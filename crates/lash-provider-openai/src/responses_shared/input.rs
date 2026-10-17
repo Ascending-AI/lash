@@ -1,5 +1,5 @@
 use lash_core::provider::attachment_wire::UnitWriter;
-use lash_sansio::llm::types::TemplateJson;
+use lash_protocol_types::llm::types::TemplateJson;
 use serde_json::{Value, json};
 
 use super::*;
@@ -193,7 +193,7 @@ fn function_call_output(content: &[ModelToolReturnPart], is_error: bool) -> Temp
                 }
                 ModelToolReturnPart::Attachment(source) => Some(input_attachment_part(
                     source,
-                    lash_sansio::llm::attachment_delivery::AttachmentPosition::ToolResult,
+                    lash_protocol_types::llm::attachment_delivery::AttachmentPosition::ToolResult,
                 )),
             }))
             .collect(),
@@ -327,7 +327,7 @@ fn build_input_group(req: &LlmRequest, group: std::ops::Range<usize>) -> Vec<Tem
                     if is_user {
                         pending_content.push(input_attachment_part(
                             reference,
-                            lash_sansio::llm::attachment_delivery::AttachmentPosition::Message,
+                            lash_protocol_types::llm::attachment_delivery::AttachmentPosition::Message,
                         ));
                     }
                 }

@@ -41,12 +41,12 @@ pub use lash_kernel_doc::{WorkflowDocumentEntry, WorkflowDocumentRef};
 #[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize, schemars::JsonSchema)]
 #[serde(deny_unknown_fields)]
 pub struct StepBodyStarted {
-    pub process_id: lash_sansio::ProcessId,
+    pub process_id: lash_protocol_types::ProcessId,
     /// The occurrence of the site in the process's workflow document the
     /// step runs for.
-    pub at: lash_sansio::EffectIdentity,
+    pub at: lash_protocol_types::EffectIdentity,
     /// The call the admission bound the step to.
-    pub call_id: lash_sansio::ToolCallId,
+    pub call_id: lash_protocol_types::ToolCallId,
     /// The one-based attempt of the admitted body.
     pub attempt: u32,
 }
@@ -89,7 +89,7 @@ pub enum TraceLanguageExecutionPayload {
     },
     /// One fact about one occurrence of one execution site.
     Node {
-        at: lash_sansio::EffectIdentity,
+        at: lash_protocol_types::EffectIdentity,
         fact: TraceNodeFact,
     },
     /// Document statement starts and empty-block entries by site ordinal.
@@ -107,7 +107,7 @@ pub enum TraceLanguageExecutionPayload {
 impl TraceLanguageExecutionPayload {
     /// The occurrence this fact is about; `None` for a fact about the whole
     /// execution.
-    pub fn at(&self) -> Option<&lash_sansio::EffectIdentity> {
+    pub fn at(&self) -> Option<&lash_protocol_types::EffectIdentity> {
         match self {
             Self::ExecutionStarted { .. } | Self::ExecutionFinished { .. } | Self::Ran { .. } => {
                 None
@@ -135,7 +135,7 @@ impl TraceLanguageExecutionPayload {
 pub enum TraceNodeFact {
     Started {
         #[serde(default, skip_serializing_if = "Option::is_none")]
-        call_id: Option<lash_sansio::ToolCallId>,
+        call_id: Option<lash_protocol_types::ToolCallId>,
     },
     /// The occurrence has parked on an observed wait. Its `since` is the
     /// enclosing trace record timestamp, not a separately sampled clock.
@@ -147,11 +147,11 @@ pub enum TraceNodeFact {
     Cancelled,
     Completed {
         #[serde(default, skip_serializing_if = "Option::is_none")]
-        call_id: Option<lash_sansio::ToolCallId>,
+        call_id: Option<lash_protocol_types::ToolCallId>,
     },
     Failed {
         #[serde(default, skip_serializing_if = "Option::is_none")]
-        call_id: Option<lash_sansio::ToolCallId>,
+        call_id: Option<lash_protocol_types::ToolCallId>,
         failure: TraceLanguageExecutionFailure,
     },
     BranchSelected {
@@ -196,7 +196,7 @@ pub enum TraceNodeAwaited {
         key: String,
     },
     ChildProcesses {
-        process_ids: Vec<lash_sansio::ProcessId>,
+        process_ids: Vec<lash_protocol_types::ProcessId>,
     },
     ToolBatch {
         batch_id: String,
@@ -205,7 +205,7 @@ pub enum TraceNodeAwaited {
     RunAggregate {
         group_key: String,
         position: usize,
-        wake: lash_sansio::RunAggregateWakePolicy,
+        wake: lash_protocol_types::RunAggregateWakePolicy,
     },
 }
 

@@ -31,8 +31,8 @@
 use std::collections::HashMap;
 use std::sync::{Arc, Mutex, Weak};
 
-use lash_sansio::SessionId;
-use lash_sansio::sync::MutexExt;
+use lash_protocol_types::SessionId;
+use lash_protocol_types::sync::MutexExt;
 
 use crate::NodeId;
 use crate::session_graph::{SessionGraph, WindowAnchor};

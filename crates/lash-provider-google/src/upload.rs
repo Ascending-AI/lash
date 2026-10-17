@@ -2,7 +2,7 @@
 use crate::support::*;
 use lash_core_store::attachments::provider_files::{ProviderFileUploader, UploadedProviderFile};
 use lash_core_store::attachments::{AttachmentStoreError, AttachmentStoreFailureClass};
-use lash_sansio::llm::attachment_delivery::DeliverySecret;
+use lash_protocol_types::llm::attachment_delivery::DeliverySecret;
 
 const GEMINI_FILES_UPLOAD_URL: &str =
     "https://generativelanguage.googleapis.com/upload/v1beta/files";

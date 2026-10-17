@@ -6,7 +6,7 @@ use lash::TurnActivity;
 use lash::provider::LlmTransportError;
 use lash_core::llm::types::ResponseTextMeta;
 
-use lash_sansio::llm::types::{StreamBlockEvent, StreamBlockKind};
+use lash_protocol_types::{llm::types::StreamBlockEvent, llm::types::StreamBlockKind};
 
 use tokio::sync::{Mutex as TokioMutex, oneshot};
 

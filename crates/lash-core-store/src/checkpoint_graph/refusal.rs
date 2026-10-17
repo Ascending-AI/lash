@@ -7,7 +7,7 @@
 
 use lash_kernel_doc::EffectIdentity;
 use lash_kernel_doc::graph_tokens::{CanonicalFault, DecodeDimension, TokenError};
-use lash_sansio::ToolCallId;
+use lash_protocol_types::ToolCallId;
 
 pub use lash_vm_protocol::KernelRestoreRefusal;
 

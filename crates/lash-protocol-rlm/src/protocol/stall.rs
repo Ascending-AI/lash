@@ -14,8 +14,8 @@ use crate::rlm_support::RlmCompletion;
 use lash_core::llm::types::ProviderReasoningReplay;
 use lash_core::session_model::SessionHistoryRecord;
 use lash_core::{DriverAction, DriverContextView};
+use lash_protocol_types::TurnId;
 use lash_rlm_types::RlmProtocolEvent;
-use lash_sansio::TurnId;
 use serde::ser::{Serialize, SerializeMap, Serializer};
 use serde_json::Value;
 
@@ -149,7 +149,7 @@ pub(crate) fn cell_id(turn_id: &TurnId, protocol_iteration: usize) -> String {
 /// rather than stored, because the diagnostic is durable session history and a
 /// reply is not small. Derived from the reply alone, so it is replay-stable.
 pub(crate) fn reply_fingerprint(assistant_text: &str) -> String {
-    let digest = lash_sansio::core_support::blake3_domain_hash(
+    let digest = lash_protocol_types::core_support::blake3_domain_hash(
         LASH_RLM_STALL_REPLY_DOMAIN_VERSION,
         assistant_text.as_bytes(),
     );

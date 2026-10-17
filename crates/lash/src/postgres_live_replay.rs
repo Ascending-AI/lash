@@ -46,8 +46,8 @@ use lash_postgres_store::host::{
 use lash_postgres_store::{
     PostgresConnectionFactory, PostgresEndpoints, PostgresHostConfigError, TransactionPrelude,
 };
-use lash_sansio::SessionId;
-use lash_sansio::sync::MutexExt as _;
+use lash_protocol_types::SessionId;
+use lash_protocol_types::sync::MutexExt as _;
 use tokio::sync::{mpsc, oneshot};
 use tokio::task::JoinHandle;
 

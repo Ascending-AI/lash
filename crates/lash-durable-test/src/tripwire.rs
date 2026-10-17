@@ -10,8 +10,8 @@
 
 use lash_durable::DurableProbe;
 use lash_durable::domain::{AdmittedId, ExecKey, Ordinal, OwnerKey, RunSeq};
-use lash_sansio::sync::MutexExt as _;
-use lash_sansio::{SessionId, TurnId};
+use lash_protocol_types::sync::MutexExt as _;
+use lash_protocol_types::{SessionId, TurnId};
 use std::collections::BTreeMap;
 use std::sync::Mutex;
 

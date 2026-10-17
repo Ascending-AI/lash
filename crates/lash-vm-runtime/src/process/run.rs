@@ -109,7 +109,7 @@ fn failed(process: &ProcessId, fault: &RunFault) -> SettledOutput {
         "kernel_run_fault",
         fault.to_string(),
     ));
-    let text = serde_json::to_string(&lash_sansio::Durable(&output)).unwrap_or_default();
+    let text = serde_json::to_string(&lash_protocol_types::Durable(&output)).unwrap_or_default();
     SettledOutput::Failed(material(process, text).failure(KnownFailureReason::Reported, None))
 }
 

@@ -49,7 +49,7 @@
 #![deny(clippy::future_not_send)]
 
 use lash_core_execution::FleetFormatStore;
-use lash_sansio::SessionId;
+use lash_protocol_types::SessionId;
 mod namespace;
 mod observed_sql;
 /// Opt-in physical-write attribution for performance replay.

@@ -1,4 +1,4 @@
-use lash_sansio::SessionId;
+use lash_protocol_types::SessionId;
 use std::collections::{BTreeMap, BTreeSet};
 
 use lash::scenario_contracts::AGENT_SCENARIO_CONTRACTS;

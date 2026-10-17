@@ -159,7 +159,7 @@ impl TokenCodec for StoredRequest {
         Ok(Self(match variant {
             0 => {
                 TokenReader::expect_fields(fields, 4)?;
-                let id = lash_sansio::ToolCallId::parse(input.text()?)
+                let id = lash_protocol_types::ToolCallId::parse(input.text()?)
                     .map_err(|error| invalid(error.to_string()))?;
                 let call = CellCall::decode_dispatch(input, id, serde_json::Value::Null)?;
                 FrozenRequest::Tool {

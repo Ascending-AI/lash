@@ -12,7 +12,7 @@ use lash_core::provider::{
     Provider, ProviderHandle, ProviderOptions, ProviderReliability, ProviderToken,
 };
 use lash_llm_transport::{LlmHttpBody, LlmHttpRequest, LlmHttpResponse, LlmHttpTransport};
-use lash_sansio::{AttachmentCreateMeta, MediaType};
+use lash_protocol_types::{AttachmentCreateMeta, MediaType};
 use lash_transport_failure::LlmTransportError;
 use serde_json::json;
 use std::sync::{Arc, Mutex};
@@ -291,8 +291,8 @@ async fn file_upload_refuses_a_foreign_origin_before_sending_and_finalizes_same_
             })
         }
     }
-    let reference = lash_sansio::AttachmentRef {
-        id: lash_sansio::AttachmentId::parse("ab".repeat(32)).unwrap(),
+    let reference = lash_protocol_types::AttachmentRef {
+        id: lash_protocol_types::AttachmentId::parse("ab".repeat(32)).unwrap(),
         media_type: MediaType::parse("image/png").unwrap(),
         byte_len: 3,
         type_metadata: None,

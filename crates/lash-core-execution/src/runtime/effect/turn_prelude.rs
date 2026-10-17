@@ -10,7 +10,7 @@
 //! the prelude until settlement (ADR 0113 §2.1).
 
 use crate::runtime::effect::RuntimeEffectControllerError;
-use lash_sansio::core_support::{MessageCoreSupport as _, MessageSequenceCoreSupport as _};
+use lash_protocol_types::core_support::MessageCoreSupport as _;
 
 /// version_surface = "coexist"
 /// version_guard(items(TURN_PRELUDE_DOMAIN, of_store_bytes))

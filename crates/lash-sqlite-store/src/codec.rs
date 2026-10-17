@@ -1,7 +1,7 @@
 //! Shared blob/record codecs for the SQLite store: JSON + msgpack envelopes
 //! and the compressed artifact-blob encoding.
 use super::*;
-use lash_sansio::SessionId;
+use lash_protocol_types::SessionId;
 
 /// The stored SQLite blob envelope's format under the 1.0 freeze.
 ///
@@ -45,7 +45,7 @@ fn blob_envelope_admits(version: u32) -> bool {
 /// store error [`sqlite_error`](crate::sqlite_error) unwraps.
 pub(crate) fn sql_identity<T>(value: String) -> rusqlite::Result<T>
 where
-    T: std::str::FromStr<Err = lash_sansio::BlankIdentity>,
+    T: std::str::FromStr<Err = lash_protocol_types::BlankIdentity>,
 {
     value
         .parse()
@@ -57,8 +57,8 @@ where
 pub(crate) fn sql_process_id(
     column: usize,
     value: String,
-) -> rusqlite::Result<lash_sansio::ProcessId> {
-    lash_sansio::ProcessId::parse(&value).map_err(|error| {
+) -> rusqlite::Result<lash_protocol_types::ProcessId> {
+    lash_protocol_types::ProcessId::parse(&value).map_err(|error| {
         rusqlite::Error::FromSqlConversionFailure(
             column,
             rusqlite::types::Type::Text,
@@ -71,15 +71,15 @@ pub(crate) fn sql_process_id(
 pub(crate) fn row_process_id(
     row: &rusqlite::Row<'_>,
     column: usize,
-) -> rusqlite::Result<lash_sansio::ProcessId> {
+) -> rusqlite::Result<lash_protocol_types::ProcessId> {
     sql_process_id(column, row.get(column)?)
 }
 
 /// Parse a stored process id outside a row read, as a store error.
 pub(crate) fn stored_process_id(
     value: &str,
-) -> Result<lash_sansio::ProcessId, lash_core_execution::PluginError> {
-    lash_sansio::ProcessId::parse(value).map_err(|error| {
+) -> Result<lash_protocol_types::ProcessId, lash_core_execution::PluginError> {
+    lash_protocol_types::ProcessId::parse(value).map_err(|error| {
         lash_core_execution::PluginError::Session(format!("corrupt stored process id: {error}"))
     })
 }

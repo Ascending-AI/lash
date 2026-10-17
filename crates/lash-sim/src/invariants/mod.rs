@@ -186,7 +186,7 @@ pub struct Record {
     pub fact: Fact,
 }
 
-/// The identity of one tool call: the sealed `lash_sansio::ToolCallId` lash
+/// The identity of one tool call: the sealed `lash_protocol_types::ToolCallId` lash
 /// minted for it (ADR 0117), recorded from `AttemptContext::call_id()` in
 /// [`ToolObserver::executed`] and read from the committed transcript part.
 /// It is derived from the call's durable position, never from the provider,

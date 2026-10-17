@@ -110,7 +110,7 @@ impl ToolIntent {
 
 /// The payload type each generated [`ToolIntent`] variant carries.
 ///
-/// One arm per variant of [`lash_sansio::tool_intent_variants!`]: a variant
+/// One arm per variant of [`lash_protocol_types::tool_intent_variants!`]: a variant
 /// added to that list without a payload here is a compile error, so the enum
 /// and the kind set cannot diverge.
 macro_rules! tool_intent_payload {
@@ -134,7 +134,7 @@ macro_rules! define_tool_intent {
     ($($variant:ident $wire:literal,)*) => {
         /// Durable follow-on work a recorded leaf attempt may request.
         ///
-        /// Generated from [`lash_sansio::tool_intent_variants!`] together with
+        /// Generated from [`lash_protocol_types::tool_intent_variants!`] together with
         /// [`ToolIntentKind`], so `kind()` is a projection of one list rather
         /// than a hand-kept mirror.
         /// **Integrator class 3: protocol and process-engine implementors.**
@@ -181,7 +181,7 @@ macro_rules! define_tool_intent {
     };
 }
 
-lash_sansio::tool_intent_variants!(define_tool_intent);
+lash_protocol_types::tool_intent_variants!(define_tool_intent);
 
 /// Durable submission-ledger row for one host-submitted tool-intent identity.
 ///

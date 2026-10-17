@@ -1,7 +1,7 @@
 use std::collections::{BTreeMap, BTreeSet};
 
 use chrono::{DateTime, Utc};
-use lash_sansio::Site;
+use lash_protocol_types::Site;
 use serde::{Deserialize, Serialize};
 
 use crate::{
@@ -72,12 +72,12 @@ pub struct WorkflowTaskSite {
     /// The site in the document.
     pub site: Site,
     /// The task that ran it.
-    pub task: lash_sansio::TaskIdentity,
+    pub task: lash_protocol_types::TaskIdentity,
 }
 
 impl WorkflowTaskSite {
     /// The site and task of the occurrence `at`.
-    pub fn of(at: &lash_sansio::EffectIdentity) -> Self {
+    pub fn of(at: &lash_protocol_types::EffectIdentity) -> Self {
         Self {
             site: at.site.clone(),
             task: at.task.clone(),
@@ -88,8 +88,8 @@ impl WorkflowTaskSite {
 impl std::fmt::Display for WorkflowTaskSite {
     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
         match &self.task {
-            lash_sansio::TaskIdentity::Main => write!(f, "{}", self.site),
-            lash_sansio::TaskIdentity::Spawned(spawn) => write!(
+            lash_protocol_types::TaskIdentity::Main => write!(f, "{}", self.site),
+            lash_protocol_types::TaskIdentity::Spawned(spawn) => write!(
                 f,
                 "{} in the task of {}#{}",
                 self.site, spawn.site, spawn.occurrence
@@ -163,11 +163,11 @@ pub enum WorkflowOverlayEventIdentity {
         transition: WorkflowOverlayExecutionTransition,
     },
     Node {
-        at: lash_sansio::EffectIdentity,
+        at: lash_protocol_types::EffectIdentity,
         transition: WorkflowOverlayNodeTransition,
     },
     StepBody {
-        at: lash_sansio::EffectIdentity,
+        at: lash_protocol_types::EffectIdentity,
         attempt: u32,
     },
 }
@@ -175,7 +175,7 @@ pub enum WorkflowOverlayEventIdentity {
 impl WorkflowOverlayEventIdentity {
     /// The occurrence the observation is about; `None` for a fact about the
     /// whole execution.
-    pub const fn at(&self) -> Option<&lash_sansio::EffectIdentity> {
+    pub const fn at(&self) -> Option<&lash_protocol_types::EffectIdentity> {
         match self {
             Self::Execution { .. } => None,
             Self::Node { at, .. } | Self::StepBody { at, .. } => Some(at),
@@ -547,7 +547,7 @@ pub enum WorkflowOverlayTerminalStatus {
 #[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize, schemars::JsonSchema)]
 pub struct WorkflowOverlayCall {
     pub occurrence: u64,
-    pub call_id: lash_sansio::ToolCallId,
+    pub call_id: lash_protocol_types::ToolCallId,
     /// The latest attempt of the call's admitted body that was observed to
     /// start; absent when the binding came from a language fact alone.
     #[serde(default, skip_serializing_if = "Option::is_none")]

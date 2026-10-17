@@ -11,7 +11,7 @@
 //! same start under its key and discharges its cancel policy and hold. An
 //! isolated call is such a start from the beginning, with no inline body.
 
-use lash_sansio::ToolCallId;
+use lash_protocol_types::ToolCallId;
 use serde::{Deserialize, Serialize};
 
 use super::model::{ConsumerHold, ProcessStartRegistration, StartKey};

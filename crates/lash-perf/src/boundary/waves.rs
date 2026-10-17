@@ -1,7 +1,7 @@
 //! Retention series on one real node, without a smoke-run growth threshold.
 use super::{Args, Case, Meter, Receipt, facade};
 use anyhow::{Result, ensure};
-use lash_sansio::sync::MutexExt as _;
+use lash_protocol_types::sync::MutexExt as _;
 use std::io::Write as _;
 use std::sync::Arc;
 use std::time::{Duration, Instant};

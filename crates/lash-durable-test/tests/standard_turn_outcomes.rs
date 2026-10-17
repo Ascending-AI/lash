@@ -11,7 +11,7 @@
 #[path = "support/served.rs"]
 mod served;
 
-use lash_sansio::llm::types::{StreamBlockEvent, StreamBlockKind};
+use lash_protocol_types::{llm::types::StreamBlockEvent, llm::types::StreamBlockKind};
 use std::sync::atomic::{AtomicUsize, Ordering};
 use std::sync::{Arc, Mutex};
 
@@ -21,7 +21,7 @@ use lash_core::llm::types::{
     StreamBlockIdentity,
 };
 use lash_core::testing::runtime_helpers::{EchoTool, MockCall, TerminalControlTool, mock_provider};
-use lash_sansio::sync::MutexExt as _;
+use lash_protocol_types::sync::MutexExt as _;
 
 use served::{Tier, World};
 
@@ -817,7 +817,7 @@ fn attachment_model(asked: Arc<Asked>) -> lash_core::facade_support::ProviderHan
                     });
                 }
                 let position =
-                    lash_sansio::llm::attachment_delivery::AttachmentPosition::ToolResult;
+                    lash_protocol_types::llm::attachment_delivery::AttachmentPosition::ToolResult;
                 if let Some(reference) = request.attachments().find(|reference| {
                     lash_core::llm::transport::known_attachment_acceptors(
                         &request.attachment_acceptance,
@@ -882,9 +882,12 @@ fn request_text(request: &LlmRequest) -> String {
 /// images from the scenario's provider, as bytes, in tool results and
 /// messages, and no other media.
 fn attachment_spec() -> lash::SessionSpec {
-    use lash_sansio::llm::attachment_delivery::{AttachmentPosition, DeliveryForms};
-    use lash_sansio::llm::capability::{
-        AttachmentAcceptanceRule, AttachmentAcceptor, AttachmentCapabilitySnapshot,
+    use lash_protocol_types::{
+        llm::attachment_delivery::AttachmentPosition, llm::attachment_delivery::DeliveryForms,
+    };
+    use lash_protocol_types::{
+        llm::capability::AttachmentAcceptanceRule, llm::capability::AttachmentAcceptor,
+        llm::capability::AttachmentCapabilitySnapshot,
     };
     served::spec(8).attachment_acceptance(Arc::new(AttachmentCapabilitySnapshot {
         revision: "standard-turn-outcomes".to_owned(),
@@ -1301,7 +1304,7 @@ async fn attachment_in_array_tool_value_then_immediate_cancel_loses_nothing(tier
     let turn_one = world.send(&session, "return the array").await;
     served::assert_answered("the array turn", &turn_one);
     assert!(
-        lash_sansio::messages_are_prompt_resume_safe(
+        lash_protocol_types::messages_are_prompt_resume_safe(
             session
                 .read()
                 .await
@@ -1379,13 +1382,13 @@ async fn attachment_in_array_tool_value_then_immediate_cancel_loses_nothing(tier
             "the image stays {provider_call}'s result's one attachment: {blocks:?}"
         );
     }
-    assert!(lash_sansio::messages_are_prompt_resume_safe(
+    assert!(lash_protocol_types::messages_are_prompt_resume_safe(
         head.messages()
     ));
 
     let turn_three = world.send(&session, "turn three input").await;
     served::assert_answered("the turn after the cancel", &turn_three);
-    assert!(lash_sansio::messages_are_prompt_resume_safe(
+    assert!(lash_protocol_types::messages_are_prompt_resume_safe(
         session
             .read()
             .await

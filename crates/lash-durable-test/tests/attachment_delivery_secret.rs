@@ -19,17 +19,21 @@ use lash_core::{
 };
 use lash_core_execution::StoreSet;
 use lash_durable_test::{Matrix, Script, SimClock, SimNodes, SimNodesConfig, Tripwire};
-use lash_sansio::llm::attachment_delivery::{
-    AttachmentPosition, Delivery, DeliveryForms, DeliveryLimits, DeliverySecret, ProviderAccepts,
-    ProviderFileScope,
+use lash_protocol_types::sync::MutexExt as _;
+use lash_protocol_types::{
+    llm::attachment_delivery::AttachmentPosition, llm::attachment_delivery::Delivery,
+    llm::attachment_delivery::DeliveryForms, llm::attachment_delivery::DeliveryLimits,
+    llm::attachment_delivery::DeliverySecret, llm::attachment_delivery::ProviderAccepts,
+    llm::attachment_delivery::ProviderFileScope,
 };
-use lash_sansio::llm::capability::{
-    AttachmentAcceptanceRule, AttachmentAcceptor, AttachmentCapabilitySnapshot,
+use lash_protocol_types::{
+    llm::capability::AttachmentAcceptanceRule, llm::capability::AttachmentAcceptor,
+    llm::capability::AttachmentCapabilitySnapshot,
 };
-use lash_sansio::llm::types::{
-    LiveRequestBody, ProviderRouteIdentity, RecordedRequestTemplate, ResponseContext, SegmentCache,
+use lash_protocol_types::{
+    llm::types::LiveRequestBody, llm::types::ProviderRouteIdentity,
+    llm::types::RecordedRequestTemplate, llm::types::ResponseContext, llm::types::SegmentCache,
 };
-use lash_sansio::sync::MutexExt as _;
 use std::sync::atomic::{AtomicUsize, Ordering};
 
 /// What every signature this law's store mints starts with.

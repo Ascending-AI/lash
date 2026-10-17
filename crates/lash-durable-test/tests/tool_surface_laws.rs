@@ -38,7 +38,7 @@ use std::sync::{Arc, Mutex};
 
 use lash_core::llm::types::{LlmRequest, LlmRole};
 use lash_core::{ToolDefinitionBindingExt as _, ToolId};
-use lash_sansio::sync::MutexExt as _;
+use lash_protocol_types::sync::MutexExt as _;
 
 use served::{Tier, WATCHDOG};
 

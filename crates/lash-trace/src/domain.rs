@@ -2,7 +2,7 @@
 //! domain operations and of single provider attempts, and a decoded stream
 //! event.
 
-use lash_sansio::llm::types::{LlmUsage, StreamBlockEvent};
+use lash_protocol_types::{llm::types::LlmUsage, llm::types::StreamBlockEvent};
 use serde::{Deserialize, Serialize};
 use serde_json::Value;
 
@@ -42,10 +42,10 @@ pub enum TraceDomainSubject {
     },
     /// One occurrence of a workflow node, by its whole effect identity.
     WorkflowNode {
-        at: lash_sansio::EffectIdentity,
+        at: lash_protocol_types::EffectIdentity,
     },
     ToolIntent {
-        kind: lash_sansio::ToolIntentKind,
+        kind: lash_protocol_types::ToolIntentKind,
     },
 }
 
@@ -145,7 +145,7 @@ pub struct TraceModelCall {
     pub stream: bool,
     pub reasoning: Option<String>,
     pub output_type: Option<String>,
-    pub generation: lash_sansio::llm::types::GenerationOptions,
+    pub generation: lash_protocol_types::llm::types::GenerationOptions,
 }
 
 /// One real provider attempt's trace identity and provider-seam clocks.
@@ -165,13 +165,13 @@ pub struct TraceModelAttemptSpan {
 #[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize, schemars::JsonSchema)]
 pub struct TraceModelAttempt {
     #[serde(flatten)]
-    pub attempt: lash_sansio::llm::types::AttemptRecord,
+    pub attempt: lash_protocol_types::llm::types::AttemptRecord,
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub span: Option<TraceModelAttemptSpan>,
 }
 
-impl From<lash_sansio::llm::types::AttemptRecord> for TraceModelAttempt {
-    fn from(attempt: lash_sansio::llm::types::AttemptRecord) -> Self {
+impl From<lash_protocol_types::llm::types::AttemptRecord> for TraceModelAttempt {
+    fn from(attempt: lash_protocol_types::llm::types::AttemptRecord) -> Self {
         Self {
             attempt,
             span: None,
@@ -180,7 +180,7 @@ impl From<lash_sansio::llm::types::AttemptRecord> for TraceModelAttempt {
 }
 
 impl std::ops::Deref for TraceModelAttempt {
-    type Target = lash_sansio::llm::types::AttemptRecord;
+    type Target = lash_protocol_types::llm::types::AttemptRecord;
     fn deref(&self) -> &Self::Target {
         &self.attempt
     }

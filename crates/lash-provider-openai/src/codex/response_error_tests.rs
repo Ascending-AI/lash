@@ -6,7 +6,7 @@ use lash_core::provider::ProviderHandle;
 use lash_llm_transport::{
     LlmByteStream, LlmHttpBody, LlmHttpRequest, LlmHttpResponse, LlmHttpTransport,
 };
-use lash_sansio::FailureCode;
+use lash_protocol_types::FailureCode;
 use lash_transport_failure::{LlmTransportError, TransportRetryVerdict};
 use std::sync::Arc;
 use std::time::Duration;

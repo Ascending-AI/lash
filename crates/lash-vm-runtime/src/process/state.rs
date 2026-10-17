@@ -461,7 +461,7 @@ pub(crate) enum KernelRunOutput {
     },
     /// The run ended.
     Ended {
-        #[serde(serialize_with = "lash_sansio::durable_serde::serialize")]
+        #[serde(serialize_with = "lash_protocol_types::durable_serde::serialize")]
         outcome: Box<lash_core::ProcessOutcome>,
         /// The segment's statement starts and empty-block entries, by
         /// document site ordinal, at `observe: counts` (FIG-6370).

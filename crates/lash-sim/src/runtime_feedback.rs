@@ -1,23 +1,25 @@
 //! Request-boundary witnesses for initial instructions and positional feedback.
 use lash_core::llm::types::{LlmMessage, LlmRequest, LlmRole};
 use lash_core::provider::CacheRetention;
-use lash_sansio::sync::MutexExt;
+use lash_protocol_types::sync::MutexExt;
 use serde_json::{Value, json};
 use std::sync::Arc;
 
 fn request(messages: Vec<LlmMessage>) -> LlmRequest {
     LlmRequest {
         instructions: Some(Arc::from("I")),
-        model: lash_sansio::llm_profile::LlmProfileConfig::new(
-            lash_sansio::llm_profile::RecordedLlmProfile::mint(
-                lash_sansio::llm_profile::LlmProfileKey::new("request-fixture"),
-                lash_sansio::llm_profile::LlmProfileMetadata::builder("host-selected-model")
-                    .context_window_tokens(128_000)
-                    .capability(Default::default())
-                    .extra_body(Default::default())
-                    .cache_retention(lash_sansio::llm::capability::CacheRetention::Short)
-                    .build()
-                    .expect("valid profile"),
+        model: lash_protocol_types::llm_profile::LlmProfileConfig::new(
+            lash_protocol_types::llm_profile::RecordedLlmProfile::mint(
+                lash_protocol_types::llm_profile::LlmProfileKey::new("request-fixture"),
+                lash_protocol_types::llm_profile::LlmProfileMetadata::builder(
+                    "host-selected-model",
+                )
+                .context_window_tokens(128_000)
+                .capability(Default::default())
+                .extra_body(Default::default())
+                .cache_retention(lash_protocol_types::llm::capability::CacheRetention::Short)
+                .build()
+                .expect("valid profile"),
             ),
         )
         .with_reasoning(Default::default()),
@@ -497,7 +499,7 @@ fn feedback_tool_results(wire: Wire) {
             .collect::<Vec<_>>();
         let results = (0..count)
             .map(|i| B::ToolResult {
-                status: lash_sansio::ToolCallStatus::Success,
+                status: lash_protocol_types::ToolCallStatus::Success,
                 call_id: format!("call{i}"),
                 tool_name: Some("lookup".into()),
                 content: vec![lash_core::facade_support::ModelToolReturnPart::text(

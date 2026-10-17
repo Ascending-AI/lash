@@ -523,12 +523,12 @@ pub const PROVIDER_BODY_CHUNK_BYTES: usize = 32 * 1024;
 #[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize)]
 #[serde(deny_unknown_fields)]
 pub struct ChunkedRequestTemplate {
-    pub fetch_horizon: lash_sansio::llm::attachment_delivery::DeliveryFetchHorizon,
-    pub route: lash_sansio::llm::types::ProviderRouteIdentity,
+    pub fetch_horizon: lash_protocol_types::llm::attachment_delivery::DeliveryFetchHorizon,
+    pub route: lash_protocol_types::llm::types::ProviderRouteIdentity,
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub transport_stream: Option<bool>,
     #[serde(default, skip_serializing_if = "Option::is_none")]
-    pub generation: Option<lash_sansio::llm::types::GenerationReceipt>,
+    pub generation: Option<lash_protocol_types::llm::types::GenerationReceipt>,
     #[serde(default, skip_serializing_if = "Vec::is_empty")]
     pub wire_features: Vec<Box<str>>,
     /// One immutable root, including the ordered attachment slots.
@@ -546,7 +546,8 @@ pub struct ChunkedRequestTemplate {
 #[derive(Clone, Debug, Serialize, Deserialize)]
 #[serde(tag = "fragment", rename_all = "snake_case", deny_unknown_fields)]
 #[serde(bound(deserialize = "Text: Deserialize<'de>, Slot: Deserialize<'de>"))]
-pub enum RequestFragment<Text = String, Slot = Box<lash_sansio::llm::types::AttachmentSlot>> {
+pub enum RequestFragment<Text = String, Slot = Box<lash_protocol_types::llm::types::AttachmentSlot>>
+{
     Literal {
         #[cfg_attr(
             any(test, feature = "testing"),
@@ -640,7 +641,7 @@ pub enum ProviderBodyError {
     MissingChunk { hash: String },
     /// The assembled segments are not a valid template.
     #[error("the assembled request template is invalid: {0}")]
-    Template(#[from] lash_sansio::llm::types::TemplateError),
+    Template(#[from] lash_protocol_types::llm::types::TemplateError),
 }
 
 /// Split `text` into chunks of at most [`PROVIDER_BODY_CHUNK_BYTES`], each
@@ -667,7 +668,7 @@ type Leaf = (PromptTextRef, EncodedRequestFragment);
 
 /// Store a fragment by its exact encoding, never by re-rendered JSON.
 fn encode_fragment(
-    fragment: &RequestFragment<&str, &lash_sansio::llm::types::AttachmentSlot>,
+    fragment: &RequestFragment<&str, &lash_protocol_types::llm::types::AttachmentSlot>,
 ) -> Leaf {
     let body = serde_json::to_string(fragment).expect("wire fragments encode");
     let reference = RequestFragment::reference(&body);
@@ -681,7 +682,7 @@ fn encode_fragment(
 }
 
 fn keep_fragment(
-    fragment: &RequestFragment<&str, &lash_sansio::llm::types::AttachmentSlot>,
+    fragment: &RequestFragment<&str, &lash_protocol_types::llm::types::AttachmentSlot>,
     texts: &mut Vec<(BlobRef, EncodedRequestFragment)>,
 ) -> PromptTextRef {
     let (reference, encoded) = encode_fragment(fragment);
@@ -809,8 +810,11 @@ impl TextChunker {
 struct ItemLeaves(Vec<Leaf>);
 struct SeparatedItemLeaves(Vec<Leaf>);
 
-fn item_leaves(item: &lash_sansio::llm::types::RequestSegment, separated: bool) -> Vec<Leaf> {
-    use lash_sansio::llm::types::SegmentPart;
+fn item_leaves(
+    item: &lash_protocol_types::llm::types::RequestSegment,
+    separated: bool,
+) -> Vec<Leaf> {
+    use lash_protocol_types::llm::types::SegmentPart;
     let mut leaves = Vec::new();
     let mut separator = separated;
     for part in item.parts() {
@@ -863,7 +867,7 @@ impl ChunkedRequestTemplate {
     /// request envelope stays together instead of indexing every JSON
     /// field. The reusable prefix ends with the last history item.
     pub fn chunk(
-        template: &lash_sansio::llm::types::RecordedRequestTemplate,
+        template: &lash_protocol_types::llm::types::RecordedRequestTemplate,
     ) -> (Self, Vec<(BlobRef, EncodedRequestFragment)>) {
         let mut leaves: Vec<Leaf> = Vec::new();
         let mut envelope = TextChunker::new(true);
@@ -890,10 +894,10 @@ impl ChunkedRequestTemplate {
             previous_item = false;
             for part in segment.parts() {
                 match part {
-                    lash_sansio::llm::types::SegmentPart::Literal(text) => {
+                    lash_protocol_types::llm::types::SegmentPart::Literal(text) => {
                         envelope.literal(text, &mut leaves);
                     }
-                    lash_sansio::llm::types::SegmentPart::Slot(slot) => {
+                    lash_protocol_types::llm::types::SegmentPart::Slot(slot) => {
                         leaves.push(encode_fragment(&RequestFragment::Attachment {
                             slot: slot.as_ref(),
                         }));
@@ -963,8 +967,10 @@ impl ChunkedRequestTemplate {
     pub fn assemble<'a>(
         &self,
         text: impl Fn(&BlobRef) -> Option<&'a str>,
-    ) -> Result<lash_sansio::llm::types::RecordedRequestTemplate, ProviderBodyError> {
-        use lash_sansio::llm::types::{RequestSegment, SegmentKind, SegmentPart};
+    ) -> Result<lash_protocol_types::llm::types::RecordedRequestTemplate, ProviderBodyError> {
+        use lash_protocol_types::{
+            llm::types::RequestSegment, llm::types::SegmentKind, llm::types::SegmentPart,
+        };
         let mut stack = vec![self.root.clone()];
         let mut parts = Vec::new();
         let mut literal = String::new();
@@ -1008,7 +1014,7 @@ impl ChunkedRequestTemplate {
         // body is one text segment.
         let segments = vec![RequestSegment::from_parts(SegmentKind::Text, parts)?];
         let mut template =
-            lash_sansio::llm::types::RecordedRequestTemplate::from_recorded_segments(
+            lash_protocol_types::llm::types::RecordedRequestTemplate::from_recorded_segments(
                 self.route.clone(),
                 self.transport_stream,
                 self.generation,
@@ -1027,7 +1033,7 @@ impl ChunkedRequestTemplate {
 #[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize)]
 #[serde(deny_unknown_fields)]
 pub struct RecordedResponseContext {
-    pub scope: lash_sansio::llm::types::LlmRequestScope,
+    pub scope: lash_protocol_types::llm::types::LlmRequestScope,
     /// The JSON of the call's `ResponseContract`, in order.
     pub contract: Vec<PromptTextRef>,
     /// The request-only contract chunks, kept in the admission record.
@@ -1036,7 +1042,7 @@ pub struct RecordedResponseContext {
 
 impl RecordedResponseContext {
     /// Record the exact response contract beside this call's envelope.
-    pub fn record(scope: lash_sansio::llm::types::LlmRequestScope, contract: &str) -> Self {
+    pub fn record(scope: lash_protocol_types::llm::types::LlmRequestScope, contract: &str) -> Self {
         let mut inline = Vec::new();
         let contract = chunk_text(contract, &mut inline);
         Self {

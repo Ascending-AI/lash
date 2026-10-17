@@ -76,7 +76,7 @@ struct ProgressBoundarySnapshot<'a> {
 }
 
 pub(super) struct TurnBoundary {
-    output_cuts: lash_sansio::session_model::RuntimeOutputCuts,
+    output_cuts: lash_protocol_types::session_model::RuntimeOutputCuts,
     fleet_format: crate::FleetFormat,
     /// `Some` at every point outside `final_state_mut`'s transition, which
     /// takes the stage, rewrites `Drafting` into `Finalized`, and puts it
@@ -114,7 +114,7 @@ struct FinalizedTurnCommitStage {
 impl TurnBoundary {
     pub(super) fn with_output_cuts(
         mut self,
-        cuts: lash_sansio::session_model::RuntimeOutputCuts,
+        cuts: lash_protocol_types::session_model::RuntimeOutputCuts,
     ) -> Self {
         self.output_cuts = cuts;
         self
@@ -183,7 +183,7 @@ impl TurnBoundary {
     ) -> Self {
         let draft_clock = Arc::clone(&clock);
         Self {
-            output_cuts: lash_sansio::session_model::RuntimeOutputCuts::standard(),
+            output_cuts: lash_protocol_types::session_model::RuntimeOutputCuts::standard(),
             fleet_format: crate::FleetFormat::current(),
             stage: Some(TurnCommitStage::Drafting(Box::new(
                 TurnCommitDraft::from_state_with_graph_appends(
@@ -258,7 +258,7 @@ impl TurnBoundary {
         self.draft_ref()
             .read_view(policy, turn_index, protocol_turn_options, messages)
     }
-    pub(super) fn active_events(&self) -> lash_sansio::AppendVec<SessionHistoryRecord> {
+    pub(super) fn active_events(&self) -> lash_protocol_types::AppendVec<SessionHistoryRecord> {
         self.draft_ref().active_events()
     }
 

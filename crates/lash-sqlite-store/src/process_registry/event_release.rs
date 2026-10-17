@@ -1,7 +1,7 @@
 //! Host release of a retained process's event prefix (FIG-3482).
 
 use super::*;
-use lash_sansio::ProcessId;
+use lash_protocol_types::ProcessId;
 
 impl SqliteProcessRegistry {
     /// The highest sequence `process_id` released, `0` when it released none.

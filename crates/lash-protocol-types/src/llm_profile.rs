@@ -161,15 +161,15 @@ impl LlmProfileMetadata {
 /// D-DEFAULTS2: omitting the host's cache choice cannot construct metadata.
 ///
 /// ```compile_fail
-/// use lash_sansio::llm_profile::LlmProfileMetadata;
+/// use lash_protocol_types::llm_profile::LlmProfileMetadata;
 /// let _ = LlmProfileMetadata::builder("provider/model")
 ///     .context_window_tokens(8_192)
 ///     .build();
 /// ```
 ///
 /// ```
-/// use lash_sansio::llm::capability::CacheRetention;
-/// use lash_sansio::llm_profile::{LlmProfileMetadata, LlmProfileMetadataBuilder};
+/// use lash_protocol_types::llm::capability::CacheRetention;
+/// use lash_protocol_types::llm_profile::{LlmProfileMetadata, LlmProfileMetadataBuilder};
 /// let builder: LlmProfileMetadataBuilder = LlmProfileMetadata::builder("provider/model");
 /// let metadata = builder.context_window_tokens(8_192)
 ///     .cache_retention(CacheRetention::None)

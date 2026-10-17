@@ -1,6 +1,6 @@
 use super::*;
 use lash_core::llm::types::LlmOutputSpec;
-use lash_sansio::{ProviderFailureKind, SchemaContract, SchemaDialect};
+use lash_protocol_types::{ProviderFailureKind, SchemaContract, SchemaDialect};
 
 fn provider() -> GoogleOAuthProvider {
     GoogleOAuthProvider::new(std::sync::Arc::new(
@@ -12,7 +12,7 @@ fn projected_contract() -> SchemaContract {
         .expect("valid declared schema")
         .with_override(
             SchemaDialect::GoogleSchema,
-            lash_sansio::JsonSchema::admit(
+            lash_protocol_types::JsonSchema::admit(
                 json!({"type":"object","properties":{"projected":{"type":"string"}}}),
             )
             .expect("valid declared projection schema"),
@@ -25,7 +25,7 @@ fn tool_request(model: &str) -> LlmRequest {
         name: "lookup".into(),
         description: "lookup".into(),
         input_schema: projected_contract(),
-        output_schema: lash_sansio::SchemaContract::admit(json!({}))
+        output_schema: lash_protocol_types::SchemaContract::admit(json!({}))
             .expect("valid declared schema"),
     }]);
     req
@@ -88,7 +88,7 @@ fn protocol53_schema_contract_modes_apply_to_every_dialect_and_site() {
                         name: "lookup".into(),
                         description: "lookup".into(),
                         input_schema: contract,
-                        output_schema: lash_sansio::SchemaContract::admit(json!({}))
+                        output_schema: lash_protocol_types::SchemaContract::admit(json!({}))
                             .expect("valid declared schema"),
                     }]);
                 }

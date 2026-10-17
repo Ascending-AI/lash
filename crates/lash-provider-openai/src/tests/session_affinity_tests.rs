@@ -1,5 +1,5 @@
 use super::*;
-use lash_sansio::SessionId;
+use lash_protocol_types::SessionId;
 
 #[tokio::test]
 async fn host_enabled_session_affinity_works_through_a_custom_proxy_url() {

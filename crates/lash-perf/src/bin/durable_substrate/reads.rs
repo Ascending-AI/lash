@@ -8,7 +8,7 @@ use anyhow::{Context as _, Result, ensure};
 use lash::tools::{StaticToolExecute, StaticToolProvider, ToolProviderRegistration, ToolReads};
 use lash_core::ToolDefinitionBindingExt as _;
 use lash_core_execution::StoreSet;
-use lash_sansio::sync::MutexExt as _;
+use lash_protocol_types::sync::MutexExt as _;
 use serde_json::{Value, json};
 
 use crate::Run;

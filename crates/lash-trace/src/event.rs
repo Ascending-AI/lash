@@ -2,7 +2,7 @@
 
 use std::collections::BTreeMap;
 
-use lash_sansio::llm::types::{AttemptRecord, LlmUsage};
+use lash_protocol_types::{llm::types::AttemptRecord, llm::types::LlmUsage};
 use serde::{Deserialize, Serialize};
 use serde_json::Value;
 
@@ -70,8 +70,8 @@ pub enum TraceEvent {
         /// On the wire `attachment_position`: a record's own `position`
         /// is its place in the trace.
         #[serde(rename = "attachment_position")]
-        position: lash_sansio::llm::attachment_delivery::AttachmentPosition,
-        reason: lash_sansio::AttachmentMaterializationReason,
+        position: lash_protocol_types::llm::attachment_delivery::AttachmentPosition,
+        reason: lash_protocol_types::AttachmentMaterializationReason,
     },
     /// Complete model-facing composition captured only when its fingerprint
     /// changes for a resident session.
@@ -160,7 +160,7 @@ pub enum TraceEvent {
     },
     ToolCallStarted {
         /// Lash's identity for the call (ADR 0117).
-        call_id: lash_sansio::ToolCallId,
+        call_id: lash_protocol_types::ToolCallId,
         /// The model provider's id for the call, when a model issued it.
         #[serde(default, skip_serializing_if = "Option::is_none")]
         provider_call_id: Option<String>,
@@ -171,7 +171,7 @@ pub enum TraceEvent {
     },
     ToolCallCompleted {
         /// Lash's identity for the call (ADR 0117).
-        call_id: lash_sansio::ToolCallId,
+        call_id: lash_protocol_types::ToolCallId,
         /// The model provider's id for the call, when a model issued it.
         #[serde(default, skip_serializing_if = "Option::is_none")]
         /// Exporters outside lash cannot read the store, so provider correlation travels with the trace.
@@ -310,7 +310,7 @@ pub enum TraceEvent {
     ToolCheckConflict {
         /// The plugin whose reply won.
         plugin_id: String,
-        conflict: lash_sansio::ToolCheckConflict,
+        conflict: lash_protocol_types::ToolCheckConflict,
     },
     /// An extension span or point ended: its one whole record, with what
     /// it buffered. Its position names the span and its parent.
@@ -449,7 +449,9 @@ impl From<Value> for TraceToolArgs {
 #[serde(untagged)]
 pub enum TraceToolName {
     Name(String),
-    Identity { tool_id: lash_sansio::ToolId },
+    Identity {
+        tool_id: lash_protocol_types::ToolId,
+    },
 }
 
 impl TraceToolName {

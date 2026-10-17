@@ -72,9 +72,9 @@ fn a_settled_call_is_one_outcome_node_that_rebuilds_its_presentation_after_colle
     let mut presented = ModelToolReturn::from_output("query".to_owned(), &output);
     let rendered = presented.parts[0].visible_text().unwrap().to_owned();
     presented.parts = vec![ModelToolReturnPart::Retained(crate::RetainedOutput {
-        reference: lash_sansio::AttachmentRef::new(
-            lash_sansio::AttachmentId::parse("cd".repeat(32)).unwrap(),
-            lash_sansio::MediaType::parse("text/plain").unwrap(),
+        reference: lash_protocol_types::AttachmentRef::new(
+            lash_protocol_types::AttachmentId::parse("cd".repeat(32)).unwrap(),
+            lash_protocol_types::MediaType::parse("text/plain").unwrap(),
             rendered.len() as u64,
             None,
             None,
@@ -211,7 +211,7 @@ fn every_round_fact_round_trips_through_its_node() {
                 call: ToolCallId::fixture("a"),
                 tool: "query".to_owned(),
                 request: request.reference().clone(),
-                policy: lash_sansio::ExecutionPolicy::Once,
+                policy: lash_protocol_types::ExecutionPolicy::Once,
                 limit_expires_at_ms: 9,
                 limit_max_slice_ms: 4,
                 wait_id: Some("ab".to_owned()),

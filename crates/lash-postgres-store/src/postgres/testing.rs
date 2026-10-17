@@ -409,7 +409,7 @@ impl AfterFence {
     }
 
     fn lock_state(&self) -> std::sync::MutexGuard<'_, AfterFenceState> {
-        use lash_sansio::sync::MutexExt;
+        use lash_protocol_types::sync::MutexExt;
         self.state.lock_recover()
     }
 }
@@ -473,7 +473,7 @@ impl BeforeTurnCommit {
 
     /// Pause the next transaction that commits a turn change.
     pub fn pause_next(&self) -> TurnCommitPause {
-        use lash_sansio::sync::MutexExt;
+        use lash_protocol_types::sync::MutexExt;
         let pause = TurnCommitPause {
             gate: std::sync::Arc::new(lash_core_execution::testing::Gate::new(
                 "postgres turn commit",
@@ -486,7 +486,7 @@ impl BeforeTurnCommit {
     /// Called by a transaction that wrote a turn change: takes the next armed
     /// pause, if any, and waits for its release.
     pub(crate) async fn pass(&self) {
-        use lash_sansio::sync::MutexExt;
+        use lash_protocol_types::sync::MutexExt;
         let armed = self.armed.lock_recover().pop_front();
         if let Some(armed) = armed {
             armed.gate.pass().await;
@@ -549,7 +549,7 @@ impl StorageGates {
 
     /// Pause the next transaction that reaches `point`.
     pub fn pause_next(&self, point: StoragePoint) -> StoragePause {
-        use lash_sansio::sync::MutexExt;
+        use lash_protocol_types::sync::MutexExt;
         let gate = std::sync::Arc::new(lash_core_execution::testing::Gate::new(format!(
             "postgres storage point {point:?}"
         )));
@@ -562,7 +562,7 @@ impl StorageGates {
     /// Called by a transaction at `point`: takes the earliest pause armed
     /// there, if any, and waits for its release.
     pub(crate) async fn pass(&self, point: StoragePoint) {
-        use lash_sansio::sync::MutexExt;
+        use lash_protocol_types::sync::MutexExt;
         let armed = {
             let mut armed = self.armed.lock_recover();
             armed

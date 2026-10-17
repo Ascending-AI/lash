@@ -32,7 +32,7 @@ mod sim;
 #[path = "support/matrix.rs"]
 mod matrix;
 
-use lash_sansio::llm::types::{StreamBlockEvent, StreamBlockKind};
+use lash_protocol_types::{llm::types::StreamBlockEvent, llm::types::StreamBlockKind};
 use matrix::MatrixTestExt as _;
 
 use std::sync::{Arc, Mutex};
@@ -50,8 +50,8 @@ use lash_durable::{ActorKey, ActorState, CommitLabel, DurableError, DurableStore
 use lash_durable_test::{
     Cut, Fault, Matrix, Scenario, SimClock, SimNodes, SimNodesConfig, Stored, Tripwire, WriteKind,
 };
-use lash_sansio::sync::MutexExt as _;
-use lash_sansio::{SessionId, TurnId};
+use lash_protocol_types::sync::MutexExt as _;
+use lash_protocol_types::{SessionId, TurnId};
 
 use dialect::Dialect;
 

@@ -6,8 +6,8 @@ use super::events::ProcessTerminal;
 use super::model::ProcessLifecycleState;
 use super::observation::{ObservedProcess, ObservedProcessEvent};
 
-pub use lash_sansio::Durable;
-use lash_sansio::DurableSerialize;
+pub use lash_protocol_types::Durable;
+use lash_protocol_types::DurableSerialize;
 
 macro_rules! durable_serialize {
     ($($record:ty),+ $(,)?) => {$(

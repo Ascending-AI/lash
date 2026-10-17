@@ -15,12 +15,12 @@ fn tool_schema_cache_control_does_not_count_as_adapter_cache_emission() {
     req.tools = Arc::new(vec![LlmToolSpec {
         name: "cache-shaped-input".to_string(),
         description: "Host tool with a provider-looking property".to_string(),
-        input_schema: lash_sansio::SchemaContract::admit(json!({
+        input_schema: lash_protocol_types::SchemaContract::admit(json!({
             "type": "object",
             "properties": { "cache_control": { "type": "string" } }
         }))
         .expect("valid declared schema"),
-        output_schema: lash_sansio::SchemaContract::admit(json!({}))
+        output_schema: lash_protocol_types::SchemaContract::admit(json!({}))
             .expect("valid declared schema"),
     }]);
 

@@ -7,7 +7,7 @@ use lash::{TurnActivity, TurnInput};
 use lash_core::facade_support::{SessionObservationSubscription, SessionResume, TurnOutcome};
 
 use lash_core::{SessionId, TurnId};
-use lash_sansio::llm::types::{StreamBlockEvent, StreamBlockKind};
+use lash_protocol_types::{llm::types::StreamBlockEvent, llm::types::StreamBlockKind};
 
 use lash_facade_tests::streaming::{
     AppTools, FailingAppTools, PendingAppTools, QueuedWorkHydrationProbeFactory,

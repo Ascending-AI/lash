@@ -1,6 +1,6 @@
 use crate::LlmRequest as CoreLlmRequest;
 use crate::LlmResponse;
-use crate::sansio::LlmCallError;
+use lash_protocol_types::LlmCallError;
 use lash_transport_failure::LlmTransportError;
 
 use super::CausalRef;

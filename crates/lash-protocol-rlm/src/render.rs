@@ -111,10 +111,10 @@ pub(crate) fn rendered_print(
     params: &RenderParams,
     history_index: usize,
     print_index: usize,
-) -> lash_sansio::CellPrint {
+) -> lash_protocol_types::CellPrint {
     let rendered = truncate_chars(renderer.print(value, params), params.max_chars);
     let projected_chars = rendered.body.chars().count();
-    let projection = lash_sansio::TextProjectionMetadata {
+    let projection = lash_protocol_types::TextProjectionMetadata {
         truncated: !rendered.cuts.is_empty(),
         original_chars: rendered.cuts.original_chars,
         projected_chars,
@@ -136,7 +136,7 @@ pub(crate) fn rendered_print(
             rendered.cuts.original_chars, params.max_chars, counts, rendered.body
         )
     };
-    lash_sansio::CellPrint {
+    lash_protocol_types::CellPrint {
         text,
         value: value.clone(),
         projection,

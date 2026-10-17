@@ -26,7 +26,7 @@ use serde::{Deserialize, Serialize};
 use super::StoreError;
 use super::control_intent::ControlIntentId;
 use crate::{BatchId, InputId, SessionId, TurnId};
-use lash_sansio::{TurnFinish, TurnOutcome, TurnStop};
+use lash_protocol_types::{TurnFinish, TurnOutcome, TurnStop};
 
 /// A turn commit's identity: the logical run and the physical ordinal of
 /// the attempt that commits it. Derived, never minted: the ordinal is the
@@ -118,13 +118,13 @@ pub enum RunCommittedOutcome {
         /// evidence of the answer's type, whatever the host offers since.
         /// `None` when no finish tool ended the turn.
         #[serde(default, skip_serializing_if = "Option::is_none")]
-        value_schema: Option<lash_sansio::JsonSchema>,
+        value_schema: Option<lash_protocol_types::JsonSchema>,
     },
     AgentFrameSwitch {
-        frame_key: lash_sansio::FrameKey,
+        frame_key: lash_protocol_types::FrameKey,
         task: String,
         /// The run spec the follow-on runs under, as the switch stated it.
-        next_run: lash_sansio::NextRun,
+        next_run: lash_protocol_types::NextRun,
     },
     Stopped(TurnStop),
 }
@@ -135,7 +135,7 @@ impl RunCommittedOutcome {
     #[must_use]
     pub fn of_turn_outcome(
         outcome: &TurnOutcome,
-        value_schema: Option<lash_sansio::JsonSchema>,
+        value_schema: Option<lash_protocol_types::JsonSchema>,
     ) -> Self {
         match outcome {
             TurnOutcome::Finished(finish) => Self::Finished {
@@ -202,7 +202,7 @@ pub enum RunTerminalCause {
     /// request's evidence and the undelivered inputs it affected, beside
     /// the stop's session-head commit when the turn has state to publish.
     Cancelled {
-        evidence: lash_sansio::TurnCancellationEvidence,
+        evidence: lash_protocol_types::TurnCancellationEvidence,
         /// Store-derived facts, selected and disposed in the terminal
         /// transaction, in session ingress order.
         input_outcome: crate::TurnCancelInputOutcome,

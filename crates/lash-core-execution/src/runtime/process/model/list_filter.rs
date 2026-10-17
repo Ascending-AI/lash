@@ -259,7 +259,7 @@ struct ProcessSelectionFacts<'a> {
     identity: &'a ProcessIdentity,
     originator: &'a ProcessOriginator,
     lifetime: &'a crate::LifetimeDecision,
-    cancel_request: Option<&'a lash_sansio::CancelRequest>,
+    cancel_request: Option<&'a lash_protocol_types::CancelRequest>,
     created_at_ms: u64,
     updated_at_ms: u64,
 }

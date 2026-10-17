@@ -10,12 +10,13 @@ use crate::CheckpointKind;
 use crate::llm::types::{
     LlmEventSender, LlmMessage, LlmOutputSpec, LlmProviderTraceSender, LlmToolChoice, LlmToolSpec,
 };
-use crate::sansio::{ExecutionEnvironmentSync, ExecutionEnvironmentSyncFailure, LlmCallError};
+use crate::sansio::{ExecutionEnvironmentSync, ExecutionEnvironmentSyncFailure};
 use crate::{
     CausalRef, CheckpointDelivery, EffectAddress, ExecResponse, ExecutionScope,
     LlmRequest as CoreLlmRequest, LlmResponse, ProcessAwaitOutput, ProcessExecutionContext,
     ProcessListMode, ProcessStartRegistration, SessionScope,
 };
+use lash_protocol_types::LlmCallError;
 
 use super::executor::RuntimeEffectControllerError;
 use super::llm_outcome::{AssistantResponsePlan, AssistantStreamCapsule, LlmStreamRecord};
@@ -75,10 +76,10 @@ impl RuntimeEffectInvocation {
         }
         self.address.validate().map_err(|error| {
             let code = match error {
-                lash_sansio::EffectIdentityError::MissingExecutionScopeId => {
+                lash_protocol_types::EffectIdentityError::MissingExecutionScopeId => {
                     crate::RuntimeErrorCode::MissingExecutionScopeId
                 }
-                lash_sansio::EffectIdentityError::MissingReplayKey => {
+                lash_protocol_types::EffectIdentityError::MissingReplayKey => {
                     crate::RuntimeErrorCode::RuntimeEffectReplayRequired
                 }
             };
@@ -405,7 +406,7 @@ pub enum RuntimeEffectCommand {
         tool_name: String,
         render: Option<crate::RecordedRender>,
         args: serde_json::Value,
-        #[serde(serialize_with = "lash_sansio::durable_serde::serialize")]
+        #[serde(serialize_with = "lash_protocol_types::durable_serde::serialize")]
         output: Box<crate::ToolCallOutput>,
     },
     Process {
@@ -864,7 +865,7 @@ pub enum ProcessEffectOutcome {
     Await {
         // Keep the full terminal record while bounding every process outcome
         // carried through the recursive effect executor.
-        #[serde(serialize_with = "lash_sansio::durable_serde::serialize")]
+        #[serde(serialize_with = "lash_protocol_types::durable_serde::serialize")]
         output: Box<ProcessAwaitOutput>,
     },
     Cancel {
@@ -888,7 +889,7 @@ pub struct ToolAttemptEffectOutcome {
 #[serde(tag = "status", rename_all = "snake_case")]
 pub enum ToolAttemptLaunch {
     Done {
-        #[serde(serialize_with = "lash_sansio::durable_serde::serialize")]
+        #[serde(serialize_with = "lash_protocol_types::durable_serde::serialize")]
         record: Box<crate::ToolCallRecord>,
         intents: crate::ToolIntents,
     },
@@ -1062,7 +1063,7 @@ const _: () = assert!(std::mem::size_of::<RuntimeEffectOutcome>() <= 128);
 pub struct LlmRequestSpec {
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub instructions: Option<Arc<str>>,
-    pub model: lash_sansio::llm_profile::LlmProfileConfig,
+    pub model: lash_protocol_types::llm_profile::LlmProfileConfig,
     pub messages: Vec<LlmMessage>,
     pub tools: Arc<Vec<LlmToolSpec>>,
     pub tool_choice: LlmToolChoice,

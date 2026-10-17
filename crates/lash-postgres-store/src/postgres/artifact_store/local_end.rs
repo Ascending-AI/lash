@@ -3,7 +3,7 @@
 //! data-modifying CTE would miss an edge a concurrent publisher just committed.
 
 use lash_core_execution::{ArtifactCleanup, ArtifactReferrer, StoreError};
-use lash_sansio::EffectJournalIdentity;
+use lash_protocol_types::EffectJournalIdentity;
 
 pub(super) const NAMESPACES: [&str; 4] = [
     super::MODULE_ARTIFACT_NAMESPACE,

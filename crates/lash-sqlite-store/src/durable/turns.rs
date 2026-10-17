@@ -18,7 +18,7 @@ use lash_durable::domain::{
     TurnEnd, TurnNamespace, TurnRow, TurnWrite, UnfinishedPhase,
 };
 use lash_durable::{ActorKey, DurableError, DurableInstant, Epoch, Woken};
-use lash_sansio::{SessionId, TurnId};
+use lash_protocol_types::{SessionId, TurnId};
 use lash_store_sql::durable::turns::TurnStatements;
 use rusqlite::{Connection, OptionalExtension};
 
@@ -442,7 +442,7 @@ pub(super) fn apply(
             super::session_mail::settle_held(tx, session, run, commit.now.0)?;
             crate::obligation_ledger::end_execution_tx(
                 tx,
-                &lash_sansio::ExecutionScope::turn(session.clone(), run.clone()),
+                &lash_protocol_types::ExecutionScope::turn(session.clone(), run.clone()),
                 integer(commit.now.0)?,
             )
             .map_err(crate::sqlite_conversion_error)?;

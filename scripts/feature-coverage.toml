@@ -27,6 +27,7 @@ features = [
   "lash-internal-provider-google/default",
   "lash-internal-provider-openai/default",
   "lash-internal-sansio/default",
+  "lash-internal-protocol-types/default",
   "lash-internal-store-sql/default",
   "lash-internal-tool-support/default",
   "lash-internal-trace/default",
@@ -40,11 +41,15 @@ features = [
 name = "sansio-schema-validation"
 features = [
   "lash-internal-sansio/schema-validation:on",
+  "lash-internal-protocol-types/schema-validation:on",
   "lash-internal-sansio/schema-validation:off",
+  "lash-internal-protocol-types/schema-validation:off",
 ]
 commands = [
   ["cargo", "check", "-p", "lash-internal-sansio", "--lib", "--no-default-features", "--locked"],
+  ["cargo", "check", "-p", "lash-internal-protocol-types", "--lib", "--no-default-features", "--locked"],
   ["cargo", "check", "-p", "lash-internal-sansio", "--lib", "--no-default-features", "--features", "schema-validation", "--locked"],
+  ["cargo", "check", "-p", "lash-internal-protocol-types", "--lib", "--no-default-features", "--features", "schema-validation", "--locked"],
 ]
 
 [[lane]]
@@ -506,7 +511,9 @@ features = [
   "lash-internal-core/synthetic-next:on",
   "lash-internal-core/synthetic-next:off",
   "lash-internal-sansio/synthetic-next:on",
+  "lash-internal-protocol-types/synthetic-next:on",
   "lash-internal-sansio/synthetic-next:off",
+  "lash-internal-protocol-types/synthetic-next:off",
   "lash-internal-core-store/synthetic-next:on",
   "lash-internal-core-store/synthetic-next:off",
   "lash-internal-core-execution/synthetic-next:on",
@@ -530,7 +537,9 @@ commands = [
   ["cargo", "test", "-p", "lash-internal-vm-protocol", "--lib", "--no-default-features", "--features", "synthetic-next", "--locked"],
   ["cargo", "test", "-p", "lash-internal-vm-worker", "--test", "pool_laws", "--no-default-features", "--features", "testing,synthetic-next", "--locked", "workers_refuse_another_protocol_before_guest_admission"],
   ["cargo", "check", "-p", "lash-internal-sansio", "--all-targets", "--no-default-features", "--locked"],
+  ["cargo", "check", "-p", "lash-internal-protocol-types", "--all-targets", "--no-default-features", "--locked"],
   ["cargo", "check", "-p", "lash-internal-sansio", "--all-targets", "--no-default-features", "--features", "synthetic-next", "--locked"],
+  ["cargo", "check", "-p", "lash-internal-protocol-types", "--all-targets", "--no-default-features", "--features", "synthetic-next", "--locked"],
   ["cargo", "check", "-p", "lash-internal-core-store", "--all-targets", "--no-default-features", "--locked"],
   ["cargo", "check", "-p", "lash-internal-core-store", "--all-targets", "--no-default-features", "--features", "synthetic-next", "--locked"],
   ["cargo", "test", "-p", "lash-internal-core-store", "--lib", "--no-default-features", "--features", "synthetic-next", "--locked"],

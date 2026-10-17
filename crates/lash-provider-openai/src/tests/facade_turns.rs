@@ -2,7 +2,7 @@
 //! backend over a SQLite memory store set, whose own node serves each
 //! session's turn on the durable path (ADR 0132).
 
-use lash_sansio::llm::types::{StreamBlockEvent, StreamBlockKind};
+use lash_protocol_types::{llm::types::StreamBlockEvent, llm::types::StreamBlockKind};
 use std::sync::{Arc, Mutex};
 
 use async_trait::async_trait;
@@ -12,7 +12,7 @@ use lash::tools::{
 };
 use lash::{LashCore, TurnEvent, TurnInput};
 use lash_core::provider::{ProviderHandle, ProviderOptions};
-use lash_sansio::sync::MutexExt;
+use lash_protocol_types::sync::MutexExt;
 use serde_json::{Value, json};
 
 use crate::CodexProvider;

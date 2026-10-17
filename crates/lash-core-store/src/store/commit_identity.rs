@@ -395,7 +395,7 @@ fn push_attachment_ref(
 }
 
 fn push_part_kind(identity: &mut crate::stable_identity::IdentityEncoder, kind: crate::PartKind) {
-    identity.tag(lash_sansio::core_support::fold_part_kind(
+    identity.tag(lash_protocol_types::core_support::fold_part_kind(
         kind,
         [0, 1, 2, 3, 4, 5, 6, 7, 8],
     ));
@@ -406,29 +406,28 @@ fn push_part(identity: &mut crate::stable_identity::IdentityEncoder, part: &crat
     push_part_kind(identity, part.kind());
     if let Some(status) = part.tool_result_status() {
         identity.tag(match status {
-            lash_sansio::ToolCallStatus::Success => 0,
-            lash_sansio::ToolCallStatus::Failure => 1,
-            lash_sansio::ToolCallStatus::Cancelled => 2,
+            lash_protocol_types::ToolCallStatus::Success => 0,
+            lash_protocol_types::ToolCallStatus::Failure => 1,
+            lash_protocol_types::ToolCallStatus::Cancelled => 2,
         });
     }
     // A tool result's content is its ordered blocks; every other kind's is
     // its text.
     match part.tool_result_content() {
         Some(blocks) => identity.sequence(blocks, |identity, block| match block {
-            lash_sansio::ModelToolReturnPart::Text { text } => {
+            lash_protocol_types::ModelToolReturnPart::Text { text } => {
                 identity.tag(0);
                 identity.string(text);
             }
-            lash_sansio::ModelToolReturnPart::Attachment(source) => {
+            lash_protocol_types::ModelToolReturnPart::Attachment(source) => {
                 identity.tag(1);
                 push_attachment_ref(identity, source);
             }
             // A retained output is its witness and the reference to its
             // bytes, never the bytes (FIG-1643).
-            lash_sansio::ModelToolReturnPart::Retained(lash_sansio::RetainedOutput {
-                reference,
-                witness,
-            }) => {
+            lash_protocol_types::ModelToolReturnPart::Retained(
+                lash_protocol_types::RetainedOutput { reference, witness },
+            ) => {
                 identity.tag(2);
                 push_attachment_ref(identity, reference);
                 identity.string(witness);
@@ -437,7 +436,7 @@ fn push_part(identity: &mut crate::stable_identity::IdentityEncoder, part: &crat
         None => identity.string(&part.content()),
     }
     identity.optional(part.attachment(), |identity, attachment| {
-        let lash_sansio::PartAttachment { reference } = attachment;
+        let lash_protocol_types::PartAttachment { reference } = attachment;
         push_attachment_ref(identity, reference)
     });
     identity.optional(part.call_id(), |identity, value| {
@@ -448,7 +447,7 @@ fn push_part(identity: &mut crate::stable_identity::IdentityEncoder, part: &crat
     });
     identity.optional(part.tool_name(), |identity, value| identity.string(value));
     identity.optional(part.tool_replay(), |identity, replay| {
-        let lash_sansio::llm::types::ProviderReplayMeta {
+        let lash_protocol_types::llm::types::ProviderReplayMeta {
             item_id,
             opaque,
             origin,
@@ -458,7 +457,7 @@ fn push_part(identity: &mut crate::stable_identity::IdentityEncoder, part: &crat
         identity.optional(origin.as_ref(), crate::stable_identity::provider_route);
     });
     identity.optional(part.reasoning_meta(), |identity, replay| {
-        let lash_sansio::llm::types::ProviderReasoningReplay {
+        let lash_protocol_types::llm::types::ProviderReasoningReplay {
             item_id,
             encrypted_content,
             signature,
@@ -476,7 +475,7 @@ fn push_part(identity: &mut crate::stable_identity::IdentityEncoder, part: &crat
         identity.optional(origin.as_ref(), crate::stable_identity::provider_route);
     });
     identity.optional(part.response_meta(), |identity, response| {
-        let lash_sansio::llm::types::ResponseTextMeta {
+        let lash_protocol_types::llm::types::ResponseTextMeta {
             id,
             status,
             phase,
@@ -687,9 +686,9 @@ mod append_request_identity_tests {
     fn append_request_identity_distinguishes_tool_result_status() {
         let operation = operation("tool-result-status");
         let hashes = [
-            lash_sansio::ToolCallStatus::Success,
-            lash_sansio::ToolCallStatus::Failure,
-            lash_sansio::ToolCallStatus::Cancelled,
+            lash_protocol_types::ToolCallStatus::Success,
+            lash_protocol_types::ToolCallStatus::Failure,
+            lash_protocol_types::ToolCallStatus::Cancelled,
         ]
         .map(|status| {
             let node = crate::SessionAppendNode::message(crate::PluginMessage {
@@ -698,8 +697,8 @@ mod append_request_identity_tests {
                 origin: None,
                 parts: vec![crate::Part::tool_result(
                     "result".into(),
-                    vec![lash_sansio::ModelToolReturnPart::text("same body")],
-                    lash_sansio::ToolCallId::fixture("call"),
+                    vec![lash_protocol_types::ModelToolReturnPart::text("same body")],
+                    lash_protocol_types::ToolCallId::fixture("call"),
                     "tool".into(),
                     status,
                 )],

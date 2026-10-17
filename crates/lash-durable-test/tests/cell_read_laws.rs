@@ -60,8 +60,8 @@ use lash_durable::{ActorDispatch, ActorKey, ActorState, CommitLabel, DurableStor
 use lash_durable_test::{
     Cut, Fault, Matrix, Scenario, Script, SimClock, SimNodes, SimNodesConfig, Tripwire, WriteKind,
 };
-use lash_sansio::SessionId;
-use lash_sansio::sync::MutexExt as _;
+use lash_protocol_types::SessionId;
+use lash_protocol_types::sync::MutexExt as _;
 use serde_json::{Value, json};
 
 const SESSION: &str = "cell-read-session";

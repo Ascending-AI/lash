@@ -18,7 +18,7 @@ use std::pin::Pin;
 use std::sync::Arc;
 
 pub use lash_core_store::tool_run::PresentationBinding;
-use lash_sansio::sync::MutexExt as _;
+use lash_protocol_types::sync::MutexExt as _;
 use serde::{Deserialize, Serialize};
 
 use super::executor::RuntimeEffectControllerError;

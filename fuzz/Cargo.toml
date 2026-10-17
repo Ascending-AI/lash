@@ -11,7 +11,7 @@ cargo-fuzz = true
 libfuzzer-sys = "0.4"
 arbitrary = "1"
 lash-kernel-conformance = { path = "../crates/lash-kernel-conformance" }
-lash-internal-sansio = { path = "../crates/lash-sansio" }
+lash-internal-protocol-types = { path = "../crates/lash-protocol-types" }
 
 [[bin]]
 name = "attachment_metadata"

@@ -217,7 +217,7 @@ async fn page_transcript(store: &dyn PageStore) -> Transcript {
         .expect("the actor was claimed");
     let exec = ExecKey::Cell(
         SessionId::try_from("fig-6191-pages".to_owned()).expect("a session id"),
-        lash_sansio::TurnId::try_from("pages-turn".to_owned()).expect("a turn id"),
+        lash_protocol_types::TurnId::try_from("pages-turn".to_owned()).expect("a turn id"),
         CellId::new("pages-cell"),
     );
 

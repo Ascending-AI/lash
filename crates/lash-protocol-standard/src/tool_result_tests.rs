@@ -108,13 +108,15 @@ fn committed_tool_results_agree_with_the_resume_safety_check() {
 
     let transcript: Vec<Message> =
         serde_json::from_value(serde_json::to_value(&transcript).unwrap()).unwrap();
-    assert!(lash_sansio::messages_are_prompt_resume_safe(&transcript));
-    let rendered = lash_sansio::session_model::message::render_prompt(&transcript);
+    assert!(lash_protocol_types::messages_are_prompt_resume_safe(
+        &transcript
+    ));
+    let rendered = lash_protocol_types::session_model::message::render_prompt(&transcript);
     let result_blocks: Vec<_> = rendered.messages[1]
         .blocks
         .iter()
         .filter_map(|block| match block {
-            lash_sansio::llm::types::LlmContentBlock::ToolResult {
+            lash_protocol_types::llm::types::LlmContentBlock::ToolResult {
                 call_id,
                 content,
                 status,
@@ -159,7 +161,7 @@ fn committed_tool_results_agree_with_the_resume_safety_check() {
     assert!(
         rendered.messages[1].blocks.iter().all(|block| matches!(
             block,
-            lash_sansio::llm::types::LlmContentBlock::ToolResult { .. }
+            lash_protocol_types::llm::types::LlmContentBlock::ToolResult { .. }
         )),
         "no attachment escapes its result as a loose block"
     );

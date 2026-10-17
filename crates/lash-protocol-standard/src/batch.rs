@@ -15,7 +15,7 @@ use lash_core::{ToolCallOutput, ToolControl};
 use lash_tool_support::object_schema;
 use serde_json::Value;
 
-pub type BatchResultRow = lash_sansio::BatchResultRow;
+pub type BatchResultRow = lash_protocol_types::BatchResultRow;
 
 /// The name the model calls the sugar by.
 pub(crate) const BATCH_TOOL_NAME: &str = "batch";
@@ -246,7 +246,7 @@ fn fold_wrapper(
             ..ToolCallOutput::success(serde_json::json!({ "results": rows }))
         },
         model_return: ModelToolReturn {
-            outcome: lash_sansio::ModelToolOutcome::Completed,
+            outcome: lash_protocol_types::ModelToolOutcome::Completed,
             tool_name: wrapper.tool_name.clone(),
             parts,
         },

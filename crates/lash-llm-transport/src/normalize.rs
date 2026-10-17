@@ -10,7 +10,9 @@
 
 use lash_core::ProviderFailureKind;
 use lash_core::provider::ProviderOptions;
-use lash_sansio::llm::types::{LlmOutputPart, LlmTerminalReason, LlmUsage};
+use lash_protocol_types::{
+    llm::types::LlmOutputPart, llm::types::LlmTerminalReason, llm::types::LlmUsage,
+};
 use lash_transport_failure::{LlmTransportError, TransportRetryVerdict};
 use serde_json::Value;
 

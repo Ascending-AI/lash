@@ -68,7 +68,7 @@ pub(in crate::runtime) struct OwnedCall<'a> {
     /// template's slots from it.
     pub(in crate::runtime) attachment_store: Arc<crate::RuntimeAttachmentStore>,
     pub(in crate::runtime) fetch_horizon:
-        lash_sansio::llm::attachment_delivery::DeliveryFetchHorizon,
+        lash_protocol_types::llm::attachment_delivery::DeliveryFetchHorizon,
     pub(in crate::runtime) budgets: ExecutionBudgets,
 }
 
@@ -265,8 +265,8 @@ impl OwnedCall<'_> {
             lash_durable::DurableInstant(i64::try_from(limit.expires_at).unwrap_or(i64::MAX));
         // What every send reads the response under is fixed here, from the
         // request the template was lowered from, and recorded with it.
-        let response =
-            lash_sansio::llm::types::ResponseContext::of_request(&lowered).with_senders(None, None);
+        let response = lash_protocol_types::llm::types::ResponseContext::of_request(&lowered)
+            .with_senders(None, None);
         let record = admission_record(
             key.clone(),
             composed.as_ref(),
@@ -316,7 +316,7 @@ impl OwnedCall<'_> {
 /// prepares the call again.
 pub(in crate::runtime) async fn hold_slots(
     cx: &ActorContext,
-    template: &lash_sansio::llm::types::RecordedRequestTemplate,
+    template: &lash_protocol_types::llm::types::RecordedRequestTemplate,
 ) -> Result<Result<(), LlmCallError>, crate::RuntimeEffectControllerError> {
     use lash_core_execution::runtime::attachment_delivery::{
         DeliveryAcquisition, acquire_under, receiving_claim,

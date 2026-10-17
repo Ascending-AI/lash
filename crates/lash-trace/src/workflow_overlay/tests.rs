@@ -1,6 +1,6 @@
 use chrono::{TimeZone, Utc};
 use lash_kernel_doc::{DocumentId, Name};
-use lash_sansio::{ProcessId, SessionId, Site, TaskIdentity, TurnId, Unit};
+use lash_protocol_types::{ProcessId, SessionId, Site, TaskIdentity, TurnId, Unit};
 
 use super::*;
 use crate::{
@@ -17,8 +17,8 @@ fn identity() -> LanguageIdentity {
             protocol_iteration: Some(0),
         },
         subject: TraceRuntimeSubject::Effect {
-            address: lash_sansio::EffectAddress::new(
-                lash_sansio::ExecutionScope::turn("session-1", "turn-1"),
+            address: lash_protocol_types::EffectAddress::new(
+                lash_protocol_types::ExecutionScope::turn("session-1", "turn-1"),
                 "exec-replay-1",
             )
             .expect("valid trace test effect address"),
@@ -58,8 +58,8 @@ fn site(node: &str) -> WorkflowTaskSite {
 }
 
 /// Occurrence `occurrence` of `site`, outside every loop.
-fn occurrence_at(site: &WorkflowTaskSite, occurrence: u64) -> lash_sansio::EffectIdentity {
-    lash_sansio::EffectIdentity {
+fn occurrence_at(site: &WorkflowTaskSite, occurrence: u64) -> lash_protocol_types::EffectIdentity {
+    lash_protocol_types::EffectIdentity {
         task: site.task.clone(),
         site: site.site.clone(),
         occurrence,
@@ -226,7 +226,7 @@ fn step_body(process: &ProcessId, occurrence: u64, call: &str, attempt: u32) -> 
     StepBodyStarted {
         process_id: process.clone(),
         at: occurrence_at(&site("then"), occurrence),
-        call_id: lash_sansio::ToolCallId::fixture(call),
+        call_id: lash_protocol_types::ToolCallId::fixture(call),
         attempt,
     }
 }
@@ -556,7 +556,7 @@ fn a_step_body_start_binds_its_occurrence_to_the_call_and_a_retry_keeps_both() {
                     "then",
                     1,
                     TraceNodeFact::Completed {
-                        call_id: Some(lash_sansio::ToolCallId::fixture("call-1")),
+                        call_id: Some(lash_protocol_types::ToolCallId::fixture("call-1")),
                     },
                 ),
             ),
@@ -576,7 +576,7 @@ fn a_step_body_start_binds_its_occurrence_to_the_call_and_a_retry_keeps_both() {
         bound.call,
         Some(WorkflowOverlayCall {
             occurrence: 1,
-            call_id: lash_sansio::ToolCallId::fixture("call-1"),
+            call_id: lash_protocol_types::ToolCallId::fixture("call-1"),
             attempt: Some(2),
         })
     );
@@ -1331,7 +1331,7 @@ fn a_snapshot_costs_what_it_retains_and_an_append_one_occurrence() {
 /// reaches it.
 fn element_site(element: u64) -> WorkflowTaskSite {
     WorkflowTaskSite {
-        task: TaskIdentity::Spawned(lash_sansio::SpawnIdentity {
+        task: TaskIdentity::Spawned(lash_protocol_types::SpawnIdentity {
             parent: std::sync::Arc::new(TaskIdentity::Main),
             site: site("branch").site,
             occurrence: element,

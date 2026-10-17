@@ -1,5 +1,6 @@
-use lash_sansio::llm::types::{
-    LlmProviderTraceDirection, LlmUsage, StreamBlockEvent, StreamBlockIdentity, StreamBlockKind,
+use lash_protocol_types::{
+    llm::types::LlmProviderTraceDirection, llm::types::LlmUsage, llm::types::StreamBlockEvent,
+    llm::types::StreamBlockIdentity, llm::types::StreamBlockKind,
 };
 use lash_trace::{
     TRACE_SCHEMA_VERSION, TraceBranchSelection, TraceContext, TraceEffectEnvelopeDiffEntry,
@@ -56,15 +57,15 @@ fn node_failure_requires_typed_provenance() {
     assert!(refusal.to_string().contains("failure"), "{refusal}");
 
     let payload = TraceLanguageExecutionPayload::Node {
-        at: lash_sansio::effect_identity_fixture("node-1", 1),
+        at: lash_protocol_types::effect_identity_fixture("node-1", 1),
         fact: lash_trace::TraceNodeFact::Failed {
-            call_id: Some(lash_sansio::ToolCallId::fixture("effect-1")),
+            call_id: Some(lash_protocol_types::ToolCallId::fixture("effect-1")),
             failure: lash_trace::TraceLanguageExecutionFailure::Effect {
-                class: lash_sansio::ToolFailureClass::PermissionDenied,
+                class: lash_protocol_types::ToolFailureClass::PermissionDenied,
                 code: "approval_denied".to_owned(),
                 message: "permission denied".to_owned(),
                 replay_key: "effect-1".to_owned(),
-                source: lash_sansio::ToolFailureSource::Policy,
+                source: lash_protocol_types::ToolFailureSource::Policy,
                 suggested_delay_ms: None,
             },
         },
@@ -129,7 +130,7 @@ fn lash_vm_identity() -> TraceLanguageExecutionIdentity {
     TraceLanguageExecutionIdentity {
         scope: TraceRuntimeScope::new("s1"),
         subject: TraceRuntimeSubject::Process {
-            process_id: lash_sansio::ProcessId::fixture("p1"),
+            process_id: lash_protocol_types::ProcessId::fixture("p1"),
         },
         document: lash_trace::WorkflowDocumentRef {
             document: lash_kernel_doc::DocumentId::from_bytes([1; 32]),
@@ -185,8 +186,8 @@ fn event_samples() -> Vec<TraceEvent> {
             attachment_id: Some("attachment-id".to_string()),
             label: Some("artifact.bin".to_string()),
             media_type: Some("application/octet-stream".to_string()),
-            position: lash_sansio::llm::attachment_delivery::AttachmentPosition::Message,
-            reason: lash_sansio::AttachmentMaterializationReason::TargetModelDoesNotAcceptMimeAndPosition,
+            position: lash_protocol_types::llm::attachment_delivery::AttachmentPosition::Message,
+            reason: lash_protocol_types::AttachmentMaterializationReason::TargetModelDoesNotAcceptMimeAndPosition,
         },
         TraceEvent::CompositionChanged {
             fingerprint: "composition-sha".to_string(),
@@ -257,10 +258,10 @@ fn event_samples() -> Vec<TraceEvent> {
         },
         TraceEvent::LlmAttemptCompleted {
             response_metadata: Default::default(),
-            attempt: lash_sansio::llm::types::AttemptRecord {
+            attempt: lash_protocol_types::llm::types::AttemptRecord {
                 ordinal: 1,
-                outcome: lash_sansio::llm::types::AttemptOutcome::Completed,
-                protocol_position: lash_sansio::llm::types::ProtocolPosition::TerminalObserved,
+                outcome: lash_protocol_types::llm::types::AttemptOutcome::Completed,
+                protocol_position: lash_protocol_types::llm::types::ProtocolPosition::TerminalObserved,
                 retry_budget_consumed: true,
                 retry_decision: None,
                 error: None,
@@ -322,12 +323,12 @@ fn event_samples() -> Vec<TraceEvent> {
         },
         TraceEvent::ToolCheckConflict {
             plugin_id: "alpha".to_string(),
-            conflict: lash_sansio::ToolCheckConflict {
-                phase: lash_sansio::ToolCheckPhase::ToolArgsCheck,
-                winner: lash_sansio::ToolCheckReply {
+            conflict: lash_protocol_types::ToolCheckConflict {
+                phase: lash_protocol_types::ToolCheckPhase::ToolArgsCheck,
+                winner: lash_protocol_types::ToolCheckReply {
                     plugin_id: "alpha".to_string(),
                     callback: "tool_args_check:check".to_string(),
-                    verdict: lash_sansio::ToolCheckVerdictKind::Deny,
+                    verdict: lash_protocol_types::ToolCheckVerdictKind::Deny,
                 },
                 displaced: Vec::new(),
             },
@@ -392,14 +393,14 @@ fn event_samples() -> Vec<TraceEvent> {
             },
         },
         TraceEvent::ToolCallStarted {
-            call_id: lash_sansio::ToolCallId::fixture("call-1"),
+            call_id: lash_protocol_types::ToolCallId::fixture("call-1"),
             provider_call_id: None,
             name: "read_file".to_string(),
             args: json!({ "path": "README.md" }),
             issuing_node_id: None,
         },
         TraceEvent::ToolCallCompleted {
-            call_id: lash_sansio::ToolCallId::fixture("call-1"),
+            call_id: lash_protocol_types::ToolCallId::fixture("call-1"),
             provider_call_id: None,
             name: "read_file".to_string().into(),
             args: json!({ "path": "README.md" }).into(),
@@ -413,9 +414,9 @@ fn event_samples() -> Vec<TraceEvent> {
             span_attributes: Default::default(),
         },
         TraceEvent::ToolCallCompleted {
-            call_id: lash_sansio::ToolCallId::fixture("abandoned"),
+            call_id: lash_protocol_types::ToolCallId::fixture("abandoned"),
             provider_call_id: None,
-            name: lash_trace::TraceToolName::Identity { tool_id: lash_sansio::ToolId::new("tool:read") },
+            name: lash_trace::TraceToolName::Identity { tool_id: lash_protocol_types::ToolId::new("tool:read") },
             args: lash_trace::TraceToolArgs::Unavailable,
             output: TraceToolCallOutput { outcome: TraceToolCallOutcome::Discarded, control: None },
             duration_ms: 3, issuing_node_id: None, attempts: None, span_attributes: Default::default(),
@@ -622,7 +623,7 @@ fn exec_code_completed_event() -> TraceEvent {
         error: None,
         terminal_finish: None,
         tool_calls: vec![TraceExecToolCall {
-            call_id: lash_sansio::ToolCallId::fixture("call-1"),
+            call_id: lash_protocol_types::ToolCallId::fixture("call-1"),
             name: "read_file".to_string(),
             status: TraceToolCallStatus::Success,
         }],
@@ -668,27 +669,27 @@ fn language_execution_payload_samples() -> Vec<TraceLanguageExecutionPayload> {
             ran: vec![(1, 2)],
         },
         TraceLanguageExecutionPayload::Node {
-            at: lash_sansio::effect_identity_fixture("branch", 1),
+            at: lash_protocol_types::effect_identity_fixture("branch", 1),
             fact: lash_trace::TraceNodeFact::Started { call_id: None },
         },
         TraceLanguageExecutionPayload::Node {
-            at: lash_sansio::effect_identity_fixture("branch", 1),
+            at: lash_protocol_types::effect_identity_fixture("branch", 1),
             fact: lash_trace::TraceNodeFact::BranchSelected {
                 selected: TraceBranchSelection::Then,
             },
         },
         TraceLanguageExecutionPayload::Node {
-            at: lash_sansio::effect_identity_fixture("branch", 1),
+            at: lash_protocol_types::effect_identity_fixture("branch", 1),
             fact: lash_trace::TraceNodeFact::Completed { call_id: None },
         },
         TraceLanguageExecutionPayload::Node {
-            at: lash_sansio::effect_identity_fixture("then", 1),
+            at: lash_protocol_types::effect_identity_fixture("then", 1),
             fact: lash_trace::TraceNodeFact::Started {
-                call_id: Some(lash_sansio::ToolCallId::fixture("call-1")),
+                call_id: Some(lash_protocol_types::ToolCallId::fixture("call-1")),
             },
         },
         TraceLanguageExecutionPayload::Node {
-            at: lash_sansio::effect_identity_fixture("then", 1),
+            at: lash_protocol_types::effect_identity_fixture("then", 1),
             fact: lash_trace::TraceNodeFact::Waiting {
                 awaited: lash_trace::TraceNodeAwaited::Signal {
                     name: "approved".to_string(),
@@ -697,26 +698,26 @@ fn language_execution_payload_samples() -> Vec<TraceLanguageExecutionPayload> {
             },
         },
         TraceLanguageExecutionPayload::Node {
-            at: lash_sansio::effect_identity_fixture("then", 1),
+            at: lash_protocol_types::effect_identity_fixture("then", 1),
             fact: lash_trace::TraceNodeFact::Resumed {
                 resolution: lash_trace::TraceNodeWaitResolution::Resumed,
             },
         },
         TraceLanguageExecutionPayload::Node {
-            at: lash_sansio::effect_identity_fixture("then", 1),
+            at: lash_protocol_types::effect_identity_fixture("then", 1),
             fact: lash_trace::TraceNodeFact::ChildStarted {
                 child: TraceLanguageChildExecution {
                     scope: TraceRuntimeScope::new("s1"),
-                    process_id: lash_sansio::ProcessId::fixture("child-1"),
+                    process_id: lash_protocol_types::ProcessId::fixture("child-1"),
                     attempt: Some(1),
                     document: None,
                 },
             },
         },
         TraceLanguageExecutionPayload::Node {
-            at: lash_sansio::effect_identity_fixture("then", 1),
+            at: lash_protocol_types::effect_identity_fixture("then", 1),
             fact: lash_trace::TraceNodeFact::Failed {
-                call_id: Some(lash_sansio::ToolCallId::fixture("call-1")),
+                call_id: Some(lash_protocol_types::ToolCallId::fixture("call-1")),
                 failure: lash_trace::TraceLanguageExecutionFailure::Runtime {
                     code: "boom".to_string(),
                     message: "notify failed".to_string(),
@@ -724,11 +725,11 @@ fn language_execution_payload_samples() -> Vec<TraceLanguageExecutionPayload> {
             },
         },
         TraceLanguageExecutionPayload::Node {
-            at: lash_sansio::effect_identity_fixture("then", 2),
+            at: lash_protocol_types::effect_identity_fixture("then", 2),
             fact: lash_trace::TraceNodeFact::Started { call_id: None },
         },
         TraceLanguageExecutionPayload::Node {
-            at: lash_sansio::effect_identity_fixture("then", 2),
+            at: lash_protocol_types::effect_identity_fixture("then", 2),
             fact: lash_trace::TraceNodeFact::Cancelled,
         },
         TraceLanguageExecutionPayload::ExecutionFinished {
@@ -862,7 +863,7 @@ fn published_overlay_schema_accepts_a_folded_overlay_and_enforces_its_row() {
             document: lash_kernel_doc::DocumentId::from_bytes([2; 32]),
             entry: lash_trace::WorkflowDocumentEntry::Main,
         },
-        [lash_sansio::effect_identity_fixture("then", 1).site],
+        [lash_protocol_types::effect_identity_fixture("then", 1).site],
     );
     let overlay = lash_trace::fold_workflow_overlay(None, Some(&document), &records, 1)
         .expect("fold every payload kind");
@@ -894,9 +895,9 @@ fn published_overlay_schema_accepts_a_folded_overlay_and_enforces_its_row() {
 
 fn step_body_started() -> lash_trace::StepBodyStarted {
     lash_trace::StepBodyStarted {
-        process_id: lash_sansio::ProcessId::fixture("p1"),
-        at: lash_sansio::effect_identity_fixture("then", 2),
-        call_id: lash_sansio::ToolCallId::fixture("call-2"),
+        process_id: lash_protocol_types::ProcessId::fixture("p1"),
+        at: lash_protocol_types::effect_identity_fixture("then", 2),
+        call_id: lash_protocol_types::ToolCallId::fixture("call-2"),
         attempt: 1,
     }
 }
@@ -936,10 +937,10 @@ fn content_bearing_events() -> Vec<TraceEvent> {
             delay_ms: None,
             detail: lash_trace::TraceRetryAttemptDetail::Tool {
                 outcome: lash_trace::TraceToolAttemptOutcome::Failed {
-                    class: lash_sansio::ToolFailureClass::Execution,
+                    class: lash_protocol_types::ToolFailureClass::Execution,
                     code: "tool_failed".to_string(),
                     message: CONTENT.to_string(),
-                    source: lash_sansio::ToolFailureSource::Tool,
+                    source: lash_protocol_types::ToolFailureSource::Tool,
                     suggested_delay_ms: None,
                 },
             },
@@ -987,8 +988,8 @@ fn content_bearing_events() -> Vec<TraceEvent> {
             attachment_id: Some("attachment-id".to_string()),
             label: Some(CONTENT.to_string()),
             media_type: Some("application/octet-stream".to_string()),
-            position: lash_sansio::llm::attachment_delivery::AttachmentPosition::Message,
-            reason: lash_sansio::AttachmentMaterializationReason::TargetModelDoesNotAcceptMimeAndPosition,
+            position: lash_protocol_types::llm::attachment_delivery::AttachmentPosition::Message,
+            reason: lash_protocol_types::AttachmentMaterializationReason::TargetModelDoesNotAcceptMimeAndPosition,
         },
         TraceEvent::CompositionChanged {
             fingerprint: "composition-sha".to_string(),
@@ -1023,7 +1024,7 @@ fn content_bearing_events() -> Vec<TraceEvent> {
                 duration_ms: 12,
                 request_model: "request-model".to_string(),
                 terminal_reason: Some(lash_trace::TraceLlmTerminalReason::Stop),
-                parts: Some(vec![lash_sansio::llm::types::LlmOutputPart::Text {
+                parts: Some(vec![lash_protocol_types::llm::types::LlmOutputPart::Text {
                     text: CONTENT.to_string(),
                     response_meta: None,
                 }]),
@@ -1120,14 +1121,14 @@ fn content_bearing_events() -> Vec<TraceEvent> {
             },
         },
         TraceEvent::ToolCallStarted {
-            call_id: lash_sansio::ToolCallId::fixture("call-1"),
+            call_id: lash_protocol_types::ToolCallId::fixture("call-1"),
             provider_call_id: Some("provider-call".to_string()),
             name: "search".to_string(),
             args: json!({ "query": CONTENT }),
             issuing_node_id: None,
         },
         TraceEvent::ToolCallCompleted {
-            call_id: lash_sansio::ToolCallId::fixture("call-1"),
+            call_id: lash_protocol_types::ToolCallId::fixture("call-1"),
             provider_call_id: Some("provider-call".to_string()),
             name: "search".to_string().into(),
             args: json!({ "query": CONTENT }).into(),
@@ -1159,7 +1160,7 @@ fn content_bearing_events() -> Vec<TraceEvent> {
             error: Some({
                 let mut failure =
                     lash_trace::CellFailure::new(lash_trace::CellFailureKind::Program, CONTENT);
-                failure.feedback.push(lash_sansio::CellFailureRepair {
+                failure.feedback.push(lash_protocol_types::CellFailureRepair {
                     plugin_id: "repair".into(),
                     callback: "cell_failure_feedback:names".into(),
                     repairs: vec![CONTENT.into()],
@@ -1168,7 +1169,7 @@ fn content_bearing_events() -> Vec<TraceEvent> {
             }),
             terminal_finish: Some(json!(CONTENT)),
             tool_calls: vec![TraceExecToolCall {
-                call_id: lash_sansio::ToolCallId::fixture("call-1"),
+                call_id: lash_protocol_types::ToolCallId::fixture("call-1"),
                 name: "search".to_string(),
                 status: TraceToolCallStatus::Failure,
             }],
@@ -1202,9 +1203,9 @@ fn content_bearing_events() -> Vec<TraceEvent> {
             error: Some(CONTENT.to_string()),
         }),
         language(TraceLanguageExecutionPayload::Node {
-            at: lash_sansio::effect_identity_fixture("n1", 1),
+            at: lash_protocol_types::effect_identity_fixture("n1", 1),
             fact: lash_trace::TraceNodeFact::Failed {
-                call_id: Some(lash_sansio::ToolCallId::fixture("call-1")),
+                call_id: Some(lash_protocol_types::ToolCallId::fixture("call-1")),
                 failure: lash_trace::TraceLanguageExecutionFailure::Runtime {
                     code: "runtime_failed".to_string(),
                     message: CONTENT.to_string(),
@@ -1283,14 +1284,14 @@ fn omitted_schema_admission_diagnostics_keep_classification_without_text() {
     const REFERENCE: &str = "https://private.example/PRIVATE-REFERENCE-SENTINEL";
     let cases = [
         (
-            lash_sansio::SchemaAdmissionError::Compilation {
+            lash_protocol_types::SchemaAdmissionError::Compilation {
                 schema_path: "/properties/mode".into(),
                 message: COMPILATION.into(),
             },
             "compilation",
         ),
         (
-            lash_sansio::SchemaAdmissionError::NonLocalReference {
+            lash_protocol_types::SchemaAdmissionError::NonLocalReference {
                 schema_path: "/properties/mode/$ref".into(),
                 reference: REFERENCE.into(),
             },
@@ -1299,11 +1300,11 @@ fn omitted_schema_admission_diagnostics_keep_classification_without_text() {
     ];
     for (diagnostic, kind) in cases {
         let path = match &diagnostic {
-            lash_sansio::SchemaAdmissionError::Compilation { schema_path, .. }
-            | lash_sansio::SchemaAdmissionError::NonLocalReference { schema_path, .. } => {
-                schema_path.clone()
-            }
-            lash_sansio::SchemaAdmissionError::InvalidKind { .. } => unreachable!(),
+            lash_protocol_types::SchemaAdmissionError::Compilation { schema_path, .. }
+            | lash_protocol_types::SchemaAdmissionError::NonLocalReference {
+                schema_path, ..
+            } => schema_path.clone(),
+            lash_protocol_types::SchemaAdmissionError::InvalidKind { .. } => unreachable!(),
         };
         let mut event = exec_code_completed_event();
         let TraceEvent::ExecCodeCompleted { error, .. } = &mut event else {
@@ -1339,7 +1340,7 @@ fn omitted_schema_admission_diagnostics_keep_classification_without_text() {
         assert_eq!(omitted["error"]["schema_admission"]["schema_path"], path);
         assert_eq!(
             omitted["tool_calls"][0]["call_id"],
-            lash_sansio::ToolCallId::fixture("call-1").to_string(),
+            lash_protocol_types::ToolCallId::fixture("call-1").to_string(),
         );
     }
 }

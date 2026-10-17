@@ -47,7 +47,7 @@ pub struct CheckpointContentRef(String);
 
 impl CheckpointContentRef {
     pub(super) fn of_bytes(bytes: &[u8]) -> Self {
-        Self(crate::core_support::blake3_domain_hash_hex(
+        Self(lash_protocol_types::core_support::blake3_domain_hash_hex(
             TURN_CHECKPOINT_CONTENT_DOMAIN,
             bytes,
         ))

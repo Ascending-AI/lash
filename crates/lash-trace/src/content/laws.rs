@@ -19,7 +19,7 @@ fn record(event: TraceEvent) -> TraceRecord {
 }
 fn tool(value: Value) -> TraceEvent {
     TraceEvent::ToolCallCompleted {
-        call_id: lash_sansio::ToolCallId::fixture("call"),
+        call_id: lash_protocol_types::ToolCallId::fixture("call"),
         provider_call_id: None,
         name: "tool".into(),
         args: json!([1, 2]).into(),
@@ -99,14 +99,16 @@ fn categories_require_direction_and_reasoning_consent() {
     for encrypted in [false, true] {
         let mut event = model_event();
         if let TraceEvent::LlmCallCompleted { response, .. } = &mut event {
-            response.parts = Some(vec![lash_sansio::llm::types::LlmOutputPart::Reasoning {
-                text: "private reasoning".into(),
-                replay: Some(lash_sansio::llm::types::ProviderReasoningReplay {
-                    redacted: !encrypted,
-                    encrypted_content: encrypted.then(|| "opaque".into()),
-                    ..Default::default()
-                }),
-            }]);
+            response.parts = Some(vec![
+                lash_protocol_types::llm::types::LlmOutputPart::Reasoning {
+                    text: "private reasoning".into(),
+                    replay: Some(lash_protocol_types::llm::types::ProviderReasoningReplay {
+                        redacted: !encrypted,
+                        encrypted_content: encrypted.then(|| "opaque".into()),
+                        ..Default::default()
+                    }),
+                },
+            ]);
         }
         assert!(
             !serde_json::to_string(&attributes(&event))

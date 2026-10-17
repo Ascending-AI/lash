@@ -20,7 +20,7 @@ use std::time::{Duration, UNIX_EPOCH};
 use lash_core::llm::types::ProviderRouteIdentity;
 use lash_core::provider::{ProviderToken, TokenRequest, TokenRequestReason, TokenSource};
 use lash_core::runtime::{Clock, SystemClock};
-use lash_sansio::sync::MutexExt;
+use lash_protocol_types::sync::MutexExt;
 use lash_transport_failure::LlmTransportError;
 
 /// Proactive token renewal policy, configurable on each provider constructor.

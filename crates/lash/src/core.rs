@@ -8,7 +8,7 @@ use lash_core::ActorContext;
 use lash_core::Backend;
 use lash_core::facade_support;
 use lash_core_worker::DurableProcessWorkerConfig;
-use lash_sansio::SessionId;
+use lash_protocol_types::SessionId;
 
 mod drain;
 mod node;

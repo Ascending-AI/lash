@@ -7,7 +7,7 @@ use crate::{
     PreparedToolCall, RuntimeEffectControllerError, RuntimeExecutionContext, ToolCallOutput,
     ToolCallRecord, ToolIntents,
 };
-use lash_sansio::sync::MutexExt;
+use lash_protocol_types::sync::MutexExt;
 use serde::{Deserialize, Serialize};
 use std::collections::BTreeMap;
 use std::sync::{Arc, Mutex};
@@ -95,16 +95,16 @@ struct Prepared {
     input: CallInput,
     original_args: Option<serde_json::Value>,
     call: PreparedToolCall,
-    #[serde(serialize_with = "lash_sansio::durable_serde::serialize")]
+    #[serde(serialize_with = "lash_protocol_types::durable_serde::serialize")]
     failure: Option<crate::ToolFailure>,
 }
 
 #[derive(Clone, Serialize, Deserialize)]
 struct Captured {
     check_phase: Option<crate::plugin::ControlPhaseDeadline>,
-    #[serde(serialize_with = "lash_sansio::durable_serde::serialize")]
+    #[serde(serialize_with = "lash_protocol_types::durable_serde::serialize")]
     original: Option<ToolCallOutput>,
-    #[serde(serialize_with = "lash_sansio::durable_serde::serialize")]
+    #[serde(serialize_with = "lash_protocol_types::durable_serde::serialize")]
     output: ToolCallOutput,
     occurrence: crate::plugin::ToolHookOccurrence,
     intents: ToolIntents,

@@ -271,7 +271,9 @@ impl RecordContent<'_> {
         }
         Some(&mut self.event.request_mut()?.messages)
     }
-    pub fn output_parts(&mut self) -> Option<&mut Vec<lash_sansio::llm::types::LlmOutputPart>> {
+    pub fn output_parts(
+        &mut self,
+    ) -> Option<&mut Vec<lash_protocol_types::llm::types::LlmOutputPart>> {
         if !self.policy.captures(ContentCategory::OutputMessages) {
             return None;
         }

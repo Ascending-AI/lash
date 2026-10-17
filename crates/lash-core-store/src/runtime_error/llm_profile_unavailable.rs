@@ -13,7 +13,8 @@ impl RuntimeErrorCause {
     pub fn is_terminal(&self) -> bool {
         match self {
             Self::PluginOperation { .. } | Self::PluginHooks { .. } => {
-                self.plugin_failure_class() == Some(lash_sansio::PluginFailureClass::Terminal)
+                self.plugin_failure_class()
+                    == Some(lash_protocol_types::PluginFailureClass::Terminal)
             }
             Self::VmWorker { outcome } => {
                 !outcome.is_retryable() && outcome.deployment_fault().is_none()

@@ -1,6 +1,6 @@
 use crate::NodeId;
-use lash_sansio::core_support::*;
-use lash_sansio::{AppendVec, same_history_record};
+use lash_protocol_types::core_support::*;
+use lash_protocol_types::{AppendVec, same_history_record};
 use std::collections::{HashMap, HashSet};
 use std::sync::Arc;
 

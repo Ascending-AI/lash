@@ -9,7 +9,7 @@ use lash_core::{
     SessionObservationEventPayload, SessionProcessEventKind, SessionQueueEventKind,
     SessionRevision, TurnActivity, TurnId,
 };
-use lash_sansio::SessionId;
+use lash_protocol_types::SessionId;
 
 /// The stored form of [`SessionObservationEventPayload`], one variant each.
 #[derive(serde::Serialize, serde::Deserialize)]
@@ -330,7 +330,7 @@ pub(super) fn language_observation(
 mod tests {
     use lash_core::llm::types::{StreamBlockEvent, StreamBlockIdentity, StreamBlockKind};
     use lash_core::{ProviderFailureKind, TurnActivityId, TurnEvent};
-    use lash_sansio::{ErrorEnvelope, FailureCode, ReportedFailure, TurnFailureKind};
+    use lash_protocol_types::{ErrorEnvelope, FailureCode, ReportedFailure, TurnFailureKind};
 
     use super::*;
 

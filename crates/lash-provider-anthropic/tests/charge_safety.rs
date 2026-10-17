@@ -46,16 +46,16 @@ impl lash_llm_transport::LlmHttpTransport for CountingSseTransport {
 fn request() -> LlmRequest {
     LlmRequest {
         instructions: None,
-        model: lash_sansio::llm_profile::LlmProfileConfig::new(
-            lash_sansio::llm_profile::RecordedLlmProfile::mint(
-                lash_sansio::llm_profile::LlmProfileKey::new("request-fixture"),
-                lash_sansio::llm_profile::LlmProfileMetadata::builder(
+        model: lash_protocol_types::llm_profile::LlmProfileConfig::new(
+            lash_protocol_types::llm_profile::RecordedLlmProfile::mint(
+                lash_protocol_types::llm_profile::LlmProfileKey::new("request-fixture"),
+                lash_protocol_types::llm_profile::LlmProfileMetadata::builder(
                     "claude-sonnet-4-6".to_string(),
                 )
                 .context_window_tokens(128_000)
                 .capability(Default::default())
                 .extra_body(Default::default())
-                .cache_retention(lash_sansio::llm::capability::CacheRetention::Short)
+                .cache_retention(lash_protocol_types::llm::capability::CacheRetention::Short)
                 .build()
                 .expect("valid profile"),
             ),
@@ -186,7 +186,7 @@ fn empty_stream_partial_retry(body: &'static str) -> ProviderCompletionError {
             .retry_decision
             .as_ref()
             .and_then(|decision| decision.decline_cause()),
-        Some(lash_sansio::llm::types::RetryDeclineCause::RetryBudgetExhausted)
+        Some(lash_protocol_types::llm::types::RetryDeclineCause::RetryBudgetExhausted)
     );
     failure
 }

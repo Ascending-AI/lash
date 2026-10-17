@@ -81,8 +81,8 @@ use lash_durable::{ActorKey, ActorState, CommitLabel};
 use lash_durable_test::{
     Fault, Matrix, Script, SimClock, SimNodes, SimNodesConfig, Stored, Tripwire,
 };
-use lash_sansio::SessionId;
-use lash_sansio::sync::MutexExt as _;
+use lash_protocol_types::SessionId;
+use lash_protocol_types::sync::MutexExt as _;
 use serde_json::{Value, json};
 
 const SESSION: &str = "model-answer-receipt";

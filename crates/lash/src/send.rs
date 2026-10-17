@@ -12,7 +12,7 @@
 //! answer, so a later call answers the same retained outcome.
 
 use lash_core::ActorContext;
-use lash_sansio::core_support::RunIdCoreSupport;
+use lash_protocol_types::core_support::RunIdCoreSupport;
 mod batch;
 mod cancel;
 mod follow;
@@ -27,7 +27,7 @@ use futures_util::future::BoxFuture;
 use lash_core::facade_support::DurableSessionOps;
 use lash_core::runtime::{TurnInputAcceptanceReceipt, TurnInputIngress};
 use lash_core::{InputId, LiveReplayStore, SessionId, TurnId};
-use lash_sansio::sync::MutexExt;
+use lash_protocol_types::sync::MutexExt;
 use tokio::sync::mpsc;
 
 use crate::durable_session::DurableSession;
@@ -1501,7 +1501,7 @@ mod tests {
             ),
             (
                 TurnOutcome::AgentFrameSwitch {
-                    frame_key: lash_sansio::FrameKey::from_caller_material("frame")
+                    frame_key: lash_protocol_types::FrameKey::from_caller_material("frame")
                         .expect("frame key"),
                     task: "next task".into(),
                     initial_nodes: Vec::new(),

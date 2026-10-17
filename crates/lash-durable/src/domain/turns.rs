@@ -8,7 +8,9 @@
 use crate::ids::{DurableInstant, Epoch};
 use lash_core_store::checkpoint_graph::NodeId;
 use lash_core_store::store::{RunAdmissionRecord, RunTerminalCause, RunTerminalKind};
-use lash_sansio::{InputId, SessionId, TurnCancelMode, TurnCancelUndeliveredInputPolicy, TurnId};
+use lash_protocol_types::{
+    InputId, SessionId, TurnCancelMode, TurnCancelUndeliveredInputPolicy, TurnId,
+};
 
 use super::keys::RunSeq;
 

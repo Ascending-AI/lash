@@ -2,7 +2,7 @@
 use super::observation::Observation;
 use lash_core_execution::facade_support::sql;
 use lash_durable::{domain::*, *};
-use lash_sansio::{ProcessId, SessionId, TurnId};
+use lash_protocol_types::{ProcessId, SessionId, TurnId};
 use std::sync::Arc;
 
 pub(crate) struct ObservedStore {
@@ -140,7 +140,7 @@ impl DurableStore for ObservedStore {
 impl DurableReads for ObservedStore {
     async fn model_call_pins(
         &self,
-        session: &lash_sansio::SessionId,
+        session: &lash_protocol_types::SessionId,
         owner: &str,
     ) -> Result<Vec<lash_durable::domain::ModelCallPinRow>, DurableError> {
         self.observe(
@@ -152,7 +152,7 @@ impl DurableReads for ObservedStore {
 
     async fn model_calls(
         &self,
-        session: &lash_sansio::SessionId,
+        session: &lash_protocol_types::SessionId,
         owner: &str,
     ) -> Result<Vec<lash_core_store::model_calls::ModelCallRecord>, DurableError> {
         self.observe("model_calls", self.inner.model_calls(session, owner))
@@ -211,16 +211,16 @@ impl DurableReads for ObservedStore {
 
     async fn cell_roots(
         &self,
-        session: &lash_sansio::SessionId,
-        run: &lash_sansio::TurnId,
+        session: &lash_protocol_types::SessionId,
+        run: &lash_protocol_types::TurnId,
     ) -> Result<Vec<ExecRootRow>, DurableError> {
         self.observe("cell_roots", self.inner.cell_roots(session, run))
             .await
     }
     async fn cell_roots_within(
         &self,
-        session: &lash_sansio::SessionId,
-        run: &lash_sansio::TurnId,
+        session: &lash_protocol_types::SessionId,
+        run: &lash_protocol_types::TurnId,
         max_rows: usize,
     ) -> Result<Vec<lash_durable::domain::ExecRootRow>, DurableError> {
         self.inner.cell_roots_within(session, run, max_rows).await

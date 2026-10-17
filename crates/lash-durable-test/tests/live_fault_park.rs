@@ -43,7 +43,7 @@ use lash_core::durable_port::domain::UnfinishedPhase;
 use lash_core::durable_port::{ActorKey, ActorState, CommitLabel, Release};
 use lash_core::llm::types::LlmRequest;
 use lash_core::testing::DurableCommitHook;
-use lash_sansio::sync::MutexExt as _;
+use lash_protocol_types::sync::MutexExt as _;
 
 use served::{Tier, World};
 

@@ -1,8 +1,8 @@
 use super::support::*;
 use super::traits::{AttemptEndReason, ProviderTerminalPolicy};
 use futures_util::FutureExt as _;
-use lash_sansio::llm::attachment_delivery::Delivery;
-use lash_sansio::{ErrorEnvelope, RetryProgress};
+use lash_protocol_types::llm::attachment_delivery::Delivery;
+use lash_protocol_types::{ErrorEnvelope, RetryProgress};
 use lash_trace::EmissionPermit;
 use lash_trace::telemetry::metrics::TelemetryMetrics;
 
@@ -196,8 +196,8 @@ impl ProviderHandle {
     pub fn accepts_attachment(
         &self,
         request: &LlmRequest,
-        reference: &lash_sansio::AttachmentRef,
-        position: lash_sansio::llm::attachment_delivery::AttachmentPosition,
+        reference: &lash_protocol_types::AttachmentRef,
+        position: lash_protocol_types::llm::attachment_delivery::AttachmentPosition,
     ) -> bool {
         !self
             .components
@@ -236,7 +236,7 @@ impl ProviderHandle {
         &mut self,
         mut request: LlmRequest,
         charge_safety: crate::ChargeSafetyPolicy,
-        budgets: lash_sansio::ExecutionBudgets,
+        budgets: lash_protocol_types::ExecutionBudgets,
         deliveries: &dyn SlotDeliveries,
     ) -> Result<ProviderCompletion, ProviderCompletionError> {
         let sideband = self.prepare_completion(&mut request);
@@ -529,7 +529,7 @@ impl ProviderHandle {
                         true,
                         failure_protocol_position(&error),
                         deadline.then_some(RetryDecision::Declined(RetryDeclineCause::TimedOut {
-                            limit: lash_sansio::LimitCause::ExecutionTotal,
+                            limit: lash_protocol_types::LimitCause::ExecutionTotal,
                         })),
                     ),
                     error
@@ -604,7 +604,7 @@ impl ProviderHandle {
                             true,
                             failure_protocol_position(failure),
                             Some(RetryDecision::Declined(RetryDeclineCause::TimedOut {
-                                limit: lash_sansio::LimitCause::ExecutionTotal,
+                                limit: lash_protocol_types::LimitCause::ExecutionTotal,
                             })),
                         ),
                         failure
@@ -746,7 +746,7 @@ impl ProviderHandle {
                     let (decision, verdict) = match decision.delay() {
                         Some(delay) if delay >= remaining(clock.as_ref()) => {
                             let cause = RetryDeclineCause::TimedOut {
-                                limit: lash_sansio::LimitCause::ExecutionTotal,
+                                limit: lash_protocol_types::LimitCause::ExecutionTotal,
                             };
                             (
                                 RetryDecision::Declined(cause),
@@ -894,14 +894,14 @@ fn provider_close_panicked(
 /// limit, which clips the call's total (spec v3 L-C2).
 #[derive(Clone, Debug, PartialEq, Eq)]
 pub struct ModelCallBounds {
-    pub budgets: lash_sansio::ExecutionBudgets,
-    pub enclosing: Option<lash_sansio::ExecutionLimit>,
+    pub budgets: lash_protocol_types::ExecutionBudgets,
+    pub enclosing: Option<lash_protocol_types::ExecutionLimit>,
 }
 
 impl ModelCallBounds {
     /// The bounds of a call no other stretch encloses: `budgets` alone.
     #[must_use]
-    pub fn unnested(budgets: lash_sansio::ExecutionBudgets) -> Self {
+    pub fn unnested(budgets: lash_protocol_types::ExecutionBudgets) -> Self {
         Self {
             budgets,
             enclosing: None,
@@ -911,7 +911,7 @@ impl ModelCallBounds {
 
 /// The typed model timeout a call settles with once its total expires.
 fn model_total_error(
-    limit: lash_sansio::ExecutionLimit,
+    limit: lash_protocol_types::ExecutionLimit,
     last_failure: Option<&LlmTransportError>,
 ) -> LlmTransportError {
     let mut message = format!(
@@ -934,7 +934,7 @@ fn model_total_exceeded(
     call_id: LlmCallId,
     sideband: &ProviderCompletionSideband,
     ordinal: u32,
-    limit: lash_sansio::ExecutionLimit,
+    limit: lash_protocol_types::ExecutionLimit,
     cut_at: Option<ProtocolPosition>,
 ) -> ProviderCompletionError {
     let error = model_total_error(limit, None);
@@ -946,7 +946,7 @@ fn model_total_exceeded(
                 true,
                 position,
                 Some(RetryDecision::Declined(RetryDeclineCause::TimedOut {
-                    limit: lash_sansio::LimitCause::ExecutionTotal,
+                    limit: lash_protocol_types::LimitCause::ExecutionTotal,
                 })),
             ),
             None,

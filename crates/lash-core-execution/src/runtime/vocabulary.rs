@@ -1,8 +1,8 @@
 use super::*;
 use crate::session_model::SessionStreamEvent;
 use crate::{LlmUsage, SessionSnapshot, ToolCallRecord};
-use lash_sansio::RunId;
-use lash_sansio::sync::MutexExt;
+use lash_protocol_types::RunId;
+use lash_protocol_types::sync::MutexExt;
 use std::collections::HashMap;
 use std::fmt;
 use std::sync::Arc;
@@ -99,7 +99,7 @@ pub struct AssembledTurn {
     #[serde(default)]
     pub llm_calls: Vec<crate::LlmCallRecord>,
     #[serde(default)]
-    #[serde(serialize_with = "lash_sansio::durable_serde::serialize")]
+    #[serde(serialize_with = "lash_protocol_types::durable_serde::serialize")]
     pub tool_calls: Vec<ToolCallRecord>,
     /// Outputs the turn's code cells retained out of history (FIG-1643):
     /// history keeps each one's witness and reference, and the turn's commit
@@ -316,7 +316,7 @@ pub enum TurnEvent {
         name: String,
         /// Provisional activity, not yet committed and never committed after an Immediate stop (ADR 0122).
         args: serde_json::Value,
-        #[serde(serialize_with = "lash_sansio::durable_serde::serialize")]
+        #[serde(serialize_with = "lash_protocol_types::durable_serde::serialize")]
         /// Provisional activity, not yet committed and never committed after an Immediate stop (ADR 0122).
         output: crate::ToolCallOutput,
         /// The observed call window, absent when unmeasured.

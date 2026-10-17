@@ -10,7 +10,7 @@
 use std::collections::HashMap;
 use std::sync::{Arc, Mutex};
 
-use lash_sansio::sync::MutexExt;
+use lash_protocol_types::sync::MutexExt;
 
 use crate::SessionId;
 use crate::llm::types::LlmToolSpec;

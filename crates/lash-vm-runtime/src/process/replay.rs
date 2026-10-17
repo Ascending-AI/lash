@@ -622,7 +622,7 @@ impl KernelProcessEngine {
             }
             (MachineStep::Ended(end), KernelRunOutput::Ended { outcome, .. }) => {
                 let durable = |outcome: &lash_core::ProcessOutcome| {
-                    serde_json::to_value(lash_sansio::Durable(outcome)).ok()
+                    serde_json::to_value(lash_protocol_types::Durable(outcome)).ok()
                 };
                 durable(&outcome_of_end(end.clone())) == durable(outcome)
             }

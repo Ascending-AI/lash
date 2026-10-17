@@ -12,11 +12,11 @@ use lash_core::facade_support::{
     ProviderSchemaCapabilities, SchemaPurpose, SchemaResolutionRequest, resolve_schema,
 };
 use lash_core::llm::types::LlmMessage;
-use lash_sansio::llm::capability::ReasoningRetentionSelection;
+use lash_protocol_types::llm::capability::ReasoningRetentionSelection;
 
 fn user_prompt_id(req: &LlmRequest) -> uuid::Uuid {
     let scope = format!("{}\0{}", req.provider_prompt_cache_key(), req.request_id());
-    let hash = lash_sansio::core_support::blake3_domain_hash(
+    let hash = lash_protocol_types::core_support::blake3_domain_hash(
         LASH_GOOGLE_USER_PROMPT_ID_DOMAIN_VERSION,
         scope,
     );

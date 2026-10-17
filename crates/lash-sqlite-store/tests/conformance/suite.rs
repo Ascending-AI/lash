@@ -9,8 +9,8 @@
 // No live_replay_tests!: live replay is an in-process cache, not SQLite-backed storage.
 // No queued-lane resolver macro: engine pacing belongs to the durable engine, not a persistence store.
 
-use lash_sansio::SessionId;
-use lash_sansio::sync::MutexExt;
+use lash_protocol_types::SessionId;
+use lash_protocol_types::sync::MutexExt;
 use std::collections::HashMap;
 use std::sync::{Arc, Mutex};
 

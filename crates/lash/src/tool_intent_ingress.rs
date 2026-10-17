@@ -1,7 +1,7 @@
 //! Host front-door admission for durable tool intents.
 
-use lash_sansio::SessionId;
-use lash_sansio::sync::MutexExt;
+use lash_protocol_types::SessionId;
+use lash_protocol_types::sync::MutexExt;
 use tracing::Instrument;
 
 /// Typed idempotency key for one host-submitted tool intent.

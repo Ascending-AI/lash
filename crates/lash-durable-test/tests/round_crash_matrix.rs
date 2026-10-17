@@ -66,8 +66,8 @@ use lash_durable::{
 use lash_durable_test::{
     Cut, Fault, Matrix, Scenario, SimClock, SimNodes, SimNodesConfig, Stored, Tripwire, WriteKind,
 };
-use lash_sansio::sync::MutexExt as _;
-use lash_sansio::{
+use lash_protocol_types::sync::MutexExt as _;
+use lash_protocol_types::{
     ExecutionLimit, ExecutionPolicy, LimitCause, SessionId, ToolCallId, ToolId, TurnId,
 };
 use tokio_util::sync::CancellationToken;
@@ -1283,7 +1283,7 @@ async fn settled_payload_reuse() {
             provider_call_id: None,
             tool_name: "fixture_large".to_owned(),
             args: serde_json::json!({"bytes": 3370}),
-            model_return: lash_sansio::ModelToolReturn::from_output(
+            model_return: lash_protocol_types::ModelToolReturn::from_output(
                 "fixture_large".to_owned(),
                 &answer,
             ),

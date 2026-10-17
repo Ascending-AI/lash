@@ -547,14 +547,14 @@ macro_rules! impl_noop_attachment_referrers {
             async fn acquire_attachment_refs(
                 &self,
                 _: &$crate::artifact_referrer::ReferrerClaim,
-                _: &[$crate::sansio::AttachmentId],
+                _: &[$crate::AttachmentId],
             ) -> Result<(), $crate::store::StoreError> {
                 Ok(())
             }
             async fn forget_attachment_ref(
                 &self,
                 _: &$crate::artifact_referrer::ArtifactReferrer,
-                _: &$crate::sansio::AttachmentId,
+                _: &$crate::AttachmentId,
             ) -> Result<(), $crate::store::StoreError> {
                 Ok(())
             }
@@ -566,13 +566,13 @@ macro_rules! impl_noop_attachment_referrers {
             }
             async fn session_referrer_state(
                 &self,
-                _: &$crate::sansio::SessionId,
+                _: &$crate::SessionId,
             ) -> Result<$crate::store::SessionReferrerState, $crate::store::StoreError> {
                 Ok($crate::store::SessionReferrerState::Live)
             }
             async fn attachment_referrers(
                 &self,
-                _: &$crate::sansio::AttachmentId,
+                _: &$crate::AttachmentId,
             ) -> Result<Vec<$crate::artifact_referrer::ArtifactReferrer>, $crate::store::StoreError>
             {
                 Ok(Vec::new())

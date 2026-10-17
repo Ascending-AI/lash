@@ -6,7 +6,7 @@
 //! and joins them. A tool appended to the catalogue appends its doc and leaves
 //! every byte before it as it was (FIG-1435).
 
-use lash_sansio::{ToolContract, ToolManifest};
+use lash_protocol_types::{ToolContract, ToolManifest};
 use lash_tool_shape::{SchemaShape, ShapeRow};
 
 use crate::{PresentedToolSection, ToolDisclosure, ToolPresentationEntry};

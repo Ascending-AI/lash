@@ -1,8 +1,7 @@
 use crate::SessionId;
 #[cfg(test)]
 use crate::facade_support::SessionGraphFacadeOps;
-use lash_sansio::core_support::*;
-use lash_sansio::sync::MutexExt;
+use lash_protocol_types::sync::MutexExt;
 use std::collections::HashSet;
 use std::sync::{Arc, Mutex as StdMutex};
 
@@ -415,7 +414,7 @@ impl TurnCommitDraft {
         &self.state
     }
 
-    pub(super) fn active_events(&self) -> lash_sansio::AppendVec<SessionHistoryRecord> {
+    pub(super) fn active_events(&self) -> lash_protocol_types::AppendVec<SessionHistoryRecord> {
         self.graph.read_model().active_events
     }
 

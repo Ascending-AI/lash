@@ -49,7 +49,7 @@ use super::*;
 ///         path = "crates/lash-sansio/src/sansio/turn_protocol.rs",
 ///         cover(TurnCheckpoint, CheckpointState, CheckpointWork, Effect),
 ///     ),
-///     roots(path = "crates/lash-sansio/src/session_model/message.rs", FlatPart, FlatPartRef),
+///     roots(path = "crates/lash-protocol-types/src/session_model/message.rs", FlatPart, FlatPartRef),
 /// )
 /// version_surface = "drain"
 /// format_manifest = "TurnCheckpoint"
@@ -191,7 +191,7 @@ impl<M: TurnProtocol> CheckpointState<M> {
         self,
         content: &TurnCheckpointContent,
         window: Option<&TurnWindow<M::Event>>,
-        policy: &crate::session_model::message::HistoryPresentation,
+        policy: &lash_protocol_types::session_model::message::HistoryPresentation,
     ) -> Result<(MachineState<M>, Option<StoredRequest>), TurnCheckpointRestoreError> {
         let mut stored = None;
         let state = match self {
@@ -441,7 +441,8 @@ impl<M: TurnProtocol> SavedTurn<M> {
     /// The committed window's earlier history is not part of this sequence.
     pub fn recorded_events(
         &self,
-    ) -> Result<Vec<crate::SessionHistoryRecord<M::Event>>, TurnCheckpointRestoreError> {
+    ) -> Result<Vec<lash_protocol_types::SessionHistoryRecord<M::Event>>, TurnCheckpointRestoreError>
+    {
         self.content
             .sequence(&self.checkpoint.events)
             .map(|(events, _)| events)
@@ -586,7 +587,7 @@ pub struct TurnMachine<M: TurnProtocol = UnitTurnProtocol> {
     pub(super) window: Option<TurnWindow<M::Event>>,
     pub(super) messages: MessageSequence,
     pub(super) prompt_messages: MessageSequence,
-    pub(super) events: crate::AppendVec<SessionHistoryRecord<M::Event>>,
+    pub(super) events: lash_protocol_types::AppendVec<SessionHistoryRecord<M::Event>>,
     pub(super) progress_event_cursor: usize,
     /// The boundaries behind the cursor that delivered protocol records.
     pub(super) progress_boundaries: Vec<ProgressBoundary>,
@@ -602,7 +603,7 @@ pub struct TurnMachine<M: TurnProtocol = UnitTurnProtocol> {
     /// before the machine is told the provider call was cancelled. Lets the
     /// machine name the request that stopped it instead of minting internal
     /// evidence.
-    pub(crate) observed_cancellation: Option<crate::TurnCancellationEvidence>,
+    pub(crate) observed_cancellation: Option<lash_protocol_types::TurnCancellationEvidence>,
     /// The work this machine starts at once it has synced, in place of the
     /// driver's first step ([`TurnMachine::resume_with`]). Runtime-only, as
     /// the observed cancellation is: the host that builds the machine hands
@@ -613,7 +614,7 @@ pub struct TurnMachine<M: TurnProtocol = UnitTurnProtocol> {
     /// machine then finishes instead of starting further work.
     pub(super) run_abort: Option<RunAbort>,
     /// The turn's decided completion candidates, in decision order.
-    pub(super) decided_completions: Vec<crate::DecidedCompletion>,
+    pub(super) decided_completions: Vec<lash_protocol_types::DecidedCompletion>,
     /// What the turn's last committed checkpoint stored, which the next
     /// builds on (FIG-5955). Runtime-only: a restore starts it from the
     /// content it reads.
@@ -624,19 +625,19 @@ pub struct TurnMachine<M: TurnProtocol = UnitTurnProtocol> {
 /// of the plugin check that stopped the Run.
 #[derive(Clone, Debug)]
 pub(super) struct RunAbort {
-    pub(super) code: crate::FailureCode,
+    pub(super) code: lash_protocol_types::FailureCode,
     pub(super) message: String,
 }
 
 impl RunAbort {
     /// The first Run abort among `outputs`, in delivery order.
     pub(super) fn first_in<'a>(
-        outputs: impl IntoIterator<Item = &'a crate::ToolCallOutput>,
+        outputs: impl IntoIterator<Item = &'a lash_protocol_types::ToolCallOutput>,
     ) -> Option<Self> {
         outputs
             .into_iter()
             .find_map(|output| match &output.control {
-                Some(crate::ToolControl::AbortRun { code, message }) => Some(Self {
+                Some(lash_protocol_types::ToolControl::AbortRun { code, message }) => Some(Self {
                     code: code.clone(),
                     message: message.clone(),
                 }),

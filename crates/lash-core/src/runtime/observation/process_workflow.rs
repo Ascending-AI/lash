@@ -3,7 +3,7 @@
 //! Session cells still use the trace overlay: they have no process event log.
 use std::collections::{BTreeMap, BTreeSet};
 
-use lash_sansio::EffectIdentity;
+use lash_protocol_types::EffectIdentity;
 use lash_trace::{
     TraceLanguageExecutionPayload, TraceNodeFact, TraceRuntimeSubject, WorkflowDocumentRef,
 };
@@ -417,7 +417,7 @@ impl ProcessWorkflowOverlayAccumulator {
                 // the parent is still at the step that admitted the effect.
                 if let TraceRuntimeSubject::Effect { address, .. } = &execution.identity.subject
                     && matches!(&address.execution_scope,
-                        lash_sansio::ExecutionScope::Process { process_id } if process_id == self.process_id)
+                        lash_protocol_types::ExecutionScope::Process { process_id } if process_id == self.process_id)
                 {
                     return Ok(());
                 }
@@ -514,7 +514,7 @@ mod tests {
     fn committed_site_sequences_retain_first_entry_and_latest_settlement() {
         let mut overlay =
             ProcessWorkflowOverlayAccumulator::new(ProcessId::fixture("site-sequences"));
-        let mut at = lash_sansio::effect_identity_fixture("sleep", 0);
+        let mut at = lash_protocol_types::effect_identity_fixture("sleep", 0);
         for (sequence, occurrence, waiting, first_entered, last_settled) in [
             (7, 0, true, 7, None),
             (11, 0, false, 7, Some(11)),
@@ -554,7 +554,7 @@ mod tests {
             entry: WorkflowDocumentEntry::Main,
         };
         let mut overlay = ProcessWorkflowOverlayAccumulator::new(process.clone());
-        let at = lash_sansio::effect_identity_fixture("effect", 0);
+        let at = lash_protocol_types::effect_identity_fixture("effect", 0);
         let mut observation = LanguageExecutionObservation {
             language: None,
             observed_at_ms: 100,
@@ -753,7 +753,7 @@ mod tests {
         };
         let mut committed = ProcessWorkflowOverlayAccumulator::new(process.clone());
         let mut live = ProcessWorkflowOverlayAccumulator::new(process.clone());
-        let at = lash_sansio::effect_identity_fixture("sleep", 1);
+        let at = lash_protocol_types::effect_identity_fixture("sleep", 1);
         live.observe(
             &document,
             &ProcessObservationEventPayload::LanguageExecution(LanguageExecutionObservation {
@@ -818,19 +818,19 @@ mod tests {
         let sleep = crate::WaitState {
             kind: WaitKind::Sleep { until_ms: 2 },
             since_ms: 1,
-            site: Some(lash_sansio::effect_identity_fixture("settled", 0)),
+            site: Some(lash_protocol_types::effect_identity_fixture("settled", 0)),
         };
         let running = crate::WaitState {
             kind: WaitKind::Process {
                 process_id: ProcessId::fixture("child"),
             },
             since_ms: 3,
-            site: Some(lash_sansio::effect_identity_fixture("running", 0)),
+            site: Some(lash_protocol_types::effect_identity_fixture("running", 0)),
         };
         let waiting = crate::WaitState {
             kind: WaitKind::Sleep { until_ms: 100 },
             since_ms: 5,
-            site: Some(lash_sansio::effect_identity_fixture("waiting", 0)),
+            site: Some(lash_protocol_types::effect_identity_fixture("waiting", 0)),
         };
         let facts = [
             ProcessLifecycleFact::Waiting {
@@ -870,7 +870,8 @@ mod tests {
         assert!(snapshot.document.is_none());
         assert_eq!(snapshot.sites.len(), 3);
         for site in snapshot.sites {
-            let expected = if site.at == lash_sansio::effect_identity_fixture("settled", 0) {
+            let expected = if site.at == lash_protocol_types::effect_identity_fixture("settled", 0)
+            {
                 ProcessWorkflowSiteState::Completed
             } else {
                 ProcessWorkflowSiteState::TerminalUnobserved
@@ -906,7 +907,7 @@ mod tests {
                     generation: None,
                 },
                 payload: TraceLanguageExecutionPayload::Node {
-                    at: lash_sansio::effect_identity_fixture("parent", 0),
+                    at: lash_protocol_types::effect_identity_fixture("parent", 0),
                     fact: TraceNodeFact::Started { call_id: None },
                 },
             },
@@ -921,8 +922,8 @@ mod tests {
         let mut nested = observation;
         nested.execution.event_key = "nested".into();
         nested.execution.identity.subject = TraceRuntimeSubject::Effect {
-            address: lash_sansio::EffectAddress::new(
-                lash_sansio::ExecutionScope::Process {
+            address: lash_protocol_types::EffectAddress::new(
+                lash_protocol_types::ExecutionScope::Process {
                     process_id: process,
                 },
                 "nested-code",
@@ -933,7 +934,7 @@ mod tests {
         nested.execution.identity.document.document =
             lash_kernel_doc::DocumentId::from_bytes([8; 32]);
         nested.execution.payload = TraceLanguageExecutionPayload::Node {
-            at: lash_sansio::effect_identity_fixture("child", 9),
+            at: lash_protocol_types::effect_identity_fixture("child", 9),
             fact: TraceNodeFact::Started { call_id: None },
         };
         overlay

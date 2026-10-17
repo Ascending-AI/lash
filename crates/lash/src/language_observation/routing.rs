@@ -1,4 +1,4 @@
-use lash_sansio::{ExecutionScope, ProcessId, SessionId};
+use lash_protocol_types::{ExecutionScope, ProcessId, SessionId};
 use lash_trace::{TraceLanguageExecution, TraceRuntimeSubject};
 
 /// The canonical owner of a language execution, independent of its dialect.

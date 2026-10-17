@@ -8,7 +8,7 @@ use lash::provider::LlmTransportError;
 use lash_core::FailureCode;
 use lash_core::facade_support::TurnOutcome;
 use lash_core::plugin::AssistantStreamTransform;
-use lash_sansio::llm::types::{StreamBlockEvent, StreamBlockKind};
+use lash_protocol_types::{llm::types::StreamBlockEvent, llm::types::StreamBlockKind};
 
 fn foreign_route() -> lash_core::ProviderRouteIdentity {
     lash_core::ProviderRouteIdentity::for_endpoint(

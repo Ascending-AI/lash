@@ -5,9 +5,9 @@ use std::num::NonZeroUsize;
 use std::sync::Mutex;
 use std::time::Duration;
 
-use lash_sansio::llm::types::AttemptOutcome;
-use lash_sansio::sync::MutexExt;
-use lash_sansio::{ProcessId, SessionId, ToolCallId, TurnId};
+use lash_protocol_types::llm::types::AttemptOutcome;
+use lash_protocol_types::sync::MutexExt;
+use lash_protocol_types::{ProcessId, SessionId, ToolCallId, TurnId};
 
 use crate::{
     TraceDomainStatus, TraceEvent, TraceEventKind, TraceLanguageExecutionPayload,

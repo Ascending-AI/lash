@@ -1,0 +1,44 @@
+[package]
+name = "lash-internal-protocol-types"
+version.workspace = true
+edition.workspace = true
+license.workspace = true
+authors.workspace = true
+repository.workspace = true
+homepage.workspace = true
+readme.workspace = true
+rust-version.workspace = true
+description = "Shared protocol values and serialization for the lash agent runtime."
+keywords = ["lash", "agent", "sans-io", "protocol", "runtime"]
+categories = ["asynchronous", "api-bindings"]
+
+[lib]
+name = "lash_protocol_types"
+doctest = false
+
+[lints]
+workspace = true
+
+[features]
+default = []
+# Validated literal identities for fixtures only.
+testing = []
+# Compile JSON Schema validators for tool inputs and process payloads.
+schema-validation = []
+# Phase A's synthetic N+1 build (ADR 0115 §6): the blocks beside the
+# constants it moves. Only lash-upgrade-harness enables it, through the
+# crates that forward it; no production build does.
+synthetic-next = []
+
+[dependencies]
+blake3 = { workspace = true }
+lash-kernel-check = { workspace = true }
+lash-kernel-doc = { workspace = true }
+jsonschema = { workspace = true, default-features = false }
+serde = { workspace = true, features = ["derive", "rc"] }
+serde_json = { workspace = true }
+thiserror = { workspace = true }
+schemars = { workspace = true }
+
+[dev-dependencies]
+proptest = "1"

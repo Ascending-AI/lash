@@ -8,10 +8,10 @@
 //! again for an admitted call, and everything here is repeat-safe until the
 //! call is admitted.
 
-use lash_sansio::core_support::RunIdCoreSupport;
+use lash_protocol_types::core_support::RunIdCoreSupport;
 use std::sync::Arc;
 
-use lash_sansio::llm::types::{LlmEventSender, RecordedRequestTemplate};
+use lash_protocol_types::{llm::types::LlmEventSender, llm::types::RecordedRequestTemplate};
 
 use super::*;
 use crate::runtime::durable::session::{ComposedCall, PreparedCall};

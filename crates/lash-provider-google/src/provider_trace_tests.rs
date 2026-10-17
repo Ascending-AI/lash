@@ -1,4 +1,4 @@
-use lash_sansio::sync::MutexExt;
+use lash_protocol_types::sync::MutexExt;
 use std::sync::{Arc, Mutex};
 
 use crate::GoogleOAuthProvider;

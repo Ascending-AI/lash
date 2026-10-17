@@ -74,7 +74,9 @@ async fn typed_validation_error_is_not_overridden_by_user_text_echo() {
     let failure = DefaultProviderFailureClassifier.classify(
         LlmTransportError::new("request rejected")
             .with_kind(ProviderFailureKind::Validation)
-            .with_code(lash_sansio::FailureCode::provider("invalid_request_error"))
+            .with_code(lash_protocol_types::FailureCode::provider(
+                "invalid_request_error",
+            ))
             .with_raw(
                 r#"{"error":{"message":"The user wrote: context length is a useful phrase"}}"#,
             )

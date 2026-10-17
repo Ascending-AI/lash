@@ -2,7 +2,7 @@ use std::future::Future;
 use std::sync::Arc;
 
 use futures_util::SinkExt;
-use lash_sansio::sync::MutexExt;
+use lash_protocol_types::sync::MutexExt;
 use rmcp::model::ErrorData;
 use rmcp::service::{RoleClient, RxJsonRpcMessage, TxJsonRpcMessage};
 use rmcp::transport::Transport;

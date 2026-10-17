@@ -24,7 +24,7 @@ pub(crate) mod tool_changes;
 pub(crate) use admission::admitted_binding;
 use admission::{McpToolBinding, RemoteCompletion};
 
-use lash_sansio::sync::{LockResultExt, MutexExt, RwLockExt};
+use lash_protocol_types::{sync::LockResultExt, sync::MutexExt, sync::RwLockExt};
 use std::collections::BTreeMap;
 use std::sync::Arc;
 use std::sync::Mutex;

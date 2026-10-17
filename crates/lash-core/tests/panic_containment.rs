@@ -36,8 +36,8 @@ impl Provider for PanicProvider {
 
     fn send<'life0, 'life1, 'async_trait>(
         &'life0 mut self,
-        _body: &'life1 lash_sansio::llm::types::LiveRequestBody,
-        _context: lash_sansio::llm::types::ResponseContext,
+        _body: &'life1 lash_protocol_types::llm::types::LiveRequestBody,
+        _context: lash_protocol_types::llm::types::ResponseContext,
     ) -> std::pin::Pin<
         Box<
             dyn std::future::Future<Output = Result<LlmResponse, LlmTransportError>>
@@ -83,8 +83,8 @@ impl Provider for ClassifierKeywordPanicProvider {
 
     async fn send(
         &mut self,
-        _body: &lash_sansio::llm::types::LiveRequestBody,
-        _context: lash_sansio::llm::types::ResponseContext,
+        _body: &lash_protocol_types::llm::types::LiveRequestBody,
+        _context: lash_protocol_types::llm::types::ResponseContext,
     ) -> Result<LlmResponse, LlmTransportError> {
         panic!("safety context length does not exist")
     }
@@ -97,16 +97,16 @@ impl Provider for ClassifierKeywordPanicProvider {
 fn request() -> LlmRequest {
     LlmRequest {
         instructions: None,
-        model: lash_sansio::llm_profile::LlmProfileConfig::new(
-            lash_sansio::llm_profile::RecordedLlmProfile::mint(
-                lash_sansio::llm_profile::LlmProfileKey::new("request-fixture"),
-                lash_sansio::llm_profile::LlmProfileMetadata::builder(
+        model: lash_protocol_types::llm_profile::LlmProfileConfig::new(
+            lash_protocol_types::llm_profile::RecordedLlmProfile::mint(
+                lash_protocol_types::llm_profile::LlmProfileKey::new("request-fixture"),
+                lash_protocol_types::llm_profile::LlmProfileMetadata::builder(
                     "panic-test-model".to_string(),
                 )
                 .context_window_tokens(128_000)
                 .capability(Default::default())
                 .extra_body(Default::default())
-                .cache_retention(lash_sansio::llm::capability::CacheRetention::Short)
+                .cache_retention(lash_protocol_types::llm::capability::CacheRetention::Short)
                 .build()
                 .expect("valid profile"),
             ),
@@ -152,7 +152,7 @@ async fn provider_panic_is_typed_and_non_retryable() {
             .retry_decision
             .as_ref()
             .and_then(|decision| decision.decline_cause()),
-        Some(lash_sansio::llm::types::RetryDeclineCause::NotRetryable)
+        Some(lash_protocol_types::llm::types::RetryDeclineCause::NotRetryable)
     );
 }
 
@@ -219,8 +219,8 @@ impl Provider for AuxiliaryPanicProvider {
     }
     fn send<'life0, 'life1, 'async_trait>(
         &'life0 mut self,
-        _: &'life1 lash_sansio::llm::types::LiveRequestBody,
-        _: lash_sansio::llm::types::ResponseContext,
+        _: &'life1 lash_protocol_types::llm::types::LiveRequestBody,
+        _: lash_protocol_types::llm::types::ResponseContext,
     ) -> std::pin::Pin<
         Box<
             dyn std::future::Future<Output = Result<LlmResponse, LlmTransportError>>

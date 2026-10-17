@@ -13,7 +13,7 @@ use lash_durable::runner::{Activation, Drain, Hints, Runner, RunnerConfig, Stopp
 use lash_durable::{
     CommitLabel, DurableError, DurableStore, FormatSet, LeaseConfig, MailCommit, MailTx, NodeId,
 };
-use lash_sansio::sync::MutexExt as _;
+use lash_protocol_types::sync::MutexExt as _;
 use std::collections::BTreeMap;
 use std::sync::{Arc, Mutex};
 use tokio::task::JoinHandle;

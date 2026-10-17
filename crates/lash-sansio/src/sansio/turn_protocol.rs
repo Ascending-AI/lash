@@ -1,6 +1,6 @@
 use super::*;
-use crate::SessionId;
-use crate::TurnId;
+use lash_protocol_types::SessionId;
+use lash_protocol_types::TurnId;
 
 impl TurnProtocol for UnitTurnProtocol {
     type IntentOutcome = ();
@@ -21,7 +21,7 @@ pub struct EffectId(pub u64);
 /// echoes it back so the provider pairs the result with its call.
 #[derive(Clone, Debug, Serialize, serde::Deserialize)]
 pub struct PendingToolCall {
-    pub call_id: crate::ToolCallId,
+    pub call_id: lash_protocol_types::ToolCallId,
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub provider_call_id: Option<String>,
     pub tool_name: String,
@@ -33,13 +33,13 @@ pub struct PendingToolCall {
 #[derive(Clone, Debug, Serialize, serde::Deserialize)]
 #[serde(bound(serialize = "I: Serialize", deserialize = "I: serde::Deserialize<'de>"))]
 pub struct CompletedToolCall<I = ()> {
-    pub call_id: crate::ToolCallId,
+    pub call_id: lash_protocol_types::ToolCallId,
     /// See [`PendingToolCall::provider_call_id`].
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub provider_call_id: Option<String>,
     pub tool_name: String,
     pub args: Value,
-    #[serde(serialize_with = "crate::durable_serde::serialize")]
+    #[serde(serialize_with = "lash_protocol_types::durable_serde::serialize")]
     pub output: ToolCallOutput,
     pub model_return: ModelToolReturn,
     #[serde(default, skip_serializing_if = "Vec::is_empty")]
@@ -73,7 +73,7 @@ pub struct ExpandedWrapper {
     /// Position of the wrapper call among the response's dispatched calls.
     pub source_position: u32,
     /// The wrapper call's identity; each member's is its `child`.
-    pub call_id: crate::ToolCallId,
+    pub call_id: lash_protocol_types::ToolCallId,
     /// The provider's call id and replay metadata, kept for the transcript.
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub provider_call_id: Option<String>,
@@ -122,19 +122,19 @@ pub enum LogEvent {
         provider_usage: Option<Value>,
         request_body: Option<String>,
         response_text: String,
-        response_parts: Vec<crate::llm::types::LlmOutputPart>,
+        response_parts: Vec<lash_protocol_types::llm::types::LlmOutputPart>,
     },
     LlmError {
         session_id: SessionId,
         protocol_iteration: usize,
         request_body: Option<String>,
         retryable: bool,
-        code: Option<crate::session_model::FailureCode>,
+        code: Option<lash_protocol_types::session_model::FailureCode>,
         /// The transport's failure classification. `ProviderFailureKind::Unknown`
         /// means the failure carried no provider kind; the trace projection
         /// renders it as an absent kind.
         #[serde(default)]
-        kind: crate::llm::types::ProviderFailureKind,
+        kind: lash_protocol_types::llm::types::ProviderFailureKind,
         terminal_reason: LlmTerminalReason,
     },
 }
@@ -276,37 +276,6 @@ impl<M: TurnProtocol> Clone for Effect<M> {
     }
 }
 
-/// Error details from a failed LLM call.
-#[derive(Clone, Debug, Serialize, serde::Deserialize)]
-pub struct LlmCallError {
-    #[serde(serialize_with = "serialize_provider_failure_message")]
-    pub message: String,
-    pub retryable: bool,
-    /// Required transport classification. Non-provider failures explicitly
-    /// carry `ProviderFailureKind::Unknown`; missing or future kinds are refused.
-    pub kind: crate::llm::types::ProviderFailureKind,
-    #[serde(default, skip_serializing, skip_deserializing)]
-    pub raw: Option<String>,
-    /// Namespaced failure code: `provider` spellings are provider-owned,
-    /// `lash` spellings are Lash-authored (pre-cutover `adapter`/`refusal`
-    /// namespaces decode as Lash vocabulary), and every other namespace is a
-    /// foreign-owned pair carried verbatim.
-    pub code: Option<crate::session_model::FailureCode>,
-    pub terminal_reason: LlmTerminalReason,
-    pub request_body: Option<String>,
-    /// Output and usage observed before the failed stream ended. Partial tool
-    /// calls in this response are retained for diagnosis but never executed.
-    #[serde(default, skip_serializing_if = "Option::is_none")]
-    pub partial_response: Option<Box<LlmResponse>>,
-}
-
-fn serialize_provider_failure_message<S>(_: &String, serializer: S) -> Result<S::Ok, S::Error>
-where
-    S: serde::Serializer,
-{
-    serializer.serialize_str("provider call failed")
-}
-
 /// A response to a previously emitted effect.
 pub enum Response<I = ()> {
     /// Live execution environment sync completed.
@@ -331,7 +300,7 @@ pub enum Response<I = ()> {
     /// Mode code execution result.
     ExecResult {
         id: EffectId,
-        result: Result<crate::ExecResponse, crate::ExecCodeFailure>,
+        result: Result<lash_protocol_types::ExecResponse, lash_protocol_types::ExecCodeFailure>,
     },
     /// Checkpoint result with optional injected messages.
     Checkpoint {
@@ -354,7 +323,7 @@ pub struct ExecutionEnvironmentSync {
     /// controls each declares. A protocol orders a step's control call by
     /// them, and a turn that must end through a control checks one can.
     #[serde(default, skip_serializing_if = "std::collections::BTreeMap::is_empty")]
-    pub turn_controls: std::collections::BTreeMap<String, crate::TurnControls>,
+    pub turn_controls: std::collections::BTreeMap<String, lash_protocol_types::TurnControls>,
 }
 
 /// Lower a call's composed prompt onto `request`, which a projector rendered
@@ -373,20 +342,22 @@ pub fn place_prompt(
         if has_current_context_prefix && let Some(prefix) = request.messages.last_mut() {
             let blocks = Arc::make_mut(&mut prefix.blocks);
             match blocks.last_mut() {
-                Some(crate::llm::types::LlmContentBlock::Text { text, .. }) => {
+                Some(lash_protocol_types::llm::types::LlmContentBlock::Text { text, .. }) => {
                     *text = Arc::from(format!("{text}\n\n\n{context}"));
                 }
-                _ => blocks.push(crate::llm::types::LlmContentBlock::Text {
+                _ => blocks.push(lash_protocol_types::llm::types::LlmContentBlock::Text {
                     text: Arc::from(format!("\n\n\n{context}")),
                     response_meta: None,
                     cache_breakpoint: false,
                 }),
             }
         } else {
-            request.messages.push(crate::llm::types::LlmMessage::text(
-                crate::llm::types::LlmRole::User,
-                context,
-            ));
+            request
+                .messages
+                .push(lash_protocol_types::llm::types::LlmMessage::text(
+                    lash_protocol_types::llm::types::LlmRole::User,
+                    context,
+                ));
         }
     }
 }
@@ -417,7 +388,7 @@ pub enum ExecutionEnvironmentSyncFailureKind {
 #[derive(Clone, Debug, PartialEq, Eq, Serialize, serde::Deserialize)]
 #[serde(deny_unknown_fields)]
 pub struct ExecutionEnvironmentSyncFailure {
-    pub code: crate::session_model::FailureCode,
+    pub code: lash_protocol_types::session_model::FailureCode,
     pub kind: ExecutionEnvironmentSyncFailureKind,
     pub message: String,
 }
@@ -445,8 +416,8 @@ pub enum CheckpointResumeAction {
     /// `superseded` appended before that input, so the model reads that
     /// its control did not end the turn.
     Complete {
-        candidate: Box<crate::CompletionCandidate>,
-        superseded: Vec<crate::Message>,
+        candidate: Box<lash_protocol_types::CompletionCandidate>,
+        superseded: Vec<lash_protocol_types::Message>,
     },
 }
 
@@ -470,7 +441,7 @@ impl PartialEq for CheckpointResumeAction {
                     && left_messages
                         .iter()
                         .zip(right_messages)
-                        .all(|(left, right)| crate::same_message(left, right))
+                        .all(|(left, right)| lash_protocol_types::same_message(left, right))
             }
             _ => false,
         }
@@ -774,7 +745,7 @@ pub(super) enum AnsweredWork<M: TurnProtocol = UnitTurnProtocol> {
     },
     Exec {
         driver_state: M::DriverState,
-        result: Result<crate::ExecResponse, crate::ExecCodeFailure>,
+        result: Result<lash_protocol_types::ExecResponse, lash_protocol_types::ExecCodeFailure>,
     },
     Checkpoint {
         checkpoint: CheckpointKind,
@@ -793,7 +764,7 @@ pub enum DriverAction<M: TurnProtocol = UnitTurnProtocol> {
     AdvanceProtocolIteration,
     /// Finish for a cancellation whose host evidence was already observed.
     FinishCancelled {
-        evidence: crate::TurnCancellationEvidence,
+        evidence: lash_protocol_types::TurnCancellationEvidence,
     },
     Finish(TurnOutcome),
     /// Report completed tool calls that were refused before host dispatch.
@@ -820,7 +791,7 @@ pub struct DriverContextView<'a, M: TurnProtocol = UnitTurnProtocol> {
     pub(super) events: &'a [SessionHistoryRecord<M::Event>],
     pub(super) protocol_iteration: usize,
     pub(super) protocol_run_offset: usize,
-    pub(super) observed_cancellation: Option<&'a crate::TurnCancellationEvidence>,
+    pub(super) observed_cancellation: Option<&'a lash_protocol_types::TurnCancellationEvidence>,
     /// The environment the iteration synced.
     pub(super) environment: &'a ExecutionEnvironmentSync,
 }
@@ -832,7 +803,7 @@ impl<'a, M: TurnProtocol> DriverContextView<'a, M> {
     pub fn project_llm_request(
         &self,
         use_tools: bool,
-    ) -> Result<Arc<LlmRequest>, crate::StoredDataCorruption> {
+    ) -> Result<Arc<LlmRequest>, lash_protocol_types::StoredDataCorruption> {
         let projected = self.config.projector.project(ProjectorContext {
             config: self.config,
             messages: self.prompt_messages,
@@ -855,7 +826,7 @@ impl<'a, M: TurnProtocol> DriverContextView<'a, M> {
     }
 
     /// Whether a tool of the synced surface can end the turn with a value:
-    /// one declares [`TurnControlKind::Finish`](crate::TurnControlKind::Finish).
+    /// one declares [`TurnControlKind::Finish`](lash_protocol_types::TurnControlKind::Finish).
     pub fn can_finish(&self) -> bool {
         self.finishing_tools().next().is_some()
     }
@@ -866,7 +837,7 @@ impl<'a, M: TurnProtocol> DriverContextView<'a, M> {
         self.environment
             .turn_controls
             .iter()
-            .filter(|(_, controls)| controls.contains(crate::TurnControlKind::Finish))
+            .filter(|(_, controls)| controls.contains(lash_protocol_types::TurnControlKind::Finish))
             .map(|(name, _)| name.as_str())
     }
 
@@ -888,15 +859,15 @@ impl<'a, M: TurnProtocol> DriverContextView<'a, M> {
         &self.config.turn_id
     }
 
-    pub fn turn_budget(&self) -> crate::TurnBudget {
+    pub fn turn_budget(&self) -> lash_protocol_types::TurnBudget {
         self.config.turn_budget
     }
 
-    pub fn no_progress_budget(&self) -> crate::NoProgressBudget {
+    pub fn no_progress_budget(&self) -> lash_protocol_types::NoProgressBudget {
         self.config.no_progress_budget
     }
 
-    pub fn generation(&self) -> &crate::llm::types::GenerationOptions {
+    pub fn generation(&self) -> &lash_protocol_types::llm::types::GenerationOptions {
         &self.config.generation
     }
 
@@ -906,7 +877,7 @@ impl<'a, M: TurnProtocol> DriverContextView<'a, M> {
 
     /// Host cancellation evidence observed before the current response was
     /// handed to the protocol driver.
-    pub fn observed_cancellation(&self) -> Option<&crate::TurnCancellationEvidence> {
+    pub fn observed_cancellation(&self) -> Option<&lash_protocol_types::TurnCancellationEvidence> {
         self.observed_cancellation
     }
 
@@ -939,8 +910,10 @@ pub struct ProjectorContext<'a, M: TurnProtocol = UnitTurnProtocol> {
 pub trait ContextProjector<M: TurnProtocol = UnitTurnProtocol>: Send + Sync {
     /// Pure history policy used to reconstruct a checkpoint's shared window prefix.
     /// Projectors that send verbatim record text need no authored wording.
-    fn history_presentation(&self) -> crate::session_model::message::HistoryPresentation {
-        crate::session_model::message::HistoryPresentation::verbatim()
+    fn history_presentation(
+        &self,
+    ) -> lash_protocol_types::session_model::message::HistoryPresentation {
+        lash_protocol_types::session_model::message::HistoryPresentation::verbatim()
     }
 
     /// Whether projection ends in a dedicated, uncached User prefix for the
@@ -953,23 +926,25 @@ pub trait ContextProjector<M: TurnProtocol = UnitTurnProtocol>: Send + Sync {
     fn project(
         &self,
         ctx: ProjectorContext<'_, M>,
-    ) -> Result<Arc<LlmRequest>, crate::StoredDataCorruption>;
+    ) -> Result<Arc<LlmRequest>, lash_protocol_types::StoredDataCorruption>;
 }
 
 #[derive(Clone, Debug, Default)]
 pub struct ChatContextProjector {
-    pub history: crate::session_model::message::HistoryPresentation,
+    pub history: lash_protocol_types::session_model::message::HistoryPresentation,
 }
 
 impl<M: TurnProtocol> ContextProjector<M> for ChatContextProjector {
-    fn history_presentation(&self) -> crate::session_model::message::HistoryPresentation {
+    fn history_presentation(
+        &self,
+    ) -> lash_protocol_types::session_model::message::HistoryPresentation {
         self.history.clone()
     }
 
     fn project(
         &self,
         ctx: ProjectorContext<'_, M>,
-    ) -> Result<Arc<LlmRequest>, crate::StoredDataCorruption> {
+    ) -> Result<Arc<LlmRequest>, lash_protocol_types::StoredDataCorruption> {
         let messages = ctx.messages.render_prompt(&self.history).messages;
 
         Ok(Arc::new(LlmRequest {
@@ -989,7 +964,7 @@ impl<M: TurnProtocol> ContextProjector<M> for ChatContextProjector {
             },
             attachment_acceptance: Arc::clone(&ctx.config.attachment_acceptance),
             generation: ctx.config.generation.clone(),
-            scope: crate::llm::types::LlmRequestScope::new(
+            scope: lash_protocol_types::llm::types::LlmRequestScope::new(
                 ctx.config.session_id.clone(),
                 ctx.config.agent_frame_id.clone(),
                 format!(
@@ -1021,7 +996,7 @@ pub trait ProtocolDriverHandle<M: TurnProtocol = UnitTurnProtocol>: Send + Sync 
     fn cell_trailing_discarded(
         &self,
         _events: &[SessionHistoryRecord<M::Event>],
-    ) -> Result<usize, crate::StoredDataCorruption> {
+    ) -> Result<usize, lash_protocol_types::StoredDataCorruption> {
         Ok(0)
     }
 
@@ -1096,7 +1071,7 @@ pub trait ProtocolDriverHandle<M: TurnProtocol = UnitTurnProtocol>: Send + Sync 
         &self,
         ctx: DriverContextView<'_, M>,
         driver_state: M::DriverState,
-        result: Result<crate::ExecResponse, crate::ExecCodeFailure>,
+        result: Result<lash_protocol_types::ExecResponse, lash_protocol_types::ExecCodeFailure>,
     ) -> Vec<DriverAction<M>>;
 }
 
@@ -1106,12 +1081,12 @@ pub trait ProtocolDriverHandle<M: TurnProtocol = UnitTurnProtocol>: Send + Sync 
 /// the model response's effect ordinal.
 #[derive(Clone, Debug, PartialEq, Eq)]
 pub struct ModelToolCalls {
-    admission: crate::ToolCallAdmission,
+    admission: lash_protocol_types::ToolCallAdmission,
     continuation: u64,
 }
 
 impl ModelToolCalls {
-    pub fn new(admission: crate::ToolCallAdmission, continuation: u64) -> Self {
+    pub fn new(admission: lash_protocol_types::ToolCallAdmission, continuation: u64) -> Self {
         Self {
             admission,
             continuation,
@@ -1123,9 +1098,9 @@ impl ModelToolCalls {
     #[doc(hidden)]
     pub fn fixture() -> Self {
         Self {
-            admission: crate::ToolCallAdmission::process(
+            admission: lash_protocol_types::ToolCallAdmission::process(
                 "",
-                crate::ProcessId::fixture("model-tool-calls"),
+                lash_protocol_types::ProcessId::fixture("model-tool-calls"),
             ),
             continuation: 0,
         }
@@ -1155,25 +1130,33 @@ pub struct ResponseToolCalls {
 impl ResponseToolCalls {
     /// The id of the call at `content_index`, its full original index among
     /// the response's parts.
-    pub fn id(&self, content_index: usize) -> crate::ToolCallId {
+    pub fn id(&self, content_index: usize) -> lash_protocol_types::ToolCallId {
         self.calls.admission.call_id(&[
-            crate::ToolCallPosition::Continuation(self.calls.continuation),
-            crate::ToolCallPosition::Iteration(self.protocol_iteration),
-            crate::ToolCallPosition::EffectOrdinal(self.effect_ordinal),
-            crate::ToolCallPosition::ContentIndex(content_index as u64),
+            lash_protocol_types::ToolCallPosition::Continuation(self.calls.continuation),
+            lash_protocol_types::ToolCallPosition::Iteration(self.protocol_iteration),
+            lash_protocol_types::ToolCallPosition::EffectOrdinal(self.effect_ordinal),
+            lash_protocol_types::ToolCallPosition::ContentIndex(content_index as u64),
         ])
     }
 
     /// The ids of `response`'s tool-call parts, in order, each named by its
     /// full original content index. Visible-part projection
-    /// ([`crate::normalized_response_parts`]) drops only text, so the `n`th
+    /// ([`lash_protocol_types::normalized_response_parts`]) drops only text, so the `n`th
     /// visible call is the `n`th id here.
-    pub fn call_ids(&self, response: &crate::llm::types::LlmResponse) -> Vec<crate::ToolCallId> {
+    pub fn call_ids(
+        &self,
+        response: &lash_protocol_types::llm::types::LlmResponse,
+    ) -> Vec<lash_protocol_types::ToolCallId> {
         response
             .parts
             .iter()
             .enumerate()
-            .filter(|(_, part)| matches!(part, crate::llm::types::LlmOutputPart::ToolCall { .. }))
+            .filter(|(_, part)| {
+                matches!(
+                    part,
+                    lash_protocol_types::llm::types::LlmOutputPart::ToolCall { .. }
+                )
+            })
             .map(|(content_index, _)| self.id(content_index))
             .collect()
     }
@@ -1185,15 +1168,16 @@ pub struct TurnMachineConfig<M: TurnProtocol = UnitTurnProtocol> {
     pub model_tool_calls: ModelToolCalls,
     pub protocol_driver: Arc<dyn ProtocolDriverHandle<M>>,
     pub projector: Arc<dyn ContextProjector<M>>,
-    pub model: crate::llm_profile::LlmProfileConfig,
-    pub turn_budget: crate::TurnBudget,
+    pub model: lash_protocol_types::llm_profile::LlmProfileConfig,
+    pub turn_budget: lash_protocol_types::TurnBudget,
     /// Bound on consecutive provider attempts that commit no successful
     /// execution. Enforced by the protocol driver, which is the only layer
     /// that can tell a productive attempt from a stalled one.
-    pub no_progress_budget: crate::NoProgressBudget,
+    pub no_progress_budget: lash_protocol_types::NoProgressBudget,
     /// The session's recorded attachment-acceptance rules.
-    pub attachment_acceptance: Arc<crate::llm::capability::AttachmentCapabilitySnapshot>,
-    pub generation: crate::llm::types::GenerationOptions,
+    pub attachment_acceptance:
+        Arc<lash_protocol_types::llm::capability::AttachmentCapabilitySnapshot>,
+    pub generation: lash_protocol_types::llm::types::GenerationOptions,
     pub session_id: SessionId,
     /// The committed active frame whose history is being projected.
     pub agent_frame_id: String,
@@ -1208,86 +1192,26 @@ pub struct TurnMachineConfig<M: TurnProtocol = UnitTurnProtocol> {
 
 /// Stop before a provider request when its durable history cannot be projected.
 pub fn stored_history_refusal_actions<M: TurnProtocol>(
-    error: crate::StoredDataCorruption,
+    error: lash_protocol_types::StoredDataCorruption,
 ) -> Vec<DriverAction<M>> {
     vec![
-        DriverAction::Emit(crate::session_model::make_error_event(
-            crate::TurnFailureKind::Runtime,
-            Some(crate::FailureCode::lash(crate::TurnFailureCode::Other(
-                "stored_data_corrupt".into(),
-            ))),
+        DriverAction::Emit(lash_protocol_types::session_model::make_error_event(
+            lash_protocol_types::TurnFailureKind::Runtime,
+            Some(lash_protocol_types::FailureCode::lash(
+                lash_protocol_types::TurnFailureCode::from_wire("stored_data_corrupt"),
+            )),
             error.to_string(),
             Some(error.to_string()),
-            crate::session_model::RuntimeOutputCuts::standard(),
+            lash_protocol_types::session_model::RuntimeOutputCuts::standard(),
         )),
-        DriverAction::Finish(crate::TurnOutcome::Stopped(crate::TurnStop::RuntimeError {
-            cause: crate::TurnErrorCause::new(crate::TurnErrorCode::StoredDataCorrupt),
-        })),
+        DriverAction::Finish(lash_protocol_types::TurnOutcome::Stopped(
+            lash_protocol_types::TurnStop::RuntimeError {
+                cause: lash_protocol_types::TurnErrorCause::new(
+                    lash_protocol_types::TurnErrorCode::StoredDataCorrupt,
+                ),
+            },
+        )),
     ]
-}
-
-#[cfg(test)]
-mod llm_call_error_tests {
-    use super::LlmCallError;
-    use crate::llm::types::ProviderFailureKind;
-
-    #[test]
-    fn journaled_provider_error_omits_free_text() {
-        const SECRET: &str = "api_key= secret Authorization: Basic abc";
-        let error = LlmCallError {
-            message: SECRET.to_string(),
-            retryable: false,
-            kind: ProviderFailureKind::Http,
-            raw: Some(SECRET.to_string()),
-            code: Some(crate::session_model::FailureCode::provider(
-                "rate_limit_exceeded",
-            )),
-            terminal_reason: crate::llm::types::LlmTerminalReason::ProviderError,
-            request_body: None,
-            partial_response: None,
-        };
-        let journaled = serde_json::to_string(&error).expect("serialize effect result");
-        assert!(!journaled.contains(SECRET));
-        assert!(!journaled.contains("Basic abc"));
-        assert!(journaled.contains("provider:rate_limit_exceeded"));
-        let replayed: LlmCallError = serde_json::from_str(&journaled).expect("replay error");
-        assert_eq!(replayed.message, "provider call failed");
-        assert_eq!(replayed.raw, None);
-    }
-
-    #[test]
-    fn llm_call_error_requires_a_recognized_journal_kind() {
-        let mut wire = serde_json::json!({"message":"rate limited","retryable":true,"raw":null,"code":"429","terminal_reason":"provider_error","request_body":null});
-        assert!(
-            serde_json::from_value::<LlmCallError>(wire.clone())
-                .unwrap_err()
-                .to_string()
-                .contains("kind")
-        );
-        wire["kind"] = serde_json::json!("future_kind");
-        assert!(
-            serde_json::from_value::<LlmCallError>(wire.clone())
-                .unwrap_err()
-                .to_string()
-                .contains("future_kind")
-        );
-        for (literal, expected) in [
-            ("transport", ProviderFailureKind::Transport),
-            ("timeout", ProviderFailureKind::Timeout),
-            ("http", ProviderFailureKind::Http),
-            ("stream", ProviderFailureKind::Stream),
-            ("auth", ProviderFailureKind::Auth),
-            ("validation", ProviderFailureKind::Validation),
-            ("quota", ProviderFailureKind::Quota),
-            ("unsupported", ProviderFailureKind::Unsupported),
-            ("unknown", ProviderFailureKind::Unknown),
-        ] {
-            wire["kind"] = serde_json::json!(literal);
-            let decoded = serde_json::from_value::<LlmCallError>(wire.clone()).unwrap();
-            assert_eq!(decoded.kind, expected);
-            assert_eq!(serde_json::to_value(decoded).unwrap()["kind"], literal);
-        }
-    }
 }
 
 // ─── Internal state ───

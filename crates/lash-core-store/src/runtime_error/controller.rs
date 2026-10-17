@@ -231,7 +231,7 @@ impl RuntimeEffectControllerError {
             .as_ref()
             .and_then(RuntimeErrorCause::plugin_failure_class)
         {
-            return class == lash_sansio::PluginFailureClass::Terminal;
+            return class == lash_protocol_types::PluginFailureClass::Terminal;
         }
         self.has_terminal_cause()
             || match self.foreign_cause {
@@ -256,8 +256,8 @@ impl RuntimeEffectControllerError {
             .and_then(RuntimeErrorCause::plugin_failure_class)
         {
             return match class {
-                lash_sansio::PluginFailureClass::Terminal => TurnFailureCause::Outcome,
-                lash_sansio::PluginFailureClass::Parked => TurnFailureCause::Parked,
+                lash_protocol_types::PluginFailureClass::Terminal => TurnFailureCause::Outcome,
+                lash_protocol_types::PluginFailureClass::Parked => TurnFailureCause::Parked,
                 _ => TurnFailureCause::LiveFault,
             };
         }
@@ -319,8 +319,8 @@ impl From<RuntimeError> for RuntimeEffectControllerError {
     }
 }
 
-impl From<lash_sansio::EffectIdentityError> for RuntimeEffectControllerError {
-    fn from(error: lash_sansio::EffectIdentityError) -> Self {
+impl From<lash_protocol_types::EffectIdentityError> for RuntimeEffectControllerError {
+    fn from(error: lash_protocol_types::EffectIdentityError) -> Self {
         RuntimeError::from(error).into()
     }
 }

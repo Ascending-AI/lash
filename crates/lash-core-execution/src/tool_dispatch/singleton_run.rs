@@ -5,7 +5,7 @@
 
 use std::sync::Arc;
 
-use lash_sansio::{ToolCallId, ToolIntentKind};
+use lash_protocol_types::{ToolCallId, ToolIntentKind};
 use serde::{Deserialize, Serialize};
 
 use crate::runtime::effect::{AttemptStream, AttemptStreamRecorder};

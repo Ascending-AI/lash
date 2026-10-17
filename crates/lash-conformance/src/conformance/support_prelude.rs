@@ -19,6 +19,6 @@ pub(crate) use crate::{
     ProcessRegistration, ProcessRegistry, ProcessStatus, ProcessStatusFilter, SessionScope,
     WaitState,
 };
-pub(crate) use lash_sansio::{
+pub(crate) use lash_protocol_types::{
     AttachmentCreateMeta, AttachmentTypeMetadata, EffectAddress, MediaType, SessionId,
 };

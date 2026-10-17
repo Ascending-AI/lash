@@ -24,7 +24,7 @@ use std::sync::Arc;
 use lash_core_store::checkpoint_graph::{
     BlobEncoding, CommitId, DecodeLimits, EncodedNode, NodeId, NodeSource, RootSource, StoredNode,
 };
-use lash_sansio::{SessionId, ToolCallId, TurnId};
+use lash_protocol_types::{SessionId, ToolCallId, TurnId};
 
 use super::DomainWrite;
 use super::keys::{ExecKey, Ordinal, OwnerKey, RunSeq};

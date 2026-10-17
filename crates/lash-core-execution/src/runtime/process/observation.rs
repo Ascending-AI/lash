@@ -1,5 +1,5 @@
 use crate::SessionId;
-use lash_sansio::CancelRequest;
+use lash_protocol_types::CancelRequest;
 use std::sync::Arc;
 
 use serde::{Deserialize, Serialize};

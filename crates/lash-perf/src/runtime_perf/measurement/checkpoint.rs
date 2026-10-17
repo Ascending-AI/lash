@@ -1,6 +1,6 @@
 use super::*;
-use lash_sansio::SessionId;
-use lash_sansio::TurnId;
+use lash_protocol_types::SessionId;
+use lash_protocol_types::TurnId;
 
 pub(super) fn measure_runtime_perf_phase<T>(
     name: &str,
@@ -694,13 +694,13 @@ fn checkpoint_config(
         model_tool_calls: lash_core::sansio::ModelToolCalls::fixture(),
         protocol_driver,
         projector: Arc::new(ChatContextProjector::default()),
-        model: lash_sansio::llm_profile::LlmProfileConfig::new(
-            lash_sansio::llm_profile::RecordedLlmProfile::mint(
-                lash_sansio::llm_profile::LlmProfileKey::new("request-fixture"),
-                lash_sansio::llm_profile::LlmProfileMetadata::new(
+        model: lash_protocol_types::llm_profile::LlmProfileConfig::new(
+            lash_protocol_types::llm_profile::RecordedLlmProfile::mint(
+                lash_protocol_types::llm_profile::LlmProfileKey::new("request-fixture"),
+                lash_protocol_types::llm_profile::LlmProfileMetadata::new(
                     "mock-model".to_string(),
                     std::num::NonZeroUsize::MIN.saturating_add(127_999),
-                    lash_sansio::llm::capability::CacheRetention::Short,
+                    lash_protocol_types::llm::capability::CacheRetention::Short,
                 )
                 .with_capability(lash_core::LlmProfileCapability::default())
                 .with_extra_body(Default::default()),
@@ -905,7 +905,7 @@ fn checkpoint_machine(
 fn checkpoint_tool_calls(protocol_iteration: usize) -> Vec<PendingToolCall> {
     (0..24)
         .map(|index| PendingToolCall {
-            call_id: lash_sansio::ToolCallId::fixture(&format!(
+            call_id: lash_protocol_types::ToolCallId::fixture(&format!(
                 "checkpoint-call-{protocol_iteration}-{index}"
             )),
             provider_call_id: None,

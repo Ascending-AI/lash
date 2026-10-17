@@ -72,7 +72,7 @@ pub fn shared_parts(parts: Vec<Part>) -> Arc<Vec<Part>> {
 
 /// A borrowed view of the fields that define message content.
 #[derive(Clone, Copy)]
-pub(crate) struct MessageContentRef<'a> {
+pub struct MessageContentRef<'a> {
     id: &'a str,
     role: MessageRole,
     parts: &'a Arc<Vec<Part>>,
@@ -136,7 +136,7 @@ pub fn same_message(existing: &Message, value: &Message) -> bool {
 /// hop (`ConversationRecord::to_message` clones the pointer, not the parts),
 /// so the pointer check settles the common case in constant time regardless
 /// of how large the payload is.
-pub(crate) fn message_content_equal<'left, 'right>(
+pub fn message_content_equal<'left, 'right>(
     left: impl Into<MessageContentRef<'left>>,
     right: impl Into<MessageContentRef<'right>>,
 ) -> bool {
@@ -1123,7 +1123,7 @@ impl BaseRenderCache {
 
     /// The render of `base`, the messages this cache was made for.
     /// Longest recorded projection prefix matching a request, across policy identities.
-    pub(crate) fn shared_prefix(&self, rendered: &[LlmMessage]) -> Option<usize> {
+    pub fn shared_prefix(&self, rendered: &[LlmMessage]) -> Option<usize> {
         self.rendered
             .lock()
             .unwrap_or_else(|p| p.into_inner())
@@ -1190,7 +1190,7 @@ pub fn messages_are_prompt_resume_safe<'a>(
 /// How many of `messages` lead a prompt-resume-safe prefix, the longest
 /// one: every tool call in it is answered, and it pairs results with calls
 /// as [`messages_are_prompt_resume_safe`] requires.
-pub(crate) fn prompt_resume_safe_len<'a>(messages: impl IntoIterator<Item = &'a Message>) -> usize {
+pub fn prompt_resume_safe_len<'a>(messages: impl IntoIterator<Item = &'a Message>) -> usize {
     let mut seen_tool_calls = HashSet::new();
     let mut completed_tool_calls = HashSet::new();
     let mut safe = 0;

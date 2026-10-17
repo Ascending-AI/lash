@@ -40,6 +40,7 @@ lash-kernel-vm = { workspace = true }
 lash-kernel-state = { workspace = true }
 lash-trace = { workspace = true }
 lash-sansio = { workspace = true }
+lash-protocol-types = { workspace = true }
 lash-core = { workspace = true }
 # The checkpoint graph a cell's host state is written to (FIG-5887).
 lash-core-store = { workspace = true }
@@ -69,6 +70,7 @@ lash-core = { workspace = true, features = ["testing"] }
 # The guarded-surface laws (FIG-3802) this crate runs over its own decoders.
 lash-core-store = { workspace = true, features = ["testing"] }
 lash-sansio = { workspace = true }
+lash-protocol-types = { workspace = true }
 lash-sqlite-store = { workspace = true, features = ["testing"] }
 # The worker a Python-dialect law runs its cell in: this crate's test binary
 # re-entered as the worker of a host that names Python alone.

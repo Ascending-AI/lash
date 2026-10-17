@@ -30,7 +30,7 @@ use std::sync::{Arc, Mutex};
 pub use super::publication_window::{PublicationMark, PublicationMarks, PublicationWindow};
 
 use lash_core_store::transcript::{EntryId, TranscriptDecoders};
-use lash_sansio::sync::MutexExt as _;
+use lash_protocol_types::sync::MutexExt as _;
 
 use crate::{
     FrameNodeId, LashRuntime, LiveReplayEventDraft, LiveReplayStore, SessionId,

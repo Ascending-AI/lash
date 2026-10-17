@@ -9,7 +9,7 @@
 //! same commit as the state revision.
 
 use crate::ids::{DurableInstant, Epoch};
-use lash_sansio::{CancelOrigin, ProcessId};
+use lash_protocol_types::{CancelOrigin, ProcessId};
 
 use super::keys::ScopeKey;
 

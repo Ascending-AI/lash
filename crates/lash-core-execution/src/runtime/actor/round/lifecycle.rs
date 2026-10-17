@@ -188,7 +188,7 @@ pub trait MemberBodies: Send + Sync {
 
     /// How long a body whose token was cancelled may still answer before it
     /// is dropped: the runtime's
-    /// [`ExecutionBudgets::stop_grace`](lash_sansio::ExecutionBudgets::stop_grace).
+    /// [`ExecutionBudgets::stop_grace`](lash_protocol_types::ExecutionBudgets::stop_grace).
     fn stop_grace(&self) -> std::time::Duration;
 
     /// The final answer of `execution`, which parked as `parked`, once one
@@ -1125,10 +1125,12 @@ impl Lifecycle {
         // an attempt: a capacity verdict from any other records the
         // attempt's `Interrupted`.
         let pinned = execution.policy();
-        let honours_capacity = matches!(pinned, lash_sansio::ExecutionPolicy::Repeatable { .. })
-            && self
-                .policies
-                .permits_repeat(execution.draft().tool(), pinned);
+        let honours_capacity = matches!(
+            pinned,
+            lash_protocol_types::ExecutionPolicy::Repeatable { .. }
+        ) && self
+            .policies
+            .permits_repeat(execution.draft().tool(), pinned);
         self.in_flight.insert(execution.id().clone());
         let attempt = async move {
             type Carried = (

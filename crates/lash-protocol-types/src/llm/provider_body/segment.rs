@@ -40,7 +40,7 @@ pub enum SegmentKind {
 /// rewrites is a new segment with nothing derived.
 ///
 /// ```
-/// use lash_sansio::llm::types::{RequestSegment, SegmentKind, TemplateJson};
+/// use lash_protocol_types::llm::types::{RequestSegment, SegmentKind, TemplateJson};
 ///
 /// let item = RequestSegment::item_json(&serde_json::json!({"role": "user"})).unwrap();
 /// assert_eq!(item.kind(), SegmentKind::Item);

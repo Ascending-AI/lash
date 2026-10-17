@@ -8,7 +8,7 @@ use std::future::Future;
 use std::pin::Pin;
 use std::sync::{Mutex, Weak};
 
-use lash_sansio::sync::MutexExt;
+use lash_protocol_types::sync::MutexExt;
 use rmcp::model::{
     ClientRequest, RequestId, ServerResult, SubscriptionFilter,
     SubscriptionsAcknowledgedNotificationParams, SubscriptionsListenRequest,

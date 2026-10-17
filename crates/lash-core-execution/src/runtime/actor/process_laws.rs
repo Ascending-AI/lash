@@ -17,7 +17,7 @@ use std::time::{Duration, Instant};
 use lash_durable::domain::WaitPurpose;
 use lash_durable::runner::{Runner, RunnerConfig, Stopped};
 use lash_durable::{ActorKey, ActorState, DurableError, NoProbe, NodeId, NodeSpec};
-use lash_sansio::{ExecutionLimit, ExecutionPolicy};
+use lash_protocol_types::{ExecutionLimit, ExecutionPolicy};
 use serde_json::{Value, json};
 use tokio_util::sync::CancellationToken;
 
@@ -313,8 +313,8 @@ const SLEEP_NODE: &str = "sleep-node";
 
 /// The first occurrence of `node`, as the law engine's document
 /// would name it.
-fn law_site(node: &str) -> lash_sansio::EffectIdentity {
-    lash_sansio::effect_identity_fixture(node, 1)
+fn law_site(node: &str) -> lash_protocol_types::EffectIdentity {
+    lash_protocol_types::effect_identity_fixture(node, 1)
 }
 
 fn settled_name(outcome: &SettledOutput) -> &'static str {
@@ -617,7 +617,7 @@ impl ProcessSteps for LawSteps {
         };
         let limit = ExecutionLimit::starting_at(now_ms, LONG, LONG);
         Ok(StepAdmission::new(
-            lash_sansio::ToolId::new(step_tool(step)),
+            lash_protocol_types::ToolId::new(step_tool(step)),
             policy,
             limit,
             (step_tool(step) == LAW_PARK).then(|| {

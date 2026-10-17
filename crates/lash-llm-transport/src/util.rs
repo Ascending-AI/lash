@@ -2,7 +2,7 @@
 //! previously copy-pasted into each provider; they live here because every
 //! provider already depends on `lash-llm-transport`.
 
-use lash_sansio::llm::types::{LlmProviderTraceEvent, LlmProviderTraceSender};
+use lash_protocol_types::{llm::types::LlmProviderTraceEvent, llm::types::LlmProviderTraceSender};
 use serde_json::Value;
 
 pub fn emit_provider_trace(tx: Option<&LlmProviderTraceSender>, provider: &'static str, raw: &str) {

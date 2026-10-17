@@ -1,11 +1,12 @@
 //! One attempt's bounded, validated slot deliveries.
 use super::{AttachmentStoreError, RuntimeAttachmentStore, validate_attachment_bytes};
 use lash_core_llm::provider::{AttachmentDeliveryError, AttachmentReadPolicy, SlotDeliveries};
-use lash_sansio::AttachmentRef;
-use lash_sansio::llm::attachment_delivery::{
-    Delivery, DeliveryContext, DeliveryLimits, ProviderAccepts,
+use lash_protocol_types::AttachmentRef;
+use lash_protocol_types::llm::types::AttachmentSlot;
+use lash_protocol_types::{
+    llm::attachment_delivery::Delivery, llm::attachment_delivery::DeliveryContext,
+    llm::attachment_delivery::DeliveryLimits, llm::attachment_delivery::ProviderAccepts,
 };
-use lash_sansio::llm::types::AttachmentSlot;
 use std::sync::Arc;
 
 /// The slots of one attempt that share one delivery: the same content as

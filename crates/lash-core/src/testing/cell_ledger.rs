@@ -33,7 +33,7 @@ impl TokenCodec for PreviousReport {
 }
 
 struct PreviousAnswer(Option<NodeId>);
-impl lash_sansio::tool_output::graph::AnswerSlot for PreviousAnswer {
+impl lash_protocol_types::tool_output::graph::AnswerSlot for PreviousAnswer {
     fn write(&self, _value: &crate::ToolValue, out: &mut TokenWriter) {
         if let Some(node) = self.0 {
             node.encode(out);
@@ -55,7 +55,7 @@ impl TokenCodec for PreviousOutcome<'_> {
         Option::<NodeId>::None.encode(out);
         out.unsigned(0);
         out.text(&self.record.tool);
-        lash_sansio::tool_output::graph::encode_output(
+        lash_protocol_types::tool_output::graph::encode_output(
             &self.record.output,
             &PreviousAnswer(self.answer),
             out,
@@ -123,13 +123,15 @@ pub fn cell_ledger_bytes(
     let mut entries = Vec::new();
     for record in records.iter().take(128) {
         let model_return = crate::ModelToolReturn::from_output(record.tool.clone(), &record.output);
-        let recipe =
-            lash_sansio::tool_output::graph::PresentationRecipe::of(&model_return, &record.output);
+        let recipe = lash_protocol_types::tool_output::graph::PresentationRecipe::of(
+            &model_return,
+            &record.output,
+        );
         let presentation = staging.encode_value(NodeKind::PRESENTATION, &recipe)?;
         let answer = match &record.output.outcome {
             crate::ToolCallOutcome::Success(value) => Some(staging.encode_value(
                 NodeKind::FROZEN_VALUE,
-                &lash_sansio::tool_output::graph::FrozenToolValue(value.clone()),
+                &lash_protocol_types::tool_output::graph::FrozenToolValue(value.clone()),
             )?),
             _ => None,
         };

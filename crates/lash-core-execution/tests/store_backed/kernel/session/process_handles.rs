@@ -177,7 +177,9 @@ mod tests {
             ("not a handle record", json!({ "id": "process-7" })),
             (
                 "a handle that names no process",
-                lash_sansio::handle::handle_record_json(&lash_sansio::handle::HandleId::tool(7, 1)),
+                lash_protocol_types::handle::handle_record_json(
+                    &lash_protocol_types::handle::HandleId::tool(7, 1),
+                ),
             ),
             (
                 "a process handle whose id no registrar minted",
@@ -316,8 +318,8 @@ mod tests {
             Arc::new(crate::ChronologicalProjection::default()),
             crate::TurnContext::default(),
         );
-        let handle = lash_sansio::handle::handle_record_json(
-            &lash_sansio::handle::HandleId::process(&hidden_process.id),
+        let handle = lash_protocol_types::handle::handle_record_json(
+            &lash_protocol_types::handle::HandleId::process(&hidden_process.id),
         );
 
         let awaited = crate::await_process_handle(
@@ -393,9 +395,9 @@ mod tests {
             .await
             .expect("complete run-local await process");
         let local_handle = |process_id: &ProcessId| {
-            lash_sansio::handle::handle_record_json(&lash_sansio::handle::HandleId::process(
-                process_id,
-            ))
+            lash_protocol_types::handle::handle_record_json(
+                &lash_protocol_types::handle::HandleId::process(process_id),
+            )
         };
         let local_cancel = crate::cancel_process_handle(
             &context,

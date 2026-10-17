@@ -12,7 +12,7 @@
 
 use serde::{Deserialize, Serialize};
 
-pub use lash_sansio::VersionRange;
+pub use lash_protocol_types::VersionRange;
 
 /// One versioned stored component: a PostgreSQL schema or a SQLite database
 /// file.
@@ -83,7 +83,7 @@ pub struct CompatDescriptor {
 ///             RuntimeEffectOutcome,
 ///         ),
 ///     ),
-///     roots(path = "crates/lash-sansio/src/session_model/mod.rs", TurnOutcome, ErrorEnvelope),
+///     roots(path = "crates/lash-protocol-types/src/session_model/mod.rs", TurnOutcome, ErrorEnvelope),
 ///     catalog(path = "crates/lash-postgres-store/src/postgres/migrate.rs", EXPAND_MIGRATIONS),
 /// )
 /// version_surface = "migrate"
@@ -113,7 +113,7 @@ pub const POSTGRES_SCHEMA_VERSION: u32 = 1;
 ///         path = "crates/lash-sqlite-store/src/lib.rs", StoredBlobEnvelope,
 ///         BlobArtifactDescriptor, BlobStorageHint, BlobCompression,
 ///     ),
-///     roots(path = "crates/lash-sansio/src/session_model/mod.rs", TurnOutcome, ErrorEnvelope),
+///     roots(path = "crates/lash-protocol-types/src/session_model/mod.rs", TurnOutcome, ErrorEnvelope),
 ///     items(
 ///         path = "crates/lash-sqlite-store/src/schema.rs", SCHEMA, PROCESS_SCHEMA,
 ///         elide = "sql_idempotent_index",

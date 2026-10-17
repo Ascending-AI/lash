@@ -9,7 +9,7 @@
 use super::session_store_factory::session_store_request;
 use super::*;
 use lash_core::store::ConformanceDeployment;
-use lash_sansio::SessionId;
+use lash_protocol_types::SessionId;
 use pretty_assertions::assert_eq;
 
 /// One session a law executes turns on.

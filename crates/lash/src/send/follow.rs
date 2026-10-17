@@ -24,7 +24,7 @@
 //! own observation that follows it, for at most the follow poll's ceiling
 //! (FIG-5793).
 
-use lash_sansio::core_support::RunIdCoreSupport;
+use lash_protocol_types::core_support::RunIdCoreSupport;
 use std::collections::{HashSet, VecDeque};
 use std::sync::Arc;
 use std::time::Duration;

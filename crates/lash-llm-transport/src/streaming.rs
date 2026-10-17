@@ -26,8 +26,10 @@
 
 use lash_core::ProviderFailureKind;
 use lash_core::provider::ProviderOptions;
-use lash_sansio::llm::types::{LlmEventSender, LlmStreamEvent, LlmUsage};
-use lash_sansio::session_model::TurnFailureCode;
+use lash_protocol_types::session_model::TurnFailureCode;
+use lash_protocol_types::{
+    llm::types::LlmEventSender, llm::types::LlmStreamEvent, llm::types::LlmUsage,
+};
 use lash_transport_failure::{LlmTransportError, TransportRetryVerdict};
 
 use std::time::Duration;

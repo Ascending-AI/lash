@@ -1,7 +1,7 @@
 use super::*;
 use crate::tests::host::ingress::*;
 use lash_core::ProcessRegistry;
-use lash_sansio::ProcessId;
+use lash_protocol_types::ProcessId;
 
 /// FIG-3070: a start committed before its submission outcome is retained
 /// reports the store's coalescing verdict when ingress realizes it again.

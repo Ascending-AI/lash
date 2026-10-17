@@ -25,7 +25,7 @@ use lash_core_store::tool_run::Material;
 use lash_core_store::tool_run::SettledOutput;
 use lash_core_store::tool_run::{MaterialOwner, MaterialRole};
 use lash_durable::domain::OwnerKey;
-use lash_sansio::{ExecutionLimit, ExecutionPolicy, ToolId};
+use lash_protocol_types::{ExecutionLimit, ExecutionPolicy, ToolId};
 use serde_json::{Value, json};
 
 use super::world::{BodyEntry, World};

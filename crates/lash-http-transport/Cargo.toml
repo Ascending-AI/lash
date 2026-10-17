@@ -21,7 +21,7 @@ workspace = true
 
 [dependencies]
 lash-transport-failure = { workspace = true }
-lash-sansio = { workspace = true }
+lash-protocol-types = { workspace = true }
 async-trait = { workspace = true }
 bytes = { workspace = true }
 reqwest = { workspace = true, features = ["json", "query", "stream", "rustls", "http2"] }

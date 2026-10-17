@@ -8,7 +8,7 @@ use lash_core_store::checkpoint_graph::{
 };
 use lash_core_store::effect_opener::EffectOpener;
 use lash_kernel_doc::{Site, TaskIdentity, Unit};
-use lash_sansio::{ExecutionPolicy, ToolCallId, ToolId};
+use lash_protocol_types::{ExecutionPolicy, ToolCallId, ToolId};
 
 use super::*;
 use crate::kernel::value::datum_to_json;

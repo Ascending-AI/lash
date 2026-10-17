@@ -1,8 +1,8 @@
 use super::*;
 use crate::session_sql::session_sql;
-use lash_sansio::ProcessId;
-use lash_sansio::SessionId;
-use lash_sansio::TurnId;
+use lash_protocol_types::ProcessId;
+use lash_protocol_types::SessionId;
+use lash_protocol_types::TurnId;
 
 use lash_core_execution::store_backend_support::{CausalColumns, SessionMetaCodec, StoredRelation};
 

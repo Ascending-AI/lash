@@ -113,7 +113,7 @@ impl PluginSession {
             .iter()
             .map(|definition| definition.manifest.clone())
             .collect();
-        let resolve_contract: lash_sansio::ToolContractResolver =
+        let resolve_contract: lash_protocol_types::ToolContractResolver =
             Arc::new(move |manifest: &ToolManifest| {
                 definitions
                     .iter()
@@ -131,23 +131,23 @@ impl PluginSession {
 }
 
 /// A catalog build refusal as the plugin error it is.
-pub(crate) fn catalog_build_error(err: lash_sansio::ToolCatalogBuildError) -> PluginError {
+pub(crate) fn catalog_build_error(err: lash_protocol_types::ToolCatalogBuildError) -> PluginError {
     match err {
-        source @ lash_sansio::ToolCatalogBuildError::UnusableSchema { .. } => {
+        source @ lash_protocol_types::ToolCatalogBuildError::UnusableSchema { .. } => {
             PluginError::UnusableToolSchema {
                 source: Box::new(source),
             }
         }
-        lash_sansio::ToolCatalogBuildError::MissingContract { tool_id, name } => {
+        lash_protocol_types::ToolCatalogBuildError::MissingContract { tool_id, name } => {
             PluginError::ResidentToolContractUnavailable { tool_id, name }
         }
-        lash_sansio::ToolCatalogBuildError::DuplicateId { tool_id } => {
+        lash_protocol_types::ToolCatalogBuildError::DuplicateId { tool_id } => {
             PluginError::ResidentToolDuplicateId { tool_id }
         }
-        lash_sansio::ToolCatalogBuildError::DuplicateName { name } => {
+        lash_protocol_types::ToolCatalogBuildError::DuplicateName { name } => {
             PluginError::ResidentToolDuplicateName { name }
         }
-        lash_sansio::ToolCatalogBuildError::RegistrationRefused { refusal } => {
+        lash_protocol_types::ToolCatalogBuildError::RegistrationRefused { refusal } => {
             PluginError::ToolRegistrationRefused {
                 source: Box::new(refusal),
             }

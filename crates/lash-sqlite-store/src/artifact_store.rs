@@ -1057,7 +1057,7 @@ mod tests {
     #[tokio::test]
     async fn guarded_publication_arms_cleanup_with_the_edge() {
         let (_dir, store) = store().await;
-        let journal = lash_sansio::ExecutionScope::runtime_operation("guarded-publication")
+        let journal = lash_protocol_types::ExecutionScope::runtime_operation("guarded-publication")
             .journal_identity()
             .expect("journal identity");
         let claim = ReferrerClaim::guarded(lash_core_execution::ReferrerGuard::Journal(journal));

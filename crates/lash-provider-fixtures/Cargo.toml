@@ -29,7 +29,7 @@ lash-llm-transport = { workspace = true }
 lash-provider-anthropic = { workspace = true }
 lash-provider-google = { workspace = true }
 lash-provider-openai = { workspace = true }
-lash-sansio = { workspace = true }
+lash-protocol-types = { workspace = true }
 lash-transport-failure = { workspace = true }
 serde = { workspace = true, features = ["derive"] }
 serde_json = { workspace = true }

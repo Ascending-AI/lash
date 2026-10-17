@@ -193,8 +193,8 @@ impl crate::HostBoundary {
     pub fn offer_bound_tool(
         &mut self,
         manifest: &lash_core::ToolManifest,
-        input: &lash_sansio::JsonSchema,
-        output: &lash_sansio::JsonSchema,
+        input: &lash_protocol_types::JsonSchema,
+        output: &lash_protocol_types::JsonSchema,
     ) -> Result<(), ToolBindingError> {
         let binding = required_tool_executable(manifest)?;
         self.offer_tool(

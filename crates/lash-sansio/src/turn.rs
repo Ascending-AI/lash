@@ -1,10 +1,10 @@
-use crate::SessionId;
-use crate::TurnId;
+use lash_protocol_types::SessionId;
+use lash_protocol_types::TurnId;
 use std::sync::Arc;
 
-use crate::MessageSequence;
 use crate::sansio::{TurnMachine, TurnMachineConfig, TurnProtocol, UnitTurnProtocol};
 use crate::turn_driver::TurnDriverPreamble;
+use lash_protocol_types::MessageSequence;
 
 pub struct SansIoTurnInput<M: TurnProtocol = UnitTurnProtocol> {
     pub session_id: SessionId,
@@ -12,22 +12,23 @@ pub struct SansIoTurnInput<M: TurnProtocol = UnitTurnProtocol> {
     pub model_tool_calls: crate::ModelToolCalls,
     pub agent_frame_id: String,
     pub turn_id: TurnId,
-    pub model: crate::llm_profile::LlmProfileConfig,
+    pub model: lash_protocol_types::llm_profile::LlmProfileConfig,
     /// The committed window the turn starts from, which its checkpoints
     /// name instead of holding.
     pub window: crate::TurnWindow<M::Event>,
     /// The turn's messages, led by the window's.
     pub messages: MessageSequence,
     /// The turn's history, led by the window's records.
-    pub events: crate::AppendVec<crate::SessionHistoryRecord<M::Event>>,
+    pub events: lash_protocol_types::AppendVec<lash_protocol_types::SessionHistoryRecord<M::Event>>,
     pub protocol_run_offset: usize,
     pub turn_driver_preamble: Arc<TurnDriverPreamble<M>>,
-    pub turn_budget: crate::TurnBudget,
-    pub no_progress_budget: crate::NoProgressBudget,
+    pub turn_budget: lash_protocol_types::TurnBudget,
+    pub no_progress_budget: lash_protocol_types::NoProgressBudget,
     /// The session's recorded attachment-acceptance rules every request of
     /// the turn carries.
-    pub attachment_acceptance: Arc<crate::llm::capability::AttachmentCapabilitySnapshot>,
-    pub generation: crate::llm::types::GenerationOptions,
+    pub attachment_acceptance:
+        Arc<lash_protocol_types::llm::capability::AttachmentCapabilitySnapshot>,
+    pub generation: lash_protocol_types::llm::types::GenerationOptions,
     pub emit_llm_trace: bool,
     pub termination: M::Termination,
 }

@@ -1,7 +1,7 @@
 use super::*;
 
 use futures_util::StreamExt as _;
-use lash_sansio::llm::types::{StreamBlockEvent, StreamBlockKind};
+use lash_protocol_types::{llm::types::StreamBlockEvent, llm::types::StreamBlockKind};
 
 use lash_facade_tests::observations::*;
 
@@ -502,7 +502,7 @@ async fn rlm_provider_failure_after_prose_is_not_retried_or_committed() -> Resul
             .retry_decision
             .as_ref()
             .and_then(|decision| decision.denial_reason()),
-        Some(lash_sansio::llm::types::ChargeSafetyDenialReason::GuaranteeRequired)
+        Some(lash_protocol_types::llm::types::ChargeSafetyDenialReason::GuaranteeRequired)
     );
     // The durable report is rebuilt from the store: the typed refusal is
     // the turn's committed failure evidence.
@@ -522,7 +522,7 @@ async fn rlm_provider_failure_after_prose_is_not_retried_or_committed() -> Resul
     );
     assert_eq!(
         failure.refusal.denial_reason,
-        lash_sansio::llm::types::ChargeSafetyDenialReason::GuaranteeRequired
+        lash_protocol_types::llm::types::ChargeSafetyDenialReason::GuaranteeRequired
     );
 
     let reopened = core

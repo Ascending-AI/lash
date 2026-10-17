@@ -18,7 +18,7 @@ pub use lash_core_store::store::plugin_writers::{
 
 pub use lash_core_store::plugin_state::{FormatNamespace, FormatRefusal, PluginConfigNamespace};
 
-pub use lash_sansio::{
+pub use lash_protocol_types::{
     CheckpointKind, ControlPhaseExpired, PluginMessage, PluginRuntimeEvent, ToolCatalogContribution,
 };
 
@@ -401,8 +401,8 @@ mod tests {
         type Error = String;
         const ERROR_TYPE: &'static str = Self::NAME;
         const ERROR_VERSION: crate::FormatVersion = crate::FormatVersion::ONE;
-        fn error_class(_: &Self::Error) -> lash_sansio::PluginFailureClass {
-            lash_sansio::PluginFailureClass::Terminal
+        fn error_class(_: &Self::Error) -> lash_protocol_types::PluginFailureClass {
+            lash_protocol_types::PluginFailureClass::Terminal
         }
     }
 
@@ -671,8 +671,8 @@ Ok(move |ctx: crate::plugin::PluginQueryContext, args: <TypedEchoOp as crate::pl
             type Error = String;
             const ERROR_TYPE: &'static str = Self::NAME;
             const ERROR_VERSION: crate::FormatVersion = crate::FormatVersion::ONE;
-            fn error_class(_: &Self::Error) -> lash_sansio::PluginFailureClass {
-                lash_sansio::PluginFailureClass::Terminal
+            fn error_class(_: &Self::Error) -> lash_protocol_types::PluginFailureClass {
+                lash_protocol_types::PluginFailureClass::Terminal
             }
         }
         impl PluginTask for EchoTaskOp {}

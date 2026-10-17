@@ -31,7 +31,7 @@ use lash_core::{RuntimeExecutionContext, ToolExecutionGrant};
 use lash_core_store::checkpoint_graph::{GraphStaging, NodeId};
 use lash_kernel_doc::{Datum, EffectIdentity, EffectName, ErrorDatum};
 use lash_kernel_vm::{EffectRequest, Outcome};
-use lash_sansio::sync::MutexExt;
+use lash_protocol_types::sync::MutexExt;
 use lash_vm_broker::kernel::graph::{FrozenRequest, Projections};
 use lash_vm_broker::kernel::{
     AdmittedCall, AdmittedEffect, EFFECT_CANCELLED, HostParts, KernelEffects, datum_from_json,
@@ -757,7 +757,7 @@ pub(super) fn call_outcome(
     admission: NodeId,
 ) -> lash_vm_broker::round_graph::CallOutcome {
     let model_return =
-        lash_sansio::ModelToolReturn::from_output(record.tool.clone(), &record.output);
+        lash_protocol_types::ModelToolReturn::from_output(record.tool.clone(), &record.output);
     lash_vm_broker::round_graph::CallOutcome {
         call_id: record.call_id.clone(),
         admission: Some(admission),
@@ -768,7 +768,7 @@ pub(super) fn call_outcome(
         provider_call_id: record.provider_call_id.clone(),
         replay: None,
         intent_outcomes: Vec::new(),
-        presentation: lash_sansio::tool_output::graph::PresentationRecipe::of(
+        presentation: lash_protocol_types::tool_output::graph::PresentationRecipe::of(
             &model_return,
             &record.output,
         ),

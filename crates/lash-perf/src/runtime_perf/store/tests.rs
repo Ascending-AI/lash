@@ -1,7 +1,7 @@
 use super::*;
 use lash_core::SessionCommitStore;
 use lash_core::runtime::RuntimeSessionState;
-use lash_sansio::SessionId;
+use lash_protocol_types::SessionId;
 
 #[test]
 fn in_flight_store_calls_are_published_only_with_their_latency() {

@@ -22,11 +22,14 @@ use lash_core::provider::{
     AttachmentDeliveryError, Provider, ProviderComponents, ProviderHandle, ProviderOptions,
     SlotDeliveries,
 };
-use lash_sansio::llm::attachment_delivery::{
-    AttachmentPosition, Delivery, DeliveryContext, DeliverySecret, ProviderAccepts,
+use lash_protocol_types::{
+    llm::attachment_delivery::AttachmentPosition, llm::attachment_delivery::Delivery,
+    llm::attachment_delivery::DeliveryContext, llm::attachment_delivery::DeliverySecret,
+    llm::attachment_delivery::ProviderAccepts,
 };
-use lash_sansio::llm::types::{
-    AttachmentSlot, BodyPart, LiveRequestBody, ResponseContext, SlotCodec,
+use lash_protocol_types::{
+    llm::types::AttachmentSlot, llm::types::BodyPart, llm::types::LiveRequestBody,
+    llm::types::ResponseContext, llm::types::SlotCodec,
 };
 
 /// The bytes of the image only the slot modes' model calls name.
@@ -119,7 +122,7 @@ pub(super) async fn adapter_template(
                 positions: vec![AttachmentPosition::Message],
                 media_types: vec![image.reference.media_type.as_str().to_owned()],
                 media_families: Vec::new(),
-                forms: lash_sansio::llm::attachment_delivery::DeliveryForms {
+                forms: lash_protocol_types::llm::attachment_delivery::DeliveryForms {
                     bytes: true,
                     url: false,
                     provider_file: false,
@@ -136,7 +139,10 @@ pub(super) async fn adapter_template(
             }],
         ));
     let template = adapter(Arc::default())
-        .lower(&request, &lash_sansio::llm::types::SegmentCache::disabled())
+        .lower(
+            &request,
+            &lash_protocol_types::llm::types::SegmentCache::disabled(),
+        )
         .await
         .map_err(|error| TurnError::Exec(format!("the adapter lowers the call: {error}")))?;
     if template.slots().count() != 1 {
@@ -239,7 +245,7 @@ impl SlotDeliveries for RuntimeDeliveries {
 async fn send_adapter_attempt(
     services: &L3Services,
     request: &LlmRequest,
-    admitted: &lash_sansio::llm::types::AdmittedSend,
+    admitted: &lash_protocol_types::llm::types::AdmittedSend,
 ) -> Sent {
     let backend = services.backend();
     let transport = Arc::new(WireTransport::default());
@@ -385,7 +391,7 @@ impl SlotDeliveries for SlotStore {
 pub(super) async fn send_attempt(
     services: &L3Services,
     request: &LlmRequest,
-    admitted: &lash_sansio::llm::types::AdmittedSend,
+    admitted: &lash_protocol_types::llm::types::AdmittedSend,
 ) -> Result<Sent, TurnError> {
     if services.mode == Mode::AdapterSlots {
         return Ok(send_adapter_attempt(services, request, admitted).await);

@@ -199,7 +199,7 @@ async fn a_refused_plugin_build_fails_the_turn_typed(backend: lash_core::Backend
         }),
     );
     let session = core
-        .session(lash_sansio::SessionId::try_from("refused-build".to_owned()).expect("id"))
+        .session(lash_protocol_types::SessionId::try_from("refused-build".to_owned()).expect("id"))
         .create(lash::SessionCreation::root(mock_session_spec()))
         .await
         .expect("creation records config and builds no plugin");
@@ -225,7 +225,7 @@ async fn a_retryably_refused_plugin_build_completes_the_turn(backend: lash_core:
         }),
     );
     let session = core
-        .session(lash_sansio::SessionId::try_from("retried-build".to_owned()).expect("id"))
+        .session(lash_protocol_types::SessionId::try_from("retried-build".to_owned()).expect("id"))
         .create(lash::SessionCreation::root(mock_session_spec()))
         .await
         .expect("created");

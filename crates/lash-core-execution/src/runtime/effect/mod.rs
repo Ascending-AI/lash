@@ -42,8 +42,8 @@ pub use executor::{
 pub use identity_types::{
     RuntimeAttribution, RuntimeEffectKind, RuntimeReplay, RuntimeReplayAttribution, RuntimeSubject,
 };
-pub use lash_sansio::RunAggregateWakePolicy;
-pub use lash_sansio::{CausalRef, EffectAddress};
+pub use lash_protocol_types::RunAggregateWakePolicy;
+pub use lash_protocol_types::{CausalRef, EffectAddress};
 pub use llm_outcome::{
     AssistantResponsePlan, AssistantStreamCapsule, AssistantStreamHookState, LlmStreamRecord,
     RuntimeLlmCallOutcome,

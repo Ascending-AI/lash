@@ -692,8 +692,8 @@ async fn attachment_gc_refuses_an_empty_postgres_root_database() {
     let attachment = lash_core_execution::AttachmentStore::put(
         backend.as_ref(),
         b"postgres-live-committed-blob".to_vec(),
-        lash_sansio::AttachmentCreateMeta::new(
-            lash_sansio::MediaType::parse("application/octet-stream").expect("media type"),
+        lash_protocol_types::AttachmentCreateMeta::new(
+            lash_protocol_types::MediaType::parse("application/octet-stream").expect("media type"),
             None,
             Some("live".to_string()),
         ),

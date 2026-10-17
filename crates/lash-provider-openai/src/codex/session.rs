@@ -9,7 +9,7 @@
 //! it. `CodexWebSocketAttemptError` lives here because connecting is the first
 //! place an attempt can fail.
 
-use lash_sansio::sync::MutexExt;
+use lash_protocol_types::sync::MutexExt;
 use std::collections::HashMap;
 use std::sync::{Arc, Mutex};
 use std::time::{Duration, Instant};

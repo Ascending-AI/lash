@@ -39,7 +39,7 @@ pub const LLM_QUERY_INSTRUCTIONS: &str = "Answer the focused sub-question using 
 /// turn prompt (ADR 0133 §8).
 #[derive(Clone, Debug, Default)]
 pub struct LlmToolsPluginFactory {
-    pub output_schema_limits: lash_sansio::schema_contract::OutputSchemaLimits,
+    pub output_schema_limits: lash_protocol_types::schema_contract::OutputSchemaLimits,
 }
 
 impl PluginFactory for LlmToolsPluginFactory {
@@ -190,14 +190,16 @@ impl From<lash_core::ToolFailure> for LlmQueryError {
     }
 }
 pub struct LlmToolsProvider {
-    output_schema_limits: lash_sansio::schema_contract::OutputSchemaLimits,
+    output_schema_limits: lash_protocol_types::schema_contract::OutputSchemaLimits,
 }
 
 pub fn llm_query_provider() -> StaticToolProvider<LlmToolsProvider> {
-    llm_query_provider_with_limits(lash_sansio::schema_contract::OutputSchemaLimits::standard())
+    llm_query_provider_with_limits(
+        lash_protocol_types::schema_contract::OutputSchemaLimits::standard(),
+    )
 }
 pub fn llm_query_provider_with_limits(
-    limits: lash_sansio::schema_contract::OutputSchemaLimits,
+    limits: lash_protocol_types::schema_contract::OutputSchemaLimits,
 ) -> StaticToolProvider<LlmToolsProvider> {
     StaticToolProvider::new(
         vec![llm_query_tool_definition()],
@@ -215,7 +217,7 @@ impl LlmToolsProvider {
     ) -> Result<Value, LlmQueryError> {
         let task = required_string(args, "task")?;
         let inputs = args.get("inputs").cloned().unwrap_or(Value::Null);
-        let output_schema = lash_sansio::schema_contract::parse_output_schema_with_limits(
+        let output_schema = lash_protocol_types::schema_contract::parse_output_schema_with_limits(
             args.get("output"),
             self.output_schema_limits,
         )
@@ -228,20 +230,18 @@ impl LlmToolsProvider {
         // The sub-question runs on the session's behalf, so it carries the
         // session's sampling intent rather than provider defaults.
         let generation = session_model.generation;
-        let response_schema =
-            lash_sansio::JsonSchema::admit(llm_query_response_schema(output_schema.as_ref()))
-                .map_err(|source| {
-                    lash_core::ToolFailure::invalid_request(
-                        "unusable_output_schema",
-                        source.to_string(),
-                    )
-                    .with_cause(lash_core::ToolFailureCause::SchemaAdmission { source })
-                })?;
+        let response_schema = lash_protocol_types::JsonSchema::admit(llm_query_response_schema(
+            output_schema.as_ref(),
+        ))
+        .map_err(|source| {
+            lash_core::ToolFailure::invalid_request("unusable_output_schema", source.to_string())
+                .with_cause(lash_core::ToolFailureCause::SchemaAdmission { source })
+        })?;
         let prompt = llm_query_prompt(&task, &inputs, output_schema.as_ref());
 
         let output = DirectOutputSpec::JsonSchema(DirectJsonSchema {
             name: "llm_query_result".to_string(),
-            schema: lash_sansio::SchemaContract::new(response_schema.clone()),
+            schema: lash_protocol_types::SchemaContract::new(response_schema.clone()),
             strict: true,
         });
 
@@ -332,7 +332,7 @@ pub fn llm_query_tool_definition() -> ToolDefinition {
     .with_output_from_input_schema(
         "output",
         Some(
-            lash_sansio::JsonSchema::admit(json!({ "type": "string" }))
+            lash_protocol_types::JsonSchema::admit(json!({ "type": "string" }))
                 .expect("valid output default schema"),
         ),
     )
@@ -397,7 +397,7 @@ fn llm_query_response_schema(output_schema: Option<&Value>) -> Value {
 
 fn parse_llm_query_result(
     text: &str,
-    schema: &lash_sansio::JsonSchema,
+    schema: &lash_protocol_types::JsonSchema,
 ) -> Result<Value, LlmQueryError> {
     let trimmed = text.trim();
     if trimmed.is_empty() {
@@ -513,7 +513,7 @@ mod tests {
             }
         }
     }
-    use lash_sansio::sync::MutexExt;
+    use lash_protocol_types::sync::MutexExt;
 
     fn llm_profile_spec(model: &str, variant: Option<&str>) -> Option<lash_core::LlmProfileConfig> {
         let config = lash_core::testing::test_llm_profile_config(
@@ -656,7 +656,7 @@ mod tests {
                 "count": { "type": "integer" }
             }
         });
-        let schema = lash_sansio::JsonSchema::admit(
+        let schema = lash_protocol_types::JsonSchema::admit(
             serde_json::json!({ "type": "object", "properties": { "value": output } }),
         )
         .expect("valid result schema");

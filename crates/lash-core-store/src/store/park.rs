@@ -344,7 +344,7 @@ impl ParkReason {
     pub fn of_error(error: &RuntimeError) -> Option<Self> {
         let message = error.message.clone();
         if let Some(cause) = &error.cause
-            && cause.plugin_failure_class() == Some(lash_sansio::PluginFailureClass::Parked)
+            && cause.plugin_failure_class() == Some(lash_protocol_types::PluginFailureClass::Parked)
         {
             return Some(Self::PluginFailure {
                 cause: Box::new(cause.clone()),

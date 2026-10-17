@@ -218,7 +218,7 @@ impl RuntimeTurnDriver<'_> {
                     Some(error.category.failure_code().into()),
                     error.message.clone(),
                     Some(error.message),
-                    lash_sansio::session_model::RuntimeOutputCuts::standard(),
+                    lash_protocol_types::session_model::RuntimeOutputCuts::standard(),
                 )));
             }
         }

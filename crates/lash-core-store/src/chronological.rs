@@ -1,6 +1,6 @@
 use crate::session_model::{ConversationRecord, ProtocolEvent, SessionHistoryRecord};
 use crate::{Message, MessageOrigin, MessageRole, MessageSequence, Part};
-use lash_sansio::core_support::*;
+use lash_protocol_types::core_support::*;
 
 #[derive(Clone, Debug, Default, serde::Serialize, serde::Deserialize)]
 pub struct ChronologicalProjection {
@@ -216,7 +216,7 @@ mod tests {
 
     #[test]
     fn chronological_projection_preserves_the_committed_reply_marker() {
-        use lash_sansio::core_support::TurnReplyCoreSupport;
+        use lash_protocol_types::core_support::TurnReplyCoreSupport;
         let mut reply = text_message("reply", MessageRole::Assistant, "answer");
         reply.reply_marker = Some(crate::TurnReply::mint(
             crate::TurnId::parse("turn").unwrap(),

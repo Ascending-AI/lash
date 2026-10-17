@@ -11,7 +11,7 @@ use std::sync::Weak;
 use std::sync::atomic::{AtomicU32, Ordering};
 use std::time::Duration;
 
-use lash_sansio::sync::{MutexExt, RwLockExt};
+use lash_protocol_types::{sync::MutexExt, sync::RwLockExt};
 use rmcp::service::QuitReason;
 use tokio::sync::{mpsc, oneshot, watch};
 use tokio::time::{Instant, timeout, timeout_at};

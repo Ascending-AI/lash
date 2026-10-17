@@ -28,7 +28,7 @@ macro_rules! define_realized {
         }
     };
 }
-lash_sansio::tool_intent_variants!(define_realized);
+lash_protocol_types::tool_intent_variants!(define_realized);
 
 #[derive(Clone, Debug, PartialEq, Serialize, Deserialize)]
 #[serde(tag = "reason", rename_all = "snake_case")]

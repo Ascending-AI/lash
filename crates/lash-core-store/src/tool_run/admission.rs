@@ -22,13 +22,13 @@
 //! and never retries a reported failure. `Repeatable` may repeat only within
 //! its bounds while both recorded and current policies permit it. A permitted
 //! crash rerun keeps the attempt ordinal; a reported-failure retry advances it.
-//! The stable [`ToolCallId`](lash_sansio::ToolCallId) lets recipients deduplicate
+//! The stable [`ToolCallId`](lash_protocol_types::ToolCallId) lets recipients deduplicate
 //! external work across those attempts; Lash promises no exactly-once external effects.
 
 use std::collections::BTreeSet;
 
-use lash_sansio::ToolCallId;
-pub use lash_sansio::{DeclarationRefusal, OutcomeShape, ToolDeclaration};
+use lash_protocol_types::ToolCallId;
+pub use lash_protocol_types::{DeclarationRefusal, OutcomeShape, ToolDeclaration};
 use serde::{Deserialize, Serialize};
 
 use super::material::{MaterialOwner, MaterialRef, MaterialRole};
@@ -80,7 +80,7 @@ impl AdmittedBinding {
     }
 }
 
-pub use lash_sansio::{Backoff, BoundedRetry, ExecutionPolicy};
+pub use lash_protocol_types::{Backoff, BoundedRetry, ExecutionPolicy};
 
 /// What cancelling an issued call asks of the external work it started.
 #[derive(Clone, Copy, Debug, Default, PartialEq, Eq, Hash, Serialize, Deserialize)]

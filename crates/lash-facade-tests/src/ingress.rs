@@ -1,9 +1,9 @@
 use super::*;
 use lash_core::ProcessRegistry;
 
-use lash_sansio::ProcessId;
+use lash_protocol_types::ProcessId;
 
-use lash_sansio::SessionId;
+use lash_protocol_types::SessionId;
 
 pub const SESSION: &str = "intent-ingress-session";
 pub const SCOPE: &str = "intent-ingress-turn";

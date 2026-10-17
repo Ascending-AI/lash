@@ -42,6 +42,7 @@ EXPECTED_INTERNAL_PACKAGES = {
     "lash-render": "lash-internal-render",
     "lash-rlm-types": "lash-internal-rlm-types",
     "lash-s3-store": "lash-internal-s3-store",
+    "lash-protocol-types": "lash-internal-protocol-types",
     "lash-sansio": "lash-internal-sansio",
     "lash-sqlite-store": "lash-internal-sqlite-store",
     "lash-store-sql": "lash-internal-store-sql",

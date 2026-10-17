@@ -185,10 +185,12 @@ impl ToolRegistry {
                     && !self.reads.contains_key(key)
                 {
                     return Err(crate::PluginError::ToolRegistrationRefused {
-                        source: Box::new(lash_sansio::RegistrationRefused::ReadWithoutReader {
-                            tool: manifest.name.clone(),
-                            provider: key.to_string(),
-                        }),
+                        source: Box::new(
+                            lash_protocol_types::RegistrationRefused::ReadWithoutReader {
+                                tool: manifest.name.clone(),
+                                provider: key.to_string(),
+                            },
+                        ),
                     });
                 }
                 let definition = served_definition(provider.as_ref(), manifest, config)?;

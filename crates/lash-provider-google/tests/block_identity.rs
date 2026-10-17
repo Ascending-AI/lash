@@ -3,8 +3,8 @@
 //! interrupted by reasoning or a tool call must close and re-open as a new
 //! block — never merge into one id.
 
-use lash_sansio::llm::types::{StreamBlockEvent, StreamBlockKind};
-use lash_sansio::sync::MutexExt;
+use lash_protocol_types::sync::MutexExt;
+use lash_protocol_types::{llm::types::StreamBlockEvent, llm::types::StreamBlockKind};
 use std::sync::{Arc, Mutex};
 
 use lash_core::llm::types::{
@@ -50,13 +50,13 @@ fn text_tool_text_stream_bytes() -> Vec<u8> {
 fn request(events: Arc<Mutex<Vec<LlmStreamEvent>>>) -> LlmRequest {
     LlmRequest {
         instructions: None,
-        model: lash_sansio::llm_profile::LlmProfileConfig::new(
-            lash_sansio::llm_profile::RecordedLlmProfile::mint(
-                lash_sansio::llm_profile::LlmProfileKey::new("request-fixture"),
-                lash_sansio::llm_profile::LlmProfileMetadata::new(
+        model: lash_protocol_types::llm_profile::LlmProfileConfig::new(
+            lash_protocol_types::llm_profile::RecordedLlmProfile::mint(
+                lash_protocol_types::llm_profile::LlmProfileKey::new("request-fixture"),
+                lash_protocol_types::llm_profile::LlmProfileMetadata::new(
                     "gemini-3.1-pro-preview".to_string(),
                     std::num::NonZeroUsize::MIN.saturating_add(127_999),
-                    lash_sansio::llm::capability::CacheRetention::Short,
+                    lash_protocol_types::llm::capability::CacheRetention::Short,
                 )
                 .with_capability(lash_core::provider::LlmProfileCapability::default())
                 .with_extra_body(Default::default()),

@@ -445,7 +445,7 @@ impl RuntimeTurnDriver<'_> {
     pub(in crate::runtime) async fn run_exec_code(
         &self,
         code: &str,
-        active_events: lash_sansio::AppendVec<crate::SessionHistoryRecord>,
+        active_events: lash_protocol_types::AppendVec<crate::SessionHistoryRecord>,
         messages: crate::MessageSequence,
         protocol_iteration: usize,
         invocation: crate::RuntimeInvocation,

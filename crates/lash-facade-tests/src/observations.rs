@@ -6,8 +6,8 @@ use std::sync::Mutex as StdMutex;
 #[cfg(feature = "rlm")]
 use std::sync::atomic::{AtomicUsize, Ordering};
 
-use lash_sansio::llm::types::{StreamBlockEvent, StreamBlockKind};
-use lash_sansio::sync::LockResultExt as _;
+use lash_protocol_types::sync::LockResultExt as _;
+use lash_protocol_types::{llm::types::StreamBlockEvent, llm::types::StreamBlockKind};
 pub fn bid() -> lash_core::llm::types::StreamBlockIdentity {
     lash_core::llm::types::StreamBlockIdentity::new("text:0", 0)
 }

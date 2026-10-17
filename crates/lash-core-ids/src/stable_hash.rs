@@ -9,7 +9,7 @@ where
 }
 
 pub fn blake3_hex(domain: &str, bytes: &[u8]) -> String {
-    lash_sansio::core_support::blake3_domain_hash_hex(domain, bytes)
+    lash_protocol_types::core_support::blake3_domain_hash_hex(domain, bytes)
 }
 
 /// SHA-256 retained only for contracts whose field or protocol name explicitly

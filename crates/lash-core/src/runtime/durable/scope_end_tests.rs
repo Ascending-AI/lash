@@ -87,7 +87,7 @@ impl CutStore {
 impl DurableReads for CutStore {
     async fn model_call_pins(
         &self,
-        session: &lash_sansio::SessionId,
+        session: &lash_protocol_types::SessionId,
         owner: &str,
     ) -> Result<Vec<lash_durable::domain::ModelCallPinRow>, DurableError> {
         self.inner.model_call_pins(session, owner).await
@@ -95,7 +95,7 @@ impl DurableReads for CutStore {
 
     async fn model_calls(
         &self,
-        session: &lash_sansio::SessionId,
+        session: &lash_protocol_types::SessionId,
         owner: &str,
     ) -> Result<Vec<lash_core_store::model_calls::ModelCallRecord>, DurableError> {
         self.inner.model_calls(session, owner).await
@@ -150,15 +150,15 @@ impl DurableReads for CutStore {
 
     async fn cell_roots(
         &self,
-        session: &lash_sansio::SessionId,
-        run: &lash_sansio::TurnId,
+        session: &lash_protocol_types::SessionId,
+        run: &lash_protocol_types::TurnId,
     ) -> Result<Vec<ExecRootRow>, DurableError> {
         self.inner.cell_roots(session, run).await
     }
     async fn cell_roots_within(
         &self,
-        session: &lash_sansio::SessionId,
-        run: &lash_sansio::TurnId,
+        session: &lash_protocol_types::SessionId,
+        run: &lash_protocol_types::TurnId,
         max_rows: usize,
     ) -> Result<Vec<lash_durable::domain::ExecRootRow>, DurableError> {
         self.inner.cell_roots_within(session, run, max_rows).await
@@ -1415,8 +1415,8 @@ impl ProcessSteps for HangingSteps {
         let long = Duration::from_secs(60);
         Ok(StepAdmission::new(
             lash_core_execution::testing::step_tool(_step, "law"),
-            lash_sansio::ExecutionPolicy::Once,
-            lash_sansio::ExecutionLimit::starting_at(now_ms, long, long),
+            lash_protocol_types::ExecutionPolicy::Once,
+            lash_protocol_types::ExecutionLimit::starting_at(now_ms, long, long),
             None,
         ))
     }

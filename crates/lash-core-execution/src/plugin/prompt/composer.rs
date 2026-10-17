@@ -29,10 +29,11 @@ use std::sync::{Arc, Barrier, Mutex, OnceLock};
 
 use lash_durable::domain::{PromptCallKey, PromptText, PromptWrite};
 use lash_durable::{DomainWrite, DurableError, DurableInstant, DurableReads};
-use lash_sansio::llm::types::{
-    LlmRequestScope, RecordedRequestTemplate, ResponseContext, ResponseContract,
+use lash_protocol_types::sync::MutexExt;
+use lash_protocol_types::{
+    llm::types::LlmRequestScope, llm::types::RecordedRequestTemplate, llm::types::ResponseContext,
+    llm::types::ResponseContract,
 };
-use lash_sansio::sync::MutexExt;
 
 use super::{
     PromptCatalog, PromptCompositionError, PromptCut, PromptPlacement, PromptPlan, PromptPurpose,

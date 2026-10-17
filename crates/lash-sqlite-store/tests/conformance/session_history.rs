@@ -91,7 +91,7 @@ async fn turn_prelude_bytes_do_not_grow_with_history_depth() {
         RuntimeSessionState, SessionCatalogStore, SessionCommitStore, SessionId, SessionPolicy,
         TurnPrelude, TurnPreludeStore,
     };
-    use lash_sansio::MessageSequence;
+    use lash_protocol_types::MessageSequence;
     let mut sizes = Vec::new();
     for depth in [8, 128] {
         let backend = TestBackend::open(SUBSTRATE).await;

@@ -207,7 +207,7 @@ impl<'run> ToolDispatchContext<'run> {
 
 #[derive(Clone, Debug, serde::Serialize, serde::Deserialize)]
 pub struct ToolDispatchOutcome {
-    #[serde(serialize_with = "lash_sansio::durable_serde::serialize")]
+    #[serde(serialize_with = "lash_protocol_types::durable_serde::serialize")]
     pub record: ToolCallRecord,
     #[serde(default, skip_serializing_if = "Vec::is_empty")]
     pub attempts: Vec<lash_trace::TraceRetryAttempt>,
@@ -236,7 +236,7 @@ pub(super) fn completed_preparation(outcome: ToolDispatchOutcome) -> ToolPrepara
 /// call and, when a model issued it, the provider's correlation.
 #[derive(Clone, Debug, PartialEq, Eq)]
 pub struct ToolCallIds {
-    pub call_id: lash_sansio::ToolCallId,
+    pub call_id: lash_protocol_types::ToolCallId,
     /// Protocol correlation only: never key material.
     pub provider_call_id: Option<String>,
 }

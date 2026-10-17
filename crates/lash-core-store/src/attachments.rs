@@ -5,7 +5,7 @@ use crate::store::{
     AttachmentReferrers, AttachmentWrite, AttachmentWriteFence, AttachmentWritePermit,
 };
 #[cfg(test)]
-use lash_sansio::sync::MutexExt;
+use lash_protocol_types::sync::MutexExt;
 #[cfg(test)]
 use std::sync::Mutex;
 mod root_enumeration;
@@ -15,8 +15,11 @@ use std::path::PathBuf;
 #[cfg(test)]
 use std::sync::Arc;
 
-use lash_sansio::llm::attachment_delivery::{Delivery, DeliveryLimits, ProviderAccepts};
-use lash_sansio::{AttachmentCreateMeta, AttachmentId, AttachmentRef, MediaType};
+use lash_protocol_types::{AttachmentCreateMeta, AttachmentId, AttachmentRef, MediaType};
+use lash_protocol_types::{
+    llm::attachment_delivery::Delivery, llm::attachment_delivery::DeliveryLimits,
+    llm::attachment_delivery::ProviderAccepts,
+};
 
 use crate::store::{
     AttachmentCondemnation, AttachmentCondemnationAdoption, AttachmentCondemnationPhase,
@@ -803,7 +806,7 @@ pub use runtime_store::{
     RuntimeAttachmentStore, STANDARD_ATTACHMENT_UPLOAD_EXPIRY_MS,
 };
 
-pub use lash_sansio::attachment::content_id;
+pub use lash_protocol_types::attachment::content_id;
 
 /// Verify actual content and retained allocation before a read or delivery escapes.
 pub fn validate_attachment_bytes(

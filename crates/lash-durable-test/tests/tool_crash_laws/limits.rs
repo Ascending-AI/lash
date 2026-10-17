@@ -61,7 +61,7 @@ impl Crash {
                 || failures.iter().any(|failure| {
                     failure.code != lash::ToolCallLimitExceeded::CODE
                         || failure.class != lash_core::ToolFailureClass::ResourceLimit
-                        || failure.source != lash_sansio::ToolFailureSource::Runtime
+                        || failure.source != lash_protocol_types::ToolFailureSource::Runtime
                 })
             {
                 violations.push(format!(
@@ -82,8 +82,11 @@ impl Crash {
                     _ => None,
                 })
                 .collect::<Vec<_>>();
-            let mut expected_statuses = vec![lash_sansio::ToolCallStatus::Success; LIMIT];
-            expected_statuses.extend(vec![lash_sansio::ToolCallStatus::Failure; requested]);
+            let mut expected_statuses = vec![lash_protocol_types::ToolCallStatus::Success; LIMIT];
+            expected_statuses.extend(vec![
+                lash_protocol_types::ToolCallStatus::Failure;
+                requested
+            ]);
             if statuses != expected_statuses {
                 violations.push(format!(
                     "model result statuses {statuses:?}, expected {expected_statuses:?}"

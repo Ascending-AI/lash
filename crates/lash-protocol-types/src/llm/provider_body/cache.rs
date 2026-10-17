@@ -28,7 +28,7 @@ const SEGMENT_KEY_DOMAIN: &str = "lash request segment key v1";
 /// contexts differ share nothing.
 ///
 /// ```
-/// use lash_sansio::llm::types::SegmentContext;
+/// use lash_protocol_types::llm::types::SegmentContext;
 ///
 /// let a = SegmentContext::new("example.provider/1").str("model-a").finish();
 /// let b = SegmentContext::new("example.provider/1").str("model-b").finish();
@@ -137,7 +137,7 @@ impl<'a> SegmentKey<'a> {
 /// configuration is another context and misses. Clones share one cache.
 ///
 /// ```
-/// use lash_sansio::llm::types::{
+/// use lash_protocol_types::llm::types::{
 ///     LlmMessage, LlmRole, RequestSegment, SegmentCache, SegmentContext, SegmentKey,
 /// };
 ///

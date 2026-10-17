@@ -3,7 +3,7 @@ use super::*;
 use crate::plugin::{PluginFactory, SessionAuthorityContext, SessionPlugin, SessionReadyContext};
 use lash_core::plugin::PluginSessionRequest;
 use lash_core::{PluginError, PluginStateError, PluginStateView, StateCommands};
-use lash_sansio::sync::MutexExt;
+use lash_protocol_types::sync::MutexExt;
 use std::sync::Mutex;
 
 #[path = "plugin_state_support.rs"]

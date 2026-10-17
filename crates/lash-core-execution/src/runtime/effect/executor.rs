@@ -114,10 +114,10 @@ pub struct ProcessDefinitionLocalExecution {
 /// leaves.
 #[derive(Clone)]
 pub struct AdmittedDirectSend {
-    pub template: Arc<lash_sansio::llm::types::RecordedRequestTemplate>,
+    pub template: Arc<lash_protocol_types::llm::types::RecordedRequestTemplate>,
     /// What every send reads its response under, as admitted: a first send
     /// and a resend are handed the same one, and add their own senders.
-    pub response: lash_sansio::llm::types::ResponseContext,
+    pub response: lash_protocol_types::llm::types::ResponseContext,
     pub deliveries: Arc<dyn crate::provider::SlotDeliveries>,
     pub limit: crate::ExecutionLimit,
 }
@@ -142,9 +142,9 @@ pub(super) struct LocalDirectEffectRunner {
     /// The call's request template, as its admission stored it: every
     /// attempt fills its slots from `deliveries` and sends it, and nothing
     /// lowers the call again.
-    template: Arc<lash_sansio::llm::types::RecordedRequestTemplate>,
+    template: Arc<lash_protocol_types::llm::types::RecordedRequestTemplate>,
     /// The call's response context, as its admission recorded it.
-    response: lash_sansio::llm::types::ResponseContext,
+    response: lash_protocol_types::llm::types::ResponseContext,
     deliveries: Arc<dyn crate::provider::SlotDeliveries>,
     /// Who the call spends for (ADR 0127).
     owner: crate::RuntimeOwner,

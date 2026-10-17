@@ -21,6 +21,7 @@ workspace = true
 
 [dependencies]
 lash-sansio = { workspace = true }
+lash-protocol-types = { workspace = true }
 lash-render = { workspace = true }
 lash-tool-shape = { workspace = true }
 schemars = { workspace = true }
@@ -29,3 +30,4 @@ serde_json = { workspace = true }
 
 [dev-dependencies]
 lash-sansio = { workspace = true, features = ["testing"] }
+lash-protocol-types = { workspace = true, features = ["testing"] }

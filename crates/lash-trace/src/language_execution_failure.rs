@@ -7,11 +7,11 @@ pub enum TraceLanguageExecutionFailure {
     /// A dispatched tool effect failed with its recorded classification and
     /// recorded source and delay hint. `replay_key` is the causing effect's identity.
     Effect {
-        class: lash_sansio::ToolFailureClass,
+        class: lash_protocol_types::ToolFailureClass,
         code: String,
         message: String,
         replay_key: String,
-        source: lash_sansio::ToolFailureSource,
+        source: lash_protocol_types::ToolFailureSource,
         suggested_delay_ms: Option<u64>,
     },
     /// A VM or host-boundary failure with a stable runtime error code.

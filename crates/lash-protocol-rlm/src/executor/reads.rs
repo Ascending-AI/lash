@@ -22,7 +22,7 @@ use std::sync::{Arc, Mutex};
 use std::time::{Duration, Instant};
 
 use lash_kernel_doc::{Datum, EffectName, ErrorDatum, Site};
-use lash_sansio::sync::MutexExt;
+use lash_protocol_types::sync::MutexExt;
 use lash_vm_broker::ParentFault;
 use lash_vm_broker::kernel::{EFFECT_CANCELLED, EFFECT_RESULT, EFFECT_TIMED_OUT, datum_from_json};
 use lash_vm_runtime::{EffectReads, HostBoundary};
@@ -82,16 +82,18 @@ impl CellReads {
             &route.definition.manifest.argument_projection,
         )
         .map_err(|error| refused(super::host::TOOL_ARGUMENTS, error.to_string()))?;
-        lash_sansio::validate_tool_input(&route.definition.contract, &args).map_err(|error| {
-            tool_failed(
-                &lash_core::ToolFailure::runtime(
-                    lash_core::ToolFailureClass::InvalidRequest,
-                    "invalid_tool_args",
-                    error.to_string(),
+        lash_protocol_types::validate_tool_input(&route.definition.contract, &args).map_err(
+            |error| {
+                tool_failed(
+                    &lash_core::ToolFailure::runtime(
+                        lash_core::ToolFailureClass::InvalidRequest,
+                        "invalid_tool_args",
+                        error.to_string(),
+                    )
+                    .with_cause(lash_core::ToolFailureCause::ValueMismatch { source: error }),
                 )
-                .with_cause(lash_core::ToolFailureCause::ValueMismatch { source: error }),
-            )
-        })?;
+            },
+        )?;
         Ok(args)
     }
 

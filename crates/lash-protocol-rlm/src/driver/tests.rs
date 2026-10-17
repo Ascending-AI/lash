@@ -1,7 +1,7 @@
 use lash_core::llm::types::LlmRole;
+use lash_protocol_types::SessionId;
+use lash_protocol_types::TurnId;
 use lash_rlm_types::RlmTurnOptions;
-use lash_sansio::SessionId;
-use lash_sansio::TurnId;
 
 use super::*;
 use lash_core::CellRecord;
@@ -248,14 +248,14 @@ pub(super) fn projection_test_config(
             crate::dialect::CellDialect::typescript(),
         )),
         projector: Arc::new(lash_core::sansio::ChatContextProjector::default()),
-        model: lash_sansio::llm_profile::LlmProfileConfig::new(
-            lash_sansio::llm_profile::RecordedLlmProfile::mint(
-                lash_sansio::llm_profile::LlmProfileKey::new("request-fixture"),
-                lash_sansio::llm_profile::LlmProfileMetadata::builder(model.to_string())
+        model: lash_protocol_types::llm_profile::LlmProfileConfig::new(
+            lash_protocol_types::llm_profile::RecordedLlmProfile::mint(
+                lash_protocol_types::llm_profile::LlmProfileKey::new("request-fixture"),
+                lash_protocol_types::llm_profile::LlmProfileMetadata::builder(model.to_string())
                     .context_window_tokens(max_context_tokens.unwrap_or(128_000))
                     .capability(Default::default())
                     .extra_body(Default::default())
-                    .cache_retention(lash_sansio::llm::capability::CacheRetention::Short)
+                    .cache_retention(lash_protocol_types::llm::capability::CacheRetention::Short)
                     .build()
                     .expect("valid profile"),
             ),

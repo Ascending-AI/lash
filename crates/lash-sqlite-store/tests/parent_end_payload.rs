@@ -16,7 +16,7 @@ use lash_sqlite_store::SqliteProcessRegistry;
 /// refusals are proved on one.
 fn operation_scope(session: &str, operation: &str) -> lash_core_execution::ScopeId {
     lash_core_execution::ScopeId::session_operation(
-        lash_sansio::SessionId::fixture(session),
+        lash_protocol_types::SessionId::fixture(session),
         operation,
     )
 }

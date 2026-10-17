@@ -12,7 +12,7 @@ use crate::policy::{
 };
 use crate::telemetry::metrics::registry::{AttributeKey, RefinableKey};
 use crate::{AttrKey, TraceIds, TracePolicySnapshot, TracePosition, TraceRecord, TraceSpanKind};
-use lash_sansio::llm::types::LlmUsage;
+use lash_protocol_types::llm::types::LlmUsage;
 
 /// The host's meaning for lash's spans, added at creation.
 ///

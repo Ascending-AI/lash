@@ -755,7 +755,7 @@ async fn a_build_catalog_closure_hydrates_whole_within_every_limit() {
         })
         .await
         .expect("an install");
-    let session = lash_sansio::SessionId::parse("catalog-law").expect("a session id");
+    let session = lash_protocol_types::SessionId::parse("catalog-law").expect("a session id");
     tier.foreign(ForeignWrite::RevisionRoot {
         config: false,
         session: session.clone(),
@@ -1083,8 +1083,8 @@ async fn a_park_publication_writes_a_counted_number_of_statements() {
     let identity = lash_core_execution::testing::sql_work::owner_commit(&tier._set).await;
     let actor = ActorKey::session("sql-work-owner").expect("actor");
     let exec = ExecKey::Cell(
-        lash_sansio::SessionId::parse("counted-park").expect("a session id"),
-        lash_sansio::TurnId::try_from("counted-turn".to_owned()).expect("a turn id"),
+        lash_protocol_types::SessionId::parse("counted-park").expect("a session id"),
+        lash_protocol_types::TurnId::try_from("counted-turn".to_owned()).expect("a turn id"),
         CellId::new("counted-cell"),
     );
     let leaf = encode(NodeKind::PAYLOAD_LEAF, "counted leaf", &[]);

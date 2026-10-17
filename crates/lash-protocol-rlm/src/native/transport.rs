@@ -7,7 +7,7 @@
 use lash_core::llm::types::{LlmContentBlock, LlmMessage, LlmRole};
 use lash_core::session_model::{Message, MessageRole, shared_parts};
 use lash_core::{MessageOrigin, Part, PartKind};
-use lash_sansio::TurnId;
+use lash_protocol_types::TurnId;
 use std::collections::{HashMap, HashSet};
 
 /// The assistant message of a reply whose `execute_code` call ran as the cell
@@ -56,7 +56,7 @@ pub(super) fn refused_call_messages(
                 vec![lash_core::facade_support::ModelToolReturnPart::text(&text)],
                 part.call_id()?.clone(),
                 part.tool_name().unwrap_or_default().to_string(),
-                lash_sansio::ToolCallStatus::Success,
+                lash_protocol_types::ToolCallStatus::Success,
             ))
         })
         .collect::<Vec<_>>();
@@ -216,7 +216,7 @@ pub(super) fn append_pair(messages: &mut Vec<LlmMessage>, parts: &[Part], output
                     replay: part.tool_replay().cloned(),
                 });
                 results.push(LlmContentBlock::ToolResult {
-                    status: lash_sansio::ToolCallStatus::Success,
+                    status: lash_protocol_types::ToolCallStatus::Success,
                     call_id: call_id.to_string(),
                     tool_name: part.tool_name().map(str::to_string),
                     content: vec![lash_core::facade_support::ModelToolReturnPart::text(output)],

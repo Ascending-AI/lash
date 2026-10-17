@@ -50,7 +50,7 @@ class NoSubagentTests(unittest.TestCase):
         self.assertIn("crates/lash-core/src/lib.rs:1: a subagent concept in core", result.stderr)
 
     def test_every_guarded_crate_and_spelling_fails(self) -> None:
-        crates = ("lash-core", "lash-core-execution", "lash-core-store", "lash-sansio",
+        crates = ("lash-core", "lash-core-execution", "lash-core-store", "lash-sansio", "lash-protocol-types",
                   "lash-durable", "lash")
         spellings = (WORD, WORD.upper(), f"{WORD[:3].title()}{WORD[3:].title()}Context",
                      f"MAX_{WORD.upper()}_DEPTH", f"{WORD}s")

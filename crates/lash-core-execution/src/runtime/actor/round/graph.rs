@@ -35,9 +35,12 @@ use lash_core_store::tool_run::{
     LimitCause, MaterialDigest, MaterialLocation, MaterialOwner, MaterialRef, MaterialRole,
 };
 use lash_durable::domain::graph::RunFactKind;
-use lash_sansio::tool_output::graph::{
-    AnswerSlot, FrozenJson, FrozenToolValue, PresentationRecipe, PresentationRefusal, decode_json,
-    decode_output, encode_json, encode_output,
+use lash_protocol_types::{
+    tool_output::graph::AnswerSlot, tool_output::graph::FrozenJson,
+    tool_output::graph::FrozenToolValue, tool_output::graph::PresentationRecipe,
+    tool_output::graph::PresentationRefusal, tool_output::graph::decode_json,
+    tool_output::graph::decode_output, tool_output::graph::encode_json,
+    tool_output::graph::encode_output,
 };
 use serde::Serialize;
 use serde::de::DeserializeOwned;
@@ -491,7 +494,7 @@ pub struct CallOutcome {
     pub tool_name: String,
     pub output: ToolCallOutput,
     pub provider_call_id: Option<String>,
-    pub replay: Option<lash_sansio::llm::types::ProviderReplayMeta>,
+    pub replay: Option<lash_protocol_types::llm::types::ProviderReplayMeta>,
     pub intent_outcomes: Vec<crate::ToolIntentExecutionOutcome>,
     pub presentation: PresentationRecipe,
 }
@@ -519,7 +522,7 @@ struct StoredOutcome {
     body: NodeId,
     admission: Option<NodeId>,
     attempt: u64,
-    replay: Option<lash_sansio::llm::types::ProviderReplayMeta>,
+    replay: Option<lash_protocol_types::llm::types::ProviderReplayMeta>,
     intent_outcomes: Vec<crate::ToolIntentExecutionOutcome>,
     presentation: NodeId,
 }
@@ -528,7 +531,7 @@ fn encode_live_outcome(
     body: NodeId,
     admission: Option<NodeId>,
     attempt: u64,
-    replay: Option<&lash_sansio::llm::types::ProviderReplayMeta>,
+    replay: Option<&lash_protocol_types::llm::types::ProviderReplayMeta>,
     intents: &[crate::ToolIntentExecutionOutcome],
     presentation: NodeId,
     out: &mut TokenWriter,
@@ -699,7 +702,7 @@ pub fn stage_value(
     value: &serde_json::Value,
 ) -> Result<MaterialNode, GraphRefusal> {
     let mut body = TokenWriter::new();
-    body.sum(lash_sansio::tool_output::graph::FROZEN_JSON, 1);
+    body.sum(lash_protocol_types::tool_output::graph::FROZEN_JSON, 1);
     encode_json(value, &mut body);
     staging
         .encode(
@@ -798,7 +801,7 @@ pub struct PinnedMember {
     pub call: ToolCallId,
     pub tool: String,
     pub request: MaterialRef,
-    pub policy: lash_sansio::ExecutionPolicy,
+    pub policy: lash_protocol_types::ExecutionPolicy,
     pub limit_expires_at_ms: u64,
     pub limit_max_slice_ms: u64,
     /// The completion wait pinned with the admission, by its id's hex: a
@@ -875,7 +878,7 @@ impl PinnedMember {
             tool,
             self.request.clone(),
             self.policy,
-            lash_sansio::ExecutionLimit {
+            lash_protocol_types::ExecutionLimit {
                 expires_at: self.limit_expires_at_ms,
                 max_slice: std::time::Duration::from_millis(self.limit_max_slice_ms),
             },

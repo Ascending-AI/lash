@@ -2,7 +2,7 @@
 
 use super::*;
 use crate::ProcessEventLogTestSupport as _;
-use lash_sansio::ProcessId;
+use lash_protocol_types::ProcessId;
 use pretty_assertions::assert_eq;
 
 /// The two arms of a process-event append leave different durable footprints,
@@ -171,10 +171,10 @@ async fn durable_effect_outcome_event_crash_windows(
         .expect("register effect-summary process")
         .id;
     let recorded = lash_core::ProcessEffectOccurrence::new(
-        lash_sansio::effect_identity_fixture("node:tool", 1),
+        lash_protocol_types::effect_identity_fixture("node:tool", 1),
         "tool:fixture",
         lash_core::ProcessEffectOutcomeClass::Failure,
-        Some(lash_sansio::FailureCode::from_foreign_wire(
+        Some(lash_protocol_types::FailureCode::from_foreign_wire(
             "fixture:refused",
         )),
         "lash_vm:recorded-effect:1",
@@ -200,7 +200,7 @@ async fn durable_effect_outcome_event_crash_windows(
     assert_eq!(replayed.event.fact.payload(), inserted.event.fact.payload());
 
     let mut changed = recorded.clone();
-    changed.code = Some(lash_sansio::FailureCode::from_foreign_wire(
+    changed.code = Some(lash_protocol_types::FailureCode::from_foreign_wire(
         "fixture:changed",
     ));
     let error = registry

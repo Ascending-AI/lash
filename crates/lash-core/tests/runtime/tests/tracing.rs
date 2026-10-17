@@ -5,7 +5,7 @@
 
 use super::*;
 use ::tracing::Instrument;
-use lash_sansio::sync::MutexExt;
+use lash_protocol_types::sync::MutexExt;
 use tracing_subscriber::layer::{Context, SubscriberExt};
 use tracing_subscriber::registry::LookupSpan;
 use tracing_subscriber::{Layer, Registry};

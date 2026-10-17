@@ -1,7 +1,7 @@
 use super::*;
 use crate::ActorContext;
 use crate::TurnId;
-use lash_sansio::core_support::RunIdCoreSupport;
+use lash_protocol_types::core_support::RunIdCoreSupport;
 
 /// The rows one turn executes, each admitted to the turn's run (FIG-3927):
 /// what the run's admission bound.

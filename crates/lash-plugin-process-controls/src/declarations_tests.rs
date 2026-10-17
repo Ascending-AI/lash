@@ -95,7 +95,7 @@ async fn start_and_get_accept_only_the_exact_definition_contracts() {
         "get_process_definition",
         serde_json::json!({"definition_id": id(1).to_tagged_json()})
     ));
-    assert_eq!(slot, lash_sansio::handle::definition_slot_json(0));
+    assert_eq!(slot, lash_protocol_types::handle::definition_slot_json(0));
     assert!(
         matches!(&get[..], [ToolIntent::GetDefinition(intent)] if intent.definition_id == id(1))
     );

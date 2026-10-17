@@ -1,7 +1,7 @@
 use crate::SessionId;
 use crate::plugin::PluginSessionRequest;
 
-use lash_sansio::sync::MutexExt;
+use lash_protocol_types::sync::MutexExt;
 use std::sync::{Arc, Mutex};
 
 #[tokio::test]

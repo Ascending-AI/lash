@@ -101,8 +101,9 @@ fn a_prompt_snapshot_decodes_only_at_version_one() {
 
 #[test]
 fn chunked_response_mode_is_recorded_only_outside_the_body() {
-    use lash_sansio::llm::types::{
-        LiveRequestBody, ProviderRouteIdentity, RecordedRequestTemplate,
+    use lash_protocol_types::{
+        llm::types::LiveRequestBody, llm::types::ProviderRouteIdentity,
+        llm::types::RecordedRequestTemplate,
     };
     let route = ProviderRouteIdentity {
         provider: "fixture".into(),
@@ -137,7 +138,9 @@ fn chunked_response_mode_is_recorded_only_outside_the_body() {
 /// the admission's encoded index, independently of backend deduplication.
 #[test]
 fn growing_requests_submit_new_fragments_and_logarithmic_index_paths() {
-    use lash_sansio::llm::types::{ProviderRouteIdentity, RecordedRequestTemplate};
+    use lash_protocol_types::{
+        llm::types::ProviderRouteIdentity, llm::types::RecordedRequestTemplate,
+    };
     let route = ProviderRouteIdentity {
         provider: "fixture".into(),
         endpoint: "https://fixture.test".into(),

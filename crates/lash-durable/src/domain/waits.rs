@@ -5,7 +5,7 @@
 //! Lock order is the wait row, then the actor row.
 
 use crate::ids::{ActorKey, DurableInstant, Epoch};
-use lash_sansio::{ProcessId, ToolCallId, ToolId};
+use lash_protocol_types::{ProcessId, ToolCallId, ToolId};
 
 use super::keys::ScopeKey;
 

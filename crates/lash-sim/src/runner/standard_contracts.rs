@@ -1,6 +1,6 @@
 use super::*;
-use lash_sansio::ReportedFailure;
-use lash_sansio::llm::types::{StreamBlockEvent, StreamBlockKind};
+use lash_protocol_types::ReportedFailure;
+use lash_protocol_types::{llm::types::StreamBlockEvent, llm::types::StreamBlockKind};
 
 pub(super) const STANDARD_CONTRACT_ROWS: &[FixedContractRow<TurnMachineContractExecutor>] = &[
     FixedContractRow {
@@ -287,7 +287,7 @@ impl StandardContractToolResult {
             args: call.args.clone(),
             output: self.output.clone(),
             model_return: lash_core::facade_support::ModelToolReturn {
-                outcome: lash_sansio::ModelToolOutcome::from(&self.output.outcome),
+                outcome: lash_protocol_types::ModelToolOutcome::from(&self.output.outcome),
                 tool_name: self.tool_name.to_string(),
                 parts: vec![lash_core::facade_support::ModelToolReturnPart::text(
                     self.model_return_text,
@@ -618,7 +618,9 @@ fn standard_llm_error(message: &str) -> lash_core::LlmCallError {
         retryable: false,
         kind: lash_core::ProviderFailureKind::Unknown,
         raw: None,
-        code: Some(lash_sansio::FailureCode::provider("test_provider_error")),
+        code: Some(lash_protocol_types::FailureCode::provider(
+            "test_provider_error",
+        )),
         terminal_reason: LlmTerminalReason::ProviderError,
         request_body: None,
         partial_response: None,

@@ -4,8 +4,8 @@ use lash_core::{
     ProcessEventLogTestSupport as _, ProcessLifecycle as _, ProcessObserverRegistry as _,
     ProcessRegistrar as _, ProcessRetention as _,
 };
-use lash_sansio::ProcessId;
-use lash_sansio::SessionId;
+use lash_protocol_types::ProcessId;
+use lash_protocol_types::SessionId;
 
 // =============================================================================
 // Runtime dependencies come from one backend

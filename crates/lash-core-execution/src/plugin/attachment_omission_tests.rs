@@ -70,7 +70,7 @@ fn history() -> Vec<Message> {
                 ],
                 call,
                 "look".into(),
-                lash_sansio::ToolCallStatus::Success,
+                lash_protocol_types::ToolCallStatus::Success,
             )],
         ),
         message(

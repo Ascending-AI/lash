@@ -1,5 +1,5 @@
 pub use lash_core_store::process_identity::*;
-use lash_sansio::{CancelOrigin, CancelRequest};
+use lash_protocol_types::{CancelOrigin, CancelRequest};
 
 use schemars::JsonSchema;
 use serde::{Deserialize, Serialize};
@@ -557,7 +557,7 @@ pub fn terminal_append_request(
 #[serde(remote = "Self", tag = "type", rename_all = "snake_case")]
 pub enum ProcessAwaitOutput {
     Settled {
-        #[serde(serialize_with = "lash_sansio::durable_serde::serialize")]
+        #[serde(serialize_with = "lash_protocol_types::durable_serde::serialize")]
         output: Box<crate::ToolCallOutput>,
     },
     /// The owner stopped executing without recording an outcome. Written only by
@@ -568,7 +568,7 @@ pub enum ProcessAwaitOutput {
     Abandoned {
         evidence: Box<AbandonEvidence>,
         #[serde(default, skip_serializing_if = "Option::is_none")]
-        #[serde(serialize_with = "lash_sansio::durable_serde::serialize")]
+        #[serde(serialize_with = "lash_protocol_types::durable_serde::serialize")]
         control: Option<crate::ToolControl>,
     },
     NoLongerRetained {
@@ -723,14 +723,14 @@ fn settled_status(output: &crate::ToolCallOutput) -> TerminalProcessStatus {
 #[serde(remote = "Self", tag = "type", rename_all = "snake_case")]
 pub enum ProcessTerminal {
     Settled {
-        #[serde(serialize_with = "lash_sansio::durable_serde::serialize")]
+        #[serde(serialize_with = "lash_protocol_types::durable_serde::serialize")]
         output: Box<crate::ToolCallOutput>,
     },
     /// See [`ProcessAwaitOutput::Abandoned`].
     Abandoned {
         evidence: Box<AbandonEvidence>,
         #[serde(default, skip_serializing_if = "Option::is_none")]
-        #[serde(serialize_with = "lash_sansio::durable_serde::serialize")]
+        #[serde(serialize_with = "lash_protocol_types::durable_serde::serialize")]
         control: Option<crate::ToolControl>,
     },
 }

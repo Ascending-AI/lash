@@ -138,7 +138,7 @@ impl RuntimeExecutionContext<'_> {
         call_id: crate::ToolCallId,
         language: impl Into<String>,
         identity: lash_trace::TraceLanguageExecutionIdentity,
-        at: lash_sansio::EffectIdentity,
+        at: lash_protocol_types::EffectIdentity,
     ) {
         self.language_calls.lock_recover().insert(
             call_id,

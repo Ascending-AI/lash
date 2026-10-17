@@ -33,7 +33,7 @@
 
 use std::collections::BTreeMap;
 
-use lash_sansio::sync::MutexExt;
+use lash_protocol_types::sync::MutexExt;
 use serde::{Deserialize, Serialize};
 use serde_json::Value;
 

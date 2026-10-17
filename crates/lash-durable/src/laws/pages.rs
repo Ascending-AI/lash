@@ -294,9 +294,9 @@ pub struct Owned {
 impl Owned {
     fn exec(&self, cell: &str) -> ExecKey {
         ExecKey::Cell(
-            lash_sansio::SessionId::try_from(self.session.clone())
+            lash_protocol_types::SessionId::try_from(self.session.clone())
                 .unwrap_or_else(|_| panic!("a constant session id")),
-            lash_sansio::TurnId::try_from("pages-turn".to_owned())
+            lash_protocol_types::TurnId::try_from("pages-turn".to_owned())
                 .unwrap_or_else(|_| panic!("a constant turn id")),
             CellId::new(cell),
         )

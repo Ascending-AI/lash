@@ -79,7 +79,7 @@ pub struct CellEnvelope {
 
 impl CellEnvelope {
     pub(super) fn code_digest(code: &str) -> String {
-        lash_sansio::core_support::blake3_domain_hash_hex(
+        lash_protocol_types::core_support::blake3_domain_hash_hex(
             LASH_CODEMODE_CELL_SEGMENT_CODE_DOMAIN_VERSION,
             code.as_bytes(),
         )

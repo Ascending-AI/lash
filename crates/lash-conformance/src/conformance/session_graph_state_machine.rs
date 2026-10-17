@@ -7,7 +7,7 @@
 
 use crate::facade_support::SessionGraphFacadeOps;
 use lash_core::plugin::PluginSessionRequest;
-use lash_sansio::SessionId;
+use lash_protocol_types::SessionId;
 use std::collections::{BTreeMap, BTreeSet};
 use std::future::Future;
 use std::path::PathBuf;

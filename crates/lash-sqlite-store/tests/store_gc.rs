@@ -10,7 +10,7 @@ use lash_core_execution::{
     SessionCommitStore, SessionCreationHead, SessionHistoryStore, SessionLookup, SessionPolicy,
     SessionStoreCreateRequest, StoreError, StoreMaintenance, TurnInputStore,
 };
-use lash_sansio::SessionId;
+use lash_protocol_types::SessionId;
 use lash_sqlite_store::{BlobArtifactDescriptor, SqliteStore};
 use std::path::{Path, PathBuf};
 use std::sync::Arc;

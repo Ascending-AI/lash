@@ -536,7 +536,7 @@ pub(super) fn direct_llm_client_request(turn_index: usize) -> lash::direct::Dire
         ),
         lash::direct::DirectJsonSchema {
             name: "runtime_perf_direct_completion".to_string(),
-            schema: lash_sansio::SchemaContract::admit(serde_json::json!({
+            schema: lash_protocol_types::SchemaContract::admit(serde_json::json!({
                 "type": "object",
                 "additionalProperties": false,
                 "required": ["kind", "value", "error"],

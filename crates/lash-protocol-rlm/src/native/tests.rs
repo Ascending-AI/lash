@@ -1,9 +1,9 @@
 use lash_core::plugin::PluginSessionRequest;
 use lash_core::sansio::Response;
 use lash_core::{Effect, LlmOutputPart, LlmResponse, TurnMachine, TurnMachineConfig};
+use lash_protocol_types::SessionId;
+use lash_protocol_types::TurnId;
 use lash_rlm_types::{RlmCreateExtras, RlmProtocolEvent};
-use lash_sansio::SessionId;
-use lash_sansio::TurnId;
 use std::collections::VecDeque;
 use std::sync::Arc;
 
@@ -68,16 +68,18 @@ pub(super) fn config_with_dialect(
         model_tool_calls: lash_core::sansio::ModelToolCalls::fixture(),
         protocol_driver: preamble.config.protocol,
         projector: preamble.config.projector,
-        model: lash_sansio::llm_profile::LlmProfileConfig::new(
-            lash_sansio::llm_profile::RecordedLlmProfile::mint(
-                lash_sansio::llm_profile::LlmProfileKey::new("request-fixture"),
-                lash_sansio::llm_profile::LlmProfileMetadata::builder("scripted".to_string())
-                    .context_window_tokens(128_000)
-                    .capability(Default::default())
-                    .extra_body(Default::default())
-                    .cache_retention(lash_sansio::llm::capability::CacheRetention::Short)
-                    .build()
-                    .expect("valid profile"),
+        model: lash_protocol_types::llm_profile::LlmProfileConfig::new(
+            lash_protocol_types::llm_profile::RecordedLlmProfile::mint(
+                lash_protocol_types::llm_profile::LlmProfileKey::new("request-fixture"),
+                lash_protocol_types::llm_profile::LlmProfileMetadata::builder(
+                    "scripted".to_string(),
+                )
+                .context_window_tokens(128_000)
+                .capability(Default::default())
+                .extra_body(Default::default())
+                .cache_retention(lash_protocol_types::llm::capability::CacheRetention::Short)
+                .build()
+                .expect("valid profile"),
             ),
         )
         .with_reasoning(Default::default()),
@@ -1553,12 +1555,12 @@ fn native_user_stop_is_terminal_live_and_after_restore() {
                 _ => None,
             })
             .unwrap();
-        machine.record_cancellation_evidence(lash_sansio::TurnCancellationEvidence {
+        machine.record_cancellation_evidence(lash_protocol_types::TurnCancellationEvidence {
             request_id: "user-stop".into(),
             origin: Some("host".into()),
             reason: Some("Stop".into()),
-            undelivered: lash_sansio::TurnCancelUndeliveredInputPolicy::Defer,
-            mode: lash_sansio::TurnCancelMode::Immediate,
+            undelivered: lash_protocol_types::TurnCancelUndeliveredInputPolicy::Defer,
+            mode: lash_protocol_types::TurnCancelMode::Immediate,
             honoured_after_step: None,
         });
         machine.handle_response(Response::ExecResult {

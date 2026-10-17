@@ -20,8 +20,8 @@ use lash_core_store::tool_run::{
 };
 use lash_durable::ActorTx;
 use lash_durable::domain::{OwnerKey, RunSeq};
+use lash_protocol_types::{ExecutionLimit, ExecutionPolicy};
 use lash_sansio::sansio::PendingToolCall;
-use lash_sansio::{ExecutionLimit, ExecutionPolicy};
 
 use super::super::ActorContext;
 use super::super::waits::{ParkDeadline, Resolution};
@@ -143,7 +143,7 @@ pub trait RoundTools: Send + Sync {
 
     /// How long a call's body whose token was cancelled may still answer:
     /// the runtime's
-    /// [`ExecutionBudgets::stop_grace`](lash_sansio::ExecutionBudgets::stop_grace).
+    /// [`ExecutionBudgets::stop_grace`](lash_protocol_types::ExecutionBudgets::stop_grace).
     fn stop_grace(&self) -> std::time::Duration;
 
     /// The body of `execution`, an attempt of `call`: the call's admission

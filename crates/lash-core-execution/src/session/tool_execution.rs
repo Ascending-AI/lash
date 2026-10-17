@@ -131,7 +131,7 @@ impl ToolInvocationReply {
 #[derive(Clone, Debug, serde::Serialize, serde::Deserialize)]
 pub struct CompletedProtocolToolCall {
     pub completed: crate::sansio::CompletedToolCall,
-    #[serde(serialize_with = "lash_sansio::durable_serde::serialize")]
+    #[serde(serialize_with = "lash_protocol_types::durable_serde::serialize")]
     pub record: ToolCallRecord,
 }
 

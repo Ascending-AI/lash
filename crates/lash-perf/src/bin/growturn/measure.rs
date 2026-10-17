@@ -1,6 +1,6 @@
 //! Endpoint counters: store-owned bytes, allocator traffic and Linux resources.
 use anyhow::{Context as _, Result};
-use lash_sansio::sync::MutexExt as _;
+use lash_protocol_types::sync::MutexExt as _;
 use rusqlite::{Connection, OpenFlags};
 use serde_json::{Value, json};
 use std::io::Write as _;

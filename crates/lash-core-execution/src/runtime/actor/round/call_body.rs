@@ -100,7 +100,10 @@ impl CallBody {
         let answer = match &output.outcome {
             crate::ToolCallOutcome::Success(value) => {
                 let mut body = TokenWriter::new();
-                body.sum(lash_sansio::tool_output::graph::FROZEN_TOOL_VALUE, 1);
+                body.sum(
+                    lash_protocol_types::tool_output::graph::FROZEN_TOOL_VALUE,
+                    1,
+                );
                 value.encode(&mut body);
                 Some(staging.encode(
                     NodeKind::FROZEN_VALUE,

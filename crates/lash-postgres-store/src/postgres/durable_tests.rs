@@ -210,9 +210,10 @@ async fn sequential_calls_submit_only_new_fragments_across_settlement() {
         ActorKey, CommitLabel, DomainWrite, DurableReads, DurableStore, FormatSet, MailTx, NodeId,
         NodeSpec,
     };
-    use lash_sansio::llm::types::{
-        LlmRequestScope, ProviderRouteIdentity, RecordedRequestTemplate, ResponseContext,
-        ResponseContract,
+    use lash_protocol_types::{
+        llm::types::LlmRequestScope, llm::types::ProviderRouteIdentity,
+        llm::types::RecordedRequestTemplate, llm::types::ResponseContext,
+        llm::types::ResponseContract,
     };
 
     let database_url = crate::postgres_test_support::database_url()
@@ -222,7 +223,7 @@ async fn sequential_calls_submit_only_new_fragments_across_settlement() {
     let store = storage
         .durable_store()
         .with_clock_for_testing(Arc::new(TestClock::new(1_000_000)));
-    let session = lash_sansio::SessionId::from("fragment-session");
+    let session = lash_protocol_types::SessionId::from("fragment-session");
     let actor = ActorKey::session(session.as_str()).unwrap();
     let formats = FormatSet::new("fragment-index-formats");
     let mut create = MailTx::new();
@@ -277,7 +278,8 @@ async fn sequential_calls_submit_only_new_fragments_across_settlement() {
         let call = PromptCallKey {
             session: session.clone(),
             call: ModelCallId::Turn {
-                run: lash_sansio::TurnId::parse(format!("fragment-turn-{ordinal}")).unwrap(),
+                run: lash_protocol_types::TurnId::parse(format!("fragment-turn-{ordinal}"))
+                    .unwrap(),
                 ordinal: 1,
             },
         };
@@ -430,7 +432,7 @@ async fn sequential_calls_submit_only_new_fragments_across_settlement() {
     let call = PromptCallKey {
         session: session.clone(),
         call: ModelCallId::Turn {
-            run: lash_sansio::TurnId::from("fragment-delete"),
+            run: lash_protocol_types::TurnId::from("fragment-delete"),
             ordinal: 1,
         },
     };

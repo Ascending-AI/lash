@@ -10,7 +10,7 @@
 //! No method has a default body: a probe states what it does with each.
 
 use crate::domain::{AdmittedId, ExecKey, Ordinal, OwnerKey, RunSeq};
-use lash_sansio::{SessionId, TurnId};
+use lash_protocol_types::{SessionId, TurnId};
 
 /// Where the owners report what hidden replay would make them do.
 pub trait DurableProbe: Send + Sync {

@@ -1,4 +1,4 @@
-use lash_sansio::TurnId;
+use lash_protocol_types::TurnId;
 use std::sync::Arc;
 
 use crate::rlm_support::RlmCompletion;
@@ -391,12 +391,12 @@ impl ProtocolDriverHandle<lash_core::HostTurnProtocol> for RlmDriver {
                 Some(TurnFailureCode::EmptyResponse.into()),
                 "Model returned no assistant text.",
                 None,
-                lash_sansio::session_model::RuntimeOutputCuts::standard(),
+                lash_protocol_types::session_model::RuntimeOutputCuts::standard(),
             )));
             actions.push(DriverAction::Finish(TurnOutcome::Stopped(
                 TurnStop::ProviderError {
-                    cause: lash_sansio::TurnErrorCause::new(
-                        lash_sansio::TurnErrorCode::InvalidResponse,
+                    cause: lash_protocol_types::TurnErrorCause::new(
+                        lash_protocol_types::TurnErrorCode::InvalidResponse,
                     ),
                 },
             )));

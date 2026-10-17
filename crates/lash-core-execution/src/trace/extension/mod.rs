@@ -14,7 +14,7 @@ use std::sync::{Arc, Mutex};
 
 use lash_core_store::store::plugin_writers::PluginCallbackIdentity;
 use lash_core_store::tool_run::CallbackSlot;
-use lash_sansio::sync::MutexExt as _;
+use lash_protocol_types::sync::MutexExt as _;
 use lash_trace::{
     ContentPolicy, PublicationHold, SpanSpec, ToolSpanAnnotations, TraceCarrier, TraceContext,
     TraceOmissionDiagnostic, TraceParent, TraceSpanKind, WriterRemaining,

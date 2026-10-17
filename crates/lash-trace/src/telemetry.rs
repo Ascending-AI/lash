@@ -15,13 +15,15 @@
 //! freshly executed work and newly committed transitions hold; a retained read
 //! or a replayed journal entry has none.
 
-use lash_sansio::{ProcessId, RuntimeOwner, SessionId, TurnId};
+use lash_protocol_types::{ProcessId, RuntimeOwner, SessionId, TurnId};
 use serde::{Deserialize, Serialize};
 use sha2::{Digest, Sha256};
 
-pub use lash_sansio::trace_carrier::{
-    InvalidTraceCarrier, TRACESTATE_CHAR_LIMIT, TRACESTATE_MEMBER_LIMIT, TraceCarrier,
-    TraceStateBudget, W3cSpanId, W3cTraceFlags, W3cTraceId, W3cTraceState,
+pub use lash_protocol_types::{
+    trace_carrier::InvalidTraceCarrier, trace_carrier::TRACESTATE_CHAR_LIMIT,
+    trace_carrier::TRACESTATE_MEMBER_LIMIT, trace_carrier::TraceCarrier,
+    trace_carrier::TraceStateBudget, trace_carrier::W3cSpanId, trace_carrier::W3cTraceFlags,
+    trace_carrier::W3cTraceId, trace_carrier::W3cTraceState,
 };
 
 /// A host's narrowing of the W3C `tracestate` ceilings, for carriers it

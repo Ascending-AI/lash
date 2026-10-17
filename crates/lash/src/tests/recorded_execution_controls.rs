@@ -380,7 +380,7 @@ fn refusals_shown(request: &LlmRequest) -> usize {
             matches!(
                 block,
                 LlmContentBlock::ToolResult {
-                    status: lash_sansio::ToolCallStatus::Failure,
+                    status: lash_protocol_types::ToolCallStatus::Failure,
                     ..
                 }
             )
@@ -525,7 +525,10 @@ async fn a_commanded_max_tool_calls_binds_the_next_run() -> Result<()> {
             };
             assert_eq!(failure.code, crate::ToolCallLimitExceeded::CODE);
             assert_eq!(failure.class, lash_core::ToolFailureClass::ResourceLimit);
-            assert_eq!(failure.source, lash_sansio::ToolFailureSource::Runtime);
+            assert_eq!(
+                failure.source,
+                lash_protocol_types::ToolFailureSource::Runtime
+            );
         }
     }
 

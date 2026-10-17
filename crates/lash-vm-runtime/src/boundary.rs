@@ -5,7 +5,7 @@ use std::collections::{BTreeMap, BTreeSet};
 
 pub use lash_kernel_check::type_of_schema;
 use lash_kernel_doc::{EffectName, Signature, Type};
-use lash_sansio::ToolId;
+use lash_protocol_types::ToolId;
 
 /// One effect a document may perform, and the tool that answers it.
 #[derive(Clone, Debug, PartialEq, Eq)]
@@ -14,7 +14,7 @@ pub struct HostEffect {
     /// The signature a document's manifest must state to perform it.
     pub signature: Signature,
     /// The turn-ending controls the tool declares its result may be.
-    pub controls: lash_sansio::TurnControls,
+    pub controls: lash_protocol_types::TurnControls,
 }
 
 /// Why a boundary could not be stated.
@@ -65,15 +65,15 @@ impl HostBoundary {
         &mut self,
         name: &str,
         tool: ToolId,
-        input: &lash_sansio::JsonSchema,
-        output: &lash_sansio::JsonSchema,
-        controls: lash_sansio::TurnControls,
+        input: &lash_protocol_types::JsonSchema,
+        output: &lash_protocol_types::JsonSchema,
+        controls: lash_protocol_types::TurnControls,
     ) -> Result<(), BoundaryError> {
         self.offer(
             name,
             HostEffect {
                 tool,
-                signature: lash_sansio::tool_signature(input, output),
+                signature: lash_protocol_types::tool_signature(input, output),
                 controls,
             },
         )
@@ -108,10 +108,10 @@ impl HostBoundary {
                     .controls
                     .iter()
                     .map(|kind| match kind {
-                        lash_sansio::TurnControlKind::Finish => {
+                        lash_protocol_types::TurnControlKind::Finish => {
                             lash_kernel_dialect::EffectControl::Finish
                         }
-                        lash_sansio::TurnControlKind::SwitchAgentFrame => {
+                        lash_protocol_types::TurnControlKind::SwitchAgentFrame => {
                             lash_kernel_dialect::EffectControl::SwitchAgentFrame
                         }
                     })
@@ -246,10 +246,10 @@ mod tests {
             "took_ms": { "type": "integer" },
         }));
         let admit = |schema: &serde_json::Value| {
-            lash_sansio::JsonSchema::admit(schema.clone()).expect("an admissible schema")
+            lash_protocol_types::JsonSchema::admit(schema.clone()).expect("an admissible schema")
         };
-        let expected = lash_sansio::tool_signature(&admit(&input), &admit(&earlier));
-        let provided = lash_sansio::tool_signature(&admit(&input), &admit(&later));
+        let expected = lash_protocol_types::tool_signature(&admit(&input), &admit(&earlier));
+        let provided = lash_protocol_types::tool_signature(&admit(&input), &admit(&later));
         assert!(
             lash_kernel_check::signature_serves(&provided, &expected),
             "the added field fits the projected result"

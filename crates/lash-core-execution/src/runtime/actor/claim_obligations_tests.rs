@@ -14,7 +14,7 @@ use lash_core_store::tool_run::{
 };
 use lash_durable::domain::{OwnerKey, RunSeq};
 use lash_durable::{ActorKey, ActorTx, DurableInstant, Epoch, MailSeq, OpenedActor, StateRevision};
-use lash_sansio::{ExecutionLimit, ExecutionPolicy, SessionId, TurnId};
+use lash_protocol_types::{ExecutionLimit, ExecutionPolicy, SessionId, TurnId};
 
 use super::{ReadScope, RecordedWork, SessionObligations, Staged};
 use crate::runtime::actor::round::{self, AdmittedExecution, ExecutionDraft};

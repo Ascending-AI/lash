@@ -7,8 +7,8 @@ use lash_core::{
     LiveReplayEventDraft, LiveReplayStore, ProcessEvent, ProcessRegistry,
     SessionObservationEventPayload, SessionProcessEventKind,
 };
-use lash_sansio::sync::MutexExt;
-use lash_sansio::{ProcessId, SessionId};
+use lash_protocol_types::sync::MutexExt;
+use lash_protocol_types::{ProcessId, SessionId};
 
 /// One open handle's route: the revision its observation stands at, or
 /// `None` once the handle is gone.

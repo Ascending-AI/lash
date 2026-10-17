@@ -1,4 +1,4 @@
-use lash_sansio::sync::MutexExt;
+use lash_protocol_types::sync::MutexExt;
 use std::sync::{Arc, Mutex};
 
 use crate::codex::ws_testing::{ScriptedWsAction, spawn_scripted_websocket};
@@ -115,16 +115,18 @@ fn provider_request_event(
 fn request() -> LlmRequest {
     LlmRequest {
         instructions: None,
-        model: lash_sansio::llm_profile::LlmProfileConfig::new(
-            lash_sansio::llm_profile::RecordedLlmProfile::mint(
-                lash_sansio::llm_profile::LlmProfileKey::new("request-fixture"),
-                lash_sansio::llm_profile::LlmProfileMetadata::builder("test-model".to_string())
-                    .context_window_tokens(128_000)
-                    .capability(Default::default())
-                    .extra_body(Default::default())
-                    .cache_retention(lash_sansio::llm::capability::CacheRetention::Short)
-                    .build()
-                    .expect("valid profile"),
+        model: lash_protocol_types::llm_profile::LlmProfileConfig::new(
+            lash_protocol_types::llm_profile::RecordedLlmProfile::mint(
+                lash_protocol_types::llm_profile::LlmProfileKey::new("request-fixture"),
+                lash_protocol_types::llm_profile::LlmProfileMetadata::builder(
+                    "test-model".to_string(),
+                )
+                .context_window_tokens(128_000)
+                .capability(Default::default())
+                .extra_body(Default::default())
+                .cache_retention(lash_protocol_types::llm::capability::CacheRetention::Short)
+                .build()
+                .expect("valid profile"),
             ),
         )
         .with_reasoning(Default::default()),

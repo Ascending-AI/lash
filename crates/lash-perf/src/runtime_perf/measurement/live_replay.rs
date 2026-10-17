@@ -1,7 +1,7 @@
 use super::*;
-use lash_sansio::SessionId;
-use lash_sansio::TurnId;
-use lash_sansio::llm::types::{StreamBlockEvent, StreamBlockKind};
+use lash_protocol_types::SessionId;
+use lash_protocol_types::TurnId;
+use lash_protocol_types::{llm::types::StreamBlockEvent, llm::types::StreamBlockKind};
 
 const LIVE_REPLAY_EVENTS_PER_TURN: usize = 96;
 const LIVE_REPLAY_MAIN_CAPACITY: usize = 256;

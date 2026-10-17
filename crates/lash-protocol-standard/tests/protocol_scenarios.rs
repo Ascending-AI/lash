@@ -1,6 +1,6 @@
-use lash_sansio::ReportedFailure;
-use lash_sansio::TurnId;
-use lash_sansio::llm::types::{StreamBlockEvent, StreamBlockKind};
+use lash_protocol_types::ReportedFailure;
+use lash_protocol_types::TurnId;
+use lash_protocol_types::{llm::types::StreamBlockEvent, llm::types::StreamBlockKind};
 use std::sync::Arc;
 
 use lash_core::sansio::{self, ChatContextProjector, ProtocolDriverHandle, Response};
@@ -330,7 +330,7 @@ impl StandardToolResult {
             args: call.args.clone(),
             output: self.output.clone(),
             model_return: lash_core::facade_support::ModelToolReturn {
-                outcome: lash_sansio::ModelToolOutcome::from(&self.output.outcome),
+                outcome: lash_protocol_types::ModelToolOutcome::from(&self.output.outcome),
                 tool_name: self.tool_name.to_string(),
                 parts: vec![lash_core::facade_support::ModelToolReturnPart::text(
                     self.model_return_text,
@@ -498,13 +498,13 @@ fn standard_config() -> TurnMachineConfig {
         model_tool_calls: lash_core::sansio::ModelToolCalls::fixture(),
         protocol_driver,
         projector: Arc::new(ChatContextProjector::default()),
-        model: lash_sansio::llm_profile::LlmProfileConfig::new(
-            lash_sansio::llm_profile::RecordedLlmProfile::mint(
-                lash_sansio::llm_profile::LlmProfileKey::new("request-fixture"),
-                lash_sansio::llm_profile::LlmProfileMetadata::new(
+        model: lash_protocol_types::llm_profile::LlmProfileConfig::new(
+            lash_protocol_types::llm_profile::RecordedLlmProfile::mint(
+                lash_protocol_types::llm_profile::LlmProfileKey::new("request-fixture"),
+                lash_protocol_types::llm_profile::LlmProfileMetadata::new(
                     "test-model".to_string(),
                     std::num::NonZeroUsize::MIN.saturating_add(127_999),
-                    lash_sansio::llm::capability::CacheRetention::Short,
+                    lash_protocol_types::llm::capability::CacheRetention::Short,
                 )
                 .with_capability(lash_core::LlmProfileCapability::default())
                 .with_extra_body(Default::default()),
@@ -602,7 +602,9 @@ fn llm_error(message: &str) -> LlmCallError {
         retryable: false,
         kind: lash_core::ProviderFailureKind::Unknown,
         raw: None,
-        code: Some(lash_sansio::FailureCode::provider("test_provider_error")),
+        code: Some(lash_protocol_types::FailureCode::provider(
+            "test_provider_error",
+        )),
         terminal_reason: LlmTerminalReason::ProviderError,
         request_body: None,
         partial_response: None,
@@ -705,8 +707,8 @@ fn standard_protocol_scenario_provider_error_stops_without_checkpoint() {
             done: Some(true),
             error_contains: vec!["LLM error: upstream provider unavailable"],
             turn_outcome: Some(TurnOutcome::Stopped(TurnStop::ProviderError {
-                cause: lash_sansio::TurnErrorCause::new(
-                    lash_sansio::TurnErrorCode::ProviderRejected,
+                cause: lash_protocol_types::TurnErrorCause::new(
+                    lash_protocol_types::TurnErrorCode::ProviderRejected,
                 ),
             })),
             ..StandardProtocolExpectations::default()

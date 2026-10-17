@@ -8,7 +8,7 @@
 // library code).
 #![allow(clippy::disallowed_methods)]
 
-use lash_sansio::SessionId;
+use lash_protocol_types::SessionId;
 
 // Attachment-store laws certify SQLite and S3; PostgreSQL owns only referrers.
 // live_replay_tests! run in tests/live_replay.rs, against the facade's PostgreSQL live replay store.

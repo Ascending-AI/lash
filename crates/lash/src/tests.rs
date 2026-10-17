@@ -3,10 +3,10 @@ use lash_core::facade_support::PluginFactory;
 use lash_core::facade_support::ProviderHandle;
 use lash_core::plugin::StaticPluginFactory;
 use lash_core::{ToolProvider, TurnActivity};
-use lash_sansio::SessionId;
+use lash_protocol_types::SessionId;
 use std::sync::Arc;
 
-use lash_sansio::sync::MutexExt;
+use lash_protocol_types::sync::MutexExt;
 use std::sync::Mutex as StdMutex;
 use std::sync::atomic::{AtomicUsize, Ordering};
 

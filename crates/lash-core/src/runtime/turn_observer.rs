@@ -44,7 +44,7 @@ use std::sync::{Arc, Mutex};
 use std::task::{Context, Poll, Waker};
 use std::time::Instant;
 
-use lash_sansio::sync::MutexExt;
+use lash_protocol_types::sync::MutexExt;
 
 use super::RuntimeStreamEvent;
 use super::observation_publisher::ObservationSource;

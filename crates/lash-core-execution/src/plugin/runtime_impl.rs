@@ -3,7 +3,7 @@ use std::collections::{BTreeMap, BTreeSet};
 use std::sync::Arc;
 use std::sync::{Mutex as StdMutex, Weak};
 
-use lash_sansio::sync::MutexExt;
+use lash_protocol_types::sync::MutexExt;
 
 use super::*;
 

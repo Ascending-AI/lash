@@ -7,7 +7,7 @@ use crate::plugin::PluginSessionRequest;
 fn plugin_view_cannot_capture_foreign_namespace() {
     use crate::plugin::{ExecutionState, PluginError, SessionAuthorityContext};
     use lash_core_store::session_state::SessionPluginStateSource;
-    use lash_sansio::sync::MutexExt;
+    use lash_protocol_types::sync::MutexExt;
 
     #[derive(Clone)]
     struct Probe {

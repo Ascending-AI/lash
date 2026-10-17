@@ -133,7 +133,7 @@ pub struct EffectAdmission {
 pub struct AdmittedCall {
     pub effect: EffectIdentity,
     pub operation: EffectName,
-    pub call: lash_sansio::ToolCallId,
+    pub call: lash_protocol_types::ToolCallId,
     /// Its Admission.
     pub admission: NodeId,
 }

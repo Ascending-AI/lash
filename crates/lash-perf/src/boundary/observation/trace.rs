@@ -10,7 +10,7 @@ use anyhow::{Result, ensure};
 use lash::tracing::{
     ContentPolicy, TraceDetailPolicy, TraceEvent, TraceRecord, TraceSink, TraceSinkError,
 };
-use lash_sansio::sync::MutexExt;
+use lash_protocol_types::sync::MutexExt;
 
 use super::super::{Args, Case, Meter, Receipt, facade};
 use super::{Flavor, Fleet};

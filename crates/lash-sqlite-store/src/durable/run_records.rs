@@ -11,7 +11,7 @@ use lash_durable::domain::{
     DomainRefusal, Ordinal, OwnerKey, RunFactKind, RunFactRow, RunFactWrite, RunSeq,
 };
 use lash_durable::{DurableError, Epoch};
-use lash_sansio::ToolCallId;
+use lash_protocol_types::ToolCallId;
 use lash_store_sql::durable::run_records::RunRecordStatements;
 use rusqlite::{Connection, OptionalExtension};
 

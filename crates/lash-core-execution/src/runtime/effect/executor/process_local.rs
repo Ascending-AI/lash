@@ -44,7 +44,7 @@ pub(crate) fn process_terminal_resolution(output: crate::ProcessAwaitOutput) -> 
 fn process_start_starter(
     registration: &crate::ProcessStartRegistration,
     execution_context: &crate::ProcessExecutionContext,
-) -> Result<lash_sansio::EffectJournalIdentity, RuntimeEffectControllerError> {
+) -> Result<lash_protocol_types::EffectJournalIdentity, RuntimeEffectControllerError> {
     let journal = match (
         execution_context
             .causal_invocation

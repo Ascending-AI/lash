@@ -7,7 +7,7 @@ use lash_core::llm::types::{
     LlmContentBlock, LlmRequest, LlmRole, LlmStreamEvent, StreamBlockIdentity,
 };
 use lash_core::provider::{ProviderOptions, ProviderReliability};
-use lash_sansio::llm::types::{StreamBlockEvent, StreamBlockKind};
+use lash_protocol_types::{llm::types::StreamBlockEvent, llm::types::StreamBlockKind};
 use std::path::PathBuf;
 use std::sync::Arc;
 use std::time::Duration;

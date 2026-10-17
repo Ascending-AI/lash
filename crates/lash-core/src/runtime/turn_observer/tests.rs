@@ -4,7 +4,7 @@ use std::sync::{Arc, Mutex};
 use std::task::{Context, Poll};
 use std::time::{Duration, Instant};
 
-use lash_sansio::sync::MutexExt;
+use lash_protocol_types::sync::MutexExt;
 
 use super::{DeltaFraming, ObservationSource, RuntimeStreamEvent, TurnObservations, TurnObserver};
 use crate::engine::{

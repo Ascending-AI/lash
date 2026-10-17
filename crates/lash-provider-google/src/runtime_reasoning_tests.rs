@@ -2,12 +2,12 @@
 //! durable backend over a SQLite memory store set serves each turn on its
 //! own node, and the host sees each reasoning part once, in its place.
 
-use lash_sansio::llm::types::{StreamBlockEvent, StreamBlockKind};
+use lash_protocol_types::{llm::types::StreamBlockEvent, llm::types::StreamBlockKind};
 use std::collections::VecDeque;
 use std::sync::Arc;
 
 use lash_core::provider::{ProviderHandle, StreamTermination};
-use lash_sansio::sync::MutexExt;
+use lash_protocol_types::sync::MutexExt;
 use serde_json::{Value, json};
 
 use crate::GoogleOAuthProvider;

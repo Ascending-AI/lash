@@ -27,7 +27,7 @@
 #[path = "support/served.rs"]
 mod served;
 
-use lash_sansio::llm::types::StreamBlockEvent;
+use lash_protocol_types::llm::types::StreamBlockEvent;
 use std::sync::{Arc, Mutex};
 
 use lash::observe::Stream as _;
@@ -39,7 +39,7 @@ use lash_core::llm::types::{
 use lash_core::{
     LiveReplayStore, SessionObservationEventPayload, ToolCall, TurnActivity, TurnEvent,
 };
-use lash_sansio::sync::MutexExt as _;
+use lash_protocol_types::sync::MutexExt as _;
 
 use served::{Tier, WATCHDOG, World};
 
@@ -187,7 +187,7 @@ impl lash_core::ToolProvider for ActivityTools {
         // `processes.start` does: the realized start's handle replaces it.
         let answer =
             lash_core::ToolOutcomeDone::ok(if call.args["slot"].as_bool().unwrap_or_default() {
-                lash_sansio::handle::process_start_slot_json(0)
+                lash_protocol_types::handle::process_start_slot_json(0)
             } else {
                 serde_json::json!({ "answered": label })
             });

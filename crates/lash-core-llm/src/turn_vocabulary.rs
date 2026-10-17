@@ -107,7 +107,7 @@ pub enum TurnIssueSeverity {
 #[derive(Clone, Debug, serde::Serialize, serde::Deserialize)]
 pub struct TurnIssue {
     #[serde(default, skip_serializing_if = "Vec::is_empty")]
-    pub plugin_failures: Vec<lash_sansio::PluginOperationFailure>,
+    pub plugin_failures: Vec<lash_protocol_types::PluginOperationFailure>,
     pub severity: TurnIssueSeverity,
     /// Typed origin of the failure, carrying the same wire spelling the field
     /// held as a bare `String`.

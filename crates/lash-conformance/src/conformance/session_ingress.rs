@@ -4,7 +4,7 @@
 use std::sync::Arc;
 use std::{future::Future, pin::Pin};
 
-use lash_sansio::SessionId;
+use lash_protocol_types::SessionId;
 
 /// The session every ingress law runs in, on a fresh fixture per law.
 pub const SESSION_INGRESS_SESSION_ID: &str = "session-ingress";

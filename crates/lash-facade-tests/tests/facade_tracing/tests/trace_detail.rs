@@ -17,7 +17,7 @@ use lash::tracing::{
     TraceRecord, TraceSpanKind as K,
 };
 use lash_core::llm::types::{LlmOutputPart, LlmProviderTraceEvent, StreamBlockIdentity};
-use lash_sansio::llm::types::{StreamBlockEvent, StreamBlockKind};
+use lash_protocol_types::{llm::types::StreamBlockEvent, llm::types::StreamBlockKind};
 use lash_trace::otel::OtelOptions;
 use opentelemetry_sdk::trace::{Sampler, SpanData};
 use std::sync::atomic::{AtomicUsize, Ordering};

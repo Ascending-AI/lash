@@ -191,14 +191,14 @@ pub enum PluginOperationCommandOutcome {
         plugin_id: String,
         output: serde_json::Value,
         #[serde(default, skip_serializing_if = "Vec::is_empty")]
-        events: Vec<lash_sansio::PluginRuntimeEvent>,
+        events: Vec<lash_protocol_types::PluginRuntimeEvent>,
         #[serde(default, skip_serializing_if = "Vec::is_empty")]
         pending_turn_inputs: Vec<crate::PendingTurnInput>,
     },
     /// The operation failed: nothing of it committed, and the command is
     /// settled, so it is never applied again.
     Failed {
-        failure: Box<lash_sansio::PluginOperationFailure>,
+        failure: Box<lash_protocol_types::PluginOperationFailure>,
     },
     /// Queued input was refused at admission. The refusal and its typed
     /// cause are retained for the submitting host, and none of the

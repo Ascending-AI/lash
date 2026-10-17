@@ -1,6 +1,6 @@
 use super::*;
 use crate::scheduler::PendingRuntimeBoundary;
-use lash_sansio::SessionId;
+use lash_protocol_types::SessionId;
 
 #[tokio::test]
 async fn attachment_owner_sweep_is_deterministic_across_memory_and_sqlite() {

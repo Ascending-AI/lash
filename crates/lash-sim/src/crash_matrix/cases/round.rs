@@ -12,7 +12,7 @@ use std::sync::{Arc, Mutex};
 use lash_core::sync::MutexExt as _;
 use lash_core_store::store::RunTerminalKind;
 use lash_durable_test::{Cut, SimNodes};
-use lash_sansio::SessionId;
+use lash_protocol_types::SessionId;
 
 use super::{admit_turn, turn_end, turn_settled};
 use crate::crash_matrix::deployment::Workload;

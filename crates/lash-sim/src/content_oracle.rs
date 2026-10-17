@@ -11,7 +11,7 @@ use std::fmt;
 
 use lash_core::DeploymentStore;
 use lash_protocol_standard::{BuiltinToolOutputRenderer, ToolOutputRenderer, ToolRenderParams};
-use lash_sansio::SessionId;
+use lash_protocol_types::SessionId;
 use serde::Serialize;
 use serde_json::Value;
 
@@ -478,12 +478,13 @@ pub async fn reopen_session(
             if part.get("kind").and_then(Value::as_str) == Some("ToolResult") {
                 // A tool result's content is its ordered `blocks`; compare the
                 // text the model reads, rendered the one way the runtime does.
-                let blocks = serde_json::from_value::<Vec<lash_sansio::ModelToolReturnPart>>(
-                    part.get("blocks").cloned().unwrap_or(Value::Null),
-                )
-                .map_err(|err| {
-                    format!("reopened `{session_id}` tool result blocks do not decode: {err}")
-                })?;
+                let blocks =
+                    serde_json::from_value::<Vec<lash_protocol_types::ModelToolReturnPart>>(
+                        part.get("blocks").cloned().unwrap_or(Value::Null),
+                    )
+                    .map_err(|err| {
+                        format!("reopened `{session_id}` tool result blocks do not decode: {err}")
+                    })?;
                 reopened.result_call_ids.push(part_str(part, "call_id"));
                 reopened.tool_results.push(ToolResultContent {
                     call_id: provider_call_ids

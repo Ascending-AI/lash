@@ -30,8 +30,8 @@ use crate::session_graph_integrity::{
 use crate::session_model::{ConversationRecord, ProtocolEvent, SessionHistoryRecord};
 use crate::{BaseRenderCache, ClockWallTime, LlmUsage, Message};
 use facade_ops::{SessionGraphFacadeOps, SessionNodeProjection};
-use lash_sansio::AppendVec;
-use lash_sansio::core_support::MessageCoreSupport;
+use lash_protocol_types::AppendVec;
+use lash_protocol_types::core_support::MessageCoreSupport;
 
 #[derive(
     Clone, Debug, PartialEq, Eq, serde::Serialize, serde::Deserialize, schemars::JsonSchema,
@@ -334,7 +334,7 @@ pub struct SessionNodeRecord {
 /// version_guard(
 ///     shapes(cover(StoredSessionNodeBody, SessionNodePayload, SessionNodeRecord)),
 ///     roots(
-///         path = "crates/lash-sansio/src/session_model/message.rs", Message, FlatPart,
+///         path = "crates/lash-protocol-types/src/session_model/message.rs", Message, FlatPart,
 ///         FlatPartRef,
 ///     ),
 ///     file(
@@ -345,15 +345,15 @@ pub struct SessionNodeRecord {
 ///         ),
 ///     ),
 ///     shapes(
-///         path = "crates/lash-sansio/src/llm/capability.rs",
+///         path = "crates/lash-protocol-types/src/llm/capability.rs",
 ///         cover(
 ///             LlmProfileCapability, ReasoningCapability, ReasoningSelection, ReasoningEncoding,
 ///             SamplingCapability, StreamTermination, CacheControlDialect,
 ///         ),
 ///     ),
 ///     shapes(
-///         path = "crates/lash-sansio/src/llm/types.rs",
-///         path = "crates/lash-sansio/src/llm/types/non_negative_finite_f64.rs",
+///         path = "crates/lash-protocol-types/src/llm/types.rs",
+///         path = "crates/lash-protocol-types/src/llm/types/non_negative_finite_f64.rs",
 ///         cover(
 ///             AttachmentRef, ProviderReplayMeta, ProviderReasoningReplay, ResponseTextMeta,
 ///             ProviderRouteIdentity, ProviderFileScope, GenerationOptions, NonNegativeFiniteF64,

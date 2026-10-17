@@ -495,13 +495,13 @@ name = "lash-fuzz"
 version = "0.0.0"
 dependencies = [
  "arbitrary",
- "lash-internal-sansio",
+ "lash-internal-protocol-types",
  "lash-kernel-conformance",
  "libfuzzer-sys",
 ]
 
 [[package]]
-name = "lash-internal-sansio"
+name = "lash-internal-protocol-types"
 version = "0.0.0-dev"
 dependencies = [
  "blake3",

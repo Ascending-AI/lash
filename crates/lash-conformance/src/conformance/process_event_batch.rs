@@ -9,7 +9,7 @@
 
 use super::*;
 use crate::ProcessEventLogTestSupport as _;
-use lash_sansio::ProcessId;
+use lash_protocol_types::ProcessId;
 use pretty_assertions::assert_eq;
 
 fn batch_registration() -> ProcessRegistration {
@@ -42,7 +42,7 @@ async fn registered(registry: &Arc<dyn ProcessRegistry>) -> ProcessId {
 
 fn occurrence(node: &str, occurrence: u64, replay_key: &str) -> ProcessEventAppendRequest {
     lash_core::ProcessEffectOccurrence::new(
-        lash_sansio::effect_identity_fixture(node, occurrence),
+        lash_protocol_types::effect_identity_fixture(node, occurrence),
         "tool:batch_law",
         lash_core::ProcessEffectOutcomeClass::Success,
         None,

@@ -1,4 +1,4 @@
-use lash_sansio::sync::MutexExt;
+use lash_protocol_types::sync::MutexExt;
 use std::sync::Arc;
 
 use lash_core::llm::types::{LlmContentBlock, LlmMessage, LlmRequest, LlmRole};
@@ -60,14 +60,14 @@ fn text_block(text: &str, cache_breakpoint: bool) -> LlmContentBlock {
 fn request(model: &str, messages: Vec<LlmMessage>) -> LlmRequest {
     LlmRequest {
         instructions: Some(Arc::from("stable system")),
-        model: lash_sansio::llm_profile::LlmProfileConfig::new(
-            lash_sansio::llm_profile::RecordedLlmProfile::mint(
-                lash_sansio::llm_profile::LlmProfileKey::new("request-fixture"),
-                lash_sansio::llm_profile::LlmProfileMetadata::builder(model.to_string())
+        model: lash_protocol_types::llm_profile::LlmProfileConfig::new(
+            lash_protocol_types::llm_profile::RecordedLlmProfile::mint(
+                lash_protocol_types::llm_profile::LlmProfileKey::new("request-fixture"),
+                lash_protocol_types::llm_profile::LlmProfileMetadata::builder(model.to_string())
                     .context_window_tokens(128_000)
                     .capability(Default::default())
                     .extra_body(Default::default())
-                    .cache_retention(lash_sansio::llm::capability::CacheRetention::Short)
+                    .cache_retention(lash_protocol_types::llm::capability::CacheRetention::Short)
                     .build()
                     .expect("valid profile"),
             ),

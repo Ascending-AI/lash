@@ -12,8 +12,8 @@
 #![allow(dead_code, unreachable_code, unused_variables, unused_imports)]
 #![allow(clippy::all)]
 
-use lash_sansio::RetryProgress;
-use lash_sansio::llm::types::{StreamBlockEvent, StreamBlockKind};
+use lash_protocol_types::RetryProgress;
+use lash_protocol_types::{llm::types::StreamBlockEvent, llm::types::StreamBlockKind};
 
 fn type_witness<T>() {}
 fn member_witness<T>(_: T) {}

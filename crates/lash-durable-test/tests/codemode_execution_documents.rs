@@ -27,7 +27,7 @@ use lash::workflow::{
     WorkflowDocument, WorkflowDocumentEntry, WorkflowDocumentRead, WorkflowDocumentRef,
 };
 use lash_core::facade_support::{TraceRecord, TraceSink, TraceSinkError};
-use lash_sansio::sync::MutexExt as _;
+use lash_protocol_types::sync::MutexExt as _;
 
 use served::{Tier, World};
 use web_fetch::Fetch;

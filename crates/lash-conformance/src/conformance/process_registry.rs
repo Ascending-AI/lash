@@ -1,6 +1,6 @@
 //! Cross-backend conformance for the durable process registry.
 
-use lash_sansio::ProcessId;
+use lash_protocol_types::ProcessId;
 mod cancellation;
 mod completion_authority;
 mod consumer_holds;
@@ -985,8 +985,8 @@ async fn refolded_process_record_matches_stored_projection(
     let wait = WaitState {
         since_ms: i64::try_from(base.created_at_ms).unwrap_or(i64::MAX),
         kind: crate::WaitKind::Call {
-            call_id: lash_sansio::ToolCallId::fixture("process-wait-law"),
-            tool_id: lash_sansio::ToolId::new("process_wait"),
+            call_id: lash_protocol_types::ToolCallId::fixture("process-wait-law"),
+            tool_id: lash_protocol_types::ToolId::new("process_wait"),
         },
         site: None,
     };
@@ -1206,8 +1206,8 @@ pub async fn waiting_processes_remain_in_the_non_terminal_scan(
                 &WaitState {
                     since_ms: i64::try_from(record.created_at_ms).unwrap_or(i64::MAX),
                     kind: crate::WaitKind::Call {
-                        call_id: lash_sansio::ToolCallId::fixture("process-wait-law"),
-                        tool_id: lash_sansio::ToolId::new("process_wait"),
+                        call_id: lash_protocol_types::ToolCallId::fixture("process-wait-law"),
+                        tool_id: lash_protocol_types::ToolId::new("process_wait"),
                     },
                     site: None,
                 },

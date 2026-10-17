@@ -7,7 +7,7 @@ use super::*;
 use lash_core::TurnEvent;
 use lash_core::facade_support::TurnOutcome;
 use lash_core::llm::types::{StreamBlockIdentity, StreamBlockKind};
-use lash_sansio::llm::types::StreamBlockEvent;
+use lash_protocol_types::llm::types::StreamBlockEvent;
 
 /// One turn whose single model call streams `stream` and answers
 /// `response`: its report and every activity it published.

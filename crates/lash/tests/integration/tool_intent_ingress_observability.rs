@@ -3,8 +3,8 @@
     reason = "test target: clippy's allow-unwrap-in-tests only exempts #[test] functions, and the setup helpers around them in this target are test code too"
 )]
 
-use lash_sansio::ProcessId;
-use lash_sansio::SessionId;
+use lash_protocol_types::ProcessId;
+use lash_protocol_types::SessionId;
 use std::sync::{Arc, Mutex};
 
 const SESSION: &str = "intent-ingress-observability-session";

@@ -15,7 +15,7 @@
               in-test exemption does not recognize"
 )]
 
-use lash_sansio::SessionId;
+use lash_protocol_types::SessionId;
 use std::collections::BTreeMap;
 
 use async_trait::async_trait;

@@ -7,7 +7,7 @@ use lash::TurnInput;
 
 use lash_core::facade_support::{TurnOutcome, TurnStop};
 use lash_core::plugin::{ProtocolDriverPlugin, ProtocolSessionPlugin};
-use lash_sansio::ReportedFailure;
+use lash_protocol_types::ReportedFailure;
 
 const PROTOCOL: &str = "test_protocol";
 
@@ -86,7 +86,7 @@ struct TestProtocolDriver(Received);
 impl ProtocolDriverPlugin for TestProtocolDriver {
     fn attachment_omission_text(
         &self,
-        notice: &lash_sansio::AttachmentMaterializationNotice,
+        notice: &lash_protocol_types::AttachmentMaterializationNotice,
     ) -> String {
         format!("({} omitted)", notice.media_type)
     }
@@ -166,8 +166,8 @@ impl lash_sansio::ProtocolDriverHandle<lash_core::HostTurnProtocol> for TestDriv
         }
         actions.push(lash_core::DriverAction::Finish(TurnOutcome::Stopped(
             TurnStop::RuntimeError {
-                cause: lash_sansio::TurnErrorCause::new(
-                    lash_sansio::TurnErrorCode::ExecutorUnavailable,
+                cause: lash_protocol_types::TurnErrorCause::new(
+                    lash_protocol_types::TurnErrorCode::ExecutorUnavailable,
                 ),
             },
         )));

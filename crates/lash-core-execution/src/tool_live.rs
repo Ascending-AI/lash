@@ -1,7 +1,7 @@
 //! Bounded, execution-owned observations outside recorded attempt streams.
 use crate::{ExecutionOwner, ToolCallId};
 use futures_util::{StreamExt, stream::BoxStream};
-use lash_sansio::sync::MutexExt;
+use lash_protocol_types::sync::MutexExt;
 use serde::{Deserialize, Serialize};
 use std::{
     collections::HashMap,

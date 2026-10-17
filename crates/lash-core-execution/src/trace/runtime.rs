@@ -13,7 +13,7 @@
 //! Nothing here asks a substrate whether it is replaying. The frontier moves
 //! only when a step body the engine handed over runs.
 
-use lash_sansio::sync::MutexExt;
+use lash_protocol_types::sync::MutexExt;
 use std::sync::atomic::{AtomicU64, Ordering};
 use std::sync::{Arc, Mutex};
 

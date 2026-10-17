@@ -18,7 +18,7 @@ use lash_trace::{
 };
 
 use super::*;
-use lash_sansio::sync::MutexExt as _;
+use lash_protocol_types::sync::MutexExt as _;
 
 mod drain;
 mod host_forwarder;
@@ -33,7 +33,7 @@ mod terminal;
 
 pub(in crate::runtime) use drain::CallDrains;
 use host_forwarder::ProviderHostForwarder;
-use lash_sansio::session_model::{FailureCode, TurnFailureCode};
+use lash_protocol_types::{session_model::FailureCode, session_model::TurnFailureCode};
 use terminal::{observed_stream_protocol_position, protocol_handoff_response};
 
 /// Result of running stream hooks over a visible chunk. Carries both
@@ -226,7 +226,7 @@ impl RuntimeTurnDriver<'_> {
     pub(in crate::runtime) async fn run_llm_call(
         &mut self,
         request: Arc<LlmRequest>,
-        admitted: &lash_sansio::llm::types::AdmittedSend,
+        admitted: &lash_protocol_types::llm::types::AdmittedSend,
         protocol_iteration: usize,
         invocation: crate::RuntimeInvocation,
         event_tx: &TurnObserver,

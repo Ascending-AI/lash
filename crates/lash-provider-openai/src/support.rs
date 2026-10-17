@@ -1,5 +1,5 @@
 pub(crate) use async_trait::async_trait;
-use lash_sansio::llm::types::StreamBlockKind;
+use lash_protocol_types::llm::types::StreamBlockKind;
 pub(crate) use serde::Deserialize;
 pub(crate) use serde_json::{Value, json};
 pub(crate) use std::collections::HashMap;
@@ -111,7 +111,8 @@ pub(crate) fn reasoning_part_block_texts(
 pub(crate) use lash_core::provider::attachment_wire::{
     UnitWriter, check_codec, lower_attachment_json, segment_context, template_error,
 };
-pub(crate) use lash_sansio::AttachmentRef;
-pub(crate) use lash_sansio::llm::attachment_delivery::{
-    AttachmentPosition, Delivery, ProviderAccepts, ProviderFileScope,
+pub(crate) use lash_protocol_types::AttachmentRef;
+pub(crate) use lash_protocol_types::{
+    llm::attachment_delivery::AttachmentPosition, llm::attachment_delivery::Delivery,
+    llm::attachment_delivery::ProviderAccepts, llm::attachment_delivery::ProviderFileScope,
 };

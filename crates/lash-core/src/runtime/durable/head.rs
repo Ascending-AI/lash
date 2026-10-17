@@ -21,7 +21,6 @@
 use std::sync::Arc;
 
 use lash_sansio::TurnWindowPin;
-use lash_sansio::core_support::MessageSequenceCoreSupport as _;
 
 use lash_durable::{ActorKey, Epoch};
 
@@ -297,8 +296,8 @@ pub async fn load_window(
     if head.revision == 0 {
         return Ok(TurnWindow::new(
             pin.clone(),
-            lash_sansio::AppendVec::new(),
-            lash_sansio::AppendVec::new(),
+            lash_protocol_types::AppendVec::new(),
+            lash_protocol_types::AppendVec::new(),
         ));
     }
     let store = session_store(backend, session).await?;

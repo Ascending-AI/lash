@@ -1,5 +1,7 @@
-use lash_sansio::llm::types::{LlmResponse, LlmTerminalReason, ProviderFailureKind};
-use lash_sansio::session_model::{FailureCode, TurnFailureCode};
+use lash_protocol_types::{
+    llm::types::LlmResponse, llm::types::LlmTerminalReason, llm::types::ProviderFailureKind,
+};
+use lash_protocol_types::{session_model::FailureCode, session_model::TurnFailureCode};
 
 /// Adapter-owned retry classification for a transport failure.
 #[derive(Clone, Copy, Debug, Default, PartialEq, Eq)]

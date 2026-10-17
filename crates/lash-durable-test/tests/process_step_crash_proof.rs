@@ -46,7 +46,7 @@ use lash_durable::{ActorKey, ActorState, CommitLabel, DurableError, DurableStore
 use lash_durable_test::{
     Cut, Fault, Matrix, Scenario, SimClock, SimNodes, SimNodesConfig, Stored, Tripwire, WriteKind,
 };
-use lash_sansio::sync::MutexExt as _;
+use lash_protocol_types::sync::MutexExt as _;
 
 const ENGINE: &str = "process-step-proof";
 const TOOL: &str = "ext_write";

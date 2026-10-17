@@ -14,14 +14,17 @@ use lash_core::{
     AttachmentCreateMeta, AttachmentId, AttachmentRef, AttachmentStore, AttachmentStoreError,
     AttachmentStorePersistence, StoredAttachment, StoredBlobRef,
 };
-use lash_sansio::llm::attachment_delivery::{
-    AttachmentPosition, Delivery, DeliveryForms, DeliveryLimits, DeliverySecret, ProviderAccepts,
-    ProviderFileScope,
+use lash_protocol_types::sync::MutexExt;
+use lash_protocol_types::{
+    llm::attachment_delivery::AttachmentPosition, llm::attachment_delivery::Delivery,
+    llm::attachment_delivery::DeliveryForms, llm::attachment_delivery::DeliveryLimits,
+    llm::attachment_delivery::DeliverySecret, llm::attachment_delivery::ProviderAccepts,
+    llm::attachment_delivery::ProviderFileScope,
 };
-use lash_sansio::llm::capability::{
-    AttachmentAcceptanceRule, AttachmentAcceptor, AttachmentCapabilitySnapshot,
+use lash_protocol_types::{
+    llm::capability::AttachmentAcceptanceRule, llm::capability::AttachmentAcceptor,
+    llm::capability::AttachmentCapabilitySnapshot,
 };
-use lash_sansio::sync::MutexExt;
 use lash_transport_failure::{LlmTransportError, TransportRetryVerdict};
 use std::sync::{Arc, Mutex};
 use std::time::Instant;

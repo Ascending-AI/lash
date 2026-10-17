@@ -17,7 +17,7 @@ fn prepared_prompt_rendering_does_not_clone_retained_history() {
     for depth in [8, 512] {
         let window = window(depth);
         let expected = window
-            .render(&crate::session_model::message::HistoryPresentation::verbatim())
+            .render(&lash_protocol_types::session_model::message::HistoryPresentation::verbatim())
             .clone();
         // TurnPrelude::restore rebuilds this base/delta shape. Its base
         // is shared, but its render cache is not the live window's cache.
@@ -32,16 +32,16 @@ fn prepared_prompt_rendering_does_not_clone_retained_history() {
         );
         let measurement = render_allocations::Measurement::start();
         machine.adopt_prepared_messages(prepared);
-        let rendered = machine
-            .prompt_message_sequence()
-            .render_prompt(&crate::session_model::message::HistoryPresentation::verbatim());
+        let rendered = machine.prompt_message_sequence().render_prompt(
+            &lash_protocol_types::session_model::message::HistoryPresentation::verbatim(),
+        );
         measurements.push(measurement.finish());
 
         assert_eq!(rendered.messages.len(), depth + 1);
         assert_eq!(
             rendered.messages[depth],
-            crate::llm::types::LlmMessage::text(
-                crate::llm::types::LlmRole::User,
+            lash_protocol_types::llm::types::LlmMessage::text(
+                lash_protocol_types::llm::types::LlmRole::User,
                 "fixed new input"
             )
         );
@@ -61,7 +61,8 @@ fn prepared_prompt_rendering_does_not_clone_retained_history() {
     // render_prompt copies N message headers, then grows the vector to
     // 2N for the new message: at most 3N headers requested from the allocator.
     // Historical text and block payloads have no place in this allowance.
-    let metadata_growth = 3 * (512 - 8) * std::mem::size_of::<crate::llm::types::LlmMessage>();
+    let metadata_growth =
+        3 * (512 - 8) * std::mem::size_of::<lash_protocol_types::llm::types::LlmMessage>();
     assert!(
         measurements[1].allocated <= measurements[0].allocated + metadata_growth,
         "only flat request-vector metadata may grow: {measurements:?}"
@@ -167,7 +168,7 @@ fn llm_pending(count: usize) -> (TurnMachine, EffectId) {
     let mut machine = TurnMachine::new(
         test_config(Arc::new(ToolBatchDriver)),
         history(count),
-        crate::AppendVec::new(),
+        lash_protocol_types::AppendVec::new(),
         0,
     );
     let effects = drain_effects(&mut machine);
@@ -362,8 +363,8 @@ fn window(count: usize) -> TurnWindow {
         .collect::<Vec<_>>();
     TurnWindow::new(
         TurnWindowPin::new(format!("head-{count}")),
-        crate::AppendVec::from(messages),
-        crate::AppendVec::from(events),
+        lash_protocol_types::AppendVec::from(messages),
+        lash_protocol_types::AppendVec::from(events),
     )
 }
 
@@ -530,12 +531,12 @@ impl ProtocolDriverHandle for FinishingDriver {
         vec![DriverAction::Start(PendingWork::Checkpoint {
             checkpoint: CheckpointKind::BeforeCompletion,
             on_empty: CheckpointResumeAction::Complete {
-                candidate: Box::new(crate::CompletionCandidate::new(
+                candidate: Box::new(lash_protocol_types::CompletionCandidate::new(
                     iteration,
-                    crate::ToolCallId::fixture(&format!("finish-{iteration}")),
+                    lash_protocol_types::ToolCallId::fixture(&format!("finish-{iteration}")),
                     "finish",
-                    crate::TurnControl::Finish {
-                        value: crate::ToolValue::String(FINISH_VALUE.repeat(64)),
+                    lash_protocol_types::TurnControl::Finish {
+                        value: lash_protocol_types::ToolValue::String(FINISH_VALUE.repeat(64)),
                         value_schema: None,
                     },
                 )),
@@ -556,7 +557,7 @@ impl ProtocolDriverHandle for FinishingDriver {
         &self,
         _ctx: DriverContextView<'_>,
         _driver_state: serde_json::Value,
-        _result: Result<crate::ExecResponse, crate::ExecCodeFailure>,
+        _result: Result<lash_protocol_types::ExecResponse, lash_protocol_types::ExecCodeFailure>,
     ) -> Vec<DriverAction> {
         Vec::new()
     }
@@ -573,7 +574,7 @@ fn decided_completion_candidates_are_checkpoint_content_not_body() {
     let mut machine = TurnMachine::new(
         test_config(Arc::new(FinishingDriver)),
         vec![user_message("finish")],
-        crate::AppendVec::new(),
+        lash_protocol_types::AppendVec::new(),
         0,
     );
     let mut effects = drain_effects(&mut machine);
@@ -892,9 +893,10 @@ fn a_narrowed_prompt_view_stores_only_where_it_differs() {
 #[test]
 fn a_mode_history_policy_reconstructs_the_recorded_request_prefix() {
     let committed = window(3);
-    let policy = crate::session_model::message::HistoryPresentation::new(|_, part| {
-        format!("mode history: {}", part.content())
-    });
+    let policy =
+        lash_protocol_types::session_model::message::HistoryPresentation::new(|_, part| {
+            format!("mode history: {}", part.content())
+        });
     let config = || {
         let mut config = test_config(Arc::new(ToolBatchDriver));
         config.projector = Arc::new(ChatContextProjector {

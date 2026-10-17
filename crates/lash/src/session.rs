@@ -1,6 +1,6 @@
 use lash_core::ActorContext;
-use lash_sansio::SessionId;
-use lash_sansio::TurnId;
+use lash_protocol_types::SessionId;
+use lash_protocol_types::TurnId;
 
 use crate::durable_session::DurableSession;
 pub use crate::observation_feed::SessionObservationStream;

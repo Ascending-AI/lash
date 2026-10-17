@@ -44,7 +44,7 @@ pub(crate) fn classify_openai_error(
         return failure;
     };
 
-    failure.code = Some(lash_sansio::FailureCode::provider(code));
+    failure.code = Some(lash_protocol_types::FailureCode::provider(code));
     match code {
         "context_length_exceeded" if matches!(failure.http_status, None | Some(400)) => {
             failure.kind = ProviderFailureKind::Validation;

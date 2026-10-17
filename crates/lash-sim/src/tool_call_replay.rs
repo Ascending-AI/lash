@@ -15,14 +15,14 @@ const RAW_ARGS: &str = r#"{"path": "a.txt", "content": "he said "hi"}"#;
 fn malformed_history_request(model: &str) -> LlmRequest {
     LlmRequest {
         instructions: Some(Arc::from("stable system")),
-        model: lash_sansio::llm_profile::LlmProfileConfig::new(
-            lash_sansio::llm_profile::RecordedLlmProfile::mint(
-                lash_sansio::llm_profile::LlmProfileKey::new("request-fixture"),
-                lash_sansio::llm_profile::LlmProfileMetadata::builder(model.to_string())
+        model: lash_protocol_types::llm_profile::LlmProfileConfig::new(
+            lash_protocol_types::llm_profile::RecordedLlmProfile::mint(
+                lash_protocol_types::llm_profile::LlmProfileKey::new("request-fixture"),
+                lash_protocol_types::llm_profile::LlmProfileMetadata::builder(model.to_string())
                     .context_window_tokens(128_000)
                     .capability(Default::default())
                     .extra_body(Default::default())
-                    .cache_retention(lash_sansio::llm::capability::CacheRetention::Short)
+                    .cache_retention(lash_protocol_types::llm::capability::CacheRetention::Short)
                     .build()
                     .expect("valid profile"),
             ),
@@ -42,7 +42,7 @@ fn malformed_history_request(model: &str) -> LlmRequest {
             LlmMessage::new(
                 LlmRole::User,
                 vec![LlmContentBlock::ToolResult {
-                    status: lash_sansio::ToolCallStatus::Success,
+                    status: lash_protocol_types::ToolCallStatus::Success,
                     call_id: "call-1".to_string(),
                     tool_name: Some("write_file".to_string()),
                     content: vec![lash_core::facade_support::ModelToolReturnPart::text(

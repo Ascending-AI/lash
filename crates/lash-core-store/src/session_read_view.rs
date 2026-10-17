@@ -2,7 +2,6 @@
 
 use crate::facade_support::SessionGraphFacadeOps;
 use crate::{RuntimeSessionState, SessionId, SessionPolicy, SessionSnapshot};
-use lash_sansio::core_support::MessageSequenceCoreSupport;
 use std::sync::Arc;
 use std::sync::OnceLock;
 
@@ -29,7 +28,7 @@ impl SessionReadView {
         meta: SessionReadMeta,
         base_graph: Arc<crate::SessionGraph>,
         messages: crate::MessageSequence,
-        active_events: lash_sansio::AppendVec<crate::SessionHistoryRecord>,
+        active_events: lash_protocol_types::AppendVec<crate::SessionHistoryRecord>,
     ) -> Self {
         Self(
             Arc::new(SessionReadState::new(

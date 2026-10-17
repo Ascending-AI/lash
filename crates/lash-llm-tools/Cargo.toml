@@ -23,7 +23,7 @@ default = []
 workspace = true
 
 [dependencies]
-lash-sansio = { workspace = true }
+lash-protocol-types = { workspace = true }
 lash-core = { workspace = true }
 lash-tool-support = { workspace = true }
 async-trait = { workspace = true }

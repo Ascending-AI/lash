@@ -35,7 +35,7 @@ pub(crate) use lash_llm_transport::{
     reserved_generation_paths, validate_extra_headers,
 };
 pub(crate) use lash_llm_transport::{TokenGate, TokenLease, rejected_before_output};
-pub(crate) use lash_sansio::ModelToolReturnPart;
+pub(crate) use lash_protocol_types::ModelToolReturnPart;
 pub(crate) use lash_transport_failure::{LlmTransportError, TransportRetryVerdict};
 
 pub(crate) use crate::config::*;
@@ -46,7 +46,8 @@ pub(crate) use lash_core::provider::attachment_wire::{
     UnitWriter, check_codec, lower_attachment_json, message_names_missing_file,
     reject_missing_provider_files, segment_context, template_error,
 };
-pub(crate) use lash_sansio::AttachmentRef;
-pub(crate) use lash_sansio::llm::attachment_delivery::{
-    AttachmentPosition, Delivery, ProviderAccepts, ProviderFileScope,
+pub(crate) use lash_protocol_types::AttachmentRef;
+pub(crate) use lash_protocol_types::{
+    llm::attachment_delivery::AttachmentPosition, llm::attachment_delivery::Delivery,
+    llm::attachment_delivery::ProviderAccepts, llm::attachment_delivery::ProviderFileScope,
 };

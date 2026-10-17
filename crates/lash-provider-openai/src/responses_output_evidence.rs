@@ -1,6 +1,6 @@
 use lash_core::llm::transport::ProviderFailureKind;
 use lash_core::llm::types::{LlmOutputPart, LlmStreamEvent, LlmUsage};
-use lash_sansio::llm::types::StreamBlockEvent;
+use lash_protocol_types::llm::types::StreamBlockEvent;
 use lash_transport_failure::LlmTransportError;
 use serde_json::Value;
 

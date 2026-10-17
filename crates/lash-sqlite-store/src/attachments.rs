@@ -1,7 +1,7 @@
 //! Attachment edges and external-byte write state in the durable-core catalog.
 use super::*;
 use lash_core_execution::{ArtifactReferrer, AttachmentWrite, ReferrerClaim, SessionReferrerState};
-use lash_sansio::sync::MutexExt;
+use lash_protocol_types::sync::MutexExt;
 use lash_store_sql::attachment::{
     condemnation::CondemnationStatements, edges::AttachmentEdgeStatements,
     pending_writes::PendingWriteStatements, session_holds::SessionHoldStatements,

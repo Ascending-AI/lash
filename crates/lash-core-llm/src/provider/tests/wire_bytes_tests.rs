@@ -3,8 +3,13 @@
 //! before lowering became incremental.
 
 use super::*;
-use lash_sansio::llm::attachment_delivery::{AttachmentPosition, DeliveryForms};
-use lash_sansio::llm::wire_corpus::{corpus_tool, digest_line, reuse_cases, wire_corpus};
+use lash_protocol_types::{
+    llm::attachment_delivery::AttachmentPosition, llm::attachment_delivery::DeliveryForms,
+};
+use lash_protocol_types::{
+    llm::wire_corpus::corpus_tool, llm::wire_corpus::digest_line, llm::wire_corpus::reuse_cases,
+    llm::wire_corpus::wire_corpus,
+};
 
 /// Digests from the coalescing lowering at de7f61e3dc, refreshed for
 /// FIG-6518's explicit tool-result status in the canonical request shape.
@@ -155,8 +160,8 @@ fn a_reused_prefix_sends_the_bytes_a_cold_lowering_sends() {
 /// sends, and the body reads back as that request.
 #[test]
 fn a_custom_plugin_sends_the_request_it_means() {
-    use lash_sansio::llm::types::{RequestSegment, TemplateError};
-    use lash_sansio::llm::wire_corpus::{growing_history, text_only};
+    use lash_protocol_types::{llm::types::RequestSegment, llm::types::TemplateError};
+    use lash_protocol_types::{llm::wire_corpus::growing_history, llm::wire_corpus::text_only};
 
     let route = canonical_route();
     let cache = SegmentCache::new();

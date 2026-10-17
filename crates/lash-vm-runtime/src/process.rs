@@ -60,7 +60,7 @@ pub use workflow::{
 };
 
 /// The engine kind every kernel process is registered under.
-pub use lash_sansio::LASH_VM_ENGINE_KIND;
+pub use lash_protocol_types::LASH_VM_ENGINE_KIND;
 
 /// The error kind raised at a `perform` of an effect the host does not
 /// offer.

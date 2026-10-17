@@ -18,7 +18,7 @@ use lash_core_store::checkpoint_graph::{
     CommitId, DecodeLimits, EncodeBudget, EncodedNode, ExplicitLimit, GraphCommitBudget,
     GraphRefusal, GraphStaging, NodeId, NodeKind, RootSource, TokenWriter, TypedBody,
 };
-use lash_sansio::{SessionId, ToolCallId, TurnId};
+use lash_protocol_types::{SessionId, ToolCallId, TurnId};
 
 use super::{LABEL, LawBroken, LawOutcome, create, ensure, node, session};
 use crate::domain::graph::{
@@ -542,9 +542,9 @@ pub async fn every_root_source_retains_its_graph_and_shared_leaves_outlive_one_o
         run: run.clone(),
         admission: lash_core_store::store::RunAdmissionRecord::Turn {
             took: lash_core_store::store::AdmittedTurnRows::Inputs {
-                ids: lash_core_store::store::AdmittedInputIds::one(lash_sansio::InputId::from(
-                    "graph-roots-batch",
-                )),
+                ids: lash_core_store::store::AdmittedInputIds::one(
+                    lash_protocol_types::InputId::from("graph-roots-batch"),
+                ),
             },
             trace: None,
         },
@@ -656,7 +656,7 @@ pub async fn every_root_source_retains_its_graph_and_shared_leaves_outlive_one_o
                             ordinal: 1,
                         },
                     },
-                    call_id: lash_sansio::llm::types::LlmCallId("root-law-call".into()),
+                    call_id: lash_protocol_types::llm::types::LlmCallId("root-law-call".into()),
                     record: root,
                 })),
                 None,
@@ -769,7 +769,7 @@ pub async fn every_root_source_retains_its_graph_and_shared_leaves_outlive_one_o
                             ordinal: 2,
                         },
                     },
-                    call_id: lash_sansio::llm::types::LlmCallId("pending-deletion".into()),
+                    call_id: lash_protocol_types::llm::types::LlmCallId("pending-deletion".into()),
                     attempt: 1,
                     enclosing: None,
                 },
@@ -1215,7 +1215,7 @@ pub async fn turn_and_owned_model_calls_survive_an_idempotent_outcome_commit(
 ) -> LawOutcome {
     use crate::domain::{ModelCallId, ModelCallWrite, PromptCallKey};
     use lash_core_store::model_calls::{ModelCallEnd, ModelCallFact};
-    use lash_sansio::llm::types::{LlmCallId, LlmCallRecord};
+    use lash_protocol_types::{llm::types::LlmCallId, llm::types::LlmCallRecord};
     let owner = owned(tier, "model-call-keys").await?;
     let run = turn("call-key-run");
     let mut nodes = staging();

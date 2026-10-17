@@ -1,5 +1,5 @@
 use crate::ProcessId;
-use lash_sansio::CancelOrigin;
+use lash_protocol_types::CancelOrigin;
 
 use crate::plugin::PluginError;
 
@@ -120,7 +120,7 @@ pub enum ProcessTransition {
     /// Bind the process to durable work owned by another backend.
     SetExternalRef(super::model::ProcessExternalRef),
     /// Record a typed process cancellation request.
-    RequestCancel(lash_sansio::CancelRequest),
+    RequestCancel(lash_protocol_types::CancelRequest),
 }
 
 /// The store action selected for a registry-owned lifecycle transition.
@@ -238,7 +238,10 @@ fn route_transition_refusal_to_fold(
 
 /// Whether `request`, a cancel, ends `record` as it stands: a start that
 /// failed before it was handed to any owner is cancelled by its own request.
-fn start_failed_cancel_ends(record: &ProcessRecord, request: &lash_sansio::CancelRequest) -> bool {
+fn start_failed_cancel_ends(
+    record: &ProcessRecord,
+    request: &lash_protocol_types::CancelRequest,
+) -> bool {
     request.origin == CancelOrigin::StartFailed && record.external_ref.is_none()
 }
 

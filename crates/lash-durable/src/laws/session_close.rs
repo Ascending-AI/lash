@@ -3,7 +3,7 @@
 use super::{LABEL, LawBroken, LawOutcome, create, node, session};
 use crate::domain::{DomainRefusal, SessionCloseStep, SessionCloseWrite};
 use crate::{DomainWrite, DurableError, DurableStore, Release};
-use lash_sansio::SessionId;
+use lash_protocol_types::SessionId;
 
 fn session_id(id: &str) -> Result<SessionId, LawBroken> {
     SessionId::parse(id).map_err(|error| LawBroken(error.to_string()))

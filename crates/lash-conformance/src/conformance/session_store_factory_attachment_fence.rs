@@ -1,5 +1,5 @@
 use super::*;
-use lash_sansio::SessionId;
+use lash_protocol_types::SessionId;
 use pretty_assertions::assert_eq;
 
 /// The attachment GC fence is a durable, clockless CAS state machine over one

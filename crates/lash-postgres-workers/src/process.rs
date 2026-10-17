@@ -19,7 +19,7 @@ use lash_core_execution::{
 use lash_core_store::tool_run::Material;
 use lash_core_store::tool_run::SettledOutput;
 use lash_core_store::tool_run::{MaterialOwner, MaterialRole};
-use lash_sansio::{ExecutionLimit, ExecutionPolicy, ToolId};
+use lash_protocol_types::{ExecutionLimit, ExecutionPolicy, ToolId};
 use serde_json::{Value, json};
 
 use crate::events::{Event, report};

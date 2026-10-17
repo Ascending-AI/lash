@@ -1,5 +1,5 @@
 use super::support::*;
-use lash_sansio::sync::MutexExt;
+use lash_protocol_types::sync::MutexExt;
 
 #[derive(Debug)]
 pub struct ProviderRateLimiter {
@@ -372,7 +372,7 @@ mod admission_tests {
         let template = RecordedRequestTemplate::of_request(
             components.provider.route_identity("model"),
             &super::super::tests::empty_request(),
-            &lash_sansio::llm::types::SegmentCache::disabled(),
+            &lash_protocol_types::llm::types::SegmentCache::disabled(),
         )
         .expect("the request lowers canonically");
         let assert_usage = |request_used, token_used| {
@@ -475,13 +475,13 @@ mod admission_tests {
                 first.complete(
                     super::super::tests::empty_request(),
                     crate::ChargeSafetyPolicy::RequireGuarantee,
-                    lash_sansio::ExecutionBudgets::recommended(),
+                    lash_protocol_types::ExecutionBudgets::recommended(),
                     &crate::provider::NoSlotDeliveries
                 ),
                 second.complete(
                     super::super::tests::empty_request(),
                     crate::ChargeSafetyPolicy::RequireGuarantee,
-                    lash_sansio::ExecutionBudgets::recommended(),
+                    lash_protocol_types::ExecutionBudgets::recommended(),
                     &crate::provider::NoSlotDeliveries
                 )
             )
@@ -527,8 +527,8 @@ mod admission_tests {
         }
         async fn send(
             &mut self,
-            _body: &lash_sansio::llm::types::LiveRequestBody,
-            _context: lash_sansio::llm::types::ResponseContext,
+            _body: &lash_protocol_types::llm::types::LiveRequestBody,
+            _context: lash_protocol_types::llm::types::ResponseContext,
         ) -> Result<LlmResponse, LlmTransportError> {
             self.0.reliability.rate_limits.requests_per_window = rate(1, 1000);
             if std::mem::take(&mut self.1) {
@@ -575,7 +575,7 @@ mod admission_tests {
             .complete(
                 super::super::tests::empty_request(),
                 crate::ChargeSafetyPolicy::RequireGuarantee,
-                lash_sansio::ExecutionBudgets::recommended(),
+                lash_protocol_types::ExecutionBudgets::recommended(),
                 &crate::provider::NoSlotDeliveries,
             )
             .await
@@ -603,7 +603,7 @@ mod admission_tests {
             .complete(
                 super::super::tests::empty_request(),
                 crate::ChargeSafetyPolicy::RequireGuarantee,
-                lash_sansio::ExecutionBudgets::recommended(),
+                lash_protocol_types::ExecutionBudgets::recommended(),
                 &crate::provider::NoSlotDeliveries,
             )
             .await
@@ -630,7 +630,7 @@ mod admission_tests {
                 .complete(
                     request.clone(),
                     crate::ChargeSafetyPolicy::RequireGuarantee,
-                    lash_sansio::ExecutionBudgets::recommended(),
+                    lash_protocol_types::ExecutionBudgets::recommended(),
                     &crate::provider::NoSlotDeliveries
                 )
                 .now_or_never()
@@ -642,7 +642,7 @@ mod admission_tests {
             .complete(
                 request,
                 crate::ChargeSafetyPolicy::RequireGuarantee,
-                lash_sansio::ExecutionBudgets::recommended(),
+                lash_protocol_types::ExecutionBudgets::recommended(),
                 &crate::provider::NoSlotDeliveries,
             )
             .await

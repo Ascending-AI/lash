@@ -71,24 +71,26 @@ fn transport(script: &str) -> Arc<ScriptedLlmHttpTransport> {
 fn request(model: &str, stream: bool, structured: bool) -> LlmRequest {
     LlmRequest {
         instructions: None,
-        model: lash_sansio::llm_profile::LlmProfileConfig::new(
-            lash_sansio::llm_profile::RecordedLlmProfile::mint(
-                lash_sansio::llm_profile::LlmProfileKey::new("request-fixture"),
+        model: lash_protocol_types::llm_profile::LlmProfileConfig::new(
+            lash_protocol_types::llm_profile::RecordedLlmProfile::mint(
+                lash_protocol_types::llm_profile::LlmProfileKey::new("request-fixture"),
                 {
                     let mut metadata =
-                        lash_sansio::llm_profile::LlmProfileMetadata::builder(model.to_string())
-                            .context_window_tokens(128_000)
-                            .capability(lash_core::LlmProfileCapability::default())
-                            .extra_body(Default::default())
-                            .request_defaults(lash_core::provider::LlmProfileRequestDefaults {
-                                ..lash_core::provider::LlmProfileRequestDefaults::new(
-                                    lash_core::provider::CacheRetention::Short,
-                                )
-                            })
-                            .build()
-                            .expect("valid profile");
+                        lash_protocol_types::llm_profile::LlmProfileMetadata::builder(
+                            model.to_string(),
+                        )
+                        .context_window_tokens(128_000)
+                        .capability(lash_core::LlmProfileCapability::default())
+                        .extra_body(Default::default())
+                        .request_defaults(lash_core::provider::LlmProfileRequestDefaults {
+                            ..lash_core::provider::LlmProfileRequestDefaults::new(
+                                lash_core::provider::CacheRetention::Short,
+                            )
+                        })
+                        .build()
+                        .expect("valid profile");
                     metadata.limits.output_tokens =
-                        lash_sansio::llm_profile::OutputTokenLimits::new(
+                        lash_protocol_types::llm_profile::OutputTokenLimits::new(
                             None,
                             model.starts_with("claude").then_some(4096),
                         )
@@ -112,7 +114,7 @@ fn request(model: &str, stream: bool, structured: bool) -> LlmRequest {
         output_spec: structured.then(|| {
             LlmOutputSpec::JsonSchema(LlmJsonSchema {
                 name: "answer".to_string(),
-                schema: lash_sansio::SchemaContract::admit(json!({
+                schema: lash_protocol_types::SchemaContract::admit(json!({
                     "type": "object",
                     "properties": { "answer": { "type": "string" } }
                 }))
@@ -390,9 +392,9 @@ fn validate_recorded_reality_provenance(provenance: &ProviderWireProvenance) -> 
 async fn no_credentials_reach_request_debug_recordings_or_traces() {
     use lash_core::llm::types::{LlmProviderTraceEvent, LlmProviderTraceSender};
     use lash_core::provider::ProviderToken;
+    use lash_protocol_types::sync::MutexExt;
     use lash_provider_anthropic::AnthropicAuthScheme;
     use lash_provider_openai::{CodexProvider, OpenAiWireConfig};
-    use lash_sansio::sync::MutexExt;
     use std::sync::Mutex;
 
     const MARKER: &str = "credential-disclosure-witness";

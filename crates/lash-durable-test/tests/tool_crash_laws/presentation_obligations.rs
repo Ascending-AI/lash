@@ -9,7 +9,7 @@
 
 use std::sync::{Arc, Mutex};
 
-use lash_sansio::sync::MutexExt as _;
+use lash_protocol_types::sync::MutexExt as _;
 
 use super::served::{self, Tier, WATCHDOG};
 

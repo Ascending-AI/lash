@@ -84,8 +84,8 @@ pub struct ChargeSafetyRefusalEvidence {
 
 impl ChargeSafetyRefusalEvidence {
     /// The provider refusal code, derived from the retained denial facts.
-    pub fn code(&self) -> lash_sansio::session_model::FailureCode {
-        lash_sansio::session_model::FailureCode::lash(
+    pub fn code(&self) -> lash_protocol_types::session_model::FailureCode {
+        lash_protocol_types::session_model::FailureCode::lash(
             self.denial_reason.failure_code(self.protocol_position),
         )
     }
@@ -108,7 +108,7 @@ pub struct TurnFailureEvidence {
 
 impl TurnFailureEvidence {
     pub fn from_llm_failure(
-        error: &crate::sansio::LlmCallError,
+        error: &lash_protocol_types::LlmCallError,
         call_record: &crate::LlmCallRecord,
         max_partial_output_bytes: usize,
     ) -> Option<Self> {
@@ -178,7 +178,7 @@ mod tests {
 
     #[test]
     fn charge_safety_evidence_stores_only_denial_facts() {
-        let error = crate::sansio::LlmCallError {
+        let error = lash_protocol_types::LlmCallError {
             message: "failed generation".into(),
             retryable: false,
             kind: crate::llm::types::ProviderFailureKind::Stream,

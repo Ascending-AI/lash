@@ -1,6 +1,6 @@
 use super::*;
-use lash_sansio::SessionId;
-use lash_sansio::TurnId;
+use lash_protocol_types::SessionId;
+use lash_protocol_types::TurnId;
 
 pub(super) const RLM_CONTRACT_ROWS: &[FixedContractRow<TurnMachineContractExecutor>] = &[
     FixedContractRow {
@@ -667,13 +667,13 @@ fn rlm_contract_config_with_turn_options(
         protocol_driver,
         model_tool_calls: lash_core::sansio::ModelToolCalls::fixture(),
         projector: Arc::new(lash_core::sansio::ChatContextProjector::default()),
-        model: lash_sansio::llm_profile::LlmProfileConfig::new(
-            lash_sansio::llm_profile::RecordedLlmProfile::mint(
-                lash_sansio::llm_profile::LlmProfileKey::new("request-fixture"),
-                lash_sansio::llm_profile::LlmProfileMetadata::new(
+        model: lash_protocol_types::llm_profile::LlmProfileConfig::new(
+            lash_protocol_types::llm_profile::RecordedLlmProfile::mint(
+                lash_protocol_types::llm_profile::LlmProfileKey::new("request-fixture"),
+                lash_protocol_types::llm_profile::LlmProfileMetadata::new(
                     "rlm-contract".to_string(),
                     std::num::NonZeroUsize::MIN.saturating_add(127_999),
-                    lash_sansio::llm::capability::CacheRetention::Short,
+                    lash_protocol_types::llm::capability::CacheRetention::Short,
                 )
                 .with_capability(lash_core::LlmProfileCapability::default())
                 .with_extra_body(Default::default()),

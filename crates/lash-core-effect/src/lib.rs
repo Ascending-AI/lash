@@ -8,5 +8,5 @@ pub mod core_internal {
 mod await_event_support;
 pub use lash_core_store::await_event_identity::{AwaitEventKey, AwaitEventWaitIdentity};
 pub(crate) use lash_core_store::runtime_error::{RuntimeError, RuntimeErrorCode};
-pub(crate) use lash_sansio::{ProcessId, SessionId};
+pub(crate) use lash_protocol_types::{ProcessId, SessionId};
 pub use retirement::*;

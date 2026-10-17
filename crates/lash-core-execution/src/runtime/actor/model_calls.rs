@@ -3,7 +3,7 @@ use super::ActorContext;
 use lash_durable::domain::model_calls::OwnedModelCall;
 use lash_durable::domain::{DomainWrite, ModelCallOwner, RunFactKind, RunFactWrite, TurnWrite};
 use lash_durable::{ActorTx, DurableError};
-use lash_sansio::sync::MutexExt as _;
+use lash_protocol_types::sync::MutexExt as _;
 
 pub(super) struct ModelCallDebts {
     attempts: Vec<lash_trace::TraceAttemptId>,

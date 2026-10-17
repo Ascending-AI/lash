@@ -66,7 +66,7 @@ fn frame_transition(
         ended: lash_core_execution::FrameEnvironmentId::new(session_id.clone(), ended),
         successor: lash_core_execution::FrameEnvironmentId::new(session_id.clone(), successor),
         carries: Vec::new(),
-        gate: lash_sansio::ExecutionScope::runtime_operation("postgres-frame-switch")
+        gate: lash_protocol_types::ExecutionScope::runtime_operation("postgres-frame-switch")
             .journal_identity()
             .expect("journal identity"),
     }
@@ -398,7 +398,7 @@ async fn postgres_switch_out_of_a_resident_frame_ends_every_frame_the_commit_lea
         ended: first.clone(),
         successor: successor.clone(),
         carries: Vec::new(),
-        gate: lash_sansio::ExecutionScope::runtime_operation("postgres-frame-switch")
+        gate: lash_protocol_types::ExecutionScope::runtime_operation("postgres-frame-switch")
             .journal_identity()
             .expect("journal identity"),
     };

@@ -8,7 +8,7 @@
 //! command's `ToolCallId`.
 
 use lash_core_store::effect_opener::EffectOpener;
-use lash_sansio::{ToolCallId, ToolCallPosition};
+use lash_protocol_types::{ToolCallId, ToolCallPosition};
 
 /// The identities one run of model code mints.
 ///
@@ -37,7 +37,7 @@ impl CodeCallIdentities {
 
     /// The identities one process body mints, for the whole life of the
     /// process.
-    pub fn process_body(process_id: lash_sansio::ProcessId) -> Self {
+    pub fn process_body(process_id: lash_protocol_types::ProcessId) -> Self {
         Self {
             opener: EffectOpener::process(process_id),
             execution: None,

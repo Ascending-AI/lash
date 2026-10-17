@@ -57,10 +57,12 @@ async fn presentation_step_only_changes_model_observation() -> Result<()> {
         lash_core::facade_support::PluginSpec::new().with_presentation_step(
             lash::hook_key!("model-projection"),
             Arc::new(|input: lash_core::facade_support::ToolPresentationInput| {
-                let projected = lash_sansio::ModelToolReturn {
-                    outcome: lash_sansio::ModelToolOutcome::Completed,
+                let projected = lash_protocol_types::ModelToolReturn {
+                    outcome: lash_protocol_types::ModelToolOutcome::Completed,
                     tool_name: input.context.tool_name.clone(),
-                    parts: vec![lash_sansio::ModelToolReturnPart::text("model projection")],
+                    parts: vec![lash_protocol_types::ModelToolReturnPart::text(
+                        "model projection",
+                    )],
                 };
                 Box::pin(async move { Ok(projected) })
             }),

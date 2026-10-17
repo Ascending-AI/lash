@@ -90,11 +90,11 @@ pub struct ProcessEffectOccurrence {
     pub vocabulary_version: u32,
     /// The occurrence of the execution site the effect ran at: two calls of
     /// one node stay apart after the live window.
-    pub at: lash_sansio::EffectIdentity,
+    pub at: lash_protocol_types::EffectIdentity,
     pub operation: String,
     pub outcome_class: ProcessEffectOutcomeClass,
     #[serde(default, skip_serializing_if = "Option::is_none")]
-    pub code: Option<lash_sansio::FailureCode>,
+    pub code: Option<lash_protocol_types::FailureCode>,
     /// The tool call this effect records; engine-only effects have no tool call.
     pub call_id: Option<crate::ToolCallId>,
     pub replay_key: String,
@@ -104,11 +104,11 @@ pub struct ProcessEffectOccurrence {
 #[serde(deny_unknown_fields)]
 struct ProcessEffectOccurrenceFields {
     vocabulary_version: u32,
-    at: lash_sansio::EffectIdentity,
+    at: lash_protocol_types::EffectIdentity,
     operation: String,
     outcome_class: ProcessEffectOutcomeClass,
     #[serde(default, deserialize_with = "nonempty_failure_code")]
-    code: Option<lash_sansio::FailureCode>,
+    code: Option<lash_protocol_types::FailureCode>,
     #[serde(deserialize_with = "Option::deserialize")]
     call_id: Option<crate::ToolCallId>,
     replay_key: String,
@@ -136,14 +136,14 @@ impl TryFrom<ProcessEffectOccurrenceFields> for ProcessEffectOccurrence {
 
 fn nonempty_failure_code<'de, D: serde::Deserializer<'de>>(
     deserializer: D,
-) -> Result<Option<lash_sansio::FailureCode>, D::Error> {
+) -> Result<Option<lash_protocol_types::FailureCode>, D::Error> {
     let code = String::deserialize(deserializer)?;
     if code.is_empty() {
         return Err(serde::de::Error::custom(
             "an effect failure code must be nonempty",
         ));
     }
-    Ok(Some(lash_sansio::FailureCode::from_wire(&code)))
+    Ok(Some(lash_protocol_types::FailureCode::from_wire(&code)))
 }
 
 fn nonempty_identifier(
@@ -158,10 +158,10 @@ fn nonempty_identifier(
 
 impl ProcessEffectOccurrence {
     pub fn new(
-        at: lash_sansio::EffectIdentity,
+        at: lash_protocol_types::EffectIdentity,
         operation: impl Into<String>,
         outcome_class: ProcessEffectOutcomeClass,
-        code: Option<lash_sansio::FailureCode>,
+        code: Option<lash_protocol_types::FailureCode>,
         replay_key: impl Into<String>,
         fleet_format: crate::FleetFormat,
     ) -> Self {
@@ -408,15 +408,15 @@ pub(super) fn admit_vocabulary_version(
 /// The code a recorded tool failure carries. A failure the runtime, a policy
 /// or a cancellation produced is Lash vocabulary; a spelling the tool or a
 /// plugin authored stays in the author's namespace.
-pub fn tool_failure_code(failure: &crate::ToolFailure) -> lash_sansio::FailureCode {
+pub fn tool_failure_code(failure: &crate::ToolFailure) -> lash_protocol_types::FailureCode {
     match failure.source {
         crate::ToolFailureSource::Runtime
         | crate::ToolFailureSource::Policy
-        | crate::ToolFailureSource::Cancellation => {
-            lash_sansio::FailureCode::lash(lash_sansio::TurnFailureCode::from_wire(&failure.code))
-        }
+        | crate::ToolFailureSource::Cancellation => lash_protocol_types::FailureCode::lash(
+            lash_protocol_types::TurnFailureCode::from_wire(&failure.code),
+        ),
         crate::ToolFailureSource::Tool | crate::ToolFailureSource::Plugin => {
-            lash_sansio::FailureCode::from_foreign_wire(&failure.code)
+            lash_protocol_types::FailureCode::from_foreign_wire(&failure.code)
         }
     }
 }

@@ -16,7 +16,7 @@ use crate::{
     DriverAction, DriverContextView, ExecResponse, ProtocolBuildInput, TurnDriverConfig,
     TurnDriverPreamble,
 };
-use lash_sansio::llm::types::LlmResponse;
+use lash_protocol_types::llm::types::LlmResponse;
 
 pub fn test_standard_protocol_factories() -> Vec<Arc<dyn PluginFactory>> {
     vec![Arc::new(TestProtocolFactory {
@@ -288,7 +288,7 @@ struct TestProtocolDriver {
 impl ProtocolDriverPlugin for TestProtocolDriver {
     fn attachment_omission_text(
         &self,
-        notice: &lash_sansio::AttachmentMaterializationNotice,
+        notice: &lash_protocol_types::AttachmentMaterializationNotice,
     ) -> String {
         format!("({} omitted)", notice.media_type)
     }
@@ -330,7 +330,7 @@ impl ProtocolDriverHandle<crate::HostTurnProtocol> for TestDriver {
     fn handle_llm_success(
         &self,
         ctx: DriverContextView<'_>,
-        _request: Arc<lash_sansio::llm::types::LlmRequest>,
+        _request: Arc<lash_protocol_types::llm::types::LlmRequest>,
         _driver_state: Option<crate::ProtocolDriverState>,
         llm_response: LlmResponse,
         calls: &crate::sansio::ResponseToolCalls,
@@ -338,8 +338,8 @@ impl ProtocolDriverHandle<crate::HostTurnProtocol> for TestDriver {
     ) -> Vec<DriverAction> {
         use crate::sansio::{CheckpointResumeAction, PendingToolCall};
         use crate::{CheckpointKind, Message, MessageRole, Part, SessionStreamEvent};
-        use lash_sansio::llm::types::LlmOutputPart;
-        use lash_sansio::session_model::make_error_event;
+        use lash_protocol_types::llm::types::LlmOutputPart;
+        use lash_protocol_types::session_model::make_error_event;
 
         let parts = crate::normalized_response_parts(&llm_response);
         let mut call_ids = calls.call_ids(&llm_response).into_iter();
@@ -349,7 +349,7 @@ impl ProtocolDriverHandle<crate::HostTurnProtocol> for TestDriver {
             String,
             String,
             String,
-            Option<lash_sansio::llm::types::ProviderReplayMeta>,
+            Option<lash_protocol_types::llm::types::ProviderReplayMeta>,
         )> = Vec::new();
         let mut actions = Vec::new();
         let mut next_block_ordinal = 0u64;
@@ -369,7 +369,7 @@ impl ProtocolDriverHandle<crate::HostTurnProtocol> for TestDriver {
                             // the same Started/Delta/Completed lifecycle the
                             // streaming lane produces, keyed per text part.
                             let item_id = response_meta.as_ref().and_then(|meta| meta.id.clone());
-                            let block = lash_sansio::llm::types::StreamBlockIdentity {
+                            let block = lash_protocol_types::llm::types::StreamBlockIdentity {
                                 id: item_id
                                     .clone()
                                     .unwrap_or_else(|| format!("part:{part_index}")),
@@ -379,7 +379,7 @@ impl ProtocolDriverHandle<crate::HostTurnProtocol> for TestDriver {
                             next_block_ordinal += 1;
                             actions.push(DriverAction::Emit(SessionStreamEvent::StreamBlock(
                                 StreamBlockEvent::Started {
-                                    kind: lash_sansio::llm::types::StreamBlockKind::AssistantText,
+                                    kind: lash_protocol_types::llm::types::StreamBlockKind::AssistantText,
                                     block: block.clone(),
                                 },
                             )));
@@ -392,7 +392,7 @@ impl ProtocolDriverHandle<crate::HostTurnProtocol> for TestDriver {
                             )));
                             actions.push(DriverAction::Emit(SessionStreamEvent::StreamBlock(
                                 StreamBlockEvent::Completed {
-                                    kind: lash_sansio::llm::types::StreamBlockKind::AssistantText,
+                                    kind: lash_protocol_types::llm::types::StreamBlockKind::AssistantText,
                                     block,
                                     text: text.clone(),
                                 },
@@ -423,16 +423,16 @@ impl ProtocolDriverHandle<crate::HostTurnProtocol> for TestDriver {
         if tool_calls.is_empty() {
             if assistant_text.trim().is_empty() {
                 actions.push(DriverAction::Emit(make_error_event(
-                    lash_sansio::session_model::TurnFailureKind::LlmProvider,
-                    Some(lash_sansio::session_model::TurnFailureCode::EmptyResponse.into()),
+                    lash_protocol_types::session_model::TurnFailureKind::LlmProvider,
+                    Some(lash_protocol_types::session_model::TurnFailureCode::EmptyResponse.into()),
                     "Model returned no assistant text or tool calls.",
                     None,
-                    lash_sansio::session_model::RuntimeOutputCuts::standard(),
+                    lash_protocol_types::session_model::RuntimeOutputCuts::standard(),
                 )));
                 actions.push(DriverAction::Finish(TurnOutcome::Stopped(
                     TurnStop::ProviderError {
-                        cause: lash_sansio::TurnErrorCause::new(
-                            lash_sansio::TurnErrorCode::InvalidResponse,
+                        cause: lash_protocol_types::TurnErrorCause::new(
+                            lash_protocol_types::TurnErrorCode::InvalidResponse,
                         ),
                     },
                 )));
@@ -449,7 +449,7 @@ impl ProtocolDriverHandle<crate::HostTurnProtocol> for TestDriver {
                 SessionHistoryRecord::Conversation(ConversationRecord::from_message(Message {
                     id: asst_id,
                     role: MessageRole::Assistant,
-                    parts: lash_sansio::shared_parts(parts_out),
+                    parts: lash_protocol_types::shared_parts(parts_out),
                     origin: None,
                     reply_marker: None,
                 })),
@@ -501,7 +501,7 @@ impl ProtocolDriverHandle<crate::HostTurnProtocol> for TestDriver {
                 SessionHistoryRecord::Conversation(ConversationRecord::from_message(Message {
                     id: asst_id,
                     role: MessageRole::Assistant,
-                    parts: lash_sansio::shared_parts(assistant_parts),
+                    parts: lash_protocol_types::shared_parts(assistant_parts),
                     origin: None,
                     reply_marker: None,
                 })),
@@ -521,7 +521,7 @@ impl ProtocolDriverHandle<crate::HostTurnProtocol> for TestDriver {
     ) -> Vec<DriverAction> {
         use crate::sansio::CheckpointResumeAction;
         use crate::{CheckpointKind, Message, MessageRole, Part, SessionStreamEvent};
-        use lash_sansio::session_model::reassign_part_ids;
+        use lash_protocol_types::session_model::reassign_part_ids;
         let mut actions = Vec::new();
         let mut result_parts = Vec::new();
         let mut terminal_outcome = None;
@@ -551,7 +551,7 @@ impl ProtocolDriverHandle<crate::HostTurnProtocol> for TestDriver {
                     .parts
                     .iter()
                     .filter(|block| {
-                        !matches!(block, lash_sansio::ModelToolReturnPart::Text { text } if text.is_empty())
+                        !matches!(block, lash_protocol_types::ModelToolReturnPart::Text { text } if text.is_empty())
                     })
                     .cloned()
                     .collect(),
@@ -571,7 +571,7 @@ impl ProtocolDriverHandle<crate::HostTurnProtocol> for TestDriver {
                 SessionHistoryRecord::Conversation(ConversationRecord::from_message(Message {
                     id: user_id,
                     role: MessageRole::User,
-                    parts: lash_sansio::shared_parts(result_parts),
+                    parts: lash_protocol_types::shared_parts(result_parts),
                     origin: None,
                     reply_marker: None,
                 })),
@@ -637,7 +637,7 @@ impl ProtocolDriverHandle<crate::HostTurnProtocol> for EndsWithoutDoneDriver {
     fn handle_llm_success(
         &self,
         ctx: DriverContextView<'_>,
-        _request: Arc<lash_sansio::llm::types::LlmRequest>,
+        _request: Arc<lash_protocol_types::llm::types::LlmRequest>,
         _driver_state: Option<crate::ProtocolDriverState>,
         llm_response: LlmResponse,
         _calls: &crate::sansio::ResponseToolCalls,

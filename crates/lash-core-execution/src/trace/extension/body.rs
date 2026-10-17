@@ -5,7 +5,7 @@
 use std::collections::BTreeMap;
 use std::sync::{Arc, Mutex, OnceLock};
 
-use lash_sansio::sync::MutexExt as _;
+use lash_protocol_types::sync::MutexExt as _;
 use lash_trace::{
     ExtensionAttribute, ExtensionContent, ExtensionOperation, ExtensionSpanEnd, ExtensionSpanEvent,
     ExtensionSpanKind, ExtensionSpanRecord, SpanRole, ToolSpanAnnotations, TraceAttributeWriter,

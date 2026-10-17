@@ -25,7 +25,7 @@ use lash_core::{
 };
 use lash_durable::{ActorState, CommitLabel};
 use lash_durable_test::{Cut, SimNodes};
-use lash_sansio::{BatchId, SessionId};
+use lash_protocol_types::{BatchId, SessionId};
 
 use super::command::{settled, submit};
 use super::{session_actor, state};

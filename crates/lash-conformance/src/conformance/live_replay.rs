@@ -12,9 +12,9 @@ use super::replay_laws::{
 };
 use super::*;
 use crate::runtime::LiveReplayEventDraft;
-use lash_sansio::SessionId;
-use lash_sansio::TurnId;
-use lash_sansio::llm::types::{StreamBlockEvent, StreamBlockKind};
+use lash_protocol_types::SessionId;
+use lash_protocol_types::TurnId;
+use lash_protocol_types::{llm::types::StreamBlockEvent, llm::types::StreamBlockKind};
 use pretty_assertions::assert_eq;
 
 /// The session live replay store, as the generic replay laws drive it.

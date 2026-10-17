@@ -1,4 +1,4 @@
-use lash_sansio::{SessionId, TurnId};
+use lash_protocol_types::{SessionId, TurnId};
 use std::{fmt::Write as _, future::IntoFuture as _, path::PathBuf, sync::Arc};
 
 use lash::{

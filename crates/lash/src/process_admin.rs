@@ -13,8 +13,8 @@
 use crate::support::{Arc, EmbedError, LashCore, Result};
 use lash_core::ActorContext;
 
-use lash_sansio::ProcessId;
-use lash_sansio::SessionId;
+use lash_protocol_types::ProcessId;
+use lash_protocol_types::SessionId;
 
 async fn await_process_terminal(
     process_work: &dyn lash_core::ProcessWorkSubstrate,

@@ -23,7 +23,7 @@ use lash_core::sync::MutexExt as _;
 use lash_core_store::store::RunTerminalKind;
 use lash_durable::{ActorState, CommitLabel};
 use lash_durable_test::{Cut, SimNodes};
-use lash_sansio::{SessionId, TurnId};
+use lash_protocol_types::{SessionId, TurnId};
 
 use super::{run_of, session_actor, state};
 use crate::crash_matrix::compactions::{RECOVERED, SENT};

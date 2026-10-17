@@ -1,7 +1,7 @@
 use super::support::*;
 use crate::LlmTerminalReason;
 
-pub use lash_sansio::llm::types::{AttemptEndReason, ProviderAttemptControl};
+pub use lash_protocol_types::{llm::types::AttemptEndReason, llm::types::ProviderAttemptControl};
 
 /// Lash-assigned identity of one dispatched attempt, including its call span.
 #[derive(Clone, Debug)]
@@ -67,11 +67,14 @@ pub enum GenerationRetryGuarantee {
 #[derive(Clone, Debug)]
 pub struct LiveCallHorizon {
     pub clock: Arc<dyn crate::Clock>,
-    pub limits: lash_sansio::ProviderAttemptLimits,
+    pub limits: lash_protocol_types::ProviderAttemptLimits,
 }
 
 impl LiveCallHorizon {
-    pub fn new(clock: Arc<dyn crate::Clock>, limits: lash_sansio::ProviderAttemptLimits) -> Self {
+    pub fn new(
+        clock: Arc<dyn crate::Clock>,
+        limits: lash_protocol_types::ProviderAttemptLimits,
+    ) -> Self {
         Self { clock, limits }
     }
 
@@ -81,7 +84,7 @@ impl LiveCallHorizon {
     pub fn fixture() -> Self {
         Self::new(
             Arc::new(crate::SystemClock),
-            lash_sansio::ProviderAttemptLimits::recommended(),
+            lash_protocol_types::ProviderAttemptLimits::recommended(),
         )
     }
 }
@@ -117,14 +120,14 @@ pub trait Provider: Send + Sync + std::fmt::Debug {
     fn attachment_accepts(
         &self,
         _model: &str,
-        _media_type: &lash_sansio::MediaType,
-        _position: lash_sansio::llm::attachment_delivery::AttachmentPosition,
-    ) -> lash_sansio::llm::attachment_delivery::ProviderAccepts {
-        lash_sansio::llm::attachment_delivery::ProviderAccepts::NONE
+        _media_type: &lash_protocol_types::MediaType,
+        _position: lash_protocol_types::llm::attachment_delivery::AttachmentPosition,
+    ) -> lash_protocol_types::llm::attachment_delivery::ProviderAccepts {
+        lash_protocol_types::llm::attachment_delivery::ProviderAccepts::NONE
     }
     fn attachment_file_scope(
         &self,
-    ) -> Option<lash_sansio::llm::attachment_delivery::ProviderFileScope> {
+    ) -> Option<lash_protocol_types::llm::attachment_delivery::ProviderFileScope> {
         None
     }
 
@@ -152,7 +155,7 @@ pub trait Provider: Send + Sync + std::fmt::Debug {
     fn encode_slot(
         &self,
         slot: &AttachmentSlot,
-        delivery: &lash_sansio::llm::attachment_delivery::Delivery,
+        delivery: &lash_protocol_types::llm::attachment_delivery::Delivery,
     ) -> Result<TransientJson, LlmTransportError> {
         super::attachment_wire::canonical_slot(slot, delivery)
     }
@@ -236,7 +239,7 @@ pub trait Provider: Send + Sync + std::fmt::Debug {
                 LlmTransportError::new("provider call timed out")
                     .with_kind(ProviderFailureKind::Timeout)
                     .with_retry_verdict(TransportRetryVerdict::RetryableTransient)
-                    .with_lash_code(lash_sansio::session_model::TurnFailureCode::Timeout)
+                    .with_lash_code(lash_protocol_types::session_model::TurnFailureCode::Timeout)
             })?,
         }?;
         let result = self
@@ -315,7 +318,7 @@ pub fn canonical_request(
 pub fn canonical_call(
     body: &LiveRequestBody,
     context: ResponseContext,
-    delivery_context: &lash_sansio::llm::attachment_delivery::DeliveryContext,
+    delivery_context: &lash_protocol_types::llm::attachment_delivery::DeliveryContext,
     policy: super::AttachmentReadPolicy,
 ) -> Result<(LlmRequest, super::CanonicalDeliveries), LlmTransportError> {
     let request = canonical_request(body, context)?;

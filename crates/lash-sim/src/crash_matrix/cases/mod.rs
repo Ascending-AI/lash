@@ -30,7 +30,7 @@ use lash_core_execution::{
 use lash_durable::domain::TurnEnd;
 use lash_durable::{ActorKey, ActorState};
 use lash_durable_test::SimNodes;
-use lash_sansio::{SessionId, TurnId};
+use lash_protocol_types::{SessionId, TurnId};
 use serde_json::Value;
 
 use super::engine::KIND;

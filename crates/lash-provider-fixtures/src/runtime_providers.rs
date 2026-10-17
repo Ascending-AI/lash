@@ -613,7 +613,7 @@ pub fn runtime_provider_components<T>(
 ) -> Result<
     (
         ProviderHandle,
-        lash_sansio::llm_profile::LlmProfileMetadata,
+        lash_protocol_types::llm_profile::LlmProfileMetadata,
         String,
     ),
     RuntimeProviderError,
@@ -661,7 +661,7 @@ where
             )));
         }
     };
-    let mut model = lash_sansio::llm_profile::LlmProfileMetadata::builder(model_name)
+    let mut model = lash_protocol_types::llm_profile::LlmProfileMetadata::builder(model_name)
         .cache_retention(lash_core::provider::CacheRetention::Short)
         .context_window_tokens(200_000);
     if provider_kind == ANTHROPIC {

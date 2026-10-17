@@ -34,7 +34,7 @@ use crate::snapshot::OperationId;
 pub struct AdmittedEffect {
     /// Minted when its park committed: the park and its ordinal there.
     pub operation: OperationId,
-    pub call: lash_sansio::ToolCallId,
+    pub call: lash_protocol_types::ToolCallId,
 }
 
 /// How a wait stands once its park committed.

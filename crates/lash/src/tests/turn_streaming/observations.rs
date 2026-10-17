@@ -2,7 +2,7 @@ use super::*;
 use crate::{TurnEvent, TurnId};
 
 use futures_util::StreamExt as _;
-use lash_sansio::llm::types::{StreamBlockEvent, StreamBlockKind};
+use lash_protocol_types::{llm::types::StreamBlockEvent, llm::types::StreamBlockKind};
 
 use crate::tests::host::observations::*;
 

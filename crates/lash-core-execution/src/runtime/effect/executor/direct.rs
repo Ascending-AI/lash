@@ -4,7 +4,7 @@ use super::super::outcome::llm_call_error_from_transport;
 use super::*;
 use crate::LlmRequest as CoreLlmRequest;
 use crate::provider::ProviderHandle;
-use lash_sansio::sync::MutexExt as _;
+use lash_protocol_types::sync::MutexExt as _;
 
 impl LocalDirectEffectRunner {
     pub(super) async fn run_direct(

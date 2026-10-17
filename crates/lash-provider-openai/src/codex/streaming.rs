@@ -8,7 +8,7 @@
 //! SSE stream. Both end in the shared response assembly, and `Auto` falls back
 //! from the first to the second only while no stream events have been seen.
 
-use lash_sansio::llm::types::{StreamBlockEvent, StreamBlockKind};
+use lash_protocol_types::{llm::types::StreamBlockEvent, llm::types::StreamBlockKind};
 use std::sync::Arc;
 
 use async_trait::async_trait;
@@ -32,7 +32,7 @@ use lash_llm_transport::{
     openai_usage_from_response_value, read_http_body_text,
 };
 use lash_llm_transport::{TokenLease, merge_extra_headers, rejected_before_output};
-use lash_sansio::FailureCode;
+use lash_protocol_types::FailureCode;
 use lash_transport_failure::{LlmTransportError, TransportRetryVerdict};
 
 use crate::common::BuiltRequest;
@@ -1146,7 +1146,7 @@ impl Provider for CodexProvider {
     fn attachment_accepts(
         &self,
         _model: &str,
-        mime: &lash_sansio::MediaType,
+        mime: &lash_protocol_types::MediaType,
         _position: AttachmentPosition,
     ) -> ProviderAccepts {
         crate::attachment_delivery::responses_accepts(mime, self.attachment_file_scope())
@@ -1217,7 +1217,7 @@ impl Provider for CodexProvider {
         // Building the body is the rest of the preflight.
         self.validate_headers()?;
         let stream = req.stream_events.is_some();
-        let accepts = |mime: &lash_sansio::MediaType, position| {
+        let accepts = |mime: &lash_protocol_types::MediaType, position| {
             self.attachment_accepts(req.model.wire_model(), mime, position)
         };
         // A group of history reads, besides its messages, the route, the

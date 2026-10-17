@@ -72,7 +72,11 @@ fn record(id: &str, timestamp_ms: i64, event: TraceEvent) -> TraceRecord {
 }
 
 fn call_id() -> ToolCallId {
-    ToolCallId::derive("", lash_sansio::ToolCallRoot::turn("turn").unwrap(), &[])
+    ToolCallId::derive(
+        "",
+        lash_protocol_types::ToolCallRoot::turn("turn").unwrap(),
+        &[],
+    )
 }
 
 fn tool(outcome: TraceToolCallOutcome, duration_ms: u64) -> TraceEvent {

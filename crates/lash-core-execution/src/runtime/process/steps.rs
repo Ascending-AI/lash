@@ -33,8 +33,8 @@ use std::sync::{Arc, Mutex};
 
 use lash_core_store::tool_run::CompletionSource;
 use lash_core_store::tool_run::StateResolution;
-use lash_sansio::sync::MutexExt as _;
-use lash_sansio::{ExecutionLimit, ExecutionPolicy};
+use lash_protocol_types::sync::MutexExt as _;
+use lash_protocol_types::{ExecutionLimit, ExecutionPolicy};
 
 use lash_core_store::tool_run::{MaterialOwner, MaterialRole};
 
@@ -393,7 +393,7 @@ pub trait ProcessSteps: Send + Sync {
 
     /// How long a step body whose token was cancelled may still answer:
     /// the runtime's
-    /// [`ExecutionBudgets::stop_grace`](lash_sansio::ExecutionBudgets::stop_grace).
+    /// [`ExecutionBudgets::stop_grace`](lash_protocol_types::ExecutionBudgets::stop_grace).
     fn stop_grace(&self) -> std::time::Duration;
 
     /// The most catalog tool steps `process` may hold at once: the
@@ -408,7 +408,7 @@ pub trait ProcessSteps: Send + Sync {
     async fn max_tool_calls(
         &self,
         process: &ProcessRecord,
-    ) -> Result<Option<lash_sansio::MaxToolCalls>, StepRefusal> {
+    ) -> Result<Option<lash_protocol_types::MaxToolCalls>, StepRefusal> {
         let _ = process;
         Ok(None)
     }
@@ -828,8 +828,8 @@ pub fn process_step_call(
     step: &super::StepName,
     run: u64,
 ) -> crate::ToolCallId {
-    lash_sansio::ToolCallAdmission::process("", process_id.clone())
-        .call_id(&[lash_sansio::ToolCallPosition::ProcessStep { step: &step.0, run }])
+    lash_protocol_types::ToolCallAdmission::process("", process_id.clone())
+        .call_id(&[lash_protocol_types::ToolCallPosition::ProcessStep { step: &step.0, run }])
 }
 
 /// Read every step a process's run journal retains, in admission order,

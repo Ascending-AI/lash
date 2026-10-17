@@ -7,7 +7,7 @@ use std::path::{Path, PathBuf};
 use std::sync::Mutex;
 
 use anyhow::{Context as _, Result, ensure};
-use lash_sansio::sync::MutexExt as _;
+use lash_protocol_types::sync::MutexExt as _;
 use serde::Serialize;
 use sqlx::postgres::{PgPool, PgPoolOptions};
 

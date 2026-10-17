@@ -9,7 +9,7 @@ use std::sync::{Arc, Mutex};
 use async_trait::async_trait;
 use lash_core::ProviderFailureKind;
 use lash_llm_transport::{LlmHttpRequest, LlmHttpResponse, LlmHttpTransport};
-use lash_sansio::sync::MutexExt;
+use lash_protocol_types::sync::MutexExt;
 use lash_transport_failure::LlmTransportError;
 use serde_json::Value;
 
@@ -652,17 +652,19 @@ mod tests {
     ) -> LlmRequest {
         LlmRequest {
             instructions: None,
-            model: lash_sansio::llm_profile::LlmProfileConfig::new(
-                lash_sansio::llm_profile::RecordedLlmProfile::mint(
-                    lash_sansio::llm_profile::LlmProfileKey::new("request-fixture"),
-                    lash_sansio::llm_profile::LlmProfileMetadata::builder(model.wire_model.clone())
-                        .context_window_tokens(128_000)
-                        .max_output_tokens(2048)
-                        .capability(Default::default())
-                        .extra_body(Default::default())
-                        .request_defaults(model.request_defaults.clone())
-                        .build()
-                        .expect("valid profile"),
+            model: lash_protocol_types::llm_profile::LlmProfileConfig::new(
+                lash_protocol_types::llm_profile::RecordedLlmProfile::mint(
+                    lash_protocol_types::llm_profile::LlmProfileKey::new("request-fixture"),
+                    lash_protocol_types::llm_profile::LlmProfileMetadata::builder(
+                        model.wire_model.clone(),
+                    )
+                    .context_window_tokens(128_000)
+                    .max_output_tokens(2048)
+                    .capability(Default::default())
+                    .extra_body(Default::default())
+                    .request_defaults(model.request_defaults.clone())
+                    .build()
+                    .expect("valid profile"),
                 ),
             )
             .with_reasoning(Default::default()),

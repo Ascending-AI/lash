@@ -477,9 +477,9 @@ fn fenced_read(
     };
     let turn_cancel = match (actor.kind(), get::<Option<String>>(row, 4)?) {
         (lash_durable::ActorKind::Session, Some(run)) => {
-            let session = lash_sansio::SessionId::try_from(actor.id().to_owned())
+            let session = lash_protocol_types::SessionId::try_from(actor.id().to_owned())
                 .map_err(|_| super::corrupt("session id", actor.id()))?;
-            let run = lash_sansio::TurnId::try_from(run.clone())
+            let run = lash_protocol_types::TurnId::try_from(run.clone())
                 .map_err(|_| super::corrupt("turn id", &run))?;
             let stored = (
                 get(row, 5)?,

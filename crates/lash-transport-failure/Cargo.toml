@@ -23,6 +23,6 @@ workspace = true
 default = []
 
 [dependencies]
-lash-sansio = { workspace = true }
+lash-protocol-types = { workspace = true }
 thiserror = { workspace = true }
 httpdate = { workspace = true }

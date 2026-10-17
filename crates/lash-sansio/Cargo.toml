@@ -8,7 +8,7 @@ repository.workspace = true
 homepage.workspace = true
 readme.workspace = true
 rust-version.workspace = true
-description = "Sans-IO protocol kernel for the lash agent runtime. Pure types and state machine; no IO or async."
+description = "Sans-IO protocol kernel for the lash agent runtime. Turn machine and protocol driver contracts; no IO or async."
 keywords = ["lash", "agent", "sans-io", "protocol", "runtime"]
 categories = ["asynchronous", "api-bindings"]
 
@@ -21,24 +21,14 @@ workspace = true
 
 [features]
 default = []
-# Validated literal identities for fixtures only.
-testing = []
-# Compile JSON Schema validators for tool inputs and process payloads.
-schema-validation = []
-# Phase A's synthetic N+1 build (ADR 0115 §6): the blocks beside the
-# constants it moves. Only lash-upgrade-harness enables it, through the
-# crates that forward it; no production build does.
-synthetic-next = []
+testing = ["lash-protocol-types/testing"]
+schema-validation = ["lash-protocol-types/schema-validation"]
+synthetic-next = ["lash-protocol-types/synthetic-next"]
 
 [dependencies]
-blake3 = { workspace = true }
-lash-kernel-check = { workspace = true }
-lash-kernel-doc = { workspace = true }
-jsonschema = { workspace = true, default-features = false }
+lash-protocol-types = { workspace = true }
 serde = { workspace = true, features = ["derive", "rc"] }
 serde_json = { workspace = true }
-thiserror = { workspace = true }
-schemars = { workspace = true }
 
 [dev-dependencies]
-proptest = "1"
+lash-protocol-types = { workspace = true, features = ["testing"] }

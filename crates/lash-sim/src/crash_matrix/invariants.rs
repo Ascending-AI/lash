@@ -35,7 +35,7 @@ use lash_core_store::tool_run::SettledOutput;
 use lash_durable::domain::{AdmittedId, OwnerKey};
 use lash_durable::{ActorState, CommitLabel};
 use lash_durable_test::{Cut, Fault, SimNodes, Stored, Write, WriteKind};
-use lash_sansio::ExecutionPolicy;
+use lash_protocol_types::ExecutionPolicy;
 
 use super::world::World;
 

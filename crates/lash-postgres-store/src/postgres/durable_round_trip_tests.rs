@@ -20,7 +20,7 @@ use lash_durable::{
     ActorKey, ActorTx, CommitLabel, DurableReads as _, DurableStore as _, Epoch, FormatSet, MailTx,
     NodeId, NodeSpec, Release,
 };
-use lash_sansio::{SessionId, TurnId};
+use lash_protocol_types::{SessionId, TurnId};
 
 use crate::PostgresStorage;
 use crate::observed_sql::ROUND_TRIPS;
@@ -104,7 +104,7 @@ fn staged(tx: &mut ActorTx, kind: NodeKind, text: &str) -> GraphNode {
 }
 
 /// Accept input `id` for `owned`'s session, as a producer does.
-async fn accept(owned: &Owned, id: &str) -> lash_sansio::InputId {
+async fn accept(owned: &Owned, id: &str) -> lash_protocol_types::InputId {
     use lash_core_execution::{PendingTurnInputBatch, TurnInputStore as _};
     let draft = lash_core_execution::PendingTurnInputDraft::new(
         &owned.session,
@@ -122,7 +122,7 @@ async fn accept(owned: &Owned, id: &str) -> lash_sansio::InputId {
 }
 
 /// Admit `run` with `input` on `tx`, as the session's drain does.
-fn admit(tx: &mut ActorTx, owned: &Owned, run: &TurnId, input: lash_sansio::InputId) {
+fn admit(tx: &mut ActorTx, owned: &Owned, run: &TurnId, input: lash_protocol_types::InputId) {
     tx.write(DomainWrite::SessionMail(SessionMailWrite::Admit {
         session: owned.session.clone(),
         run: run.clone(),
@@ -295,7 +295,8 @@ async fn a_round_outcome_stays_within_its_round_trip_budget() {
         return;
     };
     let store = owned.storage.durable_store();
-    let call = lash_sansio::ToolCallId::parse(&format!("tc_{}", "ab".repeat(32))).expect("call");
+    let call =
+        lash_protocol_types::ToolCallId::parse(&format!("tc_{}", "ab".repeat(32))).expect("call");
     let (_, trips) = round_trips(async {
         let mut tx = store.begin(&owned.actor, owned.epoch).await.expect("open");
         let record = staged(&mut tx, NodeKind::ROUND_FACT, "outcome");
@@ -390,7 +391,7 @@ async fn turn_commit_round_trips(holds_artifacts: bool) {
         .commit(tx, CommitLabel::TURN_ADMIT)
         .await
         .expect("admit the turn");
-    let journal = lash_sansio::ExecutionScope::turn(owned.session.clone(), run.clone())
+    let journal = lash_protocol_types::ExecutionScope::turn(owned.session.clone(), run.clone())
         .journal_identity()
         .expect("turn journal");
     let artifacts = owned.storage.lash_vm_artifact_store();
@@ -487,7 +488,7 @@ async fn turn_commit_round_trips(holds_artifacts: bool) {
                 commit: lash_core_execution::store::TurnCommitId::new(run.clone(), 0),
                 turn: run.clone(),
                 outcome: lash_core_execution::store::RunCommittedOutcome::Finished {
-                    finish: lash_sansio::TurnFinish::AssistantMessage {
+                    finish: lash_protocol_types::TurnFinish::AssistantMessage {
                         text: "done".to_owned(),
                     },
                     value_schema: None,

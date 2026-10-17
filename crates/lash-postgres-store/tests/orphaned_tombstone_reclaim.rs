@@ -8,7 +8,7 @@
 
 use lash_core_execution::SessionCatalogStore;
 use lash_postgres_store::{PostgresStorage, testing::IsolatedDatabase};
-use lash_sansio::SessionId;
+use lash_protocol_types::SessionId;
 
 use crate::support::database_url;
 

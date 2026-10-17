@@ -8,9 +8,12 @@
 //! lifecycle — are not part of this surface.
 
 use super::*;
-use lash_sansio::ProcessId;
-use lash_sansio::SessionId;
-use lash_sansio::llm::attachment_delivery::{Delivery, DeliveryLimits, ProviderAccepts};
+use lash_protocol_types::ProcessId;
+use lash_protocol_types::SessionId;
+use lash_protocol_types::{
+    llm::attachment_delivery::Delivery, llm::attachment_delivery::DeliveryLimits,
+    llm::attachment_delivery::ProviderAccepts,
+};
 
 use std::collections::BTreeSet;
 use std::fs;

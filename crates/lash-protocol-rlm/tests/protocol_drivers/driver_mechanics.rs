@@ -1,7 +1,7 @@
 use super::support::*;
-use lash_sansio::ReportedFailure;
-use lash_sansio::TurnId;
-use lash_sansio::llm::types::{StreamBlockEvent, StreamBlockKind};
+use lash_protocol_types::ReportedFailure;
+use lash_protocol_types::TurnId;
+use lash_protocol_types::{llm::types::StreamBlockEvent, llm::types::StreamBlockKind};
 
 // Focused RLM driver mechanics: malformed options, driver-state ownership, and checkpoint restore internals.
 
@@ -46,7 +46,7 @@ fn opaque_reasoning_only_response_stops_as_empty_provider_response() {
         text_streamed: false,
         result: Ok(rlm_response(vec![LlmOutputPart::Reasoning {
             text: String::new(),
-            replay: Some(lash_sansio::llm::types::ProviderReasoningReplay {
+            replay: Some(lash_protocol_types::llm::types::ProviderReasoningReplay {
                 item_id: Some("opaque-only".to_string()),
                 encrypted_content: Some("encrypted-reasoning-blob".to_string()),
                 signature: None,
@@ -63,12 +63,14 @@ fn opaque_reasoning_only_response_stops_as_empty_provider_response() {
         Effect::Emit(SessionStreamEvent::Error(ReportedFailure {
             envelope: Some(envelope),
             ..
-        })) if envelope.code == Some(lash_sansio::TurnFailureCode::EmptyResponse.into())
+        })) if envelope.code == Some(lash_protocol_types::TurnFailureCode::EmptyResponse.into())
     )));
     assert!(effects.iter().any(|effect| matches!(
         effect,
         Effect::Emit(SessionStreamEvent::TurnOutcome {
-            outcome: lash_sansio::TurnOutcome::Stopped(lash_sansio::TurnStop::ProviderError { .. })
+            outcome: lash_protocol_types::TurnOutcome::Stopped(
+                lash_protocol_types::TurnStop::ProviderError { .. }
+            )
         })
     )));
     assert!(
@@ -397,15 +399,15 @@ fn output_limit_retry_emits_the_guarded_projection_with_no_empty_parts() {
             parts: vec![
                 LlmOutputPart::Text {
                     text: "internal commentary the user never sees".to_string(),
-                    response_meta: Some(lash_sansio::llm::types::ResponseTextMeta {
-                        phase: Some(lash_sansio::llm::types::ResponsePhase::Commentary),
+                    response_meta: Some(lash_protocol_types::llm::types::ResponseTextMeta {
+                        phase: Some(lash_protocol_types::llm::types::ResponsePhase::Commentary),
                         ..Default::default()
                     }),
                 },
                 LlmOutputPart::Text {
                     text: "the truncated answer".to_string(),
-                    response_meta: Some(lash_sansio::llm::types::ResponseTextMeta {
-                        phase: Some(lash_sansio::llm::types::ResponsePhase::FinalAnswer),
+                    response_meta: Some(lash_protocol_types::llm::types::ResponseTextMeta {
+                        phase: Some(lash_protocol_types::llm::types::ResponsePhase::FinalAnswer),
                         ..Default::default()
                     }),
                 },
@@ -608,9 +610,9 @@ fn rlm_checkpoint_redrives_pending_exec_code_with_driver_state() {
 
     restored.handle_response(Response::ExecResult {
         id: restored_exec_id,
-        result: Ok(lash_sansio::ExecResponse {
+        result: Ok(lash_protocol_types::ExecResponse {
             prints_retained: None,
-            prints: vec![lash_sansio::CellPrint {
+            prints: vec![lash_protocol_types::CellPrint {
                 text: "hi\n".to_string(),
                 value: serde_json::json!("hi\n"),
                 projection: Default::default(),
@@ -742,12 +744,12 @@ fn user_stop_is_terminal_without_feedback_or_model_reinvocation_live_and_replay(
                         _ => None,
                     })
                     .unwrap_or_else(|| panic!("{case}: pending cell execution"));
-                let cancellation_evidence = lash_sansio::TurnCancellationEvidence {
+                let cancellation_evidence = lash_protocol_types::TurnCancellationEvidence {
                     request_id: format!("stop-{restore_pending_exec}"),
                     origin: Some("test-host".to_string()),
                     reason: Some("user pressed Stop".to_string()),
-                    undelivered: lash_sansio::TurnCancelUndeliveredInputPolicy::Defer,
-                    mode: lash_sansio::TurnCancelMode::Immediate,
+                    undelivered: lash_protocol_types::TurnCancelUndeliveredInputPolicy::Defer,
+                    mode: lash_protocol_types::TurnCancelMode::Immediate,
                     honoured_after_step: None,
                 };
                 machine.record_cancellation_evidence(cancellation_evidence.clone());
@@ -758,7 +760,7 @@ fn user_stop_is_terminal_without_feedback_or_model_reinvocation_live_and_replay(
                 );
                 stopped_response
                     .degraded_bindings
-                    .push(lash_sansio::DegradedBinding {
+                    .push(lash_protocol_types::DegradedBinding {
                         name: "cancelled_tail".to_string(),
                         reason: "must not be committed".to_string(),
                     });
@@ -814,8 +816,8 @@ fn user_stop_is_terminal_without_feedback_or_model_reinvocation_live_and_replay(
                 assert!(machine.is_done(), "{case}: the stopped turn must settle");
                 assert_eq!(
                     find_turn_outcome(&post_stop_effects),
-                    Some(lash_sansio::TurnOutcome::Stopped(
-                        lash_sansio::TurnStop::Cancelled {
+                    Some(lash_protocol_types::TurnOutcome::Stopped(
+                        lash_protocol_types::TurnStop::Cancelled {
                             evidence: cancellation_evidence,
                         }
                     )),
@@ -852,10 +854,11 @@ fn host_failure_without_cancellation_evidence_retries_without_fabricating_cancel
         })
         .expect("cell execution");
     let mut response = exec_response(&[], None, None);
-    response.result = lash_sansio::CellOutcome::Failed(lash_sansio::CellFailure::new(
-        lash_sansio::CellFailureKind::Host,
-        "execution token failed without host cancellation evidence",
-    ));
+    response.result =
+        lash_protocol_types::CellOutcome::Failed(lash_protocol_types::CellFailure::new(
+            lash_protocol_types::CellFailureKind::Host,
+            "execution token failed without host cancellation evidence",
+        ));
     machine.handle_response(Response::ExecResult {
         id: exec_id,
         result: Ok(response),
@@ -969,9 +972,9 @@ fn rlm_checkpoint_after_exec_fanout_tool_outputs_preserves_structured_outcomes()
         .expect("exec effect");
     machine.handle_response(Response::ExecResult {
         id: exec_id,
-        result: Ok(lash_sansio::ExecResponse {
+        result: Ok(lash_protocol_types::ExecResponse {
             prints_retained: None,
-            prints: vec![lash_sansio::CellPrint {
+            prints: vec![lash_protocol_types::CellPrint {
                 text: "fanout done".to_string(),
                 value: serde_json::json!("fanout done"),
                 projection: Default::default(),
@@ -1151,8 +1154,8 @@ fn rlm_checkpoint_after_exec_fanout_tool_outputs_preserves_structured_outcomes()
     let settled = drain_effects(&mut restored);
     assert!(matches!(
         find_turn_outcome(&settled),
-        Some(lash_sansio::TurnOutcome::Stopped(
-            lash_sansio::TurnStop::Cancelled { .. }
+        Some(lash_protocol_types::TurnOutcome::Stopped(
+            lash_protocol_types::TurnStop::Cancelled { .. }
         ))
     ));
 }
@@ -1174,7 +1177,7 @@ fn rlm_checkpoint_after_exec_fanout_tool_outputs_preserves_structured_outcomes()
 fn drive_stalling_turn(
     machine: &mut TurnMachine,
     reply: &str,
-    exec_result: Option<lash_sansio::ExecResponse>,
+    exec_result: Option<lash_protocol_types::ExecResponse>,
     max_llm_calls: usize,
 ) -> StalledTurn {
     let mut llm_calls = 0;
@@ -1225,7 +1228,7 @@ fn drive_stalling_turn(
 
 struct StalledTurn {
     llm_calls: usize,
-    outcome: Option<lash_sansio::TurnOutcome>,
+    outcome: Option<lash_protocol_types::TurnOutcome>,
     messages: Vec<Message>,
 }
 
@@ -1241,7 +1244,7 @@ impl StalledTurn {
     }
 }
 
-fn find_turn_outcome(effects: &[Effect]) -> Option<lash_sansio::TurnOutcome> {
+fn find_turn_outcome(effects: &[Effect]) -> Option<lash_protocol_types::TurnOutcome> {
     effects.iter().find_map(|effect| match effect {
         Effect::Emit(SessionStreamEvent::TurnOutcome { outcome }) => Some(outcome.clone()),
         _ => None,
@@ -1455,7 +1458,7 @@ fn a_no_progress_stop_does_not_spend_the_next_turns_budget() {
     let mut second = TurnMachine::new(
         config,
         vec![user_message("try again")],
-        lash_sansio::AppendVec::from(carried),
+        lash_protocol_types::AppendVec::from(carried),
         0,
     );
     let stalled = drive_stalling_turn(&mut second, "<typescript>\nfinish \"ok\"", None, 32);
@@ -1479,7 +1482,7 @@ fn prose_only_turns_do_not_accumulate_into_the_next_turns_count() {
         let mut machine = TurnMachine::new(
             config,
             vec![user_message("just talk to me")],
-            lash_sansio::AppendVec::from(carried.clone()),
+            lash_protocol_types::AppendVec::from(carried.clone()),
             0,
         );
         let mut effects = drain_effects(&mut machine);
@@ -1521,7 +1524,7 @@ fn prose_only_turns_do_not_accumulate_into_the_next_turns_count() {
     let mut machine = TurnMachine::new(
         config,
         vec![user_message("now run something")],
-        lash_sansio::AppendVec::from(carried),
+        lash_protocol_types::AppendVec::from(carried),
         0,
     );
     let mut effects = drain_effects(&mut machine);
@@ -1803,43 +1806,44 @@ fn a_repair_iteration_carries_no_accumulation_from_the_failed_one() {
     config.turn_budget = lash_core::TurnBudget::bounded(8);
     let mut machine = TurnMachine::new(config, vec![user_message("run it")], Default::default(), 0);
 
-    let run_cell = |machine: &mut TurnMachine, code: &str, result: lash_sansio::ExecResponse| {
-        let mut effects = drain_effects(machine);
-        // Between iterations the machine parks on a checkpoint; acknowledge
-        // it so the next LLM call is issued.
-        if find_llm_call(&effects).is_none()
-            && let Some((checkpoint_id, _)) = find_checkpoint(&effects)
-        {
-            machine.handle_response(Response::Checkpoint {
-                id: checkpoint_id,
-                delivery: lash_sansio::CheckpointDelivery::default(),
+    let run_cell =
+        |machine: &mut TurnMachine, code: &str, result: lash_protocol_types::ExecResponse| {
+            let mut effects = drain_effects(machine);
+            // Between iterations the machine parks on a checkpoint; acknowledge
+            // it so the next LLM call is issued.
+            if find_llm_call(&effects).is_none()
+                && let Some((checkpoint_id, _)) = find_checkpoint(&effects)
+            {
+                machine.handle_response(Response::Checkpoint {
+                    id: checkpoint_id,
+                    delivery: lash_sansio::CheckpointDelivery::default(),
+                });
+                effects = drain_effects(machine);
+            }
+            let llm_id = *find_llm_call(&effects).expect("an llm call opens the iteration");
+            let text = format!("<typescript>\n{code}\n</typescript>");
+            machine.handle_response(Response::LlmComplete {
+                id: llm_id,
+                text_streamed: false,
+                result: Ok(LlmResponse {
+                    parts: vec![text_part(&text)],
+                    terminal_reason: lash_core::LlmTerminalReason::Stop,
+                    ..LlmResponse::default()
+                }),
             });
-            effects = drain_effects(machine);
-        }
-        let llm_id = *find_llm_call(&effects).expect("an llm call opens the iteration");
-        let text = format!("<typescript>\n{code}\n</typescript>");
-        machine.handle_response(Response::LlmComplete {
-            id: llm_id,
-            text_streamed: false,
-            result: Ok(LlmResponse {
-                parts: vec![text_part(&text)],
-                terminal_reason: lash_core::LlmTerminalReason::Stop,
-                ..LlmResponse::default()
-            }),
-        });
-        let effects = drain_effects(machine);
-        let exec_id = effects
-            .iter()
-            .find_map(|effect| match effect {
-                Effect::ExecCode { id, .. } => Some(*id),
-                _ => None,
-            })
-            .expect("the cell is executed");
-        machine.handle_response(Response::ExecResult {
-            id: exec_id,
-            result: Ok(result),
-        });
-    };
+            let effects = drain_effects(machine);
+            let exec_id = effects
+                .iter()
+                .find_map(|effect| match effect {
+                    Effect::ExecCode { id, .. } => Some(*id),
+                    _ => None,
+                })
+                .expect("the cell is executed");
+            machine.handle_response(Response::ExecResult {
+                id: exec_id,
+                result: Ok(result),
+            });
+        };
 
     // A cell that printed something and then failed.
     run_cell(
@@ -1988,7 +1992,7 @@ fn drive_rlm_to_second_llm_request(
 )]
 fn answer_one_cell(
     code: &str,
-    result: Result<lash_sansio::ExecResponse, lash_core::ExecCodeFailure>,
+    result: Result<lash_protocol_types::ExecResponse, lash_core::ExecCodeFailure>,
 ) -> (TurnMachine, Vec<Effect>) {
     let preamble = lash_protocol_rlm::build_rlm_preamble(
         lash_core::ProtocolBuildInput {

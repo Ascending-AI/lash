@@ -5,7 +5,6 @@ use crate::session_model::{MessageRole, Part};
 use crate::{
     AgentFrameReason, FrameKey, Message, OpenAgentFrameRequest, SessionGraph, shared_parts,
 };
-use lash_sansio::core_support::MessageSequenceCoreSupport;
 const UNBOUNDED: crate::TurnBudget = crate::TurnBudget::Unbounded;
 fn text_message(id: &str, role: MessageRole, content: &str) -> Message {
     Message {
@@ -342,7 +341,7 @@ async fn gates_advance_after_an_attachment_bearing_tool_result() {
             content,
             crate::ToolCallId::fixture(call_id),
             "shot".to_string(),
-            lash_sansio::ToolCallStatus::Success,
+            lash_protocol_types::ToolCallStatus::Success,
         )]),
         origin: None,
         reply_marker: None,

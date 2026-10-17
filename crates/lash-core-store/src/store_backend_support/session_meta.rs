@@ -161,7 +161,7 @@ impl CausalColumns {
                 session_id: codec.required(self.session_id, "caused_by_session_id")?,
                 call_id: {
                     let call_id = codec.required(self.call_id, "caused_by_call_id")?;
-                    lash_sansio::ToolCallId::parse(&call_id).map_err(|error| {
+                    lash_protocol_types::ToolCallId::parse(&call_id).map_err(|error| {
                         codec.corrupt(format!("invalid caused_by_call_id: {error}"))
                     })?
                 },

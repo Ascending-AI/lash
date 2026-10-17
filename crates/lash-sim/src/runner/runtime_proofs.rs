@@ -1,6 +1,6 @@
 use super::*;
-use lash_sansio::llm::types::{StreamBlockEvent, StreamBlockKind};
-use lash_sansio::sync::MutexExt;
+use lash_protocol_types::sync::MutexExt;
+use lash_protocol_types::{llm::types::StreamBlockEvent, llm::types::StreamBlockKind};
 
 /// The seed of the fixed runtime proofs' server doubles.
 pub(super) const RUNTIME_PROOF_SEED: u64 = 0x5eed_7001;
@@ -147,7 +147,7 @@ pub(super) async fn run_live_turn_facts(
         .serve_test_llm_profile(provider_handle, model.clone())
         .build(crate::sim_process_owner())
         .map_err(|err| FixedScriptRunnerError::Runtime(err.to_string()))?;
-    let session_id = lash_sansio::SessionId::fixture(format!(
+    let session_id = lash_protocol_types::SessionId::fixture(format!(
         "sim-live-failure-{provider_kind}-{offered_prose_deltas}"
     ));
     let session = crate::open_created_session(model.wire_model.clone(), &core, session_id)

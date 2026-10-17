@@ -8,7 +8,7 @@ use crate::llm::types::{
     LlmOutputPart, ProviderReasoningReplay, ProviderReplayMeta, ResponseTextMeta,
     StreamBlockIdentity, StreamBlockKind,
 };
-use lash_sansio::core_support::Blake3DomainHasher;
+use lash_protocol_types::core_support::Blake3DomainHasher;
 use std::collections::HashSet;
 
 #[derive(Clone, Debug, Default)]

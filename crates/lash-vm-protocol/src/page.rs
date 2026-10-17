@@ -204,7 +204,7 @@ impl PageEnvelope {
     /// The digest that names `envelope`.
     #[must_use]
     pub fn digest(envelope: &[u8]) -> [u8; 32] {
-        lash_sansio::core_support::blake3_domain_hash(PAGE_DIGEST_DOMAIN, envelope)
+        lash_protocol_types::core_support::blake3_domain_hash(PAGE_DIGEST_DOMAIN, envelope)
     }
 }
 

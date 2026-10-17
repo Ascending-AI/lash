@@ -1,7 +1,7 @@
 //! Live faults abort an opaque attempt without becoming a recorded outcome.
 
 use crate::RuntimeEffectControllerError;
-use lash_sansio::sync::MutexExt;
+use lash_protocol_types::sync::MutexExt;
 use std::sync::{Arc, Mutex};
 
 #[derive(Clone)]

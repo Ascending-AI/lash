@@ -106,7 +106,7 @@ pub struct ProtocolSessionRestoreView {
     pub execution_state: Result<Option<HydratedExecutionGraph>, crate::StoreError>,
     /// Active history to replay protocol seed and globals events: the
     /// session's own records, shared, never copied for a restore.
-    pub active_events: lash_sansio::AppendVec<crate::SessionHistoryRecord>,
+    pub active_events: lash_protocol_types::AppendVec<crate::SessionHistoryRecord>,
     /// Where the session's committed head holds its execution state, when
     /// the caller reads it over a store: a stored-state check looks a
     /// tool's namespace root up in the stored binding tree through these

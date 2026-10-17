@@ -52,7 +52,7 @@ pub(super) fn is_process_subject(subject: &crate::TraceRuntimeSubject) -> bool {
         crate::TraceRuntimeSubject::Process { .. } => true,
         crate::TraceRuntimeSubject::Effect { address, .. } => matches!(
             address.execution_scope,
-            lash_sansio::ExecutionScope::Process { .. }
+            lash_protocol_types::ExecutionScope::Process { .. }
         ),
     }
 }

@@ -1,7 +1,7 @@
 use super::*;
 use crate::TurnId;
 use crate::direct_completion_client::{DirectCompletionService, DirectExecutionPosition};
-use lash_sansio::sync::MutexExt;
+use lash_protocol_types::sync::MutexExt;
 use std::collections::BTreeMap;
 
 impl RuntimeSessionServices {

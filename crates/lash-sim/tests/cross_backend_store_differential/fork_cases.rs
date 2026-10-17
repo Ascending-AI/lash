@@ -1,5 +1,5 @@
 use super::*;
-use lash_sansio::SessionId;
+use lash_protocol_types::SessionId;
 
 /// Agreement alone misses a missing-root defect shared by every backend.
 /// Apply the same independent byte-survival and rollback oracle to all three.

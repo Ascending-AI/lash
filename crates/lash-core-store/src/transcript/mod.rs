@@ -7,8 +7,8 @@ use crate::{
     AttachmentRef, InputId, Message, MessageOrigin, MessageRole, NodeId, Part, ProtocolEvent,
     SessionHistoryRecord, SessionNodePayload, SessionNodeRecord, TurnId,
 };
-use lash_sansio::tool_output::ModelToolReturnPart;
-use lash_sansio::{CellRecord, RetainedOutput, ToolCallId};
+use lash_protocol_types::tool_output::ModelToolReturnPart;
+use lash_protocol_types::{CellRecord, RetainedOutput, ToolCallId};
 use std::sync::Arc;
 
 /// Opaque entry identity. Equality and transport do not expose its spelling.
@@ -136,7 +136,7 @@ impl TranscriptEntry {
 }
 
 /// Settled records and admitted identities awaiting an outcome in a saved cell.
-pub type CellCallLedger = (Vec<lash_sansio::ToolCallRecord>, Vec<ToolCallId>);
+pub type CellCallLedger = (Vec<lash_protocol_types::ToolCallRecord>, Vec<ToolCallId>);
 
 /// A protocol's decoder of the stored shapes it owns, usable without
 /// restoring a live session. Core owns identities, timestamps and reply
@@ -148,7 +148,8 @@ pub trait TranscriptDecoderPlugin: Send + Sync {
         &self,
         _decoder: &mut crate::checkpoint_graph::GraphDecoder<'_>,
         _outcome: crate::checkpoint_graph::NodeId,
-    ) -> Result<Option<lash_sansio::ToolCallRecord>, crate::checkpoint_graph::GraphRefusal> {
+    ) -> Result<Option<lash_protocol_types::ToolCallRecord>, crate::checkpoint_graph::GraphRefusal>
+    {
         Ok(None)
     }
 
@@ -204,7 +205,7 @@ impl TranscriptDecoders {
         &self,
         decoder: &mut crate::checkpoint_graph::GraphDecoder<'_>,
         outcome: crate::checkpoint_graph::NodeId,
-    ) -> Result<lash_sansio::ToolCallRecord, crate::checkpoint_graph::GraphRefusal> {
+    ) -> Result<lash_protocol_types::ToolCallRecord, crate::checkpoint_graph::GraphRefusal> {
         for registered in &self.decoders {
             if let Some(record) = registered.decode_cell_call(decoder, outcome)? {
                 return Ok(record);
@@ -222,7 +223,7 @@ impl TranscriptDecoders {
         decoder: &mut crate::checkpoint_graph::GraphDecoder<'_>,
         root: crate::checkpoint_graph::NodeId,
     ) -> Result<
-        (Vec<lash_sansio::ToolCallRecord>, Vec<ToolCallId>),
+        (Vec<lash_protocol_types::ToolCallRecord>, Vec<ToolCallId>),
         crate::checkpoint_graph::GraphRefusal,
     > {
         for registered in &self.decoders {
@@ -372,19 +373,23 @@ pub struct CommittedTurn {
 pub struct CommittedTurnWithCalls {
     pub turn: CommittedTurn,
     pub model_calls: Vec<crate::model_calls::ModelCallRecord>,
-    #[serde(serialize_with = "lash_sansio::durable_serde::serialize")]
-    pub tool_calls: Vec<lash_sansio::tool_output::ToolCallRecord>,
+    #[serde(serialize_with = "lash_protocol_types::durable_serde::serialize")]
+    pub tool_calls: Vec<lash_protocol_types::tool_output::ToolCallRecord>,
 }
 
 impl CommittedTurnWithCalls {
     /// Sum the retained calls; no summary is stored beside them.
     pub fn usage(
         &self,
-    ) -> Result<lash_sansio::llm::types::LlmUsage, lash_sansio::llm::types::TokenUsageOverflow>
-    {
+    ) -> Result<
+        lash_protocol_types::llm::types::LlmUsage,
+        lash_protocol_types::llm::types::TokenUsageOverflow,
+    > {
         self.model_calls.iter().try_fold(
             Default::default(),
-            |total: lash_sansio::llm::types::LlmUsage, call| total.checked_add(&call.usage()?),
+            |total: lash_protocol_types::llm::types::LlmUsage, call| {
+                total.checked_add(&call.usage()?)
+            },
         )
     }
 }
@@ -494,7 +499,7 @@ enum PartClass {
 }
 
 fn decode_part(part: &Part, marked: Option<&str>) -> Option<TranscriptBlock> {
-    let class = lash_sansio::core_support::fold_part_kind(
+    let class = lash_protocol_types::core_support::fold_part_kind(
         part.kind(),
         [
             PartClass::Text,

@@ -198,7 +198,7 @@ pub enum StepRequest {
         /// site's `process.effect_outcome`, and the start of its admitted
         /// body is observed there ([`lash_trace::StepBodyStarted`]).
         #[serde(default, skip_serializing_if = "Option::is_none")]
-        site: Option<lash_sansio::EffectIdentity>,
+        site: Option<lash_protocol_types::EffectIdentity>,
         /// The recorded match a `call_dynamic` call runs on (P6): set only
         /// by lash, on the step it issues once the call's resolution
         /// committed, which runs the matched tool with the call's `args`
@@ -263,7 +263,7 @@ impl StepRequest {
 
     /// The effect node the step runs for, if its engine named one.
     #[must_use]
-    pub fn site(&self) -> Option<&lash_sansio::EffectIdentity> {
+    pub fn site(&self) -> Option<&lash_protocol_types::EffectIdentity> {
         match self {
             Self::Tool { site, .. } => site.as_ref(),
             Self::Engine { .. } => None,
@@ -286,8 +286,8 @@ impl EngineStepKind {
     /// `engine`: `<engine>/<kind>`, which only identifies the record. An
     /// engine step is dispatched by its variant, never by this name.
     #[must_use]
-    pub fn admitted_tool(&self, engine: &str) -> lash_sansio::ToolId {
-        lash_sansio::ToolId::new(format!("{engine}/{}", self.0))
+    pub fn admitted_tool(&self, engine: &str) -> lash_protocol_types::ToolId {
+        lash_protocol_types::ToolId::new(format!("{engine}/{}", self.0))
     }
 }
 
@@ -543,7 +543,7 @@ pub trait EngineSteps: Send + Sync {
     /// registers the engine
     /// ([`ProcessEngineRegistration::with_engine_step_retry`](super::ProcessEngineRegistration::with_engine_step_retry)).
     /// Lash holds no retry default.
-    fn retry(&self, kind: &EngineStepKind) -> lash_sansio::ExecutionPolicy;
+    fn retry(&self, kind: &EngineStepKind) -> lash_protocol_types::ExecutionPolicy;
 
     /// Run one body to its outcome, observing `cancel`: its settled output,
     /// or a [`CapacityVerdict`] when the host lacked capacity for it.
@@ -585,7 +585,7 @@ pub enum EngineStepRefusal {
 #[derive(Clone, Debug, PartialEq)]
 pub struct EngineWake {
     pub until: DurableInstant,
-    pub site: Option<lash_sansio::EffectIdentity>,
+    pub site: Option<lash_protocol_types::EffectIdentity>,
 }
 
 /// What an engine asks lash to do next.
@@ -615,7 +615,7 @@ pub enum EngineAction {
         /// The wait's name.
         name: KeyName,
         /// The node that waits, when the engine's workflow document names one.
-        site: Option<lash_sansio::EffectIdentity>,
+        site: Option<lash_protocol_types::EffectIdentity>,
     },
     /// Wait for another process's terminal.
     AwaitProcess {
@@ -625,14 +625,14 @@ pub enum EngineAction {
         /// lash default or ceiling.
         bound: crate::ParkBound,
         /// The node that waits, when the engine's workflow document names one.
-        site: Option<lash_sansio::EffectIdentity>,
+        site: Option<lash_protocol_types::EffectIdentity>,
     },
     /// Sleep until a durable instant.
     Sleep {
         /// When the process wakes.
         until: DurableInstant,
         /// The node that sleeps, when the engine's workflow document names one.
-        site: Option<lash_sansio::EffectIdentity>,
+        site: Option<lash_protocol_types::EffectIdentity>,
     },
     /// Nothing to do and no deadline: the process waits until the next
     /// mailbox event (`Cancelled`, a resolved wait or a settled step)
@@ -695,7 +695,7 @@ pub enum EngineEvent {
     /// The process was cancelled; delivered once, within its grace.
     Cancelled {
         /// Who asked.
-        origin: lash_sansio::CancelOrigin,
+        origin: lash_protocol_types::CancelOrigin,
         /// When lash forces the terminal.
         grace_until: DurableInstant,
     },

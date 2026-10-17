@@ -142,7 +142,7 @@ use crate::llm::types::{
     LlmRequest, LlmResponse, LlmStreamEvent, LlmUsage, StreamBlockIdentity,
 };
 use crate::plugin::{CheckpointHookContext, SessionConfigChangedContext, SessionRelation};
-use crate::sansio::{LlmCallError, Response};
+use crate::sansio::Response;
 use crate::session_model::{
     Message, MessageRole, Part, RuntimeSessionPolicy, SessionPolicy, SessionStreamEvent,
     make_error_event, shared_parts,
@@ -153,6 +153,7 @@ use crate::{
     TurnStop,
 };
 use crate::{Effect, TurnMachine};
+use lash_protocol_types::LlmCallError;
 
 use host::*;
 use session_manager::*;

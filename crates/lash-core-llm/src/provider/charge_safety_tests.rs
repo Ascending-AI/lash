@@ -15,7 +15,7 @@ async fn authorizes_bounded_duplicate_billing_and_projects_typed_trace() {
                 max_unsafe_retries: 1,
                 max_duplicate_cost_tokens: Some(10),
             },
-            lash_sansio::ExecutionBudgets::recommended(),
+            lash_protocol_types::ExecutionBudgets::recommended(),
             &crate::provider::NoSlotDeliveries,
         )
         .await
@@ -52,7 +52,7 @@ async fn duplicate_cost_bound_denies_and_projects_typed_trace() {
                 max_unsafe_retries: 1,
                 max_duplicate_cost_tokens: Some(9),
             },
-            lash_sansio::ExecutionBudgets::recommended(),
+            lash_protocol_types::ExecutionBudgets::recommended(),
             &crate::provider::NoSlotDeliveries,
         )
         .await
@@ -84,17 +84,18 @@ async fn provider_handle_enforces_the_supplied_retry_limit_without_a_second_ceil
     let mut handle = paid_partial_handle(Arc::clone(&attempts), 100, 10, None);
     // The deployment's attempt limit (FIG-5171) is stated above the policy
     // under test, so the supplied charge-safety limit is the one that binds.
-    let budgets = lash_sansio::ExecutionBudgets::new(lash_sansio::ExecutionBudgetsConfig {
-        provider: lash_sansio::ProviderAttemptLimits::new(
-            Duration::from_secs(300),
-            Duration::from_secs(120),
-            Duration::from_secs(120),
-            lash_sansio::MAX_PROVIDER_ATTEMPTS,
-        )
-        .expect("valid provider limits"),
-        ..lash_sansio::ExecutionBudgetsConfig::recommended()
-    })
-    .expect("valid budgets");
+    let budgets =
+        lash_protocol_types::ExecutionBudgets::new(lash_protocol_types::ExecutionBudgetsConfig {
+            provider: lash_protocol_types::ProviderAttemptLimits::new(
+                Duration::from_secs(300),
+                Duration::from_secs(120),
+                Duration::from_secs(120),
+                lash_protocol_types::MAX_PROVIDER_ATTEMPTS,
+            )
+            .expect("valid provider limits"),
+            ..lash_protocol_types::ExecutionBudgetsConfig::recommended()
+        })
+        .expect("valid budgets");
     let mut request = empty_request();
     let sideband = handle.prepare_completion(&mut request);
     let body = handle.lower(&request).await.expect("the request lowers");
@@ -146,7 +147,7 @@ async fn unsafe_retry_honors_retry_after_and_excessive_delay_fails_fast() {
                 max_unsafe_retries: 1,
                 max_duplicate_cost_tokens: None,
             },
-            lash_sansio::ExecutionBudgets::recommended(),
+            lash_protocol_types::ExecutionBudgets::recommended(),
             &crate::provider::NoSlotDeliveries,
         )
         .await
@@ -166,7 +167,7 @@ async fn unsafe_retry_honors_retry_after_and_excessive_delay_fails_fast() {
                 max_unsafe_retries: 1,
                 max_duplicate_cost_tokens: None,
             },
-            lash_sansio::ExecutionBudgets::recommended(),
+            lash_protocol_types::ExecutionBudgets::recommended(),
             &crate::provider::NoSlotDeliveries,
         )
         .await
@@ -178,7 +179,7 @@ async fn unsafe_retry_honors_retry_after_and_excessive_delay_fails_fast() {
             .retry_decision
             .as_ref()
             .and_then(|decision| decision.decline_cause()),
-        Some(lash_sansio::llm::types::RetryDeclineCause::RetryAfterExceedsCap)
+        Some(lash_protocol_types::llm::types::RetryDeclineCause::RetryAfterExceedsCap)
     );
 }
 
@@ -297,7 +298,7 @@ async fn one_shot_completion_applies_configured_charge_safety_policy() {
             .complete(
                 empty_request(),
                 configured,
-                lash_sansio::ExecutionBudgets::recommended(),
+                lash_protocol_types::ExecutionBudgets::recommended(),
                 &crate::provider::NoSlotDeliveries,
             )
             .await;

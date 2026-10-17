@@ -3,7 +3,7 @@ use crate::plugin::{DirectCompletion, PluginError};
 #[derive(Clone)]
 pub struct ToolDirectCompletionClient<'run> {
     pub(super) owner: crate::RuntimeOwner,
-    pub(super) call_id: lash_sansio::ToolCallId,
+    pub(super) call_id: lash_protocol_types::ToolCallId,
     pub(super) direct_completions: crate::DirectCompletionClient<'run>,
     pub(super) parent_invocation: Option<crate::RuntimeInvocation>,
 }

@@ -3,7 +3,7 @@
 //! node, and the listings an operator's kernel migration survey reads
 //! (FIG-5787).
 
-use lash_sansio::{SessionId, TurnId};
+use lash_protocol_types::{SessionId, TurnId};
 
 use super::{LawBroken, LawOutcome};
 use crate::domain::{CANCEL_MAIL, CellId, DomainWrite, ExecKey, ExecRootWrite};
@@ -265,7 +265,7 @@ pub async fn actors_in_a_format_set_and_a_turns_cells_are_listed(
     let cell = |session: &SessionId, run: &TurnId, cell: &str| {
         ExecKey::Cell(session.clone(), run.clone(), CellId::new(cell))
     };
-    let process = lash_sansio::ProcessId::fixture("listed-b");
+    let process = lash_protocol_types::ProcessId::fixture("listed-b");
     for claim in &claimed {
         let mut tx = store.begin(&claim.actor, claim.epoch).await?;
         if claim.actor == first {

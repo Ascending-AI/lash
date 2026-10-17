@@ -9,7 +9,7 @@
 
 mod compact;
 
-use lash_sansio::{JsonSchema, ToolContract, ToolManifest, ToolOutputContract};
+use lash_protocol_types::{JsonSchema, ToolContract, ToolManifest, ToolOutputContract};
 use lash_tool_presenter_api::{
     PresentationRefusal, PresentedToolSection, ToolPresentationEntry, ToolPresentationRequest,
     ToolPresenter, import_schema, listing,

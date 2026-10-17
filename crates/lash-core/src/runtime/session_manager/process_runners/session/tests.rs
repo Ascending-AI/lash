@@ -29,12 +29,16 @@ fn every_non_cancelled_child_stop_is_distinguishable_to_the_parent() {
         crate::TurnStop::MaxTurns,
         crate::TurnStop::ToolFailure,
         crate::TurnStop::ProviderError {
-            cause: lash_sansio::TurnErrorCause::new(lash_sansio::TurnErrorCode::ProviderRejected),
+            cause: lash_protocol_types::TurnErrorCause::new(
+                lash_protocol_types::TurnErrorCode::ProviderRejected,
+            ),
         },
         crate::TurnStop::ContextOverflow,
         crate::TurnStop::PluginAbort,
         crate::TurnStop::RuntimeError {
-            cause: lash_sansio::TurnErrorCause::new(lash_sansio::TurnErrorCode::RuntimeRefused),
+            cause: lash_protocol_types::TurnErrorCause::new(
+                lash_protocol_types::TurnErrorCode::RuntimeRefused,
+            ),
         },
         crate::TurnStop::AgentFrameSwitchLimit,
         crate::TurnStop::SubmittedError {
@@ -106,7 +110,9 @@ fn a_child_authored_stop_reason_reaches_the_parent_verbatim() {
 fn a_category_stop_carries_the_child_turn_blocking_issue() {
     let mut turn = crate::testing::mock_assembled_turn(&SessionId::from("failing-child"), "unused");
     turn.outcome = crate::TurnOutcome::Stopped(crate::TurnStop::ProviderError {
-        cause: lash_sansio::TurnErrorCause::new(lash_sansio::TurnErrorCode::ProviderRejected),
+        cause: lash_protocol_types::TurnErrorCause::new(
+            lash_protocol_types::TurnErrorCode::ProviderRejected,
+        ),
     });
     turn.errors = vec![crate::TurnIssue {
         severity: crate::TurnIssueSeverity::Blocking,
@@ -123,7 +129,7 @@ fn a_category_stop_carries_the_child_turn_blocking_issue() {
     let failure = failure_from_process_turn(
         &turn,
         lash_core_store::execution_limits::DiagnosticLimits::standard(),
-        lash_sansio::session_model::RuntimeOutputCuts::standard(),
+        lash_protocol_types::session_model::RuntimeOutputCuts::standard(),
     );
     assert_eq!(failure.code, "process_session_turn_provider_error");
     assert_eq!(failure.class, crate::ToolFailureClass::External);
@@ -149,9 +155,9 @@ fn a_category_stop_carries_the_child_turn_blocking_issue() {
         crate::ProcessStatus::Failed,
         &crate::SessionTurnOutcome::Turn,
         lash_core_store::execution_limits::DiagnosticLimits::standard(),
-        lash_sansio::session_model::RuntimeOutputCuts {
+        lash_protocol_types::session_model::RuntimeOutputCuts {
             raw_error_max_chars: 3,
-            ..lash_sansio::session_model::RuntimeOutputCuts::standard()
+            ..lash_protocol_types::session_model::RuntimeOutputCuts::standard()
         },
     );
     let bounded = projected_failure(bounded);
@@ -190,7 +196,7 @@ fn failed_child_failure(stop: crate::TurnStop) -> crate::ToolFailure {
         state,
         &crate::SessionTurnOutcome::Turn,
         lash_core_store::execution_limits::DiagnosticLimits::standard(),
-        lash_sansio::session_model::RuntimeOutputCuts::standard(),
+        lash_protocol_types::session_model::RuntimeOutputCuts::standard(),
     );
     let crate::ToolCallOutcome::Failure(failure) = output.outcome else {
         panic!("a failed child turn must project a tool failure");
@@ -327,7 +333,7 @@ async fn child_turn_cancellation_evidence_survives_runner_record_and_parent_resu
         crate::ProcessStatus::Cancelled,
         &crate::SessionTurnOutcome::FinalValue { schema: None },
         lash_core_store::execution_limits::DiagnosticLimits::standard(),
-        lash_sansio::session_model::RuntimeOutputCuts::standard(),
+        lash_protocol_types::session_model::RuntimeOutputCuts::standard(),
     );
     assert_child_turn_cancellation(&runner_output, &evidence);
 
@@ -387,7 +393,7 @@ fn project_turn(
         state,
         result,
         lash_core_store::execution_limits::DiagnosticLimits::standard(),
-        lash_sansio::session_model::RuntimeOutputCuts::standard(),
+        lash_protocol_types::session_model::RuntimeOutputCuts::standard(),
     )
 }
 
@@ -428,7 +434,7 @@ fn child_final_value_keeps_typed_values_and_checks_the_schema() {
     let value = serde_json::json!({ "answer": 42 });
     let typed = crate::SessionTurnOutcome::FinalValue {
         schema: Some(
-            lash_sansio::JsonSchema::admit(serde_json::json!({
+            lash_protocol_types::JsonSchema::admit(serde_json::json!({
                 "type": "object",
                 "properties": { "answer": { "type": "integer" } },
                 "required": ["answer"],

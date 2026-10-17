@@ -1,6 +1,6 @@
 //! Versioned provider-variation fixture matrix at the transport seam.
 
-use lash_sansio::llm::types::{StreamBlockEvent, StreamBlockKind};
+use lash_protocol_types::{llm::types::StreamBlockEvent, llm::types::StreamBlockKind};
 use std::collections::BTreeSet;
 use std::sync::{Arc, Mutex};
 
@@ -10,16 +10,21 @@ use lash_core::provider::{
 };
 use lash_core::{AttemptOutcome, ProtocolPosition, ProviderFailureKind};
 use lash_llm_transport::LlmHttpTransport;
+use lash_protocol_types::sync::MutexExt;
+use lash_protocol_types::{
+    llm::types::LlmEventSender, llm::types::LlmMessage, llm::types::LlmOutputPart,
+    llm::types::LlmRequest, llm::types::LlmRequestScope, llm::types::LlmRole,
+    llm::types::LlmStreamEvent, llm::types::LlmStreamEvidence, llm::types::LlmTerminalReason,
+    llm::types::LlmToolChoice,
+};
+use lash_protocol_types::{
+    session_model::Message, session_model::MessageRole, session_model::render_prompt,
+    session_model::shared_parts,
+};
 use lash_provider_anthropic::AnthropicProvider;
 use lash_provider_google::GoogleOAuthProvider;
 use lash_provider_openai::codex::ws_testing::{ScriptedWsAction, spawn_scripted_websocket};
 use lash_provider_openai::{CodexProvider, OpenAiCompatibleProvider, OpenAiProvider};
-use lash_sansio::llm::types::{
-    LlmEventSender, LlmMessage, LlmOutputPart, LlmRequest, LlmRequestScope, LlmRole,
-    LlmStreamEvent, LlmStreamEvidence, LlmTerminalReason, LlmToolChoice,
-};
-use lash_sansio::session_model::{Message, MessageRole, render_prompt, shared_parts};
-use lash_sansio::sync::MutexExt;
 use serde_json::{Value, json};
 
 use crate::provider_variations::TYPESCRIPT_CLOSE_DELIMITER;
@@ -624,7 +629,7 @@ async fn run_matrix_row(
                         .retry_decision
                         .as_ref()
                         .and_then(|decision| decision.retry_class()),
-                    Some(lash_sansio::llm::types::RetryClass::EmptyStreamPartial),
+                    Some(lash_protocol_types::llm::types::RetryClass::EmptyStreamPartial),
                     "{dialect} response observation alone must not authorize retry"
                 );
             }
@@ -912,25 +917,27 @@ fn matrix_request(
     };
     LlmRequest {
         instructions: None,
-        model: lash_sansio::llm_profile::LlmProfileConfig::new(
-            lash_sansio::llm_profile::RecordedLlmProfile::mint(
-                lash_sansio::llm_profile::LlmProfileKey::new("request-fixture"),
+        model: lash_protocol_types::llm_profile::LlmProfileConfig::new(
+            lash_protocol_types::llm_profile::RecordedLlmProfile::mint(
+                lash_protocol_types::llm_profile::LlmProfileKey::new("request-fixture"),
                 {
                     let mut metadata =
-                        lash_sansio::llm_profile::LlmProfileMetadata::builder(model.to_string())
-                            .context_window_tokens(128_000)
-                            .capability(llm_profile_capability)
-                            .extra_body(Default::default())
-                            .request_defaults(lash_core::provider::LlmProfileRequestDefaults {
-                                expose_thinking: true,
-                                ..lash_core::provider::LlmProfileRequestDefaults::new(
-                                    lash_core::provider::CacheRetention::Short,
-                                )
-                            })
-                            .build()
-                            .expect("valid profile");
+                        lash_protocol_types::llm_profile::LlmProfileMetadata::builder(
+                            model.to_string(),
+                        )
+                        .context_window_tokens(128_000)
+                        .capability(llm_profile_capability)
+                        .extra_body(Default::default())
+                        .request_defaults(lash_core::provider::LlmProfileRequestDefaults {
+                            expose_thinking: true,
+                            ..lash_core::provider::LlmProfileRequestDefaults::new(
+                                lash_core::provider::CacheRetention::Short,
+                            )
+                        })
+                        .build()
+                        .expect("valid profile");
                     metadata.limits.output_tokens =
-                        lash_sansio::llm_profile::OutputTokenLimits::new(
+                        lash_protocol_types::llm_profile::OutputTokenLimits::new(
                             None,
                             (dialect == "anthropic.messages").then_some(4096),
                         )
@@ -1424,23 +1431,26 @@ fn assert_reasoning_rendered(parts: &[LlmOutputPart], dialect: &str, expected_re
             LlmOutputPart::Text {
                 text,
                 response_meta,
-            } => lash_sansio::session_model::Part::prose(
+            } => lash_protocol_types::session_model::Part::prose(
                 format!("matrix-assistant.p{index}"),
                 text.clone(),
                 response_meta.clone(),
             ),
-            LlmOutputPart::Reasoning { text, replay } => {
-                lash_sansio::reasoning_part("matrix-assistant", index, text.clone(), replay.clone())
-            }
+            LlmOutputPart::Reasoning { text, replay } => lash_protocol_types::reasoning_part(
+                "matrix-assistant",
+                index,
+                text.clone(),
+                replay.clone(),
+            ),
             LlmOutputPart::ToolCall {
                 call_id,
                 tool_name,
                 input_json,
                 replay,
-            } => lash_sansio::session_model::Part::tool_call(
+            } => lash_protocol_types::session_model::Part::tool_call(
                 format!("matrix-assistant.p{index}"),
                 input_json.clone(),
-                lash_sansio::ToolCallId::fixture(call_id),
+                lash_protocol_types::ToolCallId::fixture(call_id),
                 call_id.clone(),
                 tool_name.clone(),
                 replay.clone(),
@@ -1459,7 +1469,7 @@ fn assert_reasoning_rendered(parts: &[LlmOutputPart], dialect: &str, expected_re
         .iter()
         .flat_map(|message| message.blocks.iter())
         .any(|block| {
-            matches!(block, lash_sansio::llm::types::LlmContentBlock::Reasoning { text, .. } if text == "matrix reasoning")
+            matches!(block, lash_protocol_types::llm::types::LlmContentBlock::Reasoning { text, .. } if text == "matrix reasoning")
         });
     assert_eq!(
         rendered_reasoning, expected_replayable,
@@ -1468,7 +1478,7 @@ fn assert_reasoning_rendered(parts: &[LlmOutputPart], dialect: &str, expected_re
     );
     assert!(
         rendered.messages.iter().flat_map(|message| message.blocks.iter()).all(|block| {
-            !matches!(block, lash_sansio::llm::types::LlmContentBlock::Text { text, .. } if text.contains("matrix reasoning"))
+            !matches!(block, lash_protocol_types::llm::types::LlmContentBlock::Text { text, .. } if text.contains("matrix reasoning"))
         }),
         "{dialect} reasoning leaked into visible assistant text"
     );

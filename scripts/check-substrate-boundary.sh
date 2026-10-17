@@ -278,7 +278,7 @@ while IFS=: read -r file line source; do
   stripped="$(sed -E \
     -e 's/(PluginError|TurnFailureKind|Self)::RuntimeEffectController([^[:alnum:]_]|$)/\2/g' \
     -e 's/(^|[^[:alnum:]_:])RuntimeEffectController[[:space:]]*\(/\1(/g' <<<"$source")"
-  if [[ $file == crates/lash-sansio/src/session_model/failure.rs ]]; then
+  if [[ $file == crates/lash-protocol-types/src/session_model/failure.rs ]]; then
     stripped="$(sed -E 's/^[[:space:]]*RuntimeEffectController,[[:space:]]*$//' <<<"$stripped")"
   fi
   grep -Eq "$collapse_forbidden" <<<"$stripped" || continue

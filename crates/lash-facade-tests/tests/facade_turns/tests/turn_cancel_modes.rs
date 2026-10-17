@@ -7,7 +7,7 @@ use super::*;
 use lash::{TurnCancelMode, TurnCancelUndeliveredInputPolicy, TurnEvent, TurnInput};
 use lash_core::ToolDefinitionBindingExt as _;
 use lash_core::facade_support::TurnCancelOutcome;
-use lash_sansio::llm::types::{StreamBlockEvent, StreamBlockKind};
+use lash_protocol_types::{llm::types::StreamBlockEvent, llm::types::StreamBlockKind};
 use std::sync::atomic::AtomicBool;
 
 /// How long a cancelled turn may take to end.

@@ -10,7 +10,10 @@ use crate::{
     ProducerOutcome, SpanRole, TraceContext, TraceDomainCompletion, TraceIds, TraceTimestamp,
     TraceTurnCompletionReason,
 };
-use lash_sansio::llm::types::{AttemptOutcome, AttemptRecord, ExecutionEvidence, ProtocolPosition};
+use lash_protocol_types::{
+    llm::types::AttemptOutcome, llm::types::AttemptRecord, llm::types::ExecutionEvidence,
+    llm::types::ProtocolPosition,
+};
 use opentelemetry::trace::SpanKind;
 use opentelemetry_sdk::metrics::{InMemoryMetricExporter, PeriodicReader, SdkMeterProvider};
 use opentelemetry_sdk::trace::{
@@ -690,9 +693,9 @@ fn domain_subject_owns_the_span_and_intent_kind_attribute() {
             name: Some("example".into()),
         },
         TraceDomainSubject::WorkflowNode {
-            at: lash_sansio::EffectIdentity {
-                task: lash_sansio::TaskIdentity::Main,
-                site: lash_sansio::Site::new(lash_sansio::Unit::Main, [2, 0]),
+            at: lash_protocol_types::EffectIdentity {
+                task: lash_protocol_types::TaskIdentity::Main,
+                site: lash_protocol_types::Site::new(lash_protocol_types::Unit::Main, [2, 0]),
                 occurrence: 1,
                 loops: Vec::new(),
             },
@@ -700,7 +703,7 @@ fn domain_subject_owns_the_span_and_intent_kind_attribute() {
     ]
     .into_iter()
     .chain(
-        lash_sansio::ToolIntentKind::ALL
+        lash_protocol_types::ToolIntentKind::ALL
             .iter()
             .map(|kind| TraceDomainSubject::ToolIntent { kind: *kind }),
     );
@@ -783,7 +786,7 @@ fn tool_and_code_completions_export_their_retained_times_and_the_policys_content
         (
             TraceSpanKind::Tool,
             TraceEvent::ToolCallCompleted {
-                call_id: lash_sansio::ToolCallId::fixture("call"),
+                call_id: lash_protocol_types::ToolCallId::fixture("call"),
                 provider_call_id: None,
                 name: "unfamiliar-tool".into(),
                 args: serde_json::json!({"secret":"hidden"}).into(),
@@ -957,7 +960,7 @@ fn failed_cells_export_their_reason_without_failing_a_recovered_turn() {
                 observation_count: 0,
                 observation_projections: Vec::new(),
                 error: Some(
-                    lash_sansio::ExecCodeFailure::new(
+                    lash_protocol_types::ExecCodeFailure::new(
                         crate::ExecCodeFailureReason::ExecutorUnavailable,
                         "missing executor",
                     )
@@ -1056,7 +1059,7 @@ fn a_discarded_cell_is_a_tool_span_that_did_not_fail() {
 fn correlation_ids_are_attributes_with_payload_export_off() {
     let (provider, meter, exporter, _) = providers(Sampler::AlwaysOn);
     let adapter = OtelTelemetry::new(&provider, &meter, OtelOptions::default());
-    let process_id = lash_sansio::ProcessId::fixture("process");
+    let process_id = lash_protocol_types::ProcessId::fixture("process");
     let process_value = process_id.to_string();
     let owners = [
         (
@@ -1069,7 +1072,7 @@ fn correlation_ids_are_attributes_with_payload_export_off() {
         ),
         (
             TraceScopeOwner::Process {
-                process_id: lash_sansio::ProcessId::fixture("process"),
+                process_id: lash_protocol_types::ProcessId::fixture("process"),
             },
             None,
             Some(process_value.as_str()),
@@ -1088,7 +1091,7 @@ fn correlation_ids_are_attributes_with_payload_export_off() {
         (
             TraceScopeOwner::Tool {
                 owner: TraceToolOwner::Process {
-                    process_id: lash_sansio::ProcessId::fixture("process"),
+                    process_id: lash_protocol_types::ProcessId::fixture("process"),
                 },
                 call_id: "tool".into(),
             },
@@ -1097,9 +1100,9 @@ fn correlation_ids_are_attributes_with_payload_export_off() {
         ),
         (
             TraceScopeOwner::ToolIntent {
-                owner: lash_sansio::RuntimeOwner::Process(lash_sansio::ProcessId::fixture(
-                    "process",
-                )),
+                owner: lash_protocol_types::RuntimeOwner::Process(
+                    lash_protocol_types::ProcessId::fixture("process"),
+                ),
                 replay_key: "intent".into(),
             },
             None,
@@ -1107,7 +1110,7 @@ fn correlation_ids_are_attributes_with_payload_export_off() {
         ),
         (
             TraceScopeOwner::ToolIntent {
-                owner: lash_sansio::RuntimeOwner::Session("conversation".into()),
+                owner: lash_protocol_types::RuntimeOwner::Session("conversation".into()),
                 replay_key: "intent".into(),
             },
             None,
@@ -1198,7 +1201,7 @@ fn failure_attributes_preserve_typed_classes() {
     let (provider, meter, exporter, _) = providers(Sampler::AlwaysOn);
     let adapter = OtelTelemetry::new(&provider, &meter, OtelOptions::default());
     let tool = |outcome, attempts| TraceEvent::ToolCallCompleted {
-        call_id: lash_sansio::ToolCallId::fixture("call"),
+        call_id: lash_protocol_types::ToolCallId::fixture("call"),
         provider_call_id: None,
         name: "tool".into(),
         args: serde_json::Value::Null.into(),
@@ -1217,10 +1220,10 @@ fn failure_attributes_preserve_typed_classes() {
             delay_ms: None,
             detail: crate::TraceRetryAttemptDetail::Tool {
                 outcome: crate::TraceToolAttemptOutcome::Failed {
-                    class: lash_sansio::ToolFailureClass::Io,
+                    class: lash_protocol_types::ToolFailureClass::Io,
                     code: "old".into(),
                     message: "private detail".into(),
-                    source: lash_sansio::ToolFailureSource::Tool,
+                    source: lash_protocol_types::ToolFailureSource::Tool,
                     suggested_delay_ms: None,
                 },
             },
@@ -1230,10 +1233,10 @@ fn failure_attributes_preserve_typed_classes() {
             delay_ms: None,
             detail: crate::TraceRetryAttemptDetail::Tool {
                 outcome: crate::TraceToolAttemptOutcome::Failed {
-                    class: lash_sansio::ToolFailureClass::PermissionDenied,
+                    class: lash_protocol_types::ToolFailureClass::PermissionDenied,
                     code: "final".into(),
                     message: "private detail".into(),
-                    source: lash_sansio::ToolFailureSource::Tool,
+                    source: lash_protocol_types::ToolFailureSource::Tool,
                     suggested_delay_ms: None,
                 },
             },
@@ -1283,8 +1286,8 @@ fn failure_attributes_preserve_typed_classes() {
             TraceSpanKind::Tool,
             tool(
                 crate::TraceToolCallOutcome::Failure(
-                    lash_sansio::ToolFailure::runtime(
-                        lash_sansio::ToolFailureClass::Internal,
+                    lash_protocol_types::ToolFailure::runtime(
+                        lash_protocol_types::ToolFailureClass::Internal,
                         "tool_retry_sleep_failed",
                         "private retry sleep failure",
                     )
@@ -1298,7 +1301,7 @@ fn failure_attributes_preserve_typed_classes() {
             TraceSpanKind::Tool,
             tool(
                 crate::TraceToolCallOutcome::Failure(
-                    lash_sansio::ToolFailure::io("host_io_failed", "private detail")
+                    lash_protocol_types::ToolFailure::io("host_io_failed", "private detail")
                         .to_json_value(),
                 ),
                 Vec::new(),
@@ -2146,7 +2149,7 @@ fn model_fixture(adapter: &OtelTelemetry, provider: &str) -> TraceRecord {
                 protocol_position: ProtocolPosition::TerminalObserved,
                 retry_budget_consumed: true,
                 retry_decision: None,
-                error: (ordinal == 1).then(|| lash_sansio::llm::types::NormalizedError {
+                error: (ordinal == 1).then(|| lash_protocol_types::llm::types::NormalizedError {
                     class: crate::TraceProviderFailureKind::Http,
                     code: None,
                     http_status: Some(503),
@@ -2218,7 +2221,7 @@ fn content_attributes_are_whole_schema_valid_json() {
     let (traces, meters, spans, _) = providers(Sampler::AlwaysOn);
     let exporter = OtelTelemetry::new(&traces, &meters, OtelOptions::standard());
     let event = TraceEvent::ToolCallCompleted {
-        call_id: lash_sansio::ToolCallId::fixture("content-law"),
+        call_id: lash_protocol_types::ToolCallId::fixture("content-law"),
         provider_call_id: None,
         name: "read".into(),
         args: serde_json::json!([1, 2]).into(),
@@ -2399,11 +2402,11 @@ fn abandoned_tool_spans_omit_unavailable_arguments_but_keep_real_null() {
     .enumerate()
     {
         let event = TraceEvent::ToolCallCompleted {
-            call_id: lash_sansio::ToolCallId::fixture(&format!("abandoned-{index}")),
+            call_id: lash_protocol_types::ToolCallId::fixture(&format!("abandoned-{index}")),
             provider_call_id: None,
             name: if index == 0 {
                 crate::TraceToolName::Identity {
-                    tool_id: lash_sansio::ToolId::new("tool:read"),
+                    tool_id: lash_protocol_types::ToolId::new("tool:read"),
                 }
             } else {
                 "read".into()

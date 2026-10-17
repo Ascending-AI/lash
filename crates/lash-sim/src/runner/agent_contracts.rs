@@ -1,9 +1,9 @@
 use super::*;
-use lash_sansio::ReportedFailure;
+use lash_protocol_types::ReportedFailure;
 
 mod process_fixtures;
-use lash_sansio::ProcessId;
-use lash_sansio::SessionId;
+use lash_protocol_types::ProcessId;
+use lash_protocol_types::SessionId;
 use process_fixtures::*;
 
 thread_local! {

@@ -36,10 +36,12 @@ pub use token_gate::{TokenGate, TokenLease, TokenPolicy, rejected_before_output}
 pub use util::{emit_provider_request_trace, emit_provider_trace, extract_error_detail, parse_i64};
 
 /// Flatten a tool result for transports that carry attachments separately.
-pub fn tool_result_text(content: &[lash_sansio::ModelToolReturnPart]) -> std::borrow::Cow<'_, str> {
+pub fn tool_result_text(
+    content: &[lash_protocol_types::ModelToolReturnPart],
+) -> std::borrow::Cow<'_, str> {
     lash_render::tool_result_text(
         content
             .iter()
-            .map(lash_sansio::ModelToolReturnPart::visible_text),
+            .map(lash_protocol_types::ModelToolReturnPart::visible_text),
     )
 }

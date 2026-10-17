@@ -52,8 +52,8 @@ use lash_durable::{ActorKey, ActorState, CommitLabel, DurableStore, FormatSet};
 use lash_durable_test::{
     Cut, Fault, Matrix, Scenario, SimClock, SimNodes, SimNodesConfig, Stored, Tripwire,
 };
-use lash_sansio::sync::MutexExt as _;
-use lash_sansio::{ExecutionLimit, ExecutionPolicy};
+use lash_protocol_types::sync::MutexExt as _;
+use lash_protocol_types::{ExecutionLimit, ExecutionPolicy};
 use serde_json::{Value, json};
 
 use dialect::Dialect;

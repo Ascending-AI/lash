@@ -605,7 +605,7 @@ pub fn check_candidate(
 /// the session's execution root, and it is the candidate's root.
 fn check_session_candidate(
     writes: &[DomainWrite],
-    session: &lash_sansio::SessionId,
+    session: &lash_protocol_types::SessionId,
     summary: &ManifestSummary,
 ) -> Result<(), GraphRefusal> {
     let mut owned = writes.iter().filter_map(|write| match write {

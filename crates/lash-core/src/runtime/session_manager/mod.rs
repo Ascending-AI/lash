@@ -13,7 +13,7 @@ use super::*;
 use crate::ProcessId;
 use crate::SessionId;
 use crate::TurnId;
-use lash_sansio::sync::MutexExt as _;
+use lash_protocol_types::sync::MutexExt as _;
 use std::sync::atomic::AtomicBool;
 
 mod api;
@@ -37,7 +37,7 @@ enum CurrentSnapshot {
     /// projection for in-turn readers.
     ReadModel {
         meta: RuntimeSessionState,
-        messages: lash_sansio::AppendVec<Message>,
+        messages: lash_protocol_types::AppendVec<Message>,
         graph_appends: TurnGraphAppendDraft,
     },
 }

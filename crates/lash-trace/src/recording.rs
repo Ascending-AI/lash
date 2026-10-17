@@ -2,7 +2,7 @@
 
 use std::sync::Mutex;
 
-use lash_sansio::sync::MutexExt;
+use lash_protocol_types::sync::MutexExt;
 
 use crate::{TraceRecord, TraceSink, TraceSinkError};
 

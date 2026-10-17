@@ -15,8 +15,8 @@ use std::collections::{BTreeMap, BTreeSet};
 use std::sync::{Arc, Mutex};
 use std::time::Duration;
 
-use lash_sansio::SessionId;
-use lash_sansio::sync::MutexExt as _;
+use lash_protocol_types::SessionId;
+use lash_protocol_types::sync::MutexExt as _;
 
 const SESSION_MODEL: &str = "own-env-session-model";
 const RUN_MODEL: &str = "own-env-run-model";

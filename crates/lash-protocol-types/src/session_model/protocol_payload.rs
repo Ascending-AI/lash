@@ -13,7 +13,7 @@ use std::sync::Arc;
 /// from. It serializes as its JSON.
 ///
 /// ```
-/// use lash_sansio::ProtocolPayload;
+/// use lash_protocol_types::ProtocolPayload;
 ///
 /// let payload = ProtocolPayload::from(serde_json::json!({"format": 1}));
 /// let format = payload.derived(|value| value["format"].as_u64());

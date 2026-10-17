@@ -11,7 +11,7 @@ use lash_core::facade_support::TurnOutcome;
 #[cfg(feature = "rlm")]
 use lash_core::facade_support::{SessionGraphFacadeOps as _, SessionNodeProjection as _};
 use lash_core::plugin::StaticPluginFactory;
-use lash_sansio::llm::types::{StreamBlockEvent, StreamBlockKind};
+use lash_protocol_types::{llm::types::StreamBlockEvent, llm::types::StreamBlockKind};
 use tokio::sync::oneshot;
 
 #[tokio::test]

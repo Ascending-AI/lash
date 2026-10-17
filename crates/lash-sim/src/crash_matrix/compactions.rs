@@ -24,7 +24,7 @@ use lash_core::facade_support::ProviderHandle;
 use lash_core::llm::types::{
     LlmContentBlock, LlmOutputPart, LlmRequest, LlmResponse, ResponseContext,
 };
-use lash_sansio::{SessionId, TurnId};
+use lash_protocol_types::{SessionId, TurnId};
 
 use super::services::TurnScript;
 use super::world::World;

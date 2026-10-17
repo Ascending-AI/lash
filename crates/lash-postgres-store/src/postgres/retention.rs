@@ -1,6 +1,6 @@
 use crate::process_sql::process_sql;
 use crate::*;
-use lash_sansio::ProcessId;
+use lash_protocol_types::ProcessId;
 
 pub(super) async fn filter_unregistered_process_ids(
     pool: &sqlx::PgPool,

@@ -1,5 +1,5 @@
-use lash_sansio::SessionId;
-use lash_sansio::sync::MutexExt;
+use lash_protocol_types::SessionId;
+use lash_protocol_types::sync::MutexExt;
 use std::sync::atomic::{AtomicUsize, Ordering};
 use std::sync::{Arc, Mutex};
 

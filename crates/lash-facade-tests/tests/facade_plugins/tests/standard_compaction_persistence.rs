@@ -1,6 +1,6 @@
 use super::*;
 use lash_core::facade_support::SessionNodeProjection as _;
-use lash_sansio::SessionId;
+use lash_protocol_types::SessionId;
 use std::collections::VecDeque;
 
 fn message_text(message: &lash_core::Message) -> String {
@@ -704,7 +704,9 @@ async fn attachment_pruning_never_rewrites_the_durable_message() -> Result<()> {
     use lash_core::provider::{
         AttachmentAcceptanceRule, AttachmentAcceptor, AttachmentCapabilitySnapshot,
     };
-    use lash_sansio::llm::attachment_delivery::{AttachmentPosition, DeliveryForms};
+    use lash_protocol_types::{
+        llm::attachment_delivery::AttachmentPosition, llm::attachment_delivery::DeliveryForms,
+    };
 
     let session_id = "standard-compaction-attachment-prune";
     let trace = Arc::new(lash::testing::RecordingTraceSink::new());

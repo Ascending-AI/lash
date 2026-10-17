@@ -518,7 +518,7 @@ impl Scenario for Deployment {
     async fn check(&self, nodes: &SimNodes, cut: Option<&Cut>) -> Vec<String> {
         let bound = self.workload.bound()
             + failover(nodes.lease())
-            + lash_sansio::ExecutionBudgets::recommended().stop_grace();
+            + lash_protocol_types::ExecutionBudgets::recommended().stop_grace();
         let bound_ms = u64::try_from(bound.as_millis()).unwrap_or(u64::MAX);
         let mut violations = invariants::check(
             &self.world,

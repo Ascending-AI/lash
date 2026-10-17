@@ -1,6 +1,6 @@
 use crate::SessionId;
 use crate::session::runtime_ops::RuntimeExecutionContextRuntimeOps as _;
-use lash_sansio::sync::MutexExt;
+use lash_protocol_types::sync::MutexExt;
 use std::sync::{Arc, OnceLock};
 
 use crate::PluginMessage;

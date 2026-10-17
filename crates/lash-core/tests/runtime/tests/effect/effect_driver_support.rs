@@ -1,6 +1,6 @@
 use super::*;
 use lash_core::plugin::PluginRecipe;
-use lash_sansio::ReportedFailure;
+use lash_protocol_types::ReportedFailure;
 
 pub(super) struct EffectControllerTestProtocolFactory {
     pub(super) code_executor: Option<Arc<dyn lash_core::plugin::CodeExecutorPlugin>>,
@@ -198,7 +198,7 @@ struct EffectControllerTestProtocolDriver;
 impl ProtocolDriverPlugin for EffectControllerTestProtocolDriver {
     fn attachment_omission_text(
         &self,
-        notice: &lash_sansio::AttachmentMaterializationNotice,
+        notice: &lash_protocol_types::AttachmentMaterializationNotice,
     ) -> String {
         format!("({} omitted)", notice.media_type)
     }
@@ -290,8 +290,8 @@ impl lash_sansio::ProtocolDriverHandle<lash_core::HostTurnProtocol> for EffectCo
                     }),
                 ),
                 lash_core::DriverAction::Finish(TurnOutcome::Stopped(TurnStop::RuntimeError {
-                    cause: lash_sansio::TurnErrorCause::new(
-                        lash_sansio::TurnErrorCode::RuntimeRefused,
+                    cause: lash_protocol_types::TurnErrorCause::new(
+                        lash_protocol_types::TurnErrorCode::RuntimeRefused,
                     ),
                 })),
             ],

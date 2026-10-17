@@ -24,7 +24,10 @@ use lash_core_execution::{
     AttachmentStoreError, AttachmentStoreFailureClass, AttachmentStorePersistence,
     StoredAttachment, StoredBlobRef,
 };
-use lash_sansio::llm::attachment_delivery::{Delivery, DeliveryLimits, ProviderAccepts};
+use lash_protocol_types::{
+    llm::attachment_delivery::Delivery, llm::attachment_delivery::DeliveryLimits,
+    llm::attachment_delivery::ProviderAccepts,
+};
 use rusqlite::{OptionalExtension, params};
 
 use crate::SqliteStore;

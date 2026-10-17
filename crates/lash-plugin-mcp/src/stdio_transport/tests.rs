@@ -10,7 +10,7 @@ use serde_json::{Value, json};
 use tokio::io::{AsyncBufReadExt, AsyncRead, AsyncWrite, AsyncWriteExt, BufReader, ReadBuf};
 use tokio::sync::Notify;
 
-use lash_sansio::sync::MutexExt;
+use lash_protocol_types::sync::MutexExt;
 
 use super::{MAX_STDIO_MESSAGE_BYTES, ManagedChildTransport, StdioReadError, stdio_close_cause};
 

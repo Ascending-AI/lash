@@ -1,4 +1,4 @@
-use lash_sansio::TurnId;
+use lash_protocol_types::TurnId;
 
 use crate::support::{
     Arc, LlmCallRecord, LlmUsage, ToolCallRecord, TurnActivity, TurnActivitySink,

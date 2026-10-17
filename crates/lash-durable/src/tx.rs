@@ -10,7 +10,7 @@ use std::collections::{BTreeMap, BTreeSet};
 use lash_core_store::checkpoint_graph::{
     EncodeBudget, EncodedNode, ExplicitLimit, GraphCommitBudget, GraphRefusal, GraphStaging, NodeId,
 };
-use lash_sansio::{SessionId, TurnId};
+use lash_protocol_types::{SessionId, TurnId};
 
 use crate::domain::namespace_value::NamespaceValue;
 use crate::domain::{
@@ -208,7 +208,9 @@ impl ActorTx {
     #[must_use]
     pub fn immediate_cancel_since_read(&self, fenced: Option<&TurnCancelRequest>) -> bool {
         let immediate = |request: Option<&TurnCancelRequest>| {
-            request.is_some_and(|request| request.mode == lash_sansio::TurnCancelMode::Immediate)
+            request.is_some_and(|request| {
+                request.mode == lash_protocol_types::TurnCancelMode::Immediate
+            })
         };
         immediate(fenced) && !immediate(self.turn_cancel())
     }

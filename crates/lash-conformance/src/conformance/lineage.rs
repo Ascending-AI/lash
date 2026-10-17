@@ -1,4 +1,4 @@
-use lash_sansio::SessionId;
+use lash_protocol_types::SessionId;
 use pretty_assertions::assert_eq;
 use std::sync::Arc;
 

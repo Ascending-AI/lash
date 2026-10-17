@@ -1,5 +1,5 @@
 use super::*;
-use lash_sansio::{AttachmentId, MediaType, PartAttachment, ToolCallId};
+use lash_protocol_types::{AttachmentId, MediaType, PartAttachment, ToolCallId};
 fn part(kind: PartKind, content: &str) -> Part {
     match kind {
         PartKind::Text => Part::text("p0".into(), content.into(), None),
@@ -178,7 +178,7 @@ fn mode_history_policy_selects_text_without_changing_records_or_order() {
         },
     ];
     let stored = serde_json::to_value(&messages).unwrap();
-    let cache = lash_sansio::BaseRenderCache::new();
+    let cache = lash_protocol_types::BaseRenderCache::new();
     let standard = presentation();
     let rendered = cache.rendered(&messages, &standard);
     assert_eq!(

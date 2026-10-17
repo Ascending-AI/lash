@@ -859,7 +859,7 @@ impl PostgresLashVmArtifactStore {
 
     pub(crate) async fn end_local_execution_tx(
         tx: &mut sqlx::PgConnection,
-        journal: &lash_sansio::EffectJournalIdentity,
+        journal: &lash_protocol_types::EffectJournalIdentity,
         now_ms: u64,
     ) -> Result<(), StoreError> {
         local_end::end(

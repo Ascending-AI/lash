@@ -12,15 +12,17 @@ use lash_core::provider::{
     ReasoningSelection, SamplingCapability,
 };
 use lash_llm_transport::LlmHttpTransport;
+use lash_protocol_types::{FailureCode, TurnFailureCode};
+use lash_protocol_types::{
+    llm::types::GenerationOptionOutcome as Outcome, llm::types::GenerationReceipt,
+    llm::types::LlmEventSender, llm::types::LlmMessage, llm::types::LlmRequest,
+    llm::types::LlmRequestScope, llm::types::LlmRole, llm::types::LlmToolChoice,
+    llm::types::LlmToolSpec,
+};
 use lash_provider_anthropic::AnthropicProvider;
 use lash_provider_google::GoogleOAuthProvider;
 use lash_provider_openai::codex::ws_testing::{ScriptedWsAction, spawn_scripted_websocket};
 use lash_provider_openai::{CodexProvider, OpenAiCompatibleProvider, OpenAiProvider};
-use lash_sansio::llm::types::{
-    GenerationOptionOutcome as Outcome, GenerationReceipt, LlmEventSender, LlmMessage, LlmRequest,
-    LlmRequestScope, LlmRole, LlmToolChoice, LlmToolSpec,
-};
-use lash_sansio::{FailureCode, TurnFailureCode};
 use serde_json::{Value, json};
 
 use lash_provider_fixtures::provider::{
@@ -209,17 +211,19 @@ impl Dialect {
         };
         LlmRequest {
             instructions: None,
-            model: lash_sansio::llm_profile::LlmProfileConfig::new(
-                lash_sansio::llm_profile::RecordedLlmProfile::mint(
-                    lash_sansio::llm_profile::LlmProfileKey::new("request-fixture"),
-                    lash_sansio::llm_profile::LlmProfileMetadata::builder(self.model())
+            model: lash_protocol_types::llm_profile::LlmProfileConfig::new(
+                lash_protocol_types::llm_profile::RecordedLlmProfile::mint(
+                    lash_protocol_types::llm_profile::LlmProfileKey::new("request-fixture"),
+                    lash_protocol_types::llm_profile::LlmProfileMetadata::builder(self.model())
                         .context_window_tokens(128_000)
                         .capability(LlmProfileCapability {
                             google_dialect,
                             ..LlmProfileCapability::default()
                         })
                         .extra_body(Default::default())
-                        .cache_retention(lash_sansio::llm::capability::CacheRetention::Short)
+                        .cache_retention(
+                            lash_protocol_types::llm::capability::CacheRetention::Short,
+                        )
                         .build()
                         .expect("valid profile"),
                 ),
@@ -272,9 +276,11 @@ impl Setting {
                 request.tools = Arc::new(vec![LlmToolSpec {
                     name: "lookup".into(),
                     description: "Lookup".into(),
-                    input_schema: lash_sansio::SchemaContract::admit(json!({"type":"object"}))
-                        .expect("valid declared schema"),
-                    output_schema: lash_sansio::SchemaContract::admit(json!({}))
+                    input_schema: lash_protocol_types::SchemaContract::admit(
+                        json!({"type":"object"}),
+                    )
+                    .expect("valid declared schema"),
+                    output_schema: lash_protocol_types::SchemaContract::admit(json!({}))
                         .expect("valid declared schema"),
                 }]);
                 request.generation.parallel_tool_calls = Some(false);
@@ -309,7 +315,7 @@ impl Setting {
 /// Stamps the recorded model's output cap default onto a matrix request.
 fn with_llm_profile_cap(mut request: LlmRequest, cap: Option<u64>) -> LlmRequest {
     request.model.metadata_mut().limits.output_tokens =
-        lash_sansio::llm_profile::OutputTokenLimits::new(None, cap)
+        lash_protocol_types::llm_profile::OutputTokenLimits::new(None, cap)
             .expect("valid output-token limits");
     request
 }

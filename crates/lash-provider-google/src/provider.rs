@@ -500,7 +500,7 @@ impl GoogleOAuthProvider {
                 }
             };
         }
-        let accepts = |mime: &lash_sansio::MediaType, position| {
+        let accepts = |mime: &lash_protocol_types::MediaType, position| {
             self.attachment_accepts(req.model.wire_model(), mime, position)
         };
         let route = self.route_identity_for_model(req.model.wire_model());
@@ -578,7 +578,7 @@ impl Provider for GoogleOAuthProvider {
     fn attachment_accepts(
         &self,
         _model: &str,
-        mime: &lash_sansio::MediaType,
+        mime: &lash_protocol_types::MediaType,
         _position: AttachmentPosition,
     ) -> ProviderAccepts {
         self.accepts_attachment(mime)
@@ -761,16 +761,16 @@ mod error_detail_tests {
     pub(super) fn completion_request() -> LlmRequest {
         LlmRequest {
             instructions: None,
-            model: lash_sansio::llm_profile::LlmProfileConfig::new(
-                lash_sansio::llm_profile::RecordedLlmProfile::mint(
-                    lash_sansio::llm_profile::LlmProfileKey::new("request-fixture"),
-                    lash_sansio::llm_profile::LlmProfileMetadata::builder(
+            model: lash_protocol_types::llm_profile::LlmProfileConfig::new(
+                lash_protocol_types::llm_profile::RecordedLlmProfile::mint(
+                    lash_protocol_types::llm_profile::LlmProfileKey::new("request-fixture"),
+                    lash_protocol_types::llm_profile::LlmProfileMetadata::builder(
                         "gemini-3.1-pro-preview".to_string(),
                     )
                     .context_window_tokens(128_000)
                     .capability(Default::default())
                     .extra_body(Default::default())
-                    .cache_retention(lash_sansio::llm::capability::CacheRetention::Short)
+                    .cache_retention(lash_protocol_types::llm::capability::CacheRetention::Short)
                     .build()
                     .expect("valid profile"),
                 ),
@@ -932,7 +932,7 @@ mod error_detail_tests {
 mod token_source_tests {
     use super::*;
     use lash_core::provider::{ProviderToken, TokenError, TokenRequest};
-    use lash_sansio::sync::MutexExt;
+    use lash_protocol_types::sync::MutexExt;
     use std::sync::Mutex;
 
     /// Rotates `token-1` to `token-2` when lash rejects `token-1`.

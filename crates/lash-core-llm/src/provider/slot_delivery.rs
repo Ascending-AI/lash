@@ -11,13 +11,17 @@
 
 use std::sync::Arc;
 
-use lash_sansio::llm::attachment_delivery::{Delivery, DeliveryContext};
-use lash_sansio::llm::types::{AttachmentSlot, LiveRequestBody, RecordedRequestTemplate};
-use lash_sansio::{AttachmentId, AttachmentRef};
+use lash_protocol_types::{AttachmentId, AttachmentRef};
+use lash_protocol_types::{
+    llm::attachment_delivery::Delivery, llm::attachment_delivery::DeliveryContext,
+};
+use lash_protocol_types::{
+    llm::types::AttachmentSlot, llm::types::LiveRequestBody, llm::types::RecordedRequestTemplate,
+};
 
 use super::Provider;
 use crate::llm::transport::ProviderFailureKind;
-use lash_sansio::session_model::TurnFailureCode;
+use lash_protocol_types::session_model::TurnFailureCode;
 use lash_transport_failure::{LlmTransportError, TransportRetryVerdict};
 
 /// What fills the attachment slots of one attempt.
@@ -361,7 +365,7 @@ pub(super) fn check_bytes(
     bytes: &[u8],
 ) -> Result<(), AttachmentDeliveryError> {
     if bytes.len() as u64 != reference.byte_len
-        || lash_sansio::attachment::content_id(bytes) != reference.id
+        || lash_protocol_types::attachment::content_id(bytes) != reference.id
     {
         return Err(AttachmentDeliveryError::ContentMismatch {
             id: reference.id.clone(),

@@ -5,7 +5,7 @@ use lash_core::llm::types::{
     ProviderReasoningReplay, ProviderRouteIdentity,
 };
 use lash_core::provider::Provider;
-use lash_sansio::sync::MutexExt;
+use lash_protocol_types::sync::MutexExt;
 
 use crate::AnthropicProvider;
 
@@ -34,16 +34,16 @@ impl lash_llm_transport::LlmHttpTransport for CapturingTransport {
 fn request(messages: Vec<LlmMessage>) -> LlmRequest {
     LlmRequest {
         instructions: None,
-        model: lash_sansio::llm_profile::LlmProfileConfig::new(
-            lash_sansio::llm_profile::RecordedLlmProfile::mint(
-                lash_sansio::llm_profile::LlmProfileKey::new("request-fixture"),
-                lash_sansio::llm_profile::LlmProfileMetadata::builder(
+        model: lash_protocol_types::llm_profile::LlmProfileConfig::new(
+            lash_protocol_types::llm_profile::RecordedLlmProfile::mint(
+                lash_protocol_types::llm_profile::LlmProfileKey::new("request-fixture"),
+                lash_protocol_types::llm_profile::LlmProfileMetadata::builder(
                     "claude-sonnet-4-6".to_string(),
                 )
                 .context_window_tokens(128_000)
                 .capability(Default::default())
                 .extra_body(Default::default())
-                .cache_retention(lash_sansio::llm::capability::CacheRetention::Short)
+                .cache_retention(lash_protocol_types::llm::capability::CacheRetention::Short)
                 .build()
                 .expect("valid profile"),
             ),

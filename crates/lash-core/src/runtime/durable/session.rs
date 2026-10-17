@@ -39,8 +39,8 @@ use lash_durable::runner::{Activation, Exit, Owned};
 use lash_durable::{
     ActorTx, CommitLabel, DomainWrite, DurableError, DurableInstant, DurableProbe, MailTx, Release,
 };
+use lash_protocol_types::llm::types::RecordedRequestTemplate;
 use lash_sansio::SavedTurn;
-use lash_sansio::llm::types::RecordedRequestTemplate;
 use tokio_util::sync::CancellationToken;
 use tracing::Instrument as _;
 

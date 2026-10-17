@@ -9,8 +9,8 @@ use super::*;
 use crate::facade_support::SessionGraphFacadeOps;
 use lash_core::testing::store_fixtures::admit_at_checkpoint_for_test;
 pub(super) use lash_core::testing::store_fixtures::commit_runtime_state_for_test;
-use lash_sansio::SessionId;
-use lash_sansio::TurnId;
+use lash_protocol_types::SessionId;
+use lash_protocol_types::TurnId;
 
 /// A plugin state whose one namespace is at `generation`: a checkpoint
 /// component whose content a commit changes and a load reads back.

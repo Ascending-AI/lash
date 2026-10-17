@@ -28,9 +28,9 @@ use super::checkpoint_content::{
 };
 use super::machine_state::outside_window;
 use super::{SavedTurn, TurnCheckpointRestoreError, TurnProtocol, TurnWindow};
-use crate::llm::types::{LlmMessage, LlmRequest};
-use crate::session_model::message::message_content_equal;
-use crate::session_model::{Message, MessageSequence};
+use lash_protocol_types::session_model::message::message_content_equal;
+use lash_protocol_types::{llm::types::LlmMessage, llm::types::LlmRequest};
+use lash_protocol_types::{session_model::Message, session_model::MessageSequence};
 
 /// How many leading items of each of the machine's sequences are unchanged
 /// since a checkpoint: `usize::MAX` for one that only grew.
@@ -126,7 +126,7 @@ impl StoredRequest {
         rendered_from_window: usize,
         content: &TurnCheckpointContent,
         window: Option<&TurnWindow<E>>,
-        policy: &crate::session_model::message::HistoryPresentation,
+        policy: &lash_protocol_types::session_model::message::HistoryPresentation,
     ) -> Result<Self, TurnCheckpointRestoreError> {
         let mut request: LlmRequest = content.value(frame)?;
         if !request.messages.is_empty() {

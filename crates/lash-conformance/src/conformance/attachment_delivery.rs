@@ -1,6 +1,9 @@
 //! ATTACHMENT-IDENTITY: delivery verifies the immutable original's claims.
 use crate::*;
-use lash_sansio::llm::attachment_delivery::{Delivery, DeliveryLimits, ProviderAccepts};
+use lash_protocol_types::{
+    llm::attachment_delivery::Delivery, llm::attachment_delivery::DeliveryLimits,
+    llm::attachment_delivery::ProviderAccepts,
+};
 
 #[expect(clippy::expect_used, reason = "conformance fixture setup must succeed")]
 pub async fn attachment_delivery_names_its_content(backend: Arc<dyn AttachmentStore>) {

@@ -1,15 +1,16 @@
 use super::*;
 use lash_core::llm::types::{AttachmentSlot, SlotCodec};
-use lash_sansio::llm::attachment_delivery::{
-    AttachmentPosition, Delivery, DeliverySecret, ProviderFileScope,
+use lash_protocol_types::{
+    llm::attachment_delivery::AttachmentPosition, llm::attachment_delivery::Delivery,
+    llm::attachment_delivery::DeliverySecret, llm::attachment_delivery::ProviderFileScope,
 };
-use lash_sansio::llm::types::{StreamBlockEvent, StreamBlockKind};
+use lash_protocol_types::{llm::types::StreamBlockEvent, llm::types::StreamBlockKind};
 
 // DELIVERY-SCOPE: Chat has no Files namespace, even when the host permits one.
 #[test]
 fn chat_never_accepts_provider_files() {
     let provider = OpenAiCompatibleProvider::new("key", "https://example.invalid/v1");
-    let mime = lash_sansio::MediaType::parse("image/png").unwrap();
+    let mime = lash_protocol_types::MediaType::parse("image/png").unwrap();
     let scope = ProviderFileScope {
         provider: provider.kind().into(),
         endpoint: provider.route_identity("").endpoint.into(),
@@ -21,8 +22,8 @@ fn chat_never_accepts_provider_files() {
         if position == AttachmentPosition::ToolResult {
             assert!(accepts.is_empty());
         }
-        let reference = lash_sansio::AttachmentRef {
-            id: lash_sansio::AttachmentId::parse("a".repeat(64)).unwrap(),
+        let reference = lash_protocol_types::AttachmentRef {
+            id: lash_protocol_types::AttachmentId::parse("a".repeat(64)).unwrap(),
             media_type: mime.clone(),
             byte_len: 1,
             label: None,
@@ -32,7 +33,7 @@ fn chat_never_accepts_provider_files() {
         let slot = AttachmentSlot {
             reference,
             position,
-            accepts: lash_sansio::llm::attachment_delivery::ProviderAccepts {
+            accepts: lash_protocol_types::llm::attachment_delivery::ProviderAccepts {
                 bytes: true,
                 url: true,
                 provider_file: Some(scope.clone()),
@@ -121,9 +122,9 @@ async fn url_attachment_calls_stream_deltas_and_provider_traces() {
         req.messages = vec![LlmMessage::new(
             LlmRole::User,
             vec![LlmContentBlock::Attachment {
-                reference: Box::new(lash_sansio::AttachmentRef {
-                    id: lash_sansio::AttachmentId::parse("a".repeat(64)).unwrap(),
-                    media_type: lash_sansio::MediaType::parse("image/png").unwrap(),
+                reference: Box::new(lash_protocol_types::AttachmentRef {
+                    id: lash_protocol_types::AttachmentId::parse("a".repeat(64)).unwrap(),
+                    media_type: lash_protocol_types::MediaType::parse("image/png").unwrap(),
                     byte_len: 1,
                     label: None,
                     type_metadata: None,
@@ -193,7 +194,7 @@ impl lash_core::provider::SlotDeliveries for UrlDelivery {
     async fn deliver(
         &self,
         slots: &[&AttachmentSlot],
-        _: &lash_sansio::llm::attachment_delivery::DeliveryContext,
+        _: &lash_protocol_types::llm::attachment_delivery::DeliveryContext,
     ) -> Result<Vec<Arc<Delivery>>, lash_core::provider::AttachmentDeliveryError> {
         Ok(slots
             .iter()
@@ -209,7 +210,7 @@ impl lash_core::provider::SlotDeliveries for UrlDelivery {
     }
     async fn invalidate(
         &self,
-        _: &lash_sansio::AttachmentRef,
+        _: &lash_protocol_types::AttachmentRef,
         _: &Delivery,
     ) -> Result<(), lash_core::provider::AttachmentDeliveryError> {
         Ok(())
@@ -218,9 +219,9 @@ impl lash_core::provider::SlotDeliveries for UrlDelivery {
 
 pub(crate) fn url_attachment() -> LlmContentBlock {
     LlmContentBlock::Attachment {
-        reference: Box::new(lash_sansio::AttachmentRef {
-            id: lash_sansio::AttachmentId::parse("a".repeat(64)).unwrap(),
-            media_type: lash_sansio::MediaType::parse("image/png").unwrap(),
+        reference: Box::new(lash_protocol_types::AttachmentRef {
+            id: lash_protocol_types::AttachmentId::parse("a".repeat(64)).unwrap(),
+            media_type: lash_protocol_types::MediaType::parse("image/png").unwrap(),
             byte_len: 1,
             label: None,
             type_metadata: None,

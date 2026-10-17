@@ -5,7 +5,7 @@
 //! The mode validates every call path before it gets here; this crate only
 //! spells.
 
-use lash_sansio::{JsonSchema, ToolContract, ToolManifest};
+use lash_protocol_types::{JsonSchema, ToolContract, ToolManifest};
 use lash_tool_presenter_api::{
     PresentationRefusal, PresentedToolSection, ToolPresentationEntry, ToolPresentationRequest,
     ToolPresenter, import_schema, listing,

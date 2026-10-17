@@ -2234,7 +2234,7 @@ dependencies = [
  "lash-internal-core",
  "lash-internal-core-store",
  "lash-internal-core-worker",
- "lash-internal-sansio",
+ "lash-internal-protocol-types",
  "lash-internal-sqlite-store",
  "lash-internal-transport-failure",
  "lash-kernel-doc",
@@ -2264,6 +2264,7 @@ dependencies = [
  "lash-internal-core-llm",
  "lash-internal-core-store",
  "lash-internal-durable",
+ "lash-internal-protocol-types",
  "lash-internal-sansio",
  "lash-internal-sqlite-store",
  "lash-internal-trace",
@@ -2289,7 +2290,7 @@ name = "lash-internal-core-effect"
 version = "0.0.0-dev"
 dependencies = [
  "lash-internal-core-store",
- "lash-internal-sansio",
+ "lash-internal-protocol-types",
  "serde",
  "serde_json",
 ]
@@ -2308,6 +2309,7 @@ dependencies = [
  "lash-internal-core-llm",
  "lash-internal-core-store",
  "lash-internal-durable",
+ "lash-internal-protocol-types",
  "lash-internal-sansio",
  "lash-internal-sqlite-store",
  "lash-internal-trace",
@@ -2336,7 +2338,7 @@ dependencies = [
  "async-trait",
  "chrono",
  "lash-internal-checkpoint-encoder",
- "lash-internal-sansio",
+ "lash-internal-protocol-types",
  "lash-internal-trace",
  "rustix",
  "schemars",
@@ -2358,7 +2360,7 @@ dependencies = [
  "chrono",
  "futures-util",
  "lash-internal-core-ids",
- "lash-internal-sansio",
+ "lash-internal-protocol-types",
  "lash-internal-trace",
  "lash-internal-transport-failure",
  "schemars",
@@ -2379,7 +2381,7 @@ dependencies = [
  "lash-internal-core-ids",
  "lash-internal-core-llm",
  "lash-internal-render",
- "lash-internal-sansio",
+ "lash-internal-protocol-types",
  "lash-internal-sqlite-store",
  "lash-internal-trace",
  "lash-internal-vm-protocol",
@@ -2419,7 +2421,7 @@ dependencies = [
  "futures-util",
  "lash-internal-core-ids",
  "lash-internal-core-store",
- "lash-internal-sansio",
+ "lash-internal-protocol-types",
  "lash-internal-trace",
  "serde_json",
  "thiserror 2.0.18",
@@ -2445,6 +2447,7 @@ dependencies = [
  "lash-internal-plugin-standard-compaction",
  "lash-internal-postgres-store",
  "lash-internal-provider-anthropic",
+ "lash-internal-protocol-types",
  "lash-internal-sansio",
  "lash-internal-sqlite-store",
  "lash-internal-transport-failure",
@@ -2484,6 +2487,7 @@ dependencies = [
  "lash-internal-provider-anthropic",
  "lash-internal-provider-openai",
  "lash-internal-rlm-types",
+ "lash-internal-protocol-types",
  "lash-internal-sansio",
  "lash-internal-sqlite-store",
  "lash-internal-trace",
@@ -2509,7 +2513,7 @@ version = "0.0.0-dev"
 dependencies = [
  "async-trait",
  "bytes",
- "lash-internal-sansio",
+ "lash-internal-protocol-types",
  "lash-internal-transport-failure",
  "reqwest",
  "tokio",
@@ -2521,7 +2525,7 @@ version = "0.0.0-dev"
 dependencies = [
  "async-trait",
  "lash-internal-core",
- "lash-internal-sansio",
+ "lash-internal-protocol-types",
  "lash-internal-tool-support",
  "serde_json",
  "tokio",
@@ -2537,7 +2541,7 @@ dependencies = [
  "lash-internal-http-transport",
  "lash-internal-llm-transport",
  "lash-internal-render",
- "lash-internal-sansio",
+ "lash-internal-protocol-types",
  "lash-internal-transport-failure",
  "proptest",
  "serde",
@@ -2559,7 +2563,7 @@ dependencies = [
  "http",
  "jsonschema",
  "lash-internal-core",
- "lash-internal-sansio",
+ "lash-internal-protocol-types",
  "lash-internal-sqlite-store",
  "lash-internal-tool-support",
  "lash-internal-vm-runtime",
@@ -2582,7 +2586,7 @@ version = "0.0.0-dev"
 dependencies = [
  "async-trait",
  "lash-internal-core",
- "lash-internal-sansio",
+ "lash-internal-protocol-types",
  "lash-internal-tool-support",
  "lash-runtime",
  "serde_json",
@@ -2595,6 +2599,7 @@ version = "0.0.0-dev"
 dependencies = [
  "async-trait",
  "lash-internal-core",
+ "lash-internal-protocol-types",
  "lash-internal-sansio",
  "lash-runtime",
  "serde",
@@ -2615,7 +2620,7 @@ dependencies = [
  "lash-internal-durable",
  "lash-internal-durable-test",
  "lash-internal-postgres-store",
- "lash-internal-sansio",
+ "lash-internal-protocol-types",
  "lash-internal-sqlite-store",
  "lash-internal-store-sql",
  "lash-kernel-doc",
@@ -2643,7 +2648,7 @@ dependencies = [
  "lash-internal-core-store",
  "lash-internal-durable",
  "lash-internal-postgres-store",
- "lash-internal-sansio",
+ "lash-internal-protocol-types",
  "lash-internal-sqlite-store",
  "lash-runtime",
  "rusqlite",
@@ -2667,6 +2672,7 @@ dependencies = [
  "lash-internal-llm-transport",
  "lash-internal-render",
  "lash-internal-rlm-types",
+ "lash-internal-protocol-types",
  "lash-internal-sansio",
  "lash-internal-sqlite-store",
  "lash-internal-tool-presenter-api",
@@ -2701,6 +2707,7 @@ dependencies = [
  "lash-internal-core",
  "lash-internal-postgres-store",
  "lash-internal-render",
+ "lash-internal-protocol-types",
  "lash-internal-sansio",
  "lash-internal-sqlite-store",
  "lash-internal-tool-presenter-api",
@@ -2715,6 +2722,21 @@ dependencies = [
 ]
 
 [[package]]
+name = "lash-internal-protocol-types"
+version = "0.0.0-dev"
+dependencies = [
+ "blake3",
+ "jsonschema",
+ "lash-kernel-check",
+ "lash-kernel-doc",
+ "proptest",
+ "schemars",
+ "serde",
+ "serde_json",
+ "thiserror 2.0.18",
+]
+
+[[package]]
 name = "lash-internal-provider-anthropic"
 version = "0.0.0-dev"
 dependencies = [
@@ -2723,7 +2745,7 @@ dependencies = [
  "lash-internal-core",
  "lash-internal-llm-transport",
  "lash-internal-provider-anthropic",
- "lash-internal-sansio",
+ "lash-internal-protocol-types",
  "lash-internal-transport-failure",
  "reqwest",
  "serde_json",
@@ -2741,7 +2763,7 @@ dependencies = [
  "lash-internal-provider-anthropic",
  "lash-internal-provider-google",
  "lash-internal-provider-openai",
- "lash-internal-sansio",
+ "lash-internal-protocol-types",
  "lash-internal-transport-failure",
  "serde",
  "serde_json",
@@ -2759,7 +2781,7 @@ dependencies = [
  "lash-internal-core-store",
  "lash-internal-llm-transport",
  "lash-internal-provider-google",
- "lash-internal-sansio",
+ "lash-internal-protocol-types",
  "lash-internal-transport-failure",
  "lash-runtime",
  "reqwest",
@@ -2780,7 +2802,7 @@ dependencies = [
  "lash-internal-llm-transport",
  "lash-internal-protocol-rlm",
  "lash-internal-provider-openai",
- "lash-internal-sansio",
+ "lash-internal-protocol-types",
  "lash-internal-tool-support",
  "lash-internal-transport-failure",
  "lash-runtime",
@@ -2805,6 +2827,7 @@ name = "lash-internal-rlm-types"
 version = "0.0.0-dev"
 dependencies = [
  "lash-internal-render",
+ "lash-internal-protocol-types",
  "lash-internal-sansio",
  "lash-internal-tool-shape",
  "schemars",
@@ -2820,7 +2843,7 @@ dependencies = [
  "futures-util",
  "lash-internal-conformance",
  "lash-internal-core",
- "lash-internal-sansio",
+ "lash-internal-protocol-types",
  "lash-internal-sqlite-store",
  "object_store",
  "tokio",
@@ -2831,15 +2854,9 @@ dependencies = [
 name = "lash-internal-sansio"
 version = "0.0.0-dev"
 dependencies = [
- "blake3",
- "jsonschema",
- "lash-kernel-check",
- "lash-kernel-doc",
- "proptest",
- "schemars",
+ "lash-internal-protocol-types",
  "serde",
  "serde_json",
- "thiserror 2.0.18",
 ]
 
 [[package]]
@@ -2853,7 +2870,7 @@ dependencies = [
  "lash-internal-core-execution",
  "lash-internal-core-store",
  "lash-internal-durable",
- "lash-internal-sansio",
+ "lash-internal-protocol-types",
  "lash-internal-sqlite-store",
  "lash-internal-store-sql",
  "lash-kernel-doc",
@@ -2878,7 +2895,7 @@ version = "0.0.0-dev"
 name = "lash-internal-tool-presenter-api"
 version = "0.0.0-dev"
 dependencies = [
- "lash-internal-sansio",
+ "lash-internal-protocol-types",
  "lash-internal-tool-shape",
  "serde",
  "serde_json",
@@ -2889,7 +2906,7 @@ dependencies = [
 name = "lash-internal-tool-presenter-python"
 version = "0.0.0-dev"
 dependencies = [
- "lash-internal-sansio",
+ "lash-internal-protocol-types",
  "lash-internal-tool-presenter-api",
  "lash-internal-tool-shape",
  "serde",
@@ -2900,7 +2917,7 @@ dependencies = [
 name = "lash-internal-tool-presenter-standard"
 version = "0.0.0-dev"
 dependencies = [
- "lash-internal-sansio",
+ "lash-internal-protocol-types",
  "lash-internal-tool-presenter-api",
  "lash-internal-tool-shape",
  "serde",
@@ -2911,7 +2928,7 @@ dependencies = [
 name = "lash-internal-tool-presenter-typescript"
 version = "0.0.0-dev"
 dependencies = [
- "lash-internal-sansio",
+ "lash-internal-protocol-types",
  "lash-internal-tool-presenter-api",
  "lash-internal-tool-shape",
  "serde",
@@ -2944,7 +2961,7 @@ version = "0.0.0-dev"
 dependencies = [
  "chrono",
  "jsonschema",
- "lash-internal-sansio",
+ "lash-internal-protocol-types",
  "lash-kernel-check",
  "lash-kernel-doc",
  "opentelemetry",
@@ -2965,7 +2982,7 @@ name = "lash-internal-transport-failure"
 version = "0.0.0-dev"
 dependencies = [
  "httpdate",
- "lash-internal-sansio",
+ "lash-internal-protocol-types",
  "thiserror 2.0.18",
 ]
 
@@ -2979,7 +2996,7 @@ dependencies = [
  "lash-internal-core-store",
  "lash-internal-durable",
  "lash-internal-durable-test",
- "lash-internal-sansio",
+ "lash-internal-protocol-types",
  "lash-internal-vm-protocol",
  "lash-internal-vm-releases",
  "lash-kernel-doc",
@@ -2999,7 +3016,6 @@ dependencies = [
  "async-trait",
  "lash-internal-core-execution",
  "lash-internal-core-store",
- "lash-internal-sansio",
  "lash-internal-vm-broker",
  "lash-internal-vm-protocol",
  "lash-kernel-dialect",
@@ -3030,7 +3046,7 @@ dependencies = [
 name = "lash-internal-vm-protocol"
 version = "0.0.0-dev"
 dependencies = [
- "lash-internal-sansio",
+ "lash-internal-protocol-types",
  "rmp-serde",
  "schemars",
  "serde",
@@ -3074,7 +3090,7 @@ dependencies = [
  "lash-internal-core-ids",
  "lash-internal-core-store",
  "lash-internal-durable",
- "lash-internal-sansio",
+ "lash-internal-protocol-types",
  "lash-internal-trace",
  "lash-internal-vm-broker",
  "lash-internal-vm-client",
@@ -3114,7 +3130,7 @@ dependencies = [
  "lash-internal-durable",
  "lash-internal-durable-test",
  "lash-internal-postgres-store",
- "lash-internal-sansio",
+ "lash-internal-protocol-types",
  "lash-internal-sqlite-store",
  "lash-internal-vm-broker",
  "lash-internal-vm-client",
@@ -3312,6 +3328,7 @@ dependencies = [
  "lash-internal-protocol-rlm",
  "lash-internal-provider-openai",
  "lash-internal-rlm-types",
+ "lash-internal-protocol-types",
  "lash-internal-sansio",
  "lash-internal-sqlite-store",
  "lash-internal-transport-failure",
@@ -3422,6 +3439,7 @@ dependencies = [
  "lash-internal-render",
  "lash-internal-rlm-types",
  "lash-internal-s3-store",
+ "lash-internal-protocol-types",
  "lash-internal-sansio",
  "lash-internal-sqlite-store",
  "lash-internal-tool-presenter-api",
@@ -3480,6 +3498,7 @@ dependencies = [
  "lash-internal-provider-openai",
  "lash-internal-rlm-types",
  "lash-internal-s3-store",
+ "lash-internal-protocol-types",
  "lash-internal-sansio",
  "lash-internal-sqlite-store",
  "lash-internal-transport-failure",

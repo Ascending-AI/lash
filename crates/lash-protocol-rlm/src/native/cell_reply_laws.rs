@@ -500,8 +500,8 @@ fn a_cell_in_the_reasoning_channel_alone_runs_nothing_and_is_never_replied() {
         assert_no_cell_replied("reasoning-only cell", native, &next);
         let expected = if native {
             Next::Stopped(TurnStop::ProviderError {
-                cause: lash_sansio::TurnErrorCause::new(
-                    lash_sansio::TurnErrorCode::InvalidResponse,
+                cause: lash_protocol_types::TurnErrorCause::new(
+                    lash_protocol_types::TurnErrorCode::InvalidResponse,
                 ),
             })
         } else {

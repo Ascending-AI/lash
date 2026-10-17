@@ -5,7 +5,7 @@
 //! Registered from `RlmProtocolPlugin::register` via
 //! [`register_stream_mask`].
 
-use lash_sansio::sync::MutexExt;
+use lash_protocol_types::sync::MutexExt;
 use std::sync::{Arc, Mutex};
 
 use lash_core::PluginRuntimeEvent;

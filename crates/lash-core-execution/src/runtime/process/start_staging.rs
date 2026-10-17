@@ -302,7 +302,7 @@ pub struct ProcessStartStores<'a> {
     pub executor: &'static str,
     /// The journal of the scope running the start: the authority of the
     /// start's `AwaitStart` guard (ADR 0113 §3.3).
-    pub starter: &'a lash_sansio::EffectJournalIdentity,
+    pub starter: &'a lash_protocol_types::EffectJournalIdentity,
 }
 
 impl<'a> ProcessStartStores<'a> {
@@ -737,7 +737,7 @@ async fn abandon_start(
 /// The key renders no admissible operation id.
 pub fn start_operation_journal(
     start_key: &StartKey,
-) -> Result<lash_sansio::EffectJournalIdentity, lash_sansio::EffectIdentityError> {
+) -> Result<lash_protocol_types::EffectJournalIdentity, lash_protocol_types::EffectIdentityError> {
     crate::ExecutionScope::runtime_operation(crate::ProcessCommand::start_effect_id(Some(
         start_key,
     )))
@@ -748,7 +748,7 @@ pub fn start_operation_journal(
 /// ([`start_operation_journal`]).
 #[must_use]
 pub fn is_start_operation(
-    starter: &lash_sansio::EffectJournalIdentity,
+    starter: &lash_protocol_types::EffectJournalIdentity,
     start_key: &StartKey,
 ) -> bool {
     start_operation_journal(start_key).is_ok_and(|journal| journal == *starter)

@@ -196,16 +196,17 @@ pub(crate) fn ending_executions(
     for write in writes {
         let scope = match write {
             DomainWrite::Turn(TurnWrite::Terminal { session, run, .. }) => {
-                lash_sansio::ExecutionScope::turn(session.clone(), run.clone())
+                lash_protocol_types::ExecutionScope::turn(session.clone(), run.clone())
             }
             DomainWrite::Process(ProcessWrite::Terminal { process, .. }) => {
-                lash_sansio::ExecutionScope::process(process.clone())
+                lash_protocol_types::ExecutionScope::process(process.clone())
             }
             DomainWrite::Process(ProcessWrite::ScopeClosed {
                 scope: ScopeKey::Operation(session, operation),
-            }) => {
-                lash_sansio::ExecutionScope::session_operation(session.clone(), operation.clone())
-            }
+            }) => lash_protocol_types::ExecutionScope::session_operation(
+                session.clone(),
+                operation.clone(),
+            ),
             _ => continue,
         };
         let journal = scope
@@ -223,7 +224,7 @@ pub(crate) fn ending_executions(
 /// remain owed through the existing ledger.
 pub(crate) async fn end_execution_tx(
     tx: &mut sqlx::PgConnection,
-    scope: &lash_sansio::ExecutionScope,
+    scope: &lash_protocol_types::ExecutionScope,
     now_ms: u64,
 ) -> Result<(), StoreError> {
     let journal = scope

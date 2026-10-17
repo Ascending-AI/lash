@@ -47,7 +47,7 @@ use std::sync::{Arc, Mutex};
 use lash_core::{ExecRequest, ExecResponse, RuntimeExecutionContext};
 use lash_kernel_doc::{Datum, IdentifiedDocument, Name};
 use lash_kernel_vm::{Bounds, End, Target};
-use lash_sansio::sync::MutexExt;
+use lash_protocol_types::sync::MutexExt;
 use lash_vm_broker::kernel::run::PagePlan;
 use lash_vm_broker::kernel::{KernelBroker, KernelCeilings, KernelEnd, KernelFailure};
 use lash_vm_client::service::runtime_ops::ServiceRuntimeOps as _;

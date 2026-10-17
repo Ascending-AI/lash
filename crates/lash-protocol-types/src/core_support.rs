@@ -14,14 +14,13 @@ use std::sync::Arc;
 
 use serde_json::Value;
 
-use crate::append_vec::AppendVec;
 use crate::blake3_domains::BLAKE3_DOMAINS;
 use crate::llm::types::LlmToolSpec;
 use crate::{
-    AttachmentId, AttachmentTypeMetadata, BaseRenderCache, ConversationRecord,
-    LlmProfileEffortValidationCategory, MediaType, Message, MessageSequence, ModelToolReturn,
-    ModelToolReturnPart, ProtocolEvent, SessionAppendNode, ToolCancellation, ToolCatalog,
-    ToolContract, ToolDefinition, ToolFailure, ToolFailureClass, ToolId, ToolManifest, ToolValue,
+    AttachmentId, AttachmentTypeMetadata, ConversationRecord, LlmProfileEffortValidationCategory,
+    MediaType, Message, ModelToolReturn, ModelToolReturnPart, ProtocolEvent, SessionAppendNode,
+    ToolCancellation, ToolCatalog, ToolContract, ToolDefinition, ToolFailure, ToolFailureClass,
+    ToolId, ToolManifest, ToolValue,
 };
 
 /// The one manifest key a tool binding lives under.
@@ -149,52 +148,6 @@ impl MessageCoreSupport for Message {
 impl MessageCoreSupport for ConversationRecord {
     fn content_equals(&self, other: &Message) -> bool {
         crate::session_model::message::message_content_equal(self, other)
-    }
-}
-
-pub trait MessageSequenceCoreSupport {
-    fn preserved_extension_delta<'a>(&self, next: &'a MessageSequence) -> Option<&'a [Message]>;
-    fn from_owned(messages: Vec<Message>) -> Self;
-    fn from_base(base: AppendVec<Message>) -> Self;
-    fn from_base_and_delta(base: AppendVec<Message>, delta: Vec<Message>) -> Self;
-    fn with_base_render_cache(self, cache: Arc<BaseRenderCache>) -> Self;
-    fn as_slice(&self) -> &[Message];
-    fn shared(&self) -> AppendVec<Message>;
-    fn extend(&mut self, messages: Vec<Message>);
-}
-
-#[doc(hidden)]
-impl MessageSequenceCoreSupport for MessageSequence {
-    fn preserved_extension_delta<'a>(&self, next: &'a MessageSequence) -> Option<&'a [Message]> {
-        MessageSequence::preserved_extension_delta(self, next)
-    }
-
-    fn from_owned(messages: Vec<Message>) -> Self {
-        MessageSequence::from_owned(messages)
-    }
-
-    fn from_base(base: AppendVec<Message>) -> Self {
-        MessageSequence::from_base(base)
-    }
-
-    fn from_base_and_delta(base: AppendVec<Message>, delta: Vec<Message>) -> Self {
-        MessageSequence::from_base_and_delta(base, delta)
-    }
-
-    fn with_base_render_cache(self, cache: Arc<BaseRenderCache>) -> Self {
-        MessageSequence::with_base_render_cache(self, cache)
-    }
-
-    fn as_slice(&self) -> &[Message] {
-        MessageSequence::as_slice(self)
-    }
-
-    fn shared(&self) -> AppendVec<Message> {
-        MessageSequence::shared(self)
-    }
-
-    fn extend(&mut self, messages: Vec<Message>) {
-        MessageSequence::extend(self, messages);
     }
 }
 

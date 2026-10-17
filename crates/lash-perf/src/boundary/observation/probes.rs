@@ -12,8 +12,8 @@ use lash_core::{
     ProcessReplayStore, ProcessReplayStoreError, ProcessReplaySubscribeOutcome, ProcessSequence,
     SessionCursor, SessionObservationEvent, SessionRevision,
 };
-use lash_sansio::sync::MutexExt;
-use lash_sansio::{ProcessId, SessionId};
+use lash_protocol_types::sync::MutexExt;
+use lash_protocol_types::{ProcessId, SessionId};
 use serde::Serialize;
 
 use super::super::Meter;

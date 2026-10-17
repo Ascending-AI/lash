@@ -11,7 +11,7 @@ use lash_core::session_model::ConversationRecord;
 use lash_core::{
     DriverAction, DriverContextView, Message, MessageRole, Part, SessionHistoryRecord,
 };
-use lash_sansio::{TurnFinish, TurnOutcome, shared_parts};
+use lash_protocol_types::{TurnFinish, TurnOutcome, shared_parts};
 
 /// The protocol's plugin id, and the owner of the record it appends.
 pub const NOTED_PROTOCOL: &str = "noted_protocol";
@@ -88,7 +88,7 @@ struct NotedDriverPlugin;
 impl ProtocolDriverPlugin for NotedDriverPlugin {
     fn attachment_omission_text(
         &self,
-        notice: &lash_sansio::AttachmentMaterializationNotice,
+        notice: &lash_protocol_types::AttachmentMaterializationNotice,
     ) -> String {
         format!("({} omitted)", notice.media_type)
     }

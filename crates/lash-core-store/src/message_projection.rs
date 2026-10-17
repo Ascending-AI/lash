@@ -1,7 +1,7 @@
 //! Projection of a plugin-authored message into the durable message shape.
 
 use crate::{Message, PluginMessage};
-use lash_sansio::session_model::reassign_part_ids;
+use lash_protocol_types::session_model::reassign_part_ids;
 use std::sync::Arc;
 
 pub fn plugin_message_to_message(plugin_message: &PluginMessage, fallback_id: &str) -> Message {

@@ -15,8 +15,10 @@ pub(crate) fn runtime_error_actions(
     error: String,
 ) -> Vec<DriverAction> {
     let cause = match code {
-        TurnFailureCode::InvalidTurnOptions => lash_sansio::TurnErrorCode::InvalidTurnOptions,
-        _ => lash_sansio::TurnErrorCode::RuntimeRefused,
+        TurnFailureCode::InvalidTurnOptions => {
+            lash_protocol_types::TurnErrorCode::InvalidTurnOptions
+        }
+        _ => lash_protocol_types::TurnErrorCode::RuntimeRefused,
     };
     vec![
         DriverAction::Emit(make_error_event(
@@ -24,10 +26,10 @@ pub(crate) fn runtime_error_actions(
             Some(code.into()),
             error.clone(),
             Some(error),
-            lash_sansio::session_model::RuntimeOutputCuts::standard(),
+            lash_protocol_types::session_model::RuntimeOutputCuts::standard(),
         )),
         DriverAction::Finish(TurnOutcome::Stopped(TurnStop::RuntimeError {
-            cause: lash_sansio::TurnErrorCause::new(cause),
+            cause: lash_protocol_types::TurnErrorCause::new(cause),
         })),
     ]
 }

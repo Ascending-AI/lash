@@ -561,18 +561,18 @@ impl ActorContext {
     }
 
     pub(crate) fn retain_model_attempt(&self, attempt: crate::EffectAttempt) {
-        use lash_sansio::sync::MutexExt as _;
+        use lash_protocol_types::sync::MutexExt as _;
         self.inner.model_attempts.lock_recover().push(attempt);
     }
 
     pub(crate) fn retain_owned_model_task(&self, task: crate::task::JoinHandle<()>) {
-        use lash_sansio::sync::MutexExt as _;
+        use lash_protocol_types::sync::MutexExt as _;
         self.inner.model_tasks.lock_recover().push(task);
     }
 
     /// Retain a command's sealed call until the command's existing commit.
     pub fn record_owned_model_call(&self, call: lash_durable::domain::model_calls::OwnedModelCall) {
-        use lash_sansio::sync::MutexExt as _;
+        use lash_protocol_types::sync::MutexExt as _;
         let mut calls = self.inner.model_calls.lock_recover();
         if !calls.iter().any(|stored| stored.key == call.key) {
             calls.push(call);

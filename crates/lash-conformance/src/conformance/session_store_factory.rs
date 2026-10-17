@@ -9,8 +9,8 @@ use super::session_store_factory_vacuum::{
 };
 use super::*;
 use crate::ActorContext;
-use lash_sansio::SessionId;
-use lash_sansio::TurnId;
+use lash_protocol_types::SessionId;
+use lash_protocol_types::TurnId;
 use pretty_assertions::assert_eq;
 
 mod admission;
@@ -1634,8 +1634,8 @@ async fn session_store_factory_fenced_sweep_collects_and_records_reclaimed(
     let orphan = crate::AttachmentStore::put(
         backend.as_ref(),
         b"conformance-fenced-orphan".to_vec(),
-        lash_sansio::AttachmentCreateMeta::new(
-            lash_sansio::MediaType::parse("application/octet-stream").expect("media type"),
+        lash_protocol_types::AttachmentCreateMeta::new(
+            lash_protocol_types::MediaType::parse("application/octet-stream").expect("media type"),
             None,
             Some("orphan".to_string()),
         ),

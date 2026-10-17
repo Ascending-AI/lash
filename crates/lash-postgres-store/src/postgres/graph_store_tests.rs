@@ -825,7 +825,7 @@ async fn a_build_catalog_closure_hydrates_whole_without_reading_it_back() {
     install(&tier, &nodes, &BTreeSet::new())
         .await
         .expect("the graph installs");
-    let session = lash_sansio::SessionId::parse("catalog-law").expect("a session id");
+    let session = lash_protocol_types::SessionId::parse("catalog-law").expect("a session id");
     for (revision, top) in [(1, root), (2, member)] {
         tier.foreign(ForeignWrite::RevisionRoot {
             config: false,

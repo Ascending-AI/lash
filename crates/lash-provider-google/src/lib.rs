@@ -30,8 +30,8 @@ mod tests {
     #[test]
     fn failed_and_cancelled_results_keep_presenter_body_and_native_error_signal() {
         for status in [
-            lash_sansio::ToolCallStatus::Failure,
-            lash_sansio::ToolCallStatus::Cancelled,
+            lash_protocol_types::ToolCallStatus::Failure,
+            lash_protocol_types::ToolCallStatus::Cancelled,
         ] {
             let result: LlmContentBlock = serde_json::from_value(json!({"ToolResult": {
                 "call_id": "call-1", "tool_name": "lookup",
@@ -70,8 +70,8 @@ mod tests {
     mod epilogue;
     mod generation_tests;
     mod wire_bytes;
-    use lash_sansio::llm::types::{StreamBlockEvent, StreamBlockKind};
-    use lash_sansio::sync::MutexExt;
+    use lash_protocol_types::sync::MutexExt;
+    use lash_protocol_types::{llm::types::StreamBlockEvent, llm::types::StreamBlockKind};
 
     use std::num::NonZeroUsize;
     use std::sync::Arc;
@@ -961,7 +961,7 @@ mod tests {
 
         let mut req = request(None);
         req.model.metadata_mut().limits.output_tokens =
-            lash_sansio::llm_profile::OutputTokenLimits::new(None, Some(9999))
+            lash_protocol_types::llm_profile::OutputTokenLimits::new(None, Some(9999))
                 .expect("valid output-token limits");
         req.generation.output_token_cap = NonZeroUsize::new(4096);
         let body = GoogleOAuthProvider::build_request(&provider, &req, Vec::new(), None)
@@ -973,8 +973,9 @@ mod tests {
             .model
             .metadata_mut()
             .limits
-            .output_tokens = lash_sansio::llm_profile::OutputTokenLimits::new(None, Some(9999))
-            .expect("valid output-token limits");
+            .output_tokens =
+            lash_protocol_types::llm_profile::OutputTokenLimits::new(None, Some(9999))
+                .expect("valid output-token limits");
         let model_limited =
             GoogleOAuthProvider::build_request(&provider, &model_limited_request, Vec::new(), None)
                 .expect("schema projection");
@@ -1102,12 +1103,12 @@ mod tests {
         req.tools = Arc::new(vec![LlmToolSpec {
             name: "cache-shaped-input".to_string(),
             description: "Host tool with a provider-looking property".to_string(),
-            input_schema: lash_sansio::SchemaContract::admit(json!({
+            input_schema: lash_protocol_types::SchemaContract::admit(json!({
                 "type": "object",
                 "properties": { "cachedContent": { "type": "string" } }
             }))
             .expect("valid declared schema"),
-            output_schema: lash_sansio::SchemaContract::admit(json!({}))
+            output_schema: lash_protocol_types::SchemaContract::admit(json!({}))
                 .expect("valid declared schema"),
         }]);
 
@@ -1290,7 +1291,7 @@ mod tests {
         claude_on_vertex.tools = Arc::new(vec![LlmToolSpec {
             name: "lookup".to_string(),
             description: "Lookup".to_string(),
-            input_schema: lash_sansio::SchemaContract::admit(json!({
+            input_schema: lash_protocol_types::SchemaContract::admit(json!({
                 "$schema": "https://json-schema.org/draft/2020-12/schema",
                 "$id": "tool.schema.json",
                 "$defs": { "unused": { "type": "string" } },
@@ -1305,7 +1306,7 @@ mod tests {
                 }
             }))
             .expect("valid declared schema"),
-            output_schema: lash_sansio::SchemaContract::admit(json!({}))
+            output_schema: lash_protocol_types::SchemaContract::admit(json!({}))
                 .expect("valid declared schema"),
         }]);
         let claude_on_vertex_body =

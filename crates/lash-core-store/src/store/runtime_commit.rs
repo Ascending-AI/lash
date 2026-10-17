@@ -14,7 +14,7 @@ pub struct FrameTransition {
     pub successor: crate::artifact_referrer::FrameEnvironmentId,
     pub carries: Vec<crate::artifact_referrer::ArtifactName>,
     /// The committing execution: the only one that can still read `ended`.
-    pub gate: lash_sansio::EffectJournalIdentity,
+    pub gate: lash_protocol_types::EffectJournalIdentity,
 }
 
 impl FrameTransition {
@@ -316,8 +316,8 @@ pub enum TurnCommitFailureCause {
 
 impl TurnCommitOutcome {
     /// Derive the durable label from the terminal produced by the turn driver.
-    pub fn from_terminal(outcome: &lash_sansio::TurnOutcome) -> Self {
-        use lash_sansio::{TurnOutcome, TurnStop};
+    pub fn from_terminal(outcome: &lash_protocol_types::TurnOutcome) -> Self {
+        use lash_protocol_types::{TurnOutcome, TurnStop};
         match outcome {
             TurnOutcome::Finished(_) => Self::Completed,
             TurnOutcome::AgentFrameSwitch { .. } => Self::FrameSwitch,
@@ -1030,7 +1030,7 @@ struct FrameTransitionWire {
     successor: FrameEnvironmentWire,
     carries: Vec<crate::artifact_referrer::ArtifactName>,
     #[serde(with = "crate::artifact_referrer::journal_identity")]
-    gate: lash_sansio::EffectJournalIdentity,
+    gate: lash_protocol_types::EffectJournalIdentity,
 }
 
 #[derive(serde::Serialize, serde::Deserialize)]

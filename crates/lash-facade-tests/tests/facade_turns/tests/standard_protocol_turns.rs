@@ -236,7 +236,10 @@ async fn malformed_tool_arguments_are_refused_not_dispatched() {
     assert_eq!(call.tool, "status");
     assert_eq!(failure.code, "invalid_tool_call_json");
     assert_eq!(failure.class, lash_core::ToolFailureClass::InvalidRequest);
-    assert_eq!(failure.source, lash_sansio::ToolFailureSource::Runtime);
+    assert_eq!(
+        failure.source,
+        lash_protocol_types::ToolFailureSource::Runtime
+    );
     let results = requests[1]
         .messages
         .iter()
@@ -256,7 +259,7 @@ async fn malformed_tool_arguments_are_refused_not_dispatched() {
         vec![(
             "malformed-call",
             Some("status"),
-            lash_sansio::ToolCallStatus::Failure
+            lash_protocol_types::ToolCallStatus::Failure
         )]
     );
 

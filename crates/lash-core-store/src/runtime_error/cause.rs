@@ -20,7 +20,7 @@ pub enum RuntimeErrorCause {
     },
     /// A host-configured aggregate callback deadline passed without an answer.
     ControlPhaseExpired {
-        expiry: Box<lash_sansio::ControlPhaseExpired>,
+        expiry: Box<lash_protocol_types::ControlPhaseExpired>,
     },
     ToolRunCutRefused {
         refusal: Box<crate::tool_run::RunCutRefusal>,
@@ -29,7 +29,7 @@ pub enum RuntimeErrorCause {
         refusal: Box<crate::tool_run::IsolatedStartRefusal>,
     },
     ToolRunControl {
-        call_id: Box<lash_sansio::ToolCallId>,
+        call_id: Box<lash_protocol_types::ToolCallId>,
         aborted: bool,
         cause: Option<Box<crate::tool_run::HookCause>>,
     },
@@ -65,16 +65,16 @@ pub enum RuntimeErrorCause {
     },
     /// A completed provider call's refusal, retained through plugin and host errors.
     ProviderFailure {
-        failure_kind: lash_sansio::llm::types::ProviderFailureKind,
-        code: Option<lash_sansio::FailureCode>,
+        failure_kind: lash_protocol_types::llm::types::ProviderFailureKind,
+        code: Option<lash_protocol_types::FailureCode>,
         retryable: bool,
-        terminal_reason: lash_sansio::llm::types::LlmTerminalReason,
+        terminal_reason: lash_protocol_types::llm::types::LlmTerminalReason,
     },
     PluginOperation {
-        failure: Box<lash_sansio::PluginOperationFailure>,
+        failure: Box<lash_protocol_types::PluginOperationFailure>,
     },
     PluginHooks {
-        causes: Vec<lash_sansio::PluginHookFailure>,
+        causes: Vec<lash_protocol_types::PluginHookFailure>,
     },
     /// A typed worker failure retained through protocol and host errors.
     VmWorker {
@@ -116,17 +116,17 @@ pub enum RuntimeErrorCause {
         failure: Box<super::AttachmentRetentionFailure>,
     },
     ModuleArtifactRefused {
-        refusal: Box<lash_sansio::module_artifact_refusal::ModuleArtifactRefusal>,
+        refusal: Box<lash_protocol_types::module_artifact_refusal::ModuleArtifactRefusal>,
     },
     SchemaRefused {
-        source: Box<lash_sansio::SchemaAdmissionError>,
+        source: Box<lash_protocol_types::SchemaAdmissionError>,
     },
     ToolSchemaRefused {
-        source: Box<lash_sansio::ToolCatalogBuildError>,
+        source: Box<lash_protocol_types::ToolCatalogBuildError>,
     },
     ValueMismatch {
         context: Box<str>,
-        source: Box<lash_sansio::ValueMismatch>,
+        source: Box<lash_protocol_types::ValueMismatch>,
     },
     IngressReservedSourceKey {
         #[serde(flatten)]
@@ -191,7 +191,7 @@ pub enum RuntimeErrorCause {
     },
 }
 
-pub use lash_sansio::StoredDataCorruption;
+pub use lash_protocol_types::StoredDataCorruption;
 
 impl RuntimeErrorCause {
     /// The fenced referrer `cause` names, if it is an ended-referrer refusal.
@@ -244,7 +244,7 @@ impl super::RuntimeError {
 }
 
 impl RuntimeErrorCause {
-    pub fn plugin_failure_class(&self) -> Option<lash_sansio::PluginFailureClass> {
+    pub fn plugin_failure_class(&self) -> Option<lash_protocol_types::PluginFailureClass> {
         match self {
             Self::PluginOperation { failure } => Some(failure.class),
             Self::PluginHooks { causes } => Some(
@@ -252,26 +252,26 @@ impl RuntimeErrorCause {
                     .iter()
                     .map(|cause| cause.failure.class)
                     .min_by_key(|class| class.precedence())
-                    .unwrap_or(lash_sansio::PluginFailureClass::Terminal),
+                    .unwrap_or(lash_protocol_types::PluginFailureClass::Terminal),
             ),
             _ => None,
         }
     }
 }
 
-impl From<super::RuntimeError> for lash_sansio::PluginOperationFailure {
+impl From<super::RuntimeError> for lash_protocol_types::PluginOperationFailure {
     fn from(error: super::RuntimeError) -> Self {
         if let Some(RuntimeErrorCause::PluginOperation { failure }) = &error.cause {
             return *failure.clone();
         }
         let class = if error.turn_failure_cause() == super::TurnFailureCause::Parked {
-            lash_sansio::PluginFailureClass::Parked
+            lash_protocol_types::PluginFailureClass::Parked
         } else if error.is_retryable() {
-            lash_sansio::PluginFailureClass::Retryable
+            lash_protocol_types::PluginFailureClass::Retryable
         } else if error.is_terminal() {
-            lash_sansio::PluginFailureClass::Terminal
+            lash_protocol_types::PluginFailureClass::Terminal
         } else {
-            lash_sansio::PluginFailureClass::Redrivable
+            lash_protocol_types::PluginFailureClass::Redrivable
         };
         match serde_json::to_value(&error) {
             Ok(payload) => Self {
@@ -279,7 +279,7 @@ impl From<super::RuntimeError> for lash_sansio::PluginOperationFailure {
                 error_version: std::num::NonZeroU32::MIN,
                 payload,
                 class,
-                code: lash_sansio::FailureCode::from(&error.code),
+                code: lash_protocol_types::FailureCode::from(&error.code),
                 message: error.message,
                 origin: None,
             },
@@ -287,8 +287,8 @@ impl From<super::RuntimeError> for lash_sansio::PluginOperationFailure {
                 error_type: "lash.encoding".into(),
                 error_version: std::num::NonZeroU32::MIN,
                 payload: serde_json::json!({"message": source.to_string()}),
-                class: lash_sansio::PluginFailureClass::Terminal,
-                code: lash_sansio::FailureCode::from(
+                class: lash_protocol_types::PluginFailureClass::Terminal,
+                code: lash_protocol_types::FailureCode::from(
                     &super::RuntimeErrorCode::RecordEncodingFailed,
                 ),
                 message: source.to_string(),

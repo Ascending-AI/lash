@@ -10,7 +10,7 @@ use serde::{Deserialize, Serialize};
 // Effect host + controller trait + scope + error
 // =============================================================================
 
-pub use lash_sansio::{EffectJournalIdentity, ExecutionScope};
+pub use lash_protocol_types::{EffectJournalIdentity, ExecutionScope};
 
 /// Who proves that a scope-exact retirement can no longer be reached.
 ///
@@ -157,9 +157,11 @@ impl EffectJournalRetirement {
 /// `timeout` lands in `foreign` instead of minting Lash vocabulary.
 fn deserialize_foreign_code<'de, D: serde::Deserializer<'de>>(
     deserializer: D,
-) -> Result<lash_sansio::FailureCode, D::Error> {
+) -> Result<lash_protocol_types::FailureCode, D::Error> {
     let spelling = <String as serde::Deserialize>::deserialize(deserializer)?;
-    Ok(lash_sansio::FailureCode::from_foreign_wire(&spelling))
+    Ok(lash_protocol_types::FailureCode::from_foreign_wire(
+        &spelling,
+    ))
 }
 
 #[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize)]
@@ -170,14 +172,14 @@ pub struct ExternalCompletionError {
     /// claiming a reserved namespace or carrying no namespace lands in
     /// `foreign` rather than acquiring Lash ownership.
     #[serde(deserialize_with = "deserialize_foreign_code")]
-    pub code: lash_sansio::FailureCode,
+    pub code: lash_protocol_types::FailureCode,
     pub message: String,
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub raw: Option<serde_json::Value>,
 }
 
 impl ExternalCompletionError {
-    pub fn new(code: lash_sansio::FailureCode, message: impl Into<String>) -> Self {
+    pub fn new(code: lash_protocol_types::FailureCode, message: impl Into<String>) -> Self {
         Self {
             code,
             message: message.into(),

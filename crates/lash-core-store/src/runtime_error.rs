@@ -833,7 +833,7 @@ impl RuntimeErrorCode {
     }
 }
 
-impl From<&RuntimeErrorCode> for lash_sansio::FailureCode {
+impl From<&RuntimeErrorCode> for lash_protocol_types::FailureCode {
     /// Maps a runtime error code onto a namespaced failure code: built-in
     /// spellings are workspace vocabulary and land in `lash`, while a
     /// [`RuntimeErrorCode::ForeignCode`] decodes through the foreign-ingress
@@ -842,10 +842,10 @@ impl From<&RuntimeErrorCode> for lash_sansio::FailureCode {
     /// lands in `foreign`, never re-minted as a `lash` code.
     fn from(code: &RuntimeErrorCode) -> Self {
         match code.foreign_code() {
-            Some(foreign) => lash_sansio::FailureCode::from_foreign_wire(foreign),
-            None => lash_sansio::FailureCode::lash(lash_sansio::TurnFailureCode::from_wire(
-                code.as_str(),
-            )),
+            Some(foreign) => lash_protocol_types::FailureCode::from_foreign_wire(foreign),
+            None => lash_protocol_types::FailureCode::lash(
+                lash_protocol_types::TurnFailureCode::from_wire(code.as_str()),
+            ),
         }
     }
 }
@@ -1153,7 +1153,7 @@ impl RuntimeError {
             .as_ref()
             .and_then(RuntimeErrorCause::plugin_failure_class)
         {
-            return class == lash_sansio::PluginFailureClass::Retryable;
+            return class == lash_protocol_types::PluginFailureClass::Retryable;
         }
         !self.has_terminal_cause() && self.code.is_retryable()
     }
@@ -1177,7 +1177,7 @@ impl RuntimeError {
             .as_ref()
             .and_then(RuntimeErrorCause::plugin_failure_class)
         {
-            return class == lash_sansio::PluginFailureClass::Terminal;
+            return class == lash_protocol_types::PluginFailureClass::Terminal;
         }
         self.has_terminal_cause()
             || match self.foreign_cause {
@@ -1195,8 +1195,8 @@ impl RuntimeError {
             .and_then(RuntimeErrorCause::plugin_failure_class)
         {
             return match class {
-                lash_sansio::PluginFailureClass::Terminal => TurnFailureCause::Outcome,
-                lash_sansio::PluginFailureClass::Parked => TurnFailureCause::Parked,
+                lash_protocol_types::PluginFailureClass::Terminal => TurnFailureCause::Outcome,
+                lash_protocol_types::PluginFailureClass::Parked => TurnFailureCause::Parked,
                 _ => TurnFailureCause::LiveFault,
             };
         }
@@ -1224,13 +1224,13 @@ impl std::fmt::Display for RuntimeError {
         write!(f, "{}: {}", self.code, self.message)
     }
 }
-impl From<lash_sansio::EffectIdentityError> for RuntimeError {
-    fn from(error: lash_sansio::EffectIdentityError) -> Self {
+impl From<lash_protocol_types::EffectIdentityError> for RuntimeError {
+    fn from(error: lash_protocol_types::EffectIdentityError) -> Self {
         let code = match error {
-            lash_sansio::EffectIdentityError::MissingExecutionScopeId => {
+            lash_protocol_types::EffectIdentityError::MissingExecutionScopeId => {
                 RuntimeErrorCode::MissingExecutionScopeId
             }
-            lash_sansio::EffectIdentityError::MissingReplayKey => {
+            lash_protocol_types::EffectIdentityError::MissingReplayKey => {
                 RuntimeErrorCode::RuntimeEffectReplayRequired
             }
         };

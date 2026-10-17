@@ -173,7 +173,10 @@ async fn discovery_hidden_tool_executes_through_rlm_and_standard_batch_but_not_n
             assert_eq!(call.tool, "hidden");
             assert_eq!(failure.code, "unknown_tool");
             assert_eq!(failure.class, lash_core::ToolFailureClass::Unavailable);
-            assert_eq!(failure.source, lash_sansio::ToolFailureSource::Runtime);
+            assert_eq!(
+                failure.source,
+                lash_protocol_types::ToolFailureSource::Runtime
+            );
             let requests = requests.lock_recover();
             assert_eq!(requests.len(), 2, "the model receives the refusal once");
             let results = requests[1]
@@ -194,7 +197,7 @@ async fn discovery_hidden_tool_executes_through_rlm_and_standard_batch_but_not_n
                 vec![(
                     "discovery-call",
                     Some("hidden"),
-                    lash_sansio::ToolCallStatus::Failure
+                    lash_protocol_types::ToolCallStatus::Failure
                 )]
             );
         } else {

@@ -79,7 +79,7 @@ fn a_failing_sink_does_not_rob_later_sinks_in_a_tee() {
 fn event_is_failed_identifies_all_failure_outcomes() {
     fn tool_completed(outcome: TraceToolCallOutcome) -> TraceEvent {
         TraceEvent::ToolCallCompleted {
-            call_id: lash_sansio::ToolCallId::fixture("none"),
+            call_id: lash_protocol_types::ToolCallId::fixture("none"),
             provider_call_id: None,
             name: "tool".to_string().into(),
             args: Value::Null.into(),
@@ -102,7 +102,7 @@ fn event_is_failed_identifies_all_failure_outcomes() {
                 identity: TraceLanguageExecutionIdentity {
                     scope: TraceRuntimeScope::new("s1"),
                     subject: TraceRuntimeSubject::Process {
-                        process_id: lash_sansio::ProcessId::fixture("p1"),
+                        process_id: lash_protocol_types::ProcessId::fixture("p1"),
                     },
                     document: crate::WorkflowDocumentRef {
                         document: lash_kernel_doc::DocumentId::from_bytes([1; 32]),
@@ -158,7 +158,7 @@ fn event_is_failed_identifies_all_failure_outcomes() {
         (
             "language node failed",
             language_execution(TraceLanguageExecutionPayload::Node {
-                at: lash_sansio::effect_identity_fixture("n1", 1),
+                at: lash_protocol_types::effect_identity_fixture("n1", 1),
                 fact: TraceNodeFact::Failed {
                     call_id: None,
                     failure: TraceLanguageExecutionFailure::Runtime {
@@ -247,7 +247,7 @@ fn event_is_failed_identifies_all_failure_outcomes() {
         (
             "started language node",
             language_execution(TraceLanguageExecutionPayload::Node {
-                at: lash_sansio::effect_identity_fixture("n1", 1),
+                at: lash_protocol_types::effect_identity_fixture("n1", 1),
                 fact: TraceNodeFact::Started { call_id: None },
             }),
         ),

@@ -324,7 +324,7 @@ impl DirectLlmClient {
         };
         match lash_core_llm::core_internal::complete_prepared(
             &mut self.provider,
-            lash_sansio::llm::types::ResponseContext::of_request(&llm_request),
+            lash_protocol_types::llm::types::ResponseContext::of_request(&llm_request),
             &template,
             self.deliveries.as_ref(),
             sideband,
@@ -554,7 +554,7 @@ mod tests {
     use super::*;
     use crate::llm::types::{LlmOutputPart, LlmTerminalReason, LlmUsage};
     use crate::testing::TestProvider;
-    use lash_sansio::sync::MutexExt;
+    use lash_protocol_types::sync::MutexExt;
     use serde_json::json;
     use std::sync::{Arc, Mutex};
 
@@ -589,7 +589,7 @@ mod tests {
             "return items",
             DirectJsonSchema {
                 name: "items_result".to_string(),
-                schema: lash_sansio::SchemaContract::admit(json!({
+                schema: lash_protocol_types::SchemaContract::admit(json!({
                     "type": "object",
                     "required": ["items"],
                     "properties": {
@@ -811,7 +811,7 @@ mod tests {
             .expect("explicit direct stream sender must be preserved");
         sender.send(LlmStreamEvent::Block(StreamBlockEvent::Delta {
             kind: StreamBlockKind::AssistantText,
-            block: lash_sansio::llm::types::StreamBlockIdentity::new("text:0", 0),
+            block: lash_protocol_types::llm::types::StreamBlockIdentity::new("text:0", 0),
             text: "delta".to_string(),
         }));
         assert_eq!(captured_events.lock_recover().len(), 1);

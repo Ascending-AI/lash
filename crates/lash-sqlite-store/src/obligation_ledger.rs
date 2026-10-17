@@ -490,7 +490,7 @@ pub(crate) fn arm_cleanup_tx(
 /// fences and obligations remain for late publishers and independent stores.
 pub(crate) fn end_execution_tx(
     tx: &rusqlite::Connection,
-    scope: &lash_sansio::ExecutionScope,
+    scope: &lash_protocol_types::ExecutionScope,
     now_ms: u64,
 ) -> Result<(), StoreError> {
     let journal = scope
@@ -793,7 +793,7 @@ mod artifact_cleanup_tests {
         let core = set.process_env_store();
         let execution = |name: &str| {
             ArtifactReferrer::Execution(
-                lash_sansio::ExecutionScope::runtime_operation(name)
+                lash_protocol_types::ExecutionScope::runtime_operation(name)
                     .journal_identity()
                     .expect("journal identity"),
             )
@@ -924,7 +924,7 @@ mod artifact_cleanup_tests {
         let conn = rusqlite::Connection::open_in_memory().expect("open SQLite");
         conn.execute_batch(crate::schema::SCHEMA)
             .expect("create durable core");
-        let journal = lash_sansio::ExecutionScope::runtime_operation("cleanup-test")
+        let journal = lash_protocol_types::ExecutionScope::runtime_operation("cleanup-test")
             .journal_identity()
             .expect("journal identity");
         let referrer = ArtifactReferrer::Execution(journal);

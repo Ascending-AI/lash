@@ -8,7 +8,7 @@
 //! frame. A resumed run starts from a committed root's capability and
 //! faults in only the pages it touches.
 
-use lash_sansio::VersionRange;
+use lash_protocol_types::VersionRange;
 use serde::{Deserialize, Serialize};
 use thiserror::Error;
 

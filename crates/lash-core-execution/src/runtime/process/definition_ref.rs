@@ -293,8 +293,8 @@ pub enum ProcessDefinitionRefusal {
     /// The descriptor presented for a definition value is not the one its id
     /// was derived from.
     DefinitionIdMismatch {
-        claimed: lash_sansio::ProcessDefinitionId,
-        derived: lash_sansio::ProcessDefinitionId,
+        claimed: lash_protocol_types::ProcessDefinitionId,
+        derived: lash_protocol_types::ProcessDefinitionId,
     },
     /// The descriptor's artifact manifest is not the set of artifacts its
     /// owning engine resolves the value to: a definition that would hold

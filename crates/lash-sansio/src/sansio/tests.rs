@@ -1,7 +1,7 @@
-use crate::ReportedFailure;
-use crate::SessionId;
-use crate::TurnId;
-use crate::llm::types::{StreamBlockEvent, StreamBlockKind};
+use lash_protocol_types::ReportedFailure;
+use lash_protocol_types::SessionId;
+use lash_protocol_types::TurnId;
+use lash_protocol_types::{llm::types::StreamBlockEvent, llm::types::StreamBlockKind};
 use std::sync::Arc;
 use std::sync::atomic::{AtomicU64, Ordering};
 
@@ -10,13 +10,17 @@ use super::*;
 mod bounded_checkpoint;
 mod fold;
 mod held_progress;
-use crate::TurnFinish;
-use crate::llm::types::{LlmOutputPart, LlmRequest, LlmResponse, LlmTerminalReason};
-use crate::session_model::message::PartAttachment;
-use crate::session_model::{
-    ConversationRecord, Message, MessageRole, MessageSequence, Part, SessionHistoryRecord,
+use lash_protocol_types::TurnFinish;
+use lash_protocol_types::session_model::message::PartAttachment;
+use lash_protocol_types::{ModelToolReturnPart, ToolCancellation, ToolFailure, ToolFailureClass};
+use lash_protocol_types::{
+    llm::types::LlmOutputPart, llm::types::LlmRequest, llm::types::LlmResponse,
+    llm::types::LlmTerminalReason,
 };
-use crate::{ModelToolReturnPart, ToolCancellation, ToolFailure, ToolFailureClass};
+use lash_protocol_types::{
+    session_model::ConversationRecord, session_model::Message, session_model::MessageRole,
+    session_model::MessageSequence, session_model::Part, session_model::SessionHistoryRecord,
+};
 
 static NEXT_TEST_MESSAGE_ID: AtomicU64 = AtomicU64::new(1);
 
@@ -32,23 +36,25 @@ fn test_config(protocol_driver: Arc<dyn ProtocolDriverHandle>) -> TurnMachineCon
         model_tool_calls: crate::ModelToolCalls::fixture(),
         protocol_driver,
         projector: Arc::new(ChatContextProjector::default()),
-        model: crate::llm_profile::LlmProfileConfig::new(
-            crate::llm_profile::RecordedLlmProfile::mint(
-                crate::llm_profile::LlmProfileKey::new("request-fixture"),
-                crate::llm_profile::LlmProfileMetadata::builder("test-model".to_string())
-                    .context_window_tokens(128_000)
-                    .capability(crate::llm::capability::LlmProfileCapability::default())
-                    .extra_body(Default::default())
-                    .cache_retention(crate::llm::capability::CacheRetention::Short)
-                    .build()
-                    .expect("valid profile"),
+        model: lash_protocol_types::llm_profile::LlmProfileConfig::new(
+            lash_protocol_types::llm_profile::RecordedLlmProfile::mint(
+                lash_protocol_types::llm_profile::LlmProfileKey::new("request-fixture"),
+                lash_protocol_types::llm_profile::LlmProfileMetadata::builder(
+                    "test-model".to_string(),
+                )
+                .context_window_tokens(128_000)
+                .capability(lash_protocol_types::llm::capability::LlmProfileCapability::default())
+                .extra_body(Default::default())
+                .cache_retention(lash_protocol_types::llm::capability::CacheRetention::Short)
+                .build()
+                .expect("valid profile"),
             ),
         )
-        .with_reasoning(crate::ReasoningSelection::ProviderDefault),
-        turn_budget: crate::TurnBudget::Unbounded,
-        no_progress_budget: crate::NoProgressBudget::bounded(12),
+        .with_reasoning(lash_protocol_types::ReasoningSelection::ProviderDefault),
+        turn_budget: lash_protocol_types::TurnBudget::Unbounded,
+        no_progress_budget: lash_protocol_types::NoProgressBudget::bounded(12),
         attachment_acceptance: Default::default(),
-        generation: crate::llm::types::GenerationOptions::default(),
+        generation: lash_protocol_types::llm::types::GenerationOptions::default(),
         session_id: SessionId::from("test"),
         agent_frame_id: "test-frame".to_string(),
         turn_id: TurnId::from("test-turn"),
@@ -62,13 +68,13 @@ fn assistant_done(text: impl Into<String>) -> TurnOutcome {
     TurnOutcome::Finished(TurnFinish::AssistantMessage { text: text.into() })
 }
 
-fn test_attachment_ref(byte_len: u64) -> crate::AttachmentRef {
-    crate::AttachmentRef {
-        id: crate::AttachmentId::parse(
+fn test_attachment_ref(byte_len: u64) -> lash_protocol_types::AttachmentRef {
+    lash_protocol_types::AttachmentRef {
+        id: lash_protocol_types::AttachmentId::parse(
             "3cd0b0330a44b423a583def0f3795fdc194067a489c1f3e1bfe61ba204380423",
         )
         .expect("valid attachment id"),
-        media_type: crate::MediaType::parse("image/png").unwrap(),
+        media_type: lash_protocol_types::MediaType::parse("image/png").unwrap(),
         byte_len,
         type_metadata: None,
         label: None,
@@ -201,7 +207,7 @@ fn turn_checkpoint_restore_refuses_every_non_current_version() {
     let machine = TurnMachine::new(
         test_config(Arc::new(ProseDriver)),
         vec![user_message("hello")],
-        crate::AppendVec::new(),
+        lash_protocol_types::AppendVec::new(),
         0,
     );
     let encoded = serde_json::to_value(machine.checkpoint()).expect("checkpoint json");
@@ -233,7 +239,7 @@ fn current_checkpoint_decoder_refuses_unknown_fields_as_incompatible_format() {
     let machine = TurnMachine::new(
         test_config(Arc::new(ProseDriver)),
         vec![user_message("hello")],
-        crate::AppendVec::new(),
+        lash_protocol_types::AppendVec::new(),
         0,
     );
     let mut encoded =
@@ -250,14 +256,14 @@ fn current_checkpoint_decoder_refuses_unknown_fields_as_incompatible_format() {
     assert!(error.to_string().contains("unknown field `termination`"));
 }
 
-fn empty_exec_response() -> crate::ExecResponse {
-    crate::ExecResponse {
+fn empty_exec_response() -> lash_protocol_types::ExecResponse {
+    lash_protocol_types::ExecResponse {
         prints_retained: None,
         prints: Vec::new(),
         calls: Vec::new(),
         tool_calls: Vec::new(),
         printed_images: Vec::new(),
-        result: crate::CellOutcome::Completed,
+        result: lash_protocol_types::CellOutcome::Completed,
         retained_finish_value: None,
         degraded_bindings: Vec::new(),
         bindings: Default::default(),
@@ -272,13 +278,13 @@ fn completed_tool(
     output: ToolCallOutput,
 ) -> CompletedToolCall {
     CompletedToolCall {
-        call_id: crate::ToolCallId::fixture(call_id),
+        call_id: lash_protocol_types::ToolCallId::fixture(call_id),
         provider_call_id: None,
         tool_name: tool_name.to_string(),
         args,
         output: output.clone(),
         model_return: ModelToolReturn {
-            outcome: crate::ModelToolOutcome::from(&output.outcome),
+            outcome: lash_protocol_types::ModelToolOutcome::from(&output.outcome),
             tool_name: tool_name.to_string(),
             parts: vec![ModelToolReturnPart::text(format!("{tool_name} result"))],
         },
@@ -292,7 +298,7 @@ fn checkpoint_roundtrips_report_tool_calls_before_accounting() {
     let mut machine = TurnMachine::new(
         test_config(Arc::new(ProseDriver)),
         vec![user_message("hello")],
-        crate::AppendVec::new(),
+        lash_protocol_types::AppendVec::new(),
         0,
     );
     let effects = drain_effects(&mut machine);
@@ -339,7 +345,7 @@ fn checkpoint_roundtrips_report_tool_calls_before_accounting() {
     assert_eq!(completed.len(), 1);
     assert_eq!(
         completed[0].call_id,
-        crate::ToolCallId::fixture("call-refused")
+        lash_protocol_types::ToolCallId::fixture("call-refused")
     );
     assert_eq!(completed[0].tool_name, "catalog.private");
     assert!(matches!(
@@ -348,7 +354,7 @@ fn checkpoint_roundtrips_report_tool_calls_before_accounting() {
             call_id,
             name,
             ..
-        }) if *call_id == crate::ToolCallId::fixture("call-refused") && name == "catalog.private"
+        }) if *call_id == lash_protocol_types::ToolCallId::fixture("call-refused") && name == "catalog.private"
     ));
 }
 
@@ -397,7 +403,7 @@ impl ProtocolDriverHandle for ProseDriver {
         &self,
         _ctx: DriverContextView<'_>,
         _driver_state: serde_json::Value,
-        _result: Result<crate::ExecResponse, crate::ExecCodeFailure>,
+        _result: Result<lash_protocol_types::ExecResponse, lash_protocol_types::ExecCodeFailure>,
     ) -> Vec<DriverAction> {
         Vec::new()
     }
@@ -438,7 +444,7 @@ impl ProtocolDriverHandle for ExecDriver {
         &self,
         _ctx: DriverContextView<'_>,
         driver_state: serde_json::Value,
-        _result: Result<crate::ExecResponse, crate::ExecCodeFailure>,
+        _result: Result<lash_protocol_types::ExecResponse, lash_protocol_types::ExecCodeFailure>,
     ) -> Vec<DriverAction> {
         let state = driver_state
             .as_str()
@@ -503,7 +509,7 @@ impl ProtocolDriverHandle for SyncThenAdvanceDriver {
         &self,
         _ctx: DriverContextView<'_>,
         _driver_state: serde_json::Value,
-        _result: Result<crate::ExecResponse, crate::ExecCodeFailure>,
+        _result: Result<lash_protocol_types::ExecResponse, lash_protocol_types::ExecCodeFailure>,
     ) -> Vec<DriverAction> {
         Vec::new()
     }
@@ -549,7 +555,7 @@ impl ProtocolDriverHandle for CellEveryIterationDriver {
         &self,
         _ctx: DriverContextView<'_>,
         _driver_state: serde_json::Value,
-        _result: Result<crate::ExecResponse, crate::ExecCodeFailure>,
+        _result: Result<lash_protocol_types::ExecResponse, lash_protocol_types::ExecCodeFailure>,
     ) -> Vec<DriverAction> {
         vec![
             DriverAction::AdvanceProtocolIteration,
@@ -562,7 +568,7 @@ impl ProtocolDriverHandle for CellEveryIterationDriver {
 }
 
 fn machine_at_protocol_iteration(
-    turn_budget: crate::TurnBudget,
+    turn_budget: lash_protocol_types::TurnBudget,
     protocol_run_offset: usize,
     protocol_iteration: usize,
 ) -> TurnMachine {
@@ -571,7 +577,7 @@ fn machine_at_protocol_iteration(
     let machine = TurnMachine::new(
         config,
         vec![user_message("keep running")],
-        crate::AppendVec::new(),
+        lash_protocol_types::AppendVec::new(),
         protocol_run_offset,
     );
     let mut checkpoint = machine.checkpoint();
@@ -585,11 +591,11 @@ fn machine_at_protocol_iteration(
 #[test]
 fn bounded_turn_stops_before_the_provider_and_effect_at_iteration_n() {
     let mut config = test_config(Arc::new(CellEveryIterationDriver));
-    config.turn_budget = crate::TurnBudget::bounded(1);
+    config.turn_budget = lash_protocol_types::TurnBudget::bounded(1);
     let mut machine = TurnMachine::new(
         config,
         vec![user_message("run one cell")],
-        crate::AppendVec::new(),
+        lash_protocol_types::AppendVec::new(),
         0,
     );
 
@@ -654,7 +660,8 @@ fn bounded_turn_stops_before_the_provider_and_effect_at_iteration_n() {
 
 #[test]
 fn bounded_turn_budget_exhausts_exactly_at_n_iterations() {
-    let mut below_limit = machine_at_protocol_iteration(crate::TurnBudget::bounded(3), 4, 6);
+    let mut below_limit =
+        machine_at_protocol_iteration(lash_protocol_types::TurnBudget::bounded(3), 4, 6);
     let effects = drain_effects(&mut below_limit);
     assert!(
         find_llm_call(&effects).is_some(),
@@ -662,7 +669,8 @@ fn bounded_turn_budget_exhausts_exactly_at_n_iterations() {
     );
     assert!(find_done(&effects).is_none());
 
-    let mut at_limit = machine_at_protocol_iteration(crate::TurnBudget::bounded(3), 4, 7);
+    let mut at_limit =
+        machine_at_protocol_iteration(lash_protocol_types::TurnBudget::bounded(3), 4, 7);
     let effects = drain_effects(&mut at_limit);
     assert!(
         find_llm_call(&effects).is_none(),
@@ -682,7 +690,8 @@ fn bounded_turn_budget_exhausts_exactly_at_n_iterations() {
 #[test]
 fn unbounded_turn_budget_never_schedules_a_limit_stop() {
     for iteration in [0, 1, 10_000, usize::MAX] {
-        let mut machine = machine_at_protocol_iteration(crate::TurnBudget::Unbounded, 0, iteration);
+        let mut machine =
+            machine_at_protocol_iteration(lash_protocol_types::TurnBudget::Unbounded, 0, iteration);
         let effects = drain_effects(&mut machine);
 
         assert!(
@@ -750,7 +759,7 @@ impl ProtocolDriverHandle for NoProgressFeedbackAtBudgetDriver {
         &self,
         _ctx: DriverContextView<'_>,
         _driver_state: serde_json::Value,
-        _result: Result<crate::ExecResponse, crate::ExecCodeFailure>,
+        _result: Result<lash_protocol_types::ExecResponse, lash_protocol_types::ExecCodeFailure>,
     ) -> Vec<DriverAction> {
         Vec::new()
     }
@@ -759,12 +768,12 @@ impl ProtocolDriverHandle for NoProgressFeedbackAtBudgetDriver {
 #[test]
 fn sansio_simultaneous_turn_and_no_progress_exhaustion_preempts_conversation_feedback() {
     let mut config = test_config(Arc::new(NoProgressFeedbackAtBudgetDriver));
-    config.turn_budget = crate::TurnBudget::bounded(1);
-    config.no_progress_budget = crate::NoProgressBudget::bounded(1);
+    config.turn_budget = lash_protocol_types::TurnBudget::bounded(1);
+    config.no_progress_budget = lash_protocol_types::NoProgressBudget::bounded(1);
     let mut machine = TurnMachine::new(
         config,
         vec![user_message("run one attempt")],
-        crate::AppendVec::new(),
+        lash_protocol_types::AppendVec::new(),
         0,
     );
 
@@ -839,14 +848,14 @@ impl ProtocolDriverHandle for ToolBatchDriver {
         vec![DriverAction::Start(PendingWork::tool_round(
             vec![
                 PendingToolCall {
-                    call_id: crate::ToolCallId::fixture("call-read"),
+                    call_id: lash_protocol_types::ToolCallId::fixture("call-read"),
                     provider_call_id: None,
                     tool_name: "read_file".to_string(),
                     args: serde_json::json!({"path": "a.txt"}),
                     replay: None,
                 },
                 PendingToolCall {
-                    call_id: crate::ToolCallId::fixture("call-search"),
+                    call_id: lash_protocol_types::ToolCallId::fixture("call-search"),
                     provider_call_id: None,
                     tool_name: "search".to_string(),
                     args: serde_json::json!({"q": "needle"}),
@@ -857,7 +866,7 @@ impl ProtocolDriverHandle for ToolBatchDriver {
                     }),
                 },
                 PendingToolCall {
-                    call_id: crate::ToolCallId::fixture("call-slow"),
+                    call_id: lash_protocol_types::ToolCallId::fixture("call-slow"),
                     provider_call_id: None,
                     tool_name: "slow_tool".to_string(),
                     args: serde_json::json!({}),
@@ -894,7 +903,7 @@ impl ProtocolDriverHandle for ToolBatchDriver {
         &self,
         _ctx: DriverContextView<'_>,
         _driver_state: serde_json::Value,
-        _result: Result<crate::ExecResponse, crate::ExecCodeFailure>,
+        _result: Result<lash_protocol_types::ExecResponse, lash_protocol_types::ExecCodeFailure>,
     ) -> Vec<DriverAction> {
         Vec::new()
     }
@@ -906,7 +915,7 @@ fn progress_emits_only_new_event_delta() {
     let mut machine = TurnMachine::new(
         test_config(Arc::new(ProseDriver)),
         vec![initial.clone()],
-        crate::AppendVec::from(vec![conversation_event(initial)]),
+        lash_protocol_types::AppendVec::from(vec![conversation_event(initial)]),
         0,
     );
 
@@ -933,7 +942,7 @@ fn progress_without_new_events_emits_empty_delta() {
     let mut machine = TurnMachine::new(
         test_config(Arc::new(SyncThenAdvanceDriver)),
         vec![user_message("hello")],
-        crate::AppendVec::new(),
+        lash_protocol_types::AppendVec::new(),
         0,
     );
 
@@ -955,7 +964,7 @@ fn done_carries_unreported_final_delta() {
     let mut machine = TurnMachine::new(
         test_config(Arc::new(ProseDriver)),
         Vec::new(),
-        crate::AppendVec::new(),
+        lash_protocol_types::AppendVec::new(),
         0,
     );
     machine.append_event(conversation_event(text_message(
@@ -994,12 +1003,12 @@ fn llm_request_includes_image_prompt_parts_for_attached_images() {
         origin: None,
         reply_marker: None,
     }];
-    let mut machine = TurnMachine::new(config, msgs, crate::AppendVec::new(), 0);
+    let mut machine = TurnMachine::new(config, msgs, lash_protocol_types::AppendVec::new(), 0);
 
     let effects = drain_effects(&mut machine);
     let (_, request) = find_llm_call(&effects).expect("llm call");
 
-    use crate::llm::types::LlmContentBlock;
+    use lash_protocol_types::llm::types::LlmContentBlock;
     assert_eq!(request.attachments().count(), 1);
     assert!(request.messages.iter().any(|msg| {
         msg.blocks
@@ -1020,7 +1029,7 @@ fn checkpoint_after_llm_result_replays_checkpoint_without_second_llm() {
     let mut machine = TurnMachine::new(
         config,
         vec![user_message("hello")],
-        crate::AppendVec::new(),
+        lash_protocol_types::AppendVec::new(),
         0,
     );
 
@@ -1060,7 +1069,7 @@ fn checkpoint_after_llm_result_replays_checkpoint_without_second_llm() {
 fn output_limit_stops_as_incomplete_without_assistant_message() {
     let config = test_config(Arc::new(ProseDriver));
     let msgs = vec![user_message("hello")];
-    let mut machine = TurnMachine::new(config, msgs, crate::AppendVec::new(), 0);
+    let mut machine = TurnMachine::new(config, msgs, lash_protocol_types::AppendVec::new(), 0);
 
     let effects = drain_effects(&mut machine);
     let llm_id = *find_llm_call(&effects).expect("llm call").0;
@@ -1114,7 +1123,7 @@ fn zero_output_limit_with_a_full_prompt_refines_to_context_overflow() {
     config.model.metadata_mut().limits.context_window_tokens =
         std::num::NonZeroUsize::new(100).unwrap();
     let msgs = vec![user_message("hello")];
-    let mut machine = TurnMachine::new(config, msgs, crate::AppendVec::new(), 0);
+    let mut machine = TurnMachine::new(config, msgs, lash_protocol_types::AppendVec::new(), 0);
 
     let effects = drain_effects(&mut machine);
     let llm_id = *find_llm_call(&effects).expect("llm call").0;
@@ -1125,7 +1134,7 @@ fn zero_output_limit_with_a_full_prompt_refines_to_context_overflow() {
             terminal_reason: LlmTerminalReason::OutputLimit,
             // The refinement reads the whole prompt-side subtotal, not just
             // `input_tokens`: 60 + 30 + 8 = 98 of a 100-token window.
-            usage: crate::llm::types::LlmUsage {
+            usage: lash_protocol_types::llm::types::LlmUsage {
                 input_tokens: 60,
                 output_tokens: 0,
                 cache_read_input_tokens: 30,
@@ -1164,7 +1173,7 @@ fn provider_prompt_subtotal_overflow_fails_the_turn_at_ingress() {
     config.model.metadata_mut().limits.context_window_tokens =
         std::num::NonZeroUsize::new(100).unwrap();
     let msgs = vec![user_message("hello")];
-    let mut machine = TurnMachine::new(config, msgs, crate::AppendVec::new(), 0);
+    let mut machine = TurnMachine::new(config, msgs, lash_protocol_types::AppendVec::new(), 0);
 
     let effects = drain_effects(&mut machine);
     let llm_id = *find_llm_call(&effects).expect("llm call").0;
@@ -1173,7 +1182,7 @@ fn provider_prompt_subtotal_overflow_fails_the_turn_at_ingress() {
         text_streamed: false,
         result: Ok(LlmResponse {
             terminal_reason: LlmTerminalReason::OutputLimit,
-            usage: crate::llm::types::LlmUsage {
+            usage: lash_protocol_types::llm::types::LlmUsage {
                 input_tokens: i64::MAX,
                 output_tokens: i64::MIN,
                 cache_read_input_tokens: i64::MAX,
@@ -1193,16 +1202,16 @@ fn provider_prompt_subtotal_overflow_fails_the_turn_at_ingress() {
         Effect::Emit(SessionStreamEvent::Error(ReportedFailure {
             envelope: Some(envelope),
             ..
-        })) if envelope.kind == crate::session_model::TurnFailureKind::TokenUsageAccounting
+        })) if envelope.kind == lash_protocol_types::session_model::TurnFailureKind::TokenUsageAccounting
             && envelope.code
-                == Some(crate::session_model::TurnFailureCode::TokenUsageOverflow.into())
+                == Some(lash_protocol_types::session_model::TurnFailureCode::TokenUsageOverflow.into())
             && envelope.user_message.contains("input_total_tokens")
     )));
     assert!(effects.iter().any(|effect| matches!(
         effect,
         Effect::Emit(SessionStreamEvent::TurnOutcome {
             outcome: TurnOutcome::Stopped(TurnStop::RuntimeError { cause })
-        }) if cause.code == crate::TurnErrorCode::TokenUsageOverflow
+        }) if cause.code == lash_protocol_types::TurnErrorCode::TokenUsageOverflow
     )));
 }
 
@@ -1213,7 +1222,7 @@ fn provider_prompt_subtotal_overflow_fails_the_turn_at_ingress() {
 fn context_overflow_response_stops_as_its_own_outcome() {
     let config = test_config(Arc::new(ProseDriver));
     let msgs = vec![user_message("hello")];
-    let mut machine = TurnMachine::new(config, msgs, crate::AppendVec::new(), 0);
+    let mut machine = TurnMachine::new(config, msgs, lash_protocol_types::AppendVec::new(), 0);
 
     let effects = drain_effects(&mut machine);
     let llm_id = *find_llm_call(&effects).expect("llm call").0;
@@ -1261,7 +1270,7 @@ fn context_overflow_response_stops_as_its_own_outcome() {
 fn context_overflow_llm_error_stops_as_its_own_outcome() {
     let config = test_config(Arc::new(ProseDriver));
     let msgs = vec![user_message("hello")];
-    let mut machine = TurnMachine::new(config, msgs, crate::AppendVec::new(), 0);
+    let mut machine = TurnMachine::new(config, msgs, lash_protocol_types::AppendVec::new(), 0);
 
     let effects = drain_effects(&mut machine);
     let llm_id = *find_llm_call(&effects).expect("llm call").0;
@@ -1271,9 +1280,9 @@ fn context_overflow_llm_error_stops_as_its_own_outcome() {
         result: Err(LlmCallError {
             message: "This model's maximum context length is 128000 tokens".to_string(),
             retryable: false,
-            kind: crate::llm::types::ProviderFailureKind::Validation,
+            kind: lash_protocol_types::llm::types::ProviderFailureKind::Validation,
             raw: None,
-            code: Some(crate::session_model::FailureCode::provider(
+            code: Some(lash_protocol_types::session_model::FailureCode::provider(
                 "context_length_exceeded",
             )),
             terminal_reason: LlmTerminalReason::ContextOverflow,
@@ -1305,7 +1314,7 @@ fn provider_error_is_live_but_absent_from_the_turn_checkpoint() {
     let mut machine = TurnMachine::new(
         config,
         vec![user_message("hello")],
-        crate::AppendVec::new(),
+        lash_protocol_types::AppendVec::new(),
         0,
     );
     let effects = drain_effects(&mut machine);
@@ -1316,9 +1325,9 @@ fn provider_error_is_live_but_absent_from_the_turn_checkpoint() {
         result: Err(LlmCallError {
             message: SECRET.to_string(),
             retryable: false,
-            kind: crate::llm::types::ProviderFailureKind::Http,
+            kind: lash_protocol_types::llm::types::ProviderFailureKind::Http,
             raw: Some(SECRET.to_string()),
-            code: Some(crate::session_model::FailureCode::provider(
+            code: Some(lash_protocol_types::session_model::FailureCode::provider(
                 "rate_limit_exceeded",
             )),
             terminal_reason: LlmTerminalReason::ProviderError,
@@ -1349,7 +1358,7 @@ fn non_overflow_llm_errors_still_stop_as_provider_error() {
     ] {
         let config = test_config(Arc::new(ProseDriver));
         let msgs = vec![user_message("hello")];
-        let mut machine = TurnMachine::new(config, msgs, crate::AppendVec::new(), 0);
+        let mut machine = TurnMachine::new(config, msgs, lash_protocol_types::AppendVec::new(), 0);
 
         let effects = drain_effects(&mut machine);
         let llm_id = *find_llm_call(&effects).expect("llm call").0;
@@ -1359,7 +1368,7 @@ fn non_overflow_llm_errors_still_stop_as_provider_error() {
             result: Err(LlmCallError {
                 message: "provider said no".to_string(),
                 retryable: false,
-                kind: crate::llm::types::ProviderFailureKind::Unknown,
+                kind: lash_protocol_types::llm::types::ProviderFailureKind::Unknown,
                 raw: None,
                 code: None,
                 terminal_reason: reason,
@@ -1379,8 +1388,8 @@ fn non_overflow_llm_errors_still_stop_as_provider_error() {
         assert_eq!(
             outcomes,
             vec![&TurnOutcome::Stopped(TurnStop::ProviderError {
-                cause: crate::TurnErrorCause::provider(
-                    crate::ProviderFailureKind::Unknown,
+                cause: lash_protocol_types::TurnErrorCause::provider(
+                    lash_protocol_types::ProviderFailureKind::Unknown,
                     reason,
                     None
                 )
@@ -1400,7 +1409,7 @@ fn content_filter_and_provider_error_still_stop_as_provider_error() {
     ] {
         let config = test_config(Arc::new(ProseDriver));
         let msgs = vec![user_message("hello")];
-        let mut machine = TurnMachine::new(config, msgs, crate::AppendVec::new(), 0);
+        let mut machine = TurnMachine::new(config, msgs, lash_protocol_types::AppendVec::new(), 0);
 
         let effects = drain_effects(&mut machine);
         let llm_id = *find_llm_call(&effects).expect("llm call").0;
@@ -1431,7 +1440,7 @@ fn content_filter_and_provider_error_still_stop_as_provider_error() {
 fn checkpoint_user_messages_resume_prepare_protocol_iteration() {
     let config = test_config(Arc::new(ProseDriver));
     let msgs = vec![user_message("hello")];
-    let mut machine = TurnMachine::new(config, msgs, crate::AppendVec::new(), 0);
+    let mut machine = TurnMachine::new(config, msgs, lash_protocol_types::AppendVec::new(), 0);
 
     let effects = drain_effects(&mut machine);
     let llm_id = *find_llm_call(&effects).expect("llm call").0;
@@ -1494,7 +1503,7 @@ fn checkpoint_after_mixed_tool_batch_results_replays_model_feedback_once() {
     let mut machine = TurnMachine::new(
         config,
         vec![user_message("use tools")],
-        crate::AppendVec::new(),
+        lash_protocol_types::AppendVec::new(),
         0,
     );
 
@@ -1576,7 +1585,7 @@ fn checkpoint_round_trips_waiting_exec_driver_state() {
     let mut machine = TurnMachine::new(
         config,
         vec![user_message("hello")],
-        crate::AppendVec::new(),
+        lash_protocol_types::AppendVec::new(),
         0,
     );
     let effects = drain_effects(&mut machine);
@@ -1589,7 +1598,7 @@ fn checkpoint_round_trips_waiting_exec_driver_state() {
             .expect("supported checkpoint");
     restored.handle_response(Response::ExecResult {
         id: *exec_id,
-        result: Ok(crate::ExecResponse {
+        result: Ok(lash_protocol_types::ExecResponse {
             ..empty_exec_response()
         }),
     });
@@ -1654,7 +1663,7 @@ fn turn_checkpoint_pins_the_waiting_state_encoding() {
     let mut machine = TurnMachine::new(
         test_config(Arc::new(ProseDriver)),
         vec![user_message("hello")],
-        crate::AppendVec::new(),
+        lash_protocol_types::AppendVec::new(),
         0,
     );
     let effects = drain_unsynced_effects(&mut machine);
@@ -1671,7 +1680,7 @@ fn turn_checkpoint_pins_the_waiting_state_encoding() {
     let mut machine = TurnMachine::new(
         test_config(Arc::new(SyncThenAdvanceDriver)),
         vec![user_message("hello")],
-        crate::AppendVec::new(),
+        lash_protocol_types::AppendVec::new(),
         0,
     );
     let effects = drain_effects(&mut machine);
@@ -1717,7 +1726,7 @@ fn turn_checkpoint_pins_the_waiting_state_encoding() {
     let mut machine = TurnMachine::new(
         test_config(Arc::new(ToolBatchDriver)),
         vec![user_message("use tools")],
-        crate::AppendVec::new(),
+        lash_protocol_types::AppendVec::new(),
         0,
     );
     let effects = drain_effects(&mut machine);
@@ -1744,7 +1753,7 @@ fn turn_checkpoint_pins_the_waiting_state_encoding() {
     let mut machine = TurnMachine::new(
         test_config(Arc::new(ExecDriver)),
         vec![user_message("hello")],
-        crate::AppendVec::new(),
+        lash_protocol_types::AppendVec::new(),
         0,
     );
     let effects = drain_effects(&mut machine);
@@ -1768,7 +1777,7 @@ fn outstanding_effect_follows_the_emits_and_progress_queued_before_it() {
     let mut machine = TurnMachine::new(
         test_config(Arc::new(ProseDriver)),
         vec![user_message("hello")],
-        crate::AppendVec::new(),
+        lash_protocol_types::AppendVec::new(),
         0,
     );
     let effects = drain_effects(&mut machine);
@@ -1807,7 +1816,7 @@ fn response_of_the_wrong_kind_leaves_the_waiting_work_in_place() {
     let mut machine = TurnMachine::new(
         test_config(Arc::new(ProseDriver)),
         vec![user_message("hello")],
-        crate::AppendVec::new(),
+        lash_protocol_types::AppendVec::new(),
         0,
     );
     let effects = drain_effects(&mut machine);
@@ -1834,7 +1843,7 @@ fn stale_response_does_not_cancel_checkpoint_redelivery() {
     let mut machine = TurnMachine::new(
         config,
         vec![user_message("hello")],
-        crate::AppendVec::new(),
+        lash_protocol_types::AppendVec::new(),
         0,
     );
     let effects = drain_effects(&mut machine);
@@ -1859,13 +1868,17 @@ fn stale_response_does_not_cancel_checkpoint_redelivery() {
 
 fn recorded_environment(tool: &str) -> ExecutionEnvironmentSync {
     ExecutionEnvironmentSync {
-        tool_specs: Arc::new(vec![crate::llm::types::LlmToolSpec {
+        tool_specs: Arc::new(vec![lash_protocol_types::llm::types::LlmToolSpec {
             name: tool.to_string(),
             description: "desc".to_string(),
-            input_schema: crate::SchemaContract::admit(serde_json::json!({ "type": "object" }))
-                .expect("valid declared schema"),
-            output_schema: crate::SchemaContract::admit(serde_json::json!({ "type": "object" }))
-                .expect("valid declared schema"),
+            input_schema: lash_protocol_types::SchemaContract::admit(
+                serde_json::json!({ "type": "object" }),
+            )
+            .expect("valid declared schema"),
+            output_schema: lash_protocol_types::SchemaContract::admit(
+                serde_json::json!({ "type": "object" }),
+            )
+            .expect("valid declared schema"),
         }]),
         turn_controls: Default::default(),
     }
@@ -1880,7 +1893,7 @@ fn a_restored_machine_projects_from_the_environment_its_checkpoint_recorded() {
     let mut machine = TurnMachine::new(
         test_config(Arc::new(ProseDriver)),
         vec![user_message("hello")],
-        crate::AppendVec::new(),
+        lash_protocol_types::AppendVec::new(),
         0,
     );
     let effects = drain_unsynced_effects(&mut machine);
@@ -1927,7 +1940,7 @@ fn a_checkpoint_waiting_on_driver_work_without_an_environment_is_refused() {
     let mut machine = TurnMachine::new(
         test_config(Arc::new(ProseDriver)),
         vec![user_message("hello")],
-        crate::AppendVec::new(),
+        lash_protocol_types::AppendVec::new(),
         0,
     );
     let effects = drain_effects(&mut machine);
@@ -1955,13 +1968,13 @@ fn a_recorded_sync_failure_fails_the_turn_under_its_own_code() {
     let mut machine = TurnMachine::new(
         test_config(Arc::new(ProseDriver)),
         vec![user_message("hello")],
-        crate::AppendVec::new(),
+        lash_protocol_types::AppendVec::new(),
         0,
     );
     let effects = drain_unsynced_effects(&mut machine);
     let sync_id = find_execution_environment_sync(&effects).expect("execution environment sync");
-    let code = crate::session_model::FailureCode::lash(
-        crate::session_model::TurnFailureCode::BeforeLlmCallFailed,
+    let code = lash_protocol_types::session_model::FailureCode::lash(
+        lash_protocol_types::session_model::TurnFailureCode::BeforeLlmCallFailed,
     );
     machine.handle_response(Response::ExecutionEnvironmentSynced {
         id: sync_id,
@@ -1985,7 +1998,7 @@ fn a_recorded_sync_failure_fails_the_turn_under_its_own_code() {
         .expect("the turn fails with an error envelope");
     assert_eq!(
         envelope.kind,
-        crate::session_model::TurnFailureKind::ExecutionEnvironment
+        lash_protocol_types::session_model::TurnFailureKind::ExecutionEnvironment
     );
     assert_eq!(envelope.code, Some(code));
     assert_eq!(
@@ -1999,7 +2012,7 @@ fn iteration_execution_environment_sync_can_refresh_tools() {
     let mut machine = TurnMachine::new(
         test_config(Arc::new(SyncThenAdvanceDriver)),
         vec![user_message("hello")],
-        crate::AppendVec::new(),
+        lash_protocol_types::AppendVec::new(),
         0,
     );
 
@@ -2052,6 +2065,6 @@ fn iteration_execution_environment_sync_can_refresh_tools() {
         request
             .messages
             .iter()
-            .all(|message| message.role != crate::llm::types::LlmRole::System)
+            .all(|message| message.role != lash_protocol_types::llm::types::LlmRole::System)
     );
 }

@@ -6,7 +6,7 @@ use super::*;
 /// the context-window refinement below, the checked cumulative merge in `record_llm_usage`,
 /// the durable turn commit, and host-side bare sums such as `LlmUsage::total`.
 pub(super) fn checked_turn_usage_from_llm_usage(
-    usage: &crate::llm::types::LlmUsage,
+    usage: &lash_protocol_types::llm::types::LlmUsage,
 ) -> Result<(LlmUsage, i64), TokenUsageOverflow> {
     let usage = usage.clone();
     usage.checked_total()?;

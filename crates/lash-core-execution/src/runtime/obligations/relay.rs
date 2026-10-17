@@ -511,7 +511,7 @@ pub async fn relay_due(
 mod tests {
     use std::sync::{Arc, Mutex};
 
-    use lash_sansio::SessionId;
+    use lash_protocol_types::SessionId;
 
     use super::*;
     use crate::store::{ClaimToken, ObligationKind, StalledObligation, UndecodableObligation};

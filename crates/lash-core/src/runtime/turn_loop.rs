@@ -169,7 +169,9 @@ pub(in crate::runtime) async fn publish_observation(
             Some(turn_id) => {
                 #[cfg(feature = "perf-witness")]
                 {
-                    use lash_sansio::llm::types::{StreamBlockEvent, StreamBlockKind};
+                    use lash_protocol_types::{
+                        llm::types::StreamBlockEvent, llm::types::StreamBlockKind,
+                    };
                     let delta = matches!(
                         &activity.event,
                         crate::TurnEvent::StreamBlock(StreamBlockEvent::Delta {

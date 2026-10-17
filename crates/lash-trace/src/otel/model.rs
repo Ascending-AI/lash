@@ -2,9 +2,9 @@
 //! attempts carry diagnostic usage under lash keys, so billing is counted once.
 use super::*;
 use crate::{TraceLlmResponse, TraceModelAttempt, TraceModelCall};
-use lash_sansio::llm::types::{
-    AttemptOutcome, AttemptRecord, GenerationOptionOutcome, NormalizedError, ProtocolPosition,
-    TokenUsageOverflow,
+use lash_protocol_types::{
+    llm::types::AttemptOutcome, llm::types::AttemptRecord, llm::types::GenerationOptionOutcome,
+    llm::types::NormalizedError, llm::types::ProtocolPosition, llm::types::TokenUsageOverflow,
 };
 
 pub(super) fn error_type(error: &NormalizedError) -> String {

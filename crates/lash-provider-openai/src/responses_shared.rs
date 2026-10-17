@@ -22,7 +22,7 @@
 //! classification. Both send a tool result as one `function_call_output`
 //! whose `output` carries the result's images in order.
 
-use lash_sansio::llm::types::{StreamBlockEvent, StreamBlockKind};
+use lash_protocol_types::{llm::types::StreamBlockEvent, llm::types::StreamBlockKind};
 use serde_json::{Value, json};
 use std::collections::HashMap;
 
@@ -66,10 +66,10 @@ pub fn role_name(role: &LlmRole) -> &'static str {
 }
 
 pub fn input_attachment_part(
-    reference: &lash_sansio::AttachmentRef,
-    position: lash_sansio::llm::attachment_delivery::AttachmentPosition,
-) -> lash_sansio::llm::types::TemplateJson {
-    lash_sansio::llm::types::TemplateJson::attachment(reference, position)
+    reference: &lash_protocol_types::AttachmentRef,
+    position: lash_protocol_types::llm::attachment_delivery::AttachmentPosition,
+) -> lash_protocol_types::llm::types::TemplateJson {
+    lash_protocol_types::llm::types::TemplateJson::attachment(reference, position)
 }
 
 pub fn tool_choice_value(choice: &LlmToolChoice) -> &'static str {
@@ -142,7 +142,7 @@ pub fn build_tools_with_capabilities(
                 "name": tool.name,
                 "description": tool.description,
                 "parameters": resolved.schema,
-                "strict": resolved.dialect == lash_sansio::SchemaDialect::OpenaiStrictToolParameters,
+                "strict": resolved.dialect == lash_protocol_types::SchemaDialect::OpenaiStrictToolParameters,
             }))
         })
         .collect()

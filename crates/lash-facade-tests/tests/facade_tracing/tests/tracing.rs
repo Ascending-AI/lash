@@ -6,7 +6,7 @@
 
 use super::*;
 
-use lash_sansio::llm::types::{StreamBlockEvent, StreamBlockKind};
+use lash_protocol_types::{llm::types::StreamBlockEvent, llm::types::StreamBlockKind};
 
 use lash::TurnInput;
 use lash::provider::LlmTransportError;

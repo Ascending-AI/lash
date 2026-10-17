@@ -8,7 +8,7 @@ use lash_core::runtime::ParsedSessionCursor;
 use lash_core::{
     LiveReplayGapReason, LiveReplayStoreError, SessionObservationEvent, SessionRevision,
 };
-use lash_sansio::SessionId;
+use lash_protocol_types::SessionId;
 use sqlx::Row as _;
 
 use super::schema::{Incarnation, column, db_error, ensure_incarnation, micros, position};

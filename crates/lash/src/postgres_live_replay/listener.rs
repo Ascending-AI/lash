@@ -10,7 +10,7 @@
 use std::sync::Arc;
 
 use lash_core::LiveReplayStoreError;
-use lash_sansio::SessionId;
+use lash_protocol_types::SessionId;
 use sqlx::Row as _;
 
 use super::Shared;

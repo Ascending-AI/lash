@@ -93,7 +93,7 @@ impl MaterialBundle {
             store: ArtifactStoreId::ToolMaterial,
             artifact_ref: format!(
                 "{BUNDLE_REF_PREFIX}{}",
-                lash_sansio::core_support::blake3_domain_hash_hex(BUNDLE_DOMAIN, &bytes)
+                lash_protocol_types::core_support::blake3_domain_hash_hex(BUNDLE_DOMAIN, &bytes)
             ),
         };
         let references = wire

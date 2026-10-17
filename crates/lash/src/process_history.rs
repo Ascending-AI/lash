@@ -14,7 +14,7 @@ use lash_core::{
     PluginError, ProcessEventHistoryRetention, ProcessEventQueryMode, ProcessEventReadOutcome,
     ProcessRegistry,
 };
-use lash_sansio::ProcessId;
+use lash_protocol_types::ProcessId;
 use serde::{Deserialize, Serialize};
 
 /// Where a durable event read continues: after `after_sequence` of the
@@ -62,7 +62,7 @@ pub struct ProcessEventsRead {
     pub next: ProcessHistoryContinuation,
 }
 
-impl lash_sansio::DurableSerialize for ProcessEventsRead {
+impl lash_protocol_types::DurableSerialize for ProcessEventsRead {
     fn serialize_durable<S: serde::Serializer>(&self, serializer: S) -> Result<S::Ok, S::Error> {
         Self::serialize(self, serializer)
     }

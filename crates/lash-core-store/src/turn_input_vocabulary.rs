@@ -1121,7 +1121,7 @@ pub(crate) fn plugin_message_from_turn_input(input: &TurnInput) -> Option<Plugin
             crate::InputItem::Attachment { reference } => crate::Part::attachment_part(
                 String::new(),
                 String::new(),
-                Some(lash_sansio::PartAttachment {
+                Some(lash_protocol_types::PartAttachment {
                     reference: reference.clone(),
                 }),
             ),

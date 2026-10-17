@@ -58,7 +58,7 @@ pub fn process_language_observation(
                 generation: None,
             },
             payload: lash_trace::TraceLanguageExecutionPayload::Node {
-                at: lash_sansio::effect_identity_fixture(label, 1),
+                at: lash_protocol_types::effect_identity_fixture(label, 1),
                 fact: lash_trace::TraceNodeFact::Started { call_id: None },
             },
         },
@@ -67,10 +67,10 @@ pub fn process_language_observation(
 }
 
 /// The label a fixture site was built from
-/// ([`lash_sansio::effect_identity_fixture`]).
-fn fixture_label(site: &lash_sansio::Site) -> String {
+/// ([`lash_protocol_types::effect_identity_fixture`]).
+fn fixture_label(site: &lash_protocol_types::Site) -> String {
     match &site.unit {
-        lash_sansio::Unit::Function(name) => name.to_string(),
+        lash_protocol_types::Unit::Function(name) => name.to_string(),
         _ => site.to_string(),
     }
 }
@@ -112,7 +112,7 @@ pub fn process_step_body_started(
     lash_trace::StepBodyStartedObservation {
         step: lash_trace::StepBodyStarted {
             process_id: process.clone(),
-            at: lash_sansio::effect_identity_fixture(label, 1),
+            at: lash_protocol_types::effect_identity_fixture(label, 1),
             call_id: crate::ToolCallId::fixture(label),
             attempt,
         },
@@ -146,8 +146,8 @@ pub fn session_language_observation(
     let mut observation =
         process_language_observation(&crate::ProcessId::fixture("session-cell"), event_key, label);
     observation.execution.identity.subject = lash_trace::TraceRuntimeSubject::Effect {
-        address: lash_sansio::EffectAddress::new(
-            lash_sansio::ExecutionScope::session_operation(session_id.clone(), "cell"),
+        address: lash_protocol_types::EffectAddress::new(
+            lash_protocol_types::ExecutionScope::session_operation(session_id.clone(), "cell"),
             "cell-execution",
         )
         .expect("fixture effect address"),

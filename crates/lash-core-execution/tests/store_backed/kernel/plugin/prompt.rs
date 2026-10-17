@@ -126,7 +126,7 @@ fn call_key(call: u32) -> PromptCallKey {
     PromptCallKey {
         session: SessionId::from(SESSION),
         call: ModelCallId::Turn {
-            run: lash_sansio::TurnId::from("prompt-turn"),
+            run: lash_protocol_types::TurnId::from("prompt-turn"),
             ordinal: call,
         },
     }
@@ -137,9 +137,10 @@ fn call_key(call: u32) -> PromptCallKey {
 /// The response context call `call` is admitted with: its own scope, as a
 /// send names its attempt, over the model, the output it asks for and the
 /// one tool it offers.
-fn response(call: u32) -> lash_sansio::llm::types::ResponseContext {
-    use lash_sansio::llm::types::{
-        LlmOutputSpec, LlmRequestScope, ResponseContext, ResponseContract, ToolCallContract,
+fn response(call: u32) -> lash_protocol_types::llm::types::ResponseContext {
+    use lash_protocol_types::{
+        llm::types::LlmOutputSpec, llm::types::LlmRequestScope, llm::types::ResponseContext,
+        llm::types::ResponseContract, llm::types::ToolCallContract,
     };
     ResponseContext::recorded(
         LlmRequestScope {
@@ -164,10 +165,14 @@ fn response(call: u32) -> lash_sansio::llm::types::ResponseContext {
     )
 }
 
-fn template(call: u32) -> lash_sansio::llm::types::RecordedRequestTemplate {
-    use lash_sansio::llm::attachment_delivery::{AttachmentPosition, ProviderAccepts};
-    use lash_sansio::llm::types::{AttachmentSlot, RecordedRequestTemplate, SlotCodec};
-    let route = lash_sansio::llm::types::ProviderRouteIdentity {
+fn template(call: u32) -> lash_protocol_types::llm::types::RecordedRequestTemplate {
+    use lash_protocol_types::{
+        llm::attachment_delivery::AttachmentPosition, llm::attachment_delivery::ProviderAccepts,
+    };
+    use lash_protocol_types::{
+        llm::types::AttachmentSlot, llm::types::RecordedRequestTemplate, llm::types::SlotCodec,
+    };
+    let route = lash_protocol_types::llm::types::ProviderRouteIdentity {
         provider: "test".into(),
         endpoint: "https://provider.test/v1".into(),
         model: "model".into(),
@@ -180,9 +185,10 @@ fn template(call: u32) -> lash_sansio::llm::types::RecordedRequestTemplate {
     builder
         .literal(format!("{{\"call\":{call},\"image\":"))
         .attachment(AttachmentSlot {
-            reference: lash_sansio::AttachmentRef {
-                id: lash_sansio::AttachmentId::parse("ab".repeat(32)).expect("a digest id"),
-                media_type: lash_sansio::MediaType::parse("image/png").expect("a media type"),
+            reference: lash_protocol_types::AttachmentRef {
+                id: lash_protocol_types::AttachmentId::parse("ab".repeat(32)).expect("a digest id"),
+                media_type: lash_protocol_types::MediaType::parse("image/png")
+                    .expect("a media type"),
                 byte_len: 4,
                 type_metadata: None,
                 label: Some("shot".to_owned()),
@@ -280,7 +286,7 @@ async fn an_admitted_calls_snapshot_reads_back_byte_for_byte_without_any_rendere
         let recorded = response(call);
         assert_eq!(
             admitted.scope,
-            lash_sansio::llm::types::LlmRequestScope {
+            lash_protocol_types::llm::types::LlmRequestScope {
                 attempt: None,
                 ..recorded.scope
             }
@@ -366,7 +372,7 @@ async fn an_admitted_calls_snapshot_reads_back_byte_for_byte_without_any_rendere
     tx.write(lash_durable::DomainWrite::Prompt(
         lash_durable::domain::PromptWrite::Settle {
             session: SessionId::from(SESSION),
-            run: lash_sansio::TurnId::from("prompt-turn"),
+            run: lash_protocol_types::TurnId::from("prompt-turn"),
             open: None,
         },
     ));
@@ -408,7 +414,7 @@ async fn an_admitted_calls_snapshot_reads_back_byte_for_byte_without_any_rendere
 #[test]
 fn prompt_admission_never_decodes_fresh_fragments() {
     use lash_core_store::prompt_sections::RequestFragment;
-    use lash_sansio::llm::types::RecordedRequestTemplate;
+    use lash_protocol_types::llm::types::RecordedRequestTemplate;
     use sha2::{Digest as _, Sha256};
 
     let route = template(1).route.clone();

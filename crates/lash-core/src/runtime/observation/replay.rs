@@ -1,7 +1,7 @@
 use crate::ProcessId;
 use crate::SessionId;
 use crate::TurnId;
-use lash_sansio::sync::MutexExt;
+use lash_protocol_types::sync::MutexExt;
 use std::collections::{BTreeMap, HashMap, VecDeque};
 use std::fmt;
 use std::pin::Pin;

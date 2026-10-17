@@ -22,7 +22,7 @@
 
 use std::sync::Arc;
 
-use lash_sansio::{JsonSchema, ToolContract, ToolId, ToolManifest};
+use lash_protocol_types::{JsonSchema, ToolContract, ToolId, ToolManifest};
 use serde_json::Value;
 
 pub mod listing;
@@ -56,7 +56,7 @@ pub fn import_schema(
 /// Hosts may reuse this in their mode presenter, or supply their own wording.
 /// The label (or MIME when unlabelled) is flattened to keep the notice one line.
 pub fn default_attachment_omission_text(
-    notice: &lash_sansio::AttachmentMaterializationNotice,
+    notice: &lash_protocol_types::AttachmentMaterializationNotice,
 ) -> String {
     let label = notice
         .label
@@ -66,8 +66,10 @@ pub fn default_attachment_omission_text(
         .collect::<Vec<_>>()
         .join(" ");
     let position = match notice.position {
-        lash_sansio::llm::attachment_delivery::AttachmentPosition::Message => "a message",
-        lash_sansio::llm::attachment_delivery::AttachmentPosition::ToolResult => "a tool result",
+        lash_protocol_types::llm::attachment_delivery::AttachmentPosition::Message => "a message",
+        lash_protocol_types::llm::attachment_delivery::AttachmentPosition::ToolResult => {
+            "a tool result"
+        }
     };
     format!(
         "({label} omitted: this model can't read {} in {position})",
@@ -80,7 +82,7 @@ pub trait ToolPresenter: Send + Sync {
     /// Request-only wording for an attachment the target model cannot accept.
     fn attachment_omission_text(
         &self,
-        notice: &lash_sansio::AttachmentMaterializationNotice,
+        notice: &lash_protocol_types::AttachmentMaterializationNotice,
     ) -> String {
         default_attachment_omission_text(notice)
     }

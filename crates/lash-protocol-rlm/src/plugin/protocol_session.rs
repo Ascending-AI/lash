@@ -174,7 +174,7 @@ impl std::error::Error for RlmSessionConfigDecodeError {}
 
 #[cfg(test)]
 mod tests {
-    use lash_sansio::SessionId;
+    use lash_protocol_types::SessionId;
     use std::sync::Arc;
 
     use super::*;

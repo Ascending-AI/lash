@@ -67,7 +67,7 @@ mod matrix;
 #[path = "vertical_crash_proof/run_config.rs"]
 mod run_config;
 
-use lash_sansio::llm::types::{StreamBlockEvent, StreamBlockKind};
+use lash_protocol_types::{llm::types::StreamBlockEvent, llm::types::StreamBlockKind};
 use matrix::MatrixTestExt as _;
 
 use std::collections::BTreeMap;
@@ -87,8 +87,8 @@ use lash_durable_test::{
     Cut, Fault, Life, Matrix, Scenario, Script, SimClock, SimNodes, SimNodesConfig, Stored,
     Tripwire, Verdict, WriteKind,
 };
-use lash_sansio::sync::MutexExt as _;
-use lash_sansio::{SessionId, TurnId};
+use lash_protocol_types::sync::MutexExt as _;
+use lash_protocol_types::{SessionId, TurnId};
 
 use dialect::Dialect;
 

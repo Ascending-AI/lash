@@ -1,14 +1,14 @@
 use crate::support::*;
 pub(crate) const CHAT_CODEC: &str = "openai.chat.image_url";
 pub(crate) const RESPONSES_CODEC: &str = "openai.responses.input";
-pub(crate) fn image(mime: &lash_sansio::MediaType) -> bool {
+pub(crate) fn image(mime: &lash_protocol_types::MediaType) -> bool {
     matches!(
         mime.as_str(),
         "image/jpeg" | "image/png" | "image/gif" | "image/webp"
     )
 }
 pub(crate) fn responses_accepts(
-    mime: &lash_sansio::MediaType,
+    mime: &lash_protocol_types::MediaType,
     scope: Option<ProviderFileScope>,
 ) -> ProviderAccepts {
     let image = image(mime);

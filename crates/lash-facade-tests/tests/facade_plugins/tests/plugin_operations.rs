@@ -8,7 +8,7 @@ use lash::plugins::{
     PluginCommand, PluginOperation, PluginOperationFailure, PluginOperationOutcome,
     PluginRuntimeEvent, PluginTask, SessionParam,
 };
-use lash_sansio::core_support::RunIdCoreSupport;
+use lash_protocol_types::core_support::RunIdCoreSupport;
 
 use std::time::Duration;
 
@@ -24,8 +24,8 @@ macro_rules! operation {
             type Error = String;
             const ERROR_TYPE: &'static str = Self::NAME;
             const ERROR_VERSION: lash_core::FormatVersion = lash_core::FormatVersion::ONE;
-            fn error_class(_: &Self::Error) -> lash_sansio::PluginFailureClass {
-                lash_sansio::PluginFailureClass::Terminal
+            fn error_class(_: &Self::Error) -> lash_protocol_types::PluginFailureClass {
+                lash_protocol_types::PluginFailureClass::Terminal
             }
         }
         impl $kind for $name {}

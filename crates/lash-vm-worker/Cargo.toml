@@ -99,7 +99,7 @@ libc = { workspace = true }
 [dev-dependencies]
 blake3 = { workspace = true }
 tokio-util = { workspace = true }
-lash-sansio = { workspace = true }
+lash-protocol-types = { workspace = true }
 lash-vm-broker = { workspace = true, features = ["testing"] }
 lash-durable = { workspace = true }
 lash-durable-test = { workspace = true }

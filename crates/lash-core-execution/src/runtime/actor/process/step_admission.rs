@@ -11,7 +11,7 @@ use lash_core_store::tool_run::{MaterialLocation, MaterialOwner, MaterialPayload
 use lash_durable::domain::{OwnerKey, ProcessActorRow, ProcessWrite, RunSeq, ScopeKey};
 use lash_durable::runner::Owned;
 use lash_durable::{ActorTx, CommitLabel, DomainWrite, DurableError, DurableInstant};
-use lash_sansio::{ToolCallAdmission, ToolCallPosition};
+use lash_protocol_types::{ToolCallAdmission, ToolCallPosition};
 
 use super::activation::{Live, Pass, corrupt, millis, refused, unavailable};
 use super::driver::{Blocked, Driver, Immediate, InFlight, Pinned, StoredWaitId};

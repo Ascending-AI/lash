@@ -83,7 +83,7 @@ pub enum TraceOmissionSite {
         #[serde(default, skip_serializing_if = "Option::is_none")]
         at: Option<W3cSpanId>,
         #[serde(default, skip_serializing_if = "Option::is_none")]
-        call: Option<lash_sansio::ToolCallId>,
+        call: Option<lash_protocol_types::ToolCallId>,
         #[serde(default, skip_serializing_if = "Option::is_none")]
         attempt: Option<u32>,
     },

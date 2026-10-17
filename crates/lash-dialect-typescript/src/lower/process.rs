@@ -15,7 +15,7 @@ use crate::{Diagnostic, DiagnosticCode, SourceSpan};
 /// The effect that waits for a process's end.
 const AWAIT_EFFECT: &str = "processes.await";
 
-/// The field every handle record carries (`lash_sansio::handle`).
+/// The field every handle record carries (`lash_protocol_types::handle`).
 const HANDLE_FIELD: &str = "__handle__";
 
 impl Lowerer<'_> {

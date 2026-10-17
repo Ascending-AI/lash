@@ -3,7 +3,7 @@
 //! Formerly `crate::runtime::tests::trace_capture`; it lives behind the
 //! `testing` feature so the relocated runtime integration binaries can use it.
 
-use lash_sansio::sync::MutexExt;
+use lash_protocol_types::sync::MutexExt;
 use std::collections::BTreeMap;
 use std::sync::{Arc, Mutex};
 

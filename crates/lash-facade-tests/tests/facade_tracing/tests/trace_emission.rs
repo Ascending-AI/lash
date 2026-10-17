@@ -160,11 +160,11 @@ async fn served_turn() -> Result<(Observed, LashCore)> {
         tool_call("call-echo", "echo_tool", r#"{"value":"emitted"}"#),
         text_call("done"),
     ];
-    calls[0].stream_events = vec![lash_sansio::llm::types::LlmStreamEvent::Evidence(
+    calls[0].stream_events = vec![lash_protocol_types::llm::types::LlmStreamEvent::Evidence(
         Default::default(),
     )];
-    calls[1].stream_events = vec![lash_sansio::llm::types::LlmStreamEvent::Part(
-        lash_sansio::llm::types::LlmOutputPart::Text {
+    calls[1].stream_events = vec![lash_protocol_types::llm::types::LlmStreamEvent::Part(
+        lash_protocol_types::llm::types::LlmOutputPart::Text {
             text: "done".into(),
             response_meta: None,
         },
@@ -173,7 +173,7 @@ async fn served_turn() -> Result<(Observed, LashCore)> {
         .response
         .as_mut()
         .expect("successful fixture")
-        .usage = lash_sansio::llm::types::LlmUsage {
+        .usage = lash_protocol_types::llm::types::LlmUsage {
         input_tokens: 10,
         cache_read_input_tokens: 3,
         cache_write_input_tokens: 2,

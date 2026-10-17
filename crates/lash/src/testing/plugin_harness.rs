@@ -1,7 +1,7 @@
 //! Author assertions over real sessions, admissions and durable SQLite state.
 use lash_core::plugin::{PluginFactory, PluginMetadata, PluginRecipe};
 use lash_core::testing::CallbackCounts;
-use lash_sansio::sync::MutexExt;
+use lash_protocol_types::sync::MutexExt;
 use std::collections::VecDeque;
 use std::sync::atomic::{AtomicUsize, Ordering};
 use std::sync::{Arc, Mutex};

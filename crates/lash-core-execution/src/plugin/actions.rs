@@ -156,7 +156,7 @@ pub trait PluginCommand: PluginOperation {}
 
 pub trait PluginTask: PluginOperation {}
 
-pub use lash_sansio::{
+pub use lash_protocol_types::{
     PluginFailureClass, PluginFailureOrigin, PluginHookFailure, PluginOperationFailure,
 };
 

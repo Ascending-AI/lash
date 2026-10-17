@@ -10,7 +10,7 @@ use lash_core_execution::{
     EmptyRootSetPolicy, Message, MessageRole, Part, RuntimeSessionState, SessionCatalogStore,
     SessionRelation,
 };
-use lash_sansio::MediaType;
+use lash_protocol_types::MediaType;
 
 /// What the catalog's bytes outlive: a file, or the memory backend.
 const PERSISTENCE: AttachmentStorePersistence = match SUBSTRATE {
@@ -73,7 +73,7 @@ fn state_referencing(session_id: &SessionId, reference: &AttachmentRef) -> Runti
         parts: Arc::new(vec![Part::attachment_part(
             "held-image-part".into(),
             String::new(),
-            Some(lash_sansio::PartAttachment {
+            Some(lash_protocol_types::PartAttachment {
                 reference: reference.clone(),
             }),
         )]),

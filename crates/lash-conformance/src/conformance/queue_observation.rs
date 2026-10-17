@@ -2,7 +2,7 @@
 
 use super::*;
 use futures_util::StreamExt as _;
-use lash_sansio::SessionId;
+use lash_protocol_types::SessionId;
 
 #[expect(clippy::expect_used, reason = "conformance fixture assertions")]
 pub async fn queue_head_read_failure_publishes_recoverable_gap(backend: crate::Backend) {

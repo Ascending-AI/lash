@@ -13,8 +13,10 @@ pub(super) use crate::llm::types::{
     RecordedRequestTemplate, ResponseContext, RetryClass, RetryDecision, RetryDeclineCause,
     RetryWait, SegmentCache, TransientJson,
 };
-pub(super) use lash_sansio::llm::capability::ReasoningIntent;
-pub(super) use lash_sansio::session_model::{FailureCode, Namespace, TurnFailureCode};
+pub(super) use lash_protocol_types::llm::capability::ReasoningIntent;
+pub(super) use lash_protocol_types::{
+    session_model::FailureCode, session_model::Namespace, session_model::TurnFailureCode,
+};
 pub(super) use lash_transport_failure::{LlmTransportError, TransportRetryVerdict};
 
 #[cfg(test)]

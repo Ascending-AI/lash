@@ -16,9 +16,10 @@ use lash_core::{
     AttachmentStoreError, AttachmentStoreFailureClass, AttachmentStorePersistence,
     StoredAttachment, StoredBlobRef,
 };
-use lash_sansio::Redacted;
-use lash_sansio::llm::attachment_delivery::{
-    Delivery, DeliveryLimits, DeliverySecret, ProviderAccepts,
+use lash_protocol_types::Redacted;
+use lash_protocol_types::{
+    llm::attachment_delivery::Delivery, llm::attachment_delivery::DeliveryLimits,
+    llm::attachment_delivery::DeliverySecret, llm::attachment_delivery::ProviderAccepts,
 };
 use object_store::aws::AmazonS3Builder;
 use object_store::list::{PaginatedListOptions, PaginatedListStore};

@@ -4,7 +4,7 @@ use lash_core::facade_support::{
     ProviderSchemaCapabilities, SchemaPurpose, SchemaResolutionRequest, resolve_schema,
 };
 use lash_core::llm::types::ResponseContract;
-use lash_sansio::{OmissionNullPath, OmissionNullPathSegment};
+use lash_protocol_types::{OmissionNullPath, OmissionNullPathSegment};
 use lash_transport_failure::LlmTransportError;
 use serde_json::Value;
 
@@ -34,7 +34,7 @@ impl ToolArgumentDecoder {
                 },
             )
             .map_err(|error| projection_error(provider, error))?;
-            if resolved.dialect == lash_sansio::SchemaDialect::OpenaiStrictToolParameters
+            if resolved.dialect == lash_protocol_types::SchemaDialect::OpenaiStrictToolParameters
                 && !resolved.omission_null_paths.is_empty()
             {
                 omission_paths_by_tool.insert(tool.name.clone(), resolved.omission_null_paths);

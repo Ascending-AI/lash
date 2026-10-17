@@ -18,7 +18,7 @@ use lash_durable::{
     ActorKey, DurableError, DurableInstant, Epoch, MailRefusal, StoreFailure, StoreFailureKind,
     Woken,
 };
-use lash_sansio::{CancelOrigin, ProcessId};
+use lash_protocol_types::{CancelOrigin, ProcessId};
 use rusqlite::{Connection, OptionalExtension};
 
 use super::{Answer, Committing, SQL, actor_key, integer, wake_within};
@@ -386,7 +386,7 @@ pub(super) fn apply(tx: &Connection, commit: &Committing<'_>, write: &ProcessWri
             };
             crate::obligation_ledger::end_execution_tx(
                 tx,
-                &lash_sansio::ExecutionScope::process(process.clone()),
+                &lash_protocol_types::ExecutionScope::process(process.clone()),
                 millis(commit.now)?,
             )
             .map_err(crate::sqlite_conversion_error)?;
@@ -436,7 +436,10 @@ fn close_scope(tx: &Connection, commit: &Committing<'_>, scope: &ScopeKey) -> An
     if let ScopeKey::Operation(session, operation) = scope {
         crate::obligation_ledger::end_execution_tx(
             tx,
-            &lash_sansio::ExecutionScope::session_operation(session.clone(), operation.clone()),
+            &lash_protocol_types::ExecutionScope::session_operation(
+                session.clone(),
+                operation.clone(),
+            ),
             millis(commit.now)?,
         )
         .map_err(crate::sqlite_conversion_error)?;

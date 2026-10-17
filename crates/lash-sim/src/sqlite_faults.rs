@@ -1,4 +1,4 @@
-use lash_sansio::SessionId;
+use lash_protocol_types::SessionId;
 use std::collections::BTreeSet;
 use std::path::{Path, PathBuf};
 use std::sync::Arc;

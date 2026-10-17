@@ -63,14 +63,14 @@ pub(super) fn step_trace_scope(
 fn node_site<'a>(
     record: &ProcessRecord,
     request: &StepRequest,
-    site: Option<&'a lash_sansio::EffectIdentity>,
-) -> Option<&'a lash_sansio::EffectIdentity> {
+    site: Option<&'a lash_protocol_types::EffectIdentity>,
+) -> Option<&'a lash_protocol_types::EffectIdentity> {
     site.filter(|_| record.trace_nodes && !request.resolves())
 }
 
 /// One node span a commit closes.
 struct NodeClose {
-    at: lash_sansio::EffectIdentity,
+    at: lash_protocol_types::EffectIdentity,
     started_at_ms: u64,
     status: TraceDomainStatus,
 }

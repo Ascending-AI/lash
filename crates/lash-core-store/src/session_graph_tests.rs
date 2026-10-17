@@ -155,11 +155,11 @@ fn rejected_graph_appends_leave_nodes_leaf_and_cached_reads_unchanged() {
         before_graph
     );
     let after_read = graph.read_model();
-    assert!(lash_sansio::AppendVec::ptr_eq(
+    assert!(lash_protocol_types::AppendVec::ptr_eq(
         &before_read.active_events,
         &after_read.active_events
     ));
-    assert!(lash_sansio::AppendVec::ptr_eq(
+    assert!(lash_protocol_types::AppendVec::ptr_eq(
         &before_read.messages,
         &after_read.messages
     ));
@@ -1002,7 +1002,7 @@ fn event_only_appends_preserve_the_message_vec_and_render_cache() {
     graph.append_protocol_event(protocol_event());
     let after = graph.read_model();
 
-    assert!(lash_sansio::AppendVec::ptr_eq(
+    assert!(lash_protocol_types::AppendVec::ptr_eq(
         &before.messages,
         &after.messages
     ));
@@ -1012,7 +1012,7 @@ fn event_only_appends_preserve_the_message_vec_and_render_cache() {
     ));
     assert_eq!(after.messages.len(), 1);
     assert_eq!(after.active_events.len(), before.active_events.len() + 1);
-    assert!(!lash_sansio::AppendVec::ptr_eq(
+    assert!(!lash_protocol_types::AppendVec::ptr_eq(
         &before.active_events,
         &after.active_events
     ));
@@ -1240,7 +1240,7 @@ fn held_readers_of_every_commit_share_the_frame_and_keep_what_they_saw() {
         }]);
         let read = graph.read_model();
         assert!(
-            lash_sansio::AppendVec::ptr_eq(&warm.messages, &read.messages)
+            lash_protocol_types::AppendVec::ptr_eq(&warm.messages, &read.messages)
                 && Arc::ptr_eq(&warm.prompt_render_cache, &read.prompt_render_cache),
             "deriving ids and realizing timestamps keeps the warm cache"
         );
@@ -1331,11 +1331,11 @@ fn an_extended_render_cache_equals_a_fresh_render_of_the_frame() {
         let read = graph.read_model();
         let rendered = read.prompt_render_cache.rendered(
             read.messages.as_slice(),
-            &lash_sansio::session_model::message::HistoryPresentation::verbatim(),
+            &lash_protocol_types::session_model::message::HistoryPresentation::verbatim(),
         );
         assert_eq!(
             rendered.as_slice(),
-            lash_sansio::session_model::render_prompt(read.messages.as_slice())
+            lash_protocol_types::session_model::render_prompt(read.messages.as_slice())
                 .messages
                 .as_slice()
         );
@@ -1456,7 +1456,7 @@ fn transcript_suppresses_blank_opaque_reasoning_as_empty_content() {
             vec![Part::reasoning(
                 "reasoning".into(),
                 text.into(),
-                Some(lash_sansio::llm::types::ProviderReasoningReplay {
+                Some(lash_protocol_types::llm::types::ProviderReasoningReplay {
                     encrypted_content: Some("opaque-provider-replay".into()),
                     ..Default::default()
                 }),
@@ -1483,7 +1483,7 @@ fn transcript_reasoning_with_tool_call_is_one_assistant_entry() {
             Part::tool_call(
                 "call".into(),
                 "{\"path\":\"notes.txt\"}".into(),
-                lash_sansio::ToolCallId::fixture("transcript-call"),
+                lash_protocol_types::ToolCallId::fixture("transcript-call"),
                 "provider-call".into(),
                 "read_file".into(),
                 None,
@@ -1502,7 +1502,7 @@ fn transcript_reasoning_with_tool_call_is_one_assistant_entry() {
                     text: "Inspect the file first.".into()
                 },
                 crate::transcript::TranscriptBlock::ToolCall {
-                    call_id: lash_sansio::ToolCallId::fixture("transcript-call"),
+                    call_id: lash_protocol_types::ToolCallId::fixture("transcript-call"),
                     tool_name: "read_file".into(),
                     arguments: "{\"path\":\"notes.txt\"}".into(),
                 },

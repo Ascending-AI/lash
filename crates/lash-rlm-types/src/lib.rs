@@ -1,7 +1,8 @@
-use lash_sansio::{
+use lash_protocol_types::{
     CellFailure, CellFailureKind, CellOutcome, CellRecord, ExecutedCall, ExecutedCallOutcome,
-    OutputValue, RetainedValue, TerminationMode, TurnProtocol, ValueShape,
+    OutputValue, RetainedValue, TerminationMode, ValueShape,
 };
+use lash_sansio::TurnProtocol;
 use lash_tool_shape::SchemaDocument;
 
 /// Read-only legacy protocol-owned assistant context paired with a code mode
@@ -58,7 +59,7 @@ pub enum RlmHistoryRole {
 pub struct RlmAttachmentRef {
     /// Attachment occurrence id within the history message.
     pub id: String,
-    pub reference: lash_sansio::AttachmentRef,
+    pub reference: lash_protocol_types::AttachmentRef,
 }
 
 #[derive(
@@ -67,7 +68,7 @@ pub struct RlmAttachmentRef {
 pub struct RlmImageRef {
     pub id: String,
     #[schemars(with = "String")]
-    pub media_type: lash_sansio::MediaType,
+    pub media_type: lash_protocol_types::MediaType,
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub width: Option<u32>,
     #[serde(default, skip_serializing_if = "Option::is_none")]
@@ -79,9 +80,11 @@ pub struct RlmImageRef {
 
 impl RlmImageRef {
     /// Build the model-visible image metadata from its durable attachment reference.
-    pub fn from_attachment(attachment: &lash_sansio::AttachmentRef) -> Self {
+    pub fn from_attachment(attachment: &lash_protocol_types::AttachmentRef) -> Self {
         let (width, height) = match attachment.type_metadata.as_ref() {
-            Some(lash_sansio::AttachmentTypeMetadata::Image { width, height }) => (*width, *height),
+            Some(lash_protocol_types::AttachmentTypeMetadata::Image { width, height }) => {
+                (*width, *height)
+            }
             None => (None, None),
         };
         Self {
@@ -145,8 +148,10 @@ impl From<&RetainedValue> for RetainedHistoryValue {
             tag: HistoryValueTag::Retained,
             shape: retained.shape.clone(),
             byte_len: retained.output.reference.byte_len,
-            attachment: lash_sansio::ToolValue::Attachment(retained.output.reference.clone())
-                .to_json_value(),
+            attachment: lash_protocol_types::ToolValue::Attachment(
+                retained.output.reference.clone(),
+            )
+            .to_json_value(),
         }
     }
 }
@@ -320,10 +325,10 @@ pub fn history_item_document(images: bool) -> SchemaDocument {
 mod rlm_step_serde_tests {
     use std::collections::BTreeSet;
 
-    use lash_sansio::{CellFailure, CellFailureKind};
+    use lash_protocol_types::{CellFailure, CellFailureKind};
     use lash_tool_shape::ShapeKind;
 
-    use lash_sansio::{CellOutcome, CellRecord};
+    use lash_protocol_types::{CellOutcome, CellRecord};
 
     use super::RlmHistoryItem;
 
@@ -335,21 +340,21 @@ mod rlm_step_serde_tests {
             language: "typescript".to_string(),
             code: "print('hello')".to_string(),
             prints: vec!["hello".to_string().into()],
-            images: vec![lash_sansio::AttachmentRef {
+            images: vec![lash_protocol_types::AttachmentRef {
                 id: ("a".repeat(64)).parse().expect("valid attachment id"),
                 media_type: "image/png".parse().expect("valid media type"),
                 byte_len: 42,
-                type_metadata: Some(lash_sansio::AttachmentTypeMetadata::image(
+                type_metadata: Some(lash_protocol_types::AttachmentTypeMetadata::image(
                     Some(640),
                     Some(480),
                 )),
                 label: Some("plot".to_string()),
             }],
-            calls: vec![lash_sansio::ExecutedCall {
+            calls: vec![lash_protocol_types::ExecutedCall {
                 result_summary: None,
                 operation: "math.add".to_string(),
-                outcome: lash_sansio::ExecutedCallOutcome::Ok {},
-                call_id: Some(lash_sansio::ToolCallId::fixture("math-add")),
+                outcome: lash_protocol_types::ExecutedCallOutcome::Ok {},
+                call_id: Some(lash_protocol_types::ToolCallId::fixture("math-add")),
             }],
             bindings: Default::default(),
             result: finished(serde_json::json!({"answer": 42}).into()),
@@ -359,15 +364,15 @@ mod rlm_step_serde_tests {
     fn finished(value: super::OutputValue) -> CellOutcome {
         CellOutcome::Controlled {
             tool_name: "finish".to_string(),
-            call_id: lash_sansio::ToolCallId::fixture("finish"),
-            control: lash_sansio::CellControl::Finish { value },
+            call_id: lash_protocol_types::ToolCallId::fixture("finish"),
+            control: lash_protocol_types::CellControl::Finish { value },
         }
     }
 
-    fn retained(witness: &str) -> lash_sansio::RetainedValue {
-        lash_sansio::RetainedValue {
-            output: lash_sansio::RetainedOutput {
-                reference: lash_sansio::AttachmentRef {
+    fn retained(witness: &str) -> lash_protocol_types::RetainedValue {
+        lash_protocol_types::RetainedValue {
+            output: lash_protocol_types::RetainedOutput {
+                reference: lash_protocol_types::AttachmentRef {
                     id: ("b".repeat(64)).parse().expect("valid attachment id"),
                     media_type: "application/json".parse().expect("valid media type"),
                     byte_len: 90_000,
@@ -376,7 +381,7 @@ mod rlm_step_serde_tests {
                 },
                 witness: witness.to_string(),
             },
-            shape: lash_sansio::ValueShape::of(&serde_json::json!({"rows": [1, 2]})),
+            shape: lash_protocol_types::ValueShape::of(&serde_json::json!({"rows": [1, 2]})),
         }
     }
 
@@ -415,10 +420,11 @@ mod rlm_step_serde_tests {
         assert!(record.get("witness").is_none(), "no cut text stands in");
         assert_eq!(record["shape"]["fields"][0]["key"], "rows");
         assert_eq!(record["byte_len"], 90_000);
-        let adopted: lash_sansio::ToolValue = serde_json::from_value(record["attachment"].clone())
-            .expect("the attachment decodes as a tool value");
+        let adopted: lash_protocol_types::ToolValue =
+            serde_json::from_value(record["attachment"].clone())
+                .expect("the attachment decodes as a tool value");
         assert!(
-            matches!(adopted, lash_sansio::ToolValue::Attachment(_)),
+            matches!(adopted, lash_protocol_types::ToolValue::Attachment(_)),
             "a tool adopts the record's attachment: {adopted:?}"
         );
     }
@@ -481,8 +487,8 @@ mod rlm_step_serde_tests {
             content: "hello".to_string(),
             attachments: vec![super::RlmAttachmentRef {
                 id: "a1".to_string(),
-                reference: lash_sansio::AttachmentRef::new(
-                    lash_sansio::AttachmentId::parse("a".repeat(64)).expect("digest"),
+                reference: lash_protocol_types::AttachmentRef::new(
+                    lash_protocol_types::AttachmentId::parse("a".repeat(64)).expect("digest"),
                     "text/plain".parse().expect("valid media type"),
                     4,
                     None,

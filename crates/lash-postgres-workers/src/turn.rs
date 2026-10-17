@@ -9,7 +9,7 @@
 //! production session activation, code mode worker path and tool dispatch, and the
 //! turn commits the session's real head.
 
-use lash_sansio::llm::types::{StreamBlockEvent, StreamBlockKind};
+use lash_protocol_types::{llm::types::StreamBlockEvent, llm::types::StreamBlockKind};
 use std::sync::Arc;
 use std::time::Duration;
 
@@ -22,7 +22,7 @@ use lash_core::llm::types::{
 use lash_core::{ExecutionPolicy, LlmOutputPart, ToolCall, ToolOutcome};
 use lash_core_execution::Backend;
 use lash_durable::ActorKey;
-use lash_sansio::{SessionId, TurnId};
+use lash_protocol_types::{SessionId, TurnId};
 
 use crate::events::{Event, report};
 use crate::witness::{Hold, Witness};

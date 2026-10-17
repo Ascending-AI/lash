@@ -14,8 +14,8 @@
 #![allow(clippy::disallowed_methods)]
 
 use lash_core_execution::compat::CompatRefusal;
-use lash_sansio::ProcessId;
-use lash_sansio::SessionId;
+use lash_protocol_types::ProcessId;
+use lash_protocol_types::SessionId;
 use std::future::Future;
 use std::sync::Arc;
 

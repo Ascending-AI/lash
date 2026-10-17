@@ -12,7 +12,7 @@
 
 use lash_durable::domain::{AdmittedId, OwnerKey, RunFacts};
 use lash_durable::{ActorKey, CommitLabel, DurableError};
-use lash_sansio::sync::MutexExt as _;
+use lash_protocol_types::sync::MutexExt as _;
 use std::sync::{Arc, Mutex};
 use std::time::Duration;
 

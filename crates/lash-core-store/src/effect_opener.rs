@@ -47,7 +47,9 @@ const SESSION_OPERATION_TAG: &str = "drain:";
 pub enum SettlementSource {
     /// A scalar or batch tool call the opener admitted live, named by its
     /// lash-minted identity.
-    Invocation { call_id: lash_sansio::ToolCallId },
+    Invocation {
+        call_id: lash_protocol_types::ToolCallId,
+    },
 }
 
 /// What the opener has incorporated so far: the once-only set. Travels with
@@ -275,14 +277,14 @@ impl EffectOpener {
         clippy::expect_used,
         reason = "an identity encoding starts with its kind tag, so it is never blank"
     )]
-    pub fn tool_call_admission(&self) -> lash_sansio::ToolCallAdmission {
+    pub fn tool_call_admission(&self) -> lash_protocol_types::ToolCallAdmission {
         match self {
             Self::Turn { .. } | Self::SessionOperation { .. } => {
-                lash_sansio::ToolCallAdmission::turn("", self.identity_encoding())
+                lash_protocol_types::ToolCallAdmission::turn("", self.identity_encoding())
                     .expect("an identity encoding is never blank")
             }
             Self::Process { process_id } => {
-                lash_sansio::ToolCallAdmission::process("", process_id.clone())
+                lash_protocol_types::ToolCallAdmission::process("", process_id.clone())
             }
         }
     }

@@ -2,7 +2,7 @@
 //! harness can render durable-write lines from facts the backend accepted.
 
 use crate::SessionId;
-use lash_sansio::sync::MutexExt;
+use lash_protocol_types::sync::MutexExt;
 use std::collections::BTreeMap;
 use std::sync::{Arc, Mutex};
 

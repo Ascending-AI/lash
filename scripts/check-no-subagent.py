@@ -9,7 +9,7 @@ builds one on the facade.
 
 The check fails on every case-insensitive `subagent` in a tracked path or in a
 tracked text file's contents under the core crates (`crates/lash-core*/`),
-`crates/lash-sansio/`, `crates/lash-durable/` and the facade (`crates/lash/`).
+`crates/lash-sansio/`, `crates/lash-protocol-types/`, `crates/lash-durable/` and the facade (`crates/lash/`).
 There is no exemption: the word may appear in examples and docs only.
 
 Run it from anywhere: `python3 scripts/check-no-subagent.py`.
@@ -28,7 +28,7 @@ from pathlib import Path
 ROOT = Path(__file__).resolve().parents[1]
 MENTION = re.compile("subagent", re.I)
 # A path is guarded when its first two components name a guarded crate.
-GUARDED_CRATE = re.compile(r"^crates/(lash-core[^/]*|lash-sansio|lash-durable|lash)/")
+GUARDED_CRATE = re.compile(r"^crates/(lash-core[^/]*|lash-sansio|lash-protocol-types|lash-durable|lash)/")
 
 
 @dataclass(frozen=True)

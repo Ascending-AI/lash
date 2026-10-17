@@ -754,7 +754,7 @@ fn material_reference_preparation_does_not_copy_the_complete_encoding() {
         MaterialRole::AttemptOutput,
         "unicode é\nquote \" slash \\ ".repeat(16_384),
     );
-    let expected = lash_sansio::core_support::blake3_domain_hash_hex(
+    let expected = lash_protocol_types::core_support::blake3_domain_hash_hex(
         "lash-tool-material/v1",
         serde_json::to_vec(&payload).unwrap(),
     );

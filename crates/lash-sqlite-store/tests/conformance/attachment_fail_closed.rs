@@ -1,6 +1,6 @@
 use lash_core_execution::attachments::*;
 use lash_core_execution::*;
-use lash_sansio::MediaType;
+use lash_protocol_types::MediaType;
 
 struct UnsupportedAttachmentRoots;
 

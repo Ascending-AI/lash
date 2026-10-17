@@ -1,5 +1,5 @@
 use super::*;
-use lash_sansio::ToolDefinition;
+use lash_protocol_types::ToolDefinition;
 use serde_json::json;
 
 #[test]
@@ -39,7 +39,7 @@ fn recursive_filter_has_one_named_body_and_a_recursive_array() {
     assert!(text.contains("and: Array<Filter>"), "{text}");
     assert!(!text.contains("unknown"), "{text}");
 }
-fn definition(name: &str, input: Value) -> lash_sansio::ToolDefinition {
+fn definition(name: &str, input: Value) -> lash_protocol_types::ToolDefinition {
     ToolDefinition::raw(
         name,
         name,
@@ -51,7 +51,7 @@ fn definition(name: &str, input: Value) -> lash_sansio::ToolDefinition {
     .with_execution(std::time::Duration::from_secs(120))
 }
 
-fn document(tool: &lash_sansio::ToolDefinition) -> String {
+fn document(tool: &lash_protocol_types::ToolDefinition) -> String {
     let contract = tool.contract();
     TypescriptToolPresenter
         .tool_doc(

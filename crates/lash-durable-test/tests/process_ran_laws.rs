@@ -50,7 +50,7 @@ use lash_core_execution::StoreSet;
 use lash_durable::runner::Activation;
 use lash_durable::{ActorKey, ActorState, DurableStore};
 use lash_durable_test::{Cut, Fault, Matrix, Scenario, SimClock, SimNodes, SimNodesConfig};
-use lash_sansio::sync::MutexExt as _;
+use lash_protocol_types::sync::MutexExt as _;
 
 /// `counted()`: a draw it branches on, a sleep, a clock read and a second
 /// draw, a second sleep, then its answer: three segments.

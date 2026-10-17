@@ -30,7 +30,7 @@ use lash_durable::domain::{
     request_roots,
 };
 use lash_durable::{DurableError, Epoch};
-use lash_sansio::{SessionId, TurnId};
+use lash_protocol_types::{SessionId, TurnId};
 use lash_store_sql::Dialect;
 use lash_store_sql::durable::prompts::{PromptStatements, REQUEST_PART, SNAPSHOT_PART};
 use sqlx::PgConnection;

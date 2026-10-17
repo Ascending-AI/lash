@@ -7,7 +7,7 @@
 
 use lash_core::facade_support::*;
 use lash_core::*;
-use lash_sansio::core_support::ModelToolReturnCoreSupport as _;
+use lash_protocol_types::core_support::ModelToolReturnCoreSupport as _;
 use std::sync::Arc;
 
 const CALL_ID: &str = "oversized-call";

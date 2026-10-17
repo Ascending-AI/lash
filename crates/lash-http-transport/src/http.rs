@@ -4,11 +4,11 @@ use std::time::Duration;
 
 use async_trait::async_trait;
 use bytes::Bytes;
-use lash_sansio::llm::types::ProviderFailureKind;
-use lash_sansio::session_model::TurnFailureCode;
+use lash_protocol_types::llm::types::ProviderFailureKind;
+use lash_protocol_types::session_model::TurnFailureCode;
 
 #[cfg(test)]
-use lash_sansio::session_model::FailureCode;
+use lash_protocol_types::session_model::FailureCode;
 use lash_transport_failure::{LlmTransportError, TransportRetryVerdict};
 
 #[async_trait]

@@ -10,8 +10,8 @@ impl PluginOperation for Query {
     type Error = String;
     const ERROR_TYPE: &'static str = Self::NAME;
     const ERROR_VERSION: lash_core::FormatVersion = lash_core::FormatVersion::ONE;
-    fn error_class(_: &Self::Error) -> lash_sansio::PluginFailureClass {
-        lash_sansio::PluginFailureClass::Terminal
+    fn error_class(_: &Self::Error) -> lash_protocol_types::PluginFailureClass {
+        lash_protocol_types::PluginFailureClass::Terminal
     }
 }
 impl PluginQuery for Query {}

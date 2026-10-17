@@ -1,5 +1,5 @@
 //! Complete namespace conversion results at an engine admission boundary.
-use lash_sansio::sync::{MutexExt, RwLockExt};
+use lash_protocol_types::{sync::MutexExt, sync::RwLockExt};
 use std::collections::BTreeMap;
 
 use super::*;

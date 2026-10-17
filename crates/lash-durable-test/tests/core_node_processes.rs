@@ -13,7 +13,7 @@
 // Test code: the PostgreSQL leg reads its database URL from the environment.
 #![allow(clippy::disallowed_methods, clippy::expect_used, clippy::unwrap_used)]
 
-use lash_sansio::llm::types::{StreamBlockEvent, StreamBlockKind};
+use lash_protocol_types::{llm::types::StreamBlockEvent, llm::types::StreamBlockKind};
 use std::sync::atomic::{AtomicUsize, Ordering};
 use std::sync::{Arc, Mutex};
 use std::time::Duration;
@@ -24,7 +24,7 @@ use lash_core::llm::types::{
     LlmRequest, LlmResponse, LlmStreamEvent, LlmUsage, StreamBlockIdentity,
 };
 use lash_core_execution::StoreSet;
-use lash_sansio::SessionId;
+use lash_protocol_types::SessionId;
 
 const MODEL: &str = "core-node-model";
 
@@ -1246,7 +1246,7 @@ impl lash_core::ProcessEngine for ScriptEngine {
 }
 
 /// A cancel answered at once: what every scripted engine does with one.
-fn cancelled(origin: lash_sansio::CancelOrigin) -> lash_core::EngineAction {
+fn cancelled(origin: lash_protocol_types::CancelOrigin) -> lash_core::EngineAction {
     lash_core::EngineAction::Terminal(lash_core::ProcessOutcome::from_tool_output(
         lash_core::ToolCallOutput::cancelled(
             lash_core::ToolCancellation::runtime("the scripted engine answered its cancel")

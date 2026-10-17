@@ -46,7 +46,7 @@ fn openrouter_chat_body_requires_supported_parameters_with_json_schema_output() 
     let mut req = request(vec![LlmMessage::text(LlmRole::User, "extract")]);
     req.output_spec = Some(LlmOutputSpec::JsonSchema(LlmJsonSchema {
         name: "extraction".to_string(),
-        schema: lash_sansio::SchemaContract::admit(json!({
+        schema: lash_protocol_types::SchemaContract::admit(json!({
             "type": "object",
             "properties": { "answer": { "type": "string" } },
             "required": ["answer"]

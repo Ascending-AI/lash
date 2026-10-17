@@ -270,7 +270,7 @@ pub(super) fn emit_remaining_metrics(adapter: &OtelTelemetry) {
         (
             TraceSpanKind::Tool,
             TraceEvent::ToolCallCompleted {
-                call_id: lash_sansio::ToolCallId::fixture("call"),
+                call_id: lash_protocol_types::ToolCallId::fixture("call"),
                 provider_call_id: None,
                 name: "search".into(),
                 args: serde_json::Value::Null.into(),

@@ -637,13 +637,13 @@ pub(super) fn request_text(request: &LlmRequest) -> String {
 pub(crate) fn empty_request() -> LlmRequest {
     LlmRequest {
         instructions: None,
-        model: lash_sansio::llm_profile::LlmProfileConfig::new(
-            lash_sansio::llm_profile::RecordedLlmProfile::mint(
-                lash_sansio::llm_profile::LlmProfileKey::new("request-fixture"),
-                lash_sansio::llm_profile::LlmProfileMetadata::new(
+        model: lash_protocol_types::llm_profile::LlmProfileConfig::new(
+            lash_protocol_types::llm_profile::RecordedLlmProfile::mint(
+                lash_protocol_types::llm_profile::LlmProfileKey::new("request-fixture"),
+                lash_protocol_types::llm_profile::LlmProfileMetadata::new(
                     "mock-model".to_string(),
                     std::num::NonZeroUsize::MIN.saturating_add(127_999),
-                    lash_sansio::llm::capability::CacheRetention::Short,
+                    lash_protocol_types::llm::capability::CacheRetention::Short,
                 )
                 .with_capability(lash_core::LlmProfileCapability::default())
                 .with_extra_body(Default::default()),

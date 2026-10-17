@@ -19,7 +19,7 @@ use lash_durable::{
     ActorKey, DurableError, DurableInstant, Epoch, MailRefusal, StoreFailure, StoreFailureKind,
     Woken,
 };
-use lash_sansio::{CancelOrigin, ProcessId};
+use lash_protocol_types::{CancelOrigin, ProcessId};
 use sqlx::PgConnection;
 
 use super::steps::{Entry, Shape, Step, Ty, Value};
@@ -318,7 +318,7 @@ pub(super) async fn apply(
             .map_err(|error| registry_failure(&error))?;
             crate::obligation_ledger::end_execution_tx(
                 tx,
-                &lash_sansio::ExecutionScope::process(process.clone()),
+                &lash_protocol_types::ExecutionScope::process(process.clone()),
                 millis(commit.now)?,
             )
             .await
@@ -458,7 +458,10 @@ async fn close_scope(
     if let ScopeKey::Operation(session, operation) = scope {
         crate::obligation_ledger::end_execution_tx(
             tx,
-            &lash_sansio::ExecutionScope::session_operation(session.clone(), operation.clone()),
+            &lash_protocol_types::ExecutionScope::session_operation(
+                session.clone(),
+                operation.clone(),
+            ),
             millis(commit.now)?,
         )
         .await

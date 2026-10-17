@@ -273,7 +273,7 @@ async fn a_terminally_refused_command_commit_settles_with_its_cause_and_the_lane
     use lash_core::runtime::durable::session::SessionActivation;
     use lash_durable::{ActorKey, ActorState, CommitLabel, DomainRefusal, DomainWrite};
     use lash_durable_test::{Matrix, Script, SimClock, SimNodes, SimNodesConfig, Stored, Tripwire};
-    use lash_sansio::sync::MutexExt as _;
+    use lash_protocol_types::sync::MutexExt as _;
     use std::sync::Mutex;
 
     let Some((dialect, postgres_url)) = dialect_of(tier) else {

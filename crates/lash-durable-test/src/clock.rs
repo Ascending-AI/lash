@@ -8,7 +8,7 @@
 //! polls fire on virtual time only.
 
 use lash_core_ids::clock::Clock;
-use lash_sansio::sync::MutexExt;
+use lash_protocol_types::sync::MutexExt;
 use std::collections::BTreeMap;
 use std::sync::atomic::{AtomicU64, AtomicUsize, Ordering};
 use std::sync::{Arc, Mutex};

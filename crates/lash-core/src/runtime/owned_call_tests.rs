@@ -158,7 +158,7 @@ async fn admit(world: &World) -> OwnedAdmission {
         request: world.request.clone(),
         binding: world.binding.clone(),
         attachment_store: Arc::new(crate::RuntimeAttachmentStore::unavailable()),
-        fetch_horizon: lash_sansio::llm::attachment_delivery::DeliveryFetchHorizon {
+        fetch_horizon: lash_protocol_types::llm::attachment_delivery::DeliveryFetchHorizon {
             millis: world.clock.timestamp_ms() - START_MS + 17,
         },
         budgets: budgets(),

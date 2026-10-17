@@ -4,7 +4,7 @@ error[E0624]: associated function `mint` is private
 3 |     let _ = TurnReply::mint("host-turn".into(), "host-part".into());
   |                        ^^^^ private associated function
   |
- ::: $WORKSPACE/crates/lash-sansio/src/session_model/message.rs
+ ::: $WORKSPACE/crates/lash-protocol-types/src/session_model/message.rs
   |
   |     pub(crate) fn mint(turn_id: TurnId, part_id: String) -> Self {
   |     ------------------------------------------------------------ private associated function defined here
@@ -12,5 +12,5 @@ error[E0624]: associated function `mint` is private
   = help: items from traits can only be used if the trait is in scope
 help: trait `TurnReplyCoreSupport` which provides `mint` is implemented but not in scope; perhaps you want to import it
   |
-1 + use lash_sansio::core_support::TurnReplyCoreSupport;
+1 + use lash_protocol_types::core_support::TurnReplyCoreSupport;
   |

@@ -374,7 +374,7 @@ impl CommittedPluginNamespace {
 pub struct PromptCall {
     pub session_id: crate::SessionId,
     pub frame: Option<lash_core_store::session_identity::FrameNodeId>,
-    pub run: Option<lash_sansio::RunId>,
+    pub run: Option<lash_protocol_types::RunId>,
     pub turn: Option<crate::TurnId>,
     /// The protocol iteration the call belongs to.
     pub iteration: u32,

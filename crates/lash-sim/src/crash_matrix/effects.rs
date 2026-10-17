@@ -8,7 +8,7 @@ use lash_core_execution::{
     LifetimeDecision, NoProcessWork, ProcessEngineRegistration, ProcessEngineRegistry,
     ProcessInput, ProcessProvenance, ProcessRegistration, RuntimeEffectLocalExecutor, StartKey,
 };
-use lash_sansio::ToolCallId;
+use lash_protocol_types::ToolCallId;
 
 use super::engine::{KIND, SimProcessEngine, ends_at_once};
 use super::world::World;

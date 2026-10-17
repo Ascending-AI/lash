@@ -2,7 +2,7 @@
 
 use std::sync::Arc;
 
-use lash_sansio::sync::MutexExt;
+use lash_protocol_types::sync::MutexExt;
 
 use super::execution_context::RuntimeExecutionContext;
 

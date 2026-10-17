@@ -22,16 +22,18 @@ fn machine_config(max_turns: Option<usize>) -> TurnMachineConfig {
         model_tool_calls: lash_core::sansio::ModelToolCalls::fixture(),
         protocol_driver,
         projector: Arc::new(ChatContextProjector::default()),
-        model: lash_sansio::llm_profile::LlmProfileConfig::new(
-            lash_sansio::llm_profile::RecordedLlmProfile::mint(
-                lash_sansio::llm_profile::LlmProfileKey::new("request-fixture"),
-                lash_sansio::llm_profile::LlmProfileMetadata::builder("test-model".to_string())
-                    .context_window_tokens(128_000)
-                    .capability(lash_core::LlmProfileCapability::default())
-                    .extra_body(Default::default())
-                    .cache_retention(lash_sansio::llm::capability::CacheRetention::Short)
-                    .build()
-                    .expect("valid profile"),
+        model: lash_protocol_types::llm_profile::LlmProfileConfig::new(
+            lash_protocol_types::llm_profile::RecordedLlmProfile::mint(
+                lash_protocol_types::llm_profile::LlmProfileKey::new("request-fixture"),
+                lash_protocol_types::llm_profile::LlmProfileMetadata::builder(
+                    "test-model".to_string(),
+                )
+                .context_window_tokens(128_000)
+                .capability(lash_core::LlmProfileCapability::default())
+                .extra_body(Default::default())
+                .cache_retention(lash_protocol_types::llm::capability::CacheRetention::Short)
+                .build()
+                .expect("valid profile"),
             ),
         )
         .with_reasoning(Default::default()),
@@ -152,7 +154,7 @@ fn completed_call(
         args: call.args.clone(),
         output: output.clone(),
         model_return: lash_core::facade_support::ModelToolReturn {
-            outcome: lash_sansio::ModelToolOutcome::from(&output.outcome),
+            outcome: lash_protocol_types::ModelToolOutcome::from(&output.outcome),
             tool_name: call.tool_name.clone(),
             parts: vec![lash_core::facade_support::ModelToolReturnPart::text(
                 "result",

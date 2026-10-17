@@ -315,8 +315,8 @@ pub(super) async fn a_resume_event_cannot_return_an_ended_process_to_running(
     let wait = crate::WaitState {
         since_ms: 1,
         kind: crate::WaitKind::Call {
-            call_id: lash_sansio::ToolCallId::fixture("process-wait-law"),
-            tool_id: lash_sansio::ToolId::new("process_wait"),
+            call_id: lash_protocol_types::ToolCallId::fixture("process-wait-law"),
+            tool_id: lash_protocol_types::ToolId::new("process_wait"),
         },
         site: None,
     };

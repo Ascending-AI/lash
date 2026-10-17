@@ -62,7 +62,7 @@ impl IntentRealizationContext<'_> {
 /// A replay divergence, which the call cannot settle.
 pub async fn execute_final_tool_intents(
     context: &IntentRealizationContext<'_>,
-    tool_call_id: &lash_sansio::ToolCallId,
+    tool_call_id: &lash_protocol_types::ToolCallId,
     intents: &crate::ToolIntents,
     child_trace_hook: Option<&crate::ToolChildExecutionTraceHook>,
 ) -> Result<super::Realization, crate::RuntimeEffectControllerError> {
@@ -334,7 +334,7 @@ pub(super) fn admit_batch(
 fn refuse_all(
     context: &IntentRealizationContext<'_>,
     execution_scope_id: &str,
-    tool_call_id: &lash_sansio::ToolCallId,
+    tool_call_id: &lash_protocol_types::ToolCallId,
     intents: &crate::ToolIntents,
     refusal: crate::ToolIntentRefusalReason,
 ) -> Vec<crate::ToolIntentExecutionOutcome> {
@@ -384,7 +384,7 @@ fn refuse_all(
 /// declared start is bound to before it launches (ADR 0116 §3.1).
 pub(crate) fn declaring_identity(
     context: &ToolDispatchContext<'_>,
-    tool_call_id: &lash_sansio::ToolCallId,
+    tool_call_id: &lash_protocol_types::ToolCallId,
     minting_emission: &crate::RuntimeInvocation,
 ) -> crate::ToolIntentIdentity {
     crate::derive_tool_intent_identity_under(
@@ -399,7 +399,7 @@ pub(crate) fn declaring_identity(
 fn derive_identity(
     context: &IntentRealizationContext<'_>,
     execution_scope_id: &str,
-    tool_call_id: &lash_sansio::ToolCallId,
+    tool_call_id: &lash_protocol_types::ToolCallId,
     intent_index: usize,
 ) -> Result<crate::ToolIntentIdentity, crate::ToolIntentRefusalReason> {
     let intent_index = u32::try_from(intent_index)
@@ -686,7 +686,7 @@ mod tests {
         crate::ToolIntent::StartProcess(Box::new(crate::StartProcessIntent {
             owner: session("session"),
             declaration: crate::ProcessStartDeclaration::engine(
-                lash_sansio::LASH_VM_ENGINE_KIND,
+                lash_protocol_types::LASH_VM_ENGINE_KIND,
                 payload,
                 crate::DeclaredLaunch::held(crate::EngineLaunch::new(
                     env.stable_ref().expect("environment digest"),

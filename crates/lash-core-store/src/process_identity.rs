@@ -31,7 +31,7 @@ use std::fmt;
 )]
 pub fn mint_process_id() -> ProcessId {
     ProcessId::minted(
-        lash_sansio::identity::ProcessIdRegistrar::REGISTRAR,
+        lash_protocol_types::identity::ProcessIdRegistrar::REGISTRAR,
         uuid::Uuid::now_v7().as_u128(),
     )
     .expect("UUIDv7 generator supplies valid process-id bits")
@@ -74,7 +74,7 @@ impl ProcessIdMint {
         // Version 7 in the version nibble and the RFC 4122 variant, around a
         // counter where UUIDv7 carries its random bits.
         ProcessId::minted(
-            lash_sansio::identity::ProcessIdRegistrar::REGISTRAR,
+            lash_protocol_types::identity::ProcessIdRegistrar::REGISTRAR,
             (u128::from(ordinal) & ((1_u128 << 62) - 1))
                 | ((u128::from(ordinal) >> 62) << 64)
                 | (0x7_u128 << 76)
@@ -229,7 +229,7 @@ impl StartKeyDerivation {
     pub fn for_isolated_call(
         self,
         owner: &crate::effect_opener::EffectOpener,
-        call_id: &lash_sansio::ToolCallId,
+        call_id: &lash_protocol_types::ToolCallId,
     ) -> StartKey {
         StartKey::derive(StartKeyNamespace::IsolatedCall, |encoder| {
             encoder.string(&owner.identity_encoding());
@@ -389,13 +389,13 @@ impl fmt::Display for StartKey {
 /// record, a handle whose id does not decode (a retired spelling or an id no
 /// registrar minted), or a handle of another kind.
 pub fn process_id_from_handle_json(handle: &serde_json::Value) -> Result<ProcessId, String> {
-    let handle = lash_sansio::handle::parse_handle_json(handle)
+    let handle = lash_protocol_types::handle::parse_handle_json(handle)
         .ok_or_else(|| "Invalid process handle".to_string())?;
     let target = handle.target().ok_or_else(|| {
         "Invalid process handle: unreadable id (a retired spelling, or an id no registrar minted)"
             .to_string()
     })?;
-    let lash_sansio::handle::HandleTarget::Process { process_id } = target else {
+    let lash_protocol_types::handle::HandleTarget::Process { process_id } = target else {
         return Err("Invalid process handle: not a process".to_string());
     };
     Ok(process_id)

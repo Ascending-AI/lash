@@ -26,7 +26,7 @@ use lash::tracing::{
     FlightRecorderSettings, FlightRecorderSink, SpanRole, TraceCarrier, TracePosition, TraceRecord,
     TraceScopeId, TraceScopeOwner, TraceSink, TraceSinkError, TraceSpanKind,
 };
-use lash_sansio::sync::MutexExt as _;
+use lash_protocol_types::sync::MutexExt as _;
 
 /// The collector every process's runtime publishes to.
 #[derive(Clone, Default)]

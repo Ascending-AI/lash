@@ -11,7 +11,7 @@
 
 #![allow(dead_code)]
 
-use lash_sansio::llm::types::{StreamBlockEvent, StreamBlockKind};
+use lash_protocol_types::{llm::types::StreamBlockEvent, llm::types::StreamBlockKind};
 use std::collections::BTreeMap;
 use std::sync::{Arc, Mutex};
 use std::time::Duration;
@@ -22,7 +22,7 @@ use lash_core::llm::types::{
     LlmRequest, LlmResponse, LlmRole, LlmStreamEvent, StreamBlockIdentity,
 };
 use lash_core_execution::StoreSet;
-use lash_sansio::sync::MutexExt as _;
+use lash_protocol_types::sync::MutexExt as _;
 
 /// The database a law's core runs over.
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]

@@ -68,7 +68,7 @@ impl std::ops::Deref for MessageSequence {
 }
 
 impl MessageSequence {
-    pub(crate) fn from_owned(messages: Vec<Message>) -> Self {
+    pub fn from_owned(messages: Vec<Message>) -> Self {
         Self {
             mode: SequenceMode::Owned(Arc::new(messages)),
             materialized: Arc::default(),
@@ -76,7 +76,7 @@ impl MessageSequence {
         }
     }
 
-    pub(crate) fn from_base(base: AppendVec<Message>) -> Self {
+    pub fn from_base(base: AppendVec<Message>) -> Self {
         Self {
             mode: SequenceMode::Layered {
                 base,
@@ -87,7 +87,7 @@ impl MessageSequence {
         }
     }
 
-    pub(crate) fn from_base_and_delta(base: AppendVec<Message>, delta: Vec<Message>) -> Self {
+    pub fn from_base_and_delta(base: AppendVec<Message>, delta: Vec<Message>) -> Self {
         Self {
             mode: SequenceMode::Layered {
                 base,
@@ -102,12 +102,16 @@ impl MessageSequence {
     /// Subsequent `render_prompt` calls will reuse the memoized `RenderedPrompt` for the base
     /// instead of rewalking it.
     /// The delta is always re-rendered because it changes per LLM iteration.
-    pub(crate) fn with_base_render_cache(mut self, cache: Arc<BaseRenderCache>) -> Self {
+    pub fn with_base_render_cache(mut self, cache: Arc<BaseRenderCache>) -> Self {
         self.base_rendered = Some(cache);
         self
     }
 
-    pub(crate) fn len(&self) -> usize {
+    pub fn is_empty(&self) -> bool {
+        self.as_slice().is_empty()
+    }
+
+    pub fn len(&self) -> usize {
         match &self.mode {
             SequenceMode::Owned(owned) => owned.len(),
             SequenceMode::Layered { base, delta } => base.len() + delta.len(),
@@ -128,7 +132,7 @@ impl MessageSequence {
     /// rewrote history), the bases are different allocations, or `next`'s
     /// delta diverges from this one's. `None` means "cannot decide cheaply",
     /// so callers fall back to reconciling content.
-    pub(crate) fn preserved_extension_delta<'a>(&self, next: &'a Self) -> Option<&'a [Message]> {
+    pub fn preserved_extension_delta<'a>(&self, next: &'a Self) -> Option<&'a [Message]> {
         let (
             SequenceMode::Layered {
                 base: self_base,
@@ -155,11 +159,11 @@ impl MessageSequence {
 
     /// Whether this sequence is `base` followed by its own messages,
     /// witnessed by construction rather than compared.
-    pub(crate) fn has_base(&self, base: &AppendVec<Message>) -> bool {
+    pub fn has_base(&self, base: &AppendVec<Message>) -> bool {
         matches!(&self.mode, SequenceMode::Layered { base: own, .. } if AppendVec::ptr_eq(own, base))
     }
 
-    pub(crate) fn iter(&self) -> MessageSequenceIter<'_> {
+    pub fn iter(&self) -> MessageSequenceIter<'_> {
         match &self.mode {
             SequenceMode::Owned(owned) => MessageSequenceIter::Owned(owned.iter()),
             SequenceMode::Layered { base, delta } => {
@@ -187,14 +191,14 @@ impl MessageSequence {
         }
     }
 
-    pub(crate) fn as_slice(&self) -> &[Message] {
+    pub fn as_slice(&self) -> &[Message] {
         match &self.mode {
             SequenceMode::Owned(owned) => owned.as_slice(),
             SequenceMode::Layered { .. } => self.materialize().as_slice(),
         }
     }
 
-    pub(crate) fn shared(&self) -> AppendVec<Message> {
+    pub fn shared(&self) -> AppendVec<Message> {
         self.materialize().clone()
     }
 
@@ -218,7 +222,7 @@ impl MessageSequence {
         }
     }
 
-    pub(crate) fn push(&mut self, message: Message) {
+    pub fn push(&mut self, message: Message) {
         match &mut self.mode {
             SequenceMode::Owned(owned) => Arc::make_mut(owned).push(message),
             SequenceMode::Layered { delta, .. } => Arc::make_mut(delta).push(message),
@@ -226,7 +230,7 @@ impl MessageSequence {
         self.materialized = Arc::default();
     }
 
-    pub(crate) fn extend(&mut self, messages: Vec<Message>) {
+    pub fn extend(&mut self, messages: Vec<Message>) {
         if messages.is_empty() {
             return;
         }
@@ -242,7 +246,7 @@ impl MessageSequence {
         self.materialized = Arc::default();
     }
 
-    pub(crate) fn render_prompt(&self, policy: &HistoryPresentation) -> RenderedPrompt {
+    pub fn render_prompt(&self, policy: &HistoryPresentation) -> RenderedPrompt {
         let SequenceMode::Layered { base, delta } = &self.mode else {
             return policy.render(self.as_slice());
         };

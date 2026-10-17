@@ -6,7 +6,7 @@ use super::model::{
     ProcessLifecycleState, ProcessOriginator, ProcessWaits, SessionId,
 };
 use super::observation::{ObservedProcess, ObservedProcessEvent, ProcessParkState};
-use lash_sansio::CancelRequest;
+use lash_protocol_types::CancelRequest;
 use serde::{Deserialize, Serialize};
 
 /// A process outcome for a host to store or display. Each value, failure or

@@ -1,6 +1,6 @@
 use crate::session_sql::session_sql;
 use crate::*;
-use lash_sansio::SessionId;
+use lash_protocol_types::SessionId;
 
 /// Read the authoritative lease clock from PostgreSQL.
 ///

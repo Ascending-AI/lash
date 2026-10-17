@@ -96,7 +96,7 @@ pub use lash_vm_runtime::{
 pub use crate::kernel_migration::{
     KERNEL_MIGRATION_SWEEP, KernelMigrationSweep, survey_kernel_migration, sweep_kernel_migration,
 };
-pub use lash_sansio::worker_limit::WorkerFrameKind;
+pub use lash_protocol_types::worker_limit::WorkerFrameKind;
 pub use lash_vm_client::{
     BootstrapFault, CheckpointRefusal, CodecRefusal, DecodeLimits, Detail, DetailLimit, DiskSpool,
     EffectPhase, EffectPhases, Exchange, ExecutionClass, ExecutionLease, ExecutionReceipt,

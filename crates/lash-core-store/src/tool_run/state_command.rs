@@ -192,12 +192,12 @@ impl StateCommand {
 pub enum StateCommandOrigin {
     /// A tool body's result.
     ToolAttempt {
-        call_id: lash_sansio::ToolCallId,
+        call_id: lash_protocol_types::ToolCallId,
         attempt: AttemptOrdinal,
     },
     /// The recorded finalization of an authenticated Deferred resolution.
     DeferredFinalization {
-        call_id: lash_sansio::ToolCallId,
+        call_id: lash_protocol_types::ToolCallId,
         attempt: AttemptOrdinal,
     },
     /// An after-tool result check at one occurrence.

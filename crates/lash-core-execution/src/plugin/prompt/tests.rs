@@ -1,6 +1,6 @@
 use super::*;
 use crate::plugin::registrar::PluginContributions;
-use lash_sansio::sync::MutexExt;
+use lash_protocol_types::sync::MutexExt;
 
 mod composer;
 

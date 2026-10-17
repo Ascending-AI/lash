@@ -23,7 +23,7 @@
 /// version_guard(items(LASH_STANDARD_COMPACTION_DOMAIN_VERSION, compaction_request_ids))
 const LASH_STANDARD_COMPACTION_DOMAIN_VERSION: &str = "lash-standard-compaction/v1";
 
-use lash_sansio::{SessionId, TurnId};
+use lash_protocol_types::{SessionId, TurnId};
 
 mod recovery;
 
@@ -491,7 +491,7 @@ pub(crate) fn compaction_request_ids(
     append_identity_field(&mut identity, journal_scope.key());
     let request_identity = compaction_request_identity(request_snapshot, prompt_text)?;
     append_identity_field(&mut identity, &request_identity);
-    let discriminator = lash_sansio::core_support::blake3_domain_hash_hex(
+    let discriminator = lash_protocol_types::core_support::blake3_domain_hash_hex(
         LASH_STANDARD_COMPACTION_DOMAIN_VERSION,
         identity,
     );
@@ -592,7 +592,7 @@ async fn summarize_compaction_prefix(
         scoped_effect_controller.execution_scope(),
     )?;
     let read_view = snapshot.read_view();
-    let rendered = lash_sansio::session_model::render_prompt(read_view.messages());
+    let rendered = lash_protocol_types::session_model::render_prompt(read_view.messages());
 
     let model = snapshot.policy.model.as_ref().ok_or_else(|| {
         ContextError::Session("compaction needs the session's model, and it selects none".into())
@@ -604,7 +604,7 @@ async fn summarize_compaction_prefix(
         model: model.clone(),
         messages: rendered.messages,
         tools: Arc::new(Vec::new()),
-        tool_choice: lash_sansio::llm::types::LlmToolChoice::None,
+        tool_choice: lash_protocol_types::llm::types::LlmToolChoice::None,
         attachment_acceptance: Arc::clone(&snapshot.policy.attachment_acceptance),
         generation: snapshot.policy.generation.clone(),
         scope: lash_core::LlmRequestScope::new(
@@ -634,8 +634,8 @@ async fn summarize_compaction_prefix(
         .await
         .map_err(ContextError::from)?;
     match completion.response.terminal_reason {
-        lash_sansio::llm::types::LlmTerminalReason::Stop
-        | lash_sansio::llm::types::LlmTerminalReason::Unknown => {}
+        lash_protocol_types::llm::types::LlmTerminalReason::Stop
+        | lash_protocol_types::llm::types::LlmTerminalReason::Unknown => {}
         reason => {
             return Err(ContextError::Pipeline(format!(
                 "compaction summary ended with terminal reason `{}` ({}); \

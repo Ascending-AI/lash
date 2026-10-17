@@ -16,7 +16,7 @@ use std::time::{Duration, Instant};
 
 use lash_core_ids::clock::{Clock, SystemClock};
 use lash_core_store::checkpoint_graph::{CommitId, NodeId, NodeKind};
-use lash_sansio::{ProcessId, SessionId, TurnId};
+use lash_protocol_types::{ProcessId, SessionId, TurnId};
 use tokio::sync::watch;
 
 use super::super::node_wakes::{LawNode, serve_node_on};
@@ -801,7 +801,7 @@ impl DurableStore for Retiring {
 impl DurableReads for Retiring {
     async fn model_call_pins(
         &self,
-        session: &lash_sansio::SessionId,
+        session: &lash_protocol_types::SessionId,
         owner: &str,
     ) -> Result<Vec<crate::domain::ModelCallPinRow>, DurableError> {
         self.inner.model_call_pins(session, owner).await
@@ -809,7 +809,7 @@ impl DurableReads for Retiring {
 
     async fn model_calls(
         &self,
-        session: &lash_sansio::SessionId,
+        session: &lash_protocol_types::SessionId,
         owner: &str,
     ) -> Result<Vec<lash_core_store::model_calls::ModelCallRecord>, DurableError> {
         self.inner.model_calls(session, owner).await
@@ -874,8 +874,8 @@ impl DurableReads for Retiring {
     }
     async fn cell_roots_within(
         &self,
-        session: &lash_sansio::SessionId,
-        run: &lash_sansio::TurnId,
+        session: &lash_protocol_types::SessionId,
+        run: &lash_protocol_types::TurnId,
         max_rows: usize,
     ) -> Result<Vec<crate::domain::ExecRootRow>, DurableError> {
         self.inner.cell_roots_within(session, run, max_rows).await

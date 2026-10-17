@@ -5,8 +5,8 @@ use super::runtime_boundaries::RuntimeBoundaryHarness;
 use super::*;
 use crate::backend_fault::GeneratedBackendFaultHarness;
 use crate::scheduler::QueuedIngressMode;
-use lash_sansio::SessionId;
-use lash_sansio::sync::MutexExt as _;
+use lash_protocol_types::SessionId;
+use lash_protocol_types::sync::MutexExt as _;
 
 mod provider_turn;
 mod suspend;

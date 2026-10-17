@@ -1,7 +1,7 @@
 use super::*;
-use lash_sansio::ProcessId;
-use lash_sansio::SessionId;
-use lash_sansio::TurnId;
+use lash_protocol_types::ProcessId;
+use lash_protocol_types::SessionId;
+use lash_protocol_types::TurnId;
 use sqlx::Row as _;
 
 #[derive(Clone, Debug, PartialEq, Eq)]

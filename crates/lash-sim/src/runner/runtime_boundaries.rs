@@ -19,7 +19,7 @@ use lash_core::{
     RuntimeEffectOutcome, ToolAttemptLaunch, ToolCallOutput, ToolCallRecord, ToolId,
 };
 use lash_core_execution::ActorContext;
-use lash_sansio::SessionId;
+use lash_protocol_types::SessionId;
 
 use super::*;
 use crate::trace::value_digest;

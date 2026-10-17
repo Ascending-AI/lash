@@ -2,7 +2,7 @@
 //! prompt audits, and the bodies of settled inputs and the payloads of
 //! applied commands (FIG-6607), and settled host tool-intent payloads
 //! (FIG-6612), each one bounded page per release.
-use lash_sansio::SessionId;
+use lash_protocol_types::SessionId;
 use lash_store_sql::session::revisions::MATERIAL_RELEASE_BATCH;
 use sqlx::PgConnection;
 

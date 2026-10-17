@@ -10,7 +10,7 @@ struct LocalTurnEffectRunner {
     prompt_messages: crate::MessageSequence,
     /// The machine's admitted last-call usage at this effect's boundary.
     last_call_usage: Option<crate::LlmUsage>,
-    active_events: lash_sansio::AppendVec<crate::SessionHistoryRecord>,
+    active_events: lash_protocol_types::AppendVec<crate::SessionHistoryRecord>,
     /// The machine waits on a checkpoint that decides a control call's
     /// candidate, which input addressed to the turn supersedes.
     decides_candidate: bool,

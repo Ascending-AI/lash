@@ -40,13 +40,13 @@ impl lash_llm_transport::LlmHttpTransport for CountingSseTransport {
 fn request() -> LlmRequest {
     LlmRequest {
         instructions: None,
-        model: lash_sansio::llm_profile::LlmProfileConfig::new(
-            lash_sansio::llm_profile::RecordedLlmProfile::mint(
-                lash_sansio::llm_profile::LlmProfileKey::new("request-fixture"),
-                lash_sansio::llm_profile::LlmProfileMetadata::new(
+        model: lash_protocol_types::llm_profile::LlmProfileConfig::new(
+            lash_protocol_types::llm_profile::RecordedLlmProfile::mint(
+                lash_protocol_types::llm_profile::LlmProfileKey::new("request-fixture"),
+                lash_protocol_types::llm_profile::LlmProfileMetadata::new(
                     "gemini-3.1-pro-preview".to_string(),
                     std::num::NonZeroUsize::MIN.saturating_add(127_999),
-                    lash_sansio::llm::capability::CacheRetention::Short,
+                    lash_protocol_types::llm::capability::CacheRetention::Short,
                 )
                 .with_capability(Default::default())
                 .with_extra_body(Default::default()),
@@ -198,6 +198,6 @@ fn charge_safety_google_truly_empty_partial_schedules_empty_stream_retry() {
             .retry_decision
             .as_ref()
             .and_then(|decision| decision.decline_cause()),
-        Some(lash_sansio::llm::types::RetryDeclineCause::RetryBudgetExhausted)
+        Some(lash_protocol_types::llm::types::RetryDeclineCause::RetryBudgetExhausted)
     );
 }

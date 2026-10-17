@@ -9,7 +9,7 @@ use std::collections::BTreeMap;
 
 use lash_core_execution::store::RunStore as _;
 use lash_core_execution::{SessionCatalogStore as _, SessionHistoryStore as _};
-use lash_sansio::{ProcessId, SessionId};
+use lash_protocol_types::{ProcessId, SessionId};
 use std::sync::atomic::Ordering;
 
 static CHECKPOINT_DATA_STATEMENT_COUNT: AtomicUsize = AtomicUsize::new(0);
@@ -823,7 +823,7 @@ async fn commit_pair(same_operation: bool, grouped: bool) -> (Vec<String>, u64, 
             &mut state,
             lash_core_execution::OperationId::turn(
                 &session,
-                lash_sansio::TurnId::fixture(name.to_owned()),
+                lash_protocol_types::TurnId::fixture(name.to_owned()),
                 "commit",
             ),
         )
@@ -1396,7 +1396,7 @@ fn partial_run_terminals_are_corruption_at_decode() {
     conn.pragma_update(None, "ignore_check_constraints", true)
         .unwrap();
     let session = SessionId::try_from("s".to_owned()).unwrap();
-    let run = lash_sansio::TurnId::try_from("r".to_owned()).unwrap();
+    let run = lash_protocol_types::TurnId::try_from("r".to_owned()).unwrap();
     for bits in 0..8 {
         conn.execute("DELETE FROM session_runs", []).unwrap();
         conn.execute(
@@ -1469,7 +1469,7 @@ async fn a_terminal_writes_its_window_in_constant_bytes_at_every_history_positio
             )]),
             reply_marker: None,
         }]);
-        let run = lash_sansio::TurnId::fixture(format!("terminal-window-{position}"));
+        let run = lash_protocol_types::TurnId::fixture(format!("terminal-window-{position}"));
         let (commit, appended) = RuntimeCommit::persisted_state_with_operation(
             &mut state,
             lash_core_execution::OperationId::turn(&session, run.clone(), "commit"),
@@ -1493,7 +1493,7 @@ async fn a_terminal_writes_its_window_in_constant_bytes_at_every_history_positio
         written.iter().all(|bytes| *bytes == 8),
         "a terminal's window bytes are not its 8-byte revision: {written:?}"
     );
-    let window = |store: Arc<SqliteStore>, run: lash_sansio::TurnId| {
+    let window = |store: Arc<SqliteStore>, run: lash_protocol_types::TurnId| {
         let session = session.clone();
         async move {
             store

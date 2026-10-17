@@ -36,7 +36,7 @@ use lash_core_execution::StoreSet;
 use lash_durable::runner::Activation;
 use lash_durable::{ActorKey, ActorState, CommitLabel, DurableStore};
 use lash_durable_test::{Fault, Matrix, Scenario, SimClock, SimNodes, SimNodesConfig, Tripwire};
-use lash_sansio::sync::MutexExt as _;
+use lash_protocol_types::sync::MutexExt as _;
 use matrix::MatrixTestExt as _;
 use served::{Tier, World};
 

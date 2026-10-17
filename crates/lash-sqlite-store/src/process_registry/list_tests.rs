@@ -128,7 +128,7 @@ fn until_scope_roster_page_seeks_the_lifetime_scope_index() {
         &lash_core_execution::ProcessListFilter {
             status: lash_core_execution::ProcessStatusFilter::Any,
             until: Some(lash_core_execution::ScopeId::turn(
-                lash_sansio::SessionId::from("plan-session"),
+                lash_protocol_types::SessionId::from("plan-session"),
                 lash_core_execution::TurnId::from("plan-turn"),
             )),
             ..lash_core_execution::ProcessListFilter::default()

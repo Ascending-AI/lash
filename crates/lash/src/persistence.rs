@@ -17,8 +17,8 @@ pub use lash_core::{Durable, ProcessAuthorityReads};
 pub use lash_core_store::checkpoint_graph::{
     DecodeLimits as GraphDecodeLimits, GraphReadPolicy, KernelDataLimits,
 };
-pub use lash_sansio::DurableSerialize;
-pub use lash_sansio::durable_serde::serialize as serialize_durable;
+pub use lash_protocol_types::DurableSerialize;
+pub use lash_protocol_types::durable_serde::serialize as serialize_durable;
 
 #[cfg(any(test, feature = "testing"))]
 pub use lash_core::{
@@ -62,9 +62,9 @@ pub use lash_core_store::store::{
 };
 pub use lash_core_store::{PersistedNodeIds, surface_format};
 /// The protocol-generic form [`SessionHistoryRecord`] specializes.
-pub use lash_sansio::SessionHistoryRecord as GenericSessionHistoryRecord;
-pub use lash_sansio::{AppendVec, BaseRenderCache, ConversationRecord};
-pub use lash_sansio::{VersionRange, VersionRangeError};
+pub use lash_protocol_types::SessionHistoryRecord as GenericSessionHistoryRecord;
+pub use lash_protocol_types::{AppendVec, BaseRenderCache, ConversationRecord};
+pub use lash_protocol_types::{VersionRange, VersionRangeError};
 
 pub use lash_core::CheckpointKind;
 /// The store halves a [`StoreSet`](crate::StoreSet) hands out as trait

@@ -4,7 +4,7 @@ use super::{LABEL, LawBroken, LawOutcome, create, ensure, node, session};
 use crate::domain::{ModelCall, ModelPin, PhaseAdvance, RunSeq, TurnWrite, UnfinishedPhase};
 use crate::{DomainWrite, DurableInstant, DurableStore};
 use lash_core_store::store::{AdmittedTurnRows, RunAdmissionRecord};
-use lash_sansio::{SessionId, TurnId};
+use lash_protocol_types::{SessionId, TurnId};
 
 /// A turn counts the model calls it admitted. Admission starts the count at
 /// 0; each model phase stores its pin's call as the count, and the pin and
@@ -79,9 +79,9 @@ pub async fn a_turn_counts_the_model_calls_it_admitted(store: &dyn DurableStore)
         run: run.clone(),
         admission: RunAdmissionRecord::Turn {
             took: AdmittedTurnRows::Inputs {
-                ids: lash_core_store::store::AdmittedInputIds::one(lash_sansio::InputId::from(
-                    "counted-batch",
-                )),
+                ids: lash_core_store::store::AdmittedInputIds::one(
+                    lash_protocol_types::InputId::from("counted-batch"),
+                ),
             },
             trace: None,
         },
@@ -197,9 +197,9 @@ pub async fn a_receipt_stands_beside_its_model_phase_until_the_next_phase(
             run: run.clone(),
             admission: RunAdmissionRecord::Turn {
                 took: AdmittedTurnRows::Inputs {
-                    ids: lash_core_store::store::AdmittedInputIds::one(lash_sansio::InputId::from(
-                        "receipt-batch",
-                    )),
+                    ids: lash_core_store::store::AdmittedInputIds::one(
+                        lash_protocol_types::InputId::from("receipt-batch"),
+                    ),
                 },
                 trace: None,
             },

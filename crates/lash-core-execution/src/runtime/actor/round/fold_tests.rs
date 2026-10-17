@@ -10,7 +10,7 @@ use lash_core_store::tool_run::{
 };
 use lash_durable::domain::{Ordinal, OwnerKey, RunFacts, RunSeq};
 use lash_durable::{ActorKey, ActorTx, DurableInstant, Epoch, MailSeq, OpenedActor, StateRevision};
-use lash_sansio::{ExecutionLimit, ExecutionPolicy, SessionId, TurnId};
+use lash_protocol_types::{ExecutionLimit, ExecutionPolicy, SessionId, TurnId};
 
 use super::{
     AdmittedExecution, ExecutionDraft, FoldRefusal, PinnedWaits, PolicyView, Recovery, RunFold,

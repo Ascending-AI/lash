@@ -26,7 +26,7 @@ use std::collections::HashMap;
 use std::hash::Hash;
 use std::sync::{Arc, Mutex};
 
-use lash_sansio::sync::MutexExt as _;
+use lash_protocol_types::sync::MutexExt as _;
 
 /// The commits a node is still publishing, per subject: each by the
 /// revision it stands on.

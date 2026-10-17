@@ -30,7 +30,7 @@ use crate::tool_run::{
     OutcomeShape, RankedVerdict, ResultSource,
 };
 use crate::{ConsumerHold, ProcessId, ProcessStartRegistration, ScopeId, ToolCallId};
-use lash_sansio::ToolIntentKind;
+use lash_protocol_types::ToolIntentKind;
 
 #[cfg(test)]
 #[path = "call_run/tests.rs"]

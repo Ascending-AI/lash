@@ -72,7 +72,7 @@ pub trait KernelEffects: Projections + Send + Sync {
     async fn admit(
         &self,
         request: &EffectRequest,
-        call: lash_sansio::ToolCallId,
+        call: lash_protocol_types::ToolCallId,
         outstanding: u64,
         live: u64,
     ) -> Result<Result<MemberDraft, ErrorDatum>, ParentFault>;
@@ -280,14 +280,14 @@ impl PagePlan {
 
 /// The kernel versions this build's machines open a checkpoint root of.
 #[must_use]
-pub fn kernel_reads() -> lash_sansio::VersionRange {
+pub fn kernel_reads() -> lash_protocol_types::VersionRange {
     let newest = lash_kernel_doc::KernelVersion::NEWEST.number();
     let oldest = lash_kernel_doc::KernelVersion::ALL
         .iter()
         .map(|version| version.number())
         .min()
         .unwrap_or(newest);
-    lash_sansio::VersionRange::between(oldest, newest)
+    lash_protocol_types::VersionRange::between(oldest, newest)
 }
 
 /// A process-unique staging lease, and with it a capability epoch: no two

@@ -15,7 +15,7 @@ impl RuntimeTurnDriver<'_> {
 
     fn usage_overflow(
         &self,
-        overflow: lash_sansio::llm::types::TokenUsageOverflow,
+        overflow: lash_protocol_types::llm::types::TokenUsageOverflow,
     ) -> RuntimeError {
         crate::runtime::runtime_error_from_store_commit(
             crate::StoreError::TokenUsageAccountingOverflow {
@@ -149,7 +149,7 @@ impl RuntimeTurnDriver<'_> {
                     Some(crate::TurnFailureCode::BeforeLlmCallFailed.into()),
                     failure.message.clone(),
                     Some(failure.message),
-                    lash_sansio::session_model::RuntimeOutputCuts::standard(),
+                    lash_protocol_types::session_model::RuntimeOutputCuts::standard(),
                 ));
                 Ok(false)
             }
@@ -168,7 +168,7 @@ impl RuntimeTurnDriver<'_> {
         machine: &mut TurnMachine,
         id: crate::sansio::EffectId,
         request: Arc<LlmRequest>,
-        admitted: &lash_sansio::llm::types::AdmittedSend,
+        admitted: &lash_protocol_types::llm::types::AdmittedSend,
         attempt: u32,
         event_tx: &TurnObserver,
     ) -> Result<Option<crate::runtime::durable::session::ModelAnswer>, RuntimeError> {
@@ -971,13 +971,13 @@ impl RuntimeTurnDriver<'_> {
                                     call_id: record.call_id.clone(),
                                     name: record.tool.clone(),
                                     status: match record.output.status() {
-                                        lash_sansio::ToolCallStatus::Success => {
+                                        lash_protocol_types::ToolCallStatus::Success => {
                                             lash_trace::TraceToolCallStatus::Success
                                         }
-                                        lash_sansio::ToolCallStatus::Failure => {
+                                        lash_protocol_types::ToolCallStatus::Failure => {
                                             lash_trace::TraceToolCallStatus::Failure
                                         }
-                                        lash_sansio::ToolCallStatus::Cancelled => {
+                                        lash_protocol_types::ToolCallStatus::Cancelled => {
                                             lash_trace::TraceToolCallStatus::Cancelled
                                         }
                                     },
@@ -1006,10 +1006,9 @@ impl RuntimeTurnDriver<'_> {
         // request. The protocol then reads the cancelled record off the call
         // ledger and finishes the turn cancelled itself.
         let tool_call_cancelled = result.as_ref().ok().is_some_and(|output| {
-            output
-                .tool_calls
-                .iter()
-                .any(|record| record.output.status() == lash_sansio::ToolCallStatus::Cancelled)
+            output.tool_calls.iter().any(|record| {
+                record.output.status() == lash_protocol_types::ToolCallStatus::Cancelled
+            })
         });
         if let Some(code_executor) = self.session.plugins().code_executor() {
             code_executor

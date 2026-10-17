@@ -11,7 +11,7 @@ use std::future::Future;
 use std::sync::{Arc, Mutex, OnceLock};
 use std::time::{Duration, Instant};
 
-use lash_sansio::{SessionId, sync::MutexExt};
+use lash_protocol_types::{SessionId, sync::MutexExt};
 use tokio::sync::Notify;
 use tokio_util::sync::CancellationToken;
 

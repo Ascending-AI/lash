@@ -1,7 +1,7 @@
 use super::*;
-use lash_sansio::SessionId;
-use lash_sansio::TurnId;
-use lash_sansio::sync::MutexExt;
+use lash_protocol_types::SessionId;
+use lash_protocol_types::TurnId;
+use lash_protocol_types::sync::MutexExt;
 
 pub(super) async fn append_contract_execution_boundaries(
     events: &mut Vec<crate::scheduler::DeliveredBoundary>,
@@ -561,13 +561,13 @@ pub(super) fn standard_contract_turn_machine_config() -> lash_core::TurnMachineC
         protocol_driver,
         model_tool_calls: lash_core::sansio::ModelToolCalls::fixture(),
         projector: Arc::new(lash_core::sansio::ChatContextProjector::default()),
-        model: lash_sansio::llm_profile::LlmProfileConfig::new(
-            lash_sansio::llm_profile::RecordedLlmProfile::mint(
-                lash_sansio::llm_profile::LlmProfileKey::new("request-fixture"),
-                lash_sansio::llm_profile::LlmProfileMetadata::new(
+        model: lash_protocol_types::llm_profile::LlmProfileConfig::new(
+            lash_protocol_types::llm_profile::RecordedLlmProfile::mint(
+                lash_protocol_types::llm_profile::LlmProfileKey::new("request-fixture"),
+                lash_protocol_types::llm_profile::LlmProfileMetadata::new(
                     "standard-max-turn-contract".to_string(),
                     std::num::NonZeroUsize::MIN.saturating_add(127_999),
-                    lash_sansio::llm::capability::CacheRetention::Short,
+                    lash_protocol_types::llm::capability::CacheRetention::Short,
                 )
                 .with_capability(lash_core::LlmProfileCapability::default())
                 .with_extra_body(Default::default()),

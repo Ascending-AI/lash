@@ -1,6 +1,6 @@
 //! Request-local omission preserves history and attachment occurrence order.
-use lash_sansio::llm::attachment_delivery::AttachmentPosition;
-use lash_sansio::{AttachmentMaterializationNotice, AttachmentRef};
+use lash_protocol_types::llm::attachment_delivery::AttachmentPosition;
+use lash_protocol_types::{AttachmentMaterializationNotice, AttachmentRef};
 use std::sync::Arc;
 
 /// Replace each attachment the target cannot accept with the mode's text.
@@ -58,7 +58,9 @@ pub fn degrade_unmaterializable_request_attachments(
                                     reference,
                                     AttachmentPosition::ToolResult,
                                 );
-                            *part = lash_sansio::ModelToolReturnPart::text(omission_text(&notice));
+                            *part = lash_protocol_types::ModelToolReturnPart::text(omission_text(
+                                &notice,
+                            ));
                             notices.push(notice);
                         }
                     }

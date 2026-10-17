@@ -17,7 +17,7 @@ use crate::llm::types::{
     LlmContentBlock, LlmMessage, LlmOutputSpec, LlmRequest, LlmRole, LlmToolChoice, LlmToolSpec,
 };
 use crate::{ToolCallOutcome, ToolCallOutput};
-use lash_sansio::core_support::Blake3DomainHasher;
+use lash_protocol_types::core_support::Blake3DomainHasher;
 
 /// LLM-call trace projections, re-exported at their original path from
 /// `lash-core-llm`, which owns the provider records they project.
@@ -331,7 +331,7 @@ pub fn trace_cell_failure(
     if content.captures(lash_trace::ContentCategory::CodeOutput) {
         return failure.clone();
     }
-    use lash_sansio::SchemaAdmissionError;
+    use lash_protocol_types::SchemaAdmissionError;
     crate::CellFailure {
         kind: failure.kind,
         message: String::new(),
@@ -361,7 +361,7 @@ pub fn trace_cell_failure(
         feedback: failure
             .feedback
             .iter()
-            .map(|feedback| lash_sansio::CellFailureRepair {
+            .map(|feedback| lash_protocol_types::CellFailureRepair {
                 plugin_id: feedback.plugin_id.clone(),
                 callback: feedback.callback.clone(),
                 repairs: Vec::new(),
@@ -656,11 +656,11 @@ mod span_identity_tests {
                     retry_budget_consumed: true,
                     retry_decision: Some(crate::RetryDecision::Scheduled {
                         delay: std::time::Duration::from_millis(250),
-                        wait: lash_sansio::llm::types::RetryWait::Throttle,
-                        class: lash_sansio::llm::types::RetryClass::RejectedHttpResponse,
+                        wait: lash_protocol_types::llm::types::RetryWait::Throttle,
+                        class: lash_protocol_types::llm::types::RetryClass::RejectedHttpResponse,
                     }),
                     error: Some(crate::NormalizedError {
-                        class: lash_sansio::llm::types::ProviderFailureKind::Http,
+                        class: lash_protocol_types::llm::types::ProviderFailureKind::Http,
                         code: Some(crate::FailureCode::provider("rate_limit_exceeded")),
                         http_status: Some(429),
                         provider_request_id: None,

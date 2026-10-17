@@ -365,10 +365,10 @@ async fn forged_signature_claim_is_refused() {
 fn one_definition_id_encoding_everywhere() {
     let id = signed_draft().id();
     let spelling = id.to_string();
-    let tagged = serde_json::json!({ lash_sansio::DEFINITION_ID_FIELD: spelling });
+    let tagged = serde_json::json!({ lash_protocol_types::DEFINITION_ID_FIELD: spelling });
 
-    let _: &lash_sansio::ProcessDefinitionId = &id;
-    assert!(spelling.starts_with(lash_sansio::DEFINITION_ID_PREFIX));
+    let _: &lash_protocol_types::ProcessDefinitionId = &id;
+    assert!(spelling.starts_with(lash_protocol_types::DEFINITION_ID_PREFIX));
     assert_eq!(ProcessDefinitionId::parse(&spelling).as_ref(), Ok(&id));
     assert_eq!(serde_json::to_value(&id).expect("serialize id"), tagged);
     assert_eq!(id.to_tagged_json(), tagged);

@@ -2,7 +2,7 @@
 
 use super::session_store_factory::session_store_request;
 use super::*;
-use lash_sansio::SessionId;
+use lash_protocol_types::SessionId;
 use pretty_assertions::assert_eq;
 
 /// Backend observation and fault seam for the session-delete blob laws.
@@ -859,7 +859,7 @@ async fn attachment_prefix_retention(backend_name: &str, handles: SessionDeleteB
         parts: Arc::new(vec![crate::Part::attachment_part(
             "shared-image-part".into(),
             String::new(),
-            Some(lash_sansio::PartAttachment {
+            Some(lash_protocol_types::PartAttachment {
                 reference: reference.clone(),
             }),
         )]),

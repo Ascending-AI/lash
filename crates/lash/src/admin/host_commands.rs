@@ -1,6 +1,6 @@
 use super::AdminContext;
 use crate::support::{EmbedError, LashRuntime, Result, SessionError};
-use lash_sansio::SessionId;
+use lash_protocol_types::SessionId;
 
 #[derive(Clone)]
 /// Facade handle for session command administration.

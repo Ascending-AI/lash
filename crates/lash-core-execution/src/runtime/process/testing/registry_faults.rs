@@ -2,7 +2,7 @@
 //! faults, holds a non-terminal page at a known point,
 //! and counts point reads, over any backend.
 
-use lash_sansio::sync::MutexExt;
+use lash_protocol_types::sync::MutexExt;
 use std::sync::Arc;
 use std::sync::atomic::{AtomicUsize, Ordering};
 

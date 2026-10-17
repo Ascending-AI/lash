@@ -1,4 +1,6 @@
-use lash_sansio::llm::attachment_delivery::{AttachmentPosition, DeliveryForms};
+use lash_protocol_types::{
+    llm::attachment_delivery::AttachmentPosition, llm::attachment_delivery::DeliveryForms,
+};
 #[cfg(any(test, feature = "testing"))]
 pub fn attachment_test_acceptance() -> std::sync::Arc<crate::provider::AttachmentCapabilitySnapshot>
 {

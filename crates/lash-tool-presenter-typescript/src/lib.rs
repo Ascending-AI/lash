@@ -12,7 +12,7 @@ mod types;
 pub use definitions::{PreparedDefinitions, TypescriptDefinitions, emit_definition};
 pub use notes::note_rows;
 
-use lash_sansio::{JsonSchema, ToolContract, ToolManifest};
+use lash_protocol_types::{JsonSchema, ToolContract, ToolManifest};
 use lash_tool_presenter_api::{
     PresentationRefusal, PresentedToolSection, ToolPresentationEntry, ToolPresentationRequest,
     ToolPresenter, import_schema, listing,

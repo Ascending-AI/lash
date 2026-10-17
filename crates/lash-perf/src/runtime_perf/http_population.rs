@@ -182,7 +182,7 @@ async fn call(call: Call) -> Result<Arrival> {
                 max_unsafe_retries: 1,
                 max_duplicate_cost_tokens: None,
             },
-            lash_sansio::ExecutionBudgets::recommended(),
+            lash_protocol_types::ExecutionBudgets::recommended(),
             &lash_core::provider::NoSlotDeliveries,
         )
         .await;

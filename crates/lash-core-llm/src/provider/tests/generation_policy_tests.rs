@@ -31,7 +31,7 @@ fn with_defaults(mut request: LlmRequest, defaults: LlmProfileRequestDefaults) -
 
 fn with_cap(mut request: LlmRequest, cap: u64) -> LlmRequest {
     request.model.metadata_mut().limits.output_tokens =
-        lash_sansio::llm_profile::OutputTokenLimits::new(None, Some(cap)).unwrap();
+        lash_protocol_types::llm_profile::OutputTokenLimits::new(None, Some(cap)).unwrap();
     request
 }
 
@@ -100,7 +100,7 @@ fn generation_policy_clamps_once_and_only_reports_a_cap_that_reached_the_wire() 
         1024,
     );
     request.model.metadata_mut().limits.output_tokens =
-        lash_sansio::llm_profile::OutputTokenLimits::new(Some(2048), Some(1024))
+        lash_protocol_types::llm_profile::OutputTokenLimits::new(Some(2048), Some(1024))
             .expect("valid limits");
     let policy = resolve_generation_policy(&request, "test", &open_wire()).expect("resolved");
     assert_eq!(policy.max_output_tokens, Some(2048));
@@ -139,7 +139,8 @@ fn generation_policy_clamps_once_and_only_reports_a_cap_that_reached_the_wire() 
         GenerationOptionOutcome::Applied
     );
     request.model.metadata_mut().limits.output_tokens =
-        lash_sansio::llm_profile::OutputTokenLimits::new(Some(2048), None).expect("valid limits");
+        lash_protocol_types::llm_profile::OutputTokenLimits::new(Some(2048), None)
+            .expect("valid limits");
     let policy =
         resolve_generation_policy(&request, "test", &open_wire()).expect("no invented cap");
     assert_eq!(policy.max_output_tokens, None);

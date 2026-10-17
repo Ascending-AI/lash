@@ -11,7 +11,7 @@
 //! Nodes are never observed through `load_session`: that constructs a
 //! `SessionGraph` read model whose id indexes can hide duplicate durable rows.
 
-use lash_sansio::SessionId;
+use lash_protocol_types::SessionId;
 use std::collections::BTreeMap;
 use std::fmt::Write as _;
 use std::path::{Path, PathBuf};
@@ -756,8 +756,8 @@ fn differential_attachment_id() -> AttachmentId {
 }
 
 /// The process identity used by the session-ownership fixtures.
-fn differential_process_owner_id() -> lash_sansio::ProcessId {
-    lash_sansio::ProcessId::fixture("differential-process-owner")
+fn differential_process_owner_id() -> lash_protocol_types::ProcessId {
+    lash_protocol_types::ProcessId::fixture("differential-process-owner")
 }
 
 #[expect(

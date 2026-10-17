@@ -3,8 +3,8 @@
 use super::host_commands::{SubmittedCommand, unsettled_command_error};
 use super::{AdminContext, AdminMutation, SessionCommandAdmin};
 use crate::support::{EmbedError, LashRuntime, Result, SessionError};
-use lash_sansio::SessionId;
-use lash_sansio::core_support::RunIdCoreSupport;
+use lash_protocol_types::SessionId;
+use lash_protocol_types::core_support::RunIdCoreSupport;
 
 /// A task's decoded operation failure or a facade refusal. The complete
 /// failure envelope retains classification, provenance and unknown data.

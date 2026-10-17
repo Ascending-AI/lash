@@ -37,7 +37,7 @@ pub(crate) use lash_llm_transport::{
     first_header_value, merge_extra_body, merge_extra_headers, read_http_body_text,
     rejected_before_output, reserved_generation_paths, validate_extra_headers,
 };
-pub(crate) use lash_sansio::ModelToolReturnPart;
+pub(crate) use lash_protocol_types::ModelToolReturnPart;
 pub(crate) use lash_transport_failure::{LlmTransportError, TransportRetryVerdict};
 pub(crate) use std::sync::Arc;
 
@@ -48,7 +48,8 @@ pub(crate) use lash_core::provider::attachment_wire::{
     UnitWriter, check_codec, lower_attachment_json, message_names_missing_file,
     reject_missing_provider_files, segment_context,
 };
-pub(crate) use lash_sansio::AttachmentRef;
-pub(crate) use lash_sansio::llm::attachment_delivery::{
-    AttachmentPosition, Delivery, ProviderAccepts, ProviderFileScope,
+pub(crate) use lash_protocol_types::AttachmentRef;
+pub(crate) use lash_protocol_types::{
+    llm::attachment_delivery::AttachmentPosition, llm::attachment_delivery::Delivery,
+    llm::attachment_delivery::ProviderAccepts, llm::attachment_delivery::ProviderFileScope,
 };

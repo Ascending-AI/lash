@@ -20,7 +20,7 @@ use crate::ProcessId;
 use crate::SessionId;
 use crate::TurnId;
 use crate::session::runtime_ops::RuntimeExecutionContextRuntimeOps as _;
-use lash_sansio::sync::MutexExt;
+use lash_protocol_types::sync::MutexExt;
 // Each submodule documents itself in its own file. Adding an outer doc comment
 // here as well would merge two fragments written in different scopes, and a
 // reader or editor following the merged doc comment — including the
@@ -139,7 +139,7 @@ pub fn performs(tools: &[crate::ToolDefinition]) -> crate::PerformedEffects {
         .map(|tool| {
             (
                 effect_of(tool),
-                lash_sansio::tool_signature(
+                lash_protocol_types::tool_signature(
                     &tool.contract.input_schema.canonical,
                     &tool.contract.output_schema.canonical,
                 ),
@@ -322,10 +322,11 @@ type CompletionFuture =
     Pin<Box<dyn Future<Output = Result<LlmResponse, LlmTransportError>> + Send>>;
 /// The handler's request, and the exact wire when the handler reads it.
 type CompletionFn = dyn Fn(LlmRequest, Option<String>) -> CompletionFuture + Send + Sync;
-type AnswerFn =
-    dyn Fn(lash_sansio::llm::types::ResponseContext, String) -> CompletionFuture + Send + Sync;
+type AnswerFn = dyn Fn(lash_protocol_types::llm::types::ResponseContext, String) -> CompletionFuture
+    + Send
+    + Sync;
 type TemplateFn =
-    dyn Fn(&LlmRequest) -> lash_sansio::llm::types::RecordedRequestTemplate + Send + Sync;
+    dyn Fn(&LlmRequest) -> lash_protocol_types::llm::types::RecordedRequestTemplate + Send + Sync;
 type SerializeConfigFn = dyn Fn() -> serde_json::Value + Send + Sync;
 
 fn empty_provider_config() -> serde_json::Value {
@@ -469,7 +470,10 @@ impl TestProviderBuilder {
     /// [`template`](Self::template) lowers to a body of its own.
     pub fn answer<F, Fut>(mut self, answer: F) -> Self
     where
-        F: Fn(lash_sansio::llm::types::ResponseContext, String) -> Fut + Send + Sync + 'static,
+        F: Fn(lash_protocol_types::llm::types::ResponseContext, String) -> Fut
+            + Send
+            + Sync
+            + 'static,
         Fut: Future<Output = Result<LlmResponse, LlmTransportError>> + Send + 'static,
     {
         self.provider.answer = Some(Arc::new(move |context, body| {
@@ -481,7 +485,7 @@ impl TestProviderBuilder {
     /// Build the recorded template for tests of admission and takeover.
     pub fn template<F>(mut self, template: F) -> Self
     where
-        F: Fn(&LlmRequest) -> lash_sansio::llm::types::RecordedRequestTemplate
+        F: Fn(&LlmRequest) -> lash_protocol_types::llm::types::RecordedRequestTemplate
             + Send
             + Sync
             + 'static,
@@ -524,10 +528,10 @@ impl Provider for TestProvider {
     fn attachment_accepts(
         &self,
         _model: &str,
-        _mime: &lash_sansio::MediaType,
-        _position: lash_sansio::llm::attachment_delivery::AttachmentPosition,
-    ) -> lash_sansio::llm::attachment_delivery::ProviderAccepts {
-        lash_sansio::llm::attachment_delivery::ProviderAccepts {
+        _mime: &lash_protocol_types::MediaType,
+        _position: lash_protocol_types::llm::attachment_delivery::AttachmentPosition,
+    ) -> lash_protocol_types::llm::attachment_delivery::ProviderAccepts {
+        lash_protocol_types::llm::attachment_delivery::ProviderAccepts {
             bytes: true,
             url: true,
             provider_file: None,
@@ -549,11 +553,11 @@ impl Provider for TestProvider {
     async fn lower(
         &mut self,
         request: &LlmRequest,
-        cache: &lash_sansio::llm::types::SegmentCache,
-    ) -> Result<lash_sansio::llm::types::RecordedRequestTemplate, LlmTransportError> {
+        cache: &lash_protocol_types::llm::types::SegmentCache,
+    ) -> Result<lash_protocol_types::llm::types::RecordedRequestTemplate, LlmTransportError> {
         match &self.template {
             Some(template) => Ok(template(request)),
-            None => lash_sansio::llm::types::RecordedRequestTemplate::of_request(
+            None => lash_protocol_types::llm::types::RecordedRequestTemplate::of_request(
                 self.route_identity(request.model.wire_model()),
                 request,
                 cache,
@@ -564,8 +568,8 @@ impl Provider for TestProvider {
 
     async fn send(
         &mut self,
-        body: &lash_sansio::llm::types::LiveRequestBody,
-        context: lash_sansio::llm::types::ResponseContext,
+        body: &lash_protocol_types::llm::types::LiveRequestBody,
+        context: lash_protocol_types::llm::types::ResponseContext,
     ) -> Result<LlmResponse, LlmTransportError> {
         let answered = match &self.answer {
             Some(answer) => answer(context, body.to_wire_string()).await,
@@ -592,8 +596,8 @@ impl Provider for TestProvider {
 
     fn generation_retry_guarantee(
         &self,
-        _context: &lash_sansio::llm::types::ResponseContext,
-        _template: &lash_sansio::llm::types::RecordedRequestTemplate,
+        _context: &lash_protocol_types::llm::types::ResponseContext,
+        _template: &lash_protocol_types::llm::types::RecordedRequestTemplate,
     ) -> crate::provider::GenerationRetryGuarantee {
         self.generation_retry_guarantee
     }

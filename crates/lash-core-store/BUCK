@@ -114,7 +114,7 @@ load(
 )
 
 lash_rust_feature_library(
-    name = "lash-core-store__fv_02d863a2",
+    name = "lash-core-store__fv_0313ad3b",
     build_script = None,
     crate_features = [
         "default",
@@ -136,118 +136,12 @@ lash_rust_feature_library(
         "feature-lane",
         "manual",
     ],
-    variant_deps = {"//crates/lash-checkpoint-encoder:lash-checkpoint-encoder": "//crates/lash-checkpoint-encoder:lash-checkpoint-encoder__fv_57546a29", "//crates/lash-core-effect:lash-core-effect": "//crates/lash-core-effect:lash-core-effect__fv_ae19e4b9", "//crates/lash-core-execution:lash-core-execution": "//crates/lash-core-execution:lash-core-execution__fv_f7bdb02f", "//crates/lash-core-ids:lash-core-ids": "//crates/lash-core-ids:lash-core-ids__fv_eb991e6e", "//crates/lash-core-llm:lash-core-llm": "//crates/lash-core-llm:lash-core-llm__fv_e8e31fb1", "//crates/lash-core:lash-core": "//crates/lash-core:lash-core__fv_b1fddaa3", "//crates/lash-durable:lash-durable": "//crates/lash-durable:lash-durable__fv_dde520fd", "//crates/lash-kernel-dialect:lash-kernel-dialect": "//crates/lash-kernel-dialect:lash-kernel-dialect__fv_66d5dd0a", "//crates/lash-kernel-migrate:lash-kernel-migrate": "//crates/lash-kernel-migrate:lash-kernel-migrate__fv_11cdb259", "//crates/lash-kernel-state:lash-kernel-state": "//crates/lash-kernel-state:lash-kernel-state__fv_4bd72e2f", "//crates/lash-sansio:lash-sansio": "//crates/lash-sansio:lash-sansio__fv_1b411d70", "//crates/lash-sqlite-store:lash-sqlite-store": "//crates/lash-sqlite-store:lash-sqlite-store__fv_361c43e0", "//crates/lash-store-sql:lash-store-sql": "//crates/lash-store-sql:lash-store-sql__fv_0dc86928", "//crates/lash-trace:lash-trace": "//crates/lash-trace:lash-trace__fv_10b9d8fc", "//crates/lash-transport-failure:lash-transport-failure": "//crates/lash-transport-failure:lash-transport-failure__fv_8ec33649", "//crates/lash-vm-protocol:lash-vm-protocol": "//crates/lash-vm-protocol:lash-vm-protocol__fv_06c9f8d0"},
+    variant_deps = {"//crates/lash-checkpoint-encoder:lash-checkpoint-encoder": "//crates/lash-checkpoint-encoder:lash-checkpoint-encoder__fv_d292d8bf", "//crates/lash-core-effect:lash-core-effect": "//crates/lash-core-effect:lash-core-effect__fv_8f6f1131", "//crates/lash-core-execution:lash-core-execution": "//crates/lash-core-execution:lash-core-execution__fv_ae19d894", "//crates/lash-core-ids:lash-core-ids": "//crates/lash-core-ids:lash-core-ids__fv_60a997c3", "//crates/lash-core-llm:lash-core-llm": "//crates/lash-core-llm:lash-core-llm__fv_83519295", "//crates/lash-durable:lash-durable": "//crates/lash-durable:lash-durable__fv_957158c3", "//crates/lash-kernel-check:lash-kernel-check": "//crates/lash-kernel-check:lash-kernel-check__fv_47bd46f0", "//crates/lash-kernel-dialect:lash-kernel-dialect": "//crates/lash-kernel-dialect:lash-kernel-dialect__fv_00ec9f8c", "//crates/lash-kernel-doc:lash-kernel-doc": "//crates/lash-kernel-doc:lash-kernel-doc__fv_45814574", "//crates/lash-kernel-migrate:lash-kernel-migrate": "//crates/lash-kernel-migrate:lash-kernel-migrate__fv_ab91dc6b", "//crates/lash-kernel-state:lash-kernel-state": "//crates/lash-kernel-state:lash-kernel-state__fv_6d3bfb5d", "//crates/lash-kernel-vm:lash-kernel-vm": "//crates/lash-kernel-vm:lash-kernel-vm__fv_fc81a06e", "//crates/lash-protocol-types:lash-protocol-types": "//crates/lash-protocol-types:lash-protocol-types__fv_4769bde9", "//crates/lash-sansio:lash-sansio": "//crates/lash-sansio:lash-sansio__fv_1cdf8461", "//crates/lash-trace:lash-trace": "//crates/lash-trace:lash-trace__fv_237cc8e1", "//crates/lash-transport-failure:lash-transport-failure": "//crates/lash-transport-failure:lash-transport-failure__fv_93de75e2", "//crates/lash-vm-broker:lash-vm-broker": "//crates/lash-vm-broker:lash-vm-broker__fv_61ed2587", "//crates/lash-vm-client:lash-vm-client": "//crates/lash-vm-client:lash-vm-client__fv_fd922927", "//crates/lash-vm-protocol:lash-vm-protocol": "//crates/lash-vm-protocol:lash-vm-protocol__fv_2f2eb32f", "//crates/lash-vm-releases:lash-vm-releases": "//crates/lash-vm-releases:lash-vm-releases__fv_26737218"},
     version = "0.0.0-dev",
 )
 
 lash_rust_feature_library(
-    name = "lash-core-store__fv_04e7ec4c",
-    build_script = None,
-    crate_features = [
-        "default",
-        "perf-witness",
-    ],
-    crate_name = "lash_core_store",
-    declared_features = [
-        "default",
-        "otel-trace",
-        "perf-witness",
-        "synthetic-next",
-        "testing",
-    ],
-    exec_properties = sized_exec_properties("lash-internal-core-store", "lash_core_store"),
-    extra_compile_data = [],
-    manifest_dir = "crates/lash-core-store",
-    package_name = "lash-internal-core-store",
-    tags = [
-        "feature-lane",
-        "manual",
-    ],
-    variant_deps = {"//crates/lash-checkpoint-encoder:lash-checkpoint-encoder": "//crates/lash-checkpoint-encoder:lash-checkpoint-encoder__fv_8665a98c", "//crates/lash-core-effect:lash-core-effect": "//crates/lash-core-effect:lash-core-effect__fv_dff32229", "//crates/lash-core-ids:lash-core-ids": "//crates/lash-core-ids:lash-core-ids__fv_05bb3f9c", "//crates/lash-core-llm:lash-core-llm": "//crates/lash-core-llm:lash-core-llm__fv_9b06a3c8", "//crates/lash-sansio:lash-sansio": "//crates/lash-sansio:lash-sansio__fv_a9b27561", "//crates/lash-trace:lash-trace": "//crates/lash-trace:lash-trace__fv_77669f7f", "//crates/lash-transport-failure:lash-transport-failure": "//crates/lash-transport-failure:lash-transport-failure__fv_e838421a", "//crates/lash-vm-protocol:lash-vm-protocol": "//crates/lash-vm-protocol:lash-vm-protocol__fv_4387d802"},
-    version = "0.0.0-dev",
-)
-
-lash_rust_feature_library(
-    name = "lash-core-store__fv_057f36dc",
-    build_script = None,
-    crate_features = [
-        "default",
-    ],
-    crate_name = "lash_core_store",
-    declared_features = [
-        "default",
-        "otel-trace",
-        "perf-witness",
-        "synthetic-next",
-        "testing",
-    ],
-    exec_properties = sized_exec_properties("lash-internal-core-store", "lash_core_store"),
-    extra_compile_data = [],
-    manifest_dir = "crates/lash-core-store",
-    package_name = "lash-internal-core-store",
-    tags = [
-        "feature-lane",
-        "manual",
-    ],
-    variant_deps = {"//crates/lash-checkpoint-encoder:lash-checkpoint-encoder": "//crates/lash-checkpoint-encoder:lash-checkpoint-encoder__fv_57546a29", "//crates/lash-core-effect:lash-core-effect": "//crates/lash-core-effect:lash-core-effect__fv_5fe9f32e", "//crates/lash-core-execution:lash-core-execution": "//crates/lash-core-execution:lash-core-execution__fv_dea267b5", "//crates/lash-core-ids:lash-core-ids": "//crates/lash-core-ids:lash-core-ids__fv_c0eef79e", "//crates/lash-core-llm:lash-core-llm": "//crates/lash-core-llm:lash-core-llm__fv_03148780", "//crates/lash-core:lash-core": "//crates/lash-core:lash-core__fv_eab68716", "//crates/lash-durable:lash-durable": "//crates/lash-durable:lash-durable__fv_bd74275e", "//crates/lash-kernel-dialect:lash-kernel-dialect": "//crates/lash-kernel-dialect:lash-kernel-dialect__fv_66d5dd0a", "//crates/lash-kernel-migrate:lash-kernel-migrate": "//crates/lash-kernel-migrate:lash-kernel-migrate__fv_11cdb259", "//crates/lash-kernel-state:lash-kernel-state": "//crates/lash-kernel-state:lash-kernel-state__fv_4bd72e2f", "//crates/lash-sqlite-store:lash-sqlite-store": "//crates/lash-sqlite-store:lash-sqlite-store__fv_71ac017c", "//crates/lash-store-sql:lash-store-sql": "//crates/lash-store-sql:lash-store-sql__fv_0dc86928", "//crates/lash-trace:lash-trace": "//crates/lash-trace:lash-trace__fv_72269560"},
-    version = "0.0.0-dev",
-)
-
-lash_rust_feature_library(
-    name = "lash-core-store__fv_0e4c48c1",
-    build_script = None,
-    crate_features = [
-        "default",
-        "testing",
-    ],
-    crate_name = "lash_core_store",
-    declared_features = [
-        "default",
-        "otel-trace",
-        "perf-witness",
-        "synthetic-next",
-        "testing",
-    ],
-    exec_properties = sized_exec_properties("lash-internal-core-store", "lash_core_store"),
-    extra_compile_data = [],
-    manifest_dir = "crates/lash-core-store",
-    package_name = "lash-internal-core-store",
-    tags = [
-        "feature-lane",
-        "manual",
-    ],
-    variant_deps = {"//crates/lash-checkpoint-encoder:lash-checkpoint-encoder": "//crates/lash-checkpoint-encoder:lash-checkpoint-encoder__fv_ddc3bbf0", "//crates/lash-core-effect:lash-core-effect": "//crates/lash-core-effect:lash-core-effect__fv_6e5bba70", "//crates/lash-core-ids:lash-core-ids": "//crates/lash-core-ids:lash-core-ids__fv_f93ad835", "//crates/lash-core-llm:lash-core-llm": "//crates/lash-core-llm:lash-core-llm__fv_9388b265", "//crates/lash-trace:lash-trace": "//crates/lash-trace:lash-trace__fv_72269560"},
-    version = "0.0.0-dev",
-)
-
-lash_rust_feature_library(
-    name = "lash-core-store__fv_1afafbad",
-    build_script = None,
-    crate_features = [
-        "perf-witness",
-    ],
-    crate_name = "lash_core_store",
-    declared_features = [
-        "default",
-        "otel-trace",
-        "perf-witness",
-        "synthetic-next",
-        "testing",
-    ],
-    exec_properties = sized_exec_properties("lash-internal-core-store", "lash_core_store"),
-    extra_compile_data = [],
-    manifest_dir = "crates/lash-core-store",
-    package_name = "lash-internal-core-store",
-    tags = [
-        "feature-lane",
-        "manual",
-    ],
-    variant_deps = {"//crates/lash-checkpoint-encoder:lash-checkpoint-encoder": "//crates/lash-checkpoint-encoder:lash-checkpoint-encoder__fv_8665a98c", "//crates/lash-core-ids:lash-core-ids": "//crates/lash-core-ids:lash-core-ids__fv_05bb3f9c", "//crates/lash-core-llm:lash-core-llm": "//crates/lash-core-llm:lash-core-llm__fv_9b06a3c8", "//crates/lash-sansio:lash-sansio": "//crates/lash-sansio:lash-sansio__fv_a9b27561", "//crates/lash-trace:lash-trace": "//crates/lash-trace:lash-trace__fv_77669f7f", "//crates/lash-transport-failure:lash-transport-failure": "//crates/lash-transport-failure:lash-transport-failure__fv_e838421a", "//crates/lash-vm-protocol:lash-vm-protocol": "//crates/lash-vm-protocol:lash-vm-protocol__fv_4387d802"},
-    version = "0.0.0-dev",
-)
-
-lash_rust_feature_library(
-    name = "lash-core-store__fv_237382c2",
+    name = "lash-core-store__fv_0815ef70",
     build_script = None,
     crate_features = [
         "default",
@@ -270,42 +164,17 @@ lash_rust_feature_library(
         "feature-lane",
         "manual",
     ],
-    variant_deps = {"//crates/lash-checkpoint-encoder:lash-checkpoint-encoder": "//crates/lash-checkpoint-encoder:lash-checkpoint-encoder__fv_45e548bb", "//crates/lash-conformance:lash-conformance": "//crates/lash-conformance:lash-conformance__fv_a94b7785", "//crates/lash-core-effect:lash-core-effect": "//crates/lash-core-effect:lash-core-effect__fv_7acdbcc8", "//crates/lash-core-execution:lash-core-execution": "//crates/lash-core-execution:lash-core-execution__fv_f3edcbcb", "//crates/lash-core-ids:lash-core-ids": "//crates/lash-core-ids:lash-core-ids__fv_66019c18", "//crates/lash-core-llm:lash-core-llm": "//crates/lash-core-llm:lash-core-llm__fv_6ff13f13", "//crates/lash-core-worker:lash-core-worker": "//crates/lash-core-worker:lash-core-worker__fv_8998ff31", "//crates/lash-core:lash-core": "//crates/lash-core:lash-core__fv_297c83f2", "//crates/lash-durable:lash-durable": "//crates/lash-durable:lash-durable__fv_e98f80f3", "//crates/lash-kernel-check:lash-kernel-check": "//crates/lash-kernel-check:lash-kernel-check__fv_47bd46f0", "//crates/lash-kernel-dialect:lash-kernel-dialect": "//crates/lash-kernel-dialect:lash-kernel-dialect__fv_7dff48c2", "//crates/lash-kernel-doc:lash-kernel-doc": "//crates/lash-kernel-doc:lash-kernel-doc__fv_45814574", "//crates/lash-kernel-migrate:lash-kernel-migrate": "//crates/lash-kernel-migrate:lash-kernel-migrate__fv_29488ff1", "//crates/lash-kernel-state:lash-kernel-state": "//crates/lash-kernel-state:lash-kernel-state__fv_3fe37b57", "//crates/lash-sansio:lash-sansio": "//crates/lash-sansio:lash-sansio__fv_477c7b15", "//crates/lash-sqlite-store:lash-sqlite-store": "//crates/lash-sqlite-store:lash-sqlite-store__fv_192f78dc", "//crates/lash-trace:lash-trace": "//crates/lash-trace:lash-trace__fv_401b6ab8", "//crates/lash-transport-failure:lash-transport-failure": "//crates/lash-transport-failure:lash-transport-failure__fv_0de949ad", "//crates/lash-vm-protocol:lash-vm-protocol": "//crates/lash-vm-protocol:lash-vm-protocol__fv_d2be4b5f"},
+    variant_deps = {"//crates/lash-checkpoint-encoder:lash-checkpoint-encoder": "//crates/lash-checkpoint-encoder:lash-checkpoint-encoder__fv_45e548bb", "//crates/lash-conformance:lash-conformance": "//crates/lash-conformance:lash-conformance__fv_51a539c1", "//crates/lash-core-effect:lash-core-effect": "//crates/lash-core-effect:lash-core-effect__fv_b17648b7", "//crates/lash-core-execution:lash-core-execution": "//crates/lash-core-execution:lash-core-execution__fv_c4d8411a", "//crates/lash-core-ids:lash-core-ids": "//crates/lash-core-ids:lash-core-ids__fv_a214f90a", "//crates/lash-core-llm:lash-core-llm": "//crates/lash-core-llm:lash-core-llm__fv_fc70cdc1", "//crates/lash-core-worker:lash-core-worker": "//crates/lash-core-worker:lash-core-worker__fv_b820365a", "//crates/lash-core:lash-core": "//crates/lash-core:lash-core__fv_b539bc21", "//crates/lash-durable:lash-durable": "//crates/lash-durable:lash-durable__fv_68d3775b", "//crates/lash-kernel-check:lash-kernel-check": "//crates/lash-kernel-check:lash-kernel-check__fv_47bd46f0", "//crates/lash-kernel-dialect:lash-kernel-dialect": "//crates/lash-kernel-dialect:lash-kernel-dialect__fv_7dff48c2", "//crates/lash-kernel-doc:lash-kernel-doc": "//crates/lash-kernel-doc:lash-kernel-doc__fv_45814574", "//crates/lash-kernel-migrate:lash-kernel-migrate": "//crates/lash-kernel-migrate:lash-kernel-migrate__fv_29488ff1", "//crates/lash-kernel-state:lash-kernel-state": "//crates/lash-kernel-state:lash-kernel-state__fv_3fe37b57", "//crates/lash-protocol-types:lash-protocol-types": "//crates/lash-protocol-types:lash-protocol-types__fv_95fe79b7", "//crates/lash-sansio:lash-sansio": "//crates/lash-sansio:lash-sansio__fv_ee22391f", "//crates/lash-sqlite-store:lash-sqlite-store": "//crates/lash-sqlite-store:lash-sqlite-store__fv_7e678747", "//crates/lash-trace:lash-trace": "//crates/lash-trace:lash-trace__fv_53f7c2ff", "//crates/lash-transport-failure:lash-transport-failure": "//crates/lash-transport-failure:lash-transport-failure__fv_2fc0ed20", "//crates/lash-vm-protocol:lash-vm-protocol": "//crates/lash-vm-protocol:lash-vm-protocol__fv_c0193712"},
     version = "0.0.0-dev",
 )
 
 lash_rust_feature_library(
-    name = "lash-core-store__fv_264e2a5f",
+    name = "lash-core-store__fv_0e792caa",
     build_script = None,
     crate_features = [
         "default",
-    ],
-    crate_name = "lash_core_store",
-    declared_features = [
-        "default",
-        "otel-trace",
         "perf-witness",
         "synthetic-next",
-        "testing",
-    ],
-    exec_properties = sized_exec_properties("lash-internal-core-store", "lash_core_store"),
-    extra_compile_data = [],
-    manifest_dir = "crates/lash-core-store",
-    package_name = "lash-internal-core-store",
-    tags = [
-        "feature-lane",
-        "manual",
-    ],
-    variant_deps = {"//crates/lash-checkpoint-encoder:lash-checkpoint-encoder": "//crates/lash-checkpoint-encoder:lash-checkpoint-encoder__fv_57546a29", "//crates/lash-core-effect:lash-core-effect": "//crates/lash-core-effect:lash-core-effect__fv_b7529bc9", "//crates/lash-core-execution:lash-core-execution": "//crates/lash-core-execution:lash-core-execution__fv_8614602d", "//crates/lash-core-ids:lash-core-ids": "//crates/lash-core-ids:lash-core-ids__fv_b17d382a", "//crates/lash-core-llm:lash-core-llm": "//crates/lash-core-llm:lash-core-llm__fv_79fd3946", "//crates/lash-core:lash-core": "//crates/lash-core:lash-core__fv_909ddcf7", "//crates/lash-durable:lash-durable": "//crates/lash-durable:lash-durable__fv_9f33e209", "//crates/lash-kernel-dialect:lash-kernel-dialect": "//crates/lash-kernel-dialect:lash-kernel-dialect__fv_66d5dd0a", "//crates/lash-kernel-migrate:lash-kernel-migrate": "//crates/lash-kernel-migrate:lash-kernel-migrate__fv_11cdb259", "//crates/lash-kernel-state:lash-kernel-state": "//crates/lash-kernel-state:lash-kernel-state__fv_4bd72e2f", "//crates/lash-sqlite-store:lash-sqlite-store": "//crates/lash-sqlite-store:lash-sqlite-store__fv_a2c9b98c", "//crates/lash-store-sql:lash-store-sql": "//crates/lash-store-sql:lash-store-sql__fv_0dc86928", "//crates/lash-trace:lash-trace": "//crates/lash-trace:lash-trace__fv_7cb6a6d6"},
-    version = "0.0.0-dev",
-)
-
-lash_rust_feature_library(
-    name = "lash-core-store__fv_3f33b5a9",
-    build_script = None,
-    crate_features = [
-        "default",
-        "perf-witness",
         "testing",
     ],
     crate_name = "lash_core_store",
@@ -324,16 +193,16 @@ lash_rust_feature_library(
         "feature-lane",
         "manual",
     ],
-    variant_deps = {"//crates/lash-conformance:lash-conformance": "//crates/lash-conformance:lash-conformance__fv_9822afb8", "//crates/lash-core-effect:lash-core-effect": "//crates/lash-core-effect:lash-core-effect__fv_9c190566", "//crates/lash-core-execution:lash-core-execution": "//crates/lash-core-execution:lash-core-execution__fv_68e73adc", "//crates/lash-core-ids:lash-core-ids": "//crates/lash-core-ids:lash-core-ids__fv_4f70f08f", "//crates/lash-core-llm:lash-core-llm": "//crates/lash-core-llm:lash-core-llm__fv_d7f212a9", "//crates/lash-core-worker:lash-core-worker": "//crates/lash-core-worker:lash-core-worker__fv_d7028198", "//crates/lash-core:lash-core": "//crates/lash-core:lash-core__fv_591ff1bb", "//crates/lash-durable:lash-durable": "//crates/lash-durable:lash-durable__fv_e56c08dc", "//crates/lash-llm-tools:lash-llm-tools": "//crates/lash-llm-tools:lash-llm-tools__fv_b9dbdd9e", "//crates/lash-llm-transport:lash-llm-transport": "//crates/lash-llm-transport:lash-llm-transport__fv_de656dff", "//crates/lash-plugin-process-controls:lash-plugin-process-controls": "//crates/lash-plugin-process-controls:lash-plugin-process-controls__fv_405af3f6", "//crates/lash-plugin-standard-compaction:lash-plugin-standard-compaction": "//crates/lash-plugin-standard-compaction:lash-plugin-standard-compaction__fv_aa349fd7", "//crates/lash-postgres-store:lash-postgres-store": "//crates/lash-postgres-store:lash-postgres-store__fv_52159c4d", "//crates/lash-protocol-rlm:lash-protocol-rlm": "//crates/lash-protocol-rlm:lash-protocol-rlm__fv_d26935a0", "//crates/lash-protocol-standard:lash-protocol-standard": "//crates/lash-protocol-standard:lash-protocol-standard__fv_16bdfe91", "//crates/lash-provider-anthropic:lash-provider-anthropic": "//crates/lash-provider-anthropic:lash-provider-anthropic__fv_3681e141", "//crates/lash-provider-openai:lash-provider-openai": "//crates/lash-provider-openai:lash-provider-openai__fv_4d709e28", "//crates/lash-sqlite-store:lash-sqlite-store": "//crates/lash-sqlite-store:lash-sqlite-store__fv_ef12f333", "//crates/lash-tool-support:lash-tool-support": "//crates/lash-tool-support:lash-tool-support__fv_938addb0", "//crates/lash-trace:lash-trace": "//crates/lash-trace:lash-trace__fv_53409751", "//crates/lash-vm-broker:lash-vm-broker": "//crates/lash-vm-broker:lash-vm-broker__fv_a064e96d", "//crates/lash-vm-client:lash-vm-client": "//crates/lash-vm-client:lash-vm-client__fv_932b6487", "//crates/lash-vm-runtime:lash-vm-runtime": "//crates/lash-vm-runtime:lash-vm-runtime__fv_ebd1e269", "//crates/lash-vm-worker:lash-vm-worker": "//crates/lash-vm-worker:lash-vm-worker__fv_e47f4e7a", "//crates/lash:lash": "//crates/lash:lash__fv_2621f2e5"},
+    variant_deps = {"//crates/lash-checkpoint-encoder:lash-checkpoint-encoder": "//crates/lash-checkpoint-encoder:lash-checkpoint-encoder__fv_1d59cb9b", "//crates/lash-core-effect:lash-core-effect": "//crates/lash-core-effect:lash-core-effect__fv_545d262f", "//crates/lash-core-execution:lash-core-execution": "//crates/lash-core-execution:lash-core-execution__fv_941a08c4", "//crates/lash-core-ids:lash-core-ids": "//crates/lash-core-ids:lash-core-ids__fv_8ba1cdec", "//crates/lash-core-llm:lash-core-llm": "//crates/lash-core-llm:lash-core-llm__fv_180522ed", "//crates/lash-dialect-python:lash-dialect-python": "//crates/lash-dialect-python:lash-dialect-python__fv_40be046c", "//crates/lash-dialect-typescript:lash-dialect-typescript": "//crates/lash-dialect-typescript:lash-dialect-typescript__fv_030a574c", "//crates/lash-durable-test:lash-durable-test": "//crates/lash-durable-test:lash-durable-test__fv_04d94559", "//crates/lash-durable:lash-durable": "//crates/lash-durable:lash-durable__fv_f9b9d93c", "//crates/lash-ext-date-ecma:lash-ext-date-ecma": "//crates/lash-ext-date-ecma:lash-ext-date-ecma__fv_61b244e2", "//crates/lash-ext-py-core:lash-ext-py-core": "//crates/lash-ext-py-core:lash-ext-py-core__fv_4fdaa734", "//crates/lash-ext-regex-ecma:lash-ext-regex-ecma": "//crates/lash-ext-regex-ecma:lash-ext-regex-ecma__fv_d045f1a8", "//crates/lash-ext-ts-core:lash-ext-ts-core": "//crates/lash-ext-ts-core:lash-ext-ts-core__fv_01d8387e", "//crates/lash-ext-url-whatwg:lash-ext-url-whatwg": "//crates/lash-ext-url-whatwg:lash-ext-url-whatwg__fv_e8aa39b2", "//crates/lash-kernel-check:lash-kernel-check": "//crates/lash-kernel-check:lash-kernel-check__fv_47bd46f0", "//crates/lash-kernel-dialect:lash-kernel-dialect": "//crates/lash-kernel-dialect:lash-kernel-dialect__fv_c6e161f0", "//crates/lash-kernel-doc:lash-kernel-doc": "//crates/lash-kernel-doc:lash-kernel-doc__fv_45814574", "//crates/lash-kernel-lib:lash-kernel-lib": "//crates/lash-kernel-lib:lash-kernel-lib__fv_bda8fe95", "//crates/lash-kernel-migrate:lash-kernel-migrate": "//crates/lash-kernel-migrate:lash-kernel-migrate__fv_08d80bce", "//crates/lash-kernel-state:lash-kernel-state": "//crates/lash-kernel-state:lash-kernel-state__fv_decc367a", "//crates/lash-kernel-vm:lash-kernel-vm": "//crates/lash-kernel-vm:lash-kernel-vm__fv_1f06080a", "//crates/lash-postgres-store:lash-postgres-store": "//crates/lash-postgres-store:lash-postgres-store__fv_0b2d6904", "//crates/lash-protocol-types:lash-protocol-types": "//crates/lash-protocol-types:lash-protocol-types__fv_95fe79b7", "//crates/lash-sansio:lash-sansio": "//crates/lash-sansio:lash-sansio__fv_ee22391f", "//crates/lash-sqlite-store:lash-sqlite-store": "//crates/lash-sqlite-store:lash-sqlite-store__fv_8a18e900", "//crates/lash-trace:lash-trace": "//crates/lash-trace:lash-trace__fv_53f7c2ff", "//crates/lash-transport-failure:lash-transport-failure": "//crates/lash-transport-failure:lash-transport-failure__fv_2fc0ed20", "//crates/lash-vm-broker:lash-vm-broker": "//crates/lash-vm-broker:lash-vm-broker__fv_d2878231", "//crates/lash-vm-client:lash-vm-client": "//crates/lash-vm-client:lash-vm-client__fv_36e63122", "//crates/lash-vm-library:lash-vm-library": "//crates/lash-vm-library:lash-vm-library__fv_8226e6b0", "//crates/lash-vm-protocol:lash-vm-protocol": "//crates/lash-vm-protocol:lash-vm-protocol__fv_ae01e4c4", "//crates/lash-vm-releases:lash-vm-releases": "//crates/lash-vm-releases:lash-vm-releases__fv_566829e6", "//crates/lash-vm-worker:lash-vm-worker": "//crates/lash-vm-worker:lash-vm-worker__fv_bdda751d"},
     version = "0.0.0-dev",
 )
 
 lash_rust_feature_library(
-    name = "lash-core-store__fv_53b57897",
+    name = "lash-core-store__fv_1f957e33",
     build_script = None,
     crate_features = [
         "default",
-        "otel-trace",
+        "perf-witness",
     ],
     crate_name = "lash_core_store",
     declared_features = [
@@ -351,16 +220,18 @@ lash_rust_feature_library(
         "feature-lane",
         "manual",
     ],
-    variant_deps = {"//crates/lash-checkpoint-encoder:lash-checkpoint-encoder": "//crates/lash-checkpoint-encoder:lash-checkpoint-encoder__fv_57546a29", "//crates/lash-core-effect:lash-core-effect": "//crates/lash-core-effect:lash-core-effect__fv_bad947f6", "//crates/lash-core-execution:lash-core-execution": "//crates/lash-core-execution:lash-core-execution__fv_2af91f5e", "//crates/lash-core-ids:lash-core-ids": "//crates/lash-core-ids:lash-core-ids__fv_b17d382a", "//crates/lash-core-llm:lash-core-llm": "//crates/lash-core-llm:lash-core-llm__fv_def1d3da", "//crates/lash-core:lash-core": "//crates/lash-core:lash-core__fv_6ccb3b8d", "//crates/lash-durable:lash-durable": "//crates/lash-durable:lash-durable__fv_e12aadec", "//crates/lash-kernel-dialect:lash-kernel-dialect": "//crates/lash-kernel-dialect:lash-kernel-dialect__fv_66d5dd0a", "//crates/lash-kernel-migrate:lash-kernel-migrate": "//crates/lash-kernel-migrate:lash-kernel-migrate__fv_11cdb259", "//crates/lash-kernel-state:lash-kernel-state": "//crates/lash-kernel-state:lash-kernel-state__fv_4bd72e2f", "//crates/lash-sqlite-store:lash-sqlite-store": "//crates/lash-sqlite-store:lash-sqlite-store__fv_e9c07c81", "//crates/lash-store-sql:lash-store-sql": "//crates/lash-store-sql:lash-store-sql__fv_0dc86928", "//crates/lash-trace:lash-trace": "//crates/lash-trace:lash-trace__fv_7cb6a6d6"},
+    variant_deps = {"//crates/lash-checkpoint-encoder:lash-checkpoint-encoder": "//crates/lash-checkpoint-encoder:lash-checkpoint-encoder__fv_8665a98c", "//crates/lash-core-effect:lash-core-effect": "//crates/lash-core-effect:lash-core-effect__fv_50b4afc7", "//crates/lash-core-ids:lash-core-ids": "//crates/lash-core-ids:lash-core-ids__fv_d25c22bd", "//crates/lash-core-llm:lash-core-llm": "//crates/lash-core-llm:lash-core-llm__fv_9d5e29bd", "//crates/lash-protocol-types:lash-protocol-types": "//crates/lash-protocol-types:lash-protocol-types__fv_43c15285", "//crates/lash-trace:lash-trace": "//crates/lash-trace:lash-trace__fv_2415ba04", "//crates/lash-transport-failure:lash-transport-failure": "//crates/lash-transport-failure:lash-transport-failure__fv_19f8278c", "//crates/lash-vm-protocol:lash-vm-protocol": "//crates/lash-vm-protocol:lash-vm-protocol__fv_61d13f6c"},
     version = "0.0.0-dev",
 )
 
 lash_rust_feature_library(
-    name = "lash-core-store__fv_59a37f80",
+    name = "lash-core-store__fv_304ca809",
     build_script = None,
     crate_features = [
         "default",
+        "perf-witness",
         "synthetic-next",
+        "testing",
     ],
     crate_name = "lash_core_store",
     declared_features = [
@@ -378,64 +249,12 @@ lash_rust_feature_library(
         "feature-lane",
         "manual",
     ],
-    variant_deps = {"//crates/lash-checkpoint-encoder:lash-checkpoint-encoder": "//crates/lash-checkpoint-encoder:lash-checkpoint-encoder__fv_d292d8bf", "//crates/lash-core-effect:lash-core-effect": "//crates/lash-core-effect:lash-core-effect__fv_8588c6a9", "//crates/lash-core-execution:lash-core-execution": "//crates/lash-core-execution:lash-core-execution__fv_3eedf292", "//crates/lash-core-ids:lash-core-ids": "//crates/lash-core-ids:lash-core-ids__fv_86b1ef82", "//crates/lash-core-llm:lash-core-llm": "//crates/lash-core-llm:lash-core-llm__fv_0aa58313", "//crates/lash-durable:lash-durable": "//crates/lash-durable:lash-durable__fv_cb78dbe5", "//crates/lash-kernel-check:lash-kernel-check": "//crates/lash-kernel-check:lash-kernel-check__fv_47bd46f0", "//crates/lash-kernel-dialect:lash-kernel-dialect": "//crates/lash-kernel-dialect:lash-kernel-dialect__fv_7dff48c2", "//crates/lash-kernel-doc:lash-kernel-doc": "//crates/lash-kernel-doc:lash-kernel-doc__fv_45814574", "//crates/lash-kernel-migrate:lash-kernel-migrate": "//crates/lash-kernel-migrate:lash-kernel-migrate__fv_29488ff1", "//crates/lash-kernel-state:lash-kernel-state": "//crates/lash-kernel-state:lash-kernel-state__fv_3fe37b57", "//crates/lash-sansio:lash-sansio": "//crates/lash-sansio:lash-sansio__fv_73d4275e", "//crates/lash-trace:lash-trace": "//crates/lash-trace:lash-trace__fv_ce8a557a", "//crates/lash-transport-failure:lash-transport-failure": "//crates/lash-transport-failure:lash-transport-failure__fv_91ee5949", "//crates/lash-vm-protocol:lash-vm-protocol": "//crates/lash-vm-protocol:lash-vm-protocol__fv_4cc1873b"},
+    variant_deps = {"//crates/lash-checkpoint-encoder:lash-checkpoint-encoder": "//crates/lash-checkpoint-encoder:lash-checkpoint-encoder__fv_1d59cb9b", "//crates/lash-conformance:lash-conformance": "//crates/lash-conformance:lash-conformance__fv_2647e8cb", "//crates/lash-core-effect:lash-core-effect": "//crates/lash-core-effect:lash-core-effect__fv_75e5159f", "//crates/lash-core-execution:lash-core-execution": "//crates/lash-core-execution:lash-core-execution__fv_261a1069", "//crates/lash-core-ids:lash-core-ids": "//crates/lash-core-ids:lash-core-ids__fv_8ba1cdec", "//crates/lash-core-llm:lash-core-llm": "//crates/lash-core-llm:lash-core-llm__fv_180522ed", "//crates/lash-core-worker:lash-core-worker": "//crates/lash-core-worker:lash-core-worker__fv_b947d677", "//crates/lash-core:lash-core": "//crates/lash-core:lash-core__fv_0b4b0934", "//crates/lash-durable-test:lash-durable-test": "//crates/lash-durable-test:lash-durable-test__fv_a5b5516e", "//crates/lash-durable:lash-durable": "//crates/lash-durable:lash-durable__fv_f21dfa66", "//crates/lash-helper-labels:lash-helper-labels": "//crates/lash-helper-labels:lash-helper-labels__fv_71e03991", "//crates/lash-kernel-check:lash-kernel-check": "//crates/lash-kernel-check:lash-kernel-check__fv_47bd46f0", "//crates/lash-kernel-dialect:lash-kernel-dialect": "//crates/lash-kernel-dialect:lash-kernel-dialect__fv_7dff48c2", "//crates/lash-kernel-doc:lash-kernel-doc": "//crates/lash-kernel-doc:lash-kernel-doc__fv_45814574", "//crates/lash-kernel-migrate:lash-kernel-migrate": "//crates/lash-kernel-migrate:lash-kernel-migrate__fv_29488ff1", "//crates/lash-kernel-state:lash-kernel-state": "//crates/lash-kernel-state:lash-kernel-state__fv_3fe37b57", "//crates/lash-plugin-mcp:lash-plugin-mcp": "//crates/lash-plugin-mcp:lash-plugin-mcp__fv_51d3d93a", "//crates/lash-plugin-process-controls:lash-plugin-process-controls": "//crates/lash-plugin-process-controls:lash-plugin-process-controls__fv_ea3d1f2e", "//crates/lash-plugin-standard-compaction:lash-plugin-standard-compaction": "//crates/lash-plugin-standard-compaction:lash-plugin-standard-compaction__fv_8e6fa9a2", "//crates/lash-postgres-store:lash-postgres-store": "//crates/lash-postgres-store:lash-postgres-store__fv_3bedc555", "//crates/lash-protocol-standard:lash-protocol-standard": "//crates/lash-protocol-standard:lash-protocol-standard__fv_74282b31", "//crates/lash-protocol-types:lash-protocol-types": "//crates/lash-protocol-types:lash-protocol-types__fv_95fe79b7", "//crates/lash-sansio:lash-sansio": "//crates/lash-sansio:lash-sansio__fv_ee22391f", "//crates/lash-sqlite-store:lash-sqlite-store": "//crates/lash-sqlite-store:lash-sqlite-store__fv_502d4cff", "//crates/lash-tool-presenter-api:lash-tool-presenter-api": "//crates/lash-tool-presenter-api:lash-tool-presenter-api__fv_e40f978a", "//crates/lash-tool-presenter-standard:lash-tool-presenter-standard": "//crates/lash-tool-presenter-standard:lash-tool-presenter-standard__fv_b2ae604f", "//crates/lash-tool-support:lash-tool-support": "//crates/lash-tool-support:lash-tool-support__fv_c6e78767", "//crates/lash-trace:lash-trace": "//crates/lash-trace:lash-trace__fv_53f7c2ff", "//crates/lash-transport-failure:lash-transport-failure": "//crates/lash-transport-failure:lash-transport-failure__fv_2fc0ed20", "//crates/lash-vm-protocol:lash-vm-protocol": "//crates/lash-vm-protocol:lash-vm-protocol__fv_c0193712", "//crates/lash:lash": "//crates/lash:lash__fv_2ede612c", "//third-party/vendored/lash-rmcp:lash-rmcp": "//third-party/vendored/lash-rmcp:lash-rmcp__fv_e2e7b48c"},
     version = "0.0.0-dev",
 )
 
 lash_rust_feature_library(
-    name = "lash-core-store__fv_612fe365",
-    build_script = None,
-    crate_features = [
-        "default",
-    ],
-    crate_name = "lash_core_store",
-    declared_features = [
-        "default",
-        "otel-trace",
-        "perf-witness",
-        "synthetic-next",
-        "testing",
-    ],
-    exec_properties = sized_exec_properties("lash-internal-core-store", "lash_core_store"),
-    extra_compile_data = [],
-    manifest_dir = "crates/lash-core-store",
-    package_name = "lash-internal-core-store",
-    tags = [
-        "feature-lane",
-        "manual",
-    ],
-    variant_deps = {"//crates/lash-checkpoint-encoder:lash-checkpoint-encoder": "//crates/lash-checkpoint-encoder:lash-checkpoint-encoder__fv_57546a29", "//crates/lash-core-effect:lash-core-effect": "//crates/lash-core-effect:lash-core-effect__fv_c802ad60", "//crates/lash-core-execution:lash-core-execution": "//crates/lash-core-execution:lash-core-execution__fv_3a154a72", "//crates/lash-core-ids:lash-core-ids": "//crates/lash-core-ids:lash-core-ids__fv_27c9adad", "//crates/lash-core-llm:lash-core-llm": "//crates/lash-core-llm:lash-core-llm__fv_e215d32e", "//crates/lash-core:lash-core": "//crates/lash-core:lash-core__fv_7df10aa1", "//crates/lash-durable:lash-durable": "//crates/lash-durable:lash-durable__fv_adbb7f2f", "//crates/lash-kernel-dialect:lash-kernel-dialect": "//crates/lash-kernel-dialect:lash-kernel-dialect__fv_66d5dd0a", "//crates/lash-kernel-migrate:lash-kernel-migrate": "//crates/lash-kernel-migrate:lash-kernel-migrate__fv_11cdb259", "//crates/lash-kernel-state:lash-kernel-state": "//crates/lash-kernel-state:lash-kernel-state__fv_4bd72e2f", "//crates/lash-sqlite-store:lash-sqlite-store": "//crates/lash-sqlite-store:lash-sqlite-store__fv_1e3103c4", "//crates/lash-store-sql:lash-store-sql": "//crates/lash-store-sql:lash-store-sql__fv_0dc86928", "//crates/lash-trace:lash-trace": "//crates/lash-trace:lash-trace__fv_7cb6a6d6"},
-    version = "0.0.0-dev",
-)
-
-lash_rust_feature_library(
-    name = "lash-core-store__fv_896f9d88",
-    build_script = None,
-    crate_features = [
-        "default",
-    ],
-    crate_name = "lash_core_store",
-    declared_features = [
-        "default",
-        "otel-trace",
-        "perf-witness",
-        "synthetic-next",
-        "testing",
-    ],
-    exec_properties = sized_exec_properties("lash-internal-core-store", "lash_core_store"),
-    extra_compile_data = [],
-    manifest_dir = "crates/lash-core-store",
-    package_name = "lash-internal-core-store",
-    tags = [
-        "feature-lane",
-        "manual",
-    ],
-    variant_deps = {"//crates/lash-checkpoint-encoder:lash-checkpoint-encoder": "//crates/lash-checkpoint-encoder:lash-checkpoint-encoder__fv_57546a29", "//crates/lash-core-effect:lash-core-effect": "//crates/lash-core-effect:lash-core-effect__fv_45996a8e", "//crates/lash-core-execution:lash-core-execution": "//crates/lash-core-execution:lash-core-execution__fv_581beb04", "//crates/lash-core-ids:lash-core-ids": "//crates/lash-core-ids:lash-core-ids__fv_b17d382a", "//crates/lash-core-llm:lash-core-llm": "//crates/lash-core-llm:lash-core-llm__fv_def1d3da", "//crates/lash-core:lash-core": "//crates/lash-core:lash-core__fv_55fa062f", "//crates/lash-durable:lash-durable": "//crates/lash-durable:lash-durable__fv_91d617c8", "//crates/lash-kernel-dialect:lash-kernel-dialect": "//crates/lash-kernel-dialect:lash-kernel-dialect__fv_66d5dd0a", "//crates/lash-kernel-migrate:lash-kernel-migrate": "//crates/lash-kernel-migrate:lash-kernel-migrate__fv_11cdb259", "//crates/lash-kernel-state:lash-kernel-state": "//crates/lash-kernel-state:lash-kernel-state__fv_4bd72e2f", "//crates/lash-sqlite-store:lash-sqlite-store": "//crates/lash-sqlite-store:lash-sqlite-store__fv_c8e1d6e4", "//crates/lash-store-sql:lash-store-sql": "//crates/lash-store-sql:lash-store-sql__fv_0dc86928", "//crates/lash-trace:lash-trace": "//crates/lash-trace:lash-trace__fv_7cb6a6d6"},
-    version = "0.0.0-dev",
-)
-
-lash_rust_feature_library(
-    name = "lash-core-store__fv_932fa73d",
+    name = "lash-core-store__fv_31a095d9",
     build_script = None,
     crate_features = [
         "default",
@@ -457,15 +276,147 @@ lash_rust_feature_library(
         "feature-lane",
         "manual",
     ],
-    variant_deps = {"//crates/lash-checkpoint-encoder:lash-checkpoint-encoder": "//crates/lash-checkpoint-encoder:lash-checkpoint-encoder__fv_d292d8bf", "//crates/lash-core-effect:lash-core-effect": "//crates/lash-core-effect:lash-core-effect__fv_769e425c", "//crates/lash-core-execution:lash-core-execution": "//crates/lash-core-execution:lash-core-execution__fv_0c8bdfb3", "//crates/lash-core-ids:lash-core-ids": "//crates/lash-core-ids:lash-core-ids__fv_86b1ef82", "//crates/lash-core-llm:lash-core-llm": "//crates/lash-core-llm:lash-core-llm__fv_0aa58313", "//crates/lash-durable:lash-durable": "//crates/lash-durable:lash-durable__fv_f1456a12", "//crates/lash-kernel-check:lash-kernel-check": "//crates/lash-kernel-check:lash-kernel-check__fv_47bd46f0", "//crates/lash-kernel-dialect:lash-kernel-dialect": "//crates/lash-kernel-dialect:lash-kernel-dialect__fv_00ec9f8c", "//crates/lash-kernel-doc:lash-kernel-doc": "//crates/lash-kernel-doc:lash-kernel-doc__fv_45814574", "//crates/lash-kernel-migrate:lash-kernel-migrate": "//crates/lash-kernel-migrate:lash-kernel-migrate__fv_ab91dc6b", "//crates/lash-kernel-state:lash-kernel-state": "//crates/lash-kernel-state:lash-kernel-state__fv_6d3bfb5d", "//crates/lash-kernel-vm:lash-kernel-vm": "//crates/lash-kernel-vm:lash-kernel-vm__fv_fc81a06e", "//crates/lash-sansio:lash-sansio": "//crates/lash-sansio:lash-sansio__fv_73d4275e", "//crates/lash-trace:lash-trace": "//crates/lash-trace:lash-trace__fv_ce8a557a", "//crates/lash-transport-failure:lash-transport-failure": "//crates/lash-transport-failure:lash-transport-failure__fv_91ee5949", "//crates/lash-vm-broker:lash-vm-broker": "//crates/lash-vm-broker:lash-vm-broker__fv_8ac8ae82", "//crates/lash-vm-client:lash-vm-client": "//crates/lash-vm-client:lash-vm-client__fv_0e798b0e", "//crates/lash-vm-protocol:lash-vm-protocol": "//crates/lash-vm-protocol:lash-vm-protocol__fv_69a0d5ca", "//crates/lash-vm-releases:lash-vm-releases": "//crates/lash-vm-releases:lash-vm-releases__fv_26737218"},
+    variant_deps = {"//crates/lash-checkpoint-encoder:lash-checkpoint-encoder": "//crates/lash-checkpoint-encoder:lash-checkpoint-encoder__fv_57546a29", "//crates/lash-core-effect:lash-core-effect": "//crates/lash-core-effect:lash-core-effect__fv_3fa4314c", "//crates/lash-core-execution:lash-core-execution": "//crates/lash-core-execution:lash-core-execution__fv_0d0a4b88", "//crates/lash-core-ids:lash-core-ids": "//crates/lash-core-ids:lash-core-ids__fv_df42f1b5", "//crates/lash-core-llm:lash-core-llm": "//crates/lash-core-llm:lash-core-llm__fv_c066c7f7", "//crates/lash-core:lash-core": "//crates/lash-core:lash-core__fv_6ff96571", "//crates/lash-durable:lash-durable": "//crates/lash-durable:lash-durable__fv_e85ff93d", "//crates/lash-kernel-dialect:lash-kernel-dialect": "//crates/lash-kernel-dialect:lash-kernel-dialect__fv_66d5dd0a", "//crates/lash-kernel-migrate:lash-kernel-migrate": "//crates/lash-kernel-migrate:lash-kernel-migrate__fv_11cdb259", "//crates/lash-kernel-state:lash-kernel-state": "//crates/lash-kernel-state:lash-kernel-state__fv_4bd72e2f", "//crates/lash-protocol-types:lash-protocol-types": "//crates/lash-protocol-types:lash-protocol-types__fv_e6e8f54c", "//crates/lash-sansio:lash-sansio": "//crates/lash-sansio:lash-sansio__fv_b3898691", "//crates/lash-sqlite-store:lash-sqlite-store": "//crates/lash-sqlite-store:lash-sqlite-store__fv_a1ab88b9", "//crates/lash-store-sql:lash-store-sql": "//crates/lash-store-sql:lash-store-sql__fv_0dc86928", "//crates/lash-trace:lash-trace": "//crates/lash-trace:lash-trace__fv_2ca042c3", "//crates/lash-transport-failure:lash-transport-failure": "//crates/lash-transport-failure:lash-transport-failure__fv_db916377", "//crates/lash-vm-protocol:lash-vm-protocol": "//crates/lash-vm-protocol:lash-vm-protocol__fv_88e13ba6"},
     version = "0.0.0-dev",
 )
 
 lash_rust_feature_library(
-    name = "lash-core-store__fv_9b8844e3",
+    name = "lash-core-store__fv_45653cb4",
     build_script = None,
     crate_features = [
         "default",
+        "testing",
+    ],
+    crate_name = "lash_core_store",
+    declared_features = [
+        "default",
+        "otel-trace",
+        "perf-witness",
+        "synthetic-next",
+        "testing",
+    ],
+    exec_properties = sized_exec_properties("lash-internal-core-store", "lash_core_store"),
+    extra_compile_data = [],
+    manifest_dir = "crates/lash-core-store",
+    package_name = "lash-internal-core-store",
+    tags = [
+        "feature-lane",
+        "manual",
+    ],
+    variant_deps = {"//crates/lash-checkpoint-encoder:lash-checkpoint-encoder": "//crates/lash-checkpoint-encoder:lash-checkpoint-encoder__fv_ddc3bbf0", "//crates/lash-core-effect:lash-core-effect": "//crates/lash-core-effect:lash-core-effect__fv_6b4bbcaa", "//crates/lash-core-execution:lash-core-execution": "//crates/lash-core-execution:lash-core-execution__fv_56d21aff", "//crates/lash-core-ids:lash-core-ids": "//crates/lash-core-ids:lash-core-ids__fv_9c068b9f", "//crates/lash-core-llm:lash-core-llm": "//crates/lash-core-llm:lash-core-llm__fv_0062af94", "//crates/lash-durable:lash-durable": "//crates/lash-durable:lash-durable__fv_5a2868eb", "//crates/lash-kernel-dialect:lash-kernel-dialect": "//crates/lash-kernel-dialect:lash-kernel-dialect__fv_66d5dd0a", "//crates/lash-kernel-migrate:lash-kernel-migrate": "//crates/lash-kernel-migrate:lash-kernel-migrate__fv_11cdb259", "//crates/lash-kernel-state:lash-kernel-state": "//crates/lash-kernel-state:lash-kernel-state__fv_4bd72e2f", "//crates/lash-sansio:lash-sansio": "//crates/lash-sansio:lash-sansio__fv_43dbea3a", "//crates/lash-trace:lash-trace": "//crates/lash-trace:lash-trace__fv_b49dfc46"},
+    version = "0.0.0-dev",
+)
+
+lash_rust_feature_library(
+    name = "lash-core-store__fv_4c084b98",
+    build_script = None,
+    crate_features = [
+        "default",
+    ],
+    crate_name = "lash_core_store",
+    declared_features = [
+        "default",
+        "otel-trace",
+        "perf-witness",
+        "synthetic-next",
+        "testing",
+    ],
+    exec_properties = sized_exec_properties("lash-internal-core-store", "lash_core_store"),
+    extra_compile_data = [],
+    manifest_dir = "crates/lash-core-store",
+    package_name = "lash-internal-core-store",
+    tags = [
+        "feature-lane",
+        "manual",
+    ],
+    variant_deps = {"//crates/lash-checkpoint-encoder:lash-checkpoint-encoder": "//crates/lash-checkpoint-encoder:lash-checkpoint-encoder__fv_57546a29", "//crates/lash-core-effect:lash-core-effect": "//crates/lash-core-effect:lash-core-effect__fv_a70304f4", "//crates/lash-core-execution:lash-core-execution": "//crates/lash-core-execution:lash-core-execution__fv_44cd0f94", "//crates/lash-core-ids:lash-core-ids": "//crates/lash-core-ids:lash-core-ids__fv_367b6f7d", "//crates/lash-core-llm:lash-core-llm": "//crates/lash-core-llm:lash-core-llm__fv_958b463d", "//crates/lash-durable:lash-durable": "//crates/lash-durable:lash-durable__fv_48f4233d", "//crates/lash-kernel-dialect:lash-kernel-dialect": "//crates/lash-kernel-dialect:lash-kernel-dialect__fv_66d5dd0a", "//crates/lash-kernel-migrate:lash-kernel-migrate": "//crates/lash-kernel-migrate:lash-kernel-migrate__fv_11cdb259", "//crates/lash-kernel-state:lash-kernel-state": "//crates/lash-kernel-state:lash-kernel-state__fv_4bd72e2f", "//crates/lash-kernel-vm:lash-kernel-vm": "//crates/lash-kernel-vm:lash-kernel-vm__fv_a86c33ba", "//crates/lash-protocol-types:lash-protocol-types": "//crates/lash-protocol-types:lash-protocol-types__fv_43c15285", "//crates/lash-sansio:lash-sansio": "//crates/lash-sansio:lash-sansio__fv_a0d1c0c2", "//crates/lash-trace:lash-trace": "//crates/lash-trace:lash-trace__fv_2415ba04", "//crates/lash-transport-failure:lash-transport-failure": "//crates/lash-transport-failure:lash-transport-failure__fv_19f8278c", "//crates/lash-vm-broker:lash-vm-broker": "//crates/lash-vm-broker:lash-vm-broker__fv_d5ba5feb", "//crates/lash-vm-protocol:lash-vm-protocol": "//crates/lash-vm-protocol:lash-vm-protocol__fv_bd47f46a", "//crates/lash-vm-releases:lash-vm-releases": "//crates/lash-vm-releases:lash-vm-releases__fv_e7d797cb"},
+    version = "0.0.0-dev",
+)
+
+lash_rust_feature_library(
+    name = "lash-core-store__fv_5623408c",
+    build_script = None,
+    crate_features = [
+        "default",
+        "perf-witness",
+        "testing",
+    ],
+    crate_name = "lash_core_store",
+    declared_features = [
+        "default",
+        "otel-trace",
+        "perf-witness",
+        "synthetic-next",
+        "testing",
+    ],
+    exec_properties = sized_exec_properties("lash-internal-core-store", "lash_core_store"),
+    extra_compile_data = [],
+    manifest_dir = "crates/lash-core-store",
+    package_name = "lash-internal-core-store",
+    tags = [
+        "feature-lane",
+        "manual",
+    ],
+    variant_deps = {"//crates/lash-conformance:lash-conformance": "//crates/lash-conformance:lash-conformance__fv_792a99ce", "//crates/lash-core-effect:lash-core-effect": "//crates/lash-core-effect:lash-core-effect__fv_d32bdaa3", "//crates/lash-core-execution:lash-core-execution": "//crates/lash-core-execution:lash-core-execution__fv_0a2008e9", "//crates/lash-core-ids:lash-core-ids": "//crates/lash-core-ids:lash-core-ids__fv_ec183e95", "//crates/lash-core-llm:lash-core-llm": "//crates/lash-core-llm:lash-core-llm__fv_efcdcb7a", "//crates/lash-core-worker:lash-core-worker": "//crates/lash-core-worker:lash-core-worker__fv_b930bcdf", "//crates/lash-core:lash-core": "//crates/lash-core:lash-core__fv_05b1d900", "//crates/lash-durable:lash-durable": "//crates/lash-durable:lash-durable__fv_2794341b", "//crates/lash-llm-tools:lash-llm-tools": "//crates/lash-llm-tools:lash-llm-tools__fv_814cac70", "//crates/lash-llm-transport:lash-llm-transport": "//crates/lash-llm-transport:lash-llm-transport__fv_5f03288e", "//crates/lash-plugin-process-controls:lash-plugin-process-controls": "//crates/lash-plugin-process-controls:lash-plugin-process-controls__fv_f2521226", "//crates/lash-plugin-standard-compaction:lash-plugin-standard-compaction": "//crates/lash-plugin-standard-compaction:lash-plugin-standard-compaction__fv_677d0260", "//crates/lash-postgres-store:lash-postgres-store": "//crates/lash-postgres-store:lash-postgres-store__fv_e9da4cf9", "//crates/lash-protocol-rlm:lash-protocol-rlm": "//crates/lash-protocol-rlm:lash-protocol-rlm__fv_4754dbea", "//crates/lash-protocol-standard:lash-protocol-standard": "//crates/lash-protocol-standard:lash-protocol-standard__fv_dceb5155", "//crates/lash-provider-anthropic:lash-provider-anthropic": "//crates/lash-provider-anthropic:lash-provider-anthropic__fv_85403932", "//crates/lash-provider-openai:lash-provider-openai": "//crates/lash-provider-openai:lash-provider-openai__fv_4362fa61", "//crates/lash-rlm-types:lash-rlm-types": "//crates/lash-rlm-types:lash-rlm-types__fv_332c0941", "//crates/lash-sansio:lash-sansio": "//crates/lash-sansio:lash-sansio__fv_43dbea3a", "//crates/lash-sqlite-store:lash-sqlite-store": "//crates/lash-sqlite-store:lash-sqlite-store__fv_614a189a", "//crates/lash-tool-support:lash-tool-support": "//crates/lash-tool-support:lash-tool-support__fv_5994149b", "//crates/lash-trace:lash-trace": "//crates/lash-trace:lash-trace__fv_b49dfc46", "//crates/lash-vm-broker:lash-vm-broker": "//crates/lash-vm-broker:lash-vm-broker__fv_dfadafe9", "//crates/lash-vm-client:lash-vm-client": "//crates/lash-vm-client:lash-vm-client__fv_b0bbc4b5", "//crates/lash-vm-runtime:lash-vm-runtime": "//crates/lash-vm-runtime:lash-vm-runtime__fv_4c61d86a", "//crates/lash-vm-worker:lash-vm-worker": "//crates/lash-vm-worker:lash-vm-worker__fv_fd20c196", "//crates/lash:lash": "//crates/lash:lash__fv_fca9596d"},
+    version = "0.0.0-dev",
+)
+
+lash_rust_feature_library(
+    name = "lash-core-store__fv_7416bf54",
+    build_script = None,
+    crate_features = [
+        "default",
+    ],
+    crate_name = "lash_core_store",
+    declared_features = [
+        "default",
+        "otel-trace",
+        "perf-witness",
+        "synthetic-next",
+        "testing",
+    ],
+    exec_properties = sized_exec_properties("lash-internal-core-store", "lash_core_store"),
+    extra_compile_data = [],
+    manifest_dir = "crates/lash-core-store",
+    package_name = "lash-internal-core-store",
+    tags = [
+        "feature-lane",
+        "manual",
+    ],
+    variant_deps = {"//crates/lash-checkpoint-encoder:lash-checkpoint-encoder": "//crates/lash-checkpoint-encoder:lash-checkpoint-encoder__fv_57546a29", "//crates/lash-core-effect:lash-core-effect": "//crates/lash-core-effect:lash-core-effect__fv_2c4f39d3", "//crates/lash-core-execution:lash-core-execution": "//crates/lash-core-execution:lash-core-execution__fv_16b9540a", "//crates/lash-core-ids:lash-core-ids": "//crates/lash-core-ids:lash-core-ids__fv_cb88884c", "//crates/lash-core-llm:lash-core-llm": "//crates/lash-core-llm:lash-core-llm__fv_3941b236", "//crates/lash-core:lash-core": "//crates/lash-core:lash-core__fv_97f75674", "//crates/lash-durable:lash-durable": "//crates/lash-durable:lash-durable__fv_5a2e632d", "//crates/lash-kernel-dialect:lash-kernel-dialect": "//crates/lash-kernel-dialect:lash-kernel-dialect__fv_66d5dd0a", "//crates/lash-kernel-migrate:lash-kernel-migrate": "//crates/lash-kernel-migrate:lash-kernel-migrate__fv_11cdb259", "//crates/lash-kernel-state:lash-kernel-state": "//crates/lash-kernel-state:lash-kernel-state__fv_4bd72e2f", "//crates/lash-sansio:lash-sansio": "//crates/lash-sansio:lash-sansio__fv_43dbea3a", "//crates/lash-sqlite-store:lash-sqlite-store": "//crates/lash-sqlite-store:lash-sqlite-store__fv_bf00e4cb", "//crates/lash-store-sql:lash-store-sql": "//crates/lash-store-sql:lash-store-sql__fv_0dc86928", "//crates/lash-trace:lash-trace": "//crates/lash-trace:lash-trace__fv_df3b2780"},
+    version = "0.0.0-dev",
+)
+
+lash_rust_feature_library(
+    name = "lash-core-store__fv_76aba3e2",
+    build_script = None,
+    crate_features = [
+        "testing",
+    ],
+    crate_name = "lash_core_store",
+    declared_features = [
+        "default",
+        "otel-trace",
+        "perf-witness",
+        "synthetic-next",
+        "testing",
+    ],
+    exec_properties = sized_exec_properties("lash-internal-core-store", "lash_core_store"),
+    extra_compile_data = [],
+    manifest_dir = "crates/lash-core-store",
+    package_name = "lash-internal-core-store",
+    tags = [
+        "feature-lane",
+        "manual",
+    ],
+    variant_deps = {"//crates/lash-checkpoint-encoder:lash-checkpoint-encoder": "//crates/lash-checkpoint-encoder:lash-checkpoint-encoder__fv_ddc3bbf0", "//crates/lash-core-ids:lash-core-ids": "//crates/lash-core-ids:lash-core-ids__fv_ec6cd44f", "//crates/lash-core-llm:lash-core-llm": "//crates/lash-core-llm:lash-core-llm__fv_d5b0a5e5", "//crates/lash-trace:lash-trace": "//crates/lash-trace:lash-trace__fv_88fa6727"},
+    version = "0.0.0-dev",
+)
+
+lash_rust_feature_library(
+    name = "lash-core-store__fv_943ee4fb",
+    build_script = None,
+    crate_features = [
         "otel-trace",
     ],
     crate_name = "lash_core_store",
@@ -484,12 +435,116 @@ lash_rust_feature_library(
         "feature-lane",
         "manual",
     ],
-    variant_deps = {"//crates/lash-checkpoint-encoder:lash-checkpoint-encoder": "//crates/lash-checkpoint-encoder:lash-checkpoint-encoder__fv_57546a29", "//crates/lash-core-effect:lash-core-effect": "//crates/lash-core-effect:lash-core-effect__fv_97b17692", "//crates/lash-core-ids:lash-core-ids": "//crates/lash-core-ids:lash-core-ids__fv_2fdcc36c", "//crates/lash-core-llm:lash-core-llm": "//crates/lash-core-llm:lash-core-llm__fv_14d834a8", "//crates/lash-sansio:lash-sansio": "//crates/lash-sansio:lash-sansio__fv_a9b27561", "//crates/lash-trace:lash-trace": "//crates/lash-trace:lash-trace__fv_03bdd693", "//crates/lash-transport-failure:lash-transport-failure": "//crates/lash-transport-failure:lash-transport-failure__fv_e838421a", "//crates/lash-vm-protocol:lash-vm-protocol": "//crates/lash-vm-protocol:lash-vm-protocol__fv_4387d802"},
+    variant_deps = {"//crates/lash-checkpoint-encoder:lash-checkpoint-encoder": "//crates/lash-checkpoint-encoder:lash-checkpoint-encoder__fv_57546a29", "//crates/lash-core-ids:lash-core-ids": "//crates/lash-core-ids:lash-core-ids__fv_71ffe165", "//crates/lash-core-llm:lash-core-llm": "//crates/lash-core-llm:lash-core-llm__fv_7bdcd764", "//crates/lash-protocol-types:lash-protocol-types": "//crates/lash-protocol-types:lash-protocol-types__fv_43c15285", "//crates/lash-trace:lash-trace": "//crates/lash-trace:lash-trace__fv_12335f28", "//crates/lash-transport-failure:lash-transport-failure": "//crates/lash-transport-failure:lash-transport-failure__fv_19f8278c", "//crates/lash-vm-protocol:lash-vm-protocol": "//crates/lash-vm-protocol:lash-vm-protocol__fv_61d13f6c"},
     version = "0.0.0-dev",
 )
 
 lash_rust_feature_library(
-    name = "lash-core-store__fv_a33e76c4",
+    name = "lash-core-store__fv_9534ec9c",
+    build_script = None,
+    crate_features = [
+        "default",
+    ],
+    crate_name = "lash_core_store",
+    declared_features = [
+        "default",
+        "otel-trace",
+        "perf-witness",
+        "synthetic-next",
+        "testing",
+    ],
+    exec_properties = sized_exec_properties("lash-internal-core-store", "lash_core_store"),
+    extra_compile_data = [],
+    manifest_dir = "crates/lash-core-store",
+    package_name = "lash-internal-core-store",
+    tags = [
+        "feature-lane",
+        "manual",
+    ],
+    variant_deps = {"//crates/lash-checkpoint-encoder:lash-checkpoint-encoder": "//crates/lash-checkpoint-encoder:lash-checkpoint-encoder__fv_57546a29", "//crates/lash-core-effect:lash-core-effect": "//crates/lash-core-effect:lash-core-effect__fv_3f2847ac", "//crates/lash-core-execution:lash-core-execution": "//crates/lash-core-execution:lash-core-execution__fv_e0e074ca", "//crates/lash-core-ids:lash-core-ids": "//crates/lash-core-ids:lash-core-ids__fv_ec6f226e", "//crates/lash-core-llm:lash-core-llm": "//crates/lash-core-llm:lash-core-llm__fv_2d442b7c", "//crates/lash-core:lash-core": "//crates/lash-core:lash-core__fv_f23956d8", "//crates/lash-durable:lash-durable": "//crates/lash-durable:lash-durable__fv_1994ef08", "//crates/lash-kernel-dialect:lash-kernel-dialect": "//crates/lash-kernel-dialect:lash-kernel-dialect__fv_66d5dd0a", "//crates/lash-kernel-migrate:lash-kernel-migrate": "//crates/lash-kernel-migrate:lash-kernel-migrate__fv_11cdb259", "//crates/lash-kernel-state:lash-kernel-state": "//crates/lash-kernel-state:lash-kernel-state__fv_4bd72e2f", "//crates/lash-sansio:lash-sansio": "//crates/lash-sansio:lash-sansio__fv_43dbea3a", "//crates/lash-sqlite-store:lash-sqlite-store": "//crates/lash-sqlite-store:lash-sqlite-store__fv_d0a921a1", "//crates/lash-store-sql:lash-store-sql": "//crates/lash-store-sql:lash-store-sql__fv_0dc86928", "//crates/lash-trace:lash-trace": "//crates/lash-trace:lash-trace__fv_88fa6727"},
+    version = "0.0.0-dev",
+)
+
+lash_rust_feature_library(
+    name = "lash-core-store__fv_954e1ae7",
+    build_script = None,
+    crate_features = [
+        "default",
+    ],
+    crate_name = "lash_core_store",
+    declared_features = [
+        "default",
+        "otel-trace",
+        "perf-witness",
+        "synthetic-next",
+        "testing",
+    ],
+    exec_properties = sized_exec_properties("lash-internal-core-store", "lash_core_store"),
+    extra_compile_data = [],
+    manifest_dir = "crates/lash-core-store",
+    package_name = "lash-internal-core-store",
+    tags = [
+        "feature-lane",
+        "manual",
+    ],
+    variant_deps = {"//crates/lash-checkpoint-encoder:lash-checkpoint-encoder": "//crates/lash-checkpoint-encoder:lash-checkpoint-encoder__fv_57546a29", "//crates/lash-core-effect:lash-core-effect": "//crates/lash-core-effect:lash-core-effect__fv_ec63f674", "//crates/lash-core-execution:lash-core-execution": "//crates/lash-core-execution:lash-core-execution__fv_4f4bbae0", "//crates/lash-core-ids:lash-core-ids": "//crates/lash-core-ids:lash-core-ids__fv_4b924541", "//crates/lash-core-llm:lash-core-llm": "//crates/lash-core-llm:lash-core-llm__fv_94eb9d75", "//crates/lash-core:lash-core": "//crates/lash-core:lash-core__fv_e6bd66b8", "//crates/lash-durable:lash-durable": "//crates/lash-durable:lash-durable__fv_d0fdddd5", "//crates/lash-kernel-dialect:lash-kernel-dialect": "//crates/lash-kernel-dialect:lash-kernel-dialect__fv_66d5dd0a", "//crates/lash-kernel-migrate:lash-kernel-migrate": "//crates/lash-kernel-migrate:lash-kernel-migrate__fv_11cdb259", "//crates/lash-kernel-state:lash-kernel-state": "//crates/lash-kernel-state:lash-kernel-state__fv_4bd72e2f", "//crates/lash-sansio:lash-sansio": "//crates/lash-sansio:lash-sansio__fv_43dbea3a", "//crates/lash-sqlite-store:lash-sqlite-store": "//crates/lash-sqlite-store:lash-sqlite-store__fv_a1772537", "//crates/lash-store-sql:lash-store-sql": "//crates/lash-store-sql:lash-store-sql__fv_0dc86928", "//crates/lash-trace:lash-trace": "//crates/lash-trace:lash-trace__fv_df3b2780"},
+    version = "0.0.0-dev",
+)
+
+lash_rust_feature_library(
+    name = "lash-core-store__fv_9b9e35de",
+    build_script = None,
+    crate_features = [
+        "perf-witness",
+    ],
+    crate_name = "lash_core_store",
+    declared_features = [
+        "default",
+        "otel-trace",
+        "perf-witness",
+        "synthetic-next",
+        "testing",
+    ],
+    exec_properties = sized_exec_properties("lash-internal-core-store", "lash_core_store"),
+    extra_compile_data = [],
+    manifest_dir = "crates/lash-core-store",
+    package_name = "lash-internal-core-store",
+    tags = [
+        "feature-lane",
+        "manual",
+    ],
+    variant_deps = {"//crates/lash-checkpoint-encoder:lash-checkpoint-encoder": "//crates/lash-checkpoint-encoder:lash-checkpoint-encoder__fv_8665a98c", "//crates/lash-core-ids:lash-core-ids": "//crates/lash-core-ids:lash-core-ids__fv_d25c22bd", "//crates/lash-core-llm:lash-core-llm": "//crates/lash-core-llm:lash-core-llm__fv_9d5e29bd", "//crates/lash-protocol-types:lash-protocol-types": "//crates/lash-protocol-types:lash-protocol-types__fv_43c15285", "//crates/lash-trace:lash-trace": "//crates/lash-trace:lash-trace__fv_2415ba04", "//crates/lash-transport-failure:lash-transport-failure": "//crates/lash-transport-failure:lash-transport-failure__fv_19f8278c", "//crates/lash-vm-protocol:lash-vm-protocol": "//crates/lash-vm-protocol:lash-vm-protocol__fv_61d13f6c"},
+    version = "0.0.0-dev",
+)
+
+lash_rust_feature_library(
+    name = "lash-core-store__fv_a7e230b3",
+    build_script = None,
+    crate_features = [
+        "default",
+    ],
+    crate_name = "lash_core_store",
+    declared_features = [
+        "default",
+        "otel-trace",
+        "perf-witness",
+        "synthetic-next",
+        "testing",
+    ],
+    exec_properties = sized_exec_properties("lash-internal-core-store", "lash_core_store"),
+    extra_compile_data = [],
+    manifest_dir = "crates/lash-core-store",
+    package_name = "lash-internal-core-store",
+    tags = [
+        "feature-lane",
+        "manual",
+    ],
+    variant_deps = {"//crates/lash-checkpoint-encoder:lash-checkpoint-encoder": "//crates/lash-checkpoint-encoder:lash-checkpoint-encoder__fv_57546a29", "//crates/lash-core-effect:lash-core-effect": "//crates/lash-core-effect:lash-core-effect__fv_a08a3032", "//crates/lash-core-execution:lash-core-execution": "//crates/lash-core-execution:lash-core-execution__fv_a506b12b", "//crates/lash-core-ids:lash-core-ids": "//crates/lash-core-ids:lash-core-ids__fv_4b924541", "//crates/lash-core-llm:lash-core-llm": "//crates/lash-core-llm:lash-core-llm__fv_0058231c", "//crates/lash-core:lash-core": "//crates/lash-core:lash-core__fv_f86c00a5", "//crates/lash-durable:lash-durable": "//crates/lash-durable:lash-durable__fv_ce9843ad", "//crates/lash-kernel-dialect:lash-kernel-dialect": "//crates/lash-kernel-dialect:lash-kernel-dialect__fv_66d5dd0a", "//crates/lash-kernel-migrate:lash-kernel-migrate": "//crates/lash-kernel-migrate:lash-kernel-migrate__fv_11cdb259", "//crates/lash-kernel-state:lash-kernel-state": "//crates/lash-kernel-state:lash-kernel-state__fv_4bd72e2f", "//crates/lash-sansio:lash-sansio": "//crates/lash-sansio:lash-sansio__fv_43dbea3a", "//crates/lash-sqlite-store:lash-sqlite-store": "//crates/lash-sqlite-store:lash-sqlite-store__fv_eb118746", "//crates/lash-store-sql:lash-store-sql": "//crates/lash-store-sql:lash-store-sql__fv_0dc86928", "//crates/lash-trace:lash-trace": "//crates/lash-trace:lash-trace__fv_df3b2780"},
+    version = "0.0.0-dev",
+)
+
+lash_rust_feature_library(
+    name = "lash-core-store__fv_c50654c2",
     build_script = None,
     crate_features = [],
     crate_name = "lash_core_store",
@@ -508,96 +563,12 @@ lash_rust_feature_library(
         "feature-lane",
         "manual",
     ],
-    variant_deps = {"//crates/lash-checkpoint-encoder:lash-checkpoint-encoder": "//crates/lash-checkpoint-encoder:lash-checkpoint-encoder__fv_57546a29", "//crates/lash-core-ids:lash-core-ids": "//crates/lash-core-ids:lash-core-ids__fv_fa31164a", "//crates/lash-core-llm:lash-core-llm": "//crates/lash-core-llm:lash-core-llm__fv_5a2a7062", "//crates/lash-sansio:lash-sansio": "//crates/lash-sansio:lash-sansio__fv_a9b27561", "//crates/lash-trace:lash-trace": "//crates/lash-trace:lash-trace__fv_77669f7f", "//crates/lash-transport-failure:lash-transport-failure": "//crates/lash-transport-failure:lash-transport-failure__fv_e838421a", "//crates/lash-vm-protocol:lash-vm-protocol": "//crates/lash-vm-protocol:lash-vm-protocol__fv_4387d802"},
+    variant_deps = {"//crates/lash-checkpoint-encoder:lash-checkpoint-encoder": "//crates/lash-checkpoint-encoder:lash-checkpoint-encoder__fv_57546a29", "//crates/lash-core-ids:lash-core-ids": "//crates/lash-core-ids:lash-core-ids__fv_367b6f7d", "//crates/lash-core-llm:lash-core-llm": "//crates/lash-core-llm:lash-core-llm__fv_958b463d", "//crates/lash-protocol-types:lash-protocol-types": "//crates/lash-protocol-types:lash-protocol-types__fv_43c15285", "//crates/lash-trace:lash-trace": "//crates/lash-trace:lash-trace__fv_2415ba04", "//crates/lash-transport-failure:lash-transport-failure": "//crates/lash-transport-failure:lash-transport-failure__fv_19f8278c", "//crates/lash-vm-protocol:lash-vm-protocol": "//crates/lash-vm-protocol:lash-vm-protocol__fv_61d13f6c"},
     version = "0.0.0-dev",
 )
 
 lash_rust_feature_library(
-    name = "lash-core-store__fv_aa3a928d",
-    build_script = None,
-    crate_features = [
-        "default",
-        "perf-witness",
-        "synthetic-next",
-        "testing",
-    ],
-    crate_name = "lash_core_store",
-    declared_features = [
-        "default",
-        "otel-trace",
-        "perf-witness",
-        "synthetic-next",
-        "testing",
-    ],
-    exec_properties = sized_exec_properties("lash-internal-core-store", "lash_core_store"),
-    extra_compile_data = [],
-    manifest_dir = "crates/lash-core-store",
-    package_name = "lash-internal-core-store",
-    tags = [
-        "feature-lane",
-        "manual",
-    ],
-    variant_deps = {"//crates/lash-checkpoint-encoder:lash-checkpoint-encoder": "//crates/lash-checkpoint-encoder:lash-checkpoint-encoder__fv_1d59cb9b", "//crates/lash-core-effect:lash-core-effect": "//crates/lash-core-effect:lash-core-effect__fv_bd221cf3", "//crates/lash-core-execution:lash-core-execution": "//crates/lash-core-execution:lash-core-execution__fv_b8fbc720", "//crates/lash-core-ids:lash-core-ids": "//crates/lash-core-ids:lash-core-ids__fv_866dc051", "//crates/lash-core-llm:lash-core-llm": "//crates/lash-core-llm:lash-core-llm__fv_d17bbd6f", "//crates/lash-dialect-python:lash-dialect-python": "//crates/lash-dialect-python:lash-dialect-python__fv_40be046c", "//crates/lash-dialect-typescript:lash-dialect-typescript": "//crates/lash-dialect-typescript:lash-dialect-typescript__fv_030a574c", "//crates/lash-durable-test:lash-durable-test": "//crates/lash-durable-test:lash-durable-test__fv_f801e9fe", "//crates/lash-durable:lash-durable": "//crates/lash-durable:lash-durable__fv_bdd962bd", "//crates/lash-ext-date-ecma:lash-ext-date-ecma": "//crates/lash-ext-date-ecma:lash-ext-date-ecma__fv_61b244e2", "//crates/lash-ext-py-core:lash-ext-py-core": "//crates/lash-ext-py-core:lash-ext-py-core__fv_4fdaa734", "//crates/lash-ext-regex-ecma:lash-ext-regex-ecma": "//crates/lash-ext-regex-ecma:lash-ext-regex-ecma__fv_d045f1a8", "//crates/lash-ext-ts-core:lash-ext-ts-core": "//crates/lash-ext-ts-core:lash-ext-ts-core__fv_01d8387e", "//crates/lash-ext-url-whatwg:lash-ext-url-whatwg": "//crates/lash-ext-url-whatwg:lash-ext-url-whatwg__fv_e8aa39b2", "//crates/lash-kernel-check:lash-kernel-check": "//crates/lash-kernel-check:lash-kernel-check__fv_47bd46f0", "//crates/lash-kernel-dialect:lash-kernel-dialect": "//crates/lash-kernel-dialect:lash-kernel-dialect__fv_c6e161f0", "//crates/lash-kernel-doc:lash-kernel-doc": "//crates/lash-kernel-doc:lash-kernel-doc__fv_45814574", "//crates/lash-kernel-lib:lash-kernel-lib": "//crates/lash-kernel-lib:lash-kernel-lib__fv_bda8fe95", "//crates/lash-kernel-migrate:lash-kernel-migrate": "//crates/lash-kernel-migrate:lash-kernel-migrate__fv_08d80bce", "//crates/lash-kernel-state:lash-kernel-state": "//crates/lash-kernel-state:lash-kernel-state__fv_decc367a", "//crates/lash-kernel-vm:lash-kernel-vm": "//crates/lash-kernel-vm:lash-kernel-vm__fv_1f06080a", "//crates/lash-postgres-store:lash-postgres-store": "//crates/lash-postgres-store:lash-postgres-store__fv_18b6a2c7", "//crates/lash-sansio:lash-sansio": "//crates/lash-sansio:lash-sansio__fv_477c7b15", "//crates/lash-sqlite-store:lash-sqlite-store": "//crates/lash-sqlite-store:lash-sqlite-store__fv_7a1ddf18", "//crates/lash-trace:lash-trace": "//crates/lash-trace:lash-trace__fv_401b6ab8", "//crates/lash-transport-failure:lash-transport-failure": "//crates/lash-transport-failure:lash-transport-failure__fv_0de949ad", "//crates/lash-vm-broker:lash-vm-broker": "//crates/lash-vm-broker:lash-vm-broker__fv_6ac0d0aa", "//crates/lash-vm-client:lash-vm-client": "//crates/lash-vm-client:lash-vm-client__fv_21248d47", "//crates/lash-vm-library:lash-vm-library": "//crates/lash-vm-library:lash-vm-library__fv_8226e6b0", "//crates/lash-vm-protocol:lash-vm-protocol": "//crates/lash-vm-protocol:lash-vm-protocol__fv_cd014529", "//crates/lash-vm-releases:lash-vm-releases": "//crates/lash-vm-releases:lash-vm-releases__fv_566829e6", "//crates/lash-vm-worker:lash-vm-worker": "//crates/lash-vm-worker:lash-vm-worker__fv_1974f046"},
-    version = "0.0.0-dev",
-)
-
-lash_rust_feature_library(
-    name = "lash-core-store__fv_ae135e34",
-    build_script = None,
-    crate_features = [
-        "otel-trace",
-    ],
-    crate_name = "lash_core_store",
-    declared_features = [
-        "default",
-        "otel-trace",
-        "perf-witness",
-        "synthetic-next",
-        "testing",
-    ],
-    exec_properties = sized_exec_properties("lash-internal-core-store", "lash_core_store"),
-    extra_compile_data = [],
-    manifest_dir = "crates/lash-core-store",
-    package_name = "lash-internal-core-store",
-    tags = [
-        "feature-lane",
-        "manual",
-    ],
-    variant_deps = {"//crates/lash-checkpoint-encoder:lash-checkpoint-encoder": "//crates/lash-checkpoint-encoder:lash-checkpoint-encoder__fv_57546a29", "//crates/lash-core-ids:lash-core-ids": "//crates/lash-core-ids:lash-core-ids__fv_2fdcc36c", "//crates/lash-core-llm:lash-core-llm": "//crates/lash-core-llm:lash-core-llm__fv_14d834a8", "//crates/lash-sansio:lash-sansio": "//crates/lash-sansio:lash-sansio__fv_a9b27561", "//crates/lash-trace:lash-trace": "//crates/lash-trace:lash-trace__fv_03bdd693", "//crates/lash-transport-failure:lash-transport-failure": "//crates/lash-transport-failure:lash-transport-failure__fv_e838421a", "//crates/lash-vm-protocol:lash-vm-protocol": "//crates/lash-vm-protocol:lash-vm-protocol__fv_4387d802"},
-    version = "0.0.0-dev",
-)
-
-lash_rust_feature_library(
-    name = "lash-core-store__fv_b221096b",
-    build_script = None,
-    crate_features = [
-        "default",
-        "perf-witness",
-        "synthetic-next",
-        "testing",
-    ],
-    crate_name = "lash_core_store",
-    declared_features = [
-        "default",
-        "otel-trace",
-        "perf-witness",
-        "synthetic-next",
-        "testing",
-    ],
-    exec_properties = sized_exec_properties("lash-internal-core-store", "lash_core_store"),
-    extra_compile_data = [],
-    manifest_dir = "crates/lash-core-store",
-    package_name = "lash-internal-core-store",
-    tags = [
-        "feature-lane",
-        "manual",
-    ],
-    variant_deps = {"//crates/lash-checkpoint-encoder:lash-checkpoint-encoder": "//crates/lash-checkpoint-encoder:lash-checkpoint-encoder__fv_1d59cb9b", "//crates/lash-conformance:lash-conformance": "//crates/lash-conformance:lash-conformance__fv_a5522419", "//crates/lash-core-effect:lash-core-effect": "//crates/lash-core-effect:lash-core-effect__fv_2aac928c", "//crates/lash-core-execution:lash-core-execution": "//crates/lash-core-execution:lash-core-execution__fv_a06aaecc", "//crates/lash-core-ids:lash-core-ids": "//crates/lash-core-ids:lash-core-ids__fv_866dc051", "//crates/lash-core-llm:lash-core-llm": "//crates/lash-core-llm:lash-core-llm__fv_d17bbd6f", "//crates/lash-core-worker:lash-core-worker": "//crates/lash-core-worker:lash-core-worker__fv_8a4ce5d9", "//crates/lash-core:lash-core": "//crates/lash-core:lash-core__fv_4388a89a", "//crates/lash-durable-test:lash-durable-test": "//crates/lash-durable-test:lash-durable-test__fv_298dd4ec", "//crates/lash-durable:lash-durable": "//crates/lash-durable:lash-durable__fv_7eb3a5d9", "//crates/lash-helper-labels:lash-helper-labels": "//crates/lash-helper-labels:lash-helper-labels__fv_71e03991", "//crates/lash-kernel-check:lash-kernel-check": "//crates/lash-kernel-check:lash-kernel-check__fv_47bd46f0", "//crates/lash-kernel-dialect:lash-kernel-dialect": "//crates/lash-kernel-dialect:lash-kernel-dialect__fv_7dff48c2", "//crates/lash-kernel-doc:lash-kernel-doc": "//crates/lash-kernel-doc:lash-kernel-doc__fv_45814574", "//crates/lash-kernel-migrate:lash-kernel-migrate": "//crates/lash-kernel-migrate:lash-kernel-migrate__fv_29488ff1", "//crates/lash-kernel-state:lash-kernel-state": "//crates/lash-kernel-state:lash-kernel-state__fv_3fe37b57", "//crates/lash-plugin-mcp:lash-plugin-mcp": "//crates/lash-plugin-mcp:lash-plugin-mcp__fv_f9f0050d", "//crates/lash-plugin-process-controls:lash-plugin-process-controls": "//crates/lash-plugin-process-controls:lash-plugin-process-controls__fv_18b1975b", "//crates/lash-plugin-standard-compaction:lash-plugin-standard-compaction": "//crates/lash-plugin-standard-compaction:lash-plugin-standard-compaction__fv_c75f750c", "//crates/lash-postgres-store:lash-postgres-store": "//crates/lash-postgres-store:lash-postgres-store__fv_d145dcfb", "//crates/lash-protocol-standard:lash-protocol-standard": "//crates/lash-protocol-standard:lash-protocol-standard__fv_18710871", "//crates/lash-sansio:lash-sansio": "//crates/lash-sansio:lash-sansio__fv_477c7b15", "//crates/lash-sqlite-store:lash-sqlite-store": "//crates/lash-sqlite-store:lash-sqlite-store__fv_72dc41bc", "//crates/lash-tool-presenter-api:lash-tool-presenter-api": "//crates/lash-tool-presenter-api:lash-tool-presenter-api__fv_30a85f36", "//crates/lash-tool-presenter-standard:lash-tool-presenter-standard": "//crates/lash-tool-presenter-standard:lash-tool-presenter-standard__fv_e02b735e", "//crates/lash-tool-support:lash-tool-support": "//crates/lash-tool-support:lash-tool-support__fv_d375ebc8", "//crates/lash-trace:lash-trace": "//crates/lash-trace:lash-trace__fv_401b6ab8", "//crates/lash-transport-failure:lash-transport-failure": "//crates/lash-transport-failure:lash-transport-failure__fv_0de949ad", "//crates/lash-vm-protocol:lash-vm-protocol": "//crates/lash-vm-protocol:lash-vm-protocol__fv_d2be4b5f", "//crates/lash:lash": "//crates/lash:lash__fv_668871b4", "//third-party/vendored/lash-rmcp:lash-rmcp": "//third-party/vendored/lash-rmcp:lash-rmcp__fv_e2e7b48c"},
-    version = "0.0.0-dev",
-)
-
-lash_rust_feature_library(
-    name = "lash-core-store__fv_c09d8e44",
+    name = "lash-core-store__fv_c784d270",
     build_script = None,
     crate_features = [
         "default",
@@ -618,91 +589,12 @@ lash_rust_feature_library(
         "feature-lane",
         "manual",
     ],
-    variant_deps = {"//crates/lash-checkpoint-encoder:lash-checkpoint-encoder": "//crates/lash-checkpoint-encoder:lash-checkpoint-encoder__fv_57546a29", "//crates/lash-core-effect:lash-core-effect": "//crates/lash-core-effect:lash-core-effect__fv_2395bf06", "//crates/lash-core-ids:lash-core-ids": "//crates/lash-core-ids:lash-core-ids__fv_fa31164a", "//crates/lash-core-llm:lash-core-llm": "//crates/lash-core-llm:lash-core-llm__fv_5a2a7062", "//crates/lash-sansio:lash-sansio": "//crates/lash-sansio:lash-sansio__fv_a9b27561", "//crates/lash-trace:lash-trace": "//crates/lash-trace:lash-trace__fv_77669f7f", "//crates/lash-transport-failure:lash-transport-failure": "//crates/lash-transport-failure:lash-transport-failure__fv_e838421a", "//crates/lash-vm-protocol:lash-vm-protocol": "//crates/lash-vm-protocol:lash-vm-protocol__fv_4387d802"},
+    variant_deps = {"//crates/lash-checkpoint-encoder:lash-checkpoint-encoder": "//crates/lash-checkpoint-encoder:lash-checkpoint-encoder__fv_57546a29", "//crates/lash-core-effect:lash-core-effect": "//crates/lash-core-effect:lash-core-effect__fv_ebbd70e3", "//crates/lash-core-ids:lash-core-ids": "//crates/lash-core-ids:lash-core-ids__fv_367b6f7d", "//crates/lash-core-llm:lash-core-llm": "//crates/lash-core-llm:lash-core-llm__fv_958b463d", "//crates/lash-protocol-types:lash-protocol-types": "//crates/lash-protocol-types:lash-protocol-types__fv_43c15285", "//crates/lash-trace:lash-trace": "//crates/lash-trace:lash-trace__fv_2415ba04", "//crates/lash-transport-failure:lash-transport-failure": "//crates/lash-transport-failure:lash-transport-failure__fv_19f8278c", "//crates/lash-vm-protocol:lash-vm-protocol": "//crates/lash-vm-protocol:lash-vm-protocol__fv_61d13f6c"},
     version = "0.0.0-dev",
 )
 
 lash_rust_feature_library(
-    name = "lash-core-store__fv_e1582e60",
-    build_script = None,
-    crate_features = [
-        "default",
-    ],
-    crate_name = "lash_core_store",
-    declared_features = [
-        "default",
-        "otel-trace",
-        "perf-witness",
-        "synthetic-next",
-        "testing",
-    ],
-    exec_properties = sized_exec_properties("lash-internal-core-store", "lash_core_store"),
-    extra_compile_data = [],
-    manifest_dir = "crates/lash-core-store",
-    package_name = "lash-internal-core-store",
-    tags = [
-        "feature-lane",
-        "manual",
-    ],
-    variant_deps = {"//crates/lash-checkpoint-encoder:lash-checkpoint-encoder": "//crates/lash-checkpoint-encoder:lash-checkpoint-encoder__fv_57546a29", "//crates/lash-core-effect:lash-core-effect": "//crates/lash-core-effect:lash-core-effect__fv_94f70353", "//crates/lash-core-execution:lash-core-execution": "//crates/lash-core-execution:lash-core-execution__fv_02307d61", "//crates/lash-core-ids:lash-core-ids": "//crates/lash-core-ids:lash-core-ids__fv_fa31164a", "//crates/lash-core-llm:lash-core-llm": "//crates/lash-core-llm:lash-core-llm__fv_5a2a7062", "//crates/lash-durable:lash-durable": "//crates/lash-durable:lash-durable__fv_0ba63cc1", "//crates/lash-kernel-dialect:lash-kernel-dialect": "//crates/lash-kernel-dialect:lash-kernel-dialect__fv_66d5dd0a", "//crates/lash-kernel-migrate:lash-kernel-migrate": "//crates/lash-kernel-migrate:lash-kernel-migrate__fv_11cdb259", "//crates/lash-kernel-state:lash-kernel-state": "//crates/lash-kernel-state:lash-kernel-state__fv_4bd72e2f", "//crates/lash-kernel-vm:lash-kernel-vm": "//crates/lash-kernel-vm:lash-kernel-vm__fv_a86c33ba", "//crates/lash-sansio:lash-sansio": "//crates/lash-sansio:lash-sansio__fv_a9b27561", "//crates/lash-trace:lash-trace": "//crates/lash-trace:lash-trace__fv_77669f7f", "//crates/lash-transport-failure:lash-transport-failure": "//crates/lash-transport-failure:lash-transport-failure__fv_e838421a", "//crates/lash-vm-broker:lash-vm-broker": "//crates/lash-vm-broker:lash-vm-broker__fv_8a15243f", "//crates/lash-vm-protocol:lash-vm-protocol": "//crates/lash-vm-protocol:lash-vm-protocol__fv_64174848", "//crates/lash-vm-releases:lash-vm-releases": "//crates/lash-vm-releases:lash-vm-releases__fv_e7d797cb"},
-    version = "0.0.0-dev",
-)
-
-lash_rust_feature_library(
-    name = "lash-core-store__fv_e99a6f40",
-    build_script = None,
-    crate_features = [
-        "default",
-        "testing",
-    ],
-    crate_name = "lash_core_store",
-    declared_features = [
-        "default",
-        "otel-trace",
-        "perf-witness",
-        "synthetic-next",
-        "testing",
-    ],
-    exec_properties = sized_exec_properties("lash-internal-core-store", "lash_core_store"),
-    extra_compile_data = [],
-    manifest_dir = "crates/lash-core-store",
-    package_name = "lash-internal-core-store",
-    tags = [
-        "feature-lane",
-        "manual",
-    ],
-    variant_deps = {"//crates/lash-checkpoint-encoder:lash-checkpoint-encoder": "//crates/lash-checkpoint-encoder:lash-checkpoint-encoder__fv_ddc3bbf0", "//crates/lash-core-effect:lash-core-effect": "//crates/lash-core-effect:lash-core-effect__fv_d969c670", "//crates/lash-core-execution:lash-core-execution": "//crates/lash-core-execution:lash-core-execution__fv_48ff5efb", "//crates/lash-core-ids:lash-core-ids": "//crates/lash-core-ids:lash-core-ids__fv_46d22288", "//crates/lash-core-llm:lash-core-llm": "//crates/lash-core-llm:lash-core-llm__fv_8e5b8ce6", "//crates/lash-durable:lash-durable": "//crates/lash-durable:lash-durable__fv_efb325e3", "//crates/lash-kernel-dialect:lash-kernel-dialect": "//crates/lash-kernel-dialect:lash-kernel-dialect__fv_66d5dd0a", "//crates/lash-kernel-migrate:lash-kernel-migrate": "//crates/lash-kernel-migrate:lash-kernel-migrate__fv_11cdb259", "//crates/lash-kernel-state:lash-kernel-state": "//crates/lash-kernel-state:lash-kernel-state__fv_4bd72e2f", "//crates/lash-trace:lash-trace": "//crates/lash-trace:lash-trace__fv_53409751"},
-    version = "0.0.0-dev",
-)
-
-lash_rust_feature_library(
-    name = "lash-core-store__fv_f6afd742",
-    build_script = None,
-    crate_features = [
-        "testing",
-    ],
-    crate_name = "lash_core_store",
-    declared_features = [
-        "default",
-        "otel-trace",
-        "perf-witness",
-        "synthetic-next",
-        "testing",
-    ],
-    exec_properties = sized_exec_properties("lash-internal-core-store", "lash_core_store"),
-    extra_compile_data = [],
-    manifest_dir = "crates/lash-core-store",
-    package_name = "lash-internal-core-store",
-    tags = [
-        "feature-lane",
-        "manual",
-    ],
-    variant_deps = {"//crates/lash-checkpoint-encoder:lash-checkpoint-encoder": "//crates/lash-checkpoint-encoder:lash-checkpoint-encoder__fv_ddc3bbf0", "//crates/lash-core-ids:lash-core-ids": "//crates/lash-core-ids:lash-core-ids__fv_f93ad835", "//crates/lash-core-llm:lash-core-llm": "//crates/lash-core-llm:lash-core-llm__fv_9388b265", "//crates/lash-trace:lash-trace": "//crates/lash-trace:lash-trace__fv_72269560"},
-    version = "0.0.0-dev",
-)
-
-lash_rust_feature_library(
-    name = "lash-core-store__fv_fa2348ff",
+    name = "lash-core-store__fv_cd99668e",
     build_script = None,
     crate_features = [
         "default",
@@ -725,40 +617,120 @@ lash_rust_feature_library(
         "feature-lane",
         "manual",
     ],
-    variant_deps = {"//crates/lash-checkpoint-encoder:lash-checkpoint-encoder": "//crates/lash-checkpoint-encoder:lash-checkpoint-encoder__fv_ddc3bbf0", "//crates/lash-conformance:lash-conformance": "//crates/lash-conformance:lash-conformance__fv_e751045f", "//crates/lash-core-effect:lash-core-effect": "//crates/lash-core-effect:lash-core-effect__fv_c0934ee8", "//crates/lash-core-execution:lash-core-execution": "//crates/lash-core-execution:lash-core-execution__fv_233b5788", "//crates/lash-core-ids:lash-core-ids": "//crates/lash-core-ids:lash-core-ids__fv_4c0edb1d", "//crates/lash-core-llm:lash-core-llm": "//crates/lash-core-llm:lash-core-llm__fv_22c27e4b", "//crates/lash-core-worker:lash-core-worker": "//crates/lash-core-worker:lash-core-worker__fv_fcaf51e4", "//crates/lash-core:lash-core": "//crates/lash-core:lash-core__fv_ebdddc1e", "//crates/lash-durable:lash-durable": "//crates/lash-durable:lash-durable__fv_691fb6ce", "//crates/lash-kernel-dialect:lash-kernel-dialect": "//crates/lash-kernel-dialect:lash-kernel-dialect__fv_66d5dd0a", "//crates/lash-kernel-migrate:lash-kernel-migrate": "//crates/lash-kernel-migrate:lash-kernel-migrate__fv_11cdb259", "//crates/lash-kernel-state:lash-kernel-state": "//crates/lash-kernel-state:lash-kernel-state__fv_4bd72e2f", "//crates/lash-sqlite-store:lash-sqlite-store": "//crates/lash-sqlite-store:lash-sqlite-store__fv_2a6024d3"},
+    variant_deps = {"//crates/lash-checkpoint-encoder:lash-checkpoint-encoder": "//crates/lash-checkpoint-encoder:lash-checkpoint-encoder__fv_ddc3bbf0", "//crates/lash-conformance:lash-conformance": "//crates/lash-conformance:lash-conformance__fv_451894b4", "//crates/lash-core-effect:lash-core-effect": "//crates/lash-core-effect:lash-core-effect__fv_84d2169c", "//crates/lash-core-execution:lash-core-execution": "//crates/lash-core-execution:lash-core-execution__fv_02d8c84c", "//crates/lash-core-ids:lash-core-ids": "//crates/lash-core-ids:lash-core-ids__fv_28b745fb", "//crates/lash-core-llm:lash-core-llm": "//crates/lash-core-llm:lash-core-llm__fv_2e0790b3", "//crates/lash-core-worker:lash-core-worker": "//crates/lash-core-worker:lash-core-worker__fv_f81f6ad0", "//crates/lash-core:lash-core": "//crates/lash-core:lash-core__fv_dce5581e", "//crates/lash-durable:lash-durable": "//crates/lash-durable:lash-durable__fv_7d3fbd03", "//crates/lash-kernel-dialect:lash-kernel-dialect": "//crates/lash-kernel-dialect:lash-kernel-dialect__fv_66d5dd0a", "//crates/lash-kernel-migrate:lash-kernel-migrate": "//crates/lash-kernel-migrate:lash-kernel-migrate__fv_11cdb259", "//crates/lash-kernel-state:lash-kernel-state": "//crates/lash-kernel-state:lash-kernel-state__fv_4bd72e2f", "//crates/lash-sansio:lash-sansio": "//crates/lash-sansio:lash-sansio__fv_43dbea3a", "//crates/lash-sqlite-store:lash-sqlite-store": "//crates/lash-sqlite-store:lash-sqlite-store__fv_5c735362"},
+    version = "0.0.0-dev",
+)
+
+lash_rust_feature_library(
+    name = "lash-core-store__fv_d790de76",
+    build_script = None,
+    crate_features = [
+        "default",
+        "otel-trace",
+    ],
+    crate_name = "lash_core_store",
+    declared_features = [
+        "default",
+        "otel-trace",
+        "perf-witness",
+        "synthetic-next",
+        "testing",
+    ],
+    exec_properties = sized_exec_properties("lash-internal-core-store", "lash_core_store"),
+    extra_compile_data = [],
+    manifest_dir = "crates/lash-core-store",
+    package_name = "lash-internal-core-store",
+    tags = [
+        "feature-lane",
+        "manual",
+    ],
+    variant_deps = {"//crates/lash-checkpoint-encoder:lash-checkpoint-encoder": "//crates/lash-checkpoint-encoder:lash-checkpoint-encoder__fv_57546a29", "//crates/lash-core-effect:lash-core-effect": "//crates/lash-core-effect:lash-core-effect__fv_ca3bdd54", "//crates/lash-core-execution:lash-core-execution": "//crates/lash-core-execution:lash-core-execution__fv_ed25f155", "//crates/lash-core-ids:lash-core-ids": "//crates/lash-core-ids:lash-core-ids__fv_4b924541", "//crates/lash-core-llm:lash-core-llm": "//crates/lash-core-llm:lash-core-llm__fv_94eb9d75", "//crates/lash-core:lash-core": "//crates/lash-core:lash-core__fv_152f7e1c", "//crates/lash-durable:lash-durable": "//crates/lash-durable:lash-durable__fv_965a807b", "//crates/lash-kernel-dialect:lash-kernel-dialect": "//crates/lash-kernel-dialect:lash-kernel-dialect__fv_66d5dd0a", "//crates/lash-kernel-migrate:lash-kernel-migrate": "//crates/lash-kernel-migrate:lash-kernel-migrate__fv_11cdb259", "//crates/lash-kernel-state:lash-kernel-state": "//crates/lash-kernel-state:lash-kernel-state__fv_4bd72e2f", "//crates/lash-sansio:lash-sansio": "//crates/lash-sansio:lash-sansio__fv_43dbea3a", "//crates/lash-sqlite-store:lash-sqlite-store": "//crates/lash-sqlite-store:lash-sqlite-store__fv_7a366241", "//crates/lash-store-sql:lash-store-sql": "//crates/lash-store-sql:lash-store-sql__fv_0dc86928", "//crates/lash-trace:lash-trace": "//crates/lash-trace:lash-trace__fv_df3b2780"},
+    version = "0.0.0-dev",
+)
+
+lash_rust_feature_library(
+    name = "lash-core-store__fv_e934c647",
+    build_script = None,
+    crate_features = [
+        "default",
+        "synthetic-next",
+    ],
+    crate_name = "lash_core_store",
+    declared_features = [
+        "default",
+        "otel-trace",
+        "perf-witness",
+        "synthetic-next",
+        "testing",
+    ],
+    exec_properties = sized_exec_properties("lash-internal-core-store", "lash_core_store"),
+    extra_compile_data = [],
+    manifest_dir = "crates/lash-core-store",
+    package_name = "lash-internal-core-store",
+    tags = [
+        "feature-lane",
+        "manual",
+    ],
+    variant_deps = {"//crates/lash-checkpoint-encoder:lash-checkpoint-encoder": "//crates/lash-checkpoint-encoder:lash-checkpoint-encoder__fv_d292d8bf", "//crates/lash-core-effect:lash-core-effect": "//crates/lash-core-effect:lash-core-effect__fv_572d0248", "//crates/lash-core-execution:lash-core-execution": "//crates/lash-core-execution:lash-core-execution__fv_9a64bb7c", "//crates/lash-core-ids:lash-core-ids": "//crates/lash-core-ids:lash-core-ids__fv_60a997c3", "//crates/lash-core-llm:lash-core-llm": "//crates/lash-core-llm:lash-core-llm__fv_83519295", "//crates/lash-durable:lash-durable": "//crates/lash-durable:lash-durable__fv_70d07e0c", "//crates/lash-kernel-check:lash-kernel-check": "//crates/lash-kernel-check:lash-kernel-check__fv_47bd46f0", "//crates/lash-kernel-dialect:lash-kernel-dialect": "//crates/lash-kernel-dialect:lash-kernel-dialect__fv_7dff48c2", "//crates/lash-kernel-doc:lash-kernel-doc": "//crates/lash-kernel-doc:lash-kernel-doc__fv_45814574", "//crates/lash-kernel-migrate:lash-kernel-migrate": "//crates/lash-kernel-migrate:lash-kernel-migrate__fv_29488ff1", "//crates/lash-kernel-state:lash-kernel-state": "//crates/lash-kernel-state:lash-kernel-state__fv_3fe37b57", "//crates/lash-protocol-types:lash-protocol-types": "//crates/lash-protocol-types:lash-protocol-types__fv_4769bde9", "//crates/lash-sansio:lash-sansio": "//crates/lash-sansio:lash-sansio__fv_1cdf8461", "//crates/lash-trace:lash-trace": "//crates/lash-trace:lash-trace__fv_237cc8e1", "//crates/lash-transport-failure:lash-transport-failure": "//crates/lash-transport-failure:lash-transport-failure__fv_93de75e2", "//crates/lash-vm-protocol:lash-vm-protocol": "//crates/lash-vm-protocol:lash-vm-protocol__fv_6b7fb433"},
+    version = "0.0.0-dev",
+)
+
+lash_rust_feature_library(
+    name = "lash-core-store__fv_ef89faf0",
+    build_script = None,
+    crate_features = [
+        "default",
+        "testing",
+    ],
+    crate_name = "lash_core_store",
+    declared_features = [
+        "default",
+        "otel-trace",
+        "perf-witness",
+        "synthetic-next",
+        "testing",
+    ],
+    exec_properties = sized_exec_properties("lash-internal-core-store", "lash_core_store"),
+    extra_compile_data = [],
+    manifest_dir = "crates/lash-core-store",
+    package_name = "lash-internal-core-store",
+    tags = [
+        "feature-lane",
+        "manual",
+    ],
+    variant_deps = {"//crates/lash-checkpoint-encoder:lash-checkpoint-encoder": "//crates/lash-checkpoint-encoder:lash-checkpoint-encoder__fv_ddc3bbf0", "//crates/lash-core-effect:lash-core-effect": "//crates/lash-core-effect:lash-core-effect__fv_55e679bb", "//crates/lash-core-ids:lash-core-ids": "//crates/lash-core-ids:lash-core-ids__fv_ec6cd44f", "//crates/lash-core-llm:lash-core-llm": "//crates/lash-core-llm:lash-core-llm__fv_d5b0a5e5", "//crates/lash-trace:lash-trace": "//crates/lash-trace:lash-trace__fv_88fa6727"},
+    version = "0.0.0-dev",
+)
+
+lash_rust_feature_library(
+    name = "lash-core-store__fv_f4cd7dca",
+    build_script = None,
+    crate_features = [
+        "default",
+        "otel-trace",
+    ],
+    crate_name = "lash_core_store",
+    declared_features = [
+        "default",
+        "otel-trace",
+        "perf-witness",
+        "synthetic-next",
+        "testing",
+    ],
+    exec_properties = sized_exec_properties("lash-internal-core-store", "lash_core_store"),
+    extra_compile_data = [],
+    manifest_dir = "crates/lash-core-store",
+    package_name = "lash-internal-core-store",
+    tags = [
+        "feature-lane",
+        "manual",
+    ],
+    variant_deps = {"//crates/lash-checkpoint-encoder:lash-checkpoint-encoder": "//crates/lash-checkpoint-encoder:lash-checkpoint-encoder__fv_57546a29", "//crates/lash-core-effect:lash-core-effect": "//crates/lash-core-effect:lash-core-effect__fv_9d8f8bd9", "//crates/lash-core-ids:lash-core-ids": "//crates/lash-core-ids:lash-core-ids__fv_71ffe165", "//crates/lash-core-llm:lash-core-llm": "//crates/lash-core-llm:lash-core-llm__fv_7bdcd764", "//crates/lash-protocol-types:lash-protocol-types": "//crates/lash-protocol-types:lash-protocol-types__fv_43c15285", "//crates/lash-trace:lash-trace": "//crates/lash-trace:lash-trace__fv_12335f28", "//crates/lash-transport-failure:lash-transport-failure": "//crates/lash-transport-failure:lash-transport-failure__fv_19f8278c", "//crates/lash-vm-protocol:lash-vm-protocol": "//crates/lash-vm-protocol:lash-vm-protocol__fv_61d13f6c"},
     version = "0.0.0-dev",
 )
 
 lash_rust_feature_test(
-    name = "lash-core-store__unit_test__fv_49ed9e94",
-    build_script = None,
-    crate_features = [
-        "default",
-        "synthetic-next",
-    ],
-    crate_name = "lash_core_store",
-    crate_root = "src/lib.rs",
-    declared_features = [
-        "default",
-        "otel-trace",
-        "perf-witness",
-        "synthetic-next",
-        "testing",
-    ],
-    exec_properties = sized_exec_properties("lash-internal-core-store", "lash_core_store", "//crates/lash-core-store:lash-core-store__unit_test__fv_49ed9e94"),
-    extra_compile_data = [],
-    manifest_dir = "crates/lash-core-store",
-    package_name = "lash-internal-core-store",
-    tags = [
-        "feature-lane",
-        "manual",
-    ],
-    variant_deps = {"//crates/lash-checkpoint-encoder:lash-checkpoint-encoder": "//crates/lash-checkpoint-encoder:lash-checkpoint-encoder__fv_57546a29", "//crates/lash-core-effect:lash-core-effect": "//crates/lash-core-effect:lash-core-effect__fv_ae19e4b9", "//crates/lash-core-execution:lash-core-execution": "//crates/lash-core-execution:lash-core-execution__fv_f7bdb02f", "//crates/lash-core-ids:lash-core-ids": "//crates/lash-core-ids:lash-core-ids__fv_eb991e6e", "//crates/lash-core-llm:lash-core-llm": "//crates/lash-core-llm:lash-core-llm__fv_e8e31fb1", "//crates/lash-core-store:lash-core-store": "//crates/lash-core-store:lash-core-store__fv_02d863a2", "//crates/lash-core:lash-core": "//crates/lash-core:lash-core__fv_b1fddaa3", "//crates/lash-durable:lash-durable": "//crates/lash-durable:lash-durable__fv_dde520fd", "//crates/lash-kernel-dialect:lash-kernel-dialect": "//crates/lash-kernel-dialect:lash-kernel-dialect__fv_66d5dd0a", "//crates/lash-kernel-migrate:lash-kernel-migrate": "//crates/lash-kernel-migrate:lash-kernel-migrate__fv_11cdb259", "//crates/lash-kernel-state:lash-kernel-state": "//crates/lash-kernel-state:lash-kernel-state__fv_4bd72e2f", "//crates/lash-sansio:lash-sansio": "//crates/lash-sansio:lash-sansio__fv_1b411d70", "//crates/lash-sqlite-store:lash-sqlite-store": "//crates/lash-sqlite-store:lash-sqlite-store__fv_361c43e0", "//crates/lash-store-sql:lash-store-sql": "//crates/lash-store-sql:lash-store-sql__fv_0dc86928", "//crates/lash-trace:lash-trace": "//crates/lash-trace:lash-trace__fv_10b9d8fc", "//crates/lash-transport-failure:lash-transport-failure": "//crates/lash-transport-failure:lash-transport-failure__fv_8ec33649", "//crates/lash-vm-protocol:lash-vm-protocol": "//crates/lash-vm-protocol:lash-vm-protocol__fv_06c9f8d0"},
-    version = "0.0.0-dev",
-)
-
-lash_rust_feature_test(
-    name = "lash-core-store__unit_test__fv_4a0fff3a",
+    name = "lash-core-store__unit_test__fv_28448730",
     build_script = None,
     crate_features = [
         "default",
@@ -773,7 +745,7 @@ lash_rust_feature_test(
         "synthetic-next",
         "testing",
     ],
-    exec_properties = sized_exec_properties("lash-internal-core-store", "lash_core_store", "//crates/lash-core-store:lash-core-store__unit_test__fv_4a0fff3a"),
+    exec_properties = sized_exec_properties("lash-internal-core-store", "lash_core_store", "//crates/lash-core-store:lash-core-store__unit_test__fv_28448730"),
     extra_compile_data = [],
     manifest_dir = "crates/lash-core-store",
     package_name = "lash-internal-core-store",
@@ -781,12 +753,12 @@ lash_rust_feature_test(
         "feature-lane",
         "manual",
     ],
-    variant_deps = {"//crates/lash-checkpoint-encoder:lash-checkpoint-encoder": "//crates/lash-checkpoint-encoder:lash-checkpoint-encoder__fv_57546a29", "//crates/lash-core-effect:lash-core-effect": "//crates/lash-core-effect:lash-core-effect__fv_bad947f6", "//crates/lash-core-execution:lash-core-execution": "//crates/lash-core-execution:lash-core-execution__fv_2af91f5e", "//crates/lash-core-ids:lash-core-ids": "//crates/lash-core-ids:lash-core-ids__fv_b17d382a", "//crates/lash-core-llm:lash-core-llm": "//crates/lash-core-llm:lash-core-llm__fv_def1d3da", "//crates/lash-core-store:lash-core-store": "//crates/lash-core-store:lash-core-store__fv_53b57897", "//crates/lash-core:lash-core": "//crates/lash-core:lash-core__fv_6ccb3b8d", "//crates/lash-durable:lash-durable": "//crates/lash-durable:lash-durable__fv_e12aadec", "//crates/lash-kernel-dialect:lash-kernel-dialect": "//crates/lash-kernel-dialect:lash-kernel-dialect__fv_66d5dd0a", "//crates/lash-kernel-migrate:lash-kernel-migrate": "//crates/lash-kernel-migrate:lash-kernel-migrate__fv_11cdb259", "//crates/lash-kernel-state:lash-kernel-state": "//crates/lash-kernel-state:lash-kernel-state__fv_4bd72e2f", "//crates/lash-sqlite-store:lash-sqlite-store": "//crates/lash-sqlite-store:lash-sqlite-store__fv_e9c07c81", "//crates/lash-store-sql:lash-store-sql": "//crates/lash-store-sql:lash-store-sql__fv_0dc86928", "//crates/lash-trace:lash-trace": "//crates/lash-trace:lash-trace__fv_7cb6a6d6"},
+    variant_deps = {"//crates/lash-checkpoint-encoder:lash-checkpoint-encoder": "//crates/lash-checkpoint-encoder:lash-checkpoint-encoder__fv_57546a29", "//crates/lash-core-effect:lash-core-effect": "//crates/lash-core-effect:lash-core-effect__fv_ca3bdd54", "//crates/lash-core-execution:lash-core-execution": "//crates/lash-core-execution:lash-core-execution__fv_ed25f155", "//crates/lash-core-ids:lash-core-ids": "//crates/lash-core-ids:lash-core-ids__fv_4b924541", "//crates/lash-core-llm:lash-core-llm": "//crates/lash-core-llm:lash-core-llm__fv_94eb9d75", "//crates/lash-core-store:lash-core-store": "//crates/lash-core-store:lash-core-store__fv_d790de76", "//crates/lash-core:lash-core": "//crates/lash-core:lash-core__fv_152f7e1c", "//crates/lash-durable:lash-durable": "//crates/lash-durable:lash-durable__fv_965a807b", "//crates/lash-kernel-dialect:lash-kernel-dialect": "//crates/lash-kernel-dialect:lash-kernel-dialect__fv_66d5dd0a", "//crates/lash-kernel-migrate:lash-kernel-migrate": "//crates/lash-kernel-migrate:lash-kernel-migrate__fv_11cdb259", "//crates/lash-kernel-state:lash-kernel-state": "//crates/lash-kernel-state:lash-kernel-state__fv_4bd72e2f", "//crates/lash-sansio:lash-sansio": "//crates/lash-sansio:lash-sansio__fv_43dbea3a", "//crates/lash-sqlite-store:lash-sqlite-store": "//crates/lash-sqlite-store:lash-sqlite-store__fv_7a366241", "//crates/lash-store-sql:lash-store-sql": "//crates/lash-store-sql:lash-store-sql__fv_0dc86928", "//crates/lash-trace:lash-trace": "//crates/lash-trace:lash-trace__fv_df3b2780"},
     version = "0.0.0-dev",
 )
 
 lash_rust_feature_test(
-    name = "lash-core-store__unit_test__fv_4d604c5e",
+    name = "lash-core-store__unit_test__fv_3c4d1d4f",
     build_script = None,
     crate_features = [
         "default",
@@ -800,7 +772,7 @@ lash_rust_feature_test(
         "synthetic-next",
         "testing",
     ],
-    exec_properties = sized_exec_properties("lash-internal-core-store", "lash_core_store", "//crates/lash-core-store:lash-core-store__unit_test__fv_4d604c5e"),
+    exec_properties = sized_exec_properties("lash-internal-core-store", "lash_core_store", "//crates/lash-core-store:lash-core-store__unit_test__fv_3c4d1d4f"),
     extra_compile_data = [],
     manifest_dir = "crates/lash-core-store",
     package_name = "lash-internal-core-store",
@@ -808,12 +780,12 @@ lash_rust_feature_test(
         "feature-lane",
         "manual",
     ],
-    variant_deps = {"//crates/lash-checkpoint-encoder:lash-checkpoint-encoder": "//crates/lash-checkpoint-encoder:lash-checkpoint-encoder__fv_57546a29", "//crates/lash-core-effect:lash-core-effect": "//crates/lash-core-effect:lash-core-effect__fv_45996a8e", "//crates/lash-core-execution:lash-core-execution": "//crates/lash-core-execution:lash-core-execution__fv_581beb04", "//crates/lash-core-ids:lash-core-ids": "//crates/lash-core-ids:lash-core-ids__fv_b17d382a", "//crates/lash-core-llm:lash-core-llm": "//crates/lash-core-llm:lash-core-llm__fv_def1d3da", "//crates/lash-core-store:lash-core-store": "//crates/lash-core-store:lash-core-store__fv_896f9d88", "//crates/lash-core:lash-core": "//crates/lash-core:lash-core__fv_55fa062f", "//crates/lash-durable:lash-durable": "//crates/lash-durable:lash-durable__fv_91d617c8", "//crates/lash-kernel-dialect:lash-kernel-dialect": "//crates/lash-kernel-dialect:lash-kernel-dialect__fv_66d5dd0a", "//crates/lash-kernel-migrate:lash-kernel-migrate": "//crates/lash-kernel-migrate:lash-kernel-migrate__fv_11cdb259", "//crates/lash-kernel-state:lash-kernel-state": "//crates/lash-kernel-state:lash-kernel-state__fv_4bd72e2f", "//crates/lash-sqlite-store:lash-sqlite-store": "//crates/lash-sqlite-store:lash-sqlite-store__fv_c8e1d6e4", "//crates/lash-store-sql:lash-store-sql": "//crates/lash-store-sql:lash-store-sql__fv_0dc86928", "//crates/lash-trace:lash-trace": "//crates/lash-trace:lash-trace__fv_7cb6a6d6"},
+    variant_deps = {"//crates/lash-checkpoint-encoder:lash-checkpoint-encoder": "//crates/lash-checkpoint-encoder:lash-checkpoint-encoder__fv_57546a29", "//crates/lash-core-effect:lash-core-effect": "//crates/lash-core-effect:lash-core-effect__fv_2c4f39d3", "//crates/lash-core-execution:lash-core-execution": "//crates/lash-core-execution:lash-core-execution__fv_16b9540a", "//crates/lash-core-ids:lash-core-ids": "//crates/lash-core-ids:lash-core-ids__fv_cb88884c", "//crates/lash-core-llm:lash-core-llm": "//crates/lash-core-llm:lash-core-llm__fv_3941b236", "//crates/lash-core-store:lash-core-store": "//crates/lash-core-store:lash-core-store__fv_7416bf54", "//crates/lash-core:lash-core": "//crates/lash-core:lash-core__fv_97f75674", "//crates/lash-durable:lash-durable": "//crates/lash-durable:lash-durable__fv_5a2e632d", "//crates/lash-kernel-dialect:lash-kernel-dialect": "//crates/lash-kernel-dialect:lash-kernel-dialect__fv_66d5dd0a", "//crates/lash-kernel-migrate:lash-kernel-migrate": "//crates/lash-kernel-migrate:lash-kernel-migrate__fv_11cdb259", "//crates/lash-kernel-state:lash-kernel-state": "//crates/lash-kernel-state:lash-kernel-state__fv_4bd72e2f", "//crates/lash-sansio:lash-sansio": "//crates/lash-sansio:lash-sansio__fv_43dbea3a", "//crates/lash-sqlite-store:lash-sqlite-store": "//crates/lash-sqlite-store:lash-sqlite-store__fv_bf00e4cb", "//crates/lash-store-sql:lash-store-sql": "//crates/lash-store-sql:lash-store-sql__fv_0dc86928", "//crates/lash-trace:lash-trace": "//crates/lash-trace:lash-trace__fv_df3b2780"},
     version = "0.0.0-dev",
 )
 
 lash_rust_feature_test(
-    name = "lash-core-store__unit_test__fv_4eefcfd9",
+    name = "lash-core-store__unit_test__fv_3f89366d",
     build_script = None,
     crate_features = [
         "default",
@@ -828,7 +800,7 @@ lash_rust_feature_test(
         "synthetic-next",
         "testing",
     ],
-    exec_properties = sized_exec_properties("lash-internal-core-store", "lash_core_store", "//crates/lash-core-store:lash-core-store__unit_test__fv_4eefcfd9"),
+    exec_properties = sized_exec_properties("lash-internal-core-store", "lash_core_store", "//crates/lash-core-store:lash-core-store__unit_test__fv_3f89366d"),
     extra_compile_data = [],
     manifest_dir = "crates/lash-core-store",
     package_name = "lash-internal-core-store",
@@ -836,12 +808,12 @@ lash_rust_feature_test(
         "feature-lane",
         "manual",
     ],
-    variant_deps = {"//crates/lash-checkpoint-encoder:lash-checkpoint-encoder": "//crates/lash-checkpoint-encoder:lash-checkpoint-encoder__fv_ddc3bbf0", "//crates/lash-core-effect:lash-core-effect": "//crates/lash-core-effect:lash-core-effect__fv_b2dd58f7", "//crates/lash-core-execution:lash-core-execution": "//crates/lash-core-execution:lash-core-execution__fv_1e096dc1", "//crates/lash-core-ids:lash-core-ids": "//crates/lash-core-ids:lash-core-ids__fv_f93ad835", "//crates/lash-core-llm:lash-core-llm": "//crates/lash-core-llm:lash-core-llm__fv_9388b265", "//crates/lash-core-store:lash-core-store": "//crates/lash-core-store:lash-core-store__fv_0e4c48c1", "//crates/lash-core:lash-core": "//crates/lash-core:lash-core__fv_9a643bcf", "//crates/lash-durable:lash-durable": "//crates/lash-durable:lash-durable__fv_f913315d", "//crates/lash-kernel-dialect:lash-kernel-dialect": "//crates/lash-kernel-dialect:lash-kernel-dialect__fv_66d5dd0a", "//crates/lash-kernel-migrate:lash-kernel-migrate": "//crates/lash-kernel-migrate:lash-kernel-migrate__fv_11cdb259", "//crates/lash-kernel-state:lash-kernel-state": "//crates/lash-kernel-state:lash-kernel-state__fv_4bd72e2f", "//crates/lash-sqlite-store:lash-sqlite-store": "//crates/lash-sqlite-store:lash-sqlite-store__fv_7304ebab", "//crates/lash-store-sql:lash-store-sql": "//crates/lash-store-sql:lash-store-sql__fv_0dc86928", "//crates/lash-trace:lash-trace": "//crates/lash-trace:lash-trace__fv_72269560"},
+    variant_deps = {"//crates/lash-checkpoint-encoder:lash-checkpoint-encoder": "//crates/lash-checkpoint-encoder:lash-checkpoint-encoder__fv_ddc3bbf0", "//crates/lash-core-effect:lash-core-effect": "//crates/lash-core-effect:lash-core-effect__fv_8f4b0664", "//crates/lash-core-execution:lash-core-execution": "//crates/lash-core-execution:lash-core-execution__fv_643d5984", "//crates/lash-core-ids:lash-core-ids": "//crates/lash-core-ids:lash-core-ids__fv_ec6cd44f", "//crates/lash-core-llm:lash-core-llm": "//crates/lash-core-llm:lash-core-llm__fv_d5b0a5e5", "//crates/lash-core-store:lash-core-store": "//crates/lash-core-store:lash-core-store__fv_ef89faf0", "//crates/lash-core:lash-core": "//crates/lash-core:lash-core__fv_ebe9a406", "//crates/lash-durable:lash-durable": "//crates/lash-durable:lash-durable__fv_a28a13e5", "//crates/lash-kernel-dialect:lash-kernel-dialect": "//crates/lash-kernel-dialect:lash-kernel-dialect__fv_66d5dd0a", "//crates/lash-kernel-migrate:lash-kernel-migrate": "//crates/lash-kernel-migrate:lash-kernel-migrate__fv_11cdb259", "//crates/lash-kernel-state:lash-kernel-state": "//crates/lash-kernel-state:lash-kernel-state__fv_4bd72e2f", "//crates/lash-sansio:lash-sansio": "//crates/lash-sansio:lash-sansio__fv_43dbea3a", "//crates/lash-sqlite-store:lash-sqlite-store": "//crates/lash-sqlite-store:lash-sqlite-store__fv_27cd6fb0", "//crates/lash-store-sql:lash-store-sql": "//crates/lash-store-sql:lash-store-sql__fv_0dc86928", "//crates/lash-trace:lash-trace": "//crates/lash-trace:lash-trace__fv_88fa6727"},
     version = "0.0.0-dev",
 )
 
 lash_rust_feature_test(
-    name = "lash-core-store__unit_test__fv_99a04850",
+    name = "lash-core-store__unit_test__fv_53738633",
     build_script = None,
     crate_features = [
         "default",
@@ -855,7 +827,7 @@ lash_rust_feature_test(
         "synthetic-next",
         "testing",
     ],
-    exec_properties = sized_exec_properties("lash-internal-core-store", "lash_core_store", "//crates/lash-core-store:lash-core-store__unit_test__fv_99a04850"),
+    exec_properties = sized_exec_properties("lash-internal-core-store", "lash_core_store", "//crates/lash-core-store:lash-core-store__unit_test__fv_53738633"),
     extra_compile_data = [],
     manifest_dir = "crates/lash-core-store",
     package_name = "lash-internal-core-store",
@@ -863,12 +835,12 @@ lash_rust_feature_test(
         "feature-lane",
         "manual",
     ],
-    variant_deps = {"//crates/lash-checkpoint-encoder:lash-checkpoint-encoder": "//crates/lash-checkpoint-encoder:lash-checkpoint-encoder__fv_57546a29", "//crates/lash-core-effect:lash-core-effect": "//crates/lash-core-effect:lash-core-effect__fv_b7529bc9", "//crates/lash-core-execution:lash-core-execution": "//crates/lash-core-execution:lash-core-execution__fv_8614602d", "//crates/lash-core-ids:lash-core-ids": "//crates/lash-core-ids:lash-core-ids__fv_b17d382a", "//crates/lash-core-llm:lash-core-llm": "//crates/lash-core-llm:lash-core-llm__fv_79fd3946", "//crates/lash-core-store:lash-core-store": "//crates/lash-core-store:lash-core-store__fv_264e2a5f", "//crates/lash-core:lash-core": "//crates/lash-core:lash-core__fv_909ddcf7", "//crates/lash-durable:lash-durable": "//crates/lash-durable:lash-durable__fv_9f33e209", "//crates/lash-kernel-dialect:lash-kernel-dialect": "//crates/lash-kernel-dialect:lash-kernel-dialect__fv_66d5dd0a", "//crates/lash-kernel-migrate:lash-kernel-migrate": "//crates/lash-kernel-migrate:lash-kernel-migrate__fv_11cdb259", "//crates/lash-kernel-state:lash-kernel-state": "//crates/lash-kernel-state:lash-kernel-state__fv_4bd72e2f", "//crates/lash-sqlite-store:lash-sqlite-store": "//crates/lash-sqlite-store:lash-sqlite-store__fv_a2c9b98c", "//crates/lash-store-sql:lash-store-sql": "//crates/lash-store-sql:lash-store-sql__fv_0dc86928", "//crates/lash-trace:lash-trace": "//crates/lash-trace:lash-trace__fv_7cb6a6d6"},
+    variant_deps = {"//crates/lash-checkpoint-encoder:lash-checkpoint-encoder": "//crates/lash-checkpoint-encoder:lash-checkpoint-encoder__fv_57546a29", "//crates/lash-core-effect:lash-core-effect": "//crates/lash-core-effect:lash-core-effect__fv_a08a3032", "//crates/lash-core-execution:lash-core-execution": "//crates/lash-core-execution:lash-core-execution__fv_a506b12b", "//crates/lash-core-ids:lash-core-ids": "//crates/lash-core-ids:lash-core-ids__fv_4b924541", "//crates/lash-core-llm:lash-core-llm": "//crates/lash-core-llm:lash-core-llm__fv_0058231c", "//crates/lash-core-store:lash-core-store": "//crates/lash-core-store:lash-core-store__fv_a7e230b3", "//crates/lash-core:lash-core": "//crates/lash-core:lash-core__fv_f86c00a5", "//crates/lash-durable:lash-durable": "//crates/lash-durable:lash-durable__fv_ce9843ad", "//crates/lash-kernel-dialect:lash-kernel-dialect": "//crates/lash-kernel-dialect:lash-kernel-dialect__fv_66d5dd0a", "//crates/lash-kernel-migrate:lash-kernel-migrate": "//crates/lash-kernel-migrate:lash-kernel-migrate__fv_11cdb259", "//crates/lash-kernel-state:lash-kernel-state": "//crates/lash-kernel-state:lash-kernel-state__fv_4bd72e2f", "//crates/lash-sansio:lash-sansio": "//crates/lash-sansio:lash-sansio__fv_43dbea3a", "//crates/lash-sqlite-store:lash-sqlite-store": "//crates/lash-sqlite-store:lash-sqlite-store__fv_eb118746", "//crates/lash-store-sql:lash-store-sql": "//crates/lash-store-sql:lash-store-sql__fv_0dc86928", "//crates/lash-trace:lash-trace": "//crates/lash-trace:lash-trace__fv_df3b2780"},
     version = "0.0.0-dev",
 )
 
 lash_rust_feature_test(
-    name = "lash-core-store__unit_test__fv_ab354ec5",
+    name = "lash-core-store__unit_test__fv_d1743f2f",
     build_script = None,
     crate_features = [
         "default",
@@ -882,7 +854,7 @@ lash_rust_feature_test(
         "synthetic-next",
         "testing",
     ],
-    exec_properties = sized_exec_properties("lash-internal-core-store", "lash_core_store", "//crates/lash-core-store:lash-core-store__unit_test__fv_ab354ec5"),
+    exec_properties = sized_exec_properties("lash-internal-core-store", "lash_core_store", "//crates/lash-core-store:lash-core-store__unit_test__fv_d1743f2f"),
     extra_compile_data = [],
     manifest_dir = "crates/lash-core-store",
     package_name = "lash-internal-core-store",
@@ -890,12 +862,12 @@ lash_rust_feature_test(
         "feature-lane",
         "manual",
     ],
-    variant_deps = {"//crates/lash-checkpoint-encoder:lash-checkpoint-encoder": "//crates/lash-checkpoint-encoder:lash-checkpoint-encoder__fv_57546a29", "//crates/lash-core-effect:lash-core-effect": "//crates/lash-core-effect:lash-core-effect__fv_c802ad60", "//crates/lash-core-execution:lash-core-execution": "//crates/lash-core-execution:lash-core-execution__fv_3a154a72", "//crates/lash-core-ids:lash-core-ids": "//crates/lash-core-ids:lash-core-ids__fv_27c9adad", "//crates/lash-core-llm:lash-core-llm": "//crates/lash-core-llm:lash-core-llm__fv_e215d32e", "//crates/lash-core-store:lash-core-store": "//crates/lash-core-store:lash-core-store__fv_612fe365", "//crates/lash-core:lash-core": "//crates/lash-core:lash-core__fv_7df10aa1", "//crates/lash-durable:lash-durable": "//crates/lash-durable:lash-durable__fv_adbb7f2f", "//crates/lash-kernel-dialect:lash-kernel-dialect": "//crates/lash-kernel-dialect:lash-kernel-dialect__fv_66d5dd0a", "//crates/lash-kernel-migrate:lash-kernel-migrate": "//crates/lash-kernel-migrate:lash-kernel-migrate__fv_11cdb259", "//crates/lash-kernel-state:lash-kernel-state": "//crates/lash-kernel-state:lash-kernel-state__fv_4bd72e2f", "//crates/lash-sqlite-store:lash-sqlite-store": "//crates/lash-sqlite-store:lash-sqlite-store__fv_1e3103c4", "//crates/lash-store-sql:lash-store-sql": "//crates/lash-store-sql:lash-store-sql__fv_0dc86928", "//crates/lash-trace:lash-trace": "//crates/lash-trace:lash-trace__fv_7cb6a6d6"},
+    variant_deps = {"//crates/lash-checkpoint-encoder:lash-checkpoint-encoder": "//crates/lash-checkpoint-encoder:lash-checkpoint-encoder__fv_57546a29", "//crates/lash-core-effect:lash-core-effect": "//crates/lash-core-effect:lash-core-effect__fv_3f2847ac", "//crates/lash-core-execution:lash-core-execution": "//crates/lash-core-execution:lash-core-execution__fv_e0e074ca", "//crates/lash-core-ids:lash-core-ids": "//crates/lash-core-ids:lash-core-ids__fv_ec6f226e", "//crates/lash-core-llm:lash-core-llm": "//crates/lash-core-llm:lash-core-llm__fv_2d442b7c", "//crates/lash-core-store:lash-core-store": "//crates/lash-core-store:lash-core-store__fv_9534ec9c", "//crates/lash-core:lash-core": "//crates/lash-core:lash-core__fv_f23956d8", "//crates/lash-durable:lash-durable": "//crates/lash-durable:lash-durable__fv_1994ef08", "//crates/lash-kernel-dialect:lash-kernel-dialect": "//crates/lash-kernel-dialect:lash-kernel-dialect__fv_66d5dd0a", "//crates/lash-kernel-migrate:lash-kernel-migrate": "//crates/lash-kernel-migrate:lash-kernel-migrate__fv_11cdb259", "//crates/lash-kernel-state:lash-kernel-state": "//crates/lash-kernel-state:lash-kernel-state__fv_4bd72e2f", "//crates/lash-sansio:lash-sansio": "//crates/lash-sansio:lash-sansio__fv_43dbea3a", "//crates/lash-sqlite-store:lash-sqlite-store": "//crates/lash-sqlite-store:lash-sqlite-store__fv_d0a921a1", "//crates/lash-store-sql:lash-store-sql": "//crates/lash-store-sql:lash-store-sql__fv_0dc86928", "//crates/lash-trace:lash-trace": "//crates/lash-trace:lash-trace__fv_88fa6727"},
     version = "0.0.0-dev",
 )
 
 lash_rust_feature_test(
-    name = "lash-core-store__unit_test__fv_d1c33d44",
+    name = "lash-core-store__unit_test__fv_f70a04a3",
     build_script = None,
     crate_features = [
         "default",
@@ -909,7 +881,7 @@ lash_rust_feature_test(
         "synthetic-next",
         "testing",
     ],
-    exec_properties = sized_exec_properties("lash-internal-core-store", "lash_core_store", "//crates/lash-core-store:lash-core-store__unit_test__fv_d1c33d44"),
+    exec_properties = sized_exec_properties("lash-internal-core-store", "lash_core_store", "//crates/lash-core-store:lash-core-store__unit_test__fv_f70a04a3"),
     extra_compile_data = [],
     manifest_dir = "crates/lash-core-store",
     package_name = "lash-internal-core-store",
@@ -917,6 +889,34 @@ lash_rust_feature_test(
         "feature-lane",
         "manual",
     ],
-    variant_deps = {"//crates/lash-checkpoint-encoder:lash-checkpoint-encoder": "//crates/lash-checkpoint-encoder:lash-checkpoint-encoder__fv_57546a29", "//crates/lash-core-effect:lash-core-effect": "//crates/lash-core-effect:lash-core-effect__fv_5fe9f32e", "//crates/lash-core-execution:lash-core-execution": "//crates/lash-core-execution:lash-core-execution__fv_dea267b5", "//crates/lash-core-ids:lash-core-ids": "//crates/lash-core-ids:lash-core-ids__fv_c0eef79e", "//crates/lash-core-llm:lash-core-llm": "//crates/lash-core-llm:lash-core-llm__fv_03148780", "//crates/lash-core-store:lash-core-store": "//crates/lash-core-store:lash-core-store__fv_057f36dc", "//crates/lash-core:lash-core": "//crates/lash-core:lash-core__fv_eab68716", "//crates/lash-durable:lash-durable": "//crates/lash-durable:lash-durable__fv_bd74275e", "//crates/lash-kernel-dialect:lash-kernel-dialect": "//crates/lash-kernel-dialect:lash-kernel-dialect__fv_66d5dd0a", "//crates/lash-kernel-migrate:lash-kernel-migrate": "//crates/lash-kernel-migrate:lash-kernel-migrate__fv_11cdb259", "//crates/lash-kernel-state:lash-kernel-state": "//crates/lash-kernel-state:lash-kernel-state__fv_4bd72e2f", "//crates/lash-sqlite-store:lash-sqlite-store": "//crates/lash-sqlite-store:lash-sqlite-store__fv_71ac017c", "//crates/lash-store-sql:lash-store-sql": "//crates/lash-store-sql:lash-store-sql__fv_0dc86928", "//crates/lash-trace:lash-trace": "//crates/lash-trace:lash-trace__fv_72269560"},
+    variant_deps = {"//crates/lash-checkpoint-encoder:lash-checkpoint-encoder": "//crates/lash-checkpoint-encoder:lash-checkpoint-encoder__fv_57546a29", "//crates/lash-core-effect:lash-core-effect": "//crates/lash-core-effect:lash-core-effect__fv_ec63f674", "//crates/lash-core-execution:lash-core-execution": "//crates/lash-core-execution:lash-core-execution__fv_4f4bbae0", "//crates/lash-core-ids:lash-core-ids": "//crates/lash-core-ids:lash-core-ids__fv_4b924541", "//crates/lash-core-llm:lash-core-llm": "//crates/lash-core-llm:lash-core-llm__fv_94eb9d75", "//crates/lash-core-store:lash-core-store": "//crates/lash-core-store:lash-core-store__fv_954e1ae7", "//crates/lash-core:lash-core": "//crates/lash-core:lash-core__fv_e6bd66b8", "//crates/lash-durable:lash-durable": "//crates/lash-durable:lash-durable__fv_d0fdddd5", "//crates/lash-kernel-dialect:lash-kernel-dialect": "//crates/lash-kernel-dialect:lash-kernel-dialect__fv_66d5dd0a", "//crates/lash-kernel-migrate:lash-kernel-migrate": "//crates/lash-kernel-migrate:lash-kernel-migrate__fv_11cdb259", "//crates/lash-kernel-state:lash-kernel-state": "//crates/lash-kernel-state:lash-kernel-state__fv_4bd72e2f", "//crates/lash-sansio:lash-sansio": "//crates/lash-sansio:lash-sansio__fv_43dbea3a", "//crates/lash-sqlite-store:lash-sqlite-store": "//crates/lash-sqlite-store:lash-sqlite-store__fv_a1772537", "//crates/lash-store-sql:lash-store-sql": "//crates/lash-store-sql:lash-store-sql__fv_0dc86928", "//crates/lash-trace:lash-trace": "//crates/lash-trace:lash-trace__fv_df3b2780"},
+    version = "0.0.0-dev",
+)
+
+lash_rust_feature_test(
+    name = "lash-core-store__unit_test__fv_f92be68c",
+    build_script = None,
+    crate_features = [
+        "default",
+        "synthetic-next",
+    ],
+    crate_name = "lash_core_store",
+    crate_root = "src/lib.rs",
+    declared_features = [
+        "default",
+        "otel-trace",
+        "perf-witness",
+        "synthetic-next",
+        "testing",
+    ],
+    exec_properties = sized_exec_properties("lash-internal-core-store", "lash_core_store", "//crates/lash-core-store:lash-core-store__unit_test__fv_f92be68c"),
+    extra_compile_data = [],
+    manifest_dir = "crates/lash-core-store",
+    package_name = "lash-internal-core-store",
+    tags = [
+        "feature-lane",
+        "manual",
+    ],
+    variant_deps = {"//crates/lash-checkpoint-encoder:lash-checkpoint-encoder": "//crates/lash-checkpoint-encoder:lash-checkpoint-encoder__fv_57546a29", "//crates/lash-core-effect:lash-core-effect": "//crates/lash-core-effect:lash-core-effect__fv_3fa4314c", "//crates/lash-core-execution:lash-core-execution": "//crates/lash-core-execution:lash-core-execution__fv_0d0a4b88", "//crates/lash-core-ids:lash-core-ids": "//crates/lash-core-ids:lash-core-ids__fv_df42f1b5", "//crates/lash-core-llm:lash-core-llm": "//crates/lash-core-llm:lash-core-llm__fv_c066c7f7", "//crates/lash-core-store:lash-core-store": "//crates/lash-core-store:lash-core-store__fv_31a095d9", "//crates/lash-core:lash-core": "//crates/lash-core:lash-core__fv_6ff96571", "//crates/lash-durable:lash-durable": "//crates/lash-durable:lash-durable__fv_e85ff93d", "//crates/lash-kernel-dialect:lash-kernel-dialect": "//crates/lash-kernel-dialect:lash-kernel-dialect__fv_66d5dd0a", "//crates/lash-kernel-migrate:lash-kernel-migrate": "//crates/lash-kernel-migrate:lash-kernel-migrate__fv_11cdb259", "//crates/lash-kernel-state:lash-kernel-state": "//crates/lash-kernel-state:lash-kernel-state__fv_4bd72e2f", "//crates/lash-protocol-types:lash-protocol-types": "//crates/lash-protocol-types:lash-protocol-types__fv_e6e8f54c", "//crates/lash-sansio:lash-sansio": "//crates/lash-sansio:lash-sansio__fv_b3898691", "//crates/lash-sqlite-store:lash-sqlite-store": "//crates/lash-sqlite-store:lash-sqlite-store__fv_a1ab88b9", "//crates/lash-store-sql:lash-store-sql": "//crates/lash-store-sql:lash-store-sql__fv_0dc86928", "//crates/lash-trace:lash-trace": "//crates/lash-trace:lash-trace__fv_2ca042c3", "//crates/lash-transport-failure:lash-transport-failure": "//crates/lash-transport-failure:lash-transport-failure__fv_db916377", "//crates/lash-vm-protocol:lash-vm-protocol": "//crates/lash-vm-protocol:lash-vm-protocol__fv_88e13ba6"},
     version = "0.0.0-dev",
 )

@@ -15,8 +15,8 @@ impl RuntimeExecutionContext<'_> {
     /// tools take a `process_id`, and reading one out of the handle id is
     /// exactly what the opaque id forbids.
     pub fn process_handle_json(process_id: &crate::ProcessId) -> serde_json::Value {
-        let mut record = lash_sansio::handle::handle_record_json(
-            &lash_sansio::handle::HandleId::process(process_id),
+        let mut record = lash_protocol_types::handle::handle_record_json(
+            &lash_protocol_types::handle::HandleId::process(process_id),
         );
         record["process_id"] = json!(process_id.as_str());
         record

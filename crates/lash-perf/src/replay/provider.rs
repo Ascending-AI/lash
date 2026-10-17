@@ -17,8 +17,8 @@ use lash_core::llm::types::{
     LlmRequest, LlmResponse, LlmRole, LlmStreamEvent, StreamBlockIdentity,
 };
 use lash_core::{ExecutionPolicy, LlmOutputPart, ToolCall, ToolOutcome};
-use lash_sansio::llm::types::{StreamBlockEvent, StreamBlockKind};
-use lash_sansio::sync::MutexExt as _;
+use lash_protocol_types::sync::MutexExt as _;
+use lash_protocol_types::{llm::types::StreamBlockEvent, llm::types::StreamBlockKind};
 
 use super::script::{Protocol, Reply, ScriptedTurn};
 

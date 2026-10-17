@@ -79,7 +79,7 @@ fn assistant_response_hook_failures_are_retryable_not_terminal() {
 /// A `lash:` spelling belongs to exactly one failure vocabulary.
 #[test]
 fn runtime_and_turn_failure_spellings_do_not_overlap() {
-    use lash_sansio::session_model::TurnFailureCode;
+    use lash_protocol_types::session_model::TurnFailureCode;
 
     for code in TurnFailureCode::ALL_NAMED {
         assert!(
@@ -100,7 +100,7 @@ fn runtime_and_turn_failure_spellings_do_not_overlap() {
 /// reserved namespace or carrying none lands in `foreign`, never `lash`.
 #[test]
 fn runtime_error_code_conversion_never_mints_lash_for_foreign_codes() {
-    use lash_sansio::session_model::{FailureCode, Namespace};
+    use lash_protocol_types::{session_model::FailureCode, session_model::Namespace};
 
     let built_in = FailureCode::from(&RuntimeErrorCode::RuntimeStore);
     assert_eq!(built_in.namespace(), &Namespace::LASH);
@@ -612,7 +612,7 @@ mod typed_refusal_causes {
             key: crate::LlmProfileKey::new("model"),
             reasoning: crate::ReasoningSelection::Effort("deep".to_string()),
             category:
-                lash_sansio::llm::capability::LlmProfileEffortValidationCategory::UnsupportedEffort,
+                lash_protocol_types::llm::capability::LlmProfileEffortValidationCategory::UnsupportedEffort,
             message: "deep is not declared".to_string(),
         };
         for (refusal, code) in [

@@ -282,7 +282,7 @@ async fn retained_expiry_check_attribution_survives_removal() {
             owner: "removed-check".into(),
             key: key.into(),
         };
-        let expiry = lash_sansio::ControlPhaseExpired {
+        let expiry = lash_protocol_types::ControlPhaseExpired {
             phase: phase.into(),
             bound_ms: 10,
             plugin: callback.owner.clone(),
@@ -381,7 +381,7 @@ async fn retained_expiry_check_attribution_survives_removal() {
             provider_call_id: None,
             tool_name: "probe".into(),
             args: serde_json::json!({}),
-            model_return: lash_sansio::tool_output::ModelToolReturn::from_output(
+            model_return: lash_protocol_types::tool_output::ModelToolReturn::from_output(
                 "probe".into(),
                 &output,
             ),

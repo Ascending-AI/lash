@@ -89,7 +89,7 @@ impl ToolHookOccurrence {
 #[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize)]
 #[serde(deny_unknown_fields)]
 pub struct HookOccurrence {
-    pub call_id: lash_sansio::ToolCallId,
+    pub call_id: lash_protocol_types::ToolCallId,
     pub callback: PluginCallbackIdentity,
     pub phase: ToolHookPhase,
     pub occurrence: ToolHookOccurrence,

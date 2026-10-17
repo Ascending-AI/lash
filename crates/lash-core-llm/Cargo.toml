@@ -23,7 +23,7 @@ otel-trace = ["lash-trace/otel", "lash-core-ids/otel-trace"]
 # site compiled out unless an internal witness explicitly enables this feature.
 perf-witness = ["lash-core-ids/perf-witness"]
 # Test-only observation hooks shared with lash-core's unit suites.
-testing = ["lash-core-ids/testing", "lash-sansio/testing"]
+testing = ["lash-core-ids/testing", "lash-protocol-types/testing"]
 
 [lints]
 workspace = true
@@ -31,7 +31,7 @@ workspace = true
 [dependencies]
 lash-transport-failure = { workspace = true }
 lash-core-ids = { workspace = true }
-lash-sansio = { workspace = true, features = ["schema-validation"] }
+lash-protocol-types = { workspace = true, features = ["schema-validation"] }
 lash-trace = { workspace = true }
 async-trait = { workspace = true }
 base64 = { workspace = true }
@@ -46,5 +46,5 @@ tracing = { workspace = true }
 
 [dev-dependencies]
 lash-core-ids = { workspace = true, features = ["testing"] }
-lash-sansio = { workspace = true, features = ["schema-validation", "testing"] }
+lash-protocol-types = { workspace = true, features = ["schema-validation", "testing"] }
 tokio = { workspace = true, features = ["test-util", "rt-multi-thread"] }

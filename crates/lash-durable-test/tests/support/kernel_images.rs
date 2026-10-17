@@ -13,8 +13,8 @@ use lash_core_execution::{
 use lash_durable::runner::{Activation, Stopped};
 use lash_durable::{ActorKey, ActorState, CommitLabel, DurableStore, LeaseConfig, MailTx};
 use lash_durable_test::{Script, SimClock, SimNodes, SimNodesConfig, Tripwire};
-use lash_sansio::sync::MutexExt as _;
-use lash_sansio::{ExecutionLimit, ExecutionPolicy};
+use lash_protocol_types::sync::MutexExt as _;
+use lash_protocol_types::{ExecutionLimit, ExecutionPolicy};
 use lash_vm_runtime::{
     KernelDocuments, KernelEngineSteps, KernelProcessEngine, KernelProcessInput,
     LASH_VM_ENGINE_KIND,

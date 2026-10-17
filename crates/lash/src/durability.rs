@@ -10,7 +10,7 @@ pub use lash_core::{EffectAttempt, RecordedEffectExecution};
 pub use lash_core::PreparedProcessRegistration;
 pub use lash_core::RecordedKeys;
 pub use lash_core_store::effect_opener::EffectOpener;
-pub use lash_sansio::{CancelRequest, ToolCallAdmission};
+pub use lash_protocol_types::{CancelRequest, ToolCallAdmission};
 
 /// Effect-host inputs, replay projections, and local execution capabilities.
 pub use lash_core::runtime::{

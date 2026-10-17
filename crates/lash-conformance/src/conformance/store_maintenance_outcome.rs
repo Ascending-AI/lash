@@ -11,7 +11,7 @@
 //! reading counters.
 
 use crate::conformance::DeploymentViewExt as _;
-use lash_sansio::SessionId;
+use lash_protocol_types::SessionId;
 use std::sync::Arc;
 
 use super::session_store_factory::session_store_request;
@@ -176,8 +176,8 @@ pub async fn empty_root_set_refusal_returns_its_partial_report(
     let orphan = crate::AttachmentStore::put(
         attachments.as_ref(),
         b"maintenance-refusal-orphan".to_vec(),
-        lash_sansio::AttachmentCreateMeta::new(
-            lash_sansio::MediaType::parse("application/octet-stream").expect("media type"),
+        lash_protocol_types::AttachmentCreateMeta::new(
+            lash_protocol_types::MediaType::parse("application/octet-stream").expect("media type"),
             None,
             Some("orphan".to_string()),
         ),

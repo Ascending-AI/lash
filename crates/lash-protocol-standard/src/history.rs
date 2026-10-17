@@ -1,9 +1,13 @@
 //! Standard mode history wording and the optional flat transcript view.
-use lash_sansio::llm::types::{LlmContentBlock, LlmMessage, LlmRole};
-use lash_sansio::session_model::message::{
-    HistoryPresentation, Message, MessageRole, Part, PartKind, RenderedPrompt,
+use lash_protocol_types::{AttachmentRef, ModelToolReturnPart};
+use lash_protocol_types::{
+    llm::types::LlmContentBlock, llm::types::LlmMessage, llm::types::LlmRole,
 };
-use lash_sansio::{AttachmentRef, ModelToolReturnPart};
+use lash_protocol_types::{
+    session_model::message::HistoryPresentation, session_model::message::Message,
+    session_model::message::MessageRole, session_model::message::Part,
+    session_model::message::PartKind, session_model::message::RenderedPrompt,
+};
 use std::sync::{Arc, OnceLock};
 
 /// Standard mode's flat tool-result view; attachments retain their slots.

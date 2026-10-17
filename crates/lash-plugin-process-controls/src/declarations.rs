@@ -98,7 +98,7 @@ pub fn execute_process_get_tool_call(
         Err(error) => return refuse(error),
     };
     ToolAttemptOutcome::done(
-        ToolOutcomeDone::ok(lash_sansio::handle::definition_slot_json(0)),
+        ToolOutcomeDone::ok(lash_protocol_types::handle::definition_slot_json(0)),
         ToolIntents::v3(vec![ToolIntent::GetDefinition(
             lash_core::GetDefinitionIntent {
                 owner: context.owner().runtime_owner(),
@@ -186,7 +186,11 @@ pub async fn execute_process_start_tool_call(
     };
     let (resolved, inline) = match (fields.get("definition"), fields.get("definition_id")) {
         (Some(value), None) => match context
-            .resolve_inline_start(lash_sansio::LASH_VM_ENGINE_KIND, value.clone(), run_args)
+            .resolve_inline_start(
+                lash_protocol_types::LASH_VM_ENGINE_KIND,
+                value.clone(),
+                run_args,
+            )
             .await
         {
             Ok(inline) => (inline.target.clone(), Some(inline)),
@@ -297,7 +301,7 @@ pub async fn execute_process_start_tool_call(
     // slot and the realization replaces it with the handle of the process the
     // start registered (ADR 0107).
     ToolAttemptOutcome::done(
-        ToolOutcomeDone::ok(lash_sansio::handle::process_start_slot_json(
+        ToolOutcomeDone::ok(lash_protocol_types::handle::process_start_slot_json(
             identity.intent_index,
         )),
         ToolIntents::v3(vec![ToolIntent::StartProcess(Box::new(

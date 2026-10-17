@@ -21,7 +21,7 @@ pub(crate) fn session_ingress_sql() -> &'static SessionIngressStatements {
 /// Every caller holds the database write lock for the entire allocation.
 pub(crate) fn allocate_sequence(
     conn: &rusqlite::Connection,
-    session_id: &lash_sansio::SessionId,
+    session_id: &lash_protocol_types::SessionId,
 ) -> Result<i64, crate::StoreError> {
     conn.query_row(
         session_ingress_sql().allocate_sequence.sql(),

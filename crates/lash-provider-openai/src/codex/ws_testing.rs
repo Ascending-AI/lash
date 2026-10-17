@@ -19,7 +19,7 @@
     reason = "test-support harness: a broken setup assumption aborts the test"
 )]
 
-use lash_sansio::sync::MutexExt;
+use lash_protocol_types::sync::MutexExt;
 use std::collections::VecDeque;
 use std::sync::{Arc, Mutex};
 use std::time::Duration;

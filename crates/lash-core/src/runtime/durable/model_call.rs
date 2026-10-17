@@ -277,7 +277,7 @@ pub(super) async fn send(
     drive: &mut dyn TurnDrive,
     id: EffectId,
     request: std::sync::Arc<LlmRequest>,
-    admitted: &lash_sansio::llm::types::AdmittedSend,
+    admitted: &lash_protocol_types::llm::types::AdmittedSend,
     start: &ModelStart,
 ) -> Result<bool, TurnError> {
     let (pin, limit, resent) = match start {

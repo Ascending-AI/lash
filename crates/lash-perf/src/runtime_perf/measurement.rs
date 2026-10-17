@@ -19,7 +19,7 @@ use lash_core::{
     facade_support::Response, facade_support::TurnFinish, facade_support::TurnOutcome,
     facade_support::shared_parts,
 };
-use lash_sansio::sync::MutexExt;
+use lash_protocol_types::sync::MutexExt;
 use serde::Serialize;
 use stats_alloc::Stats;
 use tokio_util::sync::CancellationToken;
@@ -45,7 +45,7 @@ use super::store::RuntimePerfStoreTiming;
 #[cfg(test)]
 async fn load_runtime_perf_session_state(
     store: &Arc<dyn lash_core::RuntimeStore>,
-    session_id: &lash_sansio::SessionId,
+    session_id: &lash_protocol_types::SessionId,
 ) -> Result<Option<RuntimeSessionState>, lash_core::StoreError> {
     let view = lash_core::SessionStore::new(store.clone(), session_id.clone())?;
     Ok(lash_core::store::load_session_window_state(

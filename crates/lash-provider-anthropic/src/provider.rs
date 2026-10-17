@@ -29,7 +29,7 @@ impl Provider for AnthropicProvider {
     fn attachment_accepts(
         &self,
         _model: &str,
-        mime: &lash_sansio::MediaType,
+        mime: &lash_protocol_types::MediaType,
         _position: AttachmentPosition,
     ) -> ProviderAccepts {
         self.accepts_attachment(mime)
@@ -96,8 +96,9 @@ impl Provider for AnthropicProvider {
     ) -> Result<RecordedRequestTemplate, LlmTransportError> {
         self.validate_route_and_headers(req.model.wire_model())?;
         let route = self.route_identity(req.model.wire_model());
-        let accepts =
-            |mime: &lash_sansio::MediaType, position| self.attachment_accepts("", mime, position);
+        let accepts = |mime: &lash_protocol_types::MediaType, position| {
+            self.attachment_accepts("", mime, position)
+        };
         // A wire message reads, besides its own messages, the route, the
         // host's acceptance and this provider's file scope (its slots).
         let context = segment_context("lash.anthropic.message/1", req, &route)

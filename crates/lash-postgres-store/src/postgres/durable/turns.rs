@@ -19,7 +19,7 @@ use lash_durable::domain::{
     TurnCancelRequest, TurnEnd, TurnNamespace, TurnRow, TurnWrite, UnfinishedPhase,
 };
 use lash_durable::{ActorKey, DurableError, DurableInstant, Epoch, Woken};
-use lash_sansio::{SessionId, TurnId};
+use lash_protocol_types::{SessionId, TurnId};
 use lash_store_sql::Dialect;
 use lash_store_sql::durable::turns::TurnStatements;
 use sqlx::{PgConnection, Row};
@@ -266,7 +266,7 @@ const TERMINAL_RETENTION: u8 = 2;
 /// The end of `referrer`'s local edges, gated on `gate`, as a step.
 pub(super) fn end_local_step(
     referrer: &lash_core_execution::ArtifactReferrer,
-    gate: Option<&lash_sansio::EffectJournalIdentity>,
+    gate: Option<&lash_protocol_types::EffectJournalIdentity>,
 ) -> Result<Step, lash_core_execution::StoreError> {
     let end = crate::artifact_store::LocalEndArguments::of(referrer, gate)?;
     Ok(Step::one(
@@ -360,7 +360,7 @@ fn terminal_steps(
     let mut batches = turn();
     batches.push(Value::Now);
     program.push(Step::any(&SETTLE_HELD_BATCHES, batches));
-    let journal = lash_sansio::ExecutionScope::turn(session.clone(), run.clone())
+    let journal = lash_protocol_types::ExecutionScope::turn(session.clone(), run.clone())
         .journal_identity()
         .map_err(|error| corrupt("turn journal", &error.to_string()))?;
     program.push(

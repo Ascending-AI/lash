@@ -7,7 +7,7 @@ use crate::session_graph_integrity::{ancestry_indices, graph_node_indices};
 use crate::session_model::SessionHistoryRecord;
 use crate::snapshot_index::SnapshotIndex;
 use crate::{BaseRenderCache, Message, NodeId};
-use lash_sansio::{AppendVec, same_history_record, same_message};
+use lash_protocol_types::{AppendVec, same_history_record, same_message};
 
 #[derive(Clone, Debug)]
 pub(crate) struct NodeIdIndex(SnapshotIndex<NodeId, Option<usize>>);
@@ -66,7 +66,7 @@ pub(crate) struct SessionGraphCache {
     /// Identity is the point, not only the saved work: the turn projection
     /// decides prefix agreement by comparing the shared sequence a read
     /// model handed out (`TurnGraphEditor::message_delta_if_current_preserved`,
-    /// [`lash_sansio::AppendVec::ptr_eq`]), so every reader of one resident
+    /// [`lash_protocol_types::AppendVec::ptr_eq`]), so every reader of one resident
     /// graph shares these sequences.
     ///
     /// Behind a mutex because `read_model` materializes through `&self`

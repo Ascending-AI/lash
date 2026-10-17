@@ -10,7 +10,7 @@ use crate::store::{
 };
 use crate::{ExecutionScope, HostArtifactPin, ReferrerClaim, ReferrerGuard};
 
-fn journal(id: &str) -> lash_sansio::EffectJournalIdentity {
+fn journal(id: &str) -> lash_protocol_types::EffectJournalIdentity {
     ExecutionScope::runtime_operation(id)
         .journal_identity()
         .expect("an operation scope has a journal")
@@ -143,7 +143,7 @@ struct Authorities {
 }
 
 impl Authorities {
-    fn settle(&self, journal: &lash_sansio::EffectJournalIdentity) {
+    fn settle(&self, journal: &lash_protocol_types::EffectJournalIdentity) {
         self.settled
             .lock()
             .unwrap_or_else(std::sync::PoisonError::into_inner)
@@ -162,7 +162,7 @@ impl ArtifactCleanupAuthorities for Authorities {
 
     async fn journal_replay(
         &self,
-        journal: &lash_sansio::EffectJournalIdentity,
+        journal: &lash_protocol_types::EffectJournalIdentity,
     ) -> Result<JournalReplay, String> {
         let settled = self
             .settled

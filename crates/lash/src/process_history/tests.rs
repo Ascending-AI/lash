@@ -68,7 +68,7 @@ impl Fixture {
     /// Commit one runtime-owned effect-summary occurrence.
     async fn commit_outcome(&self, occurrence: u64) -> ProcessEvent {
         let outcome = lash_core::ProcessEffectOccurrence::new(
-            lash_sansio::effect_identity_fixture("node", occurrence),
+            lash_protocol_types::effect_identity_fixture("node", occurrence),
             "tools.echo",
             lash_core::ProcessEffectOutcomeClass::Success,
             None,
@@ -355,7 +355,7 @@ async fn effect_omissions_survive_zero_and_tiny_acquisition_budgets() {
         fixture
             .registry
             .add_observer(
-                &lash_sansio::SessionId::fixture(format!("late-observer-{n}")),
+                &lash_protocol_types::SessionId::fixture(format!("late-observer-{n}")),
                 &fixture.process_id,
                 lash_core::ProcessObserverBy::host(format!("late-observer-{n}")),
             )
@@ -457,7 +457,7 @@ impl Fixture {
             for occurrence in 0..count.min(cap) {
                 pending.push(
                     lash_core::ProcessEffectOccurrence::new(
-                        lash_sansio::effect_identity_fixture(&node_name, occurrence),
+                        lash_protocol_types::effect_identity_fixture(&node_name, occurrence),
                         "tools.echo",
                         lash_core::ProcessEffectOutcomeClass::Success,
                         None,
@@ -468,7 +468,7 @@ impl Fixture {
                 );
             }
             omitted.insert(
-                lash_sansio::effect_identity_fixture(&node_name, 0)
+                lash_protocol_types::effect_identity_fixture(&node_name, 0)
                     .site
                     .to_string(),
                 lash_core::ProcessEffectOmittedCounts {

@@ -4,6 +4,7 @@ exclude = ["fuzz", ".kiln"]
 members = [
     "third-party/vendored/lash-rmcp",
     "crates/lash-render",
+    "crates/lash-protocol-types",
     "crates/lash-sansio",
     "crates/lash-trace",
     "crates/lash-rlm-types",
@@ -345,6 +346,7 @@ lash-provider-openai = { package = "lash-internal-provider-openai", path = "crat
 lash-provider-fixtures = { package = "lash-internal-provider-fixtures", path = "crates/lash-provider-fixtures", version = "=0.0.0-dev" }
 lash-regress = { path = "crates/lash-regress", version = "=0.0.0-dev", features = ["utf16"] }
 lash-rlm-types = { package = "lash-internal-rlm-types", path = "crates/lash-rlm-types", version = "=0.0.0-dev" }
+lash-protocol-types = { package = "lash-internal-protocol-types", path = "crates/lash-protocol-types", version = "=0.0.0-dev" }
 lash-sansio = { package = "lash-internal-sansio", path = "crates/lash-sansio", version = "=0.0.0-dev" }
 lash-tool-shape = { package = "lash-internal-tool-shape", path = "crates/lash-tool-shape", version = "=0.0.0-dev" }
 lash-tool-presenter-api = { package = "lash-internal-tool-presenter-api", path = "crates/lash-tool-presenter-api", version = "=0.0.0-dev" }

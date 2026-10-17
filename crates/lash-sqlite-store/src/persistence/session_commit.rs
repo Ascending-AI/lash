@@ -96,7 +96,7 @@ fn end_frames_tx(
     tx: &rusqlite::Connection,
     session_id: &SessionId,
     left: &[lash_core_execution::FrameNodeId],
-    gate: Option<&lash_sansio::EffectJournalIdentity>,
+    gate: Option<&lash_protocol_types::EffectJournalIdentity>,
     now_ms: u64,
 ) -> Result<(), StoreError> {
     for frame in left {

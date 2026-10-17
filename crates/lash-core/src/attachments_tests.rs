@@ -5,8 +5,8 @@
 
 use crate::SessionId;
 use lash_core_store::attachments::*;
-use lash_sansio::sync::MutexExt;
-use lash_sansio::{AttachmentCreateMeta, AttachmentId, AttachmentRef};
+use lash_protocol_types::sync::MutexExt;
+use lash_protocol_types::{AttachmentCreateMeta, AttachmentId, AttachmentRef};
 use std::collections::{BTreeSet, HashMap};
 use std::sync::{Arc, Mutex};
 
@@ -16,7 +16,7 @@ fn now_epoch_ms() -> u64 {
 
 use crate::store::{AttachmentReferrers, AttachmentWriteFence};
 use crate::{ArtifactReferrer, AttachmentWrite, ReferrerClaim, RuntimeOwner};
-use lash_sansio::{AttachmentTypeMetadata, MediaType};
+use lash_protocol_types::{AttachmentTypeMetadata, MediaType};
 
 fn session_owner(session_id: &str) -> RuntimeOwner {
     RuntimeOwner::Session(SessionId::fixture(session_id))
@@ -234,16 +234,17 @@ fn meta() -> AttachmentCreateMeta {
 #[tokio::test]
 async fn put_delivery_advice_matches_the_single_slot_read_boundary() {
     use lash_core_llm::provider::{AttachmentDeliveryError, InlineDeliveries, SlotDeliveries};
-    use lash_sansio::llm::attachment_delivery::{
-        AttachmentPosition, DeliveryContext, ProviderAccepts,
+    use lash_protocol_types::{
+        llm::attachment_delivery::AttachmentPosition, llm::attachment_delivery::DeliveryContext,
+        llm::attachment_delivery::ProviderAccepts,
     };
-    use lash_sansio::llm::types::{AttachmentSlot, SlotCodec};
+    use lash_protocol_types::{llm::types::AttachmentSlot, llm::types::SlotCodec};
 
     let backend = crate::testing::sqlite_memory_store_set()
         .await
         .attachment_store();
     let reference = AttachmentRef {
-        id: lash_sansio::attachment::content_id(&[7; 3]),
+        id: lash_protocol_types::attachment::content_id(&[7; 3]),
         media_type: "image/png".parse().unwrap(),
         byte_len: 3,
         label: Some("pixel".into()),
@@ -1619,16 +1620,16 @@ fn attachment_request(
         .collect();
     Arc::new(crate::llm::types::LlmRequest {
         instructions: None,
-        model: lash_sansio::llm_profile::LlmProfileConfig::new(
-            lash_sansio::llm_profile::RecordedLlmProfile::mint(
-                lash_sansio::llm_profile::LlmProfileKey::new("request-fixture"),
-                lash_sansio::llm_profile::LlmProfileMetadata::builder(
+        model: lash_protocol_types::llm_profile::LlmProfileConfig::new(
+            lash_protocol_types::llm_profile::RecordedLlmProfile::mint(
+                lash_protocol_types::llm_profile::LlmProfileKey::new("request-fixture"),
+                lash_protocol_types::llm_profile::LlmProfileMetadata::builder(
                     "attachment-model".to_string(),
                 )
                 .context_window_tokens(128_000)
                 .capability(Default::default())
                 .extra_body(Default::default())
-                .cache_retention(lash_sansio::llm::capability::CacheRetention::Short)
+                .cache_retention(lash_protocol_types::llm::capability::CacheRetention::Short)
                 .build()
                 .expect("valid profile"),
             ),

@@ -230,7 +230,9 @@ fn visit(
 fn lease(root: NodeId) -> RootLease {
     RootLease {
         id: RootLeaseId(41),
-        owner: RootOwner::Exec(ExecKey::Process(lash_sansio::ProcessId::fixture("paging"))),
+        owner: RootOwner::Exec(ExecKey::Process(lash_protocol_types::ProcessId::fixture(
+            "paging",
+        ))),
         root,
         fence: LeaseFence::Actor {
             actor: ActorKey::process("paging").expect("actor"),

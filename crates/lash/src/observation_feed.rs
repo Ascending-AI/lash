@@ -43,7 +43,7 @@ use lash_core::{
     LiveReplaySubscribeOutcome, LiveReplaySubscription, SessionObservationEvent,
     SessionObservationEventPayload, SessionRevision,
 };
-use lash_sansio::SessionId;
+use lash_protocol_types::SessionId;
 
 use crate::session::SessionObservationStreamItem;
 use crate::support::{

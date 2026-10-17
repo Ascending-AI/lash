@@ -5,7 +5,7 @@
 
 use super::*;
 use lash_core::ToolProvider;
-use lash_sansio::sync::{MutexExt, RwLockExt};
+use lash_protocol_types::{sync::MutexExt, sync::RwLockExt};
 
 #[tokio::test]
 async fn mcp_view_preserves_order_and_filters_nonassistant_blocks() {

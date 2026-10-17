@@ -6,7 +6,7 @@ use lash_core::llm::types::{
     ReasoningRetentionSelection,
 };
 use lash_core::provider::Provider;
-use lash_sansio::sync::MutexExt;
+use lash_protocol_types::sync::MutexExt;
 use serde_json::json;
 
 use super::GoogleOAuthProvider;
@@ -40,16 +40,18 @@ impl lash_llm_transport::LlmHttpTransport for CapturingTransport {
 fn request() -> LlmRequest {
     LlmRequest {
         instructions: None,
-        model: lash_sansio::llm_profile::LlmProfileConfig::new(
-            lash_sansio::llm_profile::RecordedLlmProfile::mint(
-                lash_sansio::llm_profile::LlmProfileKey::new("request-fixture"),
-                lash_sansio::llm_profile::LlmProfileMetadata::builder("gemini-2.5-pro".to_string())
-                    .context_window_tokens(128_000)
-                    .capability(Default::default())
-                    .extra_body(Default::default())
-                    .cache_retention(lash_sansio::llm::capability::CacheRetention::Short)
-                    .build()
-                    .expect("valid profile"),
+        model: lash_protocol_types::llm_profile::LlmProfileConfig::new(
+            lash_protocol_types::llm_profile::RecordedLlmProfile::mint(
+                lash_protocol_types::llm_profile::LlmProfileKey::new("request-fixture"),
+                lash_protocol_types::llm_profile::LlmProfileMetadata::builder(
+                    "gemini-2.5-pro".to_string(),
+                )
+                .context_window_tokens(128_000)
+                .capability(Default::default())
+                .extra_body(Default::default())
+                .cache_retention(lash_protocol_types::llm::capability::CacheRetention::Short)
+                .build()
+                .expect("valid profile"),
             ),
         )
         .with_reasoning(Default::default()),

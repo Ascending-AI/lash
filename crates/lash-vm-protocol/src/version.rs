@@ -12,13 +12,13 @@ use thiserror::Error;
 ///             ParentFrame, WorkerFrame,
 ///         ),
 ///     ),
-///     roots(path = "crates/lash-sansio/src/compat.rs", VersionRange),
+///     roots(path = "crates/lash-protocol-types/src/compat.rs", VersionRange),
 ///     items(
 ///         path = "crates/lash-vm-protocol/src/codec.rs", FRAME_MAGIC, FRAME_HEADER_BYTES,
 ///         encode_parent, encode_worker, decode_parent, decode_worker, frame_len,
 ///     ),
 ///     shapes(
-///         path = "crates/lash-sansio/src/worker_limit.rs", cover(WorkerLimit, WorkerFrameKind),
+///         path = "crates/lash-protocol-types/src/worker_limit.rs", cover(WorkerLimit, WorkerFrameKind),
 ///     ),
 /// )
 #[cfg(not(feature = "synthetic-next"))]

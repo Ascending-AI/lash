@@ -33,7 +33,7 @@ async fn url_delivery_names_the_put_object_and_respects_the_fetch_horizon() {
     );
     let bytes = b"immutable signed content".to_vec();
     let meta = AttachmentCreateMeta::new(
-        lash_sansio::MediaType::parse("image/png").unwrap(),
+        lash_protocol_types::MediaType::parse("image/png").unwrap(),
         None,
         None,
     );

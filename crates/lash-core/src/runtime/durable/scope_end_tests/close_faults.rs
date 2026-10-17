@@ -5,7 +5,7 @@
 use super::*;
 use crate::store::{MaintenanceFailure, MaintenanceStop, SessionBlobReclaimReport};
 use lash_core_execution::testing::ProcessRegistryFaults;
-use lash_sansio::sync::MutexExt as _;
+use lash_protocol_types::sync::MutexExt as _;
 
 /// The fault decorators one law arms.
 #[derive(Default)]

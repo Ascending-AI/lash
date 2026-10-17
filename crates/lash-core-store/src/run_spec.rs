@@ -737,15 +737,15 @@ impl RunSpec {
     }
 
     /// This spec as a frame switch carries it to its follow-on
-    /// ([`NextRun`](lash_sansio::NextRun)).
+    /// ([`NextRun`](lash_protocol_types::NextRun)).
     ///
     /// # Errors
     ///
     /// The serializer's, for a spec that does not encode.
-    pub fn next_run(&self) -> Result<lash_sansio::NextRun, serde_json::Error> {
-        Ok(lash_sansio::NextRun::from_encoded(serde_json::to_value(
-            self,
-        )?))
+    pub fn next_run(&self) -> Result<lash_protocol_types::NextRun, serde_json::Error> {
+        Ok(lash_protocol_types::NextRun::from_encoded(
+            serde_json::to_value(self)?,
+        ))
     }
 
     /// The spec a frame switch's `next_run` carries.
@@ -753,7 +753,9 @@ impl RunSpec {
     /// # Errors
     ///
     /// The deserializer's, for a carried spec that is not one.
-    pub fn from_next_run(next_run: &lash_sansio::NextRun) -> Result<Self, serde_json::Error> {
+    pub fn from_next_run(
+        next_run: &lash_protocol_types::NextRun,
+    ) -> Result<Self, serde_json::Error> {
         serde_json::from_value(next_run.encoded().clone())
     }
 }

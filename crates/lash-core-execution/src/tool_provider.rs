@@ -3,8 +3,8 @@ use crate::SessionId;
 pub(crate) use completion_support::AttemptCompletionSupport;
 use std::sync::{Arc, Mutex};
 
-use lash_sansio::llm::types::ProviderReplayMeta;
-use lash_sansio::sync::MutexExt;
+use lash_protocol_types::llm::types::ProviderReplayMeta;
+use lash_protocol_types::sync::MutexExt;
 use serde::{Deserialize, Serialize};
 
 use crate::plugin::{
@@ -214,7 +214,7 @@ pub struct AttemptContext<'run> {
     tool_execution_binding: Option<crate::ExecutionBinding>,
     /// The run's resolved config the attempt executes under.
     config: crate::plugin::OwnerConfigView,
-    call_id: lash_sansio::ToolCallId,
+    call_id: lash_protocol_types::ToolCallId,
     attempt_number: u32,
     max_attempts: u32,
     /// The enclosing process's full recorded provenance, also supplied to
@@ -523,7 +523,7 @@ impl<'run> AttemptContext<'run> {
     /// call id. A service the tool calls deduplicates on it. A tool that
     /// wants a fresh key per attempt combines it with
     /// [`attempt_number`](Self::attempt_number) itself.
-    pub fn call_id(&self) -> &lash_sansio::ToolCallId {
+    pub fn call_id(&self) -> &lash_protocol_types::ToolCallId {
         &self.call_id
     }
     /// Integrator class 3 one-based retry attempt number.
@@ -840,7 +840,7 @@ pub(crate) struct ToolContext<'run> {
     pub(crate) tool_execution_binding: Option<crate::ExecutionBinding>,
     tool_execution_route: ToolExecutionRoute,
     /// The identity of the admitted call this context runs.
-    pub(crate) call_id: lash_sansio::ToolCallId,
+    pub(crate) call_id: lash_protocol_types::ToolCallId,
     pub(crate) attempt_number: u32,
     pub(crate) max_attempts: u32,
     pub(crate) completion: ToolCompletionState,
@@ -901,7 +901,7 @@ pub(crate) struct ToolContextBuilder<'run> {
     prepared_payload: serde_json::Value,
     tool_execution_binding: Option<crate::ExecutionBinding>,
     tool_execution_route: ToolExecutionRoute,
-    call_id: lash_sansio::ToolCallId,
+    call_id: lash_protocol_types::ToolCallId,
     completion: ToolCompletionState,
     parent_invocation: Option<crate::RuntimeInvocation>,
     facts: crate::plugin::ExecutionFacts,
@@ -1109,7 +1109,7 @@ impl<'run> ToolContext<'run> {
             prepared_payload: serde_json::Value::Null,
             tool_execution_binding: None,
             tool_execution_route: ToolExecutionRoute::Catalog,
-            call_id: lash_sansio::ToolCallId::fixture("tool-context"),
+            call_id: lash_protocol_types::ToolCallId::fixture("tool-context"),
             completion: ToolCompletionState::default(),
             parent_invocation: None,
             facts: crate::plugin::ExecutionFacts::of_policy(&policy, None),
@@ -1146,7 +1146,7 @@ impl<'run> ToolContext<'run> {
 
     /// The identity of the admitted call this context runs.
     #[cfg(any(test, feature = "testing"))]
-    pub fn call_id(&self) -> &lash_sansio::ToolCallId {
+    pub fn call_id(&self) -> &lash_protocol_types::ToolCallId {
         &self.call_id
     }
 
@@ -1223,7 +1223,7 @@ impl<'run> ToolContext<'run> {
 // Comparison verifies retained logical call admission and replay.
 #[derive(Clone, Debug, PartialEq, Serialize, Deserialize)]
 pub struct PreparedToolCall {
-    pub call_id: lash_sansio::ToolCallId,
+    pub call_id: lash_protocol_types::ToolCallId,
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub provider_call_id: Option<String>,
     pub tool_id: ToolId,
@@ -1313,7 +1313,7 @@ pub struct ToolPrepareContext {
     /// reads answer from it.
     tool_catalog: Option<Arc<crate::ToolCatalog>>,
     turn_context: crate::TurnContext,
-    call_id: lash_sansio::ToolCallId,
+    call_id: lash_protocol_types::ToolCallId,
     tool_execution_binding: Option<crate::ExecutionBinding>,
     tool_execution_route: ToolExecutionRoute,
     /// The originator of the process chain the call runs in, when it runs
@@ -1331,7 +1331,7 @@ impl ToolPrepareContext {
         owner: crate::RuntimeOwner,
         sessions: Arc<dyn SessionStateService>,
         turn_context: crate::TurnContext,
-        call_id: lash_sansio::ToolCallId,
+        call_id: lash_protocol_types::ToolCallId,
         tool_execution_binding: Option<crate::ExecutionBinding>,
         fleet_format: crate::FleetFormat,
         config: crate::plugin::OwnerConfigView,
@@ -1369,7 +1369,7 @@ impl ToolPrepareContext {
             owner,
             sessions,
             crate::TurnContext::default(),
-            lash_sansio::ToolCallId::fixture("prepare-for-testing"),
+            lash_protocol_types::ToolCallId::fixture("prepare-for-testing"),
             None,
             crate::FleetFormat::current(),
             crate::plugin::OwnerConfigView::session(crate::AdmittedPluginConfig::default()),
@@ -1420,7 +1420,7 @@ impl ToolPrepareContext {
     }
 
     /// The admitted identity of the call being prepared.
-    pub fn call_id(&self) -> &lash_sansio::ToolCallId {
+    pub fn call_id(&self) -> &lash_protocol_types::ToolCallId {
         &self.call_id
     }
 

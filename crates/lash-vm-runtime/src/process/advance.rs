@@ -31,7 +31,7 @@ use super::{KernelProcessFailureCode, failure};
 /// state holds the run as that version parks it.
 pub(crate) fn state_format(kernel: KernelVersion) -> EngineStateFormat {
     EngineStateFormat {
-        kind: lash_sansio::LASH_VM_ENGINE_KIND.to_owned(),
+        kind: lash_protocol_types::LASH_VM_ENGINE_KIND.to_owned(),
         version: kernel.number(),
     }
 }
@@ -494,7 +494,7 @@ fn run(
     })
 }
 
-fn cancelled(origin: lash_sansio::CancelOrigin) -> lash_core::ProcessOutcome {
+fn cancelled(origin: lash_protocol_types::CancelOrigin) -> lash_core::ProcessOutcome {
     lash_core::ProcessAwaitOutput::from_tool_output(lash_core::ToolCallOutput::cancelled(
         lash_core::ToolCancellation::runtime("the process was cancelled"),
     ))

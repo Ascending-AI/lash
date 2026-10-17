@@ -17,7 +17,7 @@
 use std::fmt;
 use std::hash::{Hash, Hasher};
 
-use lash_sansio::{EffectJournalIdentity, ExecutionScope};
+use lash_protocol_types::{EffectJournalIdentity, ExecutionScope};
 use serde::{Deserialize, Deserializer, Serialize, Serializer};
 
 use crate::FrameNodeId;
@@ -32,14 +32,14 @@ use crate::{ProcessId, SessionId};
 ///         ArtifactReferrerKind, ArtifactReferrer, StoredReferrer, FrameEnvironmentId,
 ///         HostArtifactPin, UploadReferrerId, AttachmentUploadId,
 ///     ),
-///     roots(path = "crates/lash-sansio/src/effect_identity.rs", EffectJournalIdentity),
+///     roots(path = "crates/lash-protocol-types/src/effect_identity.rs", EffectJournalIdentity),
 ///     items(
 ///         ALL, as_str, parse, canonical_id, decode, HOST_PIN_PREFIX, HOST_PIN_HEX_LEN,
 ///         UPLOAD_PREFIX, UPLOAD_HEX_LEN, try_from, decode_journal_identity, json_text, json_parse,
 ///     ),
 ///     items(path = "crates/lash-core-store/src/process_identity.rs", parse_rendered),
 ///     file(
-///         path = "crates/lash-sansio/src/identity.rs",
+///         path = "crates/lash-protocol-types/src/identity.rs",
 ///         cover("string_identity!", SessionId, ProcessId),
 ///     ),
 /// )

@@ -74,7 +74,7 @@ fn first_commit_may_end_its_own_appended_frame_open() {
         ended,
         successor: FrameEnvironmentId::new(session, successor),
         carries: Vec::new(),
-        gate: lash_sansio::ExecutionScope::runtime_operation("first-turn-switch")
+        gate: lash_protocol_types::ExecutionScope::runtime_operation("first-turn-switch")
             .journal_identity()
             .expect("journal identity"),
     };
@@ -112,7 +112,7 @@ fn first_commit_may_end_its_own_appended_frame_open() {
     );
     crate::obligation_ledger::end_execution_tx(
         &conn,
-        &lash_sansio::ExecutionScope::runtime_operation("first-turn-switch"),
+        &lash_protocol_types::ExecutionScope::runtime_operation("first-turn-switch"),
         124,
     )
     .expect("settle the switching execution");
@@ -165,7 +165,7 @@ fn frame_transition_carries_then_fences_and_records_gated_cleanup() {
             store: ArtifactStoreId::KernelDocument,
             artifact_ref: "carried".into(),
         }],
-        gate: lash_sansio::ExecutionScope::runtime_operation("switch")
+        gate: lash_protocol_types::ExecutionScope::runtime_operation("switch")
             .journal_identity()
             .expect("journal identity"),
     };
@@ -322,8 +322,8 @@ async fn frame_end(
         .expect("read frame end")
 }
 
-fn gate() -> lash_sansio::EffectJournalIdentity {
-    lash_sansio::ExecutionScope::runtime_operation("frame-switch-turn")
+fn gate() -> lash_protocol_types::EffectJournalIdentity {
+    lash_protocol_types::ExecutionScope::runtime_operation("frame-switch-turn")
         .journal_identity()
         .expect("journal identity")
 }

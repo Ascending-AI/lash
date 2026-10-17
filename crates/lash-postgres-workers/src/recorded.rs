@@ -28,7 +28,7 @@ use lash_durable::{
     DurableError, DurableInstant, DurableReads, DurableStore, Epoch, HeartbeatOutcome, MailCommit,
     MailTx, NodeLease, NodeSpec, NodeWakeFeed, NodeWakes, Owner, Reaped, WakeBatch,
 };
-use lash_sansio::{ProcessId, SessionId, TurnId};
+use lash_protocol_types::{ProcessId, SessionId, TurnId};
 use tokio::sync::Notify;
 
 use crate::events::{Event, report};
@@ -279,7 +279,7 @@ impl DurableStore for RecordedStore {
 impl DurableReads for RecordedStore {
     async fn model_call_pins(
         &self,
-        session: &lash_sansio::SessionId,
+        session: &lash_protocol_types::SessionId,
         owner: &str,
     ) -> Result<Vec<lash_durable::domain::ModelCallPinRow>, DurableError> {
         self.inner.model_call_pins(session, owner).await
@@ -287,7 +287,7 @@ impl DurableReads for RecordedStore {
 
     async fn model_calls(
         &self,
-        session: &lash_sansio::SessionId,
+        session: &lash_protocol_types::SessionId,
         owner: &str,
     ) -> Result<Vec<lash_core_store::model_calls::ModelCallRecord>, DurableError> {
         self.inner.model_calls(session, owner).await
@@ -342,15 +342,15 @@ impl DurableReads for RecordedStore {
 
     async fn cell_roots(
         &self,
-        session: &lash_sansio::SessionId,
-        run: &lash_sansio::TurnId,
+        session: &lash_protocol_types::SessionId,
+        run: &lash_protocol_types::TurnId,
     ) -> Result<Vec<ExecRootRow>, DurableError> {
         self.inner.cell_roots(session, run).await
     }
     async fn cell_roots_within(
         &self,
-        session: &lash_sansio::SessionId,
-        run: &lash_sansio::TurnId,
+        session: &lash_protocol_types::SessionId,
+        run: &lash_protocol_types::TurnId,
         max_rows: usize,
     ) -> Result<Vec<lash_durable::domain::ExecRootRow>, DurableError> {
         self.inner.cell_roots_within(session, run, max_rows).await

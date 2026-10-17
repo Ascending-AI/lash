@@ -3,8 +3,9 @@
 //! the body recorded before lowering became incremental.
 
 use super::*;
-use lash_sansio::llm::wire_corpus::{
-    corpus_tool, digest_line, reuse_cases, text_only, wire_corpus,
+use lash_protocol_types::{
+    llm::wire_corpus::corpus_tool, llm::wire_corpus::digest_line, llm::wire_corpus::reuse_cases,
+    llm::wire_corpus::text_only, llm::wire_corpus::wire_corpus,
 };
 
 /// Digests recorded from the coalescing lowering at de7f61e3dc.

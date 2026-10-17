@@ -1,5 +1,7 @@
 use super::support::*;
-use lash_sansio::llm::capability::{CacheRetention, ReasoningRetentionSelection};
+use lash_protocol_types::{
+    llm::capability::CacheRetention, llm::capability::ReasoningRetentionSelection,
+};
 use std::collections::hash_map::RandomState;
 use std::hash::{BuildHasher, Hasher};
 
@@ -22,16 +24,16 @@ pub struct LlmTimeouts {
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 pub enum RouteBound {
     /// [`ProviderReliability::request_timeout`], against
-    /// [`ProviderAttemptLimits::per_request`](lash_sansio::ProviderAttemptLimits::per_request).
+    /// [`ProviderAttemptLimits::per_request`](lash_protocol_types::ProviderAttemptLimits::per_request).
     RequestTimeout,
     /// [`ProviderReliability::response_start_timeout`], against
-    /// [`ProviderAttemptLimits::response_start`](lash_sansio::ProviderAttemptLimits::response_start).
+    /// [`ProviderAttemptLimits::response_start`](lash_protocol_types::ProviderAttemptLimits::response_start).
     ResponseStartTimeout,
     /// [`ProviderReliability::chunk_timeout`], against
-    /// [`ProviderAttemptLimits::chunk_idle`](lash_sansio::ProviderAttemptLimits::chunk_idle).
+    /// [`ProviderAttemptLimits::chunk_idle`](lash_protocol_types::ProviderAttemptLimits::chunk_idle).
     ChunkTimeout,
     /// [`ProviderRetryPolicy::max_attempts`], against
-    /// [`ProviderAttemptLimits::max_attempts`](lash_sansio::ProviderAttemptLimits::max_attempts).
+    /// [`ProviderAttemptLimits::max_attempts`](lash_protocol_types::ProviderAttemptLimits::max_attempts).
     MaxAttempts,
 }
 
@@ -63,7 +65,7 @@ pub struct RouteBoundAboveBudget {
 /// A provider route's operational options: its reliability policy and its
 /// transport byte guards. Publication, cache hints and response-metadata capture
 /// come from the recorded model's
-/// [`LlmProfileRequestDefaults`](lash_sansio::llm::capability::LlmProfileRequestDefaults).
+/// [`LlmProfileRequestDefaults`](lash_protocol_types::llm::capability::LlmProfileRequestDefaults).
 /// The default output cap comes from its
 /// [`OutputTokenLimits`](crate::llm_profile::OutputTokenLimits). Each request
 /// carries both as part of its recorded binding.
@@ -226,7 +228,7 @@ fn unsupported(wire: &GenerationWire, setting: &str, reason: &str) -> LlmTranspo
 /// Lash invents no defaults: with no request cap and no recorded
 /// `output_tokens.default_cap` no cap is sent, and a wire that requires one
 /// refuses the call with `output_token_cap_required`. A pinned model
-/// ([`SamplingCapability::Pinned`](lash_sansio::llm::capability::SamplingCapability))
+/// ([`SamplingCapability::Pinned`](lash_protocol_types::llm::capability::SamplingCapability))
 /// or active thinking that pins sampling refuses a set temperature on every
 /// adapter.
 pub fn resolve_generation_policy(
@@ -403,7 +405,7 @@ impl ResolvedGenerationPolicy {
 }
 
 /// A provider route's reliability. Every unset bound is the runtime's: its
-/// [`ExecutionBudgets`](lash_sansio::ExecutionBudgets)' provider attempt
+/// [`ExecutionBudgets`](lash_protocol_types::ExecutionBudgets)' provider attempt
 /// limits. A set bound above its limit refuses the call
 /// ([`RouteBoundAboveBudget`]); it is never clipped.
 #[derive(Clone, Debug, Serialize, Deserialize, Default, PartialEq, Eq)]
@@ -461,7 +463,7 @@ impl ProviderReliability {
     /// [`RouteBoundAboveBudget`] for the first set bound above its limit.
     pub fn within(
         &self,
-        limits: &lash_sansio::ProviderAttemptLimits,
+        limits: &lash_protocol_types::ProviderAttemptLimits,
     ) -> Result<Self, RouteBoundAboveBudget> {
         let bound = |bound: RouteBound, route: Option<u64>, limit: u64| match route
             .filter(|value| *value > 0)

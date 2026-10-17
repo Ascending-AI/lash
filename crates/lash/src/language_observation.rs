@@ -13,8 +13,8 @@ use lash_core::{
     LiveReplayEventDraft, LiveReplayStore, ProcessReplayEventDraft, ProcessReplayStore,
     ProcessSequence, SessionObservationEventPayload,
 };
-use lash_sansio::sync::MutexExt;
-use lash_sansio::{ProcessId, SessionId};
+use lash_protocol_types::sync::MutexExt;
+use lash_protocol_types::{ProcessId, SessionId};
 use lash_trace::{LanguageExecutionObservation, TraceEvent, TraceRecord};
 
 mod ingress;

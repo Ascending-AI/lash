@@ -10,7 +10,7 @@
 use lash_core::RuntimeExecutionContext;
 use lash_core::plugin::PluginExecutionTrace;
 use lash_kernel_doc::{DocumentId, EffectIdentity};
-use lash_sansio::sync::MutexExt as _;
+use lash_protocol_types::sync::MutexExt as _;
 use lash_trace::{
     TraceEvent, TraceLanguageExecution, TraceLanguageExecutionFailure,
     TraceLanguageExecutionIdentity, TraceLanguageExecutionPayload, TraceLanguageExecutionStatus,

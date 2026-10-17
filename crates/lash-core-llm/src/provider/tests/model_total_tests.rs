@@ -104,12 +104,17 @@ impl Provider for StallingProvider {
     }
 }
 
-fn budgets() -> lash_sansio::ExecutionBudgets {
-    lash_sansio::ExecutionBudgets::new(lash_sansio::ExecutionBudgetsConfig {
+fn budgets() -> lash_protocol_types::ExecutionBudgets {
+    lash_protocol_types::ExecutionBudgets::new(lash_protocol_types::ExecutionBudgetsConfig {
         model_total: 60 * SECOND,
-        provider: lash_sansio::ProviderAttemptLimits::new(40 * SECOND, 20 * SECOND, 20 * SECOND, 4)
-            .expect("valid provider limits"),
-        ..lash_sansio::ExecutionBudgetsConfig::recommended()
+        provider: lash_protocol_types::ProviderAttemptLimits::new(
+            40 * SECOND,
+            20 * SECOND,
+            20 * SECOND,
+            4,
+        )
+        .expect("valid provider limits"),
+        ..lash_protocol_types::ExecutionBudgetsConfig::recommended()
     })
     .expect("valid budgets")
 }
@@ -186,7 +191,7 @@ fn assert_model_total_exceeded(settled: &Settled, cap: Duration) {
     assert_eq!(
         last.retry_decision,
         Some(RetryDecision::Declined(RetryDeclineCause::TimedOut {
-            limit: lash_sansio::LimitCause::ExecutionTotal,
+            limit: lash_protocol_types::LimitCause::ExecutionTotal,
         }))
     );
 }
@@ -264,13 +269,19 @@ impl Provider for RecordingProvider {
 async fn complete_route(
     reliability: ProviderReliability,
 ) -> (ProviderCompletionError, Vec<LlmTimeouts>) {
-    let budgets = lash_sansio::ExecutionBudgets::new(lash_sansio::ExecutionBudgetsConfig {
-        model_total: 600 * SECOND,
-        provider: lash_sansio::ProviderAttemptLimits::new(40 * SECOND, 15 * SECOND, 10 * SECOND, 3)
+    let budgets =
+        lash_protocol_types::ExecutionBudgets::new(lash_protocol_types::ExecutionBudgetsConfig {
+            model_total: 600 * SECOND,
+            provider: lash_protocol_types::ProviderAttemptLimits::new(
+                40 * SECOND,
+                15 * SECOND,
+                10 * SECOND,
+                3,
+            )
             .expect("valid provider limits"),
-        ..lash_sansio::ExecutionBudgetsConfig::recommended()
-    })
-    .expect("valid budgets");
+            ..lash_protocol_types::ExecutionBudgetsConfig::recommended()
+        })
+        .expect("valid budgets");
     let sent = Arc::new(Mutex::new(Vec::new()));
     let provider = RecordingProvider {
         options: ProviderOptions {

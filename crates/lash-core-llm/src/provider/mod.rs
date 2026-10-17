@@ -31,14 +31,20 @@ pub use handle::{
     ProviderCancellationGuard, ProviderCompletion, ProviderCompletionError, ProviderComponents,
     ProviderHandle, UnconfiguredProvider,
 };
-pub use lash_sansio::llm::capability::{
-    AnthropicThinkingRetention, AttachmentAcceptanceRule, AttachmentAcceptor,
-    AttachmentCapabilitySnapshot, CacheControlDialect, CacheRetention, GoogleDialect,
-    InstructionRole, LlmProfileCapability, LlmProfileEffortValidationCategory,
-    LlmProfileEffortValidationError, LlmProfileRequestDefaults, OpenAiReasoningContext,
-    ReasoningCapability, ReasoningEncoding, ReasoningIntent, ReasoningRetentionCapability,
-    ReasoningRetentionPolicy, ReasoningRetentionSelection, ReasoningRetentionValidationCategory,
-    ReasoningRetentionValidationError, ReasoningSelection, SamplingCapability, StreamTermination,
+pub use lash_protocol_types::{
+    llm::capability::AnthropicThinkingRetention, llm::capability::AttachmentAcceptanceRule,
+    llm::capability::AttachmentAcceptor, llm::capability::AttachmentCapabilitySnapshot,
+    llm::capability::CacheControlDialect, llm::capability::CacheRetention,
+    llm::capability::GoogleDialect, llm::capability::InstructionRole,
+    llm::capability::LlmProfileCapability, llm::capability::LlmProfileEffortValidationCategory,
+    llm::capability::LlmProfileEffortValidationError, llm::capability::LlmProfileRequestDefaults,
+    llm::capability::OpenAiReasoningContext, llm::capability::ReasoningCapability,
+    llm::capability::ReasoningEncoding, llm::capability::ReasoningIntent,
+    llm::capability::ReasoningRetentionCapability, llm::capability::ReasoningRetentionPolicy,
+    llm::capability::ReasoningRetentionSelection,
+    llm::capability::ReasoningRetentionValidationCategory,
+    llm::capability::ReasoningRetentionValidationError, llm::capability::ReasoningSelection,
+    llm::capability::SamplingCapability, llm::capability::StreamTermination,
 };
 pub use models::{
     EmptyLlmProfiles, LlmProfileRegistry, LlmProfileUnavailable, LlmProfileUnavailableReason,

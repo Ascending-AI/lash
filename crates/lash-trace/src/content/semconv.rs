@@ -2,7 +2,7 @@ use crate::{
     TraceContentBlock, TraceEvent, TraceLlmMessage, TraceToolCallOutcome, TraceToolResultBlock,
     TraceToolSpec,
 };
-use lash_sansio::llm::types::LlmOutputPart;
+use lash_protocol_types::llm::types::LlmOutputPart;
 use serde_json::{Value, json};
 fn attachment(reference: &crate::TraceAttachment) -> Value {
     json!({"type":"lash.attachment","mime_type":reference.media_type,"lash.attachment.id":reference.id,

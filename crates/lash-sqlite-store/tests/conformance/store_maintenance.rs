@@ -1,10 +1,10 @@
 //! SQLite's answer to the store maintenance outcome contract (ADR 0067 §4).
 
-use lash_sansio::SessionId;
+use lash_protocol_types::SessionId;
 use std::sync::{Arc, Mutex};
 
 use lash_core_execution::DeploymentStore;
-use lash_sansio::sync::MutexExt;
+use lash_protocol_types::sync::MutexExt;
 
 use super::Retained;
 use crate::backend_fixture::TestBackend;

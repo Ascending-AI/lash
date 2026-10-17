@@ -9,7 +9,7 @@ use crate::{DomainWrite, DurableError, DurableStore, Epoch};
 use lash_core_store::store::{
     AdmittedTurnRows, ControlIntentId, RunAdmissionRecord, RunTerminalCause, SessionCatalogStore,
 };
-use lash_sansio::{SessionId, TurnId};
+use lash_protocol_types::{SessionId, TurnId};
 
 fn text(name: &str) -> PromptText {
     PromptText {
@@ -72,13 +72,13 @@ pub async fn prompt_snapshot_roots_survive_phase_pruning_until_released(
             run: run.clone(),
             admission: RunAdmissionRecord::Turn {
                 took: AdmittedTurnRows::Inputs {
-                    ids: lash_core_store::store::AdmittedInputIds::one(lash_sansio::InputId::from(
-                        if *run == first {
+                    ids: lash_core_store::store::AdmittedInputIds::one(
+                        lash_protocol_types::InputId::from(if *run == first {
                             "first-batch"
                         } else {
                             "second-batch"
-                        },
-                    )),
+                        }),
+                    ),
                 },
                 trace: None,
             },

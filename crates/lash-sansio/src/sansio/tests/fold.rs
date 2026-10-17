@@ -7,14 +7,14 @@ use super::*;
 /// Starts one step of three slots, the last two expanded from one wrapper,
 /// and folds each wrapper's slots into one call named after it.
 struct ExpandingDriver {
-    handed_back: std::sync::Mutex<Vec<crate::ToolCallId>>,
+    handed_back: std::sync::Mutex<Vec<lash_protocol_types::ToolCallId>>,
 }
 
-fn tc(label: &str) -> crate::ToolCallId {
-    crate::ToolCallId::fixture(label)
+fn tc(label: &str) -> lash_protocol_types::ToolCallId {
+    lash_protocol_types::ToolCallId::fixture(label)
 }
 
-fn slot_call(call_id: crate::ToolCallId, tool_name: &str) -> PendingToolCall {
+fn slot_call(call_id: lash_protocol_types::ToolCallId, tool_name: &str) -> PendingToolCall {
     PendingToolCall {
         call_id,
         provider_call_id: None,
@@ -123,14 +123,14 @@ impl ProtocolDriverHandle for ExpandingDriver {
         &self,
         _ctx: DriverContextView<'_>,
         _driver_state: serde_json::Value,
-        _result: Result<crate::ExecResponse, crate::ExecCodeFailure>,
+        _result: Result<lash_protocol_types::ExecResponse, lash_protocol_types::ExecCodeFailure>,
     ) -> Vec<DriverAction> {
         Vec::new()
     }
 }
 
 fn completion(
-    call_id: &crate::ToolCallId,
+    call_id: &lash_protocol_types::ToolCallId,
     tool_name: &str,
     value: serde_json::Value,
     replay: Option<ProviderReplayMeta>,
@@ -141,7 +141,10 @@ fn completion(
         provider_call_id: None,
         tool_name: tool_name.to_string(),
         args: serde_json::json!({}),
-        model_return: crate::ModelToolReturn::from_output(tool_name.to_string(), &output),
+        model_return: lash_protocol_types::ModelToolReturn::from_output(
+            tool_name.to_string(),
+            &output,
+        ),
         output,
         intent_outcomes: Vec::new(),
         replay,
@@ -170,7 +173,7 @@ fn the_machine_folds_expanded_slots_before_emitting_or_handing_back() {
     let mut machine = TurnMachine::new(
         test_config(Arc::clone(&driver) as Arc<dyn ProtocolDriverHandle>),
         vec![user_message("use tools")],
-        crate::AppendVec::new(),
+        lash_protocol_types::AppendVec::new(),
         0,
     );
     let effects = drain_effects(&mut machine);
@@ -227,7 +230,7 @@ fn a_checkpoint_restores_the_step_with_its_expansion() {
     let mut machine = TurnMachine::new(
         test_config(Arc::clone(&driver)),
         vec![user_message("use tools")],
-        crate::AppendVec::new(),
+        lash_protocol_types::AppendVec::new(),
         0,
     );
     let effects = drain_effects(&mut machine);
@@ -257,7 +260,7 @@ fn checkpoint_resume_keeps_prompt_view_edits_out_of_progress_and_done() {
         let mut machine = TurnMachine::new(
             test_config(Arc::new(ProseDriver)),
             vec![original.clone()],
-            crate::AppendVec::new(),
+            lash_protocol_types::AppendVec::new(),
             0,
         );
         let prompt = if remove {

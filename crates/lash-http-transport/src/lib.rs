@@ -10,7 +10,7 @@ pub use http::{
     first_header_value, header_contains, header_pairs, http_client_builder,
     http_client_builder_with, read_http_body_bytes, read_http_body_text, run_with_timeout,
 };
-pub use lash_sansio::session_model::FailureCode;
+pub use lash_protocol_types::session_model::FailureCode;
 pub use reqwest;
 pub use reqwest::Client as ReqwestClient;
 

@@ -67,7 +67,7 @@ struct ModelDriver;
 impl ProtocolDriverPlugin for ModelDriver {
     fn attachment_omission_text(
         &self,
-        notice: &lash_sansio::AttachmentMaterializationNotice,
+        notice: &lash_protocol_types::AttachmentMaterializationNotice,
     ) -> String {
         format!("({} omitted)", notice.media_type)
     }

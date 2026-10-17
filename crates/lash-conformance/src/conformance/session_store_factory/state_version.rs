@@ -1,4 +1,4 @@
-use lash_sansio::SessionId;
+use lash_protocol_types::SessionId;
 use std::sync::Arc;
 
 use crate::conformance::DeploymentViewExt as _;

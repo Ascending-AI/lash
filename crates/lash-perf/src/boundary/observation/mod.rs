@@ -475,7 +475,7 @@ pub(super) async fn settled(core: &lash::LashCore, process: &lash::ProcessId) ->
         within_population("process terminal", core.processes().await_output(process)).await??;
     ensure!(
         matches!(&output, lash_core::ProcessAwaitOutput::Settled { output }
-            if output.status() == lash_sansio::ToolCallStatus::Success),
+            if output.status() == lash_protocol_types::ToolCallStatus::Success),
         "the observed process failed: {output:?}"
     );
     Ok(())

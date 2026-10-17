@@ -1,5 +1,5 @@
 use crate::pool::McpServerHealth;
-use lash_sansio::sync::{MutexExt, RwLockExt};
+use lash_protocol_types::{sync::MutexExt, sync::RwLockExt};
 use std::collections::{BTreeMap, HashMap};
 use std::future::Future;
 use std::pin::Pin;

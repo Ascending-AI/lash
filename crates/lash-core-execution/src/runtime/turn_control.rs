@@ -19,11 +19,13 @@ use lash_durable::{ActorTx, CommitLabel, DurableError, MailTx};
 use serde::{Deserialize, Serialize};
 
 pub use lash_core_store::turn_control_vocabulary::*;
-pub use lash_sansio::{TurnCancelMode, TurnCancelUndeliveredInputPolicy, TurnCancellationEvidence};
+pub use lash_protocol_types::{
+    TurnCancelMode, TurnCancelUndeliveredInputPolicy, TurnCancellationEvidence,
+};
 
 use super::RuntimeError;
 use crate::{Backend, TurnOutcome, TurnStop};
-use lash_sansio::{InputId, SessionId};
+use lash_protocol_types::{InputId, SessionId};
 
 /// What a cancel request did.
 #[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize)]
@@ -286,7 +288,7 @@ impl TurnWorkDriver {
             request.address.session_id.clone(),
             &request.address.turn_id,
         )
-        .and_then(|operation| lash_sansio::BatchId::parse(operation.operation_id).ok()) else {
+        .and_then(|operation| lash_protocol_types::BatchId::parse(operation.operation_id).ok()) else {
             return Ok(OperationCancelOutcome::UnknownOrRevoked);
         };
         let evidence = request.evidence();

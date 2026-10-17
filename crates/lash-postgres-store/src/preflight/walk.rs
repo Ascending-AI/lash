@@ -42,7 +42,7 @@ use lash_core_execution::{
     DurableItem, DurablePayload, DurableScan, DurableScanPage, DurableSurface, ScanCoverage,
     StoreError,
 };
-use lash_sansio::SessionId;
+use lash_protocol_types::SessionId;
 use sqlx::postgres::PgPool;
 use sqlx::{Postgres, Transaction};
 

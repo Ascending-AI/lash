@@ -29,7 +29,7 @@ pub(crate) use publication::{collect_proposals, propose, propose_all, record_eff
 
 use lash_core_store::plugin_state::validate_state_key_with_limit;
 use lash_core_store::tool_run::{SegmentOrdinal, StateCommandLimits};
-use lash_sansio::sync::MutexExt;
+use lash_protocol_types::sync::MutexExt;
 use serde::Serialize;
 use serde_json::Value;
 use std::collections::{BTreeMap, BTreeSet};

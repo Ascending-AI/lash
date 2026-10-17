@@ -195,11 +195,11 @@ pub enum BrokerInvariant {
     )]
     Unanswerable {
         /// The admitted calls the run awaits.
-        calls: Vec<lash_sansio::ToolCallId>,
+        calls: Vec<lash_protocol_types::ToolCallId>,
     },
 }
 
-fn named(calls: &[lash_sansio::ToolCallId]) -> String {
+fn named(calls: &[lash_protocol_types::ToolCallId]) -> String {
     if calls.is_empty() {
         return "no call".to_owned();
     }

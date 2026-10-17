@@ -10,7 +10,10 @@ impl AnthropicProvider {
                 credential_scope: scope.clone(),
             })
     }
-    pub(crate) fn accepts_attachment(&self, mime: &lash_sansio::MediaType) -> ProviderAccepts {
+    pub(crate) fn accepts_attachment(
+        &self,
+        mime: &lash_protocol_types::MediaType,
+    ) -> ProviderAccepts {
         if !matches!(
             mime.as_str(),
             "image/jpeg" | "image/png" | "image/gif" | "image/webp" | "application/pdf"

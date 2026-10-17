@@ -751,7 +751,7 @@ pub(super) fn member_pin(
     MemberPin {
         tool,
         policy: ExecutionPolicy::Once,
-        limit: lash_sansio::ExecutionLimit::starting_at(now_ms, control, control),
+        limit: lash_protocol_types::ExecutionLimit::starting_at(now_ms, control, control),
         park: None,
         declaration: None,
         binding: None,

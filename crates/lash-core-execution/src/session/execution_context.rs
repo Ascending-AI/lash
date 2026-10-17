@@ -1,6 +1,6 @@
 use crate::ProcessId;
 use crate::SessionId;
-use lash_sansio::sync::MutexExt;
+use lash_protocol_types::sync::MutexExt;
 use std::sync::Arc;
 
 mod held_response;
@@ -95,7 +95,7 @@ impl CellEndHandoff {
 pub(super) enum ChronologicalRead {
     Owned(Arc<crate::ChronologicalProjection>),
     Turn {
-        events: lash_sansio::AppendVec<crate::SessionHistoryRecord>,
+        events: lash_protocol_types::AppendVec<crate::SessionHistoryRecord>,
         messages: crate::MessageSequence,
         projected: std::sync::OnceLock<Arc<crate::ChronologicalProjection>>,
     },
@@ -1110,7 +1110,7 @@ impl<'run> RuntimeExecutionContext<'run> {
     #[must_use]
     pub fn with_turn_history(
         mut self,
-        events: lash_sansio::AppendVec<crate::SessionHistoryRecord>,
+        events: lash_protocol_types::AppendVec<crate::SessionHistoryRecord>,
         messages: crate::MessageSequence,
     ) -> Self {
         self.chronological_projection = Arc::new(ChronologicalRead::Turn {

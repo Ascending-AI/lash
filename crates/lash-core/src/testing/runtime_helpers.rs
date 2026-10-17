@@ -11,7 +11,7 @@ use crate::plugin::StaticPluginFactory;
 use crate::runtime::*;
 use crate::testing::TestProvider;
 use crate::*;
-use lash_sansio::sync::MutexExt;
+use lash_protocol_types::sync::MutexExt;
 use lash_transport_failure::LlmTransportError;
 use serde_json::json;
 use std::sync::atomic::{AtomicBool, Ordering};
@@ -242,7 +242,7 @@ fn mock_provider_with_kind(kind: &'static str, calls: Vec<MockCall>) -> TestProv
 pub async fn send_admitted(
     handle: &mut crate::ProviderHandle,
     mut request: LlmRequest,
-    admitted: &lash_sansio::llm::types::AdmittedSend,
+    admitted: &lash_protocol_types::llm::types::AdmittedSend,
     deliveries: &dyn crate::provider::SlotDeliveries,
 ) -> Result<crate::provider::ProviderCompletion, crate::provider::ProviderCompletionError> {
     let sideband = crate::provider::prepare_completion(handle, &mut request);
@@ -258,7 +258,9 @@ pub async fn send_admitted(
         crate::ChargeSafetyPolicy::default(),
         &lash_trace::telemetry::metrics::TelemetryMetrics::default(),
         None,
-        crate::provider::ModelCallBounds::unnested(lash_sansio::ExecutionBudgets::recommended()),
+        crate::provider::ModelCallBounds::unnested(
+            lash_protocol_types::ExecutionBudgets::recommended(),
+        ),
     )
     .await
 }

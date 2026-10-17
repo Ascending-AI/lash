@@ -139,7 +139,7 @@ struct UnusedAppendRollbackProtocolDriver;
 impl lash_core::plugin::ProtocolDriverPlugin for UnusedAppendRollbackProtocolDriver {
     fn attachment_omission_text(
         &self,
-        notice: &lash_sansio::AttachmentMaterializationNotice,
+        notice: &lash_protocol_types::AttachmentMaterializationNotice,
     ) -> String {
         format!("({} omitted)", notice.media_type)
     }

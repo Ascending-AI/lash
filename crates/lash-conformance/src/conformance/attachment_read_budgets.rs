@@ -2,11 +2,13 @@
 use crate::*;
 use lash_core::attachments::{ProviderFileDelivery, ProviderFileUploader, UploadedProviderFile};
 use lash_core::provider::{AttachmentDeliveryError, SlotDeliveries};
-use lash_sansio::llm::attachment_delivery::ProviderFileScope;
-use lash_sansio::llm::attachment_delivery::{
-    Delivery, DeliveryContext, DeliveryLimits, DeliverySecret, ProviderAccepts,
+use lash_protocol_types::llm::attachment_delivery::ProviderFileScope;
+use lash_protocol_types::{
+    llm::attachment_delivery::Delivery, llm::attachment_delivery::DeliveryContext,
+    llm::attachment_delivery::DeliveryLimits, llm::attachment_delivery::DeliverySecret,
+    llm::attachment_delivery::ProviderAccepts,
 };
-use lash_sansio::llm::types::{AttachmentSlot, SlotCodec};
+use lash_protocol_types::{llm::types::AttachmentSlot, llm::types::SlotCodec};
 use std::sync::atomic::{AtomicUsize, Ordering};
 
 struct FileProbe {
@@ -49,7 +51,7 @@ fn slot(reference: AttachmentRef, accepts: ProviderAccepts) -> AttachmentSlot {
     AttachmentSlot {
         reference,
         accepts,
-        position: lash_sansio::llm::attachment_delivery::AttachmentPosition::Message,
+        position: lash_protocol_types::llm::attachment_delivery::AttachmentPosition::Message,
         codec: SlotCodec {
             name: "lash.canonical".into(),
             revision: 1,

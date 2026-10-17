@@ -11,7 +11,7 @@ use crate::{
     ProjectionWatermark, fold_process_record,
 };
 use generated_prefix::generated_prefix;
-use lash_sansio::{ProcessId, SessionId};
+use lash_protocol_types::{ProcessId, SessionId};
 use proptest::prelude::*;
 use proptest::test_runner::{Config, RngSeed, TestError, TestRunner};
 use run_shape::{RunShape, RunShapeCounter, RunShapeTotals};

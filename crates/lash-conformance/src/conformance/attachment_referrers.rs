@@ -290,7 +290,7 @@ pub async fn retained_output_is_held_by_its_execution_until_a_commit_names_it(
             let artifacts =
                 lash_core::runtime::effect::SessionPresentationArtifacts::new(Arc::clone(&facade));
             let mut model_return = ModelToolReturn {
-                outcome: lash_sansio::ModelToolOutcome::Completed,
+                outcome: lash_protocol_types::ModelToolOutcome::Completed,
                 tool_name: "oversized".to_string(),
                 parts: vec![ModelToolReturnPart::text(text)],
             };
@@ -508,7 +508,7 @@ pub async fn attachment_prefix_pin_keeps_the_session_edge_until_unpin(
         parts: Arc::new(vec![Part::attachment_part(
             "pinned-part".into(),
             String::new(),
-            Some(lash_sansio::PartAttachment {
+            Some(lash_protocol_types::PartAttachment {
                 reference: reference.clone(),
             }),
         )]),
@@ -592,7 +592,7 @@ pub async fn session_referrer_waits_for_graph_retirement(h: AttachmentReferrerHa
         parts: Arc::new(vec![Part::attachment_part(
             "retained-part".into(),
             String::new(),
-            Some(lash_sansio::PartAttachment {
+            Some(lash_protocol_types::PartAttachment {
                 reference: reference.clone(),
             }),
         )]),

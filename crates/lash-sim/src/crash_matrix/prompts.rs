@@ -25,7 +25,7 @@ use lash_core::llm::types::{LlmContentBlock, LlmOutputPart, LlmRequest, LlmRespo
 use lash_core::plugin::prompt::{PromptWrapSpec, PromptWrapTarget};
 use lash_core::prompt_sections::{PromptSectionId, PromptSectionKey, PromptWrapKey};
 use lash_core::{ExecutionPolicy, ToolCall};
-use lash_sansio::{SessionId, TurnId};
+use lash_protocol_types::{SessionId, TurnId};
 
 use super::services::{FINAL, session_id};
 use super::world::World;

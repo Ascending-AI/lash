@@ -1,11 +1,15 @@
 //! Adapter helpers for lowering a built request tree and encoding its slots.
 use crate::llm::transport::ProviderFailureKind;
-use lash_sansio::AttachmentRef;
-use lash_sansio::llm::attachment_delivery::{AttachmentPosition, Delivery};
-use lash_sansio::llm::types::{
-    AttachmentSlot, GenerationReceipt, LiveRequestBody, LlmRequest, LoweredItem,
-    ProviderRouteIdentity, RecordedRequestTemplate, RequestSegment, SegmentCache, SegmentContext,
-    SegmentContextKey, SegmentKey, SlotCodec, TemplateJson, TransientJson,
+use lash_protocol_types::AttachmentRef;
+use lash_protocol_types::{
+    llm::attachment_delivery::AttachmentPosition, llm::attachment_delivery::Delivery,
+};
+use lash_protocol_types::{
+    llm::types::AttachmentSlot, llm::types::GenerationReceipt, llm::types::LiveRequestBody,
+    llm::types::LlmRequest, llm::types::LoweredItem, llm::types::ProviderRouteIdentity,
+    llm::types::RecordedRequestTemplate, llm::types::RequestSegment, llm::types::SegmentCache,
+    llm::types::SegmentContext, llm::types::SegmentContextKey, llm::types::SegmentKey,
+    llm::types::SlotCodec, llm::types::TemplateJson, llm::types::TransientJson,
 };
 use lash_transport_failure::{LlmTransportError, TransportRetryVerdict};
 use serde_json::{Value, json};
@@ -13,7 +17,9 @@ use serde_json::{Value, json};
 pub fn template_error(error: impl std::fmt::Display) -> LlmTransportError {
     LlmTransportError::new(format!("request template unavailable: {error}"))
         .with_kind(ProviderFailureKind::Validation)
-        .with_lash_code(lash_sansio::session_model::TurnFailureCode::AdmittedRequestUnavailable)
+        .with_lash_code(
+            lash_protocol_types::session_model::TurnFailureCode::AdmittedRequestUnavailable,
+        )
         .with_retry_verdict(TransportRetryVerdict::Forbidden)
 }
 
@@ -70,9 +76,9 @@ pub fn message_names_missing_file(message: &str) -> bool {
 /// host acceptance. An attachment nothing accepts refuses the lowering.
 pub fn slot_pinner<'a>(
     accepts: impl Fn(
-        &lash_sansio::MediaType,
+        &lash_protocol_types::MediaType,
         AttachmentPosition,
-    ) -> lash_sansio::llm::attachment_delivery::ProviderAccepts
+    ) -> lash_protocol_types::llm::attachment_delivery::ProviderAccepts
     + 'a,
     request: &'a LlmRequest,
     provider: &'a str,
@@ -168,9 +174,9 @@ impl<'a> UnitWriter<'a> {
         cache: &'a SegmentCache,
         context: SegmentContextKey,
         accepts: impl Fn(
-            &lash_sansio::MediaType,
+            &lash_protocol_types::MediaType,
             AttachmentPosition,
-        ) -> lash_sansio::llm::attachment_delivery::ProviderAccepts
+        ) -> lash_protocol_types::llm::attachment_delivery::ProviderAccepts
         + 'a,
         request: &'a LlmRequest,
         provider: &'a str,
@@ -224,9 +230,9 @@ impl<'a> UnitWriter<'a> {
 /// [`slot_pinner`] pins.
 pub fn lower_attachment_json(
     accepts: impl Fn(
-        &lash_sansio::MediaType,
+        &lash_protocol_types::MediaType,
         AttachmentPosition,
-    ) -> lash_sansio::llm::attachment_delivery::ProviderAccepts,
+    ) -> lash_protocol_types::llm::attachment_delivery::ProviderAccepts,
     request: &LlmRequest,
     route: ProviderRouteIdentity,
     settings: (bool, Option<GenerationReceipt>),
@@ -272,11 +278,11 @@ pub fn canonical_slot(
 /// without asking an attachment backend again. Errors never contain live values.
 pub(super) fn canonical_deliveries(
     body: &LiveRequestBody,
-    context: &lash_sansio::llm::attachment_delivery::DeliveryContext,
+    context: &lash_protocol_types::llm::attachment_delivery::DeliveryContext,
     policy: super::AttachmentReadPolicy,
 ) -> Result<super::CanonicalDeliveries, LlmTransportError> {
     use base64::Engine;
-    use lash_sansio::llm::attachment_delivery::DeliverySecret;
+    use lash_protocol_types::llm::attachment_delivery::DeliverySecret;
     use std::sync::Arc;
     #[derive(serde::Deserialize)]
     #[serde(untagged)]

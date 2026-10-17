@@ -11,7 +11,7 @@
 //! mails its own session with [`SessionMailWrite::Enqueue`]: a frame switch
 //! commits its follow-on that way, in its `turn.commit`.
 
-use lash_sansio::{BatchId, InputId, SessionId, TurnId};
+use lash_protocol_types::{BatchId, InputId, SessionId, TurnId};
 
 /// The set of a session actor before its first turn: the one every producer
 /// that creates the actor with its first wake records. A producer is not

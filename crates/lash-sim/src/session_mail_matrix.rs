@@ -23,7 +23,7 @@ use lash_core::{
     PendingTurnInputReadStatus, SessionId, StoreSet, TurnId, TurnInput, TurnInputIngress,
 };
 use lash_durable_test::{Cut, Fault, Scenario, SimClock, SimNodes, SimNodesConfig, Tripwire};
-use lash_sansio::sync::MutexExt as _;
+use lash_protocol_types::sync::MutexExt as _;
 use std::sync::{Arc, Mutex, OnceLock};
 
 const SESSION: &str = "session-mail-matrix";

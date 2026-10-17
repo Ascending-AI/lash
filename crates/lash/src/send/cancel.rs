@@ -9,7 +9,7 @@ use lash_core::facade_support::{
     OperationCancelOutcome, QueueWithdrawalObservation, TurnAddress, TurnCancelMode,
     TurnCancelOutcome, TurnCancelRequest, TurnCancelUndeliveredInputPolicy, TurnWorkDriver,
 };
-use lash_sansio::core_support::RunIdCoreSupport;
+use lash_protocol_types::core_support::RunIdCoreSupport;
 
 use super::follow::Subject;
 use super::{CancelReceipt, SendParts};

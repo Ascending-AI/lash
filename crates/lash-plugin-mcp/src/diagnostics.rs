@@ -2,7 +2,7 @@
 use std::collections::VecDeque;
 use std::sync::{Arc, Mutex};
 
-use lash_sansio::sync::MutexExt;
+use lash_protocol_types::sync::MutexExt;
 use tokio::io::AsyncReadExt;
 use tokio::task::JoinHandle;
 

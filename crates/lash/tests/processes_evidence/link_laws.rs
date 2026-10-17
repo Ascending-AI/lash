@@ -199,7 +199,7 @@ async fn payload(
     for (effect, tool) in typed {
         document.manifest.effects.insert(
             lash::workflow::document::EffectName::new(*effect).expect("an effect name"),
-            lash_sansio::tool_signature(
+            lash_protocol_types::tool_signature(
                 &tool.contract.input_schema.canonical,
                 &tool.contract.output_schema.canonical,
             ),
@@ -489,7 +489,7 @@ fn dynamic_links_cannot_disguise_ordinary_effects() {
     let forged: ProcessEnv = serde_json::from_value(encoded).unwrap();
     let performed = BTreeMap::from([(
         effect,
-        lash_sansio::tool_signature(
+        lash_protocol_types::tool_signature(
             &tool.contract.input_schema.canonical,
             &tool.contract.output_schema.canonical,
         ),

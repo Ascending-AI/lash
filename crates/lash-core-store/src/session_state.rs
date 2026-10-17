@@ -1269,7 +1269,7 @@ fn validate_restored_turn_index(turn_index: usize) -> Result<(), crate::StoreErr
 /// contract [`validate_restored_turn_index`] gives the bare next-turn
 /// increments.
 fn validate_restored_token_usage(usage: &LlmUsage) -> Result<(), crate::StoreError> {
-    let checkpoint_overflow = |overflow: lash_sansio::session_model::TokenUsageOverflow| {
+    let checkpoint_overflow = |overflow: lash_protocol_types::session_model::TokenUsageOverflow| {
         crate::StoreError::CheckpointTokenUsageOutOfRange {
             counter: overflow.counter(),
         }

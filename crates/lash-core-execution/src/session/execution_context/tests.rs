@@ -155,7 +155,7 @@ fn scoped_context(
     crate::testing::TestExecutionContextBuilder::over_controller(
         crate::testing::TestEffectController::Borrowed(controller),
     )
-    .session_id(lash_sansio::SessionId::fixture(session_id))
+    .session_id(lash_protocol_types::SessionId::fixture(session_id))
     .plugin_factories(vec![])
     .build()
     .into_runtime()

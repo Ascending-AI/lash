@@ -36,13 +36,13 @@ use lash_core_store::tool_run::Material;
 use lash_core_store::tool_run::SettledOutput;
 use lash_core_store::tool_run::{CompletionSource, MaterialOwner, MaterialRole};
 use lash_durable::ActorKey;
-use lash_sansio::llm::types::{ProviderRouteIdentity, RecordedRequestTemplate};
-use lash_sansio::sansio::ExecutionEnvironmentSync;
-use lash_sansio::sync::MutexExt as _;
-use lash_sansio::{
+use lash_protocol_types::sync::MutexExt as _;
+use lash_protocol_types::{
     ExecutionBudgets, ExecutionPolicy, ModelToolReturn, SessionId, ToolCallOutput, ToolFailure,
     ToolFailureClass, ToolId, TurnId,
 };
+use lash_protocol_types::{llm::types::ProviderRouteIdentity, llm::types::RecordedRequestTemplate};
+use lash_sansio::sansio::ExecutionEnvironmentSync;
 use serde::Serialize;
 use tokio::sync::oneshot;
 
@@ -340,13 +340,13 @@ fn machine_config(session: &SessionId, run: &TurnId, driver: &Arc<Protocol>) -> 
         model_tool_calls: lash_core::sansio::ModelToolCalls::fixture(),
         protocol_driver: Arc::clone(driver) as _,
         projector: Arc::new(ChatContextProjector::default()),
-        model: lash_sansio::llm_profile::LlmProfileConfig::new(
-            lash_sansio::llm_profile::RecordedLlmProfile::mint(
-                lash_sansio::llm_profile::LlmProfileKey::new("bench-model"),
-                lash_sansio::llm_profile::LlmProfileMetadata::new(
+        model: lash_protocol_types::llm_profile::LlmProfileConfig::new(
+            lash_protocol_types::llm_profile::RecordedLlmProfile::mint(
+                lash_protocol_types::llm_profile::LlmProfileKey::new("bench-model"),
+                lash_protocol_types::llm_profile::LlmProfileMetadata::new(
                     "scripted".to_string(),
                     NonZeroUsize::MIN.saturating_add(127_999),
-                    lash_sansio::llm::capability::CacheRetention::Short,
+                    lash_protocol_types::llm::capability::CacheRetention::Short,
                 )
                 .with_capability(lash_core::LlmProfileCapability::default())
                 .with_extra_body(Default::default()),
@@ -565,7 +565,7 @@ impl TurnDrive for BenchDrive {
         let template = RecordedRequestTemplate::of_request(
             route,
             &request,
-            &lash_sansio::llm::types::SegmentCache::disabled(),
+            &lash_protocol_types::llm::types::SegmentCache::disabled(),
         )
         .map_err(|error| TurnError::Exec(error.to_string()))?;
         Ok(PreparedCall::Admit(Box::new(ComposedCall {
@@ -580,7 +580,7 @@ impl TurnDrive for BenchDrive {
         _cx: &ActorContext,
         _id: EffectId,
         request: Arc<LlmRequest>,
-        _admitted: &lash_sansio::llm::types::AdmittedSend,
+        _admitted: &lash_protocol_types::llm::types::AdmittedSend,
         attempt: ModelCallAttempt,
     ) -> Result<(), TurnError> {
         let ModelCallAttempt {
@@ -705,7 +705,7 @@ impl RoundTools for EchoTools {
         MemberPin::admitted(
             ToolId::new(ECHO),
             ExecutionPolicy::Once,
-            lash_sansio::ToolBounds {
+            lash_protocol_types::ToolBounds {
                 execution: std::time::Duration::from_secs(30),
                 park: None,
             },

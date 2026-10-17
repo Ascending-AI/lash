@@ -618,9 +618,9 @@ async fn lifecycle(
         )
         .await??;
         let status = if n % 2 == 1 {
-            lash_sansio::ToolCallStatus::Cancelled
+            lash_protocol_types::ToolCallStatus::Cancelled
         } else {
-            lash_sansio::ToolCallStatus::Success
+            lash_protocol_types::ToolCallStatus::Success
         };
         ensure!(
             matches!(&output, lash_core::ProcessAwaitOutput::Settled { output } if output.status() == status),

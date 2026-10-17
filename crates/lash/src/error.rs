@@ -1,5 +1,5 @@
 use crate::support::SessionError;
-use lash_sansio::SessionId;
+use lash_protocol_types::SessionId;
 
 #[derive(Debug, thiserror::Error)]
 /// Errors returned while configuring or operating the embedded Lash runtime.
@@ -246,8 +246,8 @@ pub enum RetiredConfigObserverRefusal {
 }
 
 /// Blank text a host offers as an identity is the store's refusal of it.
-impl From<lash_sansio::BlankIdentity> for EmbedError {
-    fn from(error: lash_sansio::BlankIdentity) -> Self {
+impl From<lash_protocol_types::BlankIdentity> for EmbedError {
+    fn from(error: lash_protocol_types::BlankIdentity) -> Self {
         Self::Store(error.into())
     }
 }
@@ -730,7 +730,7 @@ mod tests {
         PluginError, RuntimeEffectControllerError, RuntimeError, RuntimeErrorCause,
         RuntimeErrorCode, SessionError, StoreError,
     };
-    use lash_sansio::SessionId;
+    use lash_protocol_types::SessionId;
 
     /// FIG-6549: exhaustion stays typed through runtime, plugin and session wrappers.
     #[cfg(feature = "codemode")]

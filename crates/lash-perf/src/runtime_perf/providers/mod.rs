@@ -1,5 +1,5 @@
-use lash_sansio::SessionId;
-use lash_sansio::llm::types::{StreamBlockEvent, StreamBlockKind};
+use lash_protocol_types::SessionId;
+use lash_protocol_types::{llm::types::StreamBlockEvent, llm::types::StreamBlockKind};
 use std::{
     collections::HashMap,
     sync::{
@@ -19,7 +19,7 @@ use lash_core::{
     ToolOutputContract, ToolProvider, facade_support::DirectJsonSchema,
     facade_support::DirectRequest,
 };
-use lash_sansio::sync::MutexExt;
+use lash_protocol_types::sync::MutexExt;
 use lash_vm_runtime::{ToolBinding, ToolDefinitionBindingExt};
 
 use super::scenarios::RuntimePerfScenario;

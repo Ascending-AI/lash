@@ -386,13 +386,13 @@ pub use lash_core::runtime::obligations::relay::{
 pub use lash_core::store::{IngressTerminal, IngressTerminalCause};
 pub use lash_core_store::session_identity::{OpenAgentFrameOutcome, OpenAgentFrameRequest};
 pub use lash_core_store::turn_input_vocabulary::ResolvedRun;
-pub use lash_sansio::llm::types::{
-    AttemptRecord, ChargeSafetyDenialReason, LlmCallId, StreamBlockEvent, StreamBlockIdentity,
-    StreamBlockKind,
-};
-pub use lash_sansio::{
+pub use lash_protocol_types::{
     BlankIdentity, ErrorEnvelope, ExecCodeFailure, FrameKeyError, InvalidProcessId, LlmCallError,
     ReportedFailure, RetryProgress, ToolCallPosition, ToolCallRoot,
+};
+pub use lash_protocol_types::{
+    llm::types::AttemptRecord, llm::types::ChargeSafetyDenialReason, llm::types::LlmCallId,
+    llm::types::StreamBlockEvent, llm::types::StreamBlockIdentity, llm::types::StreamBlockKind,
 };
 
 /// `use lash::prelude::*;` brings in the daily core/session/turn vocabulary
@@ -461,7 +461,7 @@ pub mod observe {
 pub mod tools {
     #[cfg(feature = "codemode")]
     pub use lash_llm_tools::{LLM_TOOLS_CONFIG, LlmToolsComponent, LlmToolsPluginFactory};
-    pub use lash_sansio::schema_contract::OutputSchemaLimits;
+    pub use lash_protocol_types::schema_contract::OutputSchemaLimits;
     /// How an execution mode's tools read to a model: the replaceable
     /// presenter a mode holds in its slot, what it is handed and what it
     /// answers, the record a session keeps of it, and a wrapper that
@@ -482,7 +482,7 @@ pub mod tools {
     };
     // The vocabulary this module's signatures name (the facade-completeness rule).
     pub use lash_core::{GetDefinitionIntent, PublishDefinitionIntent};
-    pub use lash_sansio::{ModelTool, ToolCallStatus};
+    pub use lash_protocol_types::{ModelTool, ToolCallStatus};
 
     pub use crate::tool_intent_ingress::{
         ToolIntentIngress, ToolIntentIngressKey, ToolIntentIngressOutcome, ToolIntentIngressRefusal,
@@ -590,9 +590,10 @@ pub mod tools {
 /// Direct protocol transport types.
 pub mod direct {
     // The vocabulary this module's signatures name (the facade-completeness rule).
-    pub use lash_sansio::llm::types::{
-        GenerationProjectionProvenance, ProviderReplayMeta, ProviderReplayOriginConflict,
-        ResponsePhase, ResponseTextMeta,
+    pub use lash_protocol_types::{
+        llm::types::GenerationProjectionProvenance, llm::types::ProviderReplayMeta,
+        llm::types::ProviderReplayOriginConflict, llm::types::ResponsePhase,
+        llm::types::ResponseTextMeta,
     };
 
     pub use lash_core::llm::types::{
@@ -729,13 +730,16 @@ pub mod plugins {
     pub use lash_core_store::transcript::CellCallLedger;
     pub use lash_core_worker::execution::runtime::ProcessEnvLoadError;
     pub use lash_protocol_standard::BatchSugar;
+    pub use lash_protocol_types::{
+        AttachmentMaterializationNotice, CompletionCandidate, CompletionDisposition,
+        DecidedCompletion, DegradedBinding, ModelToolOutcome, ModelToolReturn, SessionStreamEvent,
+        StreamMessageKind, ToolCatalogBuildError, ToolContractResolver,
+    };
     pub use lash_sansio::{
-        AttachmentMaterializationNotice, CheckpointResumeAction, CompletionCandidate,
-        CompletionDisposition, DecidedCompletion, DegradedBinding, DriverAction, DriverContextView,
-        EffectId, ExpandedRow, ExpandedWrapper, ModelToolCalls, ModelToolOutcome, ModelToolReturn,
-        PendingWork, ProjectorContext, ResponseToolCalls, SessionStreamEvent, StreamMessageKind,
-        ToolCatalogBuildError, ToolContractResolver, ToolExpansionPlan, ToolWave,
-        TurnMachineConfig, TurnProtocol, UndecodableDriverState, UnitTurnProtocol, WriterFormats,
+        CheckpointResumeAction, DriverAction, DriverContextView, EffectId, ExpandedRow,
+        ExpandedWrapper, ModelToolCalls, PendingWork, ProjectorContext, ResponseToolCalls,
+        ToolExpansionPlan, ToolWave, TurnMachineConfig, TurnProtocol, UndecodableDriverState,
+        UnitTurnProtocol, WriterFormats,
     };
     /// The protocol-generic forms [`TurnDriverConfig`] and
     /// [`TurnDriverPreamble`] specialize to the host's turn protocol.
@@ -1002,6 +1006,9 @@ pub mod plugins {
         OMITTED_ATTACHMENT_PLACEHOLDER, StandardCompactionConfig, StandardCompactionPluginFactory,
     };
     pub use lash_protocol_standard::{StandardProtocolConfig, StandardProtocolPluginFactory};
+    /// Model-facing tool declaration carried by [`TurnDriverPreamble::tool_specs`].
+    pub use lash_protocol_types::llm::types::LlmToolSpec;
+    pub use lash_protocol_types::session_model::message::HistoryPresentation;
     /// Default chat projector installed by [`TurnDriverConfig::chat`].
     pub use lash_sansio::ChatContextProjector;
     pub use lash_sansio::CompletedToolCall as GenericCompletedToolCall;
@@ -1011,16 +1018,15 @@ pub mod plugins {
     /// Sans-I/O protocol handle accepted by [`TurnDriverConfig::chat`]; custom host drivers use
     /// [`HostTurnProtocol`] as its protocol parameter.
     pub use lash_sansio::ProtocolDriverHandle;
-    /// Model-facing tool declaration carried by [`TurnDriverPreamble::tool_specs`].
-    pub use lash_sansio::llm::types::LlmToolSpec;
-    pub use lash_sansio::session_model::message::HistoryPresentation;
 }
 
 /// Protocol message and content types.
 pub mod messages {
-    pub use lash_sansio::session_model::message::RenderedPrompt;
+    pub use lash_protocol_types::AppendVec;
+    pub use lash_protocol_types::session_model::message::RenderedPrompt;
+    pub use lash_protocol_types::session_model::message::{BaseRenderCache, MessageSequenceIter};
     // The vocabulary this module's signatures name (the facade-completeness rule).
-    pub use lash_sansio::ModelToolReturnPart;
+    pub use lash_protocol_types::ModelToolReturnPart;
 
     pub use lash_core::session_graph::SharedJsonValue;
     pub use lash_core::{
@@ -1061,19 +1067,22 @@ pub mod attachments {
         ValueShapeLimits,
     };
     pub use lash_core_store::attachments::{AttachmentByteDelivery, AttachmentPutReceipt};
-    pub use lash_sansio::FieldShape;
-    pub use lash_sansio::llm::attachment_delivery::{
-        AttachmentPosition, Delivery, DeliveryContext, DeliveryFetchHorizon, DeliveryForms,
-        DeliveryLimits, DeliverySecret, ProviderAccepts, ProviderFileScope,
+    pub use lash_protocol_types::FieldShape;
+    pub use lash_protocol_types::{InvalidAttachmentId, InvalidMediaType};
+    pub use lash_protocol_types::{
+        llm::attachment_delivery::AttachmentPosition, llm::attachment_delivery::Delivery,
+        llm::attachment_delivery::DeliveryContext, llm::attachment_delivery::DeliveryFetchHorizon,
+        llm::attachment_delivery::DeliveryForms, llm::attachment_delivery::DeliveryLimits,
+        llm::attachment_delivery::DeliverySecret, llm::attachment_delivery::ProviderAccepts,
+        llm::attachment_delivery::ProviderFileScope,
     };
-    pub use lash_sansio::{InvalidAttachmentId, InvalidMediaType};
 }
 
 /// Secret-handling values for host-owned configuration structs.
 pub mod secrets {
     /// A string wrapper whose `Debug`/`Display` render `[redacted]`, so a
     /// provider key held in a host config struct cannot leak through logs.
-    pub use lash_sansio::Redacted;
+    pub use lash_protocol_types::Redacted;
 }
 
 /// Host process observation, definitions and lifecycle commands.
@@ -1092,7 +1101,7 @@ pub mod process {
         ConsumerHold, FitPolicy, ProcessDefinitionStoredError, ProcessStartDeclaration,
     };
     pub use lash_core_store::effect_opener::EffectOpenerError;
-    pub use lash_sansio::HandleTarget;
+    pub use lash_protocol_types::HandleTarget;
 
     pub use crate::admin::process_admin::SessionProcessAdmin;
     pub use crate::artifacts::{
@@ -1251,11 +1260,12 @@ pub mod runtime {
     /// An exhausted host resource and whether its execution can be redriven.
     pub use lash_core_store::runtime_error::HostResource;
     pub use lash_core_store::turn_input_vocabulary::RunDefinitions;
+    pub use lash_protocol_types::EffectIdentityError;
+    pub use lash_sansio::CheckpointDelivery;
     pub use lash_sansio::sansio::{
         ExecutionEnvironmentSync, ExecutionEnvironmentSyncFailure,
         ExecutionEnvironmentSyncFailureKind,
     };
-    pub use lash_sansio::{CheckpointDelivery, EffectIdentityError};
 
     /// The one effect context of an actor's activation (ADR 0132 §1).
     pub use lash_core::ActorContext;
@@ -1308,7 +1318,9 @@ pub mod runtime {
 /// Structural admission of host JSON before DTO allocation. The budget is
 /// independent of fixed wire-validity limits and Serde's recursion guard.
 pub mod json_decode {
-    pub use lash_sansio::json_decode::{JsonDecodeError, JsonDecodeLimits, JsonDecodeUsage};
+    pub use lash_protocol_types::{
+        json_decode::JsonDecodeError, json_decode::JsonDecodeLimits, json_decode::JsonDecodeUsage,
+    };
 }
 
 /// Trace context, events, and sink configuration.
@@ -1326,7 +1338,7 @@ pub mod testing;
 /// share: [`SchemaContract`] declares what a schema promises, and
 /// [`project_for_dialect`] renders it for one provider dialect.
 pub mod schema {
-    pub use lash_sansio::schema_contract::*;
+    pub use lash_protocol_types::schema_contract::*;
 }
 
 /// SQLite durable store backend. Enable with `features = ["sqlite"]`.
@@ -1464,24 +1476,29 @@ pub mod provider {
     pub use lash_core::provider::{canonical_call, canonical_request};
     /// The admitted request template and the transient body filled for one attempt
     /// (ADR 0133 §6). Only literals, refs, acceptance and codecs are recorded.
-    pub use lash_sansio::llm::types::{
-        AttachmentSlot, BodyPart, LiveRequestBody, LoweredItem, RecordedRequestTemplate,
-        RequestSegment, RequestTemplateBuilder, SegmentKind, SegmentPart, SlotCodec, TemplateError,
-        TemplateJson, TransientJson, WireChunk,
+    pub use lash_protocol_types::{
+        llm::types::AttachmentSlot, llm::types::BodyPart, llm::types::LiveRequestBody,
+        llm::types::LoweredItem, llm::types::RecordedRequestTemplate, llm::types::RequestSegment,
+        llm::types::RequestTemplateBuilder, llm::types::SegmentKind, llm::types::SegmentPart,
+        llm::types::SlotCodec, llm::types::TemplateError, llm::types::TemplateJson,
+        llm::types::TransientJson, llm::types::WireChunk,
     };
-    pub use lash_sansio::llm::types::{
-        LlmProviderTraceDirection, LlmProviderTraceEvent, LlmProviderTraceSender,
-        ProviderReasoningRetentionSupport,
+    pub use lash_protocol_types::{
+        llm::types::LlmProviderTraceDirection, llm::types::LlmProviderTraceEvent,
+        llm::types::LlmProviderTraceSender, llm::types::ProviderReasoningRetentionSupport,
     };
     /// Reuse of what a provider lowered before: each unit of history by the
     /// identity of the messages it was lowered from (FIG-6443).
-    pub use lash_sansio::llm::types::{
-        LoweredUnit, SEGMENT_CACHE_BUDGET_BYTES, SegmentCache, SegmentCacheStats, SegmentContext,
-        SegmentContextKey, SegmentKey,
+    pub use lash_protocol_types::{
+        llm::types::LoweredUnit, llm::types::SEGMENT_CACHE_BUDGET_BYTES, llm::types::SegmentCache,
+        llm::types::SegmentCacheStats, llm::types::SegmentContext, llm::types::SegmentContextKey,
+        llm::types::SegmentKey,
     };
     /// What a provider's `send` reads its response under, beside the body:
     /// the call's scope, its recorded contract and the send's live senders.
-    pub use lash_sansio::llm::types::{ResponseContext, ResponseContract, ToolCallContract};
+    pub use lash_protocol_types::{
+        llm::types::ResponseContext, llm::types::ResponseContract, llm::types::ToolCallContract,
+    };
     pub use lash_transport_failure::{
         HttpFailureContext, LlmTransportError, TransportRetryVerdict, retry_after_from_headers,
     };

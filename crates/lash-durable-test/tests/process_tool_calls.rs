@@ -18,7 +18,7 @@ use std::sync::{Arc, Mutex};
 
 use lash_core::ToolDefinitionBindingExt as _;
 use lash_core::{ToolCall, ToolOutcome};
-use lash_sansio::sync::MutexExt as _;
+use lash_protocol_types::sync::MutexExt as _;
 
 use served::{Tier, World};
 

@@ -183,13 +183,13 @@ fn lowered(dialect: &str, source: &str, effect: &EffectName, root: Option<&str>)
     let embedding = every_dialect(&WorkerTuning::standard()).expect("an embedding of both");
     let effects = BTreeMap::from([(
         effect.clone(),
-        lash_sansio::tool_signature(
-            &lash_sansio::JsonSchema::admit(serde_json::json!({
+        lash_protocol_types::tool_signature(
+            &lash_protocol_types::JsonSchema::admit(serde_json::json!({
                 "type": "object",
                 "properties": { "x": { "type": "number" } }
             }))
             .expect("an admissible input schema"),
-            &lash_sansio::JsonSchema::admit(serde_json::json!({ "type": "integer" }))
+            &lash_protocol_types::JsonSchema::admit(serde_json::json!({ "type": "integer" }))
                 .expect("an admissible result schema"),
         ),
     )]);

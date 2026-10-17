@@ -29,7 +29,7 @@ impl MemberDraft {
     ///
     /// [`ParentFault`] when the request does not stage.
     pub fn pinned(
-        call: lash_sansio::ToolCallId,
+        call: lash_protocol_types::ToolCallId,
         request: FrozenRequest,
         opener: &lash_core_store::effect_opener::EffectOpener,
         pin: lash_core_execution::runtime::actor::round::MemberPin,
@@ -55,11 +55,14 @@ impl MemberDraft {
     ///
     /// [`ParentFault`] when the request does not stage.
     pub fn new(
-        call: lash_sansio::ToolCallId,
-        tool: lash_sansio::ToolId,
+        call: lash_protocol_types::ToolCallId,
+        tool: lash_protocol_types::ToolId,
         request: FrozenRequest,
         opener: &lash_core_store::effect_opener::EffectOpener,
-        pin: (lash_sansio::ExecutionPolicy, lash_sansio::ExecutionLimit),
+        pin: (
+            lash_protocol_types::ExecutionPolicy,
+            lash_protocol_types::ExecutionLimit,
+        ),
         park: Option<lash_core_execution::runtime::actor::waits::ParkDeadline>,
     ) -> Result<Self, ParentFault> {
         let mut scratch = GraphStaging::new(EncodeBudget::new(ExplicitLimit::new(u64::MAX)));

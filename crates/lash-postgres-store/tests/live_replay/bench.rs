@@ -10,7 +10,7 @@ use std::time::{Duration, Instant};
 
 use lash_core::{LiveReplayEventDraft, SessionRevision};
 use lash_postgres_store::testing::{IsolatedDatabase, required_database_url};
-use lash_sansio::SessionId;
+use lash_protocol_types::SessionId;
 use sqlx::Row as _;
 
 use super::{connect, fresh_schema, label, next_item, subscribed, text};

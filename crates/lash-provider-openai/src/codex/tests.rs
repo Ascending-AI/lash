@@ -10,7 +10,7 @@ use lash_core::provider::{
     ReasoningCapability, StreamTermination,
 };
 use lash_llm_transport::openai_terminal_reason_from_response_value;
-use lash_sansio::sync::MutexExt;
+use lash_protocol_types::sync::MutexExt;
 use shared::ResponsesStreamState as CodexStreamState;
 use std::sync::{Arc, Mutex};
 use std::time::{Duration, Instant};
@@ -65,14 +65,16 @@ fn reasoning_capability() -> LlmProfileCapability {
 fn request(messages: Vec<LlmMessage>) -> LlmRequest {
     LlmRequest {
         instructions: None,
-        model: lash_sansio::llm_profile::LlmProfileConfig::new(
-            lash_sansio::llm_profile::RecordedLlmProfile::mint(
-                lash_sansio::llm_profile::LlmProfileKey::new("request-fixture"),
-                lash_sansio::llm_profile::LlmProfileMetadata::builder("gpt-5.4".to_string())
-                    .cache_retention(lash_sansio::llm::capability::CacheRetention::Short)
-                    .context_window_tokens(128_000)
-                    .build()
-                    .expect("valid profile"),
+        model: lash_protocol_types::llm_profile::LlmProfileConfig::new(
+            lash_protocol_types::llm_profile::RecordedLlmProfile::mint(
+                lash_protocol_types::llm_profile::LlmProfileKey::new("request-fixture"),
+                lash_protocol_types::llm_profile::LlmProfileMetadata::builder(
+                    "gpt-5.4".to_string(),
+                )
+                .cache_retention(lash_protocol_types::llm::capability::CacheRetention::Short)
+                .context_window_tokens(128_000)
+                .build()
+                .expect("valid profile"),
             ),
         ),
         messages,
@@ -425,14 +427,14 @@ fn codex_request_uses_openai_schema_projection() {
     req.tools = Arc::new(vec![LlmToolSpec {
         name: "empty".to_string(),
         description: "Empty".to_string(),
-        input_schema: lash_sansio::SchemaContract::admit(json!({"type": "object"}))
+        input_schema: lash_protocol_types::SchemaContract::admit(json!({"type": "object"}))
             .expect("valid declared schema"),
-        output_schema: lash_sansio::SchemaContract::admit(json!({}))
+        output_schema: lash_protocol_types::SchemaContract::admit(json!({}))
             .expect("valid declared schema"),
     }]);
     req.output_spec = Some(LlmOutputSpec::JsonSchema(LlmJsonSchema {
         name: "result".to_string(),
-        schema: lash_sansio::SchemaContract::admit(json!({
+        schema: lash_protocol_types::SchemaContract::admit(json!({
             "type": "object",
             "properties": { "summary": { "type": "string" } }
         }))
@@ -1943,7 +1945,7 @@ fn codex_schema_projection_failure_is_local_validation_error() {
     let mut req = request(vec![LlmMessage::text(LlmRole::User, "hello")]);
     req.output_spec = Some(LlmOutputSpec::JsonSchema(LlmJsonSchema {
         name: "bad".to_string(),
-        schema: lash_sansio::SchemaContract::admit(
+        schema: lash_protocol_types::SchemaContract::admit(
             json!({"type": "object", "allOf": [{"type": "object"}, {"type": "object"}]}),
         )
         .expect("valid declared schema"),

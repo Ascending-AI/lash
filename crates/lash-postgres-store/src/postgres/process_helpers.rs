@@ -1,6 +1,6 @@
 use crate::guarded_tx::GuardedTx;
 use crate::*;
-use lash_sansio::ProcessId;
+use lash_protocol_types::ProcessId;
 
 use crate::process_sql::process_sql;
 

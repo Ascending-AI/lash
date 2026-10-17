@@ -27,8 +27,8 @@ use lash_durable::{
     DurableInstant, DurableReads, DurableStore, Epoch, FormatSet, HeartbeatOutcome, MailCommit,
     MailTx, NodeLease, NodeSpec, Reaped,
 };
-use lash_sansio::sync::MutexExt as _;
-use lash_sansio::{ProcessId, SessionId, TurnId};
+use lash_protocol_types::sync::MutexExt as _;
+use lash_protocol_types::{ProcessId, SessionId, TurnId};
 
 /// What runs before an owner commit: `Err` answers the commit in the
 /// store's place, with nothing applied.
@@ -155,7 +155,7 @@ impl PageStore for DurableCommitHook {
 impl DurableReads for DurableCommitHook {
     async fn model_call_pins(
         &self,
-        session: &lash_sansio::SessionId,
+        session: &lash_protocol_types::SessionId,
         owner: &str,
     ) -> Result<Vec<lash_durable::domain::ModelCallPinRow>, DurableError> {
         self.inner.model_call_pins(session, owner).await
@@ -163,7 +163,7 @@ impl DurableReads for DurableCommitHook {
 
     async fn model_calls(
         &self,
-        session: &lash_sansio::SessionId,
+        session: &lash_protocol_types::SessionId,
         owner: &str,
     ) -> Result<Vec<lash_core_store::model_calls::ModelCallRecord>, DurableError> {
         self.inner.model_calls(session, owner).await
@@ -221,8 +221,8 @@ impl DurableReads for DurableCommitHook {
     }
     async fn cell_roots_within(
         &self,
-        session: &lash_sansio::SessionId,
-        run: &lash_sansio::TurnId,
+        session: &lash_protocol_types::SessionId,
+        run: &lash_protocol_types::TurnId,
         max_rows: usize,
     ) -> Result<Vec<lash_durable::domain::ExecRootRow>, DurableError> {
         self.inner.cell_roots_within(session, run, max_rows).await

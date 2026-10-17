@@ -270,7 +270,7 @@ impl Placement {
 impl Observation {
     /// The occurrence the observation is about, loops and all; `None` for a
     /// fact about the whole execution.
-    fn at(&self) -> Option<&lash_sansio::EffectIdentity> {
+    fn at(&self) -> Option<&lash_protocol_types::EffectIdentity> {
         match &self.fact {
             WorkflowOverlayFact::StepBodyStarted { step } => Some(&step.at),
             WorkflowOverlayFact::Language { payload, .. } => payload.at(),
@@ -434,7 +434,7 @@ struct OccurrenceFold<'a> {
     waiting: Option<(DateTime<Utc>, &'a crate::TraceNodeAwaited)>,
     resumed: Option<DateTime<Utc>>,
     terminal: Option<OccurrenceTerminal<'a>>,
-    call: Option<(&'a lash_sansio::ToolCallId, Option<u32>)>,
+    call: Option<(&'a lash_protocol_types::ToolCallId, Option<u32>)>,
     branch: Option<TraceBranchSelection>,
     children: Vec<&'a TraceLanguageChildExecution>,
 }
@@ -455,7 +455,7 @@ impl<'a> OccurrenceFold<'a> {
 
     /// Bind the occurrence to the call a language fact repeated, unless the
     /// step's actor stated the binding (it carries the attempt).
-    fn repeat_call(&mut self, call_id: Option<&'a lash_sansio::ToolCallId>) {
+    fn repeat_call(&mut self, call_id: Option<&'a lash_protocol_types::ToolCallId>) {
         if let Some(call_id) = call_id
             && !matches!(self.call, Some((_, Some(_))))
         {
@@ -521,7 +521,7 @@ impl<'a> OccurrenceFold<'a> {
 }
 
 /// A child execution's place among its site's links.
-type ChildKey = (lash_sansio::ProcessId, Option<u32>);
+type ChildKey = (lash_protocol_types::ProcessId, Option<u32>);
 
 /// The child executions one site started, each listed once.
 #[derive(Clone, Default)]

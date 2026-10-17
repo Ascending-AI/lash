@@ -15,7 +15,7 @@ use lash_core_execution::store::{
     run_binding_conflict, stored_intent_kind, stored_intent_state,
 };
 use lash_core_execution::store_backend_support::turn_cancel::EndedRunInputRelease;
-use lash_sansio::{InputId, SessionId, TurnId};
+use lash_protocol_types::{InputId, SessionId, TurnId};
 use lash_store_sql::session_runs::{
     control_intents::ControlIntentStatements, run_inputs::SessionRunInputStatements,
     runs::SessionRunStatements,

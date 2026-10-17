@@ -4,7 +4,7 @@ use crate::plugin::{PluginSessionMaterializationRequest, PluginSessionRequest};
 use std::collections::BTreeMap;
 use std::sync::Arc;
 
-use lash_sansio::sync::{MutexExt, RwLockExt};
+use lash_protocol_types::{sync::MutexExt, sync::RwLockExt};
 
 use super::*;
 
@@ -1184,7 +1184,7 @@ impl PluginSession {
 #[cfg(test)]
 mod presentation_plan_tests {
     use super::*;
-    use lash_sansio::core_support::ModelToolReturnCoreSupport as _;
+    use lash_protocol_types::core_support::ModelToolReturnCoreSupport as _;
     use std::sync::atomic::{AtomicUsize, Ordering};
 
     struct PresenterFactory {

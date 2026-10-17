@@ -17,7 +17,7 @@ use lash_core_execution::{
     ProcessInfraError, ProcessOutcome, ProcessRecord, StepRequest, ToolCallOutput,
     ToolCancellation,
 };
-use lash_sansio::sync::MutexExt as _;
+use lash_protocol_types::sync::MutexExt as _;
 use serde_json::{Value, json};
 use tokio::sync::mpsc;
 

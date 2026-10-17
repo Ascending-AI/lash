@@ -2,7 +2,7 @@
 //! PostgreSQL state: lineage forcing and fence-integrity injection.
 
 use super::*;
-use lash_sansio::SessionId;
+use lash_protocol_types::SessionId;
 
 pub(crate) struct PostgresLineageConformanceInjector {
     pub(crate) storage: Arc<PostgresStorage>,

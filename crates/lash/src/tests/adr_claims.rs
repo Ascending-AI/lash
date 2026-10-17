@@ -4,7 +4,7 @@
 use super::*;
 use crate::support::TurnInput;
 use lash_core::llm::types::{LlmOutputPart, LlmResponse};
-use lash_sansio::SessionId;
+use lash_protocol_types::SessionId;
 use lash_transport_failure::LlmTransportError;
 use std::sync::atomic::{AtomicUsize, Ordering};
 

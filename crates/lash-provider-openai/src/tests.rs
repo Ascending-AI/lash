@@ -17,7 +17,7 @@ use lash_core::provider::{
     CacheControlDialect, CacheRetention, LlmProfileCapability, ProviderHandle, ProviderReliability,
     ReasoningCapability, ReasoningEncoding,
 };
-use lash_sansio::sync::MutexExt;
+use lash_protocol_types::sync::MutexExt;
 use runtime_feedback::request_with_instructions;
 use std::collections::BTreeMap;
 use std::collections::VecDeque;
@@ -778,9 +778,9 @@ fn anthropic_cache_dialect_marks_canonical_breakpoints_for_an_arbitrary_model() 
     req.tools = Arc::new(vec![LlmToolSpec {
         name: "search".to_string(),
         description: "Search".to_string(),
-        input_schema: lash_sansio::SchemaContract::admit(json!({"type": "object"}))
+        input_schema: lash_protocol_types::SchemaContract::admit(json!({"type": "object"}))
             .expect("valid declared schema"),
-        output_schema: lash_sansio::SchemaContract::admit(json!({}))
+        output_schema: lash_protocol_types::SchemaContract::admit(json!({}))
             .expect("valid declared schema"),
     }]);
 
@@ -833,9 +833,9 @@ fn gemini_cache_dialect_emits_one_ephemeral_explicit_breakpoint() {
     req.tools = Arc::new(vec![LlmToolSpec {
         name: "search".to_string(),
         description: "Search".to_string(),
-        input_schema: lash_sansio::SchemaContract::admit(json!({"type": "object"}))
+        input_schema: lash_protocol_types::SchemaContract::admit(json!({"type": "object"}))
             .expect("valid declared schema"),
-        output_schema: lash_sansio::SchemaContract::admit(json!({}))
+        output_schema: lash_protocol_types::SchemaContract::admit(json!({}))
             .expect("valid declared schema"),
     }]);
 
@@ -884,7 +884,7 @@ fn structured_output_schema_is_projected_or_rejected_locally() {
     let mut req = request(vec![LlmMessage::text(LlmRole::User, "hello")]);
     req.output_spec = Some(LlmOutputSpec::JsonSchema(LlmJsonSchema {
         name: "result".to_string(),
-        schema: lash_sansio::SchemaContract::admit(json!({
+        schema: lash_protocol_types::SchemaContract::admit(json!({
             "type": "object",
             "properties": { "summary": { "type": "string" } }
         }))
@@ -906,7 +906,7 @@ fn structured_output_schema_is_projected_or_rejected_locally() {
 
     req.output_spec = Some(LlmOutputSpec::JsonSchema(LlmJsonSchema {
         name: "bad".to_string(),
-        schema: lash_sansio::SchemaContract::admit(
+        schema: lash_protocol_types::SchemaContract::admit(
             json!({"type": "object", "allOf": [{"type": "object"}, {"type": "object"}]}),
         )
         .expect("valid declared schema"),
@@ -924,7 +924,7 @@ fn openrouter_can_be_configured_for_bedrock_safe_schema_dialect() {
     let mut req = request(vec![LlmMessage::text(LlmRole::User, "rank")]);
     req.output_spec = Some(LlmOutputSpec::JsonSchema(LlmJsonSchema {
         name: "rank_result".to_string(),
-        schema: lash_sansio::SchemaContract::admit(json!({
+        schema: lash_protocol_types::SchemaContract::admit(json!({
             "type": "object",
             "required": ["ranked"],
             "properties": {
@@ -1174,12 +1174,12 @@ fn chat_body_honors_compat_max_token_field_streaming_usage_and_strict_tools() {
     req.tools = Arc::new(vec![LlmToolSpec {
         name: "lookup".to_string(),
         description: "Lookup".to_string(),
-        input_schema: lash_sansio::SchemaContract::admit(json!({
+        input_schema: lash_protocol_types::SchemaContract::admit(json!({
             "type": "object",
             "properties": { "q": { "type": "string" } }
         }))
         .expect("valid declared schema"),
-        output_schema: lash_sansio::SchemaContract::admit(json!({}))
+        output_schema: lash_protocol_types::SchemaContract::admit(json!({}))
             .expect("valid declared schema"),
     }]);
 
@@ -1212,9 +1212,9 @@ fn local_preset_suppresses_optional_openai_fields() {
     req.tools = Arc::new(vec![LlmToolSpec {
         name: "lookup".to_string(),
         description: "Lookup".to_string(),
-        input_schema: lash_sansio::SchemaContract::admit(json!({"type": "object"}))
+        input_schema: lash_protocol_types::SchemaContract::admit(json!({"type": "object"}))
             .expect("valid declared schema"),
-        output_schema: lash_sansio::SchemaContract::admit(json!({}))
+        output_schema: lash_protocol_types::SchemaContract::admit(json!({}))
             .expect("valid declared schema"),
     }]);
 
@@ -2045,8 +2045,8 @@ include!("failed_stream_metadata_tests.rs");
 #[test]
 fn failed_and_cancelled_results_keep_presenter_body_and_native_error_signal() {
     for status in [
-        lash_sansio::ToolCallStatus::Failure,
-        lash_sansio::ToolCallStatus::Cancelled,
+        lash_protocol_types::ToolCallStatus::Failure,
+        lash_protocol_types::ToolCallStatus::Cancelled,
     ] {
         let result: LlmContentBlock = serde_json::from_value(json!({"ToolResult": {
             "call_id": "call-1", "tool_name": "lookup",

@@ -69,7 +69,7 @@ use super::definition_ref::{
 };
 use super::engine::ProcessEngineRegistry;
 
-pub use lash_sansio::{InvalidProcessDefinitionId, ProcessDefinitionId};
+pub use lash_protocol_types::{InvalidProcessDefinitionId, ProcessDefinitionId};
 
 /// The identity family that owns the definition-id preimage.
 const PROCESS_DEFINITION_ID_DOMAIN: &str = "lash.process-definition-id";

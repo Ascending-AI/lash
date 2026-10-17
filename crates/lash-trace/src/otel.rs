@@ -11,7 +11,7 @@
 use std::collections::HashMap;
 use std::sync::{Arc, Mutex};
 
-use lash_sansio::sync::MutexExt;
+use lash_protocol_types::sync::MutexExt;
 use opentelemetry::metrics::MeterProvider;
 use opentelemetry::trace::{
     Link, Span, SpanBuilder, SpanContext, SpanId, SpanKind, Status, TraceContextExt, TraceFlags,
@@ -20,7 +20,7 @@ use opentelemetry::trace::{
 use opentelemetry::{Context, KeyValue};
 use opentelemetry_sdk::trace::{IdGenerator, SamplingDecision, SdkTracer};
 
-use lash_sansio::llm::types::{LlmUsage, TokenUsageOverflow};
+use lash_protocol_types::{llm::types::LlmUsage, llm::types::TokenUsageOverflow};
 
 use crate::policy::{Contributions, TraceAttributeWriter, TraceOmissionCounts};
 use crate::telemetry::{
@@ -708,7 +708,7 @@ struct Projection<'a> {
     span: DomainSpan,
     model: Option<&'a str>,
     tool: Option<&'a str>,
-    tool_identity: Option<&'a lash_sansio::ToolId>,
+    tool_identity: Option<&'a lash_protocol_types::ToolId>,
     process: Option<&'a str>,
     /// A workflow node's site, which names its span.
     site: Option<String>,
@@ -819,8 +819,8 @@ impl<'a> Projection<'a> {
         if let Some(attempt) = self.attempt {
             return matches!(
                 attempt.attempt.outcome,
-                lash_sansio::llm::types::AttemptOutcome::Failed
-                    | lash_sansio::llm::types::AttemptOutcome::Interrupted
+                lash_protocol_types::llm::types::AttemptOutcome::Failed
+                    | lash_protocol_types::llm::types::AttemptOutcome::Interrupted
             );
         }
         match &record.event {
@@ -832,8 +832,8 @@ impl<'a> Projection<'a> {
             }
             TraceEvent::LlmAttemptCompleted { attempt, .. } => matches!(
                 attempt.outcome,
-                lash_sansio::llm::types::AttemptOutcome::Failed
-                    | lash_sansio::llm::types::AttemptOutcome::Interrupted
+                lash_protocol_types::llm::types::AttemptOutcome::Failed
+                    | lash_protocol_types::llm::types::AttemptOutcome::Interrupted
             ),
             _ => record.event.is_failed(),
         }
@@ -993,7 +993,7 @@ impl<'a> Projection<'a> {
                         crate::TraceToolCallOutcome::Failure(value) => value
                             .get("class")
                             .and_then(|class| {
-                                serde_json::from_value::<lash_sansio::ToolFailureClass>(
+                                serde_json::from_value::<lash_protocol_types::ToolFailureClass>(
                                     class.clone(),
                                 )
                                 .ok()

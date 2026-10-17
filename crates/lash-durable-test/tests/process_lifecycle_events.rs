@@ -178,7 +178,7 @@ fn answer(value: serde_json::Value) -> lash_core::EngineAction {
     ))
 }
 
-fn cancelled(origin: lash_sansio::CancelOrigin) -> lash_core::EngineAction {
+fn cancelled(origin: lash_protocol_types::CancelOrigin) -> lash_core::EngineAction {
     lash_core::EngineAction::Terminal(lash_core::ProcessOutcome::from_tool_output(
         lash_core::ToolCallOutput::cancelled(
             lash_core::ToolCancellation::runtime("the scripted engine answered its cancel")
@@ -407,7 +407,7 @@ fn write(step: &str, x: u64, site: Option<(&str, u64)>) -> lash_core::EngineActi
             effect: lash_core_execution::testing::effect_of(&write_definition()),
             input: serde_json::json!({ "x": x }),
             site: site.map(|(node_id, occurrence)| {
-                lash_sansio::effect_identity_fixture(node_id, occurrence)
+                lash_protocol_types::effect_identity_fixture(node_id, occurrence)
             }),
             matched: None,
         }],
@@ -527,8 +527,8 @@ static EFFECT_LAW_GUARD: tokio::sync::Mutex<()> = tokio::sync::Mutex::const_new(
 
 /// The identity of the `n`-th write of [`NODE`], from 0: the one site of
 /// the node, at its `n`-th occurrence.
-fn node_site(n: u64) -> lash_sansio::EffectIdentity {
-    lash_sansio::effect_identity_fixture(NODE, n)
+fn node_site(n: u64) -> lash_protocol_types::EffectIdentity {
+    lash_protocol_types::effect_identity_fixture(NODE, n)
 }
 
 /// Writes [`NODE_WRITES`] times for [`NODE`], one settled before the next,
@@ -598,7 +598,7 @@ async fn each_committed_effect_is_one_effect_outcome_event(tier: Tier) {
                     .expect("an effect outcome decodes")
             })
             .collect();
-    let recorded: Vec<lash_sansio::EffectIdentity> =
+    let recorded: Vec<lash_protocol_types::EffectIdentity> =
         outcomes.iter().map(|outcome| outcome.at.clone()).collect();
     let first_cap: Vec<_> = (0..64).map(node_site).collect();
     assert_eq!(

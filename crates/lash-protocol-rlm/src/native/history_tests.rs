@@ -1,8 +1,8 @@
 use super::*;
 use lash_core::{CellOutcome, CellRecord};
 use lash_core::{Part, SessionHistoryRecord};
+use lash_protocol_types::TurnId;
 use lash_rlm_types::RlmProtocolEvent;
-use lash_sansio::TurnId;
 
 fn step(id: &str, error: Option<&str>, terminal: bool) -> CellRecord {
     CellRecord {

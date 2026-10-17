@@ -19,7 +19,7 @@ fn structured_output_uses_native_output_config_format() {
     req.output_spec = Some(LlmOutputSpec::JsonSchema(LlmJsonSchema {
         name: "extract_result".to_string(),
         strict: true,
-        schema: lash_sansio::SchemaContract::admit(json!({
+        schema: lash_protocol_types::SchemaContract::admit(json!({
             "type": "object",
             "additionalProperties": false,
             "required": ["answer"],
@@ -158,10 +158,10 @@ fn runtime_feedback_result_order_preserves_explicit_cache_marker() {
         LlmMessage::new(
             LlmRole::User,
             vec![LlmContentBlock::ToolResult {
-                status: lash_sansio::ToolCallStatus::Success,
+                status: lash_protocol_types::ToolCallStatus::Success,
                 call_id: "call1".into(),
                 tool_name: Some("lookup".into()),
-                content: vec![lash_sansio::ModelToolReturnPart::text("RESULT")],
+                content: vec![lash_protocol_types::ModelToolReturnPart::text("RESULT")],
             }],
         ),
     ]);

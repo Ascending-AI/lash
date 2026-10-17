@@ -60,7 +60,10 @@ pub use backend::{
 /// The durable store a [`StoreSet`] hands out (ADR 0132 §1).
 pub use lash_durable::{DurableConfig, DurableSettings, DurableStore};
 mod module_artifacts;
-pub use lash_sansio::module_artifact_refusal::{ModuleArtifactCorruption, ModuleArtifactRefusal};
+pub use lash_protocol_types::{
+    module_artifact_refusal::ModuleArtifactCorruption,
+    module_artifact_refusal::ModuleArtifactRefusal,
+};
 pub use module_artifacts::{
     ArtifactStoreError, DurabilityTier, ModuleArtifactBody, ModuleArtifactHold, ModuleArtifactStore,
 };
@@ -115,7 +118,7 @@ pub use lash_core_store::store_backend_support;
 pub use lash_core_store::tool_run;
 /// Standard-lock poison recovery traits used across Lash hosts and runtimes.
 pub mod sync {
-    pub use lash_sansio::sync::*;
+    pub use lash_protocol_types::sync::*;
 }
 #[cfg(any(test, feature = "testing"))]
 pub mod test_support;
@@ -340,35 +343,35 @@ pub mod facade_support {
     pub use lash_core_store::session_identity::facade_ops::AgentFrameReasonFacadeOps;
     pub use lash_core_store::session_state::facade_ops::RuntimeSessionStateFacadeOps;
     pub use lash_core_store::tool_surface::ReconfigureError;
-    pub use lash_sansio::AcceptedInjectedTurnInput;
-    pub use lash_sansio::AttachmentMaterializationNotice;
-    pub use lash_sansio::AttachmentMaterializationReason;
-    pub use lash_sansio::AttachmentRef;
+    pub use lash_protocol_types::AcceptedInjectedTurnInput;
+    pub use lash_protocol_types::AttachmentMaterializationNotice;
+    pub use lash_protocol_types::AttachmentMaterializationReason;
+    pub use lash_protocol_types::AttachmentRef;
+    pub use lash_protocol_types::ErrorEnvelope;
+    pub use lash_protocol_types::MessageSequence;
+    pub use lash_protocol_types::ModelToolReturnPart;
+    pub use lash_protocol_types::ProviderSchemaCapabilities;
+    pub use lash_protocol_types::ReportedFailure;
+    pub use lash_protocol_types::ResolvedSchema;
+    pub use lash_protocol_types::RetryProgress;
+    pub use lash_protocol_types::SchemaPurpose;
+    pub use lash_protocol_types::SchemaResolutionError;
+    pub use lash_protocol_types::SchemaResolutionRequest;
+    pub use lash_protocol_types::SessionStreamEvent;
+    pub use lash_protocol_types::StreamMessageKind;
+    pub use lash_protocol_types::ToolCatalogBuildError;
+    pub use lash_protocol_types::TurnFinish;
+    pub use lash_protocol_types::TurnOutcome;
+    pub use lash_protocol_types::append_assistant_text_part;
+    pub use lash_protocol_types::build_tool_catalog;
+    pub use lash_protocol_types::normalized_response_parts;
+    pub use lash_protocol_types::reasoning_part;
+    pub use lash_protocol_types::resolve_schema;
+    pub use lash_protocol_types::shared_parts;
+    pub use lash_protocol_types::visible_response_text_from_parts;
+    pub use lash_protocol_types::{ModelToolOutcome, ModelToolReturn};
+    pub use lash_protocol_types::{PluginStage, TurnErrorCause, TurnErrorCode, TurnStop};
     pub use lash_sansio::EffectId;
-    pub use lash_sansio::ErrorEnvelope;
-    pub use lash_sansio::MessageSequence;
-    pub use lash_sansio::ModelToolReturnPart;
-    pub use lash_sansio::ProviderSchemaCapabilities;
-    pub use lash_sansio::ReportedFailure;
-    pub use lash_sansio::ResolvedSchema;
-    pub use lash_sansio::RetryProgress;
-    pub use lash_sansio::SchemaPurpose;
-    pub use lash_sansio::SchemaResolutionError;
-    pub use lash_sansio::SchemaResolutionRequest;
-    pub use lash_sansio::SessionStreamEvent;
-    pub use lash_sansio::StreamMessageKind;
-    pub use lash_sansio::ToolCatalogBuildError;
-    pub use lash_sansio::TurnFinish;
-    pub use lash_sansio::TurnOutcome;
-    pub use lash_sansio::append_assistant_text_part;
-    pub use lash_sansio::build_tool_catalog;
-    pub use lash_sansio::normalized_response_parts;
-    pub use lash_sansio::reasoning_part;
-    pub use lash_sansio::resolve_schema;
-    pub use lash_sansio::shared_parts;
-    pub use lash_sansio::visible_response_text_from_parts;
-    pub use lash_sansio::{ModelToolOutcome, ModelToolReturn};
-    pub use lash_sansio::{PluginStage, TurnErrorCause, TurnErrorCode, TurnStop};
     pub use lash_trace::TraceBranchSelection;
     pub use lash_trace::TraceRecord;
     pub use lash_trace::TraceRuntimeScope;
@@ -389,16 +392,16 @@ pub(crate) use crate::plugin::{
     RuntimeServices, SessionObservedProcessOutcome, SessionObservedProcessReceipt,
     SessionObserverIntent,
 };
-pub(crate) use lash_sansio::{ToolCatalogBuildInput, validate_tool_input};
+pub(crate) use lash_protocol_types::{ToolCatalogBuildInput, validate_tool_input};
 
 pub mod sansio {
     pub use crate::{CompletedToolCall, Response};
     pub use lash_sansio::sansio::{
         ChatContextProjector, CheckpointDelivery, CheckpointResumeAction, ContextProjector,
         EffectId, ExecutionEnvironmentSync, ExecutionEnvironmentSyncFailure,
-        ExecutionEnvironmentSyncFailureKind, ExpandedRow, ExpandedWrapper, LlmCallError,
-        ModelToolCalls, PendingToolCall, PendingWork, ProtocolDriverHandle, ResponseToolCalls,
-        SyncedEnvironment, ToolExpansionPlan, ToolWave, TurnMachine, place_prompt,
+        ExecutionEnvironmentSyncFailureKind, ExpandedRow, ExpandedWrapper, ModelToolCalls,
+        PendingToolCall, PendingWork, ProtocolDriverHandle, ResponseToolCalls, SyncedEnvironment,
+        ToolExpansionPlan, ToolWave, TurnMachine, place_prompt,
     };
 }
 
@@ -408,24 +411,14 @@ pub use attachments::{
     AttachmentStoreFailureClass, AttachmentStorePersistence, EmptyRootSetPolicy, StoredAttachment,
     StoredBlobRef,
 };
-pub use lash_sansio::llm::attachment_delivery::ProviderFileScope;
-pub use lash_sansio::llm::types::{
-    AttemptOutcome, AttemptRecord, AttemptUsageOutcome, ChargeSafetyDecision,
-    ChargeSafetyDenialReason, DiscardReason, DiscardedAfterCell, ExecutionEvidence,
-    ExecutionEvidenceCollectionInterruption, ExecutionEvidenceMergeError, GenerationOptionOutcome,
-    GenerationOptions, GenerationReceipt, LlmCallId, LlmCallRecord, LlmOutputPart, LlmRequest,
-    LlmRequestOwner, LlmRequestScope, LlmResponse, LlmStreamEvidence, LlmTerminalReason,
-    NonNegativeFiniteF64, NormalizedError, ProtocolPosition, ProviderEndpointError,
-    ProviderReplayDrop, ProviderReplayDropReason, ProviderReplayKind, ProviderRouteIdentity,
-    RecordedRequestTemplate, RetryDecision,
-};
-pub use lash_sansio::{
+pub use lash_protocol_types::llm::attachment_delivery::ProviderFileScope;
+pub use lash_protocol_types::{
     AttachmentCreateMeta, AttachmentId, AttachmentRef, AttachmentTypeMetadata, Backoff, BatchId,
     BindingChanges, BoundedRetry, CancelOrigin, CancelRequest, CellControl, CellDefect,
     CellFailure, CellFailureKind, CellFailureRepair, CellOutcome, CellPrint, CellRecord,
-    CheckpointDelivery, CheckpointKind, CompletionCandidate, CompletionDisposition,
-    DecidedCompletion, DeclarationRefusal, DegradedBinding, ExecCodeFailure, ExecCodeFailureReason,
-    ExecResponse, ExecutedCall, ExecutedCallOutcome, ExecutionBudgets, ExecutionBudgetsConfig,
+    CheckpointKind, CompletionCandidate, CompletionDisposition, DecidedCompletion,
+    DeclarationRefusal, DegradedBinding, ExecCodeFailure, ExecCodeFailureReason, ExecResponse,
+    ExecutedCall, ExecutedCallOutcome, ExecutionBudgets, ExecutionBudgetsConfig,
     ExecutionBudgetsError, ExecutionLimit, ExecutionPolicy, FrameKey, FrameKeyError, InputId,
     JsonSchema, LimitCause, LlmCallError, LlmUsage, MediaType, Message, MessageOrigin, MessageRole,
     NextRun, NodeId, OutcomeShape, OutputRetentionPolicy, OutputValue, ParkBound, Part, PartKind,
@@ -441,6 +434,22 @@ pub use lash_sansio::{
     ToolValue, ToolView, ToolViewBlock, ToolViewMeta, TurnControl, TurnControlKind, TurnControls,
     TurnId, TurnOutputSource, ValueMismatch, ValueShape, ValueShapeLimits,
 };
+pub use lash_protocol_types::{
+    llm::types::AttemptOutcome, llm::types::AttemptRecord, llm::types::AttemptUsageOutcome,
+    llm::types::ChargeSafetyDecision, llm::types::ChargeSafetyDenialReason,
+    llm::types::DiscardReason, llm::types::DiscardedAfterCell, llm::types::ExecutionEvidence,
+    llm::types::ExecutionEvidenceCollectionInterruption, llm::types::ExecutionEvidenceMergeError,
+    llm::types::GenerationOptionOutcome, llm::types::GenerationOptions,
+    llm::types::GenerationReceipt, llm::types::LlmCallId, llm::types::LlmCallRecord,
+    llm::types::LlmOutputPart, llm::types::LlmRequest, llm::types::LlmRequestOwner,
+    llm::types::LlmRequestScope, llm::types::LlmResponse, llm::types::LlmStreamEvidence,
+    llm::types::LlmTerminalReason, llm::types::NonNegativeFiniteF64, llm::types::NormalizedError,
+    llm::types::ProtocolPosition, llm::types::ProviderEndpointError,
+    llm::types::ProviderReplayDrop, llm::types::ProviderReplayDropReason,
+    llm::types::ProviderReplayKind, llm::types::ProviderRouteIdentity,
+    llm::types::RecordedRequestTemplate, llm::types::RetryDecision,
+};
+pub use lash_sansio::CheckpointDelivery;
 pub use tool_provider::{ToolAttachmentClient, ToolDirectCompletionClient, ToolSessionLlmProfile};
 /// The stop a tool control other than a declared turn control ends the turn
 /// with: a tool-requested failure, or a plugin's abort. A declared turn
@@ -587,8 +596,8 @@ pub type TurnMachine = lash_sansio::TurnMachine<HostTurnProtocol>;
 ///
 /// Protocol-engine implementors construct this configuration at their boundary.
 pub type TurnMachineConfig = lash_sansio::TurnMachineConfig<HostTurnProtocol>;
-pub use lash_sansio::{FailureCode, TurnFailureCode, TurnFailureKind};
-pub use lash_sansio::{
+pub use lash_protocol_types::{FailureCode, TurnFailureCode, TurnFailureKind};
+pub use lash_protocol_types::{
     InvalidToolCallId, ToolCallAdmission, ToolCallId, ToolCallPosition, ToolCallRoot,
     ToolCallRootError,
 };

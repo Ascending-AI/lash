@@ -10,7 +10,7 @@ use std::time::Duration;
 
 use anyhow::{Context, Result};
 use lash_core::store::StoreTestSupport as _;
-use lash_sansio::sync::MutexExt as _;
+use lash_protocol_types::sync::MutexExt as _;
 use serde::{Deserialize, Serialize};
 
 /// Whether a metric counts work or times it. Per-merge gates bind counted

@@ -28,8 +28,8 @@ use lash_core_execution::facade_support::process_child_session_id;
 use lash_core_execution::{
     ProcessId, ProcessListFilter, ProcessRecord, ProcessStatus, ProcessStatusFilter,
 };
-use lash_sansio::SessionId;
-use lash_sansio::sync::MutexExt as _;
+use lash_protocol_types::SessionId;
+use lash_protocol_types::sync::MutexExt as _;
 
 use served::{Tier, WATCHDOG};
 
@@ -128,7 +128,7 @@ struct Script {
     child_probe: Option<Probe>,
     /// The tool results a child's answering step saw.
     child_saw: Mutex<Vec<String>>,
-    child_statuses: Mutex<Vec<lash_sansio::ToolCallStatus>>,
+    child_statuses: Mutex<Vec<lash_protocol_types::ToolCallStatus>>,
 }
 
 impl Script {
@@ -1506,7 +1506,7 @@ async fn declared_start_refusal_settles_the_call(tier: Tier) {
     );
     assert_eq!(
         *world.script.child_statuses.lock_recover(),
-        [lash_sansio::ToolCallStatus::Failure]
+        [lash_protocol_types::ToolCallStatus::Failure]
     );
     let failures = world.failures.lock_recover().clone();
     let refused = failures
@@ -1516,7 +1516,8 @@ async fn declared_start_refusal_settles_the_call(tier: Tier) {
     let [failure] = refused.as_slice() else {
         panic!("the child has one closed-scope failure: {failures:?}");
     };
-    let evidence = serde_json::to_string(&lash_sansio::durable_serde::Durable(*failure)).unwrap();
+    let evidence =
+        serde_json::to_string(&lash_protocol_types::durable_serde::Durable(*failure)).unwrap();
     assert!(
         evidence.contains("process_parent_ended") && evidence.contains(&ended.id().to_string()),
         "the call settles as the closed-scope refusal naming the exact scope that closed ({}): \
@@ -1605,12 +1606,13 @@ async fn assert_refused_before_launch(world: &World, name: &str, call: &str, cod
         })
         .and_then(|part| part.tool_result_status())
         .expect("typed result");
-    assert_eq!(status, lash_sansio::ToolCallStatus::Failure);
+    assert_eq!(status, lash_protocol_types::ToolCallStatus::Failure);
     let failures = world.failures.lock_recover().clone();
     let failure = failures
         .get(&call_id)
         .expect("the presenter's typed failure");
-    let evidence = serde_json::to_string(&lash_sansio::durable_serde::Durable(failure)).unwrap();
+    let evidence =
+        serde_json::to_string(&lash_protocol_types::durable_serde::Durable(failure)).unwrap();
     assert!(
         evidence.contains(code),
         "{name}: the call settles as the start's typed refusal `{code}`: {answered:?}"

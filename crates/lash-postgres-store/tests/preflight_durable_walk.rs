@@ -21,7 +21,7 @@ use lash_core_execution::{
     ModuleArtifactStore, ReferrerClaim, ScanCoverage, StorePreflight,
 };
 use lash_postgres_store::PostgresStorePreflight;
-use lash_sansio::SessionId;
+use lash_protocol_types::SessionId;
 
 #[allow(dead_code)]
 mod support;

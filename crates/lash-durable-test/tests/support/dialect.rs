@@ -8,7 +8,7 @@ use std::sync::{Arc, Mutex};
 use lash_core_execution::StoreSet;
 use lash_durable::DurableStore;
 use lash_durable_test::{OffClockWork, SimClock};
-use lash_sansio::sync::MutexExt as _;
+use lash_protocol_types::sync::MutexExt as _;
 
 /// Where a scenario's database lives.
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]

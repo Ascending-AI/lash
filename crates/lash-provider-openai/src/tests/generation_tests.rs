@@ -1,13 +1,13 @@
 use super::*;
 use crate::CodexProvider;
 use lash_core::NonNegativeFiniteF64;
-use lash_sansio::sync::MutexExt;
+use lash_protocol_types::sync::MutexExt;
 
 #[test]
 fn output_token_cap_maps_to_wire_fields() {
     let mut req = request(vec![LlmMessage::text(LlmRole::User, "hello")]);
     req.model.metadata_mut().limits.output_tokens =
-        lash_sansio::llm_profile::OutputTokenLimits::new(None, Some(9999))
+        lash_protocol_types::llm_profile::OutputTokenLimits::new(None, Some(9999))
             .expect("valid output-token limits");
     req.generation.output_token_cap = NonZeroUsize::new(2048);
 
@@ -17,7 +17,7 @@ fn output_token_cap_maps_to_wire_fields() {
     assert_eq!(responses_body["max_output_tokens"], 2048);
     let mut model_limited_req = request(vec![LlmMessage::text(LlmRole::User, "hello")]);
     model_limited_req.model.metadata_mut().limits.output_tokens =
-        lash_sansio::llm_profile::OutputTokenLimits::new(None, Some(9999))
+        lash_protocol_types::llm_profile::OutputTokenLimits::new(None, Some(9999))
             .expect("valid output-token limits");
     let model_limited_responses_body = OpenAiProvider::new("key")
         .build_responses_request_body(&model_limited_req, true)
@@ -197,7 +197,7 @@ fn codex_refuses_every_sampling_control_and_the_cap() {
     cases.push(("output_token_cap", cap));
     let mut model_cap = request(vec![LlmMessage::text(LlmRole::User, "hello")]);
     model_cap.model.metadata_mut().limits.output_tokens =
-        lash_sansio::llm_profile::OutputTokenLimits::new(None, Some(1_024))
+        lash_protocol_types::llm_profile::OutputTokenLimits::new(None, Some(1_024))
             .expect("valid output-token limits");
     cases.push(("output_token_cap", model_cap));
     for (setting, req) in cases {
@@ -239,11 +239,11 @@ fn tool(name: &str) -> LlmToolSpec {
     LlmToolSpec {
         name: name.to_string(),
         description: name.to_string(),
-        input_schema: lash_sansio::SchemaContract::admit(
+        input_schema: lash_protocol_types::SchemaContract::admit(
             json!({ "type": "object", "properties": {} }),
         )
         .expect("valid declared schema"),
-        output_schema: lash_sansio::SchemaContract::admit(json!({}))
+        output_schema: lash_protocol_types::SchemaContract::admit(json!({}))
             .expect("valid declared schema"),
     }
 }

@@ -41,8 +41,9 @@ impl PluginAbort {
         reason = "the literal `plugin` is a fixed valid host-namespace spelling, so validation cannot fail"
     )]
     pub fn failure_code(&self, plugin_id: &str) -> crate::FailureCode {
-        let namespace = lash_sansio::Namespace::host(plugin_id).unwrap_or_else(|_| {
-            lash_sansio::Namespace::host("plugin").expect("`plugin` is a valid host namespace")
+        let namespace = lash_protocol_types::Namespace::host(plugin_id).unwrap_or_else(|_| {
+            lash_protocol_types::Namespace::host("plugin")
+                .expect("`plugin` is a valid host namespace")
         });
         crate::FailureCode::foreign(namespace, self.code.clone())
             .expect("a validated host namespace is foreign-mintable")

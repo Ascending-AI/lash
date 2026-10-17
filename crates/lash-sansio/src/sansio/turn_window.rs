@@ -10,10 +10,13 @@
 
 use std::sync::Arc;
 
-use crate::AppendVec;
-use crate::llm::types::LlmMessage;
-use crate::session_model::message::message_content_equal;
-use crate::session_model::{BaseRenderCache, Message, MessageSequence, SessionHistoryRecord};
+use lash_protocol_types::AppendVec;
+use lash_protocol_types::llm::types::LlmMessage;
+use lash_protocol_types::session_model::message::message_content_equal;
+use lash_protocol_types::{
+    session_model::BaseRenderCache, session_model::Message, session_model::MessageSequence,
+    session_model::SessionHistoryRecord,
+};
 
 /// The host's name for a committed window, encoded by the host: the machine
 /// only compares it.
@@ -126,18 +129,20 @@ impl<E: Clone> TurnWindow<E> {
     /// render.
     pub(super) fn shared_render(&self, rendered: &[LlmMessage]) -> usize {
         self.rendered.shared_prefix(rendered).unwrap_or_else(|| {
-            self.render(&crate::session_model::message::HistoryPresentation::verbatim())
-                .iter()
-                .zip(rendered)
-                .take_while(|(window, message)| window == message)
-                .count()
+            self.render(
+                &lash_protocol_types::session_model::message::HistoryPresentation::verbatim(),
+            )
+            .iter()
+            .zip(rendered)
+            .take_while(|(window, message)| window == message)
+            .count()
         })
     }
 
     /// The window's messages, rendered as a model prompt.
     pub(super) fn render(
         &self,
-        policy: &crate::session_model::message::HistoryPresentation,
+        policy: &lash_protocol_types::session_model::message::HistoryPresentation,
     ) -> AppendVec<LlmMessage> {
         self.rendered.rendered(self.messages.as_slice(), policy)
     }

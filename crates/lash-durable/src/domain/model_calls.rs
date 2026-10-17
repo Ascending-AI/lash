@@ -1,7 +1,7 @@
 //! Model call records owned by the same execution as their prompt snapshots.
 use super::PromptCallKey;
 use lash_core_store::checkpoint_graph::NodeId;
-use lash_sansio::llm::types::LlmCallId;
+use lash_protocol_types::llm::types::LlmCallId;
 
 /// Publish the one immutable sealed fact in the call's existing settling commit.
 #[derive(Clone, Debug, PartialEq, Eq)]
@@ -16,7 +16,7 @@ pub struct ModelCallWrite {
 pub struct ModelCallOwner {
     pub owner: super::OwnerKey,
     pub run: super::RunSeq,
-    pub call: lash_sansio::ToolCallId,
+    pub call: lash_protocol_types::ToolCallId,
 }
 
 /// Dispatch reservations, distinct from sealed records. An accepted tail
@@ -47,8 +47,9 @@ impl ModelCallPinRow {
     /// All dispatches whose observations died with the owner stay visible.
     pub fn unobserved(&self) -> lash_core_store::model_calls::ModelCallFact {
         use lash_core_store::model_calls::{ModelCallEnd, ModelCallEndReason, ModelCallFact};
-        use lash_sansio::llm::types::{
-            AttemptOutcome, AttemptRecord, LlmCallRecord, ProtocolPosition,
+        use lash_protocol_types::{
+            llm::types::AttemptOutcome, llm::types::AttemptRecord, llm::types::LlmCallRecord,
+            llm::types::ProtocolPosition,
         };
         let call = match self.key.call {
             super::ModelCallId::Turn { ordinal, .. } => ordinal,
@@ -88,7 +89,7 @@ impl ModelCallPinRow {
 
 /// Decode a reservation's keys without interpreting opaque call ids.
 pub fn pin_row(
-    session: &lash_sansio::SessionId,
+    session: &lash_protocol_types::SessionId,
     owner: &str,
     call: String,
     call_id: String,
@@ -104,7 +105,7 @@ pub fn pin_row(
     };
     let address = if let Some(run) = owner.strip_prefix("turn:") {
         super::ModelCallId::Turn {
-            run: lash_sansio::TurnId::try_from(run.to_owned()).map_err(|_| invalid())?,
+            run: lash_protocol_types::TurnId::try_from(run.to_owned()).map_err(|_| invalid())?,
             ordinal: call.parse().map_err(|_| invalid())?,
         }
     } else {
@@ -126,7 +127,7 @@ pub fn pin_row(
             (Some(owner), Some(run), Some(call)) => Some(ModelCallOwner {
                 owner: super::OwnerKey::parse(&owner).map_err(|_| invalid())?,
                 run: super::RunSeq(u64::try_from(run).map_err(|_| invalid())?),
-                call: lash_sansio::ToolCallId::parse(&call).map_err(|_| invalid())?,
+                call: lash_protocol_types::ToolCallId::parse(&call).map_err(|_| invalid())?,
             }),
             _ => return Err(invalid()),
         },

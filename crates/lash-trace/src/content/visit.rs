@@ -214,10 +214,11 @@ impl TraceEvent {
                 for (i, part) in response.parts.iter_mut().flatten().enumerate() {
                     let path = format!("output_messages.parts[{i}]");
                     match part {
-                        lash_sansio::llm::types::LlmOutputPart::Text { text: value, .. } => {
-                            text(C::OutputMessages, path, value, f)
-                        }
-                        lash_sansio::llm::types::LlmOutputPart::Reasoning {
+                        lash_protocol_types::llm::types::LlmOutputPart::Text {
+                            text: value,
+                            ..
+                        } => text(C::OutputMessages, path, value, f),
+                        lash_protocol_types::llm::types::LlmOutputPart::Reasoning {
                             text: value,
                             replay,
                         } => {
@@ -228,7 +229,10 @@ impl TraceEvent {
                                 }
                             }
                         }
-                        lash_sansio::llm::types::LlmOutputPart::ToolCall { input_json, .. } => {
+                        lash_protocol_types::llm::types::LlmOutputPart::ToolCall {
+                            input_json,
+                            ..
+                        } => {
                             let mut value = serde_json::from_str::<Value>(input_json)
                                 .unwrap_or_else(|_| Value::String(input_json.clone()));
                             json(C::OutputMessages, path, &mut value, f);
@@ -292,19 +296,21 @@ impl TraceEvent {
             }
             Self::RuntimeStreamEvent { event } => match &mut event.payload {
                 TraceRuntimeStreamPayload::Block { event, raw_text } => {
-                    let category =
-                        if event.kind() == lash_sansio::llm::types::StreamBlockKind::Reasoning {
-                            C::Reasoning
-                        } else {
-                            C::OutputMessages
-                        };
+                    let category = if event.kind()
+                        == lash_protocol_types::llm::types::StreamBlockKind::Reasoning
+                    {
+                        C::Reasoning
+                    } else {
+                        C::OutputMessages
+                    };
                     json(category, "stream.raw_text", raw_text, f);
                     match event {
-                        lash_sansio::llm::types::StreamBlockEvent::Started { .. } => {}
-                        lash_sansio::llm::types::StreamBlockEvent::Delta {
-                            text: value, ..
+                        lash_protocol_types::llm::types::StreamBlockEvent::Started { .. } => {}
+                        lash_protocol_types::llm::types::StreamBlockEvent::Delta {
+                            text: value,
+                            ..
                         }
-                        | lash_sansio::llm::types::StreamBlockEvent::Completed {
+                        | lash_protocol_types::llm::types::StreamBlockEvent::Completed {
                             text: value,
                             ..
                         } => text(category, "stream.text", value, f),
@@ -429,14 +435,15 @@ impl TraceEvent {
                     }
                     if let Some(admission) = error.schema_admission.as_deref_mut() {
                         match admission {
-                            lash_sansio::SchemaAdmissionError::Compilation { message, .. } => {
-                                text(C::CodeOutput, "code_output.error.schema", message, f)
-                            }
-                            lash_sansio::SchemaAdmissionError::NonLocalReference {
+                            lash_protocol_types::SchemaAdmissionError::Compilation {
+                                message,
+                                ..
+                            } => text(C::CodeOutput, "code_output.error.schema", message, f),
+                            lash_protocol_types::SchemaAdmissionError::NonLocalReference {
                                 reference,
                                 ..
                             } => text(C::CodeOutput, "code_output.error.reference", reference, f),
-                            lash_sansio::SchemaAdmissionError::InvalidKind { .. } => {}
+                            lash_protocol_types::SchemaAdmissionError::InvalidKind { .. } => {}
                         }
                     }
                 }
@@ -634,7 +641,7 @@ impl TraceEvent {
                 for (i, part) in parts.iter().enumerate() {
                     if matches!(
                         part,
-                        lash_sansio::llm::types::LlmOutputPart::Reasoning { .. }
+                        lash_protocol_types::llm::types::LlmOutputPart::Reasoning { .. }
                     ) {
                         marks
                             .omitted
@@ -644,7 +651,7 @@ impl TraceEvent {
                 parts.retain(|part| {
                     !matches!(
                         part,
-                        lash_sansio::llm::types::LlmOutputPart::Reasoning { .. }
+                        lash_protocol_types::llm::types::LlmOutputPart::Reasoning { .. }
                     )
                 });
             }

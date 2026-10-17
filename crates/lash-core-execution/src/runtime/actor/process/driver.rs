@@ -100,7 +100,7 @@ pub(super) struct InFlight {
     /// The request, so a `Repeatable` body can run again at its ordinal.
     pub(super) request: StepRequest,
     /// The policy its admission pinned.
-    pub(super) policy: lash_sansio::ExecutionPolicy,
+    pub(super) policy: lash_protocol_types::ExecutionPolicy,
     /// Its limit's expiry, as admitted: never refreshed.
     pub(super) limit_expires_at: u64,
     /// Its limit's longest slice in milliseconds, as admitted.
@@ -109,8 +109,8 @@ pub(super) struct InFlight {
 
 impl InFlight {
     /// The limit its admission recorded.
-    pub(super) fn limit(&self) -> lash_sansio::ExecutionLimit {
-        lash_sansio::ExecutionLimit {
+    pub(super) fn limit(&self) -> lash_protocol_types::ExecutionLimit {
+        lash_protocol_types::ExecutionLimit {
             expires_at: self.limit_expires_at,
             max_slice: std::time::Duration::from_millis(self.limit_max_slice_ms),
         }
@@ -139,7 +139,7 @@ pub(super) enum Blocked {
         wait: StoredWaitId,
         /// The node that waits, when the engine named one.
         #[serde(default, skip_serializing_if = "Option::is_none")]
-        site: Option<lash_sansio::EffectIdentity>,
+        site: Option<lash_protocol_types::EffectIdentity>,
     },
     /// Another process's terminal.
     Process {
@@ -149,7 +149,7 @@ pub(super) enum Blocked {
         wait: StoredWaitId,
         /// The node that waits, when the engine named one.
         #[serde(default, skip_serializing_if = "Option::is_none")]
-        site: Option<lash_sansio::EffectIdentity>,
+        site: Option<lash_protocol_types::EffectIdentity>,
     },
     /// A durable instant.
     Sleep {
@@ -157,7 +157,7 @@ pub(super) enum Blocked {
         until: i64,
         /// The node that sleeps, when the engine named one.
         #[serde(default, skip_serializing_if = "Option::is_none")]
-        site: Option<lash_sansio::EffectIdentity>,
+        site: Option<lash_protocol_types::EffectIdentity>,
     },
     /// Nothing but its mailbox.
     Idle,

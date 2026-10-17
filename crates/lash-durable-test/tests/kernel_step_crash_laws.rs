@@ -44,7 +44,7 @@ use lash_durable::{ActorKey, ActorState, CommitLabel, DurableStore};
 use lash_durable_test::{
     Cut, Fault, Matrix, Scenario, SimClock, SimNodes, SimNodesConfig, Tripwire,
 };
-use lash_sansio::sync::MutexExt as _;
+use lash_protocol_types::sync::MutexExt as _;
 
 /// `worker()`: two sleeps, then its answer. Three `kernel_run` steps: one
 /// to each sleep and one to the return.

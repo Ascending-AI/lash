@@ -1,5 +1,5 @@
 use super::*;
-use lash_sansio::sync::MutexExt;
+use lash_protocol_types::sync::MutexExt;
 
 pub(super) async fn prove_openai_compatible_tool_stream() -> Result<ProofRun, FixedScriptRunnerError>
 {
@@ -106,12 +106,12 @@ fn codex_request(tools: bool, stream_events: Option<LlmEventSender>) -> LlmReque
         vec![LlmToolSpec {
             name: "lookup".to_string(),
             description: "Lookup".to_string(),
-            input_schema: lash_sansio::SchemaContract::admit(json!({
+            input_schema: lash_protocol_types::SchemaContract::admit(json!({
                 "type": "object",
                 "properties": { "q": { "type": "string" } }
             }))
             .expect("valid declared schema"),
-            output_schema: lash_sansio::SchemaContract::admit(json!({}))
+            output_schema: lash_protocol_types::SchemaContract::admit(json!({}))
                 .expect("valid declared schema"),
         }]
     } else {
@@ -119,13 +119,13 @@ fn codex_request(tools: bool, stream_events: Option<LlmEventSender>) -> LlmReque
     };
     LlmRequest {
         instructions: None,
-        model: lash_sansio::llm_profile::LlmProfileConfig::new(
-            lash_sansio::llm_profile::RecordedLlmProfile::mint(
-                lash_sansio::llm_profile::LlmProfileKey::new("request-fixture"),
-                lash_sansio::llm_profile::LlmProfileMetadata::new(
+        model: lash_protocol_types::llm_profile::LlmProfileConfig::new(
+            lash_protocol_types::llm_profile::RecordedLlmProfile::mint(
+                lash_protocol_types::llm_profile::LlmProfileKey::new("request-fixture"),
+                lash_protocol_types::llm_profile::LlmProfileMetadata::new(
                     "gpt-5.4-codex".to_string(),
                     std::num::NonZeroUsize::MIN.saturating_add(127_999),
-                    lash_sansio::llm::capability::CacheRetention::Short,
+                    lash_protocol_types::llm::capability::CacheRetention::Short,
                 )
                 .with_capability(lash_core::LlmProfileCapability::default())
                 .with_extra_body(Default::default()),
@@ -553,8 +553,8 @@ pub(super) async fn prove_openai_compatible_response_start_timeout()
     require(
         err.kind == ProviderFailureKind::Timeout
             && err.code
-                == Some(lash_sansio::FailureCode::lash(
-                    lash_sansio::TurnFailureCode::Timeout,
+                == Some(lash_protocol_types::FailureCode::lash(
+                    lash_protocol_types::TurnFailureCode::Timeout,
                 ))
             && err.is_retryable()
             && err.http_status.is_none(),
@@ -599,8 +599,8 @@ pub(super) async fn prove_openai_compatible_stream_chunk_timeout()
     require(
         err.kind == ProviderFailureKind::Timeout
             && err.code
-                == Some(lash_sansio::FailureCode::lash(
-                    lash_sansio::TurnFailureCode::Timeout,
+                == Some(lash_protocol_types::FailureCode::lash(
+                    lash_protocol_types::TurnFailureCode::Timeout,
                 ))
             && err.is_retryable()
             && err.http_status.is_none(),
@@ -922,13 +922,13 @@ pub(super) fn openai_compatible_request(stream: bool) -> LlmRequest {
 fn openai_compatible_request_with_events(stream_events: Option<LlmEventSender>) -> LlmRequest {
     LlmRequest {
         instructions: None,
-        model: lash_sansio::llm_profile::LlmProfileConfig::new(
-            lash_sansio::llm_profile::RecordedLlmProfile::mint(
-                lash_sansio::llm_profile::LlmProfileKey::new("request-fixture"),
-                lash_sansio::llm_profile::LlmProfileMetadata::new(
+        model: lash_protocol_types::llm_profile::LlmProfileConfig::new(
+            lash_protocol_types::llm_profile::RecordedLlmProfile::mint(
+                lash_protocol_types::llm_profile::LlmProfileKey::new("request-fixture"),
+                lash_protocol_types::llm_profile::LlmProfileMetadata::new(
                     "openai/gpt-5.4".to_string(),
                     std::num::NonZeroUsize::MIN.saturating_add(127_999),
-                    lash_sansio::llm::capability::CacheRetention::Short,
+                    lash_protocol_types::llm::capability::CacheRetention::Short,
                 )
                 .with_capability(lash_core::LlmProfileCapability::default())
                 .with_extra_body(Default::default()),
@@ -940,14 +940,14 @@ fn openai_compatible_request_with_events(stream_events: Option<LlmEventSender>) 
         tools: Arc::new(vec![LlmToolSpec {
             name: "lookup".to_string(),
             description: "Lookup".to_string(),
-            input_schema: lash_sansio::SchemaContract::admit(json!({
+            input_schema: lash_protocol_types::SchemaContract::admit(json!({
                 "type": "object",
                 "properties": {
                     "q": { "type": "string" }
                 }
             }))
             .expect("valid declared schema"),
-            output_schema: lash_sansio::SchemaContract::admit(json!({}))
+            output_schema: lash_protocol_types::SchemaContract::admit(json!({}))
                 .expect("valid declared schema"),
         }]),
         tool_choice: LlmToolChoice::Auto,
@@ -976,13 +976,13 @@ fn event_collector() -> (Arc<Mutex<Vec<LlmStreamEvent>>>, LlmEventSender) {
 fn openai_responses_request() -> LlmRequest {
     LlmRequest {
         instructions: None,
-        model: lash_sansio::llm_profile::LlmProfileConfig::new(
-            lash_sansio::llm_profile::RecordedLlmProfile::mint(
-                lash_sansio::llm_profile::LlmProfileKey::new("request-fixture"),
-                lash_sansio::llm_profile::LlmProfileMetadata::new(
+        model: lash_protocol_types::llm_profile::LlmProfileConfig::new(
+            lash_protocol_types::llm_profile::RecordedLlmProfile::mint(
+                lash_protocol_types::llm_profile::LlmProfileKey::new("request-fixture"),
+                lash_protocol_types::llm_profile::LlmProfileMetadata::new(
                     "gpt-5.4".to_string(),
                     std::num::NonZeroUsize::MIN.saturating_add(127_999),
-                    lash_sansio::llm::capability::CacheRetention::Short,
+                    lash_protocol_types::llm::capability::CacheRetention::Short,
                 )
                 .with_capability(lash_core::LlmProfileCapability::default())
                 .with_extra_body(Default::default()),
@@ -1009,19 +1009,19 @@ fn openai_responses_request() -> LlmRequest {
 fn anthropic_messages_request() -> LlmRequest {
     LlmRequest {
         instructions: None,
-        model: lash_sansio::llm_profile::LlmProfileConfig::new(
-            lash_sansio::llm_profile::RecordedLlmProfile::mint(
-                lash_sansio::llm_profile::LlmProfileKey::new("request-fixture"),
-                lash_sansio::llm_profile::LlmProfileMetadata::with_limits(
+        model: lash_protocol_types::llm_profile::LlmProfileConfig::new(
+            lash_protocol_types::llm_profile::RecordedLlmProfile::mint(
+                lash_protocol_types::llm_profile::LlmProfileKey::new("request-fixture"),
+                lash_protocol_types::llm_profile::LlmProfileMetadata::with_limits(
                     "claude-sonnet-4-20250514".to_string(),
-                    lash_sansio::llm_profile::LlmProfileLimits {
+                    lash_protocol_types::llm_profile::LlmProfileLimits {
                         context_window_tokens: std::num::NonZeroUsize::MIN.saturating_add(127_999),
                         output_tokens:
-                            lash_sansio::llm_profile::OutputTokenLimits::from_default_cap(
+                            lash_protocol_types::llm_profile::OutputTokenLimits::from_default_cap(
                                 std::num::NonZeroUsize::MIN.saturating_add(4095),
                             ),
                     },
-                    lash_sansio::llm::capability::CacheRetention::Short,
+                    lash_protocol_types::llm::capability::CacheRetention::Short,
                 )
                 .with_capability(lash_core::LlmProfileCapability::default())
                 .with_extra_body(Default::default()),
@@ -1048,13 +1048,13 @@ fn anthropic_messages_request() -> LlmRequest {
 fn google_request(stream: bool) -> LlmRequest {
     LlmRequest {
         instructions: None,
-        model: lash_sansio::llm_profile::LlmProfileConfig::new(
-            lash_sansio::llm_profile::RecordedLlmProfile::mint(
-                lash_sansio::llm_profile::LlmProfileKey::new("request-fixture"),
-                lash_sansio::llm_profile::LlmProfileMetadata::new(
+        model: lash_protocol_types::llm_profile::LlmProfileConfig::new(
+            lash_protocol_types::llm_profile::RecordedLlmProfile::mint(
+                lash_protocol_types::llm_profile::LlmProfileKey::new("request-fixture"),
+                lash_protocol_types::llm_profile::LlmProfileMetadata::new(
                     "gemini-3.1-pro-preview".to_string(),
                     std::num::NonZeroUsize::MIN.saturating_add(127_999),
-                    lash_sansio::llm::capability::CacheRetention::Short,
+                    lash_protocol_types::llm::capability::CacheRetention::Short,
                 )
                 .with_capability(lash_core::LlmProfileCapability::default())
                 .with_extra_body(Default::default()),

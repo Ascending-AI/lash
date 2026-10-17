@@ -621,7 +621,7 @@ mod named_component_laws {
         ProcessEnvRefusal,
     };
     use lash::tools::ToolDefinitionBindingExt as _;
-    use lash_sansio::sync::MutexExt as _;
+    use lash_protocol_types::sync::MutexExt as _;
 
     const MODEL: &str = "named-components";
     /// Cross-cutting: no tools, one result check.

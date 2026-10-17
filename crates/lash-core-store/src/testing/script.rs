@@ -16,7 +16,7 @@
 //! the same check without panicking, for a harness that adds its own context.
 use super::gate::{GATE_DEADLINE, Gate};
 use crate::store::{MaintenanceFailure, StoreError};
-use lash_sansio::sync::MutexExt as _;
+use lash_protocol_types::sync::MutexExt as _;
 use std::future::Future;
 use std::sync::{Arc, Mutex, Weak};
 

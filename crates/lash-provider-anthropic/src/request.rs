@@ -8,7 +8,7 @@ const LASH_ANTHROPIC_TOOL_CALL_WIRE_DOMAIN_VERSION: &str = "lash-anthropic-tool-
 
 use crate::support::*;
 use lash_core::llm::types::LlmMessage;
-use lash_sansio::core_support::Blake3DomainHasher;
+use lash_protocol_types::core_support::Blake3DomainHasher;
 use std::collections::{BTreeSet, HashMap, HashSet};
 
 /// The wire messages of a request, decided before any is built: each

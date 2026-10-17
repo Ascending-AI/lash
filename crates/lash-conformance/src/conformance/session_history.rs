@@ -1082,7 +1082,7 @@ async fn assert_one_read_model(store: &dyn ConformanceDeployment, session: &Sess
         serde_json::to_value(admitted.messages.as_slice()).expect("admitted messages encode"),
         "{case}: one head's messages"
     );
-    let verbatim = lash_sansio::session_model::message::HistoryPresentation::verbatim();
+    let verbatim = lash_protocol_types::session_model::message::HistoryPresentation::verbatim();
     assert_eq!(
         current
             .prompt_render_cache

@@ -35,7 +35,7 @@ pub use policy::{
     TracePolicyField, TracePolicySelection, TracePolicySnapshot, TraceValue, WriterRemaining,
 };
 
-use lash_sansio::{
+use lash_protocol_types::{
     BatchId, CausalRef, InputId, ProcessId, SessionId, ToolCallId, ToolIntentIdentity, TurnId,
 };
 use std::io;
@@ -91,11 +91,11 @@ pub use language_execution::{
     TraceNodeWaitResolution, WorkflowDocumentEntry, WorkflowDocumentRef,
 };
 pub use language_execution_failure::TraceLanguageExecutionFailure;
-pub use lash_sansio::llm::types::GenerationReceipt;
-use lash_sansio::llm::types::{LlmOutputPart, LlmProviderTraceDirection};
-pub use lash_sansio::{
+pub use lash_protocol_types::llm::types::GenerationReceipt;
+pub use lash_protocol_types::{
     CellFailure, CellFailureKind, ExecCodeFailureReason, TextProjectionMetadata,
 };
+use lash_protocol_types::{llm::types::LlmOutputPart, llm::types::LlmProviderTraceDirection};
 pub use position::{SpanRole, TracePosition, TraceSpanKind, TraceSpanKindSet};
 #[cfg(any(test, feature = "testing"))]
 pub use recording::RecordingTraceSink;
@@ -554,11 +554,14 @@ pub enum TraceProgramStepOutcome {
     },
 }
 
-pub use lash_sansio::FailureCode as TraceFailureCode;
-pub use lash_sansio::llm::types::{
-    LlmTerminalReason as TraceLlmTerminalReason, NormalizedError as TraceNormalizedError,
-    ProviderFailureKind as TraceProviderFailureKind, RetryClass as TraceRetryClass,
-    RetryDeclineCause as TraceRetryDeclineCause, RetryWait as TraceRetryWait,
+pub use lash_protocol_types::FailureCode as TraceFailureCode;
+pub use lash_protocol_types::{
+    llm::types::LlmTerminalReason as TraceLlmTerminalReason,
+    llm::types::NormalizedError as TraceNormalizedError,
+    llm::types::ProviderFailureKind as TraceProviderFailureKind,
+    llm::types::RetryClass as TraceRetryClass,
+    llm::types::RetryDeclineCause as TraceRetryDeclineCause,
+    llm::types::RetryWait as TraceRetryWait,
 };
 
 /// One tool attempt projected from its retry owner's sealed record. A model
@@ -583,17 +586,17 @@ pub enum TraceRetryAttemptDetail {
 pub enum TraceToolAttemptOutcome {
     Completed,
     Failed {
-        class: lash_sansio::ToolFailureClass,
+        class: lash_protocol_types::ToolFailureClass,
         code: String,
         message: String,
-        source: lash_sansio::ToolFailureSource,
+        source: lash_protocol_types::ToolFailureSource,
         suggested_delay_ms: Option<u64>,
     },
     Cancelled {
         message: String,
-        source: lash_sansio::ToolFailureSource,
+        source: lash_protocol_types::ToolFailureSource,
         #[serde(default, skip_serializing_if = "Option::is_none")]
-        origin: Option<lash_sansio::CancelOrigin>,
+        origin: Option<lash_protocol_types::CancelOrigin>,
     },
 }
 
@@ -666,7 +669,7 @@ pub enum TraceToolCallStatus {
 
 #[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize, schemars::JsonSchema)]
 pub struct TraceExecToolCall {
-    pub call_id: lash_sansio::ToolCallId,
+    pub call_id: lash_protocol_types::ToolCallId,
     pub name: String,
     pub status: TraceToolCallStatus,
 }
@@ -903,8 +906,12 @@ fn wire_tag<T: Serialize>(value: &T) -> String {
 /// a cancelled trace outcome can never be stated without saying which request
 /// produced it.
 ///
-/// [`TurnStop::Cancelled`]: lash_sansio::session_model::TurnStop::Cancelled
+/// [`TurnStop::Cancelled`]: lash_protocol_types::session_model::TurnStop::Cancelled
 #[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize, schemars::JsonSchema)]
+// Keep the baseline schema documentation while Rustdoc links follow the current owner.
+#[schemars(
+    description = "Durable evidence that the traced turn was cancelled. Mirrors the runtime's\n`TurnCancellationEvidence`, which only [`TurnStop::Cancelled`] can carry, so\na cancelled trace outcome can never be stated without saying which request\nproduced it.\n\n[`TurnStop::Cancelled`]: lash_sansio::session_model::TurnStop::Cancelled"
+)]
 pub struct TraceTurnCancellationEvidence {
     pub request_id: String,
     /// Opaque host-domain data. Lash records and returns it unchanged.
@@ -1059,7 +1066,7 @@ impl TraceRuntimeScope {
 #[serde(tag = "type", rename_all = "snake_case")]
 pub enum TraceRuntimeSubject {
     Effect {
-        address: lash_sansio::EffectAddress,
+        address: lash_protocol_types::EffectAddress,
         effect_id: String,
     },
     Process {
@@ -1168,7 +1175,7 @@ pub struct TraceLanguageExecution {
 #[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize, schemars::JsonSchema)]
 pub struct TraceLanguageChildExecution {
     pub scope: TraceRuntimeScope,
-    pub process_id: lash_sansio::ProcessId,
+    pub process_id: lash_protocol_types::ProcessId,
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub attempt: Option<u32>,
     #[serde(default, skip_serializing_if = "Option::is_none")]

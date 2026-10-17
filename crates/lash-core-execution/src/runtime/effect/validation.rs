@@ -324,7 +324,7 @@ fn trace_value(value: Option<&Value>, max_value_bytes: usize) -> TraceEffectEnve
 mod tests {
     use std::sync::Mutex;
 
-    use lash_sansio::sync::MutexExt;
+    use lash_protocol_types::sync::MutexExt;
     use lash_trace::{TraceRecord, TraceSink, TraceSinkError};
     use serde_json::json;
 

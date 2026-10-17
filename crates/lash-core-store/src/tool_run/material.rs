@@ -300,7 +300,7 @@ impl MaterialPayload {
         &self,
         location: MaterialLocation,
     ) -> Result<MaterialRef, crate::runtime_error::RuntimeEffectControllerError> {
-        let mut writer = MaterialHash(lash_sansio::core_support::Blake3DomainHasher::new(
+        let mut writer = MaterialHash(lash_protocol_types::core_support::Blake3DomainHasher::new(
             MATERIAL_DOMAIN,
         ));
         serde_json::to_writer(&mut writer, self).map_err(|error| {
@@ -369,7 +369,7 @@ impl From<MaterialRefusal> for crate::runtime_error::RuntimeEffectControllerErro
 }
 
 /// Consume the exact serde JSON stream without retaining a second payload.
-struct MaterialHash(lash_sansio::core_support::Blake3DomainHasher);
+struct MaterialHash(lash_protocol_types::core_support::Blake3DomainHasher);
 
 impl std::io::Write for MaterialHash {
     fn write(&mut self, bytes: &[u8]) -> std::io::Result<usize> {

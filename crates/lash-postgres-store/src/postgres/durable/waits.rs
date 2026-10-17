@@ -122,7 +122,7 @@ pub(super) static RESOLVE_CHILD_SESSION: Entry = Entry::new(
 /// target's resolution. A pin or a due timer has none.
 pub(super) fn steps(write: &WaitWrite) -> Option<Vec<Step>> {
     let resolved = |entry: &'static Entry,
-                    process: &lash_sansio::ProcessId,
+                    process: &lash_protocol_types::ProcessId,
                     digest: &str,
                     resolution_ref: &str| {
         vec![Step::any(
@@ -310,16 +310,17 @@ fn decode_stored(row: &PgRow) -> Result<StoredWait, DurableError> {
         WaitPurposeColumns {
             target: target
                 .map(|process| {
-                    lash_sansio::ProcessId::parse(&process)
+                    lash_protocol_types::ProcessId::parse(&process)
                         .map_err(|_| corrupt("wait target process", &process))
                 })
                 .transpose()?,
             call: call
                 .map(|call| {
-                    lash_sansio::ToolCallId::parse(&call).map_err(|_| corrupt("wait call", &call))
+                    lash_protocol_types::ToolCallId::parse(&call)
+                        .map_err(|_| corrupt("wait call", &call))
                 })
                 .transpose()?,
-            tool: get::<Option<String>>(row, 12)?.map(lash_sansio::ToolId::new),
+            tool: get::<Option<String>>(row, 12)?.map(lash_protocol_types::ToolId::new),
             key_name: get(row, 13)?,
             deadline: get::<Option<i64>>(row, 6)?.map(DurableInstant),
         },

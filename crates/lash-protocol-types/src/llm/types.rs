@@ -1,4 +1,6 @@
+mod call_error;
 use crate::{RunId, SessionId, TurnId};
+pub use call_error::LlmCallError;
 use schemars::JsonSchema;
 use std::num::NonZeroUsize;
 use std::sync::Arc;
@@ -11,6 +13,8 @@ pub use response::{
     ChargeSafetyDenialReason, DiscardReason, DiscardedAfterCell, ExecutionEvidence,
     ExecutionEvidenceCollectionInterruption, ExecutionEvidenceMergeError, LlmCallId, LlmCallRecord,
     LlmProfileSelection, LlmResponse, NormalizedError, ProtocolPosition,
+    append_assistant_text_part, normalized_response_parts, reasoning_part, visible_response_parts,
+    visible_response_text_from_parts,
 };
 mod retry;
 mod stream_block;

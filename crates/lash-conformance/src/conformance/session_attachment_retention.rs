@@ -12,7 +12,7 @@
 use super::session_delete_blob_reclaim::SessionDeleteBlobHandles;
 use super::session_store_factory::session_store_request;
 use super::*;
-use lash_sansio::SessionId;
+use lash_protocol_types::SessionId;
 
 const MODEL: &str = "session-attachment-hold-model";
 
@@ -37,7 +37,7 @@ fn message(id: &str, references: &[&crate::AttachmentRef]) -> crate::Message {
                     crate::Part::attachment_part(
                         format!("{id}-part-{index}"),
                         String::new(),
-                        Some(lash_sansio::PartAttachment {
+                        Some(lash_protocol_types::PartAttachment {
                             reference: (*reference).clone(),
                         }),
                     )

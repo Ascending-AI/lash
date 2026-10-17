@@ -13,7 +13,7 @@ use std::sync::{Arc, Mutex};
 use lash_core::sync::MutexExt as _;
 use lash_core_store::store::RunTerminalKind;
 use lash_durable_test::{Cut, SimNodes};
-use lash_sansio::SessionId;
+use lash_protocol_types::SessionId;
 
 use super::{admit_turn, run_of, turn_end, turn_settled};
 use crate::crash_matrix::deployment::Workload;
@@ -24,7 +24,7 @@ use crate::crash_matrix::world::World;
 pub struct CancelCase {
     tag: String,
     session: Mutex<Option<SessionId>>,
-    process: Mutex<Option<lash_sansio::ProcessId>>,
+    process: Mutex<Option<lash_protocol_types::ProcessId>>,
 }
 
 impl CancelCase {
@@ -156,7 +156,7 @@ impl Workload for CancelCase {
 async fn interrupted_hang(
     nodes: &SimNodes,
     session: &SessionId,
-    run: &lash_sansio::TurnId,
+    run: &lash_protocol_types::TurnId,
 ) -> bool {
     use lash_core_execution::runtime::actor::round::{PinnedWaits, PolicyView, Recovery, fold};
     use lash_core_store::tool_run::SettledOutput;

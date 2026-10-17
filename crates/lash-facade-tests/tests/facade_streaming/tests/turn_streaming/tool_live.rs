@@ -186,7 +186,7 @@ async fn tool_live_flood_never_trims_uncommitted_text_or_process_node_history() 
         correlation_id: lash_core::TurnActivityId::new("stopped-tail"),
         event: TurnEvent::StreamBlock(StreamBlockEvent::Delta {
             kind: StreamBlockKind::AssistantText,
-            block: lash_sansio::llm::types::StreamBlockIdentity::new("tail", 0),
+            block: lash_protocol_types::llm::types::StreamBlockIdentity::new("tail", 0),
             text: "uncommitted tail".into(),
         }),
     };

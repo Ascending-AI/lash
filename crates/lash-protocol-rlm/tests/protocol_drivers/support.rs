@@ -1,7 +1,7 @@
 use lash_core::plugin::PluginSessionRequest;
-use lash_sansio::ReportedFailure;
-use lash_sansio::SessionId;
-use lash_sansio::TurnId;
+use lash_protocol_types::ReportedFailure;
+use lash_protocol_types::SessionId;
+use lash_protocol_types::TurnId;
 pub(crate) use std::sync::Arc;
 
 pub(crate) use lash_core::facade_support::PluginHost;
@@ -18,13 +18,14 @@ pub(crate) use lash_protocol_rlm::{RlmDriver, RlmProtocolPluginConfig, RlmProtoc
 /// one sans-io machine for one session.
 pub(crate) const RLM_TRANSCRIPT_ACTOR: &str = "rlm";
 use lash_core::CellRecord;
-pub(crate) use lash_rlm_types::{RlmCreateExtras, RlmProtocolEvent};
-pub(crate) use lash_sansio::llm::types::{
-    LlmContentBlock, LlmOutputPart, LlmRequest, LlmResponse, LlmRole,
-};
-pub(crate) use lash_sansio::{
+pub(crate) use lash_protocol_types::{
     CheckpointKind, Message, MessageRole, Part, PartKind, SessionStreamEvent,
 };
+pub(crate) use lash_protocol_types::{
+    llm::types::LlmContentBlock, llm::types::LlmOutputPart, llm::types::LlmRequest,
+    llm::types::LlmResponse, llm::types::LlmRole,
+};
+pub(crate) use lash_rlm_types::{RlmCreateExtras, RlmProtocolEvent};
 
 pub(crate) fn recorded_rlm_event(event: &lash_core::ProtocolEvent) -> Option<RlmProtocolEvent> {
     lash_protocol_rlm::decode_rlm_protocol_event(event)
@@ -81,13 +82,13 @@ pub(crate) fn test_config_with_protocol_turn_options(
         model_tool_calls: lash_core::sansio::ModelToolCalls::fixture(),
         protocol_driver,
         projector: Arc::new(ChatContextProjector::default()),
-        model: lash_sansio::llm_profile::LlmProfileConfig::new(
-            lash_sansio::llm_profile::RecordedLlmProfile::mint(
-                lash_sansio::llm_profile::LlmProfileKey::new("request-fixture"),
-                lash_sansio::llm_profile::LlmProfileMetadata::new(
+        model: lash_protocol_types::llm_profile::LlmProfileConfig::new(
+            lash_protocol_types::llm_profile::RecordedLlmProfile::mint(
+                lash_protocol_types::llm_profile::LlmProfileKey::new("request-fixture"),
+                lash_protocol_types::llm_profile::LlmProfileMetadata::new(
                     "test-model".to_string(),
                     std::num::NonZeroUsize::MIN.saturating_add(127_999),
-                    lash_sansio::llm::capability::CacheRetention::Short,
+                    lash_protocol_types::llm::capability::CacheRetention::Short,
                 )
                 .with_capability(lash_core::LlmProfileCapability::default())
                 .with_extra_body(Default::default()),
@@ -157,7 +158,9 @@ pub(crate) fn find_checkpoint(effects: &[Effect]) -> Option<(sansio::EffectId, C
     })
 }
 
-pub(crate) fn find_done(effects: &[Effect]) -> Option<(&lash_sansio::MessageSequence, usize)> {
+pub(crate) fn find_done(
+    effects: &[Effect],
+) -> Option<(&lash_protocol_types::MessageSequence, usize)> {
     effects.iter().find_map(|e| match e {
         Effect::Done {
             messages,
@@ -370,12 +373,12 @@ pub(crate) fn exec_response(
     output: &[&str],
     error: Option<&str>,
     final_output: Option<serde_json::Value>,
-) -> lash_sansio::ExecResponse {
-    lash_sansio::ExecResponse {
+) -> lash_protocol_types::ExecResponse {
+    lash_protocol_types::ExecResponse {
         prints_retained: None,
         prints: output
             .iter()
-            .map(|item| lash_sansio::CellPrint {
+            .map(|item| lash_protocol_types::CellPrint {
                 text: (*item).to_string(),
                 value: serde_json::json!(*item),
                 projection: Default::default(),
@@ -387,22 +390,24 @@ pub(crate) fn exec_response(
         tool_calls: final_output
             .iter()
             .filter(|_| error.is_none())
-            .map(|value| lash_sansio::ToolCallRecord {
+            .map(|value| lash_protocol_types::ToolCallRecord {
                 call_id: finish_call_id(),
                 provider_call_id: None,
                 tool: lash_protocol_rlm::FINISH_TOOL_NAME.to_string(),
                 args: value.clone(),
-                output: lash_sansio::ToolCallOutput::finish(value.clone()),
+                output: lash_protocol_types::ToolCallOutput::finish(value.clone()),
             })
             .collect(),
         printed_images: Vec::new(),
         result: match (error, final_output) {
-            (Some(message), _) => lash_sansio::CellOutcome::Failed(lash_sansio::CellFailure::new(
-                lash_sansio::CellFailureKind::Program,
-                message,
-            )),
+            (Some(message), _) => {
+                lash_protocol_types::CellOutcome::Failed(lash_protocol_types::CellFailure::new(
+                    lash_protocol_types::CellFailureKind::Program,
+                    message,
+                ))
+            }
             (None, Some(value)) => finished(value),
-            (None, None) => lash_sansio::CellOutcome::Completed,
+            (None, None) => lash_protocol_types::CellOutcome::Completed,
         },
         retained_finish_value: None,
         degraded_bindings: Vec::new(),
@@ -425,13 +430,13 @@ pub(crate) fn rlm_environment() -> sansio::ExecutionEnvironmentSync {
 }
 
 /// The call id of the scripted cells' `control.finish` call.
-pub(crate) fn finish_call_id() -> lash_sansio::ToolCallId {
-    lash_sansio::ToolCallId::fixture("finish-call")
+pub(crate) fn finish_call_id() -> lash_protocol_types::ToolCallId {
+    lash_protocol_types::ToolCallId::fixture("finish-call")
 }
 
 /// The outcome of a cell `control.finish(value)` ended.
-pub(crate) fn finished(value: serde_json::Value) -> lash_sansio::CellOutcome {
-    lash_sansio::CellOutcome::finished_by(
+pub(crate) fn finished(value: serde_json::Value) -> lash_protocol_types::CellOutcome {
+    lash_protocol_types::CellOutcome::finished_by(
         lash_protocol_rlm::FINISH_TOOL_NAME,
         finish_call_id(),
         value,
@@ -455,8 +460,8 @@ pub(crate) fn effects_include_runtime_error(effects: &[Effect], message_fragment
         matches!(
             effect,
             Effect::Emit(SessionStreamEvent::TurnOutcome {
-                outcome: lash_sansio::TurnOutcome::Stopped(
-                    lash_sansio::TurnStop::RuntimeError { .. }
+                outcome: lash_protocol_types::TurnOutcome::Stopped(
+                    lash_protocol_types::TurnStop::RuntimeError { .. }
                 )
             })
         )
@@ -561,7 +566,7 @@ impl RlmProtocolScenario {
         self
     }
 
-    pub(crate) fn exec_result(mut self, result: lash_sansio::ExecResponse) -> Self {
+    pub(crate) fn exec_result(mut self, result: lash_protocol_types::ExecResponse) -> Self {
         self.steps
             .push(RlmProtocolStep::ExecResult(Box::new(result)));
         self
@@ -709,7 +714,7 @@ pub(crate) enum RlmProtocolStep {
         chunks: Vec<String>,
         parts: Vec<LlmOutputPart>,
     },
-    ExecResult(Box<lash_sansio::ExecResponse>),
+    ExecResult(Box<lash_protocol_types::ExecResponse>),
     Checkpoint,
 }
 
@@ -735,7 +740,7 @@ pub(crate) struct RlmProtocolExpectations {
     pub(crate) plugin_spliced_response_texts: Option<Vec<&'static str>>,
     pub(crate) plugin_stream_abort_requests: Option<Vec<bool>>,
     pub(crate) llm_extraction_payload: Option<serde_json::Value>,
-    pub(crate) turn_outcome: Option<lash_sansio::TurnOutcome>,
+    pub(crate) turn_outcome: Option<lash_protocol_types::TurnOutcome>,
     pub(crate) agent_frame_switch: Option<(&'static str, &'static str)>,
     pub(crate) tool_error_message: Option<(&'static str, &'static str)>,
     pub(crate) trajectory_last: Option<RlmTrajectoryExpectation>,
@@ -923,7 +928,7 @@ impl RlmProtocolExpectations {
             assert!(
                 run.turn_outcomes.iter().any(|outcome| matches!(
                     outcome,
-                    lash_sansio::TurnOutcome::AgentFrameSwitch {
+                    lash_protocol_types::TurnOutcome::AgentFrameSwitch {
                         frame_key: actual_frame_key,
                         task: actual_task,
                         ..
@@ -937,7 +942,7 @@ impl RlmProtocolExpectations {
             assert!(
                 run.turn_outcomes.iter().any(|outcome| matches!(
                     outcome,
-                    lash_sansio::TurnOutcome::Stopped(lash_sansio::TurnStop::ToolError {
+                    lash_protocol_types::TurnOutcome::Stopped(lash_protocol_types::TurnStop::ToolError {
                         tool_name: actual_tool_name,
                         value,
                     }) if actual_tool_name == tool_name
@@ -1000,7 +1005,7 @@ pub(crate) struct RlmProtocolRun {
     pub(crate) exec_codes: Vec<String>,
     pub(crate) checkpoints: Vec<CheckpointKind>,
     pub(crate) llm_call_count: usize,
-    pub(crate) turn_outcomes: Vec<lash_sansio::TurnOutcome>,
+    pub(crate) turn_outcomes: Vec<lash_protocol_types::TurnOutcome>,
     pub(crate) tool_call_event: bool,
     pub(crate) assistant_conversation_progress: bool,
     pub(crate) plugin_stream_visible_texts: Vec<String>,
@@ -1030,7 +1035,7 @@ impl RlmProtocolRun {
                     self.assistant_conversation_progress |= event_delta.iter().any(|event| {
                         matches!(
                             event,
-                            lash_sansio::SessionHistoryRecord::Conversation(record)
+                            lash_protocol_types::SessionHistoryRecord::Conversation(record)
                                 if record.to_message().role == MessageRole::Assistant
                         )
                     });

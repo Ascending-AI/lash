@@ -108,7 +108,7 @@ impl DataRetentionConfig {
 
 #[derive(Clone)]
 pub struct RuntimeProviderConfig {
-    pub delivery_fetch_horizon: lash_sansio::llm::attachment_delivery::DeliveryFetchHorizon,
+    pub delivery_fetch_horizon: lash_protocol_types::llm::attachment_delivery::DeliveryFetchHorizon,
     /// The host's models: the registry that mints a session's model binding
     /// and binds a recorded one to its transport.
     pub models: Arc<dyn crate::LlmProfiles>,
@@ -248,7 +248,7 @@ impl DeltaCoalescing {
 #[derive(Clone)]
 pub struct RuntimeControlConfig {
     /// Readable transcript copies; defaults to the named standard preset.
-    pub output_cuts: lash_sansio::session_model::RuntimeOutputCuts,
+    pub output_cuts: lash_protocol_types::session_model::RuntimeOutputCuts,
     /// Optional host pool; absence uses the shared standard pool. Every model
     /// call, including direct compaction, uses the selected pool.
     pub prompt_render_pool: Option<Arc<crate::plugin::prompt::PromptRenderPool>>,
@@ -358,7 +358,7 @@ impl RuntimeHostConfig {
                 run_definitions: crate::RunDefinitions::default(),
             },
             control: RuntimeControlConfig {
-                output_cuts: lash_sansio::session_model::RuntimeOutputCuts::standard(),
+                output_cuts: lash_protocol_types::session_model::RuntimeOutputCuts::standard(),
                 prompt_render_pool: None,
                 execution_budgets,
                 delta_coalescing,

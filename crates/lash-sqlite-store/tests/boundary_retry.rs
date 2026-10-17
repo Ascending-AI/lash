@@ -25,7 +25,7 @@ async fn a_commit_receipt_keeps_its_queue_decision_after_later_ingress_and_reope
         .await
         .expect("empty commit");
     assert!(!original.work_remaining, "the committing snapshot is empty");
-    let session = lash_sansio::SessionId::from("root");
+    let session = lash_protocol_types::SessionId::from("root");
     store
         .admit_pending_turn_inputs(
             lash_core::PendingTurnInputBatch::new(
@@ -67,7 +67,7 @@ async fn admit_run(store: &SqliteStore) {
     store
         .admit_session(
             &lash_core_execution::testing::store_fixtures::root_session_request(
-                &lash_sansio::SessionId::from("root"),
+                &lash_protocol_types::SessionId::from("root"),
             ),
         )
         .await
@@ -77,7 +77,7 @@ async fn admit_run(store: &SqliteStore) {
 async fn loaded_state(store: &SqliteStore) -> RuntimeSessionState {
     let read = store
         .load_session_window(
-            &lash_sansio::SessionId::from("root"),
+            &lash_protocol_types::SessionId::from("root"),
             WindowSelector::Current,
         )
         .await
@@ -187,7 +187,7 @@ async fn semantic_boundary_retry_after_head_advance(boundary: &str, key: &str) {
     );
     assert_eq!(
         store
-            .load_session_head_meta(&lash_sansio::SessionId::from("root"))
+            .load_session_head_meta(&lash_protocol_types::SessionId::from("root"))
             .await
             .expect("read head")
             .expect("session")
@@ -232,7 +232,7 @@ async fn initial_park_exact_commit_retry_after_head_advance() {
     let first = park_commit(&state);
     assert_eq!(
         store
-            .load_session_head_meta(&lash_sansio::SessionId::from("root"))
+            .load_session_head_meta(&lash_protocol_types::SessionId::from("root"))
             .await
             .expect("preview has no store effects")
             .expect("admission wrote the created head")
@@ -333,7 +333,7 @@ async fn append_identity_replays_after_head_advance() {
     assert_eq!(replay.head_revision, original.head_revision);
     assert_eq!(
         store
-            .load_session_head_meta(&lash_sansio::SessionId::from("root"))
+            .load_session_head_meta(&lash_protocol_types::SessionId::from("root"))
             .await
             .expect("head")
             .expect("session")
@@ -369,7 +369,7 @@ async fn non_append_operations_refuse_append_identity_metadata() {
     }
     assert!(
         store
-            .load_session_head_meta(&lash_sansio::SessionId::from("root"))
+            .load_session_head_meta(&lash_protocol_types::SessionId::from("root"))
             .await
             .expect("unchanged store")
             .is_none()

@@ -21,7 +21,7 @@ use lash_durable::{ActorKey, CommitCapacity, DurableError, DurableReads};
 impl DurableReads for PostgresDurableStore {
     async fn model_call_pins(
         &self,
-        session: &lash_sansio::SessionId,
+        session: &lash_protocol_types::SessionId,
         owner: &str,
     ) -> Result<Vec<lash_durable::domain::ModelCallPinRow>, DurableError> {
         self.read_model_call_pins(session, owner).await
@@ -29,7 +29,7 @@ impl DurableReads for PostgresDurableStore {
 
     async fn model_calls(
         &self,
-        session: &lash_sansio::SessionId,
+        session: &lash_protocol_types::SessionId,
         owner: &str,
     ) -> Result<Vec<lash_core_store::model_calls::ModelCallRecord>, DurableError> {
         self.read_model_calls(session, owner).await
@@ -37,7 +37,7 @@ impl DurableReads for PostgresDurableStore {
 
     async fn turn(
         &self,
-        session: &lash_sansio::SessionId,
+        session: &lash_protocol_types::SessionId,
     ) -> Result<Option<TurnRow>, DurableError> {
         self.read(|connection| Box::pin(turns::turn(connection, session)))
             .await
@@ -45,8 +45,8 @@ impl DurableReads for PostgresDurableStore {
 
     async fn turn_end(
         &self,
-        session: &lash_sansio::SessionId,
-        run: &lash_sansio::TurnId,
+        session: &lash_protocol_types::SessionId,
+        run: &lash_protocol_types::TurnId,
     ) -> Result<Option<lash_durable::domain::TurnEnd>, DurableError> {
         self.read(|connection| Box::pin(turns::turn_end(connection, session, run)))
             .await
@@ -54,8 +54,8 @@ impl DurableReads for PostgresDurableStore {
 
     async fn turn_namespaces(
         &self,
-        session: &lash_sansio::SessionId,
-        run: &lash_sansio::TurnId,
+        session: &lash_protocol_types::SessionId,
+        run: &lash_protocol_types::TurnId,
     ) -> Result<Vec<lash_durable::domain::TurnNamespace>, DurableError> {
         // The rows and the graphs they root are several statements: one
         // snapshot, so a peel beside the read never leaves it half a graph.
@@ -115,8 +115,8 @@ impl DurableReads for PostgresDurableStore {
 
     async fn cell_roots(
         &self,
-        session: &lash_sansio::SessionId,
-        run: &lash_sansio::TurnId,
+        session: &lash_protocol_types::SessionId,
+        run: &lash_protocol_types::TurnId,
     ) -> Result<Vec<ExecRootRow>, DurableError> {
         let prefix = ExecKey::turn_cells(session, run);
         self.read(|connection| Box::pin(snapshots::under(connection, &prefix)))
@@ -125,8 +125,8 @@ impl DurableReads for PostgresDurableStore {
 
     async fn cell_roots_within(
         &self,
-        session: &lash_sansio::SessionId,
-        run: &lash_sansio::TurnId,
+        session: &lash_protocol_types::SessionId,
+        run: &lash_protocol_types::TurnId,
         max_rows: usize,
     ) -> Result<Vec<ExecRootRow>, DurableError> {
         let prefix = ExecKey::turn_cells(session, run);
@@ -152,7 +152,7 @@ impl DurableReads for PostgresDurableStore {
 
     async fn process(
         &self,
-        process: &lash_sansio::ProcessId,
+        process: &lash_protocol_types::ProcessId,
     ) -> Result<Option<ProcessActorRow>, DurableError> {
         self.read(|connection| Box::pin(processes::process(connection, process)))
             .await
@@ -162,7 +162,7 @@ impl DurableReads for PostgresDurableStore {
         &self,
         scope: &ScopeKey,
         limit: usize,
-    ) -> Result<Vec<lash_sansio::ProcessId>, DurableError> {
+    ) -> Result<Vec<lash_protocol_types::ProcessId>, DurableError> {
         self.read(|connection| {
             Box::pin(processes::live_until_descendants(connection, scope, limit))
         })
@@ -172,16 +172,16 @@ impl DurableReads for PostgresDurableStore {
     async fn until_children(
         &self,
         scope: &ScopeKey,
-        after: Option<&lash_sansio::ProcessId>,
+        after: Option<&lash_protocol_types::ProcessId>,
         limit: usize,
-    ) -> Result<Vec<lash_sansio::ProcessId>, DurableError> {
+    ) -> Result<Vec<lash_protocol_types::ProcessId>, DurableError> {
         self.read(|connection| Box::pin(processes::until_children(connection, scope, after, limit)))
             .await
     }
 
     async fn session_close(
         &self,
-        session: &lash_sansio::SessionId,
+        session: &lash_protocol_types::SessionId,
     ) -> Result<Option<SessionCloseRow>, DurableError> {
         self.read(|connection| Box::pin(session_close::read(connection, session)))
             .await
@@ -189,7 +189,7 @@ impl DurableReads for PostgresDurableStore {
 
     async fn ending_scopes(
         &self,
-        session: &lash_sansio::SessionId,
+        session: &lash_protocol_types::SessionId,
     ) -> Result<Vec<ScopeKey>, DurableError> {
         self.read(|connection| Box::pin(session_close::ending_scopes(connection, session)))
             .await
@@ -197,7 +197,7 @@ impl DurableReads for PostgresDurableStore {
 
     async fn session_mailbox(
         &self,
-        session: &lash_sansio::SessionId,
+        session: &lash_protocol_types::SessionId,
     ) -> Result<lash_durable::domain::SessionMailbox, DurableError> {
         self.read(|connection| Box::pin(session_mail::read(connection, session)))
             .await

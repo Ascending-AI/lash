@@ -126,7 +126,7 @@ pub(super) struct RuntimeTurnDriver<'a> {
     /// request template and recorded response context: handed to that
     /// effect's body, which fills the template's slots afresh and never
     /// rebuilds it.
-    pub(super) admitted_body: Option<lash_sansio::llm::types::AdmittedSend>,
+    pub(super) admitted_body: Option<lash_protocol_types::llm::types::AdmittedSend>,
     /// The attempt of the admitted call the next model-call effect sends, its
     /// pin's: a re-sent attempt streams under an observation key of its own
     /// (`abandoned_stream::model_stream_key`).

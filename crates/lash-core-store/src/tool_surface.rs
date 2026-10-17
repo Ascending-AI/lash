@@ -194,12 +194,12 @@ impl RecordedSurface {
 #[serde(deny_unknown_fields)]
 pub struct ProcessSurface {
     pub id: ToolId,
-    pub input_schema: lash_sansio::SchemaContract,
-    pub output_schema: lash_sansio::SchemaContract,
-    pub output_contract: lash_sansio::ToolOutputContract,
-    pub declaration: lash_sansio::ToolDeclaration,
-    pub execution_policy: lash_sansio::ExecutionPolicy,
-    pub argument_projection: lash_sansio::ToolArgumentProjectionPolicy,
+    pub input_schema: lash_protocol_types::SchemaContract,
+    pub output_schema: lash_protocol_types::SchemaContract,
+    pub output_contract: lash_protocol_types::ToolOutputContract,
+    pub declaration: lash_protocol_types::ToolDeclaration,
+    pub execution_policy: lash_protocol_types::ExecutionPolicy,
+    pub argument_projection: lash_protocol_types::ToolArgumentProjectionPolicy,
 }
 
 impl ProcessSurface {
@@ -209,7 +209,10 @@ impl ProcessSurface {
     }
 
     /// The process projection of the tool `manifest` and `contract` describe.
-    pub fn of_parts(manifest: &crate::ToolManifest, contract: &lash_sansio::ToolContract) -> Self {
+    pub fn of_parts(
+        manifest: &crate::ToolManifest,
+        contract: &lash_protocol_types::ToolContract,
+    ) -> Self {
         Self {
             id: manifest.id.clone(),
             input_schema: contract.input_schema.clone(),
@@ -226,10 +229,10 @@ impl ProcessSurface {
 /// binding's module path and operation, dotted. `None` for a tool with no
 /// usable binding, which no document can perform.
 pub fn effect_path_of(manifest: &crate::ToolManifest) -> Option<String> {
-    let binding: lash_sansio::ToolBinding = serde_json::from_value(
+    let binding: lash_protocol_types::ToolBinding = serde_json::from_value(
         manifest
             .bindings
-            .get(lash_sansio::core_support::TOOL_BINDING_KEY)?
+            .get(lash_protocol_types::core_support::TOOL_BINDING_KEY)?
             .clone(),
     )
     .ok()?;
@@ -252,7 +255,7 @@ pub const CALL_DYNAMIC_EFFECT: &str = "lash.call_dynamic";
 #[serde(deny_unknown_fields)]
 pub struct DeferredResolutionPolicy {
     pub execution: std::time::Duration,
-    pub execution_policy: lash_sansio::ExecutionPolicy,
+    pub execution_policy: lash_protocol_types::ExecutionPolicy,
 }
 
 impl Default for DeferredResolutionPolicy {
@@ -261,7 +264,7 @@ impl Default for DeferredResolutionPolicy {
     fn default() -> Self {
         Self {
             execution: std::time::Duration::from_secs(60),
-            execution_policy: lash_sansio::ExecutionPolicy::repeatable(
+            execution_policy: lash_protocol_types::ExecutionPolicy::repeatable(
                 std::num::NonZeroU32::MIN.saturating_add(2),
                 100,
                 1_000,
@@ -283,7 +286,7 @@ impl Default for DeferredResolutionPolicy {
     reason = "the endpoint's schemas are fixed literals the schema admission accepts"
 )]
 pub fn call_dynamic_endpoint(policy: DeferredResolutionPolicy) -> ToolDefinition {
-    use lash_sansio::ToolDefinitionBindingExt as _;
+    use lash_protocol_types::ToolDefinitionBindingExt as _;
     ToolDefinition::raw(
         "lash:call_dynamic",
         "call_dynamic",
@@ -300,7 +303,10 @@ pub fn call_dynamic_endpoint(policy: DeferredResolutionPolicy) -> ToolDefinition
         serde_json::json!({}),
     )
     .expect("the call_dynamic endpoint's schemas admit")
-    .with_tool_binding(lash_sansio::ToolBinding::new(["lash"], "call_dynamic"))
+    .with_tool_binding(lash_protocol_types::ToolBinding::new(
+        ["lash"],
+        "call_dynamic",
+    ))
     .with_execution(policy.execution)
     .with_execution_policy(policy.execution_policy)
 }

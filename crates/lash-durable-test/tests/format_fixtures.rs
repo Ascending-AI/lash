@@ -72,8 +72,8 @@ async fn pre_heap_images_are_refused_naming_their_format() {
     let reads = stores.durable_store();
     let cells = reads
         .cell_roots_within(
-            &lash_sansio::SessionId::try_from("v0-session".to_owned()).unwrap(),
-            &lash_sansio::TurnId::try_from("v0-turn".to_owned()).unwrap(),
+            &lash_protocol_types::SessionId::try_from("v0-session".to_owned()).unwrap(),
+            &lash_protocol_types::TurnId::try_from("v0-turn".to_owned()).unwrap(),
             8,
         )
         .await

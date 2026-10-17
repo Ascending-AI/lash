@@ -1,7 +1,7 @@
 //! Production-adapter scenarios for the completion epilogue contract.
 use crate::{LlmByteStream, LlmHttpBody, LlmHttpRequest, LlmHttpResponse, LlmHttpTransport};
 use lash_core::ProviderFailureKind;
-use lash_sansio::llm::types::{LlmResponse, LlmTerminalReason};
+use lash_protocol_types::{llm::types::LlmResponse, llm::types::LlmTerminalReason};
 use lash_transport_failure::LlmTransportError;
 
 /// Observable outcomes that constrain completion-check ordering.

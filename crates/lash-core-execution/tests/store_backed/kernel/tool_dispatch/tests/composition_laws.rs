@@ -11,7 +11,7 @@ use crate::tool_dispatch::{
     prepare_tool_call_with_context,
 };
 use lash_core_execution::hook_key;
-use lash_sansio::sync::MutexExt as _;
+use lash_protocol_types::sync::MutexExt as _;
 
 /// `beta` returns its `value` argument and counts its executions. With
 /// `prepare`, the provider's preparation appends `-prepared` to the value.

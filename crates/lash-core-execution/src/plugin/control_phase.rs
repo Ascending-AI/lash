@@ -24,7 +24,7 @@ impl ControlPhaseDeadline {
         PluginError::Runtime(crate::RuntimeError::new(crate::RuntimeErrorCode::Plugin,
             format!("control phase `{}` expired after {} ms without callback `{callback}` answering", self.phase, self.bound_ms))
             .with_cause(crate::RuntimeErrorCause::ControlPhaseExpired {
-                expiry: Box::new(lash_sansio::ControlPhaseExpired {
+                expiry: Box::new(lash_protocol_types::ControlPhaseExpired {
                     phase: self.phase.clone(), bound_ms: self.bound_ms,
                     plugin: callback.owner.clone(), callback: callback.key.clone(),
                 }),

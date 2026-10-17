@@ -735,7 +735,7 @@ impl TurnDrive for RuntimeDrive {
         cx: &ActorContext,
         id: crate::EffectId,
         request: Arc<LlmRequest>,
-        admitted: &lash_sansio::llm::types::AdmittedSend,
+        admitted: &lash_protocol_types::llm::types::AdmittedSend,
         attempt: ModelCallAttempt,
     ) -> Result<(), TurnError> {
         let ModelCallAttempt {

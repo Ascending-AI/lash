@@ -187,13 +187,13 @@ impl WriterFence {
     /// Install the `AfterFence` seam every transaction of this storage passes.
     #[cfg(any(test, feature = "testing"))]
     pub(crate) fn install_after_fence(&self, seam: crate::testing::AfterFence) {
-        use lash_sansio::sync::MutexExt;
+        use lash_protocol_types::sync::MutexExt;
         *self.state.after_fence.lock_recover() = Some(seam);
     }
 
     #[cfg(any(test, feature = "testing"))]
     fn after_fence(&self) -> Option<crate::testing::AfterFence> {
-        use lash_sansio::sync::MutexExt;
+        use lash_protocol_types::sync::MutexExt;
         self.state.after_fence.lock_recover().clone()
     }
 
@@ -201,13 +201,13 @@ impl WriterFence {
     /// passes once it recorded its turn receipt.
     #[cfg(any(test, feature = "testing"))]
     pub(crate) fn install_before_turn_commit(&self, seam: crate::testing::BeforeTurnCommit) {
-        use lash_sansio::sync::MutexExt;
+        use lash_protocol_types::sync::MutexExt;
         *self.state.before_turn_commit.lock_recover() = Some(seam);
     }
 
     #[cfg(any(test, feature = "testing"))]
     fn before_turn_commit(&self) -> Option<crate::testing::BeforeTurnCommit> {
-        use lash_sansio::sync::MutexExt;
+        use lash_protocol_types::sync::MutexExt;
         self.state.before_turn_commit.lock_recover().clone()
     }
 

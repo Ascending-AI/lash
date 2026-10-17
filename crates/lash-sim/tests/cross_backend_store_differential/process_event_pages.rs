@@ -1,11 +1,14 @@
-fn page_wait(id: &lash_sansio::ProcessId, label: &str) -> lash_core::ProcessEventAppendRequest {
+fn page_wait(
+    id: &lash_protocol_types::ProcessId,
+    label: &str,
+) -> lash_core::ProcessEventAppendRequest {
     lash_core::ProcessEventAppendRequest::wait_entered(
         id,
         &lash_core::WaitState {
             since_ms: 1,
             kind: lash_core::WaitKind::Call {
-                call_id: lash_sansio::ToolCallId::fixture(label),
-                tool_id: lash_sansio::ToolId::new("page_fixture"),
+                call_id: lash_protocol_types::ToolCallId::fixture(label),
+                tool_id: lash_protocol_types::ToolId::new("page_fixture"),
             },
             site: None,
         },
@@ -22,7 +25,10 @@ use lash_core::ProcessRegistryTestSupport as _;
 )]
 async fn release_observations(
     registry: &dyn lash_core::ConformanceProcessRegistry,
-) -> (lash_sansio::ProcessId, Vec<lash_core::ProcessEventRelease>) {
+) -> (
+    lash_protocol_types::ProcessId,
+    Vec<lash_core::ProcessEventRelease>,
+) {
     let bounds = registry
         .process_change_bounds()
         .await
@@ -147,7 +153,7 @@ async fn event_release_differential_on_sqlite_memory_and_file() {
 
 async fn read_all_event_metadata<R>(
     registry: &R,
-    process_id: &lash_sansio::ProcessId,
+    process_id: &lash_protocol_types::ProcessId,
     mode: lash_core::ProcessEventQueryMode,
 ) -> Result<(u64, Vec<usize>), lash_core::PluginError>
 where
@@ -353,7 +359,7 @@ pub(super) async fn compare_bounded_process_event_pages(
     // fixture cut of eight one by one and counts the rest, by
     // class, in one omission record.
     // Occurrences and omissions name the same structural site (ADR 0100 R4).
-    let effect_node_id = lash_sansio::effect_identity_fixture("repeated-node", 1)
+    let effect_node_id = lash_protocol_types::effect_identity_fixture("repeated-node", 1)
         .site
         .to_string();
     let mut omitted = lash_core::ProcessEffectOmittedCounts::default();
@@ -372,7 +378,7 @@ pub(super) async fn compare_bounded_process_event_pages(
         }
         recorded.push(
             lash_core::ProcessEffectOccurrence::new(
-                lash_sansio::effect_identity_fixture("repeated-node", occurrence),
+                lash_protocol_types::effect_identity_fixture("repeated-node", occurrence),
                 if is_failure { "fixture.write" } else { "now" },
                 class,
                 is_failure
@@ -395,8 +401,8 @@ pub(super) async fn compare_bounded_process_event_pages(
     let wait = lash_core::WaitState {
         since_ms: 1,
         kind: lash_core::WaitKind::Call {
-            call_id: lash_sansio::ToolCallId::fixture("process-wait-law"),
-            tool_id: lash_sansio::ToolId::new("process_wait"),
+            call_id: lash_protocol_types::ToolCallId::fixture("process-wait-law"),
+            tool_id: lash_protocol_types::ToolId::new("process_wait"),
         },
         site: None,
     };

@@ -19,7 +19,7 @@ const LASH_LLM_REQUEST_CONTENT_DOMAIN_VERSION: &str = "lash-llm-request-content/
 use std::io;
 use std::sync::Arc;
 
-use lash_sansio::core_support::Blake3DomainHasher;
+use lash_protocol_types::core_support::Blake3DomainHasher;
 use serde::Serialize;
 
 use crate::llm::types::{LlmOutputSpec, LlmToolChoice};
@@ -186,16 +186,16 @@ mod tests {
     fn request(messages: Vec<LlmMessage>) -> super::super::LlmRequestSpec {
         super::super::LlmRequestSpec {
             instructions: Some(Arc::from("be brief")),
-            model: lash_sansio::llm_profile::LlmProfileConfig::new(
-                lash_sansio::llm_profile::RecordedLlmProfile::mint(
-                    lash_sansio::llm_profile::LlmProfileKey::new("request-fixture"),
-                    lash_sansio::llm_profile::LlmProfileMetadata::builder(
+            model: lash_protocol_types::llm_profile::LlmProfileConfig::new(
+                lash_protocol_types::llm_profile::RecordedLlmProfile::mint(
+                    lash_protocol_types::llm_profile::LlmProfileKey::new("request-fixture"),
+                    lash_protocol_types::llm_profile::LlmProfileMetadata::builder(
                         "digest-model".to_string(),
                     )
                     .context_window_tokens(128_000)
                     .capability(Default::default())
                     .extra_body(Default::default())
-                    .cache_retention(lash_sansio::llm::capability::CacheRetention::Short)
+                    .cache_retention(lash_protocol_types::llm::capability::CacheRetention::Short)
                     .build()
                     .expect("valid profile"),
                 ),
@@ -225,10 +225,11 @@ mod tests {
             RuntimeEffectCommand::LlmCall {
                 request: {
                     let mut request = Box::new(request(messages));
-                    request.model.model = lash_sansio::llm_profile::RecordedLlmProfile::mint(
-                        crate::LlmProfileKey::new("digest-model-key"),
-                        request.model.metadata().clone(),
-                    );
+                    request.model.model =
+                        lash_protocol_types::llm_profile::RecordedLlmProfile::mint(
+                            crate::LlmProfileKey::new("digest-model-key"),
+                            request.model.metadata().clone(),
+                        );
                     request
                 },
             },
@@ -273,7 +274,7 @@ mod tests {
         envelope.command = RuntimeEffectCommand::Direct {
             request: {
                 let mut request = Box::new(request(transcript("direct")));
-                request.model.model = lash_sansio::llm_profile::RecordedLlmProfile::mint(
+                request.model.model = lash_protocol_types::llm_profile::RecordedLlmProfile::mint(
                     crate::LlmProfileKey::new(profile_key),
                     request.model.metadata().clone(),
                 );
@@ -384,7 +385,7 @@ mod tests {
                         request: {
                             let mut request = Box::new(spec);
                             request.model.model =
-                                lash_sansio::llm_profile::RecordedLlmProfile::mint(
+                                lash_protocol_types::llm_profile::RecordedLlmProfile::mint(
                                     crate::LlmProfileKey::new("digest-model-key"),
                                     request.model.metadata().clone(),
                                 );

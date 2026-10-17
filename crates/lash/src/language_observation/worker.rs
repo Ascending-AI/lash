@@ -18,8 +18,8 @@ use lash_core::{
     LiveReplayEventDraft, LiveReplayStore, ProcessReplayEventDraft, ProcessReplayStore,
     ProcessSequence, SessionRevision,
 };
-use lash_sansio::sync::MutexExt;
-use lash_sansio::{ProcessId, SessionId};
+use lash_protocol_types::sync::MutexExt;
+use lash_protocol_types::{ProcessId, SessionId};
 use tokio::sync::Notify;
 
 use super::ingress::{Ingress, Work};

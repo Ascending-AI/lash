@@ -43,7 +43,7 @@ impl ProtocolDriverHandle for MidCallNoteDriver {
         _calls: &crate::ResponseToolCalls,
         _text_streamed: bool,
     ) -> Vec<DriverAction> {
-        let call_id = crate::ToolCallId::fixture(CALL);
+        let call_id = lash_protocol_types::ToolCallId::fixture(CALL);
         vec![
             DriverAction::AppendEvents(vec![
                 conversation_event(Message {
@@ -89,7 +89,7 @@ impl ProtocolDriverHandle for MidCallNoteDriver {
                     vec![ModelToolReturnPart::text("ok")],
                     call.call_id,
                     call.tool_name,
-                    crate::ToolCallStatus::Success,
+                    lash_protocol_types::ToolCallStatus::Success,
                 )
             })
             .collect::<Vec<_>>();
@@ -112,7 +112,7 @@ impl ProtocolDriverHandle for MidCallNoteDriver {
         &self,
         _ctx: DriverContextView<'_>,
         _driver_state: serde_json::Value,
-        _result: Result<crate::ExecResponse, crate::ExecCodeFailure>,
+        _result: Result<lash_protocol_types::ExecResponse, lash_protocol_types::ExecCodeFailure>,
     ) -> Vec<DriverAction> {
         Vec::new()
     }
@@ -141,7 +141,7 @@ fn a_record_appended_while_a_call_is_unanswered_rides_the_next_resume_safe_bound
     let mut machine = TurnMachine::new(
         test_config(Arc::new(MidCallNoteDriver)),
         vec![user_message("use the tool")],
-        crate::AppendVec::new(),
+        lash_protocol_types::AppendVec::new(),
         0,
     );
     let effects = drain_effects(&mut machine);
@@ -161,7 +161,7 @@ fn a_record_appended_while_a_call_is_unanswered_rides_the_next_resume_safe_bound
         .expect("the tool round");
     for (messages, _) in progress_boundaries(&effects) {
         assert!(
-            crate::messages_are_prompt_resume_safe(messages.iter()),
+            lash_protocol_types::messages_are_prompt_resume_safe(messages.iter()),
             "a progress boundary carries an unanswered call"
         );
     }
@@ -190,7 +190,9 @@ fn a_record_appended_while_a_call_is_unanswered_rides_the_next_resume_safe_bound
     let effects = drain_effects(&mut restored);
     let boundaries = progress_boundaries(&effects);
     let (messages, delta) = boundaries.first().expect("the answered round's boundary");
-    assert!(crate::messages_are_prompt_resume_safe(messages.iter()));
+    assert!(lash_protocol_types::messages_are_prompt_resume_safe(
+        messages.iter()
+    ));
     let delivered = delta
         .iter()
         .map(|record| match record {
@@ -216,7 +218,7 @@ fn a_cancel_while_a_call_is_unanswered_finishes_without_the_call_or_its_record()
     let mut machine = TurnMachine::new(
         test_config(Arc::new(MidCallNoteDriver)),
         vec![user_message("use the tool")],
-        crate::AppendVec::new(),
+        lash_protocol_types::AppendVec::new(),
         0,
     );
     let effects = drain_effects(&mut machine);
@@ -227,7 +229,7 @@ fn a_cancel_while_a_call_is_unanswered_finishes_without_the_call_or_its_record()
         result: Ok(LlmResponse::default()),
     });
     drain_effects(&mut machine);
-    let evidence = crate::TurnCancellationEvidence::internal("stop");
+    let evidence = lash_protocol_types::TurnCancellationEvidence::internal("stop");
     machine.finish_cancelled(evidence.clone());
     let effects = drain_effects(&mut machine);
     let outcome = effects.iter().find_map(|effect| match effect {

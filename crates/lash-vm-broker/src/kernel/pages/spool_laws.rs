@@ -103,7 +103,9 @@ impl CommittedPages for Arc<Committed> {
 fn lease(root: NodeId) -> RootLease {
     RootLease {
         id: RootLeaseId(7),
-        owner: RootOwner::Exec(ExecKey::Process(lash_sansio::ProcessId::fixture("pages"))),
+        owner: RootOwner::Exec(ExecKey::Process(lash_protocol_types::ProcessId::fixture(
+            "pages",
+        ))),
         root,
         fence: LeaseFence::Actor {
             actor: ActorKey::process("pages").expect("actor"),

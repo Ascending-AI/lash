@@ -2,7 +2,7 @@
 //! releases a stdin barrier only after every child opened its own core.
 use super::{Args, Case, Meter, Receipt, facade};
 use anyhow::{Context, Result, ensure};
-use lash_sansio::sync::MutexExt;
+use lash_protocol_types::sync::MutexExt;
 use std::path::{Path, PathBuf};
 use std::sync::Arc;
 use std::time::{Duration, Instant};

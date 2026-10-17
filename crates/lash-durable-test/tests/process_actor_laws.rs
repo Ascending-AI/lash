@@ -28,8 +28,8 @@ use lash_core_store::tool_run::SettledOutput;
 use lash_core_store::tool_run::{MaterialOwner, MaterialRole};
 use lash_durable::{ActorKey, ActorState, CommitLabel, DurableInstant, LeaseConfig};
 use lash_durable_test::{Fault, Script, SimClock, SimNodes, SimNodesConfig, Tripwire};
-use lash_sansio::sync::MutexExt as _;
-use lash_sansio::{ExecutionLimit, ExecutionPolicy};
+use lash_protocol_types::sync::MutexExt as _;
+use lash_protocol_types::{ExecutionLimit, ExecutionPolicy};
 use serde_json::{Value, json};
 
 const KIND: &str = "l9d-law";

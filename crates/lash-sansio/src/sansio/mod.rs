@@ -12,15 +12,18 @@ use serde::Serialize;
 use serde::de::DeserializeOwned;
 use serde_json::Value;
 
-use crate::llm::types::{
-    LlmOutputPart, LlmRequest, LlmResponse, LlmTerminalReason, LlmToolChoice, LlmToolSpec,
-    ProviderReplayMeta,
+use lash_protocol_types::LlmCallError;
+use lash_protocol_types::{CheckpointKind, ModelToolReturn, ToolCallOutput, TurnOutcome, TurnStop};
+use lash_protocol_types::{
+    llm::types::LlmOutputPart, llm::types::LlmRequest, llm::types::LlmResponse,
+    llm::types::LlmTerminalReason, llm::types::LlmToolChoice, llm::types::LlmToolSpec,
+    llm::types::ProviderReplayMeta,
 };
-use crate::session_model::{
-    LlmUsage, Message, MessageSequence, SessionHistoryRecord, SessionStreamEvent,
-    TokenUsageOverflow, make_error_event,
+use lash_protocol_types::{
+    session_model::LlmUsage, session_model::Message, session_model::MessageSequence,
+    session_model::SessionHistoryRecord, session_model::SessionStreamEvent,
+    session_model::TokenUsageOverflow, session_model::make_error_event,
 };
-use crate::{CheckpointKind, ModelToolReturn, ToolCallOutput, TurnOutcome, TurnStop};
 
 // ─── Public types ───
 
@@ -40,9 +43,9 @@ pub use turn_protocol::{
     ChatContextProjector, CheckpointDelivery, CheckpointResumeAction, CompletedToolCall,
     ContextProjector, DriverAction, DriverContextView, Effect, EffectId, ExecutionEnvironmentSync,
     ExecutionEnvironmentSyncFailure, ExecutionEnvironmentSyncFailureKind, ExpandedRow,
-    ExpandedWrapper, LlmCallError, LogEvent, ModelToolCalls, PendingToolCall, PendingWork,
-    ProjectorContext, ProtocolDriverHandle, Response, ResponseToolCalls, SyncedEnvironment,
-    ToolExpansionPlan, ToolWave, TurnMachineConfig, UndecodableDriverState, place_prompt,
+    ExpandedWrapper, LogEvent, ModelToolCalls, PendingToolCall, PendingWork, ProjectorContext,
+    ProtocolDriverHandle, Response, ResponseToolCalls, SyncedEnvironment, ToolExpansionPlan,
+    ToolWave, TurnMachineConfig, UndecodableDriverState, place_prompt,
     stored_history_refusal_actions,
 };
 mod checkpoint_content;

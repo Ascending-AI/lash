@@ -318,7 +318,7 @@ fn quota_refused_provider() -> ProviderHandle {
 /// The failure envelopes a feed of turn activities carries.
 fn reported_failures<'a>(
     activities: impl IntoIterator<Item = &'a lash_core::TurnActivity>,
-) -> Vec<&'a lash_sansio::ErrorEnvelope> {
+) -> Vec<&'a lash_protocol_types::ErrorEnvelope> {
     activities
         .into_iter()
         .filter_map(|activity| match &activity.event {
@@ -442,13 +442,13 @@ async fn a_provider_failure_reaches_the_activity_feed_typed_and_reads_back_after
     let before = session.observe().snapshot().await?;
     let output = session.send(TurnInput::text("hello")).output().await?;
 
-    let assert_typed = |envelopes: Vec<&lash_sansio::ErrorEnvelope>, feed: &str| {
+    let assert_typed = |envelopes: Vec<&lash_protocol_types::ErrorEnvelope>, feed: &str| {
         let [envelope] = envelopes.as_slice() else {
             panic!("{feed} carries exactly one reported failure: {envelopes:?}");
         };
         assert_eq!(
             envelope.kind,
-            lash_sansio::TurnFailureKind::LlmProvider,
+            lash_protocol_types::TurnFailureKind::LlmProvider,
             "{feed}"
         );
         assert_eq!(

@@ -1,7 +1,7 @@
 //! Durable await-event wait identity.
 
 use crate::{ExecutionScope, RuntimeError};
-use lash_sansio::ToolCallId;
+use lash_protocol_types::ToolCallId;
 use serde::{Deserialize, Serialize};
 /// The wait a Deferred source resolves: the deferring tool call it parked
 /// on, by its stable call id (ADR 0117).

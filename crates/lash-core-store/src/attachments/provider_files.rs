@@ -3,11 +3,13 @@ use super::{
     AttachmentStore, AttachmentStoreError, AttachmentStorePersistence, StoredAttachment,
     StoredBlobRef, validate_attachment_bytes,
 };
-use lash_sansio::llm::attachment_delivery::{
-    Delivery, DeliveryLimits, DeliverySecret, ProviderAccepts, ProviderFileScope,
+use lash_protocol_types::sync::MutexExt;
+use lash_protocol_types::{AttachmentCreateMeta, AttachmentId, AttachmentRef, MediaType};
+use lash_protocol_types::{
+    llm::attachment_delivery::Delivery, llm::attachment_delivery::DeliveryLimits,
+    llm::attachment_delivery::DeliverySecret, llm::attachment_delivery::ProviderAccepts,
+    llm::attachment_delivery::ProviderFileScope,
 };
-use lash_sansio::sync::MutexExt;
-use lash_sansio::{AttachmentCreateMeta, AttachmentId, AttachmentRef, MediaType};
 use std::sync::{Arc, Mutex};
 
 #[async_trait::async_trait]

@@ -1,6 +1,6 @@
 pub use lash_core_store::session_policy::*;
 pub mod context;
-pub use lash_sansio::session_model::message;
+pub use lash_protocol_types::session_model::message;
 
 use crate::llm::types::{LlmEventSender, LlmStreamEvent};
 use crate::provider::{AttachmentCapabilitySnapshot, ProviderHandle, ReasoningSelection};
@@ -31,15 +31,22 @@ pub fn format_tool_output_content(output: &crate::ToolCallOutput) -> String {
         }
     }
 }
-pub use lash_sansio::session_model::{
-    ConversationRecord, ErrorEnvelope, FailureCode, LlmUsage, MaxToolCalls, Message, MessageRole,
-    Namespace, NoProgressBudget, Part, PartKind, ProtocolEvent, ProtocolPayload, RuntimeOutputCuts,
-    SessionStreamEvent, StreamMessageKind, TokenUsageOverflow, ToolCallLimitExceeded,
-    ToolCallLimitScope, TurnBudget, TurnFailureCode, TurnFailureKind, make_error_envelope,
-    make_error_event, reassign_part_ids, render_prompt, shared_parts,
+pub use lash_protocol_types::{
+    session_model::ConversationRecord, session_model::ErrorEnvelope, session_model::FailureCode,
+    session_model::LlmUsage, session_model::MaxToolCalls, session_model::Message,
+    session_model::MessageRole, session_model::Namespace, session_model::NoProgressBudget,
+    session_model::Part, session_model::PartKind, session_model::ProtocolEvent,
+    session_model::ProtocolPayload, session_model::RuntimeOutputCuts,
+    session_model::SessionStreamEvent, session_model::StreamMessageKind,
+    session_model::TokenUsageOverflow, session_model::ToolCallLimitExceeded,
+    session_model::ToolCallLimitScope, session_model::TurnBudget, session_model::TurnFailureCode,
+    session_model::TurnFailureKind, session_model::make_error_envelope,
+    session_model::make_error_event, session_model::reassign_part_ids,
+    session_model::render_prompt, session_model::shared_parts,
 };
 
-pub type SessionHistoryRecord = lash_sansio::session_model::SessionHistoryRecord<ProtocolEvent>;
+pub type SessionHistoryRecord =
+    lash_protocol_types::session_model::SessionHistoryRecord<ProtocolEvent>;
 
 pub const PLUGIN_RUNTIME_PROTOCOL_PLUGIN_ID: &str = "lash.plugin_runtime";
 

@@ -1,5 +1,5 @@
 use super::*;
-use lash_sansio::ProcessId;
+use lash_protocol_types::ProcessId;
 
 fn watermark_change_seq(watermark: lash_core_execution::ProjectionWatermark) -> Option<i64> {
     match watermark {

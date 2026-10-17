@@ -11,7 +11,7 @@
 //! A provider call parks when its lane's [`LaneHold`] is armed — the `busy`
 //! case's way of keeping a run in flight behind the measured input.
 
-use lash_sansio::llm::types::{StreamBlockEvent, StreamBlockKind};
+use lash_protocol_types::{llm::types::StreamBlockEvent, llm::types::StreamBlockKind};
 use std::collections::HashMap;
 use std::sync::atomic::{AtomicBool, Ordering};
 use std::sync::{Arc, Mutex};
@@ -23,8 +23,8 @@ use lash_core::llm::types::{
 };
 use lash_core::provider::ProviderOptions;
 use lash_core::testing::TestProvider;
-use lash_sansio::SessionId;
-use lash_sansio::sync::MutexExt;
+use lash_protocol_types::SessionId;
+use lash_protocol_types::sync::MutexExt;
 use lash_transport_failure::LlmTransportError;
 
 /// The provider fixtures the latency cases select.

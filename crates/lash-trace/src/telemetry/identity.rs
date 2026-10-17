@@ -92,7 +92,9 @@ pub enum SpanKey<'a> {
     /// One occurrence of a workflow node: its whole effect identity (task,
     /// site, occurrence and enclosing loop iterations), since a site alone
     /// does not name an execution.
-    Node { at: &'a lash_sansio::EffectIdentity },
+    Node {
+        at: &'a lash_protocol_types::EffectIdentity,
+    },
 }
 
 const SPAN_DOMAIN: &[u8] = b"lash.span\0";
@@ -198,7 +200,7 @@ impl ProducerSpan {
 
     /// Names the input this call's acceptance assigned, on the settle
     /// record.
-    pub fn accepted(&mut self, send: lash_sansio::InputId) {
+    pub fn accepted(&mut self, send: lash_protocol_types::InputId) {
         self.ids.send = Some(send);
     }
 

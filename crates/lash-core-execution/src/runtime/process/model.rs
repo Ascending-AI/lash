@@ -1,5 +1,5 @@
 pub use lash_core_store::process_identity::*;
-use lash_sansio::CancelOrigin;
+use lash_protocol_types::CancelOrigin;
 use std::collections::BTreeSet;
 use std::fmt;
 use std::sync::Arc;
@@ -28,8 +28,8 @@ pub use scope_lifetime::*;
 mod start_request;
 pub use start_request::*;
 
-pub use lash_sansio::handle::HandleId;
-pub use lash_sansio::{ProcessId, SessionId};
+pub use lash_protocol_types::handle::HandleId;
+pub use lash_protocol_types::{ProcessId, SessionId};
 pub type ProcessOutcome = ProcessAwaitOutput;
 #[derive(Clone, Debug, PartialEq, Eq, Hash, Serialize, Deserialize)]
 #[serde(transparent)]
@@ -218,7 +218,7 @@ pub enum SessionTurnOutcome {
     /// when one is given.
     FinalValue {
         #[serde(default, skip_serializing_if = "Option::is_none")]
-        schema: Option<lash_sansio::JsonSchema>,
+        schema: Option<lash_protocol_types::JsonSchema>,
     },
 }
 
@@ -1422,18 +1422,18 @@ pub struct ProcessHandleView {
 /// handle.
 mod handle_kind_field {
     pub fn serialize<S: serde::Serializer>(_: &(), serializer: S) -> Result<S::Ok, S::Error> {
-        serializer.serialize_str(lash_sansio::handle::HANDLE_KIND)
+        serializer.serialize_str(lash_protocol_types::handle::HANDLE_KIND)
     }
 
     pub fn deserialize<'de, D: serde::Deserializer<'de>>(deserializer: D) -> Result<(), D::Error> {
         use serde::Deserialize as _;
         let kind = String::deserialize(deserializer)?;
-        if kind == lash_sansio::handle::HANDLE_KIND {
+        if kind == lash_protocol_types::handle::HANDLE_KIND {
             return Ok(());
         }
         Err(serde::de::Error::invalid_value(
             serde::de::Unexpected::Str(&kind),
-            &lash_sansio::handle::HANDLE_KIND,
+            &lash_protocol_types::handle::HANDLE_KIND,
         ))
     }
 }

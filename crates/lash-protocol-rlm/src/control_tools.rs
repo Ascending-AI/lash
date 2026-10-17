@@ -314,8 +314,8 @@ fn required_string(args: &Value, key: &str) -> Result<String, String> {
 mod tests {
     use super::*;
     use crate::projection::{decode_rlm_protocol_event, rlm_protocol_event};
-    use lash_sansio::sync::MutexExt;
-    use lash_sansio::{ProcessId, SessionId};
+    use lash_protocol_types::sync::MutexExt;
+    use lash_protocol_types::{ProcessId, SessionId};
     use std::sync::{Arc, Mutex};
 
     use lash_core::plugin::runtime_host::{

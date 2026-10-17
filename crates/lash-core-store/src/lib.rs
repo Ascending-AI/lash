@@ -95,26 +95,32 @@ pub(crate) use lash_core_llm::llm;
 pub(crate) use lash_core_llm::llm_profile::{LlmProfileConfig, LlmProfileKey, RecordedLlmProfile};
 pub(crate) use lash_core_llm::provider;
 pub(crate) use lash_core_llm::session_model::ChargeSafetyPolicy;
-pub(crate) use lash_sansio::AcceptedInjectedTurnInput;
-pub(crate) use lash_sansio::llm::types::ChargeSafetyDecision;
-pub(crate) use lash_sansio::llm::types::{
-    ChargeSafetyDenialReason, GenerationOptions, ProtocolPosition,
+pub(crate) use lash_protocol_types::AcceptedInjectedTurnInput;
+pub(crate) use lash_protocol_types::llm::types::ChargeSafetyDecision;
+pub(crate) use lash_protocol_types::{
+    AttachmentRef, AttachmentTypeMetadata, BatchId, BlankIdentity, CausalRef, CheckpointKind,
+    EffectAddress, ExecutionScope, FrameKey, InputId, LlmUsage, Message, MessageOrigin,
+    MessageRole, NodeId, Part, PartKind, PluginMessage, ProcessId, SessionAppendNode, TurnId,
+    TurnOutputSource, TurnReply, shared_parts,
 };
-pub(crate) use lash_sansio::session_model::{ConversationRecord, ProtocolEvent, TurnBudget};
-pub(crate) use lash_sansio::session_model::{
-    MaxToolCalls, NoProgressBudget, ToolCallLimitExceeded, message::BaseRenderCache,
-    message::MessageSequence,
+pub(crate) use lash_protocol_types::{
+    llm::types::ChargeSafetyDenialReason, llm::types::GenerationOptions,
+    llm::types::ProtocolPosition,
 };
-pub(crate) use lash_sansio::tool_contract::{ToolDefinition, ToolId, ToolManifest};
-pub(crate) use lash_sansio::{
-    AttachmentId, AttachmentRef, AttachmentTypeMetadata, BatchId, BlankIdentity, CausalRef,
-    CheckpointKind, EffectAddress, ExecutionScope, FrameKey, InputId, LlmUsage, Message,
-    MessageOrigin, MessageRole, NodeId, Part, PartKind, PluginMessage, ProcessId,
-    SessionAppendNode, SessionId, TurnId, TurnOutputSource, TurnReply, shared_parts,
+pub(crate) use lash_protocol_types::{
+    session_model::ConversationRecord, session_model::ProtocolEvent, session_model::TurnBudget,
+};
+pub(crate) use lash_protocol_types::{
+    session_model::MaxToolCalls, session_model::NoProgressBudget,
+    session_model::ToolCallLimitExceeded, session_model::message::BaseRenderCache,
+    session_model::message::MessageSequence,
+};
+pub(crate) use lash_protocol_types::{
+    tool_contract::ToolDefinition, tool_contract::ToolId, tool_contract::ToolManifest,
 };
 
 pub(crate) type SessionHistoryRecord =
-    lash_sansio::session_model::SessionHistoryRecord<ProtocolEvent>;
+    lash_protocol_types::session_model::SessionHistoryRecord<ProtocolEvent>;
 
 // Items the moved modules name at the crate root because `lash-core`'s
 // `lib.rs` re-exported them there.
@@ -133,7 +139,7 @@ pub(crate) use turn_failure_evidence::{TurnFailureEvidence, TurnFailureSettlemen
 
 pub(crate) use config_transaction::{ConfigTransactionOutcome, ConfigTransactionRecord};
 pub(crate) use execution_state::{AdmittedPluginConfig, CheckpointComponentKey, PluginConfig};
-pub(crate) use lash_sansio::{
+pub(crate) use lash_protocol_types::{
     TurnCancelMode, TurnCancelUndeliveredInputPolicy, TurnCancellationEvidence,
 };
 pub(crate) use plugin_state::PluginState;
@@ -163,7 +169,7 @@ pub(crate) use turn_input_vocabulary::{
 
 pub(crate) use chronological::ChronologicalProjection;
 pub(crate) use effect_identity::RuntimeEffectKind;
-pub(crate) use lash_sansio::ToolIntentIdentity;
+pub(crate) use lash_protocol_types::ToolIntentIdentity;
 pub(crate) use message_projection::plugin_message_to_message;
 pub(crate) use turn_input_vocabulary::TurnInputCheckpointBoundary;
 pub(crate) use turn_input_vocabulary::{InputItem, TurnContext, TurnInput};
@@ -185,7 +191,7 @@ pub(crate) mod session_model {
         ConversationRecord, LlmUsage, Message, ProtocolEvent, SessionHistoryRecord, SessionPolicy,
         plugin_message_to_message,
     };
-    pub(crate) use lash_sansio::session_model::message;
+    pub(crate) use lash_protocol_types::session_model::message;
 }
 
 /// Path shim: the durable half of what `lash-core` exposes as `crate::runtime`.
@@ -201,10 +207,8 @@ pub(crate) mod runtime {
 }
 
 pub(crate) use input_normalization::NormalizedItem;
-#[doc(hidden)]
-pub use lash_sansio as sansio;
-pub(crate) use lash_sansio::llm::capability::ReasoningSelection;
-pub(crate) use lash_sansio::llm::types::LlmCallRecord;
+pub(crate) use lash_protocol_types::llm::capability::ReasoningSelection;
+pub(crate) use lash_protocol_types::llm::types::LlmCallRecord;
 pub(crate) use runtime_error::RuntimeEffectReplayMismatchReport;
 
 #[allow(unused_imports)]
@@ -212,19 +216,22 @@ pub(crate) use attachments::AttachmentGcFence;
 #[allow(unused_imports)]
 pub(crate) use lash_core_ids::test_watchdog;
 #[allow(unused_imports)]
-pub(crate) use lash_sansio::attachment::MediaType;
+pub(crate) use lash_protocol_types::attachment::MediaType;
 #[allow(unused_imports)]
-pub(crate) use lash_sansio::llm::capability::{LlmProfileCapability, ReasoningRetentionPolicy};
+pub(crate) use lash_protocol_types::llm::types::LlmResponse;
 #[allow(unused_imports)]
-pub(crate) use lash_sansio::llm::capability::{
-    OpenAiReasoningContext, ReasoningRetentionCapability, ReasoningRetentionSelection,
+pub(crate) use lash_protocol_types::tool_contract::ToolContract;
+#[allow(unused_imports)]
+pub(crate) use lash_protocol_types::tool_output::AttachmentMaterializationReason;
+#[allow(unused_imports)]
+pub(crate) use lash_protocol_types::{
+    llm::capability::LlmProfileCapability, llm::capability::ReasoningRetentionPolicy,
 };
 #[allow(unused_imports)]
-pub(crate) use lash_sansio::llm::types::LlmResponse;
-#[allow(unused_imports)]
-pub(crate) use lash_sansio::tool_contract::ToolContract;
-#[allow(unused_imports)]
-pub(crate) use lash_sansio::tool_output::AttachmentMaterializationReason;
+pub(crate) use lash_protocol_types::{
+    llm::capability::OpenAiReasoningContext, llm::capability::ReasoningRetentionCapability,
+    llm::capability::ReasoningRetentionSelection,
+};
 #[allow(unused_imports)]
 pub(crate) use queued_drain_policy::{
     DrainMode, DrainModePolicy, QueuedDrainSelection, default_queued_drain_policy,
@@ -270,3 +277,6 @@ pub mod plugin_registrations;
 
 /// Retained model-call facts and read vocabulary.
 pub mod model_calls;
+
+#[doc(hidden)]
+pub use lash_protocol_types::{AttachmentId, SessionId};

@@ -3,7 +3,7 @@
 //! decides nothing else.
 
 use lash_core::{ToolCatalog, ToolContract, ToolDefinition, ToolManifest};
-use lash_sansio::JsonSchema;
+use lash_protocol_types::JsonSchema;
 use lash_tool_presenter_api::{
     PresentationRefusal, PresentedToolSection, ToolPresentationEntry, ToolPresentationRequest,
     ToolPresenter, ToolPresenterSlot, WrappedToolPresenter,
@@ -149,9 +149,9 @@ fn a_replaced_or_wrapped_presenter_changes_the_section_and_never_admission() {
         "### Tools\n\n`tools.lookup(query: number)` finds a record by number."
     );
     let contract = &catalog.tools[0].contract;
-    assert!(lash_sansio::validate_tool_input(contract, &json!({ "query": 7 })).is_err());
-    assert!(lash_sansio::validate_tool_input(contract, &json!({})).is_err());
-    assert!(lash_sansio::validate_tool_input(contract, &json!({ "query": "a" })).is_ok());
+    assert!(lash_protocol_types::validate_tool_input(contract, &json!({ "query": 7 })).is_err());
+    assert!(lash_protocol_types::validate_tool_input(contract, &json!({})).is_err());
+    assert!(lash_protocol_types::validate_tool_input(contract, &json!({ "query": "a" })).is_ok());
 
     let unaccounted = declarations(
         CellDialect::typescript().with_tool_presenter(ToolPresenterSlot::new(HostPresenter {

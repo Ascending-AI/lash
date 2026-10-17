@@ -1,6 +1,6 @@
 use super::*;
 use lash_core::session_graph::RealizedNodeTimestamp;
-use lash_sansio::SessionId;
+use lash_protocol_types::SessionId;
 
 /// Resident-graph sizes swept by the curve. The defect under measurement is
 /// per-turn cost linear in resident history, so the sizes span two orders of
@@ -430,7 +430,6 @@ mod append_allocation_tests {
 #[cfg(all(test, target_os = "linux"))]
 mod commit_scaling_tests {
     use super::*;
-    use lash_sansio::core_support::MessageSequenceCoreSupport;
 
     #[expect(unsafe_code, reason = "clock_gettime writes to this local timespec")]
     fn thread_cpu_ns() -> anyhow::Result<u64> {
@@ -453,8 +452,10 @@ mod commit_scaling_tests {
         let base = base_graph.read_model();
         let message =
             checkpoint_message(format!("turn-{turn}"), MessageRole::User, "one turn".into());
-        let messages =
-            lash_sansio::MessageSequence::from_base_and_delta(base.messages, vec![message.clone()]);
+        let messages = lash_protocol_types::MessageSequence::from_base_and_delta(
+            base.messages,
+            vec![message.clone()],
+        );
         let view = lash_core::SessionReadView::derived_from_persisted_state(
             state,
             state.policy.clone(),

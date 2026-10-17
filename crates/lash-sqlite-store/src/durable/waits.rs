@@ -89,11 +89,20 @@ pub(super) fn apply(tx: &Connection, commit: &Committing<'_>, write: &WaitWrite)
                     scope.stored(),
                     purpose.kind().as_str(),
                     purpose.kind().host_resolvable(),
-                    columns.target.as_ref().map(lash_sansio::ProcessId::as_str),
+                    columns
+                        .target
+                        .as_ref()
+                        .map(lash_protocol_types::ProcessId::as_str),
                     columns.deadline.map(|deadline| deadline.0),
                     commit.epoch.0,
-                    columns.call.as_ref().map(lash_sansio::ToolCallId::as_str),
-                    columns.tool.as_ref().map(lash_sansio::ToolId::as_str),
+                    columns
+                        .call
+                        .as_ref()
+                        .map(lash_protocol_types::ToolCallId::as_str),
+                    columns
+                        .tool
+                        .as_ref()
+                        .map(lash_protocol_types::ToolId::as_str),
                     columns.key_name
                 ],
             )?;
@@ -351,17 +360,18 @@ fn decode_stored(stored: Stored) -> Result<StoredWait, DurableError> {
             target: stored
                 .target
                 .map(|process| {
-                    lash_sansio::ProcessId::parse(&process)
+                    lash_protocol_types::ProcessId::parse(&process)
                         .map_err(|_| corrupt("wait target process", &process))
                 })
                 .transpose()?,
             call: stored
                 .call
                 .map(|call| {
-                    lash_sansio::ToolCallId::parse(&call).map_err(|_| corrupt("wait call", &call))
+                    lash_protocol_types::ToolCallId::parse(&call)
+                        .map_err(|_| corrupt("wait call", &call))
                 })
                 .transpose()?,
-            tool: stored.tool.map(lash_sansio::ToolId::new),
+            tool: stored.tool.map(lash_protocol_types::ToolId::new),
             key_name: stored.key_name,
             deadline: stored.deadline.map(DurableInstant),
         },

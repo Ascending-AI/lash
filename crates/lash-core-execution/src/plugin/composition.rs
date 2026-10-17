@@ -497,7 +497,7 @@ impl ExecutionComposition {
         crate::runtime::effect::ToolPresentation,
         crate::runtime::effect::RuntimeEffectControllerError,
     > {
-        use lash_sansio::core_support::ModelToolReturnCoreSupport as _;
+        use lash_protocol_types::core_support::ModelToolReturnCoreSupport as _;
 
         let callbacks = self
             .resolve_tool_presentation_plan(plan)
@@ -529,7 +529,7 @@ impl ExecutionComposition {
                 Err(err) => crate::ModelToolReturn::text(ctx.tool_name.clone(), err.to_string()),
             };
         }
-        model_return.outcome = lash_sansio::ModelToolOutcome::from(&ctx.output.outcome);
+        model_return.outcome = lash_protocol_types::ModelToolOutcome::from(&ctx.output.outcome);
         let retention = ctx.artifacts.retention_policy();
         crate::runtime::effect::retain_oversized_return(
             &mut model_return,

@@ -8,7 +8,7 @@ use lash_core::facade_support::SessionGraphFacadeOps;
 use lash_core::llm::types::{LlmContentBlock, LlmMessage, LlmRole, LlmToolChoice};
 use lash_core::plugin::PluginSessionRequest;
 use lash_core::plugin::{ProtocolDriverPlugin, ProtocolSessionPlugin};
-use lash_sansio::sync::MutexExt;
+use lash_protocol_types::sync::MutexExt;
 mod fig1127;
 
 const SEED: u64 = 0x5_e100;

@@ -2,8 +2,8 @@
 //! SQLite memory stores, the core's node serving the session.
 
 use super::*;
-use lash_sansio::RetryProgress;
-use lash_sansio::llm::types::{StreamBlockEvent, StreamBlockKind};
+use lash_protocol_types::RetryProgress;
+use lash_protocol_types::{llm::types::StreamBlockEvent, llm::types::StreamBlockKind};
 
 #[tokio::test(flavor = "multi_thread", worker_threads = 2)]
 async fn turn_stream_finish_returns_committed_assistant_prose() -> Result<()> {

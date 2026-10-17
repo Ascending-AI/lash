@@ -14,7 +14,7 @@ use std::sync::{Arc, Mutex};
 use lash::tracing::TraceSpanKind;
 use lash_durable::CommitLabel;
 use lash_durable_test::{Cut, Fault};
-use lash_sansio::sync::MutexExt as _;
+use lash_protocol_types::sync::MutexExt as _;
 
 use super::telemetry::{Lost, Telemetry};
 

@@ -5,10 +5,12 @@
 
 use super::*;
 use crate::ClockWallTime as _;
-use lash_sansio::llm::attachment_delivery::{
-    AttachmentPosition, Delivery, DeliveryContext, DeliverySecret, ProviderAccepts,
+use lash_protocol_types::llm::types::SlotCodec;
+use lash_protocol_types::{
+    llm::attachment_delivery::AttachmentPosition, llm::attachment_delivery::Delivery,
+    llm::attachment_delivery::DeliveryContext, llm::attachment_delivery::DeliverySecret,
+    llm::attachment_delivery::ProviderAccepts,
 };
-use lash_sansio::llm::types::SlotCodec;
 
 /// The route the slot provider serves.
 fn slot_route() -> ProviderRouteIdentity {
@@ -106,7 +108,7 @@ impl SlotDeliveries for FlakySigner {
 
     async fn invalidate(
         &self,
-        _reference: &lash_sansio::AttachmentRef,
+        _reference: &lash_protocol_types::AttachmentRef,
         rejected: &Delivery,
     ) -> Result<(), AttachmentDeliveryError> {
         if let Some(secret) = rejected.secret() {
@@ -123,9 +125,10 @@ fn slot_template() -> RecordedRequestTemplate {
     builder
         .literal("{\"image\":")
         .attachment(AttachmentSlot {
-            reference: lash_sansio::AttachmentRef {
-                id: lash_sansio::AttachmentId::parse("cd".repeat(32)).expect("a digest id"),
-                media_type: lash_sansio::MediaType::parse("image/png").expect("a media type"),
+            reference: lash_protocol_types::AttachmentRef {
+                id: lash_protocol_types::AttachmentId::parse("cd".repeat(32)).expect("a digest id"),
+                media_type: lash_protocol_types::MediaType::parse("image/png")
+                    .expect("a media type"),
                 byte_len: 3,
                 type_metadata: None,
                 label: None,
@@ -164,7 +167,7 @@ async fn every_attempt_delivers_afresh_and_unsent_or_rejected_deliveries_are_ret
     let sideband = handle.prepare_completion(&mut request);
     let mut template = slot_template();
     template.fetch_horizon.millis = 17;
-    let enclosing = lash_sansio::ExecutionLimit::starting_at(
+    let enclosing = lash_protocol_types::ExecutionLimit::starting_at(
         crate::SystemClock.timestamp_ms(),
         std::time::Duration::from_secs(30),
         std::time::Duration::from_secs(30),
@@ -180,7 +183,7 @@ async fn every_attempt_delivers_afresh_and_unsent_or_rejected_deliveries_are_ret
             &lash_trace::telemetry::metrics::TelemetryMetrics::default(),
             None,
             crate::provider::handle::ModelCallBounds {
-                budgets: lash_sansio::ExecutionBudgets::recommended(),
+                budgets: lash_protocol_types::ExecutionBudgets::recommended(),
                 enclosing: Some(enclosing),
             },
         )
@@ -242,7 +245,7 @@ async fn pending_invalidation_is_cut_at_model_total_and_seals_the_rejection() {
         }
         async fn invalidate(
             &self,
-            _: &lash_sansio::AttachmentRef,
+            _: &lash_protocol_types::AttachmentRef,
             _: &Delivery,
         ) -> Result<(), AttachmentDeliveryError> {
             self.entered.notify_one();
@@ -262,9 +265,10 @@ async fn pending_invalidation_is_cut_at_model_total_and_seals_the_rejection() {
     let signer = PendingInvalidator {
         entered: tokio::sync::Notify::new(),
     };
-    let budgets = lash_sansio::ExecutionBudgets::recommended();
+    let budgets = lash_protocol_types::ExecutionBudgets::recommended();
     let cap = Duration::from_secs(1);
-    let enclosing = lash_sansio::ExecutionLimit::starting_at(clock.timestamp_ms(), cap, cap);
+    let enclosing =
+        lash_protocol_types::ExecutionLimit::starting_at(clock.timestamp_ms(), cap, cap);
     let template = Arc::new(slot_template());
     let metrics = lash_trace::telemetry::metrics::TelemetryMetrics::default();
     let completion = handle.complete_prepared(
@@ -307,15 +311,15 @@ async fn pending_invalidation_is_cut_at_model_total_and_seals_the_rejection() {
     assert_eq!(
         attempt.retry_decision,
         Some(RetryDecision::Declined(RetryDeclineCause::TimedOut {
-            limit: lash_sansio::LimitCause::ExecutionTotal
+            limit: lash_protocol_types::LimitCause::ExecutionTotal
         }))
     );
 }
 
-fn inline_reference(bytes: &[u8]) -> lash_sansio::AttachmentRef {
-    lash_sansio::AttachmentRef {
-        id: lash_sansio::attachment::content_id(bytes),
-        media_type: lash_sansio::MediaType::parse("image/png").unwrap(),
+fn inline_reference(bytes: &[u8]) -> lash_protocol_types::AttachmentRef {
+    lash_protocol_types::AttachmentRef {
+        id: lash_protocol_types::attachment::content_id(bytes),
+        media_type: lash_protocol_types::MediaType::parse("image/png").unwrap(),
         byte_len: bytes.len() as u64,
         label: None,
         type_metadata: None,
@@ -429,8 +433,10 @@ async fn inline_deliveries_refuse_content_length_acceptance_and_budget_mismatche
 #[tokio::test]
 async fn canonical_call_recovers_the_admitted_slots_without_a_second_backend_read() {
     use crate::provider::{AttachmentReadPolicy, canonical_call};
-    use lash_sansio::llm::attachment_delivery::{DeliveryForms, ProviderFileScope};
-    use lash_sansio::llm::types::SegmentCache;
+    use lash_protocol_types::llm::types::SegmentCache;
+    use lash_protocol_types::{
+        llm::attachment_delivery::DeliveryForms, llm::attachment_delivery::ProviderFileScope,
+    };
     let reference = inline_reference(b"abc");
     let scope = ProviderFileScope {
         provider: "slots".into(),
@@ -597,7 +603,7 @@ async fn canonical_call_recovers_the_admitted_slots_without_a_second_backend_rea
         let invalid_values = invalid_template
             .slots()
             .map(|_| {
-                lash_sansio::llm::types::TransientJson::new(
+                lash_protocol_types::llm::types::TransientJson::new(
                     &serde_json::json!({"url": "secret", "extra": true}),
                     &live_values[2],
                 )

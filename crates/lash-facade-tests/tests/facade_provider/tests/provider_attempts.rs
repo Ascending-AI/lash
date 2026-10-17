@@ -6,8 +6,8 @@ use super::*;
 use lash::provider::{LlmTransportError, TransportRetryVerdict};
 use lash_core::llm::types::{LlmUsage, StreamBlockIdentity};
 use lash_core::{MessageRole, TurnEvent};
-use lash_sansio::ReportedFailure;
-use lash_sansio::llm::types::{StreamBlockEvent, StreamBlockKind};
+use lash_protocol_types::ReportedFailure;
+use lash_protocol_types::{llm::types::StreamBlockEvent, llm::types::StreamBlockKind};
 
 /// Every committed part's content in an explicitly read session view.
 fn committed_contents(view: &lash_core::SessionReadView) -> Vec<String> {
@@ -741,7 +741,10 @@ mod facade_settings {
             // not whether the blocking pool can schedule preparation in 7 ms.
             let template = Arc::new(
                 provider
-                    .lower(&request, &lash_sansio::llm::types::SegmentCache::disabled())
+                    .lower(
+                        &request,
+                        &lash_protocol_types::llm::types::SegmentCache::disabled(),
+                    )
                     .await
                     .unwrap(),
             );
@@ -845,7 +848,7 @@ mod facade_settings {
         let template = unrestricted
             .lower(
                 &request(),
-                &lash_sansio::llm::types::SegmentCache::disabled(),
+                &lash_protocol_types::llm::types::SegmentCache::disabled(),
             )
             .await
             .unwrap();
@@ -878,7 +881,7 @@ mod facade_settings {
             let template = provider
                 .lower(
                     &request(),
-                    &lash_sansio::llm::types::SegmentCache::disabled(),
+                    &lash_protocol_types::llm::types::SegmentCache::disabled(),
                 )
                 .await
                 .unwrap();
@@ -1068,17 +1071,19 @@ impl lash_core::provider::Provider for RefusedLower {
     async fn lower(
         &mut self,
         _request: &LlmRequest,
-        _cache: &lash_sansio::llm::types::SegmentCache,
-    ) -> std::result::Result<lash_sansio::llm::types::RecordedRequestTemplate, LlmTransportError>
-    {
+        _cache: &lash_protocol_types::llm::types::SegmentCache,
+    ) -> std::result::Result<
+        lash_protocol_types::llm::types::RecordedRequestTemplate,
+        LlmTransportError,
+    > {
         Err(LlmTransportError::new("request cannot be lowered")
             .with_kind(lash_core::ProviderFailureKind::Validation)
             .with_code(lash_core::FailureCode::provider("lower_refused")))
     }
     async fn send(
         &mut self,
-        _body: &lash_sansio::llm::types::LiveRequestBody,
-        _context: lash_sansio::llm::types::ResponseContext,
+        _body: &lash_protocol_types::llm::types::LiveRequestBody,
+        _context: lash_protocol_types::llm::types::ResponseContext,
     ) -> std::result::Result<LlmResponse, LlmTransportError> {
         panic!("an unsent call never reaches the provider");
     }

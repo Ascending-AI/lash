@@ -49,6 +49,7 @@ lash-core-store = { workspace = true }
 lash-core-effect = { workspace = true }
 lash-core-execution = { workspace = true }
 lash-sansio = { workspace = true, features = ["schema-validation"] }
+lash-protocol-types = { workspace = true, features = ["schema-validation"] }
 lash-trace = { workspace = true }
 tokio = { workspace = true, features = ["process", "io-util", "sync", "time", "rt", "rt-multi-thread", "macros"] }
 serde = { workspace = true, features = ["derive", "rc"] }

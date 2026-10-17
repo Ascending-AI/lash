@@ -407,7 +407,7 @@ mod tests {
         ToolContract, ToolDefinition, facade_support::build_tool_catalog,
         test_support::ToolCatalogBuildInput,
     };
-    use lash_sansio::SessionId;
+    use lash_protocol_types::SessionId;
     use lash_vm_runtime::{ToolBinding, ToolDefinitionBindingExt};
     use serde_json::json;
     use std::sync::Arc;
@@ -499,15 +499,18 @@ mod tests {
             "{signature}"
         );
         assert!(
-            lash_sansio::validate_tool_input(
+            lash_protocol_types::validate_tool_input(
                 &catalog.tools[0].contract,
                 &json!({ "pinned": "yes" })
             )
             .is_ok()
         );
         assert!(
-            lash_sansio::validate_tool_input(&catalog.tools[0].contract, &json!({ "drifted": 1 }))
-                .is_err()
+            lash_protocol_types::validate_tool_input(
+                &catalog.tools[0].contract,
+                &json!({ "drifted": 1 })
+            )
+            .is_err()
         );
         assert_eq!(
             resolutions.load(Ordering::SeqCst),

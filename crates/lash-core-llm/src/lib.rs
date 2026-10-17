@@ -10,7 +10,7 @@
 #![deny(clippy::future_not_send)]
 
 pub mod llm;
-pub use lash_sansio::llm_profile;
+pub use lash_protocol_types::llm_profile;
 pub mod provider;
 pub mod session_model;
 pub mod stream_assembly;
@@ -32,21 +32,23 @@ pub mod core_internal {
 // crate-internal, so this crate's public surface is the modules alone.
 pub(crate) use lash_core_ids::clock::{Clock, SystemClock};
 pub(crate) use lash_core_ids::{operational_metrics, panic_containment};
-pub(crate) use lash_sansio::llm::types::{
-    GenerationReceipt, LlmCallRecord, LlmTerminalReason, NonNegativeFiniteF64, ProviderFailureKind,
-    ProviderReplayDrop,
+pub(crate) use lash_protocol_types::{
+    llm::types::GenerationReceipt, llm::types::LlmCallRecord, llm::types::LlmTerminalReason,
+    llm::types::NonNegativeFiniteF64, llm::types::ProviderFailureKind,
+    llm::types::ProviderReplayDrop,
 };
-pub(crate) use lash_sansio::session_model::{FailureCode, TurnFailureKind};
+pub(crate) use lash_protocol_types::{session_model::FailureCode, session_model::TurnFailureKind};
 pub(crate) use session_model::ChargeSafetyPolicy;
 
 // Names the moved modules reach for only from their own test suites.
 #[cfg(test)]
 pub(crate) use lash_core_ids::clock::ClockWallTime;
 #[cfg(test)]
-pub(crate) use lash_sansio::llm::types::{
-    AttemptOutcome, AttemptRecord, ChargeSafetyDecision, ChargeSafetyDenialReason,
-    GenerationOptionOutcome, GenerationOptions, LlmCallId, LlmRequestScope, ProtocolPosition,
-    ProviderReplayDropReason,
+pub(crate) use lash_protocol_types::{
+    llm::types::AttemptOutcome, llm::types::AttemptRecord, llm::types::ChargeSafetyDecision,
+    llm::types::ChargeSafetyDenialReason, llm::types::GenerationOptionOutcome,
+    llm::types::GenerationOptions, llm::types::LlmCallId, llm::types::LlmRequestScope,
+    llm::types::ProtocolPosition, llm::types::ProviderReplayDropReason,
 };
 #[cfg(test)]
 pub(crate) use provider::LlmProfileCapability;

@@ -5,7 +5,7 @@
 use super::*;
 use lash_core_execution::store::{QueuedWorkStore as _, TurnInputStore as _};
 use lash_core_execution::{Retention, SessionCatalogStore as _, Target};
-use lash_sansio::SessionId;
+use lash_protocol_types::SessionId;
 
 /// A body large enough that keeping it is a real cost.
 fn large(tag: &str) -> String {

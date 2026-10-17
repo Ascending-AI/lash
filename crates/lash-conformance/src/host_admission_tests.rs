@@ -30,8 +30,8 @@ impl Provider for PendingTransport {
     }
     async fn send(
         &mut self,
-        _body: &lash_sansio::llm::types::LiveRequestBody,
-        _: lash_sansio::llm::types::ResponseContext,
+        _body: &lash_protocol_types::llm::types::LiveRequestBody,
+        _: lash_protocol_types::llm::types::ResponseContext,
     ) -> Result<LlmResponse, LlmTransportError> {
         self.entered.notify_one();
         std::future::pending().await
@@ -77,14 +77,14 @@ impl Provider for HostAdmission {
     async fn lower(
         &mut self,
         request: &LlmRequest,
-        cache: &lash_sansio::llm::types::SegmentCache,
+        cache: &lash_protocol_types::llm::types::SegmentCache,
     ) -> Result<RecordedRequestTemplate, LlmTransportError> {
         self.inner.lower(request, cache).await
     }
     async fn send(
         &mut self,
-        body: &lash_sansio::llm::types::LiveRequestBody,
-        context: lash_sansio::llm::types::ResponseContext,
+        body: &lash_protocol_types::llm::types::LiveRequestBody,
+        context: lash_protocol_types::llm::types::ResponseContext,
     ) -> Result<LlmResponse, LlmTransportError> {
         let _permit = self
             .permits
@@ -123,14 +123,14 @@ async fn host_admission_permit_releases_on_cancellation_and_forwards_close() {
     let mut first = make_handle();
     let mut second = make_handle();
     let request = LlmRequest {
-        model: lash_sansio::llm_profile::LlmProfileConfig::new(
-            lash_sansio::llm_profile::RecordedLlmProfile::mint(
-                lash_sansio::llm_profile::LlmProfileKey::new("request-fixture"),
-                lash_sansio::llm_profile::LlmProfileMetadata::builder("fixture-model")
+        model: lash_protocol_types::llm_profile::LlmProfileConfig::new(
+            lash_protocol_types::llm_profile::RecordedLlmProfile::mint(
+                lash_protocol_types::llm_profile::LlmProfileKey::new("request-fixture"),
+                lash_protocol_types::llm_profile::LlmProfileMetadata::builder("fixture-model")
                     .context_window_tokens(128_000)
                     .capability(Default::default())
                     .extra_body(Default::default())
-                    .cache_retention(lash_sansio::llm::capability::CacheRetention::Short)
+                    .cache_retention(lash_protocol_types::llm::capability::CacheRetention::Short)
                     .build()
                     .expect("valid profile"),
             ),

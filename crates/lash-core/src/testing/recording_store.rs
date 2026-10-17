@@ -15,7 +15,7 @@ use std::sync::Arc;
 use std::sync::Mutex;
 use std::sync::atomic::{AtomicBool, AtomicUsize, Ordering};
 
-use lash_sansio::sync::MutexExt;
+use lash_protocol_types::sync::MutexExt;
 
 use crate::store::{
     RuntimeCommit, RuntimeCommitReceipt, RuntimeStore, RuntimeStoreDecorator, SessionWindowRead,

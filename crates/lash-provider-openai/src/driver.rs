@@ -4,7 +4,7 @@ const LASH_OPENAI_RESPONSES_REQUEST_DOMAIN_VERSION: &str = "lash-openai-response
 
 use crate::request_work::{needs_blocking, run};
 use crate::support::*;
-use lash_sansio::llm::types::{StreamBlockEvent, StreamBlockKind};
+use lash_protocol_types::{llm::types::StreamBlockEvent, llm::types::StreamBlockKind};
 
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 pub enum CompletionEndpoint {
@@ -151,7 +151,7 @@ pub(crate) fn build_request_body(
     reason = "the template contains only infallibly serializable JSON primitives"
 )]
 pub(crate) fn request_fingerprint(body: &RecordedRequestTemplate) -> ResponsesRequestFingerprint {
-    struct Hashing(lash_sansio::core_support::Blake3DomainHasher);
+    struct Hashing(lash_protocol_types::core_support::Blake3DomainHasher);
     impl std::io::Write for Hashing {
         fn write(&mut self, bytes: &[u8]) -> std::io::Result<usize> {
             self.0.update(bytes);
@@ -161,7 +161,7 @@ pub(crate) fn request_fingerprint(body: &RecordedRequestTemplate) -> ResponsesRe
             Ok(())
         }
     }
-    let mut hashing = Hashing(lash_sansio::core_support::Blake3DomainHasher::new(
+    let mut hashing = Hashing(lash_protocol_types::core_support::Blake3DomainHasher::new(
         LASH_OPENAI_RESPONSES_REQUEST_DOMAIN_VERSION,
     ));
     serde_json::to_writer(&mut hashing, body).expect("template serialization is infallible");
@@ -232,7 +232,7 @@ impl CompletionEndpoint {
 fn endpoint_accepts(
     endpoint: CompletionEndpoint,
     scope: &Option<ProviderFileScope>,
-    mime: &lash_sansio::MediaType,
+    mime: &lash_protocol_types::MediaType,
     position: AttachmentPosition,
 ) -> ProviderAccepts {
     match endpoint {
@@ -320,7 +320,7 @@ pub(crate) async fn lower(
             let mut units = UnitWriter::cached(
                 &build_cache,
                 context,
-                |mime: &lash_sansio::MediaType, position| {
+                |mime: &lash_protocol_types::MediaType, position| {
                     endpoint_accepts(endpoint, &build_scope, mime, position)
                 },
                 &safe,
@@ -331,7 +331,7 @@ pub(crate) async fn lower(
         })
         .await??;
     lower_attachment_json(
-        |mime: &lash_sansio::MediaType, position| {
+        |mime: &lash_protocol_types::MediaType, position| {
             endpoint_accepts(endpoint, &scope, mime, position)
         },
         req,

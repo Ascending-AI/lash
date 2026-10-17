@@ -8,7 +8,7 @@
 //! included) in its heap, and its second with a text answer. A fresh cell's
 //! padding is a new text at each await.
 
-use lash_sansio::llm::types::{StreamBlockEvent, StreamBlockKind};
+use lash_protocol_types::{llm::types::StreamBlockEvent, llm::types::StreamBlockKind};
 use std::path::Path;
 use std::sync::Arc;
 use std::time::Duration;
@@ -23,7 +23,7 @@ use lash_core::llm::types::{
 use lash_core::runtime::durable::session::TurnServices;
 use lash_core::{ExecutionPolicy, LlmOutputPart, ToolCall, ToolOutcome};
 use lash_core_execution::Backend;
-use lash_sansio::SessionId;
+use lash_protocol_types::SessionId;
 
 use crate::recorder::Recorder;
 use crate::turn::{ANSWER, Scripts, session_of_admission};

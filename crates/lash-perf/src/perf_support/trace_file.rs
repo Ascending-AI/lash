@@ -8,7 +8,7 @@ use std::path::PathBuf;
 use std::sync::Mutex;
 
 use lash::tracing::{TraceRecord, TraceSink, TraceSinkError};
-use lash_sansio::sync::MutexExt;
+use lash_protocol_types::sync::MutexExt;
 
 pub struct JsonlFileSink {
     path: PathBuf,

@@ -60,8 +60,9 @@ use crate::plugin::prompt::{admission_record, load_admitted_call};
 use crate::{
     ActorContext, Effect, HeldResponse, HostTurnProtocol, SessionStreamEvent, TurnMachine,
 };
-use lash_sansio::llm::types::AdmittedSend;
-use lash_sansio::{CheckpointDelta, SessionId, TurnId};
+use lash_protocol_types::llm::types::AdmittedSend;
+use lash_protocol_types::{SessionId, TurnId};
+use lash_sansio::CheckpointDelta;
 use std::sync::Arc;
 
 /// The phase checkpoint of `drive` as it stands: its machine's checkpoint
@@ -248,12 +249,12 @@ pub async fn run_phases(
         drive
             .local(
                 cx,
-                Effect::Emit(lash_sansio::session_model::make_error_event(
+                Effect::Emit(lash_protocol_types::session_model::make_error_event(
                     crate::TurnFailureKind::Runtime,
                     Some(crate::TurnFailureCode::AgentFrameSwitchLimit.into()),
                     format!("logical turn reached the limit of {limit} agent frame switches"),
                     None,
-                    lash_sansio::session_model::RuntimeOutputCuts::standard(),
+                    lash_protocol_types::session_model::RuntimeOutputCuts::standard(),
                 )),
             )
             .await?;

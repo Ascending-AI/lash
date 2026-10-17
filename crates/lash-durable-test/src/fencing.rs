@@ -21,7 +21,7 @@ use lash_durable::{
     ActorKey, ActorState, CommitLabel, DurableError, DurableStore, Epoch, FormatSet, MailKind,
     MailSeq, MailTx, Release, StateRevision,
 };
-use lash_sansio::sync::MutexExt as _;
+use lash_protocol_types::sync::MutexExt as _;
 use std::future::Future;
 use std::pin::Pin;
 use std::sync::{Arc, Mutex};

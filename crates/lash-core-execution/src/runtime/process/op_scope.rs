@@ -5,7 +5,7 @@ pub(crate) struct LanguageCallAttribution {
     pub language: String,
     pub identity: lash_trace::TraceLanguageExecutionIdentity,
     /// The occurrence of the call's site.
-    pub at: lash_sansio::EffectIdentity,
+    pub at: lash_protocol_types::EffectIdentity,
 }
 
 pub(crate) type LanguageCallAttributions = std::sync::Arc<

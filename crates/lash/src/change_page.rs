@@ -13,8 +13,8 @@ pub struct ChangePage<Change, Cursor> {
     pub retained_after: Option<Cursor>,
 }
 
-impl<Change: lash_sansio::DurableSerialize, Cursor: serde::Serialize> lash_sansio::DurableSerialize
-    for ChangePage<Change, Cursor>
+impl<Change: lash_protocol_types::DurableSerialize, Cursor: serde::Serialize>
+    lash_protocol_types::DurableSerialize for ChangePage<Change, Cursor>
 {
     fn serialize_durable<S: serde::Serializer>(&self, serializer: S) -> Result<S::Ok, S::Error> {
         use serde::Serialize;
@@ -22,7 +22,7 @@ impl<Change: lash_sansio::DurableSerialize, Cursor: serde::Serialize> lash_sansi
             changes: self
                 .changes
                 .iter()
-                .map(lash_sansio::Durable)
+                .map(lash_protocol_types::Durable)
                 .collect::<Vec<_>>(),
             next: &self.next,
             retained_after: self.retained_after.as_ref(),

@@ -22,7 +22,7 @@ pub(super) async fn observed(
 }
 
 /// The kind and site of each wait, in the order the record lists them.
-fn blockers(waits: &[WaitState]) -> Vec<(WaitKind, Option<lash_sansio::EffectIdentity>)> {
+fn blockers(waits: &[WaitState]) -> Vec<(WaitKind, Option<lash_protocol_types::EffectIdentity>)> {
     waits
         .iter()
         .map(|wait| (wait.kind.clone(), wait.site.clone()))

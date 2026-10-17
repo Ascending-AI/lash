@@ -10,7 +10,7 @@ use lash_durable::domain::{
 };
 use lash_durable::{ActorKey, DurableInstant, Woken};
 use lash_durable::{DurableError, StoreFailure, StoreFailureKind};
-use lash_sansio::{BatchId, InputId, SessionId, TurnId};
+use lash_protocol_types::{BatchId, InputId, SessionId, TurnId};
 use rusqlite::{Connection, OptionalExtension};
 
 use super::{Answer, Committing, SQL};

@@ -10,7 +10,7 @@
     reason = "test target: the fixtures around the laws are test code too"
 )]
 
-use lash_sansio::llm::types::{StreamBlockEvent, StreamBlockKind};
+use lash_protocol_types::{llm::types::StreamBlockEvent, llm::types::StreamBlockKind};
 use std::sync::Arc;
 use std::time::Duration;
 
@@ -25,7 +25,7 @@ use lash_core::{
     TurnActivityId, TurnEvent,
 };
 use lash_postgres_store::testing::{IsolatedDatabase, required_database_url};
-use lash_sansio::SessionId;
+use lash_protocol_types::SessionId;
 
 #[path = "live_replay/bench.rs"]
 mod bench;

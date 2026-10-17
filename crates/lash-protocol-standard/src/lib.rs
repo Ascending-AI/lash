@@ -18,8 +18,8 @@
 
 #![deny(clippy::future_not_send)]
 
-use lash_sansio::TurnId;
-use lash_sansio::llm::types::{StreamBlockEvent, StreamBlockKind};
+use lash_protocol_types::TurnId;
+use lash_protocol_types::{llm::types::StreamBlockEvent, llm::types::StreamBlockKind};
 pub use lash_tool_presenter_api::{
     PresentationRefusal, PresentedToolSection, RecordedToolPresenter, ToolPresenterSlot,
 };
@@ -796,7 +796,7 @@ struct StandardProtocolDriver {
 impl ProtocolDriverPlugin for StandardProtocolDriver {
     fn attachment_omission_text(
         &self,
-        notice: &lash_sansio::AttachmentMaterializationNotice,
+        notice: &lash_protocol_types::AttachmentMaterializationNotice,
     ) -> String {
         self.config
             .tool_presenter
@@ -1094,7 +1094,7 @@ impl ProtocolDriverHandle<lash_core::HostTurnProtocol> for StandardDriver {
                     && !text.is_empty()
                 {
                     let item_id = response_meta.as_ref().and_then(|meta| meta.id.clone());
-                    let block = lash_sansio::llm::types::StreamBlockIdentity {
+                    let block = lash_protocol_types::llm::types::StreamBlockIdentity {
                         id: item_id
                             .clone()
                             .unwrap_or_else(|| format!("part:{part_index}")),
@@ -1395,10 +1395,12 @@ fn invalid_turn_options_actions(error: String) -> Vec<DriverAction> {
             Some(lash_core::session_model::TurnFailureCode::InvalidTurnOptions.into()),
             error.clone(),
             Some(error),
-            lash_sansio::session_model::RuntimeOutputCuts::standard(),
+            lash_protocol_types::session_model::RuntimeOutputCuts::standard(),
         )),
         DriverAction::Finish(TurnOutcome::Stopped(TurnStop::RuntimeError {
-            cause: lash_sansio::TurnErrorCause::new(lash_sansio::TurnErrorCode::InvalidTurnOptions),
+            cause: lash_protocol_types::TurnErrorCause::new(
+                lash_protocol_types::TurnErrorCode::InvalidTurnOptions,
+            ),
         })),
     ]
 }

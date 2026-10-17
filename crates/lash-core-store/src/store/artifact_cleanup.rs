@@ -75,7 +75,7 @@ mod tests {
     fn ended_replaces_a_guard_and_nothing_else_replaces_a_row() {
         let referrer =
             ArtifactReferrer::Start(crate::process_identity::StartKey::for_host("upsert"));
-        let journal = lash_sansio::ExecutionScope::runtime_operation("op")
+        let journal = lash_protocol_types::ExecutionScope::runtime_operation("op")
             .journal_identity()
             .expect("journal");
         let guard = ArtifactCleanup::Await(ReferrerGuard::Start {

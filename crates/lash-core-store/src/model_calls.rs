@@ -1,8 +1,9 @@
 //! One sealed logical model call, retained independently of its answer receipt.
 
 use crate::checkpoint_graph::{GraphDecoder, GraphRefusal, GraphStaging, NodeId, NodeKind};
-use lash_sansio::llm::types::{
-    AttemptEndReason, LlmCallId, LlmCallRecord, LlmUsage, TokenUsageOverflow,
+use lash_protocol_types::{
+    llm::types::AttemptEndReason, llm::types::LlmCallId, llm::types::LlmCallRecord,
+    llm::types::LlmUsage, llm::types::TokenUsageOverflow,
 };
 
 /// How the logical call ended. An accepted streaming cell is answered even

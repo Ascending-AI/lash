@@ -63,6 +63,7 @@ lash-kernel-check.workspace = true
 lash-kernel-dialect.workspace = true
 lash-vm-library = { workspace = true, features = ["dialect-typescript", "dialect-python"] }
 lash-sansio = { workspace = true }
+lash-protocol-types = { workspace = true }
 lash-vm-client = { workspace = true, features = ["perf-witness"] }
 lash-vm-broker = { workspace = true, features = ["perf-witness"] }
 lash-vm-worker = { workspace = true, features = ["testing", "dialect-typescript", "dialect-python"] }

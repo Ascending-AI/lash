@@ -13,7 +13,10 @@ impl GoogleOAuthProvider {
             credential_scope: format!("{}:{scope}{project}", scope.len()),
         })
     }
-    pub(crate) fn accepts_attachment(&self, mime: &lash_sansio::MediaType) -> ProviderAccepts {
+    pub(crate) fn accepts_attachment(
+        &self,
+        mime: &lash_protocol_types::MediaType,
+    ) -> ProviderAccepts {
         if mime.as_str() != "application/pdf"
             && !matches!(mime.family(), "image" | "audio" | "text" | "video")
         {

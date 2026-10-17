@@ -3,7 +3,7 @@
 //! proof states about them.
 
 use super::*;
-use lash_sansio::SessionId;
+use lash_protocol_types::SessionId;
 
 /// One execution a contract core observed: what it did, and the workflow
 /// document it ran when lash still answers it.

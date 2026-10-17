@@ -1,5 +1,5 @@
 use super::*;
-use lash_sansio::SessionId;
+use lash_protocol_types::SessionId;
 
 const PRIOR_HISTORY_ROWS: [usize; 4] = [0, 1_000, 8_000, 32_000];
 const CURRENT_FRAME_ROWS: usize = 64;

@@ -202,7 +202,7 @@ impl Provider for OpenAiCompatibleProvider {
     fn attachment_accepts(
         &self,
         _model: &str,
-        mime: &lash_sansio::MediaType,
+        mime: &lash_protocol_types::MediaType,
         position: AttachmentPosition,
     ) -> ProviderAccepts {
         if position != AttachmentPosition::Message || !crate::attachment_delivery::image(mime) {
@@ -302,7 +302,7 @@ impl Provider for OpenAiProvider {
     fn attachment_accepts(
         &self,
         _model: &str,
-        mime: &lash_sansio::MediaType,
+        mime: &lash_protocol_types::MediaType,
         _position: AttachmentPosition,
     ) -> ProviderAccepts {
         crate::attachment_delivery::responses_accepts(mime, self.attachment_file_scope())

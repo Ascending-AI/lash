@@ -76,7 +76,7 @@ pub enum BodyPart<'a> {
 /// one tree.
 ///
 /// ```
-/// use lash_sansio::llm::types::{
+/// use lash_protocol_types::llm::types::{
 ///     ProviderRouteIdentity, RecordedRequestTemplate, RequestSegment,
 /// };
 ///
@@ -669,7 +669,7 @@ impl RecordedRequestTemplate {
     /// with a `,` between them, so an edit never writes separators.
     ///
     /// ```
-    /// use lash_sansio::llm::types::{ProviderRouteIdentity, RecordedRequestTemplate, RequestSegment};
+    /// use lash_protocol_types::llm::types::{ProviderRouteIdentity, RecordedRequestTemplate, RequestSegment};
     ///
     /// let route = ProviderRouteIdentity::for_endpoint("example", "https://example.test", "model");
     /// let item = |value| RequestSegment::item_json(&serde_json::json!(value)).unwrap();
@@ -722,7 +722,7 @@ impl RecordedRequestTemplate {
     /// change stay shared.
     ///
     /// ```
-    /// use lash_sansio::llm::types::{ProviderRouteIdentity, RecordedRequestTemplate};
+    /// use lash_protocol_types::llm::types::{ProviderRouteIdentity, RecordedRequestTemplate};
     ///
     /// let route = ProviderRouteIdentity::for_endpoint("example", "https://example.test", "model");
     /// let template = RecordedRequestTemplate::literal(route, false, None, "{}").unwrap();
@@ -752,7 +752,7 @@ impl RecordedRequestTemplate {
     /// rewritten template with [`Self::from_json`].
     ///
     /// ```
-    /// use lash_sansio::llm::types::{ProviderRouteIdentity, RecordedRequestTemplate, TemplateError};
+    /// use lash_protocol_types::llm::types::{ProviderRouteIdentity, RecordedRequestTemplate, TemplateError};
     ///
     /// let route = ProviderRouteIdentity::for_endpoint("example", "https://example.test", "model");
     /// let template =

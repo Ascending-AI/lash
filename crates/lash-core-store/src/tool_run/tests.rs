@@ -1,6 +1,6 @@
 //! Codec, refusal and transition witnesses of the tool-run contract.
 
-use lash_sansio::{ToolCallId, ToolIntentKind};
+use lash_protocol_types::{ToolCallId, ToolIntentKind};
 use serde_json::json;
 
 use super::*;
@@ -176,7 +176,7 @@ fn declarations_refuse_typed() {
         may_defer: true,
         intents: vec![ToolIntentKind::CancelProcess],
         isolated: false,
-        controls: lash_sansio::TurnControls::none(),
+        controls: lash_protocol_types::TurnControls::none(),
     };
     assert_eq!(deferring.admits(OutcomeShape::Deferred), Ok(()));
     assert_eq!(

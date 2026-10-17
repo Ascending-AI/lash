@@ -63,7 +63,7 @@ use lash_kernel_doc::{
 };
 use lash_kernel_state::paged::{PageBody, PageKind, PageSource as _, SessionRoot};
 use lash_kernel_vm::{Bounds, EffectRequest, End, Host, Outcome, Program, Request, Target};
-use lash_sansio::{SessionId, ToolCallId, ToolId, TurnId};
+use lash_protocol_types::{SessionId, ToolCallId, ToolId, TurnId};
 use lash_vm_broker::kernel::graph::{
     ArgumentProjection, Disposition, EffectMembership, FrozenRequest, Projections,
 };
@@ -562,7 +562,7 @@ impl Activation for ParkActivation {
                 PolicyView::new(["work", "sum"].map(|tool| {
                     (
                         ToolId::new(format!("tool:{tool}")),
-                        lash_sansio::ExecutionPolicy::Once,
+                        lash_protocol_types::ExecutionPolicy::Once,
                     )
                 })),
             )
@@ -1047,8 +1047,8 @@ impl KernelEffects for LawHost {
             frozen,
             identities().opener(),
             (
-                lash_sansio::ExecutionPolicy::Once,
-                lash_sansio::ExecutionLimit::starting_at(
+                lash_protocol_types::ExecutionPolicy::Once,
+                lash_protocol_types::ExecutionLimit::starting_at(
                     u64::try_from(now.0).expect("a time after the epoch"),
                     Duration::from_secs(3600),
                     Duration::from_secs(3600),

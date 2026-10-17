@@ -22,9 +22,9 @@ use lash::{EmbedError, LashCore, Result, async_trait};
 use lash_core::facade_support::ProviderHandle;
 use lash_core::facade_support::{PluginFactory, TurnActivitySink};
 use lash_core::{ToolProvider, TurnActivity};
-use lash_sansio::SessionId;
-use lash_sansio::llm::types::{StreamBlockEvent, StreamBlockKind};
-use lash_sansio::sync::MutexExt;
+use lash_protocol_types::SessionId;
+use lash_protocol_types::sync::MutexExt;
+use lash_protocol_types::{llm::types::StreamBlockEvent, llm::types::StreamBlockKind};
 use std::sync::Arc;
 
 use lash_core::llm::types::{LlmContentBlock, LlmRequest, LlmResponse, LlmRole, LlmStreamEvent};

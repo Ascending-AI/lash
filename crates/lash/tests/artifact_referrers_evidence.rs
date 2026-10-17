@@ -17,7 +17,7 @@ use std::sync::{Arc, Mutex};
 use lash::direct::LlmOutputPart;
 use lash::provider::LlmResponse;
 use lash::{LashCore, TurnInput, TurnOutput};
-use lash_sansio::sync::MutexExt;
+use lash_protocol_types::sync::MutexExt;
 
 #[path = "artifact_referrers_evidence/fixture.rs"]
 mod fixture;

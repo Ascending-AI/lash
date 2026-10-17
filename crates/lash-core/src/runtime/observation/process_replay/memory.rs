@@ -8,7 +8,7 @@ use std::task::{Context, Poll, ready};
 use std::time::{Duration, Instant};
 
 use futures_util::Stream;
-use lash_sansio::sync::MutexExt;
+use lash_protocol_types::sync::MutexExt;
 use tokio::sync::broadcast;
 use tokio_util::sync::ReusableBoxFuture;
 

@@ -1,11 +1,11 @@
 use super::checkpoint_content::Chain;
 use super::*;
-use crate::ReportedFailure;
-use crate::llm::types::{StreamBlockEvent, StreamBlockKind};
+use lash_protocol_types::ReportedFailure;
+use lash_protocol_types::{llm::types::StreamBlockEvent, llm::types::StreamBlockKind};
 
 impl<M: TurnProtocol> TurnMachine<M> {
     /// Restore only the Prompt View retained by the environment prelude.
-    pub fn adopt_prepared_messages(&mut self, messages: crate::MessageSequence) {
+    pub fn adopt_prepared_messages(&mut self, messages: lash_protocol_types::MessageSequence) {
         let messages = self.rebased(messages);
         let agreed = self.agreed_prefix(&self.prompt_messages, &messages);
         self.content.rewrote(Sequence::Prompt, agreed);
@@ -13,7 +13,7 @@ impl<M: TurnProtocol> TurnMachine<M> {
     }
 
     /// Adopt the real inputs and outputs retained by a recorded sync.
-    pub fn adopt_committed_messages(&mut self, messages: crate::MessageSequence) {
+    pub fn adopt_committed_messages(&mut self, messages: lash_protocol_types::MessageSequence) {
         let messages = self.rebased(messages);
         let agreed = self.agreed_prefix(&self.messages, &messages);
         self.content.rewrote(Sequence::Messages, agreed);
@@ -23,7 +23,10 @@ impl<M: TurnProtocol> TurnMachine<M> {
     /// `messages` over the machine's window: the messages it shares with
     /// the window are the window's own, so a checkpoint finds them shared
     /// without comparing them.
-    fn rebased(&self, messages: crate::MessageSequence) -> crate::MessageSequence {
+    fn rebased(
+        &self,
+        messages: lash_protocol_types::MessageSequence,
+    ) -> lash_protocol_types::MessageSequence {
         let Some(window) = &self.window else {
             return messages;
         };
@@ -54,7 +57,7 @@ impl<M: TurnProtocol> TurnMachine<M> {
             .skip(from)
             .zip(now.iter().skip(from))
             .take_while(|(before, now)| {
-                crate::session_model::message::message_content_equal(*before, *now)
+                lash_protocol_types::session_model::message::message_content_equal(*before, *now)
             })
             .count()
     }
@@ -73,7 +76,7 @@ impl<M: TurnProtocol> TurnMachine<M> {
     pub fn new(
         config: TurnMachineConfig<M>,
         messages: Vec<Message>,
-        events: crate::AppendVec<SessionHistoryRecord<M::Event>>,
+        events: lash_protocol_types::AppendVec<SessionHistoryRecord<M::Event>>,
         protocol_run_offset: usize,
     ) -> Self {
         Self::new_shared(
@@ -87,7 +90,7 @@ impl<M: TurnProtocol> TurnMachine<M> {
     pub fn new_shared(
         config: TurnMachineConfig<M>,
         messages: MessageSequence,
-        events: crate::AppendVec<SessionHistoryRecord<M::Event>>,
+        events: lash_protocol_types::AppendVec<SessionHistoryRecord<M::Event>>,
         protocol_run_offset: usize,
     ) -> Self {
         Self {
@@ -163,7 +166,9 @@ impl<M: TurnProtocol> TurnMachine<M> {
     }
 
     /// The current cell's recorded trailing-discard count, for its trace.
-    pub fn cell_trailing_discarded(&self) -> Result<usize, crate::StoredDataCorruption> {
+    pub fn cell_trailing_discarded(
+        &self,
+    ) -> Result<usize, lash_protocol_types::StoredDataCorruption> {
         if self.waiting_exec().is_none() {
             return Ok(0);
         }
@@ -208,7 +213,10 @@ impl<M: TurnProtocol> TurnMachine<M> {
 
     /// Record the cancellation request the host has observed for this turn.
     /// The first observation wins; later ones are ignored.
-    pub fn record_cancellation_evidence(&mut self, evidence: crate::TurnCancellationEvidence) {
+    pub fn record_cancellation_evidence(
+        &mut self,
+        evidence: lash_protocol_types::TurnCancellationEvidence,
+    ) {
         if self.observed_cancellation.is_none() {
             self.observed_cancellation = Some(evidence);
         }
@@ -217,9 +225,9 @@ impl<M: TurnProtocol> TurnMachine<M> {
     /// Evidence for a cancellation the machine is about to record, falling
     /// back to lash-internal evidence when the host observed no request (a
     /// provider-side abort classified as cancelled).
-    fn cancellation_evidence(&self) -> crate::TurnCancellationEvidence {
+    fn cancellation_evidence(&self) -> lash_protocol_types::TurnCancellationEvidence {
         self.observed_cancellation.clone().unwrap_or_else(|| {
-            crate::TurnCancellationEvidence::internal(format!(
+            lash_protocol_types::TurnCancellationEvidence::internal(format!(
                 "provider-cancelled:{}",
                 self.protocol_iteration
             ))
@@ -230,11 +238,11 @@ impl<M: TurnProtocol> TurnMachine<M> {
         matches!(self.state, MachineState::Finished)
     }
 
-    pub fn messages(&self) -> crate::AppendVec<Message> {
+    pub fn messages(&self) -> lash_protocol_types::AppendVec<Message> {
         self.messages.shared()
     }
 
-    pub fn events(&self) -> crate::AppendVec<SessionHistoryRecord<M::Event>> {
+    pub fn events(&self) -> lash_protocol_types::AppendVec<SessionHistoryRecord<M::Event>> {
         self.events.clone()
     }
 
@@ -343,7 +351,7 @@ impl<M: TurnProtocol> TurnMachine<M> {
     /// The completion candidates this turn has decided, in decision order.
     /// A restored machine holds the same list, so a superseded candidate is
     /// never decided again.
-    pub fn decided_completions(&self) -> &[crate::DecidedCompletion] {
+    pub fn decided_completions(&self) -> &[lash_protocol_types::DecidedCompletion] {
         &self.decided_completions
     }
 
@@ -490,7 +498,7 @@ impl<M: TurnProtocol> TurnMachine<M> {
                         envelope: Some(mut envelope),
                     })) if matches!(
                         envelope.kind,
-                        crate::session_model::TurnFailureKind::LlmProvider
+                        lash_protocol_types::session_model::TurnFailureKind::LlmProvider
                     ) =>
                     {
                         envelope.raw = None;
@@ -657,11 +665,11 @@ impl<M: TurnProtocol> TurnMachine<M> {
             // A fresh machine syncs before it prepares, and restore refuses a
             // checkpoint that waits on driver work with no environment.
             self.fail_turn(make_error_event(
-                crate::session_model::TurnFailureKind::ExecutionEnvironment,
-                Some(crate::session_model::TurnFailureCode::ReconfigureFailed.into()),
+                lash_protocol_types::session_model::TurnFailureKind::ExecutionEnvironment,
+                Some(lash_protocol_types::session_model::TurnFailureCode::ReconfigureFailed.into()),
                 "the turn has no synced execution environment",
                 None,
-                crate::session_model::RuntimeOutputCuts::standard(),
+                lash_protocol_types::session_model::RuntimeOutputCuts::standard(),
             ));
             return;
         };
@@ -697,7 +705,9 @@ impl<M: TurnProtocol> TurnMachine<M> {
     /// boundary's delta, or the turn's `Done`, in the order they were
     /// appended.
     fn emit_progress(&mut self) {
-        if !crate::session_model::messages_are_prompt_resume_safe(self.messages.iter()) {
+        if !lash_protocol_types::session_model::messages_are_prompt_resume_safe(
+            self.messages.iter(),
+        ) {
             return;
         }
         let delivered = self.progress_event_cursor.min(self.events.len());
@@ -719,7 +729,7 @@ impl<M: TurnProtocol> TurnMachine<M> {
     }
 
     pub fn fail_turn(&mut self, event: SessionStreamEvent) {
-        let cause = crate::TurnErrorCause::runtime(match &event {
+        let cause = lash_protocol_types::TurnErrorCause::runtime(match &event {
             SessionStreamEvent::Error(failure) => failure.envelope.as_ref(),
             _ => None,
         });
@@ -731,7 +741,7 @@ impl<M: TurnProtocol> TurnMachine<M> {
     pub fn fail_turn_with_cause(
         &mut self,
         event: SessionStreamEvent,
-        cause: crate::TurnErrorCause,
+        cause: lash_protocol_types::TurnErrorCause,
     ) {
         self.emit(event);
         self.finish(TurnOutcome::Stopped(TurnStop::RuntimeError { cause }));
@@ -747,8 +757,8 @@ impl<M: TurnProtocol> TurnMachine<M> {
     /// machine appended since its last progress boundary, are the
     /// uncommitted tail the stop returns to that point. A machine waiting
     /// on its next model call, between steps, keeps everything.
-    pub fn finish_cancelled(&mut self, evidence: crate::TurnCancellationEvidence) {
-        let safe = crate::session_model::prompt_resume_safe_len(self.messages.iter());
+    pub fn finish_cancelled(&mut self, evidence: lash_protocol_types::TurnCancellationEvidence) {
+        let safe = lash_protocol_types::session_model::prompt_resume_safe_len(self.messages.iter());
         if safe < self.messages.len() {
             self.messages.make_mut().truncate(safe);
             self.events.truncate(self.progress_event_cursor);
@@ -763,11 +773,11 @@ impl<M: TurnProtocol> TurnMachine<M> {
     /// cause, then finish with the plugin-abort stop.
     fn finish_run_abort(&mut self, abort: RunAbort) {
         self.emit(make_error_event(
-            crate::session_model::TurnFailureKind::Plugin,
+            lash_protocol_types::session_model::TurnFailureKind::Plugin,
             Some(abort.code),
             abort.message,
             None,
-            crate::session_model::RuntimeOutputCuts::standard(),
+            lash_protocol_types::session_model::RuntimeOutputCuts::standard(),
         ));
         self.finish(TurnOutcome::Stopped(TurnStop::PluginAbort));
     }
@@ -979,14 +989,16 @@ impl<M: TurnProtocol> TurnMachine<M> {
     pub fn handle_response(&mut self, response: Response<M::IntentOutcome>) {
         if let Err(overflow) = self.try_handle_response(response) {
             self.fail_turn(make_error_event(
-                crate::session_model::TurnFailureKind::TokenUsageAccounting,
-                Some(crate::session_model::TurnFailureCode::TokenUsageOverflow.into()),
+                lash_protocol_types::session_model::TurnFailureKind::TokenUsageAccounting,
+                Some(
+                    lash_protocol_types::session_model::TurnFailureCode::TokenUsageOverflow.into(),
+                ),
                 format!(
                     "token usage counter `{}` overflowed while accumulating turn usage",
                     overflow.counter()
                 ),
                 None,
-                crate::session_model::RuntimeOutputCuts::standard(),
+                lash_protocol_types::session_model::RuntimeOutputCuts::standard(),
             ));
         }
     }
@@ -1043,14 +1055,14 @@ impl<M: TurnProtocol> TurnMachine<M> {
             }
             Err(failure) => {
                 self.fail_turn(make_error_event(
-                    crate::session_model::TurnFailureKind::ExecutionEnvironment,
+                    lash_protocol_types::session_model::TurnFailureKind::ExecutionEnvironment,
                     Some(failure.code),
                     format!(
                         "Failed to refresh execution environment: {}",
                         failure.message
                     ),
                     Some(failure.message),
-                    crate::session_model::RuntimeOutputCuts::standard(),
+                    lash_protocol_types::session_model::RuntimeOutputCuts::standard(),
                 ));
             }
         }
@@ -1068,15 +1080,18 @@ impl<M: TurnProtocol> TurnMachine<M> {
                 superseded,
             } = on_empty
             {
-                self.decided_completions.push(crate::DecidedCompletion {
-                    candidate: *candidate,
-                    disposition: crate::CompletionDisposition::Superseded,
-                });
+                self.decided_completions
+                    .push(lash_protocol_types::DecidedCompletion {
+                        candidate: *candidate,
+                        disposition: lash_protocol_types::CompletionDisposition::Superseded,
+                    });
                 // The notice is the turn's own output: it is recorded with
                 // the turn's events, so a reload reads it as the model did.
                 for message in superseded {
                     self.append_event(SessionHistoryRecord::Conversation(
-                        crate::session_model::ConversationRecord::from_message(message),
+                        lash_protocol_types::session_model::ConversationRecord::from_message(
+                            message,
+                        ),
                     ));
                 }
             }
@@ -1112,10 +1127,11 @@ impl<M: TurnProtocol> TurnMachine<M> {
             CheckpointResumeAction::Finish(outcome) => self.finish(outcome),
             CheckpointResumeAction::Complete { candidate, .. } => {
                 let outcome = candidate.outcome();
-                self.decided_completions.push(crate::DecidedCompletion {
-                    candidate: *candidate,
-                    disposition: crate::CompletionDisposition::Accepted,
-                });
+                self.decided_completions
+                    .push(lash_protocol_types::DecidedCompletion {
+                        candidate: *candidate,
+                        disposition: lash_protocol_types::CompletionDisposition::Accepted,
+                    });
                 self.finish(outcome);
             }
         }
@@ -1189,10 +1205,14 @@ impl<M: TurnProtocol> TurnMachine<M> {
             LlmTerminalReason::OutputLimit => TurnOutcome::Stopped(TurnStop::Incomplete),
             LlmTerminalReason::ContextOverflow => TurnOutcome::Stopped(TurnStop::ContextOverflow),
             LlmTerminalReason::ContentFilter => TurnOutcome::Stopped(TurnStop::ProviderError {
-                cause: crate::TurnErrorCause::new(crate::TurnErrorCode::ContentFiltered),
+                cause: lash_protocol_types::TurnErrorCause::new(
+                    lash_protocol_types::TurnErrorCode::ContentFiltered,
+                ),
             }),
             LlmTerminalReason::ProviderError => TurnOutcome::Stopped(TurnStop::ProviderError {
-                cause: crate::TurnErrorCause::new(crate::TurnErrorCode::ProviderRejected),
+                cause: lash_protocol_types::TurnErrorCause::new(
+                    lash_protocol_types::TurnErrorCode::ProviderRejected,
+                ),
             }),
             LlmTerminalReason::Cancelled => TurnOutcome::Stopped(TurnStop::Cancelled {
                 evidence: self.cancellation_evidence(),
@@ -1211,12 +1231,12 @@ impl<M: TurnProtocol> TurnMachine<M> {
             // Terminal-finish fallback: the projected remainder arrives as one
             // block — still a full Started/Delta/Completed lifecycle so hosts
             // never see an unpaired delta.
-            let block = crate::llm::types::StreamBlockIdentity::new(
+            let block = lash_protocol_types::llm::types::StreamBlockIdentity::new(
                 format!("completed:{}:text", self.protocol_iteration),
                 0,
             );
             self.emit(SessionStreamEvent::StreamBlock(StreamBlockEvent::Started {
-                kind: crate::llm::types::StreamBlockKind::AssistantText,
+                kind: lash_protocol_types::llm::types::StreamBlockKind::AssistantText,
                 block: block.clone(),
             }));
             self.emit(SessionStreamEvent::StreamBlock(StreamBlockEvent::Delta {
@@ -1226,7 +1246,7 @@ impl<M: TurnProtocol> TurnMachine<M> {
             }));
             self.emit(SessionStreamEvent::StreamBlock(
                 StreamBlockEvent::Completed {
-                    kind: crate::llm::types::StreamBlockKind::AssistantText,
+                    kind: lash_protocol_types::llm::types::StreamBlockKind::AssistantText,
                     block,
                     text: visible_text.clone(),
                 },
@@ -1241,13 +1261,13 @@ impl<M: TurnProtocol> TurnMachine<M> {
             .terminal_diagnostic
             .clone()
             .unwrap_or_else(|| format!("Model call ended with terminal reason {reason:?}."));
-        let mut envelope = crate::session_model::make_error_envelope(
-            crate::session_model::TurnFailureKind::LlmProvider,
+        let mut envelope = lash_protocol_types::session_model::make_error_envelope(
+            lash_protocol_types::session_model::TurnFailureKind::LlmProvider,
             Some(reason.into()),
             Some(reason),
             "provider call ended",
             None,
-            crate::session_model::RuntimeOutputCuts::standard(),
+            lash_protocol_types::session_model::RuntimeOutputCuts::standard(),
         );
         // A terminal reason is a deterministic outcome of a completed call
         // (overflow, filter, cancellation): replaying the identical request
@@ -1315,20 +1335,21 @@ impl<M: TurnProtocol> TurnMachine<M> {
 
     fn emit_llm_error(&mut self, error: LlmCallError) {
         self.record_llm_error(&error);
-        let mut envelope = crate::session_model::make_error_envelope(
-            crate::session_model::TurnFailureKind::LlmProvider,
+        let mut envelope = lash_protocol_types::session_model::make_error_envelope(
+            lash_protocol_types::session_model::TurnFailureKind::LlmProvider,
             error.code.clone(),
             Some(error.terminal_reason),
             "provider call failed",
             None,
-            crate::session_model::RuntimeOutputCuts::standard(),
+            lash_protocol_types::session_model::RuntimeOutputCuts::standard(),
         );
         // Carry the transport's typed signals through to the envelope (and
         // from there to `TurnIssue`): retryability is always classified, the
         // failure kind only when the source knew it (`Unknown` stays absent).
         envelope.retryable = Some(error.retryable);
-        envelope.provider_failure_kind =
-            (error.kind != crate::llm::types::ProviderFailureKind::Unknown).then_some(error.kind);
+        envelope.provider_failure_kind = (error.kind
+            != lash_protocol_types::llm::types::ProviderFailureKind::Unknown)
+            .then_some(error.kind);
         self.emit(SessionStreamEvent::Error(ReportedFailure {
             message: format!("LLM error: {}", error.message),
             envelope: Some(envelope),
@@ -1343,7 +1364,7 @@ impl<M: TurnProtocol> TurnMachine<M> {
         self.finish(TurnOutcome::Stopped(match error.terminal_reason {
             LlmTerminalReason::ContextOverflow => TurnStop::ContextOverflow,
             _ => TurnStop::ProviderError {
-                cause: crate::TurnErrorCause::provider(
+                cause: lash_protocol_types::TurnErrorCause::provider(
                     error.kind,
                     error.terminal_reason,
                     error.code.as_ref(),
@@ -1451,7 +1472,7 @@ impl<M: TurnProtocol> TurnMachine<M> {
     fn handle_exec_result(
         &mut self,
         driver_state: M::DriverState,
-        result: Result<crate::ExecResponse, crate::ExecCodeFailure>,
+        result: Result<lash_protocol_types::ExecResponse, lash_protocol_types::ExecCodeFailure>,
     ) {
         if let Some(stop) = result.as_ref().ok().and_then(|response| {
             response
@@ -1473,10 +1494,14 @@ impl<M: TurnProtocol> TurnMachine<M> {
 /// The answer of a held control call refused because a sibling of its step
 /// failed or was cancelled: its body never ran.
 fn sibling_failed<I>(call: PendingToolCall) -> CompletedToolCall<I> {
-    let output =
-        crate::ToolCallOutput::failure(crate::ToolFailure::control_sibling_failed(&call.tool_name));
+    let output = lash_protocol_types::ToolCallOutput::failure(
+        lash_protocol_types::ToolFailure::control_sibling_failed(&call.tool_name),
+    );
     CompletedToolCall {
-        model_return: crate::ModelToolReturn::from_output(call.tool_name.clone(), &output),
+        model_return: lash_protocol_types::ModelToolReturn::from_output(
+            call.tool_name.clone(),
+            &output,
+        ),
         call_id: call.call_id,
         provider_call_id: call.provider_call_id,
         tool_name: call.tool_name,

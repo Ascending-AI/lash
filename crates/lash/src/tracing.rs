@@ -11,7 +11,7 @@ pub use lash_core::operational_metrics::sql;
 /// or code-executor body, or plugin operation stands in the trace, the
 /// spans it opens there, and the annotations of its own tool span.
 pub use lash_core::trace::{ExtensionSpan, ExtensionTrace, ToolSpanAttributes, TraceInstrumented};
-pub use lash_sansio::AttachmentMaterializationReason;
+pub use lash_protocol_types::AttachmentMaterializationReason;
 /// The scope, cause, permit and identity vocabulary the trace runtime's
 /// signatures name.
 pub use lash_trace::telemetry::metrics::{
@@ -58,7 +58,7 @@ pub use lash_core::{
     facade_support::TraceRecord, facade_support::TraceRuntimeScope,
     facade_support::TraceRuntimeSubject, facade_support::TraceSinkError,
 };
-pub use lash_sansio::ExecutionNodeKind;
+pub use lash_protocol_types::ExecutionNodeKind;
 #[cfg(feature = "otel-trace")]
 pub use lash_trace::otel::api as otel;
 

@@ -1,5 +1,5 @@
 use super::RuntimeExecutionContext;
-use lash_sansio::sync::MutexExt;
+use lash_protocol_types::sync::MutexExt;
 
 /// What a call's trace start left for its completion: the scope it opened,
 /// when, and the context it was observed under.

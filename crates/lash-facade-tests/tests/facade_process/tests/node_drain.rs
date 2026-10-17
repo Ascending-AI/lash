@@ -5,7 +5,7 @@
 //! nothing run twice.
 
 use super::*;
-use lash_sansio::llm::types::{StreamBlockEvent, StreamBlockKind};
+use lash_protocol_types::{llm::types::StreamBlockEvent, llm::types::StreamBlockKind};
 
 use std::future::Future;
 use std::task::Poll;
@@ -186,8 +186,8 @@ fn build_boot(
     .expect("core")
 }
 
-fn session_id(id: &str) -> lash_sansio::SessionId {
-    lash_sansio::SessionId::try_from(id.to_owned()).expect("session id")
+fn session_id(id: &str) -> lash_protocol_types::SessionId {
+    lash_protocol_types::SessionId::try_from(id.to_owned()).expect("session id")
 }
 
 async fn answered(core: &LashCore, id: &str, text: &str) -> lash::TurnOutput {

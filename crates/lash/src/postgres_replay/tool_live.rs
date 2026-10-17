@@ -5,7 +5,7 @@ use lash_core::{
     ExecutionOwner, ToolLiveCursor, ToolLiveError, ToolLiveGapReason, ToolLiveItem,
     ToolLiveReadFault, ToolLiveRecord, ToolLiveReplay, ToolLiveRetention, ToolLiveSubscription,
 };
-use lash_sansio::sync::MutexExt;
+use lash_protocol_types::sync::MutexExt;
 use sqlx::Row;
 use std::{
     collections::VecDeque,

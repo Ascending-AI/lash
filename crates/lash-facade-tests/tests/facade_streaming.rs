@@ -6,7 +6,7 @@ use lash_core::facade_support::TurnActivitySink;
 
 use lash_core::facade_support::ProviderHandle;
 
-use lash_sansio::sync::MutexExt;
+use lash_protocol_types::sync::MutexExt;
 use std::sync::Mutex as StdMutex;
 use std::sync::atomic::{AtomicUsize, Ordering};
 

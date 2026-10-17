@@ -3,7 +3,7 @@ use crate::support::*;
 use lash_core::facade_support::{ModelToolReturnPart, SchemaResolutionRequest, resolve_schema};
 use lash_core::llm::types::{ExecutionEvidenceMergeError, LlmMessage};
 use lash_llm_transport::tool_result_text;
-use lash_sansio::llm::types::{StreamBlockEvent, StreamBlockKind};
+use lash_protocol_types::{llm::types::StreamBlockEvent, llm::types::StreamBlockKind};
 use std::borrow::Cow;
 
 const PROVIDER: &str = "OpenAI-compatible";
@@ -327,7 +327,7 @@ impl OpenAiCompatibleProvider {
                         "name": tool.name,
                         "description": tool.description,
                         "parameters": resolved.schema,
-                        "strict": resolved.dialect == lash_sansio::SchemaDialect::OpenaiStrictToolParameters,
+                        "strict": resolved.dialect == lash_protocol_types::SchemaDialect::OpenaiStrictToolParameters,
                     },
                 }))
             })

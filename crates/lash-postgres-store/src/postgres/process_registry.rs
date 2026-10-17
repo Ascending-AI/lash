@@ -9,8 +9,8 @@ mod roster;
 use crate::*;
 use lash_core_execution::ProcessQuery as _;
 use lash_core_execution::facade_support;
-use lash_sansio::ProcessId;
-use lash_sansio::SessionId;
+use lash_protocol_types::ProcessId;
+use lash_protocol_types::SessionId;
 #[path = "process_registry/event_release.rs"]
 mod event_release;
 #[path = "process_registry/lifecycle.rs"]

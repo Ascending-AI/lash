@@ -11,7 +11,7 @@ use std::time::{Duration, Instant};
 
 use anyhow::{Context, Result};
 use futures_util::future::BoxFuture;
-use lash_sansio::SessionId;
+use lash_protocol_types::SessionId;
 
 use super::ledger::{Arrival, ServiceMarks};
 use super::{Backend, Marks, Population};

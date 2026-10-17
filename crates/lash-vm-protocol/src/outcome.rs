@@ -37,7 +37,7 @@ pub enum SupervisorEvidence {
     ForbiddenSyscall,
 }
 
-pub use lash_sansio::worker_limit::{WorkerFrameKind, WorkerLimit};
+pub use lash_protocol_types::{worker_limit::WorkerFrameKind, worker_limit::WorkerLimit};
 
 /// A diagnostic beside a typed cause, cut to [`Self::MAX_BYTES`]. The variant
 /// that carries it decides the class; the bound keeps a refusal within any
@@ -329,7 +329,7 @@ impl std::fmt::Display for RunInput {
 pub enum RunRefusal {
     #[error("unusable payload schema: {source}")]
     UnusableSchema {
-        source: Box<lash_sansio::SchemaAdmissionError>,
+        source: Box<lash_protocol_types::SchemaAdmissionError>,
     },
     #[error("{refusal}")]
     Checkpoint { refusal: CheckpointRefusal },

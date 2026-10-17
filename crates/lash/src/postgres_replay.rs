@@ -10,7 +10,7 @@ use std::time::Duration;
 
 use futures_util::Stream;
 use lash_postgres_store::host::ReconnectPolicy;
-use lash_sansio::sync::MutexExt as _;
+use lash_protocol_types::sync::MutexExt as _;
 use sqlx::postgres::PgListener;
 use tokio::sync::watch;
 

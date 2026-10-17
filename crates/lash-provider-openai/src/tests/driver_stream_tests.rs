@@ -9,7 +9,7 @@
 
 use super::*;
 use lash_llm_transport::{LlmByteStream, LlmHttpResponse, run_with_timeout};
-use lash_sansio::llm::types::{StreamBlockEvent, StreamBlockKind};
+use lash_protocol_types::{llm::types::StreamBlockEvent, llm::types::StreamBlockKind};
 
 #[tokio::test]
 async fn unsuccessful_http_response_emits_no_response_establishment_marker() {

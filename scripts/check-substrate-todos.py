@@ -50,6 +50,7 @@ SUBSTRATE_PATHS = (
     "crates/lash-postgres-store",
     "crates/lash-protocol-rlm",
     "crates/lash-sansio",
+    "crates/lash-protocol-types",
     "crates/lash-sqlite-store",
     "crates/lash-store-sql",
     "crates/lash-vm-broker",

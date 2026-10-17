@@ -1,5 +1,5 @@
 use super::support::*;
-use lash_sansio::sync::MutexExt as _;
+use lash_protocol_types::sync::MutexExt as _;
 use std::num::NonZeroUsize;
 use std::sync::atomic::{AtomicUsize, Ordering};
 
@@ -722,14 +722,14 @@ mod wire_bytes_tests;
 pub(super) fn empty_request() -> LlmRequest {
     LlmRequest {
         instructions: None,
-        model: lash_sansio::llm_profile::LlmProfileConfig::new(
-            lash_sansio::llm_profile::RecordedLlmProfile::mint(
-                lash_sansio::llm_profile::LlmProfileKey::new("request-fixture"),
-                lash_sansio::llm_profile::LlmProfileMetadata::builder("model".to_string())
+        model: lash_protocol_types::llm_profile::LlmProfileConfig::new(
+            lash_protocol_types::llm_profile::RecordedLlmProfile::mint(
+                lash_protocol_types::llm_profile::LlmProfileKey::new("request-fixture"),
+                lash_protocol_types::llm_profile::LlmProfileMetadata::builder("model".to_string())
                     .context_window_tokens(128_000)
                     .capability(crate::LlmProfileCapability::default())
                     .extra_body(Default::default())
-                    .cache_retention(lash_sansio::llm::capability::CacheRetention::Short)
+                    .cache_retention(lash_protocol_types::llm::capability::CacheRetention::Short)
                     .build()
                     .expect("valid profile"),
             ),
@@ -777,7 +777,7 @@ async fn provider_handle_records_drop_without_provider_trace_and_stamps_fresh_st
         .complete(
             request,
             crate::ChargeSafetyPolicy::RequireGuarantee,
-            lash_sansio::ExecutionBudgets::recommended(),
+            lash_protocol_types::ExecutionBudgets::recommended(),
             &NoSlotDeliveries,
         )
         .await
@@ -842,7 +842,7 @@ async fn same_provider_and_model_on_distinct_gateways_are_foreign_routes() {
         .complete(
             request,
             crate::ChargeSafetyPolicy::RequireGuarantee,
-            lash_sansio::ExecutionBudgets::recommended(),
+            lash_protocol_types::ExecutionBudgets::recommended(),
             &NoSlotDeliveries,
         )
         .await
@@ -872,7 +872,7 @@ async fn invalid_endpoint_failure_records_a_real_no_response_attempt() {
         .complete(
             empty_request(),
             crate::ChargeSafetyPolicy::RequireGuarantee,
-            lash_sansio::ExecutionBudgets::recommended(),
+            lash_protocol_types::ExecutionBudgets::recommended(),
             &NoSlotDeliveries,
         )
         .await
@@ -921,7 +921,7 @@ async fn call_id_derives_from_the_request_scope() {
         .complete(
             request.clone(),
             crate::ChargeSafetyPolicy::RequireGuarantee,
-            lash_sansio::ExecutionBudgets::recommended(),
+            lash_protocol_types::ExecutionBudgets::recommended(),
             &NoSlotDeliveries,
         )
         .await
@@ -930,7 +930,7 @@ async fn call_id_derives_from_the_request_scope() {
         .complete(
             request,
             crate::ChargeSafetyPolicy::RequireGuarantee,
-            lash_sansio::ExecutionBudgets::recommended(),
+            lash_protocol_types::ExecutionBudgets::recommended(),
             &NoSlotDeliveries,
         )
         .await
@@ -947,7 +947,7 @@ async fn call_id_derives_from_the_request_scope() {
         .complete(
             other,
             crate::ChargeSafetyPolicy::RequireGuarantee,
-            lash_sansio::ExecutionBudgets::recommended(),
+            lash_protocol_types::ExecutionBudgets::recommended(),
             &NoSlotDeliveries,
         )
         .await
@@ -965,7 +965,7 @@ async fn provider_handle_rejects_instead_of_recertifying_foreign_stamped_output(
         .complete(
             empty_request(),
             crate::ChargeSafetyPolicy::RequireGuarantee,
-            lash_sansio::ExecutionBudgets::recommended(),
+            lash_protocol_types::ExecutionBudgets::recommended(),
             &NoSlotDeliveries,
         )
         .await
@@ -990,7 +990,7 @@ async fn partial_response_origin_conflict_retains_original_provider_failure_evid
         .complete(
             empty_request(),
             crate::ChargeSafetyPolicy::RequireGuarantee,
-            lash_sansio::ExecutionBudgets::recommended(),
+            lash_protocol_types::ExecutionBudgets::recommended(),
             &NoSlotDeliveries,
         )
         .await
@@ -1218,7 +1218,7 @@ async fn provider_handle_records_aborted_and_interrupted_outcomes() {
             .complete(
                 empty_request(),
                 crate::ChargeSafetyPolicy::RequireGuarantee,
-                lash_sansio::ExecutionBudgets::recommended(),
+                lash_protocol_types::ExecutionBudgets::recommended(),
                 &NoSlotDeliveries,
             )
             .await
@@ -1241,7 +1241,7 @@ async fn failed_stream_attempt_retains_observed_usage_and_evidence_in_ledger() {
         .complete(
             empty_request(),
             crate::ChargeSafetyPolicy::RequireGuarantee,
-            lash_sansio::ExecutionBudgets::recommended(),
+            lash_protocol_types::ExecutionBudgets::recommended(),
             &NoSlotDeliveries,
         )
         .await
@@ -1291,7 +1291,7 @@ async fn output_started_failure_is_typed_non_retryable_when_max_attempts_is_one(
         .complete(
             empty_request(),
             crate::ChargeSafetyPolicy::RequireGuarantee,
-            lash_sansio::ExecutionBudgets::recommended(),
+            lash_protocol_types::ExecutionBudgets::recommended(),
             &NoSlotDeliveries,
         )
         .await
@@ -1305,7 +1305,7 @@ async fn output_started_failure_is_typed_non_retryable_when_max_attempts_is_one(
             .retry_decision
             .as_ref()
             .and_then(|decision| decision.denial_reason()),
-        Some(lash_sansio::llm::types::ChargeSafetyDenialReason::GuaranteeRequired)
+        Some(lash_protocol_types::llm::types::ChargeSafetyDenialReason::GuaranteeRequired)
     );
     assert_eq!(
         failure.call_record.attempts[0]
@@ -1530,7 +1530,9 @@ async fn provider_handle_retries_retryable_failures_in_shared_executor() {
             crate::ChargeSafetyPolicy::default(),
             &instruments,
             Some(&permit),
-            super::handle::ModelCallBounds::unnested(lash_sansio::ExecutionBudgets::recommended()),
+            super::handle::ModelCallBounds::unnested(
+                lash_protocol_types::ExecutionBudgets::recommended(),
+            ),
         )
         .await
         .expect("eventual success");
@@ -1629,7 +1631,7 @@ async fn provider_handle_records_usage_and_evidence_for_any_provider_kind() {
         .complete(
             empty_request(),
             crate::ChargeSafetyPolicy::RequireGuarantee,
-            lash_sansio::ExecutionBudgets::recommended(),
+            lash_protocol_types::ExecutionBudgets::recommended(),
             &NoSlotDeliveries,
         )
         .await
@@ -1754,7 +1756,7 @@ async fn provider_handle_stops_on_non_retryable_failure() {
         .complete(
             empty_request(),
             crate::ChargeSafetyPolicy::RequireGuarantee,
-            lash_sansio::ExecutionBudgets::recommended(),
+            lash_protocol_types::ExecutionBudgets::recommended(),
             &NoSlotDeliveries,
         )
         .await
@@ -1804,7 +1806,9 @@ async fn provider_handle_throttle_with_retry_after_does_not_consume_attempts() {
             crate::ChargeSafetyPolicy::default(),
             &instruments,
             Some(&permit),
-            super::handle::ModelCallBounds::unnested(lash_sansio::ExecutionBudgets::recommended()),
+            super::handle::ModelCallBounds::unnested(
+                lash_protocol_types::ExecutionBudgets::recommended(),
+            ),
         )
         .await
         .expect("success after deferred throttle waits");
@@ -1853,7 +1857,7 @@ async fn provider_handle_retry_after_beyond_cap_fails_without_sleeping() {
         .complete(
             empty_request(),
             crate::ChargeSafetyPolicy::RequireGuarantee,
-            lash_sansio::ExecutionBudgets::recommended(),
+            lash_protocol_types::ExecutionBudgets::recommended(),
             &NoSlotDeliveries,
         )
         .await
@@ -1866,7 +1870,7 @@ async fn provider_handle_retry_after_beyond_cap_fails_without_sleeping() {
             .retry_decision
             .as_ref()
             .and_then(|decision| decision.decline_cause()),
-        Some(lash_sansio::llm::types::RetryDeclineCause::RetryAfterExceedsCap)
+        Some(lash_protocol_types::llm::types::RetryDeclineCause::RetryAfterExceedsCap)
     );
 }
 
@@ -1889,7 +1893,7 @@ async fn provider_handle_repeated_past_http_dates_are_attempt_bounded() {
         .complete(
             empty_request(),
             crate::ChargeSafetyPolicy::RequireGuarantee,
-            lash_sansio::ExecutionBudgets::recommended(),
+            lash_protocol_types::ExecutionBudgets::recommended(),
             &NoSlotDeliveries,
         )
         .await
@@ -1939,7 +1943,7 @@ async fn provider_handle_throttle_budget_exhaustion_degrades_to_attempt_counting
         .complete(
             empty_request(),
             crate::ChargeSafetyPolicy::RequireGuarantee,
-            lash_sansio::ExecutionBudgets::recommended(),
+            lash_protocol_types::ExecutionBudgets::recommended(),
             &NoSlotDeliveries,
         )
         .await
@@ -1972,7 +1976,7 @@ async fn provider_handle_one_second_throttle_storm_has_a_total_call_bound() {
         .complete(
             empty_request(),
             crate::ChargeSafetyPolicy::RequireGuarantee,
-            lash_sansio::ExecutionBudgets::recommended(),
+            lash_protocol_types::ExecutionBudgets::recommended(),
             &NoSlotDeliveries,
         )
         .await
@@ -2023,7 +2027,7 @@ async fn provider_handle_throttle_without_retry_after_uses_counted_backoff_retry
         .complete(
             empty_request(),
             crate::ChargeSafetyPolicy::RequireGuarantee,
-            lash_sansio::ExecutionBudgets::recommended(),
+            lash_protocol_types::ExecutionBudgets::recommended(),
             &NoSlotDeliveries,
         )
         .await
@@ -2059,7 +2063,7 @@ async fn provider_handle_throttle_with_malformed_retry_after_uses_counted_backof
         .complete(
             empty_request(),
             crate::ChargeSafetyPolicy::RequireGuarantee,
-            lash_sansio::ExecutionBudgets::recommended(),
+            lash_protocol_types::ExecutionBudgets::recommended(),
             &NoSlotDeliveries,
         )
         .await
@@ -2096,7 +2100,7 @@ async fn provider_handle_server_error_with_retry_after_is_not_retried() {
         .complete(
             empty_request(),
             crate::ChargeSafetyPolicy::RequireGuarantee,
-            lash_sansio::ExecutionBudgets::recommended(),
+            lash_protocol_types::ExecutionBudgets::recommended(),
             &NoSlotDeliveries,
         )
         .await
@@ -2128,7 +2132,7 @@ async fn provider_handle_attachment_413_remains_plain_non_retryable_validation()
         .complete(
             empty_request(),
             crate::ChargeSafetyPolicy::RequireGuarantee,
-            lash_sansio::ExecutionBudgets::recommended(),
+            lash_protocol_types::ExecutionBudgets::recommended(),
             &NoSlotDeliveries,
         )
         .await
@@ -2189,7 +2193,7 @@ impl Provider for AdmissionRecorder {
     fn encode_slot(
         &self,
         slot: &AttachmentSlot,
-        delivery: &lash_sansio::llm::attachment_delivery::Delivery,
+        delivery: &lash_protocol_types::llm::attachment_delivery::Delivery,
     ) -> Result<TransientJson, LlmTransportError> {
         self.inner.encode_slot(slot, delivery)
     }
@@ -2245,7 +2249,7 @@ async fn admission_decorator_observes_all_retry_requests_with_session_identity()
         .complete(
             request.clone(),
             crate::ChargeSafetyPolicy::RequireGuarantee,
-            lash_sansio::ExecutionBudgets::recommended(),
+            lash_protocol_types::ExecutionBudgets::recommended(),
             &NoSlotDeliveries,
         )
         .await

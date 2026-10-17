@@ -18,10 +18,14 @@
 
 pub mod epilogue;
 
-use lash_sansio::llm::types::{
-    LlmMessage, LlmOutputPart, LlmStreamEvent, LlmTerminalReason, LlmUsage,
+use lash_protocol_types::{
+    llm::types::LlmMessage, llm::types::LlmOutputPart, llm::types::LlmStreamEvent,
+    llm::types::LlmTerminalReason, llm::types::LlmUsage,
 };
-use lash_sansio::session_model::{Message, MessageRole, Part, render_prompt, shared_parts};
+use lash_protocol_types::{
+    session_model::Message, session_model::MessageRole, session_model::Part,
+    session_model::render_prompt, session_model::shared_parts,
+};
 use serde_json::Value;
 
 /// The canonical scenarios every provider must normalize identically. Each
@@ -460,7 +464,7 @@ fn standard_next_request_messages(parts: &[LlmOutputPart]) -> Vec<LlmMessage> {
                 response_meta.clone(),
             )),
             LlmOutputPart::Reasoning { text, replay } => {
-                history_parts.push(lash_sansio::reasoning_part(
+                history_parts.push(lash_protocol_types::reasoning_part(
                     assistant_id,
                     history_parts.len(),
                     text.clone(),
@@ -475,7 +479,7 @@ fn standard_next_request_messages(parts: &[LlmOutputPart]) -> Vec<LlmMessage> {
             } => history_parts.push(Part::tool_call(
                 format!("{assistant_id}.p{}", history_parts.len()),
                 input_json.clone(),
-                lash_sansio::ToolCallId::fixture(call_id),
+                lash_protocol_types::ToolCallId::fixture(call_id),
                 call_id.clone(),
                 tool_name.clone(),
                 replay.clone(),

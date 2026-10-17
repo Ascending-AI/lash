@@ -14,7 +14,7 @@
 //! host needing hard isolation builds it into its own engine.
 
 use crate::ToolId;
-use lash_sansio::ToolCallId;
+use lash_protocol_types::ToolCallId;
 
 /// An isolated call, as admission asks its provider for its start.
 #[derive(Clone, Copy, Debug)]

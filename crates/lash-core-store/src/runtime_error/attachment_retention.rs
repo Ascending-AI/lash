@@ -128,8 +128,8 @@ impl AttachmentRetentionStoreFailure {
 impl AttachmentRetentionFailure {
     /// The tool-visible class of a failed attachment retention. This does
     /// not authorize replaying the external tool that produced the attachment.
-    pub fn tool_failure_class(&self) -> lash_sansio::ToolFailureClass {
-        use lash_sansio::ToolFailureClass as C;
+    pub fn tool_failure_class(&self) -> lash_protocol_types::ToolFailureClass {
+        use lash_protocol_types::ToolFailureClass as C;
         match self {
             Self::SizeLimitExceeded { .. }
             | Self::ReadLimitExceeded { .. }

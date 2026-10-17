@@ -3,7 +3,7 @@
 
 use super::*;
 use crate::recovery::*;
-use lash_sansio::sync::MutexExt;
+use lash_protocol_types::sync::MutexExt;
 use std::sync::Mutex;
 
 use lash_core::SessionGraph;
@@ -218,13 +218,13 @@ fn build_compaction_ctx(
 
 fn llm_completion(text: &str) -> lash_core::plugin::DirectLlmCompletion {
     lash_core::plugin::DirectLlmCompletion {
-        response: lash_sansio::llm::types::LlmResponse {
-            parts: vec![lash_sansio::llm::types::LlmOutputPart::Text {
+        response: lash_protocol_types::llm::types::LlmResponse {
+            parts: vec![lash_protocol_types::llm::types::LlmOutputPart::Text {
                 text: text.to_string(),
                 response_meta: None,
             }],
             usage: Default::default(),
-            terminal_reason: lash_sansio::llm::types::LlmTerminalReason::Stop,
+            terminal_reason: lash_protocol_types::llm::types::LlmTerminalReason::Stop,
             ..Default::default()
         },
         usage: Default::default(),
@@ -236,7 +236,7 @@ struct RecordingLlmCompletions {
     requests: Mutex<Vec<lash_core::LlmRequest>>,
     summary: String,
     error: Option<PluginError>,
-    terminal_reason: lash_sansio::llm::types::LlmTerminalReason,
+    terminal_reason: lash_protocol_types::llm::types::LlmTerminalReason,
 }
 
 impl Default for RecordingLlmCompletions {
@@ -245,7 +245,7 @@ impl Default for RecordingLlmCompletions {
             requests: Mutex::new(Vec::new()),
             summary: String::new(),
             error: None,
-            terminal_reason: lash_sansio::llm::types::LlmTerminalReason::Stop,
+            terminal_reason: lash_protocol_types::llm::types::LlmTerminalReason::Stop,
         }
     }
 }
@@ -277,7 +277,9 @@ impl RecordingLlmCompletions {
             .iter()
             .flat_map(|message| message.blocks.iter())
             .filter_map(|block| match block {
-                lash_sansio::llm::types::LlmContentBlock::Text { text, .. } => Some(text.as_ref()),
+                lash_protocol_types::llm::types::LlmContentBlock::Text { text, .. } => {
+                    Some(text.as_ref())
+                }
                 _ => None,
             })
             .collect::<Vec<_>>()
@@ -806,8 +808,8 @@ async fn overflow_after_turn_queues_marker_for_context_overflow_outcome_only() {
         session_id: SessionId::from("root"),
         turn: overflow_turn_report(lash_core::facade_support::TurnOutcome::Stopped(
             lash_core::facade_support::TurnStop::ProviderError {
-                cause: lash_sansio::TurnErrorCause::new(
-                    lash_sansio::TurnErrorCode::ProviderRejected,
+                cause: lash_protocol_types::TurnErrorCause::new(
+                    lash_protocol_types::TurnErrorCode::ProviderRejected,
                 ),
             },
         )),
@@ -1130,10 +1132,10 @@ fn compactable_messages() -> Vec<Message> {
 #[tokio::test]
 async fn standard_compactor_refuses_incomplete_terminal_reasons_as_frame_seed() {
     for reason in [
-        lash_sansio::llm::types::LlmTerminalReason::OutputLimit,
-        lash_sansio::llm::types::LlmTerminalReason::ContentFilter,
-        lash_sansio::llm::types::LlmTerminalReason::ToolUse,
-        lash_sansio::llm::types::LlmTerminalReason::Cancelled,
+        lash_protocol_types::llm::types::LlmTerminalReason::OutputLimit,
+        lash_protocol_types::llm::types::LlmTerminalReason::ContentFilter,
+        lash_protocol_types::llm::types::LlmTerminalReason::ToolUse,
+        lash_protocol_types::llm::types::LlmTerminalReason::Cancelled,
     ] {
         let captured = Arc::new(RecordingLlmCompletions {
             summary: "partial summary".to_string(),
@@ -1199,10 +1201,12 @@ async fn pressure_retains_the_latest_physical_turn_with_its_tool_pair() {
     let mut result = text_message("new-r", MessageRole::User, "");
     result.parts = vec![Part::tool_result(
         "r.p0".into(),
-        vec![lash_sansio::ModelToolReturnPart::text("tool result")],
+        vec![lash_protocol_types::ModelToolReturnPart::text(
+            "tool result",
+        )],
         call_id,
         "read_file".into(),
-        lash_sansio::ToolCallStatus::Success,
+        lash_protocol_types::ToolCallStatus::Success,
     )]
     .into();
     let assistant = text_message("new-a", MessageRole::Assistant, "new answer");
@@ -1262,8 +1266,8 @@ async fn pressure_retains_the_latest_physical_turn_with_its_tool_pair() {
             .flat_map(|message| message.blocks.iter())
             .all(|block| !matches!(
                 block,
-                lash_sansio::llm::types::LlmContentBlock::ToolCall { .. }
-                    | lash_sansio::llm::types::LlmContentBlock::ToolResult { .. }
+                lash_protocol_types::llm::types::LlmContentBlock::ToolCall { .. }
+                    | lash_protocol_types::llm::types::LlmContentBlock::ToolResult { .. }
             )),
         "no half-pair in the summarized prefix"
     );

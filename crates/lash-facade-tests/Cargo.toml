@@ -26,7 +26,7 @@ http-transport = ["lash/http-transport"]
 lash = { path = "../lash", package = "lash-runtime", default-features = false, features = ["testing"] }
 lash-core = { workspace = true, features = ["testing"] }
 lash-core-store.workspace = true
-lash-sansio.workspace = true
+lash-protocol-types.workspace = true
 lash-conformance.workspace = true
 lash-sqlite-store = { workspace = true, features = ["testing"] }
 lash-postgres-store = { workspace = true, features = ["testing"] }
@@ -39,6 +39,7 @@ tempfile.workspace = true
 uuid.workspace = true
 
 [dev-dependencies]
+lash-sansio.workspace = true
 futures-util.workspace = true
 serde.workspace = true
 thiserror.workspace = true

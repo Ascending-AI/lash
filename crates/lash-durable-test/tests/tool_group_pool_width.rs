@@ -16,7 +16,7 @@
 // Test code: the PostgreSQL leg reads its database URL from the environment.
 #![allow(clippy::disallowed_methods, clippy::expect_used, clippy::unwrap_used)]
 
-use lash_sansio::llm::types::{StreamBlockEvent, StreamBlockKind};
+use lash_protocol_types::{llm::types::StreamBlockEvent, llm::types::StreamBlockKind};
 use std::sync::{Arc, Mutex};
 use std::time::Duration;
 
@@ -32,8 +32,8 @@ use lash_core_execution::{
 use lash_durable::runner::Activation;
 use lash_durable::{ActorKey, ActorState, DurableStore, LeaseConfig};
 use lash_durable_test::{Matrix, Scenario, SimClock, SimNodes, SimNodesConfig, Tripwire};
-use lash_sansio::sync::MutexExt as _;
-use lash_sansio::{SessionId, TurnId};
+use lash_protocol_types::sync::MutexExt as _;
+use lash_protocol_types::{SessionId, TurnId};
 
 const SESSION: &str = "pool-width-session";
 const RUN: &str = "pool-width-turn";

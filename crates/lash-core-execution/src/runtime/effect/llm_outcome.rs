@@ -6,7 +6,7 @@ use serde::{Deserialize, Serialize};
 /// the call's receipt-to-be.
 #[derive(Debug)]
 pub struct RuntimeLlmCallOutcome {
-    pub result: Result<crate::llm::types::LlmResponse, crate::sansio::LlmCallError>,
+    pub result: Result<crate::llm::types::LlmResponse, lash_protocol_types::LlmCallError>,
     pub text_streamed: bool,
     pub call_record: Option<crate::LlmCallRecord>,
     pub stream: LlmStreamRecord,

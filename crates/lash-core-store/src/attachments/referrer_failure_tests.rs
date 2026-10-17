@@ -257,7 +257,7 @@ async fn put(store: &RuntimeAttachmentStore) -> AttachmentStoreError {
         .put(
             b"referrers failure probe".to_vec(),
             AttachmentCreateMeta::new(
-                lash_sansio::MediaType::parse("text/plain").unwrap(),
+                lash_protocol_types::MediaType::parse("text/plain").unwrap(),
                 None,
                 None,
             ),

@@ -2,7 +2,7 @@
 //! send-to-completion diagnostic. The observer retains discovery lag only;
 //! phase boundaries come from the serving engine's successful commits.
 
-use lash_sansio::llm::types::{StreamBlockEvent, StreamBlockKind};
+use lash_protocol_types::{llm::types::StreamBlockEvent, llm::types::StreamBlockKind};
 use std::collections::BTreeMap;
 use std::path::{Path, PathBuf};
 use std::sync::Arc;
@@ -12,8 +12,8 @@ use anyhow::{Context, Result};
 use lash_core::perf_witness::latency::{Collector, Snapshot, Stamp, Worker};
 use serde::Serialize;
 
-use lash_sansio::SessionId;
-use lash_sansio::sync::MutexExt;
+use lash_protocol_types::SessionId;
+use lash_protocol_types::sync::MutexExt;
 
 use super::FollowerMode;
 use super::provider::{

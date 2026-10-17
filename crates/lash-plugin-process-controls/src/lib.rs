@@ -497,7 +497,7 @@ pub async fn execute_process_list_tool_call(
         }
         let inline = match context
             .resolve_inline_start(
-                lash_sansio::LASH_VM_ENGINE_KIND,
+                lash_protocol_types::LASH_VM_ENGINE_KIND,
                 value,
                 serde_json::Map::new(),
             )

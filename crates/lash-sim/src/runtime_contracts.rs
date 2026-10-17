@@ -1,8 +1,8 @@
 const RUNTIME_TURN_CONTRACT_ORACLE: crate::trace::OracleId<'static> =
     crate::trace::OracleId::real("runtime.turn_contract");
 use lash_core::facade_support::SessionGraphFacadeOps;
-use lash_sansio::SessionId;
-use lash_sansio::llm::types::{StreamBlockEvent, StreamBlockKind};
+use lash_protocol_types::SessionId;
+use lash_protocol_types::{llm::types::StreamBlockEvent, llm::types::StreamBlockKind};
 use std::collections::{BTreeMap, BTreeSet};
 
 use serde::{Deserialize, Serialize, ser::SerializeStruct};

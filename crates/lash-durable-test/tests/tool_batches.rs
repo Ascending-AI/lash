@@ -35,7 +35,7 @@ use std::sync::{Arc, Mutex};
 use lash_core::ToolDefinitionBindingExt as _;
 use lash_core::llm::types::LlmResponse;
 use lash_core::{ToolCall, ToolOutcome};
-use lash_sansio::sync::MutexExt as _;
+use lash_protocol_types::sync::MutexExt as _;
 
 use served::{Tier, World};
 
@@ -859,7 +859,7 @@ fn assert_step_limit_refusal(world: &World, name: &str, output: &lash::TurnOutpu
         );
         assert_eq!(
             failure.source,
-            lash_sansio::ToolFailureSource::Runtime,
+            lash_protocol_types::ToolFailureSource::Runtime,
             "{name}"
         );
     }
@@ -881,19 +881,19 @@ fn assert_step_limit_refusal(world: &World, name: &str, output: &lash::TurnOutpu
                 ..
             } if tool_name.as_deref() == Some("batch") => {
                 // The wrapper completes; each member keeps its own success flag.
-                assert_eq!(*status, lash_sansio::ToolCallStatus::Success);
+                assert_eq!(*status, lash_protocol_types::ToolCallStatus::Success);
                 let text = content
                     .iter()
                     .filter_map(|part| part.visible_text())
                     .collect::<String>();
                 let value: serde_json::Value = serde_json::from_str(&text).expect("batch result");
-                let rows: Vec<lash_sansio::BatchResultRow> =
+                let rows: Vec<lash_protocol_types::BatchResultRow> =
                     serde_json::from_value(value["results"].clone())
                         .expect("typed member outcomes");
                 rows.iter().filter(|row| !row.success).count()
             }
             lash_core::llm::types::LlmContentBlock::ToolResult {
-                status: lash_sansio::ToolCallStatus::Failure,
+                status: lash_protocol_types::ToolCallStatus::Failure,
                 ..
             } => 1,
             _ => 0,
@@ -1289,7 +1289,7 @@ fn rows(answered: &served::Answered) -> Vec<(u64, String, bool)> {
 fn assert_runtime_refusal(
     output: &lash::TurnOutput,
     answered: &served::Answered,
-    class: lash_sansio::ToolFailureClass,
+    class: lash_protocol_types::ToolFailureClass,
     code: &str,
 ) {
     let call = output
@@ -1303,7 +1303,10 @@ fn assert_runtime_refusal(
     };
     assert_eq!(failure.class, class);
     assert_eq!(failure.code, code);
-    assert_eq!(failure.source, lash_sansio::ToolFailureSource::Runtime);
+    assert_eq!(
+        failure.source,
+        lash_protocol_types::ToolFailureSource::Runtime
+    );
     assert!(!failure.message.is_empty(), "a refusal explains its cause");
 }
 
@@ -1441,7 +1444,7 @@ async fn batch_admission_and_identity_contract(tier: Tier) {
         assert_runtime_refusal(
             &output,
             &wrapper[0],
-            lash_sansio::ToolFailureClass::InvalidRequest,
+            lash_protocol_types::ToolFailureClass::InvalidRequest,
             "invalid_batch",
         );
     }
@@ -1523,7 +1526,7 @@ async fn batch_admission_and_identity_contract(tier: Tier) {
         })
         .and_then(|part| part.tool_result_status())
         .expect("typed wrapper result");
-    assert_eq!(status, lash_sansio::ToolCallStatus::Failure);
+    assert_eq!(status, lash_protocol_types::ToolCallStatus::Failure);
     assert!(
         matches!(&output.result.tool_calls[0].output.outcome, lash_core::ToolCallOutcome::Failure(failure) if failure.code == "tool_unavailable")
     );

@@ -4,7 +4,7 @@ use std::sync::{Arc, Mutex};
 
 use lash_durable::domain::TurnCancelRequest;
 use lash_durable::{ActorCommit, ActorTx, CommitLabel, DurableError};
-use lash_sansio::sync::MutexExt as _;
+use lash_protocol_types::sync::MutexExt as _;
 use tokio_util::sync::CancellationToken;
 
 /// The model response that asked for a cell, held uncommitted by its turn

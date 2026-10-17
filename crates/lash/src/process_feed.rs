@@ -62,7 +62,7 @@ use lash_core::{
     ProcessReplaySubscribeOutcome, ProcessReplaySubscription, ProcessSequence, RetainedProcessView,
     RetiredProcessStatus,
 };
-use lash_sansio::ProcessId;
+use lash_protocol_types::ProcessId;
 
 use crate::language_observation::CommittedPublication;
 use crate::support::{Arc, EmbedError, Result, RuntimeErrorCode};

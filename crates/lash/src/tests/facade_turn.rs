@@ -68,7 +68,8 @@ async fn three_step_tool_calls_survive_owner_loss_and_cold_reattachment() {
                 .expect("core")
             };
             let old = build("three-steps-old");
-            let id = lash_sansio::SessionId::try_from("three-steps".to_owned()).expect("id");
+            let id =
+                lash_protocol_types::SessionId::try_from("three-steps".to_owned()).expect("id");
             let session = old
                 .session(id.clone())
                 .create(crate::SessionCreation::root(mock_session_spec()))

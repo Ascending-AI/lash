@@ -45,7 +45,7 @@ pub trait ArtifactCleanupAuthorities: Send + Sync {
     /// The engine's verdict on `journal` (ADR 0113 §2.5).
     async fn journal_replay(
         &self,
-        journal: &lash_sansio::EffectJournalIdentity,
+        journal: &lash_protocol_types::EffectJournalIdentity,
     ) -> Result<JournalReplay, String>;
 
     async fn frame_is_retained(&self, frame: &crate::FrameEnvironmentId) -> Result<bool, String>;
@@ -72,7 +72,7 @@ impl ArtifactCleanupAuthorities for StoreSetAuthorities {
     /// this build cannot read names an execution it cannot prove ended.
     async fn journal_replay(
         &self,
-        journal: &lash_sansio::EffectJournalIdentity,
+        journal: &lash_protocol_types::EffectJournalIdentity,
     ) -> Result<JournalReplay, String> {
         let running = match crate::ExecutionScope::from_journal_key(journal.key()) {
             Some(crate::ExecutionScope::Turn {
@@ -242,7 +242,7 @@ impl ArtifactCleanupRelay {
 
     async fn journal_settled(
         &self,
-        journal: &lash_sansio::EffectJournalIdentity,
+        journal: &lash_protocol_types::EffectJournalIdentity,
     ) -> Result<bool, DeliveryFailure> {
         match self.ports.authorities.journal_replay(journal).await {
             Ok(JournalReplay::Settled) => Ok(true),
@@ -348,7 +348,7 @@ impl ArtifactCleanupRelay {
     async fn unregistered_start(
         &self,
         start_key: &StartKey,
-        starter: &lash_sansio::EffectJournalIdentity,
+        starter: &lash_protocol_types::EffectJournalIdentity,
     ) -> Result<Resolution, DeliveryFailure> {
         if super::is_start_operation(starter, start_key) || !self.journal_settled(starter).await? {
             return Ok(Resolution::NotYet);

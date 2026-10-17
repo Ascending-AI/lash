@@ -20,7 +20,7 @@
 //! callback ([`Watch`]). With no pending work when the cell ends, its end
 //! commits with `turn.commit`, even with that callback installed (FIG-6162).
 
-use lash_sansio::llm::types::{StreamBlockEvent, StreamBlockKind};
+use lash_protocol_types::{llm::types::StreamBlockEvent, llm::types::StreamBlockKind};
 use std::sync::{Arc, Weak};
 use std::time::Duration;
 
@@ -35,7 +35,7 @@ use lash_core::{ExecutionPolicy, LlmOutputPart, ToolCall, ToolOutcome};
 use lash_core_execution::Backend;
 use lash_durable::domain::{ExecKey, OwnerKey};
 use lash_durable_test::SimClock;
-use lash_sansio::{SessionId, TurnId};
+use lash_protocol_types::{SessionId, TurnId};
 
 use super::cases::run_of;
 use super::services::{EXT_WRITE, FINAL, TurnScript, kill_owner, session_id};

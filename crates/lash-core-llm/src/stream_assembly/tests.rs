@@ -33,7 +33,7 @@ fn stream_accumulator_preserves_reasoning_when_final_response_has_tool_call() {
         "call_1".to_string(),
         "get_time".to_string(),
         "{\"timezone\":\"UTC\"}".to_string(),
-        Some(lash_sansio::llm::types::ProviderReplayMeta {
+        Some(lash_protocol_types::llm::types::ProviderReplayMeta {
             item_id: Some("item_1".to_string()),
             opaque: Some("sig".to_string()),
             ..Default::default()
@@ -45,7 +45,7 @@ fn stream_accumulator_preserves_reasoning_when_final_response_has_tool_call() {
             call_id: "call_1".to_string(),
             tool_name: "get_time".to_string(),
             input_json: "{\"timezone\":\"UTC\"}".to_string(),
-            replay: Some(lash_sansio::llm::types::ProviderReplayMeta {
+            replay: Some(lash_protocol_types::llm::types::ProviderReplayMeta {
                 item_id: Some("item_1".to_string()),
                 opaque: Some("sig".to_string()),
                 ..Default::default()

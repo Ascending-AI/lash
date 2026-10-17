@@ -87,14 +87,14 @@ reason = "names the projection a frozen request's call arguments were made under
 
 [[unregistered]]
 constant = "MODEL_RETURN_RENDERER"
-constant_path = "crates/lash-sansio/src/tool_output/graph.rs"
+constant_path = "crates/lash-protocol-types/src/tool_output/graph.rs"
 reason = "the spec whose digest identifies the one renderer a presentation recipe is reconstructed with; a recipe under another renderer is refused, never re-rendered, so it versions no stored shape"
 
 # BLAKE3 hash domains that are permanently reserved but no longer used: a
 # retired name must never identify another format. The domains in use are the
 # `lash*/vN` identity constants the release inventory resolves;
 # `python3 scripts/release_baseline.py tables --write` generates
-# crates/lash-sansio/src/blake3_domains.rs from both, and the release reset
+# crates/lash-protocol-types/src/blake3_domains.rs from both, and the release reset
 # appends the names it supersedes here.
 
 [[retired_hash_domain]]

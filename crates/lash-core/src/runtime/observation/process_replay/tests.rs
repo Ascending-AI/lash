@@ -5,7 +5,7 @@
 use std::sync::Mutex as StdMutex;
 use std::time::{Duration, Instant};
 
-use lash_sansio::sync::MutexExt as _;
+use lash_protocol_types::sync::MutexExt as _;
 
 use super::*;
 use crate::testing::{

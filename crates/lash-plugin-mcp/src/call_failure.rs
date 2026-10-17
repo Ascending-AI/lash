@@ -71,7 +71,7 @@ pub(crate) enum McpCallFailure {
     },
     ToolError {
         message: String,
-        #[serde(serialize_with = "lash_sansio::durable_serde::serialize")]
+        #[serde(serialize_with = "lash_protocol_types::durable_serde::serialize")]
         content: ToolValue,
     },
 }

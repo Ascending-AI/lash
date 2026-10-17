@@ -14,10 +14,10 @@
 
 use lash_core::TurnId;
 use lash_core::llm::types::{LlmTerminalReason, ProviderFailureKind};
-use lash_sansio::llm::types::{StreamBlockEvent, StreamBlockKind};
-use lash_sansio::{
+use lash_protocol_types::{
     ErrorEnvelope, FailureCode, ReportedFailure, RetryProgress, SessionStreamEvent, TurnFailureKind,
 };
+use lash_protocol_types::{llm::types::StreamBlockEvent, llm::types::StreamBlockKind};
 use std::collections::BTreeSet;
 
 use lash_core::{

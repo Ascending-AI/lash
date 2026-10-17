@@ -59,8 +59,8 @@ use lash_durable::{ActorKey, ActorState, CommitLabel, DomainWrite, DurableStore}
 use lash_durable_test::{
     Cut, Fault, Matrix, Scenario, SimClock, SimNodes, SimNodesConfig, Stored, Tripwire,
 };
-use lash_sansio::SessionId;
-use lash_sansio::sync::MutexExt as _;
+use lash_protocol_types::SessionId;
+use lash_protocol_types::sync::MutexExt as _;
 
 use dialect::Dialect;
 use served::Tier;

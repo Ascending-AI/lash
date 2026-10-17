@@ -244,7 +244,7 @@ type Tx = GuardedTx<'static>;
 /// delete's to peel.
 pub(crate) async fn retire_session_rows(
     tx: &mut PgConnection,
-    session: &lash_sansio::SessionId,
+    session: &lash_protocol_types::SessionId,
 ) -> Result<Vec<String>, sqlx::Error> {
     use lash_durable::domain::{ExecKey, OwnerKey, ScopeKey};
 
@@ -264,7 +264,7 @@ pub(crate) async fn retire_session_rows(
 /// nodes they held: the prune's to peel.
 pub(crate) async fn retire_process_rows(
     tx: &mut PgConnection,
-    process: &lash_sansio::ProcessId,
+    process: &lash_protocol_types::ProcessId,
 ) -> Result<Vec<String>, sqlx::Error> {
     let mut facts = run_records::delete_owner(
         &mut *tx,
@@ -274,7 +274,7 @@ pub(crate) async fn retire_process_rows(
     facts.extend(
         model_calls::delete_session(
             tx,
-            &lash_sansio::SessionId::prefixed("process:", process.as_str()),
+            &lash_protocol_types::SessionId::prefixed("process:", process.as_str()),
         )
         .await?,
     );
@@ -728,7 +728,7 @@ pub(crate) async fn wake_within(
 /// 0132 §12), creating it ready first when the session has none yet.
 pub(crate) async fn wake_session_within(
     tx: &mut PgConnection,
-    session: &lash_sansio::SessionId,
+    session: &lash_protocol_types::SessionId,
     control: bool,
     now: DurableInstant,
 ) -> Result<Woken, DurableError> {
@@ -753,7 +753,7 @@ pub(crate) async fn wake_session_within(
 /// session itself.
 pub(crate) async fn wake_session_tx(
     tx: &mut PgConnection,
-    session: &lash_sansio::SessionId,
+    session: &lash_protocol_types::SessionId,
     control: bool,
     at_ms: u64,
 ) -> Result<Option<Woken>, StoreError> {
@@ -1265,9 +1265,9 @@ impl DurableStore for PostgresDurableStore {
         }
         let turn_cancel = match (session, get::<Option<String>>(first, 10)?) {
             (Some(session), Some(run)) => {
-                let session = lash_sansio::SessionId::try_from(session.to_owned())
+                let session = lash_protocol_types::SessionId::try_from(session.to_owned())
                     .map_err(|_| corrupt("session id", session))?;
-                let run = lash_sansio::TurnId::try_from(run.clone())
+                let run = lash_protocol_types::TurnId::try_from(run.clone())
                     .map_err(|_| corrupt("turn id", &run))?;
                 let stored = (
                     get(first, 11)?,

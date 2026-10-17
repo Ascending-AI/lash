@@ -2,7 +2,7 @@ use crate::TurnId;
 use std::collections::BTreeSet;
 
 use crate::{Message, MessageRole, Part, PartKind, TurnFinish, TurnOutcome, shared_parts};
-use lash_sansio::core_support::TurnReplyCoreSupport;
+use lash_protocol_types::core_support::TurnReplyCoreSupport;
 
 use super::RuntimeSessionState;
 
@@ -47,7 +47,7 @@ pub(super) fn materialize_turn_reply(
     turn_id: &TurnId,
     message_id: &str,
     protocol_output: &ProtocolTerminalOutput,
-    cuts: lash_sansio::session_model::RuntimeOutputCuts,
+    cuts: lash_protocol_types::session_model::RuntimeOutputCuts,
 ) {
     let TurnOutcome::Finished(finish) = outcome else {
         return;
@@ -213,7 +213,7 @@ mod tests {
             &TurnId::from(TURN_ID),
             TERMINAL_ID,
             &protocol_output,
-            lash_sansio::session_model::RuntimeOutputCuts::standard(),
+            lash_protocol_types::session_model::RuntimeOutputCuts::standard(),
         );
 
         assert_eq!(
@@ -260,7 +260,7 @@ mod tests {
             &TurnId::from(TURN_ID),
             TERMINAL_ID,
             &ProtocolTerminalOutput::default(),
-            lash_sansio::session_model::RuntimeOutputCuts::standard(),
+            lash_protocol_types::session_model::RuntimeOutputCuts::standard(),
         );
 
         let messages = state.read_model().messages.clone();
@@ -313,7 +313,7 @@ mod tests {
             &TurnId::from(TURN_ID),
             TERMINAL_ID,
             &ProtocolTerminalOutput::default(),
-            lash_sansio::session_model::RuntimeOutputCuts::standard(),
+            lash_protocol_types::session_model::RuntimeOutputCuts::standard(),
         );
 
         assert_eq!(
@@ -360,7 +360,7 @@ mod tests {
             &turn(),
             TERMINAL_ID,
             &ProtocolTerminalOutput::default(),
-            lash_sansio::session_model::RuntimeOutputCuts::standard(),
+            lash_protocol_types::session_model::RuntimeOutputCuts::standard(),
         );
     }
 
@@ -422,10 +422,13 @@ mod tests {
 
         materialize(
             &mut state,
-            &final_value(serde_json::json!("é".repeat(
-                lash_sansio::session_model::RuntimeOutputCuts::standard().value_reply_max_chars
-                    + 10
-            ))),
+            &final_value(serde_json::json!(
+                "é".repeat(
+                    lash_protocol_types::session_model::RuntimeOutputCuts::standard()
+                        .value_reply_max_chars
+                        + 10
+                )
+            )),
         );
 
         let messages = state.read_model().messages.clone();
@@ -434,7 +437,8 @@ mod tests {
             .into_owned();
         assert_eq!(
             text.chars().count(),
-            lash_sansio::session_model::RuntimeOutputCuts::standard().value_reply_max_chars + 1
+            lash_protocol_types::session_model::RuntimeOutputCuts::standard().value_reply_max_chars
+                + 1
         );
         assert!(text.ends_with('…'));
     }
@@ -475,7 +479,7 @@ mod tests {
             &turn(),
             TERMINAL_ID,
             &protocol_output,
-            lash_sansio::session_model::RuntimeOutputCuts::standard(),
+            lash_protocol_types::session_model::RuntimeOutputCuts::standard(),
         );
 
         assert_eq!(
@@ -505,7 +509,7 @@ mod tests {
             &turn(),
             "first-attempt-reply",
             &ProtocolTerminalOutput::default(),
-            lash_sansio::session_model::RuntimeOutputCuts::standard(),
+            lash_protocol_types::session_model::RuntimeOutputCuts::standard(),
         );
         mark_all_persisted(&mut state);
         let before = message_ids(&state);
@@ -516,7 +520,7 @@ mod tests {
             &turn(),
             "fresh-attempt-reply",
             &ProtocolTerminalOutput::default(),
-            lash_sansio::session_model::RuntimeOutputCuts::standard(),
+            lash_protocol_types::session_model::RuntimeOutputCuts::standard(),
         );
         assert_eq!(
             reply_markers(&state).len(),
@@ -549,7 +553,7 @@ mod tests {
             &turn(),
             TERMINAL_ID,
             &protocol_output,
-            lash_sansio::session_model::RuntimeOutputCuts::standard(),
+            lash_protocol_types::session_model::RuntimeOutputCuts::standard(),
         );
 
         assert!(reply_markers(&state).is_empty());
@@ -571,7 +575,7 @@ mod tests {
             &TurnId::from(TURN_ID),
             TERMINAL_ID,
             &ProtocolTerminalOutput::default(),
-            lash_sansio::session_model::RuntimeOutputCuts::standard(),
+            lash_protocol_types::session_model::RuntimeOutputCuts::standard(),
         );
 
         assert_eq!(message_ids(&state), before);

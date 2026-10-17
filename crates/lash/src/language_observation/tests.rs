@@ -25,7 +25,7 @@ fn record(subject: TraceRuntimeSubject, occurrence: u64) -> TraceRecord {
         }
     } else {
         TraceLanguageExecutionPayload::Node {
-            at: lash_sansio::effect_identity_fixture("node", occurrence),
+            at: lash_protocol_types::effect_identity_fixture("node", occurrence),
             fact: lash_trace::TraceNodeFact::Started { call_id: None },
         }
     };
@@ -130,7 +130,7 @@ async fn a_process_cancelled_while_blocked_has_a_committed_cancelled_graph() {
         match &mut event.payload {
             _ if occurrence == 2 => {
                 event.payload = TraceLanguageExecutionPayload::Node {
-                    at: lash_sansio::effect_identity_fixture("node", 1),
+                    at: lash_protocol_types::effect_identity_fixture("node", 1),
                     fact: lash_trace::TraceNodeFact::Waiting {
                         awaited: lash_trace::TraceNodeAwaited::Sleep { deadline_ms: None },
                     },
@@ -140,11 +140,11 @@ async fn a_process_cancelled_while_blocked_has_a_committed_cancelled_graph() {
                 at,
                 fact: lash_trace::TraceNodeFact::Started { .. },
             } if occurrence == 3 => {
-                *at = lash_sansio::effect_identity_fixture("running", 1);
+                *at = lash_protocol_types::effect_identity_fixture("running", 1);
             }
             _ if occurrence == 4 => {
                 event.payload = TraceLanguageExecutionPayload::Node {
-                    at: lash_sansio::effect_identity_fixture("done", 1),
+                    at: lash_protocol_types::effect_identity_fixture("done", 1),
                     fact: lash_trace::TraceNodeFact::Completed { call_id: None },
                 };
             }
@@ -154,8 +154,8 @@ async fn a_process_cancelled_while_blocked_has_a_committed_cancelled_graph() {
     }
     let step = lash_trace::StepBodyStarted {
         process_id: process.clone(),
-        at: lash_sansio::effect_identity_fixture("stepped", 1),
-        call_id: lash_sansio::ToolCallId::fixture("stepped"),
+        at: lash_protocol_types::effect_identity_fixture("stepped", 1),
+        call_id: lash_protocol_types::ToolCallId::fixture("stepped"),
         attempt: 1,
     };
     let stepped = step.clone();
@@ -333,15 +333,18 @@ async fn language_ingress_overflow_resnapshots_every_session_and_continues() {
                 crate::observe::SessionObservationStreamItem::Event(_)
             ));
             let scope = if index == 0 {
-                lash_sansio::ExecutionScope::turn(session.session_id().clone(), "language-turn")
+                lash_protocol_types::ExecutionScope::turn(
+                    session.session_id().clone(),
+                    "language-turn",
+                )
             } else {
-                lash_sansio::ExecutionScope::session_operation(
+                lash_protocol_types::ExecutionScope::session_operation(
                     session.session_id().clone(),
                     "language-operation",
                 )
             };
             let subject = TraceRuntimeSubject::Effect {
-                address: lash_sansio::EffectAddress::new(scope, "language-replay")
+                address: lash_protocol_types::EffectAddress::new(scope, "language-replay")
                     .expect("effect address"),
                 effect_id: "cell".into(),
             };
@@ -770,8 +773,8 @@ fn deployment_language_publication_limits_are_honored() {
         count_limits,
     );
     let subject = TraceRuntimeSubject::Effect {
-        address: lash_sansio::EffectAddress::new(
-            lash_sansio::ExecutionScope::turn(SessionId::from("language-limit"), "turn"),
+        address: lash_protocol_types::EffectAddress::new(
+            lash_protocol_types::ExecutionScope::turn(SessionId::from("language-limit"), "turn"),
             "language",
         )
         .unwrap(),

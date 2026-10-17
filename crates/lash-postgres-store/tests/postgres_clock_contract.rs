@@ -1,6 +1,6 @@
 //! Behavioral laws and lexical fences for PostgreSQL clock provenance.
 
-use lash_sansio::SessionId;
+use lash_protocol_types::SessionId;
 use std::sync::Arc;
 
 use lash_core_execution::runtime::QueuedWorkBatchDraft;

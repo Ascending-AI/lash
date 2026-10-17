@@ -8,7 +8,7 @@ use super::{ToolCallLaunch, ToolDispatchContext, ToolDispatchOutcome};
 /// The invocation a tool call's attempts descend from: its lineage.
 ///
 /// Every attempt and retry sleep of a call is keyed by the call's
-/// [`ToolCallId`](lash_sansio::ToolCallId) and the attempt number (ADR 0117
+/// [`ToolCallId`](lash_protocol_types::ToolCallId) and the attempt number (ADR 0117
 /// §6): `{call_id}:attempt:{n}` and `{call_id}:attempt:{n}:sleep`, under the
 /// parent invocation when the call has one — a command's or a process
 /// body's — and under `tool:` when it has none. The call id is
@@ -307,7 +307,7 @@ pub async fn coordinate_tool_invocation<'run>(
 struct TerminalAttemptSettlement<'settlement> {
     minting_emission: &'settlement RuntimeEffectInvocation,
     child_trace_hook: Option<&'settlement crate::ToolChildExecutionTraceHook>,
-    recorded_call_id: &'settlement lash_sansio::ToolCallId,
+    recorded_call_id: &'settlement lash_protocol_types::ToolCallId,
 
     record: Box<ToolCallRecord>,
     intents: crate::ToolIntents,
@@ -322,7 +322,7 @@ struct SealedToolFinal {
     minting_emission: Option<RuntimeInvocation>,
     /// The identity the committed attempt recorded, which intent admission
     /// uses.
-    recorded_call_id: lash_sansio::ToolCallId,
+    recorded_call_id: lash_protocol_types::ToolCallId,
     record: ToolCallRecord,
     intents: crate::ToolIntents,
     intent_outcomes: Vec<crate::ToolIntentExecutionOutcome>,
@@ -487,7 +487,7 @@ pub(super) fn project_recorded_intent_outcomes(
     let crate::ToolCallOutcome::Success(value) = &mut output.outcome else {
         return;
     };
-    if let Some(index) = lash_sansio::handle::definition_slot(&value.to_json_value()) {
+    if let Some(index) = lash_protocol_types::handle::definition_slot(&value.to_json_value()) {
         let outcome = outcomes.iter().find(|outcome| {
             declares_at(outcome, crate::ToolIntentKind::PublishDefinition, index)
                 || declares_at(outcome, crate::ToolIntentKind::GetDefinition, index)
@@ -525,7 +525,8 @@ pub(super) fn project_recorded_intent_outcomes(
     // did not realize is never exposed as a handle. Only an attempt that
     // declared a start at that index answers a slot: the same spelling in any
     // other tool's output is that tool's own data and is left untouched.
-    if let Some(intent_index) = lash_sansio::handle::process_start_slot(&value.to_json_value())
+    if let Some(intent_index) =
+        lash_protocol_types::handle::process_start_slot(&value.to_json_value())
         && let Some(start) = outcomes
             .iter()
             .find(|outcome| declares_start_at(outcome, intent_index))
@@ -573,7 +574,7 @@ pub(super) fn project_recorded_intent_outcomes(
 /// id when it started a definition. Lifecycle status remains a read.
 fn realized_start_handle(handle: &crate::ProcessHandleView) -> serde_json::Value {
     let mut value = serde_json::json!({
-        lash_sansio::handle::HANDLE_FIELD: lash_sansio::handle::HANDLE_KIND,
+        lash_protocol_types::handle::HANDLE_FIELD: lash_protocol_types::handle::HANDLE_KIND,
         "id": handle.id,
         "process_id": handle.process_id,
     });
@@ -673,14 +674,14 @@ mod projection_tests {
     /// The slot a start answers before its declaration is realized, as
     /// `lash_plugin_process_controls::declarations` writes it.
     fn start_slot(intent_index: u32) -> serde_json::Value {
-        lash_sansio::handle::process_start_slot_json(intent_index)
+        lash_protocol_types::handle::process_start_slot_json(intent_index)
     }
 
     fn realized_handle(label: &str) -> serde_json::Value {
         let process_id = crate::process_id_for_test(label);
         serde_json::json!({
             "__handle__": "lash",
-            "id": lash_sansio::handle::HandleId::process(&process_id).as_str(),
+            "id": lash_protocol_types::handle::HandleId::process(&process_id).as_str(),
             "process_id": process_id,
         })
     }
@@ -828,7 +829,7 @@ mod projection_tests {
             )
         };
         let mut output =
-            crate::ToolCallOutput::success(lash_sansio::handle::definition_slot_json(0));
+            crate::ToolCallOutput::success(lash_protocol_types::handle::definition_slot_json(0));
         project_recorded_intent_outcomes(&mut output, &[get(definition.clone())]);
         assert_eq!(
             output.value_for_projection(),
@@ -836,7 +837,7 @@ mod projection_tests {
         );
 
         let mut refused =
-            crate::ToolCallOutput::success(lash_sansio::handle::definition_slot_json(0));
+            crate::ToolCallOutput::success(lash_protocol_types::handle::definition_slot_json(0));
         project_recorded_intent_outcomes(
             &mut refused,
             &[crate::ToolIntentExecutionOutcome::Refused {

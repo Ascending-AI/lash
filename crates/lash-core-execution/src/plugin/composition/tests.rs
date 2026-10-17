@@ -1020,7 +1020,7 @@ const LOOKUP_TOOL: &str = "tool:lookup";
 
 /// The `Read` tool `lookup`: what a knowledge base says about a topic.
 fn lookup_definition() -> crate::ToolDefinition {
-    use lash_sansio::ToolDefinitionBindingExt as _;
+    use lash_protocol_types::ToolDefinitionBindingExt as _;
     crate::ToolDefinition::raw(
         LOOKUP_TOOL,
         "lookup",
@@ -1031,7 +1031,7 @@ fn lookup_definition() -> crate::ToolDefinition {
     .expect("valid declared tool schemas")
     .with_execution(std::time::Duration::from_secs(30))
     .with_execution_policy(crate::ExecutionPolicy::Read)
-    .with_tool_binding(lash_sansio::ToolBinding::new(["tools"], "lookup"))
+    .with_tool_binding(lash_protocol_types::ToolBinding::new(["tools"], "lookup"))
 }
 
 /// What the knowledge base says about the topic `args` names.

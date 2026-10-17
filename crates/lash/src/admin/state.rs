@@ -3,7 +3,7 @@ use super::{AdminContext, AdminMutation, SessionCommandAdmin};
 use crate::support::{
     Arc, EmbedError, LashRuntime, PluginMessage, Result, RuntimeSessionState, SessionStateService,
 };
-use lash_sansio::SessionId;
+use lash_protocol_types::SessionId;
 
 #[derive(Clone)]
 /// Facade handle for session state administration.

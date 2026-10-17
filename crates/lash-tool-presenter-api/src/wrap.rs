@@ -2,7 +2,7 @@
 
 use std::sync::Arc;
 
-use lash_sansio::{JsonSchema, ToolContract, ToolManifest};
+use lash_protocol_types::{JsonSchema, ToolContract, ToolManifest};
 use serde_json::Value;
 
 use crate::{
@@ -11,7 +11,7 @@ use crate::{
 };
 
 type OmissionRenderer =
-    dyn Fn(&lash_sansio::AttachmentMaterializationNotice) -> String + Send + Sync;
+    dyn Fn(&lash_protocol_types::AttachmentMaterializationNotice) -> String + Send + Sync;
 
 type ToolFilter = dyn Fn(&ToolPresentationEntry<'_>) -> bool + Send + Sync;
 
@@ -67,7 +67,10 @@ impl WrappedToolPresenter {
     #[must_use]
     pub fn with_attachment_omission_renderer(
         mut self,
-        render: impl Fn(&lash_sansio::AttachmentMaterializationNotice) -> String + Send + Sync + 'static,
+        render: impl Fn(&lash_protocol_types::AttachmentMaterializationNotice) -> String
+        + Send
+        + Sync
+        + 'static,
     ) -> Self {
         self.omission_renderer = Some(Arc::new(render));
         self
@@ -101,7 +104,7 @@ impl WrappedToolPresenter {
 impl ToolPresenter for WrappedToolPresenter {
     fn attachment_omission_text(
         &self,
-        notice: &lash_sansio::AttachmentMaterializationNotice,
+        notice: &lash_protocol_types::AttachmentMaterializationNotice,
     ) -> String {
         match &self.omission_renderer {
             Some(render) => render(notice),
@@ -153,7 +156,7 @@ impl ToolPresenter for WrappedToolPresenter {
         section
             .omitted
             .extend(filtered.into_iter().map(|tool| tool.manifest.id.clone()));
-        let order = |id: &lash_sansio::ToolId| {
+        let order = |id: &lash_protocol_types::ToolId| {
             request
                 .tools
                 .iter()

@@ -24,7 +24,7 @@ use lash_core::{
     ArtifactReferrer, AttachmentId, ClockWallTime as _, ToolDefinitionBindingExt as _, ToolProvider,
 };
 use lash_core_execution::StoreSet;
-use lash_sansio::sync::MutexExt as _;
+use lash_protocol_types::sync::MutexExt as _;
 
 use served::{Keep, Tier, WATCHDOG};
 

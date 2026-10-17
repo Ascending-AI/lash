@@ -516,7 +516,7 @@ pub struct ProcessEngineRegistration {
     inline_starts: Option<Arc<dyn InlineStarts>>,
     /// The host's retry policies for engine step kinds, over the engine's.
     engine_step_retries:
-        BTreeMap<super::engine_state::EngineStepKind, lash_sansio::ExecutionPolicy>,
+        BTreeMap<super::engine_state::EngineStepKind, lash_protocol_types::ExecutionPolicy>,
 }
 
 impl ProcessEngineRegistration {
@@ -631,7 +631,7 @@ impl ProcessEngineRegistration {
     pub fn with_engine_step_retry(
         mut self,
         kind: super::engine_state::EngineStepKind,
-        policy: lash_sansio::ExecutionPolicy,
+        policy: lash_protocol_types::ExecutionPolicy,
     ) -> Self {
         self.engine_step_retries.insert(kind, policy);
         self
@@ -696,7 +696,7 @@ impl WeakProcessEngineRegistry {
 /// An engine's steps under the host's per-kind retry overrides.
 struct RetriedEngineSteps {
     steps: Arc<dyn super::engine_state::EngineSteps>,
-    retries: BTreeMap<super::engine_state::EngineStepKind, lash_sansio::ExecutionPolicy>,
+    retries: BTreeMap<super::engine_state::EngineStepKind, lash_protocol_types::ExecutionPolicy>,
 }
 
 #[async_trait::async_trait]
@@ -709,7 +709,10 @@ impl super::engine_state::EngineSteps for RetriedEngineSteps {
         self.steps.execution(kind)
     }
 
-    fn retry(&self, kind: &super::engine_state::EngineStepKind) -> lash_sansio::ExecutionPolicy {
+    fn retry(
+        &self,
+        kind: &super::engine_state::EngineStepKind,
+    ) -> lash_protocol_types::ExecutionPolicy {
         self.retries
             .get(kind)
             .copied()

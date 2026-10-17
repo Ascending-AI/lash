@@ -23,8 +23,8 @@ mod tests {
     #[test]
     fn failed_and_cancelled_results_keep_presenter_body_and_native_error_signal() {
         for status in [
-            lash_sansio::ToolCallStatus::Failure,
-            lash_sansio::ToolCallStatus::Cancelled,
+            lash_protocol_types::ToolCallStatus::Failure,
+            lash_protocol_types::ToolCallStatus::Cancelled,
         ] {
             let result: LlmContentBlock = serde_json::from_value(json!({"ToolResult": {
                 "call_id": "call-1", "tool_name": "lookup",
@@ -65,7 +65,7 @@ mod tests {
     use runtime_feedback::request_with_instructions;
     mod epilogue;
     mod generation_tests;
-    use lash_sansio::sync::MutexExt;
+    use lash_protocol_types::sync::MutexExt;
 
     use crate::stream::StreamState;
     use crate::{AnthropicProvider, DEFAULT_BASE_URL};
@@ -656,7 +656,7 @@ mod tests {
         req.output_spec = Some(LlmOutputSpec::JsonSchema(LlmJsonSchema {
             name: "rank_result".to_string(),
             strict: true,
-            schema: lash_sansio::SchemaContract::admit(json!({
+            schema: lash_protocol_types::SchemaContract::admit(json!({
                 "type": "object",
                 "required": ["ranked"],
                 "properties": {
@@ -690,7 +690,7 @@ mod tests {
         req.tools = Arc::new(vec![LlmToolSpec {
             name: "rank".to_string(),
             description: "Rank".to_string(),
-            input_schema: lash_sansio::SchemaContract::admit(json!({
+            input_schema: lash_protocol_types::SchemaContract::admit(json!({
                 "type": "object",
                 "properties": {
                     "ids": {
@@ -702,7 +702,7 @@ mod tests {
                 }
             }))
             .expect("valid declared schema"),
-            output_schema: lash_sansio::SchemaContract::admit(json!({}))
+            output_schema: lash_protocol_types::SchemaContract::admit(json!({}))
                 .expect("valid declared schema"),
         }]);
 
@@ -1106,7 +1106,7 @@ mod tests {
         let provider = AnthropicProvider::new("key");
         let mut req = request(vec![LlmMessage::text(LlmRole::User, "hello")]);
         req.model.metadata_mut().limits.output_tokens =
-            lash_sansio::llm_profile::OutputTokenLimits::new(None, Some(9999))
+            lash_protocol_types::llm_profile::OutputTokenLimits::new(None, Some(9999))
                 .expect("valid output-token limits");
         req.generation.output_token_cap = NonZeroUsize::new(2048);
 
@@ -1116,7 +1116,7 @@ mod tests {
         let mut model_limited = request(vec![LlmMessage::text(LlmRole::User, "hello")]);
         model_limited.generation.output_token_cap = None;
         model_limited.model.metadata_mut().limits.output_tokens =
-            lash_sansio::llm_profile::OutputTokenLimits::new(None, Some(9999))
+            lash_protocol_types::llm_profile::OutputTokenLimits::new(None, Some(9999))
                 .expect("valid output-token limits");
         let model_limited_body = provider.build_request_body(&model_limited).expect("body");
         assert_eq!(model_limited_body["max_tokens"], 9999);

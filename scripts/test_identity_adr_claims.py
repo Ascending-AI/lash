@@ -13,7 +13,7 @@ REPO = Path(__file__).resolve().parents[1]
 def public_outcome_names_follow_declared_suffix_roles():
     witnesses = [
         ("crates/lash-core-execution/src/runtime/process/model.rs", "ProcessRegistrationOutcome", "enum", "Existing"),
-        ("crates/lash-sansio/src/tool_contract.rs", "ExecutionPolicy", "enum", "Repeatable"),
+        ("crates/lash-protocol-types/src/tool_contract.rs", "ExecutionPolicy", "enum", "Repeatable"),
     ]
     for path, name, kind, member in witnesses:
         text = gate.blank_noncode((REPO / path).read_text())

@@ -132,13 +132,13 @@ use lash_durable::{
 use lash_durable_test::{
     Cut, Fault, Matrix, Scenario, SimClock, SimNodes, SimNodesConfig, Stored, Tripwire, WriteKind,
 };
-use lash_sansio::llm::types::{ProviderRouteIdentity, RecordedRequestTemplate};
-use lash_sansio::sansio::ExecutionEnvironmentSync;
-use lash_sansio::sync::MutexExt as _;
-use lash_sansio::{
+use lash_protocol_types::sync::MutexExt as _;
+use lash_protocol_types::{
     ExecutionBudgets, ExecutionBudgetsConfig, ProviderAttemptLimits, SessionId, TurnCancelMode,
     TurnCancelUndeliveredInputPolicy, TurnId,
 };
+use lash_protocol_types::{llm::types::ProviderRouteIdentity, llm::types::RecordedRequestTemplate};
+use lash_sansio::sansio::ExecutionEnvironmentSync;
 
 use dialect::Dialect;
 
@@ -414,13 +414,13 @@ fn machine_config(session: &SessionId, run: &TurnId) -> TurnMachineConfig {
         model_tool_calls: lash_core::sansio::ModelToolCalls::fixture(),
         protocol_driver: Arc::new(ScriptedProtocol),
         projector: Arc::new(ChatContextProjector::default()),
-        model: lash_sansio::llm_profile::LlmProfileConfig::new(
-            lash_sansio::llm_profile::RecordedLlmProfile::mint(
-                lash_sansio::llm_profile::LlmProfileKey::new("l3-model"),
-                lash_sansio::llm_profile::LlmProfileMetadata::new(
+        model: lash_protocol_types::llm_profile::LlmProfileConfig::new(
+            lash_protocol_types::llm_profile::RecordedLlmProfile::mint(
+                lash_protocol_types::llm_profile::LlmProfileKey::new("l3-model"),
+                lash_protocol_types::llm_profile::LlmProfileMetadata::new(
                     "scripted".to_string(),
                     std::num::NonZeroUsize::MIN.saturating_add(127_999),
-                    lash_sansio::llm::capability::CacheRetention::Short,
+                    lash_protocol_types::llm::capability::CacheRetention::Short,
                 )
                 .with_capability(lash_core::LlmProfileCapability::default())
                 .with_extra_body(Default::default()),
@@ -667,7 +667,7 @@ impl TurnDrive for L3Drive {
         cx: &ActorContext,
         _id: EffectId,
         request: Arc<LlmRequest>,
-        send: &lash_sansio::llm::types::AdmittedSend,
+        send: &lash_protocol_types::llm::types::AdmittedSend,
         attempt: ModelCallAttempt,
     ) -> Result<(), TurnError> {
         let ModelCallAttempt {

@@ -16,7 +16,7 @@ use std::sync::{Arc, Mutex};
 use std::time::Instant;
 
 use anyhow::{Result, ensure};
-use lash_sansio::sync::MutexExt;
+use lash_protocol_types::sync::MutexExt;
 use serde::Serialize;
 
 pub(crate) use ledger::Ledger;

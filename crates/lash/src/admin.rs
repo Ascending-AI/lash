@@ -1,5 +1,5 @@
 use crate::support::{EmbedError, LashCore, Result};
-use lash_sansio::ProcessId;
+use lash_protocol_types::ProcessId;
 // `PluginQuery` / `PluginCommand` / `PluginTask` bound the plugin operation runners, but their home is `crate::plugins`: authoring surface a plugin
 // implements, not a name a host writes to invoke one (ADR 0051, FIG-1921).
 pub use lash_core::facade_support::AcceptedInjectedTurnInput;

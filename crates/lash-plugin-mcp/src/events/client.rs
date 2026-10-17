@@ -7,7 +7,7 @@ use super::wire::{
 };
 use super::{McpEventTransportPolicy, McpServerEvents};
 use crate::pool::McpConnectionPool;
-use lash_sansio::sync::MutexExt as _;
+use lash_protocol_types::sync::MutexExt as _;
 use rmcp::ServiceError;
 use rmcp::model::{ClientRequest, CustomRequest, ServerResult};
 use rmcp::service::{Peer, PeerRequestOptions, RequestHandle, RoleClient};

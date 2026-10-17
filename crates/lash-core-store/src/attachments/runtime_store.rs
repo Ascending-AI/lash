@@ -9,8 +9,8 @@ use crate::SessionId;
 use crate::store::{
     AttachmentReferrers, AttachmentWrite, AttachmentWriteFence, AttachmentWritePermit, StoreError,
 };
-use lash_sansio::sync::MutexExt;
-use lash_sansio::{AttachmentCreateMeta, AttachmentId, AttachmentRef};
+use lash_protocol_types::sync::MutexExt;
+use lash_protocol_types::{AttachmentCreateMeta, AttachmentId, AttachmentRef};
 use std::collections::BTreeSet;
 use std::sync::{Arc, Mutex};
 
@@ -158,7 +158,7 @@ pub struct AttachmentPolicy {
     pub upload_expiry_ms: u64,
     /// Which outputs leave history for a retained attachment, and the
     /// witness history keeps in their place (FIG-1643).
-    pub output_retention: lash_sansio::OutputRetentionPolicy,
+    pub output_retention: lash_protocol_types::OutputRetentionPolicy,
 }
 
 impl AttachmentPolicy {
@@ -166,7 +166,7 @@ impl AttachmentPolicy {
     /// [`AttachmentReadPolicy::STANDARD`] reads (32 MiB per blob, 128 MiB
     /// per request), a 24-hour upload expiry
     /// ([`STANDARD_ATTACHMENT_UPLOAD_EXPIRY_MS`]) and
-    /// [`OutputRetentionPolicy::STANDARD`](lash_sansio::OutputRetentionPolicy::STANDARD)
+    /// [`OutputRetentionPolicy::STANDARD`](lash_protocol_types::OutputRetentionPolicy::STANDARD)
     /// (64 KiB inline, a 4 KiB witness).
     ///
     /// Unbounded puts can retain blobs that a bounded byte read refuses:
@@ -185,7 +185,7 @@ impl AttachmentPolicy {
             max_attachment_bytes: None,
             read: AttachmentReadPolicy::STANDARD,
             upload_expiry_ms: STANDARD_ATTACHMENT_UPLOAD_EXPIRY_MS,
-            output_retention: lash_sansio::OutputRetentionPolicy::STANDARD,
+            output_retention: lash_protocol_types::OutputRetentionPolicy::STANDARD,
         }
     }
 }
@@ -222,14 +222,14 @@ pub struct RuntimeAttachmentStore {
     max_attachment_bytes: Option<u64>,
     read_policy: AttachmentReadPolicy,
     upload_expiry_ms: u64,
-    output_retention: lash_sansio::OutputRetentionPolicy,
+    output_retention: lash_protocol_types::OutputRetentionPolicy,
     reclamation_retry: AttachmentReclamationRetryPolicy,
     execution: Mutex<Option<BoundAttachmentExecution>>,
     clock: Arc<dyn crate::Clock>,
 }
 #[derive(Clone)]
 struct BoundAttachmentExecution {
-    journal: lash_sansio::EffectJournalIdentity,
+    journal: lash_protocol_types::EffectJournalIdentity,
     recorded_puts: Arc<Mutex<BTreeSet<AttachmentId>>>,
 }
 pub struct AttachmentExecutionBinding {
@@ -368,14 +368,14 @@ impl RuntimeAttachmentStore {
     /// The byte policy an output is measured against before it enters
     /// history (FIG-1643). Process configuration: every step that applies it
     /// journals the policy it applied, so a replay never reads it again.
-    pub fn output_retention(&self) -> lash_sansio::OutputRetentionPolicy {
+    pub fn output_retention(&self) -> lash_protocol_types::OutputRetentionPolicy {
         self.output_retention
     }
 
     /// This store with `output_retention` as its retention policy.
     pub fn with_output_retention(
         mut self,
-        output_retention: lash_sansio::OutputRetentionPolicy,
+        output_retention: lash_protocol_types::OutputRetentionPolicy,
     ) -> Self {
         self.output_retention = output_retention;
         self
@@ -386,7 +386,7 @@ impl RuntimeAttachmentStore {
     /// size limit.
     pub fn reconfigured_output_retention(
         &self,
-        output_retention: lash_sansio::OutputRetentionPolicy,
+        output_retention: lash_protocol_types::OutputRetentionPolicy,
     ) -> Self {
         Self {
             output_retention,
@@ -413,7 +413,7 @@ impl RuntimeAttachmentStore {
     }
     pub fn bind_execution_scoped(
         self: &Arc<Self>,
-        journal: lash_sansio::EffectJournalIdentity,
+        journal: lash_protocol_types::EffectJournalIdentity,
     ) -> Result<AttachmentExecutionBinding, AttachmentStoreError> {
         if !matches!(
             self.holder,
@@ -436,7 +436,7 @@ impl RuntimeAttachmentStore {
     }
     pub fn recorded_execution_puts(
         &self,
-        journal: &lash_sansio::EffectJournalIdentity,
+        journal: &lash_protocol_types::EffectJournalIdentity,
     ) -> BTreeSet<AttachmentId> {
         let recorded = self
             .execution

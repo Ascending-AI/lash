@@ -3,11 +3,11 @@
 
 use lash_transport_failure::{LlmTransportError, TransportRetryVerdict};
 
-pub use lash_sansio::llm::types::ProviderFailureKind;
-pub use lash_sansio::session_model::TurnFailureCode;
+pub use lash_protocol_types::llm::types::ProviderFailureKind;
+pub use lash_protocol_types::session_model::TurnFailureCode;
 
-use lash_sansio::AttachmentRef;
-use lash_sansio::llm::attachment_delivery::AttachmentPosition;
+use lash_protocol_types::AttachmentRef;
+use lash_protocol_types::llm::attachment_delivery::AttachmentPosition;
 
 pub fn known_attachment_acceptors<'a>(
     snapshot: &'a crate::provider::AttachmentCapabilitySnapshot,

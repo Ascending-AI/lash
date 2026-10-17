@@ -167,18 +167,20 @@ async fn a_provider_gets_one_terminal_per_attempt_and_both_cancellation_waits_ar
                 Arc::new(lash_trace::LashIdentity),
             );
         let template = Arc::new(handle.lower(&request).await.expect("lowers"));
-        let budgets = lash_sansio::ExecutionBudgets::new(lash_sansio::ExecutionBudgetsConfig {
-            model_total: Duration::from_secs(1),
-            stop_grace: Duration::from_millis(500),
-            provider: lash_sansio::ProviderAttemptLimits::new(
-                Duration::from_secs(1),
-                Duration::from_secs(1),
-                Duration::from_secs(1),
-                2,
-            )
-            .expect("provider limits"),
-            ..lash_sansio::ExecutionBudgetsConfig::recommended()
-        })
+        let budgets = lash_protocol_types::ExecutionBudgets::new(
+            lash_protocol_types::ExecutionBudgetsConfig {
+                model_total: Duration::from_secs(1),
+                stop_grace: Duration::from_millis(500),
+                provider: lash_protocol_types::ProviderAttemptLimits::new(
+                    Duration::from_secs(1),
+                    Duration::from_secs(1),
+                    Duration::from_secs(1),
+                    2,
+                )
+                .expect("provider limits"),
+                ..lash_protocol_types::ExecutionBudgetsConfig::recommended()
+            },
+        )
         .expect("budgets");
         let start = tokio::time::Instant::now();
         let reason = match mode {
@@ -200,7 +202,7 @@ async fn a_provider_gets_one_terminal_per_attempt_and_both_cancellation_waits_ar
             ModelCallBounds {
                 budgets,
                 enclosing: (mode == "enclosing").then(|| {
-                    lash_sansio::ExecutionLimit::starting_at(
+                    lash_protocol_types::ExecutionLimit::starting_at(
                         1_000_000,
                         Duration::from_millis(500),
                         Duration::from_millis(500),

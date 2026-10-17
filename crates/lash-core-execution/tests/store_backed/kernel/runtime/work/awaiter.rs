@@ -19,7 +19,7 @@ mod tests {
             .await
             .process_registry()
     }
-    use lash_sansio::sync::MutexExt;
+    use lash_protocol_types::sync::MutexExt;
 
     fn watched_parts(watched: WatchedRegistry) -> (Arc<dyn ProcessRegistry>, ProcessChangeHub) {
         (Arc::clone(watched.registry()), watched.hub().clone())

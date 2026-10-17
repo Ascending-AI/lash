@@ -189,7 +189,7 @@ impl IdentityEncoder {
 
 pub fn provider_route(
     identity: &mut IdentityEncoder,
-    route: &lash_sansio::llm::types::ProviderRouteIdentity,
+    route: &lash_protocol_types::llm::types::ProviderRouteIdentity,
 ) {
     identity.string(&route.provider);
     identity.string(&route.endpoint);

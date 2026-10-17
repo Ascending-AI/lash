@@ -570,7 +570,7 @@ mod tests {
         let returned = crate::ModelToolReturn::from_output("tool".into(), &output);
         assert_eq!(
             returned.outcome,
-            lash_sansio::ModelToolOutcome::Failure(failure)
+            lash_protocol_types::ModelToolOutcome::Failure(failure)
         );
         assert!(returned.parts.is_empty());
     }

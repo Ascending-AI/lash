@@ -34,6 +34,7 @@ lash-kernel-dialect = { workspace = true, optional = true }
 lash-vm-client = { workspace = true, optional = true }
 lash-vm-worker = { workspace = true, optional = true }
 lash-sansio = { workspace = true, features = ["schema-validation"] }
+lash-protocol-types = { workspace = true, features = ["schema-validation"] }
 async-trait = { workspace = true }
 futures-util = { workspace = true }
 lash-helper-labels = { workspace = true }

@@ -12,7 +12,7 @@
 use std::collections::{BTreeMap, HashMap};
 
 use lash_core::{SessionCursor, SessionRevision};
-use lash_sansio::SessionId;
+use lash_protocol_types::SessionId;
 
 use super::codec::Doorbell;
 use super::schema::Incarnation;

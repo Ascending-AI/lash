@@ -27,7 +27,7 @@ use crate::testing::{CommitFault, IsolatedDatabase, LostCommit};
 const LABEL: CommitLabel = CommitLabel::new("law.write");
 
 /// Admit session `session` to the catalog, with no durable actor yet.
-async fn admit(storage: &PostgresStorage, session: &lash_sansio::SessionId) {
+async fn admit(storage: &PostgresStorage, session: &lash_protocol_types::SessionId) {
     use lash_core_execution::{
         MaxToolCalls, SessionCatalogStore as _, SessionCreationHead, SessionRelation,
         SessionStoreCreateRequest, TurnBudget,
@@ -53,7 +53,7 @@ async fn admit(storage: &PostgresStorage, session: &lash_sansio::SessionId) {
 }
 
 /// The advisory key of session `session`'s artifact referrer lock.
-fn referrer_key(session: &lash_sansio::SessionId) -> String {
+fn referrer_key(session: &lash_protocol_types::SessionId) -> String {
     let referrer = lash_core_execution::ArtifactReferrer::Session(session.clone());
     format!(
         "lash-artifact-referrer:{}:{}",
@@ -98,7 +98,7 @@ async fn backend_pid(tx: &mut sqlx::PgConnection) -> i32 {
 type Admission = Box<
     dyn FnOnce(
             PostgresStorage,
-            lash_sansio::SessionId,
+            lash_protocol_types::SessionId,
         ) -> std::pin::Pin<Box<dyn std::future::Future<Output = ()> + Send>>
         + Send,
 >;
@@ -117,7 +117,7 @@ async fn a_waiting_admission_holds_no_history_or_referrer_lock(
     let (_database, storage) = storage(name, &PostgresHostConfig::default())
         .await
         .expect("hermetic PostgreSQL is available");
-    let session = lash_sansio::SessionId::from(name);
+    let session = lash_protocol_types::SessionId::from(name);
     admit(&storage, &session).await;
     let store = storage.durable_store();
     create(&store, &actor(session.as_str())).await;
@@ -257,7 +257,7 @@ async fn a_producer_queued_behind_the_actors_creation_takes_the_actor_row_before
     let (_database, storage) = storage(name, &PostgresHostConfig::default())
         .await
         .expect("hermetic PostgreSQL is available");
-    let session = lash_sansio::SessionId::from(name);
+    let session = lash_protocol_types::SessionId::from(name);
     admit(&storage, &session).await;
     let mut history = crate::begin_guarded(storage.pool(), &storage.fence)
         .await
@@ -865,7 +865,7 @@ async fn a_read_on_a_connection_the_server_closed_answers_from_a_live_one() {
         !store.pools.work.options().get_test_before_acquire(),
         "the work pool does not ping every checkout"
     );
-    let session = lash_sansio::SessionId::from("closed-under-a-read");
+    let session = lash_protocol_types::SessionId::from("closed-under-a-read");
     let warm = store.turn(&session).await.expect("the warm read answers");
     assert_eq!(warm, None);
     let mut server = <sqlx::PgConnection as sqlx::Connection>::connect(database.url())

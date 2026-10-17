@@ -27,14 +27,15 @@ mod runtime {
             SessionObserverIntent,
         };
         pub(crate) use lash_core::runtime::*;
-        pub(crate) use lash_core::sansio::{LlmCallError, Response};
+        pub(crate) use lash_core::sansio::Response;
         pub(crate) use lash_core::session_model::{
             LlmUsage, Message, MessageRole, Part, RuntimeSessionPolicy, SessionPolicy,
             SessionStreamEvent, make_error_event, reassign_part_ids, shared_parts,
         };
         pub(crate) use lash_core::testing::runtime_internals::*;
         pub(crate) use lash_core::*;
-        pub(crate) use lash_sansio::sync::MutexExt;
+        pub(crate) use lash_protocol_types::LlmCallError;
+        pub(crate) use lash_protocol_types::sync::MutexExt;
         pub(crate) use std::collections::HashMap;
         pub(crate) use std::sync::Mutex as StdMutex;
         pub(crate) use tokio::sync::mpsc;

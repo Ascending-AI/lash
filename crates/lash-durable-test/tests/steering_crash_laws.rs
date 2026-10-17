@@ -41,7 +41,7 @@ mod dialect;
 #[path = "support/sim.rs"]
 mod sim;
 
-use lash_sansio::llm::types::{StreamBlockEvent, StreamBlockKind};
+use lash_protocol_types::{llm::types::StreamBlockEvent, llm::types::StreamBlockKind};
 use std::sync::{Arc, Mutex, OnceLock};
 use std::time::Duration;
 
@@ -57,8 +57,8 @@ use lash_durable::{ActorKey, ActorState, CommitLabel, DurableError, DurableStore
 use lash_durable_test::{
     Cut, Fault, Matrix, Scenario, SimClock, SimNodes, SimNodesConfig, Stored, Tripwire, WriteKind,
 };
-use lash_sansio::sync::MutexExt as _;
-use lash_sansio::{InputId, SessionId, TurnId};
+use lash_protocol_types::sync::MutexExt as _;
+use lash_protocol_types::{InputId, SessionId, TurnId};
 
 use dialect::Dialect;
 
@@ -753,7 +753,7 @@ fn second_finish_laws(cause: &lash_core_store::store::RunTerminalCause) -> Vec<S
         lash_core_store::store::RunTerminalCause::Committed {
             outcome:
                 lash_core_store::store::RunCommittedOutcome::Finished {
-                    finish: lash_sansio::TurnFinish::Finished { tool_name, value },
+                    finish: lash_protocol_types::TurnFinish::Finished { tool_name, value },
                     value_schema: Some(schema),
                 },
             ..

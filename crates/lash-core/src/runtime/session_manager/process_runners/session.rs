@@ -401,7 +401,7 @@ fn first_blocking_issue(turn: &crate::AssembledTurn) -> Option<&crate::TurnIssue
 fn failure_from_process_turn(
     turn: &crate::AssembledTurn,
     limits: lash_core_store::execution_limits::DiagnosticLimits,
-    cuts: lash_sansio::session_model::RuntimeOutputCuts,
+    cuts: lash_protocol_types::session_model::RuntimeOutputCuts,
 ) -> crate::ToolFailure {
     let crate::TurnOutcome::Stopped(stop) = &turn.outcome else {
         return crate::ToolFailure::tool(
@@ -436,7 +436,7 @@ fn failure_from_process_turn(
     let mut failure = crate::ToolFailure::tool(
         class,
         code,
-        lash_sansio::session_model::truncate_raw_error(&message, cuts.raw_error_max_chars),
+        lash_protocol_types::session_model::truncate_raw_error(&message, cuts.raw_error_max_chars),
     );
     failure.raw =
         process_turn_failure_raw(stop_value, issue, limits).map(crate::ToolValue::untrusted_json);
@@ -485,7 +485,7 @@ fn output_from_process_turn(
     state: crate::ProcessStatus,
     result: &crate::SessionTurnOutcome,
     limits: lash_core_store::execution_limits::DiagnosticLimits,
-    cuts: lash_sansio::session_model::RuntimeOutputCuts,
+    cuts: lash_protocol_types::session_model::RuntimeOutputCuts,
 ) -> crate::ToolCallOutput {
     if state == crate::ProcessStatus::Cancelled {
         let cancellation = match &turn.outcome {
