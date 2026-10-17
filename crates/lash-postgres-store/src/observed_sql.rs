@@ -575,7 +575,7 @@ mod tests {
             assert!(stdout.contains("test result: ok. 1 passed; 0 failed;"));
             return;
         }
-        use lash_core_execution::perf_witness::{Collector, sql_shapes};
+        use lash_core_ids::perf_witness::{Collector, sql_shapes};
         let database =
             crate::testing::IsolatedDatabase::create(&crate::testing::required_database_url())
                 .await;
