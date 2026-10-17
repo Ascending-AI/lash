@@ -14,7 +14,7 @@ statement main/5/0/0/4 ordinal=15 depth=1 block=main/5/0/0 Return { value: Varia
 statement main/6 ordinal=16 depth=0 block=main Let { name: Name("t5"), value: Expr(List([Literal(Int(Integer(1))), Variable(Name("add"))])) }
 statement main/7 ordinal=17 depth=0 block=main Let { name: Name("t6"), value: Expr(Map([MapEntry { key: Literal(Text("list")), value: Variable(Name("t5")) }])) }
 statement main/8 ordinal=18 depth=0 block=main Let { name: Name("t7"), value: Expr(Map([MapEntry { key: Literal(Text("nested")), value: Variable(Name("t6")) }])) }
-statement main/9 ordinal=19 depth=0 block=main Let { name: Name("t8"), value: Action(Perform { effect: QualifiedName("echo"), args: [Variable(Name("t7"))], result: Any, then_yield: false }) }
+statement main/9 ordinal=19 depth=0 block=main Let { name: Name("t8"), value: Action(Perform { effect: QualifiedName("corpus.echo"), args: [Variable(Name("t7"))], result: Any, then_yield: false }) }
 statement main/10 ordinal=20 depth=0 block=main Do { value: Act(ActExpr { kind: Call(Library(FunctionId(09159bbbadc0f6eda5aa8761653ad9fc2f463b362941fe756a2cf7e9aa2006cd))), args: [Variable(Name("t8"))] }) }
 statement main/11 ordinal=21 depth=0 block=main Do { value: Act(ActExpr { kind: Call(Library(FunctionId(edba14b7556da4f04334afd9562b8aff746ca76196458bc9963eee614fbd866f))), args: [Variable(Name("shared")), Literal(Int(Integer(0))), Literal(Int(Integer(9)))] }) }
 scope main ordinal=0 depth=0 Entry
@@ -25,6 +25,6 @@ action main/5/0/0/0/1/0/0 library id=556c1567d7aa4c49eebd5daf663f5651525f848b237
 action main/5/0/0/1/0 library id=b560e89d5062ca16a6939b8a6a9aedb7f9ea67ff1f3a9d0f54d4eaf3a543e64b name=py.add label="Python add"
 action main/5/0/0/2/0 library id=81bbe1cbf45f89eed18711f1d5f4bb9f8bd9401d15620a6e056c595fa58a4f1f name=py.getitem label="Python getitem"
 action main/5/0/0/3/0 library id=b560e89d5062ca16a6939b8a6a9aedb7f9ea67ff1f3a9d0f54d4eaf3a543e64b name=py.add label="Python add"
-action main/9/0 Some(Effect(QualifiedName("echo")))
+action main/9/0 Some(Effect(QualifiedName("corpus.echo")))
 action main/10/0 library id=09159bbbadc0f6eda5aa8761653ad9fc2f463b362941fe756a2cf7e9aa2006cd name=py.reply label="Python reply"
 action main/11/0 library id=edba14b7556da4f04334afd9562b8aff746ca76196458bc9963eee614fbd866f name=py.setitem label="Python setitem"

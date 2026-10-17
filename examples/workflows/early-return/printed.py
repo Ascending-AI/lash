@@ -9,7 +9,7 @@ async def demo(value):
         else:
             pass
         t1 = value
-        t2 = await tools.echo(t1)
+        t2 = await tools.corpus.echo(t1)
         await helper_py_reply(t2)
         return "done"
     t5 = await t4(value)

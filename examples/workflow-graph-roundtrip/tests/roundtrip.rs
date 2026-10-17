@@ -6,9 +6,8 @@
 
 use std::sync::Arc;
 
-use lash::workflow::view::PathSite;
 use serde_json::{Value, json};
-use workflow_graph_roundtrip::{AppState, RunEvent, RunPath, RunStatus};
+use workflow_graph_roundtrip::{AppState, RunEvent, RunStatus};
 
 async fn serve() -> (String, lash::LashCore) {
     let stores = lash::sqlite::SqliteStoreSet::memory()
@@ -82,286 +81,6 @@ async fn run(client: &reqwest::Client, base: &str, inputs: Value) -> Vec<RunEven
     events
 }
 
-/// FIG-5757: a catalog workflow is a kernel document end to end. The host
-/// serves it with its sites and the TypeScript the printer spells; one
-/// kernel edit transaction saves and publishes a new version and answers
-/// where each node went; a refused transaction changes nothing; and a run
-/// of the edited version reports every event at a site of that document,
-/// shows the edited value, and ends.
-#[tokio::test(flavor = "multi_thread", worker_threads = 2)]
-async fn a_catalog_workflow_is_edited_republished_run_and_shown_as_a_kernel_document() {
-    let (base, core) = serve().await;
-    let client = reqwest::Client::new();
-    let opened = answer(
-        client
-            .post(format!("{base}/workflow/select"))
-            .json(&json!({"id": "onboarding"}))
-            .send()
-            .await
-            .expect("select"),
-    )
-    .await;
-    assert!(
-        opened["definition"].is_string() && opened["notAdmitted"].is_null(),
-        "the catalog workflow is admitted: {opened}"
-    );
-    let source = opened["source"].as_str().expect("the printer spells it");
-    let original: lash::workflow::document::Document =
-        serde_json::from_value(opened["document"].clone()).expect("the document is readable");
-    let decoded = lash::typescript::read(source, &original, Default::default())
-        .expect("the source reads back against its document without a library");
-    assert_eq!(original.canonical_bytes(), decoded.canonical_bytes());
-    assert!(
-        source.contains("Welcome to the workflow graph") && source.contains("set_status"),
-        "the TypeScript lens shows the document: {source}"
-    );
-
-    // The host serves lash's view of the definition it published, verbatim.
-    let served: lash::workflow::view::WorkflowView =
-        serde_json::from_value(opened["view"].clone()).expect("lash's view");
-    let definition = lash::process::ProcessDefinitionId::parse(
-        opened["definition"].as_str().expect("the definition id"),
-    )
-    .expect("a definition id");
-    let lash::workflow::WorkflowRead::Inspected(published) = core
-        .host_artifacts()
-        .definition_graph(&definition)
-        .await
-        .expect("the definition reads")
-    else {
-        panic!("lash holds the published definition");
-    };
-    let mut expected_view = lash::workflow::view::derive(&published.document).expect("the view");
-    let source_map = serde_json::from_value(opened["sourceMap"].clone()).expect("the printer map");
-    expected_view
-        .readable_ranges(
-            published.document.document(),
-            "generated_typescript".into(),
-            source,
-            &source_map,
-        )
-        .expect("printer ranges belong to the published document");
-    assert_eq!(
-        served, expected_view,
-        "the view is lash's read with the printer's readable ranges"
-    );
-
-    // The message the workflow shows first is the text literal of the record
-    // lash binds before performing it: `let tN = {text: "Welcome ..."}`.
-    let statements = opened["view"]["statements"].as_array().expect("statements");
-    let bound = statements
-        .iter()
-        .find(|statement| {
-            statement["statement"]["let"]["value"]["expr"]["record"][0]["value"]["literal"]["text"]
-                == "Welcome to the workflow graph"
-        })
-        .expect("the statement binding the welcome message");
-    let record = {
-        let mut site = bound["site"].clone();
-        site["path"].as_array_mut().expect("a path").push(json!(0));
-        site
-    };
-    let literal = {
-        let mut site = record.clone();
-        site["path"].as_array_mut().expect("a path").push(json!(0));
-        site
-    };
-
-    // A transaction the checker refuses changes nothing.
-    let refused = client
-        .post(format!("{base}/workflow/edits"))
-        .json(&json!({"version": opened["version"], "edits": [
-            {"set_value": {"base": opened["identity"], "target": {"literal": {"expression": literal}}, "value": {"variable": "nowhere"}}},
-        ]}))
-        .send()
-        .await
-        .expect("edits");
-    assert_eq!(refused.status(), reqwest::StatusCode::UNPROCESSABLE_ENTITY);
-    let refused: Value = refused.json().await.expect("an error body");
-    assert!(
-        refused["error"]["code"] == "edit_refused"
-            && refused["error"]["details"]["diagnostics"][0]["site"] == literal,
-        "the refusal names the site it is about: {refused}"
-    );
-    let unchanged = answer(
-        client
-            .get(format!("{base}/workflow"))
-            .send()
-            .await
-            .expect("get"),
-    )
-    .await;
-    assert_eq!(unchanged["identity"], opened["identity"]);
-
-    // A direct edit saves and publishes a new version, and the TypeScript
-    // lens follows it.
-    let replaced = answer(
-        client
-            .post(format!("{base}/workflow/edits"))
-            .json(&json!({"version": opened["version"], "edits": [
-                {"set_value": {
-                    "base": opened["identity"],
-                    "target": {"literal": {"expression": literal}},
-                    "value": {"literal": {"text": "Edited as a kernel document"}},
-                }},
-            ]}))
-            .send()
-            .await
-            .expect("edits"),
-    )
-    .await;
-    let edited = &replaced["workflow"];
-    assert!(
-        edited["version"] == opened["version"].as_u64().expect("a version") + 1
-            && edited["definition"].is_string()
-            && edited["definition"] != opened["definition"]
-            && edited["identity"] != opened["identity"],
-        "the edit saved and published a new version: {edited}"
-    );
-    assert!(
-        edited["source"]
-            .as_str()
-            .is_some_and(|source| source.contains("Edited as a kernel document")),
-        "the lens follows the edit"
-    );
-    let survivors = replaced["correspondence"]["entries"]
-        .as_array()
-        .expect("survivors");
-    assert!(
-        survivors
-            .iter()
-            .filter(|survivor| survivor["edited"] == true)
-            .map(|survivor| &survivor["from"])
-            .eq([&literal]),
-        "the correspondence marks the replaced literal alone as edited"
-    );
-
-    // The host previews a public authoring operation, then submits its
-    // ordinary transaction through the same edit/admission route.
-    let planned = answer(
-        client
-            .post(format!("{base}/workflow/plan"))
-            .json(&json!({"version": edited["version"], "operations": [
-                {"insert_step": {
-                    "base": edited["identity"],
-                    "at": {"block": bound["block"], "before": bound["site"]},
-                    "effect": "display.show_message",
-                    "args": [{"record": [{"field": "text", "value": {"literal": {"text": "Added through public authoring"}}}]}],
-                    "result": "null",
-                    "binding": "extra_message",
-                }},
-            ]}))
-            .send()
-            .await
-            .expect("preview authoring operations"),
-    )
-    .await;
-    let still_saved = answer(
-        client
-            .get(format!("{base}/workflow"))
-            .send()
-            .await
-            .expect("get after preview"),
-    )
-    .await;
-    assert_eq!(still_saved["identity"], edited["identity"]);
-    assert_eq!(still_saved["version"], edited["version"]);
-    let inserted = answer(
-        client
-            .post(format!("{base}/workflow/edits"))
-            .json(&json!({"version": edited["version"], "edits": planned["transaction"]["edits"]}))
-            .send()
-            .await
-            .expect("edits"),
-    )
-    .await;
-    let workflow = &inserted["workflow"];
-    assert!(
-        workflow["version"] == edited["version"].as_u64().expect("a version") + 1
-            && workflow["definition"].is_string()
-            && workflow["identity"] != edited["identity"],
-        "the insertion saved and published a new version: {workflow}"
-    );
-    // The inserted step is one statement whose effect takes the record in
-    // place, as the argument of its nested `perform`.
-    let step = workflow["view"]["statements"]
-        .as_array()
-        .expect("statements")
-        .iter()
-        .find(|statement| statement["statement"]["let"]["name"] == "extra_message")
-        .expect("the inserted step");
-    assert_eq!(
-        step["statement"]["let"]["value"]["expr"]["act"]["args"][0]["record"][0]["value"]["literal"]
-            ["text"],
-        "Added through public authoring",
-        "the record is the effect's argument: {step}"
-    );
-    let action = workflow["view"]["dataflow"]["actions"]
-        .as_array()
-        .expect("actions")
-        .iter()
-        .find(|action| action["statement"] == step["site"])
-        .expect("the inserted step's action");
-    assert_eq!(step["actions"], json!([action["site"]]));
-    assert!(
-        action["args"][0]["expression"]["record"].is_array()
-            && action["args"][0]["site"].is_object(),
-        "the view lists the record argument with its site: {action}"
-    );
-    let source = workflow["source"]
-        .as_str()
-        .expect("the lens follows insert_effect");
-    assert!(workflow["sourceUnavailable"].is_null());
-    assert!(
-        source.contains(
-            "await tools.display.show_message({text: \"Added through public authoring\"})"
-        ),
-        "{source}"
-    );
-    let document: lash::workflow::document::Document =
-        serde_json::from_value(workflow["document"].clone()).expect("the edited document");
-    let decoded = lash::typescript::read(source, &document, Default::default())
-        .expect("the edited lens reads back exactly");
-    assert_eq!(document.canonical_bytes(), decoded.canonical_bytes());
-
-    let events = run(&client, &base, json!({})).await;
-    let sites: Vec<&Value> = workflow["view"]["execution_sites"]
-        .as_array()
-        .expect("execution sites")
-        .iter()
-        .map(|site| &site["site"])
-        .collect();
-    let last = events.last().expect("the run reports");
-    assert!(
-        last.site.is_none() && last.status == RunStatus::Succeeded,
-        "the run ends completed: {last:?}"
-    );
-    for event in &events {
-        assert_eq!(event.workflow_version, workflow["version"]);
-        assert_eq!(json!(event.definition), workflow["identity"]);
-        if let Some(site) = &event.site {
-            let site = serde_json::to_value(site).expect("a site");
-            assert!(
-                sites.contains(&&site),
-                "the run reports only sites of its document: {site}"
-            );
-        }
-    }
-    assert_eq!(
-        last.display.messages,
-        [
-            "Added through public authoring",
-            "Edited as a kernel document"
-        ],
-        "the run showed the helper's input and the directly edited message"
-    );
-    assert_eq!(last.display.progress, 100.0);
-    assert_eq!(
-        last.display.lists["steps"],
-        ["Approved", "Loop item", "Loop item"]
-    );
-}
-
 #[tokio::test]
 async fn each_edit_response_maps_its_immediate_base() {
     let (base, _) = serve().await;
@@ -394,83 +113,6 @@ async fn each_edit_response_maps_its_immediate_base() {
         );
         previous = response["workflow"].clone();
     }
-}
-
-/// Named entry inputs are sent to the canonical process launch; the settled
-/// result and tool call evidence must agree with that exact invocation.
-#[tokio::test(flavor = "multi_thread", worker_threads = 2)]
-async fn named_inputs_reach_effects_and_the_final_workflow_output() {
-    let (base, _) = serve().await;
-    let client = reqwest::Client::new();
-    let workflow = answer(
-        client
-            .post(format!("{base}/workflow/select"))
-            .json(&json!({"id":"deep-research"}))
-            .send()
-            .await
-            .expect("select"),
-    )
-    .await;
-    assert_eq!(
-        workflow["document"]["entries"]["deep_research"]["params"][0]["ty"],
-        "text"
-    );
-    // Awaited effects bind their declared record result directly. Find the
-    // source bindings by name; the view also includes entry adapter bindings.
-    let bindings = workflow["view"]["dataflow"]["bindings"]
-        .as_array()
-        .expect("dataflow bindings");
-    for name in ["evidence", "report"] {
-        let binding = bindings
-            .iter()
-            .find(|binding| binding["name"] == name)
-            .expect("the awaited effect's binding");
-        assert_eq!(binding["type"], json!({"record": {"rest": "any"}}));
-    }
-    assert_eq!(
-        workflow["view"]["dataflow"]["returns"][0]["type"],
-        json!({"record": {"rest": "any"}})
-    );
-    let refused = client
-        .post(format!("{base}/run"))
-        .json(&json!({"version": 0, "inputs":{"topic":"Should not run"}}))
-        .send()
-        .await
-        .expect("stale request");
-    assert_eq!(refused.status(), reqwest::StatusCode::CONFLICT);
-    let response = client
-        .post(format!("{base}/run"))
-        .json(&json!({"version":workflow["version"],"inputs":{"topic":"Typed dataflow research"}}))
-        .send()
-        .await
-        .expect("run");
-    assert!(response.status().is_success());
-    let body = response.text().await.expect("SSE body");
-    assert!(!body.contains("event: run_error"), "{body}");
-    let events: Vec<RunEvent> = body
-        .lines()
-        .filter_map(|line| line.strip_prefix("data: "))
-        .map(|json| serde_json::from_str(json).expect("run event"))
-        .collect();
-    let last = events.last().expect("terminal event");
-    assert_eq!(last.status, RunStatus::Succeeded);
-    assert_eq!(
-        last.output.as_ref().expect("returned report")["title"],
-        "Typed dataflow research"
-    );
-    assert!(
-        events
-            .iter()
-            .filter_map(|event| event.call.as_ref())
-            .any(|call| call.input["topic"] == "Typed dataflow research")
-    );
-    assert_eq!(
-        workflow["view"]["dataflow"]["parameters"]
-            .as_array()
-            .expect("parameters")
-            .len(),
-        1
-    );
 }
 
 #[tokio::test(flavor = "multi_thread", worker_threads = 2)]
@@ -520,305 +162,6 @@ async fn imported_parameterized_entries_can_run_with_named_inputs() {
     );
 }
 
-/// Each example's id, the inputs a run of it is started with and, where it
-/// authors one, the result it returns.
-fn catalog_runs() -> Vec<(&'static str, Value, Option<Value>)> {
-    let topic = json!([{"title": "Release notes", "urgent": true}]);
-    vec![
-        ("deep-research", json!({"topic": "Loops"}), None),
-        ("weekly-kpis", json!({"workspace": "Acme Cloud"}), None),
-        ("blank", json!({}), Some(Value::Null)),
-        ("onboarding", json!({}), Some(json!({"approved": true}))),
-        ("summarize-emails", json!({}), None),
-        ("research-nvidia-stock", json!({}), None),
-        ("team-standup-digest", json!({}), None),
-        ("traffic-lights", json!({}), Some(Value::Null)),
-        (
-            "branching-approval",
-            json!({}),
-            Some(json!({"approved": true})),
-        ),
-        ("counter-loop", json!({}), Some(json!(3))),
-        ("flat", json!({}), None),
-        ("branch", json!({}), Some(Value::Null)),
-        ("digest", json!({"topics": topic}), Some(json!({"seen": 1}))),
-        ("typed", json!({"topics": topic}), Some(json!({"seen": 1}))),
-        (
-            "inbox",
-            json!({"items": [{"title": "Hello"}]}),
-            Some(json!({"sent": 1})),
-        ),
-        ("countdown", json!({}), Some(json!({"count": 4}))),
-        ("nested", json!({}), Some(json!({"filed": 6}))),
-        ("retry", json!({}), Some(json!({"failures": 1}))),
-        ("helper", json!({}), None),
-        ("unread", json!({}), None),
-    ]
-}
-
-/// FIG-6401: every example is authored TypeScript and opens as exactly what
-/// lash's workflow import lowers it to (its view is the size the catalog
-/// lists, and its authored text is kept beside the printer's TypeScript and
-/// map), then runs to its authored result against the mock tools.
-#[tokio::test(flavor = "multi_thread", worker_threads = 2)]
-async fn every_example_opens_as_its_imported_source_and_runs_with_the_mocks() {
-    let (base, _) = serve().await;
-    let client = reqwest::Client::new();
-    let catalog = answer(
-        client
-            .get(format!("{base}/workflows"))
-            .send()
-            .await
-            .expect("the catalog"),
-    )
-    .await;
-    let runs = catalog_runs();
-    let entries = catalog.as_array().expect("a list");
-    assert_eq!(
-        entries
-            .iter()
-            .map(|entry| entry["id"].as_str().expect("an id"))
-            .collect::<Vec<_>>(),
-        runs.iter().map(|(id, _, _)| *id).collect::<Vec<_>>(),
-        "the catalog lists each example"
-    );
-    for ((id, inputs, output), entry) in runs.into_iter().zip(entries) {
-        let opened = answer(
-            client
-                .post(format!("{base}/workflow/select"))
-                .json(&json!({ "id": id }))
-                .send()
-                .await
-                .expect("select"),
-        )
-        .await;
-        assert!(
-            opened["definition"].is_string(),
-            "{id} is admitted: {}",
-            opened["notAdmitted"]
-        );
-        assert_eq!(
-            (
-                opened["view"]["statements"].as_array().map(Vec::len),
-                opened["view"]["scopes"].as_array().map(Vec::len),
-            ),
-            (
-                entry["statements"].as_u64().map(|count| count as usize),
-                entry["scopes"].as_u64().map(|count| count as usize),
-            ),
-            "{id} opens as the lowering the catalog counts"
-        );
-        assert_eq!(
-            opened["authored"]["version"], opened["version"],
-            "{id} keeps the source it was imported from"
-        );
-        assert!(
-            opened["sourceMap"]["sites"]
-                .as_array()
-                .is_some_and(|sites| !sites.is_empty()),
-            "{id} has lash's TypeScript source map"
-        );
-        let events = run(&client, &base, inputs).await;
-        let last = events.last().expect("the run reports");
-        assert!(
-            last.site.is_none() && last.status == RunStatus::Succeeded,
-            "{id} runs to its end: {last:?}"
-        );
-        if let Some(output) = output {
-            // A `null` result reads back as an absent output.
-            assert_eq!(
-                last.output.clone().unwrap_or_default(),
-                output,
-                "{id} returns what it authored"
-            );
-        }
-        println!(
-            "{id}: {} statements, {} scopes",
-            entry["statements"], entry["scopes"]
-        );
-    }
-}
-
-/// FIG-6380: each example's TypeScript and Python twins import through
-/// lash's one workflow import and, run with the mocks and the same inputs,
-/// make the same tool calls and return the same result. A twin lash
-/// refuses is listed by the catalog with its refusal; the twins are
-/// authored as written and never edited to agree.
-#[tokio::test(flavor = "multi_thread", worker_threads = 2)]
-async fn each_example_runs_alike_from_its_typescript_and_python_twins() {
-    let (base, _) = serve().await;
-    let client = reqwest::Client::new();
-    let catalog = answer(
-        client
-            .get(format!("{base}/workflows"))
-            .send()
-            .await
-            .expect("the catalog"),
-    )
-    .await;
-    let refused: Vec<&str> = catalog
-        .as_array()
-        .expect("a list")
-        .iter()
-        .filter(|entry| entry["pythonRefused"].is_string())
-        .map(|entry| entry["id"].as_str().expect("an id"))
-        .collect();
-    let mut differ = Vec::new();
-    let mut compared = 0;
-    for (id, inputs, _) in catalog_runs() {
-        if refused.contains(&id) {
-            continue;
-        }
-        compared += 1;
-        let mut observed = Vec::new();
-        for dialect in ["typescript", "python"] {
-            let opened = answer(
-                client
-                    .post(format!("{base}/workflow/select"))
-                    .json(&json!({ "id": id, "dialect": dialect }))
-                    .send()
-                    .await
-                    .expect("select"),
-            )
-            .await;
-            assert_eq!(opened["authored"]["dialect"], dialect, "{id}");
-            assert!(
-                opened["definition"].is_string(),
-                "{id} ({dialect}) is admitted: {}",
-                opened["notAdmitted"]
-            );
-            let events = run(&client, &base, inputs.clone()).await;
-            let last = events.last().expect("the run reports");
-            assert!(
-                last.site.is_none() && last.status == RunStatus::Succeeded,
-                "{id} ({dialect}) runs to its end: {last:?}"
-            );
-            let mut calls: Vec<String> = events
-                .iter()
-                .filter_map(|event| event.call.as_ref())
-                .map(|call| json!({"input": call.input, "output": call.output}).to_string())
-                .collect();
-            calls.sort();
-            observed.push((calls, last.output.clone().unwrap_or_default()));
-        }
-        if observed[0] != observed[1] {
-            differ.push(format!(
-                "{id}: TypeScript {:?}\nPython {:?}",
-                observed[0], observed[1]
-            ));
-        }
-    }
-    println!("{compared} pairs compared; Python twins lash refuses: {refused:?}");
-    assert!(compared > 0, "no example's twins both import");
-    assert!(
-        differ.is_empty(),
-        "the twins differ:\n{}",
-        differ.join("\n")
-    );
-}
-
-/// FIG-6404: a run is observed at `counts`, so the canvas can play it out.
-/// Over two topics, one urgent, the digest's loop body is entered twice and
-/// each of its statements runs twice, each branch runs once, the counts
-/// arrive while the run is live, and the path lash's replay verifies starts
-/// exactly the statements the counts say ran.
-#[tokio::test(flavor = "multi_thread", worker_threads = 2)]
-async fn a_counted_run_reports_each_statement_as_often_as_its_loop_ran_it() {
-    let (base, _) = serve().await;
-    let client = reqwest::Client::new();
-    let opened = answer(
-        client
-            .post(format!("{base}/workflow/select"))
-            .json(&json!({ "id": "digest" }))
-            .send()
-            .await
-            .expect("select"),
-    )
-    .await;
-    let topics = json!([
-        {"title": "Release notes", "urgent": true},
-        {"title": "Team offsite", "urgent": false},
-    ]);
-    let events = run(&client, &base, json!({ "topics": topics })).await;
-    let last = events.last().expect("the run reports");
-    assert_eq!(
-        (last.status, last.output.clone()),
-        (RunStatus::Succeeded, Some(json!({"seen": 2}))),
-        "the digest runs to its end"
-    );
-    assert!(
-        events[..events.len() - 1]
-            .iter()
-            .any(|event| event.coverage.is_some()),
-        "counts arrive while the run is live"
-    );
-    let coverage = serde_json::to_value(last.coverage.as_ref().expect("the end carries coverage"))
-        .expect("coverage encodes");
-    assert_eq!(coverage["observation"], "counts");
-    let view = &opened["view"];
-    let list = |value: &Value| value.as_array().expect("a list").clone();
-    let (statements, scopes) = (list(&view["statements"]), list(&view["scopes"]));
-    let (runs, entries) = (list(&coverage["statements"]), list(&coverage["scopes"]));
-    let count = |value: &Value| value.as_u64().expect("observed at counts");
-    let entered = |scope: &Value| {
-        count(&entries[scopes.iter().position(|s| s == scope).expect("a scope")]["entries"])
-    };
-    let ran_in = |scope: &Value| {
-        statements
-            .iter()
-            .zip(&runs)
-            .filter(|(statement, _)| statement["block"] == scope["block"])
-            .map(|(_, ran)| count(&ran["runs"]))
-            .collect::<Vec<_>>()
-    };
-    // The lowering iterates a list in one loop and other iterables in
-    // another: the list loop ran once per topic, the other never did.
-    let mut loops = scopes
-        .iter()
-        .filter(|scope| scope["kind"] == "for")
-        .map(|scope| (entered(scope), ran_in(scope)))
-        .collect::<Vec<_>>();
-    loops.sort();
-    assert_eq!(loops.len(), 2, "the lowering has two loops: {loops:?}");
-    let (other, list_loop) = (&loops[0], &loops[1]);
-    assert_eq!(list_loop.0, 2, "the loop ran once per topic");
-    assert!(
-        !list_loop.1.is_empty() && list_loop.1.iter().all(|runs| *runs == 2),
-        "each statement in the loop ran once per topic: {list_loop:?}"
-    );
-    assert!(
-        other.0 == 0 && other.1.iter().all(|runs| *runs == 0),
-        "the other loop never ran: {other:?}"
-    );
-    // One topic is urgent and one is not: some `if` took each branch once.
-    assert!(
-        scopes
-            .iter()
-            .filter(|scope| scope["kind"] == "then")
-            .any(|then| {
-                entered(then) == 1
-                    && scopes.iter().any(|other| {
-                        other["kind"] == "else"
-                            && other["statement"] == then["statement"]
-                            && entered(other) == 1
-                    })
-            }),
-        "the urgent test took each branch once"
-    );
-    let Some(RunPath::Verified { steps }) = &last.path else {
-        panic!("the run replays to a verified path: {:?}", last.path);
-    };
-    let started = steps
-        .iter()
-        .filter(|step| matches!(step.site, PathSite::Statement { .. }))
-        .count() as u64;
-    let ran: u64 = runs
-        .iter()
-        .map(|ran| ran["runs"].as_u64().expect("observed"))
-        .sum();
-    assert_eq!(started, ran, "the path starts what the counts say ran");
-}
-
 /// CANVAS-CLOSED: neither endpoint accepts the retired tree writes or passthrough.
 #[tokio::test]
 async fn canvas_closed_http() {
@@ -852,4 +195,247 @@ async fn canvas_closed_http() {
     }
     let unchanged = answer(client.get(format!("{base}/workflow")).send().await.unwrap()).await;
     assert_eq!(unchanged["identity"], opened["identity"]);
+}
+
+/// EXAMPLE-SOURCE / EXAMPLE-DISPLAY: the authored pane reads the retained
+/// map/source; printed reads preserve identity and authoring edits drop the map.
+#[tokio::test(flavor = "multi_thread", worker_threads = 2)]
+async fn authored_source_is_read_from_its_published_map() {
+    let (base, core) = serve().await;
+    let client = reqwest::Client::new();
+    for (dialect, source, format) in [
+        (
+            "typescript",
+            "export async function demo() { return await corpus.echo(\"日本 🦀\"); }",
+            "type_script_v1",
+        ),
+        (
+            "python",
+            "async def demo():\n    return await corpus.echo(\"日本 🦀\")\n",
+            "python_v1",
+        ),
+    ] {
+        let before = answer(client.get(format!("{base}/workflow")).send().await.unwrap()).await;
+        let imported = answer(client.post(format!("{base}/workflow/source")).json(&json!({
+            "version": before["version"], "entry": "demo", "dialect": dialect, "source": source
+        })).send().await.unwrap()).await;
+        assert!(
+            imported["authored"]["sourceMapId"].is_string(),
+            "the host holds the publication's map id"
+        );
+        let id = serde_json::from_value(imported["authored"]["sourceMapId"].clone()).unwrap();
+        let lash::workflow::SourceMapRead::Read {
+            map,
+            source: stored_source,
+        } = core.host_artifacts().read_source_map(&id).await.unwrap()
+        else {
+            panic!("the publication retains its source map");
+        };
+        assert_eq!(stored_source, source);
+        assert_eq!(stored_source, imported["authored"]["text"]);
+        assert_eq!(
+            serde_json::to_value(map).unwrap(),
+            imported["authored"]["sourceMap"]
+        );
+        let read = answer(
+            client
+                .post(format!("{base}/workflow/source"))
+                .json(&json!({
+                    "version": imported["version"], "entry": "demo", "dialect": dialect,
+                    "format": format, "source": imported["source"]
+                }))
+                .send()
+                .await
+                .unwrap(),
+        )
+        .await;
+        assert_eq!(
+            read["identity"], imported["identity"],
+            "printed reading preserves canonical bytes"
+        );
+        assert_eq!(read["document"], imported["document"]);
+        assert_eq!(read["sourceDialect"], dialect);
+        // Re-import authored text, then edit a tool argument through the closed API.
+        let imported = answer(client.post(format!("{base}/workflow/source")).json(&json!({
+            "version": read["version"], "entry": "demo", "dialect": dialect, "source": source
+        })).send().await.unwrap()).await;
+        let action = imported["view"]["dataflow"]["actions"]
+            .as_array()
+            .unwrap()
+            .iter()
+            .find(|action| action["callee"]["effect"] == "corpus.echo")
+            .unwrap();
+        let operation = json!({"set_value": {"base": imported["identity"],
+            "target": {"tool_argument": {"action": action["site"], "index": 0}},
+            "value": {"literal": {"text": "edited λ"}}}});
+        let preview = answer(
+            client
+                .post(format!("{base}/workflow/plan"))
+                .json(&json!({
+                    "version": imported["version"], "operations": [operation.clone()]
+                }))
+                .send()
+                .await
+                .unwrap(),
+        )
+        .await;
+        assert_ne!(preview["preview"]["identity"], imported["identity"]);
+        assert!(preview["preview"]["authored"]["sourceMapId"].is_null());
+        let edited = answer(
+            client
+                .post(format!("{base}/workflow/edits"))
+                .json(&json!({
+                    "version": imported["version"], "edits": [operation]
+                }))
+                .send()
+                .await
+                .unwrap(),
+        )
+        .await;
+        assert_eq!(
+            edited["workflow"]["document"], preview["preview"]["document"],
+            "preview and exact replay agree"
+        );
+        assert!(edited["workflow"]["authored"]["sourceMapId"].is_null());
+        assert!(edited["workflow"]["authored"]["sourceMap"].is_null());
+        assert_eq!(edited["correspondence"]["base"], imported["identity"]);
+        let events = run(&client, &base, json!({})).await;
+        let last = events.last().unwrap();
+        assert_eq!(last.status, RunStatus::Succeeded);
+        assert_eq!(last.output, Some(json!("edited λ")));
+        assert_eq!(last.display.messages, ["edited λ"]);
+    }
+}
+
+/// EXAMPLE-CORPUS / STORED-VIEW / HELP-LABEL: the picker follows the shared
+/// catalog, twins keep their own results, and drawing consumes stored declarations.
+#[tokio::test(flavor = "multi_thread", worker_threads = 2)]
+async fn corpus_catalog_imports_both_dialects_and_draws_the_stored_read() {
+    let (base, core) = serve().await;
+    let client = reqwest::Client::new();
+    let catalog = answer(
+        client
+            .get(format!("{base}/workflows"))
+            .send()
+            .await
+            .unwrap(),
+    )
+    .await;
+    let manifest: Value = serde_json::from_str(workflow_corpus::CATALOG_JSON).unwrap();
+    assert_eq!(
+        catalog.as_array().unwrap().len(),
+        manifest.as_array().unwrap().len()
+    );
+    let before = answer(client.get(format!("{base}/workflow")).send().await.unwrap()).await;
+    let refused = client
+        .post(format!("{base}/workflow/select"))
+        .json(&json!({"id":"straight-tool", "entry":"missing"}))
+        .send()
+        .await
+        .unwrap();
+    assert_eq!(refused.status(), reqwest::StatusCode::UNPROCESSABLE_ENTITY);
+    let unchanged = answer(client.get(format!("{base}/workflow")).send().await.unwrap()).await;
+    assert_eq!(unchanged["version"], before["version"]);
+    let mut modules = 0;
+    let mut refusals = 0;
+    let mut cells = 0;
+    for (case, declared) in catalog
+        .as_array()
+        .unwrap()
+        .iter()
+        .zip(manifest.as_array().unwrap())
+    {
+        assert_eq!(case["id"], declared["name"]);
+        for dialect in ["typescript", "python"] {
+            let source = &case[format!("{dialect}Source")];
+            let before = answer(client.get(format!("{base}/workflow")).send().await.unwrap()).await;
+            match case["group"].as_str().unwrap() {
+                "cell" => {
+                    assert!(
+                        case[format!("{dialect}Witness")]
+                            .as_str()
+                            .is_some_and(
+                                |text| text.contains("FunctionValue") || text.contains("finish")
+                            )
+                    );
+                    cells += 1;
+                }
+                "refusal" => {
+                    let response = client.post(format!("{base}/workflow/source")).json(&json!({
+                        "version": before["version"], "entry": "demo", "dialect": dialect, "source": source
+                    })).send().await.unwrap();
+                    assert_eq!(response.status(), reqwest::StatusCode::UNPROCESSABLE_ENTITY);
+                    let error: Value = response.json().await.unwrap();
+                    assert_eq!(
+                        error["error"]["details"]["diagnostics"][0]["code"],
+                        declared["refusal"]
+                    );
+                    let after =
+                        answer(client.get(format!("{base}/workflow")).send().await.unwrap()).await;
+                    assert_eq!(after["identity"], before["identity"]);
+                    assert_eq!(after["version"], before["version"]);
+                    refusals += 1;
+                }
+                "module" => {
+                    for entry in declared["entries"].as_array().unwrap() {
+                        let opened = answer(
+                            client
+                                .post(format!("{base}/workflow/select"))
+                                .json(&json!({
+                                    "id": case["id"], "dialect": dialect, "entry": entry
+                                }))
+                                .send()
+                                .await
+                                .unwrap(),
+                        )
+                        .await;
+                        assert_eq!(opened["authored"]["text"], *source);
+                        assert_eq!(opened["sourceDialect"], dialect);
+                        let definition = lash::process::ProcessDefinitionId::parse(
+                            opened["definition"].as_str().unwrap(),
+                        )
+                        .unwrap();
+                        let lash::workflow::WorkflowRead::Inspected(stored) = core
+                            .host_artifacts()
+                            .definition_graph(&definition)
+                            .await
+                            .unwrap()
+                        else {
+                            panic!("stored definition");
+                        };
+                        let mut expected = lash::workflow::view::derive(&stored.document).unwrap();
+                        let map = serde_json::from_value(opened["sourceMap"].clone()).unwrap();
+                        expected
+                            .readable_ranges(
+                                stored.document.document(),
+                                if dialect == "python" {
+                                    "generated_python"
+                                } else {
+                                    "generated_typescript"
+                                }
+                                .into(),
+                                opened["source"].as_str().unwrap(),
+                                &map,
+                            )
+                            .unwrap();
+                        assert_eq!(serde_json::to_value(expected).unwrap(), opened["view"]);
+                        for action in opened["view"]["dataflow"]["actions"].as_array().unwrap() {
+                            if let Some(name) = action["callee"]["library"]["name"].as_str() {
+                                assert!(
+                                    opened["functionLabels"][name]
+                                        .as_str()
+                                        .is_some_and(|title| !title.is_empty())
+                                );
+                            }
+                        }
+                        modules += 1;
+                    }
+                }
+                other => panic!("unknown corpus group {other}"),
+            }
+        }
+    }
+    println!(
+        "EXAMPLE-CORPUS observed {modules} module entries, {refusals} refused imports, {cells} cell witnesses"
+    );
 }

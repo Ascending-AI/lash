@@ -1,6 +1,6 @@
 kernel 1
 numbers float
-effect echo(input: Any) -> Any
+effect corpus.echo(input?: Any) -> Any
 use kind = @3e2a9836b16b3ade4f7fcc2d56d1fb203dffed4bd5d7f4bf800df213c8c8c5f7
 use same = @1465a1a642da52eba1664711a12c594f155ba2c6cd744344079f5b5018db1578
 use ts.await = @1463b538a6614aa09a001e6db86e6d54cd2b0fb6826493c23043a41273c0860a
@@ -11,11 +11,11 @@ fn demo() {
   let t3 = fn(this1, args1) start() -> Any token("ts.function", 4) ts_args(ts.await, same) {
     let `result` = "start"
     try {
-      set `result` = perform echo("try") as Any then yield
+      set `result` = perform corpus.echo("try") as Any then yield
     } catch error {
       set `result` = "caught"
     } finally {
-      do perform echo("finally") as Any then yield
+      do perform corpus.echo("finally") as Any then yield
     }
     return `result`
   }

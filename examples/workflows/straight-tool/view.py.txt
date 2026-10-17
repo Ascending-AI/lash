@@ -1,12 +1,12 @@
 unit Function(Name("demo"))
-statement fn demo/0 ordinal=4 depth=0 block=fn demo Let { name: Name("t3"), value: Expr(Closure(Closure { params: [], body: [Let { name: Name("t1"), value: Action(Perform { effect: QualifiedName("echo"), args: [Literal(Text("hello"))], result: Any, then_yield: false }) }, Let { name: Name("t2"), value: Action(Call { callee: Library(FunctionId(09159bbbadc0f6eda5aa8761653ad9fc2f463b362941fe756a2cf7e9aa2006cd)), args: [Variable(Name("t1"))] }) }, Return { value: Variable(Name("t2")) }], start: Some(StartAdapter { signature: Signature { params: [], result: Any }, representation: Bare, convention: Direct }) })) }
-statement fn demo/0/0/0/0 ordinal=6 depth=1 block=fn demo/0/0/0 Let { name: Name("t1"), value: Action(Perform { effect: QualifiedName("echo"), args: [Literal(Text("hello"))], result: Any, then_yield: false }) }
+statement fn demo/0 ordinal=4 depth=0 block=fn demo Let { name: Name("t3"), value: Expr(Closure(Closure { params: [], body: [Let { name: Name("t1"), value: Action(Perform { effect: QualifiedName("corpus.echo"), args: [Literal(Text("hello"))], result: Any, then_yield: false }) }, Let { name: Name("t2"), value: Action(Call { callee: Library(FunctionId(09159bbbadc0f6eda5aa8761653ad9fc2f463b362941fe756a2cf7e9aa2006cd)), args: [Variable(Name("t1"))] }) }, Return { value: Variable(Name("t2")) }], start: Some(StartAdapter { signature: Signature { params: [], result: Any }, representation: Bare, convention: Direct }) })) }
+statement fn demo/0/0/0/0 ordinal=6 depth=1 block=fn demo/0/0/0 Let { name: Name("t1"), value: Action(Perform { effect: QualifiedName("corpus.echo"), args: [Literal(Text("hello"))], result: Any, then_yield: false }) }
 statement fn demo/0/0/0/1 ordinal=7 depth=1 block=fn demo/0/0/0 Let { name: Name("t2"), value: Action(Call { callee: Library(FunctionId(09159bbbadc0f6eda5aa8761653ad9fc2f463b362941fe756a2cf7e9aa2006cd)), args: [Variable(Name("t1"))] }) }
 statement fn demo/0/0/0/2 ordinal=8 depth=1 block=fn demo/0/0/0 Return { value: Variable(Name("t2")) }
 statement fn demo/1 ordinal=9 depth=0 block=fn demo Let { name: Name("t4"), value: Action(Call { callee: Value(Name("t3")), args: [] }) }
 statement fn demo/2 ordinal=10 depth=0 block=fn demo Return { value: Variable(Name("t4")) }
 scope fn demo ordinal=3 depth=0 Entry
 scope fn demo/0/0/0 ordinal=5 depth=1 Closure
-action fn demo/0/0/0/0/0 Some(Effect(QualifiedName("echo")))
+action fn demo/0/0/0/0/0 Some(Effect(QualifiedName("corpus.echo")))
 action fn demo/0/0/0/1/0 library id=09159bbbadc0f6eda5aa8761653ad9fc2f463b362941fe756a2cf7e9aa2006cd name=py.reply label="Python reply"
 action fn demo/1/0 None

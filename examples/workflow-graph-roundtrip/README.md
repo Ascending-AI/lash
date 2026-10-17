@@ -119,76 +119,33 @@ inputs. Node positions are derived, not persistent user layout.
 
 ## Examples and the code pane
 
-Every example is authored in `catalog/` as TypeScript and as a Python twin,
-written the way a person would write each, and imported at startup through
-lash's public `import_workflow`, exactly as written: no kernel document is
-written by hand and the host rewrites nothing, so the canvas shows lash's
-current lowering of either dialect. The **Example** dropdown lists each one
-once, grouped as apps or control-flow examples, with the statement and scope
-count of its lowering in the chosen dialect (the same counts appear under the
-canvas caption). Choosing one loads it at once. The **TypeScript | Python** toggle
-beside it chooses which twin opens; an example whose Python twin lash refuses
-keeps Python off, and the button's title is lash's refusal.
+The picker comes from [the shared corpus](../workflows/README.md). It lists
+workflow modules, cell crossings and module refusals. Both dialects import
+unchanged through `HostArtifacts::import_workflow`. Module counts come from
+`view::derive`; entry names follow the shared module contract. Cell and refusal
+cases open their source and recorded witness without replacing the saved workflow.
+The shared `workflow_corpus::tools` declaration binds `corpus.echo`; the mock
+returns its argument and displays it. No external service is called.
 
-The code pane is read-only and shows the saved revision as:
+The read-only pane offers three lenses:
 
-- **Source**: the authored TypeScript or Python the workflow was imported
-  from, as imported. Edits do not change it; the pane says when the revision
-  was edited since. It is not linked to the canvas yet.
-- **TypeScript**: lash's exact readable printer. Lines are linked through the
-  printer's source map.
-- **Kernel**: the kernel document text. The kernel printer starts every
-  statement on its own line in document order; the pane matches each statement
-  of lash's view to its line and checks its keyword. If any statement does not
-  match, the tab is shown without linking.
+- **Source** shows the imported text read with its map from stored artifacts.
+  The host keeps the publication's source-map id beside the definition id.
+  Browser linking converts UTF-8 offsets to UTF-16 offsets before selecting
+  lines. Authoring edits keep the historical text and drop its map.
+- **Printed** shows the selected dialect's exact printer output and fresh map.
+- **Kernel** shows canonical text with the view's canonical line ranges.
 
-Selecting a node marks the line its statement starts on and scrolls the pane to
-it. Clicking a linked line selects that statement: the canvas switches to its
-scope and scrolls to its node, without opening it; double-click the line to
-open it. Edits and imports refresh the pane.
+The canvas derives from the stored document and its retained declarations;
+reading a saved view does not link against the current registry. Library action
+labels join `CalleeView::Library.name` against `FunctionLabels`; an unknown name
+shows itself. Roles, layout and wording remain host-owned.
 
-**Edit source** opens whole-source replacement for renames, declarations and
-code changes. Import validates before replacing the document and resets site
-selection. Canvas edits carry correspondence within a draft.
-
-The TypeScript pane uses Lash's exact readable printer: named async functions,
-awaited tool calls and ordinary expressions. The `k.document(...)` header carries
-structured metadata needed for exact reconstruction; it is not an escaped JSON
-document. Importing an unchanged export preserves the kernel document identity.
-The host does not rewrite the printed source or recover dialect patterns.
-
-Inputs support constants and in-scope data values. Records expose fields and a
-whole-object editor. Arbitrary computation, constant promotion and renaming
-belong in source. Explicit expansion is presentation state and follows
-correspondence.
-
-Lash's view carries binding identity, lexical availability, expression sites,
-assignment destinations and callable ownership from the canonical graph. The
-frontend consumes that metadata without recognizing dialect syntax. The kernel
-checker decides type compatibility during edit admission. Inferred
-binding and expression types come from its conservative facets; the browser
-keeps unknown types as `Any`. Entry input controls and immediate effect-result
-ports retain their declared signatures. A mutable record with an unknown facet
-has a whole-value source choice; use canonical expressions for fields the
-checker cannot establish. Display hints never narrow an unconstrained binding
-or replace a declared return contract.
-Assignment nodes show state writes, and closure returns show function outputs.
-Scope inputs expose enclosing bindings without turning them into workflow entry
-parameters. Running always invokes the entry.
-
-Add-step forms support the mocked Gmail, web search, message and status actions.
-The editor chooses a fresh result binding for each visual insertion. A rejected
-edit preserves the saved document and reports the error in the current panel.
-
-Return and Finish are actual terminal statements. Return exits the current
-function after enclosing `finally` blocks run; a `finally` can override its
-result. Finish ends the whole invocation and skips `finally` blocks. Each has
-execution order entering it and a typed `result` input, with no outgoing
-execution connection. The editor does not invent a terminal tile for a block
-without an explicit terminal statement.
-
-Terminal structure is edited in source. The canvas can set an existing literal
-without inserting or replacing Return or Finish statements.
+**Edit source** distinguishes **Workflow module** from **Printed document**.
+Choose the module's language explicitly before importing authored source.
+Printed source reads against the current document with its printer format;
+reading it unchanged preserves canonical identity. The language of a printed
+lens follows the imported revision, including after canvas edits.
 
 ## Public authoring API
 
@@ -225,69 +182,24 @@ refusals have schemas under `kernel-entry-extraction` and `kernel-edit-refusal`.
 Admission and correspondence in `Extraction.applied` stay in-process; the wire
 omits them, and deserialization sets that field to `None`.
 
-## Dialect independence verification
+## Verification
 
-Run the focused host projection laws with:
+The focused HTTP laws cover retained source maps, both dialects' imports,
+printed read identity, exact edit preview/replay, display output, catalog entry
+and refusal contracts, and views derived from stored declarations. The shared
+corpus law pins readable per-dialect outputs and counts. It compares entry names
+and refusal codes across dialects; it does not require their values to agree.
 
 ```sh
-node --test examples/workflow-graph-roundtrip/frontend/*.test.mjs
+. ./env.sh
+kiln test //examples/workflow-graph-roundtrip:roundtrip__test --test_arg=--exact --test_arg=authored_source_is_read_from_its_published_map --test_arg=corpus_catalog_imports_both_dialects_and_draws_the_stored_read
+kiln gate lash "$(basename "$PWD")" -- node --test --test-name-pattern=EXAMPLE-SOURCE examples/workflow-graph-roundtrip/frontend/codepane.test.mjs
 ```
 
-These pin the unused-closure, opaque-library-call, shared/shadowed-input,
-empty-scope and terminal-insertion rules, zooming around the cursor and the
-wheel/pinch/pan split, the click-versus-drag slop, two-finger pinch, arrow-key
-neighbours and framing, the select/open/Escape state machine, the code pane's
-statement-to-line linking and line stepping, and how lash's statuses, coverage
-and replay path become node states and taken branches. The Rust law
-`every_example_opens_as_its_imported_source_and_runs_with_the_mocks` imports
-every catalog example and runs it against the mocks, and
-`a_counted_run_reports_each_statement_as_often_as_its_loop_ran_it` pins a
-counted digest run's loop and branch counts and its verified path. The HTTP regression
-`each_edit_response_maps_its_immediate_base` pins per-transaction correspondence
-across consecutive edits. The dataflow value-encoding law preserves integral
-floats, negative zero and typed nested record values.
-
-Lash's own laws (`lash-kernel-edit`'s `view_tests`) cover lexical source
-choices and shadowing, callable return ownership and assignment identity. The
-example's Rust laws cover the served view being Lash's, named invocation inputs
-reaching effects and the final output, and imported parameterized entries. Browser checks exercise
-data-value rewiring, type mismatch rejection, actual research and KPI
-executions, output reset between runs and mobile layout.
-
-## Dataflow examples
-
-The examples include **Deep research brief** and **Weekly business KPIs**.
-Research maps the search result's topic and
-sources into a cited brief. KPIs maps current and previous period records into a
-comparison with calculated percentage changes. Their last step displays the
-report summary. Edit `topic` or `workspace` in the workflow Input node to try
-another run. These values are invocation arguments, separate from document edits.
-Research evidence, URLs and business metrics are synthetic fixtures; the mock
-synthesis and comparison consume their actual mapped inputs.
-
-Each action shows named inputs and result ports. Record outputs also expose
-fields as connection sources. Double-click an input to edit its constant, select an
-available source or use the data-value mapping. **Execution data** in an
-open node shows each retained call's input and output, with separate occurrences
-for repeated calls. Trace rows select the relevant node. The entry Return or Finish inspector
-shows the actual terminal result. A nested function Return never borrows the
-workflow's terminal result. Data resets when the document changes or a new run
-begins; this example does not persist a run-history browser.
-
-The backend serves `lash::workflow::view::derive` verbatim: Lash projects the
-canonical document and graph into statements, scopes, dataflow and execution
-sites. `frontend/dataflow.mjs` projects ports from that view and plans closed
-canvas operations; it introduces no second persisted dataflow graph.
-The example host owns port labels, layout, expansion state, invocation forms,
-mock defaults and transport. Kernel types, lexical bindings, Sites, edits and
-runtime records remain authoritative.
-
-The host attaches `callId` from `ProcessEffectOccurrence`, then reads the settled
-record through `core.processes().tool_call`. Output display uses the public
-`value_for_projection` API. Missing retained data is shown as unavailable. Lash
-owns the definition/site/call identities, execution and records; this example
-owns the SSE fields, mock tools, app labels and inspector. No dialect-specific
-analysis or new core observation API is required.
+The [browser runbook](../../runbooks/workflow-editor-authoring/runbook.md)
+inspects every corpus case in both dialects and exercises import, edit, read
+and display through the browser. It records observed counts and screenshots;
+it is product verification, not a correctness gate.
 
 ## Observation adapter behavior
 
@@ -319,35 +231,3 @@ Events identify the execution owner, call and attempt, and support resumption
 within their own retention window with explicit gaps. This example does not
 yet subscribe to that feed or publish mock tool-live facts. Display progress
 here remains the mock host's display state, separate from tool progress.
-
-## Lowering shape ratchet (SHAPE)
-
-Print the current table and check its ratchet with one command, from a sourced
-Kiln fork:
-
-```sh
-kiln test //examples/workflow-graph-roundtrip:workflow-graph-roundtrip__unit_test --test_arg=catalog::shape::every_catalog_and_probe_workflow_stays_within_its_shape_ratchet --test_arg=--exact --test_arg=--nocapture --test_output=all
-```
-
-The instrument discovers every `.ts` and `.py` under `catalog/`, including the
-original four probes in `catalog/probes/`. It uses each dialect's real module
-lowering (TypeScript and Python alike), with the catalog's host effects and the
-worker's helper library. It counts all document-owned statements, scopes
-(including empty blocks) and actions: module roots, entry adapters, closures and
-cloned bodies count; library helper bodies do not. This includes one module
-statement and scope beyond the entry-view counts quoted in FIG-6411.
-
-Author statements come from SWC and Ruff ASTs, including nested function bodies;
-function/type declarations and braces are containers. Loop-header declarations
-belong to their loop. Each kernel statement with a source note belongs to the
-smallest author statement containing that note's span. Ownership is exclusive:
-a loop's maximum measures its own expansion, without counting its child author
-statements again. Unowned statements remain explicit `overhead`. The table gives
-the statements/author ratio and the worst author's line, byte range and source.
-
-`catalog/shape.ratchet` is sorted by relative path, one workflow per row, with
-columns `statements scopes actions author max overhead`. A count increase fails;
-a decrease also fails until the improving change lowers the corresponding
-ratchet. The command prints replacement rows. Investigate increases rather than
-raising a baseline to accept a regression. Corpus additions and removals must
-update the ratchet in the same change. Source formatting changes need no update.

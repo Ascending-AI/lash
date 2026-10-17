@@ -1,7 +1,7 @@
 --- before
 -kernel 1
 -numbers float
--effect echo(input: Any) -> Any
+-effect corpus.echo(input?: Any) -> Any
 -use kind = @3e2a9836b16b3ade4f7fcc2d56d1fb203dffed4bd5d7f4bf800df213c8c8c5f7
 -use same = @1465a1a642da52eba1664711a12c594f155ba2c6cd744344079f5b5018db1578
 -use ts.await = @1463b538a6614aa09a001e6db86e6d54cd2b0fb6826493c23043a41273c0860a
@@ -10,7 +10,7 @@
 -
 -fn demo() {
 -  let t2 = fn(this1, args1) start() -> Any token("ts.function", 4) ts_args(ts.await, same) {
--    let t1 = perform echo("hello") as Any then yield
+-    let t1 = perform corpus.echo("hello") as Any then yield
 -    return t1
 -  }
 -  let t3 = []
@@ -27,7 +27,7 @@
 +++ after
 +kernel 1
 +numbers float
-+effect echo(input: Any) -> Any
++effect corpus.echo(input?: Any) -> Any
 +use kind = @3e2a9836b16b3ade4f7fcc2d56d1fb203dffed4bd5d7f4bf800df213c8c8c5f7
 +use same = @1465a1a642da52eba1664711a12c594f155ba2c6cd744344079f5b5018db1578
 +use ts.await = @1463b538a6614aa09a001e6db86e6d54cd2b0fb6826493c23043a41273c0860a
@@ -36,7 +36,7 @@
 +
 +fn demo() {
 +  let t2 = fn(this1, args1) start() -> Any token("ts.function", 4) ts_args(ts.await, same) {
-+    let t1 = perform echo("edited λ") as Any then yield
++    let t1 = perform corpus.echo("edited λ") as Any then yield
 +    return t1
 +  }
 +  let t3 = []
@@ -53,8 +53,8 @@
 
 Correspondence:
 {
-  "base": "f034fc21e2228bb08478c0480b7f4efb164659d036a9f51a528e83a57b6a441c",
-  "result": "8bc22d969a43f030f273c3f6baae890374498df4f25439368b51554739838abd",
+  "base": "efd01445780db343320193fcf9488783405542eeef20fe94922b71ed7e310efa",
+  "result": "9ed781e456956823e9e2f5650030d6a57249fdc45a894c3f62aafea787225999",
   "entries": [
     {
       "from": {
@@ -555,7 +555,7 @@ Correspondence:
 Reprinted source:
 export async function demo() {
   let t2 = async function(this1, args1) {
-    let t1 = await await tools.echo("edited λ");
+    let t1 = await await tools.corpus.echo("edited λ");
     return t1;
   };
   let t3 = [];

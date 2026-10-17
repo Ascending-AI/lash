@@ -1,10 +1,11 @@
 {
   "context": {
-    "echo": {
+    "corpus.echo": {
       "params": [
         {
           "name": "input",
-          "ty": "any"
+          "ty": "any",
+          "optional": true
         }
       ],
       "result": "any"
@@ -20,11 +21,11 @@
     }
   },
   "transaction": {
-    "base": "f034fc21e2228bb08478c0480b7f4efb164659d036a9f51a528e83a57b6a441c",
+    "base": "efd01445780db343320193fcf9488783405542eeef20fe94922b71ed7e310efa",
     "edits": [
       {
         "set_value": {
-          "base": "f034fc21e2228bb08478c0480b7f4efb164659d036a9f51a528e83a57b6a441c",
+          "base": "efd01445780db343320193fcf9488783405542eeef20fe94922b71ed7e310efa",
           "target": {
             "tool_argument": {
               "action": {

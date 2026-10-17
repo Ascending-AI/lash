@@ -20,6 +20,7 @@ pub(crate) struct SourceRequest {
     entry: Name,
     #[serde(default)]
     dialect: Dialect,
+    format: Option<lash::dialect::SourceFormat>,
 }
 
 pub(crate) async fn import_source(
@@ -29,7 +30,36 @@ pub(crate) async fn import_source(
     let _publishing = state.publishing.lock().await;
     let current = state.current();
     check_version(request.version, current.version)?;
-    let document = import(&state.core, request.dialect, &request.source).await?;
+    let (document, map) = if let Some(format) = request.format {
+        let read = state
+            .core
+            .host_artifacts()
+            .import_exported_workflow(
+                &request.source,
+                format,
+                current.draft.document(),
+                &runtime::environment()
+                    .map_err(|error| ErrorResponse::invalid("environment", error))?,
+            )
+            .await
+            .map_err(|error| ErrorResponse::invalid("source_read", error))?;
+        match read {
+            WorkflowImport::Read { document } => (
+                document
+                    .to_document()
+                    .map_err(|error| ErrorResponse::invalid("document_bytes", error))?,
+                None,
+            ),
+            other => {
+                return Err(ErrorResponse::invalid(
+                    "source_read_refused",
+                    format!("{other:?}"),
+                ));
+            }
+        }
+    } else {
+        import(&state.core, request.dialect, &request.source).await?
+    };
     if !document.entries.contains_key(&request.entry) {
         return Err(ErrorResponse::invalid(
             "entry",
@@ -42,13 +72,26 @@ pub(crate) async fn import_source(
         .install(
             draft,
             request.entry,
-            Origin::Imported {
-                dialect: request.dialect,
-                text: request.source,
+            if let Some(format) = request.format {
+                Origin::Read {
+                    dialect: if format.language()
+                        == lash::workflow::document::SourceLanguage::Python
+                    {
+                        Dialect::Python
+                    } else {
+                        Dialect::TypeScript
+                    },
+                }
+            } else {
+                Origin::Imported {
+                    dialect: request.dialect,
+                    text: request.source,
+                    map,
+                }
             },
         )
         .await;
-    Ok(Json(saved.view(checked.functions())))
+    Ok(Json(saved.view(&state.core, checked.functions()).await))
 }
 
 /// Lowers authored source in `dialect` through lash's workflow import and
@@ -58,7 +101,7 @@ pub(crate) async fn import(
     core: &lash::LashCore,
     dialect: Dialect,
     source: &str,
-) -> Result<Document, ErrorResponse> {
+) -> Result<(Document, Option<lash::workflow::document::SourceMap>), ErrorResponse> {
     let environment =
         runtime::environment().map_err(|error| ErrorResponse::invalid("environment", error))?;
     let imported = core
@@ -67,9 +110,16 @@ pub(crate) async fn import(
         .await
         .map_err(|error| ErrorResponse::invalid("source_import", error))?;
     match imported {
-        WorkflowImport::Imported { document, .. } => document
-            .to_document()
-            .map_err(|error| ErrorResponse::invalid("document_bytes", error)),
+        WorkflowImport::Imported {
+            document,
+            source_map,
+            ..
+        } => Ok((
+            document
+                .to_document()
+                .map_err(|error| ErrorResponse::invalid("document_bytes", error))?,
+            Some(source_map),
+        )),
         WorkflowImport::Refused(diagnostics) => Err(ErrorResponse::new(
             StatusCode::UNPROCESSABLE_ENTITY,
             "source_refused",
@@ -132,7 +182,15 @@ pub(crate) async fn preview(
             }).collect::<Vec<_>>()}),
             )
         })?;
-    let mut view = current.view(environment.functions());
+    // A preview is an unpublished edit and must not read the old definition or map.
+    current.published = Err(std::sync::Arc::new(runtime::RunError::Invalid(
+        "preview".into(),
+    )));
+    if let Some(authored) = &mut current.authored {
+        authored.source_map_id = None;
+        authored.source_map = None;
+    }
+    let mut view = current.view(&state.core, environment.functions()).await;
     view.definition = None;
     view.not_admitted = None;
     Ok(Json(PlanResponse {

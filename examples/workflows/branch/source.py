@@ -1,4 +1,4 @@
 async def demo(flag: bool):
     if flag:
-        return await echo("yes")
+        return await corpus.echo("yes")
     return "no"

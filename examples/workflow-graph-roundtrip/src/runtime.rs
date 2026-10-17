@@ -25,6 +25,8 @@ pub(crate) enum RunError {
     #[error("{0}")]
     Refused(lash::workflow::WorkflowAdmissionRefusal),
     #[error(transparent)]
+    SourceMap(#[from] lash::workflow::document::SourceMapRefusal),
+    #[error(transparent)]
     Overlay(#[from] lash::workflow::WorkflowOverlayFoldError),
     #[error(transparent)]
     Json(#[from] serde_json::Error),
@@ -62,6 +64,8 @@ pub(crate) struct Published {
     pub(crate) definition: ProcessDefinition,
     launch: EngineLaunch,
     pub(crate) pin: HostArtifactPin,
+    pub(crate) reference: lash::workflow::WorkflowDocumentRef,
+    pub(crate) source_map: Option<lash::workflow::document::SourceMapId>,
 }
 
 impl Published {
@@ -121,6 +125,7 @@ pub(crate) async fn publish(
     core: &LashCore,
     draft: &Draft,
     entry: &Name,
+    source: Option<(&lash::workflow::document::SourceMap, &str)>,
 ) -> Result<Publication, RunError> {
     let pin = HostArtifactPin::mint();
     let artifacts = core.host_artifacts();
@@ -152,7 +157,7 @@ pub(crate) async fn publish(
                 &lash::workflow::document::DocumentBytes::from(draft.document().clone()),
                 entry,
                 &environment,
-                None,
+                source,
             )
             .await?
         {
@@ -161,15 +166,15 @@ pub(crate) async fn publish(
                 Ok(Publication {
                     published: Published {
                         definition: publication.definition,
+                        reference: publication.reference,
+                        source_map: publication.source_map,
                         launch: EngineLaunch::new(env_ref, settings),
                         pin: pin.clone(),
                     },
                 })
             }
             WorkflowPublish::Refused(refusal) => Err(RunError::Refused(refusal)),
-            WorkflowPublish::SourceMapRefused(refusal) => Err(RunError::Invalid(format!(
-                "the source map is refused: {refusal}"
-            ))),
+            WorkflowPublish::SourceMapRefused(refusal) => Err(RunError::SourceMap(refusal)),
             WorkflowPublish::Unsupported { engine_kind } => Err(RunError::Invalid(format!(
                 "engine `{engine_kind}` admits no workflow documents"
             ))),

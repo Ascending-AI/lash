@@ -1,9 +1,9 @@
 unit Main
 statement main/0 ordinal=1 depth=0 block=main Let { name: Name("t1"), value: Action(Perform { effect: QualifiedName("finish"), args: [Literal(Text("done"))], result: Any, then_yield: false }) }
 statement main/1 ordinal=2 depth=0 block=main Finish { value: Literal(Null) }
-statement main/2 ordinal=3 depth=0 block=main Let { name: Name("t2"), value: Action(Perform { effect: QualifiedName("echo"), args: [Literal(Text("unreachable"))], result: Any, then_yield: false }) }
+statement main/2 ordinal=3 depth=0 block=main Let { name: Name("t2"), value: Action(Perform { effect: QualifiedName("corpus.echo"), args: [Literal(Text("unreachable"))], result: Any, then_yield: false }) }
 statement main/3 ordinal=4 depth=0 block=main Do { value: Act(ActExpr { kind: Call(Library(FunctionId(09159bbbadc0f6eda5aa8761653ad9fc2f463b362941fe756a2cf7e9aa2006cd))), args: [Variable(Name("t2"))] }) }
 scope main ordinal=0 depth=0 Entry
 action main/0/0 Some(Effect(QualifiedName("finish")))
-action main/2/0 Some(Effect(QualifiedName("echo")))
+action main/2/0 Some(Effect(QualifiedName("corpus.echo")))
 action main/3/0 library id=09159bbbadc0f6eda5aa8761653ad9fc2f463b362941fe756a2cf7e9aa2006cd name=py.reply label="Python reply"

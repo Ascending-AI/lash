@@ -56,6 +56,7 @@ pub struct AppState {
     commands: runtime::CommandClient,
     host: Arc<display::HostTools>,
     catalog: Arc<catalog::Catalog>,
+    function_labels: std::collections::BTreeMap<String, String>,
 }
 
 /// The saved version: host revision state. The workflow itself is the
@@ -71,6 +72,8 @@ struct SavedWorkflow {
     published: Result<runtime::Published, Arc<runtime::RunError>>,
     /// The source the workflow was imported from, if it was.
     authored: Option<AuthoredSource>,
+    dialect: Dialect,
+    function_labels: std::collections::BTreeMap<String, String>,
 }
 
 /// How a saved version came to be, which says what authored source it has.
@@ -78,21 +81,57 @@ pub(crate) enum Origin {
     /// Opened as a kernel document: it has no authored source.
     Document,
     /// Imported from this source.
-    Imported { dialect: Dialect, text: String },
+    Imported {
+        dialect: Dialect,
+        text: String,
+        map: Option<lash::workflow::document::SourceMap>,
+    },
     /// An edit of the saved version: it keeps that version's source.
     Edited,
+    Read {
+        dialect: Dialect,
+    },
 }
 
 impl SavedWorkflow {
-    fn view(&self, functions: &FunctionRegistry) -> WorkflowView {
+    async fn view(&self, core: &lash::LashCore, functions: &FunctionRegistry) -> WorkflowView {
         let document = self.draft.document().clone();
-        let derived = WorkflowDocument::derive(
-            document.clone(),
-            WorkflowDocumentEntry::Entry {
-                function: self.entry.clone(),
+        // Saved views link only the declarations retained by their publication.
+        let derived = match &self.published {
+            Ok(published) => match core
+                .host_artifacts()
+                .execution_document(&published.reference)
+                .await
+            {
+                Ok(lash::workflow::WorkflowDocumentRead::Read(read)) => Ok(read.document),
+                other => Err(format!("stored document unavailable: {other:?}")),
             },
-            functions,
-        );
+            Err(_) => WorkflowDocument::derive(
+                document.clone(),
+                WorkflowDocumentEntry::Entry {
+                    function: self.entry.clone(),
+                },
+                functions,
+            )
+            .map_err(|error| error.to_string()),
+        };
+        let mut authored = self.authored.clone();
+        if let Some(authored) = &mut authored
+            && let Some(id) = &authored.source_map_id
+        {
+            match core.host_artifacts().read_source_map(id).await {
+                Ok(lash::workflow::SourceMapRead::Read { map, source }) => {
+                    authored.text = source;
+                    authored.source_map = Some(map);
+                }
+                other => authored.map_unavailable = Some(format!("{other:?}")),
+            }
+        }
+        let source_dialect = self.dialect;
+        let lens = match source_dialect {
+            Dialect::TypeScript => "generated_typescript",
+            Dialect::Python => "generated_python",
+        };
         let (view, view_unavailable, printed, source_unavailable) = match &derived {
             Ok(derived) => {
                 let (mut view, view_unavailable) = match lash::workflow::view::derive(derived) {
@@ -103,41 +142,35 @@ impl SavedWorkflow {
                     source_map: true,
                     ..Default::default()
                 };
-                let (printed, source_unavailable, cause) =
-                    match lash::typescript::print(derived.document(), options) {
-                        Ok(printed) => (Some(printed), None, None),
-                        Err(error) => {
-                            use lash::dialect::PrintError;
-                            use lash::workflow::view::ReadableRefusal;
-                            let cause = match &error {
-                                PrintError::Bytes { limit } => {
-                                    ReadableRefusal::Bytes { limit: *limit }
-                                }
-                                PrintError::Depth { limit } => {
-                                    ReadableRefusal::Depth { limit: *limit }
-                                }
-                                PrintError::Encode(error) => ReadableRefusal::Encoding {
-                                    message: error.to_string(),
-                                },
-                                PrintError::Invalid(message) => ReadableRefusal::Invalid {
-                                    message: message.clone(),
-                                },
-                            };
-                            (None, Some(error.to_string()), Some(cause))
-                        }
-                    };
+                let (printed, source_unavailable, cause) = match match source_dialect {
+                    Dialect::TypeScript => lash::typescript::print(derived.document(), options),
+                    Dialect::Python => lash::python::print(derived.document(), options),
+                } {
+                    Ok(printed) => (Some(printed), None, None),
+                    Err(error) => {
+                        use lash::dialect::PrintError;
+                        use lash::workflow::view::ReadableRefusal;
+                        let cause = match &error {
+                            PrintError::Bytes { limit } => ReadableRefusal::Bytes { limit: *limit },
+                            PrintError::Depth { limit } => ReadableRefusal::Depth { limit: *limit },
+                            PrintError::Encode(error) => ReadableRefusal::Encoding {
+                                message: error.to_string(),
+                            },
+                            PrintError::Invalid(message) => ReadableRefusal::Invalid {
+                                message: message.clone(),
+                            },
+                        };
+                        (None, Some(error.to_string()), Some(cause))
+                    }
+                };
                 if let Some(view) = &mut view {
                     if let Some(printed) = &printed {
                         if let Some(map) = &printed.source_map
-                            && let Err(refusal) = view.readable_ranges(
-                                &document,
-                                "generated_typescript".into(),
-                                &printed.source,
-                                map,
-                            )
+                            && let Err(refusal) =
+                                view.readable_ranges(&document, lens.into(), &printed.source, map)
                         {
                             view.readable = lash::workflow::view::ReadableLens::Refused {
-                                name: "generated_typescript".into(),
+                                name: lens.into(),
                                 cause: lash::workflow::view::ReadableRefusal::Invalid {
                                     message: refusal.to_string(),
                                 },
@@ -145,7 +178,7 @@ impl SavedWorkflow {
                         }
                     } else if let Some(cause) = cause {
                         view.readable = lash::workflow::view::ReadableLens::Refused {
-                            name: "generated_typescript".into(),
+                            name: lens.into(),
                             cause,
                         };
                     }
@@ -181,7 +214,9 @@ impl SavedWorkflow {
                 .and_then(|printed| printed.source_map.clone()),
             source: printed.map(|printed| printed.source),
             source_unavailable,
-            authored: self.authored.clone(),
+            authored,
+            source_dialect,
+            function_labels: self.function_labels.clone(),
             document,
         }
     }
@@ -205,6 +240,11 @@ impl AppState {
             commands: runtime::CommandClient::new(core.clone()),
             core,
             catalog: Arc::new(catalog),
+            function_labels: lash::helper_labels::labels()
+                .map_err(|error| StartupError(error.to_string()))?
+                .into_iter()
+                .map(|(name, label)| (name.to_string(), label.title))
+                .collect(),
         };
         let opening = state
             .catalog
@@ -244,7 +284,15 @@ impl AppState {
         entry: Name,
         origin: Origin,
     ) -> (SavedWorkflow, Option<runtime::Publication>) {
-        let publication = runtime::publish(&self.core, &draft, &entry).await;
+        let source = match &origin {
+            Origin::Imported {
+                map: Some(map),
+                text,
+                ..
+            } => Some((map, text.as_str())),
+            _ => None,
+        };
+        let publication = runtime::publish(&self.core, &draft, &entry, source).await;
         let (published, publication) = match publication {
             Ok(publication) => (Ok(publication.published.clone()), Some(publication)),
             Err(refusal) => (Err(Arc::new(refusal)), None),
@@ -252,21 +300,44 @@ impl AppState {
         let (saved, superseded) = {
             let mut store = self.store.lock_recover();
             let version = store.as_ref().map_or(1, |saved| saved.version + 1);
-            let authored = match origin {
-                Origin::Document => None,
-                Origin::Imported { dialect, text } => Some(AuthoredSource {
-                    dialect,
-                    text,
-                    version,
-                }),
-                Origin::Edited => store.as_ref().and_then(|saved| saved.authored.clone()),
+            let dialect = match &origin {
+                Origin::Document => Dialect::TypeScript,
+                Origin::Imported { dialect, .. } | Origin::Read { dialect } => *dialect,
+                Origin::Edited => store
+                    .as_ref()
+                    .map_or(Dialect::TypeScript, |saved| saved.dialect),
             };
+            let authored =
+                match origin {
+                    Origin::Document | Origin::Read { .. } => None,
+                    Origin::Imported { dialect, text, .. } => Some(AuthoredSource {
+                        dialect,
+                        text,
+                        version,
+                        source_map_id: published
+                            .as_ref()
+                            .ok()
+                            .and_then(|published| published.source_map),
+                        source_map: None,
+                        map_unavailable: None,
+                    }),
+                    Origin::Edited => store.as_ref().and_then(|saved| saved.authored.clone()).map(
+                        |mut authored| {
+                            authored.source_map_id = None;
+                            authored.source_map = None;
+                            authored.map_unavailable = None;
+                            authored
+                        },
+                    ),
+                };
             let saved = SavedWorkflow {
                 version,
                 draft,
                 entry,
                 published,
                 authored,
+                dialect,
+                function_labels: self.function_labels.clone(),
             };
             let superseded = store
                 .replace(saved.clone())
@@ -324,8 +395,14 @@ async fn read_environment(
 }
 
 async fn get_workflow(State(state): State<AppState>) -> Result<Json<WorkflowView>, ErrorResponse> {
+    let _publishing = state.publishing.lock().await;
     let environment = state.environment().await?;
-    Ok(Json(state.current().view(environment.functions())))
+    Ok(Json(
+        state
+            .current()
+            .view(&state.core, environment.functions())
+            .await,
+    ))
 }
 
 async fn select_workflow(
@@ -338,13 +415,18 @@ async fn select_workflow(
         .get(&request.id, request.dialect)
         .ok_or_else(|| ErrorResponse::unknown_workflow(&request.id))?
         .map_err(|refusal| ErrorResponse::invalid("dialect", refusal))?;
+    let entry = request.entry.unwrap_or_else(|| example.entry.clone());
+    if !example.document.entries.contains_key(&entry) {
+        return Err(ErrorResponse::invalid(
+            "entry",
+            "Select a declared workflow entry",
+        ));
+    }
     let draft = Draft::open(example.document.clone())
         .map_err(|error| ErrorResponse::invalid("document", format!("{error:?}")))?;
     let _publishing = state.publishing.lock().await;
-    let (saved, _) = state
-        .install(draft, example.entry.clone(), example.origin())
-        .await;
-    Ok(Json(saved.view(environment.functions())))
+    let (saved, _) = state.install(draft, entry, example.origin()).await;
+    Ok(Json(saved.view(&state.core, environment.functions()).await))
 }
 
 /// Opens a workflow given as a kernel document, with the manifest this
@@ -360,7 +442,7 @@ async fn open_workflow(
         .map_err(|error| ErrorResponse::invalid("document", format!("{error:?}")))?;
     let _publishing = state.publishing.lock().await;
     let (saved, _) = state.install(draft, request.entry, Origin::Document).await;
-    Ok(Json(saved.view(environment.functions())))
+    Ok(Json(saved.view(&state.core, environment.functions()).await))
 }
 
 /// Applies kernel edits to the saved draft as one transaction and
@@ -414,7 +496,7 @@ async fn edit_workflow(
         })?;
     let (saved, _) = state.install(draft, current.entry, Origin::Edited).await;
     Ok(Json(EditWorkflowResponse {
-        workflow: saved.view(environment.functions()),
+        workflow: saved.view(&state.core, environment.functions()).await,
         // The published document is the draft's, so the transaction's
         // correspondence is also where each node is in the definition.
         correspondence: applied.correspondence,

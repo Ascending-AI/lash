@@ -140,23 +140,21 @@ pub(crate) fn code_sites(document: &Document) -> Vec<Site> {
     sites
 }
 
-fn effects() -> Result<BTreeMap<k::EffectName, k::Signature>> {
-    ["echo", "finish"]
-        .into_iter()
-        .map(|name| {
-            Ok((
-                k::EffectName::new(name)?,
-                k::Signature {
-                    params: vec![k::Param {
-                        name: Name::new("input"),
-                        ty: k::Type::Any,
-                        optional: false,
-                    }],
-                    result: k::Type::Any,
-                },
-            ))
-        })
-        .collect()
+/// The corpus and the example offer precisely this tool declaration. Its
+/// module/operation path is the public facade import contract.
+pub fn tools() -> Result<Vec<lash::tools::ToolDefinition>> {
+    use lash::tools::{ToolBinding, ToolDefinition, ToolDefinitionBindingExt};
+    Ok(vec![
+        ToolDefinition::raw(
+            "tool:corpus_echo",
+            "corpus_echo",
+            "Echo a corpus value and display it.",
+            serde_json::json!({}),
+            serde_json::json!({}),
+        )?
+        .with_execution(std::time::Duration::from_secs(120))
+        .with_tool_binding(ToolBinding::new(["corpus"], "echo")),
+    ])
 }
 
 /// Generate review artifacts, checking reproducible import, exact source
@@ -169,7 +167,28 @@ fn effects() -> Result<BTreeMap<k::EffectName, k::Signature>> {
 pub fn render(root: &Path) -> Result<BTreeMap<String, String>> {
     let embedding = lash_vm_worker::built_dialects(&Default::default())?;
     let registry = embedding.registry()?;
-    let effects = effects()?;
+    let mut boundary = lash::vm::HostBoundary::new();
+    for tool in tools()? {
+        boundary.offer_bound_tool(
+            &tool.manifest,
+            &tool.contract.input_schema.canonical,
+            &tool.contract.output_schema.canonical,
+        )?;
+    }
+    let mut effects = boundary.signatures();
+    // Finish belongs only to cells; it is not a process tool offered by the example.
+    effects.insert(
+        k::EffectName::new("finish")?,
+        k::Signature {
+            params: vec![k::Param {
+                name: Name::new("input"),
+                ty: k::Type::Any,
+                optional: false,
+            }],
+            result: k::Type::Any,
+        },
+    );
+    let tool_roots = BTreeSet::from([Name::new("corpus")]);
     let controls = BTreeMap::from([(
         k::EffectName::new("finish")?,
         BTreeSet::from([lash_kernel_dialect::EffectControl::Finish]),
@@ -177,7 +196,7 @@ pub fn render(root: &Path) -> Result<BTreeMap<String, String>> {
     let env = Environment {
         library: embedding.library(),
         effects: &effects,
-        tool_roots: &BTreeSet::new(),
+        tool_roots: &tool_roots,
         controls: &controls,
     };
     let mut checker = Checker::new(registry.as_ref());
@@ -366,3 +385,144 @@ fn edit(
     )?;
     Ok((json, text))
 }
+
+/// Shared picker manifest, embedded for hosts without a corpus directory.
+pub const CATALOG_JSON: &str = include_str!("../catalog.json");
+
+// The manifest owns membership and entry/refusal contracts. Literal includes
+// make corpus assets available to a deployed host without filesystem reads.
+pub type SourceRow = (
+    &'static str,
+    &'static str,
+    &'static str,
+    Option<&'static str>,
+    Option<&'static str>,
+);
+pub const SOURCES: &[SourceRow] = &[
+    (
+        "straight-tool",
+        include_str!("../straight-tool/source.ts"),
+        include_str!("../straight-tool/source.py"),
+        None,
+        None,
+    ),
+    (
+        "branch",
+        include_str!("../branch/source.ts"),
+        include_str!("../branch/source.py"),
+        None,
+        None,
+    ),
+    (
+        "iteration-typed",
+        include_str!("../iteration-typed/source.ts"),
+        include_str!("../iteration-typed/source.py"),
+        None,
+        None,
+    ),
+    (
+        "iteration-untyped",
+        include_str!("../iteration-untyped/source.ts"),
+        include_str!("../iteration-untyped/source.py"),
+        None,
+        None,
+    ),
+    (
+        "try-finally",
+        include_str!("../try-finally/source.ts"),
+        include_str!("../try-finally/source.py"),
+        None,
+        None,
+    ),
+    (
+        "fan-out",
+        include_str!("../fan-out/source.ts"),
+        include_str!("../fan-out/source.py"),
+        None,
+        None,
+    ),
+    (
+        "sleep",
+        include_str!("../sleep/source.ts"),
+        include_str!("../sleep/source.py"),
+        None,
+        None,
+    ),
+    (
+        "closures-helpers",
+        include_str!("../closures-helpers/source.ts"),
+        include_str!("../closures-helpers/source.py"),
+        None,
+        None,
+    ),
+    (
+        "early-return",
+        include_str!("../early-return/source.ts"),
+        include_str!("../early-return/source.py"),
+        None,
+        None,
+    ),
+    (
+        "non-ascii",
+        include_str!("../non-ascii/source.ts"),
+        include_str!("../non-ascii/source.py"),
+        None,
+        None,
+    ),
+    (
+        "entry-boundary",
+        include_str!("../entry-boundary/source.ts"),
+        include_str!("../entry-boundary/source.py"),
+        None,
+        None,
+    ),
+    (
+        "early-finish",
+        include_str!("../early-finish/source.ts"),
+        include_str!("../early-finish/source.py"),
+        Some(include_str!("../early-finish/cell-1.ts.txt")),
+        Some(include_str!("../early-finish/cell-1.py.txt")),
+    ),
+    (
+        "capturing-cell",
+        include_str!("../capturing-cell/source.ts"),
+        include_str!("../capturing-cell/source.py"),
+        Some(include_str!("../capturing-cell/cell-1.ts.txt")),
+        Some(include_str!("../capturing-cell/cell-1.py.txt")),
+    ),
+    (
+        "refusal-duplicate",
+        include_str!("../refusal-duplicate/source.ts"),
+        include_str!("../refusal-duplicate/source.py"),
+        None,
+        None,
+    ),
+    (
+        "refusal-empty",
+        include_str!("../refusal-empty/source.ts"),
+        include_str!("../refusal-empty/source.py"),
+        None,
+        None,
+    ),
+    (
+        "refusal-capture",
+        include_str!("../refusal-capture/source.ts"),
+        include_str!("../refusal-capture/source.py"),
+        None,
+        None,
+    ),
+    (
+        "refusal-annotation",
+        include_str!("../refusal-annotation/source.ts"),
+        include_str!("../refusal-annotation/source.py"),
+        None,
+        None,
+    ),
+    (
+        "refusal-default",
+        include_str!("../refusal-default/source.ts"),
+        include_str!("../refusal-default/source.py"),
+        None,
+        None,
+    ),
+];

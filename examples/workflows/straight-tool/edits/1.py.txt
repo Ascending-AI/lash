@@ -1,7 +1,7 @@
 --- before
 -kernel 1
 -numbers by_spelling
--effect echo(input: Any) -> Any
+-effect corpus.echo(input?: Any) -> Any
 -use kind = @3e2a9836b16b3ade4f7fcc2d56d1fb203dffed4bd5d7f4bf800df213c8c8c5f7
 -use list.len = @70d92c79f9c69cfe8cda0752cf30f5f0db0499a1bbffeeed9e2abddad9cf302b
 -use py.reply = @09159bbbadc0f6eda5aa8761653ad9fc2f463b362941fe756a2cf7e9aa2006cd
@@ -11,7 +11,7 @@
 -
 -fn demo() {
 -  let t3 = fn() start() -> Any bare direct {
--    let t1 = perform echo("hello") as Any
+-    let t1 = perform corpus.echo("hello") as Any
 -    let t2 = invoke py.reply(t1)
 -    return t2
 -  }
@@ -26,7 +26,7 @@
 +++ after
 +kernel 1
 +numbers by_spelling
-+effect echo(input: Any) -> Any
++effect corpus.echo(input?: Any) -> Any
 +use kind = @3e2a9836b16b3ade4f7fcc2d56d1fb203dffed4bd5d7f4bf800df213c8c8c5f7
 +use list.len = @70d92c79f9c69cfe8cda0752cf30f5f0db0499a1bbffeeed9e2abddad9cf302b
 +use py.reply = @09159bbbadc0f6eda5aa8761653ad9fc2f463b362941fe756a2cf7e9aa2006cd
@@ -36,7 +36,7 @@
 +
 +fn demo() {
 +  let t3 = fn() start() -> Any bare direct {
-+    let t1 = perform echo("edited λ") as Any
++    let t1 = perform corpus.echo("edited λ") as Any
 +    let t2 = invoke py.reply(t1)
 +    return t2
 +  }
@@ -51,8 +51,8 @@
 
 Correspondence:
 {
-  "base": "1862b74f0a891d9d299b1821e843fb7e756e15f0b0f8c61f52aed5346e0beeef",
-  "result": "0896984e84297cd268c6e6a47e6fef4cc65c60945a98705824d030072815dd38",
+  "base": "6e3abb545421b2d4d0b88bee71f15bc89301e39469bb67ef9a1c2be0bcf847da",
+  "result": "1a0834cb559febf38a1d8d1827e5b9ddf671ab56eea0794e5129f11b86d71fb0",
   "entries": [
     {
       "from": {
@@ -427,7 +427,7 @@ Correspondence:
 Reprinted source:
 async def demo():
     async def t3():
-        t1 = await tools.echo("edited λ")
+        t1 = await tools.corpus.echo("edited λ")
         t2 = await helper_py_reply(t1)
         return t2
     t4 = await t3()

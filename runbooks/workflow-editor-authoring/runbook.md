@@ -1,91 +1,81 @@
-# Workflow editor: open, edit, republish and run
+# Workflow corpus: import, edit, read and display
 
-Read [the shared rules](../RULES.md) first. This scenario uses the existing
-`examples/workflow-graph-roundtrip` host and deterministic mock effects. It
-opens no RLM session and calls no external model, email or research service.
+Read [the shared rules](../RULES.md). This browser pass uses
+`examples/workflow-graph-roundtrip` and the committed Design 8 corpus. It
+opens no RLM session and calls no provider or external service. `corpus.echo`
+is the shared mock tool: it returns its input and displays it. Cell witnesses
+are recorded corpus artifacts; displaying one does not execute a session.
 
 ## Start and evidence
 
-From an isolated Kiln fork, run `just workflow-graph-roundtrip`. The script
-uses a gate-owned port and a fresh SQLite database; open its printed URL at `/`.
-Poll `/healthz` for `{ "service": "workflow-graph-roundtrip", "status": "ok" }`.
-Use a fresh artifact directory. Stop only this test's server when finished.
+Source `env.sh`, then run `just workflow-graph-roundtrip` under the host's
+8-GiB memory cap, with `WORKFLOW_GRAPH_SQLITE_PATH` inside this run's evidence
+directory. The launcher uses `kiln gate` and prints its private URL.
+Poll `/healthz` for `status: ok`. Launch Chromium without a virtual-memory cap
+and record its peak RSS with `/usr/bin/time -v`. Stop this run's server at the
+end. No credentials are needed.
 
-The default page is the visual editor. **Examples** selects workflows,
-**Canvas scope** selects canonical blocks, and **Edit source** contains source,
-and whole-source replacement. It is one
-editor with one saved document. See [the HTTP contract](../../examples/workflow-graph-roundtrip/CONTRACT.md).
+Save HTTP replies, SSE, a screenshot at each named checkpoint, actual counts,
+browser errors and the final scorecard in the run's evidence directory.
+A refusal or timeout aborts the pass: capture the page/API discrepancy and
+report its stage. Do not repair during a recorded pass.
 
-Save screenshots at each phase and the corresponding HTTP requests, responses
-and SSE events. Treat UI success messages alone as insufficient evidence.
+## Inspect every corpus case in each dialect
 
-## 1. Open and inspect
+Read `/workflows` and compare its ids and order with
+`examples/workflows/catalog.json`. Iterate every case in both **TypeScript**
+and **Python** using the picker and dialect buttons. Record the actual number
+of inspected module, refusal and cell views; do not infer success from an exit
+code. Save `<case>-<dialect>.png` at every checkpoint.
 
-Open **Examples**, select **Onboarding**, and capture `/workflow/select`.
-Require that its response and a fresh `/workflow` agree on `version`,
-`identity`, `definition` and `entry`, with no `notAdmitted` error. The canvas
-must show the selected entry, with branches and explicit scope navigation.
+For a module, capture `/workflow/select` and a fresh `/workflow`. Require equal
+revision, identity, definition and entry, no admission refusal, and canvas
+nodes from the returned view. The document's entry names must match the corpus
+contract, including both entries of `entry-boundary` and no block-local entries.
+Select **Source** and require exact source text, a held `sourceMapId`, and a
+map naming the current identity. Click a linked source line and require a
+corresponding selected canvas node. Inspect the non-ASCII case in both languages:
+Japanese and the crab character must remain intact and selection must land on
+the right line. Library action titles use the returned `functionLabels` keyed
+by the view's callee name; roles remain presentation owned by the example.
 
-Open **Edit source**. The TypeScript pane must contain
-`Welcome to the workflow graph`. Import that unchanged export and verify that
-`identity` and the canonical `document` are unchanged. The host revision may
-advance. Save `01-opened.json` and `01-opened.png`.
+For a refusal, require the dialog to show its exact source and named diagnostic,
+then verify an explicit `/workflow/source` import returns 422 with that code
+and leaves the saved identity/revision unchanged. For a cell, require the dialog
+to show its source and crossing/finish witness. The saved revision must not
+change. Do not claim that the browser executed a cell.
 
-Find the text expression containing that greeting in `workflow.view.dataflow.expressions`.
-Record its full `site` and the current revision. Do not use a site from an earlier
-revision after an edit.
+## Import, edit, read and display in both languages
 
-## 2. Refuse an invalid edit without saving
+For each language select `straight-tool`. Open **Edit source**, select
+**Workflow module**, verify the language selector and import the unchanged
+source. Capture the request's `dialect` and the returned source/map.
+Save `import-<dialect>.png` and the HTTP replies.
 
-Send `/workflow/plan` a `set_value` operation against the saved document identity,
-with the greeting's literal Site and value `{"variable":"nowhere"}`. Require
-HTTP 422 `plan_refused`, a typed unbound-variable cause, and unchanged saved
-identity and revision. Repeat a raw `replace_statement` request against both
-`/workflow/edits` and `/workflow/plan`; require `unsupported_canvas_edit` and
-unchanged identity. There is no raw-edit UI.
+In **Printed document** mode, read the unchanged output. Require equal
+canonical document and identity, and that the printed lens still uses the
+selected language. Save `read-<dialect>.png`.
 
-## 3. Apply a supported edit
+Re-import the authored module. Find the `corpus.echo` action in the returned
+view. Preview and apply a `set_value` on its first tool argument to `edited λ`.
+Require matching preview/applied documents, revision +1, changed identity,
+correspondence from the immediate base, and no authored map/id after the edit.
+The Source pane must explain that it no longer links this revision; Printed
+and Kernel still link. Save `edit-<dialect>.png` and both replies.
 
-Double-click the greeting's input, set its constant to `Edited as a kernel
-document`, and save. Inspect the closed `set_value` operation and correspondence.
-Require revision +1 and a changed identity. Add a mock message with **Add step**;
-its preview uses `insert_step` and its data arguments remain inside the step.
-Save the requests/responses and screenshots.
+Press **Run workflow** and record SSE. Require terminal `succeeded`, result
+`edited λ`, and the same text in the rendered output display. Missing call data
+must stay unavailable. Save `display-<dialect>.png` and `run-<dialect>.jsonl`.
 
-Use **Edit source** for renames, code/declaration changes and terminal structure.
-Import validates the whole replacement before saving it.
+Finally capture the current editor at desktop and narrow mobile widths. Require
+usable source controls and no document-level horizontal overflow.
 
-## 4. Run and approve
+## Scorecard
 
-Close Edit source and press **Run workflow**, recording SSE. Require the execution
-panel to show the parked approval and a usable approval control. Approve it and
-poll until the invocation settles. Every site-bearing event must reference the
-run's document; call-only events must not replace aggregate node status.
-
-Require terminal `succeeded`, the edited greeting in the display, the expected
-Onboarding list/progress updates, and input/output data for retained calls.
-Missing observations must remain unavailable or incomplete. Save
-`04-waiting.png`, `04-settled.png` and `04-run.jsonl`.
-
-## 5. Research and KPI data mappings
-
-Select **Deep research brief**, edit the workflow Input node's topic to
-`Reducing support escalation`, save inputs and run. Require a successful output
-whose title/topic reflects that input, not the template default, and three
-inspectable mock calls. Repeat with **Weekly business KPIs**, a distinct workspace
-name, and four calls. Select a result port and inspect the Return step's mapping.
-Save `05-research.png`, `05-kpis.png` and each run's events.
-
-## Regression companions
-
-Run the example's Node tests using `node --test examples/workflow-graph-roundtrip/frontend/*.test.mjs`.
-They must exercise the active canvas and editing/approval implementations:
-closed operations reject arbitrary code; generated result names avoid
-all binding kinds; negative zero survives controls; pending approvals survive
-concurrent waits and late responses. Backend admission owns type compatibility.
-Use the example's focused Rust laws for canonical facets, atomic edits, named
-inputs, trace gaps and repeated call correlation.
-
-The draft is intentionally in memory and this example has no historical-run
-browser. Do not claim restart restoration, full durable trace capture, or generic
-tool-live progress based on this scenario.
+Record each gate separately: catalog membership; module views; refusal codes
+and atomicity; cell source/witness inspection; non-ASCII linking; language
+selection on import; exact printed reads; preview/replay; map invalidation;
+terminal/output/display agreement; desktop/mobile usability; teardown.
+Give observed numerator/denominator counts, screenshot paths and API evidence.
+State any abort or unobserved property explicitly. This pass does not certify
+restart restoration, durable cell execution, or historical-run browsing.

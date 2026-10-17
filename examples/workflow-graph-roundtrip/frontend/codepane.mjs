@@ -48,6 +48,39 @@ export function readableLinking(view) {
   return spans.length ? linking(spans) : undefined;
 }
 
+// Convert checked UTF-8 byte offsets once at the browser edge. JS strings
+// and DOM selections count UTF-16 code units, including two for an astral rune.
+export function sourceRanges(text, map) {
+  const offsets = new Map([[0, 0]]);
+  let bytes = 0, units = 0;
+  const encoder = new TextEncoder();
+  for (const rune of text) {
+    bytes += encoder.encode(rune).length;
+    units += rune.length;
+    offsets.set(bytes, units);
+  }
+  return map.sites.map(({ site, ranges }) => ({ site, ranges: ranges.map(({ start, end }) => {
+    if (!offsets.has(start) || !offsets.has(end) || start > end)
+      throw new Error("Source map offset is outside a UTF-8 boundary");
+    return { start: offsets.get(start), end: offsets.get(end) };
+  }) }));
+}
+export function sourceLinking(workflow) {
+  const authored = workflow.authored;
+  if (!authored?.sourceMapId || authored.sourceMap?.document !== workflow.identity)
+    return undefined;
+  const mapped = new Map(sourceRanges(authored.text, authored.sourceMap)
+    .map(({ site, ranges }) => [siteKey(site), ranges]));
+  const line = (offset) => authored.text.slice(0, offset).split("\n").length - 1;
+  const spans = (workflow.view?.nodes ?? []).flatMap((node) => {
+    const ranges = [node.site, ...node.members].flatMap((site) => mapped.get(siteKey(site)) ?? []);
+    return ranges.length ? [{ key: siteKey(node.site),
+      start: Math.min(...ranges.map((range) => line(range.start))),
+      end: Math.max(...ranges.map((range) => line(Math.max(range.start, range.end - 1)))) }] : [];
+  });
+  return spans.length ? linking(spans) : undefined;
+}
+
 const KEYWORDS = {
   typescript: new Set(
     "as async await break case catch class const continue default do else export for function if in let new null of return switch this throw true false try type typeof undefined var while yield".split(

@@ -1,6 +1,6 @@
 kernel 1
 numbers by_spelling
-effect echo(input: Any) -> Any
+effect corpus.echo(input?: Any) -> Any
 use kind = @3e2a9836b16b3ade4f7fcc2d56d1fb203dffed4bd5d7f4bf800df213c8c8c5f7
 use list.len = @70d92c79f9c69cfe8cda0752cf30f5f0db0499a1bbffeeed9e2abddad9cf302b
 use py.reply = @09159bbbadc0f6eda5aa8761653ad9fc2f463b362941fe756a2cf7e9aa2006cd
@@ -10,7 +10,7 @@ entry demo() -> Any
 
 fn demo() {
   let t3 = fn() start() -> Any bare direct {
-    let t1 = perform echo("hello") as Any
+    let t1 = perform corpus.echo("hello") as Any
     let t2 = invoke py.reply(t1)
     return t2
   }

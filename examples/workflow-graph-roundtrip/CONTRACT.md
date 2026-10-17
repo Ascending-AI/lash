@@ -25,17 +25,20 @@ own serialized shapes and pass through unchanged (snake_case).
 | `GET` | `/healthz` | `{ "service": "workflow-graph-roundtrip", "status": "ok" }` |
 | `GET` | `/` and `/{path}` | Files from `frontend/` |
 
-Every example is authored twice in `catalog/`, as TypeScript (`<name>.ts`)
-and as its Python twin (`<name>.py`), and both are imported once at startup
-through `HostArtifacts::import_workflow`, exactly as written. A catalog
-entry's `group` is `app` or `controlFlow`; `statements` and `scopes` count the
-statements and blocks of lash's view of its TypeScript entry, the size of what
-the import lowered it to; `python`, when present, holds the same
-`{ statements, scopes }` for the Python twin. `pythonRefused`, when present,
-is lash's refusal of the Python twin, which then cannot be opened. A TypeScript example lash
-refuses to import stops the host at startup. `POST /workflow/select` takes
-`{ id, dialect? }`, `typescript` by default; a revision's `authored` names the
-`dialect` of its text.
+The catalog is `examples/workflows/catalog.json`, with embedded source and
+cell witnesses from the same corpus. `group` is `module`, `cell` or `refusal`.
+`entries` lists the declared workflow entries. `statements`/`scopes` and `python`
+count the first entry's derived view in that dialect; non-modules have no view.
+`refusal` names an expected module-contract diagnostic. `typescriptSource`,
+`pythonSource`, `typescriptWitness` and `pythonWitness` support inspection of
+cell/refusal cases without changing the saved workflow.
+
+`POST /workflow/select` takes `{ id, dialect?, entry? }`; the default is
+TypeScript and the case's first entry. Cell/refusal selections return 422.
+`POST /workflow/source` takes `{ version, source, entry, dialect?, format? }`.
+Without `format`, it imports a workflow module in the selected language.
+With `type_script_v1` or `python_v1`, it reads generated source against the
+current document. An unchanged printed read preserves canonical bytes.
 
 An error is `{ "error": { code, message, details } }`. An unknown catalog id
 is HTTP 404 `unknown_workflow`; a stale `version` is HTTP 409
@@ -61,9 +64,11 @@ here.
 | `document` | The kernel document. |
 | `text` | The document in kernel notation. |
 | `view` | Lash's canvas read of the entry, exactly as `lash::workflow::view::derive` answers it: see [The view](#the-view). Absent when the document has none; `viewUnavailable` then says why. |
-| `source` | The exact TypeScript export. Editing this text has no effect until `POST /workflow/source` admits it. Absent with a `sourceUnavailable` reason when the document has no TypeScript spelling. |
+| `source` | The exact export in `sourceDialect` (`typescript` or `python`). Editing this text has no effect until `POST /workflow/source` admits it. Absent with a `sourceUnavailable` reason when the document has no spelling in that dialect. |
+| `sourceDialect` | The dialect used to print the saved document. |
+| `functionLabels` | Shipped helper titles keyed by name, joined against view callees. Unknown names fall back to themselves. |
 | `sourceMap` | Lash's `SourceMap` for `source` (snake_case, lash's shape): UTF-8 byte ranges of `source` for each site of the document. |
-| `authored` | `{ text, version }`: the TypeScript this workflow was imported from (an example or `POST /workflow/source`) and the version the import saved. Edits keep it unchanged; opening a kernel document with `POST /workflow` drops it. |
+| `authored` | `{ dialect, text, version, sourceMapId?, sourceMap?, mapUnavailable? }`: the imported source, read back through the publication's held map id. Authoring edits retain historical text but drop the map and id. A printed read or opening a kernel document drops authored source. |
 
 A site is `{ "unit": { "function": "onboarding" }, "path": [3, 0] }`.
 

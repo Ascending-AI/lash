@@ -6,7 +6,7 @@ export async function demo(flag) {
     }
     let flag_1 = t1[0.0];
     if (flag_1) {
-      let t4 = await await tools.echo("yes");
+      let t4 = await await tools.corpus.echo("yes");
       return t4;
     }
     return "no";

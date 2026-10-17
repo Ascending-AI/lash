@@ -22,7 +22,7 @@ statement main/3/0/0/3 ordinal=28 depth=1 block=main/3/0/0 Return { value: Varia
 statement main/4 ordinal=29 depth=0 block=main Let { name: Name("add"), value: Expr(Tuple([Literal(Text("ts.function")), Literal(Text("")), Literal(Text("add")), Literal(Float(Float(1.0))), Variable(Name("t10")), Record([])])) }
 statement main/5 ordinal=30 depth=0 block=main Let { name: Name("t11"), value: Expr(Record([RecordEntry { field: "nested", value: Record([RecordEntry { field: "list", value: List([Literal(Float(Float(1.0))), Variable(Name("add"))]) }]) }])) }
 statement main/6 ordinal=31 depth=0 block=main Let { name: Name("t12"), value: Action(Call { callee: Library(FunctionId(4979682bd7501b8088dc50a0b7839615c9541621786252504fbf17afc282d4fc)), args: [Variable(Name("t11"))] }) }
-statement main/7 ordinal=32 depth=0 block=main Do { value: Act(ActExpr { kind: Perform { effect: QualifiedName("echo"), result: Any, then_yield: true }, args: [Variable(Name("t12"))] }) }
+statement main/7 ordinal=32 depth=0 block=main Do { value: Act(ActExpr { kind: Perform { effect: QualifiedName("corpus.echo"), result: Any, then_yield: true }, args: [Variable(Name("t12"))] }) }
 statement main/8 ordinal=33 depth=0 block=main Let { name: Name("t14"), value: Expr(Variable(Name("shared"))) }
 statement main/9 ordinal=34 depth=0 block=main If { condition: Call { function: FunctionId(d85e26af1e62c7c06fe6456f3a4a756dbd7d92b98361ea1bf89b69d08d81354b), args: [Literal(Float(Float(0.0))), Call { function: FunctionId(70d92c79f9c69cfe8cda0752cf30f5f0db0499a1bbffeeed9e2abddad9cf302b), args: [Variable(Name("t14"))] }] }, then_block: [Assign { place: Member(Index { target: Variable(Name("t14")), index: Literal(Float(Float(0.0))) }), value: Expr(Literal(Float(Float(9.0)))) }], else_block: [Do { value: Act(ActExpr { kind: Call(Library(FunctionId(1689ae439d7381a2de285e75317dc1fb3b98241a0cb87cf5a74b64f68b5c7d21))), args: [Variable(Name("t14")), Literal(Float(Float(0.0))), Literal(Float(Float(9.0)))] }) }] }
 statement main/9/1/0 ordinal=36 depth=1 block=main/9/1 Assign { place: Member(Index { target: Variable(Name("t14")), index: Literal(Float(Float(0.0))) }), value: Expr(Literal(Float(Float(9.0)))) }
@@ -43,5 +43,5 @@ action main/2/0/0/5/2/0/0 library id=0489eb52d3c2e7e23b6273a535f016cb2616d5a70a7
 action main/3/0/0/1/0 library id=656aeb7c2f80aaa8c1a1f930bf330144f4d2b86e156f57a111e2b66c4bd7f9be name=ts.promise.pending label="TypeScript promise pending"
 action main/3/0/0/2/1 library id=b5d7323cfb8fd85bd529192148137269284bc5ec55c5d4c5a78bb474cc6269e0 name=ts.promise.run label="TypeScript promise run"
 action main/6/0 library id=4979682bd7501b8088dc50a0b7839615c9541621786252504fbf17afc282d4fc name=ts.boundary label="TypeScript boundary"
-action main/7/0 Some(Effect(QualifiedName("echo")))
+action main/7/0 Some(Effect(QualifiedName("corpus.echo")))
 action main/9/2/0/0 library id=1689ae439d7381a2de285e75317dc1fb3b98241a0cb87cf5a74b64f68b5c7d21 name=ts.set label="TypeScript set"

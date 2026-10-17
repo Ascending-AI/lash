@@ -1,6 +1,6 @@
 kernel 1
 numbers by_spelling
-effect echo(input: Any) -> Any
+effect corpus.echo(input?: Any) -> Any
 effect finish(input: Any) -> Any
 use kind = @3e2a9836b16b3ade4f7fcc2d56d1fb203dffed4bd5d7f4bf800df213c8c8c5f7
 use list.len = @70d92c79f9c69cfe8cda0752cf30f5f0db0499a1bbffeeed9e2abddad9cf302b
@@ -12,7 +12,7 @@ private t1, t2
 main {
   let t1 = perform finish("done") as Any
   finish null
-  let t2 = perform echo("unreachable") as Any
+  let t2 = perform corpus.echo("unreachable") as Any
   do invoke py.reply(t2)
 }
 

@@ -3,7 +3,7 @@ async def demo():
         result = k.absent
         result = "start"
         try:
-            t4 = await tools.echo("try")
+            t4 = await tools.corpus.echo("try")
             result = await helper_py_reply(t4)
         except BaseException as t1:
             t6 = ()
@@ -13,7 +13,7 @@ async def demo():
             else:
                 raise t1
         finally:
-            t2 = await tools.echo("finally")
+            t2 = await tools.corpus.echo("finally")
             await helper_py_reply(t2)
         return result
     t9 = await t8()

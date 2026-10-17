@@ -1,2 +1,2 @@
 async def demo():
-    return await echo("hello")
+    return await corpus.echo("hello")

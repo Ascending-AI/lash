@@ -10,7 +10,7 @@ export async function demo(items) {
       let item = t4;
       let t5 = out;
       let t6 = await helper_ts_boundary(item);
-      t5[helper_list_len(t5)] = await await tools.echo(t6);
+      t5[helper_list_len(t5)] = await await tools.corpus.echo(t6);
     }
     return out;
   };

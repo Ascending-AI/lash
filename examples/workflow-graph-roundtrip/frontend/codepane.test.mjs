@@ -33,3 +33,21 @@ test("COARSE-SPANS links and steps canonical carriers only through supplied prin
   assert.equal(readableLinking(refused), undefined);
   assert.deepEqual(kernelLinking(view.canonical_source, refused).lines(nodes[0].site), linked.lines(nodes[0].site));
 });
+
+// EXAMPLE-SOURCE: byte offsets cross non-ASCII and astral characters before
+// reaching DOM strings; an edited document must never select through an old map.
+test("EXAMPLE-SOURCE converts UTF-8 offsets and links only the mapped revision", async () => {
+  const { sourceRanges, sourceLinking } = await import("./codepane.mjs");
+  const text = 'const λ = "日本 🦀";\nreturn λ;\n';
+  const site = {unit: {function: "demo"}, path: [1]};
+  const start = new TextEncoder().encode(text.split("\n")[0] + "\n").length;
+  const map = {document: "held", sites: [{site, ranges: [{start, end: start + 10}]}]};
+  const ranges = sourceRanges(text, map)[0].ranges[0];
+  assert.equal(text.slice(ranges.start, ranges.end), "return λ;");
+  const workflow = {identity: "held", authored: {text, sourceMapId: "id", sourceMap: map},
+    view: {nodes: [{site, members: []}]}};
+  assert.deepEqual(sourceLinking(workflow).lines(site), {key: JSON.stringify([site.unit, site.path]), start: 1, end: 1});
+  assert.equal(sourceLinking({...workflow, identity: "edited"}), undefined);
+  assert.equal(sourceLinking({...workflow, authored: {text}}), undefined);
+  assert.throws(() => sourceRanges(text, {sites: [{site, ranges: [{start: 7, end: 8}]}]}), /UTF-8 boundary/);
+});

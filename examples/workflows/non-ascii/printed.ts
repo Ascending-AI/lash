@@ -8,7 +8,7 @@ export async function demo(name) {
     let größe = "日本 🦀";
     let t4 = helper_text_concat(größe, name_1);
     let t5 = await helper_ts_boundary(t4);
-    let t6 = await await tools.echo(t5);
+    let t6 = await await tools.corpus.echo(t5);
     return t6;
   };
   let t8 = [name];

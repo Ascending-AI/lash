@@ -1685,6 +1685,7 @@ PACKAGE_DEPS = {
         "dev": {},
         "normal": {
             "anyhow": "//third-party/rust:p0010",
+            "lash": "//crates/lash:lash",
             "lash_dialect_python": "//crates/lash-dialect-python:lash-dialect-python",
             "lash_dialect_typescript": "//crates/lash-dialect-typescript:lash-dialect-typescript",
             "lash_helper_labels": "//crates/lash-helper-labels:lash-helper-labels",
@@ -1704,18 +1705,7 @@ PACKAGE_DEPS = {
         "build": {},
         "dev": {
             "lash": "//crates/lash:lash",
-            "lash_dialect_python": "//crates/lash-dialect-python:lash-dialect-python",
-            "lash_dialect_typescript": "//crates/lash-dialect-typescript:lash-dialect-typescript",
-            "lash_kernel_dialect": "//crates/lash-kernel-dialect:lash-kernel-dialect",
-            "lash_kernel_doc": "//crates/lash-kernel-doc:lash-kernel-doc",
-            "lash_vm_worker": "//crates/lash-vm-worker:lash-vm-worker",
-            "reqwest": "//third-party/rust:p0281",
-            "ruff_python_ast": "//third-party/rust:p0288",
-            "ruff_python_parser": "//third-party/rust:p0289",
-            "ruff_text_size": "//third-party/rust:p0292",
-            "swc_common": "//third-party/rust:p0361",
-            "swc_ecma_ast": "//third-party/rust:p0362",
-            "swc_ecma_parser": "//third-party/rust:p0363"
+            "reqwest": "//third-party/rust:p0281"
         },
         "normal": {
             "anyhow": "//third-party/rust:p0010",
@@ -1727,7 +1717,8 @@ PACKAGE_DEPS = {
             "thiserror": "//third-party/rust:p0375",
             "tokio": "//third-party/rust:p0381",
             "tokio_stream": "//third-party/rust:p0386",
-            "uuid": "//third-party/rust:p0423"
+            "uuid": "//third-party/rust:p0423",
+            "workflow_corpus": "//examples/workflows:workflows"
         }
     }
 }

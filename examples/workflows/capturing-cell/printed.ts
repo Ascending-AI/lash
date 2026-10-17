@@ -28,7 +28,7 @@ async function main() {
   let add = ["ts.function", "", "add", 1.0, t10, {}] as const;
   let t11 = {nested: {list: [1.0, add]}};
   let t12 = await helper_ts_boundary(t11);
-  await await tools.echo(t12);
+  await await tools.corpus.echo(t12);
   let t14 = shared;
   if (0.0 <= helper_list_len(t14)) {
     t14[0.0] = 9.0;

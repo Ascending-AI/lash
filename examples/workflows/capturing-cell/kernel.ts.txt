@@ -1,6 +1,6 @@
 kernel 1
 numbers float
-effect echo(input: Any) -> Any
+effect corpus.echo(input?: Any) -> Any
 use bool.not = @740c324347c666f1713aef804c355509918da319708a6a1ad8665e9a1e85306d
 use collection.function_check = @a76697deec5c174c74ed173a04b4207532f093c3fa95ae478cdebc9c38466e0c
 use collection.holds_none = @a58e0ba0d11b84096fd0264a5a281ef308aa5fe9a7bf26dd7b662b283fa491fe
@@ -834,7 +834,7 @@ main {
   let add = ("ts.function", "", "add", 1.0, t10, {})
   let t11 = {nested: {list: [1.0, add]}}
   let t12 = invoke ts.boundary(t11)
-  do perform echo(t12) as Any then yield
+  do perform corpus.echo(t12) as Any then yield
   let t14 = shared
   if num.le(0.0, list.len(t14)) {
     set t14[0.0] = 9.0

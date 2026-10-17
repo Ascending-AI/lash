@@ -4,5 +4,5 @@ shared = [1]
 async def add(x: int):
     return x + limit + shared[0]
 
-await echo({"nested": {"list": [1, add]}})
+await corpus.echo({"nested": {"list": [1, add]}})
 shared[0] = 9

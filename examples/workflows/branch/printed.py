@@ -5,7 +5,7 @@ async def demo(flag):
         else:
             pass
         if flag:
-            t1 = await tools.echo("yes")
+            t1 = await tools.corpus.echo("yes")
             t2 = await helper_py_reply(t1)
             return t2
         else:

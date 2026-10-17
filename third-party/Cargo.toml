@@ -2184,7 +2184,7 @@ features = ["default"]
 package = "swc_ecma_ast"
 version = "=28.0.0"
 default-features = false
-features = ["default", "serde", "serde-impl"]
+features = ["default"]
 
 [dependencies.p0363]
 package = "swc_ecma_parser"

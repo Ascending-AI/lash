@@ -1,9 +1,9 @@
 async def demo():
     result = "start"
     try:
-        result = await echo("try")
+        result = await corpus.echo("try")
     except Exception:
         result = "caught"
     finally:
-        await echo("finally")
+        await corpus.echo("finally")
     return result

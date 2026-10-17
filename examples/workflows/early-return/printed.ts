@@ -9,7 +9,7 @@ export async function demo(value) {
       return "negative";
     }
     let t4 = await helper_ts_boundary(value_1);
-    await await tools.echo(t4);
+    await await tools.corpus.echo(t4);
     return "done";
   };
   let t7 = [value];

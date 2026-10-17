@@ -1,5 +1,5 @@
 cell entries: []
-crossing echo
+crossing corpus.echo
 Record {
 field nested
 Record {

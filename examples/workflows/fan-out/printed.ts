@@ -7,7 +7,7 @@ export async function demo() {
       }
       let value = t1[0.0];
       let t4 = await helper_ts_boundary(value);
-      let t5 = await await tools.echo(t4);
+      let t5 = await await tools.corpus.echo(t4);
       return t5;
     };
     let t9 = async function(this3, args3) {

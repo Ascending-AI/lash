@@ -25,6 +25,7 @@ import {
   highlightLine,
   kernelLinking,
   readableLinking,
+  sourceLinking,
 } from "./codepane.mjs";
 import {
   clampZoom,
@@ -166,7 +167,9 @@ function show(next, correspondence) {
   $("admission").textContent = next.definition
     ? "Ready to run"
     : `Not admitted: ${next.notAdmitted}`;
-  $("source").value = next.source ?? "";
+  $("source-kind").value = next.authored?.version === next.version ? "authored" : "printed";
+  $("source-dialect").value = next.sourceDialect;
+  refreshSourceEditor();
   renderCode();
   $("source").scrollTop = 0;
   $("source").scrollLeft = 0;
@@ -192,17 +195,28 @@ $("import").onclick = () =>
       version: workflow.version,
       source: $("source").value,
       entry: $("entry").value,
+      dialect: $("source-dialect").value,
+      ...($("source-kind").value === "printed" ? { format: workflow.sourceDialect === "python" ? "python_v1" : "type_script_v1" } : {}),
     });
     selected = undefined;
     show(next);
     $("example").value = "";
-    report(`Imported TypeScript · revision ${workflow.version}.`);
+    report(`Imported ${dialectName(workflow.sourceDialect)} · revision ${workflow.version}.`);
   });
 async function loadExample(id) {
   const example = examples.find((entry) => entry.id === id);
   if (!example) return;
   await action(async () => {
-    if (dialect === "python" && example.pythonRefused) setDialect("typescript");
+    if (example.group !== "module") {
+      $("corpus-title").textContent = example.name;
+      $("corpus-note").textContent = example.refusal
+        ? `Module import refuses ${example.refusal}. The saved workflow is unchanged.`
+        : "Cell code runs in a session. Its recorded crossing is shown below.";
+      $("corpus-source").textContent = dialect === "python" ? example.pythonSource : example.typescriptSource;
+      $("corpus-witness").textContent = (dialect === "python" ? example.pythonWitness : example.typescriptWitness) ?? example.refusal;
+      $("corpus-case").showModal();
+      return;
+    }
     const next = await call("/workflow/select", { id, dialect });
     selected = undefined;
     show(next);
@@ -221,13 +235,10 @@ function setDialect(next) {
 // The toggle shows the dialect examples open in. An example whose Python
 // twin lash refuses keeps Python off, with lash's refusal as its title.
 function renderDialect() {
-  const example = examples.find((entry) => entry.id === $("example").value);
   for (const name of ["typescript", "python"]) {
     $(`dialect-${name}`).setAttribute("aria-pressed", String(dialect === name));
   }
-  const python = $("dialect-python");
-  python.disabled = Boolean(example?.pythonRefused);
-  python.title = example?.pythonRefused ?? "";
+  $("source").setAttribute("aria-label", `${dialectName($("source-dialect").value)} source`);
 }
 function chooseDialect(next) {
   if (next === dialect) return;
@@ -239,7 +250,7 @@ function chooseDialect(next) {
 // chosen dialect.
 function renderExamples() {
   const selected = $("example").value;
-  const groups = { app: "Apps", controlFlow: "Control flow" };
+  const groups = { module: "Workflow modules", cell: "Cell crossings", refusal: "Module refusals" };
   const placeholder = el("option", null, "Choose an example…");
   placeholder.value = "";
   placeholder.disabled = true;
@@ -256,7 +267,7 @@ function renderExamples() {
             const option = el(
               "option",
               null,
-              `${example.name} · ${size.statements} statements · ${size.scopes} scopes`,
+              example.group === "module" ? `${example.name} · ${size.statements} statements · ${size.scopes} scopes` : example.name,
             );
             option.value = example.id;
             option.title = example.description;
@@ -771,12 +782,13 @@ function model(s) {
     sleep: "Wait",
     yield: "Yield",
   };
-  const name = names[kind] ?? kind;
+  const library = actionOf(workflow, s)?.callee?.library;
+  const name = library ? (workflow.functionLabels[library.name] ?? library.name) : (names[kind] ?? kind);
   return {
     s,
     info: { name, app: "Flow", icon: "status" },
     title: name,
-    subtitle: "Open to inspect",
+    subtitle: library ? `${library.name} · ${library.id}` : "Open to inspect",
     generic: true,
   };
 }
@@ -1924,7 +1936,7 @@ function zoomToSelection() {
 function codeText() {
   if (!workflow) return undefined;
   if (codeView === "source") return workflow.authored?.text;
-  if (codeView === "typescript") return workflow.source;
+  if (codeView === "printed") return workflow.source;
   return workflow.text;
 }
 function codeNote() {
@@ -1935,12 +1947,12 @@ function codeNote() {
       authored.version === workflow.version
         ? ""
         : ` · edited since (revision ${workflow.version}); shown as imported`;
-    return `Authored ${dialectName(authored.dialect)} imported at revision ${authored.version}${edited} · not linked`;
+    return `Authored ${dialectName(authored.dialect)} imported at revision ${authored.version}${edited}${codeLinking ? " · linked through stored source map" : " · map unavailable for this revision"}`;
   }
-  if (codeView === "typescript")
+  if (codeView === "printed")
     return workflow.source
-      ? `Lash's exact TypeScript printer${codeLinking ? " · linked through its source map" : ""}`
-      : `No TypeScript: ${workflow.sourceUnavailable}`;
+      ? `Lash's exact ${dialectName(workflow.sourceDialect)} printer${codeLinking ? " · linked through its source map" : ""}`
+      : `No printed source: ${workflow.sourceUnavailable}`;
   return `Kernel document text${codeLinking ? " · linked to coarse nodes" : " · not linked: no matching printer ranges"}`;
 }
 function renderCode() {
@@ -1952,11 +1964,11 @@ function renderCode() {
     );
   const text = codeText();
   codeLinking =
-    codeView === "typescript" && workflow.source
+    codeView === "printed" && workflow.source
       ? readableLinking(viewOf(workflow))
       : codeView === "kernel"
         ? kernelLinking(workflow.text, viewOf(workflow))
-        : undefined;
+        : sourceLinking(workflow);
   $("code-note").textContent = codeNote();
   $("code-note").title = codeNote();
   const language =
@@ -1964,14 +1976,14 @@ function renderCode() {
       ? "kernel"
       : codeView === "source"
         ? (workflow.authored?.dialect ?? "typescript")
-        : "typescript";
+        : workflow.sourceDialect;
   $("code-view").innerHTML = text
     ? text
         .replace(/\n$/, "")
         .split("\n")
         .map(
           (line, index) =>
-            `<div class="code-line${codeLinking ? " linked" : ""}" data-line="${index}"><span class="ln">${index + 1}</span><span class="code">${highlightLine(line, language)}</span></div>`,
+            `<div class="code-line${codeLinking?.siteAt(index) !== undefined ? " linked" : ""}" data-line="${index}"><span class="ln">${index + 1}</span><span class="code">${highlightLine(line, language)}</span></div>`,
         )
         .join("")
     : `<p class="code-empty">${codeNote()}</p>`;
@@ -2180,7 +2192,17 @@ function setupCodePane() {
     setSplit((current || 0.58) + step);
   };
 }
+function refreshSourceEditor() {
+  const printed = $("source-kind").value === "printed";
+  $("source").value = printed ? (workflow.source ?? "") : (workflow.authored?.text ?? "");
+  $("source-dialect").disabled = printed;
+  if (printed) $("source-dialect").value = workflow.sourceDialect;
+  $("import").textContent = printed ? "Read printed document" : "Import module";
+  $("source").setAttribute("aria-label", `${dialectName($("source-dialect").value)} source`);
+}
 function setupVisual() {
+  $("source-kind").onchange = refreshSourceEditor;
+  $("source-dialect").onchange = () => $("source").setAttribute("aria-label", `${dialectName($("source-dialect").value)} source`);
   $("scope").onchange = () => {
     activeScope = canvasScopes()[Number($("scope").value)].block;
     setFocus(close(focus));

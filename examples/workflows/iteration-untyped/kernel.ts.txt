@@ -1,6 +1,6 @@
 kernel 1
 numbers float
-effect echo(input: Any) -> Any
+effect corpus.echo(input?: Any) -> Any
 use bool.not = @740c324347c666f1713aef804c355509918da319708a6a1ad8665e9a1e85306d
 use collection.holds_none = @a58e0ba0d11b84096fd0264a5a281ef308aa5fe9a7bf26dd7b662b283fa491fe
 use date.ecma.format = @aa44d3f29c320f240de9506ccc5c0fe6f822c96526b0371d505060a9206a5e86
@@ -107,7 +107,7 @@ fn demo(items) {
       let item = t4
       let t5 = out
       let t6 = invoke ts.boundary(item)
-      set t5[list.len(t5)] = perform echo(t6) as Any then yield
+      set t5[list.len(t5)] = perform corpus.echo(t6) as Any then yield
     }
     return out
   }

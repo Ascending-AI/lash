@@ -7,7 +7,7 @@ async def demo(name):
             pass
         größe = "日本 🦀"
         t1 = await helper_py_add(größe, name)
-        t2 = await tools.echo(t1)
+        t2 = await tools.corpus.echo(t1)
         t3 = await helper_py_reply(t2)
         return t3
     t5 = await t4(name)

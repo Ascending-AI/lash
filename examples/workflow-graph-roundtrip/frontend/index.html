@@ -17,7 +17,7 @@
       ><span class="slash">/</span>
       <div class="workflow-name">
         <span class="eyebrow">PERSONAL WORKSPACE</span>
-        <h1>Notification workflow</h1>
+        <h1>Workflow editor</h1>
       </div>
       <span class="saved" id="revision">Connecting…</span
       ><button id="source-button" class="quiet" aria-label="Edit source">
@@ -144,8 +144,8 @@
         <div class="code-top">
           <div class="segmented" role="group" aria-label="Code view">
             <button data-code="source" aria-pressed="false">Source</button
-            ><button data-code="typescript" aria-pressed="false">
-              TypeScript</button
+            ><button data-code="printed" aria-pressed="false">
+              Printed</button
             ><button data-code="kernel" aria-pressed="true">Kernel</button>
           </div>
           <span id="code-note" class="code-note"></span>
@@ -159,12 +159,22 @@
         <button data-close="source-editor" aria-label="Close source editor">×</button>
       </div>
       <section class="source-panel">
+        <div class="button-row">
+          <label for="source-kind">Source form</label><select id="source-kind"><option value="authored">Workflow module</option><option value="printed">Printed document</option></select>
+          <label for="source-dialect">Language</label><select id="source-dialect"><option value="typescript">TypeScript</option><option value="python">Python</option></select>
+        </div>
         <textarea id="source" aria-label="TypeScript source" spellcheck="false" wrap="off"></textarea>
         <div id="source-actions" class="button-row entry-row">
           <label for="entry">Entry function</label><input id="entry" value="demo" />
           <button id="import" data-write>Import TypeScript</button>
         </div>
       </section>
+    </dialog>
+    <dialog id="corpus-case" aria-labelledby="corpus-title">
+      <div class="dialog-top"><h2 id="corpus-title">Corpus case</h2><button data-close="corpus-case" aria-label="Close corpus case">×</button></div>
+      <p id="corpus-note" class="help"></p>
+      <pre id="corpus-source" class="code-fragment"></pre>
+      <pre id="corpus-witness" class="code-fragment"></pre>
     </dialog>
     <span id="admission" hidden></span>
     <script type="module" src="/editor.js"></script>

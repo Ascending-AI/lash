@@ -44,6 +44,9 @@ pub struct WorkflowView {
     /// The document as the TypeScript printer spells it: a read-only lens.
     #[serde(skip_serializing_if = "Option::is_none")]
     pub source: Option<String>,
+    pub source_dialect: Dialect,
+    /// Host display data joined by the callee name carried by the view.
+    pub function_labels: BTreeMap<String, String>,
     /// Lash's map from the document's sites to byte ranges of `source`.
     #[serde(skip_serializing_if = "Option::is_none")]
     pub source_map: Option<SourceMap>,
@@ -64,6 +67,12 @@ pub struct AuthoredSource {
     pub dialect: Dialect,
     pub text: String,
     pub version: u64,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub source_map_id: Option<lash::workflow::document::SourceMapId>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub source_map: Option<SourceMap>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub map_unavailable: Option<String>,
 }
 
 /// A dialect a workflow is authored in. Both import through lash's one

@@ -1,6 +1,6 @@
 kernel 1
 numbers by_spelling
-effect echo(input: Any) -> Any
+effect corpus.echo(input?: Any) -> Any
 use add = @7e4f2312e59326d1b501e7b4d092549da7b8db86c07ada94902ee61f3317b537
 use bool.not = @740c324347c666f1713aef804c355509918da319708a6a1ad8665e9a1e85306d
 use error.new = @94cb9716bc8ce4815dfcc5451d7f6d00901c7ed7aeba0d131da241a5f750d064
@@ -30,7 +30,7 @@ fn demo(name) {
     }
     set `größe` = "日本 🦀"
     let t1 = invoke py.add(`größe`, name)
-    let t2 = perform echo(t1) as Any
+    let t2 = perform corpus.echo(t1) as Any
     let t3 = invoke py.reply(t2)
     return t3
   }

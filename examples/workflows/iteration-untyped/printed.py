@@ -11,7 +11,7 @@ async def demo(items):
             item = t2
             t6 = out
             t3 = item
-            t4 = await tools.echo(t3)
+            t4 = await tools.corpus.echo(t3)
             t5 = await helper_py_reply(t4)
             t6.append(t5)
         return out

@@ -235,6 +235,26 @@ impl lash::tools::StaticToolExecute for HostTools {
     async fn execute(&self, call: lash::tools::ToolCall<'_>) -> lash::tools::ToolAttemptOutcome {
         use lash::sync::MutexExt;
         use lash::tools::{PendingCompletion, ToolAttemptOutcome, ToolOutcome};
+        if call.name() == "corpus_echo" {
+            let Some(process) = call.context.enclosing_process() else {
+                return ToolOutcome::err_fmt("echo requires a workflow process").into();
+            };
+            let text = call
+                .args
+                .as_str()
+                .map_or_else(|| call.args.to_string(), str::to_owned);
+            let mut ledger = self.display.lock_recover();
+            let records = ledger.entry(process.to_string()).or_default();
+            let call_id = call.context.call_id().to_string();
+            if !records.iter().any(|record| record.call_id == call_id) {
+                records.push(DisplayCall {
+                    call_id,
+                    operation: "show_message".into(),
+                    args: serde_json::json!({"text": text}),
+                });
+            }
+            return ToolOutcome::ok(call.args.clone()).into();
+        }
         if call.name() == "host_approval" {
             let Some(process) = call.context.enclosing_process() else {
                 return ToolOutcome::err_fmt("approval requires a workflow process").into();
@@ -284,7 +304,7 @@ impl lash::tools::StaticToolExecute for HostTools {
 )]
 pub(crate) fn tool_definitions() -> Vec<lash::tools::ToolDefinition> {
     use lash::tools::{ToolBinding, ToolDeclaration, ToolDefinition, ToolDefinitionBindingExt};
-    let mut definitions = Vec::new();
+    let mut definitions = workflow_corpus::tools().expect("the shared corpus tool declaration");
     for operation in OPERATIONS {
         let properties = operation
             .fields

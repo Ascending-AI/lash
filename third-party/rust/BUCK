@@ -20880,11 +20880,7 @@ third_party_rust_library(
         "CARGO_PKG_VERSION_PATCH": "0",
         "CARGO_PKG_VERSION_PRE": "",
     },
-    features = [
-        "default",
-        "serde",
-        "serde-impl",
-    ],
+    features = ["default"],
     platform = {
         "linux-x86_64": dict(),
     },
@@ -20896,7 +20892,6 @@ third_party_rust_library(
         ":once_cell-1",
         ":phf-0.11",
         ":rustc-hash-2",
-        ":serde-1",
         ":string_enum-1",
         ":swc_atoms-10",
         ":swc_common-25",

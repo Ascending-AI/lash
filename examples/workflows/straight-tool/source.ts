@@ -1,3 +1,3 @@
 export async function demo() {
-  return await echo("hello");
+  return await corpus.echo("hello");
 }

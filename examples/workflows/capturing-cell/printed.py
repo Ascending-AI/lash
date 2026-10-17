@@ -16,6 +16,6 @@ async def main():
     t5 = [1, add]
     t6 = {"list": t5}
     t7 = {"nested": t6}
-    t8 = await tools.echo(t7)
+    t8 = await tools.corpus.echo(t7)
     await helper_py_reply(t8)
     await helper_py_setitem(shared, 0, 9)

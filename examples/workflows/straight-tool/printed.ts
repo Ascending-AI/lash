@@ -1,6 +1,6 @@
 export async function demo() {
   let t2 = async function(this1, args1) {
-    let t1 = await await tools.echo("hello");
+    let t1 = await await tools.corpus.echo("hello");
     return t1;
   };
   let t3 = [];

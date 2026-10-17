@@ -1,6 +1,6 @@
 kernel 1
 numbers float
-effect echo(input: Any) -> Any
+effect corpus.echo(input?: Any) -> Any
 use kind = @3e2a9836b16b3ade4f7fcc2d56d1fb203dffed4bd5d7f4bf800df213c8c8c5f7
 use list.len = @70d92c79f9c69cfe8cda0752cf30f5f0db0499a1bbffeeed9e2abddad9cf302b
 use num.le = @d85e26af1e62c7c06fe6456f3a4a756dbd7d92b98361ea1bf89b69d08d81354b
@@ -19,7 +19,7 @@ fn demo(flag) {
     }
     let flag_1 = t1[0.0]
     if flag_1 {
-      let t4 = perform echo("yes") as Any then yield
+      let t4 = perform corpus.echo("yes") as Any then yield
       return t4
     }
     return "no"

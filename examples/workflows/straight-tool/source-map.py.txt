@@ -1,13 +1,13 @@
 language: Python
 exceptions: absent-binding initialization, task finalizer
-main/1 [0..48] "async def demo():\n    return await echo(\"hello\")"
-fn demo/0 [0..48] "async def demo():\n    return await echo(\"hello\")"
-fn demo/0/0/0/0 [22..48] "return await echo(\"hello\")"
-fn demo/0/0/0/0/0 [22..48] "return await echo(\"hello\")"
-fn demo/0/0/0/1 [22..48] "return await echo(\"hello\")"
-fn demo/0/0/0/1/0 [22..48] "return await echo(\"hello\")"
-fn demo/0/0/0/2 [22..48] "return await echo(\"hello\")"
-fn demo/1 [0..48] "async def demo():\n    return await echo(\"hello\")"
-fn demo/1/0 [0..48] "async def demo():\n    return await echo(\"hello\")"
-fn demo/2 [0..48] "async def demo():\n    return await echo(\"hello\")"
+main/1 [0..55] "async def demo():\n    return await corpus.echo(\"hello\")"
+fn demo/0 [0..55] "async def demo():\n    return await corpus.echo(\"hello\")"
+fn demo/0/0/0/0 [22..55] "return await corpus.echo(\"hello\")"
+fn demo/0/0/0/0/0 [22..55] "return await corpus.echo(\"hello\")"
+fn demo/0/0/0/1 [22..55] "return await corpus.echo(\"hello\")"
+fn demo/0/0/0/1/0 [22..55] "return await corpus.echo(\"hello\")"
+fn demo/0/0/0/2 [22..55] "return await corpus.echo(\"hello\")"
+fn demo/1 [0..55] "async def demo():\n    return await corpus.echo(\"hello\")"
+fn demo/1/0 [0..55] "async def demo():\n    return await corpus.echo(\"hello\")"
+fn demo/2 [0..55] "async def demo():\n    return await corpus.echo(\"hello\")"
 exception main/0: absent-binding initialization
