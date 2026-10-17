@@ -62,13 +62,6 @@ pub(super) fn cancel_pending_turn_input_row_conn(
     }
 }
 
-pub(crate) fn decode_stored_json<T: serde::de::DeserializeOwned>(
-    json: &str,
-    record_kind: &'static str,
-) -> Result<T, StoreError> {
-    serde_json::from_str(json).map_err(|err| crate::stored_data_corrupt(record_kind, err))
-}
-
 /// The cancel request turn `turn_id` of session `session_id` accepted, if
 /// any.
 pub(crate) fn load_turn_cancel_request_conn(

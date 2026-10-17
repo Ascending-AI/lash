@@ -241,7 +241,7 @@ table lash_pending_turn_inputs
   column enqueued_at_ms bigint not-null
   column ingress_json text not-null
   column input_id text not-null
-  column input_json text not-null
+  column input_json text nullable
   column run_spec_hash text nullable
   column session_id text not-null
   column source_key text nullable
@@ -363,7 +363,7 @@ table lash_queued_work_batches
   column enqueued_at_ms bigint not-null
   column entered_at_ms bigint nullable
   column merge_key text nullable
-  column payload_json text not-null
+  column payload_json text nullable
   column session_id text not-null
   column settled_operation_key text nullable
   column source_key text nullable

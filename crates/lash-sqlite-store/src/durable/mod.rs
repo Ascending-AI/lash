@@ -58,11 +58,29 @@ pub(crate) mod processes;
 mod prompts;
 
 /// Drain one bounded page; the collection repeats pages in separate transactions.
+///
+/// A page releases settled prompt audits and, at most
+/// [`MATERIAL_RELEASE_BATCH`](lash_store_sql::session::revisions::MATERIAL_RELEASE_BATCH)
+/// each, the bodies of settled inputs and the payloads of applied commands
+/// whose revision is no longer retained (FIG-6607).
 pub(crate) fn release_material_batch(
     tx: &Connection,
     session: Option<&lash_sansio::SessionId>,
 ) -> rusqlite::Result<usize> {
-    prompts::release_unretained(tx, session)
+    let mut released = prompts::release_unretained(tx, session)?;
+    let limit = i64::from(lash_store_sql::session::revisions::MATERIAL_RELEASE_BATCH);
+    let ingress = crate::turn_ingress::turn_ingress_sql();
+    for statement in [
+        &ingress.pending_inputs.release_settled_bodies,
+        &ingress.queued_batches.release_settled_payloads,
+    ] {
+        released += cached_execute(
+            tx,
+            statement.sql(),
+            rusqlite::params![session.map(lash_sansio::SessionId::as_str), limit],
+        )?;
+    }
+    Ok(released)
 }
 #[path = "../durable_reads.rs"]
 mod reads;

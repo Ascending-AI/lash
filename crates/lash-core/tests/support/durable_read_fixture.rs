@@ -745,8 +745,8 @@ pub async fn assert_semantics(handles: &FixtureHandles, expected: &ExpectedFixtu
     assert_eq!(queued[0].source_key.as_deref(), Some(QUEUE_SOURCE_KEY));
     assert!(
         matches!(
-            &queued[0].payload,
-            QueuedWorkPayload::SessionCommand { command }
+            queued[0].payload.retained(),
+            Some(QueuedWorkPayload::SessionCommand { command })
                 if matches!(
                     command.as_ref(),
                     SessionCommand::RefreshToolCatalog { reason }

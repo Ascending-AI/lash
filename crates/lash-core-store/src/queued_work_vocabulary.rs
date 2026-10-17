@@ -365,7 +365,10 @@ pub struct QueuedWorkBatch {
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub merge_key: Option<String>,
     pub enqueued_at_ms: u64,
-    pub payload: QueuedWorkPayload,
+    /// The submitted payload: retained while the batch is open, and released
+    /// with its revision once the commit that applied it is no longer
+    /// retained (FIG-6607).
+    pub payload: crate::turn_input_vocabulary::SubmittedBody<QueuedWorkPayload>,
     /// The immutable digest admission recorded
     /// ([`QueuedWorkBatchDraft::submission_digest`]): a resubmission under the
     /// same source key must carry it (ADR 0101 §8).
@@ -603,7 +606,7 @@ impl AdmittedQueuedWork {
             return None;
         }
         let batch = self.batches.first()?;
-        Some((batch, batch.payload.command()))
+        Some((batch, batch.payload.retained()?.command()))
     }
 
     /// Extract every independently receipted command in a coalesced
@@ -612,7 +615,7 @@ impl AdmittedQueuedWork {
     pub fn session_commands(&self) -> Option<Vec<(&QueuedWorkBatch, &SessionCommand)>> {
         let mut commands = Vec::with_capacity(self.batches.len());
         for batch in &self.batches {
-            commands.push((batch, batch.payload.command()));
+            commands.push((batch, batch.payload.retained()?.command()));
         }
         (!commands.is_empty()).then_some(commands)
     }

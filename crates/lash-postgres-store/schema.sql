@@ -308,7 +308,7 @@ CREATE TABLE IF NOT EXISTS lash_queued_work_batches (
     session_id TEXT NOT NULL,
     source_key TEXT,
     delivery_policy TEXT NOT NULL,
-    payload_json TEXT NOT NULL,
+    payload_json TEXT, -- NULL once the revision its applying commit published is released (FIG-6607).
     authority_json TEXT NOT NULL,
     merge_key TEXT,
     enqueued_at_ms BIGINT NOT NULL,
@@ -322,7 +322,7 @@ CREATE TABLE IF NOT EXISTS lash_queued_work_batches (
     entered_at_ms BIGINT, -- When a plugin task's operation run entered, before its handler ran; NULL while it never ran.
     cancel_request_json TEXT, -- The first host cancel of the entered operation run; NULL while none.
     CONSTRAINT ck_queued_work_batches_cancel_after_entry CHECK (cancel_request_json IS NULL OR entered_at_ms IS NOT NULL),
-    CONSTRAINT ck_queued_work_batches_payload CHECK ((payload_json::jsonb ->> 'type' = 'session_command') IS TRUE),
+    CONSTRAINT ck_queued_work_batches_payload CHECK (((payload_json IS NULL AND terminal_cause IS NOT NULL) OR payload_json::jsonb ->> 'type' = 'session_command') IS TRUE),
     CONSTRAINT ck_queued_work_batches_delivery_policy CHECK (delivery_policy IN ('earliest_safe_boundary', 'after_current_turn_commit')),
     CONSTRAINT ck_queued_work_batches_admission_all_or_none CHECK ((admitted_run IS NULL) = (admitted_by IS NULL)),
     CONSTRAINT ck_queued_work_batches_terminal CHECK ((terminal_cause IS NULL AND terminal_at_ms IS NULL) OR (terminal_cause IN ('delivered', 'applied', 'cancelled', 'stale_config_revision') AND terminal_at_ms IS NOT NULL AND admitted_run IS NULL)),
@@ -337,6 +337,11 @@ CREATE INDEX IF NOT EXISTS idx_lash_queued_work_admission_order
 CREATE INDEX IF NOT EXISTS idx_lash_queued_work_session_command_order
     ON lash_queued_work_batches(session_id, enqueued_at_ms, enqueue_seq)
     WHERE terminal_cause IS NULL;
+-- The applied commands whose payload a revision release may clear
+-- (FIG-6607): a released or still-open row never lengthens the scan.
+CREATE INDEX IF NOT EXISTS idx_lash_queued_work_settled_payload
+    ON lash_queued_work_batches(session_id, enqueue_seq)
+    WHERE payload_json IS NOT NULL AND terminal_cause IS NOT NULL;
 
 CREATE TABLE IF NOT EXISTS lash_pending_turn_inputs (
     enqueue_seq BIGINT NOT NULL,
@@ -345,7 +350,7 @@ CREATE TABLE IF NOT EXISTS lash_pending_turn_inputs (
     source_key TEXT,
     ingress_json TEXT NOT NULL, -- The submitted delivery, written once (ADR 0101 §5.1).
     state TEXT NOT NULL,
-    input_json TEXT NOT NULL,
+    input_json TEXT, -- NULL once the revision its run ended on is released (FIG-6607).
     submission_digest TEXT NOT NULL,
     enqueued_at_ms BIGINT NOT NULL,
     admitted_run TEXT, -- The run that took the input, retained after settlement; NULL while unbound.
@@ -358,6 +363,7 @@ CREATE TABLE IF NOT EXISTS lash_pending_turn_inputs (
     CONSTRAINT ck_pending_turn_inputs_admission_all_or_none CHECK (state IN ('cancelled', 'completed') OR (admitted_run IS NULL) = (admitted_by IS NULL)),
     CONSTRAINT ck_pending_turn_inputs_settled_unadmitted CHECK (admitted_by IS NULL OR state NOT IN ('cancelled', 'completed')),
     CONSTRAINT ck_pending_turn_inputs_terminal_at CHECK ((state IN ('cancelled', 'completed')) = (terminal_at_ms IS NOT NULL)),
+    CONSTRAINT ck_pending_turn_inputs_released_settled CHECK (input_json IS NOT NULL OR state IN ('cancelled', 'completed')),
     UNIQUE (session_id, source_key),
     PRIMARY KEY (session_id, enqueue_seq)
 );
@@ -372,6 +378,11 @@ CREATE INDEX IF NOT EXISTS idx_lash_pending_turn_inputs_accepted_state
 CREATE INDEX IF NOT EXISTS idx_lash_pending_turn_inputs_bound_run
     ON lash_pending_turn_inputs(session_id, admitted_run)
     WHERE admitted_run IS NOT NULL;
+-- The settled inputs whose body a revision release may clear (FIG-6607):
+-- a released or live row never lengthens the scan.
+CREATE INDEX IF NOT EXISTS idx_lash_pending_turn_inputs_settled_body
+    ON lash_pending_turn_inputs(session_id, enqueue_seq)
+    WHERE input_json IS NOT NULL AND state IN ('cancelled', 'completed');
 
 -- The source keys a host forsook before any input was filed under them: no
 -- input is ever admitted under one. A forsake and an admission of one key
@@ -1315,9 +1326,9 @@ DECLARE
     v_answer JSONB;
     v_frame TEXT;
 BEGIN
-    -- Generated from this build's statements (registry 3ef43a73c4547a73); a call
+    -- Generated from this build's statements (registry f8d8e7133402fd25); a call
     -- built from others is refused, as is any isolation but read committed.
-    IF p_registry IS DISTINCT FROM '3ef43a73c4547a73'
+    IF p_registry IS DISTINCT FROM 'f8d8e7133402fd25'
         OR current_setting('transaction_isolation') <> 'read committed' THEN
         RAISE EXCEPTION 'lash_owner_commit: registry or isolation refused' USING ERRCODE = 'LX000';
     END IF;
@@ -2218,11 +2229,6 @@ BEGIN
                 END IF;
                 v_rows := v_rows + 1;
             END LOOP;
-        WHEN 'session_revision.insert_config' THEN
-            INSERT INTO lash_blobs (hash, content, encoding) VALUES ((v_p->>0), (decode(v_p->>1, 'hex')), 0)
-             ON CONFLICT (hash) DO NOTHING;
-            GET DIAGNOSTICS v_rows = ROW_COUNT;
-            IF v_rows > 0 THEN v_first := '{}'::JSONB; END IF;
         WHEN 'session_revision.insert' THEN
             INSERT INTO lash_session_revisions
                  (session_id, head_revision, leaf_node_id, checkpoint_ref, config_ref)
@@ -2313,6 +2319,47 @@ BEGIN
                 IF v_row."checkpoint_ref" IS NOT NULL THEN v_retired := v_retired || v_row."checkpoint_ref"::TEXT; END IF;
                 IF v_row."config_ref" IS NOT NULL THEN v_retired := v_retired || v_row."config_ref"::TEXT; END IF;
             END LOOP;
+        WHEN 'pending_turn_input.release_settled_bodies' THEN
+            UPDATE lash_pending_turn_inputs SET input_json = NULL
+             WHERE (session_id, enqueue_seq) IN (
+                 SELECT held.session_id, held.enqueue_seq
+                 FROM lash_pending_turn_inputs AS held
+                 JOIN lash_session_runs AS ended
+                   ON ended.session_id = held.session_id AND ended.run = held.admitted_run
+                 WHERE (held.session_id = (v_p->>0) OR (v_p->>0) IS NULL)
+                   AND held.state IN ('cancelled', 'completed')
+                   AND held.input_json IS NOT NULL
+                   AND ended.terminal_kind IS NOT NULL
+                   AND NOT EXISTS (
+                       SELECT 1 FROM lash_session_revisions AS kept
+                       WHERE kept.session_id = ended.session_id
+                         AND kept.head_revision = COALESCE(
+                             ended.terminal_window_revision, ended.terminal_head_revision)
+                   )
+                 LIMIT ((v_p->>1)::BIGINT)
+             );
+            GET DIAGNOSTICS v_rows = ROW_COUNT;
+            IF v_rows > 0 THEN v_first := '{}'::JSONB; END IF;
+        WHEN 'queued_work_batch.release_settled_payloads' THEN
+            UPDATE lash_queued_work_batches SET payload_json = NULL
+             WHERE (session_id, enqueue_seq) IN (
+                 SELECT command.session_id, command.enqueue_seq
+                 FROM lash_queued_work_batches AS command
+                 JOIN lash_runtime_turn_commits AS receipt
+                   ON receipt.session_id = command.session_id
+                  AND receipt.turn_id = command.settled_operation_key
+                 WHERE (command.session_id = (v_p->>0) OR (v_p->>0) IS NULL)
+                   AND command.terminal_cause IS NOT NULL
+                   AND command.payload_json IS NOT NULL
+                   AND NOT EXISTS (
+                       SELECT 1 FROM lash_session_revisions AS kept
+                       WHERE kept.session_id = receipt.session_id
+                         AND kept.head_revision = receipt.head_revision
+                   )
+                 LIMIT ((v_p->>1)::BIGINT)
+             );
+            GET DIAGNOSTICS v_rows = ROW_COUNT;
+            IF v_rows > 0 THEN v_first := '{}'::JSONB; END IF;
         WHEN 'queued_work_batch.settle_command' THEN
             UPDATE lash_queued_work_batches
              SET terminal_cause = (v_p->>3),

@@ -66,7 +66,8 @@ pub(super) fn settle_commit_ingress_conn(
                 match row {
                     lash_core_execution::store::IngressRowId::Input(input_id) => {
                         let held = admitted_input_conn(tx, session_id, run, input_id)?;
-                        let payload = decode_stored_json(&held.input_json, "turn input")?;
+                        let payload =
+                            decode_turn_input(held.input_json)?.into_live("PendingTurnInput")?;
                         match disposition {
                             lash_core_execution::TurnCancelUndeliveredInputPolicy::Defer => {
                                 release_admitted_input_conn(tx, session_id, run, input_id)?;

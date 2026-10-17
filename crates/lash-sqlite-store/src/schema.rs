@@ -236,7 +236,7 @@ CREATE TABLE IF NOT EXISTS queued_work_batches (
     session_id        TEXT NOT NULL,
     source_key        TEXT,
     delivery_policy   TEXT NOT NULL,
-    payload_json TEXT NOT NULL,
+    payload_json TEXT, -- NULL once the revision its applying commit published is released (FIG-6607).
     authority_json    TEXT NOT NULL,
     merge_key         TEXT,
     enqueued_at_ms    INTEGER NOT NULL,
@@ -250,7 +250,7 @@ CREATE TABLE IF NOT EXISTS queued_work_batches (
     entered_at_ms     INTEGER, -- When a plugin task's operation run entered, before its handler ran; NULL while it never ran.
     cancel_request_json TEXT, -- The first host cancel of the entered operation run; NULL while none.
     CONSTRAINT ck_queued_work_batches_cancel_after_entry CHECK (cancel_request_json IS NULL OR entered_at_ms IS NOT NULL),
-    CONSTRAINT ck_queued_work_batches_payload CHECK ((json_valid(payload_json) AND json_type(payload_json) = 'object' AND json_extract(payload_json, '$.type') = 'session_command') IS TRUE),
+    CONSTRAINT ck_queued_work_batches_payload CHECK (((payload_json IS NULL AND terminal_cause IS NOT NULL) OR (json_valid(payload_json) AND json_type(payload_json) = 'object' AND json_extract(payload_json, '$.type') = 'session_command')) IS TRUE),
     CONSTRAINT ck_queued_work_batches_delivery_policy CHECK (delivery_policy IN ('earliest_safe_boundary', 'after_current_turn_commit')),
     CONSTRAINT ck_queued_work_batches_admission_all_or_none CHECK ((admitted_run IS NULL) = (admitted_by IS NULL)),
     CONSTRAINT ck_queued_work_batches_terminal CHECK ((terminal_cause IS NULL AND terminal_at_ms IS NULL) OR (terminal_cause IN ('delivered', 'applied', 'cancelled', 'stale_config_revision') AND terminal_at_ms IS NOT NULL AND admitted_run IS NULL)),
@@ -265,6 +265,12 @@ CREATE INDEX IF NOT EXISTS idx_queued_work_session_command_order
     ON queued_work_batches(session_id, enqueued_at_ms, enqueue_seq)
     WHERE terminal_cause IS NULL;
 
+-- The applied commands whose payload a revision release may clear
+-- (FIG-6607): a released or still-open row never lengthens the scan.
+CREATE INDEX IF NOT EXISTS idx_queued_work_settled_payload
+    ON queued_work_batches(session_id, enqueue_seq)
+    WHERE payload_json IS NOT NULL AND terminal_cause IS NOT NULL;
+
 DROP INDEX IF EXISTS idx_queued_work_admitted;
 CREATE INDEX IF NOT EXISTS idx_queued_work_admission_order
     ON queued_work_batches(session_id, admitted_run, enqueue_seq)
@@ -277,7 +283,7 @@ CREATE TABLE IF NOT EXISTS pending_turn_inputs (
     source_key        TEXT,
     ingress_json      TEXT NOT NULL, -- The submitted delivery, written once (ADR 0101 §5.1).
     state             TEXT NOT NULL,
-    input_json        TEXT NOT NULL,
+    input_json        TEXT, -- NULL once the revision its run ended on is released (FIG-6607).
     submission_digest TEXT NOT NULL,
     enqueued_at_ms    INTEGER NOT NULL,
     admitted_run     TEXT, -- The run that took the input, retained after settlement; NULL while unbound.
@@ -290,6 +296,7 @@ CREATE TABLE IF NOT EXISTS pending_turn_inputs (
     CONSTRAINT ck_pending_turn_inputs_admission_all_or_none CHECK (state IN ('cancelled', 'completed') OR (admitted_run IS NULL) = (admitted_by IS NULL)),
     CONSTRAINT ck_pending_turn_inputs_settled_unadmitted CHECK (admitted_by IS NULL OR state NOT IN ('cancelled', 'completed')),
     CONSTRAINT ck_pending_turn_inputs_terminal_at CHECK ((state IN ('cancelled', 'completed')) = (terminal_at_ms IS NOT NULL)),
+    CONSTRAINT ck_pending_turn_inputs_released_settled CHECK (input_json IS NOT NULL OR state IN ('cancelled', 'completed')),
     UNIQUE (session_id, source_key),
     PRIMARY KEY (session_id, enqueue_seq)
 );
@@ -310,6 +317,12 @@ CREATE INDEX IF NOT EXISTS idx_pending_turn_inputs_open_state
 CREATE INDEX IF NOT EXISTS idx_pending_turn_inputs_accepted_state
     ON pending_turn_inputs(session_id, enqueue_seq)
     WHERE state IN ('accepted');
+
+-- The settled inputs whose body a revision release may clear (FIG-6607):
+-- a released or live row never lengthens the scan.
+CREATE INDEX IF NOT EXISTS idx_pending_turn_inputs_settled_body
+    ON pending_turn_inputs(session_id, enqueue_seq)
+    WHERE input_json IS NOT NULL AND state IN ('cancelled', 'completed');
 
 DROP INDEX IF EXISTS idx_pending_turn_inputs_admitted;
 CREATE INDEX IF NOT EXISTS idx_pending_turn_inputs_bound_run

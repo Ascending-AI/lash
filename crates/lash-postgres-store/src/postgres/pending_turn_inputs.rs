@@ -13,7 +13,8 @@ pub(crate) struct PendingTurnInputRow {
     session_id: SessionId,
     source_key: Option<String>,
     state: lash_core_execution::TurnInputState,
-    input_json: String,
+    /// `None` once the session's retention released the settled body.
+    input_json: Option<String>,
     enqueued_at_ms: u64,
     /// The run that took the input, retained after settlement; absent while unbound.
     pub(crate) admitted_run: Option<String>,
@@ -63,7 +64,12 @@ pub(crate) fn pending_turn_input_from_row(
         source_key: row.source_key,
         state: row.state,
         enqueued_at_ms: row.enqueued_at_ms,
-        input: store_decode_json(&row.input_json, "turn input")?,
+        input: row
+            .input_json
+            .as_deref()
+            .map(|input| store_decode_json(input, "turn input"))
+            .transpose()?
+            .into(),
         run_spec: row
             .run_spec_hash
             .map(lash_core_execution::RunSpecHash::from_stored),

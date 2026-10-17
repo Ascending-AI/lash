@@ -82,6 +82,13 @@ impl std::fmt::Display for Target {
 ///
 /// A pin always retains the revision it resolves to, and a session's head is
 /// always retained, whatever the policy.
+///
+/// A released revision takes its settled material with it, in the same
+/// transaction (FIG-6607): the body of each input whose run ended on it and
+/// the payload of each command the commit that published it applied. Their
+/// identities, digests and receipts stay, so a retry is answered or refused
+/// exactly as before, and a read reports the body as
+/// [`SubmittedBody::Released`](crate::turn_input_vocabulary::SubmittedBody::Released).
 #[derive(Clone, Copy, Debug, PartialEq, Eq, serde::Serialize, serde::Deserialize)]
 #[serde(tag = "kind", content = "turns", rename_all = "snake_case")]
 pub enum Retention {

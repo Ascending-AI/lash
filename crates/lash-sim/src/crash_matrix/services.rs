@@ -537,6 +537,8 @@ async fn admitted_messages(
         let text: String = read
             .input
             .input
+            .live("PendingTurnInput")
+            .map_err(|error| TurnError::Exec(error.to_string()))?
             .items
             .iter()
             .filter_map(|item| match item {

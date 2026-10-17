@@ -819,7 +819,9 @@ pub trait TurnInputStore: Send + Sync {
     ///
     /// A draft filed under a source key the session already holds is the same
     /// submission when its digest equals the stored row's, and returns that
-    /// row whatever became of it; any other content is
+    /// row whatever became of it, its body
+    /// [`Released`](crate::turn_input_vocabulary::SubmittedBody::Released) once the session's
+    /// retention released the revision its run ended on; any other content is
     /// [`StoreError::PendingTurnInputSourceKeyConflict`]. A draft that carries
     /// its own `input_id` names one admission the same way: an identical
     /// submission returns the row and anything else is
@@ -1037,7 +1039,9 @@ pub trait QueuedWorkStore: Send + Sync {
     /// (ADR 0101 §8). A draft whose source key the session already filed
     /// answers that batch, open or a tombstone, as
     /// [`Existing`](crate::QueuedWorkEnqueueOutcome::Existing) when the
-    /// digests are equal, and nothing reopens; a changed digest is
+    /// digests are equal, and nothing reopens; an applied command's payload
+    /// is [`Released`](crate::turn_input_vocabulary::SubmittedBody::Released) once the session's
+    /// retention released the revision that applied it. A changed digest is
     /// [`StoreError::QueuedWorkSourceKeyConflict`] and nothing is stored.
     async fn enqueue_queued_work_with_outcome(
         &self,

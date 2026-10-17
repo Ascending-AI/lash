@@ -185,7 +185,8 @@ pub(super) async fn input(
             role: "user".to_owned(),
             blocks: pending
                 .input
-                .items
+                .retained()
+                .map_or(&[][..], |input| &input.items)
                 .iter()
                 .map(|item| match item {
                     crate::InputItem::Text { text } => lash_trace::TraceContentBlock::Text {

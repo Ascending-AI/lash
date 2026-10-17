@@ -398,7 +398,12 @@ pub(super) async fn agent_frame_switches(
                     row.run
                 ))
             })?;
-        switches = switches.max(read.input.input.agent_frame_switches);
+        let input = read
+            .input
+            .input
+            .live("PendingTurnInput")
+            .map_err(|error| super::session::TurnError::Runtime(error.runtime_error()))?;
+        switches = switches.max(input.agent_frame_switches);
     }
     Ok(switches)
 }

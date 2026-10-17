@@ -14,8 +14,16 @@ pub(crate) fn decode_authority(value: String) -> Result<QueuedWorkAuthority, Sto
     serde_json::from_str(&value).map_err(|err| stored_data_corrupt("QueuedWorkAuthority", err))
 }
 
-pub(crate) fn decode_queued_payload(value: String) -> Result<QueuedWorkPayload, StoreError> {
-    serde_json::from_str(&value).map_err(|err| stored_data_corrupt("QueuedWorkPayload", err))
+/// The submitted payload, or [`Released`](lash_core_execution::runtime::SubmittedBody::Released)
+/// once the session's retention released the settled body (FIG-6607).
+pub(crate) fn decode_queued_payload(
+    value: Option<String>,
+) -> Result<lash_core_execution::runtime::SubmittedBody<QueuedWorkPayload>, StoreError> {
+    value
+        .map(|value| serde_json::from_str(&value))
+        .transpose()
+        .map(Into::into)
+        .map_err(|err| stored_data_corrupt("QueuedWorkPayload", err))
 }
 
 pub(crate) fn queued_work_batch_from_row(
@@ -40,7 +48,8 @@ pub(crate) struct QueuedBatchRow {
     pub(crate) session_id: SessionId,
     pub(crate) source_key: Option<String>,
     pub(crate) delivery_policy: String,
-    pub(crate) payload_json: String,
+    /// `None` once the session's retention released the settled body.
+    pub(crate) payload_json: Option<String>,
     pub(crate) authority_json: String,
     pub(crate) merge_key: Option<String>,
     pub(crate) enqueued_at_ms: u64,

@@ -15,10 +15,17 @@ pub(crate) fn decode_turn_input_state(
     lash_core_execution::TurnInputState::from_persisted(&value, ingress, terminal_at_ms)
 }
 
+/// The submitted input, or [`Released`](lash_core_execution::runtime::SubmittedBody::Released)
+/// once the session's retention released the settled body (FIG-6607).
 pub(crate) fn decode_turn_input(
-    value: String,
-) -> Result<lash_core_execution::TurnInput, StoreError> {
-    serde_json::from_str(&value).map_err(|err| stored_data_corrupt("TurnInput", err))
+    value: Option<String>,
+) -> Result<lash_core_execution::runtime::SubmittedBody<lash_core_execution::TurnInput>, StoreError>
+{
+    value
+        .map(|value| serde_json::from_str(&value))
+        .transpose()
+        .map(Into::into)
+        .map_err(|err| stored_data_corrupt("TurnInput", err))
 }
 
 #[derive(Clone, Debug)]
@@ -29,7 +36,8 @@ pub(crate) struct PendingTurnInputRow {
     pub(crate) source_key: Option<String>,
     pub(crate) ingress_json: String,
     pub(crate) state: String,
-    pub(crate) input_json: String,
+    /// `None` once the session's retention released the settled body.
+    pub(crate) input_json: Option<String>,
     pub(crate) enqueued_at_ms: u64,
     /// The run that took the input, retained after settlement; absent while unbound.
     pub(crate) admitted_run: Option<String>,

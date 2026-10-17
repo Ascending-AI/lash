@@ -84,11 +84,30 @@ crate::statements! {
              FROM pending_turn_inputs
              WHERE input_id = ?1";
 
-        select_by_id = "SELECT enqueue_seq, input_id, session_id, source_key, ingress_json,
-                    state, input_json, enqueued_at_ms, admitted_run, admitted_by, run_spec_hash,
-                    terminal_at_ms, trace_cause_json
-             FROM pending_turn_inputs
-             WHERE session_id = ?1 AND input_id = ?2";
+        /// Input `?2` of session `?1`, in any state.
+        /// A settled row's `input_json` reads `NULL` once the revision its
+        /// run ended on is no longer retained (FIG-6607), whether or not
+        /// [`release_settled_bodies`](Self::release_settled_bodies) has
+        /// cleared the bytes yet: expiry is the retained-revisions relation's,
+        /// never the release backlog's.
+        select_by_id = "SELECT held.enqueue_seq, held.input_id, held.session_id, held.source_key,
+                    held.ingress_json, held.state,
+                    CASE WHEN {{terminal_turn_input_state(held.state)}} AND EXISTS (
+                        SELECT 1 FROM session_runs AS ended
+                        WHERE ended.session_id = held.session_id
+                          AND ended.run = held.admitted_run
+                          AND ended.terminal_kind IS NOT NULL
+                          AND NOT EXISTS (
+                              SELECT 1 FROM session_revisions AS kept
+                              WHERE kept.session_id = ended.session_id
+                                AND kept.head_revision = COALESCE(
+                                    ended.terminal_window_revision, ended.terminal_head_revision)
+                          )
+                    ) THEN NULL ELSE held.input_json END AS input_json,
+                    held.enqueued_at_ms, held.admitted_run, held.admitted_by, held.run_spec_hash,
+                    held.terminal_at_ms, held.trace_cause_json
+             FROM pending_turn_inputs AS held
+             WHERE held.session_id = ?1 AND held.input_id = ?2";
 
         /// The lifecycle state of input `?2` of session `?1`: what a fork
         /// target naming an input no run is bound to answers from.
@@ -100,12 +119,26 @@ crate::statements! {
         select_source_key_by_id = "SELECT source_key FROM pending_turn_inputs
              WHERE session_id = ?1 AND input_id = ?2";
 
-        /// The input session `?1` filed under source key `?2`.
-        select_by_source_key = "SELECT enqueue_seq, input_id, session_id, source_key, ingress_json,
-                    state, input_json, enqueued_at_ms, admitted_run, admitted_by, run_spec_hash,
-                    terminal_at_ms, trace_cause_json
-             FROM pending_turn_inputs
-             WHERE session_id = ?1 AND source_key = ?2";
+        /// The input session `?1` filed under source key `?2`, in any state.
+        /// Its body reads as [`select_by_id`](Self::select_by_id)'s does.
+        select_by_source_key = "SELECT held.enqueue_seq, held.input_id, held.session_id,
+                    held.source_key, held.ingress_json, held.state,
+                    CASE WHEN {{terminal_turn_input_state(held.state)}} AND EXISTS (
+                        SELECT 1 FROM session_runs AS ended
+                        WHERE ended.session_id = held.session_id
+                          AND ended.run = held.admitted_run
+                          AND ended.terminal_kind IS NOT NULL
+                          AND NOT EXISTS (
+                              SELECT 1 FROM session_revisions AS kept
+                              WHERE kept.session_id = ended.session_id
+                                AND kept.head_revision = COALESCE(
+                                    ended.terminal_window_revision, ended.terminal_head_revision)
+                          )
+                    ) THEN NULL ELSE held.input_json END AS input_json,
+                    held.enqueued_at_ms, held.admitted_run, held.admitted_by, held.run_spec_hash,
+                    held.terminal_at_ms, held.trace_cause_json
+             FROM pending_turn_inputs AS held
+             WHERE held.session_id = ?1 AND held.source_key = ?2";
 
         /// The lifecycle state and run spec of the input session `?1` filed
         /// under source key `?2`: the input that started the run a steering
@@ -199,6 +232,8 @@ crate::statements! {
         /// under run `?4`, which must hold it, at `?5`: completed when the
         /// run delivered it, cancelled when the run drops it. The run
         /// stays on the tombstone; only the live admission step is cleared.
+        /// The body stays until the revision the run ends on is released
+        /// ([`release_settled_bodies`](Self::release_settled_bodies)).
         settle_admitted = "UPDATE pending_turn_inputs
              SET state = ?3,
                  terminal_at_ms = ?5,
@@ -234,7 +269,8 @@ crate::statements! {
         /// digest and receipt until session deletion, alongside the terminal
         /// evidence of the run that took it, so a retry under its id is
         /// validated against its digest and answered from that run for the
-        /// run's whole retained life (FIG-3837).
+        /// run's whole retained life (FIG-3837); only its body goes with its
+        /// revision ([`release_settled_bodies`](Self::release_settled_bodies)).
         delete_withdrawn = "DELETE FROM pending_turn_inputs
              WHERE session_id = ?1 AND {{cancelled_turn_input_state(state)}}
                AND admitted_run IS NULL";
@@ -245,6 +281,37 @@ crate::statements! {
         cancel_input = "UPDATE pending_turn_inputs SET state = ?4,
             terminal_at_ms = ?3, admitted_by = NULL
             WHERE session_id = ?1 AND input_id = ?2 AND {{nonterminal_turn_input_state(state)}}";
+
+        /// Clear the bodies of up to `?2` settled inputs of session `?1` (of
+        /// every session when `?1` is NULL) whose run ended on a revision
+        /// that is no longer retained (FIG-6607): the session's `Retention`
+        /// released that revision, so it releases the input it settled. The
+        /// row stays with its digest, its delivery and its run, so an
+        /// identical retry is still answered and a changed one refused.
+        ///
+        /// A row whose run has not ended yet keeps its body: the revision it
+        /// will end on is the head's. A withdrawn input no run took is
+        /// [`delete_withdrawn`](Self::delete_withdrawn)'s. Reads treat a
+        /// released row as released already ([`select_by_id`](Self::select_by_id)),
+        /// so a batch left for a later release changes no answer.
+        release_settled_bodies = "UPDATE pending_turn_inputs SET input_json = NULL
+             WHERE (session_id, enqueue_seq) IN (
+                 SELECT held.session_id, held.enqueue_seq
+                 FROM pending_turn_inputs AS held
+                 JOIN session_runs AS ended
+                   ON ended.session_id = held.session_id AND ended.run = held.admitted_run
+                 WHERE (held.session_id = ?1 OR ?1 IS NULL)
+                   AND {{terminal_turn_input_state(held.state)}}
+                   AND held.input_json IS NOT NULL
+                   AND ended.terminal_kind IS NOT NULL
+                   AND NOT EXISTS (
+                       SELECT 1 FROM session_revisions AS kept
+                       WHERE kept.session_id = ended.session_id
+                         AND kept.head_revision = COALESCE(
+                             ended.terminal_window_revision, ended.terminal_head_revision)
+                   )
+                 LIMIT ?2
+             )";
 
         delete_by_session = "DELETE FROM pending_turn_inputs WHERE session_id = ?1";
     }

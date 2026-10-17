@@ -28,11 +28,31 @@ pub const SETTLEMENT_COLUMNS: &str = "admitted_run";
 crate::statements! {
     /// `queued_work_batches` statements both backends issue verbatim.
     pub struct QueuedBatchStatements @ "queued_work_batch" {
-        select_by_id = "SELECT enqueue_seq, batch_id, session_id, source_key, delivery_policy,
-                    authority_json, merge_key, enqueued_at_ms, submission_digest,
-                    admitted_run, admitted_by, terminal_cause, terminal_at_ms, payload_json, trace_cause_json
-             FROM queued_work_batches
-             WHERE batch_id = ?1";
+        /// Batch `?1`, open or a tombstone.
+        ///
+        /// A command's `payload_json` reads `NULL` once the revision the
+        /// commit that applied it published is no longer retained
+        /// (FIG-6607), whether or not
+        /// [`release_settled_payloads`](Self::release_settled_payloads) has
+        /// cleared the bytes yet.
+        select_by_id = "SELECT command.enqueue_seq, command.batch_id, command.session_id,
+                    command.source_key, command.delivery_policy, command.authority_json,
+                    command.merge_key, command.enqueued_at_ms, command.submission_digest,
+                    command.admitted_run, command.admitted_by, command.terminal_cause,
+                    command.terminal_at_ms,
+                    CASE WHEN EXISTS (
+                        SELECT 1 FROM runtime_turn_commits AS receipt
+                        WHERE receipt.session_id = command.session_id
+                          AND receipt.turn_id = command.settled_operation_key
+                          AND NOT EXISTS (
+                              SELECT 1 FROM session_revisions AS kept
+                              WHERE kept.session_id = receipt.session_id
+                                AND kept.head_revision = receipt.head_revision
+                          )
+                    ) THEN NULL ELSE command.payload_json END AS payload_json,
+                    command.trace_cause_json
+             FROM queued_work_batches AS command
+             WHERE command.batch_id = ?1";
 
         /// The source key batch `?2` of session `?1` was accepted under: the
         /// turn a run that admits it executes (FIG-3946).
@@ -115,7 +135,9 @@ crate::statements! {
         /// Settle open session command `?2` of session `?1` into its
         /// tombstone at `?3`, with cause `?4` and applying operation `?5`, in the
         /// commit that applied it (FIG-3927). A command withdrawn since the
-        /// shift read it matches no row, and the commit is refused.
+        /// shift read it matches no row, and the commit is refused. Its
+        /// payload stays until the revision that commit publishes is
+        /// released ([`release_settled_payloads`](Self::release_settled_payloads)).
         settle_command = "UPDATE queued_work_batches
              SET terminal_cause = ?4,
                  terminal_at_ms = ?3,
@@ -174,6 +196,37 @@ crate::statements! {
              SET admitted_run = NULL,
                  admitted_by = NULL
              WHERE session_id = ?1 AND admitted_run = ?2 AND terminal_cause IS NULL";
+
+        /// Clear the payloads of up to `?2` applied commands of session `?1`
+        /// (of every session when `?1` is NULL) whose applying commit's
+        /// revision is no longer retained (FIG-6607): the session's
+        /// `Retention` released that revision, so it releases the command it
+        /// applied. The tombstone stays with its digest and its applying
+        /// receipt, so an identical retry is still answered with the original
+        /// answer and a changed one refused.
+        ///
+        /// A command whose receipt is not written yet is being applied by
+        /// this very transaction and keeps its payload. A withdrawn or
+        /// cancelled tombstone names no receipt and is the host vacuum's
+        /// ([`delete_tombstones`](Self::delete_tombstones)), which keeps its
+        /// redelivery floor.
+        release_settled_payloads = "UPDATE queued_work_batches SET payload_json = NULL
+             WHERE (session_id, enqueue_seq) IN (
+                 SELECT command.session_id, command.enqueue_seq
+                 FROM queued_work_batches AS command
+                 JOIN runtime_turn_commits AS receipt
+                   ON receipt.session_id = command.session_id
+                  AND receipt.turn_id = command.settled_operation_key
+                 WHERE (command.session_id = ?1 OR ?1 IS NULL)
+                   AND command.terminal_cause IS NOT NULL
+                   AND command.payload_json IS NOT NULL
+                   AND NOT EXISTS (
+                       SELECT 1 FROM session_revisions AS kept
+                       WHERE kept.session_id = receipt.session_id
+                         AND kept.head_revision = receipt.head_revision
+                   )
+                 LIMIT ?2
+             )";
 
         delete_by_session = "DELETE FROM queued_work_batches WHERE session_id = ?1";
     }

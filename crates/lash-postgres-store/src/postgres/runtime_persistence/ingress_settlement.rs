@@ -49,7 +49,7 @@ pub(crate) async fn released_rows_tx(
                         held.enqueue_seq,
                         lash_core_execution::TurnCancelAffectedInput {
                             input_id: input_id.clone(),
-                            payload: held.input,
+                            payload: held.input.into_live("PendingTurnInput")?,
                             disposition,
                         },
                     ))

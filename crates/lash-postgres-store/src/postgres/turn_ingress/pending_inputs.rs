@@ -10,18 +10,47 @@ lash_store_sql::statements! {
     /// `pending_turn_inputs` statements only PostgreSQL issues.
     pub(crate) struct PendingInputPostgresStatements @ "pending_turn_input" {
         /// Input `?2` of session `?1`, locked for the caller's transaction.
-        select_by_id_for_update = "SELECT enqueue_seq, input_id, session_id, source_key, ingress_json,
-                    state, input_json, enqueued_at_ms, admitted_run, admitted_by, run_spec_hash, terminal_at_ms, trace_cause_json
-             FROM pending_turn_inputs
-             WHERE session_id = ?1 AND input_id = ?2 FOR UPDATE";
+        /// A settled body reads as the shared `select_by_id` reads it
+        /// (FIG-6607).
+        select_by_id_for_update = "SELECT held.enqueue_seq, held.input_id, held.session_id, held.source_key,
+                    held.ingress_json, held.state,
+                    CASE WHEN {{terminal_turn_input_state(held.state)}} AND EXISTS (
+                        SELECT 1 FROM session_runs AS ended
+                        WHERE ended.session_id = held.session_id
+                          AND ended.run = held.admitted_run
+                          AND ended.terminal_kind IS NOT NULL
+                          AND NOT EXISTS (
+                              SELECT 1 FROM session_revisions AS kept
+                              WHERE kept.session_id = ended.session_id
+                                AND kept.head_revision = COALESCE(
+                                    ended.terminal_window_revision, ended.terminal_head_revision)
+                          )
+                    ) THEN NULL ELSE held.input_json END AS input_json,
+                    held.enqueued_at_ms, held.admitted_run, held.admitted_by, held.run_spec_hash,
+                    held.terminal_at_ms, held.trace_cause_json
+             FROM pending_turn_inputs AS held
+             WHERE held.session_id = ?1 AND held.input_id = ?2 FOR UPDATE OF held";
 
         /// The input session `?1` filed under source key `?2`, locked for the
         /// caller's transaction.
-        select_by_source_key_for_update = "SELECT enqueue_seq, input_id, session_id, source_key,
-                    ingress_json, state, input_json, enqueued_at_ms, admitted_run,
-                    admitted_by, run_spec_hash, terminal_at_ms, trace_cause_json
-             FROM pending_turn_inputs
-             WHERE session_id = ?1 AND source_key = ?2 FOR UPDATE";
+        select_by_source_key_for_update = "SELECT held.enqueue_seq, held.input_id, held.session_id, held.source_key,
+                    held.ingress_json, held.state,
+                    CASE WHEN {{terminal_turn_input_state(held.state)}} AND EXISTS (
+                        SELECT 1 FROM session_runs AS ended
+                        WHERE ended.session_id = held.session_id
+                          AND ended.run = held.admitted_run
+                          AND ended.terminal_kind IS NOT NULL
+                          AND NOT EXISTS (
+                              SELECT 1 FROM session_revisions AS kept
+                              WHERE kept.session_id = ended.session_id
+                                AND kept.head_revision = COALESCE(
+                                    ended.terminal_window_revision, ended.terminal_head_revision)
+                          )
+                    ) THEN NULL ELSE held.input_json END AS input_json,
+                    held.enqueued_at_ms, held.admitted_run, held.admitted_by, held.run_spec_hash,
+                    held.terminal_at_ms, held.trace_cause_json
+             FROM pending_turn_inputs AS held
+             WHERE held.session_id = ?1 AND held.source_key = ?2 FOR UPDATE OF held";
 
         /// The facts the settlement verdict consults about input `?2` of
         /// session `?1`, locked for the caller's transaction.
@@ -31,12 +60,26 @@ lash_store_sql::statements! {
 
         /// Session `?1`'s inputs from `?2` onwards, locked: the suffix a cancel
         /// anchored at one input covers.
-        select_suffix = "SELECT enqueue_seq, input_id, session_id, source_key, ingress_json,
-                    state, input_json, enqueued_at_ms, admitted_run, admitted_by, run_spec_hash, terminal_at_ms, trace_cause_json
-             FROM pending_turn_inputs
-             WHERE session_id = ?1 AND enqueue_seq >= ?2
-             ORDER BY enqueue_seq ASC
-             FOR UPDATE";
+        select_suffix = "SELECT held.enqueue_seq, held.input_id, held.session_id, held.source_key,
+                    held.ingress_json, held.state,
+                    CASE WHEN {{terminal_turn_input_state(held.state)}} AND EXISTS (
+                        SELECT 1 FROM session_runs AS ended
+                        WHERE ended.session_id = held.session_id
+                          AND ended.run = held.admitted_run
+                          AND ended.terminal_kind IS NOT NULL
+                          AND NOT EXISTS (
+                              SELECT 1 FROM session_revisions AS kept
+                              WHERE kept.session_id = ended.session_id
+                                AND kept.head_revision = COALESCE(
+                                    ended.terminal_window_revision, ended.terminal_head_revision)
+                          )
+                    ) THEN NULL ELSE held.input_json END AS input_json,
+                    held.enqueued_at_ms, held.admitted_run, held.admitted_by, held.run_spec_hash,
+                    held.terminal_at_ms, held.trace_cause_json
+             FROM pending_turn_inputs AS held
+             WHERE held.session_id = ?1 AND held.enqueue_seq >= ?2
+             ORDER BY held.enqueue_seq ASC
+             FOR UPDATE OF held";
 
         /// Session `?1`'s open active-turn inputs, locked, which an
         /// interrupted turn's commit re-defers: input addressed to the turn

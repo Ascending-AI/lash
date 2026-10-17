@@ -13,7 +13,7 @@ pub(crate) struct QueuedBatchRow {
     session_id: SessionId,
     source_key: Option<String>,
     pub(crate) delivery_policy: DeliveryPolicy,
-    pub(crate) payload: QueuedWorkPayload,
+    pub(crate) payload: lash_core_execution::runtime::SubmittedBody<QueuedWorkPayload>,
     pub(crate) authority: QueuedWorkAuthority,
     pub(crate) merge_key: Option<String>,
     enqueued_at_ms: u64,
@@ -34,10 +34,11 @@ pub(crate) fn queued_batch_row(row: PgRow) -> Result<QueuedBatchRow, StoreError>
                 record_kind: "QueuedWorkBatch",
                 message: "unknown queued-work delivery policy".to_string(),
             })?;
-    let payload: QueuedWorkPayload = store_decode_json(
-        row.get::<String, _>("payload_json").as_str(),
-        "queued work payload",
-    )?;
+    let payload = row
+        .get::<Option<String>, _>("payload_json")
+        .map(|payload| store_decode_json::<QueuedWorkPayload>(&payload, "queued work payload"))
+        .transpose()?
+        .into();
     let authority_json: String = row.get("authority_json");
     Ok(QueuedBatchRow {
         enqueue_seq: u64_from_sql("QueuedWorkBatch", "enqueue_seq", row.get("enqueue_seq"))?,

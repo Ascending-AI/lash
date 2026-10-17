@@ -449,7 +449,7 @@ pub(super) fn pending_next_turn_input_draft(
 }
 
 pub(super) fn pending_input_text(input: &crate::PendingTurnInput) -> Option<&str> {
-    match input.input.items.first()? {
+    match input.input.retained()?.items.first()? {
         crate::InputItem::Text { text } => Some(text.as_str()),
         crate::InputItem::Attachment { .. } => None,
     }
@@ -542,7 +542,7 @@ pub(super) fn keyed_queued_draft(
     queued_draft(session, text, policy).with_source_key(key.as_ref())
 }
 pub(super) fn queued_batch_text(batch: &QueuedWorkBatch) -> Option<&str> {
-    let QueuedWorkPayload::SessionCommand { command } = &batch.payload;
+    let QueuedWorkPayload::SessionCommand { command } = batch.payload.retained()?;
     match command.as_ref() {
         crate::SessionCommand::RefreshToolCatalog { reason } => Some(reason),
         _ => None,

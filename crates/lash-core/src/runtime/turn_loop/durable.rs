@@ -124,7 +124,11 @@ impl LashRuntime {
             .iter()
             .flat_map(|admitted| &admitted.inputs)
         {
-            let normalized = normalize_input_items(&pending.input.items);
+            let input = pending
+                .input
+                .live("PendingTurnInput")
+                .map_err(|error| error.runtime_error())?;
+            let normalized = normalize_input_items(&input.items);
             let user_id = crate::runtime::ingress_message_id(&pending.input_id);
             user_messages.push(opening_user_message(
                 user_id,

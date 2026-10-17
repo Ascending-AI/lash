@@ -635,6 +635,98 @@ fn turn_input_submission_preimage(
     }
     Ok(identity.finish())
 }
+/// A submitted body whose availability a read reports (FIG-6607).
+///
+/// Open and admitted work always carries its body. Once the work settles,
+/// its body is material of the revision the settling commit published and
+/// is released with that revision under the session's
+/// [`Retention`](crate::Retention); the row's identity, submission digest
+/// and receipt stay, so an identical retry is still answered and a changed
+/// one still refused. A released body reads [`Self::Released`], never a
+/// substitute.
+///
+/// On the wire a retained body is the body itself and a released one is
+/// `null`.
+#[derive(Clone, Debug, PartialEq, Eq)]
+pub enum SubmittedBody<T> {
+    /// The body as it was submitted.
+    Retained(T),
+    /// The session's retention released the settled body.
+    Released,
+}
+
+impl<T> SubmittedBody<T> {
+    /// The body, while it is retained.
+    #[must_use]
+    pub fn retained(&self) -> Option<&T> {
+        match self {
+            Self::Retained(body) => Some(body),
+            Self::Released => None,
+        }
+    }
+
+    /// The body, while it is retained.
+    #[must_use]
+    pub fn into_retained(self) -> Option<T> {
+        match self {
+            Self::Retained(body) => Some(body),
+            Self::Released => None,
+        }
+    }
+
+    /// The body of live work, which retention never releases: a released
+    /// body here is [`StoreError::StoredDataCorrupt`](crate::StoreError::StoredDataCorrupt)
+    /// for `record_kind`.
+    pub fn live(&self, record_kind: &'static str) -> Result<&T, crate::StoreError> {
+        self.retained().ok_or_else(|| Self::not_live(record_kind))
+    }
+
+    /// [`Self::live`], by value.
+    pub fn into_live(self, record_kind: &'static str) -> Result<T, crate::StoreError> {
+        self.into_retained()
+            .ok_or_else(|| Self::not_live(record_kind))
+    }
+
+    fn not_live(record_kind: &'static str) -> crate::StoreError {
+        crate::StoreError::StoredDataCorrupt {
+            record_kind,
+            message: "live work has no submitted body".to_owned(),
+        }
+    }
+}
+
+impl<T> From<Option<T>> for SubmittedBody<T> {
+    fn from(body: Option<T>) -> Self {
+        body.map_or(Self::Released, Self::Retained)
+    }
+}
+
+impl<T: serde::Serialize> serde::Serialize for SubmittedBody<T> {
+    fn serialize<S: serde::Serializer>(&self, serializer: S) -> Result<S::Ok, S::Error> {
+        self.retained().serialize(serializer)
+    }
+}
+
+impl<'de, T: serde::Deserialize<'de>> serde::Deserialize<'de> for SubmittedBody<T> {
+    fn deserialize<D: serde::Deserializer<'de>>(deserializer: D) -> Result<Self, D::Error> {
+        Option::<T>::deserialize(deserializer).map(Self::from)
+    }
+}
+
+impl<T: schemars::JsonSchema> schemars::JsonSchema for SubmittedBody<T> {
+    fn inline_schema() -> bool {
+        <Option<T>>::inline_schema()
+    }
+
+    fn schema_name() -> std::borrow::Cow<'static, str> {
+        <Option<T>>::schema_name()
+    }
+
+    fn json_schema(generator: &mut schemars::SchemaGenerator) -> schemars::Schema {
+        <Option<T>>::json_schema(generator)
+    }
+}
+
 #[derive(Clone, Debug, serde::Serialize, serde::Deserialize)]
 #[serde(deny_unknown_fields)]
 pub struct PendingTurnInput {
@@ -648,7 +740,9 @@ pub struct PendingTurnInput {
     /// column pair cannot disagree.
     pub state: TurnInputState,
     pub enqueued_at_ms: u64,
-    pub input: TurnInput,
+    /// The submitted input: retained while the input is open or admitted,
+    /// and released with its revision once it settled (FIG-6607).
+    pub input: SubmittedBody<TurnInput>,
     /// The interned spec the input runs under; `None` for the default spec
     /// (FIG-3838). An admission never mixes inputs whose specs differ.
     #[serde(default, skip_serializing_if = "Option::is_none")]
@@ -780,7 +874,7 @@ impl PendingTurnInput {
     /// Exposes accepted input to store and durable-substrate implementors while admitting and
     /// settling durable turn inputs.
     pub fn accepted_input(&self) -> Option<crate::AcceptedInjectedTurnInput> {
-        plugin_message_from_turn_input(&self.input).map(|message| {
+        plugin_message_from_turn_input(self.input.retained()?).map(|message| {
             crate::AcceptedInjectedTurnInput {
                 id: self
                     .source_key
@@ -1048,7 +1142,11 @@ async fn committed_message_from_pending_input(
     pending: &PendingTurnInput,
     turn_id: &crate::TurnId,
 ) -> Result<Option<crate::Message>, String> {
-    let normalized = crate::input_normalization::normalize_input_items(&pending.input.items);
+    let input = pending
+        .input
+        .live("PendingTurnInput")
+        .map_err(|error| error.to_string())?;
+    let normalized = crate::input_normalization::normalize_input_items(&input.items);
     let message_id = ingress_message_id(&pending.input_id);
     let mut parts = Vec::new();
     for item in normalized {

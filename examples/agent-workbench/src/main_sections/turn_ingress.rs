@@ -254,7 +254,8 @@ fn publish_input_withdrawals(state: &AppState, outcomes: &[lash::PendingTurnInpu
         };
         let text = input
             .input
-            .items
+            .retained()
+            .map_or(&[][..], |input| &input.items)
             .iter()
             .filter_map(|item| match item {
                 lash::InputItem::Text { text } => Some(text.as_str()),

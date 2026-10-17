@@ -45,7 +45,7 @@ use lash_store_sql::Dialect;
 use super::steps::{Entry, Step};
 use super::{
     PostgresDurableStore, SQL, get, graph, head_commit, park, processes, prompts, replay,
-    run_records, session_close, session_mail, snapshots, sqlx_failure, turns, waits,
+    retention, run_records, session_close, session_mail, snapshots, sqlx_failure, turns, waits,
 };
 use crate::connection_sql::connection_sql;
 use crate::replayable::Attempt;
@@ -241,6 +241,8 @@ pub(super) fn entries() -> Vec<&'static Entry> {
         &head_commit::HEAD_CAS,
         &head_commit::TOUCH,
         &head_commit::PRUNE,
+        &retention::RELEASE_INPUT_BODIES,
+        &retention::RELEASE_COMMAND_PAYLOADS,
         &head_commit::SETTLE_COMMAND,
         &head_commit::SETTLE_INPUT,
         &head_commit::RELEASE_INPUT,
