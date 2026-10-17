@@ -52,12 +52,7 @@ pub use lash_core_store::runtime_owner::RuntimeOwner;
 pub use lash_core_store::session_identity::SessionRevision;
 pub use lash_core_store::surface_format;
 mod backend;
-pub mod execution_limits;
-pub use execution_limits::{
-    CompositionCacheLimits, CompositionCacheLimitsError, CompositionCacheLimitsField,
-    DiagnosticLimits, DiagnosticLimitsError, DiagnosticLimitsField, EvidenceLimits,
-    EvidenceLimitsError, EvidenceLimitsField,
-};
+
 pub mod formats;
 pub use backend::{
     Backend, BackendParts, DurableBuildError, RetirementCheck, StoreBindingId, StoreSet,
@@ -692,14 +687,14 @@ pub use runtime::{
     InlineStarts, InputItem, InspectedProcessDefinition, InvalidProcessDefinitionId,
     InvalidStartKey, JournalReplay, KeyName, Lifetime, LifetimeDecision, LifetimePolicy,
     LlmRequestSpec, LlmStreamRecord, MAX_NON_TERMINAL_PROCESS_PAGE_SIZE,
-    MAX_PROCESS_ROSTER_PAGE_SIZE, Material, NamesMaterial, NoProcessWork, NoRunOptionsOwner,
-    NonTerminalProcessPage, OwnerRunOptions, ParentEndPlan, PendingTurnInput,
-    PendingTurnInputBatch, PendingTurnInputCancelOutcome, PendingTurnInputCancelReceipt,
-    PendingTurnInputCancelTarget, PendingTurnInputDraft, PendingTurnInputRead,
-    PendingTurnInputReadStatus, PendingTurnInputSuffixCancelOutcome, PerformedEffects,
-    PreparedProcessRegistration, ProcessAwaitOutput, ProcessCancelReceipt, ProcessChange,
-    ProcessChangeBounds, ProcessChangeCursor, ProcessChangeKind, ProcessClockRebind,
-    ProcessCommand, ProcessCompletionAuthority, ProcessCompletionOutcome, ProcessComponentConfig,
+    MAX_PROCESS_ROSTER_PAGE_SIZE, NoProcessWork, NoRunOptionsOwner, NonTerminalProcessPage,
+    OwnerRunOptions, ParentEndPlan, PendingTurnInput, PendingTurnInputBatch,
+    PendingTurnInputCancelOutcome, PendingTurnInputCancelReceipt, PendingTurnInputCancelTarget,
+    PendingTurnInputDraft, PendingTurnInputRead, PendingTurnInputReadStatus,
+    PendingTurnInputSuffixCancelOutcome, PerformedEffects, PreparedProcessRegistration,
+    ProcessAwaitOutput, ProcessCancelReceipt, ProcessChange, ProcessChangeBounds,
+    ProcessChangeCursor, ProcessChangeKind, ProcessClockRebind, ProcessCommand,
+    ProcessCompletionAuthority, ProcessCompletionOutcome, ProcessComponentConfig,
     ProcessComponentEntry, ProcessComponentId, ProcessComponentIdError, ProcessConfigKey,
     ProcessDefinition, ProcessDefinitionDraft, ProcessDefinitionDraftError, ProcessDefinitionError,
     ProcessDefinitionId, ProcessDefinitionRef, ProcessDefinitionRefusal,
@@ -742,12 +737,11 @@ pub use runtime::{
     RuntimeSessionAuthority, RuntimeSessionState, SCOPE_STORAGE_PAYLOAD_VERSION, ScopeGrant,
     ScopeId, ScopeRef, ScopeStorageError, SegmentProgress, ServedOnly, ServedOnlyRange,
     SessionCreationHead, SessionEntry, SessionId, SessionListFilter, SessionRelationKind,
-    SessionScope, SessionStateVersionRefusal, SessionStoreCreateRequest, SessionView,
-    SettledOutput, SettledOutputRefusal, SleepSpec, SlotId, StagedProcessStart, StartCx,
-    StartCxError, StartKey, StepCandidate, StepName, StepPages, StepPublication, StepRequest,
-    StoreRealization, StoredDataCorruption, SubmittedBody, Target, ToolAttemptLaunch,
-    ToolIntentActivityOutcome, ToolIntentRealizedRef, TurnActivity, TurnActivityId,
-    TurnCancelAffectedInput, TurnCancelInputOutcome, TurnCancelMode,
+    SessionScope, SessionStateVersionRefusal, SessionStoreCreateRequest, SessionView, SleepSpec,
+    SlotId, StagedProcessStart, StartCx, StartCxError, StartKey, StepCandidate, StepName,
+    StepPages, StepPublication, StepRequest, StoreRealization, StoredDataCorruption, SubmittedBody,
+    Target, ToolAttemptLaunch, ToolIntentActivityOutcome, ToolIntentRealizedRef, TurnActivity,
+    TurnActivityId, TurnCancelAffectedInput, TurnCancelInputOutcome, TurnCancelMode,
     TurnCancelUndeliveredInputPolicy, TurnContext, TurnEvent, TurnFailureCause,
     TurnFailureEvidence, TurnFailurePartialOutput, TurnFailureSettlement, TurnInput,
     TurnInputAdmissionMode, TurnInputApplication, TurnInputCheckpointBoundary, TurnInputCompletion,

@@ -1,4 +1,5 @@
 use super::*;
+use lash_core_llm::stream_assembly::LlmStreamAccumulator;
 
 /// The response the turn derives an accepted cell from when the protocol
 /// accepted it before the provider returned: what streamed up to the
@@ -32,7 +33,8 @@ pub(super) fn protocol_handoff_response(
         // publish behaviour while streamed blocks reconcile by identity.
         expose_thinking: None,
     };
-    stream_accumulator.apply_to_response_for_request(&mut response, &call_id.0);
+    response.parts =
+        stream_accumulator.response_parts(std::mem::take(&mut response.parts), &call_id.0);
     response
 }
 

@@ -157,8 +157,8 @@ async fn interrupted_hang(
     session: &SessionId,
     run: &lash_sansio::TurnId,
 ) -> bool {
-    use lash_core_execution::runtime::actor::round::SettledOutput;
     use lash_core_execution::runtime::actor::round::{PinnedWaits, PolicyView, Recovery, fold};
+    use lash_core_store::tool_run::SettledOutput;
     let owner = lash_durable::domain::OwnerKey::Turn(session.clone(), run.clone());
     let Ok(rows) = nodes.database().run_facts(&owner).await else {
         return false;

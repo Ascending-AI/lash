@@ -615,7 +615,10 @@ async fn a_deferred_only_granted_cell_call_executes_once_or_parks_for_missing_re
     members.register(member.clone());
     let outcome = members.body(&admitted[0])(tokio_util::sync::CancellationToken::new()).await;
     assert!(
-        matches!(outcome.output, round::SettledOutput::Completed(_)),
+        matches!(
+            outcome.output,
+            lash_core_store::tool_run::SettledOutput::Completed(_)
+        ),
         "{outcome:?}"
     );
     let reply = members.reply(&member, &outcome.output);

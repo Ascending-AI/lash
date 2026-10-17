@@ -279,9 +279,6 @@ pub use lash_core::runtime::durable::session::{
 /// Display labels for the shipped kernel and dialect helpers.
 pub use lash_helper_labels as helper_labels;
 mod pacing;
-pub use lash_core::execution_limits::{
-    CompositionCacheLimitsBuilder, DiagnosticLimitsBuilder, EvidenceLimitsBuilder, LimitBounds,
-};
 pub use lash_core::facade_support::{
     TurnCancelAffectedInput, TurnCancelInputOutcome, TurnCancelMode,
     TurnCancelUndeliveredInputPolicy,
@@ -325,13 +322,6 @@ pub use lash_core::{
     facade_support::TurnInputAcceptanceReceipt, facade_support::TurnOutcome,
     facade_support::TurnStop, facade_support::TurnTerminal, facade_support::TurnWorkDriver,
 };
-/// The bounds on execution evidence, diagnostics and composition memory:
-/// sealed policies whose refusals name the field, value and range.
-pub use lash_core::{
-    CompositionCacheLimits, CompositionCacheLimitsError, CompositionCacheLimitsField,
-    DiagnosticLimits, DiagnosticLimitsError, DiagnosticLimitsField, EvidenceLimits,
-    EvidenceLimitsError, EvidenceLimitsField,
-};
 /// Lash's own execution bounds (`LashCoreBuilder::execution_budgets`), the
 /// limit one executable stretch runs under, and the registration refusal of
 /// a tool missing a bound its host must set.
@@ -342,6 +332,14 @@ pub use lash_core::{
 /// A plugin hook's [`HookKey`](plugins::HookKey) for a string literal,
 /// validated at compile time.
 pub use lash_core::{hook_key, tool_provider_key};
+/// The bounds on execution evidence, diagnostics and composition memory:
+/// sealed policies whose refusals name the field, value and range.
+pub use lash_core_store::execution_limits::{
+    CompositionCacheLimits, CompositionCacheLimitsBuilder, CompositionCacheLimitsError,
+    CompositionCacheLimitsField, DiagnosticLimits, DiagnosticLimitsBuilder, DiagnosticLimitsError,
+    DiagnosticLimitsField, EvidenceLimits, EvidenceLimitsBuilder, EvidenceLimitsError,
+    EvidenceLimitsField, LimitBounds,
+};
 pub use pacing::{
     CommitAdmissionPolicy, CommitAdmissionPolicyError, ObserverPacing, PollPacing, RecoveryPacing,
     RelayPolicy, RelayPolicyError, RuntimePacingPolicy, WorkCadencePolicy,
@@ -963,8 +961,7 @@ pub mod plugins {
         CapacityCause, CapacityVerdict, EngineAction, EngineEvent, EngineState, EngineStateFormat,
         EngineStateMigration, EngineStateRefusal, EngineStatus, EngineStatusProjection,
         EngineStepAnswer, EngineStepKind, EngineStepRefusal, EngineStepRun, EngineSteps,
-        EngineWake, KeyName, Material, NamesMaterial, SettledOutput, SettledOutputRefusal,
-        StepCandidate, StepName, StepPages, StepPublication, StepRequest,
+        EngineWake, KeyName, StepCandidate, StepName, StepPages, StepPublication, StepRequest,
     };
     /// Code-executor request, response, and runtime capability context.
     pub use lash_core::{
@@ -997,6 +994,9 @@ pub mod plugins {
     pub use lash_core::{
         facade_support::ModelCallAddress, facade_support::PluginLifecycleEvent,
         facade_support::SessionConfigChangedContext, facade_support::SessionConfigField,
+    };
+    pub use lash_core_store::tool_run::{
+        Material, NamesMaterial, SettledOutput, SettledOutputRefusal,
     };
     pub use lash_plugin_standard_compaction::{
         OMITTED_ATTACHMENT_PLACEHOLDER, StandardCompactionConfig, StandardCompactionPluginFactory,
@@ -1169,23 +1169,22 @@ pub mod process {
         AbandonEvidence, AbandonWriter, AdmittedProcessIdentity, Ancestry, CausalRef,
         DeclaredProcessIdentity, HandleId, InvalidProcessDefinitionId, InvalidStartKey, Lifetime,
         LifetimeDecision, LifetimePolicy, MAX_NON_TERMINAL_PROCESS_PAGE_SIZE,
-        MAX_PROCESS_EFFECT_OCCURRENCES, MAX_PROCESS_ROSTER_PAGE_SIZE, NoProcessWork,
-        PROCESS_EFFECT_OMISSIONS_EVENT_TYPE, PROCESS_EFFECT_OUTCOME_EVENT_TYPE,
-        PROCESS_RAN_EVENT_TYPE, ProcessAwaitOutput, ProcessChangeBounds, ProcessChangeCursor,
-        ProcessDefinition, ProcessDefinitionDraft, ProcessDefinitionDraftError,
-        ProcessDefinitionError, ProcessDefinitionId, ProcessDefinitionRef,
-        ProcessDefinitionRefusal, ProcessDefinitionResolution, ProcessDefinitionTarget,
-        ProcessDefinitionValue, ProcessEffectNodeReport, ProcessEffectOccurrence,
-        ProcessEffectOmissions, ProcessEffectOmittedCounts, ProcessEffectOutcomeClass,
-        ProcessEffectReport, ProcessEffectReportError, ProcessEngineKind, ProcessEnvRef,
-        ProcessEvent, ProcessEventAppendReceipt, ProcessEventHistoryRetention, ProcessEventKind,
-        ProcessEventLite, ProcessEventPage, ProcessEventPageEvents, ProcessEventPageMore,
-        ProcessEventQueryMode, ProcessEventReadOutcome, ProcessEventRelease,
-        ProcessExecutionContext, ProcessExternalRef, ProcessIdentity, ProcessInput,
-        ProcessLifecycleFact, ProcessLineage, ProcessListMode, ProcessObserverBy,
-        ProcessOriginator, ProcessOriginatorFilter, ProcessProvenance, ProcessPruneReport,
-        ProcessRan, ProcessRegistration, ProcessRegistrationOutcome, ProcessRegistryCursor,
-        ProcessResumeRefusal, ProcessRosterCursor, ProcessRosterTokenBudget,
+        MAX_PROCESS_ROSTER_PAGE_SIZE, NoProcessWork, PROCESS_EFFECT_OMISSIONS_EVENT_TYPE,
+        PROCESS_EFFECT_OUTCOME_EVENT_TYPE, PROCESS_RAN_EVENT_TYPE, ProcessAwaitOutput,
+        ProcessChangeBounds, ProcessChangeCursor, ProcessDefinition, ProcessDefinitionDraft,
+        ProcessDefinitionDraftError, ProcessDefinitionError, ProcessDefinitionId,
+        ProcessDefinitionRef, ProcessDefinitionRefusal, ProcessDefinitionResolution,
+        ProcessDefinitionTarget, ProcessDefinitionValue, ProcessEffectNodeReport,
+        ProcessEffectOccurrence, ProcessEffectOmissions, ProcessEffectOmittedCounts,
+        ProcessEffectOutcomeClass, ProcessEffectReport, ProcessEffectReportError,
+        ProcessEngineKind, ProcessEnvRef, ProcessEvent, ProcessEventAppendReceipt,
+        ProcessEventHistoryRetention, ProcessEventKind, ProcessEventLite, ProcessEventPage,
+        ProcessEventPageEvents, ProcessEventPageMore, ProcessEventQueryMode,
+        ProcessEventReadOutcome, ProcessEventRelease, ProcessExecutionContext, ProcessExternalRef,
+        ProcessIdentity, ProcessInput, ProcessLifecycleFact, ProcessLineage, ProcessListMode,
+        ProcessObserverBy, ProcessOriginator, ProcessOriginatorFilter, ProcessProvenance,
+        ProcessPruneReport, ProcessRan, ProcessRegistration, ProcessRegistrationOutcome,
+        ProcessRegistryCursor, ProcessResumeRefusal, ProcessRosterCursor, ProcessRosterTokenBudget,
         ProcessRosterTokenError, ProcessService, ProcessSessionDeleteReport, ProcessSignature,
         ProcessStartOptions, ProcessStartRegistration, ProcessStartRequest, ProcessStartTarget,
         ProcessStatus, ProcessStatusFilter, ProcessTerminalWait, ProcessWorkSubstrate,
@@ -1218,6 +1217,7 @@ pub mod process {
         ProcessReplaySubscribeOutcome, ProcessReplaySubscription, ProcessSequence,
         RetainedProcessView, StepBodyStartedObservation,
     };
+    pub use lash_core_store::execution_limits::MAX_PROCESS_EFFECT_OCCURRENCES;
     #[cfg(feature = "codemode")]
     pub use lash_vm_runtime::{KernelProcessDefinition, KernelProcessInput, LASH_VM_ENGINE_KIND};
 }

@@ -144,7 +144,6 @@
         "tests/runtime/tests/assembler.rs",
         "tests/runtime/tests/projection.rs",
         "tests/runtime/tests/session_freshness.rs",
-        "tests/runtime/tests/stream_accumulator.rs",
         "tests/runtime/tests/tracing.rs"
       ],
       "runtime_turns": [

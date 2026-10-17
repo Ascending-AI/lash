@@ -23,9 +23,7 @@ use tokio_util::sync::CancellationToken;
 
 use super::process::ProcessActivation;
 use super::wait_laws::{LawBroken, LawOutcome};
-use crate::runtime::actor::round::{
-    self, AdmittedExecution, Material, MemberState, PolicyView, SettledOutput,
-};
+use crate::runtime::actor::round::{self, AdmittedExecution, MemberState, PolicyView};
 use crate::runtime::actor::waits::{self, ParkDeadline, Resolution, WaitDeadline};
 use crate::runtime::process::steps::{ProcessSteps, StepAdmission, StepRefusal};
 use crate::{
@@ -35,6 +33,8 @@ use crate::{
     ProcessRegistration, ScopeGrant, ScopeId, StepName, StepRequest, ToolCallId, ToolCallOutput,
     ToolCancellation,
 };
+use lash_core_store::tool_run::Material;
+use lash_core_store::tool_run::SettledOutput;
 use lash_core_store::tool_run::{
     CompletionSource, KnownFailureReason, MaterialOwner, MaterialRole,
 };
@@ -339,7 +339,7 @@ impl ProcessEngine for LawEngine {
     fn settled_ran(
         &self,
         _kind: &crate::EngineStepKind,
-        _output: &crate::SettledOutput,
+        _output: &lash_core_store::tool_run::SettledOutput,
     ) -> Vec<(u32, u64)> {
         Vec::new()
     }

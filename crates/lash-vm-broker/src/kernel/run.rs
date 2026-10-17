@@ -53,7 +53,7 @@ use crate::effects::{MemberDraft, ParentFault};
 use crate::identity::CodeCallIdentities;
 use crate::members::Driven;
 use crate::snapshot::{BrokerInvariant, DriveRefusal, DurableSnapshotStore, QuietPointRefusal};
-use lash_core_execution::runtime::actor::round::SettledOutput;
+use lash_core_store::tool_run::SettledOutput;
 
 /// The parent's half of a kernel run: how each effect is admitted, how a
 /// committed outcome answers it, and the host's own state each save

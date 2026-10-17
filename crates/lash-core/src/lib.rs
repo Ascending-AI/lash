@@ -86,15 +86,11 @@ pub mod panic_containment {
     pub(crate) use lash_core_ids::panic_containment::payload_message;
     pub use lash_core_ids::panic_containment::{is_loud, set_loud};
 }
-pub use lash_core_execution::execution_limits;
+
 pub use lash_core_execution::plugin;
 pub(crate) use lash_core_execution::plugin_stack;
 pub(crate) use lash_core_execution::protocol_build;
-pub use lash_core_execution::{
-    CompositionCacheLimits, CompositionCacheLimitsError, CompositionCacheLimitsField,
-    DiagnosticLimits, DiagnosticLimitsError, DiagnosticLimitsField, EvidenceLimits,
-    EvidenceLimitsError, EvidenceLimitsField,
-};
+
 pub use lash_core_execution::{hook_key, tool_provider_key};
 #[cfg(feature = "perf-witness")]
 pub use lash_core_ids::perf_witness;
@@ -592,7 +588,7 @@ pub use plugin::{OpenAgentFrameOutcome, OpenAgentFrameRequest};
 pub use lash_core_execution::{
     FinishToolProvider, finish_tool, finish_tool_id, suppress_default_finish,
 };
-pub use lash_core_execution::{Material, NamesMaterial, SettledOutput, SettledOutputRefusal};
+
 pub use provider::{
     AnthropicThinkingRetention, AttachmentAcceptanceRule, AttachmentAcceptor,
     AttachmentCapabilitySnapshot, CacheControlDialect, GoogleDialect, InstructionRole,
@@ -649,9 +645,9 @@ pub use runtime::{
     InvalidStartKey, JournalReplay, KeyName, Lifetime, LifetimeDecision, LifetimePolicy,
     LiveReplayEventDraft, LiveReplayGapReason, LiveReplayOutcome, LiveReplayStore,
     LiveReplayStoreError, LiveReplaySubscribeOutcome, LiveReplaySubscription, LlmRequestSpec,
-    LlmStreamRecord, MAX_NON_TERMINAL_PROCESS_PAGE_SIZE, MAX_PROCESS_EFFECT_OCCURRENCES,
-    MAX_PROCESS_ROSTER_PAGE_SIZE, NoProcessWork, NoRunOptionsOwner, NonTerminalProcessPage,
-    OwnerRunOptions, PROCESS_EFFECT_OMISSIONS_EVENT_TYPE, PROCESS_EFFECT_OUTCOME_EVENT_TYPE,
+    LlmStreamRecord, MAX_NON_TERMINAL_PROCESS_PAGE_SIZE, MAX_PROCESS_ROSTER_PAGE_SIZE,
+    NoProcessWork, NoRunOptionsOwner, NonTerminalProcessPage, OwnerRunOptions,
+    PROCESS_EFFECT_OMISSIONS_EVENT_TYPE, PROCESS_EFFECT_OUTCOME_EVENT_TYPE,
     PROCESS_EVENT_VOCABULARY_VERSION, PROCESS_RAN_EVENT_TYPE, ParentEndPlan, PendingTurnInput,
     PendingTurnInputBatch, PendingTurnInputCancelOutcome, PendingTurnInputCancelReceipt,
     PendingTurnInputCancelTarget, PendingTurnInputDraft, PendingTurnInputRead,

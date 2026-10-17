@@ -13,10 +13,12 @@ use lash_durable::{ActorKey, ActorTx, DurableInstant, Epoch, MailSeq, OpenedActo
 use lash_sansio::{ExecutionLimit, ExecutionPolicy, SessionId, TurnId};
 
 use super::{
-    AdmittedExecution, ExecutionDraft, FoldRefusal, Material, PinnedWaits, PolicyView, Recovery,
-    RunFold, SettledOutput, admit, fold, settle, settle_retry, start_retry,
+    AdmittedExecution, ExecutionDraft, FoldRefusal, PinnedWaits, PolicyView, Recovery, RunFold,
+    admit, fold, settle, settle_retry, start_retry,
 };
 use crate::{ToolCallId, ToolId};
+use lash_core_store::tool_run::Material;
+use lash_core_store::tool_run::SettledOutput;
 
 const RUN: RunSeq = RunSeq(1);
 

@@ -9,9 +9,10 @@ use lash_durable::{ActorTx, DurableInstant};
 use super::records::{Record, RetryBody, append, start_record};
 use super::{
     AdmissionRefusal, AdmittedExecution, AdmittedRound, PinnedWait, Presentation, RoundDraft,
-    RunFold, SettleRefusal, SettledOutput, check_drafts,
+    RunFold, SettleRefusal, check_drafts,
 };
 use crate::runtime::actor::waits::{self, WaitDeadline, WaitPurpose, WaitSpec};
+use lash_core_store::tool_run::SettledOutput;
 
 /// Admit a tool round inside the `model.done` transaction: its membership,
 /// pinned policies and limits, and an `x_start` for every member. A member

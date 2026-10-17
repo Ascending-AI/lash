@@ -478,8 +478,9 @@ async fn cell_calls(
     id: crate::EffectId,
 ) -> Result<CellToolCalls, TurnError> {
     use lash_core_execution::runtime::actor::round::graph::{ReportView, RoundFact};
-    use lash_core_execution::runtime::actor::round::{self, PolicyView, SettledOutput};
+    use lash_core_execution::runtime::actor::round::{self, PolicyView};
     use lash_core_store::checkpoint_graph::GraphDecoder;
+    use lash_core_store::tool_run::SettledOutput;
     use lash_durable::domain::{CellId, ExecKey, OwnerKey};
     let Some(executor) = driver.session.plugins().code_executor() else {
         return Ok(CellToolCalls::default());

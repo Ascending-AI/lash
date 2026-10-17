@@ -71,7 +71,7 @@ async fn facade_evidence_cuts_bound_attempts_failures_and_divergences() {
         crate::tests::sqlite_memory_store_backend().await,
     ))
     .evidence_limits(
-        crate::EvidenceLimits::builder()
+        lash_core_store::execution_limits::EvidenceLimits::builder()
             .attempt_stream_bytes(1)
             .failure_partial_output_bytes(1)
             .diff_value_json_bytes(1)
@@ -80,7 +80,7 @@ async fn facade_evidence_cuts_bound_attempts_failures_and_divergences() {
             .unwrap(),
     )
     .diagnostic_limits(
-        crate::DiagnosticLimits::builder()
+        lash_core_store::execution_limits::DiagnosticLimits::builder()
             .diagnostic_error_chars(2)
             .build()
             .unwrap(),

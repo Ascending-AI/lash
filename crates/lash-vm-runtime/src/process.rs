@@ -621,10 +621,12 @@ impl lash_core::ProcessEngine for KernelProcessEngine {
     fn settled_ran(
         &self,
         kind: &lash_core::EngineStepKind,
-        output: &lash_core::SettledOutput,
+        output: &lash_core_store::tool_run::SettledOutput,
     ) -> Vec<(u32, u64)> {
         match output {
-            lash_core::SettledOutput::Completed(material) if kind.0 == KERNEL_RUN_STEP => {
+            lash_core_store::tool_run::SettledOutput::Completed(material)
+                if kind.0 == KERNEL_RUN_STEP =>
+            {
                 serde_json::from_str::<state::KernelRunOutput>(material.payload())
                     .map(|output| output.observed().ran.clone())
                     .unwrap_or_default()

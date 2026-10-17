@@ -14,7 +14,7 @@ pub use crate::plugin::{
     SessionObservedProcessReceipt, SessionObserverIntent,
 };
 pub use crate::runtime::NormalizedItem;
-pub use crate::runtime::assembly::LlmStreamAccumulator;
+
 pub use crate::runtime::effect::TurnCancelWait;
 pub use crate::runtime::io::normalize_input_items;
 pub use crate::runtime::turn_input_ingress::ingress_message_id;

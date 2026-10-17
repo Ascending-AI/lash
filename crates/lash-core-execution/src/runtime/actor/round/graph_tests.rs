@@ -1,5 +1,6 @@
 #![allow(clippy::expect_used, clippy::unwrap_used)]
 
+use lash_core_store::tool_run::Material;
 use std::collections::BTreeMap;
 
 use lash_core_store::checkpoint_graph::{

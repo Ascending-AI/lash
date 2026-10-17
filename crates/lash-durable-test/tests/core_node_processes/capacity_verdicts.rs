@@ -67,7 +67,7 @@ impl lash_core::EngineSteps for Saturating {
             ));
         }
         let material = |text: String| {
-            lash_core::Material::journal_local(
+            lash_core_store::tool_run::Material::journal_local(
                 MaterialOwner::Process {
                     process_id: run.process.clone(),
                 },
@@ -76,16 +76,17 @@ impl lash_core::EngineSteps for Saturating {
             )
         };
         match self.then {
-            Then::Complete => {
-                lash_core::SettledOutput::Completed(material("\"capacity\"".to_owned())).into()
-            }
+            Then::Complete => lash_core_store::tool_run::SettledOutput::Completed(material(
+                "\"capacity\"".to_owned(),
+            ))
+            .into(),
             Then::Fail => {
                 let output = lash_core::ToolCallOutput::failure(lash_core::ToolFailure::runtime(
                     lash_core::ToolFailureClass::Internal,
                     "saturating_failed",
                     "the saturating body failed on its own",
                 ));
-                lash_core::SettledOutput::Failed(
+                lash_core_store::tool_run::SettledOutput::Failed(
                     material(
                         serde_json::to_string(&lash_core::Durable(&output))
                             .expect("a tool output encodes"),

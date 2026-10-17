@@ -285,8 +285,8 @@ pub trait SingletonToolHandlers: Send + Sync {
     }
 
     /// The bounds on the execution evidence the call records.
-    fn evidence_limits(&self) -> crate::EvidenceLimits {
-        crate::EvidenceLimits::standard()
+    fn evidence_limits(&self) -> lash_core_store::execution_limits::EvidenceLimits {
+        lash_core_store::execution_limits::EvidenceLimits::standard()
     }
 
     /// The actual process implementations installed by this host.

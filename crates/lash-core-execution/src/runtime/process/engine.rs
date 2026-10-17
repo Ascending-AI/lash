@@ -163,7 +163,7 @@ pub trait ProcessEngine: Send + Sync {
     fn settled_ran(
         &self,
         kind: &super::engine_state::EngineStepKind,
-        output: &crate::runtime::actor::round::SettledOutput,
+        output: &lash_core_store::tool_run::SettledOutput,
     ) -> Vec<(u32, u64)>;
 
     /// The next state and action for `event` over `state`: synchronous and

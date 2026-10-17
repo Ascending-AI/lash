@@ -1,6 +1,7 @@
 //! The runtime-owned durable effect summary: one bounded record per effect
 //! node, written at result incorporation (ADR 0100 R4).
 
+use lash_core_store::execution_limits::MAX_PROCESS_EFFECT_OCCURRENCES;
 use std::collections::BTreeMap;
 
 use serde::{Deserialize, Serialize};
@@ -17,12 +18,13 @@ use super::events::ProcessEventAppendRequest;
 ///     file(
 ///         cover(
 ///             PROCESS_EFFECT_OUTCOME_EVENT_TYPE, PROCESS_EFFECT_OMISSIONS_EVENT_TYPE,
-///             MAX_PROCESS_EFFECT_OCCURRENCES, "struct ProcessEffectOccurrence",
+///             "struct ProcessEffectOccurrence",
 ///             "struct ProcessEffectOmissions", "fn append_request", "fn decode",
 ///             "fn tool_failure_code", "fn effect_outcome_payload_schema",
 ///             "fn effect_omissions_payload_schema",
 ///         ),
 ///     ),
+///     items(path = "crates/lash-core-store/src/execution_limits.rs", MAX_PROCESS_EFFECT_OCCURRENCES),
 ///     items(path = "crates/lash-core-execution/src/runtime/process/events.rs", ProcessLifecycleFact),
 ///     items(path = "crates/lash-core-execution/src/runtime/process/ran.rs", ProcessRan),
 /// )
@@ -70,13 +72,6 @@ pub const PROCESS_EFFECT_OUTCOME_EVENT_TYPE: &str =
 /// recovery contract as [`PROCESS_EFFECT_OUTCOME_EVENT_TYPE`].
 pub const PROCESS_EFFECT_OMISSIONS_EVENT_TYPE: &str =
     super::events::ProcessEventKind::EffectOmissions.as_str();
-
-/// How many effect occurrences of one node are recorded one by one, across
-/// every site of the node: the hard maximum of 4096.
-/// The host chooses an evidence cut through
-/// [`EvidenceLimits`](crate::EvidenceLimits) (default 64); the driver pins
-/// that cut in its first transition and omissions record it.
-pub const MAX_PROCESS_EFFECT_OCCURRENCES: u64 = 4096;
 
 /// Terminal class of a recorded effect occurrence.
 #[derive(Clone, Copy, Debug, PartialEq, Eq, Serialize, Deserialize)]

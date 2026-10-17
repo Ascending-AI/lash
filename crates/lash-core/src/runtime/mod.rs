@@ -160,10 +160,7 @@ use turn_boundary::*;
 use turn_commit_draft::*;
 use turn_driver::*;
 
-use assembly::{
-    LlmStreamAccumulator, LlmStreamDebugState, LlmStreamState, ReasoningPublicationState,
-    fold_llm_stream_event,
-};
+use assembly::{LlmStreamDebugState, LlmStreamState, fold_llm_stream_event};
 
 /// The context for one step of a command run under `admitted`: the run's
 /// own when it already serves that scope, else a rescope of it.
@@ -182,6 +179,7 @@ pub(crate) fn response_synthesized_from_aborted_stream(
     events: &[crate::llm::types::LlmStreamEvent],
 ) -> crate::llm::types::LlmResponse {
     use crate::llm::types::LlmUsage;
+    use lash_core_llm::stream_assembly::LlmStreamAccumulator;
 
     let mut accumulator = LlmStreamAccumulator::default();
     let mut usage = LlmUsage::default();
@@ -194,7 +192,8 @@ pub(crate) fn response_synthesized_from_aborted_stream(
         terminal_reason: crate::llm::types::LlmTerminalReason::Stop,
         ..crate::llm::types::LlmResponse::default()
     };
-    accumulator.apply_to_response(&mut response);
+    response.parts =
+        accumulator.response_parts(std::mem::take(&mut response.parts), "test-request");
     response
 }
 pub use builder::EmbeddedRuntimeBuilder;
@@ -289,13 +288,13 @@ pub use process::{
     EngineSteps, EngineWake, FitPolicy, HandleId, HoldEnvError, InlineDefinition, InlineStarts,
     InspectedProcessDefinition, InvalidProcessDefinitionId, InvalidStartKey, KeyName, Lifetime,
     LifetimeDecision, LifetimePolicy, MAX_NON_TERMINAL_PROCESS_PAGE_SIZE,
-    MAX_PROCESS_EFFECT_OCCURRENCES, MAX_PROCESS_ROSTER_PAGE_SIZE, NonTerminalProcessPage,
-    ObservedProcess, ObservedProcessChange, ObservedProcessChangeKind, ObservedProcessEvent,
-    ObservedProcessEventLite, ObservedProcessEventPage, ObservedProcessEventReadOutcome,
-    ObservedWorkItem, ObservedWorkItemState, PROCESS_EFFECT_OMISSIONS_EVENT_TYPE,
-    PROCESS_EFFECT_OUTCOME_EVENT_TYPE, PROCESS_EVENT_VOCABULARY_VERSION, PROCESS_RAN_EVENT_TYPE,
-    ParentEndPlan, PreparedProcessRegistration, ProcessAwaitOutput, ProcessCancelReceipt,
-    ProcessChange, ProcessChangeBounds, ProcessChangeCursor, ProcessChangeHub, ProcessChangeKind,
+    MAX_PROCESS_ROSTER_PAGE_SIZE, NonTerminalProcessPage, ObservedProcess, ObservedProcessChange,
+    ObservedProcessChangeKind, ObservedProcessEvent, ObservedProcessEventLite,
+    ObservedProcessEventPage, ObservedProcessEventReadOutcome, ObservedWorkItem,
+    ObservedWorkItemState, PROCESS_EFFECT_OMISSIONS_EVENT_TYPE, PROCESS_EFFECT_OUTCOME_EVENT_TYPE,
+    PROCESS_EVENT_VOCABULARY_VERSION, PROCESS_RAN_EVENT_TYPE, ParentEndPlan,
+    PreparedProcessRegistration, ProcessAwaitOutput, ProcessCancelReceipt, ProcessChange,
+    ProcessChangeBounds, ProcessChangeCursor, ProcessChangeHub, ProcessChangeKind,
     ProcessClockRebind, ProcessCompletionAuthority, ProcessCompletionOutcome,
     ProcessComponentConfig, ProcessComponentEntry, ProcessComponentId, ProcessComponentIdError,
     ProcessConfigKey, ProcessDefinition, ProcessDefinitionDraft, ProcessDefinitionDraftError,

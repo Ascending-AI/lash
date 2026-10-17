@@ -625,7 +625,8 @@ fn retaped(
     edit: impl FnOnce(&mut serde_json::Value),
 ) -> Vec<RecordedProcessStep> {
     let mut steps = steps.to_vec();
-    let Some(lash_core::SettledOutput::Completed(material)) = &steps[at].outcome else {
+    let Some(lash_core_store::tool_run::SettledOutput::Completed(material)) = &steps[at].outcome
+    else {
         panic!("the kernel run completed");
     };
     let mut output: serde_json::Value =
@@ -635,8 +636,8 @@ fn retaped(
         .and_then(|output| output.values_mut().next())
         .expect("a tagged output");
     edit(fields);
-    steps[at].outcome = Some(lash_core::SettledOutput::Completed(
-        lash_core::Material::journal_local(
+    steps[at].outcome = Some(lash_core_store::tool_run::SettledOutput::Completed(
+        lash_core_store::tool_run::Material::journal_local(
             lash_core_store::tool_run::MaterialOwner::Process {
                 process_id: process.clone(),
             },

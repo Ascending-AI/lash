@@ -10,7 +10,7 @@
 
 use std::sync::Arc;
 
-use lash_core_store::tool_run::{
+use super::{
     AttemptOutcome, AvailableEvidence, CompletionSource, KnownFailure, KnownFailureReason,
     LimitCause, MaterialDigest, MaterialLocation, MaterialOwner, MaterialPayload, MaterialRef,
     MaterialRefusal, MaterialRole,
@@ -309,28 +309,28 @@ impl SettledOutput {
     /// a turn's presentation and a process engine's injection alike, answers
     /// these from here. `None` for an output whose payload is its answer.
     #[must_use]
-    pub fn stopped_answer(&self) -> Option<crate::ToolCallOutput> {
+    pub fn stopped_answer(&self) -> Option<lash_sansio::ToolCallOutput> {
         Some(match self {
-            Self::Interrupted => crate::ToolCallOutput::failure(
-                crate::ToolFailure::runtime(
-                    crate::ToolFailureClass::Execution,
+            Self::Interrupted => lash_sansio::ToolCallOutput::failure(
+                lash_sansio::ToolFailure::runtime(
+                    lash_sansio::ToolFailureClass::Execution,
                     "tool_interrupted",
                     "tool was interrupted by a runtime restart; it may or may not have taken effect, and may still be running.",
                 )
-                .with_cause(crate::ToolFailureCause::Interrupted),
+                .with_cause(lash_sansio::ToolFailureCause::Interrupted),
             ),
-            Self::TimedOut { cause, .. } => crate::ToolCallOutput::failure(
-                crate::ToolFailure::runtime(
-                    crate::ToolFailureClass::Timeout,
+            Self::TimedOut { cause, .. } => lash_sansio::ToolCallOutput::failure(
+                lash_sansio::ToolFailure::runtime(
+                    lash_sansio::ToolFailureClass::Timeout,
                     "tool_timed_out",
                     format!(
                         "tool exceeded its {cause:?} limit; it may have partly run, and may still be running."
                     ),
                 )
-                .with_cause(crate::ToolFailureCause::ExecutionLimit { cause: *cause }),
+                .with_cause(lash_sansio::ToolFailureCause::ExecutionLimit { cause: *cause }),
             ),
-            Self::Cancelled { .. } => crate::ToolCallOutput::cancelled(
-                crate::ToolCancellation::runtime("the call was cancelled"),
+            Self::Cancelled { .. } => lash_sansio::ToolCallOutput::cancelled(
+                lash_sansio::ToolCancellation::runtime("the call was cancelled"),
             ),
             Self::Completed(_) | Self::Failed(_) | Self::Waiting(_) => return None,
         })
@@ -363,8 +363,8 @@ impl From<SettledOutput> for SettledOutputForm {
 
 #[cfg(test)]
 mod tests {
-    use lash_core_store::effect_opener::EffectOpener;
-    use lash_core_store::tool_run::{MaterialOwner, MaterialRole};
+    use super::{MaterialOwner, MaterialRole};
+    use crate::effect_opener::EffectOpener;
 
     use super::{Material, SettledOutput};
 

@@ -44,7 +44,6 @@ mod testing;
 mod tests;
 mod validation;
 
-pub use super::actor::round::{Material, NamesMaterial, SettledOutput, SettledOutputRefusal};
 /// Why a process actor is parked: the typed reason its observed state carries.
 pub use crate::runtime::actor::process::ProcessParkReason;
 pub use awaiter::{
@@ -68,10 +67,10 @@ pub use definition_store::{
     DefinitionAcquisition, ProcessDefinitionStore, ResolvedProcessDefinition,
 };
 pub use effect_summary::{
-    MAX_PROCESS_EFFECT_OCCURRENCES, PROCESS_EFFECT_OMISSIONS_EVENT_TYPE,
-    PROCESS_EFFECT_OUTCOME_EVENT_TYPE, PROCESS_EVENT_VOCABULARY_VERSION, ProcessEffectNodeReport,
-    ProcessEffectOccurrence, ProcessEffectOmissions, ProcessEffectOmittedCounts,
-    ProcessEffectOutcomeClass, ProcessEffectReport, ProcessEffectReportError, tool_failure_code,
+    PROCESS_EFFECT_OMISSIONS_EVENT_TYPE, PROCESS_EFFECT_OUTCOME_EVENT_TYPE,
+    PROCESS_EVENT_VOCABULARY_VERSION, ProcessEffectNodeReport, ProcessEffectOccurrence,
+    ProcessEffectOmissions, ProcessEffectOmittedCounts, ProcessEffectOutcomeClass,
+    ProcessEffectReport, ProcessEffectReportError, tool_failure_code,
 };
 pub use engine::{
     AdmittedProcessIdentity, InlineDefinition, InlineStarts, InspectedProcessDefinition,

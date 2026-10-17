@@ -1,5 +1,6 @@
 use super::*;
 use crate::runtime::durable::session::CellExit;
+use lash_core_llm::stream_assembly::ReasoningPublicationState;
 
 impl RuntimeTurnDriver<'_> {
     pub(super) fn record_model_call(

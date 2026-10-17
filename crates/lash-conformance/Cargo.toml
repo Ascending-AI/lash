@@ -24,6 +24,7 @@ workspace = true
 lash-vm = []
 
 [dependencies]
+lash-core-store = { workspace = true }
 lash-core = { workspace = true, features = ["testing"] }
 # Enable the worker testing surface in the workspace feature graph.
 lash-core-worker = { workspace = true, features = ["testing"] }

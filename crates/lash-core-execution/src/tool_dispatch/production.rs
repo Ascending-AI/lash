@@ -506,7 +506,7 @@ impl SingletonToolHandlers for ProductionToolHandlers<'_> {
     fn execution_state(&self) -> Option<Arc<dyn crate::plugin::ExecutionState>> {
         Some(self.context.dispatch().state.clone())
     }
-    fn evidence_limits(&self) -> crate::EvidenceLimits {
+    fn evidence_limits(&self) -> lash_core_store::execution_limits::EvidenceLimits {
         self.context.dispatch().state.evidence_limits()
     }
     fn process_engines(&self) -> Option<&crate::ProcessEngineRegistry> {

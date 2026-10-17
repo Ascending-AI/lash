@@ -65,6 +65,8 @@
 //!
 //! [`DomainRefusal::RunOrdinalGap`]: lash_durable::domain::DomainRefusal::RunOrdinalGap
 
+use lash_core_store::tool_run::Material;
+use lash_core_store::tool_run::SettledOutput;
 use std::future::Future;
 use std::pin::Pin;
 use std::sync::Arc;
@@ -83,7 +85,6 @@ use crate::{ToolCallId, ToolId};
 pub use crate::plugin::StagedPluginState;
 pub use lash_durable::domain::{OwnerKey, ProcessStartRows, RunSeq};
 
-mod codec_variants;
 mod context;
 mod fold;
 #[cfg(test)]
@@ -91,7 +92,6 @@ mod fold_tests;
 #[doc(hidden)]
 pub mod graph;
 pub mod lifecycle;
-mod output;
 mod parked;
 mod records;
 mod rounds;
@@ -105,7 +105,7 @@ pub use fold::{MemberState, RoundMember, RoundView, fold};
 pub use lifecycle::{
     Discharge, Fence, MemberBodies, MemberBody, MemberOutcome, Presented, member_body,
 };
-pub use output::{Material, NamesMaterial, SettledOutput, SettledOutputRefusal};
+
 pub use parked::{CallOwner, ParkedCall, PinnedWaits, parked};
 pub use records::RUN_RECORD_FORMAT_VERSION;
 pub use rounds::{

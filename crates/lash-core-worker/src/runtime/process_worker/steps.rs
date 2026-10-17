@@ -34,9 +34,7 @@
 use std::sync::Arc;
 
 use lash_core_execution::runtime::actor::round::MemberPin;
-use lash_core_execution::runtime::actor::round::{
-    AdmittedExecution, Material, MemberBody, MemberOutcome, SettledOutput,
-};
+use lash_core_execution::runtime::actor::round::{AdmittedExecution, MemberBody, MemberOutcome};
 use lash_core_execution::runtime::actor::waits::Resolution;
 use lash_core_execution::runtime::process::steps::{
     ProcessSteps, StepAdmission, StepRefusal, StepRuntime, dynamic_resolution, tool_step_output,
@@ -46,6 +44,8 @@ use lash_core_execution::tool_run::CompletionSource;
 use lash_core_execution::{
     EngineStepRun, ExecutionLimit, MaxToolCalls, ProcessInput, ProcessRecord, StepRequest,
 };
+use lash_core_store::tool_run::Material;
+use lash_core_store::tool_run::SettledOutput;
 
 use super::DurableProcessWorker;
 

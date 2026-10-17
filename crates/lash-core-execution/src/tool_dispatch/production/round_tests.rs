@@ -2,6 +2,8 @@
 //! recorded.
 
 use super::*;
+use lash_core_store::tool_run::Material;
+use lash_core_store::tool_run::SettledOutput;
 
 fn integer() -> crate::JsonSchema {
     crate::JsonSchema::admit(serde_json::json!({ "type": "integer" }))

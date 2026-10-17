@@ -741,9 +741,9 @@ pub struct LashCoreBuilder {
     content_hook: Option<Arc<dyn lash_trace::ContentHook>>,
     trace_limits: Option<crate::tracing::TraceLimits>,
     content_limits: Option<crate::tracing::ContentLimits>,
-    evidence_limits: Option<crate::EvidenceLimits>,
-    diagnostic_limits: Option<crate::DiagnosticLimits>,
-    composition_cache_limits: Option<crate::CompositionCacheLimits>,
+    evidence_limits: Option<lash_core_store::execution_limits::EvidenceLimits>,
+    diagnostic_limits: Option<lash_core_store::execution_limits::DiagnosticLimits>,
+    composition_cache_limits: Option<lash_core_store::execution_limits::CompositionCacheLimits>,
     /// The tracing policies the resolved runtime config carries.
     trace_policy: Option<crate::tracing::TracePolicySnapshot>,
     observation_work_limits: crate::tracing::ObservationWorkLimits,

@@ -13,6 +13,7 @@ pub mod llm;
 pub use lash_sansio::llm_profile;
 pub mod provider;
 pub mod session_model;
+pub mod stream_assembly;
 pub mod trace;
 pub mod turn_vocabulary;
 

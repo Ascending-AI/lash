@@ -13,10 +13,8 @@
 use std::sync::Arc;
 
 use lash_core::tool_run::{KnownFailureReason, MaterialOwner, MaterialRole};
-use lash_core::{
-    CapacityCause, CapacityVerdict, EngineStepAnswer, EngineStepRun, Material, ProcessId,
-    SettledOutput,
-};
+use lash_core::{CapacityCause, CapacityVerdict, EngineStepAnswer, EngineStepRun, ProcessId};
+use lash_core_store::tool_run::{Material, SettledOutput};
 use lash_kernel_doc::{Datum, Document, ErrorDatum, Handle, Integer, Timestamp};
 use lash_kernel_vm::{Bounds, End, Request, RunError, Target};
 use lash_vm_broker::ParentFault;

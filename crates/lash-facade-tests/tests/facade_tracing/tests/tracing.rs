@@ -1506,7 +1506,7 @@ async fn facade_plugin_state_warning_threshold_takes_effect() -> Result<()> {
         mock_provider(vec![text_call("done")]).into_handle(),
         |builder| {
             builder.plugin(Arc::new(plugin)).diagnostic_limits(
-                lash::DiagnosticLimits::builder()
+                lash_core_store::execution_limits::DiagnosticLimits::builder()
                     .plugin_state_warn_bytes(Some(1))
                     .build()
                     .expect("valid diagnostic limits"),

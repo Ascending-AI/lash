@@ -57,13 +57,14 @@ use std::collections::{BTreeMap, BTreeSet};
 
 use lash_core_execution::runtime::actor::claim_obligations::ExecutionDebts;
 use lash_core_execution::runtime::actor::round::{
-    self, AdmittedExecution, Recovery, RoundDraft, RunFold, SettledOutput,
+    self, AdmittedExecution, Recovery, RoundDraft, RunFold,
 };
 use lash_core_execution::runtime::actor::waits;
 use lash_core_store::checkpoint_graph::bodies::{ExecRoot, ExecStatus};
 use lash_core_store::checkpoint_graph::{
     CommitId, EncodeBudget, ExplicitLimit, GraphDecoder, GraphStaging, NodeId, NodeKind,
 };
+use lash_core_store::tool_run::SettledOutput;
 use lash_durable::domain::graph::{HydratedGraph, RootOwner};
 use lash_durable::domain::pages::{CandidateOwner, CandidatePublication};
 use lash_durable::domain::{ExecKey, RunFactWrite, RunSeq, SnapshotRev};

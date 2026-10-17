@@ -9,6 +9,13 @@
 
 use std::num::NonZeroU64;
 
+/// How many effect occurrences of one node are recorded one by one, across
+/// every site of the node: the hard maximum of 4096.
+/// The host chooses an evidence cut through
+/// [`EvidenceLimits`] (default 64); the driver pins
+/// that cut in its first transition and omissions record it.
+pub const MAX_PROCESS_EFFECT_OCCURRENCES: u64 = 4096;
+
 const KIB: u64 = 1024;
 const MIB: u64 = 1024 * 1024;
 
@@ -142,7 +149,7 @@ limits_policy! {
         failure_partial_output_bytes: usize => FailurePartialOutputBytes(64 * KIB, 0, 8 * MIB),
             "Visible output kept from a failed generation, its truncation marker included (default 64 KiB, 0..=8 MiB).";
         process_effect_occurrences: u64 => ProcessEffectOccurrences(
-            64, 0, crate::runtime::process::MAX_PROCESS_EFFECT_OCCURRENCES),
+            64, 0, MAX_PROCESS_EFFECT_OCCURRENCES),
             "Effect occurrences of one process node recorded one by one, pinned by the process; zero summarizes every occurrence (default 64, 0..=4096).";
     }
 }
@@ -182,7 +189,7 @@ impl DiagnosticLimitsField {
                 max: MIB,
             },
             Self::PluginStateWarnBytes => LimitBounds {
-                default: lash_core_store::plugin_state::PLUGIN_STATE_SESSION_WARN as u64,
+                default: crate::plugin_state::PLUGIN_STATE_SESSION_WARN as u64,
                 min: 1,
                 max: 64 * MIB,
             },

@@ -308,7 +308,7 @@ mod tests {
             &other_key,
             crate::RuntimeErrorCode::EffectReplayDivergence,
             None,
-            crate::EvidenceLimits::standard(),
+            lash_core_store::execution_limits::EvidenceLimits::standard(),
         )
         .expect_err("another key for the same wire model diverges");
         assert_eq!(
@@ -322,7 +322,7 @@ mod tests {
                 &same,
                 crate::RuntimeErrorCode::EffectReplayDivergence,
                 None,
-                crate::EvidenceLimits::standard(),
+                lash_core_store::execution_limits::EvidenceLimits::standard(),
             )
             .is_ok(),
             "the same key replays"
@@ -342,7 +342,7 @@ mod tests {
             &replayed,
             crate::RuntimeErrorCode::EffectReplayDivergence,
             None,
-            crate::EvidenceLimits::standard(),
+            lash_core_store::execution_limits::EvidenceLimits::standard(),
         )
         .expect_err("another transcript diverges");
         assert_eq!(
@@ -358,7 +358,7 @@ mod tests {
                 &same,
                 crate::RuntimeErrorCode::EffectReplayDivergence,
                 None,
-                crate::EvidenceLimits::standard(),
+                lash_core_store::execution_limits::EvidenceLimits::standard(),
             )
             .is_ok(),
             "the same transcript replays"
@@ -402,7 +402,7 @@ mod tests {
                     &same,
                     crate::RuntimeErrorCode::EffectReplayDivergence,
                     None,
-                    crate::EvidenceLimits::standard(),
+                    lash_core_store::execution_limits::EvidenceLimits::standard(),
                 )
                 .is_ok()
             );
@@ -412,7 +412,7 @@ mod tests {
                 &changed,
                 crate::RuntimeErrorCode::EffectReplayDivergence,
                 None,
-                crate::EvidenceLimits::standard(),
+                lash_core_store::execution_limits::EvidenceLimits::standard(),
             )
             .expect_err("changed body diverges");
             assert_eq!(
@@ -532,7 +532,7 @@ mod tests {
                     &retried,
                     crate::RuntimeErrorCode::EffectReplayDivergence,
                     None,
-                    crate::EvidenceLimits::standard(),
+                    lash_core_store::execution_limits::EvidenceLimits::standard(),
                 )
                 .unwrap_or_else(|error| panic!("{what}: a retry replays: {error:?}"));
             }

@@ -305,7 +305,7 @@ mod tests;
 /// The resident published state of one owner, and its publication slots.
 #[derive(Debug, Default)]
 pub(crate) struct PluginStateRegistry {
-    pub(super) diagnostics: crate::DiagnosticLimits,
+    pub(super) diagnostics: lash_core_store::execution_limits::DiagnosticLimits,
     pub(super) limits: lash_core_store::tool_run::StateCommandLimits,
     /// Published state: every namespace's values at its applied generation.
     pub(super) data: PluginState,

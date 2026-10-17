@@ -40,7 +40,7 @@ use serde_json::Value;
 /// The standard preset for payload bytes in an attempt's recorded stream. What does not fit
 /// is dropped and counted in its [`AttemptStreamTruncation`].
 pub const ATTEMPT_STREAM_BYTE_BUDGET: usize =
-    crate::EvidenceLimits::standard().attempt_stream_bytes();
+    lash_core_store::execution_limits::EvidenceLimits::standard().attempt_stream_bytes();
 
 /// The fields a call's session event and activity both carry, stored
 /// once per call.

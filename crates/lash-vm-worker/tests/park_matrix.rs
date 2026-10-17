@@ -39,14 +39,14 @@ use std::sync::{Arc, Mutex};
 use std::time::Duration;
 
 use lash_core_execution::runtime::actor::round::lifecycle::{MemberBodies, MemberBody};
-use lash_core_execution::runtime::actor::round::{
-    AdmittedExecution, Material, PolicyView, SettledOutput,
-};
+use lash_core_execution::runtime::actor::round::{AdmittedExecution, PolicyView};
 use lash_core_execution::runtime::actor::waits::Resolution;
 use lash_core_execution::{ActorContext, AdmittedScope, Backend};
 use lash_core_store::checkpoint_graph::NodeId;
 use lash_core_store::checkpoint_graph::bodies::{ExecRoot, ExecStatus};
 use lash_core_store::checkpoint_graph::{GraphDecoder, NodeKind};
+use lash_core_store::tool_run::Material;
+use lash_core_store::tool_run::SettledOutput;
 use lash_core_store::tool_run::{CompletionSource, MaterialOwner, MaterialRole};
 use lash_durable::domain::graph::{OWNER_READ_LIMITS, RootOwner};
 use lash_durable::domain::{CellId, ExecKey, HydratedGraph, RunFactKind, RunSeq};

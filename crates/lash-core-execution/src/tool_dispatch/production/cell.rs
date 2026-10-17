@@ -32,13 +32,14 @@ use super::round::{
 use super::*;
 use crate::runtime::actor::round::graph::{decode_opt_tree, encode_opt_tree};
 use crate::runtime::actor::round::{
-    AdmittedExecution, Discharge, Material, MemberBodies, MemberBody, MemberPin, PolicyView,
-    Presented, SettledOutput,
+    AdmittedExecution, Discharge, MemberBodies, MemberBody, MemberPin, PolicyView, Presented,
 };
 use crate::runtime::actor::waits::Resolution;
 use crate::session::tool_execution::{ToolInvocation, ToolInvocationReply};
 use crate::tool_run::CompletionSource;
 use lash_core_store::checkpoint_graph::{TokenCodec, TokenError, TokenReader, TokenWriter};
+use lash_core_store::tool_run::Material;
+use lash_core_store::tool_run::SettledOutput;
 
 /// One tool call a cell makes, as its admitted member's frozen request
 /// carries it: everything its body is built from again, on any owner.

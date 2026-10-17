@@ -157,7 +157,7 @@ pub fn validate_replayed_effect_envelope(
     reconstructed: &CanonicalRuntimeEffectEnvelope,
     mismatch_code: crate::RuntimeErrorCode,
     trace: Option<&RuntimeEffectReplayTrace>,
-    limits: crate::EvidenceLimits,
+    limits: lash_core_store::execution_limits::EvidenceLimits,
 ) -> Result<(), RuntimeEffectControllerError> {
     debug_assert!(
         mismatch_code.is_replay_mismatch(),
@@ -403,7 +403,7 @@ mod tests {
                 &reconstructed,
                 crate::RuntimeErrorCode::EffectReplayDivergence,
                 None,
-                crate::EvidenceLimits::standard(),
+                lash_core_store::execution_limits::EvidenceLimits::standard(),
             )
             .expect_err("a journal row this build did not write must not replay");
             assert_eq!(
@@ -421,7 +421,7 @@ mod tests {
             &canonical(reconstructed),
             crate::RuntimeErrorCode::EffectReplayDivergence,
             None,
-            crate::EvidenceLimits::standard(),
+            lash_core_store::execution_limits::EvidenceLimits::standard(),
         )
         .expect_err("mismatch");
         error.summary.expect("summary").first_divergent_paths
@@ -479,7 +479,7 @@ mod tests {
             })),
             crate::RuntimeErrorCode::EffectReplayDivergence,
             None,
-            crate::EvidenceLimits::standard(),
+            lash_core_store::execution_limits::EvidenceLimits::standard(),
         )
         .expect_err("mismatch");
         assert_eq!(
@@ -524,7 +524,7 @@ mod tests {
             &canonical(json!({"tool_results": [{"value": "b".repeat(3_000)}]})),
             crate::RuntimeErrorCode::EffectReplayDivergence,
             Some(&trace),
-            crate::EvidenceLimits::builder()
+            lash_core_store::execution_limits::EvidenceLimits::builder()
                 .diff_value_json_bytes(1)
                 .build()
                 .expect("valid evidence limits"),
@@ -563,7 +563,7 @@ mod tests {
             &reconstructed,
             crate::RuntimeErrorCode::EffectReplayDivergence,
             None,
-            crate::EvidenceLimits::standard(),
+            lash_core_store::execution_limits::EvidenceLimits::standard(),
         )
         .expect_err("canonical invariant failure");
         assert_eq!(

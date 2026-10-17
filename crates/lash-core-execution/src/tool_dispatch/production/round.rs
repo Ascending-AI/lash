@@ -5,9 +5,9 @@
 //! `x_outcome` (ADR 0132 §5).
 use super::*;
 use crate::runtime::actor::round::{
-    AcceptedStop, AdmittedExecution, CompletedCall, Discharge, Material, MemberBody, MemberOutcome,
-    MemberPin, PolicyView, Presented, RoundTools, SettledOutput, StoreLocalEffect,
-    completed_material, decode_completed,
+    AcceptedStop, AdmittedExecution, CompletedCall, Discharge, MemberBody, MemberOutcome,
+    MemberPin, PolicyView, Presented, RoundTools, StoreLocalEffect, completed_material,
+    decode_completed,
 };
 use crate::runtime::actor::waits::{self, Resolution};
 use crate::session::tool_execution::ToolInvocation;
@@ -15,6 +15,8 @@ use crate::tool_dispatch::call_run::{AdmittedToolCall, AttemptEnd, CallEnd};
 use crate::tool_run::{
     AvailableEvidence, CompletionSource, KnownFailureReason, MaterialOwner, MaterialRole,
 };
+use lash_core_store::tool_run::Material;
+use lash_core_store::tool_run::SettledOutput;
 
 /// How one attempt of a round member ended.
 pub(super) enum MemberEnd {

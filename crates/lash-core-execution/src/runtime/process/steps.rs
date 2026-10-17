@@ -40,14 +40,15 @@ use lash_core_store::tool_run::{MaterialOwner, MaterialRole};
 
 use super::engine_state::StepRequest;
 use crate::runtime::actor::round::{
-    AdmittedExecution, Material, MemberBody, MemberOutcome, RoundTools, SettledOutput,
-    decode_completed,
+    AdmittedExecution, MemberBody, MemberOutcome, RoundTools, decode_completed,
 };
 use crate::runtime::actor::waits::{ParkDeadline, Resolution};
 use crate::{
     ActorContext, PluginError, ProcessId, ProcessRecord, RuntimeEffectControllerError, ToolCatalog,
     ToolId,
 };
+use lash_core_store::tool_run::Material;
+use lash_core_store::tool_run::SettledOutput;
 
 /// A step's admission: what its tool's declaration pins before it runs.
 #[derive(Clone, Debug, PartialEq)]
@@ -774,7 +775,10 @@ pub async fn read_process_tool_call(
         if member.call() != call_id {
             continue;
         }
-        let Some(payload) = member.outcome().and_then(round::SettledOutput::payload) else {
+        let Some(payload) = member
+            .outcome()
+            .and_then(lash_core_store::tool_run::SettledOutput::payload)
+        else {
             return Ok(None);
         };
         let record: crate::ToolCallRecord = serde_json::from_str(payload).map_err(|error| {

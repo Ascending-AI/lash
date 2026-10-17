@@ -15,7 +15,6 @@ use std::sync::{Arc, Mutex};
 use std::time::Duration;
 
 use lash_core_execution::runtime::actor::process::ProcessActivation;
-use lash_core_execution::runtime::actor::round::{Material, SettledOutput};
 use lash_core_execution::runtime::process::steps::{ProcessSteps, StepAdmission, StepRefusal};
 use lash_core_execution::{
     Backend, BackendParts, DurableSettings, EngineAction, EngineEvent, EngineState,
@@ -24,6 +23,8 @@ use lash_core_execution::{
     ProcessProvenance, ProcessRecord, ProcessRegistration, ProcessStatus, ProjectionWatermark,
     StartKey, StepName, StepRequest, ToolCallOutput, ToolCancellation,
 };
+use lash_core_store::tool_run::Material;
+use lash_core_store::tool_run::SettledOutput;
 use lash_core_store::tool_run::{MaterialOwner, MaterialRole};
 use lash_durable::{ActorKey, ActorState, CommitLabel, DurableInstant, LeaseConfig};
 use lash_durable_test::{Fault, Script, SimClock, SimNodes, SimNodesConfig, Tripwire};
@@ -85,7 +86,7 @@ impl ProcessEngine for LawEngine {
     fn settled_ran(
         &self,
         _kind: &lash_core_execution::EngineStepKind,
-        _output: &lash_core_execution::SettledOutput,
+        _output: &lash_core_store::tool_run::SettledOutput,
     ) -> Vec<(u32, u64)> {
         Vec::new()
     }
@@ -297,12 +298,10 @@ impl ProcessSteps for LawSteps {
         _process: &ProcessRecord,
         _step: &StepRequest,
         _execution: &lash_core_execution::runtime::actor::round::AdmittedExecution,
-        _parked: &lash_core_execution::runtime::actor::round::Material<
-            lash_core_store::tool_run::CompletionSource,
-        >,
+        _parked: &lash_core_store::tool_run::Material<lash_core_store::tool_run::CompletionSource>,
         _resolution: lash_core_execution::runtime::actor::waits::Resolution,
-    ) -> lash_core_execution::runtime::actor::round::SettledOutput {
-        lash_core_execution::runtime::actor::round::SettledOutput::Interrupted
+    ) -> lash_core_store::tool_run::SettledOutput {
+        lash_core_store::tool_run::SettledOutput::Interrupted
     }
 
     fn body(

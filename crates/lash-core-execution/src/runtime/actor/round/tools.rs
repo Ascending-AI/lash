@@ -26,10 +26,12 @@ use lash_sansio::{ExecutionLimit, ExecutionPolicy};
 use super::super::ActorContext;
 use super::super::waits::{ParkDeadline, Resolution};
 use super::{
-    AdmittedExecution, ExecutionDraft, Material, MemberBodies, MemberBody, PinnedWaits, PolicyView,
-    RoundError, SettledOutput, fold, settle,
+    AdmittedExecution, ExecutionDraft, MemberBodies, MemberBody, PinnedWaits, PolicyView,
+    RoundError, fold, settle,
 };
 use crate::{ToolCallId, ToolId};
+use lash_core_store::tool_run::Material;
+use lash_core_store::tool_run::SettledOutput;
 
 /// A settled member as the turn's machine is answered with it.
 pub type CompletedCall = lash_sansio::sansio::CompletedToolCall<crate::ToolIntentExecutionOutcome>;

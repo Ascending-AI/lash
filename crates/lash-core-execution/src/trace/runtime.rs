@@ -44,9 +44,9 @@ struct TraceRuntimeParts {
     metrics: TelemetryMetrics,
     limits: lash_trace::TraceLimits,
     content_limits: lash_trace::ContentLimits,
-    evidence: crate::EvidenceLimits,
-    diagnostics: crate::DiagnosticLimits,
-    composition: crate::CompositionCacheLimits,
+    evidence: lash_core_store::execution_limits::EvidenceLimits,
+    diagnostics: lash_core_store::execution_limits::DiagnosticLimits,
+    composition: lash_core_store::execution_limits::CompositionCacheLimits,
     omissions: Arc<lash_trace::TraceOmissionLedger>,
     compositions: Arc<super::composition::CompositionMemory>,
     /// The host's ambient context: what third-party instrumentation inside
@@ -70,9 +70,9 @@ impl TraceRuntime {
                 metrics: TelemetryMetrics::default(),
                 limits: lash_trace::TraceLimits::standard(),
                 content_limits: lash_trace::ContentLimits::standard(),
-                evidence: crate::EvidenceLimits::standard(),
-                diagnostics: crate::DiagnosticLimits::standard(),
-                composition: crate::CompositionCacheLimits::standard(),
+                evidence: lash_core_store::execution_limits::EvidenceLimits::standard(),
+                diagnostics: lash_core_store::execution_limits::DiagnosticLimits::standard(),
+                composition: lash_core_store::execution_limits::CompositionCacheLimits::standard(),
                 omissions,
                 compositions: Arc::default(),
                 ambient: None,
@@ -146,12 +146,12 @@ impl TraceRuntime {
     }
 
     /// The bounds on the execution evidence lash records.
-    pub fn evidence_limits(&self) -> crate::EvidenceLimits {
+    pub fn evidence_limits(&self) -> lash_core_store::execution_limits::EvidenceLimits {
         self.parts.evidence
     }
 
     /// How much of a diagnostic lash keeps, and when it warns.
-    pub fn diagnostic_limits(&self) -> crate::DiagnosticLimits {
+    pub fn diagnostic_limits(&self) -> lash_core_store::execution_limits::DiagnosticLimits {
         self.parts.diagnostics
     }
 
@@ -205,21 +205,30 @@ impl TraceRuntime {
 
     /// Installs the bounds on the execution evidence lash records.
     #[must_use]
-    pub fn with_evidence_limits(mut self, limits: crate::EvidenceLimits) -> Self {
+    pub fn with_evidence_limits(
+        mut self,
+        limits: lash_core_store::execution_limits::EvidenceLimits,
+    ) -> Self {
         Arc::make_mut(&mut self.parts).evidence = limits;
         self
     }
 
     /// Installs how much of a diagnostic lash keeps, and when it warns.
     #[must_use]
-    pub fn with_diagnostic_limits(mut self, limits: crate::DiagnosticLimits) -> Self {
+    pub fn with_diagnostic_limits(
+        mut self,
+        limits: lash_core_store::execution_limits::DiagnosticLimits,
+    ) -> Self {
         Arc::make_mut(&mut self.parts).diagnostics = limits;
         self
     }
 
     /// Installs how much composition history the runtime remembers.
     #[must_use]
-    pub fn with_composition_cache_limits(mut self, limits: crate::CompositionCacheLimits) -> Self {
+    pub fn with_composition_cache_limits(
+        mut self,
+        limits: lash_core_store::execution_limits::CompositionCacheLimits,
+    ) -> Self {
         Arc::make_mut(&mut self.parts).composition = limits;
         self
     }

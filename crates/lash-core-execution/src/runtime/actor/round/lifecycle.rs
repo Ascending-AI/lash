@@ -93,11 +93,12 @@ use tracing::Instrument as _;
 use super::super::ActorContext;
 use super::super::waits::{self, ParkDeadline, RaceWinner, Resolution, WaitId, WaitKind, WaitRef};
 use super::{
-    AdmittedExecution, Material, PolicyView, Recovery, RoundError, RoundView, RunFold,
-    SettledOutput, Stop, StoreLocalEffect, ToolBody, run_bounded, settle, settle_retry,
-    start_retry,
+    AdmittedExecution, PolicyView, Recovery, RoundError, RoundView, RunFold, Stop,
+    StoreLocalEffect, ToolBody, run_bounded, settle, settle_retry, start_retry,
 };
 use crate::runtime::process::{CapacityVerdict, EngineStepAnswer, StepCandidate};
+use lash_core_store::tool_run::Material;
+use lash_core_store::tool_run::SettledOutput;
 
 /// What a member's body answers: its output, and the store-local effects
 /// its completion or its park commits with.

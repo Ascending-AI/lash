@@ -25,6 +25,7 @@ http-transport = ["lash/http-transport"]
 [dependencies]
 lash = { path = "../lash", package = "lash-runtime", default-features = false, features = ["testing"] }
 lash-core = { workspace = true, features = ["testing"] }
+lash-core-store.workspace = true
 lash-sansio.workspace = true
 lash-conformance.workspace = true
 lash-sqlite-store = { workspace = true, features = ["testing"] }
@@ -47,7 +48,6 @@ lash-llm-tools.workspace = true
 lash-plugin-process-controls.workspace = true
 lash-plugin-standard-compaction.workspace = true
 lash-protocol-standard.workspace = true
-lash-core-store.workspace = true
 lash-trace.workspace = true
 lash-facade-tests = { path = ".", package = "lash-internal-facade-tests", features = ["rlm", "otel-trace", "openai", "http-transport"] }
 lash = { path = "../lash", package = "lash-runtime", default-features = false, features = ["worker", "dialect-typescript", "dialect-python", "typescript", "python", "sqlite", "postgres", "openai", "anthropic", "mcp", "workflow-authoring"] }

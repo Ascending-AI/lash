@@ -1,5 +1,6 @@
 use super::*;
 use crate::llm::types::{StreamBlockEvent, StreamBlockKind};
+use lash_core_llm::stream_assembly::ReasoningPublicationState;
 
 impl RuntimeTurnDriver<'_> {
     /// Publish an event. Every event the machine emits, and every terminal

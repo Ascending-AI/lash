@@ -599,12 +599,12 @@ async fn no_kind_is_off_while_a_kind_it_can_parent_is_on() -> lash::Result<()> {
 /// and answers the value it reports or the field and bounds it refused.
 fn moved_fields<Fld: Copy + std::fmt::Display>(
     fields: &[Fld],
-    bounds: impl Fn(Fld) -> lash::LimitBounds,
+    bounds: impl Fn(Fld) -> lash_core_store::execution_limits::LimitBounds,
     attempt: impl Fn(Fld, u64) -> std::result::Result<u64, (Fld, u64, u64, u64)>,
     same: impl Fn(Fld, Fld) -> bool,
 ) {
     for &field in fields {
-        let lash::LimitBounds { default, min, max } = bounds(field);
+        let lash_core_store::execution_limits::LimitBounds { default, min, max } = bounds(field);
         assert_eq!(
             attempt(field, default).ok(),
             Some(default),
@@ -636,11 +636,15 @@ fn moved_fields<Fld: Copy + std::fmt::Display>(
 /// refused typed outside its documented range and builds at both ends.
 #[test]
 fn every_moved_limit_is_refused_typed_out_of_range_and_builds_at_its_endpoints() {
-    use lash::{
-        CompositionCacheLimits, CompositionCacheLimitsError, CompositionCacheLimitsField as C,
-        DiagnosticLimits, DiagnosticLimitsError, DiagnosticLimitsField as D, EvidenceLimits,
-        EvidenceLimitsError, EvidenceLimitsField as E,
-    };
+    use lash_core_store::execution_limits::CompositionCacheLimits;
+    use lash_core_store::execution_limits::CompositionCacheLimitsError;
+    use lash_core_store::execution_limits::CompositionCacheLimitsField as C;
+    use lash_core_store::execution_limits::DiagnosticLimits;
+    use lash_core_store::execution_limits::DiagnosticLimitsError;
+    use lash_core_store::execution_limits::DiagnosticLimitsField as D;
+    use lash_core_store::execution_limits::EvidenceLimits;
+    use lash_core_store::execution_limits::EvidenceLimitsError;
+    use lash_core_store::execution_limits::EvidenceLimitsField as E;
     let size = |value: usize| u64::try_from(value).expect("a size");
     moved_fields(
         E::ALL,

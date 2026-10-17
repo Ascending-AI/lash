@@ -6,6 +6,8 @@
 //! coalesce losslessly by correlation; they are never committed state.
 
 use crate::llm::types::{StreamBlockEvent, StreamBlockKind};
+use lash_core_llm::stream_assembly::LlmStreamAccumulator;
+use lash_core_llm::stream_assembly::ReasoningPublicationState;
 use std::sync::Arc;
 
 use futures_util::FutureExt as _;
@@ -500,9 +502,10 @@ impl RuntimeTurnDriver<'_> {
                                     if response_usage_is_empty(&resp.usage) {
                                         resp.usage = stream_state.streamed_usage.clone();
                                     }
-                                    stream_state
-                                        .stream_accumulator
-                                        .apply_to_response_for_request(&mut resp, &call_id.0);
+                                    resp.parts = stream_state.stream_accumulator.response_parts(
+                                        std::mem::take(&mut resp.parts),
+                                        &call_id.0,
+                                    );
                                     break Ok(resp);
                                 }
                                 Err(error) => {
@@ -652,7 +655,8 @@ impl RuntimeTurnDriver<'_> {
                             if response_usage_is_empty(&resp.usage) {
                                 resp.usage = streamed_usage.clone();
                             }
-                            stream_accumulator.apply_to_response_for_request(&mut resp, &call_id.0);
+                            resp.parts = stream_accumulator
+                                .response_parts(std::mem::take(&mut resp.parts), &call_id.0);
                             break Ok(resp);
                         }
                         Err(e) => {

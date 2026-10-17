@@ -96,7 +96,8 @@ impl Fixture {
     async fn read_view(&self, limits: lash_trace::ObservationWorkLimits) -> ProcessReadView {
         self.read_view_with_retention(
             limits,
-            crate::EvidenceLimits::standard().process_effect_occurrences(),
+            lash_core_store::execution_limits::EvidenceLimits::standard()
+                .process_effect_occurrences(),
         )
         .await
     }
@@ -301,10 +302,10 @@ async fn snapshot_effect_evidence_is_bounded_by_the_work_limits_and_says_so() {
 #[tokio::test]
 async fn maximum_retention_four_nodes_of_5000_has_complete_effect_evidence() {
     let fixture = Fixture::new("maximum-effect-retention").await;
-    let cap = crate::EvidenceLimitsField::ProcessEffectOccurrences
+    let cap = lash_core_store::execution_limits::EvidenceLimitsField::ProcessEffectOccurrences
         .bounds()
         .max;
-    crate::EvidenceLimits::builder()
+    lash_core_store::execution_limits::EvidenceLimits::builder()
         .process_effect_occurrences(cap)
         .build()
         .expect("the documented maximum is admitted");

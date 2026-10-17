@@ -94,22 +94,31 @@ impl LashCoreBuilder {
 
     /// Select the bounds on the execution evidence lash records: tool
     /// attempt streams, effect diffs, failed generations and process effect
-    /// occurrences. Defaults to [`EvidenceLimits::standard`](crate::EvidenceLimits::standard).
-    pub fn evidence_limits(mut self, limits: crate::EvidenceLimits) -> Self {
+    /// occurrences. Defaults to [`EvidenceLimits::standard`](lash_core_store::execution_limits::EvidenceLimits::standard).
+    pub fn evidence_limits(
+        mut self,
+        limits: lash_core_store::execution_limits::EvidenceLimits,
+    ) -> Self {
         self.evidence_limits = Some(limits);
         self
     }
 
     /// Select how much of a diagnostic lash keeps and when a plugin's state
-    /// size warns. Defaults to [`DiagnosticLimits::standard`](crate::DiagnosticLimits::standard).
-    pub fn diagnostic_limits(mut self, limits: crate::DiagnosticLimits) -> Self {
+    /// size warns. Defaults to [`DiagnosticLimits::standard`](lash_core_store::execution_limits::DiagnosticLimits::standard).
+    pub fn diagnostic_limits(
+        mut self,
+        limits: lash_core_store::execution_limits::DiagnosticLimits,
+    ) -> Self {
         self.diagnostic_limits = Some(limits);
         self
     }
 
     /// Select how much tool-composition history the runtime remembers.
-    /// Defaults to [`CompositionCacheLimits::standard`](crate::CompositionCacheLimits::standard).
-    pub fn composition_cache_limits(mut self, limits: crate::CompositionCacheLimits) -> Self {
+    /// Defaults to [`CompositionCacheLimits::standard`](lash_core_store::execution_limits::CompositionCacheLimits::standard).
+    pub fn composition_cache_limits(
+        mut self,
+        limits: lash_core_store::execution_limits::CompositionCacheLimits,
+    ) -> Self {
         self.composition_cache_limits = Some(limits);
         self
     }

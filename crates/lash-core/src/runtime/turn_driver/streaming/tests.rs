@@ -1,4 +1,5 @@
 use crate::llm::types::{StreamBlockEvent, StreamBlockKind};
+use lash_core_llm::stream_assembly::LlmStreamAccumulator;
 use std::future::Future;
 use std::sync::atomic::{AtomicUsize, Ordering};
 use std::task::{Context, Poll};

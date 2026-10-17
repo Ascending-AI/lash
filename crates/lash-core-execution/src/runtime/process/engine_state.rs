@@ -22,9 +22,9 @@ use std::time::Duration;
 
 use lash_durable::DurableInstant;
 
-use crate::runtime::actor::round::SettledOutput;
 use crate::runtime::actor::waits::PinnedKey;
 use crate::{ProcessId, ProcessOutcome, Resolution};
+use lash_core_store::tool_run::SettledOutput;
 
 /// The encoding of an engine's [`EngineState`]: the engine's kind and a
 /// version it bumps when the encoding changes. A node claims a process only

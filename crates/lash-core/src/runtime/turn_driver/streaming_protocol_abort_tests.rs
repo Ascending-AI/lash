@@ -1,4 +1,5 @@
 use super::*;
+use lash_core_llm::stream_assembly::LlmStreamAccumulator;
 
 fn request_disposition() -> crate::GenerationReceipt {
     crate::GenerationReceipt {

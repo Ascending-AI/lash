@@ -156,7 +156,7 @@ impl crate::ProcessEngine for HeldProcessEngine {
     fn settled_ran(
         &self,
         _kind: &crate::EngineStepKind,
-        _output: &crate::SettledOutput,
+        _output: &lash_core_store::tool_run::SettledOutput,
     ) -> Vec<(u32, u64)> {
         Vec::new()
     }
@@ -287,7 +287,7 @@ impl crate::ProcessEngine for FixtureProcessEngine {
     fn settled_ran(
         &self,
         _kind: &crate::EngineStepKind,
-        _output: &crate::SettledOutput,
+        _output: &lash_core_store::tool_run::SettledOutput,
     ) -> Vec<(u32, u64)> {
         Vec::new()
     }

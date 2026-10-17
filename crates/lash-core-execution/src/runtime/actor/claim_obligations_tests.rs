@@ -17,9 +17,10 @@ use lash_durable::{ActorKey, ActorTx, DurableInstant, Epoch, MailSeq, OpenedActo
 use lash_sansio::{ExecutionLimit, ExecutionPolicy, SessionId, TurnId};
 
 use super::{ReadScope, RecordedWork, SessionObligations, Staged};
-use crate::runtime::actor::round::{self, AdmittedExecution, ExecutionDraft, SettledOutput};
+use crate::runtime::actor::round::{self, AdmittedExecution, ExecutionDraft};
 use crate::tool_run::{AdmittedBinding, PresentationBinding};
 use crate::{ToolCallId, ToolId};
+use lash_core_store::tool_run::SettledOutput;
 
 fn session() -> SessionId {
     SessionId::try_from("s".to_owned()).unwrap()

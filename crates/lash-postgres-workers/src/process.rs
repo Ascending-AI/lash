@@ -10,13 +10,14 @@
 
 use std::time::Duration;
 
-use lash_core_execution::runtime::actor::round::{Material, SettledOutput};
 use lash_core_execution::runtime::process::steps::{ProcessSteps, StepAdmission, StepRefusal};
 use lash_core_execution::{
     EngineAction, EngineEvent, EngineState, EngineStateFormat, KeyName, ProcessEngine,
     ProcessInfraError, ProcessOutcome, ProcessRecord, StepName, StepRequest, ToolCallOutput,
     ToolCancellation,
 };
+use lash_core_store::tool_run::Material;
+use lash_core_store::tool_run::SettledOutput;
 use lash_core_store::tool_run::{MaterialOwner, MaterialRole};
 use lash_sansio::{ExecutionLimit, ExecutionPolicy, ToolId};
 use serde_json::{Value, json};
@@ -71,7 +72,7 @@ impl ProcessEngine for WorkerEngine {
     fn settled_ran(
         &self,
         _kind: &lash_core_execution::EngineStepKind,
-        _output: &lash_core_execution::SettledOutput,
+        _output: &lash_core_store::tool_run::SettledOutput,
     ) -> Vec<(u32, u64)> {
         Vec::new()
     }
@@ -296,12 +297,10 @@ impl ProcessSteps for WorkerSteps {
         _process: &ProcessRecord,
         _step: &StepRequest,
         _execution: &lash_core_execution::runtime::actor::round::AdmittedExecution,
-        _parked: &lash_core_execution::runtime::actor::round::Material<
-            lash_core_store::tool_run::CompletionSource,
-        >,
+        _parked: &lash_core_store::tool_run::Material<lash_core_store::tool_run::CompletionSource>,
         _resolution: lash_core_execution::runtime::actor::waits::Resolution,
-    ) -> lash_core_execution::runtime::actor::round::SettledOutput {
-        lash_core_execution::runtime::actor::round::SettledOutput::Interrupted
+    ) -> lash_core_store::tool_run::SettledOutput {
+        lash_core_store::tool_run::SettledOutput::Interrupted
     }
 
     fn body(

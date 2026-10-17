@@ -24,6 +24,7 @@
 pub mod admission;
 pub mod material;
 pub mod operation;
+mod output;
 pub mod refusal;
 pub mod retention;
 pub mod run_event;
@@ -40,6 +41,7 @@ pub use material::{
     MaterialPayload, MaterialRef, MaterialRefusal, MaterialRole,
 };
 pub use operation::{OperationRun, RunInputKind};
+pub use output::{Material, NamesMaterial, SettledOutput, SettledOutputRefusal};
 pub use refusal::{DeclaredStartObligationRefusal, IsolatedStartRefusal, RunCutRefusal};
 pub use retention::{MaterialBundle, MaterialHolder, MaterialRetentionError, RetainedBundle};
 pub use run_event::{

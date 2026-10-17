@@ -12,10 +12,12 @@ use lash_durable::domain::{
 
 use super::records::{self, ADMIT_ORDINAL, Record, first_start};
 use super::{
-    AdmittedExecution, ExecutionDraft, FoldRefusal, Material, PinnedWaits, PolicyView, Recovery,
-    RunCursor, RunFold, SettledOutput,
+    AdmittedExecution, ExecutionDraft, FoldRefusal, PinnedWaits, PolicyView, Recovery, RunCursor,
+    RunFold,
 };
 use crate::ToolCallId;
+use lash_core_store::tool_run::Material;
+use lash_core_store::tool_run::SettledOutput;
 
 /// Where one member's call stands.
 #[derive(Clone, Debug, PartialEq, Eq)]

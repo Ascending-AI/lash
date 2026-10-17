@@ -1,7 +1,7 @@
 use lash_core::tool_run::{MaterialOwner, MaterialRole};
-use lash_core::{
-    EngineAction, EngineEvent, EngineState, Material, SettledOutput, StepName, StepRequest,
-};
+use lash_core::{EngineAction, EngineEvent, EngineState, StepName, StepRequest};
+use lash_core_store::tool_run::Material;
+use lash_core_store::tool_run::SettledOutput;
 use lash_kernel_doc::{DocumentId, EffectIdentity, Site, TaskIdentity, Unit};
 use lash_vm_client::wire::OutcomeWire;
 

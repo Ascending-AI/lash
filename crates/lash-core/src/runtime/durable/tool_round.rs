@@ -254,7 +254,7 @@ pub(super) async fn run(
                     round::settle(
                         &mut tx,
                         member,
-                        round::SettledOutput::Completed(output),
+                        lash_core_store::tool_run::SettledOutput::Completed(output),
                         Vec::new(),
                         None,
                     )
@@ -403,7 +403,7 @@ pub(super) fn record_refused(
         round::settle(
             tx,
             member,
-            round::SettledOutput::Completed(output),
+            lash_core_store::tool_run::SettledOutput::Completed(output),
             Vec::new(),
             None,
         )

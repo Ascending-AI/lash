@@ -22,10 +22,11 @@
 use std::sync::Arc;
 use std::sync::atomic::{AtomicBool, Ordering};
 
-use lash_core::{ProcessId, SettledOutput};
+use lash_core::ProcessId;
 use lash_core_execution::runtime::process::steps::{
     RecordedProcessStep, StepFact, process_step_call,
 };
+use lash_core_store::tool_run::SettledOutput;
 use lash_durable::domain::pages::PageStore;
 use lash_durable::domain::{ExecKey, OwnerKey, RootOwner};
 use lash_kernel_doc::{Datum, ErrorDatum, Handle, Integer, Timestamp};

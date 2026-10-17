@@ -73,13 +73,15 @@ impl lash_core::EngineSteps for Double {
         use lash_core::tool_run::{MaterialOwner, MaterialRole};
         self.runs.fetch_add(1, Ordering::SeqCst);
         let text = (run.input.as_i64().unwrap_or_default() * 2).to_string();
-        lash_core::SettledOutput::Completed(lash_core::Material::journal_local(
-            MaterialOwner::Process {
-                process_id: run.process,
-            },
-            MaterialRole::AttemptOutput,
-            text,
-        ))
+        lash_core_store::tool_run::SettledOutput::Completed(
+            lash_core_store::tool_run::Material::journal_local(
+                MaterialOwner::Process {
+                    process_id: run.process,
+                },
+                MaterialRole::AttemptOutput,
+                text,
+            ),
+        )
         .into()
     }
 }
@@ -267,8 +269,8 @@ impl lash_core::EngineSteps for Flaky {
             "flaky",
             "the flaky body failed",
         ));
-        lash_core::SettledOutput::Failed(
-            lash_core::Material::journal_local(
+        lash_core_store::tool_run::SettledOutput::Failed(
+            lash_core_store::tool_run::Material::journal_local(
                 MaterialOwner::Process {
                     process_id: run.process,
                 },
@@ -507,7 +509,7 @@ fn failed_step_advance(
     event: lash_core::EngineEvent,
 ) -> lash_core::EngineAction {
     if let lash_core::EngineEvent::StepSettled {
-        outcome: lash_core::SettledOutput::Failed(failure),
+        outcome: lash_core_store::tool_run::SettledOutput::Failed(failure),
         ..
     } = &event
     {

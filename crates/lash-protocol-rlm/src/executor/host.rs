@@ -532,7 +532,7 @@ impl KernelEffects for CellHost<'_> {
     fn outcome(
         &self,
         effect: &AdmittedEffect,
-        output: &lash_core::SettledOutput,
+        output: &lash_core_store::tool_run::SettledOutput,
     ) -> Option<Outcome> {
         // `None` while the record is not final.
         outcome_of(output)?;

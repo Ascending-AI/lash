@@ -27,11 +27,13 @@ use lash_core::{
     facade_support::TurnFinish, facade_support::TurnOutcome, facade_support::shared_parts,
 };
 use lash_core_execution::runtime::actor::round::{
-    AcceptedStop, AdmittedExecution, CompletedCall, Material, MemberBody, MemberOutcome, MemberPin,
-    PolicyView, RoundTools, SettledOutput,
+    AcceptedStop, AdmittedExecution, CompletedCall, MemberBody, MemberOutcome, MemberPin,
+    PolicyView, RoundTools,
 };
 use lash_core_execution::{ActorContext, Backend};
 use lash_core_store::effect_opener::EffectOpener;
+use lash_core_store::tool_run::Material;
+use lash_core_store::tool_run::SettledOutput;
 use lash_core_store::tool_run::{CompletionSource, MaterialOwner, MaterialRole};
 use lash_durable::ActorKey;
 use lash_sansio::llm::types::{ProviderRouteIdentity, RecordedRequestTemplate};

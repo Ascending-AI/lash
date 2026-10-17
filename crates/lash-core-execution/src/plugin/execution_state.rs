@@ -24,7 +24,7 @@ pub trait ExecutionState: Send + Sync {
     fn owner(&self) -> &crate::RuntimeOwner;
 
     /// The bounds on the execution evidence this state's calls record.
-    fn evidence_limits(&self) -> crate::EvidenceLimits;
+    fn evidence_limits(&self) -> lash_core_store::execution_limits::EvidenceLimits;
 
     /// Deployment payload admission limits associated with this state sink.
     fn data_limits(&self) -> crate::runtime::RuntimeDataLimits {
@@ -84,7 +84,7 @@ impl ExecutionState for PluginSession {
     fn owner(&self) -> &crate::RuntimeOwner {
         PluginSession::owner(self)
     }
-    fn evidence_limits(&self) -> crate::EvidenceLimits {
+    fn evidence_limits(&self) -> lash_core_store::execution_limits::EvidenceLimits {
         self.host().trace_runtime().evidence_limits()
     }
     fn data_limits(&self) -> crate::runtime::RuntimeDataLimits {

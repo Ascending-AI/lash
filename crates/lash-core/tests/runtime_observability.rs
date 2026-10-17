@@ -63,7 +63,7 @@ mod runtime {
         mod assembler;
         mod projection;
         mod session_freshness;
-        mod stream_accumulator;
+
         mod tracing;
     }
 }

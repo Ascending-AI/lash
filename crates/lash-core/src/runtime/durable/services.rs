@@ -181,6 +181,7 @@ impl RuntimeTurnServices {
         decoders: &crate::transcript::TranscriptDecoders,
     ) -> Result<Vec<crate::ToolCallRecord>, lash_durable::DurableError> {
         use lash_core_execution::runtime::actor::round;
+
         let corrupt = |message| {
             lash_durable::DurableError::Store(lash_durable::StoreFailure {
                 kind: lash_durable::StoreFailureKind::Corrupt,
@@ -212,7 +213,10 @@ impl RuntimeTurnServices {
                 if member.draft().tool().as_str().starts_with("cell-host:") {
                     continue;
                 }
-                let Some(payload) = member.outcome().and_then(round::SettledOutput::payload) else {
+                let Some(payload) = member
+                    .outcome()
+                    .and_then(lash_core_store::tool_run::SettledOutput::payload)
+                else {
                     continue;
                 };
                 let completed = round::decode_completed(payload).ok_or_else(|| {
@@ -274,7 +278,6 @@ impl RuntimeTurnServices {
         ),
         lash_durable::DurableError,
     > {
-        use lash_core_execution::runtime::actor::round;
         use lash_core_store::checkpoint_graph::GraphDecoder;
         use lash_durable::domain::{OwnerKey, RootOwner};
         if unfinished != Some(run) {
@@ -316,7 +319,7 @@ impl RuntimeTurnServices {
                 }
                 if member
                     .outcome()
-                    .and_then(round::SettledOutput::payload)
+                    .and_then(lash_core_store::tool_run::SettledOutput::payload)
                     .is_none()
                 {
                     pending.insert(member.call().clone());

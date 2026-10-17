@@ -70,9 +70,7 @@ use lash_core::llm::types::{LlmRequest, LlmResponse, LlmStreamEvent, StreamBlock
 use lash_core::runtime::durable::session::SessionActivation;
 use lash_core::{ExecutionPolicy, LlmOutputPart, ToolCall, ToolCallId, ToolOutcome};
 use lash_core_execution::runtime::actor::process::ProcessActivation;
-use lash_core_execution::runtime::actor::round::{
-    AdmittedExecution, Material, MemberBody, SettledOutput,
-};
+use lash_core_execution::runtime::actor::round::{AdmittedExecution, MemberBody};
 use lash_core_execution::runtime::process::steps::{ProcessSteps, StepAdmission, StepRefusal};
 use lash_core_execution::{
     Backend, BackendParts, EngineAction, EngineEvent, EngineState, EngineStateFormat,
@@ -80,6 +78,8 @@ use lash_core_execution::{
     ProcessInput, ProcessOutcome, ProcessProvenance, ProcessRecord, ProcessRegistration,
     StepRequest, StoreSet, ToolCallOutput, ToolCancellation,
 };
+use lash_core_store::tool_run::Material;
+use lash_core_store::tool_run::SettledOutput;
 use lash_durable::domain::WaitKind;
 use lash_durable::runner::Activation;
 use lash_durable::{
@@ -586,7 +586,7 @@ impl ProcessEngine for SleepEngine {
     fn settled_ran(
         &self,
         _kind: &lash_core_execution::EngineStepKind,
-        _output: &lash_core_execution::SettledOutput,
+        _output: &lash_core_store::tool_run::SettledOutput,
     ) -> Vec<(u32, u64)> {
         Vec::new()
     }

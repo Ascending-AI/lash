@@ -144,12 +144,10 @@ impl ProcessSteps for KernelSteps {
         _process: &ProcessRecord,
         _step: &StepRequest,
         _execution: &lash_core_execution::runtime::actor::round::AdmittedExecution,
-        _parked: &lash_core_execution::runtime::actor::round::Material<
-            lash_core_store::tool_run::CompletionSource,
-        >,
+        _parked: &lash_core_store::tool_run::Material<lash_core_store::tool_run::CompletionSource>,
         _resolution: lash_core_execution::runtime::actor::waits::Resolution,
-    ) -> lash_core_execution::runtime::actor::round::SettledOutput {
-        lash_core_execution::runtime::actor::round::SettledOutput::Interrupted
+    ) -> lash_core_store::tool_run::SettledOutput {
+        lash_core_store::tool_run::SettledOutput::Interrupted
     }
 
     fn body(

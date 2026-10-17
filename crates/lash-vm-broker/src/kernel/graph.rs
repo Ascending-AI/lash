@@ -23,7 +23,6 @@
 
 use std::collections::BTreeMap;
 
-use lash_core_execution::runtime::actor::round::Material;
 use lash_core_execution::runtime::actor::round::graph::PinnedMember;
 use lash_core_execution::tool_dispatch::CellCall;
 use lash_core_store::checkpoint_graph::{
@@ -31,6 +30,7 @@ use lash_core_store::checkpoint_graph::{
     TokenReader, TokenWriter,
 };
 use lash_core_store::effect_opener::EffectOpener;
+use lash_core_store::tool_run::Material;
 use lash_core_store::tool_run::{MaterialOwner, MaterialRef, MaterialRole};
 use lash_durable::DomainWrite;
 use lash_durable::domain::ExecKey;

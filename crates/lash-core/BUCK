@@ -255,7 +255,6 @@ lash_rust_integration_test(
         "tests/runtime/tests/assembler.rs",
         "tests/runtime/tests/projection.rs",
         "tests/runtime/tests/session_freshness.rs",
-        "tests/runtime/tests/stream_accumulator.rs",
         "tests/runtime/tests/tracing.rs",
     ],
     exec_properties = sized_exec_properties("lash-internal-core", "runtime_observability", "//crates/lash-core:runtime_observability__test"),
@@ -1498,7 +1497,7 @@ lash_rust_feature_test(
     library_crate_name = "lash_core",
     manifest_dir = "crates/lash-core",
     package_name = "lash-internal-core",
-    srcs_patterns = ["tests/runtime_observability.rs", "tests/runtime_support/**/*.rs", "tests/runtime/tests/assembler.rs", "tests/runtime/tests/projection.rs", "tests/runtime/tests/session_freshness.rs", "tests/runtime/tests/stream_accumulator.rs", "tests/runtime/tests/tracing.rs"],
+    srcs_patterns = ["tests/runtime_observability.rs", "tests/runtime_support/**/*.rs", "tests/runtime/tests/assembler.rs", "tests/runtime/tests/projection.rs", "tests/runtime/tests/session_freshness.rs", "tests/runtime/tests/tracing.rs"],
     test_env = {"RUST_TEST_THREADS": "1"},
     tags = [
         "feature-lane",
@@ -1530,7 +1529,7 @@ lash_rust_feature_test(
     library_crate_name = "lash_core",
     manifest_dir = "crates/lash-core",
     package_name = "lash-internal-core",
-    srcs_patterns = ["tests/runtime_observability.rs", "tests/runtime_support/**/*.rs", "tests/runtime/tests/assembler.rs", "tests/runtime/tests/projection.rs", "tests/runtime/tests/session_freshness.rs", "tests/runtime/tests/stream_accumulator.rs", "tests/runtime/tests/tracing.rs"],
+    srcs_patterns = ["tests/runtime_observability.rs", "tests/runtime_support/**/*.rs", "tests/runtime/tests/assembler.rs", "tests/runtime/tests/projection.rs", "tests/runtime/tests/session_freshness.rs", "tests/runtime/tests/tracing.rs"],
     test_env = {"RUST_TEST_THREADS": "1"},
     tags = [
         "feature-lane",

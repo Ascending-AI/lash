@@ -30,8 +30,8 @@
 
 use std::collections::BTreeSet;
 
-use lash_core_execution::runtime::actor::round::SettledOutput;
 use lash_core_execution::runtime::actor::round::{PinnedWaits, PolicyView, Recovery, fold};
+use lash_core_store::tool_run::SettledOutput;
 use lash_durable::domain::{AdmittedId, OwnerKey};
 use lash_durable::{ActorState, CommitLabel};
 use lash_durable_test::{Cut, Fault, SimNodes, Stored, Write, WriteKind};

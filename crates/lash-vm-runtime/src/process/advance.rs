@@ -14,9 +14,10 @@
 
 use lash_core::{
     EngineAction, EngineEvent, EngineState, EngineStateFormat, EngineStepKind, ProcessInfraError,
-    SettledOutput, StepName, StepRequest,
+    StepName, StepRequest,
 };
 use lash_core_store::checkpoint_graph::{GraphRefusal, NodeKind};
+use lash_core_store::tool_run::SettledOutput;
 use lash_kernel_doc::KernelVersion;
 use lash_vm_client::wire::OutcomeWire;
 

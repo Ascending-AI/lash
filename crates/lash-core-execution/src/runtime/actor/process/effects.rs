@@ -7,8 +7,8 @@ use lash_durable::{ActorTx, DomainWrite};
 
 use super::driver::{Driver, InFlight};
 use crate::ProcessId;
-use crate::runtime::actor::round::SettledOutput;
 use crate::runtime::process::engine_state::StepRequest;
+use lash_core_store::tool_run::SettledOutput;
 
 /// Record `step`'s settled `outcome` on `tx` as an occurrence of the effect
 /// node it runs for, in the transaction that hands it to the engine: once,

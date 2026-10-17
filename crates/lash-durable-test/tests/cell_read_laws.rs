@@ -49,11 +49,11 @@ use lash_core::llm::types::{LlmRequest, LlmResponse};
 use lash_core::runtime::durable::session::SessionActivation;
 use lash_core::{ExecutionPolicy, LlmOutputPart, ToolCall, ToolCallId, ToolOutcome};
 use lash_core_execution::runtime::actor::process::ProcessActivation;
-use lash_core_execution::runtime::actor::round::{
-    AdmittedExecution, Material, MemberBody, SettledOutput,
-};
+use lash_core_execution::runtime::actor::round::{AdmittedExecution, MemberBody};
 use lash_core_execution::runtime::process::steps::{ProcessSteps, StepAdmission, StepRefusal};
 use lash_core_execution::{Backend, BackendParts, NoProjectionProviders, StoreSet};
+use lash_core_store::tool_run::Material;
+use lash_core_store::tool_run::SettledOutput;
 use lash_durable::domain::WaitKind;
 use lash_durable::runner::Activation;
 use lash_durable::{ActorDispatch, ActorKey, ActorState, CommitLabel, DurableStore};

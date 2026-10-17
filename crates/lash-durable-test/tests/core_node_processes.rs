@@ -1119,7 +1119,7 @@ impl lash_core::ProcessEngine for ScriptEngine {
     fn settled_ran(
         &self,
         _kind: &lash_core::EngineStepKind,
-        _output: &lash_core::SettledOutput,
+        _output: &lash_core_store::tool_run::SettledOutput,
     ) -> Vec<(u32, u64)> {
         Vec::new()
     }
@@ -1257,7 +1257,7 @@ fn cancelled(origin: lash_sansio::CancelOrigin) -> lash_core::EngineAction {
 
 /// What a settled step answered: a tool step's output value, an engine
 /// step's payload, or its outcome when it names no material.
-fn settled(outcome: &lash_core::SettledOutput) -> serde_json::Value {
+fn settled(outcome: &lash_core_store::tool_run::SettledOutput) -> serde_json::Value {
     let Some(payload) = outcome.payload() else {
         return format!("{:?}", outcome.outcome()).into();
     };

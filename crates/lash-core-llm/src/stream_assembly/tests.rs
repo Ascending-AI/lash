@@ -1,4 +1,5 @@
 use super::*;
+use crate::llm::types::LlmResponse;
 
 #[test]
 fn stream_accumulator_enriches_reasoning_delta_with_later_roundtrip_payload() {
@@ -54,7 +55,8 @@ fn stream_accumulator_preserves_reasoning_when_final_response_has_tool_call() {
         ..Default::default()
     };
 
-    accumulator.apply_to_response(&mut response);
+    response.parts =
+        accumulator.response_parts(std::mem::take(&mut response.parts), "test-request");
 
     assert_eq!(response.parts.len(), 2);
     assert!(matches!(
@@ -89,7 +91,8 @@ fn stream_accumulator_repairs_missing_blank_and_duplicate_ids_deterministically(
             2
         );
         let mut response = LlmResponse::default();
-        accumulator.apply_to_response_for_request(&mut response, "request-1");
+        response.parts =
+            accumulator.response_parts(std::mem::take(&mut response.parts), "request-1");
         let ids: Vec<&str> = response
             .parts
             .iter()
@@ -118,9 +121,11 @@ fn stream_accumulator_repairs_missing_blank_and_duplicate_ids_deterministically(
     };
     let accumulator = LlmStreamAccumulator::default();
     let mut first = original();
-    accumulator.apply_to_response_for_request(&mut first, "journaled-request-1");
+    first.parts =
+        accumulator.response_parts(std::mem::take(&mut first.parts), "journaled-request-1");
     let mut replay = original();
-    accumulator.apply_to_response_for_request(&mut replay, "journaled-request-1");
+    replay.parts =
+        accumulator.response_parts(std::mem::take(&mut replay.parts), "journaled-request-1");
     let ids = |response: &LlmResponse| {
         response
             .parts
@@ -144,10 +149,14 @@ fn stream_accumulator_repairs_missing_blank_and_duplicate_ids_deterministically(
     assert!(first_ids[0].starts_with("lashcall_"));
     assert!(first_ids[1].starts_with("lashcall_"));
     assert!(first_ids[3].starts_with("lashcall_"));
-    accumulator.apply_to_response_for_request(&mut first, "journaled-request-1");
+    first.parts =
+        accumulator.response_parts(std::mem::take(&mut first.parts), "journaled-request-1");
     assert_eq!(ids(&first), first_ids);
     let mut different_request = original();
-    accumulator.apply_to_response_for_request(&mut different_request, "journaled-request-2");
+    different_request.parts = accumulator.response_parts(
+        std::mem::take(&mut different_request.parts),
+        "journaled-request-2",
+    );
     assert_ne!(ids(&different_request)[0], first_ids[0]);
 }
 
@@ -164,7 +173,7 @@ fn stream_accumulator_keeps_a_later_provider_id_that_matches_a_candidate() {
         parts: vec![tool("")],
         ..Default::default()
     };
-    accumulator.apply_to_response_for_request(&mut first, "request-1");
+    first.parts = accumulator.response_parts(std::mem::take(&mut first.parts), "request-1");
     let LlmOutputPart::ToolCall {
         call_id: candidate, ..
     } = &first.parts[0]
@@ -175,7 +184,7 @@ fn stream_accumulator_keeps_a_later_provider_id_that_matches_a_candidate() {
         parts: vec![tool(""), tool(candidate)],
         ..Default::default()
     };
-    accumulator.apply_to_response_for_request(&mut response, "request-1");
+    response.parts = accumulator.response_parts(std::mem::take(&mut response.parts), "request-1");
     let LlmOutputPart::ToolCall {
         call_id: repaired, ..
     } = &response.parts[0]
@@ -209,7 +218,8 @@ fn stream_accumulator_does_not_duplicate_complete_final_response() {
         ..Default::default()
     };
 
-    accumulator.apply_to_response(&mut response);
+    response.parts =
+        accumulator.response_parts(std::mem::take(&mut response.parts), "test-request");
 
     assert_eq!(response.parts.len(), 2);
     assert!(matches!(

@@ -42,9 +42,10 @@ use lash_sansio::tool_output::graph::{
 use serde::Serialize;
 use serde::de::DeserializeOwned;
 
-use super::output::{Material, NamesMaterial};
 use super::tools::CompletedCall;
 use crate::{ToolCallId, ToolCallOutput, ToolValue};
+use lash_core_store::tool_run::Material;
+use lash_core_store::tool_run::NamesMaterial;
 
 #[path = "call_body.rs"]
 mod call_body;

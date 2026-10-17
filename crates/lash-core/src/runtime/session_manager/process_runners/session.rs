@@ -400,7 +400,7 @@ fn first_blocking_issue(turn: &crate::AssembledTurn) -> Option<&crate::TurnIssue
 /// stop's projected value — ride the existing `raw` channel, bounded.
 fn failure_from_process_turn(
     turn: &crate::AssembledTurn,
-    limits: lash_core_execution::DiagnosticLimits,
+    limits: lash_core_store::execution_limits::DiagnosticLimits,
     cuts: lash_sansio::session_model::RuntimeOutputCuts,
 ) -> crate::ToolFailure {
     let crate::TurnOutcome::Stopped(stop) = &turn.outcome else {
@@ -448,7 +448,7 @@ fn failure_from_process_turn(
 fn process_turn_failure_raw(
     stop_value: Option<&serde_json::Value>,
     issue: Option<&crate::TurnIssue>,
-    limits: lash_core_execution::DiagnosticLimits,
+    limits: lash_core_store::execution_limits::DiagnosticLimits,
 ) -> Option<serde_json::Value> {
     let mut raw = serde_json::Map::new();
     if let Some(value) = stop_value {
@@ -484,7 +484,7 @@ fn output_from_process_turn(
     turn: crate::AssembledTurn,
     state: crate::ProcessStatus,
     result: &crate::SessionTurnOutcome,
-    limits: lash_core_execution::DiagnosticLimits,
+    limits: lash_core_store::execution_limits::DiagnosticLimits,
     cuts: lash_sansio::session_model::RuntimeOutputCuts,
 ) -> crate::ToolCallOutput {
     if state == crate::ProcessStatus::Cancelled {

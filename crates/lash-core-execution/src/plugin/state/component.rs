@@ -19,7 +19,7 @@ pub struct ComponentState {
     owner: crate::RuntimeOwner,
     reducers: BTreeMap<String, BTreeMap<String, StateReducer>>,
     formats: BTreeMap<String, FormatVersion>,
-    evidence: crate::EvidenceLimits,
+    evidence: lash_core_store::execution_limits::EvidenceLimits,
     data_limits: crate::runtime::RuntimeDataLimits,
 }
 
@@ -31,8 +31,8 @@ impl ComponentState {
     pub fn new(
         process: crate::ProcessId,
         composition: &ProcessComposition,
-        evidence: crate::EvidenceLimits,
-        diagnostics: crate::DiagnosticLimits,
+        evidence: lash_core_store::execution_limits::EvidenceLimits,
+        diagnostics: lash_core_store::execution_limits::DiagnosticLimits,
         data_limits: crate::runtime::RuntimeDataLimits,
     ) -> Self {
         composition.state.lock_recover().diagnostics = diagnostics;
@@ -129,7 +129,7 @@ impl crate::plugin::ExecutionState for ComponentState {
     fn owner(&self) -> &crate::RuntimeOwner {
         &self.owner
     }
-    fn evidence_limits(&self) -> crate::EvidenceLimits {
+    fn evidence_limits(&self) -> lash_core_store::execution_limits::EvidenceLimits {
         self.evidence
     }
     fn data_limits(&self) -> crate::runtime::RuntimeDataLimits {

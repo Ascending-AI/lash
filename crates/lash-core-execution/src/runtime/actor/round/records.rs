@@ -9,9 +9,10 @@ use lash_durable::domain::{
 };
 use lash_durable::{ActorTx, DomainWrite};
 
+use super::ExecutionDraft;
 use super::graph::{self, AdmitMember, PinnedMember, RoundFact, SettledFact};
-use super::{ExecutionDraft, SettledOutput};
 use crate::ToolCallId;
+use lash_core_store::tool_run::SettledOutput;
 
 /// The format of a run record's body: the RoundFact node (kind 21) each
 /// record names, and the admission, start, outcome, retry and presentation

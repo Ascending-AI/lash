@@ -10,7 +10,7 @@ impl lash_core::ProcessEngine for PayloadGatedEngine {
     fn settled_ran(
         &self,
         _kind: &lash_core::EngineStepKind,
-        _output: &lash_core::SettledOutput,
+        _output: &lash_core_store::tool_run::SettledOutput,
     ) -> Vec<(u32, u64)> {
         Vec::new()
     }

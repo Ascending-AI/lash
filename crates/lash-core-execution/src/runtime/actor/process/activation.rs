@@ -68,8 +68,7 @@ use super::{CascadeProgress, end_scope};
 use crate::runtime::actor::activation_loop;
 use crate::runtime::actor::round::lifecycle::{Act, Idle, Lifecycle};
 use crate::runtime::actor::round::{
-    self, AdmittedExecution, Material, MemberBodies, MemberBody, PolicyView, RoundError, RunFold,
-    SettledOutput,
+    self, AdmittedExecution, MemberBodies, MemberBody, PolicyView, RoundError, RunFold,
 };
 use crate::runtime::actor::waits::{self, Resolution, WaitKind};
 use crate::runtime::process::engine_state::{
@@ -80,6 +79,8 @@ use crate::{
     ActorContext, AdmittedScope, Backend, CancelOrigin, ProcessEngine, ProcessId, ProcessInput,
     ProcessRecord, ToolCallId,
 };
+use lash_core_store::tool_run::Material;
+use lash_core_store::tool_run::SettledOutput;
 
 /// The activation of claimed process actors: one per node, routed by
 /// [`lash_durable::ActorDispatch`].
@@ -87,7 +88,7 @@ pub struct ProcessActivation {
     /// What a process's terminal and a park are reported through; a node
     /// given none reports neither.
     pub(super) tracing: Option<crate::trace::TraceRuntime>,
-    evidence: crate::EvidenceLimits,
+    evidence: lash_core_store::execution_limits::EvidenceLimits,
     pub(super) backend: Backend,
     pub(super) steps: Arc<dyn ProcessSteps>,
     probe: Arc<dyn DurableProbe>,
@@ -110,7 +111,7 @@ impl ProcessActivation {
         Self {
             backend,
             tracing: None,
-            evidence: crate::EvidenceLimits::standard(),
+            evidence: lash_core_store::execution_limits::EvidenceLimits::standard(),
             steps,
             probe,
             session_turns: None,

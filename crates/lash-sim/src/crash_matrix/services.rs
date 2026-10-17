@@ -28,10 +28,12 @@ use lash_core::{
 };
 use lash_core_execution::ActorContext;
 use lash_core_execution::runtime::actor::round::{
-    AcceptedStop, AdmittedExecution, CompletedCall, Material, MemberBody, MemberOutcome, MemberPin,
-    PolicyView, RoundTools, SettledOutput,
+    AcceptedStop, AdmittedExecution, CompletedCall, MemberBody, MemberOutcome, MemberPin,
+    PolicyView, RoundTools,
 };
 use lash_core_store::effect_opener::EffectOpener;
+use lash_core_store::tool_run::Material;
+use lash_core_store::tool_run::SettledOutput;
 use lash_core_store::tool_run::{
     CompletionSource, KnownFailureReason, MaterialOwner, MaterialRole,
 };
