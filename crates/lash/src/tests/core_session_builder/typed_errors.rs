@@ -9,6 +9,8 @@ use lash_core::{PluginError, PluginStateError};
 /// FIG-5500: cold open requires recorded identity even when the row is root.
 #[tokio::test]
 async fn a_cold_open_refuses_a_head_without_identity_even_for_root() {
+    use lash_core_store::checkpoint_graph::{EncodeBudget, ExplicitLimit, GraphStaging, config};
+
     let files = tempfile::tempdir().expect("SQLite directory");
     let path = files.path().join("lash.db");
     let stores = Arc::new(
@@ -37,6 +39,8 @@ async fn a_cold_open_refuses_a_head_without_identity_even_for_root() {
     }
     creating.shutdown().await.expect("shutdown creator");
     let reopened = build();
+    let mut staging = GraphStaging::new(EncodeBudget::new(ExplicitLimit::new(u64::MAX)));
+    let mut roots_without_identity = Vec::new();
     for id in ["root", "host-chosen-session"] {
         let session = reopened
             .session(crate::SessionId::from(id))
@@ -45,17 +49,53 @@ async fn a_cold_open_refuses_a_head_without_identity_even_for_root() {
             .expect("recorded identity permits cold open");
         assert_eq!(session.session_id().as_str(), id);
         drop(session);
+        let head = lash_core::SessionCommitStore::load_session_head_meta(
+            reopened.store_factory.as_ref(),
+            &crate::SessionId::from(id),
+        )
+        .await
+        .expect("read recorded head")
+        .expect("head");
+        let mut value = serde_json::to_value(head.payload()).expect("head value");
+        value
+            .as_object_mut()
+            .expect("head object")
+            .remove("session_id");
+        let root = config::stage(&mut staging, &value).expect("valid graph without identity");
+        roots_without_identity.push((id, root));
     }
     reopened.shutdown().await.expect("shutdown reader");
-    let raw = rusqlite::Connection::open(&path).expect("raw SQLite connection");
-    assert_eq!(
-        raw.execute(
-            "UPDATE blobs SET content = CAST(json_remove(content, '$.session_id') AS BLOB) WHERE hash IN (SELECT config_ref FROM session_revisions)",
-            [],
+    let mut raw = rusqlite::Connection::open(&path).expect("raw SQLite connection");
+    let tx = raw.transaction().expect("fixture transaction");
+    // Keep canonical envelopes, hashes and edges intact: only the recorded
+    // head's identity is absent, so cold open must reach its typed refusal.
+    for node in staging.nodes().values() {
+        tx.execute(
+            "INSERT OR IGNORE INTO blobs (hash, content, encoding) VALUES (?1, ?2, 1)",
+            rusqlite::params![node.id.to_hex(), node.bytes.as_ref()],
         )
-        .expect("remove only the stored identities"),
-        2,
-    );
+        .expect("install config node");
+    }
+    for node in staging.nodes().values() {
+        for child in node.children().expect("canonical children") {
+            tx.execute(
+                "INSERT OR IGNORE INTO blob_edges (parent_hash, child_hash) VALUES (?1, ?2)",
+                rusqlite::params![node.id.to_hex(), child.to_hex()],
+            )
+            .expect("install config edge");
+        }
+    }
+    for (id, root) in roots_without_identity {
+        assert_eq!(
+            tx.execute(
+                "UPDATE session_revisions SET config_ref = ?1 WHERE session_id = ?2",
+                rusqlite::params![root.to_hex(), id],
+            )
+            .expect("replace only the stored identity"),
+            1,
+        );
+    }
+    tx.commit().expect("publish identity-free graphs");
     drop(raw);
     let refusing = build();
     for id in ["root", "host-chosen-session"] {

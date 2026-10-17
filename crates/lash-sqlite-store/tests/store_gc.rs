@@ -245,6 +245,31 @@ async fn sqlite_factory_delete_session_removes_only_the_selected_session() {
         .commit_runtime_state(RuntimeCommit::persisted_state_for_test(&deleted_state))
         .await
         .expect("commit deleted session checkpoint");
+    // Capture the complete surviving graph before collection, so a lost
+    // descendant cannot disappear from both the expected and actual sets.
+    let retained_config = {
+        let conn = rusqlite::Connection::open(catalog_uri(&root)).expect("open catalog");
+        let mut query = conn
+            .prepare(
+                "WITH RECURSIVE reachable(hash) AS (
+                     SELECT revision.config_ref FROM session_head AS head
+                     JOIN session_revisions AS revision
+                       ON revision.session_id = head.session_id
+                      AND revision.head_revision = head.head_revision
+                     WHERE head.session_id = 'keep/me'
+                     UNION
+                     SELECT edge.child_hash FROM blob_edges AS edge
+                     JOIN reachable ON edge.parent_hash = reachable.hash
+                 ) SELECT hash FROM reachable",
+            )
+            .expect("surviving config closure query");
+        query
+            .query_map([], |row| row.get::<_, String>(0))
+            .expect("surviving config closure")
+            .collect::<rusqlite::Result<std::collections::BTreeSet<_>>>()
+            .expect("surviving config identities")
+    };
+    assert!(retained_config.len() > 1, "the config has descendants");
     {
         let conn = rusqlite::Connection::open(catalog_uri(&root)).expect("open catalog");
         conn.execute(
@@ -299,30 +324,33 @@ async fn sqlite_factory_delete_session_removes_only_the_selected_session() {
         host_ref_count, 1,
         "factory artifact refs without session attribution remain host-owned"
     );
-    let retained_config: String = conn
-        .query_row(
-            "SELECT revision.config_ref FROM session_head AS head
-             JOIN session_revisions AS revision
-               ON revision.session_id = head.session_id
-              AND revision.head_revision = head.head_revision
-             WHERE head.session_id = 'keep/me'",
-            [],
-            |row| row.get(0),
-        )
-        .expect("surviving session config reference");
-    let blobs = conn
-        .prepare("SELECT hash FROM blobs ORDER BY hash")
-        .expect("retained blob query")
-        .query_map([], |row| row.get::<_, String>(0))
-        .expect("retained blobs")
-        .collect::<rusqlite::Result<std::collections::BTreeSet<_>>>()
-        .expect("retained blob identities");
-    // FIG-5948 stores config in blobs too: the surviving session retains its
-    // config while the deleted session releases its entire checkpoint tree.
+    let blobs = || {
+        conn.prepare("SELECT hash FROM blobs ORDER BY hash")
+            .expect("retained blob query")
+            .query_map([], |row| row.get::<_, String>(0))
+            .expect("retained blobs")
+            .collect::<rusqlite::Result<std::collections::BTreeSet<_>>>()
+            .expect("retained blob identities")
+    };
+    let host_artifact = std::collections::BTreeSet::from(["host-artifact-blob".to_owned()]);
     assert_eq!(
-        blobs,
-        std::collections::BTreeSet::from(["host-artifact-blob".to_owned(), retained_config,]),
-        "delete must retain only the host artifact and the surviving session's config"
+        blobs(),
+        retained_config.union(&host_artifact).cloned().collect(),
+        "delete retains exactly the host artifact and the surviving config's reachable closure"
+    );
+
+    factory
+        .delete_session(&SessionId::from("keep/me"))
+        .await
+        .expect("delete final config referrer");
+    factory
+        .gc_unreachable()
+        .await
+        .expect("collect final config");
+    assert_eq!(
+        blobs(),
+        host_artifact,
+        "the last session releases every config node, including shared descendants"
     );
 }
 
