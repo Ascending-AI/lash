@@ -213,6 +213,33 @@ pub(crate) fn with_source(
         session.census(bounds.memory),
     )
 }
+/// [`open`] under `layout`.
+#[cfg(test)]
+pub(crate) fn open_in(
+    program: lash_kernel_vm::Program,
+    bounds: lash_kernel_vm::Bounds,
+    root: &CheckpointRoot,
+    source: &Source,
+    admissions: Vec<lash_kernel_state::AdmittedWait>,
+    layout: lash_kernel_vm::Layout,
+) -> Result<lash_kernel_vm::KernelMachine, lash_kernel_vm::OpenError> {
+    let heap = PagedHeap::open_header(root.heap, Box::new(source.clone()), EditEpoch(2))
+        .map_err(lash_kernel_vm::OpenError::Heap)?;
+    let census = Census::restore(heap.certificate(), LogicalBytes(bounds.memory)).map_err(|e| {
+        lash_kernel_vm::OpenError::Malformed {
+            problem: e.to_string(),
+        }
+    })?;
+    lash_kernel_vm::KernelMachine::open_with_layout(
+        program,
+        bounds,
+        root,
+        admissions,
+        Box::new(source.clone()),
+        Box::new(census),
+        layout,
+    )
+}
 pub(crate) fn open<M: lash_kernel_vm::Machine>(
     program: lash_kernel_vm::Program,
     bounds: lash_kernel_vm::Bounds,

@@ -9,6 +9,7 @@ include!("corpus_files.rs");
 #[path = "contract_cases.rs"]
 mod contract_cases;
 
+mod charge;
 mod protocol;
 
 // These three owning-library shards fill rules this corpus does not own.

@@ -17,18 +17,25 @@
 //! - [`Op`]: the executor IR, a flat stream in which every statement is one
 //!   range of semantic operations from one Boundary to the next;
 //! - [`SEMANTICS`]: the charge events each op emits, in order;
-//! - [`verify_semantics`] and [`verify_stream`]: the coverage invariants.
+//! - [`verify_semantics`] and [`verify_stream`]: the coverage invariants;
+//! - the end state's seams (`docs/design/kernel-end-state.md`): the charge
+//!   event program and its per-unit oracle, [`ReferenceCharger`]
+//!   ([`charge`]), and the coordinate grammar a saved run restores by
+//!   ([`coord`]).
 //!
 //! Each operation's meaning is written once, as the machine's
 //! (`lash-kernel-vm`); this crate holds types and checks only, and depends
 //! on no machine.
 
 mod boundary;
+pub mod charge;
+pub mod coord;
 mod kir;
 mod sem;
 mod verify;
 
 pub use boundary::{BoundaryKind, StepEdge};
+pub use charge::{ReferenceCharger, Weight};
 pub use kir::{
     ActIx, BlockIx, CodeIx, ConstIx, FieldIx, FieldListIx, LibIx, LocalRef, NameIx, Op, OpKind,
     OpRange, Operand, Reg, RegRange,

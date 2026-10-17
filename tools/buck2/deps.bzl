@@ -1375,7 +1375,8 @@ PACKAGE_DEPS = {
             "lash_ext_py_core": "//crates/lash-ext-py-core:lash-ext-py-core",
             "lash_ext_regex_ecma": "//crates/lash-ext-regex-ecma:lash-ext-regex-ecma",
             "lash_ext_ts_core": "//crates/lash-ext-ts-core:lash-ext-ts-core",
-            "lash_ext_url_whatwg": "//crates/lash-ext-url-whatwg:lash-ext-url-whatwg"
+            "lash_ext_url_whatwg": "//crates/lash-ext-url-whatwg:lash-ext-url-whatwg",
+            "lash_kernel_exec": "//crates/lash-kernel-exec:lash-kernel-exec"
         },
         "normal": {
             "arbitrary": "//third-party/rust:p0012",

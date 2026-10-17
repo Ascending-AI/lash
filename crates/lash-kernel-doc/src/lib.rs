@@ -30,6 +30,9 @@ mod decode;
 pub use decode::{DecodeMismatch, Decoder};
 mod document;
 pub use data_limits::KernelDataLimits;
+/// The arena's frozen target vocabulary and native ABI (FIG-6691): the
+/// arena swap moves it to the crate root.
+pub mod arena;
 mod document_bytes;
 mod function;
 mod function_value;

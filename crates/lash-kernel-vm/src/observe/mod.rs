@@ -24,6 +24,7 @@ pub(crate) use context::Publisher;
 pub(crate) use work::Counting;
 
 use lash_kernel_doc::TaskId;
+use lash_kernel_exec::Weight;
 
 use crate::compile::{CodeId, LibId, StmtId};
 
@@ -120,11 +121,51 @@ pub(crate) enum Event {
     FormulaExit,
 }
 
+/// Every charge a run makes, in order, as the per-unit reference charger
+/// reads them (`K-CHG-002`, [`lash_kernel_exec::ReferenceCharger`]): each
+/// unit run as [`Weight::Units`], each other charge as [`Weight::Atomic`].
+/// A run that passes its bound inside a unit run records the units within
+/// it, then the unit that passes. Clones share one record, so a law keeps
+/// it across a seal and a reopen and reads it while the run is parked.
+#[derive(Clone, Debug, Default)]
+pub struct ChargeTape(Arc<std::sync::Mutex<Vec<Weight>>>);
+
+impl ChargeTape {
+    pub fn new() -> Self {
+        Self::default()
+    }
+
+    /// The charges recorded so far.
+    pub fn steps(&self) -> Vec<Weight> {
+        self.lock().clone()
+    }
+
+    /// How many charges are recorded.
+    pub fn len(&self) -> usize {
+        self.lock().len()
+    }
+
+    pub fn is_empty(&self) -> bool {
+        self.lock().is_empty()
+    }
+
+    pub(crate) fn push(&self, weight: Weight) {
+        self.lock().push(weight);
+    }
+
+    fn lock(&self) -> std::sync::MutexGuard<'_, Vec<Weight>> {
+        self.0
+            .lock()
+            .unwrap_or_else(std::sync::PoisonError::into_inner)
+    }
+}
+
 /// What one machine observes.
 pub(crate) struct Observer {
     pub(crate) path: Option<PathRecorder>,
     pub(crate) work: Option<Counting>,
     pub(crate) context: Option<Publisher>,
+    pub(crate) charges: Option<ChargeTape>,
 }
 
 impl Observer {
@@ -133,6 +174,7 @@ impl Observer {
             path: None,
             work: None,
             context: None,
+            charges: None,
         }
     }
 

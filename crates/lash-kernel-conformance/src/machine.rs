@@ -66,6 +66,25 @@ pub(crate) struct Park<'a, M> {
     pub(crate) requests: &'a [Request],
 }
 
+/// How a run's machine starts.
+pub(crate) type Starter<'r, M> = dyn FnMut(
+        Program,
+        lash_kernel_vm::Bounds,
+        CellStart,
+        &crate::pages::Source,
+    ) -> Result<M, StartError>
+    + 'r;
+
+/// How a law instruments a run of a case: how its machine starts, what it
+/// sees at each print, and a charge bound in place of the case's own.
+pub(crate) struct Run<'r, M> {
+    pub(crate) start: &'r mut Starter<'r, M>,
+    pub(crate) printed: &'r mut dyn FnMut(),
+    /// The charge bound the run takes instead of the case's. A run under
+    /// it may end before its script is consumed.
+    pub(crate) charge: Option<u64>,
+}
+
 /// Runs `case` under its script. `at_park` is handed the machine at every
 /// park and answers the machine the run goes on with.
 pub(crate) fn run_case<M: Machine>(
@@ -76,9 +95,41 @@ pub(crate) fn run_case<M: Machine>(
     run_case_projected(library, case, at_park, None)
 }
 
+/// [`run_case`], projected at every slice and at the end when `projection`
+/// is given.
 pub(crate) fn run_case_projected<M: Machine>(
     library: &PreparedLibrary,
     case: &Case,
+    at_park: &mut dyn FnMut(Park<'_, M>) -> Result<M, HarnessError>,
+    projection: Option<&mut crate::projection::Projector<'_>>,
+) -> Result<Observations, HarnessError> {
+    let mut start =
+        |program, bounds: lash_kernel_vm::Bounds, start, source: &crate::pages::Source| {
+            let session = crate::pages::Session {
+                root: None,
+                source: source.clone(),
+            };
+            M::start(
+                program,
+                bounds,
+                start,
+                Box::new(source.clone()),
+                session.census(bounds.memory),
+            )
+        };
+    let run = Run {
+        start: &mut start,
+        printed: &mut || {},
+        charge: None,
+    };
+    run_case_in(library, case, run, at_park, projection)
+}
+
+/// [`run_case_projected`], instrumented by `run`.
+pub(crate) fn run_case_in<M: Machine>(
+    library: &PreparedLibrary,
+    case: &Case,
+    run: Run<'_, M>,
     at_park: &mut dyn FnMut(Park<'_, M>) -> Result<M, HarnessError>,
     mut projection: Option<&mut crate::projection::Projector<'_>>,
 ) -> Result<Observations, HarnessError> {
@@ -108,17 +159,17 @@ pub(crate) fn run_case_projected<M: Machine>(
         document: Arc::new(document),
         library: library.clone(),
     };
-    let bounds = env.bounds.into();
+    let mut bounds: lash_kernel_vm::Bounds = env.bounds.into();
+    if let Some(charge) = run.charge {
+        bounds.charge = charge;
+    }
+    let cut = run.charge.is_some();
     let source = projection
         .as_ref()
         .and_then(|p| p.imports)
         .and_then(|images| images.first())
         .map(|image| image.source.clone())
         .unwrap_or_default();
-    let session = crate::pages::Session {
-        root: None,
-        source: source.clone(),
-    };
     let start = CellStart {
         target: env.entry.clone().map_or(Target::Main, Target::Entry),
         args: env.args.clone(),
@@ -127,13 +178,7 @@ pub(crate) fn run_case_projected<M: Machine>(
         modes: EffectModes::reading(env.reads.iter().cloned()),
         host: Vec::new(),
     };
-    let mut machine = match M::start(
-        program.clone(),
-        bounds,
-        start,
-        Box::new(source.clone()),
-        session.census(bounds.memory),
-    ) {
+    let mut machine = match (run.start)(program.clone(), bounds, start, &source) {
         Ok(machine) => machine,
         Err(StartError::NotAdmitted(_) | StartError::UndeclaredRead { .. }) => {
             return Ok(refused());
@@ -144,6 +189,7 @@ pub(crate) fn run_case_projected<M: Machine>(
         answers: env.host.clone().into(),
         prints: Vec::new(),
         fault: None,
+        printed: run.printed,
     };
     let mut batches = env.deliveries.iter();
     let mut waits = Vec::new();
@@ -161,7 +207,7 @@ pub(crate) fn run_case_projected<M: Machine>(
         let step = match step {
             Ok(step) => step,
             Err(MachineError::Host(_)) => {
-                if batches.next().is_some() || !host.answers.is_empty() {
+                if !cut && (batches.next().is_some() || !host.answers.is_empty()) {
                     return Err(HarnessError(
                         "run stopped before its script was consumed".into(),
                     ));
@@ -192,7 +238,7 @@ pub(crate) fn run_case_projected<M: Machine>(
                 if let Some(p) = &mut projection {
                     p.end(&end, &source)?;
                 }
-                if batches.next().is_some() || !host.answers.is_empty() {
+                if !cut && (batches.next().is_some() || !host.answers.is_empty()) {
                     return Err(HarnessError(
                         "run ended before its script was consumed".into(),
                     ));
@@ -282,13 +328,14 @@ pub(crate) fn run_case_projected<M: Machine>(
     )))
 }
 
-struct ScriptHost {
+struct ScriptHost<'r> {
     answers: VecDeque<HostAnswer>,
     prints: Vec<Datum>,
     fault: Option<String>,
+    printed: &'r mut dyn FnMut(),
 }
 
-impl ScriptHost {
+impl ScriptHost<'_> {
     fn mismatch(&mut self, expected: &str, answer: Option<HostAnswer>) {
         self.fault.get_or_insert_with(|| {
             format!("host requested {expected}, next answer was {answer:?}")
@@ -296,7 +343,7 @@ impl ScriptHost {
     }
 }
 
-impl Host for ScriptHost {
+impl Host for ScriptHost<'_> {
     fn clock(&mut self) -> Timestamp {
         match self.answers.pop_front() {
             Some(HostAnswer::Clock(time)) => time,
@@ -357,6 +404,7 @@ impl Host for ScriptHost {
     }
 
     fn print(&mut self, value: &Datum) {
+        (self.printed)();
         self.prints.push(value.clone());
     }
 

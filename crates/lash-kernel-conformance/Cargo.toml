@@ -36,6 +36,7 @@ thiserror.workspace = true
 
 [dev-dependencies]
 kernel-embedder = { path = "../../examples/kernel-embedder" }
+lash-kernel-exec.workspace = true
 lash-ext-regex-ecma = { path = "../lash-ext-regex-ecma" }
 
 # Records native answers without building the release gate it is bootstrapping.

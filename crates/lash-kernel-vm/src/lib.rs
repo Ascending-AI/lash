@@ -49,7 +49,7 @@ mod laws;
 pub use compile::{Layout, PreparedLibrary};
 pub use functions::{MachineFunctions, register_machine_functions};
 pub use machine::KernelMachine;
-pub use observe::{Observe, RanDelta, StatementPath};
+pub use observe::{ChargeTape, Observe, RanDelta, StatementPath};
 pub use paged::{TaskFilter, TaskPage};
 pub use session_editor::{SessionEditor, SessionValue};
 

@@ -97,6 +97,9 @@ impl KernelMachine {
     /// code is not charged (`K-CHG-007`), ending the run past its bound.
     pub(super) fn charge(&mut self, units: u64) -> Result<(), Halt> {
         if self.charging {
+            if self.observer.is_some() {
+                self.observe_atomic(units);
+            }
             self.charged = self.charged.saturating_add(units);
             if self.charged > self.bounds.charge {
                 return Err(bound(Bound::Charge, self.bounds.charge));

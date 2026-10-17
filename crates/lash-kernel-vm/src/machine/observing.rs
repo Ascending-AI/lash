@@ -9,10 +9,11 @@ use lash_kernel_doc::TaskId;
 use super::{Control, Frame, KernelMachine};
 use crate::compile::{BlockId, Executable, LibId};
 use crate::observe::{
-    Counting, Event, GuestContext, GuestFrame, GuestPhase, GuestSymbols, NO_STATEMENT, Observer,
-    PathRecorder, WorkReport,
+    ChargeTape, Counting, Event, GuestContext, GuestFrame, GuestPhase, GuestSymbols, NO_STATEMENT,
+    Observer, PathRecorder, WorkReport,
 };
 use crate::{Observe, RanDelta, StatementPath};
+use lash_kernel_exec::Weight;
 
 impl KernelMachine {
     /// Selects observation for this machine. A resumed machine starts Off
@@ -135,6 +136,13 @@ impl KernelMachine {
         ))
     }
 
+    /// Records every charge the run makes from here on in `tape`, in order
+    /// (`K-CHG-002`). Laws compare it with the per-unit reference charger;
+    /// recording changes no result, charge, park or export.
+    pub fn record_charges(&mut self, tape: ChargeTape) {
+        self.observer_mut().charges = Some(tape);
+    }
+
     /// Publishes the running task's frames and the machine's phase to
     /// `context` from here on, for a sampler the embedder runs. The machine
     /// is the context's only writer until it is dropped or publishes to
@@ -196,17 +204,45 @@ impl KernelMachine {
     #[inline(always)]
     pub(super) fn observe_expressions(&mut self, count: u32) {
         if self.observer.is_some() {
-            self.observe_expressions_unlikely(count);
+            self.observe_expressions_unlikely(count, false);
+        }
+    }
+
+    /// `count` expression nodes are evaluated, their one-unit charge
+    /// events charged as one run when the code is charged.
+    #[inline(always)]
+    pub(super) fn observe_nodes(&mut self, count: u32) {
+        if self.observer.is_some() {
+            self.observe_expressions_unlikely(count, true);
         }
     }
 
     #[cold]
     #[inline(never)]
-    fn observe_expressions_unlikely(&mut self, count: u32) {
+    fn observe_expressions_unlikely(&mut self, count: u32, charged: bool) {
         if let Some(observer) = self.observer.as_deref_mut() {
+            if charged
+                && self.charging
+                && let Some(tape) = &observer.charges
+            {
+                tape.push(Weight::Units(u64::from(count)));
+            }
             for _ in 0..count {
                 observer.expression(self.charging);
             }
+        }
+    }
+
+    /// A charge of `units` charged whole, before the bound is checked.
+    #[cold]
+    #[inline(never)]
+    pub(super) fn observe_atomic(&mut self, units: u64) {
+        if let Some(tape) = self
+            .observer
+            .as_deref()
+            .and_then(|observer| observer.charges.as_ref())
+        {
+            tape.push(Weight::Atomic(units));
         }
     }
 

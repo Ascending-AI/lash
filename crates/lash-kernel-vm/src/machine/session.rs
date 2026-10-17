@@ -97,6 +97,10 @@ pub(super) fn start(
         Arc::clone(&exe),
     ))?;
     let arguments = |problem: String| StartError::Arguments { problem };
+    // What the start decodes charges nothing (the charge is reset below),
+    // so no charge bound can stop it: the run's first statement meets the
+    // bound instead (`K-CHG-002`).
+    let bound = std::mem::replace(&mut machine.bounds.charge, u64::MAX);
     let (code, args) = match &start.target {
         Target::Main => {
             if !start.args.is_empty() {
@@ -175,6 +179,7 @@ pub(super) fn start(
             (*code, args)
         }
     };
+    machine.bounds.charge = bound;
     let count = args.len();
     machine.regs = args.into();
     machine

@@ -476,7 +476,7 @@ impl KernelMachine {
             }
             self.charged = charged;
         }
-        self.observe_expressions(units);
+        self.observe_nodes(units);
         Ok(())
     }
 
@@ -486,7 +486,9 @@ impl KernelMachine {
         // The events before the one that crosses stay within the bound.
         let within = self.bounds.charge.saturating_sub(self.charged);
         self.charged = self.charged.saturating_add(within).saturating_add(1);
-        self.observe_expressions(u32::try_from(within).unwrap_or(u32::MAX));
+        self.observe_nodes(u32::try_from(within).unwrap_or(u32::MAX));
+        // The unit that crosses is charged, and ends the run.
+        self.observe_atomic(1);
         bound(Bound::Charge, self.bounds.charge)
     }
 
