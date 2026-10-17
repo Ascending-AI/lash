@@ -258,12 +258,12 @@ impl Compiler<'_> {
             .map(|(_, declared)| *declared);
         match declared {
             Some(Declared::Slot(slot)) => return Var::Local(Local::unplaced(slot)),
-            Some(Declared::Session) => return Var::Session(name.clone()),
+            Some(Declared::Session) => return Var::Session(super::BindingName::new(name.clone())),
             None | Some(Declared::ScopedSlot(_)) => {}
         }
         if level == 0 {
             if scopes.main {
-                return Var::Session(name.clone());
+                return Var::Session(super::BindingName::new(name.clone()));
             }
             return match self.free_slot(name) {
                 Some(slot) => Var::Local(Local::unplaced(slot)),

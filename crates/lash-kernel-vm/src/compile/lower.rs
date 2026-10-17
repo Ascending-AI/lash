@@ -137,7 +137,7 @@ impl Compiler<'_> {
                             src,
                         },
                         Var::Session(name) => Op::WriteSession {
-                            name: self.name(name),
+                            name: self.name(name.name),
                             src,
                         },
                         Var::Unbound(name) => Op::WriteUnbound {
@@ -755,7 +755,7 @@ impl Compiler<'_> {
             },
             Var::Session(name) => Op::Session {
                 dst,
-                name: self.name(name),
+                name: self.name(name.name),
             },
             Var::Unbound(name) => Op::Unbound {
                 dst,
@@ -773,7 +773,7 @@ impl Compiler<'_> {
     fn name(&mut self, name: Name) -> NameIx {
         let names = &mut self.stream.names;
         NameIx(*self.names.entry(name).or_insert_with_key(|name| {
-            names.push(name.clone());
+            names.push(super::BindingName::new(name.clone()));
             names.len() as u32 - 1
         }))
     }

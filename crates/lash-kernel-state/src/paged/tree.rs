@@ -6,6 +6,7 @@ use lash_kernel_doc::graph_tokens::{
     TokenCodec, TokenError, TokenReader, TokenWriter, decode_body, encode_body,
 };
 use lash_kernel_doc::heap::{FamilyId, HeapFault, LogicalBytes, PageId, PageRef};
+use std::borrow::Cow;
 use std::cell::RefCell;
 use std::collections::BTreeMap;
 use std::rc::{Rc, Weak};
@@ -856,10 +857,10 @@ impl<T: Cell> Tree<T> {
             .map_or(Ok(0), |r| walk(r, key, access, self.sequence))
     }
     pub fn write(&mut self, key: Vec<u8>, value: T, access: &Access<'_>) -> Result<(), HeapFault> {
-        self.change(key, access, false, |rows, position, key| {
+        self.change(Cow::Owned(key), access, false, |rows, position, key| {
             match position {
                 Ok(i) => rows[i].1 = value,
-                Err(i) => rows.insert(i, (key, value)),
+                Err(i) => rows.insert(i, (Key(key.into_owned()), value)),
             }
             Ok(true)
         })
@@ -874,34 +875,53 @@ impl<T: Cell> Tree<T> {
         access: &Access<'_>,
         update: impl FnOnce(&mut T) -> Result<bool, HeapFault>,
     ) -> Result<bool, HeapFault> {
-        self.change(key, access, true, |rows, position, _| {
+        self.change(Cow::Owned(key), access, true, |rows, position, _| {
             let i =
                 position.map_err(|_| HeapFault::Malformed("updated tree row is missing".into()))?;
             update(&mut rows[i].1)
         })
     }
-    fn change<F>(
+    /// Look up and replace a row in one traversal. Returning `None` leaves
+    /// its values unchanged; only inserting a row copies the borrowed key.
+    pub fn write_with<E: From<HeapFault>>(
         &mut self,
-        key: Vec<u8>,
+        key: &[u8],
+        access: &Access<'_>,
+        write: impl FnOnce(Option<&T>) -> Result<Option<T>, E>,
+    ) -> Result<bool, E> {
+        self.change(Cow::Borrowed(key), access, false, |rows, position, key| {
+            let Some(value) = write(position.ok().map(|i| &rows[i].1))? else {
+                return Ok(false);
+            };
+            match position {
+                Ok(i) => rows[i].1 = value,
+                Err(i) => rows.insert(i, (Key(key.into_owned()), value)),
+            }
+            Ok(true)
+        })
+    }
+    fn change<E: From<HeapFault>, F>(
+        &mut self,
+        key: Cow<'_, [u8]>,
         access: &Access<'_>,
         preserve: bool,
         patch: F,
-    ) -> Result<bool, HeapFault>
+    ) -> Result<bool, E>
     where
-        F: FnOnce(&mut Vec<(Key, T)>, Result<usize, usize>, Key) -> Result<bool, HeapFault>,
+        F: FnOnce(&mut Vec<(Key, T)>, Result<usize, usize>, Cow<'_, [u8]>) -> Result<bool, E>,
     {
         #[cfg(test)]
         note_lookup::<T>();
-        fn edit<T: Cell, F>(
+        fn edit<T: Cell, E: From<HeapFault>, F>(
             branch: &mut Branch<T>,
-            key: Key,
+            key: Cow<'_, [u8]>,
             access: &Access<'_>,
             seq: bool,
             patch: &mut Option<F>,
             preserve: bool,
-        ) -> Result<(bool, Option<Branch<T>>), HeapFault>
+        ) -> Result<(bool, Option<Branch<T>>), E>
         where
-            F: FnOnce(&mut Vec<(Key, T)>, Result<usize, usize>, Key) -> Result<bool, HeapFault>,
+            F: FnOnce(&mut Vec<(Key, T)>, Result<usize, usize>, Cow<'_, [u8]>) -> Result<bool, E>,
         {
             let previous = (preserve && !matches!(&branch.link, Link::Dirty(page) if Rc::strong_count(page) == 1 && !matches!(&*page.borrow(), Node::Staged(..)))).then(|| branch.clone());
             let page = make_dirty(branch, access, seq)?;
@@ -910,7 +930,7 @@ impl<T: Cell> Tree<T> {
             match &mut *node {
                 Node::Staged(..) => unreachable!("loaded staged node"),
                 Node::Leaf(rows) => {
-                    let position = rows.binary_search_by(|(k, _)| k.cmp(&key));
+                    let position = rows.binary_search_by(|(k, _)| k.as_slice().cmp(key.as_ref()));
                     let (at, before, removed) = match position {
                         Ok(i) => (
                             i,
@@ -942,7 +962,7 @@ impl<T: Cell> Tree<T> {
                     let bytes = access.track_row(&page, rows, seq, before, Some(after));
                     if rows.len() > KEYED_LEAF_ROWS as usize || bytes > PAGE_TARGET_BYTES as usize {
                         if rows.len() == 1 {
-                            return Err(HeapFault::Malformed("unbounded tree cell".into()));
+                            return Err(HeapFault::Malformed("unbounded tree cell".into()).into());
                         }
                         let right = rows.split_off(rows.len() / 2);
                         refresh(branch, &node)?;
@@ -964,7 +984,9 @@ impl<T: Cell> Tree<T> {
                     return Ok((true, None));
                 }
                 Node::Index(rows) => {
-                    let i = rows.partition_point(|r| r.first <= key).saturating_sub(1);
+                    let i = rows
+                        .partition_point(|r| r.first.as_slice() <= key.as_ref())
+                        .saturating_sub(1);
                     let before = rows[i].summary;
                     let (changed, right) = edit(&mut rows[i], key, access, seq, patch, preserve)?;
                     if !changed {
@@ -1001,7 +1023,6 @@ impl<T: Cell> Tree<T> {
             access.track(&page, &node, seq);
             Ok((true, None))
         }
-        let key = Key(key);
         let mut patch = Some(patch);
         let changed = match &mut self.root {
             None => {

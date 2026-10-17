@@ -1,5 +1,6 @@
 //! Starting and carrying a cell preserve the paged identity directory.
 use super::*;
+use crate::compile::BindingName;
 use crate::interface::{CellStart, Finished, Target};
 use lash_kernel_state::paged::{
     AllocationCensus, CarryRoots, EditEpoch, KeyedRoot, ObjectInit, PageSource,
@@ -108,7 +109,7 @@ pub(super) fn start(
                     .decode(&exe, datum, &lash_kernel_doc::Type::Any)
                     .map_err(|error| start_interrupt(name.as_str(), error))?;
                 machine
-                    .session_write(name.clone(), value)
+                    .session_write(&BindingName::new(name.clone()), value, false)
                     .map_err(|error| start_interrupt(name.as_str(), error.into()))?;
                 machine.host.push(name.clone());
             }
@@ -225,7 +226,7 @@ impl KernelMachine {
             .collect::<Result<std::collections::BTreeSet<_>, _>>()?;
         let mut bindings = std::collections::BTreeMap::new();
         for name in dropped.iter().chain(&held) {
-            if let Some(value) = self.session_get(name)? {
+            if let Some(value) = self.heap.session_binding(name)? {
                 bindings.insert(name.clone(), value);
             }
         }
@@ -290,34 +291,49 @@ impl KernelMachine {
     /// The record of the session binding `name` holding `value`, declared at
     /// `main`.
     fn binding_record(&mut self, name: &Name, value: Value) -> Result<BindingRecord, Halt> {
-        let value = self
-            .heap
-            .canonical_value(value)
-            .map_err(|error| self.heap_halt(error))?;
-        Ok(BindingRecord {
-            name: lash_kernel_state::paged::NameRef::new(name, self.heap.pages())?,
-            declared: lash_kernel_state::paged::SiteRef::new(
-                &self.exe.code(self.exe.main).site,
-                self.heap.pages(),
-            )?,
-            value: BoundRecord::Value(value),
-        })
+        binding_record(
+            &mut self.heap,
+            &self.exe.code(self.exe.main).site,
+            name,
+            value,
+        )
+        .map_err(|error| self.heap_halt(error))
     }
 
-    pub(super) fn session_get(&self, name: &Name) -> Result<Option<Value>, HeapFault> {
-        self.heap.session_binding(name)
+    pub(super) fn session_get(&self, name: &BindingName) -> Result<Option<Value>, HeapFault> {
+        self.heap.session_binding_at(&name.key)
     }
-    pub(super) fn session_write(&mut self, name: Name, value: Value) -> Result<(), Halt> {
-        let record = self.binding_record(&name, value)?;
-        let mut bindings = self.heap.session_root().clone();
-        bindings.write(
-            lash_kernel_state::paged::metadata::metadata_key(&name),
-            record,
-            self.heap.pages(),
-        )?;
+    pub(super) fn session_write(
+        &mut self,
+        name: &BindingName,
+        value: Value,
+        existing: bool,
+    ) -> Result<bool, Halt> {
+        // Declarations prepare their value before touching the binding tree.
+        let record = if existing {
+            None
+        } else {
+            Some(self.binding_record(name, value.clone())?)
+        };
+        let exe = Arc::clone(&self.exe);
         self.heap_write(|heap| {
-            heap.set_session_root(bindings.clone())
-                .map_err(super::write_halt)
+            heap.write_session_binding(&name.key, |heap, previous| {
+                if existing {
+                    let Some(previous) = previous else {
+                        return Ok(None);
+                    };
+                    // The former existence read resolved shared variables too.
+                    if let BoundRecord::Shared(id) = previous.value {
+                        heap.variable_get(id)?;
+                    }
+                }
+                match &record {
+                    Some(record) => Ok(Some(record.clone())),
+                    None => binding_record(heap, &exe.code(exe.main).site, name, value.clone())
+                        .map(Some),
+                }
+            })
+            .map_err(super::write_halt)
         })
     }
     pub(super) fn finished(&mut self, result: Datum, finish: bool) -> Result<Finished, Halt> {
@@ -431,4 +447,18 @@ fn start_interrupt(what: &str, error: Interrupt) -> StartError {
             problem: format!("{what}: {other:?}"),
         },
     }
+}
+
+fn binding_record(
+    heap: &mut PagedHeap,
+    declared: &lash_kernel_doc::Site,
+    name: &Name,
+    value: Value,
+) -> Result<BindingRecord, HeapWriteError> {
+    let value = heap.canonical_value(value)?;
+    Ok(BindingRecord {
+        name: lash_kernel_state::paged::NameRef::new(name, heap.pages())?,
+        declared: lash_kernel_state::paged::SiteRef::new(declared, heap.pages())?,
+        value: BoundRecord::Value(value),
+    })
 }

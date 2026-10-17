@@ -483,6 +483,25 @@ impl PagedHeap {
             heap.session = root
         })
     }
+    /// Prepares a replacement only after looking up the binding. Returning
+    /// `None` leaves a missing assignment untouched. The proposed tree is
+    /// moved into the accounting installation without another root clone.
+    pub fn write_session_binding(
+        &mut self,
+        key: &[u8],
+        write: impl FnOnce(
+            &mut Self,
+            Option<&BindingRecord>,
+        ) -> Result<Option<BindingRecord>, HeapWriteError>,
+    ) -> Result<bool, HeapWriteError> {
+        let mut bindings = self.session.clone();
+        let access = self.access.clone();
+        if !bindings.write_with(key, &access, |previous| write(self, previous))? {
+            return Ok(false);
+        }
+        self.set_session_root(bindings)?;
+        Ok(true)
+    }
     /// Installs execution and statement roots together. `pinned_bytes`
     /// prices immediate pins omitted from `pinned`: it remains a holding
     /// location in both conservative accounting and exact refinement,

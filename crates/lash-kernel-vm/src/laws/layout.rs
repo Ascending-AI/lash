@@ -340,3 +340,66 @@ fn a_compiled_formula_charges_what_the_formula_states() {
         }
     }
 }
+
+/// K-SES-001 / K-MACH-008: inline and digested binding keys name the same
+/// state under every layout, including after rebuilding cold lookup caches.
+#[test]
+fn session_binding_images_are_identical_across_layouts_and_cold_caches() {
+    use lash_kernel_doc::graph_tokens::encode_body;
+
+    let long = "binding".repeat(100);
+    let declarations = (0..70)
+        .map(|i| format!("let v{i} = {i}\n"))
+        .collect::<String>();
+    let source = format!(
+        "main {{ {declarations} let {long} = 7 \
+         set v0 = {long} set v69 = v0 \
+         let reply = perform echo(v69) as Any \
+         set {long} = reply set v0 = {long} \
+         let again = perform echo(v0) as Any \
+         set {long} = again return {long} }}"
+    );
+    let observe = |layout| {
+        let mut embedder = Embedder::with(
+            &source,
+            Setup {
+                layout: Layout(layout),
+                ..Setup::default()
+            },
+        );
+        let mut images = Vec::new();
+        for hop in 0..2 {
+            assert!(matches!(embedder.run(), Step::Parked(_)));
+            images.push(encode_body(
+                &embedder.reopen(Layout(layout ^ (hop + 1)), true),
+            ));
+            embedder.deliver("echo");
+        }
+        let End::Finished(finished) = embedder.run_to_end(&[]) else {
+            panic!("the binding program must finish");
+        };
+        assert_eq!(finished.result, int(7));
+        let carry = finished.carry.expect("a session cell carries bindings");
+        let mut heap = lash_kernel_state::paged::PagedHeap::open_header(
+            carry.heap,
+            Box::new(embedder.source.clone()),
+            lash_kernel_state::paged::EditEpoch(2),
+        )
+        .unwrap();
+        lash_kernel_state::paged::HeapLifecycle::adopt(&mut heap, &carry).unwrap();
+        for name in ["v0", "v69", long.as_str()] {
+            assert!(
+                heap.session_binding(&lash_kernel_doc::Name::new(name))
+                    .unwrap()
+                    .is_some(),
+                "the prepared key must equal the canonical key for {name}"
+            );
+        }
+        images.push(encode_body(&carry));
+        (images, embedder.machine.meters().charged)
+    };
+    let reference = observe(0);
+    for layout in [1, 42, u64::MAX] {
+        assert_eq!(observe(layout), reference, "layout {layout}");
+    }
+}

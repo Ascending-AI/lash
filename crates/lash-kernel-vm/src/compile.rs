@@ -751,11 +751,30 @@ pub(crate) enum LibRun {
     Machine(MachineFunction),
 }
 
+/// A physical lookup cache; only the name participates in saved state.
+#[derive(Clone)]
+pub(crate) struct BindingName {
+    pub(crate) name: Name,
+    pub(crate) key: Arc<[u8]>,
+}
+impl BindingName {
+    pub(crate) fn new(name: Name) -> Self {
+        let key = lash_kernel_state::paged::metadata::metadata_key(&name).into();
+        Self { name, key }
+    }
+}
+impl std::ops::Deref for BindingName {
+    type Target = Name;
+    fn deref(&self) -> &Name {
+        &self.name
+    }
+}
+
 pub(crate) enum Var {
     Local(Local),
     /// A session binding, looked up by name when it is read
     /// (`K-SES-001`).
-    Session(Name),
+    Session(BindingName),
     /// A name no enclosing scope declares (`K-FORM-003`).
     Unbound(Name),
 }
@@ -766,7 +785,7 @@ pub(crate) enum Var {
 pub(crate) struct Stream {
     pub(crate) ops: Vec<Op>,
     pub(crate) consts: Vec<Constant>,
-    pub(crate) names: Vec<Name>,
+    pub(crate) names: Vec<BindingName>,
     pub(crate) fields: Vec<Field>,
     /// Computed record reads, keyed by their instruction's stream offset.
     pub(crate) index_hints: BTreeMap<u32, ReadHint>,

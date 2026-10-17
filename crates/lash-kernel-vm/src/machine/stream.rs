@@ -169,7 +169,7 @@ impl KernelMachine {
                 Op::Session { dst, name } => {
                     let name = &running.stream.names[name.ix()];
                     let value = match self.session_get(name)? {
-                        Some(value) => value.clone(),
+                        Some(value) => value,
                         None => return unbound(name),
                     };
                     self.put(at(dst), value);
@@ -178,10 +178,9 @@ impl KernelMachine {
                     let value = self.take(at(src));
                     self.reserve(value_bytes(&value))?;
                     let name = &running.stream.names[name.ix()];
-                    if self.session_get(name)?.is_none() {
+                    if !self.session_write(name, value, true)? {
                         return unbound(name);
                     }
-                    self.session_write(name.clone(), value)?;
                     return Ok(Ran::Done);
                 }
                 Op::Jump { skip } => pc += skip as usize,
@@ -368,7 +367,7 @@ impl KernelMachine {
             Op::BindSession { name, src } => {
                 let value = self.take(at(src));
                 self.reserve(value_bytes(&value))?;
-                self.session_write(stream.names[name.ix()].clone(), value)?;
+                self.session_write(&stream.names[name.ix()], value, false)?;
                 Ran::Done
             }
             Op::WriteUnbound { name, src } => {
