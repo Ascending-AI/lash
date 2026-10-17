@@ -61,9 +61,9 @@ pub use lash_core_store::store::{
     StoredRunTerminal, SurfaceFormat, WriterPin,
 };
 pub use lash_core_store::{PersistedNodeIds, surface_format};
+pub use lash_protocol_types::ConversationRecord;
 /// The protocol-generic form [`SessionHistoryRecord`] specializes.
 pub use lash_protocol_types::SessionHistoryRecord as GenericSessionHistoryRecord;
-pub use lash_protocol_types::{AppendVec, BaseRenderCache, ConversationRecord};
 pub use lash_protocol_types::{VersionRange, VersionRangeError};
 
 pub use lash_core::CheckpointKind;
