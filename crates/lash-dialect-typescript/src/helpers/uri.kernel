@@ -3,6 +3,11 @@
 use bytes.from_octets
 use bytes.utf8_decode
 use eq
+use int.parse
+use text.len
+use text.slice
+use text.split
+use text.find
 use error.new
 use int.rem_floor
 use int.div_floor
@@ -29,18 +34,6 @@ use ts.uri.encodeURI
 use ts.uri.encodeURIComponent
 use ts.uri.escape
 use ts.uri.flush
-use ts.uri.hex
-
-function ts.uri.hex(unit: Int) -> Int
-kernel 1
-errors "URIError"
-charge sum(8, deep(result))
-body {
-  if num.le(48, unit) { if num.le(unit, 57) { return num.sub(unit, 48) } }
-  if num.le(65, unit) { if num.le(unit, 70) { return num.sub(unit, 55) } }
-  if num.le(97, unit) { if num.le(unit, 102) { return num.sub(unit, 87) } }
-  throw error.new("URIError", "URI malformed", null)
-}
 
 function ts.uri.escape(octet: Int) -> Text
 kernel 1
@@ -107,57 +100,66 @@ body {
 function ts.uri.flush(octets: List(Int)) -> Text
 kernel 1
 errors "URIError"
-charge sum(8, deep(result))
+charge sum(8, size(octets), deep(result))
 body {
   try { return bytes.utf8_decode(bytes.from_octets(octets)) } catch malformed {
     throw error.new("URIError", "URI malformed", null)
   }
 }
 
+# Each input unit is walked a bounded number of times: split once, parse
+# two ASCII hex digits per escape, and flush disjoint octet runs. Literal
+# tails are copied whole, never looked up again from the input's beginning.
 function ts.uri.decode(input: Text, preserve: Bool) -> Text
 kernel 1
 errors "URIError"
-charge sum(8, size(input), size(preserve), deep(result))
+charge sum(32, product(64, size(input)), size(preserve), deep(result))
 body {
   let pieces = []
   let octets = []
-  let index = 0
-  let length = text.utf16_len(input)
-  while num.lt(index, length) {
-    let unit = text.utf16_get(input, index)
-    if eq(unit, 37) {
-      if num.lt(num.add(index, 2), length) {} else { throw error.new("URIError", "URI malformed", null) }
-      let highUnit = text.utf16_get(input, num.add(index, 1))
-      let lowUnit = text.utf16_get(input, num.add(index, 2))
-      let high = invoke ts.uri.hex(highUnit)
-      let low = invoke ts.uri.hex(lowUnit)
-      let octet = num.add(num.mul(high, 16), low)
+  let first = true
+  for chunk in text.split(input, "%") {
+    if first {
+      set pieces[list.len(pieces)] = chunk
+      set first = false
+    } else {
+      let length = text.len(chunk)
+      if num.lt(length, 2) { throw error.new("URIError", "URI malformed", null) }
+      let hex = text.slice(chunk, 0, 2)
+      let octet = 0
+      # The leading zero disallows int.parse's optional sign. Its grammar
+      # otherwise accepts exactly the two ASCII radix digits URI requires.
+      try { set octet = int.parse(text.concat("0", hex), 16) } catch malformed {
+        throw error.new("URIError", "URI malformed", null)
+      }
       let reserved = false
       if preserve {
-        if num.lt(octet, 128) {
-          let character = text.from_utf16_units([octet])
-          set reserved = num.le(0, text.utf16_find(";/?:@&=+$,#", character, 0))
-        }
+        # A valid hex pair cannot straddle the percent separators in this
+        # fixed table. Preserve the original pair's case in the result.
+        set reserved = num.le(0, text.find("%3B%3b%2F%2f%3F%3f%3A%3a%40%26%3D%3d%2B%2b%24%2C%2c%23", hex, 0))
       }
       if reserved {
-        let flushed = invoke ts.uri.flush(octets)
-        set pieces[list.len(pieces)] = flushed
-        set octets = []
-        set pieces[list.len(pieces)] = text.utf16_slice(input, index, num.add(index, 3))
+        if num.lt(0, list.len(octets)) {
+          let flushed = invoke ts.uri.flush(octets)
+          set pieces[list.len(pieces)] = flushed
+          set octets = []
+        }
+        set pieces[list.len(pieces)] = text.concat("%", hex)
       } else { set octets[list.len(octets)] = octet }
-      set index = num.add(index, 3)
-    } else {
-      let flushed = invoke ts.uri.flush(octets)
-      set pieces[list.len(pieces)] = flushed
-      set octets = []
-      let end = num.add(index, 1)
-      if num.le(55296, unit) { if num.le(unit, 56319) { set end = num.add(end, 1) } }
-      set pieces[list.len(pieces)] = text.utf16_slice(input, index, end)
-      set index = end
+      if num.lt(2, length) {
+        if num.lt(0, list.len(octets)) {
+          let flushed = invoke ts.uri.flush(octets)
+          set pieces[list.len(pieces)] = flushed
+          set octets = []
+        }
+        set pieces[list.len(pieces)] = text.slice(chunk, 2, length)
+      }
     }
   }
-  let flushed = invoke ts.uri.flush(octets)
-  set pieces[list.len(pieces)] = flushed
+  if num.lt(0, list.len(octets)) {
+    let flushed = invoke ts.uri.flush(octets)
+    set pieces[list.len(pieces)] = flushed
+  }
   return text.join(pieces, "")
 }
 
@@ -176,7 +178,7 @@ body {
 function ts.uri.decodeURI(this: Any, args: List(Any)) -> Text
 kernel 1
 errors "type_error", "URIError"
-charge sum(8, deep(args), deep(result))
+charge sum(32, product(64, deep(args)), deep(result))
 body {
   let padded = invoke ts.pad(args, 1)
   let arg_2 = padded[0]
@@ -200,7 +202,7 @@ body {
 function ts.uri.decodeURIComponent(this: Any, args: List(Any)) -> Text
 kernel 1
 errors "type_error", "URIError"
-charge sum(8, deep(args), deep(result))
+charge sum(32, product(64, deep(args)), deep(result))
 body {
   let padded = invoke ts.pad(args, 1)
   let arg_4 = padded[0]

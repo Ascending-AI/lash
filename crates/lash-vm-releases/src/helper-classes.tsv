@@ -833,7 +833,6 @@ ts.uri.encodeURI	operation
 ts.uri.encodeURIComponent	operation
 ts.uri.escape	total
 ts.uri.flush	total
-ts.uri.hex	total
 ts.url.canParse	operation
 ts.url.construct	operation
 ts.url.is	total

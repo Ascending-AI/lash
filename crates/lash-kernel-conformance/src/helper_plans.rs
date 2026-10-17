@@ -530,3 +530,115 @@ fn generated_callees_run_a_declined_body_once() {
         crate::ExpectedEnd::Finished(Datum::Tuple(vec![log.clone(), log]))
     );
 }
+
+/// K-URI-WORK (FIG-6720): one completion price bounds the synchronous
+/// delegated calls and heap bookkeeping, including work before a URI raises.
+/// The decoder traverses percent-delimited chunks: its 64 units per input
+/// unit cover calls, holding changes and reservations; 32 cover fixed work.
+#[test]
+fn uri_decode_completion_price_bounds_delegated_work_on_return_and_raise() {
+    use lash_kernel_vm::perf_witness::{self, Profiling as _};
+    use std::sync::Arc;
+
+    let runner = runner::Runner::new("typescript").unwrap();
+    let case = runner::Case {
+        id: "uri-work".into(),
+        dialect: "typescript".into(),
+        source: "decodeURI('');".into(),
+        bits: 0,
+        stride: 0,
+        nanoseconds: 0,
+    };
+    let runner::Lowered::Program(base) = runner.lower(&case).unwrap() else {
+        panic!("the URI operation lowers");
+    };
+    for name in ["ts.uri.decodeURI", "ts.uri.decodeURIComponent"] {
+        let function = base
+            .library
+            .registry()
+            .iter()
+            .find_map(|(id, registered)| {
+                (registered.definition().name.as_str() == name).then_some(*id)
+            })
+            .unwrap();
+        for repeats in [0, 1, 16, 256] {
+            let prefix = "%E0%A0%80".repeat(repeats);
+            for (suffix, raised) in [
+                ("", false),
+                ("literal😀%2f", false),
+                ("%", true),
+                ("%+1", true),
+                ("%ED%A0%80", true),
+            ] {
+                let input = format!("{prefix}{suffix}");
+                let source = format!(
+                    "kernel 1\nnumbers by_spelling\nuse decode = @{function}\nmain {{ let answer = invoke decode(null, [{input:?}]) return answer }}"
+                );
+                let program = Program {
+                    document: Arc::new(lash_kernel_doc::parse_document(&source).unwrap()),
+                    ..base.clone()
+                };
+                let mut machine = crate::pages::start(
+                    program,
+                    Bounds {
+                        charge: 50_000_000,
+                        memory: 64 << 20,
+                        call_depth: 200,
+                        live_tasks: 100,
+                        requests_per_park: 100,
+                        join_members: 100,
+                    },
+                    CellStart {
+                        target: Target::Main,
+                        args: Vec::new(),
+                        session: None,
+                        owner: crate::pages::OWNER,
+                        modes: Default::default(),
+                        host: Vec::new(),
+                    },
+                )
+                .unwrap();
+                let mut world = World {
+                    bits: 0,
+                    stride: 0,
+                    nanoseconds: 0,
+                    prints: Vec::new(),
+                };
+                machine.count_work();
+                perf_witness::enable_work();
+                let step = machine.run(&mut world, u64::MAX).unwrap();
+                let fixed = perf_witness::take_work().unwrap();
+                perf_witness::disable_work();
+                let Step::Ended(end) = step else {
+                    panic!("a synchronous decoder ends");
+                };
+                if raised {
+                    assert!(
+                        matches!(
+                            end,
+                            lash_kernel_vm::End::Error(lash_kernel_vm::RunError::Uncaught(_))
+                        ),
+                        "{end:?}"
+                    );
+                } else {
+                    assert!(matches!(end, lash_kernel_vm::End::Finished(_)), "{end:?}");
+                }
+                let work = machine.work().unwrap();
+                let price = work
+                    .natives
+                    .iter()
+                    .find(|native| native.symbol.name == name)
+                    .unwrap()
+                    .counts
+                    .self_charge;
+                let calls: u64 = work.natives.iter().map(|native| native.counts.calls).sum();
+                let admitted_work =
+                    calls + fixed.heap.accounting_changes + fixed.heap.accounting_reservations;
+                assert!(
+                    admitted_work <= price,
+                    "{name}, repeats={repeats}, suffix={suffix:?}: {admitted_work} calls, holding changes and reservations exceed completion price {price}"
+                );
+            }
+        }
+    }
+}

@@ -713,7 +713,6 @@ ts.uri.encodeURI	TypeScript uri encodeURI
 ts.uri.encodeURIComponent	TypeScript uri encodeURIComponent
 ts.uri.escape	TypeScript uri escape
 ts.uri.flush	TypeScript uri flush
-ts.uri.hex	TypeScript uri hex
 ts.url.canParse	TypeScript url canParse
 ts.url.construct	TypeScript url construct
 ts.url.is	TypeScript url is

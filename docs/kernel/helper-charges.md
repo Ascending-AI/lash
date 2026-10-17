@@ -330,3 +330,41 @@ traversal test. `list.sort` declares two units per merge/copy test because a
 comparator may shrink the original while the merge walks a captured copy.
 `tasks.wait_all` and `tasks.cancel_all` declare two units per task-set test;
 their trip counts come from live tasks rather than call arguments.
+
+## URI traversal bound (FIG-6720)
+
+`ts.uri.decode` walks percent-delimited chunks. `text.split` makes two
+linear passes. A chunk consumes one percent and two ASCII hex digits;
+`int.parse("0" + pair, 16)` validates those digits together, rejecting signs,
+whitespace, separators and non-ASCII digits. The remaining literal tail is
+copied once. Octet runs are disjoint: `bytes.from_octets` and strict
+`bytes.utf8_decode` each traverse a run once before it is discarded. Reserved
+pairs flush the preceding run before their original spelling is appended.
+No loop repeatedly indexes the full input or dispatches a hex helper per digit.
+
+The completion bound reserves 32 fixed units for padding, conversion and
+assembly, plus 64 per input unit for delegated parsing, tests, appends and
+flushes, and the result size for final assembly. An escaped chunk consumes
+at least three input units; even the reserved-pair-plus-literal branch uses
+fewer than 48 delegated calls. Each call and statement also holds and releases operands. The 64-unit
+coefficient includes these accounting changes and reservations as well as
+the split, copy and UTF-8 passes; three units per escape give 192 units for
+its bounded calls and bookkeeping. `ts.uri.decodeURI` and `ts.uri.decodeURIComponent`
+apply that coefficient to `deep(args)`, covering the arguments' delegated
+conversion as well as decoding. Guest callbacks keep their ordinary charge.
+`ts.uri.flush` now includes the octet list size, so failed UTF-8 validation
+is covered when there is no result. Raises use result size zero, as before.
+
+| Helper | Previous completion formula | Completion formula |
+| --- | --- | --- |
+| `ts.uri.decode` | `sum(8, size(input), size(preserve), deep(result))` | `sum(32, product(64, size(input)), size(preserve), deep(result))` |
+| `ts.uri.decodeURI`, `ts.uri.decodeURIComponent` | `sum(8, deep(args), deep(result))` | `sum(32, product(64, deep(args)), deep(result))` |
+| `ts.uri.flush` | `sum(8, deep(result))` | `sum(8, size(octets), deep(result))` |
+
+`helper_plans::uri_decode_completion_price_bounds_delegated_work_on_return_and_raise`
+pins K-URI-WORK: delegated calls plus heap-accounting changes and
+reservations stay below the operation's completion price
+on successful and raised outcomes over growing escaped inputs, literal tails,
+reserved escapes, malformed percent sequences and invalid UTF-8. The fixed
+successful probe separately measures real work; a higher completion price
+alone cannot satisfy the performance proof.
