@@ -1,0 +1,5365 @@
+{
+  "ticket": "FIG-5925",
+  "measured_revision": "6b32e646b030838eb7dd6393058cb76a087a5097",
+  "date": "2026-10-17",
+  "verdict": "Landed sharing meets the cell request/outcome repeated-large-value outcome; no product change.",
+  "backend": "SQLite file; production durable engine, TypeScript subprocess worker",
+  "profile": "default development; debug_assertions=true",
+  "scope": "admission-to-turn.commit; excludes facade send/observation; no wall-time or optimization-speedup claim",
+  "method": "Temporary probes at SQLite graph.rs and pages.rs absent-node insertion sites, joined by SQL Window operation to accepted recorder transactions; sums match maintained newly_installed_graph_bytes for every operation. Counts include insertions after GC. Not recorder first-seen counts, staged bytes, SQL bind bytes, allocated database file size or WAL bytes.",
+  "units": {
+    "installed_bytes": "canonical graph-node envelope bytes actually newly inserted in accepted commits",
+    "by_kind": "numeric registry kind to installed canonical bytes",
+    "instructions": "whole-process user instructions, worker descendants and probes included; two batches per process",
+    "peak_rss_kib": "/usr/bin/time -v process/descendant maximum; not summed simultaneous RSS",
+    "load1": "before and after process"
+  },
+  "workload": {
+    "parks": [
+      1,
+      3,
+      10
+    ],
+    "value_bytes": [
+      0,
+      1024,
+      16384
+    ],
+    "patterns": [
+      "repeat x P times",
+      "fresh: x (P-1) times followed by decimal await index, 0..9; empty at P=0"
+    ],
+    "batches_per_population": 2,
+    "retention": "all echoed answers remain in the guest kept array",
+    "archive_validation": "After every turn, committed_turns_with_tool_calls returns exactly N ordered calls; every args equals {i, pad}; every typed ToolCallOutput equals success(args), including output metadata.",
+    "freshness": "fresh within one batch only; batch 1 repeats batch 0 values and is explicitly warm",
+    "failure_population": "No failing effects in this echo fixture. No runtime/storage/codec/host code changes retained, so typed failures and their order remain unchanged; no failure-injection proof claimed."
+  },
+  "counts": {
+    "populations": 18,
+    "batches_completed": 36,
+    "ordered_calls_verified": 168,
+    "parks_verified": 168,
+    "failed_populations": 0,
+    "libtest_executed": 0
+  },
+  "conclusion": {
+    "repeated_later_park_text_bytes": 0,
+    "outcome_text_bytes": 0,
+    "fresh_1024_later_park_bytes_per_value": 1035,
+    "fresh_16384_later_park_bytes_per_value": 16397,
+    "request_kind": "FrozenRequest=19: 198 bytes per large-value admission on cold batches",
+    "archive_kind": "CallBody=40: 192 bytes per large-value settled call, independent of 1/16 KiB pad",
+    "necessary_other_bytes": "Initial source/doc/heap leaves and exact model/prompt spellings remain; per-call structural nodes grow. These are individually attributed, not mistaken for request/outcome value duplication."
+  },
+  "evidence_root": ".kiln/FIG-5925",
+  "evidence_sha256": {
+    "p1-cell-0/identity.json": "65739e8dd5aa602998b5628978abf304df9f984849d3bfae599298b4b28fae12",
+    "p1-cell-0/receipt.jsonl": "7a7db040ada2033a10d4da010c6291453716df6b2d3ef596b7b92ea3f74b0f31",
+    "p1-cell-0/stderr.log": "652460093065f442f814bcdd46b71fb623b7109098a2570d08b5fe1f97275457",
+    "p1-cell-0/perf.txt": "0e0f11537cfb7a66e114f535c9b34805e63c034e4dd719f579f1f49bc0466892",
+    "p1-cell-0/resources.txt": "83d2d823d837cdf66589ab81e694cbd480d0de58c59312b567a47fe05528d371",
+    "p1-cell-1024/identity.json": "5fef8f2661eaa13f5eef7d045dbbdaab7a3abcb740540fea91c5912c50f6beae",
+    "p1-cell-1024/receipt.jsonl": "aecd342826c96ae97a75427044b5b673f6f97ecad29912329d9317ec3ce22ad1",
+    "p1-cell-1024/stderr.log": "d07849057f9256e94d088145676601475ba67870eeaae08be8ef672ba7fceb24",
+    "p1-cell-1024/perf.txt": "f84a2c9d1ad39cc9cf0c07444b140e6547c288f082ddbcd26ffcff31df96e5aa",
+    "p1-cell-1024/resources.txt": "fc87e251de75e85d501ceccc56bb82780d8bf65db8e5a0417749858d8eca1fe1",
+    "p1-cell-16384/identity.json": "3b3e587ca24753b6d9d3aefc8ef4566e6af47b733c37f8978dff8529cdf473d8",
+    "p1-cell-16384/receipt.jsonl": "ee615de7b8b09e0da22eb3be3bb1541cc4ffdc790115d343cd9c8ef28ee143c3",
+    "p1-cell-16384/stderr.log": "70b2c7de4c8b43b2f7717611638027775936ffd44b9022c0ead7567ba596f673",
+    "p1-cell-16384/perf.txt": "a84980490ae53e33a81ee97a9a2130587d3d58bdf1c68bcaae9aca6136303b10",
+    "p1-cell-16384/resources.txt": "7fa96d1da5a1b568e503b35690fce15691af3e8bcda6824633918c8e33335e79",
+    "p1-cell-fresh-0/identity.json": "97afe70b449ed2c45f50f812ae4e2131554f8ffd3e132b665656537c940d73e1",
+    "p1-cell-fresh-0/receipt.jsonl": "c4c761e6a840a089cd964e3d9aa842b0e54732687aca040ffcef8f8467bacd25",
+    "p1-cell-fresh-0/stderr.log": "3f3e94f4871d8de105588ddc96fc3b71e701e233e78a8e9ced412e2be2e197d1",
+    "p1-cell-fresh-0/perf.txt": "3a1572a32cd6661abda613e0ea9a5fba9ebfe5b09c2c9582b00f56360e081488",
+    "p1-cell-fresh-0/resources.txt": "5cd5bddaaf5505a7fe432cc58cf6bd4beb367c183148d9694909bbd272e786bd",
+    "p1-cell-fresh-1024/identity.json": "c913e4b09826a1f98f11f4f18aade5d8fa32927db8cdbccfe50ee20354eeaab6",
+    "p1-cell-fresh-1024/receipt.jsonl": "10f5a7070728dd82802d4d9d9d04303e742f862444a598996e7d0c6e6ccb1ab2",
+    "p1-cell-fresh-1024/stderr.log": "8daa053795a12c8b9c7b240e1ed1d0c57e37526cdf1afdae351841b39699e010",
+    "p1-cell-fresh-1024/perf.txt": "5ae8401d7435a3a801b22775d8d5abeb6cac9441972a211d6b5e1f749f712291",
+    "p1-cell-fresh-1024/resources.txt": "4459ab24d66f699f5c8cbbc65c337667eecef67a4038452aaa95a6e433ce0a90",
+    "p1-cell-fresh-16384/identity.json": "24fd451b53276c7e8adebea2a979fe4aaa68fbbfa4be36816bd265c75bd1d767",
+    "p1-cell-fresh-16384/receipt.jsonl": "41fd88f9b3ddbf57810bf3622def279ec97e28648848b31bd9669537952e53b8",
+    "p1-cell-fresh-16384/stderr.log": "5625b8f5e602f236119c4bce7ed2eb9357419bf7dcec7dbaeda8f02df1876708",
+    "p1-cell-fresh-16384/perf.txt": "c533ca78e5b640dcf9f17e3b18779a58a50362fea9782d8d657284e91714ace4",
+    "p1-cell-fresh-16384/resources.txt": "afb4930f71492e625a88fc86cde5ea215401bce41154ca05e78536449df0c72c",
+    "p10-cell-0/identity.json": "16a54113740f63d7a7cfaf4be8d1fa52302378de5dbfad309aa33d07d62b4c26",
+    "p10-cell-0/receipt.jsonl": "7c8c560ad6bd901a6a4a2e7d472c34bdf273aaf68318f2ff7085efda6e62cf50",
+    "p10-cell-0/stderr.log": "cd62af79830dd50c56e09e29573d9a40c7703e07da68a51303b89f587b716722",
+    "p10-cell-0/perf.txt": "70c6fce9800c27781596f7dcf3c8914ae7bd53090d3d9a6990f090004ce6fbc5",
+    "p10-cell-0/resources.txt": "ae139f218952b504816f52254cdbca2301f23309b7b3e7b09544685c2eb6c218",
+    "p10-cell-1024/identity.json": "5e092ed0813a03b276b52ec2f3e29fe1c028ba982d815ed4ec47d8d4ca237ffe",
+    "p10-cell-1024/receipt.jsonl": "5873e89b4bbab0e387e3e13457bfd7bbabc375c1c920a0a8e9fe373940d633e5",
+    "p10-cell-1024/stderr.log": "87f70e340757e7b318e3d433a19c1bdcb7fe0f6cb3fc96397065b24b4d812948",
+    "p10-cell-1024/perf.txt": "4a7e7ed2985faf1bcdb2fd33bbd9ff011f101a7a485eee29a4db916a14b95baf",
+    "p10-cell-1024/resources.txt": "b3e5d05ac1bf33ad2d92b6353b265c8f0347a65ff979c2a74ba0a7bf73d8744a",
+    "p10-cell-16384/identity.json": "d67304b3c05df07b8b2c4e5e38fa695e1f2f771bfdae1166f36b810d5732fec7",
+    "p10-cell-16384/receipt.jsonl": "05e224d2408de8f651635d02edea33655be4bc3b49f39c6bab151820a466f803",
+    "p10-cell-16384/stderr.log": "d216ed6d0ddf6f79f74ff52d3354c6af49ed8476474c4c336f779be6d274af28",
+    "p10-cell-16384/perf.txt": "0cadd63aea7940763ea62ce4ba202e3bc64b2718224eb10f6c7c6fc87582ea50",
+    "p10-cell-16384/resources.txt": "3f436dc39f052d077d1c3a6e91d20bbde6b244674ea7be9ac80c90d7164ca496",
+    "p10-cell-fresh-0/identity.json": "242bb3b38d59fb1c6805653883f306b58d5562e00eb8ed56312ffd48d7ed33af",
+    "p10-cell-fresh-0/receipt.jsonl": "72efe16ade584ee86711e39ee457776da6a3ad511061ac470ea3ed63934ae23d",
+    "p10-cell-fresh-0/stderr.log": "5d072c7a94261bf9d3fb8731d493f48ec932d4f941f533aa72098460d9485e77",
+    "p10-cell-fresh-0/perf.txt": "7c500ea9f53f271c1f7a36fb920d5916dc3c78d9455e6a80f9b5017941ab4bbf",
+    "p10-cell-fresh-0/resources.txt": "e39eb4e35ad228b5a762eef5c1bc7f1d959e776347587923693f785d8fb8e8e7",
+    "p10-cell-fresh-1024/identity.json": "802b089dba510abdbaca3171242fd7010472695f10ba319da3a276ac168b193d",
+    "p10-cell-fresh-1024/receipt.jsonl": "465a5930b364285c51706e12e5c170e2452cca123cc094a0788eb717643565a7",
+    "p10-cell-fresh-1024/stderr.log": "a62d09e5e6276d91948413bd5c0794841809638da34c2be9c9c607ffc4ab5be8",
+    "p10-cell-fresh-1024/perf.txt": "166de82bcc178ecf6eeb1fb8cfe859324460c0b9bdcc0ba63df00cb563b739d5",
+    "p10-cell-fresh-1024/resources.txt": "e6310694faf96bad2ce7dd91a23224c9bcda7564ca2c8e03c47ee7a194fc774d",
+    "p10-cell-fresh-16384/identity.json": "458beb4036628439b2d3e56d46ea88e4325047882d33772f05777f9dddf0c7ae",
+    "p10-cell-fresh-16384/receipt.jsonl": "23e4e4a0ee8b00061fc5e83d1049af6290a3a7b3dc890cd815a746482e2a17ed",
+    "p10-cell-fresh-16384/stderr.log": "797e54ef7a89f1a6c76e0c7be614e48f130b92877d08fcb95b9f99f19cd1bb0e",
+    "p10-cell-fresh-16384/perf.txt": "a9fbd3f5e12b19325801b3defb92891827ad180bd8a3ee6db4c0a1d3c33ab899",
+    "p10-cell-fresh-16384/resources.txt": "411f3e8a1c2094f5edfd9f64851465387c0f7fee19a97a7555949a74e429bd48",
+    "p3-cell-0/identity.json": "7c7e003f95a0058d5932d638592efb9b297fb30c4821e24ee13c76702f99d1bd",
+    "p3-cell-0/receipt.jsonl": "19d2dc204b6c1bc1fde04cb450ca67e6328939ca25088d6ac8ebafd2258986b4",
+    "p3-cell-0/stderr.log": "5586eb7a1a60c428d13e50e856f7100f310d438dc92e33dfd87b6c231daa0f8c",
+    "p3-cell-0/perf.txt": "4546bb745f9ff6e054bda0ebc59d5aef67b088aea90a43fa0263c3140cacb60a",
+    "p3-cell-0/resources.txt": "8564d2892f2f78690aaa776d8d19d38cbec7a2c7787311ce3a9ce5bf32e5ef92",
+    "p3-cell-1024/identity.json": "99b87dc67550ca2c50df32108c548da4614a9a06fe0ef40befbcb88bf7e5b73c",
+    "p3-cell-1024/receipt.jsonl": "e38e4c32cde8f67d3f1d37cb7092d9b3a93989ef3165523338bc129539c07ebf",
+    "p3-cell-1024/stderr.log": "4df1f36a75da54d38a9fec102012bab9ede7fe4cb77e13a293c2991e3b4f4224",
+    "p3-cell-1024/perf.txt": "3b48a993094424a98b1b0270477f80ec59a61d02b087c26c8837768f47320c1b",
+    "p3-cell-1024/resources.txt": "3a054b7339b3352d498ffd1f33f6cdc2f093b8d58924f9fb383c41af1ba2a7da",
+    "p3-cell-16384/identity.json": "471a031cf74638ee602a0bcb7f90fbb00c70feb44836c40a24eae1588f876eda",
+    "p3-cell-16384/receipt.jsonl": "35f95b920ac45cdbb04d138c2599d564ada421901b216a3f1683be630ccc4a6f",
+    "p3-cell-16384/stderr.log": "f281f005a5c4ce9235ca877a4cdd9bb1642d9ca6c7dde1353fe58cefd4029d69",
+    "p3-cell-16384/perf.txt": "a4db2dc94c79c8fead2b744ac2dff84999f6065bad8d19ba72599d78eb09d090",
+    "p3-cell-16384/resources.txt": "0a9b8627ab3b6b39fb6547c8414ab968a4a17be9a9dbaeed053f8c7dcab2d9d3",
+    "p3-cell-fresh-0/identity.json": "cdc4255ccc6eff62d9681887cb901407152bf2a645e5857f6980f460b46568cd",
+    "p3-cell-fresh-0/receipt.jsonl": "aba926cbdf69db6390b9e91fcbf8c9f65d38f63cb121e21c11beb16ec5a898f8",
+    "p3-cell-fresh-0/stderr.log": "616c55c477569a3361e2686afa34454545aebb79d10242033f1aa5b2351e4044",
+    "p3-cell-fresh-0/perf.txt": "4d909171acff1810adfe72df0e68b760816a002c4ff8127a07a127e300a2d4cc",
+    "p3-cell-fresh-0/resources.txt": "4b978f01a4d8fcd28ec6747f26963c00c23a31b351eaca1ca470b799b7f28b0a",
+    "p3-cell-fresh-1024/identity.json": "180abab2c34c82ff76fe8d9a58d1461dee9663a2c35bfb9007620287a1fdd245",
+    "p3-cell-fresh-1024/receipt.jsonl": "7dcb1372b7a9ca4e79fcef8642757c142f2857b8ae81c306eeeae32f3f85792d",
+    "p3-cell-fresh-1024/stderr.log": "df293eb660146c2824b85ad860f7e6db2ec0aea600b1690abcc4db21c079aff4",
+    "p3-cell-fresh-1024/perf.txt": "ad76bdcc305c7de5900bd1fde161e71c857a99de1f1aa0d0d5661cd710bdc266",
+    "p3-cell-fresh-1024/resources.txt": "b563f57154b334b98b87b1d82c0e88fb1a6ff7f7e65545dbd78d7cd844972548",
+    "p3-cell-fresh-16384/identity.json": "e0fcc13190611e3e7a79cebe20d95d985fa469b18f4b4ebdfb63d1e308a75313",
+    "p3-cell-fresh-16384/receipt.jsonl": "b74ac035a849e678e5bc8e03596ed51dfb6e44241fc2ce3c939f2ff7920dcfaf",
+    "p3-cell-fresh-16384/stderr.log": "58b351f8c8e4e62e03ed69036b3b4ad22191c331c27b0cbf5dce09febeabf0fc",
+    "p3-cell-fresh-16384/perf.txt": "d18cb0d817163f3543b8501aff7fb2939480abba5fca75dfd1ab9e6ad1e71b59",
+    "p3-cell-fresh-16384/resources.txt": "5d373c2c4a133e36dc3029d8ef31209f0595f4cf4ea406d1419b593224cc7741",
+    "measurement.patch": "50a5016d907fef26ef23d6adf35531f09451ad3ecec3b43434d307af3dd5e46e",
+    "measure.py": "1857a70139a632ce04d4f42b27ac7b661896a4c1234f83125246e9d5f80ab86a",
+    "analyze.py": "c16e1e645a00c46f8d0afbec12001187de8be044273aea6ac80daef6af45cf14"
+  },
+  "samples": [
+    {
+      "parks": 1,
+      "value_bytes": 0,
+      "fresh": false,
+      "batch": 0,
+      "installed_bytes": 1387784,
+      "actor_installed_bytes": 1387784,
+      "by_kind": {
+        "1": 27738,
+        "5": 51,
+        "6": 131782,
+        "7": 129,
+        "8": 42,
+        "9": 146,
+        "12": 400,
+        "13": 44,
+        "14": 1218170,
+        "15": 353,
+        "17": 94,
+        "18": 849,
+        "19": 166,
+        "20": 89,
+        "21": 337,
+        "22": 180,
+        "24": 66,
+        "31": 97,
+        "32": 46,
+        "33": 1887,
+        "34": 383,
+        "35": 57,
+        "36": 261,
+        "37": 78,
+        "39": 432,
+        "40": 160,
+        "41": 12,
+        "42": 566,
+        "43": 236,
+        "1000": 308,
+        "1004": 2269,
+        "1007": 236,
+        "1008": 120
+      },
+      "labels": {
+        "turn.admit": {
+          "bytes": 0,
+          "by_kind": {}
+        },
+        "model.start": {
+          "bytes": 25555,
+          "by_kind": {
+            "1": 22311,
+            "21": 47,
+            "32": 46,
+            "33": 1258,
+            "35": 57,
+            "39": 388,
+            "43": 236,
+            "1004": 856,
+            "1007": 236,
+            "1008": 120
+          }
+        },
+        "model.answer": {
+          "bytes": 2611,
+          "by_kind": {
+            "1": 2611
+          }
+        },
+        "model.done+cell.snapshot+admit": {
+          "bytes": 1358480,
+          "by_kind": {
+            "1": 2816,
+            "5": 51,
+            "6": 131782,
+            "7": 129,
+            "12": 400,
+            "13": 44,
+            "14": 1218170,
+            "15": 353,
+            "17": 94,
+            "18": 849,
+            "19": 166,
+            "21": 69,
+            "22": 180,
+            "24": 66,
+            "33": 629,
+            "36": 261,
+            "37": 78,
+            "39": 44,
+            "41": 12,
+            "42": 566,
+            "1000": 308,
+            "1004": 1413
+          }
+        },
+        "round.outcome": {
+          "bytes": 609,
+          "by_kind": {
+            "8": 42,
+            "20": 89,
+            "21": 221,
+            "31": 97,
+            "40": 160
+          }
+        },
+        "turn.commit": {
+          "bytes": 529,
+          "by_kind": {
+            "9": 146,
+            "34": 383
+          }
+        }
+      },
+      "archived_calls": 1,
+      "parks_verified": 1,
+      "blocks": [
+        {
+          "operation": "cell.park",
+          "installed_bytes": 1358480
+        }
+      ],
+      "source": "p1-cell-0",
+      "load1": [
+        19.72216796875,
+        19.72216796875
+      ],
+      "instructions": 4038104580,
+      "peak_rss_kib": 154096
+    },
+    {
+      "parks": 1,
+      "value_bytes": 0,
+      "fresh": false,
+      "batch": 1,
+      "installed_bytes": 29195,
+      "actor_installed_bytes": 29195,
+      "by_kind": {
+        "1": 24339,
+        "17": 94,
+        "18": 849,
+        "19": 166,
+        "20": 89,
+        "21": 320,
+        "22": 180,
+        "24": 66,
+        "32": 46,
+        "33": 1887,
+        "36": 261,
+        "37": 78,
+        "39": 352,
+        "40": 160,
+        "1000": 308
+      },
+      "labels": {
+        "turn.admit": {
+          "bytes": 0,
+          "by_kind": {}
+        },
+        "model.start": {
+          "bytes": 20571,
+          "by_kind": {
+            "1": 18912,
+            "21": 47,
+            "32": 46,
+            "33": 1258,
+            "39": 308
+          }
+        },
+        "model.answer": {
+          "bytes": 2611,
+          "by_kind": {
+            "1": 2611
+          }
+        },
+        "model.done+cell.snapshot+admit": {
+          "bytes": 5543,
+          "by_kind": {
+            "1": 2816,
+            "17": 94,
+            "18": 849,
+            "19": 166,
+            "21": 52,
+            "22": 180,
+            "24": 66,
+            "33": 629,
+            "36": 261,
+            "37": 78,
+            "39": 44,
+            "1000": 308
+          }
+        },
+        "round.outcome": {
+          "bytes": 470,
+          "by_kind": {
+            "20": 89,
+            "21": 221,
+            "40": 160
+          }
+        },
+        "turn.commit": {
+          "bytes": 0,
+          "by_kind": {}
+        }
+      },
+      "archived_calls": 1,
+      "parks_verified": 1,
+      "blocks": [
+        {
+          "operation": "cell.park",
+          "installed_bytes": 5543
+        }
+      ],
+      "source": "p1-cell-0",
+      "load1": [
+        19.72216796875,
+        19.72216796875
+      ],
+      "instructions": 4038104580,
+      "peak_rss_kib": 154096
+    },
+    {
+      "parks": 1,
+      "value_bytes": 1024,
+      "fresh": false,
+      "batch": 0,
+      "installed_bytes": 1397081,
+      "actor_installed_bytes": 1397081,
+      "by_kind": {
+        "1": 35714,
+        "5": 51,
+        "6": 131782,
+        "7": 129,
+        "8": 74,
+        "9": 146,
+        "12": 400,
+        "13": 44,
+        "14": 1218170,
+        "15": 353,
+        "17": 94,
+        "18": 873,
+        "19": 198,
+        "20": 89,
+        "21": 343,
+        "22": 180,
+        "24": 66,
+        "31": 98,
+        "32": 46,
+        "33": 1887,
+        "34": 383,
+        "35": 57,
+        "36": 261,
+        "37": 90,
+        "39": 432,
+        "40": 192,
+        "41": 12,
+        "42": 584,
+        "43": 236,
+        "1000": 309,
+        "1004": 2343,
+        "1005": 1050,
+        "1007": 275,
+        "1008": 120
+      },
+      "labels": {
+        "turn.admit": {
+          "bytes": 0,
+          "by_kind": {}
+        },
+        "model.start": {
+          "bytes": 29480,
+          "by_kind": {
+            "1": 26159,
+            "21": 47,
+            "32": 46,
+            "33": 1258,
+            "35": 57,
+            "39": 388,
+            "43": 236,
+            "1004": 894,
+            "1007": 275,
+            "1008": 120
+          }
+        },
+        "model.answer": {
+          "bytes": 4671,
+          "by_kind": {
+            "1": 4671
+          }
+        },
+        "model.done+cell.snapshot+admit": {
+          "bytes": 1361721,
+          "by_kind": {
+            "1": 4884,
+            "5": 51,
+            "6": 131782,
+            "7": 129,
+            "12": 400,
+            "13": 44,
+            "14": 1218170,
+            "15": 353,
+            "17": 94,
+            "18": 873,
+            "19": 198,
+            "21": 69,
+            "22": 180,
+            "24": 66,
+            "33": 629,
+            "36": 261,
+            "37": 90,
+            "39": 44,
+            "41": 12,
+            "42": 584,
+            "1000": 309,
+            "1004": 1449,
+            "1005": 1050
+          }
+        },
+        "round.outcome": {
+          "bytes": 680,
+          "by_kind": {
+            "8": 74,
+            "20": 89,
+            "21": 227,
+            "31": 98,
+            "40": 192
+          }
+        },
+        "turn.commit": {
+          "bytes": 529,
+          "by_kind": {
+            "9": 146,
+            "34": 383
+          }
+        }
+      },
+      "archived_calls": 1,
+      "parks_verified": 1,
+      "blocks": [
+        {
+          "operation": "cell.park",
+          "installed_bytes": 1361721
+        }
+      ],
+      "source": "p1-cell-1024",
+      "load1": [
+        19.72216796875,
+        19.50390625
+      ],
+      "instructions": 4122473929,
+      "peak_rss_kib": 156860
+    },
+    {
+      "parks": 1,
+      "value_bytes": 1024,
+      "fresh": false,
+      "batch": 1,
+      "installed_bytes": 40174,
+      "actor_installed_bytes": 40174,
+      "by_kind": {
+        "1": 32315,
+        "12": 400,
+        "15": 353,
+        "17": 94,
+        "18": 873,
+        "19": 198,
+        "20": 89,
+        "21": 343,
+        "22": 180,
+        "24": 66,
+        "31": 98,
+        "32": 46,
+        "33": 1887,
+        "35": 57,
+        "36": 261,
+        "37": 90,
+        "39": 352,
+        "40": 192,
+        "41": 12,
+        "42": 584,
+        "1000": 309,
+        "1004": 1375
+      },
+      "labels": {
+        "turn.admit": {
+          "bytes": 0,
+          "by_kind": {}
+        },
+        "model.start": {
+          "bytes": 24476,
+          "by_kind": {
+            "1": 22760,
+            "21": 47,
+            "32": 46,
+            "33": 1258,
+            "35": 57,
+            "39": 308
+          }
+        },
+        "model.answer": {
+          "bytes": 4671,
+          "by_kind": {
+            "1": 4671
+          }
+        },
+        "model.done+cell.snapshot+admit": {
+          "bytes": 10421,
+          "by_kind": {
+            "1": 4884,
+            "12": 400,
+            "15": 353,
+            "17": 94,
+            "18": 873,
+            "19": 198,
+            "21": 69,
+            "22": 180,
+            "24": 66,
+            "33": 629,
+            "36": 261,
+            "37": 90,
+            "39": 44,
+            "41": 12,
+            "42": 584,
+            "1000": 309,
+            "1004": 1375
+          }
+        },
+        "round.outcome": {
+          "bytes": 606,
+          "by_kind": {
+            "20": 89,
+            "21": 227,
+            "31": 98,
+            "40": 192
+          }
+        },
+        "turn.commit": {
+          "bytes": 0,
+          "by_kind": {}
+        }
+      },
+      "archived_calls": 1,
+      "parks_verified": 1,
+      "blocks": [
+        {
+          "operation": "cell.park",
+          "installed_bytes": 10421
+        }
+      ],
+      "source": "p1-cell-1024",
+      "load1": [
+        19.72216796875,
+        19.50390625
+      ],
+      "instructions": 4122473929,
+      "peak_rss_kib": 156860
+    },
+    {
+      "parks": 1,
+      "value_bytes": 16384,
+      "fresh": false,
+      "batch": 0,
+      "installed_bytes": 1492768,
+      "actor_installed_bytes": 1492768,
+      "by_kind": {
+        "1": 128019,
+        "5": 51,
+        "6": 131782,
+        "7": 129,
+        "8": 74,
+        "9": 146,
+        "12": 400,
+        "13": 44,
+        "14": 1218170,
+        "15": 353,
+        "17": 94,
+        "18": 881,
+        "19": 198,
+        "20": 89,
+        "21": 345,
+        "22": 180,
+        "24": 66,
+        "31": 99,
+        "32": 46,
+        "33": 1989,
+        "34": 383,
+        "35": 57,
+        "36": 261,
+        "37": 94,
+        "39": 476,
+        "40": 192,
+        "41": 12,
+        "42": 608,
+        "43": 236,
+        "1000": 310,
+        "1004": 2358,
+        "1005": 4122,
+        "1006": 102,
+        "1007": 282,
+        "1008": 120
+      },
+      "labels": {
+        "turn.admit": {
+          "bytes": 0,
+          "by_kind": {}
+        },
+        "model.start": {
+          "bytes": 60491,
+          "by_kind": {
+            "1": 57008,
+            "21": 47,
+            "32": 46,
+            "33": 1360,
+            "35": 57,
+            "39": 432,
+            "43": 236,
+            "1004": 903,
+            "1007": 282,
+            "1008": 120
+          }
+        },
+        "model.answer": {
+          "bytes": 35397,
+          "by_kind": {
+            "1": 35397
+          }
+        },
+        "model.done+cell.snapshot+admit": {
+          "bytes": 1395668,
+          "by_kind": {
+            "1": 35614,
+            "5": 51,
+            "6": 131782,
+            "7": 129,
+            "12": 400,
+            "13": 44,
+            "14": 1218170,
+            "15": 353,
+            "17": 94,
+            "18": 881,
+            "19": 198,
+            "21": 69,
+            "22": 180,
+            "24": 66,
+            "33": 629,
+            "36": 261,
+            "37": 94,
+            "39": 44,
+            "41": 12,
+            "42": 608,
+            "1000": 310,
+            "1004": 1455,
+            "1005": 4122,
+            "1006": 102
+          }
+        },
+        "round.outcome": {
+          "bytes": 683,
+          "by_kind": {
+            "8": 74,
+            "20": 89,
+            "21": 229,
+            "31": 99,
+            "40": 192
+          }
+        },
+        "turn.commit": {
+          "bytes": 529,
+          "by_kind": {
+            "9": 146,
+            "34": 383
+          }
+        }
+      },
+      "archived_calls": 1,
+      "parks_verified": 1,
+      "blocks": [
+        {
+          "operation": "cell.park",
+          "installed_bytes": 1395668
+        }
+      ],
+      "source": "p1-cell-16384",
+      "load1": [
+        19.50390625,
+        19.50390625
+      ],
+      "instructions": 4959618951,
+      "peak_rss_kib": 157836
+    },
+    {
+      "parks": 1,
+      "value_bytes": 16384,
+      "fresh": false,
+      "batch": 1,
+      "installed_bytes": 138877,
+      "actor_installed_bytes": 138877,
+      "by_kind": {
+        "1": 124620,
+        "8": 74,
+        "9": 146,
+        "12": 400,
+        "15": 353,
+        "17": 94,
+        "18": 881,
+        "19": 198,
+        "20": 89,
+        "21": 345,
+        "22": 180,
+        "24": 66,
+        "31": 99,
+        "32": 46,
+        "33": 1989,
+        "34": 383,
+        "35": 57,
+        "36": 261,
+        "37": 94,
+        "39": 396,
+        "40": 192,
+        "41": 12,
+        "42": 608,
+        "1000": 310,
+        "1004": 2358,
+        "1005": 4122,
+        "1006": 102,
+        "1007": 282,
+        "1008": 120
+      },
+      "labels": {
+        "turn.admit": {
+          "bytes": 0,
+          "by_kind": {}
+        },
+        "model.start": {
+          "bytes": 56776,
+          "by_kind": {
+            "1": 53609,
+            "21": 47,
+            "32": 46,
+            "33": 1360,
+            "35": 57,
+            "39": 352,
+            "1004": 903,
+            "1007": 282,
+            "1008": 120
+          }
+        },
+        "model.answer": {
+          "bytes": 35397,
+          "by_kind": {
+            "1": 35397
+          }
+        },
+        "model.done+cell.snapshot+admit": {
+          "bytes": 45492,
+          "by_kind": {
+            "1": 35614,
+            "12": 400,
+            "15": 353,
+            "17": 94,
+            "18": 881,
+            "19": 198,
+            "21": 69,
+            "22": 180,
+            "24": 66,
+            "33": 629,
+            "36": 261,
+            "37": 94,
+            "39": 44,
+            "41": 12,
+            "42": 608,
+            "1000": 310,
+            "1004": 1455,
+            "1005": 4122,
+            "1006": 102
+          }
+        },
+        "round.outcome": {
+          "bytes": 683,
+          "by_kind": {
+            "8": 74,
+            "20": 89,
+            "21": 229,
+            "31": 99,
+            "40": 192
+          }
+        },
+        "turn.commit": {
+          "bytes": 529,
+          "by_kind": {
+            "9": 146,
+            "34": 383
+          }
+        }
+      },
+      "archived_calls": 1,
+      "parks_verified": 1,
+      "blocks": [
+        {
+          "operation": "cell.park",
+          "installed_bytes": 45492
+        }
+      ],
+      "source": "p1-cell-16384",
+      "load1": [
+        19.50390625,
+        19.50390625
+      ],
+      "instructions": 4959618951,
+      "peak_rss_kib": 157836
+    },
+    {
+      "parks": 1,
+      "value_bytes": 0,
+      "fresh": true,
+      "batch": 0,
+      "installed_bytes": 1388072,
+      "actor_installed_bytes": 1388072,
+      "by_kind": {
+        "1": 27942,
+        "5": 51,
+        "6": 131782,
+        "7": 129,
+        "8": 42,
+        "9": 146,
+        "12": 400,
+        "13": 44,
+        "14": 1218170,
+        "15": 353,
+        "17": 94,
+        "18": 897,
+        "19": 166,
+        "20": 89,
+        "21": 349,
+        "22": 180,
+        "24": 66,
+        "31": 97,
+        "32": 46,
+        "33": 1887,
+        "34": 383,
+        "35": 57,
+        "36": 261,
+        "37": 102,
+        "39": 432,
+        "40": 160,
+        "41": 12,
+        "42": 566,
+        "43": 236,
+        "1000": 308,
+        "1004": 2269,
+        "1007": 236,
+        "1008": 120
+      },
+      "labels": {
+        "turn.admit": {
+          "bytes": 0,
+          "by_kind": {}
+        },
+        "model.start": {
+          "bytes": 25699,
+          "by_kind": {
+            "1": 22455,
+            "21": 47,
+            "32": 46,
+            "33": 1258,
+            "35": 57,
+            "39": 388,
+            "43": 236,
+            "1004": 856,
+            "1007": 236,
+            "1008": 120
+          }
+        },
+        "model.answer": {
+          "bytes": 2635,
+          "by_kind": {
+            "1": 2635
+          }
+        },
+        "model.done+cell.snapshot+admit": {
+          "bytes": 1358588,
+          "by_kind": {
+            "1": 2852,
+            "5": 51,
+            "6": 131782,
+            "7": 129,
+            "12": 400,
+            "13": 44,
+            "14": 1218170,
+            "15": 353,
+            "17": 94,
+            "18": 897,
+            "19": 166,
+            "21": 69,
+            "22": 180,
+            "24": 66,
+            "33": 629,
+            "36": 261,
+            "37": 102,
+            "39": 44,
+            "41": 12,
+            "42": 566,
+            "1000": 308,
+            "1004": 1413
+          }
+        },
+        "round.outcome": {
+          "bytes": 621,
+          "by_kind": {
+            "8": 42,
+            "20": 89,
+            "21": 233,
+            "31": 97,
+            "40": 160
+          }
+        },
+        "turn.commit": {
+          "bytes": 529,
+          "by_kind": {
+            "9": 146,
+            "34": 383
+          }
+        }
+      },
+      "archived_calls": 1,
+      "parks_verified": 1,
+      "blocks": [
+        {
+          "operation": "cell.park",
+          "installed_bytes": 1358588
+        }
+      ],
+      "source": "p1-cell-fresh-0",
+      "load1": [
+        19.72216796875,
+        19.72216796875
+      ],
+      "instructions": 4064768541,
+      "peak_rss_kib": 157580
+    },
+    {
+      "parks": 1,
+      "value_bytes": 0,
+      "fresh": true,
+      "batch": 1,
+      "installed_bytes": 32324,
+      "actor_installed_bytes": 32324,
+      "by_kind": {
+        "1": 24543,
+        "12": 400,
+        "15": 353,
+        "17": 94,
+        "18": 897,
+        "19": 166,
+        "20": 89,
+        "21": 349,
+        "22": 180,
+        "24": 66,
+        "31": 97,
+        "32": 46,
+        "33": 1887,
+        "35": 57,
+        "36": 261,
+        "37": 102,
+        "39": 352,
+        "40": 160,
+        "41": 12,
+        "42": 566,
+        "1000": 308,
+        "1004": 1339
+      },
+      "labels": {
+        "turn.admit": {
+          "bytes": 0,
+          "by_kind": {}
+        },
+        "model.start": {
+          "bytes": 20772,
+          "by_kind": {
+            "1": 19056,
+            "21": 47,
+            "32": 46,
+            "33": 1258,
+            "35": 57,
+            "39": 308
+          }
+        },
+        "model.answer": {
+          "bytes": 2635,
+          "by_kind": {
+            "1": 2635
+          }
+        },
+        "model.done+cell.snapshot+admit": {
+          "bytes": 8338,
+          "by_kind": {
+            "1": 2852,
+            "12": 400,
+            "15": 353,
+            "17": 94,
+            "18": 897,
+            "19": 166,
+            "21": 69,
+            "22": 180,
+            "24": 66,
+            "33": 629,
+            "36": 261,
+            "37": 102,
+            "39": 44,
+            "41": 12,
+            "42": 566,
+            "1000": 308,
+            "1004": 1339
+          }
+        },
+        "round.outcome": {
+          "bytes": 579,
+          "by_kind": {
+            "20": 89,
+            "21": 233,
+            "31": 97,
+            "40": 160
+          }
+        },
+        "turn.commit": {
+          "bytes": 0,
+          "by_kind": {}
+        }
+      },
+      "archived_calls": 1,
+      "parks_verified": 1,
+      "blocks": [
+        {
+          "operation": "cell.park",
+          "installed_bytes": 8338
+        }
+      ],
+      "source": "p1-cell-fresh-0",
+      "load1": [
+        19.72216796875,
+        19.72216796875
+      ],
+      "instructions": 4064768541,
+      "peak_rss_kib": 157580
+    },
+    {
+      "parks": 1,
+      "value_bytes": 1024,
+      "fresh": true,
+      "batch": 0,
+      "installed_bytes": 1383901,
+      "actor_installed_bytes": 1383901,
+      "by_kind": {
+        "1": 37031,
+        "5": 51,
+        "6": 131782,
+        "7": 129,
+        "8": 74,
+        "9": 146,
+        "12": 400,
+        "13": 44,
+        "14": 1201839,
+        "15": 353,
+        "17": 94,
+        "18": 921,
+        "19": 198,
+        "20": 89,
+        "21": 355,
+        "22": 180,
+        "24": 66,
+        "31": 98,
+        "32": 46,
+        "33": 1887,
+        "34": 383,
+        "35": 57,
+        "36": 261,
+        "37": 114,
+        "39": 432,
+        "40": 192,
+        "41": 12,
+        "42": 736,
+        "43": 236,
+        "1000": 309,
+        "1004": 2892,
+        "1005": 2099,
+        "1007": 275,
+        "1008": 120
+      },
+      "labels": {
+        "turn.admit": {
+          "bytes": 0,
+          "by_kind": {}
+        },
+        "model.start": {
+          "bytes": 29650,
+          "by_kind": {
+            "1": 26329,
+            "21": 47,
+            "32": 46,
+            "33": 1258,
+            "35": 57,
+            "39": 388,
+            "43": 236,
+            "1004": 894,
+            "1007": 275,
+            "1008": 120
+          }
+        },
+        "model.answer": {
+          "bytes": 4721,
+          "by_kind": {
+            "1": 4721
+          }
+        },
+        "model.done+cell.snapshot+admit": {
+          "bytes": 1348309,
+          "by_kind": {
+            "1": 5981,
+            "5": 51,
+            "6": 131782,
+            "7": 129,
+            "12": 400,
+            "13": 44,
+            "14": 1201839,
+            "15": 353,
+            "17": 94,
+            "18": 921,
+            "19": 198,
+            "21": 69,
+            "22": 180,
+            "24": 66,
+            "33": 629,
+            "36": 261,
+            "37": 114,
+            "39": 44,
+            "41": 12,
+            "42": 736,
+            "1000": 309,
+            "1004": 1998,
+            "1005": 2099
+          }
+        },
+        "round.outcome": {
+          "bytes": 692,
+          "by_kind": {
+            "8": 74,
+            "20": 89,
+            "21": 239,
+            "31": 98,
+            "40": 192
+          }
+        },
+        "turn.commit": {
+          "bytes": 529,
+          "by_kind": {
+            "9": 146,
+            "34": 383
+          }
+        }
+      },
+      "archived_calls": 1,
+      "parks_verified": 1,
+      "blocks": [
+        {
+          "operation": "cell.park",
+          "installed_bytes": 1348309
+        }
+      ],
+      "source": "p1-cell-fresh-1024",
+      "load1": [
+        19.50390625,
+        19.50390625
+      ],
+      "instructions": 4176297683,
+      "peak_rss_kib": 154564
+    },
+    {
+      "parks": 1,
+      "value_bytes": 1024,
+      "fresh": true,
+      "batch": 1,
+      "installed_bytes": 42290,
+      "actor_installed_bytes": 42290,
+      "by_kind": {
+        "1": 32597,
+        "12": 400,
+        "15": 353,
+        "17": 94,
+        "18": 921,
+        "19": 198,
+        "20": 89,
+        "21": 355,
+        "22": 180,
+        "24": 66,
+        "31": 98,
+        "32": 46,
+        "33": 1887,
+        "35": 57,
+        "36": 261,
+        "37": 114,
+        "39": 352,
+        "40": 192,
+        "41": 12,
+        "42": 736,
+        "1000": 309,
+        "1004": 1924,
+        "1005": 1049
+      },
+      "labels": {
+        "turn.admit": {
+          "bytes": 0,
+          "by_kind": {}
+        },
+        "model.start": {
+          "bytes": 24646,
+          "by_kind": {
+            "1": 22930,
+            "21": 47,
+            "32": 46,
+            "33": 1258,
+            "35": 57,
+            "39": 308
+          }
+        },
+        "model.answer": {
+          "bytes": 4721,
+          "by_kind": {
+            "1": 4721
+          }
+        },
+        "model.done+cell.snapshot+admit": {
+          "bytes": 12305,
+          "by_kind": {
+            "1": 4946,
+            "12": 400,
+            "15": 353,
+            "17": 94,
+            "18": 921,
+            "19": 198,
+            "21": 69,
+            "22": 180,
+            "24": 66,
+            "33": 629,
+            "36": 261,
+            "37": 114,
+            "39": 44,
+            "41": 12,
+            "42": 736,
+            "1000": 309,
+            "1004": 1924,
+            "1005": 1049
+          }
+        },
+        "round.outcome": {
+          "bytes": 618,
+          "by_kind": {
+            "20": 89,
+            "21": 239,
+            "31": 98,
+            "40": 192
+          }
+        },
+        "turn.commit": {
+          "bytes": 0,
+          "by_kind": {}
+        }
+      },
+      "archived_calls": 1,
+      "parks_verified": 1,
+      "blocks": [
+        {
+          "operation": "cell.park",
+          "installed_bytes": 12305
+        }
+      ],
+      "source": "p1-cell-fresh-1024",
+      "load1": [
+        19.50390625,
+        19.50390625
+      ],
+      "instructions": 4176297683,
+      "peak_rss_kib": 154564
+    },
+    {
+      "parks": 1,
+      "value_bytes": 16384,
+      "fresh": true,
+      "batch": 0,
+      "installed_bytes": 1502319,
+      "actor_installed_bytes": 1502319,
+      "by_kind": {
+        "1": 144698,
+        "5": 51,
+        "6": 131782,
+        "7": 129,
+        "8": 74,
+        "9": 146,
+        "12": 400,
+        "13": 44,
+        "14": 1201839,
+        "15": 353,
+        "17": 94,
+        "18": 929,
+        "19": 198,
+        "20": 89,
+        "21": 357,
+        "22": 180,
+        "24": 66,
+        "31": 99,
+        "32": 46,
+        "33": 1989,
+        "34": 383,
+        "35": 57,
+        "36": 261,
+        "37": 118,
+        "39": 476,
+        "40": 192,
+        "41": 12,
+        "42": 766,
+        "43": 236,
+        "1000": 311,
+        "1004": 2909,
+        "1005": 12365,
+        "1006": 268,
+        "1007": 282,
+        "1008": 120
+      },
+      "labels": {
+        "turn.admit": {
+          "bytes": 0,
+          "by_kind": {}
+        },
+        "model.start": {
+          "bytes": 60661,
+          "by_kind": {
+            "1": 57178,
+            "21": 47,
+            "32": 46,
+            "33": 1360,
+            "35": 57,
+            "39": 432,
+            "43": 236,
+            "1004": 903,
+            "1007": 282,
+            "1008": 120
+          }
+        },
+        "model.answer": {
+          "bytes": 35447,
+          "by_kind": {
+            "1": 35447
+          }
+        },
+        "model.done+cell.snapshot+admit": {
+          "bytes": 1404987,
+          "by_kind": {
+            "1": 52073,
+            "5": 51,
+            "6": 131782,
+            "7": 129,
+            "12": 400,
+            "13": 44,
+            "14": 1201839,
+            "15": 353,
+            "17": 94,
+            "18": 929,
+            "19": 198,
+            "21": 69,
+            "22": 180,
+            "24": 66,
+            "33": 629,
+            "36": 261,
+            "37": 118,
+            "39": 44,
+            "41": 12,
+            "42": 766,
+            "1000": 311,
+            "1004": 2006,
+            "1005": 12365,
+            "1006": 268
+          }
+        },
+        "round.outcome": {
+          "bytes": 695,
+          "by_kind": {
+            "8": 74,
+            "20": 89,
+            "21": 241,
+            "31": 99,
+            "40": 192
+          }
+        },
+        "turn.commit": {
+          "bytes": 529,
+          "by_kind": {
+            "9": 146,
+            "34": 383
+          }
+        }
+      },
+      "archived_calls": 1,
+      "parks_verified": 1,
+      "blocks": [
+        {
+          "operation": "cell.park",
+          "installed_bytes": 1404987
+        }
+      ],
+      "source": "p1-cell-fresh-16384",
+      "load1": [
+        19.50390625,
+        19.06298828125
+      ],
+      "instructions": 5033769679,
+      "peak_rss_kib": 159940
+    },
+    {
+      "parks": 1,
+      "value_bytes": 16384,
+      "fresh": true,
+      "batch": 1,
+      "installed_bytes": 138002,
+      "actor_installed_bytes": 138002,
+      "by_kind": {
+        "1": 124902,
+        "12": 400,
+        "15": 353,
+        "17": 94,
+        "18": 929,
+        "19": 198,
+        "20": 89,
+        "21": 357,
+        "22": 180,
+        "24": 66,
+        "31": 99,
+        "32": 46,
+        "33": 1989,
+        "35": 57,
+        "36": 261,
+        "37": 118,
+        "39": 396,
+        "40": 192,
+        "41": 12,
+        "42": 766,
+        "1000": 311,
+        "1004": 1932,
+        "1005": 4121,
+        "1006": 134
+      },
+      "labels": {
+        "turn.admit": {
+          "bytes": 0,
+          "by_kind": {}
+        },
+        "model.start": {
+          "bytes": 55641,
+          "by_kind": {
+            "1": 53779,
+            "21": 47,
+            "32": 46,
+            "33": 1360,
+            "35": 57,
+            "39": 352
+          }
+        },
+        "model.answer": {
+          "bytes": 35447,
+          "by_kind": {
+            "1": 35447
+          }
+        },
+        "model.done+cell.snapshot+admit": {
+          "bytes": 46293,
+          "by_kind": {
+            "1": 35676,
+            "12": 400,
+            "15": 353,
+            "17": 94,
+            "18": 929,
+            "19": 198,
+            "21": 69,
+            "22": 180,
+            "24": 66,
+            "33": 629,
+            "36": 261,
+            "37": 118,
+            "39": 44,
+            "41": 12,
+            "42": 766,
+            "1000": 311,
+            "1004": 1932,
+            "1005": 4121,
+            "1006": 134
+          }
+        },
+        "round.outcome": {
+          "bytes": 621,
+          "by_kind": {
+            "20": 89,
+            "21": 241,
+            "31": 99,
+            "40": 192
+          }
+        },
+        "turn.commit": {
+          "bytes": 0,
+          "by_kind": {}
+        }
+      },
+      "archived_calls": 1,
+      "parks_verified": 1,
+      "blocks": [
+        {
+          "operation": "cell.park",
+          "installed_bytes": 46293
+        }
+      ],
+      "source": "p1-cell-fresh-16384",
+      "load1": [
+        19.50390625,
+        19.06298828125
+      ],
+      "instructions": 5033769679,
+      "peak_rss_kib": 159940
+    },
+    {
+      "parks": 10,
+      "value_bytes": 0,
+      "fresh": false,
+      "batch": 0,
+      "installed_bytes": 1463476,
+      "actor_installed_bytes": 1463476,
+      "by_kind": {
+        "1": 30015,
+        "5": 51,
+        "6": 131782,
+        "7": 129,
+        "8": 420,
+        "9": 146,
+        "12": 400,
+        "13": 44,
+        "14": 1218170,
+        "15": 353,
+        "17": 940,
+        "18": 8490,
+        "19": 1660,
+        "20": 1997,
+        "21": 2794,
+        "22": 10800,
+        "24": 660,
+        "31": 970,
+        "32": 352,
+        "33": 1887,
+        "34": 383,
+        "35": 57,
+        "36": 2610,
+        "37": 78,
+        "39": 432,
+        "40": 1600,
+        "41": 12,
+        "42": 575,
+        "43": 236,
+        "1000": 3089,
+        "1004": 39864,
+        "1007": 2360,
+        "1008": 120
+      },
+      "labels": {
+        "turn.admit": {
+          "bytes": 0,
+          "by_kind": {}
+        },
+        "model.start": {
+          "bytes": 32240,
+          "by_kind": {
+            "1": 24584,
+            "21": 47,
+            "32": 352,
+            "33": 1258,
+            "35": 57,
+            "39": 388,
+            "43": 236,
+            "1004": 4962,
+            "1007": 236,
+            "1008": 120
+          }
+        },
+        "model.answer": {
+          "bytes": 2613,
+          "by_kind": {
+            "1": 2613
+          }
+        },
+        "model.done+cell.snapshot+admit": {
+          "bytes": 1358491,
+          "by_kind": {
+            "1": 2818,
+            "5": 51,
+            "6": 131782,
+            "7": 129,
+            "12": 400,
+            "13": 44,
+            "14": 1218170,
+            "15": 353,
+            "17": 94,
+            "18": 849,
+            "19": 166,
+            "21": 69,
+            "22": 180,
+            "24": 66,
+            "33": 629,
+            "36": 261,
+            "37": 78,
+            "39": 44,
+            "41": 12,
+            "42": 575,
+            "1000": 308,
+            "1004": 1413
+          }
+        },
+        "round.outcome": {
+          "bytes": 6090,
+          "by_kind": {
+            "8": 420,
+            "20": 890,
+            "21": 2210,
+            "31": 970,
+            "40": 1600
+          }
+        },
+        "cell.snapshot+admit": {
+          "bytes": 63513,
+          "by_kind": {
+            "17": 846,
+            "18": 7641,
+            "19": 1494,
+            "20": 1107,
+            "21": 468,
+            "22": 10620,
+            "24": 594,
+            "36": 2349,
+            "1000": 2781,
+            "1004": 33489,
+            "1007": 2124
+          }
+        },
+        "turn.commit": {
+          "bytes": 529,
+          "by_kind": {
+            "9": 146,
+            "34": 383
+          }
+        }
+      },
+      "archived_calls": 10,
+      "parks_verified": 10,
+      "blocks": [
+        {
+          "operation": "cell.park",
+          "installed_bytes": 1358491
+        },
+        {
+          "operation": "cell.park",
+          "installed_bytes": 4445
+        },
+        {
+          "operation": "cell.park",
+          "installed_bytes": 5076
+        },
+        {
+          "operation": "cell.park",
+          "installed_bytes": 5735
+        },
+        {
+          "operation": "cell.park",
+          "installed_bytes": 6395
+        },
+        {
+          "operation": "cell.park",
+          "installed_bytes": 7054
+        },
+        {
+          "operation": "cell.park",
+          "installed_bytes": 7713
+        },
+        {
+          "operation": "cell.park",
+          "installed_bytes": 8372
+        },
+        {
+          "operation": "cell.park",
+          "installed_bytes": 9032
+        },
+        {
+          "operation": "cell.park",
+          "installed_bytes": 9691
+        }
+      ],
+      "source": "p10-cell-0",
+      "load1": [
+        17.736328125,
+        17.11669921875
+      ],
+      "instructions": 5645644905,
+      "peak_rss_kib": 157420
+    },
+    {
+      "parks": 10,
+      "value_bytes": 0,
+      "fresh": false,
+      "batch": 1,
+      "installed_bytes": 73975,
+      "actor_installed_bytes": 73975,
+      "by_kind": {
+        "1": 26616,
+        "9": 146,
+        "17": 940,
+        "18": 8490,
+        "19": 1660,
+        "20": 1997,
+        "21": 2777,
+        "22": 10800,
+        "24": 660,
+        "32": 352,
+        "33": 1887,
+        "34": 383,
+        "36": 2610,
+        "37": 78,
+        "39": 352,
+        "40": 1600,
+        "1000": 3089,
+        "1004": 9182,
+        "1007": 236,
+        "1008": 120
+      },
+      "labels": {
+        "turn.admit": {
+          "bytes": 0,
+          "by_kind": {}
+        },
+        "model.start": {
+          "bytes": 28468,
+          "by_kind": {
+            "1": 21185,
+            "21": 47,
+            "32": 352,
+            "33": 1258,
+            "39": 308,
+            "1004": 4962,
+            "1007": 236,
+            "1008": 120
+          }
+        },
+        "model.answer": {
+          "bytes": 2613,
+          "by_kind": {
+            "1": 2613
+          }
+        },
+        "model.done+cell.snapshot+admit": {
+          "bytes": 5545,
+          "by_kind": {
+            "1": 2818,
+            "17": 94,
+            "18": 849,
+            "19": 166,
+            "21": 52,
+            "22": 180,
+            "24": 66,
+            "33": 629,
+            "36": 261,
+            "37": 78,
+            "39": 44,
+            "1000": 308
+          }
+        },
+        "round.outcome": {
+          "bytes": 4700,
+          "by_kind": {
+            "20": 890,
+            "21": 2210,
+            "40": 1600
+          }
+        },
+        "cell.snapshot+admit": {
+          "bytes": 32120,
+          "by_kind": {
+            "17": 846,
+            "18": 7641,
+            "19": 1494,
+            "20": 1107,
+            "21": 468,
+            "22": 10620,
+            "24": 594,
+            "36": 2349,
+            "1000": 2781,
+            "1004": 4220
+          }
+        },
+        "turn.commit": {
+          "bytes": 529,
+          "by_kind": {
+            "9": 146,
+            "34": 383
+          }
+        }
+      },
+      "archived_calls": 10,
+      "parks_verified": 10,
+      "blocks": [
+        {
+          "operation": "cell.park",
+          "installed_bytes": 5545
+        },
+        {
+          "operation": "cell.park",
+          "installed_bytes": 4180
+        },
+        {
+          "operation": "cell.park",
+          "installed_bytes": 4840
+        },
+        {
+          "operation": "cell.park",
+          "installed_bytes": 2700
+        },
+        {
+          "operation": "cell.park",
+          "installed_bytes": 2900
+        },
+        {
+          "operation": "cell.park",
+          "installed_bytes": 3100
+        },
+        {
+          "operation": "cell.park",
+          "installed_bytes": 3300
+        },
+        {
+          "operation": "cell.park",
+          "installed_bytes": 3500
+        },
+        {
+          "operation": "cell.park",
+          "installed_bytes": 3700
+        },
+        {
+          "operation": "cell.park",
+          "installed_bytes": 3900
+        }
+      ],
+      "source": "p10-cell-0",
+      "load1": [
+        17.736328125,
+        17.11669921875
+      ],
+      "instructions": 5645644905,
+      "peak_rss_kib": 157420
+    },
+    {
+      "parks": 10,
+      "value_bytes": 1024,
+      "fresh": false,
+      "batch": 0,
+      "installed_bytes": 1479104,
+      "actor_installed_bytes": 1479104,
+      "by_kind": {
+        "1": 42233,
+        "5": 51,
+        "6": 131782,
+        "7": 129,
+        "8": 740,
+        "9": 146,
+        "12": 400,
+        "13": 44,
+        "14": 1218170,
+        "15": 353,
+        "17": 940,
+        "18": 8730,
+        "19": 1980,
+        "20": 1997,
+        "21": 2854,
+        "22": 10800,
+        "24": 660,
+        "31": 980,
+        "32": 352,
+        "33": 1887,
+        "34": 383,
+        "35": 57,
+        "36": 2610,
+        "37": 90,
+        "39": 432,
+        "40": 1920,
+        "41": 12,
+        "42": 584,
+        "43": 236,
+        "1000": 3095,
+        "1004": 40537,
+        "1005": 1050,
+        "1007": 2750,
+        "1008": 120
+      },
+      "labels": {
+        "turn.admit": {
+          "bytes": 0,
+          "by_kind": {}
+        },
+        "model.start": {
+          "bytes": 40453,
+          "by_kind": {
+            "1": 32674,
+            "21": 47,
+            "32": 352,
+            "33": 1258,
+            "35": 57,
+            "39": 388,
+            "43": 236,
+            "1004": 5046,
+            "1007": 275,
+            "1008": 120
+          }
+        },
+        "model.answer": {
+          "bytes": 4673,
+          "by_kind": {
+            "1": 4673
+          }
+        },
+        "model.done+cell.snapshot+admit": {
+          "bytes": 1361723,
+          "by_kind": {
+            "1": 4886,
+            "5": 51,
+            "6": 131782,
+            "7": 129,
+            "12": 400,
+            "13": 44,
+            "14": 1218170,
+            "15": 353,
+            "17": 94,
+            "18": 873,
+            "19": 198,
+            "21": 69,
+            "22": 180,
+            "24": 66,
+            "33": 629,
+            "36": 261,
+            "37": 90,
+            "39": 44,
+            "41": 12,
+            "42": 584,
+            "1000": 309,
+            "1004": 1449,
+            "1005": 1050
+          }
+        },
+        "round.outcome": {
+          "bytes": 6800,
+          "by_kind": {
+            "8": 740,
+            "20": 890,
+            "21": 2270,
+            "31": 980,
+            "40": 1920
+          }
+        },
+        "cell.snapshot+admit": {
+          "bytes": 64926,
+          "by_kind": {
+            "17": 846,
+            "18": 7857,
+            "19": 1782,
+            "20": 1107,
+            "21": 468,
+            "22": 10620,
+            "24": 594,
+            "36": 2349,
+            "1000": 2786,
+            "1004": 34042,
+            "1007": 2475
+          }
+        },
+        "turn.commit": {
+          "bytes": 529,
+          "by_kind": {
+            "9": 146,
+            "34": 383
+          }
+        }
+      },
+      "archived_calls": 10,
+      "parks_verified": 10,
+      "blocks": [
+        {
+          "operation": "cell.park",
+          "installed_bytes": 1361723
+        },
+        {
+          "operation": "cell.park",
+          "installed_bytes": 4582
+        },
+        {
+          "operation": "cell.park",
+          "installed_bytes": 5217
+        },
+        {
+          "operation": "cell.park",
+          "installed_bytes": 5881
+        },
+        {
+          "operation": "cell.park",
+          "installed_bytes": 6546
+        },
+        {
+          "operation": "cell.park",
+          "installed_bytes": 7211
+        },
+        {
+          "operation": "cell.park",
+          "installed_bytes": 7875
+        },
+        {
+          "operation": "cell.park",
+          "installed_bytes": 8540
+        },
+        {
+          "operation": "cell.park",
+          "installed_bytes": 9205
+        },
+        {
+          "operation": "cell.park",
+          "installed_bytes": 9869
+        }
+      ],
+      "source": "p10-cell-1024",
+      "load1": [
+        17.11669921875,
+        16.86669921875
+      ],
+      "instructions": 6025091519,
+      "peak_rss_kib": 157924
+    },
+    {
+      "parks": 10,
+      "value_bytes": 1024,
+      "fresh": false,
+      "batch": 1,
+      "installed_bytes": 99913,
+      "actor_installed_bytes": 99913,
+      "by_kind": {
+        "1": 38834,
+        "8": 222,
+        "9": 146,
+        "17": 940,
+        "18": 8730,
+        "19": 1980,
+        "20": 1997,
+        "21": 2837,
+        "22": 10800,
+        "24": 660,
+        "31": 294,
+        "32": 352,
+        "33": 1887,
+        "34": 383,
+        "36": 2610,
+        "37": 90,
+        "39": 352,
+        "40": 1920,
+        "1000": 3095,
+        "1004": 20564,
+        "1007": 1100,
+        "1008": 120
+      },
+      "labels": {
+        "turn.admit": {
+          "bytes": 0,
+          "by_kind": {}
+        },
+        "model.start": {
+          "bytes": 36681,
+          "by_kind": {
+            "1": 29275,
+            "21": 47,
+            "32": 352,
+            "33": 1258,
+            "39": 308,
+            "1004": 5046,
+            "1007": 275,
+            "1008": 120
+          }
+        },
+        "model.answer": {
+          "bytes": 4673,
+          "by_kind": {
+            "1": 4673
+          }
+        },
+        "model.done+cell.snapshot+admit": {
+          "bytes": 7682,
+          "by_kind": {
+            "1": 4886,
+            "17": 94,
+            "18": 873,
+            "19": 198,
+            "21": 52,
+            "22": 180,
+            "24": 66,
+            "33": 629,
+            "36": 261,
+            "37": 90,
+            "39": 44,
+            "1000": 309
+          }
+        },
+        "round.outcome": {
+          "bytes": 5596,
+          "by_kind": {
+            "8": 222,
+            "20": 890,
+            "21": 2270,
+            "31": 294,
+            "40": 1920
+          }
+        },
+        "cell.snapshot+admit": {
+          "bytes": 44752,
+          "by_kind": {
+            "17": 846,
+            "18": 7857,
+            "19": 1782,
+            "20": 1107,
+            "21": 468,
+            "22": 10620,
+            "24": 594,
+            "36": 2349,
+            "1000": 2786,
+            "1004": 15518,
+            "1007": 825
+          }
+        },
+        "turn.commit": {
+          "bytes": 529,
+          "by_kind": {
+            "9": 146,
+            "34": 383
+          }
+        }
+      },
+      "archived_calls": 10,
+      "parks_verified": 10,
+      "blocks": [
+        {
+          "operation": "cell.park",
+          "installed_bytes": 7682
+        },
+        {
+          "operation": "cell.park",
+          "installed_bytes": 2356
+        },
+        {
+          "operation": "cell.park",
+          "installed_bytes": 2556
+        },
+        {
+          "operation": "cell.park",
+          "installed_bytes": 2756
+        },
+        {
+          "operation": "cell.park",
+          "installed_bytes": 2956
+        },
+        {
+          "operation": "cell.park",
+          "installed_bytes": 3157
+        },
+        {
+          "operation": "cell.park",
+          "installed_bytes": 3357
+        },
+        {
+          "operation": "cell.park",
+          "installed_bytes": 8540
+        },
+        {
+          "operation": "cell.park",
+          "installed_bytes": 9205
+        },
+        {
+          "operation": "cell.park",
+          "installed_bytes": 9869
+        }
+      ],
+      "source": "p10-cell-1024",
+      "load1": [
+        17.11669921875,
+        16.86669921875
+      ],
+      "instructions": 6025091519,
+      "peak_rss_kib": 157924
+    },
+    {
+      "parks": 10,
+      "value_bytes": 16384,
+      "fresh": false,
+      "batch": 0,
+      "installed_bytes": 1575284,
+      "actor_installed_bytes": 1575284,
+      "by_kind": {
+        "1": 134537,
+        "5": 51,
+        "6": 131782,
+        "7": 129,
+        "8": 740,
+        "9": 146,
+        "12": 400,
+        "13": 44,
+        "14": 1218170,
+        "15": 353,
+        "17": 940,
+        "18": 8810,
+        "19": 1980,
+        "20": 1997,
+        "21": 2874,
+        "22": 10800,
+        "24": 660,
+        "31": 990,
+        "32": 352,
+        "33": 1989,
+        "34": 383,
+        "35": 57,
+        "36": 2610,
+        "37": 94,
+        "39": 476,
+        "40": 1920,
+        "41": 12,
+        "42": 608,
+        "43": 236,
+        "1000": 3100,
+        "1004": 40880,
+        "1005": 4122,
+        "1006": 102,
+        "1007": 2820,
+        "1008": 120
+      },
+      "labels": {
+        "turn.admit": {
+          "bytes": 0,
+          "by_kind": {}
+        },
+        "model.start": {
+          "bytes": 71506,
+          "by_kind": {
+            "1": 63522,
+            "21": 47,
+            "32": 352,
+            "33": 1360,
+            "35": 57,
+            "39": 432,
+            "43": 236,
+            "1004": 5098,
+            "1007": 282,
+            "1008": 120
+          }
+        },
+        "model.answer": {
+          "bytes": 35399,
+          "by_kind": {
+            "1": 35399
+          }
+        },
+        "model.done+cell.snapshot+admit": {
+          "bytes": 1395670,
+          "by_kind": {
+            "1": 35616,
+            "5": 51,
+            "6": 131782,
+            "7": 129,
+            "12": 400,
+            "13": 44,
+            "14": 1218170,
+            "15": 353,
+            "17": 94,
+            "18": 881,
+            "19": 198,
+            "21": 69,
+            "22": 180,
+            "24": 66,
+            "33": 629,
+            "36": 261,
+            "37": 94,
+            "39": 44,
+            "41": 12,
+            "42": 608,
+            "1000": 310,
+            "1004": 1455,
+            "1005": 4122,
+            "1006": 102
+          }
+        },
+        "round.outcome": {
+          "bytes": 6830,
+          "by_kind": {
+            "8": 740,
+            "20": 890,
+            "21": 2290,
+            "31": 990,
+            "40": 1920
+          }
+        },
+        "cell.snapshot+admit": {
+          "bytes": 65350,
+          "by_kind": {
+            "17": 846,
+            "18": 7929,
+            "19": 1782,
+            "20": 1107,
+            "21": 468,
+            "22": 10620,
+            "24": 594,
+            "36": 2349,
+            "1000": 2790,
+            "1004": 34327,
+            "1007": 2538
+          }
+        },
+        "turn.commit": {
+          "bytes": 529,
+          "by_kind": {
+            "9": 146,
+            "34": 383
+          }
+        }
+      },
+      "archived_calls": 10,
+      "parks_verified": 10,
+      "blocks": [
+        {
+          "operation": "cell.park",
+          "installed_bytes": 1395670
+        },
+        {
+          "operation": "cell.park",
+          "installed_bytes": 4610
+        },
+        {
+          "operation": "cell.park",
+          "installed_bytes": 5250
+        },
+        {
+          "operation": "cell.park",
+          "installed_bytes": 5919
+        },
+        {
+          "operation": "cell.park",
+          "installed_bytes": 6589
+        },
+        {
+          "operation": "cell.park",
+          "installed_bytes": 7258
+        },
+        {
+          "operation": "cell.park",
+          "installed_bytes": 7927
+        },
+        {
+          "operation": "cell.park",
+          "installed_bytes": 8596
+        },
+        {
+          "operation": "cell.park",
+          "installed_bytes": 9266
+        },
+        {
+          "operation": "cell.park",
+          "installed_bytes": 9935
+        }
+      ],
+      "source": "p10-cell-16384",
+      "load1": [
+        16.556640625,
+        16.556640625
+      ],
+      "instructions": 10707381550,
+      "peak_rss_kib": 161240
+    },
+    {
+      "parks": 10,
+      "value_bytes": 16384,
+      "fresh": false,
+      "batch": 1,
+      "installed_bytes": 221393,
+      "actor_installed_bytes": 221393,
+      "by_kind": {
+        "1": 131138,
+        "8": 740,
+        "9": 146,
+        "12": 400,
+        "15": 353,
+        "17": 940,
+        "18": 8810,
+        "19": 1980,
+        "20": 1997,
+        "21": 2874,
+        "22": 10800,
+        "24": 660,
+        "31": 990,
+        "32": 352,
+        "33": 1989,
+        "34": 383,
+        "35": 57,
+        "36": 2610,
+        "37": 94,
+        "39": 396,
+        "40": 1920,
+        "41": 12,
+        "42": 608,
+        "1000": 3100,
+        "1004": 40880,
+        "1005": 4122,
+        "1006": 102,
+        "1007": 2820,
+        "1008": 120
+      },
+      "labels": {
+        "turn.admit": {
+          "bytes": 0,
+          "by_kind": {}
+        },
+        "model.start": {
+          "bytes": 67791,
+          "by_kind": {
+            "1": 60123,
+            "21": 47,
+            "32": 352,
+            "33": 1360,
+            "35": 57,
+            "39": 352,
+            "1004": 5098,
+            "1007": 282,
+            "1008": 120
+          }
+        },
+        "model.answer": {
+          "bytes": 35399,
+          "by_kind": {
+            "1": 35399
+          }
+        },
+        "model.done+cell.snapshot+admit": {
+          "bytes": 45494,
+          "by_kind": {
+            "1": 35616,
+            "12": 400,
+            "15": 353,
+            "17": 94,
+            "18": 881,
+            "19": 198,
+            "21": 69,
+            "22": 180,
+            "24": 66,
+            "33": 629,
+            "36": 261,
+            "37": 94,
+            "39": 44,
+            "41": 12,
+            "42": 608,
+            "1000": 310,
+            "1004": 1455,
+            "1005": 4122,
+            "1006": 102
+          }
+        },
+        "round.outcome": {
+          "bytes": 6830,
+          "by_kind": {
+            "8": 740,
+            "20": 890,
+            "21": 2290,
+            "31": 990,
+            "40": 1920
+          }
+        },
+        "cell.snapshot+admit": {
+          "bytes": 65350,
+          "by_kind": {
+            "17": 846,
+            "18": 7929,
+            "19": 1782,
+            "20": 1107,
+            "21": 468,
+            "22": 10620,
+            "24": 594,
+            "36": 2349,
+            "1000": 2790,
+            "1004": 34327,
+            "1007": 2538
+          }
+        },
+        "turn.commit": {
+          "bytes": 529,
+          "by_kind": {
+            "9": 146,
+            "34": 383
+          }
+        }
+      },
+      "archived_calls": 10,
+      "parks_verified": 10,
+      "blocks": [
+        {
+          "operation": "cell.park",
+          "installed_bytes": 45494
+        },
+        {
+          "operation": "cell.park",
+          "installed_bytes": 4610
+        },
+        {
+          "operation": "cell.park",
+          "installed_bytes": 5250
+        },
+        {
+          "operation": "cell.park",
+          "installed_bytes": 5919
+        },
+        {
+          "operation": "cell.park",
+          "installed_bytes": 6589
+        },
+        {
+          "operation": "cell.park",
+          "installed_bytes": 7258
+        },
+        {
+          "operation": "cell.park",
+          "installed_bytes": 7927
+        },
+        {
+          "operation": "cell.park",
+          "installed_bytes": 8596
+        },
+        {
+          "operation": "cell.park",
+          "installed_bytes": 9266
+        },
+        {
+          "operation": "cell.park",
+          "installed_bytes": 9935
+        }
+      ],
+      "source": "p10-cell-16384",
+      "load1": [
+        16.556640625,
+        16.556640625
+      ],
+      "instructions": 10707381550,
+      "peak_rss_kib": 161240
+    },
+    {
+      "parks": 10,
+      "value_bytes": 0,
+      "fresh": true,
+      "batch": 0,
+      "installed_bytes": 1464304,
+      "actor_installed_bytes": 1464304,
+      "by_kind": {
+        "1": 30219,
+        "5": 51,
+        "6": 131782,
+        "7": 129,
+        "8": 420,
+        "9": 146,
+        "12": 400,
+        "13": 44,
+        "14": 1218170,
+        "15": 353,
+        "17": 940,
+        "18": 8970,
+        "19": 1660,
+        "20": 1997,
+        "21": 2914,
+        "22": 10800,
+        "24": 660,
+        "31": 970,
+        "32": 352,
+        "33": 1887,
+        "34": 383,
+        "35": 57,
+        "36": 2610,
+        "37": 102,
+        "39": 432,
+        "40": 1600,
+        "41": 12,
+        "42": 575,
+        "43": 236,
+        "1000": 3089,
+        "1004": 39864,
+        "1007": 2360,
+        "1008": 120
+      },
+      "labels": {
+        "turn.admit": {
+          "bytes": 0,
+          "by_kind": {}
+        },
+        "model.start": {
+          "bytes": 32384,
+          "by_kind": {
+            "1": 24728,
+            "21": 47,
+            "32": 352,
+            "33": 1258,
+            "35": 57,
+            "39": 388,
+            "43": 236,
+            "1004": 4962,
+            "1007": 236,
+            "1008": 120
+          }
+        },
+        "model.answer": {
+          "bytes": 2637,
+          "by_kind": {
+            "1": 2637
+          }
+        },
+        "model.done+cell.snapshot+admit": {
+          "bytes": 1358599,
+          "by_kind": {
+            "1": 2854,
+            "5": 51,
+            "6": 131782,
+            "7": 129,
+            "12": 400,
+            "13": 44,
+            "14": 1218170,
+            "15": 353,
+            "17": 94,
+            "18": 897,
+            "19": 166,
+            "21": 69,
+            "22": 180,
+            "24": 66,
+            "33": 629,
+            "36": 261,
+            "37": 102,
+            "39": 44,
+            "41": 12,
+            "42": 575,
+            "1000": 308,
+            "1004": 1413
+          }
+        },
+        "round.outcome": {
+          "bytes": 6210,
+          "by_kind": {
+            "8": 420,
+            "20": 890,
+            "21": 2330,
+            "31": 970,
+            "40": 1600
+          }
+        },
+        "cell.snapshot+admit": {
+          "bytes": 63945,
+          "by_kind": {
+            "17": 846,
+            "18": 8073,
+            "19": 1494,
+            "20": 1107,
+            "21": 468,
+            "22": 10620,
+            "24": 594,
+            "36": 2349,
+            "1000": 2781,
+            "1004": 33489,
+            "1007": 2124
+          }
+        },
+        "turn.commit": {
+          "bytes": 529,
+          "by_kind": {
+            "9": 146,
+            "34": 383
+          }
+        }
+      },
+      "archived_calls": 10,
+      "parks_verified": 10,
+      "blocks": [
+        {
+          "operation": "cell.park",
+          "installed_bytes": 1358599
+        },
+        {
+          "operation": "cell.park",
+          "installed_bytes": 4493
+        },
+        {
+          "operation": "cell.park",
+          "installed_bytes": 5124
+        },
+        {
+          "operation": "cell.park",
+          "installed_bytes": 5783
+        },
+        {
+          "operation": "cell.park",
+          "installed_bytes": 6443
+        },
+        {
+          "operation": "cell.park",
+          "installed_bytes": 7102
+        },
+        {
+          "operation": "cell.park",
+          "installed_bytes": 7761
+        },
+        {
+          "operation": "cell.park",
+          "installed_bytes": 8420
+        },
+        {
+          "operation": "cell.park",
+          "installed_bytes": 9080
+        },
+        {
+          "operation": "cell.park",
+          "installed_bytes": 9739
+        }
+      ],
+      "source": "p10-cell-fresh-0",
+      "load1": [
+        17.11669921875,
+        17.11669921875
+      ],
+      "instructions": 5697260665,
+      "peak_rss_kib": 156844
+    },
+    {
+      "parks": 10,
+      "value_bytes": 0,
+      "fresh": true,
+      "batch": 1,
+      "installed_bytes": 87545,
+      "actor_installed_bytes": 87545,
+      "by_kind": {
+        "1": 26820,
+        "17": 940,
+        "18": 8970,
+        "19": 1660,
+        "20": 1997,
+        "21": 2897,
+        "22": 10800,
+        "24": 660,
+        "32": 352,
+        "33": 1887,
+        "36": 2610,
+        "37": 102,
+        "39": 352,
+        "40": 1600,
+        "1000": 3089,
+        "1004": 22809
+      },
+      "labels": {
+        "turn.admit": {
+          "bytes": 0,
+          "by_kind": {}
+        },
+        "model.start": {
+          "bytes": 23294,
+          "by_kind": {
+            "1": 21329,
+            "21": 47,
+            "32": 352,
+            "33": 1258,
+            "39": 308
+          }
+        },
+        "model.answer": {
+          "bytes": 2637,
+          "by_kind": {
+            "1": 2637
+          }
+        },
+        "model.done+cell.snapshot+admit": {
+          "bytes": 5653,
+          "by_kind": {
+            "1": 2854,
+            "17": 94,
+            "18": 897,
+            "19": 166,
+            "21": 52,
+            "22": 180,
+            "24": 66,
+            "33": 629,
+            "36": 261,
+            "37": 102,
+            "39": 44,
+            "1000": 308
+          }
+        },
+        "round.outcome": {
+          "bytes": 4820,
+          "by_kind": {
+            "20": 890,
+            "21": 2330,
+            "40": 1600
+          }
+        },
+        "cell.snapshot+admit": {
+          "bytes": 51141,
+          "by_kind": {
+            "17": 846,
+            "18": 8073,
+            "19": 1494,
+            "20": 1107,
+            "21": 468,
+            "22": 10620,
+            "24": 594,
+            "36": 2349,
+            "1000": 2781,
+            "1004": 22809
+          }
+        },
+        "turn.commit": {
+          "bytes": 0,
+          "by_kind": {}
+        }
+      },
+      "archived_calls": 10,
+      "parks_verified": 10,
+      "blocks": [
+        {
+          "operation": "cell.park",
+          "installed_bytes": 5653
+        },
+        {
+          "operation": "cell.park",
+          "installed_bytes": 4228
+        },
+        {
+          "operation": "cell.park",
+          "installed_bytes": 4888
+        },
+        {
+          "operation": "cell.park",
+          "installed_bytes": 5547
+        },
+        {
+          "operation": "cell.park",
+          "installed_bytes": 6207
+        },
+        {
+          "operation": "cell.park",
+          "installed_bytes": 6866
+        },
+        {
+          "operation": "cell.park",
+          "installed_bytes": 7525
+        },
+        {
+          "operation": "cell.park",
+          "installed_bytes": 8184
+        },
+        {
+          "operation": "cell.park",
+          "installed_bytes": 3748
+        },
+        {
+          "operation": "cell.park",
+          "installed_bytes": 3948
+        }
+      ],
+      "source": "p10-cell-fresh-0",
+      "load1": [
+        17.11669921875,
+        17.11669921875
+      ],
+      "instructions": 5697260665,
+      "peak_rss_kib": 156844
+    },
+    {
+      "parks": 10,
+      "value_bytes": 1024,
+      "fresh": true,
+      "batch": 0,
+      "installed_bytes": 1491903,
+      "actor_installed_bytes": 1491903,
+      "by_kind": {
+        "1": 52865,
+        "5": 51,
+        "6": 131782,
+        "7": 129,
+        "8": 740,
+        "9": 146,
+        "12": 400,
+        "13": 44,
+        "14": 1201839,
+        "15": 353,
+        "17": 940,
+        "18": 9210,
+        "19": 1980,
+        "20": 1997,
+        "21": 2974,
+        "22": 10800,
+        "24": 660,
+        "31": 980,
+        "32": 352,
+        "33": 1887,
+        "34": 383,
+        "35": 57,
+        "36": 2610,
+        "37": 114,
+        "39": 432,
+        "40": 1920,
+        "41": 12,
+        "42": 736,
+        "43": 236,
+        "1000": 3099,
+        "1004": 47756,
+        "1005": 11549,
+        "1007": 2750,
+        "1008": 120
+      },
+      "labels": {
+        "turn.admit": {
+          "bytes": 0,
+          "by_kind": {}
+        },
+        "model.start": {
+          "bytes": 40911,
+          "by_kind": {
+            "1": 32844,
+            "21": 47,
+            "32": 352,
+            "33": 1258,
+            "35": 57,
+            "39": 388,
+            "43": 236,
+            "1004": 5334,
+            "1007": 275,
+            "1008": 120
+          }
+        },
+        "model.answer": {
+          "bytes": 4723,
+          "by_kind": {
+            "1": 4723
+          }
+        },
+        "model.done+cell.snapshot+admit": {
+          "bytes": 1348311,
+          "by_kind": {
+            "1": 5983,
+            "5": 51,
+            "6": 131782,
+            "7": 129,
+            "12": 400,
+            "13": 44,
+            "14": 1201839,
+            "15": 353,
+            "17": 94,
+            "18": 921,
+            "19": 198,
+            "21": 69,
+            "22": 180,
+            "24": 66,
+            "33": 629,
+            "36": 261,
+            "37": 114,
+            "39": 44,
+            "41": 12,
+            "42": 736,
+            "1000": 309,
+            "1004": 1998,
+            "1005": 2099
+          }
+        },
+        "round.outcome": {
+          "bytes": 6920,
+          "by_kind": {
+            "8": 740,
+            "20": 890,
+            "21": 2390,
+            "31": 980,
+            "40": 1920
+          }
+        },
+        "cell.snapshot+admit": {
+          "bytes": 90509,
+          "by_kind": {
+            "1": 9315,
+            "17": 846,
+            "18": 8289,
+            "19": 1782,
+            "20": 1107,
+            "21": 468,
+            "22": 10620,
+            "24": 594,
+            "36": 2349,
+            "1000": 2790,
+            "1004": 40424,
+            "1005": 9450,
+            "1007": 2475
+          }
+        },
+        "turn.commit": {
+          "bytes": 529,
+          "by_kind": {
+            "9": 146,
+            "34": 383
+          }
+        }
+      },
+      "archived_calls": 10,
+      "parks_verified": 10,
+      "blocks": [
+        {
+          "operation": "cell.park",
+          "installed_bytes": 1348311
+        },
+        {
+          "operation": "cell.park",
+          "installed_bytes": 7297
+        },
+        {
+          "operation": "cell.park",
+          "installed_bytes": 7964
+        },
+        {
+          "operation": "cell.park",
+          "installed_bytes": 8660
+        },
+        {
+          "operation": "cell.park",
+          "installed_bytes": 9357
+        },
+        {
+          "operation": "cell.park",
+          "installed_bytes": 10053
+        },
+        {
+          "operation": "cell.park",
+          "installed_bytes": 10750
+        },
+        {
+          "operation": "cell.park",
+          "installed_bytes": 11446
+        },
+        {
+          "operation": "cell.park",
+          "installed_bytes": 12143
+        },
+        {
+          "operation": "cell.park",
+          "installed_bytes": 12839
+        }
+      ],
+      "source": "p10-cell-fresh-1024",
+      "load1": [
+        16.86669921875,
+        16.556640625
+      ],
+      "instructions": 6248745363,
+      "peak_rss_kib": 156908
+    },
+    {
+      "parks": 10,
+      "value_bytes": 1024,
+      "fresh": true,
+      "batch": 1,
+      "installed_bytes": 107442,
+      "actor_installed_bytes": 107442,
+      "by_kind": {
+        "1": 41186,
+        "8": 222,
+        "9": 146,
+        "17": 940,
+        "18": 9210,
+        "19": 1980,
+        "20": 1997,
+        "21": 2957,
+        "22": 10800,
+        "24": 660,
+        "31": 294,
+        "32": 352,
+        "33": 1887,
+        "34": 383,
+        "36": 2610,
+        "37": 114,
+        "39": 352,
+        "40": 1920,
+        "1000": 3099,
+        "1004": 23288,
+        "1005": 2100,
+        "1007": 825,
+        "1008": 120
+      },
+      "labels": {
+        "turn.admit": {
+          "bytes": 0,
+          "by_kind": {}
+        },
+        "model.start": {
+          "bytes": 37139,
+          "by_kind": {
+            "1": 29445,
+            "21": 47,
+            "32": 352,
+            "33": 1258,
+            "39": 308,
+            "1004": 5334,
+            "1007": 275,
+            "1008": 120
+          }
+        },
+        "model.answer": {
+          "bytes": 4723,
+          "by_kind": {
+            "1": 4723
+          }
+        },
+        "model.done+cell.snapshot+admit": {
+          "bytes": 7816,
+          "by_kind": {
+            "1": 4948,
+            "17": 94,
+            "18": 921,
+            "19": 198,
+            "21": 52,
+            "22": 180,
+            "24": 66,
+            "33": 629,
+            "36": 261,
+            "37": 114,
+            "39": 44,
+            "1000": 309
+          }
+        },
+        "round.outcome": {
+          "bytes": 5716,
+          "by_kind": {
+            "8": 222,
+            "20": 890,
+            "21": 2390,
+            "31": 294,
+            "40": 1920
+          }
+        },
+        "cell.snapshot+admit": {
+          "bytes": 51519,
+          "by_kind": {
+            "1": 2070,
+            "17": 846,
+            "18": 8289,
+            "19": 1782,
+            "20": 1107,
+            "21": 468,
+            "22": 10620,
+            "24": 594,
+            "36": 2349,
+            "1000": 2790,
+            "1004": 17954,
+            "1005": 2100,
+            "1007": 550
+          }
+        },
+        "turn.commit": {
+          "bytes": 529,
+          "by_kind": {
+            "9": 146,
+            "34": 383
+          }
+        }
+      },
+      "archived_calls": 10,
+      "parks_verified": 10,
+      "blocks": [
+        {
+          "operation": "cell.park",
+          "installed_bytes": 7816
+        },
+        {
+          "operation": "cell.park",
+          "installed_bytes": 4908
+        },
+        {
+          "operation": "cell.park",
+          "installed_bytes": 5604
+        },
+        {
+          "operation": "cell.park",
+          "installed_bytes": 2805
+        },
+        {
+          "operation": "cell.park",
+          "installed_bytes": 3005
+        },
+        {
+          "operation": "cell.park",
+          "installed_bytes": 3205
+        },
+        {
+          "operation": "cell.park",
+          "installed_bytes": 3405
+        },
+        {
+          "operation": "cell.park",
+          "installed_bytes": 3605
+        },
+        {
+          "operation": "cell.park",
+          "installed_bytes": 12143
+        },
+        {
+          "operation": "cell.park",
+          "installed_bytes": 12839
+        }
+      ],
+      "source": "p10-cell-fresh-1024",
+      "load1": [
+        16.86669921875,
+        16.556640625
+      ],
+      "instructions": 6248745363,
+      "peak_rss_kib": 156908
+    },
+    {
+      "parks": 10,
+      "value_bytes": 16384,
+      "fresh": true,
+      "batch": 0,
+      "installed_bytes": 1777948,
+      "actor_installed_bytes": 1777948,
+      "by_kind": {
+        "1": 298789,
+        "5": 51,
+        "6": 131782,
+        "7": 129,
+        "8": 740,
+        "9": 146,
+        "12": 400,
+        "13": 44,
+        "14": 1201839,
+        "15": 353,
+        "17": 940,
+        "18": 9290,
+        "19": 1980,
+        "20": 1997,
+        "21": 2994,
+        "22": 10800,
+        "24": 660,
+        "31": 990,
+        "32": 352,
+        "33": 1989,
+        "34": 383,
+        "35": 57,
+        "36": 2610,
+        "37": 118,
+        "39": 476,
+        "40": 1920,
+        "41": 12,
+        "42": 766,
+        "43": 236,
+        "1000": 3110,
+        "1004": 48118,
+        "1005": 49463,
+        "1006": 1474,
+        "1007": 2820,
+        "1008": 120
+      },
+      "labels": {
+        "turn.admit": {
+          "bytes": 0,
+          "by_kind": {}
+        },
+        "model.start": {
+          "bytes": 71964,
+          "by_kind": {
+            "1": 63692,
+            "21": 47,
+            "32": 352,
+            "33": 1360,
+            "35": 57,
+            "39": 432,
+            "43": 236,
+            "1004": 5386,
+            "1007": 282,
+            "1008": 120
+          }
+        },
+        "model.answer": {
+          "bytes": 35449,
+          "by_kind": {
+            "1": 35449
+          }
+        },
+        "model.done+cell.snapshot+admit": {
+          "bytes": 1404989,
+          "by_kind": {
+            "1": 52075,
+            "5": 51,
+            "6": 131782,
+            "7": 129,
+            "12": 400,
+            "13": 44,
+            "14": 1201839,
+            "15": 353,
+            "17": 94,
+            "18": 929,
+            "19": 198,
+            "21": 69,
+            "22": 180,
+            "24": 66,
+            "33": 629,
+            "36": 261,
+            "37": 118,
+            "39": 44,
+            "41": 12,
+            "42": 766,
+            "1000": 311,
+            "1004": 2006,
+            "1005": 12365,
+            "1006": 268
+          }
+        },
+        "round.outcome": {
+          "bytes": 6950,
+          "by_kind": {
+            "8": 740,
+            "20": 890,
+            "21": 2410,
+            "31": 990,
+            "40": 1920
+          }
+        },
+        "cell.snapshot+admit": {
+          "bytes": 258067,
+          "by_kind": {
+            "1": 147573,
+            "17": 846,
+            "18": 8361,
+            "19": 1782,
+            "20": 1107,
+            "21": 468,
+            "22": 10620,
+            "24": 594,
+            "36": 2349,
+            "1000": 2799,
+            "1004": 40726,
+            "1005": 37098,
+            "1006": 1206,
+            "1007": 2538
+          }
+        },
+        "turn.commit": {
+          "bytes": 529,
+          "by_kind": {
+            "9": 146,
+            "34": 383
+          }
+        }
+      },
+      "archived_calls": 10,
+      "parks_verified": 10,
+      "blocks": [
+        {
+          "operation": "cell.park",
+          "installed_bytes": 1404989
+        },
+        {
+          "operation": "cell.park",
+          "installed_bytes": 25895
+        },
+        {
+          "operation": "cell.park",
+          "installed_bytes": 26567
+        },
+        {
+          "operation": "cell.park",
+          "installed_bytes": 27268
+        },
+        {
+          "operation": "cell.park",
+          "installed_bytes": 27970
+        },
+        {
+          "operation": "cell.park",
+          "installed_bytes": 28671
+        },
+        {
+          "operation": "cell.park",
+          "installed_bytes": 29372
+        },
+        {
+          "operation": "cell.park",
+          "installed_bytes": 30073
+        },
+        {
+          "operation": "cell.park",
+          "installed_bytes": 30775
+        },
+        {
+          "operation": "cell.park",
+          "installed_bytes": 31476
+        }
+      ],
+      "source": "p10-cell-fresh-16384",
+      "load1": [
+        16.556640625,
+        16.59228515625
+      ],
+      "instructions": 11342056601,
+      "peak_rss_kib": 162180
+    },
+    {
+      "parks": 10,
+      "value_bytes": 16384,
+      "fresh": true,
+      "batch": 1,
+      "installed_bytes": 440331,
+      "actor_installed_bytes": 440331,
+      "by_kind": {
+        "1": 295390,
+        "8": 740,
+        "9": 146,
+        "12": 400,
+        "15": 353,
+        "17": 940,
+        "18": 9290,
+        "19": 1980,
+        "20": 1997,
+        "21": 2994,
+        "22": 10800,
+        "24": 660,
+        "31": 990,
+        "32": 352,
+        "33": 1989,
+        "34": 383,
+        "36": 2610,
+        "37": 118,
+        "39": 396,
+        "40": 1920,
+        "41": 12,
+        "42": 766,
+        "1000": 3110,
+        "1004": 48118,
+        "1005": 49463,
+        "1006": 1474,
+        "1007": 2820,
+        "1008": 120
+      },
+      "labels": {
+        "turn.admit": {
+          "bytes": 0,
+          "by_kind": {}
+        },
+        "model.start": {
+          "bytes": 68192,
+          "by_kind": {
+            "1": 60293,
+            "21": 47,
+            "32": 352,
+            "33": 1360,
+            "39": 352,
+            "1004": 5386,
+            "1007": 282,
+            "1008": 120
+          }
+        },
+        "model.answer": {
+          "bytes": 35449,
+          "by_kind": {
+            "1": 35449
+          }
+        },
+        "model.done+cell.snapshot+admit": {
+          "bytes": 71144,
+          "by_kind": {
+            "1": 52075,
+            "12": 400,
+            "15": 353,
+            "17": 94,
+            "18": 929,
+            "19": 198,
+            "21": 69,
+            "22": 180,
+            "24": 66,
+            "33": 629,
+            "36": 261,
+            "37": 118,
+            "39": 44,
+            "41": 12,
+            "42": 766,
+            "1000": 311,
+            "1004": 2006,
+            "1005": 12365,
+            "1006": 268
+          }
+        },
+        "round.outcome": {
+          "bytes": 6950,
+          "by_kind": {
+            "8": 740,
+            "20": 890,
+            "21": 2410,
+            "31": 990,
+            "40": 1920
+          }
+        },
+        "cell.snapshot+admit": {
+          "bytes": 258067,
+          "by_kind": {
+            "1": 147573,
+            "17": 846,
+            "18": 8361,
+            "19": 1782,
+            "20": 1107,
+            "21": 468,
+            "22": 10620,
+            "24": 594,
+            "36": 2349,
+            "1000": 2799,
+            "1004": 40726,
+            "1005": 37098,
+            "1006": 1206,
+            "1007": 2538
+          }
+        },
+        "turn.commit": {
+          "bytes": 529,
+          "by_kind": {
+            "9": 146,
+            "34": 383
+          }
+        }
+      },
+      "archived_calls": 10,
+      "parks_verified": 10,
+      "blocks": [
+        {
+          "operation": "cell.park",
+          "installed_bytes": 71144
+        },
+        {
+          "operation": "cell.park",
+          "installed_bytes": 25895
+        },
+        {
+          "operation": "cell.park",
+          "installed_bytes": 26567
+        },
+        {
+          "operation": "cell.park",
+          "installed_bytes": 27268
+        },
+        {
+          "operation": "cell.park",
+          "installed_bytes": 27970
+        },
+        {
+          "operation": "cell.park",
+          "installed_bytes": 28671
+        },
+        {
+          "operation": "cell.park",
+          "installed_bytes": 29372
+        },
+        {
+          "operation": "cell.park",
+          "installed_bytes": 30073
+        },
+        {
+          "operation": "cell.park",
+          "installed_bytes": 30775
+        },
+        {
+          "operation": "cell.park",
+          "installed_bytes": 31476
+        }
+      ],
+      "source": "p10-cell-fresh-16384",
+      "load1": [
+        16.556640625,
+        16.59228515625
+      ],
+      "instructions": 11342056601,
+      "peak_rss_kib": 162180
+    },
+    {
+      "parks": 3,
+      "value_bytes": 0,
+      "fresh": false,
+      "batch": 0,
+      "installed_bytes": 1399985,
+      "actor_installed_bytes": 1399985,
+      "by_kind": {
+        "1": 28242,
+        "5": 51,
+        "6": 131782,
+        "7": 129,
+        "8": 126,
+        "9": 146,
+        "12": 400,
+        "13": 44,
+        "14": 1218170,
+        "15": 353,
+        "17": 282,
+        "18": 2547,
+        "19": 498,
+        "20": 513,
+        "21": 883,
+        "22": 1140,
+        "24": 198,
+        "31": 291,
+        "32": 114,
+        "33": 1887,
+        "34": 383,
+        "35": 57,
+        "36": 783,
+        "37": 78,
+        "39": 432,
+        "40": 480,
+        "41": 12,
+        "42": 566,
+        "43": 236,
+        "1000": 926,
+        "1004": 7408,
+        "1007": 708,
+        "1008": 120
+      },
+      "labels": {
+        "turn.admit": {
+          "bytes": 0,
+          "by_kind": {}
+        },
+        "model.start": {
+          "bytes": 27017,
+          "by_kind": {
+            "1": 22815,
+            "21": 47,
+            "32": 114,
+            "33": 1258,
+            "35": 57,
+            "39": 388,
+            "43": 236,
+            "1004": 1746,
+            "1007": 236,
+            "1008": 120
+          }
+        },
+        "model.answer": {
+          "bytes": 2611,
+          "by_kind": {
+            "1": 2611
+          }
+        },
+        "model.done+cell.snapshot+admit": {
+          "bytes": 1358480,
+          "by_kind": {
+            "1": 2816,
+            "5": 51,
+            "6": 131782,
+            "7": 129,
+            "12": 400,
+            "13": 44,
+            "14": 1218170,
+            "15": 353,
+            "17": 94,
+            "18": 849,
+            "19": 166,
+            "21": 69,
+            "22": 180,
+            "24": 66,
+            "33": 629,
+            "36": 261,
+            "37": 78,
+            "39": 44,
+            "41": 12,
+            "42": 566,
+            "1000": 308,
+            "1004": 1413
+          }
+        },
+        "round.outcome": {
+          "bytes": 1827,
+          "by_kind": {
+            "8": 126,
+            "20": 267,
+            "21": 663,
+            "31": 291,
+            "40": 480
+          }
+        },
+        "cell.snapshot+admit": {
+          "bytes": 9521,
+          "by_kind": {
+            "17": 188,
+            "18": 1698,
+            "19": 332,
+            "20": 246,
+            "21": 104,
+            "22": 960,
+            "24": 132,
+            "36": 522,
+            "1000": 618,
+            "1004": 4249,
+            "1007": 472
+          }
+        },
+        "turn.commit": {
+          "bytes": 529,
+          "by_kind": {
+            "9": 146,
+            "34": 383
+          }
+        }
+      },
+      "archived_calls": 3,
+      "parks_verified": 3,
+      "blocks": [
+        {
+          "operation": "cell.park",
+          "installed_bytes": 1358480
+        },
+        {
+          "operation": "cell.park",
+          "installed_bytes": 4445
+        },
+        {
+          "operation": "cell.park",
+          "installed_bytes": 5076
+        }
+      ],
+      "source": "p3-cell-0",
+      "load1": [
+        19.06298828125,
+        19.06298828125
+      ],
+      "instructions": 4343380966,
+      "peak_rss_kib": 157140
+    },
+    {
+      "parks": 3,
+      "value_bytes": 0,
+      "fresh": false,
+      "batch": 1,
+      "installed_bytes": 42762,
+      "actor_installed_bytes": 42762,
+      "by_kind": {
+        "1": 24843,
+        "12": 400,
+        "15": 353,
+        "17": 282,
+        "18": 2547,
+        "19": 498,
+        "20": 513,
+        "21": 883,
+        "22": 1140,
+        "24": 198,
+        "31": 291,
+        "32": 114,
+        "33": 1887,
+        "35": 57,
+        "36": 783,
+        "37": 78,
+        "39": 352,
+        "40": 480,
+        "41": 12,
+        "42": 566,
+        "1000": 926,
+        "1004": 5559
+      },
+      "labels": {
+        "turn.admit": {
+          "bytes": 0,
+          "by_kind": {}
+        },
+        "model.start": {
+          "bytes": 21200,
+          "by_kind": {
+            "1": 19416,
+            "21": 47,
+            "32": 114,
+            "33": 1258,
+            "35": 57,
+            "39": 308
+          }
+        },
+        "model.answer": {
+          "bytes": 2611,
+          "by_kind": {
+            "1": 2611
+          }
+        },
+        "model.done+cell.snapshot+admit": {
+          "bytes": 8230,
+          "by_kind": {
+            "1": 2816,
+            "12": 400,
+            "15": 353,
+            "17": 94,
+            "18": 849,
+            "19": 166,
+            "21": 69,
+            "22": 180,
+            "24": 66,
+            "33": 629,
+            "36": 261,
+            "37": 78,
+            "39": 44,
+            "41": 12,
+            "42": 566,
+            "1000": 308,
+            "1004": 1339
+          }
+        },
+        "round.outcome": {
+          "bytes": 1701,
+          "by_kind": {
+            "20": 267,
+            "21": 663,
+            "31": 291,
+            "40": 480
+          }
+        },
+        "cell.snapshot+admit": {
+          "bytes": 9020,
+          "by_kind": {
+            "17": 188,
+            "18": 1698,
+            "19": 332,
+            "20": 246,
+            "21": 104,
+            "22": 960,
+            "24": 132,
+            "36": 522,
+            "1000": 618,
+            "1004": 4220
+          }
+        },
+        "turn.commit": {
+          "bytes": 0,
+          "by_kind": {}
+        }
+      },
+      "archived_calls": 3,
+      "parks_verified": 3,
+      "blocks": [
+        {
+          "operation": "cell.park",
+          "installed_bytes": 8230
+        },
+        {
+          "operation": "cell.park",
+          "installed_bytes": 4180
+        },
+        {
+          "operation": "cell.park",
+          "installed_bytes": 4840
+        }
+      ],
+      "source": "p3-cell-0",
+      "load1": [
+        19.06298828125,
+        19.06298828125
+      ],
+      "instructions": 4343380966,
+      "peak_rss_kib": 157140
+    },
+    {
+      "parks": 3,
+      "value_bytes": 1024,
+      "fresh": false,
+      "batch": 0,
+      "installed_bytes": 1410655,
+      "actor_installed_bytes": 1410655,
+      "by_kind": {
+        "1": 37162,
+        "5": 51,
+        "6": 131782,
+        "7": 129,
+        "8": 222,
+        "9": 146,
+        "12": 400,
+        "13": 44,
+        "14": 1218170,
+        "15": 353,
+        "17": 282,
+        "18": 2619,
+        "19": 594,
+        "20": 513,
+        "21": 901,
+        "22": 1140,
+        "24": 198,
+        "31": 294,
+        "32": 114,
+        "33": 1887,
+        "34": 383,
+        "35": 57,
+        "36": 783,
+        "37": 90,
+        "39": 432,
+        "40": 576,
+        "41": 12,
+        "42": 584,
+        "43": 236,
+        "1000": 927,
+        "1004": 7579,
+        "1005": 1050,
+        "1007": 825,
+        "1008": 120
+      },
+      "labels": {
+        "turn.admit": {
+          "bytes": 0,
+          "by_kind": {}
+        },
+        "model.start": {
+          "bytes": 31895,
+          "by_kind": {
+            "1": 27607,
+            "21": 47,
+            "32": 114,
+            "33": 1258,
+            "35": 57,
+            "39": 388,
+            "43": 236,
+            "1004": 1793,
+            "1007": 275,
+            "1008": 120
+          }
+        },
+        "model.answer": {
+          "bytes": 4671,
+          "by_kind": {
+            "1": 4671
+          }
+        },
+        "model.done+cell.snapshot+admit": {
+          "bytes": 1361721,
+          "by_kind": {
+            "1": 4884,
+            "5": 51,
+            "6": 131782,
+            "7": 129,
+            "12": 400,
+            "13": 44,
+            "14": 1218170,
+            "15": 353,
+            "17": 94,
+            "18": 873,
+            "19": 198,
+            "21": 69,
+            "22": 180,
+            "24": 66,
+            "33": 629,
+            "36": 261,
+            "37": 90,
+            "39": 44,
+            "41": 12,
+            "42": 584,
+            "1000": 309,
+            "1004": 1449,
+            "1005": 1050
+          }
+        },
+        "round.outcome": {
+          "bytes": 2040,
+          "by_kind": {
+            "8": 222,
+            "20": 267,
+            "21": 681,
+            "31": 294,
+            "40": 576
+          }
+        },
+        "cell.snapshot+admit": {
+          "bytes": 9799,
+          "by_kind": {
+            "17": 188,
+            "18": 1746,
+            "19": 396,
+            "20": 246,
+            "21": 104,
+            "22": 960,
+            "24": 132,
+            "36": 522,
+            "1000": 618,
+            "1004": 4337,
+            "1007": 550
+          }
+        },
+        "turn.commit": {
+          "bytes": 529,
+          "by_kind": {
+            "9": 146,
+            "34": 383
+          }
+        }
+      },
+      "archived_calls": 3,
+      "parks_verified": 3,
+      "blocks": [
+        {
+          "operation": "cell.park",
+          "installed_bytes": 1361721
+        },
+        {
+          "operation": "cell.park",
+          "installed_bytes": 4582
+        },
+        {
+          "operation": "cell.park",
+          "installed_bytes": 5217
+        }
+      ],
+      "source": "p3-cell-1024",
+      "load1": [
+        18.4970703125,
+        18.4970703125
+      ],
+      "instructions": 4492645536,
+      "peak_rss_kib": 156368
+    },
+    {
+      "parks": 3,
+      "value_bytes": 1024,
+      "fresh": false,
+      "batch": 1,
+      "installed_bytes": 52065,
+      "actor_installed_bytes": 52065,
+      "by_kind": {
+        "1": 33763,
+        "12": 400,
+        "15": 353,
+        "17": 282,
+        "18": 2619,
+        "19": 594,
+        "20": 513,
+        "21": 901,
+        "22": 1140,
+        "24": 198,
+        "31": 294,
+        "32": 114,
+        "33": 1887,
+        "36": 783,
+        "37": 90,
+        "39": 352,
+        "40": 576,
+        "41": 12,
+        "42": 584,
+        "1000": 927,
+        "1004": 5683
+      },
+      "labels": {
+        "turn.admit": {
+          "bytes": 0,
+          "by_kind": {}
+        },
+        "model.start": {
+          "bytes": 25935,
+          "by_kind": {
+            "1": 24208,
+            "21": 47,
+            "32": 114,
+            "33": 1258,
+            "39": 308
+          }
+        },
+        "model.answer": {
+          "bytes": 4671,
+          "by_kind": {
+            "1": 4671
+          }
+        },
+        "model.done+cell.snapshot+admit": {
+          "bytes": 10421,
+          "by_kind": {
+            "1": 4884,
+            "12": 400,
+            "15": 353,
+            "17": 94,
+            "18": 873,
+            "19": 198,
+            "21": 69,
+            "22": 180,
+            "24": 66,
+            "33": 629,
+            "36": 261,
+            "37": 90,
+            "39": 44,
+            "41": 12,
+            "42": 584,
+            "1000": 309,
+            "1004": 1375
+          }
+        },
+        "round.outcome": {
+          "bytes": 1818,
+          "by_kind": {
+            "20": 267,
+            "21": 681,
+            "31": 294,
+            "40": 576
+          }
+        },
+        "cell.snapshot+admit": {
+          "bytes": 9220,
+          "by_kind": {
+            "17": 188,
+            "18": 1746,
+            "19": 396,
+            "20": 246,
+            "21": 104,
+            "22": 960,
+            "24": 132,
+            "36": 522,
+            "1000": 618,
+            "1004": 4308
+          }
+        },
+        "turn.commit": {
+          "bytes": 0,
+          "by_kind": {}
+        }
+      },
+      "archived_calls": 3,
+      "parks_verified": 3,
+      "blocks": [
+        {
+          "operation": "cell.park",
+          "installed_bytes": 10421
+        },
+        {
+          "operation": "cell.park",
+          "installed_bytes": 4278
+        },
+        {
+          "operation": "cell.park",
+          "installed_bytes": 4942
+        }
+      ],
+      "source": "p3-cell-1024",
+      "load1": [
+        18.4970703125,
+        18.4970703125
+      ],
+      "instructions": 4492645536,
+      "peak_rss_kib": 156368
+    },
+    {
+      "parks": 3,
+      "value_bytes": 16384,
+      "fresh": false,
+      "batch": 0,
+      "installed_bytes": 1506417,
+      "actor_installed_bytes": 1506417,
+      "by_kind": {
+        "1": 129465,
+        "5": 51,
+        "6": 131782,
+        "7": 129,
+        "8": 222,
+        "9": 146,
+        "12": 400,
+        "13": 44,
+        "14": 1218170,
+        "15": 353,
+        "17": 282,
+        "18": 2643,
+        "19": 594,
+        "20": 513,
+        "21": 907,
+        "22": 1140,
+        "24": 198,
+        "31": 297,
+        "32": 114,
+        "33": 1989,
+        "34": 383,
+        "35": 57,
+        "36": 783,
+        "37": 94,
+        "39": 476,
+        "40": 576,
+        "41": 12,
+        "42": 608,
+        "43": 236,
+        "1000": 930,
+        "1004": 7633,
+        "1005": 4122,
+        "1006": 102,
+        "1007": 846,
+        "1008": 120
+      },
+      "labels": {
+        "turn.admit": {
+          "bytes": 0,
+          "by_kind": {}
+        },
+        "model.start": {
+          "bytes": 62914,
+          "by_kind": {
+            "1": 58454,
+            "21": 47,
+            "32": 114,
+            "33": 1360,
+            "35": 57,
+            "39": 432,
+            "43": 236,
+            "1004": 1812,
+            "1007": 282,
+            "1008": 120
+          }
+        },
+        "model.answer": {
+          "bytes": 35397,
+          "by_kind": {
+            "1": 35397
+          }
+        },
+        "model.done+cell.snapshot+admit": {
+          "bytes": 1395668,
+          "by_kind": {
+            "1": 35614,
+            "5": 51,
+            "6": 131782,
+            "7": 129,
+            "12": 400,
+            "13": 44,
+            "14": 1218170,
+            "15": 353,
+            "17": 94,
+            "18": 881,
+            "19": 198,
+            "21": 69,
+            "22": 180,
+            "24": 66,
+            "33": 629,
+            "36": 261,
+            "37": 94,
+            "39": 44,
+            "41": 12,
+            "42": 608,
+            "1000": 310,
+            "1004": 1455,
+            "1005": 4122,
+            "1006": 102
+          }
+        },
+        "round.outcome": {
+          "bytes": 2049,
+          "by_kind": {
+            "8": 222,
+            "20": 267,
+            "21": 687,
+            "31": 297,
+            "40": 576
+          }
+        },
+        "cell.snapshot+admit": {
+          "bytes": 9860,
+          "by_kind": {
+            "17": 188,
+            "18": 1762,
+            "19": 396,
+            "20": 246,
+            "21": 104,
+            "22": 960,
+            "24": 132,
+            "36": 522,
+            "1000": 620,
+            "1004": 4366,
+            "1007": 564
+          }
+        },
+        "turn.commit": {
+          "bytes": 529,
+          "by_kind": {
+            "9": 146,
+            "34": 383
+          }
+        }
+      },
+      "archived_calls": 3,
+      "parks_verified": 3,
+      "blocks": [
+        {
+          "operation": "cell.park",
+          "installed_bytes": 1395668
+        },
+        {
+          "operation": "cell.park",
+          "installed_bytes": 4610
+        },
+        {
+          "operation": "cell.park",
+          "installed_bytes": 5250
+        }
+      ],
+      "source": "p3-cell-16384",
+      "load1": [
+        18.4970703125,
+        17.736328125
+      ],
+      "instructions": 6127792248,
+      "peak_rss_kib": 159368
+    },
+    {
+      "parks": 3,
+      "value_bytes": 16384,
+      "fresh": false,
+      "batch": 1,
+      "installed_bytes": 139142,
+      "actor_installed_bytes": 139142,
+      "by_kind": {
+        "1": 126066,
+        "17": 282,
+        "18": 2643,
+        "19": 594,
+        "20": 513,
+        "21": 890,
+        "22": 1140,
+        "24": 198,
+        "32": 114,
+        "33": 1989,
+        "36": 783,
+        "37": 94,
+        "39": 396,
+        "40": 576,
+        "1000": 930,
+        "1004": 1934
+      },
+      "labels": {
+        "turn.admit": {
+          "bytes": 0,
+          "by_kind": {}
+        },
+        "model.start": {
+          "bytes": 56928,
+          "by_kind": {
+            "1": 55055,
+            "21": 47,
+            "32": 114,
+            "33": 1360,
+            "39": 352
+          }
+        },
+        "model.answer": {
+          "bytes": 35397,
+          "by_kind": {
+            "1": 35397
+          }
+        },
+        "model.done+cell.snapshot+admit": {
+          "bytes": 38423,
+          "by_kind": {
+            "1": 35614,
+            "17": 94,
+            "18": 881,
+            "19": 198,
+            "21": 52,
+            "22": 180,
+            "24": 66,
+            "33": 629,
+            "36": 261,
+            "37": 94,
+            "39": 44,
+            "1000": 310
+          }
+        },
+        "round.outcome": {
+          "bytes": 1530,
+          "by_kind": {
+            "20": 267,
+            "21": 687,
+            "40": 576
+          }
+        },
+        "cell.snapshot+admit": {
+          "bytes": 6864,
+          "by_kind": {
+            "17": 188,
+            "18": 1762,
+            "19": 396,
+            "20": 246,
+            "21": 104,
+            "22": 960,
+            "24": 132,
+            "36": 522,
+            "1000": 620,
+            "1004": 1934
+          }
+        },
+        "turn.commit": {
+          "bytes": 0,
+          "by_kind": {}
+        }
+      },
+      "archived_calls": 3,
+      "parks_verified": 3,
+      "blocks": [
+        {
+          "operation": "cell.park",
+          "installed_bytes": 38423
+        },
+        {
+          "operation": "cell.park",
+          "installed_bytes": 4299
+        },
+        {
+          "operation": "cell.park",
+          "installed_bytes": 2565
+        }
+      ],
+      "source": "p3-cell-16384",
+      "load1": [
+        18.4970703125,
+        17.736328125
+      ],
+      "instructions": 6127792248,
+      "peak_rss_kib": 159368
+    },
+    {
+      "parks": 3,
+      "value_bytes": 0,
+      "fresh": true,
+      "batch": 0,
+      "installed_bytes": 1400393,
+      "actor_installed_bytes": 1400393,
+      "by_kind": {
+        "1": 28446,
+        "5": 51,
+        "6": 131782,
+        "7": 129,
+        "8": 126,
+        "9": 146,
+        "12": 400,
+        "13": 44,
+        "14": 1218170,
+        "15": 353,
+        "17": 282,
+        "18": 2691,
+        "19": 498,
+        "20": 513,
+        "21": 919,
+        "22": 1140,
+        "24": 198,
+        "31": 291,
+        "32": 114,
+        "33": 1887,
+        "34": 383,
+        "35": 57,
+        "36": 783,
+        "37": 102,
+        "39": 432,
+        "40": 480,
+        "41": 12,
+        "42": 566,
+        "43": 236,
+        "1000": 926,
+        "1004": 7408,
+        "1007": 708,
+        "1008": 120
+      },
+      "labels": {
+        "turn.admit": {
+          "bytes": 0,
+          "by_kind": {}
+        },
+        "model.start": {
+          "bytes": 27161,
+          "by_kind": {
+            "1": 22959,
+            "21": 47,
+            "32": 114,
+            "33": 1258,
+            "35": 57,
+            "39": 388,
+            "43": 236,
+            "1004": 1746,
+            "1007": 236,
+            "1008": 120
+          }
+        },
+        "model.answer": {
+          "bytes": 2635,
+          "by_kind": {
+            "1": 2635
+          }
+        },
+        "model.done+cell.snapshot+admit": {
+          "bytes": 1358588,
+          "by_kind": {
+            "1": 2852,
+            "5": 51,
+            "6": 131782,
+            "7": 129,
+            "12": 400,
+            "13": 44,
+            "14": 1218170,
+            "15": 353,
+            "17": 94,
+            "18": 897,
+            "19": 166,
+            "21": 69,
+            "22": 180,
+            "24": 66,
+            "33": 629,
+            "36": 261,
+            "37": 102,
+            "39": 44,
+            "41": 12,
+            "42": 566,
+            "1000": 308,
+            "1004": 1413
+          }
+        },
+        "round.outcome": {
+          "bytes": 1863,
+          "by_kind": {
+            "8": 126,
+            "20": 267,
+            "21": 699,
+            "31": 291,
+            "40": 480
+          }
+        },
+        "cell.snapshot+admit": {
+          "bytes": 9617,
+          "by_kind": {
+            "17": 188,
+            "18": 1794,
+            "19": 332,
+            "20": 246,
+            "21": 104,
+            "22": 960,
+            "24": 132,
+            "36": 522,
+            "1000": 618,
+            "1004": 4249,
+            "1007": 472
+          }
+        },
+        "turn.commit": {
+          "bytes": 529,
+          "by_kind": {
+            "9": 146,
+            "34": 383
+          }
+        }
+      },
+      "archived_calls": 3,
+      "parks_verified": 3,
+      "blocks": [
+        {
+          "operation": "cell.park",
+          "installed_bytes": 1358588
+        },
+        {
+          "operation": "cell.park",
+          "installed_bytes": 4493
+        },
+        {
+          "operation": "cell.park",
+          "installed_bytes": 5124
+        }
+      ],
+      "source": "p3-cell-fresh-0",
+      "load1": [
+        19.06298828125,
+        18.4970703125
+      ],
+      "instructions": 4349557837,
+      "peak_rss_kib": 156884
+    },
+    {
+      "parks": 3,
+      "value_bytes": 0,
+      "fresh": true,
+      "batch": 1,
+      "installed_bytes": 43170,
+      "actor_installed_bytes": 43170,
+      "by_kind": {
+        "1": 25047,
+        "12": 400,
+        "15": 353,
+        "17": 282,
+        "18": 2691,
+        "19": 498,
+        "20": 513,
+        "21": 919,
+        "22": 1140,
+        "24": 198,
+        "31": 291,
+        "32": 114,
+        "33": 1887,
+        "35": 57,
+        "36": 783,
+        "37": 102,
+        "39": 352,
+        "40": 480,
+        "41": 12,
+        "42": 566,
+        "1000": 926,
+        "1004": 5559
+      },
+      "labels": {
+        "turn.admit": {
+          "bytes": 0,
+          "by_kind": {}
+        },
+        "model.start": {
+          "bytes": 21344,
+          "by_kind": {
+            "1": 19560,
+            "21": 47,
+            "32": 114,
+            "33": 1258,
+            "35": 57,
+            "39": 308
+          }
+        },
+        "model.answer": {
+          "bytes": 2635,
+          "by_kind": {
+            "1": 2635
+          }
+        },
+        "model.done+cell.snapshot+admit": {
+          "bytes": 8338,
+          "by_kind": {
+            "1": 2852,
+            "12": 400,
+            "15": 353,
+            "17": 94,
+            "18": 897,
+            "19": 166,
+            "21": 69,
+            "22": 180,
+            "24": 66,
+            "33": 629,
+            "36": 261,
+            "37": 102,
+            "39": 44,
+            "41": 12,
+            "42": 566,
+            "1000": 308,
+            "1004": 1339
+          }
+        },
+        "round.outcome": {
+          "bytes": 1737,
+          "by_kind": {
+            "20": 267,
+            "21": 699,
+            "31": 291,
+            "40": 480
+          }
+        },
+        "cell.snapshot+admit": {
+          "bytes": 9116,
+          "by_kind": {
+            "17": 188,
+            "18": 1794,
+            "19": 332,
+            "20": 246,
+            "21": 104,
+            "22": 960,
+            "24": 132,
+            "36": 522,
+            "1000": 618,
+            "1004": 4220
+          }
+        },
+        "turn.commit": {
+          "bytes": 0,
+          "by_kind": {}
+        }
+      },
+      "archived_calls": 3,
+      "parks_verified": 3,
+      "blocks": [
+        {
+          "operation": "cell.park",
+          "installed_bytes": 8338
+        },
+        {
+          "operation": "cell.park",
+          "installed_bytes": 4228
+        },
+        {
+          "operation": "cell.park",
+          "installed_bytes": 4888
+        }
+      ],
+      "source": "p3-cell-fresh-0",
+      "load1": [
+        19.06298828125,
+        18.4970703125
+      ],
+      "instructions": 4349557837,
+      "peak_rss_kib": 156884
+    },
+    {
+      "parks": 3,
+      "value_bytes": 1024,
+      "fresh": true,
+      "batch": 0,
+      "installed_bytes": 1403025,
+      "actor_installed_bytes": 1403025,
+      "by_kind": {
+        "1": 40549,
+        "5": 51,
+        "6": 131782,
+        "7": 129,
+        "8": 222,
+        "9": 146,
+        "12": 400,
+        "13": 44,
+        "14": 1201839,
+        "15": 353,
+        "17": 282,
+        "18": 2763,
+        "19": 594,
+        "20": 513,
+        "21": 937,
+        "22": 1140,
+        "24": 198,
+        "31": 294,
+        "32": 114,
+        "33": 1887,
+        "34": 383,
+        "35": 57,
+        "36": 783,
+        "37": 114,
+        "39": 432,
+        "40": 576,
+        "41": 12,
+        "42": 736,
+        "43": 236,
+        "1000": 929,
+        "1004": 9386,
+        "1005": 4199,
+        "1007": 825,
+        "1008": 120
+      },
+      "labels": {
+        "turn.admit": {
+          "bytes": 0,
+          "by_kind": {}
+        },
+        "model.start": {
+          "bytes": 32129,
+          "by_kind": {
+            "1": 27777,
+            "21": 47,
+            "32": 114,
+            "33": 1258,
+            "35": 57,
+            "39": 388,
+            "43": 236,
+            "1004": 1857,
+            "1007": 275,
+            "1008": 120
+          }
+        },
+        "model.answer": {
+          "bytes": 4721,
+          "by_kind": {
+            "1": 4721
+          }
+        },
+        "model.done+cell.snapshot+admit": {
+          "bytes": 1348309,
+          "by_kind": {
+            "1": 5981,
+            "5": 51,
+            "6": 131782,
+            "7": 129,
+            "12": 400,
+            "13": 44,
+            "14": 1201839,
+            "15": 353,
+            "17": 94,
+            "18": 921,
+            "19": 198,
+            "21": 69,
+            "22": 180,
+            "24": 66,
+            "33": 629,
+            "36": 261,
+            "37": 114,
+            "39": 44,
+            "41": 12,
+            "42": 736,
+            "1000": 309,
+            "1004": 1998,
+            "1005": 2099
+          }
+        },
+        "round.outcome": {
+          "bytes": 2076,
+          "by_kind": {
+            "8": 222,
+            "20": 267,
+            "21": 717,
+            "31": 294,
+            "40": 576
+          }
+        },
+        "cell.snapshot+admit": {
+          "bytes": 15261,
+          "by_kind": {
+            "1": 2070,
+            "17": 188,
+            "18": 1842,
+            "19": 396,
+            "20": 246,
+            "21": 104,
+            "22": 960,
+            "24": 132,
+            "36": 522,
+            "1000": 620,
+            "1004": 5531,
+            "1005": 2100,
+            "1007": 550
+          }
+        },
+        "turn.commit": {
+          "bytes": 529,
+          "by_kind": {
+            "9": 146,
+            "34": 383
+          }
+        }
+      },
+      "archived_calls": 3,
+      "parks_verified": 3,
+      "blocks": [
+        {
+          "operation": "cell.park",
+          "installed_bytes": 1348309
+        },
+        {
+          "operation": "cell.park",
+          "installed_bytes": 7297
+        },
+        {
+          "operation": "cell.park",
+          "installed_bytes": 7964
+        }
+      ],
+      "source": "p3-cell-fresh-1024",
+      "load1": [
+        18.4970703125,
+        18.4970703125
+      ],
+      "instructions": 4574242436,
+      "peak_rss_kib": 156560
+    },
+    {
+      "parks": 3,
+      "value_bytes": 1024,
+      "fresh": true,
+      "batch": 1,
+      "installed_bytes": 55497,
+      "actor_installed_bytes": 55497,
+      "by_kind": {
+        "1": 34045,
+        "12": 400,
+        "15": 353,
+        "17": 282,
+        "18": 2763,
+        "19": 594,
+        "20": 513,
+        "21": 937,
+        "22": 1140,
+        "24": 198,
+        "31": 294,
+        "32": 114,
+        "33": 1887,
+        "36": 783,
+        "37": 114,
+        "39": 352,
+        "40": 576,
+        "41": 12,
+        "42": 736,
+        "1000": 929,
+        "1004": 7426,
+        "1005": 1049
+      },
+      "labels": {
+        "turn.admit": {
+          "bytes": 0,
+          "by_kind": {}
+        },
+        "model.start": {
+          "bytes": 26105,
+          "by_kind": {
+            "1": 24378,
+            "21": 47,
+            "32": 114,
+            "33": 1258,
+            "39": 308
+          }
+        },
+        "model.answer": {
+          "bytes": 4721,
+          "by_kind": {
+            "1": 4721
+          }
+        },
+        "model.done+cell.snapshot+admit": {
+          "bytes": 12305,
+          "by_kind": {
+            "1": 4946,
+            "12": 400,
+            "15": 353,
+            "17": 94,
+            "18": 921,
+            "19": 198,
+            "21": 69,
+            "22": 180,
+            "24": 66,
+            "33": 629,
+            "36": 261,
+            "37": 114,
+            "39": 44,
+            "41": 12,
+            "42": 736,
+            "1000": 309,
+            "1004": 1924,
+            "1005": 1049
+          }
+        },
+        "round.outcome": {
+          "bytes": 1854,
+          "by_kind": {
+            "20": 267,
+            "21": 717,
+            "31": 294,
+            "40": 576
+          }
+        },
+        "cell.snapshot+admit": {
+          "bytes": 10512,
+          "by_kind": {
+            "17": 188,
+            "18": 1842,
+            "19": 396,
+            "20": 246,
+            "21": 104,
+            "22": 960,
+            "24": 132,
+            "36": 522,
+            "1000": 620,
+            "1004": 5502
+          }
+        },
+        "turn.commit": {
+          "bytes": 0,
+          "by_kind": {}
+        }
+      },
+      "archived_calls": 3,
+      "parks_verified": 3,
+      "blocks": [
+        {
+          "operation": "cell.park",
+          "installed_bytes": 12305
+        },
+        {
+          "operation": "cell.park",
+          "installed_bytes": 4908
+        },
+        {
+          "operation": "cell.park",
+          "installed_bytes": 5604
+        }
+      ],
+      "source": "p3-cell-fresh-1024",
+      "load1": [
+        18.4970703125,
+        18.4970703125
+      ],
+      "instructions": 4574242436,
+      "peak_rss_kib": 156560
+    },
+    {
+      "parks": 3,
+      "value_bytes": 16384,
+      "fresh": true,
+      "batch": 0,
+      "installed_bytes": 1558658,
+      "actor_installed_bytes": 1558658,
+      "by_kind": {
+        "1": 178938,
+        "5": 51,
+        "6": 131782,
+        "7": 129,
+        "8": 222,
+        "9": 146,
+        "12": 400,
+        "13": 44,
+        "14": 1201839,
+        "15": 353,
+        "17": 282,
+        "18": 2787,
+        "19": 594,
+        "20": 513,
+        "21": 943,
+        "22": 1140,
+        "24": 198,
+        "31": 297,
+        "32": 114,
+        "33": 1989,
+        "34": 383,
+        "35": 57,
+        "36": 783,
+        "37": 118,
+        "39": 476,
+        "40": 576,
+        "41": 12,
+        "42": 766,
+        "43": 236,
+        "1000": 933,
+        "1004": 9446,
+        "1005": 20609,
+        "1006": 536,
+        "1007": 846,
+        "1008": 120
+      },
+      "labels": {
+        "turn.admit": {
+          "bytes": 0,
+          "by_kind": {}
+        },
+        "model.start": {
+          "bytes": 63148,
+          "by_kind": {
+            "1": 58624,
+            "21": 47,
+            "32": 114,
+            "33": 1360,
+            "35": 57,
+            "39": 432,
+            "43": 236,
+            "1004": 1876,
+            "1007": 282,
+            "1008": 120
+          }
+        },
+        "model.answer": {
+          "bytes": 35447,
+          "by_kind": {
+            "1": 35447
+          }
+        },
+        "model.done+cell.snapshot+admit": {
+          "bytes": 1404987,
+          "by_kind": {
+            "1": 52073,
+            "5": 51,
+            "6": 131782,
+            "7": 129,
+            "12": 400,
+            "13": 44,
+            "14": 1201839,
+            "15": 353,
+            "17": 94,
+            "18": 929,
+            "19": 198,
+            "21": 69,
+            "22": 180,
+            "24": 66,
+            "33": 629,
+            "36": 261,
+            "37": 118,
+            "39": 44,
+            "41": 12,
+            "42": 766,
+            "1000": 311,
+            "1004": 2006,
+            "1005": 12365,
+            "1006": 268
+          }
+        },
+        "round.outcome": {
+          "bytes": 2085,
+          "by_kind": {
+            "8": 222,
+            "20": 267,
+            "21": 723,
+            "31": 297,
+            "40": 576
+          }
+        },
+        "cell.snapshot+admit": {
+          "bytes": 52462,
+          "by_kind": {
+            "1": 32794,
+            "17": 188,
+            "18": 1858,
+            "19": 396,
+            "20": 246,
+            "21": 104,
+            "22": 960,
+            "24": 132,
+            "36": 522,
+            "1000": 622,
+            "1004": 5564,
+            "1005": 8244,
+            "1006": 268,
+            "1007": 564
+          }
+        },
+        "turn.commit": {
+          "bytes": 529,
+          "by_kind": {
+            "9": 146,
+            "34": 383
+          }
+        }
+      },
+      "archived_calls": 3,
+      "parks_verified": 3,
+      "blocks": [
+        {
+          "operation": "cell.park",
+          "installed_bytes": 1404987
+        },
+        {
+          "operation": "cell.park",
+          "installed_bytes": 25895
+        },
+        {
+          "operation": "cell.park",
+          "installed_bytes": 26567
+        }
+      ],
+      "source": "p3-cell-fresh-16384",
+      "load1": [
+        17.736328125,
+        17.736328125
+      ],
+      "instructions": 6361340896,
+      "peak_rss_kib": 159708
+    },
+    {
+      "parks": 3,
+      "value_bytes": 16384,
+      "fresh": true,
+      "batch": 1,
+      "installed_bytes": 137697,
+      "actor_installed_bytes": 137697,
+      "by_kind": {
+        "1": 126348,
+        "17": 282,
+        "18": 2787,
+        "19": 594,
+        "20": 513,
+        "21": 926,
+        "22": 1140,
+        "24": 198,
+        "32": 114,
+        "33": 1989,
+        "36": 783,
+        "37": 118,
+        "39": 396,
+        "40": 576,
+        "1000": 933
+      },
+      "labels": {
+        "turn.admit": {
+          "bytes": 0,
+          "by_kind": {}
+        },
+        "model.start": {
+          "bytes": 57098,
+          "by_kind": {
+            "1": 55225,
+            "21": 47,
+            "32": 114,
+            "33": 1360,
+            "39": 352
+          }
+        },
+        "model.answer": {
+          "bytes": 35447,
+          "by_kind": {
+            "1": 35447
+          }
+        },
+        "model.done+cell.snapshot+admit": {
+          "bytes": 38558,
+          "by_kind": {
+            "1": 35676,
+            "17": 94,
+            "18": 929,
+            "19": 198,
+            "21": 52,
+            "22": 180,
+            "24": 66,
+            "33": 629,
+            "36": 261,
+            "37": 118,
+            "39": 44,
+            "1000": 311
+          }
+        },
+        "round.outcome": {
+          "bytes": 1566,
+          "by_kind": {
+            "20": 267,
+            "21": 723,
+            "40": 576
+          }
+        },
+        "cell.snapshot+admit": {
+          "bytes": 5028,
+          "by_kind": {
+            "17": 188,
+            "18": 1858,
+            "19": 396,
+            "20": 246,
+            "21": 104,
+            "22": 960,
+            "24": 132,
+            "36": 522,
+            "1000": 622
+          }
+        },
+        "turn.commit": {
+          "bytes": 0,
+          "by_kind": {}
+        }
+      },
+      "archived_calls": 3,
+      "parks_verified": 3,
+      "blocks": [
+        {
+          "operation": "cell.park",
+          "installed_bytes": 38558
+        },
+        {
+          "operation": "cell.park",
+          "installed_bytes": 2414
+        },
+        {
+          "operation": "cell.park",
+          "installed_bytes": 2614
+        }
+      ],
+      "source": "p3-cell-fresh-16384",
+      "load1": [
+        17.736328125,
+        17.736328125
+      ],
+      "instructions": 6361340896,
+      "peak_rss_kib": 159708
+    }
+  ],
+  "node_kinds": {
+    "1": "TextLeaf",
+    "2": "BytesLeaf",
+    "3": "TextIndex",
+    "4": "BytesIndex",
+    "5": "WholeStream",
+    "6": "StructureBlock",
+    "7": "StreamIndex",
+    "8": "FrozenValue",
+    "9": "OpaqueLeaf",
+    "10": "Document",
+    "12": "EffectTable",
+    "13": "ReleaseManifest",
+    "14": "HelperDefinition",
+    "15": "CellEnvelope",
+    "17": "EffectMembership",
+    "18": "Admission",
+    "19": "FrozenRequest",
+    "20": "CallOutcome",
+    "21": "RoundFact",
+    "22": "SummaryPage",
+    "23": "SummaryIndex",
+    "24": "HostRoot",
+    "25": "EventPage",
+    "26": "EventIndex",
+    "28": "CellEnd",
+    "30": "FunctionBundle",
+    "31": "Presentation",
+    "32": "ReportView",
+    "33": "PhaseRoot",
+    "34": "SessionManifest",
+    "35": "NamespaceValue",
+    "36": "ExecRoot",
+    "37": "OwnerBinding",
+    "38": "ProcessState",
+    "39": "TurnContent",
+    "40": "CallBody",
+    "41": "WrittenTable",
+    "42": "SourceMap",
+    "43": "ConfigValue",
+    "1000": "CheckpointRoot",
+    "1001": "SequenceIndex",
+    "1002": "SequenceLeaf",
+    "1003": "KeyedIndex",
+    "1004": "KeyedLeaf",
+    "1005": "PayloadLeaf",
+    "1006": "PayloadIndex",
+    "1007": "FrozenRoot",
+    "1008": "SessionRoot"
+  }
+}
