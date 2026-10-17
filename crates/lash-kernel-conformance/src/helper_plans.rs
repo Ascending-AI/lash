@@ -75,7 +75,13 @@ fn run_bounded<const L: u64>(
     projector: &mut Projector<'_>,
     charge: u64,
 ) -> Observed {
-    run_at_depth::<L>(case, program, projector, charge, 200)
+    run_with_memory::<L>(
+        case,
+        program,
+        projector,
+        charge,
+        lash_kernel_vm::MemoryLimit::Recount,
+    )
 }
 
 fn run_at_depth<const L: u64>(
@@ -85,7 +91,36 @@ fn run_at_depth<const L: u64>(
     charge: u64,
     call_depth: u32,
 ) -> Observed {
+    run_with_options::<L>(
+        case,
+        program,
+        projector,
+        charge,
+        call_depth,
+        lash_kernel_vm::MemoryLimit::Recount,
+    )
+}
+
+fn run_with_memory<const L: u64>(
+    case: &runner::Case,
+    program: &Program,
+    projector: &mut Projector<'_>,
+    charge: u64,
+    memory_limit: lash_kernel_vm::MemoryLimit,
+) -> Observed {
+    run_with_options::<L>(case, program, projector, charge, 200, memory_limit)
+}
+
+fn run_with_options<const L: u64>(
+    case: &runner::Case,
+    program: &Program,
+    projector: &mut Projector<'_>,
+    charge: u64,
+    call_depth: u32,
+    memory_limit: lash_kernel_vm::MemoryLimit,
+) -> Observed {
     let bounds = Bounds {
+        memory_limit,
         charge: lash_kernel_vm::Charge::Exact,
         charge_limit: charge,
         memory: 64 << 20,
@@ -619,6 +654,7 @@ fn uri_decode_completion_price_bounds_delegated_work_on_return_and_raise() {
                 let mut machine = crate::pages::start(
                     program,
                     Bounds {
+                        memory_limit: lash_kernel_vm::MemoryLimit::Recount,
                         charge: lash_kernel_vm::Charge::Exact,
                         charge_limit: 50_000_000,
                         memory: 64 << 20,
@@ -902,4 +938,157 @@ fn generated_scalar_templates_agree_with_their_bodies() {
             println!("{name}: {answered} template/body cases");
         }
     }
+}
+
+/// FIG-6731: generated helpers retain results, charge, effects and parks
+/// with memory Off, and never create a reservation scope.
+fn memory_off_helper_plans_keep_the_corpus_without_memory_scopes(shard: usize) {
+    let cases: Vec<runner::Case> = serde_json::from_str(include_str!(
+        "../../lash-dialect-typescript/tests/helper_differential/cases.json"
+    ))
+    .unwrap();
+    let mut compared = 0;
+    for dialect in ["typescript", "python"] {
+        let runner = runner::Runner::new(dialect).unwrap();
+        for (index, case) in cases
+            .iter()
+            .filter(|case| case.dialect == dialect)
+            .enumerate()
+        {
+            if index % 16 != shard {
+                continue;
+            }
+            println!("memory-off helper shard={shard}: {}", case.id);
+            let runner::Lowered::Program(program) = runner.lower(case).unwrap() else {
+                continue;
+            };
+            let expected = run::<0>(case, &program, &mut Projector::default());
+            if matches!(&expected.end, crate::ExpectedEnd::Bound { name, .. } if name == "memory") {
+                continue;
+            }
+            lash_kernel_vm::perf_witness::enable_work();
+            let observed = run_with_memory::<0>(
+                case,
+                &program,
+                &mut Projector::default(),
+                50_000_000,
+                lash_kernel_vm::MemoryLimit::Off,
+            );
+            let work = lash_kernel_vm::perf_witness::take_work().unwrap();
+            lash_kernel_vm::perf_witness::disable_work();
+            assert_eq!(observed, expected, "{}", case.id);
+            assert_eq!(
+                (
+                    work.memory_scopes,
+                    work.heap.arena_memory_prices,
+                    work.heap.accounting_reservations,
+                    work.heap.accounting_changes,
+                    work.heap.accounting_additions,
+                    work.heap.refinement_attempts
+                ),
+                (0, 0, 0, 0, 0, 0),
+                "{}",
+                case.id
+            );
+            compared += 1;
+        }
+    }
+    assert!(compared > 0);
+    println!("memory-off helpers: shard={shard} compared={compared}");
+}
+
+/// FIG-6731: shard 0/16 of the unchanged helper corpus with memory Off.
+#[test]
+fn memory_off_00_helper_plans_keep_the_corpus_without_memory_scopes() {
+    memory_off_helper_plans_keep_the_corpus_without_memory_scopes(0);
+}
+
+/// FIG-6731: shard 1/16 of the unchanged helper corpus with memory Off.
+#[test]
+fn memory_off_01_helper_plans_keep_the_corpus_without_memory_scopes() {
+    memory_off_helper_plans_keep_the_corpus_without_memory_scopes(1);
+}
+
+/// FIG-6731: shard 2/16 of the unchanged helper corpus with memory Off.
+#[test]
+fn memory_off_02_helper_plans_keep_the_corpus_without_memory_scopes() {
+    memory_off_helper_plans_keep_the_corpus_without_memory_scopes(2);
+}
+
+/// FIG-6731: shard 3/16 of the unchanged helper corpus with memory Off.
+#[test]
+fn memory_off_03_helper_plans_keep_the_corpus_without_memory_scopes() {
+    memory_off_helper_plans_keep_the_corpus_without_memory_scopes(3);
+}
+
+/// FIG-6731: shard 4/16 of the unchanged helper corpus with memory Off.
+#[test]
+fn memory_off_04_helper_plans_keep_the_corpus_without_memory_scopes() {
+    memory_off_helper_plans_keep_the_corpus_without_memory_scopes(4);
+}
+
+/// FIG-6731: shard 5/16 of the unchanged helper corpus with memory Off.
+#[test]
+fn memory_off_05_helper_plans_keep_the_corpus_without_memory_scopes() {
+    memory_off_helper_plans_keep_the_corpus_without_memory_scopes(5);
+}
+
+/// FIG-6731: shard 6/16 of the unchanged helper corpus with memory Off.
+#[test]
+fn memory_off_06_helper_plans_keep_the_corpus_without_memory_scopes() {
+    memory_off_helper_plans_keep_the_corpus_without_memory_scopes(6);
+}
+
+/// FIG-6731: shard 7/16 of the unchanged helper corpus with memory Off.
+#[test]
+fn memory_off_07_helper_plans_keep_the_corpus_without_memory_scopes() {
+    memory_off_helper_plans_keep_the_corpus_without_memory_scopes(7);
+}
+
+/// FIG-6731: shard 8/16 of the unchanged helper corpus with memory Off.
+#[test]
+fn memory_off_08_helper_plans_keep_the_corpus_without_memory_scopes() {
+    memory_off_helper_plans_keep_the_corpus_without_memory_scopes(8);
+}
+
+/// FIG-6731: shard 9/16 of the unchanged helper corpus with memory Off.
+#[test]
+fn memory_off_09_helper_plans_keep_the_corpus_without_memory_scopes() {
+    memory_off_helper_plans_keep_the_corpus_without_memory_scopes(9);
+}
+
+/// FIG-6731: shard 10/16 of the unchanged helper corpus with memory Off.
+#[test]
+fn memory_off_10_helper_plans_keep_the_corpus_without_memory_scopes() {
+    memory_off_helper_plans_keep_the_corpus_without_memory_scopes(10);
+}
+
+/// FIG-6731: shard 11/16 of the unchanged helper corpus with memory Off.
+#[test]
+fn memory_off_11_helper_plans_keep_the_corpus_without_memory_scopes() {
+    memory_off_helper_plans_keep_the_corpus_without_memory_scopes(11);
+}
+
+/// FIG-6731: shard 12/16 of the unchanged helper corpus with memory Off.
+#[test]
+fn memory_off_12_helper_plans_keep_the_corpus_without_memory_scopes() {
+    memory_off_helper_plans_keep_the_corpus_without_memory_scopes(12);
+}
+
+/// FIG-6731: shard 13/16 of the unchanged helper corpus with memory Off.
+#[test]
+fn memory_off_13_helper_plans_keep_the_corpus_without_memory_scopes() {
+    memory_off_helper_plans_keep_the_corpus_without_memory_scopes(13);
+}
+
+/// FIG-6731: shard 14/16 of the unchanged helper corpus with memory Off.
+#[test]
+fn memory_off_14_helper_plans_keep_the_corpus_without_memory_scopes() {
+    memory_off_helper_plans_keep_the_corpus_without_memory_scopes(14);
+}
+
+/// FIG-6731: shard 15/16 of the unchanged helper corpus with memory Off.
+#[test]
+fn memory_off_15_helper_plans_keep_the_corpus_without_memory_scopes() {
+    memory_off_helper_plans_keep_the_corpus_without_memory_scopes(15);
 }

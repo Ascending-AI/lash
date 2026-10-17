@@ -1,6 +1,8 @@
 pub use lash_kernel_vm::Charge;
 use std::num::NonZeroU64;
 
+pub use lash_kernel_vm::MemoryLimit;
+
 /// Serialized shape shared by every execution bound: an explicit finite limit
 /// or an explicit opt-out. Bounds are distinct Rust types so that an
 /// instruction budget can never be passed where a memory limit is meant, but
@@ -96,7 +98,7 @@ impl InstructionBound {
 
 nonzero_bound_serde!(InstructionBound);
 
-/// How many live logical bytes an execution may hold, metered by the
+/// The conservative bound on logical bytes an execution may hold, metered by the
 /// kernel's size schedule rather than by the allocator or RSS.
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 pub struct MemoryBound(Option<NonZeroU64>);
@@ -154,6 +156,7 @@ pub struct ExecutionBounds {
     pub instruction_limit: InstructionBound,
     pub memory_limit: MemoryBound,
     pub durability: lash_vm_client::Durability,
+    pub on_memory_limit: MemoryLimit,
 }
 
 impl ExecutionBounds {
@@ -163,6 +166,7 @@ impl ExecutionBounds {
             instruction_limit,
             memory_limit,
             durability: lash_vm_client::Durability::Durable,
+            on_memory_limit: MemoryLimit::Recount,
         }
     }
 
@@ -178,6 +182,12 @@ impl ExecutionBounds {
 
     pub const fn with_durability(mut self, durability: lash_vm_client::Durability) -> Self {
         self.durability = durability;
+        self
+    }
+
+    /// Choose what happens at the conservative memory bound; Recount is the default.
+    pub const fn on_memory_limit(mut self, policy: MemoryLimit) -> Self {
+        self.on_memory_limit = policy;
         self
     }
 

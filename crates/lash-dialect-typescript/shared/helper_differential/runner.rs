@@ -162,6 +162,7 @@ impl Runner {
     /// Runs one admitted program through the embedding API.
     pub fn execute(&self, case: &Case, program: &Program) -> Result<Observed, String> {
         let bounds = Bounds {
+            memory_limit: lash_kernel_vm::MemoryLimit::Recount,
             charge: self.charge,
             charge_limit: 50_000_000,
             memory: 64 << 20,

@@ -228,12 +228,21 @@ impl KernelMachine {
         mut source: Box<dyn PageSource>,
         layout: Layout,
     ) -> Result<Self, OpenError> {
-        let census = session::restored_census(&mut *source, Some(root.heap), bounds.memory)?;
-        Self::open_with_census(program, bounds, root, admissions, source, census, layout)
+        let census = if root.memory_limit == crate::MemoryLimit::Off {
+            None
+        } else {
+            Some(session::restored_census(
+                &mut *source,
+                Some(root.heap),
+                bounds.memory,
+            )?)
+        };
+        Self::open_with_optional_census(program, bounds, root, admissions, source, census, layout)
     }
 
     /// Opens `root` with `census` for its accounting: the laws that hold a
     /// run to a census of their own.
+    #[cfg(test)]
     pub(crate) fn open_with_census(
         program: Program,
         bounds: Bounds,
@@ -243,9 +252,33 @@ impl KernelMachine {
         census: Box<dyn AllocationCensus>,
         layout: Layout,
     ) -> Result<Self, OpenError> {
+        Self::open_with_optional_census(
+            program,
+            bounds,
+            root,
+            _admissions,
+            source,
+            Some(census),
+            layout,
+        )
+    }
+
+    fn open_with_optional_census(
+        program: Program,
+        bounds: Bounds,
+        root: &CheckpointRoot,
+        _admissions: Vec<lash_kernel_state::AdmittedWait>,
+        source: Box<dyn PageSource>,
+        census: Option<Box<dyn AllocationCensus>>,
+        layout: Layout,
+    ) -> Result<Self, OpenError> {
         if bounds.durability == crate::interface::Durability::Ephemeral {
             return Err(OpenError::Ephemeral);
         }
+        let bounds = Bounds {
+            memory_limit: root.memory_limit,
+            ..bounds
+        };
         let limits = lash_kernel_doc::KernelDataLimits::standard();
         // The checkpoint owns its policy, even on a worker configured otherwise.
         let bounds = Bounds {
@@ -285,16 +318,28 @@ impl KernelMachine {
         let mut heap =
             PagedHeap::open_header(root.heap, source, EditEpoch(0)).map_err(OpenError::Heap)?;
         heap.set_data_limits(limits);
-        heap.set_census(census).map_err(OpenError::Heap)?;
+        if bounds.memory_limit == crate::MemoryLimit::Off {
+            heap.without_memory_accounting();
+        } else {
+            heap.set_census(census.ok_or_else(|| OpenError::Malformed {
+                problem: "metered open has no census".into(),
+            })?)
+            .map_err(OpenError::Heap)?;
+        }
         heap.set_family_base(Box::new(
             lash_kernel_state::kernel_internals::family_impl::FrozenBase::default(),
         ));
         heap.restore_execution_roots(root);
         let access = heap.pages().clone();
         let census_refinements = heap.certificate().refinements;
-        let arena: super::SharedArena = std::rc::Rc::new(std::cell::RefCell::new(
-            lash_kernel_state::arena::Arena::from_ordinal(heap.next_ordinal()),
-        ));
+        let arena: super::SharedArena = std::rc::Rc::new(std::cell::RefCell::new({
+            let arena = lash_kernel_state::arena::Arena::from_ordinal(heap.next_ordinal());
+            if bounds.memory_limit == crate::MemoryLimit::Off {
+                arena.without_memory_accounting()
+            } else {
+                arena
+            }
+        }));
         Ok(Self {
             release: root.release,
             owner: root.owner,
@@ -304,6 +349,7 @@ impl KernelMachine {
             program,
             exe: Arc::clone(&exe),
             bounds,
+            memory_stream: super::stream::runner(bounds.memory_limit),
             limits,
             tasks: tasks::Tasks::open(
                 heap.task_root().clone(),
@@ -440,6 +486,7 @@ impl KernelMachine {
             }
         };
         let root = CheckpointRoot {
+            memory_limit: self.bounds.memory_limit,
             kernel: self.program.document.manifest.kernel,
             document,
             release: self.release,

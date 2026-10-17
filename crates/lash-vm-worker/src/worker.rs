@@ -501,6 +501,11 @@ impl<'embedding> Server<'embedding> {
         let mut program = self.program(&start.document)?;
         let path = start.observe_path.then(|| program.document.site_ordinals());
         let bounds = Bounds {
+            memory_limit: match start.bounds.memory_limit {
+                lash_vm_protocol::MemoryLimit::Recount => lash_kernel_vm::MemoryLimit::Recount,
+                lash_vm_protocol::MemoryLimit::Refuse => lash_kernel_vm::MemoryLimit::Refuse,
+                lash_vm_protocol::MemoryLimit::Off => lash_kernel_vm::MemoryLimit::Off,
+            },
             charge: match start.bounds.charge {
                 lash_vm_protocol::Charge::Exact => lash_kernel_vm::Charge::Exact,
                 lash_vm_protocol::Charge::Off => lash_kernel_vm::Charge::Off,

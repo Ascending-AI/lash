@@ -153,6 +153,7 @@ main {{
 
 fn bounds() -> Bounds {
     Bounds {
+        memory_limit: lash_kernel_vm::MemoryLimit::Recount,
         charge: lash_kernel_vm::Charge::Exact,
         charge_limit: u64::MAX,
         memory: u64::MAX,

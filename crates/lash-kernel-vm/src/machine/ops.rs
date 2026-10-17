@@ -34,7 +34,7 @@ use lash_kernel_state::arena::Arena;
 
 use super::exec::Call;
 use super::operation_entry::AdmittedBody;
-use super::{Eval, Halt, Interrupt, KernelMachine, Refusal, bound, fault, raise};
+use super::{Eval, FRAME_BYTES, Halt, Interrupt, KernelMachine, Refusal, bound, fault, raise};
 use crate::compile::{Charge, Executable, LibId, LibRun, StmtId};
 use crate::functions::MachineFunction;
 use crate::interface::Bound;
@@ -74,6 +74,119 @@ fn position(index: &Value) -> Eval<Option<usize>> {
 }
 
 impl KernelMachine {
+    /// Ends the statement's decoding streaks, dropping clean large objects
+    /// back to their pages once residency is high, and frees the arena
+    /// objects nothing the run holds, once enough wait: at a statement
+    /// boundary, where every value the run holds outside the arena's
+    /// members is in a frame. Garbage cycles are collected only under
+    /// pressure, and only when a count fell without reaching zero since
+    /// the last collection (seam D).
+    pub(super) fn collect_arena(&mut self) -> Result<(), Halt> {
+        self.arena.borrow_mut().statement_boundary();
+        let (release, cycles) = {
+            let arena = self.arena.borrow();
+            (arena.release_due(), arena.cycles_due())
+        };
+        if !release && !cycles {
+            return Ok(());
+        }
+        let (tasks, session) = (&self.tasks, &self.session);
+        let mut roots = |visit: &mut lash_kernel_state::arena::Visit<'_>| {
+            tasks.each_value(visit);
+            session.values().for_each(|(_, value)| visit(value));
+        };
+        let mut arena = self.arena.borrow_mut();
+        if cycles {
+            arena.collect_cycles(&mut roots);
+        }
+        arena.release(&mut roots);
+        let young = if self.bounds.memory_limit == crate::MemoryLimit::Off {
+            0
+        } else {
+            arena.take_released_young()
+        };
+        drop(arena);
+        if young > 0 {
+            self.heap.release_young(young)?;
+        }
+        Ok(())
+    }
+
+    /// The one policy decision for arena, native and paged-write pressure.
+    /// Refuse stops before any holdings publication or exact trace.
+    pub(super) fn memory_pressure(&mut self, bytes: u64) -> Result<(), Halt> {
+        match self.bounds.memory_limit {
+            crate::MemoryLimit::Refuse => Err(bound(Bound::Memory, self.bounds.memory)),
+            crate::MemoryLimit::Recount => self.refine_for(bytes),
+            crate::MemoryLimit::Off => Ok(()),
+        }
+    }
+
+    /// The collection point: under pressure, publishes what the run holds
+    /// and refines exactly with `bytes` pending, so the verdict is given
+    /// here, over current roots (FIG-6318).
+    fn refine_for(&mut self, bytes: u64) -> Result<(), Halt> {
+        if !self.durable() {
+            return self.reclaim_for(bytes);
+        }
+        self.publish_holdings()?;
+        // What the statement built and no root holds yet, a native's
+        // result on its way to a register, is live: the refinement prices
+        // it as pending and holds it again.
+        let unrooted = self.arena.borrow().unprojected();
+        self.heap
+            .refine(bytes.saturating_add(unrooted))
+            .map_err(|e| self.heap_halt(e))?;
+        self.arena.borrow_mut().rebased();
+        if unrooted > 0 && !self.heap.hold_growth(unrooted)? {
+            return Err(fault("a refinement left no room for what it priced"));
+        }
+        Ok(())
+    }
+
+    /// An ephemeral run's collection point: it publishes no roots, so no
+    /// exact refinement can trace them. It frees every object whose count
+    /// fell to zero and that nothing the run holds, nor the running
+    /// statement made, which refunds what they were accounted. It then
+    /// prices what the run holds in memory, as a refinement prices what
+    /// published roots reach: the young objects its values and the running
+    /// statement reach, its frames and the values they hold. The growth
+    /// held past that is refunded, so holds and slot growth released since
+    /// do not accumulate. It refuses when what remains and `bytes` do not
+    /// fit the bound.
+    fn reclaim_for(&mut self, bytes: u64) -> Result<(), Halt> {
+        let (tasks, session, regs, pins) = (&self.tasks, &self.session, &self.regs, &self.pins);
+        let mut roots = |visit: &mut lash_kernel_state::arena::Visit<'_>| {
+            tasks.each_value(visit);
+            session.values().for_each(|(_, value)| visit(value));
+            regs.projection().iter().for_each(&mut *visit);
+            pins.values.iter().for_each(&mut *visit);
+            pins.borrowed.iter().for_each(&mut *visit);
+        };
+        let mut arena = self.arena.borrow_mut();
+        arena.release_inside_statement(&mut roots);
+        let young = arena.take_released_young();
+        let objects = arena.reachable_young_cost(&mut roots);
+        let mut values = 0_u64;
+        roots(&mut |value| values = values.saturating_add(arena.cost_of(value)));
+        drop(arena);
+        if young > 0 {
+            self.heap.release_young(young)?;
+        }
+        let live = objects
+            .saturating_add(values)
+            .saturating_add(self.tasks.frames().saturating_mul(FRAME_BYTES));
+        let surplus = self.heap.held_growth().saturating_sub(live);
+        if surplus > 0 {
+            self.heap.release_young(surplus)?;
+        }
+        let held = self.heap.certificate().upper.0;
+        match held.checked_add(bytes) {
+            Some(total) if total <= self.bounds.memory => Ok(()),
+            _ => Err(bound(Bound::Memory, self.bounds.memory)),
+        }
+    }
+
     /// Writes `value` to register `out`, growing the registers to it.
     #[inline(always)]
     pub(super) fn put(&mut self, out: Reg, value: Value) {
@@ -167,6 +280,19 @@ impl KernelMachine {
         self.arena.borrow().cost_of(value)
     }
 
+    #[inline]
+    pub(super) fn cost_of_metered(&self, value: &Value) -> u64 {
+        self.arena.borrow().cost_of_metered(value)
+    }
+
+    /// A transient census root outside the frame that returned it.
+    #[inline]
+    pub(super) fn borrow_value(&mut self, value: Value) {
+        if self.bounds.memory_limit != crate::MemoryLimit::Off {
+            self.pins.borrowed.push(value);
+        }
+    }
+
     /// The charge anchor (`K-CHG-002`): `units` more, unless the running
     /// code is not charged (`K-CHG-007`), ending the run past its bound.
     pub(super) fn charge(&mut self, units: u64) -> Result<(), Halt> {
@@ -182,6 +308,9 @@ impl KernelMachine {
     /// ends, refining exactly at the collection point when the heap is due
     /// and ending the run when what is live does not leave room.
     pub(super) fn reserve(&mut self, bytes: u64) -> Result<(), Halt> {
+        if self.bounds.memory_limit == crate::MemoryLimit::Off {
+            return Ok(());
+        }
         self.hold(bytes)
     }
 
@@ -189,23 +318,32 @@ impl KernelMachine {
     /// It shares the arena's growth ledger; projection transfers that credit
     /// into saved rows, without repricing frames at each publication.
     pub(super) fn reserve_growth(&mut self, bytes: u64) -> Result<(), Halt> {
-        if self.heap.hold_growth(bytes)? {
+        if self.bounds.memory_limit == crate::MemoryLimit::Off {
             return Ok(());
         }
-        self.refine_for(bytes)?;
-        if self.heap.hold_growth(bytes)? {
+        self.reserve_growth_metered(bytes)
+    }
+
+    #[inline]
+    pub(super) fn reserve_growth_metered(&mut self, bytes: u64) -> Result<(), Halt> {
+        if self.heap.hold_growth_metered(bytes)? {
+            return Ok(());
+        }
+        self.memory_pressure(bytes)?;
+        if self.heap.hold_growth_metered(bytes)? {
             Ok(())
         } else {
             Err(bound(Bound::Memory, self.bounds.memory))
         }
     }
 
-    fn hold(&mut self, bytes: u64) -> Result<(), Halt> {
-        if self.heap.hold(bytes)? {
+    #[inline]
+    pub(super) fn hold(&mut self, bytes: u64) -> Result<(), Halt> {
+        if self.heap.hold_metered(bytes)? {
             return Ok(());
         }
-        self.refine_for(bytes)?;
-        if self.heap.hold(bytes)? {
+        self.memory_pressure(bytes)?;
+        if self.heap.hold_metered(bytes)? {
             Ok(())
         } else {
             Err(bound(Bound::Memory, self.bounds.memory))
@@ -215,21 +353,24 @@ impl KernelMachine {
     /// The memory anchor of the arena's objects: holds `bytes` they grew
     /// by until the heap receives them, the statement's holds paying first.
     pub(super) fn grow(&mut self, bytes: u64) -> Result<(), Halt> {
+        if self.bounds.memory_limit == crate::MemoryLimit::Off {
+            return Ok(());
+        }
         if bytes == 0 {
             return Ok(());
         }
-        if self.heap.hold_growth(bytes)? {
+        if self.heap.hold_growth_metered(bytes)? {
             return Ok(());
         }
         // The objects have grown already: the refinement prices them
         // exactly with the rest of what is live, so nothing more is
         // pending, as a heap allocation refused before it is made.
         if self.durable() {
-            return self.refine_for(0);
+            return self.memory_pressure(0);
         }
         // An ephemeral run prices nothing exactly: what its collection
         // frees must leave room to hold the growth.
-        self.refine_for(0)?;
+        self.memory_pressure(0)?;
         if self.heap.hold_growth(bytes)? {
             Ok(())
         } else {
@@ -240,6 +381,9 @@ impl KernelMachine {
     /// What the bound leaves past what the census holds: the room a native
     /// call may reserve without a refinement.
     fn headroom(&self) -> u64 {
+        if self.bounds.memory_limit == crate::MemoryLimit::Off {
+            return u64::MAX;
+        }
         self.bounds
             .memory
             .saturating_sub(self.heap.certificate().upper.0)
@@ -289,6 +433,9 @@ impl KernelMachine {
     /// The pin anchor on a value the statement holds outside the
     /// registers.
     pub(super) fn pin_value(&mut self, value: &Value) -> Result<(), Halt> {
+        if self.bounds.memory_limit == crate::MemoryLimit::Off {
+            return Ok(());
+        }
         // Immediates own no arena storage and their register slot is
         // already admitted. Holding a page-value shell until statement
         // end would reserve and release bytes that were never allocated.
@@ -843,7 +990,11 @@ impl KernelMachine {
                     let (answer, built) = {
                         let arena = self.arena.borrow();
                         let semantics = arena.semantics().with_limits(self.limits);
-                        let mut nursery = Nursery::new(arena.objects(), LogicalBytes(room));
+                        let mut nursery = if self.bounds.memory_limit == crate::MemoryLimit::Off {
+                            Nursery::unaccounted(arena.objects())
+                        } else {
+                            Nursery::new(arena.objects(), LogicalBytes(room))
+                        };
                         let answer = native.call(NativeCall {
                             args: Args::new(&self.regs[args..end], arena.objects(), &semantics),
                             new: &mut nursery,

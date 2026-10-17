@@ -24,7 +24,10 @@ pub(super) fn main() -> Result<(), String> {
         Ok("exact") | Err(_) => lash_kernel_vm::Charge::Exact,
         Ok(other) => return Err(format!("unknown charge policy: {other}")),
     };
-    let bounds = Bounds { charge, ..bounds() };
+    let bounds = Bounds {
+        charge,
+        ..benchmark_bounds()
+    };
     let python = file.ends_with(".py");
     let mut source = std::fs::read_to_string(&file).map_err(|error| error.to_string())?;
     // Only the result boundary differs from the CLI engines' print(result).
@@ -98,33 +101,37 @@ pub(super) fn main() -> Result<(), String> {
     .map_err(|error| error.to_string())?;
     let document_compile_and_start_ns = start_time.elapsed().as_nanos();
     let run_allocations = stats_alloc::Region::new(ALLOCATOR);
-    let run = Instant::now();
-    let mut console = Console::default();
-    let mut result = Datum::Null;
-    loop {
-        match machine
-            .run(&mut console, u64::MAX)
-            .map_err(|error| error.to_string())?
-        {
-            Step::Slice => {}
-            Step::Parked(park) => {
-                if let Some(value) = deliver_all(&mut machine, park.requests) {
-                    result = value;
-                }
-            }
-            Step::Ended(End::Finished(_)) => break,
-            Step::Ended(end) => return Err(format!("{file}: {end:?}")),
-        }
+    let memory_witness = std::env::var_os("KERNEL_PERF_MEMORY_WITNESS").is_some();
+    if memory_witness {
+        lash_kernel_vm::perf_witness::enable_work();
     }
-    let charged = machine.meters().charged;
+    let run = Instant::now();
+    let end = try_to_end(&mut machine, &file);
     let run_ns = run.elapsed().as_nanos();
+    let memory_work = if memory_witness {
+        let work = lash_kernel_vm::perf_witness::take_work().map(kernel_phase::phase_counts);
+        lash_kernel_vm::perf_witness::disable_work();
+        work
+    } else {
+        None
+    };
     let run_allocations = run_allocations.change();
     let cold_ns = began.elapsed().as_nanos();
     let allocations = allocations.change();
-    let result = plain(result)?;
+    let (outcome, charged, result) = match end {
+        Ok((charged, result)) => ("ok", charged, plain(result)?),
+        Err(end) => (
+            "error",
+            machine.meters().charged,
+            json!({"error": format!("{end:?}")}),
+        ),
+    };
     println!(
         "{}",
         json!({
+            "outcome": outcome,
+            "memory": machine.meters().memory,
+            "memory_work": memory_work,
             "result": result,
             "registry_ns": registry_ns,
             "lower_ns": lower_ns,

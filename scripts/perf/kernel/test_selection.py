@@ -9,6 +9,7 @@ import subprocess
 import unittest
 
 from summarize import summarize, validate
+import embedded
 
 
 class Comparison(unittest.TestCase):
@@ -49,6 +50,22 @@ class Comparison(unittest.TestCase):
                     current['rows'][0][field] = value
                 with self.assertRaises(ValueError):
                     summarize(baseline, current)
+
+
+class EmbeddedMemoryPolicy(unittest.TestCase):
+    def test_memory_refusal_cannot_enter_a_performance_average(self):
+        # FIG-6731: a complete population containing a memory refusal is a
+        # failed comparison, even if its measurements and peers are present.
+        rows = [dict(program='allocation_churn', engine=engine, pair=pair)
+                for engine in ['lash-ts', 'quickjs', 'lash-py', 'monty', 'node', 'cpython']
+                for pair in [1, 2]]
+        for row in rows:
+            row.update(result=1, result_sha256=embedded.digest(1), instructions=1,
+                       wall_ns=1, cold_first_line_ns=1, peak_rss_kib=1)
+        rows[0]['failure'] = 'BoundExceeded { bound: Memory, limit: 1073741824 }'
+        receipt = dict(programs=['allocation_churn'], samples=rows)
+        with self.assertRaisesRegex(ValueError, 'allocation_churn/lash-ts: .*Memory'):
+            embedded.validate(receipt)
 
 
 class Selection(unittest.TestCase):

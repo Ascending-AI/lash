@@ -42,8 +42,9 @@ pub use codec::{
 pub use message::{
     BorrowedParentFrame, BorrowedParentMessage, Charge, CheckpointStart, Delivery, Durability,
     EncodedPayload, ExecutionLease, FrameEpoch, HeaderRefusal, HostReadId, HostReadKind,
-    MessageFence, MessageHeader, OwnerEpoch, ParentFrame, ParentMessage, RunBounds, RunMeters,
-    Start, StartFrom, TransportSequence, WorkerFrame, WorkerMessage, WorkerPhase, WorkerWork,
+    MemoryLimit, MessageFence, MessageHeader, OwnerEpoch, ParentFrame, ParentMessage, RunBounds,
+    RunMeters, Start, StartFrom, TransportSequence, WorkerFrame, WorkerMessage, WorkerPhase,
+    WorkerWork,
 };
 pub use outcome::{
     BootstrapFault, Detail, DetailLimit, Exchange, InfrastructureOutcome, PayloadKind, PoolFault,

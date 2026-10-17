@@ -481,3 +481,56 @@ fn charge_off_preserves_the_conformance_corpus() {
     assert!(executed > 0);
     assert!(failures.is_empty(), "{}", failures.join("\n"));
 }
+
+/// FIG-6731: Off keeps the existing corpus's semantic results, errors,
+/// effects, charge and parks while doing no census accounting. Memory-bound
+/// cases name the rule intentionally disabled and remain on the metered gate.
+#[test]
+fn memory_off_preserves_the_corpus_without_census_work() {
+    use crate::DocumentRunner;
+    let mut runner = crate::MachineRunner::<lash_kernel_vm::KernelMachine>::new(
+        std::sync::Arc::new(corpus_registry()),
+    );
+    let mut checked = 0;
+    let mut memory_bound_cases = 0;
+    for shard in corpus_shards() {
+        for mut case in shard.cases {
+            if matches!(&case.expected.end, ExpectedEnd::Bound { name, .. } if name == "memory") {
+                memory_bound_cases += 1;
+                continue;
+            }
+            let metered = runner
+                .observe(&case)
+                .unwrap_or_else(|error| panic!("{} {}: {error}", shard.rule, case.name));
+            case.environment.bounds.memory_limit = lash_kernel_vm::MemoryLimit::Off;
+            lash_kernel_vm::perf_witness::enable_work();
+            let off = runner.observe(&case);
+            let work = lash_kernel_vm::perf_witness::take_work().unwrap();
+            lash_kernel_vm::perf_witness::disable_work();
+            assert_eq!(
+                off.unwrap_or_else(|error| panic!("{} {}: {error}", shard.rule, case.name)),
+                metered,
+                "{} {}",
+                shard.rule,
+                case.name
+            );
+            assert_eq!(
+                (
+                    work.heap.accounting_additions,
+                    work.heap.accounting_changes,
+                    work.heap.accounting_reservations,
+                    work.heap.refinement_attempts,
+                    work.heap.arena_memory_prices,
+                    work.memory_scopes
+                ),
+                (0, 0, 0, 0, 0, 0),
+                "{} {}",
+                shard.rule,
+                case.name
+            );
+            checked += 1;
+        }
+    }
+    assert!(checked > 0);
+    println!("memory-off corpus: compared={checked} memory-bound-cases={memory_bound_cases}");
+}

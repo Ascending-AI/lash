@@ -4,7 +4,6 @@
 
 use std::collections::BTreeMap;
 use std::sync::Arc;
-use std::sync::atomic::{AtomicUsize, Ordering};
 
 use lash_kernel_doc::arena::ShortText;
 use lash_kernel_doc::heap::*;
@@ -14,7 +13,7 @@ use lash_kernel_doc::{
     Value, parse_definition, parse_document,
 };
 use lash_kernel_state::paged::*;
-use std::cell::RefCell;
+use std::cell::{Cell, RefCell};
 use std::rc::Rc;
 
 use crate::{
@@ -24,6 +23,7 @@ use crate::{
 
 /// Bounds no law reaches unless it sets one.
 pub(crate) const ROOMY: Bounds = Bounds {
+    memory_limit: crate::MemoryLimit::Recount,
     charge: crate::Charge::Exact,
     charge_limit: 10_000_000,
     memory: 64 << 20,
@@ -156,8 +156,10 @@ impl NativeFunction for Fill {
     }
 }
 
-/// How many texts `work.repeat` has built.
-pub(crate) static REPEAT_BUILDS: AtomicUsize = AtomicUsize::new(0);
+thread_local! {
+    /// How many texts `work.repeat` has built on this law's thread.
+    pub(crate) static REPEAT_BUILDS: Cell<usize> = const { Cell::new(0) };
+}
 
 /// Reserves a text of that many bytes, then builds it.
 struct Repeat;
@@ -168,7 +170,7 @@ impl NativeFunction for Repeat {
         };
         let length = u64::try_from(*length).unwrap_or(0);
         call.new.reserve(0, length)?;
-        REPEAT_BUILDS.fetch_add(1, Ordering::Relaxed);
+        REPEAT_BUILDS.set(REPEAT_BUILDS.get() + 1);
         Ok(call.new.text(&"x".repeat(length as usize)))
     }
 }

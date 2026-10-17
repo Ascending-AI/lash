@@ -172,6 +172,9 @@ impl PagedHeap {
     /// [`HeapWriteError::NeedsPrecision`] before it changes anything, so no
     /// trace ever runs over roots the machine has not published (FIG-6318).
     pub fn execution_roots_moved(&mut self) {
+        if self.unmetered() {
+            return;
+        }
         self.holdings.roots_current = false;
     }
     /// Holds `bytes` the running statement pays for, as a native
@@ -183,6 +186,15 @@ impl PagedHeap {
     ///
     /// A fault of the census.
     pub fn hold(&mut self, bytes: u64) -> Result<bool, HeapFault> {
+        if self.unmetered() {
+            return Ok(true);
+        }
+        self.hold_metered(bytes)
+    }
+
+    /// A statement hold after the machine selected an accounted run.
+    #[inline]
+    pub fn hold_metered(&mut self, bytes: u64) -> Result<bool, HeapFault> {
         if !self.admit_hold(bytes)? {
             return Ok(false);
         }
@@ -217,6 +229,15 @@ impl PagedHeap {
     ///
     /// A fault of the census.
     pub fn hold_growth(&mut self, bytes: u64) -> Result<bool, HeapFault> {
+        if self.unmetered() {
+            return Ok(true);
+        }
+        self.hold_growth_metered(bytes)
+    }
+
+    /// A growth hold after the machine selected an accounted run.
+    #[inline]
+    pub fn hold_growth_metered(&mut self, bytes: u64) -> Result<bool, HeapFault> {
         let credit = self.holdings.credit(bytes);
         if bytes > credit && !self.admit_hold(bytes - credit)? {
             return Ok(false);
@@ -239,6 +260,9 @@ impl PagedHeap {
     /// pages and older objects never refund the baseline. Census membership
     /// retirement, when present, belongs to the arena's release operation.
     pub fn release_young(&mut self, bytes: u64) -> Result<(), HeapFault> {
+        if self.unmetered() {
+            return Ok(());
+        }
         let census = self
             .census
             .as_mut()
@@ -254,6 +278,9 @@ impl PagedHeap {
     /// Takes up to `growth` of what the machine holds persistently as the
     /// credit of an object store that grows by `growth`; gives the credit.
     pub(super) fn spend_held(&mut self, growth: u64) -> u64 {
+        if self.unmetered() {
+            return 0;
+        }
         let credit = self.holdings.held.min(growth);
         self.holdings.held -= credit;
         credit
@@ -334,6 +361,9 @@ impl PagedHeap {
     ///
     /// A fault of the census.
     pub fn release_reserved_to(&mut self, mark: u64) -> Result<(), HeapFault> {
+        if self.unmetered() {
+            return Ok(());
+        }
         let Some(released) = self.holdings.reserved.checked_sub(mark) else {
             return Ok(());
         };
@@ -353,6 +383,9 @@ impl PagedHeap {
         Ok(())
     }
     pub fn release_statement_roots(&mut self) -> Result<(), HeapFault> {
+        if self.unmetered() {
+            return Ok(());
+        }
         self.holdings.borrowed.clear();
         if self.holdings.temporary.is_empty()
             && self.holdings.scalar_bytes == 0
@@ -398,6 +431,9 @@ impl PagedHeap {
             .map(LogicalBytes)
     }
     pub(super) fn install_transient(&mut self, roots: StatementRoots<'_>) {
+        if self.unmetered() {
+            return;
+        }
         let StatementRoots {
             registers: values,
             pinned,
@@ -478,6 +514,9 @@ impl PagedHeap {
     /// a heap with no census has nothing to refine. It is refused over
     /// roots the machine has not published (FIG-6318).
     pub fn collect(&mut self) -> Result<(), HeapFault> {
+        if self.unmetered() {
+            return Ok(());
+        }
         if !self.holdings.roots_current {
             return Err(HeapFault::Malformed(
                 "a collection would trace roots the machine has not published".into(),
@@ -500,6 +539,9 @@ impl PagedHeap {
         result
     }
     pub(super) fn admit(&mut self, bytes: u64, extra: &[PageValue]) -> Result<(), HeapWriteError> {
+        if self.unmetered() {
+            return Ok(());
+        }
         let census = self
             .census
             .as_mut()
@@ -587,6 +629,28 @@ impl PagedHeap {
         joins: Tree<ListJoinRecord>,
         roots: StatementRoots<'_>,
     ) -> Result<(), HeapWriteError> {
+        if self.unmetered() {
+            let old_tasks = checked_sum(
+                [
+                    previous.edges(&self.access)?,
+                    self.joins.read_task_edges(&self.access)?,
+                ]
+                .into_iter(),
+            )?;
+            let task_edges = tasks.read_task_edges(&self.access)?;
+            let join_edges = joins.read_task_edges(&self.access)?;
+            let new_tasks = checked_sum([task_edges, join_edges].into_iter())?;
+            self.population.task_edges = self
+                .population
+                .task_edges
+                .checked_sub(old_tasks)
+                .and_then(|v| v.checked_add(new_tasks))
+                .ok_or_else(|| HeapFault::Malformed("root task-edge population overflow".into()))?;
+            self.tasks = tasks.with_task_edges(task_edges);
+            self.joins = joins.with_task_edges(join_edges);
+            self.header = None;
+            return Ok(());
+        }
         let StatementRoots {
             registers,
             pinned,
@@ -637,6 +701,9 @@ impl PagedHeap {
     /// Settles unprojected growth after all current roots are installed.
     /// Publication itself never prices frames or refunds their slack.
     pub(super) fn settle_growth(&mut self) -> Result<(), HeapFault> {
+        if self.unmetered() {
+            return Ok(());
+        }
         if self.holdings.held == 0 {
             return Ok(());
         }
@@ -674,6 +741,17 @@ impl PagedHeap {
         new_tasks: u64,
         install: impl FnOnce(&mut Self),
     ) -> Result<(), HeapWriteError> {
+        if self.unmetered() {
+            install(self);
+            self.population.task_edges = self
+                .population
+                .task_edges
+                .checked_sub(old_tasks)
+                .and_then(|v| v.checked_add(new_tasks))
+                .ok_or_else(|| HeapFault::Malformed("root task-edge population overflow".into()))?;
+            self.header = None;
+            return Ok(());
+        }
         let before_certificate = self.accounting;
         let before_population = self.population;
         let mut census = self

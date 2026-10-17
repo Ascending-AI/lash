@@ -27,7 +27,7 @@ pub use config_owner::{
     RLM_RUN_OPTIONS, RlmConfigOwner, RlmConfigRefusal, RlmCreateConfig, RlmRecordedConfig,
     RlmRenderRefusal, RlmRunOptions, SetRlmRender,
 };
-pub use config_types::{Charge, ExecutionBounds, InstructionBound, MemoryBound};
+pub use config_types::{Charge, ExecutionBounds, InstructionBound, MemoryBound, MemoryLimit};
 pub use factory::RlmProtocolPluginFactory;
 pub use helpers::HelperReleaseGate;
 pub use protocol_session::{RlmSessionConfigDecodeError, rlm_session_config};

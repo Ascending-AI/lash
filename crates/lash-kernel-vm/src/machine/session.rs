@@ -18,7 +18,7 @@ pub(crate) fn start(
     bounds: Bounds,
     start: CellStart,
     source: Box<dyn PageSource>,
-    census: Box<dyn AllocationCensus>,
+    census: Option<Box<dyn AllocationCensus>>,
     layout: Layout,
     limits: lash_kernel_doc::KernelDataLimits,
 ) -> Result<KernelMachine, StartError> {
@@ -39,7 +39,11 @@ pub(crate) fn start(
         None => PagedHeap::fresh(source, EditEpoch(0)),
     };
     heap.set_data_limits(limits);
-    heap.set_census(census)?;
+    if bounds.memory_limit != crate::MemoryLimit::Off {
+        heap.set_census(
+            census.ok_or_else(|| HeapFault::Malformed("metered start has no census".into()))?,
+        )?;
+    }
     heap.set_family_base(Box::new(
         lash_kernel_state::kernel_internals::family_impl::FrozenBase::default(),
     ));
@@ -48,11 +52,24 @@ pub(crate) fn start(
     });
     if let Some(session) = &start.session {
         heap.adopt(session)?;
+        if bounds.memory_limit != crate::MemoryLimit::Off
+            && heap.certificate().metric == lash_kernel_state::paged::AccountingMetric::Unmetered
+        {
+            heap.collect()?;
+        }
+    }
+    if bounds.memory_limit == crate::MemoryLimit::Off {
+        heap.without_memory_accounting();
     }
     let access = heap.pages().clone();
-    let arena: SharedArena = std::rc::Rc::new(std::cell::RefCell::new(
-        lash_kernel_state::arena::Arena::from_ordinal(heap.next_ordinal()),
-    ));
+    let arena: SharedArena = std::rc::Rc::new(std::cell::RefCell::new({
+        let arena = lash_kernel_state::arena::Arena::from_ordinal(heap.next_ordinal());
+        if bounds.memory_limit == crate::MemoryLimit::Off {
+            arena.without_memory_accounting()
+        } else {
+            arena
+        }
+    }));
     let mut machine = KernelMachine {
         release: program.release,
         owner: start.owner,
@@ -62,6 +79,7 @@ pub(crate) fn start(
         document: None,
         exe: Arc::clone(&exe),
         bounds,
+        memory_stream: super::stream::runner(bounds.memory_limit),
         heap,
         arena: std::rc::Rc::clone(&arena),
         limits,
@@ -503,7 +521,11 @@ impl KernelMachine {
         layout: Layout,
         mut source: Box<dyn PageSource>,
     ) -> Result<Self, StartError> {
-        let census = start_census(&mut *source, &start, bounds.memory)?;
+        let census = if bounds.memory_limit == crate::MemoryLimit::Off {
+            None
+        } else {
+            Some(start_census(&mut *source, &start, bounds.memory)?)
+        };
         self::start(
             program,
             bounds,
@@ -528,7 +550,11 @@ impl KernelMachine {
         limits: lash_kernel_doc::KernelDataLimits,
         mut source: Box<dyn PageSource>,
     ) -> Result<Self, StartError> {
-        let census = start_census(&mut *source, &start, bounds.memory)?;
+        let census = if bounds.memory_limit == crate::MemoryLimit::Off {
+            None
+        } else {
+            Some(start_census(&mut *source, &start, bounds.memory)?)
+        };
         self::start(
             program,
             bounds,
@@ -558,7 +584,7 @@ impl KernelMachine {
             bounds,
             start,
             source,
-            census,
+            Some(census),
             layout,
             lash_kernel_doc::KernelDataLimits::standard(),
         )

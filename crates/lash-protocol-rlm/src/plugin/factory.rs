@@ -134,6 +134,11 @@ impl RlmProtocolPluginFactory {
         let pool = self.workers.config().run_bounds;
         let bounds = self.config.execution_bounds();
         lash_vm_client::RunBounds {
+            memory_limit: match bounds.on_memory_limit {
+                crate::MemoryLimit::Recount => lash_vm_client::MemoryLimit::Recount,
+                crate::MemoryLimit::Refuse => lash_vm_client::MemoryLimit::Refuse,
+                crate::MemoryLimit::Off => lash_vm_client::MemoryLimit::Off,
+            },
             charge: match bounds.charge {
                 crate::Charge::Exact => lash_vm_client::Charge::Exact,
                 crate::Charge::Off => lash_vm_client::Charge::Off,

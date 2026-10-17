@@ -68,6 +68,8 @@ pub struct Program {
 /// the run with [`RunError::Bound`]; no guest code catches it.
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 pub struct Bounds {
+    /// How pressure against the conservative memory bound is resolved.
+    pub memory_limit: crate::MemoryLimit,
     /// Whether charge is metered. Exact is the default host policy.
     pub charge: Charge,
     /// The most the run may be charged under Exact, in charge units.

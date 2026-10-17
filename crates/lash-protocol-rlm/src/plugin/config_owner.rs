@@ -628,6 +628,18 @@ mod tests {
                 owner.validate(&redialected, Some(&base), facts),
                 Err(RlmConfigRefusal::PinChanged { pin, .. }) if pin == "dialect"
             ));
+            assert_eq!(base.behaviour.on_memory_limit, crate::MemoryLimit::Recount);
+            let repolicied = RlmRecordedConfig {
+                behaviour: RlmRecordedBehaviour {
+                    on_memory_limit: crate::MemoryLimit::Refuse,
+                    ..base.behaviour.clone()
+                },
+                ..base.clone()
+            };
+            assert!(matches!(
+                owner.validate(&repolicied, Some(&base), facts),
+                Err(RlmConfigRefusal::PinChanged { pin, .. }) if pin == "behaviour"
+            ));
             let rebounded = RlmRecordedConfig {
                 behaviour: RlmRecordedBehaviour {
                     charge: crate::Charge::Exact,

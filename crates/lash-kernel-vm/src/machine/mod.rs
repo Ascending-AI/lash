@@ -358,6 +358,7 @@ pub struct KernelMachine {
     document: Option<DocumentId>,
     exe: Arc<Executable>,
     bounds: Bounds,
+    memory_stream: stream::Runner,
     heap: PagedHeap,
     /// The objects the run executes on; the heap is their projection.
     arena: SharedArena,
@@ -638,6 +639,9 @@ impl KernelMachine {
 
     #[inline(always)]
     fn reconcile_sweep(&mut self) -> Result<(), HeapFault> {
+        if self.bounds.memory_limit == crate::MemoryLimit::Off {
+            return Ok(());
+        }
         if self.heap.certificate().refinements != self.census_refinements {
             self.reconcile_refinement()?;
         }
@@ -678,7 +682,9 @@ impl KernelMachine {
         self.flush_arena()?;
         self.reconcile_sweep()?;
         let pages = self.heap.pages().clone();
-        let (registers, pinned, borrowed) = {
+        let (registers, pinned, borrowed) = if self.bounds.memory_limit == crate::MemoryLimit::Off {
+            (Vec::new(), Vec::new(), Vec::new())
+        } else {
             let mut arena = self.arena.borrow_mut();
             let mut projected = |values: &[Value]| {
                 values
@@ -932,40 +938,6 @@ impl KernelMachine {
         crate::data::copy_out(&self.arena.borrow(), self.limits.value_depth(), value)
     }
 
-    /// Ends the statement's decoding streaks, dropping clean large objects
-    /// back to their pages once residency is high, and frees the arena
-    /// objects nothing the run holds, once enough wait: at a statement
-    /// boundary, where every value the run holds outside the arena's
-    /// members is in a frame. Garbage cycles are collected only under
-    /// pressure, and only when a count fell without reaching zero since
-    /// the last collection (seam D).
-    fn collect_arena(&mut self) -> Result<(), Halt> {
-        self.arena.borrow_mut().statement_boundary();
-        let (release, cycles) = {
-            let arena = self.arena.borrow();
-            (arena.release_due(), arena.cycles_due())
-        };
-        if !release && !cycles {
-            return Ok(());
-        }
-        let (tasks, session) = (&self.tasks, &self.session);
-        let mut roots = |visit: &mut lash_kernel_state::arena::Visit<'_>| {
-            tasks.each_value(visit);
-            session.values().for_each(|(_, value)| visit(value));
-        };
-        let mut arena = self.arena.borrow_mut();
-        if cycles {
-            arena.collect_cycles(&mut roots);
-        }
-        arena.release(&mut roots);
-        let young = arena.take_released_young();
-        drop(arena);
-        if young > 0 {
-            self.heap.release_young(young)?;
-        }
-        Ok(())
-    }
-
     /// The law's forced collection hook at a statement boundary.
     #[cfg(test)]
     fn at_boundary(&mut self) -> Result<(), MachineError> {
@@ -981,71 +953,6 @@ impl KernelMachine {
         self.reconcile_sweep().map_err(MachineError::Heap)
     }
 
-    /// The collection point: under pressure, publishes what the run holds
-    /// and refines exactly with `bytes` pending, so the verdict is given
-    /// here, over current roots (FIG-6318).
-    pub(super) fn refine_for(&mut self, bytes: u64) -> Result<(), Halt> {
-        if !self.durable() {
-            return self.reclaim_for(bytes);
-        }
-        self.publish_holdings()?;
-        // What the statement built and no root holds yet, a native's
-        // result on its way to a register, is live: the refinement prices
-        // it as pending and holds it again.
-        let unrooted = self.arena.borrow().unprojected();
-        self.heap
-            .refine(bytes.saturating_add(unrooted))
-            .map_err(|e| self.heap_halt(e))?;
-        self.arena.borrow_mut().rebased();
-        if unrooted > 0 && !self.heap.hold_growth(unrooted)? {
-            return Err(fault("a refinement left no room for what it priced"));
-        }
-        Ok(())
-    }
-
-    /// An ephemeral run's collection point: it publishes no roots, so no
-    /// exact refinement can trace them. It frees every object whose count
-    /// fell to zero and that nothing the run holds, nor the running
-    /// statement made, which refunds what they were accounted. It then
-    /// prices what the run holds in memory, as a refinement prices what
-    /// published roots reach: the young objects its values and the running
-    /// statement reach, its frames and the values they hold. The growth
-    /// held past that is refunded, so holds and slot growth released since
-    /// do not accumulate. It refuses when what remains and `bytes` do not
-    /// fit the bound.
-    fn reclaim_for(&mut self, bytes: u64) -> Result<(), Halt> {
-        let (tasks, session, regs, pins) = (&self.tasks, &self.session, &self.regs, &self.pins);
-        let mut roots = |visit: &mut lash_kernel_state::arena::Visit<'_>| {
-            tasks.each_value(visit);
-            session.values().for_each(|(_, value)| visit(value));
-            regs.projection().iter().for_each(&mut *visit);
-            pins.values.iter().for_each(&mut *visit);
-            pins.borrowed.iter().for_each(&mut *visit);
-        };
-        let mut arena = self.arena.borrow_mut();
-        arena.release_inside_statement(&mut roots);
-        let young = arena.take_released_young();
-        let objects = arena.reachable_young_cost(&mut roots);
-        let mut values = 0_u64;
-        roots(&mut |value| values = values.saturating_add(arena.cost_of(value)));
-        drop(arena);
-        if young > 0 {
-            self.heap.release_young(young)?;
-        }
-        let live = objects
-            .saturating_add(values)
-            .saturating_add(self.tasks.frames().saturating_mul(FRAME_BYTES));
-        let surplus = self.heap.held_growth().saturating_sub(live);
-        if surplus > 0 {
-            self.heap.release_young(surplus)?;
-        }
-        let held = self.heap.certificate().upper.0;
-        match held.checked_add(bytes) {
-            Some(total) if total <= self.bounds.memory => Ok(()),
-            _ => Err(bound(Bound::Memory, self.bounds.memory)),
-        }
-    }
-
     /// Makes a heap write. One that needs an exact refinement while the
     /// run's roots are unpublished refuses before it changes anything; the
     /// run refines at its collection point and makes the write again,
@@ -1058,7 +965,7 @@ impl KernelMachine {
         match write(&mut self.heap) {
             Err(error) => match self.heap.take_refusal() {
                 Some(bytes) => {
-                    self.refine_for(bytes)?;
+                    self.memory_pressure(bytes)?;
                     let again = write(&mut self.heap);
                     // An ephemeral run's roots are never installed, so the
                     // write refuses for precision again when the room its
@@ -1095,7 +1002,9 @@ impl KernelMachine {
         // The prepared statement owns the kill set, including on park,
         // raise and halt exits. Clean up before the driver sees the result.
         self.regs.kill_statement();
-        self.pins.clear();
+        if self.bounds.memory_limit != crate::MemoryLimit::Off {
+            self.pins.clear();
+        }
         self.arena.borrow_mut().statement_ended();
         self.tasks.protect(None);
         result
@@ -1122,7 +1031,9 @@ impl KernelMachine {
             let _ = observer;
             self.observe_step(task, exe);
         }
-        self.pins.clear();
+        if self.bounds.memory_limit != crate::MemoryLimit::Off {
+            self.pins.clear();
+        }
         if self.task(task)?.take_requeue() {
             // The one more turn a `then yield` wait takes once its outcome
             // is in, as `yield` takes it (`K-TASK-005`, `K-TASK-006`): it

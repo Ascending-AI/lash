@@ -214,9 +214,33 @@ pub enum CellTargetKind {
     Entry,
 }
 
+/// What happens when the conservative memory bound leaves no room.
+#[derive(
+    Clone,
+    Copy,
+    Debug,
+    Default,
+    PartialEq,
+    Eq,
+    serde::Serialize,
+    serde::Deserialize,
+    schemars::JsonSchema,
+)]
+#[serde(rename_all = "snake_case")]
+pub enum MemoryLimit {
+    /// Recount the live set exactly, then refuse if it still leaves no room.
+    #[default]
+    Recount,
+    /// Refuse immediately, without publishing holdings or tracing the heap.
+    Refuse,
+    /// No memory meter, reservations or bound.
+    Off,
+}
+
 /// Kind 1000: one execution's complete root.
 #[derive(Clone, Debug)]
 pub struct CheckpointRoot {
+    pub memory_limit: MemoryLimit,
     pub kernel: u32,
     pub document: DocumentId,
     /// The ReleaseManifest node the run pins; checked before executing,
@@ -255,9 +279,9 @@ pub struct CheckpointRoot {
 impl CheckpointRoot {
     /// The encoded host-name list's byte budget (S1, FIG-6499).
     ///
-    /// The 4096-byte root reserves 773 token bytes for its fixed fields:
+    /// The 4096-byte root reserves 776 token bytes for its fixed fields:
     /// struct header (2), kernel (6), document (34), release/owner (66),
-    /// target (3), nine full tree roots (9 * 58), heap (33), largest ended
+    /// policy (3), target (3), nine full tree roots (9 * 58), heap (33), largest ended
     /// status (66), and meters (41). All integers use their maximum widths.
     /// Another 256 bytes cover the envelope: each of at most 13 distinct
     /// child references adds at most one byte when moved to the child table,
@@ -267,7 +291,7 @@ impl CheckpointRoot {
     /// Even empty names cost two bytes, so this bounds their count as well
     /// as each name. No guest allocation or park can grow the list.
     pub const HOST_METADATA_LIMIT: usize =
-        4096 - (2 + 6 + 34 + 66 + 3 + 9 * 58 + 33 + 66 + 41) - 256;
+        4096 - (2 + 6 + 34 + 66 + 3 + 3 + 9 * 58 + 33 + 66 + 41) - 256;
 
     /// The canonical host-name list's size, without allocating its encoding.
     /// Overflow saturates so admission refuses it.

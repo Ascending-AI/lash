@@ -622,6 +622,7 @@ pub enum NewObject {
 pub struct Nursery<'call> {
     objects: &'call Objects,
     room: LogicalBytes,
+    unaccounted: bool,
     held: LogicalBytes,
     new: Vec<(ArenaHandle, NewObject)>,
     /// Every reservation asked for, and whether it was held: kept only
@@ -643,9 +644,18 @@ impl<'call> Nursery<'call> {
         Self {
             objects,
             room,
+            unaccounted: false,
             held: LogicalBytes(0),
             new: Vec::new(),
             log: None,
+        }
+    }
+
+    /// A nursery without memory reservation accounting or a memory bound.
+    pub fn unaccounted(objects: &'call Objects) -> Self {
+        Self {
+            unaccounted: true,
+            ..Self::new(objects, LogicalBytes(0))
         }
     }
 
@@ -666,6 +676,9 @@ impl<'call> Nursery<'call> {
     /// Holds room for `values` values and `bytes` bytes the call is about
     /// to build, before it builds them.
     pub fn reserve(&mut self, values: u64, bytes: u64) -> Result<(), NativeError> {
+        if self.unaccounted {
+            return Ok(());
+        }
         let wanted = values
             .checked_mul(std::mem::size_of::<Value>() as u64)
             .and_then(|values| values.checked_add(bytes))
@@ -695,6 +708,9 @@ impl<'call> Nursery<'call> {
     /// the call (a whole paged payload read, a concatenation, a slice).
     /// It draws on the room as [`Self::reserve`] does and is not recorded.
     pub fn hold(&mut self, values: u64, bytes: u64) -> Result<(), NativeError> {
+        if self.unaccounted {
+            return Ok(());
+        }
         let wanted = values
             .checked_mul(std::mem::size_of::<Value>() as u64)
             .and_then(|values| values.checked_add(bytes))

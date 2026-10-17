@@ -109,6 +109,7 @@ fn run(
     let spools = tempfile::tempdir().expect("spool directory");
     let spools = SpoolRoot::open(spools.path(), 1 << 30).expect("spools");
     let bounds = lash_kernel_vm::Bounds {
+        memory_limit: lash_kernel_vm::MemoryLimit::Recount,
         charge: lash_kernel_vm::Charge::Exact,
         charge_limit: 1_000_000,
         memory: 16 << 20,

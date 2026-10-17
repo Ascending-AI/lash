@@ -19,6 +19,8 @@ pub struct Work {
     pub charge_work: u64,
     /// Publications of the run's execution roots to its heap (FIG-6318).
     pub root_publishes: u64,
+    /// Generated-plan statements that open a memory reservation scope.
+    pub memory_scopes: u64,
     /// Slow resolutions for kp2-frame (FIG-6588), excluding active hits.
     pub task_resolutions: u64,
     pub frame_resolutions: u64,

@@ -31,6 +31,8 @@ pub enum AccountingMetric {
     /// holds at their holding locations, shared entities once by identity,
     /// inline immutable values per holding location (`K-BND-003`).
     LocalCostV1,
+    /// The heap was written without a memory meter.
+    Unmetered,
 }
 
 /// The census's persisted accounting, in the heap root. U is labelled an

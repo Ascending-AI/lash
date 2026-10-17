@@ -242,7 +242,7 @@ impl KernelMachine {
                 Completion::Return(value)
                 | Completion::ReturnVia { value, .. }
                 | Completion::Throw(value) => {
-                    self.pins.borrowed.push(**value);
+                    self.borrow_value(**value);
                 }
                 Completion::Break | Completion::Continue => {}
             }
@@ -867,10 +867,26 @@ impl KernelMachine {
         shared: bool,
         value: Value,
     ) -> Result<(), Halt> {
+        if self.bounds.memory_limit == crate::MemoryLimit::Off {
+            self.bind_memory::<false>(task, at, shared, value)
+        } else {
+            self.bind_memory::<true>(task, at, shared, value)
+        }
+    }
+
+    pub(super) fn bind_memory<const MEMORY: bool>(
+        &mut self,
+        task: TaskId,
+        at: u32,
+        shared: bool,
+        value: Value,
+    ) -> Result<(), Halt> {
         let state = if shared {
             SlotState::Cell(self.new_cell(value)?)
         } else {
-            self.reserve_growth(self.cost_of(&value))?;
+            if MEMORY {
+                self.reserve_growth_metered(self.cost_of_metered(&value))?;
+            }
             SlotState::Value(value)
         };
         #[cfg(test)]
@@ -1209,7 +1225,7 @@ impl KernelMachine {
             if matches!(origin, ResultOrigin::Delivered) {
                 self.pin(0)?;
             } else {
-                self.pins.borrowed.push(self.regs[0]);
+                self.borrow_value(self.regs[0]);
             }
             return match self.run(host, &running, running.stmt.resume())? {
                 Ran::Done => Ok((id, Ran::Done)),
@@ -1245,7 +1261,7 @@ impl KernelMachine {
         if matches!(origin, ResultOrigin::Delivered) {
             self.pin(entry.dst.0 as usize)?;
         } else {
-            self.pins.borrowed.push(self.regs[entry.dst.0 as usize]);
+            self.borrow_value(self.regs[entry.dst.0 as usize]);
         }
         let pc = running.stmt.ops.start as usize + entry.resume as usize;
         let ran = self.run(host, &running, pc)?;

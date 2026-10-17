@@ -101,7 +101,7 @@ pub mod tool_presenters {
 }
 pub use lash_vm_runtime::ResolvedToolBinding;
 pub use plugin::{
-    Charge, ExecutionBounds, HelperReleaseGate, InstructionBound, MemoryBound,
+    Charge, ExecutionBounds, HelperReleaseGate, InstructionBound, MemoryBound, MemoryLimit,
     RLM_PROTOCOL_PLUGIN_ID, RLM_RUN_OPTIONS, RlmChannel, RlmConfigOwner, RlmConfigRefusal,
     RlmCreateConfig, RlmDiscovery, RlmPresentationConfig, RlmProtocolPluginConfig,
     RlmProtocolPluginConfigBuilder, RlmProtocolPluginFactory, RlmRecordedBehaviour,

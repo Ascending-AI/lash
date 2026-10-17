@@ -142,6 +142,22 @@ impl PagedHeap {
     pub fn set_data_limits(&mut self, limits: lash_kernel_doc::KernelDataLimits) {
         self.limits = limits;
     }
+    /// Select the unaccounted heap at run entry. No census is installed.
+    pub fn without_memory_accounting(&mut self) {
+        self.census = None;
+        self.accounting = AccountingCertificate {
+            metric: super::AccountingMetric::Unmetered,
+            ..AccountingCertificate::FRESH
+        };
+        self.collection_live = None;
+        self.header = None;
+    }
+
+    #[inline]
+    pub(super) fn unmetered(&self) -> bool {
+        self.accounting.metric == super::AccountingMetric::Unmetered && self.census.is_none()
+    }
+
     /// The machine installs the accounting lane's admitted census and bound.
     pub fn set_census(&mut self, census: Box<dyn AllocationCensus>) -> Result<(), HeapFault> {
         if census.certificate() != self.accounting {
@@ -248,6 +264,23 @@ impl PagedHeap {
         let (old_closures, old_tasks) = taken
             .and_then(|taken| taken.owned)
             .map_or((0, 0), |(closure, tasks)| (u64::from(closure), tasks));
+        if self.unmetered() {
+            self.population.closure_entities = self
+                .population
+                .closure_entities
+                .checked_sub(old_closures)
+                .and_then(|v| v.checked_add(closure as u64))
+                .ok_or_else(|| HeapFault::Malformed("closure population overflow".into()))?;
+            self.population.task_edges = self
+                .population
+                .task_edges
+                .checked_sub(old_tasks)
+                .and_then(|v| v.checked_add(tasks))
+                .ok_or_else(|| HeapFault::Malformed("task-edge population overflow".into()))?;
+            edit(self)?;
+            self.header = None;
+            return Ok(());
+        }
         let mut census = self
             .census
             .take()
@@ -301,6 +334,9 @@ impl PagedHeap {
     /// (an instantiated frozen datum's payload), as the machine's other
     /// holdings are (`K-BND-003`).
     pub(super) fn reserve_held(&mut self, values: u64, bytes: u64) -> Result<(), HeapWriteError> {
+        if self.unmetered() {
+            return Ok(());
+        }
         let bytes = values
             .checked_mul(16)
             .and_then(|v| v.checked_add(bytes))

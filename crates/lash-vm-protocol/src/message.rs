@@ -232,6 +232,18 @@ pub enum Charge {
     Off,
 }
 
+/// The run's response to conservative memory pressure, carried to every worker.
+#[derive(
+    Clone, Copy, Debug, Default, PartialEq, Eq, Serialize, Deserialize, schemars::JsonSchema,
+)]
+#[serde(rename_all = "snake_case")]
+pub enum MemoryLimit {
+    #[default]
+    Recount,
+    Refuse,
+    Off,
+}
+
 /// The bounds a run is held to, as the machine counts them. Passing one ends
 /// the run with a typed bound error; it is the run's own end, not a worker
 /// failure.
@@ -239,6 +251,7 @@ pub enum Charge {
 #[serde(deny_unknown_fields)]
 pub struct RunBounds {
     pub charge: Charge,
+    pub memory_limit: MemoryLimit,
     /// The most the run may be charged, in the kernel's charge units.
     pub charge_limit: u64,
     /// The most heap the run may hold, in bytes as the machine accounts them.

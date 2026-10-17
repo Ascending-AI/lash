@@ -1,8 +1,8 @@
 //! The bound laws (`K-BND-001`): each bound ends the run with its typed
 //! error, and no `catch` or `finally` sees it (`K-ERR-004`).
 
+use lash_kernel_state::paged::AllocationCensus;
 use std::sync::Arc;
-use std::sync::atomic::Ordering;
 
 use lash_kernel_doc::{parse_definition, parse_document};
 
@@ -103,6 +103,7 @@ fn the_memory_bound_holds_inside_a_native_call() {
 /// before the function builds anything.
 #[test]
 fn the_memory_bound_refuses_a_native_reservation_before_the_allocation() {
+    REPEAT_BUILDS.set(0);
     let bounds = Bounds {
         memory: 64 << 10,
         ..ROOMY
@@ -114,7 +115,7 @@ fn the_memory_bound_refuses_a_native_reservation_before_the_allocation() {
             ..exceeded(Bound::Memory, 64 << 10)
         }
     );
-    assert_eq!(REPEAT_BUILDS.load(Ordering::Relaxed), 0);
+    assert_eq!(REPEAT_BUILDS.get(), 0);
     // A reservation is refused only by what is live: the garbage of
     // earlier calls is collected and the call made again.
     let mut embedder = Embedder::with(
@@ -132,7 +133,7 @@ fn the_memory_bound_refuses_a_native_reservation_before_the_allocation() {
         },
     );
     assert_eq!(result(embedder.run_to_end(&[])), int(200));
-    assert_eq!(REPEAT_BUILDS.load(Ordering::Relaxed), 200);
+    assert_eq!(REPEAT_BUILDS.get(), 200);
 }
 
 /// `K-BND-002`: call depth is counted per task.
@@ -495,4 +496,255 @@ fn charge_off_survives_a_resume_on_a_fresh_worker() {
     assert_eq!(run.machine.meters().charged, None);
     assert_eq!(result(run.run_to_end(&[])), int(7));
     assert_eq!(run.machine.meters().charged, None);
+}
+
+/// K-BND-001 / FIG-6731: conservative pressure is the host's choice. Dead
+/// young growth leaves room after a recount, but Refuse must not publish,
+/// trace or sweep to discover that room.
+#[test]
+fn conservative_memory_pressure_obeys_the_runs_policy() {
+    for policy in [crate::MemoryLimit::Refuse, crate::MemoryLimit::Recount] {
+        let mut embedder = Embedder::with(
+            MEMORY_CHURN,
+            Setup {
+                bounds: Bounds {
+                    memory: 64 << 10,
+                    memory_limit: policy,
+                    ..ROOMY
+                },
+                ..Setup::default()
+            },
+        );
+        crate::perf_witness::enable_work();
+        let end = embedder.run_to_end(&[]);
+        let work = crate::perf_witness::take_work().unwrap();
+        crate::perf_witness::disable_work();
+        match policy {
+            crate::MemoryLimit::Refuse => {
+                assert!(
+                    matches!(
+                        end,
+                        End::Error(RunError::Bound(BoundExceeded {
+                            bound: Bound::Memory,
+                            ..
+                        }))
+                    ),
+                    "{end:?}"
+                );
+                assert_eq!(work.heap.refinement_attempts, 0);
+                assert_eq!(work.root_publishes, 0);
+                assert_eq!(work.heap.arena_marks, 0);
+                assert_eq!(work.heap.projection_visits, 0);
+            }
+            crate::MemoryLimit::Off => unreachable!(),
+            crate::MemoryLimit::Recount => {
+                assert_eq!(result(end), int(200));
+                assert!(
+                    work.heap.refinement_attempts > 0,
+                    "the program must need precision"
+                );
+            }
+        }
+    }
+}
+
+const MEMORY_CHURN: &str = r#"main {
+  let i = 0
+  while num.lt(i, 200) {
+    let held = work.fill(1000)
+    set i = num.add(i, 1)
+  }
+  return i
+}"#;
+
+/// FIG-6731 / K-MACH-008: a new worker reads Refuse from the checkpoint,
+/// even when its own creation bounds choose Recount.
+#[test]
+fn a_cold_resume_keeps_the_memory_policy_without_recounting() {
+    let program = MEMORY_CHURN.replacen("main {", "main { do perform echo(\"park\") as Any", 1);
+    let mut embedder = Embedder::with(
+        &program,
+        Setup {
+            bounds: Bounds {
+                memory: 64 << 10,
+                memory_limit: crate::MemoryLimit::Refuse,
+                ..ROOMY
+            },
+            ..Setup::default()
+        },
+    );
+    assert!(matches!(embedder.run(), Step::Parked(_)));
+    let (root, certificate) = embedder.checkpoint();
+    assert_eq!(root.memory_limit, crate::MemoryLimit::Refuse);
+    let (program, _) = embedder.program(true);
+    embedder.machine = KernelMachine::open_with_census(
+        program,
+        Bounds {
+            memory: 64 << 10,
+            ..ROOMY
+        },
+        &root,
+        Vec::new(),
+        Box::new(embedder.source.clone()),
+        Box::new(
+            lash_kernel_state::kernel_internals::census_impl::Census::restore(
+                certificate,
+                lash_kernel_doc::heap::LogicalBytes(64 << 10),
+            )
+            .unwrap(),
+        ),
+        crate::Layout::default(),
+    )
+    .unwrap();
+    embedder.deliver("park");
+    crate::perf_witness::enable_work();
+    let end = embedder.run_to_end(&[]);
+    let work = crate::perf_witness::take_work().unwrap();
+    crate::perf_witness::disable_work();
+    assert!(
+        matches!(
+            end,
+            End::Error(RunError::Bound(BoundExceeded {
+                bound: Bound::Memory,
+                ..
+            }))
+        ),
+        "{end:?}"
+    );
+    assert_eq!(work.heap.refinement_attempts, 0);
+    assert_eq!(work.root_publishes, 0);
+    assert_eq!(work.heap.arena_marks, 0);
+    assert_eq!(work.heap.projection_visits, 0);
+}
+
+/// FIG-6731: disabling memory accounting removes census work and its bound,
+/// while keeping the program's result and a durable cold continuation.
+#[test]
+fn memory_off_removes_accounting_and_survives_a_cold_resume() {
+    let text = MEMORY_CHURN.replacen("main {", "main { do perform echo(\"park\") as Any", 1);
+    let mut embedder = Embedder::with(
+        &text,
+        Setup {
+            bounds: Bounds {
+                memory: 0,
+                memory_limit: crate::MemoryLimit::Off,
+                ..ROOMY
+            },
+            ..Setup::default()
+        },
+    );
+    assert!(matches!(embedder.run(), Step::Parked(_)));
+    let (root, certificate) = embedder.checkpoint();
+    assert_eq!(root.memory_limit, crate::MemoryLimit::Off);
+    embedder.open_at(&root, certificate, crate::Layout::default(), true);
+    embedder.deliver("park");
+    crate::perf_witness::enable_work();
+    let end = embedder.run_to_end(&[]);
+    let work = crate::perf_witness::take_work().unwrap();
+    crate::perf_witness::disable_work();
+    assert_eq!(result(end), int(200));
+    assert_eq!(work.heap.arena_memory_prices, 0, "Off priced arena memory");
+    assert_eq!(
+        work.heap.accounting_reservations, 0,
+        "Off reserved census bytes"
+    );
+    assert_eq!(work.heap.accounting_changes, 0, "Off updated the census");
+    assert_eq!(
+        work.heap.accounting_additions, 0,
+        "Off added census entities"
+    );
+    assert_eq!(work.heap.refinement_attempts, 0, "Off recounted");
+    assert_eq!(
+        embedder.machine.meters().memory,
+        0,
+        "Off reports no memory meter"
+    );
+}
+
+/// FIG-6731: Off's nursery does not even compute a reservation's size.
+#[test]
+fn an_unaccounted_nursery_does_no_reservation_bookkeeping() {
+    let objects = lash_kernel_doc::arena::Objects::default();
+    let mut nursery = lash_kernel_doc::Nursery::unaccounted(&objects);
+    nursery.reserve(u64::MAX, u64::MAX).unwrap();
+    nursery.hold(u64::MAX, u64::MAX).unwrap();
+    assert_eq!(nursery.held().0, 0);
+    assert!(nursery.reservations().is_empty());
+}
+
+/// FIG-6731: Off's durable session can feed another Off cell or a metered
+/// cell, preserving edits through a second cold carry. A fresh meter prices
+/// adopted roots once before the new cell runs.
+#[test]
+fn an_unmetered_session_can_feed_off_or_metered_cells() {
+    let mut first = Embedder::with(
+        "main { let keep = [7, 8] return 0 }",
+        Setup {
+            bounds: Bounds {
+                memory_limit: crate::MemoryLimit::Off,
+                ..ROOMY
+            },
+            ..Setup::default()
+        },
+    );
+    let End::Finished(end) = first.run_to_end(&[]) else {
+        panic!("the first cell must finish");
+    };
+    let carry = end.carry.unwrap();
+    for policy in [crate::MemoryLimit::Off, crate::MemoryLimit::Recount] {
+        let (mut program, _) = first.program(true);
+        program.document = Arc::new(
+            parse_document(&format!(
+                "numbers by_spelling\n{}main {{ set keep[1] = 9 return keep[1] }}",
+                first.library.header
+            ))
+            .unwrap(),
+        );
+        let mut machine = KernelMachine::start(
+            program.clone(),
+            Bounds {
+                memory_limit: policy,
+                ..ROOMY
+            },
+            CellStart {
+                session: Some(carry),
+                ..Setup::default().start
+            },
+            Box::new(first.source.clone()),
+        )
+        .unwrap();
+        let Step::Ended(End::Finished(end)) = machine.run(&mut World::default(), u64::MAX).unwrap()
+        else {
+            panic!("the editing cell must finish");
+        };
+        assert_eq!(end.result, int(9));
+        program.document = Arc::new(
+            parse_document(&format!(
+                "numbers by_spelling\n{}main {{ return keep[1] }}",
+                first.library.header
+            ))
+            .unwrap(),
+        );
+        let mut reopened = KernelMachine::start(
+            program,
+            Bounds {
+                memory_limit: policy,
+                ..ROOMY
+            },
+            CellStart {
+                session: end.carry,
+                ..Setup::default().start
+            },
+            Box::new(first.source.clone()),
+        )
+        .unwrap();
+        assert!(
+            matches!(reopened.run(&mut World::default(), u64::MAX).unwrap(),
+            Step::Ended(End::Finished(ref end)) if end.result == int(9))
+        );
+        assert_eq!(
+            machine.meters().memory == 0,
+            policy == crate::MemoryLimit::Off
+        );
+    }
 }

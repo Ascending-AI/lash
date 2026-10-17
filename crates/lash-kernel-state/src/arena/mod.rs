@@ -54,6 +54,7 @@ pub use bench::{Bench, Called, Usage};
 pub use chunks::{ColdChunk, PayloadPart};
 pub use keys::{ArenaSemantics, text_key};
 pub use ops::invalid_key;
+use ops::{composite, object_cost};
 pub use tables::{Index, Place};
 
 use std::collections::HashMap;
@@ -224,6 +225,7 @@ pub struct Arena {
     /// Seals and exact refinements since the run began: what tells a
     /// young object.
     seals: u64,
+    unaccounted: bool,
     /// Mutable objects the run created.
     allocations: u64,
     /// The mutable objects created since the statement began: until a
@@ -276,6 +278,12 @@ impl Arena {
             next_ordinal: next,
             ..Self::new()
         }
+    }
+
+    /// An arena with lifetime management but no memory-accounting age ledger.
+    pub fn without_memory_accounting(mut self) -> Self {
+        self.unaccounted = true;
+        self
     }
 
     /// The bodies, as a native call borrows them.
@@ -347,6 +355,9 @@ impl Arena {
     /// A seal or an exact refinement priced what is live: every object
     /// created before it is old, and releasing it refunds nothing.
     pub fn rebased(&mut self) {
+        if self.unaccounted {
+            return;
+        }
         self.seals += 1;
     }
 
@@ -436,7 +447,7 @@ impl Arena {
         self.allocations += 1;
         Facts {
             dirty: true,
-            born: Some(self.seals),
+            born: (!self.unaccounted).then_some(self.seals),
             summary: Summary {
                 cost,
                 ..Summary::default()
@@ -448,10 +459,16 @@ impl Arena {
 
     /// Creates the mutable object `body`.
     fn insert_created(&mut self, body: Body) -> ArenaHandle {
-        let cost = object_cost(&self.objects, &self.facts, &body);
+        let cost = if self.unaccounted {
+            0
+        } else {
+            object_cost(&self.objects, &self.facts, &body)
+        };
         let facts = self.created(cost, None);
         let handle = self.insert(body, facts);
-        self.statement.push(handle);
+        if !self.unaccounted {
+            self.statement.push(handle);
+        }
         handle
     }
 
@@ -584,7 +601,25 @@ impl Arena {
     /// The logical cost of `value` where it is held: the heap's local
     /// cost of its page form.
     pub fn cost_of(&self, value: &Value) -> u64 {
+        if self.unaccounted {
+            0
+        } else {
+            self.cost_of_metered(value)
+        }
+    }
+
+    /// Logical pricing for a caller already dispatched to the accounted stream.
+    #[inline]
+    pub fn cost_of_metered(&self, value: &Value) -> u64 {
         local_cost(&self.objects, &self.facts, value)
+    }
+
+    fn composite_summary(&self, members: &[Value]) -> Summary {
+        if self.unaccounted {
+            composite::<false>(&self.objects, &self.facts, members)
+        } else {
+            composite::<true>(&self.objects, &self.facts, members)
+        }
     }
 
     /// An immutable composite's summary, as its page form certifies it;
@@ -650,7 +685,7 @@ impl Arena {
 
     /// A tuple of `members`, or `too_deep` past `depth_limit`.
     pub fn tuple(&mut self, members: Vec<Value>, depth_limit: usize) -> Result<Value, Raise> {
-        let summary = composite(&self.objects, &self.facts, &members);
+        let summary = self.composite_summary(&members);
         if summary.depth as usize > depth_limit {
             return Err(Raise::TooDeep);
         }
@@ -676,10 +711,12 @@ impl Arena {
 
     /// An error value of texts `kind` and `message`, and `data`.
     pub fn error_of(&mut self, kind: Value, message: Value, data: Value) -> Value {
-        let mut summary = composite(&self.objects, &self.facts, std::slice::from_ref(&data));
-        summary.cost = text_bytes(&self.objects, &kind)
-            .saturating_add(text_bytes(&self.objects, &message))
-            .saturating_add(local_cost(&self.objects, &self.facts, &data));
+        let mut summary = self.composite_summary(std::slice::from_ref(&data));
+        if !self.unaccounted {
+            summary.cost = text_bytes(&self.objects, &kind)
+                .saturating_add(text_bytes(&self.objects, &message))
+                .saturating_add(local_cost(&self.objects, &self.facts, &data));
+        }
         Value::Error(self.insert(
             Body::Error(ErrorBody {
                 kind,
@@ -725,7 +762,7 @@ impl Arena {
                     Some(ValueKind::Record),
                 ),
                 NewObject::Tuple(members) => {
-                    let summary = composite(&self.objects, &self.facts, &members);
+                    let summary = self.composite_summary(&members);
                     self.install_one(
                         handle,
                         Body::Tuple(Sequence {
@@ -779,11 +816,12 @@ impl Arena {
                     message,
                     data,
                 } => {
-                    let mut summary =
-                        composite(&self.objects, &self.facts, std::slice::from_ref(&data));
-                    summary.cost = text_bytes(&self.objects, &kind)
-                        .saturating_add(text_bytes(&self.objects, &message))
-                        .saturating_add(local_cost(&self.objects, &self.facts, &data));
+                    let mut summary = self.composite_summary(std::slice::from_ref(&data));
+                    if !self.unaccounted {
+                        summary.cost = text_bytes(&self.objects, &kind)
+                            .saturating_add(text_bytes(&self.objects, &message))
+                            .saturating_add(local_cost(&self.objects, &self.facts, &data));
+                    }
                     self.install_one(
                         handle,
                         Body::Error(ErrorBody {
@@ -805,11 +843,19 @@ impl Arena {
                     .transpose()?,
                 _ => None,
             };
-            let cost = object_cost(&self.objects, &self.facts, &body);
-            grown = grown.saturating_add(cost);
+            let cost = if self.unaccounted {
+                0
+            } else {
+                object_cost(&self.objects, &self.facts, &body)
+            };
+            if !self.unaccounted {
+                grown = grown.saturating_add(cost);
+            }
             let facts = self.created(cost, index.map(Box::new));
             self.install_one(handle, body, facts);
-            self.statement.push(handle);
+            if !self.unaccounted {
+                self.statement.push(handle);
+            }
         }
         // Members are counted once the whole batch is placed: an object
         // may hold one built after it in the same call.
@@ -845,7 +891,8 @@ impl Arena {
             self.colds = self.colds.saturating_sub(1);
         }
         let mutable = self.facts(handle)?.entity.is_some();
-        let cost = mutable.then(|| object_cost(&self.objects, &self.facts, &body));
+        let cost =
+            (mutable && !self.unaccounted).then(|| object_cost(&self.objects, &self.facts, &body));
         self.facts_mut(handle)?.cold = false;
         self.hold_members(&body);
         let placeholder = std::mem::replace(
@@ -1493,6 +1540,7 @@ fn word_bytes(word: i64) -> u64 {
 
 /// The heap's local cost of `value`'s page form
 /// (`lash_kernel_doc::heap_values::local_cost`).
+#[inline]
 pub(crate) fn local_cost(objects: &Objects, facts: &[Facts], value: &Value) -> u64 {
     let summary = |handle: &ArenaHandle| {
         facts
@@ -1542,49 +1590,4 @@ fn value_summary(facts: &[Facts], value: &Value) -> Summary {
         },
         _ => Summary::default(),
     }
-}
-
-/// The summary of an immutable composite of `members`.
-fn composite(objects: &Objects, facts: &[Facts], members: &[Value]) -> Summary {
-    let mut summary = Summary {
-        depth: 1,
-        ..Summary::default()
-    };
-    for member in members {
-        let inner = value_summary(facts, member);
-        summary.cost = summary
-            .cost
-            .saturating_add(local_cost(objects, facts, member));
-        summary.depth = summary.depth.max(inner.depth.saturating_add(1));
-        summary.task_edges = summary.task_edges.saturating_add(inner.task_edges);
-        summary.has_edges |= inner.has_edges;
-    }
-    summary
-}
-
-/// A resident mutable object's logical cost, as the heap prices its head
-/// (`ObjectHead::cost`): a minimum plus its rows, a record's field rows
-/// less their name references.
-fn object_cost(objects: &Objects, facts: &[Facts], body: &Body) -> u64 {
-    let rows = |chunks: &[Chunk<Vec<Value>>]| -> u64 {
-        chunks
-            .iter()
-            .filter_map(|chunk| match chunk {
-                Chunk::Resident(values) => Some(values),
-                Chunk::Cold { .. } => None,
-            })
-            .flatten()
-            .map(|value| local_cost(objects, facts, value))
-            .fold(0u64, u64::saturating_add)
-    };
-    32u64.saturating_add(match body {
-        Body::List(sequence) => rows(&sequence.chunks),
-        Body::Map(table) => rows(&table.chunks),
-        // A set's members are rows of a key and a null.
-        Body::Set(table) => rows(&table.chunks),
-        Body::Record(table) => rows(&table.chunks).saturating_sub(table.len * 16),
-        Body::Closure { captures, .. } => captures.len() as u64 * 8,
-        Body::Cell(value) => local_cost(objects, facts, value),
-        _ => 0,
-    })
 }

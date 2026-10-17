@@ -28,10 +28,13 @@ use crate::compile::{Executable, LibId, PreparedPlan};
 /// What a statement the plan performs started from: what it pins and
 /// holds from then on is its own, released when it ends.
 #[derive(Clone, Copy)]
-pub(super) struct Mark {
-    pins: usize,
-    borrowed: usize,
-    reserved: u64,
+pub(super) enum Mark {
+    Unaccounted,
+    Accounted {
+        pins: usize,
+        borrowed: usize,
+        reserved: u64,
+    },
 }
 
 /// A `for` a plan walks: its cursor, the variable that holds what it
@@ -45,7 +48,7 @@ pub(super) struct Walk {
 
 /// One running plan: the machine, the caller's arguments and the plan's
 /// registers.
-pub(super) struct PlanRun<'m> {
+pub(super) struct PlanRun<'m, const MEMORY: bool> {
     pub(super) machine: &'m mut KernelMachine,
     pub(super) task: TaskId,
     pub(super) exe: &'m Executable,
@@ -71,7 +74,7 @@ pub(super) struct PlanRun<'m> {
     pub(super) halt: Option<Box<Halt>>,
 }
 
-impl PlanRun<'_> {
+impl<const MEMORY: bool> PlanRun<'_, MEMORY> {
     fn shared(&self, slot: u32) -> bool {
         self.prepared.locals[slot as usize].is_some_and(|local| local.shared)
     }
@@ -88,8 +91,12 @@ impl PlanRun<'_> {
             let allocated = self.machine.new_cell(value);
             Value::ObjectRef(self.held(allocated)?)
         } else {
-            let reserved = self.machine.reserve_growth(self.machine.cost_of(&value));
-            self.held(reserved)?;
+            if MEMORY {
+                let reserved = self
+                    .machine
+                    .reserve_growth_metered(self.machine.cost_of_metered(&value));
+                self.held(reserved)?;
+            }
             value
         };
         self.machine.put(self.slots + slot as usize, holding);
@@ -129,9 +136,19 @@ impl PlanRun<'_> {
             return Ok(());
         };
         let machine = &mut *self.machine;
-        machine.pins.values.truncate(mark.pins);
-        machine.pins.borrowed.truncate(mark.borrowed);
-        machine.heap.release_reserved_to(mark.reserved)?;
+        if MEMORY {
+            let Mark::Accounted {
+                pins,
+                borrowed,
+                reserved,
+            } = mark
+            else {
+                return Err(fault("an accounted statement has no memory scope"));
+            };
+            machine.pins.values.truncate(pins);
+            machine.pins.borrowed.truncate(borrowed);
+            machine.heap.release_reserved_to(reserved)?;
+        }
         let registers = self.prepared.plan.registers as usize;
         machine.regs.clear_range(self.base..self.base + registers);
         machine.heap.execution_roots_moved();
@@ -139,22 +156,28 @@ impl PlanRun<'_> {
     }
 }
 
-impl PlanRun<'_> {
+impl<const MEMORY: bool> PlanRun<'_, MEMORY> {
     /// Opens the next statement, ending the one open.
     pub(super) fn open_statement(&mut self) -> Result<(), PlanExit> {
         let ended = self.end_statement();
         self.held(ended)?;
-        let machine = &*self.machine;
-        self.statement = Some(Mark {
-            pins: machine.pins.values.len(),
-            borrowed: machine.pins.borrowed.len(),
-            reserved: machine.heap.statement_reserved(),
+        self.statement = Some(if MEMORY {
+            #[cfg(any(test, feature = "perf-witness"))]
+            crate::perf_witness::record(|work| work.memory_scopes += 1);
+            let machine = &*self.machine;
+            Mark::Accounted {
+                pins: machine.pins.values.len(),
+                borrowed: machine.pins.borrowed.len(),
+                reserved: machine.heap.statement_reserved(),
+            }
+        } else {
+            Mark::Unaccounted
         });
         Ok(())
     }
 }
 
-impl PlanContext for PlanRun<'_> {
+impl<const MEMORY: bool> PlanContext for PlanRun<'_, MEMORY> {
     fn begin(&mut self) -> Result<(), PlanExit> {
         self.open_statement()
     }
@@ -225,18 +248,23 @@ impl PlanContext for PlanRun<'_> {
             let cell = self.held(cell)?;
             let growth = self.machine.in_arena(|arena| arena.cell_set(cell, value));
             let growth = self.check(growth)?;
-            let grown = self.machine.grow(growth);
-            return self.held(grown);
+            return if MEMORY {
+                let grown = self.machine.grow(growth);
+                self.held(grown)
+            } else {
+                Ok(())
+            };
         }
         let at = self.slots + slot as usize;
-        let growth = self
-            .machine
-            .cost_of(&value)
-            .saturating_sub(self.machine.cost_of(&self.machine.regs[at]));
-        if growth != 0 {
-            // The variable's old holding already pays for that much.
-            let reserved = self.machine.reserve_growth(growth);
-            self.held(reserved)?;
+        if MEMORY {
+            let growth = self
+                .machine
+                .cost_of_metered(&value)
+                .saturating_sub(self.machine.cost_of_metered(&self.machine.regs[at]));
+            if growth != 0 {
+                let reserved = self.machine.reserve_growth_metered(growth);
+                self.held(reserved)?;
+            }
         }
         self.machine.put(at, value);
         Ok(())
@@ -342,8 +370,12 @@ impl PlanContext for PlanRun<'_> {
     }
 
     fn pin(&mut self, src: u32) -> Result<(), PlanExit> {
-        let pinned = self.machine.pin(self.base + src as usize);
-        self.held(pinned)
+        if MEMORY {
+            let pinned = self.machine.pin(self.base + src as usize);
+            self.held(pinned)
+        } else {
+            Ok(())
+        }
     }
 
     fn set_field(&mut self, target: u32, field: u32, src: u32) -> Result<(), PlanExit> {
@@ -500,8 +532,10 @@ impl KernelMachine {
     /// A value leaving a plan, as one leaving a frame is held
     /// ([`KernelMachine::complete`]): `holds` times, until the step ends.
     fn departing(&mut self, value: Value, holds: usize) -> Result<Value, Halt> {
-        for _ in 0..holds {
-            self.pins.borrowed.push(value);
+        if self.bounds.memory_limit != crate::MemoryLimit::Off {
+            for _ in 0..holds {
+                self.pins.borrowed.push(value);
+            }
         }
         Ok(value)
     }
@@ -511,6 +545,22 @@ impl KernelMachine {
     /// at a callback site, its frames to stand there once the caller has
     /// saved where it stands ([`KernelMachine::stand_segments`]).
     pub(super) fn run_plan(
+        &mut self,
+        task: TaskId,
+        exe: &Executable,
+        lib: LibId,
+        plan: &Arc<PreparedPlan>,
+        args: Reg,
+        entry: Option<&super::operation_entry::OperationEntry>,
+    ) -> Eval<Option<Result<Value, Value>>> {
+        if self.bounds.memory_limit == crate::MemoryLimit::Off {
+            self.run_plan_memory::<false>(task, exe, lib, plan, args, entry)
+        } else {
+            self.run_plan_memory::<true>(task, exe, lib, plan, args, entry)
+        }
+    }
+
+    fn run_plan_memory<const MEMORY: bool>(
         &mut self,
         task: TaskId,
         exe: &Executable,
@@ -536,7 +586,7 @@ impl KernelMachine {
         // the call is charged, or roots a task (`push_operation_frame`).
         let keep = charging || self.task(task)?.frames.is_empty();
         self.plans += 1;
-        let mut run = PlanRun {
+        let mut run = PlanRun::<MEMORY> {
             machine: self,
             task,
             exe,

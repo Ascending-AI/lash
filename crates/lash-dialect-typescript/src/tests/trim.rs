@@ -111,6 +111,7 @@ fn native_trim_agrees_with_generic_utf16_scan() {
     let fast = make_program("ts.string.trim_value");
     let generic = make_program("ts.law.trim_value");
     let bounds = Bounds {
+        memory_limit: lash_kernel_vm::MemoryLimit::Recount,
         charge: lash_kernel_vm::Charge::Exact,
         charge_limit: 10_000_000,
         memory: 1 << 20,

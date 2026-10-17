@@ -1,4 +1,4 @@
-use super::{ExecutionBounds, InstructionBound, MemoryBound};
+use super::{ExecutionBounds, InstructionBound, MemoryBound, MemoryLimit};
 
 /// Prompt presentation of values and calls. These choices are pinned with
 /// protocol behaviour; how tools read is the dialect's tool presenter's.
@@ -99,6 +99,7 @@ pub struct RlmProtocolPluginConfig {
         skip_serializing_if = "lash_vm_client::Durability::is_durable"
     )]
     pub durability: lash_vm_client::Durability,
+    pub on_memory_limit: MemoryLimit,
     #[serde(default)]
     pub prompt_features: crate::protocol::RlmPromptFeatures,
     #[serde(default = "default_max_output_chars")]
@@ -138,6 +139,7 @@ pub struct RlmRecordedBehaviour {
         skip_serializing_if = "lash_vm_client::Durability::is_durable"
     )]
     pub durability: lash_vm_client::Durability,
+    pub on_memory_limit: MemoryLimit,
     pub prompt_features: crate::protocol::RlmPromptFeatures,
     pub max_output_chars: usize,
     /// The prompt-token threshold of the soft context-budget warning, or
@@ -180,6 +182,7 @@ pub struct RlmProtocolPluginConfigBuilder<I = UnsetBound, M = UnsetBound, C = Un
     charge: super::Charge,
     instruction_limit: I,
     memory_limit: M,
+    on_memory_limit: MemoryLimit,
     channel: C,
     durability: lash_vm_client::Durability,
 }
@@ -191,6 +194,12 @@ impl<I, M, C> RlmProtocolPluginConfigBuilder<I, M, C> {
         self
     }
 
+    /// Choose the response to conservative memory pressure. Defaults to Recount.
+    pub fn on_memory_limit(mut self, policy: MemoryLimit) -> Self {
+        self.on_memory_limit = policy;
+        self
+    }
+
     pub fn channel(
         self,
         channel: super::RlmChannel,
@@ -199,6 +208,7 @@ impl<I, M, C> RlmProtocolPluginConfigBuilder<I, M, C> {
             charge: self.charge,
             instruction_limit: self.instruction_limit,
             memory_limit: self.memory_limit,
+            on_memory_limit: self.on_memory_limit,
             channel,
             durability: self.durability,
         }
@@ -212,6 +222,7 @@ impl<I, M, C> RlmProtocolPluginConfigBuilder<I, M, C> {
             charge: self.charge,
             instruction_limit,
             memory_limit: self.memory_limit,
+            on_memory_limit: self.on_memory_limit,
             channel: self.channel,
             durability: self.durability,
         }
@@ -225,6 +236,7 @@ impl<I, M, C> RlmProtocolPluginConfigBuilder<I, M, C> {
             charge: self.charge,
             instruction_limit: self.instruction_limit,
             memory_limit,
+            on_memory_limit: self.on_memory_limit,
             channel: self.channel,
             durability: self.durability,
         }
@@ -258,6 +270,7 @@ impl RlmProtocolPluginConfigBuilder<InstructionBound, MemoryBound, super::RlmCha
             instruction_limit: self.instruction_limit,
             memory_limit: self.memory_limit,
             durability: self.durability,
+            on_memory_limit: self.on_memory_limit,
             prompt_features: crate::protocol::RlmPromptFeatures::default(),
             max_output_chars: default_max_output_chars(),
             continue_as_soft_warn_tokens: default_continue_as_soft_warn_tokens(),
@@ -287,6 +300,7 @@ impl RlmProtocolPluginConfig {
             charge: super::Charge::Exact,
             instruction_limit: UnsetBound,
             memory_limit: UnsetBound,
+            on_memory_limit: MemoryLimit::Recount,
             channel: UnsetChannel,
             durability: lash_vm_client::Durability::Durable,
         }
@@ -296,6 +310,7 @@ impl RlmProtocolPluginConfig {
         ExecutionBounds::new(self.instruction_limit, self.memory_limit)
             .with_charge(self.charge)
             .with_durability(self.durability)
+            .on_memory_limit(self.on_memory_limit)
     }
 
     /// The behaviour a session created in `dialect` under this
@@ -314,6 +329,7 @@ impl RlmProtocolPluginConfig {
             instruction_limit: self.instruction_limit,
             memory_limit: self.memory_limit,
             durability: self.durability,
+            on_memory_limit: self.on_memory_limit,
             prompt_features: self.prompt_features,
             max_output_chars: self.max_output_chars,
             continue_as_soft_warn_tokens: self.continue_as_soft_warn_tokens,
@@ -332,6 +348,7 @@ impl RlmProtocolPluginConfig {
         self.instruction_limit = behaviour.instruction_limit;
         self.memory_limit = behaviour.memory_limit;
         self.durability = behaviour.durability;
+        self.on_memory_limit = behaviour.on_memory_limit;
 
         self.prompt_features = behaviour.prompt_features;
         self.max_output_chars = behaviour.max_output_chars;

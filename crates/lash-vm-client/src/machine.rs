@@ -202,6 +202,11 @@ impl RemoteMachines {
             document: EncodedPayload(self.body.to_vec()),
             from,
             bounds: RunBounds {
+                memory_limit: match self.bounds.memory_limit {
+                    lash_kernel_vm::MemoryLimit::Recount => lash_vm_protocol::MemoryLimit::Recount,
+                    lash_kernel_vm::MemoryLimit::Refuse => lash_vm_protocol::MemoryLimit::Refuse,
+                    lash_kernel_vm::MemoryLimit::Off => lash_vm_protocol::MemoryLimit::Off,
+                },
                 charge: match self.bounds.charge {
                     lash_kernel_vm::Charge::Exact => lash_vm_protocol::Charge::Exact,
                     lash_kernel_vm::Charge::Off => lash_vm_protocol::Charge::Off,
@@ -770,6 +775,7 @@ mod reservation_tests {
             document: EncodedPayload(vec![0; 16]),
             from: StartFrom::Fresh(EncodedPayload(vec![0; 16])),
             bounds: RunBounds {
+                memory_limit: lash_vm_protocol::MemoryLimit::Recount,
                 charge: lash_vm_protocol::Charge::Exact,
                 charge_limit: u64::MAX,
                 memory: u64::MAX,

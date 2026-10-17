@@ -117,6 +117,7 @@ use gate_six::{answer, effects, programs};
 use gate_six_registry::registry;
 
 const BOUNDS: Bounds = Bounds {
+    memory_limit: lash_kernel_vm::MemoryLimit::Refuse,
     charge: lash_kernel_vm::Charge::Exact,
     charge_limit: 1_000_000_000,
     memory: 1 << 30,
@@ -127,19 +128,22 @@ const BOUNDS: Bounds = Bounds {
     durability: lash_kernel_vm::Durability::Durable,
 };
 
-/// [`BOUNDS`] with the durability `KERNEL_PERF_DURABILITY` states:
-/// `durable` (the default) or `ephemeral`, a run that is never saved.
-#[expect(
-    clippy::disallowed_methods,
-    reason = "explicit benchmark durability from the driver"
-)]
-fn bounds() -> Bounds {
+/// The driver composes independent option flags through the process environment.
+#[expect(clippy::disallowed_methods, reason = "explicit benchmark option")]
+fn benchmark_bounds() -> Bounds {
+    let memory_limit = match std::env::var("KERNEL_PERF_MEMORY").as_deref() {
+        Ok("off") => lash_kernel_vm::MemoryLimit::Off,
+        Ok("recount") => lash_kernel_vm::MemoryLimit::Recount,
+        Ok("refuse" | "") | Err(_) => lash_kernel_vm::MemoryLimit::Refuse,
+        Ok(other) => panic!("unknown benchmark memory policy: {other}"),
+    };
     let durability = match std::env::var("KERNEL_PERF_DURABILITY").as_deref() {
         Ok("durable") | Ok("") | Err(_) => lash_kernel_vm::Durability::Durable,
         Ok("ephemeral") => lash_kernel_vm::Durability::Ephemeral,
         Ok(other) => panic!("KERNEL_PERF_DURABILITY is durable or ephemeral, not {other}"),
     };
     Bounds {
+        memory_limit,
         durability,
         ..BOUNDS
     }
@@ -211,13 +215,27 @@ fn start_on(program: &Program, source: &pages::Source) -> KernelMachine {
         modes: lash_kernel_vm::EffectModes::recorded(),
         host: Vec::new(),
     };
-    KernelMachine::start(program.clone(), bounds(), start, Box::new(source.clone()))
-        .unwrap_or_else(|error| panic!("{error}"))
+    KernelMachine::start(
+        program.clone(),
+        benchmark_bounds(),
+        start,
+        Box::new(source.clone()),
+    )
+    .unwrap_or_else(|error| panic!("{error}"))
 }
 
 /// Runs a started machine to its end. Gives the charge and the value the
 /// program finished with.
 fn to_end(machine: &mut KernelMachine, name: &str) -> (u64, Datum) {
+    let (charged, result) =
+        try_to_end(machine, name).unwrap_or_else(|end| panic!("{name} ended {end:?}"));
+    (
+        charged.unwrap_or_else(|| panic!("this profiling mode requires Exact charge")),
+        result,
+    )
+}
+
+fn try_to_end(machine: &mut KernelMachine, name: &str) -> Result<(Option<u64>, Datum), End> {
     let mut console = Console::default();
     let mut finished = Datum::Null;
     loop {
@@ -230,16 +248,8 @@ fn to_end(machine: &mut KernelMachine, name: &str) -> (u64, Datum) {
                     finished = value;
                 }
             }
-            Step::Ended(End::Finished(_)) => {
-                return (
-                    machine
-                        .meters()
-                        .charged
-                        .unwrap_or_else(|| panic!("this profiling mode requires Exact charge")),
-                    finished,
-                );
-            }
-            Step::Ended(other) => panic!("{name} ended {other:?}"),
+            Step::Ended(End::Finished(_)) => return Ok((machine.meters().charged, finished)),
+            Step::Ended(other) => return Err(other),
             Step::Slice => unreachable!("the slice is unbounded"),
         }
     }

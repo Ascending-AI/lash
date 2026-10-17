@@ -480,6 +480,7 @@ fn engine_settings_decode_strictly_to_recorded_settings() {
     let recorded = KernelRecordedSettings::new(
         "typescript",
         lash_kernel_vm::Bounds {
+            memory_limit: lash_kernel_vm::MemoryLimit::Refuse,
             charge: lash_kernel_vm::Charge::Exact,
             charge_limit: 10_000,
             memory: 1024 * 1024,
@@ -495,6 +496,15 @@ fn engine_settings_decode_strictly_to_recorded_settings() {
     assert_eq!(
         KernelRecordedSettings::from_engine_settings(&engine).unwrap(),
         recorded
+    );
+    let mut missing = engine.value().clone();
+    missing.as_object_mut().unwrap().remove("memory_limit");
+    assert!(
+        KernelRecordedSettings::from_engine_settings(
+            &lash_execution_contracts::process::EngineSettings::new(missing)
+        )
+        .is_err(),
+        "recorded policy is required, never defaulted on read"
     );
     let mut unknown = engine.value().clone();
     unknown["unknown"] = serde_json::json!(true);

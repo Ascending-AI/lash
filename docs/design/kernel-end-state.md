@@ -675,8 +675,15 @@ seal reads a staged leaf back and places its rows canonically.
   until a collection refines it. A cold open sets `base` from the root it
   opens. Warm and cold runs therefore hold identical counters from every seal
   onward, and K-MACH-008 holds for bound errors too.
-- **Collection.** An admission that would pass the bound collects cycles and
-  refines the census, then admits or ends the run with `Bound::Memory`.
+- **Collection policy (FIG-6731).** The run carries `MemoryLimit` with its
+  bounds and checkpoints. Production hosts default to `Recount`: an admission
+  that would pass the conservative bound collects cycles and refines the census,
+  then admits or ends the run with `Bound::Memory`. `Refuse` ends the run with
+  that same typed bound immediately, before publishing holdings, tracing or
+  sweeping. Seals and explicit checkpoints rebase under both policies. `Off` removes
+  reservations, holds, arena memory pricing and census work; its memory readout
+  is zero and its checkpoint carries an unmetered certificate. Semantic value
+  summaries, persistence and reference ownership remain active.
   Refinement prices cold objects by their persisted summaries and resident ones
   by their bodies, and both give the same exact live cost, so the verdict does
   not depend on residency.

@@ -6,12 +6,12 @@
 //! marks its object dirty, with the card it changed, and gives its logical
 //! growth, which the machine holds before the heap receives it.
 
-use lash_kernel_doc::arena::{ArenaHandle, Body, Chunk, LocalCode, Sequence};
+use lash_kernel_doc::arena::{ArenaHandle, Body, Chunk, LocalCode, Objects, Sequence};
 use lash_kernel_doc::heap::NormalKey;
 use lash_kernel_doc::{NativeError, Retry, Site, Value};
 
 use super::keys::normal_key;
-use super::{Arena, CARD, local_cost, malformed};
+use super::{Arena, CARD, Facts, Summary, local_cost, malformed, value_summary};
 
 /// The refusal a value that is no legal key raises (`K-KEY-002`).
 pub fn invalid_key() -> NativeError {
@@ -162,6 +162,10 @@ impl Arena {
         before: u64,
         after: u64,
     ) -> Result<u64, NativeError> {
+        if self.unaccounted {
+            self.mark(handle, card)?;
+            return Ok(0);
+        }
         let facts = self.facts_mut(handle)?;
         facts.summary.cost = facts
             .summary
@@ -180,17 +184,16 @@ impl Arena {
         value: Value,
     ) -> Result<u64, NativeError> {
         self.warm(handle)?;
-        let after = local_cost(&self.objects, &self.facts, &value);
+        let after = self.cost_of(&value);
         let (len, before) = {
-            let (objects, facts) = (&self.objects, &self.facts);
-            let Some(Body::List(sequence)) = objects.get(handle) else {
+            let Some(Body::List(sequence)) = self.objects.get(handle) else {
                 return Err(malformed("a list handle names another body"));
             };
-            let before = match index < sequence.len {
-                true => self
-                    .item(handle, index)?
-                    .map(|old| local_cost(objects, facts, &old)),
-                false => None,
+            let before = if !self.unaccounted && index < sequence.len {
+                self.item(handle, index)?
+                    .map(|old| self.cost_of_metered(&old))
+            } else {
+                None
             };
             (sequence.len, before)
         };
@@ -261,7 +264,7 @@ impl Arena {
         };
         let old = old.ok_or_else(|| malformed("a list's chunks miss its length"))?;
         sequence.len -= 1;
-        let before = local_cost(&self.objects, &self.facts, &old);
+        let before = self.cost_of(&old);
         for card in index / CARD..=(len - 1) / CARD {
             self.mark(handle, Some(card))?;
         }
@@ -278,6 +281,9 @@ impl Arena {
     /// The row cost of an entry of the table `handle`: a record's field
     /// row is priced without its name reference.
     fn entry_cost(&self, handle: ArenaHandle, key: &Value, value: &Value) -> u64 {
+        if self.unaccounted {
+            return 0;
+        }
         let record = matches!(self.objects.get(handle), Some(Body::Record(_)));
         let cost = local_cost(&self.objects, &self.facts, key).saturating_add(local_cost(
             &self.objects,
@@ -433,12 +439,12 @@ impl Arena {
     /// Writes a shared variable; gives its growth.
     pub fn cell_set(&mut self, handle: ArenaHandle, value: Value) -> Result<u64, NativeError> {
         self.warm(handle)?;
-        let after = local_cost(&self.objects, &self.facts, &value);
+        let after = self.cost_of(&value);
         let Some(Body::Cell(held)) = self.objects.get_mut(handle) else {
             return Err(malformed("a cell handle names another body"));
         };
         let old = std::mem::replace(held, value);
-        let before = local_cost(&self.objects, &self.facts, &old);
+        let before = self.cost_of(&old);
         self.hold(&value);
         self.unhold(&old);
         self.moved(handle, None, before, after)
@@ -456,4 +462,61 @@ impl Arena {
             _ => None,
         })
     }
+}
+
+/// The summary of an immutable composite of `members`.
+pub(super) fn composite<const MEMORY: bool>(
+    objects: &Objects,
+    facts: &[Facts],
+    members: &[Value],
+) -> Summary {
+    #[cfg(any(test, feature = "perf-witness"))]
+    if MEMORY {
+        crate::perf_witness::record(|work| work.arena_memory_prices += 1);
+    }
+    let mut summary = Summary {
+        depth: 1,
+        ..Summary::default()
+    };
+    for member in members {
+        let inner = value_summary(facts, member);
+        if MEMORY {
+            summary.cost = summary
+                .cost
+                .saturating_add(local_cost(objects, facts, member));
+        }
+        summary.depth = summary.depth.max(inner.depth.saturating_add(1));
+        summary.task_edges = summary.task_edges.saturating_add(inner.task_edges);
+        summary.has_edges |= inner.has_edges;
+    }
+    summary
+}
+
+/// A resident mutable object's logical cost, as the heap prices its head
+/// (`ObjectHead::cost`): a minimum plus its rows, a record's field rows
+/// less their name references.
+pub(super) fn object_cost(objects: &Objects, facts: &[Facts], body: &Body) -> u64 {
+    #[cfg(any(test, feature = "perf-witness"))]
+    crate::perf_witness::record(|work| work.arena_memory_prices += 1);
+    let rows = |chunks: &[Chunk<Vec<Value>>]| -> u64 {
+        chunks
+            .iter()
+            .filter_map(|chunk| match chunk {
+                Chunk::Resident(values) => Some(values),
+                Chunk::Cold { .. } => None,
+            })
+            .flatten()
+            .map(|value| local_cost(objects, facts, value))
+            .fold(0u64, u64::saturating_add)
+    };
+    32u64.saturating_add(match body {
+        Body::List(sequence) => rows(&sequence.chunks),
+        Body::Map(table) => rows(&table.chunks),
+        // A set's members are rows of a key and a null.
+        Body::Set(table) => rows(&table.chunks),
+        Body::Record(table) => rows(&table.chunks).saturating_sub(table.len * 16),
+        Body::Closure { captures, .. } => captures.len() as u64 * 8,
+        Body::Cell(value) => local_cost(objects, facts, value),
+        _ => 0,
+    })
 }

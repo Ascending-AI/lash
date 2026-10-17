@@ -80,7 +80,7 @@ record!(AccountingCertificate {
     entities: u64,
     refinements: u64
 });
-units!(AccountingMetric { LocalCostV1 = 0 });
+units!(AccountingMetric { LocalCostV1 = 0, Unmetered = 1 });
 record!(HeapRoot {
     directory: KeyedRoot,
     families: KeyedRoot,
@@ -149,7 +149,9 @@ impl TokenCodec for SavedMeters {
         })
     }
 }
+units!(MemoryLimit { Recount = 0, Refuse = 1, Off = 2 });
 record!(CheckpointRoot {
+    memory_limit: MemoryLimit,
     kernel: u32,
     document: DocumentId,
     release: PageId,

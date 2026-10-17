@@ -184,6 +184,9 @@ def validate(receipt):
               for row in receipt['samples']]
     if not expected or len(actual) != len(expected) or set(actual) != expected:
         raise ValueError('incomplete or duplicate sample population')
+    failures = [row for row in receipt['samples'] if row.get('failure')]
+    if failures:
+        raise ValueError('; '.join(f"{row['program']}/{row['engine']}: {row['failure']}" for row in failures))
     results = {}
     for row in receipt['samples']:
         result_sha = digest(row['result'])
@@ -313,6 +316,10 @@ def render_warm(receipt, path):
 def main():
     parser = argparse.ArgumentParser(description=__doc__)
     parser.add_argument('--fetch-engines', action='store_true')
+    parser.add_argument('--memory', choices=['recount', 'refuse', 'off'], default='refuse',
+                        help='kernel memory policy; benchmarks refuse by default')
+    parser.add_argument('--memory-witness', action='store_true',
+                        help='diagnostic accounting counters; do not use as a timing sample')
     parser.add_argument('--out', type=Path, required=True)
     parser.add_argument('--report', type=Path, default=ROOT / 'docs/perf/kernel-vs-embedded.md')
     parser.add_argument('--charge', choices=['exact', 'off'], default='exact')
@@ -326,6 +333,11 @@ def main():
                         help="Lash runs' durability (KERNEL_PERF_DURABILITY): ephemeral runs are never saved")
     args = parser.parse_args()
     os.environ['KERNEL_PERF_DURABILITY'] = args.durability
+    os.environ['KERNEL_PERF_MEMORY'] = args.memory
+    if args.memory_witness:
+        os.environ['KERNEL_PERF_MEMORY_WITNESS'] = '1'
+    else:
+        os.environ.pop('KERNEL_PERF_MEMORY_WITNESS', None)
     if args.render:
         render(json.loads(args.render.read_text()), args.report)
         return
@@ -358,6 +370,8 @@ def main():
                    executable_sha256={name: sha(Path(path).read_bytes()) for name, path in tools.items()},
                    release_archives={name: {'url': data[0], 'sha256': data[1]} for name, data in RELEASES.items()},
                    driver_sha256=sha(Path(__file__).read_bytes()), sources={}, samples=[])
+    receipt['memory_policy'] = args.memory
+    receipt['memory_witness'] = args.memory_witness
     if args.differential_warm:
         receipt['differential_warm'] = True
     receipt['durability'] = args.durability
@@ -402,9 +416,15 @@ def main():
                 sample, output = measure(commands[engine], prefix, args.timeout, args.charge)
                 result, inner = parse_result(engine, output)
                 actual = digest(result)
-                if expected is not None and actual != expected:
-                    raise ValueError(f'{program}/{engine}: result digest mismatch {actual} != {expected}')
-                expected = actual
+                failure = None
+                if engine.startswith('lash') and inner.get('outcome') != 'ok':
+                    failure = str(result.get('error', 'non-ok kernel outcome'))
+                elif expected is not None and actual != expected:
+                    failure = f'result digest mismatch {actual} != {expected}'
+                else:
+                    expected = actual
+                if failure:
+                    sample['failure'] = failure
                 sample.update(program=program, engine=engine, pair=pair,
                               result=result, result_sha256=actual, lash=inner)
                 if args.differential_warm:
@@ -413,8 +433,21 @@ def main():
                 with (out / 'samples.jsonl').open('a') as log:
                     log.write(json.dumps(sample, sort_keys=True) + '\n')
                 print(f'{program} pair={pair} {engine}: {sample["instructions"]} instructions; digest={actual}', flush=True)
-    validate(receipt)
     (out / 'receipt.json').write_text(json.dumps(receipt, indent=2, sort_keys=True) + '\n')
+    failures = [row for row in receipt['samples'] if row.get('failure')]
+    if failures:
+        lines = ['# Kernel comparison failed', '',
+                 'Failed samples are excluded from performance averages.', '',
+                 '| Program | Engine | Pair | Repetitions | Outcome |',
+                 '|---|---|---:|---:|---|']
+        for row in receipt['samples']:
+            status = 'FAILED: ' + row['failure'] if row.get('failure') else 'ok'
+            lines.append(f"| {row['program']} | {row['engine']} | {row['pair']} | "
+                         f"{row.get('repetitions', 1)} | {status} |")
+        args.report.write_text('\n'.join(lines) + '\n')
+        for row in failures:
+            print(f"FAIL: {row['program']}/{row['engine']}: {row['failure']}", flush=True)
+        raise SystemExit(1)
     render(receipt, args.report)
     print(f'PASS: {len(receipt["samples"])} samples, {len(programs)} programs, six engines, two pairs; all digests match')
 

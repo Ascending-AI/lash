@@ -907,17 +907,15 @@ impl PagedHeap {
             extent: frozen.summary.entities,
             membership: keyed(&membership)?,
         };
-        let census = self
-            .census
-            .as_mut()
-            .ok_or_else(|| HeapFault::Malformed("family has no census".into()))?;
-        census
-            .changed(LogicalBytes(credit), LogicalBytes(0))
-            .map_err(census_fault)?;
-        census
-            .added(frozen.summary.cost, frozen.summary.entities)
-            .map_err(census_fault)?;
-        self.accounting = census.certificate();
+        if let Some(census) = self.census.as_mut() {
+            census
+                .changed(LogicalBytes(credit), LogicalBytes(0))
+                .map_err(census_fault)?;
+            census
+                .added(frozen.summary.cost, frozen.summary.entities)
+                .map_err(census_fault)?;
+            self.accounting = census.certificate();
+        }
         if !frozen.summary.data_only {
             self.population.closure_entities = self
                 .population
