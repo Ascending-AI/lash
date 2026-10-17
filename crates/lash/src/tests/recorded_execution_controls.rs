@@ -480,11 +480,11 @@ async fn a_commanded_max_tool_calls_binds_the_next_run() -> Result<()> {
         .send(TurnInput::text("look two things up"))
         .output()
         .await?;
-    assert_eq!(admitted.result.tool_calls.len(), 2);
+    let admitted_calls =
+        crate::testing::tool_calls_for_activity(&session.durable(), &admitted.activities).await;
+    assert_eq!(admitted_calls.len(), 2);
     assert!(
-        admitted
-            .result
-            .tool_calls
+        admitted_calls
             .iter()
             .all(|call| matches!(call.output.outcome, lash_core::ToolCallOutcome::Success(_)))
     );
@@ -517,9 +517,12 @@ async fn a_commanded_max_tool_calls_binds_the_next_run() -> Result<()> {
         2,
         "only the initially admitted bodies run"
     );
+    let durable = core.session(crate::SessionId::from(ID)).durable().await?;
     for output in [&refused, &reopened] {
-        assert_eq!(output.result.tool_calls.len(), 2);
-        for call in &output.result.tool_calls {
+        let output_tool_calls =
+            crate::testing::tool_calls_for_activity(&durable, &output.activities).await;
+        assert_eq!(output_tool_calls.len(), 2);
+        for call in &output_tool_calls {
             let lash_core::ToolCallOutcome::Failure(failure) = &call.output.outcome else {
                 panic!("the commanded limit refuses every call: {call:?}");
             };

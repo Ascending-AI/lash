@@ -158,7 +158,7 @@ async fn presentation_step_failure_feeds_fallback_to_next_step() -> Result<()> {
         .create(lash::SessionCreation::root(mock_session_spec()))
         .await?;
     let report = session.send(TurnInput::text("call it")).output().await?;
-    assert!(report.is_success(), "{:?}", report.result.outcome);
+    assert!(report.is_success(), "{:?}", report.outcome);
     assert_eq!(
         *seen.handed.lock_recover(),
         vec![(
@@ -225,7 +225,7 @@ async fn a_recorded_presentation_is_served_after_its_owners_loss_without_its_ste
     )
     .await
     .expect("the redriven turn answers")?;
-    assert!(output.is_success(), "{:?}", output.result.outcome);
+    assert!(output.is_success(), "{:?}", output.outcome);
     assert_eq!(
         *seen.calls.lock_recover(),
         vec!["first", "second"],

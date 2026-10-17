@@ -3,6 +3,7 @@
 //! the engine settled it.
 
 use super::*;
+use lash_protocol_types::core_support::RunIdCoreSupport;
 
 impl GeneratedRuntimeWorld {
     pub(in crate::runner) async fn start_provider_turn(
@@ -429,17 +430,11 @@ async fn run_provider_turn_task(
             event.boundary_id
         ))
     };
-    let output = crate::backend::settle_handle(
-        accepted.map_err(runtime_error)?,
-        Arc::new(SessionActivity(activities)),
-    )
-    .await
-    .map_err(runtime_error)?;
-    let acceptance = output
-        .result
-        .acceptance
-        .as_ref()
-        .ok_or_else(|| FixedScriptRunnerError::Assertion("missing turn acceptance".into()))?;
+    let accepted = accepted.map_err(runtime_error)?;
+    let acceptance = accepted.receipt().clone();
+    let output = crate::backend::settle_handle(accepted, Arc::new(SessionActivity(activities)))
+        .await
+        .map_err(runtime_error)?;
     let run = session
         .attach(acceptance.input_id.clone())
         .run()
@@ -459,13 +454,22 @@ async fn run_provider_turn_task(
     let provider_exchange_count = transport_exchanges(transport.as_ref())?.len();
     let graph_invariant = runtime_graph_invariant_facts(&snapshot.session_graph);
     let agent_frame_invariant = runtime_agent_frame_invariant_facts(&snapshot);
-    let usage_invariant = runtime_usage_invariant_facts(&output.result, &output.activities);
+    let usage_invariant = runtime_usage_invariant_facts(
+        &session
+            .read_turn_model_calls(run.turn_id())
+            .await
+            .map_err(|err| FixedScriptRunnerError::Runtime(err.to_string()))?,
+        &snapshot.token_usage,
+    )
+    .map_err(|err| {
+        FixedScriptRunnerError::Runtime(format!("committed call usage overflows {}", err.counter()))
+    })?;
     let final_value_invariant =
-        runtime_final_value_invariant_facts(&output.result, &output.activities);
+        runtime_final_value_invariant_facts(&output.outcome, &output.activities);
     if !output.is_success() {
         return Err(FixedScriptRunnerError::Assertion(format!(
             "runtime turn `{}` did not succeed; turn_index={} outcome={:?} activities={:?}",
-            event.boundary_id, snapshot.turn_index, output.result.outcome, output.activities
+            event.boundary_id, snapshot.turn_index, output.outcome, output.activities
         )));
     }
     let observation = RuntimeTurnObservation {

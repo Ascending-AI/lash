@@ -177,7 +177,7 @@ async fn measure(stores_dir: &Path, recorder: &Recorder, announce: bool) -> Resu
     let handle = session.send(lash::TurnInput::text("first result")).await?;
     let output = tokio::time::timeout(Duration::from_secs(30), handle.output()).await??;
     ensure!(
-        matches!(output.result.outcome, lash::TurnOutcome::Finished(_)),
+        matches!(output.outcome, lash::TurnOutcome::Finished(_)),
         "startup first turn did not finish"
     );
     startup::record(Phase::FirstResult);

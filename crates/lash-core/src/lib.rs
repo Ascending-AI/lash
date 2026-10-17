@@ -273,8 +273,6 @@ pub mod facade_support {
     pub use crate::provider::ProviderComponents;
     pub use crate::provider::ProviderHandle;
     pub use crate::provider::ProviderOptions;
-    pub use crate::runtime::AgentFrameRun;
-    pub use crate::runtime::AssembledTurn;
     pub use crate::runtime::CanonicalProcessEventAppend;
     pub use crate::runtime::CanonicalRuntimeEffectEnvelope;
     pub use crate::runtime::DirectCompletionClient;

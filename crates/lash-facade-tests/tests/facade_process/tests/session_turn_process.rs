@@ -260,3 +260,51 @@ async fn a_session_turn_on_an_unserved_profile_is_repaired_by_a_serving_deployme
     core.shutdown().await?;
     Ok(())
 }
+
+/// FIG-6565: the real child runner projects the committed provider cause,
+/// even though it has no observed issue vector to consult.
+#[tokio::test(flavor = "multi_thread", worker_threads = 2)]
+async fn child_turn_provider_cause_reaches_the_parent() -> Result<()> {
+    let provider = lash_core::testing::TestProvider::builder()
+        .kind("child-provider-cause")
+        .complete(|_| async {
+            Err(
+                lash::provider::LlmTransportError::new("private provider body")
+                    .with_kind(lash_core::ProviderFailureKind::Auth)
+                    .with_http_status(401),
+            )
+        })
+        .build()
+        .into_handle();
+    let core = explicit_ephemeral_facets(LashCore::standard_builder(
+        sqlite_memory_store_backend().await,
+    ))
+    .serve_test_llm_profile(provider, mock_llm_profile_spec())
+    .build(lash_facade_tests::runtime_lease_owner())?;
+    let started = core
+        .processes()
+        .start(request("mock-model"), core.effect_host())
+        .await?;
+    let answer = tokio::time::timeout(
+        std::time::Duration::from_secs(60),
+        core.processes().await_output(&started.process_id),
+    )
+    .await
+    .expect("child settles")?;
+    let lash_core::ProcessAwaitOutput::Settled { output } = answer else {
+        panic!("settled child")
+    };
+    let lash_core::ToolCallOutcome::Failure(failure) = output.outcome else {
+        panic!("failed child")
+    };
+    let raw = failure
+        .raw
+        .as_ref()
+        .map(lash_core::ToolValue::to_json_value)
+        .expect("committed cause");
+    assert_eq!(raw["cause"], lash::TurnErrorCode::AuthRejected.code());
+    assert!(raw.get("retryable").is_none());
+    assert!(raw.get("provider_failure_kind").is_none());
+    core.shutdown().await?;
+    Ok(())
+}

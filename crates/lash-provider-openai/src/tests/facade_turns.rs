@@ -414,9 +414,14 @@ async fn mixed_model_stream_recovery_obeys_recorded_allowances() {
             .expect("session");
 
         let seed = send(&session, "seed the cache").await;
-        assert_eq!(seed.result.llm_calls[0].attempts.len(), 1);
+        assert_eq!(
+            lash::testing::model_calls_for_activity(&session, &seed.activities).await[0]
+                .attempts
+                .len(),
+            1
+        );
         let mixed = send(&session, "continue the seed").await;
-        let calls = &mixed.result.llm_calls;
+        let calls = lash::testing::model_calls_for_activity(&session, &mixed.activities).await;
         assert_eq!(calls.len(), 1, "recovery never hides an extra model call");
         let attempts = &calls[0].attempts;
         assert_eq!(attempts.len(), max_attempts as usize);
@@ -477,7 +482,7 @@ async fn mixed_model_stream_recovery_obeys_recorded_allowances() {
 
         if max_attempts == 2 {
             assert!(
-                !mixed.result.is_context_overflow(),
+                !mixed.outcome.is_context_overflow(),
                 "overflow must remain unsent at the cap"
             );
             assert_eq!(
@@ -498,7 +503,7 @@ async fn mixed_model_stream_recovery_obeys_recorded_allowances() {
                 })
             ));
             assert!(
-                mixed.result.is_context_overflow(),
+                mixed.outcome.is_context_overflow(),
                 "typed overflow ends the mixed call"
             );
             let rebuilt = send(&session, "recover after overflow").await;
@@ -531,9 +536,8 @@ async fn mixed_model_stream_recovery_obeys_recorded_allowances() {
                 "mixed recovery cannot multiply or replenish recorded allowances"
             );
             assert!(
-                rebuilt
-                    .result
-                    .llm_calls
+                lash::testing::model_calls_for_activity(&session, &rebuilt.activities)
+                    .await
                     .iter()
                     .all(|call| call.attempts.len() <= max_attempts as usize)
             );

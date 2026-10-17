@@ -212,9 +212,9 @@ async fn a_frame_switch_through_send_completes_and_its_follow_on_runs_next() {
     );
     let lash_core::facade_support::TurnOutcome::AgentFrameSwitch {
         frame_key, task, ..
-    } = &switched.result.outcome
+    } = &switched.outcome
     else {
-        panic!("the switch answers its send: {:?}", switched.result.outcome);
+        panic!("the switch answers its send: {:?}", switched.outcome);
     };
     assert_eq!(task, TASK);
 

@@ -266,9 +266,9 @@ async fn setup_crash_case(tier: Tier, request: Request) {
         "the worker retry derives the paid receipt again, with no model.done fallback"
     );
     assert!(
-        output.result.errors.is_empty(),
+        output.outcome.error_cause().is_none(),
         "no cell failures: {:?}",
-        output.result.errors
+        output.outcome.error_cause()
     );
     assert_eq!(
         output.finished().map(|(_, value)| value),

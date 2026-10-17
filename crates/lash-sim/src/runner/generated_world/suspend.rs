@@ -328,9 +328,8 @@ impl GeneratedRuntimeWorld {
                 event.actor_alias
             ))
         })??;
-        let result = &output.result;
+        let result = &output.outcome;
         let completed_after = turn.events.tool_completed_count().await;
-        let activities = turn.events.snapshot().await;
         let assistant_message = result.assistant_message().unwrap_or_default().to_string();
         let snapshot = turn
             .core
@@ -345,10 +344,38 @@ impl GeneratedRuntimeWorld {
             .to_snapshot();
         let read_view = snapshot.read_view();
         let graph_invariant = runtime_graph_invariant_facts(&snapshot.session_graph);
-        let usage_invariant = runtime_usage_invariant_facts(result, &activities);
+        let usage_invariant = runtime_usage_invariant_facts(
+            &turn
+                .core
+                .session(SessionId::fixture(event.actor_alias.clone()))
+                .durable()
+                .await
+                .map_err(|err| FixedScriptRunnerError::Runtime(err.to_string()))?
+                .read_turn_model_calls(
+                    &output
+                        .activities
+                        .iter()
+                        .find_map(|activity| match &activity.event {
+                            lash::TurnEvent::TurnStarted { turn_id, .. } => Some(turn_id.clone()),
+                            _ => None,
+                        })
+                        .ok_or_else(|| {
+                            FixedScriptRunnerError::Assertion("missing turn admission".into())
+                        })?,
+                )
+                .await
+                .map_err(|err| FixedScriptRunnerError::Runtime(err.to_string()))?,
+            &snapshot.token_usage,
+        )
+        .map_err(|err| {
+            FixedScriptRunnerError::Runtime(format!(
+                "committed call usage overflows {}",
+                err.counter()
+            ))
+        })?;
         let resumed_after_completion = completed_after > completed_before
             && matches!(
-                &result.outcome,
+                &result,
                 lash_core::facade_support::TurnOutcome::Finished(
                     lash_core::facade_support::TurnFinish::AssistantMessage { .. }
                 )

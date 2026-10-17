@@ -70,9 +70,9 @@ async fn a_tools_direct_completion_runs_in_its_call_and_records_usage_and_trace(
         .await?;
 
     assert_eq!(output.assistant_message(), Some("done"));
-    let answered = output
-        .result
-        .tool_calls
+    let output_tool_calls =
+        lash::testing::tool_calls_for_activity(&session.durable(), &output.activities).await;
+    let answered = output_tool_calls
         .iter()
         .find(|call| call.tool == "direct_probe")
         .expect("the probe's call is reported")

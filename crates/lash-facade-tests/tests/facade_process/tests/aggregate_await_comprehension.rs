@@ -146,11 +146,11 @@ async fn delivered_orders_printed_by(cell: &str) -> Result<(String, usize)> {
         .await?;
     assert!(
         matches!(
-            result.outcome,
+            result,
             TurnOutcome::Finished(lash_core::facade_support::TurnFinish::Finished { .. })
         ),
         "the cell must finish, got {:?}",
-        result.outcome
+        result
     );
     let tool_calls = events.0.load(Ordering::SeqCst);
     let requests = requests.lock_recover();

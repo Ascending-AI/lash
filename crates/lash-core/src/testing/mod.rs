@@ -46,7 +46,7 @@ pub use lash_core_execution::testing::{
     execute_tool_intents_with_services_and_hook, fixture_echo_definition, fixture_engine_launch,
     graph_integrity, held_engine_declaration, held_engine_input, held_engine_registration,
     held_engine_request, host_pin_claim_for_testing, lineage, llm_profiles_serving,
-    measure_runtime_commit_budget, mock_assembled_turn, mock_attempt_context,
+    measure_runtime_commit_budget, mock_attempt_context,
     mock_attempt_context_with_execution_binding, mock_attempt_context_with_host,
     mock_session_policy, process_engine_fixture, process_engine_plugin_fixture,
     process_env_fixture, process_env_of_size, process_env_with_limit,

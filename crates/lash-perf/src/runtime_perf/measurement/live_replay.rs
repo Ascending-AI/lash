@@ -401,7 +401,7 @@ pub(super) async fn run_once_trace_jsonl(
             validate_runtime_perf_turn(
                 scenario,
                 turn_index,
-                &turn,
+                &turn.outcome,
                 &runtime.export_state().await?,
             )?;
             Ok(())

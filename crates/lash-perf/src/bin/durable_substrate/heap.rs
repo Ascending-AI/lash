@@ -459,7 +459,7 @@ async fn sample_with_stores(
         for phase in 0..=expected {
             let received = tokio::select! {
                 phase = gates.recv() => phase.context("gate sender closed")?,
-                result = &mut output => anyhow::bail!("{scenario}/{h} ended before gate {phase}: {:?}", result?.result.outcome),
+                result = &mut output => anyhow::bail!("{scenario}/{h} ended before gate {phase}: {:?}", result?.outcome),
             };
             ensure!(received == phase, "gate {received} arrived instead of {phase}");
             // The tool merely offers a pending outcome. The engine commits
@@ -495,10 +495,10 @@ async fn sample_with_stores(
     core.shutdown().await?;
     let output = result??;
     ensure!(
-        matches!(output.result.outcome, lash::TurnOutcome::Finished(_)),
+        matches!(output.outcome, lash::TurnOutcome::Finished(_)),
         "heap turn failed: {:?}: {:?}",
-        output.result.outcome,
-        output.result.errors
+        output.outcome,
+        output.outcome.error_cause()
     );
     let rows = meter
         .state

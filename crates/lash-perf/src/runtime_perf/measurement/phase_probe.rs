@@ -817,7 +817,7 @@ async fn run_once_inner(
                     validate_runtime_perf_turn(
                         scenario,
                         turn_index,
-                        &turn,
+                        &turn.outcome,
                         &runtime.export_state().await?,
                     )?;
                 }

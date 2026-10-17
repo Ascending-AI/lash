@@ -393,11 +393,11 @@ async fn context_overflow_mid_turn_continues_on_the_same_session() -> Result<()>
         .await
         .expect("the overflow turn settles")?;
         assert!(
-            overflow.result.is_context_overflow(),
+            overflow.outcome.is_context_overflow(),
             "{:?}",
-            overflow.result.outcome
+            overflow.outcome
         );
-        assert!(!overflow.result.is_success());
+        assert!(!overflow.outcome.is_success());
         assert_eq!(committed(&session).await.turn_index(), 1);
         drop(session);
 
@@ -413,12 +413,8 @@ async fn context_overflow_mid_turn_continues_on_the_same_session() -> Result<()>
         )
         .await
         .expect("the continuing turn settles")?;
-        assert!(
-            continued.result.is_success(),
-            "{:?}",
-            continued.result.outcome
-        );
-        assert!(!continued.result.is_context_overflow());
+        assert!(continued.outcome.is_success(), "{:?}", continued.outcome);
+        assert!(!continued.outcome.is_context_overflow());
         assert_eq!(
             continued.finished().map(|(_, value)| value),
             Some(&serde_json::json!(262144))

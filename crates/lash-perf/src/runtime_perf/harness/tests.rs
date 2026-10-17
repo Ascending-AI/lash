@@ -35,7 +35,7 @@ async fn rlm_globals_keeps_fixed_session_projection_across_real_turns() {
             validate_runtime_perf_turn(
                 RuntimePerfScenario::RlmGlobals,
                 1,
-                &turn,
+                &turn.outcome,
                 &runtime.export_state().await?,
             )
         }),
@@ -72,7 +72,7 @@ async fn a_dropped_runtime_frees_its_in_process_lane() {
             validate_runtime_perf_turn(
                 scenario,
                 turn,
-                &report,
+                &report.outcome,
                 &runtime.export_state().await.expect("committed state"),
             )
             .expect("a valid benchmark turn");
@@ -112,18 +112,23 @@ async fn large_print_fixture_finishes_with_projection_evidence() {
             validate_runtime_perf_turn(
                 RuntimePerfScenario::RlmLargePrint,
                 0,
-                &turn,
+                &turn.outcome,
                 &runtime.export_state().await?,
             )?;
+            let turn_calls = runtime
+                .session()
+                .durable()
+                .read_turn_tool_calls(turn.run.turn_id())
+                .await?;
             assert_eq!(
-                turn.tool_calls
+                turn_calls
                     .iter()
                     .map(|call| call.tool.as_str())
                     .collect::<Vec<_>>(),
                 ["benchmark_echo", "finish"]
             );
             assert_eq!(
-                turn.tool_calls[1].args,
+                turn_calls[1].args,
                 serde_json::json!("runtime perf benchmark ok")
             );
             Ok(())
@@ -156,17 +161,17 @@ async fn large_catalog_fixture_reaches_the_scripted_provider() {
             failures.push(failure);
         }
     }
-    let turn = handle.output().await.expect("catalog output").result;
+    let turn = handle.output().await.expect("catalog output");
     assert!(
         validate_runtime_perf_turn(
             scenario,
             0,
-            &turn,
+            &turn.outcome,
             &runtime.export_state().await.expect("committed state")
         )
         .is_ok(),
         "outcome={:?}; failures={failures:?}",
-        turn.outcome
+        turn
     );
 }
 

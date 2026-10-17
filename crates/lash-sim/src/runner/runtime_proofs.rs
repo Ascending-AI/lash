@@ -184,7 +184,7 @@ pub(super) async fn run_live_turn_facts(
                 "live provider failure turn task failed to join: {err}"
             ))
         })??
-        .map(|output| output.result);
+        .map(|output| output.outcome);
     let streamed_prose_deltas = events.assistant_prose_delta_count().await;
     // Committed output is the durable turn result and the session's
     // transcript, not transient stream deltas.
@@ -300,7 +300,7 @@ pub(crate) async fn prove_pending_tool_completion_on(
                 )
                 .await
                 .map_err(|err| err.to_string())?
-                .map(|output| output.result)
+                .map(|output| output.outcome)
                 .map_err(|err| err.to_string())
         })
     };
@@ -395,7 +395,7 @@ pub(crate) async fn prove_pending_tool_completion_on(
     let completed_outputs = events.tool_completed_outputs().await;
     let assistant_message = result.assistant_message().unwrap_or_default().to_string();
     let final_ok = matches!(
-        &result.outcome,
+        &result,
         lash_core::facade_support::TurnOutcome::Finished(
             lash_core::facade_support::TurnFinish::AssistantMessage { .. }
         )
@@ -592,7 +592,7 @@ pub(super) async fn prove_final_value_semantic_channel()
     let (output, session) = run_final_value_turn(&engine, events.clone(), None).await?;
     let result = output
         .map_err(|err| FixedScriptRunnerError::Runtime(err.to_string()))?
-        .result;
+        .outcome;
     let snapshot = session
         .durable()
         .read()
@@ -607,7 +607,7 @@ pub(super) async fn prove_final_value_semantic_channel()
         .ok_or_else(|| {
             FixedScriptRunnerError::Assertion(format!(
                 "final-value proof finished without TurnFinish::Finished: {:?}",
-                result.outcome
+                result
             ))
         })?;
     let recorded = events.snapshot().await;

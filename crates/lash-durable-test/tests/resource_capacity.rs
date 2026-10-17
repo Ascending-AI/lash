@@ -130,7 +130,7 @@ async fn one_lifecycle(run: usize) -> std::sync::Weak<lash_sqlite_store::SqliteS
     .await
     .expect("the turn answers within a minute")
     .expect("the turn's output");
-    assert!(answered.is_success(), "{:?}", answered.result.outcome);
+    assert!(answered.is_success(), "{:?}", answered.outcome);
     drop(session);
     core.shutdown().await.expect("the core shuts down");
     drop(core);

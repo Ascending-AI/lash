@@ -178,7 +178,7 @@ async fn a_cell_parents_its_calls_and_spans_its_own_time() -> Result<()> {
         .await?;
     for prompt in ["call the tool", "fail"] {
         let output = session.send(TurnInput::text(prompt)).output().await?;
-        assert!(output.is_success(), "{prompt}: {:?}", output.result.outcome);
+        assert!(output.is_success(), "{prompt}: {:?}", output.outcome);
     }
     observed
         .until("both turns are exported", |observed| {
@@ -337,7 +337,7 @@ async fn a_discarded_prediction_is_counted_on_its_cell_span() -> Result<()> {
         .send(TurnInput::text("call the tool"))
         .output()
         .await?;
-    assert!(output.is_success(), "{:?}", output.result.outcome);
+    assert!(output.is_success(), "{:?}", output.outcome);
     observed
         .until("the turn is exported", |observed| {
             observed.spans("invoke_agent").len() == 1

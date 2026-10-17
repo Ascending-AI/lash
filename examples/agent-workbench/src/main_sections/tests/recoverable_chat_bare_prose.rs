@@ -50,7 +50,7 @@ async fn run_report(
     state: &AppState,
     session_id: &SessionId,
     turn_id: &TurnId,
-) -> lash::TurnReport {
+) -> lash::TurnOutcome {
     state
         .core
         .session(session_id.clone())
@@ -61,7 +61,7 @@ async fn run_report(
         .output()
         .await
         .expect("the run's settled output")
-        .result
+        .outcome
 }
 
 /// The committed turn-reply rows of `turn_id`.
@@ -175,12 +175,12 @@ async fn interactive_bare_prose_termination_leaves_one_committed_agent_reply() {
     let report = run_report(state, &session_id, &turn_id).await;
     assert!(
         matches!(
-            &report.outcome,
+            &report,
             lash::TurnOutcome::Finished(lash::TurnFinish::AssistantMessage { text })
                 if text == REPLY
         ),
         "a bare prose reply ends the turn as its message: {:?}",
-        report.outcome
+        report
     );
     assert_eq!(
         committed_replies(state, &session_id, &turn_id).await,
@@ -209,12 +209,12 @@ async fn bare_prose_reply_with_reasoning_renders_its_committed_prose_once() {
     let report = run_report(state, &session_id, &turn_id).await;
     assert!(
         matches!(
-            &report.outcome,
+            &report,
             lash::TurnOutcome::Finished(lash::TurnFinish::AssistantMessage { text })
                 if text == REPLY
         ),
         "{:?}",
-        report.outcome
+        report
     );
     let committed = state
         .open_session(&session_id, "test")

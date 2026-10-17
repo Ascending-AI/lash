@@ -10,7 +10,7 @@ same durable identity. Also establish that the standard-compaction plugin
 records a pending recovery marker with the overflow turn's commit.
 
 A settled overflow ends that turn. The host reads
-`TurnReport::is_context_overflow` and chooses whether to compact, summarize,
+`TurnOutcome::is_context_overflow` and chooses whether to compact, summarize,
 or send another input. It submits the next turn through `send()`; Lash's
 engine owns execution. See [ADR 0101](../../docs/adr/0101-one-session-ingress-carries-every-admitted-item.md).
 The continuation law sends directly after the overflow to isolate session

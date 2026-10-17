@@ -618,7 +618,7 @@ async fn send(lane: &Lane, turn: usize, observe_result: bool) -> Result<Option<S
                 use sha2::{Digest as _, Sha256};
                 Ok(Some(format!(
                     "{:x}",
-                    Sha256::digest(serde_json::to_vec(&output.result.outcome)?)
+                    Sha256::digest(serde_json::to_vec(&output.outcome)?)
                 )))
             } else {
                 Ok(None)
@@ -627,7 +627,7 @@ async fn send(lane: &Lane, turn: usize, observe_result: bool) -> Result<Option<S
         Some(output) => bail!(
             "the turn did not answer: {:?}; issues: {:?}",
             output.status(),
-            output.result.errors
+            output.outcome.error_cause()
         ),
         None => bail!("the turn has no output: {:?}", outcome.status()),
     }

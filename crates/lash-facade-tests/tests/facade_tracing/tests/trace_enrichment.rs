@@ -524,9 +524,9 @@ async fn flooded_tool_span(
         .output()
         .await?;
     assert!(
-        matches!(output.result.outcome, lash::TurnOutcome::Finished(_)),
+        matches!(output.outcome, lash::TurnOutcome::Finished(_)),
         "{:?}",
-        output.result.outcome
+        output.outcome
     );
     until("the tool span is exported", || {
         spans

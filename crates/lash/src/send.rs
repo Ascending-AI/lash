@@ -33,7 +33,7 @@ use tokio::sync::mpsc;
 use crate::durable_session::DurableSession;
 use crate::error::{EmbedError, Result, SendError};
 use crate::support::{LashSession, TurnActivity, TurnActivitySink, TurnInput, TurnOutcome};
-use crate::turn::{TurnOutput, TurnReport};
+use crate::turn::TurnOutput;
 use lash_core::{GenerationOptions, LlmProfileKey, ReasoningSelection, RunSpec};
 
 use lash_core::facade_support::{
@@ -58,7 +58,6 @@ pub(crate) enum SendTarget {
 /// and cancels go through, and the live replay events come from.
 #[derive(Clone)]
 pub(crate) struct SendParts {
-    pub(crate) transcript_decoders: crate::transcript::TranscriptDecoders,
     pub(crate) observer_pacing: Arc<crate::ObserverPacing>,
     pub(crate) session_id: SessionId,
     pub(crate) store: lash_core::store::SessionStore,
@@ -422,8 +421,8 @@ impl SendBuilder {
     }
 
     /// Accept, forward the run's live activity to `sink`, then return the
-    /// settled report ([`SendHandle::output_into`]).
-    pub async fn output_into(self, sink: &dyn TurnActivitySink) -> Result<TurnReport> {
+    /// committed outcome ([`SendHandle::output_into`]).
+    pub async fn output_into(self, sink: &dyn TurnActivitySink) -> Result<TurnOutcome> {
         self.await?.output_into(sink).await
     }
 
@@ -789,7 +788,7 @@ impl SendOutcome {
 }
 
 impl TurnStatus {
-    /// Classify a committed outcome, using the same rule as [`crate::TurnReport::status`].
+    /// Classify a committed outcome, using the same rule as [`TurnStatus::of_outcome`].
     /// A frame switch answers its turn; a cancelled stop is cancelled and
     /// every other stop is failed.
     pub fn of_outcome(outcome: &TurnOutcome) -> Self {
@@ -1011,7 +1010,7 @@ impl SendHandle {
     /// [`SendError::NotSettled`].
     pub async fn output(self) -> Result<TurnOutput> {
         let input_id = self.receipt.input_id.clone();
-        settled_output(input_id, self.outcome().await?)
+        collected_output(input_id, self.outcome().await?)
     }
 
     /// Forward the run's live activity to `sink` as it arrives, and answer
@@ -1030,10 +1029,10 @@ impl SendHandle {
     }
 
     /// [`outcome_into`](Self::outcome_into) narrowed to a settled turn's
-    /// report, as [`output`](Self::output) narrows [`outcome`](Self::outcome).
-    pub async fn output_into(self, sink: &dyn TurnActivitySink) -> Result<TurnReport> {
+    /// outcome, as [`output`](Self::output) narrows [`outcome`](Self::outcome).
+    pub async fn output_into(self, sink: &dyn TurnActivitySink) -> Result<TurnOutcome> {
         let input_id = self.receipt.input_id.clone();
-        Ok(settled_output(input_id, self.outcome_into(sink).await?)?.result)
+        settled_output(input_id, self.outcome_into(sink).await?)
     }
 
     /// Withdraw the input if it is still queued, or cooperatively cancel its
@@ -1139,7 +1138,7 @@ impl<Output, Error> RunHandle<Output, Error> {
     pub async fn output(self) -> Result<TurnOutput> {
         let run = self.run.clone();
         let outcome = self.outcome().await?;
-        settled_output(InputId::from(&run), outcome)
+        collected_output(InputId::from(&run), outcome)
     }
 
     async fn raw_result(
@@ -1344,7 +1343,11 @@ pub(crate) fn run(target: SendTarget, run: crate::RunId) -> RunHandle {
     }
 }
 
-pub(crate) fn settled_output(input_id: InputId, outcome: SendOutcome) -> Result<TurnOutput> {
+fn settled_output(input_id: InputId, outcome: SendOutcome) -> Result<TurnOutcome> {
+    Ok(collected_output(input_id, outcome)?.outcome)
+}
+
+pub(crate) fn collected_output(input_id: InputId, outcome: SendOutcome) -> Result<TurnOutput> {
     match outcome {
         SendOutcome::Settled { output, .. } => Ok(*output),
         SendOutcome::Refused { refusal, .. } => Err(EmbedError::Runtime(*refusal)),

@@ -97,7 +97,9 @@ async fn three_step_tool_calls_survive_owner_loss_and_cold_reattachment() {
                 .expect("output task")
                 .expect("turn answers");
             assert_eq!(output.assistant_message(), Some("all six calls finished"));
-            let records = &output.result.tool_calls;
+            let output_tool_calls =
+                crate::testing::tool_calls_for_activity(&session, &output.activities).await;
+            let records = &output_tool_calls;
             assert_eq!(records.len(), 6, "all calls, crash={crash}: {records:?}");
             for (index, record) in records.iter().enumerate() {
                 assert_eq!(
@@ -120,13 +122,17 @@ async fn three_step_tool_calls_survive_owner_loss_and_cold_reattachment() {
             }
             let core = new.as_ref().unwrap_or(&old);
             let durable = core.session(id).durable().await.expect("durable session");
-            let cold = durable
-                .attach_id(input)
+            durable
+                .attach_id(input.clone())
                 .output()
                 .await
                 .expect("cold answer");
             assert_eq!(
-                cold.result.tool_calls, *records,
+                durable
+                    .read_turn_tool_calls(&input)
+                    .await
+                    .expect("read cold ledger"),
+                *records,
                 "no live activity is needed"
             );
             if let Some(new) = new {

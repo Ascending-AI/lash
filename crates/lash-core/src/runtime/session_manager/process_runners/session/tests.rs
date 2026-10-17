@@ -103,81 +103,11 @@ fn a_child_authored_stop_reason_reaches_the_parent_verbatim() {
     );
 }
 
-/// A stop the child did not author text for carries the assembler's own
-/// blocking issue — including its typed kind and code — rather than a
-/// sentence with nothing behind it.
-#[test]
-fn a_category_stop_carries_the_child_turn_blocking_issue() {
-    let mut turn = crate::testing::mock_assembled_turn(&SessionId::from("failing-child"), "unused");
-    turn.outcome = crate::TurnOutcome::Stopped(crate::TurnStop::ProviderError {
-        cause: lash_protocol_types::TurnErrorCause::new(
-            lash_protocol_types::TurnErrorCode::ProviderRejected,
-        ),
-    });
-    turn.errors = vec![crate::TurnIssue {
-        severity: crate::TurnIssueSeverity::Blocking,
-        kind: crate::TurnFailureKind::LlmProvider,
-        code: Some(crate::TurnFailureCode::ContextOverflow.into()),
-        terminal_reason: None,
-        message: "the request exceeded the model's context window".to_string(),
-        raw: None,
-        retryable: Some(false),
-        provider_failure_kind: None,
-        plugin_failures: Vec::new(),
-    }];
-
-    let failure = failure_from_process_turn(
-        &turn,
-        lash_core_store::execution_limits::DiagnosticLimits::standard(),
-        lash_protocol_types::session_model::RuntimeOutputCuts::standard(),
-    );
-    assert_eq!(failure.code, "process_session_turn_provider_error");
-    assert_eq!(failure.class, crate::ToolFailureClass::External);
-    assert_eq!(
-        failure.message,
-        "background session turn stopped on a provider error: the request exceeded the model's context window"
-    );
-    let raw = failure
-        .raw
-        .as_ref()
-        .map(crate::ToolValue::to_json_value)
-        .expect("typed diagnostics ride `raw`");
-    assert_eq!(raw["kind"], serde_json::json!("llm_provider"));
-    assert_eq!(raw["code"], serde_json::json!("lash:context_overflow"));
-    assert_eq!(raw["retryable"], serde_json::json!(false));
-
-    // D-DEFAULTS2: the parent's readable message obeys the runtime cut,
-    // while the classified cause and diagnostic payload stay typed.
-    let bounded = output_from_process_turn(
-        &crate::ProcessId::fixture("bounded-child-process"),
-        &SessionId::from("failing-child"),
-        turn,
-        crate::ProcessStatus::Failed,
-        &crate::SessionTurnOutcome::Turn,
-        lash_core_store::execution_limits::DiagnosticLimits::standard(),
-        lash_protocol_types::session_model::RuntimeOutputCuts {
-            raw_error_max_chars: 3,
-            ..lash_protocol_types::session_model::RuntimeOutputCuts::standard()
-        },
-    );
-    let bounded = projected_failure(bounded);
-    assert!(
-        bounded.message.starts_with("b\n\n... ("),
-        "{}",
-        bounded.message
-    );
-    assert!(bounded.message.ends_with("\n\nw"), "{}", bounded.message);
-    assert_eq!(bounded.code, failure.code);
-    assert_eq!(bounded.class, failure.class);
-    assert_eq!(bounded.raw, failure.raw);
-}
-
 /// Run one stopped child turn through the runner's own projection, so the
 /// assertions cover the failure a parent, a process record and a terminal
 /// process event all read.
 fn failed_child_failure(stop: crate::TurnStop) -> crate::ToolFailure {
-    let mut turn = crate::testing::mock_assembled_turn(&SessionId::from("failing-child"), "unused");
-    turn.outcome = crate::TurnOutcome::Stopped(stop);
+    let turn = crate::TurnOutcome::Stopped(stop);
     crate::testing::held_engine_registration(
         serde_json::Value::Null,
         crate::ProcessProvenance::host(),
@@ -192,8 +122,8 @@ fn failed_child_failure(stop: crate::TurnStop) -> crate::ToolFailure {
     let output = output_from_process_turn(
         &crate::ProcessId::fixture("failing-child-process"),
         &SessionId::from("failing-child"),
+        &crate::TurnId::fixture("projected-child-turn"),
         turn,
-        state,
         &crate::SessionTurnOutcome::Turn,
         lash_core_store::execution_limits::DiagnosticLimits::standard(),
         lash_protocol_types::session_model::RuntimeOutputCuts::standard(),
@@ -321,16 +251,15 @@ async fn child_turn_cancellation_evidence_survives_runner_record_and_parent_resu
         .await
         .expect("register child-turn process")
         .id;
-    let mut turn = crate::testing::mock_assembled_turn(&child_session_id, "");
-    turn.outcome = crate::TurnOutcome::Stopped(crate::TurnStop::Cancelled {
+    let turn = crate::TurnOutcome::Stopped(crate::TurnStop::Cancelled {
         evidence: evidence.clone(),
     });
 
     let runner_output = output_from_process_turn(
         &process_id,
         &child_session_id,
+        &crate::TurnId::fixture("projected-child-turn"),
         turn,
-        crate::ProcessStatus::Cancelled,
         &crate::SessionTurnOutcome::FinalValue { schema: None },
         lash_core_store::execution_limits::DiagnosticLimits::standard(),
         lash_protocol_types::session_model::RuntimeOutputCuts::standard(),
@@ -382,28 +311,22 @@ fn assert_child_turn_cancellation(
 
 /// Project one ended child turn through the runner under `result`.
 fn project_turn(
-    turn: crate::AssembledTurn,
+    turn: crate::TurnOutcome,
     result: &crate::SessionTurnOutcome,
 ) -> crate::ToolCallOutput {
-    let state = process_terminal_state_for_turn(&turn);
     output_from_process_turn(
         &crate::ProcessId::fixture("projected-child-process"),
         &SessionId::from("projected-child"),
+        &crate::TurnId::fixture("projected-child-turn"),
         turn,
-        state,
         result,
         lash_core_store::execution_limits::DiagnosticLimits::standard(),
         lash_protocol_types::session_model::RuntimeOutputCuts::standard(),
     )
 }
 
-fn finished_turn(finish: crate::TurnFinish) -> crate::AssembledTurn {
-    let mut turn = crate::testing::mock_assembled_turn(
-        &SessionId::from("projected-child"),
-        "unrelated history",
-    );
-    turn.outcome = crate::TurnOutcome::Finished(finish);
-    turn
+fn finished_turn(finish: crate::TurnFinish) -> crate::TurnOutcome {
+    crate::TurnOutcome::Finished(finish)
 }
 
 fn projected_failure(output: crate::ToolCallOutput) -> crate::ToolFailure {
@@ -494,9 +417,7 @@ fn child_final_value_keeps_typed_values_and_checks_the_schema() {
 /// ADR 0116 §3.7: a frame switch or stopped turn cannot supply a final value.
 #[test]
 fn child_final_value_refuses_a_frame_switch_or_stopped_turn() {
-    let mut switched =
-        crate::testing::mock_assembled_turn(&SessionId::from("projected-child"), "unused");
-    switched.outcome = crate::TurnOutcome::AgentFrameSwitch {
+    let switched = crate::TurnOutcome::AgentFrameSwitch {
         frame_key: crate::FrameKey::from_caller_material("next-frame").expect("frame key"),
         task: "continue elsewhere".to_string(),
         initial_nodes: Vec::new(),
@@ -511,12 +432,11 @@ fn child_final_value_refuses_a_frame_switch_or_stopped_turn() {
     assert_eq!(failure.code, "process_session_turn_frame_switch");
     let turn = project_turn(switched.clone(), &crate::SessionTurnOutcome::Turn);
     assert_eq!(
-        turn.value_for_projection()["turn"]["outcome"],
-        serde_json::to_value(&switched.outcome).expect("typed outcome")
+        turn.value_for_projection()["outcome"],
+        serde_json::to_value(&switched).expect("typed outcome")
     );
 
-    let mut stopped = switched;
-    stopped.outcome = crate::TurnOutcome::Stopped(crate::TurnStop::Incomplete);
+    let stopped = crate::TurnOutcome::Stopped(crate::TurnStop::Incomplete);
     let failure = final_value_of_turn(&stopped).expect_err("a stopped child has no final value");
     assert_eq!(failure.code, "process_session_turn_stopped");
 }

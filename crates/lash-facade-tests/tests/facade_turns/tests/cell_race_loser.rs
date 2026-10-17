@@ -136,7 +136,7 @@ async fn l06_race_loser_body_progresses_while_the_program_sleeps() -> Result<()>
         .await
         .expect("the turn answers")?;
     let answered = Instant::now();
-    assert!(output.is_success(), "{:?}", output.result.outcome);
+    assert!(output.is_success(), "{:?}", output.outcome);
     let won = *tools.won.get().expect("the winning call answered");
     let (progressed_at, answered_at) =
         (progressed.duration_since(won), answered.duration_since(won));
@@ -245,12 +245,9 @@ async fn closing_race(loser: Loser) -> Result<(bool, lash_core::ToolCallOutput)>
     .await
     .expect("the turn answers, its loser stopped within the grace")?;
     assert!(
-        matches!(
-            &report.outcome,
-            lash_core::facade_support::TurnOutcome::Finished(_)
-        ),
+        matches!(&report, lash_core::facade_support::TurnOutcome::Finished(_)),
         "{:?}",
-        report.outcome
+        report
     );
     let completions: Vec<_> = events
         .snapshot()
@@ -419,12 +416,9 @@ async fn closing_in_backoff() -> Result<(Duration, usize, Option<lash_core::Tool
     .expect("the turn answers")?;
     let answered = sent.elapsed();
     assert!(
-        matches!(
-            &report.outcome,
-            lash_core::facade_support::TurnOutcome::Finished(_)
-        ),
+        matches!(&report, lash_core::facade_support::TurnOutcome::Finished(_)),
         "{:?}",
-        report.outcome
+        report
     );
     // Past any next attempt closing might wrongly start.
     tokio::time::sleep(Duration::from_millis(500)).await;

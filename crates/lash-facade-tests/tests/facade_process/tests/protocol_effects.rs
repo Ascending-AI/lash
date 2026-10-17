@@ -218,11 +218,11 @@ async fn start_exec_without_code_executor_stops_as_runtime_error() -> Result<()>
     let (output, received) = a_turn_without_a_code_executor().await?;
     assert!(
         matches!(
-            output.result.outcome,
+            output.outcome,
             TurnOutcome::Stopped(TurnStop::RuntimeError { .. })
         ),
         "{:?}",
-        output.result.outcome
+        output.outcome
     );
     assert_eq!(
         received,
@@ -232,21 +232,6 @@ async fn start_exec_without_code_executor_stops_as_runtime_error() -> Result<()>
     Ok(())
 }
 
-/// The failure the driver reported is the turn's error in its report.
-#[tokio::test(flavor = "multi_thread", worker_threads = 4)]
-async fn the_driver_s_reported_exec_failure_is_the_turn_s_error() -> Result<()> {
-    let (output, _) = a_turn_without_a_code_executor().await?;
-    let reported = output
-        .result
-        .errors
-        .iter()
-        .find_map(|issue| serde_json::from_str::<serde_json::Value>(&issue.message).ok())
-        .unwrap_or_else(|| panic!("the driver reports the failure: {:?}", output.result.errors));
-    assert_eq!(reported, executor_unavailable());
-    Ok(())
-}
-
-/// A typed runtime refusal belongs to the terminal, even after a new node opens it.
 #[tokio::test(flavor = "multi_thread", worker_threads = 2)]
 async fn runtime_stop_cause_survives_owner_replacement() -> Result<()> {
     fn core(backend: lash_core::Backend) -> Result<LashCore> {
@@ -269,7 +254,7 @@ async fn runtime_stop_cause_survives_owner_replacement() -> Result<()> {
         .id(run.clone())
         .output()
         .await?
-        .result;
+        .outcome;
     drop(session);
     running.shutdown().await?;
     let reopened = core(backend)?;
@@ -280,21 +265,16 @@ async fn runtime_stop_cause_survives_owner_replacement() -> Result<()> {
         .attach_id(run)
         .output()
         .await?
-        .result;
-    assert_eq!(report.source, lash::ReportSource::Durable);
-    assert_eq!(report.outcome, live.outcome);
+        .outcome;
+    assert_eq!(report, live);
     assert_eq!(report.error_cause(), live.error_cause());
     assert_eq!(
-        report.status(),
+        lash::TurnStatus::of_outcome(&report),
         lash::TurnStatus::Failed {
             cause: live.error_cause().cloned(),
         }
     );
-    assert!(
-        report.errors.is_empty(),
-        "the new follower observed no failure"
-    );
-    let encoded = serde_json::to_value(&report.outcome)?;
+    let encoded = serde_json::to_value(&report)?;
     assert_eq!(
         encoded.pointer("/stopped/runtime_error/cause/code"),
         Some(&serde_json::json!("executor_unavailable"))

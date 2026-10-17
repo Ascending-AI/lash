@@ -89,7 +89,9 @@ async fn presentation_step_only_changes_model_observation() -> Result<()> {
             .any(|block| block.contains("model projection") && !block.contains("raw:sample")),
         "the model observes the presented result: {observed:?}"
     );
-    let calls = &turn.result.tool_calls;
+    let turn_tool_calls =
+        lash::testing::tool_calls_for_activity(&session.durable(), &turn.activities).await;
+    let calls = &turn_tool_calls;
     assert_eq!(calls.len(), 1);
     assert_eq!(calls[0].provider_call_id.as_deref(), Some("tool-1"));
     assert_eq!(

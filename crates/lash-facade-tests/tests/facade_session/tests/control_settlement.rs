@@ -85,7 +85,7 @@ async fn a_host_finish_replaces_the_default_and_types_the_value() -> Result<()> 
         .await?;
 
     assert_eq!(
-        typed.result.outcome,
+        typed.outcome,
         TurnOutcome::Finished(TurnFinish::Finished {
             tool_name: "answer".to_string(),
             value: serde_json::json!(7),
@@ -167,14 +167,14 @@ async fn a_run_retypes_the_finish_value_for_itself_alone() -> Result<()> {
         .await?;
 
     assert_eq!(
-        retyped.result.outcome,
+        retyped.outcome,
         TurnOutcome::Finished(TurnFinish::Finished {
             tool_name: "finish".to_string(),
             value: serde_json::json!("seven"),
         })
     );
     assert_eq!(
-        typed.result.outcome,
+        typed.outcome,
         TurnOutcome::Finished(TurnFinish::Finished {
             tool_name: "finish".to_string(),
             value: serde_json::json!(7),
@@ -321,7 +321,7 @@ async fn run_submit_turn(
     drop(session);
     core.shutdown().await?;
     Ok(SubmitTurn {
-        outcome: report.outcome,
+        outcome: report,
         completed,
         requests: requests.lock_recover().clone(),
     })
@@ -524,7 +524,7 @@ async fn a_batch_member_finish_is_checked_against_its_value_schema() -> Result<(
         .await?;
 
     assert_eq!(
-        report.result.outcome,
+        report.outcome,
         TurnOutcome::Finished(TurnFinish::Finished {
             tool_name: SUBMIT.to_string(),
             value: serde_json::json!(42),
@@ -570,7 +570,7 @@ async fn finish_keeps_the_mixed_cell_answer_unchanged() -> Result<()> {
         .output()
         .await?;
     assert_eq!(
-        serde_json::to_string(&report.result.outcome).expect("outcome encodes"),
+        serde_json::to_string(&report.outcome).expect("outcome encodes"),
         serde_json::to_string(&TurnOutcome::Finished(TurnFinish::Finished {
             tool_name: "finish".to_owned(),
             value: serde_json::json!("abcdefghijklmnopqrstuvwxyz0123456789")

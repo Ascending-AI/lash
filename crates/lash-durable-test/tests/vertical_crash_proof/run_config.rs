@@ -915,10 +915,16 @@ async fn a_cancel_completes_under_drift_and_keeps_its_committed_calls_on_sqlite_
         .expect("the cancelled run has a committed answer");
     core_b.shutdown().await.expect("the drifted core stops");
     assert_eq!(output.status(), lash::TurnStatus::Cancelled);
+    let output_tool_calls = core_b
+        .session(session())
+        .durable()
+        .await
+        .expect("bind session")
+        .read_turn_tool_calls(&run())
+        .await
+        .expect("read cancelled ledger");
     assert_eq!(
-        output
-            .result
-            .tool_calls
+        output_tool_calls
             .iter()
             .map(|call| call.tool.as_str())
             .collect::<Vec<_>>(),

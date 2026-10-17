@@ -231,7 +231,7 @@ pub(super) fn rlm_streamed_lash_vm_cell_uses_captured_body_when_final_text_is_ra
             .await?;
 
         assert!(matches!(
-            result.outcome,
+            result,
             TurnOutcome::Finished(lash_core::facade_support::TurnFinish::Finished { .. })
         ));
         assert_eq!(
@@ -450,7 +450,12 @@ pub(super) fn rlm_accepted_cell_commits_the_usage_its_tail_reports() -> Result<(
             !dropped_early.load(Ordering::SeqCst),
             "the provider future was never dropped before its end"
         );
-        let record = result.llm_calls.first().expect("the call's record");
+        let calls = lash::testing::model_calls_for_activity(
+            &session.durable(),
+            &sink.events.snapshot().await,
+        )
+        .await;
+        let record = calls.first().expect("the call's record");
         let attempt = record.attempts.last().expect("the call's attempt");
         assert_eq!(attempt.outcome, lash_core::AttemptOutcome::Completed);
         assert_eq!(
@@ -461,8 +466,8 @@ pub(super) fn rlm_accepted_cell_commits_the_usage_its_tail_reports() -> Result<(
             attempt.usage.as_ref().map(|usage| usage.output_tokens),
             Some(5)
         );
-        assert_eq!(result.usage.input_tokens, 17);
-        assert_eq!(result.usage.output_tokens, 5);
+        assert_eq!(record.usage().expect("usage").input_tokens, 17);
+        assert_eq!(record.usage().expect("usage").output_tokens, 5);
         let committed = committed(&session).await;
         assert_eq!(committed.token_usage().input_tokens, 17);
         assert_eq!(committed.token_usage().output_tokens, 5);
@@ -522,12 +527,15 @@ pub(super) fn rlm_accepted_cell_without_tail_usage_is_unknown_never_zero() -> Re
                 Some(&serde_json::json!("unknown usage")),
                 "{case}"
             );
-            let record = result.result.llm_calls.first().expect("the call's record");
+            let result_model_calls =
+                lash::testing::model_calls_for_activity(&session.durable(), &result.activities)
+                    .await;
+            let record = result_model_calls.first().expect("the call's record");
             let attempt = record.attempts.last().expect("the call's attempt");
             assert_eq!(attempt.usage, None, "{case}");
             assert!(record.usage_unknown(), "{case}");
             let unknown = lash_core::llm::types::LlmUsage::unknown_call();
-            assert_eq!(result.result.usage, unknown, "{case}");
+            assert_eq!(record.usage().expect("bounded usage"), unknown, "{case}");
             assert_eq!(committed(&session).await.token_usage(), &unknown, "{case}");
         }
         Ok(())
@@ -727,8 +735,10 @@ pub(super) fn every_abandoned_attempt_reaches_the_provider_with_its_partial_rece
             let output = handle.output().await;
             if case != "provider-panic" {
                 let output = output?;
-                let report = &output.result;
-                assert_eq!(report.llm_calls.len(), 1, "{case}: one retained call");
+                let calls =
+                    lash::testing::model_calls_for_activity(&session.durable(), &output.activities)
+                        .await;
+                assert_eq!(calls.len(), 1, "{case}: one retained call");
                 let turn = output
                     .activities
                     .iter()
@@ -741,7 +751,7 @@ pub(super) fn every_abandoned_attempt_reaches_the_provider_with_its_partial_rece
                     .durable()
                     .read_model_calls(&[lash::turn::TurnModelCallRef {
                         turn_id: turn,
-                        call_id: report.llm_calls[0].call_id.clone(),
+                        call_id: calls[0].call_id.clone(),
                     }])
                     .await?;
                 let lash::turn::ModelCallRead::Settled { record } = &records[0] else {
@@ -756,11 +766,7 @@ pub(super) fn every_abandoned_attempt_reaches_the_provider_with_its_partial_rece
                     );
                 }
 
-                assert_eq!(
-                    report.llm_calls[0].usage().expect("call usage"),
-                    usage,
-                    "{case}"
-                );
+                assert_eq!(calls[0].usage().expect("call usage"), usage, "{case}");
                 let head = session.durable().read().await?.expect("head");
                 assert_eq!(
                     head.token_usage(),
@@ -921,9 +927,10 @@ pub(super) fn returned_provider_attempts_settle_once_without_an_abandoned_termin
                 terminals.lock_recover().is_empty(),
                 "{case}: returned attempts have no callback"
             );
-            let usage = output
-                .result
-                .llm_calls
+            let output_model_calls =
+                lash::testing::model_calls_for_activity(&session.durable(), &output.activities)
+                    .await;
+            let usage = output_model_calls
                 .iter()
                 .try_fold(lash_core::LlmUsage::default(), |sum, record| {
                     sum.checked_add(&record.usage()?)
@@ -1036,18 +1043,15 @@ pub(super) fn cancelling_a_tool_settles_its_nested_direct_provider_attempt() -> 
             .mode(lash::TurnCancelMode::Immediate)
             .await?;
         let output = handle.output().await?;
+        let output_model_calls =
+            lash::testing::model_calls_for_activity(&session.durable(), &output.activities).await;
         assert_eq!(
-            output.result.llm_calls.len(),
+            output_model_calls.len(),
             2,
             "turn and nested calls retain distinct keys"
         );
-        assert_ne!(
-            output.result.llm_calls[0].call_id,
-            output.result.llm_calls[1].call_id
-        );
-        let usage = output
-            .result
-            .llm_calls
+        assert_ne!(output_model_calls[0].call_id, output_model_calls[1].call_id);
+        let usage = output_model_calls
             .iter()
             .try_fold(lash_core::LlmUsage::default(), |sum, record| {
                 sum.checked_add(&record.usage()?)
@@ -1161,15 +1165,22 @@ pub(super) fn rlm_turn_without_interruption_or_usage_preserves_absent_usage() ->
             result.finished().map(|(_, value)| value),
             Some(&serde_json::json!("quiet"))
         );
-        let attempt = result
-            .result
-            .llm_calls
+        let result_model_calls =
+            lash::testing::model_calls_for_activity(&session.durable(), &result.activities).await;
+        let attempt = result_model_calls
             .first()
             .and_then(|record| record.attempts.first())
             .expect("completed attempt");
         assert_eq!(attempt.outcome, lash_core::AttemptOutcome::Completed);
         assert_eq!(attempt.usage, None);
-        assert_eq!(result.result.usage.unknown_calls, 1);
+        assert_eq!(
+            lash::testing::model_calls_for_activity(&session.durable(), &result.activities)
+                .await
+                .iter()
+                .map(|call| call.usage().expect("bounded usage").unknown_calls)
+                .sum::<u32>(),
+            1
+        );
         assert_eq!(
             attempt.usage_disposition(),
             lash_core::AttemptUsageOutcome::UnreportedByProvider
@@ -1215,15 +1226,17 @@ await control.finish("done");"#,
         .await?;
 
     assert!(matches!(
-        result.outcome,
+        result,
         TurnOutcome::Finished(lash_core::facade_support::TurnFinish::Finished { .. })
     ));
     // The lookup, then the cell's `control.finish`.
-    assert_eq!(result.tool_calls.len(), 2);
-    assert_eq!(result.tool_calls[0].tool, "app_lookup");
-    assert_eq!(result.tool_calls[0].args, serde_json::json!({}));
+    let result_calls =
+        lash::testing::tool_calls_for_activity(&session.durable(), &events.snapshot().await).await;
+    assert_eq!(result_calls.len(), 2);
+    assert_eq!(result_calls[0].tool, "app_lookup");
+    assert_eq!(result_calls[0].args, serde_json::json!({}));
     assert_eq!(
-        result.tool_calls[0].output.value_for_projection(),
+        result_calls[0].output.value_for_projection(),
         serde_json::json!({ "ok": true })
     );
     let events = events.snapshot().await;
@@ -1389,8 +1402,7 @@ await control.finish("recovered");"#,
         let result = session
             .send(TurnInput::text("recover the tool failure"))
             .output()
-            .await?
-            .result;
+            .await?;
 
         assert!(matches!(
             result.outcome,
@@ -1401,9 +1413,11 @@ await control.finish("recovered");"#,
             Some(&serde_json::json!("recovered"))
         );
         // The failed lookup, then the `control.finish` that recovered.
-        assert_eq!(result.tool_calls.len(), 2);
-        assert_eq!(result.tool_calls[0].tool, "app_lookup");
-        assert!(!result.tool_calls[0].output.is_success());
+        let result_calls =
+            lash::testing::tool_calls_for_activity(&session.durable(), &result.activities).await;
+        assert_eq!(result_calls.len(), 2);
+        assert_eq!(result_calls[0].tool, "app_lookup");
+        assert!(!result_calls[0].output.is_success());
         Ok(())
     })
 }
@@ -1444,7 +1458,7 @@ await control.finish("done");"#,
         .output_into(events.as_ref())
         .await?;
     assert!(matches!(
-        result.outcome,
+        result,
         TurnOutcome::Finished(lash_core::facade_support::TurnFinish::Finished { .. })
     ));
     let events = events.snapshot().await;
@@ -1543,7 +1557,7 @@ pub(super) fn rlm_native_provider_tool_call_repairs_and_the_next_cell_finishes()
             .await?;
 
         assert_eq!(
-            turn.result.outcome,
+            turn.outcome,
             TurnOutcome::Finished(lash_core::facade_support::TurnFinish::Finished {
                 tool_name: "finish".to_string(),
                 value: serde_json::json!(1)
@@ -1551,10 +1565,17 @@ pub(super) fn rlm_native_provider_tool_call_repairs_and_the_next_cell_finishes()
             "the stray call is repaired and the next cell settles the turn"
         );
         assert!(
-            !turn.result.errors.iter().any(|issue| issue.code
-                == Some(lash::turn::TurnFailureCode::NativeToolCallNotAllowed.into())),
+            !turn
+                .activities
+                .iter()
+                .filter_map(|activity| match &activity.event {
+                    lash::TurnEvent::Error(error) => error.envelope.as_ref(),
+                    _ => None,
+                })
+                .any(|issue| issue.code
+                    == Some(lash::turn::TurnFailureCode::NativeToolCallNotAllowed.into())),
             "a repaired stray call records no terminal protocol issue: {:?}",
-            turn.result.errors
+            turn.outcome.error_cause()
         );
         let repair = repair_request
             .lock()
@@ -1669,7 +1690,7 @@ pub(super) async fn rlm_pending_host_tool_completion_resumes_lash_vm_await_inner
 
     let result = turn.await.expect("turn task")?;
     assert!(matches!(
-        result.outcome,
+        result,
         TurnOutcome::Finished(lash_core::facade_support::TurnFinish::Finished { .. })
     ));
     assert_eq!(result.finished().map(|(_, value)| value), Some(&payload));
@@ -1772,7 +1793,7 @@ await control.finish(result);"#,
 
     let result = turn.await.expect("turn task")?;
     assert!(matches!(
-        result.outcome,
+        result,
         TurnOutcome::Finished(lash_core::facade_support::TurnFinish::Finished { .. })
     ));
     assert_eq!(result.finished().map(|(_, value)| value), Some(&payload));
@@ -1831,9 +1852,9 @@ pub(super) async fn continue_as_observation_emits_frame_switch_then_commit_inner
         .output()
         .await?;
     let lash_core::facade_support::TurnOutcome::AgentFrameSwitch { frame_key, .. } =
-        &switched.result.outcome
+        &switched.outcome
     else {
-        panic!("the switch answers its send: {:?}", switched.result.outcome);
+        panic!("the switch answers its send: {:?}", switched.outcome);
     };
     let output = session
         .attach_id(lash_core::runtime::durable::session_mail::frame_task_run(

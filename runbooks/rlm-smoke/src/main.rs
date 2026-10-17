@@ -558,20 +558,30 @@ async fn main() -> Result<()> {
         .open()
         .await
         .context("open RLM smoke session")?;
-    let output = tokio::time::timeout(TURN_TIMEOUT, session.send(TurnInput::text(prompt)).output())
-        .await
-        .context("RLM smoke turn timed out")?
-        .context("run RLM smoke turn")?;
+    let answer = tokio::time::timeout(TURN_TIMEOUT, async {
+        session.send(TurnInput::text(prompt)).await?.outcome().await
+    })
+    .await
+    .context("RLM smoke turn timed out")?
+    .context("run RLM smoke turn")?;
+    let lash::SendOutcome::Settled { run, output, .. } = answer else {
+        bail!("RLM smoke turn did not settle: {answer:?}");
+    };
+    let turn_id = lash::TurnId::parse(run.as_str()).context("settled run identity")?;
     ensure!(
         output.is_success(),
         "RLM smoke turn did not complete successfully"
     );
 
-    let served_models = output
-        .result
-        .llm_calls
+    let committed = session
+        .durable()
+        .committed_turn(&turn_id)
+        .await?
+        .context("smoke turn committed")?;
+    let served_models = committed
+        .model_calls
         .iter()
-        .flat_map(|record| record.attempts.iter())
+        .flat_map(|row| row.record.attempts.iter())
         .filter_map(|attempt| attempt.evidence.as_ref())
         .filter_map(|evidence| evidence.served_model.clone())
         .collect::<BTreeSet<_>>()
@@ -616,7 +626,7 @@ async fn main() -> Result<()> {
         session_id: args.session_id,
         port: args.port,
         trace_offset: args.trace_offset,
-        tool_call_count: output.result.tool_calls.len(),
+        tool_call_count: committed.tool_calls.len(),
         code_languages,
         turn_succeeded: true,
     };

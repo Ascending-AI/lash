@@ -136,9 +136,9 @@ async fn standard_runtime_recovers_streamed_text_when_final_response_is_empty(ti
     served::assert_answered("the streamed turn", &output);
     assert_eq!(output.assistant_message(), Some(expected));
     assert!(
-        output.result.errors.is_empty(),
+        output.outcome.error_cause().is_none(),
         "{:?}",
-        output.result.errors
+        output.outcome.error_cause()
     );
     let view = session.read().await.expect("committed read").expect("head");
     let replies = view
@@ -177,7 +177,7 @@ async fn standard_runtime_text_part_reconciles_without_streaming_duplicate(tier:
     let output = world.send(&session, "continue").await;
 
     assert_eq!(
-        output.result.assistant_message().unwrap_or_default(),
+        output.outcome.assistant_message().unwrap_or_default(),
         "The sentence."
     );
     assert_eq!(streamed_prose(&output), "The sentence.");
@@ -249,11 +249,13 @@ async fn a_tool_answering_an_undeclared_control_is_refused_and_the_turn_goes_on(
     let session = world.session("undeclared-control", served::spec(8)).await;
     let output = world.send(&session, "smuggle a finish").await;
 
-    assert_eq!(output.finished(), None, "{:?}", output.result.outcome);
-    assert_eq!(output.result.tool_calls.len(), 1);
+    assert_eq!(output.finished(), None, "{:?}", output.outcome);
+    let output_tool_calls =
+        lash::testing::tool_calls_for_activity(&session, &output.activities).await;
+    assert_eq!(output_tool_calls.len(), 1);
     assert!(
         matches!(
-            &output.result.tool_calls[0].output.outcome,
+            &output_tool_calls[0].output.outcome,
             lash_core::ToolCallOutcome::Failure(failure)
                 if matches!(
                     failure.cause.as_deref(),
@@ -265,18 +267,18 @@ async fn a_tool_answering_an_undeclared_control_is_refused_and_the_turn_goes_on(
                 )
         ),
         "the undeclared control is refused: {:?}",
-        output.result.tool_calls[0]
+        output_tool_calls[0]
     );
     assert!(
         matches!(
-            &output.result.outcome,
+            &output.outcome,
             lash_core::facade_support::TurnOutcome::Finished(
                 lash_core::facade_support::TurnFinish::AssistantMessage { text }
             )
                 if text == "answered after the refusal"
         ),
         "{:?}",
-        output.result.outcome
+        output.outcome
     );
     world.shutdown().await;
 }
@@ -318,20 +320,20 @@ async fn standard_runtime_tool_control_finish_emits_terminal_output(tier: Tier) 
     };
     let session = world.session("terminal-tool-finish", served::spec(8)).await;
     let output = world.send(&session, "run terminal tools").await;
+    let output_tool_calls =
+        lash::testing::tool_calls_for_activity(&session, &output.activities).await;
 
     assert_eq!(
         output.finished(),
         Some(("terminal_tool_0", &serde_json::json!("first"))),
         "outcome={:?} calls={:?}",
-        output.result.outcome,
-        output.result.tool_calls
+        output.outcome,
+        output_tool_calls
     );
-    assert_eq!(output.result.tool_calls.len(), 2);
+    assert_eq!(output_tool_calls.len(), 2);
     // A refused call is reported before the step's executed calls, so the
     // second control call is found by its tool.
-    let second_call = output
-        .result
-        .tool_calls
+    let second_call = output_tool_calls
         .iter()
         .find(|call| call.tool == "terminal_tool_1")
         .expect("the second control call is recorded");
@@ -416,10 +418,12 @@ async fn standard_runtime_tool_control_fail_stops_without_terminal_output_event(
     };
     let session = world.session("terminal-tool-fail", served::spec(8)).await;
     let output = world.send(&session, "run failing terminal tool").await;
+    let output_tool_calls =
+        lash::testing::tool_calls_for_activity(&session, &output.activities).await;
 
     assert!(
         matches!(
-            &output.result.outcome,
+            &output.outcome,
             lash_core::facade_support::TurnOutcome::Stopped(lash_core::facade_support::TurnStop::ToolError {
                 tool_name,
                 value,
@@ -428,8 +432,8 @@ async fn standard_runtime_tool_control_fail_stops_without_terminal_output_event(
                 && value["message"] == "failed"
         ),
         "outcome={:?} calls={:?}",
-        output.result.outcome,
-        output.result.tool_calls
+        output.outcome,
+        output_tool_calls
     );
     assert!(
         !output
@@ -472,10 +476,12 @@ async fn standard_runtime_executes_streamed_tool_call_when_final_response_is_emp
     let output = world.send(&session, "run the tool").await;
 
     assert_eq!(
-        output.result.assistant_message().unwrap_or_default(),
+        output.outcome.assistant_message().unwrap_or_default(),
         "done"
     );
-    let calls = &output.result.tool_calls;
+    let output_tool_calls =
+        lash::testing::tool_calls_for_activity(&session, &output.activities).await;
+    let calls = &output_tool_calls;
     assert_eq!(calls.len(), 1, "{calls:?}");
     assert_eq!(calls[0].provider_call_id.as_deref(), Some("tool-1"));
     assert_eq!(
@@ -503,7 +509,7 @@ async fn standard_runtime_preserves_part_boundaries_when_response_is_not_streame
     let output = world.send(&session, "hi").await;
 
     assert_eq!(
-        output.result.assistant_message().unwrap_or_default(),
+        output.outcome.assistant_message().unwrap_or_default(),
         "Intro paragraph.\n\n## Heading"
     );
     let blocks = output
@@ -541,11 +547,18 @@ async fn standard_runtime_preserves_part_boundaries_when_response_is_not_streame
     world.shutdown().await;
 }
 
-/// The usage the turn's activity and its sealed call record report: the
-/// turn's cumulative `Usage` and the call's one attempt's. A durable report
-/// carries no usage of its own (`ReportSource::Durable`): hosts meter at the
-/// provider seam (ADR 0127) and read the turn's from its activity.
-fn reported_usage(output: &lash::TurnOutput) -> Vec<(i64, i64, i64)> {
+/// Canonical row usage, alongside each attempt's reported usage.
+async fn reported_usage(
+    session: &lash::DurableSession,
+    output: &lash::TurnOutput,
+) -> Vec<(i64, i64, i64)> {
+    let calls = lash::testing::model_calls_for_activity(session, &output.activities).await;
+    let usage = calls
+        .iter()
+        .try_fold(LlmUsage::default(), |total, call| {
+            total.checked_add(&call.usage()?)
+        })
+        .expect("bounded usage");
     let triple = |usage: &LlmUsage| {
         (
             usage.input_tokens,
@@ -553,21 +566,14 @@ fn reported_usage(output: &lash::TurnOutput) -> Vec<(i64, i64, i64)> {
             usage.cache_read_input_tokens,
         )
     };
-    let cumulative = triple(&output.result.usage);
-    let attempts = output
-        .result
-        .llm_calls
-        .iter()
-        .flat_map(|call| call.attempts.iter())
-        .map(|attempt| {
-            attempt
-                .usage
-                .as_ref()
-                .map(triple)
-                .expect("the attempt's usage")
-        })
-        .collect::<Vec<_>>();
-    std::iter::once(cumulative).chain(attempts).collect()
+    std::iter::once(triple(&usage))
+        .chain(
+            calls
+                .iter()
+                .flat_map(|call| &call.attempts)
+                .map(|attempt| triple(attempt.usage.as_ref().expect("attempt usage"))),
+        )
+        .collect()
 }
 
 /// A response that reports no usage of its own is billed what its stream
@@ -592,7 +598,10 @@ async fn standard_runtime_uses_streamed_usage_when_final_usage_missing(tier: Tie
     let session = world.session("streamed-usage", served::spec(8)).await;
     let output = world.send(&session, "hello").await;
 
-    assert_eq!(reported_usage(&output), [(9, 3, 2), (9, 3, 2)]);
+    assert_eq!(
+        reported_usage(&session, &output).await,
+        [(9, 3, 2), (9, 3, 2)]
+    );
     world.shutdown().await;
 }
 
@@ -618,7 +627,10 @@ async fn standard_runtime_prefers_final_usage_over_streamed_usage(tier: Tier) {
     let session = world.session("final-usage", served::spec(8)).await;
     let output = world.send(&session, "hello").await;
 
-    assert_eq!(reported_usage(&output), [(12, 4, 1), (12, 4, 1)]);
+    assert_eq!(
+        reported_usage(&session, &output).await,
+        [(12, 4, 1), (12, 4, 1)]
+    );
     world.shutdown().await;
 }
 
@@ -940,15 +952,24 @@ async fn unsupported_committed_tool_attachment_degrades_and_session_remains_cont
         .send(&session, "answer this text-only follow-up")
         .await;
 
-    assert_eq!(artifact.result.tool_calls.len(), 1);
-    assert!(artifact.result.tool_calls[0].output.is_success());
+    assert_eq!(
+        lash::testing::tool_calls_for_activity(&session, &artifact.activities)
+            .await
+            .len(),
+        1
+    );
+    assert!(
+        lash::testing::tool_calls_for_activity(&session, &artifact.activities).await[0]
+            .output
+            .is_success()
+    );
     assert!(
         artifact.is_success() && follow_up.is_success(),
         "an unmaterializable attachment and its history stay continuable: {:?} {:?}; {:?} {:?}",
-        artifact.result.outcome,
-        artifact.result.errors,
-        follow_up.result.outcome,
-        follow_up.result.errors
+        artifact.outcome,
+        artifact.outcome.error_cause(),
+        follow_up.outcome,
+        follow_up.outcome.error_cause()
     );
     let requests = asked.requests();
     assert_eq!(requests.len(), 3);
@@ -1337,7 +1358,7 @@ async fn attachment_in_array_tool_value_then_immediate_cancel_loses_nothing(tier
         turn_two.status(),
         lash::TurnStatus::Cancelled,
         "{:?}",
-        turn_two.result.outcome
+        turn_two.outcome
     );
 
     let head = session
@@ -1498,7 +1519,7 @@ async fn an_immediate_cancel_before_an_accepted_finish_commits_publishes_no_fini
         output.status(),
         lash::TurnStatus::Cancelled,
         "{:?}",
-        output.result.outcome
+        output.outcome
     );
     let published_finish = output
         .activities

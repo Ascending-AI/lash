@@ -707,7 +707,7 @@ fn blob_id(text: &str) -> AttachmentId {
 fn started_process_id(output: &lash::TurnOutput) -> lash_core::ProcessId {
     serde_json::from_value(
         output
-            .result
+            .outcome
             .finished()
             .map(|(_, value)| value)
             .cloned()

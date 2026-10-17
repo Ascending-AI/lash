@@ -334,9 +334,9 @@ async fn a_session_whose_activation_panics_parks_at_its_budget_and_a_cancel_stil
         .expect("the parked turn's cancel ends it")
         .expect("the cancelled turn answers its output");
     let evidence = output
-        .result
+        .outcome
         .cancellation()
-        .unwrap_or_else(|| panic!("the turn ended cancelled: {:?}", output.result.outcome));
+        .unwrap_or_else(|| panic!("the turn ended cancelled: {:?}", output.outcome));
     assert_eq!(evidence.request_id, "cancel-the-parked-turn");
     assert_eq!(
         faults.runs.load(Ordering::SeqCst),
@@ -412,12 +412,10 @@ async fn a_cancel_committed_while_a_session_parks_still_ends_its_turn(tier: Tier
             .await
             .unwrap_or_else(|_| panic!("{name}: the park stranded the cancel"))
             .unwrap_or_else(|error| panic!("{name}: the park stranded the cancel: {error:?}"));
-        let evidence = output.result.cancellation().unwrap_or_else(|| {
-            panic!(
-                "{name}: the turn ended cancelled: {:?}",
-                output.result.outcome
-            )
-        });
+        let evidence = output
+            .outcome
+            .cancellation()
+            .unwrap_or_else(|| panic!("{name}: the turn ended cancelled: {:?}", output.outcome));
         assert_eq!(evidence.request_id, name);
         assert_eq!(
             faults.runs.load(Ordering::SeqCst),

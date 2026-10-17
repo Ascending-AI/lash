@@ -84,10 +84,10 @@ async fn ended(
         .expect("the cancelled turn ends")?;
     let at = Instant::now();
     let evidence = output
-        .result
+        .outcome
         .cancellation()
         .cloned()
-        .unwrap_or_else(|| panic!("the turn ended cancelled: {:?}", output.result.outcome));
+        .unwrap_or_else(|| panic!("the turn ended cancelled: {:?}", output.outcome));
     Ok((evidence, at))
 }
 

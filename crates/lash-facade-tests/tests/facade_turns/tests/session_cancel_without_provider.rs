@@ -230,9 +230,9 @@ async fn an_immediate_cancel_ends_an_unserved_session_without_a_provider(
         .await
         .expect("the unserved session's cancelled turn reaches its terminal")?;
     let evidence = output
-        .result
+        .outcome
         .cancellation()
-        .unwrap_or_else(|| panic!("the turn ended cancelled: {:?}", output.result.outcome));
+        .unwrap_or_else(|| panic!("the turn ended cancelled: {:?}", output.outcome));
     assert_eq!(evidence.request_id, "immediate-without-provider");
     assert_eq!(
         stranded.calls.counts(),
@@ -311,9 +311,9 @@ async fn an_after_step_cancel_of_an_unserved_session_waits_until_escalated(
         .await
         .expect("the escalated cancel reaches the turn's terminal")?;
     let evidence = output
-        .result
+        .outcome
         .cancellation()
-        .unwrap_or_else(|| panic!("the turn ended cancelled: {:?}", output.result.outcome));
+        .unwrap_or_else(|| panic!("the turn ended cancelled: {:?}", output.outcome));
     assert_eq!(evidence.mode, TurnCancelMode::Immediate);
     assert_eq!(
         stranded.calls.counts(),

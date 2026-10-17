@@ -26,7 +26,7 @@ async fn turn_stream_finish_returns_committed_assistant_prose() -> Result<()> {
     while let Some(activity) = stream.next_activity().await {
         activities.push(activity?);
     }
-    let result = handle.output().await?.result;
+    let result = handle.output().await?.outcome;
 
     assert_eq!(assistant_prose(&activities), "firstsecond");
     assert_eq!(result.assistant_message(), Some("first\n\nsecond"));
@@ -56,7 +56,7 @@ async fn retry_status_streams_as_semantic_turn_event() -> Result<()> {
         .await?;
 
     assert!(matches!(
-        result.outcome,
+        result,
         TurnOutcome::Finished(lash_core::facade_support::TurnFinish::AssistantMessage { .. })
     ));
     let retry = events
@@ -145,7 +145,7 @@ async fn queued_input_acceptance_streams_semantic_ack_with_id() -> Result<()> {
     let result = turn.await.expect("turn task")?;
 
     assert!(matches!(
-        result.outcome,
+        result,
         TurnOutcome::Finished(lash_core::facade_support::TurnFinish::AssistantMessage { .. })
     ));
     // The injected input is the session's next turn (ADR 0101): its run,
@@ -156,7 +156,7 @@ async fn queued_input_acceptance_streams_semantic_ack_with_id() -> Result<()> {
         .output_into(&next)
         .await?;
     assert!(matches!(
-        follow_up.outcome,
+        follow_up,
         TurnOutcome::Finished(lash_core::facade_support::TurnFinish::AssistantMessage { .. })
     ));
     let events = next.snapshot().await;
@@ -378,13 +378,22 @@ async fn assert_session_turn_cancel_disposition(
     // Drain the follower to its end: it settles with the live turn report
     // and leaves that answer on the handle, which output() then returns.
     while let Some(_activity) = events.next_activity().await {}
-    let interrupted = handle.output().await?.result;
+    let interrupted = handle.output().await?.outcome;
     assert!(matches!(
-        interrupted.outcome,
+        interrupted,
         TurnOutcome::Stopped(lash_core::facade_support::TurnStop::Cancelled { .. })
     ));
-    assert_eq!(interrupted.cancel_input_outcome.affected_inputs.len(), 1);
-    let affected = &interrupted.cancel_input_outcome.affected_inputs[0];
+    let terminal = session
+        .durable()
+        .run_terminal(&lash::RunId::parse(turn_id.as_str()).unwrap())
+        .await?
+        .expect("cancel terminal");
+    let lash::persistence::RunTerminalCause::Cancelled { input_outcome, .. } = terminal.cause
+    else {
+        panic!("cancelled terminal")
+    };
+    assert_eq!(input_outcome.affected_inputs.len(), 1);
+    let affected = &input_outcome.affected_inputs[0];
     assert_eq!(affected.input_id, undelivered_id);
     assert_eq!(affected.disposition, disposition);
 
@@ -832,7 +841,7 @@ async fn turn_event_fanout_streams_to_collector_and_live_sink() -> Result<()> {
         .expect("an answered send has its output");
 
     assert!(matches!(
-        output.result.outcome,
+        output.outcome,
         TurnOutcome::Finished(lash_core::facade_support::TurnFinish::AssistantMessage { .. })
     ));
     assert_eq!(

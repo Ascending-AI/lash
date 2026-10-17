@@ -48,9 +48,8 @@ impl Crash {
                 Ok(Ok(output)) => output,
                 other => return vec![format!("the limit scenario did not settle: {other:?}")],
             };
-            let failures = output
-                .result
-                .tool_calls
+            let calls = lash::testing::tool_calls_for_activity(&session, &output.activities).await;
+            let failures = calls
                 .iter()
                 .filter_map(|call| match &call.output.outcome {
                     lash_core::ToolCallOutcome::Failure(failure) => Some(failure),

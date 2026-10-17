@@ -439,7 +439,7 @@ async fn rlm_provider_failure_after_prose_is_not_retried_or_committed() -> Resul
         "provider output must not be re-bought after the failed attempt"
     );
     assert!(matches!(
-        first.result.outcome,
+        first.outcome,
         TurnOutcome::Stopped(lash_core::facade_support::TurnStop::ProviderError { .. })
     ));
     assert!(first.activities.iter().any(|activity| matches!(
@@ -483,9 +483,11 @@ async fn rlm_provider_failure_after_prose_is_not_retried_or_committed() -> Resul
         let requests = requests.lock_recover();
         assert_eq!(requests.len(), 1, "RLM scheduled a spurious iteration");
     }
-    assert_eq!(first.result.llm_calls.len(), 1);
-    assert_eq!(first.result.llm_calls[0].attempts.len(), 1);
-    let attempt = &first.result.llm_calls[0].attempts[0];
+    let first_model_calls =
+        lash::testing::model_calls_for_activity(&session.durable(), &first.activities).await;
+    assert_eq!(first_model_calls.len(), 1);
+    assert_eq!(first_model_calls[0].attempts.len(), 1);
+    let attempt = &first_model_calls[0].attempts[0];
     assert_eq!(
         attempt.protocol_position,
         lash_core::ProtocolPosition::OutputStarted
@@ -1183,9 +1185,9 @@ async fn snapshot_subscribe_has_only_two_histories_across_a_frame_switch() -> Re
         replay_store.release_commit_install();
         let switched = turn.await.expect("join publishing turn")?;
         let lash_core::facade_support::TurnOutcome::AgentFrameSwitch { frame_key, .. } =
-            &switched.result.outcome
+            &switched.outcome
         else {
-            panic!("the switch answers its send: {:?}", switched.result.outcome);
+            panic!("the switch answers its send: {:?}", switched.outcome);
         };
         // The frame's task runs next as its own run (FIG-5232); its commit
         // is news to the subscriber, and switches nothing.
@@ -1535,6 +1537,6 @@ async fn recoverable_chat_conformance_disconnect_does_not_cancel_server_work() -
     );
     release.notify_one();
     let result = turn.await.expect("join turn")?;
-    assert!(matches!(result.result.outcome, TurnOutcome::Finished(_)));
+    assert!(matches!(result.outcome, TurnOutcome::Finished(_)));
     Ok(())
 }

@@ -374,7 +374,7 @@ await task.fail({ reason: "parent observed child failure" });
         )
         .await?
         .map_err(|err| FixedScriptRunnerError::Runtime(err.to_string()))?
-        .result;
+        .outcome;
     session
         .refresh_background_graph()
         .await
@@ -398,7 +398,7 @@ await task.fail({ reason: "parent observed child failure" });
         "session_id": snapshot.session_id,
         "turn_index": snapshot.turn_index,
         "done": true,
-        "turn_outcome": turn_outcome_contract_json(&result.outcome),
+        "turn_outcome": turn_outcome_contract_json(&result),
         "final_value": Value::Null,
         "processes": process_observations
             .iter()
@@ -534,7 +534,7 @@ async fn facade_final_value_execution_inner(
         )
         .await?
         .map_err(|err| FixedScriptRunnerError::Runtime(err.to_string()))?
-        .result;
+        .outcome;
     let final_value = result
         .finished()
         .map(|(_, value)| value)
@@ -542,7 +542,7 @@ async fn facade_final_value_execution_inner(
         .ok_or_else(|| {
             FixedScriptRunnerError::Assertion(format!(
                 "{provider_kind} finished without TurnFinish::Finished: {:?}",
-                result.outcome
+                result
             ))
         })?;
     require(
@@ -660,7 +660,7 @@ async fn facade_agent_process_execution_with_options(
         )
         .await?
         .map_err(|err| FixedScriptRunnerError::Runtime(err.to_string()))?
-        .result;
+        .outcome;
     session
         .refresh_background_graph()
         .await
@@ -744,7 +744,7 @@ await control.finish({ recovered: true });
                 contract_turn("Start a process that asks for durable input."),
             )
             .await?
-            .map(|output| output.result)
+            .map(|output| output.outcome)
             .map_err(|err| FixedScriptRunnerError::Runtime(err.to_string()))
     });
     let key = wait_for_contract_durable_input_key(key_rx).await?;
@@ -1013,7 +1013,7 @@ async fn agent_process_execution_result(
     session: &lash::LashSession,
     core: &lash::LashCore,
     graph_store: &ContractGraphs,
-    result: lash::TurnReport,
+    result: lash::TurnOutcome,
     events: Arc<RuntimeProofRecordingEvents>,
     provider_kind: &'static str,
     expected_final_value: &Value,
@@ -1034,7 +1034,7 @@ async fn agent_process_execution_result(
         .ok_or_else(|| {
             FixedScriptRunnerError::Assertion(format!(
                 "{provider_kind} finished without TurnFinish::Finished: {:?}",
-                result.outcome
+                result
             ))
         })?;
     require(
@@ -1409,7 +1409,7 @@ fn normalize_contract_process_event_payload(event_type: &str, payload: Value) ->
 }
 
 fn agent_failed_child_activity_facts(
-    result: &lash::TurnReport,
+    result: &lash::TurnOutcome,
     events: &[lash::TurnActivity],
 ) -> Value {
     let mut failed_code_block_errors = Vec::new();

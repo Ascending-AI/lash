@@ -129,7 +129,7 @@ async fn run_task_with_shutdown_witness(
                 match &result {
                     Ok(Ok(output)) if !output.0.is_success() => eprintln!(
                         "toolbench: core shutdown failed after terminal turn outcome `{:?}`: {shutdown_error:#}",
-                        output.0.result.outcome
+                        output.0.outcome
                     ),
                     Ok(Ok(_)) => {}
                     Ok(Err(primary)) => eprintln!(
@@ -148,21 +148,17 @@ async fn run_task_with_shutdown_witness(
     };
     let (mut completed, mut completion_error, finish_value, decisions, turn_outcome) = match result
     {
-        Ok(Ok((output, decisions))) => {
-            telemetry.record_calls(output.result.llm_calls.clone());
-            (
-                output.is_success(),
-                (!output.is_success())
-                    .then(|| format!("turn outcome: {:?}", output.result.outcome)),
-                if channel == crate::ChannelSelection::Standard {
-                    world.submissions().first().cloned()
-                } else {
-                    output.finished().map(|(_, value)| value).cloned()
-                },
-                decisions,
-                Some(format!("{:?}", output.result.outcome)),
-            )
-        }
+        Ok(Ok((output, decisions))) => (
+            output.is_success(),
+            (!output.is_success()).then(|| format!("turn outcome: {:?}", output.outcome)),
+            if channel == crate::ChannelSelection::Standard {
+                world.submissions().first().cloned()
+            } else {
+                output.finished().map(|(_, value)| value).cloned()
+            },
+            decisions,
+            Some(format!("{:?}", output.outcome)),
+        ),
         Ok(Err(error)) => (
             false,
             Some(format!("{error:#}")),
@@ -293,15 +289,25 @@ async fn run_turn(
     let turn = session.send(TurnInput::text(
         task.prompt_for(channel == crate::ChannelSelection::Standard),
     ));
-    let result = turn
-        .output_into(telemetry.as_ref())
+    let answer = turn
+        .outcome_into(telemetry.as_ref())
         .await
         .context("run toolbench turn")?;
+    let lash::SendOutcome::Settled { run, output, .. } = answer else {
+        anyhow::bail!("toolbench turn did not settle: {answer:?}");
+    };
+    let turn_id = lash::TurnId::parse(run.as_str())?;
+    telemetry.record_calls(
+        session
+            .durable()
+            .read_turn_model_calls(&turn_id)
+            .await?
+            .into_iter()
+            .map(|row| row.record)
+            .collect(),
+    );
     let decisions = lash::rlm::recorded_extraction_decisions(session.read_view().active_events())?;
-    Ok((
-        lash::TurnOutput::new(result, telemetry.activities()),
-        decisions,
-    ))
+    Ok((*output, decisions))
 }
 
 /// A run's engine: lash's durable engine over a fresh SQLite memory store

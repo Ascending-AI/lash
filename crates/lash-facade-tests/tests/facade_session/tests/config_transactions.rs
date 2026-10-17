@@ -297,7 +297,7 @@ async fn namespace_collision_law(per_run: bool) -> Result<()> {
             .output()
             .await?;
         assert!(
-            matches!(report.result.outcome,
+            matches!(report.outcome,
             lash::TurnOutcome::Finished(lash::TurnFinish::Finished { value, .. }) if value == serde_json::json!(42)),
             "the refused tools leave the binding usable"
         );
@@ -431,7 +431,7 @@ async fn provider_installation_refuses_an_existing_namespace_binding() -> Result
         .send(lash::TurnInput::text("read data"))
         .output()
         .await?;
-    assert!(matches!(report.result.outcome,
+    assert!(matches!(report.outcome,
         lash::TurnOutcome::Finished(lash::TurnFinish::Finished { value, .. }) if value == serde_json::json!(42)));
     drop(session);
     core.shutdown().await?;

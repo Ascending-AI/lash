@@ -489,3 +489,5 @@ pub fn diagnostic_core(backend: lash_core::Backend) -> LashCore {
         .expect("diagnostic core")
 }
 pub mod controls;
+
+pub use lash::testing::{model_calls_for_activity, tool_calls_for_activity};

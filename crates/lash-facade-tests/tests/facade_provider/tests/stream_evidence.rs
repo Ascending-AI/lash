@@ -15,7 +15,11 @@ async fn streamed_turn(
     session_id: &str,
     stream: Vec<LlmStreamEvent>,
     response: LlmResponse,
-) -> Result<(lash::TurnReport, Vec<TurnActivity>)> {
+) -> Result<(
+    lash::TurnOutcome,
+    Vec<TurnActivity>,
+    Vec<lash::LlmCallRecord>,
+)> {
     let script = Arc::new(StdMutex::new(Some((stream, response))));
     let provider = lash::testing::TestProvider::builder()
         .kind("stream-evidence")
@@ -50,7 +54,9 @@ async fn streamed_turn(
         .send(TurnInput::text("shift the scripted stream"))
         .output_into(&events)
         .await?;
-    Ok((output, events.snapshot().await))
+    let activities = events.snapshot().await;
+    let calls = lash::testing::model_calls_for_activity(&session.durable(), &activities).await;
+    Ok((output, activities, calls))
 }
 
 fn text_response_with(parts: Vec<LlmOutputPart>) -> LlmResponse {
@@ -102,7 +108,7 @@ fn text(text: &str) -> LlmOutputPart {
 #[tokio::test(flavor = "multi_thread", worker_threads = 2)]
 async fn custom_provider_can_establish_a_no_summary_response_before_execution_evidence()
 -> Result<()> {
-    let (report, _) = streamed_turn(
+    let (report, _, calls) = streamed_turn(
         "no-summary-response-establishment",
         vec![
             LlmStreamEvent::Evidence(lash_core::LlmStreamEvidence {
@@ -124,12 +130,8 @@ async fn custom_provider_can_establish_a_no_summary_response_before_execution_ev
     )
     .await?;
 
-    assert!(
-        matches!(report.outcome, TurnOutcome::Finished(_)),
-        "{:?}",
-        report.outcome
-    );
-    let attempt = &report.llm_calls[0].attempts[0];
+    assert!(matches!(report, TurnOutcome::Finished(_)), "{:?}", report);
+    let attempt = &calls[0].attempts[0];
     assert_eq!(attempt.outcome, lash_core::AttemptOutcome::Completed);
     assert_eq!(
         attempt.protocol_position,
@@ -140,7 +142,7 @@ async fn custom_provider_can_establish_a_no_summary_response_before_execution_ev
 
 #[tokio::test(flavor = "multi_thread", worker_threads = 2)]
 async fn attempt_reset_clears_response_establishment_before_later_evidence() -> Result<()> {
-    let (report, activities) = streamed_turn(
+    let (report, activities, calls) = streamed_turn(
         "response-establishment-attempt-reset",
         vec![
             LlmStreamEvent::Evidence(lash_core::LlmStreamEvidence {
@@ -167,23 +169,21 @@ async fn attempt_reset_clears_response_establishment_before_later_evidence() -> 
     )
     .await?;
 
+    assert!(matches!(report, TurnOutcome::Stopped(_)), "{:?}", report);
     assert!(
-        matches!(report.outcome, TurnOutcome::Stopped(_)),
-        "{:?}",
-        report.outcome
-    );
-    assert!(
-        report.errors.iter().any(|error| error.code
-            == Some(lash_core::TurnFailureCode::StreamEvidenceBeforeResponseStart.into())),
+        activities
+            .iter()
+            .filter_map(|activity| match &activity.event {
+                TurnEvent::Error(error) => error.envelope.as_ref(),
+                _ => None,
+            })
+            .any(|error| error.code
+                == Some(lash_core::TurnFailureCode::StreamEvidenceBeforeResponseStart.into())),
         "the turn stops on evidence before its response started: {:?} {activities:?}",
-        report.errors
+        report.error_cause()
     );
-    assert_eq!(
-        report.llm_calls.len(),
-        1,
-        "the rejected stream keeps its call record"
-    );
-    assert!(!report.llm_calls[0].attempts.is_empty());
+    assert_eq!(calls.len(), 1, "the rejected stream keeps its call record");
+    assert!(!calls[0].attempts.is_empty());
     Ok(())
 }
 
@@ -192,7 +192,7 @@ async fn attempt_reset_clears_response_establishment_before_later_evidence() -> 
 /// the stale accumulated deltas.
 #[tokio::test(flavor = "multi_thread", worker_threads = 2)]
 async fn text_block_completion_seals_authoritative_correction() -> Result<()> {
-    let (_, activities) = streamed_turn(
+    let (_, activities, _) = streamed_turn(
         "text-block-correction",
         vec![
             LlmStreamEvent::Block(StreamBlockEvent::Started {
@@ -224,7 +224,7 @@ async fn text_block_completion_seals_authoritative_correction() -> Result<()> {
 /// plugin transform would double-feed the already-seen prefix.
 #[tokio::test(flavor = "multi_thread", worker_threads = 2)]
 async fn text_block_completion_forwards_only_the_unseen_tail() -> Result<()> {
-    let (_, activities) = streamed_turn(
+    let (_, activities, _) = streamed_turn(
         "text-block-tail",
         vec![
             LlmStreamEvent::Block(StreamBlockEvent::Started {
@@ -256,7 +256,7 @@ async fn text_block_completion_forwards_only_the_unseen_tail() -> Result<()> {
 /// authoritative text as one delta before sealing.
 #[tokio::test(flavor = "multi_thread", worker_threads = 2)]
 async fn text_block_completion_without_deltas_publishes_full_text() -> Result<()> {
-    let (_, activities) = streamed_turn(
+    let (_, activities, _) = streamed_turn(
         "text-block-whole",
         vec![
             LlmStreamEvent::Block(StreamBlockEvent::Started {
@@ -282,7 +282,7 @@ async fn text_block_completion_without_deltas_publishes_full_text() -> Result<()
 /// republished to the host when the provider policy hides thinking.
 #[tokio::test(flavor = "multi_thread", worker_threads = 2)]
 async fn unstreamed_reasoning_is_not_republished_while_thinking_is_hidden() -> Result<()> {
-    let (_, activities) = streamed_turn(
+    let (_, activities, _) = streamed_turn(
         "hidden-reasoning",
         Vec::new(),
         LlmResponse {
@@ -323,7 +323,7 @@ async fn unstreamed_reasoning_is_not_republished_while_thinking_is_hidden() -> R
 /// the absence of reasoning parts.
 #[tokio::test(flavor = "multi_thread", worker_threads = 2)]
 async fn unstreamed_reasoning_republishes_when_thinking_is_exposed() -> Result<()> {
-    let (_, activities) = streamed_turn(
+    let (_, activities, _) = streamed_turn(
         "exposed-reasoning",
         Vec::new(),
         LlmResponse {

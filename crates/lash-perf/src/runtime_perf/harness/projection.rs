@@ -115,7 +115,7 @@ async fn install_rlm_session_projection(runtime: &mut BenchmarkRuntime) -> anyho
     validate_runtime_perf_turn(
         RuntimePerfScenario::RlmGlobals,
         0,
-        &turn,
+        &turn.outcome,
         &runtime.export_state().await?,
     )?;
     runtime.await_background_work().await?;

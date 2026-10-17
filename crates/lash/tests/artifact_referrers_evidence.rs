@@ -110,7 +110,7 @@ fn last_cell_finish(view: &lash::persistence::SessionReadView) -> Option<serde_j
 /// that follows it (FIG-5232): the output the switch's work ends in.
 async fn send_through(session: &lash::LashSession, text: &str) -> lash::Result<TurnOutput> {
     let output = session.send(TurnInput::text(text)).output().await?;
-    let lash::TurnOutcome::AgentFrameSwitch { frame_key, .. } = &output.result.outcome else {
+    let lash::TurnOutcome::AgentFrameSwitch { frame_key, .. } = &output.outcome else {
         return Ok(output);
     };
     let follow_on = lash_core::runtime::durable::session_mail::frame_task_run(frame_key);

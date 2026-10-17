@@ -1140,7 +1140,7 @@ impl EmbedRun {
                 validate_runtime_perf_turn(
                     scenario,
                     turn_index,
-                    &turn,
+                    &turn.outcome,
                     &session
                         .durable()
                         .read()

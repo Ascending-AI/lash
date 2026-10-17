@@ -355,9 +355,9 @@ async fn admitted_switch_is_seeded_queued_after_earlier_work_and_exactly_once() 
     let switched = first.output().await.expect("the switching run settles");
     let lash_core::facade_support::TurnOutcome::AgentFrameSwitch {
         frame_key, task, ..
-    } = &switched.result.outcome
+    } = &switched.outcome
     else {
-        panic!("the switch answers its send: {:?}", switched.result.outcome);
+        panic!("the switch answers its send: {:?}", switched.outcome);
     };
     assert_eq!(task.as_str(), "run seeded follow-on");
     let second_output = second.output().await.expect("the second input settles");
@@ -557,7 +557,7 @@ async fn admissions_settle_for_finish_cancel_and_error() {
     assert_global_invariants(&cancel_engine, "admissions-settle-cancel").await;
     drop(cancel_engine);
     assert!(matches!(
-        cancelled.result.outcome,
+        cancelled.outcome,
         lash_core::facade_support::TurnOutcome::Stopped(TurnStop::Cancelled { .. })
     ));
 }
@@ -646,11 +646,11 @@ async fn assert_switch_chain(limit: usize, switches: usize, finishes: bool) {
         .expect("the first switch answers its send");
     for _ in 0..switches {
         let lash_core::facade_support::TurnOutcome::AgentFrameSwitch { frame_key, .. } =
-            &output.result.outcome
+            &output.outcome
         else {
             panic!(
                 "the chain must switch until its final follow-on: {:?}",
-                output.result.outcome
+                output.outcome
             );
         };
         // A switch's answer proves that its follow-on mail committed. Attach
@@ -673,24 +673,21 @@ async fn assert_switch_chain(limit: usize, switches: usize, finishes: bool) {
     } else {
         assert!(
             matches!(
-                output.result.outcome,
+                output.outcome,
                 lash_core::facade_support::TurnOutcome::Stopped(TurnStop::AgentFrameSwitchLimit)
             ),
             "the follow-on at the bound stops typed: {:?}",
-            output.result.outcome
+            output.outcome
         );
         assert_eq!(call_index.load(Ordering::SeqCst), limit);
-        let bounded_run = lash_core::TurnId::parse(
-            output
-                .result
-                .acceptance
-                .as_ref()
-                .unwrap()
-                .source_key
-                .as_ref()
-                .unwrap(),
-        )
-        .unwrap();
+        let bounded_run = output
+            .activities
+            .iter()
+            .find_map(|activity| match &activity.event {
+                lash::TurnEvent::TurnStarted { turn_id, .. } => Some(turn_id.clone()),
+                _ => None,
+            })
+            .expect("the bounded run's admission identity");
         // The terminal is durable: attaching again requires no live error
         // event to distinguish the chain bound from another runtime failure.
         let resumed = session
@@ -699,7 +696,7 @@ async fn assert_switch_chain(limit: usize, switches: usize, finishes: bool) {
             .await
             .expect("reattach bounded run");
         assert!(matches!(
-            resumed.result.outcome,
+            resumed.outcome,
             lash_core::facade_support::TurnOutcome::Stopped(TurnStop::AgentFrameSwitchLimit)
         ));
         // The bound belongs to this chain, not to the session's frame history.
@@ -709,7 +706,7 @@ async fn assert_switch_chain(limit: usize, switches: usize, finishes: bool) {
             .await
             .expect("fresh host input runs");
         let lash_core::facade_support::TurnOutcome::AgentFrameSwitch { frame_key, .. } =
-            &fresh.result.outcome
+            &fresh.outcome
         else {
             panic!("fresh input must switch once");
         };
@@ -812,9 +809,9 @@ await control.finish({ baton: baton });
     // The send answers with the switch; the task runs as the follow-on under
     // its own run (ADR 0101 §3).
     let lash_core::facade_support::TurnOutcome::AgentFrameSwitch { frame_key, .. } =
-        &switched.result.outcome
+        &switched.outcome
     else {
-        panic!("the switch answers its send: {:?}", switched.result.outcome);
+        panic!("the switch answers its send: {:?}", switched.outcome);
     };
     let terminal = session
         .attach_id(lash_core::runtime::durable::session_mail::frame_task_run(
@@ -954,11 +951,11 @@ await local_actions.continue_as({
         .expect("non-callable turn runs");
     assert!(
         matches!(
-            stopped.result.outcome,
+            stopped.outcome,
             lash_core::facade_support::TurnOutcome::Stopped(TurnStop::MaxTurns)
         ),
         "expected the non-callable data call to stop on the no-progress budget, got {:?}",
-        stopped.result.outcome
+        stopped.outcome
     );
     assert!(
         stopped.finished().map(|(_, value)| value).is_none(),

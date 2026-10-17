@@ -210,7 +210,7 @@ async fn refusal_of(core: &LashCore, id: &str) -> EmbedError {
         );
     };
     let error = match answer {
-        Ok(output) => panic!("{id}: the session cannot open, got {:?}", output.result),
+        Ok(output) => panic!("{id}: the session cannot open, got {:?}", output.outcome),
         Err(error) => error,
     };
     assert_nothing_parked(core, id).await;
@@ -432,7 +432,7 @@ async fn a_send_whose_open_meets_a_refusing_catalog_is_answered(
         );
     };
     let error = match answer {
-        Ok(output) => panic!("{id}: the session cannot open, got {:?}", output.result),
+        Ok(output) => panic!("{id}: the session cannot open, got {:?}", output.outcome),
         Err(error) => runtime_refusal(&id, error),
     };
     assert_nothing_parked(&serving, &id).await;
@@ -839,7 +839,7 @@ mod sweep {
             progress.fetch_add(1, Ordering::SeqCst);
             if !output.is_success() {
                 return Ok(Answer::Stopped {
-                    status: format!("{:?}", output.result.outcome),
+                    status: format!("{:?}", output.outcome),
                 });
             }
             answers.push(output.assistant_message().expect("echo answer").to_owned());

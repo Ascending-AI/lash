@@ -31,7 +31,7 @@ async fn every_cell_call_beyond_the_prompt_bound_survives_a_reopen() -> Result<(
         .await?;
     let events = RecordingEvents::default();
     let run = turn("all-cell-calls-run");
-    let output = session
+    session
         .send(crate::TurnInput::text("all calls"))
         .id(run.clone())
         .output_into(&events)
@@ -42,8 +42,11 @@ async fn every_cell_call_beyond_the_prompt_bound_survives_a_reopen() -> Result<(
         &run,
     )
     .await?;
-    let sizes = lash_core::testing::cell_ledger_bytes(&transcript, &output.tool_calls)
-        .expect("the stored ledger sizes read");
+    let sizes = lash_core::testing::cell_ledger_bytes(
+        &transcript,
+        &session.durable().read_turn_tool_calls(&run).await?,
+    )
+    .expect("the stored ledger sizes read");
     eprintln!(
         "FIG-6171 130 calls: report={} held={} previous_copy={}",
         sizes.0, sizes.1, sizes.2

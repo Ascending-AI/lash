@@ -143,7 +143,7 @@ async fn run(observe: bool) -> Result<(Vec<Seen>, Option<(Observed, LashCore)>)>
         .id(lash::TurnId::parse("l26-turn").expect("nonblank host identity"))
         .output()
         .await?;
-    assert!(output.is_success(), "{:?}", output.result.outcome);
+    assert!(output.is_success(), "{:?}", output.outcome);
     let seen = seen.lock_recover().clone();
     match observed {
         Some(observed) => Ok((seen, Some((observed, core)))),

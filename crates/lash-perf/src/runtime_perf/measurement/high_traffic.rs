@@ -494,11 +494,11 @@ async fn run_high_traffic_operation(
                 )))
                 .await?;
             durable_queue_depth = session.durable().pending_turn_inputs().await?.len() as u64;
-            let report = handle.output().await?.result;
-            if !matches!(report.outcome, lash::TurnOutcome::Finished(_)) {
+            let report = handle.output().await?.outcome;
+            if !matches!(report, lash::TurnOutcome::Finished(_)) {
                 anyhow::bail!(
                     "queued high-traffic operation {ordinal} did not finish: {:?}",
-                    report.outcome
+                    report
                 );
             }
             LlmUsage::default()
@@ -531,7 +531,7 @@ async fn run_high_traffic_direct_turn(
     ordinal: usize,
     kind: HighTrafficOperationKind,
 ) -> anyhow::Result<LlmUsage> {
-    let report = session
+    let answer = session
         .send(TurnInput::text(high_traffic_prompt(
             kind,
             ordinal,
@@ -540,17 +540,32 @@ async fn run_high_traffic_direct_turn(
         .id(lash_core::TurnId::fixture(format!(
             "runtime-perf-load-turn-{ordinal}"
         )))
-        .output()
         .await?
-        .result;
-    if !matches!(report.outcome, lash::TurnOutcome::Finished(_)) {
+        .outcome()
+        .await?;
+    let lash::SendOutcome::Settled { run, output, .. } = answer else {
+        anyhow::bail!("high-traffic operation {ordinal} did not settle: {answer:?}");
+    };
+    let report = output.outcome;
+    if !matches!(report, lash::TurnOutcome::Finished(_)) {
         anyhow::bail!(
             "high-traffic {kind} operation {ordinal} did not finish: {:?}; errors={:?}",
-            report.outcome,
-            report.errors
+            report,
+            report.error_cause()
         );
     }
-    Ok(report.usage)
+    let calls = session
+        .durable()
+        .read_turn_model_calls(&lash_core::TurnId::parse(run.as_str())?)
+        .await?;
+    calls
+        .iter()
+        .try_fold(LlmUsage::default(), |total, row| {
+            total.checked_add(&row.usage()?)
+        })
+        .map_err(|error: lash::usage::TokenUsageOverflow| {
+            anyhow::anyhow!("usage overflows {}", error.counter())
+        })
 }
 
 fn high_traffic_turn_index(

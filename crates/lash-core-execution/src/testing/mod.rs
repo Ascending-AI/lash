@@ -256,10 +256,7 @@ use crate::llm::types::{LlmRequest, LlmResponse};
 use crate::plugin::{PluginError, SessionCreateRequest, SessionHandle, SessionSnapshot};
 use crate::provider::{Provider, ProviderComponents, ProviderHandle};
 use crate::session_model::{ConversationRecord, SessionHistoryRecord};
-use crate::{
-    AssembledTurn, LlmUsage, ProviderOptions, RuntimeSessionState, SessionPolicy,
-    TurnExecutionMetrics, TurnFinish, TurnOutcome, TurnStop,
-};
+use crate::{ProviderOptions, RuntimeSessionState, TurnFinish, TurnOutcome, TurnStop};
 use lash_transport_failure::LlmTransportError;
 
 /// Generous claim bounds for store/runtime conformance tests whose subject is
@@ -1576,47 +1573,13 @@ where
     .await
 }
 
-pub fn mock_assembled_turn(session_id: &SessionId, summary: &str) -> AssembledTurn {
-    AssembledTurn {
-        state: SessionSnapshot {
-            session_id: session_id.clone(),
-            policy: SessionPolicy::new(
-                crate::TurnBudget::Unbounded,
-                crate::MaxToolCalls::new(1024),
-                crate::NoProgressBudget::bounded(12),
-            ),
-            ..SessionSnapshot::new(
-                session_id.clone(),
-                SessionPolicy::new(
-                    crate::TurnBudget::Unbounded,
-                    crate::MaxToolCalls::new(1024),
-                    crate::NoProgressBudget::bounded(12),
-                ),
-            )
-        },
-        outcome: TurnOutcome::Finished(TurnFinish::AssistantMessage {
-            text: summary.to_string(),
-        }),
-        execution: TurnExecutionMetrics::default(),
-        token_usage: LlmUsage::default(),
-        llm_calls: Vec::new(),
-        tool_calls: Vec::new(),
-        retained_outputs: Vec::new(),
-        failure_evidence: Vec::new(),
-        errors: Vec::new(),
-        turn_input_acceptance: None,
-        turn_cancel_input_outcome: Default::default(),
-    }
-}
-
 /// Configurable mock for host capability traits. Tests override
-/// the snapshot, tool catalog, and turn outcome via the builder
+/// the snapshot and tool catalog via the builder
 /// methods; `create_session` mutations are recorded so tests can
 /// assert against them.
 pub struct MockSessionManager {
     pub snapshot: SessionSnapshot,
     pub tool_catalog: Vec<serde_json::Value>,
-    pub turn: AssembledTurn,
     /// The registry the mock's process routes read and write. `None` (the
     /// default) is a session manager with no process port: every process
     /// route refuses, so a tool test that never touches processes needs no
@@ -1630,7 +1593,6 @@ impl Default for MockSessionManager {
         Self {
             snapshot: RuntimeSessionState::fixture(mock_session_policy()).to_snapshot(),
             tool_catalog: Vec::new(),
-            turn: mock_assembled_turn(&SessionId::from("root"), ""),
             process_registry: None,
             created: Mutex::new(Vec::new()),
         }
@@ -1646,11 +1608,6 @@ impl MockSessionManager {
 
     pub fn with_tool_catalog(mut self, catalog: Vec<serde_json::Value>) -> Self {
         self.tool_catalog = catalog;
-        self
-    }
-
-    pub fn with_turn(mut self, turn: AssembledTurn) -> Self {
-        self.turn = turn;
         self
     }
 

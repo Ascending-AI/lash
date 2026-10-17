@@ -211,8 +211,10 @@ impl ProcessStartTarget {
 #[derive(Clone, Debug, PartialEq, Serialize, Deserialize)]
 #[serde(tag = "kind", rename_all = "snake_case")]
 pub enum SessionTurnOutcome {
-    /// The runner answers the child's `AssembledTurn`, with the process and
-    /// child-session ids beside it.
+    /// The runner answers `{ process_id, child_session_id, turn_id, outcome }`.
+    /// No session read is embedded. Failure diagnostics preserve the committed
+    /// cause and permitted detail; retryability and provider kind are not
+    /// committed and are not surfaced.
     Turn,
     /// The runner answers the child's final value, checked against `schema`
     /// when one is given.

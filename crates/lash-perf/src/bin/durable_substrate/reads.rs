@@ -524,7 +524,7 @@ async fn measure_with_stores(
             output.is_success(),
             "{id}: {:?}, {:?}",
             output.status(),
-            output.result.errors
+            output.outcome.error_cause()
         );
         ensure!(
             *answers.calls.lock_recover() == variant.count(),

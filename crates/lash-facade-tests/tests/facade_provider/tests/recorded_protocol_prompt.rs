@@ -636,7 +636,7 @@ async fn facade_prompt_pool_and_limits_control_real_composition() -> Result<()> 
         .output()
         .await;
     assert!(
-        !matches!(result, Ok(ref output) if matches!(output.result.outcome, lash_core::facade_support::TurnOutcome::Finished(_)))
+        !matches!(result, Ok(ref output) if matches!(output.outcome, lash_core::facade_support::TurnOutcome::Finished(_)))
     );
     assert_eq!(
         served.lock_recover().len(),

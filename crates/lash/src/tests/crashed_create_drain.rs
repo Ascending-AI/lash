@@ -494,9 +494,9 @@ async fn a_session_drained_after_a_crashed_create_reopens_on_a_new_deployment(
     };
     let output = output??;
     assert!(
-        matches!(output.result.outcome, TurnOutcome::Finished(_)),
+        matches!(output.outcome, TurnOutcome::Finished(_)),
         "the restarted deployment runs a turn of the session: {:?}",
-        output.result.outcome
+        output.outcome
     );
     Ok(())
 }
@@ -615,7 +615,7 @@ async fn a_send_to_a_catalog_row_with_no_head_answers_the_typed_refusal(
         panic!("the sender's output answers the refusal: none in 60 s");
     };
     let refusal = match output {
-        Ok(output) => panic!("the row runs no turn: {:?}", output.result.outcome),
+        Ok(output) => panic!("the row runs no turn: {:?}", output.outcome),
         Err(refusal) => refusal,
     };
     let code = lash_core::RuntimeErrorCode::SessionCreationUnrecorded;

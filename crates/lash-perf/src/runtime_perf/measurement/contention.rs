@@ -30,7 +30,7 @@ struct ContentionWave {
 enum WriterOperationResult {
     Configure(lash::config::ConfigTransactionOutcome),
     AppendMessages,
-    SecondTurn(Box<lash::TurnReport>),
+    SecondTurn(Box<super::super::harness::MeasuredTurn>),
 }
 
 async fn run_writer_operation(
@@ -120,7 +120,7 @@ async fn measure_writer_operation(
         WriterOperationResult::SecondTurn(turn) => validate_runtime_perf_turn(
             scenario,
             ordinal,
-            &turn,
+            &turn.outcome,
             &session
                 .durable()
                 .read()
@@ -502,7 +502,7 @@ pub(crate) async fn run_once_async_process_settlement(
             CancellationToken::new(),
         )
         .await?;
-    validate_runtime_perf_turn(scenario, 0, &turn, &runtime.export_state().await?)?;
+    validate_runtime_perf_turn(scenario, 0, &turn.outcome, &runtime.export_state().await?)?;
     let parent_return_ms = elapsed_ms(run_started);
 
     // Each child's start committed before the parent's turn did, so every

@@ -912,10 +912,15 @@ fn reporting(response: LlmResponse, usage: &LlmUsage) -> LlmResponse {
 }
 
 /// The usage each model call of `output`'s turn reported, in call order.
-fn call_usage(output: &lash::TurnOutput) -> Vec<LlmUsage> {
-    output
-        .result
-        .llm_calls
+async fn call_usage(core: &lash::LashCore, name: &str, output: &lash::TurnOutput) -> Vec<LlmUsage> {
+    let session = core
+        .session(SessionId::parse(name).unwrap())
+        .durable()
+        .await
+        .unwrap();
+    let output_model_calls =
+        lash::testing::model_calls_for_activity(&session, &output.activities).await;
+    output_model_calls
         .iter()
         .flat_map(|call| &call.attempts)
         .filter_map(|attempt| attempt.usage.clone())
@@ -970,12 +975,17 @@ async fn a_childs_model_usage_stays_on_the_childs_own_turn(tier: Tier) {
         "the parent's turn ends on its own answer: {parent:?}"
     );
     assert_eq!(
-        call_usage(&parent),
+        call_usage(&deployment.core, "usage-parent", &parent).await,
         vec![parent_spawns, parent_answers],
         "the parent records its own two calls and none of its child's"
     );
     assert_eq!(
-        parent.result.usage,
+        call_usage(&deployment.core, "usage-parent", &parent)
+            .await
+            .into_iter()
+            .try_fold(LlmUsage::default(), |total, usage| total
+                .checked_add(&usage))
+            .unwrap(),
         lash_core::LlmUsage {
             input_tokens: 16,
             output_tokens: 4,
@@ -1005,12 +1015,17 @@ async fn a_childs_model_usage_stays_on_the_childs_own_turn(tier: Tier) {
         .unwrap();
     assert!(cached.is_success(), "{cached:?}");
     assert_eq!(
-        call_usage(&cached),
+        call_usage(&deployment.core, "usage-linked-child", &cached).await,
         vec![cached_child],
         "the child's cache-read-only call is its own turn's"
     );
     assert_eq!(
-        cached.result.usage,
+        call_usage(&deployment.core, "usage-linked-child", &cached)
+            .await
+            .into_iter()
+            .try_fold(LlmUsage::default(), |total, usage| total
+                .checked_add(&usage))
+            .unwrap(),
         lash_core::LlmUsage {
             cache_read_input_tokens: 9,
             ..lash_core::LlmUsage::default()
@@ -1056,9 +1071,18 @@ async fn a_turn_report_sums_two_model_calls_usage(tier: Tier) {
     })
     .await;
     let output = settle(&deployment.core, "report-two-calls", "write the attachment").await;
-    assert_eq!(call_usage(&output), vec![first, second], "{output:?}");
     assert_eq!(
-        output.result.usage,
+        call_usage(&deployment.core, "report-two-calls", &output).await,
+        vec![first, second],
+        "{output:?}"
+    );
+    assert_eq!(
+        call_usage(&deployment.core, "report-two-calls", &output)
+            .await
+            .into_iter()
+            .try_fold(lash_core::LlmUsage::default(), |total, usage| total
+                .checked_add(&usage))
+            .expect("bounded usage"),
         lash_core::LlmUsage {
             input_tokens: 16,
             output_tokens: 5,

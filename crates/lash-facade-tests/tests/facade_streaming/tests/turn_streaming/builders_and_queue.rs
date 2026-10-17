@@ -52,9 +52,9 @@ pub(super) async fn turn_started_identity_targets_cancellation_from_pull_stream(
             if evidence.request_id == "turn-started-cancel-request"
     ));
 
-    let report = handle.output().await?.result;
+    let report = handle.output().await?.outcome;
     assert!(matches!(
-        report.outcome,
+        report,
         TurnOutcome::Stopped(lash_core::facade_support::TurnStop::Cancelled { .. })
     ));
     assert!(matches!(

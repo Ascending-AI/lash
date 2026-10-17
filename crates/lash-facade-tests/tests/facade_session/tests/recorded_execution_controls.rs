@@ -8,10 +8,7 @@ const PULSAR: &str = "recorded-controls-pulsar";
 /// How a turn ended and how many model calls it made since the last
 /// reading of `calls`.
 fn shape(output: &lash::TurnOutput, calls: &AtomicUsize) -> (TurnOutcome, usize) {
-    (
-        output.result.outcome.clone(),
-        calls.swap(0, Ordering::SeqCst),
-    )
+    (output.outcome.clone(), calls.swap(0, Ordering::SeqCst))
 }
 
 fn finished_after_all_tools() -> (TurnOutcome, usize) {

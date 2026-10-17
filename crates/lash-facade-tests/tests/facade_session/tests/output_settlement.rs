@@ -146,7 +146,7 @@ async fn a_success_its_output_schema_refuses_settles_as_a_failure_naming_the_too
         "the failure names the tool: {failure:?}"
     );
     assert_eq!(
-        report.outcome,
+        report,
         TurnOutcome::Finished(TurnFinish::AssistantMessage {
             text: "done".to_string(),
         }),
@@ -195,7 +195,7 @@ async fn a_host_reads_the_schema_refusal_from_the_cells_committed_call() -> Resu
         .await
         .open()
         .await?;
-    let report = session
+    session
         .send(TurnInput::text("search the index"))
         .output()
         .await?;
@@ -230,8 +230,9 @@ async fn a_host_reads_the_schema_refusal_from_the_cells_committed_call() -> Resu
     };
     assert_eq!(&record.call_id, call_id);
     assert_eq!(record.tool, SEARCH);
+    let report_tool_calls = durable.read_turn_tool_calls(turn).await?;
     assert_eq!(
-        report.result.tool_calls.as_slice(),
+        report_tool_calls.as_slice(),
         std::slice::from_ref(record.as_ref())
     );
     let lash_core::ToolCallOutcome::Failure(failure) = &record.output.outcome else {

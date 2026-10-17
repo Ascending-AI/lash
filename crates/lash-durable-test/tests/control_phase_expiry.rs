@@ -203,8 +203,10 @@ async fn prove(tool: bool, denied: bool) {
         .await
         .expect("turn settles")
         .unwrap();
-    let recorded = serde_json::to_value(&output.result).unwrap();
-    let text = recorded.to_string();
+    let recorded_outcome = serde_json::to_value(&output.outcome).unwrap();
+    let recorded_calls = session.read_turn_tool_calls(&run).await.unwrap();
+    let text =
+        serde_json::to_string(&(&output.outcome, lash_core::Durable(&recorded_calls))).unwrap();
     assert!(
         text.contains("control_phase_expired"),
         "typed expiry missing: {text}"
@@ -218,9 +220,7 @@ async fn prove(tool: bool, denied: bool) {
         "expiry retains configured bound: {text}"
     );
     if tool {
-        let lash_core::ToolCallOutcome::Failure(failure) =
-            &output.result.tool_calls[0].output.outcome
-        else {
+        let lash_core::ToolCallOutcome::Failure(failure) = &recorded_calls[0].output.outcome else {
             panic!("expired check did not refuse");
         };
         if denied {
@@ -256,8 +256,7 @@ async fn prove(tool: bool, denied: bool) {
         ));
     }
     if !tool {
-        let lash::TurnOutcome::Stopped(lash::TurnStop::RuntimeError { cause }) =
-            &output.result.outcome
+        let lash::TurnOutcome::Stopped(lash::TurnStop::RuntimeError { cause }) = &output.outcome
         else {
             panic!("checkpoint did not fail through its hook path");
         };
@@ -275,14 +274,17 @@ async fn prove(tool: bool, denied: bool) {
     let reopened = stores.reopen_with_clock(clock).await.unwrap();
     let second = core(&served::backend(Arc::new(reopened)), plugin, tool, "second");
     let session = second.session(id).durable().await.unwrap();
-    let replay = session.attach_id(run).output().await.unwrap();
+    let replay = session.attach_id(run.clone()).output().await.unwrap();
     assert_eq!(
-        serde_json::to_value(&replay.result.outcome).unwrap(),
-        recorded["outcome"]
+        serde_json::to_value(&replay.outcome).unwrap(),
+        recorded_outcome
     );
     assert_eq!(
-        serde_json::to_value(lash_core::Durable(&replay.result.tool_calls)).unwrap(),
-        recorded["tool_calls"]
+        serde_json::to_value(lash_core::Durable(
+            &session.read_turn_tool_calls(&run).await.unwrap()
+        ))
+        .unwrap(),
+        serde_json::to_value(lash_core::Durable(&recorded_calls)).unwrap()
     );
     assert_eq!(
         invoked.load(Ordering::SeqCst),

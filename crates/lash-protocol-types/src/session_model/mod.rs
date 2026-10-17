@@ -564,6 +564,32 @@ pub enum TurnOutcome {
 }
 
 impl TurnOutcome {
+    /// The exact assistant text committed as the turn's answer.
+    pub fn assistant_message(&self) -> Option<&str> {
+        match self {
+            Self::Finished(TurnFinish::AssistantMessage { text }) => Some(text),
+            _ => None,
+        }
+    }
+
+    /// The declared finish tool and its committed value.
+    pub fn finished(&self) -> Option<(&str, &serde_json::Value)> {
+        match self {
+            Self::Finished(TurnFinish::Finished { tool_name, value }) => Some((tool_name, value)),
+            _ => None,
+        }
+    }
+
+    /// Whether the turn answered or switched frames successfully.
+    pub fn is_success(&self) -> bool {
+        matches!(self, Self::Finished(_) | Self::AgentFrameSwitch { .. })
+    }
+
+    /// Whether context compaction can recover this stop.
+    pub fn is_context_overflow(&self) -> bool {
+        matches!(self, Self::Stopped(TurnStop::ContextOverflow))
+    }
+
     /// Durable cancellation evidence, present exactly when this outcome is a
     /// cancelled stop. Cancellation evidence has no other home.
     pub fn cancellation(&self) -> Option<&TurnCancellationEvidence> {

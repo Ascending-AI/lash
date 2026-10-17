@@ -199,13 +199,17 @@ async fn truncated_retry_resets_partial_tool_calls_and_retains_failed_attempt_us
         .expect("the retry answers");
     assert_eq!(attempts.load(Ordering::SeqCst), 2);
     assert_eq!(output.assistant_message(), Some("success"));
-    assert!(output.result.tool_calls.is_empty());
+    let output_tool_calls =
+        lash::testing::tool_calls_for_activity(&session, &output.activities).await;
+    assert!(output_tool_calls.is_empty());
     assert!(
         committed_contents(&session.read().await.expect("committed read").expect("head"))
             .iter()
             .all(|content| !content.contains("must_not_run"))
     );
-    let failed = &output.result.llm_calls[0].attempts[0];
+    let output_model_calls =
+        lash::testing::model_calls_for_activity(&session, &output.activities).await;
+    let failed = &output_model_calls[0].attempts[0];
     assert_eq!(failed.outcome, lash_core::AttemptOutcome::Interrupted);
     assert_eq!(
         failed.usage.as_ref().map(|usage| usage.input_tokens),
@@ -301,7 +305,9 @@ async fn courtesy_retry_after_regeneration_emits_one_host_visible_attempt_reset(
         .expect("the courtesy retry answers");
     assert_eq!(output.assistant_message(), Some("success"));
     assert_eq!(calls.load(Ordering::SeqCst), 2);
-    let attempts = &output.result.llm_calls[0].attempts;
+    let output_model_calls =
+        lash::testing::model_calls_for_activity(&session, &output.activities).await;
+    let attempts = &output_model_calls[0].attempts;
     assert_eq!(attempts.len(), 2);
     assert_eq!(
         attempts
@@ -397,7 +403,7 @@ async fn retryable_mid_stream_failure_preserves_durable_charge_safety_evidence()
         .expect("the failed turn settles");
     assert_eq!(requests.lock_recover().len(), 1, "no regeneration");
     assert!(matches!(
-        output.result.outcome,
+        output.outcome,
         lash::TurnOutcome::Stopped(lash::TurnStop::ProviderError { .. })
     ));
     assert!(output.activities.iter().any(|activity| matches!(
@@ -416,8 +422,10 @@ async fn retryable_mid_stream_failure_preserves_durable_charge_safety_evidence()
             .all(|content| !content.contains("discarded")),
         "a failed partial response is preview output, not committed history"
     );
-    let [call] = output.result.llm_calls.as_slice() else {
-        panic!("one model call: {:?}", output.result.llm_calls);
+    let output_model_calls =
+        lash::testing::model_calls_for_activity(&session, &output.activities).await;
+    let [call] = output_model_calls.as_slice() else {
+        panic!("one model call: {:?}", output_model_calls);
     };
     let [attempt] = call.attempts.as_slice() else {
         panic!("one attempt: {:?}", call.attempts);
@@ -548,18 +556,20 @@ async fn authentication_failure_stops_unretried_and_permits_the_next_turn() {
         .expect("the failed turn settles");
     assert!(
         matches!(
-            first.result.outcome,
+            first.outcome,
             lash::TurnOutcome::Stopped(lash::TurnStop::ProviderError { .. })
         ),
         "a 401 stops as a provider failure: {:?}",
-        first.result.outcome
+        first.outcome
     );
     assert!(
-        first.result.outcome.cancellation().is_none(),
+        first.outcome.cancellation().is_none(),
         "a 401 is no cancellation"
     );
-    let [call] = first.result.llm_calls.as_slice() else {
-        panic!("one model call: {:?}", first.result.llm_calls);
+    let first_model_calls =
+        lash::testing::model_calls_for_activity(&session, &first.activities).await;
+    let [call] = first_model_calls.as_slice() else {
+        panic!("one model call: {:?}", first_model_calls);
     };
     let [attempt] = call.attempts.as_slice() else {
         panic!(
@@ -583,24 +593,6 @@ async fn authentication_failure_stops_unretried_and_permits_the_next_turn() {
         .await
         .expect("the next turn answers");
     assert_eq!(second.assistant_message(), Some("recovered"));
-    let first_input = first
-        .result
-        .acceptance
-        .as_ref()
-        .map(|receipt| &receipt.input_id);
-    assert!(
-        first_input.is_some(),
-        "the failed turn's input was accepted"
-    );
-    assert_ne!(
-        first_input,
-        second
-            .result
-            .acceptance
-            .as_ref()
-            .map(|receipt| &receipt.input_id),
-        "the next turn does not inherit the failed turn's input identity"
-    );
     core.shutdown().await.expect("shutdown");
 }
 
@@ -1025,11 +1017,10 @@ async fn stream_validation_failure_keeps_the_sealed_attempts_and_the_interrupted
         .output()
         .await
         .expect("validation settles the turn");
-    let [call] = output.result.llm_calls.as_slice() else {
-        panic!(
-            "the interrupted call is recorded: {:?}",
-            output.result.llm_calls
-        );
+    let output_model_calls =
+        lash::testing::model_calls_for_activity(&session, &output.activities).await;
+    let [call] = output_model_calls.as_slice() else {
+        panic!("the interrupted call is recorded: {:?}", output_model_calls);
     };
     assert_eq!(attempts.load(Ordering::SeqCst), 2);
     assert_eq!(call.attempts.len(), 2);
@@ -1045,8 +1036,6 @@ async fn stream_validation_failure_keeps_the_sealed_attempts_and_the_interrupted
         interrupted.error.as_ref().expect("validation failure").code,
         Some(lash_core::TurnFailureCode::StreamEvidenceBeforeResponseStart.into())
     );
-    assert!(output.result.errors.iter().any(|issue| issue.code
-        == Some(lash_core::TurnFailureCode::StreamEvidenceBeforeResponseStart.into())));
 }
 
 #[derive(Clone, Debug, Default)]
@@ -1095,7 +1084,7 @@ impl lash_core::provider::Provider for RefusedLower {
 
 /// FIG-6570 / S1: preparation refusal is the turn's typed failure, not a
 /// transport attempt. The retained call says unsent and charges no usage;
-/// the terminal classifies the refusal and the observed issue keeps its code.
+/// the terminal classifies the refusal and live error activity keeps its code.
 #[tokio::test(flavor = "multi_thread", worker_threads = 2)]
 async fn a_preparation_refusal_keeps_its_typed_cause_and_an_empty_call_ledger() {
     let model = ProviderHandle::new(lash_core::provider::ProviderComponents::new(Box::new(
@@ -1117,13 +1106,21 @@ async fn a_preparation_refusal_keeps_its_typed_cause_and_an_empty_call_ledger() 
     };
     assert!(gaps.is_empty(), "the refusal's activity is available");
     assert_eq!(
-        output.result.outcome,
+        output.outcome,
         lash::TurnOutcome::Stopped(lash::TurnStop::ProviderError {
             cause: lash::TurnErrorCause::new(lash::TurnErrorCode::RequestRejected),
         })
     );
-    let [issue] = output.result.errors.as_slice() else {
-        panic!("one preparation failure: {:?}", output.result.errors);
+    let failures: Vec<_> = output
+        .activities
+        .iter()
+        .filter_map(|activity| match &activity.event {
+            TurnEvent::Error(failure) => failure.envelope.as_ref(),
+            _ => None,
+        })
+        .collect();
+    let [issue] = failures.as_slice() else {
+        panic!("one preparation failure: {failures:?}");
     };
     assert_eq!(issue.kind, lash_core::TurnFailureKind::LlmProvider);
     assert_eq!(
@@ -1158,9 +1155,7 @@ async fn a_preparation_refusal_keeps_its_typed_cause_and_an_empty_call_ledger() 
         call.record.attempts.is_empty(),
         "no dispatched attempt or retry charge"
     );
-    assert_eq!(output.result.llm_calls, vec![call.record.clone()]);
     assert_eq!(committed.usage().expect("call usage"), LlmUsage::default());
-    assert_eq!(output.result.usage, LlmUsage::default());
     assert_eq!(
         session
             .read()
@@ -1305,7 +1300,9 @@ async fn a_live_model_deadline_reports_the_interrupted_attempt_and_its_typed_fai
     tokio::time::advance(std::time::Duration::from_millis(2_001)).await;
     committed.notified().await;
     let output = held.output().await.expect("the deadline settles the turn");
-    let [call] = output.result.llm_calls.as_slice() else {
+    let output_model_calls =
+        lash::testing::model_calls_for_activity(&session, &output.activities).await;
+    let [call] = output_model_calls.as_slice() else {
         panic!("one interrupted call");
     };
     let [attempt] = call.attempts.as_slice() else {
@@ -1320,13 +1317,6 @@ async fn a_live_model_deadline_reports_the_interrupted_attempt_and_its_typed_fai
     assert_eq!(
         attempt.error.as_ref().expect("timeout failure").code,
         Some(lash_core::TurnFailureCode::ModelTotalExceeded.into())
-    );
-    assert!(
-        output
-            .result
-            .errors
-            .iter()
-            .any(|issue| issue.code == Some(lash_core::TurnFailureCode::ModelTotalExceeded.into()))
     );
     core.shutdown().await.expect("shutdown");
     hold_time.abort();
@@ -1354,7 +1344,7 @@ async fn provider_stop_cause_survives_owner_replacement() {
         .output()
         .await
         .expect("settled")
-        .result;
+        .outcome;
     drop(session);
     running.shutdown().await.expect("shutdown");
     let reopened = core_over(backend, model);
@@ -1367,21 +1357,21 @@ async fn provider_stop_cause_survives_owner_replacement() {
         .output()
         .await
         .expect("report")
-        .result;
-    assert_eq!(report.source, lash::ReportSource::Durable);
-    assert_eq!(report.outcome, live.outcome);
+        .outcome;
+    // FIG-6565: a settled answer is independent of the follower's activity.
+    assert_eq!(
+        serde_json::to_value(&report).unwrap(),
+        serde_json::to_value(&live).unwrap()
+    );
+    assert_eq!(report, live);
     assert_eq!(report.error_cause(), live.error_cause());
     assert_eq!(
-        report.status(),
+        lash::TurnStatus::of_outcome(&report),
         lash::TurnStatus::Failed {
             cause: live.error_cause().cloned(),
         }
     );
-    assert!(
-        report.errors.is_empty(),
-        "the new follower observed no failure"
-    );
-    let encoded = serde_json::to_value(&report.outcome).expect("outcome");
+    let encoded = serde_json::to_value(&report).expect("outcome");
     assert_eq!(
         encoded.pointer("/stopped/provider_error/cause/code"),
         Some(&serde_json::json!("auth_rejected"))
@@ -1413,8 +1403,8 @@ async fn provider_stop_detail_excludes_secret_body() {
         .output()
         .await
         .expect("settled")
-        .result;
-    let encoded = serde_json::to_value(&report.outcome).expect("outcome");
+        .outcome;
+    let encoded = serde_json::to_value(&report).expect("outcome");
     let detail = encoded
         .pointer("/stopped/provider_error/cause/detail")
         .and_then(serde_json::Value::as_str)

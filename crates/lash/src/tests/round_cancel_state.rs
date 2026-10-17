@@ -251,9 +251,9 @@ async fn cancelled_sibling(answer: Answer) -> Result<CancelledRound> {
         .await
         .expect("the cancelled turn ends")?;
     assert!(
-        output.result.cancellation().is_some(),
+        output.outcome.cancellation().is_some(),
         "{:?}",
-        output.result.outcome
+        output.outcome
     );
     while let Some(activity) = events.next_activity().await {
         seen.push(activity?);

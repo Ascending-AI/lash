@@ -140,7 +140,7 @@ async fn standard_tool_panic_stops_before_another_model_call() -> Result<()> {
         .send(TurnInput::text("call the tool"))
         .output()
         .await?;
-    assert_tool_panic(&first);
+    assert_tool_panic(&session.durable(), &first).await;
     assert_eq!(calls.load(Ordering::SeqCst), 1);
     let next = session.send(TurnInput::text("continue")).output().await?;
     assert_eq!(next.assistant_message(), Some("next turn works"));
@@ -160,20 +160,20 @@ fn panic_tool_response() -> LlmResponse {
     }
 }
 
-fn assert_tool_panic(output: &lash::TurnOutput) {
+async fn assert_tool_panic(session: &lash::DurableSession, output: &lash::TurnOutput) {
     let lash::TurnOutcome::Stopped(lash::TurnStop::ToolPanicked {
         tool_name,
         call_id,
         message,
-    }) = &output.result.outcome
+    }) = &output.outcome
     else {
-        panic!("expected ToolPanicked, got {:?}", output.result.outcome);
+        panic!("expected ToolPanicked, got {:?}", output.outcome);
     };
     assert_eq!(tool_name, "fixture_echo");
     assert_eq!(message, "tool payload only");
-    let failed = output
-        .result
-        .tool_calls
+    let output_tool_calls =
+        lash::testing::tool_calls_for_activity(session, &output.activities).await;
+    let failed = output_tool_calls
         .iter()
         .find(|call| call.output.tool_panic_stop().is_some())
         .expect("committed panicked call");
@@ -272,7 +272,7 @@ await control.finish("must not finish");"#
         "tool must run: {:?}",
         output.activities
     );
-    assert_tool_panic(&output);
+    assert_tool_panic(&session.durable(), &output).await;
     assert_eq!(calls.load(Ordering::SeqCst), 1);
     core.shutdown().await?;
     Ok(())
@@ -306,14 +306,17 @@ async fn provider_panic_records_the_typed_attempt_releases_the_lease_and_next_tu
         .await?;
     assert!(
         matches!(
-            failed.result.outcome,
+            failed.outcome,
             lash::TurnOutcome::Stopped(lash_core::facade_support::TurnStop::ProviderError { .. })
         ),
         "{:?}",
-        failed.result.outcome
+        failed.outcome
     );
     assert_eq!(
-        panicked_attempt(&failed).0.as_deref(),
+        panicked_attempt(&session.durable(), &failed)
+            .await
+            .0
+            .as_deref(),
         Some("lash:provider_panicked")
     );
 
@@ -326,10 +329,13 @@ async fn provider_panic_records_the_typed_attempt_releases_the_lease_and_next_tu
 }
 
 /// The typed attempt a provider panic leaves on its turn's report.
-fn panicked_attempt(output: &lash::TurnOutput) -> (Option<String>, String) {
-    let attempt = output
-        .result
-        .llm_calls
+async fn panicked_attempt(
+    session: &lash::DurableSession,
+    output: &lash::TurnOutput,
+) -> (Option<String>, String) {
+    let output_model_calls =
+        lash::testing::model_calls_for_activity(session, &output.activities).await;
+    let attempt = output_model_calls
         .first()
         .and_then(|call| call.attempts.first())
         .expect("provider panic attempt record");
@@ -339,7 +345,7 @@ fn panicked_attempt(output: &lash::TurnOutput) -> (Option<String>, String) {
             .as_ref()
             .and_then(|error| error.code.as_ref())
             .map(|code| code.namespaced()),
-        format!("{:?}", output.result.outcome),
+        format!("{:?}", output.outcome),
     )
 }
 
@@ -436,7 +442,7 @@ async fn provider_panic_effect_is_identical_before_quiet_return_or_loud_reraise(
             .await
             .expect("loud propagation follows the committed terminal");
     }
-    let effect = panicked_attempt(&output);
+    let effect = panicked_attempt(&session.durable(), &output).await;
     println!("EFFECT {effect:?}");
     assert_eq!(
         effect.0.as_deref(),
@@ -536,7 +542,7 @@ async fn tool_panic_effect_is_identical_before_quiet_return_or_loud_reraise() ->
         .id(lash::TurnId::fixture("tool-panic-turn"))
         .output()
         .await?;
-    assert_tool_panic(&first);
+    assert_tool_panic(&session.durable(), &first).await;
     if loud {
         tokio::time::timeout(std::time::Duration::from_secs(30), raised.notified())
             .await
@@ -548,13 +554,13 @@ async fn tool_panic_effect_is_identical_before_quiet_return_or_loud_reraise() ->
         .id(lash::TurnId::fixture("tool-panic-turn"))
         .output()
         .await?;
-    assert_eq!(first.result.outcome, replay.result.outcome);
+    assert_eq!(first.outcome, replay.outcome);
     assert_eq!(
         tool.calls.load(Ordering::SeqCst),
         1,
         "a committed panic never calls the tool again"
     );
-    println!("EFFECT {:?}", first.result.outcome);
+    println!("EFFECT {:?}", first.outcome);
     core.shutdown().await?;
     Ok(())
 }

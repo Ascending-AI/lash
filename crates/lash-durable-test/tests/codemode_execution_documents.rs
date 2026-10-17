@@ -259,16 +259,32 @@ await control.finish(fetched.url);
         2,
         "fetch and finish each name a site: {emitted:?}"
     );
+    let output_tool_calls = world
+        .core
+        .session(lash::SessionId::from("cell-document"))
+        .durable()
+        .await
+        .unwrap()
+        .read_turn_tool_calls(
+            &output
+                .activities
+                .iter()
+                .find_map(|activity| match &activity.event {
+                    lash::TurnEvent::TurnStarted { turn_id, .. } => Some(turn_id.clone()),
+                    _ => None,
+                })
+                .unwrap(),
+        )
+        .await
+        .unwrap();
     assert_eq!(
-        output
-            .result
-            .tool_calls
+        output_tool_calls
             .iter()
             .map(|call| call.tool.as_str())
             .collect::<Vec<_>>(),
         ["web_fetch", "finish"]
     );
-    for call in &output.result.tool_calls {
+    for call in &output_tool_calls {
         let sites = events
             .iter()
             .filter_map(|event| match &event.payload {

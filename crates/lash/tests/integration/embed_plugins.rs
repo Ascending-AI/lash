@@ -20,7 +20,7 @@ use serde_json::json;
 
 fn assistant_prose(result: &lash::turn::TurnOutput) -> String {
     result
-        .result
+        .outcome
         .assistant_message()
         .unwrap_or_default()
         .to_string()

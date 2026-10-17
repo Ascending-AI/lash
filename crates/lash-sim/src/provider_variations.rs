@@ -539,7 +539,7 @@ mod tests {
         };
 
         assert_eq!(
-            turn.result.outcome,
+            turn.outcome,
             lash::TurnOutcome::Finished(TurnFinish::Finished {
                 tool_name: "finish".into(),
                 value: json!("settled")
@@ -561,15 +561,15 @@ mod tests {
                 carries_unclosed_cell_retry_prompt: false,
             }]
         );
+        let turn_model_calls =
+            lash::testing::model_calls_for_activity(&session.durable(), &turn.activities).await;
 
-        let attempt = turn
-            .result
-            .llm_calls
+        let attempt = turn_model_calls
             .first()
             .and_then(|call| call.attempts.first())
             .expect("one provider attempt");
-        assert_eq!(turn.result.llm_calls.len(), 1);
-        assert_eq!(turn.result.llm_calls[0].attempts.len(), 1);
+        assert_eq!(turn_model_calls.len(), 1);
+        assert_eq!(turn_model_calls[0].attempts.len(), 1);
         assert_eq!(
             attempt
                 .generation_disposition

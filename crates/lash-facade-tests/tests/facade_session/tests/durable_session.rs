@@ -1308,7 +1308,7 @@ async fn an_rlm_cells_executed_calls_name_the_turns_tool_call_records_after_a_re
 
     let reopened = core(backend)?;
     let transcript = reopened
-        .session(session_id)
+        .session(session_id.clone())
         .open()
         .await?
         .read_view()
@@ -1375,7 +1375,7 @@ async fn a_settled_turns_cell_tool_records_are_the_streamed_ones_after_a_reopen(
         .open()
         .await?;
     let events = RecordingEvents::default();
-    let settled = session
+    session
         .send(lash::TurnInput::text("look up twice"))
         .id(run.clone())
         .output_into(&events)
@@ -1414,21 +1414,32 @@ async fn a_settled_turns_cell_tool_records_are_the_streamed_ones_after_a_reopen(
             })
             .collect::<Vec<_>>()
     };
-    assert_eq!(recorded(&settled.tool_calls), streamed);
+    assert_eq!(
+        recorded(&session.durable().read_turn_tool_calls(&run).await?),
+        streamed
+    );
     drop(session);
     running.shutdown().await?;
 
     let reopened = core(backend)?;
-    let report = reopened
-        .session(session_id)
+    reopened
+        .session(session_id.clone())
         .open()
         .await?
-        .attach_id(run)
+        .attach_id(run.clone())
         .output()
-        .await?
-        .result;
-    assert_eq!(report.source, lash::ReportSource::Durable);
-    assert_eq!(recorded(&report.tool_calls), streamed);
+        .await?;
+    assert_eq!(
+        recorded(
+            &reopened
+                .session(session_id.clone())
+                .durable()
+                .await?
+                .read_turn_tool_calls(&run)
+                .await?
+        ),
+        streamed
+    );
     reopened.shutdown().await?;
     Ok(())
 }
@@ -1511,30 +1522,28 @@ async fn a_cancelled_turn_reports_the_tool_calls_its_cell_completed_after_a_reop
         let ended = tokio::time::timeout(std::time::Duration::from_secs(60), handle.output())
             .await
             .expect("the cancelled turn ends")?
-            .result;
+            .outcome;
         canceller.join().expect("the canceller runs")?;
-        assert!(
-            ended.cancellation().is_some(),
-            "{mode:?}: {:?}",
-            ended.outcome
-        );
+        assert!(ended.cancellation().is_some(), "{mode:?}: {:?}", ended);
         drop(session);
         running.shutdown().await?;
 
         let reopened = core(backend)?;
         let report = reopened
-            .session(session_id)
+            .session(session_id.clone())
             .open()
             .await?
-            .attach_id(run)
+            .attach_id(run.clone())
             .output()
-            .await?
-            .result;
-        assert_eq!(report.source, lash::ReportSource::Durable);
-        assert!(report.cancellation().is_some(), "{mode:?}");
+            .await?;
+        assert!(report.outcome.cancellation().is_some(), "{mode:?}");
         assert_eq!(
-            report
-                .tool_calls
+            reopened
+                .session(session_id.clone())
+                .durable()
+                .await?
+                .read_turn_tool_calls(&run)
+                .await?
                 .iter()
                 .map(|record| (record.tool.as_str(), record.output.is_success()))
                 .collect::<Vec<_>>(),
@@ -1593,10 +1602,11 @@ async fn the_after_turn_report_lists_the_tool_calls_of_the_cell_that_finished_th
     let settled = session
         .send(lash::TurnInput::text("look up"))
         .output()
-        .await?
-        .result;
+        .await?;
     assert_eq!(
-        settled.tool_calls.len(),
+        lash::testing::tool_calls_for_activity(&session.durable(), &settled.activities)
+            .await
+            .len(),
         2,
         "the cell made one tool call and its `control.finish`"
     );
@@ -1708,7 +1718,7 @@ async fn a_cells_assistant_context_and_record_read_back_from_the_transcript_afte
 
         let reopened = core(backend, channel)?;
         let transcript = reopened
-            .session(session_id)
+            .session(session_id.clone())
             .open()
             .await?
             .durable()
@@ -1826,8 +1836,7 @@ async fn a_cell_at_its_tool_call_limit_can_still_finish() -> Result<()> {
     let settled = session
         .send(lash::TurnInput::text("look up once"))
         .output()
-        .await?
-        .result;
+        .await?;
     assert_eq!(
         settled.finished(),
         Some(("finish", &serde_json::json!("looked up once"))),
@@ -1835,12 +1844,12 @@ async fn a_cell_at_its_tool_call_limit_can_still_finish() -> Result<()> {
         settled.outcome
     );
     assert!(
-        settled
-            .tool_calls
+        lash::testing::tool_calls_for_activity(&session.durable(), &settled.activities)
+            .await
             .iter()
             .all(|call| call.output.is_success()),
         "{:?}",
-        settled.tool_calls
+        lash::testing::tool_calls_for_activity(&session.durable(), &settled.activities).await
     );
     drop(session);
     core.shutdown().await?;

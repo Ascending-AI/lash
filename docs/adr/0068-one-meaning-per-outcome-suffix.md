@@ -20,7 +20,7 @@ four permitted suffixes has one role:
 | --- | --- |
 | `Receipt` | Durable acknowledgement that a request is accepted or recorded. It does not promise that the requested work completes. |
 | `Outcome` | The terminal answer of one operation. Usually a closed enum; a struct is appropriate when that operation has one terminal answer shape. |
-| `Report` | An aggregate over items, including maintenance counts, batch deliveries and a turn's calls or usage. |
+| `Report` | An aggregate over items, including maintenance counts, batch deliveries and explicitly requested usage aggregates. |
 | `Status` | A point-in-time observation of work that can remain in flight. Its state set can include terminal observations. |
 
 The operation an outcome answers is explicit. A tool body's return and a whole
@@ -106,7 +106,7 @@ These current types demonstrate the roles rather than recording a rename list.
 | `ToolDeclaration` | Producer capabilities, not an answer. |
 | `ProcessHandleView` | Read projection of the process handle. |
 | `TurnExecutionMetrics` | Measured execution facts. |
-| `TurnReport` | Aggregate of the turn outcome, calls, errors and usage. |
+| `TurnOutcome` | The committed terminal answer, independent of observation. |
 | `MaintenanceResult<R>` | A genuine fallible-return alias. |
 
 ## Executable evidence
@@ -118,9 +118,9 @@ These current types demonstrate the roles rather than recording a rename list.
 - [Role witnesses](../../scripts/test_identity_adr_claims.py#L23) pin delivery
   receipt/report nesting, registration outcomes and execution policy.
 - [Tool-body answer](../../crates/lash-core-execution/src/tool_result.rs#L382),
-  [call outcome](../../crates/lash-sansio/src/tool_output.rs#L455) and
-  [execution policy](../../crates/lash-sansio/src/tool_contract.rs#L13) keep the
+  [call outcome](../../crates/lash-protocol-types/src/tool_output.rs#L455) and
+  [execution policy](../../crates/lash-protocol-types/src/tool_contract.rs#L13) keep the
   neighbouring roles separate.
-- [Turn report](../../crates/lash/src/turn.rs#L158) and
+- [Turn output](../../crates/lash/src/turn.rs) and
   [send outcomes](../../crates/lash/src/send.rs)
   show aggregate and observation roles, including parked and stalled work.

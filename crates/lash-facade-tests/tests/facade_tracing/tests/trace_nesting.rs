@@ -57,7 +57,7 @@ async fn sent(
     .trace_context(caller())
     .output()
     .await?;
-    assert!(output.is_success(), "{:?}", output.result.outcome);
+    assert!(output.is_success(), "{:?}", output.outcome);
     Ok(core)
 }
 

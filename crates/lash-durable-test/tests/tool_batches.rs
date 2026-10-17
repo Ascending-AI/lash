@@ -835,20 +835,30 @@ enum Scope {
 
 /// Full refusal causes are recorded independently of the provider's compact
 /// error status and the mode's words (FIG-6518).
-fn refusals(output: &lash::TurnOutput) -> Vec<&lash_core::ToolFailure> {
-    output
-        .result
-        .tool_calls
+async fn refusals(
+    world: &World,
+    name: &str,
+    output: &lash::TurnOutput,
+) -> Vec<lash_core::ToolFailure> {
+    let session = world
+        .core
+        .session(lash::SessionId::parse(name).unwrap())
+        .durable()
+        .await
+        .unwrap();
+    let output_tool_calls =
+        lash::testing::tool_calls_for_activity(&session, &output.activities).await;
+    output_tool_calls
         .iter()
         .filter_map(|call| match &call.output.outcome {
-            lash_core::ToolCallOutcome::Failure(failure) => Some(failure),
+            lash_core::ToolCallOutcome::Failure(failure) => Some(failure.clone()),
             _ => None,
         })
         .collect()
 }
 
-fn assert_step_limit_refusal(world: &World, name: &str, output: &lash::TurnOutput) {
-    let refused = refusals(output);
+async fn assert_step_limit_refusal(world: &World, name: &str, output: &lash::TurnOutput) {
+    let refused = refusals(world, name, output).await;
     assert!(!refused.is_empty(), "{name}: the round has typed refusals");
     for failure in &refused {
         assert_eq!(failure.code, lash::ToolCallLimitExceeded::CODE, "{name}");
@@ -963,8 +973,8 @@ async fn tool_call_limit_admits_the_limit_and_refuses_the_group_past_it(tier: Ti
             &producers.world.read(&at).await,
         );
         assert_eq!(
-            refusals(&output),
-            Vec::<&lash_core::ToolFailure>::new(),
+            refusals(&producers.world, &at, &output).await,
+            Vec::<lash_core::ToolFailure>::new(),
             "{at}: a round of exactly max_tool_calls calls is not refused"
         );
 
@@ -982,7 +992,7 @@ async fn tool_call_limit_admits_the_limit_and_refuses_the_group_past_it(tier: Ti
             Vec::<usize>::new(),
             "{past}: no call of a refused round runs"
         );
-        assert_step_limit_refusal(&producers.world, &past, &output);
+        assert_step_limit_refusal(&producers.world, &past, &output).await;
     }
     producers.world.shutdown().await;
 }
@@ -1028,8 +1038,8 @@ async fn tool_call_limit_staged_calls(tier: Tier) {
                     "{twice}: both groups of max_tool_calls calls run"
                 );
                 assert_eq!(
-                    refusals(&output),
-                    Vec::<&lash_core::ToolFailure>::new(),
+                    refusals(&producers.world, &twice, &output).await,
+                    Vec::<lash_core::ToolFailure>::new(),
                     "{twice}: two groups of max_tool_calls calls in sequence are not refused"
                 );
             }
@@ -1064,7 +1074,7 @@ async fn tool_call_limit_staged_calls(tier: Tier) {
                 "{past}: no refused call starts"
             );
             match scope {
-                Scope::Step => assert_step_limit_refusal(&producers.world, &past, &output),
+                Scope::Step => assert_step_limit_refusal(&producers.world, &past, &output).await,
                 Scope::Cell => {
                     assert_cell_limit_refusal(&producers.world.read(&past).await, counted, rest)
                 }
@@ -1287,14 +1297,12 @@ fn rows(answered: &served::Answered) -> Vec<(u64, String, bool)> {
 /// Protocol admission refusals retain the typed failure independently of
 /// the mode's presented words (ADR 0071, FIG-6518).
 fn assert_runtime_refusal(
-    output: &lash::TurnOutput,
+    output_tool_calls: &[lash_core::ToolCallRecord],
     answered: &served::Answered,
     class: lash_protocol_types::ToolFailureClass,
     code: &str,
 ) {
-    let call = output
-        .result
-        .tool_calls
+    let call = output_tool_calls
         .iter()
         .find(|call| Some(&call.call_id) == answered.call_id.as_ref())
         .unwrap_or_else(|| panic!("the refusal has a typed call record: {answered:?}"));
@@ -1376,6 +1384,14 @@ async fn batch_admission_and_identity_contract(tier: Tier) {
     let output = world.run(context, served::spec(1024), script).await;
     served::assert_answered(context, &output);
     let view = world.read(context).await;
+    let session = world
+        .core
+        .session(lash::SessionId::from(context))
+        .durable()
+        .await
+        .unwrap();
+    let output_tool_calls =
+        lash::testing::tool_calls_for_activity(&session, &output.activities).await;
 
     for value in &full {
         assert_eq!(
@@ -1442,7 +1458,7 @@ async fn batch_admission_and_identity_contract(tier: Tier) {
         let wrapper = answered_under(&view, refused);
         assert_eq!(wrapper.len(), 1, "{context}: `{refused}` answers once");
         assert_runtime_refusal(
-            &output,
+            &output_tool_calls,
             &wrapper[0],
             lash_protocol_types::ToolFailureClass::InvalidRequest,
             "invalid_batch",
@@ -1527,8 +1543,16 @@ async fn batch_admission_and_identity_contract(tier: Tier) {
         .and_then(|part| part.tool_result_status())
         .expect("typed wrapper result");
     assert_eq!(status, lash_protocol_types::ToolCallStatus::Failure);
+    let session = world
+        .core
+        .session(lash::SessionId::from(context))
+        .durable()
+        .await
+        .unwrap();
+    let output_tool_calls =
+        lash::testing::tool_calls_for_activity(&session, &output.activities).await;
     assert!(
-        matches!(&output.result.tool_calls[0].output.outcome, lash_core::ToolCallOutcome::Failure(failure) if failure.code == "tool_unavailable")
+        matches!(&output_tool_calls[0].output.outcome, lash_core::ToolCallOutcome::Failure(failure) if failure.code == "tool_unavailable")
     );
     assert!(
         rows(&wrapper[0]).is_empty(),

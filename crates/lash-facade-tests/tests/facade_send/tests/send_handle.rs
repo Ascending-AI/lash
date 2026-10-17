@@ -204,100 +204,6 @@ async fn settled_outcomes_do_not_load_session_windows() -> Result<()> {
     Ok(())
 }
 
-/// A run's report is rebuilt from the store for every follower: the turn
-/// runs on the session's actor, never in the sender's process, so no live
-/// report is held for it. A second follower answers the same outcome
-/// and acceptance as the first, marked Durable, and its sealed call activity
-/// stays transportable (D1 §1.5 3b, risk R1; ADR 0132 §3).
-async fn a_run_whose_live_report_is_gone_answers_its_durable_report() -> Result<()> {
-    let fixture = fixture(1).await?;
-    let session = created_session(
-        &fixture.core,
-        lash::SessionId::parse("send-durable-report").expect("nonblank host identity"),
-    )
-    .await
-    .open()
-    .await?;
-
-    let handle = session
-        .send(TurnInput::text(HELD))
-        .id(lash::TurnId::parse("durable-report-run").expect("nonblank host identity"))
-        .await?;
-    let input_id = handle.input_id().clone();
-    provider_called(&fixture, 1).await;
-    // Subscribe while the provider is held, then let the first follower take
-    // the live report. The second follower retains the sealed call activity
-    // while rebuilding its terminal report from durable state.
-    let follower = session.attach(input_id.clone());
-    fixture.release.notify_one();
-    let live = handle.output().await?;
-    assert_eq!(live.result.source, lash::ReportSource::Durable);
-    assert_eq!(live.status(), lash::TurnStatus::Answered);
-
-    let durable = follower.output().await?;
-    assert_eq!(durable.result.source, lash::ReportSource::Durable);
-    assert_eq!(durable.status(), lash::TurnStatus::Answered);
-    assert_eq!(durable.result.outcome, live.result.outcome);
-    assert_eq!(
-        durable.assistant_message(),
-        Some("echo: held until released")
-    );
-    assert!(
-        durable
-            .activities
-            .iter()
-            .any(|activity| matches!(activity.event, lash::TurnEvent::ModelCallRecorded { .. }))
-    );
-    assert_eq!(
-        durable
-            .result
-            .acceptance
-            .as_ref()
-            .map(|acceptance| &acceptance.input_id),
-        Some(&input_id)
-    );
-    assert_eq!(fixture.calls.load(Ordering::SeqCst), 1);
-    Ok(())
-}
-
-/// A settled run's durable report is a function of the store: every
-/// follower that reattaches while the store stands still answers the same
-/// report. A turn cancelled before its first commit leaves the session's
-/// head without a graph, and a report must not date a frame no commit wrote
-/// with the instant it was read (FIG-5489).
-async fn a_reattached_follower_answers_the_same_durable_report() -> Result<()> {
-    let fixture = fixture(1).await?;
-    let session = created_session(
-        &fixture.core,
-        lash::SessionId::parse("send-same-report").expect("nonblank host identity"),
-    )
-    .await
-    .durable()
-    .await?;
-
-    let handle = session
-        .send(TurnInput::text(HELD))
-        .id(lash::TurnId::parse("cancelled-run").expect("nonblank host identity"))
-        .await?;
-    let input_id = handle.input_id().clone();
-    drop(handle);
-    provider_called(&fixture, 1).await;
-    let receipt = session.attach(input_id.clone()).cancel().await?;
-    assert!(
-        matches!(receipt, lash::CancelReceipt::Cancelled { .. }),
-        "{receipt:?}"
-    );
-
-    let first = session.attach(input_id.clone()).output().await?;
-    let again = session.attach(input_id).output().await?;
-    assert_eq!(first.status(), lash::TurnStatus::Cancelled);
-    assert_eq!(first.result.source, lash::ReportSource::Durable);
-    // The sealed calls a follower watched stay its own evidence; the
-    // terminal is the store's.
-    assert_eq!(again.result.outcome, first.result.outcome);
-    Ok(())
-}
-
 /// A settled run whose report no execution in this process can still deposit
 /// answers from the store at once: the follower waits for a live report only
 /// while a run here may still deposit one, never on a run that ran elsewhere
@@ -327,7 +233,6 @@ async fn a_settled_run_no_execution_here_can_report_answers_at_once() -> Result<
     let started = std::time::Instant::now();
     let durable = session.attach(input_id).output().await?;
     let waited = started.elapsed();
-    assert_eq!(durable.result.source, lash::ReportSource::Durable);
     assert_eq!(durable.assistant_message(), Some("echo: report me once"));
     assert!(
         waited < std::time::Duration::from_secs(2),
@@ -620,7 +525,7 @@ async fn an_input_answered_inside_another_run_resolves_answered_with_that_run() 
     // both handles answer its one reply.
     assert_eq!(third.assistant_message(), Some("echo: third"), "{third:?}");
     assert_eq!(third.assistant_message(), second.assistant_message());
-    assert_eq!(third.result.outcome, second.result.outcome);
+    assert_eq!(third.outcome, second.outcome);
 
     let applied_by = session
         .durable()
@@ -733,9 +638,9 @@ async fn a_cancel_reaches_a_run_past_its_frame_switch() -> Result<()> {
         .output()
         .await?;
     let lash_core::facade_support::TurnOutcome::AgentFrameSwitch { frame_key, .. } =
-        &switched.result.outcome
+        &switched.outcome
     else {
-        panic!("the switch answers its send: {:?}", switched.result.outcome);
+        panic!("the switch answers its send: {:?}", switched.outcome);
     };
     let follow_on_run = lash_core::runtime::durable::session_mail::frame_task_run(frame_key);
     reaches(&calls, 2, "the follow-on turn calls the provider").await;
@@ -1216,16 +1121,6 @@ mod sqlite_memory {
     use super::*;
 
     #[tokio::test(flavor = "multi_thread", worker_threads = 4)]
-    async fn a_run_whose_live_report_is_gone_answers_its_durable_report() -> Result<()> {
-        super::a_run_whose_live_report_is_gone_answers_its_durable_report().await
-    }
-
-    #[tokio::test(flavor = "multi_thread", worker_threads = 4)]
-    async fn a_reattached_follower_answers_the_same_durable_report() -> Result<()> {
-        super::a_reattached_follower_answers_the_same_durable_report().await
-    }
-
-    #[tokio::test(flavor = "multi_thread", worker_threads = 4)]
     async fn a_settled_run_no_execution_here_can_report_answers_at_once() -> Result<()> {
         super::a_settled_run_no_execution_here_can_report_answers_at_once().await
     }
@@ -1308,12 +1203,9 @@ async fn session_start_discovers_exact_host_run_across_frame_switch() -> Result<
         .await?;
     let switched = sent.output().await?;
     let lash_core::facade_support::TurnOutcome::AgentFrameSwitch { frame_key, .. } =
-        &switched.result.outcome
+        &switched.outcome
     else {
-        panic!(
-            "the first run switches frame: {:?}",
-            switched.result.outcome
-        );
+        panic!("the first run switches frame: {:?}", switched.outcome);
     };
     let next_run = lash_core::runtime::durable::session_mail::frame_task_run(frame_key);
     let expected = [host_run, lash::RunId::parse(next_run.as_str())?];

@@ -116,7 +116,7 @@ async fn an_assistant_hook_session_fault_retries_the_step_without_recording_it()
         output.assistant_message(),
         Some("the paid completion [hooked]"),
         "{:?}",
-        output.result.outcome
+        output.outcome
     );
     assert_eq!(
         hook_calls.load(Ordering::SeqCst),
@@ -179,7 +179,7 @@ async fn a_deterministic_assistant_hook_failure_is_the_steps_recorded_outcome() 
         Ok(output) => assert!(
             !output.is_success(),
             "a failed hook does not answer: {:?}",
-            output.result.outcome
+            output.outcome
         ),
         Err(error) => assert!(
             error.to_string().contains("deterministic failure"),

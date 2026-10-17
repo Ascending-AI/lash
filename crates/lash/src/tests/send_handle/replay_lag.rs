@@ -255,7 +255,6 @@ fn assert_whole(watched: &crate::SendOutcome) {
         "{:?}",
         output.activities
     );
-    assert_eq!(output.result.llm_calls.len(), 1);
 }
 
 /// A node that dies right after a turn's commit publishes no `Committed`

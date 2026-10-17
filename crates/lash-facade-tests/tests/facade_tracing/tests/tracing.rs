@@ -100,7 +100,7 @@ pub(super) fn tool_call(call_id: &str, tool_name: &str, input_json: &str) -> Moc
 
 fn completed(output: &lash::TurnOutput) -> bool {
     matches!(
-        &output.result.outcome,
+        &output.outcome,
         lash::TurnOutcome::Finished(_) | lash::TurnOutcome::AgentFrameSwitch { .. }
     )
 }
@@ -575,8 +575,10 @@ async fn assert_standard_tool_lifecycle(
         .output()
         .await?;
 
-    assert!(completed(&turn), "{:?}", turn.result.outcome);
-    let calls = &turn.result.tool_calls;
+    assert!(completed(&turn), "{:?}", turn.outcome);
+    let turn_tool_calls =
+        lash::testing::tool_calls_for_activity(&session.durable(), &turn.activities).await;
+    let calls = &turn_tool_calls;
     assert_eq!(calls.len(), 1, "one accounting record per call");
     assert_eq!(calls[0].provider_call_id.as_deref(), Some(call_id));
     assert_eq!(calls[0].tool, tool_name);
@@ -844,8 +846,10 @@ async fn pending_then_resolved_tool_call_emits_one_completion_per_channel() -> R
         lash_core::ResolveAnswer::Resolved
     );
     let turn = turn.await.expect("the turn task")?;
+    let turn_tool_calls =
+        lash::testing::tool_calls_for_activity(&session.durable(), &turn.activities).await;
 
-    let calls = &turn.result.tool_calls;
+    let calls = &turn_tool_calls;
     assert_eq!(calls.len(), 1);
     assert_eq!(calls[0].provider_call_id.as_deref(), Some(call_id));
     let entries = traced.entries();
@@ -938,8 +942,10 @@ async fn standard_runtime_trace_records_stream_event_entries() -> Result<()> {
     let session = traced.session("trace-stream-events").await?;
     let turn = session.send(TurnInput::text("hello")).output().await?;
 
-    assert!(completed(&turn), "{:?}", turn.result.outcome);
-    let attempt_evidence = turn.result.llm_calls[0].attempts[0]
+    assert!(completed(&turn), "{:?}", turn.outcome);
+    let turn_model_calls =
+        lash::testing::model_calls_for_activity(&session.durable(), &turn.activities).await;
+    let attempt_evidence = turn_model_calls[0].attempts[0]
         .evidence
         .as_ref()
         .expect("response evidence reaches the sealed attempt ledger");
@@ -1052,7 +1058,7 @@ async fn extended_runtime_trace_records_provider_request_and_stream_events() -> 
     .await?;
     let session = traced.session("trace-provider-stream").await?;
     let turn = session.send(TurnInput::text("hello")).output().await?;
-    assert!(completed(&turn), "{:?}", turn.result.outcome);
+    assert!(completed(&turn), "{:?}", turn.outcome);
 
     let entries = traced.entries();
     // Both directions are one event kind; the typed direction tells them apart.
@@ -1146,7 +1152,7 @@ async fn provider_request_trace_sender_requires_extended_level_and_sink() -> Res
     let traced = Traced::new(sender_absent(), |builder| builder).await?;
     let session = traced.session("standard-trace-level").await?;
     let turn = session.send(TurnInput::text("hello")).output().await?;
-    assert!(completed(&turn), "{:?}", turn.result.outcome);
+    assert!(completed(&turn), "{:?}", turn.outcome);
     traced.core.shutdown().await?;
 
     // The extended level with no sink.
@@ -1164,7 +1170,7 @@ async fn provider_request_trace_sender_requires_extended_level_and_sink() -> Res
     .open()
     .await?;
     let turn = session.send(TurnInput::text("hello")).output().await?;
-    assert!(completed(&turn), "{:?}", turn.result.outcome);
+    assert!(completed(&turn), "{:?}", turn.outcome);
     core.shutdown().await?;
     Ok(())
 }
@@ -1193,7 +1199,7 @@ async fn standard_runtime_trace_omits_stream_event_entries_by_default() -> Resul
     .await?;
     let session = traced.session("trace-standard").await?;
     let turn = session.send(TurnInput::text("hello")).output().await?;
-    assert!(completed(&turn), "{:?}", turn.result.outcome);
+    assert!(completed(&turn), "{:?}", turn.outcome);
 
     let entries = traced.entries();
     assert!(
@@ -1231,13 +1237,15 @@ async fn standard_runtime_trace_records_failed_llm_calls() -> Result<()> {
     let turn = session.send(TurnInput::text("hello")).output().await?;
 
     assert!(
-        matches!(&turn.result.outcome, lash::TurnOutcome::Stopped(_)),
+        matches!(&turn.outcome, lash::TurnOutcome::Stopped(_)),
         "{:?}",
-        turn.result.outcome
+        turn.outcome
     );
+    let turn_model_calls =
+        lash::testing::model_calls_for_activity(&session.durable(), &turn.activities).await;
     // A durable report is thin: the failure is the call's attempt record,
     // which keeps the code and no raw body.
-    let failure = turn.result.llm_calls[0].attempts[0]
+    let failure = turn_model_calls[0].attempts[0]
         .error
         .as_ref()
         .expect("the attempt records its failure");
@@ -1432,7 +1440,7 @@ async fn golden_tree_survives_a_kill_and_resume_on_another_node() -> Result<()> 
         .attach_id(lash::TurnId::parse(TREE_TURN).expect("nonblank host identity"))
         .output()
         .await?;
-    assert!(completed(&output), "{:?}", output.result.outcome);
+    assert!(completed(&output), "{:?}", output.outcome);
     // The trees of both nodes' records together: node B's records name
     // spans node A's opened.
     let mut entries = before;

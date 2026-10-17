@@ -135,14 +135,16 @@ async fn retryable_llm_failures_exhaust_and_fail_turn() {
         .expect("the turn settles");
     assert!(
         matches!(
-            output.result.outcome,
+            output.outcome,
             lash::TurnOutcome::Stopped(lash::TurnStop::ProviderError { .. })
         ),
         "{:?}",
-        output.result.outcome
+        output.outcome
     );
-    let [call] = output.result.llm_calls.as_slice() else {
-        panic!("one logical model call: {:?}", output.result.llm_calls);
+    let output_model_calls =
+        lash::testing::model_calls_for_activity(&session, &output.activities).await;
+    let [call] = output_model_calls.as_slice() else {
+        panic!("one logical model call: {:?}", output_model_calls);
     };
     let attempts = &call.attempts;
     assert_eq!(
@@ -209,11 +211,13 @@ async fn provider_failure_surfaces_typed_kind_and_retryability_on_turn_issue() {
         .await
         .expect("the turn settles");
     assert!(matches!(
-        output.result.outcome,
+        output.outcome,
         lash::TurnOutcome::Stopped(lash::TurnStop::ProviderError { .. })
     ));
-    let [call] = output.result.llm_calls.as_slice() else {
-        panic!("one logical model call: {:?}", output.result.llm_calls);
+    let output_model_calls =
+        lash::testing::model_calls_for_activity(&session, &output.activities).await;
+    let [call] = output_model_calls.as_slice() else {
+        panic!("one logical model call: {:?}", output_model_calls);
     };
     let [attempt] = call.attempts.as_slice() else {
         panic!("one attempt: {:?}", call.attempts);
@@ -472,9 +476,9 @@ async fn checkpoint_observer_failure_leaves_active_input_pending_without_applica
         .await
         .expect("the turn settles");
     assert!(
-        matches!(output.result.outcome, lash::TurnOutcome::Stopped(_)),
+        matches!(output.outcome, lash::TurnOutcome::Stopped(_)),
         "a failed checkpoint stops the turn: {:?}",
-        output.result.outcome
+        output.outcome
     );
     let steered = session.attach_id(steer_run.clone());
     assert!(

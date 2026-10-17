@@ -154,9 +154,10 @@ async fn successful_cell_feedback_omits_completed_call_evidence() -> Result<()> 
                 .send(TurnInput::text("look up once"))
                 .output()
                 .await?;
-            let lookup = output
-                .result
-                .tool_calls
+            let output_tool_calls =
+                lash::testing::tool_calls_for_activity(&session.durable(), &output.activities)
+                    .await;
+            let lookup = output_tool_calls
                 .iter()
                 .find(|record| record.tool == "app_lookup")
                 .unwrap_or_else(|| panic!("{case}: the lookup completed"));
@@ -242,9 +243,10 @@ async fn failed_cell_feedback_preserves_completed_call_evidence() -> Result<()> 
                 .send(TurnInput::text("look up, then fail"))
                 .output()
                 .await?;
-            let lookup = output
-                .result
-                .tool_calls
+            let output_tool_calls =
+                lash::testing::tool_calls_for_activity(&session.durable(), &output.activities)
+                    .await;
+            let lookup = output_tool_calls
                 .iter()
                 .find(|record| record.tool == "app_lookup")
                 .unwrap_or_else(|| panic!("{case}: the turn's ledger holds the lookup"));

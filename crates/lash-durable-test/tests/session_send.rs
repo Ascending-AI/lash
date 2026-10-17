@@ -765,10 +765,15 @@ async fn sqlite_memory_cancelled_model_keeps_sealed_attempts() {
             lash::CancelReceipt::Cancelled { .. }
         ));
         let output = handle.output().await.expect("settled turn");
-        assert_eq!(output.result.status(), lash::TurnStatus::Cancelled);
+        assert_eq!(
+            lash::TurnStatus::of_outcome(&output.outcome),
+            lash::TurnStatus::Cancelled
+        );
         assert_eq!(calls.load(Ordering::SeqCst), 1, "no retry was sent");
-        let [call] = output.result.llm_calls.as_slice() else {
-            panic!("one model call settles: {:?}", output.result.llm_calls);
+        let output_model_calls =
+            lash::testing::model_calls_for_activity(&session, &output.activities).await;
+        let [call] = output_model_calls.as_slice() else {
+            panic!("one model call settles: {:?}", output_model_calls);
         };
         let [failed] = call.attempts.as_slice() else {
             panic!("only the dispatched failed attempt: {call:?}");

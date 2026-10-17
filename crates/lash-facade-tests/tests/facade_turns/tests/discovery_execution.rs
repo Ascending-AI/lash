@@ -164,8 +164,11 @@ async fn discovery_hidden_tool_executes_through_rlm_and_standard_batch_but_not_n
                 calls.lock_recover().is_empty(),
                 "hidden native tool dispatched"
             );
-            let [call] = output.result.tool_calls.as_slice() else {
-                panic!("one refused native call: {:?}", output.result.tool_calls);
+            let output_tool_calls =
+                lash::testing::tool_calls_for_activity(&session.durable(), &output.activities)
+                    .await;
+            let [call] = output_tool_calls.as_slice() else {
+                panic!("one refused native call: {:?}", output_tool_calls);
             };
             let lash_core::ToolCallOutcome::Failure(failure) = &call.output.outcome else {
                 panic!("the unlisted tool is refused: {call:?}");

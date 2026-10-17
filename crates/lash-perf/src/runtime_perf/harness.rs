@@ -1,3 +1,4 @@
+use lash_protocol_types::core_support::RunIdCoreSupport;
 use lash_protocol_types::{SessionId, TurnId};
 use std::{fmt::Write as _, future::IntoFuture as _, path::PathBuf, sync::Arc};
 
@@ -158,6 +159,15 @@ impl BenchmarkCore {
 /// Where a benchmark turn's session lives. A turn is always sent to the
 /// session and the engine's session shift runs it (FIG-3600): the host
 /// waits on the sent input's answer and never runs the turn itself.
+/// Measurement read after settlement; usage is the sum of canonical call rows.
+#[derive(Debug)]
+pub(crate) struct MeasuredTurn {
+    pub(crate) outcome: TurnOutcome,
+    #[cfg(test)]
+    pub(crate) run: lash::RunId,
+    pub(crate) usage: lash::LlmUsage,
+}
+
 #[derive(Clone)]
 pub(crate) enum TurnEntry {
     /// A lane on lash's durable engine.
@@ -174,7 +184,7 @@ impl TurnEntry {
         input: lash::TurnInput,
         turn_id: Option<&TurnId>,
         cancel: tokio_util::sync::CancellationToken,
-    ) -> anyhow::Result<lash::TurnReport> {
+    ) -> anyhow::Result<MeasuredTurn> {
         let mut send = session.send(input);
         if let Some(turn_id) = turn_id {
             send = send.id(turn_id.clone());
@@ -183,6 +193,7 @@ impl TurnEntry {
         // scenario awaits this one.
         let handle = Box::pin(send.into_future()).await?;
         let stop = handle.cancel().reason("runtime perf turn cancelled");
+        let input_for_read = handle.input_id().clone();
         let mut output = Box::pin(handle.output());
         let output = tokio::select! {
             output = &mut output => output,
@@ -191,7 +202,30 @@ impl TurnEntry {
                 output.await
             }
         };
-        Ok(output?.result)
+        let output = output?;
+        let run = session
+            .attach(input_for_read)
+            .run()
+            .await?
+            .ok_or_else(|| anyhow::anyhow!("settled turn has no run"))?;
+        let calls = session
+            .durable()
+            .read_turn_model_calls(run.turn_id())
+            .await?;
+        let usage = calls
+            .iter()
+            .try_fold(lash::LlmUsage::default(), |total, row| {
+                total.checked_add(&row.usage()?)
+            })
+            .map_err(|error: lash::usage::TokenUsageOverflow| {
+                anyhow::anyhow!("usage overflows {}", error.counter())
+            })?;
+        Ok(MeasuredTurn {
+            outcome: output.outcome,
+            #[cfg(test)]
+            run,
+            usage,
+        })
     }
 }
 
@@ -348,7 +382,7 @@ impl BenchmarkRuntime {
         &self,
         input: lash::TurnInput,
         cancel: tokio_util::sync::CancellationToken,
-    ) -> anyhow::Result<lash::TurnReport> {
+    ) -> anyhow::Result<MeasuredTurn> {
         let session = self.session.as_ref().expect("benchmark session");
         self.turn_entry.run(session, input, None, cancel).await
     }
@@ -362,7 +396,7 @@ impl BenchmarkRuntime {
         input: lash::TurnInput,
         turn_id: &TurnId,
         cancel: tokio_util::sync::CancellationToken,
-    ) -> anyhow::Result<lash::TurnReport> {
+    ) -> anyhow::Result<MeasuredTurn> {
         let session = self.session.as_ref().expect("benchmark session");
         self.turn_entry
             .run(session, input, Some(turn_id), cancel)
@@ -408,7 +442,7 @@ impl BenchmarkRuntime {
         turn_id: &TurnId,
         cancel: tokio_util::sync::CancellationToken,
         request_id: &str,
-    ) -> anyhow::Result<(lash::TurnReport, std::time::Duration)> {
+    ) -> anyhow::Result<(MeasuredTurn, std::time::Duration)> {
         let control = self
             .provider_control
             .as_ref()
@@ -458,7 +492,7 @@ impl BenchmarkRuntime {
         turn_id: &TurnId,
         cancel: tokio_util::sync::CancellationToken,
         source_id: &str,
-    ) -> anyhow::Result<(lash::TurnReport, std::time::Duration)> {
+    ) -> anyhow::Result<(MeasuredTurn, std::time::Duration)> {
         let control = self
             .provider_control
             .as_ref()
@@ -514,7 +548,7 @@ impl BenchmarkRuntime {
 pub(crate) fn validate_runtime_perf_turn(
     scenario: RuntimePerfScenario,
     turn_index: usize,
-    turn: &lash::TurnReport,
+    turn: &TurnOutcome,
     state: &SessionSnapshot,
 ) -> anyhow::Result<()> {
     let expected = "runtime perf benchmark ok";
@@ -527,7 +561,7 @@ pub(crate) fn validate_runtime_perf_turn(
             diagnostics
         );
     }
-    if !turn.errors.is_empty() {
+    if turn.error_cause().is_some() {
         anyhow::bail!(
             "runtime perf scenario {} turn {} emitted runtime errors:\n{}",
             scenario.name(),
@@ -537,7 +571,7 @@ pub(crate) fn validate_runtime_perf_turn(
     }
     if scenario.execution_mode().is_rlm()
         && matches!(
-            turn.outcome,
+            turn,
             TurnOutcome::Finished(lash::TurnFinish::AssistantMessage { .. })
         )
     {
@@ -548,7 +582,7 @@ pub(crate) fn validate_runtime_perf_turn(
             diagnostics
         );
     }
-    match &turn.outcome {
+    match &turn {
         TurnOutcome::Finished(lash::TurnFinish::AssistantMessage { text }) => {
             let valid = if matches!(scenario, RuntimePerfScenario::OpenAiCompatStream) {
                 text.contains(expected)
@@ -601,7 +635,7 @@ pub(crate) fn validate_runtime_perf_turn(
                 scenario.name(),
                 turn_index + 1,
                 stop,
-                turn.errors
+                turn.error_cause()
             );
         }
     }
@@ -648,23 +682,15 @@ fn rlm_trajectory_entries(state: &SessionSnapshot) -> Vec<CellRecord> {
         .collect()
 }
 
-fn runtime_perf_turn_diagnostics(turn: &lash::TurnReport, state: &SessionSnapshot) -> String {
+fn runtime_perf_turn_diagnostics(turn: &TurnOutcome, state: &SessionSnapshot) -> String {
     let mut out = String::new();
-    if !turn.errors.is_empty() {
-        let _ = writeln!(out, "turn_errors:");
-        for issue in &turn.errors {
-            let code = issue
-                .code
-                .as_ref()
-                .map_or_else(|| "none".to_string(), |code| code.namespaced());
-            let _ = writeln!(
-                out,
-                "- kind={} code={} message={}",
-                issue.kind,
-                code,
-                preview(&issue.message, 600)
-            );
-        }
+    if let Some(cause) = turn.error_cause() {
+        let _ = writeln!(
+            out,
+            "turn_cause: {} {:?}",
+            cause.code.code(),
+            cause.detail()
+        );
     }
 
     let entries = rlm_trajectory_entries(state);

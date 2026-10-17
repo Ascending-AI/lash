@@ -168,14 +168,12 @@ impl RuntimeSessionServices {
                 )));
             }
         };
-        let turn = self.child_turn(&session_id, outcome).await?;
-        let state = process_terminal_state_for_turn(&turn);
         Ok(crate::ProcessAwaitOutput::from_tool_output(
             output_from_process_turn(
                 process_id,
                 &session_id,
-                turn,
-                state,
+                &turn_id,
+                outcome,
                 result,
                 self.current.host.core.tracing.diagnostic_limits(),
                 self.current.host.core.control.output_cuts,
@@ -234,48 +232,10 @@ impl RuntimeSessionServices {
         })?;
         Ok(terminal.map(|terminal| terminal.cause))
     }
-
-    /// The child turn as its commit left it: the session's committed head
-    /// and the turn's committed outcome.
-    async fn child_turn(
-        &self,
-        session_id: &SessionId,
-        outcome: crate::TurnOutcome,
-    ) -> Result<crate::AssembledTurn, crate::PluginError> {
-        let store = self.child_store(session_id).await?;
-        let state =
-            crate::store::load_session_window_state(&store, crate::store::WindowSelector::Current)
-                .await
-                .map_err(|error| {
-                    crate::PluginError::of_store_error(
-                        format_args!("failed to load child session `{session_id}`"),
-                        error,
-                    )
-                })?
-                .map(|loaded| loaded.state)
-                .ok_or_else(|| {
-                    crate::PluginError::Session(format!(
-                        "child session `{session_id}` has no committed head"
-                    ))
-                })?;
-        Ok(crate::AssembledTurn {
-            state: state.to_snapshot(),
-            outcome,
-            execution: Default::default(),
-            token_usage: Default::default(),
-            llm_calls: Vec::new(),
-            tool_calls: Vec::new(),
-            retained_outputs: Vec::new(),
-            failure_evidence: Vec::new(),
-            errors: Vec::new(),
-            turn_input_acceptance: None,
-            turn_cancel_input_outcome: Default::default(),
-        })
-    }
 }
 
-fn process_terminal_state_for_turn(turn: &crate::AssembledTurn) -> crate::ProcessStatus {
-    match &turn.outcome {
+fn process_terminal_state_for_turn(outcome: &crate::TurnOutcome) -> crate::ProcessStatus {
+    match outcome {
         crate::TurnOutcome::Finished(_) | crate::TurnOutcome::AgentFrameSwitch { .. } => {
             crate::ProcessStatus::Completed
         }
@@ -383,27 +343,19 @@ fn authored_stop_text(value: &serde_json::Value) -> Option<String> {
         .map(ToOwned::to_owned)
 }
 
-/// The child turn's first blocking issue: the root cause the assembler
-/// recorded, ahead of any consequence it recorded afterwards.
-fn first_blocking_issue(turn: &crate::AssembledTurn) -> Option<&crate::TurnIssue> {
-    turn.errors
-        .iter()
-        .find(|issue| issue.severity == crate::TurnIssueSeverity::Blocking)
-}
-
 /// Project a failed child turn onto the failure the parent's spawn result,
 /// the child's process record and its terminal process event all carry.
 ///
 /// The child's own reason is the message wherever the child authored one, the
 /// stop's code keeps the categories apart, and the typed diagnostics — the
-/// child's [`crate::TurnFailureKind`]/[`crate::TurnFailureCode`] and the
+/// child's [`crate::TurnErrorCode`] and the
 /// stop's projected value — ride the existing `raw` channel, bounded.
 fn failure_from_process_turn(
-    turn: &crate::AssembledTurn,
+    outcome: &crate::TurnOutcome,
     limits: lash_core_store::execution_limits::DiagnosticLimits,
     cuts: lash_protocol_types::session_model::RuntimeOutputCuts,
 ) -> crate::ToolFailure {
-    let crate::TurnOutcome::Stopped(stop) = &turn.outcome else {
+    let crate::TurnOutcome::Stopped(stop) = &outcome else {
         return crate::ToolFailure::tool(
             crate::ToolFailureClass::Internal,
             "process_session_turn_failed",
@@ -411,14 +363,15 @@ fn failure_from_process_turn(
         );
     };
     let (class, code, sentence) = process_turn_stop_classification(stop);
-    let issue = first_blocking_issue(turn);
+    let cause = outcome.error_cause();
     let (authored, stop_value) = match stop {
         crate::TurnStop::SubmittedError { value } | crate::TurnStop::ToolError { value, .. } => {
             (authored_stop_text(value), Some(value))
         }
         _ => (
-            issue
-                .map(|issue| issue.message.trim())
+            cause
+                .and_then(|cause| cause.detail())
+                .map(str::trim)
                 .filter(|message| !message.is_empty())
                 .map(ToOwned::to_owned),
             None,
@@ -429,7 +382,7 @@ fn failure_from_process_turn(
         // verbatim: the parent model reads the child's words, not ours.
         (Some(text), true) => text,
         // A category stop has no child-authored terminal text, so the
-        // assembler's blocking issue qualifies the stop's own sentence.
+        // committed cause qualifies the stop's own sentence.
         (Some(text), false) => format!("{sentence}: {text}"),
         (None, _) => sentence.to_string(),
     };
@@ -439,36 +392,26 @@ fn failure_from_process_turn(
         lash_protocol_types::session_model::truncate_raw_error(&message, cuts.raw_error_max_chars),
     );
     failure.raw =
-        process_turn_failure_raw(stop_value, issue, limits).map(crate::ToolValue::untrusted_json);
+        process_turn_failure_raw(stop, cause, limits).map(crate::ToolValue::untrusted_json);
     failure
 }
 
-/// Bounded diagnostics for a failed child turn, or `None` when the child
-/// produced neither a projected stop value nor a blocking issue.
+/// Bounded stop diagnostics, with the committed cause and permitted detail when present.
 fn process_turn_failure_raw(
-    stop_value: Option<&serde_json::Value>,
-    issue: Option<&crate::TurnIssue>,
+    stop: &crate::TurnStop,
+    cause: Option<&lash_protocol_types::TurnErrorCause>,
     limits: lash_core_store::execution_limits::DiagnosticLimits,
 ) -> Option<serde_json::Value> {
     let mut raw = serde_json::Map::new();
-    if let Some(value) = stop_value {
-        raw.insert(
-            "stop".to_string(),
-            serde_json::Value::String(limits.diagnostic_error(&value.to_string())),
-        );
-    }
-    if let Some(issue) = issue {
-        raw.insert("kind".to_string(), issue.kind.as_str().into());
-        if let Some(code) = issue.code.as_ref() {
-            raw.insert("code".to_string(), code.namespaced().into());
-        }
-        if let Some(retryable) = issue.retryable {
-            raw.insert("retryable".to_string(), retryable.into());
-        }
-        raw.insert(
-            "issue".to_string(),
-            serde_json::Value::String(limits.diagnostic_error(issue.message.trim())),
-        );
+    raw.insert(
+        "stop".into(),
+        limits
+            .diagnostic_error(&serde_json::json!(stop).to_string())
+            .into(),
+    );
+    if let Some(cause) = cause {
+        raw.insert("cause".into(), cause.code.code().into());
+        raw.insert("detail".into(), serde_json::json!(cause.detail()));
     }
     (!raw.is_empty()).then_some(serde_json::Value::Object(raw))
 }
@@ -476,19 +419,20 @@ fn process_turn_failure_raw(
 /// Project the child's ended turn onto the process's answer.
 ///
 /// A cancelled or failed child answers its own cancellation or failure under
-/// every [`crate::SessionTurnOutcome`]. A finished child answers its assembled
-/// turn under `Turn`, and its final value under `FinalValue`.
+/// every [`crate::SessionTurnOutcome`]. A finished child answers its committed
+/// outcome and identity under `Turn`, and its final value under `FinalValue`.
 fn output_from_process_turn(
     process_id: &crate::ProcessId,
     child_session_id: &SessionId,
-    turn: crate::AssembledTurn,
-    state: crate::ProcessStatus,
+    turn_id: &crate::TurnId,
+    outcome: crate::TurnOutcome,
     result: &crate::SessionTurnOutcome,
     limits: lash_core_store::execution_limits::DiagnosticLimits,
     cuts: lash_protocol_types::session_model::RuntimeOutputCuts,
 ) -> crate::ToolCallOutput {
+    let state = process_terminal_state_for_turn(&outcome);
     if state == crate::ProcessStatus::Cancelled {
-        let cancellation = match &turn.outcome {
+        let cancellation = match &outcome {
             crate::TurnOutcome::Stopped(crate::TurnStop::Cancelled { evidence }) => {
                 crate::ToolCancellation {
                     message: evidence
@@ -511,7 +455,7 @@ fn output_from_process_turn(
         tool_name,
         call_id,
         message,
-    }) = &turn.outcome
+    }) = &outcome
     {
         return crate::ToolCallOutput::failure(crate::ToolFailure::runtime(
             crate::ToolFailureClass::Internal, "tool_panicked",
@@ -521,16 +465,17 @@ fn output_from_process_turn(
         }));
     }
     if state == crate::ProcessStatus::Failed {
-        return crate::ToolCallOutput::failure(failure_from_process_turn(&turn, limits, cuts));
+        return crate::ToolCallOutput::failure(failure_from_process_turn(&outcome, limits, cuts));
     }
     match result {
         crate::SessionTurnOutcome::Turn => crate::ToolCallOutput::success(serde_json::json!({
             "process_id": process_id,
             "child_session_id": child_session_id,
-            "turn": turn,
+            "turn_id": turn_id,
+            "outcome": outcome,
         })),
         crate::SessionTurnOutcome::FinalValue { schema } => {
-            match final_value_of_turn(&turn)
+            match final_value_of_turn(&outcome)
                 .and_then(|value| checked_final_value(value, schema.as_ref()))
             {
                 Ok(value) => crate::ToolCallOutput::success(value),
@@ -547,9 +492,9 @@ fn output_from_process_turn(
 /// A child that switched agent frames or stopped has no final value, and says
 /// so as a typed failure rather than as an empty success.
 fn final_value_of_turn(
-    turn: &crate::AssembledTurn,
+    outcome: &crate::TurnOutcome,
 ) -> Result<serde_json::Value, Box<crate::ToolFailure>> {
-    match &turn.outcome {
+    match outcome {
         crate::TurnOutcome::Finished(crate::TurnFinish::Finished { value, .. }) => {
             Ok(value.clone())
         }

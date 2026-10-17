@@ -206,7 +206,9 @@ async fn multi_model_turn_keeps_per_call_evidence() -> Result<()> {
         .id(crate::TurnId::parse("evidence-run").expect("nonblank host identity"))
         .output()
         .await?;
-    let calls = &output.result.llm_calls;
+    let output_model_calls =
+        crate::testing::model_calls_for_activity(&session.durable(), &output.activities).await;
+    let calls = &output_model_calls;
     assert_eq!(attempts.load(Ordering::SeqCst), 3);
     assert_eq!(calls.len(), 2);
     assert_eq!(calls[0].attempts.len(), 2);

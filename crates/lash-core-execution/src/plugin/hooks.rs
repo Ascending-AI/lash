@@ -369,7 +369,9 @@ pub enum PluginLifecycleEvent {
 /// this report; this boundary never collected them.
 #[derive(Clone, Debug)]
 pub struct TurnHookReport {
+    /// Decision input before the final commit, so a settled read cannot supply it.
     pub outcome: crate::TurnOutcome,
+    /// Precommit decision input, including calls whose turn may never commit after an Immediate stop.
     pub tool_calls: Arc<Vec<crate::ToolCallRecord>>,
 }
 

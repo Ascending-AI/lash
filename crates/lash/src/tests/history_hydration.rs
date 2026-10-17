@@ -69,7 +69,10 @@ mod tool_call_reads {
                 .id(turn.clone())
                 .output()
                 .await?;
-            turns.push((turn, output.result.tool_calls.clone()));
+            let output_tool_calls =
+                crate::testing::tool_calls_for_activity(&session.durable(), &output.activities)
+                    .await;
+            turns.push((turn, output_tool_calls.clone()));
         }
         let durable = session.durable();
         drop(session);

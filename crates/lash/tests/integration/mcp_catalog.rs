@@ -565,11 +565,13 @@ async fn turn_witness(store: Store, failure_law: bool) {
     .await
     .expect("turn deadline")
     .expect("turn completes during stalled discovery");
+    let output_tool_calls =
+        lash::testing::tool_calls_for_activity(&session, &output.activities).await;
     assert_eq!(
-        output.result.tool_calls.len(),
+        output_tool_calls.len(),
         if failure_law { 2 } else { 1 },
         "{:?}",
-        output.result.tool_calls
+        output_tool_calls
     );
     if failure_law {
         let persisted = session
@@ -580,9 +582,7 @@ async fn turn_witness(store: Store, failure_law: bool) {
         assert_eq!(persisted.turn_index(), 1);
         assert_eq!(calls.load(Ordering::SeqCst), 2);
         factory.shutdown().await.expect("MCP shutdown");
-        for (record, class, code, kind) in output
-            .result
-            .tool_calls
+        for (record, class, code, kind) in output_tool_calls
             .iter()
             .zip([
                 (
@@ -627,7 +627,7 @@ async fn turn_witness(store: Store, failure_law: bool) {
         drop(database);
         return;
     }
-    assert_eq!(output.result.assistant_message(), Some("storm done"));
+    assert_eq!(output.outcome.assistant_message(), Some("storm done"));
     assert_eq!(calls.load(Ordering::SeqCst), 2);
     assert_eq!(
         std::fs::read_to_string(root.path().join("lists")).expect("discovery trace"),

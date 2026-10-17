@@ -120,7 +120,11 @@ async fn witness(stores: Arc<dyn lash_core::StoreSet>, lane: &str, witness: Witn
                     .await
                     .unwrap();
                 if !excess && status == 200 {
-                    assert!(output.is_success(), "{lane}: {:?}", output.result.errors);
+                    assert!(
+                        output.is_success(),
+                        "{lane}: {:?}",
+                        output.outcome.error_cause()
+                    );
                     assert_eq!(output.assistant_message(), Some("done"));
                 } else {
                     assert!(!output.is_success(), "{lane} accepted a refused response");
@@ -137,18 +141,30 @@ async fn witness(stores: Arc<dyn lash_core::StoreSet>, lane: &str, witness: Witn
                         );
                     }
                     if witness == Witness::Report {
+                        let output_model_calls = lash::testing::model_calls_for_activity(
+                            &session.durable(),
+                            &output.activities,
+                        )
+                        .await;
                         if excess {
                             assert!(
-                                output.result.errors.iter().any(|error| error
-                                    .code
-                                    .as_ref()
-                                    .is_some_and(|code| code.to_string() == expected)),
+                                output
+                                    .activities
+                                    .iter()
+                                    .filter_map(|activity| match &activity.event {
+                                        lash::TurnEvent::Error(error) => error.envelope.as_ref(),
+                                        _ => None,
+                                    })
+                                    .any(|error| error
+                                        .code
+                                        .as_ref()
+                                        .is_some_and(|code| code.to_string() == expected)),
                                 "{lane}: {:?}",
-                                output.result.errors
+                                output.outcome.error_cause()
                             );
                         }
                         assert_eq!(
-                            output.result.llm_calls.len(),
+                            output_model_calls.len(),
                             1,
                             "{lane}: refusal must not retry"
                         );

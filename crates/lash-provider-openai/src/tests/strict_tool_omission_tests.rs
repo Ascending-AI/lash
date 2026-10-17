@@ -296,12 +296,12 @@ async fn run_case(
     let result = super::facade_turns::send(&session, "Call the probe.").await;
     assert_eq!(result.assistant_message(), Some("done"));
     core.shutdown().await.expect("the core shuts down");
+    let result_tool_calls =
+        lash::testing::tool_calls_for_activity(&session, &result.activities).await;
     CaseResult {
         seen,
         requests: transport.request_bodies(),
-        failed: result
-            .result
-            .tool_calls
+        failed: result_tool_calls
             .iter()
             .any(|call| matches!(&call.output.outcome, lash_core::ToolCallOutcome::Failure(_))),
     }

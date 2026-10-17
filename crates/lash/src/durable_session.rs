@@ -210,7 +210,7 @@ impl DurableSession {
         let mut turns = BTreeMap::new();
         for call in calls {
             if !turns.contains_key(&call.turn_id) {
-                let records = self.turn_model_calls(&call.turn_id).await?;
+                let records = self.read_turn_model_calls(&call.turn_id).await?;
                 turns.insert(call.turn_id.clone(), records);
             }
         }
@@ -260,7 +260,21 @@ impl DurableSession {
             .collect())
     }
 
-    async fn turn_model_calls(
+    /// Read settled tool-call bodies owned by the named turn, in admission order.
+    /// Admitted calls without a committed outcome are excluded. This also reads
+    /// the terminal transcript of a cancelled turn without a final head commit.
+    pub async fn read_turn_tool_calls(
+        &self,
+        turn: &crate::TurnId,
+    ) -> Result<Vec<crate::tools::ToolCallRecord>> {
+        self.store().await?;
+        let open = self.open_turn().await?;
+        Ok(self.turn_tool_call_bodies(turn, open.as_ref()).await?.0)
+    }
+
+    /// Read every retained model-call row owned by the named turn, in call order.
+    /// This also reads calls from a cancelled turn without a final head commit.
+    pub async fn read_turn_model_calls(
         &self,
         turn: &crate::TurnId,
     ) -> Result<Vec<crate::turn::ModelCallRecord>> {
@@ -421,7 +435,6 @@ impl DurableSession {
     /// send handle bound to this Durable Session reads and writes through.
     pub(crate) async fn send_parts(&self) -> Result<crate::send::SendParts> {
         Ok(crate::send::SendParts {
-            transcript_decoders: self.transcript_decoders.clone(),
             observer_pacing: Arc::clone(&self.observer_pacing),
             session_id: self.session_id.clone(),
             store: self.store().await?.clone(),
@@ -833,6 +846,16 @@ impl DurableSession {
         })
     }
 
+    /// Read the named run's committed terminal, including the affected input
+    /// ids of a cancellation. `None` means no retained terminal exists.
+    pub async fn run_terminal(
+        &self,
+        run: &crate::RunId,
+    ) -> Result<Option<crate::persistence::RunTerminal>> {
+        use lash_protocol_types::core_support::RunIdCoreSupport;
+        Ok(self.store().await?.run_terminal(run.turn_id()).await?)
+    }
+
     /// At most `limit` of this session's committed turns after `after`,
     /// oldest first by commit, each with its transcript rows, commit time and
     /// outcome (ADR 0129). `None` starts before the session's first turn; a
@@ -880,7 +903,7 @@ impl DurableSession {
         // A committed turn is never the unfinished one.
         for turn in page.turns {
             let (tool_calls, _) = self.turn_tool_call_bodies(&turn.turn_id, None).await?;
-            let model_calls = self.turn_model_calls(&turn.turn_id).await?;
+            let model_calls = self.read_turn_model_calls(&turn.turn_id).await?;
             turns.push(crate::transcript::CommittedTurnWithCalls {
                 turn,
                 tool_calls,

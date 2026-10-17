@@ -139,24 +139,6 @@ fn drain_area_witnesses() {
     fn trait_witness_0057<T: lash::plugins::SessionGraphService>() {}
     // W0059: lash::plugins::SessionStateService [trait]
     fn trait_witness_0059<T: lash::plugins::SessionStateService>() {}
-    // W0063: lash::runtime::AssembledTurn [struct]
-    type_witness::<lash::runtime::AssembledTurn>();
-    // W0065: lash::runtime::AssembledTurn::errors [field]
-    field_witness(|value: &lash::runtime::AssembledTurn| {
-        let _ = &value.errors;
-    });
-    // W0066: lash::runtime::AssembledTurn::execution [field]
-    field_witness(|value: &lash::runtime::AssembledTurn| {
-        let _ = &value.execution;
-    });
-    // W0067: lash::runtime::AssembledTurn::outcome [field]
-    field_witness(|value: &lash::runtime::AssembledTurn| {
-        let _ = &value.outcome;
-    });
-    // W0068: lash::runtime::AssembledTurn::state [field]
-    field_witness(|value: &lash::runtime::AssembledTurn| {
-        let _ = &value.state;
-    });
     // W0073: lash::runtime::RuntimeEffectControllerError [struct]
     type_witness::<lash::runtime::RuntimeEffectControllerError>();
     // W0074: lash::runtime::RuntimeEffectEnvelope [struct]
@@ -1228,10 +1210,6 @@ fn drain_area_witnesses() {
     let _ = lash::runtime::ExecutionScope::from_journal_key;
     // W0506: lash::durability::CanonicalRuntimeEffectEnvelope::json [function]
     let _ = lash::durability::CanonicalRuntimeEffectEnvelope::json;
-    // W0510: lash::runtime::AssembledTurn::turn_cancel_input_outcome [field]
-    field_witness(|value: &lash::runtime::AssembledTurn| {
-        let _ = &value.turn_cancel_input_outcome;
-    });
     // W0512: lash::testing::MockSessionManager::created [field]
     field_witness(|value: &lash::testing::MockSessionManager| {
         let _ = &value.created;
@@ -1250,16 +1228,10 @@ fn drain_area_witnesses() {
     field_witness(|value: &lash::testing::MockSessionManager| {
         let _ = &value.tool_catalog;
     });
-    // W0518: lash::testing::MockSessionManager::turn [field]
-    field_witness(|value: &lash::testing::MockSessionManager| {
-        let _ = &value.turn;
-    });
     // W0520: lash::testing::MockSessionManager::with_snapshot [function]
     let _ = lash::testing::MockSessionManager::with_snapshot;
     // W0521: lash::testing::MockSessionManager::with_tool_catalog [function]
     let _ = lash::testing::MockSessionManager::with_tool_catalog;
-    // W0523: lash::testing::MockSessionManager::with_turn [function]
-    let _ = lash::testing::MockSessionManager::with_turn;
     // W0524: lash::testing::TestClock::advance [function]
     let _ = lash::testing::TestClock::advance;
     // W0525: lash::testing::TestClock::set [function]

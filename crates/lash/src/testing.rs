@@ -382,3 +382,53 @@ pub use plugin_harness::*;
 
 mod actor_park;
 pub use actor_park::{park_process, park_session};
+
+/// Read retained model records addressed by this test's observed turn admission.
+/// Tests that exercise missing observations instead read their stated turn ids.
+#[expect(
+    clippy::expect_used,
+    reason = "fixture queries fail the test when its stated admission or retained records are missing"
+)]
+pub async fn model_calls_for_activity(
+    session: &crate::DurableSession,
+    activities: &[crate::TurnActivity],
+) -> Vec<crate::LlmCallRecord> {
+    use lash_protocol_types::core_support::RunIdCoreSupport as _;
+    let turn_id = activities
+        .iter()
+        .find_map(|activity| match &activity.event {
+            crate::TurnEvent::TurnStarted { run_id, .. } => Some(run_id.turn_id().clone()),
+            _ => None,
+        })
+        .expect("test observed the turn admission");
+    session
+        .read_turn_model_calls(&turn_id)
+        .await
+        .expect("read recorded model calls")
+        .into_iter()
+        .map(|row| row.record)
+        .collect()
+}
+
+/// Read retained tool bodies by the turn admission observed in a test.
+#[expect(
+    clippy::expect_used,
+    reason = "fixture queries fail the test when its stated admission or retained records are missing"
+)]
+pub async fn tool_calls_for_activity(
+    session: &crate::DurableSession,
+    activities: &[crate::TurnActivity],
+) -> Vec<crate::tools::ToolCallRecord> {
+    use lash_protocol_types::core_support::RunIdCoreSupport as _;
+    let turn_id = activities
+        .iter()
+        .find_map(|activity| match &activity.event {
+            crate::TurnEvent::TurnStarted { run_id, .. } => Some(run_id.turn_id().clone()),
+            _ => None,
+        })
+        .expect("test observed the turn admission");
+    session
+        .read_turn_tool_calls(&turn_id)
+        .await
+        .expect("read recorded tool calls")
+}

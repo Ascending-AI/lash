@@ -96,14 +96,14 @@ async fn turn_under(
         None,
     );
     let core = builder.build(lash_facade_tests::runtime_lease_owner())?;
-    let output = created_session(&core, lash::SessionId::parse("l21-detail").expect("an id"))
+    let session = created_session(&core, lash::SessionId::parse("l21-detail").expect("an id"))
         .await
         .open()
-        .await?
-        .send(TurnInput::text("retried"))
-        .output()
         .await?;
-    assert_eq!(output.result.llm_calls[0].attempts.len(), 2, "two attempts");
+    let output = session.send(TurnInput::text("retried")).output().await?;
+    let output_model_calls =
+        lash::testing::model_calls_for_activity(&session.durable(), &output.activities).await;
+    assert_eq!(output_model_calls[0].attempts.len(), 2, "two attempts");
     tokio::time::timeout(std::time::Duration::from_secs(60), async {
         while !spans
             .get_finished_spans()

@@ -426,23 +426,29 @@ impl RuntimeBoundaryHarness {
             .durable()
             .await
             .map_err(|err| RuntimeBoundaryError::new(err.to_string()))?;
-        let output =
-            tokio::time::timeout(DURABLE_EFFECT_BOUND, resumed.attach_id(turn_id).output())
-                .await
-                .map_err(|_| {
-                    RuntimeBoundaryError::new(format!(
-                        "durable effect `{durable_key}` was not resumed by the redrive"
-                    ))
-                })?
-                .map_err(|err| RuntimeBoundaryError::new(err.to_string()))?;
+        tokio::time::timeout(
+            DURABLE_EFFECT_BOUND,
+            resumed.attach_id(turn_id.clone()).output(),
+        )
+        .await
+        .map_err(|_| {
+            RuntimeBoundaryError::new(format!(
+                "durable effect `{durable_key}` was not resumed by the redrive"
+            ))
+        })?
+        .map_err(|err| RuntimeBoundaryError::new(err.to_string()))?;
         redrive
             .shutdown()
             .await
             .map_err(|err| RuntimeBoundaryError::new(err.to_string()))?;
-        let [record] = output.result.tool_calls.as_slice() else {
+        let output_tool_calls = resumed
+            .read_turn_tool_calls(&turn_id)
+            .await
+            .map_err(|err| RuntimeBoundaryError::new(err.to_string()))?;
+        let [record] = output_tool_calls.as_slice() else {
             return Err(RuntimeBoundaryError::new(format!(
                 "durable effect `{durable_key}` resumed with {} tool calls, expected one",
-                output.result.tool_calls.len()
+                output_tool_calls.len()
             )));
         };
         let first_calls = first_calls.load(Ordering::SeqCst);

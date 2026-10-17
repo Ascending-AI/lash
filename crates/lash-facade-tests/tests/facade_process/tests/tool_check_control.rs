@@ -67,7 +67,7 @@ fn tool_policy_plugin(
 /// One policy turn, in which the model calls [`ECHO`] once and then answers
 /// `done`, and the turn sent after it.
 struct PolicyTurn {
-    output: lash::TurnReport,
+    output: lash::TurnOutcome,
     completed: Vec<lash_core::ToolCallOutput>,
     calls: usize,
     requests: Vec<String>,
@@ -158,12 +158,9 @@ fn abort_run() -> lash_core::plugin::BeforeToolDecision {
 async fn a_tool_check_abort_run_stops_the_run() -> Result<()> {
     let turn = run_policy_turn("tool-check-abort-run", abort_run).await?;
     assert!(
-        matches!(
-            &turn.output.outcome,
-            TurnOutcome::Stopped(TurnStop::PluginAbort)
-        ),
+        matches!(&turn.output, TurnOutcome::Stopped(TurnStop::PluginAbort)),
         "{:?}",
-        turn.output.outcome
+        turn.output
     );
     assert_eq!(turn.completed.len(), 1, "{:?}", turn.completed);
     let output = &turn.completed[0];
@@ -187,25 +184,6 @@ async fn a_tool_check_abort_run_stops_the_run() -> Result<()> {
     Ok(())
 }
 
-/// The abort's typed plugin cause is the stopped turn's error.
-#[tokio::test(flavor = "multi_thread", worker_threads = 4)]
-#[ignore = "FIG-5334: a turn's report through send() carries no errors"]
-async fn a_tool_check_abort_run_reports_its_typed_plugin_cause() -> Result<()> {
-    let turn = run_policy_turn("tool-check-abort-cause", abort_run).await?;
-    let issue = turn
-        .output
-        .errors
-        .iter()
-        .find(|issue| issue.kind == lash_core::TurnFailureKind::Plugin)
-        .unwrap_or_else(|| panic!("the abort's typed plugin cause: {:?}", turn.output.errors));
-    assert_eq!(issue.message, "policy stopped the run");
-    assert_eq!(
-        issue.code.as_ref().map(|code| code.namespaced()).as_deref(),
-        Some("tool-policy:stop")
-    );
-    Ok(())
-}
-
 /// A Deny fails only the call: the run continues to the model's next answer.
 #[tokio::test(flavor = "multi_thread", worker_threads = 4)]
 async fn a_tool_check_deny_fails_only_the_call() -> Result<()> {
@@ -218,9 +196,9 @@ async fn a_tool_check_deny_fails_only_the_call() -> Result<()> {
     })
     .await?;
     assert!(
-        matches!(&turn.output.outcome, TurnOutcome::Finished(_)),
+        matches!(&turn.output, TurnOutcome::Finished(_)),
         "{:?}",
-        turn.output.outcome
+        turn.output
     );
     assert_eq!(turn.completed.len(), 1, "{:?}", turn.completed);
     let output = &turn.completed[0];

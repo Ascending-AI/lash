@@ -227,8 +227,10 @@ async fn malformed_tool_arguments_are_refused_not_dispatched() {
         2,
         "the refusal loops back to the model once"
     );
-    let [call] = output.result.tool_calls.as_slice() else {
-        panic!("one refused malformed call: {:?}", output.result.tool_calls);
+    let output_tool_calls =
+        lash::testing::tool_calls_for_activity(&session, &output.activities).await;
+    let [call] = output_tool_calls.as_slice() else {
+        panic!("one refused malformed call: {:?}", output_tool_calls);
     };
     let lash_core::ToolCallOutcome::Failure(failure) = &call.output.outcome else {
         panic!("malformed arguments are a typed refusal: {call:?}");
@@ -468,10 +470,10 @@ async fn assert_discovery_refusal_is_reported_and_accounted(mixed: bool) {
     );
     assert_eq!(refused.load(Ordering::SeqCst), 0);
     assert_eq!(admitted.load(Ordering::SeqCst), usize::from(mixed));
-    assert_eq!(output.result.tool_calls.len(), if mixed { 2 } else { 1 });
-    let refusal = output
-        .result
-        .tool_calls
+    let output_tool_calls =
+        lash::testing::tool_calls_for_activity(&session, &output.activities).await;
+    assert_eq!(output_tool_calls.len(), if mixed { 2 } else { 1 });
+    let refusal = output_tool_calls
         .iter()
         .find(|record| record.provider_call_id.as_deref() == Some("refused-call"))
         .expect("the refused call is accounted");
@@ -796,7 +798,7 @@ async fn a_terminal_required_standard_session_ends_through_finish() {
         output.finished(),
         Some(("finish", &serde_json::json!({ "answer": 42 }))),
         "{:?}",
-        output.result.outcome
+        output.outcome
     );
     let requests = requests.lock_recover().clone();
     assert_eq!(requests.len(), 2, "the prose reply was repaired once");

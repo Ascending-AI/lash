@@ -635,7 +635,7 @@ pub fn assert_answered(context: &str, output: &lash::TurnOutput) {
         output.is_success(),
         "{context}: the turn must answer: {:?}; issues: {:?}",
         output.status(),
-        output.result.errors
+        output.outcome.error_cause()
     );
 }
 

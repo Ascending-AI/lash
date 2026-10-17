@@ -578,13 +578,13 @@ async fn compaction_recovery_records_a_context_overflow_with_its_turn(tier: Tier
         .await;
     assert!(
         matches!(
-            output.result.outcome,
+            output.outcome,
             lash_core::facade_support::TurnOutcome::Stopped(
                 lash_core::facade_support::TurnStop::ContextOverflow
             )
         ),
         "the turn stops on its context overflow: {:?}",
-        output.result.outcome
+        output.outcome
     );
     let session = SessionId::try_from(name.to_owned()).unwrap();
     let (recoveries, _, _) = committed(&world.backend, &session, [OVERFLOW_RECOVERY, NOTE])

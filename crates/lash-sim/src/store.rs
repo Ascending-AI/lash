@@ -164,6 +164,9 @@ impl ModelStore {
                     .or_else(|| event.payload.get("text").and_then(Value::as_str))
                     .unwrap_or("")
                     .to_string();
+                session
+                    .provider_usage
+                    .saturating_add_assign(&provider_turn_usage(event));
                 session.provider_turns.push(ProviderTurnView {
                     output: text,
                     exchange_count: observed
@@ -441,30 +444,13 @@ impl ModelStore {
                     .get("provider_kind")
                     .and_then(Value::as_str)
                     .unwrap_or("openai-compatible");
-                // Generated turns carry the usage their script reports; turns
-                // recorded before generated usage ran the canonical scripts'
-                // fixed counts.
-                let turn_usage =
-                    match lash_provider_fixtures::runtime_providers::scripted_turn_from_provider_boundary(
-                        &event.payload,
-                    )
-                    .ok()
-                    .and_then(|turn| turn.usage)
-                    {
-                        Some(usage) => RuntimeUsageTotals::new(
-                            usage.input_tokens,
-                            usage.output_tokens,
-                            usage.cache_read_input_tokens,
-                            0,
-                            usage.reasoning_output_tokens,
-                        ),
-                        None => match provider_kind {
-                            "openai" => RuntimeUsageTotals::new(5, 2, 0, 0, 0),
-                            "anthropic" => RuntimeUsageTotals::new(7, 4, 0, 0, 0),
-                            "google_oauth" => RuntimeUsageTotals::new(6, 4, 0, 0, 1),
-                            _ => RuntimeUsageTotals::default(),
-                        },
-                    };
+                let turn_usage = provider_turn_usage(event);
+                let mut total_usage = self
+                    .sessions
+                    .get(&event.actor_alias)
+                    .map(|session| session.provider_usage.clone())
+                    .unwrap_or_default();
+                total_usage.saturating_add_assign(&turn_usage);
                 let frame_key = lash_core::FrameKey::from_caller_material("initial-frame")
                     .expect("non-empty initial frame material");
                 let frame_node_id = lash_core::facade_support::frame_node_id(
@@ -495,7 +481,7 @@ impl ModelStore {
                 };
                 let usage_facts = RuntimeUsageInvariantFacts {
                     turn_usage: turn_usage.clone(),
-                    total_usage: turn_usage.clone(),
+                    total_usage,
                     usage_event_count: 1,
                     usage_event_cumulative_totals: vec![turn_usage],
                     non_negative: true,
@@ -877,12 +863,42 @@ impl ModelStore {
     }
 }
 
+/// Independently model the usage encoded in a generated provider request.
+fn provider_turn_usage(event: &BoundaryEvent) -> RuntimeUsageTotals {
+    let provider_kind = event
+        .payload
+        .get("provider_kind")
+        .and_then(Value::as_str)
+        .unwrap_or("openai-compatible");
+    match lash_provider_fixtures::runtime_providers::scripted_turn_from_provider_boundary(
+        &event.payload,
+    )
+    .ok()
+    .and_then(|turn| turn.usage)
+    {
+        Some(usage) => RuntimeUsageTotals::new(
+            usage.input_tokens,
+            usage.output_tokens,
+            usage.cache_read_input_tokens,
+            0,
+            usage.reasoning_output_tokens,
+        ),
+        None => match provider_kind {
+            "openai" => RuntimeUsageTotals::new(5, 2, 0, 0, 0),
+            "anthropic" => RuntimeUsageTotals::new(7, 4, 0, 0, 0),
+            "google_oauth" => RuntimeUsageTotals::new(6, 4, 0, 0, 1),
+            _ => RuntimeUsageTotals::default(),
+        },
+    }
+}
+
 #[derive(Clone, Debug, Default, Eq, PartialEq)]
 struct ModelSession {
     alias: String,
     opened: bool,
     ingress_count: usize,
     provider_turns: Vec<ProviderTurnView>,
+    provider_usage: RuntimeUsageTotals,
     tool_outputs: Vec<String>,
     exec_code_outputs: Vec<String>,
     observer_turn_indices: Vec<usize>,
@@ -905,6 +921,7 @@ impl ModelSession {
             opened: false,
             ingress_count: 0,
             provider_turns: Vec::new(),
+            provider_usage: RuntimeUsageTotals::default(),
             tool_outputs: Vec::new(),
             exec_code_outputs: Vec::new(),
             observer_turn_indices: Vec::new(),

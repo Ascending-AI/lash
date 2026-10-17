@@ -107,15 +107,15 @@ async fn admitted_plugin_abort_commits_and_settles_input() -> Result<()> {
 
     let handle = session.send(TurnInput::text("abort this input")).await?;
     let input = handle.input_id().clone();
-    let report = handle.output().await?.result;
+    let report = handle.output().await?.outcome;
 
     assert!(
         matches!(
-            report.outcome,
+            report,
             TurnOutcome::Stopped(lash_core::facade_support::TurnStop::PluginAbort)
         ),
         "{:?}",
-        report.outcome
+        report
     );
     assert!(
         session

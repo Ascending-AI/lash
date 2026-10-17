@@ -328,9 +328,9 @@ async fn overflow_recovery_failures_record_failed_then_exhausted_without_a_frame
         .output()
         .await?;
     assert!(
-        overflow.result.is_context_overflow(),
+        overflow.outcome.is_context_overflow(),
         "{:?}",
-        overflow.result
+        overflow.outcome
     );
     let first_frame = committed(&session)
         .await
@@ -351,7 +351,7 @@ async fn overflow_recovery_failures_record_failed_then_exhausted_without_a_frame
             )))
             .output()
             .await?;
-        assert!(turn.result.is_success(), "{:?}", turn.result);
+        assert!(turn.outcome.is_success(), "{:?}", turn.outcome);
         assert_eq!(
             committed(&session)
                 .await
@@ -925,9 +925,9 @@ async fn threshold_continue_as_extends_the_pre_switch_durable_leaf() -> Result<(
         .output()
         .await?;
     let lash_core::facade_support::TurnOutcome::AgentFrameSwitch { frame_key, .. } =
-        &switched.result.outcome
+        &switched.outcome
     else {
-        panic!("the switch answers its send: {:?}", switched.result.outcome);
+        panic!("the switch answers its send: {:?}", switched.outcome);
     };
     let continued = session
         .attach_id(lash_core::runtime::durable::session_mail::frame_task_run(
@@ -1003,7 +1003,7 @@ async fn facade_compaction_settings_control_pressure_and_summary() -> Result<()>
         .output()
         .await?;
     if let lash_core::facade_support::TurnOutcome::AgentFrameSwitch { frame_key, .. } =
-        &switched.result.outcome
+        &switched.outcome
     {
         session
             .attach_id(lash_core::runtime::durable::session_mail::frame_task_run(

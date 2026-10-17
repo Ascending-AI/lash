@@ -278,13 +278,13 @@ async fn an_rlm_run_executes_under_its_recorded_behaviour(tier: Tier) {
     else {
         return;
     };
-    let outcome = serde_json::to_string(&output.result.outcome).expect("outcome JSON");
+    let outcome = serde_json::to_string(&output.outcome).expect("outcome JSON");
     assert!(
         !outcome.contains(LOST_ANSWER),
         "the run's prompt withheld continue_as: {outcome}"
     );
     assert!(
-        matches!(output.result.outcome, lash::TurnOutcome::Finished(_))
+        matches!(output.outcome, lash::TurnOutcome::Finished(_))
             && outcome.contains(&format!("ran {LOOP_ITERATIONS}")),
         "the run's cell ran its loop under the recorded bound: {outcome}"
     );

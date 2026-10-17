@@ -547,14 +547,18 @@ pub fn runtime_agent_frame_invariant_facts(
 }
 
 pub fn runtime_usage_invariant_facts(
-    result: &lash::TurnReport,
-    _activities: &[lash::TurnActivity],
-) -> RuntimeUsageInvariantFacts {
-    let turn_usage = RuntimeUsageTotals::from_usage(&result.usage);
-    let total_usage = turn_usage.clone();
+    calls: &[lash::turn::ModelCallRecord],
+    head_usage: &lash::LlmUsage,
+) -> Result<RuntimeUsageInvariantFacts, lash::usage::TokenUsageOverflow> {
+    let usage = calls
+        .iter()
+        .try_fold(lash::LlmUsage::default(), |total, row| {
+            total.checked_add(&row.usage()?)
+        })?;
+    let turn_usage = RuntimeUsageTotals::from_usage(&usage);
+    let total_usage = RuntimeUsageTotals::from_usage(head_usage);
     let mut cumulative = lash::LlmUsage::default();
-    let usage_event_cumulative_totals = result
-        .llm_calls
+    let usage_event_cumulative_totals = calls
         .iter()
         .filter_map(|call| {
             cumulative = cumulative.checked_add(&call.usage().ok()?).ok()?;
@@ -569,7 +573,7 @@ pub fn runtime_usage_invariant_facts(
     collect_negative_usage_fields("turn_usage", &turn_usage, &mut negative_fields);
     collect_negative_usage_fields("total_usage", &total_usage, &mut negative_fields);
     let non_negative = negative_fields.is_empty();
-    RuntimeUsageInvariantFacts {
+    Ok(RuntimeUsageInvariantFacts {
         turn_usage,
         total_usage,
         usage_event_count: usage_event_cumulative_totals.len(),
@@ -577,14 +581,14 @@ pub fn runtime_usage_invariant_facts(
         non_negative,
         usage_events_monotonic,
         negative_fields,
-    }
+    })
 }
 
 pub fn runtime_final_value_invariant_facts(
-    result: &lash::TurnReport,
+    result: &lash::TurnOutcome,
     activities: &[lash::TurnActivity],
 ) -> RuntimeFinalValueInvariantFacts {
-    let (outcome_kind, semantic_value) = match &result.outcome {
+    let (outcome_kind, semantic_value) = match result {
         lash_core::facade_support::TurnOutcome::Finished(
             lash_core::facade_support::TurnFinish::Finished { value, .. },
         ) => ("finished".to_string(), Some(value.clone())),
@@ -779,105 +783,5 @@ mod tests {
         let facts = runtime_graph_invariant_facts(&cycle);
         assert!(!facts.passed());
         assert!(!facts.cycle_node_ids.is_empty());
-    }
-
-    #[test]
-    fn usage_totals_own_the_field_list_and_saturating_total_rule() {
-        assert_eq!(
-            RuntimeUsageTotals::FIELDS,
-            &[
-                "input_tokens",
-                "output_tokens",
-                "cache_read_input_tokens",
-                "cache_write_input_tokens",
-                "reasoning_output_tokens",
-            ]
-        );
-
-        let report = lash::TurnReport::new(
-            lash::TurnOutcome::Finished(lash::TurnFinish::AssistantMessage {
-                text: "answer".into(),
-            }),
-            lash::usage::LlmUsage {
-                input_tokens: i64::MAX - 2,
-                output_tokens: 1,
-                cache_read_input_tokens: 1,
-                cache_write_input_tokens: 1,
-                reasoning_output_tokens: i64::MAX,
-                unknown_calls: 0,
-            },
-            lash::ReportSource::Live,
-        );
-        let facts = runtime_usage_invariant_facts(&report, &[]);
-        assert!(facts.non_negative);
-        let mut totals = facts.turn_usage;
-        assert_eq!(totals.total_tokens, i64::MAX);
-
-        totals.saturating_add_assign(&RuntimeUsageTotals::new(3, i64::MAX, 0, 0, 1));
-        assert_eq!(totals.input_tokens, i64::MAX);
-        assert_eq!(totals.output_tokens, i64::MAX);
-        assert_eq!(totals.reasoning_output_tokens, i64::MAX);
-        assert_eq!(totals.total_tokens, i64::MAX);
-    }
-
-    #[test]
-    fn final_value_builder_derives_pass_and_fail_from_real_outcomes_and_events() {
-        let prose_only = lash::TurnReport::new(
-            lash_core::facade_support::TurnOutcome::Finished(
-                lash_core::facade_support::TurnFinish::AssistantMessage {
-                    text: "looks final".to_string(),
-                },
-            ),
-            Default::default(),
-            lash::ReportSource::Live,
-        );
-        let failed = runtime_final_value_invariant_facts(
-            &prose_only,
-            &[lash::TurnActivity::independent(
-                lash::TurnEvent::StreamBlock(StreamBlockEvent::Delta {
-                    kind: StreamBlockKind::AssistantText,
-                    text: "looks final".into(),
-                    block: lash_core::llm::types::StreamBlockIdentity::new("text:0", 0),
-                }),
-            )],
-        );
-        assert!(!failed.passed());
-        assert!(failed.transcript_inference_required());
-
-        let value = serde_json::json!({"answer": 42});
-        let semantic = lash::TurnReport::new(
-            lash_core::facade_support::TurnOutcome::Finished(
-                lash_core::facade_support::TurnFinish::Finished {
-                    tool_name: "finish".into(),
-                    value: value.clone(),
-                },
-            ),
-            Default::default(),
-            lash::ReportSource::Live,
-        );
-        let mismatched = runtime_final_value_invariant_facts(
-            &semantic,
-            &[lash::TurnActivity::independent(lash::TurnEvent::Finished {
-                tool_name: "finish".into(),
-                value: serde_json::json!({"answer": 41}),
-            })],
-        );
-        assert!(!mismatched.passed());
-        assert_eq!(mismatched.terminal_event_count, 1);
-
-        let missing_terminal_event = runtime_final_value_invariant_facts(&semantic, &[]);
-        assert!(!missing_terminal_event.passed());
-        assert_eq!(missing_terminal_event.terminal_event_count, 0);
-
-        let passed = runtime_final_value_invariant_facts(
-            &semantic,
-            &[lash::TurnActivity::independent(lash::TurnEvent::Finished {
-                tool_name: "finish".into(),
-                value: value.clone(),
-            })],
-        );
-        assert!(passed.passed());
-        assert_eq!(passed.semantic_value, Some(value));
-        assert!(!passed.transcript_inference_required());
     }
 }

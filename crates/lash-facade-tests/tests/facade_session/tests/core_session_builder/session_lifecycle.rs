@@ -351,9 +351,9 @@ async fn a_native_model_patch_reaches_all_runtime_consumers() {
         .await
         .expect("the switching turn answers");
     let lash_core::facade_support::TurnOutcome::AgentFrameSwitch { frame_key, .. } =
-        &switched.result.outcome
+        &switched.outcome
     else {
-        panic!("the switch answers its send: {:?}", switched.result.outcome);
+        panic!("the switch answers its send: {:?}", switched.outcome);
     };
     // The switch mailed its task: the session's next turn runs it on the new
     // frame.

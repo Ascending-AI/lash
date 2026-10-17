@@ -375,11 +375,14 @@ async fn follow_once(
         }
     }
     .map_err(AppError::runtime)?;
-    // Answered, Failed and Cancelled runs ran and settled: each has a report
+    // Answered, Failed and Cancelled runs have a committed outcome
     // the page shows. A refused run answers its typed refusal. A parked run,
     // or an input withdrawn before it ran, has none.
-    let output = match outcome {
-        lash::SendOutcome::Settled { output, .. } => output.result,
+    let (output, durable_turn_id) = match outcome {
+        lash::SendOutcome::Settled { run, output, .. } => (
+            output.outcome,
+            TurnId::parse(run.as_str()).map_err(AppError::internal)?,
+        ),
         lash::SendOutcome::Refused { refusal, .. } => {
             return Err(AppError::runtime(lash::EmbedError::Runtime(*refusal)));
         }
@@ -390,7 +393,7 @@ async fn follow_once(
         session,
         TurnOutputIdentity {
             turn_id,
-            durable_turn_id: turn_id,
+            durable_turn_id: &durable_turn_id,
         },
         output,
         turn_state,
@@ -783,7 +786,7 @@ pub(crate) async fn record_turn_output_for_profile(
     state: &AppState,
     session: &lash::LashSession,
     identity: TurnOutputIdentity<'_>,
-    output: lash::TurnReport,
+    output: lash::TurnOutcome,
     turn_state: Arc<Mutex<TurnStreamState>>,
     trace_name: &str,
 ) -> Result<(), AppError> {
@@ -812,8 +815,8 @@ pub(crate) async fn record_turn_output_for_profile(
         json!({
             "assistant_text": assistant_text.clone(),
             "streamed_prose": streamed_prose,
-            "outcome": &output.outcome,
-            "errors": &output.errors,
+            "outcome": &output,
+            "cause": output.error_cause(),
             "finished": output.finished().map(|(tool_name, value)| {
                 json!({
                     "tool_name": tool_name,
@@ -822,7 +825,13 @@ pub(crate) async fn record_turn_output_for_profile(
             }),
         }),
     );
-    for record in output.llm_calls.iter().cloned() {
+    for row in session
+        .durable()
+        .read_turn_model_calls(identity.durable_turn_id)
+        .await
+        .map_err(AppError::internal)?
+    {
+        let record = row.record;
         let call_id = record.call_id.0.clone();
         state.publish_for_session_identified(
             &session.session_id(),
@@ -830,7 +839,7 @@ pub(crate) async fn record_turn_output_for_profile(
             crate::StreamItem::ModelCallRecorded { record },
         );
     }
-    match &output.outcome {
+    match &output {
         lash::TurnOutcome::Stopped(lash::TurnStop::Cancelled { evidence }) => {
             let message = format!("turn stopped · request {}", evidence.request_id);
             state.push_message_with_id_for_session(

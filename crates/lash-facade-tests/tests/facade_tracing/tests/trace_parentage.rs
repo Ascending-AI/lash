@@ -147,7 +147,7 @@ async fn a_sent_turn_joins_the_trace_of_its_send() -> Result<()> {
         .trace_context(caller(0xe1))
         .output()
         .await?;
-    assert!(output.is_success(), "{:?}", output.result.outcome);
+    assert!(output.is_success(), "{:?}", output.outcome);
     observed
         .until("the turn's terminal is exported", |observed| {
             !observed.spans("invoke_agent").is_empty()
@@ -415,7 +415,7 @@ async fn a_consumed_input_is_linked_never_a_second_parent() -> Result<()> {
     )?;
     let opened = send_the_law(&core, &mut keys).await?;
     let output = opened.await.expect("T1's send joins")?;
-    assert!(output.is_success(), "{:?}", output.result.outcome);
+    assert!(output.is_success(), "{:?}", output.outcome);
     observed
         .until("both turns' terminals are exported", |observed| {
             observed.spans("invoke_agent").len() == 2
@@ -469,7 +469,7 @@ async fn a_consumed_input_stays_linked_across_a_resume_on_another_owner() -> Res
         .attach_id(lash::TurnId::parse(T1).expect("nonblank host identity"))
         .output()
         .await?;
-    assert!(output.is_success(), "{:?}", output.result.outcome);
+    assert!(output.is_success(), "{:?}", output.outcome);
     observed_b
         .until("both turns' terminals are exported", |observed| {
             observed.spans("invoke_agent").len() == 2

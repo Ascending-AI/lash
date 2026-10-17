@@ -155,9 +155,9 @@ pub(super) async fn send(session: &lash::DurableSession, name: &str, meter: &Met
     )
     .await??;
     ensure!(
-        matches!(output.result.outcome, lash::TurnOutcome::Finished(_)),
+        matches!(output.outcome, lash::TurnOutcome::Finished(_)),
         "send stopped: {:?}",
-        output.result.outcome
+        output.outcome
     );
     meter.operation(
         "send.settle",
@@ -443,7 +443,7 @@ async fn root_redrive(
         )
         .await??;
         ensure!(
-            matches!(output.result.outcome, lash::TurnOutcome::Finished(_)),
+            matches!(output.outcome, lash::TurnOutcome::Finished(_)),
             "redrive did not finish"
         );
         meter.operation("root.redrive.settle", session.session_id(), "ok", start);
@@ -545,7 +545,7 @@ async fn takeover(
         )
         .await??;
         ensure!(
-            matches!(output.result.outcome, lash::TurnOutcome::Finished(_)),
+            matches!(output.outcome, lash::TurnOutcome::Finished(_)),
             "takeover failed"
         );
         meter.operation("call.settle", session.session_id(), "ok", start);

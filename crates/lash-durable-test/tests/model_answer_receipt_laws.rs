@@ -1684,7 +1684,7 @@ async fn cancelled_at_the_receipt(
     deployment.settle().await;
     let cursor = handle.cursor().clone();
     let output = handle.output().await.expect("the turn settles");
-    let honoured_after_step = match &output.result.outcome {
+    let honoured_after_step = match &output.outcome {
         lash::TurnOutcome::Stopped(lash_core::facade_support::TurnStop::Cancelled { evidence }) => {
             evidence.honoured_after_step
         }

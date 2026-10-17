@@ -36,8 +36,8 @@ use lash_core::runtime::TurnInputAcceptanceReceipt;
 use lash_core::store::PhysicalTurn;
 use lash_core::{
     LiveReplayGapReason, LiveReplayOutcome, LiveReplaySubscribeOutcome, LiveReplaySubscription,
-    LlmCallRecord, LlmUsage, SessionCursor, SessionObservationEvent,
-    SessionObservationEventPayload, SessionRevision, TurnActivity, TurnEvent, TurnId,
+    SessionCursor, SessionObservationEvent, SessionObservationEventPayload, SessionRevision,
+    TurnActivity, TurnEvent, TurnId,
 };
 use tokio::sync::mpsc;
 
@@ -45,7 +45,7 @@ use super::resolve::{self, Resolution};
 use super::{SendContext, SendOutcome};
 use crate::error::{EmbedError, Result, SendError};
 use crate::support::TurnActivitySink;
-use crate::turn::{ReportSource, TurnOutput, TurnReport};
+use crate::turn::TurnOutput;
 
 /// What a follower follows.
 #[derive(Clone, Debug)]
@@ -424,7 +424,6 @@ pub(super) async fn follow(
                     let observed = observed_before || !adoption.collected.is_empty();
                     return finish_settled(
                         ctx,
-                        subject,
                         run,
                         outcome,
                         adoption.collected,
@@ -655,13 +654,8 @@ async fn drain(
     }
 }
 
-#[allow(
-    clippy::too_many_arguments,
-    reason = "the settled answer's parts are each read at a different point of the follow"
-)]
 async fn finish_settled(
     ctx: &SendContext,
-    subject: &Subject,
     run: TurnId,
     outcome: TurnOutcome,
     activities: Vec<TurnActivity>,
@@ -679,115 +673,13 @@ async fn finish_settled(
         );
         observation.report(gap, tap).await;
     }
-    let acceptance = match subject {
-        Subject::Input(receipt) => Some(receipt.clone()),
-        Subject::Run(_) => None,
-    };
-    // The terminal is durable. Preserve the sealed calls this follower
-    // actually observed beside their activities; unavailable history stays a
-    // reported gap. Retain duplicates and contradictions for validation.
-    let result = durable_report(ctx, &run, outcome, acceptance, &activities).await?;
     Ok(SendOutcome::Settled {
         run: crate::RunId::from_turn_id(run),
-        output: Box::new(TurnOutput { result, activities }),
+        output: Box::new(TurnOutput {
+            outcome,
+            activities,
+        }),
         gaps: observation.gaps,
-    })
-}
-
-/// The report of a run that ran elsewhere, rebuilt from the store: honest
-/// and thin (D1 §1.5 3b).
-pub(super) async fn durable_report(
-    ctx: &SendContext,
-    run: &TurnId,
-    outcome: TurnOutcome,
-    acceptance: Option<TurnInputAcceptanceReceipt>,
-    activities: &[TurnActivity],
-) -> Result<TurnReport> {
-    let llm_calls: Vec<LlmCallRecord> = ctx
-        .parts
-        .effect_host
-        .durable_reads()?
-        .model_calls(
-            &ctx.parts.session_id,
-            &lash_core::durable_port::domain::ModelCallId::turn_owner(run),
-        )
-        .await
-        .map_err(EmbedError::Durable)?
-        .into_iter()
-        .map(|call| call.record)
-        .collect();
-    let errors = activities
-        .iter()
-        .filter_map(|activity| match &activity.event {
-            TurnEvent::Error(failure) => {
-                let envelope = failure.envelope.as_ref();
-                Some(crate::turn::TurnIssue {
-                    plugin_failures: Vec::new(),
-                    severity: crate::turn::TurnIssueSeverity::Blocking,
-                    kind: envelope.map_or_else(
-                        || lash_core::TurnFailureKind::Unknown("unknown".to_string()),
-                        |error| error.kind.clone(),
-                    ),
-                    code: envelope.and_then(|error| error.code.clone()),
-                    terminal_reason: envelope.and_then(|error| error.terminal_reason),
-                    message: envelope.map_or_else(
-                        || failure.message.clone(),
-                        |error| error.user_message.clone(),
-                    ),
-                    raw: envelope.and_then(|error| error.raw.clone()),
-                    retryable: envelope.and_then(|error| error.retryable),
-                    provider_failure_kind: envelope.and_then(|error| error.provider_failure_kind),
-                })
-            }
-            _ => None,
-        })
-        .collect();
-
-    // A call whose usage never arrived counts unknown, never as zero.
-    let usage = llm_calls
-        .iter()
-        .try_fold(LlmUsage::default(), |total, call| {
-            total.checked_add(&call.usage()?)
-        })
-        .map_err(|overflow| {
-            EmbedError::Runtime(lash_core::RuntimeError::new(
-                lash_core::RuntimeErrorCode::QueuedWork,
-                format!("turn report token usage overflows {}", overflow.counter()),
-            ))
-        })?;
-    let tool_calls =
-        lash_core::runtime::durable::services::RuntimeTurnServices::settled_tool_calls(
-            &ctx.parts.effect_host,
-            &ctx.parts.session_id,
-            run,
-            &ctx.parts.transcript_decoders,
-        )
-        .await
-        .map_err(EmbedError::Durable)?;
-    let cancel_input_outcome = match ctx
-        .parts
-        .store
-        .run_terminal(run)
-        .await
-        .map_err(EmbedError::Store)?
-    {
-        Some(lash_core::store::RunTerminal {
-            cause: lash_core::store::RunTerminalCause::Cancelled { input_outcome, .. },
-            ..
-        }) => input_outcome,
-        _ => Default::default(),
-    };
-    Ok(TurnReport {
-        outcome,
-        usage,
-        llm_calls,
-        failure_evidence: Vec::new(),
-        tool_calls,
-        execution: Default::default(),
-        errors,
-        acceptance,
-        cancel_input_outcome,
-        source: ReportSource::Durable,
     })
 }
 

@@ -139,12 +139,12 @@ async fn workbench_tools_expose_typed_cancellation_and_turn_control() {
         .expect("run the cancellation turn");
     assert!(
         matches!(
-            &cancelled.outcome,
+            &cancelled,
             lash::TurnOutcome::Stopped(lash::TurnStop::Cancelled { .. })
         ),
         "a cancelled tool is an uncatchable host terminal, so the catch's \
          finish is never reached and the turn ends cancelled: {:?}",
-        cancelled.outcome
+        cancelled
     );
     // A durable report is thin and a cancelled turn commits nothing: the
     // call's output is read off the turn's activity.
@@ -169,16 +169,16 @@ async fn workbench_tools_expose_typed_cancellation_and_turn_control() {
         .output()
         .await
         .expect("run the tool finish turn")
-        .result;
+        .outcome;
     assert!(
         matches!(
-            &finished.outcome,
+            &finished,
             lash::TurnOutcome::Finished(lash::TurnFinish::Finished { tool_name, value })
                 if tool_name == "workbench_finish"
                     && value == &json!({ "finished_by": "workbench_finish" })
         ),
         "{:?}",
-        finished.outcome
+        finished
     );
 
     let failed = session
@@ -186,16 +186,16 @@ async fn workbench_tools_expose_typed_cancellation_and_turn_control() {
         .output()
         .await
         .expect("run the tool failure turn")
-        .result;
+        .outcome;
     assert!(
         matches!(
-            &failed.outcome,
+            &failed,
             lash::TurnOutcome::Stopped(lash::TurnStop::ToolError { tool_name, value })
                 if tool_name == "workbench_fail"
                     && value["code"] == "workbench_action_rejected"
         ),
         "{:?}",
-        failed.outcome
+        failed
     );
     drop(session);
     workbench.shutdown().await;

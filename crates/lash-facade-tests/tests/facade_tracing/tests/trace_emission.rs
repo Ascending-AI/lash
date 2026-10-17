@@ -202,9 +202,9 @@ async fn served_turn() -> Result<(Observed, LashCore)> {
             .output()
             .await?;
         assert!(
-            matches!(output.result.outcome, lash::TurnOutcome::Finished(_)),
+            matches!(output.outcome, lash::TurnOutcome::Finished(_)),
             "{:?}",
-            output.result.outcome
+            output.outcome
         );
     }
     Ok((observed, core))
@@ -304,12 +304,12 @@ async fn a_control_finished_turn_exports_its_value_only_with_output_consent() ->
             let result = session.send(TurnInput::text("finish")).output().await?;
             assert!(
                 matches!(
-                    &result.result.outcome,
+                    &result.outcome,
                     lash::TurnOutcome::Finished(lash::TurnFinish::Finished { value: actual, .. })
                         if actual == &value
                 ),
                 "{:?}",
-                result.result.outcome
+                result.outcome
             );
             let records = observed.records(&core, "turn_completed");
             assert_eq!(records.len(), 1);

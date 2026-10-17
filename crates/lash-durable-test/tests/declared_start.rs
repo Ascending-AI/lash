@@ -1682,7 +1682,7 @@ async fn batch_of_spawns_overlaps(tier: Tier) {
         assert!(
             output.is_success(),
             "width {width}, {producer:?}: the batch answers: {:?}; activities: {:#?}; parent asked: {}; child calls: {}",
-            output.result.outcome,
+            output.outcome,
             output.activities,
             *world.script.parent_asked.borrow(),
             world.script.child_calls()
@@ -1704,7 +1704,7 @@ async fn batch_of_spawns_overlaps(tier: Tier) {
                 }
             }
             Producer::PromiseAll => {
-                let reply = format!("{:?}", output.result.outcome);
+                let reply = format!("{:?}", output.outcome);
                 for index in 0..width {
                     assert!(
                         reply.contains(&child_reply(index)),

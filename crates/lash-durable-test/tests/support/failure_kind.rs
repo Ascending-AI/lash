@@ -256,12 +256,7 @@ async fn protocol_before_model_refusal_keeps_its_specific_cause_after_crash_and_
         .output()
         .await
         .expect("the stopped turn reads")
-        .result;
-    assert_eq!(report.source, lash::ReportSource::Durable);
-    assert!(
-        report.errors.is_empty(),
-        "the follower observed no failure activity"
-    );
+        .outcome;
     assert_eq!(
         hooks.load(Ordering::SeqCst),
         1,
@@ -334,7 +329,7 @@ async fn before_llm_call_plugin_failure_keeps_its_stage_after_store_reopen() {
             .output()
             .await
             .expect("the committed terminal reads")
-            .result;
+            .outcome;
         let cause = report.error_cause().expect("the terminal cause").clone();
         owner.kill("a");
         owner.quiesce().await;
@@ -352,12 +347,7 @@ async fn before_llm_call_plugin_failure_keeps_its_stage_after_store_reopen() {
         .output()
         .await
         .expect("the reopened terminal reads")
-        .result;
-    assert_eq!(report.source, lash::ReportSource::Durable);
-    assert!(
-        report.errors.is_empty(),
-        "no activity contributes to the cause"
-    );
+        .outcome;
     let reopened = report.error_cause().expect("the reopened terminal cause");
     assert_eq!(reopened, &committed);
     assert_eq!(hooks.load(Ordering::SeqCst), 1, "the hook never reruns");

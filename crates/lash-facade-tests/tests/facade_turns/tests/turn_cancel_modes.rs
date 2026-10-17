@@ -268,10 +268,10 @@ async fn cancelled(
         .await
         .expect("the cancelled turn ends")?;
     Ok(output
-        .result
+        .outcome
         .cancellation()
         .cloned()
-        .unwrap_or_else(|| panic!("the turn ended cancelled: {:?}", output.result.outcome)))
+        .unwrap_or_else(|| panic!("the turn ended cancelled: {:?}", output.outcome)))
 }
 
 /// The step an after-step stop let finish stays in the session: the stop
@@ -587,9 +587,9 @@ async fn undelivered_input_settles_by(
             .await
             .expect("the cancelled turn ends")?;
         let evidence = output
-            .result
+            .outcome
             .cancellation()
-            .unwrap_or_else(|| panic!("the turn ended cancelled: {:?}", output.result.outcome));
+            .unwrap_or_else(|| panic!("the turn ended cancelled: {:?}", output.outcome));
         assert_eq!(evidence.mode, mode);
         assert_eq!(
             evidence.undelivered, disposition,
@@ -598,7 +598,17 @@ async fn undelivered_input_settles_by(
         match (witness, disposition) {
             (Witness::Report, _) => {
                 let extra = extra.expect("the report witness sends two addressed inputs");
-                let affected = output.result.cancel_input_outcome.clone();
+                let terminal = session
+                    .run_terminal(&lash::RunId::parse(run.as_str()).unwrap())
+                    .await?
+                    .expect("cancel terminal");
+                let lash::persistence::RunTerminalCause::Cancelled {
+                    input_outcome: affected,
+                    ..
+                } = terminal.cause
+                else {
+                    panic!("cancelled terminal")
+                };
                 assert_eq!(
                     affected.affected_inputs,
                     vec![
@@ -639,9 +649,19 @@ async fn undelivered_input_settles_by(
                 )
                 .await
                 .expect("the late input runs")?;
-                let reread = session.attach_id(run).output().await?;
+                let reread = session
+                    .run_terminal(&lash::RunId::parse(run.as_str()).unwrap())
+                    .await?
+                    .expect("retained terminal");
+                let lash::persistence::RunTerminalCause::Cancelled {
+                    input_outcome: reread,
+                    ..
+                } = reread.cause
+                else {
+                    panic!("cancelled terminal")
+                };
                 assert_eq!(
-                    reread.result.cancel_input_outcome, affected,
+                    reread, affected,
                     "a fresh follower reads the stop's facts after input lifecycles changed"
                 );
             }

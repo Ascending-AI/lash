@@ -260,9 +260,7 @@ pub use crate::session::{
     LashSession, ObservableSession, ParkedSession, SessionBuilder, SessionCreation,
     SessionParkRefused,
 };
-pub use crate::turn::{
-    ReportSource, ToolCallRead, TurnActivityFanout, TurnOutput, TurnReport, TurnToolCallRef,
-};
+pub use crate::turn::{ToolCallRead, TurnActivityFanout, TurnOutput, TurnToolCallRef};
 /// Re-exported so implementors of `#[async_trait]` facade traits (for example
 /// [`tools::StaticToolExecute`]) apply the macro without carrying their own
 /// `async-trait` dependency to keep version-aligned.
@@ -410,7 +408,7 @@ pub mod prelude {
         SessionEntry, SessionListFilter, SessionParkRefused, SessionRelationKind, SessionSpec,
         SessionStartPoint, SessionView, TurnActivity, TurnActivityFanout, TurnActivityId,
         TurnActivitySink, TurnBudget, TurnEvent, TurnExecutionMetrics, TurnFinish, TurnInput,
-        TurnInputAcceptanceReceipt, TurnOutcome, TurnOutput, TurnReport, TurnStatus, TurnStop,
+        TurnInputAcceptanceReceipt, TurnOutcome, TurnOutput, TurnStatus, TurnStop,
     };
 }
 
@@ -1290,18 +1288,17 @@ pub mod runtime {
     /// against uses the same reading rather than its own.
     pub use lash_core::runtime::current_epoch_ms;
     pub use lash_core::runtime::{
-        AdmittedDirectSend, AdmittedScope, AssembledTurn, AssistantResponseHookEvents,
-        AssistantResponsePlan, AssistantStreamCapsule, AssistantStreamHookState,
-        CheckpointAdmittedSet, DirectCompletionClient, EffectAddress, EmbeddedRuntimeHost,
-        EventSink, ExecutionScope, LlmRequestSpec, LlmStreamRecord, NoopEventSink,
-        NoopTurnActivitySink, ProcessCommand, ProcessEffectOutcome, ProcessListSelection,
-        RunAggregateWakePolicy, RuntimeAttribution, RuntimeControlConfig, RuntimeDurabilityConfig,
-        RuntimeEffectCommand, RuntimeEffectControllerError, RuntimeEffectEnvelope,
-        RuntimeEffectInvocation, RuntimeEffectKind, RuntimeEffectLocalExecutor,
-        RuntimeEffectOutcome, RuntimeEffectReplayMismatchReport, RuntimeEnvironmentBuilder,
-        RuntimeError, RuntimeErrorCode, RuntimeInvocation, RuntimeProviderConfig, SleepSpec,
-        TraceEmitter, TraceRuntime, TurnCancelWait, TurnContext, TurnPrelude, TurnPreludeRef,
-        WorkCadenceError,
+        AdmittedDirectSend, AdmittedScope, AssistantResponseHookEvents, AssistantResponsePlan,
+        AssistantStreamCapsule, AssistantStreamHookState, CheckpointAdmittedSet,
+        DirectCompletionClient, EffectAddress, EmbeddedRuntimeHost, EventSink, ExecutionScope,
+        LlmRequestSpec, LlmStreamRecord, NoopEventSink, NoopTurnActivitySink, ProcessCommand,
+        ProcessEffectOutcome, ProcessListSelection, RunAggregateWakePolicy, RuntimeAttribution,
+        RuntimeControlConfig, RuntimeDurabilityConfig, RuntimeEffectCommand,
+        RuntimeEffectControllerError, RuntimeEffectEnvelope, RuntimeEffectInvocation,
+        RuntimeEffectKind, RuntimeEffectLocalExecutor, RuntimeEffectOutcome,
+        RuntimeEffectReplayMismatchReport, RuntimeEnvironmentBuilder, RuntimeError,
+        RuntimeErrorCode, RuntimeInvocation, RuntimeProviderConfig, SleepSpec, TraceEmitter,
+        TraceRuntime, TurnCancelWait, TurnContext, TurnPrelude, TurnPreludeRef, WorkCadenceError,
     };
     /// The host clock a [`Backend`](crate::Backend) is opened on, used
     /// for runtime sleeps and store timestamps. [`SystemClock`] is the

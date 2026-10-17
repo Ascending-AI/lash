@@ -79,18 +79,13 @@ fn image_message(id: &str, role: MessageRole, bytes: &[u8]) -> Message {
     }
 }
 
-use lash_core::testing::{MockSessionManager, mock_assembled_turn as empty_turn};
+use lash_core::testing::MockSessionManager;
 
 fn mock_manager() -> MockSessionManager {
-    MockSessionManager::default()
-        .with_tool_catalog(vec![
-            json!({"name":"search_tools"}),
-            json!({"name":"read_file"}),
-        ])
-        .with_turn(empty_turn(
-            &SessionId::from("root"),
-            "Compacted work summary",
-        ))
+    MockSessionManager::default().with_tool_catalog(vec![
+        json!({"name":"search_tools"}),
+        json!({"name":"read_file"}),
+    ])
 }
 
 /// Captures what a context hook emits through its trace-only emitter, and

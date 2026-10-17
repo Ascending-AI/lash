@@ -304,9 +304,9 @@ async fn run(args: &Args, meter: Arc<measure::Meter>) -> Result<()> {
                     .await?;
                 let output = tokio::time::timeout(LIMIT, handle.output()).await??;
                 ensure!(
-                    matches!(output.result.outcome, lash::TurnOutcome::Finished(_)),
+                    matches!(output.outcome, lash::TurnOutcome::Finished(_)),
                     "session {ordinal} failed: {:?}",
-                    output.result.outcome
+                    output.outcome
                 );
                 drop(output);
                 meter.sample(&format!("completed-{ordinal}"), args.rounds)?;
@@ -404,9 +404,9 @@ async fn run(args: &Args, meter: Arc<measure::Meter>) -> Result<()> {
             resolve(&core, &restored).await?;
             let output = tokio::time::timeout(LIMIT, handle.output()).await??;
             ensure!(
-                matches!(output.result.outcome, lash::TurnOutcome::Finished(_)),
+                matches!(output.outcome, lash::TurnOutcome::Finished(_)),
                 "turn failed: {:?}",
-                output.result.outcome
+                output.outcome
             );
             drop(output);
             drop(session);

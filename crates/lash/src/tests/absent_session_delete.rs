@@ -55,9 +55,9 @@ async fn runs_a_turn(core: &LashCore, id: &str) -> Result<()> {
     .await
     .unwrap_or_else(|_| panic!("session `{id}` runs a turn: none finished in 60 s"))?;
     assert!(
-        matches!(output.result.outcome, TurnOutcome::Finished(_)),
+        matches!(output.outcome, TurnOutcome::Finished(_)),
         "session `{id}` runs a turn: {:?}",
-        output.result.outcome
+        output.outcome
     );
     Ok(())
 }

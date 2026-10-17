@@ -261,13 +261,9 @@ async fn assert_retired(
     transcript.nodes.keys().map(|id| id.to_hex()).collect()
 }
 
-/// The tool names a report lists, in its order.
-fn tools(report: &crate::TurnReport) -> Vec<String> {
-    report
-        .tool_calls
-        .iter()
-        .map(|call| call.tool.clone())
-        .collect()
+/// The tool names in the settled call read, in admission order.
+fn tools(calls: &[crate::tools::ToolCallRecord]) -> Vec<String> {
+    calls.iter().map(|call| call.tool.clone()).collect()
 }
 
 /// A turn cancelled while its cell parks on an approval retires, in its
@@ -335,10 +331,15 @@ async fn a_cancelled_turn_retires_the_cell_it_stopped_in_and_keeps_its_transcrip
         .request_id("retire-cancelled-stop")
         .mode(TurnCancelMode::Immediate)
         .await?;
-    let live = handle.output().await?.result;
-    assert_eq!(live.status(), crate::TurnStatus::Cancelled);
+    let live = handle.output().await?;
+    let live_calls = crate::testing::tool_calls_for_activity(&session, &live.activities).await;
+    let live = live.outcome;
     assert_eq!(
-        tools(&live),
+        crate::TurnStatus::of_outcome(&live),
+        crate::TurnStatus::Cancelled
+    );
+    assert_eq!(
+        tools(&live_calls),
         vec!["app_lookup".to_owned()],
         "the stopped cell's settled lookup is reported"
     );
@@ -350,11 +351,15 @@ async fn a_cancelled_turn_retires_the_cell_it_stopped_in_and_keeps_its_transcrip
         "a resolution after the turn's end answers Revoked"
     );
     world.collect().await;
-    let durable = session.attach(input).output().await?.result;
-    assert_eq!(durable.source, crate::ReportSource::Durable);
+    let follower = session.attach(input);
+    let followed_run = follower.run().await?.expect("settled run");
+    follower.output().await?;
+    let durable_calls = session
+        .read_turn_tool_calls(&crate::TurnId::parse(followed_run.as_str())?)
+        .await?;
     assert_eq!(
-        durable.tool_calls, live.tool_calls,
-        "the transcript reports what the live report did"
+        durable_calls, live_calls,
+        "the transcript reads the same calls as the live read"
     );
     drop(session);
     world.core.shutdown().await?;
@@ -383,13 +388,18 @@ async fn a_committed_turn_retires_its_consumed_cell_and_compacts_its_waits() -> 
         world.resolve(&key, granted.clone()).await,
         lash_core::ResolveAnswer::Resolved
     );
-    let live = handle.output().await?.result;
-    assert_eq!(live.status(), crate::TurnStatus::Answered);
+    let live = handle.output().await?;
+    let live_calls = crate::testing::tool_calls_for_activity(&session, &live.activities).await;
+    let live = live.outcome;
     assert_eq!(
-        tools(&live).len(),
+        crate::TurnStatus::of_outcome(&live),
+        crate::TurnStatus::Answered
+    );
+    assert_eq!(
+        tools(&live_calls).len(),
         3,
         "the cell's lookup, approval and finish are reported: {:?}",
-        tools(&live)
+        tools(&live_calls)
     );
 
     assert_retired(&world, session_name, run).await;
@@ -399,7 +409,7 @@ async fn a_committed_turn_retires_its_consumed_cell_and_compacts_its_waits() -> 
         &crate::TurnId::fixture(run),
     )
     .await?;
-    let sizes = lash_core::testing::cell_ledger_bytes(&transcript, &live.tool_calls)
+    let sizes = lash_core::testing::cell_ledger_bytes(&transcript, &live_calls)
         .expect("the stored ledger sizes read");
     eprintln!(
         "FIG-6171 3 calls: report={} held={} previous_copy={}",
@@ -420,9 +430,14 @@ async fn a_committed_turn_retires_its_consumed_cell_and_compacts_its_waits() -> 
         "another answer after the first won"
     );
     world.collect().await;
-    let durable = session.attach(input).output().await?.result;
-    assert_eq!(durable.tool_calls, live.tool_calls);
-    for call in &live.tool_calls {
+    let follower = session.attach(input);
+    let followed_run = follower.run().await?.expect("settled run");
+    follower.output().await?;
+    let durable_calls = session
+        .read_turn_tool_calls(&crate::TurnId::parse(followed_run.as_str())?)
+        .await?;
+    assert_eq!(durable_calls, live_calls);
+    for call in &live_calls {
         assert_eq!(
             session
                 .read_tool_call(&crate::TurnToolCallRef {
@@ -462,11 +477,16 @@ async fn a_deleted_session_leaves_no_engine_row_and_only_its_own_nodes_go() -> R
         world
             .resolve(&key, serde_json::json!({ "approved": true }))
             .await;
-        let live = handle.output().await?.result;
-        assert_eq!(live.status(), crate::TurnStatus::Answered);
+        let live = handle.output().await?;
+        let live_calls = crate::testing::tool_calls_for_activity(&session, &live.activities).await;
+        let live = live.outcome;
+        assert_eq!(
+            crate::TurnStatus::of_outcome(&live),
+            crate::TurnStatus::Answered
+        );
         transcripts.push(assert_retired(&world, name, &run).await);
         if name == "retire-kept" {
-            kept = Some((session, input, live));
+            kept = Some((session, input, live_calls));
         }
     }
     let (deleted, others) = (&transcripts[0], &transcripts[1]);
@@ -489,9 +509,14 @@ async fn a_deleted_session_leaves_no_engine_row_and_only_its_own_nodes_go() -> R
         others.iter().all(|node| blobs.contains(node)),
         "another session's transcript stays reachable"
     );
-    let (session, input, live) = kept.expect("the kept session ran");
-    let durable = session.attach(input).output().await?.result;
-    assert_eq!(durable.tool_calls, live.tool_calls);
+    let (session, input, live_calls) = kept.expect("the kept session ran");
+    let follower = session.attach(input);
+    let followed_run = follower.run().await?.expect("settled run");
+    follower.output().await?;
+    let durable_calls = session
+        .read_turn_tool_calls(&crate::TurnId::parse(followed_run.as_str())?)
+        .await?;
+    assert_eq!(durable_calls, live_calls);
     drop(session);
     world.core.shutdown().await?;
     Ok(())
@@ -642,7 +667,10 @@ async fn recorded_session_with_retired_plugin(retain_state: bool) -> Result<()> 
         let output = tokio::time::timeout(std::time::Duration::from_secs(60), running.output())
             .await
             .expect("the recorded turn resumes")?;
-        assert_eq!(output.result.status(), crate::TurnStatus::Answered);
+        assert_eq!(
+            crate::TurnStatus::of_outcome(&output.outcome),
+            crate::TurnStatus::Answered
+        );
     }
     assert_eq!(
         calls.load(Ordering::SeqCst),
@@ -709,8 +737,8 @@ async fn a_new_session_naming_a_retired_plugin_is_refused_typed() -> Result<()> 
 }
 
 /// A settled turn's tool calls as each read path answers them on `core`:
-/// the durable report a follower attaches to, the committed-turn read, and
-/// each call's turn-addressed read.
+/// the per-turn bulk read, the committed-turn read, and each call's
+/// turn-addressed read, after a follower has observed settlement.
 async fn settled_reads(
     core: &LashCore,
     session: &str,
@@ -721,14 +749,16 @@ async fn settled_reads(
         .session(crate::SessionId::fixture(session))
         .durable()
         .await?;
-    let report = session.attach(input.clone()).output().await?.result;
-    assert_eq!(report.source, crate::ReportSource::Durable);
+    session.attach(input.clone()).output().await?;
+    let calls = session
+        .read_turn_tool_calls(&crate::TurnId::fixture(run))
+        .await?;
     let committed = session
         .committed_turn(&crate::TurnId::fixture(run))
         .await?
         .expect("the turn committed");
-    assert_eq!(committed.tool_calls, report.tool_calls);
-    for call in &report.tool_calls {
+    assert_eq!(committed.tool_calls, calls);
+    for call in &calls {
         assert_eq!(
             session
                 .read_tool_call(&crate::TurnToolCallRef {
@@ -741,7 +771,7 @@ async fn settled_reads(
             }
         );
     }
-    Ok(report.tool_calls)
+    Ok(calls)
 }
 
 /// The turn's operational ledger rows.
@@ -967,14 +997,17 @@ async fn a_retried_native_call_reads_from_its_transcript_without_its_ledger() ->
         .id(crate::TurnId::fixture(run))
         .await?;
     let input = handle.input_id().clone();
-    let live = handle.output().await?.result;
+    let live = handle.output().await?;
+    let live_calls = session
+        .read_turn_tool_calls(&crate::TurnId::fixture(run))
+        .await?;
     assert_eq!(live.status(), crate::TurnStatus::Answered);
     assert_eq!(
         attempts.load(Ordering::SeqCst),
         2,
         "the call was retried once"
     );
-    assert_eq!(tools(&live), vec![FLAKY.to_owned()]);
+    assert_eq!(tools(&live_calls), vec![FLAKY.to_owned()]);
     let left = ledger(&stores, session_name, run);
     assert!(
         left.is_empty(),
@@ -986,7 +1019,7 @@ async fn a_retried_native_call_reads_from_its_transcript_without_its_ledger() ->
     );
     assert_eq!(
         settled_reads(&first, session_name, run, &input).await?,
-        live.tool_calls
+        live_calls
     );
     drop(session);
     first.shutdown().await?;
@@ -994,7 +1027,7 @@ async fn a_retried_native_call_reads_from_its_transcript_without_its_ledger() ->
     let reopened = core()?;
     assert_eq!(
         settled_reads(&reopened, session_name, run, &input).await?,
-        live.tool_calls,
+        live_calls,
         "a reopened core reads the live report's call"
     );
     reopened.shutdown().await?;

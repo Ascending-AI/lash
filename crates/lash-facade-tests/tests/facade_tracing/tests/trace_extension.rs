@@ -157,9 +157,9 @@ async fn spanning_turn(
         .output()
         .await?;
     assert!(
-        matches!(output.result.outcome, lash::TurnOutcome::Finished(_)),
+        matches!(output.outcome, lash::TurnOutcome::Finished(_)),
         "{:?}",
-        output.result.outcome
+        output.outcome
     );
     tokio::time::timeout(std::time::Duration::from_secs(60), async {
         while !spans
@@ -544,9 +544,9 @@ async fn nesting_turn(
         .output()
         .await?;
     assert!(
-        matches!(output.result.outcome, lash::TurnOutcome::Finished(_)),
+        matches!(output.outcome, lash::TurnOutcome::Finished(_)),
         "{:?}",
-        output.result.outcome
+        output.outcome
     );
     tokio::time::timeout(std::time::Duration::from_secs(60), async {
         while !spans

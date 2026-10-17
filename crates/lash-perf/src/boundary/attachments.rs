@@ -354,10 +354,23 @@ pub(super) async fn run(operations: usize, ledger_cap: usize) -> Result<Receipt>
             )
             .await??;
             ensure!(
-                matches!(output.result.outcome, lash::TurnOutcome::Finished(_)),
+                matches!(output.outcome, lash::TurnOutcome::Finished(_)),
                 "attachment turn failed: {:?}; calls={:?}; phases={:?}",
-                output.result.outcome,
-                output.result.llm_calls,
+                output.outcome,
+                session
+                    .durable()
+                    .committed_turn(
+                        &output
+                            .activities
+                            .iter()
+                            .find_map(|activity| match &activity.event {
+                                lash::TurnEvent::TurnStarted { turn_id, .. } =>
+                                    Some(turn_id.clone()),
+                                _ => None,
+                            })
+                            .ok_or_else(|| anyhow::anyhow!("turn admission"))?
+                    )
+                    .await?,
                 meter.phases.lock_recover()
             );
         }

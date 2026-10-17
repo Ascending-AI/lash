@@ -1,6 +1,5 @@
 use super::*;
 use crate::session_model::SessionStreamEvent;
-use crate::{LlmUsage, SessionSnapshot, ToolCallRecord};
 use lash_protocol_types::RunId;
 use lash_protocol_types::sync::MutexExt;
 use std::collections::HashMap;
@@ -82,75 +81,6 @@ pub struct CodeOutputRecord {
     pub output: String,
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub error: Option<String>,
-}
-
-/// Canonical high-level turn result returned to hosts.
-#[derive(Clone, Debug, serde::Serialize, serde::Deserialize)]
-pub struct AssembledTurn {
-    pub state: SessionSnapshot,
-    /// Cancellation evidence, when the turn was cancelled, rides this outcome
-    /// — see [`crate::TurnOutcome::cancellation`].
-    pub outcome: crate::TurnOutcome,
-    pub execution: TurnExecutionMetrics,
-    #[serde(default)]
-    pub token_usage: LlmUsage,
-    /// Provider calls made by this session during the turn, in protocol order.
-    /// Child-session calls remain on the child turn result.
-    #[serde(default)]
-    pub llm_calls: Vec<crate::LlmCallRecord>,
-    #[serde(default)]
-    #[serde(serialize_with = "lash_protocol_types::durable_serde::serialize")]
-    pub tool_calls: Vec<ToolCallRecord>,
-    /// Outputs the turn's code cells retained out of history (FIG-1643):
-    /// history keeps each one's witness and reference, and the turn's commit
-    /// holds each referenced attachment for the session.
-    #[serde(default, skip_serializing_if = "Vec::is_empty")]
-    pub retained_outputs: Vec<crate::RetainedOutput>,
-    /// Bounded, non-transcript evidence retained when host charge-safety
-    /// policy refuses regeneration of a failed provider generation.
-    #[serde(default, skip_serializing_if = "Vec::is_empty")]
-    pub failure_evidence: Vec<TurnFailureEvidence>,
-    #[serde(default)]
-    pub errors: Vec<TurnIssue>,
-    /// Durable admission identity of the input this turn was executed from.
-    #[serde(default, skip_serializing_if = "Option::is_none")]
-    pub turn_input_acceptance: Option<TurnInputAcceptanceReceipt>,
-    /// Undelivered active-turn inputs repaired under this turn's cancellation policy.
-    #[serde(
-        default,
-        skip_serializing_if = "crate::TurnCancelInputOutcome::is_empty"
-    )]
-    pub turn_cancel_input_outcome: crate::TurnCancelInputOutcome,
-}
-
-/// Result of executing one logical host turn through any AgentFrame switches.
-///
-/// A frame switch is an internal runtime continuation, similar to compaction
-/// from a host's perspective. Callers that need a final answer inspect
-/// `final_turn()`.
-#[derive(Clone, Debug, serde::Serialize, serde::Deserialize)]
-pub struct AgentFrameRun {
-    pub turns: Vec<AssembledTurn>,
-    /// Durable admission identity committed before this run was executed.
-    #[serde(default, skip_serializing_if = "Option::is_none")]
-    pub acceptance: Option<TurnInputAcceptanceReceipt>,
-}
-
-impl AgentFrameRun {
-    pub fn final_turn(&self) -> Option<&AssembledTurn> {
-        self.turns.last()
-    }
-
-    pub fn into_final_turn(mut self) -> Option<AssembledTurn> {
-        self.turns.pop()
-    }
-
-    pub fn frame_switch_count(&self) -> usize {
-        self.turns
-            .iter()
-            .filter(|turn| matches!(turn.outcome, crate::TurnOutcome::AgentFrameSwitch { .. }))
-            .count()
-    }
 }
 
 /// Host application sink for low-level streaming runtime events.

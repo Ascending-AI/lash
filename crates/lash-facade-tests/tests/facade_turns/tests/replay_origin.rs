@@ -144,12 +144,11 @@ impl Replay {
         })
     }
 
-    async fn run(&self) -> Result<lash::TurnReport> {
+    async fn run(&self) -> Result<lash::TurnOutput> {
         self.session
             .send(TurnInput::text("continue"))
             .output()
             .await
-            .map(|output| output.result)
     }
 
     fn trace_events(&self) -> Vec<lash_trace::TraceEvent> {
@@ -162,11 +161,11 @@ impl Replay {
     }
 }
 
-fn assert_drop_survived(report: &lash::TurnReport, events: &[lash_trace::TraceEvent]) {
-    assert_eq!(report.llm_calls.len(), 1, "{:?}", report.llm_calls);
-    assert_eq!(report.llm_calls[0].replay_drops.len(), 1);
+fn assert_drop_survived(calls: &[lash::LlmCallRecord], events: &[lash_trace::TraceEvent]) {
+    assert_eq!(calls.len(), 1, "{:?}", calls);
+    assert_eq!(calls[0].replay_drops.len(), 1);
     assert_eq!(
-        report.llm_calls[0].replay_drops[0].reason,
+        calls[0].replay_drops[0].reason,
         lash_core::ProviderReplayDropReason::ForeignRoute
     );
     assert!(events.iter().any(|event| matches!(
@@ -201,8 +200,11 @@ async fn caller_shaped_completion_preserves_drop_sideband_without_provider_trace
     let replay = Replay::over("replay-completion", provider, Vec::new(), true).await?;
 
     let report = replay.run().await?;
+    let calls =
+        lash::testing::model_calls_for_activity(&replay.session.durable(), &report.activities)
+            .await;
     let events = replay.trace_events();
-    assert_drop_survived(&report, &events);
+    assert_drop_survived(&calls, &events);
     assert!(
         events
             .iter()
@@ -226,12 +228,24 @@ async fn caller_shaped_failure_preserves_drop_sideband_and_original_error() -> R
     let replay = Replay::over("replay-failure", provider, Vec::new(), true).await?;
 
     let report = replay.run().await?;
+    let calls =
+        lash::testing::model_calls_for_activity(&replay.session.durable(), &report.activities)
+            .await;
     let events = replay.trace_events();
-    assert_drop_survived(&report, &events);
-    assert!(report.errors.iter().any(|error| {
-        error.message == "provider call failed"
-            && error.code == Some(FailureCode::provider("original_provider_code"))
-    }));
+    assert_drop_survived(&calls, &events);
+    assert!(
+        report
+            .activities
+            .iter()
+            .filter_map(|activity| match &activity.event {
+                lash::TurnEvent::Error(error) => error.envelope.as_ref(),
+                _ => None,
+            })
+            .any(|error| {
+                error.user_message == "provider call failed"
+                    && error.code == Some(FailureCode::provider("original_provider_code"))
+            })
+    );
     assert!(call_failed_with(&events, "provider:original_provider_code"));
     Ok(())
 }
@@ -269,12 +283,24 @@ async fn caller_shaped_protocol_abort_rejects_foreign_stream_and_emits_drop() ->
     .await?;
 
     let report = replay.run().await?;
+    let calls =
+        lash::testing::model_calls_for_activity(&replay.session.durable(), &report.activities)
+            .await;
     let events = replay.trace_events();
-    assert_drop_survived(&report, &events);
-    assert!(report.errors.iter().any(|error| {
-        error.code == Some(lash_core::TurnFailureCode::ProviderReplayOriginConflict.into())
-            && !error.message.contains("foreign-stream-signature")
-    }));
+    assert_drop_survived(&calls, &events);
+    assert!(
+        report
+            .activities
+            .iter()
+            .filter_map(|activity| match &activity.event {
+                lash::TurnEvent::Error(error) => error.envelope.as_ref(),
+                _ => None,
+            })
+            .any(|error| {
+                error.code == Some(lash_core::TurnFailureCode::ProviderReplayOriginConflict.into())
+                    && !error.user_message.contains("foreign-stream-signature")
+            })
+    );
     assert!(call_failed_with(
         &events,
         "lash:provider_replay_origin_conflict"
@@ -317,16 +343,19 @@ async fn caller_shaped_cancellation_preserves_drop_sideband_without_provider_tra
     let handle = replay.session.send(TurnInput::text("continue")).await?;
     started.notified().await;
     handle.cancel().await?;
-    let report = handle.output().await?.result;
+    let report = handle.output().await?;
+    let calls =
+        lash::testing::model_calls_for_activity(&replay.session.durable(), &report.activities)
+            .await;
     let events = replay.trace_events();
-    assert_drop_survived(&report, &events);
-    assert_eq!(report.llm_calls[0].attempts.len(), 1);
+    assert_drop_survived(&calls, &events);
+    assert_eq!(calls[0].attempts.len(), 1);
     assert_eq!(
-        report.llm_calls[0].attempts[0].outcome,
+        calls[0].attempts[0].outcome,
         lash_core::AttemptOutcome::Aborted
     );
     assert_eq!(
-        report.llm_calls[0].attempts[0].protocol_position,
+        calls[0].attempts[0].protocol_position,
         lash_core::ProtocolPosition::OutputStarted
     );
     assert!(matches!(
@@ -390,15 +419,31 @@ async fn confirm2_protocol_abort_conflict_retains_a_racing_provider_failure() ->
     .await?;
 
     let report = replay.run().await?;
-    assert!(report.errors.iter().any(|error| {
-        error.code == Some(lash_core::TurnFailureCode::ProviderReplayOriginConflict.into())
-            && error.message == "provider call failed"
-    }));
+    let calls =
+        lash::testing::model_calls_for_activity(&replay.session.durable(), &report.activities)
+            .await;
+    assert!(
+        report
+            .activities
+            .iter()
+            .filter_map(|activity| match &activity.event {
+                lash::TurnEvent::Error(error) => error.envelope.as_ref(),
+                _ => None,
+            })
+            .any(|error| {
+                error.code == Some(lash_core::TurnFailureCode::ProviderReplayOriginConflict.into())
+                    && error.user_message == "provider call failed"
+            })
+    );
     let events = replay.trace_events();
-    assert_drop_survived(&report, &events);
+    assert_drop_survived(&calls, &events);
     let issue = report
-        .errors
+        .activities
         .iter()
+        .filter_map(|activity| match &activity.event {
+            lash::TurnEvent::Error(error) => error.envelope.as_ref(),
+            _ => None,
+        })
         .find(|error| {
             error.code == Some(lash_core::TurnFailureCode::ProviderReplayOriginConflict.into())
         })
@@ -408,7 +453,7 @@ async fn confirm2_protocol_abort_conflict_retains_a_racing_provider_failure() ->
         Some(lash_core::ProviderFailureKind::Validation)
     );
     assert_eq!(issue.raw, None);
-    let original = report.llm_calls[0].attempts[0]
+    let original = calls[0].attempts[0]
         .error
         .as_ref()
         .expect("original provider failure evidence remains attached");
@@ -457,14 +502,23 @@ async fn protocol_abort_commits_a_complete_cell_despite_a_conflict_free_tail_fai
     .await?;
 
     let report = replay.run().await?;
-    assert!(report.errors.is_empty(), "complete cell remains accepted");
+    let calls =
+        lash::testing::model_calls_for_activity(&replay.session.durable(), &report.activities)
+            .await;
+    assert!(
+        !report
+            .activities
+            .iter()
+            .any(|activity| matches!(&activity.event, lash::TurnEvent::Error(_))),
+        "complete cell remains accepted"
+    );
     assert!(
         matches!(report.outcome, TurnOutcome::Finished(_)),
         "{:?}",
         report.outcome
     );
-    assert_eq!(report.llm_calls.len(), 1);
-    let original = report.llm_calls[0].attempts[0]
+    assert_eq!(calls.len(), 1);
+    let original = calls[0].attempts[0]
         .error
         .as_ref()
         .expect("tail provider failure remains in the sealed call record");

@@ -604,9 +604,11 @@ where
         .map(|(_, value)| value)
         .cloned()
         .expect("the reading turn finishes with a value");
+    let output_tool_calls =
+        lash::testing::tool_calls_for_activity(&session.durable(), &output.activities).await;
     Ok((
         value,
-        serde_json::to_value(lash_core::Durable(&output.result.tool_calls))
+        serde_json::to_value(lash_core::Durable(&output_tool_calls))
             .expect("the records serialize"),
     ))
 }
@@ -854,9 +856,9 @@ for (let i = 0; i < history.length; i++) {
         .output()
         .await?;
     let lash_core::facade_support::TurnOutcome::AgentFrameSwitch { frame_key, .. } =
-        &switched.result.outcome
+        &switched.outcome
     else {
-        panic!("the switch answers its send: {:?}", switched.result.outcome);
+        panic!("the switch answers its send: {:?}", switched.outcome);
     };
     let continued = session
         .attach_id(lash_core::runtime::durable::session_mail::frame_task_run(
@@ -1066,7 +1068,7 @@ async fn read_output_definition_reads_retained_value_on_sqlite() -> Result<()> {
                 read.finished().is_some(),
                 "{} {channel:?}: {:?}",
                 dialect.name(),
-                read.result.outcome
+                read.outcome
             );
             assert_eq!(
                 read.finished(),

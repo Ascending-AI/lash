@@ -724,12 +724,12 @@ async fn rendered_live_and_after_recovery(
     );
     let mut feed = observed.observe().subscribe_and_recover(snapshot.cursor);
     let output = world.send(&session, name).await;
-    if !output.result.is_success() {
+    if !output.outcome.is_success() {
         let transcript = session.transcript().await.expect("the transcript decodes");
         panic!(
             "{name}: the turn must answer: {:?} {:#?}\n{:#?}\nrequests: {:#?}\nactivities: {:#?}",
-            output.result.outcome,
-            output.result.errors,
+            output.outcome,
+            output.outcome.error_cause(),
             render(transcript.entries()),
             world.requests(name).len(),
             output
