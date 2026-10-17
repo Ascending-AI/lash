@@ -76,6 +76,23 @@ fn top_level_names_are_session_bindings() {
     assert_eq!(lines, ["2 [1, 2]", "4"]);
 }
 
+/// FIG-6680 / K-SES-001: cell carry uses a module loop target even when
+/// no later statement reads it. An empty loop leaves its target unbound.
+#[test]
+fn loop_targets_remain_module_bindings_for_the_next_cell() {
+    for cleanup in [
+        "",
+        "import asyncio\nasync def work():\n    return 1\nawait asyncio.create_task(work())\n",
+    ] {
+        let cell = format!("{cleanup}for last in [1, 2]:\n    pass\nfor empty in []:\n    pass\n");
+        let lines = machine::session(&[
+            &cell,
+            "print(last)\ntry:\n    print(empty)\nexcept NameError:\n    print('unbound')\n",
+        ]);
+        assert_eq!(lines, ["2", "unbound"]);
+    }
+}
+
 /// A name an earlier cell declared and never assigned is still unbound.
 #[test]
 fn a_binding_never_assigned_stays_unbound_in_the_next_cell() {

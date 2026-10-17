@@ -1263,7 +1263,7 @@ impl Lowerer<'_> {
             .map(|param| Name::new(param.as_str()))
             .chain(active)
             .collect();
-        Ok((params, self.finish_declarations(block?)))
+        Ok((params, self.finish_declarations(block?, None)))
     }
 
     /// Whether the call gave no argument for `param`.

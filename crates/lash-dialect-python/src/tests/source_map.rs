@@ -88,10 +88,39 @@ fn unmapped(lowered: &Lowered) -> BTreeMap<String, &'static str> {
 fn nested_actions_and_required_declarations_keep_source_ranges() {
     let source = "größe = \"日本\"\nasync def scale(x: int, extra: int = 1) -> int:\n    async def inner(y):\n        return y * 2\n    return await inner(x) + extra\ntwice = lambda y: y * 2\ntotal = 0\nfor item in [1, 2]:\n    try:\n        total += await echo(item)\n    except Exception:\n        total -= 1\n    if total > 3:\n        break\ntask = asyncio.create_task(scale(total))\nprint(größe, twice(await task))\n";
     let lowered = super::machine::lower(source).unwrap();
-    // FIG-6402 rev2 §11/§12: dominated declarations disappear, while
-    // every action and author statement still has a source range. The only
-    // unspelled sites in this source are the run-root task finalizer.
+    // FIG-6680 / FIG-6402 rev2 §11/§12: the cleanup try does not dominate
+    // cell carry. Its module slots stay outside, while every action and
+    // author statement still has a source range.
+    let declarations: BTreeSet<_> = lowered
+        .document
+        .main
+        .iter()
+        .filter_map(|stmt| match stmt {
+            Stmt::Let {
+                name,
+                value: Rhs::Expr(Expr::Literal(Literal::Absent)),
+            } => Some(name.as_str()),
+            _ => None,
+        })
+        .collect();
+    assert_eq!(
+        declarations,
+        BTreeSet::from(["größe", "item", "scale", "task", "total", "twice"])
+    );
     let unmapped = unmapped(&lowered);
-    assert!(unmapped.values().all(|kind| *kind == "task finalizer"));
-    assert_eq!(unmapped.len(), 3);
+    assert_eq!(
+        unmapped
+            .values()
+            .filter(|kind| **kind == "absent-binding initialization")
+            .count(),
+        declarations.len()
+    );
+    assert_eq!(
+        unmapped
+            .values()
+            .filter(|kind| **kind == "task finalizer")
+            .count(),
+        3
+    );
+    assert_eq!(unmapped.len(), declarations.len() + 3);
 }

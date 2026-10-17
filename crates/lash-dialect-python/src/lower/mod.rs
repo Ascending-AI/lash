@@ -340,30 +340,18 @@ pub(crate) fn lower_with_calls(
         });
     }
     let body = lowerer.block(|this| this.statements(&module.body))?;
-    let mut body = body;
-    body.stmts
-        .splice(0..0, std::mem::take(&mut lowerer.buf.stmts));
-    body.notes
-        .splice(0..0, std::mem::take(&mut lowerer.buf.notes));
-    let mut body = lowerer.finish_declarations(body);
-    let declarations = body
-        .stmts
-        .iter()
-        .take_while(|stmt| {
-            matches!(
-                stmt,
-                Stmt::Let {
-                    value: Rhs::Expr(Expr::Literal(Literal::Absent)),
-                    ..
-                }
-            )
-        })
-        .count();
-    lowerer.buf.stmts.extend(body.stmts.drain(..declarations));
-    lowerer.buf.notes.extend(body.notes.drain(..declarations));
     let body = lowerer.task_cleanup(body)?;
     lowerer.append(body);
     let main = std::mem::take(&mut lowerer.buf);
+    // Judge dominance in the final scopes: a slot carried after cleanup
+    // must be declared outside its try, and after a loop outside that loop.
+    let main = lowerer.finish_declarations(
+        main,
+        lowerer
+            .module
+            .is_none()
+            .then_some(&lowerer.scopes[0].bindings.locals),
+    );
     let mut document = Document::new(NumberPolicy::BySpelling, main.stmts);
     document.private_bindings = lowerer.private;
     document.functions = lowerer.declared;
@@ -485,7 +473,8 @@ impl Lowerer<'_> {
     /// Declaration dominance (FIG-6402 rev2 §11): a straight-line first
     /// assignment may declare the slot, unless its RHS or an earlier node
     /// reads or captures it. Nested assignments cannot declare an outer slot.
-    fn finish_declarations(&self, mut body: Buf) -> Buf {
+    /// A cell's carried names are also used after its root block finishes.
+    fn finish_declarations(&self, mut body: Buf, carried: Option<&BTreeSet<String>>) -> Buf {
         fn mentions(node: lash_kernel_doc::Node<'_>, name: &Name) -> bool {
             match node {
                 lash_kernel_doc::Node::Expr(Expr::Variable(read)) if read == name => true,
@@ -546,6 +535,7 @@ impl Lowerer<'_> {
                     else_block,
                     ..
                 } = &body.stmts[next]
+                    && !carried.is_some_and(|names| names.contains(name.as_str()))
                     && !mentions(lash_kernel_doc::Node::Expr(iterable), &name)
                     && !mentions(lash_kernel_doc::Node::Block(else_block), &name)
                     && matches!(pass.first(), Some(Stmt::Assign {
