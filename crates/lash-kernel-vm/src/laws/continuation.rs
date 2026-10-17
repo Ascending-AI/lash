@@ -99,6 +99,8 @@ struct Drive {
     bounds: Bounds,
     /// The library functions the run's text may call.
     probes: embedder::Probes,
+    /// The entry the run starts on, with its one argument, or `main`.
+    entry: Option<(&'static str, i64)>,
 }
 
 impl Drive {
@@ -108,6 +110,7 @@ impl Drive {
             reopens,
             bounds: embedder::ROOMY,
             probes: bodies,
+            entry: None,
         }
     }
 }
@@ -124,11 +127,15 @@ struct Seen {
 /// oldest first. Gives the trace and where its frames stood at each
 /// reopen.
 fn drive(text: &str, order: &[&str], drive: Drive) -> (Trace, Seen) {
-    let setup = Setup {
+    let mut setup = Setup {
         bounds: drive.bounds,
         probes: Some(drive.probes),
         ..setup(drive.slice)
     };
+    if let Some((entry, arg)) = drive.entry {
+        setup.start.target = crate::Target::Entry(lash_kernel_doc::Name::new(entry));
+        setup.start.args = vec![int(arg)];
+    }
     let mut embedder = match Embedder::try_with(text, setup) {
         Ok(embedder) => embedder,
         Err(error) => {
@@ -223,15 +230,23 @@ fn case(text: &str, order: &[&str], expected: &Datum, printed: &[Datum], want: &
 /// prints `printed`, and every sliced and reopened run leaves its trace.
 /// Gives where the reopened runs' frames stood.
 fn exact(base: Drive, text: &str, order: &[&str], expected: &Datum, printed: &[Datum]) -> Seen {
+    let (reference, seen) = everywhere(base, text, order);
+    assert_eq!(reference.end, format!("Finished({expected:?})"), "{text}");
+    let printed: Vec<String> = printed.iter().map(|datum| format!("{datum:?}")).collect();
+    assert_eq!(reference.printed, printed, "{text}");
+    seen
+}
+
+/// The uninterrupted run of `text` under `base`, after checking that every
+/// sliced and reopened run leaves its trace; and where the reopened runs'
+/// frames stood.
+fn everywhere(base: Drive, text: &str, order: &[&str]) -> (Trace, Seen) {
     let at = |slice, reopens| Drive {
         slice,
         reopens,
         ..base
     };
     let (reference, _) = drive(text, order, at(u64::MAX, false));
-    assert_eq!(reference.end, format!("Finished({expected:?})"), "{text}");
-    let printed: Vec<String> = printed.iter().map(|datum| format!("{datum:?}")).collect();
-    assert_eq!(reference.printed, printed, "{text}");
     let mut seen = Seen::default();
     for slice in [u64::MAX, 1, 0] {
         let (sliced, _) = drive(text, order, at(slice, false));
@@ -241,7 +256,7 @@ fn exact(base: Drive, text: &str, order: &[&str], expected: &Datum, printed: &[D
         seen.phases.extend(at_reopens.phases);
         seen.headers.extend(at_reopens.headers);
     }
-    seen
+    (reference, seen)
 }
 
 fn text(datum: &str) -> Datum {
@@ -1231,4 +1246,92 @@ main { let value = call work() return value }
         &int(7),
         &[text("evaluated"), text("cleaned"), text("adopt")],
     );
+}
+
+/// A run-root cleanup probe that waits for the tasks still running, as
+/// `tasks.cancel_all` does, then `ends`.
+fn cleanup_probe(
+    name: &'static str,
+    ends: &str,
+    registry: &mut FunctionRegistry,
+    ids: &BTreeMap<&'static str, FunctionId>,
+) -> Vec<(&'static str, FunctionId)> {
+    let mut probes = bodies(registry, ids);
+    let definition = parse_definition(&format!(
+        "function {name}() -> Any\nkernel 1\ncharge 0\nuse tasks.unfinished = @{}\n\
+         body {{ print \"clean\" let hs = invoke tasks.unfinished() let rs = join all hs {ends} }}",
+        ids["tasks.unfinished"]
+    ))
+    .unwrap();
+    probes.push((name, registry.register(definition, None).unwrap()));
+    probes
+}
+
+/// The entry `run`, started with `n`, under the run-root cleanup
+/// `body.clean`, which returns a value the run discards.
+fn cleaned(n: i64) -> Drive {
+    Drive {
+        probes: |registry, ids| cleanup_probe("body.clean", "return \"discarded\"", registry, ids),
+        entry: Some(("run", n)),
+        ..Drive::new(u64::MAX, false)
+    }
+}
+
+/// K-TASK-019, CONT-EXACT, CONT-ONCE: an entry's root cleanup runs once,
+/// as the run's root frame leaves and after its `finally` blocks, never
+/// for a nested call of the entry's function; its result is discarded and
+/// the held return ends the run, across a park in the cleanup reopened
+/// cold under other layouts.
+#[test]
+fn a_root_cleanup_runs_once_after_source_finalizers_and_resumes_exactly() {
+    let source = r#"
+entry run(n: Any) -> Any py_direct(body.clean)
+fn child() { do perform echo("child") as Any print "child" }
+fn run(n) {
+  if num.lt(0, n) { let inner = call run(0) print "inner" return inner }
+  try { let h = spawn call child() return 7 }
+  finally { print "finally" }
+}
+main { }
+"#;
+    exact(
+        cleaned(1),
+        source,
+        &[],
+        &int(7),
+        &[text("finally"), text("inner"), text("clean"), text("child")],
+    );
+}
+
+/// K-TASK-019: a cleanup holds the body's raise and re-raises it, and its
+/// own raise replaces what it holds, at every slice and cold reopen.
+#[test]
+fn a_root_cleanup_holds_the_raise_and_its_own_raise_replaces_it() {
+    let raises = r#"
+entry run(n: Any) -> Any py_direct(body.clean)
+fn child() { do perform echo("child") as Any print "child" }
+fn run(n) { let h = spawn call child() throw "held" }
+main { }
+"#;
+    let printed = [
+        format!("{:?}", text("clean")),
+        format!("{:?}", text("child")),
+    ];
+    let (trace, _) = everywhere(cleaned(0), raises, &[]);
+    assert!(trace.end.contains("held"), "{}", trace.end);
+    assert_eq!(trace.printed, printed);
+    let (trace, _) = everywhere(
+        Drive {
+            probes: |registry, ids| cleanup_probe("body.clean", "throw \"cleanup\"", registry, ids),
+            ..cleaned(0)
+        },
+        raises,
+        &[],
+    );
+    assert!(
+        trace.end.contains("cleanup") && !trace.end.contains("held"),
+        "{}",
+        trace.end
+    );
+    assert_eq!(trace.printed, printed);
 }

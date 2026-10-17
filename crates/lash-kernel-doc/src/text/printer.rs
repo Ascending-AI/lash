@@ -706,6 +706,11 @@ impl<'a> Printer<'a> {
                 self.function(same_fn);
                 self.out.push_str(") ");
             }
+            StartConvention::PyDirect { cleanup } => {
+                self.out.push_str(" py_direct(");
+                self.function(cleanup);
+                self.out.push_str(") ");
+            }
         }
     }
 

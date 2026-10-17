@@ -572,6 +572,19 @@ impl Executable {
         }
     }
 
+    /// The run-root cleanup of the entry whose body is `code`, when its
+    /// start convention declares one (`StartConvention::PyDirect`).
+    pub(crate) fn root_cleanup(&self, code: CodeId) -> Option<LibId> {
+        let site = &self.code(code).site;
+        let (doc::Unit::Function(name), true) = (&site.unit, site.path.is_empty()) else {
+            return None;
+        };
+        match &self.document.entries.get(name)?.convention {
+            doc::StartConvention::PyDirect { cleanup } => self.lib_of(cleanup),
+            _ => None,
+        }
+    }
+
     /// The library function `function`, when the document reaches it.
     pub(crate) fn lib_of(&self, function: &FunctionId) -> Option<LibId> {
         if !self.reaches(function) {

@@ -1243,7 +1243,7 @@ impl Parser {
     }
 
     fn entry_convention(&mut self) -> Parsed<StartConvention> {
-        if matches!(self.peek(), Token::Word(word) if word == "direct" || word == "ts_args" || word == "ts_direct")
+        if matches!(self.peek(), Token::Word(word) if word == "direct" || word == "ts_args" || word == "ts_direct" || word == "py_direct")
         {
             self.convention()
         } else {
@@ -1252,7 +1252,8 @@ impl Parser {
     }
 
     fn convention(&mut self) -> Parsed<StartConvention> {
-        let convention = match self.keyword("`direct`, `ts_direct` or `ts_args`")?.as_str() {
+        let expected = "`direct`, `ts_direct`, `ts_args` or `py_direct`";
+        let convention = match self.keyword(expected)?.as_str() {
             "direct" => StartConvention::Direct,
             "ts_direct" => {
                 self.expect(&Token::LParen)?;
@@ -1268,7 +1269,13 @@ impl Parser {
                 self.expect(&Token::RParen)?;
                 StartConvention::TsArgsList { await_fn, same_fn }
             }
-            _ => return Err(self.unexpected_previous("`direct`, `ts_direct` or `ts_args`")),
+            "py_direct" => {
+                self.expect(&Token::LParen)?;
+                let cleanup = self.function_reference()?;
+                self.expect(&Token::RParen)?;
+                StartConvention::PyDirect { cleanup }
+            }
+            _ => return Err(self.unexpected_previous(expected)),
         };
         Ok(convention)
     }

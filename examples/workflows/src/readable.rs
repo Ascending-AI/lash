@@ -71,14 +71,10 @@ pub(super) fn source_map(lowered: &Lowered, source: &str, allowed: &[String]) ->
 }
 
 fn task_finalizer(document: &Document, site: &Site) -> bool {
+    // An entry declares its cleanup in its start convention; only a cell's
+    // root wraps it.
     let body = match &site.unit {
         Unit::Main => &document.main,
-        Unit::Function(name) if document.entries.contains_key(name) => {
-            let Some(function) = document.functions.get(name) else {
-                return false;
-            };
-            &function.body
-        }
         _ => return false,
     };
     let Some(last) = body

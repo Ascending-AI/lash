@@ -181,7 +181,10 @@ pub fn render(root: &Path) -> Result<BTreeMap<String, String>> {
     for name in [
         "display.show_message",
         "display.set_status",
+        "display.add_item",
         "gmail.list_recent",
+        "llm.query",
+        "web.search",
     ] {
         effects.insert(
             k::EffectName::new(name)?,

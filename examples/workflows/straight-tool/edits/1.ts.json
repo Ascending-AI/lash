@@ -10,6 +10,15 @@
       ],
       "result": "any"
     },
+    "display.add_item": {
+      "params": [
+        {
+          "name": "input",
+          "ty": "any"
+        }
+      ],
+      "result": "any"
+    },
     "display.set_status": {
       "params": [
         {
@@ -38,6 +47,24 @@
       "result": "any"
     },
     "gmail.list_recent": {
+      "params": [
+        {
+          "name": "input",
+          "ty": "any"
+        }
+      ],
+      "result": "any"
+    },
+    "llm.query": {
+      "params": [
+        {
+          "name": "input",
+          "ty": "any"
+        }
+      ],
+      "result": "any"
+    },
+    "web.search": {
       "params": [
         {
           "name": "input",

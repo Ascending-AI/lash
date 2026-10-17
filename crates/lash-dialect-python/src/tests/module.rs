@@ -317,7 +317,8 @@ fn entry_convention_keeps_python_positional_and_keyword_arguments() {
 }
 
 /// K-TASK-019: resolved task creation, including ensure_future in a callee,
-/// installs cleanup at the run root. Mere spelling and shadowed names do not.
+/// installs cleanup at the run root: an entry's start convention declares
+/// it, and a cell's root wraps it. Mere spelling and shadowed names do not.
 #[test]
 fn task_cleanup_follows_resolved_calls_and_belongs_to_the_entry_root() {
     let plain = module("# create_task gather\nasync def run():\n    def gather():\n        return 'create_task'\n    return gather()\n").unwrap();
@@ -329,21 +330,29 @@ fn task_cleanup_follows_resolved_calls_and_belongs_to_the_entry_root() {
             .values()
             .any(|name| name.as_str() == "tasks.cancel_all")
     );
-    let tasks = module("import asyncio\nasync def run():\n    async def child():\n        await asyncio.sleep(1)\n    def launch():\n        return asyncio.ensure_future(child())\n    launch()\n").unwrap();
-    let body = &tasks.document.functions[&Name::new("run")].body;
-    assert!(matches!(
-        body.last(),
-        Some(lash_kernel_doc::Stmt::Try(lash_kernel_doc::TryStmt {
-            finally: Some(_),
-            ..
-        }))
-    ));
-    assert!(
-        !tasks
-            .document
-            .main
+    let tasks = module("import asyncio\nasync def run():\n    async def child():\n        try:\n            await asyncio.sleep(1)\n        finally:\n            print('cleanup')\n    def launch():\n        return asyncio.ensure_future(child())\n    launch()\n    await asyncio.sleep(0)\n    print('done')\n    return 7\n").unwrap();
+    let document = &tasks.document;
+    let lash_kernel_doc::StartConvention::PyDirect { cleanup } =
+        &document.entries[&Name::new("run")].convention
+    else {
+        panic!("the entry declares no root cleanup");
+    };
+    assert_eq!(
+        document.manifest.functions[cleanup].as_str(),
+        "tasks.cancel_all"
+    );
+    let no_try = |body: &[lash_kernel_doc::Stmt]| {
+        !body
             .iter()
             .any(|stmt| matches!(stmt, lash_kernel_doc::Stmt::Try(_)))
+    };
+    assert!(no_try(&document.functions[&Name::new("run")].body) && no_try(&document.main));
+    assert_eq!(
+        machine::entry_output(tasks.document.into_document(), Vec::new()),
+        (
+            lash_kernel_doc::Datum::Int(lash_kernel_doc::Integer::from(7)),
+            vec!["done".to_owned(), "cleanup".to_owned()]
+        )
     );
     let (lines, end) = machine::output(
         "import asyncio\nasync def child():\n    try:\n        await asyncio.sleep(1)\n    finally:\n        print('cleanup')\nasyncio.ensure_future(child())\nawait asyncio.sleep(0)\nprint('done')\n",

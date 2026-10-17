@@ -644,8 +644,9 @@ impl TokenCodec for FunctionRepresentation {
     }
 }
 
-/// Direct (0), TypeScript's argument list (1), or source parameters (2).
-/// TypeScript adapters retain the helpers extraction needs.
+/// Direct (0), TypeScript's argument list (1), source parameters (2), or
+/// direct with a root cleanup (3). TypeScript adapters retain the helpers
+/// extraction needs.
 impl TokenCodec for StartConvention {
     fn encode(&self, out: &mut TokenWriter) {
         match self {
@@ -659,6 +660,10 @@ impl TokenCodec for StartConvention {
                 await_fn.encode(out);
                 same_fn.encode(out);
             }
+            Self::PyDirect { cleanup } => {
+                out.sum(3, 1);
+                cleanup.encode(out);
+            }
         }
     }
 
@@ -668,11 +673,15 @@ impl TokenCodec for StartConvention {
                 0 => Some(0),
                 1 => Some(2),
                 2 => Some(1),
+                3 => Some(1),
                 _ => None,
             })? {
                 0 => Self::Direct,
                 2 => Self::TsDirect {
                     await_fn: FunctionId::decode(input)?,
+                },
+                3 => Self::PyDirect {
+                    cleanup: FunctionId::decode(input)?,
                 },
                 _ => Self::TsArgsList {
                     await_fn: FunctionId::decode(input)?,

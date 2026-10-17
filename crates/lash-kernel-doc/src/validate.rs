@@ -266,9 +266,9 @@ pub fn validate_document_with_limits(
             ));
         };
         let expected = match definition.convention {
-            crate::StartConvention::Direct | crate::StartConvention::TsDirect { .. } => {
-                signature.params.len()
-            }
+            crate::StartConvention::Direct
+            | crate::StartConvention::TsDirect { .. }
+            | crate::StartConvention::PyDirect { .. } => signature.params.len(),
             crate::StartConvention::TsArgsList { .. } => 2,
         };
         if function.params.len() != expected {
@@ -1007,8 +1007,10 @@ impl Scope<'_> {
         {
             return Err(invalid(Some(site), InvalidReason::StartToken));
         }
-        if matches!(start.convention, crate::StartConvention::Direct)
-            && start.signature.params.len() != params
+        if matches!(
+            start.convention,
+            crate::StartConvention::Direct | crate::StartConvention::PyDirect { .. }
+        ) && start.signature.params.len() != params
         {
             return Err(invalid(
                 Some(site),

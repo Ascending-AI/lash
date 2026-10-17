@@ -66,6 +66,24 @@ fn collections_walk_live_and_iterators_step_through_next() {
     );
 }
 
+/// CONT-ONCE (spec-rev2 §3.5) and PROTO-LOOP on the cutover lowering: a
+/// guest `valueOf` that ran before a nested await is not run again when
+/// its expression resumes, and an array spliced and a set deleted from
+/// while their loops park are walked live, once per element.
+#[test]
+fn guest_conversions_run_once_and_mutated_collections_walk_live_across_parks() {
+    let source = "let calls = 0;\n\
+        const n = { valueOf() { calls = calls + 1; return 2; } };\n\
+        const out = [];\n\
+        out.push(n * 3 + await echo(1));\n\
+        const a = [1, 2, 3, 4];\n\
+        for (const x of a) { out.push(await echo(x)); if (x === 1) { a.splice(1, 1); } }\n\
+        const s = new Set([1, 2, 3]);\n\
+        for (const x of s) { if (x === 1) { s.delete(2); } out.push(await echo(x)); }\n\
+        await finish(out.join(\",\") + \":\" + calls);";
+    assert_eq!(finished(source), Datum::Text("7,1,3,4,1,3:1".into()));
+}
+
 /// A value declared an array is walked as what it holds, as JavaScript
 /// walks it: the protocol has no typed copy of the loop.
 #[test]

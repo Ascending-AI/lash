@@ -26,6 +26,11 @@
 //! A third parks at the same places on `then yield` waits: each step that
 //! delivers an outcome leaves its task delivered, owing one more turn
 //! (`K-TASK-005`), and every cut of that step ends as the uncut run.
+//!
+//! Workflows imported from TypeScript and Python source park mid-iteration
+//! in each protocol loop cursor kind (list, tuple, map and set tables,
+//! text, driver), and inside an entry's run-root cleanup (`K-TASK-019`);
+//! every cut ends each as its uncut run.
 
 #![allow(clippy::expect_used, clippy::unwrap_used)]
 
@@ -136,8 +141,42 @@ main {
 }
 "#;
 
-/// The step outcomes the uncut run commits.
-const OUTCOMES: usize = 3;
+/// TypeScript source whose entry parks mid-iteration in a protocol loop
+/// over each cursor kind it has: a list, a map's and a set's tables, a
+/// text and a driver stepped through `next`. Six `kernel_run` steps.
+const TS_CURSORS: &str = r#"const worker = async () => {
+  const out = [];
+  for (const x of [1, 2]) { if (x === 2) { await sleep(5); } out.push(x); }
+  const m = new Map([["a", 3], ["b", 4]]);
+  for (const [key, v] of m) { if (key === "b") { await sleep(5); } out.push(v); }
+  const s = new Set([5, 6]);
+  for (const x of s) { if (x === 6) { await sleep(5); } out.push(x); }
+  for (const c of "xy") { if (c === "y") { await sleep(5); } out.push(c); }
+  for (const x of [7, 8].values()) { if (x === 8) { await sleep(5); } out.push(x); }
+  return out.join(",");
+};
+"#;
+
+/// Python source whose entry parks mid-iteration over a tuple, then inside
+/// its run-root cleanup, which cancels a task and waits while its
+/// `finally` sleeps.
+const PY_TUPLE_AND_CLEANUP: &str = r#"import asyncio
+
+async def worker():
+    async def child():
+        try:
+            await asyncio.sleep(100)
+        finally:
+            await asyncio.sleep(5)
+    out = []
+    for x in (1, 2):
+        if x == 2:
+            await asyncio.sleep(5)
+        out.append(x)
+    asyncio.ensure_future(child())
+    await asyncio.sleep(1)
+    return "b" + str(out[1])
+"#;
 
 /// Each program's terminal output in its uncut run, which every cut run
 /// ends with.
@@ -145,6 +184,10 @@ static UNCUT: Mutex<Vec<(&'static str, String)>> = Mutex::new(Vec::new());
 
 struct KernelSteps {
     source: &'static str,
+    /// The dialect `source` is imported from, or kernel text.
+    language: Option<lash::workflow::document::SourceLanguage>,
+    /// The step outcomes the uncut run commits.
+    outcomes: usize,
     staging: tempfile::TempDir,
     tripwire: Arc<Tripwire>,
     store: Mutex<Option<lash_sqlite_store::SqliteDurableStore>>,
@@ -156,8 +199,18 @@ struct KernelSteps {
 
 impl KernelSteps {
     fn new(source: &'static str) -> Self {
+        Self::imported(source, None, 3)
+    }
+
+    fn imported(
+        source: &'static str,
+        language: Option<lash::workflow::document::SourceLanguage>,
+        outcomes: usize,
+    ) -> Self {
         Self {
             source,
+            language,
+            outcomes,
             staging: tempfile::tempdir().expect("a staging directory"),
             tripwire: Arc::default(),
             store: Mutex::default(),
@@ -219,8 +272,26 @@ impl KernelSteps {
 
     async fn start_process(&self) -> Result<lash_core::ProcessId, String> {
         let core = self.core();
-        let document = lash::workflow::document::parse_document(self.source)
-            .map_err(|error| format!("the document parses: {error}"))?;
+        let document = match self.language {
+            None => lash::workflow::document::parse_document(self.source)
+                .map_err(|error| format!("the document parses: {error}"))?,
+            Some(language) => {
+                let env = lash::process::ProcessEnv::builder(lash::MaxToolCalls::new(4))
+                    .build()
+                    .map_err(|refusal| format!("the env builds: {refusal}"))?;
+                let imported = core
+                    .host_artifacts()
+                    .import_workflow(language, self.source, &env, None)
+                    .await
+                    .map_err(|error| format!("import the workflow: {error}"))?;
+                let lash::workflow::WorkflowImport::Imported { document, .. } = imported else {
+                    return Err(format!("the workflow imports: {imported:?}"));
+                };
+                document
+                    .to_document()
+                    .map_err(|error| format!("the imported document reads: {error}"))?
+            }
+        };
         let identity = lash_vm_runtime::KernelDocuments::new(self.backend().module_artifacts())
             .publish(
                 &lash_core::ReferrerClaim::unguarded(lash_core::ArtifactReferrer::HostPin(
@@ -375,9 +446,10 @@ impl Scenario for KernelSteps {
             })
             .collect();
         let committed = outcomes.iter().filter(|write| write.committed()).count();
-        if committed != OUTCOMES {
+        if committed != self.outcomes {
             violations.push(format!(
-                "the process committed {committed} step outcomes, not {OUTCOMES}"
+                "the process committed {committed} step outcomes, not {}",
+                self.outcomes
             ));
         }
         // The cut write is the one outcome that may not land: a step that
@@ -546,4 +618,62 @@ async fn a_delivered_then_yield_wait_resumes_exactly_across_a_cut() {
         ended.is_some_and(|(_, output)| output.contains(r#""b""#)),
         "{ended:?}"
     );
+}
+
+/// One imported workflow's cut matrix: every cut ends as its uncut run,
+/// whose terminal output holds `ends`.
+async fn imported_steps_resume_exactly(
+    source: &'static str,
+    language: lash::workflow::document::SourceLanguage,
+    outcomes: usize,
+    ends: &str,
+) {
+    let report = Matrix::new()
+        .labels(&[CommitLabel::STEP_OUTCOME])
+        .faults(&[
+            Fault::FailBefore,
+            Fault::Abort,
+            Fault::AckHidden,
+            Fault::CommitThenAbort,
+        ])
+        .horizon(Duration::from_secs(600))
+        .run_test(|| KernelSteps::imported(source, Some(language), outcomes))
+        .await;
+    eprintln!("imported kernel steps: {} cells", report.cells.len());
+    report.assert_held();
+    let uncut = UNCUT.lock_recover();
+    let ended = uncut.iter().find(|(seen, _)| *seen == source);
+    assert!(
+        ended.is_some_and(|(_, output)| output.contains(ends)),
+        "{ended:?}"
+    );
+}
+
+/// PROTO-LOOP, `K-MACH-007`: a TypeScript workflow parked mid-iteration
+/// over a list, a map, a set, a text and a driver resumes each loop's
+/// cursor on the other node wherever its step's outcome was cut.
+#[tokio::test]
+async fn a_typescript_run_parked_in_each_loop_cursor_resumes_exactly_across_a_cut() {
+    imported_steps_resume_exactly(
+        TS_CURSORS,
+        lash::workflow::document::SourceLanguage::TypeScript,
+        6,
+        "1,2,3,4,5,6,x,y,7,8",
+    )
+    .await;
+}
+
+/// PROTO-LOOP, `K-TASK-019`: a Python workflow parked mid-iteration over a
+/// tuple, then inside its run-root cleanup, resumes on the other node
+/// wherever its step's outcome was cut, the cleanup holding the entry's
+/// return.
+#[tokio::test]
+async fn a_python_run_parked_in_a_tuple_loop_and_its_root_cleanup_resumes_exactly_across_a_cut() {
+    imported_steps_resume_exactly(
+        PY_TUPLE_AND_CLEANUP,
+        lash::workflow::document::SourceLanguage::Python,
+        4,
+        "b2",
+    )
+    .await;
 }

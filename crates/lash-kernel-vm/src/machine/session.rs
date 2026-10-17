@@ -135,6 +135,7 @@ pub(super) fn start(
             if matches!(
                 definition.convention,
                 lash_kernel_doc::StartConvention::Direct
+                    | lash_kernel_doc::StartConvention::PyDirect { .. }
             ) && !(signature.required()..=signature.params.len()).contains(&given)
             {
                 return Err(arguments(format!(

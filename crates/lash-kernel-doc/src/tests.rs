@@ -49,8 +49,10 @@ pub(crate) fn every_form_corpus() -> Vec<String> {
 entry start(count: Int, label?: Text) -> List(Text)
 entry positional(value: Any) -> Any ts_direct(helper.twice)
 entry packed(value: Any) -> Any ts_args(helper.twice, num.neg)
+entry cleaned(value: Any) -> Any py_direct(helper.twice)
 fn positional(value) {{ return value via helper.twice }}
 fn packed(this, args) {{ return args }}
+fn cleaned(value) {{ return value }}
 private t1, `let`
 
 fn start(count, label) {{

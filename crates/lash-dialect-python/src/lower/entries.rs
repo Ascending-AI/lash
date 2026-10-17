@@ -4,6 +4,9 @@
 //!
 //! An entry's declared function is the author's body. The machine binds its
 //! source parameters under `Direct`; there is no closure or call wrapper.
+//! An entry that makes tasks declares `tasks.cancel_all` as its run-root
+//! cleanup instead (`PyDirect`), which the machine calls once the body has
+//! left, as `asyncio.run` does.
 //! Annotation and capture refusals are shared with every workflow dialect.
 
 use std::collections::HashSet;
@@ -49,10 +52,12 @@ impl Lowerer<'_> {
             None,
         );
         self.in_entry = false;
-        let body = body.and_then(|(params, body)| {
-            let body = self.task_cleanup(body)?;
-            Ok((params, body))
-        });
+        let convention = match self.creates_tasks {
+            true => self
+                .function("tasks.cancel_all")
+                .map(|cleanup| lash_kernel_doc::StartConvention::PyDirect { cleanup }),
+            false => Ok(lash_kernel_doc::StartConvention::Direct),
+        };
         self.creates_tasks = creates_tasks;
         if let Some((captured, at)) = self.captured.borrow_mut().take() {
             return Err(ModuleRefusal::CapturedModuleBinding
@@ -65,6 +70,7 @@ impl Lowerer<'_> {
                 .into_diagnostic());
         }
         let (params, body) = body?;
+        let convention = convention?;
         let entry = Name::new(name);
         // Only a module's lowering marks entry definitions (`declarations`).
         if let Some(module) = self.module.as_mut() {
@@ -78,7 +84,7 @@ impl Lowerer<'_> {
                         start: None,
                     },
                     signature,
-                    convention: lash_kernel_doc::StartConvention::Direct,
+                    convention,
                     notes: body.notes,
                 })
                 .map_err(ModuleError::into_diagnostic)?;
@@ -94,7 +100,8 @@ impl Lowerer<'_> {
         Ok(())
     }
 
-    /// Task cleanup belongs to the run root, including tasks made by callees.
+    /// A cell's task cleanup belongs to its root, including tasks made by
+    /// callees. An entry declares its cleanup in its start convention.
     pub(super) fn task_cleanup(&mut self, body: super::Buf) -> Lowering<super::Buf> {
         if !self.creates_tasks {
             return Ok(body);

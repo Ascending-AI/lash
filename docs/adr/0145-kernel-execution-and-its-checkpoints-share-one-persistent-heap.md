@@ -105,7 +105,8 @@ its exact meters. The table is [kernel design §6](../kernel/design.md#6-parked-
 - A frame persists semantic coordinates only: its pending statement's site
   and, at an action nested in it, that action's site, phase and operand
   roles by site (`K-EVAL-008`), bindings by name and declaring site, loops,
-  `finally` departures, values a loop iterates and a library call's
+  `finally` departures (an entry's run-root cleanup is one, at its body's
+  site, `K-TASK-019`), values a loop iterates and a library call's
   arguments. Registers and compiled code, statement and slot numbers are
   rebuilt caches and are never at a checkpoint.
 - A wait is keyed by its number and holds its task, its kind and its phase:

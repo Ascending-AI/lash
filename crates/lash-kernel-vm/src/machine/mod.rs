@@ -278,6 +278,9 @@ struct Frame {
     nested: Option<lash_kernel_exec::ActIx>,
     /// The library call this frame is the body of, charged when it ends.
     library: Option<LibraryCall>,
+    /// The departure an entry's run-root cleanup holds while it runs: the
+    /// body's result or raise, which ends the run once the cleanup returns.
+    cleaning: Option<Result<Value, Value>>,
     /// Non-owning comparison with the last row written (FIG-6586).
     published: Option<frames::Publication>,
 }

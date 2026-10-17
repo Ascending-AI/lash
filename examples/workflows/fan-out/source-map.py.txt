@@ -1,19 +1,16 @@
 language: Python
 exceptions: absent-binding initialization, task finalizer
 main/0 [16..159] "async def demo():\n    async def work(value: str):\n        return await corpus.echo(value)\n    return await asyncio.gather(work(\"a\"), work(\"b\"))"
-fn demo/0/0/0 [38..105] "async def work(value: str):\n        return await corpus.echo(value)"
-fn demo/0/0/0/0/0/0 [74..105] "return await corpus.echo(value)"
-fn demo/0/0/0/0/0/0/0/0/1 [74..105] "return await corpus.echo(value)"
-fn demo/0/0/0/0/0/0/0/1 [74..105] "return await corpus.echo(value)"
-fn demo/0/0/0/0/0/0/0/1/0 [74..105] "return await corpus.echo(value)"
-fn demo/0/0/1 [110..159] "return await asyncio.gather(work(\"a\"), work(\"b\"))"
-fn demo/0/0/1/0/1/1/1/1/1/1/0/0 [110..159] "return await asyncio.gather(work(\"a\"), work(\"b\"))"
-fn demo/0/0/1/0/1/1/1/1/1/1/0/0/0/0/0 [110..159] "return await asyncio.gather(work(\"a\"), work(\"b\"))"
-fn demo/0/0/1/0/1/1/1/1/1/1/0/0/0/0/0/0 [110..159] "return await asyncio.gather(work(\"a\"), work(\"b\"))"
-fn demo/0/0/1/0/1/1/1/1/1/1/0/1 [110..159] "return await asyncio.gather(work(\"a\"), work(\"b\"))"
-fn demo/0/0/1/0/1/1/1/1/1/1/0/1/0/0/0 [110..159] "return await asyncio.gather(work(\"a\"), work(\"b\"))"
-fn demo/0/0/1/0/1/1/1/1/1/1/0/1/0/0/0/0 [110..159] "return await asyncio.gather(work(\"a\"), work(\"b\"))"
-fn demo/0/0/1/0/1/1/1/1/1/1/1 [110..159] "return await asyncio.gather(work(\"a\"), work(\"b\"))"
-exception fn demo/0: task finalizer
-exception fn demo/0/1/0: task finalizer
-exception fn demo/0/1/0/0: task finalizer
+fn demo/0 [38..105] "async def work(value: str):\n        return await corpus.echo(value)"
+fn demo/0/0/0/0 [74..105] "return await corpus.echo(value)"
+fn demo/0/0/0/0/0/0/1 [74..105] "return await corpus.echo(value)"
+fn demo/0/0/0/0/0/1 [74..105] "return await corpus.echo(value)"
+fn demo/0/0/0/0/0/1/0 [74..105] "return await corpus.echo(value)"
+fn demo/1 [110..159] "return await asyncio.gather(work(\"a\"), work(\"b\"))"
+fn demo/1/0/1/1/1/1/1/1/0/0 [110..159] "return await asyncio.gather(work(\"a\"), work(\"b\"))"
+fn demo/1/0/1/1/1/1/1/1/0/0/0/0/0 [110..159] "return await asyncio.gather(work(\"a\"), work(\"b\"))"
+fn demo/1/0/1/1/1/1/1/1/0/0/0/0/0/0 [110..159] "return await asyncio.gather(work(\"a\"), work(\"b\"))"
+fn demo/1/0/1/1/1/1/1/1/0/1 [110..159] "return await asyncio.gather(work(\"a\"), work(\"b\"))"
+fn demo/1/0/1/1/1/1/1/1/0/1/0/0/0 [110..159] "return await asyncio.gather(work(\"a\"), work(\"b\"))"
+fn demo/1/0/1/1/1/1/1/1/0/1/0/0/0/0 [110..159] "return await asyncio.gather(work(\"a\"), work(\"b\"))"
+fn demo/1/0/1/1/1/1/1/1/1 [110..159] "return await asyncio.gather(work(\"a\"), work(\"b\"))"

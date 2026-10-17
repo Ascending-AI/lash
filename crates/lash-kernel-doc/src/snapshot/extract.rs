@@ -376,7 +376,8 @@ fn entry_wrapper(start: &StartAdapter, root: &Name) -> Function {
         })
     };
     let (params, mut body, args) = match &start.convention {
-        StartConvention::Direct => (
+        // The cleanup is the extracted entry's own convention.
+        StartConvention::Direct | StartConvention::PyDirect { .. } => (
             source_params.clone(),
             Vec::new(),
             source_params.iter().cloned().map(Atom::Variable).collect(),
@@ -410,7 +411,7 @@ fn entry_wrapper(start: &StartAdapter, root: &Name) -> Function {
         value: call(args),
     });
     let value = match &start.convention {
-        StartConvention::Direct => returned,
+        StartConvention::Direct | StartConvention::PyDirect { .. } => returned,
         StartConvention::TsDirect { await_fn } | StartConvention::TsArgsList { await_fn, .. } => {
             let value = local("value");
             body.push(Stmt::Let {

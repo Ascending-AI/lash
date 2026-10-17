@@ -367,5 +367,44 @@
     "exceptions": {
       "ts": []
     }
+  },
+  {
+    "name": "probe-nested",
+    "mode": "module",
+    "entries": [
+      "file_emails"
+    ],
+    "dialects": [
+      "ts"
+    ],
+    "exceptions": {
+      "ts": []
+    }
+  },
+  {
+    "name": "probe-retry",
+    "mode": "module",
+    "entries": [
+      "resilient_search"
+    ],
+    "dialects": [
+      "ts"
+    ],
+    "exceptions": {
+      "ts": []
+    }
+  },
+  {
+    "name": "probe-helper",
+    "mode": "module",
+    "entries": [
+      "summarize_inbox"
+    ],
+    "dialects": [
+      "ts"
+    ],
+    "exceptions": {
+      "ts": []
+    }
   }
 ]

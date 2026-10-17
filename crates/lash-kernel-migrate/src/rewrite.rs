@@ -109,7 +109,8 @@ fn replace_in_convention(
     convention: &mut lash_kernel_doc::StartConvention,
     functions: &BTreeMap<FunctionId, FunctionId>,
 ) {
-    if let lash_kernel_doc::StartConvention::TsDirect { await_fn } = convention
+    if let lash_kernel_doc::StartConvention::TsDirect { await_fn }
+    | lash_kernel_doc::StartConvention::PyDirect { cleanup: await_fn } = convention
         && let Some(to) = functions.get(await_fn)
     {
         *await_fn = *to;

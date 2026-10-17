@@ -1566,6 +1566,28 @@
             "ts_args_list"
           ],
           "type": "object"
+        },
+        {
+          "additionalProperties": false,
+          "description": "As `Direct`, and the run's root cleanup: when the entry's body has\nleft, by its return or its raise, and its own `finally` blocks have\nrun, `cleanup` is called with no arguments before the run ends. The\nbody's departure then ends the run, unless the cleanup raises: its\nraise does instead. Python's `asyncio.run` cancels and waits for the\ntasks still running this way (`K-TASK-019`).",
+          "properties": {
+            "py_direct": {
+              "additionalProperties": false,
+              "properties": {
+                "cleanup": {
+                  "$ref": "#/$defs/FunctionId"
+                }
+              },
+              "required": [
+                "cleanup"
+              ],
+              "type": "object"
+            }
+          },
+          "required": [
+            "py_direct"
+          ],
+          "type": "object"
         }
       ]
     },

@@ -113,6 +113,13 @@ pub enum StartConvention {
         await_fn: FunctionId,
         same_fn: FunctionId,
     },
+    /// As `Direct`, and the run's root cleanup: when the entry's body has
+    /// left, by its return or its raise, and its own `finally` blocks have
+    /// run, `cleanup` is called with no arguments before the run ends. The
+    /// body's departure then ends the run, unless the cleanup raises: its
+    /// raise does instead. Python's `asyncio.run` cancels and waits for the
+    /// tasks still running this way (`K-TASK-019`).
+    PyDirect { cleanup: FunctionId },
 }
 
 impl StartConvention {
@@ -122,6 +129,7 @@ impl StartConvention {
             Self::Direct => Vec::new(),
             Self::TsDirect { await_fn } => vec![*await_fn],
             Self::TsArgsList { await_fn, same_fn } => vec![*await_fn, *same_fn],
+            Self::PyDirect { cleanup } => vec![*cleanup],
         }
     }
 }

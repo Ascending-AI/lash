@@ -408,6 +408,14 @@ pub(crate) fn run(source: &str, deliveries: &[Vec<String>]) -> Recorded {
 
 /// Runs an entry with positional host arguments through the real machine.
 pub(super) fn end_of_entry(document: lash_kernel_doc::Document, args: Vec<Datum>) -> Datum {
+    entry_output(document, args).0
+}
+
+/// What an entry that calls no tool returns, and the lines it prints.
+pub(super) fn entry_output(
+    document: lash_kernel_doc::Document,
+    args: Vec<Datum>,
+) -> (Datum, Vec<String>) {
     let session = Session::default();
     let program = Program {
         release: pages::RELEASE,
@@ -431,7 +439,7 @@ pub(super) fn end_of_entry(document: lash_kernel_doc::Document, args: Vec<Datum>
     .unwrap();
     let mut console = Console::default();
     match machine.run(&mut console, u64::MAX).unwrap() {
-        Step::Ended(End::Finished(finished)) => finished.result,
+        Step::Ended(End::Finished(finished)) => (finished.result, console.lines),
         other => panic!("{other:?}"),
     }
 }

@@ -484,6 +484,10 @@ export type StartConvention = ("direct" | {
     "await_fn": FunctionId;
     "same_fn": FunctionId;
   };
+} | {
+  "py_direct": {
+    "cleanup": FunctionId;
+  };
 });
 
 export type Stmt = (("break" | "continue") | {

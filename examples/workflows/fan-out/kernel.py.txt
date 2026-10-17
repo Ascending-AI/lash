@@ -21,25 +21,21 @@ use tasks.cancel_all = @1bca1cb6474db8f08b6bc9ade7f293c845c33e9474b1553ca7a3cb51
 use tasks.unfinished = @5e80cb13afcf53414557d360bb2c75280ba4316c3929d6a76150ee665a80596b
 use text.concat = @ba1c1b7fe1ae760637dddbee3751c5dfbe05ed7b4f3e7792af355dc80d5ff6bb
 use text.join = @79aad37e7cebc78b176b7458ed56e625112872a7faf900143e331db02c601a0f
-entry demo() -> Any
+entry demo() -> Any py_direct(tasks.cancel_all)
 
 fn demo() {
-  try {
-    let work = fn(value) start(value: Text) -> Any bare direct {
-      return let(t1 = if(same(value, absent), invoke py.arg_missing("work"), null), invoke py.reply(perform corpus.echo(value) as Any))
-    }
-    return let(t2 = work, let(t3 = "a", let(t4 = t3, let(t5 = work, let(t6 = "b", let(t7 = t6, let(t8 = [spawn invoke py.task.run(fn() {
-      return apply t2(t4)
-    }), spawn invoke py.task.run(fn() {
-      return apply t5(t7)
-    })], invoke py.gather(t8))))))))
-  } finally {
-    do invoke tasks.cancel_all()
+  let work = fn(value) start(value: Text) -> Any bare direct {
+    return let(t1 = if(same(value, absent), invoke py.arg_missing("work"), null), invoke py.reply(perform corpus.echo(value) as Any))
   }
+  return let(t2 = work, let(t3 = "a", let(t4 = t3, let(t5 = work, let(t6 = "b", let(t7 = t6, let(t8 = [spawn invoke py.task.run(fn() {
+    return apply t2(t4)
+  }), spawn invoke py.task.run(fn() {
+    return apply t5(t7)
+  })], invoke py.gather(t8))))))))
 }
 
 main {
   let demo = &demo
 }
 
-unit Function(Name("demo")): statements=7 scopes=6 sites=17
+unit Function(Name("demo")): statements=5 scopes=4 sites=14

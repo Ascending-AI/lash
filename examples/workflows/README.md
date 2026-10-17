@@ -64,11 +64,17 @@ same rules for both dialects wherever the construct exists (owner rulings
 Both corpus laws pin each case's statement and loop counts. The TypeScript
 law also includes the original digest, typed, inbox and flat probes. Their
 old 96/87/96/27 statement counts are now 14/14/12/5, of which 6/6/6/0 are
-retained tested read ladders: the source counts are 8/8/6/5. The `read_ladder`
-column records those unresolved paths separately, pending FIG-6672 and
-FIG-6643's new ladders-off measurement; it is never an operand-pin allowance.
-The capturing cell also pins one §12 operand-order binding before its read
-ladder. Python records run-root cleanup separately as `entry_cleanup`.
+retained tested read ladders: the source counts are 8/8/6/5. The original
+nested, retry and `helper.ts` probes count 14/29/17, of which 6/20/8 are read
+ladders, against source counts 8/10/9; helper's loop body is its one source
+statement. The `read_ladder` column records those unresolved paths separately,
+pending FIG-6672's ladders-off measurement; it is never an operand-pin
+allowance. It includes the two parameter bindings the capturing cell and
+helper leave outside the expression a ladder splits. The capturing cell also
+pins one §12 operand-order binding before its read ladder. A Python entry that
+makes tasks declares `tasks.cancel_all` as its run-root cleanup in its
+`py_direct` start convention, so `entry_cleanup` is zero for every entry; only
+a cell's Main keeps its root wrap.
 `kernel_hoist` is zero: calls remain nested in while tests and assignment
 places (FIG-6657). The SHAPE contract remains statements ≤ author statements
 + operand pins, with one body per author loop, including comprehensions.

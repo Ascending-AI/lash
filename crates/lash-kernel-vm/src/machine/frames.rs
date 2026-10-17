@@ -464,6 +464,31 @@ impl Frame {
                 _ => {}
             }
         }
+        // A run-root cleanup runs at the body, outside every source scope.
+        if let Some(departed) = &self.cleaning {
+            let (value, entered) = match departed {
+                Ok(value) => (value, EnteredRecord::Return),
+                Err(value) => (value, EnteredRecord::Throw),
+            };
+            write(
+                &mut self.record.departing,
+                departing,
+                value.clone(),
+                &self.access,
+            )?;
+            departing += 1;
+            if coordinates {
+                let site = &self.exe.code(self.code).site;
+                let saved = self
+                    .record
+                    .finally
+                    .get(&ordinal_key(finally), &self.access)?;
+                let site = site_ref(saved.map(|record| record.site), site, &self.access)?;
+                let record = FinallyRecord { site, entered };
+                write(&mut self.record.finally, finally, record, &self.access)?;
+            }
+            finally += 1;
+        }
         if coordinates {
             truncate(&mut self.record.loops, loops, &self.access)?;
             truncate(&mut self.record.finally, finally, &self.access)?;
@@ -830,7 +855,7 @@ fn restore(
     exe: Arc<Executable>,
 ) -> Result<Box<Frame>, HeapFault> {
     let site = record.statement.resolve(&access)?;
-    let code_id = (0..site.path.len())
+    let code_id = (0..=site.path.len())
         .rev()
         .find_map(|length| exe.code_at(&Site::new(site.unit.clone(), &site.path[..length])))
         .ok_or_else(|| malformed("a frame has no admitted code body"))?;
@@ -862,7 +887,28 @@ fn restore(
     if let Some(stmt) = adopting {
         awaiting = Some(stmt);
     }
-    while adopting.is_none() {
+    // A run-root cleanup has left every source scope: the frame stands at
+    // its body, holding the departure the cleanup returns to.
+    let cleaning = if *site == code.site
+        && parked == ParkKind::Returned
+        && record.pending.is_none()
+        && exe.root_cleanup(code_id).is_some()
+    {
+        let saved = row(&record.finally, 0, &access)?;
+        let value = row(&record.departing, 0, &access)?;
+        (finally, departing) = (1, 1);
+        Some(match saved.entered {
+            _ if !saved.site.matches(&code.site, &access)? => {
+                return Err(malformed("a cleanup belongs to another site"));
+            }
+            EnteredRecord::Return => Ok(value),
+            EnteredRecord::Throw => Err(value),
+            _ => return Err(malformed("a root cleanup holds no return or raise")),
+        })
+    } else {
+        None
+    };
+    while adopting.is_none() && cleaning.is_none() {
         let index = *site.path.get(depth).ok_or_else(nowhere)? as usize;
         let stmts = &exe.block(block).stmts;
         if depth + 1 == site.path.len() {
@@ -1062,6 +1108,7 @@ fn restore(
         awaiting,
         nested,
         library,
+        cleaning,
     }))
 }
 

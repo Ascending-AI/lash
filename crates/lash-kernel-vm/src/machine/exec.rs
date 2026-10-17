@@ -321,11 +321,17 @@ impl KernelMachine {
                     }
                     continue;
                 }
-                let result = match departure {
+                let mut result = match departure {
                     Completion::Return(value) => Ok(*value),
                     Completion::Throw(value) => Err(*value),
                     _ => return Err(fault("a break or a continue left its function")),
                 };
+                if let Some(cleanup) = self.root_cleanup(task, exe)? {
+                    match self.clean_up(task, exe, cleanup, result)? {
+                        Some(cleaned) => result = cleaned,
+                        None => return Ok(()),
+                    }
+                }
                 match self.leave_frame(task, host, exe, result)? {
                     Some(next) => departure = next,
                     None => return Ok(()),
@@ -376,6 +382,50 @@ impl KernelMachine {
                     }
                 }
             }
+        }
+    }
+
+    /// The run-root cleanup to call as the entry the run started on is
+    /// left: its start convention's, when the departing frame is that
+    /// entry's root frame.
+    fn root_cleanup(&mut self, task: TaskId, exe: &Executable) -> Result<Option<LibId>, Halt> {
+        if task != TaskId::MAIN || self.task(task)?.frames.len() != 1 {
+            return Ok(None);
+        }
+        let code = self.frame(task)?.code;
+        Ok(exe.root_cleanup(code))
+    }
+
+    /// Calls the run-root cleanup `cleanup` with no source scope left, the
+    /// frame holding the body's departure `result` while it runs. Answers
+    /// what then ends the run: `result`, or the cleanup's raise; `None`
+    /// while the cleanup's body runs, whose return `leave_frame` takes.
+    fn clean_up(
+        &mut self,
+        task: TaskId,
+        exe: &Executable,
+        cleanup: LibId,
+        result: Result<Value, Value>,
+    ) -> Result<Option<Result<Value, Value>>, Halt> {
+        let frame = self.frame(task)?;
+        for at in 0..exe.code(frame.code).slots_by_at.len() {
+            frame.set_slot(at as u32, SlotState::Empty);
+        }
+        frame.record.statement =
+            lash_kernel_state::paged::SiteRef::new(&exe.code(frame.code).site, &frame.access)?;
+        frame.awaiting = None;
+        frame.cleaning = Some(result);
+        match self.call_lib(task, exe, cleanup, 0, 0, None) {
+            Ok(super::ops::Flow::Step) => Ok(None),
+            Ok(super::ops::Flow::Done) => {
+                drop(self.take(0));
+                Ok(self.frame(task)?.cleaning.take())
+            }
+            Err(Interrupt::Raise(value)) => {
+                self.frame(task)?.cleaning = None;
+                Ok(Some(Err(*value)))
+            }
+            Err(Interrupt::Halt(halt)) => Err(*halt),
         }
     }
 
@@ -433,6 +483,12 @@ impl KernelMachine {
         if self.task(task)?.frames.is_empty() {
             self.end_task(task, result)?;
             return Ok(None);
+        }
+        // The run-root cleanup has returned or raised: the body's departure,
+        // or the cleanup's raise, leaves the entry.
+        if let Some(departed) = self.frame(task)?.cleaning.take() {
+            let result = if result.is_ok() { departed } else { result };
+            return self.leave_frame(task, host, exe, result);
         }
         Ok(match result {
             Ok(value) => match self
@@ -497,6 +553,7 @@ impl KernelMachine {
         frame.awaiting = None;
         frame.nested = None;
         frame.library = None;
+        frame.cleaning = None;
         frame.published = None;
         self.storage.frames.push(frame);
     }
@@ -680,6 +737,7 @@ impl KernelMachine {
                     awaiting: None,
                     nested: None,
                     library: None,
+                    cleaning: None,
                     published: None,
                 })
             }

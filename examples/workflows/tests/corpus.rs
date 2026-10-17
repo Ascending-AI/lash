@@ -29,7 +29,9 @@ fn design_8_corpus_pins_readable_per_dialect_outputs() -> anyhow::Result<()> {
 /// no extra statement (437803). A function or closure whose only statement
 /// returns a dialect-helper call taking the author's inline body closure
 /// counts zero extra; the body's statements count normally (441660).
-/// Run-root task cleanup is pinned separately as entry_cleanup (437760).
+/// An entry's run-root task cleanup is its start convention, not a statement
+/// (FIG-6643), so entry_cleanup is zero everywhere; a cell's root wrap would
+/// still be counted there, never as an operand pin (437760).
 /// A `while` test and an assignment's place keep their actions nested
 /// (FIG-6657), so no action is hoisted for the kernel. The cleanup column is
 /// not an operand-pin allowance.
@@ -241,7 +243,7 @@ fn every_python_corpus_case_has_one_body_per_source_loop_and_no_statement_inflat
             "branch" => (3, 0, 0, 0),
             "iteration-typed" | "iteration-untyped" => (4, 1, 0, 0),
             "try-finally" => (8, 0, 0, 0),
-            "fan-out" => (3, 0, 2, 2),
+            "fan-out" => (3, 0, 0, 2),
             "sleep" => (2, 0, 0, 0),
             "closures-helpers" => (6, 1, 0, 0),
             "early-return" => (4, 0, 0, 0),
@@ -281,7 +283,10 @@ fn every_typescript_corpus_case_has_source_shaped_statements_and_one_body_per_lo
         "finish",
         "display.show_message",
         "display.set_status",
+        "display.add_item",
         "gmail.list_recent",
+        "llm.query",
+        "web.search",
     ]
     .into_iter()
     .map(|name| {
@@ -372,6 +377,9 @@ fn every_typescript_corpus_case_has_source_shaped_statements_and_one_body_per_lo
         ("typed", include_str!("../probe-typed/source.ts"), 8, 1),
         ("inbox", include_str!("../probe-inbox/source.ts"), 6, 1),
         ("flat", include_str!("../probe-flat/source.ts"), 5, 0),
+        ("nested", include_str!("../probe-nested/source.ts"), 8, 2),
+        ("retry", include_str!("../probe-retry/source.ts"), 10, 1),
+        ("helper", include_str!("../probe-helper/source.ts"), 9, 1),
     ];
     let catalog: Vec<serde_json::Value> =
         serde_json::from_str(include_str!("../catalog.json")).unwrap();
@@ -394,6 +402,9 @@ fn every_typescript_corpus_case_has_source_shaped_statements_and_one_body_per_lo
             "typed" => "probe-typed",
             "inbox" => "probe-inbox",
             "flat" => "probe-flat",
+            "nested" => "probe-nested",
+            "retry" => "probe-retry",
+            "helper" => "probe-helper",
             name => name,
         })
         .collect();
@@ -457,7 +468,8 @@ fn every_typescript_corpus_case_has_source_shaped_statements_and_one_body_per_lo
         // pinned per fixture: no blanket multiplier or spare allowance.
         // Capturing-cell's two parameter bindings remain outside its return
         // solely because the retained read ladder splits that expression;
-        // its arithmetic left operand is the one §12 order pin.
+        // its arithmetic left operand is the one §12 order pin. Helper's
+        // two parameter bindings stay outside its query for the same reason.
         let (expected, read_ladder, operand_pins, expected_adapters) = match name {
             "straight-tool" => (1, 0, 0, 0),
             "branch" => (3, 0, 0, 0),
@@ -472,6 +484,9 @@ fn every_typescript_corpus_case_has_source_shaped_statements_and_one_body_per_lo
             "digest" | "typed" => (14, 6, 0, 0),
             "inbox" => (12, 6, 0, 0),
             "flat" => (5, 0, 0, 0),
+            "nested" => (14, 6, 0, 0),
+            "retry" => (29, 20, 0, 0),
+            "helper" => (17, 8, 0, 1),
             _ => unreachable!(),
         };
         let kernel_hoist = 0;
