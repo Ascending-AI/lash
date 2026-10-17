@@ -85,8 +85,7 @@ impl KernelMachine {
         running: &Running<'_>,
         mut pc: usize,
     ) -> Eval<Ran> {
-        let window = running.stmt.regs as usize;
-        self.regs.window(window);
+        self.regs.statement(running.stmt.regs);
         let ops = running.stream.ops.as_slice();
         let task = running.task;
         loop {
@@ -652,7 +651,7 @@ impl KernelMachine {
                 } else {
                     // The slot's old holding already pays for that much.
                     // Hold its growth before publishing or changing it.
-                    self.reserve_held(growth)?;
+                    self.reserve_growth(growth)?;
                     self.frame(task)?
                         .set_slot(local.at, SlotState::Value(value));
                 }

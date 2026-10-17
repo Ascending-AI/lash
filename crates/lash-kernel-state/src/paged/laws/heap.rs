@@ -946,3 +946,45 @@ fn a_cold_text_length_observation_reads_no_payload_leaf() {
         matches!(heap.payload_visit(&PageValue::Text(t), 0..4101, &mut |_| ControlFlow::Continue(())), Err(HeapFault::Missing { page }) if page == missing)
     );
 }
+
+/// SAM-4 / K-MACH-008: release-by-count refunds only young growth; after
+/// every seal a warm heap and its cold reopen retain the same baseline.
+#[test]
+fn every_seal_rebases_release_by_count_to_the_cold_counter() {
+    use crate::paged::tree::Tree;
+    use lash_kernel_doc::{Name, Site, Unit};
+    let (mut heap, pages) = fresh();
+    for _ in 0..3 {
+        let baseline = heap.certificate();
+        assert!(heap.hold_growth(96).unwrap());
+        heap.release_young(32).unwrap();
+        assert_eq!(heap.certificate().upper.0, baseline.upper.0 + 64);
+        // Install the live holding so projection consumes its growth
+        // credit. A tuple is an immutable value, with no entity identity.
+        let mut bindings = Tree::new(false);
+        let value = PageValue::Float(lash_kernel_doc::Float::new(1.5));
+        bindings
+            .write(
+                b"live".to_vec(),
+                BindingRecord {
+                    name: NameRef::new(&Name::new("live"), heap.pages()).unwrap(),
+                    declared: SiteRef::new(&Site::new(Unit::Main, vec![0]), heap.pages()).unwrap(),
+                    value: BoundRecord::Value(value),
+                },
+                heap.pages(),
+            )
+            .unwrap();
+        heap.set_session_root(bindings).unwrap();
+        seal(&mut heap);
+        let sealed = heap.certificate();
+        let mut cold = reopen(&mut heap, &pages);
+        assert_eq!(cold.certificate(), sealed);
+        heap.release_young(64).unwrap();
+        cold.release_young(64).unwrap();
+        assert_eq!(heap.certificate(), sealed);
+        assert_eq!(cold.certificate(), sealed);
+        assert!(heap.hold_growth(48).unwrap());
+        heap.release_young(48).unwrap();
+        assert_eq!(heap.certificate(), sealed);
+    }
+}

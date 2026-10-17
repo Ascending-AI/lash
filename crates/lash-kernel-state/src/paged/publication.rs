@@ -42,9 +42,9 @@ pub(super) struct Holdings {
     /// What the running statement holds: credit for its writes, released
     /// at the statement's end.
     reserved: u64,
-    /// What the machine holds for its frames since it last published:
-    /// counted in U, and taken as credit when the roots it pays for are
-    /// installed (FIG-6318).
+    /// Unprojected object and control growth, counted in the young portion.
+    /// Projection transfers its credit into rows; remaining credit is
+    /// settled only at precision or seal, never by frame publication.
     held: u64,
     /// Whether the installed task and join trees are the execution state's
     /// current roots. A machine clears it once its state moves past what it
@@ -73,6 +73,11 @@ impl Default for Holdings {
 }
 
 impl Holdings {
+    /// Precision has priced current roots; projection credit is obsolete.
+    pub(super) fn projected(&mut self) {
+        self.held = 0;
+    }
+
     /// The credit what the running statement holds gives a write that
     /// grows by `growth`.
     pub(super) fn credit(&self, growth: u64) -> u64 {
@@ -174,15 +179,20 @@ impl PagedHeap {
     }
     /// Holds `bytes` the running statement pays for, as a native
     /// reservation does: U grows by them at once. A statement's hold is
-    /// credit for its writes and is released at the statement's end; a
-    /// persistent one pays for what the machine keeps in its frames and is
-    /// taken as credit when it next publishes them (FIG-6318). `false`, with
-    /// nothing held, when the census needs an exact refinement first.
+    /// credit for its writes and is released at the statement's end.
+    /// Returns `false` without a hold when precision is needed first.
     ///
     /// # Errors
     ///
     /// A fault of the census.
-    pub fn hold(&mut self, bytes: u64, persistent: bool) -> Result<bool, HeapFault> {
+    pub fn hold(&mut self, bytes: u64) -> Result<bool, HeapFault> {
+        if !self.admit_hold(bytes)? {
+            return Ok(false);
+        }
+        self.holdings.reserve(bytes)?;
+        Ok(true)
+    }
+    fn admit_hold(&mut self, bytes: u64) -> Result<bool, HeapFault> {
         let census = self
             .census
             .as_mut()
@@ -200,37 +210,44 @@ impl PagedHeap {
         // hold; copying the census certificate repeats facts we have.
         self.accounting.upper.0 += bytes;
         self.header = None;
-        let counter = if persistent {
-            &mut self.holdings.held
-        } else {
-            &mut self.holdings.reserved
-        };
-        *counter = counter
-            .checked_add(bytes)
-            .ok_or_else(|| HeapFault::Malformed("outstanding hold overflow".into()))?;
         Ok(true)
     }
-    /// Holds `bytes` the arena's objects grew by, which the heap receives
-    /// when they are next stored: the running statement's holds pay first,
-    /// the rest is held as for the frames, until the next publication
-    /// (seam D, swap 2.4(a)). `false`, with nothing held, when the census
-    /// needs an exact refinement first.
+    /// Admits object or control growth. Statement credit pays first;
+    /// remaining young credit transfers into rows at projection. Returns
+    /// `false` without a hold when precision is needed first.
     ///
     /// # Errors
     ///
     /// A fault of the census.
     pub fn hold_growth(&mut self, bytes: u64) -> Result<bool, HeapFault> {
         let credit = self.holdings.credit(bytes);
-        if bytes > credit && !self.hold(bytes - credit, true)? {
+        if bytes > credit && !self.admit_hold(bytes - credit)? {
             return Ok(false);
         }
         self.holdings.spend(credit);
         self.holdings.held = self
             .holdings
             .held
-            .checked_add(credit)
+            .checked_add(bytes)
             .ok_or_else(|| HeapFault::Malformed("outstanding hold overflow".into()))?;
         Ok(true)
+    }
+    /// Refunds a released young object's accounted cost. The arena calls
+    /// this only for allocations since the last seal; objects read from
+    /// pages and older objects never refund the baseline. Census membership
+    /// retirement, when present, belongs to the arena's release operation.
+    pub fn release_young(&mut self, bytes: u64) -> Result<(), HeapFault> {
+        let census = self
+            .census
+            .as_mut()
+            .ok_or_else(|| HeapFault::Malformed("a young release has no census".into()))?;
+        census
+            .changed(LogicalBytes(bytes), LogicalBytes(0))
+            .map_err(census_fault)?;
+        self.accounting = census.certificate();
+        self.holdings.held = self.holdings.held.saturating_sub(bytes);
+        self.header = None;
+        Ok(())
     }
     /// Takes up to `growth` of what the machine holds persistently as the
     /// credit of an object store that grows by `growth`; gives the credit.
@@ -253,6 +270,7 @@ impl PagedHeap {
             )
             .into());
         }
+        self.settle_growth()?;
         let mut census = self
             .census
             .take()
@@ -297,7 +315,7 @@ impl PagedHeap {
         census
             .changed(LogicalBytes(self.holdings.reserved), LogicalBytes(0))
             .map_err(census_fault)?;
-        self.accounting.upper.0 -= self.holdings.reserved;
+        self.accounting = census.certificate();
         self.holdings.reserved = 0;
         self.header = None;
         Ok(())
@@ -327,7 +345,7 @@ impl PagedHeap {
         census
             .changed(LogicalBytes(released), LogicalBytes(0))
             .map_err(census_fault)?;
-        self.accounting.upper.0 -= released;
+        self.accounting = census.certificate();
         self.holdings.reserved = mark;
         self.header = None;
         Ok(())
@@ -355,7 +373,7 @@ impl PagedHeap {
             census
                 .changed(LogicalBytes(released), LogicalBytes(0))
                 .map_err(census_fault)?;
-            self.accounting.upper.0 -= released;
+            self.accounting = census.certificate();
         }
         self.holdings.temporary.clear();
         self.holdings.scalar_bytes = 0;
@@ -373,7 +391,10 @@ impl PagedHeap {
         &self.holdings.fresh
     }
     pub(super) fn outstanding_reserved(&self) -> u64 {
-        self.holdings.reserved.saturating_add(self.holdings.held)
+        // Precision runs only over current, projected roots. Their growth
+        // is already priced there; historical projection credit is not a
+        // simultaneously held transient buffer.
+        self.holdings.reserved
     }
     fn transient_reserved(&self) -> Result<LogicalBytes, HeapFault> {
         checked_sum([self.outstanding_reserved(), self.holdings.scalar_bytes].into_iter())
@@ -423,6 +444,7 @@ impl PagedHeap {
             },
         );
         if decision.is_ok() {
+            self.holdings.held = 0;
             self.collection_live = Some(census.certificate().upper);
         }
         match decision {
@@ -469,6 +491,7 @@ impl PagedHeap {
                 "a collection would trace roots the machine has not published".into(),
             ));
         }
+        self.settle_growth()?;
         let Some(mut census) = self.census.take() else {
             return Ok(());
         };
@@ -603,7 +626,7 @@ impl PagedHeap {
                 heap.tasks = tasks;
                 heap.install_transient(roots);
             })?;
-            return self.release_held();
+            return Ok(());
         }
         let old_tasks = checked_sum(
             [
@@ -620,11 +643,11 @@ impl PagedHeap {
             heap.joins = joins.with_task_edges(join_edges);
             heap.install_transient(roots);
         })?;
-        self.release_held()
+        Ok(())
     }
-    /// Releases what the machine held for its frames beyond what the roots
-    /// just installed cost: they are priced exactly now (FIG-6318).
-    fn release_held(&mut self) -> Result<(), HeapWriteError> {
+    /// Settles unprojected growth after all current roots are installed.
+    /// Publication itself never prices frames or refunds their slack.
+    pub(super) fn settle_growth(&mut self) -> Result<(), HeapFault> {
         if self.holdings.held == 0 {
             return Ok(());
         }
@@ -635,7 +658,7 @@ impl PagedHeap {
         census
             .changed(LogicalBytes(self.holdings.held), LogicalBytes(0))
             .map_err(census_fault)?;
-        self.accounting.upper.0 -= self.holdings.held;
+        self.accounting = census.certificate();
         self.holdings.held = 0;
         self.header = None;
         Ok(())
@@ -704,6 +727,7 @@ impl PagedHeap {
                     let borrowed = self.holdings.borrowed.clone();
                     let fresh = self.fresh_roots().to_vec();
                     let reserved = self.transient_reserved()?;
+                    self.holdings.held = 0;
                     match census.refine(
                         self,
                         &TransientRoots {

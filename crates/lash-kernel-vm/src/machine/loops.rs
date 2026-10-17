@@ -255,6 +255,9 @@ impl KernelMachine {
         lib: LibId,
         args: Vec<Value>,
     ) -> Eval<Option<Value>> {
+        // Protocol hooks have at most two arguments. This is the header's
+        // static ABI window, also when the header resumes outside a stream.
+        self.regs.statement(exe.stmt(stmt).regs.max(2));
         let count = args.len();
         for (at, arg) in args.into_iter().enumerate() {
             self.put(at, arg);
@@ -574,6 +577,7 @@ impl KernelMachine {
         {
             let list = *list;
             *header = Header::Item(Box::new(raw));
+            self.regs.statement(exe.stmt(stmt).regs.max(2));
             self.put(0, Value::List(list));
             self.put(1, raw);
             // Same held item and argument roots as the general hook. Only

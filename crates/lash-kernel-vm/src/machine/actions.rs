@@ -526,7 +526,7 @@ impl KernelMachine {
         for (site, reg) in &entry.roles {
             let held = self.take(reg.0 as usize);
             let value = self.page_form(&held)?;
-            self.reserve_held(self.cost_of(&held))?;
+            self.reserve_growth(self.cost_of(&held))?;
             roles.push(RoleRecord {
                 site: site.path[depth..].to_vec(),
                 value,

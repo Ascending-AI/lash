@@ -266,7 +266,7 @@ impl KernelMachine {
         // What the frame holds, held as a bound value is, while the
         // registers still hold it. A parameter is held once, and a variable
         // a closure shares is in its cell.
-        self.reserve_held(super::FRAME_BYTES)?;
+        self.reserve_growth(super::FRAME_BYTES)?;
         let local = |slot: u32| {
             plan.locals[slot as usize].ok_or_else(|| fault("a segment's site binds no variable"))
         };
@@ -291,7 +291,7 @@ impl KernelMachine {
         }
         held.extend(site.roles.iter().map(|(_, reg)| base + *reg as usize));
         for at in held {
-            self.reserve_held(self.cost_of(&self.regs[at]))?;
+            self.reserve_growth(self.cost_of(&self.regs[at]))?;
         }
         let mut frame = self.fresh_frame(exe, code_id)?;
         frame.scalar_blocks = code.versions.select(&self.regs[args..args + arity]);

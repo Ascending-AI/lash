@@ -27,8 +27,9 @@ use super::{
     NestedKind, Runs, Stmt, Var, Via,
 };
 
-/// One statement's ops as they are gathered, and how many registers they
-/// use.
+/// One statement's ops and its static kill set: the dense register interval
+/// its expression tree uses, in document evaluation order. This interval is
+/// independent of instruction fusion and register write history.
 struct Ops {
     ops: Vec<Op>,
     regs: u32,

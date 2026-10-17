@@ -150,27 +150,30 @@ impl KernelMachine {
     /// ends, refining exactly at the collection point when the heap is due
     /// and ending the run when what is live does not leave room.
     pub(super) fn reserve(&mut self, bytes: u64) -> Result<(), Halt> {
-        self.hold(bytes, false)
+        self.hold(bytes)
     }
 
-    /// The memory anchor for what the run keeps in its frames (a frame, a
-    /// bound value): held until the frames are next published, which
-    /// prices them exactly (FIG-6318).
-    pub(super) fn reserve_held(&mut self, bytes: u64) -> Result<(), Halt> {
-        self.hold(bytes, true)
-    }
-
-    fn hold(&mut self, bytes: u64, persistent: bool) -> Result<(), Halt> {
-        #[cfg(test)]
-        if self.pins.force_precision {
-            self.pins.reservations.push((bytes, self.charged));
-            self.refine_for(bytes)?;
-        }
-        if self.heap.hold(bytes, persistent)? {
+    /// Admits durable control growth before a frame, binding or slot grows.
+    /// It shares the arena's growth ledger; projection transfers that credit
+    /// into saved rows, without repricing frames at each publication.
+    pub(super) fn reserve_growth(&mut self, bytes: u64) -> Result<(), Halt> {
+        if self.heap.hold_growth(bytes)? {
             return Ok(());
         }
         self.refine_for(bytes)?;
-        if self.heap.hold(bytes, persistent)? {
+        if self.heap.hold_growth(bytes)? {
+            Ok(())
+        } else {
+            Err(bound(Bound::Memory, self.bounds.memory))
+        }
+    }
+
+    fn hold(&mut self, bytes: u64) -> Result<(), Halt> {
+        if self.heap.hold(bytes)? {
+            return Ok(());
+        }
+        self.refine_for(bytes)?;
+        if self.heap.hold(bytes)? {
             Ok(())
         } else {
             Err(bound(Bound::Memory, self.bounds.memory))

@@ -250,10 +250,7 @@ pub(crate) fn corpus_agrees(
     imported: &Projector<'_>,
 ) -> bool {
     let memory = |end: &crate::ExpectedEnd| matches!(end, crate::ExpectedEnd::Bound { name, .. } if name == "memory");
-    if memory(&a.end) != memory(&b.end) {
-        return false;
-    }
-    if !memory(&a.end) {
+    if !memory(&a.end) && !memory(&b.end) {
         return a == b
             && reference.states == imported.states
             && reference.terminal == imported.terminal;

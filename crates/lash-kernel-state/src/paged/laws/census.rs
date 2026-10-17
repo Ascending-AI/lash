@@ -127,3 +127,45 @@ fn transfer_roots_keep_referents_without_another_allocation() {
     assert_eq!(census.certificate().upper, LogicalBytes(0));
     assert!(!graph.present);
 }
+
+/// SAM-4 / K-BND-003: a cold root is the accounting baseline. Releases
+/// cannot refund its objects; only growth since that baseline is young.
+#[test]
+fn releases_never_refund_the_sealed_baseline() {
+    let mut census = Census::restore(certificate(128, 0), LogicalBytes(512)).unwrap();
+    census.changed(LogicalBytes(64), LogicalBytes(0)).unwrap();
+    assert_eq!(census.certificate().upper, LogicalBytes(128));
+    census.changed(LogicalBytes(0), LogicalBytes(48)).unwrap();
+    assert_eq!(census.certificate().upper, LogicalBytes(176));
+    census.changed(LogicalBytes(48), LogicalBytes(0)).unwrap();
+    assert_eq!(census.certificate().upper, LogicalBytes(128));
+}
+
+/// SAM-4: a seal promotes young holdings without changing their total;
+/// precision alone can reclaim the old baseline.
+#[test]
+fn sealing_promotes_young_cost_without_a_trace() {
+    let mut census = Census::restore(certificate(128, 0), LogicalBytes(512)).unwrap();
+    census.changed(LogicalBytes(0), LogicalBytes(64)).unwrap();
+    let before = census.certificate();
+    census.rebase();
+    assert_eq!(census.certificate(), before);
+    census.changed(LogicalBytes(64), LogicalBytes(0)).unwrap();
+    assert_eq!(census.certificate(), before);
+    let mut graph = Graph {
+        roots: vec![],
+        cost: 0,
+        present: false,
+    };
+    census
+        .refine(
+            &mut graph,
+            &empty(),
+            PendingReservation {
+                bytes: LogicalBytes(0),
+                overflowed: false,
+            },
+        )
+        .unwrap();
+    assert_eq!(census.certificate().upper, LogicalBytes(0));
+}

@@ -203,12 +203,15 @@ pub trait AllocationCensus {
     where
         Self: Sized;
     fn certificate(&self) -> AccountingCertificate;
+    /// Makes the current certified upper bound the sealed baseline. It
+    /// traverses nothing and changes no persisted accounting or guest meter.
+    fn rebase(&mut self);
     /// Records newly allocated census entities in one checked operation.
     /// Lazy families pass their validated whole cost and occurrence count.
     fn added(&mut self, cost: LogicalBytes, entities: u64) -> Result<(), CensusFault>;
-    /// Records a local cost change of a census entity or a persistent root
-    /// (a field replaced, an element removed). Dropping a reference never
-    /// subtracts its referent.
+    /// Records a local cost delta. Growth is young; a decrease refunds at
+    /// most young bytes. The sealed baseline is retained until refinement.
+    /// Dropping a reference never subtracts an old referent.
     fn changed(&mut self, before: LogicalBytes, after: LogicalBytes) -> Result<(), CensusFault>;
     /// The first, conservative check: checked `U + bytes <= bound`.
     fn reserve(&mut self, bytes: LogicalBytes) -> ReservationDecision;

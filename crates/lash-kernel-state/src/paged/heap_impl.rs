@@ -906,6 +906,7 @@ impl SemanticHeap for PagedHeap {
             ReservationDecision::NeedsPrecision(pending) => {
                 match census.refine(self, transient, pending) {
                     Ok(decision) => {
+                        self.holdings.projected();
                         self.collection_live = Some(census.certificate().upper);
                         match decision {
                             RefinedDecision::Granted(_) => Ok(()),
@@ -921,9 +922,13 @@ impl SemanticHeap for PagedHeap {
         result
     }
     fn seal(&mut self, budget: SealBudget) -> Result<Option<SealedHeap>, HeapFault> {
+        self.settle_growth()?;
         if self.header.is_some()
             && self.header_state == Some((self.accounting, self.population, self.collection_live))
         {
+            if let Some(census) = &mut self.census {
+                census.rebase();
+            }
             return Ok(Some(SealedHeap {
                 root: self.heap_root()?,
                 sealed_pages: 0,
@@ -956,6 +961,9 @@ impl SemanticHeap for PagedHeap {
             .0
             .checked_add(1)
             .ok_or_else(|| HeapFault::Malformed("edit epoch overflow".into()))?;
+        if let Some(census) = &mut self.census {
+            census.rebase();
+        }
         Ok(Some(SealedHeap {
             root,
             sealed_pages: work.pages,

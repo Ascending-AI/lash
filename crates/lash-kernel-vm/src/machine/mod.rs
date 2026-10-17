@@ -21,8 +21,6 @@ mod ops;
 #[cfg(test)]
 mod park_laws;
 mod plans;
-#[cfg(test)]
-mod precision_laws;
 pub(crate) mod project;
 mod queue;
 mod registers;
@@ -450,12 +448,6 @@ struct Pins {
     borrowed: Vec<Value>,
     /// Local costs of immediate pins, which have no edges to trace.
     bytes: u64,
-    #[cfg(test)]
-    scalar_root_insertions: u64,
-    #[cfg(test)]
-    descriptor_pins: bool,
-    #[cfg(test)]
-    force_precision: bool,
     /// Every object a native call's arguments reach goes back on its pages
     /// before the call.
     #[cfg(test)]
@@ -463,10 +455,6 @@ struct Pins {
     /// How many times a native call answered `Retry::Cold`.
     #[cfg(test)]
     cold_reads: u64,
-    #[cfg(test)]
-    scalar_locations: Vec<Option<u64>>,
-    #[cfg(test)]
-    reservations: Vec<(u64, u64)>,
 }
 
 impl Pins {
@@ -484,17 +472,6 @@ impl Pins {
         if matches!(value, Value::Bool(_)) {
             return Ok(());
         }
-        #[cfg(test)]
-        {
-            if self.force_precision && Self::scalar(value) {
-                self.scalar_locations.push(Some(bytes));
-            }
-            // The precision law's oracle retains every original descriptor.
-            if self.descriptor_pins {
-                self.root(value);
-                return Ok(());
-            }
-        }
         if Self::scalar(value) {
             self.bytes = self.bytes.checked_add(bytes).ok_or_else(|| {
                 HeapFault::Malformed("statement scalar holding cost overflow".into())
@@ -507,18 +484,10 @@ impl Pins {
 
     #[inline(always)]
     fn root(&mut self, value: &Value) {
-        #[cfg(test)]
-        if Self::scalar(value) {
-            self.scalar_root_insertions += 1;
-        }
         self.values.push(*value);
     }
 
     fn clear(&mut self) {
-        #[cfg(test)]
-        if self.force_precision {
-            self.scalar_locations.push(None);
-        }
         self.values.clear();
         self.borrowed.clear();
         self.bytes = 0;
@@ -888,6 +857,11 @@ impl KernelMachine {
     fn step(&mut self, task: TaskId, host: &mut dyn Host, exe: &Executable) -> Result<(), Halt> {
         self.tasks.protect(Some(task));
         let result = self.step_protected(task, host, exe);
+        // The prepared statement owns the kill set, including on park,
+        // raise and halt exits. Clean up before the driver sees the result.
+        self.regs.kill_statement();
+        self.pins.clear();
+        self.fresh.clear();
         self.tasks.protect(None);
         result
     }
@@ -1215,9 +1189,6 @@ impl KernelMachine {
                     };
                 }
             }
-            self.regs.clear();
-            self.pins.clear();
-            self.fresh.clear();
             self.heap
                 .release_statement_roots()
                 .map_err(MachineError::Heap)?;

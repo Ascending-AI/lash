@@ -276,6 +276,7 @@ impl KernelMachine {
                     frame.awaiting = Some(stmt);
                     self.frame(task)?.statement =
                         lash_kernel_state::paged::SiteRef::new(site, self.heap.pages())?;
+                    self.regs.statement(exe.stmt(stmt).regs);
                     self.put(0, *value);
                     match self.call_lib(task, exe, *policy, 0, 1, Some(stmt)) {
                         Ok(super::ops::Flow::Step) => return Ok(()),
@@ -768,7 +769,7 @@ impl KernelMachine {
         if !library.is_some_and(|lib| exe.lib(lib).operation()) {
             self.check_call_depth(task)?;
         }
-        self.reserve_held(super::FRAME_BYTES)?;
+        self.reserve_growth(super::FRAME_BYTES)?;
         // SiteRef contains page-access-local trees. Prepare each body's
         // immutable entry once here, after the same admission checks as a
         // cold call; sharing it across machines would share their page port.
@@ -867,7 +868,7 @@ impl KernelMachine {
         let state = if shared {
             SlotState::Cell(self.new_cell(value)?)
         } else {
-            self.reserve_held(self.cost_of(&value))?;
+            self.reserve_growth(self.cost_of(&value))?;
             SlotState::Value(value)
         };
         #[cfg(test)]

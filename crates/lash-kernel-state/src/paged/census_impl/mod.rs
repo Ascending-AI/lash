@@ -17,6 +17,9 @@ use super::census::{
 /// graph, and restoring a certificate does not reconstruct any objects.
 pub struct Census {
     certificate: AccountingCertificate,
+    /// The last seal or exact collection. Only growth above it is refundable.
+    base: LogicalBytes,
+    young: LogicalBytes,
     bound: LogicalBytes,
     limits: TraceLimits,
     last_trace: TraceStats,
@@ -73,6 +76,8 @@ impl AllocationCensus for Census {
         Self::validate(certificate)?;
         Ok(Self {
             certificate,
+            base: certificate.upper,
+            young: LogicalBytes(0),
             bound,
             limits: TraceLimits::default(),
             last_trace: TraceStats::default(),
@@ -83,6 +88,11 @@ impl AllocationCensus for Census {
         #[cfg(any(test, feature = "perf-witness"))]
         crate::perf_witness::record(|work| work.accounting_certificate_reads += 1);
         self.certificate
+    }
+
+    fn rebase(&mut self) {
+        self.base = self.certificate.upper;
+        self.young = LogicalBytes(0);
     }
 
     fn added(&mut self, cost: LogicalBytes, entities: u64) -> Result<(), CensusFault> {
@@ -106,6 +116,7 @@ impl AllocationCensus for Census {
             .checked_add(entities)
             .ok_or_else(|| malformed("entity count overflow"))?;
         Self::validate(next)?;
+        self.young = LogicalBytes(self.young.0 + cost.0);
         self.certificate = next;
         Ok(())
     }
@@ -114,14 +125,22 @@ impl AllocationCensus for Census {
         #[cfg(any(test, feature = "perf-witness"))]
         crate::perf_witness::record(|work| work.accounting_changes += 1);
         let mut next = self.certificate;
+        // An old object stays in the baseline until precision proves it
+        // dead. Local decreases and release-by-count refund only the young
+        // portion; transferring a hold into a projected row is a net delta.
+        let young = self.young.0;
+        let next_young = if after.0 >= before.0 {
+            young.checked_add(after.0 - before.0)
+        } else {
+            Some(young.saturating_sub(before.0 - after.0))
+        };
         next.upper = LogicalBytes(
-            next.upper
-                .0
-                .checked_sub(before.0)
-                .and_then(|remaining| remaining.checked_add(after.0))
-                .ok_or_else(|| malformed("local cost change overflow or underflow"))?,
+            next_young
+                .and_then(|young| self.base.0.checked_add(young))
+                .ok_or_else(|| malformed("local cost change overflow"))?,
         );
         Self::validate(next)?;
+        self.young = LogicalBytes(next.upper.0 - self.base.0);
         self.certificate = next;
         Ok(())
     }
@@ -179,6 +198,8 @@ impl AllocationCensus for Census {
                 .max(self.last_trace.budget_peak as u64);
         });
         self.certificate = next;
+        self.base = next.upper;
+        self.young = LogicalBytes(0);
         Ok(match next.upper.0.checked_add(pending.bytes.0) {
             Some(total) if total <= self.bound.0 => RefinedDecision::Granted(LogicalPermit {
                 bytes: pending.bytes,

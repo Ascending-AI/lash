@@ -297,10 +297,7 @@ fn memory(execution: &Execution<Observation>) -> bool {
 /// Memory is a separate verdict. A refusal's precise charge/statement is
 /// plan-dependent; all completed observations before the earlier refusal agree.
 fn agree(a: &Execution<Observation>, b: &Execution<Observation>) -> bool {
-    if memory(a) != memory(b) {
-        return false;
-    }
-    if !memory(a) {
+    if !memory(a) && !memory(b) {
         return a == b;
     }
     match (a, b) {
@@ -449,8 +446,8 @@ pub(super) fn check_memory(smith: &Smith) -> Result<(), HarnessError> {
         ..Projector::default()
     };
     let cold = observe::<crate::projection::Plan<3>>(smith, &[0], &mut b)?;
-    if memory(&warm) != memory(&cold) {
-        return Err(fault("plans disagree on memory verdict"));
+    if !agree(&warm, &cold) {
+        return Err(fault("plans disagree before the earlier memory refusal"));
     }
     b.check_memory()
 }

@@ -9,6 +9,9 @@ pub(super) struct Registers {
     values: Vec<Value>,
     written: Vec<bool>,
     extent: usize,
+    /// Static registers of the statement being stepped, including its Pin
+    /// operands. Computed by lowering, independent of writes at run time.
+    kill: usize,
     owns_values: bool,
     #[cfg(test)]
     pub(super) initializations: usize,
@@ -22,6 +25,26 @@ fn reusable(value: &Value) -> bool {
 }
 
 impl Registers {
+    /// The statement's static kill set is the dense interval the lowering
+    /// gives it. Calls put their live roles in frames before this set dies.
+    pub(super) fn statement(&mut self, registers: u32) {
+        self.kill = self.kill.max(registers as usize);
+        self.window(registers as usize);
+    }
+
+    /// Releases the prepared set at every exit of its statement's step.
+    pub(super) fn kill_statement(&mut self) {
+        let end = std::mem::take(&mut self.kill).min(self.extent);
+        #[cfg(any(test, feature = "perf-witness"))]
+        crate::perf_witness::record(|work| {
+            work.register_slots_cleared += end as u64;
+            work.register_slots_initialized += end as u64;
+        });
+        self.clear_range(0..end);
+        self.extent = 0;
+        self.owns_values = false;
+    }
+
     /// Exposes the same Null-filled logical extent as a fresh Vec would,
     /// without reinitializing its previously initialized physical slots.
     /// Resume roles may already have been installed before the op loop.
@@ -125,6 +148,7 @@ impl Registers {
         }
         self.written[..self.extent].fill(false);
         self.extent = 0;
+        self.kill = 0;
     }
 }
 
@@ -146,9 +170,58 @@ impl From<Vec<Value>> for Registers {
             values,
             written: vec![true; extent],
             extent,
+            kill: 0,
             owns_values,
             #[cfg(test)]
             initializations: 0,
+        }
+    }
+}
+
+#[cfg(test)]
+mod laws {
+    use crate::laws::embedder::{Embedder, Setup};
+    use crate::{Layout, Machine};
+    use lash_kernel_doc::TaskId;
+
+    /// Seam E / K-BND-003: each statement's step relinquishes its
+    /// register holdings before the driver observes the step's result.
+    #[test]
+    fn a_statement_releases_its_register_holdings_on_every_exit() {
+        for layout in [Layout(0), Layout(1), Layout(3)] {
+            for body in [
+                "let held = ([1, 2], [3, 4])",
+                "print ([1, 2], [3, 4])",
+                "let held = (perform echo([1, 2]) as Any, [3, 4])",
+                "let held = [1, 2][false]",
+            ] {
+                let mut embedder = Embedder::with(
+                    &format!("main {{ {body} return null }}"),
+                    Setup {
+                        layout,
+                        ..Setup::default()
+                    },
+                );
+                let machine = &mut embedder.machine;
+                let exe = std::sync::Arc::clone(&machine.exe);
+                // Bypass run_slice's later cleanup: the step owns its kill
+                // set, including raise and park exits.
+                machine.step(TaskId(0), &mut embedder.world, &exe).unwrap();
+                assert!(
+                    machine.regs.projection().is_empty(),
+                    "register holdings survived {body:?} under {layout:?}"
+                );
+                assert!(
+                    machine
+                        .regs
+                        .values
+                        .iter()
+                        .all(|value| value.handle().is_none())
+                );
+                assert!(machine.pins.values.is_empty());
+                assert_eq!(machine.pins.bytes, 0);
+                let _ = machine.meters();
+            }
         }
     }
 }

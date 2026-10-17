@@ -90,7 +90,7 @@ impl PlanRun<'_> {
             let allocated = self.machine.new_cell(value);
             Value::ObjectRef(self.held(allocated)?)
         } else {
-            let reserved = self.machine.reserve_held(self.machine.cost_of(&value));
+            let reserved = self.machine.reserve_growth(self.machine.cost_of(&value));
             self.held(reserved)?;
             value
         };
@@ -241,7 +241,7 @@ impl PlanContext for PlanRun<'_> {
             .saturating_sub(self.machine.cost_of(&self.machine.regs[at]));
         if growth != 0 {
             // The variable's old holding already pays for that much.
-            let reserved = self.machine.reserve_held(growth);
+            let reserved = self.machine.reserve_growth(growth);
             self.held(reserved)?;
         }
         self.machine.put(at, value);
@@ -536,7 +536,7 @@ impl KernelMachine {
         let registers = plan.plan.registers as usize;
         let slots = base + registers;
         let end = slots + plan.plan.slots.len();
-        self.regs.window(end);
+        self.regs.statement(end as u32);
         let charging = std::mem::replace(&mut self.charging, false);
         // A body's frame keeps its call's arguments for its formula when
         // the call is charged, or roots a task (`push_operation_frame`).

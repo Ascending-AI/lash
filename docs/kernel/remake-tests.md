@@ -328,3 +328,25 @@ Natives now read the call-scoped arena views: a native never reads a page or tou
 | TypeScript saved positional recursion | Saved mutually recursive function runs without its partner binding; straight/cold values, charge and waits agree. | Reopen seed 17. |
 | TypeScript Test262 completion | Completion binding is true before judging normal completion. | Direct binding-tree and metadata-key read; use `SessionEditor`. |
 | TypeScript/Python helper differential | Recorded Node/CPython values, typed errors and bit-level observations; existing one-ULP boundary for implementation-approximated math. | Runtime work-code census and layout switching; math class now follows the document's named helper requirements. |
+
+## Memory rebase and statement kill sets (FIG-6710)
+
+Seam I of `docs/design/kernel-end-state.md` replaces frame-publication pricing
+and forced per-statement exactness with a sealed baseline plus refundable young
+growth. Seam E releases the statement's static register set at every step exit.
+
+| Deleted test or clause | Superseded mechanism | Surviving law |
+| --- | --- | --- |
+| `machine::precision_laws::scalar_laws::prepared_scalar_answers_need_no_root_insertions_or_hold_certificate_copies` | Scalar pin insertions and census-copy counts from FIG-6587. | `machine::registers::laws::a_statement_releases_its_register_holdings_on_every_exit` pins statement holdings; `laws::bounds::the_memory_bound_holds_inside_a_native_call` pins native admission. No semantic gap. |
+| `machine::precision_laws::precision::cost_only_pins_preserve_precision_multiplicity` | Forced exact refinement at every hold, descriptor-pin comparison and `Pins.reservations` from FIG-6587. | `smith::tests::fixed_seed_memory_verdicts_and_seal_counters_agree` and `tests::corpus_cross_resumes_after_every_statement` compare memory separately from semantic prefixes. No semantic gap. |
+| `laws::verdict::the_memory_verdict_is_one_whatever_the_slicing_and_the_garbage` | Exact memory refusal statement across different collection schedules from FIG-6318. | `paged::census_laws::releases_never_refund_the_sealed_baseline`, `paged::laws::heap::every_seal_rebases_release_by_count_to_the_cold_counter`, and the smith memory law pin the conservative contract. Exact refusal location is retired. |
+| Memory-refusal variant of `laws::layout::field_hints_are_exact_across_guard_failures_and_cold_plans` | Exact refusal and charge across warm/cold plans for an oversized fill. | The field-cache semantic law remains; the smith memory law owns agreement through the earlier refusal. |
+
+The arena release-by-count wiring and young-generation marker are owned by
+swap 2.4(c), FIG-6727; the accounting release hook is `PagedHeap::release_young`.
+
+`laws::continuation::the_memory_verdict_is_the_uninterrupted_runs_at_every_slice`
+is also deleted: its exact refusal statement across slicing, forced collection,
+and cold plans is superseded by the same conservative prefix and seal-counter
+laws. Nested operand roles remain covered by the surviving continuation laws
+and `tests::corpus_cross_resumes_after_every_statement`.

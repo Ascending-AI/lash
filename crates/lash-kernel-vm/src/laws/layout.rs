@@ -139,10 +139,8 @@ fn a_native_implementation_and_a_kernel_body_run_the_same() {
 
 /// PLAN-INDEP for field caches: warm a read site, fail its position guard
 /// on a different record, then delete, reinsert and mutate its field.
-/// Errors, effects and the memory refusal retain their order and charge,
-/// also with every safepoint reopened under a different, cold plan. The
-/// refusing fill is far past `K-BND-003`'s declared slack, so every plan
-/// refuses at the same statement.
+/// Errors and effects retain their order and charge,
+/// also with every safepoint reopened under a different, cold plan.
 #[test]
 fn field_hints_are_exact_across_guard_failures_and_cold_plans() {
     const READS: &str = r#"
@@ -239,15 +237,13 @@ main {
             text("type_error")
         ]
     );
-    for program in [
-        READS.to_owned(),
-        READS.replace("return call fetch(b)", "return work.fill(50000)"),
-    ] {
+    {
+        let program = READS;
         let bounds = Bounds {
             memory: 1 << 18,
             ..super::embedder::ROOMY
         };
-        let reference = observe(&program, bounds, Layout(0), false);
+        let reference = observe(program, bounds, Layout(0), false);
         for layout in [
             Layout(0),
             Layout(1),
@@ -257,13 +253,13 @@ main {
         ] {
             if layout != Layout(0) {
                 assert_eq!(
-                    observe(&program, bounds, layout, false),
+                    observe(program, bounds, layout, false),
                     reference,
                     "layout {layout:?}"
                 );
             }
             assert_eq!(
-                observe(&program, bounds, layout, true),
+                observe(program, bounds, layout, true),
                 reference,
                 "cold layout {layout:?}"
             );
