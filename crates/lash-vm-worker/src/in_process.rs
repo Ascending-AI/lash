@@ -455,7 +455,9 @@ where
                 let header = CheckpointRoot::of_answer(
                     answers
                         .first()
-                        .ok_or_else(|| fault("the checkpoint root was not read"))?,
+                        .ok_or_else(|| fault("the checkpoint root was not read"))?
+                        .as_ref()
+                        .map_err(fault)?,
                 )
                 .map_err(fault)?;
                 let census = census(&mut source, Some(header.heap), bounds.memory)?;

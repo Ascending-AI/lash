@@ -356,7 +356,14 @@ fn read_batch(pages: &[crate::page::ReadPage]) -> (usize, u64) {
 /// The pages and envelope bytes of a page reply.
 fn reply_batch(reply: &crate::page::PageReply) -> (usize, u64) {
     match reply {
-        crate::page::PageReply::Read { pages } => read_batch(pages),
+        crate::page::PageReply::Read { pages } => (
+            pages.len(),
+            pages
+                .iter()
+                .filter_map(|page| page.as_ref().ok())
+                .map(|read| read.page.envelope.len() as u64)
+                .sum(),
+        ),
         crate::page::PageReply::Sealed { pages } => (pages.len(), 0),
         crate::page::PageReply::Refused(_) => (0, 0),
     }

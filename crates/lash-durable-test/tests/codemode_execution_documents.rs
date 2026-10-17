@@ -369,16 +369,19 @@ async fn a_cells_parked_calls_sum_to_unsplit_counts_and_the_next_cell_can_be_off
     #[derive(Clone, Default)]
     struct Pages(Arc<std::sync::Mutex<std::collections::BTreeMap<PageId, PageAnswer>>>);
     impl PageSource for Pages {
-        fn read(&mut self, pages: &[PageRef]) -> Result<Vec<PageAnswer>, HeapFault> {
+        fn read(
+            &mut self,
+            pages: &[PageRef],
+        ) -> Result<Vec<Result<PageAnswer, HeapFault>>, HeapFault> {
             let held = self.0.lock_recover();
-            pages
+            Ok(pages
                 .iter()
                 .map(|page| {
                     held.get(&page.id)
                         .cloned()
                         .ok_or(HeapFault::Missing { page: page.id })
                 })
-                .collect()
+                .collect())
         }
         fn seal(&mut self, body: PageBody) -> Result<PageRef, HeapFault> {
             let mut tokens = body.kind.0.to_be_bytes().to_vec();

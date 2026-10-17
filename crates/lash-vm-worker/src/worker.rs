@@ -603,6 +603,7 @@ impl<'embedding> Server<'embedding> {
                 let answer = answers
                     .first()
                     .ok_or_else(|| undecodable(RunInput::Checkpoint, &"the root was not read"))?;
+                let answer = answer.as_ref().map_err(|error| heap_fault(error.clone()))?;
                 let root = CheckpointRoot::of_answer(answer).map_err(|fault| {
                     PoolError::refused(RunRefusal::Checkpoint {
                         refusal: CheckpointRefusal::Malformed {

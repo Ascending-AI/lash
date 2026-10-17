@@ -391,7 +391,7 @@ Declarations:
 
 ```rust
 pub trait PageSource {
-    fn read(&mut self, pages: &[PageRef]) -> Result<Vec<PageAnswer>, HeapFault>;
+    fn read(&mut self, pages: &[PageRef]) -> Result<Vec<Result<PageAnswer, HeapFault>>, HeapFault>;
     fn seal(&mut self, page: PageBody) -> Result<PageRef, HeapFault>;
 }
 ```
@@ -416,6 +416,12 @@ Invariants:
 
 - A request names at most `READ_BATCH_PAGES` pages and `READ_BATCH_BYTES`
   bytes.
+- A read returns each page or its own typed fault in request order.
+  Successful prefixes remain available, and consumers surface faults in
+  traversal order. Request-wide lease and deadline refusals still end the
+  activation.
+- Full payload projections batch only authenticated siblings they must
+  consume. A visitor that may stop early fetches only its demanded prefix.
 - Every answered envelope is re-hashed and re-framed by the worker before
   the kernel decodes it. Every sealed envelope is re-hashed by the parent.
 - The parent authorizes each child of a sealed page by a capability or an
@@ -437,9 +443,11 @@ missing, corrupt and malformed content is permanent.
 Laws:
 
 - Worker unit, `//crates/lash-vm-worker:lash-vm-worker__unit_test`, in
-  `crates/lash-vm-worker/src/page_laws.rs`, over a real worker process with
-  a SQLite memory store behind the parent:
-  - `a_forged_foreign_or_stale_capability_reads_nothing`
+  `crates/lash-vm-worker/src/page_laws.rs`, over the real host wire. The
+  counted bulk projection uses an instrumented SQLite-backed adapter:
+  - `every_forged_foreign_or_stale_capability_is_refused_at_its_own_slot`
+  - `bulk_projection_batches_only_demanded_siblings`
+  - `bulk_projection_preserves_the_first_typed_fault`
   - `a_fault_mid_native_resumes_on_the_same_stack`
   - `a_one_worker_pool_serves_pages_without_another_worker`
   - `a_fresh_worker_reads_the_header_and_touched_pages_only` (counted pages)

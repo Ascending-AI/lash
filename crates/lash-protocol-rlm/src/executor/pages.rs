@@ -243,65 +243,70 @@ impl SessionPageAccess {
             fetched: Fetched::new(),
         };
         let reading = tokio::task::spawn_blocking(move || read(Box::new(source)));
-        let mut refused: Option<PageAccessError> = None;
+        let mut refused = Vec::new();
         while let Some(Demand { pages, answer }) = asked.recv().await {
-            if refused.is_none() {
-                match self.fetch(pages).await {
-                    Ok(fetched) => {
-                        let _ = answer.send(Ok(fetched));
-                        continue;
-                    }
-                    Err(error) => refused = Some(error),
+            let mut fetched = Fetched::new();
+            let results = match self.fetch_batch(&pages).await {
+                Ok(found) => {
+                    self.cache.keep(found.iter().cloned());
+                    let found: HashMap<_, _> = found.into_iter().collect();
+                    pages
+                        .iter()
+                        .map(|id| {
+                            (
+                                *id,
+                                found.get(id).cloned().ok_or_else(|| {
+                                    PageAccessError::Heap(HeapFault::Missing { page: PageId(id.0) })
+                                }),
+                            )
+                        })
+                        .collect::<Vec<_>>()
                 }
+                Err(error) if pages.len() == 1 => vec![(pages[0], Err(error))],
+                Err(_) => {
+                    let mut results = Vec::with_capacity(pages.len());
+                    for id in pages {
+                        let result = self.fetch_batch(&[id]).await.and_then(|found| {
+                            found
+                                .into_iter()
+                                .find(|(page, _)| *page == id)
+                                .map(|(_, bytes)| bytes)
+                                .ok_or_else(|| {
+                                    PageAccessError::Heap(HeapFault::Missing { page: PageId(id.0) })
+                                })
+                        });
+                        results.push((id, result));
+                    }
+                    results
+                }
+            };
+            for (id, result) in results {
+                let result = result.map_err(|error| {
+                    // Keep the original typed host cause. The heap may meet
+                    // an earlier semantic fault before consuming this result.
+                    let fault = match &error {
+                        PageAccessError::Heap(fault) => fault.clone(),
+                        _ => HeapFault::Transport(format!("page {}: {error}", id.to_hex())),
+                    };
+                    refused.push((fault.clone(), error));
+                    fault
+                });
+                fetched.insert(id, result);
             }
-            let reason = refused.as_ref().map(ToString::to_string);
-            let _ = answer.send(Err(HeapFault::Transport(reason.unwrap_or_default())));
+            let _ = answer.send(fetched);
         }
         let read = match reading.await {
             Ok(read) => read,
             Err(ended) if ended.is_panic() => std::panic::resume_unwind(ended.into_panic()),
             Err(ended) => Err(HeapFault::Transport(ended.to_string())),
         };
-        match refused {
-            Some(refusal) => Err(refusal),
-            None => read.map_err(PageAccessError::Heap),
+        match read {
+            Ok(value) => Ok(value),
+            Err(fault) => Err(refused
+                .into_iter()
+                .find(|(pending, _)| *pending == fault)
+                .map_or_else(|| PageAccessError::Heap(fault), |(_, cause)| cause)),
         }
-    }
-
-    /// Fetches `missing` and, with it, the rest of every payload it
-    /// reaches: the host reads a text or bytes value whole, so a payload
-    /// index's pages come in with it rather than one demand each. Answers
-    /// every page it fetched, and each such page the cache already held,
-    /// keeping what it fetched in the cache.
-    async fn fetch(&mut self, mut missing: Vec<NodeId>) -> Result<Fetched, PageAccessError> {
-        let mut fetched = Fetched::new();
-        while !missing.is_empty() {
-            missing.sort();
-            missing.dedup();
-            let batch = missing.split_off(missing.len().saturating_sub(FETCH_BATCH));
-            let pages = self.fetch_batch(&batch).await?;
-            self.cache.keep(pages.iter().cloned());
-            fetched.extend(pages.iter().cloned());
-            for (id, bytes) in &pages {
-                for child in payload_children(*id, bytes) {
-                    if fetched.contains_key(&child)
-                        || self
-                            .spool
-                            .as_ref()
-                            .is_some_and(|spool| spool.contains(&child))
-                    {
-                        continue;
-                    }
-                    match self.cache.get(&child) {
-                        Some(bytes) => {
-                            fetched.insert(child, bytes);
-                        }
-                        None => missing.push(child),
-                    }
-                }
-            }
-        }
-        Ok(fetched)
     }
 
     async fn fetch_batch(
@@ -374,25 +379,14 @@ impl SessionPageAccess {
     }
 }
 
-/// The children of `bytes` when it frames a payload index; a page that
-/// does not frame is left for the read that answers it to refuse.
-fn payload_children(id: NodeId, bytes: &[u8]) -> Vec<NodeId> {
-    match parse_envelope(bytes, Some(id)) {
-        Ok(envelope) if envelope.kind.0 == PageKind::PAYLOAD_INDEX.0 => {
-            envelope.children.iter().collect()
-        }
-        _ => Vec::new(),
-    }
-}
-
 /// The bytes of committed pages a demand answered, by page.
-type Fetched = HashMap<NodeId, Arc<[u8]>>;
+type Fetched = HashMap<NodeId, Result<Arc<[u8]>, HeapFault>>;
 
-/// Committed pages a host read waits on, with where to answer them: every
-/// page fetched for them, and the rest of each payload they reach.
+/// Committed pages a host read explicitly demands, with where to answer
+/// their individual results.
 struct Demand {
     pages: Vec<NodeId>,
-    answer: oneshot::Sender<Result<Fetched, HeapFault>>,
+    answer: oneshot::Sender<Fetched>,
 }
 
 /// A host read's pages: the turn's spool, then what was fetched for the
@@ -402,8 +396,7 @@ struct ParentPages {
     spool: Option<SharedSpool>,
     cache: PageCache,
     demands: mpsc::Sender<Demand>,
-    /// Pages a demand answered that the read has not read yet: the rest
-    /// of a payload it reads.
+    /// Results a demand answered that the read has not consumed yet.
     fetched: Fetched,
 }
 
@@ -420,7 +413,11 @@ impl ParentPages {
                 .read(id)
                 .map(Some)
                 .map_err(|_| HeapFault::Missing { page: PageId(id.0) }),
-            _ => Ok(self.fetched.remove(id).or_else(|| self.cache.get(id))),
+            _ => Ok(self
+                .fetched
+                .remove(id)
+                .transpose()?
+                .or_else(|| self.cache.get(id))),
         }
     }
 
@@ -430,38 +427,49 @@ impl ParentPages {
         self.demands
             .blocking_send(Demand { pages, answer })
             .map_err(|_| abandoned())?;
-        let fetched = answered.blocking_recv().map_err(|_| abandoned())??;
+        let fetched = answered.blocking_recv().map_err(|_| abandoned())?;
         self.fetched.extend(fetched);
         Ok(())
     }
 }
 
 impl PageSource for ParentPages {
-    fn read(&mut self, pages: &[PageRef]) -> Result<Vec<PageAnswer>, HeapFault> {
-        let mut held = Vec::with_capacity(pages.len());
+    fn read(&mut self, pages: &[PageRef]) -> Result<Vec<Result<PageAnswer, HeapFault>>, HeapFault> {
+        if pages.len() > lash_kernel_state::paged::source::READ_BATCH_PAGES {
+            return Err(HeapFault::Exhausted {
+                resource: lash_kernel_doc::heap::HostResource::ReadBatch,
+            });
+        }
         let mut missing = Vec::new();
-        for page in pages {
-            let id = NodeId(page.id.0);
-            let bytes = self.held(&id)?;
-            if bytes.is_none() {
-                missing.push(id);
-            }
-            held.push(bytes);
-        }
-        if !missing.is_empty() {
-            self.demand(missing.clone())?;
-        }
+        let held: Vec<_> = pages
+            .iter()
+            .map(|page| {
+                let id = NodeId(page.id.0);
+                let bytes = self.held(&id);
+                if matches!(bytes, Ok(None)) {
+                    missing.push(id);
+                }
+                bytes
+            })
+            .collect();
+        let demanded = if missing.is_empty() {
+            Ok(())
+        } else {
+            self.demand(missing.clone())
+        };
         let answers = pages
             .iter()
             .zip(held)
-            .map(|(page, bytes)| {
-                let bytes = match bytes {
+            .map(|(page, held)| {
+                let bytes = match held? {
                     Some(bytes) => bytes,
-                    None => self
-                        .fetched
-                        .get(&NodeId(page.id.0))
-                        .cloned()
-                        .ok_or(HeapFault::Missing { page: page.id })?,
+                    None => {
+                        demanded.clone()?;
+                        self.fetched
+                            .get(&NodeId(page.id.0))
+                            .cloned()
+                            .unwrap_or(Err(HeapFault::Missing { page: page.id }))?
+                    }
                 };
                 answer_page(*page, &bytes, |_| Ok(PageGrant::NONE))
             })
@@ -469,7 +477,7 @@ impl PageSource for ParentPages {
         for id in &missing {
             self.fetched.remove(id);
         }
-        answers
+        Ok(answers)
     }
 
     fn seal(&mut self, page: PageBody) -> Result<PageRef, HeapFault> {

@@ -22,8 +22,11 @@
 //!   at a third of its ttl even while the worker waits on a tool, a cached
 //!   read checks it too, and an activation that waits or outlives its
 //!   budget of host work in exchanges refuses `Deadline`.
-//! - Every refusal is infrastructure ([`PageRefusal`]), and the first one
-//!   ends the activation: every later exchange is refused the same way.
+//! - Every refusal is infrastructure ([`PageRefusal`]). A request-wide
+//!   refusal ends the activation: every later exchange is refused the same way.
+//!   Page-specific read faults instead occupy their request slots, so a
+//!   later sibling cannot poison an earlier subtree before its consumer
+//!   surfaces the first fault.
 //!
 //! `LocalPages` is the same port for an embedder with no parent: the
 //! kernel's [`PageSource`] over committed pages it holds itself and a spool.
@@ -165,7 +168,7 @@ const REPLY_HEADROOM: u64 = 512 * 1024;
 /// The MessagePack values one page of a reply is estimated to hold: its
 /// envelope's and each child capability's, which crosses as one value.
 fn page_nodes(children: usize) -> u64 {
-    8 + 2 * children as u64
+    10 + 2 * children as u64
 }
 
 /// What a page service did, for measurement and the layer's laws.
@@ -326,7 +329,12 @@ impl<R: LeasedReads + ?Sized> ActivationPages<R> {
         match answer {
             Ok(pages) => Ok(pages),
             Err(refusal) => {
-                self.refused = Some(refusal.clone());
+                if matches!(
+                    refusal,
+                    PageRefusal::Unauthorized | PageRefusal::LeaseLost | PageRefusal::Deadline
+                ) {
+                    self.refused = Some(refusal.clone());
+                }
                 Err(refusal)
             }
         }
@@ -600,58 +608,134 @@ impl<R: LeasedReads + ?Sized> ActivationPages<R> {
         if capabilities.len() > self.limits.batch_pages {
             return Err(self.too_large());
         }
-        let mut wanted = Vec::with_capacity(capabilities.len());
-        for capability in &capabilities {
-            wanted.push((self.authorize(capability)?, capability.authority));
-        }
-        // Staged pages from the spool; the rest from the store in one batch.
-        let mut bytes: BTreeMap<NodeId, Arc<[u8]>> = BTreeMap::new();
+        let wanted: Vec<_> = capabilities
+            .iter()
+            .map(|capability| {
+                (
+                    NodeId(capability.page),
+                    self.authorize(capability).map(|_| capability.authority),
+                )
+            })
+            .collect();
+        let mut bytes = BTreeMap::new();
         let mut committed = BTreeSet::new();
         for (id, authority) in &wanted {
+            let Ok(authority) = authority else { continue };
             if bytes.contains_key(id) {
                 continue;
             }
             if matches!(authority, PageAuthority::Stage(_)) {
                 match self.spool.read(id) {
                     Ok(page) => {
-                        bytes.insert(*id, page);
+                        bytes.insert(*id, Ok(page));
                         continue;
                     }
-                    // A committed candidate's pages read from the store.
                     Err(StageFault::Missing(_)) if self.settled => {}
-                    Err(fault) => return Err(stage_refusal(fault)),
+                    Err(fault) => {
+                        bytes.insert(*id, Err(stage_refusal(fault)));
+                        continue;
+                    }
                 }
             }
             committed.insert(*id);
         }
         if !committed.is_empty() {
-            let ids: Vec<NodeId> = committed.into_iter().collect();
-            for page in self.store_read(&ids).await? {
-                bytes.insert(page.id, page.bytes);
+            let ids: Vec<_> = committed.into_iter().collect();
+            let started = self.clock.now();
+            match self.store_read(&ids).await {
+                Ok(found) => {
+                    for page in found {
+                        bytes.insert(page.id, Ok(page.bytes));
+                    }
+                }
+                Err(refusal)
+                    if matches!(refusal, PageRefusal::LeaseLost | PageRefusal::Deadline) =>
+                {
+                    self.refused = Some(refusal.clone());
+                    for id in ids {
+                        bytes.insert(id, Err(refusal.clone()));
+                    }
+                }
+                Err(refusal) if ids.len() == 1 => {
+                    bytes.insert(ids[0], Err(refusal));
+                }
+                Err(_) => {
+                    // The store's atomic batch can refuse without returning
+                    // its successful rows. Recover ordered per-page answers
+                    // on this exceptional path; the production store port
+                    // stays atomic and the happy path stays one read.
+                    for id in ids {
+                        let remaining = self
+                            .span
+                            .saturating_sub(self.spent)
+                            .saturating_sub(self.clock.now().saturating_duration_since(started));
+                        if let Some(refusal) = &self.refused {
+                            bytes.insert(id, Err(refusal.clone()));
+                            continue;
+                        }
+                        if remaining.is_zero() {
+                            self.refused = Some(PageRefusal::Deadline);
+                            bytes.insert(id, Err(PageRefusal::Deadline));
+                            continue;
+                        }
+                        let found = tokio::time::timeout(remaining, self.store_read(&[id])).await;
+                        let answer = match found {
+                            Ok(Ok(found)) => found
+                                .into_iter()
+                                .find(|page| page.id == id)
+                                .map(|page| page.bytes)
+                                .ok_or(PageRefusal::Missing),
+                            Ok(Err(refusal)) => Err(refusal),
+                            Err(_) => Err(PageRefusal::Deadline),
+                        };
+                        if let Err(refusal @ (PageRefusal::LeaseLost | PageRefusal::Deadline)) =
+                            &answer
+                        {
+                            self.refused = Some(refusal.clone());
+                        }
+                        bytes.insert(id, answer);
+                    }
+                }
             }
         }
         let (mut reply_bytes, mut reply_nodes) = (0_u64, 0_u64);
         let mut pages = Vec::with_capacity(wanted.len());
-        for (id, _) in wanted {
-            let page = bytes.get(&id).ok_or(PageRefusal::Missing)?;
-            let read = self.answer(id, page)?;
-            let nodes = page_nodes(read.children.len());
-            // A reply answers a prefix that fits one frame; at least one
-            // page always fits, since a page is at most 64 KiB.
-            if !pages.is_empty()
-                && (reply_bytes + page.len() as u64 > self.limits.reply_bytes
-                    || reply_nodes + nodes > self.limits.reply_nodes)
-            {
-                break;
+        for (id, authority) in wanted {
+            let read = authority.and_then(|_| {
+                let page = bytes
+                    .get(&id)
+                    .ok_or(PageRefusal::Missing)?
+                    .as_ref()
+                    .map_err(Clone::clone)?;
+                self.answer(id, page).map(|read| (read, page.len() as u64))
+            });
+            match read {
+                Ok((read, size)) => {
+                    let nodes = page_nodes(read.children.len());
+                    if !pages.is_empty()
+                        && (reply_bytes + size > self.limits.reply_bytes
+                            || reply_nodes + nodes > self.limits.reply_nodes)
+                    {
+                        break;
+                    }
+                    reply_bytes += size;
+                    reply_nodes += nodes;
+                    if let Some(hints) = &self.hints {
+                        hints.extend([id]);
+                    }
+                    self.stats.pages_read += 1;
+                    pages.push(Ok(read));
+                }
+                Err(refusal) => {
+                    let nodes = page_nodes(0);
+                    if !pages.is_empty() && reply_nodes + nodes > self.limits.reply_nodes {
+                        break;
+                    }
+                    reply_nodes += nodes;
+                    pages.push(Err(refusal));
+                }
             }
-            reply_bytes += page.len() as u64;
-            reply_nodes += nodes;
-            pages.push(read);
         }
-        if let Some(hints) = &self.hints {
-            hints.extend(pages.iter().map(|read| NodeId(read.page.id)));
-        }
-        self.stats.pages_read += pages.len() as u64;
         Ok(PageReply::Read { pages })
     }
 

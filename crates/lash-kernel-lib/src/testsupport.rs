@@ -26,12 +26,12 @@ impl Source {
     }
 }
 impl PageSource for Source {
-    fn read(&mut self, pages: &[PageRef]) -> Result<Vec<PageAnswer>, HeapFault> {
+    fn read(&mut self, pages: &[PageRef]) -> Result<Vec<Result<PageAnswer, HeapFault>>, HeapFault> {
         if let Some(fault) = self.fault.borrow().clone() {
-            return Err(fault);
+            return Ok(vec![Err(fault); pages.len()]);
         }
         self.reads.set(self.reads.get() + pages.len());
-        pages
+        Ok(pages
             .iter()
             .map(|p| {
                 self.pages
@@ -40,7 +40,7 @@ impl PageSource for Source {
                     .cloned()
                     .ok_or(HeapFault::Missing { page: p.id })
             })
-            .collect()
+            .collect())
     }
     fn seal(&mut self, body: PageBody) -> Result<PageRef, HeapFault> {
         let mut tokens = body.kind.0.to_be_bytes().to_vec();

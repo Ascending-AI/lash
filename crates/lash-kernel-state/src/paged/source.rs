@@ -152,7 +152,11 @@ pub struct PageAnswer {
 /// service, and in process over a local store (layer hp-paging, FIG-6190).
 pub trait PageSource {
     /// Reads `pages`, at most [`READ_BATCH_PAGES`], answering in request
-    /// order. Every answer was authenticated against its digest and kind.
+    /// order. Every successful answer was authenticated against its digest
+    /// and kind. Page-specific faults occupy their own slot: they never
+    /// discard successful answers or faults earlier in traversal order.
+    /// The outer error is reserved for a request-wide refusal (for example
+    /// an oversized request); consumers defer slot errors until use.
     ///
     /// # Errors
     ///
@@ -160,7 +164,7 @@ pub trait PageSource {
     /// [`HeapFault::Unauthorized`], [`HeapFault::LeaseLost`],
     /// [`HeapFault::Exhausted`] or [`HeapFault::Transport`]: the activation
     /// ends and resumes from its last committed root.
-    fn read(&mut self, pages: &[PageRef]) -> Result<Vec<PageAnswer>, HeapFault>;
+    fn read(&mut self, pages: &[PageRef]) -> Result<Vec<Result<PageAnswer, HeapFault>>, HeapFault>;
 
     /// Seals `page`: frames it, computes its identity and keeps its bytes
     /// readable through [`PageSource::read`] for the rest of the activation

@@ -56,28 +56,30 @@ struct Source {
     fail_after: Option<usize>,
 }
 impl PageSource for Source {
-    fn read(&mut self, pages: &[PageRef]) -> Result<Vec<PageAnswer>, HeapFault> {
-        let mut answers = Vec::new();
-        for page in pages {
-            if self.fail_after.is_some_and(|n| self.reads >= n) {
-                return Err(HeapFault::LeaseLost);
-            }
-            self.reads += 1;
-            if !self.cache.contains_key(&page.id) {
-                let answer = self
-                    .pages
-                    .get(&page.id)
-                    .ok_or(HeapFault::Missing { page: page.id })?
-                    .clone();
-                assert_eq!(
-                    answer.kind,
-                    PageKind::KEYED_LEAF,
-                    "tracing must not read payloads"
-                );
-                self.cache.insert(page.id, answer);
-            }
-            answers.push(self.cache[&page.id].clone());
-        }
+    fn read(&mut self, pages: &[PageRef]) -> Result<Vec<Result<PageAnswer, HeapFault>>, HeapFault> {
+        let answers = pages
+            .iter()
+            .map(|page| {
+                if self.fail_after.is_some_and(|n| self.reads >= n) {
+                    return Err(HeapFault::LeaseLost);
+                }
+                self.reads += 1;
+                if !self.cache.contains_key(&page.id) {
+                    let answer = self
+                        .pages
+                        .get(&page.id)
+                        .ok_or(HeapFault::Missing { page: page.id })?
+                        .clone();
+                    assert_eq!(
+                        answer.kind,
+                        PageKind::KEYED_LEAF,
+                        "tracing must not read payloads"
+                    );
+                    self.cache.insert(page.id, answer);
+                }
+                Ok(self.cache[&page.id].clone())
+            })
+            .collect();
         Ok(answers)
     }
     fn seal(&mut self, body: PageBody) -> Result<PageRef, HeapFault> {
@@ -145,7 +147,7 @@ impl Graph {
         page: PageRef,
         out: &mut dyn FnMut(Identity) -> Result<(), HeapFault>,
     ) -> Result<u64, HeapFault> {
-        let answer = self.source.read(&[page])?.pop().unwrap();
+        let answer = self.source.read(&[page])?.pop().unwrap()?;
         let cost = u64::from_le_bytes(answer.tokens[..8].try_into().unwrap());
         for row in answer.tokens[8..].as_chunks::<17>().0 {
             let family = u64::from_le_bytes(row[1..9].try_into().unwrap());
@@ -481,7 +483,7 @@ struct CountedSource {
     reads: std::rc::Rc<std::cell::Cell<u64>>,
 }
 impl PageSource for CountedSource {
-    fn read(&mut self, pages: &[PageRef]) -> Result<Vec<PageAnswer>, HeapFault> {
+    fn read(&mut self, pages: &[PageRef]) -> Result<Vec<Result<PageAnswer, HeapFault>>, HeapFault> {
         self.reads.set(self.reads.get() + pages.len() as u64);
         self.real.read(pages)
     }

@@ -948,8 +948,8 @@ impl Host for Printer {
 struct Pages(BTreeMap<PageId, PageAnswer>);
 
 impl PageSource for Pages {
-    fn read(&mut self, pages: &[PageRef]) -> Result<Vec<PageAnswer>, HeapFault> {
-        pages
+    fn read(&mut self, pages: &[PageRef]) -> Result<Vec<Result<PageAnswer, HeapFault>>, HeapFault> {
+        Ok(pages
             .iter()
             .map(|page| {
                 self.0
@@ -957,7 +957,7 @@ impl PageSource for Pages {
                     .cloned()
                     .ok_or(HeapFault::Missing { page: page.id })
             })
-            .collect()
+            .collect())
     }
 
     fn seal(&mut self, body: PageBody) -> Result<PageRef, HeapFault> {

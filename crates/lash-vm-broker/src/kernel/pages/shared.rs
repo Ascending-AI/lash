@@ -106,10 +106,11 @@ impl PageExchange for SharedPages {
 pub struct ParentSeal<'a>(pub &'a mut dyn StageSpool);
 
 impl PageSource for ParentSeal<'_> {
-    fn read(&mut self, pages: &[PageRef]) -> Result<Vec<PageAnswer>, HeapFault> {
-        Err(HeapFault::Unauthorized {
-            page: pages.first().map_or(PageId([0; 32]), |page| page.id),
-        })
+    fn read(&mut self, pages: &[PageRef]) -> Result<Vec<Result<PageAnswer, HeapFault>>, HeapFault> {
+        Ok(pages
+            .iter()
+            .map(|page| Err(HeapFault::Unauthorized { page: page.id }))
+            .collect())
     }
 
     fn seal(&mut self, page: PageBody) -> Result<PageRef, HeapFault> {

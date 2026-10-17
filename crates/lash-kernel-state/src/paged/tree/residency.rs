@@ -454,7 +454,7 @@ mod laws {
 
     struct UnusedSource;
     impl PageSource for UnusedSource {
-        fn read(&mut self, _: &[PageRef]) -> Result<Vec<PageAnswer>, HeapFault> {
+        fn read(&mut self, _: &[PageRef]) -> Result<Vec<Result<PageAnswer, HeapFault>>, HeapFault> {
             unreachable!("this law never reads")
         }
         fn seal(&mut self, _: PageBody) -> Result<PageRef, HeapFault> {
@@ -506,7 +506,10 @@ mod laws {
     fn borrowed_publication_pages_keep_their_weight_and_fifo_on_spill_failure() {
         struct RefusingSource;
         impl PageSource for RefusingSource {
-            fn read(&mut self, _: &[PageRef]) -> Result<Vec<PageAnswer>, HeapFault> {
+            fn read(
+                &mut self,
+                _: &[PageRef],
+            ) -> Result<Vec<Result<PageAnswer, HeapFault>>, HeapFault> {
                 unreachable!("no read")
             }
             fn seal(&mut self, _: PageBody) -> Result<PageRef, HeapFault> {

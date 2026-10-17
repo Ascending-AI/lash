@@ -55,8 +55,8 @@ pub(crate) enum RecordedObject {
 #[derive(Default)]
 struct Source(RefCell<BTreeMap<PageId, PageAnswer>>);
 impl PageSource for Source {
-    fn read(&mut self, pages: &[PageRef]) -> Result<Vec<PageAnswer>, HeapFault> {
-        pages
+    fn read(&mut self, pages: &[PageRef]) -> Result<Vec<Result<PageAnswer, HeapFault>>, HeapFault> {
+        Ok(pages
             .iter()
             .map(|p| {
                 self.0
@@ -65,7 +65,7 @@ impl PageSource for Source {
                     .cloned()
                     .ok_or(HeapFault::Missing { page: p.id })
             })
-            .collect()
+            .collect())
     }
     fn seal(&mut self, body: PageBody) -> Result<PageRef, HeapFault> {
         let mut bytes = body.kind.0.to_be_bytes().to_vec();

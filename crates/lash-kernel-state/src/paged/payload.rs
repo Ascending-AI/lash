@@ -319,7 +319,9 @@ impl Leaf {
 }
 
 fn read(access: &Access<'_>, part: &Part, text: bool) -> Result<Node, HeapFault> {
-    let answer = access.read(part.page)?;
+    decode(part, text, access.read(part.page)?)
+}
+fn decode(part: &Part, text: bool, answer: super::PageAnswer) -> Result<Node, HeapFault> {
     let bad = |reason: String| HeapFault::Corrupt {
         page: part.page.id,
         reason,
@@ -444,6 +446,52 @@ pub fn visit(
     let _ = walk(access, &Part { summary, page }, text, range, visitor)?;
     Ok(())
 }
+/// A complete projection has committed to consuming every byte in its
+/// range. Unlike `visit`, it can fetch authenticated siblings together.
+/// Holding one fanout per level bounds staging; no descendants are named
+/// until their own parent has decoded and granted them.
+pub(super) fn copy(
+    access: &Access<'_>,
+    page: PageRef,
+    summary: TextSummary,
+    text: bool,
+) -> Result<Vec<u8>, HeapFault> {
+    fn walk(
+        access: &Access<'_>,
+        part: &Part,
+        text: bool,
+        answer: super::PageAnswer,
+        out: &mut Vec<u8>,
+    ) -> Result<(), HeapFault> {
+        match decode(part, text, answer)? {
+            Node::Leaf(leaf) => out.extend_from_slice(leaf.bytes()),
+            Node::Index(children) => {
+                let children: Vec<_> = children
+                    .into_iter()
+                    .filter(|child| child.summary.utf8_bytes != 0)
+                    .collect();
+                let pages: Vec<_> = children.iter().map(|child| child.page).collect();
+                for (child, answer) in children.iter().zip(access.read_batch(&pages)) {
+                    walk(access, child, text, answer?, out)?;
+                }
+            }
+        }
+        Ok(())
+    }
+    let mut out = Vec::new();
+    if summary.utf8_bytes == 0 {
+        return Ok(out);
+    }
+    walk(
+        access,
+        &Part { page, summary },
+        text,
+        access.read(page)?,
+        &mut out,
+    )?;
+    Ok(out)
+}
+
 pub fn offset(
     access: &Access<'_>,
     page: PageRef,

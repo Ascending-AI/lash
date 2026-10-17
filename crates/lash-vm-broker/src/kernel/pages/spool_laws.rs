@@ -470,7 +470,7 @@ async fn staging_refuses_an_unprotected_child() {
     else {
         panic!("the root reads")
     };
-    let child = read[0].children[0];
+    let child = read[0].as_ref().expect("page reads").children[0];
     assert_eq!(child.page, stranger.id.0);
     sealed(seal(&mut pages, &parent, vec![child]).await);
     let other = page("other parent", &[stranger.id]);
@@ -515,7 +515,7 @@ async fn a_reused_committed_child_resolves_after_a_spill() {
     else {
         panic!("the root reads")
     };
-    let child = read[0].children[0];
+    let child = read[0].as_ref().expect("page reads").children[0];
     // Stage a parent over the reused committed child, as a spill does.
     let parent = page("parent", &[reused.id]);
     let staged = sealed(seal(&mut pages, &parent, vec![child]).await);
@@ -528,7 +528,7 @@ async fn a_reused_committed_child_resolves_after_a_spill() {
     else {
         panic!("the staged parent reads")
     };
-    let again = reread[0].children[0];
+    let again = reread[0].as_ref().expect("page reads").children[0];
     assert_eq!(again.page, reused.id.0);
     assert_eq!(again.authority, pages.issue(base.id).authority);
     // The child resolves from the store, and protects a new seal over it.
@@ -537,7 +537,10 @@ async fn a_reused_committed_child_resolves_after_a_spill() {
     else {
         panic!("the reused child resolves")
     };
-    assert_eq!(leaf[0].page.envelope, reused.bytes.to_vec());
+    assert_eq!(
+        leaf[0].as_ref().expect("page reads").page.envelope,
+        reused.bytes.to_vec()
+    );
     let top = page("top", &[parent.id, reused.id]);
     let top_capability = sealed(seal(&mut pages, &top, vec![staged, again]).await);
     let mut manifest = pages
@@ -577,7 +580,7 @@ async fn an_ambiguous_publication_keeps_its_spool_until_resolved() {
     else {
         panic!("the root reads")
     };
-    let kept_cap = read[0].children[0];
+    let kept_cap = read[0].as_ref().expect("page reads").children[0];
     let fresh = page("fresh", &[kept.id]);
     let fresh_cap = sealed(seal(&mut pages, &fresh, vec![kept_cap]).await);
     let top = page("top", &[fresh.id, kept.id]);
@@ -632,7 +635,7 @@ async fn an_ambiguous_publication_keeps_its_spool_until_resolved() {
     else {
         panic!("a committed candidate's page reads from the store")
     };
-    assert_eq!(read[0].page.id, top.id.0);
+    assert_eq!(read[0].as_ref().expect("page reads").page.id, top.id.0);
 
     // Another activation's candidate loses to a root it did not build on.
     let mut loser = ActivationPages::new(
@@ -713,7 +716,10 @@ async fn a_quota_failure_is_a_host_outcome() {
     };
     let sealed_ref = local.seal(body("fits")).expect("fits the quota");
     assert_eq!(
-        local.read(&[sealed_ref]).expect("reads back")[0].kind,
+        local.read(&[sealed_ref]).expect("reads back")[0]
+            .as_ref()
+            .expect("page reads")
+            .kind,
         PageKind::PAYLOAD_LEAF
     );
     assert_eq!(
@@ -728,7 +734,10 @@ async fn a_quota_failure_is_a_host_outcome() {
         grant: PageGrant::NONE,
     };
     assert_eq!(
-        local.read(&[unknown]).map(|answers| answers.len()),
+        local
+            .read(&[unknown])
+            .and_then(|answers| answers.into_iter().collect::<Result<Vec<_>, _>>())
+            .map(|answers| answers.len()),
         Err(HeapFault::Missing { page: unknown.id })
     );
 }
@@ -1004,7 +1013,7 @@ async fn a_crashed_parents_spool_is_reaped_and_the_committed_root_stands() {
         else {
             panic!("{cut}: the committed root reads")
         };
-        assert_eq!(read[0].page.id, base.id.0);
+        assert_eq!(read[0].as_ref().expect("page reads").page.id, base.id.0);
         drop(fresh);
         drop(next);
     }

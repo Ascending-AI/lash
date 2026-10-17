@@ -1141,10 +1141,11 @@ impl CodeModeExecutionState {
 struct SpoolSeal(SharedSpool);
 
 impl PageSource for SpoolSeal {
-    fn read(&mut self, pages: &[PageRef]) -> Result<Vec<PageAnswer>, HeapFault> {
-        Err(HeapFault::Missing {
-            page: pages.first().map_or(PageId([0; 32]), |page| page.id),
-        })
+    fn read(&mut self, pages: &[PageRef]) -> Result<Vec<Result<PageAnswer, HeapFault>>, HeapFault> {
+        Ok(pages
+            .iter()
+            .map(|page| Err(HeapFault::Missing { page: page.id }))
+            .collect())
     }
 
     fn seal(&mut self, page: PageBody) -> Result<PageRef, HeapFault> {
@@ -1170,8 +1171,8 @@ fn stored_descriptor(
 struct StoredPages<'a>(&'a HydratedExecutionGraph);
 
 impl PageSource for StoredPages<'_> {
-    fn read(&mut self, pages: &[PageRef]) -> Result<Vec<PageAnswer>, HeapFault> {
-        pages
+    fn read(&mut self, pages: &[PageRef]) -> Result<Vec<Result<PageAnswer, HeapFault>>, HeapFault> {
+        Ok(pages
             .iter()
             .map(|page| {
                 if NodeId(page.id.0) != self.0.root {
@@ -1179,7 +1180,7 @@ impl PageSource for StoredPages<'_> {
                 }
                 answer_page(*page, &self.0.descriptor, |_| Ok(PageGrant::NONE))
             })
-            .collect()
+            .collect())
     }
 
     fn seal(&mut self, page: PageBody) -> Result<PageRef, HeapFault> {

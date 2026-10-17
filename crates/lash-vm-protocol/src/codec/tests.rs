@@ -426,9 +426,11 @@ fn page_exchanges_respect_batch_bounds() {
     );
     let reply = PageReply::Read {
         pages: (0..PAGE_BATCH_PAGES)
-            .map(|index| ReadPage {
-                page: envelope(index, big - 1),
-                children: vec![capability(index)],
+            .map(|index| {
+                Ok(ReadPage {
+                    page: envelope(index, big - 1),
+                    children: vec![capability(index)],
+                })
             })
             .collect(),
     };
@@ -465,9 +467,11 @@ fn page_exchanges_respect_batch_bounds() {
     }
     let too_heavy = parent(PageReply::Read {
         pages: (0..PAGE_BATCH_PAGES)
-            .map(|index| ReadPage {
-                page: envelope(index, big),
-                children: Vec::new(),
+            .map(|index| {
+                Ok(ReadPage {
+                    page: envelope(index, big),
+                    children: Vec::new(),
+                })
             })
             .collect(),
     });

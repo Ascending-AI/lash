@@ -20,7 +20,7 @@ struct CountReads {
     reads: Rc<Cell<u64>>,
 }
 impl PageSource for CountReads {
-    fn read(&mut self, pages: &[PageRef]) -> Result<Vec<PageAnswer>, HeapFault> {
+    fn read(&mut self, pages: &[PageRef]) -> Result<Vec<Result<PageAnswer, HeapFault>>, HeapFault> {
         self.reads.set(
             self.reads.get()
                 + pages

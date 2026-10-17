@@ -1040,8 +1040,10 @@ fn host_json_probe() -> Result<(), String> {
         fn read(
             &mut self,
             pages: &[lash_kernel_doc::heap::PageRef],
-        ) -> Result<Vec<lash_kernel_state::paged::PageAnswer>, lash_kernel_doc::heap::HeapFault>
-        {
+        ) -> Result<
+            Vec<Result<lash_kernel_state::paged::PageAnswer, lash_kernel_doc::heap::HeapFault>>,
+            lash_kernel_doc::heap::HeapFault,
+        > {
             let mut count = self.counts.get();
             count[0] += 1;
             count[1] += pages.len() as u64;

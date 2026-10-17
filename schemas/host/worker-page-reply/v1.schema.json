@@ -170,13 +170,13 @@
       "oneOf": [
         {
           "additionalProperties": false,
-          "description": "The pages, in request order.",
+          "description": "Each demanded page or its own fault, in request order. A later\nfault never discards a successful prefix.",
           "properties": {
             "read": {
               "properties": {
                 "pages": {
                   "items": {
-                    "$ref": "#/$defs/ReadPage"
+                    "$ref": "#/$defs/Result_of_ReadPage_or_PageRefusal"
                   },
                   "type": "array"
                 }
@@ -249,6 +249,32 @@
         "children"
       ],
       "type": "object"
+    },
+    "Result_of_ReadPage_or_PageRefusal": {
+      "oneOf": [
+        {
+          "properties": {
+            "Ok": {
+              "$ref": "#/$defs/ReadPage"
+            }
+          },
+          "required": [
+            "Ok"
+          ],
+          "type": "object"
+        },
+        {
+          "properties": {
+            "Err": {
+              "$ref": "#/$defs/PageRefusal"
+            }
+          },
+          "required": [
+            "Err"
+          ],
+          "type": "object"
+        }
+      ]
     }
   },
   "$id": "https://lash.dev/schemas/worker-page-reply/v1",

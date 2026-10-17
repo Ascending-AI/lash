@@ -355,8 +355,11 @@ impl PageSource for Staged {
     fn read(
         &mut self,
         pages: &[PageRef],
-    ) -> Result<Vec<PageAnswer>, lash_kernel_doc::heap::HeapFault> {
-        pages
+    ) -> Result<
+        Vec<Result<PageAnswer, lash_kernel_doc::heap::HeapFault>>,
+        lash_kernel_doc::heap::HeapFault,
+    > {
+        Ok(pages
             .iter()
             .map(|page| {
                 let bytes = self
@@ -365,7 +368,7 @@ impl PageSource for Staged {
                     .map_err(|_| lash_kernel_doc::heap::HeapFault::Missing { page: page.id })?;
                 answer_page(*page, &bytes, |_| Ok(PageGrant::NONE))
             })
-            .collect()
+            .collect())
     }
 
     fn seal(&mut self, _page: PageBody) -> Result<PageRef, lash_kernel_doc::heap::HeapFault> {

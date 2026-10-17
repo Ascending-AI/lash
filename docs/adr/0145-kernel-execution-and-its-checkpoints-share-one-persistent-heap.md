@@ -167,6 +167,14 @@ first), keyed by content address and shared by every reader in the
 process; what a read may ask for is still decided by its capability or
 lease (FIG-6321).
 
+Full payload projections fetch demanded siblings together after their parent
+has authenticated their references. `PageSource::read` and the wire return
+per-page results in request order. The consumer decodes in traversal order
+and surfaces the first typed fault; a later page fault cannot discard a
+successful prefix or poison an earlier subtree's outstanding reads. Lease
+and deadline refusals remain activation-wide. Visitors that can stop early
+retain their prefix-only demand path (FIG-6595).
+
 Validation is inductive and on demand:
 
 - The worker re-hashes and re-frames every answered envelope before the
@@ -185,9 +193,11 @@ Laws: `crates/lash-vm-worker/src/page_laws.rs`
 (`a_fresh_worker_reads_the_header_and_touched_pages_only`,
 `a_fault_mid_native_resumes_on_the_same_stack`,
 `a_one_worker_pool_serves_pages_without_another_worker`,
-`a_forged_foreign_or_stale_capability_reads_nothing`,
+`every_forged_foreign_or_stale_capability_is_refused_at_its_own_slot`,
 `a_missing_or_corrupt_page_is_infrastructure_never_absence`,
 `sealed_pages_cross_in_one_batch`,
+`bulk_projection_batches_only_demanded_siblings`,
+`bulk_projection_preserves_the_first_typed_fault`,
 `a_transported_page_keeps_its_blob_address_and_token_vector`).
 
 ### 4. Infrastructure failures are never guest outcomes

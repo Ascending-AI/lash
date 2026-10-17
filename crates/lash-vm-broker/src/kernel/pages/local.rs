@@ -39,13 +39,13 @@ impl<C: CommittedPages> LocalPages<C> {
 }
 
 impl<C: CommittedPages> PageSource for LocalPages<C> {
-    fn read(&mut self, pages: &[PageRef]) -> Result<Vec<PageAnswer>, HeapFault> {
+    fn read(&mut self, pages: &[PageRef]) -> Result<Vec<Result<PageAnswer, HeapFault>>, HeapFault> {
         if pages.len() > READ_BATCH_PAGES {
             return Err(HeapFault::Exhausted {
                 resource: HostResource::ReadBatch,
             });
         }
-        pages
+        Ok(pages
             .iter()
             .map(|page| {
                 let id = NodeId(page.id.0);
@@ -59,7 +59,7 @@ impl<C: CommittedPages> PageSource for LocalPages<C> {
                 };
                 answer_page(*page, &bytes, |_| Ok(PageGrant::NONE))
             })
-            .collect()
+            .collect())
     }
 
     fn seal(&mut self, page: PageBody) -> Result<PageRef, HeapFault> {

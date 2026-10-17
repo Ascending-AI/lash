@@ -20,7 +20,7 @@ pub(super) struct Pages {
 }
 pub(super) struct Source(pub Rc<RefCell<Pages>>);
 impl PageSource for Source {
-    fn read(&mut self, pages: &[PageRef]) -> Result<Vec<PageAnswer>, HeapFault> {
+    fn read(&mut self, pages: &[PageRef]) -> Result<Vec<Result<PageAnswer, HeapFault>>, HeapFault> {
         let mut store = self.0.borrow_mut();
         store.reads += pages.len() as u64;
         store.payload_reads += pages
@@ -34,7 +34,7 @@ impl PageSource for Source {
                 })
             })
             .count() as u64;
-        pages
+        Ok(pages
             .iter()
             .map(|p| {
                 store
@@ -43,7 +43,7 @@ impl PageSource for Source {
                     .cloned()
                     .ok_or(HeapFault::Missing { page: p.id })
             })
-            .collect()
+            .collect())
     }
     fn seal(&mut self, body: PageBody) -> Result<PageRef, HeapFault> {
         if let Some(fault) = self.0.borrow().seal_fault.clone() {

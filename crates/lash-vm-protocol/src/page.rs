@@ -271,9 +271,10 @@ pub struct ReadPage {
 #[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize, JsonSchema)]
 #[serde(rename_all = "snake_case")]
 pub enum PageReply {
-    /// The pages, in request order.
+    /// Each demanded page or its own fault, in request order. A later
+    /// fault never discards a successful prefix.
     Read {
-        pages: Vec<ReadPage>,
+        pages: Vec<Result<ReadPage, PageRefusal>>,
     },
     /// A stage capability for each sealed page, in request order.
     Sealed {

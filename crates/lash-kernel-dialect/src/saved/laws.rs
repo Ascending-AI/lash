@@ -14,10 +14,10 @@ struct Pages {
 }
 struct Source(Rc<RefCell<Pages>>);
 impl PageSource for Source {
-    fn read(&mut self, pages: &[PageRef]) -> Result<Vec<PageAnswer>, HeapFault> {
+    fn read(&mut self, pages: &[PageRef]) -> Result<Vec<Result<PageAnswer, HeapFault>>, HeapFault> {
         let mut state = self.0.borrow_mut();
         state.reads += pages.len() as u64;
-        pages
+        Ok(pages
             .iter()
             .map(|p| {
                 state
@@ -26,7 +26,7 @@ impl PageSource for Source {
                     .cloned()
                     .ok_or(HeapFault::Missing { page: p.id })
             })
-            .collect()
+            .collect())
     }
     fn seal(&mut self, body: PageBody) -> Result<PageRef, HeapFault> {
         let mut tokens = body.kind.0.to_be_bytes().to_vec();

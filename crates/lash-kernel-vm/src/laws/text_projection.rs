@@ -140,12 +140,22 @@ struct FaultSource {
     fault: HeapFault,
 }
 impl PageSource for FaultSource {
-    fn read(&mut self, pages: &[PageRef]) -> Result<Vec<PageAnswer>, HeapFault> {
-        if pages.iter().any(|page| page.id == self.page) {
-            return Err(self.fault.clone());
-        }
-        self.source.read(pages)
+    fn read(&mut self, pages: &[PageRef]) -> Result<Vec<Result<PageAnswer, HeapFault>>, HeapFault> {
+        Ok(self
+            .source
+            .read(pages)?
+            .into_iter()
+            .zip(pages)
+            .map(|(answer, page)| {
+                if page.id == self.page {
+                    Err(self.fault.clone())
+                } else {
+                    answer
+                }
+            })
+            .collect())
     }
+
     fn seal(&mut self, body: PageBody) -> Result<PageRef, HeapFault> {
         self.source.seal(body)
     }

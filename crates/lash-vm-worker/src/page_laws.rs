@@ -30,7 +30,7 @@ use lash_durable::domain::graph::RootOwner;
 use lash_durable::domain::pages::{LeaseFence, RootLease, RootLeaseId, StoredPage};
 use lash_durable::{ActorKey, DurableError, DurableInstant, Epoch};
 use lash_kernel_doc::heap::{HeapFault, PageGrant, PageId, PageRef};
-use lash_kernel_state::paged::{PageAnswer, PageBody, PageKind, PageSource};
+use lash_kernel_state::paged::{AllocationCensus, PageAnswer, PageBody, PageKind, PageSource};
 use lash_vm_broker::kernel::pages::{
     ActivationPages, CapabilityKey, LeasedReads, PageExchange, PageLimits, SpoolRoot,
 };
@@ -155,7 +155,7 @@ fn child_at(answer: &PageAnswer, digest: [u8; 32]) -> PageRef {
 }
 
 fn read_one(source: &mut dyn PageSource, page: PageRef) -> Result<PageAnswer, HeapFault> {
-    Ok(source.read(&[page])?.remove(0))
+    source.read(&[page])?.remove(0)
 }
 
 /// Opens the scripted checkpoint: the control header, then the heap header.
@@ -454,9 +454,9 @@ fn a_one_worker_pool_serves_pages_without_another_worker() {
 /// A page's authority is its capability: a forged MAC, a digest the worker
 /// guessed, another activation's capability and one of an earlier epoch
 /// each read nothing. Each is refused as infrastructure, never as an
-/// absent value, and the refusal ends the activation.
+/// absent value. Execution surfaces the first consumed fault.
 #[test]
-fn a_forged_foreign_or_stale_capability_reads_nothing() {
+fn every_forged_foreign_or_stale_capability_is_refused_at_its_own_slot() {
     let store = Arc::new(Store::default());
     let (root, _) = committed_list(&store, 100);
     let key = CapabilityKey::fresh();
@@ -495,19 +495,28 @@ fn a_forged_foreign_or_stale_capability_reads_nothing() {
                 id: PageId(capability.page),
                 grant: grant_of(&capability),
             };
-            let first = source.read(&[page]).map(|answers| answers.len());
-            // The activation has ended: even its own root is refused now.
+            // A refused later slot must not poison an earlier subtree's
+            // outstanding demands. Each capability is checked on its own.
             let valid = PageRef {
                 id: PageId(valid.page),
                 grant: grant_of(&valid),
             };
-            (first, source.read(&[valid]).map(|answers| answers.len()))
+            source
+                .read(&[page, valid])
+                .expect("bounded request")
+                .into_iter()
+                .map(|answer| answer.map(|page| page.kind))
+                .collect::<Vec<_>>()
         });
         let refused = Err(HeapFault::Unauthorized {
             page: PageId(root.id.0),
         });
-        assert_eq!(read, (refused.clone(), refused), "{case}");
-        assert_eq!(pages.stats().pages_read, 0, "{case}");
+        assert_eq!(read, vec![refused, Ok(PageKind::CHECKPOINT_ROOT)], "{case}");
+        assert_eq!(
+            pages.stats().pages_read,
+            1,
+            "{case}: only the valid capability reads"
+        );
     }
     // An unforged grant of the same activation reads.
     let mut pages = activation(&store, &spools, root.id, key, 7);
@@ -517,7 +526,7 @@ fn a_forged_foreign_or_stale_capability_reads_nothing() {
                 id: PageId(valid.page),
                 grant: grant_of(&valid),
             }])
-            .map(|answers| answers[0].kind)
+            .and_then(|mut answers| answers.remove(0).map(|answer| answer.kind))
     });
     assert_eq!(read, Ok(PageKind::CHECKPOINT_ROOT));
     // The kernel's in-process grant names nothing on a worker.
@@ -528,6 +537,7 @@ fn a_forged_foreign_or_stale_capability_reads_nothing() {
                 id: PageId(root.id.0),
                 grant: PageGrant::NONE,
             }])
+            .and_then(|answers| answers.into_iter().collect::<Result<Vec<_>, _>>())
             .map(|answers| answers.len())
     });
     assert_eq!(
@@ -861,7 +871,13 @@ fn version_churn_keeps_grants_for_live_pages_only() {
                 .all(|page| page.grant == PageGrant::NONE)
         );
         set.push(keeper);
-        (peak, source.read(&set).map(|answers| answers.len()))
+        (
+            peak,
+            source
+                .read(&set)
+                .and_then(|answers| answers.into_iter().collect::<Result<Vec<_>, _>>())
+                .map(|answers| answers.len()),
+        )
     });
     assert_eq!(read, Ok(WORKING + 1), "every live page reads");
     assert!(
@@ -889,7 +905,11 @@ fn a_transported_page_keeps_its_blob_address_and_token_vector() {
             })
             .expect("seal over wire");
         source.port().flush().expect("seal crosses");
-        let answer = source.read(&[page]).expect("cold read over wire").remove(0);
+        let answer = source
+            .read(&[page])
+            .expect("cold read over wire")
+            .remove(0)
+            .expect("page reads");
         (page, answer)
     });
     assert_eq!(answer.kind, PageKind::SEQUENCE_LEAF);
@@ -906,4 +926,352 @@ fn a_transported_page_keeps_its_blob_address_and_token_vector() {
         NodeId(page.id.0)
     );
     assert_eq!(traffic.pages_requested, 1);
+}
+
+/// DEMANDED-SIBLINGS-BATCHED: the heap's full projection keeps the page
+/// port's batching, while the stoppable visitor demands only its prefix.
+#[test]
+fn bulk_projection_batches_only_demanded_siblings() {
+    use lash_durable::domain::pages::PageStore;
+    use lash_kernel_doc::heap::{NativeHeap, PAYLOAD_LEAF_BYTES, Payload, TextRef, Value};
+    use lash_kernel_state::paged::{EditEpoch, PagedHeap, SemanticHeap, payload, tree::Access};
+    use std::ops::ControlFlow;
+
+    struct Capture(Arc<Store>);
+    impl PageSource for Capture {
+        fn read(&mut self, _: &[PageRef]) -> Result<Vec<Result<PageAnswer, HeapFault>>, HeapFault> {
+            panic!("construction reads no pages")
+        }
+        fn seal(&mut self, body: PageBody) -> Result<PageRef, HeapFault> {
+            let node = lash_vm_broker::kernel::pages::frame_page(&body)?;
+            let page = PageRef {
+                id: PageId(node.id.0),
+                grant: PageGrant::NONE,
+            };
+            self.0.commit(&node);
+            Ok(page)
+        }
+    }
+    struct SqliteReads {
+        store: lash_sqlite_store::SqliteDurableStore,
+        reads: Mutex<Vec<(usize, u64)>>,
+    }
+    #[async_trait::async_trait]
+    impl LeasedReads for SqliteReads {
+        async fn read_pages(
+            &self,
+            lease: &RootLease,
+            pages: &[NodeId],
+        ) -> Result<Vec<StoredPage>, DurableError> {
+            let found = PageStore::read_pages(&self.store, lease, pages).await?;
+            self.reads.lock().expect("reads").push((
+                pages.len(),
+                found.iter().map(|p| p.bytes.len() as u64).sum(),
+            ));
+            Ok(found)
+        }
+        async fn renew_root_lease(&self, lease: &RootLease) -> Result<RootLease, DurableError> {
+            PageStore::renew_root_lease(&self.store, lease).await
+        }
+    }
+    let text: String = (0..64)
+        .map(|i| format!("{i:04}{}", "x".repeat(PAYLOAD_LEAF_BYTES as usize - 4)))
+        .collect();
+    let summary = lash_kernel_doc::heap_values::text_summary(&text);
+    let captured = Arc::new(Store::default());
+    let root = payload::build(
+        &Access::new(Box::new(Capture(captured.clone()))),
+        text.as_bytes(),
+        true,
+    )
+    .expect("payload");
+    let directory = tempfile::tempdir().expect("database");
+    let database = directory.path().join("pages.db");
+    let runtime = tokio::runtime::Builder::new_current_thread()
+        .enable_all()
+        .build()
+        .expect("runtime");
+    let stores = runtime
+        .block_on(lash_sqlite_store::SqliteStoreSet::open(
+            &database,
+            lash_sqlite_store::SqliteSynchronous::Normal,
+        ))
+        .expect("SQLite");
+    let sqlite = stores.durable_store();
+    let leased = runtime.block_on(async {
+        use lash_durable::{CommitLabel, DomainWrite, DurableStore};
+        let owner = lash_core_execution::testing::sql_work::owner_commit(&stores).await;
+        let mut tx = sqlite
+            .begin(
+                &ActorKey::session("sql-work-owner").expect("actor"),
+                Epoch(owner.epoch),
+            )
+            .await
+            .expect("owner transaction");
+        tx.stage(
+            captured
+                .pages
+                .lock()
+                .expect("pages")
+                .iter()
+                .map(|(id, bytes)| EncodedNode {
+                    id: *id,
+                    bytes: bytes.clone(),
+                }),
+        );
+        tx.write(DomainWrite::ReleasePin(
+            lash_durable::domain::graph::ReleasePinWrite::Install {
+                release: "cold-projection".into(),
+                root: NodeId(root.id.0),
+            },
+        ));
+        sqlite
+            .commit(tx, CommitLabel::new("cold-projection.install"))
+            .await
+            .expect("publish pages");
+        PageStore::acquire_root_lease(
+            &sqlite,
+            lash_durable::domain::pages::RootLeaseRequest {
+                owner: RootOwner::ReleasePin {
+                    release: "cold-projection".into(),
+                },
+                expected: NodeId(root.id.0),
+                fence: LeaseFence::Reader,
+                ttl_millis: 120_000,
+            },
+        )
+        .await
+        .expect("lease pages")
+    });
+    let store = Arc::new(SqliteReads {
+        store: sqlite,
+        reads: Mutex::new(Vec::new()),
+    });
+    let spools = SpoolRoot::open(&directory.path().join("spools"), 1 << 20).expect("spools");
+    let run = |mode: u64| {
+        let mut pages = ActivationPages::new(
+            store.clone(),
+            Some(leased.clone()),
+            Duration::from_secs(20),
+            CapabilityKey::fresh(),
+            1,
+            Box::new(spools.spool(StageLeaseId(mode + 1)).expect("spool")),
+            Arc::new(lash_core_execution::runtime::SystemClock),
+            Duration::from_secs(120),
+            PageLimits::within(ProtocolBounds::standard().decode),
+        );
+        let cap = pages.issue(NodeId(root.id.0));
+        let start = PageRef {
+            id: root.id,
+            grant: grant_of(&cap),
+        };
+        store.reads.lock().expect("reads").clear();
+        let (result, traffic) = served(&mut pages, 0, move |source| {
+            let mut heap = PagedHeap::fresh(Box::new(source.clone()), EditEpoch(1));
+            heap.set_census(Box::new(
+                lash_kernel_state::paged::census_impl::Census::restore(
+                    heap.certificate(),
+                    lash_kernel_doc::heap::LogicalBytes(1 << 30),
+                )
+                .expect("census"),
+            ))
+            .expect("install census");
+            let descriptor = TextRef {
+                normal: Default::default(),
+                summary,
+                body: Payload::paged(start),
+            };
+            if mode == 1 {
+                heap.materialize_text(&descriptor)
+                    .expect("full projection")
+                    .to_string()
+            } else {
+                heap.reserve(0, summary.utf8_bytes)
+                    .expect("same output reservation");
+                let mut out = String::new();
+                heap.payload_visit(
+                    &Value::Text(descriptor),
+                    0..summary.utf8_bytes,
+                    &mut |chunk| {
+                        if let lash_kernel_doc::heap::Chunk::Text(text) = chunk {
+                            out.push_str(text);
+                        }
+                        if mode == 2 {
+                            ControlFlow::Break(())
+                        } else {
+                            ControlFlow::Continue(())
+                        }
+                    },
+                )
+                .expect("serial visitor");
+                out
+            }
+        });
+        let reads = store.reads.lock().expect("reads");
+        let count: usize = reads.iter().map(|r| r.0).sum();
+        let bytes: u64 = reads.iter().map(|r| r.1).sum();
+        (result, traffic, count, bytes)
+    };
+    let serial = run(0);
+    let bulk = run(1);
+    let prefix = run(2);
+    assert_eq!(prefix.0, &text[..PAYLOAD_LEAF_BYTES as usize]);
+    assert_eq!(
+        prefix.1.pages_requested, 3,
+        "the visitor stops before undemanded siblings"
+    );
+    assert_eq!(serial.0, text);
+    assert_eq!(bulk.0, text);
+    assert_eq!(
+        (serial.1.pages_requested, serial.2, serial.3),
+        (bulk.1.pages_requested, bulk.2, bulk.3)
+    );
+    assert_eq!(bulk.2, 64 + 2 + 1);
+    println!(
+        "cold projection: serial exchanges={} bulk exchanges={} pages={} bytes={} result_bytes={}",
+        serial.1.exchanges,
+        bulk.1.exchanges,
+        bulk.2,
+        bulk.3,
+        bulk.0.len()
+    );
+    assert!(
+        bulk.1.exchanges < serial.1.exchanges / 2,
+        "demanded siblings must cross in bounded batches"
+    );
+}
+
+/// A later sibling's transport fault cannot discard the authenticated
+/// prefix or prevent an earlier subtree from reporting its semantic fault.
+#[test]
+fn bulk_projection_preserves_the_first_typed_fault() {
+    use lash_kernel_doc::graph_tokens::TokenCodec;
+    use lash_kernel_doc::heap::{NativeError, NativeHeap, Payload, TextRef, Value};
+    use lash_kernel_state::paged::{EditEpoch, PagedHeap, SemanticHeap};
+    use std::ops::ControlFlow;
+
+    struct FaultStore {
+        inner: Arc<Store>,
+        failed: NodeId,
+    }
+    #[async_trait::async_trait]
+    impl LeasedReads for FaultStore {
+        async fn read_pages(
+            &self,
+            lease: &RootLease,
+            pages: &[NodeId],
+        ) -> Result<Vec<StoredPage>, DurableError> {
+            if pages.contains(&self.failed) {
+                return Err(DurableError::Store(lash_durable::StoreFailure {
+                    kind: lash_durable::StoreFailureKind::Unavailable,
+                    message: "later sibling transport fault".into(),
+                }));
+            }
+            self.inner.read_pages(lease, pages).await
+        }
+        async fn renew_root_lease(&self, lease: &RootLease) -> Result<RootLease, DurableError> {
+            Ok(lease.clone())
+        }
+    }
+    let summary = lash_kernel_doc::heap_values::text_summary("x");
+    let index = |children: &[NodeId]| {
+        let mut tokens = TokenWriter::new();
+        tokens.seq(children.len() as u64);
+        for id in children {
+            tokens.seq(2);
+            summary.encode(&mut tokens);
+            PageRef {
+                id: PageId(id.0),
+                grant: PageGrant::NONE,
+            }
+            .encode(&mut tokens);
+        }
+        frame(PageKind::PAYLOAD_INDEX, &tokens)
+    };
+    let mut tokens = TokenWriter::new();
+    tokens.unsigned(0); // Authenticated envelope, invalid payload record.
+    let bad = frame(PageKind::PAYLOAD_LEAF, &tokens);
+    let mut tokens = TokenWriter::new();
+    tokens.text("later");
+    let later = frame(PageKind::PAYLOAD_LEAF, &tokens);
+    let subtree = index(&[bad.id]);
+    for children in [
+        [bad.id, later.id],
+        [later.id, bad.id],
+        [subtree.id, later.id],
+        [later.id, subtree.id],
+    ] {
+        let root = index(&children);
+        let store = Arc::new(Store::default());
+        for node in [&root, &subtree, &bad, &later] {
+            store.commit(node);
+        }
+        let store = Arc::new(FaultStore {
+            inner: store,
+            failed: later.id,
+        });
+        let directory = tempfile::tempdir().expect("spools");
+        let spools = SpoolRoot::open(directory.path(), 1 << 20).expect("spools");
+        let run = |bulk: bool| {
+            let mut pages = ActivationPages::new(
+                store.clone(),
+                Some(lease(root.id)),
+                Duration::from_secs(20),
+                CapabilityKey::fresh(),
+                1,
+                Box::new(
+                    spools
+                        .spool(StageLeaseId(if bulk { 1 } else { 2 }))
+                        .expect("spool"),
+                ),
+                Arc::new(lash_core_execution::runtime::SystemClock),
+                Duration::from_secs(120),
+                PageLimits::within(ProtocolBounds::standard().decode),
+            );
+            let start = PageRef {
+                id: PageId(root.id.0),
+                grant: grant_of(&pages.issue(root.id)),
+            };
+            served(&mut pages, 0, move |source| {
+                let mut heap = PagedHeap::fresh(Box::new(source.clone()), EditEpoch(1));
+                heap.set_census(Box::new(
+                    lash_kernel_state::paged::census_impl::Census::restore(
+                        heap.certificate(),
+                        lash_kernel_doc::heap::LogicalBytes(1 << 30),
+                    )
+                    .expect("census"),
+                ))
+                .expect("install census");
+                let descriptor = TextRef {
+                    normal: Default::default(),
+                    summary: lash_kernel_doc::heap_values::text_summary("xx"),
+                    body: Payload::paged(start),
+                };
+                if bulk {
+                    heap.materialize_text(&descriptor)
+                        .map(|text| text.to_string())
+                        .map_err(|error| match error {
+                            NativeError::Heap(fault) => fault,
+                            other => panic!("unexpected native refusal: {other:?}"),
+                        })
+                } else {
+                    heap.payload_visit(&Value::Text(descriptor), 0..2, &mut |_| {
+                        ControlFlow::Continue(())
+                    })
+                    .map(|()| String::new())
+                }
+            })
+            .0
+        };
+        let serial = run(false);
+        let bulk = run(true);
+        assert_eq!(bulk, serial, "batching preserves the first typed fault");
+        if children[0] != later.id {
+            assert!(
+                matches!(bulk, Err(HeapFault::Corrupt { page, .. }) if page == PageId(bad.id.0))
+            );
+        } else {
+            assert!(matches!(bulk, Err(HeapFault::Transport(_))));
+        }
+    }
 }

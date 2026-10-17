@@ -74,6 +74,7 @@ pub(super) fn read(
             "session port answered wrong count".into(),
         ));
     };
+    let answer = answer.as_ref().map_err(Clone::clone)?;
     if answer.page.id != page.id || answer.kind != PageKind::SESSION_ROOT {
         return Err(HeapFault::Corrupt {
             page: page.id,

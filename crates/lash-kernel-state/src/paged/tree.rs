@@ -102,13 +102,17 @@ impl<'a> Access<'a> {
                 "page port answered the wrong count".into(),
             ));
         }
-        let answer = answers.remove(0);
+        let answer = answers.remove(0)?;
         if answer.page.id != page.id {
             return Err(HeapFault::Corrupt {
                 page: page.id,
                 reason: "page port answered another page".into(),
             });
         }
+        self.keep(&answer);
+        Ok(answer)
+    }
+    fn keep(&self, answer: &PageAnswer) {
         let weight = answer.tokens.len()
             + answer.children.capacity() * std::mem::size_of::<PageRef>()
             + std::mem::size_of::<PageAnswer>()
@@ -117,8 +121,71 @@ impl<'a> Access<'a> {
             self.clear();
         }
         *self.bytes.borrow_mut() += weight;
-        self.cache.borrow_mut().insert(page.id, answer.clone());
-        Ok(answer)
+        self.cache
+            .borrow_mut()
+            .insert(answer.page.id, answer.clone());
+    }
+    /// Only explicitly demanded siblings enter this bounded read. Results
+    /// stay in request order, including faults; decoding consumes them in
+    /// traversal order rather than letting a later I/O fault skip a prefix.
+    pub(super) fn read_batch(&self, pages: &[PageRef]) -> Vec<Result<PageAnswer, HeapFault>> {
+        if pages.len() > super::source::READ_BATCH_PAGES {
+            return vec![
+                Err(HeapFault::Exhausted {
+                    resource: lash_kernel_doc::heap::HostResource::ReadBatch,
+                });
+                pages.len()
+            ];
+        }
+        let cached: Vec<_> = pages
+            .iter()
+            .map(|page| self.cache.borrow().get(&page.id).cloned())
+            .collect();
+        let mut missing: Vec<PageRef> = Vec::new();
+        for (page, held) in pages.iter().zip(&cached) {
+            if held.is_none() && !missing.iter().any(|wanted| wanted.id == page.id) {
+                missing.push(*page);
+            }
+        }
+        let mut fresh = BTreeMap::new();
+        if !missing.is_empty() {
+            let fetched = match self.source.borrow_mut().read(&missing) {
+                Ok(fetched) if fetched.len() == missing.len() => fetched,
+                Ok(_) => vec![
+                    Err(HeapFault::Malformed(
+                        "page port answered the wrong count".into()
+                    ));
+                    missing.len()
+                ],
+                Err(fault) => vec![Err(fault); missing.len()],
+            };
+            for (page, answer) in missing.into_iter().zip(fetched) {
+                let held = answer.and_then(|held| {
+                    if held.page.id != page.id {
+                        return Err(HeapFault::Corrupt {
+                            page: page.id,
+                            reason: "page port answered another page".into(),
+                        });
+                    }
+                    self.keep(&held);
+                    Ok(held)
+                });
+                fresh.insert(page.id, held);
+            }
+        }
+        pages
+            .iter()
+            .zip(cached)
+            .map(|(page, cached)| {
+                cached.map(Ok).unwrap_or_else(|| {
+                    fresh.get(&page.id).cloned().unwrap_or_else(|| {
+                        Err(HeapFault::Malformed(
+                            "page port answered the wrong count".into(),
+                        ))
+                    })
+                })
+            })
+            .collect()
     }
     pub fn seal(
         &self,
@@ -1450,7 +1517,7 @@ enum SourcePort<'a> {
     Borrowed(&'a mut dyn PageSource),
 }
 impl PageSource for SourcePort<'_> {
-    fn read(&mut self, pages: &[PageRef]) -> Result<Vec<PageAnswer>, HeapFault> {
+    fn read(&mut self, pages: &[PageRef]) -> Result<Vec<Result<PageAnswer, HeapFault>>, HeapFault> {
         match self {
             Self::Owned(source) => source.read(pages),
             Self::Borrowed(source) => source.read(pages),

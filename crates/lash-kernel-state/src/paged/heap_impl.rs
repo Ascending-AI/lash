@@ -10,7 +10,7 @@ use lash_kernel_doc::graph_tokens::{TokenCodec, TokenWriter, encode_body};
 use lash_kernel_doc::heap::*;
 use lash_kernel_doc::heap_values::{integer_from_digits, integral_float, key_digest, text_summary};
 use std::cell::RefCell;
-use std::ops::{ControlFlow, Range};
+use std::ops::Range;
 use std::rc::Rc;
 use std::sync::Arc;
 
@@ -96,7 +96,7 @@ pub fn heap_accounting(
             "a read answered the wrong count".into(),
         ));
     };
-    Ok(header_root(page, answer)?.accounting)
+    Ok(header_root(page, answer.as_ref().map_err(Clone::clone)?)?.accounting)
 }
 
 impl PagedHeap {
@@ -545,36 +545,23 @@ impl PagedHeap {
         })
     }
     pub(super) fn copy_text(&self, text: &TextRef) -> Result<Arc<str>, HeapFault> {
-        if let Payload::Resident(t) = &text.body {
-            return Ok(Arc::clone(t));
+        match &text.body {
+            Payload::Resident(text) => Ok(Arc::clone(text)),
+            Payload::Paged(page) => {
+                let bytes = payload::copy(&self.access, **page, text.summary, true)?;
+                String::from_utf8(bytes)
+                    .map(Arc::from)
+                    .map_err(|error| HeapFault::Malformed(error.to_string()))
+            }
         }
-        let mut bytes = Vec::new();
-        self.payload_visit(
-            &Value::Text(text.clone()),
-            0..text.summary.utf8_bytes,
-            &mut |c| {
-                if let Chunk::Text(t) = c {
-                    bytes.extend_from_slice(t.as_bytes());
-                }
-                ControlFlow::Continue(())
-            },
-        )?;
-        String::from_utf8(bytes)
-            .map(Arc::from)
-            .map_err(|e| HeapFault::Malformed(e.to_string()))
     }
     pub(super) fn copy_bytes(&self, bytes: &BytesRef) -> Result<Arc<[u8]>, HeapFault> {
-        if let Payload::Resident(b) = &bytes.body {
-            return Ok(Arc::clone(b));
-        }
-        let mut out = Vec::new();
-        self.payload_visit(&Value::Bytes(bytes.clone()), 0..bytes.len, &mut |c| {
-            if let Chunk::Bytes(b) = c {
-                out.extend_from_slice(b);
+        match &bytes.body {
+            Payload::Resident(bytes) => Ok(Arc::clone(bytes)),
+            Payload::Paged(page) => {
+                Ok(payload::copy(&self.access, **page, binary_summary(bytes.len), false)?.into())
             }
-            ControlFlow::Continue(())
-        })?;
-        Ok(out.into())
+        }
     }
     pub(super) fn copy_int(&self, int: &IntRef) -> Result<Integer, HeapFault> {
         match int {
@@ -583,13 +570,7 @@ impl PagedHeap {
                 summary, digits, ..
             } => {
                 let len = summary.bits.div_ceil(8);
-                let mut out = Vec::new();
-                self.payload_visit(&Value::Int(int.clone()), 0..len, &mut |chunk| {
-                    if let Chunk::Bytes(bytes) = chunk {
-                        out.extend_from_slice(bytes);
-                    }
-                    ControlFlow::Continue(())
-                })?;
+                let out = payload::copy(&self.access, **digits, binary_summary(len), false)?;
                 let int = integer_from_digits(summary.negative, &out);
                 if int.bits() != summary.bits || int.is_negative() != summary.negative {
                     return Err(HeapFault::Corrupt {

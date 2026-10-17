@@ -549,6 +549,7 @@ pub(crate) const GRANT_FLOOR: usize = 1024;
 /// whose grants come back with the run's next slice ([`PagePort::grant`]).
 /// Until then the heap holds it under no grant; the port answers for it
 /// with the grant the parent issued once it crossed.
+#[cfg_attr(test, derive(Clone))]
 pub(crate) struct WirePageSource {
     port: Rc<RefCell<Port>>,
 }
@@ -747,36 +748,50 @@ impl Port {
 
     /// Reads `missing` from the parent in as many exchanges as its replies
     /// take, each answer checked and held resident.
-    fn fetch(&mut self, mut missing: Vec<PageRef>) -> Result<Vec<PageAnswer>, HeapFault> {
+    fn fetch(&mut self, mut missing: Vec<PageRef>) -> Vec<Result<PageAnswer, HeapFault>> {
         let mut fetched = Vec::with_capacity(missing.len());
-        // The parent may answer a prefix that fits one frame; ask again for
-        // the rest.
         while !missing.is_empty() {
             self.traffic.pages_requested += missing.len() as u64;
             crate::perf_witness::pages_loaded(missing.len() as u64);
             let reply = self.exchange(PageRequest::Read {
                 pages: missing.iter().map(capability_of).collect(),
-            })?;
+            });
             let read = match reply {
-                PageReply::Read { pages } => pages,
-                PageReply::Refused(refusal) => return Err(refused(refusal, missing[0].id)),
-                PageReply::Sealed { .. } => return Err(breach("a read was answered as a seal")),
+                Ok(PageReply::Read { pages })
+                    if !pages.is_empty() && pages.len() <= missing.len() =>
+                {
+                    pages
+                }
+                Ok(PageReply::Refused(refusal)) => {
+                    fetched.extend(
+                        missing
+                            .iter()
+                            .map(|page| Err(refused(refusal.clone(), page.id))),
+                    );
+                    break;
+                }
+                other => {
+                    let fault = match other {
+                        Err(fault) => fault,
+                        _ => breach("a read reply answers no valid prefix of its request"),
+                    };
+                    fetched.extend(missing.iter().map(|_| Err(fault.clone())));
+                    break;
+                }
             };
-            if read.is_empty() || read.len() > missing.len() {
-                return Err(breach("a read reply answers no prefix of its request"));
-            }
             for (wanted, got) in missing.iter().zip(&read) {
-                if got.page.id != wanted.id.0 {
-                    return Err(HeapFault::Corrupt {
+                fetched.push(match got {
+                    Err(refusal) => Err(refused(refusal.clone(), wanted.id)),
+                    Ok(got) if got.page.id != wanted.id.0 => Err(HeapFault::Corrupt {
                         page: wanted.id,
                         reason: "the parent answered another page".to_owned(),
-                    });
-                }
-                fetched.push(self.accept(*wanted, got)?);
+                    }),
+                    Ok(got) => self.accept(*wanted, got),
+                });
             }
             missing.drain(..read.len());
         }
-        Ok(fetched)
+        fetched
     }
 
     /// Drops the grants no live link can need (FIG-6421). A checkpoint root
@@ -821,8 +836,8 @@ impl Port {
                 }
             }
             for batch in unread.chunks(READ_BATCH_PAGES) {
-                for answer in self.fetch(batch.to_vec())? {
-                    children.extend(answer.children);
+                for answer in self.fetch(batch.to_vec()) {
+                    children.extend(answer?.children);
                 }
             }
             level = children
@@ -989,7 +1004,7 @@ impl Port {
 }
 
 impl PageSource for WirePageSource {
-    fn read(&mut self, pages: &[PageRef]) -> Result<Vec<PageAnswer>, HeapFault> {
+    fn read(&mut self, pages: &[PageRef]) -> Result<Vec<Result<PageAnswer, HeapFault>>, HeapFault> {
         if pages.len() > READ_BATCH_PAGES {
             return Err(HeapFault::Exhausted {
                 resource: HostResource::ReadBatch,
@@ -998,33 +1013,30 @@ impl PageSource for WirePageSource {
         let port = &mut *self.port.borrow_mut();
         let mut missing: Vec<PageRef> = Vec::new();
         for page in pages {
-            if !missing.iter().any(|wanted| wanted.id == page.id)
+            let resolved = port.resolved(*page);
+            if !missing.contains(&resolved)
                 && !port.resident.pages.contains_key(&page.id)
                 && !port.ungranted(&page.id)
             {
-                missing.push(port.resolved(*page));
+                missing.push(resolved);
             }
         }
-        let fresh: HashMap<PageId, PageAnswer> = port
-            .fetch(missing)?
-            .into_iter()
-            .map(|answer| (answer.page.id, answer))
-            .collect();
-        pages
+        let fetched = port.fetch(missing.clone());
+        let fresh: HashMap<_, _> = missing.into_iter().zip(fetched).collect();
+        Ok(pages
             .iter()
             .map(|page| {
-                fresh
-                    .get(&page.id)
-                    .map(|answer| {
-                        let mut answer = answer.clone();
+                if let Some(answer) = fresh.get(&port.resolved(*page)) {
+                    return answer.clone().map(|mut answer| {
                         answer.page = *page;
                         answer
-                    })
-                    .or_else(|| port.unsent(page))
+                    });
+                }
+                port.unsent(page)
                     .or_else(|| port.resident.get(page))
                     .ok_or(HeapFault::Missing { page: page.id })
             })
-            .collect()
+            .collect())
     }
 
     fn seal(&mut self, page: PageBody) -> Result<PageRef, HeapFault> {

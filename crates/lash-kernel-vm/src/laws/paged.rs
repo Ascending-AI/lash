@@ -334,7 +334,7 @@ fn argument_freezing_preserves_a_page_ports_typed_failure() {
     use std::sync::Arc;
     struct Lost;
     impl PageSource for Lost {
-        fn read(&mut self, _: &[PageRef]) -> Result<Vec<PageAnswer>, HeapFault> {
+        fn read(&mut self, _: &[PageRef]) -> Result<Vec<Result<PageAnswer, HeapFault>>, HeapFault> {
             Err(HeapFault::LeaseLost)
         }
         fn seal(&mut self, _: PageBody) -> Result<PageRef, HeapFault> {
