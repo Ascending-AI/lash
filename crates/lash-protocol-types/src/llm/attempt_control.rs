@@ -4,7 +4,7 @@ use crate::sync::MutexExt as _;
 use std::sync::{Arc, Mutex};
 use std::task::{Poll, Waker};
 
-use super::types::{LlmResponse, LlmStreamEvent};
+use super::types::{LlmResponse, LlmStreamEvent, StreamBlockEvent};
 
 /// Why Lash asks an attempt to stop, or it ended without returning.
 #[derive(Clone, Copy, Debug, PartialEq, Eq, serde::Serialize, serde::Deserialize)]
@@ -26,6 +26,8 @@ struct State {
     waiters: Vec<Waker>,
     partial: Option<Box<LlmResponse>>,
     reported_usage: bool,
+    /// Output streamed, whether or not its content is retained in `partial`.
+    output_started: bool,
 }
 
 /// The live attempt's cancellation signal and response observed so far.
@@ -98,6 +100,10 @@ impl ProviderAttemptControl {
     pub fn observe(&self, event: &LlmStreamEvent) {
         let mut state = self.state();
         match event {
+            LlmStreamEvent::Block(StreamBlockEvent::Delta { text, .. }) => {
+                state.output_started |= !text.is_empty();
+            }
+            LlmStreamEvent::Block(_) | LlmStreamEvent::Part(_) => state.output_started = true,
             LlmStreamEvent::Usage(usage) => {
                 state.reported_usage = true;
                 state.partial.get_or_insert_with(Self::empty_partial).usage = usage.clone();
@@ -127,8 +133,13 @@ impl ProviderAttemptControl {
                     evidence.execution_evidence.clone(),
                 );
             }
-            _ => {}
+            LlmStreamEvent::AttemptReset | LlmStreamEvent::RetryStatus(_) => {}
         }
+    }
+
+    /// Whether the attempt streamed any output block or part.
+    pub fn output_started(&self) -> bool {
+        self.state().output_started
     }
 
     pub fn partial_response(&self) -> Option<Box<LlmResponse>> {

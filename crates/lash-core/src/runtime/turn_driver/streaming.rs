@@ -772,34 +772,29 @@ impl RuntimeTurnDriver<'_> {
         if let Err(error) = &result
             && call_record.is_none()
         {
-            completion_sideband.cancel(crate::provider::AttemptEndReason::StreamConsumerFailed);
+            let mut failure = lash_transport_failure::LlmTransportError::new(error.message.clone())
+                .with_kind(error.kind)
+                .with_terminal_reason(error.terminal_reason)
+                .with_retry_verdict(lash_transport_failure::TransportRetryVerdict::NotRetryable);
+            failure.code = error.code.clone();
+            failure.partial_response = error.partial_response.clone();
+            completion_sideband.fail_stream(failure.clone());
             let terminal = (&mut llm_task).await;
             llm_task_cancel.disarm();
             call_record = Some(match terminal {
                 Ok(Ok(completion)) => completion.call_record,
                 Ok(Err(failure)) => *failure.call_record,
-                Err(_) => {
-                    let mut failure =
-                        lash_transport_failure::LlmTransportError::new(error.message.clone())
-                            .with_kind(error.kind)
-                            .with_terminal_reason(error.terminal_reason)
-                            .with_retry_verdict(
-                                lash_transport_failure::TransportRetryVerdict::NotRetryable,
-                            );
-                    failure.code = error.code.clone();
-                    failure.partial_response = error.partial_response.clone();
-                    completion_sideband.terminal_call_record(
-                        call_id.clone(),
-                        crate::AttemptOutcome::Interrupted,
-                        &failure,
-                        true,
-                        observed_stream_protocol_position(
-                            text_streamed,
-                            &stream_accumulator,
-                            &stream_evidence,
-                        ),
-                    )
-                }
+                Err(_) => completion_sideband.terminal_call_record(
+                    call_id.clone(),
+                    crate::AttemptOutcome::Interrupted,
+                    &failure,
+                    true,
+                    observed_stream_protocol_position(
+                        text_streamed,
+                        &stream_accumulator,
+                        &stream_evidence,
+                    ),
+                ),
             });
         }
 

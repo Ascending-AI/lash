@@ -12,6 +12,8 @@ struct ProviderCompletionSidebandState {
     /// is installed.
     open_attempt: Option<lash_trace::TraceAttemptObservation>,
     terminal_delivery_timed_out: bool,
+    /// The stream consumer's failure, which stopped the live attempt.
+    consumer_failure: Option<LlmTransportError>,
 }
 
 type AttemptObserver = Arc<
@@ -136,12 +138,11 @@ impl ProviderCompletionSideband {
                 attempts: Vec::new(),
                 open_attempt: None,
                 terminal_delivery_timed_out: false,
+                consumer_failure: None,
             })),
         }
     }
 
-    /// Request cooperative cancellation; the provider task owns draining it
-    /// and delivering its terminal before it ends.
     /// Restore reservations whose observer died with the previous owner.
     /// They remain unknown even when this owner's attempt completes.
     #[must_use]
@@ -164,8 +165,23 @@ impl ProviderCompletionSideband {
         self
     }
 
+    /// Request cooperative cancellation; the provider task owns draining it
+    /// and delivering its terminal before it ends.
     pub fn cancel(&self, reason: super::super::traits::AttemptEndReason) {
         self.cancellation.cancel(reason);
+    }
+
+    /// Stop the live attempt because its stream consumer failed. An attempt
+    /// that does not return seals as interrupted by this failure.
+    pub fn fail_stream(&self, failure: LlmTransportError) {
+        self.with_state(|state| {
+            state.consumer_failure.get_or_insert(failure);
+        });
+        self.cancel(super::super::traits::AttemptEndReason::StreamConsumerFailed);
+    }
+
+    pub(super) fn consumer_failure(&self) -> Option<LlmTransportError> {
+        self.with_state(|state| state.consumer_failure.clone())
     }
 
     fn with_state<R>(&self, f: impl FnOnce(&mut ProviderCompletionSidebandState) -> R) -> R {

@@ -676,8 +676,9 @@ async fn host_input_ids_correlate_new_queued_and_steering_rows(tier: Tier) {
     world.shutdown().await;
 }
 
-/// ADR 0015/0033: the cancelled turn observes the sealed failed attempt
-/// followed by the aborted attempt, even when it cancels in retry backoff.
+/// ADR 0015/0033: the cancelled turn keeps the sealed failed attempt when it
+/// cancels in retry backoff. No second attempt was dispatched, so none is
+/// recorded (ADR 0127: attempts and their terminals are dispatched sends).
 #[tokio::test]
 async fn sqlite_memory_cancelled_model_keeps_sealed_attempts() {
     #[derive(Debug, Default)]
@@ -769,12 +770,9 @@ async fn sqlite_memory_cancelled_model_keeps_sealed_attempts() {
         let [call] = output.result.llm_calls.as_slice() else {
             panic!("one model call settles: {:?}", output.result.llm_calls);
         };
-        assert_eq!(
-            call.attempts.len(),
-            2,
-            "failed and cancelled attempts: {call:?}"
-        );
-        let failed = &call.attempts[0];
+        let [failed] = call.attempts.as_slice() else {
+            panic!("only the dispatched failed attempt: {call:?}");
+        };
         assert_eq!(failed.ordinal, 1);
         assert_eq!(failed.outcome, lash_core::AttemptOutcome::Failed);
         assert_eq!(
@@ -793,15 +791,6 @@ async fn sqlite_memory_cancelled_model_keeps_sealed_attempts() {
                 ..
             })
         ));
-        let cancelled = &call.attempts[1];
-        assert_eq!(cancelled.ordinal, 2);
-        assert_eq!(cancelled.outcome, lash_core::AttemptOutcome::Aborted);
-        assert_eq!(
-            cancelled.error.as_ref().unwrap().code,
-            Some(lash_core::FailureCode::lash(
-                lash_core::TurnFailureCode::Cancelled
-            ))
-        );
     })
     .await
     .expect("cancellation settles without releasing the retry clock");

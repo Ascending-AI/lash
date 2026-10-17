@@ -512,26 +512,42 @@ impl ProviderHandle {
             restored.reliability.chunk_timeout = route.chunk_timeout;
             self.components.provider.set_options(restored);
             let Some(attempt) = attempt else {
+                // The attempt keeps the cause that stopped it and how far
+                // its stream progressed, whatever content was retained.
                 let deadline = control.reason() == Some(AttemptEndReason::ModelDeadline);
+                let consumer_failure = (control.reason()
+                    == Some(AttemptEndReason::StreamConsumerFailed))
+                .then(|| sideband.consumer_failure())
+                .flatten();
+                let interrupted = consumer_failure.is_some();
                 let mut error = if deadline {
                     model_total_error(limit, None)
+                } else if let Some(failure) = consumer_failure {
+                    failure
                 } else {
                     LlmTransportError::new("provider attempt cancelled")
                         .with_terminal_reason(LlmTerminalReason::Cancelled)
                         .with_lash_code(TurnFailureCode::Cancelled)
                         .with_retry_verdict(TransportRetryVerdict::NotRetryable)
                 };
-                error.partial_response = control.partial_response();
+                if error.partial_response.is_none() {
+                    error.partial_response = control.partial_response();
+                }
+                error.output_started |= control.output_started();
+                let mut record = failure_attempt_record(
+                    attempt_ordinal,
+                    &error,
+                    true,
+                    failure_protocol_position(&error),
+                    deadline.then_some(RetryDecision::Declined(RetryDeclineCause::TimedOut {
+                        limit: lash_protocol_types::LimitCause::ExecutionTotal,
+                    })),
+                );
+                if interrupted {
+                    record.outcome = AttemptOutcome::Interrupted;
+                }
                 sideband.seal_attempt(
-                    failure_attempt_record(
-                        attempt_ordinal,
-                        &error,
-                        true,
-                        failure_protocol_position(&error),
-                        deadline.then_some(RetryDecision::Declined(RetryDeclineCause::TimedOut {
-                            limit: lash_protocol_types::LimitCause::ExecutionTotal,
-                        })),
-                    ),
+                    record,
                     error
                         .partial_response
                         .as_ref()
