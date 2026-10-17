@@ -34,14 +34,12 @@ pub(super) async fn turn_started_identity_targets_cancellation_from_pull_stream(
     let mut stream = handle.events();
 
     let first = stream.next().await.expect("turn start activity")?;
-    let TurnEvent::TurnStarted { turn_id } = first.event else {
+    let TurnEvent::TurnStarted { turn_id, run_id } = first.event else {
         panic!("first pull-stream activity must deliver turn identity");
     };
     assert_eq!(turn_id, expected_turn_id);
     let crate::CancelReceipt::Cancelled { receipt, .. } = session
-        .cancel(crate::CancelTarget::Run(
-            crate::RunId::parse((turn_id.clone()).as_str()).unwrap(),
-        ))
+        .cancel(crate::CancelTarget::Run(run_id))
         .request_id("turn-started-cancel-request")
         .origin("pull-stream-host")
         .reason("cancel from first activity")

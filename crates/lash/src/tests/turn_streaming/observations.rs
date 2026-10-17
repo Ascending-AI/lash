@@ -961,7 +961,8 @@ async fn session_observation_envelopes_scope_activity_and_commit_to_the_turn() -
     assert!(
         matches!(
             &first_activity.event,
-            TurnEvent::TurnStarted { turn_id } if turn_id == "observation-turn"
+            TurnEvent::TurnStarted { turn_id, run_id }
+                if turn_id == "observation-turn" && run_id.as_str() == "observation-turn"
         ),
         "replay must begin with the identity event, got {:?}",
         first_activity.event

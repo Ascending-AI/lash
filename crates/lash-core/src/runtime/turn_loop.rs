@@ -51,12 +51,14 @@ pub(in crate::runtime) fn emit_turn_started(
     observer: &TurnObserver,
     cursor: &mut crate::engine::ObservationCursor,
     turn_id: &TurnId,
+    run_id: &crate::RunId,
 ) {
     cursor.observe(
         &observer.for_turn(turn_id),
         crate::engine::ObservedEvent::Activity {
             correlation_id: None,
             event: TurnEvent::TurnStarted {
+                run_id: run_id.clone(),
                 turn_id: turn_id.clone(),
             },
         },

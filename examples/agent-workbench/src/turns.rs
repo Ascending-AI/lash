@@ -514,11 +514,12 @@ async fn watch_until_idle(
         else {
             continue;
         };
-        let lash::TurnEvent::TurnStarted { turn_id } = &activity.event else {
+        let lash::TurnEvent::TurnStarted { run_id, .. } = &activity.event else {
             continue;
         };
         idle_checks = 0;
-        let run = run_of_physical_turn(turn_id);
+        #[expect(clippy::expect_used, reason = "RunId wraps a validated TurnId")]
+        let run = TurnId::parse(run_id.as_str()).expect("a run carries a valid turn identity");
         if !follows.claim(session_id, &run) {
             continue;
         }
@@ -553,17 +554,6 @@ async fn session_is_idle(follows: &RunFollows, session: &lash::LashSession) -> b
     matches!(durable.pending_turn_inputs().await, Ok(inputs) if inputs.is_empty())
         && matches!(durable.queued_work().await, Ok(batches) if batches.is_empty())
         && matches!(durable.unfinished_run().await, Ok(None))
-}
-
-/// The run a physical turn belongs to: a run's later turns are
-/// `{run}:agent-frame:{n}`.
-fn run_of_physical_turn(turn_id: &TurnId) -> TurnId {
-    match turn_id.as_str().rsplit_once(":agent-frame:") {
-        Some((run, ordinal)) if ordinal.parse::<u64>().is_ok_and(|ordinal| ordinal > 0) => {
-            TurnId::parse(run).unwrap_or_else(|_| turn_id.clone())
-        }
-        _ => turn_id.clone(),
-    }
 }
 
 /// A followed run that did not settle: it parked, holding its work until an

@@ -1,6 +1,6 @@
-//! Physical-turn identity within a logical run: the run itself is physical
-//! turn 0, and every later physical turn (a frame switch's follow-on, a
-//! terminal-checkpoint follow-on) is `{run}:agent-frame:{n}`.
+//! Physical-turn addresses derived from a known logical run. The run itself
+//! is physical turn 0. This encoding has no inverse: host run ids may contain
+//! the same suffix, so admission records determine run membership.
 
 use crate::TurnId;
 
@@ -20,22 +20,6 @@ impl PhysicalTurn {
         } else {
             run.with_suffix(format_args!("{PHYSICAL_TURN_SEPARATOR}{physical_ordinal}"))
         }
-    }
-
-    /// The inverse of [`Self::derive_turn_id`]: the logical run's turn and
-    /// this physical turn's index within it.
-    pub fn split_turn_id(turn_id: &TurnId) -> (TurnId, u64) {
-        turn_id
-            .as_str()
-            .rsplit_once(PHYSICAL_TURN_SEPARATOR)
-            .and_then(|(run, index)| {
-                let parsed = index.parse::<u64>().ok()?;
-                if parsed == 0 || parsed.to_string() != index {
-                    return None;
-                }
-                Some((TurnId::parse(run).ok()?, parsed))
-            })
-            .unwrap_or_else(|| (turn_id.clone(), 0))
     }
 
     /// The physical ordinal of `turn` within `run`: the inverse of

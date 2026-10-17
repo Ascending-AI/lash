@@ -800,7 +800,7 @@ impl RunAdmissionRecord {
 }
 
 /// The turns a run executes, and its terminal write ends (FIG-3946): the
-/// run's own physical turns, and the turn each member of its admission was
+/// run's own turn, and the turn each member of its admission was
 /// accepted under (the member's source key). A member composed into this run
 /// never runs as a run of its own, so input addressed to its turn is
 /// addressed to this run: accepted while it runs (ADR 0101 §5.1), and
@@ -821,10 +821,9 @@ impl RunTurns {
         }
     }
 
-    /// Whether `turn` is one of the physical turns of a turn this run executes.
+    /// Whether the recorded run or one of its admitted members names `turn`.
     pub fn contains(&self, turn: &TurnId) -> bool {
-        let (logical, _) = super::PhysicalTurn::split_turn_id(turn);
-        logical == self.run || self.members.contains(logical.as_str())
+        turn == self.run || self.members.contains(turn.as_str())
     }
 }
 
@@ -971,6 +970,20 @@ impl crate::store::DurableRecord for RunAdmissionRecord {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    /// FIG-6589: legal host suffixes remain exact admission identities; a
+    /// spelling that looks derived is no evidence that a turn was admitted.
+    #[test]
+    fn run_turns_use_admitted_ids_without_interpreting_suffixes() {
+        let run = TurnId::from("job:agent-frame:1");
+        let member = TurnId::from("member:agent-frame:1");
+        let turns = RunTurns::new(&run, [member.to_string()]);
+        assert!(turns.contains(&run));
+        assert!(turns.contains(&member));
+        for unknown in ["job", "member", "job:agent-frame:1:agent-frame:1"] {
+            assert!(!turns.contains(&TurnId::from(unknown)));
+        }
+    }
 
     #[test]
     fn a_commit_id_names_only_its_runs_physical_turns() {

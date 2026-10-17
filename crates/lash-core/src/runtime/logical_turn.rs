@@ -1,6 +1,7 @@
 use super::*;
 use crate::ActorContext;
 use crate::TurnId;
+use lash_sansio::core_support::RunIdCoreSupport;
 
 /// The rows one turn executes, each admitted to the turn's run (FIG-3927):
 /// what the run's admission bound.
@@ -18,11 +19,16 @@ impl LashRuntime {
     pub(in crate::runtime) fn emit_physical_turn_start(
         observer: &TurnObserver,
         scoped_effect_controller: &ActorContext,
-        turn_id: &TurnId,
+        run: &TurnId,
     ) {
         let mut cursor =
-            super::turn_loop::turn_observation_cursor(scoped_effect_controller, turn_id, "start");
-        super::turn_loop::emit_turn_started(observer, &mut cursor, turn_id);
+            super::turn_loop::turn_observation_cursor(scoped_effect_controller, run, "start");
+        super::turn_loop::emit_turn_started(
+            observer,
+            &mut cursor,
+            run,
+            &crate::RunId::from_turn_id(run.clone()),
+        );
     }
 
     /// How this runtime's turns frame their stream deltas for the host.

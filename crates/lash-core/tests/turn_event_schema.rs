@@ -104,10 +104,12 @@ fn sample_events() -> Vec<(&'static str, TurnEvent, serde_json::Value)> {
         (
             "turn_started",
             TurnEvent::TurnStarted {
+                run_id: lash_core::RunId::fixture("run-1"),
                 turn_id: TurnId::from("turn-1"),
             },
             json!({
                 "type": "turn_started",
+                "run_id": "run-1",
                 "turn_id": "turn-1",
             }),
         ),

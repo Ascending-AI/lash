@@ -541,8 +541,8 @@ pub(crate) async fn run_admission_conn(
         .transpose()
 }
 
-/// The turns `run` executes ([`RunTurns`]), read on `conn`: its own physical
-/// turns and the turns its recorded admission's rows were accepted under.
+/// The turns `run` executes ([`RunTurns`]), read on `conn`: the run itself
+/// and the turns its recorded admission's rows were accepted under.
 pub(crate) async fn run_turns_conn(
     conn: &mut PgConnection,
     session_id: &SessionId,

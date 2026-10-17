@@ -1,6 +1,7 @@
 use super::*;
 use crate::session_model::SessionStreamEvent;
 use crate::{LlmUsage, SessionSnapshot, ToolCallRecord};
+use lash_sansio::RunId;
 use lash_sansio::sync::MutexExt;
 use std::collections::HashMap;
 use std::fmt;
@@ -216,14 +217,16 @@ impl TurnActivity {
 // justification: public turn events are transient stream DTOs kept inline for allocation-free emission and stable pattern matching.
 #[allow(clippy::large_enum_variant)]
 pub enum TurnEvent {
-    /// Announces the physical turn identity before any other activity from
-    /// that turn.
+    /// Announces the admitted logical run and physical turn identities before
+    /// any other activity from that turn.
     ///
     /// Hosts use this identity for exact cancellation and steering targets;
     /// they must not infer it from whichever incidental activity happens to
     /// arrive first. Session-observation envelopes also carry `turn_id`, but
     /// the payload keeps it available to turn-local and collected streams.
     TurnStarted {
+        /// The committed admission identity hosts use to follow the run.
+        run_id: RunId,
         turn_id: TurnId,
     },
     ModelRequestStarted {

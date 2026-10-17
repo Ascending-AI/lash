@@ -1683,6 +1683,96 @@ async fn a_send_under_an_unserved_profile_key_is_refused_before_acceptance() -> 
     Ok(())
 }
 
+/// FIG-6589: a session observer follows admitted runs, including a host id
+/// whose spelling also looks like a later physical turn.
+#[cfg(feature = "rlm")]
+#[tokio::test(flavor = "multi_thread", worker_threads = 4)]
+async fn session_start_discovers_exact_host_run_across_frame_switch() -> Result<()> {
+    let calls = Arc::new(AtomicUsize::new(0));
+    let core = explicit_ephemeral_facets(super::rlm_core_builder_over(
+        sqlite_memory_store_backend().await,
+    ))
+    .serve_test_llm_profile(
+        {
+            let calls = Arc::clone(&calls);
+            crate::testing::TestProvider::builder()
+                .kind("exact-host-run-observation")
+                .complete(move |_| {
+                    let call = calls.fetch_add(1, Ordering::SeqCst);
+                    async move {
+                        Ok(text_response(&typescript_block(if call == 0 {
+                            r#"await control.continue_as({ task: "finish in the next frame" });"#
+                        } else {
+                            r#"await control.finish("done");"#
+                        })))
+                    }
+                })
+                .build()
+                .into_handle()
+        },
+        mock_llm_profile_spec(),
+    )
+    .build(crate::testing::runtime_lease_owner())?;
+    let session = core
+        .session(crate::SessionId::fixture("exact-host-run-observation"))
+        .created()
+        .await
+        .open()
+        .await?;
+    let cursor = session.observe().snapshot().await?.cursor;
+    let mut observations = session.observe().subscribe_and_recover(cursor);
+    let host_run = crate::RunId::parse("job:agent-frame:1")?;
+    let sent = session
+        .send(TurnInput::text("switch frames"))
+        .id(crate::TurnId::fixture(host_run.as_str()))
+        .await?;
+    let switched = sent.output().await?;
+    let lash_core::facade_support::TurnOutcome::AgentFrameSwitch { frame_key, .. } =
+        &switched.result.outcome
+    else {
+        panic!(
+            "the first run switches frame: {:?}",
+            switched.result.outcome
+        );
+    };
+    let next_run = lash_core::runtime::durable::session_mail::frame_task_run(frame_key);
+    let expected = [host_run, crate::RunId::parse(next_run.as_str())?];
+    for expected_run in expected {
+        let (turn, discovered) = tokio::time::timeout(std::time::Duration::from_secs(20), async {
+            loop {
+                let item = observations.next().await.expect("session observation")?;
+                let crate::observe::SessionObservationStreamItem::Event(event) = item else {
+                    panic!("a fresh observer retains continuity");
+                };
+                let crate::observe::SessionObservationEventPayload::TurnActivity(activity) =
+                    &event.payload
+                else {
+                    continue;
+                };
+                if let crate::TurnEvent::TurnStarted { turn_id, .. } = &activity.event {
+                    // Read the public wire contract so this law also runs before
+                    // the identity field is introduced.
+                    let value = serde_json::to_value(&activity.event)?;
+                    let run = value["run_id"]
+                        .as_str()
+                        .expect("turn start names its admitted run");
+                    break Result::Ok((turn_id.clone(), crate::RunId::parse(run)?));
+                }
+            }
+        })
+        .await
+        .expect("each admitted run announces its start")?;
+        assert_eq!(discovered, expected_run);
+        assert_eq!(turn.as_str(), discovered.as_str());
+        let followed = session.run(discovered.clone()).outcome().await?;
+        assert_eq!(followed.run(), Some(&discovered));
+        assert_eq!(followed.status(), crate::TurnStatus::Answered);
+    }
+    assert_eq!(calls.load(Ordering::SeqCst), 2);
+    core.shutdown().await?;
+    Ok(())
+}
+
 async fn exact_host_root_settlement(host_id: &str) -> Result<()> {
     let fixture = fixture(1).await?;
     let session = fixture

@@ -666,14 +666,13 @@ fn turn_address_evidence_conn(
     session_id: &SessionId,
     turn_id: &lash_core_execution::TurnId,
 ) -> Result<lash_core_execution::store_backend_support::TurnAddressEvidence, StoreError> {
-    let run = lash_core_execution::store::PhysicalTurn::split_turn_id(turn_id).0;
     let ended: bool = tx
         .query_row(
             crate::turn_ingress::turn_ingress_sql()
                 .family
                 .turn_address_ended
                 .sql(),
-            params![session_id.as_str(), turn_id.as_str(), run.as_str()],
+            params![session_id.as_str(), turn_id.as_str()],
             |row| row.get(0),
         )
         .map_err(sqlite_error)?;
@@ -776,7 +775,7 @@ fn admit_run_spec_conn(
 /// The steering verdict over the run kinds no `source_key`-filed input
 /// starts (FIG-3877), read inside the admission transaction:
 ///
-/// * `turn_id` is a physical turn of the unfinished queued-headed run: it
+/// * `turn_id` names the unfinished queued-headed run: it
 ///   started from no input, so it runs the default spec.
 /// * Otherwise nothing running names `turn_id`: the steering input is a
 ///   next-turn run under its own spec.
@@ -791,7 +790,7 @@ fn check_unsourced_steering_run_spec_conn(
             unfinished.head,
             lash_core_execution::store::AdmittedHead::Batch(_)
         )
-        && lash_core_execution::store::PhysicalTurn::split_turn_id(turn_id).0 == unfinished.run
+        && unfinished.run == *turn_id
     {
         // A queued-headed run starts from no input, so it runs the default
         // spec.

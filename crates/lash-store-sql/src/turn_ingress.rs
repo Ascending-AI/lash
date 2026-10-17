@@ -27,16 +27,20 @@ crate::statements! {
     /// Statements over more than one of the family's tables, which both
     /// backends issue verbatim.
     pub struct TurnIngressStatements @ "turn_ingress" {
-        /// Whether turn `?2` of session `?1`, a physical turn of run `?3`,
-        /// has ended: its final commit is recorded, or its run has terminal
-        /// evidence. Read in the admitting transaction of input addressed to
-        /// it (ADR 0101 §5.1).
+        /// Whether turn `?2` of session `?1` has ended: its final commit is
+        /// recorded, or its admitted run has terminal evidence. The run is
+        /// named exactly or read from the input's recorded admission. Read in
+        /// the admitting transaction of input addressed to it (ADR 0101 §5.1).
         turn_address_ended = "SELECT EXISTS(
                 SELECT 1 FROM runtime_turn_commits
                 WHERE session_id = ?1 AND turn_id = ?2
              ) OR EXISTS(
                 SELECT 1 FROM session_runs
-                WHERE session_id = ?1 AND run = ?3 AND terminal_kind IS NOT NULL
+                WHERE session_id = ?1 AND terminal_kind IS NOT NULL
+                  AND (run = ?2 OR run IN (
+                      SELECT admitted_run FROM pending_turn_inputs
+                      WHERE session_id = ?1 AND source_key = ?2
+                  ))
              )";
 
         /// Whether run `?2` of session `?1` has terminal evidence. A
