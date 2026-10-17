@@ -24,11 +24,8 @@ fn nonnegative(kind: &'static str, field: &'static str, value: i64) -> Result<u6
 fn live(conn: &Connection, session_id: &SessionId) -> Result<(), StoreError> {
     lash_core_execution::store::validate_session_id(session_id)?;
     if conn
-        .query_row(
-            session_sql::session_sql().deleted_sqlite.exists.sql(),
-            params![session_id.as_str()],
-            |_| Ok(()),
-        )
+        .prepare_cached(session_sql::session_sql().deleted_sqlite.exists.sql())
+        .and_then(|mut statement| statement.query_row(params![session_id.as_str()], |_| Ok(())))
         .optional()
         .map_err(sqlite_error)?
         .is_some()
@@ -67,13 +64,10 @@ fn visible_header(
     session: &SessionId,
     node: &str,
 ) -> Result<Option<Header>, StoreError> {
-    conn.query_row(
-        session_sql::session_sql().graph_sqlite.visible_header.sql(),
-        params![node, session.as_str()],
-        header,
-    )
-    .optional()
-    .map_err(sqlite_error)
+    conn.prepare_cached(session_sql::session_sql().graph_sqlite.visible_header.sql())
+        .and_then(|mut statement| statement.query_row(params![node, session.as_str()], header))
+        .optional()
+        .map_err(sqlite_error)
 }
 fn missing_anchor(
     conn: &Connection,
@@ -101,20 +95,21 @@ pub(crate) fn head_leaf_path_node(
     conn: &Connection,
     session: &SessionId,
 ) -> Result<Option<PathNode>, StoreError> {
-    conn.query_row(
+    conn.prepare_cached(
         session_sql::session_sql()
             .graph_sqlite
             .select_head_leaf_path_node
             .sql(),
-        params![session.as_str()],
-        |row| {
+    )
+    .and_then(|mut statement| {
+        statement.query_row(params![session.as_str()], |row| {
             Ok((
                 row.get::<_, String>(0)?,
                 row.get::<_, String>(1)?,
                 row.get::<_, i64>(2)?,
             ))
-        },
-    )
+        })
+    })
     .optional()
     .map_err(sqlite_error)?
     .map(|(node_id, owner, generation)| {
@@ -129,13 +124,14 @@ pub(crate) fn head_leaf_path_node(
 
 fn owner_exit(conn: &Connection, owner: &SessionId) -> Result<OwnerExit, StoreError> {
     let row = conn
-        .query_row(
+        .prepare_cached(
             session_sql::session_sql()
                 .graph_sqlite
                 .select_owner_exit
                 .sql(),
-            params![owner.as_str()],
-            |row| {
+        )
+        .and_then(|mut statement| {
+            statement.query_row(params![owner.as_str()], |row| {
                 Ok((
                     row.get::<_, String>(0)?,
                     row.get::<_, i64>(1)?,
@@ -145,8 +141,8 @@ fn owner_exit(conn: &Connection, owner: &SessionId) -> Result<OwnerExit, StoreEr
                     row.get::<_, Option<i64>>(5)?,
                     row.get::<_, Option<i64>>(6)?,
                 ))
-            },
-        )
+            })
+        })
         .optional()
         .map_err(sqlite_error)?;
     let Some((
@@ -607,13 +603,14 @@ impl SessionHistoryStore for SqliteStore {
                 Ok((|| {
                     live(conn, &session)?;
                     let Some((leaf, candidate)) = conn
-                        .query_row(
+                        .prepare_cached(
                             session_sql::session_sql()
                                 .graph_sqlite
                                 .select_active_ancestor_candidate
                                 .sql(),
-                            params![session.as_str(), node.as_str()],
-                            |row| {
+                        )
+                        .and_then(|mut statement| {
+                            statement.query_row(params![session.as_str(), node.as_str()], |row| {
                                 Ok((
                                     (
                                         row.get::<_, String>(0)?,
@@ -622,8 +619,8 @@ impl SessionHistoryStore for SqliteStore {
                                     ),
                                     (row.get::<_, String>(3)?, row.get::<_, i64>(4)?),
                                 ))
-                            },
-                        )
+                            })
+                        })
                         .optional()
                         .map_err(sqlite_error)?
                     else {

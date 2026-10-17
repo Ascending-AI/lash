@@ -373,7 +373,10 @@ impl ObligationLedger for SqliteObligationLedger {
         let sql = self.sql();
         let count: i64 = self
             .conn
-            .call(move |conn| conn.query_row(sql.count_stalled.sql(), [], |row| row.get(0)))
+            .call(move |conn| {
+                conn.prepare_cached(sql.count_stalled.sql())
+                    .and_then(|mut statement| statement.query_row([], |row| row.get(0)))
+            })
             .await
             .map_err(sqlite_error)?;
         u64::try_from(count).map_err(|_| stored_data_corrupt("obligation", "a negative count"))
@@ -386,10 +389,12 @@ impl ObligationLedger for SqliteObligationLedger {
             .conn
             .call(move |conn| {
                 use rusqlite::OptionalExtension;
-                conn.query_row(sql.select_standing.sql(), rusqlite::params![id], |row| {
-                    Ok((row.get(0)?, row.get(1)?))
-                })
-                .optional()
+                conn.prepare_cached(sql.select_standing.sql())
+                    .and_then(|mut statement| {
+                        statement
+                            .query_row(rusqlite::params![id], |row| Ok((row.get(0)?, row.get(1)?)))
+                    })
+                    .optional()
             })
             .await
             .map_err(sqlite_error)?;
@@ -417,10 +422,9 @@ pub(crate) fn arm_cleanup_tx(
     let kind = cleanup.referrer().kind().as_str();
     let referrer_id = cleanup.referrer().canonical_id();
     let row: Option<(String, String, String, String, String)> = tx
-        .query_row(
-            CLEANUPS.select_by_referrer.sql(),
-            params![kind, referrer_id],
-            |row| {
+        .prepare_cached(CLEANUPS.select_by_referrer.sql())
+        .and_then(|mut statement| {
+            statement.query_row(params![kind, referrer_id], |row| {
                 Ok((
                     row.get(0)?,
                     row.get(1)?,
@@ -428,8 +432,8 @@ pub(crate) fn arm_cleanup_tx(
                     row.get(3)?,
                     row.get(4)?,
                 ))
-            },
-        )
+            })
+        })
         .optional()
         .map_err(sqlite_error)?;
     let existing = row
@@ -653,14 +657,17 @@ impl ArtifactCleanupLedger for SqliteArtifactCleanupLedger {
             .ledger
             .conn
             .call(move |conn| {
-                conn.query_row(CLEANUPS.select_by_id.sql(), rusqlite::params![id], |row| {
-                    Ok((
-                        row.get::<_, String>(2)?,
-                        row.get::<_, String>(3)?,
-                        row.get::<_, String>(4)?,
-                    ))
-                })
-                .optional()
+                conn.prepare_cached(CLEANUPS.select_by_id.sql())
+                    .and_then(|mut statement| {
+                        statement.query_row(rusqlite::params![id], |row| {
+                            Ok((
+                                row.get::<_, String>(2)?,
+                                row.get::<_, String>(3)?,
+                                row.get::<_, String>(4)?,
+                            ))
+                        })
+                    })
+                    .optional()
             })
             .await
             .map_err(sqlite_error)?;

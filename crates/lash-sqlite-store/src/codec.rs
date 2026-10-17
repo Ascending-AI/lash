@@ -214,10 +214,9 @@ pub(crate) fn try_load_session_head_meta_from_conn(
     configs: Option<ConfigRead<'_>>,
 ) -> Result<Option<SessionHeadMeta>, StoreError> {
     let row = conn
-        .query_row(
-            crate::session_sql::session_sql().head.select_meta.sql(),
-            params![session_id.as_str()],
-            |row| {
+        .prepare_cached(crate::session_sql::session_sql().head.select_meta.sql())
+        .and_then(|mut statement| {
+            statement.query_row(params![session_id.as_str()], |row| {
                 Ok((
                     row.get::<_, Option<String>>(0)?,
                     row.get::<_, i64>(1)?,
@@ -225,8 +224,8 @@ pub(crate) fn try_load_session_head_meta_from_conn(
                     row.get::<_, Option<String>>(3)?,
                     row.get::<_, Option<String>>(4)?,
                 ))
-            },
-        )
+            })
+        })
         .optional()
         .map_err(sqlite_error)?;
     let Some((head_json, head_revision, leaf_node_id, checkpoint_ref, current_frame_node_id)) = row

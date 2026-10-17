@@ -113,14 +113,18 @@ pub(crate) fn load_pending_turn_input_by_id_conn(
     input_id: &str,
 ) -> Result<Option<lash_core_execution::PendingTurnInput>, StoreError> {
     let row = conn
-        .query_row(
+        .prepare_cached(
             crate::turn_ingress::turn_ingress_sql()
                 .pending_inputs
                 .select_by_id
                 .sql(),
-            params![session_id.as_str(), input_id],
-            pending_turn_input_row_from_sql,
         )
+        .and_then(|mut statement| {
+            statement.query_row(
+                params![session_id.as_str(), input_id],
+                pending_turn_input_row_from_sql,
+            )
+        })
         .optional()
         .map_err(sqlite_error)?;
     row.map(pending_turn_input_from_row).transpose()
@@ -134,19 +138,23 @@ pub(crate) fn load_pending_turn_input_row_by_target_conn(
     let sql = crate::turn_ingress::turn_ingress_sql();
     match target {
         lash_core_execution::PendingTurnInputCancelTarget::InputId(input_id) => conn
-            .query_row(
-                sql.pending_inputs.select_by_id.sql(),
-                params![session_id.as_str(), input_id.as_str()],
-                pending_turn_input_row_from_sql,
-            )
+            .prepare_cached(sql.pending_inputs.select_by_id.sql())
+            .and_then(|mut statement| {
+                statement.query_row(
+                    params![session_id.as_str(), input_id.as_str()],
+                    pending_turn_input_row_from_sql,
+                )
+            })
             .optional()
             .map_err(sqlite_error),
         lash_core_execution::PendingTurnInputCancelTarget::SourceKey(source_key) => conn
-            .query_row(
-                sql.pending_inputs.select_by_source_key.sql(),
-                params![session_id.as_str(), source_key],
-                pending_turn_input_row_from_sql,
-            )
+            .prepare_cached(sql.pending_inputs.select_by_source_key.sql())
+            .and_then(|mut statement| {
+                statement.query_row(
+                    params![session_id.as_str(), source_key],
+                    pending_turn_input_row_from_sql,
+                )
+            })
             .optional()
             .map_err(sqlite_error),
     }

@@ -145,18 +145,17 @@ pub(crate) fn load_recorded_lineage(
     session_id: &SessionId,
 ) -> Result<Option<lash_core_execution::SessionLineage>, StoreError> {
     let row = conn
-        .query_row(
-            session_sql().meta.select_lineage.sql(),
-            params![session_id.as_str()],
-            |row| {
+        .prepare_cached(session_sql().meta.select_lineage.sql())
+        .and_then(|mut statement| {
+            statement.query_row(params![session_id.as_str()], |row| {
                 Ok((
                     row.get::<_, String>(0)?,
                     row.get::<_, Option<String>>(1)?,
                     row.get::<_, Option<String>>(2)?,
                     row.get::<_, Option<String>>(3)?,
                 ))
-            },
-        )
+            })
+        })
         .optional()
         .map_err(sqlite_error)?;
     row.map(
@@ -191,7 +190,7 @@ pub(crate) fn load_session_meta_in_tx(
         session_id.to_string()
     } else {
         let mut stmt = conn
-            .prepare(session_sql().meta_sqlite.select_sole_session_id.sql())
+            .prepare_cached(session_sql().meta_sqlite.select_sole_session_id.sql())
             .map_err(sqlite_error)?;
         let session_ids = stmt
             .query_map([], |row| row.get::<_, String>(0))
@@ -210,18 +209,17 @@ pub(crate) fn load_session_meta_in_tx(
         session_id
     };
     let mut stored = conn
-        .query_row(
-            session_sql().meta_sqlite.select_relation.sql(),
-            params![session_id],
-            stored_relation_from_row,
-        )
+        .prepare_cached(session_sql().meta_sqlite.select_relation.sql())
+        .and_then(|mut statement| {
+            statement.query_row(params![session_id], stored_relation_from_row)
+        })
         .optional()
         .map_err(sqlite_error)?;
     let Some(mut stored) = stored.take() else {
         return Ok(None);
     };
     let mut stmt = conn
-        .prepare(session_sql().observer_intents.select_for_session.sql())
+        .prepare_cached(session_sql().observer_intents.select_for_session.sql())
         .map_err(sqlite_error)?;
     let observer_rows = stmt
         .query_map(params![stored.session_id.as_str()], |row| {
@@ -250,15 +248,14 @@ pub(crate) fn load_session_meta_in_tx(
     let session_id = stored.session_id.clone();
     let mut meta = SessionMetaCodec::decode(SESSION_META_CODEC, stored)?;
     meta.owning_process_id = conn
-        .query_row(
-            session_sql().meta.select_owning_process.sql(),
-            params![session_id.as_str()],
-            |row| {
+        .prepare_cached(session_sql().meta.select_owning_process.sql())
+        .and_then(|mut statement| {
+            statement.query_row(params![session_id.as_str()], |row| {
                 row.get::<_, Option<String>>(0)?
                     .map(|value| crate::sql_process_id(0, value))
                     .transpose()
-            },
-        )
+            })
+        })
         .map_err(sqlite_error)?;
     Ok(Some(meta))
 }
@@ -275,11 +272,12 @@ pub(crate) fn retain_admission_base_conn(
     checkpoint_ref: Option<&lash_core_execution::store::BlobRef>,
 ) -> Result<(), StoreError> {
     let replaced = conn
-        .query_row(
-            session_sql().meta.select_admission_base.sql(),
-            rusqlite::params![session_id.as_str()],
-            |row| row.get::<_, Option<String>>(0),
-        )
+        .prepare_cached(session_sql().meta.select_admission_base.sql())
+        .and_then(|mut statement| {
+            statement.query_row(rusqlite::params![session_id.as_str()], |row| {
+                row.get::<_, Option<String>>(0)
+            })
+        })
         .optional()
         .map_err(sqlite_error)?
         .flatten()

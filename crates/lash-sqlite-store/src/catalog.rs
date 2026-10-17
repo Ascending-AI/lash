@@ -95,14 +95,15 @@ impl lash_core_execution::SessionCatalogStore for SqliteStore {
         self.read_connection()
             .read(move |conn| {
                 let deleted = conn
-                    .query_row(
+                    .prepare_cached(
                         crate::session_sql::session_sql()
                             .deleted_sqlite
                             .exists
                             .sql(),
-                        params![session_id.as_str()],
-                        |_| Ok(()),
                     )
+                    .and_then(|mut statement| {
+                        statement.query_row(params![session_id.as_str()], |_| Ok(()))
+                    })
                     .optional()?
                     .is_some();
                 if deleted {
@@ -213,14 +214,18 @@ impl lash_core_execution::DeploymentStore for SqliteStore {
         let frame = frame.clone();
         self.read_connection()
             .read(move |conn| {
-                conn.query_row(
+                conn.prepare_cached(
                     crate::session_sql::session_sql()
                         .graph_sqlite
                         .artifact_frame_is_retained
                         .sql(),
-                    params![frame.session_id().as_str(), frame.frame_node_id().as_str()],
-                    |row| row.get(0),
                 )
+                .and_then(|mut statement| {
+                    statement.query_row(
+                        params![frame.session_id().as_str(), frame.frame_node_id().as_str()],
+                        |row| row.get(0),
+                    )
+                })
             })
             .await
             .map_err(sqlite_error)
@@ -244,14 +249,15 @@ impl lash_core_execution::DeploymentStore for SqliteStore {
         let conn = self.read_connection();
         let (in_flight, held_by_stalled_close): (i64, i64) = conn
             .read(|conn| {
-                conn.query_row(
+                conn.prepare_cached(
                     crate::turn_ingress::turn_ingress_sql()
                         .family
                         .count_unsettled_turns
                         .sql(),
-                    [],
-                    |row| Ok((row.get(0)?, row.get(1)?)),
                 )
+                .and_then(|mut statement| {
+                    statement.query_row([], |row| Ok((row.get(0)?, row.get(1)?)))
+                })
             })
             .await
             .map_err(sqlite_error)?;

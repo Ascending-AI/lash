@@ -176,11 +176,12 @@ pub(crate) fn acquire_process_env_tx(
         return Err(ArtifactStoreError::ReferrerEnded { referrer }.into());
     }
     let stored: Option<String> = tx
-        .query_row(
-            artifact_sql().refs.select_blob_ref.sql(),
-            params![PROCESS_ENV_NAMESPACE, env.as_str()],
-            |row| row.get(0),
-        )
+        .prepare_cached(artifact_sql().refs.select_blob_ref.sql())
+        .and_then(|mut statement| {
+            statement.query_row(params![PROCESS_ENV_NAMESPACE, env.as_str()], |row| {
+                row.get(0)
+            })
+        })
         .optional()
         .map_err(artifact_sqlite_error)?;
     if stored.is_none() {
@@ -207,11 +208,13 @@ pub(crate) fn artifact_fenced_tx(
     tx: &rusqlite::Connection,
     referrer: &ArtifactReferrer,
 ) -> rusqlite::Result<bool> {
-    tx.query_row(
-        artifact_sql().fences.select_is_fenced.sql(),
-        params![referrer.kind().as_str(), referrer.canonical_id()],
-        |row| row.get(0),
-    )
+    tx.prepare_cached(artifact_sql().fences.select_is_fenced.sql())
+        .and_then(|mut statement| {
+            statement.query_row(
+                params![referrer.kind().as_str(), referrer.canonical_id()],
+                |row| row.get(0),
+            )
+        })
 }
 
 pub(crate) fn fence_artifact_referrer_tx(
@@ -276,11 +279,11 @@ impl SqliteStore {
                     artifact_sql().refs.insert_pointer.sql(),
                     params![namespace, artifact_ref, blob_ref.as_str()],
                 )?;
-                let stored_blob_ref: String = tx.query_row(
-                    artifact_sql().refs.select_blob_ref.sql(),
-                    params![namespace, artifact_ref],
-                    |row| row.get(0),
-                )?;
+                let stored_blob_ref: String = tx
+                    .prepare_cached(artifact_sql().refs.select_blob_ref.sql())
+                    .and_then(|mut statement| {
+                        statement.query_row(params![namespace, artifact_ref], |row| row.get(0))
+                    })?;
                 if stored_blob_ref != blob_ref.as_str() {
                     return Err(artifact_failure(ArtifactStoreError::Immutable {
                         artifact_ref,
@@ -319,9 +322,8 @@ impl SqliteStore {
             if artifact_fenced_tx(tx, referrer)? {
                 return Err(artifact_failure(ArtifactStoreError::ReferrerEnded { referrer: referrer.clone() }));
             }
-            let exists: bool = tx.query_row(
-                "SELECT EXISTS (SELECT 1 FROM artifact_refs WHERE namespace = ?1 AND artifact_ref = ?2)",
-                params![namespace, artifact_ref], |row| row.get(0))?;
+            let exists: bool = tx.prepare_cached("SELECT EXISTS (SELECT 1 FROM artifact_refs WHERE namespace = ?1 AND artifact_ref = ?2)").and_then(|mut statement| statement.query_row(
+                params![namespace, artifact_ref], |row| row.get(0)))?;
             if !exists {
                 return Err(artifact_failure(ArtifactStoreError::ArtifactMissing { artifact_ref }));
             }
@@ -415,9 +417,8 @@ impl SqliteStore {
                 continue;
             }
             let artifact_ref = &carry.artifact.artifact_ref;
-            let exists: bool = tx.query_row(
-                    "SELECT EXISTS (SELECT 1 FROM artifact_refs WHERE namespace = ?1 AND artifact_ref = ?2)",
-                    params![namespace, artifact_ref], |row| row.get(0))?;
+            let exists: bool = tx.prepare_cached("SELECT EXISTS (SELECT 1 FROM artifact_refs WHERE namespace = ?1 AND artifact_ref = ?2)").and_then(|mut statement| statement.query_row(
+                    params![namespace, artifact_ref], |row| row.get(0)))?;
             if !exists {
                 return Err(artifact_failure(ArtifactStoreError::CarryArtifactMissing {
                     artifact_ref: artifact_ref.clone(),
@@ -499,18 +500,16 @@ impl SqliteStore {
                     }));
                 }
                 let stored = |namespace: &str, artifact_ref: &str| -> rusqlite::Result<bool> {
-                    tx.query_row(
-                        "SELECT EXISTS (SELECT 1 FROM artifact_refs WHERE namespace = ?1 AND artifact_ref = ?2)",
+                    tx.prepare_cached("SELECT EXISTS (SELECT 1 FROM artifact_refs WHERE namespace = ?1 AND artifact_ref = ?2)").and_then(|mut statement| statement.query_row(
                         params![namespace, artifact_ref],
                         |row| row.get(0),
-                    )
+                    ))
                 };
                 let manifest_json = serde_json::to_string(&manifest)
                     .map_err(|error| rusqlite::Error::ToSqlConversionFailure(Box::new(error)))?;
-                let missing: Option<String> = tx.query_row(
-                    artifact_sql().refs.select_missing_manifest.sql(),
+                let missing: Option<String> = tx.prepare_cached(artifact_sql().refs.select_missing_manifest.sql()).and_then(|mut statement| statement.query_row(
                     params![manifest_json], |row| row.get(0),
-                ).optional()?;
+                )).optional()?;
                 if let Some(artifact_ref) = missing {
                     return Err(artifact_failure(ArtifactStoreError::ArtifactMissing {
                         artifact_ref,
@@ -530,11 +529,10 @@ impl SqliteStore {
                             artifact_sql().refs.insert_pointer.sql(),
                             params![PROCESS_DEFINITION_NAMESPACE, id, blob_ref.as_str()],
                         )?;
-                        let stored_blob_ref: String = tx.query_row(
-                            artifact_sql().refs.select_blob_ref.sql(),
+                        let stored_blob_ref: String = tx.prepare_cached(artifact_sql().refs.select_blob_ref.sql()).and_then(|mut statement| statement.query_row(
                             params![PROCESS_DEFINITION_NAMESPACE, id],
                             |row| row.get(0),
-                        )?;
+                        ))?;
                         if stored_blob_ref != blob_ref.as_str() {
                             return Err(artifact_failure(ArtifactStoreError::Immutable {
                                 artifact_ref: id,
@@ -580,11 +578,12 @@ impl SqliteStore {
             .conn
             .call(move |conn| {
                 let stored: Option<(String, Option<i64>)> = conn
-                    .query_row(
-                        artifact_sql().refs.select_body_ref.sql(),
-                        params![namespace, artifact_ref],
-                        |row| Ok((row.get(0)?, row.get(1)?)),
-                    )
+                    .prepare_cached(artifact_sql().refs.select_body_ref.sql())
+                    .and_then(|mut statement| {
+                        statement.query_row(params![namespace, artifact_ref], |row| {
+                            Ok((row.get(0)?, row.get(1)?))
+                        })
+                    })
                     .optional()?;
                 let Some((blob_ref, encoding)) = stored else {
                     return Ok(None);

@@ -364,7 +364,7 @@ impl SqliteStore {
                 StoreError::Backend(format!("failed to encode checkpoint ref batch: {error}"))
             })?;
             let mut statement = conn
-                .prepare(artifact_sql().blobs_sqlite.select_existing_hashes.sql())
+                .prepare_cached(artifact_sql().blobs_sqlite.select_existing_hashes.sql())
                 .map_err(sqlite_error)?;
             let rows = statement
                 .query_map(params![encoded], |row| row.get::<_, String>(0))
@@ -394,7 +394,7 @@ impl SqliteStore {
                 StoreError::Backend(format!("failed to encode checkpoint ref batch: {error}"))
             })?;
             let mut statement = conn
-                .prepare(artifact_sql().blobs_sqlite.select_bodies_by_hash.sql())
+                .prepare_cached(artifact_sql().blobs_sqlite.select_bodies_by_hash.sql())
                 .map_err(sqlite_error)?;
             let rows = statement
                 .query_map(params![encoded], |row| {
@@ -415,11 +415,10 @@ impl SqliteStore {
         blob_ref: &BlobRef,
     ) -> Result<Option<Vec<u8>>, StoreError> {
         let bytes: Option<Vec<u8>> = conn
-            .query_row(
-                artifact_sql().blobs.select_content.sql(),
-                params![blob_ref.as_str()],
-                |row| row.get(0),
-            )
+            .prepare_cached(artifact_sql().blobs.select_content.sql())
+            .and_then(|mut statement| {
+                statement.query_row(params![blob_ref.as_str()], |row| row.get(0))
+            })
             .optional()
             .map_err(sqlite_error)?;
         bytes.map(|bytes| decode_artifact_blob(&bytes)).transpose()
@@ -437,11 +436,10 @@ impl SqliteStore {
             // row is an absent checkpoint, and a blob stored there is no
             // manifest.
             let stored = conn
-                .query_row(
-                    artifact_sql().blobs.select_content.sql(),
-                    params![blob_ref.as_str()],
-                    |_| Ok(()),
-                )
+                .prepare_cached(artifact_sql().blobs.select_content.sql())
+                .and_then(|mut statement| {
+                    statement.query_row(params![blob_ref.as_str()], |_| Ok(()))
+                })
                 .optional()
                 .map_err(sqlite_error)?;
             return match stored {

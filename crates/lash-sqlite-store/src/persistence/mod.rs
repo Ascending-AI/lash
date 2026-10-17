@@ -31,11 +31,12 @@ fn read_session_state_version_conn(
     fleet: lash_core_execution::FleetFormat,
 ) -> Result<u32, StoreError> {
     let marker = conn
-        .query_row(
-            session_sql().meta.select_state_version.sql(),
-            params![session_id.as_str()],
-            |row| row.get::<_, Option<i64>>(0),
-        )
+        .prepare_cached(session_sql().meta.select_state_version.sql())
+        .and_then(|mut statement| {
+            statement.query_row(params![session_id.as_str()], |row| {
+                row.get::<_, Option<i64>>(0)
+            })
+        })
         .optional()
         .map_err(sqlite_error)?;
     let Some(marker) = marker else {
@@ -60,11 +61,10 @@ pub(crate) fn ensure_session_not_closing_conn(
     session_id: &SessionId,
 ) -> Result<(), StoreError> {
     let closing: Option<i64> = conn
-        .query_row(
-            session_sql().meta.select_closing_intent.sql(),
-            params![session_id.as_str()],
-            |row| row.get(0),
-        )
+        .prepare_cached(session_sql().meta.select_closing_intent.sql())
+        .and_then(|mut statement| {
+            statement.query_row(params![session_id.as_str()], |row| row.get(0))
+        })
         .optional()
         .map_err(sqlite_error)?
         .flatten();
@@ -86,11 +86,8 @@ pub(crate) fn ensure_session_not_deleted_conn(
     session_id: &SessionId,
 ) -> Result<(), StoreError> {
     let deleted = conn
-        .query_row(
-            session_sql().deleted_sqlite.exists.sql(),
-            params![session_id.as_str()],
-            |_| Ok(()),
-        )
+        .prepare_cached(session_sql().deleted_sqlite.exists.sql())
+        .and_then(|mut statement| statement.query_row(params![session_id.as_str()], |_| Ok(())))
         .optional()
         .map_err(sqlite_error)?
         .is_some();
@@ -115,11 +112,10 @@ fn retirable_ancestry_node_conn(
     node_id: &str,
 ) -> Result<Option<RetirableAncestryNode>, StoreError> {
     let parent = conn
-        .query_row(
-            session_sql().graph_sqlite.select_retirable_parent.sql(),
-            params![node_id],
-            |row| row.get::<_, Option<String>>(0),
-        )
+        .prepare_cached(session_sql().graph_sqlite.select_retirable_parent.sql())
+        .and_then(|mut statement| {
+            statement.query_row(params![node_id], |row| row.get::<_, Option<String>>(0))
+        })
         .optional()
         .map_err(sqlite_error)?;
     Ok(parent.map(|parent_node_id| RetirableAncestryNode {
@@ -163,13 +159,10 @@ pub(crate) fn nearest_frame_node_id_conn(
     conn: &Connection,
     leaf_node_id: &str,
 ) -> Result<Option<String>, StoreError> {
-    conn.query_row(
-        session_sql().graph_sqlite.select_frame_node_id.sql(),
-        params![leaf_node_id],
-        |row| row.get(0),
-    )
-    .optional()
-    .map_err(sqlite_error)
+    conn.prepare_cached(session_sql().graph_sqlite.select_frame_node_id.sql())
+        .and_then(|mut statement| statement.query_row(params![leaf_node_id], |row| row.get(0)))
+        .optional()
+        .map_err(sqlite_error)
 }
 
 mod admission;

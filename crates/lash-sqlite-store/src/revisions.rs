@@ -38,11 +38,8 @@ pub(crate) fn record_revision_conn(
     )?;
     let config_ref = root.blob_ref();
     let held: Option<String> = tx
-        .query_row(
-            session_sql().revisions.select_config_ref.sql(),
-            [session_id.as_str()],
-            |row| row.get(0),
-        )
+        .prepare_cached(session_sql().revisions.select_config_ref.sql())
+        .and_then(|mut statement| statement.query_row([session_id.as_str()], |row| row.get(0)))
         .optional()
         .map_err(sqlite_error)?;
     if held.as_deref() != Some(config_ref.as_str()) {
@@ -172,15 +169,16 @@ pub(crate) fn retention_conn(
     conn: &Connection,
     session_id: &SessionId,
 ) -> Result<Option<Retention>, StoreError> {
-    conn.query_row(
-        session_sql().meta.select_retention.sql(),
-        params![session_id.as_str()],
-        |row| Ok((row.get::<_, String>(0)?, row.get::<_, Option<i64>>(1)?)),
-    )
-    .optional()
-    .map_err(sqlite_error)?
-    .map(|(kind, last_turns)| Retention::from_stored(&kind, last_turns))
-    .transpose()
+    conn.prepare_cached(session_sql().meta.select_retention.sql())
+        .and_then(|mut statement| {
+            statement.query_row(params![session_id.as_str()], |row| {
+                Ok((row.get::<_, String>(0)?, row.get::<_, Option<i64>>(1)?))
+            })
+        })
+        .optional()
+        .map_err(sqlite_error)?
+        .map(|(kind, last_turns)| Retention::from_stored(&kind, last_turns))
+        .transpose()
 }
 
 /// Refuse a session the catalog does not hold: a deletion tombstone answers
@@ -189,11 +187,8 @@ pub(crate) fn retention_conn(
 fn require_session_conn(conn: &Connection, session_id: &SessionId) -> Result<(), StoreError> {
     persistence::ensure_session_not_deleted_conn(conn, session_id)?;
     let exists = conn
-        .query_row(
-            session_sql().meta_sqlite.exists_materialized.sql(),
-            params![session_id.as_str()],
-            |_| Ok(()),
-        )
+        .prepare_cached(session_sql().meta_sqlite.exists_materialized.sql())
+        .and_then(|mut statement| statement.query_row(params![session_id.as_str()], |_| Ok(())))
         .optional()
         .map_err(sqlite_error)?
         .is_some();
@@ -209,11 +204,10 @@ fn require_session_conn(conn: &Connection, session_id: &SessionId) -> Result<(),
 /// The published pointer of `session_id`: its head.
 fn head_revision_conn(conn: &Connection, session_id: &SessionId) -> Result<u64, StoreError> {
     let head = conn
-        .query_row(
-            session_sql().revisions.select_head_revision.sql(),
-            params![session_id.as_str()],
-            |row| row.get::<_, i64>(0),
-        )
+        .prepare_cached(session_sql().revisions.select_head_revision.sql())
+        .and_then(|mut statement| {
+            statement.query_row(params![session_id.as_str()], |row| row.get::<_, i64>(0))
+        })
         .optional()
         .map_err(sqlite_error)?
         .unwrap_or(0);
@@ -241,14 +235,17 @@ fn resolve_conn(
                 return of_run(&run);
             }
             let state: Option<String> = conn
-                .query_row(
+                .prepare_cached(
                     crate::turn_ingress::turn_ingress_sql()
                         .pending_inputs
                         .select_state_by_id
                         .sql(),
-                    params![session_id.as_str(), input.as_str()],
-                    |row| row.get(0),
                 )
+                .and_then(|mut statement| {
+                    statement.query_row(params![session_id.as_str(), input.as_str()], |row| {
+                        row.get(0)
+                    })
+                })
                 .optional()
                 .map_err(sqlite_error)?;
             TargetResolution::of_unbound_input(state.as_deref())
@@ -295,20 +292,19 @@ fn revision_row_conn(
     let Ok(sql_revision) = i64::try_from(head_revision) else {
         return Ok(None);
     };
-    conn.query_row(
-        session_sql().revisions.select.sql(),
-        params![session_id.as_str(), sql_revision],
-        |row| {
-            Ok(RevisionRow {
-                head_revision,
-                leaf_node_id: row.get(0)?,
-                checkpoint_ref: row.get(1)?,
-                config_ref: row.get(2)?,
+    conn.prepare_cached(session_sql().revisions.select.sql())
+        .and_then(|mut statement| {
+            statement.query_row(params![session_id.as_str(), sql_revision], |row| {
+                Ok(RevisionRow {
+                    head_revision,
+                    leaf_node_id: row.get(0)?,
+                    checkpoint_ref: row.get(1)?,
+                    config_ref: row.get(2)?,
+                })
             })
-        },
-    )
-    .optional()
-    .map_err(sqlite_error)
+        })
+        .optional()
+        .map_err(sqlite_error)
 }
 
 /// Every pin of `session_id` with the revision it resolves to now, if any.

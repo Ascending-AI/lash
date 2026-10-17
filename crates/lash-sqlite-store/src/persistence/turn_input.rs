@@ -150,7 +150,7 @@ impl lash_core_execution::TurnInputStore for SqliteStore {
                             statements.list_undelivered.sql(),
                             statements.list_accepted.sql(),
                         ] {
-                            let mut stmt = tx.prepare(sql).map_err(sqlite_error)?;
+                            let mut stmt = tx.prepare_cached(sql).map_err(sqlite_error)?;
                             let listed = stmt
                                 .query_map(
                                     params![session_id.as_str()],
@@ -225,7 +225,7 @@ impl lash_core_execution::TurnInputStore for SqliteStore {
             .call(move |conn| {
                 let outcome = (|| {
                     let mut stmt = conn
-                        .prepare(
+                        .prepare_cached(
                             crate::session_sql::session_sql()
                                 .turn_commits
                                 .select_all_for_session
@@ -342,7 +342,7 @@ impl lash_core_execution::TurnInputStore for SqliteStore {
                         };
                         let rows = {
                             let mut stmt = tx
-                                .prepare(
+                                .prepare_cached(
                                     crate::turn_ingress::turn_ingress_sql()
                                         .pending_inputs_sqlite
                                         .select_suffix

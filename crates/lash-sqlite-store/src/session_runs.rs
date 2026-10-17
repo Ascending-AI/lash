@@ -68,23 +68,23 @@ pub(crate) fn run_terminal_conn(
     run: &TurnId,
 ) -> Result<Option<RunTerminal>, StoreError> {
     let row: Option<TerminalRow> = conn
-        .query_row(
-            session_runs_sql().runs.select_terminal.sql(),
-            params![session_id.as_str(), run.as_str()],
-            |row| Ok((row.get(0)?, row.get(1)?, row.get(2)?, row.get(3)?)),
-        )
+        .prepare_cached(session_runs_sql().runs.select_terminal.sql())
+        .and_then(|mut statement| {
+            statement.query_row(params![session_id.as_str(), run.as_str()], |row| {
+                Ok((row.get(0)?, row.get(1)?, row.get(2)?, row.get(3)?))
+            })
+        })
         .optional()
         .map_err(sqlite_error)?;
     let Some((cause_json, head_revision, at_ms, kind)) = row else {
         let deleted = conn
-            .query_row(
+            .prepare_cached(
                 crate::session_sql::session_sql()
                     .deleted_sqlite
                     .exists
                     .sql(),
-                params![session_id.as_str()],
-                |_| Ok(()),
             )
+            .and_then(|mut statement| statement.query_row(params![session_id.as_str()], |_| Ok(())))
             .optional()
             .map_err(sqlite_error)?
             .is_some();
@@ -345,11 +345,10 @@ fn unanswered_run_conn(
         return Ok(UnansweredRun::Ended(Box::new(terminal)));
     }
     let exists: bool = tx
-        .query_row(
-            session_runs_sql().runs.select_terminal.sql(),
-            params![session.as_str(), run.as_str()],
-            |_| Ok(true),
-        )
+        .prepare_cached(session_runs_sql().runs.select_terminal.sql())
+        .and_then(|mut statement| {
+            statement.query_row(params![session.as_str(), run.as_str()], |_| Ok(true))
+        })
         .optional()
         .map_err(sqlite_error)?
         .unwrap_or(false);
@@ -426,11 +425,10 @@ pub(crate) fn unfinished_run_conn(
     session_id: &SessionId,
 ) -> Result<Option<UnfinishedRun>, StoreError> {
     let row: Option<(String, String)> = conn
-        .query_row(
-            session_runs_sql().runs.select_unfinished.sql(),
-            [session_id.as_str()],
-            |row| Ok((row.get(0)?, row.get(1)?)),
-        )
+        .prepare_cached(session_runs_sql().runs.select_unfinished.sql())
+        .and_then(|mut statement| {
+            statement.query_row([session_id.as_str()], |row| Ok((row.get(0)?, row.get(1)?)))
+        })
         .optional()
         .map_err(sqlite_error)?;
     row.map(|(run, json)| {
@@ -451,14 +449,15 @@ pub(crate) fn head_ownership_facts_conn(
 ) -> Result<lash_core_execution::store::HeadOwnershipFacts, StoreError> {
     let unfinished_run = unfinished_run_conn(conn, session_id)?.map(|unfinished| unfinished.run);
     let open_command: Option<i64> = conn
-        .query_row(
+        .prepare_cached(
             crate::turn_ingress::turn_ingress_sql()
                 .family
                 .pending_session_work_ordering
                 .sql(),
-            params![session_id.as_str()],
-            |row| row.get(1),
         )
+        .and_then(|mut statement| {
+            statement.query_row(params![session_id.as_str()], |row| row.get(1))
+        })
         .map_err(sqlite_error)?;
     Ok(lash_core_execution::store::HeadOwnershipFacts {
         unfinished_run,
@@ -476,11 +475,10 @@ pub(crate) fn run_admission_conn(
     run: &TurnId,
 ) -> Result<Option<RunAdmissionRecord>, StoreError> {
     let json: Option<Option<String>> = conn
-        .query_row(
-            session_runs_sql().runs.select_admission.sql(),
-            params![session_id.as_str(), run.as_str()],
-            |row| row.get(0),
-        )
+        .prepare_cached(session_runs_sql().runs.select_admission.sql())
+        .and_then(|mut statement| {
+            statement.query_row(params![session_id.as_str(), run.as_str()], |row| row.get(0))
+        })
         .optional()
         .map_err(sqlite_error)?;
     json.flatten()
@@ -501,8 +499,9 @@ pub(crate) fn run_turns_conn(
     let sql = crate::turn_ingress::turn_ingress_sql();
     let source_key = |statement: &str, id: &str| -> Result<Option<String>, StoreError> {
         let key: Option<Option<String>> = conn
-            .query_row(statement, params![session_id.as_str(), id], |row| {
-                row.get(0)
+            .prepare_cached(statement)
+            .and_then(|mut statement| {
+                statement.query_row(params![session_id.as_str(), id], |row| row.get(0))
             })
             .optional()
             .map_err(sqlite_error)?;
@@ -595,17 +594,18 @@ pub(crate) fn run_binding_conn(
     session_id: &SessionId,
     input: &InputId,
 ) -> Result<Option<TurnId>, StoreError> {
-    conn.query_row(
-        session_runs_sql().inputs.select_run.sql(),
-        params![session_id.as_str(), input.as_str()],
-        |row| row.get::<_, Option<String>>(0),
-    )
-    .optional()
-    .map_err(sqlite_error)?
-    .flatten()
-    .map(TurnId::parse)
-    .transpose()
-    .map_err(StoreError::from)
+    conn.prepare_cached(session_runs_sql().inputs.select_run.sql())
+        .and_then(|mut statement| {
+            statement.query_row(params![session_id.as_str(), input.as_str()], |row| {
+                row.get::<_, Option<String>>(0)
+            })
+        })
+        .optional()
+        .map_err(sqlite_error)?
+        .flatten()
+        .map(TurnId::parse)
+        .transpose()
+        .map_err(StoreError::from)
 }
 
 /// What a follower of `input` of `session_id` reads, in one statement on
@@ -718,15 +718,12 @@ pub(crate) fn close_session_intent_conn(
     conn: &Connection,
     session_id: &SessionId,
 ) -> Result<Option<ControlIntent>, StoreError> {
-    conn.query_row(
-        session_runs_sql().intents.select_close_session.sql(),
-        params![session_id.as_str()],
-        intent_row,
-    )
-    .optional()
-    .map_err(sqlite_error)?
-    .map(StoredIntentRow::decode)
-    .transpose()
+    conn.prepare_cached(session_runs_sql().intents.select_close_session.sql())
+        .and_then(|mut statement| statement.query_row(params![session_id.as_str()], intent_row))
+        .optional()
+        .map_err(sqlite_error)?
+        .map(StoredIntentRow::decode)
+        .transpose()
 }
 
 /// Intent `id`, read on `conn`.
@@ -799,14 +796,13 @@ pub(crate) fn begin_session_close_conn(
         return Ok((Some(intent), None));
     }
     let exists = tx
-        .query_row(
+        .prepare_cached(
             crate::session_sql::session_sql()
                 .meta_sqlite
                 .exists_materialized
                 .sql(),
-            params![session_id.as_str()],
-            |_| Ok(()),
         )
+        .and_then(|mut statement| statement.query_row(params![session_id.as_str()], |_| Ok(())))
         .optional()
         .map_err(sqlite_error)?
         .is_some();

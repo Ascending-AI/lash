@@ -48,11 +48,10 @@ impl LeaseRefusal {
 
 fn bundle_exists_tx(tx: &rusqlite::Connection, artifact_ref: &str) -> rusqlite::Result<bool> {
     Ok(tx
-        .query_row(
-            artifact_sql().refs.select_blob_ref.sql(),
-            params![TOOL_MATERIAL_NAMESPACE, artifact_ref],
-            |_| Ok(()),
-        )
+        .prepare_cached(artifact_sql().refs.select_blob_ref.sql())
+        .and_then(|mut statement| {
+            statement.query_row(params![TOOL_MATERIAL_NAMESPACE, artifact_ref], |_| Ok(()))
+        })
         .optional()?
         .is_some())
 }
@@ -104,11 +103,13 @@ impl ToolMaterialStore for SqliteStore {
                     artifact_sql().refs.insert_pointer.sql(),
                     params![TOOL_MATERIAL_NAMESPACE, artifact_ref, blob_ref.as_str()],
                 )?;
-                let stored_blob_ref: String = tx.query_row(
-                    artifact_sql().refs.select_blob_ref.sql(),
-                    params![TOOL_MATERIAL_NAMESPACE, artifact_ref],
-                    |row| row.get(0),
-                )?;
+                let stored_blob_ref: String = tx
+                    .prepare_cached(artifact_sql().refs.select_blob_ref.sql())
+                    .and_then(|mut statement| {
+                        statement.query_row(params![TOOL_MATERIAL_NAMESPACE, artifact_ref], |row| {
+                            row.get(0)
+                        })
+                    })?;
                 if stored_blob_ref != blob_ref.as_str() {
                     return Err(sqlite_conversion_error(stored_data_corrupt(
                         "tool material bundle",
@@ -204,24 +205,29 @@ impl ToolMaterialStore for SqliteStore {
                 if artifact_fenced_tx(conn, &referrer)? {
                     return Ok(Err(LeaseRefusal::HolderEnded));
                 }
-                let leased: bool = conn.query_row(
-                    artifact_sql().edges.select_edge_exists.sql(),
-                    params![
-                        TOOL_MATERIAL_NAMESPACE,
-                        artifact_ref,
-                        referrer.kind().as_str(),
-                        referrer.canonical_id()
-                    ],
-                    |row| row.get(0),
-                )?;
+                let leased: bool = conn
+                    .prepare_cached(artifact_sql().edges.select_edge_exists.sql())
+                    .and_then(|mut statement| {
+                        statement.query_row(
+                            params![
+                                TOOL_MATERIAL_NAMESPACE,
+                                artifact_ref,
+                                referrer.kind().as_str(),
+                                referrer.canonical_id()
+                            ],
+                            |row| row.get(0),
+                        )
+                    })?;
                 if !leased {
                     return Ok(Err(LeaseRefusal::BundleMissing));
                 }
-                let blob_ref: String = conn.query_row(
-                    artifact_sql().refs.select_blob_ref.sql(),
-                    params![TOOL_MATERIAL_NAMESPACE, artifact_ref],
-                    |row| row.get(0),
-                )?;
+                let blob_ref: String = conn
+                    .prepare_cached(artifact_sql().refs.select_blob_ref.sql())
+                    .and_then(|mut statement| {
+                        statement.query_row(params![TOOL_MATERIAL_NAMESPACE, artifact_ref], |row| {
+                            row.get(0)
+                        })
+                    })?;
                 let bytes = Self::get_blob_conn(conn, &BlobRef(blob_ref))
                     .map_err(sqlite_conversion_error)?
                     .ok_or_else(|| {
