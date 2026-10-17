@@ -584,7 +584,12 @@ async fn one_output_identity_per_turn_across_disconnect_and_redelivery() {
 async fn trimmed_gap_recovery_replaces_the_same_output_identity() {
     const FIRST_ANSWER: &str = "trimmed first answer";
     const SECOND_ANSWER: &str = "trimmed second answer";
-    let workbench = Workbench::builder(prose_provider(&[FIRST_ANSWER, SECOND_ANSWER]))
+    let mut provider = GatedProvider::replying(|call| match call {
+        0 => FIRST_ANSWER.to_string(),
+        1 => SECOND_ANSWER.to_string(),
+        other => panic!("unexpected provider call {other}"),
+    });
+    let workbench = Workbench::builder(provider.provider.clone())
         .live_replay(Arc::new(lash::observe::InMemoryLiveReplayStore::new(
             lash::observe::InMemoryLiveReplayStoreConfig {
                 max_events_per_session: 1,
@@ -603,34 +608,43 @@ async fn trimmed_gap_recovery_replaces_the_same_output_identity() {
     let mut transport = ReferenceTransport::default();
     let mut client = connect_observations(state, &session_id, transport.resume_cursor()).await;
 
-    // The client watches turn-one live — the row exists provisionally — then
-    // goes away before its checkpoints complete.
-    drive_reference_turn(&session, &TurnId::from("turn-one"), "first question").await;
-    let mut saw_turn_one_activity = false;
-    for _ in 0..256 {
-        let item = client.next_item().await;
-        if let ObservationStreamItem::Observation { event } = &item {
-            saw_turn_one_activity |= event.body.turn_id.as_ref() == Some(&TurnId::from("turn-one"));
-        }
-        transport.apply(&item);
-        if saw_turn_one_activity {
-            break;
-        }
-    }
-    assert!(saw_turn_one_activity, "turn-one activity must stream live");
+    // Opening the lazy stream does not acknowledge activity. Hold the first
+    // answer until the client has applied a live event: completing the turn
+    // first can trim all its activity out of the one-event replay window.
+    let turn_one = TurnId::from("turn-one");
+    let send = tokio::spawn({
+        let session = session.clone();
+        let turn_one = turn_one.clone();
+        async move { drive_reference_turn(&session, &turn_one, "first question").await }
+    });
+    assert_eq!(provider.next_call().await, 0);
+    apply_through_turn_activity(&mut client, &mut transport, &turn_one).await;
+    assert_eq!(transport.output_keys(), vec![turn_one.to_string()]);
+    assert!(
+        !transport.outputs()[&turn_one].is_settled(),
+        "turn-one's live row must exist before its answer commits"
+    );
+    let disconnected_cursor = transport
+        .resume_cursor()
+        .expect("the live connection checkpoints its cursor")
+        .to_string();
     drop(client);
+    provider.release(1);
+    send.await.expect("turn-one completes after the disconnect");
 
     // Turn-two's commits push turn-one's events out of the one-deep replay
     // window while the client is gone.
+    provider.release(1);
     drive_reference_turn(&session, &TurnId::from("turn-two"), "second question").await;
 
     // The persisted cursor is trimmed: the stream answers with a gap whose
     // replacement snapshot the transport installs from the settled view.
-    let mut client = connect_observations(state, &session_id, transport.resume_cursor()).await;
+    let mut client = connect_observations(state, &session_id, Some(&disconnected_cursor)).await;
     let mut gap_reason = None;
     for _ in 0..256 {
         let item = client.next_item().await;
         if let ObservationStreamItem::ReplayGap { gap, .. } = &item {
+            assert_eq!(gap.body.requested_cursor, disconnected_cursor);
             gap_reason = Some(gap.body.reason);
         }
         if transport.apply(&item) == TransportDirective::RefetchSettled {
