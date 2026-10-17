@@ -40,8 +40,14 @@ impl<M: Machine> DocumentRunner for MachineRunner<M> {
                 .seal(crate::pages::BUDGET)
                 .map_err(|e| HarnessError(e.to_string()))?
                 .ok_or_else(|| HarnessError("unbounded seal incomplete".into()))?;
-            crate::pages::open::<M>(at.program.clone(), at.bounds, &sealed.root, at.source)
-                .map_err(|e| HarnessError(e.to_string()))
+            crate::pages::open::<M>(
+                at.program.clone(),
+                at.bounds,
+                &sealed.root,
+                at.source,
+                at.admissions,
+            )
+            .map_err(|e| HarnessError(e.to_string()))
         })
     }
 }
@@ -55,6 +61,7 @@ pub(crate) struct Park<'a, M> {
     pub(crate) program: &'a mut Program,
     pub(crate) bounds: lash_kernel_vm::Bounds,
     pub(crate) source: &'a crate::pages::Source,
+    pub(crate) admissions: Vec<lash_kernel_state::AdmittedWait>,
     #[cfg(test)]
     pub(crate) requests: &'a [Request],
 }
@@ -65,6 +72,15 @@ pub(crate) fn run_case<M: Machine>(
     library: &PreparedLibrary,
     case: &Case,
     at_park: &mut dyn FnMut(Park<'_, M>) -> Result<M, HarnessError>,
+) -> Result<Observations, HarnessError> {
+    run_case_projected(library, case, at_park, None)
+}
+
+pub(crate) fn run_case_projected<M: Machine>(
+    library: &PreparedLibrary,
+    case: &Case,
+    at_park: &mut dyn FnMut(Park<'_, M>) -> Result<M, HarnessError>,
+    mut projection: Option<&mut crate::projection::Projector<'_>>,
 ) -> Result<Observations, HarnessError> {
     let registry = library.registry();
     let refused = || Observations {
@@ -93,7 +109,12 @@ pub(crate) fn run_case<M: Machine>(
         library: library.clone(),
     };
     let bounds = env.bounds.into();
-    let source = crate::pages::Source::default();
+    let source = projection
+        .as_ref()
+        .and_then(|p| p.imports)
+        .and_then(|images| images.first())
+        .map(|image| image.source.clone())
+        .unwrap_or_default();
     let session = crate::pages::Session {
         root: None,
         source: source.clone(),
@@ -126,9 +147,10 @@ pub(crate) fn run_case<M: Machine>(
     };
     let mut batches = env.deliveries.iter();
     let mut waits = Vec::new();
+    let mut outstanding = Vec::<Request>::new();
     let mut trace = Vec::new();
     let mut parks = 0;
-    if env.slice == 0 {
+    if env.slice == 0 && projection.is_none() {
         return Err(HarnessError("a corpus slice must be positive".into()));
     }
     for _ in 0..env.max_steps {
@@ -155,8 +177,21 @@ pub(crate) fn run_case<M: Machine>(
             Err(error) => return Err(HarnessError(error.to_string())),
         };
         match step {
-            Step::Slice => {}
+            Step::Slice => {
+                if let Some(p) = &mut projection {
+                    p.at(
+                        &mut machine,
+                        &program,
+                        bounds,
+                        &source,
+                        crate::projection::admissions(&outstanding),
+                    )?;
+                }
+            }
             Step::Ended(end) => {
+                if let Some(p) = &mut projection {
+                    p.end(&end, &source)?;
+                }
                 if batches.next().is_some() || !host.answers.is_empty() {
                     return Err(HarnessError(
                         "run ended before its script was consumed".into(),
@@ -192,11 +227,23 @@ pub(crate) fn run_case<M: Machine>(
                         }
                     }
                 }
+                outstanding.retain(|request| !park.withdrawn.contains(&request_wait(request)));
+                outstanding.extend(
+                    park.requests
+                        .iter()
+                        .filter(|request| !park.withdrawn.contains(&request_wait(request)))
+                        .cloned(),
+                );
+                let admissions = crate::projection::admissions(&outstanding);
+                if let Some(p) = &mut projection {
+                    p.at(&mut machine, &program, bounds, &source, admissions.clone())?;
+                }
                 machine = at_park(Park {
                     machine,
                     program: &mut program,
                     bounds,
                     source: &source,
+                    admissions,
                     #[cfg(test)]
                     requests: &park.requests,
                 })?;
@@ -210,11 +257,21 @@ pub(crate) fn run_case<M: Machine>(
                     let delivered = machine
                         .deliver(*wait, delivery.outcome.clone().into())
                         .map_err(|e| HarnessError(e.to_string()))?;
+                    outstanding.retain(|request| request_wait(request) != *wait);
                     if (delivered == Delivered::Dropped) != delivery.dropped {
                         return Err(HarnessError(format!(
                             "unexpected delivery result {delivered:?}"
                         )));
                     }
+                }
+                if let Some(p) = &mut projection {
+                    p.at(
+                        &mut machine,
+                        &program,
+                        bounds,
+                        &source,
+                        crate::projection::admissions(&outstanding),
+                    )?;
                 }
             }
         }
@@ -314,5 +371,12 @@ impl Host for ScriptHost {
         } else {
             false
         }
+    }
+}
+
+pub(crate) fn request_wait(request: &Request) -> lash_kernel_vm::WaitId {
+    match request {
+        Request::Effect(e) => e.wait,
+        Request::Sleep(s) => s.wait,
     }
 }

@@ -57,16 +57,44 @@ main {
 }
 "#;
 
-type Observed = (End, Vec<Datum>, Vec<Request>, u64);
+type Observed = (
+    End,
+    Vec<Datum>,
+    Vec<Request>,
+    u64,
+    Vec<crate::conformance::Checkpoint>,
+);
 
 fn observe(setup: Setup) -> Observed {
     let mut embedder = Embedder::with(PROGRAM, setup);
-    let end = embedder.run_to_end(&["c", "a", "b", "b", "c", "a"]);
+    let mut order = ["c", "a", "b", "b", "c", "a"].into_iter();
+    let mut checkpoints = Vec::new();
+    let mut end = loop {
+        match embedder.run() {
+            Step::Ended(end) => break end,
+            Step::Slice => (),
+            Step::Parked(_) => {
+                checkpoints.push(embedder.machine.semantic_checkpoint());
+                let next = order
+                    .next()
+                    .map(str::to_owned)
+                    .unwrap_or_else(|| super::embedder::label(&embedder.pending[0]));
+                embedder.deliver(&next);
+            }
+        }
+    };
+    if let End::Finished(finished) = &mut end
+        && let Some(carry) = finished.carry.take()
+    {
+        checkpoints
+            .push(crate::conformance::session(&carry, Box::new(embedder.source.clone())).unwrap());
+    }
     (
         end,
         embedder.world.printed,
         embedder.requests,
         embedder.machine.meters().charged,
+        checkpoints,
     )
 }
 
@@ -160,13 +188,21 @@ main {
         let end = loop {
             let step = embedder.run();
             if let Step::Ended(end) = step {
+                if let End::Finished(finished) = &end
+                    && let Some(carry) = &finished.carry
+                {
+                    continuations.push(
+                        crate::conformance::session(carry, Box::new(embedder.source.clone()))
+                            .unwrap(),
+                    );
+                }
                 break match end {
                     End::Finished(finished) => format!("finished {:?}", finished.result),
                     other => format!("{other:?}"),
                 };
             }
             if matches!(step, Step::Parked(_)) {
-                continuations.push(embedder.machine.canonical_continuation_bytes());
+                continuations.push(embedder.machine.semantic_checkpoint());
             }
             if cold {
                 embedder.reopen(plans.next().unwrap(), true);
@@ -237,8 +273,6 @@ main {
 /// state under every layout, including after rebuilding cold lookup caches.
 #[test]
 fn session_binding_images_are_identical_across_layouts_and_cold_caches() {
-    use lash_kernel_doc::graph_tokens::encode_body;
-
     let long = "binding".repeat(100);
     let declarations = (0..70)
         .map(|i| format!("let v{i} = {i}\n"))
@@ -262,9 +296,8 @@ fn session_binding_images_are_identical_across_layouts_and_cold_caches() {
         let mut images = Vec::new();
         for hop in 0..2 {
             assert!(matches!(embedder.run(), Step::Parked(_)));
-            images.push(encode_body(
-                &embedder.reopen(Layout(layout ^ (hop + 1)), true),
-            ));
+            embedder.reopen(Layout(layout ^ (hop + 1)), true);
+            images.push(embedder.machine.semantic_checkpoint());
             embedder.deliver("echo");
         }
         let End::Finished(finished) = embedder.run_to_end(&[]) else {
@@ -287,7 +320,8 @@ fn session_binding_images_are_identical_across_layouts_and_cold_caches() {
                 "the prepared key must equal the canonical key for {name}"
             );
         }
-        images.push(encode_body(&carry));
+        images
+            .push(crate::conformance::session(&carry, Box::new(embedder.source.clone())).unwrap());
         (images, embedder.machine.meters().charged)
     };
     let reference = observe(0);

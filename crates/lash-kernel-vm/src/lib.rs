@@ -27,6 +27,7 @@
 //! `docs/kernel/semantics.md`.
 
 mod compile;
+pub mod conformance;
 mod costs;
 mod crossing;
 mod data;

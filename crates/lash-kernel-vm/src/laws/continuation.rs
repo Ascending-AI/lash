@@ -61,6 +61,7 @@ fn setup(slice: u64) -> Setup {
 /// it handed out, and its charge.
 #[derive(Debug, PartialEq)]
 struct Trace {
+    checkpoints: Vec<crate::conformance::Checkpoint>,
     end: String,
     printed: Vec<String>,
     requests: Vec<String>,
@@ -132,6 +133,7 @@ fn drive(text: &str, order: &[&str], drive: Drive) -> (Trace, Seen) {
         Ok(embedder) => embedder,
         Err(error) => {
             let trace = Trace {
+                checkpoints: Vec::new(),
                 end: format!("start refused: {error:?}"),
                 printed: Vec::new(),
                 requests: Vec::new(),
@@ -143,16 +145,25 @@ fn drive(text: &str, order: &[&str], drive: Drive) -> (Trace, Seen) {
     let mut seen = Seen::default();
     let mut order = order.iter();
     let mut hops = 0;
+    let mut checkpoints = Vec::new();
     let end = loop {
         let step = match embedder.machine.run(&mut embedder.world, drive.slice) {
             Ok(step) => step,
             Err(error) => break format!("machine refused: {error:?}"),
         };
         if let Step::Parked(park) = &step {
+            checkpoints.push(embedder.machine.semantic_checkpoint());
             embedder.requests.extend(park.requests.iter().cloned());
             embedder.pending.extend(park.requests.iter().cloned());
         }
         if let Step::Ended(end) = &step {
+            if let End::Finished(finished) = end
+                && let Some(carry) = &finished.carry
+            {
+                checkpoints.push(
+                    crate::conformance::session(carry, Box::new(embedder.source.clone())).unwrap(),
+                );
+            }
             break end_of(end);
         }
         if drive.reopens {
@@ -184,6 +195,7 @@ fn drive(text: &str, order: &[&str], drive: Drive) -> (Trace, Seen) {
         }
     };
     let trace = Trace {
+        checkpoints,
         end,
         printed: embedder
             .world

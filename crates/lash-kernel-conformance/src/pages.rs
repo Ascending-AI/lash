@@ -218,6 +218,7 @@ pub(crate) fn open<M: lash_kernel_vm::Machine>(
     bounds: lash_kernel_vm::Bounds,
     root: &CheckpointRoot,
     source: &Source,
+    admissions: Vec<lash_kernel_state::AdmittedWait>,
 ) -> Result<M, lash_kernel_vm::OpenError> {
     let heap = PagedHeap::open_header(root.heap, Box::new(source.clone()), EditEpoch(2))
         .map_err(lash_kernel_vm::OpenError::Heap)?;
@@ -230,7 +231,7 @@ pub(crate) fn open<M: lash_kernel_vm::Machine>(
         program,
         bounds,
         root,
-        Vec::new(),
+        admissions,
         Box::new(source.clone()),
         Box::new(census),
     )

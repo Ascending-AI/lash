@@ -3,7 +3,6 @@
 use std::sync::Arc;
 
 use lash_kernel_doc::{Datum, ErrorDatum, Handle, Integer, Name, Timestamp};
-use lash_kernel_state::paged::CheckpointRoot;
 use lash_kernel_vm::{
     CellStart, Delivered, Host, KernelMachine, Machine, Meters, Outcome, Program, Request,
     StartError, Step, Target,
@@ -12,32 +11,16 @@ use lash_kernel_vm::{
 use super::{Smith, library};
 use crate::HarnessError;
 
-/// Exact canonical checkpoint grammar, independent of transient layout.
-#[derive(Clone, Debug)]
-pub struct Checkpoint(pub CheckpointRoot);
-impl PartialEq for Checkpoint {
-    fn eq(&self, other: &Self) -> bool {
-        lash_kernel_doc::graph_tokens::encode_body(&self.0)
-            == lash_kernel_doc::graph_tokens::encode_body(&other.0)
-    }
-}
-fn seal<M: Machine>(machine: &mut M) -> Result<Checkpoint, HarnessError> {
-    Ok(Checkpoint(
-        machine
-            .seal(crate::pages::BUDGET)
-            .map_err(fault)?
-            .ok_or_else(|| fault("unbounded seal incomplete"))?
-            .root,
-    ))
-}
+use crate::projection::Projector;
+use lash_kernel_vm::conformance::Checkpoint;
 
 /// Full observation at one return, including the canonical state at slices
 /// and parks. Code caches and host cancellation probes are not observations.
-#[derive(Debug, PartialEq)]
+#[derive(Debug)]
 pub struct Observation {
     pub step: Step,
+    pub carry: Option<Checkpoint>,
     pub meters: Meters,
-    pub saved_memory: Option<u64>,
     pub after_deliveries: Option<Checkpoint>,
     pub parked: Option<Checkpoint>,
     pub host_calls: Vec<HostCall>,
@@ -147,16 +130,16 @@ enum Execution<O> {
 fn observe<M: Machine>(
     smith: &Smith,
     slices: &[u64],
-    rebuild: bool,
-    save: bool,
+    projection: &mut Projector<'_>,
 ) -> Result<Execution<Observation>, HarnessError> {
-    if slices.is_empty() || slices.contains(&0) || smith.schedule.rebuild.is_empty() {
-        return Err(HarnessError(
-            "smith schedules require positive slices and rebuild choices".into(),
-        ));
+    if slices.is_empty() {
+        return Err(HarnessError("smith schedules require slices".into()));
     }
     let program = program(smith);
-    let session = session();
+    let mut session = session();
+    if let Some(image) = projection.imports.and_then(|images| images.first()) {
+        session.source = image.source.clone();
+    }
     let source = &session.source;
     let start = CellStart {
         owner: crate::pages::OWNER,
@@ -182,36 +165,59 @@ fn observe<M: Machine>(
         fail: smith.schedule.fail_effects,
     };
     let mut observations = Vec::new();
+    let mut outstanding = Vec::<Request>::new();
     // At least one statement is executed per positive slice. This exceeds
     // the generator's worst-case bounded loops, calls and work charge.
     for index in 0..25_000 {
         let step = machine
             .run(&mut host, slices[index % slices.len()])
             .map_err(fault)?;
+        if let Step::Parked(park) = &step {
+            outstanding.retain(|request| {
+                !park
+                    .withdrawn
+                    .contains(&crate::machine::request_wait(request))
+            });
+            outstanding.extend(
+                park.requests
+                    .iter()
+                    .filter(|request| {
+                        !park
+                            .withdrawn
+                            .contains(&crate::machine::request_wait(request))
+                    })
+                    .cloned(),
+            );
+        }
         let meters = machine.meters();
         let ended = matches!(step, Step::Ended(_));
-        let parked = if ended || !save {
+        if let Step::Ended(end) = &step {
+            projection.end(end, source)?;
+        }
+        let parked = if ended {
             None
         } else {
-            Some(seal(&mut machine)?)
+            Some(projection.at(
+                &mut machine,
+                &program,
+                smith.schedule.bounds,
+                source,
+                crate::projection::admissions(&outstanding),
+            )?)
         };
         let mut observation = Observation {
             meters,
-            saved_memory: parked.as_ref().map(|_| machine.meters().memory),
+            carry: if ended {
+                projection.terminal.clone()
+            } else {
+                None
+            },
             after_deliveries: None,
             step,
             parked,
             host_calls: std::mem::take(&mut host.calls),
             deliveries: Vec::new(),
         };
-        if rebuild
-            && smith.schedule.rebuild[index % smith.schedule.rebuild.len()]
-            && let Some(parked) = &observation.parked
-        {
-            machine =
-                crate::pages::open::<M>(program.clone(), smith.schedule.bounds, &parked.0, source)
-                    .map_err(fault)?;
-        }
         if let Step::Parked(park) = &observation.step {
             let mut requests: Vec<_> = park.requests.iter().collect();
             if smith.schedule.reverse_deliveries {
@@ -237,24 +243,15 @@ fn observe<M: Machine>(
                 observation
                     .deliveries
                     .push(machine.deliver(wait, outcome).map_err(fault)?);
+                outstanding.retain(|request| crate::machine::request_wait(request) != wait);
             }
-            let parked = if save {
-                Some(seal(&mut machine)?)
-            } else {
-                None
-            };
-            if rebuild
-                && smith.schedule.rebuild[index % smith.schedule.rebuild.len()]
-                && let Some(parked) = &parked
-            {
-                machine = crate::pages::open::<M>(
-                    program.clone(),
-                    smith.schedule.bounds,
-                    &parked.0,
-                    source,
-                )
-                .map_err(fault)?;
-            }
+            let parked = Some(projection.at(
+                &mut machine,
+                &program,
+                smith.schedule.bounds,
+                source,
+                crate::projection::admissions(&outstanding),
+            )?);
             observation.after_deliveries = parked;
         }
         observations.push(observation);
@@ -267,69 +264,143 @@ fn observe<M: Machine>(
     ))
 }
 
-/// Same schedule, two machines: every Step (including Slice), every meter,
-/// host call, delivery result and sealed state must agree. This seam will
-/// admit the compiled implementation when it exists.
+impl PartialEq for Observation {
+    fn eq(&self, other: &Self) -> bool {
+        (match (&self.step, &other.step) {
+            (Step::Ended(a), Step::Ended(b)) => semantic_end(a.clone()) == semantic_end(b.clone()),
+            (a, b) => a == b,
+        }) && self.meters.charged == other.meters.charged
+            && self.meters.live_tasks == other.meters.live_tasks
+            && self.after_deliveries == other.after_deliveries
+            && self.parked == other.parked
+            && self.host_calls == other.host_calls
+            && self.deliveries == other.deliveries
+    }
+}
+
+fn memory(execution: &Execution<Observation>) -> bool {
+    match execution {
+        Execution::Ran(rows) => rows.last().is_some_and(|row| {
+            matches!(
+                row.step,
+                Step::Ended(lash_kernel_vm::End::Error(lash_kernel_vm::RunError::Bound(
+                    lash_kernel_vm::BoundExceeded {
+                        bound: lash_kernel_vm::Bound::Memory,
+                        ..
+                    }
+                )))
+            )
+        }),
+        _ => false,
+    }
+}
+
+/// Memory is a separate verdict. A refusal's precise charge/statement is
+/// plan-dependent; all completed observations before the earlier refusal agree.
+fn agree(a: &Execution<Observation>, b: &Execution<Observation>) -> bool {
+    if memory(a) != memory(b) {
+        return false;
+    }
+    if !memory(a) {
+        return a == b;
+    }
+    match (a, b) {
+        (Execution::Ran(a), Execution::Ran(b)) => {
+            let prefix = a.len().min(b.len()).saturating_sub(1);
+            a[..prefix] == b[..prefix]
+                && a.iter()
+                    .flat_map(|r| &r.host_calls)
+                    .zip(b.iter().flat_map(|r| &r.host_calls))
+                    .all(|(a, b)| a == b)
+        }
+        _ => true,
+    }
+}
+
+/// A's images opened by B at every slice and park, with warm and cold code
+/// caches. The public comparison excludes physical root ids and memory meters.
 pub fn compare<A: Machine, B: Machine>(smith: &Smith) -> Result<(), HarnessError> {
-    smith.admit().map_err(fault)?;
-    let a = observe::<A>(smith, &smith.schedule.slices, false, true)?;
-    let b = observe::<B>(smith, &smith.schedule.slices, true, true)?;
-    if a != b {
-        return Err(HarnessError(format!(
-            "same-schedule mismatch:\n{a:#?}\n{b:#?}"
-        )));
-    }
-    Ok(())
-}
-
-/// Today's oracle: interpreter versus rebuilt interpreter, then interpreter
-/// under different positive slice sizes with the same outcome/delivery script.
-/// Slices differ by construction, so that comparison joins synchronous host
-/// observations across slices and compares at parks and at the terminal.
-pub fn check_interpreter(smith: &Smith) -> Result<(), HarnessError> {
-    compare::<KernelMachine, KernelMachine>(smith)?;
-    let a = without_slices(observe::<KernelMachine>(smith, &[u64::MAX], false, true)?);
-    let b = without_slices(observe::<KernelMachine>(
+    compare_plans::<A, B>(
         smith,
-        &smith.schedule.slices,
-        true,
-        true,
-    )?);
-    if a != b {
-        return Err(HarnessError(format!(
-            "cross-slice mismatch:\n{a:#?}\n{b:#?}"
-        )));
-    }
-    Ok(())
+        lash_kernel_vm::Layout::default(),
+        lash_kernel_vm::Layout::default(),
+    )
 }
 
-/// K-MACH-008 and K-TASK-024: changing the slice changes neither the
-/// observable parks, deliveries, host calls nor the terminal outcome.
-/// This law never saves or rebuilds state.
-#[cfg(test)]
-pub(super) fn check_slices(smith: &Smith) -> Result<(), HarnessError> {
+fn compare_plans<A: Machine, B: Machine>(
+    smith: &Smith,
+    a_layout: lash_kernel_vm::Layout,
+    b_layout: lash_kernel_vm::Layout,
+) -> Result<(), HarnessError> {
     smith.admit().map_err(fault)?;
-    let unbounded = without_slices(observe::<KernelMachine>(smith, &[u64::MAX], false, false)?);
-    for slice in [1, 7] {
-        let sliced = without_slices(observe::<KernelMachine>(smith, &[slice], false, false)?);
-        if unbounded != sliced {
-            return Err(HarnessError(format!(
-                "cross-slice mismatch (slice {slice}):\n{unbounded:#?}\n{sliced:#?}"
+    let mut reference = Projector {
+        layout: a_layout,
+        ..Projector::default()
+    };
+    let a = observe::<A>(smith, &smith.schedule.slices, &mut reference)?;
+    reference.check_memory()?;
+    for cold in [false, true] {
+        let mut imported = Projector {
+            imports: Some(&reference.images),
+            cold,
+            layout: b_layout,
+            ..Projector::default()
+        };
+        let b = observe::<B>(smith, &smith.schedule.slices, &mut imported)?;
+        imported.check_memory()?;
+        if !agree(&a, &b) || reference.terminal != imported.terminal {
+            return Err(fault(format!(
+                "cross-resume mismatch (cold={cold}):\n{a:#?}\n{b:#?}"
             )));
         }
     }
     Ok(())
 }
 
-// Same-schedule comparisons retain the original meters at every return.
-// Cross-schedule comparisons join host observations across slices and compare
-// complete canonical checkpoints at parks, with exact charge and task counts.
+/// Cross-slice semantic agreement with a projection after every statement.
+pub fn check_interpreter(smith: &Smith) -> Result<(), HarnessError> {
+    compare_plans::<crate::projection::Plan<0>, crate::projection::Plan<3>>(
+        smith,
+        lash_kernel_vm::Layout(0),
+        lash_kernel_vm::Layout(3),
+    )?;
+    let mut statements = smith.clone();
+    statements.schedule.slices = vec![0];
+    compare_plans::<crate::projection::Plan<0>, crate::projection::Plan<3>>(
+        &statements,
+        lash_kernel_vm::Layout(0),
+        lash_kernel_vm::Layout(3),
+    )?;
+    let a = without_slices(observe::<KernelMachine>(
+        smith,
+        &[u64::MAX],
+        &mut Projector::default(),
+    )?);
+    for slices in [&smith.schedule.slices[..], &[0][..]] {
+        let b = without_slices(observe::<KernelMachine>(
+            smith,
+            slices,
+            &mut Projector::default(),
+        )?);
+        if !schedule_agree(&a, &b) {
+            return Err(fault(format!("cross-slice mismatch:\n{a:#?}\n{b:#?}")));
+        }
+    }
+    Ok(())
+}
+
+#[cfg(test)]
+pub(super) fn check_slices(smith: &Smith) -> Result<(), HarnessError> {
+    check_interpreter(smith)
+}
+
 #[derive(Debug, PartialEq)]
 struct ScheduleReturn {
-    step: Step,
+    end: Option<lash_kernel_vm::End>,
+    carry: Option<Checkpoint>,
+    park: Option<lash_kernel_vm::Park>,
     charged: u64,
     live_tasks: u32,
-    saved_memory: Option<u64>,
     parked: Option<Checkpoint>,
     after_deliveries: Option<Checkpoint>,
     host_calls: Vec<HostCall>,
@@ -346,11 +417,17 @@ fn without_slices(execution: Execution<Observation>) -> Execution<ScheduleReturn
     for mut observation in observations {
         calls.append(&mut observation.host_calls);
         if !matches!(observation.step, Step::Slice) {
+            let (end, park) = match observation.step {
+                Step::Ended(end) => (Some(semantic_end(end)), None),
+                Step::Parked(park) => (None, Some(park)),
+                Step::Slice => unreachable!(),
+            };
             returns.push(ScheduleReturn {
-                step: observation.step,
+                end,
+                carry: observation.carry,
+                park,
                 charged: observation.meters.charged,
                 live_tasks: observation.meters.live_tasks,
-                saved_memory: observation.saved_memory,
                 parked: observation.parked,
                 after_deliveries: observation.after_deliveries,
                 host_calls: std::mem::take(&mut calls),
@@ -359,4 +436,58 @@ fn without_slices(execution: Execution<Observation>) -> Execution<ScheduleReturn
         }
     }
     Execution::Ran(returns)
+}
+
+#[cfg(test)]
+pub(super) fn check_memory(smith: &Smith) -> Result<(), HarnessError> {
+    let mut a = Projector::default();
+    let warm = observe::<crate::projection::Plan<0>>(smith, &[0], &mut a)?;
+    a.check_memory()?;
+    let mut b = Projector {
+        imports: Some(&a.images),
+        cold: true,
+        layout: lash_kernel_vm::Layout(3),
+        ..Projector::default()
+    };
+    let cold = observe::<crate::projection::Plan<3>>(smith, &[0], &mut b)?;
+    if memory(&warm) != memory(&cold) {
+        return Err(fault("plans disagree on memory verdict"));
+    }
+    b.check_memory()
+}
+
+fn schedule_agree(a: &Execution<ScheduleReturn>, b: &Execution<ScheduleReturn>) -> bool {
+    let refused = |rows: &[ScheduleReturn]| {
+        rows.last().is_some_and(|row| {
+            matches!(
+                &row.end,
+                Some(lash_kernel_vm::End::Error(lash_kernel_vm::RunError::Bound(
+                    lash_kernel_vm::BoundExceeded {
+                        bound: lash_kernel_vm::Bound::Memory,
+                        ..
+                    }
+                )))
+            )
+        })
+    };
+    match (a, b) {
+        (Execution::Ran(a), Execution::Ran(b)) if refused(a) && refused(b) => {
+            let prefix = a.len().min(b.len()).saturating_sub(1);
+            a[..prefix] == b[..prefix]
+                && a.iter()
+                    .flat_map(|r| &r.host_calls)
+                    .zip(b.iter().flat_map(|r| &r.host_calls))
+                    .all(|(a, b)| a == b)
+        }
+        _ => a == b,
+    }
+}
+
+// Carry storage is compared through the shared graph reader, retaining every
+// other terminal field (including finish policy and typed error context).
+fn semantic_end(mut end: lash_kernel_vm::End) -> lash_kernel_vm::End {
+    if let lash_kernel_vm::End::Finished(finished) = &mut end {
+        finished.carry = None;
+    }
+    end
 }

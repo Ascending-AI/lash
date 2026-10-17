@@ -1491,8 +1491,7 @@ PACKAGE_DEPS = {
     "lash-kernel-vm": {
         "build": {},
         "dev": {
-            "lash_kernel_state": "//crates/lash-kernel-state:lash-kernel-state",
-            "serde_json": "//third-party/rust:p0322"
+            "lash_kernel_state": "//crates/lash-kernel-state:lash-kernel-state"
         },
         "normal": {
             "lash_kernel_doc": "//crates/lash-kernel-doc:lash-kernel-doc",
@@ -1500,6 +1499,7 @@ PACKAGE_DEPS = {
             "lash_kernel_state": "//crates/lash-kernel-state:lash-kernel-state",
             "num_bigint": "//third-party/rust:p0212",
             "num_traits": "//third-party/rust:p0218",
+            "serde_json": "//third-party/rust:p0322",
             "thiserror": "//third-party/rust:p0375"
         }
     },

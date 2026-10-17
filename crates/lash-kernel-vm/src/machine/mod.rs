@@ -1076,43 +1076,36 @@ impl KernelMachine {
         delivered
     }
 
-    /// Canonical continuation payloads at a public park. Semantic sites are
-    /// resolved before encoding; no compiled table or register index enters it.
-    pub(crate) fn canonical_continuation_bytes(&mut self) -> Vec<Vec<u8>> {
-        let mut rows = Vec::new();
-        let access = self.heap.pages().clone();
-        self.publish(true).expect("the run publishes");
-        self.tasks
-            .visit(&mut |id, task| {
-                for index in 0..task.frames.len() {
-                    let (_, frame) = task
-                        .frames
-                        .rank_get(index, &access)
-                        .expect("frame reads")
-                        .expect("frame exists");
-                    let site = frame.statement.resolve(&access).expect("semantic site");
-                    let pending = frame
-                        .pending
-                        .as_ref()
-                        .map(lash_kernel_doc::graph_tokens::encode_body);
-                    let mut loops = Vec::new();
-                    for at in 0..frame.loops.len() {
-                        let (_, row) = frame
-                            .loops
-                            .rank_get(at, &access)
-                            .expect("loop reads")
-                            .expect("loop exists");
-                        loops.push(lash_kernel_doc::graph_tokens::encode_body(&row));
-                    }
-                    rows.push(
-                        serde_json::to_vec(&(id.0, index, site.as_ref(), pending, loops))
-                            .expect("continuation tokens serialize"),
-                    );
-                }
-                true
+    /// The shared kernel equality domain at a projection point.
+    pub(crate) fn semantic_checkpoint(&mut self) -> crate::conformance::Checkpoint {
+        let sealed = self
+            .seal(lash_kernel_state::paged::SealBudget {
+                pages: u64::MAX,
+                bytes: u64::MAX,
             })
-            .expect("task rows read");
-        rows
+            .expect("seal")
+            .expect("unbounded seal");
+        let access = self.heap.pages().clone();
+        struct Source(Access<'static>);
+        impl lash_kernel_state::paged::PageSource for Source {
+            fn read(
+                &mut self,
+                pages: &[lash_kernel_doc::heap::PageRef],
+            ) -> Result<Vec<Result<lash_kernel_state::paged::PageAnswer, HeapFault>>, HeapFault>
+            {
+                Ok(pages.iter().map(|page| self.0.read(*page)).collect())
+            }
+            fn seal(
+                &mut self,
+                _: lash_kernel_state::paged::PageBody,
+            ) -> Result<lash_kernel_doc::heap::PageRef, HeapFault> {
+                Err(HeapFault::Malformed(
+                    "comparison reader cannot write".into(),
+                ))
+            }
+        }
+        crate::conformance::checkpoint(&sealed.root, Box::new(Source(access)))
+            .expect("semantic checkpoint")
     }
 
     /// The phase of every published frame row that stands at a nested

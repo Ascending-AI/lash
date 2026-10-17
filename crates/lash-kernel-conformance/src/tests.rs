@@ -381,3 +381,59 @@ fn expected_effect_sites_address_document_actions() {
         "main, spawn, and resume identities are pinned"
     );
 }
+
+/// PLAN-INDEP / K-MACH-007/008: every corpus statement projects, and each
+/// plan resumes the other plan's images with warm and cold prepared code.
+#[test]
+fn corpus_cross_resumes_after_every_statement() {
+    use crate::projection::{Plan, Projector};
+    let library = lash_kernel_vm::PreparedLibrary::new(std::sync::Arc::new(corpus_registry()));
+    let shards = load_corpus(CORPUS_FILES.iter().chain(LIBRARY_CORPUS_FILES).copied()).unwrap();
+    let mut executed = 0;
+    let mut failures = Vec::new();
+    for case in shards.iter().flat_map(|shard| &shard.cases) {
+        let mut case = case.clone();
+        case.environment.slice = 0;
+        case.environment.resume = false;
+        let result = (|| -> Result<(), crate::HarnessError> {
+            let mut reference = Projector::default();
+            let a = crate::machine::run_case_projected::<Plan<0>>(
+                &library,
+                &case,
+                &mut |at| Ok(at.machine),
+                Some(&mut reference),
+            )?;
+            case.expected.check(&a)?;
+            reference.check_memory()?;
+            for cold in [false, true] {
+                let mut imported = Projector {
+                    imports: Some(&reference.images),
+                    cold,
+                    layout: lash_kernel_vm::Layout(3),
+                    ..Projector::default()
+                };
+                let b = crate::machine::run_case_projected::<Plan<3>>(
+                    &library,
+                    &case,
+                    &mut |at| Ok(at.machine),
+                    Some(&mut imported),
+                )?;
+                imported.check_memory()?;
+                if !crate::projection::corpus_agrees(&a, &b, &reference, &imported) {
+                    return Err(crate::HarnessError(format!(
+                        "cross-resume mismatch (cold={cold}): {a:?} / {b:?}"
+                    )));
+                }
+            }
+            Ok(())
+        })();
+        executed += 1;
+        if let Err(error) = result {
+            failures.push(format!("{}: {error}", case.name));
+        }
+    }
+    println!(
+        "corpus cross-resume: executed={executed}, projection after every statement, plans=0/3, warm/cold"
+    );
+    assert!(failures.is_empty(), "{}", failures.join("\n"));
+}

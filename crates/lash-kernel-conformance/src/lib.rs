@@ -9,6 +9,7 @@ mod coverage;
 mod machine;
 mod native;
 mod pages;
+mod projection;
 pub mod smith;
 
 pub use case::{

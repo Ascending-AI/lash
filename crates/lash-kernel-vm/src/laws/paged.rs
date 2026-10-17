@@ -633,3 +633,101 @@ main {
         List(vec![List(vec![text("a")]), List(vec![text("b")])])
     );
 }
+
+/// Equality domain: allocator/census history is irrelevant; the pc, values,
+/// identities and sharing reachable from a continuation remain observable.
+#[test]
+fn checkpoint_equality_keeps_continuations_and_ignores_allocator_history() {
+    // Record edits are required to vary allocator history and pc independently of execution.
+    use super::embedder::Embedder;
+    use lash_kernel_doc::Value;
+    use lash_kernel_state::paged::tree::Tree;
+    use lash_kernel_state::paged::{ObjectInit, SemanticHeap};
+    let mut run = Embedder::new("main { let a = [1] let b = a do sleep 1 return b }");
+    assert!(matches!(run.run(), crate::Step::Parked(_)));
+    let (root, _) = run.checkpoint();
+    let snapshot = |root: &CheckpointRoot| {
+        crate::conformance::checkpoint(root, Box::new(run.source.clone())).unwrap()
+    };
+    let original = snapshot(&root);
+    let mut heap =
+        PagedHeap::open_header(root.heap, Box::new(run.source.clone()), EditEpoch(20)).unwrap();
+    heap.set_census(Box::new(
+        Census::restore(heap.certificate(), LogicalBytes(64 << 20)).unwrap(),
+    ))
+    .unwrap();
+    heap.allocate_object(ObjectInit::List(vec![Value::Bool(false)]))
+        .unwrap();
+    heap.seal(SealBudget {
+        pages: u64::MAX,
+        bytes: u64::MAX,
+    })
+    .unwrap()
+    .unwrap();
+    let mut garbage = root.clone();
+    garbage.heap = heap.sealed_root().unwrap();
+    assert_eq!(
+        snapshot(&garbage),
+        original,
+        "allocator and unreachable garbage are outside equality"
+    );
+    let mut tasks = Tree::<TaskRecord>::of_keyed(&root.tasks);
+    let key = lash_kernel_state::paged::directory::ordinal_key(0);
+    let mut task = tasks.get(&key, heap.pages()).unwrap().unwrap();
+    let frame_key = lash_kernel_state::paged::directory::ordinal_key(0);
+    let mut frame = task.frames.get(&frame_key, heap.pages()).unwrap().unwrap();
+    frame.statement = lash_kernel_state::paged::SiteRef::new(
+        &lash_kernel_doc::Site {
+            unit: lash_kernel_doc::Unit::Main,
+            path: vec![0],
+        },
+        heap.pages(),
+    )
+    .unwrap();
+    task.frames.write(frame_key, frame, heap.pages()).unwrap();
+    tasks.write(key, task, heap.pages()).unwrap();
+    tasks
+        .seal(
+            heap.pages(),
+            &mut lash_kernel_state::paged::tree::SealWork::new(SealBudget {
+                pages: u64::MAX,
+                bytes: u64::MAX,
+            }),
+        )
+        .unwrap();
+    let mut moved = root;
+    moved.tasks = tasks.keyed_root().unwrap();
+    assert_ne!(snapshot(&moved), original, "a frame pc is exact");
+    let mut bindings = Tree::<BindingRecord>::of_keyed(&garbage.session);
+    let key = lash_kernel_state::paged::metadata::metadata_key(&lash_kernel_doc::Name::new("b"));
+    let mut binding = bindings.get(&key, heap.pages()).unwrap().unwrap();
+    let independent = heap
+        .allocate_object(ObjectInit::List(vec![Value::Int(
+            lash_kernel_doc::heap::IntRef::Inline(1.into()),
+        )]))
+        .unwrap();
+    binding.value = BoundRecord::Value(Value::List(independent));
+    bindings.write(key, binding, heap.pages()).unwrap();
+    bindings
+        .seal(
+            heap.pages(),
+            &mut lash_kernel_state::paged::tree::SealWork::new(SealBudget {
+                pages: u64::MAX,
+                bytes: u64::MAX,
+            }),
+        )
+        .unwrap();
+    heap.seal(SealBudget {
+        pages: u64::MAX,
+        bytes: u64::MAX,
+    })
+    .unwrap()
+    .unwrap();
+    garbage.heap = heap.sealed_root().unwrap();
+    garbage.session = bindings.keyed_root().unwrap();
+    assert_ne!(
+        snapshot(&garbage),
+        original,
+        "equal lists with broken sharing are different graphs"
+    );
+}

@@ -169,7 +169,13 @@ type Ended = Result<(Datum, bool, Vec<(lash_kernel_doc::Name, String)>), End>;
 
 /// What a law compares of a run: how it ended, what it printed, the
 /// requests it made, and its charge.
-type Observed = (Ended, Vec<Datum>, Vec<crate::Request>, u64);
+type Observed = (
+    Ended,
+    Vec<Datum>,
+    Vec<crate::Request>,
+    u64,
+    Vec<crate::conformance::Checkpoint>,
+);
 
 fn ended(end: End) -> Ended {
     match end {
@@ -200,6 +206,7 @@ fn observe(program: &str, bounds: Bounds, plan: &Plan) -> Observed {
         },
     );
     let mut turns = plan.reopen.iter().flatten().copied().cycle();
+    let mut checkpoints = Vec::new();
     let end = loop {
         match embedder.run() {
             Step::Ended(end) => break end,
@@ -209,6 +216,7 @@ fn observe(program: &str, bounds: Bounds, plan: &Plan) -> Observed {
                 }
             }
             Step::Parked(_) => {
+                checkpoints.push(embedder.machine.semantic_checkpoint());
                 if let Some(layout) = turns.next() {
                     embedder.reopen(layout, true);
                 }
@@ -216,12 +224,19 @@ fn observe(program: &str, bounds: Bounds, plan: &Plan) -> Observed {
             }
         }
     };
+    if let End::Finished(finished) = &end
+        && let Some(carry) = &finished.carry
+    {
+        checkpoints
+            .push(crate::conformance::session(carry, Box::new(embedder.source.clone())).unwrap());
+    }
     let charged = crate::Machine::meters(&embedder.machine).charged;
     (
         ended(end),
         embedder.world.printed,
         embedder.requests,
         charged,
+        checkpoints,
     )
 }
 

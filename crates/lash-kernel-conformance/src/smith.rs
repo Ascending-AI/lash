@@ -15,7 +15,7 @@ mod runner;
 pub use runner::{HostCall, Observation, check_interpreter, compare};
 
 /// A program and its environment script. The bytes also choose resource
-/// bounds, delivery order, slices and points at which the executable is lost.
+/// bounds, delivery order and slices. Every projection is cross-resumed.
 #[derive(Clone, Debug)]
 pub struct Smith {
     pub document: Document,
@@ -26,8 +26,8 @@ pub struct Smith {
 /// size and rebuilding. A delivery always belongs to its request identity.
 #[derive(Clone, Debug)]
 pub struct Schedule {
+    /// Zero returns after each statement, including uncharged helper statements.
     pub slices: Vec<u64>,
-    pub rebuild: Vec<bool>,
     pub reverse_deliveries: bool,
     pub fail_effects: bool,
     pub host_seed: u64,
@@ -130,14 +130,11 @@ impl<'a> Arbitrary<'a> for Smith {
             .retain(|name, _| requirements.effects.contains(name));
         let choices = u.int_in_range(1..=8u8)?;
         let mut slices = Vec::new();
-        let mut rebuild = Vec::new();
         for _ in 0..choices {
             slices.push(u.int_in_range(1..=64u64)?);
-            rebuild.push(u.arbitrary()?);
         }
         let schedule = Schedule {
             slices,
-            rebuild,
             reverse_deliveries: u.arbitrary()?,
             fail_effects: u.arbitrary()?,
             host_seed: u.arbitrary()?,
@@ -197,7 +194,16 @@ mod tests {
     /// K-MACH-008 and K-TASK-024, including a child asking after its spawner.
     #[test]
     fn fixed_seed_programs_agree_across_slices() {
-        for seed in 0..64u64 {
+        for (seed, smith) in seeds() {
+            runner::check_slices(&smith)
+                .unwrap_or_else(|error| panic!("seed {seed}: {error}\n{:?}", smith.document));
+        }
+        println!(
+            "kernel-smith slice agreement: executed=64 scheduled/max/every-statement plans=0/3 warm/cold"
+        );
+    }
+    fn seeds() -> impl Iterator<Item = (u64, Smith)> {
+        (0..64u64).map(|seed| {
             let mut state = seed + 1;
             let bytes: Vec<u8> = (0..512)
                 .map(|_| {
@@ -207,10 +213,19 @@ mod tests {
                     state as u8
                 })
                 .collect();
-            let smith = Smith::arbitrary(&mut Unstructured::new(&bytes)).unwrap();
-            runner::check_slices(&smith)
-                .unwrap_or_else(|error| panic!("seed {seed}: {error}\n{:?}", smith.document));
+            (
+                seed,
+                Smith::arbitrary(&mut Unstructured::new(&bytes)).unwrap(),
+            )
+        })
+    }
+
+    /// Conservative memory verdict, with counters rebased at each seal.
+    #[test]
+    fn fixed_seed_memory_verdicts_and_seal_counters_agree() {
+        for (seed, smith) in seeds() {
+            runner::check_memory(&smith).unwrap_or_else(|error| panic!("seed {seed}: {error}"));
         }
-        println!("kernel-smith slice agreement: executed=64 slices=1,7,max");
+        println!("kernel-smith memory agreement: executed=64 plans=0/3 warm/cold");
     }
 }

@@ -368,6 +368,7 @@ fn sites(rule: &str, case: &Case) {
             at.bounds,
             &saved.root,
             at.source,
+            at.admissions,
         )
         .unwrap())
     })
@@ -426,6 +427,7 @@ fn committed(case: &Case) {
         case.environment.bounds.into(),
         &committed.root,
         &session.source,
+        Vec::new(),
     )
     .unwrap();
     let End::Finished(result) = end(&mut restored, &mut world) else {
@@ -438,6 +440,7 @@ fn committed(case: &Case) {
         case.environment.bounds.into(),
         &admitted.root,
         &session.source,
+        crate::projection::admissions(&[lash_kernel_vm::Request::Effect(request.clone())]),
     )
     .unwrap();
     restored.deliver(request.wait, outcome).unwrap();

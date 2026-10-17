@@ -185,7 +185,7 @@ type Trace = (
     Vec<Datum>,
     Vec<crate::Request>,
     u64,
-    Vec<Vec<Vec<u8>>>,
+    Vec<crate::conformance::Checkpoint>,
 );
 
 fn observe(program: &str, bounds: Bounds, layout: Layout, cold: bool) -> Trace {
@@ -206,13 +206,20 @@ fn observe(program: &str, bounds: Bounds, layout: Layout, cold: bool) -> Trace {
     let end = loop {
         let step = embedder.run();
         if let Step::Ended(end) = step {
+            if let End::Finished(finished) = &end
+                && let Some(carry) = &finished.carry
+            {
+                continuations.push(
+                    crate::conformance::session(carry, Box::new(embedder.source.clone())).unwrap(),
+                );
+            }
             break match end {
                 End::Finished(finished) => format!("finished {:?}", finished.result),
                 other => format!("{other:?}"),
             };
         }
         if matches!(step, Step::Parked(_)) {
-            continuations.push(embedder.machine.canonical_continuation_bytes());
+            continuations.push(embedder.machine.semantic_checkpoint());
         }
         if cold {
             embedder.reopen(plans.next().unwrap(), true);
