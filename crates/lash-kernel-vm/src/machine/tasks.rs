@@ -4,8 +4,8 @@ use super::{Task, Wait};
 use crate::compile::Executable;
 use lash_kernel_doc::TaskId;
 use lash_kernel_doc::heap::HeapFault;
-use lash_kernel_state::paged::directory::ordinal_key;
-use lash_kernel_state::paged::tree::{Access, Tree, Version};
+use lash_kernel_state::kernel_internals::directory::ordinal_key;
+use lash_kernel_state::kernel_internals::tree::{Access, Tree, Version};
 use lash_kernel_state::paged::{IncomingRecord, TaskRecord, TaskStateRecord};
 use std::collections::BTreeMap;
 use std::sync::Arc;
@@ -414,7 +414,7 @@ impl Tasks {
         let outstanding = self.rows.live_members(&self.access)?;
         self.rows.seal(
             &self.access,
-            &mut lash_kernel_state::paged::tree::SealWork::new(
+            &mut lash_kernel_state::kernel_internals::tree::SealWork::new(
                 lash_kernel_state::paged::SealBudget {
                     pages: u64::MAX,
                     bytes: u64::MAX,

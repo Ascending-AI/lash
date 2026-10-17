@@ -35,23 +35,34 @@ mod functions;
 mod heap;
 mod interface;
 mod machine;
-pub mod observe;
+mod observe;
 /// The machine's face after the persistent-heap cutover (FIG-6195):
 /// implemented by the paged kernel machine.
-pub mod paged;
+mod paged;
 #[cfg(any(test, feature = "perf-witness"))]
 pub mod perf_witness;
+mod save;
 mod session_editor;
 
 #[cfg(test)]
 mod laws;
 
-pub use compile::{Layout, PreparedLibrary};
+#[cfg(test)]
+pub(crate) use compile::Layout;
+pub use compile::PreparedLibrary;
 pub use functions::{MachineFunctions, register_machine_functions};
 pub use machine::KernelMachine;
 pub use observe::{ChargeTape, Observe, RanDelta, StatementPath};
-pub use paged::{TaskFilter, TaskPage};
+pub use paged::{SealedRoot, TaskFilter, TaskPage};
+pub use save::CellSaveContext;
 pub use session_editor::{SessionEditor, SessionValue};
+
+/// The machine's implementation, for the other kernel crates only: plans
+/// that perturb how a run executes, and the step-structure checks kernel
+/// laws pin. Nothing outside `crates/lash-kernel-*` names this module
+/// (`scripts/check-kernel-boundary.py`, FIG-6688).
+#[doc(hidden)]
+pub mod kernel_internals;
 
 pub use interface::{
     Bound, BoundExceeded, Bounds, CellSave, CellStart, DeliverError, Delivered, EffectMode,

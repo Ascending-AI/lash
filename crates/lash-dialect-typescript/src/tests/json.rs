@@ -568,14 +568,8 @@ fn smith_values() -> Vec<Datum> {
             document: Arc::new(smith.document),
             library: machine::prepared().clone(),
         };
-        let mut machine = super::pages::with_source(
-            program,
-            BOUNDS,
-            start,
-            lash_kernel_vm::Layout::default(),
-            &session.source,
-        )
-        .unwrap();
+        let mut machine =
+            super::pages::with_source(program, BOUNDS, start, &session.source).unwrap();
         let mut console = Console::default();
         loop {
             match machine.run(&mut console, u64::MAX).unwrap() {

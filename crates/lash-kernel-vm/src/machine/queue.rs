@@ -1,6 +1,6 @@
 //! Persistent ordered queues. Keys leave room on both ends across reopen.
 use lash_kernel_doc::heap::HeapFault;
-use lash_kernel_state::paged::tree::{Access, Cell, Tree};
+use lash_kernel_state::kernel_internals::tree::{Access, Cell, Tree};
 
 pub(super) struct Queue<T: Cell> {
     pub(super) rows: Tree<T>,

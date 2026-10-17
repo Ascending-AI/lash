@@ -14,7 +14,8 @@ use lash_kernel_doc::{
     Action, Callee, Document, EffectName, Expr, Function, FunctionId, FunctionRepresentation, Name,
     NativeHeap, Rhs, Signature, Site, Stmt, Unit,
 };
-use lash_kernel_state::paged::{FrozenRef, HeapLifecycle, HeapWriteError, PagedHeap, SemanticHeap};
+use lash_kernel_state::kernel_internals::PagedHeap;
+use lash_kernel_state::paged::{FrozenRef, HeapLifecycle, HeapWriteError, SemanticHeap};
 use serde::{Deserialize, Serialize};
 use std::collections::{BTreeMap, BTreeSet};
 mod graph;
@@ -177,7 +178,7 @@ impl SnapshotHeap for Saving<'_, '_> {
     fn closure_capture(&mut self, id: EntityId, name: &Name) -> Result<Option<Value>, HeapFault> {
         let object = self.heap.closure(id)?;
         match object.captures.get(
-            &lash_kernel_state::paged::metadata::metadata_key(name),
+            &lash_kernel_state::kernel_internals::metadata::metadata_key(name),
             self.heap.pages(),
         )? {
             Some((_, cell)) => self.heap.variable_get(cell).map(Some),
@@ -205,7 +206,7 @@ impl SnapshotHeap for Saving<'_, '_> {
         self.heap.freeze_named(value, named).map_err(write_fault)
     }
 }
-pub fn function_reference(
+pub(crate) fn function_reference(
     heap: &PagedHeap,
     value: &Value,
     values: &FunctionRepresentation,
@@ -562,7 +563,7 @@ impl SavedFunction {
         }
         names
     }
-    pub fn value(&self, heap: &mut PagedHeap) -> Result<Value, HeapWriteError> {
+    pub(crate) fn value(&self, heap: &mut PagedHeap) -> Result<Value, HeapWriteError> {
         let function = Value::Function(heap.text(self.name.as_str()).map_err(native_write)?);
         let Some(token) = &self.token else {
             return Ok(function);
@@ -586,7 +587,8 @@ impl SavedFunction {
         value
     }
     /// Each invocation receives fresh identities over the saved immutable pages.
-    pub fn captures_for_call(
+    #[cfg(test)]
+    pub(crate) fn captures_for_call(
         &self,
         heap: &mut PagedHeap,
     ) -> Result<BTreeMap<Name, Value>, HeapWriteError> {

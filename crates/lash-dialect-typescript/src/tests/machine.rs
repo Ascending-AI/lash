@@ -287,14 +287,8 @@ fn start_with_bindings(source: &str, values: super::pages::Session) -> (KernelMa
         modes: Default::default(),
         host: Vec::new(),
     };
-    let machine = super::pages::with_source(
-        program,
-        BOUNDS,
-        start,
-        lash_kernel_vm::Layout::default(),
-        &values.source,
-    )
-    .unwrap_or_else(|error| panic!("{error}"));
+    let machine = super::pages::with_source(program, BOUNDS, start, &values.source)
+        .unwrap_or_else(|error| panic!("{error}"));
     (machine, text)
 }
 
@@ -468,7 +462,6 @@ pub(super) fn plain_record_resume(source: &str, slice: u64, restore: bool) -> (D
             modes: Default::default(),
             host: Vec::new(),
         },
-        lash_kernel_vm::Layout::default(),
         &source_pages,
     )
     .unwrap();
@@ -479,13 +472,7 @@ pub(super) fn plain_record_resume(source: &str, slice: u64, restore: bool) -> (D
             .run(&mut Console::default(), slice)
             .expect("law run");
         if restore && matches!(step, Step::Slice | Step::Parked(_)) {
-            super::pages::reopen(
-                &mut machine,
-                &program,
-                BOUNDS,
-                &source_pages,
-                lash_kernel_vm::Layout::default(),
-            );
+            super::pages::reopen(&mut machine, &program, BOUNDS, &source_pages);
             imports += 1;
         }
         match step {

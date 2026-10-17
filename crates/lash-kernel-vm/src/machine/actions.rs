@@ -26,8 +26,8 @@ use crate::interface::{Bound, EffectMode, EffectRequest, Host, Request, SleepReq
 use lash_kernel_doc::NativeHeap;
 use lash_kernel_doc::graph_tokens::{decode_body, encode_body};
 use lash_kernel_doc::heap::{ErrorRef, Payload};
-use lash_kernel_state::paged::directory::ordinal_key;
-use lash_kernel_state::paged::tree::{Access, Cell, Tree};
+use lash_kernel_state::kernel_internals::directory::ordinal_key;
+use lash_kernel_state::kernel_internals::tree::{Access, Cell, Tree};
 use lash_kernel_state::paged::{
     ObjectInit, PendingRecord, PhaseRecord, RoleRecord, SemanticHeap, WaitKindRecord, WaitPhase,
     WaitRecord,
@@ -627,7 +627,7 @@ impl KernelMachine {
                         closure
                             .captures
                             .get(
-                                &lash_kernel_state::paged::metadata::metadata_key(name),
+                                &lash_kernel_state::kernel_internals::metadata::metadata_key(name),
                                 self.heap.pages(),
                             )?
                             .map(|(_, id)| id)

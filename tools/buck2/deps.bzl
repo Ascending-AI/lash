@@ -1495,6 +1495,7 @@ PACKAGE_DEPS = {
             "lash_kernel_state": "//crates/lash-kernel-state:lash-kernel-state"
         },
         "normal": {
+            "lash_kernel_dialect": "//crates/lash-kernel-dialect:lash-kernel-dialect",
             "lash_kernel_doc": "//crates/lash-kernel-doc:lash-kernel-doc",
             "lash_kernel_exec": "//crates/lash-kernel-exec:lash-kernel-exec",
             "lash_kernel_state": "//crates/lash-kernel-state:lash-kernel-state",

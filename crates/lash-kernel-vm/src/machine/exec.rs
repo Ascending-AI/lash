@@ -567,7 +567,7 @@ impl KernelMachine {
             &exe.lib(lib).charge,
             |index, measure| {
                 let value = args.get(
-                    &lash_kernel_state::paged::directory::ordinal_key(index as u64),
+                    &lash_kernel_state::kernel_internals::directory::ordinal_key(index as u64),
                     self.heap.pages(),
                 )?;
                 self.measure(value.as_ref(), measure)
@@ -751,7 +751,7 @@ impl KernelMachine {
                             .map_err(super::write_halt)
                     })?;
                     args.write(
-                        lash_kernel_state::paged::directory::ordinal_key(at as u64),
+                        lash_kernel_state::kernel_internals::directory::ordinal_key(at as u64),
                         value,
                         self.heap.pages(),
                     )?;
@@ -806,7 +806,7 @@ impl KernelMachine {
         let saved =
             super::Tree::<lash_kernel_state::paged::FunctionRecord>::of_keyed(&self.functions)
                 .get(
-                    &lash_kernel_state::paged::metadata::metadata_key(function),
+                    &lash_kernel_state::kernel_internals::metadata::metadata_key(function),
                     self.heap.pages(),
                 )?;
         let Some(saved) = saved else {
@@ -936,7 +936,7 @@ impl KernelMachine {
         _exe: &Executable,
         wait: crate::interface::WaitId,
     ) -> Eval<Value> {
-        let key = lash_kernel_state::paged::directory::ordinal_key(wait.0);
+        let key = lash_kernel_state::kernel_internals::directory::ordinal_key(wait.0);
         let pending = self
             .waits
             .get(&key, self.heap.pages())?

@@ -177,3 +177,16 @@ pub trait PageSource {
     /// for a child no grant authorizes, and transport faults.
     fn seal(&mut self, page: PageBody) -> Result<PageRef, HeapFault>;
 }
+
+/// Resolves only children authenticated by the page just read.
+pub fn grant(page: &mut PageRef, children: &[PageRef]) -> Result<(), HeapFault> {
+    *page = children
+        .iter()
+        .find(|p| p.id == page.id)
+        .copied()
+        .ok_or_else(|| HeapFault::Corrupt {
+            page: page.id,
+            reason: "a descriptor references an undeclared child".into(),
+        })?;
+    Ok(())
+}

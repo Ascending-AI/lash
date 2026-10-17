@@ -101,7 +101,8 @@ fn formula(case: &Case) {
 fn session(rule: &str, case: &Case) {
     use crate::pages::Session;
     use lash_kernel_doc::{Name, Value};
-    use lash_kernel_state::paged::{BindingRecord, BoundRecord, tree::Tree};
+    use lash_kernel_state::kernel_internals::tree::Tree;
+    use lash_kernel_state::paged::{BindingRecord, BoundRecord};
     let library = registry();
     let mut session = Session::default();
     let mut machine = start(
@@ -124,14 +125,14 @@ fn session(rule: &str, case: &Case) {
         let table = Tree::<BindingRecord>::of_keyed(&root);
         let a = table
             .get(
-                &lash_kernel_state::paged::metadata::metadata_key(&Name::new("a")),
+                &lash_kernel_state::kernel_internals::metadata::metadata_key(&Name::new("a")),
                 heap.pages(),
             )
             .unwrap()
             .unwrap();
         let b = table
             .get(
-                &lash_kernel_state::paged::metadata::metadata_key(&Name::new("b")),
+                &lash_kernel_state::kernel_internals::metadata::metadata_key(&Name::new("b")),
                 heap.pages(),
             )
             .unwrap()
@@ -199,20 +200,19 @@ fn sites(rule: &str, case: &Case) {
     let actual = crate::machine::run_case::<KernelMachine>(&library, case, &mut |mut at| {
         inspected += 1;
         let saved = at.machine.seal(crate::pages::BUDGET).unwrap().unwrap();
-        let heap = lash_kernel_state::paged::PagedHeap::open_header(
+        let heap = lash_kernel_state::kernel_internals::PagedHeap::open_header(
             saved.root.heap,
             Box::new(at.source.clone()),
             lash_kernel_state::paged::EditEpoch(2),
         )
         .unwrap();
-        let tasks =
-            lash_kernel_state::paged::tree::Tree::<lash_kernel_state::paged::TaskRecord>::of_keyed(
-                &saved.root.tasks,
-            );
+        let tasks = lash_kernel_state::kernel_internals::tree::Tree::<
+            lash_kernel_state::paged::TaskRecord,
+        >::of_keyed(&saved.root.tasks);
         let task = |n| {
             tasks
                 .get(
-                    &lash_kernel_state::paged::directory::ordinal_key(n),
+                    &lash_kernel_state::kernel_internals::directory::ordinal_key(n),
                     heap.pages(),
                 )
                 .unwrap()
@@ -221,7 +221,7 @@ fn sites(rule: &str, case: &Case) {
         let frame = |task: &lash_kernel_state::paged::TaskRecord, n| {
             task.frames
                 .get(
-                    &lash_kernel_state::paged::directory::ordinal_key(n),
+                    &lash_kernel_state::kernel_internals::directory::ordinal_key(n),
                     heap.pages(),
                 )
                 .unwrap()
@@ -256,7 +256,7 @@ fn sites(rule: &str, case: &Case) {
                     inner
                         .finally
                         .get(
-                            &lash_kernel_state::paged::directory::ordinal_key(0),
+                            &lash_kernel_state::kernel_internals::directory::ordinal_key(0),
                             heap.pages()
                         )
                         .unwrap()
@@ -304,7 +304,9 @@ fn sites(rule: &str, case: &Case) {
                     task(0)
                         .occurrences
                         .get(
-                            &lash_kernel_state::paged::metadata::metadata_key(&spawn.site),
+                            &lash_kernel_state::kernel_internals::metadata::metadata_key(
+                                &spawn.site
+                            ),
                             heap.pages()
                         )
                         .unwrap(),
@@ -320,7 +322,9 @@ fn sites(rule: &str, case: &Case) {
                     child
                         .occurrences
                         .get(
-                            &lash_kernel_state::paged::metadata::metadata_key(&identity.site),
+                            &lash_kernel_state::kernel_internals::metadata::metadata_key(
+                                &identity.site
+                            ),
                             heap.pages()
                         )
                         .unwrap(),
@@ -344,7 +348,7 @@ fn sites(rule: &str, case: &Case) {
                 let site = call
                     .loops
                     .get(
-                        &lash_kernel_state::paged::directory::ordinal_key(0),
+                        &lash_kernel_state::kernel_internals::directory::ordinal_key(0),
                         heap.pages(),
                     )
                     .unwrap()
@@ -399,20 +403,19 @@ fn committed(case: &Case) {
     let outcome = lash_kernel_vm::Outcome::Completed(int(7));
     machine.deliver(request.wait, outcome.clone()).unwrap();
     let committed = machine.seal(crate::pages::BUDGET).unwrap().unwrap();
-    let heap = lash_kernel_state::paged::PagedHeap::open_header(
+    let heap = lash_kernel_state::kernel_internals::PagedHeap::open_header(
         committed.root.heap,
         Box::new(session.source.clone()),
         lash_kernel_state::paged::EditEpoch(2),
     )
     .unwrap();
-    let waits =
-        lash_kernel_state::paged::tree::Tree::<lash_kernel_state::paged::WaitRecord>::of_keyed(
-            &committed.root.waits,
-        );
+    let waits = lash_kernel_state::kernel_internals::tree::Tree::<
+        lash_kernel_state::paged::WaitRecord,
+    >::of_keyed(&committed.root.waits);
     assert!(matches!(
         waits
             .get(
-                &lash_kernel_state::paged::directory::ordinal_key(request.wait.0),
+                &lash_kernel_state::kernel_internals::directory::ordinal_key(request.wait.0),
                 heap.pages()
             )
             .unwrap()

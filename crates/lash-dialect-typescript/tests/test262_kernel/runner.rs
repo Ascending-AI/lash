@@ -210,14 +210,8 @@ impl<M: Machine> Executor for OnMachine<M> {
             session: None,
             host: Vec::new(),
         };
-        let mut machine = M::start(
-            program,
-            BOUNDS,
-            start,
-            Box::new(session.source.clone()),
-            session.census(BOUNDS.memory),
-        )
-        .map_err(|error| error.to_string())?;
+        let mut machine = M::start(program, BOUNDS, start, Box::new(session.source.clone()))
+            .map_err(|error| error.to_string())?;
         let mut host = TestHost::default();
         // The value the program's `finish` call ended it with.
         let mut finished_with = None;

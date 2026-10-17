@@ -59,7 +59,7 @@ pub(crate) fn answer_loaded(
     } = replay;
     let mut counter = WorkCounter::new(Some(input.work));
     let mut instrument = recording::Recording {
-        heap: &mut heap,
+        heap: &mut *heap,
         log: Vec::new(),
     };
     let called = std::panic::catch_unwind(std::panic::AssertUnwindSafe(|| {
@@ -79,24 +79,25 @@ pub(crate) fn answer_loaded(
                 .saturating_add(r.bytes)
         });
     drop(instrument);
+    let heap: &dyn NativeHeap = &*heap;
     let mut outcome = String::new();
     let result = match called {
         Ok(Ok(value)) => {
             outcome.push_str("ok ");
-            write_value(&heap, &identities, &value, &mut outcome);
+            write_value(heap, &identities, &value, &mut outcome);
             value
         }
         Ok(Err(NativeError::Raised(error))) => {
             let _ = write!(
                 outcome,
                 "raised {:?} {:?} ",
-                text(&heap, &error.kind),
-                text(&heap, &error.message)
+                text(heap, &error.kind),
+                text(heap, &error.message)
             );
             let data = heap
                 .error_data(&error)
                 .unwrap_or_else(|error| panic!("native error payload: {error}"));
-            write_value(&heap, &identities, &data, &mut outcome);
+            write_value(heap, &identities, &data, &mut outcome);
             Value::Absent
         }
         Ok(Err(NativeError::Guard(guard))) => {
@@ -132,7 +133,7 @@ pub(crate) fn answer_loaded(
                     .and_then(|i| args.get(i))
                     .unwrap_or(&Value::Absent),
             };
-            measure_value(&heap, value, measure)
+            measure_value(heap, value, measure)
         });
     let prepared_difference = prepared
         .filter(|_| !outcome.starts_with("guard "))
@@ -143,7 +144,7 @@ pub(crate) fn answer_loaded(
             match called {
                 Ok(Some(value)) => {
                     observed.push_str("ok ");
-                    write_value(&heap, &identities, &value, &mut observed);
+                    write_value(heap, &identities, &value, &mut observed);
                 }
                 Ok(None) => return None,
                 Err(_) => observed.push_str("panicked"),

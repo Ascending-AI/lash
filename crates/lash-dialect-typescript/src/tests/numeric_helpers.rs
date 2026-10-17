@@ -171,7 +171,6 @@ fn run(program: &Program, left: &Datum, right: &Datum, relay: bool) -> Ran {
             modes: Default::default(),
             host: Vec::new(),
         },
-        lash_kernel_vm::Layout::default(),
         &source,
     )
     .unwrap();
@@ -181,13 +180,7 @@ fn run(program: &Program, left: &Datum, right: &Datum, relay: bool) -> Ran {
             .unwrap()
         {
             Step::Slice => {
-                super::pages::reopen(
-                    &mut machine,
-                    program,
-                    BOUNDS,
-                    &source,
-                    lash_kernel_vm::Layout::default(),
-                );
+                super::pages::reopen(&mut machine, program, BOUNDS, &source);
             }
             Step::Ended(end) => {
                 assert!(

@@ -29,7 +29,8 @@ use lash_core_store::execution_state::{
 use lash_durable::domain::pages::RootLease;
 use lash_kernel_doc::heap::{HeapFault, PageGrant, PageId, PageRef};
 use lash_kernel_doc::{Datum, FunctionId, KERNEL_VERSION, Name, NumberPolicy};
-use lash_kernel_state::paged::{KeyedRoot, PageAnswer, PageBody, PageSource, SessionRoot};
+use lash_kernel_state::paged::session::{Note, SessionNotes, edit_notes, read_notes};
+use lash_kernel_state::paged::{PageAnswer, PageBody, PageSource, SessionRoot};
 use lash_kernel_vm::{SessionEditor, SessionValue};
 use lash_vm_broker::kernel::pages::{ParentSeal, SharedSpool, SpoolRoot, answer_page};
 use lash_vm_client::service::LowerFunction;
@@ -38,7 +39,6 @@ use super::pages::{PageAccessError, SessionPageAccess};
 use super::snapshot::SessionOpenError;
 
 mod graph;
-mod notes;
 
 /// The reserved binding the history projection answers; no cell binds it.
 pub(crate) const HISTORY_BINDING: &str = "history";
@@ -56,9 +56,9 @@ struct Version {
     bytes: Option<Arc<[u8]>>,
     session: Option<SessionRoot>,
     cells: u64,
-    /// The session's notes tree, keyed by name beside the bindings
-    /// (`notes`): unbounded data lives on pages, never in the descriptor.
-    notes: KeyedRoot,
+    /// The session's notes, keyed by name beside the bindings: unbounded
+    /// data lives on pages, never in the descriptor.
+    notes: SessionNotes,
     /// The library functions the session's saved functions pin, together
     /// (FIG-5799): bounded by the build's library, never by the session.
     pins: BTreeSet<FunctionId>,
@@ -67,7 +67,7 @@ struct Version {
 impl Default for Version {
     fn default() -> Self {
         Self {
-            notes: KeyedRoot::Empty,
+            notes: SessionNotes::EMPTY,
             ..Self::zeroed()
         }
     }
@@ -80,7 +80,7 @@ impl Version {
             bytes: None,
             session: None,
             cells: 0,
-            notes: KeyedRoot::Empty,
+            notes: SessionNotes::EMPTY,
             pins: BTreeSet::new(),
         }
     }
@@ -102,7 +102,7 @@ struct View {
     /// restore until a call loads it.
     names: Option<BTreeSet<Name>>,
     /// Each name's notes, loaded with the names.
-    notes: Option<BTreeMap<Name, notes::Note>>,
+    notes: Option<BTreeMap<Name, Note>>,
 }
 
 /// The session as it stood before the active cell.
@@ -283,9 +283,9 @@ impl CodeModeExecutionState {
         let Some(session) = &self.current.session else {
             return Vec::new();
         };
-        std::iter::once(session.heap)
-            .chain(session.bindings.page())
-            .chain(session.functions.page())
+        session
+            .pages()
+            .into_iter()
             .map(|page| NodeId(page.id.0))
             .collect()
     }
@@ -350,7 +350,7 @@ impl CodeModeExecutionState {
             .current
             .session
             .as_ref()
-            .and_then(|session| session.bindings.page())
+            .and_then(SessionRoot::bindings_page)
         else {
             return Ok(());
         };
@@ -373,7 +373,7 @@ impl CodeModeExecutionState {
             .await?;
         let notes = self
             .pages
-            .read(move |source| notes::read(&notes_root, source))
+            .read(move |source| read_notes(&notes_root, source))
             .await?;
         self.view.names = Some(names);
         self.view.notes = Some(notes);
@@ -426,11 +426,9 @@ impl CodeModeExecutionState {
                 next.notes = self
                     .pages
                     .read(move |source| {
-                        notes::edit(&root, source, |edit| {
+                        edit_notes(&root, source, |edit| {
                             for name in &carried {
-                                edit.note(name, |record| {
-                                    record.not_carried = None;
-                                })?;
+                                edit.carried(name)?;
                             }
                             Ok(())
                         })
@@ -619,16 +617,13 @@ impl CodeModeExecutionState {
         not_carried: Vec<(Name, String)>,
     ) -> Result<CellChanges, PageAccessError> {
         let spool = self.turn_spool()?;
-        let (old_bindings, old_functions) = match &self.current.session {
-            Some(session) => (session.bindings, session.functions),
-            None => (KeyedRoot::Empty, KeyedRoot::Empty),
-        };
+        let old = self.current.session;
         let (bindings, functions) = self
             .pages
             .read(move |source| {
                 let editor = SessionEditor::open(Some(&carry), source)?;
-                let bindings = editor.changed(&old_bindings, &carry.bindings)?;
-                let functions = editor.changed_functions(&old_functions, &carry.functions)?;
+                let bindings = editor.changed(old.as_ref(), &carry)?;
+                let functions = editor.changed_functions(old.as_ref(), &carry)?;
                 Ok((bindings, functions))
             })
             .await?;
@@ -706,22 +701,15 @@ impl CodeModeExecutionState {
         next.notes = self
             .pages
             .read(move |source| {
-                notes::edit(&notes_root, source, |edit| {
+                edit_notes(&notes_root, source, |edit| {
                     for name in &edit_bound {
-                        edit.note(name, |record| {
-                            record.not_carried = None;
-                        })?;
+                        edit.carried(name)?;
                     }
                     for (name, why) in &edit_not_carried {
-                        let why = edit.name_text(why)?;
-                        edit.note(name, |record| {
-                            record.not_carried = Some(why.clone());
-                        })?;
+                        edit.not_carried(name, why)?;
                     }
                     for (name, saved) in &edit_saved {
-                        edit.note(name, |record| {
-                            record.saved = *saved;
-                        })?;
+                        edit.saved(name, *saved)?;
                     }
                     Ok(())
                 })
@@ -1205,13 +1193,13 @@ pub fn saved_function_pins(
     Ok(stored_descriptor(state)?.pins)
 }
 
-/// The stored binding tree's root, of the execution state a stored
-/// session's descriptor names: what a catalog check looks a tool's
-/// namespace root up in (FIG-5824).
+/// The carried session of the execution state a stored session's
+/// descriptor names: what a catalog check looks a tool's namespace root up
+/// in (FIG-5824).
 pub(crate) fn stored_session_descriptor(
     state: &HydratedExecutionGraph,
-) -> Result<KeyedRoot, SessionOpenError> {
-    Ok(stored_descriptor(state)?.session.bindings)
+) -> Result<SessionRoot, SessionOpenError> {
+    Ok(stored_descriptor(state)?.session)
 }
 
 /// The helper releases this build holds, read once: a build's releases
@@ -1223,51 +1211,37 @@ fn held_releases() -> Option<&'static lash_vm_broker::kernel::state::ReleaseGrap
         .as_ref()
 }
 
-/// The stored check (FIG-5824): which of `roots` the stored binding tree
-/// `bindings` binds, read through `pages`, the committed head's: a point
+/// The stored check (FIG-5824): which of `roots` the stored session
+/// `session` binds, read through `pages`, the committed head's: a point
 /// lookup per root, never a full listing. A page the store cannot answer
 /// fails the check, never passes it.
 ///
 /// # Errors
 ///
 /// The store's faults leasing or reading the head's pages, or the heap's
-/// reading the tree's.
+/// reading the bindings'.
 pub(crate) async fn stored_binding_roots(
     pages: &SessionPages,
-    bindings: &KeyedRoot,
+    session: &SessionRoot,
     roots: &[String],
 ) -> Result<BTreeSet<String>, PageAccessError> {
-    use lash_kernel_state::paged::metadata::metadata_key;
-    use lash_kernel_state::paged::tree::{Access, Tree};
-
     let mut bound = BTreeSet::new();
-    if roots.is_empty() || bindings.is_empty() {
+    if roots.is_empty() || session.bindings_page().is_none() {
         return Ok(bound);
     }
     let mut access = SessionPageAccess::default();
     access.note(Some(pages));
-    let bindings = *bindings;
-    let roots = roots.to_vec();
+    let session = *session;
+    let roots: Vec<Name> = roots.iter().map(|root| Name::new(root.as_str())).collect();
     let found = access
         .read(move |source| {
-            let access = Access::new(source);
-            let tree = Tree::<lash_kernel_state::paged::BindingRecord>::of_keyed(&bindings);
-            let mut bound = BTreeSet::new();
-            for root in &roots {
-                if tree
-                    .get(&metadata_key(&Name::new(root.as_str())), &access)?
-                    .is_some()
-                {
-                    bound.insert(root.clone());
-                }
-            }
-            Ok(bound)
+            lash_kernel_state::paged::session::bound_names(&session, &roots, source)
         })
         .await;
     access.release().await;
     match found {
         Ok(found) => {
-            bound.extend(found);
+            bound.extend(found.into_iter().map(|name| name.as_str().to_owned()));
             Ok(bound)
         }
         Err(error) => Err(error),

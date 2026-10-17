@@ -249,7 +249,7 @@ Dialect packages sit beside them: `lash-dialect-typescript`, `lash-ext-regex-ecm
 4. **The machine parks; the embedder commits.** `lash-kernel-vm` seals checkpoint roots and opens them. Page staging, publication, durable admission, transactions, ownership, root leases, retirement, retries and processes stay in `lash-vm-broker` and the durable engine.
 5. **Isolation is the embedder's choice.** The machine runs in-process. lash hosts it in resettable worker processes.
 6. **The kernel owns its versions.** lash's fleet-format machinery wraps them.
-7. **Small public surfaces.** Each crate exports a short, documented facade.
+7. **Small public surfaces.** Each crate exports a short, documented facade. Code outside `crates/lash-kernel-*` uses the machine's embedding API and the kernel's semantic readers (a session's pages, bound names and notes, the helper probe heap, a cell's saving context), never the paged heap's or the machine's internals: those are crate-private, and what one kernel crate builds on in another is exported only through its `#[doc(hidden)]` `kernel_internals` module, which `scripts/check-kernel-boundary.py` keeps inside the kernel (FIG-6688). The one diagnostic seam outside it, `lash_kernel_vm::perf_witness`, sits behind the `perf-witness` feature and never ships in production.
 8. **Embedding is tested.** A minimal embedder outside lash (load a document, run it, answer effects from a table, park and resume) is part of the kernel's tests.
 
 **What stays in lash.** The worker pool, protocol and client; the broker; the process engine integration; the RLM protocol; tools, plugins and tracing.

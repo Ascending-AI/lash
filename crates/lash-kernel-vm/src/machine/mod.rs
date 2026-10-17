@@ -33,7 +33,7 @@ use std::sync::Arc;
 
 use lash_kernel_doc::{Datum, DocumentId, EntityId, Name, TaskId, Value};
 
-use crate::Layout;
+use crate::compile::Layout;
 use crate::compile::{BlockId, CodeId, Executable, LibId, StmtId};
 use crate::data::{Raised, copy_out};
 use crate::heap::value_bytes;
@@ -43,12 +43,13 @@ use crate::interface::{
 };
 use crate::observe::{Event, GuestPhase, Observer};
 use lash_kernel_doc::heap::{ErrorRef, HeapFault, PageId};
-use lash_kernel_state::paged::directory::ordinal_key;
-use lash_kernel_state::paged::tree::{Access, Tree};
+use lash_kernel_state::kernel_internals::PagedHeap;
+use lash_kernel_state::kernel_internals::directory::ordinal_key;
+use lash_kernel_state::kernel_internals::tree::{Access, Tree};
 use lash_kernel_state::paged::{
     BindingRecord, BoundRecord, EndedTask, FrameRecord, HeapLifecycle, HeapWriteError,
-    IncomingRecord as Incoming, JoinerRecord as Joiner, ListJoinRecord as ListJoin, PagedHeap,
-    SemanticHeap, TaskStateRecord as TaskState, WaitPhase, WaitRecord,
+    IncomingRecord as Incoming, JoinerRecord as Joiner, ListJoinRecord as ListJoin, SemanticHeap,
+    TaskStateRecord as TaskState, WaitPhase, WaitRecord,
 };
 use loops::Cursor;
 use session::{keyed, open_tree};
@@ -517,7 +518,7 @@ impl KernelMachine {
     /// the machine once derived it at run time. A run where the two
     /// disagree ends with a fault; the check changes nothing else a run
     /// does. Laws use it.
-    pub fn verify_step_structure(&mut self) {
+    pub(crate) fn verify_step_structure(&mut self) {
         self.steps.verify = true;
     }
 
@@ -525,12 +526,12 @@ impl KernelMachine {
     /// (`lash_kernel_exec::verify_stream`): each range is well formed and
     /// spans no Boundary. Gives how many statements it checked; the
     /// library's are [`crate::PreparedLibrary::verify_stream`]'s.
-    pub fn verify_stream(&self) -> Result<usize, lash_kernel_exec::KirError> {
+    pub(crate) fn verify_stream(&self) -> Result<usize, lash_kernel_exec::KirError> {
         self.exe.verify_stream()
     }
 
     /// How many statement ends the step-structure check has passed.
-    pub fn verified_steps(&self) -> u64 {
+    pub(crate) fn verified_steps(&self) -> u64 {
         self.steps.verified
     }
 
@@ -545,7 +546,7 @@ impl KernelMachine {
             }
             let name = Name::new(effect.as_str());
             self.modes.write(
-                lash_kernel_state::paged::metadata::metadata_key(&name),
+                lash_kernel_state::kernel_internals::metadata::metadata_key(&name),
                 lash_kernel_state::paged::NameRef::new(&name, self.heap.pages())?,
                 self.heap.pages(),
             )?;
@@ -561,7 +562,7 @@ impl KernelMachine {
             if self
                 .modes
                 .get(
-                    &lash_kernel_state::paged::metadata::metadata_key(&name),
+                    &lash_kernel_state::kernel_internals::metadata::metadata_key(&name),
                     self.heap.pages(),
                 )?
                 .is_some()
@@ -807,7 +808,7 @@ impl KernelMachine {
                 Joiner::Single(joiner) => self.wake(joiner, Incoming::Joined(task))?,
                 Joiner::List(order) => {
                     let Some(join) = self.joins.get(
-                        &lash_kernel_state::paged::directory::ordinal_key(order),
+                        &lash_kernel_state::kernel_internals::directory::ordinal_key(order),
                         &access,
                     )?
                     else {

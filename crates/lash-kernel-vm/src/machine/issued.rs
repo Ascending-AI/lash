@@ -3,7 +3,7 @@
 //! ones are the newest rows of the waits table: a park reads only them,
 //! never the waits it reported before.
 use super::*;
-use lash_kernel_state::paged::directory::ordinal_key;
+use lash_kernel_state::kernel_internals::directory::ordinal_key;
 
 /// Where the issued waits start, and how many remain: every wait at or
 /// after `from` is issued, and none before it is. Never saved: a machine

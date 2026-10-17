@@ -1,8 +1,7 @@
 //! Regex laws use the actual paged heap and allocation census.
 use lash_kernel_doc::heap::*;
 use lash_kernel_doc::{Datum, ErrorDatum, Value};
-use lash_kernel_state::paged::census_impl::Census;
-use lash_kernel_state::paged::*;
+use lash_kernel_state::paged::{PageAnswer, PageBody, PageSource, ProbeHeap};
 use std::cell::RefCell;
 use std::collections::{BTreeMap, BTreeSet};
 use std::ops::ControlFlow;
@@ -42,15 +41,9 @@ impl PageSource for Source {
         Ok(page)
     }
 }
-pub(super) fn fresh() -> PagedHeap {
-    let mut heap = PagedHeap::fresh(Box::<Source>::default(), EditEpoch(1));
-    heap.set_census(Box::new(
-        Census::restore(heap.certificate(), LogicalBytes(1 << 30)).unwrap(),
-    ))
-    .unwrap();
-    heap
+pub(super) fn fresh() -> ProbeHeap {
+    ProbeHeap::fresh(Box::<Source>::default()).unwrap()
 }
-
 fn text(heap: &dyn NativeHeap, value: &TextRef) -> String {
     let mut out = String::new();
     heap.payload_visit(
@@ -74,7 +67,7 @@ pub(super) trait Fixture {
     fn size(&self, value: &Value) -> u64;
     fn deep_size(&self, value: &Value, seen: &mut BTreeSet<EntityId>) -> u64;
 }
-impl Fixture for PagedHeap {
+impl Fixture for ProbeHeap {
     fn record(&mut self, fields: &[(&str, Value)]) -> Value {
         let fields = fields
             .iter()
@@ -96,10 +89,10 @@ impl Fixture for PagedHeap {
             Value::Absent => Datum::Absent,
             Value::Bool(v) => Datum::Bool(*v),
             Value::Int(IntRef::Inline(v)) => Datum::Int(v.clone()),
-            Value::Text(v) => Datum::Text(text(self, v)),
+            Value::Text(v) => Datum::Text(text(&**self, v)),
             Value::Error(v) => Datum::Error(Box::new(ErrorDatum {
-                kind: text(self, &v.kind),
-                message: text(self, &v.message),
+                kind: text(&**self, &v.kind),
+                message: text(&**self, &v.message),
                 data: self.datum(&self.error_data(v).unwrap()),
             })),
             Value::List(id) => {
@@ -120,7 +113,7 @@ impl Fixture for PagedHeap {
                     let Element::Field { name, value } = element else {
                         unreachable!()
                     };
-                    out.push((text(self, name), self.datum(value)));
+                    out.push((text(&**self, name), self.datum(value)));
                     ControlFlow::Continue(())
                 })
                 .unwrap();

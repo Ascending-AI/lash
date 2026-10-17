@@ -154,7 +154,6 @@ fn observe<M: Machine>(
         smith.schedule.bounds,
         start,
         Box::new(source.clone()),
-        session.census(smith.schedule.bounds.memory),
     ) {
         Ok(machine) => machine,
         Err(refusal) => return Ok(Execution::Refused(refusal)),
@@ -322,15 +321,15 @@ fn agree(a: &Execution<Observation>, b: &Execution<Observation>) -> bool {
 pub fn compare<A: Machine, B: Machine>(smith: &Smith) -> Result<(), HarnessError> {
     compare_plans::<A, B>(
         smith,
-        lash_kernel_vm::Layout::default(),
-        lash_kernel_vm::Layout::default(),
+        lash_kernel_vm::kernel_internals::Layout::default(),
+        lash_kernel_vm::kernel_internals::Layout::default(),
     )
 }
 
 fn compare_plans<A: Machine, B: Machine>(
     smith: &Smith,
-    a_layout: lash_kernel_vm::Layout,
-    b_layout: lash_kernel_vm::Layout,
+    a_layout: lash_kernel_vm::kernel_internals::Layout,
+    b_layout: lash_kernel_vm::kernel_internals::Layout,
 ) -> Result<(), HarnessError> {
     smith.admit().map_err(fault)?;
     let mut reference = Projector {
@@ -361,15 +360,15 @@ fn compare_plans<A: Machine, B: Machine>(
 pub fn check_interpreter(smith: &Smith) -> Result<(), HarnessError> {
     compare_plans::<crate::projection::Plan<0>, crate::projection::Plan<3>>(
         smith,
-        lash_kernel_vm::Layout(0),
-        lash_kernel_vm::Layout(3),
+        lash_kernel_vm::kernel_internals::Layout(0),
+        lash_kernel_vm::kernel_internals::Layout(3),
     )?;
     let mut statements = smith.clone();
     statements.schedule.slices = vec![0];
     compare_plans::<crate::projection::Plan<0>, crate::projection::Plan<3>>(
         &statements,
-        lash_kernel_vm::Layout(0),
-        lash_kernel_vm::Layout(3),
+        lash_kernel_vm::kernel_internals::Layout(0),
+        lash_kernel_vm::kernel_internals::Layout(3),
     )?;
     let a = without_slices(observe::<KernelMachine>(
         smith,
@@ -446,7 +445,7 @@ pub(super) fn check_memory(smith: &Smith) -> Result<(), HarnessError> {
     let mut b = Projector {
         imports: Some(&a.images),
         cold: true,
-        layout: lash_kernel_vm::Layout(3),
+        layout: lash_kernel_vm::kernel_internals::Layout(3),
         ..Projector::default()
     };
     let cold = observe::<crate::projection::Plan<3>>(smith, &[0], &mut b)?;

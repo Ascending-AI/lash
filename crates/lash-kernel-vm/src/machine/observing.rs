@@ -114,7 +114,7 @@ impl KernelMachine {
     /// calls, statements and expressions, self and inclusive charge,
     /// native calls and heap insertions. [`Self::work`] reads the counts.
     /// Counting changes no result, charge, park or export.
-    pub fn count_work(&mut self) {
+    pub(crate) fn count_work(&mut self) {
         let counting = Counting::new(
             self.exe.code_count(),
             self.exe.lib_count(),
@@ -126,7 +126,7 @@ impl KernelMachine {
 
     /// The work counted since [`Self::count_work`], or nothing when the
     /// machine does not count.
-    pub fn work(&self) -> Option<WorkReport> {
+    pub(crate) fn work(&self) -> Option<WorkReport> {
         let counting = self.observer.as_ref()?.work.as_ref()?;
         Some(WorkReport::of(
             counting,
@@ -147,12 +147,12 @@ impl KernelMachine {
     /// `context` from here on, for a sampler the embedder runs. The machine
     /// is the context's only writer until it is dropped or publishes to
     /// another; the context reads as inactive once it is dropped.
-    pub fn publish_context(&mut self, context: Arc<GuestContext>) {
+    pub(crate) fn publish_context(&mut self, context: Arc<GuestContext>) {
         self.observer_mut().publish(context);
     }
 
     /// What the tokens of this run's counts and context name.
-    pub fn guest_symbols(&self) -> GuestSymbols {
+    pub(crate) fn guest_symbols(&self) -> GuestSymbols {
         GuestSymbols::of(&self.exe)
     }
 

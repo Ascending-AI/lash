@@ -1,7 +1,7 @@
 use super::*;
 use lash_kernel_doc::graph_tokens::{ChildRef, decode_body, encode_body};
 use lash_kernel_doc::heap_values::key_digest;
-use lash_kernel_state::paged::census_impl::Census;
+use lash_kernel_state::kernel_internals::census_impl::Census;
 use lash_kernel_state::paged::{
     AllocationCensus, EditEpoch, NameRef, ObjectInit, PageAnswer, PageBody, PageSource, SiteRef,
 };

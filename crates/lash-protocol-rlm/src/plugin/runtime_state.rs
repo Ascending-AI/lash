@@ -124,7 +124,7 @@ impl RlmRuntimeState {
                 }
             }
         }
-        let Some(bindings) = snapshot
+        let Some(session) = snapshot
             .as_ref()
             .map(crate::executor::stored_session_descriptor)
             .transpose()
@@ -160,7 +160,7 @@ impl RlmRuntimeState {
             )
         })?;
         names.extend(
-            crate::executor::stored_binding_roots(pages, &bindings, &roots)
+            crate::executor::stored_binding_roots(pages, &session, &roots)
                 .await
                 .map_err(|error| {
                     lash_execution_contracts::plugin_error::PluginError::Session(error.to_string())

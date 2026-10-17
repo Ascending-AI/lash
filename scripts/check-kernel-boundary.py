@@ -3,7 +3,7 @@
 
 Three rules over the workspace members' manifests, each a dependency edge
 given by `path`, in the member's manifest or in the `[workspace.dependencies]`
-entry it inherits:
+entry it inherits, and one over their Rust sources:
 
 1. One direction. `lash-kernel-*`, `lash-dialect-*` and `lash-ext-*` crates
    depend only on each other and on third-party crates, so the set can move to
@@ -19,6 +19,13 @@ entry it inherits:
 3. A dialect does not run the machine. A `lash-dialect-*` crate may not have
    a normal or build dependency on `lash-kernel-vm` or `lash-kernel-state`;
    its tests may run documents through a dev-dependency.
+4. Kernel internals stay in the kernel (FIG-6688). The paged heap's and the
+   machine's implementation are private to their crates; what the other
+   kernel crates build on is exported only through a `kernel_internals`
+   module, which visibility cannot close to them alone. No Rust source
+   outside `crates/lash-kernel-*` names that module, and no kernel crate
+   re-exports from it beyond the diagnostic seam that names its own engine's
+   counters (`lash_kernel_vm::perf_witness`).
 
 Crates are named by their directory, which is their package name for the
 kernel set; lash's own crates publish as `lash-internal-*`.
@@ -44,6 +51,18 @@ LANGUAGE_NEUTRAL = re.compile(
 DIALECT = re.compile(r"^lash-dialect-")
 MACHINE = frozenset({"lash-kernel-vm", "lash-kernel-state"})
 DEPENDENCY_TABLES = ("dependencies", "dev-dependencies", "build-dependencies")
+KERNEL_CRATE = re.compile(r"^lash-kernel-")
+# A path into a kernel crate's `kernel_internals`, written out or through a
+# use group (`lash_kernel_vm::{kernel_internals, ..}`), directly or through
+# the facade's re-export of the dialect seam (`lash::dialect`).
+INTERNALS = re.compile(
+    r"\b(?:lash_kernel_\w+|lash\s*::\s*dialect)\s*::\s*"
+    r"(?:kernel_internals\b|\{[^;]*?\bkernel_internals\b)"
+)
+REEXPORT = re.compile(r"\bpub(?:\([^)]*\))?\s+use\b[^;]*\bkernel_internals\b", re.S)
+# The machine's diagnostic seam names the heap's share of its work counts.
+REEXPORT_HOMES = frozenset({"crates/lash-kernel-vm/src/perf_witness.rs"})
+LINE_COMMENT = re.compile(r"//[^\n]*")
 LINKED_TABLES = ("dependencies", "build-dependencies")
 
 
@@ -166,9 +185,45 @@ def dialects_off_the_machine(workspace: Workspace) -> list[str]:
     return found
 
 
+def rust_sources(directory: Path):
+    for path in sorted(directory.rglob("*.rs")):
+        if "target" not in path.relative_to(directory).parts:
+            yield path
+
+
+def kernel_internals_stay_inside(workspace: Workspace) -> list[str]:
+    found = []
+    for directory in sorted(workspace.names):
+        kernel = bool(KERNEL_CRATE.match(directory.name))
+        for path in rust_sources(directory):
+            relative = path.relative_to(workspace.root).as_posix()
+            text = LINE_COMMENT.sub("", path.read_text(encoding="utf-8"))
+            if not kernel:
+                for match in INTERNALS.finditer(text):
+                    line = text.count("\n", 0, match.start()) + 1
+                    found.append(
+                        f"{relative}:{line}: names a kernel crate's `kernel_internals`; code outside "
+                        "crates/lash-kernel-* uses the kernel's embedding API and its semantic "
+                        "readers, never its internals"
+                    )
+            elif relative not in REEXPORT_HOMES:
+                for match in REEXPORT.finditer(text):
+                    line = text.count("\n", 0, match.start()) + 1
+                    found.append(
+                        f"{relative}:{line}: re-exports from `kernel_internals`; a kernel crate "
+                        "uses another's internals but never hands them on"
+                    )
+    return found
+
+
 def violations(root: Path) -> list[str]:
     workspace = Workspace(root)
-    return one_direction(workspace) + crate_roles(workspace) + dialects_off_the_machine(workspace)
+    return (
+        one_direction(workspace)
+        + crate_roles(workspace)
+        + dialects_off_the_machine(workspace)
+        + kernel_internals_stay_inside(workspace)
+    )
 
 
 def main() -> int:

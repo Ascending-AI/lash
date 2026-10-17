@@ -13,9 +13,10 @@ use lash_kernel_doc::{
     Span, Unit, Value, parse_definition, parse_document, print_definition, print_document,
     validate_definition, validate_document,
 };
+use lash_kernel_vm::kernel_internals::Layout;
 use lash_kernel_vm::{
-    CellStart, DeliverError, Delivered, End, KernelMachine, Layout, Machine, Outcome,
-    PreparedLibrary, Program, Request, Step, WaitId,
+    CellStart, DeliverError, Delivered, End, KernelMachine, Machine, Outcome, PreparedLibrary,
+    Program, Request, Step, WaitId,
 };
 
 use crate::{Case, ExpectedEnd, MachineRunner, Shard, check_case};

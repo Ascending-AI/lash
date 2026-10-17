@@ -686,7 +686,7 @@ fn a_cell_carries_unsealed_bindings_at_its_end() {
         carry.bindings.page().is_some(),
         "a nonempty carry must name its sealed tree"
     );
-    let mut heap = lash_kernel_state::paged::PagedHeap::open_header(
+    let mut heap = lash_kernel_state::kernel_internals::PagedHeap::open_header(
         carry.heap,
         Box::new(embedder.source.clone()),
         lash_kernel_state::paged::EditEpoch(2),
@@ -696,7 +696,7 @@ fn a_cell_carries_unsealed_bindings_at_its_end() {
     let binding = heap
         .session_root()
         .get(
-            &lash_kernel_state::paged::metadata::metadata_key(&Name::new("x")),
+            &lash_kernel_state::kernel_internals::metadata::metadata_key(&Name::new("x")),
             heap.pages(),
         )
         .unwrap()

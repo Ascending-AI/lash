@@ -3,8 +3,7 @@
 use super::machine;
 use lash_kernel_doc::{Datum, Expr, Handle, Integer, Literal, Name, Rhs, Stmt, Timestamp, Type};
 use lash_kernel_vm::{
-    Bounds, CellStart, End, Host, KernelMachine, Layout, Machine, Outcome, Program, Request, Step,
-    Target,
+    Bounds, CellStart, End, Host, KernelMachine, Machine, Outcome, Program, Request, Step, Target,
 };
 use std::sync::Arc;
 
@@ -144,11 +143,10 @@ struct Saving {
 impl lash_kernel_vm::CellSave for Saving {
     fn save(
         &mut self,
-        heap: &mut lash_kernel_state::paged::PagedHeap,
+        saving: &mut lash_kernel_vm::CellSaveContext<'_>,
         cell: lash_kernel_vm::SaveCell<'_>,
     ) -> Result<lash_kernel_vm::SavedCell, lash_kernel_doc::heap::HeapFault> {
-        let (kept, refused) = lash_kernel_dialect::save(
-            heap,
+        let (kept, refused) = saving.save(
             lash_kernel_dialect::Left {
                 document: cell.document,
                 bindings: cell.bindings,
@@ -273,7 +271,6 @@ fn a_saved_positional_function_runs_and_resumes_without_its_partner_in_scope() {
                 modes: Default::default(),
                 host: vec![],
             },
-            Layout::default(),
             &source,
         )
         .unwrap();
@@ -284,7 +281,7 @@ fn a_saved_positional_function_runs_and_resumes_without_its_partner_in_scope() {
                 .run(&mut console, if cold { 1 } else { u64::MAX })
                 .unwrap();
             if cold && matches!(step, Step::Slice | Step::Parked(_)) {
-                super::pages::reopen(&mut current, &program, BOUNDS, &source, Layout::default());
+                super::pages::reopen(&mut current, &program, BOUNDS, &source);
             }
             match step {
                 Step::Slice => {}

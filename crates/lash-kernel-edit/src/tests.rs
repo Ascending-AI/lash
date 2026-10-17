@@ -4,17 +4,13 @@ use crate::authoring::{Branch, DataValue, Operation, ValueTarget, Wrapper};
 use crate::tree::NodeMut;
 use crate::{Draft, EditDiagnosticKind as Cause, EditRefusal, Position, Transaction};
 use lash_kernel_check::{Environment, RefusalReason};
-use lash_kernel_doc::heap::{HeapFault, LogicalBytes, PageGrant, PageId, PageRef};
+use lash_kernel_doc::heap::{HeapFault, PageGrant, PageId, PageRef};
 use lash_kernel_doc::{
     ActExpr, ActKind, Datum, Document, DocumentId, EffectName, ErrorDatum, Expr, FunctionRegistry,
     Handle, Integer, InvalidReason, Literal, Name, Node, Param, Signature, Site, Stmt, Timestamp,
     Type, Unit, parse_document, print_document,
 };
-use lash_kernel_state::paged::census_impl::Census;
-use lash_kernel_state::paged::{
-    AccountingCertificate, AccountingMetric, AllocationCensus as _, PageAnswer, PageBody,
-    PageSource,
-};
+use lash_kernel_state::paged::{PageAnswer, PageBody, PageSource};
 use lash_kernel_vm::{
     Bounds, CellStart, End, Host, KernelMachine, Machine, Outcome, Program, Request, Step, Target,
 };
@@ -1008,16 +1004,6 @@ fn canvas_atomic() {
         requests_per_park: 4,
         join_members: 4,
     };
-    let census = Census::restore(
-        AccountingCertificate {
-            metric: AccountingMetric::LocalCostV1,
-            upper: LogicalBytes(0),
-            entities: 0,
-            refinements: 0,
-        },
-        LogicalBytes(bounds.memory),
-    )
-    .unwrap();
     let program = Program {
         release: PageId([8; 32]),
         document: Arc::new(original.clone()),
@@ -1035,7 +1021,6 @@ fn canvas_atomic() {
             host: vec![],
         },
         Box::new(Pages::default()),
-        Box::new(census),
     )
     .unwrap();
     let mut host = Printer::default();

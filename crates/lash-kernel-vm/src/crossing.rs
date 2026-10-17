@@ -23,10 +23,11 @@ use lash_kernel_doc::{
     Datum, Document, ErrorDatum, Expr, FunctionCatalog, FunctionValueLimits, KernelDataLimits,
     Name, NativeHeap, Site, Unit, Value,
 };
-use lash_kernel_state::paged::metadata::metadata_key;
-use lash_kernel_state::paged::tree::Tree;
+use lash_kernel_state::kernel_internals::PagedHeap;
+use lash_kernel_state::kernel_internals::metadata::metadata_key;
+use lash_kernel_state::kernel_internals::tree::Tree;
 use lash_kernel_state::paged::{
-    FunctionRecord, HeapLifecycle, HeapWriteError, KeyedRoot, PagedHeap, SemanticHeap,
+    FunctionRecord, HeapLifecycle, HeapWriteError, KeyedRoot, SemanticHeap,
 };
 
 use crate::data::{CopyError, raised};

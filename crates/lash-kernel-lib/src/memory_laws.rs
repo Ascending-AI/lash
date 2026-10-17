@@ -13,7 +13,7 @@ fn text(value: &str) -> Datum {
 }
 fn call(
     registry: &FunctionRegistry,
-    heap: &mut lash_kernel_state::paged::PagedHeap,
+    heap: &mut lash_kernel_state::kernel_internals::PagedHeap,
     name: &str,
     input: &[Value],
 ) -> Result<Value, NativeError> {

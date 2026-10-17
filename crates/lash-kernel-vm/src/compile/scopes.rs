@@ -149,7 +149,7 @@ impl Compiler<'_> {
         }
         let slot = scopes.slots.len() as Slot;
         scopes.slots.push(SlotInfo {
-            key: lash_kernel_state::paged::metadata::metadata_key(&(
+            key: lash_kernel_state::kernel_internals::metadata::metadata_key(&(
                 scopes.body.clone(),
                 name.clone(),
             )),
@@ -169,7 +169,7 @@ impl Compiler<'_> {
         };
         let slot = scopes.slots.len() as Slot;
         scopes.slots.push(SlotInfo {
-            key: lash_kernel_state::paged::metadata::metadata_key(&(
+            key: lash_kernel_state::kernel_internals::metadata::metadata_key(&(
                 declared.clone(),
                 name.clone(),
             )),
@@ -284,7 +284,7 @@ impl Compiler<'_> {
                 let scopes = &mut self.scopes[level];
                 let inner = scopes.slots.len() as Slot;
                 scopes.slots.push(SlotInfo {
-                    key: lash_kernel_state::paged::metadata::metadata_key(&(
+                    key: lash_kernel_state::kernel_internals::metadata::metadata_key(&(
                         scopes.body.clone(),
                         name.clone(),
                     )),

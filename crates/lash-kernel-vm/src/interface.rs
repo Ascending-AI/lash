@@ -409,6 +409,9 @@ pub enum StartError {
     /// declare.
     #[error("the run binds `{effect}` as a read, and the manifest declares no such effect")]
     UndeclaredRead { effect: EffectName },
+    /// The session's saved memory accounting is inconsistent.
+    #[error("the accounting certificate is malformed: {problem}")]
+    Accounting { problem: String },
     #[error(transparent)]
     Heap(#[from] lash_kernel_doc::heap::HeapFault),
 }

@@ -602,12 +602,7 @@ impl SemanticHeap for PagedHeap {
                 closure_entities: 0,
                 task_edges: 0,
             },
-            accounting: AccountingCertificate {
-                metric: AccountingMetric::LocalCostV1,
-                upper: LogicalBytes(0),
-                entities: 0,
-                refinements: 0,
-            },
+            accounting: AccountingCertificate::FRESH,
             family_base: RefCell::new(None),
             census: None,
             session: Tree::new(false),

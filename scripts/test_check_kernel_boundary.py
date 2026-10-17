@@ -87,8 +87,9 @@ class KernelBoundary(unittest.TestCase):
             root = Path(directory)
             (root / "Cargo.toml").write_text(WORKSPACE, encoding="utf-8")
             for crate, text in {**CLEAN, **overrides}.items():
-                (root / crate).mkdir(parents=True)
-                (root / crate / "Cargo.toml").write_text(text, encoding="utf-8")
+                path = root / crate if crate.endswith(".rs") else root / crate / "Cargo.toml"
+                path.parent.mkdir(parents=True, exist_ok=True)
+                path.write_text(text, encoding="utf-8")
             return subprocess.run(
                 ["python3", str(SCRIPT), str(root)], capture_output=True, text=True, check=False
             )
@@ -145,6 +146,38 @@ class KernelBoundary(unittest.TestCase):
                 })
                 self.assertEqual(result.returncode, 1, result.stdout)
                 self.assertIn("is the machine crate `lash-kernel-vm`", result.stderr)
+
+    def test_kernel_internals_named_outside_the_kernel_are_refused(self) -> None:
+        """FIG-6688: only kernel crates name `kernel_internals`, and none hands it on."""
+        inside = {
+            # A kernel crate builds on another's internals.
+            "crates/lash-kernel-vm/src/lib.rs": "use lash_kernel_doc::kernel_internals::tree::Tree;\n",
+            # Lash's own module of that name is not the kernel's.
+            "crates/lash-core/src/lib.rs": "pub use lash_core_execution::testing::kernel_internals::*;\n",
+            # A comment may name it.
+            "crates/lash/src/lib.rs": "// lash_kernel_vm::kernel_internals stays inside\n",
+        }
+        self.assertEqual(self.run_check(inside).returncode, 0)
+        refused = {
+            "path": ("crates/lash-core/src/lib.rs", "use lash_kernel_vm::kernel_internals::Layout;\n", "names"),
+            "group": (
+                "crates/lash-core/tests/a.rs",
+                "use lash_kernel_vm::{\n    Machine,\n    kernel_internals::Layout,\n};\n",
+                "names",
+            ),
+            "facade": ("crates/lash-core/src/lib.rs", "use lash::dialect::kernel_internals::save;\n", "names"),
+            "re-export": (
+                "crates/lash-kernel-vm/src/lib.rs",
+                "pub use lash_kernel_doc::kernel_internals::tree::Tree;\n",
+                "re-exports",
+            ),
+        }
+        for label, (path, text, says) in refused.items():
+            with self.subTest(case=label):
+                result = self.run_check({path: text})
+                self.assertEqual(result.returncode, 1, result.stdout)
+                self.assertIn(f"{path}:", result.stderr)
+                self.assertIn(says, result.stderr)
 
     def test_this_repository_passes(self) -> None:
         result = subprocess.run(["python3", str(SCRIPT)], capture_output=True, text=True, check=False)

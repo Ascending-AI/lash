@@ -410,7 +410,7 @@ fn corpus_cross_resumes_after_every_statement() {
                 let mut imported = Projector {
                     imports: Some(&reference.images),
                     cold,
-                    layout: lash_kernel_vm::Layout(3),
+                    layout: lash_kernel_vm::kernel_internals::Layout(3),
                     ..Projector::default()
                 };
                 let b = crate::machine::run_case_projected::<Plan<3>>(

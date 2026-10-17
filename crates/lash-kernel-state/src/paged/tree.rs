@@ -222,18 +222,7 @@ impl<'a> Access<'a> {
     }
 }
 
-/// Resolves only children authenticated by the page just read.
-pub fn grant(page: &mut PageRef, children: &[PageRef]) -> Result<(), HeapFault> {
-    *page = children
-        .iter()
-        .find(|p| p.id == page.id)
-        .copied()
-        .ok_or_else(|| HeapFault::Corrupt {
-            page: page.id,
-            reason: "a descriptor references an undeclared child".into(),
-        })?;
-    Ok(())
-}
+pub use super::source::grant;
 
 #[derive(Clone, Copy, Debug, Default, PartialEq, Eq)]
 struct Summary {

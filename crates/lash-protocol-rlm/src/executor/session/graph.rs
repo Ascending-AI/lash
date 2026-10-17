@@ -6,8 +6,8 @@ use lash_kernel_doc::heap::{HeapFault, PageRef};
 use std::collections::BTreeSet;
 
 use lash_kernel_doc::{FunctionId, NumberPolicy};
-use lash_kernel_state::paged::tree::grant;
-use lash_kernel_state::paged::{KeyedRoot, PageBody, PageKind, PageSource, SessionRoot};
+use lash_kernel_state::paged::session::SessionNotes;
+use lash_kernel_state::paged::{PageBody, PageKind, PageSource, SessionRoot};
 
 pub(super) struct SessionDescriptor {
     pub dialect: String,
@@ -15,9 +15,8 @@ pub(super) struct SessionDescriptor {
     pub kernel: u32,
     pub cells: u64,
     pub session: SessionRoot,
-    /// Each name's session notes, keyed by name beside the bindings
-    /// (notes.rs).
-    pub notes: KeyedRoot,
+    /// Each name's session notes, keyed by name beside the bindings.
+    pub notes: SessionNotes,
     /// The library functions the session's saved functions pin, together
     /// (FIG-5799): bounded by the build's library, never by the session.
     pub pins: BTreeSet<FunctionId>,
@@ -43,7 +42,7 @@ impl TokenCodec for SessionDescriptor {
             kernel: u32::decode(input)?,
             cells: u64::decode(input)?,
             session: SessionRoot::decode(input)?,
-            notes: KeyedRoot::decode(input)?,
+            notes: SessionNotes::decode(input)?,
             pins: BTreeSet::decode(input)?,
         })
     }
@@ -52,9 +51,7 @@ pub(super) fn seal(
     source: &mut dyn PageSource,
     descriptor: &SessionDescriptor,
 ) -> Result<PageRef, HeapFault> {
-    let mut children = vec![descriptor.session.heap];
-    children.extend(descriptor.session.bindings.page());
-    children.extend(descriptor.session.functions.page());
+    let mut children = descriptor.session.pages();
     children.extend(descriptor.notes.page());
     children.sort_by_key(|p| p.id);
     children.dedup_by_key(|p| p.id);
@@ -90,15 +87,7 @@ pub(super) fn read(
         page: page.id,
         reason: e.to_string(),
     })?;
-    grant(&mut descriptor.session.heap, &answer.children)?;
-    if let Some(page) = descriptor.session.bindings.page_mut() {
-        grant(page, &answer.children)?;
-    }
-    if let Some(page) = descriptor.session.functions.page_mut() {
-        grant(page, &answer.children)?;
-    }
-    if let Some(page) = descriptor.notes.page_mut() {
-        grant(page, &answer.children)?;
-    }
+    descriptor.session.grant_children(&answer.children)?;
+    descriptor.notes.grant_children(&answer.children)?;
     Ok(descriptor)
 }

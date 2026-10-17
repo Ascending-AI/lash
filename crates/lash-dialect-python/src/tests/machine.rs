@@ -13,7 +13,6 @@ use lash_kernel_doc::{
     Datum, EffectName, ErrorDatum, FunctionRegistry, Handle, Integer, Name, Param, Signature,
     Timestamp, Type,
 };
-use lash_kernel_state::paged::AllocationCensus;
 use lash_kernel_vm::{
     Bounds, End, Host, KernelMachine, Machine, Outcome, Park, PreparedLibrary, Program, Request,
     RunError, Step, WaitId, register_machine_functions,
@@ -435,7 +434,6 @@ pub(super) fn entry_output(
             host: Vec::new(),
         },
         Box::new(session.source.clone()),
-        session.census(BOUNDS.memory),
     )
     .unwrap();
     let mut console = Console::default();
@@ -683,25 +681,13 @@ pub(super) fn execution_observation(
             return (end, host.lines, requests, machine.meters().charged);
         }
         if rebuild {
-            let sealed = machine.seal(pages::BUDGET).unwrap().unwrap();
-            let heap = lash_kernel_state::paged::PagedHeap::open_header(
-                sealed.root.heap,
-                Box::new(session.source.clone()),
-                lash_kernel_state::paged::EditEpoch(2),
-            )
-            .unwrap();
-            let census = lash_kernel_state::paged::census_impl::Census::restore(
-                heap.certificate(),
-                lash_kernel_doc::heap::LogicalBytes(bounds.memory),
-            )
-            .unwrap();
+            let sealed = machine.checkpoint().unwrap();
             machine = KernelMachine::open(
                 program.clone(),
                 bounds,
                 &sealed.root,
                 Vec::new(),
                 Box::new(session.source.clone()),
-                Box::new(census),
             )
             .unwrap();
         }

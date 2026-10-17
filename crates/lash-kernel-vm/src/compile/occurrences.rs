@@ -36,7 +36,7 @@ impl Compiler<'_> {
             .into_iter()
             .map(|site| {
                 (
-                    lash_kernel_state::paged::metadata::metadata_key(&site),
+                    lash_kernel_state::kernel_internals::metadata::metadata_key(&site),
                     site,
                 )
             })

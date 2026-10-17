@@ -157,26 +157,13 @@ fn observe(program: Program, relay: bool) -> Observed {
         host: Vec::new(),
     };
     let source = super::pages::Source::default();
-    let mut machine = super::pages::with_source(
-        program.clone(),
-        BOUNDS,
-        start,
-        lash_kernel_vm::Layout::default(),
-        &source,
-    )
-    .unwrap();
+    let mut machine = super::pages::with_source(program.clone(), BOUNDS, start, &source).unwrap();
     let mut console = Console::default();
     let mut requests = Vec::new();
     let slice = if relay { 0 } else { u64::MAX };
     let hop = |machine: &mut KernelMachine| {
         if relay {
-            super::pages::reopen(
-                machine,
-                &program,
-                BOUNDS,
-                &source,
-                lash_kernel_vm::Layout::default(),
-            );
+            super::pages::reopen(machine, &program, BOUNDS, &source);
         }
     };
     loop {

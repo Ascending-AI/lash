@@ -13,9 +13,9 @@ use crate::compile::{Executable, Form, LibId, NestedKind, StmtId};
 use lash_kernel_doc::heap::HeapFault;
 use lash_kernel_doc::{Site, Unit, Value};
 use lash_kernel_exec::ActIx;
-use lash_kernel_state::paged::directory::ordinal_key;
-use lash_kernel_state::paged::payload::TextCursor;
-use lash_kernel_state::paged::tree::{Access, Cell, Tree, Version};
+use lash_kernel_state::kernel_internals::directory::ordinal_key;
+use lash_kernel_state::kernel_internals::payload::TextCursor;
+use lash_kernel_state::kernel_internals::tree::{Access, Cell, Tree, Version};
 use lash_kernel_state::paged::{
     BindingRecord, BoundRecord, CursorKind, CursorRecord, EnteredRecord, FinallyRecord,
     FrameRecord, GuardRecord, HeaderRecord, IncomingRecord, IteratedRecord, LoopRecord,

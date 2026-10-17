@@ -46,7 +46,7 @@ const DOCUMENT_SHARDS: &[&str] = &[
     include_str!("../corpus/numbers/K-VAL-026.json"),
 ];
 
-fn decode(datum: Datum, heap: &mut lash_kernel_state::paged::PagedHeap) -> Value {
+fn decode(datum: Datum, heap: &mut lash_kernel_state::kernel_internals::PagedHeap) -> Value {
     testsupport::decode(heap, datum)
 }
 
@@ -349,7 +349,7 @@ fn k_lib_009_document_corpus_names_registered_definitions() {
                     requests_per_park: 100,
                     join_members: 100,
                 },
-                lash_kernel_vm::Layout::default(),
+                lash_kernel_vm::kernel_internals::Layout::default(),
             )
             .unwrap();
             let mut world = testsupport::World::default();

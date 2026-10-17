@@ -15,11 +15,13 @@
 //! - [`family`] (S8): frozen values, lazy identity families and cell carry.
 
 pub mod census;
-pub mod census_impl;
+pub(crate) mod census_impl;
 pub mod family;
-pub mod family_impl;
+pub(crate) mod family_impl;
 pub mod heap;
+pub mod probe;
 pub mod root;
+pub mod session;
 pub mod source;
 
 #[cfg(test)]
@@ -39,6 +41,7 @@ pub use heap::{
     ClosureView, EditEpoch, FieldName, HeapWriteError, NormalKey, ObjectInit, ObjectKind,
     SealBudget, SealedHeap, SemanticHeap, TableCursor,
 };
+pub use probe::ProbeHeap;
 pub use root::{
     BindingRecord, BoundRecord, CellTargetKind, CheckpointRoot, CommittedOutcomeRecord, CursorKind,
     CursorRecord, EndedRecord, EndedTask, EnteredRecord, FinallyRecord, FunctionRecord,
@@ -53,16 +56,16 @@ mod codec;
 mod equality;
 mod publication;
 pub use publication::StatementRoots;
-pub mod tree;
+pub(crate) mod tree;
 
-pub mod directory;
-pub mod heap_impl;
-pub mod metadata;
+pub(crate) mod directory;
+pub(crate) mod heap_impl;
+pub(crate) mod metadata;
 pub use metadata::{NameRef, SiteRef, TaskIdentityRef};
-pub mod payload;
-mod session;
+pub(crate) mod payload;
 mod working;
-pub use heap_impl::{PagedHeap, heap_accounting};
+pub(crate) use heap_impl::PagedHeap;
+pub use heap_impl::heap_accounting;
 
 pub use directory::execution::{
     FrameRecord, IteratedRecord, PendingRecord, PhaseRecord, ROLE_CHUNK, ROLE_FLAT, RoleChunk,

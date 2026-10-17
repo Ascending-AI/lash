@@ -44,7 +44,7 @@ pub(crate) struct Projector<'a> {
     pub(crate) imports: Option<&'a [Image]>,
     /// Lose prepared-code caches too, as a new worker does.
     pub(crate) cold: bool,
-    pub(crate) layout: lash_kernel_vm::Layout,
+    pub(crate) layout: lash_kernel_vm::kernel_internals::Layout,
     pub(crate) library: Option<PreparedLibrary>,
 }
 
@@ -76,7 +76,10 @@ impl Projector<'_> {
         // Preparing another layout is expensive. The warm path retains its
         // prepared library; cold imports deliberately compile a fresh one.
         let library = self.library.get_or_insert_with(|| {
-            PreparedLibrary::with_layout(program.library.registry().clone(), self.layout)
+            lash_kernel_vm::kernel_internals::prepare_with_layout(
+                program.library.registry().clone(),
+                self.layout,
+            )
         });
         program.library = library.clone();
         let witness = pages::open::<M>(
@@ -92,8 +95,10 @@ impl Projector<'_> {
         // accounting verdict; only importing runs replace their live machine.
         if self.imports.is_some() {
             if self.cold {
-                program.library =
-                    PreparedLibrary::with_layout(program.library.registry().clone(), self.layout);
+                program.library = lash_kernel_vm::kernel_internals::prepare_with_layout(
+                    program.library.registry().clone(),
+                    self.layout,
+                );
             }
             *machine = pages::open::<M>(
                 program,
@@ -160,15 +165,13 @@ impl<const L: u64> Machine for Plan<L> {
         bounds: Bounds,
         start: lash_kernel_vm::CellStart,
         source: Box<dyn lash_kernel_state::paged::PageSource>,
-        census: Box<dyn lash_kernel_state::paged::AllocationCensus>,
     ) -> Result<Self, lash_kernel_vm::StartError> {
-        lash_kernel_vm::KernelMachine::start_with_layout(
+        lash_kernel_vm::kernel_internals::start_with_layout(
             program,
             bounds,
             start,
-            lash_kernel_vm::Layout(L),
+            lash_kernel_vm::kernel_internals::Layout(L),
             source,
-            census,
         )
         .map(Self)
     }
@@ -178,16 +181,14 @@ impl<const L: u64> Machine for Plan<L> {
         root: &CheckpointRoot,
         admissions: Vec<AdmittedWait>,
         source: Box<dyn lash_kernel_state::paged::PageSource>,
-        census: Box<dyn lash_kernel_state::paged::AllocationCensus>,
     ) -> Result<Self, lash_kernel_vm::OpenError> {
-        lash_kernel_vm::KernelMachine::open_with_layout(
+        lash_kernel_vm::kernel_internals::open_with_layout(
             program,
             bounds,
             root,
             admissions,
             source,
-            census,
-            lash_kernel_vm::Layout(L),
+            lash_kernel_vm::kernel_internals::Layout(L),
         )
         .map(Self)
     }
@@ -208,7 +209,7 @@ impl<const L: u64> Machine for Plan<L> {
     fn seal(
         &mut self,
         budget: lash_kernel_state::paged::SealBudget,
-    ) -> Result<Option<lash_kernel_vm::paged::SealedRoot>, lash_kernel_vm::SealError> {
+    ) -> Result<Option<lash_kernel_vm::SealedRoot>, lash_kernel_vm::SealError> {
         self.0.seal(budget)
     }
     fn meters(&self) -> lash_kernel_vm::Meters {

@@ -10,10 +10,7 @@ use lash_kernel_vm::{
 };
 
 mod pages;
-use lash_kernel_doc::heap::{LogicalBytes, PageId};
-use lash_kernel_state::paged::{
-    AllocationCensus, EditEpoch, PagedHeap, SealBudget, SemanticHeap, census_impl::Census,
-};
+use lash_kernel_doc::heap::PageId;
 /// Two children request effects before their parent joins them.
 pub const FAN_OUT: &str = include_str!("../fan-out.kernel");
 
@@ -61,9 +58,6 @@ pub fn embed<M: Machine>(
         join_members: 32,
     };
     let source = pages::Source::default();
-    let heap = PagedHeap::fresh(Box::new(source.clone()), EditEpoch(1));
-    let census = Census::restore(heap.certificate(), LogicalBytes(bounds.memory))
-        .map_err(|e| e.to_string())?;
     let mut machine = M::start(
         program.clone(),
         bounds,
@@ -76,7 +70,6 @@ pub fn embed<M: Machine>(
             host: Vec::new(),
         },
         Box::new(source.clone()),
-        Box::new(census),
     )
     .map_err(|e| e.to_string())?;
     let mut host = Output::default();
@@ -103,28 +96,13 @@ pub fn embed<M: Machine>(
             }
             Step::Parked(park) => {
                 parks += 1;
-                let sealed = machine
-                    .seal(SealBudget {
-                        pages: u64::MAX,
-                        bytes: u64::MAX,
-                    })
-                    .map_err(|e| e.to_string())?
-                    .ok_or("unbounded seal incomplete")?;
-                let heap = PagedHeap::open_header(
-                    sealed.root.heap,
-                    Box::new(source.clone()),
-                    EditEpoch(2),
-                )
-                .map_err(|e| e.to_string())?;
-                let census = Census::restore(heap.certificate(), LogicalBytes(bounds.memory))
-                    .map_err(|e| e.to_string())?;
+                let sealed = machine.checkpoint().map_err(|e| e.to_string())?;
                 machine = M::open(
                     program.clone(),
                     bounds,
                     &sealed.root,
                     Vec::new(),
                     Box::new(source.clone()),
-                    Box::new(census),
                 )
                 .map_err(|e| e.to_string())?;
                 resumes += 1;

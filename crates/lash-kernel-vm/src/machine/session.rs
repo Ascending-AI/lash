@@ -9,10 +9,12 @@ use lash_kernel_state::paged::{
 pub(super) fn empty_root() -> KeyedRoot {
     KeyedRoot::Empty
 }
-pub(super) fn open_tree<T: lash_kernel_state::paged::tree::Cell>(root: KeyedRoot) -> Tree<T> {
+pub(super) fn open_tree<T: lash_kernel_state::kernel_internals::tree::Cell>(
+    root: KeyedRoot,
+) -> Tree<T> {
     Tree::of_keyed(&root)
 }
-pub(super) fn start(
+pub(crate) fn start(
     program: Program,
     bounds: Bounds,
     start: CellStart,
@@ -36,7 +38,7 @@ pub(super) fn start(
     heap.set_data_limits(limits);
     heap.set_census(census)?;
     heap.set_family_base(Box::new(
-        lash_kernel_state::paged::family_impl::FrozenBase::default(),
+        lash_kernel_state::kernel_internals::family_impl::FrozenBase::default(),
     ));
     let functions = start
         .session
@@ -242,7 +244,7 @@ impl KernelMachine {
             grant: lash_kernel_doc::heap::PageGrant::NONE,
         };
         let saved = save.save(
-            &mut self.heap,
+            &mut crate::CellSaveContext::new(&mut self.heap),
             crate::paged::SaveCell {
                 document: &document,
                 release,
@@ -256,7 +258,7 @@ impl KernelMachine {
         let mut functions = functions;
         for (name, record) in saved.functions {
             functions.write(
-                lash_kernel_state::paged::metadata::metadata_key(&name),
+                lash_kernel_state::kernel_internals::metadata::metadata_key(&name),
                 record,
                 self.heap.pages(),
             )?;
@@ -266,7 +268,7 @@ impl KernelMachine {
         for (name, value) in saved.rebound {
             let record = self.binding_record(&name, value)?;
             bindings.write(
-                lash_kernel_state::paged::metadata::metadata_key(&name),
+                lash_kernel_state::kernel_internals::metadata::metadata_key(&name),
                 record,
                 self.heap.pages(),
             )?;
@@ -284,11 +286,12 @@ impl KernelMachine {
                 (name.clone(), why)
             })
             .collect();
-        let mut work =
-            lash_kernel_state::paged::tree::SealWork::new(lash_kernel_state::paged::SealBudget {
+        let mut work = lash_kernel_state::kernel_internals::tree::SealWork::new(
+            lash_kernel_state::paged::SealBudget {
                 pages: u64::MAX,
                 bytes: u64::MAX,
-            });
+            },
+        );
         functions.seal(self.heap.pages(), &mut work)?;
         bindings.seal(self.heap.pages(), &mut work)?;
         Ok((keyed(&bindings)?, keyed(&functions)?, not_carried))
@@ -359,17 +362,18 @@ impl KernelMachine {
         // The host's bindings are the host's: what the cell made of its
         // copy is not the session's.
         if !self.host.is_empty() {
-            self.heap
-                .seal_session_root(&mut lash_kernel_state::paged::tree::SealWork::new(
+            self.heap.seal_session_root(
+                &mut lash_kernel_state::kernel_internals::tree::SealWork::new(
                     lash_kernel_state::paged::SealBudget {
                         pages: u64::MAX,
                         bytes: u64::MAX,
                     },
-                ))?;
+                ),
+            )?;
             let mut bindings = self.heap.session_root().clone();
             for name in std::mem::take(&mut self.host) {
                 bindings.remove(
-                    &lash_kernel_state::paged::metadata::metadata_key(&name),
+                    &lash_kernel_state::kernel_internals::metadata::metadata_key(&name),
                     self.heap.pages(),
                 )?;
             }
@@ -379,13 +383,14 @@ impl KernelMachine {
         }
         // Lifecycle roots name sealed trees. A cell may finish before its
         // first park, so its session still has only transient pages here.
-        self.heap
-            .seal_session_root(&mut lash_kernel_state::paged::tree::SealWork::new(
+        self.heap.seal_session_root(
+            &mut lash_kernel_state::kernel_internals::tree::SealWork::new(
                 lash_kernel_state::paged::SealBudget {
                     pages: u64::MAX,
                     bytes: u64::MAX,
                 },
-            ))?;
+            ),
+        )?;
         let bindings = keyed(self.heap.session_root())?;
         let classification = self.heap.classify_carry(&bindings)?;
         let mut dropped = classification.dropped;
@@ -406,14 +411,63 @@ impl KernelMachine {
         })
     }
 }
-pub(super) fn keyed<T: lash_kernel_state::paged::tree::Cell>(
+pub(super) fn keyed<T: lash_kernel_state::kernel_internals::tree::Cell>(
     tree: &Tree<T>,
 ) -> Result<KeyedRoot, lash_kernel_doc::heap::HeapFault> {
     tree.keyed_root()
 }
 
 impl KernelMachine {
-    pub fn start_with_layout(
+    pub(crate) fn start_with_layout(
+        program: Program,
+        bounds: Bounds,
+        start: CellStart,
+        layout: Layout,
+        mut source: Box<dyn PageSource>,
+    ) -> Result<Self, StartError> {
+        let census = start_census(&mut *source, &start, bounds.memory)?;
+        self::start(
+            program,
+            bounds,
+            start,
+            source,
+            census,
+            layout,
+            lash_kernel_doc::KernelDataLimits::standard(),
+        )
+    }
+
+    /// [`Machine::start`] under the deployment's data limits instead of
+    /// the standard ones.
+    ///
+    /// # Errors
+    ///
+    /// [`Machine::start`]'s.
+    pub fn start_with_data_limits(
+        program: Program,
+        bounds: Bounds,
+        start: CellStart,
+        limits: lash_kernel_doc::KernelDataLimits,
+        mut source: Box<dyn PageSource>,
+    ) -> Result<Self, StartError> {
+        let census = start_census(&mut *source, &start, bounds.memory)?;
+        self::start(
+            program,
+            bounds,
+            start,
+            source,
+            census,
+            Layout::default(),
+            limits,
+        )
+    }
+}
+
+#[cfg(test)]
+impl KernelMachine {
+    /// Starts a run held to `census` instead of the one its session's
+    /// accounting restores: the laws that count or limit the census.
+    pub(crate) fn start_with_census(
         program: Program,
         bounds: Bounds,
         start: CellStart,
@@ -431,24 +485,67 @@ impl KernelMachine {
             lash_kernel_doc::KernelDataLimits::standard(),
         )
     }
-    pub fn start_with_data_limits(
-        program: Program,
-        bounds: Bounds,
-        start: CellStart,
-        limits: lash_kernel_doc::KernelDataLimits,
-        source: Box<dyn PageSource>,
-        census: Box<dyn AllocationCensus>,
-    ) -> Result<Self, StartError> {
-        self::start(
-            program,
-            bounds,
-            start,
-            source,
-            census,
-            Layout::default(),
-            limits,
-        )
+}
+
+/// Why a run's saved memory accounting could not be restored.
+pub(crate) enum AccountingFault {
+    Heap(lash_kernel_doc::heap::HeapFault),
+    Malformed(String),
+}
+
+impl From<AccountingFault> for StartError {
+    fn from(fault: AccountingFault) -> Self {
+        match fault {
+            AccountingFault::Heap(fault) => Self::Heap(fault),
+            AccountingFault::Malformed(problem) => Self::Accounting { problem },
+        }
     }
+}
+
+impl From<AccountingFault> for crate::paged::OpenError {
+    fn from(fault: AccountingFault) -> Self {
+        match fault {
+            AccountingFault::Heap(fault) => Self::Heap(fault),
+            AccountingFault::Malformed(problem) => Self::Accounting { problem },
+        }
+    }
+}
+
+/// The census a run holds: over the heap whose header is `heap`, a fresh
+/// heap's when none, held to the run's memory bound. Reads the header page
+/// through `source`.
+pub(crate) fn restored_census(
+    source: &mut dyn PageSource,
+    heap: Option<lash_kernel_doc::heap::PageRef>,
+    memory: u64,
+) -> Result<Box<dyn AllocationCensus>, AccountingFault> {
+    use lash_kernel_state::paged::{AccountingCertificate, CensusFault, heap_accounting};
+    let accounting = match heap {
+        Some(heap) => heap_accounting(source, heap).map_err(AccountingFault::Heap)?,
+        None => AccountingCertificate::FRESH,
+    };
+    lash_kernel_state::kernel_internals::census_impl::Census::restore(
+        accounting,
+        lash_kernel_doc::heap::LogicalBytes(memory),
+    )
+    .map(|census| Box::new(census) as Box<dyn AllocationCensus>)
+    .map_err(|fault| match fault {
+        CensusFault::Heap(fault) => AccountingFault::Heap(fault),
+        CensusFault::Malformed(problem) => AccountingFault::Malformed(problem),
+    })
+}
+
+/// A starting run's census: over its session's heap, or a fresh one.
+pub(crate) fn start_census(
+    source: &mut dyn PageSource,
+    start: &CellStart,
+    memory: u64,
+) -> Result<Box<dyn AllocationCensus>, AccountingFault> {
+    restored_census(
+        source,
+        start.session.as_ref().map(|session| session.heap),
+        memory,
+    )
 }
 
 fn start_interrupt(what: &str, error: Interrupt) -> StartError {

@@ -4,7 +4,8 @@
 //! every event of every case's charge program.
 
 use lash_kernel_exec::charge::{Ending, ReferenceCharger, Weight};
-use lash_kernel_vm::{ChargeTape, KernelMachine, Layout, PreparedLibrary};
+use lash_kernel_vm::kernel_internals::{Layout, prepare_with_layout};
+use lash_kernel_vm::{ChargeTape, KernelMachine, PreparedLibrary};
 
 use crate::machine::{Park, Run, run_case_in};
 use crate::{Case, ExpectedEnd, HarnessError, Observations};
@@ -118,7 +119,7 @@ fn every_corpus_charge_bound_ends_where_the_per_unit_reference_charger_ends() {
     let registry = std::sync::Arc::new(super::corpus_registry());
     let libraries: Vec<PreparedLibrary> = LAYOUTS
         .iter()
-        .map(|layout| PreparedLibrary::with_layout(std::sync::Arc::clone(&registry), *layout))
+        .map(|layout| prepare_with_layout(std::sync::Arc::clone(&registry), *layout))
         .collect();
     let (mut cases, mut bounded, mut crossed) = (0, 0, 0);
     let mut failures = Vec::new();

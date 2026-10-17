@@ -9,9 +9,9 @@ use std::sync::Arc;
 use lash_kernel_doc::{
     Datum, ErrorDatum, FunctionId, FunctionRegistry, Handle, Integer, Timestamp, parse_document,
 };
+use lash_kernel_vm::kernel_internals::{Layout, prepare_with_layout};
 use lash_kernel_vm::{
-    Bounds, End, Host, Layout, Machine, Meters, PreparedLibrary, Program, Step,
-    register_machine_functions,
+    Bounds, End, Host, Machine, Meters, PreparedLibrary, Program, Step, register_machine_functions,
 };
 
 use crate::{register_collections, register_numbers};
@@ -62,7 +62,7 @@ impl Libraries {
         let registry = Arc::new(registry);
         Self {
             fast: PreparedLibrary::new(Arc::clone(&registry)),
-            general: PreparedLibrary::with_layout(Arc::clone(&registry), Layout(1)),
+            general: prepare_with_layout(Arc::clone(&registry), Layout(1)),
             registry,
         }
     }

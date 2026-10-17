@@ -1,0 +1,85 @@
+//! The machine's implementation, for the other kernel crates only: plans
+//! that perturb how a run executes, and the step-structure checks kernel
+//! laws pin.
+use lash_kernel_doc::FunctionRegistry;
+use lash_kernel_state::paged::{CheckpointRoot, PageSource};
+use std::sync::Arc;
+
+pub use crate::compile::Layout;
+use crate::{CellStart, KernelMachine, OpenError, PreparedLibrary, Program, StartError};
+
+/// Compiles every library body in `registry` laid out as `layout` says.
+pub fn prepare_with_layout(registry: Arc<FunctionRegistry>, layout: Layout) -> PreparedLibrary {
+    PreparedLibrary::with_layout(registry, layout)
+}
+
+/// Starts a run whose program executes in `layout`.
+///
+/// # Errors
+///
+/// [`crate::Machine::start`]'s.
+pub fn start_with_layout(
+    program: Program,
+    bounds: crate::Bounds,
+    start: CellStart,
+    layout: Layout,
+    source: Box<dyn PageSource>,
+) -> Result<KernelMachine, StartError> {
+    KernelMachine::start_with_layout(program, bounds, start, layout, source)
+}
+
+/// Opens a root whose program executes in `layout`.
+///
+/// # Errors
+///
+/// [`crate::Machine::open`]'s.
+pub fn open_with_layout(
+    program: Program,
+    bounds: crate::Bounds,
+    root: &CheckpointRoot,
+    admissions: Vec<lash_kernel_state::AdmittedWait>,
+    source: Box<dyn PageSource>,
+    layout: Layout,
+) -> Result<KernelMachine, OpenError> {
+    KernelMachine::open_with_layout(program, bounds, root, admissions, source, layout)
+}
+
+/// The executable's own checks of its statement and step structure.
+pub trait StepStructure {
+    /// Has the run check, at the end of every statement's step, the step
+    /// structure the executable states against the one its frame shows.
+    fn verify_step_structure(&mut self);
+    /// Checks the ops of every statement the run executes; gives how many
+    /// it checked.
+    ///
+    /// # Errors
+    ///
+    /// The first malformed range.
+    fn verify_stream(&self) -> Result<usize, lash_kernel_exec::KirError>;
+    /// How many statement ends the step-structure check has passed.
+    fn verified_steps(&self) -> u64;
+}
+
+impl StepStructure for KernelMachine {
+    fn verify_step_structure(&mut self) {
+        KernelMachine::verify_step_structure(self);
+    }
+    fn verify_stream(&self) -> Result<usize, lash_kernel_exec::KirError> {
+        KernelMachine::verify_stream(self)
+    }
+    fn verified_steps(&self) -> u64 {
+        KernelMachine::verified_steps(self)
+    }
+}
+
+/// Checks the ops of every statement of `library`'s bodies; gives how many
+/// it checked.
+///
+/// # Errors
+///
+/// The first malformed range.
+pub fn verify_library_stream(
+    library: &PreparedLibrary,
+) -> Result<usize, lash_kernel_exec::KirError> {
+    library.verify_stream()
+}

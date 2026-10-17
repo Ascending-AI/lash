@@ -834,7 +834,7 @@ fn native_replay_uses_the_paged_heaps_normal_keys() {
         |heap: &mut dyn NativeHeap, value: i64| Value::Int(heap.int(Integer::from(value)).unwrap());
     let float = |value| Value::Float(Float::new(value));
     let mut heap = probe::fixtures::fresh().unwrap();
-    let one = integer(&mut heap, 1);
+    let one = integer(&mut *heap, 1);
     let map = heap
         .allocate(Object::Map(vec![(one.clone(), Value::Bool(true))]))
         .unwrap();
@@ -846,7 +846,7 @@ fn native_replay_uses_the_paged_heaps_normal_keys() {
         heap.normal_key(&one).unwrap(),
         heap.normal_key(&float(1.0)).unwrap()
     );
-    let zero = integer(&mut heap, 0);
+    let zero = integer(&mut *heap, 0);
     let zero = heap.allocate(Object::Set(vec![zero])).unwrap();
     assert!(heap.set_contains(zero, &float(-0.0)).unwrap());
     let first = heap.tuple(vec![one, float(f64::NAN)]).unwrap();
@@ -859,7 +859,7 @@ fn native_replay_uses_the_paged_heaps_normal_keys() {
         heap.normal_key(&Value::Tuple(queried.clone())).unwrap()
     );
     assert!(heap.set_contains(tuple, &Value::Tuple(queried)).unwrap());
-    let max = integer(&mut heap, i64::MAX);
+    let max = integer(&mut *heap, i64::MAX);
     let boundary = heap.allocate(Object::Set(vec![max])).unwrap();
     assert!(
         !heap

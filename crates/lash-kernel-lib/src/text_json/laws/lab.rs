@@ -7,7 +7,7 @@ use std::sync::Arc;
 
 use lash_kernel_doc::heap::*;
 use lash_kernel_doc::{Datum, Float, FunctionRegistry, Integer, NativeCall, WorkCounter};
-use lash_kernel_state::paged::PagedHeap;
+use lash_kernel_state::kernel_internals::PagedHeap;
 
 use crate::testsupport;
 

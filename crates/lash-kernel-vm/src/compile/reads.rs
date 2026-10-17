@@ -6,7 +6,8 @@ use std::sync::atomic::{AtomicU64, Ordering};
 
 use lash_kernel_doc::heap::{FieldName, HeapFault};
 use lash_kernel_doc::{EntityId, NativeHeap, Value};
-use lash_kernel_state::paged::{PagedHeap, TableCursor};
+use lash_kernel_state::kernel_internals::PagedHeap;
+use lash_kernel_state::paged::TableCursor;
 
 use super::Layout;
 

@@ -1,7 +1,6 @@
 //! Measurement only: the actual heap decides every operation and refusal.
 use lash_kernel_doc::heap::*;
 use lash_kernel_doc::{Integer, NativeError, Value};
-use lash_kernel_state::paged::PagedHeap;
 use std::{
     ops::{ControlFlow, Range},
     sync::Arc,
@@ -12,7 +11,7 @@ pub(super) struct Reservation {
     pub(super) accepted: bool,
 }
 pub(super) struct Recording<'a> {
-    pub(super) heap: &'a mut PagedHeap,
+    pub(super) heap: &'a mut dyn NativeHeap,
     pub(super) log: Vec<Reservation>,
 }
 impl NativeHeap for Recording<'_> {

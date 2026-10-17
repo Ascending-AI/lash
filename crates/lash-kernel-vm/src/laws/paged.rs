@@ -3,11 +3,12 @@ use super::embedder::{Embedder, Setup, int, result};
 use crate::{Machine, Request, Step};
 use lash_kernel_doc::graph_tokens::encode_body;
 use lash_kernel_doc::heap::LogicalBytes;
-use lash_kernel_state::paged::census_impl::Census;
+use lash_kernel_state::kernel_internals::census_impl::Census;
+use lash_kernel_state::kernel_internals::{PagedHeap, tree};
 use lash_kernel_state::paged::*;
 
 fn reopen(embedder: &mut Embedder) -> CheckpointRoot {
-    embedder.reopen(crate::Layout::default(), true)
+    embedder.reopen(crate::compile::Layout::default(), true)
 }
 
 /// K-MACH-007/008: a suspended KIR action and shared-variable alias resume
@@ -29,7 +30,7 @@ fn a_parked_kir_frame_resumes_from_its_sealed_record() {
 /// a session, and both retain their target kind through a cold continuation.
 #[test]
 fn main_and_entry_keep_their_distinct_checkpoint_roots() {
-    use crate::{CellStart, EffectModes, KernelMachine, Target};
+    use crate::{CellStart, EffectModes, Target};
     use lash_kernel_doc::{Datum, Name};
     use tree::{SealWork, Tree};
     for entry in [false, true] {
@@ -66,7 +67,7 @@ fn main_and_entry_keep_their_distinct_checkpoint_roots() {
             .unwrap();
         let certificate = heap.certificate();
         let (program, _) = embedder.program(true);
-        embedder.machine = KernelMachine::start(
+        embedder.machine = crate::KernelMachine::start_with_census(
             program,
             Setup::default().bounds,
             CellStart {
@@ -85,6 +86,7 @@ fn main_and_entry_keep_their_distinct_checkpoint_roots() {
                 modes: EffectModes::recorded(),
                 host: Vec::new(),
             },
+            crate::compile::Layout::default(),
             Box::new(embedder.source.clone()),
             Box::new(
                 Census::restore(certificate, LogicalBytes(Setup::default().bounds.memory)).unwrap(),
@@ -141,7 +143,7 @@ fn an_exhausted_seal_budget_preserves_both_continuations() {
     let old_heap =
         PagedHeap::open_header(prior.heap, Box::new(embedder.source.clone()), EditEpoch(2))
             .unwrap();
-    let mut old = crate::KernelMachine::open(
+    let mut old = crate::KernelMachine::open_with_census(
         program,
         Setup::default().bounds,
         &prior,
@@ -154,6 +156,7 @@ fn an_exhausted_seal_budget_preserves_both_continuations() {
             )
             .unwrap(),
         ),
+        crate::compile::Layout::default(),
     )
     .unwrap();
     assert!(
@@ -326,9 +329,7 @@ fn rejected_and_failed_outcomes_keep_their_distinct_charges_after_open() {
 #[test]
 fn argument_freezing_preserves_a_page_ports_typed_failure() {
     use super::embedder::{ROOMY, census};
-    use crate::{
-        CellStart, EffectModes, KernelMachine, PreparedLibrary, Program, StartError, Target,
-    };
+    use crate::{CellStart, EffectModes, PreparedLibrary, Program, StartError, Target};
     use lash_kernel_doc::heap::{HeapFault, PageId, PageRef};
     use lash_kernel_doc::{Datum, FunctionRegistry, parse_document};
     use std::sync::Arc;
@@ -355,7 +356,14 @@ fn argument_freezing_preserves_a_page_ports_typed_failure() {
         host: Vec::new(),
     };
     assert!(matches!(
-        KernelMachine::start(program, ROOMY, start, Box::new(Lost), census(ROOMY.memory)),
+        crate::KernelMachine::start_with_census(
+            program,
+            ROOMY,
+            start,
+            crate::compile::Layout::default(),
+            Box::new(Lost),
+            census(ROOMY.memory)
+        ),
         Err(StartError::Heap(HeapFault::LeaseLost))
     ));
 }
@@ -471,7 +479,7 @@ fn a_session_carried_under_one_release_is_adopted_under_another() {
         let (mut program, _) = next.program(true);
         program.release = release;
         next.source = first.source.clone();
-        next.machine = crate::KernelMachine::start(
+        next.machine = crate::KernelMachine::start_with_census(
             program,
             Setup::default().bounds,
             crate::CellStart {
@@ -482,6 +490,7 @@ fn a_session_carried_under_one_release_is_adopted_under_another() {
                 modes: crate::EffectModes::recorded(),
                 host: Vec::new(),
             },
+            crate::compile::Layout::default(),
             Box::new(next.source.clone()),
             Box::new(
                 Census::restore(certificate, LogicalBytes(Setup::default().bounds.memory)).unwrap(),
@@ -548,7 +557,7 @@ fn a_failed_outcomes_number_tokens_are_decoded_before_it_is_frozen() {
 #[test]
 fn long_host_binding_names_are_bounded_before_a_checkpoint_is_published() {
     use super::embedder::{ROOMY, census};
-    use crate::{CellStart, EffectModes, KernelMachine, StartError, Target};
+    use crate::{CellStart, EffectModes, StartError, Target};
     use lash_kernel_doc::{Datum, Name};
     let embedder = Embedder::new("main { }");
     for (names, refused_size) in [
@@ -559,7 +568,7 @@ fn long_host_binding_names_are_bounded_before_a_checkpoint_is_published() {
         (vec![Name::new(""); 1533], Some(3069)),
     ] {
         let (program, _) = embedder.program(false);
-        let result = KernelMachine::start(
+        let result = crate::KernelMachine::start_with_census(
             program,
             ROOMY,
             CellStart {
@@ -570,6 +579,7 @@ fn long_host_binding_names_are_bounded_before_a_checkpoint_is_published() {
                 modes: EffectModes::recorded(),
                 host: names.into_iter().map(|name| (name, Datum::Null)).collect(),
             },
+            crate::compile::Layout::default(),
             Box::new(embedder.source.clone()),
             census(ROOMY.memory),
         );
@@ -641,7 +651,7 @@ fn checkpoint_equality_keeps_continuations_and_ignores_allocator_history() {
     // Record edits are required to vary allocator history and pc independently of execution.
     use super::embedder::Embedder;
     use lash_kernel_doc::Value;
-    use lash_kernel_state::paged::tree::Tree;
+    use lash_kernel_state::kernel_internals::tree::Tree;
     use lash_kernel_state::paged::{ObjectInit, SemanticHeap};
     let mut run = Embedder::new("main { let a = [1] let b = a do sleep 1 return b }");
     assert!(matches!(run.run(), crate::Step::Parked(_)));
@@ -672,9 +682,9 @@ fn checkpoint_equality_keeps_continuations_and_ignores_allocator_history() {
         "allocator and unreachable garbage are outside equality"
     );
     let mut tasks = Tree::<TaskRecord>::of_keyed(&root.tasks);
-    let key = lash_kernel_state::paged::directory::ordinal_key(0);
+    let key = lash_kernel_state::kernel_internals::directory::ordinal_key(0);
     let mut task = tasks.get(&key, heap.pages()).unwrap().unwrap();
-    let frame_key = lash_kernel_state::paged::directory::ordinal_key(0);
+    let frame_key = lash_kernel_state::kernel_internals::directory::ordinal_key(0);
     let mut frame = task.frames.get(&frame_key, heap.pages()).unwrap().unwrap();
     frame.statement = lash_kernel_state::paged::SiteRef::new(
         &lash_kernel_doc::Site {
@@ -689,7 +699,7 @@ fn checkpoint_equality_keeps_continuations_and_ignores_allocator_history() {
     tasks
         .seal(
             heap.pages(),
-            &mut lash_kernel_state::paged::tree::SealWork::new(SealBudget {
+            &mut lash_kernel_state::kernel_internals::tree::SealWork::new(SealBudget {
                 pages: u64::MAX,
                 bytes: u64::MAX,
             }),
@@ -699,7 +709,9 @@ fn checkpoint_equality_keeps_continuations_and_ignores_allocator_history() {
     moved.tasks = tasks.keyed_root().unwrap();
     assert_ne!(snapshot(&moved), original, "a frame pc is exact");
     let mut bindings = Tree::<BindingRecord>::of_keyed(&garbage.session);
-    let key = lash_kernel_state::paged::metadata::metadata_key(&lash_kernel_doc::Name::new("b"));
+    let key = lash_kernel_state::kernel_internals::metadata::metadata_key(
+        &lash_kernel_doc::Name::new("b"),
+    );
     let mut binding = bindings.get(&key, heap.pages()).unwrap().unwrap();
     let independent = heap
         .allocate_object(ObjectInit::List(vec![Value::Int(
@@ -711,7 +723,7 @@ fn checkpoint_equality_keeps_continuations_and_ignores_allocator_history() {
     bindings
         .seal(
             heap.pages(),
-            &mut lash_kernel_state::paged::tree::SealWork::new(SealBudget {
+            &mut lash_kernel_state::kernel_internals::tree::SealWork::new(SealBudget {
                 pages: u64::MAX,
                 bytes: u64::MAX,
             }),

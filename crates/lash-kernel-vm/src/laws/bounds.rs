@@ -492,7 +492,6 @@ fn a_host_value_depth_policy_is_honored_by_a_kernel_run() {
         },
         limits,
         Box::new(super::embedder::Source::default()),
-        super::embedder::census(ROOMY.memory),
     )
     .unwrap();
     let mut world = World::default();

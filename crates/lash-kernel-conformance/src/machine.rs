@@ -105,17 +105,7 @@ pub(crate) fn run_case_projected<M: Machine>(
 ) -> Result<Observations, HarnessError> {
     let mut start =
         |program, bounds: lash_kernel_vm::Bounds, start, source: &crate::pages::Source| {
-            let session = crate::pages::Session {
-                root: None,
-                source: source.clone(),
-            };
-            M::start(
-                program,
-                bounds,
-                start,
-                Box::new(source.clone()),
-                session.census(bounds.memory),
-            )
+            M::start(program, bounds, start, Box::new(source.clone()))
         };
     let run = Run {
         start: &mut start,

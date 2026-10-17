@@ -13,11 +13,16 @@ mod work;
 
 use std::sync::Arc;
 
-pub use context::{GuestContext, GuestFrame, GuestPhase, GuestSample, NO_STATEMENT, ReadRefused};
+pub use context::{GuestContext, GuestFrame, GuestPhase, NO_STATEMENT};
+pub use symbols::{GuestSymbols, WorkReport};
+// What only the diagnostic seam names (`crate::perf_witness`).
+#[cfg(any(test, feature = "perf-witness"))]
+pub use context::{GuestSample, ReadRefused};
+#[cfg(any(test, feature = "perf-witness"))]
 pub use profile::{Completeness, GuestProfile, READS_PER_TICK, SymbolTime};
-pub use symbols::{
-    CodeKind, CodeSymbol, CodeWork, GuestSymbols, LibKind, LibSymbol, NativeWork, WorkReport,
-};
+#[cfg(any(test, feature = "perf-witness"))]
+pub use symbols::{CodeKind, CodeSymbol, CodeWork, LibKind, LibSymbol, NativeWork};
+#[cfg(any(test, feature = "perf-witness"))]
 pub use work::{CodeCounts, NativeCounts};
 
 pub(crate) use context::Publisher;

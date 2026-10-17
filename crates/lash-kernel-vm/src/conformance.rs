@@ -10,7 +10,8 @@ use std::ops::ControlFlow;
 
 use lash_kernel_doc::graph_tokens::{TokenCodec, encode_body};
 use lash_kernel_doc::heap::*;
-use lash_kernel_state::paged::tree::{Cell, Tree};
+use lash_kernel_state::kernel_internals::PagedHeap;
+use lash_kernel_state::kernel_internals::tree::{Cell, Tree};
 use lash_kernel_state::paged::*;
 
 /// A semantic checkpoint, independent of its storage layout.
@@ -41,7 +42,7 @@ pub fn checkpoint(
 ) -> Result<Checkpoint, HeapFault> {
     let mut heap = PagedHeap::open_header(root.heap, source, EditEpoch(0))?;
     heap.set_family_base(Box::new(
-        lash_kernel_state::paged::family_impl::FrozenBase::default(),
+        lash_kernel_state::kernel_internals::family_impl::FrozenBase::default(),
     ));
     let mut reader = Reader {
         heap,
@@ -215,7 +216,7 @@ pub fn checkpoint(
 pub fn session(root: &SessionRoot, source: Box<dyn PageSource>) -> Result<Checkpoint, HeapFault> {
     let mut heap = PagedHeap::open_header(root.heap, source, EditEpoch(0))?;
     heap.set_family_base(Box::new(
-        lash_kernel_state::paged::family_impl::FrozenBase::default(),
+        lash_kernel_state::kernel_internals::family_impl::FrozenBase::default(),
     ));
     let mut reader = Reader {
         heap,
@@ -238,7 +239,7 @@ struct Reader {
 
 fn rows<T: Cell>(
     tree: &Tree<T>,
-    access: &lash_kernel_state::paged::tree::Access<'_>,
+    access: &lash_kernel_state::kernel_internals::tree::Access<'_>,
 ) -> Result<Vec<(Vec<u8>, T)>, HeapFault> {
     let mut rows = Vec::new();
     tree.visit(access, &mut |key, row| {

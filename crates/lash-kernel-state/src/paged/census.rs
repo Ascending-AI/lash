@@ -47,6 +47,16 @@ pub struct AccountingCertificate {
     pub refinements: u64,
 }
 
+impl AccountingCertificate {
+    /// A fresh heap's accounting: nothing allocated, nothing refined.
+    pub const FRESH: Self = Self {
+        metric: AccountingMetric::LocalCostV1,
+        upper: LogicalBytes(0),
+        entities: 0,
+        refinements: 0,
+    };
+}
+
 /// One entity's accounting facts, from its directory row: what a trace
 /// reads instead of its body.
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]

@@ -75,7 +75,6 @@ fn start(program: Program, bounds: CaseBounds, session: &crate::pages::Session) 
             host: Vec::new(),
         },
         Box::new(session.source.clone()),
-        session.census(bounds.memory),
     )
     .expect("start protocol document")
 }

@@ -8,13 +8,9 @@ use std::sync::mpsc;
 use std::sync::{Arc, OnceLock};
 
 use lash_core_store::checkpoint_graph::NodeId;
-use lash_kernel_doc::heap::{LogicalBytes, PageId, PageRef};
+use lash_kernel_doc::heap::{PageId, PageRef};
 use lash_kernel_doc::{DocumentId, ErrorDatum};
-use lash_kernel_state::paged::census_impl::Census;
-use lash_kernel_state::paged::{
-    AccountingCertificate, AccountingMetric, AllocationCensus, CheckpointRoot, PageSource,
-    SealBudget, heap_accounting,
-};
+use lash_kernel_state::paged::{CheckpointRoot, PageSource};
 use lash_kernel_vm::{
     Bounds, CellStart, Host, KernelMachine, Machine, Outcome, Program, Step, WaitId,
 };
@@ -174,26 +170,6 @@ fn page_source(pages: SharedPages, runtime: tokio::runtime::Handle) -> WirePageS
     )
 }
 
-/// A census over the heap whose header is `heap`, or a fresh heap's.
-fn census(
-    source: &mut dyn PageSource,
-    heap: Option<PageRef>,
-    memory: u64,
-) -> Result<Box<dyn AllocationCensus>, KernelFailure> {
-    let accounting = match heap {
-        Some(heap) => heap_accounting(source, heap).map_err(fault)?,
-        None => AccountingCertificate {
-            metric: AccountingMetric::LocalCostV1,
-            upper: LogicalBytes(0),
-            entities: 0,
-            refinements: 0,
-        },
-    };
-    Census::restore(accounting, LogicalBytes(memory))
-        .map(|census| Box::new(census) as Box<dyn AllocationCensus>)
-        .map_err(fault)
-}
-
 impl InProcessMachine {
     /// A thread that builds its machine with `build` over a page source
     /// answered by `pages`, then serves the broker's commands with `host`.
@@ -271,25 +247,15 @@ impl InProcessMachine {
                         );
                     }
                     Command::Seal { reply } => {
-                        let sealed = loop {
-                            match machine.seal(SealBudget {
-                                pages: u64::MAX,
-                                bytes: u64::MAX,
-                            }) {
-                                Ok(Some(sealed)) => {
-                                    break port
-                                        .flush()
-                                        .and_then(|()| port.checkpointed(sealed.page))
-                                        .map(|()| NodeId(sealed.page.id.0))
-                                        .map_err(|fault| {
-                                            KernelFailure::from(lash_kernel_vm::MachineError::Heap(
-                                                fault,
-                                            ))
-                                        });
-                                }
-                                Ok(None) => {}
-                                Err(error) => break Err(fault(error)),
-                            }
+                        let sealed = match machine.checkpoint() {
+                            Ok(sealed) => port
+                                .flush()
+                                .and_then(|()| port.checkpointed(sealed.page))
+                                .map(|()| NodeId(sealed.page.id.0))
+                                .map_err(|fault| {
+                                    KernelFailure::from(lash_kernel_vm::MachineError::Heap(fault))
+                                }),
+                            Err(error) => Err(fault(error)),
                         };
                         let _ = reply.send(sealed);
                     }
@@ -402,32 +368,25 @@ where
             None => None,
         };
         let (bounds, start) = (self.bounds, self.start.clone());
-        InProcessMachine::spawn(
-            self.hold.clone(),
-            pages,
-            self.host.clone(),
-            move |mut source| {
-                let census = census(
-                    &mut source,
-                    session.as_ref().map(|session| session.heap),
-                    bounds.memory,
-                )?;
-                Ok(KernelMachine::start(
-                    program,
-                    bounds,
-                    CellStart {
-                        owner: PageId(binding.0),
-                        target: start.target,
-                        args: start.args,
-                        session,
-                        modes: start.modes,
-                        host: start.host,
-                    },
-                    Box::new(source),
-                    census,
-                )?)
-            },
-        )
+        InProcessMachine::spawn(self.hold.clone(), pages, self.host.clone(), move |source| {
+            KernelMachine::start(
+                program,
+                bounds,
+                CellStart {
+                    owner: PageId(binding.0),
+                    target: start.target,
+                    args: start.args,
+                    session,
+                    modes: start.modes,
+                    host: start.host,
+                },
+                Box::new(source),
+            )
+            .map_err(|error| match error {
+                error @ lash_kernel_vm::StartError::Accounting { .. } => fault(error),
+                error => error.into(),
+            })
+        })
         .await
     }
 
@@ -460,15 +419,12 @@ where
                         .map_err(fault)?,
                 )
                 .map_err(fault)?;
-                let census = census(&mut source, Some(header.heap), bounds.memory)?;
-                Ok(KernelMachine::open(
-                    program,
-                    bounds,
-                    &header,
-                    admissions,
-                    Box::new(source),
-                    census,
-                )?)
+                KernelMachine::open(program, bounds, &header, admissions, Box::new(source)).map_err(
+                    |error| match error {
+                        error @ lash_kernel_vm::OpenError::Accounting { .. } => fault(error),
+                        error => error.into(),
+                    },
+                )
             },
         )
         .await

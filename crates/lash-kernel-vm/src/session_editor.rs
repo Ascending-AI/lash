@@ -12,14 +12,15 @@ use std::collections::{BTreeMap, BTreeSet};
 
 use lash_kernel_doc::heap::{HeapFault, LogicalBytes};
 use lash_kernel_doc::{Datum, Name, Value};
-use lash_kernel_state::paged::census_impl::Census;
-use lash_kernel_state::paged::family_impl::FrozenBase;
-use lash_kernel_state::paged::metadata::metadata_key;
-use lash_kernel_state::paged::tree::Tree;
+use lash_kernel_state::kernel_internals::PagedHeap;
+use lash_kernel_state::kernel_internals::census_impl::Census;
+use lash_kernel_state::kernel_internals::family_impl::FrozenBase;
+use lash_kernel_state::kernel_internals::metadata::metadata_key;
+use lash_kernel_state::kernel_internals::tree::Tree;
 use lash_kernel_state::paged::{
     AllocationCensus, BindingRecord, BoundRecord, CarryRoots, EditEpoch, FunctionRecord,
-    HeapLifecycle, HeapWriteError, KeyedRoot, NameRef, PageSource, PagedHeap, SemanticHeap,
-    SessionRoot, SiteRef,
+    HeapLifecycle, HeapWriteError, KeyedRoot, NameRef, PageSource, SemanticHeap, SessionRoot,
+    SiteRef,
 };
 
 /// A binding a host reads: its value as data, or why it is none.
@@ -93,19 +94,22 @@ impl SessionEditor {
     }
 
     /// The names whose bindings differ between `older` and `newer`, two
-    /// versions of one session, each with whether `older` and `newer` bind
-    /// it: read over only the pages the two do not share.
+    /// versions of one session (`older` none for a session that held
+    /// nothing), each with whether `older` and `newer` bind it: read over
+    /// only the pages the two do not share.
     ///
     /// # Errors
     ///
     /// The heap's faults.
     pub fn changed(
         &self,
-        older: &KeyedRoot,
-        newer: &KeyedRoot,
+        older: Option<&SessionRoot>,
+        newer: &SessionRoot,
     ) -> Result<BTreeMap<Name, (bool, bool)>, HeapFault> {
-        let older = Tree::<BindingRecord>::of_keyed(older);
-        let newer = Tree::<BindingRecord>::of_keyed(newer);
+        let older = Tree::<BindingRecord>::of_keyed(
+            &older.map_or(KeyedRoot::Empty, |older| older.bindings),
+        );
+        let newer = Tree::<BindingRecord>::of_keyed(&newer.bindings);
         let mut changed = Vec::new();
         older.diff(&newer, self.heap.pages(), &mut |(_, old, new)| {
             if let Some(record) = new.or(old) {
@@ -119,20 +123,23 @@ impl SessionEditor {
     }
 
     /// The saved functions whose records differ between `older` and
-    /// `newer`, two versions of one session's functions, by declared name:
-    /// each with its description in `newer`, none for one `newer` does not
-    /// hold. Reads only the pages the two do not share.
+    /// `newer`, two versions of one session (`older` none for a session
+    /// that held nothing), by declared name: each with its description in
+    /// `newer`, none for one `newer` does not hold. Reads only the pages
+    /// the two do not share.
     ///
     /// # Errors
     ///
     /// The heap's faults, and a description that is not bytes.
     pub fn changed_functions(
         &self,
-        older: &KeyedRoot,
-        newer: &KeyedRoot,
+        older: Option<&SessionRoot>,
+        newer: &SessionRoot,
     ) -> Result<BTreeMap<Name, Option<Vec<u8>>>, HeapFault> {
-        let older = Tree::<FunctionRecord>::of_keyed(older);
-        let newer = Tree::<FunctionRecord>::of_keyed(newer);
+        let older = Tree::<FunctionRecord>::of_keyed(
+            &older.map_or(KeyedRoot::Empty, |older| older.functions),
+        );
+        let newer = Tree::<FunctionRecord>::of_keyed(&newer.functions);
         let mut changed = Vec::new();
         older.diff(&newer, self.heap.pages(), &mut |(_, old, new)| {
             if let Some(record) = new.or(old) {
@@ -251,11 +258,12 @@ impl SessionEditor {
     ///
     /// The heap's faults.
     pub fn seal(mut self) -> Result<SessionRoot, HeapFault> {
-        let mut work =
-            lash_kernel_state::paged::tree::SealWork::new(lash_kernel_state::paged::SealBudget {
+        let mut work = lash_kernel_state::kernel_internals::tree::SealWork::new(
+            lash_kernel_state::paged::SealBudget {
                 pages: u64::MAX,
                 bytes: u64::MAX,
-            });
+            },
+        );
         self.bindings.seal(self.heap.pages(), &mut work)?;
         let bindings = self.bindings.keyed_root()?;
         self.heap.carry(CarryRoots {

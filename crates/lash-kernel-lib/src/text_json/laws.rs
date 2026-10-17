@@ -7,7 +7,7 @@ mod text;
 use crate::testsupport::{datum, decode, heap, heap_with_source, hold_with_extra};
 use lash_kernel_doc::heap::{HeapFault, NativeError, NativeHeap};
 use lash_kernel_doc::{Datum, FunctionRegistry, Integer, NativeCall, Value, WorkCounter};
-use lash_kernel_state::paged::PagedHeap;
+use lash_kernel_state::kernel_internals::PagedHeap;
 
 fn s(value: &str) -> Datum {
     Datum::Text(value.into())

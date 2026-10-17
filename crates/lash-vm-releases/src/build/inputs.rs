@@ -9,7 +9,6 @@ use super::probe::{
     Input,
     fixtures::{RecordedError as ErrorValue, RecordedObject as Object, RecordedValue as Value},
 };
-use lash_kernel_doc::NativeHeap;
 use lash_kernel_doc::{Bytes, Float, FunctionDefinition, Handle, Integer, TaskId, Timestamp, Type};
 
 use super::corpus::MAX_CASES;

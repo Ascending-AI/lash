@@ -13,8 +13,7 @@ use lash_kernel_doc::heap::{HeapFault, PageRef};
 use lash_kernel_doc::{Datum, DocumentId, Invalid, Name, Value};
 use lash_kernel_state::AdmittedWait;
 use lash_kernel_state::paged::{
-    AllocationCensus, CheckpointRoot, FunctionRecord, PageSource, PagedHeap, SealBudget,
-    SessionRoot,
+    CheckpointRoot, FunctionRecord, PageSource, SealBudget, SessionRoot,
 };
 use std::collections::{BTreeMap, BTreeSet};
 
@@ -65,12 +64,16 @@ impl CellStart {
 /// (`K-SES-003`): the functions among them its dialect saves
 /// (`K-SES-004`). The embedder that knows the cell's dialect supplies it.
 pub trait CellSave {
-    /// Saves what it can of `cell.dropped`.
+    /// Saves what it can of `cell.dropped` through `saving`.
     ///
     /// # Errors
     ///
     /// The heap's faults.
-    fn save(&mut self, heap: &mut PagedHeap, cell: SaveCell<'_>) -> Result<SavedCell, HeapFault>;
+    fn save(
+        &mut self,
+        saving: &mut crate::CellSaveContext<'_>,
+        cell: SaveCell<'_>,
+    ) -> Result<SavedCell, HeapFault>;
 }
 
 /// A cell's end as its saving reads it.
@@ -159,6 +162,9 @@ pub enum OpenError {
     KernelVersion { parked: u32, supported: u32 },
     #[error("the root is not a checkpoint root of this format: {problem}")]
     Malformed { problem: String },
+    /// The root's saved memory accounting is inconsistent.
+    #[error("the accounting certificate is malformed: {problem}")]
+    Accounting { problem: String },
     /// A page the open reads faulted.
     #[error(transparent)]
     Heap(HeapFault),
@@ -181,25 +187,27 @@ pub enum SealError {
 /// Implemented by `KernelMachine` (layer hp-heap, FIG-6188).
 pub trait Machine: Sized {
     /// Admits and prepares `program`'s document and creates a run that has
-    /// executed nothing, its heap read and sealed through `source`.
+    /// executed nothing, its heap read and sealed through `source`. The run
+    /// accounts its memory from the session's saved accounting (a fresh
+    /// heap's without a session), held to `bounds.memory`.
     fn start(
         program: Program,
         bounds: Bounds,
         start: CellStart,
         source: Box<dyn PageSource>,
-        census: Box<dyn AllocationCensus>,
     ) -> Result<Self, StartError>;
 
     /// Opens a sealed root against its document's prepared executable,
     /// reading the root page and nothing it does not need. `admissions`
-    /// holds the request of every wait the root holds handed out.
+    /// holds the request of every wait the root holds handed out. The run
+    /// accounts its memory from the root's saved accounting, held to
+    /// `bounds.memory`.
     fn open(
         program: Program,
         bounds: Bounds,
         root: &CheckpointRoot,
         admissions: Vec<AdmittedWait>,
         source: Box<dyn PageSource>,
-        census: Box<dyn AllocationCensus>,
     ) -> Result<Self, OpenError>;
 
     fn run(&mut self, host: &mut dyn Host, slice: u64) -> Result<Step, MachineError>;
@@ -210,6 +218,23 @@ pub trait Machine: Sized {
     /// changed pages and execution records only, within `budget`; `None`
     /// when the budget ran out first (call again).
     fn seal(&mut self, budget: SealBudget) -> Result<Option<SealedRoot>, SealError>;
+
+    /// Seals the run whole at this safe point: [`Machine::seal`] with no
+    /// budget, until it produces the root.
+    ///
+    /// # Errors
+    ///
+    /// [`Machine::seal`]'s.
+    fn checkpoint(&mut self) -> Result<SealedRoot, SealError> {
+        loop {
+            if let Some(sealed) = self.seal(SealBudget {
+                pages: u64::MAX,
+                bytes: u64::MAX,
+            })? {
+                return Ok(sealed);
+            }
+        }
+    }
 
     fn meters(&self) -> Meters;
     fn task_identity(

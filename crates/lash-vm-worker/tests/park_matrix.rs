@@ -987,9 +987,7 @@ impl Projections for LawHost {
 /// into the activation's spool beside the pages the run staged.
 async fn law_session(pages: &SharedPages, carry: Option<&SessionRoot>) -> NodeId {
     let carry = carry.expect("a finished cell carries its session");
-    let mut children = vec![carry.heap];
-    children.extend(carry.bindings.page());
-    children.extend(carry.functions.page());
+    let mut children = carry.pages();
     children.sort_by_key(|page| page.id);
     children.dedup_by_key(|page| page.id);
     let mut service = pages.lock().await;

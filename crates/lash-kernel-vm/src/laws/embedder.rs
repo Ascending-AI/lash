@@ -450,7 +450,7 @@ impl Embedder {
             library: PreparedLibrary::new(Arc::clone(&library.registry)),
         };
         let source = Source::default();
-        let machine = KernelMachine::start_with_layout(
+        let machine = crate::KernelMachine::start_with_census(
             program,
             setup.bounds,
             setup.start,
@@ -531,12 +531,12 @@ impl Embedder {
             .try_checkpoint()
             .map_err(|error| format!("{error:?}"))?;
         let (program, library) = self.program(native_twice);
-        let census = lash_kernel_state::paged::census_impl::Census::restore(
+        let census = lash_kernel_state::kernel_internals::census_impl::Census::restore(
             certificate,
             LogicalBytes(self.bounds.memory),
         )
         .map_err(|error| format!("{error:?}"))?;
-        self.machine = KernelMachine::open_with_layout(
+        self.machine = crate::KernelMachine::open_with_census(
             program,
             self.bounds,
             &root,
@@ -584,14 +584,14 @@ impl Embedder {
         native_twice: bool,
     ) {
         let (program, library) = self.program(native_twice);
-        self.machine = KernelMachine::open_with_layout(
+        self.machine = crate::KernelMachine::open_with_census(
             program,
             self.bounds,
             root,
             Vec::new(),
             Box::new(self.source.clone()),
             Box::new(
-                lash_kernel_state::paged::census_impl::Census::restore(
+                lash_kernel_state::kernel_internals::census_impl::Census::restore(
                     certificate,
                     LogicalBytes(self.bounds.memory),
                 )
@@ -681,7 +681,7 @@ pub(crate) fn function_site<const N: usize>(name: &str, path: [u32; N]) -> Site 
     Site::new(Unit::Function(name.into()), path)
 }
 
-use lash_kernel_state::paged::census_impl::Census;
+use lash_kernel_state::kernel_internals::census_impl::Census;
 #[derive(Clone, Default)]
 pub(crate) struct Source(pub(crate) Rc<RefCell<BTreeMap<PageId, PageAnswer>>>);
 impl PageSource for Source {
@@ -735,10 +735,11 @@ pub(crate) fn start_machine(
     bounds: Bounds,
     start: CellStart,
 ) -> Result<KernelMachine, crate::StartError> {
-    KernelMachine::start(
+    crate::KernelMachine::start_with_census(
         program,
         bounds,
         start,
+        crate::compile::Layout::default(),
         Box::new(Source::default()),
         census(bounds.memory),
     )

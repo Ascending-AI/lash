@@ -6,10 +6,9 @@
 use std::collections::{BTreeMap, BTreeSet};
 
 use lash_kernel_dialect::{EffectControl, Kept, Left, NotSaved};
-use lash_kernel_doc::heap::{HeapFault, NativeError, NativeHeap as _};
-use lash_kernel_doc::{EffectName, Site, Value};
-use lash_kernel_state::paged::{FunctionRecord, HeapWriteError, NameRef, PagedHeap};
-use lash_kernel_vm::{CellSave, SaveCell, SavedCell};
+use lash_kernel_doc::heap::HeapFault;
+use lash_kernel_doc::{EffectName, Site};
+use lash_kernel_vm::{CellSave, CellSaveContext, SaveCell, SavedCell};
 use lash_vm_client::service::LowerFunction;
 
 /// How a cell of one dialect saves its functions.
@@ -23,7 +22,11 @@ pub(crate) struct DialectSave {
 }
 
 impl CellSave for DialectSave {
-    fn save(&mut self, heap: &mut PagedHeap, cell: SaveCell<'_>) -> Result<SavedCell, HeapFault> {
+    fn save(
+        &mut self,
+        saving: &mut CellSaveContext<'_>,
+        cell: SaveCell<'_>,
+    ) -> Result<SavedCell, HeapFault> {
         let Some(values) = &self.values else {
             return Ok(SavedCell {
                 refused: cell
@@ -35,8 +38,7 @@ impl CellSave for DialectSave {
                 ..SavedCell::default()
             });
         };
-        let (kept, refused) = lash_kernel_dialect::save(
-            heap,
+        let (kept, refused) = saving.save(
             Left {
                 document: cell.document,
                 bindings: cell.bindings,
@@ -56,41 +58,14 @@ impl CellSave for DialectSave {
             ..SavedCell::default()
         };
         for (name, Kept { function, aliases }) in kept {
-            let meta = LowerFunction::from(&function).description();
-            let (before, after) = function
-                .token
-                .as_ref()
-                .map(|token| (token.before.clone(), token.after.clone()))
-                .unwrap_or_default();
-            let record = FunctionRecord {
-                name: NameRef::new(&function.name, heap.pages())?,
-                meta: Value::Bytes(heap.bytes(&meta).map_err(native)?),
-                release: function.release,
-                captures: function.captures.clone(),
-                before,
-                after,
-            };
+            let description = LowerFunction::from(&function).description();
+            let (record, value) = saving.record(&function, &description)?;
             // Every alias is the one function: one value, bound to each.
-            let value = function.value(heap).map_err(write)?;
             for binding in std::iter::once(&name).chain(&aliases) {
                 saved.rebound.push((binding.clone(), value.clone()));
             }
             saved.functions.push((function.name.clone(), record));
         }
         Ok(saved)
-    }
-}
-
-fn native(error: NativeError) -> HeapFault {
-    match error {
-        NativeError::Heap(fault) => fault,
-        other => HeapFault::Malformed(format!("a saved function's description: {other}")),
-    }
-}
-
-fn write(error: HeapWriteError) -> HeapFault {
-    match error {
-        HeapWriteError::Fault(fault) => fault,
-        other => HeapFault::Malformed(format!("a saved function's value: {other}")),
     }
 }

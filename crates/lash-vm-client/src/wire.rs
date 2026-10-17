@@ -148,7 +148,7 @@ impl CarryWire {
     pub fn of(session: &SessionRoot, mut issue: impl FnMut(PageRef) -> PageLink) -> Self {
         Self {
             root: encode_body(session),
-            pages: session_pages(session).into_iter().map(&mut issue).collect(),
+            pages: session.pages().into_iter().map(&mut issue).collect(),
         }
     }
 
@@ -166,7 +166,7 @@ impl CarryWire {
         let breach = |problem: &str| PoolError::payload(PayloadKind::Start, problem);
         let mut session: SessionRoot = decode_body(&self.root)
             .map_err(|error| PoolError::payload(PayloadKind::Start, error))?;
-        let named = session_pages(&session);
+        let named = session.pages();
         if named.len() != self.pages.len()
             || named
                 .iter()
@@ -176,29 +176,14 @@ impl CarryWire {
             return Err(breach("a carried session's links are not its pages'"));
         }
         let mut grants = self.pages.iter();
-        let mut next = || -> Result<PageGrant, PoolError> {
+        session.grant_pages(|_| {
             grants
                 .next()
                 .ok_or_else(|| breach("a carried session's links run out"))
                 .and_then(&mut grant)
-        };
-        session.heap.grant = next()?;
-        if let Some(page) = session.bindings.page_mut() {
-            page.grant = next()?;
-        }
-        if let Some(page) = session.functions.page_mut() {
-            page.grant = next()?;
-        }
+        })?;
         Ok(session)
     }
-}
-
-/// The pages `session` names, in its order.
-fn session_pages(session: &SessionRoot) -> Vec<PageRef> {
-    let mut pages = vec![session.heap];
-    pages.extend(session.bindings.page());
-    pages.extend(session.functions.page());
-    pages
 }
 
 /// How a new run starts ([`lash_kernel_vm::CellStart`], less its owner

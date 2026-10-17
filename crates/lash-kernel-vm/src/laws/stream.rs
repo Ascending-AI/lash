@@ -9,8 +9,8 @@ use lash_kernel_doc::{Datum, Name, parse_document};
 
 use super::embedder::{ROOMY, Source, World, census, library};
 use crate::{
-    Bound, Bounds, CellStart, End, KernelMachine, Layout, Machine, PreparedLibrary, Program,
-    RunError, Step, Target,
+    Bound, Bounds, CellStart, End, Layout, Machine, PreparedLibrary, Program, RunError, Step,
+    Target,
 };
 
 /// A generated expression over two variables, `a` (7) and `b` (`[1, 2,
@@ -304,7 +304,7 @@ fn ends(program: &Program, layout: Layout, charge: u64) -> (End, u64) {
         host: Vec::new(),
     };
     let bounds = Bounds { charge, ..ROOMY };
-    let mut machine = KernelMachine::start_with_layout(
+    let mut machine = crate::KernelMachine::start_with_census(
         program.clone(),
         bounds,
         start,

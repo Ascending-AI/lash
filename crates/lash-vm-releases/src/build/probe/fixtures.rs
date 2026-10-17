@@ -1,7 +1,7 @@
 //! Recorded inputs are testing/build data, resolved by ordinary heap operations.
 use lash_kernel_doc::heap::*;
 use lash_kernel_doc::{Bytes, Float, Handle, Integer, Name, TaskId, Timestamp, Value};
-use lash_kernel_state::paged::{census_impl::Census, tree::Tree, *};
+use lash_kernel_state::paged::{PageAnswer, PageBody, PageSource, ProbeHeap};
 use serde::{Deserialize, Serialize};
 use std::{
     cell::RefCell,
@@ -86,16 +86,11 @@ impl PageSource for Source {
         Ok(page)
     }
 }
-pub(crate) fn fresh() -> Result<PagedHeap, String> {
-    let mut heap = PagedHeap::fresh(Box::<Source>::default(), EditEpoch(1));
-    let census =
-        Census::restore(heap.certificate(), LogicalBytes(1 << 40)).map_err(|e| e.to_string())?;
-    heap.set_census(Box::new(census))
-        .map_err(|e| e.to_string())?;
-    Ok(heap)
+pub(crate) fn fresh() -> Result<ProbeHeap, String> {
+    ProbeHeap::fresh(Box::<Source>::default()).map_err(|e| e.to_string())
 }
 pub(crate) struct Replay {
-    pub(crate) heap: PagedHeap,
+    pub(crate) heap: ProbeHeap,
     pub(crate) args: Vec<Value>,
     pub(crate) identities: BTreeMap<EntityId, u64>,
 }
@@ -183,7 +178,7 @@ impl Replay {
                 RecordedObject::Set(values) => {
                     for value in values {
                         let value = decode(&mut heap, value, &ids)?;
-                        heap.set_write(id, value, true).map_err(error)?;
+                        heap.set_insert(id, value).map_err(error)?;
                     }
                 }
                 RecordedObject::Map(entries) => {
@@ -196,8 +191,7 @@ impl Replay {
                 RecordedObject::Record(fields) => {
                     for (name, value) in fields {
                         let value = decode(&mut heap, value, &ids)?;
-                        heap.record_write(id, FieldName::Static(name), value)
-                            .map_err(error)?;
+                        heap.record_write(id, name, value).map_err(error)?;
                     }
                 }
             }
@@ -207,20 +201,7 @@ impl Replay {
             .iter()
             .map(|v| decode(&mut heap, v, &ids))
             .collect::<Result<Vec<_>, _>>()?;
-        heap.set_execution_roots(Tree::new(false), Tree::new(false), &args, &[], 0, &[])
-            .map_err(error)?;
-        let certificate = heap.certificate();
-        let bound = LogicalBytes(
-            certificate
-                .upper
-                .0
-                .checked_add(input.room)
-                .ok_or("fixture bound overflow")?,
-        );
-        heap.set_census(Box::new(
-            Census::restore(certificate, bound).map_err(error)?,
-        ))
-        .map_err(error)?;
+        heap.hold(&args, input.room).map_err(error)?;
         Ok(Self {
             heap,
             args,
@@ -229,7 +210,7 @@ impl Replay {
     }
 }
 fn decode(
-    heap: &mut PagedHeap,
+    heap: &mut ProbeHeap,
     v: &RecordedValue,
     ids: &BTreeMap<u64, EntityId>,
 ) -> Result<Value, String> {

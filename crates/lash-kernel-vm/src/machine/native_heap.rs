@@ -7,8 +7,9 @@ use lash_kernel_doc::heap::{
     BytesRef, Chunk, ErrorRef, FieldName, HeapFault, IntRef, NormalKey, TextRef, TupleRef,
 };
 use lash_kernel_doc::{Element, EntityId, Integer, NativeError, NativeHeap, Object, Value};
-use lash_kernel_state::paged::tree::Tree;
-use lash_kernel_state::paged::{HeapWriteError, ListJoinRecord, PagedHeap};
+use lash_kernel_state::kernel_internals::PagedHeap;
+use lash_kernel_state::kernel_internals::tree::Tree;
+use lash_kernel_state::paged::{HeapWriteError, ListJoinRecord};
 use std::ops::{ControlFlow, Range};
 use std::sync::Arc;
 
@@ -177,9 +178,10 @@ mod scalar_laws {
     use crate::laws::embedder::Embedder;
     use crate::{End, Machine, Step};
     use lash_kernel_doc::heap::LogicalBytes;
+    use lash_kernel_state::kernel_internals::census_impl::Census;
     use lash_kernel_state::paged::{
         AccountingCertificate, AllocationCensus, CensusFault, CensusGraph, PendingReservation,
-        RefinedDecision, ReservationDecision, TransientRoots, census_impl::Census,
+        RefinedDecision, ReservationDecision, TransientRoots,
     };
     use std::cell::Cell;
     use std::rc::Rc;
@@ -270,9 +272,10 @@ mod precision_laws {
     use crate::{Bounds, End, KernelMachine, Layout, RunError, Step};
     use lash_kernel_doc::Datum;
     use lash_kernel_doc::heap::LogicalBytes;
+    use lash_kernel_state::kernel_internals::census_impl::Census;
     use lash_kernel_state::paged::{
         AccountingCertificate, AllocationCensus, CensusFault, CensusGraph, PendingReservation,
-        RefinedDecision, ReservationDecision, TransientRoots, census_impl::Census,
+        RefinedDecision, ReservationDecision, TransientRoots,
     };
     use std::cell::RefCell;
     use std::rc::Rc;

@@ -477,16 +477,12 @@ fn imperative(kind: CellFailureKind, cell_noun: &str) -> String {
 mod tests {
     use std::sync::Arc;
 
-    use lash_kernel_doc::heap::{HeapFault, LogicalBytes, PageGrant, PageId, PageRef};
+    use lash_kernel_doc::heap::{HeapFault, PageGrant, PageId, PageRef};
     use lash_kernel_doc::{
         ErrorDatum, FunctionRegistry, Handle, NativeCall, NativeError, NativeFunction, Timestamp,
         Value, parse_definition, parse_document,
     };
-    use lash_kernel_state::paged::census_impl::Census;
-    use lash_kernel_state::paged::{
-        AccountingCertificate, AccountingMetric, AllocationCensus as _, PageAnswer, PageBody,
-        PageSource,
-    };
+    use lash_kernel_state::paged::{PageAnswer, PageBody, PageSource};
     use lash_kernel_vm::{Bounds, CellStart, End, Host, KernelMachine, Machine, Program, Target};
 
     use super::*;
@@ -594,16 +590,6 @@ mod tests {
                 requests_per_park: 10,
                 join_members: 10,
             };
-            let census = Census::restore(
-                AccountingCertificate {
-                    metric: AccountingMetric::LocalCostV1,
-                    upper: LogicalBytes(0),
-                    entities: 0,
-                    refinements: 0,
-                },
-                LogicalBytes(bounds.memory),
-            )
-            .expect("census");
             let mut machine = KernelMachine::start(
                 Program {
                     release: PageId([8; 32]),
@@ -620,7 +606,6 @@ mod tests {
                     host: Vec::new(),
                 },
                 Box::new(Pages::default()),
-                Box::new(census),
             )
             .expect("started");
             let lash_kernel_vm::Step::Ended(end) = machine.run(&mut World, 1000).expect("run")

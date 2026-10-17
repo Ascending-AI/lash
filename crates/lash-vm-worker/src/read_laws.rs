@@ -15,10 +15,8 @@ use std::collections::{BTreeMap, BTreeSet};
 use std::sync::Arc;
 
 use lash_core_store::checkpoint_graph::NodeId;
-use lash_kernel_doc::heap::{LogicalBytes, PageId};
+use lash_kernel_doc::heap::PageId;
 use lash_kernel_doc::{Datum, EffectName, ErrorDatum, Handle, Integer, Name, Timestamp};
-use lash_kernel_state::paged::census_impl::Census;
-use lash_kernel_state::paged::{AccountingCertificate, AccountingMetric, AllocationCensus};
 use lash_kernel_vm::{
     CellStart, EffectModes, End, Host, HostFault, KernelMachine, Machine, Outcome, Program,
     Request, Step, Target,
@@ -118,18 +116,6 @@ fn run(
         requests_per_park: 16,
         join_members: 16,
     };
-    let census: Box<dyn AllocationCensus> = Box::new(
-        Census::restore(
-            AccountingCertificate {
-                metric: AccountingMetric::LocalCostV1,
-                upper: LogicalBytes(0),
-                entities: 0,
-                refinements: 0,
-            },
-            LogicalBytes(bounds.memory),
-        )
-        .expect("a fresh census"),
-    );
     let mut machine = KernelMachine::start(
         program.clone(),
         bounds,
@@ -138,7 +124,6 @@ fn run(
             Uncommitted,
             Box::new(spools.spool(next_stage_lease()).expect("spool")),
         )),
-        census,
     )
     .expect("the cell starts");
     let mut host = Answering {

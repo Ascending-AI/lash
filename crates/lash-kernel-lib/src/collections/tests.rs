@@ -63,7 +63,12 @@ fn program(source: &str) -> Program {
     }
 }
 fn machine(source: &str) -> KernelMachine {
-    crate::testsupport::start(program(source), BOUNDS, lash_kernel_vm::Layout::default()).unwrap()
+    crate::testsupport::start(
+        program(source),
+        BOUNDS,
+        lash_kernel_vm::kernel_internals::Layout::default(),
+    )
+    .unwrap()
 }
 fn run(source: &str) -> End {
     let mut machine = machine(source);
@@ -548,7 +553,7 @@ fn sort_comparisons_are_bounded_by_n_log_n() {
                     charge: 1_000_000_000,
                     ..BOUNDS
                 },
-                lash_kernel_vm::Layout::default(),
+                lash_kernel_vm::kernel_internals::Layout::default(),
             )
             .unwrap();
             let Step::Ended(End::Finished(done)) =
@@ -698,9 +703,12 @@ fn callback_law(source: &str, expected: Datum, expected_effects: usize) {
     let uninterrupted = source.replace("let y = perform echo(x) as Any", "let y = x");
     assert_eq!(result(&uninterrupted), expected);
     let program = program(source);
-    let mut machine =
-        crate::testsupport::start(program.clone(), BOUNDS, lash_kernel_vm::Layout::default())
-            .unwrap();
+    let mut machine = crate::testsupport::start(
+        program.clone(),
+        BOUNDS,
+        lash_kernel_vm::kernel_internals::Layout::default(),
+    )
+    .unwrap();
     let mut effects = 0;
     loop {
         match machine.run(&mut World::default(), u64::MAX).unwrap() {
@@ -855,8 +863,12 @@ fn recorded_iteration(shard: &str) {
             document: Arc::new(document),
             library: lash_kernel_vm::PreparedLibrary::new(Arc::new(FunctionRegistry::new())),
         };
-        let mut machine =
-            crate::testsupport::start(program, BOUNDS, lash_kernel_vm::Layout::default()).unwrap();
+        let mut machine = crate::testsupport::start(
+            program,
+            BOUNDS,
+            lash_kernel_vm::kernel_internals::Layout::default(),
+        )
+        .unwrap();
         let mut world = World::default();
         let Step::Ended(End::Finished(done)) = machine.run(&mut world, u64::MAX).unwrap() else {
             panic!("self-contained iteration case did not finish")
@@ -1084,7 +1096,7 @@ fn every_collection_native_has_a_named_cold_and_warm_case() {
             let mut machine = crate::testsupport::start(
                 program.clone(),
                 BOUNDS,
-                lash_kernel_vm::Layout::default(),
+                lash_kernel_vm::kernel_internals::Layout::default(),
             )
             .unwrap();
             let Step::Ended(end) = machine.run(&mut World::default(), u64::MAX).unwrap() else {

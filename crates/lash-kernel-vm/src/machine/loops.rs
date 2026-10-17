@@ -11,7 +11,7 @@ use std::sync::Arc;
 
 use lash_kernel_doc::heap::TupleRef;
 use lash_kernel_doc::{EntityId, NativeHeap, TaskId, Value};
-use lash_kernel_state::paged::payload::TextCursor;
+use lash_kernel_state::kernel_internals::payload::TextCursor;
 use lash_kernel_state::paged::{SemanticHeap, TableCursor};
 use num_traits::ToPrimitive;
 

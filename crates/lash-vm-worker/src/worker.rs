@@ -9,14 +9,10 @@ use crate::PoolError;
 use crate::embedding::Embedding;
 use crate::host::{PagePort, Wire, WireHost, WirePageSource, grant_of, link_grant};
 use lash_kernel_doc::graph_tokens::{ChildRef, decode_body};
-use lash_kernel_doc::heap::{LogicalBytes, PageId, PageRef};
+use lash_kernel_doc::heap::{PageId, PageRef};
 use lash_kernel_doc::{Datum, IdentifiedDocument};
 use lash_kernel_state::AdmittedWait;
-use lash_kernel_state::paged::census_impl::Census;
-use lash_kernel_state::paged::{
-    AccountingCertificate, AccountingMetric, AllocationCensus, CheckpointRoot, PageSource,
-    SealBudget, heap_accounting,
-};
+use lash_kernel_state::paged::{CheckpointRoot, PageSource};
 use lash_kernel_vm::{Bounds, CellStart, KernelMachine, Machine, OpenError, Program, Step};
 #[cfg(test)]
 use lash_vm_client::ipc::read_frame;
@@ -423,21 +419,10 @@ impl<'embedding> Server<'embedding> {
         if let Some(sealed) = hosted.sealed {
             return Ok(sealed);
         }
-        let root = loop {
-            let sealed = hosted
-                .machine
-                .seal(SealBudget {
-                    pages: u64::MAX,
-                    bytes: u64::MAX,
-                })
-                .map_err(|error| match error {
-                    lash_kernel_vm::SealError::Heap(fault) => heap_fault(fault),
-                    other => machine_breach(other),
-                })?;
-            if let Some(sealed) = sealed {
-                break sealed;
-            }
-        };
+        let root = hosted.machine.checkpoint().map_err(|error| match error {
+            lash_kernel_vm::SealError::Heap(fault) => heap_fault(fault),
+            other => machine_breach(other),
+        })?;
         hosted.port.checkpointed(root.page).map_err(heap_fault)?;
         let candidate = root.page.id.0;
         hosted.sealed = Some(candidate);
@@ -562,14 +547,6 @@ impl<'embedding> Server<'embedding> {
                     .map(|carry| carry.session(link_grant))
                     .transpose()
                     .map_err(|error| undecodable(RunInput::Start, &error))?;
-                let census = census(
-                    session
-                        .as_ref()
-                        .map(|session| heap_accounting(&mut source, session.heap))
-                        .transpose()
-                        .map_err(heap_fault)?,
-                    bounds.memory,
-                )?;
                 KernelMachine::start_with_data_limits(
                     program,
                     bounds,
@@ -583,10 +560,10 @@ impl<'embedding> Server<'embedding> {
                     },
                     self.bootstrap.tuning.kernel_data,
                     Box::new(source),
-                    census,
                 )
                 .map_err(|error| match error {
                     lash_kernel_vm::StartError::Heap(fault) => heap_fault(fault),
+                    error @ lash_kernel_vm::StartError::Accounting { .. } => machine_breach(error),
                     error => PoolError::refused(RunRefusal::Start {
                         detail: Detail::new(error),
                     }),
@@ -633,17 +610,15 @@ impl<'embedding> Server<'embedding> {
                     .map(|admission| decode_body::<AdmittedWait>(&admission.0))
                     .collect::<Result<Vec<_>, _>>()
                     .map_err(|error| undecodable(RunInput::Checkpoint, &error))?;
-                let census = census(
-                    Some(heap_accounting(&mut source, root.heap).map_err(heap_fault)?),
-                    bounds.memory,
-                )?;
-                KernelMachine::open(program, bounds, &root, admissions, Box::new(source), census)
-                    .map_err(|error| match error {
+                KernelMachine::open(program, bounds, &root, admissions, Box::new(source)).map_err(
+                    |error| match error {
                         OpenError::Heap(fault) => heap_fault(fault),
+                        error @ OpenError::Accounting { .. } => machine_breach(error),
                         error => PoolError::refused(RunRefusal::Restore {
                             refusal: restore_refusal(error),
                         }),
-                    })?
+                    },
+                )?
             }
         };
         machine.set_observe(if start.observe_counts {
@@ -979,23 +954,6 @@ pub(crate) fn cpu_nanos() -> Result<u64, PoolError> {
     Ok((time.tv_sec as u64)
         .saturating_mul(1_000_000_000)
         .saturating_add(time.tv_nsec as u64))
-}
-
-/// A census over a heap whose persisted accounting is `accounting` (a
-/// fresh heap's when none), held to the run's heap bound.
-fn census(
-    accounting: Option<AccountingCertificate>,
-    memory: u64,
-) -> Result<Box<dyn AllocationCensus>, PoolError> {
-    let accounting = accounting.unwrap_or(AccountingCertificate {
-        metric: AccountingMetric::LocalCostV1,
-        upper: LogicalBytes(0),
-        entities: 0,
-        refinements: 0,
-    });
-    Census::restore(accounting, LogicalBytes(memory))
-        .map(|census| Box::new(census) as Box<dyn AllocationCensus>)
-        .map_err(machine_breach)
 }
 
 /// A heap fault the worker met itself, as the protocol carries it: a host

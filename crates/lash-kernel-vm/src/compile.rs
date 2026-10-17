@@ -216,7 +216,7 @@ impl PreparedLibrary {
     /// Checks the ops of every statement of the library's bodies
     /// (`lash_kernel_exec::verify_stream`): each range is well formed and
     /// spans no Boundary. Gives how many statements it checked.
-    pub fn verify_stream(&self) -> Result<usize, KirError> {
+    pub(crate) fn verify_stream(&self) -> Result<usize, KirError> {
         let tables = &self.0.tables;
         tables.verify_stream(
             &Base {
@@ -251,7 +251,7 @@ impl PreparedLibrary {
     /// implementation runs: a parked run inside such a body resumes there
     /// (`K-MACH-008`). A test prepares its other layout once, and starts
     /// each run in it with [`crate::KernelMachine::start_with_layout`].
-    pub fn with_layout(registry: Arc<FunctionRegistry>, layout: Layout) -> Self {
+    pub(crate) fn with_layout(registry: Arc<FunctionRegistry>, layout: Layout) -> Self {
         let mut shuffler = Shuffler(layout.0);
         let mut library: Vec<(FunctionId, &doc::RegisteredFunction)> = registry
             .iter()
@@ -775,7 +775,7 @@ pub(crate) struct BindingName {
 }
 impl BindingName {
     pub(crate) fn new(name: Name) -> Self {
-        let key = lash_kernel_state::paged::metadata::metadata_key(&name).into();
+        let key = lash_kernel_state::kernel_internals::metadata::metadata_key(&name).into();
         Self { name, key }
     }
 }

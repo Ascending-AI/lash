@@ -1,7 +1,41 @@
 //! Persistent semantic heap pages and the admitted requests resumed workers receive.
 pub mod paged;
 #[cfg(any(test, feature = "perf-witness"))]
-pub mod perf_witness;
+pub(crate) mod perf_witness;
+
+/// The paged heap's implementation, for the other kernel crates only: the
+/// machine executes on it and kernel laws inspect it. Nothing outside
+/// `crates/lash-kernel-*` names this module (`scripts/check-kernel-boundary.py`,
+/// FIG-6688); hosts use [`paged`]'s records, page port and session readers.
+#[doc(hidden)]
+pub mod kernel_internals {
+    pub mod census_impl {
+        pub use crate::paged::census_impl::*;
+    }
+    pub mod directory {
+        pub use crate::paged::directory::*;
+    }
+    pub mod family_impl {
+        pub use crate::paged::family_impl::*;
+    }
+    pub mod heap_impl {
+        pub use crate::paged::heap_impl::*;
+    }
+    pub mod metadata {
+        pub use crate::paged::metadata::*;
+    }
+    pub mod payload {
+        pub use crate::paged::payload::*;
+    }
+    #[cfg(any(test, feature = "perf-witness"))]
+    pub mod perf_witness {
+        pub use crate::perf_witness::*;
+    }
+    pub mod tree {
+        pub use crate::paged::tree::*;
+    }
+    pub use crate::paged::heap_impl::PagedHeap;
+}
 use lash_kernel_doc::graph_tokens::{TokenCodec, TokenError, TokenReader, TokenWriter};
 use lash_kernel_doc::{Datum, EffectIdentity, EffectName};
 use schemars::JsonSchema;

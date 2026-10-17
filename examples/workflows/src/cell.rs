@@ -5,10 +5,7 @@ use std::rc::Rc;
 use std::sync::Arc;
 
 use lash_kernel_doc::heap::*;
-use lash_kernel_state::paged::{
-    AllocationCensus, EditEpoch, PageAnswer, PageBody, PageSource, PagedHeap, SemanticHeap,
-    census_impl::Census,
-};
+use lash_kernel_state::paged::{PageAnswer, PageBody, PageSource};
 use lash_kernel_vm::{
     Bounds, CellStart, End, Host, KernelMachine, Machine, Outcome, PreparedLibrary, Program,
     Request, Step, Target,
@@ -90,9 +87,7 @@ fn machine(
     args: Vec<k::Datum>,
 ) -> Result<KernelMachine> {
     let pages = Pages::default();
-    let heap = PagedHeap::fresh(Box::new(pages.clone()), EditEpoch(1));
-    let census = Census::restore(heap.certificate(), LogicalBytes(BOUNDS.memory))?;
-    Ok(KernelMachine::start_with_layout(
+    Ok(KernelMachine::start(
         Program {
             release: PageId([7; 32]),
             document,
@@ -107,9 +102,7 @@ fn machine(
             modes: Default::default(),
             host: vec![],
         },
-        Default::default(),
         Box::new(pages),
-        Box::new(census),
     )?)
 }
 

@@ -15,7 +15,7 @@ use crate::{
 };
 
 use super::testsupport::{Fixture, fresh};
-use lash_kernel_state::paged::{PagedHeap, SemanticHeap};
+use lash_kernel_state::paged::ProbeHeap;
 
 #[derive(Debug, PartialEq)]
 enum Failure {
@@ -48,7 +48,7 @@ struct Run {
 
 fn measure(
     definition: &FunctionDefinition,
-    heap: &PagedHeap,
+    heap: &ProbeHeap,
     args: &[Value],
     result: Option<&Value>,
     operand: &Operand,
@@ -82,7 +82,7 @@ fn run(
     engine: &Arc<Engine>,
     operation: Operation,
     limit: Limit,
-    arguments: &dyn Fn(&mut PagedHeap) -> Vec<Value>,
+    arguments: &dyn Fn(&mut ProbeHeap) -> Vec<Value>,
 ) -> Run {
     let mut registry = FunctionRegistry::new();
     let functions = register(&mut registry, engine).unwrap();
@@ -109,7 +109,7 @@ fn run(
     let mut counter = WorkCounter::new(limit);
     let result = registered.native().unwrap().call(NativeCall {
         args: &args,
-        heap: &mut heap,
+        heap: &mut *heap,
         counter: &mut counter,
     });
     // No function changes an object that existed (`K-LIB-007`).
@@ -151,7 +151,7 @@ fn cold() -> Arc<Engine> {
 fn cold_and_warm(
     operation: Operation,
     limit: Limit,
-    arguments: &dyn Fn(&mut PagedHeap) -> Vec<Value>,
+    arguments: &dyn Fn(&mut ProbeHeap) -> Vec<Value>,
 ) -> Run {
     let engine = cold();
     assert_eq!(engine.cached_patterns(), 0);
@@ -178,7 +178,7 @@ fn arguments<'a>(
     pattern: &'a str,
     flags: &'a str,
     input: &'a str,
-) -> impl Fn(&mut PagedHeap) -> Vec<Value> + 'a {
+) -> impl Fn(&mut ProbeHeap) -> Vec<Value> + 'a {
     move |heap| {
         let mut args = vec![heap.regex(pattern, flags, 0), Value::text(input)];
         if operation == Operation::Replace {
@@ -261,7 +261,7 @@ fn a_pattern_that_fails_to_compile_is_equal_cold_and_warm() {
         let none = cold_and_warm(operation, Limit::Exactly(0), &arguments);
         assert_eq!(none, stated, "{operation:?} under a limit of zero");
     }
-    let check = |heap: &mut PagedHeap| {
+    let check = |heap: &mut ProbeHeap| {
         let _ = heap;
         vec![Value::text("a(b"), Value::text("")]
     };
@@ -280,13 +280,13 @@ fn the_cache_is_bounded_by_the_size_the_embedder_sets() {
     assert_eq!(engine.cached_patterns(), 2);
 }
 
-fn call(operation: Operation, arguments: &dyn Fn(&mut PagedHeap) -> Vec<Value>) -> Datum {
+fn call(operation: Operation, arguments: &dyn Fn(&mut ProbeHeap) -> Vec<Value>) -> Datum {
     run(&cold(), operation, Limit::Stated, arguments)
         .outcome
         .unwrap()
 }
 
-fn error(operation: Operation, arguments: &dyn Fn(&mut PagedHeap) -> Vec<Value>) -> ErrorDatum {
+fn error(operation: Operation, arguments: &dyn Fn(&mut ProbeHeap) -> Vec<Value>) -> ErrorDatum {
     raised(&run(&cold(), operation, Limit::Stated, arguments).outcome).clone()
 }
 
@@ -480,7 +480,7 @@ fn split_splices_captures_and_honours_the_limit() {
 #[test]
 fn half_a_surrogate_pair_in_a_result_is_a_typed_error() {
     let dot = |flags: &'static str| {
-        move |heap: &mut PagedHeap| vec![heap.regex(".", flags, 0), Value::text("\u{1f600}")]
+        move |heap: &mut ProbeHeap| vec![heap.regex(".", flags, 0), Value::text("\u{1f600}")]
     };
     assert_eq!(error(Operation::Exec, &dot("")).kind, LONE_SURROGATE_ERROR);
     assert_eq!(
@@ -497,7 +497,7 @@ fn half_a_surrogate_pair_in_a_result_is_a_typed_error() {
 #[test]
 fn compile_check_returns_the_regex_record_or_a_syntax_error() {
     let check = |pattern: &str, flags: &str| {
-        let arguments = move |_: &mut PagedHeap| vec![Value::text(pattern), Value::text(flags)];
+        let arguments = move |_: &mut ProbeHeap| vec![Value::text(pattern), Value::text(flags)];
         run(&cold(), Operation::CompileCheck, Limit::Stated, &arguments).outcome
     };
     assert_eq!(
@@ -534,7 +534,7 @@ fn compile_check_returns_the_regex_record_or_a_syntax_error() {
 #[test]
 fn operands_of_the_wrong_shape_are_typed_errors() {
     let kind =
-        |arguments: &dyn Fn(&mut PagedHeap) -> Vec<Value>| error(Operation::Exec, arguments).kind;
+        |arguments: &dyn Fn(&mut ProbeHeap) -> Vec<Value>| error(Operation::Exec, arguments).kind;
     assert_eq!(
         kind(&|heap| {
             let regex = heap.record(&[

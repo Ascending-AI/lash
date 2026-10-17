@@ -628,7 +628,6 @@ fn numeric_map_keys_charge_only_their_body_and_retained_pins_resume() {
                 modes: Default::default(),
                 host: Vec::new(),
             },
-            lash_kernel_vm::Layout::default(),
             &source,
         )
         .unwrap();
@@ -639,13 +638,7 @@ fn numeric_map_keys_charge_only_their_body_and_retained_pins_resume() {
                 .unwrap()
             {
                 Step::Slice => {
-                    super::pages::reopen(
-                        &mut machine,
-                        &program,
-                        BOUNDS,
-                        &source,
-                        lash_kernel_vm::Layout::default(),
-                    );
+                    super::pages::reopen(&mut machine, &program, BOUNDS, &source);
                 }
                 Step::Ended(end) => return (end, machine.meters().charged),
                 other => panic!("a key never parks: {other:?}"),

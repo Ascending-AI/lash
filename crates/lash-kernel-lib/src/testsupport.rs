@@ -1,7 +1,8 @@
 //! Layer laws use the actual paged heap and allocation census.
 use lash_kernel_doc::heap::*;
 use lash_kernel_doc::{Datum, ErrorDatum, Integer, Name, Value};
-use lash_kernel_state::paged::census_impl::Census;
+use lash_kernel_state::kernel_internals::census_impl::Census;
+use lash_kernel_state::kernel_internals::{PagedHeap, tree};
 use lash_kernel_state::paged::*;
 use num_bigint::{BigInt, Sign};
 use std::cell::RefCell;
@@ -246,10 +247,9 @@ pub(crate) fn datum(heap: &dyn NativeHeap, value: &Value) -> Datum {
 pub(crate) fn start(
     program: lash_kernel_vm::Program,
     bounds: lash_kernel_vm::Bounds,
-    layout: lash_kernel_vm::Layout,
+    layout: lash_kernel_vm::kernel_internals::Layout,
 ) -> Result<lash_kernel_vm::KernelMachine, lash_kernel_vm::StartError> {
-    let certificate = heap().certificate();
-    lash_kernel_vm::KernelMachine::start_with_layout(
+    lash_kernel_vm::kernel_internals::start_with_layout(
         program,
         bounds,
         lash_kernel_vm::CellStart {
@@ -262,7 +262,6 @@ pub(crate) fn start(
         },
         layout,
         Box::<Source>::default(),
-        Box::new(Census::restore(certificate, LogicalBytes(bounds.memory)).unwrap()),
     )
 }
 

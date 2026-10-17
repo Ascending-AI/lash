@@ -86,7 +86,9 @@ use lash_kernel_dialect::{EffectControl, Environment, NamedLibrary};
 use lash_kernel_doc::{
     Datum, EffectName, ErrorDatum, FunctionRegistry, Handle, Integer, Name, Timestamp, Unit,
 };
-use lash_kernel_vm::observe::{GuestContext, GuestProfile, GuestSymbols, WorkReport};
+use lash_kernel_vm::perf_witness::{
+    GuestContext, GuestProfile, GuestSymbols, Profiling as _, WorkReport,
+};
 use lash_kernel_vm::{
     Bounds, CellStart, End, Host, KernelMachine, Machine, Outcome, PreparedLibrary, Program,
     Request, Step, Target,
@@ -181,7 +183,6 @@ fn start(program: &Program) -> KernelMachine {
     start_on(program, &pages::Source::default())
 }
 fn start_on(program: &Program, source: &pages::Source) -> KernelMachine {
-    let session = pages::Session::default();
     let start = CellStart {
         owner: pages::OWNER,
         target: Target::Main,
@@ -190,14 +191,8 @@ fn start_on(program: &Program, source: &pages::Source) -> KernelMachine {
         modes: lash_kernel_vm::EffectModes::recorded(),
         host: Vec::new(),
     };
-    KernelMachine::start(
-        program.clone(),
-        BOUNDS,
-        start,
-        Box::new(source.clone()),
-        session.census(BOUNDS.memory),
-    )
-    .unwrap_or_else(|error| panic!("{error}"))
+    KernelMachine::start(program.clone(), BOUNDS, start, Box::new(source.clone()))
+        .unwrap_or_else(|error| panic!("{error}"))
 }
 
 /// Runs a started machine to its end. Gives the charge and the value the
@@ -292,24 +287,10 @@ fn split(program: &Program, registry: &FunctionRegistry, name: &str) -> Split {
 
 /// The site unit of the statement the next ready task runs next.
 fn pending_unit(machine: &mut KernelMachine, source: &pages::Source) -> Option<Unit> {
-    use lash_kernel_state::paged::{EditEpoch, FrameRecord, PagedHeap, TaskRecord, tree::Tree};
-    let sealed = machine.seal(pages::BUDGET).ok()??;
-    let root = sealed.root;
-    let heap = PagedHeap::open_header(root.heap, Box::new(source.clone()), EditEpoch(1)).ok()?;
-    let ready = Tree::<lash_kernel_doc::TaskId>::of_sequence(&root.ready);
-    let (_, next) = ready.rank_get(0, heap.pages()).ok()??;
-    let tasks = Tree::<TaskRecord>::of_keyed(&root.tasks);
-    let task = tasks
-        .get(
-            &lash_kernel_state::paged::directory::ordinal_key(next.0),
-            heap.pages(),
-        )
-        .ok()??;
-    let (_, frame): (_, FrameRecord) = task
-        .frames
-        .rank_get(task.frames.len().checked_sub(1)?, heap.pages())
-        .ok()??;
-    Some(frame.statement.resolve(heap.pages()).ok()?.unit.clone())
+    let sealed = machine.checkpoint().ok()?;
+    lash_kernel_vm::perf_witness::next_ready_statement(&sealed.root, Box::new(source.clone()))
+        .ok()?
+        .map(|site| site.unit)
 }
 
 /// What one invocation does.
@@ -1154,7 +1135,6 @@ fn host_json_probe() -> Result<(), String> {
                     host: Vec::new(),
                 },
                 Box::new(source),
-                pages::Session::default().census(BOUNDS.memory),
             )
             .unwrap();
             let mut output = Output {

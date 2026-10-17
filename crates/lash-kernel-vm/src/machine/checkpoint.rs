@@ -3,7 +3,7 @@ use super::*;
 use crate::interface::CellStart;
 use crate::paged::{OpenError, SealError, SealedRoot};
 use lash_kernel_doc::graph_tokens::encode_body;
-use lash_kernel_state::paged::tree::SealWork;
+use lash_kernel_state::kernel_internals::tree::SealWork;
 use lash_kernel_state::paged::{
     AllocationCensus, CheckpointRoot, EditEpoch, KeyedRoot, PageKind, PageSource, RootStatus,
     SavedMeters, SealBudget, SequenceRoot,
@@ -15,17 +15,8 @@ impl Machine for KernelMachine {
         bounds: Bounds,
         start: CellStart,
         source: Box<dyn PageSource>,
-        census: Box<dyn AllocationCensus>,
     ) -> Result<Self, StartError> {
-        session::start(
-            program,
-            bounds,
-            start,
-            source,
-            census,
-            Layout::default(),
-            lash_kernel_doc::KernelDataLimits::standard(),
-        )
+        Self::start_with_layout(program, bounds, start, Layout::default(), source)
     }
     fn open(
         program: Program,
@@ -33,17 +24,8 @@ impl Machine for KernelMachine {
         root: &CheckpointRoot,
         admissions: Vec<lash_kernel_state::AdmittedWait>,
         source: Box<dyn PageSource>,
-        census: Box<dyn AllocationCensus>,
     ) -> Result<Self, OpenError> {
-        Self::open_with_layout(
-            program,
-            bounds,
-            root,
-            admissions,
-            source,
-            census,
-            Layout::default(),
-        )
+        Self::open_with_layout(program, bounds, root, admissions, source, Layout::default())
     }
     fn run(&mut self, host: &mut dyn Host, slice: u64) -> Result<Step, MachineError> {
         if self.ended {
@@ -346,10 +328,10 @@ impl Machine for KernelMachine {
         }
     }
 }
-fn sequence<T: lash_kernel_state::paged::tree::Cell>(root: SequenceRoot) -> Tree<T> {
+fn sequence<T: lash_kernel_state::kernel_internals::tree::Cell>(root: SequenceRoot) -> Tree<T> {
     Tree::of_sequence(&root)
 }
-fn sequence_root<T: lash_kernel_state::paged::tree::Cell>(
+fn sequence_root<T: lash_kernel_state::kernel_internals::tree::Cell>(
     tree: &Tree<T>,
 ) -> Result<SequenceRoot, HeapFault> {
     tree.sequence_root()
@@ -362,7 +344,21 @@ fn delivery_error(error: HeapWriteError) -> DeliverError {
 }
 
 impl KernelMachine {
-    pub fn open_with_layout(
+    pub(crate) fn open_with_layout(
+        program: Program,
+        bounds: Bounds,
+        root: &CheckpointRoot,
+        admissions: Vec<lash_kernel_state::AdmittedWait>,
+        mut source: Box<dyn PageSource>,
+        layout: Layout,
+    ) -> Result<Self, OpenError> {
+        let census = session::restored_census(&mut *source, Some(root.heap), bounds.memory)?;
+        Self::open_with_census(program, bounds, root, admissions, source, census, layout)
+    }
+
+    /// Opens `root` with `census` for its accounting: the laws that hold a
+    /// run to a census of their own.
+    pub(crate) fn open_with_census(
         program: Program,
         bounds: Bounds,
         root: &CheckpointRoot,
@@ -407,7 +403,7 @@ impl KernelMachine {
         heap.set_data_limits(limits);
         heap.set_census(census).map_err(OpenError::Heap)?;
         heap.set_family_base(Box::new(
-            lash_kernel_state::paged::family_impl::FrozenBase::default(),
+            lash_kernel_state::kernel_internals::family_impl::FrozenBase::default(),
         ));
         heap.restore_execution_roots(root);
         let access = heap.pages().clone();

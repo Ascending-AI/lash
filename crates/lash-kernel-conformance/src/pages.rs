@@ -5,11 +5,14 @@
 //! Test-owned page storage; execution and accounting are the real S4/S7 implementations.
 use lash_kernel_doc::heap::*;
 use lash_kernel_doc::{Datum, Name, Value};
-use lash_kernel_state::paged::*;
-use lash_kernel_state::paged::{
+use lash_kernel_state::kernel_internals::{
+    PagedHeap,
     census_impl::Census,
     tree::{SealWork, Tree},
 };
+use lash_kernel_state::paged::*;
+#[cfg(test)]
+use lash_kernel_vm::kernel_internals::Layout;
 use std::{cell::RefCell, collections::BTreeMap, rc::Rc, sync::Arc};
 #[derive(Clone, Default)]
 pub(crate) struct Source {
@@ -83,7 +86,7 @@ impl Session {
             None => PagedHeap::fresh(Box::new(self.source.clone()), EditEpoch(1)),
         }
     }
-    pub(crate) fn census(&self, bound: u64) -> Box<Census> {
+    fn census(&self, bound: u64) -> Box<Census> {
         Box::new(Census::restore(self.heap().certificate(), LogicalBytes(bound)).unwrap())
     }
     pub(crate) fn seeded(values: impl IntoIterator<Item = (Name, Datum)>) -> Self {
@@ -95,7 +98,7 @@ impl Session {
             let value = decode(&mut heap, datum);
             table
                 .write(
-                    lash_kernel_state::paged::metadata::metadata_key(&name),
+                    lash_kernel_state::kernel_internals::metadata::metadata_key(&name),
                     BindingRecord {
                         name: NameRef::new(&name, heap.pages()).unwrap(),
                         declared: SiteRef::new(
@@ -181,14 +184,14 @@ pub(crate) fn start(
     bounds: lash_kernel_vm::Bounds,
     start: lash_kernel_vm::CellStart,
 ) -> Result<lash_kernel_vm::KernelMachine, lash_kernel_vm::StartError> {
-    start_with_layout(program, bounds, start, lash_kernel_vm::Layout::default())
+    start_with_layout(program, bounds, start, Layout::default())
 }
 #[cfg(test)]
 pub(crate) fn start_with_layout(
     program: lash_kernel_vm::Program,
     bounds: lash_kernel_vm::Bounds,
     start: lash_kernel_vm::CellStart,
-    layout: lash_kernel_vm::Layout,
+    layout: Layout,
 ) -> Result<lash_kernel_vm::KernelMachine, lash_kernel_vm::StartError> {
     with_source(program, bounds, start, layout, &Source::default())
 }
@@ -197,20 +200,15 @@ pub(crate) fn with_source(
     program: lash_kernel_vm::Program,
     bounds: lash_kernel_vm::Bounds,
     start: lash_kernel_vm::CellStart,
-    layout: lash_kernel_vm::Layout,
+    layout: Layout,
     source: &Source,
 ) -> Result<lash_kernel_vm::KernelMachine, lash_kernel_vm::StartError> {
-    let session = Session {
-        root: start.session,
-        source: source.clone(),
-    };
-    lash_kernel_vm::KernelMachine::start_with_layout(
+    lash_kernel_vm::kernel_internals::start_with_layout(
         program,
         bounds,
         start,
         layout,
         Box::new(source.clone()),
-        session.census(bounds.memory),
     )
 }
 /// [`open`] under `layout`.
@@ -221,22 +219,14 @@ pub(crate) fn open_in(
     root: &CheckpointRoot,
     source: &Source,
     admissions: Vec<lash_kernel_state::AdmittedWait>,
-    layout: lash_kernel_vm::Layout,
+    layout: lash_kernel_vm::kernel_internals::Layout,
 ) -> Result<lash_kernel_vm::KernelMachine, lash_kernel_vm::OpenError> {
-    let heap = PagedHeap::open_header(root.heap, Box::new(source.clone()), EditEpoch(2))
-        .map_err(lash_kernel_vm::OpenError::Heap)?;
-    let census = Census::restore(heap.certificate(), LogicalBytes(bounds.memory)).map_err(|e| {
-        lash_kernel_vm::OpenError::Malformed {
-            problem: e.to_string(),
-        }
-    })?;
-    lash_kernel_vm::KernelMachine::open_with_layout(
+    lash_kernel_vm::kernel_internals::open_with_layout(
         program,
         bounds,
         root,
         admissions,
         Box::new(source.clone()),
-        Box::new(census),
         layout,
     )
 }
@@ -247,19 +237,5 @@ pub(crate) fn open<M: lash_kernel_vm::Machine>(
     source: &Source,
     admissions: Vec<lash_kernel_state::AdmittedWait>,
 ) -> Result<M, lash_kernel_vm::OpenError> {
-    let heap = PagedHeap::open_header(root.heap, Box::new(source.clone()), EditEpoch(2))
-        .map_err(lash_kernel_vm::OpenError::Heap)?;
-    let census = Census::restore(heap.certificate(), LogicalBytes(bounds.memory)).map_err(|e| {
-        lash_kernel_vm::OpenError::Malformed {
-            problem: e.to_string(),
-        }
-    })?;
-    M::open(
-        program,
-        bounds,
-        root,
-        admissions,
-        Box::new(source.clone()),
-        Box::new(census),
-    )
+    M::open(program, bounds, root, admissions, Box::new(source.clone()))
 }
