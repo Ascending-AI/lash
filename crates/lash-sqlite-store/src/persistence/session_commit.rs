@@ -679,6 +679,13 @@ pub(crate) fn apply_runtime_commit_conn(
         &commit.committed_attachment_ids,
         now,
     )?;
+    crate::attachments::hold_session_attachments_conn(
+        tx,
+        &commit.session_id,
+        lash_store_sql::attachment::session_holds::HISTORY,
+        "",
+        &commit.committed_attachment_ids,
+    )?;
     crate::session_runs::write_commit_run_terminal_conn(
         tx,
         commit,

@@ -1083,6 +1083,18 @@ fn acquire_attachments(
             ),
             Refusal::Backstop,
         );
+        program.push(
+            Step::any(
+                &super::retention::HOLD_ATTACHMENT,
+                vec![
+                    text(commit.session_id.as_str()),
+                    text(id.as_str()),
+                    text(lash_store_sql::attachment::session_holds::HISTORY),
+                    text(""),
+                ],
+            ),
+            Refusal::Backstop,
+        );
     }
     Ok(())
 }

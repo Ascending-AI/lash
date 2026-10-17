@@ -97,6 +97,16 @@ table lash_attachment_referrer_edges
   column referrer_id text not-null
   column referrer_kind text not-null
   primary-key (attachment_id, referrer_kind, referrer_id)
+table lash_attachment_session_holds
+  column attachment_id text not-null
+  column holder_id text not-null
+  column holder_kind text not-null
+  column session_id text not-null
+  primary-key (session_id, attachment_id, holder_kind, holder_id)
+table lash_attachment_session_releases
+  column attachment_id text not-null
+  column session_id text not-null
+  primary-key (session_id, attachment_id)
 table lash_attachment_sweep_clock
   column generation bigint not-null
   column singleton boolean not-null default

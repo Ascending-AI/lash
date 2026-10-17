@@ -679,6 +679,7 @@ macro_rules! session_delete_blob_reclaim_tests {
             (session_delete_blob_reclaim_conformance, "session-delete-blob-reclaim"),
             (session_delete_reclaims_after_head_advances, "session-delete-advanced-head"),
             (session_delete_preserves_admission_base_blobs, "session-delete-admission-base"),
+            (session_attachment_holds_follow_their_holders, "session-attachment-holds-follow-their-holders"),
         ]);
     };
     (@catalogue $fixture:block; [$(( $law:ident, $label:literal )),* $(,)?]) => {

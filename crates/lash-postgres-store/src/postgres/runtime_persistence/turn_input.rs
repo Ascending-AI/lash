@@ -500,6 +500,14 @@ pub(crate) async fn enqueue_pending_turn_inputs_tx(
                         u64_from_sql("PendingTurnInput", "enqueue_seq", enqueue_seq)?,
                     ),
                 };
+                crate::attachments::hold_session_attachments_tx(
+                    tx,
+                    session_id,
+                    lash_store_sql::attachment::session_holds::INPUT,
+                    input_id.as_str(),
+                    &ids,
+                )
+                .await?;
                 let state = lash_core_execution::TurnInputState::open(draft.ingress.clone());
                 let run_spec = admit_run_spec_tx(tx, draft, &mut interned).await?;
                 let inserted = crate::observed_sql::query(sql.pending_inputs.insert_new.sql())

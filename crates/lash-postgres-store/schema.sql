@@ -499,6 +499,28 @@ CREATE TABLE IF NOT EXISTS lash_attachment_referrer_edges (
 CREATE INDEX IF NOT EXISTS idx_lash_attachment_referrer_edges_referrer
     ON lash_attachment_referrer_edges(referrer_kind, referrer_id);
 
+-- Why a session's edge holds an attachment (FIG-6611): its committed history
+-- (holder id empty), a pending input or a queued batch. The edge lasts while
+-- one hold does.
+CREATE TABLE IF NOT EXISTS lash_attachment_session_holds (
+    session_id    TEXT NOT NULL CONSTRAINT ck_attachment_session_holds_session CHECK (char_length(session_id) > 0),
+    attachment_id TEXT NOT NULL CONSTRAINT ck_attachment_session_holds_attachment CHECK (char_length(attachment_id) > 0),
+    holder_kind   TEXT NOT NULL CONSTRAINT ck_attachment_session_holds_kind CHECK (holder_kind IN ('history', 'input', 'batch')),
+    holder_id     TEXT NOT NULL,
+    CONSTRAINT ck_attachment_session_holds_holder CHECK ((holder_kind = 'history') = (holder_id = '')),
+    PRIMARY KEY (session_id, attachment_id, holder_kind, holder_id)
+);
+CREATE INDEX IF NOT EXISTS idx_lash_attachment_session_holds_holder
+    ON lash_attachment_session_holds(session_id, holder_kind, holder_id);
+
+-- Attachments whose ingress hold ended: the release boundary drops the
+-- session edge of each one no hold names any more.
+CREATE TABLE IF NOT EXISTS lash_attachment_session_releases (
+    session_id    TEXT NOT NULL,
+    attachment_id TEXT NOT NULL,
+    PRIMARY KEY (session_id, attachment_id)
+);
+
 CREATE TABLE IF NOT EXISTS lash_attachment_pending_writes (
     write_id      TEXT PRIMARY KEY CONSTRAINT ck_attachment_pending_writes_write_id CHECK (char_length(write_id) = 32),
     attachment_id TEXT NOT NULL CONSTRAINT ck_attachment_pending_writes_attachment CHECK (char_length(attachment_id) > 0),
@@ -1326,9 +1348,9 @@ DECLARE
     v_answer JSONB;
     v_frame TEXT;
 BEGIN
-    -- Generated from this build's statements (registry f8d8e7133402fd25); a call
+    -- Generated from this build's statements (registry 896cf938e1634aa8); a call
     -- built from others is refused, as is any isolation but read committed.
-    IF p_registry IS DISTINCT FROM 'f8d8e7133402fd25'
+    IF p_registry IS DISTINCT FROM '896cf938e1634aa8'
         OR current_setting('transaction_isolation') <> 'read committed' THEN
         RAISE EXCEPTION 'lash_owner_commit: registry or isolation refused' USING ERRCODE = 'LX000';
     END IF;
@@ -2448,6 +2470,71 @@ BEGIN
         WHEN 'attachment_referrer_edge.insert' THEN
             INSERT INTO lash_attachment_referrer_edges (attachment_id, referrer_kind, referrer_id)
              VALUES ((v_p->>0), (v_p->>1), (v_p->>2)) ON CONFLICT (attachment_id, referrer_kind, referrer_id) DO NOTHING;
+            GET DIAGNOSTICS v_rows = ROW_COUNT;
+            IF v_rows > 0 THEN v_first := '{}'::JSONB; END IF;
+        WHEN 'attachment_session_hold.insert' THEN
+            INSERT INTO lash_attachment_session_holds (session_id, attachment_id, holder_kind, holder_id)
+             VALUES ((v_p->>0), (v_p->>1), (v_p->>2), (v_p->>3))
+             ON CONFLICT (session_id, attachment_id, holder_kind, holder_id) DO NOTHING;
+            GET DIAGNOSTICS v_rows = ROW_COUNT;
+            IF v_rows > 0 THEN v_first := '{}'::JSONB; END IF;
+        WHEN 'attachment_session_hold.queue_released_ingress' THEN
+            INSERT INTO lash_attachment_session_releases (session_id, attachment_id)
+             SELECT hold.session_id, hold.attachment_id FROM lash_attachment_session_holds AS hold
+             WHERE (hold.session_id = (v_p->>0) OR (v_p->>0) IS NULL)
+               AND ((hold.holder_kind = 'input' AND EXISTS (
+                       SELECT 1 FROM lash_pending_turn_inputs AS released
+                       WHERE released.session_id = hold.session_id
+                         AND released.input_id = hold.holder_id
+                         AND released.input_json IS NULL
+                   ))
+                 OR (hold.holder_kind = 'batch' AND EXISTS (
+                       SELECT 1 FROM lash_queued_work_batches AS released
+                       WHERE released.session_id = hold.session_id
+                         AND released.batch_id = hold.holder_id
+                         AND released.payload_json IS NULL
+                   )))
+             ON CONFLICT (session_id, attachment_id) DO NOTHING;
+            GET DIAGNOSTICS v_rows = ROW_COUNT;
+            IF v_rows > 0 THEN v_first := '{}'::JSONB; END IF;
+        WHEN 'attachment_session_hold.end_released_ingress' THEN
+            DELETE FROM lash_attachment_session_holds AS hold
+             WHERE (hold.session_id = (v_p->>0) OR (v_p->>0) IS NULL)
+               AND ((hold.holder_kind = 'input' AND EXISTS (
+                       SELECT 1 FROM lash_pending_turn_inputs AS released
+                       WHERE released.session_id = hold.session_id
+                         AND released.input_id = hold.holder_id
+                         AND released.input_json IS NULL
+                   ))
+                 OR (hold.holder_kind = 'batch' AND EXISTS (
+                       SELECT 1 FROM lash_queued_work_batches AS released
+                       WHERE released.session_id = hold.session_id
+                         AND released.batch_id = hold.holder_id
+                         AND released.payload_json IS NULL
+                   )));
+            GET DIAGNOSTICS v_rows = ROW_COUNT;
+            IF v_rows > 0 THEN v_first := '{}'::JSONB; END IF;
+        WHEN 'attachment_session_hold.release_edges' THEN
+            DELETE FROM lash_attachment_referrer_edges AS edge
+             WHERE edge.referrer_kind = 'session' AND edge.referrer_id = (v_p->>0)
+               AND edge.attachment_id IN (
+                   SELECT queued.attachment_id FROM lash_attachment_session_releases AS queued
+                   WHERE queued.session_id = (v_p->>0)
+                   ORDER BY queued.attachment_id LIMIT ((v_p->>1)::BIGINT)
+               )
+               AND NOT EXISTS (
+                   SELECT 1 FROM lash_attachment_session_holds AS hold
+                   WHERE hold.session_id = (v_p->>0) AND hold.attachment_id = edge.attachment_id
+               );
+            GET DIAGNOSTICS v_rows = ROW_COUNT;
+            IF v_rows > 0 THEN v_first := '{}'::JSONB; END IF;
+        WHEN 'attachment_session_hold.dequeue' THEN
+            DELETE FROM lash_attachment_session_releases
+             WHERE session_id = (v_p->>0) AND attachment_id IN (
+                 SELECT queued.attachment_id FROM lash_attachment_session_releases AS queued
+                 WHERE queued.session_id = (v_p->>0)
+                 ORDER BY queued.attachment_id LIMIT ((v_p->>1)::BIGINT)
+             );
             GET DIAGNOSTICS v_rows = ROW_COUNT;
             IF v_rows > 0 THEN v_first := '{}'::JSONB; END IF;
         WHEN 'turn_ingress.has_admissible_work' THEN

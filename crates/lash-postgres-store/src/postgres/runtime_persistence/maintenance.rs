@@ -54,29 +54,44 @@ impl PostgresStore {
         .await
         .map_err(store_sqlx_error)?
         .rows_affected() as usize;
-        let removed_pending_turn_input_tombstone_count = crate::observed_sql::query(
+        // A deleted input's or batch's attachment holds end with it; the
+        // next revision release lets go of what nothing else holds
+        // (FIG-6611).
+        let withdrawn: Vec<String> = crate::observed_sql::query_scalar(
             crate::turn_ingress::turn_ingress_sql()
                 .pending_inputs
                 .delete_withdrawn
                 .sql(),
         )
         .bind(session_id.as_str())
-        .execute(crate::observed_sql::executor(&mut **tx))
+        .fetch_all(crate::observed_sql::executor(&mut **tx))
         .await
-        .map_err(store_sqlx_error)?
-        .rows_affected();
+        .map_err(store_sqlx_error)?;
+        crate::attachments::end_attachment_holds_tx(
+            &mut tx,
+            session_id,
+            lash_store_sql::attachment::session_holds::INPUT,
+            &withdrawn,
+        )
+        .await?;
         // A vacuumed command's replay meets its revision check.
-        let removed_queued_work_tombstone_count = crate::observed_sql::query(
+        let tombstones: Vec<String> = crate::observed_sql::query_scalar(
             crate::turn_ingress::turn_ingress_sql()
                 .queued_batches
                 .delete_tombstones
                 .sql(),
         )
         .bind(session_id.as_str())
-        .execute(crate::observed_sql::executor(&mut **tx))
+        .fetch_all(crate::observed_sql::executor(&mut **tx))
         .await
-        .map_err(store_sqlx_error)?
-        .rows_affected();
+        .map_err(store_sqlx_error)?;
+        crate::attachments::end_attachment_holds_tx(
+            &mut tx,
+            session_id,
+            lash_store_sql::attachment::session_holds::BATCH,
+            &tombstones,
+        )
+        .await?;
         // A run's spec bytes are read only to resolve its shape: once no
         // unsettled input names a spec, nothing reads it again (FIG-6021).
         crate::observed_sql::query(
@@ -95,9 +110,8 @@ impl PostgresStore {
         tx.commit().await.map_err(store_sqlx_error)?;
         Ok(VacuumReport {
             removed_node_count,
-            removed_pending_turn_input_tombstone_count: removed_pending_turn_input_tombstone_count
-                as usize,
-            removed_queued_work_tombstone_count: removed_queued_work_tombstone_count as usize,
+            removed_pending_turn_input_tombstone_count: withdrawn.len(),
+            removed_queued_work_tombstone_count: tombstones.len(),
         })
     }
     /// The body of [`StoreMaintenance::gc_unreachable`]: every peel it
@@ -125,6 +139,28 @@ impl PostgresStore {
             if released == 0 {
                 break;
             }
+        }
+        // The material that release left queued, a bounded transaction per
+        // session under that session's write lock, the lock its commits hold.
+        let sessions = {
+            let mut conn = acquire_runtime_connection(&self.pool, &self.observer).await?;
+            crate::attachments::queued_release_sessions_tx(
+                &mut conn,
+                i64::from(lash_store_sql::session::revisions::MATERIAL_RELEASE_BATCH),
+            )
+            .await?
+        };
+        for session in sessions {
+            let connection = acquire_runtime_connection(&self.pool, &self.observer).await?;
+            let mut tx = begin_guarded(connection, &self.fence).await?;
+            super::lock_session_history_mutation_tx(&mut tx, &session).await?;
+            crate::revisions::release_revision_material_tx(
+                &mut tx,
+                Some(&session),
+                self.retirement_instant(),
+            )
+            .await?;
+            tx.commit().await.map_err(store_sqlx_error)?;
         }
         // Then what that release and every earlier delete, prune and commit
         // held, through the node's own bounded retirement steps.

@@ -271,9 +271,12 @@ crate::statements! {
         /// validated against its digest and answered from that run for the
         /// run's whole retained life (FIG-3837); only its body goes with its
         /// revision ([`release_settled_bodies`](Self::release_settled_bodies)).
+        /// Each deleted input id is answered, so its attachment holds end
+        /// with it.
         delete_withdrawn = "DELETE FROM pending_turn_inputs
              WHERE session_id = ?1 AND {{cancelled_turn_input_state(state)}}
-               AND admitted_run IS NULL";
+               AND admitted_run IS NULL
+             RETURNING input_id";
 
         /// Cancel input `?2` of session `?1`, bound to a run that ends
         /// unanswered, into its tombstone at `?3` with the cancelled state

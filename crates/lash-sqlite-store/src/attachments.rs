@@ -4,8 +4,8 @@ use lash_core_execution::{ArtifactReferrer, AttachmentWrite, ReferrerClaim, Sess
 use lash_sansio::sync::MutexExt;
 use lash_store_sql::attachment::{
     condemnation::CondemnationStatements, edges::AttachmentEdgeStatements,
-    pending_writes::PendingWriteStatements, sweep_clock::SweepClockStatements,
-    uploads::UploadStatements,
+    pending_writes::PendingWriteStatements, session_holds::SessionHoldStatements,
+    sweep_clock::SweepClockStatements, uploads::UploadStatements,
 };
 use std::sync::LazyLock;
 
@@ -20,6 +20,7 @@ lash_store_sql::statements! {
 pub(crate) struct AttachmentSql {
     pub(crate) edges: AttachmentEdgeStatements,
     pub(crate) pending: PendingWriteStatements,
+    pub(crate) holds: SessionHoldStatements,
     pub(crate) uploads: UploadStatements,
     pub(crate) condemnation: CondemnationStatements,
     pub(crate) sqlite: AttachmentSqliteStatements,
@@ -41,6 +42,7 @@ static ATTACHMENT_SQL: LazyLock<AttachmentSql> = LazyLock::new(|| {
     AttachmentSql {
         edges: AttachmentEdgeStatements::render(dialect.with_vocabulary(ATTACHMENT_REFERRER_KINDS)),
         pending: PendingWriteStatements::render(dialect),
+        holds: SessionHoldStatements::render(dialect),
         uploads: UploadStatements::render(dialect),
         condemnation: CondemnationStatements::render(dialect),
         sqlite: AttachmentSqliteStatements::render(dialect),
@@ -87,6 +89,119 @@ fn insert_edge(
     .map_err(sqlite_error)?;
     Ok(())
 }
+/// Record that `holder_kind` `holder_id` of `session` holds each of `ids`
+/// (FIG-6611), beside the session edge its writer acquires.
+pub(crate) fn hold_session_attachments_conn(
+    tx: &rusqlite::Connection,
+    session: &SessionId,
+    holder_kind: &str,
+    holder_id: &str,
+    ids: &[AttachmentId],
+) -> Result<(), StoreError> {
+    for id in ids {
+        crate::conn::cached_execute(
+            tx,
+            attachment_sql().holds.insert.sql(),
+            params![session.as_str(), id.as_str(), holder_kind, holder_id],
+        )
+        .map_err(sqlite_error)?;
+    }
+    Ok(())
+}
+
+/// End every hold `holder_kind` holders `holder_ids` of `session` have, and
+/// queue what they held for the next revision release, which drops the
+/// session edge of each attachment no hold names any more. Vacuum ends a
+/// deleted input's and batch's holds here; the revision release ends a
+/// released body's with the set form of the same two statements
+/// (`queue_released_ingress`, `end_released_ingress`).
+pub(crate) fn end_attachment_holds_conn(
+    tx: &rusqlite::Connection,
+    session: &SessionId,
+    holder_kind: &str,
+    holder_ids: &[String],
+) -> Result<(), StoreError> {
+    for holder_id in holder_ids {
+        for statement in [
+            attachment_sql().holds.queue_holder.sql(),
+            attachment_sql().holds.delete_holder.sql(),
+        ] {
+            crate::conn::cached_execute(
+                tx,
+                statement,
+                params![session.as_str(), holder_kind, holder_id],
+            )
+            .map_err(sqlite_error)?;
+        }
+    }
+    Ok(())
+}
+
+/// Drop the session edges of up to `budget` queued attachments no hold
+/// names any more, of `session` or of every session, and dequeue them.
+/// Returns how much of `budget` is left.
+pub(crate) fn release_session_attachments_conn(
+    tx: &rusqlite::Connection,
+    session: Option<&SessionId>,
+    budget: i64,
+) -> Result<i64, StoreError> {
+    let sessions = match session {
+        Some(session) => vec![session.as_str().to_owned()],
+        None => tx
+            .prepare_cached(attachment_sql().holds.select_queued_sessions.sql())
+            .map_err(sqlite_error)?
+            .query_map(params![budget], |row| row.get::<_, String>(0))
+            .map_err(sqlite_error)?
+            .collect::<Result<Vec<_>, _>>()
+            .map_err(sqlite_error)?,
+    };
+    let mut left = budget;
+    for session in sessions {
+        if left <= 0 {
+            break;
+        }
+        crate::conn::cached_execute(
+            tx,
+            attachment_sql().holds.release_edges.sql(),
+            params![session, left],
+        )
+        .map_err(sqlite_error)?;
+        let dequeued = crate::conn::cached_execute(
+            tx,
+            attachment_sql().holds.dequeue.sql(),
+            params![session, left],
+        )
+        .map_err(sqlite_error)?;
+        left -= i64::try_from(dequeued).unwrap_or(i64::MAX);
+    }
+    Ok(left)
+}
+
+/// Whether a hold of `session` still names `id`: an ingress holder, or its
+/// history while its graph lives.
+fn session_holds_conn(
+    tx: &rusqlite::Connection,
+    session: &SessionId,
+    id: &AttachmentId,
+) -> Result<bool, StoreError> {
+    let (ingress, history): (bool, bool) = tx
+        .query_row(
+            attachment_sql().holds.select_holders.sql(),
+            params![session.as_str(), id.as_str()],
+            |row| Ok((row.get(0)?, row.get(1)?)),
+        )
+        .map_err(sqlite_error)?;
+    if ingress || !history {
+        return Ok(ingress);
+    }
+    tx.query_row(
+        attachment_sql().sqlite.session_state.sql(),
+        params![session.as_str()],
+        |row| row.get(2),
+    )
+    .map_err(sqlite_error)
+}
+
 pub(crate) fn acquire_attachment_refs_conn(
     tx: &rusqlite::Connection,
     claim: &ReferrerClaim,
@@ -946,8 +1061,25 @@ impl AttachmentReferrers for SqliteStore {
         let claim = claim.clone();
         let ids = ids.to_vec();
         let now = self.clock.timestamp_ms();
+        // A session claim no commit or ingress names is held as history,
+        // for as long as the session's graph lives.
         self.conn
-            .write_flow(move |tx| outcome(acquire_attachment_refs_conn(tx, &claim, &ids, now)))
+            .write_flow(move |tx| {
+                outcome(
+                    acquire_attachment_refs_conn(tx, &claim, &ids, now).and_then(|()| match claim
+                        .referrer()
+                    {
+                        ArtifactReferrer::Session(session) => hold_session_attachments_conn(
+                            tx,
+                            &session,
+                            lash_store_sql::attachment::session_holds::HISTORY,
+                            "",
+                            &ids,
+                        ),
+                        _ => Ok(()),
+                    }),
+                )
+            })
             .await
             .map_err(sqlite_error)?
     }
@@ -967,17 +1099,10 @@ impl AttachmentReferrers for SqliteStore {
                     {
                         return Ok(());
                     }
-                    if let ArtifactReferrer::Session(session) = &referrer {
-                        let retained: bool = tx
-                            .query_row(
-                                attachment_sql().sqlite.session_state.sql(),
-                                params![session.as_str()],
-                                |row| row.get(2),
-                            )
-                            .map_err(sqlite_error)?;
-                        if retained {
-                            return Ok(());
-                        }
+                    if let ArtifactReferrer::Session(session) = &referrer
+                        && session_holds_conn(tx, session, &id)?
+                    {
+                        return Ok(());
                     }
                     crate::conn::cached_execute(
                         tx,
@@ -1016,6 +1141,15 @@ impl AttachmentReferrers for SqliteStore {
                         params![referrer.kind().as_str(), referrer.canonical_id()],
                     )
                     .map_err(sqlite_error)?;
+                    if let ArtifactReferrer::Session(session) = &referrer {
+                        for statement in [
+                            attachment_sql().holds.delete_by_session.sql(),
+                            attachment_sql().holds.delete_releases_by_session.sql(),
+                        ] {
+                            crate::conn::cached_execute(tx, statement, params![session.as_str()])
+                                .map_err(sqlite_error)?;
+                        }
+                    }
                     Ok(())
                 })())
             })

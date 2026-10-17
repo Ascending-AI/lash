@@ -3,5 +3,6 @@ pub mod blob;
 pub mod condemnation;
 pub mod edges;
 pub mod pending_writes;
+pub mod session_holds;
 pub mod sweep_clock;
 pub mod uploads;

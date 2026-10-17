@@ -103,6 +103,8 @@ pub const TABLES: &[&str] = &[
     attachment::condemnation::TABLE,
     attachment::edges::TABLE,
     attachment::pending_writes::TABLE,
+    attachment::session_holds::TABLE,
+    attachment::session_holds::RELEASES_TABLE,
     attachment::uploads::TABLE,
     attachment::sweep_clock::TABLE,
     durable::ACTORS_TABLE,
@@ -181,6 +183,7 @@ pub fn all_statements() -> Vec<Statement> {
     );
     statements.extend_from_slice(attachment::edges::AttachmentEdgeStatements::NEUTRAL);
     statements.extend_from_slice(attachment::pending_writes::PendingWriteStatements::NEUTRAL);
+    statements.extend_from_slice(attachment::session_holds::SessionHoldStatements::NEUTRAL);
     statements.extend_from_slice(attachment::uploads::UploadStatements::NEUTRAL);
     statements.extend_from_slice(attachment::condemnation::CondemnationStatements::NEUTRAL);
     statements.extend_from_slice(attachment::sweep_clock::SweepClockStatements::NEUTRAL);

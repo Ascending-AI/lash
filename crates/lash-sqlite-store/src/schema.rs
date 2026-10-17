@@ -372,6 +372,28 @@ CREATE TABLE IF NOT EXISTS attachment_referrer_edges (
 CREATE INDEX IF NOT EXISTS idx_attachment_referrer_edges_referrer
     ON attachment_referrer_edges(referrer_kind, referrer_id);
 
+-- Why a session's edge holds an attachment (FIG-6611): its committed history
+-- (holder id empty), a pending input or a queued batch. The edge lasts while
+-- one hold does.
+CREATE TABLE IF NOT EXISTS attachment_session_holds (
+    session_id    TEXT NOT NULL CONSTRAINT ck_attachment_session_holds_session CHECK (length(session_id) > 0),
+    attachment_id TEXT NOT NULL CONSTRAINT ck_attachment_session_holds_attachment CHECK (length(attachment_id) > 0),
+    holder_kind   TEXT NOT NULL CONSTRAINT ck_attachment_session_holds_kind CHECK (holder_kind IN ('history', 'input', 'batch')),
+    holder_id     TEXT NOT NULL,
+    CONSTRAINT ck_attachment_session_holds_holder CHECK ((holder_kind = 'history') = (holder_id = '')),
+    PRIMARY KEY (session_id, attachment_id, holder_kind, holder_id)
+);
+CREATE INDEX IF NOT EXISTS idx_attachment_session_holds_holder
+    ON attachment_session_holds(session_id, holder_kind, holder_id);
+
+-- Attachments whose ingress hold ended: the release boundary drops the
+-- session edge of each one no hold names any more.
+CREATE TABLE IF NOT EXISTS attachment_session_releases (
+    session_id    TEXT NOT NULL,
+    attachment_id TEXT NOT NULL,
+    PRIMARY KEY (session_id, attachment_id)
+);
+
 -- One row per granted write attempt that has neither completed nor aborted.
 -- `write_id` is AttachmentWriteToken::as_hex.
 CREATE TABLE IF NOT EXISTS attachment_pending_writes (

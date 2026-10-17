@@ -146,7 +146,9 @@ pub(crate) fn release_unretained_conn(
         .map_err(sqlite_error)
 }
 
-/// Release one page of per-revision material in the revision prune's transaction.
+/// Release one page of per-revision material in the revision prune's
+/// transaction. A session also lets go of each queued attachment whose last
+/// hold ended (FIG-6611).
 pub(crate) fn release_revision_material_conn(
     tx: &Connection,
     session_id: Option<&SessionId>,
@@ -154,7 +156,13 @@ pub(crate) fn release_revision_material_conn(
 ) -> Result<(), StoreError> {
     crate::durable::release_material_batch(tx, session_id)
         .map(drop)
-        .map_err(sqlite_error)
+        .map_err(sqlite_error)?;
+    crate::attachments::release_session_attachments_conn(
+        tx,
+        session_id,
+        i64::from(lash_store_sql::session::revisions::MATERIAL_RELEASE_BATCH),
+    )
+    .map(drop)
 }
 
 /// The retention policy recorded for `session_id`, or `None` for a session

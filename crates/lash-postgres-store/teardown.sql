@@ -66,6 +66,10 @@ DROP TABLE IF EXISTS lash_control_intents CASCADE;
 
 DROP TABLE IF EXISTS lash_attachment_referrer_edges CASCADE;
 
+DROP TABLE IF EXISTS lash_attachment_session_holds CASCADE;
+
+DROP TABLE IF EXISTS lash_attachment_session_releases CASCADE;
+
 DROP TABLE IF EXISTS lash_attachment_pending_writes CASCADE;
 
 DROP TABLE IF EXISTS lash_attachment_uploads CASCADE;

@@ -80,6 +80,15 @@ pub(crate) fn release_material_batch(
             rusqlite::params![session.map(lash_sansio::SessionId::as_str), limit],
         )?;
     }
+    // A released body no longer holds its attachments (FIG-6611).
+    let holds = &crate::attachments::attachment_sql().holds;
+    for statement in [&holds.queue_released_ingress, &holds.end_released_ingress] {
+        cached_execute(
+            tx,
+            statement.sql(),
+            rusqlite::params![session.map(lash_sansio::SessionId::as_str)],
+        )?;
+    }
     Ok(released)
 }
 #[path = "../durable_reads.rs"]

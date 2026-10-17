@@ -4,8 +4,8 @@ use lash_core_execution::{ArtifactReferrer, AttachmentWrite, ReferrerClaim, Sess
 use lash_store_sql::Dialect;
 use lash_store_sql::attachment::{
     condemnation::CondemnationStatements, edges::AttachmentEdgeStatements,
-    pending_writes::PendingWriteStatements, sweep_clock::SweepClockStatements,
-    uploads::UploadStatements,
+    pending_writes::PendingWriteStatements, session_holds::SessionHoldStatements,
+    sweep_clock::SweepClockStatements, uploads::UploadStatements,
 };
 use std::sync::LazyLock;
 
@@ -19,6 +19,7 @@ lash_store_sql::statements! {
 pub(crate) struct AttachmentSql {
     pub(crate) edges: AttachmentEdgeStatements,
     pub(crate) pending: PendingWriteStatements,
+    pub(crate) holds: SessionHoldStatements,
     pub(crate) uploads: UploadStatements,
     pub(crate) condemnation: CondemnationStatements,
     pub(crate) postgres: AttachmentPostgresStatements,
@@ -40,6 +41,7 @@ static ATTACHMENT_SQL: LazyLock<AttachmentSql> = LazyLock::new(|| {
     AttachmentSql {
         edges: AttachmentEdgeStatements::render(dialect.with_vocabulary(ATTACHMENT_REFERRER_KINDS)),
         pending: PendingWriteStatements::render(dialect),
+        holds: SessionHoldStatements::render(dialect),
         uploads: UploadStatements::render(dialect),
         condemnation: CondemnationStatements::render(dialect),
         postgres: AttachmentPostgresStatements::render(dialect),
@@ -91,6 +93,129 @@ async fn check_fence_tx(
     }
     Ok(())
 }
+/// Record that `holder_kind` `holder_id` of `session` holds each of `ids`
+/// (FIG-6611), beside the session edge its writer acquires.
+pub(crate) async fn hold_session_attachments_tx(
+    tx: &mut sqlx::PgConnection,
+    session: &SessionId,
+    holder_kind: &str,
+    holder_id: &str,
+    ids: &[AttachmentId],
+) -> Result<(), StoreError> {
+    for id in ids {
+        crate::observed_sql::query(attachment_sql().holds.insert.sql())
+            .bind(session.as_str())
+            .bind(id.as_str())
+            .bind(holder_kind)
+            .bind(holder_id)
+            .execute(crate::observed_sql::executor(&mut *tx))
+            .await
+            .map_err(store_sqlx_error)?;
+    }
+    Ok(())
+}
+
+/// End every hold `holder_kind` holders `holder_ids` of `session` have, and
+/// queue what they held for the next revision release, which drops the
+/// session edge of each attachment no hold names any more. Vacuum ends a
+/// deleted input's and batch's holds here; the revision release ends a
+/// released body's with the set form of the same two statements
+/// (`queue_released_ingress`, `end_released_ingress`).
+pub(crate) async fn end_attachment_holds_tx(
+    tx: &mut sqlx::PgConnection,
+    session: &SessionId,
+    holder_kind: &str,
+    holder_ids: &[String],
+) -> Result<(), StoreError> {
+    for holder_id in holder_ids {
+        for statement in [
+            attachment_sql().holds.queue_holder.sql(),
+            attachment_sql().holds.delete_holder.sql(),
+        ] {
+            crate::observed_sql::query(statement)
+                .bind(session.as_str())
+                .bind(holder_kind)
+                .bind(holder_id)
+                .execute(crate::observed_sql::executor(&mut *tx))
+                .await
+                .map_err(store_sqlx_error)?;
+        }
+    }
+    Ok(())
+}
+
+/// Drop `session`'s edges to up to `budget` queued attachments no hold
+/// names any more, and dequeue them, under the session's write lock the
+/// caller holds. Returns how much of `budget` is left.
+pub(crate) async fn release_session_attachments_tx(
+    tx: &mut sqlx::PgConnection,
+    session: &SessionId,
+    budget: i64,
+) -> Result<i64, StoreError> {
+    crate::observed_sql::query(attachment_sql().holds.release_edges.sql())
+        .bind(session.as_str())
+        .bind(budget)
+        .execute(crate::observed_sql::executor(&mut *tx))
+        .await
+        .map_err(store_sqlx_error)?;
+    let dequeued = crate::observed_sql::query(attachment_sql().holds.dequeue.sql())
+        .bind(session.as_str())
+        .bind(budget)
+        .execute(crate::observed_sql::executor(&mut *tx))
+        .await
+        .map_err(store_sqlx_error)?
+        .rows_affected();
+    Ok(budget - i64::try_from(dequeued).unwrap_or(i64::MAX))
+}
+
+/// The first `limit` sessions with queued attachment releases.
+pub(crate) async fn queued_release_sessions_tx(
+    tx: &mut sqlx::PgConnection,
+    limit: i64,
+) -> Result<Vec<SessionId>, StoreError> {
+    let sessions: Vec<String> =
+        crate::observed_sql::query_scalar(attachment_sql().holds.select_queued_sessions.sql())
+            .bind(limit)
+            .fetch_all(crate::observed_sql::executor(&mut *tx))
+            .await
+            .map_err(store_sqlx_error)?;
+    sessions
+        .into_iter()
+        .map(|session| {
+            SessionId::parse(session).map_err(|error| StoreError::StoredDataCorrupt {
+                record_kind: "AttachmentSessionRelease",
+                message: error.to_string(),
+            })
+        })
+        .collect()
+}
+
+/// Whether a hold of `session` still names `id`: an ingress holder, or its
+/// history while its graph lives.
+async fn session_holds_tx(
+    tx: &mut sqlx::PgConnection,
+    session: &SessionId,
+    id: &AttachmentId,
+) -> Result<bool, StoreError> {
+    let (ingress, history): (bool, bool) =
+        crate::observed_sql::query_as(attachment_sql().holds.select_holders.sql())
+            .bind(session.as_str())
+            .bind(id.as_str())
+            .fetch_one(crate::observed_sql::executor(&mut *tx))
+            .await
+            .map_err(store_sqlx_error)?;
+    if ingress || !history {
+        return Ok(ingress);
+    }
+    let (_, _, live): (bool, bool, bool) =
+        crate::observed_sql::query_as(attachment_sql().postgres.session_state.sql())
+            .bind(session.as_str())
+            .fetch_one(crate::observed_sql::executor(&mut *tx))
+            .await
+            .map_err(store_sqlx_error)?;
+    Ok(live)
+}
+
 pub(crate) async fn acquire_attachment_refs_tx(
     tx: &mut sqlx::PgConnection,
     claim: &ReferrerClaim,
@@ -760,6 +885,18 @@ impl AttachmentReferrers for PostgresStore {
         let mut tx = crate::begin_guarded(&self.pool, &self.fence).await?;
         lock_attachment_referrer_tx(&mut tx, &claim.referrer()).await?;
         acquire_attachment_refs_tx(&mut tx, claim, ids, self.clock.timestamp_ms()).await?;
+        // A session claim no commit or ingress names is held as history,
+        // for as long as the session's graph lives.
+        if let ArtifactReferrer::Session(session) = claim.referrer() {
+            hold_session_attachments_tx(
+                &mut tx,
+                &session,
+                lash_store_sql::attachment::session_holds::HISTORY,
+                "",
+                ids,
+            )
+            .await?;
+        }
         tx.commit().await.map_err(store_sqlx_error)
     }
     async fn forget_attachment_ref(
@@ -786,13 +923,7 @@ impl AttachmentReferrers for PostgresStore {
         .map_err(store_sqlx_error)?;
         if !fenced {
             let retained = if let ArtifactReferrer::Session(session) = referrer {
-                let row: (bool, bool, bool) =
-                    crate::observed_sql::query_as(attachment_sql().postgres.session_state.sql())
-                        .bind(session.as_str())
-                        .fetch_one(crate::observed_sql::executor(&mut **tx))
-                        .await
-                        .map_err(store_sqlx_error)?;
-                row.2
+                session_holds_tx(&mut tx, session, id).await?
             } else {
                 false
             };
@@ -846,6 +977,18 @@ impl AttachmentReferrers for PostgresStore {
             .execute(crate::observed_sql::executor(&mut **tx))
             .await
             .map_err(store_sqlx_error)?;
+        if let ArtifactReferrer::Session(session) = referrer {
+            for statement in [
+                attachment_sql().holds.delete_by_session.sql(),
+                attachment_sql().holds.delete_releases_by_session.sql(),
+            ] {
+                crate::observed_sql::query(statement)
+                    .bind(session.as_str())
+                    .execute(crate::observed_sql::executor(&mut **tx))
+                    .await
+                    .map_err(store_sqlx_error)?;
+            }
+        }
         tx.commit().await.map_err(store_sqlx_error)
     }
     async fn session_referrer_state(

@@ -210,6 +210,13 @@ pub(crate) fn enqueue_queued_work_conn_with_outcome(
         ],
     )
     .map_err(sqlite_error)?;
+    crate::attachments::hold_session_attachments_conn(
+        conn,
+        &batch.session_id,
+        lash_store_sql::attachment::session_holds::BATCH,
+        batch_id.as_str(),
+        &batch.stored_attachment_ids(),
+    )?;
     // The batch and the session's wake commit together (ADR 0132 §12).
     let woken = crate::durable::wake_session_tx(conn, &batch.session_id, false, now)?;
     let inserted = load_queued_batch_by_id_conn(conn, &batch_id)?

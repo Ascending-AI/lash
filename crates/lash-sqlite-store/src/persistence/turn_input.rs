@@ -550,6 +550,13 @@ pub(crate) fn enqueue_pending_turn_inputs_conn(
                         nonce,
                     )
                 });
+                crate::attachments::hold_session_attachments_conn(
+                    tx,
+                    session_id,
+                    lash_store_sql::attachment::session_holds::INPUT,
+                    input_id.as_str(),
+                    &ids,
+                )?;
                 let state = lash_core_execution::TurnInputState::open(draft.ingress.clone());
                 let run_spec = admit_run_spec_conn(tx, draft, &mut interned)?;
                 let sequence = crate::session_ingress::allocate_sequence(tx, session_id)?;

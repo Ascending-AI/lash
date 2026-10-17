@@ -26,6 +26,7 @@ pub use super::queue_observation::*;
 pub use super::retention::*;
 pub use super::revision_pins::*;
 pub use super::runtime_persistence::*;
+pub use super::session_attachment_retention::*;
 pub use super::session_delete_blob_reclaim::*;
 pub use super::session_graph_append::*;
 pub use super::session_graph_state_machine::*;

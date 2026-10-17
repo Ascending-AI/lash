@@ -32,7 +32,7 @@ Six kinds may hold an attachment (`ArtifactReferrerKind::holds_attachments`):
 | `execution` (execution `j`) | a put in a session runtime bound to `j`; a delivery into any scope that is not a process | `AwaitJournal` | `j` settles (ADR 0113 §2.5). |
 | `process_record` (`p`) | every put in `p`'s runtime; every delivery into `p`; `p`'s terminal output and its start input | none | Prune's `Ended` record. |
 | `start_input` (`key`, `starter`) | the start input's stored ids, before registration | `AwaitStart { starter }` | Cleanup acquires the retained input under `ProcessRecord(p)` before ending this starter's staging. Without a retained row, the starter's settled execution ends staging. |
-| `session` (`s`) | the boundary commit, on the committed ids; an enqueue into `s` | none | Session deletion arms `AwaitSessionGraphRetired`; the executor ends it once `s` is deleted and no untombstoned graph node of `s` remains, so a fork keeps what its retained history names. |
+| `session` (`s`) | the boundary commit, on the committed ids; an enqueue into `s` | none | Session deletion arms `AwaitSessionGraphRetired`; the executor ends it once `s` is deleted and no untombstoned graph node of `s` remains, so a fork keeps what its retained history names. Before that, each edge lasts while a hold names it (FIG-6611, below). |
 | `upload` (`s`, `u`) | a put in a session runtime with no execution bound | `AwaitUploadExpiry { expires_at_ms }` | `expires_at_ms` passes, or `s` is deleted or absent. Each put mints a fresh `u`, so one expiry never fences a later upload. |
 | `source` (`AwaitEventKey`) | K4 process-terminal delivery, before publishing the immutable result seal on its wait row | source holder fence | Logical Run or scope retirement ends the source. |
 
@@ -194,6 +194,25 @@ terminal output needs the row anyway.
   its message part. A code cell's aggregate print archive and retained finish value live in
   protocol records the commit cannot read, so the turn driver notes them
   from the cell's recorded response, and a resumed turn notes the same ones.
+
+Each `Session(s)` acquisition also records why `s` holds the attachment,
+in `attachment_session_holds` (FIG-6611): its committed history (the
+boundary commit, and a direct `acquire_attachment_refs`), an input (its
+admission) or a batch (its enqueue). A live session's head only extends,
+so revision release never tombstones its history and a history hold lasts
+while the session's graph does. An input's or batch's hold ends when its
+payload is released: vacuum, which deletes withdrawn inputs and batch
+tombstones, ends theirs, and the revision release that clears a settled
+input's body or an applied command's payload (FIG-6607) ends theirs in the
+same transaction. Each queues the attachments it held in
+`attachment_session_releases`. The revision-release boundary (a commit
+whose retention releases revisions, a terminal, an unpin, the host's
+collection) drops `s`'s edge to each queued attachment no hold names any
+more, at most `MATERIAL_RELEASE_BATCH` per transaction, so a crash leaves
+either the edge and its queue row or neither. `forget_attachment_ref` on
+`Session(s)` reads the same relation: it is a no-op while an ingress hold
+names the attachment, or a history hold does while `s` has an untombstoned
+node, and otherwise drops the edge.
 
 A delivery whose acquisition finds no evidence answers `SourceGone`: the
 producer's edges were already ended and swept. That is the typed outcome of

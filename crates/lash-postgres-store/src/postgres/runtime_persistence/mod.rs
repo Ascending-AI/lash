@@ -266,6 +266,14 @@ pub(crate) async fn enqueue_queued_work_with_outcome_tx(
         .execute(crate::observed_sql::executor(&mut *tx))
         .await
         .map_err(store_sqlx_error)?;
+    crate::attachments::hold_session_attachments_tx(
+        tx,
+        &batch.session_id,
+        lash_store_sql::attachment::session_holds::BATCH,
+        &batch_id,
+        &batch.stored_attachment_ids(),
+    )
+    .await?;
     // The batch and the session's wake commit together (ADR 0132 §12).
     let woken = crate::durable::wake_session_tx(tx, &batch.session_id, false, now).await?;
     let queued = load_queued_batch(tx, &batch_id)

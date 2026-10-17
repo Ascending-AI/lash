@@ -81,12 +81,61 @@ async fn stored_bodies(store: &SqliteStore, input: &str, batch: &str) -> (bool, 
         .expect("read stored bodies")
 }
 
+/// Give each input one attachment its admission holds, as an input that
+/// carries an attachment is admitted: a session edge and an input hold.
+async fn hold_attachments(store: &SqliteStore, session: &SessionId, inputs: &[(&str, &str)]) {
+    let session = session.to_string();
+    let inputs: Vec<(String, String)> = inputs
+        .iter()
+        .map(|(input, attachment)| ((*input).to_owned(), (*attachment).to_owned()))
+        .collect();
+    store
+        .conn
+        .write(move |tx| {
+            for (input, attachment) in &inputs {
+                tx.execute(
+                    "INSERT INTO attachment_referrer_edges (attachment_id, referrer_kind, referrer_id)
+                     VALUES (?1, 'session', ?2)",
+                    params![attachment, session],
+                )?;
+                tx.execute(
+                    "INSERT INTO attachment_session_holds
+                         (session_id, attachment_id, holder_kind, holder_id)
+                     VALUES (?1, ?2, 'input', ?3)",
+                    params![session, attachment, input],
+                )?;
+            }
+            Ok(())
+        })
+        .await
+        .expect("hold the inputs' attachments");
+}
+
+/// Whether the session's edge to `attachment` remains.
+async fn session_edge(store: &SqliteStore, session: &SessionId, attachment: &str) -> bool {
+    let (session, attachment) = (session.to_string(), attachment.to_owned());
+    store
+        .conn
+        .call(move |conn| {
+            conn.query_row(
+                "SELECT EXISTS (SELECT 1 FROM attachment_referrer_edges
+                     WHERE attachment_id = ?1 AND referrer_kind = 'session' AND referrer_id = ?2)",
+                [attachment.as_str(), session.as_str()],
+                |row| row.get::<_, bool>(0),
+            )
+        })
+        .await
+        .expect("read the session edge")
+}
+
 /// SETTLED-INGRESS-COMPACTION under `HeadOnly`: once the revisions that
 /// settled a large input and a large command are no longer retained, neither
 /// body is reachable, yet an identical retry keeps its receipt, a changed
 /// retry still refuses, the command's original answer still reads and an
 /// unconsumed input keeps its body. A pin keeps the input's body until it
-/// is lifted.
+/// is lifted. The released body's attachment hold ends with it, so the
+/// session lets that attachment go, while the unconsumed input's stays held
+/// (FIG-6611).
 #[tokio::test]
 #[expect(clippy::too_many_lines, reason = "one law, read top to bottom")]
 async fn settled_ingress_bodies_follow_head_only_retention() {
@@ -130,6 +179,15 @@ async fn settled_ingress_bodies_follow_head_only_retention() {
         ))
         .await
         .expect("enqueue an input no run takes");
+    hold_attachments(
+        &store,
+        &session,
+        &[
+            (input.input_id.as_str(), "attachment-settled"),
+            (unconsumed.input_id.as_str(), "attachment-waiting"),
+        ],
+    )
+    .await;
 
     // Run `run-1` takes the input, and its commit delivers it.
     let (session_text, input_id) = (session.to_string(), input.input_id.to_string());
@@ -227,6 +285,14 @@ async fn settled_ingress_bodies_follow_head_only_retention() {
         stored_bodies(&store, input.input_id.as_str(), command.batch_id.as_str()).await,
         (false, false),
         "no settled body outlives its released revision"
+    );
+    assert!(
+        !session_edge(&store, &session, "attachment-settled").await,
+        "a released body's attachment is no longer the session's"
+    );
+    assert!(
+        session_edge(&store, &session, "attachment-waiting").await,
+        "an unconsumed input keeps its attachment"
     );
 
     // An identical retry keeps its receipt; changed content still refuses.

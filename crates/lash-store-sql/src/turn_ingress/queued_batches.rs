@@ -173,9 +173,11 @@ crate::statements! {
 
         /// Remove session `?1`'s tombstones: host vacuum, the only reclaim a
         /// tombstone has short of session deletion. A vacuumed wake's redelivery
-        /// still meets its receiver floor.
+        /// still meets its receiver floor. Each deleted batch id is answered,
+        /// so its attachment holds end with it.
         delete_tombstones = "DELETE FROM queued_work_batches
-             WHERE session_id = ?1 AND terminal_cause IS NOT NULL";
+             WHERE session_id = ?1 AND terminal_cause IS NOT NULL
+             RETURNING batch_id";
 
         /// Hand batch `?2` of session `?1` back open at its own position,
         /// under run `?3`, which must hold it.

@@ -16,55 +16,85 @@ impl StoreMaintenance for SqliteStore {
             removed_queued_work_tombstone_count,
         ) = self
             .conn
-            .write(move |tx| {
-                let removed_node_count = crate::conn::cached_execute(tx,
-                    session_sql()
-                        .graph_sqlite
-                        .delete_tombstoned_for_session
-                        .sql(),
-                    params![session_id.as_str()],
-                )?;
-                let removed_pending_turn_input_tombstone_count = crate::conn::cached_execute(tx,
-                    crate::turn_ingress::turn_ingress_sql()
-                        .pending_inputs
-                        .delete_withdrawn
-                        .sql(),
-                    params![session_id.as_str()],
-                )?;
-                // A vacuumed command's replay meets its revision check.
-                let removed_queued_work_tombstone_count = crate::conn::cached_execute(tx,
-                    crate::turn_ingress::turn_ingress_sql()
-                        .queued_batches
-                        .delete_tombstones
-                        .sql(),
-                    params![session_id.as_str()],
-                )?;
-                // A run's spec bytes are read only to resolve its shape:
-                // once no unsettled input names a spec, nothing reads it
-                // again (FIG-6021). The write transaction serializes this
-                // against every enqueue that would reuse the row.
-                crate::conn::cached_execute(tx,
-                    crate::turn_ingress::turn_ingress_sql()
-                        .run_specs
-                        .delete_unnamed
-                        .sql(),
-                    params![session_id.as_str()],
-                )?;
-                // Cancellation rows include unresolved recovery intent. They
-                // remain until session deletion, which is the only safe
-                // reclamation boundary without terminal correlation.
-                Ok((
-                    removed_node_count,
-                    removed_pending_turn_input_tombstone_count,
-                    removed_queued_work_tombstone_count,
-                ))
+            .write_flow(move |tx| {
+                let vacuumed = (|| -> Result<_, StoreError> {
+                    let removed_node_count = crate::conn::cached_execute(
+                        tx,
+                        session_sql()
+                            .graph_sqlite
+                            .delete_tombstoned_for_session
+                            .sql(),
+                        params![session_id.as_str()],
+                    )
+                    .map_err(sqlite_error)?;
+                    // A deleted input's or batch's attachment holds end with
+                    // it; the next revision release lets go of what nothing
+                    // else holds (FIG-6611).
+                    let deleted = |statement: &str, holder_kind: &str| {
+                        let ids = tx
+                            .prepare_cached(statement)
+                            .and_then(|mut statement| {
+                                statement
+                                    .query_map(params![session_id.as_str()], |row| row.get(0))?
+                                    .collect::<rusqlite::Result<Vec<String>>>()
+                            })
+                            .map_err(sqlite_error)?;
+                        crate::attachments::end_attachment_holds_conn(
+                            tx,
+                            &session_id,
+                            holder_kind,
+                            &ids,
+                        )?;
+                        Ok::<_, StoreError>(ids.len())
+                    };
+                    let removed_pending_turn_input_tombstone_count = deleted(
+                        crate::turn_ingress::turn_ingress_sql()
+                            .pending_inputs
+                            .delete_withdrawn
+                            .sql(),
+                        lash_store_sql::attachment::session_holds::INPUT,
+                    )?;
+                    // A vacuumed command's replay meets its revision check.
+                    let removed_queued_work_tombstone_count = deleted(
+                        crate::turn_ingress::turn_ingress_sql()
+                            .queued_batches
+                            .delete_tombstones
+                            .sql(),
+                        lash_store_sql::attachment::session_holds::BATCH,
+                    )?;
+                    // A run's spec bytes are read only to resolve its shape:
+                    // once no unsettled input names a spec, nothing reads it
+                    // again (FIG-6021). The write transaction serializes this
+                    // against every enqueue that would reuse the row.
+                    crate::conn::cached_execute(
+                        tx,
+                        crate::turn_ingress::turn_ingress_sql()
+                            .run_specs
+                            .delete_unnamed
+                            .sql(),
+                        params![session_id.as_str()],
+                    )
+                    .map_err(sqlite_error)?;
+                    // Cancellation rows include unresolved recovery intent. They
+                    // remain until session deletion, which is the only safe
+                    // reclamation boundary without terminal correlation.
+                    Ok((
+                        removed_node_count,
+                        removed_pending_turn_input_tombstone_count,
+                        removed_queued_work_tombstone_count,
+                    ))
+                })();
+                Ok(match vacuumed {
+                    Ok(counts) => TxOutcome::Commit(Ok(counts)),
+                    Err(error) => TxOutcome::Rollback(Err(error)),
+                })
             })
             .await
+            .map_err(sqlite_error)
+            .and_then(|vacuumed| vacuumed)
             // Every delete rides in one transaction: a failure rolls them back,
             // so no rows survived to report.
-            .map_err(|err| {
-                lash_core_execution::MaintenanceFailure::failed_before_any_work(sqlite_error(err))
-            })?;
+            .map_err(lash_core_execution::MaintenanceFailure::failed_before_any_work)?;
         Ok(VacuumReport {
             removed_node_count,
             removed_pending_turn_input_tombstone_count,

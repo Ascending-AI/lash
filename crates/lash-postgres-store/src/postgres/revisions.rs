@@ -146,6 +146,10 @@ pub(crate) async fn release_unretained_tx(
 }
 
 /// Release one page of per-revision material in the prune's transaction.
+/// A session also lets go of each queued attachment whose last hold ended,
+/// under the session's write lock its caller holds (FIG-6611); a host
+/// collection, which names no session, does that a session at a time
+/// (`gc_unreachable`).
 pub(crate) async fn release_revision_material_tx(
     tx: &mut PgConnection,
     session_id: Option<&SessionId>,
@@ -153,8 +157,16 @@ pub(crate) async fn release_revision_material_tx(
 ) -> Result<(), StoreError> {
     crate::durable::retention::release_material_batch(tx, session_id)
         .await
-        .map(drop)
-        .map_err(store_sqlx_error)
+        .map_err(store_sqlx_error)?;
+    if let Some(session) = session_id {
+        crate::attachments::release_session_attachments_tx(
+            tx,
+            session,
+            i64::from(lash_store_sql::session::revisions::MATERIAL_RELEASE_BATCH),
+        )
+        .await?;
+    }
+    Ok(())
 }
 
 /// The retention policy recorded for `session_id`, or `None` for a session

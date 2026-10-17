@@ -24,6 +24,29 @@ pub(super) static RELEASE_COMMAND_PAYLOADS: Entry = Entry::new(
     Shape::Exec,
 );
 
+fn holds() -> &'static lash_store_sql::attachment::session_holds::SessionHoldStatements {
+    &crate::attachments::attachment_sql().holds
+}
+
+/// Record a session attachment hold (FIG-6611).
+pub(super) static HOLD_ATTACHMENT: Entry = Entry::new(
+    || &holds().insert,
+    &[Ty::Text, Ty::Text, Ty::Text, Ty::Text],
+    Shape::Exec,
+);
+/// Queue what the inputs and batches whose bodies were released held.
+pub(super) static QUEUE_RELEASED_INGRESS: Entry =
+    Entry::new(|| &holds().queue_released_ingress, &[Ty::Text], Shape::Exec);
+/// End those holds.
+pub(super) static END_RELEASED_INGRESS: Entry =
+    Entry::new(|| &holds().end_released_ingress, &[Ty::Text], Shape::Exec);
+/// Drop the session edges of a page of queued attachments no hold names.
+pub(super) static RELEASE_ATTACHMENT_EDGES: Entry =
+    Entry::new(|| &holds().release_edges, &[Ty::Text, Ty::Int], Shape::Exec);
+/// Dequeue the page the release decided.
+pub(super) static DEQUEUE_ATTACHMENT_RELEASES: Entry =
+    Entry::new(|| &holds().dequeue, &[Ty::Text, Ty::Int], Shape::Exec);
+
 /// One page per transaction; GC repeats pages without requiring new commits.
 pub(crate) async fn release_material_batch(
     tx: &mut PgConnection,
@@ -42,11 +65,22 @@ pub(crate) async fn release_material_batch(
             .rows_affected();
         released += usize::try_from(rows).unwrap_or(usize::MAX);
     }
+    // A released body no longer holds its attachments (FIG-6611).
+    for statement in [
+        &holds().queue_released_ingress,
+        &holds().end_released_ingress,
+    ] {
+        crate::observed_sql::query(statement.sql())
+            .bind(session.map(SessionId::as_str))
+            .execute(crate::observed_sql::executor(&mut *tx))
+            .await?;
+    }
     Ok(released)
 }
 
 /// The owner-commit form of the same release. Callers apply the prune's
-/// retention flag to every step, including text reclamation.
+/// retention flag to every step, including text reclamation. The session
+/// lets go of each queued attachment whose last hold ended (FIG-6611).
 pub(super) fn release_material_steps(session: &str) -> Vec<Step> {
     let page = || {
         vec![
@@ -59,5 +93,9 @@ pub(super) fn release_material_steps(session: &str) -> Vec<Step> {
         Step::any(&super::prompts::RECLAIM, Vec::new()),
         Step::any(&RELEASE_INPUT_BODIES, page()),
         Step::any(&RELEASE_COMMAND_PAYLOADS, page()),
+        Step::any(&QUEUE_RELEASED_INGRESS, vec![Value::text(session)]),
+        Step::any(&END_RELEASED_INGRESS, vec![Value::text(session)]),
+        Step::any(&RELEASE_ATTACHMENT_EDGES, page()),
+        Step::any(&DEQUEUE_ATTACHMENT_RELEASES, page()),
     ]
 }
