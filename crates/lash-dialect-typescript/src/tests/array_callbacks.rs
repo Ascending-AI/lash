@@ -11,6 +11,7 @@ use lash_kernel_dialect::{Environment, Library, NamedLibrary};
 use lash_kernel_doc::{
     Datum, ErrorDatum, FunctionCatalog, FunctionId, Handle, Integer, Timestamp, parse_document,
 };
+use lash_kernel_vm::kernel_internals::conformance::{self, Checkpoint};
 use lash_kernel_vm::{
     Bounds, CellStart, End, Host, KernelMachine, Machine, Outcome, PreparedLibrary, Program,
     Request, Step, Target,
@@ -138,6 +139,9 @@ impl Host for Console {
 #[derive(Debug, PartialEq)]
 struct Observed {
     end: End,
+    // Compare the reachable carry graph, retaining aliases and cycles, rather
+    // than projection ids, garbage or the conservative census in its pages.
+    carry: Option<Checkpoint>,
     printed: Vec<Datum>,
     requests: Vec<(String, Vec<Datum>)>,
     charged: u64,
@@ -168,9 +172,17 @@ fn observe(program: Program, relay: bool) -> Observed {
     };
     loop {
         match machine.run(&mut console, slice).unwrap() {
-            Step::Ended(end) => {
+            Step::Ended(mut end) => {
+                let carry = match &mut end {
+                    End::Finished(finished) => finished.carry.take().map(|root| {
+                        conformance::session(&root, Box::new(source.clone()))
+                            .expect("the carried graph is readable")
+                    }),
+                    _ => None,
+                };
                 return Observed {
                     end,
+                    carry,
                     printed: console.printed,
                     requests,
                     charged: machine.meters().charged,

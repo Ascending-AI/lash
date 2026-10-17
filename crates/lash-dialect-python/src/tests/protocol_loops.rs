@@ -26,17 +26,10 @@ fn run(source: &str) -> (String, Vec<String>) {
         charge: 200_000,
         ..BOUNDS
     };
-    // The session a cell carries on is compared by what it ends with: a
-    // reopened run seals pages of its own.
-    let (end, lines, requests, charged) = execution_observation(program.clone(), bounds, false);
+    let straight = execution_observation(program.clone(), bounds, false);
     let reopened = execution_observation(program, bounds, true);
-    let end = ending(end);
-    assert_eq!(
-        (ending(reopened.0), reopened.1, reopened.2, reopened.3),
-        (end.clone(), lines.clone(), requests, charged),
-        "{source}"
-    );
-    (end, lines)
+    assert_eq!(reopened, straight, "{source}");
+    (ending(straight.end), straight.lines)
 }
 
 fn lines(source: &str) -> Vec<String> {

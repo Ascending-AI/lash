@@ -13,6 +13,7 @@ use lash_kernel_doc::{
     Datum, EffectName, ErrorDatum, FunctionRegistry, Handle, Integer, Name, Param, Signature,
     Timestamp, Type,
 };
+use lash_kernel_vm::kernel_internals::conformance::{self, Checkpoint};
 use lash_kernel_vm::{
     Bounds, End, Host, KernelMachine, Machine, Outcome, Park, PreparedLibrary, Program, Request,
     RunError, Step, WaitId, register_machine_functions,
@@ -357,10 +358,10 @@ fn dict_same_size_key_replacement_raises_within_charge_bound() {
         };
         let straight = execution_observation(program.clone(), bounds, false);
         assert_eq!(
-            ending(straight.0.clone()),
+            ending(straight.end.clone()),
             "error RuntimeError: dictionary keys changed during iteration"
         );
-        assert_eq!(straight.1, visited);
+        assert_eq!(straight.lines, visited);
         // K-MACH-007/008: the remaining budget, size and live map cursor must
         // survive serialization at every safe point with identical charge.
         assert_eq!(execution_observation(program, bounds, true), straight);
@@ -664,11 +665,22 @@ except TypeError as e:
     print(e)
 ";
 
+/// Carry equality is the reachable graph, including aliases and cycles;
+/// projection ids, garbage and the conservative census are storage details.
+#[derive(Debug, PartialEq)]
+pub(super) struct ExecutionObservation {
+    pub(super) end: End,
+    pub(super) lines: Vec<String>,
+    requests: Vec<String>,
+    charged: u64,
+    carry: Option<Checkpoint>,
+}
+
 pub(super) fn execution_observation(
     program: Program,
     bounds: Bounds,
     rebuild: bool,
-) -> (End, Vec<String>, Vec<String>, u64) {
+) -> ExecutionObservation {
     let session = Session::default();
     let mut machine = pages::start(program.clone(), bounds, &session);
     let mut host = Console::default();
@@ -677,8 +689,21 @@ pub(super) fn execution_observation(
         let step = machine
             .run(&mut host, if rebuild { 1 } else { u64::MAX })
             .expect("the document runs");
-        if let Step::Ended(end) = step {
-            return (end, host.lines, requests, machine.meters().charged);
+        if let Step::Ended(mut end) = step {
+            let carry = match &mut end {
+                End::Finished(finished) => finished.carry.take().map(|root| {
+                    conformance::session(&root, Box::new(session.source.clone()))
+                        .expect("the carried graph is readable")
+                }),
+                _ => None,
+            };
+            return ExecutionObservation {
+                end,
+                lines: host.lines,
+                requests,
+                charged: machine.meters().charged,
+                carry,
+            };
         }
         if rebuild {
             let sealed = machine.checkpoint().unwrap();
@@ -749,13 +774,17 @@ fn paged_arithmetic_keeps_held_definitions_and_exact_charge() {
             library: prepared.clone(),
         };
         let straight = execution_observation(program.clone(), BOUNDS, false);
-        assert!(matches!(straight.0, End::Finished(_)), "{:?}", straight.0);
-        assert_eq!(straight.2, ["echo:7"]);
+        assert!(
+            matches!(straight.end, End::Finished(_)),
+            "{:?}",
+            straight.end
+        );
+        assert_eq!(straight.requests, ["echo:7"]);
         assert_eq!(
             execution_observation(
                 program,
                 Bounds {
-                    charge: straight.3,
+                    charge: straight.charged,
                     ..BOUNDS
                 },
                 true
@@ -765,15 +794,16 @@ fn paged_arithmetic_keeps_held_definitions_and_exact_charge() {
         observations.push(straight);
     }
     assert_eq!(
-        observations[0].0, observations[1].0,
+        observations[0].end, observations[1].end,
         "old and new documents finish identically"
     );
+    assert_eq!(observations[0].carry, observations[1].carry);
     assert_eq!(
-        observations[0].1, observations[1].1,
+        observations[0].lines, observations[1].lines,
         "numeric and fallback observations agree"
     );
     assert_eq!(
-        observations[0].3, observations[1].3,
+        observations[0].charged, observations[1].charged,
         "held and current helpers declare the same charge formulas"
     );
 }
@@ -976,14 +1006,14 @@ print(s)
         library: installed().prepared.clone(),
     };
     let straight = execution_observation(program.clone(), BOUNDS, false);
-    assert!(matches!(straight.0, End::Finished(_)));
-    assert_eq!(straight.1, ["9223372036854775810"]);
-    assert_eq!(straight.2, ["echo:9223372036854775808"]);
+    assert!(matches!(straight.end, End::Finished(_)));
+    assert_eq!(straight.lines, ["9223372036854775810"]);
+    assert_eq!(straight.requests, ["echo:9223372036854775808"]);
     assert_eq!(
         execution_observation(
             program,
             Bounds {
-                charge: straight.3,
+                charge: straight.charged,
                 ..BOUNDS
             },
             true
