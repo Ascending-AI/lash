@@ -636,13 +636,24 @@ fn uri_decode_completion_price_bounds_delegated_work_on_return_and_raise() {
                     assert!(matches!(end, lash_kernel_vm::End::Finished(_)), "{end:?}");
                 }
                 let work = machine.work().unwrap();
-                let price = work
+                // A body owns its completion charge in the code row; a
+                // native or generated plan owns it in the native row. Match
+                // the exact helper, excluding any closures inside its body.
+                let price: u64 = work
                     .natives
                     .iter()
-                    .find(|native| native.symbol.name == name)
-                    .unwrap()
-                    .counts
-                    .self_charge;
+                    .filter(|native| native.symbol.function == function)
+                    .map(|native| native.counts.self_charge)
+                    .chain(
+                        work.codes
+                            .iter()
+                            .filter(|code| {
+                                code.symbol.function == Some(function)
+                                    && code.symbol.site.path.is_empty()
+                            })
+                            .map(|code| code.counts.self_charge),
+                    )
+                    .sum();
                 let calls: u64 = work.natives.iter().map(|native| native.counts.calls).sum();
                 let admitted_work =
                     calls + fixed.heap.accounting_changes + fixed.heap.accounting_reservations;

@@ -617,6 +617,10 @@ fn session_slot_roots_and_task_edges_follow_replacements() {
         bytes: u64::MAX,
     }))
     .unwrap();
+    // Seam I keeps the old slot holdings in the baseline until collection;
+    // projection alone must still bound the current session tree.
+    assert!(heap.certificate().upper.0 >= heap.session_root().cost());
+    heap.collect().unwrap();
     assert_eq!(heap.certificate().upper.0, heap.session_root().cost());
     let root = heap.session_root().keyed_root().unwrap();
     assert!(heap.classify_carry(&root).unwrap().dropped.is_empty());
