@@ -136,6 +136,7 @@ pub(crate) enum CellObservation {
     TasksOutstanding {
         unfinished: Vec<TaskIdentity>,
         unobserved: Vec<TaskIdentity>,
+        sources: Vec<(TaskIdentity, Site)>,
     },
     /// No task is ready and none waits on anything the host can answer.
     Deadlock { waiting: Vec<TaskIdentity> },
@@ -172,9 +173,11 @@ impl CellObservation {
             RunError::TasksOutstanding {
                 unfinished,
                 unobserved,
+                sources,
             } => Self::TasksOutstanding {
                 unfinished,
                 unobserved,
+                sources,
             },
             RunError::Deadlock { waiting } => Self::Deadlock { waiting },
             RunError::Bound(exceeded) => Self::Bound(exceeded),
@@ -206,10 +209,13 @@ impl CellObservation {
         prompts: &dyn DialectPrompts,
     ) -> CellFailure {
         let vocabulary = prompts.prompt_vocabulary();
-        let place = |tasks: &[TaskIdentity]| -> String {
+        let place = |tasks: &[TaskIdentity], sources: &[(TaskIdentity, Site)]| -> String {
             tasks
                 .iter()
-                .map(|task| task_place(task, source, map))
+                .map(|task| {
+                    let body = sources.iter().find(|(identity, _)| identity == task);
+                    task_place(task, source, map, body.map(|(_, site)| site))
+                })
                 .collect::<Vec<_>>()
                 .join("; ")
         };
@@ -263,6 +269,7 @@ impl CellObservation {
             Self::TasksOutstanding {
                 unfinished,
                 unobserved,
+                sources,
             } => {
                 let mut message = format!(
                     "{CELL_TASKS_OUTSTANDING}: this {noun} ended while work it started was not awaited.",
@@ -272,14 +279,14 @@ impl CellObservation {
                     message.push_str(&format!(
                         "\nStill running ({}): {}",
                         unfinished.len(),
-                        place(unfinished)
+                        place(unfinished, sources)
                     ));
                 }
                 if !unobserved.is_empty() {
                     message.push_str(&format!(
                         "\nFailed with an error nothing awaited ({}): {}",
                         unobserved.len(),
-                        place(unobserved)
+                        place(unobserved, sources)
                     ));
                 }
                 message.push_str(&format!("\n{}", vocabulary.unjoined_task_repair));
@@ -295,7 +302,7 @@ impl CellObservation {
                 format!(
                     "{CELL_DEADLOCK}: {} task(s) wait on each other and nothing can wake them: {}",
                     waiting.len(),
-                    place(waiting)
+                    place(waiting, &[])
                 ),
             ),
             Self::Bound(exceeded) => {
@@ -372,12 +379,20 @@ pub(crate) fn task_label(task: &TaskIdentity) -> String {
 }
 
 /// Which task, for the model: the source line of the async code it runs
-/// when the document's source map places its spawn, else its typed label.
-fn task_place(task: &TaskIdentity, source: &str, map: Option<&SourceMap>) -> String {
+/// when the document's source map places its spawn or its source body
+/// through a library adapter, else its typed label.
+fn task_place(
+    task: &TaskIdentity,
+    source: &str,
+    map: Option<&SourceMap>,
+    body: Option<&Site>,
+) -> String {
     let TaskIdentity::Spawned(spawn) = task else {
         return "the program itself".to_owned();
     };
-    match map.and_then(|map| site_start(map, &spawn.site)) {
+    match map.and_then(|map| {
+        site_start(map, &spawn.site).or_else(|| body.and_then(|site| site_start(map, site)))
+    }) {
         Some(start) => {
             let (line, _) = line_column(source, start);
             let text = source.lines().nth(line - 1).unwrap_or_default().trim();

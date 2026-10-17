@@ -819,6 +819,7 @@ pub(super) fn outcome_of_end(end: End) -> lash_execution_contracts::process::Pro
         End::Error(RunError::TasksOutstanding {
             unfinished,
             unobserved,
+            ..
         }) => failure(
             KernelProcessFailureCode::TasksOutstanding,
             format!(

@@ -415,3 +415,33 @@ fn put(
     })?;
     Ok(())
 }
+
+/// The outermost document body of a live task, through any library adapter.
+/// Its canonical frames already retain these sites across cold opens; no
+/// separate task provenance needs to be persisted in the parked machine.
+pub(super) fn source_body(
+    frames: &Tree<lash_kernel_state::paged::FrameRecord>,
+    exe: &Executable,
+    access: &Access<'_>,
+) -> Result<Option<lash_kernel_doc::Site>, HeapFault> {
+    for index in 0..frames.len() {
+        let (_, frame) = frames
+            .rank_get(index, access)?
+            .ok_or_else(|| HeapFault::Malformed("a task frame is missing".into()))?;
+        let statement = frame.statement.resolve(access)?;
+        if matches!(statement.unit, lash_kernel_doc::Unit::Library(_)) {
+            continue;
+        }
+        let body = (0..=statement.path.len())
+            .rev()
+            .find_map(|length| {
+                exe.code_at(&lash_kernel_doc::Site::new(
+                    statement.unit.clone(),
+                    &statement.path[..length],
+                ))
+            })
+            .ok_or_else(|| HeapFault::Malformed("a frame has no admitted code body".into()))?;
+        return Ok(Some(exe.code(body).site.clone()));
+    }
+    Ok(None)
+}

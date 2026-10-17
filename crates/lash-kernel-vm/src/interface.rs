@@ -375,6 +375,10 @@ pub enum RunError {
     TasksOutstanding {
         unfinished: Vec<TaskIdentity>,
         unobserved: Vec<TaskIdentity>,
+        /// The outermost document body still running in each unfinished task.
+        /// Derived from semantic frames, separate from the actual spawn identity.
+        /// An embedder resolves these sites through its validated source map.
+        sources: Vec<(TaskIdentity, lash_kernel_doc::Site)>,
     },
     /// No task is ready and none waits on anything the embedder can
     /// answer.

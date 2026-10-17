@@ -856,16 +856,23 @@ impl KernelMachine {
                         unobserved.push(task.identity)
                     }
                     TaskState::Ended(_) => (),
-                    _ => unfinished.push(task.identity),
+                    _ => unfinished.push((task.identity, task.frames.clone())),
                 }
             }
             true
         })?;
         if !unfinished.is_empty() || !unobserved.is_empty() {
+            let mut sources = Vec::new();
             let unfinished = unfinished
                 .into_iter()
-                .map(|id| id.resolve(&access))
-                .collect::<Result<Vec<_>, _>>()?;
+                .map(|(id, frames)| {
+                    let identity = id.resolve(&access)?;
+                    if let Some(site) = tasks::source_body(&frames, &self.exe, &access)? {
+                        sources.push((identity.clone(), site));
+                    }
+                    Ok(identity)
+                })
+                .collect::<Result<Vec<_>, lash_kernel_doc::heap::HeapFault>>()?;
             let unobserved = unobserved
                 .into_iter()
                 .map(|id| id.resolve(&access))
@@ -873,6 +880,7 @@ impl KernelMachine {
             return Ok(End::Error(RunError::TasksOutstanding {
                 unfinished,
                 unobserved,
+                sources,
             }));
         }
         Ok(match ending {

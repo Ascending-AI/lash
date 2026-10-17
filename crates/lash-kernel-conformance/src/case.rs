@@ -212,6 +212,7 @@ impl ExpectedEnd {
             End::Error(RunError::TasksOutstanding {
                 unfinished,
                 unobserved,
+                ..
             }) => Self::TasksOutstanding {
                 unfinished,
                 unobserved,

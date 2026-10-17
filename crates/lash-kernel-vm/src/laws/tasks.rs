@@ -44,6 +44,7 @@ fn outstanding(end: End) -> (Vec<TaskIdentity>, Vec<TaskIdentity>) {
         End::Error(RunError::TasksOutstanding {
             unfinished,
             unobserved,
+            ..
         }) => (unfinished, unobserved),
         other => panic!("the run did not end with tasks outstanding: {other:?}"),
     }

@@ -74,6 +74,15 @@ async fn a_resumed_cells_failure_is_located_by_its_stored_map() {
                 failure.message
             );
         } else {
+            let Some(lash_core::CellDefect::TasksOutstanding { unfinished, .. }) = &failure.defect
+            else {
+                unreachable!("the typed task failure was checked above");
+            };
+            assert!(
+                failure
+                    .message
+                    .contains(&format!("the task {}", unfinished[0]))
+            );
             assert!(
                 failure.message.contains("Still running (1): the task ")
                     && !failure.message.contains("the async code at line"),

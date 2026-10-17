@@ -474,6 +474,7 @@ pub enum EndWire {
     TasksOutstanding {
         unfinished: Vec<TaskIdentity>,
         unobserved: Vec<TaskIdentity>,
+        sources: Vec<(TaskIdentity, lash_kernel_doc::Site)>,
     },
     Deadlock {
         waiting: Vec<TaskIdentity>,
@@ -510,9 +511,11 @@ impl EndWire {
             End::Error(RunError::TasksOutstanding {
                 unfinished,
                 unobserved,
+                sources,
             }) => Self::TasksOutstanding {
                 unfinished,
                 unobserved,
+                sources,
             },
             End::Error(RunError::Deadlock { waiting }) => Self::Deadlock { waiting },
             End::Error(RunError::Bound(exceeded)) => Self::Bound {
@@ -559,9 +562,11 @@ impl EndWire {
             Self::TasksOutstanding {
                 unfinished,
                 unobserved,
+                sources,
             } => End::Error(RunError::TasksOutstanding {
                 unfinished,
                 unobserved,
+                sources,
             }),
             Self::Deadlock { waiting } => End::Error(RunError::Deadlock { waiting }),
             Self::Bound {

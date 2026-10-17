@@ -286,6 +286,7 @@ pub enum EndRecord {
     TasksOutstanding {
         unfinished: Vec<TaskIdentity>,
         unobserved: Vec<TaskIdentity>,
+        sources: Vec<(TaskIdentity, lash_kernel_doc::Site)>,
     },
     Deadlock {
         waiting: Vec<TaskIdentity>,
@@ -353,10 +354,12 @@ impl TokenCodec for EndRecord {
             Self::TasksOutstanding {
                 unfinished,
                 unobserved,
+                sources,
             } => {
-                out.sum(3, 2);
+                out.sum(3, 3);
                 unfinished.encode(out);
                 unobserved.encode(out);
+                sources.encode(out);
             }
             Self::Deadlock { waiting } => {
                 out.sum(4, 1);
@@ -396,10 +399,11 @@ impl TokenCodec for EndRecord {
                 Self::Uncaught(input.child()?)
             }
             3 => {
-                expect(2)?;
+                expect(3)?;
                 Self::TasksOutstanding {
                     unfinished: Vec::decode(input)?,
                     unobserved: Vec::decode(input)?,
+                    sources: Vec::decode(input)?,
                 }
             }
             4 => {
@@ -441,9 +445,11 @@ impl EndRecord {
             End::Error(RunError::TasksOutstanding {
                 unfinished,
                 unobserved,
+                sources,
             }) => Self::TasksOutstanding {
                 unfinished: unfinished.clone(),
                 unobserved: unobserved.clone(),
+                sources: sources.clone(),
             },
             End::Error(RunError::Deadlock { waiting }) => Self::Deadlock {
                 waiting: waiting.clone(),
@@ -481,9 +487,11 @@ impl EndRecord {
             Self::TasksOutstanding {
                 unfinished,
                 unobserved,
+                sources,
             } => End::Error(RunError::TasksOutstanding {
                 unfinished: unfinished.clone(),
                 unobserved: unobserved.clone(),
+                sources: sources.clone(),
             }),
             Self::Deadlock { waiting } => End::Error(RunError::Deadlock {
                 waiting: waiting.clone(),
@@ -531,6 +539,38 @@ mod tests {
         let record = EndRecord::stage(&end, &mut staging)
             .expect("an uncaught end stages")
             .expect("an uncaught end is recorded");
+        let nodes = staging.into_nodes();
+        let mut decoder = GraphDecoder::new(&nodes, DecodeLimits::within_total(u64::MAX));
+        assert_eq!(record.end(&mut decoder).expect("the end reads back"), end);
+    }
+
+    /// FIG-6702, `K-TASK-020`: recording a task failure keeps the body
+    /// provenance beside its actual library spawn identity and occurrence.
+    #[test]
+    fn a_recorded_task_failure_keeps_its_source_body_separate_from_its_spawn() {
+        let task = TaskIdentity::Spawned(lash_kernel_doc::SpawnIdentity {
+            parent: Arc::new(TaskIdentity::Main),
+            site: lash_kernel_doc::Site::new(
+                lash_kernel_doc::Unit::Library(FunctionId::from_bytes([7; 32])),
+                vec![1, 1],
+            ),
+            occurrence: 3,
+        });
+        let end = End::Error(RunError::TasksOutstanding {
+            unfinished: vec![task.clone()],
+            unobserved: Vec::new(),
+            sources: vec![(
+                task,
+                lash_kernel_doc::Site::new(lash_kernel_doc::Unit::Main, vec![0, 0, 0]),
+            )],
+        });
+        let mut staging = staging(u64::MAX);
+        let record = EndRecord::stage(&end, &mut staging)
+            .expect("a task failure stages")
+            .expect("a task failure is recorded");
+        let bytes = lash_kernel_doc::graph_tokens::encode_body(&record);
+        let record: EndRecord = lash_kernel_doc::graph_tokens::decode_body(&bytes)
+            .expect("the stored task failure decodes");
         let nodes = staging.into_nodes();
         let mut decoder = GraphDecoder::new(&nodes, DecodeLimits::within_total(u64::MAX));
         assert_eq!(record.end(&mut decoder).expect("the end reads back"), end);

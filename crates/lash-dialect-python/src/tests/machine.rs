@@ -263,6 +263,7 @@ pub(super) fn ending(end: End) -> String {
         End::Error(RunError::TasksOutstanding {
             unfinished,
             unobserved,
+            ..
         }) => format!(
             "tasks outstanding: {} unfinished, {} unobserved",
             unfinished.len(),
