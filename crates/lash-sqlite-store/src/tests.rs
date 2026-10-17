@@ -1941,3 +1941,149 @@ async fn cache_release_population(delete: bool) {
         "closed sessions retain graph payloads after every reader dropped: {retained:?}"
     );
 }
+
+/// FIG-6612: a revision release drains at most `MATERIAL_RELEASE_BATCH`
+/// settled tool-intent payloads per call, only those whose owning run
+/// published a revision its session no longer retains, and every read
+/// already answers an undrained one as expired. Pending, retained-run,
+/// unfinished-run and uncorrelated payloads stay.
+#[test]
+fn settled_payload_release_is_bounded_and_takes_only_released_runs_payloads() {
+    let conn = Connection::open_in_memory().expect("SQLite");
+    for statements in crate::schema::provisioning_statements() {
+        conn.execute_batch(statements).expect("schema");
+    }
+    let batch = i64::from(lash_store_sql::session::revisions::MATERIAL_RELEASE_BATCH);
+    for (session, run, revision) in [
+        ("payloads", "released", Some(1_i64)),
+        ("payloads", "retained", Some(2)),
+        ("payloads", "unfinished", None),
+        ("other", "released", Some(1)),
+    ] {
+        match revision {
+            Some(revision) => conn.execute(
+                "INSERT INTO session_runs (session_id, run, terminal_kind, terminal_cause_json, terminal_at_ms, terminal_head_revision) VALUES (?1, ?2, 'answered', '{\"cause\":\"commands_applied\"}', 0, ?3)",
+                params![session, run, revision],
+            ),
+            None => conn.execute(
+                "INSERT INTO session_runs (session_id, run) VALUES (?1, ?2)",
+                params![session, run],
+            ),
+        }
+        .expect("run");
+    }
+    // Revision 1 was released; revision 2 is retained.
+    crate::revisions::record_revision_conn(
+        &conn,
+        &SessionId::from("payloads"),
+        2,
+        None,
+        None,
+        "{}",
+    )
+    .expect("retained revision");
+    let insert = |key: &str, session: &str, run: Option<&str>, settled: bool| {
+        conn.execute(
+            "INSERT INTO tool_intent_submissions (replay_key, owner, execution_scope_id, tool_call_id, intent_index, payload_hash, submission_json, intent_json, settlement_json, owner_session_id, owner_run, admitted_at_ms) VALUES (?1, 'session:' || ?2, 'scope', 'call', 0, 'hash', '{}', '{\"payload\":true}', ?3, ?4, ?5, 0)",
+            params![
+                key,
+                session,
+                settled.then_some("{\"settled\":true}"),
+                run.map(|_| session),
+                run
+            ],
+        )
+        .expect("submission");
+    };
+    let released = batch + 3;
+    for index in 0..released {
+        insert(
+            &format!("released-{index:04}"),
+            "payloads",
+            Some("released"),
+            true,
+        );
+    }
+    insert("pending", "payloads", Some("released"), false);
+    insert("retained", "payloads", Some("retained"), true);
+    insert("unfinished", "payloads", Some("unfinished"), true);
+    insert("uncorrelated", "payloads", None, true);
+    insert("other-session", "other", Some("released"), true);
+
+    let payloads = |pattern: &str| -> i64 {
+        conn.query_row(
+            "SELECT COUNT(*) FROM tool_intent_submissions WHERE replay_key LIKE ?1 AND intent_json IS NOT NULL",
+            [pattern],
+            |row| row.get(0),
+        )
+        .expect("count payloads")
+    };
+    let read_payload = |key: &str| -> Option<String> {
+        conn.query_row(
+            crate::turn_ingress::tool_intent_sql()
+                .shared
+                .select_by_replay_key
+                .sql(),
+            [key],
+            |row| row.get(1),
+        )
+        .expect("read the row")
+    };
+    let release = |session: Option<SessionId>| {
+        crate::revisions::release_revision_material_conn(
+            &conn,
+            session.as_ref(),
+            lash_durable::DurableInstant(0),
+        )
+        .expect("release");
+    };
+    assert_eq!(
+        read_payload("released-0000"),
+        None,
+        "a settled payload of a released run reads expired before it drains"
+    );
+
+    release(Some(SessionId::fixture("payloads")));
+    assert_eq!(payloads("released-%"), 3, "one release drains one batch");
+    let undrained: String = conn
+        .query_row(
+            "SELECT replay_key FROM tool_intent_submissions WHERE replay_key LIKE 'released-%' AND intent_json IS NOT NULL ORDER BY replay_key LIMIT 1",
+            [],
+            |row| row.get(0),
+        )
+        .expect("an undrained row");
+    assert_eq!(
+        read_payload(&undrained),
+        None,
+        "an undrained row reads expired"
+    );
+    release(Some(SessionId::fixture("payloads")));
+    assert_eq!(
+        payloads("released-%"),
+        0,
+        "the next release drains the rest"
+    );
+    for key in [
+        "pending",
+        "retained",
+        "unfinished",
+        "uncorrelated",
+        "other-session",
+    ] {
+        assert_eq!(payloads(key), 1, "`{key}` keeps its payload");
+    }
+    assert_eq!(
+        read_payload("retained").as_deref(),
+        Some("{\"payload\":true}"),
+        "a retained run's payload reads back"
+    );
+    release(None);
+    assert_eq!(
+        payloads("other-session"),
+        0,
+        "a collection over every session drains another session's released payload"
+    );
+    for key in ["pending", "retained", "unfinished", "uncorrelated"] {
+        assert_eq!(payloads(key), 1, "`{key}` still keeps its payload");
+    }
+}

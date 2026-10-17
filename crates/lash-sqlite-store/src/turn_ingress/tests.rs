@@ -132,15 +132,18 @@ fn every_turn_ingress_statement_prepares_against_the_real_schema() {
 
 #[test]
 fn every_tool_intent_statement_prepares_against_the_process_schema() {
-    // The tool-intent ledger lives in the process registry's own database, so
-    // it is rendered against that schema, unqualified, and proved against it.
-    let conn = Connection::open_in_memory().expect("in-memory database opens");
+    // The tool-intent ledger is the process registry's, rendered unqualified;
+    // its payload follows the session's retained revisions and run
+    // terminals (FIG-6612), so it is proved against the database that holds
+    // both.
+    let conn = catalog();
     conn.execute_batch(crate::schema::PROCESS_SCHEMA)
         .expect("process schema applies");
     let sql = tool_intent_sql();
     for statement in [
         sql.shared.select_by_replay_key.sql(),
-        sql.shared.update_submission.sql(),
+        sql.shared.settle.sql(),
+        sql.shared.release_settled_payloads.sql(),
         sql.sqlite.insert_new.sql(),
     ] {
         conn.prepare(statement)

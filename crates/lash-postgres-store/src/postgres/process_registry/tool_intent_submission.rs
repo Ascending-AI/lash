@@ -1,8 +1,8 @@
 use lash_core_execution::{
-    PluginError, ToolIntentExecutionOutcome, ToolIntentSubmissionAdmission,
-    ToolIntentSubmissionRecord,
+    PluginError, SessionId, ToolIntentExecutionOutcome, ToolIntentLedgerColumns,
+    ToolIntentSubmissionAdmission, ToolIntentSubmissionRecord, TurnId,
 };
-use sqlx::{PgPool, Row};
+use sqlx::{PgConnection, PgPool, Row};
 
 use crate::{plugin_sqlx_error, process_decode_error};
 
@@ -18,7 +18,7 @@ pub(super) async fn admit(
     submission: ToolIntentSubmissionRecord,
     admitted_at_ms: u64,
 ) -> Result<ToolIntentSubmissionAdmission, PluginError> {
-    submission.validate_settlement()?;
+    let columns = submission.ledger_columns()?;
     let mut tx = crate::begin_guarded(pool, fence)
         .await
         .map_err(crate::plugin_store_error)?;
@@ -39,7 +39,11 @@ pub(super) async fn admit(
             .await
             .map_err(plugin_sqlx_error)?;
     if !retired {
-        let encoded = serde_json::to_string(&submission).map_err(process_decode_error)?;
+        let (owner_session, owner_run) = columns
+            .owning_run
+            .as_ref()
+            .map(|(session, run)| (session.as_str(), run.as_str()))
+            .unzip();
         let inserted = crate::observed_sql::query(sql.tool_intents_postgres.insert_new.sql())
             .bind(&submission.identity.replay_key)
             .bind(&owner)
@@ -47,7 +51,11 @@ pub(super) async fn admit(
             .bind(submission.identity.tool_call_id.as_str())
             .bind(i64::from(submission.identity.intent_index))
             .bind(&submission.payload_hash)
-            .bind(encoded)
+            .bind(&columns.envelope_json)
+            .bind(columns.intent_json.as_deref())
+            .bind(columns.settlement_json.as_deref())
+            .bind(owner_session)
+            .bind(owner_run)
             .bind(crate::support::clamp_epoch_ms(admitted_at_ms))
             .execute(crate::observed_sql::executor(&mut **tx))
             .await
@@ -57,13 +65,8 @@ pub(super) async fn admit(
             return Ok(ToolIntentSubmissionAdmission::Admitted);
         }
     }
-    let row = crate::observed_sql::query(sql.tool_intents.select_by_replay_key.sql())
-        .bind(&submission.identity.replay_key)
-        .fetch_optional(crate::observed_sql::executor(&mut **tx))
-        .await
-        .map_err(plugin_sqlx_error)?;
-    let admission = match row {
-        Some(row) => ToolIntentSubmissionAdmission::Existing(Box::new(decode(row.get(0))?)),
+    let admission = match read(&mut tx, &submission.identity.replay_key).await? {
+        Some(existing) => ToolIntentSubmissionAdmission::Existing(Box::new(existing)),
         None if retired => ToolIntentSubmissionAdmission::Reclaimed,
         None => return Err(plugin_sqlx_error(sqlx::Error::RowNotFound)),
     };
@@ -81,31 +84,25 @@ pub(super) async fn complete(
     let mut tx = crate::begin_guarded(pool, fence)
         .await
         .map_err(crate::plugin_store_error)?;
-    let row = crate::observed_sql::query(
-        crate::turn_ingress::turn_ingress_sql()
-            .tool_intents_postgres
-            .select_by_replay_key_for_update
-            .sql(),
-    )
-    .bind(replay_key)
-    .fetch_one(crate::observed_sql::executor(&mut **tx))
-    .await
-    .map_err(plugin_sqlx_error)?;
-    let mut submission = decode(row.get(0))?;
-    let changed = submission.complete(at_ms, outcome)?;
-    if changed {
-        let encoded = serde_json::to_string(&submission).map_err(process_decode_error)?;
-        crate::observed_sql::query(
-            crate::turn_ingress::turn_ingress_sql()
-                .tool_intents
-                .update_submission
-                .sql(),
-        )
+    let sql = crate::turn_ingress::turn_ingress_sql();
+    crate::observed_sql::query(sql.tool_intents_postgres.lock_by_replay_key.sql())
         .bind(replay_key)
-        .bind(encoded)
-        .execute(crate::observed_sql::executor(&mut **tx))
+        .fetch_one(crate::observed_sql::executor(&mut **tx))
         .await
         .map_err(plugin_sqlx_error)?;
+    let mut submission = read(&mut tx, replay_key)
+        .await?
+        .ok_or_else(|| plugin_sqlx_error(sqlx::Error::RowNotFound))?;
+    let changed = submission.complete(at_ms, outcome)?;
+    if changed {
+        let settlement =
+            serde_json::to_string(&submission.settlement).map_err(process_decode_error)?;
+        crate::observed_sql::query(sql.tool_intents.settle.sql())
+            .bind(replay_key)
+            .bind(settlement)
+            .execute(crate::observed_sql::executor(&mut **tx))
+            .await
+            .map_err(plugin_sqlx_error)?;
     }
     tx.commit().await.map_err(plugin_sqlx_error)?;
     Ok(lash_core_execution::store::StoreTransition {
@@ -114,6 +111,46 @@ pub(super) async fn complete(
     })
 }
 
-fn decode(encoded: String) -> Result<ToolIntentSubmissionRecord, PluginError> {
-    serde_json::from_str(&encoded).map_err(process_decode_error)
+/// The submission recorded under `replay_key`, its payload expired when its
+/// owning run's revision is no longer retained.
+async fn read(
+    conn: &mut PgConnection,
+    replay_key: &str,
+) -> Result<Option<ToolIntentSubmissionRecord>, PluginError> {
+    let row = crate::observed_sql::query(
+        crate::turn_ingress::turn_ingress_sql()
+            .tool_intents
+            .select_by_replay_key
+            .sql(),
+    )
+    .bind(replay_key)
+    .fetch_optional(crate::observed_sql::executor(&mut *conn))
+    .await
+    .map_err(plugin_sqlx_error)?;
+    let Some(row) = row else {
+        return Ok(None);
+    };
+    let owning_run = match (
+        row.get::<Option<String>, _>(3),
+        row.get::<Option<String>, _>(4),
+    ) {
+        (Some(session), Some(run)) => Some((
+            SessionId::parse(session).map_err(owning_run_corrupt)?,
+            TurnId::parse(run).map_err(owning_run_corrupt)?,
+        )),
+        _ => None,
+    };
+    ToolIntentSubmissionRecord::from_ledger_columns(ToolIntentLedgerColumns {
+        envelope_json: row.get(0),
+        intent_json: row.get(1),
+        settlement_json: row.get(2),
+        owning_run,
+    })
+    .map(Some)
+}
+
+fn owning_run_corrupt(error: impl std::fmt::Display) -> PluginError {
+    PluginError::Session(format!(
+        "failed to decode a tool-intent submission's owning run: {error}"
+    ))
 }

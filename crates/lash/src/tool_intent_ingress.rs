@@ -667,14 +667,15 @@ impl ToolIntentIngress {
     > {
         let kind = intent.kind();
         let record = lash_core::ToolIntentSubmissionRecord::new(identity.clone(), intent.clone())
+            .map(|record| self.owned(record))
             .map_err(|error| {
-            RealizationFailure::Command(
-                kind,
-                lash_core::PluginError::Session(format!(
-                    "failed to hash tool-intent submission: {error}"
-                )),
-            )
-        })?;
+                RealizationFailure::Command(
+                    kind,
+                    lash_core::PluginError::Session(format!(
+                        "failed to hash tool-intent submission: {error}"
+                    )),
+                )
+            })?;
         let registry = self
             .process_registry()
             .map_err(|error| RealizationFailure::Command(kind, error))?;
@@ -746,6 +747,20 @@ impl ToolIntentIngress {
         ))
     }
 
+    /// `record` made under this ingress's logical run, when its scope is a
+    /// turn of the session: the run whose revision then retains the
+    /// submission's payload once it settles (FIG-6612). Any other scope names
+    /// no run, and the payload stays while the row lives.
+    fn owned(
+        &self,
+        record: lash_core::ToolIntentSubmissionRecord,
+    ) -> lash_core::ToolIntentSubmissionRecord {
+        match self.scope.logical_run() {
+            Some(run) => record.owned_by_run(run),
+            None => record,
+        }
+    }
+
     /// Retain `outcome` in the durable tool-intent submission ledger under
     /// `identity`, claiming the row first when [`Self::admit_submission`]
     /// could not. The first recorded outcome is kept: a redelivery that
@@ -759,7 +774,7 @@ impl ToolIntentIngress {
     ) -> Result<(), lash_core::PluginError> {
         let registry = self.process_registry()?;
         let submission = lash_core::ToolIntentSubmissionRecord::new(identity.clone(), submitted)
-            .map(|record| trace.offered(record))
+            .map(|record| trace.offered(self.owned(record)))
             .map_err(|error| {
                 lash_core::PluginError::Runtime(lash_core::RuntimeError::new(
                     lash_core::RuntimeErrorCode::RecordEncodingFailed,

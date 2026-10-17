@@ -220,7 +220,7 @@ struct IngressAdmissionEnginePlugin;
 
 impl lash_core::plugin::SessionPlugin for IngressAdmissionEnginePlugin {
     fn id(&self) -> &'static str {
-        "ingress-admission-engine-plugin"
+        "ingress-admission-engine-factory"
     }
 }
 impl IngressAdmissionEnginePlugin {
@@ -231,8 +231,8 @@ impl IngressAdmissionEnginePlugin {
     }
 }
 
-struct IngressAdmissionEngineFactory {
-    defaults: Option<serde_json::Value>,
+pub struct IngressAdmissionEngineFactory {
+    pub defaults: Option<serde_json::Value>,
 }
 
 impl lash_core::plugin::PluginFactory for IngressAdmissionEngineFactory {

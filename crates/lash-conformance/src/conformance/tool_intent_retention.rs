@@ -1,6 +1,8 @@
 //! FIG-1509 / ADR 0067 / ADR 0023: the host tool-intent submission ledger is
 //! reclaimed by the retained-evidence lever only after its owner session is
-//! durably deleted, and a reclaimed owner cannot submit again.
+//! durably deleted, and a reclaimed owner cannot submit again. A submission
+//! whose scope names no run keeps its payload while its row lives, through
+//! the host's collection too (FIG-6612).
 
 use super::session_store_factory::session_store_request;
 use super::*;
@@ -74,7 +76,10 @@ fn bound(committed_before_epoch_ms: u64) -> crate::RetentionBound {
 #[derive(Debug, PartialEq, Eq)]
 enum Answer {
     Admitted,
-    Existing { outcome_recorded: bool },
+    Existing {
+        outcome_recorded: bool,
+        payload_retained: bool,
+    },
     Reclaimed,
 }
 
@@ -96,6 +101,7 @@ async fn readmit(
         crate::ToolIntentSubmissionAdmission::Admitted => Answer::Admitted,
         crate::ToolIntentSubmissionAdmission::Existing(existing) => Answer::Existing {
             outcome_recorded: existing.execution_outcome().is_some(),
+            payload_retained: existing.intent.retained().is_some(),
         },
         crate::ToolIntentSubmissionAdmission::Reclaimed => Answer::Reclaimed,
     }
@@ -157,6 +163,12 @@ where
             .expect("retain the first outcome");
     }
 
+    // The host's collection releases revisions, and with them the payloads
+    // their runs own; a submission that names no run keeps its payload.
+    open.sessions
+        .gc_unreachable()
+        .await
+        .expect("the host collection completes");
     // A live owner's rows are its replay fence, whatever their age.
     assert_eq!(
         reclaim(&open, u64::MAX).await,
@@ -176,7 +188,8 @@ where
     assert_eq!(
         readmit(&open, &dead_completed).await,
         Answer::Existing {
-            outcome_recorded: true
+            outcome_recorded: true,
+            payload_retained: true,
         },
         "a row inside the bound still answers its first outcome"
     );
@@ -186,7 +199,8 @@ where
     assert_eq!(
         readmit(&before, &dead_pending).await,
         Answer::Existing {
-            outcome_recorded: false
+            outcome_recorded: false,
+            payload_retained: true,
         },
         "an unreclaimed pending row survives a reopen"
     );
@@ -198,7 +212,8 @@ where
     assert_eq!(
         readmit(&before, &live).await,
         Answer::Existing {
-            outcome_recorded: true
+            outcome_recorded: true,
+            payload_retained: true,
         },
         "the live owner's fence survives the sweep that reclaimed its neighbour"
     );
@@ -242,7 +257,8 @@ where
     assert_eq!(
         readmit(&after, &live).await,
         Answer::Existing {
-            outcome_recorded: true
+            outcome_recorded: true,
+            payload_retained: true,
         },
         "the live owner's row survives a reopen"
     );

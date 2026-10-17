@@ -7,8 +7,9 @@ lash_store_sql::statements! {
         /// replay key: a replayed submission is the point of the ledger.
         insert_new = "INSERT OR IGNORE INTO tool_intent_submissions (
                  replay_key, owner, execution_scope_id, tool_call_id,
-                 intent_index, payload_hash, submission_json, admitted_at_ms
-             ) VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8)";
+                 intent_index, payload_hash, submission_json, intent_json,
+                 settlement_json, owner_session_id, owner_run, admitted_at_ms
+             ) VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8, ?9, ?10, ?11, ?12)";
 
         /// The durably deleted session owners in JSON array `?1` whose rows
         /// the retained-evidence lever reclaims: fence each, keeping an

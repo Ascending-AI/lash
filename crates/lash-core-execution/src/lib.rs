@@ -817,10 +817,11 @@ pub(crate) use store::{
 pub use tool_intent::{
     CancelProcessIntent, GetDefinitionIntent, PublishDefinitionIntent, StartProcessIntent,
     TOOL_INTENT_MAX_CANONICAL_BYTES, TOOL_INTENT_MAX_COUNT, TOOL_INTENT_MAX_PER_KIND,
-    TOOL_INTENT_PROTOCOL_V3, ToolAttemptOutcome, ToolIntent, ToolIntentLimits,
-    ToolIntentSubmissionAdmission, ToolIntentSubmissionOutcome, ToolIntentSubmissionRecord,
-    ToolIntentSubmissionSettlement, ToolIntents, ToolOutcomeDone, derive_tool_intent_identity,
-    derive_tool_intent_identity_under, rederive_tool_intent_identity,
+    TOOL_INTENT_PROTOCOL_V3, ToolAttemptOutcome, ToolIntent, ToolIntentLedgerColumns,
+    ToolIntentLimits, ToolIntentSubmissionAdmission, ToolIntentSubmissionOutcome,
+    ToolIntentSubmissionPayload, ToolIntentSubmissionRecord, ToolIntentSubmissionSettlement,
+    ToolIntents, ToolOutcomeDone, derive_tool_intent_identity, derive_tool_intent_identity_under,
+    rederive_tool_intent_identity,
 };
 /// The process wiring a process host hands the runtime for a tool call
 /// running inside a durable process.

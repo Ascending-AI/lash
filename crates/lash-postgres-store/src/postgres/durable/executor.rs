@@ -243,6 +243,7 @@ pub(super) fn entries() -> Vec<&'static Entry> {
         &head_commit::PRUNE,
         &retention::RELEASE_INPUT_BODIES,
         &retention::RELEASE_COMMAND_PAYLOADS,
+        &retention::RELEASE_TOOL_INTENT_PAYLOADS,
         &head_commit::SETTLE_COMMAND,
         &head_commit::SETTLE_INPUT,
         &head_commit::RELEASE_INPUT,

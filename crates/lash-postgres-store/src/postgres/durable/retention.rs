@@ -1,6 +1,7 @@
 //! Per-revision settled material released beside revision pruning: settled
 //! prompt audits, and the bodies of settled inputs and the payloads of
-//! applied commands (FIG-6607), each one bounded page per release.
+//! applied commands (FIG-6607), and settled host tool-intent payloads
+//! (FIG-6612), each one bounded page per release.
 use lash_sansio::SessionId;
 use lash_store_sql::session::revisions::MATERIAL_RELEASE_BATCH;
 use sqlx::PgConnection;
@@ -20,6 +21,13 @@ pub(super) static RELEASE_INPUT_BODIES: Entry = Entry::new(
 /// The payloads of applied commands whose applying revision is released.
 pub(super) static RELEASE_COMMAND_PAYLOADS: Entry = Entry::new(
     || &ingress().queued_batches.release_settled_payloads,
+    &[Ty::Text, Ty::Int],
+    Shape::Exec,
+);
+/// Settled host tool-intent payloads whose owning run's revision is
+/// released.
+pub(super) static RELEASE_TOOL_INTENT_PAYLOADS: Entry = Entry::new(
+    || &ingress().tool_intents.release_settled_payloads,
     &[Ty::Text, Ty::Int],
     Shape::Exec,
 );
@@ -56,6 +64,7 @@ pub(crate) async fn release_material_batch(
     for statement in [
         &ingress().pending_inputs.release_settled_bodies,
         &ingress().queued_batches.release_settled_payloads,
+        &ingress().tool_intents.release_settled_payloads,
     ] {
         let rows = crate::observed_sql::query(statement.sql())
             .bind(session.map(SessionId::as_str))
@@ -97,5 +106,6 @@ pub(super) fn release_material_steps(session: &str) -> Vec<Step> {
         Step::any(&END_RELEASED_INGRESS, vec![Value::text(session)]),
         Step::any(&RELEASE_ATTACHMENT_EDGES, page()),
         Step::any(&DEQUEUE_ATTACHMENT_RELEASES, page()),
+        Step::any(&RELEASE_TOOL_INTENT_PAYLOADS, page()),
     ]
 }

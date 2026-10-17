@@ -62,7 +62,8 @@ mod prompts;
 /// A page releases settled prompt audits and, at most
 /// [`MATERIAL_RELEASE_BATCH`](lash_store_sql::session::revisions::MATERIAL_RELEASE_BATCH)
 /// each, the bodies of settled inputs and the payloads of applied commands
-/// whose revision is no longer retained (FIG-6607).
+/// whose revision is no longer retained (FIG-6607), and settled host
+/// tool-intent payloads whose owning run's revision is released (FIG-6612).
 pub(crate) fn release_material_batch(
     tx: &Connection,
     session: Option<&lash_sansio::SessionId>,
@@ -89,6 +90,7 @@ pub(crate) fn release_material_batch(
             rusqlite::params![session.map(lash_sansio::SessionId::as_str)],
         )?;
     }
+    released += crate::turn_ingress::release_settled_tool_intent_payloads(tx, session)?;
     Ok(released)
 }
 #[path = "../durable_reads.rs"]

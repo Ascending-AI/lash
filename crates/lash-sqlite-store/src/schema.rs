@@ -725,6 +725,9 @@ CREATE TABLE IF NOT EXISTS abandoned_consumer_holds (
 CREATE INDEX IF NOT EXISTS idx_abandoned_consumer_holds_owner
     ON abandoned_consumer_holds(owner_scope_kind, owner_scope_id);
 
+-- A submission keeps its replay envelope and first settlement while the row
+-- lives; its first payload follows the revision its owning run published
+-- (FIG-6612) and is cleared only once the submission settled.
 CREATE TABLE IF NOT EXISTS tool_intent_submissions (
     replay_key          TEXT PRIMARY KEY,
     owner               TEXT NOT NULL,
@@ -733,10 +736,19 @@ CREATE TABLE IF NOT EXISTS tool_intent_submissions (
     intent_index        INTEGER NOT NULL,
     payload_hash        TEXT NOT NULL,
     submission_json     TEXT NOT NULL,
-    admitted_at_ms      INTEGER NOT NULL
+    intent_json         TEXT,
+    settlement_json     TEXT,
+    owner_session_id    TEXT,
+    owner_run           TEXT,
+    admitted_at_ms      INTEGER NOT NULL,
+    CONSTRAINT ck_tool_intent_submissions_payload CHECK (intent_json IS NOT NULL OR settlement_json IS NOT NULL),
+    CONSTRAINT ck_tool_intent_submissions_owning_run CHECK ((owner_session_id IS NULL) = (owner_run IS NULL))
 );
 CREATE INDEX IF NOT EXISTS idx_tool_intent_submissions_scope
     ON tool_intent_submissions(owner, execution_scope_id, intent_index);
+CREATE INDEX IF NOT EXISTS idx_tool_intent_submissions_settled_payloads
+    ON tool_intent_submissions(owner_session_id, owner_run)
+    WHERE intent_json IS NOT NULL AND settlement_json IS NOT NULL;
 
 -- The owners whose submission ledger the retained-evidence lever reclaimed
 -- (FIG-1509): each is a durably deleted session, and the fence refuses every

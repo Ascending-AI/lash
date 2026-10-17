@@ -155,6 +155,24 @@ pub(crate) fn tool_intent_sql() -> &'static ToolIntentSql {
     &TOOL_INTENT_SQL
 }
 
+/// Drain one page of settled host tool-intent payloads of `session` (of
+/// every session when `None`) whose owning run's revision its session no
+/// longer retains, answering how many were drained (FIG-6612). Reads
+/// already answer them as expired; this releases their bytes.
+pub(crate) fn release_settled_tool_intent_payloads(
+    tx: &rusqlite::Connection,
+    session: Option<&lash_sansio::SessionId>,
+) -> rusqlite::Result<usize> {
+    crate::conn::cached_execute(
+        tx,
+        tool_intent_sql().shared.release_settled_payloads.sql(),
+        rusqlite::params![
+            session.map(lash_sansio::SessionId::as_str),
+            i64::from(lash_store_sql::session::revisions::MATERIAL_RELEASE_BATCH),
+        ],
+    )
+}
+
 #[cfg(test)]
 #[path = "turn_ingress/tests.rs"]
 mod tests;

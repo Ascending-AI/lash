@@ -1,5 +1,7 @@
 use super::*;
 use crate::tests::host::ingress::*;
+use lash_core::ProcessRegistry;
+use lash_sansio::ProcessId;
 
 /// FIG-3070: a start committed before its submission outcome is retained
 /// reports the store's coalescing verdict when ingress realizes it again.
@@ -169,4 +171,413 @@ async fn equivalent_recorded_start_has_the_same_identity_across_routes() -> Resu
         "the shared identity is the payload's admission"
     );
     Ok(())
+}
+
+/// A start of the ingress engine owned by `session`, declaring `payload`.
+fn engine_start_for(session: &SessionId, payload: serde_json::Value) -> lash_core::ToolIntent {
+    lash_core::ToolIntent::StartProcess(Box::new(lash_core::StartProcessIntent {
+        owner: crate::RuntimeOwner::Session(session.clone()),
+        declaration: lash_core::ProcessStartDeclaration::engine(
+            INGRESS_ENGINE_KIND,
+            payload,
+            lash_core::testing::declared_launch_for_testing(
+                lash_core::testing::fixture_engine_launch(),
+            ),
+            lash_core::ProcessOriginator::host(),
+            lash_core::Lifetime::Detached,
+        ),
+    }))
+}
+
+/// A cancel of `process` owned by `session`.
+fn cancel_for(session: &SessionId, process: &ProcessId) -> lash_core::ToolIntent {
+    lash_core::ToolIntent::CancelProcess(lash_core::CancelProcessIntent {
+        owner: crate::RuntimeOwner::Session(session.clone()),
+        process_id: process.clone(),
+    })
+}
+
+/// What the ledger holds under `key`: the first writer's row, read by a
+/// resubmission the ledger answers without realizing anything.
+async fn ledger_row(
+    registry: &Arc<dyn ProcessRegistry>,
+    key: &crate::tools::ToolIntentIngressKey,
+) -> Result<lash_core::ToolIntentSubmissionRecord> {
+    let probe = lash_core::ToolIntentSubmissionRecord::new(
+        key.identity().clone(),
+        cancel_for(
+            &SessionId::fixture("ledger-probe-session"),
+            &ProcessId::fixture("ledger-probe"),
+        ),
+    )
+    .expect("the probe hashes");
+    match registry.admit_tool_intent_submission(probe).await? {
+        lash_core::ToolIntentSubmissionAdmission::Existing(row) => Ok(*row),
+        other => panic!("the ledger answers the first writer: {other:?}"),
+    }
+}
+
+/// Whether `row` still holds its first payload.
+fn payload_retained(row: &lash_core::ToolIntentSubmissionRecord) -> bool {
+    match &row.intent {
+        crate::tools::ToolIntentSubmissionPayload::Retained(_) => true,
+        crate::tools::ToolIntentSubmissionPayload::Expired => false,
+    }
+}
+
+/// The first outcome a submission answered.
+fn first_outcome(
+    outcome: &crate::tools::ToolIntentIngressOutcome,
+) -> lash_core::ToolIntentExecutionOutcome {
+    match outcome {
+        crate::tools::ToolIntentIngressOutcome::Admitted {
+            outcome,
+            replayed: false,
+        } => outcome.clone(),
+        other => panic!("the first submission is admitted: {other:?}"),
+    }
+}
+
+/// `outcome` is the replay of `first`.
+fn assert_replays(
+    outcome: &crate::tools::ToolIntentIngressOutcome,
+    first: &lash_core::ToolIntentExecutionOutcome,
+    what: &str,
+) {
+    assert_eq!(
+        outcome,
+        &crate::tools::ToolIntentIngressOutcome::Admitted {
+            outcome: first.clone(),
+            replayed: true,
+        },
+        "{what} replays the first outcome"
+    );
+}
+
+/// SETTLED-TOOL-INTENT-PAYLOAD-RETENTION (FIG-6612): a settled host
+/// submission's payload follows its turn's revision under the session's
+/// retention, and its replay envelope does not.
+///
+/// Under each policy a turn's submissions settle (an executed start, an
+/// executed cancel, a refusal), one stays pending, a pinned later turn
+/// settles one and a session operation settles an uncorrelated one. Once
+/// the session moves past the first turn's unpinned revision, the first
+/// turn's settled payloads are typed expired while every other payload is
+/// retained; identical replays answer the first outcomes, a changed cancel
+/// and a kind mismatch still refuse, a changed start still answers the
+/// process its trusted key minted, the refusal stays the first settlement,
+/// and nothing realizes again.
+#[tokio::test(flavor = "multi_thread", worker_threads = 4)]
+async fn settled_tool_intent_payloads_follow_session_retention() -> Result<()> {
+    let backend = sqlite_memory_store_backend().await;
+    let registry = backend.process_registry();
+    let release = Arc::new(tokio::sync::Notify::new());
+    let calls = Arc::new(AtomicUsize::new(0));
+    let core = explicit_ephemeral_facets(LashCore::standard_builder(backend))
+        .serve_test_llm_profile(
+            crate::tests::host::send::scripted_provider(Arc::clone(&release), Arc::clone(&calls)),
+            mock_llm_profile_spec(),
+        )
+        .plugin(Arc::new(IngressAdmissionEngineFactory { defaults: None }))
+        .build(crate::tests::host::runtime_lease_owner())?;
+    core.host_artifacts()
+        .publish_process_env(
+            &lash_core::HostArtifactPin::mint(),
+            &lash_core::testing::process_env_fixture(),
+        )
+        .await?;
+    let law = PayloadRetentionLaw {
+        core,
+        registry,
+        release,
+        calls,
+    };
+    for (name, retention) in [
+        ("head-only", lash_core::Retention::HeadOnly),
+        (
+            "last-turn",
+            lash_core::Retention::LastTurns(std::num::NonZeroU32::MIN),
+        ),
+        ("until-gc", lash_core::Retention::UntilGc),
+    ] {
+        Box::pin(law.under(name, retention)).await?;
+    }
+    law.core.shutdown().await?;
+    Ok(())
+}
+
+/// The core a payload retention law runs its sessions on: its provider holds
+/// a turn sent [`crate::tests::host::send::HELD`] until `release` is notified.
+struct PayloadRetentionLaw {
+    core: LashCore,
+    registry: Arc<dyn ProcessRegistry>,
+    release: Arc<tokio::sync::Notify>,
+    calls: Arc<AtomicUsize>,
+}
+
+impl PayloadRetentionLaw {
+    async fn under(&self, name: &str, retention: lash_core::Retention) -> Result<()> {
+        let Self {
+            core,
+            registry,
+            release,
+            calls,
+        } = self;
+        let session_id = crate::SessionId::parse(format!("intent-retention-{name}"))
+            .expect("nonblank host identity");
+        let run = |label: &str| {
+            crate::TurnId::parse(format!("{name}-{label}")).expect("nonblank host identity")
+        };
+        let session = created_session(core, session_id.clone())
+            .await
+            .open()
+            .await?;
+        session.set_retention(retention).await?;
+
+        // The first turn's ledger, written while the turn runs: a large
+        // executed start, an executed cancel, a refusal, and a claim nothing
+        // realizes.
+        let called = calls.load(Ordering::SeqCst);
+        let held = session
+            .send(crate::TurnInput::text(crate::tests::host::send::HELD))
+            .id(run("first"))
+            .await?;
+        crate::tests::host::send::reaches(calls, called + 1, "the first turn runs").await;
+        let first = core.tool_intents(
+            session_id.clone(),
+            lash_core::ExecutionScope::turn(session_id.clone(), run("first")),
+        )?;
+        let declaration = serde_json::json!({"program": "known", "body": "x".repeat(16 * 1024)});
+        let start_key = first.key("start", 0).expect("key");
+        let started = first_outcome(
+            &first
+                .submit(
+                    start_key.clone(),
+                    engine_start_for(&session_id, declaration.clone()),
+                )
+                .await,
+        );
+        let process = match &started {
+            lash_core::ToolIntentExecutionOutcome::Executed {
+                realized: lash_core::ToolIntentRealized::StartProcess(handle),
+                ..
+            } => handle.process_id.clone(),
+            other => panic!("the start executes: {other:?}"),
+        };
+        let cancel_key = first.key("cancel", 0).expect("key");
+        let cancelled = first_outcome(
+            &first
+                .submit(cancel_key.clone(), cancel_for(&session_id, &process))
+                .await,
+        );
+        assert!(
+            matches!(
+                cancelled,
+                lash_core::ToolIntentExecutionOutcome::Executed { .. }
+            ),
+            "the cancel executes: {cancelled:?}"
+        );
+        let missing = ProcessId::fixture(&format!("{name}-never-registered"));
+        let refused_key = first.key("refused", 0).expect("key");
+        let refused = first_outcome(
+            &first
+                .submit(refused_key.clone(), cancel_for(&session_id, &missing))
+                .await,
+        );
+        assert!(
+            matches!(
+                refused,
+                lash_core::ToolIntentExecutionOutcome::Refused { .. }
+            ),
+            "a cancel of no process is refused: {refused:?}"
+        );
+        let pending_key = first.key("pending", 0).expect("key");
+        let pending = lash_core::ToolIntentSubmissionRecord::new(
+            pending_key.identity().clone(),
+            cancel_for(&session_id, &missing),
+        )
+        .expect("the claim hashes")
+        .owned_by_run(run("first"));
+        assert!(matches!(
+            registry.admit_tool_intent_submission(pending).await?,
+            lash_core::ToolIntentSubmissionAdmission::Admitted
+        ));
+        let refused_row = ledger_row(registry, &refused_key).await?;
+        release.notify_one();
+        held.output().await?;
+
+        // A session operation's submission names no turn.
+        let operation = core.tool_intents(
+            session_id.clone(),
+            lash_core::ExecutionScope::session_operation(session_id.clone(), format!("{name}-op")),
+        )?;
+        let uncorrelated_key = operation.key("uncorrelated", 0).expect("key");
+        first_outcome(
+            &operation
+                .submit(uncorrelated_key.clone(), cancel_for(&session_id, &missing))
+                .await,
+        );
+
+        // A pinned later turn settles one more.
+        session
+            .send(crate::TurnInput::text("second"))
+            .id(run("second"))
+            .output()
+            .await?;
+        session.pin(lash_core::Target::Turn(run("second"))).await?;
+        let second = core.tool_intents(
+            session_id.clone(),
+            lash_core::ExecutionScope::turn(session_id.clone(), run("second")),
+        )?;
+        let pinned_key = second.key("pinned", 0).expect("key");
+        first_outcome(
+            &second
+                .submit(pinned_key.clone(), cancel_for(&session_id, &missing))
+                .await,
+        );
+        session
+            .send(crate::TurnInput::text("third"))
+            .id(run("third"))
+            .output()
+            .await?;
+        if retention == lash_core::Retention::UntilGc {
+            assert!(
+                payload_retained(&ledger_row(registry, &start_key).await?),
+                "until_gc keeps the first turn's payload until the host collects"
+            );
+            core.store_factory
+                .gc_unreachable()
+                .await
+                .expect("the host collection completes");
+        }
+        let processes = registered_process_count(registry).await?;
+
+        for (key, outcome, kind, what) in [
+            (
+                &start_key,
+                &started,
+                lash_core::ToolIntentKind::StartProcess,
+                "the executed start",
+            ),
+            (
+                &cancel_key,
+                &cancelled,
+                lash_core::ToolIntentKind::CancelProcess,
+                "the executed cancel",
+            ),
+            (
+                &refused_key,
+                &refused,
+                lash_core::ToolIntentKind::CancelProcess,
+                "the refusal",
+            ),
+        ] {
+            let row = ledger_row(registry, key).await?;
+            assert!(
+                !payload_retained(&row),
+                "{name}: {what}'s payload is expired with its turn's revision"
+            );
+            assert_eq!(
+                (row.kind(), row.execution_outcome().as_ref()),
+                (kind, Some(outcome)),
+                "{name}: {what} keeps its kind and first outcome"
+            );
+        }
+        for (key, what) in [
+            (&pending_key, "a pending claim"),
+            (&pinned_key, "a pinned turn's submission"),
+            (&uncorrelated_key, "an uncorrelated submission"),
+        ] {
+            assert!(
+                payload_retained(&ledger_row(registry, key).await?),
+                "{name}: {what} keeps its payload"
+            );
+        }
+
+        // The envelope answers every replay exactly as before.
+        assert_replays(
+            &first
+                .submit(
+                    start_key.clone(),
+                    engine_start_for(&session_id, declaration.clone()),
+                )
+                .await,
+            &started,
+            "an identical start",
+        );
+        assert_replays(
+            &first
+                .submit(
+                    start_key.clone(),
+                    engine_start_for(&session_id, serde_json::json!({"program": "known"})),
+                )
+                .await,
+            &started,
+            "a changed start under its trusted key",
+        );
+        assert_replays(
+            &first
+                .submit(cancel_key.clone(), cancel_for(&session_id, &process))
+                .await,
+            &cancelled,
+            "an identical cancel",
+        );
+        assert_eq!(
+            first
+                .submit(cancel_key.clone(), cancel_for(&session_id, &missing))
+                .await,
+            crate::tools::ToolIntentIngressOutcome::Refused {
+                refusal: crate::tools::ToolIntentIngressRefusal::DuplicateIdentity {
+                    kind: lash_core::ToolIntentKind::CancelProcess,
+                },
+            },
+            "{name}: a changed cancel still refuses"
+        );
+        assert_eq!(
+            first
+                .submit(
+                    cancel_key.clone(),
+                    engine_start_for(&session_id, declaration.clone()),
+                )
+                .await,
+            crate::tools::ToolIntentIngressOutcome::Refused {
+                refusal: crate::tools::ToolIntentIngressRefusal::IdentityBoundToDifferentIntent {
+                    recorded_kind: lash_core::ToolIntentKind::CancelProcess,
+                    submitted_kind: lash_core::ToolIntentKind::StartProcess,
+                },
+            },
+            "{name}: a kind mismatch still refuses"
+        );
+        assert_eq!(
+            first
+                .submit(refused_key.clone(), cancel_for(&session_id, &missing))
+                .await,
+            crate::tools::ToolIntentIngressOutcome::Admitted {
+                outcome: refused.clone(),
+                replayed: false,
+            },
+            "{name}: the refused identity is refused again, never admitted fresh"
+        );
+        let after = ledger_row(registry, &refused_key).await?;
+        assert_eq!(
+            (
+                after.settlement.as_ref().map(|settlement| settlement.at_ms),
+                after.execution_outcome()
+            ),
+            (
+                refused_row
+                    .settlement
+                    .as_ref()
+                    .map(|settlement| settlement.at_ms),
+                refused_row.execution_outcome()
+            ),
+            "{name}: the first refusal stays the settlement"
+        );
+        assert_eq!(
+            registered_process_count(registry).await?,
+            processes,
+            "{name}: no replay realizes again"
+        );
+        Ok(())
+    }
 }

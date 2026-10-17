@@ -561,8 +561,8 @@ pub mod tools {
     pub use lash_core::{ToolBinding, ToolDefinitionBindingExt};
     /// Engine-owned tool-intent admission records used by process-registry integrators.
     pub use lash_core::{
-        ToolIntentSubmissionAdmission, ToolIntentSubmissionOutcome, ToolIntentSubmissionRecord,
-        ToolIntentSubmissionSettlement,
+        ToolIntentLedgerColumns, ToolIntentSubmissionAdmission, ToolIntentSubmissionOutcome,
+        ToolIntentSubmissionPayload, ToolIntentSubmissionRecord, ToolIntentSubmissionSettlement,
     };
     #[cfg(feature = "rlm")]
     pub use lash_protocol_rlm::DeferredResolutionError;

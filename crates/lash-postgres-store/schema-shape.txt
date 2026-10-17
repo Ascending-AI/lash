@@ -554,9 +554,13 @@ table lash_tool_intent_submissions
   column admitted_at_ms bigint not-null
   column execution_scope_id text not-null
   column intent_index bigint not-null
+  column intent_json text nullable
   column owner text not-null
+  column owner_run text nullable
+  column owner_session_id text nullable
   column payload_hash text not-null
   column replay_key text not-null
+  column settlement_json text nullable
   column submission_json text not-null
   column tool_call_id text not-null
   primary-key (replay_key)

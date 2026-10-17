@@ -740,6 +740,9 @@ CREATE TABLE IF NOT EXISTS lash_parent_end_plans (
 );
 
 
+-- A submission keeps its replay envelope and first settlement while the row
+-- lives; its first payload follows the revision its owning run published
+-- (FIG-6612) and is cleared only once the submission settled.
 CREATE TABLE IF NOT EXISTS lash_tool_intent_submissions (
     replay_key TEXT PRIMARY KEY,
     owner TEXT NOT NULL,
@@ -748,10 +751,19 @@ CREATE TABLE IF NOT EXISTS lash_tool_intent_submissions (
     intent_index BIGINT NOT NULL,
     payload_hash TEXT NOT NULL,
     submission_json TEXT NOT NULL,
-    admitted_at_ms BIGINT NOT NULL
+    intent_json TEXT,
+    settlement_json TEXT,
+    owner_session_id TEXT,
+    owner_run TEXT,
+    admitted_at_ms BIGINT NOT NULL,
+    CONSTRAINT ck_lash_tool_intent_submissions_payload CHECK (intent_json IS NOT NULL OR settlement_json IS NOT NULL),
+    CONSTRAINT ck_lash_tool_intent_submissions_owning_run CHECK ((owner_session_id IS NULL) = (owner_run IS NULL))
 );
 CREATE INDEX IF NOT EXISTS idx_lash_tool_intent_submissions_scope
     ON lash_tool_intent_submissions(owner, execution_scope_id, intent_index);
+CREATE INDEX IF NOT EXISTS idx_lash_tool_intent_submissions_settled_payloads
+    ON lash_tool_intent_submissions(owner_session_id, owner_run)
+    WHERE intent_json IS NOT NULL AND settlement_json IS NOT NULL;
 
 -- The owners whose submission ledger the retained-evidence lever reclaimed
 -- (FIG-1509): each is a durably deleted session, and the fence refuses every
@@ -1334,9 +1346,9 @@ DECLARE
     v_answer JSONB;
     v_frame TEXT;
 BEGIN
-    -- Generated from this build's statements (registry c3709ec36d78550c); a call
+    -- Generated from this build's statements (registry 0ed1198eedc989bd); a call
     -- built from others is refused, as is any isolation but read committed.
-    IF p_registry IS DISTINCT FROM 'c3709ec36d78550c'
+    IF p_registry IS DISTINCT FROM '0ed1198eedc989bd'
         OR current_setting('transaction_isolation') <> 'read committed' THEN
         RAISE EXCEPTION 'lash_owner_commit: registry or isolation refused' USING ERRCODE = 'LX000';
     END IF;
@@ -2348,6 +2360,32 @@ BEGIN
                    )
                  LIMIT ((v_p->>1)::BIGINT)
              );
+            GET DIAGNOSTICS v_rows = ROW_COUNT;
+            IF v_rows > 0 THEN v_first := '{}'::JSONB; END IF;
+        WHEN 'tool_intent_submission.release_settled_payloads' THEN
+            WITH scoped AS (
+                 SELECT replay_key, owner_session_id, owner_run FROM lash_tool_intent_submissions
+                 WHERE owner_session_id = (v_p->>0)
+                   AND intent_json IS NOT NULL AND settlement_json IS NOT NULL
+                 UNION ALL
+                 SELECT replay_key, owner_session_id, owner_run FROM lash_tool_intent_submissions
+                 WHERE (v_p->>0) IS NULL AND owner_session_id IS NOT NULL
+                   AND intent_json IS NOT NULL AND settlement_json IS NOT NULL
+             ), released AS (
+                 SELECT scoped.replay_key FROM scoped
+                 JOIN lash_session_runs AS ended
+                   ON ended.session_id = scoped.owner_session_id
+                  AND ended.run = scoped.owner_run
+                 WHERE ended.terminal_head_revision IS NOT NULL
+                   AND NOT EXISTS (
+                       SELECT 1 FROM lash_session_revisions AS revision
+                       WHERE revision.session_id = ended.session_id
+                         AND revision.head_revision = ended.terminal_head_revision
+                   )
+                 ORDER BY scoped.replay_key
+                 LIMIT ((v_p->>1)::BIGINT)
+             ) UPDATE lash_tool_intent_submissions SET intent_json = NULL
+             WHERE replay_key IN (SELECT replay_key FROM released);
             GET DIAGNOSTICS v_rows = ROW_COUNT;
             IF v_rows > 0 THEN v_first := '{}'::JSONB; END IF;
         WHEN 'queued_work_batch.settle_command' THEN
