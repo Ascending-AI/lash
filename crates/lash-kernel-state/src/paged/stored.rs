@@ -1,21 +1,29 @@
-//! Whole objects in and out of the heap: the heap's side of the arena's
-//! projection (seam D, swap 2.4(a)). The machine decodes a proxy's one
-//! chunk with [`PagedHeap::read_object`] and writes a dirty arena object
-//! back with [`PagedHeap::store_object`], at projection points and before
-//! an exact refinement.
+//! Objects in and out of the heap: the heap's side of the arena's
+//! projection (seam D). The machine opens a proxy's head with
+//! [`PagedHeap::read_head_of`], decodes one chunk of a large list or table
+//! with [`PagedHeap::read_list_rows`] or [`PagedHeap::read_table_rows`],
+//! and writes back at projection points and before an exact refinement: a
+//! fresh object whole with [`PagedHeap::store_object`], an object the heap
+//! already holds by its dirty cards with [`PagedHeap::store_cards`], so a
+//! point write re-encodes one leaf and its index path.
 //!
-//! A store replaces the entity's head whole. Its accounting is the heap's
-//! own (`ObjectHead::cost`) and is not reserved again: the machine held the
-//! arena's growth ([`PagedHeap::hold_growth`]) before it made it, and the
-//! store spends that hold.
+//! A store's accounting is the heap's own (`ObjectHead::cost`) and is not
+//! reserved again: the machine held the arena's growth
+//! ([`PagedHeap::hold_growth`]) before it made it, and the store spends
+//! that hold.
 
 use super::directory::{Body, Entry, ObjectHead, Ordinal, ordinal_key};
-use super::heap_impl::{PagedHeap, census_fault};
+use super::heap_impl::{PagedHeap, census_fault, normal_bytes};
 use super::tree::{Cell, Tree};
+use super::working::Taken;
 use super::{HeapWriteError, NameRef, ObjectKind, SiteRef};
-use lash_kernel_doc::heap::{EntityId, FamilyId, HeapFault, LogicalBytes, PageValue};
+use lash_kernel_doc::heap::{EntityId, FamilyId, HeapFault, LogicalBytes, NormalKey, PageValue};
 
-/// One object's whole contents, in page form.
+/// The values one card of a list holds, and the insertion sequences one
+/// card of a table spans: the granularity of the arena's dirty worklist.
+pub const CARD: u64 = 64;
+
+/// A fresh object's whole contents, in page form.
 #[derive(Clone, Debug)]
 pub enum StoredObject {
     List(Vec<PageValue>),
@@ -34,70 +42,163 @@ pub enum StoredObject {
     Variable(PageValue),
 }
 
+/// What an object's head says before any of its rows are read: what
+/// opening a proxy reads.
+#[derive(Clone, Debug)]
+pub enum StoredHead {
+    List {
+        len: u64,
+        cost: u64,
+    },
+    Table {
+        kind: ObjectKind,
+        len: u64,
+        next: u64,
+        cost: u64,
+    },
+    /// A closure or a shared variable, whose head is its whole contents.
+    Small(StoredObject),
+}
+
+/// A stored table entry: its sequence, key and value.
+pub type StoredEntry = (u64, PageValue, PageValue);
+
+/// The dirty cards of an object the heap already holds, in page form: each
+/// card number with the contents it holds now.
+#[derive(Clone, Debug)]
+pub enum StoredCards {
+    /// A list of `len` values; card `c` holds positions `c * CARD ..`, up
+    /// to the length.
+    List {
+        len: u64,
+        cards: Vec<(u64, Vec<PageValue>)>,
+    },
+    /// A table of `len` entries whose next entry takes sequence `next`;
+    /// card `c` holds the entries whose sequences are `c * CARD ..`.
+    Table {
+        len: u64,
+        next: u64,
+        cards: Vec<(u64, Vec<StoredEntry>)>,
+    },
+}
+
+fn malformed(problem: &str) -> HeapFault {
+    HeapFault::Malformed(problem.into())
+}
+
 impl PagedHeap {
-    /// The whole contents of `entity`, or `None` when the heap holds no
-    /// such entity.
+    /// The head of `entity` without its rows, or `None` when the heap
+    /// holds no such entity.
     ///
     /// # Errors
     ///
     /// The page port's faults.
-    pub fn read_object(&self, entity: EntityId) -> Result<Option<StoredObject>, HeapFault> {
-        let Some(head) = self.head(entity)? else {
+    pub fn read_head_of(&self, entity: EntityId) -> Result<Option<StoredHead>, HeapFault> {
+        let Some(head) = self.current_head(entity)? else {
             return Ok(None);
         };
         let access = self.pages();
-        Ok(Some(match head.body {
-            Body::List { rows, .. } => {
-                let mut values = Vec::with_capacity(rows.len() as usize);
-                rows.visit(access, &mut |_, value| {
-                    values.push(value.clone());
-                    true
-                })?;
-                StoredObject::List(values)
-            }
+        let cost = head.cost();
+        Ok(Some(match &head.body {
+            Body::List { rows, .. } => StoredHead::List {
+                len: rows.len(),
+                cost,
+            },
             Body::Table {
                 kind, rows, next, ..
-            } => {
-                let mut entries = Vec::with_capacity(rows.len() as usize);
-                let mut malformed = false;
-                rows.visit(access, &mut |key, entry| {
-                    let Ok(bytes) = <[u8; 8]>::try_from(key) else {
-                        malformed = true;
-                        return false;
-                    };
-                    entries.push((
-                        u64::from_be_bytes(bytes),
-                        entry.key.clone(),
-                        entry.value.clone(),
-                    ));
-                    true
-                })?;
-                if malformed {
-                    return Err(HeapFault::Malformed("a table row key is no ordinal".into()));
-                }
-                StoredObject::Table {
-                    kind,
-                    entries,
-                    next,
-                }
-            }
+            } => StoredHead::Table {
+                kind: *kind,
+                len: rows.len(),
+                next: *next,
+                cost,
+            },
             Body::Closure { site, captures } => {
                 let mut held = Vec::with_capacity(captures.len() as usize);
                 captures.visit(access, &mut |_, capture| {
                     held.push(capture.clone());
                     true
                 })?;
-                StoredObject::Closure {
-                    site: Box::new(site),
+                StoredHead::Small(StoredObject::Closure {
+                    site: Box::new(site.clone()),
                     captures: held,
-                }
+                })
             }
-            Body::Variable(value) => StoredObject::Variable(value),
+            Body::Variable(value) => StoredHead::Small(StoredObject::Variable(value.clone())),
         }))
     }
 
-    /// Replaces the contents of `entity` with `object`, or installs it
-    /// when the heap does not hold it yet.
+    /// Values `start ..` of the list `entity`, at most `count`: one chunk,
+    /// read by rank through its index path.
+    ///
+    /// # Errors
+    ///
+    /// The page port's faults, and an entity that is no list.
+    pub fn read_list_rows(
+        &self,
+        entity: EntityId,
+        start: u64,
+        count: u64,
+    ) -> Result<Vec<PageValue>, HeapFault> {
+        self.read_head(entity, |head| {
+            let Some(Body::List { rows, .. }) = head.map(|head| &head.body) else {
+                return Err(malformed("a list chunk names no list"));
+            };
+            let end = start.saturating_add(count).min(rows.len());
+            let mut values = Vec::with_capacity(end.saturating_sub(start) as usize);
+            for rank in start..end {
+                let (_, value) = rows
+                    .rank_get(rank, self.pages())?
+                    .ok_or_else(|| malformed("a list rank is missing"))?;
+                values.push(value);
+            }
+            Ok(values)
+        })
+    }
+
+    /// The entries of the table `entity` whose insertion sequences are in
+    /// `from .. to`, in order, each with its sequence: one chunk, read
+    /// through its index path.
+    ///
+    /// # Errors
+    ///
+    /// The page port's faults, and an entity that is no table.
+    pub fn read_table_rows(
+        &self,
+        entity: EntityId,
+        from: u64,
+        to: u64,
+    ) -> Result<Vec<StoredEntry>, HeapFault> {
+        self.read_head(entity, |head| {
+            let Some(Body::Table { rows, .. }) = head.map(|head| &head.body) else {
+                return Err(malformed("a table chunk names no table"));
+            };
+            table_rows(rows, self.pages(), from, to)
+        })
+    }
+
+    /// The insertion sequence of the entry the table `entity` keys by
+    /// `normal`, if it has one: one path of its key index.
+    ///
+    /// # Errors
+    ///
+    /// The page port's faults, and an entity that is no table.
+    pub fn table_lookup(
+        &self,
+        entity: EntityId,
+        normal: &NormalKey,
+    ) -> Result<Option<u64>, HeapFault> {
+        self.read_head(entity, |head| {
+            let Some(Body::Table { lookup, .. }) = head.map(|head| &head.body) else {
+                return Err(malformed("a key lookup names no table"));
+            };
+            Ok(lookup
+                .get(&normal_bytes(normal.clone()), self.pages())?
+                .map(|Ordinal(seq)| seq))
+        })
+    }
+
+    /// Installs the fresh object `entity` whole, or replaces the contents
+    /// of a closure or a shared variable.
     ///
     /// # Errors
     ///
@@ -108,10 +209,171 @@ impl PagedHeap {
         object: StoredObject,
     ) -> Result<(), HeapWriteError> {
         let head = self.stored_head(entity, object)?;
-        let after = head.cost();
-        let closure = head.kind() == ObjectKind::Closure;
-        let tasks = head.task_edges();
         let taken = self.take_working(entity)?;
+        let (after, closure, tasks) = (
+            head.cost(),
+            head.kind() == ObjectKind::Closure,
+            head.task_edges(),
+        );
+        if taken.is_some() {
+            self.edit_working(entity, |current, _| {
+                *current = head;
+                Ok(())
+            })?;
+        } else {
+            self.insert_working(entity, head)?;
+        }
+        self.settle(entity, taken, after, closure, tasks)
+    }
+
+    /// Writes the dirty cards of a list or a table the heap holds into its
+    /// rows: each card's rows are rewritten, and rows a card no longer
+    /// holds are removed, so only the leaves the cards address and their
+    /// index paths change. A table's key index changes only for entries
+    /// added or removed.
+    ///
+    /// # Errors
+    ///
+    /// The page port's faults, a census fault, and cards that disagree
+    /// with the object's length.
+    pub fn store_cards(
+        &mut self,
+        entity: EntityId,
+        cards: StoredCards,
+    ) -> Result<(), HeapWriteError> {
+        let Some(base) = self.current_head(entity)? else {
+            return Err(malformed("stored cards name no object").into());
+        };
+        let edit = match cards {
+            StoredCards::List { len, cards } => {
+                let Body::List { rows, next } = &base.body else {
+                    return Err(malformed("list cards name another object").into());
+                };
+                if *next != rows.len() {
+                    return Err(malformed("a list's rows are not positional").into());
+                }
+                let mut writes = Vec::new();
+                let mut removes = Vec::new();
+                for (card, values) in cards {
+                    let start = card * CARD;
+                    let held = values.len() as u64;
+                    for (at, value) in values.into_iter().enumerate() {
+                        writes.push((start + at as u64, self.canonical(value)?));
+                    }
+                    for position in (start + held).max(len)..(start + CARD).min(rows.len()) {
+                        removes.push(position);
+                    }
+                }
+                Edit::List {
+                    len,
+                    writes,
+                    removes,
+                }
+            }
+            StoredCards::Table { len, next, cards } => {
+                let Body::Table {
+                    rows,
+                    next: base_next,
+                    ..
+                } = &base.body
+                else {
+                    return Err(malformed("table cards name another object").into());
+                };
+                let mut writes = Vec::new();
+                let mut removes = Vec::new();
+                let mut inserts = Vec::new();
+                for (card, entries) in cards {
+                    let held: Vec<u64> = entries.iter().map(|(seq, _, _)| *seq).collect();
+                    let base_rows = table_rows(rows, self.pages(), card * CARD, (card + 1) * CARD)?;
+                    for (seq, key, _) in base_rows {
+                        if held.binary_search(&seq).is_err() {
+                            removes.push((seq, self.key(&key)?));
+                        }
+                    }
+                    for (seq, key, value) in entries {
+                        let key = self.canonical(key)?;
+                        if seq >= *base_next {
+                            inserts.push((seq, self.key(&key)?));
+                        }
+                        writes.push((seq, key, self.canonical(value)?));
+                    }
+                }
+                Edit::Table {
+                    len,
+                    next,
+                    writes,
+                    removes,
+                    inserts,
+                }
+            }
+        };
+        drop(base);
+        let taken = self.take_working(entity)?;
+        let (after, tasks) = self.edit_working(entity, |head, access| {
+            match (&mut head.body, edit) {
+                (
+                    Body::List { rows, next },
+                    Edit::List {
+                        len,
+                        writes,
+                        removes,
+                    },
+                ) => {
+                    for position in removes {
+                        rows.remove(&ordinal_key(position), access)?;
+                    }
+                    for (position, value) in writes {
+                        rows.write(ordinal_key(position), value, access)?;
+                    }
+                    if rows.len() != len {
+                        return Err(malformed("a list's dirty cards miss a change"));
+                    }
+                    *next = len;
+                }
+                (
+                    Body::Table {
+                        lookup, rows, next, ..
+                    },
+                    Edit::Table {
+                        len,
+                        next: arena_next,
+                        writes,
+                        removes,
+                        inserts,
+                    },
+                ) => {
+                    for (seq, normal) in removes {
+                        rows.remove(&ordinal_key(seq), access)?;
+                        lookup.remove(&normal, access)?;
+                    }
+                    for (seq, key, value) in writes {
+                        rows.write(ordinal_key(seq), Entry { key, value }, access)?;
+                    }
+                    for (seq, normal) in inserts {
+                        lookup.write(normal, Ordinal(seq), access)?;
+                    }
+                    if rows.len() != len || lookup.len() != len {
+                        return Err(malformed("a table's dirty cards miss a change"));
+                    }
+                    *next = arena_next;
+                }
+                _ => return Err(malformed("stored cards changed kind")),
+            }
+            Ok((head.cost(), head.task_edges()))
+        })?;
+        self.settle(entity, taken, after, false, tasks)
+    }
+
+    /// Settles the census and the populations after the head of `entity`
+    /// replaced the one `taken` describes with one costing `after`.
+    fn settle(
+        &mut self,
+        entity: EntityId,
+        taken: Option<Taken>,
+        after: u64,
+        closure: bool,
+        tasks: u64,
+    ) -> Result<(), HeapWriteError> {
         let before = taken.as_ref().map_or(0, |taken| taken.cost);
         let (old_closures, old_tasks) = taken
             .as_ref()
@@ -122,21 +384,13 @@ impl PagedHeap {
             .closure_entities
             .checked_sub(old_closures)
             .and_then(|v| v.checked_add(u64::from(closure)))
-            .ok_or_else(|| HeapFault::Malformed("closure population overflow".into()))?;
+            .ok_or_else(|| malformed("closure population overflow"))?;
         self.population.task_edges = self
             .population
             .task_edges
             .checked_sub(old_tasks)
             .and_then(|v| v.checked_add(tasks))
-            .ok_or_else(|| HeapFault::Malformed("task-edge population overflow".into()))?;
-        if taken.is_some() {
-            self.edit_working(entity, |current, _| {
-                *current = head;
-                Ok(())
-            })?;
-        } else {
-            self.insert_working(entity, head)?;
-        }
+            .ok_or_else(|| malformed("task-edge population overflow"))?;
         self.header = None;
         let credit = self.spend_held(after.saturating_sub(before));
         if let Some(census) = &mut self.census {
@@ -183,14 +437,10 @@ impl PagedHeap {
                 for (seq, key, value) in entries {
                     let key = self.canonical(key)?;
                     let value = self.canonical(value)?;
-                    let normal = self.normal_key(&key)?.ok_or_else(|| {
-                        HeapFault::Malformed("a stored entry's key is not a legal key".into())
-                    })?;
-                    lookup.write(
-                        super::heap_impl::normal_bytes(normal),
-                        Ordinal(seq),
-                        self.pages(),
-                    )?;
+                    let normal = self
+                        .normal_key(&key)?
+                        .ok_or_else(|| malformed("a stored entry's key is not a legal key"))?;
+                    lookup.write(normal_bytes(normal), Ordinal(seq), self.pages())?;
                     rows.write(ordinal_key(seq), Entry { key, value }, self.pages())?;
                 }
                 Body::Table {
@@ -218,6 +468,46 @@ impl PagedHeap {
             family: entity.family,
         })
     }
+}
+
+/// What [`PagedHeap::store_cards`] changes in a head, with every value in
+/// page form and every key normalized before the head is edited.
+enum Edit {
+    List {
+        len: u64,
+        writes: Vec<(u64, PageValue)>,
+        removes: Vec<u64>,
+    },
+    Table {
+        len: u64,
+        next: u64,
+        writes: Vec<StoredEntry>,
+        removes: Vec<(u64, Vec<u8>)>,
+        inserts: Vec<(u64, Vec<u8>)>,
+    },
+}
+
+/// The rows of a table whose sequences are in `from .. to`.
+fn table_rows(
+    rows: &Tree<Entry>,
+    access: &super::tree::Access<'_>,
+    from: u64,
+    to: u64,
+) -> Result<Vec<StoredEntry>, HeapFault> {
+    let mut out = Vec::new();
+    let mut after = from.checked_sub(1).map(ordinal_key);
+    while let Some((key, entry)) = rows.after(after.as_deref(), access)? {
+        let seq = u64::from_be_bytes(
+            <[u8; 8]>::try_from(key.as_slice())
+                .map_err(|_| malformed("a table row key is no ordinal"))?,
+        );
+        if seq >= to {
+            break;
+        }
+        out.push((seq, entry.key, entry.value));
+        after = Some(key);
+    }
+    Ok(out)
 }
 
 use lash_kernel_doc::heap::PageReader as _;

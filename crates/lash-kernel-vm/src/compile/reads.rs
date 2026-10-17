@@ -11,7 +11,7 @@ use lash_kernel_doc::arena::ArenaHandle;
 use lash_kernel_doc::heap::NormalKey;
 use lash_kernel_doc::{NativeError, Value};
 use lash_kernel_exec::SiteIx;
-use lash_kernel_state::arena::{Arena, text_key};
+use lash_kernel_state::arena::{Arena, Place, text_key};
 
 use super::Layout;
 
@@ -54,7 +54,9 @@ impl Field {
 
 /// The value of `record` under the key whose text is `name` and whose
 /// normal form `key` gives, the cached `slot` tried first, and the slot
-/// the value was found at.
+/// the value was found at. A slot is a place in the record's first chunk,
+/// which holds every field of a record of at most 64 fields; an entry in
+/// a later chunk of a larger one is found through its index each time.
 pub(crate) fn find(
     arena: &Arena,
     record: ArenaHandle,
@@ -62,17 +64,17 @@ pub(crate) fn find(
     name: &str,
     key: impl FnOnce() -> Result<NormalKey, NativeError>,
 ) -> Result<(Option<Value>, Option<usize>), NativeError> {
-    if let Some(slot) = slot {
-        let entries = arena.entries(record)?;
-        let at = slot * 2;
-        if let Some(pair) = entries.get(at..at + 2)
-            && keyed(arena, &pair[0], name)
-        {
-            return Ok((Some(pair[1]), Some(slot)));
-        }
+    if let Some(slot) = slot
+        && let Some(pair) = arena.table_at(record, Place { chunk: 0, at: slot })?
+        && keyed(arena, &pair[0], name)
+    {
+        return Ok((Some(pair[1]), Some(slot)));
     }
     let found = arena.table_find(record, &key()?)?;
-    Ok((found.map(|(_, value)| value), found.map(|(at, _)| at)))
+    Ok((
+        found.map(|(_, value)| value),
+        found.and_then(|(place, _)| (place.chunk == 0).then_some(place.at)),
+    ))
 }
 
 /// Whether a record entry's key is the text `name`: the cache's guard.

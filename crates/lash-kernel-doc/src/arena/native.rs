@@ -13,7 +13,10 @@
 //!
 //! A read that reaches a cold chunk does not fault inside the call: it
 //! answers [`Retry::Cold`], the machine decodes that chunk (and, doubling,
-//! the ones after it) and runs the call again. A reservation past the
+//! the ones after it) and runs the call again. A sequence's or a text's
+//! view faults only the chunks the call reads, so a slice of a large
+//! object decodes the chunks it addresses; a table's view is resident
+//! whole, since its key index answers for every key. A reservation past the
 //! machine's headroom answers [`Retry::Room`]: the machine collects and
 //! runs it again, or ends the run at the memory bound. Natives are pure,
 //! so a call run again does what it did, and the nursery of the abandoned
@@ -182,7 +185,7 @@ impl<'call> Args<'call> {
         };
         match self.body(object)? {
             Body::List(sequence) | Body::Tuple(sequence) => {
-                warm(object, &sequence.chunks)?;
+                proxy(object, sequence)?;
                 Ok(Some(SequenceView { object, sequence }))
             }
             _ => Err(NativeError::Malformed(
@@ -358,9 +361,21 @@ impl<'call> Args<'call> {
     }
 }
 
-/// Answers [`Retry::Cold`] for a mutable object or a tuple with a cold
-/// chunk: while every object is one chunk (swap 2.4(a)), a cold one is a
-/// proxy whose length the arena learns when it decodes it.
+/// Answers [`Retry::Cold`] for a proxy whose head the machine has not
+/// opened: a cold placeholder of no length, which the machine gives its
+/// length and its chunks before the call reads any.
+#[inline]
+fn proxy(object: ArenaHandle, sequence: &Sequence) -> Result<(), NativeError> {
+    match sequence.chunks.first() {
+        Some(Chunk::Cold { .. }) if sequence.len == 0 => {
+            Err(Retry::Cold { object, chunk: 0 }.into())
+        }
+        _ => Ok(()),
+    }
+}
+
+/// Answers [`Retry::Cold`] for a table with a cold chunk: a table's view
+/// reads it resident whole.
 #[inline]
 fn warm(object: ArenaHandle, chunks: &[Chunk<Vec<Value>>]) -> Result<(), NativeError> {
     match chunks
@@ -403,8 +418,8 @@ impl<'call> SequenceView<'call> {
         if index >= self.sequence.len {
             return Ok(None);
         }
-        // One chunk holds every value (swap 2.4(a)); chunk `k` of a chunked
-        // sequence holds indexes `k * CHUNK ..`.
+        // A sequence in one chunk holds every value there; chunk `k` of a
+        // chunked one holds indexes `k * CHUNK ..`.
         let (chunk, at) = match self.sequence.chunks.len() {
             1 => (0, index),
             _ => (

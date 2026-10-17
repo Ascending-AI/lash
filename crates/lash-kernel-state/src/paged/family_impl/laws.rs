@@ -1,6 +1,6 @@
 //! S8 semantic and counted-work laws over the authenticated kernel page port.
 use crate::paged::family_impl::FrozenBase;
-use crate::paged::laws::heap::{Source, fresh, seal};
+use crate::paged::laws::heap::{Source, fresh, seal, write_list};
 use crate::paged::*;
 use lash_kernel_doc::Name;
 use lash_kernel_doc::heap::*;
@@ -117,7 +117,7 @@ fn aliases_across_cells_keep_distinct_objects_distinct() {
     let alias = list(get(&next, "alias"));
     assert_eq!(a, alias);
     assert_ne!(a, b);
-    next.list_write(a, 0, int(9)).expect("write");
+    write_list(&mut next, a, 0..1, |_| int(9)).expect("write");
     assert!(
         matches!(next.list_get(alias, 0).expect("alias"), Some(PageValue::Int(IntRef::Inline(n))) if n == 9.into())
     );
@@ -157,11 +157,11 @@ fn a_fork_isolates_later_mutations() {
         .expect("fork census");
     parent.adopt(&session).expect("parent adopt");
     fork.adopt(&session).expect("fork adopt");
-    parent.list_write(id, 0, int(2)).expect("parent write");
+    write_list(&mut parent, id, 0..1, |_| int(2)).expect("parent write");
     assert!(
         matches!(fork.list_get(id, 0).expect("fork"), Some(PageValue::Int(IntRef::Inline(n))) if n == 1.into())
     );
-    fork.list_write(id, 0, int(3)).expect("fork write");
+    write_list(&mut fork, id, 0..1, |_| int(3)).expect("fork write");
     assert!(
         matches!(parent.list_get(id, 0).expect("parent"), Some(PageValue::Int(IntRef::Inline(n))) if n == 2.into())
     );
@@ -173,12 +173,12 @@ fn a_frozen_capture_ignores_later_live_writes() {
         .allocate_object(ObjectInit::List(vec![int(1)]))
         .expect("live");
     let frozen = heap.freeze(&PageValue::List(live), true).expect("freeze");
-    heap.list_write(live, 0, int(2)).expect("live write");
+    write_list(&mut heap, live, 0..1, |_| int(2)).expect("live write");
     let capture = list(heap.instantiate(&frozen).expect("capture"));
     assert!(
         matches!(heap.list_get(capture, 0).expect("get"), Some(PageValue::Int(IntRef::Inline(n))) if n == 1.into())
     );
-    heap.list_write(capture, 0, int(3)).expect("capture write");
+    write_list(&mut heap, capture, 0..1, |_| int(3)).expect("capture write");
     let other = list(heap.instantiate(&frozen).expect("other capture"));
     assert!(
         matches!(heap.list_get(other, 0).expect("get"), Some(PageValue::Int(IntRef::Inline(n))) if n == 1.into())
@@ -202,8 +202,8 @@ fn a_swept_child_never_resurrects_while_its_family_stays_live() {
     );
     assert_eq!(root.family, child.family);
     assert_ne!(root.ordinal, child.ordinal);
-    heap.list_write(child, 0, int(2)).expect("override child");
-    heap.list_write(root, 0, int(3)).expect("detach child");
+    write_list(&mut heap, child, 0..1, |_| int(2)).expect("override child");
+    write_list(&mut heap, root, 0..1, |_| int(3)).expect("detach child");
     heap.sweep(&SweepSet {
         entities: vec![child],
         ended_task_results: Vec::new(),
@@ -241,7 +241,7 @@ fn a_lazy_result_length_read_instantiates_nothing() {
     let first = list(heap.list_get(result, 0).expect("first").expect("present"));
     let second = list(heap.list_get(result, 1).expect("second").expect("present"));
     assert_ne!(first, second);
-    heap.list_write(first, 0, int(7)).expect("edit first");
+    write_list(&mut heap, first, 0..1, |_| int(7)).expect("edit first");
     assert!(
         matches!(heap.list_get(second, 0).expect("second unchanged"), Some(PageValue::Int(IntRef::Inline(n))) if n == 1.into())
     );
@@ -293,7 +293,7 @@ fn carry_classification_walks_the_union_and_propagates_through_cycles() {
             PageValue::Closure(closure),
         ]))
         .expect("b");
-    heap.list_write(a, 0, PageValue::List(b)).expect("cycle");
+    write_list(&mut heap, a, 0..1, |_| PageValue::List(b)).expect("cycle");
     let root = bindings(
         &mut heap,
         (0..100).map(|i| binding(&format!("alias{i}"), PageValue::List(a))),
@@ -408,7 +408,7 @@ fn freezing_rejects_cycles_and_runtime_identities() {
     let id = heap
         .allocate_object(ObjectInit::List(Vec::new()))
         .expect("list");
-    heap.list_write(id, 0, PageValue::List(id)).expect("cycle");
+    write_list(&mut heap, id, 0..1, |_| PageValue::List(id)).expect("cycle");
     for value in [
         PageValue::List(id),
         PageValue::Task(lash_kernel_doc::TaskId(99)),
@@ -457,7 +457,7 @@ fn a_paged_frozen_error_keeps_its_receiving_family_at_every_immutable_depth() {
     let a = child(&heap, a);
     let b = child(&heap, b);
     assert_ne!(a.family, b.family);
-    heap.list_write(a, 0, int(2)).expect("edit");
+    write_list(&mut heap, a, 0..1, |_| int(2)).expect("edit");
     seal(&mut heap);
     let mut reopened = PagedHeap::open_header(
         heap.sealed_root().expect("header"),

@@ -54,7 +54,9 @@ pub mod kernel_internals {
         pub use crate::paged::tree::*;
     }
     pub use crate::paged::heap_impl::PagedHeap;
-    pub use crate::paged::stored::{StoredObject, pages as stored_pages, reads as page_reads};
+    pub use crate::paged::stored::{
+        CARD, StoredCards, StoredHead, StoredObject, pages as stored_pages, reads as page_reads,
+    };
 }
 use lash_kernel_doc::EffectId;
 use lash_kernel_doc::graph_tokens::{TokenCodec, TokenError, TokenReader, TokenWriter};

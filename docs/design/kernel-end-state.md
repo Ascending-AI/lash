@@ -381,8 +381,8 @@ and `heap::Value`'s `EntityId` operands (with 2.4(a)).
   keeps the set of objects with dirty chunks (cards). The worklist says which
   chunks; the canonical walk (§C) says in what order they are projected. A
   point write to a million-element list decodes and encodes one chunk plus its
-  index path (`heap_impl.rs`, `list_write`, today walks and rewrites the row
-  tree).
+  index path: a based list or table is projected by its dirty 64-wide cards
+  (`StoredCards`, `store_cards`; FIG-6726).
 - **Materialization happens outside native calls.** A view that reaches a cold
   chunk answers `Retry::Cold`; the machine decodes that chunk, and, doubling,
   the ones after it in the same object, then runs the call again (§F). A scan

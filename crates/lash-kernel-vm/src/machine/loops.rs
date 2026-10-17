@@ -10,7 +10,7 @@
 use std::sync::Arc;
 
 use lash_kernel_doc::arena::ArenaHandle;
-use lash_kernel_doc::{NativeError, TaskId, Value};
+use lash_kernel_doc::{NativeError, Retry, TaskId, Value};
 use lash_kernel_state::arena::Arena;
 use lash_kernel_state::paged::TableCursor;
 
@@ -116,6 +116,25 @@ impl TextCursor {
 }
 
 impl Cursor {
+    /// The cold chunk the loop's own cursor reads at its next step, if
+    /// any: what the machine decodes before it steps.
+    pub(super) fn cold(&self, arena: &Arena) -> Option<(ArenaHandle, u32)> {
+        let read = match self {
+            Self::List(items, position) | Self::Tuple(items, position) => {
+                arena.item(*items, *position as u64).map(|_| ())
+            }
+            Self::Map(id, last) | Self::Set(id, last) => {
+                arena.table_next(*id, last.map(|last| last.0)).map(|_| ())
+            }
+            Self::Text(cursor) => arena.semantics().text(&cursor.text()).map(|_| ()),
+            Self::Opening | Self::Driver(_) => Ok(()),
+        };
+        match read {
+            Err(NativeError::Retry(Retry::Cold { object, chunk })) => Some((object, chunk)),
+            _ => None,
+        }
+    }
+
     /// The loop's own cursor steps to its next element, or is exhausted
     /// (`K-ITER-002`, `K-ITER-003`). A cursor a protocol steps has none.
     pub(super) fn step(&mut self, arena: &mut Arena) -> Result<Option<Value>, NativeError> {
@@ -372,12 +391,17 @@ impl KernelMachine {
         exe: &Executable,
     ) -> Status {
         self.charge(self.costs.loop_test)?;
-        // What the loop walks is decoded before its position is read.
-        if let Some(Control::For { cursor, .. }) = self.frame(task)?.control.last()
-            && !matches!(cursor, Cursor::Driver(_))
-            && let Some(handle) = cursor.walked().and_then(|walked| walked.handle())
-        {
-            self.warm(handle)?;
+        // What the loop's next step reads is decoded before it steps.
+        let arena = std::rc::Rc::clone(&self.arena);
+        loop {
+            let cold = match self.frame(task)?.control.last() {
+                Some(Control::For { cursor, .. }) => cursor.cold(&arena.borrow()),
+                _ => None,
+            };
+            match cold {
+                Some((object, chunk)) => self.warm(object, chunk)?,
+                None => break,
+            }
         }
         // Borrowed by field, so that the loop's position can be read
         // against the arena.

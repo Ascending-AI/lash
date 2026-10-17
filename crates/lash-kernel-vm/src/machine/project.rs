@@ -24,12 +24,19 @@ use std::sync::Arc;
 
 use lash_kernel_doc::arena::ShortText;
 use lash_kernel_doc::arena::{ArenaHandle, Body, Bytes, Chunk, ErrorBody, LongText, Sequence};
-use lash_kernel_doc::heap::{EntityId, HeapFault, Identity, PageValue, Payload, TextRef};
+use lash_kernel_doc::heap::{
+    EntityId, HeapFault, Identity, PageReader as _, PageValue, Payload, TextRef,
+};
 use lash_kernel_doc::heap_values::text_summary;
 use lash_kernel_doc::{Integer, Site, Timestamp, Value};
-use lash_kernel_state::arena::{Arena, ProxyKind, Summary, cold_text};
+use lash_kernel_state::arena::{
+    Arena, CARD, ColdChunk, PayloadPart, ProxyKind, Summary, cold_text,
+};
+use lash_kernel_state::kernel_internals::payload;
 use lash_kernel_state::kernel_internals::tree::Access;
-use lash_kernel_state::kernel_internals::{PagedHeap, StoredObject, page_reads, stored_pages};
+use lash_kernel_state::kernel_internals::{
+    PagedHeap, StoredCards, StoredHead, StoredObject, page_reads, stored_pages,
+};
 use lash_kernel_state::paged::{HeapWriteError, NameRef, ObjectKind, SiteRef};
 
 use crate::compile::{CodeId, Executable};
@@ -367,9 +374,12 @@ pub(crate) fn closure_code(exe: &Executable, site: &Site) -> Result<CodeId, Heap
         .ok_or_else(|| malformed("a closure names no admitted code"))
 }
 
-/// Decodes the cold object `handle` whole: a proxy's contents from the
-/// heap by its identity, or an immutable's chunks from its pages. Its
-/// members are admitted, as proxies where they are objects.
+/// Decodes what a read of chunk `chunk` of the cold object `handle`
+/// needs: a proxy's head (a small object whole, a large list or table as
+/// cold chunks), else that chunk and, doubling with each decode of the
+/// object since the last statement boundary, the cold chunks after it. An
+/// object whose chunks are then all resident is joined into one chunk.
+/// Members are admitted, as proxies where they are objects.
 ///
 /// # Errors
 ///
@@ -379,26 +389,86 @@ pub(crate) fn materialize(
     heap: &PagedHeap,
     exe: &Executable,
     handle: ArenaHandle,
+    chunk: u32,
 ) -> Result<(), HeapFault> {
-    if !arena.needs_decode(handle).map_err(arena_fault)? {
-        return Ok(());
-    }
-    let pages = heap.pages();
     let facts = arena.facts(handle).map_err(arena_fault)?;
     let Some(entity) = facts.entity else {
-        let page = facts
-            .page
-            .get()
-            .cloned()
-            .ok_or_else(|| malformed("a cold immutable has no page form"))?;
-        return warm_immutable(arena, pages, handle, &page);
+        let page = facts.page.get().cloned();
+        let count = arena.decode_count(handle).map_err(arena_fault)?;
+        return match page {
+            Some(page) => warm_immutable(arena, heap.pages(), handle, &page, chunk, count),
+            None if arena.needs_decode(handle).map_err(arena_fault)? => {
+                Err(malformed("a cold immutable has no page form"))
+            }
+            None => Ok(()),
+        };
     };
-    let object = heap
-        .read_object(entity)?
+    if facts.cold {
+        return open(arena, heap, exe, handle, entity);
+    }
+    let pages = heap.pages();
+    let count = arena.decode_count(handle).map_err(arena_fault)?;
+    for (at, cold) in arena
+        .cold_chunks(handle, chunk, count)
+        .map_err(arena_fault)?
+    {
+        match cold {
+            ColdChunk::List { start, count } => {
+                let values = heap
+                    .read_list_rows(entity, start, count)?
+                    .iter()
+                    .map(|value| admit(arena, pages, value))
+                    .collect::<Result<Vec<_>, _>>()?;
+                arena
+                    .decoded_list(handle, at, values)
+                    .map_err(arena_fault)?;
+            }
+            ColdChunk::Table { span } => {
+                let set = matches!(arena.body(handle).map_err(arena_fault)?, Body::Set(_));
+                let mut entries = Vec::new();
+                for (seq, key, value) in heap.read_table_rows(entity, span.start, span.end)? {
+                    let normal = heap
+                        .normal_key(&key)?
+                        .ok_or_else(|| malformed("a stored entry's key is not a legal key"))?;
+                    let key = admit(arena, pages, &key)?;
+                    let value = match set {
+                        true => Value::Absent,
+                        false => admit(arena, pages, &value)?,
+                    };
+                    entries.push((seq, key, value, normal));
+                }
+                arena
+                    .decoded_table(handle, at, entries)
+                    .map_err(arena_fault)?;
+            }
+        }
+    }
+    arena.join_chunks(handle).map_err(arena_fault)?;
+    Ok(())
+}
+
+/// Opens the head of the proxy `handle`, known as `entity`: a closure, a
+/// shared variable, or a list or table of at most one chunk is decoded
+/// whole; a larger list or table gets cold chunks.
+fn open(
+    arena: &mut Arena,
+    heap: &PagedHeap,
+    exe: &Executable,
+    handle: ArenaHandle,
+    entity: EntityId,
+) -> Result<(), HeapFault> {
+    let pages = heap.pages();
+    let head = heap
+        .read_head_of(entity)?
         .ok_or_else(|| malformed("a proxy names no object of the heap"))?;
-    let (body, sequences) = match object {
-        StoredObject::List(values) => {
-            let values = values
+    let chunk = Sequence::CHUNK as u64;
+    let (body, sequences) = match head {
+        StoredHead::List { len, cost } if len > chunk => {
+            return arena.open_list(handle, len, cost).map_err(arena_fault);
+        }
+        StoredHead::List { len, .. } => {
+            let values = heap
+                .read_list_rows(entity, 0, len)?
                 .iter()
                 .map(|value| admit(arena, pages, value))
                 .collect::<Result<Vec<_>, _>>()?;
@@ -410,11 +480,29 @@ pub(crate) fn materialize(
                 None,
             )
         }
-        StoredObject::Table {
+        StoredHead::Table {
             kind,
-            entries,
+            len,
             next,
+            cost,
+        } if len > chunk => {
+            let kind = match kind {
+                ObjectKind::Map => ProxyKind::Map,
+                ObjectKind::Set => ProxyKind::Set,
+                ObjectKind::Record => ProxyKind::Record,
+                _ => return Err(malformed("a table of another kind")),
+            };
+            return arena
+                .open_table(handle, kind, len, next, cost)
+                .map_err(arena_fault);
+        }
+        StoredHead::Table {
+            kind, len, next, ..
         } => {
+            let entries = heap.read_table_rows(entity, 0, next)?;
+            if entries.len() as u64 != len {
+                return Err(malformed("a table's rows disagree with its length"));
+            }
             let mut pairs = Vec::with_capacity(entries.len() * 2);
             let mut seqs = Vec::with_capacity(entries.len());
             for (seq, key, value) in &entries {
@@ -439,7 +527,7 @@ pub(crate) fn materialize(
                 Some((seqs, next)),
             )
         }
-        StoredObject::Closure { site, captures } => {
+        StoredHead::Small(StoredObject::Closure { site, captures }) => {
             let site = site.resolve(pages)?.as_ref().clone();
             let code = exe.code(closure_code(exe, &site)?);
             let mut named = Vec::with_capacity(captures.len());
@@ -464,7 +552,10 @@ pub(crate) fn materialize(
                 None,
             )
         }
-        StoredObject::Variable(value) => (Body::Cell(admit(arena, pages, &value)?), None),
+        StoredHead::Small(StoredObject::Variable(value)) => {
+            (Body::Cell(admit(arena, pages, &value)?), None)
+        }
+        StoredHead::Small(_) => return Err(malformed("a small head of another kind")),
     };
     arena.materialized(handle, body).map_err(arena_fault)?;
     if let Some((seqs, next)) = sequences {
@@ -475,12 +566,63 @@ pub(crate) fn materialize(
     Ok(())
 }
 
+/// Decodes what a read of chunk `chunk` of the cold immutable `handle`
+/// needs from its page form `page`: a long text's or bytes' payload node by
+/// node, `count` leaves from that chunk on, each decoded chunk an index
+/// node's children or a leaf; anything else whole.
 fn warm_immutable(
     arena: &mut Arena,
     pages: &Access<'_>,
     handle: ArenaHandle,
     page: &PageValue,
+    chunk: u32,
+    count: u32,
 ) -> Result<(), HeapFault> {
+    let paged = match page {
+        PageValue::Text(TextRef {
+            summary,
+            body: Payload::Paged(root),
+            ..
+        }) => Some((**root, *summary, true)),
+        PageValue::Bytes(bytes) => match &bytes.body {
+            Payload::Paged(root) => Some((
+                **root,
+                lash_kernel_doc::heap::TextSummary {
+                    utf8_bytes: bytes.len,
+                    chars: 0,
+                    utf16_units: 0,
+                },
+                false,
+            )),
+            Payload::Resident(_) => None,
+        },
+        _ => None,
+    };
+    if let Some((root, summary, text)) = paged {
+        let mut at = chunk;
+        let mut leaves = 0u32;
+        while leaves < count && (at as usize) < arena.chunk_count(handle).map_err(arena_fault)? {
+            let Some(range) = arena.payload_chunk(handle, at).map_err(arena_fault)? else {
+                at += 1;
+                continue;
+            };
+            match payload::node_at(pages, root, summary, text, range)? {
+                payload::PayloadNode::Leaf(bytes) => {
+                    arena
+                        .decoded_payload(handle, at, PayloadPart::Leaf(bytes))
+                        .map_err(arena_fault)?;
+                    leaves += 1;
+                    at += 1;
+                }
+                // The chunk becomes its children: the first is decoded next.
+                payload::PayloadNode::Index(children) => arena
+                    .decoded_payload(handle, at, PayloadPart::Index(children))
+                    .map_err(arena_fault)?,
+            }
+        }
+        arena.join_chunks(handle).map_err(arena_fault)?;
+        return Ok(());
+    }
     let body = match (arena.body(handle).map_err(arena_fault)?, page) {
         (Body::LongText(text), PageValue::Text(paged)) => Body::LongText(LongText {
             summary: text.summary,
@@ -510,13 +652,17 @@ fn warm_immutable(
         }
         _ => return Ok(()),
     };
+    if !arena.needs_decode(handle).map_err(arena_fault)? {
+        return Ok(());
+    }
     arena.materialized(handle, body).map_err(arena_fault)
 }
 
 /// Writes every dirty object of the arena to the heap, in identity order,
-/// and marks it clean: what a projection point and an exact refinement
-/// read. An object a stored one names that had no id takes one as it is
-/// projected, and is written in the next round.
+/// and marks it clean: a fresh object whole, a list or a table the heap
+/// holds by its dirty cards. What a projection point and an exact
+/// refinement read. An object a stored one names that had no id takes one
+/// as it is projected, and is written in the next round.
 ///
 /// # Errors
 ///
@@ -532,11 +678,112 @@ pub(crate) fn flush(
             return Ok(());
         }
         for (entity, handle) in dirty {
-            let object = stored(arena, heap.pages(), exe, handle)?;
-            heap.store_object(entity, object)?;
+            match cards(arena, heap.pages(), handle)? {
+                Some(cards) => heap.store_cards(entity, cards)?,
+                None => {
+                    let object = stored(arena, heap.pages(), exe, handle)?;
+                    heap.store_object(entity, object)?;
+                }
+            }
             arena.clean(handle).map_err(arena_fault)?;
         }
     }
+}
+
+/// The dirty cards of a list or a table the heap holds, in page form;
+/// `None` for an object projected whole. A value among them that had no
+/// id takes one as it is projected.
+fn cards(
+    arena: &mut Arena,
+    pages: &Access<'_>,
+    handle: ArenaHandle,
+) -> Result<Option<StoredCards>, HeapFault> {
+    /// A card number with its entries: sequence, key and value.
+    type TableCard = (u64, Vec<(u64, Value, Value)>);
+    enum Held {
+        List(u64, Vec<(u64, Vec<Value>)>),
+        Table(bool, u64, u64, Vec<TableCard>),
+    }
+    let facts = arena.facts(handle).map_err(arena_fault)?;
+    if !facts.based {
+        return Ok(None);
+    }
+    let held = match arena.body(handle).map_err(arena_fault)? {
+        Body::List(sequence) => {
+            let mut cards = Vec::with_capacity(facts.cards.len());
+            for card in &facts.cards {
+                let start = card * CARD;
+                let end = (start + CARD).min(sequence.len);
+                let mut values = Vec::with_capacity(end.saturating_sub(start) as usize);
+                for position in start..end {
+                    values.push(
+                        arena
+                            .item(handle, position)
+                            .map_err(arena_fault)?
+                            .ok_or_else(|| malformed("a list's dirty card misses a value"))?,
+                    );
+                }
+                cards.push((*card, values));
+            }
+            Held::List(sequence.len, cards)
+        }
+        body @ (Body::Map(table) | Body::Set(table) | Body::Record(table)) => {
+            let index = facts
+                .index
+                .as_deref()
+                .ok_or_else(|| malformed("a table has no index"))?;
+            let mut cards = Vec::with_capacity(facts.cards.len());
+            for card in &facts.cards {
+                let span = card * CARD..(card + 1) * CARD;
+                let mut entries = Vec::new();
+                for (at, chunk) in table.chunks.iter().enumerate() {
+                    let held = index.span(at);
+                    if held.end <= span.start || held.start >= span.end {
+                        continue;
+                    }
+                    let Chunk::Resident(pairs) = chunk else {
+                        return Err(malformed("a table's dirty card is not resident"));
+                    };
+                    for (pair, seq) in pairs.as_chunks::<2>().0.iter().zip(index.sequences(at)) {
+                        if span.contains(seq) {
+                            entries.push((*seq, pair[0], pair[1]));
+                        }
+                    }
+                }
+                cards.push((*card, entries));
+            }
+            Held::Table(matches!(body, Body::Set(_)), table.len, index.next(), cards)
+        }
+        _ => return Ok(None),
+    };
+    Ok(Some(match held {
+        Held::List(len, held) => {
+            let mut cards = Vec::with_capacity(held.len());
+            for (card, values) in held {
+                let values = values
+                    .iter()
+                    .map(|value| project(arena, pages, value))
+                    .collect::<Result<_, _>>()?;
+                cards.push((card, values));
+            }
+            StoredCards::List { len, cards }
+        }
+        Held::Table(set, len, next, held) => {
+            let mut cards = Vec::with_capacity(held.len());
+            for (card, entries) in held {
+                let mut stored = Vec::with_capacity(entries.len());
+                for (seq, key, value) in entries {
+                    let value = match set {
+                        true => PageValue::Null,
+                        false => project(arena, pages, &value)?,
+                    };
+                    stored.push((seq, project(arena, pages, &key)?, value));
+                }
+                cards.push((card, stored));
+            }
+            StoredCards::Table { len, next, cards }
+        }
+    }))
 }
 
 fn stored(
@@ -578,7 +825,9 @@ fn stored(
             Held::Table(
                 kind,
                 resident(&table.chunks)?,
-                index.sequences().to_vec(),
+                (0..table.chunks.len())
+                    .flat_map(|chunk| index.sequences(chunk).iter().copied())
+                    .collect(),
                 index.next(),
             )
         }

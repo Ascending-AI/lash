@@ -1,16 +1,17 @@
 //! The machine's own reads and edits of arena objects, outside any native
 //! call: what a member read, an assignment, a loop step and a shared
-//! variable do. Each answers [`Retry::Cold`] for a proxy, which the
-//! machine decodes and asks again. An edit marks its object dirty and
-//! gives its logical growth, which the machine holds before the heap
-//! receives it.
+//! variable do. Each answers [`Retry::Cold`] for a proxy or for the cold
+//! chunk it reaches, which the machine decodes before it asks again, so a
+//! point read or write of a large list or table decodes one chunk. An edit
+//! marks its object dirty, with the card it changed, and gives its logical
+//! growth, which the machine holds before the heap receives it.
 
-use lash_kernel_doc::arena::{ArenaHandle, Body, Chunk, Sequence, Table};
+use lash_kernel_doc::arena::{ArenaHandle, Body, Chunk, Sequence};
 use lash_kernel_doc::heap::NormalKey;
 use lash_kernel_doc::{NativeError, Retry, Site, Value};
 
 use super::keys::normal_key;
-use super::{Arena, local_cost, malformed};
+use super::{Arena, CARD, local_cost, malformed};
 
 /// The refusal a value that is no legal key raises (`K-KEY-002`).
 pub fn invalid_key() -> NativeError {
@@ -20,34 +21,61 @@ pub fn invalid_key() -> NativeError {
     )
 }
 
-fn values_mut(
-    handle: ArenaHandle,
-    chunks: &mut Vec<Chunk<Vec<Value>>>,
-) -> Result<&mut Vec<Value>, NativeError> {
-    if chunks.is_empty() {
-        chunks.push(Chunk::Resident(Vec::new()));
-    }
-    match chunks.as_mut_slice() {
-        [Chunk::Resident(values)] => Ok(values),
-        [Chunk::Cold { .. }] => Err(Retry::Cold {
-            object: handle,
-            chunk: 0,
-        }
-        .into()),
-        _ => Err(malformed("an object is not one chunk")),
+/// Where position `index` of a sequence sits: its chunk and its place in
+/// it. A sequence in one chunk holds every position there; a chunked one
+/// holds positions `k * CHUNK ..` in chunk `k`.
+fn locate(chunks: &[Chunk<Vec<Value>>], index: u64) -> (usize, usize) {
+    if chunks.len() <= 1 {
+        (0, index as usize)
+    } else {
+        (
+            (index / Sequence::CHUNK as u64) as usize,
+            (index % Sequence::CHUNK as u64) as usize,
+        )
     }
 }
 
-fn values(handle: ArenaHandle, chunks: &[Chunk<Vec<Value>>]) -> Result<&[Value], NativeError> {
+fn chunk_mut(
+    handle: ArenaHandle,
+    chunks: &mut [Chunk<Vec<Value>>],
+    chunk: usize,
+) -> Result<&mut Vec<Value>, NativeError> {
+    match chunks.get_mut(chunk) {
+        Some(Chunk::Resident(values)) => Ok(values),
+        Some(Chunk::Cold { .. }) => Err(Retry::Cold {
+            object: handle,
+            chunk: chunk as u32,
+        }
+        .into()),
+        None => Err(malformed("a sequence's chunks miss its length")),
+    }
+}
+
+/// The values of a sequence in one resident chunk. A chunked one answers
+/// [`Retry::Cold`] for its first cold chunk, or for chunk 0 when every
+/// chunk is resident: the machine decodes, and joins the chunks into one.
+pub(super) fn values(
+    handle: ArenaHandle,
+    chunks: &[Chunk<Vec<Value>>],
+) -> Result<&[Value], NativeError> {
     match chunks {
         [] => Ok(&[]),
         [Chunk::Resident(values)] => Ok(values),
-        [Chunk::Cold { .. }] => Err(Retry::Cold {
+        chunks => Err(Retry::Cold {
             object: handle,
-            chunk: 0,
+            chunk: super::first_cold(chunks).unwrap_or(0),
         }
         .into()),
-        _ => Err(malformed("an object is not one chunk")),
+    }
+}
+
+fn list_mut(
+    objects: &mut lash_kernel_doc::arena::Objects,
+    handle: ArenaHandle,
+) -> Result<&mut Sequence, NativeError> {
+    match objects.get_mut(handle) {
+        Some(Body::List(sequence)) => Ok(sequence),
+        _ => Err(malformed("a list handle names another body")),
     }
 }
 
@@ -70,7 +98,7 @@ impl Arena {
         Ok(self.facts(handle)?.cold)
     }
 
-    /// The values of a list or a tuple.
+    /// The values of a list or a tuple, whole.
     pub fn sequence(&self, handle: ArenaHandle) -> Result<&[Value], NativeError> {
         self.warm(handle)?;
         match self.body(handle)? {
@@ -81,13 +109,14 @@ impl Arena {
         }
     }
 
-    /// The entries of a map, a set or a record, as key and value pairs.
+    /// The entries of a map, a set or a record, whole, as key and value
+    /// pairs.
     pub fn entries(&self, handle: ArenaHandle) -> Result<&[Value], NativeError> {
         self.warm(handle)?;
         match self.body(handle)? {
-            Body::Map(Table { chunks, .. })
-            | Body::Set(Table { chunks, .. })
-            | Body::Record(Table { chunks, .. }) => values(handle, chunks),
+            Body::Map(table) | Body::Set(table) | Body::Record(table) => {
+                super::tables::pairs(handle, table)
+            }
             _ => Err(malformed("a table handle names another body")),
         }
     }
@@ -102,25 +131,44 @@ impl Arena {
         }
     }
 
-    /// The value at `index` of a list or a tuple.
+    /// The value at `index` of a list or a tuple: one chunk read.
     pub fn item(&self, handle: ArenaHandle, index: u64) -> Result<Option<Value>, NativeError> {
-        let values = self.sequence(handle)?;
-        Ok(usize::try_from(index)
-            .ok()
-            .and_then(|index| values.get(index))
-            .copied())
+        self.warm(handle)?;
+        let (Body::List(sequence) | Body::Tuple(sequence)) = self.body(handle)? else {
+            return Err(malformed("a sequence handle names another body"));
+        };
+        if index >= sequence.len {
+            return Ok(None);
+        }
+        let (chunk, at) = locate(&sequence.chunks, index);
+        match sequence.chunks.get(chunk) {
+            Some(Chunk::Resident(values)) => Ok(values.get(at).copied()),
+            Some(Chunk::Cold { .. }) => Err(Retry::Cold {
+                object: handle,
+                chunk: chunk as u32,
+            }
+            .into()),
+            None => Err(malformed("a sequence's chunks miss its length")),
+        }
     }
 
     /// Marks a mutable object dirty with its cost moved from `before` to
-    /// `after` for one row, and gives the growth.
-    fn moved(&mut self, handle: ArenaHandle, before: u64, after: u64) -> Result<u64, NativeError> {
+    /// `after` for one row, and gives the growth. `card` is the card the
+    /// row is in, for a list or a table.
+    fn moved(
+        &mut self,
+        handle: ArenaHandle,
+        card: Option<u64>,
+        before: u64,
+        after: u64,
+    ) -> Result<u64, NativeError> {
         let facts = self.facts_mut(handle)?;
         facts.summary.cost = facts
             .summary
             .cost
             .saturating_sub(before)
             .saturating_add(after);
-        self.changed(handle);
+        self.mark(handle, card)?;
         Ok(after.saturating_sub(before))
     }
 
@@ -133,51 +181,91 @@ impl Arena {
     ) -> Result<u64, NativeError> {
         self.warm(handle)?;
         let after = local_cost(&self.objects, &self.facts, &value);
-        let before = {
+        let (len, before) = {
             let (objects, facts) = (&self.objects, &self.facts);
-            match objects.get(handle) {
-                Some(Body::List(sequence)) => values(handle, &sequence.chunks)?
-                    .get(index as usize)
-                    .map(|old| local_cost(objects, facts, old)),
-                _ => return Err(malformed("a list handle names another body")),
+            let Some(Body::List(sequence)) = objects.get(handle) else {
+                return Err(malformed("a list handle names another body"));
+            };
+            let before = match index < sequence.len {
+                true => self
+                    .item(handle, index)?
+                    .map(|old| local_cost(objects, facts, &old)),
+                false => None,
+            };
+            (sequence.len, before)
+        };
+        let sequence = list_mut(&mut self.objects, handle)?;
+        let mut old = None;
+        if index < len {
+            let (chunk, at) = locate(&sequence.chunks, index);
+            old = Some(std::mem::replace(
+                &mut chunk_mut(handle, &mut sequence.chunks, chunk)?[at],
+                value,
+            ));
+        } else if index == len {
+            match sequence.chunks.len() {
+                0 => sequence.chunks.push(Chunk::Resident(Vec::new())),
+                1 => {}
+                chunks if len == chunks as u64 * Sequence::CHUNK as u64 => {
+                    sequence.chunks.push(Chunk::Resident(Vec::new()));
+                }
+                _ => {}
             }
-        };
-        let Some(Body::List(sequence)) = self.objects.get_mut(handle) else {
-            return Err(malformed("a list handle names another body"));
-        };
-        let held = values_mut(handle, &mut sequence.chunks)?;
-        let len = held.len();
-        let old = match held.get_mut(index as usize) {
-            Some(slot) => Some(std::mem::replace(slot, value)),
-            None if index as usize == len => {
-                held.push(value);
-                sequence.len += 1;
-                self.resident = self.resident.saturating_add(1);
-                None
-            }
-            None => return Err(malformed("a list write past its length")),
-        };
+            let last = sequence.chunks.len() - 1;
+            chunk_mut(handle, &mut sequence.chunks, last)?.push(value);
+            sequence.len += 1;
+            self.resident = self.resident.saturating_add(1);
+        } else {
+            return Err(malformed("a list write past its length"));
+        }
         self.hold(&value);
         if let Some(old) = old {
             self.unhold(&old);
         }
-        self.moved(handle, before.unwrap_or(0), after)
+        self.moved(handle, Some(index / CARD), before.unwrap_or(0), after)
     }
 
-    /// Removes the value at `index` of a list.
+    /// Removes the value at `index` of a list. Removing the last value
+    /// changes its chunk alone; removing another moves every later one, in
+    /// one chunk.
     pub fn list_remove(&mut self, handle: ArenaHandle, index: u64) -> Result<(), NativeError> {
         self.warm(handle)?;
-        let Some(Body::List(sequence)) = self.objects.get_mut(handle) else {
-            return Err(malformed("a list handle names another body"));
-        };
-        let held = values_mut(handle, &mut sequence.chunks)?;
-        if index as usize >= held.len() {
+        let sequence = list_mut(&mut self.objects, handle)?;
+        let len = sequence.len;
+        if index >= len {
             return Err(malformed("a list removal past its length"));
         }
-        let old = held.remove(index as usize);
+        let old = if index + 1 == len {
+            let (chunk, _) = locate(&sequence.chunks, index);
+            let held = chunk_mut(handle, &mut sequence.chunks, chunk)?;
+            let old = held.pop();
+            if held.is_empty() && sequence.chunks.len() > 1 {
+                sequence.chunks.pop();
+            }
+            old
+        } else {
+            if sequence.chunks.len() > 1 {
+                // A removal moves every later value: the list is one chunk
+                // for it.
+                if let Some(chunk) = super::first_cold(&sequence.chunks) {
+                    return Err(Retry::Cold {
+                        object: handle,
+                        chunk,
+                    }
+                    .into());
+                }
+                let joined = super::join(std::mem::take(&mut sequence.chunks));
+                sequence.chunks = vec![Chunk::Resident(joined)];
+            }
+            Some(chunk_mut(handle, &mut sequence.chunks, 0)?.remove(index as usize))
+        };
+        let old = old.ok_or_else(|| malformed("a list's chunks miss its length"))?;
         sequence.len -= 1;
         let before = local_cost(&self.objects, &self.facts, &old);
-        self.moved(handle, before, 0)?;
+        for card in index / CARD..=(len - 1) / CARD {
+            self.mark(handle, Some(card))?;
+        }
+        self.moved(handle, None, before, 0)?;
         self.unhold(&old);
         Ok(())
     }
@@ -225,8 +313,9 @@ impl Arena {
         self.warm(handle)?;
         let normal = self.key(&key)?;
         let (before, after) = match self.table_find(handle, &normal)? {
-            Some((at, old)) => {
-                let spelled = self.entries(handle)?[at * 2];
+            Some((place, old)) => {
+                let (table, _) = self.table_view(handle)?;
+                let spelled = super::tables::pair(table, place)?[0];
                 (
                     self.entry_cost(handle, &spelled, &old),
                     self.entry_cost(handle, &spelled, &value),
@@ -237,21 +326,23 @@ impl Arena {
                 (0, self.entry_cost(handle, &key, &value))
             }
         };
-        self.table_insert(handle, normal, key, value)?;
-        self.moved(handle, before, after)
+        let seq = self.table_insert(handle, normal, key, value)?;
+        self.moved(handle, Some(seq / CARD), before, after)
     }
 
     /// Removes the entry under `key` of the table `handle`, if any.
     pub fn table_delete(&mut self, handle: ArenaHandle, key: &Value) -> Result<(), NativeError> {
         self.warm(handle)?;
         let normal = self.key(key)?;
-        let Some((at, _)) = self.table_find(handle, &normal)? else {
+        let Some((place, _)) = self.table_find(handle, &normal)? else {
             return Ok(());
         };
-        let pair = &self.entries(handle)?[at * 2..at * 2 + 2];
+        let (table, _) = self.table_view(handle)?;
+        let pair = super::tables::pair(table, place)?;
         let before = self.entry_cost(handle, &pair[0], &pair[1]);
-        self.table_remove(handle, &normal)?;
-        self.moved(handle, before, 0)?;
+        let removed = self.table_remove(handle, &normal)?;
+        let card = removed.map(|(seq, _)| seq / CARD);
+        self.moved(handle, card, before, 0)?;
         Ok(())
     }
 
@@ -319,7 +410,7 @@ impl Arena {
         let before = local_cost(&self.objects, &self.facts, &old);
         self.hold(&value);
         self.unhold(&old);
-        self.moved(handle, before, after)
+        self.moved(handle, None, before, after)
     }
 
     /// The kind of value the mutable object `handle` is, by its body.

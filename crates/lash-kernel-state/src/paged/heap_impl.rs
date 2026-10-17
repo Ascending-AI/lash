@@ -459,7 +459,7 @@ impl PagedHeap {
             next,
         })
     }
-    fn key(&self, value: &PageValue) -> Result<Vec<u8>, HeapWriteError> {
+    pub(super) fn key(&self, value: &PageValue) -> Result<Vec<u8>, HeapWriteError> {
         self.normal_key(value)?.map(normal_bytes).ok_or_else(|| {
             raised(
                 "invalid_key",
@@ -650,108 +650,6 @@ impl SemanticHeap for PagedHeap {
         self.install_object(&mut proposal)
     }
 
-    fn list_write(
-        &mut self,
-        list: EntityId,
-        index: u64,
-        value: PageValue,
-    ) -> Result<(), HeapWriteError> {
-        let head = self.required(list, ObjectKind::List)?;
-        if index > head.len() {
-            return Err(raised(
-                "index_out_of_range",
-                "index exceeds the list length",
-            ));
-        }
-        let value = self.canonical(value)?;
-        let (old, cost, tasks) = match &head.body {
-            Body::List { rows, next } => {
-                let old = if index == rows.len() {
-                    next.checked_add(1)
-                        .ok_or_else(|| HeapFault::Malformed("list ordinal overflow".into()))?;
-                    None
-                } else {
-                    Some(
-                        rows.rank_get(index, &self.access)?
-                            .ok_or_else(|| HeapFault::Malformed("list rank missing".into()))?,
-                    )
-                };
-                // Match the tree's checked aggregates before reservation. Add
-                // the head's minimum only after the row delta, as cost() does.
-                let cost = rows
-                    .cost()
-                    .checked_sub(old.as_ref().map_or(0, |(_, old)| value_cost(old)))
-                    .and_then(|cost| cost.checked_add(value_cost(&value)))
-                    .ok_or_else(|| HeapFault::Malformed("logical aggregate overflow".into()))?;
-                let tasks = rows
-                    .task_edges()
-                    .checked_sub(old.as_ref().map_or(0, |(_, old)| old.task_edges()))
-                    .and_then(|tasks| tasks.checked_add(value.task_edges()))
-                    .ok_or_else(|| HeapFault::Malformed("logical aggregate overflow".into()))?;
-                (old, cost, tasks)
-            }
-            _ => unreachable!("required list"),
-        };
-        let after = census::MIN_ENTITY_COST.0.saturating_add(cost);
-        drop(head);
-        self.change_head(list, after, false, tasks, |heap| {
-            heap.edit_working(list, |head, access| {
-                let Body::List { rows, next } = &mut head.body else {
-                    unreachable!("required list")
-                };
-                let key = match old {
-                    Some((key, _)) => key,
-                    None => {
-                        let key = ordinal_key(*next);
-                        *next += 1;
-                        key
-                    }
-                };
-                rows.write(key, value, access)
-            })
-        })
-    }
-    fn list_remove(&mut self, list: EntityId, index: u64) -> Result<PageValue, HeapWriteError> {
-        let head = self.required(list, ObjectKind::List)?;
-        if index >= head.len() {
-            return Err(raised(
-                "index_out_of_range",
-                "index exceeds the list length",
-            ));
-        }
-        let Body::List { rows, .. } = &head.body else {
-            return Err(HeapFault::Malformed("list descriptor kind mismatch".into()).into());
-        };
-        let (key, value) = rows
-            .rank_get(index, &self.access)?
-            .ok_or_else(|| HeapFault::Malformed("list rank missing".into()))?;
-        let cost = rows
-            .cost()
-            .checked_sub(value_cost(&value))
-            .ok_or_else(|| HeapFault::Malformed("logical aggregate overflow".into()))?;
-        let tasks = rows
-            .task_edges()
-            .checked_sub(value.task_edges())
-            .ok_or_else(|| HeapFault::Malformed("logical aggregate overflow".into()))?;
-        drop(head);
-        self.change_head(
-            list,
-            census::MIN_ENTITY_COST.0.saturating_add(cost),
-            false,
-            tasks,
-            |heap| {
-                heap.edit_working(list, |head, access| {
-                    let Body::List { rows, .. } = &mut head.body else {
-                        unreachable!("required list")
-                    };
-                    rows.remove(&key, access)?
-                        .ok_or_else(|| HeapFault::Malformed("list row missing".into()))?;
-                    Ok(())
-                })
-            },
-        )?;
-        Ok(value)
-    }
     fn map_write(
         &mut self,
         map: EntityId,

@@ -3,6 +3,7 @@
 mod corpus;
 mod json;
 mod lab;
+mod paged;
 mod text;
 
 use crate::testsupport::{Bench, datum, decode, heap, raised};

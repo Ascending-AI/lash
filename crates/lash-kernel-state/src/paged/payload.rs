@@ -444,6 +444,63 @@ pub fn visit(
     let _ = walk(access, &Part { summary, page }, text, range, visitor)?;
     Ok(())
 }
+/// One node of a payload tree: a leaf's bytes, or an index node's children
+/// with their byte lengths.
+#[derive(Clone, Debug)]
+pub enum PayloadNode {
+    Leaf(Vec<u8>),
+    Index(Vec<(PageRef, u64)>),
+}
+
+/// The node of the payload tree at `page`, whose whole summary is
+/// `summary`, that spans exactly bytes `range`, validated along its path
+/// from the root: what a cold chunk of a long text or of bytes decodes
+/// (seam D). It reads that path and the node, never a sibling.
+///
+/// # Errors
+///
+/// The page port's faults, and a range that is no node of the tree.
+pub fn node_at(
+    access: &Access<'_>,
+    page: PageRef,
+    summary: TextSummary,
+    text: bool,
+    range: Range<u64>,
+) -> Result<PayloadNode, HeapFault> {
+    let mut part = Part { summary, page };
+    let mut offset = 0u64;
+    loop {
+        let node = read(access, &part, text)?;
+        if offset == range.start && offset + part.summary.utf8_bytes == range.end {
+            return Ok(match node {
+                Node::Leaf(leaf) => PayloadNode::Leaf(leaf.bytes().to_vec()),
+                Node::Index(children) => PayloadNode::Index(
+                    children
+                        .into_iter()
+                        .map(|child| (child.page, child.summary.utf8_bytes))
+                        .collect(),
+                ),
+            });
+        }
+        let Node::Index(children) = node else {
+            return Err(HeapFault::Malformed(
+                "a payload chunk is no node of its tree".into(),
+            ));
+        };
+        let mut chosen = None;
+        for child in children {
+            let end = offset + child.summary.utf8_bytes;
+            if range.start >= offset && range.end <= end && child.summary.utf8_bytes != 0 {
+                chosen = Some(child);
+                break;
+            }
+            offset = end;
+        }
+        part = chosen
+            .ok_or_else(|| HeapFault::Malformed("a payload chunk is no node of its tree".into()))?;
+    }
+}
+
 /// A complete projection has committed to consuming every byte in its
 /// range. Unlike `visit`, it can fetch authenticated siblings together.
 /// Holding one fanout per level bounds staging; no descendants are named

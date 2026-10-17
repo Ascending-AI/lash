@@ -3,18 +3,28 @@
 //!
 //! Bodies are [`Objects`], what a native call borrows. Beside them, by slot
 //! index, each object's [`Facts`]: its durable identity once a projection
-//! has saved it, whether it changed since it was last projected (one dirty
-//! bit: every object is one resident chunk, swap 2.4(a)), the page form it
-//! was admitted from or last projected to when it is immutable, its logical
-//! cost, a table's key index, and how many members of other objects hold
-//! it.
+//! has saved it, whether it changed since it was last projected and, for
+//! a list or a table the heap holds, which of its cards changed, the page
+//! form it was admitted from or last projected to when it is immutable, its
+//! logical cost, a table's key index, and how many members of other objects
+//! hold it.
 //!
 //! The paged heap is the arena's projection. A mutable object read from a
 //! page is a proxy, interned by its [`EntityId`] so the run sees one handle
-//! for it, whose one chunk stays cold until a read reaches it. The machine
-//! decodes it then, outside any native call, and writes every dirty object
-//! back at a projection point (`lash-kernel-vm`'s `machine/project.rs` owns
-//! those conversions).
+//! for it, which stays cold until a read reaches it. The machine opens its
+//! head then, outside any native call: a small object is decoded whole, a
+//! large list or table is given chunks that stay cold until a read reaches
+//! each, and a long text or bytes on payload pages is decoded node by node.
+//! An object whose chunks are all resident is joined into one chunk, so a
+//! whole read of it borrows one slice.
+//!
+//! What changed is on the dirty list: each object with an id whose state
+//! the heap does not hold and, for a list or a table the heap holds, its
+//! dirty cards ([`CARD`] positions or insertion sequences each). The
+//! machine writes it back at a projection point, card by card
+//! (`lash-kernel-vm`'s `machine/project.rs` owns those conversions). At a
+//! statement boundary, once residency passes a bound, clean large objects
+//! drop back to their pages.
 //!
 //! **Ids at projection** (seam C). A new mutable object has no durable id.
 //! A projection gives one to each it saves, in the canonical walk's order
@@ -34,14 +44,17 @@
 //! the new objects its roots reach and the dirty ones only.
 
 mod bench;
+mod chunks;
 mod keys;
 mod ops;
 mod tables;
 
+pub use crate::paged::stored::CARD;
 pub use bench::{Bench, Called, Usage};
+pub use chunks::{ColdChunk, PayloadPart};
 pub use keys::{ArenaSemantics, text_key};
 pub use ops::invalid_key;
-pub use tables::Index;
+pub use tables::{Index, Place};
 
 use std::collections::HashMap;
 
@@ -75,6 +88,13 @@ pub struct Facts {
     /// The object changed since it was last projected, or was never
     /// projected: the heap does not hold what the arena does.
     pub dirty: bool,
+    /// The heap holds a head for the object: it was opened from one or
+    /// projected to one. A projection writes such a list's or table's dirty
+    /// cards into it, never the whole object.
+    pub based: bool,
+    /// A based list's or table's dirty cards, ascending: card `c` holds
+    /// positions, or insertion sequences, `c * CARD ..`.
+    pub cards: Vec<u64>,
     /// An immutable's page form: the descriptor it was admitted from, or
     /// the one its first projection built. Projection reuses it.
     pub page: std::cell::OnceCell<PageValue>,
@@ -83,9 +103,13 @@ pub struct Facts {
     pub summary: Summary,
     /// A resident map's, set's or record's key index.
     pub index: Option<Box<Index>>,
-    /// A proxy whose contents the machine has not decoded from the heap:
-    /// its body is a cold placeholder of its kind.
+    /// A proxy whose head the machine has not opened: its body is a cold
+    /// placeholder of its kind.
     pub cold: bool,
+    /// The machine decoded the object this many times since the last
+    /// statement boundary: each decode reads twice as many chunks as the
+    /// one before.
+    streak: u32,
     /// How many members of arena objects hold it. Frames, registers and
     /// pins are not counted: a release scans them.
     count: u32,
@@ -102,9 +126,10 @@ pub struct Facts {
     mark: bool,
 }
 
-/// The page a proxy's placeholder chunk names: none of its own. In swap
-/// 2.4(a) an object is one chunk, decoded whole from the heap by its
-/// identity; swap 2.4(b) gives each chunk its page.
+/// The page a cold chunk of a mutable object names: none of its own. Its
+/// rows are read by position, or by insertion sequence, through its
+/// object's head in the heap, whose index path reaches the leaf that
+/// holds them.
 pub const NO_PAGE: lash_kernel_doc::heap::PageRef = lash_kernel_doc::heap::PageRef {
     id: lash_kernel_doc::heap::PageId([0; 32]),
     grant: lash_kernel_doc::heap::PageGrant::NONE,
@@ -201,6 +226,11 @@ pub struct Arena {
     /// Objects with a cold chunk, at most: none means nothing needs decoding.
     colds: u64,
     collect_at: u64,
+    /// Resident values past which a statement boundary drops clean large
+    /// objects back to their pages.
+    evict_at: u64,
+    /// Objects decoded since the last statement boundary.
+    streaked: Vec<ArenaHandle>,
 }
 
 /// What a collection's roots are visited with: each value they hold.
@@ -223,6 +253,7 @@ impl Arena {
         Self {
             collect_at: FIRST_COLLECTION,
             release_at: FIRST_RELEASE,
+            evict_at: chunks::EVICT_AT,
             ..Self::default()
         }
     }
@@ -275,7 +306,7 @@ impl Arena {
     }
 
     /// The body and facts of `handle`, for an edit: the caller marks it
-    /// dirty through [`Self::touched`].
+    /// dirty.
     #[inline]
     pub fn parts_mut(
         &mut self,
@@ -434,6 +465,7 @@ impl Arena {
             Facts {
                 entity: Some(entity),
                 cold: true,
+                based: true,
                 ..Facts::default()
             },
         )
@@ -505,6 +537,25 @@ impl Arena {
         for handle in members {
             self.unhold_handle(handle);
         }
+    }
+
+    /// Marks the mutable object `handle` changed since it was last
+    /// projected, with `card` dirty when it is a list or a table the heap
+    /// holds.
+    pub(crate) fn mark(
+        &mut self,
+        handle: ArenaHandle,
+        card: Option<u64>,
+    ) -> Result<(), NativeError> {
+        let facts = self.facts_mut(handle)?;
+        if facts.based
+            && let Some(card) = card
+            && let Err(at) = facts.cards.binary_search(&card)
+        {
+            facts.cards.insert(at, card);
+        }
+        self.changed(handle);
+        Ok(())
     }
 
     /// Marks the resident object `handle` changed since it was last
@@ -739,7 +790,7 @@ impl Arena {
             };
             let index = match &body {
                 Body::Map(table) | Body::Set(table) | Body::Record(table) => facts
-                    .map(|_| tables::index_of(&self.objects, &self.facts, table))
+                    .map(|_| tables::index_of(&self.objects, &self.facts, handle, table))
                     .transpose()?,
                 _ => None,
             };
@@ -774,7 +825,7 @@ impl Arena {
     pub fn materialized(&mut self, handle: ArenaHandle, body: Body) -> Result<(), NativeError> {
         let index = match &body {
             Body::Map(table) | Body::Set(table) | Body::Record(table) => Some(Box::new(
-                tables::index_of(&self.objects, &self.facts, table)?,
+                tables::index_of(&self.objects, &self.facts, handle, table)?,
             )),
             _ => None,
         };
@@ -934,9 +985,12 @@ impl Arena {
         dirty
     }
 
-    /// Marks `handle` clean: the heap holds what it does.
+    /// Marks `handle` clean: the heap holds what it does, as its head.
     pub fn clean(&mut self, handle: ArenaHandle) -> Result<(), NativeError> {
-        self.facts_mut(handle)?.dirty = false;
+        let facts = self.facts_mut(handle)?;
+        facts.dirty = false;
+        facts.based = true;
+        facts.cards.clear();
         Ok(())
     }
 
@@ -1239,6 +1293,29 @@ fn is_mutable(body: &Body) -> bool {
             | Body::Closure { .. }
             | Body::Cell(_)
     )
+}
+
+/// The first cold chunk of `chunks`.
+pub(crate) fn first_cold<T>(chunks: &[Chunk<T>]) -> Option<u32> {
+    chunks
+        .iter()
+        .position(|chunk| matches!(chunk, Chunk::Cold { .. }))
+        .map(|at| at as u32)
+}
+
+/// The values of resident `chunks`, in order, in one vector.
+pub(crate) fn join(chunks: Vec<Chunk<Vec<Value>>>) -> Vec<Value> {
+    let mut chunks = chunks.into_iter();
+    let mut joined = match chunks.next() {
+        Some(Chunk::Resident(values)) => values,
+        _ => Vec::new(),
+    };
+    for chunk in chunks {
+        if let Chunk::Resident(values) = chunk {
+            joined.extend(values);
+        }
+    }
+    joined
 }
 
 /// A guest error the arena's own constructors raise.

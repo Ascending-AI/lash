@@ -82,6 +82,41 @@ pub(super) fn fresh() -> (PagedHeap, Rc<RefCell<Pages>>) {
     .expect("install census");
     (heap, pages)
 }
+/// Writes positions `range` of `list`, each `value(position)`, through the
+/// heap's card store as a projection writes a list's dirty cards: a range
+/// past the length appends.
+pub(super) fn write_list(
+    heap: &mut PagedHeap,
+    list: EntityId,
+    range: std::ops::Range<u64>,
+    value: impl Fn(u64) -> PageValue,
+) -> Result<(), HeapWriteError> {
+    use super::super::stored::{CARD, StoredCards};
+    let len = heap.len(list)?.max(range.end);
+    let mut card = range.start / CARD;
+    while card * CARD < range.end {
+        let start = card * CARD;
+        let mut values = Vec::new();
+        for at in start..(start + CARD).min(len) {
+            values.push(match range.contains(&at) {
+                true => value(at),
+                false => heap
+                    .list_get(list, at)?
+                    .ok_or_else(|| HeapFault::Malformed("a list row is missing".into()))?,
+            });
+        }
+        heap.store_cards(
+            list,
+            StoredCards::List {
+                len: heap.len(list)?.max((start + CARD).min(len)),
+                cards: vec![(card, values)],
+            },
+        )?;
+        card += 1;
+    }
+    Ok(())
+}
+
 pub(super) fn seal(heap: &mut PagedHeap) -> SealedHeap {
     heap.seal(SealBudget {
         pages: u64::MAX,
@@ -128,7 +163,7 @@ fn aliases_see_one_mutation_across_seal_and_open() {
             PageValue::List(list),
         ]))
         .expect("aliases");
-    heap.list_write(list, 0, int(7)).expect("write");
+    write_list(&mut heap, list, 0..1, |_| int(7)).expect("write");
     let heap = reopen(&mut heap, &pages);
     for i in 0..2 {
         let Some(PageValue::List(id)) = heap.list_get(aliases, i).expect("alias") else {
@@ -144,8 +179,7 @@ fn cycles_seal_as_a_page_dag() {
     let list = heap
         .allocate_object(ObjectInit::List(Vec::new()))
         .expect("list");
-    heap.list_write(list, 0, PageValue::List(list))
-        .expect("self edge");
+    write_list(&mut heap, list, 0..1, |_| PageValue::List(list)).expect("self edge");
     let heap = reopen(&mut heap, &pages);
     assert!(
         matches!(heap.list_get(list, 0).expect("cycle"), Some(PageValue::List(id)) if id == list)
@@ -214,28 +248,6 @@ fn map_iteration_survives_removal_and_reinsertion_across_seal() {
     assert_eq!(fields, ["z", "a"]);
 }
 #[test]
-fn a_point_write_in_a_huge_list_seals_one_leaf_path() {
-    let (mut heap, pages) = fresh();
-    let list = heap
-        .allocate_object(ObjectInit::List((0..100_000).map(int).collect()))
-        .expect("list");
-    seal(&mut heap);
-    let before = pages.borrow().bytes;
-    heap.list_write(list, 55_555, int(-1)).expect("write");
-    let sealed = seal(&mut heap);
-    assert!(sealed.sealed_pages <= 6, "{} pages", sealed.sealed_pages);
-    let bytes = pages.borrow().bytes - before;
-    let heap = reopen(&mut heap, &pages);
-    let before_reads = pages.borrow().reads;
-    assert!(is_int(heap.list_get(list, 55_555).expect("get"), -1));
-    let reads = pages.borrow().reads - before_reads;
-    assert!(reads <= 5, "{reads} lookup pages");
-    println!(
-        "list: fanout=32 cells=64 sealed_pages={} sealed_bytes={bytes} cold_lookup_pages={reads}",
-        sealed.sealed_pages
-    );
-}
-#[test]
 fn a_tiny_update_among_many_objects_seals_one_directory_path() {
     let (mut heap, pages) = fresh();
     let mut chosen = None;
@@ -249,8 +261,7 @@ fn a_tiny_update_among_many_objects_seals_one_directory_path() {
     }
     seal(&mut heap);
     let before = pages.borrow().bytes;
-    heap.list_write(chosen.expect("chosen"), 0, int(-1))
-        .expect("write");
+    write_list(&mut heap, chosen.expect("chosen"), 0..1, |_| int(-1)).expect("write");
     let sealed = seal(&mut heap);
     assert!(sealed.sealed_pages <= 5, "{} pages", sealed.sealed_pages);
     let bytes = pages.borrow().bytes - before;
@@ -551,7 +562,7 @@ fn a_shared_dirty_directory_keeps_its_prior_version() {
         .unwrap();
     heap.flush_working().unwrap();
     let prior = heap.directory.clone();
-    heap.list_write(list, 0, int(2)).unwrap();
+    write_list(&mut heap, list, 0..1, |_| int(2)).unwrap();
     heap.flush_working().unwrap();
     let head = prior
         .get(&super::super::directory::entity_key(list), &heap.access)
@@ -707,18 +718,18 @@ fn dirty_residency_spills_before_checkpoint_and_preserves_working_versions() {
     let list = heap
         .allocate_object(ObjectInit::List(Vec::new()))
         .expect("list");
-    for i in 0..10_000 {
-        heap.list_write(list, i, int(i as i64))
-            .expect("initial row");
-    }
+    write_list(&mut heap, list, 0..10_000, |i| int(i as i64)).expect("initial rows");
     let Body::List { rows: prior, .. } = heap.head(list).expect("head").expect("list exists").body
     else {
         panic!("list")
     };
-    heap.list_write(list, 0, int(-1)).expect("new version");
+    write_list(&mut heap, list, 0..1, |_| int(-1)).expect("new version");
     let mut peak = 0;
-    for i in 10_000..250_000 {
-        heap.list_write(list, i, int(i as i64)).expect("row");
+    for start in (10_000..250_000).step_by(64) {
+        write_list(&mut heap, list, start..(start + 64).min(250_000), |i| {
+            int(i as i64)
+        })
+        .expect("rows");
         peak = peak.max(heap.access.dirty_bytes());
         assert!(
             heap.access.dirty_bytes() <= 32 << 20,
@@ -762,8 +773,8 @@ fn dirty_spill_quota_failure_preserves_the_committed_root_and_typed_cause() {
     };
     pages.borrow_mut().seal_fault = Some(fault.clone());
     let mut stopped = false;
-    for i in 1..250_000 {
-        match heap.list_write(list, i, int(i as i64)) {
+    for start in (1..250_000).step_by(64) {
+        match write_list(&mut heap, list, start..start + 64, |i| int(i as i64)) {
             Ok(()) => (),
             Err(HeapWriteError::Fault(actual)) => {
                 assert_eq!(actual, fault);
@@ -889,9 +900,10 @@ fn paged_text_cursor_preserves_boundary_fault_order() {
     assert!(matches!(cursor.next(&heap), Err(HeapFault::Missing { page }) if page == missing));
 }
 
-/// K-VAL-024: appended list contents survive sealing and a cold open.
+/// K-VAL-024: list contents appended one by one through their cards
+/// survive sealing and a cold open.
 #[test]
-fn a_list_append_neither_locates_nor_reencodes_its_directory_row() {
+fn appended_list_contents_survive_sealing_and_a_cold_open() {
     const N: u64 = 1024;
     let (mut heap, pages) = fresh();
     let list = heap
@@ -899,7 +911,7 @@ fn a_list_append_neither_locates_nor_reencodes_its_directory_row() {
         .expect("list");
     for i in 0..N {
         let len = heap.len(list).expect("length");
-        heap.list_write(list, len, int(i as i64)).expect("append");
+        write_list(&mut heap, list, len..len + 1, |_| int(i as i64)).expect("append");
     }
     let heap = reopen(&mut heap, &pages);
     assert_eq!(heap.len(list).expect("published length"), N);

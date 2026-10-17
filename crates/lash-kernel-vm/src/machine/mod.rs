@@ -741,10 +741,44 @@ impl KernelMachine {
         project::project(&mut self.arena.borrow_mut(), self.heap.pages(), value).map_err(Halt::from)
     }
 
-    /// Decodes the cold object `handle` from the heap or its pages.
-    pub(super) fn warm(&mut self, handle: ArenaHandle) -> Result<(), Halt> {
+    /// Decodes what a read of chunk `chunk` of the cold object `handle`
+    /// needs, from the heap or its pages.
+    pub(super) fn warm(&mut self, handle: ArenaHandle, chunk: u32) -> Result<(), Halt> {
         let mut arena = self.arena.borrow_mut();
-        project::materialize(&mut arena, &self.heap, &self.exe, handle).map_err(Halt::from)
+        project::materialize(&mut arena, &self.heap, &self.exe, handle, chunk).map_err(Halt::from)
+    }
+
+    /// Opens the head of `handle` when it is a proxy: what a read of its
+    /// length needs.
+    pub(super) fn warm_head(&mut self, handle: ArenaHandle) -> Result<(), Halt> {
+        let cold = self
+            .arena
+            .borrow()
+            .is_cold(handle)
+            .map_err(|error| fault(&error.to_string()))?;
+        if cold {
+            self.warm(handle, 0)?;
+        }
+        Ok(())
+    }
+
+    /// Decodes `handle` whole, chunk by chunk.
+    pub(super) fn warm_whole(&mut self, handle: ArenaHandle) -> Result<(), Halt> {
+        loop {
+            let first = {
+                let arena = self.arena.borrow();
+                if !arena
+                    .needs_decode(handle)
+                    .map_err(|error| fault(&error.to_string()))?
+                {
+                    return Ok(());
+                }
+                arena
+                    .first_cold_chunk(handle)
+                    .map_err(|error| fault(&error.to_string()))?
+            };
+            self.warm(handle, first)?;
+        }
     }
 
     /// Runs every later native call with each object its arguments reach
@@ -795,6 +829,17 @@ impl KernelMachine {
     /// Decodes every cold object `value` reaches: what a walk of its
     /// whole graph outside a native call reads.
     pub(super) fn warm_reachable(&mut self, value: &Value) -> Result<(), Halt> {
+        self.reach(value, true)
+    }
+
+    /// Decodes what a measure of `value`'s graph reads: every cold object
+    /// it reaches but a long text's or bytes' payload, whose size its
+    /// summary gives.
+    pub(super) fn warm_measured(&mut self, value: &Value) -> Result<(), Halt> {
+        self.reach(value, false)
+    }
+
+    fn reach(&mut self, value: &Value, payloads: bool) -> Result<(), Halt> {
         if !self.arena.borrow().any_cold() {
             return Ok(());
         }
@@ -804,7 +849,15 @@ impl KernelMachine {
             if !seen.insert((handle.index(), handle.generation())) {
                 continue;
             }
-            self.warm(handle)?;
+            let payload = matches!(
+                self.arena.borrow().body(handle),
+                Ok(lash_kernel_doc::arena::Body::LongText(_)
+                    | lash_kernel_doc::arena::Body::Bytes(_))
+            );
+            if payload && !payloads {
+                continue;
+            }
+            self.warm_whole(handle)?;
             let arena = self.arena.borrow();
             let body = arena
                 .body(handle)
@@ -828,12 +881,15 @@ impl KernelMachine {
         crate::data::copy_out(&self.arena.borrow(), self.limits.value_depth(), value)
     }
 
-    /// Frees the arena objects nothing the run holds, once enough wait:
-    /// at a statement boundary, where every value the run holds outside
-    /// the arena's members is in a frame. Garbage cycles are collected
-    /// only under pressure, and only when a count fell without reaching
-    /// zero since the last collection (seam D).
+    /// Ends the statement's decoding streaks, dropping clean large objects
+    /// back to their pages once residency is high, and frees the arena
+    /// objects nothing the run holds, once enough wait: at a statement
+    /// boundary, where every value the run holds outside the arena's
+    /// members is in a frame. Garbage cycles are collected only under
+    /// pressure, and only when a count fell without reaching zero since
+    /// the last collection (seam D).
     fn collect_arena(&mut self) -> Result<(), Halt> {
+        self.arena.borrow_mut().statement_boundary();
         let (release, cycles) = {
             let arena = self.arena.borrow();
             (arena.release_due(), arena.cycles_due())

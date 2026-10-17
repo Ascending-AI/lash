@@ -421,8 +421,8 @@ impl PlanContext for PlanRun<'_> {
             let stepped = walk.cursor.step(&mut self.machine.arena.borrow_mut());
             // What the loop walks is decoded, then stepped again.
             match stepped {
-                Err(NativeError::Retry(Retry::Cold { object, .. })) => {
-                    let warmed = self.machine.warm(object);
+                Err(NativeError::Retry(Retry::Cold { object, chunk })) => {
+                    let warmed = self.machine.warm(object, chunk);
                     self.held(warmed)?;
                 }
                 stepped => {

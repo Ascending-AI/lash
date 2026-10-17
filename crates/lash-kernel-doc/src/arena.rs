@@ -230,19 +230,23 @@ impl Value {
 /// One chunk of an object's contents (seam D). A resident chunk owns its
 /// decoded contents by value: a growable vector for a mutable collection,
 /// so an append is amortized O(1), and boxed exact-size storage for an
-/// immutable. A cold one is the page that holds them, decoded by the
-/// machine when a read reaches it, never during a native call.
+/// immutable. A cold one is decoded by the machine when a read reaches it,
+/// never during a native call: a payload chunk from the page it names, a
+/// list's or a table's through its object's head in the heap, by position
+/// or by insertion sequence. `len` is the values, or the payload bytes, it
+/// holds; a cold table chunk does not know its count and holds 0.
 #[derive(Debug)]
 pub enum Chunk<T> {
     Resident(T),
     Cold { page: PageRef, len: u32 },
 }
 
-/// A list's or a tuple's values, in chunks by position: chunk `k` holds
-/// indexes `k * CHUNK ..`, each cold or resident on its own, so a point
-/// read or write materializes one chunk and its index path, and equal
-/// values chunk alike whatever built them (seam H). Until swap 2.4(b)
-/// chunks them, every sequence is one chunk holding all its values.
+/// A list's or a tuple's values. A sequence the run built, or whose chunks
+/// are all resident, is one chunk holding all its values, so an append is
+/// amortized O(1) and a whole read borrows one slice. A large list opened
+/// from its pages is in chunks by position: chunk `k` holds indexes
+/// `k * CHUNK ..`, each cold or resident on its own, so a point read or
+/// write decodes one chunk and its index path.
 #[derive(Debug)]
 pub struct Sequence {
     pub len: u64,
@@ -256,11 +260,12 @@ impl Sequence {
 }
 
 /// A map's, a set's or a record's entries in insertion order, as key and
-/// value pairs (a set's values are [`Value::Absent`]), in chunks whose
-/// boundaries the canonical page constructor places by key (seam H), so a
-/// chunk holds whole pairs and chunks differ in size. The key index that
-/// finds an entry is the arena's (`native::Semantics::lookup`); its
-/// representation is decided by measurement.
+/// value pairs (a set's values are [`Value::Absent`]). A table the run
+/// built, or whose chunks are all resident, is one chunk. A large table
+/// opened from its pages is in chunks by insertion sequence, each holding
+/// whole pairs, so chunks differ in size. The key index that finds an
+/// entry, and the sequences each chunk spans, are the arena's
+/// (`native::Semantics::lookup`).
 #[derive(Debug)]
 pub struct Table {
     pub len: u64,
@@ -268,7 +273,10 @@ pub struct Table {
 }
 
 /// A long text: its lengths, and its UTF-8 bytes in chunks that end on
-/// scalar boundaries.
+/// scalar boundaries. A text on payload pages starts as one cold chunk of
+/// its whole payload; decoding a chunk that names an index page gives one
+/// cold chunk per child, and one that names a leaf gives its text, so a
+/// read decodes only the leaves it reaches and their index path.
 #[derive(Debug)]
 pub struct LongText {
     pub summary: TextSummary,

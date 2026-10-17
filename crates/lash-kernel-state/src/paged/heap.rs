@@ -168,14 +168,6 @@ pub trait SemanticHeap: PageReader {
     /// Allocates a fresh entity in the primary family. The census reserves
     /// its logical cost first.
     fn allocate_object(&mut self, init: ObjectInit) -> Result<EntityId, HeapWriteError>;
-    /// Writes element `index`; `index == len` appends (`K-FORM-006`).
-    fn list_write(
-        &mut self,
-        list: EntityId,
-        index: u64,
-        value: PageValue,
-    ) -> Result<(), HeapWriteError>;
-    fn list_remove(&mut self, list: EntityId, index: u64) -> Result<PageValue, HeapWriteError>;
     /// Writes `value` under `key`; an existing key keeps its first spelling
     /// and position (`K-KEY-003`).
     fn map_write(

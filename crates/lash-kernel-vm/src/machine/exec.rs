@@ -651,10 +651,10 @@ impl KernelMachine {
             match measure {
                 Measure::Size => {
                     if let Some(handle) = value.handle() {
-                        self.warm(handle)?;
+                        self.warm_head(handle)?;
                     }
                 }
-                Measure::DeepSize | Measure::NestedSize => self.warm_reachable(&value)?,
+                Measure::DeepSize | Measure::NestedSize => self.warm_measured(&value)?,
                 Measure::Magnitude => {}
             }
         }
@@ -905,7 +905,7 @@ impl KernelMachine {
 
     /// A value's deep charge size (`K-CHG-005`), its graph decoded first.
     pub(super) fn deep_size(&mut self, value: &Value) -> Result<u64, Halt> {
-        self.warm_reachable(value)?;
+        self.warm_measured(value)?;
         deep_size(&self.arena.borrow(), value).map_err(|error| fault(&error.to_string()))
     }
 

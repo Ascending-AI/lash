@@ -26,7 +26,7 @@
 //! [`KernelMachine::act`].
 
 use lash_kernel_doc::arena::ArenaHandle;
-use lash_kernel_doc::heap::LogicalBytes;
+use lash_kernel_doc::heap::{LogicalBytes, NormalKey};
 use lash_kernel_doc::{
     Args, NativeCall, NativeError, NewObject, Nursery, Retry, TaskId, Value, WorkCounter,
 };
@@ -104,10 +104,52 @@ impl KernelMachine {
         loop {
             let result = op(&mut self.arena.borrow_mut());
             match result {
-                Err(NativeError::Retry(Retry::Cold { object, .. })) => self.warm(object)?,
+                Err(NativeError::Retry(Retry::Cold { object, chunk })) => {
+                    self.warm(object, chunk)?
+                }
                 other => return other.map_err(Interrupt::from),
             }
         }
+    }
+
+    /// Looks `key` up in the heap's key index of the table `table` when the
+    /// arena cannot answer for it, a key only a cold chunk may hold, so a
+    /// point read or write of a large table decodes the one chunk holding
+    /// its entry (seam D).
+    pub(super) fn resolve(&mut self, table: ArenaHandle, key: &Value) -> Eval<()> {
+        if let Some(normal) = self.in_arena(|arena| arena.unresolved(table, key))? {
+            self.resolve_with(table, normal)?;
+        }
+        Ok(())
+    }
+
+    /// [`Self::resolve`] for a key's normal form.
+    pub(super) fn resolve_normal(&mut self, table: ArenaHandle, normal: &NormalKey) -> Eval<()> {
+        if self.in_arena(|arena| arena.unresolved_normal(table, normal))? {
+            self.resolve_with(table, normal.clone())?;
+        }
+        Ok(())
+    }
+
+    fn resolve_with(&mut self, table: ArenaHandle, normal: NormalKey) -> Eval<()> {
+        let entity = self
+            .arena
+            .borrow()
+            .facts(table)
+            .map_err(Interrupt::from)?
+            .entity
+            .ok_or(lash_kernel_doc::NativeError::Malformed(
+                "a table with cold chunks has no durable id",
+            ))
+            .map_err(Interrupt::from)?;
+        let seq = self
+            .heap
+            .table_lookup(entity, &normal)
+            .map_err(Halt::from)?;
+        self.arena
+            .borrow_mut()
+            .resolved(table, normal, seq)
+            .map_err(Interrupt::from)
     }
 
     /// An error value of `kind` and `message`, built in the arena.
@@ -260,6 +302,7 @@ impl KernelMachine {
     ) -> Eval<()> {
         let value = match self.regs[target] {
             Value::Record(record) => {
+                self.resolve_normal(record, &field.key)?;
                 let slot = field.site.and_then(|site| self.sites.slot(site));
                 let (value, found) = self.in_arena(|arena| {
                     crate::compile::find_property(arena, record, slot, &field.name, || {
@@ -323,6 +366,7 @@ impl KernelMachine {
                 if !matches!(index, Value::Text(_) | Value::LongText(_)) {
                     return raise("type_error", "a record index must be text");
                 }
+                self.resolve(record, &index)?;
                 let Some(site) = site else {
                     let found = self.in_arena(|arena| arena.table_get(record, &index))?;
                     self.put(out, found.unwrap_or(Value::Absent));
@@ -338,14 +382,20 @@ impl KernelMachine {
                 }
                 found.unwrap_or(Value::Absent)
             }
-            Value::Map(map) => match self.in_arena(|arena| arena.table_get(map, &index))? {
-                Some(value) => value,
-                None => return raise("key_missing", "the map has no entry under that key"),
-            },
-            Value::Set(set) => Value::Bool(
-                self.in_arena(|arena| arena.table_get(set, &index))?
-                    .is_some(),
-            ),
+            Value::Map(map) => {
+                self.resolve(map, &index)?;
+                match self.in_arena(|arena| arena.table_get(map, &index))? {
+                    Some(value) => value,
+                    None => return raise("key_missing", "the map has no entry under that key"),
+                }
+            }
+            Value::Set(set) => {
+                self.resolve(set, &index)?;
+                Value::Bool(
+                    self.in_arena(|arena| arena.table_get(set, &index))?
+                        .is_some(),
+                )
+            }
             _ => {
                 return raise(
                     "type_error",
@@ -373,6 +423,7 @@ impl KernelMachine {
         };
         let value = self.take(value);
         let name = self.field_name(field);
+        self.resolve(record, &name)?;
         let growth = self.in_arena(|arena| arena.table_write(record, name, value))?;
         self.grow(growth)?;
         Ok(())
@@ -398,12 +449,14 @@ impl KernelMachine {
                 if !matches!(field, Value::Text(_) | Value::LongText(_)) {
                     return raise("type_error", "a record index must be text");
                 }
+                self.resolve(record, &field)?;
                 let value = self.take(value);
                 self.in_arena(|arena| arena.table_write(record, field, value))?
             }
             Value::Map(map) => {
                 let key = self.regs[index];
                 self.key(&key)?;
+                self.resolve(map, &key)?;
                 let key = self.take(index);
                 let value = self.take(value);
                 self.in_arena(|arena| arena.table_write(map, key, value))?
@@ -417,6 +470,7 @@ impl KernelMachine {
                         "a set's member is assigned `true` to add it or `false` to remove it",
                     );
                 };
+                self.resolve(set, &member)?;
                 let member = self.take(index);
                 if present {
                     self.in_arena(|arena| arena.table_write(set, member, Value::Absent))?
@@ -441,6 +495,7 @@ impl KernelMachine {
             return raise("type_error", "only a record has fields to remove");
         };
         let name = self.field_name(field);
+        self.resolve(record, &name)?;
         self.in_arena(|arena| arena.table_delete(record, &name))
     }
 
@@ -462,10 +517,12 @@ impl KernelMachine {
                 if !matches!(at, Value::Text(_) | Value::LongText(_)) {
                     return raise("type_error", "a record index must be text");
                 }
+                self.resolve(record, &at)?;
                 self.in_arena(|arena| arena.table_delete(record, &at))?;
             }
             Value::Map(table) | Value::Set(table) => {
                 self.key(&at)?;
+                self.resolve(table, &at)?;
                 self.in_arena(|arena| arena.table_delete(table, &at))?;
             }
             _ => {
@@ -789,12 +846,12 @@ impl KernelMachine {
                     // is the call's.
                     spent = counter.spent();
                     match answer {
-                        Err(NativeError::Retry(Retry::Cold { object, .. })) => {
+                        Err(NativeError::Retry(Retry::Cold { object, chunk })) => {
                             #[cfg(test)]
                             {
                                 self.pins.cold_reads += 1;
                             }
-                            self.warm(object)?;
+                            self.warm(object, chunk)?;
                         }
                         Err(NativeError::Retry(Retry::Room { wanted })) => {
                             if wanted.0 <= granted {

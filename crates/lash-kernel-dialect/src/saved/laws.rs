@@ -97,6 +97,22 @@ fn saved(heap: &mut PagedHeap, live: EntityId) -> SavedFunction {
         token: None,
     }
 }
+/// Writes the one value of a one-value list, as a projection writes its
+/// dirty card.
+fn write_first(
+    heap: &mut lash_kernel_state::kernel_internals::PagedHeap,
+    list: lash_kernel_doc::heap::EntityId,
+    value: PageValue,
+) -> Result<(), lash_kernel_state::paged::HeapWriteError> {
+    heap.store_cards(
+        list,
+        lash_kernel_state::kernel_internals::StoredCards::List {
+            len: 1,
+            cards: vec![(0, vec![value])],
+        },
+    )
+}
+
 #[test]
 fn a_saved_function_bundle_keeps_its_frozen_capture() {
     let (mut heap, _) = fresh();
@@ -128,7 +144,7 @@ fn a_saved_function_bundle_keeps_its_frozen_capture() {
             .ok_or(BundleError::Missing)
     })
     .expect("assemble");
-    heap.list_write(live, 0, int(2)).expect("later live write");
+    write_first(&mut heap, live, int(2)).expect("later live write");
     let function = loaded.member(0).expect("member");
     let first = function
         .captures_for_call(&mut heap)
@@ -137,8 +153,7 @@ fn a_saved_function_bundle_keeps_its_frozen_capture() {
     assert!(
         matches!(heap.list_get(first_id, 0).expect("original"), Some(PageValue::Int(IntRef::Inline(n))) if n == 1.into())
     );
-    heap.list_write(first_id, 0, int(3))
-        .expect("first invocation write");
+    write_first(&mut heap, first_id, int(3)).expect("first invocation write");
     let second = function
         .captures_for_call(&mut heap)
         .expect("second invocation");

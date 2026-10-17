@@ -360,6 +360,37 @@ fn sliced(
     Ok(new.text(slice))
 }
 
+/// [`sliced`] over a text's view: the slice is read from the chunks its
+/// range addresses alone, so a slice of a large text on its pages decodes
+/// those chunks and no others (FIG-6193).
+fn sliced_view(
+    new: &mut Nursery<'_>,
+    text: TextView<'_>,
+    range: std::ops::Range<usize>,
+) -> Result<Value, NativeError> {
+    new.hold(0, super::room(range.len()))?;
+    let cut = || NativeError::Malformed("a text slice cuts a scalar");
+    if let Some(whole) = text.as_str() {
+        return Ok(new.text(whole.get(range).ok_or_else(cut)?));
+    }
+    let mut slice = String::with_capacity(range.len());
+    let mut offset = 0usize;
+    for chunk in text.chunks() {
+        if offset >= range.end {
+            break;
+        }
+        let chunk = chunk?;
+        let end = offset + chunk.len();
+        if end > range.start {
+            let from = range.start.saturating_sub(offset);
+            let to = (range.end - offset).min(chunk.len());
+            slice.push_str(chunk.get(from..to).ok_or_else(cut)?);
+        }
+        offset = end;
+    }
+    Ok(new.text(&slice))
+}
+
 /// Negative positions count from the end; slice positions are clamped.
 pub(super) fn position(index: &Integer, len: usize) -> usize {
     let distance = distance(index);
@@ -483,7 +514,7 @@ fn utf16_slice(call: NativeCall<'_, '_>) -> Result<Value, NativeError> {
     if start > end {
         return Ok(call.new.text(""));
     }
-    sliced(call.new, &text.whole()?, from as usize..to as usize)
+    sliced_view(call.new, text, from as usize..to as usize)
 }
 
 /// The byte offsets of UTF-16 positions `targets`, each at most the text's

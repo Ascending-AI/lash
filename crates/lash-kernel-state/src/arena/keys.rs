@@ -4,7 +4,10 @@
 //! index keys it by, so a key means the same in the arena and in pages.
 //!
 //! A read that reaches a cold chunk answers [`Retry::Cold`]: the machine
-//! decodes it and asks again.
+//! decodes it and asks again. These reads take values, texts and bytes
+//! whole, so a chunked object answers for its first cold chunk, or for
+//! chunk 0 once every chunk is resident, and the machine joins it into one
+//! chunk.
 
 use std::collections::BTreeSet;
 
@@ -22,20 +25,23 @@ fn body(objects: &Objects, handle: ArenaHandle) -> Result<&Body, NativeError> {
         .ok_or(NativeError::Malformed("a stale handle reached the arena"))
 }
 
-/// The resident values of a one-chunk sequence or table.
-fn resident(object: ArenaHandle, chunks: &[Chunk<Vec<Value>>]) -> Result<&[Value], NativeError> {
+/// The one resident piece of a chunked body, whole.
+fn whole<T>(object: ArenaHandle, chunks: &[Chunk<T>]) -> Result<Option<&T>, NativeError> {
     match chunks {
-        [] => Ok(&[]),
-        [Chunk::Resident(values)] => Ok(values),
-        [Chunk::Cold { .. }] => Err(Retry::Cold { object, chunk: 0 }.into()),
-        _ => Err(NativeError::Malformed("an object is not one chunk")),
+        [] => Ok(None),
+        [Chunk::Resident(whole)] => Ok(Some(whole)),
+        chunks => Err(Retry::Cold {
+            object,
+            chunk: super::first_cold(chunks).unwrap_or(0),
+        }
+        .into()),
     }
 }
 
 fn sequence(objects: &Objects, handle: ArenaHandle) -> Result<&[Value], NativeError> {
     match body(objects, handle)? {
         Body::List(Sequence { chunks, .. }) | Body::Tuple(Sequence { chunks, .. }) => {
-            resident(handle, chunks)
+            super::ops::values(handle, chunks)
         }
         _ => Err(NativeError::Malformed(
             "a sequence handle names another body",
@@ -46,7 +52,7 @@ fn sequence(objects: &Objects, handle: ArenaHandle) -> Result<&[Value], NativeEr
 fn table(objects: &Objects, handle: ArenaHandle) -> Result<(&Table, &[Value]), NativeError> {
     match body(objects, handle)? {
         Body::Map(table) | Body::Set(table) | Body::Record(table) => {
-            Ok((table, resident(handle, &table.chunks)?))
+            Ok((table, super::tables::pairs(handle, table)?))
         }
         _ => Err(NativeError::Malformed("a table handle names another body")),
     }
@@ -57,15 +63,9 @@ pub(crate) fn text<'a>(objects: &'a Objects, value: &'a Value) -> Result<&'a str
     match value {
         Value::Text(short) | Value::Function(short) => Ok(short.as_str()),
         Value::LongText(handle) | Value::LongFunction(handle) => match body(objects, *handle)? {
-            Body::LongText(long) | Body::LongFunction(long) => match &*long.chunks {
-                [Chunk::Resident(text)] => Ok(text),
-                [Chunk::Cold { .. }] => Err(Retry::Cold {
-                    object: *handle,
-                    chunk: 0,
-                }
-                .into()),
-                _ => Err(NativeError::Malformed("a text is not one chunk")),
-            },
+            Body::LongText(long) | Body::LongFunction(long) => {
+                Ok(whole(*handle, &long.chunks)?.map_or("", |text| text))
+            }
             _ => Err(NativeError::Malformed("a text handle names another body")),
         },
         _ => Err(NativeError::Malformed("a text was expected")),
@@ -75,15 +75,7 @@ pub(crate) fn text<'a>(objects: &'a Objects, value: &'a Value) -> Result<&'a str
 /// Bytes, whole.
 pub(crate) fn bytes(objects: &Objects, handle: ArenaHandle) -> Result<&[u8], NativeError> {
     match body(objects, handle)? {
-        Body::Bytes(bytes) => match &*bytes.chunks {
-            [Chunk::Resident(bytes)] => Ok(bytes),
-            [Chunk::Cold { .. }] => Err(Retry::Cold {
-                object: handle,
-                chunk: 0,
-            }
-            .into()),
-            _ => Err(NativeError::Malformed("bytes are not one chunk")),
-        },
+        Body::Bytes(bytes) => Ok(whole(handle, &bytes.chunks)?.map_or(&[], |bytes| bytes)),
         _ => Err(NativeError::Malformed("a bytes handle names another body")),
     }
 }
@@ -376,12 +368,18 @@ pub(crate) fn lookup<'a>(
     handle: ArenaHandle,
     normal: &NormalKey,
 ) -> Result<Option<&'a Value>, NativeError> {
-    let (_, values) = table(objects, handle)?;
+    let table = match body(objects, handle)? {
+        Body::Map(table) | Body::Set(table) | Body::Record(table) => table,
+        _ => return Err(NativeError::Malformed("a table handle names another body")),
+    };
     let index = facts
         .get(handle.index() as usize)
         .and_then(|facts| facts.index.as_deref())
         .ok_or(NativeError::Malformed("a resident table has no index"))?;
-    Ok(index.find(normal).map(|at| &values[at * 2 + 1]))
+    match super::tables::find(handle, table, index, normal)? {
+        Some(place) => Ok(Some(&super::tables::pair(table, place)?[1])),
+        None => Ok(None),
+    }
 }
 
 /// The arena's guest semantics, borrowed for a call.
