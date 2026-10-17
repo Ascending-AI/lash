@@ -2,7 +2,6 @@
 pub(super) const DATA: &str = r####"{
 "990235f5c8b47d3b45ad333c255c568dc32c218a8f796992ed3547c637abf976":{"charge":466,"outcome":"declined","prepared_difference":null,"reservations":[],"reserved":0,"spent":0},
 "99055c00082b609df2e997721c0b35dbeda11faad706edb108d7d69305b5bf3c":[{"list":0},{"text":"񹑻𕶓⧨򍶻𵃀򃱡񍁙喹򔅒⥐􈄂󉺀𘾽򈏢󶱥𦧽󴩮󧕺🦀𑊪𧀏򡴯󷛕𴭸򫾅涺󫯡󩛖򉙻񁮗򕑠𺋈񼆍񇭎􄸸򂂤󤏥󧠢󵹒󧱮񥬖񡘠󝀌򱒬񻾅󷶺󂇁𫯂􍈵򉓑妸񐌋񄗍􄈆񠔂񿶈􃑳󰳛򚈂󯏆𔆡򖵢𿄸򇋚񴲿󮷦󤦽󘑮󫋦󤸃𔉟򤬛󷭍񨋻򓼾񜃀󆽁𺷟񹝄񴽪򝽴򚗊󠸁𒉝񍥙𾲫񛦲􃱁󥙹󺂕𫲔󱣭򿎜򚕻񕛱񽘜򯪰񒭅򮡓Ń㮁񉦶򍬅󯧳"}],
-"990639dad71571daba8070212ad635a7fb05ba8c5182605376185225599e80aa":[{"float":"2.7163836287777346e-163"},{"list":21}],
 "99073761dfa6ae8e0f770869801bda47b2fd1189117d3c408aea10945c2a11a9":{"charge":68,"outcome":"ok {\"float\":\"-1569510.1032399216\"}","prepared_difference":null,"reservations":[],"reserved":0,"spent":0},
 "99073da576387c8efeacbcd6a59e1d7ef872453671e9bb374649bb09e79a3fde":{"charge":765,"outcome":"raised \"regex.syntax\" \"invalid regular expression flags: `a` is not a flag\" \"null\"","prepared_difference":null,"reservations":[],"reserved":0,"spent":0},
 "9908753be543d45d4a3be1e75f8ba92c0e084198997ce294c809987945278ce7":{"charge":6,"outcome":"ok {\"record\":[[\"(\",\"null\"]]}","prepared_difference":null,"reservations":[],"reserved":0,"spent":0},

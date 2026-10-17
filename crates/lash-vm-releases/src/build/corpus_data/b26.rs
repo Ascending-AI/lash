@@ -53,7 +53,6 @@ pub(super) const DATA: &str = r####"{
 "2659925ae8404d0819309967ad1b2ea58e8eb961c8045d2569c22d0b145f9e2c":{"charge":46,"outcome":"ok {\"bool\":true}","prepared_difference":null,"reservations":[],"reserved":0,"spent":0},
 "265c2f4d7c8d884af9ea94c556d4b1e5db2c708050e9592fa8f53cecdac4f3dc":[{"float":"2.671046613131214e256"},{"float":"4.1608167200062904e45"}],
 "265f8fa43022c6fc2afdde0c984d9c3ec5482ae6ab4ffec2ccc6161187679ddb":{"charge":5,"outcome":"ok {\"int\":\"4945122409412208926\"}","prepared_difference":null,"reservations":[],"reserved":0,"spent":0},
-"266016442e89098994cbbe830d70094259c8cdd1a2b9b82de02fc004bfb01de2":[{"list":47},{"float":"3.6031247425671534e-217"}],
 "2661bffff5cf661813091cae0572f8217a32951f80b5b242d563b8993e124842":{"charge":3,"outcome":"ok {\"float\":\"-3.394960204729785e287\"}","prepared_difference":null,"reservations":[],"reserved":0,"spent":0},
 "2661f08468f5e372545e3a829367d04fc908fb4d4ac395b686039253ea91cbf1":{"charge":1375,"outcome":"raised \"regex.syntax\" \"invalid regular expression flags: `\\u{b06be}` is not a flag\" \"null\"","prepared_difference":null,"reservations":[],"reserved":0,"spent":0},
 "2662ca87270542ce5128fbb3b229530c67cf1d55218568ebc80fe9c172b97962":{"charge":4,"outcome":"ok {\"float\":\"-1.2770503541885969e104\"}","prepared_difference":null,"reservations":[],"reserved":0,"spent":0},
@@ -135,6 +134,5 @@ pub(super) const DATA: &str = r####"{
 "26eb5ec303f18ab0d4f0ff10d35d9458643a517dc91777650c16b8a73855d26a":{"charge":263,"outcome":"ok {\"bool\":false}","prepared_difference":null,"reservations":[],"reserved":0,"spent":0},
 "26ecc036651a0a8533606f17e7343b388e07e05ff72c084cc24e2770b26a5ed3":[{"list":0},{"int":"6003931660528456441"}],
 "26f8c41cd0f36c6b5e5a9ccd706914f1e47fd7189dc50fe3065b96ff90827c11":[{"float":"-8.23573572592225e-221"},{"float":"-3.0168197495687732e144"}],
-"26fd459568ed9153c3202d31e9cd61ef1922636bbcded1f8dba3bceff541db2f":[{"float":"2.3216695413115885e89"}],
-"26fee267e1efa6aba17449daaac727459b17d6867c5368e16f9923fb3906628e":[{"float":"6.194867087122705e119"},{"bool":true}]
+"26fd459568ed9153c3202d31e9cd61ef1922636bbcded1f8dba3bceff541db2f":[{"float":"2.3216695413115885e89"}]
 }"####;

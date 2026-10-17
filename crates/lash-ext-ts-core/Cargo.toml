@@ -7,7 +7,7 @@ authors.workspace = true
 repository.workspace = true
 homepage.workspace = true
 rust-version.workspace = true
-description = "Partial native implementations of the TypeScript dialect's hot operations over kernel data"
+description = "The TypeScript dialect's closed helpers as Rust plans compiled from their kernel bodies, and partial natives of its hot operations"
 publish = false
 
 [lib]
@@ -19,3 +19,6 @@ workspace = true
 [dependencies]
 lash-kernel-doc = { workspace = true }
 thiserror = { workspace = true }
+
+[dev-dependencies]
+lash-ext-helper-compiler = { workspace = true }

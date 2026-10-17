@@ -107,7 +107,6 @@ pub(super) const DATA: &str = r####"{
 "b2be165a44d2c5d80fe8ae9102f466669a236809ef97f7df7aa63c6158caf299":[{"record":0},{"text":"𴯧񣲰󌃉񹔈񩘢򑎎󨸩􁍵񶈓򸈗񈣓񰜂🦌񜝿"}],
 "b2c22a1d04883b5de6701757123805a92574e9119a857c0247aaf64f3425cf7f":[{"float":"-4.14074603181445e73"},{"int":"-676361067342614367"}],
 "b2c30384a3660ac6776ee9bc1016274b076e880b6ea63e52d269c499662bb6a8":{"charge":585,"outcome":"raised \"regex.syntax\" \"invalid regular expression flags: `🦀` is not a flag\" \"null\"","prepared_difference":null,"reservations":[],"reserved":0,"spent":0},
-"b2c4226c59486277918b1c9fcc367991dc6ecd66438c744f2d15707130526592":[{"text":"򗥰񿎂񴫥򛌰𠉖򴧒𧏁񝽦𚵘𹘂𬞮񋆡좂񱖓󃥸񋤊񊃸󛖹𯊒򍇷⎔𦳓𒫊󽐟􅩻񧸏󵤳񾭁򋫗񝉢󐥆𶻔񘼉𔡗񹬇𐷱󿶪𻫑򚿤󍖻񅻐񦡭󡿽𠪂󝀗򼩷񞈣󋬧󠦑򺿂񃨝򱄩򁍋𵶭󩡖𽳦󆋟򴗚񚧑󽛂񮏯񛇨򅒋񻻢𮤟𡜍󤁣񵨣"},{"float":"-8.431990249737745e20"}],
 "b2c49b31438e0651321de839af63150b683ef5d2547e1ba05d04d335d7c004dd":{"charge":69,"outcome":"ok {\"float\":\"-2.8593378203655704e-31\"}","prepared_difference":null,"reservations":[],"reserved":0,"spent":0},
 "b2c56ecd7b037628518211d775623665cc9cdc8ef083a05d35dfa1bd0b0564de":[{"float":"-4.949263189793988e-234"}],
 "b2c6d3e2ed27c94c2f5015a6315900ef926fe12af17f1a17e8986c829ae0cbea":{"charge":511,"outcome":"raised \"number_range\" \"the regex's `lastIndex` is negative: it counts UTF-16 code units from the start of the input\" \"null\"","prepared_difference":null,"reservations":[],"reserved":0,"spent":0},

@@ -1,0 +1,32 @@
+[package]
+name = "lash-ext-helper-compiler"
+version.workspace = true
+edition.workspace = true
+license.workspace = true
+authors.workspace = true
+repository.workspace = true
+homepage.workspace = true
+rust-version.workspace = true
+description = "Compiles the dialects' closed helper bodies to Rust execution plans at build time"
+publish = false
+
+[lib]
+doctest = false
+
+[[bin]]
+name = "regenerate"
+path = "src/bin/regenerate.rs"
+
+[lints]
+workspace = true
+
+[dependencies]
+lash-dialect-python = { workspace = true }
+lash-dialect-typescript = { workspace = true }
+lash-ext-date-ecma = { workspace = true }
+lash-ext-regex-ecma = { workspace = true }
+lash-ext-url-whatwg = { workspace = true }
+lash-kernel-dialect = { workspace = true }
+lash-kernel-doc = { workspace = true }
+lash-kernel-lib = { workspace = true }
+lash-kernel-vm = { workspace = true }

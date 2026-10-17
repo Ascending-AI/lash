@@ -136,7 +136,6 @@ pub(super) const DATA: &str = r####"{
 "35ca63950d83d0624626dd7eb182ea73eaea8445723f5d4cb6b12b849eddc7f9":{"charge":28,"outcome":"raised \"json_syntax\" \"invalid JSON, including unpaired surrogates\" \"null\"","prepared_difference":null,"reservations":[],"reserved":0,"spent":0},
 "35cae1ce50051bf1fabd3d6e349d2e8c9e12b499497413423c07602e5de37e8b":[{"float":"-1.564605480939821e200"}],
 "35ce11d48497208ba3618d773a46e959129e2c9b7894164383459082df43a564":[{"float":"4.621444441408007e144"},{"float":"5.116332840141242e266"}],
-"35d1fe16962eef45b894a2a29e405bc1cd3af3a4bc11c5ada149237346b5ce3d":{"charge":7,"outcome":"ok {\"float\":\"-6.862217778592803e17\"}","prepared_difference":null,"reservations":[],"reserved":0,"spent":0},
 "35d3bf453fcec71cc5ca4e11a388208eb34e149fccac680a696a78fa2f1d81ee":[{"text":"񥶌򲠷𼦧𢇴񀺷񖵪󥄰򾞒򘓝񪂔㣕𢧤󺒷񋘾⫒𼰇󻡟󪣯񕡾􋭎񙆸񳒛𢨲󦫦𽖳𻣘򏖩񋈂򪷦𜬽򥟫󬎄󡄃񬿡񕰾򲴆񥓜򖍵𥓳󧒚󯳳󾟊𝚅𕑨򯓀󞬩򲒿򊴶𦇬񁘯󬿃𷺜򯥡𭛓𔞾􊢱񒦠񭇳񔂐򍈑񧇵𖩖񏔂񪩨𲜼𢁲񟪲𷧇󡃴燕񸑶🣾򾒏󼚆񷚋񡚦򉬋񃻽󥏀𵝧𹈉򠅭󦘯󜼣󛉽𝱙𝎡񄙆𧝊򯤤򽯖"},{"text":"ꘚ󖯖󚊁񙦄妷􃓄񆦭堾𐔎𐺄󔶙𴵂򻭘񫈮𵣊󒋻𶹾ἢ񛖜򗏷𴃐﹑򷇭񙱎󳳶󤔏񎑅򅫍󠜸󚔶􁟼񁳓􇠪𽩚򣭮􆊘񴡝󫖍񽎦🮁𪸶򇫪񏲟􄲦򰆿򩹼񲁀򉈀򞬤𬿲񛓭𓛄􉆩𘻊񎽗󄕉򴾃𥿜⁣𑛣񞐎񛱆󏲾󑃇񞜦񋕨򪀂󵟂񋇭󯷎𓆵ږ󿬛𗈭򻎉₮𬭯𥴹򝷃򍲸󁴁󟭻򶹍񍧑񡈢𶊆󺗃򆑈麀򕶽񍁆𰑦𽯮񁏙񖶾􋳥􍻜"},{"bool":true},{"bool":true}],
 "35d73d885023638e947df4eb8b5e94bf5cf44729c7576e451bebac6af7739445":[{"float":"-1.3519781685068653e-207"}],
 "35dc311fde44ea55085d122229f2334f759edae0102f0f6c96c588d1c98672af":[{"text":"򋏠🢇򪪶񟱣󫕛󮣱򻵠𰰚𡪂򼈷򪙳𞏿󿇸񛸛𜎧򖯠񼴷򒅭򹡯򘒟𽙖򒙺񥂶ꦗ𕄄度򪶛𞨀򚇔􄆗򘣔񝛅򢈨񈙬𸡠🦀󡛆򨵫񟢱񂬀󂍖𸺐𣶍򪲶򻹯듓𻍺􈺜􌺁򢝜񷈒󼱶𭁮󣙎񱎢񳼅񦠻񎸫󏜷񩤙􌩫𬼿񟥡󖳓򎓊􆮃򗾔􇑫񍩃򮔷񝄽󐏟𚀘𳭘󢔮򉫤񴻑󖨌񌧘󳹋򗫷񌟂󗓍󮕤"}],

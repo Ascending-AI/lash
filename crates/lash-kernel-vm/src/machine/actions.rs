@@ -214,10 +214,9 @@ impl KernelMachine {
                 let count = count - (at - args);
                 let flow = match target {
                     Target::Library(lib) => {
-                        let name = &exe.lib(lib).definition.name;
                         match self
                             .answer(task, exe, lib, at, count, at)
-                            .map_err(|interrupt| interrupt.in_function(name))?
+                            .map_err(|interrupt| interrupt.answering(exe.lib(lib)))?
                         {
                             super::ops::Answer::Done => Flow::Done,
                             super::ops::Answer::Body(code) => {
@@ -236,10 +235,9 @@ impl KernelMachine {
             // An operation's native answers at once; only a call whose body
             // runs, its native declining or absent, stands at the action.
             NestedKind::Body(lib) => {
-                let name = &exe.lib(*lib).definition.name;
                 match self
                     .answer(task, exe, *lib, args, count, args)
-                    .map_err(|interrupt| interrupt.in_function(name))?
+                    .map_err(|interrupt| interrupt.answering(exe.lib(*lib)))?
                 {
                     super::ops::Answer::Done => Ok(Flow::Done),
                     super::ops::Answer::Body(code) => {

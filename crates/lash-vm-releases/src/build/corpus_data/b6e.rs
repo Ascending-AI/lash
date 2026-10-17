@@ -125,7 +125,6 @@ pub(super) const DATA: &str = r####"{
 "6ed49e418c988e42a52dba1c5d9e4abd09ec87c3e9e0bead3ab165b46b63d426":{"charge":442,"outcome":"raised \"index_out_of_range\" \"text index is out of range\" \"null\"","prepared_difference":null,"reservations":[],"reserved":0,"spent":0},
 "6ed4d1c60a0d3b494e2c30dc011449273d4107b4f28e5abe44ed6c9045379395":[{"text":"򕷶񄫍󏬘񬃮񧣯򅇞ࣽ󛆬򠷏𼐔𞒜񏱕񲛭򣷠񢞛񽬔򖶢򤿹𣴦񐣜򘿍򵎒🶵򡌎򄲨񯠱񝮁󵉶񀥒򃯀򗶷񶂌󽥍𝶿🗄𓤯󁒝񽇴򧭗񎹡񃧽󛓎򔨧񾭳𷩥𣏑󋏶򵴑򻷫򘑐󒕘򦄒⽐񷜎񦩠􏊴򾩑򒏅򻣂󉄳𞫑򜍄󕗂񋇩𜋊𫇏󒍬󗨪򪙞𛲒󠵫󢞱𷶾󧳅񦅼񺢾򄉯񥼫񇕕𕛿"}],
 "6ed5ed3feeb099ab8e968c3d4b084ed031e8060f738669dafa61a637ff36a3cd":{"charge":5,"outcome":"ok {\"int\":\"8547640519594696538\"}","prepared_difference":null,"reservations":[],"reserved":0,"spent":0},
-"6ed6c86745f3be85192f2b0bcad02446d39da1378631b9b581577973ac1519a6":[{"text":"󜮊򹊝񜋸򪕽󘅷󵮵𘁂𖗂򴶉񴕒񾽘񭪆񅪳🦀󺓷򕩾󷅊񽤨󰒚𘨓񗧇𵻴󕛧򌾊𚂕񸲔𽚍𠙠󙁬򙙌𝁠𛇀󳺣󨠞񃊎󗍫򸥍򐌟󾫙򛭌񶔺󼅰򵳲󜳋򲶒󩝉󹘧񮃋𘿊񈑕񐈝򆥙񰏋򩔌񕜦󩠈񓄸饚򨃨􌯩򼘾􎐲𕍺ཛྷ𔹂𳁞󌞾򾦱񊘢􎿮񯮱󸠆􍪖𰪣􄉶􍽲󔙌󕇀ꥣ񜣱󻤠򓡒𖪢󼻆񅓛򄺲򒚯񥼢򌬜񇎊򫗭𮷆𘆝򦗞񸺕𡳈𧳱󠙈򢡄񃄔"}],
 "6ed861142aaf424fb4e986e2a919cdf15867e2ad341f1704eeff1bb5d2748311":{"charge":23,"outcome":"raised \"json_syntax\" \"invalid JSON, including unpaired surrogates\" \"null\"","prepared_difference":null,"reservations":[],"reserved":0,"spent":0},
 "6ed8a86c13ea3b381dd8b4c6d86e0a6af73aa1065e28efddda0aad20a0ddd6d1":[{"text":"12.5"},{"text":"12.5"},{"bool":false},{"bool":true}],
 "6ed984f3fca8abe841a2ec6221ce79c0fa435fcfbb9bea9d115d36ac78d21226":[{"text":"g"},{"text":""},{"bool":false},{"bool":false}],

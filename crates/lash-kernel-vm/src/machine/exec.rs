@@ -609,8 +609,9 @@ impl KernelMachine {
     /// a decline transfers it to the body's frame until return or raise.
     pub(super) fn check_call_depth(&mut self, task: TaskId) -> Eval<()> {
         // `main`'s own frame is not a call.
-        let depth =
-            self.task(task)?.frames.len() + usize::from(task != TaskId::MAIN || !self.session_cell);
+        let depth = self.task(task)?.frames.len()
+            + self.plans as usize
+            + usize::from(task != TaskId::MAIN || !self.session_cell);
         if depth as u64 > u64::from(self.bounds.call_depth) {
             return Err(bound(Bound::CallDepth, u64::from(self.bounds.call_depth)).into());
         }
@@ -804,6 +805,27 @@ impl KernelMachine {
         Ok(())
     }
 
+    /// A value as a variable keeps it: its resident payload moved into
+    /// pages.
+    pub(super) fn canonical_binding(&mut self, value: Value) -> Result<Value, Halt> {
+        // Scalars have no resident payload to move into pages. Avoid cloning
+        // the full value through the fallible canonicalization/retry path.
+        if matches!(
+            &value,
+            Value::Null | Value::Absent | Value::Bool(_) | Value::Float(_)
+        ) {
+            return Ok(value);
+        }
+        #[cfg(test)]
+        {
+            self.storage.binding_canonicalizations += 1;
+        }
+        self.heap_write(|heap| {
+            heap.canonical_value(value.clone())
+                .map_err(super::write_halt)
+        })
+    }
+
     /// Binds a new variable at frame position `at` of the top frame, in a
     /// heap cell when a closure shares it (`K-FORM-004`).
     pub(super) fn bind(
@@ -813,23 +835,7 @@ impl KernelMachine {
         shared: bool,
         value: Value,
     ) -> Result<(), Halt> {
-        // Scalars have no resident payload to move into pages. Avoid cloning
-        // the full value through the fallible canonicalization/retry path.
-        let value = if matches!(
-            &value,
-            Value::Null | Value::Absent | Value::Bool(_) | Value::Float(_)
-        ) {
-            value
-        } else {
-            #[cfg(test)]
-            {
-                self.storage.binding_canonicalizations += 1;
-            }
-            self.heap_write(|heap| {
-                heap.canonical_value(value.clone())
-                    .map_err(super::write_halt)
-            })?
-        };
+        let value = self.canonical_binding(value)?;
         let state = if shared {
             SlotState::Cell(self.alloc(ObjectInit::Variable(value))?)
         } else {

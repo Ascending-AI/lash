@@ -78,6 +78,7 @@ pub(crate) fn start(
         fresh: Vec::new(),
         charging: true,
         scalar_blocks: false,
+        plans: 0,
         charged: 0,
         live_tasks: 1,
         regs: registers::Registers::default(),

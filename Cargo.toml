@@ -71,6 +71,7 @@ members = [
     "crates/lash-kernel-migrate",
     "crates/lash-kernel-state",
     "crates/lash-kernel-vm",
+    "crates/lash-ext-helper-compiler",
     "crates/lash-ext-regex-ecma",
     "crates/lash-kernel-conformance",
     "examples/kernel-embedder",
@@ -384,6 +385,7 @@ lash-ext-date-ecma = { path = "crates/lash-ext-date-ecma", version = "=0.0.0-dev
 lash-ext-url-whatwg = { path = "crates/lash-ext-url-whatwg", version = "=0.0.0-dev" }
 lash-ext-ts-core = { path = "crates/lash-ext-ts-core", version = "=0.0.0-dev" }
 lash-ext-py-core = { path = "crates/lash-ext-py-core", version = "=0.0.0-dev" }
+lash-ext-helper-compiler = { path = "crates/lash-ext-helper-compiler", version = "=0.0.0-dev" }
 lash-ext-regex-ecma = { path = "crates/lash-ext-regex-ecma", version = "=0.0.0-dev" }
 lash-kernel-conformance = { path = "crates/lash-kernel-conformance", version = "=0.0.0-dev" }
 ruff_python_ast = "=0.0.11"

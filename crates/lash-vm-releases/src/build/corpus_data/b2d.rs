@@ -4,7 +4,6 @@ pub(super) const DATA: &str = r####"{
 "2d02256d6d736d96456a6fbb9096dcaca9eaed98066dbf3598d9583fb1a2cb98":[{"int":"7040782650195618979"}],
 "2d023ddcfa52001fd97f061d315d6be331ba16cab5fb4697378582a2dcd97b07":[{"list":["null","null",{"int":"-6549469144697343984"},{"text":"􋂜򐣽򬖬򢼧񔚹𣡴𺼄󝅚񰁸󉙸󔍔𘫒󋕇𑯭񩲚𘄣򩃡򳦀𺧳񢉠𰸤񢔸𴵲󰽨󱝶򢓘򊚑𻆜񾧿ꏬ𬮫񬓼𰩵񸬡𯩷"},{"float":"5.06201063394341e-190"},{"bool":false}]}],
 "2d0654558d68d757ce004540a9dec92c6d1d8a10a8a484bf87938ddca63f1480":[{"text":"񛢜􈫭򓲸򧻁򬱼틤񟉁󿯥򎍒񡰔򵬬𾲚򹯃񥀴𵮔𰠣𒫳񡈶𗮒񑷥𺺞񿱃񸵻򽲡󘍘􊑞񃪖򆍣򤵥򕂿򇿞󑊡囄򐍩󷤯򲘝𽬑󪛧󺹪򏎶𕯑󒌦񗛠񡠍􉝽򲄓񉾑񮋮𦲫񪪲񠍧󝒡򎕈󓪂񱩷􂖃񊌈󎁎󰨎򛖚񆩱𱫥𓖐񻧻𸱈𒭐򹌆򸞠𔺯৲󼥡񥂳񁋒󶉷񟕳🹙󽧥󥌖񦘰򶀕𭾕𑕪󍇀񊁣񚷣🁸"}],
-"2d089f49820a0a292bc8d7900881facee83bf491c91d23d3f36ec5cb45a2bf18":{"charge":130,"outcome":"ok {\"int\":\"-2205966866508171736\"}","prepared_difference":null,"reservations":[],"reserved":0,"spent":0},
 "2d0ac886c35460a2ad5b8f4d8614881c522f4ea93884209b50412c3795e01a0e":{"charge":5,"outcome":"ok {\"int\":\"1978891561827654485\"}","prepared_difference":null,"reservations":[],"reserved":0,"spent":0},
 "2d0b47bd61e483c537af366e889bc9a7141e315cb9c64c040f070e33a05d4bc6":[{"record":0},{"text":"Hello, Wörld"},{"text":""}],
 "2d0b4adde00a33722b651a14f088c6673689e285f0c65152af400d497cff6944":{"charge":7,"outcome":"ok {\"int\":\"-2431354995311433720\"}","prepared_difference":null,"reservations":[],"reserved":0,"spent":0},

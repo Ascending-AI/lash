@@ -198,7 +198,7 @@ macro_rules! identity {
         }
 
         impl $name {
-            pub fn from_bytes(digest: [u8; 32]) -> Self {
+            pub const fn from_bytes(digest: [u8; 32]) -> Self {
                 Self(digest)
             }
 

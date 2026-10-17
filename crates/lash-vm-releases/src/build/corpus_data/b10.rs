@@ -127,7 +127,6 @@ pub(super) const DATA: &str = r####"{
 "10aaa66ad93fb57fee17c405fc01f4f49bdf354d7a1f121a1f6e8e35ec87405a":{"charge":67,"outcome":"ok {\"float\":\"-14.101419947171719\"}","prepared_difference":null,"reservations":[],"reserved":0,"spent":0},
 "10abc3f3954888f0d86f4ff2ca23bdda334ef77c4164b4209f4580cee8455d77":[{"record":54},{"text":"񾁊􉌊𠚬􆆡򙌢򱒄枭舢󭖦𦦍𾠞󕡎󤽾􆩠򠺴ྩ򶏶񻂱𝦐񹘣򍧏𡶼񰢇󸕖򦗜񖠗𨜇񧷉򘭲󄫤񸕱𷈻󚀟񦢟񰆎񁠍񕍽񙂛󙭺򾋌󈰉"}],
 "10abe4ed64b38a93d748e2b5a333b5c9cc77d15cb88f9b144c95bfa703a97b15":[{"text":"򊥫󢋹񜓼򫁵🁕𜋵򡨰􂀄𙍄򁍢󗿄󵠻𶑋񵱃򑨻򷫏󟏺񖒝򄬔⺂𰩟񎶋󖲐󗹉􊓵򛣼𘒍𘳄򬫝򚀈􌭈󮛞񺊓󟜖󵝸񗏖󸒱𭧸􋁋񠷫񉜰𳨞򜿪􀫵𮞠󝩯󹨛𯇯󅗌󯩧񺙓񰧟󚀌󜉌󡋈󊋭󖃨򘐩󘍡ꀧ𶲧򼮾򻮩򶒞򱷗򡈬􃌈􉥮𯷜𫄧񄮅㡒򏊢򂷇󇙜񻞰ꋟ𘙚𕗖𘃽𨒼󴊵񪍰񣸶򡇊󵕩򳶃󈌸"}],
-"10b01e10f9a753d705bca3bcd02ed58d8ab680289c47844b2cdd16d6a5060a32":[{"list":[{"text":"𲥝񸹏򟺓𴞮񮂡򝄠򯺂𱿿󿘀𛧬𓮟񧐨񕃀󋑡񎥉𒫛񈡎"},"null",{"int":"-2662493461623481896"}]}],
 "10b21fde29e1b1024f563ec49c4efbd6d616095f6a917f72a24243763581b1f2":[{"list":1},{"bool":true},{"int":"-3"},{"float":"0.5"},{"bool":false},{"bool":false}],
 "10b2633cbdb86cca46639cb7f45640970fab63014fee2687e0997c7ee91f802c":[{"record":23},{"text":""},{"int":"0"}],
 "10b535bfe273b92c211b952a911f5e2c49c7ac5367c414ff1c8f4db56e446f29":{"charge":3,"outcome":"ok {\"float\":\"8.858117763821611e177\"}","prepared_difference":null,"reservations":[],"reserved":0,"spent":0},

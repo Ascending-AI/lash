@@ -49,7 +49,6 @@ pub(super) const DATA: &str = r####"{
 "7460555c72321775285477ebd2c389a493577345fcd01894c93e7b3bd5875ff4":[{"int":"6049738310646261314"},{"int":"-6048787101477634546"}],
 "7462ee328450a41f69e039f6b70f35357e255d7c9bedfea52b0f579804e61ba8":{"charge":195,"outcome":"raised \"TS_DATE_PARSE_NON_ISO\" \"Use the ECMA ISO date-time format\" \"null\"","prepared_difference":null,"reservations":[],"reserved":0,"spent":0},
 "7464a86ffa3dccdde57e89937939d9586e3033b685e9f3e8b6f76f35615b24a3":[{"record":53}],
-"7464aec02624c3080845c5e8b7dc394d54089c7fd3ec8dc91f2adb2b1320872f":[{"float":"6.532492746597365e-40"}],
 "746626a2b786ee1ec27170f76398eaebe700a190d86eea133547079505f450b1":{"charge":203,"outcome":"ok {\"bool\":false}","prepared_difference":null,"reservations":[],"reserved":0,"spent":0},
 "7467ec6defa4a024cab137cd024034d6beb35c8a4be6ee9db02cbbd7258c4c5c":{"charge":6,"outcome":"ok {\"text\":\"1\"}","prepared_difference":null,"reservations":[],"reserved":0,"spent":0},
 "7469c947e2225992ff37bfa987a436de1ab30ee2a68fc18aeb1822fabd245639":[{"text":"true"},{"int":"0"},{"text":""},{"text":"start"}],

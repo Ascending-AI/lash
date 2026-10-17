@@ -72,7 +72,6 @@ pub(super) const DATA: &str = r####"{
 "5c70cbb9e58401d78646dff360130dd5e5134b5c4fb59e9dcdb076a018e488d5":[{"text":"򩑉򎼡󤊿󹷺񊉁򄭅񝲓󧷪𐮑񇿆𝺹򍭄󖿲򩞭򳿂󗤽񍪏񘃺񖥻򁕩򡼃񷯽󪁊󦎊񳏍򙣪񖍛󨕝򸔗󘗝𙞖󊤹󛐫󟾃󯂼𖙝󞇑󬡒🥂𞨰񡧤𽛗񒒺󻉳𜟗򎶘򐹃򪺟𮀂𴥂􀽐񮥎񹼜󷼢򵽜󘛢񯭯𥕙𔖳𽷸𧩃𘱷򀺯󼝲󻱼󰨄󧜐𒗾󱰵𒭍򈱛􋎃񬰤򳪼򺇉򵣊󆛻󠻶"}],
 "5c7113f3e06c270c2786d6c78d5de05692d0c21aa97a1158376e9fab5b0c3873":[{"int":"4342062402564428783"}],
 "5c75e46bd11e0afc3eadc1c04fd42ccadb81b10f7e6b9bf7134be46bf37da24e":[{"int":"9162779265695237473"}],
-"5c76cea9c2621f6ba997f35883585e6c6e201177a60914e895d590a86cbb4fb3":[{"float":"-3.565454912976305e-268"}],
 "5c76f98ff1c9c3cc28c407c62ac8fa31921fd5985bebdef042ab9e41e83446ba":[{"int":"957710878668463135"},{"int":"-952167617613503257"}],
 "5c77fb78cf2473e993be754d9824da1557e930479c0d90f3624957efdd3a3a7e":{"charge":262751,"outcome":"raised \"regex.syntax\" \"invalid regular expression flags: `🦀` is not a flag\" \"null\"","prepared_difference":null,"reservations":[],"reserved":0,"spent":0},
 "5c7982a367391205d26a857bd8d40abf29c2ff8f22df3ced0d0c768fb39b7e8b":[{"float":"-2.0935921402124487e86"},{"float":"-4.298939860720718e137"}],

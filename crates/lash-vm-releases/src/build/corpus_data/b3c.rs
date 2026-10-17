@@ -132,7 +132,6 @@ pub(super) const DATA: &str = r####"{
 "3cee0d90306121b2943ec5a8a028de5e42d2cd370387b1c8676d7a8a23f7e6ed":[{"map":54}],
 "3cf0835e313872dae3698002365f4d185bf62f14b649fd0154f401259205af87":[{"float":"-5.281750531832117e39"},{"int":"-7897017536297527314"}],
 "3cf3b50c4c318eed11ad5c799cb3684709fb17578cb67a21b03494edb3c429cb":[{"list":[{"int":"-4706971209036228780"}]}],
-"3cf56753aafea2c6dfebeb46b98d4da6aed47706e6686162cdc0a0d92ddbefe8":[{"list":30},{"text":"󓯼𙲋񎝲񴐼󟞴􄅛󴤙򜗋򱪀󧊵唐񵆺񍆙񞙺󨌶򦎰𿵷𱥍󴨿󻅫򘣉񔮘匏󲙩򭱥󂺝"}],
 "3cf57cb018b9bee01048cc4ba4a8b8523c03a5919d9e3e2e25809b1ea043e6b8":{"charge":68,"outcome":"ok {\"float\":\"0.9966433407077949\"}","prepared_difference":null,"reservations":[],"reserved":0,"spent":0},
 "3cf793b257e1b188060cba187accc89fea9eea07c48e657221b7a875f4a1ae75":{"charge":7,"outcome":"ok {\"int\":\"12443729382408383265\"}","prepared_difference":null,"reservations":[],"reserved":0,"spent":0},
 "3cfa87d2c29fc12214c5490c07f2cd9c5e608e30c01ae796a2d9190c737484b8":[{"int":"3113439256955479698"}]

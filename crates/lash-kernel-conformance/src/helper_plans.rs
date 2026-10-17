@@ -1,4 +1,6 @@
 //! Helper schedules obey PLAN-INDEP through the kernel-owned equality seam.
+//! Layouts 0 and 1 answer closed helpers by their generated plans and the
+//! rest by their natives; layout 3 runs every body (FIG-6678).
 #![allow(
     clippy::unwrap_used,
     reason = "malformed fixtures and failed machine operations are law failures"
@@ -51,6 +53,8 @@ impl Host for World {
 #[derive(Debug, PartialEq)]
 struct Observed {
     end: crate::ExpectedEnd,
+    /// The function a bound the run ended at names (`K-LIB-006`).
+    bound_in: Option<String>,
     prints: Vec<Datum>,
     requests: Vec<Request>,
     charged: u64,
@@ -126,19 +130,50 @@ fn run<const L: u64>(
             }
         }
     };
+    let bound_in = match &end {
+        lash_kernel_vm::End::Error(lash_kernel_vm::RunError::Bound(exceeded)) => {
+            exceeded.function.as_ref().map(ToString::to_string)
+        }
+        _ => None,
+    };
     Observed {
         end: crate::ExpectedEnd::from_end(end),
+        bound_in,
         prints: world.prints,
         requests,
         charged: machine.meters().charged,
     }
 }
 
+/// Recursion through helpers (`%`, `-`, `+`, `==`) to depths around the
+/// call-depth bound of [`run`]: the deepest are refused, at the same call
+/// and naming the same function under every plan (`K-BND-002`).
+fn depth_cases(dialect: &str) -> Vec<runner::Case> {
+    (190..=200)
+        .map(|depth| runner::Case {
+            id: format!("{dialect}/depth-{depth}"),
+            dialect: dialect.into(),
+            source: match dialect {
+                "python" => format!(
+                    "def f(n):\n    if n == 0:\n        return 0\n    return f(n - 1) + n % 3\nawait observe(f({depth}))\n"
+                ),
+                _ => format!(
+                    "function f(n) {{ if (n === 0) {{ return 0; }} return f(n - 1) + (n % 3); }}\nawait observe(f({depth}));\n"
+                ),
+            },
+            bits: 0,
+            stride: 0,
+            nanoseconds: 0,
+        })
+        .collect()
+}
+
 fn compare(dialect: &str, parity: Option<usize>) {
-    let cases: Vec<runner::Case> = serde_json::from_str(include_str!(
+    let mut cases: Vec<runner::Case> = serde_json::from_str(include_str!(
         "../../lash-dialect-typescript/tests/helper_differential/cases.json"
     ))
     .unwrap();
+    cases.extend(depth_cases(dialect));
     let runner = runner::Runner::new(dialect).unwrap();
     let mut body = None;
     let mut general = None;

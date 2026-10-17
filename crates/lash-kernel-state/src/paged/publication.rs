@@ -273,6 +273,36 @@ impl PagedHeap {
         self.header = None;
         Ok(())
     }
+    /// The credit the running statement holds for its writes.
+    pub fn statement_reserved(&self) -> u64 {
+        self.holdings.reserved
+    }
+    /// Releases the running statement's credit above `mark`: a statement a
+    /// generated plan performs inside its caller's ends, and what it held
+    /// for its writes is released as its own end would (FIG-6678).
+    ///
+    /// # Errors
+    ///
+    /// A fault of the census.
+    pub fn release_reserved_to(&mut self, mark: u64) -> Result<(), HeapFault> {
+        let Some(released) = self.holdings.reserved.checked_sub(mark) else {
+            return Ok(());
+        };
+        if released == 0 {
+            return Ok(());
+        }
+        let census = self
+            .census
+            .as_mut()
+            .ok_or_else(|| HeapFault::Malformed("a release has no census".into()))?;
+        census
+            .changed(LogicalBytes(released), LogicalBytes(0))
+            .map_err(census_fault)?;
+        self.accounting.upper.0 -= released;
+        self.holdings.reserved = mark;
+        self.header = None;
+        Ok(())
+    }
     pub fn release_statement_roots(&mut self) -> Result<(), HeapFault> {
         self.holdings.borrowed.clear();
         if self.holdings.temporary.is_empty()

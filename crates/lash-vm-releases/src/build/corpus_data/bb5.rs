@@ -44,7 +44,6 @@ pub(super) const DATA: &str = r####"{
 "b53f89116e8ccb526592810785c29f2e32f2672b9fdbf7af62f04fc08f0b6d27":[{"text":"񙱏􈪷񃁢򯂂𐿣񇷖𛺭񳲐󃛩󛋄􍪡𞕔􄆞󿚝򢀰󻱰򇄈󭗪"}],
 "b5439270855ddbba0423bb5cf676ee83cb128654bbc6e4e078b829a9b60cc994":{"charge":6,"outcome":"ok {\"float\":\"-3.77004644039871e146\"}","prepared_difference":null,"reservations":[],"reserved":0,"spent":0},
 "b543d6a1bee40f7c595f51f45141e1b9eff81359e6dde0f6499b6ef295062cd7":[{"int":"5711047141555034299"}],
-"b5442b0af78ffda4aa798f4a2ba1205d8f56d14752419122e23c3e4c57ad0188":[{"text":"򑞶񹰙䥡򢦳󽔠𣲊󵑳񯠛𧤫󩤙󘹫𛶷󍄌򣞮񀁁򞐁󇖉󍄢␀󊑈𗌀𼗦񪇭𚏮򓔩󔜃𺭍񽵛吡򼓉񤜀򏶎񥷵򕸎󭬲񦀄򒟄񃊋򻀮󕳎􈧷񛬤򜵒ቈ󺱬񕈴"}],
 "b5454868421ed1050b8ac08f8cc2277408ce9e0fc3381a0da2f1b3a4cc42a201":{"charge":31,"outcome":"raised \"type_error\" \"collection has the wrong kind\" \"null\"","prepared_difference":null,"reservations":[],"reserved":0,"spent":0},
 "b547d20d80e446cde67c9d4b946510e310ceb7a0c66ed2a25127e476228a8f77":{"charge":415,"outcome":"ok {\"bool\":false}","prepared_difference":null,"reservations":[],"reserved":0,"spent":0},
 "b54badb7f2e549decfdebb98625a8c16a0f8293f0e98159c6676ba62c27b608f":{"charge":1059,"outcome":"raised \"regex.syntax\" \"invalid regular expression flags: `\\u{8875a}` is not a flag\" \"null\"","prepared_difference":null,"reservations":[],"reserved":0,"spent":0},

@@ -37,6 +37,7 @@ impl KernelMachine {
         let function = exe.lib(lib);
         let code = match function.run {
             LibRun::Body(code)
+            | LibRun::Plan { body: code, .. }
             | LibRun::Native {
                 body: Some(code), ..
             } => exe.code(code),

@@ -2155,9 +2155,25 @@ dependencies = [
 ]
 
 [[package]]
+name = "lash-ext-helper-compiler"
+version = "0.0.0-dev"
+dependencies = [
+ "lash-dialect-python",
+ "lash-dialect-typescript",
+ "lash-ext-date-ecma",
+ "lash-ext-regex-ecma",
+ "lash-ext-url-whatwg",
+ "lash-kernel-dialect",
+ "lash-kernel-doc",
+ "lash-kernel-lib",
+ "lash-kernel-vm",
+]
+
+[[package]]
 name = "lash-ext-py-core"
 version = "0.0.0-dev"
 dependencies = [
+ "lash-ext-helper-compiler",
  "lash-kernel-doc",
  "thiserror 2.0.18",
 ]
@@ -2177,6 +2193,7 @@ dependencies = [
 name = "lash-ext-ts-core"
 version = "0.0.0-dev"
 dependencies = [
+ "lash-ext-helper-compiler",
  "lash-kernel-doc",
  "thiserror 2.0.18",
 ]

@@ -51,6 +51,35 @@ lash_rust_unit_test(
     version = "0.0.0-dev",
 )
 
+lash_rust_integration_test(
+    name = "plans__test",
+    crate_features = [],
+    crate_name = "plans",
+    crate_root = "tests/plans.rs",
+    declared_features = [],
+    exec_properties = sized_exec_properties("lash-ext-py-core", "plans", "//crates/lash-ext-py-core:plans__test"),
+    extra_compile_data = [],
+    library = ":lash-ext-py-core",
+    library_crate_name = "lash_ext_py_core",
+    manifest_dir = "crates/lash-ext-py-core",
+    package_name = "lash-ext-py-core",
+    rustc_env = {},
+    tags = [],
+    version = "0.0.0-dev",
+)
+
+load("//tools/buck2:test_batch.bzl", "lash_batch_test")
+
+lash_batch_test(
+    name = "test_batch",
+    budget = test_batch_budget("//crates/lash-ext-py-core:test_batch"),
+    jobs = 2,
+    tests = [
+        ":lash-ext-py-core__unit_test",
+        ":plans__test",
+    ],
+)
+
 filegroup(
     name = "rust_sources",
     srcs = glob(["**/*.rs"]),

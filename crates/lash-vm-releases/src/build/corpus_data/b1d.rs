@@ -10,7 +10,6 @@ pub(super) const DATA: &str = r####"{
 "1d09ed4684ba38a5f07eb654824fe8781a523f69d8a28c2f758b865734a62be8":[{"list":19},"null",{"text":""}],
 "1d0a1783cfe3478423ea4839d00938d32365aa83399583f0abe104f2857a5aab":{"charge":6,"outcome":"ok {\"float\":\"1.328605946622852e116\"}","prepared_difference":null,"reservations":[],"reserved":0,"spent":0},
 "1d0d6711b64272850f41927a487cfde5d54e17ae06367a67f0555eaafb2f2c39":[{"int":"-3523963350653624366"}],
-"1d0fd8b92acf4d93b8dbfa11f73f960318dc7da374814f552a9e4f226bfcc5b1":[{"bool":false},{"int":"-8808445745305385561"}],
 "1d113239e1fb089634c9e04e1ed69d7e0ae353c7a7a266cd5a025239a23feda3":[{"list":[{"int":"-5771621544704548897"},{"int":"-6325384843059592800"},{"int":"-506853176402837597"}]}],
 "1d14caac4ea0c45155a5581ce911ccf4cc4eb72b7b6eb0e8202cb854ad9d905d":{"charge":747,"outcome":"raised \"normalization_form\" \"expected NFC, NFD, NFKC or NFKD\" \"null\"","prepared_difference":null,"reservations":[],"reserved":0,"spent":0},
 "1d1716d8218e9dd58bc5d5ff4ec72a32d7bc59762bad9ec450ccba35b0dddcb4":{"charge":3,"outcome":"ok {\"float\":\"-2.810208516053663e-280\"}","prepared_difference":null,"reservations":[],"reserved":0,"spent":0},

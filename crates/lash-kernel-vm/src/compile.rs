@@ -325,6 +325,13 @@ impl PreparedLibrary {
                 let run = match (machine_function(&definition), registered.native(), body) {
                     (Some(machine), _, _) => LibRun::Machine(machine),
                     (None, Some(_), Some(body)) if layout.declines() => LibRun::Body(body),
+                    (None, None, Some(body)) if !layout.declines() => match registered.plan() {
+                        Some(plan) => LibRun::Plan {
+                            plan: Arc::new(PreparedPlan::new(plan, &lib_of, layout)),
+                            body,
+                        },
+                        None => LibRun::Body(body),
+                    },
                     (None, Some(native), body) => LibRun::Native {
                         native: Arc::clone(native),
                         body,
@@ -745,7 +752,8 @@ pub(crate) struct Lib {
 impl Lib {
     /// A function that may answer without its body reserves that body's
     /// depth unit before offering its native the call (K-BND-002).
-    /// Body-only calls reserve their ordinary frame at entry.
+    /// Body-only calls reserve their ordinary frame at entry; a generated
+    /// plan of one is its body, and reserves the unit at its own entry.
     pub(crate) fn operation(&self) -> bool {
         self.definition.has_native() && self.definition.body().is_some()
     }
@@ -758,8 +766,71 @@ pub(crate) enum LibRun {
         native: Arc<dyn NativeFunction>,
         body: Option<CodeId>,
     },
+    /// The body's generated plan, which answers every call; the body's
+    /// code stays for a frame saved inside it (FIG-6678).
+    Plan {
+        plan: Arc<PreparedPlan>,
+        body: CodeId,
+    },
     Body(CodeId),
     Machine(MachineFunction),
+}
+
+/// A generated plan as one layout runs it: its callees by their table
+/// indexes, its literals as the body's constants, its fields with their
+/// read hints.
+pub(crate) struct PreparedPlan {
+    pub(crate) plan: &'static doc::plan::HelperPlan,
+    pub(crate) callees: Vec<LibId>,
+    pub(crate) literals: Vec<Constant>,
+    pub(crate) fields: Vec<Field>,
+}
+
+impl PreparedPlan {
+    fn new(
+        plan: &'static doc::plan::HelperPlan,
+        lib_of: &BTreeMap<FunctionId, LibId>,
+        layout: Layout,
+    ) -> Self {
+        use doc::plan::PlanLiteral;
+        let callees = plan
+            .callees
+            .iter()
+            // Installation checked that the registry holds every callee.
+            .map(|callee| lib_of.get(callee).copied().unwrap_or(LibId(u32::MAX)))
+            .collect();
+        let literals = plan
+            .literals
+            .iter()
+            .map(|literal| {
+                Constant::from(match *literal {
+                    PlanLiteral::Null => doc::Literal::Null,
+                    PlanLiteral::Absent => doc::Literal::Absent,
+                    PlanLiteral::Bool(value) => doc::Literal::Bool(value),
+                    // The generator spells each integer canonically.
+                    PlanLiteral::Int(digits) => doc::Literal::Int(
+                        doc::Integer::parse(digits).unwrap_or_else(|_| doc::Integer::new(0)),
+                    ),
+                    PlanLiteral::Float(bits) => {
+                        doc::Literal::Float(doc::Float::new(f64::from_bits(bits)))
+                    }
+                    PlanLiteral::Text(text) => doc::Literal::Text(text.to_owned()),
+                    PlanLiteral::Bytes(bytes) => doc::Literal::Bytes(doc::Bytes::new(bytes)),
+                })
+            })
+            .collect();
+        let fields = plan
+            .fields
+            .iter()
+            .map(|name| Field::new(name, layout))
+            .collect();
+        Self {
+            plan,
+            callees,
+            literals,
+            fields,
+        }
+    }
 }
 
 /// A physical lookup cache; only the name participates in saved state.
@@ -1209,7 +1280,9 @@ fn compile_document(
         .libs
         .iter()
         .map(|lib| match &lib.run {
-            LibRun::Body(_) | LibRun::Native { body: Some(_), .. } => Runs::Body,
+            LibRun::Body(_) | LibRun::Plan { .. } | LibRun::Native { body: Some(_), .. } => {
+                Runs::Body
+            }
             LibRun::Native { body: None, .. } | LibRun::Machine(_) => Runs::Answers,
         })
         .collect();

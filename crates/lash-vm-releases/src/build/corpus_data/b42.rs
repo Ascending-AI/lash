@@ -141,7 +141,6 @@ pub(super) const DATA: &str = r####"{
 "42dfdef731fa26596de2cfbfb259a55c6d2c02c4f08c0385fcdf895bd8566385":{"charge":67,"outcome":"ok {\"float\":\"2.2442541347520654e-28\"}","prepared_difference":null,"reservations":[],"reserved":0,"spent":0},
 "42dffa0cb208b164fb1aa15ff2545c33c27010292896047dc971525b543bdef2":{"charge":125,"outcome":"ok {\"record\":[[\"brand\",{\"text\":\"regex.ecma\"}],[\"pattern\",{\"text\":\"-0\"}],[\"flags\",{\"text\":\"\"}],[\"lastIndex\",{\"int\":\"0\"}]]}","prepared_difference":null,"reservations":[],"reserved":0,"spent":0},
 "42e06059dad491cc4bb3e0fa5cdeb7e0d75bd29b8c81b7c826ad9a47fa48bd85":{"charge":3,"outcome":"ok {\"int\":\"9223372036854775807\"}","prepared_difference":null,"reservations":[],"reserved":0,"spent":0},
-"42e0f0a2c14fb7afac6322170515ef508a3abcf0ae288b25a0284193734949fb":[{"float":"-1.5026040071509483e232"}],
 "42e153b1a55e1bf7fb66c4f3e80257e80d4593406cc3be6d77851dfa6b172c0f":[{"float":"-1.507632297670477e-11"}],
 "42e54be1bda63ac93ddc035efe19539c6750a259a8a2bdd168479853ec5b112a":[{"list":9}],
 "42e614c629ec9eba524fd2dd77442db278cfeb6de1023f3395aa99ddf09f07b0":[{"float":"456506342096169.06"},{"float":"5.0676061454382575e84"}],

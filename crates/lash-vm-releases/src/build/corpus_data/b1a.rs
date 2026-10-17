@@ -79,7 +79,6 @@ pub(super) const DATA: &str = r####"{
 "1a8dd400dd4c57c33f6d51177e396193e8ef8f84c5d8549f1187f49b58190f0d":[{"int":"3810721346461944409"},{"int":"-6094908391342422643"}],
 "1a90318d85f40f40848b01a36430af90638f6f8e90cb18e38e18b16bdb2da1d8":[{"float":"7.296757312670647e-6"}],
 "1a935782eb46e54d530809f87c05a33a49630c6c95895dc1876c18e5ed114a31":[{"list":[]},{"map":[]},{"set":[]},{"record":[]},{"list":[]},{"map":[]},{"set":[]},{"record":[]},{"list":[]},{"map":[]},{"set":[]},{"record":[]},{"list":[]},{"map":[]},{"set":[]},{"record":[]},{"list":[]},{"map":[]},{"set":[]},{"record":[]},{"list":[{"text":"12.5"},{"float":"9007199254740992.0"},{"int":"32"},{"record":15},{"text":"é"}]},{"list":[{"text":"򍌤򋦂󤱱󾊩弬􊚒󤽟"},{"bool":true},{"list":20},{"text":"򥜃򙥭񘼟򗿁󺝾󇮰󗝇􆁩񥓩󓀀𺩠𔬴󺢢𬕳"},{"float":"1.047411567855078e205"}]}],
-"1a94810596da4f94ca3319f9f36e0bd91093b96d6133c92a4a808b3cdba95649":[{"int":"5382694791074211681"}],
 "1a958d62cdfe3db563374a75722b9fb91e20eb7f3be0af31c94515e7035a6975":{"charge":71,"outcome":"ok {\"text\":\"3.2500000000000000000000000000000000000000000000000000000000000000\"}","prepared_difference":null,"reservations":[[0,928]],"reserved":928,"spent":0},
 "1a9c2f113b644de8ccdfaa3da1360e042ad6524dd866e624221d5cf124b0e017":[{"text":""},{"int":"0"},{"int":"1180591620717411303424"}],
 "1aa19e8b31660b58dbacbce2bdcfdd9f79d2badc0791deb6e704a6256f2f96ec":[{"text":"12.5"},{"text":"number"},{"text":"by_spelling"}],

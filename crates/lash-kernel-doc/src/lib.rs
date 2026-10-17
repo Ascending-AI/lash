@@ -57,6 +57,9 @@ pub use observation::{RanCounts, ReplayPath, RunObservation, TaskPath};
 mod name;
 mod native;
 mod number;
+/// Generated execution plans for library bodies (FIG-6678): what a build's
+/// helper compiler emits and an embedder installs beside the definitions.
+pub mod plan;
 mod text;
 mod types;
 mod validate;

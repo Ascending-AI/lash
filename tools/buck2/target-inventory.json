@@ -1,7 +1,7 @@
 {
   "cargo_only_target_count": 6,
-  "cargo_package_count": 89,
-  "cargo_target_count": 354,
+  "cargo_package_count": 90,
+  "cargo_target_count": 358,
   "facade_production_check_targets": [
     "//crates/lash-checkpoint-encoder:lash-checkpoint-encoder__fv_57546a29__metadata[check]",
     "//crates/lash-core-effect:lash-core-effect__fv_4d5e8d06__metadata[check]",
@@ -85640,7 +85640,7 @@
       "//third-party/vendored/lash-rmcp:lash-rmcp__fv_e2e7b48c"
     ]
   },
-  "generated_label_count": 451,
+  "generated_label_count": 457,
   "main_test_exclusions": {
     "//crates/lash-s3-store:lash-s3-store__unit_test": "requires an external service or credentials"
   },
@@ -85786,9 +85786,10 @@
     "//crates/lash-e2e:lash-e2e__unit_test",
     "//crates/lash-execution-contracts:lash-execution-contracts__unit_test",
     "//crates/lash-ext-date-ecma:lash-ext-date-ecma__unit_test",
-    "//crates/lash-ext-py-core:lash-ext-py-core__unit_test",
+    "//crates/lash-ext-helper-compiler:test_batch",
+    "//crates/lash-ext-py-core:test_batch",
     "//crates/lash-ext-regex-ecma:lash-ext-regex-ecma__unit_test",
-    "//crates/lash-ext-ts-core:lash-ext-ts-core__unit_test",
+    "//crates/lash-ext-ts-core:test_batch",
     "//crates/lash-ext-url-whatwg:lash-ext-url-whatwg__unit_test",
     "//crates/lash-facade-tests:facade_plugins__test",
     "//crates/lash-facade-tests:facade_plugins__test__fv_9750e702",
@@ -86469,9 +86470,13 @@
     "//crates/lash-e2e:lash-e2e__unit_test",
     "//crates/lash-execution-contracts:lash-execution-contracts__unit_test",
     "//crates/lash-ext-date-ecma:lash-ext-date-ecma__unit_test",
+    "//crates/lash-ext-helper-compiler:lash-ext-helper-compiler__unit_test",
+    "//crates/lash-ext-helper-compiler:regenerate__bin__unit_test",
     "//crates/lash-ext-py-core:lash-ext-py-core__unit_test",
+    "//crates/lash-ext-py-core:plans__test",
     "//crates/lash-ext-regex-ecma:lash-ext-regex-ecma__unit_test",
     "//crates/lash-ext-ts-core:lash-ext-ts-core__unit_test",
+    "//crates/lash-ext-ts-core:plans__test",
     "//crates/lash-ext-url-whatwg:lash-ext-url-whatwg__unit_test",
     "//crates/lash-facade-tests:facade_plugins__test",
     "//crates/lash-facade-tests:facade_plugins__test__fv_9750e702",
@@ -87037,7 +87042,7 @@
     "//third-party/vendored/lash-rmcp:test_tool_routers__test",
     "//third-party/vendored/lash-rmcp:test_trace_context__test"
   ],
-  "metadata_target_count": 1500,
+  "metadata_target_count": 1506,
   "packages": [
     {
       "declared_features": [
@@ -88779,6 +88784,70 @@
     {
       "declared_features": [],
       "dependencies": [
+        "lash-dialect-python",
+        "lash-dialect-typescript",
+        "lash-ext-date-ecma",
+        "lash-ext-regex-ecma",
+        "lash-ext-url-whatwg",
+        "lash-kernel-dialect",
+        "lash-kernel-doc",
+        "lash-kernel-lib",
+        "lash-kernel-vm"
+      ],
+      "doc": "//crates/lash-ext-helper-compiler:lash-ext-helper-compiler__doc",
+      "manifest": "crates/lash-ext-helper-compiler/Cargo.toml",
+      "package": "lash-ext-helper-compiler",
+      "resolved_features": [],
+      "targets": [
+        {
+          "build_label": "//crates/lash-ext-helper-compiler:lash-ext-helper-compiler[static]",
+          "cargo": "lash_ext_helper_compiler",
+          "check_label": "//crates/lash-ext-helper-compiler:lash-ext-helper-compiler__metadata[check]",
+          "clippy_label": "//crates/lash-ext-helper-compiler:lash-ext-helper-compiler__clippy[clippy.txt]",
+          "doc_label": "//crates/lash-ext-helper-compiler:lash-ext-helper-compiler[doc]",
+          "kind": "lib",
+          "label": "//crates/lash-ext-helper-compiler:lash-ext-helper-compiler"
+        },
+        {
+          "build_label": "//crates/lash-ext-helper-compiler:lash-ext-helper-compiler__unit_test",
+          "cargo": "lash_ext_helper_compiler",
+          "check_label": "//crates/lash-ext-helper-compiler:lash-ext-helper-compiler__unit_test__rust_test__metadata[check]",
+          "clippy_label": "//crates/lash-ext-helper-compiler:lash-ext-helper-compiler__unit_test__clippy[clippy.txt]",
+          "kind": "unit-test",
+          "label": "//crates/lash-ext-helper-compiler:lash-ext-helper-compiler__unit_test",
+          "tags": []
+        },
+        {
+          "build_label": "//crates/lash-ext-helper-compiler:regenerate__bin",
+          "cargo": "regenerate",
+          "check_label": "//crates/lash-ext-helper-compiler:regenerate__bin__metadata[check]",
+          "clippy_label": "//crates/lash-ext-helper-compiler:regenerate__bin__clippy[clippy.txt]",
+          "kind": "bin",
+          "label": "//crates/lash-ext-helper-compiler:regenerate__bin",
+          "tags": []
+        },
+        {
+          "build_label": "//crates/lash-ext-helper-compiler:regenerate__bin__unit_test",
+          "cargo": "regenerate",
+          "check_label": "//crates/lash-ext-helper-compiler:regenerate__bin__unit_test__rust_test__metadata[check]",
+          "clippy_label": "//crates/lash-ext-helper-compiler:regenerate__bin__unit_test__clippy[clippy.txt]",
+          "kind": "bin-unit-test",
+          "label": "//crates/lash-ext-helper-compiler:regenerate__bin__unit_test",
+          "tags": []
+        }
+      ],
+      "test_batch": {
+        "label": "//crates/lash-ext-helper-compiler:test_batch",
+        "members": [
+          "//crates/lash-ext-helper-compiler:lash-ext-helper-compiler__unit_test",
+          "//crates/lash-ext-helper-compiler:regenerate__bin__unit_test"
+        ]
+      }
+    },
+    {
+      "declared_features": [],
+      "dependencies": [
+        "lash-ext-helper-compiler",
         "lash-kernel-doc",
         "thiserror"
       ],
@@ -88804,11 +88873,23 @@
           "kind": "unit-test",
           "label": "//crates/lash-ext-py-core:lash-ext-py-core__unit_test",
           "tags": []
+        },
+        {
+          "build_label": "//crates/lash-ext-py-core:plans__test",
+          "cargo": "plans",
+          "check_label": "//crates/lash-ext-py-core:plans__test__rust_test__metadata[check]",
+          "clippy_label": "//crates/lash-ext-py-core:plans__test__clippy[clippy.txt]",
+          "kind": "test",
+          "label": "//crates/lash-ext-py-core:plans__test",
+          "tags": []
         }
       ],
       "test_batch": {
-        "label": null,
-        "members": []
+        "label": "//crates/lash-ext-py-core:test_batch",
+        "members": [
+          "//crates/lash-ext-py-core:lash-ext-py-core__unit_test",
+          "//crates/lash-ext-py-core:plans__test"
+        ]
       }
     },
     {
@@ -88852,6 +88933,7 @@
     {
       "declared_features": [],
       "dependencies": [
+        "lash-ext-helper-compiler",
         "lash-kernel-doc",
         "thiserror"
       ],
@@ -88877,11 +88959,23 @@
           "kind": "unit-test",
           "label": "//crates/lash-ext-ts-core:lash-ext-ts-core__unit_test",
           "tags": []
+        },
+        {
+          "build_label": "//crates/lash-ext-ts-core:plans__test",
+          "cargo": "plans",
+          "check_label": "//crates/lash-ext-ts-core:plans__test__rust_test__metadata[check]",
+          "clippy_label": "//crates/lash-ext-ts-core:plans__test__clippy[clippy.txt]",
+          "kind": "test",
+          "label": "//crates/lash-ext-ts-core:plans__test",
+          "tags": []
         }
       ],
       "test_batch": {
-        "label": null,
-        "members": []
+        "label": "//crates/lash-ext-ts-core:test_batch",
+        "members": [
+          "//crates/lash-ext-ts-core:lash-ext-ts-core__unit_test",
+          "//crates/lash-ext-ts-core:plans__test"
+        ]
       }
     },
     {
@@ -94759,9 +94853,16 @@
     "//crates/lash-e2e:lash-e2e__unit_test": 300,
     "//crates/lash-execution-contracts:lash-execution-contracts__unit_test": 300,
     "//crates/lash-ext-date-ecma:lash-ext-date-ecma__unit_test": 300,
+    "//crates/lash-ext-helper-compiler:lash-ext-helper-compiler__unit_test": 300,
+    "//crates/lash-ext-helper-compiler:regenerate__bin__unit_test": 300,
+    "//crates/lash-ext-helper-compiler:test_batch": 300,
     "//crates/lash-ext-py-core:lash-ext-py-core__unit_test": 300,
+    "//crates/lash-ext-py-core:plans__test": 300,
+    "//crates/lash-ext-py-core:test_batch": 300,
     "//crates/lash-ext-regex-ecma:lash-ext-regex-ecma__unit_test": 300,
     "//crates/lash-ext-ts-core:lash-ext-ts-core__unit_test": 300,
+    "//crates/lash-ext-ts-core:plans__test": 300,
+    "//crates/lash-ext-ts-core:test_batch": 300,
     "//crates/lash-ext-url-whatwg:lash-ext-url-whatwg__unit_test": 300,
     "//crates/lash-facade-tests:facade_plugins__test": 300,
     "//crates/lash-facade-tests:facade_plugins__test__fv_9750e702": 300,
@@ -95450,12 +95551,18 @@
     "//crates/lash-execution-contracts:lash-execution-contracts__unit_test",
     "//crates/lash-ext-date-ecma:lash-ext-date-ecma[static]",
     "//crates/lash-ext-date-ecma:lash-ext-date-ecma__unit_test",
+    "//crates/lash-ext-helper-compiler:lash-ext-helper-compiler[static]",
+    "//crates/lash-ext-helper-compiler:lash-ext-helper-compiler__unit_test",
+    "//crates/lash-ext-helper-compiler:regenerate__bin",
+    "//crates/lash-ext-helper-compiler:regenerate__bin__unit_test",
     "//crates/lash-ext-py-core:lash-ext-py-core[static]",
     "//crates/lash-ext-py-core:lash-ext-py-core__unit_test",
+    "//crates/lash-ext-py-core:plans__test",
     "//crates/lash-ext-regex-ecma:lash-ext-regex-ecma[static]",
     "//crates/lash-ext-regex-ecma:lash-ext-regex-ecma__unit_test",
     "//crates/lash-ext-ts-core:lash-ext-ts-core[static]",
     "//crates/lash-ext-ts-core:lash-ext-ts-core__unit_test",
+    "//crates/lash-ext-ts-core:plans__test",
     "//crates/lash-ext-url-whatwg:lash-ext-url-whatwg[static]",
     "//crates/lash-ext-url-whatwg:lash-ext-url-whatwg__unit_test",
     "//crates/lash-facade-tests:facade_plugins__test",
@@ -95923,12 +96030,18 @@
     "//crates/lash-execution-contracts:lash-execution-contracts__unit_test__rust_test__metadata[check]",
     "//crates/lash-ext-date-ecma:lash-ext-date-ecma__metadata[check]",
     "//crates/lash-ext-date-ecma:lash-ext-date-ecma__unit_test__rust_test__metadata[check]",
+    "//crates/lash-ext-helper-compiler:lash-ext-helper-compiler__metadata[check]",
+    "//crates/lash-ext-helper-compiler:lash-ext-helper-compiler__unit_test__rust_test__metadata[check]",
+    "//crates/lash-ext-helper-compiler:regenerate__bin__metadata[check]",
+    "//crates/lash-ext-helper-compiler:regenerate__bin__unit_test__rust_test__metadata[check]",
     "//crates/lash-ext-py-core:lash-ext-py-core__metadata[check]",
     "//crates/lash-ext-py-core:lash-ext-py-core__unit_test__rust_test__metadata[check]",
+    "//crates/lash-ext-py-core:plans__test__rust_test__metadata[check]",
     "//crates/lash-ext-regex-ecma:lash-ext-regex-ecma__metadata[check]",
     "//crates/lash-ext-regex-ecma:lash-ext-regex-ecma__unit_test__rust_test__metadata[check]",
     "//crates/lash-ext-ts-core:lash-ext-ts-core__metadata[check]",
     "//crates/lash-ext-ts-core:lash-ext-ts-core__unit_test__rust_test__metadata[check]",
+    "//crates/lash-ext-ts-core:plans__test__rust_test__metadata[check]",
     "//crates/lash-ext-url-whatwg:lash-ext-url-whatwg__metadata[check]",
     "//crates/lash-ext-url-whatwg:lash-ext-url-whatwg__unit_test__rust_test__metadata[check]",
     "//crates/lash-facade-tests:facade_plugins__test__rust_test__metadata[check]",
@@ -96416,12 +96529,18 @@
     "//crates/lash-execution-contracts:lash-execution-contracts__unit_test__clippy[clippy.txt]",
     "//crates/lash-ext-date-ecma:lash-ext-date-ecma__clippy[clippy.txt]",
     "//crates/lash-ext-date-ecma:lash-ext-date-ecma__unit_test__clippy[clippy.txt]",
+    "//crates/lash-ext-helper-compiler:lash-ext-helper-compiler__clippy[clippy.txt]",
+    "//crates/lash-ext-helper-compiler:lash-ext-helper-compiler__unit_test__clippy[clippy.txt]",
+    "//crates/lash-ext-helper-compiler:regenerate__bin__clippy[clippy.txt]",
+    "//crates/lash-ext-helper-compiler:regenerate__bin__unit_test__clippy[clippy.txt]",
     "//crates/lash-ext-py-core:lash-ext-py-core__clippy[clippy.txt]",
     "//crates/lash-ext-py-core:lash-ext-py-core__unit_test__clippy[clippy.txt]",
+    "//crates/lash-ext-py-core:plans__test__clippy[clippy.txt]",
     "//crates/lash-ext-regex-ecma:lash-ext-regex-ecma__clippy[clippy.txt]",
     "//crates/lash-ext-regex-ecma:lash-ext-regex-ecma__unit_test__clippy[clippy.txt]",
     "//crates/lash-ext-ts-core:lash-ext-ts-core__clippy[clippy.txt]",
     "//crates/lash-ext-ts-core:lash-ext-ts-core__unit_test__clippy[clippy.txt]",
+    "//crates/lash-ext-ts-core:plans__test__clippy[clippy.txt]",
     "//crates/lash-ext-url-whatwg:lash-ext-url-whatwg__clippy[clippy.txt]",
     "//crates/lash-ext-url-whatwg:lash-ext-url-whatwg__unit_test__clippy[clippy.txt]",
     "//crates/lash-facade-tests:facade_plugins__test__clippy[clippy.txt]",
@@ -96786,12 +96905,18 @@
     "//crates/lash-execution-contracts:lash-execution-contracts__unit_test",
     "//crates/lash-ext-date-ecma:lash-ext-date-ecma",
     "//crates/lash-ext-date-ecma:lash-ext-date-ecma__unit_test",
+    "//crates/lash-ext-helper-compiler:lash-ext-helper-compiler",
+    "//crates/lash-ext-helper-compiler:lash-ext-helper-compiler__unit_test",
+    "//crates/lash-ext-helper-compiler:regenerate__bin",
+    "//crates/lash-ext-helper-compiler:regenerate__bin__unit_test",
     "//crates/lash-ext-py-core:lash-ext-py-core",
     "//crates/lash-ext-py-core:lash-ext-py-core__unit_test",
+    "//crates/lash-ext-py-core:plans__test",
     "//crates/lash-ext-regex-ecma:lash-ext-regex-ecma",
     "//crates/lash-ext-regex-ecma:lash-ext-regex-ecma__unit_test",
     "//crates/lash-ext-ts-core:lash-ext-ts-core",
     "//crates/lash-ext-ts-core:lash-ext-ts-core__unit_test",
+    "//crates/lash-ext-ts-core:plans__test",
     "//crates/lash-ext-url-whatwg:lash-ext-url-whatwg",
     "//crates/lash-ext-url-whatwg:lash-ext-url-whatwg__unit_test",
     "//crates/lash-facade-tests:facade_plugins__test",
@@ -97157,12 +97282,18 @@
     "//crates/lash-execution-contracts:lash-execution-contracts__unit_test",
     "//crates/lash-ext-date-ecma:lash-ext-date-ecma",
     "//crates/lash-ext-date-ecma:lash-ext-date-ecma__unit_test",
+    "//crates/lash-ext-helper-compiler:lash-ext-helper-compiler",
+    "//crates/lash-ext-helper-compiler:lash-ext-helper-compiler__unit_test",
+    "//crates/lash-ext-helper-compiler:regenerate__bin",
+    "//crates/lash-ext-helper-compiler:regenerate__bin__unit_test",
     "//crates/lash-ext-py-core:lash-ext-py-core",
     "//crates/lash-ext-py-core:lash-ext-py-core__unit_test",
+    "//crates/lash-ext-py-core:plans__test",
     "//crates/lash-ext-regex-ecma:lash-ext-regex-ecma",
     "//crates/lash-ext-regex-ecma:lash-ext-regex-ecma__unit_test",
     "//crates/lash-ext-ts-core:lash-ext-ts-core",
     "//crates/lash-ext-ts-core:lash-ext-ts-core__unit_test",
+    "//crates/lash-ext-ts-core:plans__test",
     "//crates/lash-ext-url-whatwg:lash-ext-url-whatwg",
     "//crates/lash-ext-url-whatwg:lash-ext-url-whatwg__unit_test",
     "//crates/lash-facade-tests:facade_plugins__test",
@@ -97581,9 +97712,10 @@
     "//crates/lash-e2e:lash-e2e__unit_test",
     "//crates/lash-execution-contracts:lash-execution-contracts__unit_test",
     "//crates/lash-ext-date-ecma:lash-ext-date-ecma__unit_test",
-    "//crates/lash-ext-py-core:lash-ext-py-core__unit_test",
+    "//crates/lash-ext-helper-compiler:test_batch",
+    "//crates/lash-ext-py-core:test_batch",
     "//crates/lash-ext-regex-ecma:lash-ext-regex-ecma__unit_test",
-    "//crates/lash-ext-ts-core:lash-ext-ts-core__unit_test",
+    "//crates/lash-ext-ts-core:test_batch",
     "//crates/lash-ext-url-whatwg:lash-ext-url-whatwg__unit_test",
     "//crates/lash-facade-tests:facade_plugins__test",
     "//crates/lash-facade-tests:facade_process__test",
@@ -97790,9 +97922,10 @@
     "//crates/lash-e2e:lash-e2e__unit_test",
     "//crates/lash-execution-contracts:lash-execution-contracts__unit_test",
     "//crates/lash-ext-date-ecma:lash-ext-date-ecma__unit_test",
-    "//crates/lash-ext-py-core:lash-ext-py-core__unit_test",
+    "//crates/lash-ext-helper-compiler:test_batch",
+    "//crates/lash-ext-py-core:test_batch",
     "//crates/lash-ext-regex-ecma:lash-ext-regex-ecma__unit_test",
-    "//crates/lash-ext-ts-core:lash-ext-ts-core__unit_test",
+    "//crates/lash-ext-ts-core:test_batch",
     "//crates/lash-ext-url-whatwg:lash-ext-url-whatwg__unit_test",
     "//crates/lash-facade-tests:facade_plugins__test",
     "//crates/lash-facade-tests:facade_process__test",
@@ -98020,9 +98153,13 @@
     "//crates/lash-e2e:lash-e2e__unit_test",
     "//crates/lash-execution-contracts:lash-execution-contracts__unit_test",
     "//crates/lash-ext-date-ecma:lash-ext-date-ecma__unit_test",
+    "//crates/lash-ext-helper-compiler:lash-ext-helper-compiler__unit_test",
+    "//crates/lash-ext-helper-compiler:regenerate__bin__unit_test",
     "//crates/lash-ext-py-core:lash-ext-py-core__unit_test",
+    "//crates/lash-ext-py-core:plans__test",
     "//crates/lash-ext-regex-ecma:lash-ext-regex-ecma__unit_test",
     "//crates/lash-ext-ts-core:lash-ext-ts-core__unit_test",
+    "//crates/lash-ext-ts-core:plans__test",
     "//crates/lash-ext-url-whatwg:lash-ext-url-whatwg__unit_test",
     "//crates/lash-facade-tests:facade_plugins__test",
     "//crates/lash-facade-tests:facade_process__test",
@@ -98188,6 +98325,7 @@
     "//crates/lash-e2e:lash-e2e__doc",
     "//crates/lash-execution-contracts:lash-execution-contracts__doc",
     "//crates/lash-ext-date-ecma:lash-ext-date-ecma__doc",
+    "//crates/lash-ext-helper-compiler:lash-ext-helper-compiler__doc",
     "//crates/lash-ext-py-core:lash-ext-py-core__doc",
     "//crates/lash-ext-regex-ecma:lash-ext-regex-ecma__doc",
     "//crates/lash-ext-ts-core:lash-ext-ts-core__doc",
@@ -98274,6 +98412,7 @@
     "//crates/lash-e2e:rust_sources",
     "//crates/lash-execution-contracts:rust_sources",
     "//crates/lash-ext-date-ecma:rust_sources",
+    "//crates/lash-ext-helper-compiler:rust_sources",
     "//crates/lash-ext-py-core:rust_sources",
     "//crates/lash-ext-regex-ecma:rust_sources",
     "//crates/lash-ext-ts-core:rust_sources",
@@ -98383,6 +98522,18 @@
       "//crates/lash-core:runtime_effect__test",
       "//crates/lash-core:runtime_lifecycle__test",
       "//crates/lash-core:turn_event_schema__test"
+    ],
+    "//crates/lash-ext-helper-compiler:test_batch": [
+      "//crates/lash-ext-helper-compiler:lash-ext-helper-compiler__unit_test",
+      "//crates/lash-ext-helper-compiler:regenerate__bin__unit_test"
+    ],
+    "//crates/lash-ext-py-core:test_batch": [
+      "//crates/lash-ext-py-core:lash-ext-py-core__unit_test",
+      "//crates/lash-ext-py-core:plans__test"
+    ],
+    "//crates/lash-ext-ts-core:test_batch": [
+      "//crates/lash-ext-ts-core:lash-ext-ts-core__unit_test",
+      "//crates/lash-ext-ts-core:plans__test"
     ],
     "//crates/lash-kernel-doc:test_batch": [
       "//crates/lash-kernel-doc:document_example__test",
@@ -98513,9 +98664,10 @@
     "//crates/lash-e2e:lash-e2e__unit_test",
     "//crates/lash-execution-contracts:lash-execution-contracts__unit_test",
     "//crates/lash-ext-date-ecma:lash-ext-date-ecma__unit_test",
-    "//crates/lash-ext-py-core:lash-ext-py-core__unit_test",
+    "//crates/lash-ext-helper-compiler:test_batch",
+    "//crates/lash-ext-py-core:test_batch",
     "//crates/lash-ext-regex-ecma:lash-ext-regex-ecma__unit_test",
-    "//crates/lash-ext-ts-core:lash-ext-ts-core__unit_test",
+    "//crates/lash-ext-ts-core:test_batch",
     "//crates/lash-ext-url-whatwg:lash-ext-url-whatwg__unit_test",
     "//crates/lash-facade-tests:facade_plugins__test",
     "//crates/lash-facade-tests:facade_process__test",
@@ -98746,9 +98898,13 @@
     "//crates/lash-e2e:lash-e2e__unit_test",
     "//crates/lash-execution-contracts:lash-execution-contracts__unit_test",
     "//crates/lash-ext-date-ecma:lash-ext-date-ecma__unit_test",
+    "//crates/lash-ext-helper-compiler:lash-ext-helper-compiler__unit_test",
+    "//crates/lash-ext-helper-compiler:regenerate__bin__unit_test",
     "//crates/lash-ext-py-core:lash-ext-py-core__unit_test",
+    "//crates/lash-ext-py-core:plans__test",
     "//crates/lash-ext-regex-ecma:lash-ext-regex-ecma__unit_test",
     "//crates/lash-ext-ts-core:lash-ext-ts-core__unit_test",
+    "//crates/lash-ext-ts-core:plans__test",
     "//crates/lash-ext-url-whatwg:lash-ext-url-whatwg__unit_test",
     "//crates/lash-facade-tests:facade_plugins__test",
     "//crates/lash-facade-tests:facade_process__test",

@@ -63,7 +63,6 @@ pub(super) const DATA: &str = r####"{
 "af5cacaccbf55e4119845051368134acdab19d9abd41abc8599db921417cac97":{"charge":19,"outcome":"ok {\"int\":\"789437216582122898\"}","prepared_difference":null,"reservations":[],"reserved":0,"spent":0},
 "af5cfd366c90460d63e68fe674c5f35f378a9ef8fcdb96194724b03f51b75dc4":{"charge":3,"outcome":"ok {\"float\":\"-1.6369630212094265e217\"}","prepared_difference":null,"reservations":[],"reserved":0,"spent":0},
 "af5d70732938c3c6a39ab0e0c49f7d78cad141cef047ebc5629ca3ffe046bde1":{"charge":11,"outcome":"ok {\"text\":\"a\"}","prepared_difference":null,"reservations":[[0,2]],"reserved":2,"spent":0},
-"af5e1bbea15f56e2e0758252b55ae98d2b3e9c4ad354a157463f3213367faa70":[{"text":"򚻠􎶽𓜦󤛈􈁅𫈅􋨡􉬕󤕣󁤩"}],
 "af609d4beccd128ba0813e3402ae84c1153219659d027366e7beec50b1a24df1":[{"text":"򇎻񕞜񴈳𝱷ࠏ"},{"int":"-178016166959669281"},{"text":"񾡮򰰾򡾦󒘙􁘕𯍹򑛟򋌲𥻔򞵩𮛳󌇾󯟽񂵒񏾈񫑷򁛟󆤲񀭠󤵶񮩬󴪸񁸭󠕑񫔛󲂱𜪰𡄥򥁇񺌧󺎡󲪦"}],
 "af62396547ba8454ac0b8384981cf8acd45a703a03d38103a9b73577abb7b624":[{"text":"NaN"},"null",{"text":""}],
 "af63d606757a4919f182b4e4190a86066e2769ff7026444304e0992954a9be9d":[{"float":"-1.1574795142162768e17"}],

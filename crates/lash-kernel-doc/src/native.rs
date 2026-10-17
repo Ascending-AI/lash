@@ -15,6 +15,7 @@ use std::sync::{Arc, Mutex, OnceLock};
 use crate::function::FunctionDefinition;
 use crate::heap::NativeFunction;
 use crate::name::{FunctionId, FunctionName};
+use crate::plan::HelperPlan;
 use crate::validate::{Invalid, validate_identified_definition};
 
 /// The counter a native function is handed: it counts the function's guard
@@ -91,6 +92,8 @@ pub struct RegisteredFunction {
     definition: Arc<FunctionDefinition>,
     /// The native implementation, when the embedder supplied one.
     native: Option<Arc<dyn NativeFunction>>,
+    /// The body compiled ahead of time, when the build generated one.
+    plan: Option<&'static HelperPlan>,
     function: FunctionId,
     callees: Arc<OnceLock<BTreeSet<FunctionId>>>,
     /// The definition's token body, encoded once for every holder that
@@ -112,6 +115,7 @@ impl RegisteredFunction {
         Self {
             definition: Arc::new(definition),
             native,
+            plan: None,
             function,
             callees: Arc::default(),
             image: Arc::default(),
@@ -127,6 +131,11 @@ impl RegisteredFunction {
     /// The registered native implementation, when one was supplied.
     pub fn native(&self) -> Option<&Arc<dyn NativeFunction>> {
         self.native.as_ref()
+    }
+
+    /// The body's generated plan, when one is installed.
+    pub fn plan(&self) -> Option<&'static HelperPlan> {
+        self.plan
     }
 
     pub fn identity(&self) -> FunctionId {
@@ -220,6 +229,7 @@ impl fmt::Debug for RegisteredFunction {
         f.debug_struct("RegisteredFunction")
             .field("definition", &self.definition)
             .field("native", &self.native.is_some())
+            .field("plan", &self.plan.is_some())
             .finish()
     }
 }
@@ -254,6 +264,23 @@ pub enum RegistryError {
     AlreadyImplemented {
         name: FunctionName,
         function: FunctionId,
+    },
+    /// A plan was offered for a function whose definition has no kernel
+    /// body, or one with a native implementation, which answers instead.
+    #[error("`{name}` has no kernel body a plan could perform without a native")]
+    PlanWithoutBody { name: FunctionName },
+    /// A plan was offered for a function that has one.
+    #[error("`{name}` ({function}) already has a plan")]
+    AlreadyPlanned {
+        name: FunctionName,
+        function: FunctionId,
+    },
+    /// A plan calls a function the registry does not hold, or one that
+    /// would run its body in a frame: a plan answers at once.
+    #[error("the plan of `{name}` calls {callee}, which neither a plan nor a native answers")]
+    PlanCalleeUnanswered {
+        name: FunctionName,
+        callee: FunctionId,
     },
     /// Validated functions were offered to a registry that does not hold
     /// exactly the functions they were validated against.
@@ -427,6 +454,12 @@ impl FunctionRegistry {
                 name: registered.definition.name.clone(),
             });
         }
+        if registered.plan.is_some() {
+            return Err(RegistryError::AlreadyPlanned {
+                name: registered.definition.name.clone(),
+                function,
+            });
+        }
         if registered.native.is_some() {
             return Err(RegistryError::AlreadyImplemented {
                 name: registered.definition.name.clone(),
@@ -435,6 +468,60 @@ impl FunctionRegistry {
         }
         registered.native = Some(native);
         Ok(())
+    }
+
+    /// Installs the plans a build generated, each beside the definition
+    /// it was generated from, by identity. A plan whose function is not
+    /// registered is skipped: the registry holds another dialect's or
+    /// another release's helpers. Every callee of an installed plan must
+    /// answer at once: a native, a function the machine implements, or
+    /// another installed plan.
+    ///
+    /// # Errors
+    ///
+    /// [`RegistryError::PlanWithoutBody`], [`RegistryError::AlreadyPlanned`]
+    /// and [`RegistryError::PlanCalleeUnanswered`].
+    pub fn install_plans(&mut self, plans: &[&'static HelperPlan]) -> Result<usize, RegistryError> {
+        let mut installing = BTreeMap::new();
+        for plan in plans {
+            let Some(registered) = self.functions.get(&plan.function) else {
+                continue;
+            };
+            if registered.definition.body().is_none() || registered.native.is_some() {
+                return Err(RegistryError::PlanWithoutBody {
+                    name: registered.definition.name.clone(),
+                });
+            }
+            if registered.plan.is_some() || installing.insert(plan.function, *plan).is_some() {
+                return Err(RegistryError::AlreadyPlanned {
+                    name: registered.definition.name.clone(),
+                    function: plan.function,
+                });
+            }
+        }
+        for plan in installing.values() {
+            for callee in plan.callees {
+                // A native beside a body may decline, and the body would
+                // then need a frame.
+                let answers = installing.contains_key(callee)
+                    || self.functions.get(callee).is_some_and(|registered| {
+                        registered.plan.is_some() || registered.definition.body().is_none()
+                    });
+                if !answers {
+                    return Err(RegistryError::PlanCalleeUnanswered {
+                        name: self.functions[&plan.function].definition.name.clone(),
+                        callee: *callee,
+                    });
+                }
+            }
+        }
+        let installed = installing.len();
+        for (function, plan) in installing {
+            if let Some(registered) = self.functions.get_mut(&function) {
+                registered.plan = Some(plan);
+            }
+        }
+        Ok(installed)
     }
 
     pub fn get(&self, function: &FunctionId) -> Option<&RegisteredFunction> {

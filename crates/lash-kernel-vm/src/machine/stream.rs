@@ -136,9 +136,7 @@ impl KernelMachine {
                             } else {
                                 Ok(false)
                             };
-                        if answer.map_err(|interrupt| {
-                            interrupt.in_function(&running.exe.lib(lib).definition.name)
-                        })? {
+                        if answer.map_err(|interrupt| interrupt.answering(running.exe.lib(lib)))? {
                             continue;
                         }
                         if self.scalar_blocks
@@ -151,9 +149,7 @@ impl KernelMachine {
                                     args.len as usize,
                                     at(args.start),
                                 )
-                                .map_err(|interrupt| {
-                                    interrupt.in_function(&running.exe.lib(lib).definition.name)
-                                })?
+                                .map_err(|interrupt| interrupt.answering(running.exe.lib(lib)))?
                         {
                             continue;
                         }
@@ -273,48 +269,22 @@ impl KernelMachine {
                 return Ok(None);
             }
             Op::MakeList { items } => {
-                let (start, items) = self.members(items)?;
-                let list = Value::List(self.alloc(ObjectInit::List(items))?);
-                self.put(start, list);
+                self.make_list(items)?;
                 return Ok(None);
             }
             Op::MakeSet { items } => {
-                let (start, items) = self.members(items)?;
-                for member in &items {
-                    self.key(member)?;
-                }
-                let set = Value::Set(self.alloc(ObjectInit::Set(items))?);
-                self.put(start, set);
+                self.make_set(items)?;
                 return Ok(None);
             }
             Op::MakeMap { entries } => {
-                let start = at(entries.start);
-                self.charge(u64::from(entries.len / 2))?;
-                let mut table = Vec::new();
-                for pair in (start..start + entries.len as usize).step_by(2) {
-                    let written = self.take(pair);
-                    self.key(&written)?;
-                    let value = self.take(pair + 1);
-                    table.push((written, value));
-                }
-                let map = Value::Map(self.alloc(ObjectInit::Map(table))?);
-                self.put(start, map);
+                self.make_map(entries)?;
                 return Ok(None);
             }
             Op::MakeRecord { fields, values } => {
-                let (start, values) = self.members(values)?;
-                let fields = stream.field_lists[fields.ix()]
+                let names = stream.field_lists[fields.ix()]
                     .iter()
-                    .map(|name| {
-                        let Value::Text(text) = Value::text(name.as_str()) else {
-                            unreachable!()
-                        };
-                        text
-                    })
-                    .zip(values)
-                    .collect();
-                let record = Value::Record(self.alloc(ObjectInit::Record(fields))?);
-                self.put(start, record);
+                    .map(|name| name.as_str());
+                self.make_record(names, values)?;
                 return Ok(None);
             }
             Op::Closure { dst, code } => {
@@ -503,7 +473,65 @@ impl KernelMachine {
         Ok((start, members))
     }
 
-    fn make_tuple(&mut self, items: RegRange) -> Eval<()> {
+    /// A list of the members in `items`, into the first of them.
+    pub(super) fn make_list(&mut self, items: RegRange) -> Eval<()> {
+        let (start, items) = self.members(items)?;
+        let list = Value::List(self.alloc(ObjectInit::List(items))?);
+        self.put(start, list);
+        Ok(())
+    }
+
+    /// A set of the members in `items`, into the first of them.
+    pub(super) fn make_set(&mut self, items: RegRange) -> Eval<()> {
+        let (start, items) = self.members(items)?;
+        for member in &items {
+            self.key(member)?;
+        }
+        let set = Value::Set(self.alloc(ObjectInit::Set(items))?);
+        self.put(start, set);
+        Ok(())
+    }
+
+    /// A map of the keys and values `entries` holds by turns, into the
+    /// first of them.
+    pub(super) fn make_map(&mut self, entries: RegRange) -> Eval<()> {
+        let start = at(entries.start);
+        self.charge(u64::from(entries.len / 2))?;
+        let mut table = Vec::new();
+        for pair in (start..start + entries.len as usize).step_by(2) {
+            let written = self.take(pair);
+            self.key(&written)?;
+            let value = self.take(pair + 1);
+            table.push((written, value));
+        }
+        let map = Value::Map(self.alloc(ObjectInit::Map(table))?);
+        self.put(start, map);
+        Ok(())
+    }
+
+    /// A record of `fields`, each with the value in its register of
+    /// `values`, into the first of them.
+    pub(super) fn make_record<'n>(
+        &mut self,
+        fields: impl Iterator<Item = &'n str>,
+        values: RegRange,
+    ) -> Eval<()> {
+        let (start, values) = self.members(values)?;
+        let fields = fields
+            .map(|name| {
+                let Value::Text(text) = Value::text(name) else {
+                    unreachable!()
+                };
+                text
+            })
+            .zip(values)
+            .collect();
+        let record = Value::Record(self.alloc(ObjectInit::Record(fields))?);
+        self.put(start, record);
+        Ok(())
+    }
+
+    pub(super) fn make_tuple(&mut self, items: RegRange) -> Eval<()> {
         let (start, items) = self.members(items)?;
         if items
             .iter()

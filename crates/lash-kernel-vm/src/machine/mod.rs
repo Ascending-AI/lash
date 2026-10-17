@@ -21,6 +21,7 @@ mod operation_entry;
 mod ops;
 #[cfg(test)]
 mod park_laws;
+mod plans;
 mod queue;
 mod registers;
 mod session;
@@ -96,6 +97,17 @@ impl Interrupt {
         match self {
             Self::Halt(halt) => Self::from((*halt).in_function(function)),
             other => other,
+        }
+    }
+
+    /// What answering a call of `lib` interrupted with: a bound passed there
+    /// names `lib` (`K-LIB-006`). A generated plan's are left as they are:
+    /// it names the bounds passed inside it as its body's frames would, and
+    /// its admission names as the body's does.
+    fn answering(self, lib: &crate::compile::Lib) -> Self {
+        match lib.run {
+            crate::compile::LibRun::Plan { .. } => self,
+            _ => self.in_function(&lib.definition.name),
         }
     }
 }
@@ -358,6 +370,9 @@ pub struct KernelMachine {
     fresh: Vec<EntityId>,
     charging: bool,
     scalar_blocks: bool,
+    /// How many generated plans are running: each holds its call's depth
+    /// unit as the body's frame would (`K-BND-002`).
+    plans: u32,
     charged: u64,
     /// The cost table of the kernel version the document states.
     costs: crate::costs::Costs,

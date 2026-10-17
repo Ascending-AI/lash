@@ -219,7 +219,7 @@ pub mod document {
         Stmt, Survivor, TaskId, TaskIdentity, Timestamp, TryStmt, Type, Unit, ValidatedFunctions,
         Value, ValueKind, WorkCounter, check_declarations, check_statement, core_support,
         document_work, graph_tokens, heap, parse_definition, parse_definition_with_limits,
-        parse_document, parse_document_with_limits, print_definition, print_document,
+        parse_document, parse_document_with_limits, plan, print_definition, print_document,
         required_declarations, validate_definition, validate_definition_with_limits,
         validate_document, validate_document_with_limits,
     };

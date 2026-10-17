@@ -1,4 +1,13 @@
-//! The TypeScript dialect's hot operations, as partial natives (FIG-6440).
+//! The TypeScript dialect's helpers: closed ones as Rust plans compiled from
+//! their kernel bodies (FIG-6678), and the hot operations that can reach
+//! guest code as partial natives (FIG-6440).
+//!
+//! The helper compiler (`lash-ext-helper-compiler`) compiles each closed body
+//! to a plan the machine runs where a native would answer, through the
+//! machine's own primitives; the body stays what forced-fallback layouts
+//! and a restored frame run. The plans are generated sources, checked in
+//! beside their manifest (`generated/plans.tsv`), and a test here fails when they
+//! are not what the compiler gives for the current bodies.
 //!
 //! An operation is a dialect helper whose definition states a native
 //! implementation beside its complete kernel body (`K-LIB-002`). Each native
@@ -11,12 +20,13 @@
 //! The formula charges the operation whichever path runs (`K-CHG-007`).
 //!
 //! The dialect crate defines the helpers and knows nothing of this crate;
-//! an embedder adds each native to the helper its build registered
-//! ([`implement`]).
+//! an embedder installs each plan and adds each native beside the helper
+//! its build registered ([`implement`]).
 
 use std::sync::Arc;
 
 use lash_kernel_doc::heap::IntRef;
+
 use lash_kernel_doc::{
     Float, FunctionId, FunctionRegistry, NativeCall, NativeError, NativeFunction, PreparedNative,
     RegistryError, Value,
@@ -33,33 +43,47 @@ pub enum ImplementError {
     Missing(&'static str),
 }
 
+#[rustfmt::skip]
+#[path = "generated/plans.rs"]
+mod plans;
+
+pub use plans::PLANS;
+
 /// The helpers this crate has a native for, by name.
-pub const OPERATIONS: [&str; 10] = [
+pub const OPERATIONS: [&str; 8] = [
     "ts.get",
-    "ts.to_boolean",
     "ts.add",
     "ts.sub",
     "ts.to_number",
-    "ts.for_of.item",
     "ts.lt",
     "ts.le",
     "ts.gt",
     "ts.ge",
 ];
 
-/// Adds its native to each of `helpers` that this crate implements
-/// ([`OPERATIONS`]), each looked up by the name its definition carries.
+/// Installs each plan of [`PLANS`] beside the helper of `helpers` it was
+/// compiled from, then adds its native to each of `helpers` that this
+/// crate implements ([`OPERATIONS`]), each looked up by the name its
+/// definition carries.
 /// The registry must hold the kernel library already: the natives call
 /// its `num.add`, `num.sub`, `num.to_float`, `text.concat` and `text.utf16_compare`.
 ///
 /// # Errors
 ///
 /// [`ImplementError::Missing`], and [`ImplementError::Registry`] when a
-/// helper is not registered or its definition states no native.
+/// helper is not registered or its definition states no native, or a plan
+/// calls a body the registry answers with neither a plan nor a native.
 pub fn implement(
     registry: &mut FunctionRegistry,
     helpers: impl IntoIterator<Item = FunctionId>,
 ) -> Result<(), ImplementError> {
+    let helpers: std::collections::BTreeSet<FunctionId> = helpers.into_iter().collect();
+    let plans: Vec<&'static lash_kernel_doc::plan::HelperPlan> = PLANS
+        .iter()
+        .copied()
+        .filter(|plan| helpers.contains(&plan.function))
+        .collect();
+    registry.install_plans(&plans)?;
     let kernel = |name: &'static str| {
         registry
             .native_named(name)
@@ -87,11 +111,9 @@ pub fn implement(
         };
         let native: Arc<dyn NativeFunction> = match registered.definition().name.as_str() {
             "ts.get" => Arc::new(Get),
-            "ts.to_boolean" => Arc::new(ToBoolean),
             "ts.add" => add.clone(),
             "ts.sub" => subtract.clone(),
             "ts.to_number" => Arc::new(ToNumber),
-            "ts.for_of.item" => Arc::new(ListItem),
             "ts.lt" => relation(Relation::Lt),
             "ts.le" => relation(Relation::Le),
             "ts.gt" => relation(Relation::Gt),
@@ -125,39 +147,6 @@ fn pair<'a>(call: &'a NativeCall<'_>) -> (&'a Value, &'a Value) {
         [left, right, ..] => (left, right),
         [left] => (left, &Value::Absent),
         [] => (&Value::Absent, &Value::Absent),
-    }
-}
-
-/// `ts.to_boolean`, ToBoolean: total, for it calls no guest code.
-struct ToBoolean;
-
-impl ToBoolean {
-    fn answer(value: &Value) -> bool {
-        match value {
-            Value::Bool(value) => *value,
-            // NaN is false; otherwise `eq(value, 0)`, which -0 is.
-            Value::Float(value) => !value.get().is_nan() && value.get() != 0.0,
-            Value::Absent | Value::Null => false,
-            Value::Text(text) => text.summary.utf8_bytes != 0,
-            Value::Int(IntRef::Inline(value)) => value.bits() != 0,
-            Value::Int(IntRef::Paged { summary, .. }) => summary.bits != 0,
-            _ => true,
-        }
-    }
-}
-
-impl NativeFunction for ToBoolean {
-    fn call(&self, call: NativeCall<'_>) -> Result<Value, NativeError> {
-        Ok(Value::Bool(Self::answer(
-            call.args.first().unwrap_or(&Value::Absent),
-        )))
-    }
-
-    fn prepare(&self) -> Option<PreparedNative> {
-        Some(PreparedNative {
-            entry: |args| Some(Value::Bool(Self::answer(args.first()?))),
-            operation: "ts.to_boolean",
-        })
     }
 }
 
@@ -327,36 +316,6 @@ impl NativeFunction for Subtract {
                 _ => None,
             },
             operation: "ts.sub / Float",
-        })
-    }
-}
-
-/// The list cursor already read the element. Its item operation only maps the
-/// empty-tuple hole to undefined. Other cursor kinds keep the complete body,
-/// including machine-only key dereferencing for maps and sets.
-struct ListItem;
-impl ListItem {
-    fn answer(args: &[Value]) -> Option<Value> {
-        let [Value::List(_), raw] = args else {
-            return None;
-        };
-        Some(match raw {
-            Value::Tuple(tuple) if tuple.summary.len == 0 => Value::Absent,
-            value => value.clone(),
-        })
-    }
-}
-impl NativeFunction for ListItem {
-    fn returns_borrowed(&self) -> bool {
-        true
-    }
-    fn call(&self, call: NativeCall<'_>) -> Result<Value, NativeError> {
-        Self::answer(call.args).ok_or(NativeError::Decline)
-    }
-    fn prepare(&self) -> Option<PreparedNative> {
-        Some(PreparedNative {
-            entry: Self::answer,
-            operation: "ts.for_of.item / List",
         })
     }
 }

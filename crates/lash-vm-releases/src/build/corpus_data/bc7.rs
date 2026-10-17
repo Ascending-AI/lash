@@ -17,7 +17,6 @@ pub(super) const DATA: &str = r####"{
 "c7189c8d99b8e7bcff7c141c9de3a49c2a7d1c054cc0d408ad876356baad9191":[{"text":"򝅳񌐑񿇙񰉺򦣾񢾯񙘰򃬜󜡪፺񁯜󬻫񅮶岁񿹸򀖄񺚏󊐂񋧊򻸹򯌅񹆣􂹀񬠜󠪌𣆙񍞺򐺕񙧈󥫻񪢎󩩟񺲫񍜲񣀜𘭼򶍪󝄬𛎎񭕩򓒃򽀪򾼊򪁔󞰔𧳌򘤵𙅧򺆅񎖆𚷍󣇖񟨵𴢁𫑐󫼸𢁆𛎆􌵡𢂻󪰺既񤦩򛽺𞢄빕򎙩󩇥󼶆򞮝󃼊򑗴󗛟韲𪉝񶉙􇓝󋅴񩄖򣆴򃛗򨕺黰𾇍򡭎󕻸񵹅񄆹󛕺򋒐󐏹𕎾咙󤙰󛋼񙢙𑧨򢏛󏵜🎦򰿁鞞"},{"text":"򘩳􂞧蘨򾬤󌗲񆃹๸򔡤󋷴񲾏𢘐𿹜򿒠𽍉񥲯򦯖󤪁񾁔򶺔񑅉򳬫󙦝񾏮񑞩𝟆򗧩򗥚򽔨򖚂󉋏𶨪񭱾񆩆󞬒򜙄򲣈𘺙󗿄쐻򣭳󈧅񖾖񤛉󽐄򑂬𖾍񂰒񝃊򀗫"}],
 "c71d0588fc568d2deff185fe5c1e622480cc37c6f216b631865459c5a6793c49":{"charge":7,"outcome":"raised \"number_range\" \"expected a nonnegative machine-sized integer\" \"null\"","prepared_difference":null,"reservations":[],"reserved":0,"spent":0},
 "c71e51bf46cca397a9ba5f03823862737e626a559fe75fa2a66b0e7a983f856d":{"charge":39,"outcome":"raised \"invalid_utf8\" \"bytes are not well-formed UTF-8\" \"null\"","prepared_difference":null,"reservations":[],"reserved":0,"spent":0},
-"c721dacc5a1c5d0a2ea34cbadf19f4241f50a3dcd595b291eba8bbb96a3785a4":{"charge":6,"outcome":"ok {\"float\":\"5038.244712123028\"}","prepared_difference":null,"reservations":[],"reserved":0,"spent":0},
 "c724ede4fbc459cefbb9dae787f8fabf08c2d0acfba04db8dda09aca5ada1b7b":[{"float":"-1.3078536475271338e-118"}],
 "c72536accac48e9b33ddfa7855b844f5b72baae61d69088f48a5ff297a671b1b":{"charge":705602,"outcome":"raised \"type_error\" \"values have no shared ordering\" \"null\"","prepared_difference":null,"reservations":[],"reserved":0,"spent":0},
 "c726363b07d558f00d01cca669e9ed437804c00e76ee56981715e95b9546bbd1":{"charge":68,"outcome":"ok {\"float\":\"6.944600622959203e-113\"}","prepared_difference":null,"reservations":[],"reserved":0,"spent":0},

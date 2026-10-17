@@ -190,9 +190,26 @@ PACKAGE_DEPS = {
             "num_traits": "//third-party/rust:p0218"
         }
     },
-    "lash-ext-py-core": {
+    "lash-ext-helper-compiler": {
         "build": {},
         "dev": {},
+        "normal": {
+            "lash_dialect_python": "//crates/lash-dialect-python:lash-dialect-python",
+            "lash_dialect_typescript": "//crates/lash-dialect-typescript:lash-dialect-typescript",
+            "lash_ext_date_ecma": "//crates/lash-ext-date-ecma:lash-ext-date-ecma",
+            "lash_ext_regex_ecma": "//crates/lash-ext-regex-ecma:lash-ext-regex-ecma",
+            "lash_ext_url_whatwg": "//crates/lash-ext-url-whatwg:lash-ext-url-whatwg",
+            "lash_kernel_dialect": "//crates/lash-kernel-dialect:lash-kernel-dialect",
+            "lash_kernel_doc": "//crates/lash-kernel-doc:lash-kernel-doc",
+            "lash_kernel_lib": "//crates/lash-kernel-lib:lash-kernel-lib",
+            "lash_kernel_vm": "//crates/lash-kernel-vm:lash-kernel-vm"
+        }
+    },
+    "lash-ext-py-core": {
+        "build": {},
+        "dev": {
+            "lash_ext_helper_compiler": "//crates/lash-ext-helper-compiler:lash-ext-helper-compiler"
+        },
         "normal": {
             "lash_kernel_doc": "//crates/lash-kernel-doc:lash-kernel-doc",
             "thiserror": "//third-party/rust:p0375"
@@ -212,7 +229,9 @@ PACKAGE_DEPS = {
     },
     "lash-ext-ts-core": {
         "build": {},
-        "dev": {},
+        "dev": {
+            "lash_ext_helper_compiler": "//crates/lash-ext-helper-compiler:lash-ext-helper-compiler"
+        },
         "normal": {
             "lash_kernel_doc": "//crates/lash-kernel-doc:lash-kernel-doc",
             "thiserror": "//third-party/rust:p0375"

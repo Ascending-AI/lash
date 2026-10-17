@@ -9,8 +9,9 @@
 
 use std::sync::Arc;
 
-use lash_kernel_doc::heap::TupleRef;
+use lash_kernel_doc::heap::{HeapFault, TupleRef};
 use lash_kernel_doc::{EntityId, NativeHeap, TaskId, Value};
+use lash_kernel_state::kernel_internals::PagedHeap;
 use lash_kernel_state::kernel_internals::payload::TextCursor;
 use lash_kernel_state::paged::{SemanticHeap, TableCursor};
 use num_traits::ToPrimitive;
@@ -61,6 +62,41 @@ impl Cursor {
             Value::Set(id) => Self::Set(id, None),
             Value::Text(text_value) if text => Self::Text(Box::new(TextCursor::new(text_value, 0))),
             other => return Err(Box::new(other)),
+        })
+    }
+}
+
+impl Cursor {
+    /// The loop's own cursor steps to its next element, or is exhausted
+    /// (`K-ITER-002`, `K-ITER-003`). A cursor a protocol steps has none.
+    pub(super) fn step(&mut self, heap: &PagedHeap) -> Result<Option<Value>, HeapFault> {
+        Ok(match self {
+            Self::List(list, position) => {
+                let element = heap.list_get(*list, *position as u64)?;
+                *position += usize::from(element.is_some());
+                element
+            }
+            Self::Tuple(items, position) => {
+                let element = heap.tuple_get(items, *position as u64)?;
+                *position += usize::from(element.is_some());
+                element
+            }
+            Self::Map(id, last) | Self::Set(id, last) => {
+                let next = heap.table_after(*id, *last)?;
+                next.map(|(sequence, key)| {
+                    *last = Some(sequence);
+                    key
+                })
+            }
+            Self::Text(cursor) => cursor.next(heap)?.map(|point| {
+                let mut buffer = [0; 4];
+                Value::text(&*point.encode_utf8(&mut buffer))
+            }),
+            Self::Opening | Self::Driver(_) => {
+                return Err(HeapFault::Malformed(
+                    "a loop's own cursor steps only what it walks".into(),
+                ));
+            }
         })
     }
 }
@@ -314,27 +350,6 @@ impl KernelMachine {
                         .and_then(|observer| observer.charges.as_ref()),
                 )?;
                 let raw = match cursor {
-                    Cursor::List(list, position) => {
-                        let element = self.heap.list_get(*list, *position as u64)?;
-                        *position += usize::from(element.is_some());
-                        element
-                    }
-                    Cursor::Tuple(items, position) => {
-                        let element = self.heap.tuple_get(items, *position as u64)?;
-                        *position += usize::from(element.is_some());
-                        element
-                    }
-                    Cursor::Map(id, last) | Cursor::Set(id, last) => {
-                        let next = self.heap.table_after(*id, *last)?;
-                        next.map(|(sequence, key)| {
-                            *last = Some(sequence);
-                            key
-                        })
-                    }
-                    Cursor::Text(cursor) => cursor.next(&self.heap)?.map(|point| {
-                        let mut buffer = [0; 4];
-                        Value::text(&*point.encode_utf8(&mut buffer))
-                    }),
                     Cursor::Driver(driver) => {
                         let driver = (**driver).clone();
                         *header = Header::Pull;
@@ -352,6 +367,7 @@ impl KernelMachine {
                     Cursor::Opening => {
                         return Err(fault("a loop stepped before it was opened").into());
                     }
+                    walked => walked.step(&self.heap)?,
                 };
                 self.stepped(task, host, exe, raw)
             }

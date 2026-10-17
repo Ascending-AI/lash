@@ -399,7 +399,7 @@ impl KernelMachine {
         let function = exe.lib(lib);
         let code = match self
             .answer(task, exe, lib, args, count, args)
-            .map_err(|interrupt| interrupt.in_function(&function.definition.name))?
+            .map_err(|interrupt| interrupt.answering(function))?
         {
             Answer::Done => return Ok(Flow::Done),
             Answer::Body(code) => code,
@@ -441,7 +441,7 @@ impl KernelMachine {
         let function = exe.lib(lib);
         match self
             .answer(task, exe, lib, args, count, args)
-            .map_err(|interrupt| interrupt.in_function(&function.definition.name))?
+            .map_err(|interrupt| interrupt.answering(function))?
         {
             Answer::Done => Ok(()),
             Answer::Body(_) => {
@@ -477,9 +477,14 @@ impl KernelMachine {
         for absent in args + given..args + function.arity {
             self.put(absent, Value::Absent);
         }
+        // An operation's admission refusal names it, whichever
+        // implementation would have answered (`K-LIB-006`).
         let entry = function
             .operation()
-            .then(|| self.operation_entry(task, exe, lib, args))
+            .then(|| {
+                self.operation_entry(task, exe, lib, args)
+                    .map_err(|interrupt| interrupt.in_function(&function.definition.name))
+            })
             .transpose()?;
         let result = self.answer_admitted(task, exe, lib, args, out);
         match result {
@@ -509,6 +514,7 @@ impl KernelMachine {
         }
         let result = match &function.run {
             LibRun::Body(code) => return Ok(Answer::Body((*code).into())),
+            LibRun::Plan { plan, .. } => self.run_plan(task, exe, lib, plan, args)?,
             LibRun::Machine(MachineFunction::Deref) => match self.regs.get(args) {
                 Some(Value::Ref(Identity::Task(task))) => Ok(Value::Task(*task)),
                 Some(Value::Ref(Identity::Object(object))) => self

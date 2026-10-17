@@ -143,7 +143,6 @@ pub(super) const DATA: &str = r####"{
 "2eefa12856d107fa14f633c361da28a1dd0c05ac412a35090eac9b2593839cc8":[{"int":"-169177606367944255"}],
 "2eeff6a53b883026aa690d86a3030a2e07b7527dd249cdfa69a5d76d88d218af":[{"text":"󽽧񃜙󉌷􁟑񂆾򒩽𭥩񴺛򇣆񙎷򳅐򟬲򞉄񄂀򱘁򈱭𑰵𩕍𝄧񔽅򭢛򐟪󺽥󞽻񳱥𢵝󭡇𷰷𓴏򽊵󑡐󊉠􉌤󿤂󈹰񂕬򎈦򴡢񘹲񧯮벙򽮠򚰗󦲏񵖖󊪽󑚨򣒅𴎬􇸫򯘗򱈻񇣟󷯮񠂙󙋘맽􃇎􁀭򤥍󘲟򢑆󗶎򮣵󣹤򹄘𡸺🺆񘻻󑄦󔂄󨬅񼍓⨕򆴁"},{"bool":false}],
 "2ef02aaa790c7f53d98b82ad39fb69e16052aeb098e936fd266eb8ba16c0a813":[{"float":"-5.158482296196983e213"}],
-"2ef082f3d16216e76daa02c60f1b54d1cff74023e923fb855521a33beb540b19":[{"float":"6.45584994226073e38"}],
 "2ef17fa6ed672c80d4b2113d8bccbb80fdd90fd1bf68c3d1cc534bdfe81cca57":{"charge":773,"outcome":"ok {\"text\":\"򁠥񦭕񪋃󔝆𵙈񦛤񬤩𒃻𪉺񖆾񀣽𣾬򚣓񹕂壨񶉙𠓝𽶔𣴯𜢕􌑄𖃌򷌍򌲫𣷲󚼉󞈗񗠓𳐣򝚋𐿦𗙹㫕񮟠ꀯ򺲯򻨶񆫂򧢗򶞦𧓩򐩀񤙔򳧘󰦫󮵸󘂢򍜣񬡍𸒝󭻔𫡩򷅙􁏻𤬜𿪊𶟿󙋰󖯕񨁂󻇂򋸡󬌝򭏛𒒼񮟵𠅺󈇸񅳻򀊂򇰇􇜿𬈑𤧕󦸆񃵚󘎠򲲧𩴾򐆄񈪇򇡒𤸢􀨾񎾪򑳵𣞌񞛣񝏮󙯉𡢾򳜏񈚡򁏬򀋋񾸎󻹒\"}","prepared_difference":null,"reservations":[],"reserved":0,"spent":0},
 "2ef50696c56a9acda0468bba3f4ae131a9419bec923f299d82510d444af6fc8d":[{"list":0},{"float":"1.9724183731412312e267"},{"text":"󪥇񤷕񻐎󼃦󥳧􃞞𧁱򲛑𙃜񊳽"}],
 "2ef83f7faea20ef8bd5c8cfd2e40d471903bdf02595ac02d0cf2eefcc0dea1c3":[{"record":13},{"text":""},{"text":""}],
