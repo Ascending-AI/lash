@@ -81,20 +81,24 @@ mod node_wakes;
 pub(crate) use node_wakes::TABLES as NODE_WAKES_TABLES;
 pub(crate) use node_wakes::{NodeWakeWriter, SqliteNodeWakes};
 
-// Connection-local buffers capture producers without a second dispatch list.
+// Connection-local buffers capture producers without a second dispatch list;
+// each capture sets the writer's capture mark (`CaptureMark::register`).
 pub(super) const NODE_WAKE_CAPTURE: &str = "
 CREATE TEMP TABLE lash_woken (actor TEXT PRIMARY KEY);
 CREATE TEMP TABLE lash_appended (actor TEXT PRIMARY KEY);
 CREATE TEMP TRIGGER lash_capture_created AFTER INSERT ON main.actors
     WHEN NEW.state = 'ready' BEGIN
     INSERT OR IGNORE INTO lash_woken VALUES (NEW.actor_key);
+    SELECT lash_wake_captured();
 END;
 CREATE TEMP TRIGGER lash_capture_woken AFTER UPDATE OF mail_seq ON main.actors
     WHEN NEW.mail_seq > OLD.mail_seq BEGIN
     INSERT OR IGNORE INTO lash_woken VALUES (NEW.actor_key);
+    SELECT lash_wake_captured();
 END;
 CREATE TEMP TRIGGER lash_capture_appended AFTER INSERT ON main.process_events BEGIN
     INSERT OR IGNORE INTO lash_appended VALUES ('p/' || NEW.process_id);
+    SELECT lash_wake_captured();
 END;
 ";
 
@@ -302,6 +306,21 @@ lash_store_sql::statements! {
              ORDER BY COALESCE(a.ready_at_ms, a.next_due_ms), a.actor_key
              LIMIT ?3";
 
+        /// Session `?1`'s unfinished turn with its phase row, in the turn
+        /// read's column order, and the cancel request the turn accepted, in
+        /// the cancel read's (FIG-6617): one statement, as the open's turn.
+        turn = "SELECT r.run, r.admission_json, p.phase, p.phase_arg, p.iteration,
+                    p.checkpoint_ref, p.model_request_ref, p.model_deadline_ms,
+                    p.turn_deadline_ms, p.written_epoch, p.model_calls,
+                    p.model_stream_from, p.working_execution_ref, p.answer_ref, p.tool_calls,
+                    c.request_id, c.origin, c.reason, c.disposition, c.mode
+             FROM session_runs AS r
+             JOIN turn_phases AS p ON p.session_id = r.session_id AND p.run = r.run
+             LEFT JOIN turn_cancel_requests AS c
+                 ON c.session_id = r.session_id AND c.turn_id = r.run
+             WHERE r.session_id = ?1 AND r.admission_json IS NOT NULL
+               AND r.terminal_kind IS NULL";
+
         /// Actor `?1`'s epoch, state, revision and mail marks with each mail
         /// past its acknowledgement, in order (one row with NULL mail columns
         /// when none); and, when `?2` names its session, on every row that
@@ -409,6 +428,8 @@ pub(crate) struct Committing<'a> {
     /// The roots its writes retired, moved to retirement holds before it
     /// commits.
     pub(crate) retired: Retired,
+    /// The open turn's phase roots its fenced turn read saw.
+    pub(crate) open_roots: turns::OpenRoots,
 }
 
 /// The roots a transaction's writes retired: what it moves to retirement
@@ -710,18 +731,19 @@ fn apply_owner(
     // A session's unfinished turn's accepted cancel, read under the fence
     // before the commit writes: the receipt reports a cancel that arrived
     // after the owner's open.
-    let turn_cancel = match write.actor().kind() {
+    let (turn_cancel, open_roots) = match write.actor().kind() {
         lash_durable::ActorKind::Session => {
             let Ok(session) = lash_sansio::SessionId::try_from(write.actor().id().to_owned())
             else {
                 return refuse(corrupt("session id", write.actor().id()));
             };
-            match turns::turn(tx, &session)? {
-                Ok(row) => row.and_then(|row| row.cancel),
+            match turns::turn_with_roots(tx, &session)? {
+                Ok(Some((row, roots))) => (row.cancel, Some(roots)),
+                Ok(None) => (None, None),
                 Err(error) => return refuse(error),
             }
         }
-        lash_durable::ActorKind::Process => None,
+        lash_durable::ActorKind::Process => (None, None),
     };
     let publications: Vec<_> = write
         .domain()
@@ -761,6 +783,7 @@ fn apply_owner(
         fleet,
         blob_profile,
         retired: Retired::default(),
+        open_roots: turns::OpenRoots::read(open_roots),
     };
     for domain in write.domain() {
         if let Err(refusal) = apply_domain(tx, &committing, domain)? {

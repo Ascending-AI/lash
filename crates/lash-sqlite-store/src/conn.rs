@@ -544,8 +544,12 @@ impl SqliteConnection {
         &self,
         writer: crate::durable::NodeWakeWriter,
     ) -> rusqlite::Result<()> {
-        self.call(|c| c.execute_batch(crate::durable::NODE_WAKE_CAPTURE))
-            .await?;
+        let mark = writer.mark();
+        self.call(move |c| {
+            mark.register(c)?;
+            c.execute_batch(crate::durable::NODE_WAKE_CAPTURE)
+        })
+        .await?;
         *self
             .writer
             .node_wakes

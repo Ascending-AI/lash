@@ -102,6 +102,14 @@ pub(super) fn apply(
     commit: &Committing<'_>,
     write: &TurnWrite,
 ) -> Answer<()> {
+    // Every write but an advance (which takes them) and a tool-call count
+    // may change the phase row the fenced read saw.
+    if !matches!(
+        write,
+        TurnWrite::Advance { .. } | TurnWrite::AddToolCalls { .. }
+    ) {
+        commit.open_roots.forget();
+    }
     match write {
         TurnWrite::Admit {
             session,
@@ -165,17 +173,22 @@ pub(super) fn apply(
             let (stored, argument) = phase.stored();
             let pin = phase.model();
             // The phase's PhaseRoot it replaces and the receipt it consumes,
-            // peeled once the commit's writes are applied.
-            let (replaced, consumed) = tx
-                .prepare_cached(SQL.phase_roots.sql())?
-                .query_row([session.as_str(), run.as_str()], |row| {
-                    Ok((
-                        row.get::<_, Option<String>>(0)?,
-                        row.get::<_, Option<String>>(1)?,
-                    ))
-                })
-                .optional()?
-                .unwrap_or_default();
+            // peeled once the commit's writes are applied: as the commit's
+            // fenced turn read saw them while no write of this transaction
+            // changed the phase row since, else read again.
+            let (replaced, consumed) = match commit.open_roots.take(session, run) {
+                Some(roots) => roots,
+                None => tx
+                    .prepare_cached(SQL.phase_roots.sql())?
+                    .query_row([session.as_str(), run.as_str()], |row| {
+                        Ok((
+                            row.get::<_, Option<String>>(0)?,
+                            row.get::<_, Option<String>>(1)?,
+                        ))
+                    })
+                    .optional()?
+                    .unwrap_or_default(),
+            };
             let advanced = tx
                 .prepare_cached(SQL.advance_phase.sql())?
                 .query_row(
@@ -452,6 +465,7 @@ pub(super) fn apply_session_commit(
     commit: &Committing<'_>,
     write: &SessionCommitWrite,
 ) -> Answer<()> {
+    commit.open_roots.forget();
     let refused = |error: &lash_core_execution::StoreError| {
         Ok(Err(DurableError::session_commit(
             write.session.clone(),
@@ -716,17 +730,82 @@ pub(super) fn turn_namespaces(
     Ok(Ok(namespaces))
 }
 
+/// Session `session`'s unfinished turn with the cancel it accepted, read in
+/// one statement.
 pub(super) fn turn(tx: &Connection, session: &SessionId) -> Answer<Option<TurnRow>> {
+    Ok(turn_with_roots(tx, session)?.map(|turn| turn.map(|(row, _)| row)))
+}
+
+/// [`turn`], with the phase row's roots as stored.
+pub(super) fn turn_with_roots(
+    tx: &Connection,
+    session: &SessionId,
+) -> Answer<Option<(TurnRow, PhaseRoots)>> {
     let stored = tx
-        .prepare_cached(SQL.unfinished.sql())?
-        .query_row([session.as_str()], |row| StoredTurn::read(row, 0))
+        .prepare_cached(super::SQL.sqlite.turn.sql())?
+        .query_row([session.as_str()], |row| {
+            Ok((
+                StoredTurn::read(row, 0)?,
+                row.get::<_, Option<String>>(15)?
+                    .map(|_| StoredCancel::read(row, 15))
+                    .transpose()?,
+            ))
+        })
         .optional()?;
-    let Some(stored) = stored else {
+    let Some((stored, cancel)) = stored else {
         return Ok(Ok(None));
     };
+    let roots = PhaseRoots {
+        session: session.as_str().to_owned(),
+        run: stored.run.clone(),
+        checkpoint: stored.checkpoint.clone(),
+        answer: stored.answer.clone(),
+    };
     Ok(stored
-        .decode(session, |run| cancel_of(tx, session, run))?
-        .map(Some))
+        .decode(session, |run| {
+            Ok(cancel.map(|cancel| cancel.decode(session, run)).transpose())
+        })?
+        .map(|row| Some((row, roots))))
+}
+
+/// An unfinished turn's phase root and receipt as stored.
+pub(super) struct PhaseRoots {
+    session: String,
+    run: String,
+    checkpoint: Option<String>,
+    answer: Option<String>,
+}
+
+/// The open turn's phase root and receipt as an owner commit's fenced turn
+/// read saw them, before its writes (FIG-6617). Only this module's writes
+/// change a phase row, and the transaction holds the database's write lock,
+/// so they hold until a write of this commit changes the row: any turn
+/// write but a tool-call count forgets them, and an advance takes them.
+#[derive(Default)]
+pub(crate) struct OpenRoots(std::cell::RefCell<Option<PhaseRoots>>);
+
+impl OpenRoots {
+    /// The roots `roots` names, read under the commit's fence.
+    pub(super) fn read(roots: Option<PhaseRoots>) -> Self {
+        Self(std::cell::RefCell::new(roots))
+    }
+
+    /// Take the roots of run `run` of `session`, when they are still held.
+    fn take(&self, session: &SessionId, run: &TurnId) -> Option<(Option<String>, Option<String>)> {
+        let mut held = self.0.borrow_mut();
+        if held
+            .as_ref()
+            .is_some_and(|roots| roots.session == session.as_str() && roots.run == run.as_str())
+        {
+            held.take().map(|roots| (roots.checkpoint, roots.answer))
+        } else {
+            None
+        }
+    }
+
+    fn forget(&self) {
+        self.0.borrow_mut().take();
+    }
 }
 
 /// A session's unfinished turn as stored: its run row and phase row, in the

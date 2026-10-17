@@ -151,3 +151,79 @@ fn a_first_cell_turn_stays_within_the_sql_statement_budget() {
         "first turn issued {statements} SQL statements, budget is 855 (1.5 × pre-heap 570)"
     );
 }
+
+/// FIG-6617: one coding turn on SQLite reads each fenced fact once per
+/// scope. A member that captured no wake reads no capture buffer, an owner
+/// commit reads its open turn and that turn's cancel in one statement, and an
+/// advance takes the phase roots its commit's fenced turn read already saw.
+/// The turn (four tool calls, then an answer) issued 54 SELECTs of these
+/// shapes before; the bound is the measured count after.
+#[test]
+fn a_coding_turn_reads_its_fenced_facts_once_per_scope() {
+    let dir = tempfile::tempdir().unwrap();
+    let script = dir.path().join("coding-turn.json");
+    let reads: Vec<_> = (0..4)
+        .map(|index| {
+            serde_json::json!({"tool_calls": [{
+                "tool": "fixture_large",
+                "args": {"key": format!("read-{{turn}}-{index}"), "bytes": 643}
+            }]})
+        })
+        .chain([serde_json::json!({"text": "done"})])
+        .collect();
+    std::fs::write(
+        &script,
+        serde_json::to_vec(&serde_json::json!({
+            "format": "lash-perf-replay/1",
+            "name": "coding-turn-reads",
+            "description": "One coding turn's repeated fenced reads (FIG-6617)",
+            "protocol": "standard",
+            "sessions": 1,
+            "turns": [{"user": "Read four files, then answer", "replies": reads}]
+        }))
+        .unwrap(),
+    )
+    .unwrap();
+    let receipt = dir.path().join("receipt.json");
+    let shapes = dir.path().join("shapes.json");
+    let output = Command::new(env!("CARGO_BIN_EXE_lash-perf"))
+        .arg("replay")
+        .arg(&script)
+        .arg("--store-dir")
+        .arg(dir.path().join("stores"))
+        .arg("--out")
+        .arg(&receipt)
+        .arg("--sql-shapes")
+        .arg(&shapes)
+        .output()
+        .unwrap();
+    assert!(
+        output.status.success(),
+        "{}",
+        String::from_utf8_lossy(&output.stderr)
+    );
+    let shapes: serde_json::Value =
+        serde_json::from_slice(&std::fs::read(shapes).unwrap()).unwrap();
+    let fixed = [
+        "from temp.lash_woken",
+        "select request_id, origin, reason, disposition, mode from",
+        "select checkpoint_ref, answer_ref from",
+    ];
+    let rows = shapes["rounds"][0]["rows"].as_array().unwrap();
+    let mut counted = std::collections::BTreeMap::new();
+    for row in rows {
+        let shape = row["shape"].as_str().unwrap();
+        if let Some(fact) = fixed.iter().find(|fact| shape.contains(**fact)) {
+            *counted.entry(*fact).or_insert(0) += row["selects"].as_u64().unwrap();
+        }
+    }
+    let selects: u64 = counted.values().sum();
+    eprintln!("FIG-6617 fenced-fact SELECTs: {selects} {counted:?}");
+    assert!(
+        selects <= BOUND,
+        "the coding turn issued {selects} SELECTs of its fenced facts {counted:?}, bound {BOUND}"
+    );
+}
+
+/// The measured count after FIG-6617.
+const BOUND: u64 = 2;

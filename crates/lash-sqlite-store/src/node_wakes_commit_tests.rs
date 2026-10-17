@@ -3,10 +3,21 @@
 use super::*;
 use lash_durable::laws::node_wakes::{Claims, CountingStore};
 
-/// WAKE-CAPTURE-WORK: a producer reads both capture buffers together, even
-/// when a heartbeat has no hint to publish.
+/// The capture-buffer reads `receipt` counts.
+fn capture_reads(receipt: &lash_core_execution::facade_support::sql::Receipt) -> u64 {
+    receipt
+        .shapes
+        .iter()
+        .filter(|(sql, _)| sql.starts_with("select ") && sql.contains("temp.lash_"))
+        .map(|(_, shape)| shape.statements)
+        .sum()
+}
+
+/// WAKE-CAPTURE-WORK: a producer that captured nothing reads no capture
+/// buffer (FIG-6617), and one that captured a wake reads both buffers
+/// together, in one statement.
 #[tokio::test]
-async fn an_empty_wake_capture_is_one_read() {
+async fn a_wake_capture_is_read_only_when_a_trigger_captured() {
     let dir = tempfile::tempdir().unwrap();
     let stores = SqliteStoreSet::open(dir.path().join("lash.db"), crate::SqliteSynchronous::Full)
         .await
@@ -21,24 +32,31 @@ async fn an_empty_wake_capture_is_one_read() {
         })
         .await
         .unwrap();
-    let (answer, receipt) = lash_core_execution::facade_support::sql::collect(
+    let (answer, quiet) = lash_core_execution::facade_support::sql::collect(
         "node.heartbeat",
         "sqlite",
         store.heartbeat(&lease),
     )
     .await;
     answer.unwrap();
-    let reads: u64 = receipt
-        .shapes
-        .iter()
-        .filter(|(sql, _)| sql.starts_with("select ") && sql.contains("temp.lash_"))
-        .map(|(_, shape)| shape.statements)
-        .sum();
     eprintln!(
         "WAKE-CAPTURE SQL {}",
-        serde_json::to_string(&receipt).unwrap()
+        serde_json::to_string(&quiet).unwrap()
     );
-    assert_eq!(reads, 1, "capture buffers must share a statement");
+    assert_eq!(capture_reads(&quiet), 0, "nothing was captured");
+    let actor = ActorKey::session("capture-woken").unwrap();
+    let (_, woke) = lash_core_execution::facade_support::sql::collect(
+        "mail.create",
+        "sqlite",
+        create(&store, &actor),
+    )
+    .await;
+    eprintln!("WAKE-CAPTURE SQL {}", serde_json::to_string(&woke).unwrap());
+    assert_eq!(
+        capture_reads(&woke),
+        1,
+        "capture buffers must share a statement"
+    );
 }
 
 /// A node that claims every `poll` and holds `max_active` actors. Its

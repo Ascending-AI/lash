@@ -714,6 +714,7 @@ mod tests {
             fleet: lash_core_execution::FleetFormat::current(),
             blob_profile: crate::BuiltinBlobProfile::default(),
             retired: super::super::Retired::default(),
+            open_roots: Default::default(),
         };
         let record = lash_core_store::checkpoint_graph::NodeId([7; 32]);
         conn.execute(
