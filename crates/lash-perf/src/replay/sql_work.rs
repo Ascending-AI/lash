@@ -170,7 +170,7 @@ fn table(receipt: &Receipt) -> String {
         let c = &row.counts;
         let _ = writeln!(
             out,
-            "{} turn={:?} phase={} stmt={} site={} relations={:?} owner={:?} worker={} calls={} returned={} affected={} bind_B={} result_B={} finished={:?}",
+            "{} turn={:?} phase={} stmt={} site={} relations={:?} owner={:?} worker={} calls={} returned={} affected={} bind_B={} result_B={} finished={:?} disposition={:?}",
             k.backend,
             k.started_in.turn,
             k.started_in.phase,
@@ -184,7 +184,8 @@ fn table(receipt: &Receipt) -> String {
             c.rows_affected,
             c.bound_bytes,
             c.result_bytes,
-            k.finished_in
+            k.finished_in,
+            k.disposition
         );
     }
     let _ = writeln!(

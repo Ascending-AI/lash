@@ -6,12 +6,12 @@
 //! observation, and a bounded poll. Events the replay already holds wake one
 //! resolution between them, not one each: a follower that replays a
 //! session's retained history reads the store once for all of it (FIG-5915).
-//! Once it knows its run, it also holds one open wait on the run's published
-//! terminal, which wakes it as soon as a run that ran in another process
-//! settles; until then, a follower with no resident runtime resolves its
-//! input at the poll floor (FIG-3981). It never answers from events or from
-//! the wait: a follower whose replay window is gone still answers from the
-//! store, and so does one whose engine cannot answer the wait (FIG-4345).
+//! Once it knows its run, the terminal polling schedule also wakes that
+//! resolution path. Both schedules share the same durable read: no separate
+//! SQL waiter races resolution and gets abandoned when the answer arrives.
+//! Until adoption, a follower with no resident runtime resolves its input at
+//! the poll floor (FIG-3981). Answers always come from the store, even when
+//! the replay window is gone or another node executes the run (FIG-4345).
 //!
 //! That a run ended is the store's fact alone: its terminal. A follower that
 //! reads it answers at once, with what the replay holds past its cursor, and
@@ -29,10 +29,9 @@ use std::collections::{HashSet, VecDeque};
 use std::sync::Arc;
 use std::time::Duration;
 
-use futures_util::future::BoxFuture;
 use futures_util::{FutureExt as _, StreamExt};
 use lash_core::facade_support::LiveReplayGap;
-use lash_core::facade_support::{TurnAddress, TurnOutcome, TurnTerminal, TurnWorkDriver};
+use lash_core::facade_support::TurnOutcome;
 use lash_core::runtime::TurnInputAcceptanceReceipt;
 use lash_core::store::PhysicalTurn;
 use lash_core::{
@@ -47,10 +46,6 @@ use super::{SendContext, SendOutcome};
 use crate::error::{EmbedError, Result, SendError};
 use crate::support::TurnActivitySink;
 use crate::turn::{ReportSource, TurnOutput, TurnReport};
-
-/// A terminal wait in flight.
-type AwaitedTerminal =
-    BoxFuture<'static, std::result::Result<TurnTerminal, lash_core::RuntimeError>>;
 
 /// What a follower follows.
 #[derive(Clone, Debug)]
@@ -233,109 +228,6 @@ fn replay_gap(
     }
 }
 
-/// One open wait on the adopted run's published terminal (FIG-3981): a
-/// wake, never an answer.
-///
-/// A run that ran in another process deposits no report here and publishes
-/// nothing on this process's replay, so without the wait its follower learns
-/// that it settled only from a store poll that backs off to a second. The
-/// wait is held while a store read has just shown the run undecided. A
-/// published terminal wakes the
-/// follower, which reads the answer from the store: the run's commit is
-/// durable before its terminal is published. The wait is registered, so it
-/// holds nothing past its run: the commit's publish answers it, and a run
-/// that ended without that commit is retired, which releases it. Retirement
-/// never cancels a terminal the run's ending commit still publishes
-/// (FIG-4025). Every follower's wait on one physical turn shares one waiter
-/// in the engine, however often followers attach and drop it (FIG-4345).
-struct TerminalWait {
-    /// The run's physical turn waited on: a run that goes on past a
-    /// committed turn (a frame switch, a follow-on) goes on in its next
-    /// physical turn.
-    ordinal: u64,
-    wait: Option<AwaitedTerminal>,
-    /// The pause before the next wait, after one that failed.
-    pause: Option<Duration>,
-    /// A physical turn published a failure, or its wait was released: the
-    /// store reads decide what follows (a park, a redrive, or the run's
-    /// end), with no wait held.
-    ended: bool,
-}
-
-impl TerminalWait {
-    fn new() -> Self {
-        Self {
-            ordinal: 0,
-            wait: None,
-            pause: None,
-            ended: false,
-        }
-    }
-
-    /// Hold the wait on `run`'s current physical turn, unless one is held
-    /// or no further terminal will be published.
-    fn hold(&mut self, ctx: &SendContext, run: &TurnId) {
-        if self.wait.is_some() || self.ended {
-            return;
-        }
-        let driver = TurnWorkDriver::new(ctx.parts.effect_host.backend().clone())
-            .with_terminal_pacing(ctx.parts.observer_pacing.terminal);
-        let address = TurnAddress::new(
-            ctx.parts.session_id.clone(),
-            PhysicalTurn::derive_turn_id(run, self.ordinal),
-        );
-        let pause = self.pause.take();
-        self.wait = Some(Box::pin(async move {
-            if let Some(pause) = pause {
-                tokio::time::sleep(pause).await;
-            }
-            driver.await_terminal(&address).await
-        }));
-    }
-
-    /// The held wait's answer; pending while none is held.
-    async fn next(&mut self) -> std::result::Result<TurnTerminal, lash_core::RuntimeError> {
-        match self.wait.as_mut() {
-            Some(wait) => wait.await,
-            None => std::future::pending().await,
-        }
-    }
-
-    /// Take the held wait's answer. The follower resolves from the store
-    /// after each: a run that settled answers there, and a read that still
-    /// shows the run undecided holds the next wait.
-    fn answered(
-        &mut self,
-        ctx: &SendContext,
-        answer: std::result::Result<TurnTerminal, lash_core::RuntimeError>,
-    ) {
-        self.wait = None;
-        match answer {
-            // The turn committed: the store answers a run it ended, and a
-            // run it did not end goes on in its next physical turn.
-            Ok(TurnTerminal::Committed { .. }) => self.ordinal = self.ordinal.saturating_add(1),
-            // A failed turn publishes no further terminal, and neither does
-            // a run whose retirement (or its session's revocation) released
-            // the wait.
-            Err(error)
-                if error.code == lash_core::RuntimeErrorCode::TurnControlUnknownOrRevoked =>
-            {
-                self.ended = true;
-            }
-            Err(error) => {
-                tracing::debug!(
-                    session_id = %ctx.parts.session_id,
-                    error = %error,
-                    "send handle's terminal wait failed; attaching again after a pause"
-                );
-                // A wait that cannot attach never spins: the store poll
-                // still answers meanwhile.
-                self.pause = Some(ctx.parts.observer_pacing.follow.maximum());
-            }
-        }
-    }
-}
-
 /// Where a follower stands in its subject's live activity: the replay
 /// cursor to go on from, and whether it has observed any of the run's
 /// activity. A windowed follower hands its position to the next window, which
@@ -488,7 +380,9 @@ pub(super) async fn follow(
     // Where this follow's observation starts: past the gap, when the cursor
     // it was handed is gone, so a later window never meets that gap again.
     let start_cursor = observation.last_cursor.clone();
-    let mut terminal = TerminalWait::new();
+    let terminal_pacing = ctx.parts.observer_pacing.terminal;
+    let mut terminal_poll = terminal_pacing.initial();
+    let mut terminal_at = None;
     let pacing = ctx.parts.observer_pacing.follow;
     let mut poll = pacing.initial();
     // The store poll is due `poll` after the last resolve, and the floor
@@ -580,12 +474,11 @@ pub(super) async fn follow(
                     if let Some(run) = run {
                         adoption.adopt(run, tap).await;
                     }
-                    // Wait on the terminal only while a store read has just
-                    // shown the run undecided: a run this read shows ended
-                    // may already be retired, which releases no wait
-                    // registered after it.
-                    if let Some(run) = adoption.run.as_ref() {
-                        terminal.hold(ctx, run);
+                    // A fresh authoritative read satisfies both schedules.
+                    // The terminal schedule wakes this same path instead of
+                    // starting a competing SQL read inside the select below.
+                    if adoption.run.is_some() {
+                        terminal_at = Some(tokio::time::Instant::now() + terminal_poll);
                     }
                 }
             }
@@ -632,6 +525,12 @@ pub(super) async fn follow(
                 None => std::future::pending().await,
             }
         };
+        let terminal_tick = async {
+            match terminal_at {
+                Some(at) => tokio::time::sleep_until(at).await,
+                None => std::future::pending().await,
+            }
+        };
         tokio::select! {
             event = next_event(&mut observation.replay) => {
                 match event {
@@ -653,8 +552,8 @@ pub(super) async fn follow(
                     None => observation.replay = Replay::Ended,
                 }
             }
-            answer = terminal.next() => {
-                terminal.answered(ctx, answer);
+            () = terminal_tick => {
+                terminal_poll = terminal_pacing.next(terminal_poll);
             }
             () = tick => {}
             () = polled => {
@@ -671,7 +570,7 @@ pub(super) async fn follow(
 /// its run is known, on a follower with no resident runtime. Such a
 /// follower reads a run that may run in another process, which publishes
 /// nothing on this process's replay, so on a poll that backs off to a second
-/// it would learn the run, and hold the run's terminal wait, that late
+/// it would learn the run and start its terminal polling schedule that late
 /// (FIG-3981). The admission that writes the binding runs in the worker's
 /// process and announces it to no other, so there is no event to wait on
 /// instead. Each floor read is one keyed read of the input's status, which

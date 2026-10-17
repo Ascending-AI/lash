@@ -11,7 +11,24 @@ use std::sync::{
 };
 
 #[cfg(feature = "perf-witness")]
-type Exact = Option<lash_core_execution::perf_witness::sql_shapes::work::BindingCapture>;
+use lash_core_execution::perf_witness::sql_shapes::work::BindingCapture;
+
+/// The query owns admission; encoder values only borrow its copyable token.
+/// Cancellation before argument extraction must release the admission too.
+#[cfg(feature = "perf-witness")]
+struct Exact(Option<BindingCapture>);
+#[cfg(feature = "perf-witness")]
+impl Exact {
+    fn take(&mut self) -> Option<Vec<u8>> {
+        self.0.take().and_then(BindingCapture::take)
+    }
+}
+#[cfg(feature = "perf-witness")]
+impl Drop for Exact {
+    fn drop(&mut self) {
+        self.take();
+    }
+}
 #[cfg(feature = "perf-witness")]
 type BindingEvidence = (Option<u64>, Option<Vec<u8>>);
 
@@ -34,7 +51,7 @@ impl<Q> Bound<Q> {
             .then(Arc::default),
             unmeasured_binds: false,
             #[cfg(feature = "perf-witness")]
-            exact: lash_core_execution::perf_witness::sql_shapes::work::BindingCapture::new(),
+            exact: Exact(BindingCapture::new()),
         }
     }
 }
@@ -42,7 +59,7 @@ struct Value<T> {
     inner: T,
     bytes: Option<Arc<AtomicU64>>,
     #[cfg(feature = "perf-witness")]
-    exact: Exact,
+    exact: Option<BindingCapture>,
 }
 impl<T: Type<Postgres>> Type<Postgres> for Value<T> {
     fn type_info() -> PgTypeInfo {
@@ -94,7 +111,7 @@ impl<'q, Q: Execute<'q, Postgres>> Execute<'q, Postgres> for Bound<Q> {
         #[cfg(feature = "perf-witness")]
         report_bindings(
             self.bytes.as_ref().map(|b| b.load(Ordering::Relaxed)),
-            self.exact.and_then(|capture| capture.take()),
+            self.exact.take(),
         );
         if let Some(window) = lash_core_execution::facade_support::sql::Window::current() {
             window.payload(
@@ -213,7 +230,7 @@ impl<'q> Bound<Plain<'q>> {
                 inner: value,
                 bytes: self.bytes.clone(),
                 #[cfg(feature = "perf-witness")]
-                exact: self.exact,
+                exact: self.exact.0,
             })
         } else {
             self.unmeasured_binds = true;
@@ -229,7 +246,7 @@ impl<'q, O> Bound<sqlx::query::QueryAs<'q, Postgres, O, PgArguments>> {
                 inner: value,
                 bytes: self.bytes.clone(),
                 #[cfg(feature = "perf-witness")]
-                exact: self.exact,
+                exact: self.exact.0,
             })
         } else {
             self.unmeasured_binds = true;
@@ -245,7 +262,7 @@ impl<'q, O> Bound<sqlx::query::QueryScalar<'q, Postgres, O, PgArguments>> {
                 inner: value,
                 bytes: self.bytes.clone(),
                 #[cfg(feature = "perf-witness")]
-                exact: self.exact,
+                exact: self.exact.0,
             })
         } else {
             self.unmeasured_binds = true;
@@ -299,7 +316,11 @@ pub(super) fn capture<T>(work: impl FnOnce() -> T) -> (T, Option<BindingEvidence
     (result, BINDINGS.with(|v| v.borrow_mut().take()))
 }
 #[cfg(feature = "perf-witness")]
-fn capture_value<T: Type<Postgres>>(exact: &Exact, bytes: &[u8], null: &sqlx::encode::IsNull) {
+fn capture_value<T: Type<Postgres>>(
+    exact: &Option<BindingCapture>,
+    bytes: &[u8],
+    null: &sqlx::encode::IsNull,
+) {
     use sqlx::TypeInfo as _;
     let Some(exact) = exact else {
         return;

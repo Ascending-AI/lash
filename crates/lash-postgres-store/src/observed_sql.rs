@@ -314,6 +314,10 @@ impl Statement {
 
 impl Drop for Statement {
     fn drop(&mut self) {
+        #[cfg(feature = "perf-witness")]
+        if let Some(work) = self.work.take() {
+            work.dropped();
+        }
         if self.locking
             && let Some(state) = &self.state
         {
@@ -334,7 +338,7 @@ pub(crate) async fn control<T>(sql: &str, future: impl Future<Output = T>) -> T 
     }
     let result = future.await;
     #[cfg(feature = "perf-witness")]
-    if let Some(work) = statement.as_ref().and_then(|s| s.work) {
+    if let Some(work) = statement.as_mut().and_then(|s| s.work.take()) {
         work.finish();
     }
     if let Some(statement) = &mut statement {
@@ -381,7 +385,7 @@ impl<'c, E: Executor<'c, Database = Postgres>> Executor<'c> for Observed<E> {
                 Poll::Pending => return Poll::Pending,
                 Poll::Ready(None) => {
                     #[cfg(feature = "perf-witness")]
-                    if let Some(work) = statement.work {
+                    if let Some(work) = statement.work.take() {
                         work.finish();
                     }
                     return Poll::Ready(None);
@@ -400,7 +404,13 @@ impl<'c, E: Executor<'c, Database = Postgres>> Executor<'c> for Observed<E> {
                         window.payload(&statement.sql, done.rows_affected(), 0, 0);
                     }
                 }
-                Err(_) => statement.finish(),
+                Err(_) => {
+                    statement.finish();
+                    #[cfg(feature = "perf-witness")]
+                    if let Some(work) = statement.work.take() {
+                        work.failed();
+                    }
+                }
             }
             Poll::Ready(Some(result))
         }))
@@ -535,6 +545,117 @@ mod tests {
         drop(collector);
         drop(connection);
         pool.close().await;
+    }
+
+    /// SQL-STREAM-DROP: abandoning an executor stream closes its observed
+    /// population without fabricating command completion or unseen rows.
+    #[cfg(feature = "perf-witness")]
+    #[expect(
+        clippy::disallowed_methods,
+        reason = "isolates the exclusive process-global witness from parallel store laws"
+    )]
+    #[tokio::test]
+    async fn dropped_query_streams_conserve_only_observed_work() {
+        const CHILD: &str = "LASH_SQL_DROP_PG_CHILD";
+        if std::env::var_os(CHILD).is_none() {
+            let output = std::process::Command::new(std::env::current_exe().unwrap())
+                .args([
+                    "--exact",
+                    "observed_sql::tests::dropped_query_streams_conserve_only_observed_work",
+                    "--nocapture",
+                ])
+                .env(CHILD, "1")
+                .output()
+                .unwrap();
+            let stdout = String::from_utf8_lossy(&output.stdout);
+            eprint!("{}", String::from_utf8_lossy(&output.stderr));
+            assert!(output.status.success(), "isolated law failed: {stdout}");
+            assert!(stdout.contains("test result: ok. 1 passed; 0 failed;"));
+            return;
+        }
+        use lash_core_execution::perf_witness::{Collector, sql_shapes};
+        let database =
+            crate::testing::IsolatedDatabase::create(&crate::testing::required_database_url())
+                .await;
+        let mut connection = <sqlx::PgConnection as sqlx::Connection>::connect(database.url())
+            .await
+            .unwrap();
+        let collector = Collector::install_with_sql_shapes().unwrap();
+        sql_shapes::work::set_window(Some(80), "turn");
+        let mut stream = query("SELECT generate_series(1, 3)").fetch(executor(&mut connection));
+        stream.next().await.unwrap().unwrap();
+        drop(stream);
+        let work = collector.snapshot().sql_shapes.unwrap().work;
+        assert!(
+            work.active.is_empty(),
+            "dropped stream stays active: {work:?}"
+        );
+        assert!(work.complete && work.conserves());
+        assert_eq!(work.rows.len(), 1);
+        let row = &work.rows[0];
+        assert_eq!(row.counts.statements, 1);
+        assert_eq!(row.counts.rows_returned, 1);
+        assert_eq!(row.counts.rows_affected, 0);
+        assert_eq!(row.counts.result_bytes, 4);
+        assert_eq!(row.key.finished_in.as_ref().unwrap().turn, Some(80));
+        let json = serde_json::to_value(row).unwrap();
+        assert_eq!(json["disposition"], "dropped");
+
+        // Cancellation before polling also drops the executor guard, but
+        // cannot invent parameter extraction, rows, or command completion.
+        // The query wrapper itself is lazy: this one never reaches the
+        // executor, but must release its pending binding admission.
+        drop(query("SELECT 2").fetch_optional(executor(&mut connection)));
+        let cancelled = executor(&mut connection).fetch_optional(query("SELECT 1"));
+        sql_shapes::work::set_window(Some(81), "turn");
+        drop(cancelled);
+        assert!(
+            query("SELECT 1 / 0")
+                .fetch_all(executor(&mut connection))
+                .await
+                .is_err()
+        );
+        assert_eq!(
+            query("SELECT generate_series(1, 3)")
+                .fetch_all(executor(&mut connection))
+                .await
+                .unwrap()
+                .len(),
+            3
+        );
+        let work = collector.snapshot().sql_shapes.unwrap().work;
+        assert!(work.complete && work.conserves());
+        assert!(work.active.is_empty());
+        assert_eq!(work.pending_bindings, 0);
+        let totals = &work.totals[&sql_shapes::work::Backend::Postgres];
+        assert_eq!(totals.statements, 4);
+        assert_eq!(totals.rows_returned, 4);
+        assert_eq!(totals.rows_affected, 3);
+        assert_eq!(totals.result_bytes, 16);
+        use sql_shapes::work::Disposition;
+        for (disposition, count) in [
+            (Disposition::Dropped, 2),
+            (Disposition::Error, 1),
+            (Disposition::Finished, 1),
+        ] {
+            assert_eq!(
+                work.rows
+                    .iter()
+                    .filter(|row| row.key.disposition == Some(disposition))
+                    .map(|row| row.counts.statements)
+                    .sum::<u64>(),
+                count
+            );
+        }
+        let cancelled = work
+            .rows
+            .iter()
+            .find(|row| row.key.shape == "select ?")
+            .unwrap();
+        assert_eq!(cancelled.key.started_in.turn, Some(80));
+        assert_eq!(cancelled.key.finished_in.as_ref().unwrap().turn, Some(81));
+        assert_eq!(cancelled.counts.rows_returned, 0);
+        assert_eq!(cancelled.counts.rows_affected, 0);
     }
 
     /// SQL-COST-JOIN: PostgreSQL retains one join invocation, binary bind

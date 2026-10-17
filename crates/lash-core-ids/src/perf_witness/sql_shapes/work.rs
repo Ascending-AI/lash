@@ -36,6 +36,18 @@ impl std::fmt::Display for Backend {
     }
 }
 
+/// How observation ended, not whether the SQL command succeeded.
+#[derive(Clone, Copy, Debug, PartialEq, Eq, PartialOrd, Ord, Serialize, Deserialize)]
+#[serde(rename_all = "snake_case")]
+pub enum Disposition {
+    /// The executor returned/exhausted, or SQLite emitted its profile callback.
+    Finished,
+    /// The PostgreSQL executor yielded an error.
+    Error,
+    /// The executor guard was dropped before either terminal observation.
+    Dropped,
+}
+
 #[derive(Clone, Debug, Default, PartialEq, Eq, PartialOrd, Ord, Serialize, Deserialize)]
 pub struct Cut {
     pub turn: Option<usize>,
@@ -83,7 +95,9 @@ pub struct Key {
     pub relations: Option<Vec<String>>,
     pub backend: Backend,
     pub started_in: Cut,
+    /// Observer termination cut; this alone does not prove command completion.
     pub finished_in: Option<Cut>,
+    pub disposition: Option<Disposition>,
     pub owner: Option<OwnerIdentity>,
     pub operation: Option<String>,
     pub worker: String,
@@ -126,7 +140,7 @@ pub struct Receipt {
     pub repeat_qualification: String,
     pub repeat_identities_complete: bool,
     /// Counters conserve across completed and active executions. Unknown
-    /// binds, overflow, and missing completions refuse a complete claim.
+    /// binds, overflow, and missing terminal observations refuse a complete claim.
     pub complete: bool,
 }
 impl Receipt {
@@ -176,6 +190,7 @@ struct JoinKey {
     backend: Backend,
     started_in: Cut,
     finished_in: Option<Cut>,
+    disposition: Option<Disposition>,
     owner: Option<OwnerIdentity>,
     operation: Option<String>,
     worker: String,
@@ -190,6 +205,7 @@ impl JoinKey {
             backend: self.backend,
             started_in: self.started_in.clone(),
             finished_in: self.finished_in.clone(),
+            disposition: self.disposition,
             owner: self.owner.clone(),
             operation: self.operation.clone(),
             worker: self.worker.clone(),
@@ -458,7 +474,7 @@ pub fn set_window(turn: Option<usize>, phase: &str) {
     }
 }
 
-/// Export completed executions and closed read windows, releasing their
+/// Export terminal observations and closed read windows, releasing their
 /// resident admissions. Active executions, their read windows and pending
 /// bindings survive. Callers must assemble these chunks with the final
 /// snapshot before comparing against cumulative independent witnesses.
@@ -502,6 +518,7 @@ impl Execution {
             backend,
             started_in: state.cut.clone(),
             finished_in: None,
+            disposition: None,
             owner: window.as_ref().and_then(|v| v.0.clone()),
             operation: window.map(|v| v.1),
             worker: format!("{:?}", std::thread::current().id()),
@@ -648,12 +665,24 @@ impl Execution {
             }
         });
     }
-    /// A dropped PG stream remains active: it did not observe command completion.
+    /// Observe executor exhaustion/return or a SQLite profile callback.
     pub fn finish(self) {
+        self.end(Disposition::Finished);
+    }
+    /// Observe an error yielded by the executor, without inventing completion.
+    pub fn failed(self) {
+        self.end(Disposition::Error);
+    }
+    /// Close an abandoned observation, retaining only work already observed.
+    pub fn dropped(self) {
+        self.end(Disposition::Dropped);
+    }
+    fn end(self, disposition: Disposition) {
         self.update(|state, id| {
             if let Some(mut row) = state.active.remove(&id) {
                 state.key_bytes -= row.key.bytes();
                 row.key.finished_in = Some(state.cut.clone());
+                row.key.disposition = Some(disposition);
                 if let Some(counts) = state.rows.get_mut(&row.key) {
                     counts.add(&row.counts);
                 } else if state.rows.len() < WORK_ROW_LIMIT && state.retain(row.key.bytes()) {
