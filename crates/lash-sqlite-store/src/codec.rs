@@ -217,12 +217,11 @@ pub(crate) fn try_load_session_head_meta_from_conn(
     };
     assemble_session_head_meta(
         session_id,
-        load_config_conn(conn, head_json.as_deref(), fleet)?,
+        || load_config_conn(conn, head_json.as_deref(), fleet),
         head_revision,
         leaf_node_id,
         checkpoint_ref,
         current_frame_node_id,
-        fleet,
     )
     .map(Some)
 }
@@ -230,15 +229,15 @@ pub(crate) fn try_load_session_head_meta_from_conn(
 /// Assemble the head metadata a revision row names: its head document, its
 /// revision, its leaf and checkpoint, and the frame its leaf row names. The
 /// live head and a terminal's recorded window (FIG-5931) both read a head
-/// this way.
+/// this way. Configuration loading is deferred until the revision counter
+/// is validated so a corrupt counter refuses before its graph is read.
 pub(crate) fn assemble_session_head_meta(
     session_id: &SessionId,
-    payload: SessionHeadPayload,
+    load_payload: impl FnOnce() -> Result<SessionHeadPayload, StoreError>,
     head_revision: i64,
     leaf_node_id: Option<String>,
     checkpoint_ref: Option<String>,
     current_frame_node_id: Option<String>,
-    _fleet: lash_core_execution::FleetFormat,
 ) -> Result<SessionHeadMeta, StoreError> {
     let head_revision = u64::try_from(head_revision).map_err(|_| {
         stored_data_corrupt(
@@ -246,6 +245,7 @@ pub(crate) fn assemble_session_head_meta(
             format!("head_revision must be non-negative, got {head_revision}"),
         )
     })?;
+    let payload = load_payload()?;
     if let Some(leaf) = &leaf_node_id
         && current_frame_node_id.is_none()
     {

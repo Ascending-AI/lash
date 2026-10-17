@@ -285,12 +285,11 @@ fn terminal_head(
     }
     crate::codec::assemble_session_head_meta(
         session,
-        crate::codec::load_config_conn(conn, config_ref.as_deref(), fleet)?,
+        || crate::codec::load_config_conn(conn, config_ref.as_deref(), fleet),
         revision,
         leaf,
         checkpoint,
         frame,
-        fleet,
     )
     .map(Some)
 }
