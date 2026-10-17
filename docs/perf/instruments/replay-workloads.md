@@ -355,6 +355,44 @@ gain. Re-bless only from a clean tree at the change's commit: the baseline
 records `blessed_from`, build profile and allocator. Blessing refuses missing
 identity; an optimized evaluator refuses the committed debug baseline.
 
+### Configuration graph baseline (FIG-6637)
+
+The 2026-10-17 blessing attributes the additional read rows and chat
+allocations to `fd0652f96d` (FIG-6599). Adjacent-commit runs of
+`the_replay_corpus_subset_stays_within_its_counted_budgets` measured:
+
+| Metric / workload | Parent `1fc915f4c8` | Graph commit `fd0652f96d` |
+|---|---:|---:|
+| Rows read / chat-short | 256 | 750.5 |
+| Rows read / chat-long-compacting | 286 | 810.5 |
+| Rows read / ts-codemode | 551 | 1098 |
+| Rows read / py-codemode | 540 | 1111 |
+| Allocated bytes / chat-short | 4,930,152 | 6,885,002.5 |
+| Allocations / chat-short | 27,618 | 35,277.5 |
+| SELECTs / chat-short | 238.5 | 344.5 |
+
+FIG-6599 requires field-addressed immutable configuration shared by revisions
+and recorded runs. Head and terminal-window queries now return `config_ref`
+instead of joining the complete JSON body. Loading that reference validates
+its graph closure and reconstructs the same recorded configuration without
+calling producers. The chat trace has 45 configuration rows per closure,
+read through history windows, head reads, admission and commit. Eleven ordinary
+closure reads account for about 495 additional returned rows per turn. All
+scripted model-call counts and successful turn outcomes were validated on
+both sides of the commit.
+
+Run `just perf-replay-bless` without SQL instrumentation, then retain only
+these six attributed medians: the four workloads' `sql_rows_read`, plus
+chat-short's `allocated_bytes` and `allocations`. The committed blessing is
+from clean `8d31251a7f`; it preserves every other median and every depth slope,
+including Python's still-breaching write slope. FIG-6617 reduced the SELECT
+cost; the unobserved blessing measured 335 chat-short SELECTs against the
+existing tolerance ceiling of 355.625, so its SELECT baseline stays unchanged.
+The row-read history ceiling stays at 2. The reported 2.1 slope did not
+reproduce at `6b32e646b0` (1.0); the unobserved blessing measured 1.422.
+Head-read counts can vary with asynchronous activity and counter cuts; this
+blessing does not certify those counts as deterministic or change their guard.
+
 ## Main's trend
 
 `lash-perf replay --history <file.jsonl>` appends one duration-history record
