@@ -612,6 +612,7 @@
         "tests/support/noted.rs",
         "tests/support/sim.rs",
         "tests/vertical_crash_proof.rs",
+        "tests/vertical_crash_proof/refuse.rs",
         "tests/vertical_crash_proof/run_config.rs",
         "tests/vertical_crash_proof/session_capture.rs"
       ],

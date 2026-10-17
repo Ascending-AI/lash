@@ -1616,3 +1616,6 @@ impl Published {
 
 #[path = "vertical_crash_proof/session_capture.rs"]
 mod session_capture;
+
+#[path = "vertical_crash_proof/refuse.rs"]
+mod refuse;
