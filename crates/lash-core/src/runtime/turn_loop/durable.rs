@@ -29,20 +29,31 @@ pub(in crate::runtime) struct DurableTurn {
     pub(in crate::runtime) attachments: Option<crate::attachments::AttachmentExecutionBinding>,
 }
 
+/// What a durable turn's preparation starts from.
+pub(in crate::runtime) enum TurnStart {
+    /// A fresh turn, with the trace scope its admission retained.
+    Fresh(Option<lash_trace::DurableTraceScope>),
+    /// A resumed turn, with what its checkpoint recorded.
+    Resumed(crate::runtime::durable::session::RecordedPreparation),
+}
+
 impl LashRuntime {
     /// Prepare run `run` of this session for the session actor: install the
     /// run's configuration, materialize its admitted input over the head,
     /// apply the before-turn decisions and the attachment-omission policies,
     /// and build the driver that answers the turn's effects under
     /// `controller`, the turn's own claimed context. `admissions` are the
-    /// rows the run took. A fresh turn resolves its configuration after its
-    /// plugin transition and before its session is activated, and runs its
-    /// before-turn callbacks under `admitted_trace`, the trace scope its
-    /// `turn.admit` retained, whose export it owes; its first phase commit
-    /// records all of it. A resumed one passes what its checkpoint recorded
-    /// as `recorded`: no configuration is resolved and no callback runs, and
-    /// it reads the retained trace scope back (FIG-5363, FIG-5395,
-    /// FIG-6021). No preparation proposes an admission.
+    /// rows the run took. A fresh turn ([`TurnStart::Fresh`]) resolves its
+    /// configuration after its plugin transition and before its session is
+    /// activated, and runs its before-turn callbacks under the trace scope
+    /// its `turn.admit` retained, whose export it owes; its first phase
+    /// commit records all of it. A resumed one ([`TurnStart::Resumed`])
+    /// passes what its checkpoint recorded: no configuration is resolved and
+    /// no callback runs, and it reads the retained trace scope back
+    /// (FIG-5363, FIG-5395, FIG-6021). No preparation proposes an admission. `held` is the head
+    /// the session's owner holds, if it holds one: the turn's prelude takes
+    /// its base from it when it is the window the prelude names
+    /// (FIG-6634).
     #[expect(
         clippy::expect_used,
         reason = "the runtime session is installed for the whole preparation"
@@ -52,8 +63,8 @@ impl LashRuntime {
         controller: &ActorContext,
         run: &TurnId,
         mut admissions: LogicalTurnAdmissions,
-        recorded: Option<crate::runtime::durable::session::RecordedPreparation>,
-        admitted_trace: Option<lash_trace::DurableTraceScope>,
+        start: TurnStart,
+        held: Option<&crate::runtime::durable::head::SessionHead>,
         observer: &TurnObserver,
     ) -> Result<DurableTurn, RuntimeError> {
         // An admission never mixes run specs, so the head input's spec is the
@@ -65,14 +76,14 @@ impl LashRuntime {
             .and_then(|input| input.run_spec.clone());
         let attachments = self.bind_turn_attachments(controller)?;
         self.transition_turn_plugins(controller).await?;
-        let (recorded_before_turn, retained_trace, run_config, cell_start) = match recorded {
-            Some(recorded) => (
+        let (recorded_before_turn, retained_trace, run_config, cell_start) = match start {
+            TurnStart::Resumed(recorded) => (
                 Some(recorded.before_turn),
                 recorded.trace,
                 recorded.config,
                 recorded.cell,
             ),
-            None => (
+            TurnStart::Fresh(admitted_trace) => (
                 None,
                 admitted_trace,
                 crate::runtime::durable::run_config::RecordedRunConfig::resolved(
@@ -279,12 +290,20 @@ impl LashRuntime {
             )
         })?;
         // The runtime's read model may include a phase checkpoint's tail.
-        // Read the immutable graph base the prelude names; the tail belongs
-        // to the recorded view edits and needs no separate checkpoint root.
-        let (prelude_base_messages, _, _) = prelude
-            .restore(store)
-            .await
-            .map_err(RuntimeEffectControllerError::into_runtime_error)?;
+        // The base is the immutable graph window the prelude names: the
+        // owner's held head when it is that window, else read from the
+        // store; the tail belongs to the recorded view edits and needs no
+        // separate checkpoint root.
+        let held = held
+            .filter(|head| head.state().session_id == self.state.session_id)
+            .map(crate::runtime::durable::head::SessionHead::prelude_base);
+        let (prelude_base_messages, _, _) = crate::runtime::durable::head::restore_prelude(
+            &prelude,
+            held.as_ref().map(|(head, base)| (head, base)),
+            store,
+        )
+        .await
+        .map_err(RuntimeEffectControllerError::into_runtime_error)?;
         prelude.capture_messages(
             &prelude_base_messages,
             &messages,

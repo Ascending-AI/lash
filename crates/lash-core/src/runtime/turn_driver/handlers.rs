@@ -529,10 +529,15 @@ impl RuntimeTurnDriver<'_> {
                 "the recorded turn prelude has no history store",
             )
         })?;
-        let (base, history, context) = prelude
-            .restore(&store)
-            .await
-            .map_err(RuntimeEffectControllerError::into_runtime_error)?;
+        // The prelude names the window the driver's own prelude names, whose
+        // base the driver holds: it is read again only for another window.
+        let (base, history, context) = crate::runtime::durable::head::restore_prelude(
+            &prelude,
+            Some((&self.prelude.history, &self.prelude_base_messages)),
+            &store,
+        )
+        .await
+        .map_err(RuntimeEffectControllerError::into_runtime_error)?;
         machine.adopt_committed_messages(history);
         machine.adopt_prepared_messages(context.messages.clone());
         self.prelude_base_messages = base;

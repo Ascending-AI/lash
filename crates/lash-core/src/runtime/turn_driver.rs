@@ -63,6 +63,8 @@ pub(super) struct RuntimeTurnDriver<'a> {
     pub(super) turn_index: usize,
     pub(super) turn_pipeline: TurnBoundary,
     pub(super) prelude: Box<crate::runtime::effect::TurnPrelude>,
+    /// The messages of the window `prelude` names, as a store read of it
+    /// gives them: what every recorded prelude of that window restores over.
     pub(super) prelude_base_messages: crate::MessageSequence,
     pub(super) prepared_context: crate::session_model::context::PreparedContext,
     /// Parent-session calls only. Child runtimes assemble their own ledgers.

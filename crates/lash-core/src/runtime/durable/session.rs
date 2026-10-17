@@ -1204,6 +1204,13 @@ impl<'a> TurnRestore<'a> {
         self.row
     }
 
+    /// The head the owner already holds for this claim, if it holds one:
+    /// none is loaded for it.
+    #[must_use]
+    pub fn held_head(&self) -> Option<&SessionHead> {
+        self.heads.held(self.cx)
+    }
+
     /// What the turn's checkpoint records for preparing the resumed turn:
     /// its before-turn callback decisions, its retained trace scope and its
     /// run's recorded configuration, so no before-turn callback runs, no

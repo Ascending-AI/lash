@@ -990,3 +990,108 @@ pub async fn a_later_frame_open_cannot_rescue_earlier_root_nodes(
         );
     }
 }
+
+/// FIG-6634: a turn's prelude takes its base window from the head its owner
+/// holds, a `Current` read, instead of reading it again `Admitted` at that
+/// head with no checkpoint. Both reads of one head give one read model: the
+/// same messages and the same render from their render caches, on a plain
+/// head, on a fork's head over its lineage, and on a head after a
+/// compaction's frame.
+pub async fn admitted_and_current_reads_of_a_head_give_one_read_model(
+    store: Arc<dyn ConformanceDeployment>,
+) {
+    let runtime: &dyn crate::store::RuntimeStore = store.as_ref();
+    let mut source = state("prelude-window-source");
+    admit(store.as_ref(), &source.session_id).await;
+    source.ensure_agent_frame_initialized();
+    append_messages(&mut source, "source", 3);
+    commit(store.as_ref(), &mut source).await;
+    assert_one_read_model(store.as_ref(), &source.session_id, "a plain head").await;
+
+    let fork_point = active_tail(&source, 1).remove(0);
+    let child = SessionId::from("prelude-window-child");
+    fork_at(store.as_ref(), &source.session_id, &child, &fork_point).await;
+    append_messages(&mut source, "source-after-fork", 2);
+    commit(store.as_ref(), &mut source).await;
+    let mut forked = crate::conformance::helpers::load_window_state(runtime, &child)
+        .await
+        .expect("read the fork's head")
+        .expect("the fork has a head");
+    append_messages(&mut forked, "child", 2);
+    commit(store.as_ref(), &mut forked).await;
+    assert_one_read_model(store.as_ref(), &child, "a fork's head over its lineage").await;
+
+    open_frame(&mut forked, "prelude-window-compaction");
+    append_messages(&mut forked, "summary", 1);
+    append_messages(&mut forked, "after-compaction", 2);
+    commit(store.as_ref(), &mut forked).await;
+    assert_one_read_model(store.as_ref(), &child, "a head after a compaction's frame").await;
+}
+
+/// Append `count` messages named after `name` to `state`'s active path.
+fn append_messages(state: &mut RuntimeSessionState, name: &str, count: usize) {
+    for ordinal in 0..count {
+        state.session_graph.append_message(crate::Message {
+            id: format!("{name}-{ordinal}-{}", state.head_revision),
+            role: if ordinal % 2 == 0 {
+                crate::MessageRole::User
+            } else {
+                crate::MessageRole::Assistant
+            },
+            parts: Arc::new(vec![crate::Part::text(
+                format!("{name}-{ordinal}-{}.p0", state.head_revision),
+                format!("{name} message {ordinal}"),
+                None,
+            )]),
+            origin: None,
+            reply_marker: None,
+        });
+    }
+}
+
+/// `session`'s head read `Current` and read `Admitted` at that head with no
+/// checkpoint give one read model.
+async fn assert_one_read_model(store: &dyn ConformanceDeployment, session: &SessionId, case: &str) {
+    let current = window(store, session).await;
+    let head = crate::store::SessionHeadRef {
+        generation: 0,
+        revision: current.head_revision,
+        leaf: current.window.leaf_node_id.clone(),
+        checkpoint: None,
+    };
+    let admitted = store
+        .load_session_window(session, WindowSelector::Admitted(head))
+        .await
+        .expect("read the head admitted")
+        .expect("the head's window is stored");
+    let fleet = store.fleet_format();
+    let current = crate::store::window_state(current, fleet)
+        .expect("adopt the current read")
+        .state
+        .read_model();
+    let admitted = crate::store::window_state(admitted, fleet)
+        .expect("adopt the admitted read")
+        .state
+        .read_model();
+    assert!(
+        !current.messages.is_empty(),
+        "{case}: the head has messages"
+    );
+    assert_eq!(
+        serde_json::to_value(current.messages.as_slice()).expect("current messages encode"),
+        serde_json::to_value(admitted.messages.as_slice()).expect("admitted messages encode"),
+        "{case}: one head's messages"
+    );
+    let verbatim = lash_sansio::session_model::message::HistoryPresentation::verbatim();
+    assert_eq!(
+        current
+            .prompt_render_cache
+            .rendered(current.messages.as_slice(), &verbatim)
+            .as_slice(),
+        admitted
+            .prompt_render_cache
+            .rendered(admitted.messages.as_slice(), &verbatim)
+            .as_slice(),
+        "{case}: one head's render"
+    );
+}

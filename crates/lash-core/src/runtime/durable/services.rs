@@ -18,7 +18,7 @@ use super::session::{
 use super::session_mail::{InputAdmission, InputBatching, SessionMailError};
 use crate::runtime::logical_turn::LogicalTurnAdmissions;
 use crate::runtime::turn_driver::{DriveParts, RuntimeDrive};
-use crate::runtime::turn_loop::DurableTurn;
+use crate::runtime::turn_loop::{DurableTurn, TurnStart};
 use crate::runtime::{LashRuntime, ObservationSource as _, TurnObserver};
 use crate::{
     ActorContext, AdmittedScope, ExecutionBudgets, LiveReplayStore, SessionId, TurnActivity, TurnId,
@@ -342,6 +342,7 @@ impl RuntimeTurnServices {
         cx: &ActorContext,
         row: &TurnRow,
         recorded: Option<RecordedPreparation>,
+        held: Option<&SessionHead>,
     ) -> Result<(DurableTurn, DriveParts), TurnError> {
         let mut runtime = self.runtimes.open(&row.session).await?;
         note_page_reader(&mut runtime, cx);
@@ -358,13 +359,16 @@ impl RuntimeTurnServices {
         // The run starts from the head the runtime opened at: what it
         // changes from here is what its phases record (FIG-5301).
         runtime.services.plugins.begin_run();
-        let admitted_trace = row.admission.trace().cloned();
+        let start = match recorded {
+            Some(recorded) => TurnStart::Resumed(recorded),
+            None => TurnStart::Fresh(row.admission.trace().cloned()),
+        };
         let turn = Box::pin(runtime.prepare_durable_turn(
             &controller,
             &row.run,
             admissions,
-            recorded,
-            admitted_trace,
+            start,
+            held,
             &observer,
         ))
         .await?;
@@ -396,14 +400,15 @@ impl TurnServices for RuntimeTurnServices {
 
     /// The runtime opens at the session's committed head itself; the owner's
     /// cached `head` is the same revision, which the store's compare-and-set
-    /// on the turn's head commit checks.
+    /// on the turn's head commit checks. The turn's prelude takes its base
+    /// window from `head` when it names that head.
     async fn start(
         &self,
         cx: &ActorContext,
         row: &TurnRow,
-        _head: &SessionHead,
+        head: &SessionHead,
     ) -> Result<Box<dyn TurnDrive>, TurnError> {
-        let (turn, parts) = Box::pin(self.prepare(cx, row, None)).await?;
+        let (turn, parts) = Box::pin(self.prepare(cx, row, None, Some(head))).await?;
         Ok(Box::new(RuntimeDrive::start(turn, parts)?))
     }
 
@@ -413,7 +418,8 @@ impl TurnServices for RuntimeTurnServices {
         mut restore: TurnRestore<'_>,
     ) -> Result<OpenTurn, TurnError> {
         let recorded = restore.recorded_preparation().await?;
-        let (turn, parts) = Box::pin(self.prepare(cx, restore.row(), Some(recorded))).await?;
+        let (turn, parts) =
+            Box::pin(self.prepare(cx, restore.row(), Some(recorded), restore.held_head())).await?;
         RuntimeDrive::resume(cx, turn, parts, restore).await
     }
 

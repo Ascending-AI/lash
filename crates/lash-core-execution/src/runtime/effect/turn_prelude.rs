@@ -4,8 +4,9 @@
 //! The sync journals only the prelude digest. The stored prelude names the
 //! committed history window and records only changes to its two views
 //! (FIG-5961): real history over that window, then the prepared prompt over
-//! that history. Restore reads the named window; it never reruns preparation
-//! hooks or attachment policies. The journal's guarded execution edge keeps
+//! that history. Restore reads the named window, or takes it from a caller
+//! that already holds it (FIG-6634); it never reruns preparation hooks or
+//! attachment policies. The journal's guarded execution edge keeps
 //! the prelude until settlement (ADR 0113 §2.1).
 
 use crate::runtime::effect::RuntimeEffectControllerError;
@@ -193,7 +194,8 @@ impl TurnPrelude {
     }
 
     /// Reconstruct the pinned base, recorded history and prepared context
-    /// from the named window. No preparation hook or policy runs on restore.
+    /// from the named window, read from `store`. No preparation hook or
+    /// policy runs on restore.
     ///
     /// # Errors
     /// Missing or corrupt window state refuses restore; store faults retain
@@ -209,12 +211,7 @@ impl TurnPrelude {
         ),
         RuntimeEffectControllerError,
     > {
-        if self.configuration.execution_scope.session_id() != Some(store.session_id()) {
-            return Err(RuntimeEffectControllerError::new(
-                crate::RuntimeErrorCode::RuntimeStoreCorrupt,
-                "the recorded prelude names another session's history",
-            ));
-        }
+        self.check_session(store.session_id())?;
         let base = crate::store::load_session_window_state(
             store,
             crate::store::WindowSelector::Admitted(self.history.clone()),
@@ -235,8 +232,34 @@ impl TurnPrelude {
             )
         })?;
         let read = base.state.read_model();
-        let base = crate::MessageSequence::from_base(read.messages)
-            .with_base_render_cache(read.prompt_render_cache);
+        self.restore_over(
+            store.session_id(),
+            crate::MessageSequence::from_base(read.messages)
+                .with_base_render_cache(read.prompt_render_cache),
+        )
+    }
+
+    /// Reconstruct the recorded history and prepared context over `base`,
+    /// the messages of the window this prelude names in `session` as a
+    /// store read of it gives them: the read model's messages over its
+    /// render cache. The caller answers for `base` being that window.
+    ///
+    /// # Errors
+    /// A prelude of another session, or message edits that do not address
+    /// `base`, refuse restore.
+    pub fn restore_over(
+        &self,
+        session: &crate::SessionId,
+        base: crate::MessageSequence,
+    ) -> Result<
+        (
+            crate::MessageSequence,
+            crate::MessageSequence,
+            crate::session_model::context::PreparedContext,
+        ),
+        RuntimeEffectControllerError,
+    > {
+        self.check_session(session)?;
         let history = self.history_view.restore(&base)?;
         let prompt = self.prompt_view.restore(&history)?;
         Ok((
@@ -244,6 +267,19 @@ impl TurnPrelude {
             history,
             crate::session_model::context::PreparedContext { messages: prompt },
         ))
+    }
+
+    fn check_session(
+        &self,
+        session: &crate::SessionId,
+    ) -> Result<(), RuntimeEffectControllerError> {
+        if self.configuration.execution_scope.session_id() != Some(session) {
+            return Err(RuntimeEffectControllerError::new(
+                crate::RuntimeErrorCode::RuntimeStoreCorrupt,
+                "the recorded prelude names another session's history",
+            ));
+        }
+        Ok(())
     }
 
     /// Write this prelude to `store`, held by the journal of `scope`, and

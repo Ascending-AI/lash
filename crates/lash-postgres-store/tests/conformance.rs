@@ -988,6 +988,14 @@ mod session_history {
         lash_conformance::inflated_fork_ceiling_cannot_expose_post_fork_source_nodes(store).await;
     }
 
+    #[tokio::test]
+    async fn admitted_and_current_reads_of_a_head_give_one_read_model() {
+        let Some((_lock, store, _storage)) = catalog().await else {
+            return;
+        };
+        lash_conformance::admitted_and_current_reads_of_a_head_give_one_read_model(store).await;
+    }
+
     #[tokio::test(flavor = "multi_thread", worker_threads = 4)]
     async fn history_selection_and_confirmation_share_one_snapshot() {
         let Some((_lock, store, _storage)) = catalog().await else {

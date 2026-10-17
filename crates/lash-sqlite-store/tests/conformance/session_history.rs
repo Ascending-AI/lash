@@ -41,6 +41,12 @@ async fn inflated_fork_ceiling_cannot_expose_post_fork_source_nodes() {
     lash_conformance::inflated_fork_ceiling_cannot_expose_post_fork_source_nodes(store).await;
 }
 
+#[tokio::test]
+async fn admitted_and_current_reads_of_a_head_give_one_read_model() {
+    let (_backend, store) = catalog().await;
+    lash_conformance::admitted_and_current_reads_of_a_head_give_one_read_model(store).await;
+}
+
 #[tokio::test(flavor = "multi_thread", worker_threads = 4)]
 async fn history_selection_and_confirmation_share_one_snapshot() {
     let (_backend, store) = catalog().await;

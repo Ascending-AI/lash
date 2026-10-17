@@ -14,11 +14,14 @@
 //! The session actor keeps the head it loaded in its owner cache
 //! ([`HeadCache`], FIG-5207), so a turn reads its session's window from the
 //! store at most once: the start or the restore loads it, and the turn's
-//! head commit is built over the same head, never read again.
+//! head commit is built over the same head, never read again. The turn's
+//! prelude takes its base window from that head when it names it, and every
+//! later sync from the base the driver already holds (FIG-6634).
 
 use std::sync::Arc;
 
 use lash_sansio::TurnWindowPin;
+use lash_sansio::core_support::MessageSequenceCoreSupport as _;
 
 use lash_durable::{ActorKey, Epoch};
 
@@ -95,6 +98,24 @@ impl SessionHead {
     /// [`TurnError::Exec`] when the pin does not encode.
     pub fn window(&self) -> Result<TurnWindow, TurnError> {
         Ok(window_of(&self.state, self.pin()?))
+    }
+
+    /// The head's window as a turn prelude's base ([`restore_prelude`]):
+    /// the graph head it is, with no checkpoint, and its read model's
+    /// messages over its render cache.
+    #[must_use]
+    pub fn prelude_base(&self) -> (SessionHeadRef, crate::MessageSequence) {
+        let read = self.state.read_model();
+        (
+            SessionHeadRef {
+                generation: 0,
+                revision: self.state.head_revision,
+                leaf: self.state.session_graph.leaf_node_id.clone(),
+                checkpoint: None,
+            },
+            crate::MessageSequence::from_base(read.messages)
+                .with_base_render_cache(read.prompt_render_cache),
+        )
     }
 
     /// The commit of `run` that publishes `done`'s messages and outcome as
@@ -189,6 +210,15 @@ impl HeadCache {
         Ok(&self.held.insert(held).head)
     }
 
+    /// The head held under `cx`'s actor and epoch, without loading one.
+    #[must_use]
+    pub fn held(&self, cx: &ActorContext) -> Option<&SessionHead> {
+        self.held
+            .as_ref()
+            .filter(|held| held.actor == *cx.actor() && held.epoch == cx.epoch())
+            .map(|held| &held.head)
+    }
+
     /// The committed window `pin` names in `session`: the held head's when
     /// `pin` is the head ([`Self::head`]), else read at the pin
     /// ([`load_window`]).
@@ -276,6 +306,43 @@ pub async fn load_window(
     Ok(window_of(&state, pin.clone()))
 }
 
+/// The views `prelude` records over the committed window it names, in
+/// `store`'s session (FIG-6634): over `held`'s base when `held`'s head is
+/// that window, else over the window read from `store` with its state
+/// version. A window is immutable, so the same graph head (generation,
+/// revision and leaf) always reads back the same messages; the checkpoint
+/// a head carries is no part of its messages. `held` must be a base of
+/// `store`'s session, as a store read of its head gave it.
+///
+/// # Errors
+///
+/// [`TurnPrelude::restore`]'s and [`TurnPrelude::restore_over`]'s.
+pub(crate) async fn restore_prelude(
+    prelude: &crate::runtime::effect::TurnPrelude,
+    held: Option<(&SessionHeadRef, &crate::MessageSequence)>,
+    store: &SessionStore,
+) -> Result<
+    (
+        crate::MessageSequence,
+        crate::MessageSequence,
+        crate::session_model::context::PreparedContext,
+    ),
+    crate::RuntimeEffectControllerError,
+> {
+    match held {
+        Some((head, base)) if same_window(head, &prelude.history) => {
+            prelude.restore_over(store.session_id(), base.clone())
+        }
+        _ => prelude.restore(store).await,
+    }
+}
+
+/// Whether `a` and `b` name the same committed window, whatever
+/// checkpoint either carries.
+fn same_window(a: &SessionHeadRef, b: &SessionHeadRef) -> bool {
+    a.generation == b.generation && a.revision == b.revision && a.leaf == b.leaf
+}
+
 /// The pin of the window of `state`, a committed head: the head itself.
 pub(crate) fn window_pin(state: &RuntimeSessionState) -> Result<TurnWindowPin, serde_json::Error> {
     let head = SessionHeadRef {
@@ -319,3 +386,7 @@ pub(crate) async fn load_state(
         })?;
     Ok(loaded.state)
 }
+
+#[cfg(test)]
+#[path = "head_tests.rs"]
+mod tests;

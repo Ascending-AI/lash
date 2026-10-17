@@ -30,7 +30,7 @@ async fn effect_executor_allocations_are_independent_of_history_depth() {
         &controller,
         &run,
         crate::runtime::logical_turn::LogicalTurnAdmissions::new(Vec::new()),
-        None,
+        crate::runtime::turn_loop::TurnStart::Fresh(None),
         None,
         &observer,
     ))

@@ -227,3 +227,79 @@ fn a_coding_turn_reads_its_fenced_facts_once_per_scope() {
 
 /// The measured count after FIG-6617.
 const BOUND: u64 = 2;
+
+/// FIG-6634: one coding turn on SQLite loads its committed window from the
+/// store only where nothing it holds is that window. The owner's head and
+/// the runtime's open each read the head; preparation and every environment
+/// sync then take the prelude's base window from the head the turn already
+/// holds instead of reading it again with its state version. The turn (four
+/// tool calls, then an answer) issued the head-meta and state-version
+/// SELECTs counted here before; the bound is the measured count after.
+#[test]
+fn a_coding_turn_loads_its_window_only_where_it_holds_none() {
+    let dir = tempfile::tempdir().unwrap();
+    let script = dir.path().join("coding-turn.json");
+    let reads: Vec<_> = (0..4)
+        .map(|index| {
+            serde_json::json!({"tool_calls": [{
+                "tool": "fixture_large",
+                "args": {"key": format!("read-{{turn}}-{index}"), "bytes": 643}
+            }]})
+        })
+        .chain([serde_json::json!({"text": "done"})])
+        .collect();
+    std::fs::write(
+        &script,
+        serde_json::to_vec(&serde_json::json!({
+            "format": "lash-perf-replay/1",
+            "name": "coding-turn-window",
+            "description": "One coding turn's committed-window loads (FIG-6634)",
+            "protocol": "standard",
+            "sessions": 1,
+            "turns": [{"user": "Read four files, then answer", "replies": reads}]
+        }))
+        .unwrap(),
+    )
+    .unwrap();
+    let receipt = dir.path().join("receipt.json");
+    let shapes = dir.path().join("shapes.json");
+    let output = Command::new(env!("CARGO_BIN_EXE_lash-perf"))
+        .arg("replay")
+        .arg(&script)
+        .arg("--store-dir")
+        .arg(dir.path().join("stores"))
+        .arg("--out")
+        .arg(&receipt)
+        .arg("--sql-shapes")
+        .arg(&shapes)
+        .output()
+        .unwrap();
+    assert!(
+        output.status.success(),
+        "{}",
+        String::from_utf8_lossy(&output.stderr)
+    );
+    let shapes: serde_json::Value =
+        serde_json::from_slice(&std::fs::read(shapes).unwrap()).unwrap();
+    let window = [
+        "select revision.config_ref, head.head_revision, revision.leaf_node_id",
+        "select session_state_version from session_meta",
+    ];
+    let rows = shapes["rounds"][0]["rows"].as_array().unwrap();
+    let mut counted = std::collections::BTreeMap::new();
+    for row in rows {
+        let shape = row["shape"].as_str().unwrap();
+        if let Some(read) = window.iter().find(|read| shape.contains(**read)) {
+            *counted.entry(*read).or_insert(0) += row["selects"].as_u64().unwrap();
+        }
+    }
+    let selects: u64 = counted.values().sum();
+    eprintln!("FIG-6634 window-load SELECTs: {selects} {counted:?}");
+    assert!(
+        selects <= WINDOW_BOUND,
+        "the coding turn issued {selects} SELECTs of its window loads {counted:?}, bound {WINDOW_BOUND}"
+    );
+}
+
+/// The measured count after FIG-6634.
+const WINDOW_BOUND: u64 = 15;

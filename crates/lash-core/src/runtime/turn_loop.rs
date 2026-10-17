@@ -11,7 +11,7 @@ mod durable;
 mod execute;
 mod resident_session;
 
-pub(in crate::runtime) use durable::DurableTurn;
+pub(in crate::runtime) use durable::{DurableTurn, TurnStart};
 pub(in crate::runtime) use resident_session::ResidentSessionContinuity;
 pub use resident_session::ResidentSessionState;
 
