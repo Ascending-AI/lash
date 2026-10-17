@@ -98,10 +98,8 @@ pub fn register_collections(
     Ok(ids)
 }
 
-fn raise(kind: &str, message: &str) -> lash_kernel_doc::NativeError {
-    lash_kernel_doc::NativeError::Raised(std::sync::Arc::new(lash_kernel_doc::heap::ErrorRef::new(
-        kind, message,
-    )))
+fn raise(kind: &'static str, message: impl Into<String>) -> lash_kernel_doc::NativeError {
+    lash_kernel_doc::NativeError::refused(kind, message)
 }
 
 /// Attaches collection natives to the definitions supplied by the build.

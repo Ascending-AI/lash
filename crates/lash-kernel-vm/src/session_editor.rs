@@ -10,8 +10,9 @@
 
 use std::collections::{BTreeMap, BTreeSet};
 
+use lash_kernel_doc::heap::PageValue;
 use lash_kernel_doc::heap::{HeapFault, LogicalBytes};
-use lash_kernel_doc::{Datum, Name, Value};
+use lash_kernel_doc::{Datum, Name};
 use lash_kernel_state::kernel_internals::PagedHeap;
 use lash_kernel_state::kernel_internals::census_impl::Census;
 use lash_kernel_state::kernel_internals::family_impl::FrozenBase;
@@ -168,7 +169,7 @@ impl SessionEditor {
     }
 
     fn meta(&self, name: &Name, record: &FunctionRecord) -> Result<Vec<u8>, HeapFault> {
-        match crate::data::copy_out(&self.heap, &record.meta) {
+        match crate::data::copy_page_out(&self.heap, &record.meta) {
             Ok(Datum::Bytes(meta)) => Ok(meta.as_slice().to_vec()),
             Err(crate::data::CopyError::Heap(fault)) => Err(fault),
             Ok(_) | Err(crate::data::CopyError::Raised(_)) => Err(HeapFault::Malformed(format!(
@@ -190,7 +191,7 @@ impl SessionEditor {
             BoundRecord::Value(value) => value,
             BoundRecord::Shared(id) => self.heap.variable_get(id)?,
         };
-        Ok(Some(match crate::data::copy_out(&self.heap, &value) {
+        Ok(Some(match crate::data::copy_page_out(&self.heap, &value) {
             Ok(datum) => SessionValue::Data(datum),
             Err(crate::data::CopyError::Heap(fault)) => return Err(fault),
             Err(crate::data::CopyError::Raised(_)) => SessionValue::Opaque,
@@ -204,7 +205,7 @@ impl SessionEditor {
     /// The heap's faults, and a value the heap refuses.
     pub fn set(&mut self, name: &Name, value: &Datum) -> Result<(), HeapFault> {
         let frozen = self.heap.freeze_datum(value).map_err(write_fault)?;
-        let value: Value = self.heap.instantiate(&frozen).map_err(write_fault)?;
+        let value: PageValue = self.heap.instantiate(&frozen).map_err(write_fault)?;
         let record = BindingRecord {
             name: NameRef::new(name, self.heap.pages())?,
             declared: SiteRef::new(

@@ -1,8 +1,8 @@
 //! JSON and number formatting natives (FIG-6144's laws, ported onto heap
 //! values).
 use lash_kernel_doc::{
-    Datum, FunctionRegistry, Handle, MapType, Measure, NativeError, NumberPolicy, NumberToken,
-    Operand, RecordType, RecordTypeField, Type, Value,
+    Datum, FunctionRegistry, Handle, MapType, Measure, NumberPolicy, NumberToken, Operand,
+    RecordType, RecordTypeField, Type, Value,
 };
 
 use super::super::{decode_number, parse_json, stringify_json};
@@ -11,18 +11,21 @@ use super::lab::{Lab, VALUE, b, deep, f, i, list, raised, run, t};
 fn number(token: &str, ty: Type, policy: NumberPolicy) -> Result<Datum, String> {
     let mut lab = Lab::new();
     let token = NumberToken::new(token).unwrap();
-    let result = lab.spy(|heap| decode_number(&token, &ty, policy, heap));
+    let result = lab.spy(&[], |_, new| decode_number(&token, &ty, policy, new));
     match result {
         Ok(value) => Ok(lab.datum(&value)),
         error => Err(lab.kind(error)),
     }
 }
 fn parsed(lab: &mut Lab, text: &str, ty: &Type, policy: NumberPolicy) -> Result<Value, String> {
-    let result = lab.spy(|heap| parse_json(text, ty, policy, heap));
+    let result = lab.spy(&[], |args, new| {
+        parse_json(text, ty, policy, args.limits().document_depth(), new)
+    });
     result.map_err(|error| lab.kind(Err::<(), _>(error)))
 }
 fn stringified(lab: &mut Lab, value: &Value) -> Result<String, String> {
-    let result = lab.spy(|heap| stringify_json(value, heap));
+    let value = *value;
+    let result = lab.spy(&[value], |args, new| stringify_json(&value, &args, new));
     result.map_err(|error| lab.kind(Err::<(), _>(error)))
 }
 fn charge_of(name: &str, measure: &mut dyn FnMut(&Operand, Measure) -> u64) -> u64 {
@@ -151,8 +154,6 @@ fn k_ljson_001_json_syntax_and_surrogate_pairs_are_strict() {
 
 #[test]
 fn k_eff_003_json_collections_are_fresh_and_ordered() {
-    use lash_kernel_doc::NativeHeap as _;
-    use lash_kernel_doc::heap::FieldName;
     let mut lab = Lab::new();
     let json = r#"{"z":1,"a":[2],"z":3}"#;
     let a = parsed(&mut lab, json, &Type::Any, NumberPolicy::BySpelling).unwrap();
@@ -165,9 +166,20 @@ fn k_eff_003_json_collections_are_fresh_and_ordered() {
         stringified(&mut lab, &Value::Record(a)).unwrap(),
         r#"{"z":3,"a":[2]}"#
     );
-    let inner = |id| match lab.heap.record_get(id, FieldName::Static("a")).unwrap() {
-        Some(Value::List(list)) => list,
-        other => panic!("a fresh list: {other:?}"),
+    let inner = |id| {
+        let semantics = lab.heap.arena().semantics();
+        let field = semantics
+            .entries(id)
+            .unwrap()
+            .as_chunks::<2>()
+            .0
+            .iter()
+            .find(|pair| semantics.text(&pair[0]).unwrap() == "a")
+            .map(|pair| pair[1]);
+        match field {
+            Some(Value::List(list)) => list,
+            other => panic!("a fresh list: {other:?}"),
+        }
     };
     assert_ne!(inner(a), inner(z));
 }
@@ -241,17 +253,12 @@ fn k_ljson_004_stringify_refuses_absent_nonfinite_keys_and_handles() {
 
 #[test]
 fn k_ljson_005_cycles_are_refused_but_sharing_is_copied() {
-    use lash_kernel_state::paged::{ObjectInit, SemanticHeap as _};
     let mut lab = Lab::new();
     let child = lab.value(list(vec![t("x")]));
-    let shared = lab.list_of(vec![child.clone(), child]);
+    let shared = lab.list_of(vec![child, child]);
     assert_eq!(stringified(&mut lab, &shared).unwrap(), "[[\"x\"],[\"x\"]]");
-    let cycle = lab.heap.allocate_object(ObjectInit::List(vec![])).unwrap();
-    lab.heap.list_write(cycle, 0, Value::List(cycle)).unwrap();
-    assert_eq!(
-        stringified(&mut lab, &Value::List(cycle)).unwrap_err(),
-        "cycle"
-    );
+    let cycle = lab.cycle();
+    assert_eq!(stringified(&mut lab, &cycle).unwrap_err(), "cycle");
 }
 
 /// K-LJSON-008 and K-CHG-003: direct decimal rendering obeys explicit
@@ -277,8 +284,8 @@ fn k_ljson_008_direct_render_bounds_and_preserves_decimal_policy() {
     ];
     let child = lab.value(list(numbers.into_iter().map(f).collect()));
     let expected = "[0,0,1.25,-1.25,0.000001,1e-7,100000000000000000000,1e+21,5e-324,1.7976931348623157e+308,1000000000000000100]";
-    let shared = lab.list_of(vec![child.clone(), child.clone()]);
-    let args = [shared, kinds.clone(), Value::Absent, layout.clone()];
+    let shared = lab.list_of(vec![child, child]);
+    let args = [shared, kinds, Value::Absent, layout];
     lab.room(None);
     let result = lab.call("json.render", &args).unwrap();
     let text = format!("[{expected},{expected}]");
@@ -286,14 +293,13 @@ fn k_ljson_008_direct_render_bounds_and_preserves_decimal_policy() {
     // No fragment slots or per-number texts: only the output and its buffer.
     assert_eq!(lab.reserved, 2 * text.len() as u64);
     lab.room(Some(lab.reserved - 1));
-    assert!(matches!(
-        lab.call("json.render", &args),
-        Err(NativeError::Memory)
+    assert!(crate::testsupport::exhausted(
+        &lab.call("json.render", &args)
     ));
     lab.room(None);
     let render = |lab: &mut Lab, value: Datum, kinds: &Value, field: Datum, layout: Datum| {
         let (value, field, layout) = (lab.value(value), lab.value(field), lab.value(layout));
-        lab.call("json.render", &[value, kinds.clone(), field, layout])
+        lab.call("json.render", &[value, *kinds, field, layout])
             .map(|result| lab.datum(&result))
     };
     let layout_datum = Datum::Tuple(vec![i(-5), i(21), b(true), b(false)]);
@@ -323,10 +329,7 @@ fn k_ljson_008_direct_render_bounds_and_preserves_decimal_policy() {
     let verbatim = lab.value(Datum::Set(vec![t("list")]));
     let plain = stringified(&mut lab, &child).unwrap();
     let rendered = lab
-        .call(
-            "json.render",
-            &[child.clone(), verbatim, Value::Absent, layout.clone()],
-        )
+        .call("json.render", &[child, verbatim, Value::Absent, layout])
         .unwrap();
     assert_eq!(lab.datum(&rendered), t(&plain));
     let opaque = Datum::Record(vec![("mark".into(), t("opaque")), ("n".into(), f(2.0))]);
@@ -491,9 +494,8 @@ fn k_lfmt_003_shortest_digits_are_bounded_charged_and_reserved() {
         let mut too_small = Lab::new();
         too_small.room(Some(held - 1));
         let args = too_small.values(&[f(number)]);
-        assert!(matches!(
-            too_small.call("format.decimal_parts", &args),
-            Err(NativeError::Memory)
+        assert!(crate::testsupport::exhausted(
+            &too_small.call("format.decimal_parts", &args)
         ));
         assert_eq!(too_small.allocated, 0);
     }
@@ -578,7 +580,7 @@ fn an_amplifier_reserves_its_result_before_it_builds_it() {
         ("json.stringify", |lab| {
             let mut shared = lab.value(list(vec![t("xxxxxxxx")]));
             for _ in 0..12 {
-                shared = lab.list_of(vec![shared.clone(), shared]);
+                shared = lab.list_of(vec![shared, shared]);
             }
             vec![shared]
         }),
@@ -591,7 +593,7 @@ fn an_amplifier_reserves_its_result_before_it_builds_it() {
         let args = args(&mut lab);
         let objects = lab.allocated;
         lab.room(Some(ROOM));
-        let refused = matches!(lab.call(name, &args), Err(NativeError::Memory));
+        let refused = crate::testsupport::exhausted(&lab.call(name, &args));
         if !refused || lab.allocated != objects {
             unreserved.push(*name);
             continue;
@@ -612,14 +614,12 @@ fn an_amplifier_reserves_its_result_before_it_builds_it() {
 /// it reaches, and allocates nothing even when the remaining room is zero.
 #[test]
 fn classification_prices_the_actual_walk_and_stops_at_the_first_refusal() {
-    use lash_kernel_state::paged::{ObjectInit, SemanticHeap as _};
-
     let mut lab = Lab::new();
     let plain = lab.value(list(vec![Datum::Null, b(true), t("large leaf")]));
     let absent = lab.value(Datum::Absent);
-    let refused = lab.list_of(vec![absent, plain.clone()]);
+    let refused = lab.list_of(vec![absent, plain]);
     let over_old_cap = lab.value(list(vec![Datum::Null; 128]));
-    let shared = lab.list_of(vec![over_old_cap.clone(), over_old_cap.clone()]);
+    let shared = lab.list_of(vec![over_old_cap, over_old_cap]);
     let enormous = lab.value(list(vec![Datum::Null; 100_000]));
     let enormous_record = lab.value(Datum::Record(
         (0..100_000)
@@ -628,8 +628,7 @@ fn classification_prices_the_actual_walk_and_stops_at_the_first_refusal() {
     ));
     let field = lab.value(Datum::Record(vec![("a".into(), Datum::Null)]));
     let hook = lab.value(Datum::Record(vec![("toJSON".into(), Datum::Null)]));
-    let cycle = lab.heap.allocate_object(ObjectInit::List(vec![])).unwrap();
-    lab.heap.list_write(cycle, 0, Value::List(cycle)).unwrap();
+    let cycle = lab.cycle();
     let policy = lab.values(&[
         i(8),
         Datum::Tuple(vec![t("toJSON"), t("brand")]),
@@ -651,7 +650,7 @@ fn classification_prices_the_actual_walk_and_stops_at_the_first_refusal() {
         (enormous_record, 3_575_563),
         (field, 21),
         (hook, 16),
-        (Value::List(cycle), 18),
+        (cycle, 18),
     ] {
         let mut args = vec![value];
         args.extend(policy.iter().cloned());

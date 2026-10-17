@@ -25,10 +25,31 @@ mod memory_laws;
 #[cfg(test)]
 mod testsupport;
 
-pub(crate) fn raised(kind: &str, message: &str) -> lash_kernel_doc::NativeError {
-    lash_kernel_doc::NativeError::Raised(std::sync::Arc::new(lash_kernel_doc::heap::ErrorRef::new(
-        kind, message,
-    )))
+pub(crate) fn raised(
+    kind: &'static str,
+    message: impl Into<String>,
+) -> lash_kernel_doc::NativeError {
+    lash_kernel_doc::NativeError::refused(kind, message)
+}
+
+/// What a call answers when a buffer it reserved cannot be allocated:
+/// room past every bound, which ends the run at its memory bound.
+pub(crate) fn exhausted() -> lash_kernel_doc::NativeError {
+    lash_kernel_doc::Retry::Room {
+        wanted: lash_kernel_doc::heap::LogicalBytes(u64::MAX),
+    }
+    .into()
+}
+
+/// A text of at most `ShortText::MAX` bytes, inline: a fixed name.
+#[expect(
+    clippy::expect_used,
+    reason = "callers pass fixed names no longer than an inline text"
+)]
+pub(crate) fn short(text: &str) -> lash_kernel_doc::Value {
+    lash_kernel_doc::Value::Text(
+        lash_kernel_doc::arena::ShortText::new(text).expect("a fixed name is inline"),
+    )
 }
 
 #[cfg(test)]

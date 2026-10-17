@@ -553,8 +553,8 @@ fn native_corpus_observes_negative_zero() {
     use lash_kernel_doc::{NativeCall, NativeError, NativeFunction, Value};
     struct Native(bool);
     impl NativeFunction for Native {
-        fn call(&self, call: NativeCall<'_>) -> Result<Value, NativeError> {
-            let Value::Float(value) = call.args[0] else {
+        fn call(&self, call: NativeCall<'_, '_>) -> Result<Value, NativeError> {
+            let Value::Float(value) = call.args.values()[0] else {
                 unreachable!()
             };
             Ok(Value::Bool(
@@ -589,33 +589,30 @@ fn native_corpus_observes_negative_zero() {
 /// compatible anchors, and refuses a changed value, error, guard or reservation.
 #[test]
 fn native_corpus_certifies_answers_and_keeps_compatible_anchors() {
-    use lash_kernel_doc::{Float, NativeCall, NativeError, NativeFunction, Object, Value};
+    use lash_kernel_doc::{Float, NativeCall, NativeError, NativeFunction, NewObject, Value};
     struct Native(u8);
     impl NativeFunction for Native {
-        fn call(&self, call: NativeCall<'_>) -> Result<Value, NativeError> {
-            let Value::Float(value) = call.args[0] else {
+        fn call(&self, call: NativeCall<'_, '_>) -> Result<Value, NativeError> {
+            let Value::Float(value) = call.args.values()[0] else {
                 unreachable!()
             };
             if self.0 == 2 {
                 call.counter.spend(1)?;
             }
             if self.0 == 3 {
-                call.heap.reserve(1, 0)?;
+                call.new.reserve(1, 0)?;
             }
             if self.0 == 4 {
-                return Err(NativeError::Raised(std::sync::Arc::new(
-                    lash_kernel_doc::heap::ErrorRef::new("changed_error", "edge"),
-                )));
+                return Err(NativeError::refused("changed_error", "edge"));
             }
             let value = if self.0 == 1 && value.get() == 0.0 && value.get().is_sign_negative() {
                 Float::new(0.0)
             } else {
                 value
             };
-            Ok(Value::List(
-                call.heap
-                    .allocate(Object::List(vec![Value::Float(value)]))?,
-            ))
+            Ok(call
+                .new
+                .allocate(NewObject::List(vec![Value::Float(value)])))
         }
     }
     let registry = |mode| {
@@ -656,8 +653,8 @@ fn native_baseline_replacement_refuses_sealed_releases_and_preserves_surviving_a
     use lash_kernel_doc::{NativeCall, NativeError, NativeFunction, Value};
     struct Native(bool);
     impl NativeFunction for Native {
-        fn call(&self, call: NativeCall<'_>) -> Result<Value, NativeError> {
-            let Value::Bool(value) = call.args[0] else {
+        fn call(&self, call: NativeCall<'_, '_>) -> Result<Value, NativeError> {
+            let Value::Bool(value) = call.args.values()[0] else {
                 unreachable!()
             };
             Ok(Value::Bool(value ^ self.0))
@@ -729,9 +726,9 @@ fn an_equivalent_prepared_entry_keeps_the_native_fingerprint() {
     use lash_kernel_doc::{NativeCall, NativeError, NativeFunction, PreparedNative, Value};
     struct Native(Option<PreparedNative>, u64);
     impl NativeFunction for Native {
-        fn call(&self, call: NativeCall<'_>) -> Result<Value, NativeError> {
+        fn call(&self, call: NativeCall<'_, '_>) -> Result<Value, NativeError> {
             call.counter.spend(self.1)?;
-            let Value::Bool(value) = call.args[0] else {
+            let Value::Bool(value) = call.args.values()[0] else {
                 unreachable!()
             };
             Ok(Value::Bool(!value))
@@ -791,7 +788,7 @@ fn native_fingerprint_covers_the_prepared_entry() {
     use lash_kernel_doc::{NativeCall, NativeError, NativeFunction, PreparedNative, Value};
     struct Native(bool);
     impl NativeFunction for Native {
-        fn call(&self, _: NativeCall<'_>) -> Result<Value, NativeError> {
+        fn call(&self, _: NativeCall<'_, '_>) -> Result<Value, NativeError> {
             Ok(Value::Bool(true))
         }
         fn prepare(&self) -> Option<PreparedNative> {
@@ -826,46 +823,98 @@ fn native_fingerprint_covers_the_prepared_entry() {
     assert!(error.contains("prepared_difference"), "{error}");
 }
 
-/// K-KEY-002: release replay uses the actual paged heap's normal form.
+/// FIG-6708: every native of the library answers what it answers warm when
+/// every chunk its arguments reach starts cold: each read of one answers
+/// `Retry::Cold`, and the call run again once it is warmed gives the same
+/// value, work, charge and reservations.
 #[test]
-fn native_replay_uses_the_paged_heaps_normal_keys() {
-    use lash_kernel_doc::{Float, Integer, NativeHeap, Object, Value};
-    let integer =
-        |heap: &mut dyn NativeHeap, value: i64| Value::Int(heap.int(Integer::from(value)).unwrap());
-    let float = |value| Value::Float(Float::new(value));
-    let mut heap = probe::fixtures::fresh().unwrap();
-    let one = integer(&mut *heap, 1);
-    let map = heap
-        .allocate(Object::Map(vec![(one.clone(), Value::Bool(true))]))
+fn every_native_answers_the_same_with_every_chunk_cold() {
+    use lash_kernel_doc::{NativeCall, NativeError, NativeFunction, Value};
+    /// Stands for the machine's own `tasks.unfinished`, which the
+    /// collections' bodies name.
+    struct RunByTheMachine;
+    impl NativeFunction for RunByTheMachine {
+        fn call(&self, _: NativeCall<'_, '_>) -> Result<Value, NativeError> {
+            Err(NativeError::Decline)
+        }
+    }
+    let mut registry = lash_kernel_doc::FunctionRegistry::new();
+    lash_kernel_lib::register_numbers(&mut registry).unwrap();
+    lash_kernel_lib::register_text_json(&mut registry).unwrap();
+    registry
+        .register(
+            lash_kernel_doc::parse_definition(
+                "function tasks.unfinished() -> List(Task(Any))\nkernel 1\ncharge 1\nnative\n",
+            )
+            .unwrap(),
+            Some(std::sync::Arc::new(RunByTheMachine)),
+        )
         .unwrap();
-    assert!(matches!(
-        heap.map_get(map, &float(1.0)).unwrap(),
-        Some(Value::Bool(true))
-    ));
-    assert_eq!(
-        heap.normal_key(&one).unwrap(),
-        heap.normal_key(&float(1.0)).unwrap()
-    );
-    let zero = integer(&mut *heap, 0);
-    let zero = heap.allocate(Object::Set(vec![zero])).unwrap();
-    assert!(heap.set_contains(zero, &float(-0.0)).unwrap());
-    let first = heap.tuple(vec![one, float(f64::NAN)]).unwrap();
-    let tuple = heap
-        .allocate(Object::Set(vec![Value::Tuple(first.clone())]))
-        .unwrap();
-    let queried = heap.tuple(vec![float(1.0), float(f64::NAN)]).unwrap();
-    assert_eq!(
-        heap.normal_key(&Value::Tuple(first)).unwrap(),
-        heap.normal_key(&Value::Tuple(queried.clone())).unwrap()
-    );
-    assert!(heap.set_contains(tuple, &Value::Tuple(queried)).unwrap());
-    let max = integer(&mut *heap, i64::MAX);
-    let boundary = heap.allocate(Object::Set(vec![max])).unwrap();
+    lash_kernel_lib::register_collections(&mut registry).unwrap();
+    lash_ext_regex_ecma::register(
+        &mut registry,
+        &std::sync::Arc::new(lash_ext_regex_ecma::Engine::new(8)),
+    )
+    .unwrap();
+    lash_ext_date_ecma::register(&mut registry).unwrap();
+    lash_ext_url_whatwg::register(&mut registry).unwrap();
+    let (mut natives, mut cases, mut warmed) = (0, 0, 0);
+    for (_, registered) in registry.iter().filter(|(_, registered)| {
+        registered.native().is_some() && registered.definition().name.as_str() != "tasks.unfinished"
+    }) {
+        natives += 1;
+        for input in inputs::generate(registered.definition(), &[]) {
+            let warm = probe::answer(registered, &input, None);
+            let (cold, retries) = probe::answer_cold(registered, &input);
+            assert_eq!(
+                cold,
+                warm,
+                "`{}` on {}",
+                registered.definition().name,
+                serde_json::to_string(&input).unwrap()
+            );
+            cases += 1;
+            warmed += retries;
+        }
+    }
     assert!(
-        !heap
-            .set_contains(boundary, &float(i64::MAX as f64))
-            .unwrap()
+        natives > 100 && cases > natives,
+        "{natives} natives, {cases} cases"
     );
+    assert!(warmed > natives, "{warmed} cold reads over {cases} cases");
+}
+
+/// K-KEY-002: release replay uses the arena's normal form, as a run does.
+#[test]
+fn native_replay_uses_the_arenas_normal_keys() {
+    use lash_kernel_doc::{Datum, Float, Integer, Value};
+    let float = |value| Value::Float(Float::new(value));
+    let mut bench = lash_kernel_state::arena::Bench::new();
+    let mut build = |datum: Datum| bench.build(&datum).unwrap();
+    let int = |value: i64| Datum::Int(Integer::from(value));
+    let nan = Datum::Float(Float::new(f64::NAN));
+    let map = build(Datum::Map(vec![(int(1), Datum::Bool(true))]));
+    let zero = build(Datum::Set(vec![int(0)]));
+    let tuple = build(Datum::Set(vec![Datum::Tuple(vec![int(1), nan.clone()])]));
+    let boundary = build(Datum::Set(vec![int(i64::MAX)]));
+    let one = build(int(1));
+    let first = build(Datum::Tuple(vec![int(1), nan.clone()]));
+    let queried = build(Datum::Tuple(vec![Datum::Float(Float::new(1.0)), nan]));
+    let arena = bench.arena();
+    let semantics = arena.semantics();
+    let get = |table: &Value, key: &Value| arena.table_get(table.handle().unwrap(), key).unwrap();
+    assert!(matches!(get(&map, &float(1.0)), Some(Value::Bool(true))));
+    assert_eq!(
+        semantics.normal_key(&one).unwrap(),
+        semantics.normal_key(&float(1.0)).unwrap()
+    );
+    assert!(get(&zero, &float(-0.0)).is_some());
+    assert_eq!(
+        semantics.normal_key(&first).unwrap(),
+        semantics.normal_key(&queried).unwrap()
+    );
+    assert!(get(&tuple, &queried).is_some());
+    assert!(get(&boundary, &float(i64::MAX as f64)).is_none());
 }
 
 /// Records the kernel's closed names from the actual registry for review.

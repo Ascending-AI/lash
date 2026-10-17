@@ -1,85 +1,38 @@
-//! JSON reads paged text one bounded chunk at a time, without an input copy.
+//! JSON reads its text in place, without an input copy.
 use super::{Json, raise, room};
-use lash_kernel_doc::heap::{Chunk, TextRef};
-use lash_kernel_doc::{NativeError, NativeHeap, NumberToken, Value};
-use std::ops::ControlFlow;
+use lash_kernel_doc::{NativeError, NumberToken, Nursery, Retry};
 
-enum Input<'a> {
-    Borrowed(&'a [u8]),
-    Paged {
-        text: &'a TextRef,
-        start: usize,
-        chunk: Vec<u8>,
-    },
-}
-impl Input<'_> {
-    fn len(&self) -> usize {
-        match self {
-            Self::Borrowed(bytes) => bytes.len(),
-            Self::Paged { text, .. } => text.summary.utf8_bytes as usize,
-        }
-    }
-    fn byte(&mut self, cursor: usize, heap: &dyn NativeHeap) -> Result<Option<u8>, NativeError> {
-        if cursor >= self.len() {
-            return Ok(None);
-        }
-        match self {
-            Self::Borrowed(bytes) => Ok(bytes.get(cursor).copied()),
-            Self::Paged { text, start, chunk } => {
-                if cursor < *start || cursor >= *start + chunk.len() {
-                    chunk.clear();
-                    *start = cursor;
-                    heap.payload_visit(
-                        &Value::Text((*text).clone()),
-                        cursor as u64..text.summary.utf8_bytes,
-                        &mut |part| {
-                            match part {
-                                Chunk::Text(text) => chunk.extend_from_slice(text.as_bytes()),
-                                Chunk::Bytes(_) => unreachable!("text payload"),
-                            }
-                            ControlFlow::Break(())
-                        },
-                    )?;
-                }
-                chunk
-                    .get(cursor - *start)
-                    .copied()
-                    .map(Some)
-                    .ok_or_else(|| {
-                        lash_kernel_doc::heap::HeapFault::Malformed(
-                            "text cursor has no payload chunk".into(),
-                        )
-                        .into()
-                    })
-            }
-        }
-    }
-}
-struct Parser<'a> {
-    input: Input<'a>,
+struct Parser<'a, 'call> {
+    input: &'a [u8],
     cursor: usize,
-    heap: &'a mut dyn NativeHeap,
-    refused: bool,
+    new: &'a mut Nursery<'call>,
+    depth_limit: usize,
+    /// The room the first refused reservation asked for, and what the
+    /// reservations after it would have added.
+    refused: Option<(u64, u64)>,
 }
-impl Parser<'_> {
+impl Parser<'_, '_> {
     fn byte(&mut self) -> Result<Option<u8>, NativeError> {
-        self.input.byte(self.cursor, self.heap)
+        Ok(self.input.get(self.cursor).copied())
     }
     /// A memory refusal stops building the tree while syntax validation
-    /// continues. Infrastructure causes end the read unchanged.
+    /// continues, counting the room the rest would take. Infrastructure
+    /// causes end the read unchanged.
     fn keep(&mut self, node: &Json, name: usize) -> Result<bool, NativeError> {
-        if self.refused {
-            return Ok(false);
-        }
         let bytes = match node {
             Json::Text(text) => text.len(),
             Json::Number(token) => token.as_str().len(),
             _ => 0,
         };
-        match self.heap.reserve(1, room(bytes.saturating_add(name))) {
+        let bytes = room(bytes.saturating_add(name));
+        if let Some((_, owed)) = &mut self.refused {
+            *owed = owed.saturating_add(16).saturating_add(bytes);
+            return Ok(false);
+        }
+        match self.new.reserve(1, bytes) {
             Ok(()) => Ok(true),
-            Err(NativeError::Memory) => {
-                self.refused = true;
+            Err(NativeError::Retry(Retry::Room { wanted })) => {
+                self.refused = Some((wanted.0, 0));
                 Ok(false)
             }
             Err(error) => Err(error),
@@ -122,12 +75,12 @@ impl Parser<'_> {
     }
     fn value(&mut self, depth: usize) -> Result<Json, NativeError> {
         self.whitespace()?;
-        if depth > self.heap.data_depth_limit().min(64) {
+        if depth > self.depth_limit {
             return Err(raise(
                 "json_depth",
-                &format!(
+                format!(
                     "JSON exceeds the configured {}-level kernel nesting limit",
-                    self.heap.data_depth_limit().min(64)
+                    self.depth_limit
                 ),
             ));
         }
@@ -213,39 +166,31 @@ impl Parser<'_> {
 pub(super) fn syntax() -> NativeError {
     raise("json_syntax", "invalid JSON, including unpaired surrogates")
 }
-fn read_input(input: Input<'_>, heap: &mut dyn NativeHeap) -> Result<Json, NativeError> {
+/// Reads strict JSON nesting at most `depth_limit` levels, reserving
+/// each node it keeps in `new`.
+pub(super) fn read(
+    text: &str,
+    depth_limit: usize,
+    new: &mut Nursery<'_>,
+) -> Result<Json, NativeError> {
     let mut parser = Parser {
-        input,
+        input: text.as_bytes(),
         cursor: 0,
-        heap,
-        refused: false,
+        new,
+        depth_limit: depth_limit.min(64),
+        refused: None,
     };
     let json = parser.value(0)?;
     parser.whitespace()?;
     if parser.cursor != parser.input.len() {
         return Err(syntax());
     }
-    if !parser.keep(&json, 0)? {
-        return Err(NativeError::Memory);
+    parser.keep(&json, 0)?;
+    if let Some((wanted, owed)) = parser.refused {
+        return Err(Retry::Room {
+            wanted: lash_kernel_doc::heap::LogicalBytes(wanted.saturating_add(owed)),
+        }
+        .into());
     }
     Ok(json)
-}
-pub(super) fn read(text: &str, heap: &mut dyn NativeHeap) -> Result<Json, NativeError> {
-    read_input(Input::Borrowed(text.as_bytes()), heap)
-}
-pub(super) fn read_descriptor(
-    text: &TextRef,
-    heap: &mut dyn NativeHeap,
-) -> Result<Json, NativeError> {
-    match &text.body {
-        lash_kernel_doc::heap::Payload::Resident(text) => read(text, heap),
-        _ => read_input(
-            Input::Paged {
-                text,
-                start: 0,
-                chunk: Vec::new(),
-            },
-            heap,
-        ),
-    }
 }

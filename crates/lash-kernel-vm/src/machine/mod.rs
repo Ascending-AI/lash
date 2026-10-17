@@ -15,13 +15,15 @@ mod exec;
 mod frames;
 mod issued;
 mod loops;
-mod native_heap;
 mod observing;
 mod operation_entry;
 mod ops;
 #[cfg(test)]
 mod park_laws;
 mod plans;
+#[cfg(test)]
+mod precision_laws;
+pub(crate) mod project;
 mod queue;
 mod registers;
 mod segments;
@@ -33,18 +35,19 @@ mod versions;
 
 use std::sync::Arc;
 
+use lash_kernel_doc::arena::ArenaHandle;
+use lash_kernel_doc::heap::PageValue;
 use lash_kernel_doc::{Datum, DocumentId, EntityId, Name, TaskId, Value};
 
 use crate::compile::Layout;
 use crate::compile::{BlockId, CodeId, Executable, LibId, StmtId};
-use crate::data::{Raised, copy_out};
-use crate::heap::value_bytes;
+use crate::data::{CopyError, Raised};
 use crate::interface::{
     Bound, BoundExceeded, Bounds, DeliverError, Delivered, End, Host, Machine, MachineError,
     Meters, Outcome, Park, Program, RunError, StartError, Step, WaitId,
 };
 use crate::observe::{Event, GuestPhase, Observer};
-use lash_kernel_doc::heap::{ErrorRef, HeapFault, PageId};
+use lash_kernel_doc::heap::{HeapFault, PageId};
 use lash_kernel_state::kernel_internals::PagedHeap;
 use lash_kernel_state::kernel_internals::directory::ordinal_key;
 use lash_kernel_state::kernel_internals::tree::Tree;
@@ -54,6 +57,7 @@ use lash_kernel_state::paged::{
     TaskStateRecord as TaskState, WaitPhase, WaitRecord,
 };
 use loops::Cursor;
+use project::SharedArena;
 use session::{keyed, open_tree};
 
 /// What a frame is accounted before its variables.
@@ -87,12 +91,34 @@ impl Halt {
 #[derive(Debug)]
 pub(crate) enum Interrupt {
     Raise(Box<Value>),
+    /// The machine raises an error it has not built yet: built in the
+    /// arena where something takes the raise ([`KernelMachine::thrown`]).
+    Refuse(Box<Refusal>),
     Halt(Box<Halt>),
+}
+
+/// An error the machine raises, before the arena holds it: its kind, its
+/// message, and its data, null or a text.
+#[derive(Debug)]
+pub(crate) struct Refusal {
+    pub(crate) kind: std::borrow::Cow<'static, str>,
+    pub(crate) message: String,
+    pub(crate) data: Option<String>,
 }
 
 impl Interrupt {
     fn raised(value: Value) -> Self {
         Self::Raise(Box::new(value))
+    }
+    pub(crate) fn refused(
+        kind: impl Into<std::borrow::Cow<'static, str>>,
+        message: impl Into<String>,
+    ) -> Self {
+        Self::Refuse(Box::new(Refusal {
+            kind: kind.into(),
+            message: message.into(),
+            data: None,
+        }))
     }
     fn in_function(self, function: &lash_kernel_doc::FunctionName) -> Self {
         match self {
@@ -123,12 +149,8 @@ impl From<Halt> for Interrupt {
 
 impl From<Raised> for Interrupt {
     fn from(raised: Raised) -> Self {
-        Self::raised(error(raised.kind, raised.message))
+        Self::refused(raised.kind, raised.message)
     }
-}
-
-pub(crate) fn error(kind: &str, message: impl Into<String>) -> Value {
-    Value::Error(Arc::new(ErrorRef::new(kind, &message.into())))
 }
 
 impl From<HeapFault> for Halt {
@@ -144,9 +166,7 @@ impl From<HeapFault> for Interrupt {
 impl From<HeapWriteError> for Interrupt {
     fn from(error: HeapWriteError) -> Self {
         match error {
-            HeapWriteError::Raised { kind, message } => {
-                Self::raised(super::machine::error(kind, message))
-            }
+            HeapWriteError::Raised { kind, message } => Self::refused(kind, message),
             other => Self::from(write_halt(other)),
         }
     }
@@ -155,29 +175,30 @@ impl From<lash_kernel_doc::NativeError> for Interrupt {
     fn from(error: lash_kernel_doc::NativeError) -> Self {
         use lash_kernel_doc::NativeError;
         match error {
-            NativeError::Raised(error) => Self::raised(Value::Error(error)),
-            NativeError::Memory => Self::from(Halt::Memory),
-            NativeError::Heap(error) => Self::from(Halt::from(error)),
+            NativeError::Raised(error) => Self::raised(error),
+            NativeError::Refused { kind, message } => Self::refused(kind, message),
             NativeError::Guard(error) => Self::from(Halt::Fault(format!(
-                "an immutable constructor returned a guard: {error}"
+                "an arena operation returned a guard: {error}"
             ))),
-            NativeError::Decline => {
-                Self::from(Halt::Fault("an immutable constructor declined".into()))
-            }
+            NativeError::Retry(retry) => Self::from(Halt::Fault(format!(
+                "an arena operation outside a call needs {retry:?}"
+            ))),
+            NativeError::Decline => Self::from(Halt::Fault("an arena operation declined".into())),
+            NativeError::Malformed(problem) => Self::from(Halt::Fault(problem.into())),
         }
     }
 }
 impl From<crate::data::CopyError> for Interrupt {
     fn from(error: crate::data::CopyError) -> Self {
         match error {
-            crate::data::CopyError::Raised(error) => error.into(),
-            crate::data::CopyError::Heap(error) => error.into(),
+            CopyError::Raised(error) => error.into(),
+            CopyError::Heap(error) => error.into(),
         }
     }
 }
 
 fn raise<T>(kind: &'static str, message: impl Into<String>) -> Eval<T> {
-    Err(Interrupt::raised(error(kind, message)))
+    Err(Interrupt::refused(kind, message))
 }
 
 fn fault(problem: &str) -> Halt {
@@ -214,8 +235,8 @@ enum Completion {
 enum SlotState {
     Empty,
     Value(Value),
-    /// A variable a closure shares: the heap cell that holds it.
-    Cell(EntityId),
+    /// A variable a closure shares: the arena cell that holds it.
+    Cell(ArenaHandle),
 }
 
 #[derive(Clone, Debug)]
@@ -262,8 +283,6 @@ struct Storage {
     #[expect(clippy::vec_box, reason = "reuse the frame allocation across calls")]
     frames: Vec<Box<Frame>>,
     entry_sites: Vec<Option<lash_kernel_state::paged::SiteRef>>,
-    #[cfg(test)]
-    binding_canonicalizations: usize,
     #[cfg(test)]
     formula_sources: std::cell::RefCell<Vec<usize>>,
     /// Values moved into or out of a register or a frame slot.
@@ -333,6 +352,8 @@ pub struct KernelMachine {
     exe: Arc<Executable>,
     bounds: Bounds,
     heap: PagedHeap,
+    /// The objects the run executes on; the heap is their projection.
+    arena: SharedArena,
     limits: lash_kernel_doc::KernelDataLimits,
     release: PageId,
     owner: PageId,
@@ -435,6 +456,13 @@ struct Pins {
     descriptor_pins: bool,
     #[cfg(test)]
     force_precision: bool,
+    /// Every object a native call's arguments reach goes back on its pages
+    /// before the call.
+    #[cfg(test)]
+    force_cold: bool,
+    /// How many times a native call answered `Retry::Cold`.
+    #[cfg(test)]
+    cold_reads: u64,
     #[cfg(test)]
     scalar_locations: Vec<Option<u64>>,
     #[cfg(test)]
@@ -446,24 +474,8 @@ impl Pins {
     fn scalar(value: &Value) -> bool {
         matches!(
             value,
-            Value::Null
-                | Value::Absent
-                | Value::Bool(_)
-                | Value::Float(_)
-                | Value::Int(lash_kernel_doc::heap::IntRef::Inline(_))
+            Value::Null | Value::Absent | Value::Bool(_) | Value::Float(_) | Value::Int(_)
         )
-    }
-
-    /// Holds `value` until the statement ends, and gives the bytes to
-    /// reserve for it.
-    #[inline(always)]
-    fn pin(&mut self, value: &Value) -> Result<u64, Halt> {
-        if matches!(value, Value::Bool(_)) {
-            return Ok(0);
-        }
-        let bytes = value_bytes(value);
-        self.hold(value, bytes)?;
-        Ok(bytes)
     }
 
     /// Holds `value`, of `bytes` bytes.
@@ -499,7 +511,7 @@ impl Pins {
         if Self::scalar(value) {
             self.scalar_root_insertions += 1;
         }
-        self.values.push(value.clone());
+        self.values.push(*value);
     }
 
     fn clear(&mut self) {
@@ -631,18 +643,188 @@ impl KernelMachine {
     }
 
     fn publish(&mut self, coordinates: bool) -> Result<(), Halt> {
-        native_heap::Roots {
-            tasks: &mut self.tasks,
-            joins: &self.joins,
-            registers: &self.regs,
-            pinned: &self.pins.values,
-            borrowed: &self.pins.borrowed,
-            pinned_bytes: self.pins.bytes,
-            fresh: &self.fresh,
-            refinements: &mut self.census_refinements,
+        #[cfg(any(test, feature = "perf-witness"))]
+        crate::perf_witness::publish();
+        self.flush_arena()?;
+        self.reconcile_sweep()?;
+        let pages = self.heap.pages().clone();
+        let (registers, pinned, borrowed) = {
+            let arena = self.arena.borrow();
+            let projected = |values: &[Value]| {
+                values
+                    .iter()
+                    .map(|value| project::project(&arena, &pages, value))
+                    .collect::<Result<Vec<PageValue>, HeapFault>>()
+            };
+            (
+                projected(&self.regs.projection())?,
+                projected(&self.pins.values)?,
+                projected(&self.pins.borrowed)?,
+            )
+        };
+        let tasks = &mut self.tasks;
+        self.heap
+            .update_execution_roots(
+                self.joins.clone(),
+                lash_kernel_state::paged::StatementRoots {
+                    registers: &registers,
+                    pinned: &pinned,
+                    pinned_bytes: self.pins.bytes,
+                    borrowed: &borrowed,
+                    fresh: &self.fresh,
+                },
+                || {
+                    if coordinates {
+                        tasks.roots()
+                    } else {
+                        tasks.holdings()
+                    }
+                },
+            )
+            .map_err(|error| match error {
+                HeapWriteError::Memory => bound(Bound::Memory, self.bounds.memory),
+                other => write_halt(other),
+            })?;
+        self.reconcile_sweep()
+    }
+
+    /// Writes every object the arena changed to the heap: what a
+    /// publication, a seal and an exact refinement read.
+    pub(super) fn flush_arena(&mut self) -> Result<(), Halt> {
+        let exe = Arc::clone(&self.exe);
+        let mut arena = self.arena.borrow_mut();
+        project::flush(&mut arena, &mut self.heap, &exe).map_err(|error| match error {
+            HeapWriteError::Memory => bound(Bound::Memory, self.bounds.memory),
+            other => write_halt(other),
+        })
+    }
+
+    /// The value a refusal raises: its error, built in the arena.
+    pub(super) fn thrown(&mut self, refusal: Refusal) -> Box<Value> {
+        let mut arena = self.arena.borrow_mut();
+        let data = match &refusal.data {
+            Some(text) => arena.text(text),
+            None => Value::Null,
+        };
+        Box::new(arena.error(&refusal.kind, &refusal.message, data))
+    }
+
+    /// The value an interrupt raises, or the halt it is.
+    pub(super) fn thrown_by(&mut self, interrupt: Interrupt) -> Result<Box<Value>, Halt> {
+        match interrupt {
+            Interrupt::Raise(value) => Ok(value),
+            Interrupt::Refuse(refusal) => Ok(self.thrown(*refusal)),
+            Interrupt::Halt(halt) => Err(*halt),
         }
-        .publish(&mut self.heap, coordinates)
-        .map_err(|error| self.heap_halt(error))
+    }
+
+    /// The arena value of page form `page`.
+    pub(super) fn admit_page(&mut self, page: &PageValue) -> Result<Value, Halt> {
+        project::admit(&mut self.arena.borrow_mut(), self.heap.pages(), page).map_err(Halt::from)
+    }
+
+    /// The page form of `value`.
+    pub(super) fn page_form(&self, value: &Value) -> Result<PageValue, Halt> {
+        project::project(&self.arena.borrow(), self.heap.pages(), value).map_err(Halt::from)
+    }
+
+    /// Decodes the cold object `handle` from the heap or its pages.
+    pub(super) fn warm(&mut self, handle: ArenaHandle) -> Result<(), Halt> {
+        let mut arena = self.arena.borrow_mut();
+        project::materialize(&mut arena, &self.heap, &self.exe, handle).map_err(Halt::from)
+    }
+
+    /// Runs every later native call with each object its arguments reach
+    /// back on its pages first, so that every chunk it reads answers
+    /// `Retry::Cold` before it is warmed: the force-cold laws' run.
+    #[cfg(test)]
+    pub(crate) fn force_cold(&mut self) {
+        self.pins.force_cold = true;
+    }
+
+    /// How many times a native call answered `Retry::Cold`.
+    #[cfg(test)]
+    pub(crate) fn cold_reads(&self) -> u64 {
+        self.pins.cold_reads
+    }
+
+    /// Writes the arena to the heap and puts every object `args` reach
+    /// back on its pages.
+    #[cfg(test)]
+    pub(super) fn chill_args(&mut self, args: &[Value]) -> Result<(), Halt> {
+        self.flush_arena()?;
+        let mut pending = Vec::new();
+        for value in args {
+            // An immutable keeps the page form its projection builds.
+            self.page_form(value)?;
+            pending.extend(value.handle());
+        }
+        let mut arena = self.arena.borrow_mut();
+        let mut seen = std::collections::HashSet::new();
+        while let Some(handle) = pending.pop() {
+            if !seen.insert((handle.index(), handle.generation())) {
+                continue;
+            }
+            let body = arena
+                .body(handle)
+                .map_err(|error| fault(&error.to_string()))?;
+            lash_kernel_state::arena::each_member(body, &mut |member| {
+                pending.extend(member.handle());
+            });
+            arena
+                .evict(handle)
+                .map_err(|error| fault(&error.to_string()))?;
+        }
+        Ok(())
+    }
+
+    /// Decodes every cold object `value` reaches: what a walk of its
+    /// whole graph outside a native call reads.
+    pub(super) fn warm_reachable(&mut self, value: &Value) -> Result<(), Halt> {
+        if !self.arena.borrow().any_cold() {
+            return Ok(());
+        }
+        let mut pending: Vec<ArenaHandle> = value.handle().into_iter().collect();
+        let mut seen = std::collections::HashSet::new();
+        while let Some(handle) = pending.pop() {
+            if !seen.insert((handle.index(), handle.generation())) {
+                continue;
+            }
+            self.warm(handle)?;
+            let arena = self.arena.borrow();
+            let body = arena
+                .body(handle)
+                .map_err(|error| fault(&error.to_string()))?;
+            lash_kernel_state::arena::each_member(body, &mut |member| {
+                pending.extend(member.handle());
+            });
+            if let lash_kernel_doc::arena::Body::Closure { captures, .. } = body {
+                pending.extend(captures.iter().copied());
+            }
+        }
+        Ok(())
+    }
+
+    /// Copies `value` out of the run (`K-EFF-002`).
+    pub(super) fn copy_datum(&mut self, value: &Value) -> Result<Datum, CopyError> {
+        self.warm_reachable(value).map_err(|halt| match halt {
+            Halt::Heap(fault) => CopyError::Heap(*fault),
+            other => CopyError::Heap(HeapFault::Malformed(format!("{other:?}"))),
+        })?;
+        crate::data::copy_out(&self.arena.borrow(), self.limits.value_depth(), value)
+    }
+
+    /// Releases the arena objects nothing the run holds reaches, once
+    /// enough have accumulated: at a statement boundary, where every value
+    /// the run holds is in a frame.
+    fn collect_arena(&mut self) -> Result<(), Halt> {
+        if !self.arena.borrow().collection_due() {
+            return Ok(());
+        }
+        let tasks = &self.tasks;
+        let mut arena = self.arena.borrow_mut();
+        arena.collect(&mut |visit| tasks.each_value(visit));
+        Ok(())
     }
 
     /// The law's forced collection hook at a statement boundary.
@@ -775,24 +957,21 @@ impl KernelMachine {
             // Most statements complete normally: nothing departs.
             Ok(Completion::Normal) => return Ok(()),
             Ok(completion) => completion,
-            Err(Interrupt::Raise(value)) => Completion::Throw(value),
-            Err(Interrupt::Halt(halt)) => return Err(*halt),
+            Err(interrupt) => Completion::Throw(self.thrown_by(interrupt)?),
         };
         self.complete(task, host, exe, completion)
     }
 
     /// Marks a task ended, wakes what waits on it and, for `main`, ends
     /// the run (`K-TASK-008`, `K-TASK-018`).
-    fn end_task(&mut self, task: TaskId, result: Result<Value, Value>) -> Result<(), Halt> {
-        let result = match result {
-            Ok(value) => Ok(self
-                .heap
-                .canonical_value(value)
-                .map_err(|error| self.heap_halt(error))?),
-            Err(value) => Err(self
-                .heap
-                .canonical_value(value)
-                .map_err(|error| self.heap_halt(error))?),
+    fn end_task(&mut self, task: TaskId, outcome: Result<Value, Value>) -> Result<(), Halt> {
+        let pages = self.heap.pages().clone();
+        let result = {
+            let arena = self.arena.borrow();
+            match &outcome {
+                Ok(value) => Ok(project::project(&arena, &pages, value)?),
+                Err(value) => Err(project::project(&arena, &pages, value)?),
+            }
         };
         self.observe(Event::TaskEnded(task));
         let ended = self.task(task)?;
@@ -809,12 +988,12 @@ impl KernelMachine {
             self.current = None;
         }
         if task == TaskId::MAIN {
-            self.end = Some(match result {
+            self.end = Some(match outcome {
                 Ok(value) => self.conclude(None, Ending::Returned(value))?,
-                Err(value) => End::Error(RunError::Uncaught(match copy_out(&self.heap, &value) {
+                Err(value) => End::Error(RunError::Uncaught(match self.copy_datum(&value) {
                     Ok(value) => value,
-                    Err(crate::data::CopyError::Raised(error)) => error.into_datum(),
-                    Err(crate::data::CopyError::Heap(error)) => return Err(error.into()),
+                    Err(CopyError::Raised(error)) => error.into_datum(),
+                    Err(CopyError::Heap(error)) => return Err(error.into()),
                 })),
             });
             return Ok(());
@@ -837,13 +1016,11 @@ impl KernelMachine {
                     if let Some(decision) = self.decide(mode, &members, Some(task))? {
                         self.remove_list_join(order)?;
                         self.pass(&members)?;
-                        self.wake(
-                            joiner,
-                            match decision {
-                                Ok(value) => Incoming::Value(value),
-                                Err(value) => Incoming::Raise(value),
-                            },
-                        )?;
+                        let incoming = match decision {
+                            Ok(value) => Incoming::Value(self.page_form(&value)?),
+                            Err(value) => Incoming::Raise(self.page_form(&value)?),
+                        };
+                        self.wake(joiner, incoming)?;
                     }
                 }
             }
@@ -904,12 +1081,12 @@ impl KernelMachine {
             }));
         }
         Ok(match ending {
-            Ending::Returned(value) => match copy_out(&self.heap, &value) {
+            Ending::Returned(value) => match self.copy_datum(&value) {
                 Ok(result) => End::Finished(Box::new(self.finished(result, false)?)),
-                Err(crate::data::CopyError::Raised(raised)) => {
+                Err(CopyError::Raised(raised)) => {
                     End::Error(RunError::Uncaught(raised.into_datum()))
                 }
-                Err(crate::data::CopyError::Heap(fault)) => return Err(fault.into()),
+                Err(CopyError::Heap(fault)) => return Err(fault.into()),
             },
             Ending::Finished(result) => End::Finished(Box::new(self.finished(result, true)?)),
             Ending::Failed(reason) => End::Failed(reason),
@@ -1044,6 +1221,7 @@ impl KernelMachine {
             self.heap
                 .release_statement_roots()
                 .map_err(MachineError::Heap)?;
+            self.collect_arena().map_err(machine_error)?;
             #[cfg(test)]
             self.at_boundary()?;
             if let Some(end) = self.end.take() {

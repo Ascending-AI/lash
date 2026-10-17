@@ -8,12 +8,12 @@ use lash_kernel_doc::heap_values::integral_float;
 use std::collections::BTreeSet;
 
 enum Step {
-    Pair(Value, Value),
-    Sequence(Value, Value, u64, u64),
+    Pair(PageValue, PageValue),
+    Sequence(PageValue, PageValue, u64, u64),
     Table(Tree<Entry>, EntityId, Option<Vec<u8>>, bool),
 }
 impl PagedHeap {
-    pub(super) fn equal_values(&self, a: &Value, b: &Value) -> Result<bool, HeapFault> {
+    pub(super) fn equal_values(&self, a: &PageValue, b: &PageValue) -> Result<bool, HeapFault> {
         let mut pending = vec![Step::Pair(a.clone(), b.clone())];
         let mut seen = BTreeSet::new();
         while let Some(step) = pending.pop() {
@@ -22,9 +22,9 @@ impl PagedHeap {
                     if index == len {
                         continue;
                     }
-                    let get = |v: &Value| match v {
-                        Value::Tuple(t) => self.tuple_get(t, index),
-                        Value::List(id) => self.list_get(*id, index),
+                    let get = |v: &PageValue| match v {
+                        PageValue::Tuple(t) => self.tuple_get(t, index),
+                        PageValue::List(id) => self.list_get(*id, index),
                         _ => Err(HeapFault::Malformed(
                             "equality sequence kind mismatch".into(),
                         )),
@@ -51,11 +51,12 @@ impl PagedHeap {
                 Step::Pair(a, b) => (a, b),
             };
             match (&a, &b) {
-                (Value::Null, Value::Null) | (Value::Absent, Value::Absent) => (),
-                (Value::Bool(a), Value::Bool(b)) if a == b => (),
-                (Value::Int(a), Value::Int(b)) if self.int_equal(a, b)? => (),
-                (Value::Float(a), Value::Float(b)) if a.get() == b.get() => (),
-                (Value::Int(i), Value::Float(f)) | (Value::Float(f), Value::Int(i)) => {
+                (PageValue::Null, PageValue::Null) | (PageValue::Absent, PageValue::Absent) => (),
+                (PageValue::Bool(a), PageValue::Bool(b)) if a == b => (),
+                (PageValue::Int(a), PageValue::Int(b)) if self.int_equal(a, b)? => (),
+                (PageValue::Float(a), PageValue::Float(b)) if a.get() == b.get() => (),
+                (PageValue::Int(i), PageValue::Float(f))
+                | (PageValue::Float(f), PageValue::Int(i)) => {
                     let Some(integer) = integral_float(f.get()) else {
                         return Ok(false);
                     };
@@ -63,22 +64,22 @@ impl PagedHeap {
                         return Ok(false);
                     }
                 }
-                (Value::Text(a), Value::Text(b)) if text_same(self, a, b)? => (),
-                (Value::Bytes(a), Value::Bytes(b)) if bytes_same(self, a, b)? => (),
-                (Value::Timestamp(a), Value::Timestamp(b)) if a == b => (),
-                (Value::Function(a), Value::Function(b)) if text_same(self, a, b)? => (),
-                (Value::Handle(a), Value::Handle(b)) if a == b => (),
-                (Value::Task(a), Value::Task(b)) if a == b => (),
-                (Value::Ref(a), Value::Ref(b)) if a == b => (),
-                (Value::Closure(a), Value::Closure(b)) if a == b => (),
-                (Value::Tuple(a_tuple), Value::Tuple(b_tuple)) => {
+                (PageValue::Text(a), PageValue::Text(b)) if text_same(self, a, b)? => (),
+                (PageValue::Bytes(a), PageValue::Bytes(b)) if bytes_same(self, a, b)? => (),
+                (PageValue::Timestamp(a), PageValue::Timestamp(b)) if a == b => (),
+                (PageValue::Function(a), PageValue::Function(b)) if text_same(self, a, b)? => (),
+                (PageValue::Handle(a), PageValue::Handle(b)) if a == b => (),
+                (PageValue::Task(a), PageValue::Task(b)) if a == b => (),
+                (PageValue::Ref(a), PageValue::Ref(b)) if a == b => (),
+                (PageValue::Closure(a), PageValue::Closure(b)) if a == b => (),
+                (PageValue::Tuple(a_tuple), PageValue::Tuple(b_tuple)) => {
                     if a_tuple.summary.len != b_tuple.summary.len {
                         return Ok(false);
                     }
                     let len = a_tuple.summary.len;
                     pending.push(Step::Sequence(a, b, 0, len));
                 }
-                (Value::Error(a), Value::Error(b)) => {
+                (PageValue::Error(a), PageValue::Error(b)) => {
                     if !text_same(self, &a.kind, &b.kind)?
                         || !text_same(self, &a.message, &b.message)?
                     {
@@ -86,7 +87,7 @@ impl PagedHeap {
                     }
                     pending.push(Step::Pair(self.error_data(a)?, self.error_data(b)?));
                 }
-                (Value::List(left), Value::List(right)) => {
+                (PageValue::List(left), PageValue::List(right)) => {
                     if !seen.insert((0, *left, *right)) {
                         continue;
                     }
@@ -96,9 +97,9 @@ impl PagedHeap {
                     }
                     pending.push(Step::Sequence(a, b, 0, len));
                 }
-                (Value::Map(left), Value::Map(right))
-                | (Value::Set(left), Value::Set(right))
-                | (Value::Record(left), Value::Record(right)) => {
+                (PageValue::Map(left), PageValue::Map(right))
+                | (PageValue::Set(left), PageValue::Set(right))
+                | (PageValue::Record(left), PageValue::Record(right)) => {
                     if !seen.insert((1, *left, *right)) {
                         continue;
                     }

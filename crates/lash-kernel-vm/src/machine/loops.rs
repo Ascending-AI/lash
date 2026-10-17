@@ -9,12 +9,10 @@
 
 use std::sync::Arc;
 
-use lash_kernel_doc::heap::{HeapFault, TupleRef};
-use lash_kernel_doc::{EntityId, NativeHeap, TaskId, Value};
-use lash_kernel_state::kernel_internals::PagedHeap;
-use lash_kernel_state::kernel_internals::payload::TextCursor;
-use lash_kernel_state::paged::{SemanticHeap, TableCursor};
-use num_traits::ToPrimitive;
+use lash_kernel_doc::arena::ArenaHandle;
+use lash_kernel_doc::{NativeError, TaskId, Value};
+use lash_kernel_state::arena::Arena;
+use lash_kernel_state::paged::TableCursor;
 
 use super::ops::{Flow, Reg, Status};
 use super::stream::{Ran, Running};
@@ -28,11 +26,11 @@ use crate::interface::Host;
 pub(super) enum Cursor {
     /// Not walking yet: the protocol's `open` runs.
     Opening,
-    List(EntityId, usize),
-    Tuple(Arc<TupleRef>, usize),
+    List(ArenaHandle, usize),
+    Tuple(ArenaHandle, usize),
     /// A map or a set, and the sequence number of the entry last visited.
-    Map(EntityId, Option<TableCursor>),
-    Set(EntityId, Option<TableCursor>),
+    Map(ArenaHandle, Option<TableCursor>),
+    Set(ArenaHandle, Option<TableCursor>),
     Text(Box<TextCursor>),
     /// A value the protocol's `next` steps.
     Driver(Box<Value>),
@@ -44,11 +42,11 @@ impl Cursor {
         Some(match self {
             Self::Opening => return None,
             Self::List(id, _) => Value::List(*id),
-            Self::Tuple(tuple, _) => Value::Tuple(Arc::clone(tuple)),
+            Self::Tuple(tuple, _) => Value::Tuple(*tuple),
             Self::Map(id, _) => Value::Map(*id),
             Self::Set(id, _) => Value::Set(*id),
-            Self::Text(cursor) => Value::Text(cursor.text().clone()),
-            Self::Driver(driver) => (**driver).clone(),
+            Self::Text(cursor) => cursor.text(),
+            Self::Driver(driver) => **driver,
         })
     }
 
@@ -60,41 +58,87 @@ impl Cursor {
             Value::Tuple(tuple) => Self::Tuple(tuple, 0),
             Value::Map(id) => Self::Map(id, None),
             Value::Set(id) => Self::Set(id, None),
-            Value::Text(text_value) if text => Self::Text(Box::new(TextCursor::new(text_value, 0))),
+            Value::Text(_) | Value::LongText(_) if text => {
+                Self::Text(Box::new(TextCursor::new(value, 0)))
+            }
             other => return Err(Box::new(other)),
         })
+    }
+}
+
+/// A loop's position in a text it walks: the scalars it has given, and
+/// where the next one starts, once found.
+#[derive(Clone, Debug)]
+pub(super) struct TextCursor {
+    text: Value,
+    position: u64,
+    byte: Option<usize>,
+}
+
+impl TextCursor {
+    /// A cursor `position` scalars into `text`.
+    pub(super) fn new(text: Value, position: u64) -> Self {
+        Self {
+            text,
+            position,
+            byte: None,
+        }
+    }
+
+    /// The text walked.
+    pub(super) fn text(&self) -> Value {
+        self.text
+    }
+
+    /// How many scalars the loop has given.
+    pub(super) fn position(&self) -> u64 {
+        self.position
+    }
+
+    /// The next scalar, `None` past the last.
+    fn next(&mut self, arena: &Arena) -> Result<Option<char>, NativeError> {
+        let value = self.text;
+        let text = arena.semantics().text(&value)?;
+        let byte = match self.byte {
+            Some(byte) => byte,
+            None => text
+                .char_indices()
+                .nth(self.position as usize)
+                .map_or(text.len(), |(at, _)| at),
+        };
+        let next = text.get(byte..).and_then(|rest| rest.chars().next());
+        if let Some(scalar) = next {
+            self.byte = Some(byte + scalar.len_utf8());
+            self.position += 1;
+        }
+        Ok(next)
     }
 }
 
 impl Cursor {
     /// The loop's own cursor steps to its next element, or is exhausted
     /// (`K-ITER-002`, `K-ITER-003`). A cursor a protocol steps has none.
-    pub(super) fn step(&mut self, heap: &PagedHeap) -> Result<Option<Value>, HeapFault> {
+    pub(super) fn step(&mut self, arena: &mut Arena) -> Result<Option<Value>, NativeError> {
         Ok(match self {
-            Self::List(list, position) => {
-                let element = heap.list_get(*list, *position as u64)?;
-                *position += usize::from(element.is_some());
-                element
-            }
-            Self::Tuple(items, position) => {
-                let element = heap.tuple_get(items, *position as u64)?;
+            Self::List(items, position) | Self::Tuple(items, position) => {
+                let element = arena.item(*items, *position as u64)?;
                 *position += usize::from(element.is_some());
                 element
             }
             Self::Map(id, last) | Self::Set(id, last) => {
-                let next = heap.table_after(*id, *last)?;
+                let next = arena.table_next(*id, last.map(|last| last.0))?;
                 next.map(|(sequence, key)| {
-                    *last = Some(sequence);
+                    *last = Some(TableCursor(sequence));
                     key
                 })
             }
-            Self::Text(cursor) => cursor.next(heap)?.map(|point| {
+            Self::Text(cursor) => cursor.next(arena)?.map(|point| {
                 let mut buffer = [0; 4];
-                Value::text(&*point.encode_utf8(&mut buffer))
+                arena.text(point.encode_utf8(&mut buffer))
             }),
             Self::Opening | Self::Driver(_) => {
-                return Err(HeapFault::Malformed(
-                    "a loop's own cursor steps only what it walks".into(),
+                return Err(NativeError::Malformed(
+                    "a loop's own cursor steps only what it walks",
                 ));
             }
         })
@@ -122,7 +166,7 @@ impl Header {
     /// The stepped item the header holds while its hook runs.
     pub(super) fn held(&self) -> Option<Value> {
         match self {
-            Self::Check(raw) | Self::Item(raw) => Some((**raw).clone()),
+            Self::Check(raw) | Self::Item(raw) => Some(**raw),
             _ => None,
         }
     }
@@ -147,9 +191,14 @@ fn via_of(exe: &Executable, stmt: StmtId) -> Option<Via> {
 /// The count a protocol hook gives as `check`'s budget.
 fn count(value: &Value) -> Option<u64> {
     match value {
-        Value::Int(lash_kernel_doc::heap::IntRef::Inline(integer)) => integer.to_u64(),
+        Value::Int(word) => u64::try_from(*word).ok(),
         _ => None,
     }
+}
+
+/// A count as a value.
+fn counted(count: u64) -> Value {
+    Value::Int(i64::try_from(count).unwrap_or(i64::MAX))
 }
 
 impl KernelMachine {
@@ -284,7 +333,8 @@ impl KernelMachine {
         };
         let guard = match (&cursor, via.check) {
             (Cursor::Map(id, _) | Cursor::Set(id, _), Some(_)) => {
-                let size = self.heap.len(*id)?;
+                let id = *id;
+                let size = self.in_arena(|arena| arena.len(id))?;
                 Some(Box::new(Guard {
                     size,
                     remaining: size,
@@ -319,8 +369,15 @@ impl KernelMachine {
         exe: &Executable,
     ) -> Status {
         self.charge(self.costs.loop_test)?;
+        // What the loop walks is decoded before its position is read.
+        if let Some(Control::For { cursor, .. }) = self.frame(task)?.control.last()
+            && !matches!(cursor, Cursor::Driver(_))
+            && let Some(handle) = cursor.walked().and_then(|walked| walked.handle())
+        {
+            self.warm(handle)?;
+        }
         // Borrowed by field, so that the loop's position can be read
-        // against the heap.
+        // against the arena.
         let Some(frame) = self
             .tasks
             .get_mut(task.0 as usize)?
@@ -349,9 +406,11 @@ impl KernelMachine {
                         .as_deref()
                         .and_then(|observer| observer.charges.as_ref()),
                 )?;
+                let mut arena = self.arena.borrow_mut();
                 let raw = match cursor {
                     Cursor::Driver(driver) => {
-                        let driver = (**driver).clone();
+                        drop(arena);
+                        let driver = **driver;
                         *header = Header::Pull;
                         let next = via_of(exe, stmt)
                             .and_then(|via| via.next)
@@ -367,8 +426,9 @@ impl KernelMachine {
                     Cursor::Opening => {
                         return Err(fault("a loop stepped before it was opened").into());
                     }
-                    walked => walked.step(&self.heap)?,
+                    walked => walked.step(&mut arena).map_err(super::Interrupt::from)?,
                 };
+                drop(arena);
                 self.stepped(task, host, exe, raw)
             }
             Some(Control::While { stmt, .. }) => {
@@ -404,10 +464,12 @@ impl KernelMachine {
     /// What a driver's `next` gave: an empty tuple when it is exhausted,
     /// else a tuple of its one item.
     fn pulled(&mut self, stepped: Value) -> Eval<Option<Value>> {
-        if let Value::Tuple(tuple) = &stepped {
-            match tuple.summary.len {
+        if let Value::Tuple(tuple) = stepped {
+            let (len, first) =
+                self.in_arena(|arena| Ok((arena.len(tuple)?, arena.item(tuple, 0)?)))?;
+            match len {
                 0 => return Ok(None),
-                1 => return Ok(self.heap.tuple_get(tuple, 0)?),
+                1 => return Ok(first),
                 _ => {}
             }
         }
@@ -452,12 +514,7 @@ impl KernelMachine {
             Some(raw) => Header::Check(Box::new(raw)),
             None => Header::Exhausted,
         };
-        let args = vec![
-            walked,
-            Value::Int(size.into()),
-            Value::Int(remaining.into()),
-            Value::Bool(more),
-        ];
+        let args = vec![walked, counted(size), counted(remaining), Value::Bool(more)];
         match self.hook(task, exe, stmt, check, args)? {
             Some(budget) => self.checked(task, host, exe, budget),
             None => Ok(Flow::Step),
@@ -516,7 +573,7 @@ impl KernelMachine {
             && via_of(exe, stmt).is_some_and(|via| via.fuse_list)
         {
             let list = *list;
-            *header = Header::Item(Box::new(raw.clone()));
+            *header = Header::Item(Box::new(raw));
             self.put(0, Value::List(list));
             self.put(1, raw);
             // Same held item and argument roots as the general hook. Only
@@ -533,7 +590,7 @@ impl KernelMachine {
         let walked = cursor
             .walked()
             .ok_or_else(|| fault("an opened loop walks nothing"))?;
-        *header = Header::Item(Box::new(raw.clone()));
+        *header = Header::Item(Box::new(raw));
         match self.hook(task, exe, stmt, item, vec![walked, raw])? {
             Some(element) => self.bind_pass(task, exe, element),
             None => Ok(Flow::Step),

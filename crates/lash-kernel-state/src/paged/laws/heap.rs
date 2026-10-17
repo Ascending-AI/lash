@@ -103,14 +103,14 @@ pub(super) fn reopen(heap: &mut PagedHeap, pages: &Rc<RefCell<Pages>>) -> PagedH
     heap
 }
 
-fn int(v: i64) -> Value {
-    Value::Int(IntRef::Inline(v.into()))
+fn int(v: i64) -> PageValue {
+    PageValue::Int(IntRef::Inline(v.into()))
 }
-fn is_int(value: Option<Value>, expected: i64) -> bool {
-    matches!(value, Some(Value::Int(IntRef::Inline(i))) if i == expected.into())
+fn is_int(value: Option<PageValue>, expected: i64) -> bool {
+    matches!(value, Some(PageValue::Int(IntRef::Inline(i))) if i == expected.into())
 }
-fn text(heap: &mut PagedHeap, t: &str) -> Value {
-    Value::Text(heap.text(t).expect("text"))
+fn text(heap: &mut PagedHeap, t: &str) -> PageValue {
+    PageValue::Text(heap.text(t).expect("text"))
 }
 
 #[test]
@@ -120,12 +120,15 @@ fn aliases_see_one_mutation_across_seal_and_open() {
         .allocate_object(ObjectInit::List(vec![int(1)]))
         .expect("list");
     let aliases = heap
-        .allocate_object(ObjectInit::List(vec![Value::List(list), Value::List(list)]))
+        .allocate_object(ObjectInit::List(vec![
+            PageValue::List(list),
+            PageValue::List(list),
+        ]))
         .expect("aliases");
     heap.list_write(list, 0, int(7)).expect("write");
     let heap = reopen(&mut heap, &pages);
     for i in 0..2 {
-        let Some(Value::List(id)) = heap.list_get(aliases, i).expect("alias") else {
+        let Some(PageValue::List(id)) = heap.list_get(aliases, i).expect("alias") else {
             panic!("list alias");
         };
         assert_eq!(id, list);
@@ -138,10 +141,12 @@ fn cycles_seal_as_a_page_dag() {
     let list = heap
         .allocate_object(ObjectInit::List(Vec::new()))
         .expect("list");
-    heap.list_write(list, 0, Value::List(list))
+    heap.list_write(list, 0, PageValue::List(list))
         .expect("self edge");
     let heap = reopen(&mut heap, &pages);
-    assert!(matches!(heap.list_get(list, 0).expect("cycle"), Some(Value::List(id)) if id == list));
+    assert!(
+        matches!(heap.list_get(list, 0).expect("cycle"), Some(PageValue::List(id)) if id == list)
+    );
     // Every storage child existed before its parent was sealed; entity cycles
     // therefore cannot create a storage cycle.
     fn walk(id: PageId, pages: &Pages, active: &mut Vec<PageId>) {
@@ -166,8 +171,12 @@ fn map_iteration_survives_removal_and_reinsertion_across_seal() {
         .expect("map");
     let (cursor, first) = heap.table_after(map, None).expect("first").expect("entry");
     assert!(heap.equal(&first, &int(1)).expect("equal"));
-    heap.map_write(map, Value::Float(lash_kernel_doc::Float::new(1.0)), int(11))
-        .expect("replace");
+    heap.map_write(
+        map,
+        PageValue::Float(lash_kernel_doc::Float::new(1.0)),
+        int(11),
+    )
+    .expect("replace");
     heap.table_remove(map, &int(1)).expect("remove");
     heap.map_write(map, int(1), int(12)).expect("reinsert");
     let mut heap = reopen(&mut heap, &pages);
@@ -261,7 +270,7 @@ include!("heap_boundaries.rs");
 #[test]
 fn relative_references_in_error_data_inherit_the_page_family() {
     use lash_kernel_doc::graph_tokens::{TokenCodec, TokenWriter};
-    let (mut heap, _) = fresh();
+    let (heap, _) = fresh();
     let mut out = TokenWriter::new();
     out.seq(1);
     out.seq(2);
@@ -294,13 +303,13 @@ fn relative_references_in_error_data_inherit_the_page_family() {
         .access
         .seal(PageKind::SEQUENCE_LEAF, out.into_bytes(), vec![])
         .expect("relative leaf");
-    let tree = tree::Tree::<Value>::open(Some(page), 1, LogicalBytes(54), true);
+    let tree = tree::Tree::<PageValue>::open(Some(page), 1, LogicalBytes(54), true);
     assert!(
         tree.rank_get(0, &heap.access).is_err(),
         "relative references require context"
     );
     for family in [FamilyId(3), FamilyId(4)] {
-        let Some((_, Value::Tuple(tuple))) = tree
+        let Some((_, PageValue::Tuple(tuple))) = tree
             .clone()
             .in_family(family)
             .rank_get(0, &heap.access)
@@ -308,11 +317,11 @@ fn relative_references_in_error_data_inherit_the_page_family() {
         else {
             panic!("tuple");
         };
-        let Some(Value::Error(error)) = heap.tuple_get(&tuple, 0).expect("error") else {
+        let Some(PageValue::Error(error)) = heap.tuple_get(&tuple, 0).expect("error") else {
             panic!("error");
         };
         assert!(
-            matches!(heap.error_data(&error).expect("data"), Value::List(id) if id == EntityId { family, ordinal: 0 })
+            matches!(heap.error_data(&error).expect("data"), PageValue::List(id) if id == EntityId { family, ordinal: 0 })
         );
     }
 }
@@ -322,9 +331,9 @@ fn errors_at_the_depth_limit_have_bounded_descendants() {
     let (mut heap, pages) = fresh();
     let kind = heap.text(&"k".repeat(256)).expect("kind");
     let message = heap.text(&"m".repeat(256)).expect("message");
-    let mut value = Value::Null;
+    let mut value = PageValue::Null;
     for depth in 1..=128 {
-        value = Value::Error(Arc::new(ErrorRef {
+        value = PageValue::Error(Arc::new(ErrorRef {
             family: None,
             task_edges: 0,
             kind: kind.clone(),
@@ -341,13 +350,13 @@ fn errors_at_the_depth_limit_have_bounded_descendants() {
     let heap = reopen(&mut heap, &pages);
     let mut value = heap.list_get(list, 0).expect("get").expect("value");
     for depth in (1..=128).rev() {
-        let Value::Error(error) = value else {
+        let PageValue::Error(error) = value else {
             panic!("error at {depth}");
         };
         assert_eq!(error.depth, depth);
         value = heap.error_data(&error).expect("data");
     }
-    assert!(matches!(value, Value::Null));
+    assert!(matches!(value, PageValue::Null));
     assert!(
         pages
             .borrow()
@@ -364,7 +373,7 @@ fn an_edge_visitor_fault_stops_before_the_next_leaf() {
         .tuple(
             (0..65)
                 .map(|ordinal| {
-                    Value::List(EntityId {
+                    PageValue::List(EntityId {
                         family: FamilyId::PRIMARY,
                         ordinal,
                     })
@@ -376,7 +385,7 @@ fn an_edge_visitor_fault_stops_before_the_next_leaf() {
     pages.borrow_mut().reads = 0;
     let fault = HeapFault::Malformed("visitor stopped".into());
     let mut calls = 0;
-    let result = heap.value_edges(&Value::Tuple(tuple), &mut |_| {
+    let result = heap.value_edges(&PageValue::Tuple(tuple), &mut |_| {
         calls += 1;
         Err(fault.clone())
     });
@@ -436,11 +445,11 @@ fn a_forged_membership_aggregate_is_a_corrupt_page() {
 /// K-EFF-002: reading outbound integer digits never reserves guest memory.
 #[test]
 fn outbound_integer_digits_are_read_only_and_keep_their_sign() {
-    let (mut heap, _) = fresh();
+    let (heap, _) = fresh();
     let integer =
         lash_kernel_doc::Integer::parse(&format!("-1{}", "0".repeat(1500))).expect("integer");
-    let value = Value::Int(heap.int(integer.clone()).expect("paged integer"));
-    let Value::Int(IntRef::Paged { summary, .. }) = &value else {
+    let value = PageValue::Int(heap.int(integer.clone()).expect("paged integer"));
+    let PageValue::Int(IntRef::Paged { summary, .. }) = &value else {
         panic!("paged");
     };
     assert!(summary.negative);
@@ -470,11 +479,11 @@ fn a_long_native_error_in_a_frame_keeps_paged_data_without_reads() {
     use lash_kernel_doc::{Name, Site, Unit};
     let (mut heap, pages) = fresh();
     let mut error = ErrorRef::new(&"kind".repeat(100_000), &"message".repeat(100_000));
-    error.data = Payload::Resident(Arc::new(Value::text("d".repeat(256))));
+    error.data = Payload::Resident(Arc::new(PageValue::text("d".repeat(256))));
     let value = heap
-        .canonical_value(Value::Error(Arc::new(error)))
+        .canonical_value(PageValue::Error(Arc::new(error)))
         .expect("canonical error");
-    let Value::Error(error) = &value else {
+    let PageValue::Error(error) = &value else {
         panic!("error");
     };
     assert!(matches!(error.data, Payload::Paged(_)));
@@ -680,7 +689,7 @@ fn unequal_prefixes_do_not_read_missing_later_members() {
     assert!(removed > 0, "the later leaves really are missing");
     heap.access.clear();
     assert_eq!(
-        heap.equal(&Value::List(left), &Value::List(right)),
+        heap.equal(&PageValue::List(left), &PageValue::List(right)),
         Ok(false)
     );
 }
@@ -784,7 +793,7 @@ fn paged_text_cursor_linear() {
             })
             .collect();
         for parked in [false, true] {
-            let (mut heap, _) = fresh();
+            let (heap, _) = fresh();
             let text = heap.text(&input).unwrap();
             let mut cursor = payload::TextCursor::new(text.clone(), 0);
             for (i, expected) in input.chars().enumerate() {
@@ -804,7 +813,7 @@ fn paged_text_cursor_linear() {
 /// the last scalar demands the next leaf before it can be returned.
 #[test]
 fn paged_text_cursor_preserves_boundary_fault_order() {
-    let (mut heap, pages) = fresh();
+    let (heap, pages) = fresh();
     use lash_kernel_doc::graph_tokens::{TokenCodec, TokenWriter};
     let mut text = heap.text(&format!("{}é😀", "A".repeat(4096))).unwrap();
     let missing = pages
@@ -918,7 +927,7 @@ fn a_cold_text_length_observation_reads_no_payload_leaf() {
         store.pages.remove(&id);
         id
     };
-    let Some(Value::Text(t)) = heap
+    let Some(PageValue::Text(t)) = heap
         .list_get(list, 0)
         .expect("cold descriptor without payload")
     else {
@@ -930,6 +939,6 @@ fn a_cold_text_length_observation_reads_no_payload_leaf() {
     );
     // Demand validation happens only when the payload is actually observed.
     assert!(
-        matches!(heap.payload_visit(&Value::Text(t), 0..4101, &mut |_| ControlFlow::Continue(())), Err(HeapFault::Missing { page }) if page == missing)
+        matches!(heap.payload_visit(&PageValue::Text(t), 0..4101, &mut |_| ControlFlow::Continue(())), Err(HeapFault::Missing { page }) if page == missing)
     );
 }

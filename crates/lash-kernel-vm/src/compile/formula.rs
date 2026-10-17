@@ -3,7 +3,6 @@
 
 use lash_kernel_doc as doc;
 use lash_kernel_doc::Value;
-use num_traits::ToPrimitive;
 
 use crate::data::{holds_nothing, size_one};
 
@@ -251,6 +250,11 @@ impl Plan {
         self.ops.push(Op::Measure(index));
     }
 
+    /// The measurements the amount reads, each once.
+    pub(crate) fn measurements(&self) -> &[(Source, doc::Measure)] {
+        &self.measurements
+    }
+
     /// Computes the amount, asking `measure` for each measurement. A
     /// measurement reads the heap as it is, which nothing changes while
     /// the formula is computed.
@@ -429,13 +433,8 @@ impl Fast {
             let mut mask = 0usize;
             for (index, (source, _)) in self.shallow.measurements.iter().enumerate() {
                 match value(source) {
-                    Some(Value::Int(lash_kernel_doc::heap::IntRef::Inline(integer))) => {
-                        match integer.to_i64() {
-                            Some(0) => {}
-                            Some(_) => mask |= 1 << index,
-                            None => return Charge::Plan(&self.shallow),
-                        }
-                    }
+                    Some(Value::Int(0)) => {}
+                    Some(Value::Int(_)) => mask |= 1 << index,
                     Some(value) if size_one(value) => {}
                     _ => return Charge::Plan(&self.shallow),
                 }

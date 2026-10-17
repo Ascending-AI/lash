@@ -4,8 +4,8 @@ use super::super::*;
 use super::heap::{fresh, reopen};
 use lash_kernel_doc::heap::*;
 
-fn int(value: i64) -> Value {
-    Value::Int(IntRef::Inline(value.into()))
+fn int(value: i64) -> PageValue {
+    PageValue::Int(IntRef::Inline(value.into()))
 }
 
 /// PLAN-INDEP: a field position is a hint, never a record-layout proof.
@@ -61,8 +61,8 @@ fn record_read_hints_verify_names_against_the_current_rows() {
     check(&heap, record, field, reinserted);
     check(&heap, record, &long, paged);
     check(&heap, reordered, field, reinserted);
-    let text = match Value::text(field) {
-        Value::Text(text) => text,
+    let text = match PageValue::text(field) {
+        PageValue::Text(text) => text,
         _ => unreachable!(),
     };
     let (value, _) = heap

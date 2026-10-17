@@ -1,37 +1,21 @@
-//! Layer laws use the actual paged heap and allocation census.
+//! Layer laws call natives on an arena bench as the machine calls them,
+//! and run documents on the real machine over test-owned pages.
 use lash_kernel_doc::heap::*;
-use lash_kernel_doc::{Datum, ErrorDatum, Integer, Name, Value};
-use lash_kernel_state::kernel_internals::census_impl::Census;
-use lash_kernel_state::kernel_internals::{PagedHeap, tree};
+use lash_kernel_doc::{
+    Datum, ErrorDatum, Integer, NativeError, NativeFunction, Retry, Value, WorkCounter,
+};
+pub(crate) use lash_kernel_state::arena::Bench;
 use lash_kernel_state::paged::*;
-use num_bigint::{BigInt, Sign};
 use std::cell::RefCell;
 use std::collections::BTreeMap;
-use std::ops::ControlFlow;
 use std::rc::Rc;
-use std::sync::Arc;
 
 #[derive(Clone, Default)]
 pub(crate) struct Source {
     pages: Rc<RefCell<BTreeMap<PageId, PageAnswer>>>,
-    fault: Rc<RefCell<Option<HeapFault>>>,
-    reads: Rc<std::cell::Cell<usize>>,
-}
-impl Source {
-    /// The pages read through this source so far.
-    pub(crate) fn pages_read(&self) -> usize {
-        self.reads.get()
-    }
-    pub(crate) fn fail_reads(&self, fault: HeapFault) {
-        *self.fault.borrow_mut() = Some(fault);
-    }
 }
 impl PageSource for Source {
     fn read(&mut self, pages: &[PageRef]) -> Result<Vec<Result<PageAnswer, HeapFault>>, HeapFault> {
-        if let Some(fault) = self.fault.borrow().clone() {
-            return Ok(vec![Err(fault); pages.len()]);
-        }
-        self.reads.set(self.reads.get() + pages.len());
         Ok(pages
             .iter()
             .map(|p| {
@@ -62,185 +46,58 @@ impl PageSource for Source {
         Ok(page)
     }
 }
-pub(crate) fn heap() -> PagedHeap {
-    heap_with_source().0
+/// A fresh arena bench natives run on.
+pub(crate) fn heap() -> Bench {
+    Bench::new()
 }
-pub(crate) fn heap_with_source() -> (PagedHeap, Source) {
-    let source = Source::default();
-    let mut heap = PagedHeap::fresh(Box::new(source.clone()), EditEpoch(1));
-    heap.set_census(Box::new(
-        Census::restore(heap.certificate(), LogicalBytes(1 << 30)).unwrap(),
-    ))
-    .unwrap();
-    (heap, source)
+pub(crate) fn decode(bench: &mut Bench, datum: Datum) -> Value {
+    bench.build(&datum).unwrap()
 }
-pub(crate) fn hold_with_extra(heap: &mut PagedHeap, args: &[Value], extra: u64) {
-    heap.set_execution_roots(
-        tree::Tree::new(false),
-        tree::Tree::new(false),
-        args,
-        &[],
-        0,
-        &[],
-    )
-    .unwrap();
-    let certificate = heap.certificate();
-    heap.set_census(Box::new(
-        Census::restore(certificate, LogicalBytes(certificate.upper.0 + extra)).unwrap(),
-    ))
-    .unwrap();
+pub(crate) fn datum(bench: &Bench, value: &Value) -> Datum {
+    bench.datum(value).unwrap()
 }
-pub(crate) fn decode(heap: &mut PagedHeap, datum: Datum) -> Value {
-    match datum {
-        Datum::Null => Value::Null,
-        Datum::Absent => Value::Absent,
-        Datum::Bool(v) => Value::Bool(v),
-        Datum::Int(v) => Value::Int(heap.int(v).unwrap()),
-        Datum::Float(v) => Value::Float(v),
-        Datum::Text(v) => Value::Text(heap.text(&v).unwrap()),
-        Datum::Bytes(v) => Value::Bytes(heap.bytes(v.as_slice()).unwrap()),
-        Datum::Timestamp(v) => Value::Timestamp(v),
-        Datum::Function(v) => Value::Function(heap.text(v.as_str()).unwrap()),
-        Datum::Handle(v) => Value::Handle(Arc::new(v)),
-        Datum::Tuple(v) => {
-            let v = v.into_iter().map(|v| decode(heap, v)).collect();
-            Value::Tuple(heap.tuple(v).unwrap())
-        }
-        Datum::List(v) => {
-            let v = v.into_iter().map(|v| decode(heap, v)).collect();
-            Value::List(heap.allocate(Object::List(v)).unwrap())
-        }
-        Datum::Set(v) => {
-            let v = v.into_iter().map(|v| decode(heap, v)).collect();
-            Value::Set(heap.allocate(Object::Set(v)).unwrap())
-        }
-        Datum::Map(v) => {
-            let v = v
-                .into_iter()
-                .map(|(k, v)| (decode(heap, k), decode(heap, v)))
-                .collect();
-            Value::Map(heap.allocate(Object::Map(v)).unwrap())
-        }
-        Datum::Record(v) => {
-            let v = v
-                .into_iter()
-                .map(|(k, v)| (heap.text(&k).unwrap(), decode(heap, v)))
-                .collect();
-            Value::Record(heap.allocate(Object::Record(v)).unwrap())
-        }
-        Datum::Error(v) => {
-            let mut error = ErrorRef::new(&v.kind, &v.message);
-            error.data = Payload::Resident(Arc::new(decode(heap, v.data)));
-            heap.canonical_value(Value::Error(Arc::new(error))).unwrap()
-        }
-        Datum::Number(_) => panic!("corpus inputs have decoded numbers"),
-        Datum::FunctionValue(_) => panic!("a function value never enters a run"),
+pub(crate) fn text(bench: &Bench, value: &Value) -> String {
+    bench.arena().semantics().text(value).unwrap().to_owned()
+}
+pub(crate) fn integer(bench: &Bench, value: &Value) -> Integer {
+    bench.arena().semantics().integer(value).unwrap().unwrap()
+}
+/// Calls `native` as the machine does, with `room` to hold: the answer
+/// the run sees.
+pub(crate) fn call(
+    bench: &mut Bench,
+    native: &dyn NativeFunction,
+    args: &[Value],
+    room: u64,
+    counter: &mut WorkCounter,
+) -> Result<Value, NativeError> {
+    bench.call(native, args, room, counter).answer
+}
+/// Whether `answer` is a refusal for want of room: the run ends at its
+/// memory bound.
+pub(crate) fn exhausted<T>(answer: &Result<T, NativeError>) -> bool {
+    matches!(answer, Err(NativeError::Retry(Retry::Room { .. })))
+}
+/// A raised error as data: a refusal's data is null.
+pub(crate) fn error_datum(bench: &Bench, error: &NativeError) -> Option<Datum> {
+    match error {
+        NativeError::Refused { kind, message } => Some(Datum::Error(Box::new(ErrorDatum {
+            kind: (*kind).to_owned(),
+            message: message.clone(),
+            data: Datum::Null,
+        }))),
+        NativeError::Raised(error) => bench.datum(error).ok(),
+        _ => None,
     }
 }
-pub(crate) fn text(heap: &dyn NativeHeap, text: &TextRef) -> String {
-    let mut out = String::new();
-    heap.payload_visit(
-        &Value::Text(text.clone()),
-        0..text.summary.utf8_bytes,
-        &mut |chunk| {
-            let Chunk::Text(chunk) = chunk else {
-                panic!("text chunk")
-            };
-            out.push_str(chunk);
-            ControlFlow::Continue(())
-        },
-    )
-    .unwrap();
-    out
-}
-pub(crate) fn integer(heap: &dyn NativeHeap, value: &IntRef) -> Integer {
-    match value {
-        IntRef::Inline(value) => value.clone(),
-        IntRef::Paged { summary, .. } => {
-            let mut digits = Vec::new();
-            heap.payload_visit(
-                &Value::Int(value.clone()),
-                0..summary.bits.div_ceil(8),
-                &mut |chunk| {
-                    let Chunk::Bytes(chunk) = chunk else {
-                        panic!("integer chunk")
-                    };
-                    digits.extend_from_slice(chunk);
-                    ControlFlow::Continue(())
-                },
-            )
-            .unwrap();
-            Integer::new(BigInt::from_bytes_le(
-                if summary.negative {
-                    Sign::Minus
-                } else {
-                    Sign::Plus
-                },
-                &digits,
-            ))
-        }
-    }
-}
-pub(crate) fn datum(heap: &dyn NativeHeap, value: &Value) -> Datum {
-    match value {
-        Value::Null => Datum::Null,
-        Value::Absent => Datum::Absent,
-        Value::Bool(v) => Datum::Bool(*v),
-        Value::Int(v) => Datum::Int(integer(heap, v)),
-        Value::Float(v) => Datum::Float(*v),
-        Value::Text(v) => Datum::Text(text(heap, v)),
-        Value::Function(v) => Datum::Function(Name::new(text(heap, v))),
-        Value::Bytes(v) => {
-            let mut out = Vec::new();
-            heap.payload_visit(value, 0..v.len, &mut |chunk| {
-                let Chunk::Bytes(chunk) = chunk else {
-                    panic!("bytes chunk")
-                };
-                out.extend_from_slice(chunk);
-                ControlFlow::Continue(())
-            })
-            .unwrap();
-            Datum::Bytes(lash_kernel_doc::Bytes::new(out))
-        }
-        Value::Timestamp(v) => Datum::Timestamp(v.clone()),
-        Value::Handle(v) => Datum::Handle((**v).clone()),
-        Value::Tuple(v) => {
-            let mut out = Vec::new();
-            heap.tuple_visit(v, &mut |v| {
-                out.push(datum(heap, v));
-                ControlFlow::Continue(())
-            })
-            .unwrap();
-            Datum::Tuple(out)
-        }
-        Value::Error(v) => Datum::Error(Box::new(ErrorDatum {
-            kind: text(heap, &v.kind),
-            message: text(heap, &v.message),
-            data: datum(heap, &heap.error_data(v).unwrap()),
-        })),
-        Value::List(id) | Value::Set(id) | Value::Map(id) | Value::Record(id) => {
-            let (mut items, mut entries, mut fields) = (Vec::new(), Vec::new(), Vec::new());
-            heap.visit(*id, &mut |entry| {
-                match entry {
-                    Element::Item(v) => items.push(datum(heap, v)),
-                    Element::Entry { key, value } => {
-                        entries.push((datum(heap, key), datum(heap, value)))
-                    }
-                    Element::Field { name, value } => {
-                        fields.push((text(heap, name), datum(heap, value)))
-                    }
-                };
-                ControlFlow::Continue(())
-            })
-            .unwrap();
-            match value {
-                Value::List(_) => Datum::List(items),
-                Value::Set(_) => Datum::Set(items),
-                Value::Map(_) => Datum::Map(entries),
-                _ => Datum::Record(fields),
-            }
-        }
-        _ => panic!("a corpus result has no Datum projection"),
+/// What a raised error's kind and message read.
+pub(crate) fn raised(
+    bench: &Bench,
+    answer: &Result<Value, NativeError>,
+) -> Option<(String, String)> {
+    match error_datum(bench, answer.as_ref().err()?)? {
+        Datum::Error(error) => Some((error.kind, error.message)),
+        _ => None,
     }
 }
 
@@ -263,28 +120,6 @@ pub(crate) fn start(
         layout,
         Box::<Source>::default(),
     )
-}
-
-pub(crate) fn reopen(heap: &mut PagedHeap, source: &Source) -> PagedHeap {
-    heap.release_statement_roots().unwrap();
-    heap.seal(SealBudget {
-        pages: u64::MAX,
-        bytes: u64::MAX,
-    })
-    .unwrap()
-    .unwrap();
-    let mut restored = PagedHeap::open_header(
-        heap.sealed_root().unwrap(),
-        Box::new(source.clone()),
-        EditEpoch(2),
-    )
-    .unwrap();
-    restored
-        .set_census(Box::new(
-            Census::restore(restored.certificate(), LogicalBytes(1 << 30)).unwrap(),
-        ))
-        .unwrap();
-    restored
 }
 
 #[derive(Default)]

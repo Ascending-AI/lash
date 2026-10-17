@@ -2,7 +2,8 @@
 
 use std::sync::Arc;
 
-use lash_kernel_doc::{EntityId, Measure, TaskId, Value};
+use lash_kernel_doc::arena::ArenaHandle;
+use lash_kernel_doc::{Measure, TaskId, Value};
 use lash_kernel_exec::LocalRef;
 
 use super::ops::Reg;
@@ -12,13 +13,11 @@ use super::{
     SlotState, TaskState, TryPhase, bound, fault, raise,
 };
 use crate::compile::{BlockId, CodeId, Executable, Form, LibId, Plan, Source, StmtId, Var};
-use crate::data::{copy_out, deep_size, magnitude, nested_size, size};
-use crate::heap::value_bytes;
+use crate::data::{deep_size, magnitude, nested_size, size};
 use crate::interface::{Bound, Host};
 use crate::observe::Event;
-use lash_kernel_doc::NativeHeap;
 use lash_kernel_doc::heap::HeapFault;
-use lash_kernel_state::paged::{HeapLifecycle, ObjectInit, SemanticHeap};
+use lash_kernel_state::paged::HeapLifecycle;
 
 /// A function about to run in a new frame.
 pub(super) struct Call<'a> {
@@ -28,7 +27,7 @@ pub(super) struct Call<'a> {
     /// How many arguments there are.
     pub(super) count: usize,
     /// The cells of the variables a closure shares, in its code's order.
-    pub(super) captures: &'a [EntityId],
+    pub(super) captures: &'a [ArenaHandle],
     /// The library function the code is the body of.
     pub(super) library: Option<LibId>,
     /// The statement of the caller's frame that waits in the call.
@@ -47,7 +46,7 @@ impl<'a> Call<'a> {
         }
     }
 
-    pub(super) fn sharing(mut self, captures: &'a [EntityId]) -> Self {
+    pub(super) fn sharing(mut self, captures: &'a [ArenaHandle]) -> Self {
         self.captures = captures;
         self
     }
@@ -69,31 +68,24 @@ pub(super) enum ResultOrigin {
 }
 
 impl KernelMachine {
-    /// Inline literals share compiled descriptors. Long immutable values enter
-    /// canonical payload pages when the operation reads them.
+    /// Immediate literals are compiled values. A literal an arena object
+    /// holds is built in the arena when the operation reads it.
     pub(super) fn literal(&mut self, literal: &crate::compile::Constant) -> Eval<Value> {
         use lash_kernel_doc::Literal;
         let literal = match literal {
-            crate::compile::Constant::Resident(value) => return Ok(value.clone()),
+            crate::compile::Constant::Resident(value) => return Ok(*value),
             crate::compile::Constant::Deferred(literal) => literal,
         };
+        let mut arena = self.arena.borrow_mut();
         Ok(match literal {
             Literal::Null => Value::Null,
             Literal::Absent => Value::Absent,
             Literal::Bool(value) => Value::Bool(*value),
             Literal::Float(value) => Value::Float(*value),
-            Literal::Int(value) => Value::Int(
-                self.heap_write(|heap| heap.int(value.clone()).map_err(Interrupt::from))?,
-            ),
-            Literal::Text(value) => {
-                Value::Text(self.heap_write(|heap| heap.text(value).map_err(Interrupt::from))?)
-            }
-            Literal::Bytes(value) => Value::Bytes(
-                self.heap_write(|heap| heap.bytes(value.as_slice()).map_err(Interrupt::from))?,
-            ),
-            Literal::Function(name) => Value::Function(
-                self.heap_write(|heap| heap.text(name.as_str()).map_err(Interrupt::from))?,
-            ),
+            Literal::Int(value) => arena.int(value.clone()),
+            Literal::Text(value) => arena.text(value),
+            Literal::Bytes(value) => arena.bytes(value.as_slice()),
+            Literal::Function(name) => arena.function(name.as_str()),
         })
     }
 }
@@ -242,15 +234,6 @@ impl KernelMachine {
         mut departure: Completion,
     ) -> Result<(), Halt> {
         loop {
-            if let Completion::Return(value)
-            | Completion::ReturnVia { value, .. }
-            | Completion::Throw(value) = &mut departure
-            {
-                **value = self.heap_write(|heap| {
-                    heap.canonical_value(value.as_ref().clone())
-                        .map_err(super::write_halt)
-                })?;
-            }
             match &departure {
                 Completion::Normal => return Ok(()),
                 // A value on its way out is in no variable: the frames it
@@ -258,7 +241,7 @@ impl KernelMachine {
                 Completion::Return(value)
                 | Completion::ReturnVia { value, .. }
                 | Completion::Throw(value) => {
-                    self.pins.borrowed.push(value.as_ref().clone());
+                    self.pins.borrowed.push(**value);
                 }
                 Completion::Break | Completion::Continue => {}
             }
@@ -307,12 +290,10 @@ impl KernelMachine {
                             ) {
                                 Ok((_, Ran::Depart(next))) => next,
                                 Ok(_) => return Err(fault("a return policy did not return")),
-                                Err(Interrupt::Raise(value)) => Completion::Throw(value),
-                                Err(Interrupt::Halt(halt)) => return Err(*halt),
+                                Err(interrupt) => Completion::Throw(self.thrown_by(interrupt)?),
                             };
                         }
-                        Err(Interrupt::Raise(value)) => departure = Completion::Throw(value),
-                        Err(Interrupt::Halt(halt)) => return Err(*halt),
+                        Err(interrupt) => departure = Completion::Throw(self.thrown_by(interrupt)?),
                     }
                     continue;
                 }
@@ -343,8 +324,7 @@ impl KernelMachine {
                     Completion::Continue => {
                         departure = match self.next_iteration(task, host, exe) {
                             Ok(_) => Completion::Normal,
-                            Err(Interrupt::Raise(value)) => Completion::Throw(value),
-                            Err(Interrupt::Halt(halt)) => return Err(*halt),
+                            Err(interrupt) => Completion::Throw(self.thrown_by(interrupt)?),
                         };
                     }
                     _ => {
@@ -358,7 +338,7 @@ impl KernelMachine {
                     };
                     match (&*phase, catch, finally, &departure) {
                         (TryPhase::Body, Some((binding, block)), _, Completion::Throw(value)) => {
-                            let value = value.as_ref().clone();
+                            let value = **value;
                             *phase = TryPhase::Catch;
                             self.push_block(task, block)?;
                             self.bind(task, binding.at, binding.shared, value)?;
@@ -414,14 +394,14 @@ impl KernelMachine {
         match self.call_lib(task, exe, cleanup, 0, 0, None) {
             Ok(super::ops::Flow::Step) => Ok(None),
             Ok(super::ops::Flow::Done) => {
-                drop(self.take(0));
+                self.take(0);
                 Ok(self.frame(task)?.cleaning.take())
             }
-            Err(Interrupt::Raise(value)) => {
+            Err(interrupt) => {
+                let value = self.thrown_by(interrupt)?;
                 self.frame(task)?.cleaning = None;
                 Ok(Some(Err(*value)))
             }
-            Err(Interrupt::Halt(halt)) => Err(*halt),
         }
     }
 
@@ -454,6 +434,10 @@ impl KernelMachine {
         self.refresh_charging(task, exe)?;
         if let Some(call) = &frame.library {
             let evaluates = self.charging;
+            if evaluates {
+                let args = call.args.clone();
+                self.warm_values(&exe.lib(call.lib).charge, &args, result.as_ref().ok())?;
+            }
             let units = self.in_formula(call.lib, evaluates, |machine| {
                 machine.call_units(exe, call.lib, &call.args, result.as_ref().ok())
             })?;
@@ -517,8 +501,7 @@ impl KernelMachine {
                 }) {
                 Ok(Some(Completion::Normal) | None) => None,
                 Ok(Some(completion)) => Some(completion),
-                Err(Interrupt::Raise(value)) => Some(Completion::Throw(value)),
-                Err(Interrupt::Halt(halt)) => return Err(*halt),
+                Err(interrupt) => Some(Completion::Throw(self.thrown_by(interrupt)?)),
             },
             Err(value) => Some(Completion::Throw(Box::new(value))),
         })
@@ -619,13 +602,63 @@ impl KernelMachine {
                 .borrow_mut()
                 .push(std::ptr::from_ref(value).addr());
         }
+        let arena = self.arena.borrow();
         match (value, measure) {
             (None, _) => Ok(0),
-            (Some(value), Measure::Size) => size(&self.heap, value),
-            (Some(value), Measure::DeepSize) => deep_size(&self.heap, value),
-            (Some(value), Measure::NestedSize) => nested_size(&self.heap, value),
-            (Some(value), Measure::Magnitude) => Ok(magnitude(value)),
+            (Some(value), Measure::Size) => size(&arena, value),
+            (Some(value), Measure::DeepSize) => deep_size(&arena, value),
+            (Some(value), Measure::NestedSize) => nested_size(&arena, value),
+            (Some(value), Measure::Magnitude) => Ok(magnitude(&arena, value)),
         }
+        .map_err(|error| HeapFault::Malformed(error.to_string()))
+    }
+
+    /// Decodes what `plan`'s measurements of the call's arguments from
+    /// register `args`, and of `result`, read: a formula reads the arena
+    /// as it is.
+    pub(super) fn warm_formula(
+        &mut self,
+        plan: &Plan,
+        args: super::ops::Reg,
+        result: Option<&Value>,
+    ) -> Result<(), Halt> {
+        if !self.arena.borrow().any_cold() {
+            return Ok(());
+        }
+        let given: Vec<Value> = self.regs[args..].to_vec();
+        self.warm_values(plan, &given, result)
+    }
+
+    /// [`Self::warm_formula`] over arguments `args`.
+    pub(super) fn warm_values(
+        &mut self,
+        plan: &Plan,
+        args: &[Value],
+        result: Option<&Value>,
+    ) -> Result<(), Halt> {
+        if !self.arena.borrow().any_cold() {
+            return Ok(());
+        }
+        for (source, measure) in plan.measurements() {
+            let value = match source {
+                Source::Arg(index) => args.get(*index).copied(),
+                Source::Result => result.copied(),
+                Source::Nothing => None,
+            };
+            let Some(value) = value else {
+                continue;
+            };
+            match measure {
+                Measure::Size => {
+                    if let Some(handle) = value.handle() {
+                        self.warm(handle)?;
+                    }
+                }
+                Measure::DeepSize | Measure::NestedSize => self.warm_reachable(&value)?,
+                Measure::Magnitude => {}
+            }
+        }
+        Ok(())
     }
 
     /// Reserves the next active call's depth unit (K-BND-002). Native
@@ -747,35 +780,16 @@ impl KernelMachine {
             next: 0,
         });
         if let Some(lib) = library {
-            let mut args = Vec::new();
             // Nested calls are covered by their caller's schedule. A new
             // task has no enclosing library frame, so its root bills its own
             // formula even when an uncharged library body spawned it.
             let keep_arguments = self.charging || self.task(task)?.frames.is_empty();
-            if keep_arguments {
-                args.reserve_exact(given);
-                for at in 0..given {
-                    let given = self.regs[base + at].clone();
-                    // Immediate arguments are already canonical. Keep the
-                    // original value without entering the heap retry path.
-                    let immediate = matches!(
-                        &given,
-                        Value::Null | Value::Absent | Value::Bool(_) | Value::Float(_)
-                    ) || matches!(&given, Value::Int(lash_kernel_doc::heap::IntRef::Inline(n)) if n.bits() <= 64);
-                    args.push(if immediate {
-                        given
-                    } else {
-                        self.heap_write(|heap| {
-                            heap.canonical_value(given.clone())
-                                .map_err(super::write_halt)
-                        })?
-                    });
-                }
-            }
-            frame.library = Some(LibraryCall {
-                lib,
-                args: args.into(),
-            });
+            let args = if keep_arguments {
+                self.regs[base..base + given].into()
+            } else {
+                Box::default()
+            };
+            frame.library = Some(LibraryCall { lib, args });
         }
         for (capture, cell) in code.captures.iter().zip(captures) {
             frame.set_slot(capture.inner_at, SlotState::Cell(*cell));
@@ -834,35 +848,15 @@ impl KernelMachine {
             if let Some(frozen) = saved.captures.get(name) {
                 let value =
                     self.heap_write(|heap| heap.instantiate(frozen).map_err(super::write_halt))?;
+                let value = self.admit_page(&value)?;
                 self.bind(task, local.at, local.shared, value)?;
             }
         }
         Ok(())
     }
 
-    /// A value as a variable keeps it: its resident payload moved into
-    /// pages.
-    pub(super) fn canonical_binding(&mut self, value: Value) -> Result<Value, Halt> {
-        // Scalars have no resident payload to move into pages. Avoid cloning
-        // the full value through the fallible canonicalization/retry path.
-        if matches!(
-            &value,
-            Value::Null | Value::Absent | Value::Bool(_) | Value::Float(_)
-        ) {
-            return Ok(value);
-        }
-        #[cfg(test)]
-        {
-            self.storage.binding_canonicalizations += 1;
-        }
-        self.heap_write(|heap| {
-            heap.canonical_value(value.clone())
-                .map_err(super::write_halt)
-        })
-    }
-
-    /// Binds a new variable at frame position `at` of the top frame, in a
-    /// heap cell when a closure shares it (`K-FORM-004`).
+    /// Binds a new variable at frame position `at` of the top frame, in an
+    /// arena cell when a closure shares it (`K-FORM-004`).
     pub(super) fn bind(
         &mut self,
         task: TaskId,
@@ -870,11 +864,10 @@ impl KernelMachine {
         shared: bool,
         value: Value,
     ) -> Result<(), Halt> {
-        let value = self.canonical_binding(value)?;
         let state = if shared {
-            SlotState::Cell(self.alloc(ObjectInit::Variable(value))?)
+            SlotState::Cell(self.new_cell(value)?)
         } else {
-            self.reserve_held(value_bytes(&value))?;
+            self.reserve_held(self.cost_of(&value))?;
             SlotState::Value(value)
         };
         #[cfg(test)]
@@ -907,8 +900,15 @@ impl KernelMachine {
     /// Copies a value out of the run, charging its deep size
     /// (`K-EFF-002`, `K-CHG-002`).
     pub(super) fn copy_out(&mut self, value: &Value) -> Eval<lash_kernel_doc::Datum> {
-        self.charge(deep_size(&self.heap, value)?)?;
-        Ok(copy_out(&self.heap, value)?)
+        let size = self.deep_size(value)?;
+        self.charge(size)?;
+        Ok(self.copy_datum(value)?)
+    }
+
+    /// A value's deep charge size (`K-CHG-005`), its graph decoded first.
+    pub(super) fn deep_size(&mut self, value: &Value) -> Result<u64, Halt> {
+        self.warm_reachable(value)?;
+        deep_size(&self.arena.borrow(), value).map_err(|error| fault(&error.to_string()))
     }
 
     /// Copies an effect argument out of the run under the crossing
@@ -916,7 +916,12 @@ impl KernelMachine {
     /// ([`crate::crossing`]). The traversal is charged as a copy-out is,
     /// and each byte of a function value's canonical form besides.
     pub(super) fn copy_out_tool_arg(&mut self, value: &Value) -> Eval<lash_kernel_doc::Datum> {
-        self.charge(deep_size(&self.heap, value)?)?;
+        let size = self.deep_size(value)?;
+        self.charge(size)?;
+        // The crossing gathers functions from the page form: the heap
+        // holds what the arena does first.
+        self.flush_arena()?;
+        let value = &self.page_form(value)?;
         let document = Arc::clone(&self.program.document);
         let library = self.program.library.clone();
         let mut heap = crate::crossing::CrossingHeap {
@@ -946,8 +951,8 @@ impl KernelMachine {
         incoming: Incoming,
     ) -> Eval<Value> {
         match incoming {
-            Incoming::Value(value) => Ok(value),
-            Incoming::Raise(value) => Err(Interrupt::raised(value)),
+            Incoming::Value(value) => Ok(self.admit_page(&value)?),
+            Incoming::Raise(value) => Err(Interrupt::raised(self.admit_page(&value)?)),
             Incoming::Joined(joined) => self.join_result(joined),
             Incoming::Outcome(wait) => self.resume_outcome(task, exe, wait),
         }
@@ -971,7 +976,7 @@ impl KernelMachine {
         };
         use lash_kernel_state::paged::CommittedOutcomeRecord;
         let (value, failed) = match outcome {
-            CommittedOutcomeRecord::Elapsed => (Value::Null, false),
+            CommittedOutcomeRecord::Elapsed => (lash_kernel_doc::heap::PageValue::Null, false),
             CommittedOutcomeRecord::Rejected(frozen) => (
                 self.heap_write(|heap| heap.instantiate(&frozen).map_err(Interrupt::from))?,
                 true,
@@ -987,6 +992,7 @@ impl KernelMachine {
         // run cannot seal inside a statement; installation and consumption
         // therefore publish together at the statement's safe point.
         self.waits.remove(&key, self.heap.pages())?;
+        let value = self.admit_page(&value)?;
         if failed {
             Err(Interrupt::raised(value))
         } else {
@@ -1000,11 +1006,14 @@ impl KernelMachine {
     pub(super) fn join_result(&mut self, joined: TaskId) -> Eval<Value> {
         let joined = self.task(joined)?;
         match &joined.state {
-            TaskState::Ended(super::EndedTask::Returned(value)) => Ok(value.clone()),
+            TaskState::Ended(super::EndedTask::Returned(value)) => {
+                let value = value.clone();
+                Ok(self.admit_page(&value)?)
+            }
             TaskState::Ended(super::EndedTask::Raised(value)) => {
                 let value = value.clone();
                 joined.observed = true;
-                Err(Interrupt::raised(value))
+                Err(Interrupt::raised(self.admit_page(&value)?))
             }
             _ => Err(fault("a join resumed before its task ended").into()),
         }
@@ -1058,6 +1067,7 @@ impl KernelMachine {
             self.heap_write(|heap| heap.freeze_datum(&decoded).map_err(Interrupt::from))?;
         let charge = self.heap.frozen_charge(&frozen)?;
         let value = self.heap_write(|heap| heap.instantiate(&frozen).map_err(Interrupt::from))?;
+        let value = self.admit_page(&value)?;
         self.charge(charge)?;
         Ok(value)
     }
@@ -1113,7 +1123,7 @@ impl KernelMachine {
             if matches!(origin, ResultOrigin::Delivered) {
                 self.pin(0)?;
             } else {
-                self.pins.borrowed.push(self.regs[0].clone());
+                self.pins.borrowed.push(self.regs[0]);
             }
             return match self.run(host, &running, running.stmt.resume())? {
                 Ran::Done => Ok((id, Ran::Done)),
@@ -1131,11 +1141,10 @@ impl KernelMachine {
             .get(act.ix())
             .ok_or_else(|| fault("a pending action has no resume entry"))?;
         let depth = entry.depth as usize;
-        let mut saved: std::collections::BTreeMap<Vec<u32>, Value> = pending
-            .roles
-            .into_iter()
-            .map(|role| (role.site, role.value))
-            .collect();
+        let mut saved: std::collections::BTreeMap<Vec<u32>, Value> = Default::default();
+        for role in pending.roles {
+            saved.insert(role.site, self.admit_page(&role.value)?);
+        }
         for (site, reg) in &entry.roles {
             let role = saved
                 .remove(&site.path[depth..])
@@ -1149,9 +1158,7 @@ impl KernelMachine {
         if matches!(origin, ResultOrigin::Delivered) {
             self.pin(entry.dst.0 as usize)?;
         } else {
-            self.pins
-                .borrowed
-                .push(self.regs[entry.dst.0 as usize].clone());
+            self.pins.borrowed.push(self.regs[entry.dst.0 as usize]);
         }
         let pc = running.stmt.ops.start as usize + entry.resume as usize;
         let ran = self.run(host, &running, pc)?;

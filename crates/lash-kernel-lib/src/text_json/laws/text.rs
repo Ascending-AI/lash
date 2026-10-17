@@ -1,5 +1,5 @@
 //! Text and bytes natives (FIG-6144's laws, ported onto heap values).
-use lash_kernel_doc::{Datum, FunctionRegistry, Measure, NativeError, Operand, Value};
+use lash_kernel_doc::{Datum, FunctionRegistry, Measure, Operand, Value};
 
 use super::lab::{Lab, b, bytes, i, list, raised, run, t, unicode};
 
@@ -341,9 +341,8 @@ fn k_ltxt_011_trim_set_bounds_scan_copy_and_reserves_output() {
                 if !expected.is_empty() {
                     lab.room(Some(2 * expected.len() as u64 - 1));
                     let args = lab.values(&args);
-                    assert!(matches!(
-                        lab.call("text.trim_set", &args),
-                        Err(NativeError::Memory)
+                    assert!(crate::testsupport::exhausted(
+                        &lab.call("text.trim_set", &args)
                     ));
                     assert_eq!(lab.reserved, 0);
                 }
@@ -368,7 +367,6 @@ fn k_ltxt_011_trim_set_bounds_scan_copy_and_reserves_output() {
 /// and its shallow formula bounds both scans and the reserved output copy.
 #[test]
 fn k_ltxt_012_join_admission_bounds_scan_copy_and_first_mismatch() {
-    use lash_kernel_state::paged::SemanticHeap as _;
     for pieces in [vec![], vec![""], vec!["", "😀", "é", ""], vec!["x"; 32]] {
         for separator in ["", "|", "😀"] {
             let mut lab = Lab::new();
@@ -402,9 +400,8 @@ fn k_ltxt_012_join_admission_bounds_scan_copy_and_first_mismatch() {
             if !expected.is_empty() {
                 let args = lab.values(&[input, t(separator)]);
                 lab.room(Some(2 * expected.len() as u64 - 1));
-                assert!(matches!(
-                    lab.call("text.join_or_index", &args),
-                    Err(NativeError::Memory)
+                assert!(crate::testsupport::exhausted(
+                    &lab.call("text.join_or_index", &args)
                 ));
                 assert_eq!(lab.reserved, 0);
             }
@@ -425,21 +422,9 @@ fn k_ltxt_012_join_admission_bounds_scan_copy_and_first_mismatch() {
     }
     // A list that holds itself is a non-text slot, never walked.
     let mut lab = Lab::new();
-    let cycle = lab
-        .heap
-        .allocate_object(lash_kernel_state::paged::ObjectInit::List(vec![]))
-        .unwrap();
-    lab.heap.list_write(cycle, 0, Value::List(cycle)).unwrap();
+    let cycle = lab.cycle();
     let (a, z, separator) = (lab.value(t("a")), lab.value(t("z")), lab.value(t("|")));
-    let input = Value::List(
-        lab.heap
-            .allocate_object(lash_kernel_state::paged::ObjectInit::List(vec![
-                a,
-                Value::List(cycle),
-                z,
-            ]))
-            .unwrap(),
-    );
+    let input = lab.list_of(vec![a, cycle, z]);
     let result = lab.call("text.join_or_index", &[input, separator]).unwrap();
     assert_eq!(lab.datum(&result), i(1));
     // Native member admission precedes separator validation and allocation.

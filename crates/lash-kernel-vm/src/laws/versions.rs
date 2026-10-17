@@ -13,8 +13,8 @@ use crate::{Bounds, End, Layout, Machine, Step};
 
 struct Scalar;
 impl NativeFunction for Scalar {
-    fn call(&self, call: NativeCall<'_>) -> Result<Value, NativeError> {
-        Self::answer(call.args).ok_or(NativeError::Decline)
+    fn call(&self, call: NativeCall<'_, '_>) -> Result<Value, NativeError> {
+        Self::answer(call.args.values()).ok_or(NativeError::Decline)
     }
     fn prepare(&self) -> Option<PreparedNative> {
         Some(PreparedNative {
@@ -34,15 +34,15 @@ impl Scalar {
 
 struct IsFloat;
 impl NativeFunction for IsFloat {
-    fn call(&self, call: NativeCall<'_>) -> Result<Value, NativeError> {
-        Ok(Value::Bool(matches!(call.args, [Value::Float(_)])))
+    fn call(&self, call: NativeCall<'_, '_>) -> Result<Value, NativeError> {
+        Ok(Value::Bool(matches!(call.args.values(), [Value::Float(_)])))
     }
 }
 
 struct AddFloat;
 impl NativeFunction for AddFloat {
-    fn call(&self, call: NativeCall<'_>) -> Result<Value, NativeError> {
-        let [Value::Float(a), Value::Float(b)] = call.args else {
+    fn call(&self, call: NativeCall<'_, '_>) -> Result<Value, NativeError> {
+        let [Value::Float(a), Value::Float(b)] = call.args.values() else {
             panic!("the law's body guards its float addition")
         };
         Ok(Value::Float(Float::new(a.get() + b.get())))
@@ -51,15 +51,15 @@ impl NativeFunction for AddFloat {
 
 struct IsBool;
 impl NativeFunction for IsBool {
-    fn call(&self, call: NativeCall<'_>) -> Result<Value, NativeError> {
-        Ok(Value::Bool(matches!(call.args, [Value::Bool(_)])))
+    fn call(&self, call: NativeCall<'_, '_>) -> Result<Value, NativeError> {
+        Ok(Value::Bool(matches!(call.args.values(), [Value::Bool(_)])))
     }
 }
 
 struct Truth;
 impl NativeFunction for Truth {
-    fn call(&self, call: NativeCall<'_>) -> Result<Value, NativeError> {
-        Self::answer(call.args).ok_or(NativeError::Decline)
+    fn call(&self, call: NativeCall<'_, '_>) -> Result<Value, NativeError> {
+        Self::answer(call.args.values()).ok_or(NativeError::Decline)
     }
     fn prepare(&self) -> Option<PreparedNative> {
         Some(PreparedNative {
@@ -79,8 +79,8 @@ impl Truth {
 
 struct ListItem;
 impl NativeFunction for ListItem {
-    fn call(&self, call: NativeCall<'_>) -> Result<Value, NativeError> {
-        Self::answer(call.args).ok_or(NativeError::Decline)
+    fn call(&self, call: NativeCall<'_, '_>) -> Result<Value, NativeError> {
+        Self::answer(call.args.values()).ok_or(NativeError::Decline)
     }
     fn prepare(&self) -> Option<PreparedNative> {
         Some(PreparedNative {

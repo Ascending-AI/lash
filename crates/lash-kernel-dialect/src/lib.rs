@@ -63,7 +63,7 @@ pub mod source_types;
 /// `crates/lash-kernel-*` names this module (scripts/check-kernel-boundary.py).
 #[doc(hidden)]
 pub mod kernel_internals {
-    use lash_kernel_doc::Value;
+    use lash_kernel_doc::heap::PageValue;
     use lash_kernel_state::kernel_internals::PagedHeap;
     use lash_kernel_state::paged::HeapWriteError;
 
@@ -77,7 +77,7 @@ pub mod kernel_internals {
     pub fn saved_value(
         function: &crate::SavedFunction,
         heap: &mut PagedHeap,
-    ) -> Result<Value, HeapWriteError> {
+    ) -> Result<PageValue, HeapWriteError> {
         function.value(heap)
     }
 }

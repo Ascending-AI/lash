@@ -2,12 +2,11 @@
 //!
 //! Native calls allocate new data and never mutate their inputs. The dialect
 //! owns setters and the stable live URLSearchParams alias.
-use lash_kernel_doc::heap::{ErrorRef, Payload};
 use lash_kernel_doc::{
-    FunctionId, FunctionRegistry, NativeCall, NativeError, NativeFunction, Object, RegistryError,
-    Value, parse_definition,
+    FunctionId, FunctionRegistry, NativeCall, NativeError, NativeFunction, NewObject,
+    RegistryError, Value, parse_definition,
 };
-use std::{collections::BTreeMap, sync::Arc};
+use std::{borrow::Cow, collections::BTreeMap, sync::Arc};
 use url::{Url, form_urlencoded};
 
 /// Registers parsing, component replacement and form-query codecs.
@@ -77,44 +76,35 @@ impl Operation {
     }
 }
 
-fn raise(message: &str) -> NativeError {
-    NativeError::Raised(Arc::new(ErrorRef::new("type_error", message)))
+fn raise(message: &'static str) -> NativeError {
+    NativeError::refused("type_error", message)
 }
-fn text(call: &mut NativeCall<'_>, index: usize) -> Result<Arc<str>, NativeError> {
-    match call.args.get(index) {
-        Some(Value::Text(value)) => match &value.body {
-            Payload::Resident(text) => Ok(text.clone()),
-            Payload::Paged(_) => call.heap.materialize_text(value),
+/// Text argument `index` whole, as the heap copied it out: a paged text
+/// holds its bytes ([`lash_kernel_doc::Nursery::read_whole`]).
+fn text<'call>(
+    call: &mut NativeCall<'call, '_>,
+    index: usize,
+) -> Result<Cow<'call, str>, NativeError> {
+    match call.args.values().get(index) {
+        Some(value) => match call.args.text(value)? {
+            Some(text) => {
+                call.new.read_whole(text.len())?;
+                text.whole()
+            }
+            None => Err(raise("Expected text")),
         },
-        _ => Err(raise("Expected text")),
+        None => Err(raise("Expected text")),
     }
 }
-fn field_name(name: &str) -> lash_kernel_doc::heap::TextRef {
-    let Value::Text(name) = Value::text(name) else {
-        unreachable!()
-    };
-    name
-}
-fn allocate(call: &mut NativeCall<'_>, object: Object) -> Result<Value, NativeError> {
-    let list = matches!(object, Object::List(_));
-    let id = call.heap.allocate(object)?;
-    Ok(if list {
-        Value::List(id)
-    } else {
-        Value::Record(id)
-    })
-}
-fn pairs(call: &mut NativeCall<'_>, input: &str) -> Result<Value, NativeError> {
+fn pairs(call: &mut NativeCall<'_, '_>, input: &str) -> Value {
     let mut result = Vec::new();
     for (name, value) in form_urlencoded::parse(input.trim_start_matches('?').as_bytes()) {
-        result.push(allocate(
-            call,
-            Object::List(vec![Value::text(name), Value::text(value)]),
-        )?);
+        let (name, value) = (call.new.text(&name), call.new.text(&value));
+        result.push(call.new.allocate(NewObject::List(vec![name, value])));
     }
-    allocate(call, Object::List(result))
+    call.new.allocate(NewObject::List(result))
 }
-fn record(call: &mut NativeCall<'_>, url: &Url) -> Result<Value, NativeError> {
+fn record(call: &mut NativeCall<'_, '_>, url: &Url) -> Value {
     let fields = [
         ("href", url.as_str().to_owned()),
         ("origin", url.origin().ascii_serialization()),
@@ -153,42 +143,39 @@ fn record(call: &mut NativeCall<'_>, url: &Url) -> Result<Value, NativeError> {
         ),
     ]
     .into_iter()
-    .map(|(name, value)| (field_name(name), Value::text(value)))
+    .map(|(name, value)| (call.new.text(name), call.new.text(&value)))
     .collect();
-    let state = allocate(call, Object::Record(fields))?;
-    let decoded = pairs(call, url.query().unwrap_or(""))?;
-    let params = allocate(
-        call,
-        Object::Record(vec![
-            (field_name("brand"), Value::text("url.search_params")),
-            (field_name("pairs"), decoded),
-            (field_name("owner"), state.clone()),
-        ]),
-    )?;
-    allocate(
-        call,
-        Object::Record(vec![
-            (field_name("brand"), Value::text("url.whatwg")),
-            (field_name("state"), state),
-            (field_name("searchParams"), params),
-        ]),
-    )
+    let state = call.new.allocate(NewObject::Record(fields));
+    let decoded = pairs(call, url.query().unwrap_or(""));
+    let new = &mut *call.new;
+    let params = vec![
+        (new.text("brand"), new.text("url.search_params")),
+        (new.text("pairs"), decoded),
+        (new.text("owner"), state),
+    ];
+    let params = new.allocate(NewObject::Record(params));
+    let fields = vec![
+        (new.text("brand"), new.text("url.whatwg")),
+        (new.text("state"), state),
+        (new.text("searchParams"), params),
+    ];
+    new.allocate(NewObject::Record(fields))
 }
 impl NativeFunction for Operation {
-    fn call(&self, mut call: NativeCall<'_>) -> Result<Value, NativeError> {
+    fn call(&self, mut call: NativeCall<'_, '_>) -> Result<Value, NativeError> {
         match self {
             Self::Parse => {
                 let input = text(&mut call, 0)?;
                 let url = match call.args.get(1) {
                     Some(Value::Absent) => Url::parse(&input),
-                    Some(Value::Text(_)) => {
+                    Some(Value::Text(_) | Value::LongText(_)) => {
                         let base = text(&mut call, 1)?;
                         Url::parse(&base).and_then(|base| base.join(&input))
                     }
                     _ => return Err(raise("Expected text or absent base")),
                 }
                 .map_err(|_| raise("Invalid URL"))?;
-                record(&mut call, &url)
+                Ok(record(&mut call, &url))
             }
             Self::Update => {
                 let mut url = Url::parse(&text(&mut call, 0)?).map_err(|_| raise("Invalid URL"))?;
@@ -235,44 +222,37 @@ impl NativeFunction for Operation {
                     }),
                     _ => return Err(raise("Unsupported URL field")),
                 }
-                record(&mut call, &url)
+                Ok(record(&mut call, &url))
             }
             Self::QueryParse => {
-                let input = text(&mut call, 0)?.to_owned();
-                pairs(&mut call, &input)
+                let input = text(&mut call, 0)?;
+                Ok(pairs(&mut call, &input))
             }
             Self::QueryStringify => {
-                let Some(Value::List(id)) = call.args.first() else {
+                let args = call.args;
+                let list = args.get(0).unwrap_or(&Value::Absent);
+                let (Value::List(_), Some(list)) = (list, args.sequence(list)?) else {
                     return Err(raise("Expected pair list"));
                 };
                 let mut serializer = form_urlencoded::Serializer::new(String::new());
-                for index in 0..call.heap.len(*id)? {
-                    let Value::List(pair) = call
-                        .heap
-                        .list_get(*id, index)?
-                        .ok_or_else(|| raise("Missing pair"))?
-                    else {
+                for index in 0..list.len() {
+                    let pair = list.get(index)?.ok_or_else(|| raise("Missing pair"))?;
+                    let (Value::List(_), Some(pair)) = (pair, args.sequence(pair)?) else {
                         return Err(raise("Expected pair"));
                     };
-                    let Value::Text(name) = call
-                        .heap
-                        .list_get(pair, 0)?
-                        .ok_or_else(|| raise("Missing name"))?
-                    else {
+                    let name = pair.get(0)?.ok_or_else(|| raise("Missing name"))?;
+                    let Some(name) = args.text(name)? else {
                         return Err(raise("Expected name"));
                     };
-                    let Value::Text(value) = call
-                        .heap
-                        .list_get(pair, 1)?
-                        .ok_or_else(|| raise("Missing value"))?
-                    else {
+                    let value = pair.get(1)?.ok_or_else(|| raise("Missing value"))?;
+                    let Some(value) = args.text(value)? else {
                         return Err(raise("Expected value"));
                     };
-                    let name = call.heap.materialize_text(&name)?;
-                    let value = call.heap.materialize_text(&value)?;
-                    serializer.append_pair(&name, &value);
+                    call.new.read_whole(name.len())?;
+                    call.new.read_whole(value.len())?;
+                    serializer.append_pair(&name.whole()?, &value.whole()?);
                 }
-                Ok(Value::Text(call.heap.text(&serializer.finish())?))
+                Ok(call.new.text(&serializer.finish()))
             }
         }
     }

@@ -1,16 +1,11 @@
 //! Allocation-free classification of a depth-bounded JSON graph. Admission policy
 //! (excluded fields and a lexical key interval) belongs to the caller.
 
-use std::ops::ControlFlow;
+use std::borrow::Cow;
 
-use lash_kernel_doc::{
-    Element, Formula, Integer, NativeCall, NativeError, NativeHeap, Operand, Type, Value,
-};
+use lash_kernel_doc::{Args, Formula, NativeCall, NativeError, Operand, Type, Value};
 
-use super::{Function, arg, count_arg, definition, raise};
-use crate::comparison::payload_order;
-use lash_kernel_doc::heap::{HeapFault, IntRef, TextRef};
-
+use super::{Function, arg, count_arg, definition, raise, text_arg};
 pub(super) fn functions() -> Vec<Function> {
     let (mut definition, native) = definition(
         "json.classify",
@@ -35,117 +30,111 @@ pub(super) fn functions() -> Vec<Function> {
     vec![(definition, native)]
 }
 
-struct Walk<'a> {
-    heap: &'a dyn NativeHeap,
+struct Walk<'a, 'call> {
+    args: &'a Args<'call>,
     depth: usize,
-    excluded: [TextRef; 2],
-    key_from: TextRef,
-    key_until: TextRef,
+    excluded: [Cow<'call, str>; 2],
+    key_from: Cow<'call, str>,
+    key_until: Cow<'call, str>,
     work: u64,
 }
 
-impl Walk<'_> {
-    fn compare(
-        &mut self,
-        key: &TextRef,
-        policy: &TextRef,
-    ) -> Result<std::cmp::Ordering, HeapFault> {
-        self.work += 1 + key.summary.utf8_bytes.min(policy.summary.utf8_bytes);
-        payload_order(
-            &Value::Text(key.clone()),
-            &Value::Text(policy.clone()),
-            self.heap,
-        )
+impl Walk<'_, '_> {
+    fn compare(work: &mut u64, key: &str, policy: &str) -> std::cmp::Ordering {
+        *work += 1 + key.len().min(policy.len()) as u64;
+        key.as_bytes().cmp(policy.as_bytes())
     }
-    fn field(&mut self, key: &TextRef) -> Result<bool, HeapFault> {
-        for excluded in self.excluded.clone() {
-            if self.compare(key, &excluded)?.is_eq() {
+    fn field(&mut self, key: &Value) -> Result<bool, NativeError> {
+        let Some(key) = self.args.text(key)? else {
+            return Ok(false);
+        };
+        let key = key.whole()?;
+        for excluded in &self.excluded {
+            if Self::compare(&mut self.work, &key, excluded).is_eq() {
                 return Ok(false);
             }
         }
-        Ok(self.compare(key, &self.key_from.clone())?.is_lt()
-            || !self.compare(key, &self.key_until.clone())?.is_lt())
+        Ok(Self::compare(&mut self.work, &key, &self.key_from).is_lt()
+            || !Self::compare(&mut self.work, &key, &self.key_until).is_lt())
     }
-    fn node(&mut self, value: &Value, depth: usize) -> Result<bool, HeapFault> {
+    fn node(&mut self, value: &Value, depth: usize) -> Result<bool, NativeError> {
         self.work += 1;
-        let (id, record) = match value {
-            Value::Null | Value::Bool(_) | Value::Text(_) | Value::Int(_) => return Ok(true),
+        let record = match value {
+            Value::Null
+            | Value::Bool(_)
+            | Value::Text(_)
+            | Value::LongText(_)
+            | Value::Int(_)
+            | Value::BigInt(_) => return Ok(true),
             Value::Float(value) => return Ok(value.get().is_finite()),
-            Value::List(id) => (*id, false),
-            Value::Record(id) => (*id, true),
+            Value::List(_) => false,
+            Value::Record(_) => true,
             _ => return Ok(false),
         };
         if depth > self.depth {
             return Ok(false);
         }
-        let mut admitted = true;
-        let mut fault = None;
-        self.heap.visit(id, &mut |element| {
-            let result = match element {
-                Element::Field { name, value } if record => self.field(name).and_then(|allowed| {
-                    if allowed {
-                        self.node(value, depth + 1)
-                    } else {
-                        Ok(false)
-                    }
-                }),
-                Element::Item(value) if !record => self.node(value, depth + 1),
-                _ => Ok(false),
+        if record {
+            let Some(table) = self.args.table(value)? else {
+                return Err(NativeError::Malformed("a record names another body"));
             };
-            match result {
-                Ok(ok) => admitted = ok,
-                Err(error) => {
-                    fault = Some(error);
-                    admitted = false;
+            for chunk in table.chunks() {
+                for pair in chunk?.as_chunks::<2>().0.iter() {
+                    if !(self.field(&pair[0])? && self.node(&pair[1], depth + 1)?) {
+                        return Ok(false);
+                    }
                 }
             }
-            if admitted {
-                ControlFlow::Continue(())
-            } else {
-                ControlFlow::Break(())
+        } else {
+            let Some(sequence) = self.args.sequence(value)? else {
+                return Err(NativeError::Malformed("a list names another body"));
+            };
+            for chunk in sequence.chunks() {
+                for item in chunk? {
+                    if !self.node(item, depth + 1)? {
+                        return Ok(false);
+                    }
+                }
             }
-        })?;
-        fault.map_or(Ok(admitted), Err)
+        }
+        Ok(true)
     }
 }
 
-fn classify(call: NativeCall<'_>) -> Result<Value, NativeError> {
-    let depth = count_arg(call.args, 1)?;
+fn classify(call: NativeCall<'_, '_>) -> Result<Value, NativeError> {
+    let args = &call.args;
+    let depth = count_arg(args, 1)?;
     if !(1..=64).contains(&depth) {
         return Err(raise("number_range", "classification needs 1..64 levels"));
     }
-    let Value::Tuple(excluded) = arg(call.args, 2)? else {
-        return Err(raise("type_error", "expected two excluded field names"));
+    let excluded = arg(args.values(), 2)?;
+    let names = match args.sequence(excluded)? {
+        Some(names) if matches!(excluded, Value::Tuple(_)) && names.len() == 2 => names,
+        _ => return Err(raise("type_error", "expected two excluded field names")),
     };
-    if excluded.summary.len != 2 {
-        return Err(raise("type_error", "expected two excluded field names"));
-    }
-    let Some(Value::Text(first)) = call.heap.tuple_get(excluded, 0)? else {
-        return Err(raise("type_error", "expected two excluded field names"));
-    };
-    let Some(Value::Text(second)) = call.heap.tuple_get(excluded, 1)? else {
-        return Err(raise("type_error", "expected two excluded field names"));
-    };
-    let text = |index| match arg(call.args, index)? {
-        Value::Text(t) => Ok(t.clone()),
-        _ => Err(raise("type_error", "expected text")),
+    let name = |index| -> Result<Cow<'_, str>, NativeError> {
+        let Some(value) = names.get(index)? else {
+            return Err(raise("type_error", "expected two excluded field names"));
+        };
+        match args.text(value)? {
+            Some(text) => text.whole(),
+            None => Err(raise("type_error", "expected two excluded field names")),
+        }
     };
     let mut walk = Walk {
-        heap: call.heap,
+        args,
         depth,
-        excluded: [first, second],
-        key_from: text(3)?,
-        key_until: text(4)?,
+        excluded: [name(0)?, name(1)?],
+        key_from: text_arg(args, 3)?,
+        key_until: text_arg(args, 4)?,
         work: 0,
     };
-    let admitted = walk.node(arg(call.args, 0)?, 1)?;
-    // A bounded stack, borrowed heap visits and a small integer result need
-    // no heap allocation or reservation, even with zero remaining memory.
+    let admitted = walk.node(arg(args.values(), 0)?, 1)?;
+    // A bounded stack, borrowed views and a small integer result need no
+    // allocation or reservation, even with zero remaining memory.
     let encoded = walk
         .work
         .saturating_mul(2)
         .saturating_add(u64::from(admitted));
-    Ok(Value::Int(IntRef::Inline(Integer::from(
-        i64::try_from(encoded).unwrap_or(i64::MAX),
-    ))))
+    Ok(Value::Int(i64::try_from(encoded).unwrap_or(i64::MAX)))
 }

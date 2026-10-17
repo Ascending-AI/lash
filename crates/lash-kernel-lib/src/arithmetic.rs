@@ -2,7 +2,7 @@
 
 use std::cmp::Ordering;
 
-use lash_kernel_doc::{Float, Integer, NativeError, NativeHeap, Value, WorkCounter};
+use lash_kernel_doc::{Args, Float, Integer, NativeError, Nursery, Value, WorkCounter};
 use num_bigint::BigInt;
 use num_traits::{One, Signed, ToPrimitive, Zero};
 
@@ -46,21 +46,22 @@ pub(crate) fn binary(
     a: &Value,
     b: &Value,
     counter: &mut WorkCounter,
-    heap: &mut dyn NativeHeap,
+    args: &Args<'_>,
+    new: &mut Nursery<'_>,
 ) -> Result<Value, NativeError> {
-    let a = Numeric::read(a, heap)?;
-    let b = Numeric::read(b, heap)?;
+    let a = Numeric::read(a, args, new)?;
+    let b = Numeric::read(b, args, new)?;
     let result = match (plain(op, &a, &b)?, &a, &b) {
         (Some(result), _, _) => result,
         (None, Numeric::Int(a), Numeric::Int(b)) => Numeric::Int(Integer::new(integer_pow(
             &a.as_bigint(),
             &b.as_bigint(),
             counter,
-            heap,
+            new,
         )?)),
         (None, _, _) => unreachable!("only an integer power counts its work"),
     };
-    result.store(heap)
+    Ok(result.store(new))
 }
 
 /// [`binary`] for every operation but an integer power past the 64-bit
@@ -178,7 +179,7 @@ fn integer_pow(
     a: &BigInt,
     b: &BigInt,
     counter: &mut WorkCounter,
-    heap: &mut dyn NativeHeap,
+    new: &mut Nursery<'_>,
 ) -> Result<BigInt, NativeError> {
     if b.is_negative() {
         return Err(raised(
@@ -189,7 +190,7 @@ fn integer_pow(
     let mut exponent = b.clone();
     let mut base = a.clone();
     let mut result = BigInt::one();
-    let mut room = Room { heap, peak: 0 };
+    let mut room = Room { new, peak: 0 };
     while !exponent.is_zero() {
         if exponent.bit(0) {
             room.product(&result, &base, &result, &base, counter)?;
@@ -206,13 +207,13 @@ fn integer_pow(
 
 /// The memory an integer power holds at its largest: the result so far, the
 /// base and the product being taken.
-struct Room<'a> {
-    heap: &'a mut dyn NativeHeap,
+struct Room<'a, 'call> {
+    new: &'a mut Nursery<'call>,
     /// The most bytes any product so far has needed, all of it reserved.
     peak: u64,
 }
 
-impl Room<'_> {
+impl Room<'_, '_> {
     /// Admits the product `a * b`, taken while `result` and `base` are
     /// held. The guard counts its words as work; the bytes it adds to the
     /// most the call has held are reserved against the run's memory bound.
@@ -231,7 +232,7 @@ impl Room<'_> {
         let held = result.bits().saturating_add(base.bits()).div_ceil(8);
         let needed = held.saturating_add(words.saturating_mul(8));
         if needed > self.peak {
-            self.heap.reserve(0, needed - self.peak)?;
+            self.new.reserve(0, needed - self.peak)?;
             self.peak = needed;
         }
         Ok(())
@@ -342,7 +343,8 @@ pub(crate) fn scalar_unary(op: Unary, value: &Numeric) -> Result<Numeric, Native
 pub(crate) fn unary(
     op: Unary,
     value: &Value,
-    heap: &mut dyn NativeHeap,
+    args: &Args<'_>,
+    new: &mut Nursery<'_>,
 ) -> Result<Value, NativeError> {
-    scalar_unary(op, &Numeric::read(value, heap)?)?.store(heap)
+    Ok(scalar_unary(op, &Numeric::read(value, args, new)?)?.store(new))
 }

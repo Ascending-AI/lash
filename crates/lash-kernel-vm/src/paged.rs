@@ -9,8 +9,9 @@
 //! touch; a park seals the changed pages and execution records into a new
 //! root. Neither direction converts the whole state.
 
+use lash_kernel_doc::heap::PageValue;
 use lash_kernel_doc::heap::{HeapFault, PageRef};
-use lash_kernel_doc::{Datum, DocumentId, Invalid, Name, Value};
+use lash_kernel_doc::{Datum, DocumentId, Invalid, Name};
 use lash_kernel_state::AdmittedWait;
 use lash_kernel_state::paged::{
     Checkpoint, CheckpointRoot, FunctionRecord, PageSource, SealBudget, SessionRoot,
@@ -83,7 +84,7 @@ pub struct SaveCell<'a> {
     pub release: PageRef,
     /// The bindings the carry drops, and the session's bindings of the
     /// functions it already holds, by name.
-    pub bindings: &'a BTreeMap<Name, Value>,
+    pub bindings: &'a BTreeMap<Name, PageValue>,
     /// The bindings the carry drops, in name order.
     pub dropped: &'a [Name],
     /// The declared names of the functions the session already holds.
@@ -97,7 +98,7 @@ pub struct SavedCell {
     pub functions: Vec<(Name, FunctionRecord)>,
     /// Each binding that held a saved function, bound to the function's
     /// value now: data, which carries.
-    pub rebound: Vec<(Name, Value)>,
+    pub rebound: Vec<(Name, PageValue)>,
     /// Each dropped binding not saved, with why.
     pub refused: Vec<(Name, String)>,
 }

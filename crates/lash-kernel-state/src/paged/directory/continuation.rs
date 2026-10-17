@@ -57,7 +57,7 @@ pub enum PhaseRecord {
 #[derive(Clone, Debug)]
 pub struct RoleRecord {
     pub site: Vec<u32>,
-    pub value: Value,
+    pub value: PageValue,
 }
 
 /// A run of consecutive roles: one cell of a spilled role sequence.
@@ -98,7 +98,7 @@ impl PendingRecord {
     pub fn visit_values(
         &self,
         access: &Access<'_>,
-        visit: &mut dyn FnMut(&Value) -> Result<(), HeapFault>,
+        visit: &mut dyn FnMut(&PageValue) -> Result<(), HeapFault>,
     ) -> Result<(), HeapFault> {
         self.visit_roles(access, &mut |role| visit(&role.value))
     }

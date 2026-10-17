@@ -1,5 +1,6 @@
 //! The canonical task table and its bounded execution-coordinate cache.
 use super::frames::{self, Frames};
+use super::project::SharedArena;
 use super::{Task, Wait};
 use crate::compile::Executable;
 use lash_kernel_doc::TaskId;
@@ -22,6 +23,7 @@ impl Task {
     pub(super) fn fresh(
         identity: lash_kernel_state::paged::TaskIdentityRef,
         access: Access<'static>,
+        arena: SharedArena,
         exe: Arc<Executable>,
     ) -> Self {
         Self {
@@ -37,7 +39,7 @@ impl Task {
                 occurrences: Tree::new(false),
                 frames: Tree::new(true),
             },
-            frames: Frames::new(access, exe),
+            frames: Frames::new(access, arena, exe),
             published: None,
         }
     }
@@ -241,12 +243,14 @@ pub(super) struct Tasks {
     #[cfg(test)]
     cache_probes: usize,
     access: Access<'static>,
+    arena: SharedArena,
     exe: Arc<Executable>,
 }
 impl Tasks {
     pub(super) fn open(
         rows: Tree<TaskRecord>,
         access: Access<'static>,
+        arena: SharedArena,
         exe: Arc<Executable>,
     ) -> Self {
         Self {
@@ -258,11 +262,18 @@ impl Tasks {
             cache_probes: 0,
             cache: (0..CACHED_TASKS).map(|_| None).collect(),
             access,
+            arena,
             exe,
         }
     }
-    pub(super) fn new(access: Access<'static>, exe: Arc<Executable>) -> Self {
-        Self::open(Tree::new(false), access, exe)
+    pub(super) fn new(access: Access<'static>, arena: SharedArena, exe: Arc<Executable>) -> Self {
+        Self::open(Tree::new(false), access, arena, exe)
+    }
+    /// Visits every arena value the cached tasks' frames hold.
+    pub(super) fn each_value(&self, visit: &mut dyn FnMut(&lash_kernel_doc::Value)) {
+        for (_, task) in self.cache.iter().flatten() {
+            task.frames.each_value(visit);
+        }
     }
     pub(super) fn len(&self) -> usize {
         self.rows.len() as usize
@@ -350,6 +361,7 @@ impl Tasks {
         let frames = Frames::open(
             std::mem::replace(&mut record.frames, Tree::new(true)),
             self.access.clone(),
+            std::rc::Rc::clone(&self.arena),
             Arc::clone(&self.exe),
             frames::arrival(&record.state),
         );

@@ -25,8 +25,7 @@
 
 use std::sync::Arc;
 
-use lash_kernel_doc::heap::IntRef;
-
+use lash_kernel_doc::arena::ShortText;
 use lash_kernel_doc::{
     Float, FunctionId, FunctionRegistry, NativeCall, NativeError, NativeFunction, PreparedNative,
     RegistryError, Value,
@@ -67,7 +66,7 @@ pub const OPERATIONS: [&str; 8] = [
 /// definition carries. Closed kernel callee plans are installed as
 /// dependencies, sharing an already installed kernel plan across dialects.
 /// The registry must hold the kernel library already: the natives call
-/// its `num.add`, `num.sub`, `num.to_float`, `text.concat` and `text.utf16_compare`.
+/// its `num.add`, `num.sub`, `text.concat` and `text.utf16_compare`.
 ///
 /// # Errors
 ///
@@ -99,7 +98,6 @@ pub fn implement(
     };
     let add = Arc::new(Add {
         add: kernel("num.add")?,
-        to_float: kernel("num.to_float")?,
         concat: kernel("text.concat")?,
     });
     let subtract = Arc::new(Subtract {
@@ -136,22 +134,8 @@ pub fn implement(
     Ok(())
 }
 
-/// Calls a kernel library function's native with `args`, as the body's own
-/// call does.
-fn delegate(
-    native: &Arc<dyn NativeFunction>,
-    call: &mut NativeCall<'_>,
-    args: &[Value],
-) -> Result<Value, NativeError> {
-    native.call(NativeCall {
-        args,
-        heap: &mut *call.heap,
-        counter: &mut *call.counter,
-    })
-}
-
-fn pair<'a>(call: &'a NativeCall<'_>) -> (&'a Value, &'a Value) {
-    match call.args {
+fn pair<'a>(call: &'a NativeCall<'_, '_>) -> (&'a Value, &'a Value) {
+    match call.args.values() {
         [left, right, ..] => (left, right),
         [left] => (left, &Value::Absent),
         [] => (&Value::Absent, &Value::Absent),
@@ -163,24 +147,19 @@ fn pair<'a>(call: &'a NativeCall<'_>) -> (&'a Value, &'a Value) {
 /// a float. Every other pair declines.
 struct Add {
     add: Arc<dyn NativeFunction>,
-    to_float: Arc<dyn NativeFunction>,
     concat: Arc<dyn NativeFunction>,
 }
 
 impl NativeFunction for Add {
-    fn call(&self, mut call: NativeCall<'_>) -> Result<Value, NativeError> {
-        let (left, right) = pair(&call);
-        let (left, right) = (left.clone(), right.clone());
-        match (&left, &right) {
-            (Value::Float(_), Value::Float(_)) => delegate(&self.add, &mut call, &[left, right]),
-            (Value::Text(_), Value::Text(_)) => delegate(&self.concat, &mut call, &[left, right]),
-            (Value::Float(_), Value::Int(_)) => {
-                let right = delegate(&self.to_float, &mut call, &[right])?;
-                delegate(&self.add, &mut call, &[left, right])
-            }
-            (Value::Int(_), Value::Float(_)) => {
-                let left = delegate(&self.to_float, &mut call, &[left])?;
-                delegate(&self.add, &mut call, &[left, right])
+    fn call(&self, call: NativeCall<'_, '_>) -> Result<Value, NativeError> {
+        // The call's two arguments are the kernel function's: `num.add`
+        // makes the integer a float as `num.to_float` does.
+        match pair(&call) {
+            (Value::Float(_), Value::Float(_))
+            | (Value::Float(_), Value::Int(_) | Value::BigInt(_))
+            | (Value::Int(_) | Value::BigInt(_), Value::Float(_)) => self.add.call(call),
+            (Value::Text(_) | Value::LongText(_), Value::Text(_) | Value::LongText(_)) => {
+                self.concat.call(call)
             }
             _ => Err(NativeError::Decline),
         }
@@ -229,27 +208,24 @@ struct Relate {
 }
 
 impl NativeFunction for Relate {
-    fn call(&self, mut call: NativeCall<'_>) -> Result<Value, NativeError> {
-        let (left, right) = pair(&call);
-        let (left, right) = (left.clone(), right.clone());
-        match (&left, &right) {
+    fn call(&self, call: NativeCall<'_, '_>) -> Result<Value, NativeError> {
+        match pair(&call) {
             (Value::Float(a), Value::Float(b)) => {
                 Ok(Value::Bool(self.relation.floats(a.get(), b.get())))
             }
-            (Value::Text(_), Value::Text(_)) => {
-                // The body compares in the order each relation states.
-                let (first, second, negated) = match self.relation {
-                    Relation::Lt => (left, right, false),
-                    Relation::Gt => (right, left, false),
-                    Relation::Le => (right, left, true),
-                    Relation::Ge => (left, right, true),
-                };
-                let order = delegate(&self.compare, &mut call, &[first, second])?;
-                let less = match order {
-                    Value::Int(IntRef::Inline(order)) => order.is_negative(),
+            (Value::Text(_) | Value::LongText(_), Value::Text(_) | Value::LongText(_)) => {
+                // The body orders the texts as each relation states; the
+                // order of the call's two arguments answers every relation.
+                let order = match self.compare.call(call)? {
+                    Value::Int(order) => order,
                     _ => return Err(NativeError::Decline),
                 };
-                Ok(Value::Bool(less != negated))
+                Ok(Value::Bool(match self.relation {
+                    Relation::Lt => order < 0,
+                    Relation::Gt => order > 0,
+                    Relation::Le => order <= 0,
+                    Relation::Ge => order >= 0,
+                }))
             }
             _ => Err(NativeError::Decline),
         }
@@ -285,16 +261,16 @@ impl NativeFunction for ToNumber {
     fn returns_borrowed(&self) -> bool {
         true
     }
-    fn call(&self, call: NativeCall<'_>) -> Result<Value, NativeError> {
-        match call.args {
-            [value @ Value::Float(_)] => Ok(value.clone()),
+    fn call(&self, call: NativeCall<'_, '_>) -> Result<Value, NativeError> {
+        match call.args.values() {
+            [value @ Value::Float(_)] => Ok(*value),
             _ => Err(NativeError::Decline),
         }
     }
     fn prepare(&self) -> Option<PreparedNative> {
         Some(PreparedNative {
             entry: |args| match args {
-                [value @ Value::Float(_)] => Some(value.clone()),
+                [value @ Value::Float(_)] => Some(*value),
                 _ => None,
             },
             operation: "ts.to_number / Float",
@@ -306,12 +282,10 @@ struct Subtract {
     native: Arc<dyn NativeFunction>,
 }
 impl NativeFunction for Subtract {
-    fn call(&self, mut call: NativeCall<'_>) -> Result<Value, NativeError> {
-        match call.args {
-            [left @ Value::Float(_), right @ Value::Float(_)] => {
-                let args = [left.clone(), right.clone()];
-                delegate(&self.native, &mut call, &args)
-            }
+    fn call(&self, call: NativeCall<'_, '_>) -> Result<Value, NativeError> {
+        match call.args.values() {
+            // The call's two arguments are the kernel function's.
+            [Value::Float(_), Value::Float(_)] => self.native.call(call),
             _ => Err(NativeError::Decline),
         }
     }
@@ -337,20 +311,28 @@ impl NativeFunction for Get {
         Some("__ts_brand")
     }
 
-    fn call(&self, call: NativeCall<'_>) -> Result<Value, NativeError> {
-        use lash_kernel_doc::heap::FieldName;
-        let [Value::Record(record), Value::Text(key)] = call.args else {
+    fn call(&self, call: NativeCall<'_, '_>) -> Result<Value, NativeError> {
+        let args = call.args;
+        let [
+            record @ Value::Record(_),
+            key @ (Value::Text(_) | Value::LongText(_)),
+        ] = args.values()
+        else {
             return Err(NativeError::Decline);
         };
-        let brand = call
-            .heap
-            .record_get(*record, FieldName::Static("__ts_brand"))?;
-        if matches!(brand, Some(Value::Tuple(tuple)) if tuple.summary.len == 0) {
+        let Some(fields) = args.table(record)? else {
+            return Err(NativeError::Malformed("a record names another body"));
+        };
+        let marker = ShortText::new("__ts_brand").map(Value::Text);
+        let brand = match &marker {
+            Some(marker) => args.lookup(fields, marker)?,
+            None => None,
+        };
+        if let Some(brand @ Value::Tuple(_)) = brand
+            && args.sequence(brand)?.is_some_and(|tuple| tuple.is_empty())
+        {
             return Err(NativeError::Decline);
         }
-        Ok(call
-            .heap
-            .record_get(*record, FieldName::Text(key))?
-            .unwrap_or(Value::Absent))
+        Ok(args.lookup(fields, key)?.copied().unwrap_or(Value::Absent))
     }
 }

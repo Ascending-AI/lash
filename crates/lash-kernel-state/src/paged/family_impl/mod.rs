@@ -42,13 +42,13 @@ fn plus(a: u64, b: u64) -> Result<u64, HeapFault> {
 /// Writer cells use the relative-occurrence grammar. On access the normal
 /// heap tree decodes them under the receiving family's context.
 #[derive(Clone)]
-struct RelativeValue(Value);
-fn relative(value: &Value, out: &mut TokenWriter) {
+struct RelativeValue(PageValue);
+fn relative(value: &PageValue, out: &mut TokenWriter) {
     match value {
-        Value::List(id) => encode_relative(0, id.ordinal, out),
-        Value::Map(id) => encode_relative(1, id.ordinal, out),
-        Value::Set(id) => encode_relative(2, id.ordinal, out),
-        Value::Record(id) => encode_relative(3, id.ordinal, out),
+        PageValue::List(id) => encode_relative(0, id.ordinal, out),
+        PageValue::Map(id) => encode_relative(1, id.ordinal, out),
+        PageValue::Set(id) => encode_relative(2, id.ordinal, out),
+        PageValue::Record(id) => encode_relative(3, id.ordinal, out),
         _ => value.encode(out),
     }
 }
@@ -151,40 +151,40 @@ fn decode_header(answer: &PageAnswer, frozen: &FrozenRef) -> Result<FrozenHeader
     header.value.grants(&answer.children)?;
     Ok(header)
 }
-fn validate_occurrence(value: &Value, extent: u64) -> Result<(), HeapFault> {
+fn validate_occurrence(value: &PageValue, extent: u64) -> Result<(), HeapFault> {
     match value {
-        Value::List(id) | Value::Map(id) | Value::Set(id) | Value::Record(id) => {
+        PageValue::List(id) | PageValue::Map(id) | PageValue::Set(id) | PageValue::Record(id) => {
             if id.family != RELATIVE || id.ordinal >= extent {
                 return Err(invalid("frozen root occurrence is outside its family"));
             }
         }
-        Value::Tuple(t) => {
+        PageValue::Tuple(t) => {
             if let Payload::Resident(values) = &t.body {
                 for value in values.iter() {
                     validate_occurrence(value, extent)?;
                 }
             }
         }
-        Value::Error(e) => {
+        PageValue::Error(e) => {
             if let Payload::Resident(data) = &e.data {
                 validate_occurrence(data, extent)?;
             }
         }
-        Value::Closure(_) | Value::Task(_) | Value::Ref(_) => {
+        PageValue::Closure(_) | PageValue::Task(_) | PageValue::Ref(_) => {
             return Err(invalid("a frozen root contains a runtime identity"));
         }
         _ => (),
     }
     Ok(())
 }
-fn context(value: &mut Value, family: Option<FamilyId>) -> Result<(), HeapFault> {
+fn context(value: &mut PageValue, family: Option<FamilyId>) -> Result<(), HeapFault> {
     match value {
-        Value::List(id) | Value::Map(id) | Value::Set(id) | Value::Record(id) => {
+        PageValue::List(id) | PageValue::Map(id) | PageValue::Set(id) | PageValue::Record(id) => {
             id.family =
                 family.ok_or_else(|| invalid("zero-entity frozen root contains an occurrence"))?
         }
-        Value::Tuple(t) => Arc::make_mut(t).family = family,
-        Value::Error(e) => {
+        PageValue::Tuple(t) => Arc::make_mut(t).family = family,
+        PageValue::Error(e) => {
             let error = Arc::make_mut(e);
             error.family = family;
             if let Payload::Resident(data) = &mut error.data {
@@ -255,7 +255,7 @@ struct Freezer<'a> {
     functions: BTreeSet<Name>,
 }
 impl Freezer<'_> {
-    fn sequence(&self, values: Vec<Value>, nested: bool) -> Result<Tree<Value>, HeapFault> {
+    fn sequence(&self, values: Vec<PageValue>, nested: bool) -> Result<Tree<PageValue>, HeapFault> {
         let mut rows = Tree::new(true);
         for (i, value) in values.into_iter().enumerate() {
             rows.write(
@@ -271,41 +271,42 @@ impl Freezer<'_> {
         }
         Ok(rows.retype()?.in_family(RELATIVE))
     }
-    fn value(&mut self, value: &Value) -> Result<Value, HeapWriteError> {
+    fn value(&mut self, value: &PageValue) -> Result<PageValue, HeapWriteError> {
         if self.depth >= 128 {
             return Err(nondata());
         }
         self.depth += 1;
         self.charge = plus(self.charge, logical_size(self.heap, value)?)?;
         let result = match value {
-            Value::List(id) | Value::Map(id) | Value::Set(id) | Value::Record(id) => {
-                self.object(*id, value)
-            }
-            Value::Closure(id) => match self.named.get(id) {
+            PageValue::List(id)
+            | PageValue::Map(id)
+            | PageValue::Set(id)
+            | PageValue::Record(id) => self.object(*id, value),
+            PageValue::Closure(id) => match self.named.get(id) {
                 Some(name) => {
                     self.functions.insert(name.clone());
-                    Ok(Value::Function(datum::text(
+                    Ok(PageValue::Function(datum::text(
                         &self.heap.access,
                         name.as_str(),
                     )?))
                 }
                 None => Err(nondata()),
             },
-            Value::Function(name) => {
+            PageValue::Function(name) => {
                 let name = Name::new(self.heap.copy_text(name)?.to_string());
                 self.functions.insert(name.clone());
                 match value {
-                    Value::Function(TextRef {
+                    PageValue::Function(TextRef {
                         body: Payload::Resident(text),
                         ..
-                    }) if text.len() as u64 > IMMUTABLE_INLINE_MAX => Ok(Value::Function(
+                    }) if text.len() as u64 > IMMUTABLE_INLINE_MAX => Ok(PageValue::Function(
                         datum::text(&self.heap.access, name.as_str())?,
                     )),
                     _ => Ok(value.clone()),
                 }
             }
-            Value::Task(_) | Value::Ref(_) => Err(nondata()),
-            Value::Tuple(t) => {
+            PageValue::Task(_) | PageValue::Ref(_) => Err(nondata()),
+            PageValue::Tuple(t) => {
                 let mut values = Vec::new();
                 self.heap.tuple_visit(t, &mut |v| {
                     values.push(v.clone());
@@ -328,7 +329,7 @@ impl Freezer<'_> {
                 summary.has_edges = has_edges;
                 summary.task_edges = 0;
                 summary.depth = depth;
-                Ok(Value::Tuple(Arc::new(TupleRef {
+                Ok(PageValue::Tuple(Arc::new(TupleRef {
                     normal: Default::default(),
                     family: None,
                     summary,
@@ -337,9 +338,9 @@ impl Freezer<'_> {
                         .map_or_else(|| Payload::Resident(Arc::from([])), Payload::paged),
                 })))
             }
-            Value::Error(e) => {
+            PageValue::Error(e) => {
                 let data = self.value(&self.heap.error_data(e)?)?;
-                Ok(Value::Error(Arc::new(frozen_error(
+                Ok(PageValue::Error(Arc::new(frozen_error(
                     &self.heap.access,
                     e.kind.clone(),
                     e.message.clone(),
@@ -351,7 +352,7 @@ impl Freezer<'_> {
         self.depth -= 1;
         result
     }
-    fn object(&mut self, id: EntityId, value: &Value) -> Result<Value, HeapWriteError> {
+    fn object(&mut self, id: EntityId, value: &PageValue) -> Result<PageValue, HeapWriteError> {
         if !self.active.insert(id) {
             return Err(nondata());
         }
@@ -360,13 +361,13 @@ impl Freezer<'_> {
         let mut elements = Vec::new();
         self.heap.visit(id, &mut |e| {
             elements.push(match e {
-                Element::Item(v) => (v.clone(), Value::Absent),
+                Element::Item(v) => (v.clone(), PageValue::Absent),
                 Element::Entry { key, value } => (key.clone(), value.clone()),
-                Element::Field { name, value } => (Value::Text(name.clone()), value.clone()),
+                Element::Field { name, value } => (PageValue::Text(name.clone()), value.clone()),
             });
             ControlFlow::Continue(())
         })?;
-        let body = if matches!(value, Value::List(_)) {
+        let body = if matches!(value, PageValue::List(_)) {
             let values = elements
                 .iter()
                 .map(|(v, _)| self.value(v))
@@ -376,8 +377,8 @@ impl Freezer<'_> {
             Body::List { rows, next }
         } else {
             let kind = match value {
-                Value::Map(_) => ObjectKind::Map,
-                Value::Set(_) => ObjectKind::Set,
+                PageValue::Map(_) => ObjectKind::Map,
+                PageValue::Set(_) => ObjectKind::Set,
                 _ => ObjectKind::Record,
             };
             let mut lookup = Tree::new(false);
@@ -395,7 +396,7 @@ impl Freezer<'_> {
                         self.value(key)?
                     },
                     value: if kind == ObjectKind::Set {
-                        Value::Absent
+                        PageValue::Absent
                     } else {
                         self.value(value)?
                     },
@@ -429,15 +430,15 @@ impl Freezer<'_> {
             ordinal,
         };
         Ok(match value {
-            Value::List(_) => Value::List(id),
-            Value::Map(_) => Value::Map(id),
-            Value::Set(_) => Value::Set(id),
-            _ => Value::Record(id),
+            PageValue::List(_) => PageValue::List(id),
+            PageValue::Map(_) => PageValue::Map(id),
+            PageValue::Set(_) => PageValue::Set(id),
+            _ => PageValue::Record(id),
         })
     }
 }
 impl Freezer<'_> {
-    fn finish(mut self, value: Value) -> Result<(FrozenRef, BTreeSet<Name>), HeapWriteError> {
+    fn finish(mut self, value: PageValue) -> Result<(FrozenRef, BTreeSet<Name>), HeapWriteError> {
         self.cost = plus(self.cost, value_cost(&value))?;
         self.objects
             .seal_nested(&self.heap.access, &mut SealWork::new(budget()))?;
@@ -468,7 +469,7 @@ impl PagedHeap {
     /// declared-function references, never with a live-directory pointer.
     pub fn freeze_named(
         &mut self,
-        value: &Value,
+        value: &PageValue,
         named: &BTreeMap<EntityId, Name>,
     ) -> Result<(FrozenRef, BTreeSet<Name>), HeapWriteError> {
         let mut freezer = Freezer {
@@ -492,16 +493,16 @@ impl PagedHeap {
         Ok(read_header(&self.access, frozen)?.charge)
     }
 }
-fn logical_size(heap: &PagedHeap, value: &Value) -> Result<u64, HeapFault> {
+fn logical_size(heap: &PagedHeap, value: &PageValue) -> Result<u64, HeapFault> {
     let extent = match value {
-        Value::Int(IntRef::Inline(i)) => i.bits().div_ceil(64),
-        Value::Int(IntRef::Paged { summary, .. }) => summary.bits.div_ceil(64),
-        Value::Text(t) => t.summary.utf8_bytes,
-        Value::Bytes(b) => b.len,
-        Value::Tuple(t) => t.summary.len,
-        Value::Error(e) => plus(e.kind.summary.utf8_bytes, e.message.summary.utf8_bytes)?,
-        Value::List(id) | Value::Set(id) | Value::Record(id) => heap.len(*id)?,
-        Value::Map(id) => heap
+        PageValue::Int(IntRef::Inline(i)) => i.bits().div_ceil(64),
+        PageValue::Int(IntRef::Paged { summary, .. }) => summary.bits.div_ceil(64),
+        PageValue::Text(t) => t.summary.utf8_bytes,
+        PageValue::Bytes(b) => b.len,
+        PageValue::Tuple(t) => t.summary.len,
+        PageValue::Error(e) => plus(e.kind.summary.utf8_bytes, e.message.summary.utf8_bytes)?,
+        PageValue::List(id) | PageValue::Set(id) | PageValue::Record(id) => heap.len(*id)?,
+        PageValue::Map(id) => heap
             .len(*id)?
             .checked_mul(2)
             .ok_or_else(|| invalid("map extent overflow"))?,
@@ -510,21 +511,14 @@ fn logical_size(heap: &PagedHeap, value: &Value) -> Result<u64, HeapFault> {
     plus(extent, 1)
 }
 impl HeapLifecycle for PagedHeap {
-    fn freeze(&mut self, value: &Value, _data_only: bool) -> Result<FrozenRef, HeapWriteError> {
+    fn freeze(&mut self, value: &PageValue, _data_only: bool) -> Result<FrozenRef, HeapWriteError> {
         self.freeze_named(value, &BTreeMap::new())
             .map(|(frozen, _)| frozen)
     }
-    fn instantiate(&mut self, frozen: &FrozenRef) -> Result<Value, HeapWriteError> {
+    fn instantiate(&mut self, frozen: &FrozenRef) -> Result<PageValue, HeapWriteError> {
         let header = read_header(&self.access, frozen)?;
         let family = if frozen.summary.entities == 0 {
-            self.reserve(0, frozen.summary.cost.0)
-                .map_err(|error| match error {
-                    NativeError::Heap(error) => HeapWriteError::Fault(error),
-                    NativeError::Memory => HeapWriteError::Memory,
-                    other => HeapWriteError::Fault(invalid(format!(
-                        "frozen reservation failed: {other}"
-                    ))),
-                })?;
+            self.reserve_held(0, frozen.summary.cost.0)?;
             None
         } else {
             Some(self.register_family(*frozen)?)
@@ -681,7 +675,7 @@ fn frozen_error(
     access: &Access<'_>,
     kind: TextRef,
     message: TextRef,
-    data: Value,
+    data: PageValue,
 ) -> Result<ErrorRef, HeapFault> {
     let mut rows = Tree::new(true);
     rows.write(ordinal_key(0), RelativeValue(data.clone()), access)?;

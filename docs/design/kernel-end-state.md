@@ -372,6 +372,12 @@ and `heap::Value`'s `EntityId` operands (with 2.4(a)).
   `Sequence::CHUNK` (64) values by position, a table chunk the whole entries
   between two content-placed boundaries. Chunks materialize lazily
   (`Chunk::Cold { page, len }` to `Chunk::Resident`).
+- **Resident chunks own their storage by value** (ruled 2026-10-17, FIG-6708):
+  a list's, map's, set's or record's chunks are `Vec<Chunk<Vec<Value>>>`,
+  and immutables keep boxed exact-size storage. A boxed slice cannot grow,
+  so an append would copy the whole object; amortized O(1) append is
+  required. `Objects::get_mut` and `Objects::insert` serve the machine's own
+  edits and allocations outside a native call.
 - **Dirty-chunk worklist.** Each object keeps its dirty chunk indexes; the arena
   keeps the set of objects with dirty chunks (cards). The worklist says which
   chunks; the canonical walk (§C) says in what order they are projected. A

@@ -21,7 +21,6 @@ pub(crate) mod census_impl;
 pub mod family;
 pub(crate) mod family_impl;
 pub mod heap;
-pub mod probe;
 pub mod root;
 pub mod session;
 pub mod source;
@@ -43,7 +42,6 @@ pub use heap::{
     ClosureView, EditEpoch, FieldName, HeapWriteError, NormalKey, ObjectInit, ObjectKind,
     SealBudget, SealedHeap, SemanticHeap, TableCursor,
 };
-pub use probe::ProbeHeap;
 pub use root::{
     BindingRecord, BoundRecord, CellTargetKind, CheckpointRoot, CommittedOutcomeRecord, CursorKind,
     CursorRecord, EndedRecord, EndedTask, EnteredRecord, FinallyRecord, FunctionRecord,
@@ -57,6 +55,7 @@ mod census_graph;
 mod codec;
 mod equality;
 mod publication;
+pub(crate) mod stored;
 pub use publication::StatementRoots;
 pub(crate) mod tree;
 

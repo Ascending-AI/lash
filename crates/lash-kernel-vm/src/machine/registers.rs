@@ -3,8 +3,6 @@ use std::ops::Index;
 use std::slice::SliceIndex;
 
 use lash_kernel_doc::Value;
-use lash_kernel_doc::heap::IntRef;
-use num_traits::ToPrimitive;
 
 #[derive(Default)]
 pub(super) struct Registers {
@@ -16,15 +14,11 @@ pub(super) struct Registers {
     pub(super) initializations: usize,
 }
 
-/// Values safe to retain physically after the logical window is released.
-/// In particular a large inline integer still owns a shared allocation.
+/// Values safe to retain physically after the logical window is released:
+/// those that name no arena object, which a collection would not see.
 #[inline(always)]
 fn reusable(value: &Value) -> bool {
-    match value {
-        Value::Null | Value::Absent | Value::Bool(_) | Value::Float(_) => true,
-        Value::Int(IntRef::Inline(integer)) => integer.to_i64().is_some(),
-        _ => false,
-    }
+    value.handle().is_none()
 }
 
 impl Registers {
@@ -82,13 +76,7 @@ impl Registers {
         if !reusable(&value) {
             self.owns_values = true;
         }
-        let old = std::mem::replace(&mut self.values[out], value);
-        if matches!(
-            old,
-            Value::Null | Value::Absent | Value::Bool(_) | Value::Float(_)
-        ) {
-            std::mem::forget(old);
-        }
+        self.values[out] = value;
     }
 
     /// Taking an operand leaves a logical Null, with its original cost.
@@ -110,7 +98,7 @@ impl Registers {
             .enumerate()
             .map(|(at, value)| {
                 if self.written[at] {
-                    value.clone()
+                    *value
                 } else {
                     Value::Null
                 }

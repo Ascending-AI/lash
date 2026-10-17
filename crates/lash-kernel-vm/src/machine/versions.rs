@@ -4,7 +4,6 @@ use lash_kernel_doc::TaskId;
 
 use super::{Eval, KernelMachine};
 use crate::compile::{Executable, LibId};
-use crate::heap::within_depth;
 use crate::observe::Event;
 
 impl KernelMachine {
@@ -55,20 +54,24 @@ impl KernelMachine {
         marker: &str,
         units: u64,
     ) -> Eval<bool> {
-        use lash_kernel_doc::heap::FieldName;
-        use lash_kernel_doc::{NativeHeap, Value};
-        let [Value::Record(record), Value::Text(key)] = &self.regs[args..args + given] else {
+        use lash_kernel_doc::Value;
+        let [Value::Record(record), key @ Value::Text(name)] = self.regs[args..args + given] else {
             return Ok(false);
         };
-        if matches!(self.heap.record_get(*record, FieldName::Static(marker))?,
-            Some(Value::Tuple(tuple)) if tuple.summary.len == 0)
-        {
+        let marker = self.arena.borrow_mut().text(marker);
+        let value = self.in_arena(|arena| {
+            if let Some(Value::Tuple(tuple)) = arena.table_get(record, &marker)?
+                && arena.len(tuple)? == 0
+            {
+                return Ok(None);
+            }
+            let found = hint.read(arena, record, &arena.key(&key)?, name.as_str())?;
+            Ok(Some(found.unwrap_or(Value::Absent)))
+        })?;
+        let Some(value) = value else {
             return Ok(false);
-        }
-        let value = hint
-            .read(&self.heap, *record, FieldName::Text(key))?
-            .unwrap_or(Value::Absent);
-        if !within_depth(&value, self.limits.value_depth()) {
+        };
+        if !self.within_depth(&value) {
             return Ok(false);
         }
         self.observe(Event::NativeEnter { task, lib });
@@ -124,10 +127,7 @@ impl KernelMachine {
         scalar: crate::compile::ScalarCall,
     ) -> Eval<bool> {
         let function = exe.lib(lib);
-        let Some(value) = scalar
-            .answer(&self.regs[args..args + given])
-            .filter(|value| within_depth(value, self.limits.value_depth()))
-        else {
+        let Some(value) = scalar.answer(&self.regs[args..args + given]) else {
             return Ok(false);
         };
         self.observe(Event::NativeEnter { task, lib });

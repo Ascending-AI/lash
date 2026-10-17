@@ -6,14 +6,14 @@ use std::collections::BTreeMap;
 use std::sync::Arc;
 use std::sync::atomic::{AtomicUsize, Ordering};
 
+use lash_kernel_doc::arena::ShortText;
 use lash_kernel_doc::heap::*;
 use lash_kernel_doc::{
     Datum, Document, ErrorDatum, FunctionId, FunctionRegistry, Handle, Integer, NativeCall,
-    NativeError, NativeFunction, NumberToken, Object, PreparedNative, Site, Timestamp, Unit, Value,
-    parse_definition, parse_document,
+    NativeError, NativeFunction, NewObject, NumberToken, PreparedNative, Site, Timestamp, Unit,
+    Value, parse_definition, parse_document,
 };
 use lash_kernel_state::paged::*;
-use num_traits::ToPrimitive;
 use std::cell::RefCell;
 use std::rc::Rc;
 
@@ -32,11 +32,12 @@ pub(crate) const ROOMY: Bounds = Bounds {
     join_members: 100,
 };
 
-fn type_error(message: &str) -> NativeError {
-    NativeError::Raised(Arc::new(ErrorRef::new("type_error", message)))
+fn type_error(message: &'static str) -> NativeError {
+    NativeError::refused("type_error", message)
 }
 
-/// Heap-independent law natives offer a prepared entry with the same answer.
+/// Arena-independent law natives offer a prepared entry with the same
+/// answer.
 macro_rules! prepared {
     ($native:ident, |$args:ident| $body:expr) => {
         impl $native {
@@ -45,8 +46,8 @@ macro_rules! prepared {
             }
         }
         impl NativeFunction for $native {
-            fn call(&self, call: NativeCall<'_>) -> Result<Value, NativeError> {
-                Self::answer(call.args)
+            fn call(&self, call: NativeCall<'_, '_>) -> Result<Value, NativeError> {
+                Self::answer(call.args.values())
             }
             fn prepare(&self) -> Option<PreparedNative> {
                 Some(PreparedNative {
@@ -60,38 +61,63 @@ macro_rules! prepared {
 
 struct Add;
 prepared!(Add, |args| match args {
-    [Value::Int(IntRef::Inline(a)), Value::Int(IntRef::Inline(b))] => Ok(Value::Int(
-        IntRef::Inline(Integer::new(&*a.as_bigint() + &*b.as_bigint()))
-    )),
+    [Value::Int(a), Value::Int(b)] => a
+        .checked_add(*b)
+        .map(Value::Int)
+        .ok_or_else(|| type_error("num.add passes a word")),
     _ => Err(type_error("num.add takes two integers")),
 });
 
 struct Less;
 prepared!(Less, |args| match args {
-    [Value::Int(IntRef::Inline(a)), Value::Int(IntRef::Inline(b))] => Ok(Value::Bool(a < b)),
+    [Value::Int(a), Value::Int(b)] => Ok(Value::Bool(a < b)),
     _ => Err(type_error("num.lt takes two integers")),
 });
 
 struct Concat;
-prepared!(Concat, |args| match args {
-    [
-        Value::Text(TextRef {
-            body: Payload::Resident(a),
-            ..
-        }),
-        Value::Text(TextRef {
-            body: Payload::Resident(b),
-            ..
-        }),
-    ] => Ok(Value::text(format!("{a}{b}"))),
-    _ => Err(type_error("text.concat takes two texts")),
-});
+impl NativeFunction for Concat {
+    fn call(&self, call: NativeCall<'_, '_>) -> Result<Value, NativeError> {
+        let (Some(a), Some(b)) = (
+            call.args
+                .get(0)
+                .map(|a| call.args.text(a))
+                .transpose()?
+                .flatten(),
+            call.args
+                .get(1)
+                .map(|b| call.args.text(b))
+                .transpose()?
+                .flatten(),
+        ) else {
+            return Err(type_error("text.concat takes two texts"));
+        };
+        let text = format!("{}{}", a.whole()?, b.whole()?);
+        Ok(call.new.text(&text))
+    }
+    fn prepare(&self) -> Option<PreparedNative> {
+        Some(PreparedNative {
+            entry: |args| match args {
+                [Value::Text(a), Value::Text(b)] => {
+                    ShortText::new(&format!("{}{}", a.as_str(), b.as_str())).map(Value::Text)
+                }
+                _ => None,
+            },
+            operation: "Concat",
+        })
+    }
+}
 
 struct Len;
 impl NativeFunction for Len {
-    fn call(&self, call: NativeCall<'_>) -> Result<Value, NativeError> {
-        match call.args.first().and_then(Value::object) {
-            Some(object) => Ok(Value::Int(call.heap.len(object)?.into())),
+    fn call(&self, call: NativeCall<'_, '_>) -> Result<Value, NativeError> {
+        let Some(value) = call.args.get(0) else {
+            return Err(type_error("list.len takes a collection"));
+        };
+        if let Some(sequence) = call.args.sequence(value)? {
+            return Ok(Value::Int(sequence.len() as i64));
+        }
+        match call.args.table(value)? {
+            Some(table) => Ok(Value::Int(table.len() as i64)),
             None => Err(type_error("list.len takes a collection")),
         }
     }
@@ -100,29 +126,29 @@ impl NativeFunction for Len {
 /// Spends one unit of its guard per step.
 struct Spin;
 impl NativeFunction for Spin {
-    fn call(&self, call: NativeCall<'_>) -> Result<Value, NativeError> {
-        let [Value::Int(IntRef::Inline(steps))] = call.args else {
+    fn call(&self, call: NativeCall<'_, '_>) -> Result<Value, NativeError> {
+        let [Value::Int(steps)] = call.args.values() else {
             return Err(type_error("work.spin takes an integer"));
         };
-        let steps = steps.to_u64().unwrap_or(0);
+        let steps = u64::try_from(*steps).unwrap_or(0);
         for _ in 0..steps {
             call.counter.spend(1)?;
         }
-        Ok(call.args[0].clone())
+        Ok(call.args.values()[0])
     }
 }
 
 /// Allocates a list of that many nulls.
 struct Fill;
 impl NativeFunction for Fill {
-    fn call(&self, call: NativeCall<'_>) -> Result<Value, NativeError> {
-        let [Value::Int(IntRef::Inline(length))] = call.args else {
+    fn call(&self, call: NativeCall<'_, '_>) -> Result<Value, NativeError> {
+        let [Value::Int(length)] = call.args.values() else {
             return Err(type_error("work.fill takes an integer"));
         };
-        let length = length.to_usize().unwrap_or(0);
-        call.heap
-            .allocate(Object::List(vec![Value::Null; length]))
-            .map(Value::List)
+        let length = usize::try_from(*length).unwrap_or(0);
+        Ok(call
+            .new
+            .allocate(NewObject::List(vec![Value::Null; length])))
     }
 }
 
@@ -132,31 +158,34 @@ pub(crate) static REPEAT_BUILDS: AtomicUsize = AtomicUsize::new(0);
 /// Reserves a text of that many bytes, then builds it.
 struct Repeat;
 impl NativeFunction for Repeat {
-    fn call(&self, call: NativeCall<'_>) -> Result<Value, NativeError> {
-        let [Value::Int(IntRef::Inline(length))] = call.args else {
+    fn call(&self, call: NativeCall<'_, '_>) -> Result<Value, NativeError> {
+        let [Value::Int(length)] = call.args.values() else {
             return Err(type_error("work.repeat takes an integer"));
         };
-        let length = length.to_u64().unwrap_or(0);
-        call.heap.reserve(0, length)?;
+        let length = u64::try_from(*length).unwrap_or(0);
+        call.new.reserve(0, length)?;
         REPEAT_BUILDS.fetch_add(1, Ordering::Relaxed);
-        Ok(Value::text("x".repeat(length as usize)))
+        Ok(call.new.text(&"x".repeat(length as usize)))
     }
 }
 
 struct Ref;
-prepared!(Ref, |args| match args.first().and_then(Value::object) {
-    Some(object) => Ok(Value::Ref(lash_kernel_doc::Identity::Object(object))),
-    None => Err(type_error("ident.ref takes an object")),
+prepared!(Ref, |args| match args.first() {
+    Some(
+        Value::List(object)
+        | Value::Map(object)
+        | Value::Set(object)
+        | Value::Record(object)
+        | Value::Closure(object),
+    ) => Ok(Value::ObjectRef(*object)),
+    _ => Err(type_error("ident.ref takes an object")),
 });
 
 struct Twice;
 impl NativeFunction for Twice {
-    fn call(&self, call: NativeCall<'_>) -> Result<Value, NativeError> {
-        Add.call(NativeCall {
-            args: &[call.args[0].clone(), call.args[0].clone()],
-            heap: call.heap,
-            counter: call.counter,
-        })
+    fn call(&self, call: NativeCall<'_, '_>) -> Result<Value, NativeError> {
+        let a = call.args.values()[0];
+        Add::answer(&[a, a])
     }
 }
 
@@ -164,11 +193,14 @@ impl NativeFunction for Twice {
 /// names them in a document.
 struct LargeError;
 impl NativeFunction for LargeError {
-    fn call(&self, _call: NativeCall<'_>) -> Result<Value, NativeError> {
-        Err(NativeError::Raised(Arc::new(ErrorRef::new(
-            &"k".repeat(1 << 20),
-            &"m".repeat(1 << 20),
-        ))))
+    fn call(&self, call: NativeCall<'_, '_>) -> Result<Value, NativeError> {
+        let kind = call.new.text(&"k".repeat(1 << 20));
+        let message = call.new.text(&"m".repeat(1 << 20));
+        Err(NativeError::Raised(call.new.allocate(NewObject::Error {
+            kind,
+            message,
+            data: Value::Null,
+        })))
     }
 }
 

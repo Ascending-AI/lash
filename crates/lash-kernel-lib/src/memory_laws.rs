@@ -1,8 +1,6 @@
 //! K-BND-001/003: amplifying natives reserve against the real S7 census.
-use crate::testsupport::{decode, heap, hold_with_extra};
-use lash_kernel_doc::{
-    Datum, FunctionRegistry, Integer, NativeCall, NativeError, Value, WorkCounter,
-};
+use crate::testsupport::{Bench, decode, exhausted, heap};
+use lash_kernel_doc::{Datum, FunctionRegistry, Integer, NativeError, Value, WorkCounter};
 use num_bigint::BigInt;
 
 fn int(value: i64) -> Datum {
@@ -13,9 +11,10 @@ fn text(value: &str) -> Datum {
 }
 fn call(
     registry: &FunctionRegistry,
-    heap: &mut lash_kernel_state::kernel_internals::PagedHeap,
+    heap: &mut Bench,
     name: &str,
     input: &[Value],
+    room: u64,
 ) -> Result<Value, NativeError> {
     let (_, registered) = registry
         .iter()
@@ -26,11 +25,13 @@ fn call(
         .guard
         .as_ref()
         .map(|guard| guard.limit.evaluate(&mut |_, _| 0));
-    registered.native().unwrap().call(NativeCall {
-        args: input,
+    crate::testsupport::call(
         heap,
-        counter: &mut WorkCounter::new(limit),
-    })
+        &**registered.native().unwrap(),
+        input,
+        room,
+        &mut WorkCounter::new(limit),
+    )
 }
 /// K-BND-001/K-LIB-007: powers and radix digits refuse before their output
 /// outgrows the remaining logical space, including paged integer inputs.
@@ -53,12 +54,8 @@ fn integer_amplifiers_refuse_under_the_real_census() {
     ] {
         let mut heap = heap();
         let input: Vec<_> = input.into_iter().map(|v| decode(&mut heap, v)).collect();
-        hold_with_extra(&mut heap, &input, extra);
-        let result = call(&registry, &mut heap, name, &input);
-        assert!(
-            matches!(result, Err(NativeError::Memory)),
-            "{name}: {result:?}"
-        );
+        let result = call(&registry, &mut heap, name, &input, extra);
+        assert!(exhausted(&result), "{name}: {result:?}");
     }
 }
 /// K-BND-003: text, formatting and JSON expansion cannot construct results
@@ -92,11 +89,7 @@ fn text_and_json_amplifiers_refuse_under_the_real_census() {
     ] {
         let mut heap = heap();
         let input: Vec<_> = input.into_iter().map(|v| decode(&mut heap, v)).collect();
-        hold_with_extra(&mut heap, &input, 16 << 10);
-        let result = call(&registry, &mut heap, name, &input);
-        assert!(
-            matches!(result, Err(NativeError::Memory)),
-            "{name}: {result:?}"
-        );
+        let result = call(&registry, &mut heap, name, &input, 16 << 10);
+        assert!(exhausted(&result), "{name}: {result:?}");
     }
 }

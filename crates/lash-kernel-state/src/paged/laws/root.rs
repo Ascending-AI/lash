@@ -105,16 +105,22 @@ fn a_checkpoint_root_fits_its_root_bound() {
     }
 }
 
-/// S4/S7/K-BND-003: identity cursors add no Value header; tuple cursors
+/// S4/S7/K-BND-003: identity cursors add no PageValue header; tuple cursors
 /// retain their members. The frame's fixed 64-byte offset survives the codec.
 #[test]
 fn loop_holdings_keep_their_exact_frame_offsets_after_open() {
-    use lash_kernel_doc::{Object, Site, Unit};
+    use lash_kernel_doc::{Site, Unit};
     use tree::{Cell, SealWork, Tree};
     let (mut heap, _) = super::heap::fresh();
-    let list = Value::List(heap.allocate(Object::List(vec![Value::Null])).unwrap());
-    let map = Value::Map(heap.allocate(Object::Map(Vec::new())).unwrap());
-    let tuple = Value::Tuple(heap.tuple(vec![Value::Null, Value::Bool(true)]).unwrap());
+    let list = PageValue::List(
+        heap.allocate_object(ObjectInit::List(vec![PageValue::Null]))
+            .unwrap(),
+    );
+    let map = PageValue::Map(heap.allocate_object(ObjectInit::Map(Vec::new())).unwrap());
+    let tuple = PageValue::Tuple(
+        heap.tuple(vec![PageValue::Null, PageValue::Bool(true)])
+            .unwrap(),
+    );
     for (value, expected) in [(list, 64), (map, 64), (tuple, 96)] {
         let mut frame =
             FrameRecord::fresh(SiteRef::new(&Site::new(Unit::Main, [0]), &heap.access).unwrap());

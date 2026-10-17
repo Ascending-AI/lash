@@ -12,25 +12,25 @@ impl PagedHeap {
 fn project(
     heap: &PagedHeap,
     header: &FrozenHeader,
-    value: &Value,
+    value: &PageValue,
     depth: u32,
 ) -> Result<Datum, HeapFault> {
     if depth >= 128 {
         return Err(invalid("frozen projection exceeds the depth bound"));
     }
-    let nested = |value: &Value| project(heap, header, value, depth + 1);
+    let nested = |value: &PageValue| project(heap, header, value, depth + 1);
     Ok(match value {
-        Value::Null => Datum::Null,
-        Value::Absent => Datum::Absent,
-        Value::Bool(v) => Datum::Bool(*v),
-        Value::Int(v) => Datum::Int(heap.copy_int(v)?),
-        Value::Float(v) => Datum::Float(*v),
-        Value::Text(v) => Datum::Text(heap.copy_text(v)?.to_string()),
-        Value::Bytes(v) => Datum::Bytes(Bytes::new(heap.copy_bytes(v)?.to_vec())),
-        Value::Timestamp(v) => Datum::Timestamp(v.clone()),
-        Value::Function(v) => Datum::Function(Name::new(heap.copy_text(v)?.to_string())),
-        Value::Handle(v) => Datum::Handle(v.as_ref().clone()),
-        Value::Tuple(tuple) => {
+        PageValue::Null => Datum::Null,
+        PageValue::Absent => Datum::Absent,
+        PageValue::Bool(v) => Datum::Bool(*v),
+        PageValue::Int(v) => Datum::Int(heap.copy_int(v)?),
+        PageValue::Float(v) => Datum::Float(*v),
+        PageValue::Text(v) => Datum::Text(heap.copy_text(v)?.to_string()),
+        PageValue::Bytes(v) => Datum::Bytes(Bytes::new(heap.copy_bytes(v)?.to_vec())),
+        PageValue::Timestamp(v) => Datum::Timestamp(v.clone()),
+        PageValue::Function(v) => Datum::Function(Name::new(heap.copy_text(v)?.to_string())),
+        PageValue::Handle(v) => Datum::Handle(v.as_ref().clone()),
+        PageValue::Tuple(tuple) => {
             let mut values = Vec::new();
             for at in 0..tuple.summary.len {
                 let value = heap
@@ -40,19 +40,19 @@ fn project(
             }
             Datum::Tuple(values)
         }
-        Value::Error(error) => Datum::Error(Box::new(ErrorDatum {
+        PageValue::Error(error) => Datum::Error(Box::new(ErrorDatum {
             kind: heap.copy_text(&error.kind)?.to_string(),
             message: heap.copy_text(&error.message)?.to_string(),
             data: nested(&heap.error_data(error)?)?,
         })),
-        Value::List(id) | Value::Map(id) | Value::Set(id) | Value::Record(id) => {
+        PageValue::List(id) | PageValue::Map(id) | PageValue::Set(id) | PageValue::Record(id) => {
             validate_occurrence(value, header.summary.entities)?;
             let head = header
                 .objects
                 .get(&id.ordinal.to_be_bytes(), &heap.access)?
                 .ok_or_else(|| invalid("frozen occurrence is missing"))?;
             match (value, head.body) {
-                (Value::List(_), Body::List { rows, .. }) => {
+                (PageValue::List(_), Body::List { rows, .. }) => {
                     let mut values = Vec::new();
                     let rows = rows.in_family(RELATIVE);
                     for at in 0..rows.len() {
@@ -73,12 +73,14 @@ fn project(
                             .rank_get(at, &heap.access)?
                             .ok_or_else(|| invalid("frozen table member missing"))?;
                         match (value, kind) {
-                            (Value::Map(_), ObjectKind::Map) => {
+                            (PageValue::Map(_), ObjectKind::Map) => {
                                 entries.push((nested(&entry.key)?, nested(&entry.value)?))
                             }
-                            (Value::Set(_), ObjectKind::Set) => members.push(nested(&entry.key)?),
-                            (Value::Record(_), ObjectKind::Record) => {
-                                let Value::Text(name) = entry.key else {
+                            (PageValue::Set(_), ObjectKind::Set) => {
+                                members.push(nested(&entry.key)?)
+                            }
+                            (PageValue::Record(_), ObjectKind::Record) => {
+                                let PageValue::Text(name) = entry.key else {
                                     return Err(invalid("frozen record name is not text"));
                                 };
                                 fields.push((
@@ -94,8 +96,8 @@ fn project(
                         }
                     }
                     match value {
-                        Value::Map(_) => Datum::Map(entries),
-                        Value::Set(_) => Datum::Set(members),
+                        PageValue::Map(_) => Datum::Map(entries),
+                        PageValue::Set(_) => Datum::Set(members),
                         _ => Datum::Record(fields),
                     }
                 }

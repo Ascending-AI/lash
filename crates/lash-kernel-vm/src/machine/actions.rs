@@ -6,39 +6,46 @@ use std::collections::BTreeSet;
 use std::sync::Arc;
 use std::time::Duration;
 
-use lash_kernel_doc::{Datum, EffectName, EntityId, JoinMode, Site, TaskId, Type, Value};
-use num_traits::ToPrimitive;
+use lash_kernel_doc::arena::{ArenaHandle, Body};
+use lash_kernel_doc::heap::PageValue;
+use lash_kernel_doc::{Datum, EffectName, JoinMode, NewObject, Site, TaskId, Type, Value};
+use lash_kernel_state::arena::Arena;
 
 use super::exec::Call;
 use super::ops::{Flow, Reg, Status};
 use super::stream::Running;
 use super::{
     Eval, Halt, Incoming, Interrupt, Joiner, KernelMachine, ListJoin, Task, TaskState, Wait, bound,
-    error, fault, raise,
+    fault, raise,
 };
 use crate::compile::{
     Action, ActionKind, Atom, Callee, CodeId, Executable, Form, LibId, Nested, NestedCallee,
     NestedKind, StmtId,
 };
-use crate::heap::value_bytes;
 use crate::interface::{Bound, EffectMode, EffectRequest, Host, Request, SleepRequest, WaitId};
-use lash_kernel_doc::NativeHeap;
 use lash_kernel_doc::graph_tokens::{decode_body, encode_body};
-use lash_kernel_doc::heap::{ErrorRef, Payload};
+use lash_kernel_doc::heap::ErrorRef;
 use lash_kernel_state::kernel_internals::directory::ordinal_key;
 use lash_kernel_state::kernel_internals::tree::{Access, Cell, Tree};
-use lash_kernel_state::paged::{
-    ObjectInit, PhaseRecord, RoleRecord, SemanticHeap, WaitKindRecord, WaitPhase, WaitRecord,
-};
+use lash_kernel_state::paged::{PhaseRecord, RoleRecord, WaitKindRecord, WaitPhase, WaitRecord};
 
 /// What a call or a `spawn` runs, once its callee is read.
 pub(super) enum Target {
-    Code(CodeId, Vec<EntityId>),
+    Code(CodeId, Vec<ArenaHandle>),
     Library(LibId),
 }
 
-fn cancelled() -> Value {
-    error("cancelled", "the task was cancelled")
+/// The raise a `cancel` delivers, in page form (`K-TASK-017`).
+fn cancelled() -> PageValue {
+    PageValue::Error(Arc::new(ErrorRef::new(
+        "cancelled",
+        "the task was cancelled",
+    )))
+}
+
+/// A task's own `cancel` of itself raises at once.
+fn cancelled_here() -> Interrupt {
+    Interrupt::refused("cancelled", "the task was cancelled")
 }
 
 impl KernelMachine {
@@ -118,7 +125,7 @@ impl KernelMachine {
             }
             ActionKind::Sleep { duration, .. } => {
                 let duration = self.atom(task, exe, duration)?;
-                let duration = sleep_duration(duration)?;
+                let duration = sleep_duration(&self.arena.borrow(), duration)?;
                 let wait = self.request(task, stmt, &action.site)?;
                 self.issue(
                     task,
@@ -157,7 +164,7 @@ impl KernelMachine {
             }
             ActionKind::Yield => {
                 let yielding = self.task(task)?;
-                yielding.wake(Incoming::Value(Value::Null), false);
+                yielding.wake(Incoming::Value(PageValue::Null), false);
                 self.frame(task)?.awaiting = Some(stmt);
                 self.ready.push_back(task)?;
                 self.current = None;
@@ -168,7 +175,7 @@ impl KernelMachine {
                     return raise("type_error", "`cancel` takes a task handle");
                 };
                 if target == task {
-                    return Err(Interrupt::raised(cancelled()));
+                    return Err(cancelled_here());
                 }
                 self.cancel(target)?;
                 self.put(out, Value::Null);
@@ -327,7 +334,8 @@ impl KernelMachine {
                     self.enter(task, host, site, entry.occurrence)?;
                 }
                 self.capture(task, entry, act, PhaseRecord::Yielded)?;
-                self.task(task)?.wake(Incoming::Value(Value::Null), false);
+                self.task(task)?
+                    .wake(Incoming::Value(PageValue::Null), false);
                 self.frame(task)?.awaiting = Some(stmt);
                 self.ready.push_back(task)?;
                 self.current = None;
@@ -341,7 +349,7 @@ impl KernelMachine {
                     return raise("type_error", "`cancel` takes a task handle");
                 };
                 if target == task {
-                    return Err(Interrupt::raised(cancelled()));
+                    return Err(cancelled_here());
                 }
                 self.cancel(target)?;
                 self.put(args, Value::Null);
@@ -349,7 +357,7 @@ impl KernelMachine {
             }
             NestedKind::Sleep { .. } => {
                 let duration = self.take(args);
-                let duration = sleep_duration(duration)?;
+                let duration = sleep_duration(&self.arena.borrow(), duration)?;
                 self.capture(task, entry, act, PhaseRecord::Waiting)?;
                 let wait = self.request(task, stmt, site)?;
                 self.issue(
@@ -394,9 +402,8 @@ impl KernelMachine {
         mode: JoinMode,
         handles: &Value,
     ) -> Eval<Result<Value, Tree<TaskId>>> {
-        let len = match handles {
-            Value::Tuple(tuple) => tuple.summary.len,
-            Value::List(id) => self.heap.len(*id)?,
+        let len = match *handles {
+            Value::Tuple(items) | Value::List(items) => self.in_arena(|arena| arena.len(items))?,
             _ => {
                 return raise(
                     "type_error",
@@ -410,9 +417,10 @@ impl KernelMachine {
         }
         let mut tasks = Tree::new(true);
         for at in 0..len {
-            let member = match handles {
-                Value::Tuple(tuple) => self.heap.tuple_get(tuple, at)?,
-                Value::List(id) => self.heap.list_get(*id, at)?,
+            let member = match *handles {
+                Value::Tuple(items) | Value::List(items) => {
+                    self.in_arena(|arena| arena.item(items, at))?
+                }
                 _ => unreachable!(),
             };
             let Some(Value::Task(member)) = member else {
@@ -517,11 +525,8 @@ impl KernelMachine {
         // the frame stands here counts it once, as the frame's.
         for (site, reg) in &entry.roles {
             let held = self.take(reg.0 as usize);
-            let value = self.heap_write(|heap| {
-                heap.canonical_value(held.clone())
-                    .map_err(super::write_halt)
-            })?;
-            self.reserve_held(value_bytes(&value))?;
+            let value = self.page_form(&held)?;
+            self.reserve_held(self.cost_of(&held))?;
             roles.push(RoleRecord {
                 site: site.path[depth..].to_vec(),
                 value,
@@ -606,41 +611,17 @@ impl KernelMachine {
     /// The function a closure or a function reference names (`K-FN-005`).
     pub(super) fn target(&mut self, exe: &Executable, value: Value) -> Eval<Target> {
         match value {
-            Value::Closure(id) => {
-                let closure = self.heap.closure(id)?;
-                let closure_site = closure.site.resolve(self.heap.pages())?;
-                let site = Site::new(
-                    closure_site.unit.clone(),
-                    closure_site
-                        .path
-                        .iter()
-                        .copied()
-                        .chain([0])
-                        .collect::<Vec<_>>(),
-                );
-                let code = exe
-                    .code_at(&site)
-                    .ok_or_else(|| fault("a closure names no admitted code"))?;
-                let captures = exe
-                    .code(code)
-                    .captures
-                    .iter()
-                    .map(|capture| {
-                        let name = &exe.code(code).slots[capture.inner as usize].name;
-                        closure
-                            .captures
-                            .get(
-                                &lash_kernel_state::kernel_internals::metadata::metadata_key(name),
-                                self.heap.pages(),
-                            )?
-                            .map(|(_, id)| id)
-                            .ok_or_else(|| fault("a closure capture is missing"))
-                    })
-                    .collect::<Result<Vec<_>, _>>()?;
+            Value::Closure(closure) => {
+                let (site, captures) = self.in_arena(|arena| {
+                    let (site, captures) = arena.closure(closure)?;
+                    Ok((site.clone(), captures.to_vec()))
+                })?;
+                let code = super::project::closure_code(exe, &site)?;
                 Ok(Target::Code(code, captures))
             }
-            Value::Function(name) => {
-                let name = lash_kernel_doc::Name::new(crate::data::text_copy(&self.heap, &name)?);
+            Value::Function(_) | Value::LongFunction(_) => {
+                let name = self.in_arena(|arena| Ok(arena.semantics().text(&value)?.to_owned()))?;
+                let name = lash_kernel_doc::Name::new(name);
                 match exe.declared.get(&name) {
                     Some(code) => Ok(Target::Code(*code, Vec::new())),
                     None => raise("type_error", format!("no function `{name}` is declared")),
@@ -895,6 +876,7 @@ impl KernelMachine {
                 self.heap.pages(),
             )?,
             self.heap.pages().clone(),
+            std::rc::Rc::clone(&self.arena),
             Arc::clone(&self.exe),
         ))?;
         self.live_tasks += 1;
@@ -919,7 +901,8 @@ impl KernelMachine {
                 return Ok(Flow::Done);
             }
             // What the new task raises before it has a frame is its error.
-            Err(Interrupt::Raise(value)) => {
+            Err(raised @ (Interrupt::Raise(_) | Interrupt::Refuse(_))) => {
+                let value = self.thrown_by(raised)?;
                 self.end_task(child, Err(*value))?;
                 self.put(args, handle);
                 self.refresh_charging(task, exe)?;
@@ -928,7 +911,7 @@ impl KernelMachine {
             Err(halt) => return Err(halt),
         }
         let spawner = self.task(task)?;
-        spawner.wake(Incoming::Value(handle), false);
+        spawner.wake(Incoming::Value(PageValue::Task(child)), false);
         self.frame(task)?.awaiting = Some(stmt);
         self.ready.push_front(task)?;
         self.current = Some(child);
@@ -967,7 +950,7 @@ impl KernelMachine {
         members: &Tree<TaskId>,
         ended: Option<TaskId>,
     ) -> Result<Option<Result<Value, Value>>, Halt> {
-        let immediate = |result: &Result<Value, Value>| match mode {
+        let immediate = |result: &Result<PageValue, PageValue>| match mode {
             JoinMode::Race => true,
             JoinMode::Any => result.is_ok(),
             JoinMode::All => result.is_err(),
@@ -982,7 +965,7 @@ impl KernelMachine {
             if let Some(result) = result
                 && immediate(&result)
             {
-                return Ok(Some(result));
+                return Ok(Some(self.admit_result(&result)?));
             }
         }
         let mut results = Vec::new();
@@ -1000,21 +983,29 @@ impl KernelMachine {
                 && let Some(result) = &result
                 && immediate(result)
             {
-                return Ok(Some(result.clone()));
+                return Ok(Some(self.admit_result(result)?));
             }
             match result {
                 Some(result) => results.push(result),
                 None => complete = false,
             }
         }
-        let all = complete.then_some(results);
+        let all = match complete {
+            true => Some(
+                results
+                    .iter()
+                    .map(|result| self.admit_result(result))
+                    .collect::<Result<Vec<_>, _>>()?,
+            ),
+            false => None,
+        };
         let first = |_wanted: fn(&Result<Value, Value>) -> bool| None;
         Ok(match mode {
             JoinMode::All => match (first(Result::is_err), all) {
                 (Some(failure), _) => Some(failure),
                 (None, Some(results)) => {
                     let values = results.into_iter().filter_map(Result::ok).collect();
-                    Some(Ok(Value::List(self.alloc(ObjectInit::List(values))?)))
+                    Some(Ok(self.new_object(NewObject::List(values))?))
                 }
                 (None, None) => None,
             },
@@ -1022,19 +1013,22 @@ impl KernelMachine {
                 Some(results) => {
                     let mut records = Vec::with_capacity(results.len());
                     for result in results {
-                        let fields = match result {
-                            Ok(value) => vec![
-                                (field_name("status"), Value::text("ok")),
-                                (field_name("value"), value),
-                            ],
-                            Err(value) => vec![
-                                (field_name("status"), Value::text("error")),
-                                (field_name("error"), value),
-                            ],
+                        let fields = {
+                            let mut arena = self.arena.borrow_mut();
+                            let status = arena.text("status");
+                            match result {
+                                Ok(value) => {
+                                    vec![(status, arena.text("ok")), (arena.text("value"), value)]
+                                }
+                                Err(value) => vec![
+                                    (status, arena.text("error")),
+                                    (arena.text("error"), value),
+                                ],
+                            }
                         };
-                        records.push(Value::Record(self.alloc(ObjectInit::Record(fields))?));
+                        records.push(self.new_object(NewObject::Record(fields))?);
                     }
-                    Some(Ok(Value::List(self.alloc(ObjectInit::List(records))?)))
+                    Some(Ok(self.new_object(NewObject::List(records))?))
                 }
                 None => None,
             },
@@ -1043,25 +1037,26 @@ impl KernelMachine {
                 (Some(success), _) => Some(success),
                 (None, Some(results)) if !results.is_empty() => {
                     let errors = results.into_iter().filter_map(Result::err).collect();
-                    let errors = Value::List(self.alloc(ObjectInit::List(errors))?);
-                    Some(Err(Value::Error(Arc::new(ErrorRef {
-                        kind: field_name("all_failed"),
-                        message: field_name("every task of the `join any` failed"),
-                        cost: lash_kernel_doc::heap::LogicalBytes(
-                            crate::heap::value_bytes(&errors).saturating_add(
-                                "all_failed".len() as u64
-                                    + "every task of the `join any` failed".len() as u64,
-                            ),
-                        ),
-                        depth: 1,
-                        has_edges: true,
-                        task_edges: 0,
-                        family: None,
-                        data: Payload::Resident(Arc::new(errors)),
-                    }))))
+                    let errors = self.new_object(NewObject::List(errors))?;
+                    Some(Err(self.arena.borrow_mut().error(
+                        "all_failed",
+                        "every task of the `join any` failed",
+                        errors,
+                    )))
                 }
                 _ => None,
             },
+        })
+    }
+
+    /// A task's ended result, admitted to the arena.
+    fn admit_result(
+        &mut self,
+        result: &Result<PageValue, PageValue>,
+    ) -> Result<Result<Value, Value>, Halt> {
+        Ok(match result {
+            Ok(value) => Ok(self.admit_page(value)?),
+            Err(value) => Err(self.admit_page(value)?),
         })
     }
 
@@ -1184,25 +1179,18 @@ pub(super) fn then_yields(exe: &Executable, frame: &super::Frame) -> bool {
 }
 
 /// A `sleep`'s duration, from its argument's value.
-fn sleep_duration(value: Value) -> Eval<Duration> {
+fn sleep_duration(arena: &Arena, value: Value) -> Eval<Duration> {
+    let negative = |handle| match arena.body(handle) {
+        Ok(Body::BigInt(integer)) => integer.is_negative(),
+        _ => true,
+    };
     match value {
-        Value::Int(integer)
-            if !match &integer {
-                lash_kernel_doc::heap::IntRef::Inline(i) => i.is_negative(),
-                lash_kernel_doc::heap::IntRef::Paged { summary, .. } => summary.negative,
-            } =>
-        {
-            Ok(Duration::from_millis(match integer {
-                lash_kernel_doc::heap::IntRef::Inline(integer) => {
-                    integer.to_u64().unwrap_or(u64::MAX)
-                }
-                _ => u64::MAX,
-            }))
-        }
+        Value::Int(word) if word >= 0 => Ok(Duration::from_millis(word as u64)),
+        Value::BigInt(handle) if !negative(handle) => Ok(Duration::from_millis(u64::MAX)),
         Value::Float(float) if float.get().is_finite() && float.get() >= 0.0 => {
             Ok(Duration::try_from_secs_f64(float.get() / 1000.0).unwrap_or(Duration::MAX))
         }
-        Value::Int(_) | Value::Float(_) => raise(
+        Value::Int(_) | Value::BigInt(_) | Value::Float(_) => raise(
             "number_range",
             "`sleep` takes a duration that is finite and not negative",
         ),
@@ -1237,12 +1225,4 @@ fn append<T: Cell>(
         })?,
     };
     tree.write(ordinal_key(index), value, access)
-}
-
-fn field_name(text: &str) -> lash_kernel_doc::heap::TextRef {
-    lash_kernel_doc::heap::TextRef {
-        normal: Default::default(),
-        summary: lash_kernel_doc::heap_values::text_summary(text),
-        body: Payload::Resident(Arc::from(text)),
-    }
 }

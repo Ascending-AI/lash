@@ -1600,33 +1600,24 @@ fn step_edges(codes: &[Code], blocks: &[Block], stmts: &[Stmt], base: Base) -> V
     edges
 }
 
-/// Immutable inline literals belong to compiled code. Reading one shares its
-/// resident descriptor; only a value that needs pages is admitted by a heap.
+/// An immediate literal is a compiled value; one an arena object holds is
+/// built in the run's arena when the operation reads it.
 pub(crate) enum Constant {
     Resident(doc::Value),
     Deferred(doc::Literal),
 }
 impl From<doc::Literal> for Constant {
     fn from(literal: doc::Literal) -> Self {
-        use doc::heap::{BytesRef, IMMUTABLE_INLINE_MAX, Payload};
+        use doc::arena::ShortText;
         let resident = match &literal {
-            doc::Literal::Text(text) if text.len() as u64 <= IMMUTABLE_INLINE_MAX => {
-                Some(doc::Value::text(text.as_str()))
-            }
-            doc::Literal::Function(name) if name.as_str().len() as u64 <= IMMUTABLE_INLINE_MAX => {
-                let doc::Value::Text(text) = doc::Value::text(name.as_str()) else {
-                    unreachable!()
-                };
-                Some(doc::Value::Function(text))
-            }
-            doc::Literal::Bytes(bytes) if bytes.as_slice().len() as u64 <= IMMUTABLE_INLINE_MAX => {
-                Some(doc::Value::Bytes(BytesRef {
-                    normal: Default::default(),
-                    len: bytes.as_slice().len() as u64,
-                    body: Payload::Resident(Arc::from(bytes.as_slice())),
-                }))
-            }
-            _ => None,
+            doc::Literal::Null => Some(doc::Value::Null),
+            doc::Literal::Absent => Some(doc::Value::Absent),
+            doc::Literal::Bool(value) => Some(doc::Value::Bool(*value)),
+            doc::Literal::Float(value) => Some(doc::Value::Float(*value)),
+            doc::Literal::Int(value) => value.word().map(doc::Value::Int),
+            doc::Literal::Text(text) => ShortText::new(text).map(doc::Value::Text),
+            doc::Literal::Function(name) => ShortText::new(name.as_str()).map(doc::Value::Function),
+            doc::Literal::Bytes(_) => None,
         };
         resident.map_or_else(|| Self::Deferred(literal), Self::Resident)
     }

@@ -1,54 +1,38 @@
 //! Fallible structural equality, datum identity and lexicographic order.
 use crate::numeric::{Numeric, number_cmp, scalar_cmp};
 use crate::raised;
-use lash_kernel_doc::heap::{Chunk, HeapFault, Payload};
-use lash_kernel_doc::{EntityId, NativeError, NativeHeap, Value, ValueKind};
+use lash_kernel_doc::arena::ArenaHandle;
+use lash_kernel_doc::{Args, NativeError, Nursery, Value};
 use std::cmp::Ordering;
-use std::collections::HashSet;
 
-type Pair = (ValueKind, EntityId, EntityId);
+fn numeric(value: &Value) -> bool {
+    matches!(value, Value::Int(_) | Value::BigInt(_) | Value::Float(_))
+}
 
-/// A prepared comparison reads only operands held in its descriptors.
+/// A prepared comparison reads only operands held in its values.
 pub(crate) fn scalar_equal(a: &Value, b: &Value) -> Option<bool> {
-    if matches!(
-        (a, b),
-        (
-            Value::Int(_) | Value::Float(_),
-            Value::Int(_) | Value::Float(_)
-        )
-    ) {
-        return Some(
-            scalar_cmp(&Numeric::resident(a)?, &Numeric::resident(b)?).ok()?
-                == Some(Ordering::Equal),
-        );
-    }
+    use Value as V;
     Some(match (a, b) {
-        (Value::Null, Value::Null) | (Value::Absent, Value::Absent) => true,
-        (Value::Bool(a), Value::Bool(b)) => a == b,
-        (Value::Text(a), Value::Text(b)) => match (&a.body, &b.body) {
-            (Payload::Resident(a), Payload::Resident(b)) => a == b,
-            _ => return None,
-        },
-        (Value::Bytes(a), Value::Bytes(b)) => match (&a.body, &b.body) {
-            (Payload::Resident(a), Payload::Resident(b)) => a == b,
-            _ => return None,
-        },
-        (Value::Timestamp(a), Value::Timestamp(b)) => a == b,
-        (Value::Task(a), Value::Task(b)) => a == b,
-        (Value::Ref(a), Value::Ref(b)) => a == b,
-        (Value::Function(a), Value::Function(b)) => match (&a.body, &b.body) {
-            (Payload::Resident(a), Payload::Resident(b)) => a == b,
-            _ => return None,
-        },
-        (Value::Handle(a), Value::Handle(b)) => a == b,
-        (Value::Closure(a), Value::Closure(b)) => a == b,
-        (Value::Tuple(_), Value::Tuple(_))
-        | (Value::Error(_), Value::Error(_))
-        | (Value::List(_), Value::List(_))
-        | (Value::Map(_), Value::Map(_))
-        | (Value::Set(_), Value::Set(_))
-        | (Value::Record(_), Value::Record(_)) => return None,
-        _ => false,
+        (V::Int(_) | V::Float(_), V::Int(_) | V::Float(_)) => {
+            scalar_cmp(&Numeric::resident(a)?, &Numeric::resident(b)?).ok()?
+                == Some(Ordering::Equal)
+        }
+        (V::Null, V::Null) | (V::Absent, V::Absent) => true,
+        (V::Bool(a), V::Bool(b)) => a == b,
+        (V::Text(a), V::Text(b)) | (V::Function(a), V::Function(b)) => a == b,
+        // A short text or name is never equal to a long one, nor a word
+        // integer to a big one.
+        (V::Text(_), V::LongText(_))
+        | (V::LongText(_), V::Text(_))
+        | (V::Function(_), V::LongFunction(_))
+        | (V::LongFunction(_), V::Function(_))
+        | (V::Int(_), V::BigInt(_))
+        | (V::BigInt(_), V::Int(_)) => false,
+        (V::Timestamp(a), V::Timestamp(b)) => a == b,
+        (V::Task(a), V::Task(b)) | (V::TaskRef(a), V::TaskRef(b)) => a == b,
+        (V::Closure(a), V::Closure(b)) | (V::ObjectRef(a), V::ObjectRef(b)) => a == b,
+        _ if a.kind() != b.kind() && !(numeric(a) && numeric(b)) => false,
+        _ => return None,
     })
 }
 
@@ -56,27 +40,26 @@ pub(crate) fn scalar_compare(
     a: &Value,
     b: &Value,
 ) -> Option<Result<Option<Ordering>, NativeError>> {
+    use Value as V;
     Some(match (a, b) {
-        (Value::Int(_) | Value::Float(_), Value::Int(_) | Value::Float(_)) => {
+        (V::Int(_) | V::Float(_), V::Int(_) | V::Float(_)) => {
             scalar_cmp(&Numeric::resident(a)?, &Numeric::resident(b)?)
         }
-        (Value::Text(a), Value::Text(b)) => match (&a.body, &b.body) {
-            (Payload::Resident(a), Payload::Resident(b)) => Ok(Some(a.cmp(b))),
-            _ => return None,
-        },
-        (Value::Bytes(a), Value::Bytes(b)) => match (&a.body, &b.body) {
-            (Payload::Resident(a), Payload::Resident(b)) => Ok(Some(a.cmp(b))),
-            _ => return None,
-        },
-        (Value::Timestamp(a), Value::Timestamp(b)) => Ok(Some(a.cmp(b))),
-        (Value::Bool(a), Value::Bool(b)) => Ok(Some(a.cmp(b))),
-        (Value::Tuple(_), Value::Tuple(_)) | (Value::List(_), Value::List(_)) => return None,
+        (V::Text(a), V::Text(b)) => Ok(Some(a.as_bytes().cmp(b.as_bytes()))),
+        (V::Timestamp(a), V::Timestamp(b)) => Ok(Some(a.cmp(b))),
+        (V::Bool(a), V::Bool(b)) => Ok(Some(a.cmp(b))),
+        (V::Int(_) | V::BigInt(_) | V::Float(_), V::Int(_) | V::BigInt(_) | V::Float(_))
+        | (V::Text(_) | V::LongText(_), V::Text(_) | V::LongText(_))
+        | (V::Bytes(_), V::Bytes(_))
+        | (V::Timestamp(_) | V::BigTimestamp(_), V::Timestamp(_) | V::BigTimestamp(_))
+        | (V::Tuple(_), V::Tuple(_))
+        | (V::List(_), V::List(_)) => return None,
         _ => Err(raised("type_error", "values have no shared ordering")),
     })
 }
 
-pub fn equal(a: &Value, b: &Value, heap: &dyn NativeHeap) -> Result<bool, HeapFault> {
-    heap.equal(a, b)
+pub fn equal(a: &Value, b: &Value, args: &Args<'_>) -> Result<bool, NativeError> {
+    args.equal(a, b)
 }
 
 pub(crate) fn scalar_same(a: &Value, b: &Value) -> Option<bool> {
@@ -92,30 +75,9 @@ pub(crate) fn scalar_same(a: &Value, b: &Value) -> Option<bool> {
     })
 }
 
-pub fn same(a: &Value, b: &Value, heap: &dyn NativeHeap) -> Result<bool, HeapFault> {
-    enum Step {
-        Pair(Value, Value),
-        Members(
-            std::sync::Arc<lash_kernel_doc::heap::TupleRef>,
-            std::sync::Arc<lash_kernel_doc::heap::TupleRef>,
-            u64,
-        ),
-    }
-    let mut pending = vec![Step::Pair(a.clone(), b.clone())];
-    while let Some(step) = pending.pop() {
-        let (a, b) = match step {
-            Step::Pair(a, b) => (a, b),
-            Step::Members(a, b, index) => {
-                if index == a.summary.len {
-                    continue;
-                }
-                let left = required(heap.tuple_get(&a, index)?)?;
-                let right = required(heap.tuple_get(&b, index)?)?;
-                pending.push(Step::Members(a, b, index + 1));
-                pending.push(Step::Pair(left, right));
-                continue;
-            }
-        };
+pub fn same(a: &Value, b: &Value, args: &Args<'_>) -> Result<bool, NativeError> {
+    let mut pending = vec![(*a, *b)];
+    while let Some((a, b)) = pending.pop() {
         if let Some(same) = scalar_same(&a, &b) {
             if !same {
                 return Ok(false);
@@ -123,28 +85,34 @@ pub fn same(a: &Value, b: &Value, heap: &dyn NativeHeap) -> Result<bool, HeapFau
             continue;
         }
         match (&a, &b) {
-            (Value::Tuple(a), Value::Tuple(b)) => {
-                if a.summary.len != b.summary.len {
+            (Value::Tuple(_), Value::Tuple(_)) => {
+                let (Some(left), Some(right)) = (args.sequence(&a)?, args.sequence(&b)?) else {
+                    return Err(NativeError::Malformed("a tuple names no sequence"));
+                };
+                if left.len() != right.len() {
                     return Ok(false);
                 }
-                pending.push(Step::Members(a.clone(), b.clone(), 0));
+                // Members in order: the last pushed is compared first.
+                for index in (0..left.len()).rev() {
+                    let (Some(x), Some(y)) = (left.get(index)?, right.get(index)?) else {
+                        return Err(NativeError::Malformed("a tuple member is absent"));
+                    };
+                    pending.push((*x, *y));
+                }
             }
-            (Value::Error(a), Value::Error(b)) => {
-                if !heap.equal(&Value::Text(a.kind.clone()), &Value::Text(b.kind.clone()))?
-                    || !heap.equal(
-                        &Value::Text(a.message.clone()),
-                        &Value::Text(b.message.clone()),
-                    )?
+            (Value::Error(_), Value::Error(_)) => {
+                let (Some(left), Some(right)) = (args.error(&a)?, args.error(&b)?) else {
+                    return Err(NativeError::Malformed("an error names no parts"));
+                };
+                if !args.equal(&left.kind, &right.kind)?
+                    || !args.equal(&left.message, &right.message)?
                 {
                     return Ok(false);
                 }
-                pending.push(Step::Pair(heap.error_data(a)?, heap.error_data(b)?));
+                pending.push((left.data, right.data));
             }
-            (Value::Function(_), Value::Function(_))
-            | (Value::Int(_), Value::Int(_))
-            | (Value::Text(_), Value::Text(_))
-            | (Value::Bytes(_), Value::Bytes(_)) => {
-                if !heap.equal(&a, &b)? {
+            _ if a.kind() == b.kind() => {
+                if !args.equal(&a, &b)? {
                     return Ok(false);
                 }
             }
@@ -153,28 +121,28 @@ pub fn same(a: &Value, b: &Value, heap: &dyn NativeHeap) -> Result<bool, HeapFau
     }
     Ok(true)
 }
-fn required(value: Option<Value>) -> Result<Value, HeapFault> {
-    value.ok_or_else(|| HeapFault::Malformed("an admitted sequence member is absent".into()))
-}
 
-/// Each sequence advances one member at a time. It never snapshots a list
-/// or loads the pages of later members before the equal prefix needs them.
+/// Each sequence advances one member at a time, and never snapshots a
+/// list.
+/// A paged integer compared whole holds its bytes in `new`.
 pub fn compare(
     a: &Value,
     b: &Value,
-    heap: &mut dyn NativeHeap,
+    args: &Args<'_>,
+    new: &mut Nursery<'_>,
 ) -> Result<Option<Ordering>, NativeError> {
     enum Step {
         Values(Value, Value, bool),
         Members(Value, Value, u64, u64, u64),
-        Leave(Pair),
+        Leave,
     }
-    let mut pending = vec![Step::Values(a.clone(), b.clone(), false)];
-    let mut active = HashSet::new();
+    let mut pending = vec![Step::Values(*a, *b, false)];
+    // The list pairs being compared, innermost last.
+    let mut active: Vec<(ArenaHandle, ArenaHandle)> = Vec::new();
     while let Some(step) = pending.pop() {
         let (a, b, member) = match step {
-            Step::Leave(pair) => {
-                active.remove(&pair);
+            Step::Leave => {
+                active.pop();
                 continue;
             }
             Step::Members(a, b, index, a_len, b_len) => {
@@ -185,53 +153,73 @@ pub fn compare(
                     }
                     continue;
                 }
-                let get = |value: &Value, heap: &dyn NativeHeap| match value {
-                    Value::Tuple(t) => heap.tuple_get(t, index),
-                    Value::List(id) => heap.list_get(*id, index),
-                    _ => Err(HeapFault::Malformed(
-                        "ordering cursor has another kind".into(),
-                    )),
+                let member = |value: &Value| -> Result<Value, NativeError> {
+                    args.sequence(value)?
+                        .and_then(|sequence| sequence.get(index).transpose())
+                        .transpose()?
+                        .copied()
+                        .ok_or(NativeError::Malformed("an ordered member is absent"))
                 };
-                let left = required(get(&a, heap)?)?;
-                let right = required(get(&b, heap)?)?;
+                let left = member(&a)?;
+                let right = member(&b)?;
                 pending.push(Step::Members(a, b, index + 1, a_len, b_len));
                 pending.push(Step::Values(left, right, true));
                 continue;
             }
             Step::Values(a, b, member) => (a, b, member),
         };
-        if member && heap.equal(&a, &b)? {
+        if member && args.equal(&a, &b)? {
+            continue;
+        }
+        if let Some(order) = scalar_compare(&a, &b) {
+            let order = order?;
+            if order != Some(Ordering::Equal) {
+                return Ok(order);
+            }
             continue;
         }
         let order = match (&a, &b) {
-            (Value::Int(_) | Value::Float(_), Value::Int(_) | Value::Float(_)) => {
-                number_cmp(&a, &b, heap)?
+            (
+                Value::Int(_) | Value::BigInt(_) | Value::Float(_),
+                Value::Int(_) | Value::BigInt(_) | Value::Float(_),
+            ) => number_cmp(&a, &b, args, new)?,
+            (Value::Text(_) | Value::LongText(_), Value::Text(_) | Value::LongText(_)) => {
+                let (Some(left), Some(right)) = (args.text(&a)?, args.text(&b)?) else {
+                    return Err(NativeError::Malformed("a text names no text"));
+                };
+                Some(left.whole()?.as_bytes().cmp(right.whole()?.as_bytes()))
             }
-            (Value::Text(a), Value::Text(b)) => Some(payload_order(
-                &Value::Text(a.clone()),
-                &Value::Text(b.clone()),
-                heap,
-            )?),
-            (Value::Bytes(a), Value::Bytes(b)) => Some(payload_order(
-                &Value::Bytes(a.clone()),
-                &Value::Bytes(b.clone()),
-                heap,
-            )?),
-            (Value::Timestamp(a), Value::Timestamp(b)) => Some(a.cmp(b)),
-            (Value::Bool(a), Value::Bool(b)) => Some(a.cmp(b)),
-            (Value::Tuple(a_tuple), Value::Tuple(b_tuple)) => {
-                let lengths = (a_tuple.summary.len, b_tuple.summary.len);
-                pending.push(Step::Members(a, b, 0, lengths.0, lengths.1));
+            (Value::Bytes(_), Value::Bytes(_)) => {
+                let (Some(left), Some(right)) = (args.bytes(&a)?, args.bytes(&b)?) else {
+                    return Err(NativeError::Malformed("bytes name no bytes"));
+                };
+                Some(left.whole()?.cmp(&right.whole()?))
+            }
+            (
+                Value::Timestamp(_) | Value::BigTimestamp(_),
+                Value::Timestamp(_) | Value::BigTimestamp(_),
+            ) => match (args.timestamp(&a)?, args.timestamp(&b)?) {
+                (Some(left), Some(right)) => Some(left.cmp(&right)),
+                _ => return Err(NativeError::Malformed("a timestamp names no time")),
+            },
+            (Value::Tuple(_), Value::Tuple(_)) => {
+                let (Some(left), Some(right)) = (args.sequence(&a)?, args.sequence(&b)?) else {
+                    return Err(NativeError::Malformed("a tuple names no sequence"));
+                };
+                pending.push(Step::Members(a, b, 0, left.len(), right.len()));
                 continue;
             }
             (Value::List(a_id), Value::List(b_id)) => {
-                let pair = (ValueKind::List, *a_id, *b_id);
-                if !active.insert(pair) {
+                let pair = (*a_id, *b_id);
+                if active.contains(&pair) {
                     continue;
                 }
-                let lengths = (heap.len(*a_id)?, heap.len(*b_id)?);
-                pending.push(Step::Leave(pair));
-                pending.push(Step::Members(a, b, 0, lengths.0, lengths.1));
+                let (Some(left), Some(right)) = (args.sequence(&a)?, args.sequence(&b)?) else {
+                    return Err(NativeError::Malformed("a list names no sequence"));
+                };
+                active.push(pair);
+                pending.push(Step::Leave);
+                pending.push(Step::Members(a, b, 0, left.len(), right.len()));
                 continue;
             }
             _ => return Err(raised("type_error", "values have no shared ordering")),
@@ -241,54 +229,4 @@ pub fn compare(
         }
     }
     Ok(Some(Ordering::Equal))
-}
-
-/// UTF-8 lexicographic order agrees with scalar order. Compare only the
-/// prefix required, with at most one bounded chunk from either payload.
-pub(crate) fn payload_order(
-    a: &Value,
-    b: &Value,
-    heap: &dyn NativeHeap,
-) -> Result<Ordering, HeapFault> {
-    let length = |v: &Value| match v {
-        Value::Text(t) => t.summary.utf8_bytes,
-        Value::Bytes(b) => b.len,
-        _ => 0,
-    };
-    let (a_len, b_len) = (length(a), length(b));
-    let chunk = |value: &Value, offset: u64, len: u64| -> Result<Vec<u8>, HeapFault> {
-        let mut bytes = Vec::new();
-        heap.payload_visit(value, offset..len, &mut |chunk| {
-            let data = match chunk {
-                Chunk::Text(text) => {
-                    let mut end = text.len().min(4096);
-                    while !text.is_char_boundary(end) {
-                        end -= 1;
-                    }
-                    &text.as_bytes()[..end]
-                }
-                Chunk::Bytes(bytes) => &bytes[..bytes.len().min(4096)],
-            };
-            bytes.extend_from_slice(data);
-            std::ops::ControlFlow::Break(())
-        })?;
-        if bytes.is_empty() && offset != len {
-            return Err(HeapFault::Malformed(
-                "payload ended before its descriptor length".into(),
-            ));
-        }
-        Ok(bytes)
-    };
-    let mut offset = 0;
-    while offset < a_len.min(b_len) {
-        let left = chunk(a, offset, a_len)?;
-        let right = chunk(b, offset, b_len)?;
-        let count = left.len().min(right.len());
-        let order = left[..count].cmp(&right[..count]);
-        if order != Ordering::Equal {
-            return Ok(order);
-        }
-        offset += count as u64;
-    }
-    Ok(a_len.cmp(&b_len))
 }

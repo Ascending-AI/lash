@@ -830,27 +830,26 @@ fn k_col_014_native_charges_count_the_sizes_and_are_repeatable() {
         .find(|(_, f)| f.definition().name.as_str() == "list.copy")
         .unwrap();
     let mut heap = crate::testsupport::heap();
-    use lash_kernel_doc::{NativeCall, NativeHeap, Object, Operand, Value, WorkCounter};
-    let xs = Value::List(heap.allocate(Object::List(vec![Value::Null; 3])).unwrap());
+    use lash_kernel_doc::{Operand, WorkCounter};
+    let xs = crate::testsupport::decode(&mut heap, Datum::List(vec![Datum::Null; 3]));
     for _ in 0..2 {
-        let result = copy
-            .native()
-            .unwrap()
-            .call(NativeCall {
-                args: std::slice::from_ref(&xs),
-                heap: &mut heap,
-                counter: &mut WorkCounter::new(None),
-            })
-            .unwrap();
+        let result = crate::testsupport::call(
+            &mut heap,
+            &**copy.native().unwrap(),
+            std::slice::from_ref(&xs),
+            u64::MAX,
+            &mut WorkCounter::new(None),
+        )
+        .unwrap();
         let charge = copy.definition().charge.evaluate(&mut |operand, _| {
             let value = match operand {
                 Operand::Result => &result,
                 Operand::Param(_) => &xs,
             };
-            1 + heap.len(value.object().unwrap()).unwrap()
+            1 + heap.arena().len(value.handle().unwrap()).unwrap()
         });
         assert_eq!(charge, 9);
-        assert_ne!(xs.object(), result.object());
+        assert_ne!(xs.handle(), result.handle());
     }
 }
 
@@ -1154,40 +1153,37 @@ fn list_get_or_distinguishes_missing_positions_from_present_absent() {
 /// input remains rooted; no reservation spy decides this result.
 #[test]
 fn collection_expansion_refuses_under_the_real_census() {
-    use lash_kernel_doc::{NativeCall, NativeError, NativeHeap, Object, Value, WorkCounter};
+    use lash_kernel_doc::WorkCounter;
     let registry = registry();
     for name in ["tuple.concat", "list.concat", "list.entries"] {
         let mut heap = crate::testsupport::heap();
-        let xs = if name == "tuple.concat" {
-            Value::Tuple(heap.tuple(vec![Value::Null]).unwrap())
-        } else {
-            Value::List(heap.allocate(Object::List(vec![Value::Null])).unwrap())
-        };
-        let args = [xs.clone(), xs];
+        let xs = crate::testsupport::decode(
+            &mut heap,
+            if name == "tuple.concat" {
+                Datum::Tuple(vec![Datum::Null])
+            } else {
+                Datum::List(vec![Datum::Null])
+            },
+        );
+        let args = [xs, xs];
         let args = if name == "list.entries" {
             &args[..1]
         } else {
             &args[..]
         };
-        crate::testsupport::hold_with_extra(&mut heap, args, 0);
         let (_, function) = registry
             .iter()
             .find(|(_, f)| f.definition().name.as_str() == name)
             .unwrap();
-        let result = function.native().unwrap().call(NativeCall {
+        let result = crate::testsupport::call(
+            &mut heap,
+            &**function.native().unwrap(),
             args,
-            heap: &mut heap,
-            counter: &mut WorkCounter::new(None),
-        });
-        assert!(
-            matches!(result, Err(NativeError::Memory)),
-            "{name}: {result:?}"
+            0,
+            &mut WorkCounter::new(None),
         );
-        match &args[0] {
-            Value::Tuple(tuple) => assert_eq!(tuple.summary.len, 1),
-            Value::List(id) => assert_eq!(heap.len(*id).unwrap(), 1),
-            _ => unreachable!(),
-        }
+        assert!(crate::testsupport::exhausted(&result), "{name}: {result:?}");
+        assert_eq!(heap.arena().len(args[0].handle().unwrap()).unwrap(), 1);
     }
 }
 
@@ -1196,7 +1192,7 @@ fn collection_expansion_refuses_under_the_real_census() {
 /// and its charge bounds the work it did on the paged heap.
 #[test]
 fn index_of_range_charge_bounds_search_and_numeric_equivalence() {
-    use lash_kernel_doc::{Measure, NativeCall, Operand, WorkCounter};
+    use lash_kernel_doc::{Measure, Operand, WorkCounter};
     let registry = registry();
     let (_, search) = registry
         .iter()
@@ -1218,15 +1214,14 @@ fn index_of_range_charge_bounds_search_and_numeric_equivalence() {
             .map(|arg| crate::testsupport::decode(&mut heap, arg))
             .collect();
             let mut counter = WorkCounter::new(None);
-            let answer = search
-                .native()
-                .unwrap()
-                .call(NativeCall {
-                    args: &args,
-                    heap: &mut heap,
-                    counter: &mut counter,
-                })
-                .unwrap();
+            let answer = crate::testsupport::call(
+                &mut heap,
+                &**search.native().unwrap(),
+                &args,
+                u64::MAX,
+                &mut counter,
+            )
+            .unwrap();
             assert_eq!(
                 crate::testsupport::datum(&heap, &answer),
                 int(if length == 0 { -1 } else { 0 })
@@ -1272,9 +1267,7 @@ fn index_of_range_charge_bounds_search_and_numeric_equivalence() {
 /// immutable result only, and bounds the work it did on the paged heap.
 #[test]
 fn identity_key_projection_preserves_identity_and_bounds_its_charge() {
-    use lash_kernel_doc::{
-        Float, Identity, NativeCall, NativeHeap as _, Operand, Value, WorkCounter,
-    };
+    use lash_kernel_doc::{Float, Operand, Value, WorkCounter};
     let registry = registry();
     let (_, function) = registry
         .iter()
@@ -1290,30 +1283,23 @@ fn identity_key_projection_preserves_identity_and_bounds_its_charge() {
     let missing = crate::testsupport::decode(&mut heap, tuple(vec![text("missing")]));
     let fault = crate::testsupport::decode(&mut heap, text("fault"));
     for length in [0, 1, 8, 64] {
-        let keys = Value::Tuple(heap.tuple(vec![Value::List(object); length]).unwrap());
-        let args = [keys, missing.clone(), fault.clone()];
-        let mut work = WorkCounter::new(None);
-        let out = native
-            .call(NativeCall {
-                args: &args,
-                heap: &mut heap,
-                counter: &mut work,
-            })
+        let keys = heap
+            .arena_mut()
+            .tuple(vec![Value::List(object); length], usize::MAX)
             .unwrap();
+        let args = [keys, missing, fault];
+        let mut work = WorkCounter::new(None);
+        let out =
+            crate::testsupport::call(&mut heap, &**native, &args, u64::MAX, &mut work).unwrap();
         let Value::Tuple(out) = out else {
             panic!("a projection of a tuple is a tuple")
         };
-        let mut members = Vec::new();
-        heap.tuple_visit(&out, &mut |member| {
-            members.push(member.clone());
-            std::ops::ControlFlow::Continue(())
-        })
-        .unwrap();
+        let members = heap.arena().semantics().sequence(out).unwrap().to_vec();
         assert_eq!(members.len(), length);
         assert!(
             members
                 .iter()
-                .all(|member| matches!(member, Value::Ref(Identity::Object(id)) if *id == object)),
+                .all(|member| matches!(member, Value::ObjectRef(id) if *id == object)),
             "every slot keys the one object by its identity"
         );
         let charged = function.definition().charge.evaluate(&mut |operand, _| {
@@ -1331,14 +1317,15 @@ fn identity_key_projection_preserves_identity_and_bounds_its_charge() {
             Datum::Float(Float::new(0.0)),
         ),
     ] {
-        let args = [value, missing.clone(), fault.clone()];
-        let out = native
-            .call(NativeCall {
-                args: &args,
-                heap: &mut heap,
-                counter: &mut WorkCounter::new(None),
-            })
-            .unwrap();
+        let args = [value, missing, fault];
+        let out = crate::testsupport::call(
+            &mut heap,
+            &**native,
+            &args,
+            u64::MAX,
+            &mut WorkCounter::new(None),
+        )
+        .unwrap();
         if let Value::Float(zero) = &out {
             assert_eq!(zero.get().to_bits(), 0.0_f64.to_bits());
         }

@@ -6,8 +6,8 @@
 use std::collections::{BTreeMap, BTreeSet};
 
 use lash_kernel_dialect::{Kept, Left, NotSaved, SavedFunction};
-use lash_kernel_doc::heap::{HeapFault, NativeError, NativeHeap as _};
-use lash_kernel_doc::{Name, Value};
+use lash_kernel_doc::Name;
+use lash_kernel_doc::heap::{HeapFault, PageValue};
 use lash_kernel_state::kernel_internals::PagedHeap;
 use lash_kernel_state::paged::{FunctionRecord, HeapWriteError, NameRef};
 
@@ -48,7 +48,7 @@ impl<'a> CellSaveContext<'a> {
         &mut self,
         function: &SavedFunction,
         description: &[u8],
-    ) -> Result<(FunctionRecord, Value), HeapFault> {
+    ) -> Result<(FunctionRecord, PageValue), HeapFault> {
         let (before, after) = function
             .token
             .as_ref()
@@ -56,7 +56,7 @@ impl<'a> CellSaveContext<'a> {
             .unwrap_or_default();
         let record = FunctionRecord {
             name: NameRef::new(&function.name, self.heap.pages())?,
-            meta: Value::Bytes(self.heap.bytes(description).map_err(native)?),
+            meta: PageValue::Bytes(self.heap.bytes(description)?),
             release: function.release,
             captures: function.captures.clone(),
             before,
@@ -65,13 +65,6 @@ impl<'a> CellSaveContext<'a> {
         let value = lash_kernel_dialect::kernel_internals::saved_value(function, self.heap)
             .map_err(write)?;
         Ok((record, value))
-    }
-}
-
-fn native(error: NativeError) -> HeapFault {
-    match error {
-        NativeError::Heap(fault) => fault,
-        other => HeapFault::Malformed(format!("a saved function's description: {other}")),
     }
 }
 

@@ -12,8 +12,8 @@ use std::collections::{BTreeMap, BTreeSet};
 use std::fmt;
 use std::sync::{Arc, Mutex, OnceLock};
 
+use crate::arena::native::NativeFunction;
 use crate::function::FunctionDefinition;
-use crate::heap::NativeFunction;
 use crate::name::{FunctionId, FunctionName};
 use crate::plan::HelperPlan;
 use crate::validate::{Invalid, validate_identified_definition};

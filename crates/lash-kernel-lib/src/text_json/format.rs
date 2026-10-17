@@ -1,6 +1,6 @@
 use std::fmt::Write as _;
 
-use lash_kernel_doc::{Formula, NativeCall, NativeError, NativeHeap, Type, Value};
+use lash_kernel_doc::{Formula, NativeCall, NativeError, NewObject, Nursery, Type, Value};
 use num_traits::ToPrimitive;
 
 use super::{
@@ -62,8 +62,8 @@ pub(super) fn functions() -> Vec<Function> {
 }
 
 /// K-LFMT-003: decimal parts, without a source language's layout policy.
-fn decimal_parts(call: NativeCall<'_>) -> Result<Value, NativeError> {
-    let Value::Float(number) = arg(call.args, 0)? else {
+fn decimal_parts(call: NativeCall<'_, '_>) -> Result<Value, NativeError> {
+    let Value::Float(number) = arg(call.args.values(), 0)? else {
         return Err(raise("type_error", "expected float"));
     };
     let mut scratch = [0; 17];
@@ -73,13 +73,14 @@ fn decimal_parts(call: NativeCall<'_>) -> Result<Value, NativeError> {
         None => ("infinity", number.get().is_sign_negative(), "", 0),
     };
     // Both texts and the four tuple members are reserved before allocation.
-    super::reserve_list(call.heap, 4, kind.len() + digits.len() + 2)?;
-    Ok(Value::Tuple(call.heap.tuple(vec![
-        Value::text(kind),
+    super::reserve_list(call.new, 4, kind.len() + digits.len() + 2)?;
+    let (kind, digits) = (call.new.text(kind), call.new.text(digits));
+    Ok(call.new.allocate(NewObject::Tuple(vec![
+        kind,
         Value::Bool(negative),
-        Value::text(digits),
-        Value::Int(i64::from(exponent).into()),
-    ])?))
+        digits,
+        Value::Int(i64::from(exponent)),
+    ])))
 }
 
 /// A float's digits before the point, its sign and its point: what a
@@ -89,24 +90,25 @@ const FIXED_WHOLE: usize = 400;
 /// point and exponent.
 const SCIENTIFIC_FRAME: usize = 32;
 
-fn fixed(call: NativeCall<'_>) -> Result<Value, NativeError> {
+fn fixed(call: NativeCall<'_, '_>) -> Result<Value, NativeError> {
     // Precision is a count, never a dialect-specific default. The digits it
     // asks for are reserved before the formatter writes one.
-    let precision = count_arg(call.args, 1)?;
-    let text = match arg(call.args, 0)? {
-        Value::Int(i) => {
-            let integer = match i {
-                lash_kernel_doc::heap::IntRef::Inline(i) => i.clone(),
-                _ => call.heap.materialize_int(i)?,
+    let precision = count_arg(&call.args, 1)?;
+    let number = arg(call.args.values(), 0)?;
+    let text = match number {
+        Value::Int(_) | Value::BigInt(_) => {
+            let Some(integer) = call.args.integer(number)? else {
+                return Err(raise("type_error", "expected number"));
             };
+            call.new.read_whole(integer.bits().div_ceil(8))?;
             let whole = integer.to_string();
             if precision == 0 {
                 whole
             } else {
                 let size = precision
                     .checked_add(whole.len() + 1)
-                    .ok_or(NativeError::Memory)?;
-                let mut out = text_buffer(call.heap, size)?;
+                    .ok_or_else(crate::exhausted)?;
+                let mut out = text_buffer(call.new, size)?;
                 out.push_str(&whole);
                 out.push('.');
                 out.extend(std::iter::repeat_n('0', precision));
@@ -120,17 +122,17 @@ fn fixed(call: NativeCall<'_>) -> Result<Value, NativeError> {
                     "precision formatting requires a finite number",
                 ));
             }
-            precise(call.heap, precision, FIXED_WHOLE, |out| {
+            precise(call.new, precision, FIXED_WHOLE, |out| {
                 write!(out, "{:.*}", precision, f.get())
             })?
         }
         _ => return Err(raise("type_error", "expected number")),
     };
-    Ok(Value::text(text))
+    Ok(call.new.text(&text))
 }
 
-fn scientific(call: NativeCall<'_>) -> Result<Value, NativeError> {
-    let Value::Float(f) = arg(call.args, 0)? else {
+fn scientific(call: NativeCall<'_, '_>) -> Result<Value, NativeError> {
+    let Value::Float(f) = arg(call.args.values(), 0)? else {
         return Err(raise("type_error", "expected float"));
     };
     if !f.get().is_finite() {
@@ -139,53 +141,45 @@ fn scientific(call: NativeCall<'_>) -> Result<Value, NativeError> {
             "precision formatting requires a finite number",
         ));
     }
-    let precision = count_arg(call.args, 1)?;
-    precise(call.heap, precision, SCIENTIFIC_FRAME, |out| {
+    let precision = count_arg(&call.args, 1)?;
+    precise(call.new, precision, SCIENTIFIC_FRAME, |out| {
         write!(out, "{:.*e}", precision, f.get())
     })
-    .map(Value::text)
+    .map(|text| call.new.text(&text))
 }
 
 /// Writes a float to `precision` fraction digits into a buffer reserved for
 /// them and for the `frame` around them.
 fn precise(
-    heap: &mut dyn NativeHeap,
+    new: &mut Nursery<'_>,
     precision: usize,
     frame: usize,
     write: impl FnOnce(&mut String) -> std::fmt::Result,
 ) -> Result<String, NativeError> {
-    let size = precision.checked_add(frame).ok_or(NativeError::Memory)?;
-    let mut out = text_buffer(heap, size)?;
+    let size = precision.checked_add(frame).ok_or_else(crate::exhausted)?;
+    let mut out = text_buffer(new, size)?;
     // Writing to a `String` does not fail.
-    write(&mut out).map_err(|_| NativeError::Memory)?;
+    write(&mut out).map_err(|_| crate::exhausted())?;
     Ok(out)
 }
 
-fn radix(call: NativeCall<'_>) -> Result<Value, NativeError> {
-    let integer = integer_value(call.args, 1)?;
-    let radix = match integer {
-        lash_kernel_doc::heap::IntRef::Inline(value) => value.to_u32(),
-        lash_kernel_doc::heap::IntRef::Paged { summary, .. }
-            if summary.negative || summary.bits > 6 =>
-        {
-            None
-        }
-        _ => call.heap.materialize_int(integer)?.to_u32(),
-    }
-    .filter(|r| (2..=36).contains(r))
-    .ok_or_else(|| raise("number_range", "radix must be between 2 and 36"))?;
-    let integer = integer_value(call.args, 0)?;
-    crate::numbers::integer_text(call.heap, integer, radix)
+fn radix(call: NativeCall<'_, '_>) -> Result<Value, NativeError> {
+    let radix = integer_value(&call.args, 1)?
+        .to_u32()
+        .filter(|r| (2..=36).contains(r))
+        .ok_or_else(|| raise("number_range", "radix must be between 2 and 36"))?;
+    let integer = arg(call.args.values(), 0)?;
+    crate::numbers::integer_text(&call.args, call.new, integer, radix)
 }
 
-fn pad(call: NativeCall<'_>) -> Result<Value, NativeError> {
-    let start = match materialized_text(call.args, 3, call.heap)?.as_ref() {
+fn pad(call: NativeCall<'_, '_>) -> Result<Value, NativeError> {
+    let start = match materialized_text(&call.args, call.new, 3)?.as_ref() {
         "start" => true,
         "end" => false,
         _ => return Err(raise("type_error", "padding side must be start or end")),
     };
-    let text = materialized_text(call.args, 0, call.heap)?;
-    let width = count_arg(call.args, 1)?;
-    let fill = materialized_text(call.args, 2, call.heap)?;
-    super::text::padded(call.heap, &text, width, &fill, start)
+    let text = materialized_text(&call.args, call.new, 0)?;
+    let width = count_arg(&call.args, 1)?;
+    let fill = materialized_text(&call.args, call.new, 2)?;
+    super::text::padded(call.new, &text, width, &fill, start)
 }

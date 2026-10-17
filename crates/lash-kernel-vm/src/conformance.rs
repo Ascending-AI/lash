@@ -144,7 +144,7 @@ pub fn checkpoint(
                 ..
             }
             | TaskStateRecord::Ended(EndedTask::Returned(v) | EndedTask::Raised(v)) => {
-                *v = Value::Null
+                *v = PageValue::Null
             }
             _ => (),
         }
@@ -320,35 +320,35 @@ impl Reader {
             }
         })
     }
-    fn value(&mut self, value: &Value) -> Result<(), HeapFault> {
+    fn value(&mut self, value: &PageValue) -> Result<(), HeapFault> {
         self.put(&(value.kind() as u32));
         match value {
-            Value::List(id)
-            | Value::Map(id)
-            | Value::Set(id)
-            | Value::Record(id)
-            | Value::Closure(id)
-            | Value::Ref(Identity::Object(id)) => {
+            PageValue::List(id)
+            | PageValue::Map(id)
+            | PageValue::Set(id)
+            | PageValue::Record(id)
+            | PageValue::Closure(id)
+            | PageValue::Ref(Identity::Object(id)) => {
                 self.entity(*id)?;
             }
-            Value::Int(IntRef::Inline(integer)) => {
+            PageValue::Int(IntRef::Inline(integer)) => {
                 self.put(&integer.is_negative());
                 self.graph
                     .push(lash_kernel_doc::heap_values::integer_digits(integer));
             }
-            Value::Text(_)
-            | Value::Function(_)
-            | Value::Bytes(_)
-            | Value::Int(IntRef::Paged { .. }) => {
+            PageValue::Text(_)
+            | PageValue::Function(_)
+            | PageValue::Bytes(_)
+            | PageValue::Int(IntRef::Paged { .. }) => {
                 let mut bytes = Vec::new();
                 let len = match value {
-                    Value::Text(t) | Value::Function(t) => t.summary.utf8_bytes,
-                    Value::Bytes(b) => b.len,
-                    Value::Int(IntRef::Paged { summary, .. }) => summary.bits.div_ceil(8),
+                    PageValue::Text(t) | PageValue::Function(t) => t.summary.utf8_bytes,
+                    PageValue::Bytes(b) => b.len,
+                    PageValue::Int(IntRef::Paged { summary, .. }) => summary.bits.div_ceil(8),
                     _ => unreachable!(),
                 };
                 let payload = match value {
-                    Value::Function(t) => Value::Text(t.clone()),
+                    PageValue::Function(t) => PageValue::Text(t.clone()),
                     _ => value.clone(),
                 };
                 self.heap.payload_visit(&payload, 0..len, &mut |chunk| {
@@ -358,12 +358,12 @@ impl Reader {
                     });
                     ControlFlow::Continue(())
                 })?;
-                if let Value::Int(IntRef::Paged { summary, .. }) = value {
+                if let PageValue::Int(IntRef::Paged { summary, .. }) = value {
                     self.put(&summary.negative);
                 }
                 self.graph.push(bytes);
             }
-            Value::Tuple(tuple) => {
+            PageValue::Tuple(tuple) => {
                 self.put(&tuple.summary.len);
                 for i in 0..tuple.summary.len {
                     let v = self
@@ -373,9 +373,9 @@ impl Reader {
                     self.value(&v)?;
                 }
             }
-            Value::Error(error) => {
-                self.value(&Value::Text(error.kind.clone()))?;
-                self.value(&Value::Text(error.message.clone()))?;
+            PageValue::Error(error) => {
+                self.value(&PageValue::Text(error.kind.clone()))?;
+                self.value(&PageValue::Text(error.message.clone()))?;
                 self.value(&self.heap.error_data(error)?)?;
             }
             _ => self.put(value),
@@ -414,7 +414,7 @@ impl Reader {
                         Element::Item(v) => vec![v.clone()],
                         Element::Entry { key, value } => vec![key.clone(), value.clone()],
                         Element::Field { name, value } => {
-                            vec![Value::Text(name.clone()), value.clone()]
+                            vec![PageValue::Text(name.clone()), value.clone()]
                         }
                     });
                     ControlFlow::Continue(())

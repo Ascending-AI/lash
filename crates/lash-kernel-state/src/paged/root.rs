@@ -22,7 +22,7 @@
 //! envelope around them is the generic node store's.
 
 use super::{NameRef, SiteRef};
-use lash_kernel_doc::heap::{EntityId, HeapFault, LogicalBytes, PageId, PageRef, Value};
+use lash_kernel_doc::heap::{EntityId, HeapFault, LogicalBytes, PageId, PageRef, PageValue};
 use lash_kernel_doc::{DocumentId, JoinMode, TaskId};
 
 use super::census::AccountingCertificate;
@@ -330,8 +330,8 @@ pub enum TaskStateRecord {
 /// What a ready task's pending statement continues with.
 #[derive(Clone, Debug)]
 pub enum IncomingRecord {
-    Value(Value),
-    Raise(Value),
+    Value(PageValue),
+    Raise(PageValue),
     Joined(TaskId),
     /// A frozen committed outcome waiting for semantic delivery.
     Outcome(crate::WaitId),
@@ -341,8 +341,8 @@ pub enum IncomingRecord {
 /// reaches the task (S7).
 #[derive(Clone, Debug)]
 pub enum EndedTask {
-    Returned(Value),
-    Raised(Value),
+    Returned(PageValue),
+    Raised(PageValue),
 }
 
 #[derive(Clone, Debug)]
@@ -363,7 +363,7 @@ pub struct FunctionRecord {
     /// A bytes value: the saved function's canonical description, a token
     /// body that holds its document's token body, which its dialect reads
     /// back to declare it in a later cell's document.
-    pub meta: Value,
+    pub meta: PageValue,
     pub release: PageRef,
     /// Each variable the function reads, by name.
     pub captures: std::collections::BTreeMap<lash_kernel_doc::Name, FrozenRef>,
@@ -375,7 +375,7 @@ pub struct FunctionRecord {
 
 #[derive(Clone, Debug)]
 pub enum BoundRecord {
-    Value(Value),
+    Value(PageValue),
     /// A variable a closure shares.
     Shared(EntityId),
 }

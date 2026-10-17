@@ -16,7 +16,7 @@ use std::rc::Rc;
 
 use lash_kernel_doc::Name;
 use lash_kernel_doc::graph_tokens::{TokenCodec, TokenError, TokenReader, TokenWriter};
-use lash_kernel_doc::heap::{HeapFault, LogicalBytes, PageGrant, PageRef, Value};
+use lash_kernel_doc::heap::{HeapFault, LogicalBytes, PageGrant, PageRef, PageValue};
 
 use super::heap_impl::PagedHeap;
 use super::metadata::metadata_key;
@@ -59,9 +59,25 @@ impl PagedHeap {
 
     /// Loads a touched name once. Inspectors can read without installing a
     /// working slot; execution uses this admission before growing the overlay.
-    pub fn load_session_binding_at(&mut self, key: &[u8]) -> Result<Option<Value>, HeapWriteError> {
+    pub fn load_session_binding_at(
+        &mut self,
+        key: &[u8],
+    ) -> Result<Option<PageValue>, HeapWriteError> {
         self.session_slot(key)?;
         self.session_binding_at(key).map_err(Into::into)
+    }
+
+    /// [`Self::load_session_binding_at`], the binding unresolved: a shared
+    /// variable stays its identity, for the machine's arena to read.
+    pub fn load_session_bound_at(
+        &mut self,
+        key: &[u8],
+    ) -> Result<Option<BoundRecord>, HeapWriteError> {
+        let slot = self.session_slot(key)?;
+        Ok(self.session_slots.slots[slot]
+            .record
+            .as_ref()
+            .map(|record| record.value.clone()))
     }
 
     fn session_slot(&mut self, key: &[u8]) -> Result<usize, HeapWriteError> {
@@ -107,12 +123,12 @@ impl PagedHeap {
     pub fn session_binding(
         &self,
         name: &lash_kernel_doc::Name,
-    ) -> Result<Option<Value>, HeapFault> {
+    ) -> Result<Option<PageValue>, HeapFault> {
         self.session_binding_at(&super::metadata::metadata_key(name))
     }
 
     /// Reads the working slot, falling back to the untouched cold root.
-    pub fn session_binding_at(&self, key: &[u8]) -> Result<Option<Value>, HeapFault> {
+    pub fn session_binding_at(&self, key: &[u8]) -> Result<Option<PageValue>, HeapFault> {
         let binding = match self.session_slots.get(key) {
             Some(record) => record.as_ref().map(|record| record.value.clone()),
             None => self

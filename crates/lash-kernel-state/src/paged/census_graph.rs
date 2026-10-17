@@ -32,31 +32,32 @@ impl CensusGraph for PagedHeap {
             [self.session_cost(), tasks, self.joins.cost()].into_iter(),
         )?))
     }
-    fn value_cost(&mut self, value: &Value) -> Result<LogicalBytes, HeapFault> {
+    fn value_cost(&mut self, value: &PageValue) -> Result<LogicalBytes, HeapFault> {
         Ok(LogicalBytes(value_cost(value)))
     }
     fn value_edges(
         &mut self,
-        value: &Value,
+        value: &PageValue,
         out: &mut dyn FnMut(Identity) -> Result<(), HeapFault>,
     ) -> Result<(), HeapFault> {
         self.stream_edges(value, out)
     }
     fn persistent_roots(
         &mut self,
-        visit: &mut dyn FnMut(&Value) -> Result<(), HeapFault>,
+        visit: &mut dyn FnMut(&PageValue) -> Result<(), HeapFault>,
     ) -> Result<(), HeapFault> {
         let binding =
-            |binding: &BindingRecord, visit: &mut dyn FnMut(&Value) -> Result<(), HeapFault>| {
+            |binding: &BindingRecord,
+             visit: &mut dyn FnMut(&PageValue) -> Result<(), HeapFault>| {
                 match &binding.value {
                     BoundRecord::Value(v) => visit(v),
-                    BoundRecord::Shared(id) => visit(&Value::Ref(Identity::Object(*id))),
+                    BoundRecord::Shared(id) => visit(&PageValue::Ref(Identity::Object(*id))),
                 }
             };
         self.visit_session_bindings(&mut |b| binding(b, visit))?;
         visit_tree(&self.joins, &self.access, &mut |join| {
             visit_tree(&join.members, &self.access, &mut |member| {
-                visit(&Value::Task(*member))
+                visit(&PageValue::Task(*member))
             })
         })?;
         visit_tree(&self.tasks, &self.access, &mut |task| {
@@ -69,7 +70,7 @@ impl CensusGraph for PagedHeap {
                     incoming: IncomingRecord::Joined(t),
                     ..
                 }
-                | TaskStateRecord::Joining(t) => visit(&Value::Task(*t))?,
+                | TaskStateRecord::Joining(t) => visit(&PageValue::Task(*t))?,
                 _ => (),
             }
             visit_tree(&task.frames, &self.access, &mut |frame| {
@@ -190,10 +191,10 @@ impl CensusGraph for PagedHeap {
                 let old_edges = row.task_edges();
                 row.state = match row.state {
                     TaskStateRecord::Ended(EndedTask::Returned(_)) => {
-                        TaskStateRecord::Ended(EndedTask::Returned(Value::Null))
+                        TaskStateRecord::Ended(EndedTask::Returned(PageValue::Null))
                     }
                     TaskStateRecord::Ended(EndedTask::Raised(_)) => {
-                        TaskStateRecord::Ended(EndedTask::Raised(Value::Null))
+                        TaskStateRecord::Ended(EndedTask::Raised(PageValue::Null))
                     }
                     _ => {
                         return Err(HeapFault::Malformed(
@@ -322,18 +323,18 @@ impl PagedHeap {
     /// failure. Scalar payloads are never loaded by a trace.
     pub fn stream_edges(
         &self,
-        value: &Value,
+        value: &PageValue,
         out: &mut dyn FnMut(Identity) -> Result<(), HeapFault>,
     ) -> Result<(), HeapFault> {
         match value {
-            Value::List(id)
-            | Value::Map(id)
-            | Value::Set(id)
-            | Value::Record(id)
-            | Value::Closure(id) => out(Identity::Object(*id))?,
-            Value::Task(id) => out(Identity::Task(*id))?,
-            Value::Ref(id) => out(*id)?,
-            Value::Tuple(t) if t.summary.has_edges => {
+            PageValue::List(id)
+            | PageValue::Map(id)
+            | PageValue::Set(id)
+            | PageValue::Record(id)
+            | PageValue::Closure(id) => out(Identity::Object(*id))?,
+            PageValue::Task(id) => out(Identity::Task(*id))?,
+            PageValue::Ref(id) => out(*id)?,
+            PageValue::Tuple(t) if t.summary.has_edges => {
                 let mut error = None;
                 self.tuple_visit(t, &mut |v| match self.stream_edges(v, out) {
                     Ok(()) => ControlFlow::Continue(()),
@@ -346,7 +347,7 @@ impl PagedHeap {
                     return Err(e);
                 }
             }
-            Value::Error(e) if e.has_edges => self.stream_edges(&self.error_data(e)?, out)?,
+            PageValue::Error(e) if e.has_edges => self.stream_edges(&self.error_data(e)?, out)?,
             _ => (),
         }
         Ok(())

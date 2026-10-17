@@ -12,7 +12,7 @@ use lash_kernel_doc::snapshot::{
 };
 use lash_kernel_doc::{
     Action, Callee, Document, EffectName, Expr, Function, FunctionId, FunctionRepresentation, Name,
-    NativeHeap, Rhs, Signature, Site, Stmt, Unit,
+    Rhs, Signature, Site, Stmt, Unit,
 };
 use lash_kernel_state::kernel_internals::PagedHeap;
 use lash_kernel_state::paged::{FrozenRef, HeapLifecycle, HeapWriteError, SemanticHeap};
@@ -109,7 +109,7 @@ pub enum NotSaved {
 #[derive(Clone, Copy)]
 pub struct Left<'a> {
     pub document: &'a Document,
-    pub bindings: &'a BTreeMap<Name, Value>,
+    pub bindings: &'a BTreeMap<Name, PageValue>,
     pub not_carried: &'a [Name],
     pub controls: &'a BTreeMap<EffectName, BTreeSet<crate::EffectControl>>,
     /// What the source wrote of each function the document makes, by the
@@ -167,7 +167,7 @@ struct Saving<'a, 'h> {
 impl SnapshotHeap for Saving<'_, '_> {
     type Frozen = FrozenRef;
 
-    fn native(&self) -> &dyn NativeHeap {
+    fn pages(&self) -> &dyn PageReader {
         self.heap
     }
 
@@ -175,7 +175,11 @@ impl SnapshotHeap for Saving<'_, '_> {
         self.heap.closure(id)?.site.resolve(self.heap.pages())
     }
 
-    fn closure_capture(&mut self, id: EntityId, name: &Name) -> Result<Option<Value>, HeapFault> {
+    fn closure_capture(
+        &mut self,
+        id: EntityId,
+        name: &Name,
+    ) -> Result<Option<PageValue>, HeapFault> {
         let object = self.heap.closure(id)?;
         match object.captures.get(
             &lash_kernel_state::kernel_internals::metadata::metadata_key(name),
@@ -186,7 +190,7 @@ impl SnapshotHeap for Saving<'_, '_> {
         }
     }
 
-    fn unit_binding(&mut self, unit: &Unit, name: &Name) -> Result<Option<Value>, HeapFault> {
+    fn unit_binding(&mut self, unit: &Unit, name: &Name) -> Result<Option<PageValue>, HeapFault> {
         // The bindings the cell left, whether or not they are among the
         // bindings it drops.
         match unit {
@@ -200,7 +204,7 @@ impl SnapshotHeap for Saving<'_, '_> {
 
     fn freeze(
         &mut self,
-        value: &Value,
+        value: &PageValue,
         named: &BTreeMap<EntityId, Name>,
     ) -> Result<(FrozenRef, BTreeSet<Name>), SnapshotError> {
         self.heap.freeze_named(value, named).map_err(write_fault)
@@ -208,13 +212,13 @@ impl SnapshotHeap for Saving<'_, '_> {
 }
 pub(crate) fn function_reference(
     heap: &PagedHeap,
-    value: &Value,
+    value: &PageValue,
     values: &FunctionRepresentation,
 ) -> Result<Option<Name>, HeapFault> {
-    if let Value::Function(name) = value {
+    if let PageValue::Function(name) = value {
         return text_of(heap, name).map(|name| Some(Name::new(name)));
     }
-    let (Some(tag), Value::Tuple(t)) = (values.tag(), value) else {
+    let (Some(tag), PageValue::Tuple(t)) = (values.tag(), value) else {
         return Ok(None);
     };
     let values = members(heap, t)?;
@@ -227,7 +231,7 @@ pub(crate) fn function_reference(
         return Ok(None);
     }
     let mut names = values.iter().filter_map(|v| {
-        if let Value::Function(name) = v {
+        if let PageValue::Function(name) = v {
             Some(name.clone())
         } else {
             None
@@ -469,7 +473,7 @@ pub fn save(
         let result =
             save_closure(heap, &left, name, id, &named, &helper_owners).and_then(|mut function| {
                 if let Some((_, at)) = token_closure(heap, value, left.values.tag())?
-                    && let Value::Tuple(t) = value
+                    && let PageValue::Tuple(t) = value
                 {
                     let values = members(heap, t)?;
                     let mut saving = Saving {
@@ -563,12 +567,12 @@ impl SavedFunction {
         }
         names
     }
-    pub(crate) fn value(&self, heap: &mut PagedHeap) -> Result<Value, HeapWriteError> {
-        let function = Value::Function(heap.text(self.name.as_str()).map_err(native_write)?);
+    pub(crate) fn value(&self, heap: &mut PagedHeap) -> Result<PageValue, HeapWriteError> {
+        let function = PageValue::Function(heap.text(self.name.as_str())?);
         let Some(token) = &self.token else {
             return Ok(function);
         };
-        let mut members = vec![Value::Text(heap.text(&token.tag).map_err(native_write)?)];
+        let mut members = vec![PageValue::Text(heap.text(&token.tag)?)];
         for frozen in &token.before {
             members.push(heap.instantiate(frozen)?);
         }
@@ -576,7 +580,7 @@ impl SavedFunction {
         for frozen in &token.after {
             members.push(heap.instantiate(frozen)?);
         }
-        Ok(Value::Tuple(heap.tuple(members).map_err(native_write)?))
+        Ok(PageValue::Tuple(heap.tuple(members)?))
     }
     pub fn renamed(&self, name: &Name) -> Self {
         let mut value = self.clone();
@@ -591,7 +595,7 @@ impl SavedFunction {
     pub(crate) fn captures_for_call(
         &self,
         heap: &mut PagedHeap,
-    ) -> Result<BTreeMap<Name, Value>, HeapWriteError> {
+    ) -> Result<BTreeMap<Name, PageValue>, HeapWriteError> {
         self.captures
             .iter()
             .map(|(name, frozen)| Ok((name.clone(), heap.instantiate(frozen)?)))
@@ -719,14 +723,4 @@ pub fn install(
             .extend(function.document.manifest.functions.clone());
     }
     Ok(declarations)
-}
-
-fn native_write(error: NativeError) -> HeapWriteError {
-    match error {
-        NativeError::Heap(e) => HeapWriteError::Fault(e),
-        NativeError::Memory => HeapWriteError::Memory,
-        other => HeapWriteError::Fault(HeapFault::Malformed(format!(
-            "saved token construction failed: {other}"
-        ))),
-    }
 }

@@ -17,7 +17,7 @@
 //! [`MIN_ENTITY_COST`].
 
 use lash_kernel_doc::TaskId;
-use lash_kernel_doc::heap::{EntityId, HeapFault, Identity, LogicalBytes, Value};
+use lash_kernel_doc::heap::{EntityId, HeapFault, Identity, LogicalBytes, PageValue};
 
 /// The least logical cost of any census entity: an object's header. It
 /// bounds how many entities a bounded U can retain.
@@ -116,10 +116,10 @@ pub enum CensusFault {
 #[derive(Clone, Copy, Debug)]
 pub struct TransientRoots<'a> {
     /// Reachability during an ownership transfer, with no new allocation.
-    pub borrowed: &'a [Value],
-    pub registers: &'a [Value],
-    pub pinned: &'a [Value],
-    pub native_args: &'a [Value],
+    pub borrowed: &'a [PageValue],
+    pub registers: &'a [PageValue],
+    pub pinned: &'a [PageValue],
+    pub native_args: &'a [PageValue],
     pub fresh: &'a [EntityId],
     pub reserved: LogicalBytes,
 }
@@ -141,12 +141,12 @@ pub trait CensusGraph {
     /// and ended-task results. Validated page summaries supply this total.
     fn root_cost(&mut self) -> Result<LogicalBytes, HeapFault>;
     /// The local holding cost of a transient value under LocalCostV1.
-    fn value_cost(&mut self, value: &Value) -> Result<LogicalBytes, HeapFault>;
+    fn value_cost(&mut self, value: &PageValue) -> Result<LogicalBytes, HeapFault>;
     /// Identity edges at any immutable nesting depth, including paged
     /// tuples, read from summaries without assembling scalar payloads.
     fn value_edges(
         &mut self,
-        value: &Value,
+        value: &PageValue,
         out: &mut dyn FnMut(Identity) -> Result<(), HeapFault>,
     ) -> Result<(), HeapFault>;
     /// Visits every persistent root: session bindings, every task's frames
@@ -154,7 +154,7 @@ pub trait CensusGraph {
     /// handles that keep ended tasks' results.
     fn persistent_roots(
         &mut self,
-        visit: &mut dyn FnMut(&Value) -> Result<(), HeapFault>,
+        visit: &mut dyn FnMut(&PageValue) -> Result<(), HeapFault>,
     ) -> Result<(), HeapFault>;
     /// An entity's cost facts; `None` when the census does not hold it.
     fn entity_cost(&mut self, entity: EntityId) -> Result<Option<EntityCost>, HeapFault>;

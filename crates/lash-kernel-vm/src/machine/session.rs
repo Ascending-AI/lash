@@ -2,9 +2,8 @@
 use super::*;
 use crate::compile::BindingName;
 use crate::interface::{CellStart, Finished, Target};
-use lash_kernel_state::paged::{
-    AllocationCensus, CarryRoots, EditEpoch, KeyedRoot, ObjectInit, PageSource,
-};
+use lash_kernel_doc::NewObject;
+use lash_kernel_state::paged::{AllocationCensus, CarryRoots, EditEpoch, KeyedRoot, PageSource};
 
 pub(super) fn empty_root() -> KeyedRoot {
     KeyedRoot::Empty
@@ -51,6 +50,9 @@ pub(crate) fn start(
         heap.adopt(session)?;
     }
     let access = heap.pages().clone();
+    let arena: SharedArena = std::rc::Rc::new(std::cell::RefCell::new(
+        lash_kernel_state::arena::Arena::new(),
+    ));
     let mut machine = KernelMachine {
         release: program.release,
         owner: start.owner,
@@ -61,8 +63,9 @@ pub(crate) fn start(
         exe: Arc::clone(&exe),
         bounds,
         heap,
+        arena: std::rc::Rc::clone(&arena),
         limits,
-        tasks: tasks::Tasks::new(access.clone(), Arc::clone(&exe)),
+        tasks: tasks::Tasks::new(access.clone(), std::rc::Rc::clone(&arena), Arc::clone(&exe)),
         ready: queue::Queue::open(Tree::new(true), access.clone()),
         current: Some(TaskId::MAIN),
         joins: Tree::new(false),
@@ -101,6 +104,7 @@ pub(crate) fn start(
     machine.tasks.push(Task::fresh(
         lash_kernel_state::paged::TaskIdentityRef::MAIN,
         access,
+        arena,
         Arc::clone(&exe),
     ))?;
     let arguments = |problem: String| StartError::Arguments { problem };
@@ -178,9 +182,9 @@ pub(crate) fn start(
                 // Start arguments remain roots while the packed list reserves.
                 machine.regs = args.clone().into();
                 let list = machine
-                    .alloc(ObjectInit::List(args))
+                    .new_object(NewObject::List(args))
                     .map_err(|error| start_interrupt("arguments", error.into()))?;
-                args = vec![Value::Absent, Value::List(list)];
+                args = vec![Value::Absent, list];
             }
             machine.charged = 0;
             (*code, args)
@@ -304,7 +308,7 @@ impl KernelMachine {
 
     /// The record of the session binding `name` holding `value`, declared at
     /// `main`.
-    fn binding_record(&mut self, name: &Name, value: Value) -> Result<BindingRecord, Halt> {
+    fn binding_record(&mut self, name: &Name, value: PageValue) -> Result<BindingRecord, Halt> {
         binding_record(
             &mut self.heap,
             &self.exe.code(self.exe.main).site,
@@ -315,9 +319,22 @@ impl KernelMachine {
     }
 
     pub(super) fn session_get(&mut self, name: &BindingName) -> Result<Option<Value>, Halt> {
-        self.heap_write(|heap| {
-            heap.load_session_binding_at(&name.key)
+        let bound = self.heap_write(|heap| {
+            heap.load_session_bound_at(&name.key)
                 .map_err(super::write_halt)
+        })?;
+        Ok(match bound {
+            None => None,
+            Some(BoundRecord::Value(value)) => Some(self.admit_page(&value)?),
+            Some(BoundRecord::Shared(id)) => {
+                let cell = project::admit_cell(&mut self.arena.borrow_mut(), id);
+                Some(self.in_arena(|arena| arena.cell(cell)).map_err(
+                    |interrupt| match interrupt {
+                        Interrupt::Halt(halt) => *halt,
+                        other => fault(&format!("{other:?}")),
+                    },
+                )?)
+            }
         })
     }
     pub(super) fn session_write(
@@ -327,6 +344,7 @@ impl KernelMachine {
         existing: bool,
     ) -> Result<bool, Halt> {
         // Declarations prepare their value before touching the binding tree.
+        let value = self.page_form(&value)?;
         let record = if existing {
             None
         } else {
@@ -335,14 +353,8 @@ impl KernelMachine {
         let exe = Arc::clone(&self.exe);
         self.heap_write(|heap| {
             heap.write_session_binding(&name.key, |heap, previous| {
-                if existing {
-                    let Some(previous) = previous else {
-                        return Ok(None);
-                    };
-                    // The former existence read resolved shared variables too.
-                    if let BoundRecord::Shared(id) = previous.value {
-                        heap.variable_get(id)?;
-                    }
+                if existing && previous.is_none() {
+                    return Ok(None);
                 }
                 match &record {
                     Some(record) => Ok(Some(record.clone())),
@@ -574,9 +586,8 @@ fn binding_record(
     heap: &mut PagedHeap,
     declared: &lash_kernel_doc::Site,
     name: &Name,
-    value: Value,
+    value: PageValue,
 ) -> Result<BindingRecord, HeapWriteError> {
-    let value = heap.canonical_value(value)?;
     Ok(BindingRecord {
         name: lash_kernel_state::paged::NameRef::new(name, heap.pages())?,
         declared: lash_kernel_state::paged::SiteRef::new(declared, heap.pages())?,

@@ -666,7 +666,8 @@ impl RecordedObjects {
             room: 1 << 30,
         })?;
         replay
-            .heap
+            .arena
+            .semantics()
             .normal_key(&replay.args[0])
             .map_err(|e| e.to_string())
     }

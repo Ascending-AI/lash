@@ -1,12 +1,8 @@
-//! The arena's value vocabulary and native ABI: the frozen target
-//! declarations of the kernel end state (`docs/design/kernel-end-state.md`,
-//! seams C, D and F).
-//!
-//! Nothing uses them yet. The arena swap (stage 2, swap 4) moves [`Value`]
-//! and the native ABI ([`native`]) to the crate root in place of
-//! [`crate::heap::Value`], [`crate::heap::NativeHeap`] and
-//! [`crate::heap::NativeFunction`]. It deletes those and moves every native
-//! implementation once.
+//! The arena's value vocabulary and native ABI
+//! (`docs/design/kernel-end-state.md`, seams C, D and F): what a run's
+//! values and objects are while it executes. [`Value`] and the native ABI
+//! ([`native`]) are the crate root's. Pages hold their projection,
+//! [`crate::heap::PageValue`].
 //!
 //! Three namespaces name what a run holds, and none converts to another:
 //!
@@ -179,6 +175,27 @@ impl Value {
         }
     }
 
+    /// Whether `other` is this very value: the same kind and the same
+    /// immediate bit for bit, or the same object. Never guest equality: a
+    /// projection that reads it asks only whether a value moved.
+    pub fn same(&self, other: &Value) -> bool {
+        match (self, other) {
+            (Self::Null, Self::Null) | (Self::Absent, Self::Absent) => true,
+            (Self::Bool(a), Self::Bool(b)) => a == b,
+            (Self::Int(a), Self::Int(b)) | (Self::Timestamp(a), Self::Timestamp(b)) => a == b,
+            (Self::Float(a), Self::Float(b)) => a.get().to_bits() == b.get().to_bits(),
+            (Self::Text(a), Self::Text(b)) | (Self::Function(a), Self::Function(b)) => {
+                a.as_bytes() == b.as_bytes()
+            }
+            (Self::Task(a), Self::Task(b)) | (Self::TaskRef(a), Self::TaskRef(b)) => a == b,
+            _ => {
+                std::mem::discriminant(self) == std::mem::discriminant(other)
+                    && self.handle().is_some()
+                    && self.handle() == other.handle()
+            }
+        }
+    }
+
     /// The arena object the value names, if it names one.
     pub fn handle(&self) -> Option<ArenaHandle> {
         match self {
@@ -210,23 +227,26 @@ impl Value {
     }
 }
 
-/// One chunk of a sequence's values (seam D). A resident chunk is its
-/// decoded values; a cold one is the page that holds them, decoded by the
+/// One chunk of an object's contents (seam D). A resident chunk owns its
+/// decoded contents by value: a growable vector for a mutable collection,
+/// so an append is amortized O(1), and boxed exact-size storage for an
+/// immutable. A cold one is the page that holds them, decoded by the
 /// machine when a read reaches it, never during a native call.
 #[derive(Debug)]
-pub enum Chunk<T: ?Sized> {
-    Resident(Box<T>),
+pub enum Chunk<T> {
+    Resident(T),
     Cold { page: PageRef, len: u32 },
 }
 
 /// A list's or a tuple's values, in chunks by position: chunk `k` holds
 /// indexes `k * CHUNK ..`, each cold or resident on its own, so a point
 /// read or write materializes one chunk and its index path, and equal
-/// values chunk alike whatever built them (seam H).
+/// values chunk alike whatever built them (seam H). Until swap 2.4(b)
+/// chunks them, every sequence is one chunk holding all its values.
 #[derive(Debug)]
 pub struct Sequence {
     pub len: u64,
-    pub chunks: Box<[Chunk<[Value]>]>,
+    pub chunks: Vec<Chunk<Vec<Value>>>,
 }
 
 impl Sequence {
@@ -244,7 +264,7 @@ impl Sequence {
 #[derive(Debug)]
 pub struct Table {
     pub len: u64,
-    pub chunks: Box<[Chunk<[Value]>]>,
+    pub chunks: Vec<Chunk<Vec<Value>>>,
 }
 
 /// A long text: its lengths, and its UTF-8 bytes in chunks that end on
@@ -252,14 +272,14 @@ pub struct Table {
 #[derive(Debug)]
 pub struct LongText {
     pub summary: TextSummary,
-    pub chunks: Box<[Chunk<str>]>,
+    pub chunks: Box<[Chunk<Box<str>>]>,
 }
 
 /// Bytes, in chunks.
 #[derive(Debug)]
 pub struct Bytes {
     pub len: u64,
-    pub chunks: Box<[Chunk<[u8]>]>,
+    pub chunks: Box<[Chunk<Box<[u8]>>]>,
 }
 
 /// An error value's parts (`K-ERR-001`).
@@ -325,6 +345,38 @@ impl Objects {
             .get(handle.index as usize)
             .filter(|slot| slot.generation == handle.generation)
             .map(|slot| &slot.body)
+    }
+
+    /// The body `handle` names, for the machine's own edits outside a
+    /// native call; `None` for a stale handle.
+    #[inline]
+    pub fn get_mut(&mut self, handle: ArenaHandle) -> Option<&mut Body> {
+        self.slots
+            .get_mut(handle.index as usize)
+            .filter(|slot| slot.generation == handle.generation)
+            .map(|slot| &mut slot.body)
+    }
+
+    /// Allocates `body` outside a native call: reserves a slot and installs
+    /// it at once.
+    pub fn insert(&mut self, body: Body) -> ArenaHandle {
+        let handle = self.reserve();
+        self.install(handle, body);
+        handle
+    }
+
+    /// The handle of the live object in slot `index`, if one is there.
+    pub fn handle_at(&self, index: u32) -> Option<ArenaHandle> {
+        self.slots
+            .get(index as usize)
+            .filter(|slot| !matches!(slot.body, Body::Free))
+            .map(|slot| ArenaHandle::new(index, slot.generation))
+    }
+
+    /// One past the highest slot index ever taken: the bound of a table
+    /// kept beside the bodies by slot index.
+    pub fn capacity(&self) -> usize {
+        self.slots.len()
     }
 
     /// Reserves a slot for an object a call allocates: a released one if

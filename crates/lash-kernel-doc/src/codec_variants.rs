@@ -12,11 +12,11 @@ use crate::graph_tokens::CodecVariant;
 use crate::{
     ActKind, Action, AssignOrder, Atom, Callee, Datum, Expr, Formula, Identity, Implementation,
     JoinMode, Literal, Measure, Member, NumberPolicy, Operand, Place, Rhs, Stmt, TaskIdentity,
-    Type, Unit, Value,
+    Type, Unit,
 };
 
 #[doc(hidden)]
-impl CodecVariant for Value {
+impl CodecVariant for crate::heap::PageValue {
     fn codec_variant(&self) -> u32 {
         match self {
             Self::Null => 0,

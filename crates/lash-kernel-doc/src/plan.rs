@@ -29,7 +29,7 @@
 //! own operands. Slots are the body's named variables, and what each loop
 //! walks.
 
-use crate::heap::Value;
+use crate::Value;
 use crate::name::FunctionId;
 
 /// A body compiled to Rust: the definition it was generated from, by

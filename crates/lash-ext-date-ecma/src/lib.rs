@@ -5,10 +5,10 @@
 //! arithmetic and JavaScript coercion live in the dialect's kernel helpers.
 mod calendar;
 
-use lash_kernel_doc::heap::{ErrorRef, FieldName, Payload};
+use lash_kernel_doc::arena::ShortText;
 use lash_kernel_doc::{
-    Float, FunctionId, FunctionRegistry, Integer, NativeCall, NativeError, NativeFunction, Object,
-    RegistryError, Timestamp, Value, parse_definition,
+    Args, Float, FunctionId, FunctionRegistry, Integer, NativeCall, NativeError, NativeFunction,
+    NewObject, RegistryError, Value, parse_definition,
 };
 use num_traits::ToPrimitive;
 use std::{collections::BTreeMap, sync::Arc};
@@ -75,18 +75,26 @@ impl Operation {
     }
 }
 
-fn raise(kind: &str, message: &str) -> NativeError {
-    NativeError::Raised(Arc::new(ErrorRef::new(kind, message)))
+fn raise(kind: &'static str, message: &'static str) -> NativeError {
+    NativeError::refused(kind, message)
 }
-fn milliseconds(value: &Value, call: &NativeCall<'_>) -> Result<f64, NativeError> {
+fn milliseconds(value: &Value, args: &Args<'_>) -> Result<f64, NativeError> {
     match value {
-        Value::Timestamp(time) => (&*time.nanoseconds.as_bigint() / 1_000_000_i64)
-            .to_f64()
-            .ok_or_else(|| raise("RangeError", "Timestamp out of range")),
-        Value::Record(id) => {
-            let brand = call.heap.record_get(*id, FieldName::Static("brand"))?;
+        Value::Timestamp(_) | Value::BigTimestamp(_) => {
+            let Some(nanoseconds) = args.timestamp(value)? else {
+                return Err(raise("type_error", "Date receiver required"));
+            };
+            (&*nanoseconds.as_bigint() / 1_000_000_i64)
+                .to_f64()
+                .ok_or_else(|| raise("RangeError", "Timestamp out of range"))
+        }
+        Value::Record(_) => {
+            let Some(fields) = args.table(value)? else {
+                return Err(NativeError::Malformed("a record names another body"));
+            };
+            let brand = args.lookup(fields, &short("brand"))?;
             if let Some(brand) = brand
-                && call.heap.equal(&brand, &Value::text("date.invalid"))?
+                && args.equal(brand, &short("date.invalid"))?
             {
                 Ok(f64::NAN)
             } else {
@@ -97,10 +105,10 @@ fn milliseconds(value: &Value, call: &NativeCall<'_>) -> Result<f64, NativeError
     }
 }
 impl NativeFunction for Operation {
-    fn call(&self, call: NativeCall<'_>) -> Result<Value, NativeError> {
-        let first = call
-            .args
-            .first()
+    fn call(&self, call: NativeCall<'_, '_>) -> Result<Value, NativeError> {
+        let args = call.args;
+        let first = args
+            .get(0)
             .ok_or_else(|| raise("type_error", "Missing argument"))?;
         match self {
             Self::Timestamp => {
@@ -109,30 +117,25 @@ impl NativeFunction for Operation {
                 };
                 let clipped = calendar::time_clip(time.get());
                 if clipped.is_nan() {
-                    return call
-                        .heap
-                        .allocate(Object::Record(vec![(
-                            text_name("brand"),
-                            Value::text("date.invalid"),
-                        )]))
-                        .map(Value::Record);
+                    return Ok(call.new.allocate(NewObject::Record(vec![(
+                        short("brand"),
+                        short("date.invalid"),
+                    )])));
                 }
                 let integer = Integer::parse(&format!("{clipped:.0}"))
                     .map_err(|_| raise("RangeError", "Invalid time"))?;
-                Ok(Value::Timestamp(Timestamp {
-                    nanoseconds: Integer::new(&*integer.as_bigint() * 1_000_000),
-                }))
+                Ok(call
+                    .new
+                    .timestamp(Integer::new(&*integer.as_bigint() * 1_000_000)))
             }
-            Self::Milliseconds => Ok(Value::Float(Float::new(milliseconds(first, &call)?))),
+            Self::Milliseconds => Ok(Value::Float(Float::new(milliseconds(first, &args)?))),
             Self::Parse => {
-                let Value::Text(source) = first else {
+                let Some(source) = args.text(first)? else {
                     return Err(raise("type_error", "Expected text"));
                 };
-                let source = match &source.body {
-                    Payload::Resident(text) => text.clone(),
-                    Payload::Paged(_) => call.heap.materialize_text(source)?,
-                };
-                match calendar::parse_iso_date(&source) {
+                // A paged source is copied out of its pages.
+                call.new.read_whole(source.len())?;
+                match calendar::parse_iso_date(&source.whole()?) {
                     Ok(time) => Ok(Value::Float(Float::new(time))),
                     Err(calendar::IsoDateError::Invalid) => Ok(Value::Float(Float::new(f64::NAN))),
                     Err(calendar::IsoDateError::NonIso) => Err(raise(
@@ -142,32 +145,34 @@ impl NativeFunction for Operation {
                 }
             }
             Self::Format => {
-                let time = milliseconds(first, &call)?;
-                let Some(Value::Text(format)) = call.args.get(1) else {
+                let time = milliseconds(first, &args)?;
+                let format = match args.get(1) {
+                    Some(format) => args.text(format)?,
+                    None => None,
+                };
+                let Some(format) = format else {
                     return Err(raise("type_error", "Expected format"));
                 };
-                let format = match &format.body {
-                    Payload::Resident(text) => text.clone(),
-                    Payload::Paged(_) => call.heap.materialize_text(format)?,
-                };
-                let text = match format.as_ref() {
+                call.new.read_whole(format.len())?;
+                let text = match format.whole()?.as_ref() {
                     "iso" => calendar::to_iso_string(time)
                         .ok_or_else(|| raise("RangeError", "Invalid time value"))?,
                     "utc" => calendar::date_utc_string(time),
                     "string" => calendar::date_to_string(time),
                     _ => return Err(raise("type_error", "Unknown date format")),
                 };
-                Ok(Value::Text(call.heap.text(&text)?))
+                Ok(call.new.text(&text))
             }
         }
     }
 }
 
-fn text_name(name: &str) -> lash_kernel_doc::heap::TextRef {
-    let Value::Text(name) = Value::text(name) else {
-        unreachable!()
-    };
-    name
+/// A fixed name, inline.
+fn short(name: &'static str) -> Value {
+    match ShortText::new(name) {
+        Some(name) => Value::Text(name),
+        None => unreachable!("a fixed name fits an inline text"),
+    }
 }
 
 /// Adds natives to the registered build definitions this extension implements.

@@ -1,13 +1,12 @@
-//! Named text/JSON rules exercised through the real paged heap and census.
+//! Named text/JSON rules exercised on an arena bench, called as the machine
+//! calls a native.
 mod corpus;
 mod json;
 mod lab;
 mod text;
 
-use crate::testsupport::{datum, decode, heap, heap_with_source, hold_with_extra};
-use lash_kernel_doc::heap::{HeapFault, NativeError, NativeHeap};
-use lash_kernel_doc::{Datum, FunctionRegistry, Integer, NativeCall, Value, WorkCounter};
-use lash_kernel_state::kernel_internals::PagedHeap;
+use crate::testsupport::{Bench, datum, decode, heap, raised};
+use lash_kernel_doc::{Datum, FunctionRegistry, Integer, Value, WorkCounter};
 
 fn s(value: &str) -> Datum {
     Datum::Text(value.into())
@@ -15,21 +14,27 @@ fn s(value: &str) -> Datum {
 fn int(value: i64) -> Datum {
     Datum::Int(Integer::from(value))
 }
-fn args(heap: &mut PagedHeap, values: Vec<Datum>) -> Vec<Value> {
+fn args(heap: &mut Bench, values: Vec<Datum>) -> Vec<Value> {
     values.into_iter().map(|v| decode(heap, v)).collect()
 }
-fn call(heap: &mut PagedHeap, name: &str, args: &[Value]) -> Result<Value, NativeError> {
+fn call(
+    heap: &mut Bench,
+    name: &str,
+    args: &[Value],
+    room: u64,
+) -> lash_kernel_state::arena::Called {
     let mut registry = FunctionRegistry::new();
     super::register_text_json(&mut registry).unwrap();
     let (_, native) = registry
         .iter()
         .find(|(_, f)| f.definition().name.as_str() == name)
         .unwrap();
-    native.native().unwrap().call(NativeCall {
+    heap.call(
+        &**native.native().unwrap(),
         args,
-        heap,
-        counter: &mut WorkCounter::new(None),
-    })
+        room,
+        &mut WorkCounter::new(None),
+    )
 }
 
 /// K-LJSON-005/006: syntax and depth refusal precede exhausted result space.
@@ -44,62 +49,11 @@ fn a_refused_json_tree_preserves_its_syntax_and_depth_errors() {
     ] {
         let mut heap = heap();
         let input = args(&mut heap, vec![s(&input), s("int"), s("by_spelling")]);
-        hold_with_extra(&mut heap, &input, 1 << 10);
-        let Err(NativeError::Raised(error)) = call(&mut heap, "json.parse", &input) else {
-            panic!("JSON error")
+        let answer = call(&mut heap, "json.parse", &input, 1 << 10).answer;
+        let Some((kind, _)) = raised(&heap, &answer) else {
+            panic!("JSON error: {answer:?}")
         };
-        assert_eq!(crate::testsupport::text(&heap, &error.kind), expected);
-    }
-}
-
-/// S1: a native payload read preserves infrastructure causes unchanged.
-#[test]
-fn a_native_text_read_preserves_its_page_transport_failure() {
-    let (mut heap, source) = heap_with_source();
-    let input = args(&mut heap, vec![s(&"x".repeat(1 << 20))]);
-    let fault = HeapFault::Transport("native text read".into());
-    source.fail_reads(fault.clone());
-    assert!(
-        matches!(call(&mut heap,&format!("text.upper_u{}_{}_{}",char::UNICODE_VERSION.0,char::UNICODE_VERSION.1,char::UNICODE_VERSION.2),&input), Err(NativeError::Heap(actual)) if actual==fault)
-    );
-}
-
-/// FIG-6193: a UTF-16 slice of a paged text reads the pages its range
-/// addresses, as a scalar slice does, never the whole text. TypeScript's
-/// `text.slice(0, 4096)` on a 1 MB session global read every page of it on
-/// each turn.
-#[test]
-fn a_utf16_slice_of_a_paged_text_reads_only_the_pages_it_addresses() {
-    // Distinct leaves: content-addressed pages of a repeated text dedupe.
-    let whole: String = (0..100_000).map(|i| format!("{i:07}😀")).collect();
-    let (mut heap, source) = heap_with_source();
-    let input = args(&mut heap, vec![s(&whole)]);
-    let Value::Text(text) = &input[0] else {
-        panic!("a text")
-    };
-    let text = text.clone();
-    // Cold: the text's pages are read through the source.
-    let mut heap = crate::testsupport::reopen(&mut heap, &source);
-    for (start, end) in [(0, 4096), (7, 9)] {
-        let before = source.pages_read();
-        let range = args(&mut heap, vec![int(start), int(end)]);
-        let output = call(
-            &mut heap,
-            "text.utf16_slice",
-            &[
-                Value::Text(text.clone()),
-                range[0].clone(),
-                range[1].clone(),
-            ],
-        )
-        .unwrap();
-        let read = source.pages_read() - before;
-        let units: Vec<u16> = whole.encode_utf16().collect();
-        assert_eq!(
-            datum(&heap, &output),
-            s(&String::from_utf16(&units[start as usize..end as usize]).unwrap())
-        );
-        assert!(read <= 4, "{start}..{end} read {read} pages");
+        assert_eq!(kind, expected);
     }
 }
 
@@ -122,32 +76,11 @@ fn classification_needs_no_extra_guest_space() {
                 s(":"),
             ],
         );
-        hold_with_extra(&mut heap, &input, 0);
-        let before = heap.certificate();
-        let output = call(&mut heap, "json.classify", &input).unwrap();
-        assert_eq!(datum(&heap, &output), int(expected));
-        assert_eq!(heap.certificate(), before);
+        let called = call(&mut heap, "json.classify", &input, 0);
+        assert_eq!(datum(&heap, &called.answer.unwrap()), int(expected));
+        assert_eq!(called.usage.held.0, 0);
+        assert!(called.usage.reservations.is_empty());
     }
-}
-
-/// S1/K-LJSON-006: only a guest memory refusal may be deferred for syntax
-/// validation. A census page failure is returned immediately and unchanged.
-#[test]
-fn json_reservation_preserves_a_census_page_failure() {
-    let (mut heap, source) = heap_with_source();
-    let list = heap
-        .allocate(lash_kernel_doc::Object::List(vec![Value::Null]))
-        .unwrap();
-    let mut heap = crate::testsupport::reopen(&mut heap, &source);
-    let input = args(&mut heap, vec![s("[0"), s("int"), s("by_spelling")]);
-    let mut held = input.clone();
-    held.push(Value::List(list));
-    hold_with_extra(&mut heap, &held, 0);
-    let fault = HeapFault::Transport("JSON census page".into());
-    source.fail_reads(fault.clone());
-    assert!(
-        matches!(call(&mut heap,"json.parse",&input),Err(NativeError::Heap(actual)) if actual==fault)
-    );
 }
 
 /// K-LJSON-005: paged input preserves escaped Unicode, number tokens and
@@ -160,7 +93,9 @@ fn paged_json_preserves_unicode_numbers_and_first_key_positions() {
     );
     let mut heap = heap();
     let input = args(&mut heap, vec![s(&source), s("int"), s("by_spelling")]);
-    let output = call(&mut heap, "json.parse", &input).unwrap();
+    let output = call(&mut heap, "json.parse", &input, u64::MAX)
+        .answer
+        .unwrap();
     assert_eq!(
         datum(&heap, &output),
         Datum::Record(vec![
@@ -180,14 +115,13 @@ fn a_paged_radix_keeps_the_range_error_before_reading_the_number() {
         let magnitude = num_bigint::BigInt::from(10_u32).pow(1000);
         let radix = Integer::new(if negative { -magnitude } else { magnitude });
         let input = args(&mut heap, vec![Datum::Absent, Datum::Int(radix)]);
-        hold_with_extra(&mut heap, &input, 0);
-        let Err(NativeError::Raised(error)) = call(&mut heap, "format.radix", &input) else {
-            panic!("radix range error")
-        };
-        assert_eq!(crate::testsupport::text(&heap, &error.kind), "number_range");
+        let answer = call(&mut heap, "format.radix", &input, 0).answer;
         assert_eq!(
-            crate::testsupport::text(&heap, &error.message),
-            "radix must be between 2 and 36"
+            raised(&heap, &answer),
+            Some((
+                "number_range".to_owned(),
+                "radix must be between 2 and 36".to_owned()
+            ))
         );
     }
 }

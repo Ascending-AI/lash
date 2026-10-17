@@ -1,19 +1,16 @@
-//! Strict native replay over the actual paged heap and S7 census.
-use lash_kernel_doc::heap::*;
+//! Strict native replay over the arena a run holds, with the call's
+//! reservations recorded by its nursery.
+use lash_kernel_doc::arena::{ArenaHandle, Body};
+use lash_kernel_doc::heap::{EntityId, FamilyId, LogicalBytes};
 use lash_kernel_doc::{
-    Integer, Measure, NativeCall, NativeError, Operand, PreparedNative, RegisteredFunction, Value,
-    WorkCounter,
+    Args, Integer, Measure, NativeCall, NativeError, Nursery, Operand, PreparedNative,
+    RegisteredFunction, Retry, Timestamp, Value, WorkCounter,
 };
+use lash_kernel_state::arena::Arena;
 use serde::{Deserialize, Serialize};
-use std::{
-    collections::{BTreeMap, BTreeSet},
-    fmt::Write as _,
-    ops::ControlFlow,
-};
+use std::fmt::Write as _;
 #[path = "probe/fixtures.rs"]
 pub(crate) mod fixtures;
-#[path = "probe/recording.rs"]
-mod recording;
 use fixtures::{RecordedObject, RecordedValue, Replay};
 
 #[derive(Clone, Debug, Serialize, Deserialize)]
@@ -49,66 +46,137 @@ pub(crate) fn answer_loaded(
     prepared: Option<PreparedNative>,
     replay: Replay,
 ) -> Answer {
+    answer_replayed(registered, input, prepared, replay, false).0
+}
+/// What [`answer`] gives when every chunk the arguments reach starts cold,
+/// each read of one answering [`Retry::Cold`] and the call run again once
+/// it is warmed, as the machine runs it; and how many times it ran again.
+#[cfg(test)]
+#[allow(
+    dead_code,
+    reason = "the release crate's cold law calls it; other crates include this file"
+)]
+pub(crate) fn answer_cold(registered: &RegisteredFunction, input: &Input) -> (Answer, u64) {
+    let replay =
+        Replay::load(input).unwrap_or_else(|error| panic!("invalid native fixture: {error}"));
+    answer_replayed(registered, input, None, replay, true)
+}
+fn answer_replayed(
+    registered: &RegisteredFunction,
+    input: &Input,
+    prepared: Option<PreparedNative>,
+    mut replay: Replay,
+    cold: bool,
+) -> (Answer, u64) {
     let native = registered
         .native()
         .unwrap_or_else(|| panic!("a recorded entry has no native"));
-    let Replay {
-        mut heap,
-        args,
-        identities,
-    } = replay;
-    let mut counter = WorkCounter::new(Some(input.work));
-    let mut instrument = recording::Recording {
-        heap: &mut *heap,
-        log: Vec::new(),
+    let mut chilled = if cold {
+        chill(&mut replay.arena, &replay.args)
+    } else {
+        Vec::new()
     };
-    let called = std::panic::catch_unwind(std::panic::AssertUnwindSafe(|| {
-        native.call(NativeCall {
-            args: &args,
-            heap: &mut instrument,
-            counter: &mut counter,
+    let mut warmed = 0u64;
+    let (called, reservations, built, counter) = loop {
+        let mut counter = WorkCounter::new(Some(input.work));
+        let arena = &replay.arena;
+        let semantics = arena.semantics();
+        let mut nursery = Nursery::recording(arena.objects(), LogicalBytes(input.room));
+        let called = std::panic::catch_unwind(std::panic::AssertUnwindSafe(|| {
+            native.call(NativeCall {
+                args: Args::new(&replay.args, arena.objects(), &semantics),
+                new: &mut nursery,
+                counter: &mut counter,
+            })
+        }));
+        if let Ok(Err(NativeError::Retry(Retry::Cold { object, .. }))) = &called
+            && let Some(at) = chilled.iter().position(|(handle, _)| handle == object)
+        {
+            nursery.discard();
+            let (handle, body) = chilled.swap_remove(at);
+            replay
+                .arena
+                .thaw(handle, body)
+                .unwrap_or_else(|error| panic!("native replay thaw: {error}"));
+            warmed += 1;
+            continue;
+        }
+        let reservations = nursery.reservations().to_vec();
+        break (called, reservations, nursery.into_new(), counter);
+    };
+    // What the answer is read by reads it warm.
+    for (handle, body) in chilled {
+        replay
+            .arena
+            .thaw(handle, body)
+            .unwrap_or_else(|error| panic!("native replay thaw: {error}"));
+    }
+    let mut next = replay.next;
+    let grown = replay
+        .arena
+        .install(built, &mut || {
+            next += 1;
+            Ok(EntityId {
+                family: FamilyId::PRIMARY,
+                ordinal: next,
+            })
         })
-    }));
-    let reservations = instrument.log.iter().map(|r| (r.values, r.bytes)).collect();
-    let reserved = instrument
-        .log
-        .iter()
-        .filter(|r| r.accepted)
-        .fold(0u64, |sum, r| {
-            sum.saturating_add(r.values.saturating_mul(16))
-                .saturating_add(r.bytes)
-        });
-    drop(instrument);
-    let heap: &dyn NativeHeap = &*heap;
+        .unwrap_or_else(|error| panic!("native replay install: {error}"));
+    // The machine admits what a call built once it returns, its holds
+    // paying first: a call whose objects outgrow its room ends at the
+    // memory bound as a refused allocation would.
+    let called = match called {
+        Ok(Ok(_) | Err(NativeError::Raised(_))) if grown > input.room => Ok(Err(Retry::Room {
+            wanted: LogicalBytes(grown),
+        }
+        .into())),
+        called => called,
+    };
+    let reserved = reservations.iter().filter(|r| r.held).fold(0u64, |sum, r| {
+        sum.saturating_add(r.values.saturating_mul(16))
+            .saturating_add(r.bytes)
+    });
+    let reservations = reservations.iter().map(|r| (r.values, r.bytes)).collect();
     let mut outcome = String::new();
     let result = match called {
         Ok(Ok(value)) => {
             outcome.push_str("ok ");
-            write_value(heap, &identities, &value, &mut outcome);
+            write_value(&replay, &value, &mut outcome);
             value
         }
         Ok(Err(NativeError::Raised(error))) => {
+            let Ok(Body::Error(parts)) = error
+                .handle()
+                .ok_or(())
+                .and_then(|handle| replay.arena.body(handle).map_err(|_| ()))
+            else {
+                panic!("a native raised a value that is no error")
+            };
             let _ = write!(
                 outcome,
                 "raised {:?} {:?} ",
-                text(heap, &error.kind),
-                text(heap, &error.message)
+                text(&replay.arena, &parts.kind),
+                text(&replay.arena, &parts.message)
             );
-            let data = heap
-                .error_data(&error)
-                .unwrap_or_else(|error| panic!("native error payload: {error}"));
-            write_value(heap, &identities, &data, &mut outcome);
+            write_value(&replay, &parts.data, &mut outcome);
+            Value::Absent
+        }
+        Ok(Err(NativeError::Refused { kind, message })) => {
+            let _ = write!(outcome, "raised {kind:?} {message:?} ");
+            write_value(&replay, &Value::Null, &mut outcome);
             Value::Absent
         }
         Ok(Err(NativeError::Guard(guard))) => {
             let _ = write!(outcome, "guard {}", guard.limit);
             Value::Absent
         }
-        Ok(Err(NativeError::Memory)) => {
+        Ok(Err(NativeError::Retry(Retry::Room { .. }))) => {
             outcome.push_str("memory");
             Value::Absent
         }
-        Ok(Err(NativeError::Heap(error))) => panic!("native replay infrastructure fault: {error}"),
+        Ok(Err(error @ (NativeError::Retry(Retry::Cold { .. }) | NativeError::Malformed(_)))) => {
+            panic!("native replay infrastructure fault: {error}")
+        }
         Ok(Err(NativeError::Decline)) => {
             outcome.push_str("declined");
             Value::Absent
@@ -130,186 +198,225 @@ pub(crate) fn answer_loaded(
                     .params
                     .iter()
                     .position(|p| &p.name == name)
-                    .and_then(|i| args.get(i))
+                    .and_then(|i| replay.args.get(i))
                     .unwrap_or(&Value::Absent),
             };
-            measure_value(heap, value, measure)
+            measure_value(&replay.arena, value, measure)
         });
     let prepared_difference = prepared
         .filter(|_| !outcome.starts_with("guard "))
         .and_then(|prepared| {
-            let called =
-                std::panic::catch_unwind(std::panic::AssertUnwindSafe(|| (prepared.entry)(&args)));
+            let called = std::panic::catch_unwind(std::panic::AssertUnwindSafe(|| {
+                (prepared.entry)(&replay.args)
+            }));
             let mut observed = String::new();
             match called {
                 Ok(Some(value)) => {
                     observed.push_str("ok ");
-                    write_value(heap, &identities, &value, &mut observed);
+                    write_value(&replay, &value, &mut observed);
                 }
                 Ok(None) => return None,
                 Err(_) => observed.push_str("panicked"),
             };
             (observed != outcome).then_some(observed)
         });
-    Answer {
-        outcome,
-        spent: counter.spent(),
-        charge,
-        reservations,
-        reserved,
-        prepared_difference,
-    }
-}
-fn text(heap: &dyn NativeHeap, value: &TextRef) -> String {
-    let mut out = String::new();
-    heap.payload_visit(
-        &Value::Text(value.clone()),
-        0..value.summary.utf8_bytes,
-        &mut |chunk| {
-            let Chunk::Text(chunk) = chunk else {
-                panic!("text descriptor yielded octets")
-            };
-            out.push_str(chunk);
-            ControlFlow::Continue(())
+    (
+        Answer {
+            outcome,
+            spent: counter.spent(),
+            charge,
+            reservations,
+            reserved,
+            prepared_difference,
         },
+        warmed,
     )
-    .unwrap_or_else(|error| panic!("native replay text: {error}"));
-    out
 }
-fn integer(heap: &dyn NativeHeap, value: &IntRef) -> Integer {
-    match value {
-        IntRef::Inline(value) => value.clone(),
-        IntRef::Paged { summary, .. } => {
-            let mut digits = Vec::new();
-            heap.payload_visit(
-                &Value::Int(value.clone()),
-                0..summary.bits.div_ceil(8),
-                &mut |chunk| {
-                    let Chunk::Bytes(chunk) = chunk else {
-                        panic!("integer descriptor yielded text")
-                    };
-                    digits.extend_from_slice(chunk);
-                    ControlFlow::Continue(())
-                },
-            )
-            .unwrap_or_else(|error| panic!("native replay integer: {error}"));
-            lash_kernel_doc::heap_values::integer_from_digits(summary.negative, &digits)
+/// Sets aside every resident body `args` reach.
+fn chill(
+    arena: &mut Arena,
+    args: &[Value],
+) -> Vec<(ArenaHandle, lash_kernel_state::arena::Chilled)> {
+    let mut pending: Vec<ArenaHandle> = args.iter().filter_map(Value::handle).collect();
+    let mut seen: Vec<ArenaHandle> = Vec::new();
+    let mut order = Vec::new();
+    while let Some(handle) = pending.pop() {
+        if seen.contains(&handle) {
+            continue;
         }
+        seen.push(handle);
+        if let Ok(body) = arena.body(handle) {
+            lash_kernel_state::arena::each_member(body, &mut |member| {
+                pending.extend(member.handle());
+            });
+        }
+        order.push(handle);
+    }
+    order
+        .into_iter()
+        .filter_map(|handle| {
+            let chilled = arena
+                .chill(handle)
+                .unwrap_or_else(|error| panic!("native replay chill: {error}"))?;
+            Some((handle, chilled))
+        })
+        .collect()
+}
+fn text(arena: &Arena, value: &Value) -> String {
+    arena
+        .semantics()
+        .text(value)
+        .unwrap_or_else(|error| panic!("native replay text: {error}"))
+        .to_owned()
+}
+fn integer(arena: &Arena, value: &Value) -> Integer {
+    arena
+        .semantics()
+        .integer(value)
+        .unwrap_or_else(|error| panic!("native replay integer: {error}"))
+        .unwrap_or_else(|| panic!("native replay integer is no integer"))
+}
+fn bytes(arena: &Arena, handle: ArenaHandle) -> Vec<u8> {
+    arena
+        .semantics()
+        .bytes(handle)
+        .unwrap_or_else(|error| panic!("native replay bytes: {error}"))
+        .to_vec()
+}
+fn items(arena: &Arena, handle: ArenaHandle) -> Vec<Value> {
+    arena
+        .semantics()
+        .sequence(handle)
+        .unwrap_or_else(|error| panic!("native replay sequence: {error}"))
+        .to_vec()
+}
+fn pairs(arena: &Arena, handle: ArenaHandle) -> Vec<(Value, Value)> {
+    arena
+        .semantics()
+        .entries(handle)
+        .unwrap_or_else(|error| panic!("native replay table: {error}"))
+        .as_chunks::<2>()
+        .0
+        .iter()
+        .map(|pair| (pair[0], pair[1]))
+        .collect()
+}
+fn error_parts(arena: &Arena, handle: ArenaHandle) -> (Value, Value, Value) {
+    match arena.body(handle) {
+        Ok(Body::Error(parts)) => (parts.kind, parts.message, parts.data),
+        _ => panic!("native replay error has another body"),
     }
 }
-fn write_value(
-    heap: &dyn NativeHeap,
-    ids: &BTreeMap<EntityId, u64>,
-    value: &Value,
-    out: &mut String,
-) {
-    out.push_str(&json(heap, ids, value, &mut BTreeSet::new()).to_string());
+fn write_value(replay: &Replay, value: &Value, out: &mut String) {
+    out.push_str(&json(replay, value, &mut Vec::new()).to_string());
 }
-fn json(
-    heap: &dyn NativeHeap,
-    ids: &BTreeMap<EntityId, u64>,
-    value: &Value,
-    path: &mut BTreeSet<EntityId>,
-) -> serde_json::Value {
+fn json(replay: &Replay, value: &Value, path: &mut Vec<ArenaHandle>) -> serde_json::Value {
     use serde_json::json;
+    let arena = &replay.arena;
     match value {
         Value::Null => json!("null"),
         Value::Absent => json!("absent"),
         Value::Bool(v) => json!({"bool":v}),
-        Value::Int(v) => json!({"int":integer(heap,v)}),
+        Value::Int(_) | Value::BigInt(_) => json!({"int":integer(arena,value)}),
         Value::Float(v) => json!({"float":v}),
-        Value::Text(v) => json!({"text":text(heap,v)}),
-        Value::Function(v) => json!({"function":text(heap,v)}),
-        Value::Bytes(v) => {
-            let mut bytes = Vec::new();
-            heap.payload_visit(value, 0..v.len, &mut |chunk| {
-                let Chunk::Bytes(chunk) = chunk else {
-                    panic!("byte descriptor yielded text")
-                };
-                bytes.extend_from_slice(chunk);
-                ControlFlow::Continue(())
-            })
-            .unwrap_or_else(|e| panic!("native replay bytes: {e}"));
-            json!({"bytes":lash_kernel_doc::Bytes::new(bytes)})
+        Value::Text(_) | Value::LongText(_) => json!({"text":text(arena,value)}),
+        Value::Function(_) | Value::LongFunction(_) => json!({"function":text(arena,value)}),
+        Value::Bytes(v) => json!({"bytes":lash_kernel_doc::Bytes::new(bytes(arena, *v))}),
+        Value::Timestamp(_) | Value::BigTimestamp(_) => {
+            let nanoseconds = arena
+                .semantics()
+                .nanoseconds(value)
+                .unwrap_or_else(|e| panic!("native replay timestamp: {e}"))
+                .unwrap_or_else(|| panic!("native replay timestamp is no timestamp"));
+            json!({"timestamp":Timestamp{nanoseconds}})
         }
-        Value::Timestamp(v) => json!({"timestamp":v}),
-        Value::Handle(v) => json!({"handle":v}),
+        Value::Handle(v) => match arena.body(*v) {
+            Ok(Body::Handle(handle)) => json!({"handle":handle}),
+            _ => panic!("native replay handle has another body"),
+        },
         Value::Task(v) => json!({"task":v}),
-        Value::Ref(lash_kernel_doc::Identity::Task(v)) => json!({"ref":{"task":v}}),
-        Value::Ref(lash_kernel_doc::Identity::Object(v)) => {
-            json!({"ref":{"object":ids.get(v).unwrap_or_else(||panic!("unrecorded identity reference"))}})
+        Value::TaskRef(v) => json!({"ref":{"task":v}}),
+        Value::ObjectRef(v) => {
+            json!({"ref":{"object":replay.ordinal(*v).unwrap_or_else(||panic!("unrecorded identity reference"))}})
         }
         Value::Tuple(v) => {
-            let mut values = Vec::new();
-            heap.tuple_visit(v, &mut |v| {
-                values.push(json(heap, ids, v, path));
-                ControlFlow::Continue(())
-            })
-            .unwrap_or_else(|e| panic!("native replay tuple: {e}"));
+            let values: Vec<_> = items(arena, *v)
+                .iter()
+                .map(|v| json(replay, v, path))
+                .collect();
             json!({"tuple":values})
         }
         Value::Error(v) => {
-            let data = heap
-                .error_data(v)
-                .unwrap_or_else(|e| panic!("native replay error: {e}"));
-            json!({"error":{"kind":text(heap,&v.kind),"message":text(heap,&v.message),"data":json(heap,ids,&data,path)}})
+            let (kind, message, data) = error_parts(arena, *v);
+            json!({"error":{"kind":text(arena,&kind),"message":text(arena,&message),"data":json(replay,&data,path)}})
         }
         Value::List(id) | Value::Set(id) | Value::Map(id) | Value::Record(id) => {
-            if !path.insert(*id) {
-                return json!({"cyclic_object":ids.get(id).unwrap_or_else(||panic!("unrecorded cyclic identity"))});
+            if path.contains(id) {
+                return json!({"cyclic_object":replay.ordinal(*id).unwrap_or_else(||panic!("unrecorded cyclic identity"))});
             }
-            let mut items = Vec::new();
-            let mut entries = Vec::new();
-            let mut fields = Vec::new();
-            heap.visit(*id, &mut |element| {
-                match element {
-                    Element::Item(v) => items.push(json(heap, ids, v, path)),
-                    Element::Entry { key, value } => {
-                        entries.push([json(heap, ids, key, path), json(heap, ids, value, path)])
-                    }
-                    Element::Field { name, value } => {
-                        fields.push((text(heap, name), json(heap, ids, value, path)))
-                    }
-                };
-                ControlFlow::Continue(())
-            })
-            .unwrap_or_else(|e| panic!("native replay object: {e}"));
-            path.remove(id);
-            match value {
-                Value::List(_) => json!({"list":items}),
-                Value::Set(_) => json!({"set":items}),
-                Value::Map(_) => json!({"map":entries}),
-                _ => json!({"record":fields}),
-            }
+            path.push(*id);
+            let encoded = match value {
+                Value::List(_) => {
+                    let items: Vec<_> = items(arena, *id)
+                        .iter()
+                        .map(|v| json(replay, v, path))
+                        .collect();
+                    json!({"list":items})
+                }
+                Value::Set(_) => {
+                    let items: Vec<_> = pairs(arena, *id)
+                        .iter()
+                        .map(|(key, _)| json(replay, key, path))
+                        .collect();
+                    json!({"set":items})
+                }
+                Value::Map(_) => {
+                    let entries: Vec<_> = pairs(arena, *id)
+                        .iter()
+                        .map(|(key, value)| [json(replay, key, path), json(replay, value, path)])
+                        .collect();
+                    json!({"map":entries})
+                }
+                _ => {
+                    let fields: Vec<_> = pairs(arena, *id)
+                        .iter()
+                        .map(|(name, value)| (text(arena, name), json(replay, value, path)))
+                        .collect();
+                    json!({"record":fields})
+                }
+            };
+            path.pop();
+            encoded
         }
         Value::Closure(_) => panic!("native corpus contains no closure fixtures"),
     }
 }
-fn size(heap: &dyn NativeHeap, value: &Value) -> u64 {
+fn size(arena: &Arena, value: &Value) -> u64 {
+    let len = |handle: &ArenaHandle| match arena.body(*handle) {
+        Ok(Body::List(sequence) | Body::Tuple(sequence)) => sequence.len,
+        Ok(Body::Map(table) | Body::Set(table) | Body::Record(table)) => table.len,
+        _ => panic!("native measure: a collection has another body"),
+    };
     1 + match value {
-        Value::Int(IntRef::Inline(v)) => v.bits().div_ceil(64),
-        Value::Int(IntRef::Paged { summary, .. }) => summary.bits.div_ceil(64),
-        Value::Text(v) => v.summary.utf8_bytes,
-        Value::Bytes(v) => v.len,
-        Value::Tuple(v) => v.summary.len,
-        Value::Error(v) => v.kind.summary.utf8_bytes + v.message.summary.utf8_bytes,
-        Value::Map(id) => {
-            2 * heap
-                .len(*id)
-                .unwrap_or_else(|e| panic!("native measure: {e}"))
+        Value::Int(_) | Value::BigInt(_) => integer(arena, value).bits().div_ceil(64),
+        Value::Text(_) | Value::LongText(_) => text(arena, value).len() as u64,
+        Value::Bytes(v) => bytes(arena, *v).len() as u64,
+        Value::Tuple(v) => len(v),
+        Value::Error(v) => {
+            let (kind, message, _) = error_parts(arena, *v);
+            (text(arena, &kind).len() + text(arena, &message).len()) as u64
         }
-        Value::List(id) | Value::Set(id) | Value::Record(id) => heap
-            .len(*id)
-            .unwrap_or_else(|e| panic!("native measure: {e}")),
+        Value::Map(id) => 2 * len(id),
+        Value::List(id) | Value::Set(id) | Value::Record(id) => len(id),
         _ => 0,
     }
 }
-fn measure_value(heap: &dyn NativeHeap, value: &Value, measure: Measure) -> u64 {
+fn measure_value(arena: &Arena, value: &Value, measure: Measure) -> u64 {
     match measure {
-        Measure::Size => size(heap, value),
+        Measure::Size => size(arena, value),
         Measure::Magnitude => match value {
-            Value::Int(v) => {
-                let v = integer(heap, v);
+            Value::Int(_) | Value::BigInt(_) => {
+                let v = integer(arena, value);
                 if v.is_negative() {
                     0
                 } else {
@@ -320,13 +427,18 @@ fn measure_value(heap: &dyn NativeHeap, value: &Value, measure: Measure) -> u64 
             _ => 0,
         },
         Measure::DeepSize | Measure::NestedSize => {
-            let mut pending = vec![value.clone()];
-            let mut seen = BTreeSet::new();
+            let mut pending = vec![*value];
+            let mut seen: Vec<ArenaHandle> = Vec::new();
             let mut total = 0u64;
             let mut root = true;
             while let Some(value) = pending.pop() {
                 let nested = measure == Measure::NestedSize;
-                if let Some(id) = value.object() {
+                if let Value::List(id)
+                | Value::Map(id)
+                | Value::Set(id)
+                | Value::Record(id)
+                | Value::Closure(id) = value
+                {
                     if nested {
                         if !root {
                             total = total.saturating_add(1)
@@ -334,38 +446,34 @@ fn measure_value(heap: &dyn NativeHeap, value: &Value, measure: Measure) -> u64 
                         root = false;
                         continue;
                     }
-                    if !seen.insert(id) {
+                    if seen.contains(&id) {
                         continue;
                     }
-                    heap.visit(id, &mut |element| {
-                        match element {
-                            Element::Item(v) | Element::Field { value: v, .. } => {
-                                pending.push(v.clone())
+                    seen.push(id);
+                    match value {
+                        Value::List(_) => pending.extend(items(arena, id)),
+                        Value::Set(_) => {
+                            pending.extend(pairs(arena, id).into_iter().map(|(k, _)| k))
+                        }
+                        Value::Map(_) => {
+                            for (key, value) in pairs(arena, id) {
+                                pending.push(key);
+                                pending.push(value);
                             }
-                            Element::Entry { key, value } => {
-                                pending.push(key.clone());
-                                pending.push(value.clone())
-                            }
-                        };
-                        ControlFlow::Continue(())
-                    })
-                    .unwrap_or_else(|e| panic!("native measure object: {e}"));
+                        }
+                        Value::Record(_) => {
+                            pending.extend(pairs(arena, id).into_iter().map(|(_, v)| v))
+                        }
+                        _ => (),
+                    }
                 }
                 if !nested || !root {
-                    total = total.saturating_add(size(heap, &value));
+                    total = total.saturating_add(size(arena, &value));
                 }
                 root = false;
                 match value {
-                    Value::Tuple(v) => heap
-                        .tuple_visit(&v, &mut |v| {
-                            pending.push(v.clone());
-                            ControlFlow::Continue(())
-                        })
-                        .unwrap_or_else(|e| panic!("native measure tuple: {e}")),
-                    Value::Error(v) => pending.push(
-                        heap.error_data(&v)
-                            .unwrap_or_else(|e| panic!("native measure error: {e}")),
-                    ),
+                    Value::Tuple(v) => pending.extend(items(arena, v)),
+                    Value::Error(v) => pending.push(error_parts(arena, v).2),
                     _ => (),
                 }
             }

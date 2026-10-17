@@ -15,16 +15,15 @@
 
 use std::sync::Arc;
 
+use lash_kernel_doc::arena::ArenaHandle;
 use lash_kernel_doc::plan::{Cursor as PlanCursor, PlanContext, PlanExit, Test};
-use lash_kernel_doc::{EntityId, Identity, TaskId, Value};
+use lash_kernel_doc::{NativeError, Retry, TaskId, Value};
 use lash_kernel_exec::{Reg as KirReg, RegRange};
-use lash_kernel_state::paged::{ObjectInit, SemanticHeap};
 
 use super::loops::Cursor;
 use super::ops::Reg;
 use super::{Eval, Halt, Interrupt, KernelMachine, fault, raise};
 use crate::compile::{Executable, LibId, PreparedPlan};
-use crate::heap::value_bytes;
 
 /// What a statement the plan performs started from: what it pins and
 /// holds from then on is its own, released when it ends.
@@ -79,23 +78,21 @@ impl PlanRun<'_> {
         self.prepared.locals[slot as usize].is_some_and(|local| local.shared)
     }
 
-    fn cell(&self, slot: u32) -> Result<EntityId, Halt> {
+    fn cell(&self, slot: u32) -> Result<ArenaHandle, Halt> {
         match self.machine.regs[self.slots + slot as usize] {
-            Value::Ref(Identity::Object(cell)) => Ok(cell),
+            Value::ObjectRef(cell) => Ok(cell),
             _ => Err(fault("a plan's captured variable has no cell")),
         }
     }
 
     fn bind_value(&mut self, slot: u32, value: Value) -> Result<Value, PlanExit> {
-        let value = self.machine.canonical_binding(value);
-        let value = self.held(value)?;
         let holding = if self.shared(slot) {
-            let allocated = self.machine.alloc(ObjectInit::Variable(value.clone()));
-            Value::Ref(Identity::Object(self.held(allocated)?))
+            let allocated = self.machine.new_cell(value);
+            Value::ObjectRef(self.held(allocated)?)
         } else {
-            let reserved = self.machine.reserve_held(value_bytes(&value));
+            let reserved = self.machine.reserve_held(self.machine.cost_of(&value));
             self.held(reserved)?;
-            value.clone()
+            value
         };
         self.machine.put(self.slots + slot as usize, holding);
         Ok(value)
@@ -104,6 +101,7 @@ impl PlanRun<'_> {
     pub(super) fn exit(&mut self, interrupt: Interrupt) -> PlanExit {
         match interrupt {
             Interrupt::Raise(value) => PlanExit::Raise(*value),
+            Interrupt::Refuse(refusal) => PlanExit::Raise(*self.machine.thrown(*refusal)),
             Interrupt::Halt(halt) => {
                 self.halt = Some(halt);
                 PlanExit::Halt
@@ -168,7 +166,7 @@ impl PlanContext for PlanRun<'_> {
     }
 
     fn param(&mut self, index: u32, dst: u32) -> Result<(), PlanExit> {
-        let value = self.machine.regs[self.args + index as usize].clone();
+        let value = self.machine.regs[self.args + index as usize];
         self.machine.put(self.base + dst as usize, value);
         Ok(())
     }
@@ -176,7 +174,7 @@ impl PlanContext for PlanRun<'_> {
     fn adopt(&mut self, index: u32, slot: u32) -> Result<(), PlanExit> {
         // The argument stays: the formula is charged on what was passed, as
         // the body's frame retains it.
-        let value = self.machine.regs[self.args + index as usize].clone();
+        let value = self.machine.regs[self.args + index as usize];
         if self.shared(slot) {
             let admitted = self
                 .entry
@@ -186,14 +184,12 @@ impl PlanContext for PlanRun<'_> {
             let cell = match admitted {
                 Some(cell) => cell,
                 None => {
-                    let allocated = self.machine.alloc(ObjectInit::Variable(value));
+                    let allocated = self.machine.new_cell(value);
                     self.held(allocated)?
                 }
             };
-            self.machine.put(
-                self.slots + slot as usize,
-                Value::Ref(Identity::Object(cell)),
-            );
+            self.machine
+                .put(self.slots + slot as usize, Value::ObjectRef(cell));
         } else {
             self.machine.put(self.slots + slot as usize, value);
         }
@@ -213,10 +209,10 @@ impl PlanContext for PlanRun<'_> {
         let value = if self.shared(slot) {
             let cell = self.cell(slot);
             let cell = self.held(cell)?;
-            let value = self.machine.heap.variable_get(cell).map_err(Halt::from);
-            self.held(value)?
+            let value = self.machine.in_arena(|arena| arena.cell(cell));
+            self.check(value)?
         } else {
-            self.machine.regs[self.slots + slot as usize].clone()
+            self.machine.regs[self.slots + slot as usize]
         };
         self.machine.put(self.base + dst as usize, value);
         Ok(())
@@ -233,14 +229,16 @@ impl PlanContext for PlanRun<'_> {
         if self.shared(slot) {
             let cell = self.cell(slot);
             let cell = self.held(cell)?;
-            let written = self.machine.heap_write(|heap| {
-                heap.variable_write(cell, value.clone())
-                    .map_err(Interrupt::from)
-            });
-            return self.check(written);
+            let growth = self.machine.in_arena(|arena| arena.cell_set(cell, value));
+            let growth = self.check(growth)?;
+            let grown = self.machine.grow(growth);
+            return self.held(grown);
         }
         let at = self.slots + slot as usize;
-        let growth = value_bytes(&value).saturating_sub(value_bytes(&self.machine.regs[at]));
+        let growth = self
+            .machine
+            .cost_of(&value)
+            .saturating_sub(self.machine.cost_of(&self.machine.regs[at]));
         if growth != 0 {
             // The variable's old holding already pays for that much.
             let reserved = self.machine.reserve_held(growth);
@@ -282,11 +280,7 @@ impl PlanContext for PlanRun<'_> {
         }
         // A pending departure is a borrowed payload, not a new binding.
         // Its private register roots it across finally's statement marks.
-        let canonical = self
-            .machine
-            .heap_write(|heap| heap.canonical_value(value.clone()).map_err(Interrupt::from));
-        let value = self.check(canonical)?;
-        self.machine.put(self.slots + slot as usize, value.clone());
+        self.machine.put(self.slots + slot as usize, value);
         Ok(value)
     }
 
@@ -422,15 +416,27 @@ impl PlanContext for PlanRun<'_> {
     }
 
     fn next(&mut self, cursor: PlanCursor, dst: u32) -> Result<bool, PlanExit> {
-        let Some(walk) = self.cursors.get_mut(cursor.0 as usize) else {
-            let missing = Err(fault("a plan stepped a loop it has not opened"));
-            return self.held(missing);
+        let stepped = loop {
+            let Some(walk) = self.cursors.get_mut(cursor.0 as usize) else {
+                let missing = Err(fault("a plan stepped a loop it has not opened"));
+                return self.held(missing);
+            };
+            let stepped = walk.cursor.step(&mut self.machine.arena.borrow_mut());
+            // What the loop walks is decoded, then stepped again.
+            match stepped {
+                Err(NativeError::Retry(Retry::Cold { object, .. })) => {
+                    let warmed = self.machine.warm(object);
+                    self.held(warmed)?;
+                }
+                stepped => {
+                    let stepped = stepped.inspect(|element| {
+                        walk.started += u64::from(element.is_some());
+                    });
+                    break stepped.map_err(Interrupt::from);
+                }
+            }
         };
-        let stepped = walk.cursor.step(&self.machine.heap);
-        let stepped = stepped.inspect(|element| {
-            walk.started += u64::from(element.is_some());
-        });
-        match self.held(stepped.map_err(Halt::from))? {
+        match self.check(stepped)? {
             Some(element) => {
                 self.machine.put(self.base + dst as usize, element);
                 Ok(true)
@@ -500,12 +506,8 @@ impl KernelMachine {
     /// A value leaving a plan, as one leaving a frame is held
     /// ([`KernelMachine::complete`]): `holds` times, until the step ends.
     fn departing(&mut self, value: Value, holds: usize) -> Result<Value, Halt> {
-        let value = self.heap_write(|heap| {
-            heap.canonical_value(value.clone())
-                .map_err(super::write_halt)
-        })?;
         for _ in 0..holds {
-            self.pins.borrowed.push(value.clone());
+            self.pins.borrowed.push(value);
         }
         Ok(value)
     }

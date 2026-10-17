@@ -1,17 +1,22 @@
 //! Token-preserving JSON (`K-EFF-005` to `K-EFF-007`).
 
-use std::collections::BTreeSet;
-use std::ops::ControlFlow;
+use std::borrow::Cow;
 
-use lash_kernel_doc::heap::{HeapFault, IntRef, Payload, TextRef};
+use lash_kernel_doc::arena::ArenaHandle;
 use lash_kernel_doc::{
-    Element, EntityId, Float, Integer, NativeCall, NativeError, NativeHeap, NumberPolicy,
-    NumberToken, Object, Type, Value,
+    Args, Float, Integer, NativeCall, NativeError, NewObject, NumberPolicy, NumberToken, Nursery,
+    Type, Value,
 };
 use num_bigint::BigInt;
 use num_traits::ToPrimitive;
 
-use super::{Function, arg, definition, materialized_text, raise, room};
+use super::{Function, arg, definition, materialized_text, raise, room, text_arg};
+
+/// Whether `error` is a stated-type mismatch a union tries past, rather
+/// than a cause that ends the call.
+fn raised(error: &NativeError) -> bool {
+    matches!(error, NativeError::Raised(_) | NativeError::Refused { .. })
+}
 
 /// Decodes one JSON number without passing integers through a float.
 ///
@@ -20,13 +25,12 @@ use super::{Function, arg, definition, materialized_text, raise, room};
 /// infinity. `Number` and `Any` use `policy`. A union selects its first fitting
 /// member. A wrong type, fractional integer or float overflow raises
 /// `effect_result` (`K-EFF-005` to `K-EFF-007`). The digits an exponent adds
-/// to an integer are reserved in `heap` before they are written; a refusal
-/// ends with `NativeError::Memory`.
+/// to an integer are reserved in `new` before they are written.
 pub fn decode_number(
     token: &NumberToken,
     expected: &Type,
     policy: NumberPolicy,
-    heap: &mut dyn NativeHeap,
+    new: &mut Nursery<'_>,
 ) -> Result<Value, NativeError> {
     let selected = match expected {
         Type::Number | Type::Any => {
@@ -38,9 +42,9 @@ pub fn decode_number(
         }
         Type::Union(members) => {
             for member in members {
-                match decode_number(token, member, policy, heap) {
+                match decode_number(token, member, policy, new) {
                     Ok(value) => return Ok(value),
-                    Err(NativeError::Raised(_)) => {}
+                    Err(error) if raised(&error) => {}
                     Err(error) => return Err(error),
                 }
             }
@@ -50,8 +54,8 @@ pub fn decode_number(
     };
     match selected {
         Type::Int => {
-            let integer = exact_integer(token.as_str(), heap)?;
-            Ok(Value::Int(heap.int(Integer::new(integer))?))
+            let integer = exact_integer(token.as_str(), new)?;
+            Ok(new.integer(Integer::new(integer)))
         }
         Type::Float => token
             .as_str()
@@ -68,7 +72,7 @@ fn mismatch() -> NativeError {
     raise("effect_result", "JSON value does not fit the stated type")
 }
 
-fn exact_integer(token: &str, heap: &mut dyn NativeHeap) -> Result<BigInt, NativeError> {
+fn exact_integer(token: &str, new: &mut Nursery<'_>) -> Result<BigInt, NativeError> {
     let (mantissa, exponent) = token.split_once(['e', 'E']).unwrap_or((token, "0"));
     let exponent = exponent.parse::<BigInt>().map_err(|_| mismatch())?;
     let negative = mantissa.starts_with('-');
@@ -93,9 +97,9 @@ fn exact_integer(token: &str, heap: &mut dyn NativeHeap) -> Result<BigInt, Nativ
         // An exponent's magnitude, not the token's length, sets how many
         // digits the integer has: the zeros and the integer they spell are
         // reserved first.
-        let add = shift.to_usize().ok_or(NativeError::Memory)?;
-        heap.reserve(0, room(add).saturating_mul(2))?;
-        digits.try_reserve(add).map_err(|_| NativeError::Memory)?;
+        let add = shift.to_usize().ok_or_else(crate::exhausted)?;
+        new.reserve(0, room(add).saturating_mul(2))?;
+        digits.try_reserve(add).map_err(|_| crate::exhausted())?;
         digits.extend(std::iter::repeat_n('0', add));
     }
     let value = digits.parse::<BigInt>().map_err(|_| mismatch())?;
@@ -113,19 +117,19 @@ enum Json {
 }
 
 mod reader;
-use reader::{read, read_descriptor, syntax};
+use reader::{read, syntax};
 
 fn fits(
     json: &Json,
     ty: &Type,
     policy: NumberPolicy,
-    heap: &mut dyn NativeHeap,
+    new: &mut Nursery<'_>,
 ) -> Result<(), NativeError> {
     if let Type::Union(members) = ty {
         for member in members {
-            match fits(json, member, policy, heap) {
+            match fits(json, member, policy, new) {
                 Ok(()) => return Ok(()),
-                Err(NativeError::Raised(_)) => {}
+                Err(error) if raised(&error) => {}
                 Err(error) => return Err(error),
             }
         }
@@ -133,7 +137,7 @@ fn fits(
     }
     match (json, ty) {
         (Json::Number(token), _) => {
-            decode_number(token, ty, policy, heap)?;
+            decode_number(token, ty, policy, new)?;
         }
         (Json::Null, Type::Null | Type::Any)
         | (Json::Bool(_), Type::Bool | Type::Any)
@@ -141,22 +145,22 @@ fn fits(
         (Json::Text(text), Type::Enum(members)) if members.contains(text) => {}
         (Json::Array(items), Type::Tuple(types)) if items.len() == types.len() => {
             for (item, ty) in items.iter().zip(types) {
-                fits(item, ty, policy, heap)?;
+                fits(item, ty, policy, new)?;
             }
         }
         (Json::Array(items), Type::List(element)) => {
             for item in items {
-                fits(item, element, policy, heap)?;
+                fits(item, element, policy, new)?;
             }
         }
         (Json::Array(items), Type::Any) => {
             for item in items {
-                fits(item, &Type::Any, policy, heap)?;
+                fits(item, &Type::Any, policy, new)?;
             }
         }
         (Json::Object(fields), Type::Any) => {
             for (_, value) in fields {
-                fits(value, &Type::Any, policy, heap)?;
+                fits(value, &Type::Any, policy, new)?;
             }
         }
         (Json::Object(fields), Type::Record(record)) => {
@@ -173,13 +177,13 @@ fn fits(
                     .map(|field| &field.ty)
                     .or(record.rest.as_deref())
                     .ok_or_else(mismatch)?;
-                fits(value, ty, policy, heap)?;
+                fits(value, ty, policy, new)?;
             }
         }
         (Json::Object(fields), Type::Map(map)) => {
             for (name, value) in fields {
-                fits(&Json::Text(name.clone()), &map.key, policy, heap)?;
-                fits(value, &map.value, policy, heap)?;
+                fits(&Json::Text(name.clone()), &map.key, policy, new)?;
+                fits(value, &map.value, policy, new)?;
             }
         }
         _ => return Err(mismatch()),
@@ -191,13 +195,13 @@ fn decode(
     json: &Json,
     ty: &Type,
     policy: NumberPolicy,
-    heap: &mut dyn NativeHeap,
+    new: &mut Nursery<'_>,
 ) -> Result<Value, NativeError> {
     if let Type::Union(members) = ty {
         for member in members {
-            match fits(json, member, policy, heap) {
-                Ok(()) => return decode(json, member, policy, heap),
-                Err(NativeError::Raised(_)) => {}
+            match fits(json, member, policy, new) {
+                Ok(()) => return decode(json, member, policy, new),
+                Err(error) if raised(&error) => {}
                 Err(error) => return Err(error),
             }
         }
@@ -206,8 +210,8 @@ fn decode(
     match json {
         Json::Null => Ok(Value::Null),
         Json::Bool(value) => Ok(Value::Bool(*value)),
-        Json::Text(text) => Ok(Value::Text(heap.text(text)?)),
-        Json::Number(token) => decode_number(token, ty, policy, heap),
+        Json::Text(text) => Ok(new.text(text)),
+        Json::Number(token) => decode_number(token, ty, policy, new),
         Json::Array(items) => {
             let values: Result<Vec<_>, _> = items
                 .iter()
@@ -218,14 +222,14 @@ fn decode(
                         Type::Tuple(types) => &types[index],
                         _ => &Type::Any,
                     };
-                    decode(item, ty, policy, heap)
+                    decode(item, ty, policy, new)
                 })
                 .collect();
             let values = values?;
-            match ty {
-                Type::Tuple(_) => Ok(Value::Tuple(heap.tuple(values)?)),
-                _ => Ok(Value::List(heap.allocate(Object::List(values))?)),
-            }
+            Ok(new.allocate(match ty {
+                Type::Tuple(_) => NewObject::Tuple(values),
+                _ => NewObject::List(values),
+            }))
         }
         Json::Object(fields) => {
             let values: Result<Vec<_>, NativeError> = fields
@@ -242,22 +246,16 @@ fn decode(
                         Type::Map(map) => &map.value,
                         _ => &Type::Any,
                     };
-                    Ok((heap.text(name)?, decode(item, ty, policy, heap)?))
+                    let key = new.text(name);
+                    Ok((key, decode(item, ty, policy, new)?))
                 })
                 .collect();
             let values = values?;
-            if matches!(ty, Type::Map(_)) {
-                Ok(Value::Map(
-                    heap.allocate(Object::Map(
-                        values
-                            .into_iter()
-                            .map(|(key, value)| (Value::Text(key), value))
-                            .collect(),
-                    ))?,
-                ))
+            Ok(new.allocate(if matches!(ty, Type::Map(_)) {
+                NewObject::Map(values)
             } else {
-                Ok(Value::Record(heap.allocate(Object::Record(values))?))
-            }
+                NewObject::Record(values)
+            }))
         }
     }
 }
@@ -273,27 +271,29 @@ pub fn parse_json(
     text: &str,
     expected: &Type,
     policy: NumberPolicy,
-    heap: &mut dyn NativeHeap,
+    depth_limit: usize,
+    new: &mut Nursery<'_>,
 ) -> Result<Value, NativeError> {
-    let json = read(text, heap)?;
-    fits(&json, expected, policy, heap)?;
-    decode(&json, expected, policy, heap)
+    let json = read(text, depth_limit, new)?;
+    fits(&json, expected, policy, new)?;
+    decode(&json, expected, policy, new)
 }
 
 /// The text `stringify` writes. A shared object is written once for every
 /// place that holds it, so the text can outgrow the value: each piece is
 /// reserved, as text and as the buffer it is built in, before it is appended.
-struct Out<'a> {
+struct Out<'a, 'call> {
     text: String,
-    heap: &'a mut dyn NativeHeap,
+    args: &'a Args<'call>,
+    new: &'a mut Nursery<'call>,
     layout: Option<DecimalLayout>,
     verbatim_kinds: u8,
     verbatim_field: Option<String>,
 }
 
-impl Out<'_> {
+impl Out<'_, '_> {
     fn push(&mut self, piece: &str) -> Result<(), NativeError> {
-        self.heap.reserve(0, room(piece.len()).saturating_mul(2))?;
+        self.new.reserve(0, room(piece.len()).saturating_mul(2))?;
         self.text.push_str(piece);
         Ok(())
     }
@@ -356,25 +356,24 @@ impl Out<'_> {
                         .ok_or_else(|| raise("json_number", "JSON refuses NaN and infinity"))?;
                     return layout.write(negative, digits, i64::from(exponent), self);
                 }
-                Value::Int(number) => {
-                    if let IntRef::Inline(integer) = number
-                        && let Some(value) = integer.to_i64()
-                    {
-                        return layout.small_integer(value.unsigned_abs(), value < 0, self);
-                    }
+                Value::Int(value) => {
+                    return layout.small_integer(value.unsigned_abs(), *value < 0, self);
+                }
+                Value::BigInt(_) => {
+                    let Some(number) = self.args.integer(value)? else {
+                        return Err(NativeError::Malformed("an integer names another body"));
+                    };
                     // Reserve decimal scratch before converting arbitrary-precision
                     // integers; three digits per byte bounds their decimal extent.
-                    self.heap.reserve(
+                    self.new.reserve(
                         0,
-                        (match number {
-                            IntRef::Inline(value) => value.bits(),
-                            IntRef::Paged { summary, .. } => summary.bits,
-                        })
-                        .div_ceil(8)
-                        .saturating_mul(3)
-                        .saturating_add(1),
+                        number
+                            .bits()
+                            .div_ceil(8)
+                            .saturating_mul(3)
+                            .saturating_add(1),
                     )?;
-                    let text = integer_text(number, self.heap)?;
+                    let text = integer_digits(&number, self.new)?;
                     let digits = text.strip_prefix('-').unwrap_or(&text);
                     let trimmed = digits.trim_end_matches('0');
                     let (digits, exponent) = if trimmed.is_empty() {
@@ -383,7 +382,7 @@ impl Out<'_> {
                         (
                             trimmed,
                             i64::try_from(digits.len() - trimmed.len())
-                                .map_err(|_| NativeError::Memory)?,
+                                .map_err(|_| crate::exhausted())?,
                         )
                     };
                     return layout.write(text.starts_with('-'), digits, exponent, self);
@@ -392,8 +391,12 @@ impl Out<'_> {
             }
         }
         match value {
-            Value::Int(number) => {
-                let text = integer_text(number, self.heap)?;
+            Value::Int(number) => self.push(&number.to_string()),
+            Value::BigInt(_) => {
+                let Some(number) = self.args.integer(value)? else {
+                    return Err(NativeError::Malformed("an integer names another body"));
+                };
+                let text = integer_digits(&number, self.new)?;
                 self.push(&text)
             }
             Value::Float(number) => self.push(&number.to_string()),
@@ -406,27 +409,42 @@ impl Out<'_> {
     }
 }
 
-fn text_copy(
-    text: &TextRef,
-    heap: &mut dyn NativeHeap,
-) -> Result<std::sync::Arc<str>, NativeError> {
-    match &text.body {
-        Payload::Resident(value) => Ok(value.clone()),
-        Payload::Paged(_) => heap.materialize_text(text),
+fn text_copy<'call>(
+    args: &Args<'call>,
+    text: &'call Value,
+) -> Result<Cow<'call, str>, NativeError> {
+    match args.text(text)? {
+        Some(text) => text.whole(),
+        None => Err(raise("type_error", "expected text")),
     }
 }
 
-fn inline_i64(int: &IntRef) -> Option<i64> {
-    match int {
-        IntRef::Inline(value) => value.to_i64(),
-        IntRef::Paged { .. } => None,
+/// `text` whole, as the heap copied it out: a paged text holds its bytes
+/// ([`Nursery::read_whole`]).
+fn text_held<'call>(
+    args: &Args<'call>,
+    new: &mut Nursery<'_>,
+    text: &'call Value,
+) -> Result<Cow<'call, str>, NativeError> {
+    match args.text(text)? {
+        Some(text) => {
+            new.read_whole(text.len())?;
+            text.whole()
+        }
+        None => Err(raise("type_error", "expected text")),
     }
 }
 
-fn integer_text(int: &IntRef, heap: &mut dyn NativeHeap) -> Result<String, NativeError> {
-    match int {
-        IntRef::Inline(value) => Ok(value.to_string()),
-        IntRef::Paged { .. } => Ok(heap.materialize_int(int)?.to_string()),
+/// `number`'s digits, as the heap copied a paged integer out to spell it.
+fn integer_digits(number: &Integer, new: &mut Nursery<'_>) -> Result<String, NativeError> {
+    new.read_whole(number.bits().div_ceil(8))?;
+    Ok(number.to_string())
+}
+
+fn inline_i64(value: &Value) -> Option<i64> {
+    match value {
+        Value::Int(value) => Some(*value),
+        _ => None,
     }
 }
 
@@ -442,94 +460,68 @@ fn kind_bit(kind: &str) -> u8 {
 
 fn write(
     value: &Value,
-    active: &mut BTreeSet<EntityId>,
+    active: &mut Vec<ArenaHandle>,
     depth: usize,
     raw_numbers: bool,
-    out: &mut Out<'_>,
+    out: &mut Out<'_, '_>,
 ) -> Result<(), NativeError> {
-    if depth > out.heap.data_depth_limit().min(64) {
+    let limit = out.args.limits().document_depth().min(64);
+    if depth > limit {
         return Err(raise(
             "json_depth",
-            &format!(
-                "JSON exceeds the configured {}-level kernel nesting limit",
-                out.heap.data_depth_limit().min(64)
-            ),
+            format!("JSON exceeds the configured {limit}-level kernel nesting limit"),
         ));
     }
+    let args = out.args;
     match value {
         Value::Null => out.push("null")?,
         Value::Bool(value) => out.push(if *value { "true" } else { "false" })?,
-        Value::Int(_) => out.number(value, raw_numbers)?,
+        Value::Int(_) | Value::BigInt(_) => out.number(value, raw_numbers)?,
         Value::Float(float) if float.get().is_finite() => {
             out.number(value, raw_numbers)?;
         }
-        Value::Text(text) => {
-            let text = text_copy(text, out.heap)?;
-            out.quote(&text)?;
+        Value::Text(_) | Value::LongText(_) => {
+            let Some(text) = args.text(value)? else {
+                return Err(NativeError::Malformed("a text names another body"));
+            };
+            out.new.read_whole(text.len())?;
+            out.quote(&text.whole()?)?;
         }
-        Value::Tuple(items) => {
+        Value::Tuple(_) => {
             let raw_numbers = out.raw_numbers("tuple", raw_numbers);
-            out.push("[")?;
-            for index in 0..items.summary.len {
-                if index != 0 {
-                    out.push(",")?;
-                }
-                let value = out.heap.tuple_get(items, index)?.ok_or_else(|| {
-                    HeapFault::Malformed("tuple descriptor extent has no member".into())
-                })?;
-                write(&value, active, depth + 1, raw_numbers, out)?;
-            }
-            out.push("]")?;
+            let items = super::sequence_values(args, value)?;
+            write_array(&items, active, depth, raw_numbers, out)?;
         }
         Value::List(id) | Value::Map(id) | Value::Record(id) => {
-            if !active.insert(*id) {
+            if active.contains(id) {
                 return Err(raise("cycle", "cyclic value cannot be JSON"));
             }
-            let mut items = Vec::new();
-            let mut fields = Vec::new();
-            let mut error = None;
-            out.heap.visit(*id, &mut |element| {
-                match (value, element) {
-                    (Value::List(_), Element::Item(value)) => items.push(value.clone()),
-                    (Value::Record(_), Element::Field { name, value }) => {
-                        fields.push((name.to_owned(), value.clone()))
-                    }
-                    (
-                        Value::Map(_),
-                        Element::Entry {
-                            key: Value::Text(key),
-                            value,
-                        },
-                    ) => fields.push((key.clone(), value.clone())),
-                    (Value::Map(_), Element::Entry { .. }) => {
-                        error = Some(raise("json_key", "JSON map keys must be text"));
-                        return ControlFlow::Break(());
-                    }
-                    _ => {
-                        error = Some(raise("not_data", "invalid heap object for JSON"));
-                        return ControlFlow::Break(());
-                    }
-                }
-                ControlFlow::Continue(())
-            })?;
-            if let Some(error) = error {
-                return Err(error);
-            }
+            active.push(*id);
             if matches!(value, Value::List(_)) {
                 let raw_numbers = out.raw_numbers("list", raw_numbers);
+                let items = super::sequence_values(args, value)?;
                 write_array(&items, active, depth, raw_numbers, out)?;
             } else {
+                let Some(table) = args.table(value)? else {
+                    return Err(NativeError::Malformed("a table names another body"));
+                };
+                let mut fields = Vec::with_capacity(table.len() as usize);
+                for chunk in table.chunks() {
+                    for pair in chunk?.as_chunks::<2>().0.iter() {
+                        if !matches!(pair[0], Value::Text(_) | Value::LongText(_)) {
+                            return Err(raise("json_key", "JSON map keys must be text"));
+                        }
+                        fields.push((&pair[0], &pair[1]));
+                    }
+                }
                 let raw_numbers = if matches!(value, Value::Map(_)) {
                     out.raw_numbers("map", raw_numbers)
                 } else {
                     let mut verbatim = false;
                     if let Some(field) = &out.verbatim_field {
                         for (name, value) in &fields {
-                            if matches!(value, Value::Text(_))
-                                && out.heap.equal(
-                                    &Value::Text(name.clone()),
-                                    &Value::text(field.as_str()),
-                                )?
+                            if matches!(value, Value::Text(_) | Value::LongText(_))
+                                && *text_copy(args, name)? == **field
                             {
                                 verbatim = true;
                                 break;
@@ -543,14 +535,14 @@ fn write(
                     if index != 0 {
                         out.push(",")?;
                     }
-                    let name = text_copy(name, out.heap)?;
+                    let name = text_held(args, out.new, name)?;
                     out.quote(&name)?;
                     out.push(":")?;
                     write(value, active, depth + 1, raw_numbers, out)?;
                 }
                 out.push("}")?;
             }
-            active.remove(id);
+            active.pop();
         }
         Value::Float(_) => return Err(raise("json_number", "JSON refuses NaN and infinity")),
         _ => return Err(raise("not_data", "value kind has no JSON representation")),
@@ -560,10 +552,10 @@ fn write(
 
 fn write_array(
     items: &[Value],
-    active: &mut BTreeSet<EntityId>,
+    active: &mut Vec<ArenaHandle>,
     depth: usize,
     raw_numbers: bool,
-    out: &mut Out<'_>,
+    out: &mut Out<'_, '_>,
 ) -> Result<(), NativeError> {
     out.push("[")?;
     for (index, value) in items.iter().enumerate() {
@@ -582,17 +574,21 @@ fn write_array(
 /// sets, errors, functions, closures, task handles, host handles and refs raise
 /// `not_data`; no value is silently omitted or coerced. NaN/infinity raise
 /// `json_number`, non-text map keys `json_key`, excessive nesting `json_depth`.
-/// The text is reserved in `heap` as it grows; a refusal ends with
-/// `NativeError::Memory`.
-pub fn stringify_json(value: &Value, heap: &mut dyn NativeHeap) -> Result<String, NativeError> {
+/// The text is reserved in `new` as it grows.
+pub fn stringify_json<'call>(
+    value: &Value,
+    args: &Args<'call>,
+    new: &mut Nursery<'call>,
+) -> Result<String, NativeError> {
     let mut out = Out {
         text: String::new(),
-        heap,
+        args,
+        new,
         layout: None,
         verbatim_kinds: 0,
         verbatim_field: None,
     };
-    write(value, &mut BTreeSet::new(), 0, false, &mut out)?;
+    write(value, &mut Vec::new(), 0, false, &mut out)?;
     Ok(out.text)
 }
 
@@ -626,86 +622,78 @@ pub(super) fn functions() -> Vec<Function> {
     ]
 }
 
-fn parse(call: NativeCall<'_>) -> Result<Value, NativeError> {
-    let Value::Text(text) = arg(call.args, 0)? else {
-        return Err(raise("type_error", "expected text"));
-    };
-    let json = read_descriptor(text, call.heap)?;
-    let numbers = match materialized_text(call.args, 1, call.heap)?.as_ref() {
+fn parse(call: NativeCall<'_, '_>) -> Result<Value, NativeError> {
+    let text = text_arg(&call.args, 0)?;
+    let json = read(&text, call.args.limits().document_depth(), call.new)?;
+    let numbers = match materialized_text(&call.args, call.new, 1)?.as_ref() {
         "int" => Type::Int,
         "float" => Type::Float,
         "number" => Type::Number,
         _ => return Err(raise("type_error", "expected int, float or number")),
     };
-    let policy = match materialized_text(call.args, 2, call.heap)?.as_ref() {
+    let policy = match materialized_text(&call.args, call.new, 2)?.as_ref() {
         "by_spelling" => NumberPolicy::BySpelling,
         "float" => NumberPolicy::Float,
         _ => return Err(raise("type_error", "expected a number policy")),
     };
-    decode_with_numbers(&json, &numbers, policy, call.heap)
+    decode_with_numbers(&json, &numbers, policy, call.new)
 }
 
 fn decode_with_numbers(
     json: &Json,
     numbers: &Type,
     policy: NumberPolicy,
-    heap: &mut dyn NativeHeap,
+    new: &mut Nursery<'_>,
 ) -> Result<Value, NativeError> {
     match json {
-        Json::Number(token) => decode_number(token, numbers, policy, heap),
+        Json::Number(token) => decode_number(token, numbers, policy, new),
         Json::Array(items) => {
             let values = items
                 .iter()
-                .map(|item| decode_with_numbers(item, numbers, policy, heap))
+                .map(|item| decode_with_numbers(item, numbers, policy, new))
                 .collect::<Result<_, _>>()?;
-            Ok(Value::List(heap.allocate(Object::List(values))?))
+            Ok(new.allocate(NewObject::List(values)))
         }
         Json::Object(fields) => {
             let values = fields
                 .iter()
                 .map(|(key, item)| {
-                    Ok((
-                        heap.text(key)?,
-                        decode_with_numbers(item, numbers, policy, heap)?,
-                    ))
+                    let key = new.text(key);
+                    Ok((key, decode_with_numbers(item, numbers, policy, new)?))
                 })
                 .collect::<Result<_, NativeError>>()?;
-            Ok(Value::Record(heap.allocate(Object::Record(values))?))
+            Ok(new.allocate(NewObject::Record(values)))
         }
-        _ => decode(json, &Type::Any, policy, heap),
+        _ => decode(json, &Type::Any, policy, new),
     }
 }
 
-fn stringify(call: NativeCall<'_>) -> Result<Value, NativeError> {
-    let text = stringify_json(arg(call.args, 0)?, call.heap)?;
-    Ok(Value::Text(call.heap.text(&text)?))
+fn stringify(call: NativeCall<'_, '_>) -> Result<Value, NativeError> {
+    let text = stringify_json(arg(call.args.values(), 0)?, &call.args, call.new)?;
+    Ok(call.new.text(&text))
 }
 
-fn render(call: NativeCall<'_>) -> Result<Value, NativeError> {
-    let Some(Value::Set(kinds)) = call.args.get(1) else {
+fn render(call: NativeCall<'_, '_>) -> Result<Value, NativeError> {
+    let args = call.args;
+    let kinds = arg(args.values(), 1)?;
+    let (Value::Set(_), Some(kinds)) = (kinds, args.table(kinds)?) else {
         return Err(raise("type_error", "JSON verbatim kinds must be a set"));
     };
     let mut verbatim_kinds = 0;
-    let mut invalid = false;
-    let mut names = Vec::new();
-    call.heap.visit(*kinds, &mut |element| {
-        if let Element::Item(Value::Text(name)) = element {
-            names.push(name.clone());
-            ControlFlow::Continue(())
-        } else {
-            invalid = true;
-            ControlFlow::Break(())
+    for chunk in kinds.chunks() {
+        for pair in chunk?.as_chunks::<2>().0.iter() {
+            let Some(name) = args.text(&pair[0])? else {
+                return Err(raise("type_error", "JSON verbatim kinds must be text"));
+            };
+            call.new.read_whole(name.len())?;
+            verbatim_kinds |= kind_bit(&name.whole()?);
         }
-    })?;
-    for name in names {
-        verbatim_kinds |= kind_bit(&text_copy(&name, call.heap)?);
     }
-    if invalid {
-        return Err(raise("type_error", "JSON verbatim kinds must be text"));
-    }
-    let verbatim_field = match arg(call.args, 2)? {
+    let verbatim_field = match arg(args.values(), 2)? {
         Value::Absent => None,
-        Value::Text(field) => Some(text_copy(field, call.heap)?.to_string()),
+        field @ (Value::Text(_) | Value::LongText(_)) => {
+            Some(text_held(&args, call.new, field)?.into_owned())
+        }
         _ => {
             return Err(raise(
                 "type_error",
@@ -713,16 +701,18 @@ fn render(call: NativeCall<'_>) -> Result<Value, NativeError> {
             ));
         }
     };
-    let layout = DecimalLayout::read(arg(call.args, 3)?, call.heap)?;
+    let layout = DecimalLayout::read(arg(args.values(), 3)?, &args)?;
     let mut out = Out {
         text: String::new(),
-        heap: call.heap,
+        args: &args,
+        new: call.new,
         layout: Some(layout),
         verbatim_kinds,
         verbatim_field,
     };
-    write(arg(call.args, 0)?, &mut BTreeSet::new(), 0, true, &mut out)?;
-    Ok(Value::Text(out.heap.text(&out.text)?))
+    write(arg(args.values(), 0)?, &mut Vec::new(), 0, true, &mut out)?;
+    let text = out.text;
+    Ok(call.new.text(&text))
 }
 
 /// Shortest decimal layout is caller policy, not a language in the codec.
@@ -739,7 +729,7 @@ impl DecimalLayout {
         self,
         mut value: u64,
         negative: bool,
-        out: &mut Out<'_>,
+        out: &mut Out<'_, '_>,
     ) -> Result<(), NativeError> {
         let mut scratch = [0u8; 20];
         let mut start = scratch.len();
@@ -759,16 +749,16 @@ impl DecimalLayout {
         self.write(negative, digits, (scratch.len() - end) as i64, out)
     }
 
-    fn read(value: &Value, heap: &dyn NativeHeap) -> Result<Self, NativeError> {
-        let Value::Tuple(items) = value else {
+    fn read(value: &Value, args: &Args<'_>) -> Result<Self, NativeError> {
+        let (Value::Tuple(_), Some(items)) = (value, args.sequence(value)?) else {
             return Err(raise("type_error", "expected decimal layout tuple"));
         };
-        let values = (0..items.summary.len.min(5))
-            .map(|index| heap.tuple_get(items, index))
+        let values = (0..items.len().min(5))
+            .map(|index| items.get(index))
             .collect::<Result<Vec<_>, _>>()?;
         let [
-            Some(Value::Int(from)),
-            Some(Value::Int(until)),
+            Some(from @ (Value::Int(_) | Value::BigInt(_))),
+            Some(until @ (Value::Int(_) | Value::BigInt(_))),
             Some(Value::Bool(exponent_plus)),
             Some(Value::Bool(negative_zero)),
         ] = values.as_slice()
@@ -802,13 +792,13 @@ impl DecimalLayout {
         negative: bool,
         digits: &str,
         exponent: i64,
-        out: &mut Out<'_>,
+        out: &mut Out<'_, '_>,
     ) -> Result<(), NativeError> {
         if negative && (digits != "0" || self.negative_zero) {
             out.push("-")?;
         }
         let point = i64::try_from(digits.len())
-            .map_err(|_| NativeError::Memory)?
+            .map_err(|_| crate::exhausted())?
             .saturating_add(exponent);
         if point < self.fixed_from || point > self.fixed_until {
             out.push(&digits[..1])?;
@@ -843,7 +833,7 @@ impl DecimalLayout {
             }
             out.push(digits)
         } else {
-            let point = usize::try_from(point).map_err(|_| NativeError::Memory)?;
+            let point = usize::try_from(point).map_err(|_| crate::exhausted())?;
             if point >= digits.len() {
                 out.push(digits)?;
                 for _ in digits.len()..point {

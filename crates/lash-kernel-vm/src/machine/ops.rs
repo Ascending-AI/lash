@@ -25,20 +25,21 @@
 //! the loop's iteration step, here, and action dispatch,
 //! [`KernelMachine::act`].
 
-use lash_kernel_doc::{EntityId, Identity, NativeCall, NativeError, TaskId, Value, WorkCounter};
-use num_traits::ToPrimitive;
+use lash_kernel_doc::arena::ArenaHandle;
+use lash_kernel_doc::heap::LogicalBytes;
+use lash_kernel_doc::{
+    Args, NativeCall, NativeError, NewObject, Nursery, Retry, TaskId, Value, WorkCounter,
+};
+use lash_kernel_state::arena::Arena;
 
 use super::exec::Call;
 use super::operation_entry::AdmittedBody;
-use super::{Eval, Halt, Interrupt, KernelMachine, bound, fault, raise};
+use super::{Eval, Halt, Interrupt, KernelMachine, Refusal, bound, fault, raise};
 use crate::compile::{Charge, Executable, LibId, LibRun, StmtId};
 use crate::functions::MachineFunction;
-use crate::heap::within_depth;
 use crate::interface::Bound;
 use crate::observe::Event;
-use lash_kernel_doc::NativeHeap;
-use lash_kernel_doc::heap::{FieldName, IntRef};
-use lash_kernel_state::paged::{ObjectInit, SemanticHeap, TaskStateRecord};
+use lash_kernel_state::paged::TaskStateRecord;
 
 /// A register: a position in the machine's register stack.
 pub(super) type Reg = usize;
@@ -59,8 +60,8 @@ pub(super) type Status = Result<Flow, Interrupt>;
 /// not negative (`K-FORM-006`). `None` is a number that is no position.
 fn position(index: &Value) -> Eval<Option<usize>> {
     match index {
-        Value::Int(IntRef::Inline(integer)) => Ok(integer.to_usize()),
-        Value::Int(IntRef::Paged { .. }) => Ok(None),
+        Value::Int(word) => Ok(usize::try_from(*word).ok()),
+        Value::BigInt(_) => Ok(None),
         Value::Float(float) => {
             let float = float.get();
             Ok(
@@ -91,6 +92,42 @@ impl KernelMachine {
             self.storage.value_moves += 1;
         }
         self.regs.take(r, Value::Null)
+    }
+
+    /// Runs `op` over the arena. What it reaches cold the machine decodes,
+    /// then asks again.
+    #[inline]
+    pub(super) fn in_arena<T>(
+        &mut self,
+        mut op: impl FnMut(&mut Arena) -> Result<T, NativeError>,
+    ) -> Eval<T> {
+        loop {
+            let result = op(&mut self.arena.borrow_mut());
+            match result {
+                Err(NativeError::Retry(Retry::Cold { object, .. })) => self.warm(object)?,
+                other => return other.map_err(Interrupt::from),
+            }
+        }
+    }
+
+    /// An error value of `kind` and `message`, built in the arena.
+    pub(super) fn error_value(&mut self, kind: &'static str, message: impl Into<String>) -> Value {
+        *self.thrown(Refusal {
+            kind: kind.into(),
+            message: message.into(),
+            data: None,
+        })
+    }
+
+    /// Whether `value` nests within the run's value depth (`K-VAL-034`).
+    pub(super) fn within_depth(&self, value: &Value) -> bool {
+        self.arena.borrow().summary_of(value).depth as usize <= self.limits.value_depth()
+    }
+
+    /// The logical cost of `value` where it is held.
+    #[inline]
+    pub(super) fn cost_of(&self, value: &Value) -> u64 {
+        self.arena.borrow().cost_of(value)
     }
 
     /// The charge anchor (`K-CHG-002`): `units` more, unless the running
@@ -140,13 +177,76 @@ impl KernelMachine {
         }
     }
 
-    pub(super) fn alloc(&mut self, object: ObjectInit) -> Result<EntityId, Halt> {
-        let id = self.heap_write(|heap| {
-            heap.allocate_object(object.clone())
-                .map_err(super::write_halt)
-        })?;
-        self.fresh.push(id);
-        Ok(id)
+    /// The memory anchor of the arena's objects: holds `bytes` they grew
+    /// by until the heap receives them, the statement's holds paying first.
+    pub(super) fn grow(&mut self, bytes: u64) -> Result<(), Halt> {
+        if bytes == 0 {
+            return Ok(());
+        }
+        if self.heap.hold_growth(bytes)? {
+            return Ok(());
+        }
+        // The objects have grown already: the refinement prices them
+        // exactly with the rest of what is live, so nothing more is
+        // pending, as a heap allocation refused before it is made.
+        self.refine_for(0)
+    }
+
+    /// What the bound leaves past what the census holds: the room a native
+    /// call may reserve without a refinement.
+    fn headroom(&self) -> u64 {
+        self.bounds
+            .memory
+            .saturating_sub(self.heap.certificate().upper.0)
+    }
+
+    /// Installs what `new` built, each mutable object a fresh identity of
+    /// the heap's, and gives their logical cost.
+    fn install(&mut self, new: Vec<(ArenaHandle, NewObject)>) -> Result<u64, Halt> {
+        if new.is_empty() {
+            return Ok(0);
+        }
+        let heap = &mut self.heap;
+        let fresh = &mut self.fresh;
+        let mut overflowed = None;
+        let mut arena = self.arena.borrow_mut();
+        let grown = arena.install(new, &mut || match heap.take_ordinal() {
+            Ok(entity) => {
+                fresh.push(entity);
+                Ok(entity)
+            }
+            Err(error) => {
+                overflowed = Some(error);
+                Err(NativeError::Malformed("identity ordinals overflow"))
+            }
+        });
+        drop(arena);
+        if let Some(error) = overflowed {
+            return Err(error.into());
+        }
+        grown.map_err(|error| fault(&error.to_string()))
+    }
+
+    /// Allocates `object` outside a native call, and holds its growth.
+    pub(super) fn new_object(&mut self, object: NewObject) -> Result<Value, Halt> {
+        let (value, new) = {
+            let arena = self.arena.borrow();
+            let mut nursery = Nursery::new(arena.objects(), LogicalBytes(u64::MAX));
+            let value = nursery.allocate(object);
+            (value, nursery.into_new())
+        };
+        let grown = self.install(new)?;
+        self.grow(grown)?;
+        Ok(value)
+    }
+
+    /// A fresh shared variable holding `value`, its growth held.
+    pub(super) fn new_cell(&mut self, value: Value) -> Result<ArenaHandle, Halt> {
+        let entity = self.heap.take_ordinal()?;
+        self.fresh.push(entity);
+        let (cell, cost) = self.arena.borrow_mut().new_cell(entity, value);
+        self.grow(cost)?;
+        Ok(cell)
     }
 
     /// The pin anchor: keeps the value in register `r`, which the
@@ -154,14 +254,18 @@ impl KernelMachine {
     /// bytes.
     #[inline(always)]
     pub(super) fn pin(&mut self, r: Reg) -> Result<(), Halt> {
-        let bytes = self.pins.pin(&self.regs[r])?;
-        self.reserve(bytes)
+        let value = self.regs[r];
+        self.pin_value(&value)
     }
 
     /// The pin anchor on a value the statement holds outside the
     /// registers.
     pub(super) fn pin_value(&mut self, value: &Value) -> Result<(), Halt> {
-        let bytes = self.pins.pin(value)?;
+        if matches!(value, Value::Bool(_)) {
+            return Ok(());
+        }
+        let bytes = self.arena.borrow().cost_of(value);
+        self.pins.hold(value, bytes)?;
         self.reserve(bytes)
     }
 
@@ -173,14 +277,20 @@ impl KernelMachine {
         field: &crate::compile::Field,
         out: Reg,
     ) -> Eval<()> {
-        let value = match &self.regs[target] {
-            Value::Record(id) => field.read(&self.heap, *id)?.unwrap_or(Value::Absent),
-            Value::Error(error) => match field.name.as_str() {
-                "kind" => Value::Text(error.kind.clone()),
-                "message" => Value::Text(error.message.clone()),
-                "data" => self.heap.error_data(error)?,
-                _ => Value::Absent,
-            },
+        let value = match self.regs[target] {
+            Value::Record(record) => self.in_arena(|arena| field.read(arena, record))?,
+            Value::Error(error) => {
+                let parts = self.in_arena(|arena| match arena.body(error)? {
+                    lash_kernel_doc::arena::Body::Error(parts) => Ok(*parts),
+                    _ => Err(NativeError::Malformed("an error handle names another body")),
+                })?;
+                match field.name.as_str() {
+                    "kind" => parts.kind,
+                    "message" => parts.message,
+                    "data" => parts.data,
+                    _ => Value::Absent,
+                }
+            }
             _ => return raise("type_error", "only a record or an error has fields"),
         };
         self.put(out, value);
@@ -194,59 +304,51 @@ impl KernelMachine {
         out: Reg,
         hint: Option<&crate::compile::ReadHint>,
     ) -> Eval<()> {
-        let index = &self.regs[index];
-        let value = match &self.regs[target] {
-            Value::Tuple(tuple) => {
-                let element = match position(index)? {
-                    Some(position) => self.heap.tuple_get(tuple, position as u64)?,
-                    None => None,
-                };
+        let index = self.regs[index];
+        let value = match self.regs[target] {
+            Value::Tuple(object) | Value::List(object) => {
+                let at = position(&index)?;
+                let (element, len) = self.in_arena(|arena| {
+                    let element = match at {
+                        Some(at) => arena.item(object, at as u64)?,
+                        None => None,
+                    };
+                    Ok((element, arena.len(object)?))
+                })?;
                 match element {
                     Some(value) => value,
                     None => {
                         return raise(
                             "index_out_of_range",
-                            format!("no element there; the length is {}", tuple.summary.len),
+                            format!("no element there; the length is {len}"),
                         );
                     }
                 }
             }
-            Value::List(id) => {
-                let element = match position(index)? {
-                    Some(position) => self.heap.list_get(*id, position as u64)?,
-                    None => None,
-                };
-                match element {
-                    Some(value) => value,
-                    None => {
-                        return raise(
-                            "index_out_of_range",
-                            format!("no element there; the length is {}", self.heap.len(*id)?),
-                        );
-                    }
-                }
-            }
-            Value::Record(id) => {
-                let Value::Text(field) = index else {
+            Value::Record(record) => {
+                if !matches!(index, Value::Text(_) | Value::LongText(_)) {
                     return raise("type_error", "a record index must be text");
-                };
-                let value = match hint {
-                    Some(hint) => hint.read(&self.heap, *id, FieldName::Text(field))?,
-                    None => self.heap.record_get(*id, FieldName::Text(field))?,
-                };
-                value.unwrap_or(Value::Absent)
-            }
-            Value::Map(id) => {
-                self.key(index)?;
-                match self.heap.map_get(*id, index)? {
-                    Some(value) => value,
-                    None => return raise("key_missing", "the map has no entry under that key"),
                 }
+                self.in_arena(|arena| {
+                    let found = match hint {
+                        Some(hint) => {
+                            let key = arena.key(&index)?;
+                            let name = arena.semantics().text(&index)?.to_owned();
+                            hint.read(arena, record, &key, &name)?
+                        }
+                        None => arena.table_get(record, &index)?,
+                    };
+                    Ok(found.unwrap_or(Value::Absent))
+                })?
             }
-            Value::Set(id) => {
-                self.key(index)?;
-                Value::Bool(self.heap.set_contains(*id, index)?)
-            }
+            Value::Map(map) => match self.in_arena(|arena| arena.table_get(map, &index))? {
+                Some(value) => value,
+                None => return raise("key_missing", "the map has no entry under that key"),
+            },
+            Value::Set(set) => Value::Bool(
+                self.in_arena(|arena| arena.table_get(set, &index))?
+                    .is_some(),
+            ),
             _ => {
                 return raise(
                     "type_error",
@@ -258,15 +360,14 @@ impl KernelMachine {
         Ok(())
     }
 
-    pub(super) fn key(&self, value: &Value) -> Eval<()> {
-        if self.heap.normal_key(value)?.is_some() {
-            Ok(())
-        } else {
-            raise(
-                "invalid_key",
-                "a key is null, a bool, a number, a text, bytes, a timestamp, a ref, or a tuple of these",
-            )
-        }
+    /// Refuses a value that is no legal key (`K-KEY-002`).
+    pub(super) fn key(&mut self, value: &Value) -> Eval<()> {
+        self.in_arena(|arena| arena.key(value).map(|_| ()))
+    }
+
+    /// A record field name's text value.
+    fn field_name(&mut self, field: &str) -> Value {
+        self.arena.borrow_mut().text(field)
     }
 
     pub(super) fn write_field(&mut self, target: Reg, field: &str, value: Reg) -> Eval<()> {
@@ -274,15 +375,16 @@ impl KernelMachine {
             return raise("type_error", "only a record has fields to assign");
         };
         let value = self.take(value);
-        self.heap
-            .record_write(record, FieldName::Static(field), value)?;
+        let name = self.field_name(field);
+        let growth = self.in_arena(|arena| arena.table_write(record, name, value))?;
+        self.grow(growth)?;
         Ok(())
     }
 
     pub(super) fn write_index(&mut self, target: Reg, index: Reg, value: Reg) -> Eval<()> {
-        match self.regs[target] {
+        let growth = match self.regs[target] {
             Value::List(list) => {
-                let length = self.heap.len(list)?;
+                let length = self.in_arena(|arena| arena.len(list))?;
                 let position =
                     position(&self.regs[index])?.filter(|position| *position as u64 <= length);
                 let Some(position) = position else {
@@ -292,30 +394,26 @@ impl KernelMachine {
                     );
                 };
                 let value = self.take(value);
-                self.heap_write(|heap| {
-                    heap.list_write(list, position as u64, value.clone())
-                        .map_err(Interrupt::from)
-                })?;
+                self.in_arena(|arena| arena.list_set(list, position as u64, value))?
             }
             Value::Record(record) => {
-                let Value::Text(field) = self.take(index) else {
+                let field = self.take(index);
+                if !matches!(field, Value::Text(_) | Value::LongText(_)) {
                     return raise("type_error", "a record index must be text");
-                };
+                }
                 let value = self.take(value);
-                self.heap
-                    .record_write(record, FieldName::Text(&field), value)?;
+                self.in_arena(|arena| arena.table_write(record, field, value))?
             }
             Value::Map(map) => {
-                self.key(&self.regs[index])?;
+                let key = self.regs[index];
+                self.key(&key)?;
                 let key = self.take(index);
                 let value = self.take(value);
-                self.heap_write(|heap| {
-                    heap.map_write(map, key.clone(), value.clone())
-                        .map_err(Interrupt::from)
-                })?;
+                self.in_arena(|arena| arena.table_write(map, key, value))?
             }
             Value::Set(set) => {
-                self.key(&self.regs[index])?;
+                let member = self.regs[index];
+                self.key(&member)?;
                 let Value::Bool(present) = self.regs[value] else {
                     return raise(
                         "type_error",
@@ -323,10 +421,12 @@ impl KernelMachine {
                     );
                 };
                 let member = self.take(index);
-                self.heap_write(|heap| {
-                    heap.set_write(set, member.clone(), present)
-                        .map_err(Interrupt::from)
-                })?;
+                if present {
+                    self.in_arena(|arena| arena.table_write(set, member, Value::Absent))?
+                } else {
+                    self.in_arena(|arena| arena.table_delete(set, &member))?;
+                    0
+                }
             }
             _ => {
                 return raise(
@@ -334,7 +434,8 @@ impl KernelMachine {
                     "only a list, a record, a map or a set is assigned by index",
                 );
             }
-        }
+        };
+        self.grow(growth)?;
         Ok(())
     }
 
@@ -342,33 +443,33 @@ impl KernelMachine {
         let Value::Record(record) = self.regs[target] else {
             return raise("type_error", "only a record has fields to remove");
         };
-        self.heap.record_remove(record, FieldName::Static(field))?;
-        Ok(())
+        let name = self.field_name(field);
+        self.in_arena(|arena| arena.table_delete(record, &name))
     }
 
     pub(super) fn remove_index(&mut self, target: Reg, index: Reg) -> Eval<()> {
+        let at = self.regs[index];
         match self.regs[target] {
             Value::List(list) => {
-                let length = self.heap.len(list)?;
-                let position =
-                    position(&self.regs[index])?.filter(|position| (*position as u64) < length);
+                let length = self.in_arena(|arena| arena.len(list))?;
+                let position = position(&at)?.filter(|position| (*position as u64) < length);
                 let Some(position) = position else {
                     return raise(
                         "index_out_of_range",
                         format!("a list of {length} has no element there to remove"),
                     );
                 };
-                self.heap.list_remove(list, position as u64)?;
+                self.in_arena(|arena| arena.list_remove(list, position as u64))?;
             }
             Value::Record(record) => {
-                let Value::Text(field) = &self.regs[index] else {
+                if !matches!(at, Value::Text(_) | Value::LongText(_)) {
                     return raise("type_error", "a record index must be text");
-                };
-                self.heap.record_remove(record, FieldName::Text(field))?;
+                }
+                self.in_arena(|arena| arena.table_delete(record, &at))?;
             }
             Value::Map(table) | Value::Set(table) => {
-                self.key(&self.regs[index])?;
-                self.heap.table_remove(table, &self.regs[index])?;
+                self.key(&at)?;
+                self.in_arena(|arena| arena.table_delete(table, &at))?;
             }
             _ => {
                 return raise(
@@ -520,13 +621,15 @@ impl KernelMachine {
                 Some(result) => result,
                 None => return Ok(Answer::Yielded),
             },
-            LibRun::Machine(MachineFunction::Deref) => match self.regs.get(args) {
-                Some(Value::Ref(Identity::Task(task))) => Ok(Value::Task(*task)),
-                Some(Value::Ref(Identity::Object(object))) => self
-                    .heap
-                    .value_of(*object)?
-                    .ok_or_else(|| super::error("type_error", "the ref names no object")),
-                _ => Err(super::error("type_error", "`deref` takes a ref")),
+            LibRun::Machine(MachineFunction::Deref) => match self.regs.get(args).copied() {
+                Some(Value::TaskRef(task)) => Ok(Value::Task(task)),
+                Some(Value::ObjectRef(object)) => {
+                    match self.in_arena(|arena| arena.object_value(object))? {
+                        Some(value) => Ok(value),
+                        None => Err(self.error_value("type_error", "the ref names no object")),
+                    }
+                }
+                _ => Err(self.error_value("type_error", "`deref` takes a ref")),
             },
             LibRun::Machine(MachineFunction::TasksUnfinished) => {
                 let mut unfinished = Vec::new();
@@ -536,7 +639,7 @@ impl KernelMachine {
                     }
                     true
                 })?;
-                Ok(Value::List(self.alloc(ObjectInit::List(unfinished))?))
+                Ok(self.new_object(NewObject::List(unfinished))?)
             }
             LibRun::Native {
                 native,
@@ -544,10 +647,8 @@ impl KernelMachine {
                 fallback,
             } => {
                 if let Some((prepared, fast)) = &function.prepared {
-                    // A result too deep to keep is the general call's to raise.
-                    if let Some(value) = (prepared.entry)(&self.regs[args..end])
-                        .filter(|value| within_depth(value, self.limits.value_depth()))
-                    {
+                    // A prepared entry reads and builds no arena object.
+                    if let Some(value) = (prepared.entry)(&self.regs[args..end]) {
                         // What the general call does with its result: keep
                         // it, then charge the formula.
                         self.observe(Event::NativeFast);
@@ -557,9 +658,16 @@ impl KernelMachine {
                         let units = if self.charging {
                             match fast.charge(&function.charge, &self.regs[args..end], &value) {
                                 Charge::Units(units) => units,
-                                Charge::Plan(plan) => self.in_formula(lib, true, |machine| {
-                                    machine.formula(plan, &machine.regs[args..end], Some(&value))
-                                })?,
+                                Charge::Plan(plan) => {
+                                    self.warm_formula(plan, args, Some(&value))?;
+                                    self.in_formula(lib, true, |machine| {
+                                        machine.formula(
+                                            plan,
+                                            &machine.regs[args..end],
+                                            Some(&value),
+                                        )
+                                    })?
+                                }
                             }
                         } else {
                             0
@@ -570,42 +678,79 @@ impl KernelMachine {
                         return Ok(Answer::Done);
                     }
                 }
-                let limit = function
-                    .limit
-                    .as_ref()
-                    .map(|limit| {
-                        self.in_formula(lib, true, |machine| {
+                let limit = match &function.limit {
+                    Some(limit) => {
+                        self.warm_formula(limit, args, None)?;
+                        Some(self.in_formula(lib, true, |machine| {
                             machine.formula(limit, &machine.regs[args..end], None)
-                        })
-                    })
-                    .transpose()?;
-                let mut counter = WorkCounter::new(limit);
-                // Prepared entries above cannot touch the heap. A general
-                // native starts a new frame-access segment before it can.
-                self.tasks.invalidate_active();
-                let answer = native.call(NativeCall {
-                    args: &self.regs[args..end],
-                    heap: &mut super::native_heap::CallHeap {
-                        heap: &mut self.heap,
-                        roots: super::native_heap::Roots {
-                            tasks: &mut self.tasks,
-                            joins: &self.joins,
-                            registers: &self.regs,
-                            pinned: &self.pins.values,
-                            borrowed: &self.pins.borrowed,
-                            pinned_bytes: self.pins.bytes,
-                            fresh: &self.fresh,
-                            refinements: &mut self.census_refinements,
-                        },
-                    },
-                    counter: &mut counter,
-                });
-                self.heap.execution_roots_moved();
-                self.observe(Event::GuardWork(counter.spent()));
+                        })?)
+                    }
+                    None => None,
+                };
+                #[cfg(test)]
+                if self.pins.force_cold {
+                    let given = self.regs[args..end].to_vec();
+                    self.chill_args(&given)?;
+                }
+                let mut granted = 0u64;
+                let mut spent;
+                let answer = loop {
+                    let room = granted.max(self.headroom());
+                    let mut counter = WorkCounter::new(limit);
+                    let (answer, built) = {
+                        let arena = self.arena.borrow();
+                        let semantics = arena.semantics().with_limits(self.limits);
+                        let mut nursery = Nursery::new(arena.objects(), LogicalBytes(room));
+                        let answer = native.call(NativeCall {
+                            args: Args::new(&self.regs[args..end], arena.objects(), &semantics),
+                            new: &mut nursery,
+                            counter: &mut counter,
+                        });
+                        match &answer {
+                            Ok(_) | Err(NativeError::Raised(_)) => {
+                                let held = nursery.held().0;
+                                (answer, Some((held, nursery.into_new())))
+                            }
+                            Err(_) => {
+                                nursery.discard();
+                                (answer, None)
+                            }
+                        }
+                    };
+                    // A call run again does what it did: its last run's work
+                    // is the call's.
+                    spent = counter.spent();
+                    match answer {
+                        Err(NativeError::Retry(Retry::Cold { object, .. })) => {
+                            #[cfg(test)]
+                            {
+                                self.pins.cold_reads += 1;
+                            }
+                            self.warm(object)?;
+                        }
+                        Err(NativeError::Retry(Retry::Room { wanted })) => {
+                            if wanted.0 <= granted {
+                                return Err(fault("a native asked again for room it holds").into());
+                            }
+                            self.reserve(wanted.0 - granted)?;
+                            granted = wanted.0;
+                        }
+                        answer => {
+                            if let Some((held, new)) = built {
+                                self.reserve(held.saturating_sub(granted))?;
+                                let grown = self.install(new)?;
+                                self.grow(grown)?;
+                            }
+                            break answer;
+                        }
+                    }
+                };
+                self.observe(Event::GuardWork(spent));
                 match answer {
                     Ok(value) => {
-                        if !within_depth(&value, self.limits.value_depth()) {
-                            Err(super::error(
+                        let depth = self.arena.borrow().summary_of(&value).depth;
+                        if depth as usize > self.limits.value_depth() {
+                            Err(self.error_value(
                                 "too_deep",
                                 format!(
                                     "a value exceeds the configured {}-level value depth",
@@ -619,7 +764,10 @@ impl KernelMachine {
                             Ok(value)
                         }
                     }
-                    Err(NativeError::Raised(error)) => Err(Value::Error(error)),
+                    Err(NativeError::Raised(error)) => Err(error),
+                    Err(NativeError::Refused { kind, message }) => {
+                        Err(self.error_value(kind, message))
+                    }
                     Err(NativeError::Guard(guard)) => {
                         return Err(bound(
                             Bound::Guard {
@@ -629,10 +777,10 @@ impl KernelMachine {
                         )
                         .into());
                     }
-                    Err(NativeError::Memory) => {
-                        return Err(bound(Bound::Memory, self.bounds.memory).into());
+                    Err(NativeError::Malformed(problem)) => return Err(fault(problem).into()),
+                    Err(NativeError::Retry(_)) => {
+                        return Err(fault("a native's retry left its call").into());
                     }
-                    Err(NativeError::Heap(error)) => return Err(Halt::from(error).into()),
                     // The body runs the call, charged by the formula when
                     // its frame is left (`K-CHG-007`).
                     Err(NativeError::Decline) => {
@@ -653,6 +801,9 @@ impl KernelMachine {
             }
         };
         let evaluates = self.charging;
+        if evaluates {
+            self.warm_formula(&function.charge, args, result.as_ref().ok())?;
+        }
         let units = self.in_formula(lib, evaluates, |machine| {
             machine.call_units(exe, lib, &machine.regs[args..end], result.as_ref().ok())
         })?;

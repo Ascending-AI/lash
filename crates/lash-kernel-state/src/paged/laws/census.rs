@@ -2,7 +2,7 @@
 use crate::paged::census::*;
 use crate::paged::census_impl::Census;
 use lash_kernel_doc::TaskId;
-use lash_kernel_doc::heap::{EntityId, FamilyId, HeapFault, Identity, LogicalBytes, Value};
+use lash_kernel_doc::heap::{EntityId, FamilyId, HeapFault, Identity, LogicalBytes, PageValue};
 
 fn certificate(upper: u64, entities: u64) -> AccountingCertificate {
     AccountingCertificate {
@@ -29,7 +29,7 @@ fn entity() -> EntityId {
     }
 }
 struct Graph {
-    roots: Vec<Value>,
+    roots: Vec<PageValue>,
     cost: u64,
     present: bool,
 }
@@ -37,22 +37,22 @@ impl CensusGraph for Graph {
     fn root_cost(&mut self) -> Result<LogicalBytes, HeapFault> {
         Ok(LogicalBytes(self.roots.len() as u64 * 16))
     }
-    fn value_cost(&mut self, _: &Value) -> Result<LogicalBytes, HeapFault> {
+    fn value_cost(&mut self, _: &PageValue) -> Result<LogicalBytes, HeapFault> {
         Ok(LogicalBytes(16))
     }
     fn value_edges(
         &mut self,
-        v: &Value,
+        v: &PageValue,
         out: &mut dyn FnMut(Identity) -> Result<(), HeapFault>,
     ) -> Result<(), HeapFault> {
-        if let Value::List(id) = v {
+        if let PageValue::List(id) = v {
             out(Identity::Object(*id))?;
         }
         Ok(())
     }
     fn persistent_roots(
         &mut self,
-        visit: &mut dyn FnMut(&Value) -> Result<(), HeapFault>,
+        visit: &mut dyn FnMut(&PageValue) -> Result<(), HeapFault>,
     ) -> Result<(), HeapFault> {
         self.roots.iter().try_for_each(visit)
     }
@@ -108,7 +108,7 @@ fn transfer_roots_keep_referents_without_another_allocation() {
         present: true,
     };
     let mut census = Census::restore(certificate(32, 1), LogicalBytes(32)).unwrap();
-    let value = [Value::List(entity())];
+    let value = [PageValue::List(entity())];
     let roots = TransientRoots {
         borrowed: &value,
         ..empty()

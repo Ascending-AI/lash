@@ -2,7 +2,7 @@
 use super::embedder::{Embedder, Setup, int, result};
 use crate::{Machine, Request, Step};
 use lash_kernel_doc::graph_tokens::encode_body;
-use lash_kernel_doc::heap::LogicalBytes;
+use lash_kernel_doc::heap::{LogicalBytes, PageValue};
 use lash_kernel_state::kernel_internals::census_impl::Census;
 use lash_kernel_state::kernel_internals::{PagedHeap, tree};
 use lash_kernel_state::paged::*;
@@ -607,7 +607,6 @@ main {
 fn checkpoint_equality_keeps_continuations_and_ignores_allocator_history() {
     // Record edits are required to vary allocator history and pc independently of execution.
     use super::embedder::Embedder;
-    use lash_kernel_doc::Value;
     use lash_kernel_state::kernel_internals::tree::Tree;
     use lash_kernel_state::paged::{ObjectInit, SemanticHeap};
     let mut run = Embedder::new("main { let a = [1] let b = a do sleep 1 return b }");
@@ -623,7 +622,7 @@ fn checkpoint_equality_keeps_continuations_and_ignores_allocator_history() {
         Census::restore(heap.certificate(), LogicalBytes(64 << 20)).unwrap(),
     ))
     .unwrap();
-    heap.allocate_object(ObjectInit::List(vec![Value::Bool(false)]))
+    heap.allocate_object(ObjectInit::List(vec![PageValue::Bool(false)]))
         .unwrap();
     heap.seal(SealBudget {
         pages: u64::MAX,
@@ -671,11 +670,11 @@ fn checkpoint_equality_keeps_continuations_and_ignores_allocator_history() {
     );
     let mut binding = bindings.get(&key, heap.pages()).unwrap().unwrap();
     let independent = heap
-        .allocate_object(ObjectInit::List(vec![Value::Int(
+        .allocate_object(ObjectInit::List(vec![PageValue::Int(
             lash_kernel_doc::heap::IntRef::Inline(1.into()),
         )]))
         .unwrap();
-    binding.value = BoundRecord::Value(Value::List(independent));
+    binding.value = BoundRecord::Value(PageValue::List(independent));
     bindings.write(key, binding, heap.pages()).unwrap();
     bindings
         .seal(

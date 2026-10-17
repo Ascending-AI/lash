@@ -9,10 +9,10 @@ use std::ops::ControlFlow;
 
 use serde::{Deserialize, Serialize};
 
-use crate::heap::{Chunk, EntityId, HeapFault, Identity, TupleRef};
+use crate::heap::{Chunk, Element, EntityId, HeapFault, Identity, PageReader, PageValue, TupleRef};
 use crate::{
-    AssignOrder, Closure, Document, EffectName, Element, Expr, FunctionId, Literal, Name,
-    NativeHeap, Node, Place, Rhs, Site, Stmt, Unit, Value, ValueKind,
+    AssignOrder, Closure, Document, EffectName, Expr, FunctionId, Literal, Name, Node, Place, Rhs,
+    Site, Stmt, Unit, ValueKind,
 };
 
 use super::reads::CodeReads;
@@ -23,7 +23,7 @@ pub trait SnapshotHeap {
     type Frozen: Clone;
 
     /// The heap's values, read without allocating.
-    fn native(&self) -> &dyn NativeHeap;
+    fn pages(&self) -> &dyn PageReader;
 
     /// The site the closure `id` was made at.
     ///
@@ -38,7 +38,11 @@ pub trait SnapshotHeap {
     /// # Errors
     ///
     /// The heap's fault.
-    fn closure_capture(&mut self, id: EntityId, name: &Name) -> Result<Option<Value>, HeapFault>;
+    fn closure_capture(
+        &mut self,
+        id: EntityId,
+        name: &Name,
+    ) -> Result<Option<PageValue>, HeapFault>;
 
     /// What a free name of `unit`'s code reads when no capture of a
     /// closure holds it: for `main`'s code, the session's binding; for a
@@ -47,7 +51,7 @@ pub trait SnapshotHeap {
     /// # Errors
     ///
     /// The heap's fault.
-    fn unit_binding(&mut self, unit: &Unit, name: &Name) -> Result<Option<Value>, HeapFault>;
+    fn unit_binding(&mut self, unit: &Unit, name: &Name) -> Result<Option<PageValue>, HeapFault>;
 
     /// Freezes validated capture data ([`validate_capture`]): each closure
     /// of `named` as a reference to the function of its name. Also answers
@@ -58,7 +62,7 @@ pub trait SnapshotHeap {
     /// The heap's fault, or a capture the freezer refuses.
     fn freeze(
         &mut self,
-        value: &Value,
+        value: &PageValue,
         named: &BTreeMap<EntityId, Name>,
     ) -> Result<(Self::Frozen, BTreeSet<Name>), SnapshotError>;
 }
@@ -144,7 +148,7 @@ pub struct FrozenToken<F> {
 /// # Errors
 ///
 /// The heap's fault.
-pub fn members(heap: &dyn NativeHeap, tuple: &TupleRef) -> Result<Vec<Value>, HeapFault> {
+pub fn members(heap: &dyn PageReader, tuple: &TupleRef) -> Result<Vec<PageValue>, HeapFault> {
     let mut values = Vec::new();
     heap.tuple_visit(tuple, &mut |v| {
         values.push(v.clone());
@@ -158,8 +162,8 @@ pub fn members(heap: &dyn NativeHeap, tuple: &TupleRef) -> Result<Vec<Value>, He
 /// # Errors
 ///
 /// The heap's fault.
-pub fn text_is(heap: &dyn NativeHeap, value: &Value, text: &str) -> Result<bool, HeapFault> {
-    let Value::Text(t) = value else {
+pub fn text_is(heap: &dyn PageReader, value: &PageValue, text: &str) -> Result<bool, HeapFault> {
+    let PageValue::Text(t) = value else {
         return Ok(false);
     };
     if t.summary.utf8_bytes != text.len() as u64 {
@@ -180,10 +184,10 @@ pub fn text_is(heap: &dyn NativeHeap, value: &Value, text: &str) -> Result<bool,
 /// # Errors
 ///
 /// The heap's fault.
-pub fn text_of(heap: &dyn NativeHeap, text: &crate::heap::TextRef) -> Result<String, HeapFault> {
+pub fn text_of(heap: &dyn PageReader, text: &crate::heap::TextRef) -> Result<String, HeapFault> {
     let mut out = String::new();
     heap.payload_visit(
-        &Value::Text(text.clone()),
+        &PageValue::Text(text.clone()),
         0..text.summary.utf8_bytes,
         &mut |chunk| {
             if let Chunk::Text(chunk) = chunk {
@@ -202,11 +206,11 @@ pub fn text_of(heap: &dyn NativeHeap, text: &crate::heap::TextRef) -> Result<Str
 ///
 /// The heap's fault.
 pub fn token_closure(
-    heap: &dyn NativeHeap,
-    value: &Value,
+    heap: &dyn PageReader,
+    value: &PageValue,
     tag: Option<&str>,
 ) -> Result<Option<(EntityId, usize)>, HeapFault> {
-    let (Some(tag), Value::Tuple(t)) = (tag, value) else {
+    let (Some(tag), PageValue::Tuple(t)) = (tag, value) else {
         return Ok(None);
     };
     let values = members(heap, t)?;
@@ -219,7 +223,7 @@ pub fn token_closure(
         return Ok(None);
     }
     let mut closures = values.iter().enumerate().filter_map(|(at, value)| {
-        if let Value::Closure(id) = value {
+        if let PageValue::Closure(id) = value {
             Some((*id, at))
         } else {
             None
@@ -239,12 +243,12 @@ pub fn token_closure(
 ///
 /// The heap's fault.
 pub fn closure_held(
-    heap: &dyn NativeHeap,
-    value: &Value,
+    heap: &dyn PageReader,
+    value: &PageValue,
     tag: Option<&str>,
 ) -> Result<Option<EntityId>, HeapFault> {
     match value {
-        Value::Closure(id) => Ok(Some(*id)),
+        PageValue::Closure(id) => Ok(Some(*id)),
         _ => Ok(token_closure(heap, value, tag)?.map(|(id, _)| id)),
     }
 }
@@ -256,30 +260,31 @@ pub fn closure_held(
 ///
 /// The heap's fault, or the refusal.
 pub fn validate_capture(
-    heap: &dyn NativeHeap,
-    value: &Value,
+    heap: &dyn PageReader,
+    value: &PageValue,
     named: &BTreeMap<EntityId, Name>,
     active: &mut BTreeSet<EntityId>,
 ) -> Result<(), CaptureCheck> {
     match value {
-        Value::Closure(id) if !named.contains_key(id) => {
+        PageValue::Closure(id) if !named.contains_key(id) => {
             Err(CaptureCheck::Refused(CaptureRefusal::Function))
         }
-        Value::Task(_) | Value::Ref(Identity::Task(_)) => {
+        PageValue::Task(_) | PageValue::Ref(Identity::Task(_)) => {
             Err(CaptureCheck::Refused(CaptureRefusal::Task))
         }
-        Value::Timestamp(_) | Value::Error(_) | Value::Handle(_) | Value::Ref(_) => {
-            Err(CaptureCheck::Refused(CaptureRefusal::NoConstant {
-                kind: no_constant_kind(value),
-            }))
-        }
-        Value::Tuple(t) => {
+        PageValue::Timestamp(_)
+        | PageValue::Error(_)
+        | PageValue::Handle(_)
+        | PageValue::Ref(_) => Err(CaptureCheck::Refused(CaptureRefusal::NoConstant {
+            kind: no_constant_kind(value),
+        })),
+        PageValue::Tuple(t) => {
             for value in members(heap, t)? {
                 validate_capture(heap, &value, named, active)?;
             }
             Ok(())
         }
-        Value::List(id) | Value::Map(id) | Value::Set(id) | Value::Record(id) => {
+        PageValue::List(id) | PageValue::Map(id) | PageValue::Set(id) | PageValue::Record(id) => {
             if !active.insert(*id) {
                 return Err(CaptureCheck::Refused(CaptureRefusal::Cyclic));
             }
@@ -327,12 +332,12 @@ impl CaptureCheck {
     }
 }
 
-fn no_constant_kind(value: &Value) -> ValueKind {
+fn no_constant_kind(value: &PageValue) -> ValueKind {
     match value {
-        Value::Timestamp(_) => ValueKind::Timestamp,
-        Value::Error(_) => ValueKind::Error,
-        Value::Handle(_) => ValueKind::Handle,
-        Value::Ref(_) => ValueKind::Ref,
+        PageValue::Timestamp(_) => ValueKind::Timestamp,
+        PageValue::Error(_) => ValueKind::Error,
+        PageValue::Handle(_) => ValueKind::Handle,
+        PageValue::Ref(_) => ValueKind::Ref,
         _ => ValueKind::Absent,
     }
 }
@@ -355,7 +360,7 @@ pub fn closure_at<'a>(document: &'a Document, site: &Site) -> Option<&'a Closure
 }
 
 enum Held<F> {
-    Data(F, Box<Value>),
+    Data(F, Box<PageValue>),
     Helper(EntityId),
 }
 
@@ -494,16 +499,16 @@ pub fn gather<H: SnapshotHeap>(
 /// capture data.
 pub fn freeze_token<H: SnapshotHeap>(
     heap: &mut H,
-    values: &[Value],
+    values: &[PageValue],
     at: usize,
     tag: &str,
     named: &BTreeMap<EntityId, Name>,
 ) -> Result<FrozenToken<H::Frozen>, SnapshotError> {
-    let mut each = |values: &[Value]| -> Result<Vec<H::Frozen>, SnapshotError> {
+    let mut each = |values: &[PageValue]| -> Result<Vec<H::Frozen>, SnapshotError> {
         values
             .iter()
             .map(|value| {
-                validate_capture(heap.native(), value, &BTreeMap::new(), &mut BTreeSet::new())
+                validate_capture(heap.pages(), value, &BTreeMap::new(), &mut BTreeSet::new())
                     .map_err(|error| match error {
                         CaptureCheck::Heap(e) => SnapshotError::Heap(e),
                         CaptureCheck::Refused(_) => SnapshotRefusal::Token.into(),
@@ -554,7 +559,7 @@ impl<'a, H: SnapshotHeap> Gatherer<'a, '_, H> {
         id: EntityId,
         site: &Site,
         free: &Name,
-    ) -> Result<Option<Value>, SnapshotError> {
+    ) -> Result<Option<PageValue>, SnapshotError> {
         if let Some(value) = self.heap.closure_capture(id, free)? {
             return Ok(Some(value));
         }
@@ -575,7 +580,7 @@ impl<'a, H: SnapshotHeap> Gatherer<'a, '_, H> {
             let Some(value) = self.captured(id, &site, free)? else {
                 continue;
             };
-            if let Some(helper) = closure_held(self.heap.native(), &value, self.tag)?
+            if let Some(helper) = closure_held(self.heap.pages(), &value, self.tag)?
                 && !self.named.contains_key(&helper)
             {
                 if let Some(owners) = self.helper_owners.get(&helper) {
@@ -586,9 +591,9 @@ impl<'a, H: SnapshotHeap> Gatherer<'a, '_, H> {
                     Some(_) => return Err(capture_refused(free, CaptureRefusal::Conflict)),
                     None => (),
                 }
-                let token = match (&value, token_closure(self.heap.native(), &value, self.tag)?) {
-                    (Value::Tuple(t), Some((_, at))) => {
-                        let values = members(self.heap.native(), t)?;
+                let token = match (&value, token_closure(self.heap.pages(), &value, self.tag)?) {
+                    (PageValue::Tuple(t), Some((_, at))) => {
+                        let values = members(self.heap.pages(), t)?;
                         Some(freeze_token(
                             self.heap,
                             &values,
@@ -609,16 +614,16 @@ impl<'a, H: SnapshotHeap> Gatherer<'a, '_, H> {
                 continue;
             }
             if let Some(Held::Data(_, held)) = self.bound.get(free)
-                && self.heap.native().equal(held, &value)?
+                && self.heap.pages().equal(held, &value)?
             {
                 continue;
             }
-            validate_capture(self.heap.native(), &value, self.named, &mut BTreeSet::new())
+            validate_capture(self.heap.pages(), &value, self.named, &mut BTreeSet::new())
                 .map_err(|e| e.named(free))?;
             let (frozen, functions) = self.heap.freeze(&value, self.named)?;
             self.references.extend(functions);
             match self.bound.get(free) {
-                Some(Held::Data(_, held)) if self.heap.native().equal(held, &value)? => (),
+                Some(Held::Data(_, held)) if self.heap.pages().equal(held, &value)? => (),
                 Some(_) => return Err(capture_refused(free, CaptureRefusal::Conflict)),
                 None => {
                     self.bound
@@ -681,7 +686,7 @@ impl TokenCodec for CaptureRefusal {
     }
 }
 
-/// [`ValueKind`]'s numbers: the Value discriminants of FIG-5887 §2.
+/// [`ValueKind`]'s numbers: the PageValue discriminants of FIG-5887 §2.
 const VALUE_KINDS: [ValueKind; 19] = [
     ValueKind::Null,
     ValueKind::Absent,

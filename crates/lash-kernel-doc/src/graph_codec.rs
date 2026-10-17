@@ -825,7 +825,7 @@ pub mod heap_values {
             )
         }
     }
-    impl TokenCodec for Payload<Value> {
+    impl TokenCodec for Payload<PageValue> {
         fn encode(&self, out: &mut TokenWriter) {
             match self {
                 Self::Resident(v) => {
@@ -840,7 +840,7 @@ pub mod heap_values {
         }
         fn decode(input: &mut TokenReader<'_>) -> Result<Self, TokenError> {
             Ok(match variant(input, |v| (v <= 1).then_some(1))? {
-                0 => Self::Resident(Arc::new(Value::decode(input)?)),
+                0 => Self::Resident(Arc::new(PageValue::decode(input)?)),
                 _ => Self::paged(PageRef::decode(input)?),
             })
         }
@@ -983,7 +983,7 @@ pub mod heap_values {
             body,
         })
     }
-    impl TokenCodec for Value {
+    impl TokenCodec for PageValue {
         fn encode(&self, out: &mut TokenWriter) {
             macro_rules! one {
                 ($n:expr, $v:expr) => {{
@@ -1037,7 +1037,7 @@ pub mod heap_values {
     pub fn decode_value_with_family(
         input: &mut TokenReader<'_>,
         family: Option<FamilyId>,
-    ) -> Result<Value, TokenError> {
+    ) -> Result<PageValue, TokenError> {
         input.nested(|input| {
             Ok(
                 match variant(input, |v| match v {
@@ -1046,30 +1046,30 @@ pub mod heap_values {
                     19 => Some(2),
                     _ => None,
                 })? {
-                    0 => Value::Null,
-                    1 => Value::Absent,
-                    2 => Value::Bool(bool::decode(input)?),
-                    3 => Value::Int(IntRef::decode(input)?),
-                    4 => Value::Float(Float::decode(input)?),
-                    5 => Value::Text(TextRef::decode(input)?),
-                    6 => Value::Bytes(BytesRef::decode(input)?),
-                    7 => Value::Timestamp(Timestamp::decode(input)?),
-                    8 => Value::Tuple(Arc::new(decode_tuple(input, family)?)),
-                    9 => Value::List(absolute_entity(input, family)?),
-                    10 => Value::Map(absolute_entity(input, family)?),
-                    11 => Value::Set(absolute_entity(input, family)?),
-                    12 => Value::Record(absolute_entity(input, family)?),
-                    13 => Value::Closure(absolute_entity(input, family)?),
-                    14 => Value::Error(Arc::new(decode_error(input, family)?)),
-                    15 => Value::Task(TaskId::decode(input)?),
-                    16 => Value::Function(TextRef::decode(input)?),
-                    17 => Value::Handle(Arc::decode(input)?),
+                    0 => PageValue::Null,
+                    1 => PageValue::Absent,
+                    2 => PageValue::Bool(bool::decode(input)?),
+                    3 => PageValue::Int(IntRef::decode(input)?),
+                    4 => PageValue::Float(Float::decode(input)?),
+                    5 => PageValue::Text(TextRef::decode(input)?),
+                    6 => PageValue::Bytes(BytesRef::decode(input)?),
+                    7 => PageValue::Timestamp(Timestamp::decode(input)?),
+                    8 => PageValue::Tuple(Arc::new(decode_tuple(input, family)?)),
+                    9 => PageValue::List(absolute_entity(input, family)?),
+                    10 => PageValue::Map(absolute_entity(input, family)?),
+                    11 => PageValue::Set(absolute_entity(input, family)?),
+                    12 => PageValue::Record(absolute_entity(input, family)?),
+                    13 => PageValue::Closure(absolute_entity(input, family)?),
+                    14 => PageValue::Error(Arc::new(decode_error(input, family)?)),
+                    15 => PageValue::Task(TaskId::decode(input)?),
+                    16 => PageValue::Function(TextRef::decode(input)?),
+                    17 => PageValue::Handle(Arc::decode(input)?),
                     18 => {
                         let identity = Identity::decode(input)?;
                         if matches!(identity, Identity::Object(id) if Some(id.family) == family) {
                             return Err(invalid("absolute reference under its own family context"));
                         }
-                        Value::Ref(identity)
+                        PageValue::Ref(identity)
                     }
                     _ => {
                         let kind = input.unsigned_u32()?;
@@ -1081,12 +1081,12 @@ pub mod heap_values {
                             ordinal,
                         };
                         match kind {
-                            0 => Value::List(id),
-                            1 => Value::Map(id),
-                            2 => Value::Set(id),
-                            3 => Value::Record(id),
-                            4 => Value::Closure(id),
-                            5 => Value::Ref(Identity::Object(id)),
+                            0 => PageValue::List(id),
+                            1 => PageValue::Map(id),
+                            2 => PageValue::Set(id),
+                            3 => PageValue::Record(id),
+                            4 => PageValue::Closure(id),
+                            5 => PageValue::Ref(Identity::Object(id)),
                             _ => return Err(invalid("unknown relative reference kind")),
                         }
                     }
@@ -1096,45 +1096,45 @@ pub mod heap_values {
     }
 
     /// LocalCostV1 prices immutable data at each holding location.
-    pub fn local_cost(value: &Value) -> u64 {
+    pub fn local_cost(value: &PageValue) -> u64 {
         16u64.saturating_add(match value {
-            Value::Int(IntRef::Inline(v)) => v.bits().div_ceil(8),
-            Value::Int(IntRef::Paged { summary, .. }) => summary.bits.div_ceil(8),
-            Value::Text(v) => v.summary.utf8_bytes,
-            Value::Bytes(v) => v.len,
-            Value::Timestamp(v) => v.nanoseconds.bits().div_ceil(8),
-            Value::Tuple(v) => v.summary.cost.0,
-            Value::Error(v) => v.cost.0,
-            Value::Function(v) => v.summary.utf8_bytes,
-            Value::Handle(v) => (v.kind.len() + v.id.len()) as u64,
+            PageValue::Int(IntRef::Inline(v)) => v.bits().div_ceil(8),
+            PageValue::Int(IntRef::Paged { summary, .. }) => summary.bits.div_ceil(8),
+            PageValue::Text(v) => v.summary.utf8_bytes,
+            PageValue::Bytes(v) => v.len,
+            PageValue::Timestamp(v) => v.nanoseconds.bits().div_ceil(8),
+            PageValue::Tuple(v) => v.summary.cost.0,
+            PageValue::Error(v) => v.cost.0,
+            PageValue::Function(v) => v.summary.utf8_bytes,
+            PageValue::Handle(v) => (v.kind.len() + v.id.len()) as u64,
             _ => 0,
         })
     }
-    fn nesting(value: &Value) -> u32 {
+    fn nesting(value: &PageValue) -> u32 {
         match value {
-            Value::Tuple(t) => t.summary.depth,
-            Value::Error(e) => e.depth,
+            PageValue::Tuple(t) => t.summary.depth,
+            PageValue::Error(e) => e.depth,
             _ => 0,
         }
     }
-    fn contains_edges(value: &Value) -> bool {
+    fn contains_edges(value: &PageValue) -> bool {
         matches!(
             value,
-            Value::List(_)
-                | Value::Map(_)
-                | Value::Set(_)
-                | Value::Record(_)
-                | Value::Closure(_)
-                | Value::Task(_)
-                | Value::Ref(_)
-        ) || matches!(value, Value::Tuple(t) if t.summary.has_edges)
-            || matches!(value, Value::Error(e) if e.has_edges)
+            PageValue::List(_)
+                | PageValue::Map(_)
+                | PageValue::Set(_)
+                | PageValue::Record(_)
+                | PageValue::Closure(_)
+                | PageValue::Task(_)
+                | PageValue::Ref(_)
+        ) || matches!(value, PageValue::Tuple(t) if t.summary.has_edges)
+            || matches!(value, PageValue::Error(e) if e.has_edges)
     }
-    pub fn task_count(value: &Value) -> u64 {
+    pub fn task_count(value: &PageValue) -> u64 {
         match value {
-            Value::Task(_) | Value::Ref(Identity::Task(_)) => 1,
-            Value::Tuple(t) => t.summary.task_edges,
-            Value::Error(e) => e.task_edges,
+            PageValue::Task(_) | PageValue::Ref(Identity::Task(_)) => 1,
+            PageValue::Tuple(t) => t.summary.task_edges,
+            PageValue::Error(e) => e.task_edges,
             _ => 0,
         }
     }

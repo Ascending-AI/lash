@@ -13,7 +13,7 @@ mod continuation;
 #[derive(Clone)]
 pub enum Body {
     List {
-        rows: Tree<Value>,
+        rows: Tree<PageValue>,
         next: u64,
     },
     Table {
@@ -26,7 +26,7 @@ pub enum Body {
         site: SiteRef,
         captures: Tree<(NameRef, EntityId)>,
     },
-    Variable(Value),
+    Variable(PageValue),
 }
 #[derive(Clone)]
 pub struct ObjectHead {
@@ -35,8 +35,8 @@ pub struct ObjectHead {
 }
 #[derive(Clone)]
 pub struct Entry {
-    pub key: Value,
-    pub value: Value,
+    pub key: PageValue,
+    pub value: PageValue,
 }
 #[derive(Clone)]
 pub struct Ordinal(pub u64);
@@ -60,11 +60,11 @@ impl ObjectHead {
         }
     }
 }
-pub fn value_cost(value: &Value) -> u64 {
+pub fn value_cost(value: &PageValue) -> u64 {
     lash_kernel_doc::heap_values::local_cost(value)
 }
 
-impl Cell for Value {
+impl Cell for PageValue {
     fn cost(&self) -> u64 {
         value_cost(self)
     }
@@ -114,8 +114,8 @@ impl Cell for Entry {
     ) -> Result<Self, TokenError> {
         input.expect_struct(2)?;
         Ok(Self {
-            key: <Value as Cell>::decode_cell(input, family)?,
-            value: <Value as Cell>::decode_cell(input, family)?,
+            key: <PageValue as Cell>::decode_cell(input, family)?,
+            value: <PageValue as Cell>::decode_cell(input, family)?,
         })
     }
     fn cost(&self) -> u64 {
@@ -139,8 +139,8 @@ impl TokenCodec for Entry {
     fn decode(input: &mut TokenReader<'_>) -> Result<Self, TokenError> {
         input.expect_struct(2)?;
         Ok(Self {
-            key: Value::decode(input)?,
-            value: Value::decode(input)?,
+            key: PageValue::decode(input)?,
+            value: PageValue::decode(input)?,
         })
     }
 }
@@ -288,29 +288,29 @@ impl TokenCodec for ObjectHead {
                 }
                 5 => {
                     TokenReader::expect_fields(fields, 1)?;
-                    Body::Variable(Value::decode(input)?)
+                    Body::Variable(PageValue::decode(input)?)
                 }
                 _ => return Err(TokenError::UnsupportedVariant { variant: tag }),
             },
         })
     }
 }
-pub fn value_children(value: &Value, out: &mut Vec<PageRef>) {
+pub fn value_children(value: &PageValue, out: &mut Vec<PageRef>) {
     match value {
-        Value::Function(TextRef {
+        PageValue::Function(TextRef {
             body: Payload::Paged(p),
             ..
         })
-        | Value::Text(TextRef {
+        | PageValue::Text(TextRef {
             body: Payload::Paged(p),
             ..
         })
-        | Value::Bytes(BytesRef {
+        | PageValue::Bytes(BytesRef {
             body: Payload::Paged(p),
             ..
         }) => out.push(**p),
-        Value::Int(IntRef::Paged { digits, .. }) => out.push(**digits),
-        Value::Tuple(t) => match &t.body {
+        PageValue::Int(IntRef::Paged { digits, .. }) => out.push(**digits),
+        PageValue::Tuple(t) => match &t.body {
             Payload::Paged(p) => out.push(**p),
             Payload::Resident(v) => {
                 for v in v.iter() {
@@ -318,9 +318,9 @@ pub fn value_children(value: &Value, out: &mut Vec<PageRef>) {
                 }
             }
         },
-        Value::Error(e) => {
-            value_children(&Value::Text(e.kind.clone()), out);
-            value_children(&Value::Text(e.message.clone()), out);
+        PageValue::Error(e) => {
+            value_children(&PageValue::Text(e.kind.clone()), out);
+            value_children(&PageValue::Text(e.message.clone()), out);
             match &e.data {
                 Payload::Resident(v) => value_children(v, out),
                 Payload::Paged(p) => out.push(**p),
@@ -329,7 +329,7 @@ pub fn value_children(value: &Value, out: &mut Vec<PageRef>) {
         _ => (),
     }
 }
-pub fn value_grants(value: &mut Value, children: &[PageRef]) -> Result<(), HeapFault> {
+pub fn value_grants(value: &mut PageValue, children: &[PageRef]) -> Result<(), HeapFault> {
     fn text_grants(text: &mut TextRef, children: &[PageRef]) -> Result<(), HeapFault> {
         if let Payload::Paged(p) = &mut text.body {
             grant(Arc::make_mut(p), children)?;
@@ -337,14 +337,14 @@ pub fn value_grants(value: &mut Value, children: &[PageRef]) -> Result<(), HeapF
         Ok(())
     }
     match value {
-        Value::Text(t) | Value::Function(t) => text_grants(t, children)?,
-        Value::Bytes(b) => {
+        PageValue::Text(t) | PageValue::Function(t) => text_grants(t, children)?,
+        PageValue::Bytes(b) => {
             if let Payload::Paged(p) = &mut b.body {
                 grant(Arc::make_mut(p), children)?;
             }
         }
-        Value::Int(IntRef::Paged { digits, .. }) => grant(Arc::make_mut(digits), children)?,
-        Value::Tuple(t) => match &mut Arc::make_mut(t).body {
+        PageValue::Int(IntRef::Paged { digits, .. }) => grant(Arc::make_mut(digits), children)?,
+        PageValue::Tuple(t) => match &mut Arc::make_mut(t).body {
             Payload::Paged(p) => grant(Arc::make_mut(p), children)?,
             Payload::Resident(v) => {
                 for v in Arc::make_mut(v) {
@@ -352,7 +352,7 @@ pub fn value_grants(value: &mut Value, children: &[PageRef]) -> Result<(), HeapF
                 }
             }
         },
-        Value::Error(e) => {
+        PageValue::Error(e) => {
             let e = Arc::make_mut(e);
             text_grants(&mut e.kind, children)?;
             text_grants(&mut e.message, children)?;
@@ -387,21 +387,21 @@ pub mod execution {
     use super::*;
     use lash_kernel_doc::{Name, TaskId};
 
-    /// A cursor holding retains identity roots without another Value header.
+    /// A cursor holding retains identity roots without another PageValue header.
     #[derive(Clone)]
-    pub struct IteratedRecord(pub Value);
+    pub struct IteratedRecord(pub PageValue);
     impl TokenCodec for IteratedRecord {
         fn encode(&self, out: &mut TokenWriter) {
             self.0.encode(out);
         }
         fn decode(input: &mut TokenReader<'_>) -> Result<Self, TokenError> {
-            Ok(Self(Value::decode(input)?))
+            Ok(Self(PageValue::decode(input)?))
         }
     }
     impl Cell for IteratedRecord {
         fn cost(&self) -> u64 {
             match &self.0 {
-                Value::Tuple(tuple) => tuple.summary.cost.0,
+                PageValue::Tuple(tuple) => tuple.summary.cost.0,
                 _ => 0,
             }
         }
@@ -430,8 +430,8 @@ pub mod execution {
         pub loops: Tree<LoopRecord>,
         pub finally: Tree<FinallyRecord>,
         pub iterated: Tree<IteratedRecord>,
-        pub departing: Tree<Value>,
-        pub arguments: Option<Tree<Value>>,
+        pub departing: Tree<PageValue>,
+        pub arguments: Option<Tree<PageValue>>,
         /// The action nested in its statement the frame stands at, if it
         /// stands at one (`K-EVAL-008`).
         pub pending: Option<PendingRecord>,
@@ -810,8 +810,8 @@ pub mod execution {
                 loops: <Tree<LoopRecord>>::decode(input)?,
                 finally: <Tree<FinallyRecord>>::decode(input)?,
                 iterated: <Tree<IteratedRecord>>::decode(input)?,
-                departing: <Tree<Value>>::decode(input)?,
-                arguments: <Option<Tree<Value>>>::decode(input)?,
+                departing: <Tree<PageValue>>::decode(input)?,
+                arguments: <Option<Tree<PageValue>>>::decode(input)?,
                 pending: <Option<PendingRecord>>::decode(input)?,
             })
         }
@@ -1057,8 +1057,8 @@ impl PagedHeap {
     }
 }
 
-pub(super) fn tuple_tree(tuple: &TupleRef, page: PageRef) -> Tree<Value> {
-    let tree = Tree::<Value>::open(Some(page), tuple.summary.len, tuple.summary.cost, true)
+pub(super) fn tuple_tree(tuple: &TupleRef, page: PageRef) -> Tree<PageValue> {
+    let tree = Tree::<PageValue>::open(Some(page), tuple.summary.len, tuple.summary.cost, true)
         .with_task_edges(tuple.summary.task_edges);
     match tuple.family {
         Some(family) => tree.in_family(family),
@@ -1066,16 +1066,16 @@ pub(super) fn tuple_tree(tuple: &TupleRef, page: PageRef) -> Tree<Value> {
     }
 }
 
-pub(super) fn value_has_edges(value: &Value) -> bool {
+pub(super) fn value_has_edges(value: &PageValue) -> bool {
     matches!(
         value,
-        Value::List(_)
-            | Value::Map(_)
-            | Value::Set(_)
-            | Value::Record(_)
-            | Value::Closure(_)
-            | Value::Task(_)
-            | Value::Ref(_)
-    ) || matches!(value, Value::Tuple(t) if t.summary.has_edges)
-        || matches!(value, Value::Error(e) if e.has_edges)
+        PageValue::List(_)
+            | PageValue::Map(_)
+            | PageValue::Set(_)
+            | PageValue::Record(_)
+            | PageValue::Closure(_)
+            | PageValue::Task(_)
+            | PageValue::Ref(_)
+    ) || matches!(value, PageValue::Tuple(t) if t.summary.has_edges)
+        || matches!(value, PageValue::Error(e) if e.has_edges)
 }

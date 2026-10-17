@@ -1,14 +1,15 @@
 //! Values at the edges of a run: their charge sizes (`K-CHG-004` to
-//! `K-CHG-006`) and copying out (`K-EFF-002`). Decoding in (`K-EFF-005` to
-//! `K-EFF-007`) is [`lash_kernel_doc::Decoder`].
+//! `K-CHG-006`) and copying out (`K-EFF-002`), over the arena; and copying
+//! a page form out, for what reads a run's saved state without running it.
+//! Decoding in (`K-EFF-005` to `K-EFF-007`) is [`lash_kernel_doc::Decoder`].
 
 use std::collections::BTreeSet;
 
-use lash_kernel_doc::{Datum, EntityId, ErrorDatum, Value};
+use lash_kernel_doc::arena::{ArenaHandle, Body};
+use lash_kernel_doc::heap::{Chunk, HeapFault, IntRef, PageReader, PageValue, TextRef};
+use lash_kernel_doc::{Datum, EntityId, ErrorDatum, Integer, NativeError, Value};
+use lash_kernel_state::arena::Arena;
 use num_traits::ToPrimitive;
-
-use lash_kernel_doc::NativeHeap;
-use lash_kernel_doc::heap::{Chunk, HeapFault, IntRef, TextRef};
 use std::ops::ControlFlow;
 
 /// A raise the machine makes itself: one of the kinds of `K-ERR-002`.
@@ -35,24 +36,49 @@ pub(crate) fn raised(kind: &'static str, message: impl Into<String>) -> Raised {
     }
 }
 
-/// A value's size (`K-CHG-004`), using descriptor summaries only.
-pub(crate) fn size(heap: &dyn NativeHeap, value: &Value) -> Result<u64, HeapFault> {
+fn integer_of(arena: &Arena, value: &Value) -> Result<Option<Integer>, NativeError> {
+    arena.semantics().integer(value)
+}
+
+/// A value's size (`K-CHG-004`), from what the arena knows of it.
+pub(crate) fn size(arena: &Arena, value: &Value) -> Result<u64, NativeError> {
     let extent = match value {
-        Value::Int(IntRef::Inline(i)) => i.bits().div_ceil(64),
-        Value::Int(IntRef::Paged { summary, .. }) => summary.bits.div_ceil(64),
-        Value::Text(t) => t.summary.utf8_bytes,
-        Value::Bytes(b) => b.len,
-        Value::Tuple(t) => t.summary.len,
-        Value::Error(e) => e
-            .kind
-            .summary
-            .utf8_bytes
-            .saturating_add(e.message.summary.utf8_bytes),
-        Value::List(id) | Value::Set(id) | Value::Record(id) => heap.len(*id)?,
-        Value::Map(id) => heap.len(*id)?.saturating_mul(2),
+        Value::Int(_) | Value::BigInt(_) => {
+            integer_of(arena, value)?.map_or(0, |integer| integer.bits().div_ceil(64))
+        }
+        Value::Text(short) => short.as_bytes().len() as u64,
+        Value::LongText(handle) => match arena.body(*handle)? {
+            Body::LongText(text) => text.summary.utf8_bytes,
+            _ => 0,
+        },
+        Value::Bytes(handle) => match arena.body(*handle)? {
+            Body::Bytes(bytes) => bytes.len,
+            _ => 0,
+        },
+        Value::Tuple(handle) | Value::List(handle) | Value::Set(handle) | Value::Record(handle) => {
+            arena.len(*handle)?
+        }
+        Value::Error(handle) => match arena.body(*handle)? {
+            Body::Error(error) => {
+                text_len(arena, &error.kind)?.saturating_add(text_len(arena, &error.message)?)
+            }
+            _ => 0,
+        },
+        Value::Map(handle) => arena.len(*handle)?.saturating_mul(2),
         _ => 0,
     };
     Ok(extent.saturating_add(1))
+}
+
+fn text_len(arena: &Arena, text: &Value) -> Result<u64, NativeError> {
+    Ok(match text {
+        Value::Text(short) => short.as_bytes().len() as u64,
+        Value::LongText(handle) => match arena.body(*handle)? {
+            Body::LongText(text) => text.summary.utf8_bytes,
+            _ => 0,
+        },
+        _ => 0,
+    })
 }
 
 pub(crate) fn holds_nothing(value: &Value) -> bool {
@@ -75,102 +101,95 @@ pub(crate) fn size_one(value: &Value) -> bool {
             | Value::Bool(_)
             | Value::Float(_)
             | Value::Timestamp(_)
+            | Value::BigTimestamp(_)
             | Value::Closure(_)
             | Value::Task(_)
             | Value::Function(_)
+            | Value::LongFunction(_)
             | Value::Handle(_)
-            | Value::Ref(_)
+            | Value::TaskRef(_)
+            | Value::ObjectRef(_)
     )
 }
 
-/// A deep charge size counts each entity once (`K-CHG-005`). Immutable
-/// values still count at each holding location, regardless of page sharing.
-pub(crate) fn deep_size(heap: &dyn NativeHeap, value: &Value) -> Result<u64, HeapFault> {
-    fn measure(
-        heap: &dyn NativeHeap,
-        value: &Value,
-        seen: &mut BTreeSet<EntityId>,
-        pending: &mut Vec<EntityId>,
-    ) -> Result<u64, HeapFault> {
-        match value {
-            Value::List(id) | Value::Map(id) | Value::Set(id) | Value::Record(id) => {
-                if !seen.insert(*id) {
-                    return Ok(0);
-                }
-                pending.push(*id);
+/// The members of an immutable composite: a tuple's, an error's data.
+fn immutable_members(
+    arena: &Arena,
+    value: &Value,
+    visitor: &mut dyn FnMut(&Value) -> Result<(), NativeError>,
+) -> Result<(), NativeError> {
+    match value {
+        Value::Tuple(tuple) => {
+            for member in arena.sequence(*tuple)? {
+                visitor(member)?;
             }
-            _ => {}
         }
-        let mut total = size(heap, value)?;
-        immutable_members(heap, value, &mut |member| {
-            total = total.saturating_add(measure(heap, member, seen, pending)?);
+        Value::Error(error) => match arena.body(*error)? {
+            Body::Error(error) => visitor(&error.data)?,
+            _ => return Err(NativeError::Malformed("an error handle names another body")),
+        },
+        _ => {}
+    }
+    Ok(())
+}
+
+/// A deep charge size counts each entity once (`K-CHG-005`). Immutable
+/// values still count at each holding location.
+pub(crate) fn deep_size(arena: &Arena, value: &Value) -> Result<u64, NativeError> {
+    fn measure(
+        arena: &Arena,
+        value: &Value,
+        seen: &mut BTreeSet<u32>,
+        pending: &mut Vec<Value>,
+    ) -> Result<u64, NativeError> {
+        if let Value::List(handle)
+        | Value::Map(handle)
+        | Value::Set(handle)
+        | Value::Record(handle) = value
+        {
+            if !seen.insert(handle.index()) {
+                return Ok(0);
+            }
+            pending.push(*value);
+        }
+        let mut total = size(arena, value)?;
+        immutable_members(arena, value, &mut |member| {
+            total = total.saturating_add(measure(arena, member, seen, pending)?);
             Ok(())
         })?;
         Ok(total)
     }
     let mut seen = BTreeSet::new();
     let mut pending = Vec::new();
-    let mut total = measure(heap, value, &mut seen, &mut pending)?;
-    while let Some(id) = pending.pop() {
-        let mut fault = None;
-        heap.visit(id, &mut |element| {
-            let mut add = |value| {
-                total = total.saturating_add(measure(heap, value, &mut seen, &mut pending)?);
-                Ok::<_, HeapFault>(())
-            };
-            let result = match element {
-                lash_kernel_doc::Element::Item(v)
-                | lash_kernel_doc::Element::Field { value: v, .. } => add(v),
-                lash_kernel_doc::Element::Entry { key, value } => {
-                    add(key).and_then(|()| add(value))
-                }
-            };
-            match result {
-                Ok(()) => ControlFlow::Continue(()),
-                Err(error) => {
-                    fault = Some(error);
-                    ControlFlow::Break(())
-                }
-            }
-        })?;
-        if let Some(error) = fault {
-            return Err(error);
+    let mut total = measure(arena, value, &mut seen, &mut pending)?;
+    while let Some(object) = pending.pop() {
+        let members: Vec<Value> = match object {
+            Value::List(list) => arena.sequence(list)?.to_vec(),
+            // A set's members are its keys; a record's fields their values.
+            Value::Set(set) => arena.entries(set)?.iter().step_by(2).copied().collect(),
+            Value::Record(record) => arena
+                .entries(record)?
+                .iter()
+                .skip(1)
+                .step_by(2)
+                .copied()
+                .collect(),
+            Value::Map(map) => arena.entries(map)?.to_vec(),
+            _ => Vec::new(),
+        };
+        for member in &members {
+            total = total.saturating_add(measure(arena, member, &mut seen, &mut pending)?);
         }
     }
     Ok(total)
 }
 
-fn immutable_members(
-    heap: &dyn NativeHeap,
-    value: &Value,
-    visitor: &mut dyn FnMut(&Value) -> Result<(), HeapFault>,
-) -> Result<(), HeapFault> {
-    match value {
-        Value::Tuple(tuple) => {
-            let mut fault = None;
-            heap.tuple_visit(tuple, &mut |member| match visitor(member) {
-                Ok(()) => ControlFlow::Continue(()),
-                Err(error) => {
-                    fault = Some(error);
-                    ControlFlow::Break(())
-                }
-            })?;
-            if let Some(error) = fault {
-                return Err(error);
-            }
-        }
-        Value::Error(error) => visitor(&heap.error_data(error)?)?,
-        _ => {}
-    }
-    Ok(())
-}
-
-pub(crate) fn nested_size(heap: &dyn NativeHeap, value: &Value) -> Result<u64, HeapFault> {
+pub(crate) fn nested_size(arena: &Arena, value: &Value) -> Result<u64, NativeError> {
     let mut total = 0u64;
-    immutable_members(heap, value, &mut |member| {
+    immutable_members(arena, value, &mut |member| {
         let amount = match member {
             Value::List(_) | Value::Map(_) | Value::Set(_) | Value::Record(_) => 1,
-            _ => size(heap, member)?.saturating_add(nested_size(heap, member)?),
+            _ => size(arena, member)?.saturating_add(nested_size(arena, member)?),
         };
         total = total.saturating_add(amount);
         Ok(())
@@ -178,13 +197,149 @@ pub(crate) fn nested_size(heap: &dyn NativeHeap, value: &Value) -> Result<u64, H
     Ok(total)
 }
 
-pub(crate) fn magnitude(value: &Value) -> u64 {
+pub(crate) fn magnitude(arena: &Arena, value: &Value) -> u64 {
     match value {
-        Value::Int(IntRef::Inline(i)) if !i.is_negative() => i.to_u64().unwrap_or(u64::MAX),
-        Value::Int(IntRef::Paged { summary, .. }) if !summary.negative => u64::MAX,
+        Value::Int(word) => u64::try_from(*word).unwrap_or(0),
+        Value::BigInt(_) => match integer_of(arena, value) {
+            Ok(Some(integer)) if !integer.is_negative() => integer.to_u64().unwrap_or(u64::MAX),
+            _ => 0,
+        },
         Value::Float(f) if f.get().is_finite() && f.get() >= 0.0 => f.get() as u64,
         _ => 0,
     }
+}
+
+impl From<NativeError> for CopyError {
+    fn from(error: NativeError) -> Self {
+        Self::Heap(HeapFault::Malformed(error.to_string()))
+    }
+}
+
+/// Copies to the host's Datum tree without building or reserving
+/// anything (`K-EFF-002`): the arena holds every object `value` reaches,
+/// decoded.
+pub(crate) fn copy_out(arena: &Arena, limit: usize, value: &Value) -> Result<Datum, CopyError> {
+    copy(arena, limit, value, limit, &mut Vec::new())
+}
+
+fn text_of(arena: &Arena, value: &Value) -> Result<String, CopyError> {
+    Ok(arena.semantics().text(value)?.to_owned())
+}
+
+fn copy(
+    arena: &Arena,
+    limit: usize,
+    value: &Value,
+    budget: usize,
+    path: &mut Vec<ArenaHandle>,
+) -> Result<Datum, CopyError> {
+    let Some(budget) = budget.checked_sub(1) else {
+        return Err(raised(
+            "too_deep",
+            format!(
+                "a value copied out of the run exceeds the configured {limit}-level value depth"
+            ),
+        )
+        .into());
+    };
+    Ok(match value {
+        Value::Null => Datum::Null,
+        Value::Absent => Datum::Absent,
+        Value::Bool(v) => Datum::Bool(*v),
+        Value::Float(v) => Datum::Float(*v),
+        Value::Int(_) | Value::BigInt(_) => Datum::Int(
+            integer_of(arena, value)?.ok_or(NativeError::Malformed("an integer was expected"))?,
+        ),
+        Value::Text(_) | Value::LongText(_) => Datum::Text(text_of(arena, value)?),
+        Value::Bytes(handle) => Datum::Bytes(lash_kernel_doc::Bytes::new(
+            arena.semantics().bytes(*handle)?.to_vec(),
+        )),
+        Value::Timestamp(_) | Value::BigTimestamp(_) => {
+            Datum::Timestamp(lash_kernel_doc::Timestamp {
+                nanoseconds: arena
+                    .semantics()
+                    .nanoseconds(value)?
+                    .ok_or(NativeError::Malformed("a timestamp was expected"))?,
+            })
+        }
+        Value::Function(_) | Value::LongFunction(_) => {
+            Datum::Function(lash_kernel_doc::Name::new(text_of(arena, value)?))
+        }
+        Value::Handle(handle) => match arena.body(*handle)? {
+            Body::Handle(handle) => Datum::Handle(handle.clone()),
+            _ => return Err(NativeError::Malformed("a handle names another body").into()),
+        },
+        Value::Error(error) => match arena.body(*error)? {
+            Body::Error(error) => Datum::Error(Box::new(ErrorDatum {
+                kind: text_of(arena, &error.kind)?,
+                message: text_of(arena, &error.message)?,
+                data: copy(arena, limit, &error.data, budget, path)?,
+            })),
+            _ => return Err(NativeError::Malformed("an error names another body").into()),
+        },
+        Value::Tuple(tuple) => Datum::Tuple(
+            arena
+                .sequence(*tuple)?
+                .iter()
+                .map(|member| copy(arena, limit, member, budget, path))
+                .collect::<Result<_, _>>()?,
+        ),
+        Value::Closure(_) | Value::Task(_) | Value::TaskRef(_) | Value::ObjectRef(_) => {
+            let what = match value {
+                Value::Closure(_) => "a closure",
+                Value::Task(_) => "a task handle",
+                _ => "a ref",
+            };
+            return Err(raised(
+                "not_data",
+                format!("{what} is not data and cannot leave the run"),
+            )
+            .into());
+        }
+        Value::List(object) | Value::Map(object) | Value::Set(object) | Value::Record(object) => {
+            if path.contains(object) {
+                return Err(
+                    raised("cycle", "a value that holds itself cannot leave the run").into(),
+                );
+            }
+            path.push(*object);
+            let copied = match value {
+                Value::List(_) => Datum::List(
+                    arena
+                        .sequence(*object)?
+                        .iter()
+                        .map(|item| copy(arena, limit, item, budget, path))
+                        .collect::<Result<_, _>>()?,
+                ),
+                Value::Set(_) => Datum::Set(
+                    arena
+                        .entries(*object)?
+                        .iter()
+                        .step_by(2)
+                        .map(|member| copy(arena, limit, member, budget, path))
+                        .collect::<Result<_, _>>()?,
+                ),
+                Value::Map(_) => {
+                    let mut entries = Vec::new();
+                    for pair in arena.entries(*object)?.as_chunks::<2>().0.iter() {
+                        let key = copy(arena, limit, &pair[0], budget, path)?;
+                        entries.push((key, copy(arena, limit, &pair[1], budget, path)?));
+                    }
+                    Datum::Map(entries)
+                }
+                _ => {
+                    let mut fields = Vec::new();
+                    for pair in arena.entries(*object)?.as_chunks::<2>().0.iter() {
+                        let name = text_of(arena, &pair[0])?;
+                        fields.push((name, copy(arena, limit, &pair[1], budget, path)?));
+                    }
+                    Datum::Record(fields)
+                }
+            };
+            path.pop();
+            copied
+        }
+    })
 }
 
 /// Boundary copy failure retains the infrastructure/guest distinction.
@@ -204,7 +359,7 @@ impl From<HeapFault> for CopyError {
     }
 }
 
-pub(crate) fn text_copy(heap: &dyn NativeHeap, text: &TextRef) -> Result<String, HeapFault> {
+pub(crate) fn text_copy(heap: &dyn PageReader, text: &TextRef) -> Result<String, HeapFault> {
     // The descriptor certifies the full UTF-8 extent; check String's host
     // capacity limit before reserving it once, rather than growing per leaf.
     let capacity = usize::try_from(text.summary.utf8_bytes)
@@ -213,7 +368,7 @@ pub(crate) fn text_copy(heap: &dyn NativeHeap, text: &TextRef) -> Result<String,
         .ok_or_else(|| HeapFault::Malformed("text length exceeds host String capacity".into()))?;
     let mut out = String::with_capacity(capacity);
     heap.payload_visit(
-        &Value::Text(text.clone()),
+        &PageValue::Text(text.clone()),
         0..text.summary.utf8_bytes,
         &mut |chunk| {
             if let Chunk::Text(text) = chunk {
@@ -227,12 +382,12 @@ pub(crate) fn text_copy(heap: &dyn NativeHeap, text: &TextRef) -> Result<String,
 
 /// Copies to the host's Datum tree without allocating guest entities or
 /// reserving guest memory (`K-EFF-002`). Reads stop at the first fault.
-pub(crate) fn copy_out(heap: &dyn NativeHeap, value: &Value) -> Result<Datum, CopyError> {
-    copy(heap, value, heap.value_depth_limit(), &mut Vec::new())
+pub(crate) fn copy_page_out(heap: &dyn PageReader, value: &PageValue) -> Result<Datum, CopyError> {
+    copy_page(heap, value, heap.value_depth_limit(), &mut Vec::new())
 }
-fn copy(
-    heap: &dyn NativeHeap,
-    value: &Value,
+fn copy_page(
+    heap: &dyn PageReader,
+    value: &PageValue,
     budget: usize,
     path: &mut Vec<EntityId>,
 ) -> Result<Datum, CopyError> {
@@ -247,15 +402,15 @@ fn copy(
         .into());
     };
     Ok(match value {
-        Value::Null => Datum::Null,
-        Value::Absent => Datum::Absent,
-        Value::Bool(v) => Datum::Bool(*v),
-        Value::Float(v) => Datum::Float(*v),
-        Value::Int(IntRef::Inline(i)) => Datum::Int(i.clone()),
-        Value::Int(int @ IntRef::Paged { summary, .. }) => {
+        PageValue::Null => Datum::Null,
+        PageValue::Absent => Datum::Absent,
+        PageValue::Bool(v) => Datum::Bool(*v),
+        PageValue::Float(v) => Datum::Float(*v),
+        PageValue::Int(IntRef::Inline(i)) => Datum::Int(i.clone()),
+        PageValue::Int(int @ IntRef::Paged { summary, .. }) => {
             let mut bytes = Vec::new();
             heap.payload_visit(
-                &Value::Int(int.clone()),
+                &PageValue::Int(int.clone()),
                 0..summary.bits.div_ceil(8),
                 &mut |chunk| {
                     if let Chunk::Bytes(b) = chunk {
@@ -269,8 +424,8 @@ fn copy(
                 &bytes,
             ))
         }
-        Value::Text(t) => Datum::Text(text_copy(heap, t)?),
-        Value::Bytes(b) => {
+        PageValue::Text(t) => Datum::Text(text_copy(heap, t)?),
+        PageValue::Bytes(b) => {
             let mut bytes = Vec::new();
             heap.payload_visit(value, 0..b.len, &mut |chunk| {
                 if let Chunk::Bytes(b) = chunk {
@@ -280,28 +435,28 @@ fn copy(
             })?;
             Datum::Bytes(lash_kernel_doc::Bytes::new(bytes))
         }
-        Value::Timestamp(t) => Datum::Timestamp(t.clone()),
-        Value::Function(n) => Datum::Function(lash_kernel_doc::Name::new(text_copy(heap, n)?)),
-        Value::Handle(h) => Datum::Handle(h.as_ref().clone()),
-        Value::Error(e) => Datum::Error(Box::new(ErrorDatum {
+        PageValue::Timestamp(t) => Datum::Timestamp(t.clone()),
+        PageValue::Function(n) => Datum::Function(lash_kernel_doc::Name::new(text_copy(heap, n)?)),
+        PageValue::Handle(h) => Datum::Handle(h.as_ref().clone()),
+        PageValue::Error(e) => Datum::Error(Box::new(ErrorDatum {
             kind: text_copy(heap, &e.kind)?,
             message: text_copy(heap, &e.message)?,
-            data: copy(heap, &heap.error_data(e)?, budget, path)?,
+            data: copy_page(heap, &heap.error_data(e)?, budget, path)?,
         })),
-        Value::Tuple(t) => {
+        PageValue::Tuple(t) => {
             let mut items = Vec::new();
             for index in 0..t.summary.len {
                 let member = heap
                     .tuple_get(t, index)?
                     .ok_or_else(|| HeapFault::Malformed("tuple extent has no member".into()))?;
-                items.push(copy(heap, &member, budget, path)?);
+                items.push(copy_page(heap, &member, budget, path)?);
             }
             Datum::Tuple(items)
         }
-        Value::Closure(_) | Value::Task(_) | Value::Ref(_) => {
+        PageValue::Closure(_) | PageValue::Task(_) | PageValue::Ref(_) => {
             let what = match value {
-                Value::Closure(_) => "a closure",
-                Value::Task(_) => "a task handle",
+                PageValue::Closure(_) => "a closure",
+                PageValue::Task(_) => "a task handle",
                 _ => "a ref",
             };
             return Err(raised(
@@ -310,7 +465,7 @@ fn copy(
             )
             .into());
         }
-        Value::List(id) | Value::Map(id) | Value::Set(id) | Value::Record(id) => {
+        PageValue::List(id) | PageValue::Map(id) | PageValue::Set(id) | PageValue::Record(id) => {
             if path.contains(id) {
                 return Err(
                     raised("cycle", "a value that holds itself cannot leave the run").into(),
@@ -323,16 +478,19 @@ fn copy(
             let mut error = None;
             heap.visit(*id, &mut |element| {
                 let result = match element {
-                    lash_kernel_doc::Element::Item(v) => {
-                        copy(heap, v, budget, path).map(|v| items.push(v))
+                    lash_kernel_doc::heap::Element::Item(v) => {
+                        copy_page(heap, v, budget, path).map(|v| items.push(v))
                     }
-                    lash_kernel_doc::Element::Entry { key, value } => copy(heap, key, budget, path)
-                        .and_then(|k| {
-                            copy(heap, value, budget, path).map(|v| entries.push((k, v)))
-                        }),
-                    lash_kernel_doc::Element::Field { name, value } => text_copy(heap, name)
+                    lash_kernel_doc::heap::Element::Entry { key, value } => {
+                        copy_page(heap, key, budget, path).and_then(|k| {
+                            copy_page(heap, value, budget, path).map(|v| entries.push((k, v)))
+                        })
+                    }
+                    lash_kernel_doc::heap::Element::Field { name, value } => text_copy(heap, name)
                         .map_err(CopyError::from)
-                        .and_then(|n| copy(heap, value, budget, path).map(|v| fields.push((n, v)))),
+                        .and_then(|n| {
+                            copy_page(heap, value, budget, path).map(|v| fields.push((n, v)))
+                        }),
                 };
                 match result {
                     Ok(()) => ControlFlow::Continue(()),
@@ -347,9 +505,9 @@ fn copy(
             }
             path.pop();
             match value {
-                Value::List(_) => Datum::List(items),
-                Value::Set(_) => Datum::Set(items),
-                Value::Map(_) => Datum::Map(entries),
+                PageValue::List(_) => Datum::List(items),
+                PageValue::Set(_) => Datum::Set(items),
+                PageValue::Map(_) => Datum::Map(entries),
                 _ => Datum::Record(fields),
             }
         }

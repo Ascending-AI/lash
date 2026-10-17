@@ -25,7 +25,7 @@ use std::ops::Range;
 
 use super::{NameRef, SiteRef};
 use lash_kernel_doc::heap::{
-    EntityId, HeapFault, Identity, LogicalBytes, NativeHeap, PageRef, TextRef, TupleRef, Value,
+    EntityId, HeapFault, Identity, LogicalBytes, PageReader, PageRef, PageValue, TextRef, TupleRef,
 };
 pub use lash_kernel_doc::heap::{FieldName, NormalKey};
 
@@ -45,26 +45,25 @@ pub enum ObjectKind {
     Variable,
 }
 
-/// A fresh entity's initial contents. Unlike a native's
-/// `lash_kernel_doc::heap::Object`, the machine may allocate closures and
-/// variables.
+/// A fresh entity's initial contents, in page form: what projection
+/// installs for an arena object.
 #[derive(Clone, Debug)]
 #[expect(
     clippy::large_enum_variant,
     reason = "one transient constructor carries its bounded semantic site by value; retained closure records use paged trees"
 )]
 pub enum ObjectInit {
-    List(Vec<Value>),
-    Map(Vec<(Value, Value)>),
-    Set(Vec<Value>),
-    Record(Vec<(TextRef, Value)>),
+    List(Vec<PageValue>),
+    Map(Vec<(PageValue, PageValue)>),
+    Set(Vec<PageValue>),
+    Record(Vec<(TextRef, PageValue)>),
     Closure {
         /// The site of the closure expression: a semantic coordinate, never
         /// a compiled code index.
         site: SiteRef,
         captures: Vec<(NameRef, EntityId)>,
     },
-    Variable(Value),
+    Variable(PageValue),
 }
 
 /// A closure as the machine reads it.
@@ -119,14 +118,14 @@ pub enum HeapWriteError {
     Fault(#[from] HeapFault),
 }
 
-/// The paged heap, as the machine drives it. Its native face is
-/// [`NativeHeap`].
+/// The paged heap, as projection drives it. Its read face is
+/// [`PageReader`].
 ///
 /// Implemented by the paged heap of `lash-kernel-state` (layer hp-heap,
 /// FIG-6188); its accounting calls are [`AllocationCensus`](super::AllocationCensus)
 /// (hp-memory, FIG-6189) and its lifecycle operations
 /// [`HeapLifecycle`](super::HeapLifecycle) (hp-life, FIG-6192).
-pub trait SemanticHeap: NativeHeap {
+pub trait SemanticHeap: PageReader {
     /// Opens a sealed heap root for an activation: reads its root page and
     /// nothing else. Every later read faults in what it touches.
     ///
@@ -148,12 +147,12 @@ pub trait SemanticHeap: NativeHeap {
 
     /// Places resident immutable descendants in bounded payload pages.
     /// Existing paged descriptors retain their references without reads.
-    fn canonical_value(&mut self, value: Value) -> Result<Value, HeapWriteError>;
+    fn canonical_value(&mut self, value: PageValue) -> Result<PageValue, HeapWriteError>;
 
     fn kind(&self, entity: EntityId) -> Result<Option<ObjectKind>, HeapFault>;
     /// The value that names `entity`, by its kind; `None` for a variable.
-    fn value_of(&self, entity: EntityId) -> Result<Option<Value>, HeapFault>;
-    fn variable_get(&self, variable: EntityId) -> Result<Value, HeapFault>;
+    fn value_of(&self, entity: EntityId) -> Result<Option<PageValue>, HeapFault>;
+    fn variable_get(&self, variable: EntityId) -> Result<PageValue, HeapFault>;
     fn closure(&self, closure: EntityId) -> Result<ClosureView, HeapFault>;
     /// The first entry of a map or a set after `after`, with its cursor
     /// and its first-written key.
@@ -161,7 +160,7 @@ pub trait SemanticHeap: NativeHeap {
         &self,
         table: EntityId,
         after: Option<TableCursor>,
-    ) -> Result<Option<(TableCursor, Value)>, HeapFault>;
+    ) -> Result<Option<(TableCursor, PageValue)>, HeapFault>;
     /// How many live entries sit at or before `last`: a loop's position as
     /// a count (`K-ITER-002`).
     fn table_passed(&self, table: EntityId, last: Option<TableCursor>) -> Result<u64, HeapFault>;
@@ -174,37 +173,46 @@ pub trait SemanticHeap: NativeHeap {
         &mut self,
         list: EntityId,
         index: u64,
-        value: Value,
+        value: PageValue,
     ) -> Result<(), HeapWriteError>;
-    fn list_remove(&mut self, list: EntityId, index: u64) -> Result<Value, HeapWriteError>;
+    fn list_remove(&mut self, list: EntityId, index: u64) -> Result<PageValue, HeapWriteError>;
     /// Writes `value` under `key`; an existing key keeps its first spelling
     /// and position (`K-KEY-003`).
-    fn map_write(&mut self, map: EntityId, key: Value, value: Value) -> Result<(), HeapWriteError>;
+    fn map_write(
+        &mut self,
+        map: EntityId,
+        key: PageValue,
+        value: PageValue,
+    ) -> Result<(), HeapWriteError>;
     fn set_write(
         &mut self,
         set: EntityId,
-        member: Value,
+        member: PageValue,
         present: bool,
     ) -> Result<(), HeapWriteError>;
     /// Removes a map entry or a set member; absence is no error.
-    fn table_remove(&mut self, table: EntityId, key: &Value) -> Result<(), HeapWriteError>;
+    fn table_remove(&mut self, table: EntityId, key: &PageValue) -> Result<(), HeapWriteError>;
     fn record_write(
         &mut self,
         record: EntityId,
         field: FieldName<'_>,
-        value: Value,
+        value: PageValue,
     ) -> Result<(), HeapWriteError>;
     fn record_remove(
         &mut self,
         record: EntityId,
         field: FieldName<'_>,
     ) -> Result<(), HeapWriteError>;
-    fn variable_write(&mut self, variable: EntityId, value: Value) -> Result<(), HeapWriteError>;
+    fn variable_write(
+        &mut self,
+        variable: EntityId,
+        value: PageValue,
+    ) -> Result<(), HeapWriteError>;
 
     /// Every heap entity and task `value` names, through tuples and errors.
-    fn edges_of(&self, value: &Value, out: &mut Vec<Identity>) -> Result<(), HeapFault>;
+    fn edges_of(&self, value: &PageValue, out: &mut Vec<Identity>) -> Result<(), HeapFault>;
     /// The logical cost of `value` where it is held (the local metric).
-    fn cost_of(&self, value: &Value) -> LogicalBytes;
+    fn cost_of(&self, value: &PageValue) -> LogicalBytes;
     fn tuple_slice(
         &mut self,
         tuple: &TupleRef,

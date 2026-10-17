@@ -465,9 +465,13 @@ mod tests {
     }
 
     impl NativeFunction for Guarded {
-        fn call(&self, call: NativeCall<'_>) -> Result<Value, NativeError> {
+        fn call(&self, call: NativeCall<'_, '_>) -> Result<Value, NativeError> {
             if self.memory {
-                return Err(NativeError::Memory);
+                // Room past every bound: the run ends at its memory bound.
+                return Err(lash_kernel_doc::Retry::Room {
+                    wanted: lash_kernel_doc::heap::LogicalBytes(u64::MAX),
+                }
+                .into());
             }
             call.counter.spend(1)?;
             Ok(Value::Null)

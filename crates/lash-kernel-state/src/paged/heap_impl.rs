@@ -1,14 +1,12 @@
 //! The identity-addressed paged semantic heap. Collection edits update one
 //! bounded path and replace its directory head; no mutable container escapes.
-use super::directory::{
-    Body, Entry, ObjectHead, Ordinal, ordinal_key, value_cost, value_has_edges,
-};
-use super::tree::{Access, Cell, SealWork, Tree, checked_sum};
+use super::directory::{Body, Entry, ObjectHead, Ordinal, ordinal_key, value_cost};
+use super::tree::{Access, Cell, SealWork, Tree};
 use super::*;
 use lash_kernel_doc::Integer;
-use lash_kernel_doc::graph_tokens::{TokenCodec, TokenWriter, encode_body};
+use lash_kernel_doc::graph_tokens::{TokenCodec, TokenWriter};
 use lash_kernel_doc::heap::*;
-use lash_kernel_doc::heap_values::{integer_from_digits, integral_float, key_digest, text_summary};
+use lash_kernel_doc::heap_values::{integral_float, key_digest};
 use std::cell::RefCell;
 use std::ops::Range;
 use std::rc::Rc;
@@ -188,6 +186,9 @@ impl PagedHeap {
     pub fn next_ordinal(&self) -> u64 {
         self.next_ordinal
     }
+    pub(super) fn set_next_ordinal(&mut self, next: u64) {
+        self.next_ordinal = next;
+    }
     /// The sealed heap's root.
     ///
     /// # Errors
@@ -296,26 +297,23 @@ impl PagedHeap {
         self.census = Some(census);
         result
     }
-    /// Canonicalizes and builds a native aggregate once, before admission.
-    /// No entity identity or reservation is consumed by preparation.
-    pub fn prepare_allocation(&mut self, object: Object) -> Result<ObjectProposal, NativeError> {
-        self.prepare_object(match object {
-            Object::List(v) => ObjectInit::List(v),
-            Object::Map(v) => ObjectInit::Map(v),
-            Object::Set(v) => ObjectInit::Set(v),
-            Object::Record(v) => ObjectInit::Record(v),
-        })
-        .map_err(native_write)
-    }
-    /// Admits and installs a prepared native aggregate. On a precision refusal,
-    /// publish the execution roots and retry this operation with the same
-    /// proposal. The proposed graph participates in refinement after installation,
-    /// exactly as an ordinary allocation's graph does.
-    pub fn allocate_prepared(
-        &mut self,
-        proposal: &mut ObjectProposal,
-    ) -> Result<EntityId, NativeError> {
-        self.install_object(proposal).map_err(native_write)
+    /// Reserves `values` values and `bytes` bytes held outside any entity
+    /// (an instantiated frozen datum's payload), as the machine's other
+    /// holdings are (`K-BND-003`).
+    pub(super) fn reserve_held(&mut self, values: u64, bytes: u64) -> Result<(), HeapWriteError> {
+        let bytes = values
+            .checked_mul(16)
+            .and_then(|v| v.checked_add(bytes))
+            .ok_or_else(|| HeapFault::Malformed("a reservation overflows".into()))?;
+        self.admit(bytes, &[])?;
+        if let Some(census) = &mut self.census {
+            census
+                .changed(LogicalBytes(0), LogicalBytes(bytes))
+                .map_err(census_fault)?;
+            self.accounting = census.certificate();
+        }
+        self.holdings.reserve(bytes)?;
+        Ok(())
     }
     fn prepare_object(&mut self, init: ObjectInit) -> Result<ObjectProposal, HeapWriteError> {
         let init = match init {
@@ -337,7 +335,7 @@ impl PagedHeap {
             ObjectInit::Record(v) => ObjectInit::Record(
                 v.into_iter()
                     .map(|(k, v)| {
-                        let Value::Text(k) = self.canonical(Value::Text(k))? else {
+                        let PageValue::Text(k) = self.canonical(PageValue::Text(k))? else {
                             return Err(
                                 HeapFault::Malformed("record field is not text".into()).into()
                             );
@@ -398,13 +396,13 @@ impl PagedHeap {
             ObjectInit::Map(values) => self.make_table(ObjectKind::Map, values)?,
             ObjectInit::Set(values) => self.make_table(
                 ObjectKind::Set,
-                values.into_iter().map(|v| (v, Value::Null)).collect(),
+                values.into_iter().map(|v| (v, PageValue::Null)).collect(),
             )?,
             ObjectInit::Record(values) => self.make_table(
                 ObjectKind::Record,
                 values
                     .into_iter()
-                    .map(|(k, v)| (Value::Text(k), v))
+                    .map(|(k, v)| (PageValue::Text(k), v))
                     .collect(),
             )?,
             ObjectInit::Variable(value) => Body::Variable(value),
@@ -430,7 +428,11 @@ impl PagedHeap {
             family: FamilyId::PRIMARY,
         })
     }
-    fn make_table(&self, kind: ObjectKind, values: Vec<(Value, Value)>) -> Result<Body, HeapFault> {
+    fn make_table(
+        &self,
+        kind: ObjectKind,
+        values: Vec<(PageValue, PageValue)>,
+    ) -> Result<Body, HeapFault> {
         let mut lookup: Tree<Ordinal> = Tree::new(false);
         let mut rows = Tree::new(true);
         let mut next = 0;
@@ -457,7 +459,7 @@ impl PagedHeap {
             next,
         })
     }
-    fn key(&self, value: &Value) -> Result<Vec<u8>, HeapWriteError> {
+    fn key(&self, value: &PageValue) -> Result<Vec<u8>, HeapWriteError> {
         self.normal_key(value)?.map(normal_bytes).ok_or_else(|| {
             raised(
                 "invalid_key",
@@ -465,124 +467,69 @@ impl PagedHeap {
             )
         })
     }
-    pub(super) fn canonical(&mut self, value: Value) -> Result<Value, HeapWriteError> {
+    pub fn canonical(&self, value: PageValue) -> Result<PageValue, HeapWriteError> {
         Ok(match value {
-            Value::Function(t) => {
-                let Value::Text(t) = self.canonical(Value::Text(t))? else {
+            PageValue::Function(t) => {
+                let PageValue::Text(t) = self.canonical(PageValue::Text(t))? else {
                     unreachable!()
                 };
-                Value::Function(t)
+                PageValue::Function(t)
             }
-            Value::Text(t) => match &t.body {
+            PageValue::Text(t) => match &t.body {
                 Payload::Resident(s) if s.len() as u64 > IMMUTABLE_INLINE_MAX => {
-                    Value::Text(self.text(s).map_err(write_native)?)
+                    PageValue::Text(self.text(s)?)
                 }
-                _ => Value::Text(t),
+                _ => PageValue::Text(t),
             },
-            Value::Bytes(b) => match &b.body {
+            PageValue::Bytes(b) => match &b.body {
                 Payload::Resident(s) if s.len() as u64 > IMMUTABLE_INLINE_MAX => {
-                    Value::Bytes(self.bytes(s).map_err(write_native)?)
+                    PageValue::Bytes(self.bytes(s)?)
                 }
-                _ => Value::Bytes(b),
+                _ => PageValue::Bytes(b),
             },
-            Value::Int(IntRef::Inline(i)) if i.bits().div_ceil(8) > IMMUTABLE_INLINE_MAX => {
-                Value::Int(self.int(i).map_err(write_native)?)
+            PageValue::Int(IntRef::Inline(i)) if i.bits().div_ceil(8) > IMMUTABLE_INLINE_MAX => {
+                PageValue::Int(self.int(i)?)
             }
-            Value::Tuple(t) => match &t.body {
-                Payload::Resident(v) => Value::Tuple(self.tuple(v.to_vec()).map_err(write_native)?),
-                _ => Value::Tuple(t),
+            PageValue::Tuple(t) => match &t.body {
+                Payload::Resident(v) => PageValue::Tuple(self.tuple(v.to_vec())?),
+                _ => PageValue::Tuple(t),
             },
-            Value::Error(e) => {
+            PageValue::Error(e) => {
                 let mut e = (*e).clone();
-                let Value::Text(kind) = self.canonical(Value::Text(e.kind))? else {
+                let PageValue::Text(kind) = self.canonical(PageValue::Text(e.kind))? else {
                     return Err(HeapFault::Malformed("error kind is not text".into()).into());
                 };
-                let Value::Text(message) = self.canonical(Value::Text(e.message))? else {
+                let PageValue::Text(message) = self.canonical(PageValue::Text(e.message))? else {
                     return Err(HeapFault::Malformed("error message is not text".into()).into());
                 };
                 e.kind = kind;
                 e.message = message;
-                if matches!(e.data, Payload::Paged(_)) {
-                    return Ok(Value::Error(Arc::new(e)));
-                }
                 let data = match &e.data {
                     Payload::Resident(v) => self.canonical((**v).clone())?,
-                    Payload::Paged(_) => self.error_data(&e)?,
+                    Payload::Paged(_) => return Ok(PageValue::Error(Arc::new(e))),
                 };
-                e.depth = value_depth(&data) + 1;
-                e.task_edges = lash_kernel_doc::heap_values::task_count(&data);
-                e.family = None;
-                if e.depth as usize > self.limits.value_depth() {
+                let (kind, message) = (e.kind, e.message);
+                if value_depth(&data) as usize + 1 > self.limits.value_depth() {
                     return Err(raised("too_deep", "error nesting exceeds K-VAL-034"));
                 }
-                e.cost = LogicalBytes(checked_sum(
-                    [
-                        e.kind.summary.utf8_bytes,
-                        e.message.summary.utf8_bytes,
-                        value_cost(&data),
-                    ]
-                    .into_iter(),
-                )?);
-                e.has_edges = value_has_edges(&data);
-                e.data = if encode_body(&data).len() <= IMMUTABLE_INLINE_MAX as usize {
-                    Payload::Resident(Arc::new(data))
-                } else {
-                    let mut tree = Tree::new(true);
-                    tree.write(ordinal_key(0), data, &self.access)?;
-                    tree.seal(
-                        &self.access,
-                        &mut SealWork::new(SealBudget {
-                            pages: u64::MAX,
-                            bytes: u64::MAX,
-                        }),
-                    )?;
-                    Payload::paged(
-                        tree.page()
-                            .ok_or_else(|| HeapFault::Malformed("error data has no page".into()))?,
-                    )
-                };
-                Value::Error(Arc::new(e))
+                PageValue::Error(super::stored::pages::error(
+                    &self.access,
+                    kind,
+                    message,
+                    data,
+                )?)
             }
             other => other,
         })
     }
     pub(super) fn copy_text(&self, text: &TextRef) -> Result<Arc<str>, HeapFault> {
-        match &text.body {
-            Payload::Resident(text) => Ok(Arc::clone(text)),
-            Payload::Paged(page) => {
-                let bytes = payload::copy(&self.access, **page, text.summary, true)?;
-                String::from_utf8(bytes)
-                    .map(Arc::from)
-                    .map_err(|error| HeapFault::Malformed(error.to_string()))
-            }
-        }
+        super::stored::reads::text(&self.access, text)
     }
     pub(super) fn copy_bytes(&self, bytes: &BytesRef) -> Result<Arc<[u8]>, HeapFault> {
-        match &bytes.body {
-            Payload::Resident(bytes) => Ok(Arc::clone(bytes)),
-            Payload::Paged(page) => {
-                Ok(payload::copy(&self.access, **page, binary_summary(bytes.len), false)?.into())
-            }
-        }
+        super::stored::reads::bytes(&self.access, bytes)
     }
     pub(super) fn copy_int(&self, int: &IntRef) -> Result<Integer, HeapFault> {
-        match int {
-            IntRef::Inline(i) => Ok(i.clone()),
-            IntRef::Paged {
-                summary, digits, ..
-            } => {
-                let len = summary.bits.div_ceil(8);
-                let out = payload::copy(&self.access, **digits, binary_summary(len), false)?;
-                let int = integer_from_digits(summary.negative, &out);
-                if int.bits() != summary.bits || int.is_negative() != summary.negative {
-                    return Err(HeapFault::Corrupt {
-                        page: digits.id,
-                        reason: "integer summary mismatch".into(),
-                    });
-                }
-                Ok(int)
-            }
-        }
+        super::stored::reads::int(&self.access, int)
     }
 }
 impl SemanticHeap for PagedHeap {
@@ -641,25 +588,25 @@ impl SemanticHeap for PagedHeap {
             working: Default::default(),
         })
     }
-    fn canonical_value(&mut self, value: Value) -> Result<Value, HeapWriteError> {
+    fn canonical_value(&mut self, value: PageValue) -> Result<PageValue, HeapWriteError> {
         self.canonical(value)
     }
     fn kind(&self, entity: EntityId) -> Result<Option<ObjectKind>, HeapFault> {
         self.read_head(entity, |head| Ok(head.map(ObjectHead::kind)))
     }
-    fn value_of(&self, entity: EntityId) -> Result<Option<Value>, HeapFault> {
+    fn value_of(&self, entity: EntityId) -> Result<Option<PageValue>, HeapFault> {
         Ok(self.kind(entity)?.and_then(|k| {
             Some(match k {
-                ObjectKind::List => Value::List(entity),
-                ObjectKind::Map => Value::Map(entity),
-                ObjectKind::Set => Value::Set(entity),
-                ObjectKind::Record => Value::Record(entity),
-                ObjectKind::Closure => Value::Closure(entity),
+                ObjectKind::List => PageValue::List(entity),
+                ObjectKind::Map => PageValue::Map(entity),
+                ObjectKind::Set => PageValue::Set(entity),
+                ObjectKind::Record => PageValue::Record(entity),
+                ObjectKind::Closure => PageValue::Closure(entity),
                 ObjectKind::Variable => return None,
             })
         }))
     }
-    fn variable_get(&self, variable: EntityId) -> Result<Value, HeapFault> {
+    fn variable_get(&self, variable: EntityId) -> Result<PageValue, HeapFault> {
         self.read_head(variable, |head| match head.map(|h| &h.body) {
             Some(Body::Variable(v)) => Ok(v.clone()),
             _ => Err(HeapFault::Malformed("expected a shared variable".into())),
@@ -675,7 +622,7 @@ impl SemanticHeap for PagedHeap {
         &self,
         table: EntityId,
         after: Option<TableCursor>,
-    ) -> Result<Option<(TableCursor, Value)>, HeapFault> {
+    ) -> Result<Option<(TableCursor, PageValue)>, HeapFault> {
         self.read_head(table, |head| {
             let Some(Body::Table { rows, .. }) = head.map(|h| &h.body) else {
                 return Ok(None);
@@ -707,7 +654,7 @@ impl SemanticHeap for PagedHeap {
         &mut self,
         list: EntityId,
         index: u64,
-        value: Value,
+        value: PageValue,
     ) -> Result<(), HeapWriteError> {
         let head = self.required(list, ObjectKind::List)?;
         if index > head.len() {
@@ -764,7 +711,7 @@ impl SemanticHeap for PagedHeap {
             })
         })
     }
-    fn list_remove(&mut self, list: EntityId, index: u64) -> Result<Value, HeapWriteError> {
+    fn list_remove(&mut self, list: EntityId, index: u64) -> Result<PageValue, HeapWriteError> {
         let head = self.required(list, ObjectKind::List)?;
         if index >= head.len() {
             return Err(raised(
@@ -805,23 +752,28 @@ impl SemanticHeap for PagedHeap {
         )?;
         Ok(value)
     }
-    fn map_write(&mut self, map: EntityId, key: Value, value: Value) -> Result<(), HeapWriteError> {
+    fn map_write(
+        &mut self,
+        map: EntityId,
+        key: PageValue,
+        value: PageValue,
+    ) -> Result<(), HeapWriteError> {
         self.table_write(map, ObjectKind::Map, key, value)
     }
     fn set_write(
         &mut self,
         set: EntityId,
-        member: Value,
+        member: PageValue,
         present: bool,
     ) -> Result<(), HeapWriteError> {
         self.required(set, ObjectKind::Set)?;
         if present {
-            self.table_write(set, ObjectKind::Set, member, Value::Null)
+            self.table_write(set, ObjectKind::Set, member, PageValue::Null)
         } else {
             self.table_remove(set, &member)
         }
     }
-    fn table_remove(&mut self, table: EntityId, key: &Value) -> Result<(), HeapWriteError> {
+    fn table_remove(&mut self, table: EntityId, key: &PageValue) -> Result<(), HeapWriteError> {
         let normal = self.key(key)?;
         let Some(head) = self.current_head(table)? else {
             return Err(raised("type_error", "expected a table"));
@@ -863,11 +815,11 @@ impl SemanticHeap for PagedHeap {
         &mut self,
         record: EntityId,
         field: FieldName<'_>,
-        value: Value,
+        value: PageValue,
     ) -> Result<(), HeapWriteError> {
         let key = match field {
-            FieldName::Static(s) => Value::Text(self.text(s).map_err(write_native)?),
-            FieldName::Text(t) => Value::Text(t.clone()),
+            FieldName::Static(s) => PageValue::Text(self.text(s)?),
+            FieldName::Text(t) => PageValue::Text(t.clone()),
         };
         self.table_write(record, ObjectKind::Record, key, value)
     }
@@ -878,12 +830,16 @@ impl SemanticHeap for PagedHeap {
     ) -> Result<(), HeapWriteError> {
         self.required(record, ObjectKind::Record)?;
         let key = match field {
-            FieldName::Static(s) => Value::Text(self.text(s).map_err(write_native)?),
-            FieldName::Text(t) => Value::Text(t.clone()),
+            FieldName::Static(s) => PageValue::Text(self.text(s)?),
+            FieldName::Text(t) => PageValue::Text(t.clone()),
         };
         self.table_remove(record, &key)
     }
-    fn variable_write(&mut self, variable: EntityId, value: Value) -> Result<(), HeapWriteError> {
+    fn variable_write(
+        &mut self,
+        variable: EntityId,
+        value: PageValue,
+    ) -> Result<(), HeapWriteError> {
         self.required(variable, ObjectKind::Variable)?;
         let value = self.canonical(value)?;
         let after = census::MIN_ENTITY_COST.0.saturating_add(value_cost(&value));
@@ -896,26 +852,26 @@ impl SemanticHeap for PagedHeap {
             })
         })
     }
-    fn edges_of(&self, value: &Value, out: &mut Vec<Identity>) -> Result<(), HeapFault> {
+    fn edges_of(&self, value: &PageValue, out: &mut Vec<Identity>) -> Result<(), HeapFault> {
         match value {
-            Value::List(id)
-            | Value::Map(id)
-            | Value::Set(id)
-            | Value::Record(id)
-            | Value::Closure(id) => out.push(Identity::Object(*id)),
-            Value::Task(id) => out.push(Identity::Task(*id)),
-            Value::Ref(id) => out.push(*id),
-            Value::Tuple(t) if t.summary.has_edges => {
+            PageValue::List(id)
+            | PageValue::Map(id)
+            | PageValue::Set(id)
+            | PageValue::Record(id)
+            | PageValue::Closure(id) => out.push(Identity::Object(*id)),
+            PageValue::Task(id) => out.push(Identity::Task(*id)),
+            PageValue::Ref(id) => out.push(*id),
+            PageValue::Tuple(t) if t.summary.has_edges => {
                 for i in 0..t.summary.len {
                     self.edges_of(&required_value(self.tuple_get(t, i)?)?, out)?;
                 }
             }
-            Value::Error(e) if e.has_edges => self.edges_of(&self.error_data(e)?, out)?,
+            PageValue::Error(e) if e.has_edges => self.edges_of(&self.error_data(e)?, out)?,
             _ => (),
         }
         Ok(())
     }
-    fn cost_of(&self, value: &Value) -> LogicalBytes {
+    fn cost_of(&self, value: &PageValue) -> LogicalBytes {
         LogicalBytes(value_cost(value))
     }
     fn tuple_slice(
@@ -933,7 +889,7 @@ impl SemanticHeap for PagedHeap {
         for i in range {
             values.push(required_value(self.tuple_get(tuple, i)?)?);
         }
-        self.tuple(values).map_err(write_native)
+        self.tuple(values)
     }
     fn reserve_logical(
         &mut self,
@@ -1023,8 +979,8 @@ impl PagedHeap {
         &mut self,
         table: EntityId,
         kind: ObjectKind,
-        key: Value,
-        value: Value,
+        key: PageValue,
+        value: PageValue,
     ) -> Result<(), HeapWriteError> {
         let normal = self.key(&key)?;
         let head = self.required(table, kind)?;
@@ -1111,13 +1067,13 @@ impl PagedHeap {
     ///
     /// # Errors
     ///
-    /// The same heap faults as [`NativeHeap::record_get`].
+    /// The same heap faults as [`PageReader::record_get`].
     pub fn record_get_hinted(
         &self,
         record: EntityId,
         field: FieldName<'_>,
         hint: Option<TableCursor>,
-    ) -> Result<(Option<Value>, Option<TableCursor>), HeapFault> {
+    ) -> Result<(Option<PageValue>, Option<TableCursor>), HeapFault> {
         self.read_head(record, |head| {
             let Some(Body::Table {
                 kind: ObjectKind::Record,
@@ -1130,7 +1086,7 @@ impl PagedHeap {
             };
             if let Some(TableCursor(position)) = hint
                 && let Some(entry) = rows.get(&position.to_be_bytes(), &self.access)?
-                && let Value::Text(name) = &entry.key
+                && let PageValue::Text(name) = &entry.key
             {
                 let matches = match field {
                     FieldName::Static(field) => match &name.body {
@@ -1144,8 +1100,8 @@ impl PagedHeap {
                 }
             }
             let key = match field {
-                FieldName::Static(field) => Value::text(field),
-                FieldName::Text(field) => Value::Text(field.clone()),
+                FieldName::Static(field) => PageValue::text(field),
+                FieldName::Text(field) => PageValue::Text(field.clone()),
             };
             let Some(normal) = self.normal_key(&key)? else {
                 return Ok((None, None));
@@ -1163,8 +1119,8 @@ impl PagedHeap {
     pub(super) fn table_get(
         &self,
         table: EntityId,
-        key: &Value,
-    ) -> Result<Option<Value>, HeapFault> {
+        key: &PageValue,
+    ) -> Result<Option<PageValue>, HeapFault> {
         let Some(normal) = self.normal_key(key)? else {
             return Ok(None);
         };
@@ -1185,7 +1141,7 @@ impl PagedHeap {
 pub(super) fn keyed<T: Cell>(tree: &Tree<T>) -> Result<KeyedRoot, HeapFault> {
     tree.keyed_root()
 }
-fn normal_bytes(key: NormalKey) -> Vec<u8> {
+pub(super) fn normal_bytes(key: NormalKey) -> Vec<u8> {
     match key {
         NormalKey::Inline(b) => [vec![0], b].concat(),
         NormalKey::Digest(d) => [vec![1], d.to_vec()].concat(),
@@ -1198,10 +1154,10 @@ pub(super) fn binary_summary(len: u64) -> TextSummary {
         utf16_units: 0,
     }
 }
-pub(super) fn value_depth(value: &Value) -> u32 {
+pub(super) fn value_depth(value: &PageValue) -> u32 {
     match value {
-        Value::Tuple(t) => t.summary.depth,
-        Value::Error(e) => e.depth,
+        PageValue::Tuple(t) => t.summary.depth,
+        PageValue::Error(e) => e.depth,
         _ => 0,
     }
 }
@@ -1223,52 +1179,13 @@ pub(super) fn bytes_same(heap: &PagedHeap, a: &BytesRef, b: &BytesRef) -> Result
     }
     Ok(heap.copy_bytes(a)? == heap.copy_bytes(b)?)
 }
-pub(super) fn required_value(value: Option<Value>) -> Result<Value, HeapFault> {
+pub(super) fn required_value(value: Option<PageValue>) -> Result<PageValue, HeapFault> {
     value.ok_or_else(|| HeapFault::Malformed("an admitted collection element is absent".into()))
 }
 fn raised(kind: &'static str, message: &str) -> HeapWriteError {
     HeapWriteError::Raised {
         kind,
         message: message.into(),
-    }
-}
-pub(super) fn native_raised(kind: &str, message: &str) -> NativeError {
-    NativeError::Raised(Arc::new(ErrorRef {
-        kind: TextRef {
-            normal: Default::default(),
-            summary: text_summary(kind),
-            body: Payload::Resident(Arc::from(kind)),
-        },
-        message: TextRef {
-            normal: Default::default(),
-            summary: text_summary(message),
-            body: Payload::Resident(Arc::from(message)),
-        },
-        family: None,
-        task_edges: 0,
-        data: Payload::Resident(Arc::new(Value::Null)),
-        depth: 1,
-        cost: LogicalBytes((kind.len() + message.len()) as u64 + 16),
-        has_edges: false,
-    }))
-}
-pub(super) fn native_write(error: HeapWriteError) -> NativeError {
-    match error {
-        HeapWriteError::Raised { kind, message } => native_raised(kind, &message),
-        HeapWriteError::Memory => NativeError::Memory,
-        HeapWriteError::Fault(e) => NativeError::Heap(e),
-        // The heap recorded the refusal; the machine's write wrapper reads
-        // it (FIG-6318).
-        HeapWriteError::NeedsPrecision { .. } => NativeError::Memory,
-    }
-}
-pub(super) fn write_native(error: NativeError) -> HeapWriteError {
-    match error {
-        NativeError::Heap(e) => HeapWriteError::Fault(e),
-        NativeError::Memory => HeapWriteError::Memory,
-        other => HeapWriteError::Fault(HeapFault::Malformed(format!(
-            "unexpected immutable constructor failure: {other}"
-        ))),
     }
 }
 impl Cell for FamilyRecord {
@@ -1296,23 +1213,26 @@ pub(super) fn census_fault(error: CensusFault) -> HeapFault {
 }
 
 impl PagedHeap {
-    pub(super) fn normalize_value(&self, value: &Value) -> Result<Option<NormalKey>, HeapFault> {
+    pub(super) fn normalize_value(
+        &self,
+        value: &PageValue,
+    ) -> Result<Option<NormalKey>, HeapFault> {
         fn tokens(
             heap: &PagedHeap,
-            value: &Value,
+            value: &PageValue,
             out: &mut TokenWriter,
         ) -> Result<bool, HeapFault> {
             match value {
-                Value::Null => out.sum(0, 0),
-                Value::Bool(b) => {
+                PageValue::Null => out.sum(0, 0),
+                PageValue::Bool(b) => {
                     out.sum(1, 1);
                     b.encode(out);
                 }
-                Value::Int(i) => {
+                PageValue::Int(i) => {
                     out.sum(2, 1);
                     heap.copy_int(i)?.encode(out);
                 }
-                Value::Float(f) => {
+                PageValue::Float(f) => {
                     if let Some(i) = integral_float(f.get()) {
                         out.sum(2, 1);
                         i.encode(out);
@@ -1321,27 +1241,27 @@ impl PagedHeap {
                         f.encode(out);
                     }
                 }
-                Value::Text(t) => {
+                PageValue::Text(t) => {
                     out.sum(4, 1);
                     out.text(&heap.copy_text(t)?);
                 }
-                Value::Bytes(b) => {
+                PageValue::Bytes(b) => {
                     out.sum(5, 1);
                     out.bytes(&heap.copy_bytes(b)?);
                 }
-                Value::Timestamp(t) => {
+                PageValue::Timestamp(t) => {
                     out.sum(6, 1);
                     t.encode(out);
                 }
-                Value::Ref(i) => {
+                PageValue::Ref(i) => {
                     out.sum(7, 1);
                     i.encode(out);
                 }
-                Value::Function(n) => {
+                PageValue::Function(n) => {
                     out.sum(8, 1);
                     out.text(&heap.copy_text(n)?);
                 }
-                Value::Tuple(t) => {
+                PageValue::Tuple(t) => {
                     out.sum(9, 1);
                     out.seq(t.summary.len);
                     for i in 0..t.summary.len {
@@ -1357,12 +1277,12 @@ impl PagedHeap {
             }
             Ok(true)
         }
-        let function = matches!(value, Value::Function(_));
+        let function = matches!(value, PageValue::Function(_));
         let cache = match value {
-            Value::Text(text) | Value::Function(text) => Some(&text.normal),
-            Value::Bytes(bytes) => Some(&bytes.normal),
-            Value::Tuple(tuple) => Some(&tuple.normal),
-            Value::Int(IntRef::Paged { normal, .. }) => Some(normal),
+            PageValue::Text(text) | PageValue::Function(text) => Some(&text.normal),
+            PageValue::Bytes(bytes) => Some(&bytes.normal),
+            PageValue::Tuple(tuple) => Some(&tuple.normal),
+            PageValue::Int(IntRef::Paged { normal, .. }) => Some(normal),
             _ => None,
         };
         if let Some(key) = cache.and_then(|cache| {

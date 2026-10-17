@@ -23,9 +23,9 @@ thread_local! {
 /// The running statement's roots.
 #[derive(Clone, Copy)]
 pub struct StatementRoots<'a> {
-    pub registers: &'a [Value],
-    pub pinned: &'a [Value],
-    pub borrowed: &'a [Value],
+    pub registers: &'a [PageValue],
+    pub pinned: &'a [PageValue],
+    pub borrowed: &'a [PageValue],
     pub pinned_bytes: u64,
     pub fresh: &'a [EntityId],
 }
@@ -34,8 +34,8 @@ pub struct StatementRoots<'a> {
 /// statement's roots and holds, what it holds for its frames since it last
 /// published, and whether the installed roots are its current ones.
 pub(super) struct Holdings {
-    temporary: Vec<Value>,
-    borrowed: Vec<Value>,
+    temporary: Vec<PageValue>,
+    borrowed: Vec<PageValue>,
     /// Pinned immediate values need their local cost, but no tracing descriptor.
     scalar_bytes: u64,
     fresh: Vec<EntityId>,
@@ -210,6 +210,35 @@ impl PagedHeap {
             .ok_or_else(|| HeapFault::Malformed("outstanding hold overflow".into()))?;
         Ok(true)
     }
+    /// Holds `bytes` the arena's objects grew by, which the heap receives
+    /// when they are next stored: the running statement's holds pay first,
+    /// the rest is held as for the frames, until the next publication
+    /// (seam D, swap 2.4(a)). `false`, with nothing held, when the census
+    /// needs an exact refinement first.
+    ///
+    /// # Errors
+    ///
+    /// A fault of the census.
+    pub fn hold_growth(&mut self, bytes: u64) -> Result<bool, HeapFault> {
+        let credit = self.holdings.credit(bytes);
+        if bytes > credit && !self.hold(bytes - credit, true)? {
+            return Ok(false);
+        }
+        self.holdings.spend(credit);
+        self.holdings.held = self
+            .holdings
+            .held
+            .checked_add(credit)
+            .ok_or_else(|| HeapFault::Malformed("outstanding hold overflow".into()))?;
+        Ok(true)
+    }
+    /// Takes up to `growth` of what the machine holds persistently as the
+    /// credit of an object store that grows by `growth`; gives the credit.
+    pub(super) fn spend_held(&mut self, growth: u64) -> u64 {
+        let credit = self.holdings.held.min(growth);
+        self.holdings.held -= credit;
+        credit
+    }
     /// Refines exactly over the roots the machine has just published, with
     /// `bytes` pending: after it, a hold or write of `bytes` is granted.
     ///
@@ -337,7 +366,7 @@ impl PagedHeap {
         }
         Ok(())
     }
-    pub(super) fn statement_roots(&self) -> &[Value] {
+    pub(super) fn statement_roots(&self) -> &[PageValue] {
         &self.holdings.temporary
     }
     pub(super) fn fresh_roots(&self) -> &[EntityId] {
@@ -455,7 +484,7 @@ impl PagedHeap {
         self.census = Some(census);
         result
     }
-    pub(super) fn admit(&mut self, bytes: u64, extra: &[Value]) -> Result<(), HeapWriteError> {
+    pub(super) fn admit(&mut self, bytes: u64, extra: &[PageValue]) -> Result<(), HeapWriteError> {
         let census = self
             .census
             .as_mut()
@@ -506,8 +535,8 @@ impl PagedHeap {
         &mut self,
         tasks: Tree<TaskRecord>,
         joins: Tree<ListJoinRecord>,
-        registers: &[Value],
-        pinned: &[Value],
+        registers: &[PageValue],
+        pinned: &[PageValue],
         pinned_bytes: u64,
         fresh: &[EntityId],
     ) -> Result<(), HeapWriteError> {

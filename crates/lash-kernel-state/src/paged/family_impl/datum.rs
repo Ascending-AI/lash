@@ -43,16 +43,16 @@ fn bytes(access: &Access<'_>, bytes: &[u8]) -> Result<BytesRef, HeapFault> {
         },
     })
 }
-fn has_edges(value: &Value) -> bool {
+fn has_edges(value: &PageValue) -> bool {
     match value {
-        Value::List(_) | Value::Map(_) | Value::Set(_) | Value::Record(_) => true,
-        Value::Tuple(t) => t.summary.has_edges,
-        Value::Error(e) => e.has_edges,
+        PageValue::List(_) | PageValue::Map(_) | PageValue::Set(_) | PageValue::Record(_) => true,
+        PageValue::Tuple(t) => t.summary.has_edges,
+        PageValue::Error(e) => e.has_edges,
         _ => false,
     }
 }
 impl Freezer<'_> {
-    fn datum(&mut self, datum: &Datum) -> Result<Value, HeapWriteError> {
+    fn datum(&mut self, datum: &Datum) -> Result<PageValue, HeapWriteError> {
         if self.depth >= 128 {
             return Err(HeapWriteError::Raised {
                 kind: "depth",
@@ -62,11 +62,11 @@ impl Freezer<'_> {
         self.depth += 1;
         self.charge = plus(self.charge, datum_size(datum)?)?;
         let value = match datum {
-            Datum::Null => Value::Null,
-            Datum::Absent => Value::Absent,
-            Datum::Bool(v) => Value::Bool(*v),
-            Datum::Float(v) => Value::Float(*v),
-            Datum::Int(v) => Value::Int(if v.bits().div_ceil(8) <= IMMUTABLE_INLINE_MAX {
+            Datum::Null => PageValue::Null,
+            Datum::Absent => PageValue::Absent,
+            Datum::Bool(v) => PageValue::Bool(*v),
+            Datum::Float(v) => PageValue::Float(*v),
+            Datum::Int(v) => PageValue::Int(if v.bits().div_ceil(8) <= IMMUTABLE_INLINE_MAX {
                 IntRef::Inline(v.clone())
             } else {
                 IntRef::Paged {
@@ -94,11 +94,11 @@ impl Freezer<'_> {
                 )
                 .into());
             }
-            Datum::Text(v) => Value::Text(text(&self.heap.access, v)?),
-            Datum::Bytes(v) => Value::Bytes(bytes(&self.heap.access, v.as_slice())?),
-            Datum::Timestamp(v) => Value::Timestamp(v.clone()),
-            Datum::Function(v) => Value::Function(text(&self.heap.access, v.as_str())?),
-            Datum::Handle(v) => Value::Handle(Arc::new(v.clone())),
+            Datum::Text(v) => PageValue::Text(text(&self.heap.access, v)?),
+            Datum::Bytes(v) => PageValue::Bytes(bytes(&self.heap.access, v.as_slice())?),
+            Datum::Timestamp(v) => PageValue::Timestamp(v.clone()),
+            Datum::Function(v) => PageValue::Function(text(&self.heap.access, v.as_str())?),
+            Datum::Handle(v) => PageValue::Handle(Arc::new(v.clone())),
             Datum::Tuple(values) => {
                 let mut rows = Tree::new(true);
                 let mut edges = false;
@@ -114,7 +114,7 @@ impl Freezer<'_> {
                     )?;
                 }
                 rows.seal(&self.heap.access, &mut SealWork::new(budget()))?;
-                Value::Tuple(Arc::new(TupleRef {
+                PageValue::Tuple(Arc::new(TupleRef {
                     normal: Default::default(),
                     family: None,
                     summary: TupleSummary {
@@ -163,7 +163,7 @@ impl Freezer<'_> {
                                 .checked_sub(1)
                                 .ok_or_else(|| invalid("set charge mismatch"))?;
                         } else {
-                            self.table_entry(&mut lookup, &mut rows, key, Value::Null)?;
+                            self.table_entry(&mut lookup, &mut rows, key, PageValue::Null)?;
                         }
                     }
                     self.frozen_table(ordinal, ObjectKind::Set, lookup, rows)?
@@ -172,7 +172,7 @@ impl Freezer<'_> {
             Datum::Map(entries) => {
                 let ordinal = self.entities;
                 self.entities = plus(self.entities, 1)?;
-                let mut selected: Vec<(Value, &Datum)> = Vec::new();
+                let mut selected: Vec<(PageValue, &Datum)> = Vec::new();
                 let mut positions: BTreeMap<Vec<u8>, usize> = BTreeMap::new();
                 for (k, v) in entries {
                     let charge = self.charge;
@@ -218,7 +218,7 @@ impl Freezer<'_> {
                 let mut lookup = Tree::new(false);
                 let mut rows = Tree::new(true);
                 for (k, v) in selected {
-                    let key = Value::Text(text(&self.heap.access, k)?);
+                    let key = PageValue::Text(text(&self.heap.access, k)?);
                     let value = self.datum(v)?;
                     self.table_entry(&mut lookup, &mut rows, key, value)?;
                 }
@@ -228,7 +228,7 @@ impl Freezer<'_> {
                 let kind = text(&self.heap.access, &e.kind)?;
                 let message = text(&self.heap.access, &e.message)?;
                 let data = self.datum(&e.data)?;
-                Value::Error(Arc::new(frozen_error(
+                PageValue::Error(Arc::new(frozen_error(
                     &self.heap.access,
                     kind,
                     message,
@@ -239,7 +239,7 @@ impl Freezer<'_> {
         self.depth -= 1;
         Ok(value)
     }
-    fn frozen_object(&mut self, ordinal: u64, body: Body) -> Result<Value, HeapWriteError> {
+    fn frozen_object(&mut self, ordinal: u64, body: Body) -> Result<PageValue, HeapWriteError> {
         let head = ObjectHead {
             family: FamilyId::PRIMARY,
             body,
@@ -253,13 +253,13 @@ impl Freezer<'_> {
             ordinal,
         };
         Ok(match kind {
-            ObjectKind::List => Value::List(id),
-            ObjectKind::Map => Value::Map(id),
-            ObjectKind::Set => Value::Set(id),
-            _ => Value::Record(id),
+            ObjectKind::List => PageValue::List(id),
+            ObjectKind::Map => PageValue::Map(id),
+            ObjectKind::Set => PageValue::Set(id),
+            _ => PageValue::Record(id),
         })
     }
-    fn normal(&self, key: &Value) -> Result<Vec<u8>, HeapWriteError> {
+    fn normal(&self, key: &PageValue) -> Result<Vec<u8>, HeapWriteError> {
         let normal = self
             .heap
             .normal_key(key)?
@@ -276,8 +276,8 @@ impl Freezer<'_> {
         &self,
         lookup: &mut Tree<Ordinal>,
         rows: &mut Tree<RelativeEntry>,
-        key: Value,
-        value: Value,
+        key: PageValue,
+        value: PageValue,
     ) -> Result<(), HeapWriteError> {
         let normal = self
             .heap
@@ -313,7 +313,7 @@ impl Freezer<'_> {
         kind: ObjectKind,
         mut lookup: Tree<Ordinal>,
         mut rows: Tree<RelativeEntry>,
-    ) -> Result<Value, HeapWriteError> {
+    ) -> Result<PageValue, HeapWriteError> {
         lookup.seal_nested(&self.heap.access, &mut SealWork::new(budget()))?;
         rows.seal_nested(&self.heap.access, &mut SealWork::new(budget()))?;
         self.frozen_object(

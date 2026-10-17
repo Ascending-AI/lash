@@ -29,9 +29,9 @@ const BOTH: &str =
 
 struct Same;
 impl NativeFunction for Same {
-    fn call(&self, call: NativeCall<'_>) -> Result<Value, NativeError> {
+    fn call(&self, call: NativeCall<'_, '_>) -> Result<Value, NativeError> {
         call.counter.spend(1)?;
-        Ok(call.args[0].clone())
+        Ok(call.args.values()[0])
     }
 }
 

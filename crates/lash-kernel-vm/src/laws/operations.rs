@@ -9,7 +9,6 @@
 use std::collections::BTreeMap;
 use std::sync::Arc;
 
-use lash_kernel_doc::heap::IntRef;
 use lash_kernel_doc::{
     Datum, FunctionId, FunctionRegistry, NativeCall, NativeError, NativeFunction, Value,
     parse_definition,
@@ -19,25 +18,23 @@ use super::embedder::{Embedder, ROOMY, Setup, int, text};
 use crate::{Bound, BoundExceeded, Bounds, End, Layout, RunError, Step};
 
 /// `op.step`'s native: an integer gives the next one and a text is
-/// doubled, through the library's own `text.concat`; anything else is
-/// declined to the body, which applies it.
-struct Step1 {
-    concat: Arc<dyn NativeFunction>,
-}
+/// doubled, as the library's `text.concat` of it with itself; anything
+/// else is declined to the body, which applies it.
+struct Step1;
 
 impl NativeFunction for Step1 {
-    fn call(&self, call: NativeCall<'_>) -> Result<Value, NativeError> {
-        match call.args {
-            [Value::Int(IntRef::Inline(value))] => Ok(Value::Int(IntRef::Inline(
-                lash_kernel_doc::Integer::new(&*value.as_bigint() + 1),
-            ))),
-            [text @ Value::Text(_)] => {
-                let args = [text.clone(), text.clone()];
-                self.concat.call(NativeCall {
-                    args: &args,
-                    heap: call.heap,
-                    counter: call.counter,
-                })
+    fn call(&self, call: NativeCall<'_, '_>) -> Result<Value, NativeError> {
+        match call.args.values() {
+            [Value::Int(value)] => value
+                .checked_add(1)
+                .map(Value::Int)
+                .ok_or(NativeError::Decline),
+            [text @ (Value::Text(_) | Value::LongText(_))] => {
+                let Some(text) = call.args.text(text)? else {
+                    return Err(NativeError::Malformed("a text names another body"));
+                };
+                let text = text.whole()?;
+                Ok(call.new.text(&format!("{text}{text}")))
             }
             _ => Err(NativeError::Decline),
         }
@@ -50,8 +47,8 @@ struct Fill1 {
 }
 
 impl NativeFunction for Fill1 {
-    fn call(&self, call: NativeCall<'_>) -> Result<Value, NativeError> {
-        match call.args {
+    fn call(&self, call: NativeCall<'_, '_>) -> Result<Value, NativeError> {
+        match call.args.values() {
             [Value::Int(_)] => self.fill.call(call),
             _ => Err(NativeError::Decline),
         }
@@ -62,8 +59,8 @@ impl NativeFunction for Fill1 {
 struct Is(fn(&Value) -> bool);
 
 impl NativeFunction for Is {
-    fn call(&self, call: NativeCall<'_>) -> Result<Value, NativeError> {
-        Ok(Value::Bool(call.args.first().is_some_and(self.0)))
+    fn call(&self, call: NativeCall<'_, '_>) -> Result<Value, NativeError> {
+        Ok(Value::Bool(call.args.get(0).is_some_and(self.0)))
     }
 }
 
@@ -108,10 +105,7 @@ fn register(
     .unwrap();
     let fill = registry.register(fill, None).unwrap();
     if native {
-        let concat = registry.native_named("text.concat").unwrap();
-        registry
-            .implement(step, Arc::new(Step1 { concat }))
-            .unwrap();
+        registry.implement(step, Arc::new(Step1)).unwrap();
         let work = registry.native_named("work.fill").unwrap();
         registry
             .implement(fill, Arc::new(Fill1 { fill: work }))

@@ -1,19 +1,17 @@
 //! Canonical greedy immutable payload trees (D-IMM). Byte, scalar and
 //! UTF-16 lengths travel on links, so rank selection skips whole subtrees.
 use super::PageKind;
+use super::directory::Body;
 use super::directory::tuple_tree;
-use super::directory::{Body, ordinal_key, value_cost};
-use super::heap_impl::{
-    PagedHeap, binary_summary, census_fault, native_raised, native_write, value_depth,
-};
-use super::tree::{Access, SealWork, Tree, checked_sum, grant};
-use super::{ObjectInit, ObjectKind, SealBudget, SemanticHeap};
+use super::heap_impl::{PagedHeap, binary_summary, value_depth};
+use super::tree::{Access, grant};
+use super::{HeapWriteError, ObjectKind, SemanticHeap};
 use lash_kernel_doc::Integer;
 use lash_kernel_doc::graph_tokens::{
     TokenCodec, TokenError, TokenReader, TokenWriter, decode_body, encode_body,
 };
 use lash_kernel_doc::heap::*;
-use lash_kernel_doc::heap_values::{integer_digits, text_summary};
+use lash_kernel_doc::heap_values::text_summary;
 use std::ops::{ControlFlow, Range};
 use std::sync::Arc;
 
@@ -536,11 +534,11 @@ pub fn offset(
     }
 }
 
-impl NativeHeap for PagedHeap {
-    fn normal_key(&self, value: &Value) -> Result<Option<NormalKey>, HeapFault> {
+impl PageReader for PagedHeap {
+    fn normal_key(&self, value: &PageValue) -> Result<Option<NormalKey>, HeapFault> {
         self.normalize_value(value)
     }
-    fn equal(&self, a: &Value, b: &Value) -> Result<bool, HeapFault> {
+    fn equal(&self, a: &PageValue, b: &PageValue) -> Result<bool, HeapFault> {
         self.equal_values(a, b)
     }
     fn data_depth_limit(&self) -> usize {
@@ -552,7 +550,7 @@ impl NativeHeap for PagedHeap {
     fn len(&self, object: EntityId) -> Result<u64, HeapFault> {
         self.read_head(object, |head| Ok(head.map_or(0, |h| h.len())))
     }
-    fn list_get(&self, list: EntityId, index: u64) -> Result<Option<Value>, HeapFault> {
+    fn list_get(&self, list: EntityId, index: u64) -> Result<Option<PageValue>, HeapFault> {
         self.read_head(list, |head| {
             Ok(match head.map(|h| &h.body) {
                 Some(Body::List { rows, .. }) => {
@@ -562,13 +560,13 @@ impl NativeHeap for PagedHeap {
             })
         })
     }
-    fn map_get(&self, map: EntityId, key: &Value) -> Result<Option<Value>, HeapFault> {
+    fn map_get(&self, map: EntityId, key: &PageValue) -> Result<Option<PageValue>, HeapFault> {
         if self.kind(map)? != Some(ObjectKind::Map) {
             return Ok(None);
         }
         self.table_get(map, key)
     }
-    fn set_contains(&self, set: EntityId, member: &Value) -> Result<bool, HeapFault> {
+    fn set_contains(&self, set: EntityId, member: &PageValue) -> Result<bool, HeapFault> {
         if self.kind(set)? != Some(ObjectKind::Set) {
             return Ok(false);
         }
@@ -578,7 +576,7 @@ impl NativeHeap for PagedHeap {
         &self,
         record: EntityId,
         field: FieldName<'_>,
-    ) -> Result<Option<Value>, HeapFault> {
+    ) -> Result<Option<PageValue>, HeapFault> {
         if self.kind(record)? != Some(ObjectKind::Record) {
             return Ok(None);
         }
@@ -590,7 +588,7 @@ impl NativeHeap for PagedHeap {
             },
             FieldName::Text(text) => text.clone(),
         };
-        self.table_get(record, &Value::Text(text))
+        self.table_get(record, &PageValue::Text(text))
     }
     fn visit(
         &self,
@@ -606,7 +604,7 @@ impl NativeHeap for PagedHeap {
                 visitor(match *kind {
                     ObjectKind::Set => Element::Item(&e.key),
                     ObjectKind::Record => match &e.key {
-                        Value::Text(t) => Element::Field {
+                        PageValue::Text(t) => Element::Field {
                             name: t,
                             value: &e.value,
                         },
@@ -623,29 +621,10 @@ impl NativeHeap for PagedHeap {
         }
         Ok(())
     }
-    fn error_data(&self, error: &ErrorRef) -> Result<Value, HeapFault> {
-        match &error.data {
-            Payload::Resident(value) => Ok((**value).clone()),
-            Payload::Paged(page) => {
-                let cost = error
-                    .cost
-                    .0
-                    .checked_sub(error.kind.summary.utf8_bytes)
-                    .and_then(|v| v.checked_sub(error.message.summary.utf8_bytes))
-                    .ok_or_else(|| HeapFault::Malformed("error cost summary mismatch".into()))?;
-                let tree = Tree::<Value>::open(Some(**page), 1, LogicalBytes(cost), true)
-                    .with_task_edges(error.task_edges);
-                let tree = match error.family {
-                    Some(family) => tree.in_family(family),
-                    None => tree,
-                };
-                tree.rank_get(0, &self.access)?
-                    .map(|(_, value)| value)
-                    .ok_or_else(|| HeapFault::Malformed("error data page is empty".into()))
-            }
-        }
+    fn error_data(&self, error: &ErrorRef) -> Result<PageValue, HeapFault> {
+        super::stored::reads::error_data(&self.access, error)
     }
-    fn tuple_get(&self, tuple: &TupleRef, index: u64) -> Result<Option<Value>, HeapFault> {
+    fn tuple_get(&self, tuple: &TupleRef, index: u64) -> Result<Option<PageValue>, HeapFault> {
         if index >= tuple.summary.len {
             return Ok(None);
         }
@@ -659,7 +638,7 @@ impl NativeHeap for PagedHeap {
     fn tuple_visit(
         &self,
         tuple: &TupleRef,
-        visitor: &mut dyn FnMut(&Value) -> ControlFlow<()>,
+        visitor: &mut dyn FnMut(&PageValue) -> ControlFlow<()>,
     ) -> Result<(), HeapFault> {
         match &tuple.body {
             Payload::Resident(v) => {
@@ -677,12 +656,12 @@ impl NativeHeap for PagedHeap {
     }
     fn payload_visit(
         &self,
-        value: &Value,
+        value: &PageValue,
         range: Range<u64>,
         visitor: &mut dyn FnMut(Chunk<'_>) -> ControlFlow<()>,
     ) -> Result<(), HeapFault> {
         match value {
-            Value::Text(t) => match &t.body {
+            PageValue::Text(t) => match &t.body {
                 Payload::Resident(text) => {
                     if range.start > range.end {
                         return Err(HeapFault::Malformed("text range is reversed".into()));
@@ -707,7 +686,7 @@ impl NativeHeap for PagedHeap {
                     })
                 }
             },
-            Value::Bytes(b) => match &b.body {
+            PageValue::Bytes(b) => match &b.body {
                 Payload::Resident(bytes) => {
                     if range.start > range.end {
                         return Err(HeapFault::Malformed("bytes range is reversed".into()));
@@ -727,7 +706,7 @@ impl NativeHeap for PagedHeap {
                     &mut |bytes| visitor(Chunk::Bytes(bytes)),
                 ),
             },
-            Value::Int(IntRef::Paged {
+            PageValue::Int(IntRef::Paged {
                 summary, digits, ..
             }) => {
                 let len = summary.bits.div_ceil(8);
@@ -781,230 +760,34 @@ impl NativeHeap for PagedHeap {
             Payload::Paged(p) => super::payload::offset(&self.access, **p, text.summary, index),
         }
     }
-    fn materialize_text(&mut self, text: &TextRef) -> Result<Arc<str>, NativeError> {
-        self.reserve(0, text.summary.utf8_bytes)?;
-        Ok(self.copy_text(text)?)
+}
+
+impl PagedHeap {
+    /// A text in its page form: inline when short, else payload pages.
+    pub fn text(&self, text: &str) -> Result<TextRef, HeapFault> {
+        super::stored::pages::text(&self.access, text)
     }
-    fn materialize_bytes(&mut self, bytes: &BytesRef) -> Result<Arc<[u8]>, NativeError> {
-        self.reserve(0, bytes.len)?;
-        Ok(self.copy_bytes(bytes)?)
+    pub fn bytes(&self, bytes: &[u8]) -> Result<BytesRef, HeapFault> {
+        super::stored::pages::bytes(&self.access, bytes)
     }
-    fn materialize_int(&mut self, int: &IntRef) -> Result<Integer, NativeError> {
-        let bytes = match int {
-            IntRef::Inline(i) => i.bits().div_ceil(8),
-            IntRef::Paged { summary, .. } => summary.bits.div_ceil(8),
-        };
-        self.reserve(0, bytes)?;
-        Ok(self.copy_int(int)?)
+    pub fn int(&self, int: Integer) -> Result<IntRef, HeapFault> {
+        super::stored::pages::int(&self.access, int)
     }
-    fn text(&mut self, text: &str) -> Result<TextRef, NativeError> {
-        Ok(TextRef {
-            normal: Default::default(),
-            summary: text_summary(text),
-            body: if text.len() as u64 <= IMMUTABLE_INLINE_MAX {
-                Payload::Resident(Arc::from(text))
-            } else {
-                Payload::paged(super::payload::build(&self.access, text.as_bytes(), true)?)
-            },
-        })
-    }
-    fn bytes(&mut self, bytes: &[u8]) -> Result<BytesRef, NativeError> {
-        Ok(BytesRef {
-            normal: Default::default(),
-            len: bytes.len() as u64,
-            body: if bytes.len() as u64 <= IMMUTABLE_INLINE_MAX {
-                Payload::Resident(Arc::from(bytes))
-            } else {
-                Payload::paged(super::payload::build(&self.access, bytes, false)?)
-            },
-        })
-    }
-    fn int(&mut self, int: Integer) -> Result<IntRef, NativeError> {
-        if int.bits().div_ceil(8) <= IMMUTABLE_INLINE_MAX {
-            return Ok(IntRef::Inline(int));
-        }
-        let summary = IntSummary {
-            bits: int.bits(),
-            negative: int.is_negative(),
-        };
-        Ok(IntRef::Paged {
-            normal: Default::default(),
-            summary,
-            digits: Arc::new(super::payload::build(
-                &self.access,
-                &integer_digits(&int),
-                false,
-            )?),
-        })
-    }
-    fn tuple(&mut self, members: Vec<Value>) -> Result<Arc<TupleRef>, NativeError> {
-        let mut values = Vec::with_capacity(members.len());
-        let mut depth = 1;
-        for v in members {
-            let v = self.canonical(v).map_err(native_write)?;
-            depth = depth.max(value_depth(&v) + 1);
-            values.push(v);
-        }
-        if depth as usize > self.limits.value_depth() {
-            return Err(native_raised(
-                "too_deep",
-                "tuple nesting exceeds the value depth bound",
-            ));
-        }
-        let has_edges = values.iter().any(super::directory::value_has_edges);
-        let task_edges = checked_sum(values.iter().map(lash_kernel_doc::heap_values::task_count))?;
-        let summary = TupleSummary {
-            task_edges,
-            len: values.len() as u64,
-            cost: LogicalBytes(checked_sum(values.iter().map(value_cost))?),
-            has_edges,
-            depth,
-        };
-        let body = if encode_body(&values).len() <= IMMUTABLE_INLINE_MAX as usize {
-            Payload::Resident(Arc::from(values))
-        } else {
-            let mut tree = Tree::new(true);
-            for (i, value) in values.into_iter().enumerate() {
-                tree.write(ordinal_key(i as u64), value, &self.access)?;
-            }
-            tree.seal(
-                &self.access,
-                &mut SealWork::new(SealBudget {
-                    pages: u64::MAX,
-                    bytes: u64::MAX,
-                }),
-            )?;
-            Payload::paged(
-                tree.page()
-                    .ok_or_else(|| HeapFault::Malformed("nonempty tuple has no page".into()))?,
-            )
-        };
-        Ok(Arc::new(TupleRef {
-            normal: Default::default(),
-            summary,
-            body,
-            family: None,
-        }))
-    }
-    fn concat(&mut self, parts: &[Value]) -> Result<Value, NativeError> {
-        match parts.first() {
-            Some(Value::Text(_)) => {
-                let mut text = String::new();
-                let len = checked_sum(parts.iter().map(|v| match v {
-                    Value::Text(t) => t.summary.utf8_bytes,
-                    _ => 0,
-                }))?;
-                self.reserve(0, len)?;
-                for p in parts {
-                    let Value::Text(t) = p else {
-                        return Err(native_raised("type_error", "concat requires texts"));
-                    };
-                    text.push_str(&self.copy_text(t)?);
-                }
-                self.text(&text).map(Value::Text)
-            }
-            Some(Value::Bytes(_)) => {
-                let mut bytes = Vec::new();
-                let len = checked_sum(parts.iter().map(|v| match v {
-                    Value::Bytes(b) => b.len,
-                    _ => 0,
-                }))?;
-                self.reserve(0, len)?;
-                for p in parts {
-                    let Value::Bytes(b) = p else {
-                        return Err(native_raised("type_error", "concat requires bytes"));
-                    };
-                    bytes.extend_from_slice(&self.copy_bytes(b)?);
-                }
-                self.bytes(&bytes).map(Value::Bytes)
-            }
-            Some(Value::Tuple(_)) => {
-                let mut values = Vec::new();
-                for p in parts {
-                    let Value::Tuple(t) = p else {
-                        return Err(native_raised("type_error", "concat requires tuples"));
-                    };
-                    self.tuple_visit(t, &mut |v| {
-                        values.push(v.clone());
-                        ControlFlow::Continue(())
-                    })?;
-                }
-                self.reserve(
-                    values.len() as u64,
-                    checked_sum(values.iter().map(value_cost))?,
-                )?;
-                self.tuple(values).map(Value::Tuple)
-            }
-            _ => Err(native_raised(
-                "type_error",
-                "concat requires immutable sequences",
-            )),
-        }
-    }
-    fn slice(&mut self, value: &Value, range: Range<u64>) -> Result<Value, NativeError> {
-        let len = match value {
-            Value::Text(t) => t.summary.utf8_bytes,
-            Value::Bytes(b) => b.len,
-            Value::Tuple(t) => {
-                return self
-                    .tuple_slice(t, range)
-                    .map(Value::Tuple)
-                    .map_err(native_write);
-            }
-            _ => {
-                return Err(native_raised(
-                    "type_error",
-                    "slice requires an immutable sequence",
-                ));
-            }
-        };
-        if range.start > range.end || range.end > len {
-            return Err(native_raised(
-                "index_out_of_range",
-                "slice range exceeds length",
-            ));
-        }
-        self.reserve(0, range.end - range.start)?;
-        let mut bytes = Vec::new();
-        self.payload_visit(value, range, &mut |chunk| {
-            bytes.extend_from_slice(match chunk {
-                Chunk::Text(t) => t.as_bytes(),
-                Chunk::Bytes(b) => b,
+    /// A tuple in its page form, its members canonical first.
+    pub fn tuple(&self, members: Vec<PageValue>) -> Result<Arc<TupleRef>, HeapWriteError> {
+        let values = members
+            .into_iter()
+            .map(|value| self.canonical(value))
+            .collect::<Result<Vec<_>, _>>()?;
+        if values
+            .iter()
+            .any(|value| value_depth(value) as usize >= self.limits.value_depth())
+        {
+            return Err(HeapWriteError::Raised {
+                kind: "too_deep",
+                message: "tuple nesting exceeds the value depth bound".into(),
             });
-            ControlFlow::Continue(())
-        })?;
-        match value {
-            Value::Text(_) => self
-                .text(
-                    std::str::from_utf8(&bytes)
-                        .map_err(|_| native_raised("index_out_of_range", "slice cuts a scalar"))?,
-                )
-                .map(Value::Text),
-            _ => self.bytes(&bytes).map(Value::Bytes),
         }
-    }
-    fn allocate(&mut self, object: Object) -> Result<EntityId, NativeError> {
-        self.allocate_object(match object {
-            Object::List(v) => ObjectInit::List(v),
-            Object::Map(v) => ObjectInit::Map(v),
-            Object::Set(v) => ObjectInit::Set(v),
-            Object::Record(v) => ObjectInit::Record(v),
-        })
-        .map_err(native_write)
-    }
-    fn reserve(&mut self, values: u64, bytes: u64) -> Result<(), NativeError> {
-        let bytes = values
-            .checked_mul(16)
-            .and_then(|v| v.checked_add(bytes))
-            .ok_or_else(|| HeapFault::Malformed("native reservation overflow".into()))?;
-        self.admit(bytes, &[]).map_err(native_write)?;
-        if let Some(census) = &mut self.census {
-            census
-                .changed(LogicalBytes(0), LogicalBytes(bytes))
-                .map_err(census_fault)?;
-            self.accounting = census.certificate();
-        }
-        self.holdings.reserve(bytes)?;
-        Ok(())
+        Ok(super::stored::pages::tuple(&self.access, values)?)
     }
 }

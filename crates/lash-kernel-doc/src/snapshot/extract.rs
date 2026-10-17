@@ -11,11 +11,11 @@
 use std::collections::{BTreeMap, BTreeSet};
 use std::ops::ControlFlow;
 
-use crate::heap::{Chunk, EntityId, HeapFault, IntRef};
+use crate::heap::{Chunk, Element, EntityId, HeapFault, IntRef, PageReader, PageValue};
 use crate::{
-    Action, Atom, Callee, Document, Element, Expr, Function, FunctionCatalog, FunctionId,
+    Action, Atom, Callee, Document, Expr, Function, FunctionCatalog, FunctionId,
     FunctionRepresentation, FunctionValue, FunctionValueLimits, KernelDataLimits, Literal,
-    MapEntry, Name, NativeHeap, RecordEntry, Rhs, StartAdapter, StartConvention, Stmt, Unit, Value,
+    MapEntry, Name, RecordEntry, Rhs, StartAdapter, StartConvention, Stmt, Unit,
 };
 
 use super::collect::{
@@ -97,25 +97,25 @@ fn each_closure(node: crate::Node<'_>, visit: &mut dyn FnMut(&crate::Closure)) {
 pub fn crossing_root<H: SnapshotHeap>(
     heap: &H,
     document: &Document,
-    value: &Value,
+    value: &PageValue,
 ) -> Result<Option<CrossingRoot>, HeapFault> {
     match value {
-        Value::Closure(id) => Ok(Some(CrossingRoot::Closure(*id))),
-        Value::Function(name) => Ok(Some(CrossingRoot::Declared(Name::new(text_of(
-            heap.native(),
+        PageValue::Closure(id) => Ok(Some(CrossingRoot::Closure(*id))),
+        PageValue::Function(name) => Ok(Some(CrossingRoot::Declared(Name::new(text_of(
+            heap.pages(),
             name,
         )?)))),
-        Value::Tuple(tuple) => {
-            let values = members(heap.native(), tuple)?;
+        PageValue::Tuple(tuple) => {
+            let values = members(heap.pages(), tuple)?;
             for (at, member) in values.iter().enumerate() {
                 let (root, start) = match member {
-                    Value::Closure(id) => {
+                    PageValue::Closure(id) => {
                         let site = heap.closure_site(*id)?;
                         let start = closure_at(document, &site).and_then(|c| c.start.as_ref());
                         (CrossingRoot::Closure(*id), start)
                     }
-                    Value::Function(name) => {
-                        let name = Name::new(text_of(heap.native(), name)?);
+                    PageValue::Function(name) => {
+                        let name = Name::new(text_of(heap.pages(), name)?);
                         let start = document.functions.get(&name).and_then(|f| f.start.as_ref());
                         (CrossingRoot::Declared(name), start)
                     }
@@ -127,7 +127,7 @@ pub fn crossing_root<H: SnapshotHeap>(
                 }) = start
                     && *callable as usize == at
                     && let Some(first) = values.first()
-                    && text_is(heap.native(), first, tag)?
+                    && text_is(heap.pages(), first, tag)?
                 {
                     return Ok(Some(root));
                 }
@@ -443,8 +443,8 @@ fn entry_wrapper(start: &StartAdapter, root: &Name) -> Function {
 /// The heap's fault; [`SnapshotRefusal::TooLarge`] once `budget` is spent;
 /// and an unreadable value for anything [`super::validate_capture`] refuses.
 pub fn constant_of(
-    heap: &dyn NativeHeap,
-    value: &Value,
+    heap: &dyn PageReader,
+    value: &PageValue,
     named: &BTreeMap<EntityId, Name>,
     budget: &mut Budget,
 ) -> Result<(Expr, BTreeSet<Name>), SnapshotError> {
@@ -483,23 +483,23 @@ impl Budget {
 const NODE_BYTES: u64 = 8;
 
 fn constant(
-    heap: &dyn NativeHeap,
-    value: &Value,
+    heap: &dyn PageReader,
+    value: &PageValue,
     named: &BTreeMap<EntityId, Name>,
     budget: &mut Budget,
     references: &mut BTreeSet<Name>,
 ) -> Result<Expr, SnapshotError> {
     budget.spend(NODE_BYTES)?;
     Ok(match value {
-        Value::Null => Expr::Literal(Literal::Null),
-        Value::Absent => Expr::Literal(Literal::Absent),
-        Value::Bool(flag) => Expr::Literal(Literal::Bool(*flag)),
-        Value::Float(float) => Expr::Literal(Literal::Float(*float)),
-        Value::Int(IntRef::Inline(integer)) => Expr::Literal(Literal::Int(integer.clone())),
-        Value::Int(int @ IntRef::Paged { summary, .. }) => {
+        PageValue::Null => Expr::Literal(Literal::Null),
+        PageValue::Absent => Expr::Literal(Literal::Absent),
+        PageValue::Bool(flag) => Expr::Literal(Literal::Bool(*flag)),
+        PageValue::Float(float) => Expr::Literal(Literal::Float(*float)),
+        PageValue::Int(IntRef::Inline(integer)) => Expr::Literal(Literal::Int(integer.clone())),
+        PageValue::Int(int @ IntRef::Paged { summary, .. }) => {
             let mut bytes = Vec::new();
             heap.payload_visit(
-                &Value::Int(int.clone()),
+                &PageValue::Int(int.clone()),
                 0..summary.bits.div_ceil(8),
                 &mut |chunk| {
                     if let Chunk::Bytes(b) = chunk {
@@ -514,11 +514,11 @@ fn constant(
                 &bytes,
             )))
         }
-        Value::Text(text) => {
+        PageValue::Text(text) => {
             budget.spend(text.summary.utf8_bytes)?;
             Expr::Literal(Literal::Text(text_of(heap, text)?))
         }
-        Value::Bytes(bytes) => {
+        PageValue::Bytes(bytes) => {
             budget.spend(bytes.len.saturating_mul(2))?;
             let mut out = Vec::new();
             heap.payload_visit(value, 0..bytes.len, &mut |chunk| {
@@ -529,26 +529,26 @@ fn constant(
             })?;
             Expr::Literal(Literal::Bytes(crate::Bytes::new(out)))
         }
-        Value::Function(name) => {
+        PageValue::Function(name) => {
             let name = Name::new(text_of(heap, name)?);
             references.insert(name.clone());
             Expr::Literal(Literal::Function(name))
         }
-        Value::Closure(id) => {
+        PageValue::Closure(id) => {
             let name = named
                 .get(id)
                 .ok_or_else(|| unreadable("a captured closure is bound to no name"))?;
             references.insert(name.clone());
             Expr::Literal(Literal::Function(name.clone()))
         }
-        Value::Tuple(tuple) => {
+        PageValue::Tuple(tuple) => {
             let mut items = Vec::new();
             for member in members(heap, tuple)? {
                 items.push(constant(heap, &member, named, budget, references)?);
             }
             Expr::Tuple(items)
         }
-        Value::List(id) | Value::Set(id) | Value::Map(id) | Value::Record(id) => {
+        PageValue::List(id) | PageValue::Set(id) | PageValue::Map(id) | PageValue::Record(id) => {
             let mut items = Vec::new();
             let mut entries = Vec::new();
             let mut fields = Vec::new();
@@ -583,16 +583,18 @@ fn constant(
                 return Err(error);
             }
             match value {
-                Value::List(_) => Expr::List(items),
-                Value::Set(_) => Expr::Set(items),
-                Value::Map(_) => Expr::Map(entries),
+                PageValue::List(_) => Expr::List(items),
+                PageValue::Set(_) => Expr::Set(items),
+                PageValue::Map(_) => Expr::Map(entries),
                 _ => Expr::Record(fields),
             }
         }
-        Value::Timestamp(_)
-        | Value::Error(_)
-        | Value::Handle(_)
-        | Value::Ref(_)
-        | Value::Task(_) => return Err(unreadable("a capture with no constant was not refused")),
+        PageValue::Timestamp(_)
+        | PageValue::Error(_)
+        | PageValue::Handle(_)
+        | PageValue::Ref(_)
+        | PageValue::Task(_) => {
+            return Err(unreadable("a capture with no constant was not refused"));
+        }
     })
 }

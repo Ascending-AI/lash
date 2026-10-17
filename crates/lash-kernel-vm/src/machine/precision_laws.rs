@@ -1,182 +1,12 @@
-//! Native calls publish execution records only when their heap needs them.
-//! Reads and immutable payload construction do not collect. Reservations
-//! and allocations retry their refused heap operation after publication;
-//! the heap itself refines with that operation's proposed values in scope.
-use super::tasks::Tasks;
-use lash_kernel_doc::heap::{
-    BytesRef, Chunk, ErrorRef, FieldName, HeapFault, IntRef, NormalKey, TextRef, TupleRef,
-};
-use lash_kernel_doc::{Element, EntityId, Integer, NativeError, NativeHeap, Object, Value};
-use lash_kernel_state::kernel_internals::PagedHeap;
-use lash_kernel_state::kernel_internals::tree::Tree;
-use lash_kernel_state::paged::{HeapWriteError, ListJoinRecord};
-use std::ops::{ControlFlow, Range};
-use std::sync::Arc;
+//! Pin and precision laws: what the running statement holds is priced at
+//! its holding locations, and every forced precision point sees the same
+//! reservations and refinements whatever the pins' representation
+//! (FIG-6587, `K-BND-003`).
 
-/// The machine's authoritative roots while its heap is borrowed by a native.
-pub(super) struct Roots<'a> {
-    pub(super) tasks: &'a mut Tasks,
-    pub(super) joins: &'a Tree<ListJoinRecord>,
-    pub(super) registers: &'a super::registers::Registers,
-    pub(super) pinned: &'a [Value],
-    pub(super) borrowed: &'a [Value],
-    pub(super) pinned_bytes: u64,
-    pub(super) fresh: &'a [EntityId],
-    pub(super) refinements: &'a mut u64,
-}
-
-impl Roots<'_> {
-    fn reconcile(&mut self, heap: &PagedHeap) -> Result<(), HeapFault> {
-        let refinements = heap.certificate().refinements;
-        if refinements != *self.refinements {
-            self.tasks.after_refinement(heap.task_root().clone())?;
-            *self.refinements = refinements;
-        }
-        Ok(())
-    }
-
-    pub(super) fn publish(
-        &mut self,
-        heap: &mut PagedHeap,
-        coordinates: bool,
-    ) -> Result<(), HeapWriteError> {
-        #[cfg(any(test, feature = "perf-witness"))]
-        crate::perf_witness::publish();
-        self.reconcile(heap)?;
-        let registers = self.registers.projection();
-        heap.update_execution_roots(
-            self.joins.clone(),
-            lash_kernel_state::paged::StatementRoots {
-                registers: &registers,
-                pinned: self.pinned,
-                pinned_bytes: self.pinned_bytes,
-                borrowed: self.borrowed,
-                fresh: self.fresh,
-            },
-            || {
-                if coordinates {
-                    self.tasks.roots()
-                } else {
-                    self.tasks.holdings()
-                }
-            },
-        )?;
-        self.reconcile(heap)?;
-        Ok(())
-    }
-}
-
-pub(super) struct CallHeap<'a> {
-    pub(super) heap: &'a mut PagedHeap,
-    pub(super) roots: Roots<'a>,
-}
-
-fn native_error(error: HeapWriteError) -> NativeError {
-    match error {
-        HeapWriteError::Memory => NativeError::Memory,
-        HeapWriteError::Fault(error) => NativeError::Heap(error),
-        HeapWriteError::Raised { kind, message } => {
-            NativeError::Raised(Arc::new(ErrorRef::new(kind, &message)))
-        }
-        HeapWriteError::NeedsPrecision { bytes } => NativeError::Heap(HeapFault::Malformed(
-            format!("a native refinement still needs precision for {bytes} bytes"),
-        )),
-    }
-}
-
-impl CallHeap<'_> {
-    /// As in the machine's write wrapper, a refusal is before any edit.
-    /// Retry that heap operation alone, never the native that called it.
-    fn write<T>(
-        &mut self,
-        mut write: impl FnMut(&mut PagedHeap) -> Result<T, NativeError>,
-    ) -> Result<T, NativeError> {
-        self.heap.take_refusal();
-        match write(self.heap) {
-            Err(error) => match self.heap.take_refusal() {
-                Some(_) => {
-                    self.roots.publish(self.heap, false).map_err(native_error)?;
-                    // The retry refines with its proposed graph in scope.
-                    // Refining first could sweep a child the native built
-                    // earlier and holds only in that proposed object.
-                    write(self.heap)
-                }
-                None => Err(error),
-            },
-            result => result,
-        }
-    }
-}
-
-macro_rules! reads {
-    ($(fn $name:ident(&self $(, $arg:ident: $ty:ty)*) -> $out:ty;)*) => {
-        $(fn $name(&self $(, $arg: $ty)*) -> $out {
-            NativeHeap::$name(&*self.heap $(, $arg)*)
-        })*
-    };
-}
-
-impl NativeHeap for CallHeap<'_> {
-    reads! {
-        fn normal_key(&self, value: &Value) -> Result<Option<NormalKey>, HeapFault>;
-        fn equal(&self, a: &Value, b: &Value) -> Result<bool, HeapFault>;
-        fn data_depth_limit(&self) -> usize;
-        fn value_depth_limit(&self) -> usize;
-        fn len(&self, object: EntityId) -> Result<u64, HeapFault>;
-        fn list_get(&self, list: EntityId, index: u64) -> Result<Option<Value>, HeapFault>;
-        fn map_get(&self, map: EntityId, key: &Value) -> Result<Option<Value>, HeapFault>;
-        fn set_contains(&self, set: EntityId, member: &Value) -> Result<bool, HeapFault>;
-        fn record_get(&self, record: EntityId, field: FieldName<'_>) -> Result<Option<Value>, HeapFault>;
-        fn visit(&self, object: EntityId, visitor: &mut dyn FnMut(Element<'_>) -> ControlFlow<()>) -> Result<(), HeapFault>;
-        fn error_data(&self, error: &ErrorRef) -> Result<Value, HeapFault>;
-        fn tuple_get(&self, tuple: &TupleRef, index: u64) -> Result<Option<Value>, HeapFault>;
-        fn tuple_visit(&self, tuple: &TupleRef, visitor: &mut dyn FnMut(&Value) -> ControlFlow<()>) -> Result<(), HeapFault>;
-        fn payload_visit(&self, value: &Value, range: Range<u64>, visitor: &mut dyn FnMut(Chunk<'_>) -> ControlFlow<()>) -> Result<(), HeapFault>;
-        fn text_offset(&self, text: &TextRef, index: u64) -> Result<u64, HeapFault>;
-    }
-
-    fn materialize_text(&mut self, text: &TextRef) -> Result<Arc<str>, NativeError> {
-        self.write(|heap| heap.materialize_text(text))
-    }
-    fn materialize_bytes(&mut self, bytes: &BytesRef) -> Result<Arc<[u8]>, NativeError> {
-        self.write(|heap| heap.materialize_bytes(bytes))
-    }
-    fn materialize_int(&mut self, int: &IntRef) -> Result<Integer, NativeError> {
-        self.write(|heap| heap.materialize_int(int))
-    }
-    fn text(&mut self, text: &str) -> Result<TextRef, NativeError> {
-        self.write(|heap| heap.text(text))
-    }
-    fn bytes(&mut self, bytes: &[u8]) -> Result<BytesRef, NativeError> {
-        self.write(|heap| heap.bytes(bytes))
-    }
-    fn int(&mut self, int: Integer) -> Result<IntRef, NativeError> {
-        self.write(|heap| heap.int(int.clone()))
-    }
-    fn tuple(&mut self, members: Vec<Value>) -> Result<Arc<TupleRef>, NativeError> {
-        self.write(|heap| heap.tuple(members.clone()))
-    }
-    fn concat(&mut self, parts: &[Value]) -> Result<Value, NativeError> {
-        self.write(|heap| heap.concat(parts))
-    }
-    fn slice(&mut self, value: &Value, range: Range<u64>) -> Result<Value, NativeError> {
-        self.write(|heap| heap.slice(value, range.clone()))
-    }
-    fn allocate(&mut self, object: Object) -> Result<EntityId, NativeError> {
-        self.heap.take_refusal();
-        let mut proposal = self.heap.prepare_allocation(object)?;
-        self.write(|heap| heap.allocate_prepared(&mut proposal))
-    }
-    fn reserve(&mut self, values: u64, bytes: u64) -> Result<(), NativeError> {
-        self.write(|heap| heap.reserve(values, bytes))
-    }
-}
-
-#[cfg(test)]
 mod scalar_laws {
-    use super::*;
     use crate::laws::embedder::Embedder;
     use crate::{End, Machine, Step};
+    use lash_kernel_doc::Value;
     use lash_kernel_doc::heap::LogicalBytes;
     use lash_kernel_state::kernel_internals::census_impl::Census;
     use lash_kernel_state::paged::{
@@ -266,8 +96,7 @@ mod scalar_laws {
     }
 }
 
-#[cfg(test)]
-mod precision_laws {
+mod precision {
     use crate::laws::embedder::{Embedder, ROOMY, Setup, int};
     use crate::{Bounds, End, KernelMachine, Layout, RunError, Step};
     use lash_kernel_doc::Datum;

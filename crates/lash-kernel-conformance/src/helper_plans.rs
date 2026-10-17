@@ -510,7 +510,7 @@ struct Declining;
 impl lash_kernel_doc::NativeFunction for Declining {
     fn call(
         &self,
-        _: lash_kernel_doc::NativeCall<'_>,
+        _: lash_kernel_doc::NativeCall<'_, '_>,
     ) -> Result<lash_kernel_doc::Value, lash_kernel_doc::NativeError> {
         Err(lash_kernel_doc::NativeError::Decline)
     }

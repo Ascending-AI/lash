@@ -9,22 +9,17 @@
 //! statement stands at it, its evaluated operands saved as roles, and its
 //! resume entry runs it on from the op after the action's (`K-EVAL-008`).
 
-use std::sync::Arc;
-
-use lash_kernel_doc::{EntityId, Float, Name, TaskId, Value};
+use lash_kernel_doc::arena::{ArenaHandle, Body};
+use lash_kernel_doc::{Float, Name, NativeError, NewObject, TaskId, Value};
 use lash_kernel_exec::{LocalRef, Op, Reg, RegRange, StepEdge};
 
 use super::ops::Flow;
 use super::{
-    Completion, Control, Eval, Halt, Interrupt, KernelMachine, SlotState, TryPhase, bound, fault,
-    raise,
+    Completion, Control, Eval, Halt, Interrupt, KernelMachine, Refusal, SlotState, TryPhase, bound,
+    fault, raise,
 };
 use crate::compile::{BlockId, CodeId, Executable, Form, LibId, Stmt, StmtId, Stream};
-use crate::heap::{value_bytes, within_depth};
 use crate::interface::{Bound, Host};
-use lash_kernel_doc::NativeHeap;
-use lash_kernel_doc::heap::{ErrorRef, Payload};
-use lash_kernel_state::paged::{ObjectInit, SemanticHeap};
 
 /// How a statement's range ends.
 pub(super) enum Ran {
@@ -47,13 +42,11 @@ fn at(r: Reg) -> usize {
 
 /// The error a read of a variable no scope binds raises.
 pub(super) fn unbound<T>(name: &Name) -> Eval<T> {
-    let mut error = ErrorRef::new(
-        "unbound_variable",
-        &format!("no variable `{name}` is bound here"),
-    );
-    error.data = Payload::Resident(Arc::new(Value::text(name.as_str())));
-    error.cost.0 += name.as_str().len() as u64;
-    Err(Interrupt::raised(Value::Error(Arc::new(error))))
+    Err(Interrupt::Refuse(Box::new(Refusal {
+        kind: "unbound_variable".into(),
+        message: format!("no variable `{name}` is bound here"),
+        data: Some(name.as_str().to_owned()),
+    })))
 }
 
 /// The statement a stream runs: its task, executable and ops.
@@ -172,7 +165,7 @@ impl KernelMachine {
                 }
                 Op::WriteSession { name, src } => {
                     let value = self.take(at(src));
-                    self.reserve(value_bytes(&value))?;
+                    self.reserve(self.cost_of(&value))?;
                     let name = &running.stream.names[name.ix()];
                     if !self.session_write(name, value, true)? {
                         return unbound(name);
@@ -294,7 +287,9 @@ impl KernelMachine {
             }
             Op::Clock { dst } => {
                 self.report_ran(host);
-                self.put(at(dst), Value::Timestamp(host.clock()));
+                let now = host.clock();
+                let now = self.arena.borrow_mut().timestamp(now.nanoseconds);
+                self.put(at(dst), now);
                 return Ok(None);
             }
             Op::Random { dst } => {
@@ -336,13 +331,13 @@ impl KernelMachine {
             }
             Op::BindSession { name, src } => {
                 let value = self.take(at(src));
-                self.reserve(value_bytes(&value))?;
+                self.reserve(self.cost_of(&value))?;
                 self.session_write(&stream.names[name.ix()], value, false)?;
                 Ran::Done
             }
             Op::WriteUnbound { name, src } => {
                 let value = self.take(at(src));
-                self.reserve(value_bytes(&value))?;
+                self.reserve(self.cost_of(&value))?;
                 return unbound(&stream.names[name.ix()]);
             }
             Op::SetField { target, field, src } => {
@@ -476,7 +471,7 @@ impl KernelMachine {
     /// A list of the members in `items`, into the first of them.
     pub(super) fn make_list(&mut self, items: RegRange) -> Eval<()> {
         let (start, items) = self.members(items)?;
-        let list = Value::List(self.alloc(ObjectInit::List(items))?);
+        let list = self.new_object(NewObject::List(items))?;
         self.put(start, list);
         Ok(())
     }
@@ -487,7 +482,7 @@ impl KernelMachine {
         for member in &items {
             self.key(member)?;
         }
-        let set = Value::Set(self.alloc(ObjectInit::Set(items))?);
+        let set = self.new_object(NewObject::Set(items))?;
         self.put(start, set);
         Ok(())
     }
@@ -504,7 +499,7 @@ impl KernelMachine {
             let value = self.take(pair + 1);
             table.push((written, value));
         }
-        let map = Value::Map(self.alloc(ObjectInit::Map(table))?);
+        let map = self.new_object(NewObject::Map(table))?;
         self.put(start, map);
         Ok(())
     }
@@ -517,44 +512,34 @@ impl KernelMachine {
         values: RegRange,
     ) -> Eval<()> {
         let (start, values) = self.members(values)?;
-        let fields = fields
-            .map(|name| {
-                let Value::Text(text) = Value::text(name) else {
-                    unreachable!()
-                };
-                text
-            })
-            .zip(values)
-            .collect();
-        let record = Value::Record(self.alloc(ObjectInit::Record(fields))?);
+        let fields = {
+            let mut arena = self.arena.borrow_mut();
+            fields.map(|name| arena.text(name)).zip(values).collect()
+        };
+        let record = self.new_object(NewObject::Record(fields))?;
         self.put(start, record);
         Ok(())
     }
 
     pub(super) fn make_tuple(&mut self, items: RegRange) -> Eval<()> {
         let (start, items) = self.members(items)?;
-        if items
-            .iter()
-            .any(|value| !within_depth(value, self.limits.value_depth().saturating_sub(1)))
-        {
-            return raise(
-                "too_deep",
-                format!(
-                    "a tuple exceeds the configured {}-level value depth",
-                    self.limits.value_depth()
-                ),
-            );
-        }
-        let tuple = Value::Tuple(
-            self.heap_write(|heap| heap.tuple(items.clone()).map_err(Interrupt::from))?,
-        );
+        let depth = self.limits.value_depth();
+        let tuple = match self.arena.borrow_mut().tuple(items, depth) {
+            Ok(tuple) => tuple,
+            Err(lash_kernel_state::arena::Raise::TooDeep) => {
+                return raise(
+                    "too_deep",
+                    format!("a tuple exceeds the configured {depth}-level value depth"),
+                );
+            }
+        };
         self.put(start, tuple);
         self.pin(start)?;
         Ok(())
     }
 
     /// A closure of `code` over the cells of the variables it shares.
-    fn closure(&mut self, task: TaskId, exe: &Executable, code: CodeId) -> Eval<EntityId> {
+    fn closure(&mut self, task: TaskId, exe: &Executable, code: CodeId) -> Eval<ArenaHandle> {
         let frame = self.frame(task)?;
         let mut cells = Vec::new();
         for capture in &exe.code(code).captures {
@@ -572,23 +557,18 @@ impl KernelMachine {
         &mut self,
         exe: &Executable,
         code: CodeId,
-        cells: &[EntityId],
-    ) -> Eval<EntityId> {
-        let mut captures = Vec::new();
-        for (capture, cell) in exe.code(code).captures.iter().zip(cells) {
-            captures.push((
-                lash_kernel_state::paged::NameRef::new(
-                    &exe.code(code).slots[capture.inner as usize].name,
-                    self.heap.pages(),
-                )?,
-                *cell,
-            ));
-        }
-        let code = exe.code(code);
-        let mut site = code.site.clone();
+        cells: &[ArenaHandle],
+    ) -> Eval<ArenaHandle> {
+        let mut site = exe.code(code).site.clone();
         site.path.pop();
-        let site = lash_kernel_state::paged::SiteRef::new(&site, self.heap.pages())?;
-        Ok(self.alloc(ObjectInit::Closure { site, captures })?)
+        let entity = self.heap.take_ordinal()?;
+        self.fresh.push(entity);
+        let (closure, cost) = self
+            .arena
+            .borrow_mut()
+            .new_closure(entity, site, cells.to_vec());
+        self.grow(cost)?;
+        Ok(closure)
     }
 
     /// `read`: reads through the handle in `handle` with the request in
@@ -604,6 +584,10 @@ impl KernelMachine {
         let Value::Handle(handle) = self.take(handle) else {
             return raise("type_error", "`read` reads through a handle");
         };
+        let handle = self.in_arena(|arena| match arena.body(handle)? {
+            Body::Handle(handle) => Ok(handle.clone()),
+            _ => Err(NativeError::Malformed("a handle names another body")),
+        })?;
         let request = self.take(request);
         let request = self.copy_out(&request)?;
         self.report_ran(host);
@@ -641,10 +625,10 @@ impl KernelMachine {
         let frame = self.frame(task)?;
         let code = frame.code;
         match frame.slot(local.at) {
-            SlotState::Value(value) => Ok(value.clone()),
+            SlotState::Value(value) => Ok(*value),
             SlotState::Cell(cell) => {
                 let cell = *cell;
-                Ok(self.heap.variable_get(cell)?)
+                self.in_arena(|arena| arena.cell(cell))
             }
             SlotState::Empty => unbound(&exe.code(code).slots[local.slot as usize].name),
         }
@@ -660,8 +644,9 @@ impl KernelMachine {
         let code = frame.code;
         match frame.slot(local.at) {
             SlotState::Value(old) => {
-                let growth =
-                    crate::heap::value_bytes(&value).saturating_sub(crate::heap::value_bytes(old));
+                let old = *old;
+                let growth = self.cost_of(&value).saturating_sub(self.cost_of(&old));
+                let frame = self.frame(task)?;
                 if growth == 0 {
                     frame.set_slot(local.at, SlotState::Value(value));
                 } else {
@@ -674,10 +659,8 @@ impl KernelMachine {
             }
             SlotState::Cell(cell) => {
                 let cell = *cell;
-                self.heap_write(|heap| {
-                    heap.variable_write(cell, value.clone())
-                        .map_err(Interrupt::from)
-                })?;
+                let growth = self.in_arena(|arena| arena.cell_set(cell, value))?;
+                self.grow(growth)?;
             }
             SlotState::Empty => return unbound(&exe.code(code).slots[local.slot as usize].name),
         }

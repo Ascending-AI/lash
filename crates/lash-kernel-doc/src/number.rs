@@ -55,6 +55,14 @@ impl Integer {
         }
     }
 
+    /// The integer as a word, when it fits one: what a value holds inline.
+    pub fn word(&self) -> Option<i64> {
+        match &self.0 {
+            Repr::Small(small) => Some(*small),
+            Repr::Big(_) => None,
+        }
+    }
+
     pub fn is_negative(&self) -> bool {
         match &self.0 {
             Repr::Small(small) => *small < 0,

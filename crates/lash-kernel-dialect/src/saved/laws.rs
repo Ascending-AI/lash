@@ -58,11 +58,11 @@ fn fresh() -> (PagedHeap, Rc<RefCell<Pages>>) {
         (heap, pages)
     }
 }
-fn int(v: i64) -> Value {
-    Value::Int(IntRef::Inline(v.into()))
+fn int(v: i64) -> PageValue {
+    PageValue::Int(IntRef::Inline(v.into()))
 }
-fn id(value: &Value) -> EntityId {
-    let Value::List(id) = value else {
+fn id(value: &PageValue) -> EntityId {
+    let PageValue::List(id) = value else {
         panic!("list")
     };
     *id
@@ -85,7 +85,7 @@ fn saved(heap: &mut PagedHeap, live: EntityId) -> SavedFunction {
         document,
         captures: BTreeMap::from([(
             Name::new("capture"),
-            heap.freeze(&Value::List(live), true).expect("freeze"),
+            heap.freeze(&PageValue::List(live), true).expect("freeze"),
         )]),
         release: PageRef {
             id: PageId([1; 32]),
@@ -135,7 +135,7 @@ fn a_saved_function_bundle_keeps_its_frozen_capture() {
         .expect("first invocation");
     let first_id = id(&first[&Name::new("capture")]);
     assert!(
-        matches!(heap.list_get(first_id, 0).expect("original"), Some(Value::Int(IntRef::Inline(n))) if n == 1.into())
+        matches!(heap.list_get(first_id, 0).expect("original"), Some(PageValue::Int(IntRef::Inline(n))) if n == 1.into())
     );
     heap.list_write(first_id, 0, int(3))
         .expect("first invocation write");
@@ -145,7 +145,7 @@ fn a_saved_function_bundle_keeps_its_frozen_capture() {
     let second_id = id(&second[&Name::new("capture")]);
     assert_ne!(first_id, second_id);
     assert!(
-        matches!(heap.list_get(second_id, 0).expect("original again"), Some(Value::Int(IntRef::Inline(n))) if n == 1.into())
+        matches!(heap.list_get(second_id, 0).expect("original again"), Some(PageValue::Int(IntRef::Inline(n))) if n == 1.into())
     );
 }
 #[derive(Debug)]
@@ -163,7 +163,7 @@ fn installing_loads_no_capture_payload() {
     let (mut heap, pages) = fresh();
     let text = heap.text(&"x".repeat(1_000_000)).expect("text");
     let live = heap
-        .allocate_object(ObjectInit::List(vec![Value::Text(text)]))
+        .allocate_object(ObjectInit::List(vec![PageValue::Text(text)]))
         .expect("list");
     let function = saved(&mut heap, live);
     let functions = BTreeMap::from([(function.name.clone(), function)]);
@@ -237,7 +237,7 @@ fn saved_captures_use_names_when_free_variable_slots_are_reordered() {
         .expect("recompiled closure");
     let mut frozen = Vec::new();
     for id in [first, second] {
-        let bindings = BTreeMap::from([(Name::new("read"), Value::Closure(id))]);
+        let bindings = BTreeMap::from([(Name::new("read"), PageValue::Closure(id))]);
         let dropped = vec![Name::new("read")];
         let (saved, refused) = save(
             &mut heap,

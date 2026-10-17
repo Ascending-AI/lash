@@ -286,8 +286,12 @@ impl Machine for KernelMachine {
         let page = access
             .seal(PageKind::CHECKPOINT_ROOT, tokens, children)
             .map_err(SealError::Heap)?;
-        self.tasks =
-            tasks::Tasks::open(self.heap.task_root().clone(), access, Arc::clone(&self.exe));
+        self.tasks = tasks::Tasks::open(
+            self.heap.task_root().clone(),
+            access,
+            std::rc::Rc::clone(&self.arena),
+            Arc::clone(&self.exe),
+        );
         Ok(Some(SealedRoot { page, root }))
     }
     fn meters(&self) -> Meters {
@@ -378,6 +382,9 @@ impl KernelMachine {
         heap.restore_execution_roots(root);
         let access = heap.pages().clone();
         let census_refinements = heap.certificate().refinements;
+        let arena: super::SharedArena = std::rc::Rc::new(std::cell::RefCell::new(
+            lash_kernel_state::arena::Arena::new(),
+        ));
         Ok(Self {
             release: root.release,
             owner: root.owner,
@@ -388,7 +395,13 @@ impl KernelMachine {
             exe: Arc::clone(&exe),
             bounds,
             limits,
-            tasks: tasks::Tasks::open(heap.task_root().clone(), access.clone(), exe),
+            tasks: tasks::Tasks::open(
+                heap.task_root().clone(),
+                access.clone(),
+                std::rc::Rc::clone(&arena),
+                exe,
+            ),
+            arena,
             ready: queue::Queue::open(sequence(root.ready), access.clone()),
             current: None,
             joins: heap.join_root().clone(),

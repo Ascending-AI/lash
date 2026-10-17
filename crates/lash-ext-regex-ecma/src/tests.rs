@@ -1,12 +1,11 @@
 //! The laws of the extension: the cold-and-warm gate (`docs/kernel/design.md`
 //! §11, gate 5) and the rules each function states.
 
-use std::collections::BTreeSet;
 use std::sync::Arc;
 
 use lash_kernel_doc::{
     Datum, ErrorDatum, FunctionDefinition, FunctionRegistry, GuardExceeded, Integer, Measure,
-    NativeCall, NativeError, Operand, Value, WorkCounter,
+    NativeError, Operand, Retry, Value, WorkCounter,
 };
 
 use crate::{
@@ -14,19 +13,17 @@ use crate::{
     SYNTAX_ERROR, register,
 };
 
-use super::testsupport::{Fixture, fresh};
-use lash_kernel_state::paged::ProbeHeap;
+use super::testsupport::{Bench, Fixture, fresh};
 
 #[derive(Debug, PartialEq)]
 enum Failure {
     Raised(lash_kernel_doc::ErrorDatum),
     Guard(GuardExceeded),
     Memory,
-    Heap(lash_kernel_doc::heap::HeapFault),
 }
 
 fn int(value: i64) -> Value {
-    Value::Int(value.into())
+    Value::Int(value)
 }
 
 /// The work limit a call runs under.
@@ -48,7 +45,7 @@ struct Run {
 
 fn measure(
     definition: &FunctionDefinition,
-    heap: &ProbeHeap,
+    heap: &Bench,
     args: &[Value],
     result: Option<&Value>,
     operand: &Operand,
@@ -70,7 +67,7 @@ fn measure(
         // A call that raises is charged with a result of size 0 (`K-CHG-003`).
         (None, _) => 0,
         (Some(value), Measure::Size) => heap.size(value),
-        (Some(value), Measure::DeepSize) => heap.deep_size(value, &mut BTreeSet::new()),
+        (Some(value), Measure::DeepSize) => heap.deep_size(value, &mut Vec::new()),
         (Some(_), Measure::Magnitude) => panic!("no formula here takes a magnitude"),
         (Some(_), Measure::NestedSize) => panic!("no formula here takes a nested size"),
     }
@@ -82,7 +79,7 @@ fn run(
     engine: &Arc<Engine>,
     operation: Operation,
     limit: Limit,
-    arguments: &dyn Fn(&mut ProbeHeap) -> Vec<Value>,
+    arguments: &dyn Fn(&mut Bench) -> Vec<Value>,
 ) -> Run {
     let mut registry = FunctionRegistry::new();
     let functions = register(&mut registry, engine).unwrap();
@@ -90,13 +87,10 @@ fn run(
     let definition = registered.definition().as_ref();
 
     let mut heap = fresh();
-    let args = arguments(&mut heap)
-        .into_iter()
-        .map(|value| heap.canonical_value(value).unwrap())
-        .collect::<Vec<_>>();
+    let args = arguments(&mut heap);
     let before = args
         .iter()
-        .map(|value| heap.datum(value))
+        .map(|value| heap.read(value))
         .collect::<Vec<_>>();
     let limit =
         match (limit, &definition.guard) {
@@ -107,15 +101,18 @@ fn run(
             (Limit::Stated, None) => None,
         };
     let mut counter = WorkCounter::new(limit);
-    let result = registered.native().unwrap().call(NativeCall {
-        args: &args,
-        heap: &mut *heap,
-        counter: &mut counter,
-    });
+    let result = heap
+        .call(
+            &**registered.native().unwrap(),
+            &args,
+            u64::MAX,
+            &mut counter,
+        )
+        .answer;
     // No function changes an object that existed (`K-LIB-007`).
     assert_eq!(
         args.iter()
-            .map(|value| heap.datum(value))
+            .map(|value| heap.read(value))
             .collect::<Vec<_>>(),
         before
     );
@@ -124,17 +121,21 @@ fn run(
     });
     Run {
         outcome: match result {
-            Ok(value) => Ok(heap.datum(&value)),
+            Ok(value) => Ok(heap.read(&value)),
             Err(NativeError::Raised(error)) => {
-                let Datum::Error(error) = heap.datum(&Value::Error(error)) else {
+                let Datum::Error(error) = heap.read(&error) else {
                     unreachable!()
                 };
                 Err(Failure::Raised(*error))
             }
+            Err(NativeError::Refused { kind, message }) => Err(Failure::Raised(ErrorDatum {
+                kind: kind.to_owned(),
+                message,
+                data: Datum::Null,
+            })),
             Err(NativeError::Guard(error)) => Err(Failure::Guard(error)),
-            Err(NativeError::Memory) => Err(Failure::Memory),
-            Err(NativeError::Heap(error)) => Err(Failure::Heap(error)),
-            Err(NativeError::Decline) => unreachable!("a regex native has no body to decline to"),
+            Err(NativeError::Retry(Retry::Room { .. })) => Err(Failure::Memory),
+            Err(error) => unreachable!("a regex native answered {error:?}"),
         },
         spent: counter.spent(),
         charge,
@@ -151,7 +152,7 @@ fn cold() -> Arc<Engine> {
 fn cold_and_warm(
     operation: Operation,
     limit: Limit,
-    arguments: &dyn Fn(&mut ProbeHeap) -> Vec<Value>,
+    arguments: &dyn Fn(&mut Bench) -> Vec<Value>,
 ) -> Run {
     let engine = cold();
     assert_eq!(engine.cached_patterns(), 0);
@@ -178,11 +179,11 @@ fn arguments<'a>(
     pattern: &'a str,
     flags: &'a str,
     input: &'a str,
-) -> impl Fn(&mut ProbeHeap) -> Vec<Value> + 'a {
+) -> impl Fn(&mut Bench) -> Vec<Value> + 'a {
     move |heap| {
-        let mut args = vec![heap.regex(pattern, flags, 0), Value::text(input)];
+        let mut args = vec![heap.regex(pattern, flags, 0), heap.text(input)];
         if operation == Operation::Replace {
-            args.push(Value::text("[$&]"));
+            args.push(heap.text("[$&]"));
         }
         args
     }
@@ -261,9 +262,9 @@ fn a_pattern_that_fails_to_compile_is_equal_cold_and_warm() {
         let none = cold_and_warm(operation, Limit::Exactly(0), &arguments);
         assert_eq!(none, stated, "{operation:?} under a limit of zero");
     }
-    let check = |heap: &mut ProbeHeap| {
+    let check = |heap: &mut Bench| {
         let _ = heap;
-        vec![Value::text("a(b"), Value::text("")]
+        vec![heap.text("a(b"), heap.text("")]
     };
     let run = cold_and_warm(Operation::CompileCheck, Limit::Stated, &check);
     assert_eq!(raised(&run.outcome).kind, SYNTAX_ERROR);
@@ -280,13 +281,13 @@ fn the_cache_is_bounded_by_the_size_the_embedder_sets() {
     assert_eq!(engine.cached_patterns(), 2);
 }
 
-fn call(operation: Operation, arguments: &dyn Fn(&mut ProbeHeap) -> Vec<Value>) -> Datum {
+fn call(operation: Operation, arguments: &dyn Fn(&mut Bench) -> Vec<Value>) -> Datum {
     run(&cold(), operation, Limit::Stated, arguments)
         .outcome
         .unwrap()
 }
 
-fn error(operation: Operation, arguments: &dyn Fn(&mut ProbeHeap) -> Vec<Value>) -> ErrorDatum {
+fn error(operation: Operation, arguments: &dyn Fn(&mut Bench) -> Vec<Value>) -> ErrorDatum {
     raised(&run(&cold(), operation, Limit::Stated, arguments).outcome).clone()
 }
 
@@ -317,7 +318,7 @@ fn found(index: i64, groups: &[Datum], named: Datum) -> Datum {
 
 fn exec(pattern: &str, flags: &str, last_index: i64, input: &str) -> Datum {
     call(Operation::Exec, &|heap| {
-        vec![heap.regex(pattern, flags, last_index), Value::text(input)]
+        vec![heap.regex(pattern, flags, last_index), heap.text(input)]
     })
 }
 
@@ -345,7 +346,7 @@ fn exec_returns_the_next_last_index() {
     assert_eq!(exec("b", "", 4, "aXaXa"), none(4));
 
     let test = call(Operation::Test, &|heap| {
-        vec![heap.regex("a", "g", 1), Value::text("aXaXa")]
+        vec![heap.regex("a", "g", 1), heap.text("aXaXa")]
     });
     assert_eq!(
         test,
@@ -380,7 +381,7 @@ fn a_match_lists_its_groups_and_names() {
 fn match_all_visits_every_match_of_a_global_regex() {
     let indexes = |pattern: &str, flags: &str, last_index: i64, input: &str| {
         let Datum::List(matches) = call(Operation::MatchAll, &|heap| {
-            vec![heap.regex(pattern, flags, last_index), Value::text(input)]
+            vec![heap.regex(pattern, flags, last_index), heap.text(input)]
         }) else {
             panic!("match_all returns a list");
         };
@@ -416,8 +417,8 @@ fn replace_expands_the_replacement_and_returns_the_next_last_index() {
         call(Operation::Replace, &|heap| {
             vec![
                 heap.regex(pattern, flags, last_index),
-                Value::text(input),
-                Value::text(with),
+                heap.text(input),
+                heap.text(with),
             ]
         })
     };
@@ -448,7 +449,7 @@ fn split_splices_captures_and_honours_the_limit() {
         call(Operation::Split, &|heap| {
             vec![
                 heap.regex(pattern, "", 0),
-                Value::text(input),
+                heap.text(input),
                 limit.map_or(Value::Absent, int),
             ]
         })
@@ -480,7 +481,7 @@ fn split_splices_captures_and_honours_the_limit() {
 #[test]
 fn half_a_surrogate_pair_in_a_result_is_a_typed_error() {
     let dot = |flags: &'static str| {
-        move |heap: &mut ProbeHeap| vec![heap.regex(".", flags, 0), Value::text("\u{1f600}")]
+        move |heap: &mut Bench| vec![heap.regex(".", flags, 0), heap.text("\u{1f600}")]
     };
     assert_eq!(error(Operation::Exec, &dot("")).kind, LONE_SURROGATE_ERROR);
     assert_eq!(
@@ -497,7 +498,7 @@ fn half_a_surrogate_pair_in_a_result_is_a_typed_error() {
 #[test]
 fn compile_check_returns_the_regex_record_or_a_syntax_error() {
     let check = |pattern: &str, flags: &str| {
-        let arguments = move |_: &mut ProbeHeap| vec![Value::text(pattern), Value::text(flags)];
+        let arguments = move |heap: &mut Bench| vec![heap.text(pattern), heap.text(flags)];
         run(&cold(), Operation::CompileCheck, Limit::Stated, &arguments).outcome
     };
     assert_eq!(
@@ -534,34 +535,36 @@ fn compile_check_returns_the_regex_record_or_a_syntax_error() {
 #[test]
 fn operands_of_the_wrong_shape_are_typed_errors() {
     let kind =
-        |arguments: &dyn Fn(&mut ProbeHeap) -> Vec<Value>| error(Operation::Exec, arguments).kind;
+        |arguments: &dyn Fn(&mut Bench) -> Vec<Value>| error(Operation::Exec, arguments).kind;
     assert_eq!(
         kind(&|heap| {
-            let regex = heap.record(&[
-                ("brand", Value::text("regex.python")),
-                ("pattern", Value::text("a")),
-                ("flags", Value::text("")),
+            let fields = [
+                ("brand", heap.text("regex.python")),
+                ("pattern", heap.text("a")),
+                ("flags", heap.text("")),
                 ("lastIndex", int(0)),
-            ]);
-            vec![regex, Value::text("a")]
+            ];
+            let regex = heap.record(&fields);
+            vec![regex, heap.text("a")]
         }),
         "type_error"
     );
     assert_eq!(
         kind(&|heap| {
-            let regex = heap.record(&[
-                ("brand", Value::text(BRAND)),
-                ("pattern", Value::text("a")),
-                ("flags", Value::text("")),
+            let fields = [
+                ("brand", heap.text(BRAND)),
+                ("pattern", heap.text("a")),
+                ("flags", heap.text("")),
                 ("lastIndex", int(0)),
                 ("extra", Value::Null),
-            ]);
-            vec![regex, Value::text("a")]
+            ];
+            let regex = heap.record(&fields);
+            vec![regex, heap.text("a")]
         }),
         "type_error"
     );
     assert_eq!(
-        kind(&|_| vec![Value::text("a"), Value::text("a")]),
+        kind(&|heap| vec![heap.text("a"), heap.text("a")]),
         "type_error"
     );
     assert_eq!(
@@ -569,12 +572,12 @@ fn operands_of_the_wrong_shape_are_typed_errors() {
         "type_error"
     );
     assert_eq!(
-        kind(&|heap| vec![heap.regex("a", "g", -1), Value::text("a")]),
+        kind(&|heap| vec![heap.regex("a", "g", -1), heap.text("a")]),
         "number_range"
     );
     assert_eq!(
         error(Operation::Split, &|heap| {
-            vec![heap.regex("a", "", 0), Value::text("a"), int(-1)]
+            vec![heap.regex("a", "", 0), heap.text("a"), int(-1)]
         })
         .kind,
         "number_range"

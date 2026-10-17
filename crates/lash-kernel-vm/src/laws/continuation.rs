@@ -20,7 +20,7 @@
 
 use std::collections::BTreeMap;
 
-use lash_kernel_doc::{Datum, FunctionId, FunctionRegistry, TaskId, Value, parse_definition};
+use lash_kernel_doc::{Datum, FunctionId, FunctionRegistry, TaskId, parse_definition};
 use lash_kernel_state::paged::{
     HeaderRecord, IncomingRecord, PendingRecord, PhaseRecord, RoleRecord, RolesRecord,
     TaskStateRecord,
@@ -1153,7 +1153,7 @@ fn an_extra_role_is_refused() {
     edit_roles(&mut embedder, |roles| {
         roles.push(RoleRecord {
             site: vec![9],
-            value: Value::Null,
+            value: lash_kernel_doc::heap::PageValue::Null,
         });
     });
     assert_eq!(
@@ -1186,7 +1186,7 @@ fn a_task_state_that_disagrees_is_refused() {
         .tamper_task_state(
             TaskId::MAIN,
             TaskStateRecord::Resuming {
-                incoming: IncomingRecord::Value(Value::Null),
+                incoming: IncomingRecord::Value(lash_kernel_doc::heap::PageValue::Null),
                 requeue: false,
             },
         )

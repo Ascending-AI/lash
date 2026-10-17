@@ -6,22 +6,22 @@ use lash_kernel_doc::Name;
 use lash_kernel_doc::heap::*;
 use std::rc::Rc;
 
-fn int(n: i64) -> Value {
-    Value::Int(IntRef::Inline(n.into()))
+fn int(n: i64) -> PageValue {
+    PageValue::Int(IntRef::Inline(n.into()))
 }
-fn list(value: Value) -> EntityId {
-    let Value::List(id) = value else {
+fn list(value: PageValue) -> EntityId {
+    let PageValue::List(id) = value else {
         panic!("expected list")
     };
     id
 }
-fn binding(name: &str, value: Value) -> (Name, Value) {
+fn binding(name: &str, value: PageValue) -> (Name, PageValue) {
     (Name::new(name), value)
 }
 fn empty() -> KeyedRoot {
     KeyedRoot::Empty
 }
-fn record(heap: &PagedHeap, name: &Name, value: Value) -> BindingRecord {
+fn record(heap: &PagedHeap, name: &Name, value: PageValue) -> BindingRecord {
     BindingRecord {
         name: NameRef::new(name, &heap.access).unwrap(),
         declared: SiteRef::new(
@@ -35,7 +35,10 @@ fn record(heap: &PagedHeap, name: &Name, value: Value) -> BindingRecord {
         value: BoundRecord::Value(value),
     }
 }
-fn bindings(heap: &mut PagedHeap, values: impl IntoIterator<Item = (Name, Value)>) -> KeyedRoot {
+fn bindings(
+    heap: &mut PagedHeap,
+    values: impl IntoIterator<Item = (Name, PageValue)>,
+) -> KeyedRoot {
     let mut table = crate::paged::tree::Tree::new(false);
     for (name, value) in values {
         table
@@ -59,7 +62,7 @@ fn bindings(heap: &mut PagedHeap, values: impl IntoIterator<Item = (Name, Value)
     heap.set_session_root(table).expect("install bindings");
     root
 }
-fn get(heap: &PagedHeap, name: &str) -> Value {
+fn get(heap: &PagedHeap, name: &str) -> PageValue {
     let record = heap
         .session
         .get(name.as_bytes(), &heap.access)
@@ -105,9 +108,9 @@ fn aliases_across_cells_keep_distinct_objects_distinct() {
     let root = bindings(
         &mut heap,
         [
-            binding("a", Value::List(a)),
-            binding("alias", Value::List(a)),
-            binding("b", Value::List(b)),
+            binding("a", PageValue::List(a)),
+            binding("alias", PageValue::List(a)),
+            binding("b", PageValue::List(b)),
         ],
     );
     let (mut next, _) = next(&mut heap, &pages, root);
@@ -116,10 +119,10 @@ fn aliases_across_cells_keep_distinct_objects_distinct() {
     assert_ne!(a, b);
     next.list_write(a, 0, int(9)).expect("write");
     assert!(
-        matches!(next.list_get(alias, 0).expect("alias"), Some(Value::Int(IntRef::Inline(n))) if n == 9.into())
+        matches!(next.list_get(alias, 0).expect("alias"), Some(PageValue::Int(IntRef::Inline(n))) if n == 9.into())
     );
     assert!(
-        matches!(next.list_get(b, 0).expect("distinct"), Some(Value::Int(IntRef::Inline(n))) if n == 1.into())
+        matches!(next.list_get(b, 0).expect("distinct"), Some(PageValue::Int(IntRef::Inline(n))) if n == 1.into())
     );
 }
 #[test]
@@ -128,7 +131,7 @@ fn a_fork_isolates_later_mutations() {
     let id = heap
         .allocate_object(ObjectInit::List(vec![int(1)]))
         .expect("list");
-    let root = bindings(&mut heap, [binding("a", Value::List(id))]);
+    let root = bindings(&mut heap, [binding("a", PageValue::List(id))]);
     let session = heap
         .carry(CarryRoots {
             bindings: root,
@@ -156,11 +159,11 @@ fn a_fork_isolates_later_mutations() {
     fork.adopt(&session).expect("fork adopt");
     parent.list_write(id, 0, int(2)).expect("parent write");
     assert!(
-        matches!(fork.list_get(id, 0).expect("fork"), Some(Value::Int(IntRef::Inline(n))) if n == 1.into())
+        matches!(fork.list_get(id, 0).expect("fork"), Some(PageValue::Int(IntRef::Inline(n))) if n == 1.into())
     );
     fork.list_write(id, 0, int(3)).expect("fork write");
     assert!(
-        matches!(parent.list_get(id, 0).expect("parent"), Some(Value::Int(IntRef::Inline(n))) if n == 2.into())
+        matches!(parent.list_get(id, 0).expect("parent"), Some(PageValue::Int(IntRef::Inline(n))) if n == 2.into())
     );
 }
 #[test]
@@ -169,16 +172,16 @@ fn a_frozen_capture_ignores_later_live_writes() {
     let live = heap
         .allocate_object(ObjectInit::List(vec![int(1)]))
         .expect("live");
-    let frozen = heap.freeze(&Value::List(live), true).expect("freeze");
+    let frozen = heap.freeze(&PageValue::List(live), true).expect("freeze");
     heap.list_write(live, 0, int(2)).expect("live write");
     let capture = list(heap.instantiate(&frozen).expect("capture"));
     assert!(
-        matches!(heap.list_get(capture, 0).expect("get"), Some(Value::Int(IntRef::Inline(n))) if n == 1.into())
+        matches!(heap.list_get(capture, 0).expect("get"), Some(PageValue::Int(IntRef::Inline(n))) if n == 1.into())
     );
     heap.list_write(capture, 0, int(3)).expect("capture write");
     let other = list(heap.instantiate(&frozen).expect("other capture"));
     assert!(
-        matches!(heap.list_get(other, 0).expect("get"), Some(Value::Int(IntRef::Inline(n))) if n == 1.into())
+        matches!(heap.list_get(other, 0).expect("get"), Some(PageValue::Int(IntRef::Inline(n))) if n == 1.into())
     );
 }
 #[test]
@@ -188,9 +191,9 @@ fn a_swept_child_never_resurrects_while_its_family_stays_live() {
         .allocate_object(ObjectInit::List(vec![int(1)]))
         .expect("child");
     let live = heap
-        .allocate_object(ObjectInit::List(vec![Value::List(child)]))
+        .allocate_object(ObjectInit::List(vec![PageValue::List(child)]))
         .expect("live");
-    let frozen = heap.freeze(&Value::List(live), true).expect("freeze");
+    let frozen = heap.freeze(&PageValue::List(live), true).expect("freeze");
     let root = list(heap.instantiate(&frozen).expect("deliver"));
     let child = list(
         heap.list_get(root, 0)
@@ -219,7 +222,7 @@ fn a_swept_child_never_resurrects_while_its_family_stays_live() {
         Some(ObjectKind::List)
     );
     assert!(
-        matches!(reopened.list_get(root, 0).expect("retained override"), Some(Value::Int(IntRef::Inline(n))) if n == 3.into())
+        matches!(reopened.list_get(root, 0).expect("retained override"), Some(PageValue::Int(IntRef::Inline(n))) if n == 3.into())
     );
     assert_eq!(reopened.kind(child).expect("dead child membership"), None);
 }
@@ -230,9 +233,9 @@ fn a_lazy_result_length_read_instantiates_nothing() {
         .allocate_object(ObjectInit::List(vec![int(1)]))
         .expect("child");
     let source = heap
-        .allocate_object(ObjectInit::List(vec![Value::List(child); 100_000]))
+        .allocate_object(ObjectInit::List(vec![PageValue::List(child); 100_000]))
         .expect("source");
-    let frozen = heap.freeze(&Value::List(source), true).expect("freeze");
+    let frozen = heap.freeze(&PageValue::List(source), true).expect("freeze");
     let result = list(heap.instantiate(&frozen).expect("deliver"));
     assert_eq!(heap.len(result).expect("length"), 100_000);
     let first = list(heap.list_get(result, 0).expect("first").expect("present"));
@@ -240,7 +243,7 @@ fn a_lazy_result_length_read_instantiates_nothing() {
     assert_ne!(first, second);
     heap.list_write(first, 0, int(7)).expect("edit first");
     assert!(
-        matches!(heap.list_get(second, 0).expect("second unchanged"), Some(Value::Int(IntRef::Inline(n))) if n == 1.into())
+        matches!(heap.list_get(second, 0).expect("second unchanged"), Some(PageValue::Int(IntRef::Inline(n))) if n == 1.into())
     );
 }
 #[test]
@@ -250,9 +253,9 @@ fn repeated_delivery_loads_only_touched_index_paths() {
         .allocate_object(ObjectInit::List(vec![int(1)]))
         .expect("child");
     let source = heap
-        .allocate_object(ObjectInit::List(vec![Value::List(child); 100_000]))
+        .allocate_object(ObjectInit::List(vec![PageValue::List(child); 100_000]))
         .expect("source");
-    let frozen = heap.freeze(&Value::List(source), true).expect("freeze");
+    let frozen = heap.freeze(&PageValue::List(source), true).expect("freeze");
     heap.evict().expect("evict");
     let a = list(heap.instantiate(&frozen).expect("a"));
     let b = list(heap.instantiate(&frozen).expect("b"));
@@ -286,14 +289,14 @@ fn carry_classification_walks_the_union_and_propagates_through_cycles() {
         .expect("a");
     let b = heap
         .allocate_object(ObjectInit::List(vec![
-            Value::List(a),
-            Value::Closure(closure),
+            PageValue::List(a),
+            PageValue::Closure(closure),
         ]))
         .expect("b");
-    heap.list_write(a, 0, Value::List(b)).expect("cycle");
+    heap.list_write(a, 0, PageValue::List(b)).expect("cycle");
     let root = bindings(
         &mut heap,
-        (0..100).map(|i| binding(&format!("alias{i}"), Value::List(a))),
+        (0..100).map(|i| binding(&format!("alias{i}"), PageValue::List(a))),
     );
     heap.evict().expect("evict");
     let result = heap.classify_carry(&root).expect("classify");
@@ -371,26 +374,26 @@ fn foreign_results_freeze_without_live_allocation_and_keep_the_decode_charge() {
         "only the surviving value has an occurrence"
     );
     assert_eq!(heap.frozen_charge(&frozen).expect("charge"), 9);
-    let Value::Map(map) = heap.instantiate(&frozen).expect("instantiate") else {
+    let PageValue::Map(map) = heap.instantiate(&frozen).expect("instantiate") else {
         panic!("map")
     };
     assert_eq!(heap.len(map).expect("length"), 1);
     let child = list(heap.map_get(map, &int(1)).expect("get").expect("present"));
     assert!(
-        matches!(heap.list_get(child, 0).expect("member"), Some(Value::Int(IntRef::Inline(n))) if n == 2.into())
+        matches!(heap.list_get(child, 0).expect("member"), Some(PageValue::Int(IntRef::Inline(n))) if n == 2.into())
     );
 }
 
 #[test]
 fn carry_classification_respects_direct_and_immutable_task_roots() {
     let (mut heap, _) = fresh();
-    let task = Value::Task(lash_kernel_doc::TaskId(99));
+    let task = PageValue::Task(lash_kernel_doc::TaskId(99));
     let tuple = heap.tuple(vec![task.clone()]).expect("tuple");
     let root = bindings(
         &mut heap,
         [
             binding("task", task),
-            binding("tuple", Value::Tuple(tuple)),
+            binding("tuple", PageValue::Tuple(tuple)),
             binding("data", int(1)),
         ],
     );
@@ -404,11 +407,11 @@ fn freezing_rejects_cycles_and_runtime_identities() {
     let id = heap
         .allocate_object(ObjectInit::List(Vec::new()))
         .expect("list");
-    heap.list_write(id, 0, Value::List(id)).expect("cycle");
+    heap.list_write(id, 0, PageValue::List(id)).expect("cycle");
     for value in [
-        Value::List(id),
-        Value::Task(lash_kernel_doc::TaskId(99)),
-        Value::Ref(Identity::Object(id)),
+        PageValue::List(id),
+        PageValue::Task(lash_kernel_doc::TaskId(99)),
+        PageValue::Ref(Identity::Object(id)),
     ] {
         assert!(matches!(
             heap.freeze(&value, true),
@@ -434,14 +437,14 @@ fn a_paged_frozen_error_keeps_its_receiving_family_at_every_immutable_depth() {
     let frozen = heap.freeze_datum(&datum).expect("freeze");
     let a = heap.instantiate(&frozen).expect("first");
     let b = heap.instantiate(&frozen).expect("second");
-    fn child(heap: &PagedHeap, value: Value) -> EntityId {
-        let Value::Error(error) = value else {
+    fn child(heap: &PagedHeap, value: PageValue) -> EntityId {
+        let PageValue::Error(error) = value else {
             panic!("outer error")
         };
-        let Value::Tuple(tuple) = heap.error_data(&error).expect("outer data") else {
+        let PageValue::Tuple(tuple) = heap.error_data(&error).expect("outer data") else {
             panic!("tuple")
         };
-        let Value::Error(error) = heap
+        let PageValue::Error(error) = heap
             .tuple_get(&tuple, 0)
             .expect("tuple member")
             .expect("present")
@@ -463,10 +466,10 @@ fn a_paged_frozen_error_keeps_its_receiving_family_at_every_immutable_depth() {
     .expect("open");
     reopened.set_family_base(Box::new(FrozenBase::default()));
     assert!(
-        matches!(reopened.list_get(a, 0).expect("first"), Some(Value::Int(IntRef::Inline(n))) if n == 2.into())
+        matches!(reopened.list_get(a, 0).expect("first"), Some(PageValue::Int(IntRef::Inline(n))) if n == 2.into())
     );
     assert!(
-        matches!(reopened.list_get(b, 0).expect("second"), Some(Value::Int(IntRef::Inline(n))) if n == 1.into())
+        matches!(reopened.list_get(b, 0).expect("second"), Some(PageValue::Int(IntRef::Inline(n))) if n == 1.into())
     );
 }
 
@@ -575,13 +578,13 @@ fn session_slot_roots_and_task_edges_follow_replacements() {
     let id = heap
         .allocate_object(ObjectInit::List(vec![int(7)]))
         .unwrap();
-    let value = record(&heap, &name, Value::List(id));
+    let value = record(&heap, &name, PageValue::List(id));
     heap.write_session_binding(&key, |_, _| Ok(Some(value)))
         .unwrap();
     heap.collect().unwrap();
     assert_eq!(heap.kind(id).unwrap(), Some(ObjectKind::List));
     assert!(heap.session_root().is_empty());
-    let value = record(&heap, &name, Value::Task(lash_kernel_doc::TaskId::MAIN));
+    let value = record(&heap, &name, PageValue::Task(lash_kernel_doc::TaskId::MAIN));
     heap.write_session_binding(&key, |_, _| Ok(Some(value)))
         .unwrap();
     assert_eq!(heap.data_only_certificate().task_edges, 1);
@@ -596,7 +599,7 @@ fn session_slot_roots_and_task_edges_follow_replacements() {
             captures: Vec::new(),
         })
         .unwrap();
-    let value = record(&heap, &name, Value::Closure(closure));
+    let value = record(&heap, &name, PageValue::Closure(closure));
     heap.write_session_binding(&key, |_, _| Ok(Some(value)))
         .unwrap();
     assert_eq!(heap.data_only_certificate().task_edges, 0);

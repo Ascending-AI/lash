@@ -4,6 +4,7 @@
 
 mod await_phase;
 mod bounds;
+mod cold;
 mod continuation;
 pub(crate) mod embedder;
 mod forms;

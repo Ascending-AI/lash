@@ -78,13 +78,11 @@ pub(crate) fn machine_function(candidate: &FunctionDefinition) -> Option<Machine
 struct RunByTheMachine;
 
 impl NativeFunction for RunByTheMachine {
-    fn call(&self, _call: NativeCall<'_>) -> Result<Value, NativeError> {
-        Err(NativeError::Raised(Arc::new(
-            lash_kernel_doc::heap::ErrorRef::new(
-                "type_error",
-                "this function is implemented by the machine that runs the document",
-            ),
-        )))
+    fn call(&self, _call: NativeCall<'_, '_>) -> Result<Value, NativeError> {
+        Err(NativeError::refused(
+            "type_error",
+            "this function is implemented by the machine that runs the document",
+        ))
     }
 }
 

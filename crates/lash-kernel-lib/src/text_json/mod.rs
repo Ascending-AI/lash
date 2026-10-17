@@ -8,27 +8,27 @@ mod json;
 mod laws;
 mod text;
 
+use std::borrow::Cow;
 use std::sync::Arc;
 
 use lash_kernel_doc::{
-    Formula, FunctionDefinition, FunctionName, FunctionRegistry, Implementation, KERNEL_VERSION,
-    Name, NativeCall, NativeError, NativeFunction, NativeHeap, Operand, Param, RegistryError,
-    Signature, Type, Value,
+    Args, Formula, FunctionDefinition, FunctionName, FunctionRegistry, Implementation, Integer,
+    KERNEL_VERSION, Name, NativeCall, NativeError, NativeFunction, Nursery, Operand, Param,
+    RegistryError, Signature, TextView, Type, Value,
 };
-use num_traits::ToPrimitive;
 
 pub use json::{decode_number, parse_json, stringify_json};
 
 pub(super) type Function = (FunctionDefinition, Arc<dyn NativeFunction>);
 
 struct Native {
-    function: fn(NativeCall<'_>) -> Result<Value, NativeError>,
+    function: fn(NativeCall<'_, '_>) -> Result<Value, NativeError>,
     /// From the required parameters to all of them (`K-FN-004`).
     arity: std::ops::RangeInclusive<usize>,
 }
 
 impl NativeFunction for Native {
-    fn call(&self, call: NativeCall<'_>) -> Result<Value, NativeError> {
+    fn call(&self, call: NativeCall<'_, '_>) -> Result<Value, NativeError> {
         if !self.arity.contains(&call.args.len()) {
             return Err(raise("arity", "wrong argument count"));
         }
@@ -69,7 +69,7 @@ fn definition(
     params: &[(&str, Type)],
     result: Type,
     errors: &[&str],
-    native: fn(NativeCall<'_>) -> Result<Value, NativeError>,
+    native: fn(NativeCall<'_, '_>) -> Result<Value, NativeError>,
 ) -> Function {
     // All names are literals supplied by this module, or literals followed by
     // decimal Unicode-version components; none comes from guest input.
@@ -114,10 +114,8 @@ fn definition(
     )
 }
 
-fn raise(kind: &str, message: &str) -> NativeError {
-    NativeError::Raised(Arc::new(lash_kernel_doc::heap::ErrorRef::new(
-        kind, message,
-    )))
+fn raise(kind: &'static str, message: impl Into<String>) -> NativeError {
+    NativeError::refused(kind, message)
 }
 
 fn arg(args: &[Value], index: usize) -> Result<&Value, NativeError> {
@@ -125,43 +123,42 @@ fn arg(args: &[Value], index: usize) -> Result<&Value, NativeError> {
         .ok_or_else(|| raise("arity", "missing argument"))
 }
 
-fn materialized_text(
-    args: &[Value],
-    index: usize,
-    heap: &mut dyn NativeHeap,
-) -> Result<Arc<str>, NativeError> {
-    match arg(args, index)? {
-        Value::Text(text) => match &text.body {
-            lash_kernel_doc::heap::Payload::Resident(text) => Ok(Arc::clone(text)),
-            _ => heap.materialize_text(text),
-        },
-        _ => Err(raise("type_error", "expected text")),
-    }
-}
-fn text_descriptor(
-    args: &[Value],
-    index: usize,
-) -> Result<&lash_kernel_doc::heap::TextRef, NativeError> {
-    match arg(args, index)? {
-        Value::Text(text) => Ok(text),
-        _ => Err(raise("type_error", "expected text")),
-    }
-}
-fn integer_value(
-    args: &[Value],
-    index: usize,
-) -> Result<&lash_kernel_doc::heap::IntRef, NativeError> {
-    match arg(args, index)? {
-        Value::Int(integer) => Ok(integer),
-        _ => Err(raise("type_error", "expected integer")),
-    }
+/// Text argument `index`.
+fn text_view<'call>(args: &Args<'call>, index: usize) -> Result<TextView<'call>, NativeError> {
+    args.text(arg(args.values(), index)?)?
+        .ok_or_else(|| raise("type_error", "expected text"))
 }
 
-fn count_arg(args: &[Value], index: usize) -> Result<usize, NativeError> {
-    let integer = integer_value(args, index)?;
-    let count = match integer {
-        lash_kernel_doc::heap::IntRef::Inline(i) => i.to_usize(),
-        _ => None,
+/// Text argument `index`, whole.
+fn text_arg<'call>(args: &Args<'call>, index: usize) -> Result<Cow<'call, str>, NativeError> {
+    text_view(args, index)?.whole()
+}
+
+/// Text argument `index`, whole, as the heap copied it out: a paged text
+/// holds its bytes ([`Nursery::read_whole`]).
+fn materialized_text<'call>(
+    args: &Args<'call>,
+    new: &mut Nursery<'_>,
+    index: usize,
+) -> Result<Cow<'call, str>, NativeError> {
+    let text = text_view(args, index)?;
+    new.read_whole(text.len())?;
+    text.whole()
+}
+
+fn integer_value<'call>(
+    args: &Args<'call>,
+    index: usize,
+) -> Result<Cow<'call, Integer>, NativeError> {
+    args.integer(arg(args.values(), index)?)?
+        .ok_or_else(|| raise("type_error", "expected integer"))
+}
+
+fn count_arg(args: &Args<'_>, index: usize) -> Result<usize, NativeError> {
+    let count = match arg(args.values(), index)? {
+        Value::Int(count) => usize::try_from(*count).ok(),
+        Value::BigInt(_) => num_traits::ToPrimitive::to_usize(&*integer_value(args, index)?),
+        _ => return Err(raise("type_error", "expected integer")),
     };
     count.ok_or_else(|| {
         raise(
@@ -173,35 +170,30 @@ fn count_arg(args: &[Value], index: usize) -> Result<usize, NativeError> {
 
 /// An empty buffer with room for a text of `bytes`. The buffer and the text
 /// it becomes are reserved against the run's memory bound first
-/// ([`NativeHeap::reserve`]), so a text the bound has no room for is
+/// ([`Nursery::reserve`]), so a text the bound has no room for is
 /// refused before a byte of it is allocated.
-fn text_buffer(heap: &mut dyn NativeHeap, bytes: usize) -> Result<String, NativeError> {
-    heap.reserve(0, room(bytes).saturating_mul(2))?;
+fn text_buffer(new: &mut Nursery<'_>, bytes: usize) -> Result<String, NativeError> {
+    new.reserve(0, room(bytes).saturating_mul(2))?;
     let mut buffer = String::new();
     buffer
         .try_reserve_exact(bytes)
-        .map_err(|_| NativeError::Memory)?;
+        .map_err(|_| crate::exhausted())?;
     Ok(buffer)
 }
 
 /// Reserves a list of `count` values that hold `payload` bytes between
 /// them, before the values are built.
-fn reserve_list(
-    heap: &mut dyn NativeHeap,
-    count: usize,
-    payload: usize,
-) -> Result<(), NativeError> {
-    heap.reserve(room(count), room(payload))
+fn reserve_list(new: &mut Nursery<'_>, count: usize, payload: usize) -> Result<(), NativeError> {
+    new.reserve(room(count), room(payload))
 }
 
 fn room(bytes: usize) -> u64 {
     u64::try_from(bytes).unwrap_or(u64::MAX)
 }
 
-fn int(value: impl Into<num_bigint::BigInt>) -> Value {
-    Value::Int(lash_kernel_doc::heap::IntRef::Inline(
-        lash_kernel_doc::Integer::new(value),
-    ))
+/// A count or an offset, which always fits a word.
+fn int(value: impl TryInto<i64>) -> Value {
+    Value::Int(value.try_into().unwrap_or(i64::MAX))
 }
 
 fn ordering(order: std::cmp::Ordering) -> Value {
@@ -212,17 +204,25 @@ fn ordering(order: std::cmp::Ordering) -> Value {
     })
 }
 
-fn sequence(call: &NativeCall<'_>, index: usize) -> Result<Vec<Value>, NativeError> {
-    match arg(call.args, index)? {
-        Value::List(id) => (0..call.heap.len(*id)?)
-            .map(|i| {
-                call.heap
-                    .list_get(*id, i)?
-                    .ok_or_else(|| raise("type_error", "invalid list"))
-            })
-            .collect(),
-        _ => Err(raise("type_error", "expected list")),
+/// The values of list argument `index`.
+fn sequence(args: &Args<'_>, index: usize) -> Result<Vec<Value>, NativeError> {
+    let list = arg(args.values(), index)?;
+    if !matches!(list, Value::List(_)) {
+        return Err(raise("type_error", "expected list"));
     }
+    sequence_values(args, list)
+}
+
+/// The values of a list or a tuple.
+fn sequence_values(args: &Args<'_>, value: &Value) -> Result<Vec<Value>, NativeError> {
+    let Some(sequence) = args.sequence(value)? else {
+        return Err(raise("type_error", "expected list"));
+    };
+    let mut items = Vec::with_capacity(sequence.len() as usize);
+    for chunk in sequence.chunks() {
+        items.extend_from_slice(chunk?);
+    }
+    Ok(items)
 }
 
 fn sequence_type(element: Type) -> Type {

@@ -3,19 +3,17 @@
 //! determinism are specified independently of the implementation.
 use std::collections::BTreeMap;
 
-use lash_kernel_doc::heap::ErrorRef;
-use lash_kernel_doc::{ErrorDatum, FunctionRegistry, NativeError, WorkCounter};
+use lash_kernel_doc::{Datum, ErrorDatum, FunctionRegistry, NativeError, WorkCounter};
 
 use super::super::register_text_json;
 use super::lab::{Lab, deep, unicode};
 use crate::testsupport;
 
-fn error_datum(lab: &Lab, error: &ErrorRef) -> ErrorDatum {
-    use lash_kernel_doc::NativeHeap as _;
-    ErrorDatum {
-        kind: testsupport::text(&lab.heap, &error.kind),
-        message: testsupport::text(&lab.heap, &error.message),
-        data: lab.datum(&lab.heap.error_data(error).unwrap()),
+/// The error a call raised, as data; `None` for any other answer.
+fn error_datum(lab: &Lab, error: &NativeError) -> Option<ErrorDatum> {
+    match testsupport::error_datum(&lab.heap, error)? {
+        Datum::Error(error) => Some(*error),
+        _ => None,
     }
 }
 
@@ -431,8 +429,8 @@ fn k_lib_006_native_corpus_pins_results_charges_and_determinism() {
                     scalar,
                 )
             }
-            (Err(NativeError::Raised(error)), Err(kind)) => {
-                let error = error_datum(&lab, &error);
+            (Err(error), Err(kind)) if error_datum(&lab, &error).is_some() => {
+                let error = error_datum(&lab, &error).unwrap();
                 assert_eq!(error.kind, kind, "{name}");
                 (serde_json::json!({"raised":error}), 0, true)
             }
@@ -497,7 +495,7 @@ fn k_lib_006_native_corpus_pins_results_charges_and_determinism() {
         let warm = lab.counted(&name, &values, &mut warm_counter);
         let warm = match warm {
             Ok(value) => serde_json::json!({"returned": lab.datum(&value)}),
-            Err(NativeError::Raised(error)) => {
+            Err(error) if error_datum(&lab, &error).is_some() => {
                 serde_json::json!({"raised": error_datum(&lab, &error)})
             }
             error => panic!("unexpected warm outcome: {error:?}"),

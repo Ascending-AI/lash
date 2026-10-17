@@ -14,14 +14,14 @@
 use std::collections::BTreeMap;
 use std::sync::Arc;
 
-use lash_kernel_doc::heap::{EntityId, HeapFault};
+use lash_kernel_doc::heap::{EntityId, HeapFault, PageReader, PageValue};
 use lash_kernel_doc::snapshot::{
     Budget, Crossing, SnapshotError, SnapshotHeap, constant_of, crossing_root, extract, members,
     text_of, token_tag,
 };
 use lash_kernel_doc::{
     Datum, Document, ErrorDatum, Expr, FunctionCatalog, FunctionValueLimits, KernelDataLimits,
-    Name, NativeHeap, Site, Unit, Value,
+    Name, Site, Unit,
 };
 use lash_kernel_state::kernel_internals::PagedHeap;
 use lash_kernel_state::kernel_internals::metadata::metadata_key;
@@ -51,7 +51,7 @@ fn write_fault(error: HeapWriteError) -> HeapFault {
 impl SnapshotHeap for CrossingHeap<'_> {
     type Frozen = Expr;
 
-    fn native(&self) -> &dyn NativeHeap {
+    fn pages(&self) -> &dyn PageReader {
         self.heap
     }
 
@@ -59,7 +59,11 @@ impl SnapshotHeap for CrossingHeap<'_> {
         self.heap.closure(id)?.site.resolve(self.heap.pages())
     }
 
-    fn closure_capture(&mut self, id: EntityId, name: &Name) -> Result<Option<Value>, HeapFault> {
+    fn closure_capture(
+        &mut self,
+        id: EntityId,
+        name: &Name,
+    ) -> Result<Option<PageValue>, HeapFault> {
         let object = self.heap.closure(id)?;
         match object
             .captures
@@ -70,7 +74,7 @@ impl SnapshotHeap for CrossingHeap<'_> {
         }
     }
 
-    fn unit_binding(&mut self, unit: &Unit, name: &Name) -> Result<Option<Value>, HeapFault> {
+    fn unit_binding(&mut self, unit: &Unit, name: &Name) -> Result<Option<PageValue>, HeapFault> {
         match unit {
             Unit::Main => self.heap.session_binding(name),
             Unit::Function(function) => {
@@ -90,7 +94,7 @@ impl SnapshotHeap for CrossingHeap<'_> {
 
     fn freeze(
         &mut self,
-        value: &Value,
+        value: &PageValue,
         named: &BTreeMap<EntityId, Name>,
     ) -> Result<(Expr, std::collections::BTreeSet<Name>), SnapshotError> {
         constant_of(self.heap, value, named, &mut self.budget)
@@ -128,7 +132,7 @@ impl CrossingRun<'_> {
 pub(crate) fn copy_out_tool_arg(
     heap: &mut CrossingHeap<'_>,
     run: &mut CrossingRun<'_>,
-    value: &Value,
+    value: &PageValue,
 ) -> Result<Datum, CopyError> {
     let depth = heap.heap.value_depth_limit();
     copy(heap, run, value, depth, &mut Vec::new())
@@ -137,7 +141,7 @@ pub(crate) fn copy_out_tool_arg(
 fn copy(
     heap: &mut CrossingHeap<'_>,
     run: &mut CrossingRun<'_>,
-    value: &Value,
+    value: &PageValue,
     budget: usize,
     path: &mut Vec<EntityId>,
 ) -> Result<Datum, CopyError> {
@@ -157,14 +161,14 @@ fn copy(
         return Ok(Datum::FunctionValue(Box::new(function)));
     }
     Ok(match value {
-        Value::Tuple(tuple) => {
+        PageValue::Tuple(tuple) => {
             let mut items = Vec::new();
             for member in members(heap.heap, tuple)? {
                 items.push(copy(heap, run, &member, budget, path)?);
             }
             Datum::Tuple(items)
         }
-        Value::List(id) | Value::Map(id) | Value::Set(id) | Value::Record(id) => {
+        PageValue::List(id) | PageValue::Map(id) | PageValue::Set(id) | PageValue::Record(id) => {
             if path.contains(id) {
                 return Err(
                     raised("cycle", "a value that holds itself cannot leave the run").into(),
@@ -176,11 +180,11 @@ fn copy(
             let mut elements = Vec::new();
             heap.heap.visit(*id, &mut |element| {
                 elements.push(match element {
-                    lash_kernel_doc::Element::Item(v) => (None, None, v.clone()),
-                    lash_kernel_doc::Element::Entry { key, value } => {
+                    lash_kernel_doc::heap::Element::Item(v) => (None, None, v.clone()),
+                    lash_kernel_doc::heap::Element::Entry { key, value } => {
                         (Some(key.clone()), None, value.clone())
                     }
-                    lash_kernel_doc::Element::Field { name, value } => {
+                    lash_kernel_doc::heap::Element::Field { name, value } => {
                         (None, Some(name.clone()), value.clone())
                     }
                 });
@@ -199,13 +203,13 @@ fn copy(
             }
             path.pop();
             match value {
-                Value::List(_) => Datum::List(items),
-                Value::Set(_) => Datum::Set(items),
-                Value::Map(_) => Datum::Map(entries),
+                PageValue::List(_) => Datum::List(items),
+                PageValue::Set(_) => Datum::Set(items),
+                PageValue::Map(_) => Datum::Map(entries),
                 _ => Datum::Record(fields),
             }
         }
-        Value::Error(error) => {
+        PageValue::Error(error) => {
             let data = heap.heap.error_data(error)?;
             Datum::Error(Box::new(ErrorDatum {
                 kind: text_of(heap.heap, &error.kind)?,
@@ -213,7 +217,7 @@ fn copy(
                 data: copy(heap, run, &data, budget, path)?,
             }))
         }
-        other => crate::data::copy_out(heap.heap, other)?,
+        other => crate::data::copy_page_out(heap.heap, other)?,
     })
 }
 

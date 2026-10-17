@@ -30,8 +30,8 @@ mod decode;
 pub use decode::{DecodeMismatch, Decoder};
 mod document;
 pub use data_limits::KernelDataLimits;
-/// The arena's frozen target vocabulary and native ABI (FIG-6691): the
-/// arena swap moves it to the crate root.
+/// The arena: what a run's objects are while it executes (seams C, D).
+/// Its value and native ABI are the crate root's.
 pub mod arena;
 mod document_bytes;
 mod function;
@@ -42,8 +42,8 @@ mod graph_codec;
 /// of the document vocabulary.
 #[doc(hidden)]
 pub mod graph_tokens;
-/// The persistent semantic heap's frozen target vocabulary (FIG-6195): the
-/// heap cutover moves it to the crate root.
+/// The persistent semantic heap's page vocabulary: what pages, saved rows
+/// and projection hold (FIG-6195, FIG-6708).
 pub mod heap;
 mod identified;
 pub use document_bytes::{DOCUMENT_GRAMMAR_VERSION, DocumentBytes, DocumentBytesRefusal};
@@ -70,6 +70,11 @@ mod workflow;
 #[cfg(test)]
 mod tests;
 
+pub use arena::Value;
+pub use arena::native::{
+    Args, BytesView, NativeCall, NativeError, NativeFunction, NewObject, Nursery, PreparedNative,
+    Reservation, Retry, Semantics, SequenceView, TableView, TextView,
+};
 pub use ast::{
     ActExpr, ActKind, Action, AssignOrder, Atom, Block, Callee, Catch, Closure, Expr, Function,
     JoinMode, Literal, MapEntry, Member, Node, Place, ProjectionRead, Protocol, RecordEntry, Rhs,
@@ -91,10 +96,7 @@ pub use function_value::{
 pub use graph_codec::{
     FROZEN_DATUM, FROZEN_JSON, FROZEN_TOOL_VALUE, FrozenDatum, MAX_DECODE_DEPTH,
 };
-pub use heap::{
-    Element, EntityId, FamilyId, Identity, NativeCall, NativeError, NativeFunction, NativeHeap,
-    Object, PreparedNative, Value,
-};
+pub use heap::{EntityId, FamilyId, Identity};
 pub use identity::{
     EffectId, LoopCounts, ObservationReader, PositionCounts, PositionLabel, TaskLabel, VisitId,
     WaitId,

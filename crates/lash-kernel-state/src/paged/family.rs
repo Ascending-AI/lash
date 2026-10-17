@@ -18,7 +18,7 @@
 //! pages and owns its own directory version from then on.
 
 use lash_kernel_doc::Name;
-use lash_kernel_doc::heap::{EntityId, FamilyId, HeapFault, LogicalBytes, PageRef, Value};
+use lash_kernel_doc::heap::{EntityId, FamilyId, HeapFault, LogicalBytes, PageRef, PageValue};
 
 use super::heap::HeapWriteError;
 use super::root::KeyedRoot;
@@ -125,10 +125,10 @@ pub trait HeapLifecycle {
     /// boundary (an effect argument, a saved function's capture, a run's
     /// result). Refuses a cycle or a non-data value where `K-EFF-002`
     /// requires data.
-    fn freeze(&mut self, value: &Value, data_only: bool) -> Result<FrozenRef, HeapWriteError>;
+    fn freeze(&mut self, value: &PageValue, data_only: bool) -> Result<FrozenRef, HeapWriteError>;
     /// Instantiates a frozen value as a fresh family, reserving its logical
     /// cost and identities without building any entity.
-    fn instantiate(&mut self, frozen: &FrozenRef) -> Result<Value, HeapWriteError>;
+    fn instantiate(&mut self, frozen: &FrozenRef) -> Result<PageValue, HeapWriteError>;
     /// Classifies the bindings for carry in one union traversal with shared
     /// visited state, skipping it when the data-only certificate suffices.
     fn classify_carry(&mut self, bindings: &KeyedRoot) -> Result<CarryClassification, HeapFault>;

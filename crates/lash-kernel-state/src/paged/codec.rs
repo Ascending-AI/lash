@@ -329,11 +329,11 @@ impl TokenCodec for IncomingRecord {
         Ok(match tag {
             0 => {
                 TokenReader::expect_fields(fields, 1)?;
-                Self::Value(<Value>::decode(input)?)
+                Self::Value(<PageValue>::decode(input)?)
             }
             1 => {
                 TokenReader::expect_fields(fields, 1)?;
-                Self::Raise(<Value>::decode(input)?)
+                Self::Raise(<PageValue>::decode(input)?)
             }
             2 => {
                 TokenReader::expect_fields(fields, 1)?;
@@ -365,11 +365,11 @@ impl TokenCodec for EndedTask {
         Ok(match tag {
             0 => {
                 TokenReader::expect_fields(fields, 1)?;
-                Self::Returned(<Value>::decode(input)?)
+                Self::Returned(<PageValue>::decode(input)?)
             }
             1 => {
                 TokenReader::expect_fields(fields, 1)?;
-                Self::Raised(<Value>::decode(input)?)
+                Self::Raised(<PageValue>::decode(input)?)
             }
             _ => return Err(TokenError::UnsupportedVariant { variant: tag }),
         })
@@ -378,7 +378,7 @@ impl TokenCodec for EndedTask {
 
 record!(FunctionRecord {
     name: NameRef,
-    meta: Value,
+    meta: PageValue,
     release: PageRef,
     captures: std::collections::BTreeMap<lash_kernel_doc::Name, FrozenRef>,
     before: Vec<FrozenRef>,
@@ -407,7 +407,7 @@ impl TokenCodec for BoundRecord {
         Ok(match tag {
             0 => {
                 TokenReader::expect_fields(fields, 1)?;
-                Self::Value(<Value>::decode(input)?)
+                Self::Value(<PageValue>::decode(input)?)
             }
             1 => {
                 TokenReader::expect_fields(fields, 1)?;

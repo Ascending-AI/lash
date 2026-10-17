@@ -4,7 +4,7 @@
 )]
 //! Test-owned page storage; execution and accounting are the real S4/S7 implementations.
 use lash_kernel_doc::heap::*;
-use lash_kernel_doc::{Datum, Name, Value};
+use lash_kernel_doc::{Datum, Name};
 use lash_kernel_state::kernel_internals::{
     PagedHeap,
     census_impl::Census,
@@ -134,48 +134,49 @@ impl Session {
         session
     }
 }
-pub(crate) fn decode(heap: &mut PagedHeap, datum: Datum) -> Value {
+pub(crate) fn decode(heap: &mut PagedHeap, datum: Datum) -> PageValue {
     match datum {
-        Datum::Null => Value::Null,
-        Datum::Absent => Value::Absent,
-        Datum::Bool(v) => Value::Bool(v),
-        Datum::Int(v) => Value::Int(heap.int(v).unwrap()),
-        Datum::Float(v) => Value::Float(v),
-        Datum::Text(v) => Value::Text(heap.text(&v).unwrap()),
-        Datum::Bytes(v) => Value::Bytes(heap.bytes(v.as_slice()).unwrap()),
-        Datum::Timestamp(v) => Value::Timestamp(v),
-        Datum::Function(v) => Value::Function(heap.text(v.as_str()).unwrap()),
-        Datum::Handle(v) => Value::Handle(Arc::new(v)),
+        Datum::Null => PageValue::Null,
+        Datum::Absent => PageValue::Absent,
+        Datum::Bool(v) => PageValue::Bool(v),
+        Datum::Int(v) => PageValue::Int(heap.int(v).unwrap()),
+        Datum::Float(v) => PageValue::Float(v),
+        Datum::Text(v) => PageValue::Text(heap.text(&v).unwrap()),
+        Datum::Bytes(v) => PageValue::Bytes(heap.bytes(v.as_slice()).unwrap()),
+        Datum::Timestamp(v) => PageValue::Timestamp(v),
+        Datum::Function(v) => PageValue::Function(heap.text(v.as_str()).unwrap()),
+        Datum::Handle(v) => PageValue::Handle(Arc::new(v)),
         Datum::Tuple(v) => {
             let v = v.into_iter().map(|v| decode(heap, v)).collect();
-            Value::Tuple(heap.tuple(v).unwrap())
+            PageValue::Tuple(heap.tuple(v).unwrap())
         }
         Datum::List(v) => {
             let v = v.into_iter().map(|v| decode(heap, v)).collect();
-            Value::List(heap.allocate(Object::List(v)).unwrap())
+            PageValue::List(heap.allocate_object(ObjectInit::List(v)).unwrap())
         }
         Datum::Set(v) => {
             let v = v.into_iter().map(|v| decode(heap, v)).collect();
-            Value::Set(heap.allocate(Object::Set(v)).unwrap())
+            PageValue::Set(heap.allocate_object(ObjectInit::Set(v)).unwrap())
         }
         Datum::Map(v) => {
             let v = v
                 .into_iter()
                 .map(|(k, v)| (decode(heap, k), decode(heap, v)))
                 .collect();
-            Value::Map(heap.allocate(Object::Map(v)).unwrap())
+            PageValue::Map(heap.allocate_object(ObjectInit::Map(v)).unwrap())
         }
         Datum::Record(v) => {
             let v = v
                 .into_iter()
                 .map(|(k, v)| (heap.text(&k).unwrap(), decode(heap, v)))
                 .collect();
-            Value::Record(heap.allocate(Object::Record(v)).unwrap())
+            PageValue::Record(heap.allocate_object(ObjectInit::Record(v)).unwrap())
         }
         Datum::Error(v) => {
             let mut error = ErrorRef::new(&v.kind, &v.message);
             error.data = Payload::Resident(Arc::new(decode(heap, v.data)));
-            heap.canonical_value(Value::Error(Arc::new(error))).unwrap()
+            heap.canonical_value(PageValue::Error(Arc::new(error)))
+                .unwrap()
         }
         Datum::Number(_) => panic!("corpus inputs have decoded numbers"),
         Datum::FunctionValue(_) => panic!("a function value never enters a run"),

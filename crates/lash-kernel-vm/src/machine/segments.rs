@@ -23,9 +23,10 @@
 
 use std::sync::Arc;
 
+use lash_kernel_doc::arena::ArenaHandle;
 use lash_kernel_doc::plan::PlanExit;
-use lash_kernel_doc::{EntityId, Identity, TaskId, Value};
-use lash_kernel_state::paged::{PhaseRecord, RoleRecord, SemanticHeap};
+use lash_kernel_doc::{TaskId, Value};
+use lash_kernel_state::paged::{PhaseRecord, RoleRecord};
 
 use super::actions::Target;
 use super::exec::Call;
@@ -37,7 +38,6 @@ use super::plans::{PlanRun, Walk};
 use super::{Completion, Control, Eval, Frame, Halt, Interrupt, KernelMachine, LibraryCall, fault};
 use crate::compile::segments::{Segment, SiteControl};
 use crate::compile::{CodeId, Executable, LibId, LibRun, PreparedPlan};
-use crate::heap::value_bytes;
 use crate::interface::Host;
 use crate::observe::Event;
 
@@ -74,7 +74,7 @@ pub(super) enum Callee {
     },
     Code {
         code: CodeId,
-        captures: Vec<EntityId>,
+        captures: Vec<ArenaHandle>,
         args: Reg,
         count: usize,
     },
@@ -263,9 +263,9 @@ impl KernelMachine {
         let (segment, code_id) = segment_of(exe, lib, &plan)?;
         let site = &segment.sites[site as usize];
         let arity = exe.lib(lib).arity;
-        // What the frame holds, canonical and held as a bound value is,
-        // while the registers still hold it. A parameter is held once, and
-        // a variable a closure shares is in its cell.
+        // What the frame holds, held as a bound value is, while the
+        // registers still hold it. A parameter is held once, and a variable
+        // a closure shares is in its cell.
         self.reserve_held(super::FRAME_BYTES)?;
         let local = |slot: u32| {
             plan.locals[slot as usize].ok_or_else(|| fault("a segment's site binds no variable"))
@@ -291,23 +291,20 @@ impl KernelMachine {
         }
         held.extend(site.roles.iter().map(|(_, reg)| base + *reg as usize));
         for at in held {
-            let value = self.take(at);
-            let value = self.canonical_binding(value)?;
-            self.reserve_held(value_bytes(&value))?;
-            self.put(at, value);
+            self.reserve_held(self.cost_of(&self.regs[at]))?;
         }
         let mut frame = self.fresh_frame(exe, code_id)?;
         frame.scalar_blocks = code.versions.select(&self.regs[args..args + arity]);
         frame.slots.fresh(code.slots_by_at.len());
         for (index, at) in segment.params.iter().enumerate() {
-            let value = self.regs[args + index].clone();
+            let value = self.regs[args + index];
             frame.set_slot(*at, super::SlotState::Value(value));
         }
         for slot in &site.bound {
             let local = local(*slot)?;
-            let value = self.regs[slots + *slot as usize].clone();
+            let value = self.regs[slots + *slot as usize];
             let state = match value {
-                Value::Ref(Identity::Object(cell)) if local.shared => super::SlotState::Cell(cell),
+                Value::ObjectRef(cell) if local.shared => super::SlotState::Cell(cell),
                 _ if local.shared => return Err(fault("a shared variable has no cell").into()),
                 value => super::SlotState::Value(value),
             };
@@ -352,17 +349,17 @@ impl KernelMachine {
         frame.awaiting = Some(site.stmt);
         frame.nested = site.act;
         if site.act.is_some() {
+            let mut roles = Vec::with_capacity(site.roles.len());
+            for (path, reg) in &site.roles {
+                roles.push(RoleRecord {
+                    site: path.clone(),
+                    value: self.page_form(&self.regs[base + *reg as usize])?,
+                });
+            }
             frame.pending.set(Pending {
                 site: site.pending.clone(),
                 phase: PhaseRecord::Called,
-                roles: site
-                    .roles
-                    .iter()
-                    .map(|(path, reg)| RoleRecord {
-                        site: path.clone(),
-                        value: self.regs[base + *reg as usize].clone(),
-                    })
-                    .collect(),
+                roles,
             });
         }
         let args = match kept {
@@ -439,8 +436,7 @@ impl KernelMachine {
                 self.recycle(frame);
                 return Ok(Ok(None));
             }
-            Err(Interrupt::Halt(halt)) => return Err(*halt),
-            Err(Interrupt::Raise(value)) => Err(*value),
+            Err(interrupt) => Err(*self.thrown_by(interrupt)?),
         };
         self.left(task, host, exe, frame, result).map(Ok)
     }
@@ -468,8 +464,11 @@ impl KernelMachine {
         self.regs.window(slots + plan.plan.slots.len());
         for (index, at) in segment.params.iter().enumerate() {
             let value = match frame.slot(*at) {
-                super::SlotState::Value(value) => value.clone(),
-                super::SlotState::Cell(cell) => self.heap.variable_get(*cell)?,
+                super::SlotState::Value(value) => *value,
+                super::SlotState::Cell(cell) => {
+                    let cell = *cell;
+                    self.in_arena(|arena| arena.cell(cell))?
+                }
                 super::SlotState::Empty => {
                     return Err(fault("a segment's frame holds no parameter").into());
                 }
@@ -480,8 +479,8 @@ impl KernelMachine {
             let local = plan.locals[*slot as usize]
                 .ok_or_else(|| fault("a segment's site binds no variable"))?;
             let value = match (frame.slot(local.at), local.shared) {
-                (super::SlotState::Value(value), false) => value.clone(),
-                (super::SlotState::Cell(cell), true) => Value::Ref(Identity::Object(*cell)),
+                (super::SlotState::Value(value), false) => *value,
+                (super::SlotState::Cell(cell), true) => Value::ObjectRef(*cell),
                 _ => return Err(fault("a segment's frame holds another variable").into()),
             };
             self.put(slots + *slot as usize, value);
@@ -546,7 +545,7 @@ impl KernelMachine {
             .as_ref()
             .map(|call| call.args.clone())
             .unwrap_or_default();
-        self.pins.borrowed.extend(kept.iter().cloned());
+        self.pins.borrowed.extend(kept.iter().copied());
         let charging = std::mem::replace(&mut self.charging, false);
         self.plans += 1;
         let mut run = PlanRun {
@@ -575,9 +574,10 @@ impl KernelMachine {
                         .iter()
                         .flatten()
                         .find(|role| role.site == *path)
-                        .map(|role| role.value.clone());
+                        .map(|role| run.machine.admit_page(&role.value));
                     match role {
-                        Some(role) => run.machine.put(base + *reg as usize, role),
+                        Some(Ok(role)) => run.machine.put(base + *reg as usize, role),
+                        Some(Err(halt)) => run.halt = Some(Box::new(halt)),
                         None => {
                             run.halt =
                                 Some(Box::new(fault("a saved continuation role is missing")));
@@ -585,7 +585,7 @@ impl KernelMachine {
                     }
                 }
                 // The value is in no variable until the statement uses it.
-                run.machine.pins.borrowed.push(value.clone());
+                run.machine.pins.borrowed.push(value);
                 run.machine.put(base + stood.dst as usize, value);
                 if run.halt.is_some() {
                     Err(PlanExit::Halt)

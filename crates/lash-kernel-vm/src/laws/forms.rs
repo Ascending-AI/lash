@@ -708,6 +708,6 @@ fn a_cell_carries_unsealed_bindings_at_its_end() {
         .unwrap();
     assert!(matches!(
         binding.value,
-        lash_kernel_state::paged::BoundRecord::Value(lash_kernel_doc::Value::Int(_))
+        lash_kernel_state::paged::BoundRecord::Value(lash_kernel_doc::heap::PageValue::Int(_))
     ));
 }

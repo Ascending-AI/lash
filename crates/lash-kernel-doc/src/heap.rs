@@ -1,11 +1,14 @@
-//! The persistent semantic heap's value vocabulary and native contract
-//! (FIG-6187, seams S1 and S2 of `docs/design/persistent-heap-seams.md`).
+//! The persistent semantic heap's page vocabulary (FIG-6187, seams S1 and
+//! S2 of `docs/design/persistent-heap-seams.md`; seam C of
+//! `docs/design/kernel-end-state.md`).
 //!
-//! These are the frozen target declarations of the heap cutover. Nothing
-//! uses them yet: the cutover moves [`Value`], [`Object`], [`Identity`],
-//! [`Element`], [`NativeHeap`], [`NativeCall`], [`NativeError`] and
-//! [`NativeFunction`] to the crate root in place of the flat-heap ones in
-//! `value.rs` and `native.rs`, which it deletes (layer hp-heap, FIG-6188).
+//! Running state lives in the arena (`crate::arena`); pages are its
+//! projection. [`PageValue`] is a value as a page, a saved tree row or a
+//! census root holds it: immutable data in place or by descriptor
+//! ([`TextRef`], [`IntRef`], [`BytesRef`], [`TupleRef`], [`ErrorRef`]), or
+//! the durable identity of a heap entity. Execution and natives never see
+//! it: the machine projects an arena value to its page form where it saves
+//! one, and admits a page value into the arena where it reads one.
 //!
 //! A mutable object is an [`EntityId`]: an opaque identity, never a content
 //! hash. Immutable stored pages are [`PageId`]s: content hashes, never
@@ -101,7 +104,7 @@ pub const PAYLOAD_LEAF_BYTES: u64 = 4_096;
 /// Where an immutable payload's bytes are. Both variants are one shared
 /// pointer: a cold payload's 80-byte [`PageRef`] is held once behind its
 /// `Arc` and shared by every copy of the value, never inlined in each
-/// [`Value`] (`docs/design/vm-value-layout.md`).
+/// [`PageValue`] (`docs/design/vm-value-layout.md`).
 #[derive(Debug)]
 pub enum Payload<T: ?Sized> {
     /// At most [`IMMUTABLE_INLINE_MAX`] bytes, or a value built in this
@@ -225,7 +228,7 @@ pub struct TupleRef {
     /// Namespace for untouched frozen tuple pages.
     pub family: Option<FamilyId>,
     pub summary: TupleSummary,
-    pub body: Payload<[Value]>,
+    pub body: Payload<[PageValue]>,
 }
 
 /// An immutable error value: kind, message and data, each paged like any
@@ -236,7 +239,7 @@ pub struct ErrorRef {
     pub task_edges: u64,
     pub kind: TextRef,
     pub message: TextRef,
-    pub data: Payload<Value>,
+    pub data: Payload<PageValue>,
     /// Authenticated tuple/error nesting depth.
     pub depth: u32,
     pub cost: LogicalBytes,
@@ -250,20 +253,19 @@ pub enum Identity {
     Task(TaskId),
 }
 
-/// A kernel value after the cutover: immutable data in place or by
-/// descriptor, or the identity of a heap entity.
+/// A value in its page form: what a page, a saved tree row or a census root
+/// holds (`docs/design/kernel-end-state.md` §C, the projection column).
+/// Immutable data is in place or by descriptor; a mutable object is its
+/// durable entity identity. It is the arena value's projection, never a
+/// running value.
 ///
-/// It is 56 bytes: every variant is a scalar, an identity, or
-/// a descriptor whose cold parts are shared pointers. A paged payload's
-/// page reference and a tuple's descriptor live behind an `Arc`, so a
-/// register, frame slot or call operand moves a small value
-/// (`docs/design/vm-value-layout.md`).
+/// It is 56 bytes: every variant is a scalar, an identity, or a descriptor
+/// whose cold parts are shared pointers.
 ///
-/// It has no Rust equality. Guest equality, ordering and key normalization
-/// are the heap's (`SemanticHeap::equal`, `SemanticHeap::normal_key`):
-/// they can read pages and are fallible.
+/// It has no Rust equality. Guest equality and key normalization over page
+/// values are the paged heap's: they can read pages and are fallible.
 #[derive(Clone, Debug)]
-pub enum Value {
+pub enum PageValue {
     Null,
     Absent,
     Bool(bool),
@@ -285,11 +287,10 @@ pub enum Value {
     Ref(Identity),
 }
 
-// The layout is part of the call path's cost: every register, slot and
-// operand moves a whole Value (FIG-6502, `docs/design/vm-value-layout.md`).
-const _: () = assert!(std::mem::size_of::<Value>() == 56);
+// Saved rows and census roots move whole page values.
+const _: () = assert!(std::mem::size_of::<PageValue>() == 56);
 
-impl Value {
+impl PageValue {
     pub fn kind(&self) -> crate::ValueKind {
         use crate::ValueKind;
         match self {
@@ -324,8 +325,8 @@ impl Value {
             _ => None,
         }
     }
-    /// A value being built in this activation. Publication canonicalizes a
-    /// long resident payload into pages before sealing any containing record.
+    /// A text built in this activation. Publication canonicalizes a long
+    /// resident payload into pages before sealing any containing record.
     pub fn text(text: impl Into<Arc<str>>) -> Self {
         let text = text.into();
         Self::Text(TextRef {
@@ -347,7 +348,7 @@ impl ErrorRef {
             task_edges: 0,
             kind: text(kind),
             message: text(message),
-            data: Payload::Resident(Arc::new(Value::Null)),
+            data: Payload::Resident(Arc::new(PageValue::Null)),
             depth: 1,
             cost: LogicalBytes((kind.len() + message.len()) as u64 + 16),
             has_edges: false,
@@ -376,22 +377,19 @@ impl NormalKey {
     pub const INLINE_MAX: usize = 256;
 }
 
-/// What a native allocates: a fresh list, map, set or record.
-#[derive(Clone, Debug)]
-pub enum Object {
-    List(Vec<Value>),
-    Map(Vec<(Value, Value)>),
-    Set(Vec<Value>),
-    Record(Vec<(TextRef, Value)>),
-}
-
-/// One element of an object, as [`NativeHeap::visit`] lends it: borrowed
+/// One element of an object, as the paged heap's visit lends it: borrowed
 /// from a page pinned for the callback only.
 #[derive(Clone, Copy, Debug)]
 pub enum Element<'a> {
-    Item(&'a Value),
-    Entry { key: &'a Value, value: &'a Value },
-    Field { name: &'a TextRef, value: &'a Value },
+    Item(&'a PageValue),
+    Entry {
+        key: &'a PageValue,
+        value: &'a PageValue,
+    },
+    Field {
+        name: &'a TextRef,
+        value: &'a PageValue,
+    },
 }
 
 /// One chunk of an immutable payload, as a chunk visit lends it.
@@ -446,52 +444,27 @@ pub enum HostResource {
     HostWork,
 }
 
-/// How a native call ends without a value, after the cutover.
-#[derive(Clone, Debug, thiserror::Error)]
-pub enum NativeError {
-    /// The function raises this error value.
-    #[error("{0:?}")]
-    Raised(Arc<ErrorRef>),
-    #[error(transparent)]
-    Guard(#[from] crate::native::GuardExceeded),
-    /// The run's memory bound refused a reservation after exact refinement.
-    #[error("the run's memory bound refused an allocation")]
-    Memory,
-    /// Heap access failed: the call ends the run as infrastructure.
-    #[error(transparent)]
-    Heap(#[from] HeapFault),
-    /// The native answers only some of its inputs and declines this one:
-    /// the definition's kernel body runs the call instead (an operation's
-    /// partial native). A declining native has done nothing a run sees: it
-    /// built nothing the call keeps and counted no guard work. A native
-    /// whose definition has no body never declines.
-    #[error("the native declined the call")]
-    Decline,
-}
-
-/// What a native function sees of the heap after the cutover: fallible
-/// reads of what exists, range access to immutable payloads, reservation
-/// and allocation. It cannot change an entity that exists (`K-LIB-007`).
+/// What the paged heap answers about page values without changing
+/// anything: the read face projection, materialization and snapshot
+/// gathering use (seam D). Execution and natives read the arena instead.
 ///
 /// A read of an identity of another kind than the method asks for is the
-/// valid semantic answer it is today (empty, `None`, `false`); only storage
-/// failure is a [`HeapFault`].
-///
-/// Implemented by the paged heap (layer hp-heap, FIG-6188).
-pub trait NativeHeap {
-    fn normal_key(&self, value: &Value) -> Result<Option<NormalKey>, HeapFault>;
-    fn equal(&self, a: &Value, b: &Value) -> Result<bool, HeapFault>;
+/// valid semantic answer (empty, `None`, `false`); only storage failure is
+/// a [`HeapFault`].
+pub trait PageReader {
+    fn normal_key(&self, value: &PageValue) -> Result<Option<NormalKey>, HeapFault>;
+    fn equal(&self, a: &PageValue, b: &PageValue) -> Result<bool, HeapFault>;
     fn data_depth_limit(&self) -> usize;
     fn value_depth_limit(&self) -> usize;
     fn len(&self, object: EntityId) -> Result<u64, HeapFault>;
-    fn list_get(&self, list: EntityId, index: u64) -> Result<Option<Value>, HeapFault>;
-    fn map_get(&self, map: EntityId, key: &Value) -> Result<Option<Value>, HeapFault>;
-    fn set_contains(&self, set: EntityId, member: &Value) -> Result<bool, HeapFault>;
+    fn list_get(&self, list: EntityId, index: u64) -> Result<Option<PageValue>, HeapFault>;
+    fn map_get(&self, map: EntityId, key: &PageValue) -> Result<Option<PageValue>, HeapFault>;
+    fn set_contains(&self, set: EntityId, member: &PageValue) -> Result<bool, HeapFault>;
     fn record_get(
         &self,
         record: EntityId,
         field: FieldName<'_>,
-    ) -> Result<Option<Value>, HeapFault>;
+    ) -> Result<Option<PageValue>, HeapFault>;
     /// Visits a list's elements by index, or a map's, set's or record's
     /// contents in insertion order, until the visitor breaks. Each page is
     /// read once per visit; a fault ends the visit with nothing repeated.
@@ -500,87 +473,23 @@ pub trait NativeHeap {
         object: EntityId,
         visitor: &mut dyn FnMut(Element<'_>) -> ControlFlow<()>,
     ) -> Result<(), HeapFault>;
-    fn error_data(&self, error: &ErrorRef) -> Result<Value, HeapFault>;
-    fn tuple_get(&self, tuple: &TupleRef, index: u64) -> Result<Option<Value>, HeapFault>;
+    fn error_data(&self, error: &ErrorRef) -> Result<PageValue, HeapFault>;
+    fn tuple_get(&self, tuple: &TupleRef, index: u64) -> Result<Option<PageValue>, HeapFault>;
     fn tuple_visit(
         &self,
         tuple: &TupleRef,
-        visitor: &mut dyn FnMut(&Value) -> ControlFlow<()>,
+        visitor: &mut dyn FnMut(&PageValue) -> ControlFlow<()>,
     ) -> Result<(), HeapFault>;
     /// Visits the chunks of `range` in order, until the visitor breaks.
     /// Text ranges cut on scalar boundaries. Bytes and paged integers yield
-    /// `Chunk::Bytes`; integer ranges address canonical little-endian magnitude
-    /// digits, with the sign retained in the integer descriptor. This read
-    /// creates no guest reservation, including outbound copies (`K-EFF-002`).
+    /// `Chunk::Bytes`; integer ranges address canonical little-endian
+    /// magnitude digits, with the sign retained in the integer descriptor.
     fn payload_visit(
         &self,
-        value: &Value,
+        value: &PageValue,
         range: Range<u64>,
         visitor: &mut dyn FnMut(Chunk<'_>) -> ControlFlow<()>,
     ) -> Result<(), HeapFault>;
     /// The byte offset of character `index` of a text (`chars` counting).
     fn text_offset(&self, text: &TextRef, index: u64) -> Result<u64, HeapFault>;
-    /// A contiguous copy of a text, for an algorithm that needs one (a
-    /// regex, a foreign codec). It reserves the copy's size first.
-    fn materialize_text(&mut self, text: &TextRef) -> Result<Arc<str>, NativeError>;
-    fn materialize_bytes(&mut self, bytes: &BytesRef) -> Result<Arc<[u8]>, NativeError>;
-    fn materialize_int(&mut self, int: &IntRef) -> Result<Integer, NativeError>;
-    /// Builds an immutable value from a contiguous payload the call
-    /// reserved. A long one is placed in payload pages.
-    fn text(&mut self, text: &str) -> Result<TextRef, NativeError>;
-    fn bytes(&mut self, bytes: &[u8]) -> Result<BytesRef, NativeError>;
-    fn int(&mut self, int: Integer) -> Result<IntRef, NativeError>;
-    fn tuple(&mut self, members: Vec<Value>) -> Result<Arc<TupleRef>, NativeError>;
-    /// Joins immutable payloads without copying the pages they share.
-    fn concat(&mut self, parts: &[Value]) -> Result<Value, NativeError>;
-    fn slice(&mut self, value: &Value, range: Range<u64>) -> Result<Value, NativeError>;
-    fn allocate(&mut self, object: Object) -> Result<EntityId, NativeError>;
-    /// Reserves room for what the call is about to hold, as today
-    /// (`K-BND-003`): `values` values and `bytes` bytes. A refusal comes only
-    /// after the heap's exact refinement (`NativeError::Memory`).
-    fn reserve(&mut self, values: u64, bytes: u64) -> Result<(), NativeError>;
-}
-
-/// One native call after the cutover.
-pub struct NativeCall<'a> {
-    pub args: &'a [Value],
-    pub heap: &'a mut dyn NativeHeap,
-    pub counter: &'a mut crate::native::WorkCounter,
-}
-
-/// A native implementation after the cutover: the purity rules of
-/// `crate::NativeFunction` hold unchanged. A [`NativeError::Heap`] is not a
-/// result: a call that faulted is never resumed as one.
-pub trait NativeFunction: Send + Sync {
-    fn call(&self, call: NativeCall<'_>) -> Result<Value, NativeError>;
-
-    /// A heap-independent prepared entry, as today. It reads no page: an
-    /// operand that is paged makes it return `None`.
-    fn prepare(&self) -> Option<PreparedNative> {
-        None
-    }
-
-    /// Returns an existing argument or a value reached through one, without
-    /// creating a result allocation, or returns a pre-held immediate. Its
-    /// answer must remain reachable through the arguments until the machine
-    /// transfers it to the result register; no second holding is allocated.
-    fn returns_borrowed(&self) -> bool {
-        self.record_read_marker().is_some()
-    }
-
-    /// Offers a guarded record-read specialization. This promises that the
-    /// native answers exactly an existing field for `[Record, Text]` when
-    /// `marker` is not the empty tuple, and declines every other input.
-    /// The machine reads both fields through its heap; a position hint must
-    /// verify the field name. The native still supplies the general call.
-    fn record_read_marker(&self) -> Option<&'static str> {
-        None
-    }
-}
-
-/// A native's certified, heap-independent entry after the cutover.
-#[derive(Clone, Copy, Debug)]
-pub struct PreparedNative {
-    pub entry: fn(&[Value]) -> Option<Value>,
-    pub operation: &'static str,
 }

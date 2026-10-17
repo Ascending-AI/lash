@@ -3,7 +3,7 @@ use std::mem::size_of;
 
 use lash_kernel_doc::TaskId;
 use lash_kernel_doc::heap::{
-    EntityId, FamilyId, HeapFault, HostResource, Identity, LogicalBytes, Value,
+    EntityId, FamilyId, HeapFault, HostResource, Identity, LogicalBytes, PageValue,
 };
 
 use super::malformed;
@@ -288,30 +288,30 @@ pub(super) fn trace(
         // Direct identities stream into the bitmap. Only immutable
         // descriptors needing the graph's summary reader wait in scratch.
         let identity = match value {
-            Value::List(entity)
-            | Value::Map(entity)
-            | Value::Set(entity)
-            | Value::Record(entity)
-            | Value::Closure(entity) => Some(Identity::Object(*entity)),
-            Value::Task(task) => Some(Identity::Task(*task)),
-            Value::Ref(identity) => Some(*identity),
+            PageValue::List(entity)
+            | PageValue::Map(entity)
+            | PageValue::Set(entity)
+            | PageValue::Record(entity)
+            | PageValue::Closure(entity) => Some(Identity::Object(*entity)),
+            PageValue::Task(task) => Some(Identity::Task(*task)),
+            PageValue::Ref(identity) => Some(*identity),
             _ => None,
         };
         if let Some(identity) = identity {
             return marks.mark(identity);
         }
         match value {
-            Value::Tuple(tuple) if tuple.summary.has_edges => {}
-            Value::Error(error) if error.has_edges => {}
+            PageValue::Tuple(tuple) if tuple.summary.has_edges => {}
+            PageValue::Error(error) if error.has_edges => {}
             _ => return Ok(()),
         }
         if roots.len() == roots.capacity() {
             let next = roots.capacity().max(4) * 2;
-            marks.budget(next * size_of::<Value>())?;
+            marks.budget(next * size_of::<PageValue>())?;
             roots
                 .try_reserve_exact(next - roots.len())
                 .map_err(|_| exhausted(HostResource::TraceBudget))?;
-            marks.roots_bytes = roots.capacity() * size_of::<Value>();
+            marks.roots_bytes = roots.capacity() * size_of::<PageValue>();
             marks.budget(0)?;
         }
         roots.push(value.clone());

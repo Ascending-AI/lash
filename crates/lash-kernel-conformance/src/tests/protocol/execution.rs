@@ -12,7 +12,7 @@ use super::{Case, World, end, int, main, program, registry, start};
 
 struct Null;
 impl NativeFunction for Null {
-    fn call(&self, _: NativeCall<'_>) -> Result<Value, NativeError> {
+    fn call(&self, _: NativeCall<'_, '_>) -> Result<Value, NativeError> {
         Ok(Value::Null)
     }
 }
@@ -100,7 +100,8 @@ fn formula(case: &Case) {
 
 fn session(rule: &str, case: &Case) {
     use crate::pages::Session;
-    use lash_kernel_doc::{Name, Value};
+    use lash_kernel_doc::Name;
+    use lash_kernel_doc::heap::PageValue;
     use lash_kernel_state::kernel_internals::tree::Tree;
     use lash_kernel_state::paged::{BindingRecord, BoundRecord};
     let library = registry();
@@ -138,7 +139,7 @@ fn session(rule: &str, case: &Case) {
             )
             .unwrap()
             .unwrap();
-        let (BoundRecord::Value(Value::List(a)), BoundRecord::Value(Value::List(b))) =
+        let (BoundRecord::Value(PageValue::List(a)), BoundRecord::Value(PageValue::List(b))) =
             (a.value, b.value)
         else {
             panic!("list aliases")

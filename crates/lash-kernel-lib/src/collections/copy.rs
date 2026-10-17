@@ -1,112 +1,125 @@
 //! Deep copies preserve sharing, refuse cycles, and keep opaque identities.
-use std::collections::{BTreeMap, BTreeSet};
-use std::ops::ControlFlow;
+use std::collections::HashMap;
 
-use lash_kernel_doc::{Element, EntityId, NativeError, NativeHeap, Object, Value};
+use lash_kernel_doc::arena::ArenaHandle;
+use lash_kernel_doc::{Args, NativeError, NewObject, Nursery, Value};
 
-use super::{native::snapshot, raise};
+use super::native::{entries, items, snapshot};
+use super::raise;
 use crate::numbers::KIND_NAMES;
-use lash_kernel_doc::heap::Payload;
 
-pub(super) fn deep(value: &Value, heap: &mut dyn NativeHeap) -> Result<Value, NativeError> {
+/// A handle's slot, as a call-local map key: what a copy has met, never
+/// anything the run observes.
+fn slot(handle: ArenaHandle) -> (u32, u32) {
+    (handle.index(), handle.generation())
+}
+
+/// What a deep copy reads nests no deeper than this.
+fn depth_limit(args: &Args<'_>) -> usize {
+    args.limits().value_depth().min(128)
+}
+
+pub(super) fn deep<'call>(
+    value: &Value,
+    args: &Args<'call>,
+    new: &mut Nursery<'call>,
+) -> Result<Value, NativeError> {
     Copy {
-        heap,
-        active: BTreeSet::new(),
-        copied: BTreeMap::new(),
+        args,
+        new,
+        active: Vec::new(),
+        copied: HashMap::new(),
     }
     .value(value, 0)
 }
-struct Copy<'a> {
-    heap: &'a mut dyn NativeHeap,
-    active: BTreeSet<EntityId>,
-    copied: BTreeMap<EntityId, Value>,
+struct Copy<'a, 'call> {
+    args: &'a Args<'call>,
+    new: &'a mut Nursery<'call>,
+    active: Vec<ArenaHandle>,
+    copied: HashMap<(u32, u32), Value>,
 }
-impl Copy<'_> {
+impl Copy<'_, '_> {
     fn value(&mut self, value: &Value, depth: usize) -> Result<Value, NativeError> {
-        if depth > self.heap.value_depth_limit().min(128) {
+        let limit = depth_limit(self.args);
+        if depth > limit {
             return Err(raise(
                 "too_deep",
-                &format!(
-                    "deep copy exceeds the configured {} levels",
-                    self.heap.value_depth_limit().min(128)
-                ),
+                format!("deep copy exceeds the configured {limit} levels"),
             ));
         }
         match value {
-            Value::Tuple(tuple) => {
-                let mut values = Vec::new();
-                self.heap.tuple_visit(tuple, &mut |v| {
-                    values.push(v.clone());
-                    ControlFlow::Continue(())
-                })?;
+            Value::Tuple(_) => {
+                let values = items(self.args, value)?;
                 let values = self.items(&values, depth)?;
-                Ok(Value::Tuple(self.heap.tuple(values)?))
+                Ok(self.new.allocate(NewObject::Tuple(values)))
             }
-            Value::Error(error) => {
-                let mut copied = (**error).clone();
-                copied.family = None;
-                let data = self.heap.error_data(error)?;
-                copied.data = Payload::Resident(std::sync::Arc::new(self.value(&data, depth + 1)?));
-                if let Payload::Resident(data) = &copied.data {
-                    copied.task_edges = lash_kernel_doc::heap_values::task_count(data);
-                    copied.cost = lash_kernel_doc::heap::LogicalBytes(
-                        copied.kind.summary.utf8_bytes
-                            + copied.message.summary.utf8_bytes
-                            + lash_kernel_doc::heap_values::local_cost(data),
-                    );
-                }
-                Ok(Value::Error(std::sync::Arc::new(copied)))
+            Value::Error(_) => {
+                let Some(error) = self.args.error(value)? else {
+                    return Err(NativeError::Malformed("an error names another body"));
+                };
+                let (kind, message) = (error.kind, error.message);
+                let data = self.value(&error.data, depth + 1)?;
+                Ok(self.new.allocate(NewObject::Error {
+                    kind,
+                    message,
+                    data,
+                }))
             }
             Value::List(id) | Value::Map(id) | Value::Set(id) | Value::Record(id) => {
                 self.object(value, *id, depth)
             }
             // A ref names its original object; closures, task handles and host handles
             // are opaque identities, not collection contents to duplicate.
-            other => Ok(other.clone()),
+            other => Ok(*other),
         }
     }
     fn items(&mut self, items: &[Value], depth: usize) -> Result<Vec<Value>, NativeError> {
         items.iter().map(|x| self.value(x, depth + 1)).collect()
     }
-    fn object(&mut self, value: &Value, id: EntityId, depth: usize) -> Result<Value, NativeError> {
+    fn pairs(
+        &mut self,
+        pairs: &[(Value, Value)],
+        depth: usize,
+        keys: bool,
+    ) -> Result<Vec<(Value, Value)>, NativeError> {
+        pairs
+            .iter()
+            .map(|(key, value)| {
+                let key = if keys {
+                    self.value(key, depth + 1)?
+                } else {
+                    *key
+                };
+                Ok((key, self.value(value, depth + 1)?))
+            })
+            .collect()
+    }
+    fn object(
+        &mut self,
+        value: &Value,
+        id: ArenaHandle,
+        depth: usize,
+    ) -> Result<Value, NativeError> {
         if self.active.contains(&id) {
             return Err(raise(
                 "cyclic_value",
                 "deep copy refuses a collection cycle",
             ));
         }
-        if let Some(copied) = self.copied.get(&id) {
-            return Ok(copied.clone());
+        if let Some(copied) = self.copied.get(&slot(id)) {
+            return Ok(*copied);
         }
-        self.active.insert(id);
-        let object = match snapshot(value, self.heap)? {
-            Object::List(items) => Object::List(self.items(&items, depth)?),
-            Object::Set(items) => Object::Set(self.items(&items, depth)?),
-            Object::Map(entries) => Object::Map(
-                entries
-                    .iter()
-                    .map(|(key, value)| {
-                        Ok((self.value(key, depth + 1)?, self.value(value, depth + 1)?))
-                    })
-                    .collect::<Result<_, NativeError>>()?,
-            ),
-            Object::Record(fields) => Object::Record(
-                fields
-                    .iter()
-                    .map(|(name, value)| Ok((name.clone(), self.value(value, depth + 1)?)))
-                    .collect::<Result<_, NativeError>>()?,
-            ),
-        };
-        let copy = self.heap.allocate(object)?;
-        let copied = match value {
-            Value::List(_) => Value::List(copy),
-            Value::Map(_) => Value::Map(copy),
-            Value::Set(_) => Value::Set(copy),
-            Value::Record(_) => Value::Record(copy),
+        self.active.push(id);
+        let object = match snapshot(self.args, value)? {
+            NewObject::List(items) => NewObject::List(self.items(&items, depth)?),
+            NewObject::Set(items) => NewObject::Set(self.items(&items, depth)?),
+            NewObject::Map(entries) => NewObject::Map(self.pairs(&entries, depth, true)?),
+            NewObject::Record(fields) => NewObject::Record(self.pairs(&fields, depth, false)?),
             _ => unreachable!("object snapshot selected the four collection kinds"),
         };
-        self.active.remove(&id);
-        self.copied.insert(id, copied.clone());
+        let copied = self.new.allocate(object);
+        self.active.pop();
+        self.copied.insert(slot(id), copied);
         Ok(copied)
     }
 }
@@ -120,60 +133,78 @@ impl Copy<'_> {
 pub(super) fn holds_none(
     value: &Value,
     refused: &[bool; KIND_NAMES.len()],
-    heap: &mut dyn NativeHeap,
+    args: &Args<'_>,
+    new: &mut Nursery<'_>,
 ) -> Result<bool, NativeError> {
     enum Visit {
         Value(Value, usize),
-        Leave(EntityId),
+        Leave(ArenaHandle),
     }
-    let mut active = BTreeSet::new();
-    let mut read = BTreeSet::new();
-    let mut pending = vec![Visit::Value(value.clone(), 0)];
+    let limit = depth_limit(args);
+    let mut active: Vec<ArenaHandle> = Vec::new();
+    let mut read = std::collections::HashSet::new();
+    let mut pending = vec![Visit::Value(*value, 0)];
     while let Some(visit) = pending.pop() {
         let (value, depth) = match visit {
             Visit::Value(value, depth) => (value, depth),
             Visit::Leave(id) => {
-                active.remove(&id);
-                read.insert(id);
+                active.retain(|held| *held != id);
+                read.insert(slot(id));
                 continue;
             }
         };
-        if depth > heap.value_depth_limit().min(128) || refused[value.kind() as usize] {
+        if depth > limit || refused[value.kind() as usize] {
             return Ok(false);
         }
         // The members, in the order a copy reads them, are pushed in
         // reverse so the first is read first.
         let from = pending.len();
         match &value {
-            Value::Tuple(tuple) => heap.tuple_visit(tuple, &mut |item| {
-                pending.push(Visit::Value(item.clone(), depth + 1));
-                ControlFlow::Continue(())
-            })?,
-            Value::Error(error) => pending.push(Visit::Value(heap.error_data(error)?, depth + 1)),
+            Value::Tuple(_) => pending.extend(
+                items(args, &value)?
+                    .into_iter()
+                    .map(|item| Visit::Value(item, depth + 1)),
+            ),
+            Value::Error(_) => {
+                let Some(error) = args.error(&value)? else {
+                    return Err(NativeError::Malformed("an error names another body"));
+                };
+                pending.push(Visit::Value(error.data, depth + 1));
+            }
             Value::List(id) | Value::Map(id) | Value::Set(id) | Value::Record(id) => {
                 if active.contains(id) {
                     return Ok(false);
                 }
-                if read.contains(id) {
+                if read.contains(&slot(*id)) {
                     continue;
                 }
-                heap.reserve(1, 0)?;
-                active.insert(*id);
+                new.reserve(1, 0)?;
+                active.push(*id);
                 pending.push(Visit::Leave(*id));
                 let from = pending.len();
-                heap.visit(*id, &mut |element| {
-                    match element {
-                        Element::Item(item) => pending.push(Visit::Value(item.clone(), depth + 1)),
-                        Element::Entry { key, value } => {
-                            pending.push(Visit::Value(key.clone(), depth + 1));
-                            pending.push(Visit::Value(value.clone(), depth + 1));
-                        }
-                        Element::Field { value, .. } => {
-                            pending.push(Visit::Value(value.clone(), depth + 1));
+                match &value {
+                    Value::List(_) => pending.extend(
+                        items(args, &value)?
+                            .into_iter()
+                            .map(|item| Visit::Value(item, depth + 1)),
+                    ),
+                    Value::Set(_) => pending.extend(
+                        entries(args, &value)?
+                            .into_iter()
+                            .map(|(key, _)| Visit::Value(key, depth + 1)),
+                    ),
+                    Value::Map(_) => {
+                        for (key, value) in entries(args, &value)? {
+                            pending.push(Visit::Value(key, depth + 1));
+                            pending.push(Visit::Value(value, depth + 1));
                         }
                     }
-                    ControlFlow::Continue(())
-                })?;
+                    _ => pending.extend(
+                        entries(args, &value)?
+                            .into_iter()
+                            .map(|(_, value)| Visit::Value(value, depth + 1)),
+                    ),
+                }
                 pending[from..].reverse();
                 continue;
             }

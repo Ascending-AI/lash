@@ -15,18 +15,19 @@
 //! code's side table under this layout and against how the task comes to
 //! the frame. Restore fails closed with the [`RestoreRefusal`] that names
 //! what it refuses.
-use super::loops::{Guard, Header};
+use super::loops::{Guard, Header, TextCursor};
+use super::project::{SharedArena, admit, admit_cell, project, project_cell};
 use super::{Completion, Control, Cursor, Frame, LibraryCall, SlotState, TryPhase};
 use crate::compile::{Executable, Form, LibId, NestedKind, StmtId};
-use lash_kernel_doc::heap::HeapFault;
+use lash_kernel_doc::heap::{HeapFault, PageValue};
 use lash_kernel_doc::{Site, Unit, Value};
 use lash_kernel_exec::ActIx;
 use lash_kernel_exec::coord::{
     self, ActionEntry, ActionKind, ActionPhase, Arrival, CleanupCoordinate, Departure,
     LoopCoordinate, LoopPhase, RestoreRefusal, SitePath, StatementCoordinate,
 };
+use lash_kernel_state::arena::Arena;
 use lash_kernel_state::kernel_internals::directory::ordinal_key;
-use lash_kernel_state::kernel_internals::payload::TextCursor;
 use lash_kernel_state::kernel_internals::tree::{Access, Cell, Tree};
 use lash_kernel_state::paged::{
     BindingRecord, BoundRecord, CursorKind, CursorRecord, EnteredRecord, FinallyRecord,
@@ -56,7 +57,7 @@ pub(super) fn arrival(state: &TaskStateRecord) -> Arrival {
             incoming: IncomingRecord::Value(value),
             ..
         } => Arrival::Valued {
-            handle: matches!(value, Value::Task(_)),
+            handle: matches!(value, PageValue::Task(_)),
         },
         TaskStateRecord::Joining(_)
         | TaskStateRecord::JoiningMany(_)
@@ -285,6 +286,25 @@ impl Frame {
         }
     }
 
+    /// Visits every arena value the frame holds: what an arena collection
+    /// keeps. A shared variable's cell is visited as a ref.
+    fn each_value(&self, visit: &mut dyn FnMut(&Value)) {
+        for slot in &self.slots.values {
+            match slot {
+                SlotState::Value(value) => visit(value),
+                SlotState::Cell(cell) => visit(&Value::ObjectRef(*cell)),
+                SlotState::Empty => {}
+            }
+        }
+        self.visit_held(&mut |value| {
+            visit(value);
+            true
+        });
+        if let Some(call) = &self.library {
+            call.args.iter().for_each(&mut *visit);
+        }
+    }
+
     /// Whether the frame's row holds all the frame holds: no variable is
     /// assigned and no continuation saved since its last projection, and
     /// it holds the values it held then.
@@ -295,10 +315,7 @@ impl Frame {
         let mut at = 0;
         let mut same = true;
         self.visit_held(&mut |value| {
-            same = self
-                .held
-                .get(at)
-                .is_some_and(|held| held.same_version(value));
+            same = self.held.get(at).is_some_and(|held| held.same(value));
             at += 1;
             same
         });
@@ -315,6 +332,7 @@ impl Frame {
         coordinates: bool,
         exe: &Executable,
         access: &Access<'_>,
+        arena: &Arena,
     ) -> Result<bool, HeapFault> {
         let code = exe.code(self.code);
         let mut changed = !self.owned;
@@ -333,8 +351,8 @@ impl Frame {
                     changed |= stored.bindings.remove(&info.key, access)?.is_some();
                     continue;
                 }
-                SlotState::Value(value) => BoundRecord::Value(value.clone()),
-                SlotState::Cell(id) => BoundRecord::Shared(*id),
+                SlotState::Value(value) => BoundRecord::Value(project(arena, access, value)?),
+                SlotState::Cell(cell) => BoundRecord::Shared(project_cell(arena, *cell)?),
             };
             let (name, declared) = match stored.bindings.get(&info.key, access)? {
                 Some(old) => (old.name, old.declared),
@@ -389,8 +407,8 @@ impl Frame {
                     }
                     // What it walks, then the item a hook holds.
                     for value in cursor.walked().into_iter().chain(header.held()) {
-                        self.held.push(value.clone());
-                        let held = IteratedRecord(value);
+                        self.held.push(value);
+                        let held = IteratedRecord(project(arena, access, &value)?);
                         changed |= write(&mut stored.iterated, iterated, held, access)?;
                         iterated += 1;
                     }
@@ -426,8 +444,9 @@ impl Frame {
                         Completion::Return(value)
                         | Completion::ReturnVia { value, .. }
                         | Completion::Throw(value) => {
-                            let value = value.as_ref().clone();
-                            self.held.push(value.clone());
+                            let value = **value;
+                            self.held.push(value);
+                            let value = project(arena, access, &value)?;
                             changed |= write(&mut stored.departing, departing, value, access)?;
                             departing += 1;
                             if let Completion::ReturnVia { stmt, .. } = completion {
@@ -456,10 +475,11 @@ impl Frame {
         // A run-root cleanup runs at the body, outside every source scope.
         if let Some(departed) = &self.cleaning {
             let (value, entered) = match departed {
-                Ok(value) => (value.clone(), EnteredRecord::Return),
-                Err(value) => (value.clone(), EnteredRecord::Throw),
+                Ok(value) => (*value, EnteredRecord::Return),
+                Err(value) => (*value, EnteredRecord::Throw),
             };
-            self.held.push(value.clone());
+            self.held.push(value);
+            let value = project(arena, access, &value)?;
             changed |= write(&mut stored.departing, departing, value, access)?;
             departing += 1;
             if coordinates {
@@ -482,7 +502,11 @@ impl Frame {
             (Some(call), None) => {
                 let mut args = Tree::new(true);
                 for (at, value) in call.args.iter().enumerate() {
-                    args.write(ordinal_key(at as u64), value.clone(), access)?;
+                    args.write(
+                        ordinal_key(at as u64),
+                        project(arena, access, value)?,
+                        access,
+                    )?;
                 }
                 stored.arguments = Some(args);
                 changed = true;
@@ -582,6 +606,7 @@ pub(super) struct Frames {
     /// The rows below this index also stand where their frames stand.
     placed: u64,
     access: Access<'static>,
+    arena: SharedArena,
     exe: Arc<Executable>,
     arrival: Arrival,
 }
@@ -600,12 +625,13 @@ pub(crate) fn take_most_visited() -> usize {
 }
 
 impl Frames {
-    pub(super) fn new(access: Access<'static>, exe: Arc<Executable>) -> Self {
-        Self::open(Tree::new(true), access, exe, Arrival::Fresh)
+    pub(super) fn new(access: Access<'static>, arena: SharedArena, exe: Arc<Executable>) -> Self {
+        Self::open(Tree::new(true), access, arena, exe, Arrival::Fresh)
     }
     pub(super) fn open(
         rows: Tree<FrameRecord>,
         access: Access<'static>,
+        arena: SharedArena,
         exe: Arc<Executable>,
         arrival: Arrival,
     ) -> Self {
@@ -618,6 +644,7 @@ impl Frames {
             held: len,
             placed: len,
             access,
+            arena,
             exe,
             arrival,
         }
@@ -644,7 +671,13 @@ impl Frames {
         let index = self.len - 1;
         if self.cache.last().is_none_or(|(at, _)| *at != index) {
             let record = row(&self.rows, index, &self.access)?;
-            let frame = restore(&record, self.arrival, &self.access, &self.exe)?;
+            let frame = restore(
+                &record,
+                self.arrival,
+                &self.access,
+                &self.exe,
+                &mut self.arena.borrow_mut(),
+            )?;
             self.cache.push((index, frame));
         }
         // The top is projected at every projection point.
@@ -701,6 +734,7 @@ impl Frames {
     pub(super) fn project(&mut self, coordinates: bool) -> Result<(), HeapFault> {
         truncate(&mut self.rows, self.len, &self.access)?;
         let from = if coordinates { self.placed } else { self.held };
+        let arena = self.arena.borrow();
         #[cfg(test)]
         let mut visited = 0;
         for (index, frame) in &mut self.cache {
@@ -719,11 +753,11 @@ impl Frames {
                 }
                 self.rows
                     .update(ordinal_key(*index), &self.access, |stored| {
-                        frame.project(stored, coordinates, &self.exe, &self.access)
+                        frame.project(stored, coordinates, &self.exe, &self.access, &arena)
                     })?;
             } else {
                 let mut record = FrameRecord::fresh(frame.statement.clone());
-                frame.project(&mut record, coordinates, &self.exe, &self.access)?;
+                frame.project(&mut record, coordinates, &self.exe, &self.access, &arena)?;
                 self.rows.write(ordinal_key(*index), record, &self.access)?;
             }
         }
@@ -843,10 +877,20 @@ impl Frames {
         } else {
             Arrival::Returned
         };
-        match restore(&record, arrival, &self.access, &self.exe) {
+        // A scratch arena: the probe leaves the run's arena as it is.
+        let mut scratch = Arena::new();
+        match restore(&record, arrival, &self.access, &self.exe, &mut scratch) {
             Ok(_) => Ok(None),
             Err(Unrestored::Refused(refusal)) => Ok(Some(refusal)),
             Err(Unrestored::Fault(fault)) => Err(fault),
+        }
+    }
+
+    /// Visits every arena value the resident frames hold: what an arena
+    /// collection keeps. A cold frame's row holds page forms only.
+    pub(super) fn each_value(&self, visit: &mut dyn FnMut(&Value)) {
+        for (_, frame) in &self.cache {
+            frame.each_value(visit);
         }
     }
 
@@ -1088,6 +1132,7 @@ fn restore(
     arrival: Arrival,
     access: &Access<'static>,
     exe: &Arc<Executable>,
+    arena: &mut Arena,
 ) -> Result<Box<Frame>, Unrestored> {
     let site = record.statement.resolve(access)?;
     let code_id = (0..=site.path.len())
@@ -1131,7 +1176,7 @@ fn restore(
         && exe.root_cleanup(code_id).is_some()
     {
         let saved = row(&record.finally, 0, access)?;
-        let value = row(&record.departing, 0, access)?;
+        let value = admit(arena, access, &row(&record.departing, 0, access)?)?;
         (finally, departing) = (1, 1);
         let (cleaned, departure) = match saved.entered {
             EnteredRecord::Return => (Ok(value), Departure::Return),
@@ -1186,7 +1231,14 @@ fn restore(
                             block,
                             next: index + 1,
                         });
-                        control.push(saved_for(stmt, &saved, record, &mut iterated, access)?);
+                        control.push(saved_for(
+                            stmt,
+                            &saved,
+                            record,
+                            &mut iterated,
+                            access,
+                            arena,
+                        )?);
                         break;
                     }
                     _ => return Err(malformed("a resuming frame has no action").into()),
@@ -1218,7 +1270,14 @@ fn restore(
             Form::For { site, body, .. } if at(*body) => {
                 let saved = admitted_loop(record, loops, site, true, false, access)?;
                 loops += 1;
-                control.push(saved_for(stmt, &saved, record, &mut iterated, access)?);
+                control.push(saved_for(
+                    stmt,
+                    &saved,
+                    record,
+                    &mut iterated,
+                    access,
+                    arena,
+                )?);
                 *body
             }
             // A loop's `else` runs once the loop has left the control.
@@ -1255,7 +1314,7 @@ fn restore(
                     let mut value = || {
                         let value = row(&record.departing, departing, access)?;
                         departing += 1;
-                        Ok::<_, HeapFault>(value)
+                        admit(arena, access, &value)
                     };
                     let (completion, departure) = match &saved.entered {
                         EnteredRecord::Normal => (Completion::Normal, Departure::Normal),
@@ -1314,7 +1373,7 @@ fn restore(
             let mut args = Vec::new();
             if let Some(saved) = &record.arguments {
                 for at in 0..saved.len() {
-                    args.push(row(saved, at, access)?);
+                    args.push(admit(arena, access, &row(saved, at, access)?)?);
                 }
             }
             Some(LibraryCall {
@@ -1336,11 +1395,11 @@ fn restore(
             Some(BindingRecord {
                 value: BoundRecord::Value(value),
                 ..
-            }) => SlotState::Value(value),
+            }) => SlotState::Value(admit(arena, access, &value)?),
             Some(BindingRecord {
                 value: BoundRecord::Shared(id),
                 ..
-            }) => SlotState::Cell(id),
+            }) => SlotState::Cell(admit_cell(arena, id)),
         };
     }
     Ok(Box::new(Frame {
@@ -1406,11 +1465,12 @@ fn saved_for(
     record: &FrameRecord,
     iterated: &mut u64,
     access: &Access<'_>,
+    arena: &mut Arena,
 ) -> Result<Control, HeapFault> {
-    let mut held = || {
+    let mut held = |arena: &mut Arena| {
         let value = row(&record.iterated, *iterated, access)?.0;
         *iterated += 1;
-        Ok::<_, HeapFault>(value)
+        admit(arena, access, &value)
     };
     let (cursor, guard) = match saved.cursor {
         None => (Cursor::Opening, None),
@@ -1419,12 +1479,15 @@ fn saved_for(
             position,
             guard,
         }) => {
-            let cursor = match (kind, held()?) {
+            let walked = held(arena)?;
+            let cursor = match (kind, walked) {
                 (CursorKind::List, Value::List(id)) => Cursor::List(
                     id,
                     usize::try_from(position).map_err(|_| malformed("list cursor overflows"))?,
                 ),
-                (CursorKind::Tuple, Value::Tuple(tuple)) if position <= tuple.summary.len => {
+                (CursorKind::Tuple, Value::Tuple(tuple))
+                    if arena.len(tuple).is_ok_and(|len| position <= len) =>
+                {
                     Cursor::Tuple(tuple, position as usize)
                 }
                 (CursorKind::Table, Value::Map(id)) => {
@@ -1433,7 +1496,9 @@ fn saved_for(
                 (CursorKind::Table, Value::Set(id)) => {
                     Cursor::Set(id, (position != u64::MAX).then_some(TableCursor(position)))
                 }
-                (CursorKind::Text, Value::Text(text)) if position <= text.summary.chars => {
+                (CursorKind::Text, text @ (Value::Text(_) | Value::LongText(_)))
+                    if position <= text_chars(arena, &text) =>
+                {
                     Cursor::Text(Box::new(TextCursor::new(text, position)))
                 }
                 (CursorKind::Driver, driver) if position == 0 => Cursor::Driver(Box::new(driver)),
@@ -1448,9 +1513,9 @@ fn saved_for(
         HeaderRecord::Body => Header::Body,
         HeaderRecord::Open => Header::Open,
         HeaderRecord::Pull => Header::Pull,
-        HeaderRecord::Check => Header::Check(Box::new(held()?)),
+        HeaderRecord::Check => Header::Check(Box::new(held(arena)?)),
         HeaderRecord::Exhausted => Header::Exhausted,
-        HeaderRecord::Item => Header::Item(Box::new(held()?)),
+        HeaderRecord::Item => Header::Item(Box::new(held(arena)?)),
     };
     Ok(Control::For {
         stmt,
@@ -1459,4 +1524,16 @@ fn saved_for(
         header,
         guard,
     })
+}
+
+/// How many scalars the text `text` holds.
+fn text_chars(arena: &Arena, text: &Value) -> u64 {
+    match text {
+        Value::Text(short) => short.as_str().chars().count() as u64,
+        Value::LongText(handle) => match arena.body(*handle) {
+            Ok(lash_kernel_doc::arena::Body::LongText(long)) => long.summary.chars,
+            _ => 0,
+        },
+        _ => 0,
+    }
 }

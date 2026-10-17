@@ -2,11 +2,11 @@
 
 use super::{Eval, KernelMachine, fault};
 use crate::compile::{CodeId, Executable, LibId, LibRun};
-use lash_kernel_doc::{EntityId, TaskId};
-use lash_kernel_state::paged::ObjectInit;
+use lash_kernel_doc::TaskId;
+use lash_kernel_doc::arena::ArenaHandle;
 
 pub(super) struct OperationEntry {
-    pub(super) shared: Vec<Option<EntityId>>,
+    pub(super) shared: Vec<Option<ArenaHandle>>,
 }
 
 pub(super) struct AdmittedBody {
@@ -48,8 +48,8 @@ impl KernelMachine {
             shared.resize(function.arity, None);
             for (index, param) in code.params.iter().enumerate() {
                 if param.shared {
-                    let value = self.regs[args + index].clone();
-                    shared[index] = Some(self.alloc(ObjectInit::Variable(value))?);
+                    let value = self.regs[args + index];
+                    shared[index] = Some(self.new_cell(value)?);
                 }
             }
         }

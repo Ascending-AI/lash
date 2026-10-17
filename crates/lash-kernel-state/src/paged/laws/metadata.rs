@@ -24,7 +24,7 @@ fn megabyte_binding_and_capture_names_keep_bounded_cells() {
     let named = NameRef::new(&name, &heap.access).unwrap();
     let site = SiteRef::new(&Site::new(Unit::Function(name.clone()), [0]), &heap.access).unwrap();
     let variable = heap
-        .allocate_object(ObjectInit::Variable(Value::Null))
+        .allocate_object(ObjectInit::Variable(PageValue::Null))
         .unwrap();
     let closure = heap
         .allocate_object(ObjectInit::Closure {
@@ -40,7 +40,7 @@ fn megabyte_binding_and_capture_names_keep_bounded_cells() {
             BindingRecord {
                 name: named,
                 declared: site,
-                value: BoundRecord::Value(Value::Closure(closure)),
+                value: BoundRecord::Value(PageValue::Closure(closure)),
             },
             &heap.access,
         )
@@ -136,8 +136,8 @@ fn a_megabyte_function_name_is_bounded_and_round_trips_exactly() {
     let (mut heap, pages) = fresh();
     let name = Name::new("f".repeat(1 << 20));
     let descriptor = heap.text(name.as_str()).unwrap();
-    let value = Value::Function(descriptor.clone());
-    let resident = Value::Function(TextRef {
+    let value = PageValue::Function(descriptor.clone());
+    let resident = PageValue::Function(TextRef {
         normal: Default::default(),
         summary: descriptor.summary,
         body: Payload::Resident(std::sync::Arc::from(name.as_str())),
@@ -149,7 +149,7 @@ fn a_megabyte_function_name_is_bounded_and_round_trips_exactly() {
     );
     assert_ne!(
         heap.normal_key(&value).unwrap(),
-        heap.normal_key(&Value::Text(descriptor)).unwrap(),
+        heap.normal_key(&PageValue::Text(descriptor)).unwrap(),
         "function and text key domains differ"
     );
     let tuple = heap.tuple(vec![value.clone()]).unwrap();
@@ -174,10 +174,10 @@ fn a_megabyte_function_name_is_bounded_and_round_trips_exactly() {
     let restored = heap.freeze_datum(&datum).unwrap();
     let value2 = heap.instantiate(&restored).unwrap();
     assert!(heap.equal(&value, &value2).unwrap());
-    let decoded: Value = decode_body(&encode_body(&member)).unwrap();
+    let decoded: PageValue = decode_body(&encode_body(&member)).unwrap();
     assert!(matches!(
         decoded,
-        Value::Function(TextRef {
+        PageValue::Function(TextRef {
             body: Payload::Paged(_),
             ..
         })

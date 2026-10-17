@@ -32,7 +32,6 @@ mod costs;
 mod crossing;
 mod data;
 mod functions;
-mod heap;
 mod interface;
 mod machine;
 mod observe;

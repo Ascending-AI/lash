@@ -1,16 +1,13 @@
 //! Independent recorded native outcomes and charges.
 
-use std::collections::HashSet;
-
+use lash_kernel_doc::arena::{ArenaHandle, Body};
 use lash_kernel_doc::{
-    Datum, EntityId, FunctionId, FunctionRegistry, Measure, NativeCall, NativeError, NativeHeap,
-    Object, Operand, Value, WorkCounter,
+    Datum, FunctionId, FunctionRegistry, Measure, NativeError, Operand, Value, WorkCounter,
 };
 use num_traits::ToPrimitive;
 
 use crate::register_numbers;
-use crate::testsupport;
-use lash_kernel_doc::heap::IntRef;
+use crate::testsupport::{self, Bench};
 
 const NATIVE_SHARDS: &[&str] = &[
     include_str!("../corpus/native/numbers/K-BND-001.json"),
@@ -46,13 +43,13 @@ const DOCUMENT_SHARDS: &[&str] = &[
     include_str!("../corpus/numbers/K-VAL-026.json"),
 ];
 
-fn decode(datum: Datum, heap: &mut lash_kernel_state::kernel_internals::PagedHeap) -> Value {
+fn decode(datum: Datum, heap: &mut Bench) -> Value {
     testsupport::decode(heap, datum)
 }
 
-fn magnitude(value: &Value, heap: &dyn NativeHeap) -> u64 {
+fn magnitude(value: &Value, heap: &Bench) -> u64 {
     match value {
-        Value::Int(value) => {
+        Value::Int(_) | Value::BigInt(_) => {
             let value = testsupport::integer(heap, value);
             if value.is_negative() {
                 0
@@ -65,40 +62,79 @@ fn magnitude(value: &Value, heap: &dyn NativeHeap) -> u64 {
     }
 }
 
-fn size(value: &Value, heap: &dyn NativeHeap) -> u64 {
+fn len(handle: ArenaHandle, heap: &Bench) -> u64 {
+    match heap.arena().body(handle).unwrap() {
+        Body::List(sequence) | Body::Tuple(sequence) => sequence.len,
+        Body::Map(table) | Body::Set(table) | Body::Record(table) => table.len,
+        _ => panic!("a collection has another body"),
+    }
+}
+
+fn error_parts(handle: ArenaHandle, heap: &Bench) -> (Value, Value, Value) {
+    let Body::Error(error) = heap.arena().body(handle).unwrap() else {
+        panic!("an error has another body")
+    };
+    (error.kind, error.message, error.data)
+}
+
+fn size(value: &Value, heap: &Bench) -> u64 {
     match value {
-        Value::Int(value) => {
-            1 + match value {
-                IntRef::Inline(i) => i.bits(),
-                IntRef::Paged { summary, .. } => summary.bits,
-            }
-            .div_ceil(64)
+        Value::Int(_) | Value::BigInt(_) => {
+            1 + testsupport::integer(heap, value).bits().div_ceil(64)
         }
-        Value::Text(value) => 1 + value.summary.utf8_bytes,
-        Value::Bytes(value) => 1 + value.len,
-        Value::Tuple(values) => 1 + values.summary.len,
-        Value::List(id) | Value::Set(id) | Value::Record(id) => 1 + heap.len(*id).unwrap(),
-        Value::Map(id) => 1 + 2 * heap.len(*id).unwrap(),
-        Value::Error(value) => {
-            1 + (value.kind.summary.utf8_bytes + value.message.summary.utf8_bytes)
+        Value::Text(_) | Value::LongText(_) => 1 + testsupport::text(heap, value).len() as u64,
+        Value::Bytes(_) => {
+            1 + heap
+                .arena()
+                .semantics()
+                .bytes(value.handle().unwrap())
+                .unwrap()
+                .len() as u64
+        }
+        Value::Tuple(values) => 1 + len(*values, heap),
+        Value::List(id) | Value::Set(id) | Value::Record(id) => 1 + len(*id, heap),
+        Value::Map(id) => 1 + 2 * len(*id, heap),
+        Value::Error(error) => {
+            let (kind, message, _) = error_parts(*error, heap);
+            1 + (testsupport::text(heap, &kind).len() + testsupport::text(heap, &message).len())
+                as u64
         }
         _ => 1,
     }
 }
 
-fn nested_size(value: &Value, heap: &dyn NativeHeap) -> u64 {
-    let mut held = Vec::new();
+fn members(value: &Value, heap: &Bench) -> Vec<Value> {
+    let semantics = heap.arena().semantics();
     match value {
-        Value::Tuple(values) => heap
-            .tuple_visit(values, &mut |value| {
-                held.push(value.clone());
-                std::ops::ControlFlow::Continue(())
-            })
-            .unwrap(),
-        Value::Error(error) => held.push(heap.error_data(error).unwrap()),
-        _ => return 0,
-    };
-    held.into_iter()
+        Value::Tuple(id) | Value::List(id) => semantics.sequence(*id).unwrap().to_vec(),
+        Value::Set(id) => semantics
+            .entries(*id)
+            .unwrap()
+            .as_chunks::<2>()
+            .0
+            .iter()
+            .map(|pair| pair[0])
+            .collect(),
+        Value::Map(id) => semantics.entries(*id).unwrap().to_vec(),
+        Value::Record(id) => semantics
+            .entries(*id)
+            .unwrap()
+            .as_chunks::<2>()
+            .0
+            .iter()
+            .map(|pair| pair[1])
+            .collect(),
+        Value::Error(error) => vec![error_parts(*error, heap).2],
+        _ => Vec::new(),
+    }
+}
+
+fn nested_size(value: &Value, heap: &Bench) -> u64 {
+    if !matches!(value, Value::Tuple(_) | Value::Error(_)) {
+        return 0;
+    }
+    members(value, heap)
+        .into_iter()
         .map(|value| match value {
             Value::List(_) | Value::Map(_) | Value::Set(_) | Value::Record(_) => 1,
             _ => size(&value, heap) + nested_size(&value, heap),
@@ -106,43 +142,19 @@ fn nested_size(value: &Value, heap: &dyn NativeHeap) -> u64 {
         .sum()
 }
 
-fn deep_size(value: &Value, heap: &dyn NativeHeap) -> u64 {
-    let mut pending = vec![value.clone()];
-    let mut seen = HashSet::<EntityId>::new();
+fn deep_size(value: &Value, heap: &Bench) -> u64 {
+    let mut pending = vec![*value];
+    let mut seen = Vec::<ArenaHandle>::new();
     let mut total = 0u64;
     while let Some(value) = pending.pop() {
-        if let Some(id) = value.object()
-            && !seen.insert(id)
-        {
-            continue;
+        if let Value::List(id) | Value::Set(id) | Value::Map(id) | Value::Record(id) = value {
+            if seen.contains(&id) {
+                continue;
+            }
+            seen.push(id);
         }
         total = total.saturating_add(size(&value, heap));
-        match value {
-            Value::Tuple(values) => heap
-                .tuple_visit(&values, &mut |value| {
-                    pending.push(value.clone());
-                    std::ops::ControlFlow::Continue(())
-                })
-                .unwrap(),
-            Value::Error(error) => pending.push(heap.error_data(&error).unwrap()),
-            Value::List(id) | Value::Set(id) | Value::Map(id) | Value::Record(id) => {
-                heap.visit(id, &mut |element| {
-                    match element {
-                        lash_kernel_doc::Element::Item(value)
-                        | lash_kernel_doc::Element::Field { value, .. } => {
-                            pending.push(value.clone())
-                        }
-                        lash_kernel_doc::Element::Entry { key, value } => {
-                            pending.push(key.clone());
-                            pending.push(value.clone());
-                        }
-                    }
-                    std::ops::ControlFlow::Continue(())
-                })
-                .unwrap();
-            }
-            _ => {}
-        }
+        pending.extend(members(&value, heap));
     }
     total
 }
@@ -175,11 +187,13 @@ fn k_lib_006_recorded_native_edges_and_charges_match() {
                 .as_ref()
                 .map(|guard| guard.limit.evaluate(&mut |_, _| 0));
             let mut counter = WorkCounter::new(limit);
-            let result = registered.native().unwrap().call(NativeCall {
-                args: &args,
-                heap: &mut heap,
-                counter: &mut counter,
-            });
+            let result = testsupport::call(
+                &mut heap,
+                &**registered.native().unwrap(),
+                &args,
+                u64::MAX,
+                &mut counter,
+            );
             if let Some(prepared) = registered.native().unwrap().prepare()
                 && let Some(prepared) = (prepared.entry)(&args)
             {
@@ -198,16 +212,13 @@ fn k_lib_006_recorded_native_edges_and_charges_match() {
                     "{name}"
                 );
             } else if let Some(error) = outcome.get("raised") {
-                let NativeError::Raised(actual) = result.as_ref().unwrap_err() else {
+                let Some(actual) = testsupport::error_datum(&heap, result.as_ref().unwrap_err())
+                else {
                     panic!("{name}: expected raised error");
                 };
                 let expected: lash_kernel_doc::ErrorDatum =
                     serde_json::from_value(error.clone()).unwrap();
-                assert_eq!(
-                    testsupport::datum(&heap, &Value::Error(actual.clone())),
-                    Datum::Error(Box::new(expected)),
-                    "{name}"
-                );
+                assert_eq!(actual, Datum::Error(Box::new(expected)), "{name}");
             } else {
                 let NativeError::Guard(actual) = result.as_ref().unwrap_err() else {
                     panic!("{name}: expected guard failure");
@@ -250,27 +261,31 @@ fn k_lib_006_recorded_native_edges_and_charges_match() {
                 "{name} work"
             );
             let mut warm_counter = WorkCounter::new(limit);
-            let warm = registered.native().unwrap().call(NativeCall {
-                args: &args,
-                heap: &mut heap,
-                counter: &mut warm_counter,
-            });
+            let warm = testsupport::call(
+                &mut heap,
+                &**registered.native().unwrap(),
+                &args,
+                u64::MAX,
+                &mut warm_counter,
+            );
             match (&warm, &result) {
                 (Ok(a), Ok(b)) => assert_eq!(
                     testsupport::datum(&heap, a),
                     testsupport::datum(&heap, b),
                     "{name} cold/warm"
                 ),
-                (Err(NativeError::Raised(a)), Err(NativeError::Raised(b))) => assert_eq!(
-                    testsupport::datum(&heap, &Value::Error(a.clone())),
-                    testsupport::datum(&heap, &Value::Error(b.clone())),
+                (
+                    Err(a @ (NativeError::Raised(_) | NativeError::Refused { .. })),
+                    Err(b @ (NativeError::Raised(_) | NativeError::Refused { .. })),
+                ) => assert_eq!(
+                    testsupport::error_datum(&heap, a),
+                    testsupport::error_datum(&heap, b),
                     "{name} cold/warm"
                 ),
                 (Err(NativeError::Guard(a)), Err(NativeError::Guard(b))) => {
                     assert_eq!(a, b, "{name} cold/warm")
                 }
-                (Err(NativeError::Memory), Err(NativeError::Memory)) => (),
-                (Err(NativeError::Heap(a)), Err(NativeError::Heap(b))) => {
+                (Err(NativeError::Retry(a)), Err(NativeError::Retry(b))) => {
                     assert_eq!(a, b, "{name} cold/warm")
                 }
                 _ => panic!("{name} cold/warm outcome differs"),
@@ -290,20 +305,22 @@ fn k_lib_006_recorded_native_edges_and_charges_match() {
         .find(|(_, function)| function.definition().name.as_str() == "ref")
         .unwrap();
     let mut heap = testsupport::heap();
-    let object = heap.allocate(Object::List(vec![])).unwrap();
+    let object = testsupport::decode(&mut heap, Datum::List(Vec::new()));
+    let Value::List(handle) = object else {
+        panic!("a list")
+    };
     for _ in 0..2 {
         let mut counter = WorkCounter::new(None);
-        let value = reference
-            .native()
-            .unwrap()
-            .call(NativeCall {
-                args: &[Value::List(object)],
-                heap: &mut heap,
-                counter: &mut counter,
-            })
-            .unwrap();
+        let value = testsupport::call(
+            &mut heap,
+            &**reference.native().unwrap(),
+            &[object],
+            u64::MAX,
+            &mut counter,
+        )
+        .unwrap();
         assert!(
-            matches!(value, Value::Ref(lash_kernel_doc::Identity::Object(id)) if id == object),
+            matches!(value, Value::ObjectRef(id) if id == handle),
             "ref object identity cold/warm"
         );
         assert_eq!(counter.spent(), 0);

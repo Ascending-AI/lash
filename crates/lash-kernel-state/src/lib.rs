@@ -1,4 +1,6 @@
-//! Persistent semantic heap pages and the admitted requests resumed workers receive.
+//! The arena a run executes on, the persistent semantic heap pages it is
+//! projected to, and the admitted requests resumed workers receive.
+pub mod arena;
 pub mod paged;
 #[cfg(any(test, feature = "perf-witness"))]
 pub(crate) mod perf_witness;
@@ -52,6 +54,7 @@ pub mod kernel_internals {
         pub use crate::paged::tree::*;
     }
     pub use crate::paged::heap_impl::PagedHeap;
+    pub use crate::paged::stored::{StoredObject, pages as stored_pages, reads as page_reads};
 }
 use lash_kernel_doc::EffectId;
 use lash_kernel_doc::graph_tokens::{TokenCodec, TokenError, TokenReader, TokenWriter};

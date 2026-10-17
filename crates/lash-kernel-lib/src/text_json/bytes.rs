@@ -1,14 +1,12 @@
-use lash_kernel_doc::heap::{BytesRef, IntRef, Payload};
-use lash_kernel_doc::{NativeCall, NativeError, Type, Value};
-use num_traits::ToPrimitive;
-use std::sync::Arc;
+use std::borrow::Cow;
+
+use lash_kernel_doc::{Args, BytesView, NativeCall, NativeError, Type, Value};
 
 use super::text::position;
 use super::{
-    Function, arg, definition, integer_value, materialized_text, ordering, raise, sequence,
+    Function, arg, definition, integer_value, materialized_text, ordering, raise, room, sequence,
     sequence_type,
 };
-
 pub(super) fn functions() -> Vec<Function> {
     vec![
         definition(
@@ -60,63 +58,61 @@ pub(super) fn functions() -> Vec<Function> {
     ]
 }
 
-fn bytes_arg(args: &[Value], index: usize) -> Result<&BytesRef, NativeError> {
-    match arg(args, index)? {
-        Value::Bytes(bytes) => Ok(bytes),
-        _ => Err(raise("type_error", "expected bytes")),
-    }
+fn bytes_view<'call>(args: &Args<'call>, index: usize) -> Result<BytesView<'call>, NativeError> {
+    args.bytes(arg(args.values(), index)?)?
+        .ok_or_else(|| raise("type_error", "expected bytes"))
 }
-fn materialized_bytes(call: &mut NativeCall<'_>, index: usize) -> Result<Arc<[u8]>, NativeError> {
-    let bytes = bytes_arg(call.args, index)?;
-    match &bytes.body {
-        Payload::Resident(bytes) => Ok(Arc::clone(bytes)),
-        _ => call.heap.materialize_bytes(bytes),
-    }
+fn bytes_arg<'call>(args: &Args<'call>, index: usize) -> Result<Cow<'call, [u8]>, NativeError> {
+    bytes_view(args, index)?.whole()
 }
-fn from_octets(call: NativeCall<'_>) -> Result<Value, NativeError> {
-    let bytes: Result<Vec<_>, _> = sequence(&call, 0)?
+fn from_octets(call: NativeCall<'_, '_>) -> Result<Value, NativeError> {
+    let bytes: Result<Vec<_>, _> = sequence(&call.args, 0)?
         .iter()
         .map(|value| {
-            let Value::Int(i) = value else {
-                return Err(raise("type_error", "expected integer octet"));
-            };
-            match i {
-                IntRef::Inline(i) => i.to_u8(),
-                _ => None,
+            match value {
+                Value::Int(i) => u8::try_from(*i).ok(),
+                Value::BigInt(_) => None,
+                _ => return Err(raise("type_error", "expected integer octet")),
             }
             .ok_or_else(|| raise("number_range", "octet is outside 0..255"))
         })
         .collect();
-    Ok(Value::Bytes(call.heap.bytes(&bytes?)?))
+    Ok(call.new.bytes(&bytes?))
 }
 
-fn slice(call: NativeCall<'_>) -> Result<Value, NativeError> {
-    let bytes = bytes_arg(call.args, 0)?;
-    let start = position(integer_value(call.args, 1)?, bytes.len as usize) as u64;
-    let end = (position(integer_value(call.args, 2)?, bytes.len as usize) as u64).max(start);
-    call.heap.slice(&Value::Bytes(bytes.clone()), start..end)
+fn slice(call: NativeCall<'_, '_>) -> Result<Value, NativeError> {
+    let bytes = bytes_view(&call.args, 0)?;
+    let len = bytes.len() as usize;
+    let start = position(&*integer_value(&call.args, 1)?, len);
+    let end = position(&*integer_value(&call.args, 2)?, len).max(start);
+    call.new.hold(0, room(end - start))?;
+    Ok(call.new.bytes(&bytes.whole()?[start..end]))
 }
-fn concat(call: NativeCall<'_>) -> Result<Value, NativeError> {
-    bytes_arg(call.args, 0)?;
-    bytes_arg(call.args, 1)?;
-    call.heap.concat(call.args)
+fn concat(call: NativeCall<'_, '_>) -> Result<Value, NativeError> {
+    let (bytes, other) = (bytes_arg(&call.args, 0)?, bytes_arg(&call.args, 1)?);
+    call.new
+        .hold(0, room(bytes.len()).saturating_add(room(other.len())))?;
+    let mut out = Vec::new();
+    out.try_reserve_exact(bytes.len() + other.len())
+        .map_err(|_| crate::exhausted())?;
+    out.extend_from_slice(&bytes);
+    out.extend_from_slice(&other);
+    Ok(call.new.bytes(&out))
 }
-fn compare(call: NativeCall<'_>) -> Result<Value, NativeError> {
-    bytes_arg(call.args, 0)?;
-    bytes_arg(call.args, 1)?;
-    Ok(ordering(crate::comparison::payload_order(
-        arg(call.args, 0)?,
-        arg(call.args, 1)?,
-        call.heap,
-    )?))
+fn compare(call: NativeCall<'_, '_>) -> Result<Value, NativeError> {
+    Ok(ordering(
+        bytes_arg(&call.args, 0)?.cmp(&bytes_arg(&call.args, 1)?),
+    ))
 }
-fn encode(call: NativeCall<'_>) -> Result<Value, NativeError> {
-    let text = materialized_text(call.args, 0, call.heap)?;
-    Ok(Value::Bytes(call.heap.bytes(text.as_bytes())?))
+fn encode(call: NativeCall<'_, '_>) -> Result<Value, NativeError> {
+    let text = materialized_text(&call.args, call.new, 0)?;
+    Ok(call.new.bytes(text.as_bytes()))
 }
-fn decode(mut call: NativeCall<'_>) -> Result<Value, NativeError> {
-    let bytes = materialized_bytes(&mut call, 0)?;
+fn decode(call: NativeCall<'_, '_>) -> Result<Value, NativeError> {
+    let bytes = bytes_view(&call.args, 0)?;
+    call.new.read_whole(bytes.len())?;
+    let bytes = bytes.whole()?;
     let text = std::str::from_utf8(&bytes)
         .map_err(|_| raise("invalid_utf8", "bytes are not well-formed UTF-8"))?;
-    Ok(Value::Text(call.heap.text(text)?))
+    Ok(call.new.text(text))
 }

@@ -7,9 +7,9 @@ fn list_leaf_boundaries_follow_the_frozen_64_cell_rule() {
     for (count, sizes) in [(63, vec![63]), (64, vec![64]), (65, vec![32, 33])] {
         let (heap, pages) = fresh();
         let access = heap.pages();
-        let mut rows = Tree::<Value>::new(true);
+        let mut rows = Tree::<PageValue>::new(true);
         for n in 0..count {
-            rows.write(directory::ordinal_key(n), Value::Bool(n % 2 == 0), access)
+            rows.write(directory::ordinal_key(n), PageValue::Bool(n % 2 == 0), access)
                 .unwrap();
         }
         assert!(
@@ -47,7 +47,7 @@ fn list_leaf_boundaries_follow_the_frozen_64_cell_rule() {
                 let key = input.bytes().unwrap();
                 let n = u64::from_be_bytes(key.try_into().unwrap());
                 assert!(
-                    matches!(Value::decode(&mut input).unwrap(), Value::Bool(b) if b == (n % 2 == 0))
+                    matches!(PageValue::decode(&mut input).unwrap(), PageValue::Bool(b) if b == (n % 2 == 0))
                 );
             }
             input.finish().unwrap();
@@ -56,10 +56,10 @@ fn list_leaf_boundaries_follow_the_frozen_64_cell_rule() {
         assert_eq!(actual, sizes, "{count} cells");
         drop(store);
         access.clear();
-        let opened = Tree::<Value>::of_sequence(&root);
+        let opened = Tree::<PageValue>::of_sequence(&root);
         for n in 0..count {
             assert!(
-                matches!(opened.rank_get(n, access).unwrap().unwrap().1, Value::Bool(b) if b == (n % 2 == 0))
+                matches!(opened.rank_get(n, access).unwrap().unwrap().1, PageValue::Bool(b) if b == (n % 2 == 0))
             );
         }
     }
@@ -76,13 +76,13 @@ fn keyed_leaf_boundaries_follow_the_frozen_8192_byte_rule() {
     {
         let (heap, pages) = fresh();
         let access = heap.pages();
-        let mut rows = Tree::<Value>::new(false);
+        let mut rows = Tree::<PageValue>::new(false);
         let keys = [vec![0], vec![1; second_key_len]];
-        // Value::Bool is sum(2, 1) + bool: four bytes.
+        // PageValue::Bool is sum(2, 1) + bool: four bytes.
         // (1 + 4 + 8) + (key_len + 4 + 8).
         assert_eq!(13 + second_key_len + 12, budget);
         for (key, value) in keys.iter().zip([false, true]) {
-            rows.write(key.clone(), Value::Bool(value), access).unwrap();
+            rows.write(key.clone(), PageValue::Bool(value), access).unwrap();
         }
         assert!(
             rows.seal(
@@ -117,7 +117,7 @@ fn keyed_leaf_boundaries_follow_the_frozen_8192_byte_rule() {
             for _ in 0..count {
                 input.expect_struct(2).unwrap();
                 let key = input.bytes().unwrap().to_vec();
-                let Value::Bool(value) = Value::decode(&mut input).unwrap() else {
+                let PageValue::Bool(value) = PageValue::decode(&mut input).unwrap() else {
                     panic!("bool cell");
                 };
                 decoded.push((key, value));
@@ -131,9 +131,9 @@ fn keyed_leaf_boundaries_follow_the_frozen_8192_byte_rule() {
         );
         drop(store);
         access.clear();
-        let opened = Tree::<Value>::of_keyed(&root);
+        let opened = Tree::<PageValue>::of_keyed(&root);
         for (key, value) in keys.iter().zip([false, true]) {
-            assert!(matches!(opened.get(key, access).unwrap(), Some(Value::Bool(b)) if b == value));
+            assert!(matches!(opened.get(key, access).unwrap(), Some(PageValue::Bool(b)) if b == value));
         }
     }
 }
@@ -147,7 +147,7 @@ fn payload_leaf_boundaries_follow_the_frozen_4096_byte_rule() {
         (4096, vec![4096]),
         (4097, vec![1, 4096]),
     ] {
-        let (mut heap, pages) = fresh();
+        let (heap, pages) = fresh();
         let value = format!("{}éx", "a".repeat(len - 3));
         let a = heap.text(&value).unwrap();
         let b = heap.text(&value).unwrap();
@@ -185,7 +185,7 @@ fn payload_leaf_boundaries_follow_the_frozen_4096_byte_rule() {
         heap.pages().clear();
         let mut read = Vec::new();
         heap.payload_visit(
-            &Value::Text(TextRef {
+            &PageValue::Text(TextRef {
                 normal: Default::default(),
                 body: Payload::Paged(a),
                 summary: lash_kernel_doc::heap_values::text_summary(&value),

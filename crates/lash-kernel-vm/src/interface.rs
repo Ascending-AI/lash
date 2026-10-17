@@ -15,11 +15,11 @@
 //! not in the embedder's bounds.
 //!
 //! The check belongs to the native function, at
-//! `lash_kernel_doc::NativeHeap::reserve`: the function computes what it is
+//! `lash_kernel_doc::Nursery::reserve`: the function computes what it is
 //! about to hold, reserves it against the room the bound leaves and only
-//! then allocates. The machine answers a refusal as it answers any refused
-//! allocation: it collects the heap and makes the call again, and a second
-//! refusal ends the run with [`Bound::Memory`]. The accounting after the
+//! then allocates. A refusal is `Retry::Room`: the machine collects the
+//! heap, holds the room asked for and makes the call again, and a refusal
+//! of that room ends the run with [`Bound::Memory`]. The accounting after the
 //! call still runs for every function, and for one that reserved it
 //! confirms room the reservation already took. A function whose result and
 //! temporaries are no larger than a small fixed multiple of its arguments

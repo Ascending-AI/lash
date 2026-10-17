@@ -1,22 +1,22 @@
 //! The numeric catalogue is also the dispatch table: signatures, typed
 //! errors and charges are created beside the operation that implements them.
 
+use std::borrow::Cow;
 use std::cmp::Ordering;
 use std::sync::Arc;
 
+use lash_kernel_doc::arena::ShortText;
 use lash_kernel_doc::{
-    Float, Formula, FunctionDefinition, FunctionRegistry, Guard, Identity, Implementation, Integer,
-    KERNEL_VERSION, Name, NativeCall, NativeError, NativeFunction, NativeHeap, Operand, Param,
+    Args, Float, Formula, FunctionDefinition, FunctionRegistry, Guard, Implementation, Integer,
+    KERNEL_VERSION, Name, NativeCall, NativeError, NativeFunction, Nursery, Operand, Param,
     PreparedNative, QualifiedName, RegistryError, Signature, Type, Value, ValueKind,
 };
 use num_bigint::BigInt;
-use num_traits::ToPrimitive;
 
 use crate::arithmetic::{self, Binary, Unary};
 use crate::comparison::{compare, equal, same};
 use crate::math::Math;
 use crate::numeric::{Numeric, float_to_integer, integer_to_float};
-use lash_kernel_doc::heap::{IntRef, Payload};
 
 mod prepared;
 use crate::KernelHelper;
@@ -42,8 +42,8 @@ impl Domain {
     fn accepts(self, value: &Value) -> bool {
         match self {
             Self::Any => true,
-            Self::Number => matches!(value, Value::Int(_) | Value::Float(_)),
-            Self::Int => matches!(value, Value::Int(_)),
+            Self::Number => number(value),
+            Self::Int => integral(value),
             Self::Float => matches!(value, Value::Float(_)),
         }
     }
@@ -451,38 +451,35 @@ pub fn register_numbers(registry: &mut FunctionRegistry) -> Result<(), RegistryE
 }
 
 impl NativeFunction for NumericFunction {
-    fn call(&self, call: NativeCall<'_>) -> Result<Value, NativeError> {
-        self.admit(call.args)?;
+    fn call(&self, call: NativeCall<'_, '_>) -> Result<Value, NativeError> {
+        let values = call.args.values();
+        self.admit(values)?;
+        let args = &call.args;
         if let Operation::Binary(op) = self.operation {
-            return arithmetic::binary(op, &call.args[0], &call.args[1], call.counter, call.heap);
+            return arithmetic::binary(op, &values[0], &values[1], call.counter, args, call.new);
         }
-        if let Some(result) = plain(self.operation, call.args, Some(&mut *call.heap))? {
+        if let Some(result) = plain(self.operation, values, Some((args, &mut *call.new)))? {
             return Ok(result);
         }
-        let a = &call.args[0];
+        let a = &values[0];
         match self.operation {
-            Operation::Binary(op) => {
-                arithmetic::binary(op, a, &call.args[1], call.counter, call.heap)
-            }
-            Operation::ToText => match a {
-                Value::Int(value) => integer_text(call.heap, value, 10),
-                _ => unreachable!("only an integer's digits are reserved"),
-            },
-            Operation::IntText => {
-                let radix = radix(&call.args[1])?;
-                if let Value::Int(value) = a {
-                    integer_text(call.heap, value, radix)
-                } else {
-                    Err(raised("type_error", "expected an integer"))
-                }
-            }
-            _ => unreachable!("only an integer power counts its work or digits reserve room"),
+            Operation::ToText => integer_text(args, call.new, a, 10),
+            Operation::IntText => integer_text(args, call.new, a, radix(&values[1])?),
+            _ => unreachable!("only an integer's digits reserve room"),
         }
     }
 
     fn prepare(&self) -> Option<PreparedNative> {
         prepared::entry(self.operation, self.domain)
     }
+}
+
+fn integral(value: &Value) -> bool {
+    matches!(value, Value::Int(_) | Value::BigInt(_))
+}
+
+fn number(value: &Value) -> bool {
+    matches!(value, Value::Int(_) | Value::BigInt(_) | Value::Float(_))
 }
 
 impl NumericFunction {
@@ -495,10 +492,10 @@ impl NumericFunction {
         for (arg, ty) in args.iter().zip(&self.params) {
             let accepted = match ty {
                 Type::Any => true,
-                Type::Int => matches!(arg, Value::Int(_)),
+                Type::Int => integral(arg),
                 Type::Float => matches!(arg, Value::Float(_)),
-                Type::Number => matches!(arg, Value::Int(_) | Value::Float(_)),
-                Type::Text => matches!(arg, Value::Text(_)),
+                Type::Number => number(arg),
+                Type::Text => matches!(arg, Value::Text(_) | Value::LongText(_)),
                 _ => false,
             };
             if !accepted {
@@ -519,13 +516,17 @@ impl NumericFunction {
     }
 }
 
-/// The one implementation of admitted scalar operations. A heap-dependent
-/// comparison leaves a prepared entry for the general call (K-LIB-006).
+/// A call's arena: its views and its nursery. A prepared entry has none.
+type Arena<'a, 'call> = Option<(&'a Args<'call>, &'a mut Nursery<'call>)>;
+
+/// The one implementation of admitted scalar operations. An
+/// arena-dependent operation leaves a prepared entry for the general call
+/// (K-LIB-006).
 #[inline]
 fn plain(
     operation: Operation,
     args: &[Value],
-    mut heap: Option<&mut dyn NativeHeap>,
+    mut arena: Arena<'_, '_>,
 ) -> Result<Option<Value>, NativeError> {
     let a = &args[0];
     Ok(Some(match operation {
@@ -538,8 +539,8 @@ fn plain(
             };
             return Ok(arithmetic::plain(op, &left, &right)?.and_then(Numeric::inline));
         }
-        Operation::Unary(op) => match heap.as_deref_mut() {
-            Some(heap) => arithmetic::unary(op, a, heap)?,
+        Operation::Unary(op) => match arena {
+            Some((views, new)) => arithmetic::unary(op, a, views, new)?,
             None => {
                 let Some(value) = Numeric::resident(a) else {
                     return Ok(None);
@@ -551,10 +552,10 @@ fn plain(
             }
         },
         Operation::Math(op) => {
-            let numbers = match heap.as_deref_mut() {
-                Some(heap) => args
+            let numbers = match &mut arena {
+                Some((views, new)) => args
                     .iter()
-                    .map(|v| Numeric::read(v, heap))
+                    .map(|v| Numeric::read(v, views, new))
                     .collect::<Result<Vec<_>, _>>()?,
                 None => {
                     let Some(numbers) = args
@@ -575,8 +576,8 @@ fn plain(
             }
         }
         Operation::Eq => {
-            let equal = match heap {
-                Some(heap) => equal(a, &args[1], heap)?,
+            let equal = match &arena {
+                Some((views, _)) => equal(a, &args[1], views)?,
                 None => match crate::comparison::scalar_equal(a, &args[1]) {
                     Some(equal) => equal,
                     None => return Ok(None),
@@ -584,8 +585,8 @@ fn plain(
             };
             Value::Bool(equal)
         }
-        Operation::Same => Value::Bool(match heap.as_deref_mut() {
-            Some(heap) => same(a, &args[1], heap)?,
+        Operation::Same => Value::Bool(match &arena {
+            Some((views, _)) => same(a, &args[1], views)?,
             None => {
                 let Some(same) = crate::comparison::scalar_same(a, &args[1]) else {
                     return Ok(None);
@@ -594,20 +595,20 @@ fn plain(
             }
         }),
         Operation::Lt | Operation::Le | Operation::Gt | Operation::Ge | Operation::Compare => {
-            let order = match heap {
-                Some(heap) => compare(a, &args[1], heap)?,
+            let order = match &mut arena {
+                Some((views, new)) => compare(a, &args[1], views, new)?,
                 None => match crate::comparison::scalar_compare(a, &args[1]) {
                     Some(order) => order?,
                     None => return Ok(None),
                 },
             };
             match operation {
-                Operation::Compare => Value::Int(IntRef::Inline(Integer::from(match order {
+                Operation::Compare => Value::Int(match order {
                     Some(Ordering::Less) => -1,
                     Some(Ordering::Equal) => 0,
                     Some(Ordering::Greater) => 1,
                     None => return Err(raised("unordered", "NaN has no ordering")),
-                }))),
+                }),
                 Operation::Lt => Value::Bool(order == Some(Ordering::Less)),
                 Operation::Le => {
                     Value::Bool(matches!(order, Some(Ordering::Less | Ordering::Equal)))
@@ -617,38 +618,55 @@ fn plain(
             }
         }
         Operation::Kind => kind_name(a.kind()),
-        Operation::Ref => Value::Ref(match a {
-            Value::Task(id) => Identity::Task(*id),
-            _ => Identity::Object(
-                a.object()
-                    .ok_or_else(|| raised("type_error", "ref requires an object or task"))?,
-            ),
-        }),
+        Operation::Ref => match a {
+            Value::Task(id) => Value::TaskRef(*id),
+            Value::List(object)
+            | Value::Map(object)
+            | Value::Set(object)
+            | Value::Record(object)
+            | Value::Closure(object) => Value::ObjectRef(*object),
+            _ => return Err(raised("type_error", "ref requires an object or task")),
+        },
         Operation::ToFloat => match a {
-            Value::Int(value) => {
-                let integer = match value {
-                    IntRef::Inline(i) => i.clone(),
-                    _ => {
-                        let Some(heap) = heap else {
-                            return Ok(None);
-                        };
-                        heap.materialize_int(value)?
-                    }
+            Value::Int(value) => Value::Float(integer_to_float(&Integer::from(*value))?),
+            Value::BigInt(_) => {
+                let Some((views, new)) = &mut arena else {
+                    return Ok(None);
                 };
+                let Some(integer) = views.integer(a)? else {
+                    return Err(raised("type_error", "expected a number"));
+                };
+                new.read_whole(integer.bits().div_ceil(8))?;
                 Value::Float(integer_to_float(&integer)?)
             }
-            Value::Float(_) => a.clone(),
+            Value::Float(_) => *a,
             _ => return Err(raised("type_error", "expected a number")),
         },
         Operation::ToInt => match a {
-            Value::Float(value) => Value::Int(IntRef::Inline(float_to_integer(*value)?)),
-            Value::Int(_) => a.clone(),
+            Value::Float(value) => {
+                let integer = float_to_integer(*value)?;
+                match (integer.word(), &mut arena) {
+                    (Some(word), _) => Value::Int(word),
+                    (None, Some((_, new))) => new.integer(integer),
+                    (None, None) => return Ok(None),
+                }
+            }
+            Value::Int(_) | Value::BigInt(_) => *a,
             _ => return Err(raised("type_error", "expected a number")),
         },
         Operation::ToText => match a {
             // Its digits are reserved before they are written.
-            Value::Int(_) => return Ok(None),
-            Value::Float(value) => Value::text(value.to_string()),
+            Value::Int(_) | Value::BigInt(_) => return Ok(None),
+            Value::Float(value) => {
+                let text = value.to_string();
+                match &mut arena {
+                    Some((_, new)) => new.text(&text),
+                    None => match ShortText::new(&text) {
+                        Some(short) => Value::Text(short),
+                        None => return Ok(None),
+                    },
+                }
+            }
             _ => return Err(raised("type_error", "expected a number")),
         },
         Operation::IntText => {
@@ -657,17 +675,17 @@ fn plain(
         }
         Operation::IntParse => {
             let radix = radix(&args[1])?;
-            let Value::Text(text) = a else {
-                return Err(raised("type_error", "expected text"));
-            };
-            let text = match &text.body {
-                Payload::Resident(text) => Arc::clone(text),
-                _ => {
-                    let Some(heap) = heap.as_deref_mut() else {
-                        return Ok(None);
-                    };
-                    heap.materialize_text(text)?
-                }
+            let text = match (a, &mut arena) {
+                (Value::Text(short), _) => Cow::Borrowed(short.as_str()),
+                (Value::LongText(_), Some((views, new))) => match views.text(a)? {
+                    Some(text) => {
+                        new.read_whole(text.len())?;
+                        text.whole()?
+                    }
+                    None => return Err(raised("type_error", "expected text")),
+                },
+                (Value::LongText(_), None) => return Ok(None),
+                _ => return Err(raised("type_error", "expected text")),
             };
             let digits = text.strip_prefix(['+', '-']).unwrap_or(&text);
             if digits.is_empty()
@@ -684,28 +702,24 @@ fn plain(
                 BigInt::parse_bytes(text.as_bytes(), radix)
                     .ok_or_else(|| raised("number_parse", "invalid integer text"))?,
             );
-            match heap.as_deref_mut() {
-                Some(heap) => Value::Int(heap.int(integer)?),
-                None => {
-                    let Some(value) = Numeric::Int(integer).inline() else {
-                        return Ok(None);
-                    };
-                    value
-                }
+            match (integer.word(), &mut arena) {
+                (Some(word), _) => Value::Int(word),
+                (None, Some((_, new))) => new.integer(integer),
+                (None, None) => return Ok(None),
             }
         }
         Operation::FloatParse => {
-            let Value::Text(text) = a else {
-                return Err(raised("type_error", "expected text"));
-            };
-            let text = match &text.body {
-                Payload::Resident(text) => Arc::clone(text),
-                _ => {
-                    let Some(heap) = heap else {
-                        return Ok(None);
-                    };
-                    heap.materialize_text(text)?
-                }
+            let text = match (a, &mut arena) {
+                (Value::Text(short), _) => Cow::Borrowed(short.as_str()),
+                (Value::LongText(_), Some((views, new))) => match views.text(a)? {
+                    Some(text) => {
+                        new.read_whole(text.len())?;
+                        text.whole()?
+                    }
+                    None => return Err(raised("type_error", "expected text")),
+                },
+                (Value::LongText(_), None) => return Ok(None),
+                _ => return Err(raised("type_error", "expected text")),
             };
             Value::Float(Float::new(parse_float(&text)?))
         }
@@ -746,43 +760,36 @@ const _: () = {
 
 /// A kind's name, as `kind` answers it, from the immutable kind table.
 fn kind_name(kind: ValueKind) -> Value {
-    const NAMES: [(ValueKind, &str); 19] = KIND_NAMES;
-    Value::text(Arc::from(NAMES[kind as usize].1))
+    crate::short(KIND_NAMES[kind as usize].1)
 }
 
 /// An integer's digits in `radix`, a text that can be eight times the
 /// integer's own bytes (radix 2). The digits are reserved, as the text and
-/// as the buffer they are written in, before they are written; a refusal
-/// is [`NativeError::Memory`].
+/// as the buffer they are written in, before they are written.
 pub(crate) fn integer_text(
-    heap: &mut dyn NativeHeap,
-    integer: &IntRef,
+    args: &Args<'_>,
+    new: &mut Nursery<'_>,
+    integer: &Value,
     radix: u32,
 ) -> Result<Value, NativeError> {
+    let Some(integer) = args.integer(integer)? else {
+        return Err(raised("type_error", "expected an integer"));
+    };
     // An integer below 2^bits has at most bits / log2(radix) + 1 digits;
     // one more digit absorbs the float's rounding, and one is the sign.
-    let bits = match integer {
-        IntRef::Inline(i) => i.bits(),
-        IntRef::Paged { summary, .. } => summary.bits,
-    };
-    let digits = (bits as f64 / f64::from(radix).log2()) as u64 + 3;
-    heap.reserve(0, digits.saturating_mul(2))?;
-    let integer = match integer {
-        IntRef::Inline(i) => i.clone(),
-        _ => heap.materialize_int(integer)?,
-    };
-    Ok(Value::Text(
-        heap.text(&integer.as_bigint().to_str_radix(radix))?,
-    ))
+    let digits = (integer.bits() as f64 / f64::from(radix).log2()) as u64 + 3;
+    new.reserve(0, digits.saturating_mul(2))?;
+    new.read_whole(integer.bits().div_ceil(8))?;
+    Ok(new.text(&integer.as_bigint().to_str_radix(radix)))
 }
 
 fn radix(value: &Value) -> Result<u32, NativeError> {
     match value {
-        Value::Int(IntRef::Inline(value)) => value
-            .to_u32()
+        Value::Int(value) => u32::try_from(*value)
+            .ok()
             .filter(|value| (2..=36).contains(value))
             .ok_or_else(|| raised("number_range", "radix must be between 2 and 36")),
-        Value::Int(_) => Err(raised("number_range", "radix must be between 2 and 36")),
+        Value::BigInt(_) => Err(raised("number_range", "radix must be between 2 and 36")),
         _ => Err(raised("type_error", "radix must be an integer")),
     }
 }
@@ -827,9 +834,7 @@ fn parse_float(text: &str) -> Result<f64, NativeError> {
     }
     let value: f64 = text.parse().map_err(|_| invalid())?;
     if value.is_infinite() {
-        return Err(NativeError::Raised(Arc::new(
-            lash_kernel_doc::heap::ErrorRef::new("number_range", "decimal text rounds to infinity"),
-        )));
+        return Err(raised("number_range", "decimal text rounds to infinity"));
     }
     Ok(value)
 }

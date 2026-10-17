@@ -3,8 +3,7 @@
 
 use std::cmp::Ordering;
 
-use lash_kernel_doc::heap::{IMMUTABLE_INLINE_MAX, IntRef};
-use lash_kernel_doc::{Float, Integer, NativeError, NativeHeap, Value};
+use lash_kernel_doc::{Args, Float, Integer, NativeError, Nursery, Value};
 use num_bigint::{BigInt, BigUint, Sign};
 use num_traits::{FromPrimitive, One, ToPrimitive, Zero};
 
@@ -148,7 +147,7 @@ pub(crate) fn ratio_to_float(a: &BigInt, b: &BigInt) -> Result<f64, NativeError>
     }
 }
 
-/// Materialized operands of numeric algorithms. Heap reads remain explicit
+/// Materialized operands of numeric algorithms. Arena reads remain explicit
 /// at the call boundary; this domain contains no collection identities.
 #[derive(Clone)]
 pub(crate) enum Numeric {
@@ -159,35 +158,40 @@ pub(crate) enum Numeric {
 impl Numeric {
     pub(crate) fn resident(value: &Value) -> Option<Self> {
         match value {
-            Value::Int(IntRef::Inline(i)) => Some(Self::Int(i.clone())),
+            Value::Int(i) => Some(Self::Int(Integer::from(*i))),
             Value::Float(f) => Some(Self::Float(*f)),
             Value::Bool(b) => Some(Self::Bool(*b)),
             _ => None,
         }
     }
-    pub(crate) fn read(value: &Value, heap: &mut dyn NativeHeap) -> Result<Self, NativeError> {
+    /// The number `value` names; a paged integer read whole holds its
+    /// bytes ([`Nursery::read_whole`]).
+    pub(crate) fn read(
+        value: &Value,
+        args: &Args<'_>,
+        new: &mut Nursery<'_>,
+    ) -> Result<Self, NativeError> {
         match value {
-            Value::Int(i) => Ok(Self::Int(match i {
-                IntRef::Inline(i) => i.clone(),
-                _ => heap.materialize_int(i)?,
-            })),
             Value::Float(f) => Ok(Self::Float(*f)),
-            _ => Err(raised("type_error", "expected a number")),
+            _ => match args.integer(value)? {
+                Some(i) => {
+                    new.read_whole(i.bits().div_ceil(8))?;
+                    Ok(Self::Int(i.into_owned()))
+                }
+                None => Err(raised("type_error", "expected a number")),
+            },
         }
     }
-    pub(crate) fn store(self, heap: &mut dyn NativeHeap) -> Result<Value, NativeError> {
-        Ok(match self {
-            Self::Int(i) => Value::Int(heap.int(i)?),
+    pub(crate) fn store(self, new: &mut Nursery<'_>) -> Value {
+        match self {
+            Self::Int(i) => new.integer(i),
             Self::Float(f) => Value::Float(f),
             Self::Bool(b) => Value::Bool(b),
-        })
+        }
     }
     pub(crate) fn inline(self) -> Option<Value> {
         Some(match self {
-            Self::Int(i) if i.bits().div_ceil(8) <= IMMUTABLE_INLINE_MAX => {
-                Value::Int(IntRef::Inline(i))
-            }
-            Self::Int(_) => return None,
+            Self::Int(i) => Value::Int(i.word()?),
             Self::Float(f) => Value::Float(f),
             Self::Bool(b) => Value::Bool(b),
         })
@@ -196,7 +200,8 @@ impl Numeric {
 pub(crate) fn number_cmp(
     a: &Value,
     b: &Value,
-    heap: &mut dyn NativeHeap,
+    args: &Args<'_>,
+    new: &mut Nursery<'_>,
 ) -> Result<Option<Ordering>, NativeError> {
-    scalar_cmp(&Numeric::read(a, heap)?, &Numeric::read(b, heap)?)
+    scalar_cmp(&Numeric::read(a, args, new)?, &Numeric::read(b, args, new)?)
 }
