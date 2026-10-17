@@ -343,10 +343,17 @@ capacity and an undersized one is a throttled or killed action. The rule, in
 
 - A compile asks for one CPU while p95(cores / worker slot share) is at most
   one. The share is the sampled worker's advertised CPUs / max_inflight
-  (1.25 on i9, 1.67 on 02), read from `worker_cpu_count` and
+  (historically 1.25 on i9, 1.67 on 02), read from `worker_cpu_count` and
   `worker_max_inflight` in the record or explicit per-log `--worker-metadata`
-  JSON. Missing metadata refuses sizing (S1). Above the share, and for every
-  test run, the request is `ceil(p95 - 0.2)`, capped at 8.
+  JSON. Missing metadata refuses sizing (S1). Above the share, the compile
+  request is `ceil(p95 - 0.2)`, capped at 8. Test runs and batches reserve
+  `ceil(total CPU / total wall - 0.2)` over successful samples lasting at
+  least one second, with a one-CPU minimum and a guard of `ceil(p95 / 2)`:
+  their p95 must fit the executor's twofold CPU burst. Requests remain capped
+  at 8. Wall weighting prices sustained work across selections without letting
+  a few short parallel runs price every long serial run. Timing-sensitive
+  suites keep their independent contention floors. Measured test rows retain
+  both `mean_cores` and `p95_cores` as evidence.
 - Compile memory is p99 anonymous peak x 1.25 plus 512 MiB, rounded up to
   256 MiB, with the existing 1.5 GiB measured-row floor and per-crate floors. The anonymous
   measurement is sampled every 250 ms and is a lower bound. The fixed allowance
@@ -428,12 +435,19 @@ The worker metadata JSON is keyed by the exact usage-log path supplied on the
 command line, for example `{"usage-i9.log": {"worker_cpu_count": 40,
 "worker_max_inflight": 32}}`. Use the advertisement from the captured log's
 worker and time, rather than the pool's current settings. Records carrying
-these fields need no sidecar. Event joins require worker `action_digest`,
-matching Buck2's `RemoteCommand.action_digest` (`hash/size` and `hash:size`
-normalize to the same key). Until kiln deploys that field, logs without it
-use the previous identity/category/reservation/time join with an explicit
-warning. That legacy branch still drops raised and killed samples; ambiguous
-matches cannot lower a budget.
+these fields need no sidecar. NativeLink 1.7.3 workers do not expose
+`action_digest` in usage; this is a worker limitation, with no deployment
+planned to add it. The exact join is usage `operation_id` → scheduler trace
+`action_digest` → Buck2 `RemoteCommand.action_digest`. Enrich usage records
+with the trace digest before passing them to the event join; normalize the
+trace's `hash-size` to `hash/size` (`hash:size` also normalizes to that key).
+Filter scheduler traces to `repo:lash` and retain retries as distinct attempts,
+paired in dispatch/start order. Trace effective CPU and memory are the
+scheduler's post-hint reservations, distinct from the client's request.
+Report trace coverage and refuse uncovered or ambiguous attempts rather than
+infer their identity. Unenriched logs still enter the legacy
+identity/category/reservation/time join with an explicit warning; that branch
+can drop raised and killed samples and cannot certify their absence.
 
 `--refresh` rewrites `action-sizes.json`, `target-kind-sizes.json`,
 `optimized-sizes.json`, `clippy-sizes.json`, `category-sizes.json`,

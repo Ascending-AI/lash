@@ -18,8 +18,10 @@ log path --all` lists a checkout's logs. An executed (not cached) remote
 action matches the one usage record with its `action_digest`, Cargo identity
 and category. Reservation and elapsed time do not identify an action: hints
 change the former and killed attempts can have different durations. Ambiguous
-digests remain unmatched. Until kiln deploys `action_digest` in worker logs,
-legacy records explicitly use the old identity/category/reservation/time join:
+digests remain unmatched. NativeLink 1.7.3 worker usage lacks `action_digest`;
+enrich it through usage `operation_id` -> scheduler trace `action_digest`,
+retaining retry attempts in order and refusing uncovered or ambiguous joins.
+Unenriched records explicitly use the old identity/category/reservation/time join:
 end within five seconds, duration within 0.5 s or 8%. A warning names this
 branch because it still cannot retain raised or killed samples reliably.
 
@@ -189,8 +191,9 @@ def labelled_records(actions, lines, inventory: dict):
 
     Yields `(key, inventory kind, category, emit, optimized, record)` once per
     worker attempt. Digest-bearing records survive hints, escalation and kills.
-    Until kiln deploys digests, legacy records use the old reservation/time join
-    with an explicit warning. They cannot prove raised or killed usage absent.
+    NativeLink 1.7.3 usage needs operation_id-to-scheduler-trace enrichment.
+    Unenriched records use the legacy reservation/time join with an explicit
+    warning. They cannot prove raised or killed usage absent.
     """
     identities = target_identities(inventory)
     records = usage_by_digest(lines)

@@ -63,8 +63,8 @@ The rule, per `<package>/<crate>`:
 
 * `cpu_count` = 1 while p95(cpu time / wall time / worker slot share) is
   at most 1; otherwise ceil(p95 cores - 0.2), capped at 8. The slot share is
-  that sampled worker's advertised CPU count / max_inflight (1.25 on i9,
-  1.67 on 02). Compile samples require both worker metadata fields above;
+  that sampled worker's advertised CPU count / max_inflight (historically
+  1.25 on i9, 1.67 on 02). Compile samples require both metadata fields above;
   legacy logs can supply them with `--worker-metadata`, a JSON object keyed
   by log path whose values hold `worker_cpu_count` and `worker_max_inflight`.
   Missing metadata refuses sizing (S1); no pool-wide share is assumed.
@@ -169,8 +169,9 @@ the compile fields are empty for it. The rule, per label:
 * Only `run` records, successful ones, of a test label this workspace
   generates (`tools/buck2/target-inventory.json`), feature lanes and
   `:test_batch` aggregates included. The XML spawn is not the test, and another
-  repository's labels never match. A batch's own row is a lower bound on the
-  budget the generator derives from its members (see `batch_budget` there).
+  repository's labels never match. A batch's measured row prices the whole
+  batch; only an unmeasured batch reserves its largest members side by side
+  (see `batch_budget` in the generator).
 * At least 3 samples, or no row -- except for a label in
   `TEST_RUN_MINIMUM_MEMORY_KB`, whose floor keeps its row even on too few
   samples. An unmeasured test keeps the request the generator gives it
@@ -184,11 +185,14 @@ the compile fields are empty for it. The rule, per label:
   rows move on every refresh. A killed run's total peak x 1.25 supplies a
   minimum even when successful runs were warm. Legacy records without an
   anonymous measurement retain cgroup sizing and a 1 GiB floor.
-* `cpu_count` = ceil(p95 cores - 0.2), at least 1, capped at 8, over the
-  samples of at least one second. A run does not lean on the slot share as a
-  compile does: a throttled compile is slower, a throttled test can pass its
-  timeout. A test whose every run is shorter asks for one core: it cannot show
-  more, and it holds what it has for under a second.
+* `cpu_count` reserves sustained demand: ceil(total CPU / total wall - 0.2),
+  at least 1, over successful samples of at least one second. It also reserves
+  at least ceil(p95 cores / 2), so p95 fits the executor's twofold CPU burst.
+  The request is capped at 8. Short parallel selections must not price every
+  long serial selection; weighting by wall time also prevents many short
+  serial runs from hiding a long parallel run. Timing-sensitive suites retain
+  their separate contention floors. A test whose every run is shorter asks
+  for one core: it cannot show more, and holds it for under a second.
 * Every sampled label gets a row, including one at the smallest request: the
   generator's fallback for an unmeasured run is larger than that.
 """
@@ -222,10 +226,15 @@ COMPILE_TOOLS = {"python3", "rustdoc"}
 MIN_WALL_MS = 1000
 MIN_SAMPLES = 20
 CPU_PERCENTILE = 95
-# How far above a whole core the p95 may sit and still round down.
+# How far above a whole core the compile p95 or sustained test demand may
+# sit and still round down.
 CPU_TOLERANCE = 0.2
 # The pool caps a single action's request at 8 cores.
 MAX_CPU_COUNT = 8
+# The executor gives each reserved CPU proportional weight and a twofold
+# cpu.max burst. Admission prices sustained test work; the p95 guard keeps
+# parallel runs within that execution ceiling (FIG-6619).
+TEST_CPU_BURST = 2
 # The proportional margin covers variation between inputs; compile anonymous
 # samples also get a fixed allowance for file-backed pages and sampling error.
 # Test runs and legacy compiles keep `memory_need`'s previous request bound.
@@ -315,7 +324,7 @@ def percentile(values: list[float], pct: int) -> float:
 
 
 def cpu_count_for(p95_cores: float, *, slot_share: float | None = None) -> int:
-    """The request above a compile slot share, or for any test run."""
+    """The request above a compile slot share, or for sustained test demand."""
     if slot_share is not None and p95_cores <= slot_share:
         return DEFAULT_CPU_COUNT
     wanted = math.ceil(p95_cores - CPU_TOLERANCE)
@@ -638,6 +647,8 @@ class TestRuns:
         self.peaks: list[int] = []
         self.needs: list[float] = []
         self.timed = Samples()
+        self.cpu_usec = 0
+        self.wall_ms = 0
         self.killed_peak_bytes = 0
         self.anonymous = False
 
@@ -654,6 +665,8 @@ class TestRuns:
         self.needs += other.needs
         self.timed.records += other.timed.records
         self.timed.needs += other.timed.needs
+        self.cpu_usec += other.cpu_usec
+        self.wall_ms += other.wall_ms
         self.killed_peak_bytes = max(self.killed_peak_bytes, other.killed_peak_bytes)
         self.anonymous = self.anonymous or other.anonymous
 
@@ -672,6 +685,8 @@ class TestRuns:
         self.needs.append(memory_need(peak_bytes, requested_kb) if anon_peak_bytes is None else basis * MEMORY_MARGIN)
         if wall_ms >= MIN_WALL_MS:
             self.timed.observe(cpu_usec / 1000 / wall_ms, peak_bytes, requested_cpu)
+            self.cpu_usec += cpu_usec
+            self.wall_ms += wall_ms
 
 
 def collect_test_runs(lines, labels: set[str]) -> dict[str, TestRuns]:
@@ -739,7 +754,11 @@ def test_run_table(
             else 0.0
         )
         p99_peak_bytes = percentile(runs.peaks, MEMORY_PERCENTILE) if runs.peaks else 0
-        cpu_count = cpu_count_for(p95)
+        mean_cores = runs.cpu_usec / 1000 / runs.wall_ms if runs.wall_ms else 0.0
+        cpu_count = min(
+            MAX_CPU_COUNT,
+            max(cpu_count_for(mean_cores), math.ceil(p95 / TEST_CPU_BURST)),
+        )
         memory_kb = max(
             memory_kb_for(runs.needs, floor_kb=TEST_MEMORY_FLOOR_KB if runs.anonymous else 1024 * 1024)
             if runs.peaks
@@ -757,6 +776,7 @@ def test_run_table(
             "cpu_count": cpu_count,
             "memory_kb": memory_kb,
             "p95_cores": round(p95, 2),
+            "mean_cores": round(mean_cores, 2),
             "p99_peak_bytes": p99_peak_bytes,
             "peak_bytes": runs.peak_bytes,
             "samples": runs.count,

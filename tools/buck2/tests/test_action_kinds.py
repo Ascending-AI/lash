@@ -331,6 +331,29 @@ class InForceTest(unittest.TestCase):
         self.assertEqual(sizes.test_run_table({}, current)[label], current[label])
 
 
+class TestRunCpuTest(unittest.TestCase):
+    def row(self, runs):
+        label = "//crates/lash-core:runtime_turns__test"
+        lines = [
+            usage(cores=cores, wall_ms=wall_ms).replace("test=-", f"test=run:-:{label}")
+            for cores, wall_ms in runs
+        ]
+        return sizes.test_run_table(sizes.collect_test_runs(lines, {label}))[label]
+
+    def test_short_parallel_runs_do_not_price_long_serial_runs(self):
+        row = self.row([(1.0, 100_000)] * 17 + [(1.6, 1_000)] * 3)
+        self.assertEqual(row["cpu_count"], 1)
+
+    def test_sustained_demand_is_weighted_by_wall_time(self):
+        row = self.row([(1.0, 1_000)] * 19 + [(3.0, 100_000)])
+        self.assertEqual(row["cpu_count"], 3)
+
+    def test_p95_fits_the_executors_twofold_burst(self):
+        row = self.row([(1.0, 100_000)] * 17 + [(5.5, 1_000)] * 3)
+        self.assertEqual(row["cpu_count"], 3)
+        self.assertLessEqual(row["p95_cores"], 2 * row["cpu_count"])
+
+
 class AnonymousMemoryTest(unittest.TestCase):
     def measured(self, anon, peak=8 * GIB, count=20):
         return sizes.collect([usage(peak_bytes=peak, anon_peak_bytes=anon)] * count, {("lash-internal-core", "lash_core")})
