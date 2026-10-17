@@ -44,20 +44,17 @@ impl RuntimeTurnDriver<'_> {
         wait: bool,
     ) -> Result<(), RuntimeError> {
         for (drained, newest) in self.call_drains.settle(wait).await {
-            let usage = drained
-                .record
-                .usage()
+            let (answering, earlier) = split_answering_usage(&drained.record)
                 .map_err(|overflow| self.usage_overflow(overflow))?;
             self.queue_model_call(
                 drained.call,
                 lash_core_store::model_calls::ModelCallEnd::Answered,
                 drained.record,
             );
-            {
-                machine
-                    .settle_unknown_call_usage(&usage, newest)
-                    .map_err(|overflow| self.usage_overflow(overflow))?;
-            }
+            machine
+                .settle_unknown_call_usage(&answering, newest)
+                .and_then(|()| machine.record_unanswered_call_usage(&earlier))
+                .map_err(|overflow| self.usage_overflow(overflow))?;
         }
         Ok(())
     }
@@ -277,8 +274,11 @@ impl RuntimeTurnDriver<'_> {
         }
         let mut result = result;
         if let (Ok(response), Some(record)) = (&mut result, &call_record) {
-            response.usage = record
-                .usage()
+            let (answering, earlier) =
+                split_answering_usage(record).map_err(|overflow| self.usage_overflow(overflow))?;
+            response.usage = answering;
+            machine
+                .record_unanswered_call_usage(&earlier)
                 .map_err(|overflow| self.usage_overflow(overflow))?;
         }
         self.model_call_address = Some(crate::plugin::ModelCallAddress {
@@ -1239,6 +1239,34 @@ pub(in crate::runtime) fn model_call_activity(
             call_id: call_id.clone(),
         },
     }
+}
+
+/// `record`'s usage split at the attempt that answered, its last: what that
+/// attempt's provider reported, the prompt the response carries (unknown
+/// when it reported nothing), and what the call's earlier attempts add,
+/// which the turn counts as unanswered work. Together they count the call
+/// as [`crate::LlmCallRecord::usage`] does, unknown once when any attempt's
+/// usage never arrived (FIG-6570): an attempt a crash lost leaves the call's
+/// total unknown without hiding the prompt its resend observed.
+fn split_answering_usage(
+    record: &crate::LlmCallRecord,
+) -> Result<(LlmUsage, LlmUsage), lash_protocol_types::llm::types::TokenUsageOverflow> {
+    let Some((answering, earlier)) = record.attempts.split_last() else {
+        return Ok((LlmUsage::default(), LlmUsage::default()));
+    };
+    let earlier_unknown = (answering.usage.is_some()
+        && earlier.iter().any(|attempt| attempt.usage.is_none()))
+    .then(LlmUsage::unknown_call);
+    let earlier = earlier
+        .iter()
+        .filter_map(|attempt| attempt.usage.as_ref())
+        .chain(earlier_unknown.as_ref())
+        .try_fold(LlmUsage::default(), |total, usage| total.checked_add(usage))?;
+    let answering = answering
+        .usage
+        .clone()
+        .unwrap_or_else(LlmUsage::unknown_call);
+    Ok((answering, earlier))
 }
 
 #[cfg(test)]

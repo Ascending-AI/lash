@@ -1218,18 +1218,28 @@ impl Scenario for PromptUsage {
                 committed.last_prompt_usage
             ));
         }
+        // A start committed before the answering one reserved an attempt
+        // whose answer the cut lost: the call counts unknown, never free
+        // (FIG-6570), while the answering attempt's tokens still count.
+        let trace = nodes.script().trace();
+        let starts = trace
+            .iter()
+            .filter(|write| write.point.label == CommitLabel::MODEL_START && write.committed())
+            .count();
         let expected = lash_core::LlmUsage {
             input_tokens: PROMPT_TOKENS,
+            unknown_calls: u32::from(starts > 1),
             ..Default::default()
         };
         if committed.token_usage != expected {
             violations.push(format!(
-                "the turn committed total usage {:?}, not its call's {expected:?}",
+                "the turn committed total usage {:?} after {starts} model starts, not its \
+                 call's {expected:?}",
                 committed.token_usage
             ));
         }
         if let Some(cut) = cut {
-            violations.extend(zombie_laws(cut, &nodes.script().trace()));
+            violations.extend(zombie_laws(cut, &trace));
         }
         violations
     }
