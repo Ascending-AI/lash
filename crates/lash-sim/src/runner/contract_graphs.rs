@@ -142,14 +142,18 @@ impl lash::tracing::ProductObservationSink for ContractGraphs {
     }
 }
 
-/// The effect the document performs at `site`: the name a `perform` states.
+/// The effect performed at `site`, whether the `perform` is a statement
+/// action or an action nested in an expression (`K-EVAL-008`).
 fn contract_document_effect<'a>(
     document: &'a lash::workflow::WorkflowDocument,
     site: &lash::workflow::document::Site,
 ) -> Option<&'a lash::workflow::document::EffectName> {
+    use lash::workflow::graph::{ActNode, ActionNode, ExprNode, NodeKind};
+
     match &document.graph().node_at(site)?.kind {
-        lash::workflow::graph::NodeKind::Action(lash::workflow::graph::ActionNode::Perform {
-            effect,
+        NodeKind::Action(ActionNode::Perform { effect, .. })
+        | NodeKind::Expr(ExprNode::Act {
+            kind: ActNode::Perform { effect, .. },
             ..
         }) => Some(effect),
         _ => None,
