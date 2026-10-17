@@ -2,17 +2,17 @@
 
 use lash_kernel_doc::Name;
 
-use super::{lower, lower_in_session, main_text};
+use super::{lower, lower_in_session};
 use crate::DiagnosticCode;
 
-/// A function that ends without `return` gives `undefined`; the kernel's
-/// own default is null. Its closure states how a tool starts it: the token's
-/// closure, with an absent `this` and the argument list.
+/// A function that ends without `return` gives `undefined` through both a
+/// direct call and its function value; the kernel's own default is null.
 #[test]
 fn a_function_without_a_return_gives_undefined() {
+    use super::machine::{Ended, end};
     assert_eq!(
-        main_text("function f() {}"),
-        "let t1 = fn(this1, args1) start() -> Any token(\"ts.function\", 4) ts_args(ts.await, same) {\n  return absent\n}\nlet f = (\"ts.function\", \"\", \"f\", 0.0, t1, {})"
+        end("function f() {} const g = f; await finish(f() === undefined && g() === undefined);"),
+        Ended::Finished(lash_kernel_doc::Datum::Bool(true))
     );
 }
 
