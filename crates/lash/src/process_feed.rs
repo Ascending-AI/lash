@@ -459,7 +459,7 @@ impl ProcessFeedSource {
                         if counts_through.is_some_and(|through| position <= through)
                             && matches!(&event.payload,
                                 ProcessObservationEventPayload::LanguageExecution(observation)
-                                    if matches!(observation.execution.payload, crate::tracing::TraceLanguageExecutionPayload::Ran { .. }))
+                                    if matches!(observation.execution.payload, crate::tracing::TraceLanguageExecutionPayload::Counts { .. }))
                         {
                             continue;
                         }

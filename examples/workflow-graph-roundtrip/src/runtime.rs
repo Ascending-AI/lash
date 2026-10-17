@@ -283,7 +283,7 @@ pub(crate) async fn observe(
             ProcessObservationStreamItem::Event(event) => match &event.payload {
                 ProcessObservationEventPayload::LanguageExecution(observation) => matches!(
                     observation.execution.payload,
-                    TraceLanguageExecutionPayload::Ran { .. }
+                    TraceLanguageExecutionPayload::Counts { .. }
                 ),
                 ProcessObservationEventPayload::Committed { event } => matches!(
                     event.fact,
@@ -849,7 +849,8 @@ impl Overlay {
             self.remember(at);
         }
         let mut events = self.changed()?;
-        if let TraceLanguageExecutionPayload::Node { at, fact } = &observation.execution.payload {
+        if let TraceLanguageExecutionPayload::Node { at, fact, .. } = &observation.execution.payload
+        {
             let call = match fact {
                 TraceNodeFact::Completed { call_id } => call_id
                     .clone()
@@ -1005,9 +1006,6 @@ mod tests {
                 event_key: format!("{occurrence}:{fact:?}"),
                 identity: TraceLanguageExecutionIdentity {
                     scope: TraceRuntimeScope::none(),
-                    subject: TraceRuntimeSubject::Process {
-                        process_id: lash::ProcessId::fixture("adapter"),
-                    },
                     document: WorkflowDocumentRef {
                         document: DocumentId::from_bytes([1; 32]),
                         entry: WorkflowDocumentEntry::Main,
@@ -1017,6 +1015,9 @@ mod tests {
                     generation: None,
                 },
                 payload: TraceLanguageExecutionPayload::Node {
+                    subject: TraceRuntimeSubject::Process {
+                        process_id: lash::ProcessId::fixture("adapter"),
+                    },
                     at: EffectIdentity {
                         task: TaskIdentity::Main,
                         site: Site::new(Unit::Main, [0, 0]),

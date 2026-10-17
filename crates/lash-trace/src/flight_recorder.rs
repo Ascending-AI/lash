@@ -268,7 +268,7 @@ impl FlightRecorderRecord {
                 metadata.attempt = Some(step.attempt);
             }
             TraceEvent::LanguageExecution { event, .. } => {
-                match &event.identity.subject {
+                match &event.subject() {
                     TraceRuntimeSubject::Process { process_id } => {
                         metadata.process_id = Some(process_id.clone());
                     }
@@ -375,7 +375,7 @@ fn operation_outcome(event: &TraceEvent) -> Option<FlightRecorderOutcome> {
                 _ => None,
             },
             TraceLanguageExecutionPayload::ExecutionStarted { .. }
-            | TraceLanguageExecutionPayload::Ran { .. } => None,
+            | TraceLanguageExecutionPayload::Counts { .. } => None,
         },
         _ => None,
     }

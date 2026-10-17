@@ -168,7 +168,7 @@ impl Cache {
         source: Source,
         observation: &LanguageExecutionObservation,
     ) -> Option<WorkflowDocumentRef> {
-        let key = observation.execution.identity.graph_key();
+        let key = observation.execution.graph_key();
         // Steps that arrived before any language observation opened the
         // graph under the process's own key: it is this execution's.
         if !self.graphs.contains_key(&key)
@@ -644,9 +644,6 @@ mod tests {
                 event_key: key.to_string(),
                 identity: TraceLanguageExecutionIdentity {
                     scope: TraceRuntimeScope::none(),
-                    subject: TraceRuntimeSubject::Process {
-                        process_id: process_id.clone(),
-                    },
                     document: document(0).reference().clone(),
                     entry_name: "worker".to_string(),
                     engine_execution_id: Some(process_id.to_string()),
@@ -679,6 +676,9 @@ mod tests {
             "started",
             1_000,
             TraceLanguageExecutionPayload::ExecutionStarted {
+                subject: TraceRuntimeSubject::Process {
+                    process_id: process_id.clone(),
+                },
                 observation: lash::workflow::view::RunObservation::Off,
             },
         )
@@ -690,6 +690,9 @@ mod tests {
             "node-started",
             1_100,
             TraceLanguageExecutionPayload::Node {
+                subject: TraceRuntimeSubject::Process {
+                    process_id: process_id.clone(),
+                },
                 at: lash::workflow::document::EffectIdentity {
                     task: lash::workflow::document::TaskIdentity::Main,
                     site: document(0).graph().execution_sites()[0].site.clone(),

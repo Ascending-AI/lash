@@ -75,43 +75,106 @@ pub struct StepBodyStartedObservation {
     reason = "nearly every payload is a node fact, so boxing it would allocate once per record"
 )]
 #[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize, schemars::JsonSchema)]
-#[serde(tag = "kind", rename_all = "snake_case")]
+#[serde(tag = "kind", rename_all = "snake_case", deny_unknown_fields)]
 pub enum TraceLanguageExecutionPayload {
     /// The execution began. Its identity names the workflow document and
     /// entry; the document itself is read through facade workflow inspection.
     ExecutionStarted {
+        subject: crate::TraceRuntimeSubject,
         observation: lash_kernel_doc::RunObservation,
     },
     ExecutionFinished {
+        subject: crate::TraceRuntimeSubject,
         status: TraceLanguageExecutionStatus,
         #[serde(default, skip_serializing_if = "Option::is_none")]
         error: Option<String>,
     },
     /// One fact about one occurrence of one execution site.
     Node {
+        subject: crate::TraceRuntimeSubject,
         at: lash_protocol_types::EffectIdentity,
         fact: TraceNodeFact,
     },
-    /// Document statement starts and empty-block entries by site ordinal.
-    /// Processes report provisional deltas; cells report cumulative totals
-    /// within a stable activation segment, folded by elementwise maximum.
-    Ran {
-        /// Present for cells: a stable activation id, with cumulative counts
-        /// within that segment. Absent for process live deltas.
-        #[serde(default, skip_serializing_if = "Option::is_none")]
-        segment: Option<String>,
-        ran: Vec<(u32, u64)>,
-    },
+    /// Statement starts and empty-block entries, with their accumulation law.
+    Counts { counts: TraceCountObservation },
+}
+
+/// One process's provisional delta at stable segment/frame coordinates.
+#[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize, schemars::JsonSchema)]
+#[serde(deny_unknown_fields)]
+pub struct TraceProcessCounts {
+    pub process_id: lash_protocol_types::ProcessId,
+    pub segment: String,
+    pub frame: u64,
+    pub delta: Vec<(u32, u64)>,
+}
+
+/// One effect's cumulative totals within a stable cell activation.
+#[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize, schemars::JsonSchema)]
+#[serde(deny_unknown_fields)]
+pub struct TraceCellCounts {
+    pub address: lash_protocol_types::EffectAddress,
+    pub effect_id: String,
+    pub segment: String,
+    pub frame: u64,
+    pub totals: Vec<(u32, u64)>,
+}
+
+/// A count observation owns the subject and coordinates that determine how
+/// its counts accumulate. No optional field selects the arithmetic.
+#[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize, schemars::JsonSchema)]
+#[serde(tag = "type", rename_all = "snake_case")]
+pub enum TraceCountObservation {
+    /// Provisional deltas; committed `process.ran` remains authoritative.
+    Process(TraceProcessCounts),
+    /// Cumulative activation totals, folded by elementwise maximum.
+    Cell(TraceCellCounts),
+}
+
+impl TraceCountObservation {
+    pub fn subject(&self) -> crate::TraceRuntimeSubject {
+        match self {
+            Self::Process(counts) => crate::TraceRuntimeSubject::Process {
+                process_id: counts.process_id.clone(),
+            },
+            Self::Cell(counts) => crate::TraceRuntimeSubject::Effect {
+                address: counts.address.clone(),
+                effect_id: counts.effect_id.clone(),
+            },
+        }
+    }
+
+    /// A retry of the same frame repeats this identity.
+    pub fn event_key(&self, identity: &crate::TraceLanguageExecutionIdentity) -> String {
+        let (segment, frame) = match self {
+            Self::Process(counts) => (&counts.segment, counts.frame),
+            Self::Cell(counts) => (&counts.segment, counts.frame),
+        };
+        format!(
+            "kernel_execution:{}:ran:{segment}:{frame}",
+            identity.graph_key(&self.subject())
+        )
+    }
 }
 
 impl TraceLanguageExecutionPayload {
+    /// The subject is owned by the fact that determines its semantics.
+    pub fn subject(&self) -> crate::TraceRuntimeSubject {
+        match self {
+            Self::ExecutionStarted { subject, .. }
+            | Self::ExecutionFinished { subject, .. }
+            | Self::Node { subject, .. } => subject.clone(),
+            Self::Counts { counts } => counts.subject(),
+        }
+    }
+
     /// The occurrence this fact is about; `None` for a fact about the whole
     /// execution.
     pub fn at(&self) -> Option<&lash_protocol_types::EffectIdentity> {
         match self {
-            Self::ExecutionStarted { .. } | Self::ExecutionFinished { .. } | Self::Ran { .. } => {
-                None
-            }
+            Self::ExecutionStarted { .. }
+            | Self::ExecutionFinished { .. }
+            | Self::Counts { .. } => None,
             Self::Node { at, .. } => Some(at),
         }
     }
@@ -120,9 +183,9 @@ impl TraceLanguageExecutionPayload {
     /// about the whole execution.
     pub fn node_fact(&self) -> Option<&TraceNodeFact> {
         match self {
-            Self::ExecutionStarted { .. } | Self::ExecutionFinished { .. } | Self::Ran { .. } => {
-                None
-            }
+            Self::ExecutionStarted { .. }
+            | Self::ExecutionFinished { .. }
+            | Self::Counts { .. } => None,
             Self::Node { fact, .. } => Some(fact),
         }
     }

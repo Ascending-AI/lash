@@ -383,7 +383,7 @@ impl TraceEvent {
                     | TraceLanguageExecutionStatus::Cancelled => false,
                 },
                 TraceLanguageExecutionPayload::ExecutionStarted { .. }
-                | TraceLanguageExecutionPayload::Ran { .. } => false,
+                | TraceLanguageExecutionPayload::Counts { .. } => false,
             },
             Self::TurnStarted { .. }
             | Self::ExecCodeDiscarded { .. }

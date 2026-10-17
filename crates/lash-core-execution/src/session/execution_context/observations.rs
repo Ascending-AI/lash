@@ -138,6 +138,7 @@ impl RuntimeExecutionContext<'_> {
         call_id: crate::ToolCallId,
         language: impl Into<String>,
         identity: lash_trace::TraceLanguageExecutionIdentity,
+        subject: lash_trace::TraceRuntimeSubject,
         at: lash_protocol_types::EffectIdentity,
     ) {
         self.language_calls.lock_recover().insert(
@@ -145,6 +146,7 @@ impl RuntimeExecutionContext<'_> {
             Arc::new(crate::runtime::process::LanguageCallAttribution {
                 language: language.into(),
                 identity,
+                subject,
                 at,
             }),
         );

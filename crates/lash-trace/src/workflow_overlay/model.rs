@@ -216,11 +216,22 @@ pub enum WorkflowOverlayNodeTransition {
 pub enum WorkflowOverlayFact {
     /// What the language execution reported.
     Language {
-        document: Box<WorkflowDocumentRef>,
-        payload: TraceLanguageExecutionPayload,
+        document: WorkflowDocumentRef,
+        payload: Box<TraceLanguageExecutionPayload>,
     },
     /// The admitted body of a process step started.
     StepBodyStarted { step: StepBodyStarted },
+}
+
+impl WorkflowOverlayFact {
+    pub(super) fn language(
+        &self,
+    ) -> Option<(&WorkflowDocumentRef, &TraceLanguageExecutionPayload)> {
+        match self {
+            Self::Language { document, payload } => Some((document, payload)),
+            Self::StepBodyStarted { .. } => None,
+        }
+    }
 }
 
 /// One canonical observation retained so a persisted overlay can be folded

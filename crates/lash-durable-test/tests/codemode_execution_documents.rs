@@ -19,9 +19,7 @@ mod web_fetch;
 use std::collections::BTreeSet;
 use std::sync::{Arc, Mutex};
 
-use lash::tracing::{
-    TraceLanguageExecution, TraceLanguageExecutionIdentity, TraceLanguageExecutionPayload,
-};
+use lash::tracing::{TraceLanguageExecution, TraceLanguageExecutionPayload};
 use lash::workflow::document::Site;
 use lash::workflow::{
     WorkflowDocument, WorkflowDocumentEntry, WorkflowDocumentRead, WorkflowDocumentRef,
@@ -116,20 +114,21 @@ fn execution_starts<'r>(
 /// The exact sites the execution `identity` names reported on.
 fn emitted_sites(
     events: &[&TraceLanguageExecution],
-    identity: &TraceLanguageExecutionIdentity,
+    started: &TraceLanguageExecution,
 ) -> BTreeSet<Site> {
     events
         .iter()
-        .filter(|event| &event.identity == identity)
+        .filter(|event| event.identity == started.identity && event.subject() == started.subject())
         .filter_map(|event| event.payload.at())
         .map(|at| at.site.clone())
         .collect()
 }
 
-/// Whether the execution `identity` names reported its end.
-fn finished(events: &[&TraceLanguageExecution], identity: &TraceLanguageExecutionIdentity) -> bool {
+/// Whether the execution that began at `started` reported its end.
+fn finished(events: &[&TraceLanguageExecution], started: &TraceLanguageExecution) -> bool {
     events.iter().any(|event| {
-        &event.identity == identity
+        event.identity == started.identity
+            && event.subject() == started.subject()
             && matches!(
                 event.payload,
                 TraceLanguageExecutionPayload::ExecutionFinished { .. }
@@ -252,7 +251,7 @@ await control.finish(fetched.url);
     let [(started, _)] = execution_starts(&events)[..] else {
         panic!("one cell started");
     };
-    let emitted = emitted_sites(&events, &started.identity);
+    let emitted = emitted_sites(&events, started);
     let index = lash::workflow::WorkflowOverlayDocument::of(document);
     assert_eq!(
         emitted.len(),
@@ -294,7 +293,11 @@ await control.finish(fetched.url);
                         lash::tracing::TraceNodeFact::Started {
                             call_id: Some(call_id),
                         },
-                } if event.identity == started.identity && call_id == &call.call_id => {
+                    ..
+                } if event.identity == started.identity
+                    && event.subject() == started.subject()
+                    && call_id == &call.call_id =>
+                {
                     Some(at.site.clone())
                 }
                 _ => None,
@@ -307,10 +310,7 @@ await control.finish(fetched.url);
         emitted.iter().all(|site| index.contains(site)),
         "every site the cell reported is in its document"
     );
-    assert!(
-        finished(&events, &started.identity),
-        "the cell reported its end"
-    );
+    assert!(finished(&events, started), "the cell reported its end");
     world.shutdown().await;
 }
 
@@ -516,7 +516,7 @@ async fn a_cells_parked_calls_sum_to_unsplit_counts_and_the_next_cell_can_be_off
                 record.event,
                 lash::tracing::TraceEvent::LanguageExecution {
                     event: TraceLanguageExecution {
-                        payload: TraceLanguageExecutionPayload::Ran { .. },
+                        payload: TraceLanguageExecutionPayload::Counts { .. },
                         ..
                     },
                     ..

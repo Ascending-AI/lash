@@ -16,6 +16,83 @@ use lash_trace::{
 use serde_json::json;
 
 #[test]
+fn count_observations_refuse_ambiguous_subject_and_accumulation() {
+    let mut ambiguous = json!({
+        "event_key": "kernel_execution:process:p1:ran:root:1",
+        "identity": lash_vm_identity(),
+        "kind": "ran",
+        "segment": "root",
+        "ran": [[1, 2]]
+    });
+    ambiguous["identity"]["subject"] = json!({
+        "type": "process", "process_id": lash_protocol_types::ProcessId::fixture("p1")
+    });
+    assert!(serde_json::from_value::<TraceLanguageExecution>(ambiguous).is_err());
+
+    let schema = serde_json::to_value(schemars::schema_for!(TraceLanguageExecution)).unwrap();
+    let validator = jsonschema::validator_for(&schema).unwrap();
+    for payload in language_execution_payload_samples() {
+        let TraceLanguageExecutionPayload::Counts { .. } = &payload else {
+            continue;
+        };
+        let mut execution = TraceLanguageExecution {
+            event_key: String::new(),
+            identity: lash_vm_identity(),
+            payload,
+        };
+        execution.event_key = execution.count_event_key().unwrap();
+        let wire = serde_json::to_value(&execution).unwrap();
+        assert_eq!(
+            serde_json::from_value::<TraceLanguageExecution>(wire.clone()).unwrap(),
+            execution
+        );
+        assert_schema_accepts(&validator, &wire, "typed counts");
+
+        let mut bad_key = wire.clone();
+        bad_key["event_key"] = json!("another frame");
+        assert!(serde_json::from_value::<TraceLanguageExecution>(bad_key).is_err());
+
+        let mut inconsistent = Vec::new();
+        let mut old_subject = wire.clone();
+        old_subject["identity"]["subject"] = json!({
+            "type": "process", "process_id": lash_protocol_types::ProcessId::fixture("other")
+        });
+        inconsistent.push(old_subject);
+        let mut extra_subject = wire.clone();
+        extra_subject["subject"] = json!({
+            "type": "process", "process_id": lash_protocol_types::ProcessId::fixture("other")
+        });
+        inconsistent.push(extra_subject);
+        let mut wrong_mode = wire.clone();
+        wrong_mode["counts"]["type"] = json!(if wire["counts"]["type"] == "process" {
+            "cell"
+        } else {
+            "process"
+        });
+        inconsistent.push(wrong_mode);
+        for field in ["segment", "frame"] {
+            let mut missing = wire.clone();
+            missing["counts"].as_object_mut().unwrap().remove(field);
+            inconsistent.push(missing);
+        }
+        let mut mixed_arithmetic = wire.clone();
+        mixed_arithmetic["counts"][if wire["counts"]["type"] == "process" {
+            "totals"
+        } else {
+            "delta"
+        }] = json!([[1, 2]]);
+        inconsistent.push(mixed_arithmetic);
+        for invalid in inconsistent {
+            assert!(
+                serde_json::from_value::<TraceLanguageExecution>(invalid.clone()).is_err(),
+                "{invalid}"
+            );
+            assert!(!validator.is_valid(&invalid), "schema admitted {invalid}");
+        }
+    }
+}
+
+#[test]
 fn trace_error_refuses_unknown_failure_and_terminal_classes() {
     for field in ["failure_kind", "terminal_reason"] {
         let mut bytes = json!({
@@ -45,6 +122,7 @@ fn trace_retry_attempt_refuses_the_shared_llm_tool_shape() {
 fn node_failure_requires_typed_provenance() {
     let legacy = json!({
         "kind": "node",
+        "subject": { "type": "process", "process_id": lash_protocol_types::ProcessId::fixture("p1") },
         "at": {
             "task": "main",
             "site": { "unit": { "function": "node-1" }, "path": [] },
@@ -57,6 +135,9 @@ fn node_failure_requires_typed_provenance() {
     assert!(refusal.to_string().contains("failure"), "{refusal}");
 
     let payload = TraceLanguageExecutionPayload::Node {
+        subject: TraceRuntimeSubject::Process {
+            process_id: lash_protocol_types::ProcessId::fixture("p1"),
+        },
         at: lash_protocol_types::effect_identity_fixture("node-1", 1),
         fact: lash_trace::TraceNodeFact::Failed {
             call_id: Some(lash_protocol_types::ToolCallId::fixture("effect-1")),
@@ -129,9 +210,6 @@ fn token_usage_sample() -> LlmUsage {
 fn lash_vm_identity() -> TraceLanguageExecutionIdentity {
     TraceLanguageExecutionIdentity {
         scope: TraceRuntimeScope::new("s1"),
-        subject: TraceRuntimeSubject::Process {
-            process_id: lash_protocol_types::ProcessId::fixture("p1"),
-        },
         document: lash_trace::WorkflowDocumentRef {
             document: lash_kernel_doc::DocumentId::from_bytes([1; 32]),
             entry: lash_trace::WorkflowDocumentEntry::Entry {
@@ -464,6 +542,7 @@ fn event_samples() -> Vec<TraceEvent> {
                 event_key: "process:p1:finished".to_string(),
                 identity: lash_vm_identity(),
                 payload: TraceLanguageExecutionPayload::ExecutionFinished {
+ subject: TraceRuntimeSubject::Process { process_id: lash_protocol_types::ProcessId::fixture("p1") },
                     status: TraceLanguageExecutionStatus::Completed,
                     error: None,
                 },
@@ -655,40 +734,73 @@ fn assert_schema_accepts(validator: &jsonschema::Validator, value: &serde_json::
 fn language_execution_payload_samples() -> Vec<TraceLanguageExecutionPayload> {
     vec![
         TraceLanguageExecutionPayload::ExecutionStarted {
+            subject: TraceRuntimeSubject::Process {
+                process_id: lash_protocol_types::ProcessId::fixture("p1"),
+            },
             observation: lash_kernel_doc::RunObservation::Off,
         },
         TraceLanguageExecutionPayload::ExecutionStarted {
+            subject: TraceRuntimeSubject::Process {
+                process_id: lash_protocol_types::ProcessId::fixture("p1"),
+            },
             observation: lash_kernel_doc::RunObservation::Counts,
         },
-        TraceLanguageExecutionPayload::Ran {
-            segment: None,
-            ran: vec![(1, 2)],
+        TraceLanguageExecutionPayload::Counts {
+            counts: lash_trace::TraceCountObservation::Process(lash_trace::TraceProcessCounts {
+                process_id: lash_protocol_types::ProcessId::fixture("p1"),
+                segment: "root".into(),
+                frame: 1,
+                delta: vec![(1, 2)],
+            }),
         },
-        TraceLanguageExecutionPayload::Ran {
-            segment: Some("root".into()),
-            ran: vec![(1, 2)],
+        TraceLanguageExecutionPayload::Counts {
+            counts: lash_trace::TraceCountObservation::Cell(lash_trace::TraceCellCounts {
+                address: lash_protocol_types::EffectAddress {
+                    execution_scope: lash_protocol_types::ExecutionScope::turn("s1", "t1"),
+                    replay_key: "cell".into(),
+                },
+                effect_id: "cell".into(),
+                segment: "root".into(),
+                frame: 1,
+                totals: vec![(1, 2)],
+            }),
         },
         TraceLanguageExecutionPayload::Node {
+            subject: TraceRuntimeSubject::Process {
+                process_id: lash_protocol_types::ProcessId::fixture("p1"),
+            },
             at: lash_protocol_types::effect_identity_fixture("branch", 1),
             fact: lash_trace::TraceNodeFact::Started { call_id: None },
         },
         TraceLanguageExecutionPayload::Node {
+            subject: TraceRuntimeSubject::Process {
+                process_id: lash_protocol_types::ProcessId::fixture("p1"),
+            },
             at: lash_protocol_types::effect_identity_fixture("branch", 1),
             fact: lash_trace::TraceNodeFact::BranchSelected {
                 selected: TraceBranchSelection::Then,
             },
         },
         TraceLanguageExecutionPayload::Node {
+            subject: TraceRuntimeSubject::Process {
+                process_id: lash_protocol_types::ProcessId::fixture("p1"),
+            },
             at: lash_protocol_types::effect_identity_fixture("branch", 1),
             fact: lash_trace::TraceNodeFact::Completed { call_id: None },
         },
         TraceLanguageExecutionPayload::Node {
+            subject: TraceRuntimeSubject::Process {
+                process_id: lash_protocol_types::ProcessId::fixture("p1"),
+            },
             at: lash_protocol_types::effect_identity_fixture("then", 1),
             fact: lash_trace::TraceNodeFact::Started {
                 call_id: Some(lash_protocol_types::ToolCallId::fixture("call-1")),
             },
         },
         TraceLanguageExecutionPayload::Node {
+            subject: TraceRuntimeSubject::Process {
+                process_id: lash_protocol_types::ProcessId::fixture("p1"),
+            },
             at: lash_protocol_types::effect_identity_fixture("then", 1),
             fact: lash_trace::TraceNodeFact::Waiting {
                 awaited: lash_trace::TraceNodeAwaited::Signal {
@@ -698,12 +810,18 @@ fn language_execution_payload_samples() -> Vec<TraceLanguageExecutionPayload> {
             },
         },
         TraceLanguageExecutionPayload::Node {
+            subject: TraceRuntimeSubject::Process {
+                process_id: lash_protocol_types::ProcessId::fixture("p1"),
+            },
             at: lash_protocol_types::effect_identity_fixture("then", 1),
             fact: lash_trace::TraceNodeFact::Resumed {
                 resolution: lash_trace::TraceNodeWaitResolution::Resumed,
             },
         },
         TraceLanguageExecutionPayload::Node {
+            subject: TraceRuntimeSubject::Process {
+                process_id: lash_protocol_types::ProcessId::fixture("p1"),
+            },
             at: lash_protocol_types::effect_identity_fixture("then", 1),
             fact: lash_trace::TraceNodeFact::ChildStarted {
                 child: TraceLanguageChildExecution {
@@ -715,6 +833,9 @@ fn language_execution_payload_samples() -> Vec<TraceLanguageExecutionPayload> {
             },
         },
         TraceLanguageExecutionPayload::Node {
+            subject: TraceRuntimeSubject::Process {
+                process_id: lash_protocol_types::ProcessId::fixture("p1"),
+            },
             at: lash_protocol_types::effect_identity_fixture("then", 1),
             fact: lash_trace::TraceNodeFact::Failed {
                 call_id: Some(lash_protocol_types::ToolCallId::fixture("call-1")),
@@ -725,14 +846,23 @@ fn language_execution_payload_samples() -> Vec<TraceLanguageExecutionPayload> {
             },
         },
         TraceLanguageExecutionPayload::Node {
+            subject: TraceRuntimeSubject::Process {
+                process_id: lash_protocol_types::ProcessId::fixture("p1"),
+            },
             at: lash_protocol_types::effect_identity_fixture("then", 2),
             fact: lash_trace::TraceNodeFact::Started { call_id: None },
         },
         TraceLanguageExecutionPayload::Node {
+            subject: TraceRuntimeSubject::Process {
+                process_id: lash_protocol_types::ProcessId::fixture("p1"),
+            },
             at: lash_protocol_types::effect_identity_fixture("then", 2),
             fact: lash_trace::TraceNodeFact::Cancelled,
         },
         TraceLanguageExecutionPayload::ExecutionFinished {
+            subject: TraceRuntimeSubject::Process {
+                process_id: lash_protocol_types::ProcessId::fixture("p1"),
+            },
             status: TraceLanguageExecutionStatus::Failed,
             error: Some("notify failed".to_string()),
         },
@@ -748,10 +878,16 @@ fn language_execution_records() -> Vec<TraceRecord> {
                 TraceContext::default().for_session("s1"),
                 TraceEvent::LanguageExecution {
                     language: (index % 2 == 0).then(|| "typescript".to_string()),
-                    event: TraceLanguageExecution {
-                        event_key: format!("process:p1:{index}"),
-                        identity: lash_vm_identity(),
-                        payload,
+                    event: {
+                        let mut event = TraceLanguageExecution {
+                            event_key: format!("process:p1:{index}"),
+                            identity: lash_vm_identity(),
+                            payload,
+                        };
+                        if let Some(key) = event.count_event_key() {
+                            event.event_key = key;
+                        }
+                        event
                     },
                 },
             )
@@ -850,6 +986,14 @@ fn published_overlay_schema_accepts_a_folded_overlay_and_enforces_its_row() {
     ))
     .expect("published overlay schema");
     let mut records = language_execution_records();
+    records.retain(|record| {
+        !matches!(&record.event,
+            TraceEvent::LanguageExecution { event, .. }
+                if matches!(&event.payload, TraceLanguageExecutionPayload::Counts {
+                    counts: lash_trace::TraceCountObservation::Cell(_)
+                })
+        )
+    });
     records.push(fixture_record(
         TraceContext::default().for_session("s1"),
         TraceEvent::StepBodyStarted {
@@ -866,7 +1010,7 @@ fn published_overlay_schema_accepts_a_folded_overlay_and_enforces_its_row() {
         [lash_protocol_types::effect_identity_fixture("then", 1).site],
     );
     let overlay = lash_trace::fold_workflow_overlay(None, Some(&document), &records, 1)
-        .expect("fold every payload kind");
+        .expect("fold one process execution");
     assert!(!overlay.sites.is_empty() && !overlay.history.is_empty());
     assert!(!overlay.retention.is_empty() && !overlay.children.is_empty());
     assert_eq!(overlay.mismatches.len(), 2);
@@ -1199,10 +1343,12 @@ fn content_bearing_events() -> Vec<TraceEvent> {
             payload: json!({ "assistant": CONTENT }),
         },
         language(TraceLanguageExecutionPayload::ExecutionFinished {
+ subject: TraceRuntimeSubject::Process { process_id: lash_protocol_types::ProcessId::fixture("p1") },
             status: TraceLanguageExecutionStatus::Failed,
             error: Some(CONTENT.to_string()),
         }),
         language(TraceLanguageExecutionPayload::Node {
+ subject: TraceRuntimeSubject::Process { process_id: lash_protocol_types::ProcessId::fixture("p1") },
             at: lash_protocol_types::effect_identity_fixture("n1", 1),
             fact: lash_trace::TraceNodeFact::Failed {
                 call_id: Some(lash_protocol_types::ToolCallId::fixture("call-1")),

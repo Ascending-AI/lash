@@ -4,6 +4,7 @@ use crate::ActorContext;
 pub(crate) struct LanguageCallAttribution {
     pub language: String,
     pub identity: lash_trace::TraceLanguageExecutionIdentity,
+    pub subject: lash_trace::TraceRuntimeSubject,
     /// The occurrence of the call's site.
     pub at: lash_protocol_types::EffectIdentity,
 }
@@ -65,7 +66,7 @@ impl<'scope> ProcessOpScope<'scope> {
                 turn_id: identity.scope.turn_id.clone(),
                 turn_index: identity.scope.turn_index,
                 protocol_iteration: identity.scope.protocol_iteration,
-                effect_id: match &identity.subject {
+                effect_id: match &call.subject {
                     lash_trace::TraceRuntimeSubject::Effect { effect_id, .. } => {
                         Some(effect_id.clone())
                     }
@@ -77,12 +78,13 @@ impl<'scope> ProcessOpScope<'scope> {
             let event = lash_trace::TraceLanguageExecution {
                 event_key: format!(
                     "lash_vm_execution:{}:child:{}:{}:process:{process_id}",
-                    identity.graph_key(),
+                    identity.graph_key(&call.subject),
                     call.at.site,
                     call.at.occurrence,
                 ),
                 identity: identity.clone(),
                 payload: lash_trace::TraceLanguageExecutionPayload::Node {
+                    subject: call.subject.clone(),
                     at: call.at.clone(),
                     fact: lash_trace::TraceNodeFact::ChildStarted {
                         child: lash_trace::TraceLanguageChildExecution {

@@ -86,9 +86,10 @@ pub use flight_recorder::{
     FlightRecorderSnapshot,
 };
 pub use language_execution::{
-    LanguageExecutionObservation, StepBodyStarted, StepBodyStartedObservation,
-    TraceLanguageExecutionPayload, TraceNodeAwaited, TraceNodeFact, TraceNodeWaitKind,
-    TraceNodeWaitResolution, WorkflowDocumentEntry, WorkflowDocumentRef,
+    LanguageExecutionObservation, StepBodyStarted, StepBodyStartedObservation, TraceCellCounts,
+    TraceCountObservation, TraceLanguageExecutionPayload, TraceNodeAwaited, TraceNodeFact,
+    TraceNodeWaitKind, TraceNodeWaitResolution, TraceProcessCounts, WorkflowDocumentEntry,
+    WorkflowDocumentRef,
 };
 pub use language_execution_failure::TraceLanguageExecutionFailure;
 pub use lash_protocol_types::llm::types::GenerationReceipt;
@@ -1104,9 +1105,9 @@ impl TraceLanguageExecutionGeneration {
 }
 
 #[derive(Clone, Debug, PartialEq, Eq, Serialize, schemars::JsonSchema)]
+#[serde(deny_unknown_fields)]
 pub struct TraceLanguageExecutionIdentity {
     pub scope: TraceRuntimeScope,
-    pub subject: TraceRuntimeSubject,
     pub document: WorkflowDocumentRef,
     pub entry_name: String,
     #[serde(default, skip_serializing_if = "Option::is_none")]
@@ -1118,9 +1119,9 @@ pub struct TraceLanguageExecutionIdentity {
 }
 
 #[derive(Deserialize)]
+#[serde(deny_unknown_fields)]
 struct TraceLanguageExecutionIdentityWire {
     scope: TraceRuntimeScope,
-    subject: TraceRuntimeSubject,
     document: WorkflowDocumentRef,
     entry_name: String,
     engine_execution_id: Option<String>,
@@ -1135,7 +1136,6 @@ impl<'de> Deserialize<'de> for TraceLanguageExecutionIdentity {
         let wire = TraceLanguageExecutionIdentityWire::deserialize(deserializer)?;
         Ok(Self {
             scope: wire.scope,
-            subject: wire.subject,
             document: wire.document,
             entry_name: wire.entry_name,
             engine_execution_id: wire.engine_execution_id,
@@ -1152,24 +1152,85 @@ impl TraceLanguageExecutionIdentity {
         }
     }
 
-    pub fn graph_key(&self) -> String {
+    pub fn graph_key(&self, subject: &TraceRuntimeSubject) -> String {
         match self.generation {
             Some(generation) => format!(
                 "{}:attempt:{attempt}",
-                self.subject.graph_key(),
+                subject.graph_key(),
                 attempt = generation.attempt(),
             ),
-            None => self.subject.graph_key(),
+            None => subject.graph_key(),
         }
     }
 }
 
-#[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize, schemars::JsonSchema)]
+#[derive(Clone, Debug, PartialEq, Eq, Serialize, schemars::JsonSchema)]
+// Flattened payload fields and shared context are evaluated together: a
+// count cannot carry a second subject beside the one its variant owns.
+#[schemars(extend("unevaluatedProperties" = false))]
 pub struct TraceLanguageExecution {
     pub event_key: String,
     pub identity: TraceLanguageExecutionIdentity,
     #[serde(flatten)]
     pub payload: TraceLanguageExecutionPayload,
+}
+
+#[derive(Deserialize)]
+struct TraceLanguageExecutionWire {
+    event_key: String,
+    identity: TraceLanguageExecutionIdentity,
+    #[serde(flatten)]
+    payload: TraceLanguageExecutionPayload,
+}
+
+impl<'de> Deserialize<'de> for TraceLanguageExecution {
+    fn deserialize<D>(deserializer: D) -> Result<Self, D::Error>
+    where
+        D: serde::Deserializer<'de>,
+    {
+        Self::try_from(TraceLanguageExecutionWire::deserialize(deserializer)?)
+            .map_err(serde::de::Error::custom)
+    }
+}
+
+impl TryFrom<TraceLanguageExecutionWire> for TraceLanguageExecution {
+    type Error = String;
+
+    fn try_from(wire: TraceLanguageExecutionWire) -> Result<Self, Self::Error> {
+        let event = Self {
+            event_key: wire.event_key,
+            identity: wire.identity,
+            payload: wire.payload,
+        };
+        if let Some(expected) = event.count_event_key()
+            && expected != event.event_key
+        {
+            return Err(
+                "count event key disagrees with its subject or frame coordinates".to_owned(),
+            );
+        }
+        Ok(event)
+    }
+}
+
+impl TraceLanguageExecution {
+    pub fn subject(&self) -> TraceRuntimeSubject {
+        self.payload.subject()
+    }
+
+    pub fn graph_key(&self) -> String {
+        self.identity.graph_key(&self.subject())
+    }
+
+    /// Count identity derives from the typed subject and stable coordinates.
+    pub fn count_event_key(&self) -> Option<String> {
+        match &self.payload {
+            TraceLanguageExecutionPayload::Counts { counts } => {
+                Some(counts.event_key(&self.identity))
+            }
+            _ => None,
+        }
+    }
 }
 
 #[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize, schemars::JsonSchema)]

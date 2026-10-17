@@ -44,9 +44,6 @@ pub fn process_language_observation(
             event_key: event_key.to_string(),
             identity: lash_trace::TraceLanguageExecutionIdentity {
                 scope: lash_trace::TraceRuntimeScope::none(),
-                subject: lash_trace::TraceRuntimeSubject::Process {
-                    process_id: process_id.clone(),
-                },
                 document: lash_trace::WorkflowDocumentRef {
                     document: lash_kernel_doc::DocumentId::from_bytes([0x5a; 32]),
                     entry: lash_trace::WorkflowDocumentEntry::Entry {
@@ -58,6 +55,9 @@ pub fn process_language_observation(
                 generation: None,
             },
             payload: lash_trace::TraceLanguageExecutionPayload::Node {
+                subject: lash_trace::TraceRuntimeSubject::Process {
+                    process_id: process_id.clone(),
+                },
                 at: lash_protocol_types::effect_identity_fixture(label, 1),
                 fact: lash_trace::TraceNodeFact::Started { call_id: None },
             },
@@ -84,6 +84,7 @@ pub fn process_observation_label(event: &crate::ProcessObservationEvent) -> Stri
                 lash_trace::TraceLanguageExecutionPayload::Node {
                     at,
                     fact: lash_trace::TraceNodeFact::Started { .. },
+                    ..
                 } => fixture_label(&at.site),
                 other => format!("language:{other:?}"),
             }
@@ -145,7 +146,7 @@ pub fn session_language_observation(
 ) -> crate::LanguageExecutionObservation {
     let mut observation =
         process_language_observation(&crate::ProcessId::fixture("session-cell"), event_key, label);
-    observation.execution.identity.subject = lash_trace::TraceRuntimeSubject::Effect {
+    let subject = lash_trace::TraceRuntimeSubject::Effect {
         address: lash_protocol_types::EffectAddress::new(
             lash_protocol_types::ExecutionScope::session_operation(session_id.clone(), "cell"),
             "cell-execution",
@@ -153,6 +154,12 @@ pub fn session_language_observation(
         .expect("fixture effect address"),
         effect_id: "cell".into(),
     };
+    if let lash_trace::TraceLanguageExecutionPayload::Node {
+        subject: current, ..
+    } = &mut observation.execution.payload
+    {
+        *current = subject;
+    }
     observation.execution.identity.document.entry = lash_trace::WorkflowDocumentEntry::Main;
     observation
 }

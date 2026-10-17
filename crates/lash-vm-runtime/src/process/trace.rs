@@ -23,6 +23,7 @@ use super::state::{Delivery, Issued, KernelProcessInput};
 pub(super) struct ProcessTrace {
     tracing: PluginExecutionTrace,
     identity: TraceLanguageExecutionIdentity,
+    process_id: lash_core::ProcessId,
     observation: lash_kernel_doc::RunObservation,
 }
 
@@ -40,11 +41,9 @@ impl ProcessTrace {
         Some(Self {
             observation,
             tracing,
+            process_id: process.clone(),
             identity: TraceLanguageExecutionIdentity {
                 scope: TraceRuntimeScope::none(),
-                subject: TraceRuntimeSubject::Process {
-                    process_id: process.clone(),
-                },
                 document: WorkflowDocumentRef {
                     document: input.document,
                     entry: WorkflowDocumentEntry::Entry {
@@ -64,6 +63,7 @@ impl ProcessTrace {
     /// enters it by.
     pub(super) fn started(&self) {
         self.emit(TraceLanguageExecutionPayload::ExecutionStarted {
+            subject: self.subject(),
             observation: self.observation,
         });
     }
@@ -79,6 +79,7 @@ impl ProcessTrace {
             _ => TraceLanguageExecutionStatus::Failed,
         };
         self.emit(TraceLanguageExecutionPayload::ExecutionFinished {
+            subject: self.subject(),
             status,
             error: None,
         });
@@ -86,6 +87,7 @@ impl ProcessTrace {
 
     pub(super) fn node(&self, at: &EffectIdentity, fact: TraceNodeFact) {
         self.emit(TraceLanguageExecutionPayload::Node {
+            subject: self.subject(),
             at: at.clone(),
             fact,
         });
@@ -151,26 +153,32 @@ impl ProcessTrace {
     /// One live delta of the segment that started at `segment`, its
     /// `frame`th: a recomputed segment reports the same facts.
     pub(super) fn ran(&self, segment: &str, frame: u64, delta: &lash_kernel_vm::RanDelta) {
-        self.emit_keyed(
-            Some(format!("ran:{segment}:{frame}")),
-            TraceLanguageExecutionPayload::Ran {
-                ran: delta.clone(),
-                segment: None,
-            },
-        );
+        self.emit(TraceLanguageExecutionPayload::Counts {
+            counts: lash_trace::TraceCountObservation::Process(lash_trace::TraceProcessCounts {
+                process_id: self.process_id.clone(),
+                segment: segment.to_owned(),
+                frame,
+                delta: delta.clone(),
+            }),
+        });
+    }
+
+    fn subject(&self) -> TraceRuntimeSubject {
+        TraceRuntimeSubject::Process {
+            process_id: self.process_id.clone(),
+        }
     }
 
     fn emit(&self, payload: TraceLanguageExecutionPayload) {
-        self.emit_keyed(None, payload);
-    }
-
-    fn emit_keyed(&self, key: Option<String>, payload: TraceLanguageExecutionPayload) {
         use TraceLanguageExecutionPayload as Payload;
         let (suffix, node) = match &payload {
             Payload::ExecutionStarted { .. } => ("started".to_owned(), None),
             Payload::ExecutionFinished { .. } => ("finished".to_owned(), None),
-            Payload::Ran { .. } => (key.unwrap_or_default(), None),
-            Payload::Node { at, fact } => {
+            Payload::Counts { counts } => {
+                let event_key = counts.event_key(&self.identity);
+                (event_key, None)
+            }
+            Payload::Node { at, fact, .. } => {
                 // The whole identity names an occurrence: every task counts
                 // a site's occurrences from 0.
                 let occurrence = serde_json::to_string(at).unwrap_or_default();
@@ -190,7 +198,14 @@ impl ProcessTrace {
                 )
             }
         };
-        let event_key = format!("kernel_execution:{}:{suffix}", self.identity.graph_key());
+        let event_key = if matches!(&payload, Payload::Counts { .. }) {
+            suffix
+        } else {
+            format!(
+                "kernel_execution:{}:{suffix}",
+                self.identity.graph_key(&self.subject())
+            )
+        };
         let context = TraceContext {
             graph_node_id: node,
             ..TraceContext::default()

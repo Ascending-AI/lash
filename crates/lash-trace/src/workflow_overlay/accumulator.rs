@@ -236,10 +236,10 @@ impl WorkflowExecutionOverlayAccumulator {
     ) -> Result<(), WorkflowOverlayFoldError> {
         self.observe_fact(
             observation.observed_at_ms,
-            ExecutionRef::of_language(&observation.execution.identity),
+            ExecutionRef::of_language(&observation.execution),
             WorkflowOverlayFact::Language {
-                document: Box::new(observation.execution.identity.document.clone()),
-                payload: observation.execution.payload.clone(),
+                document: observation.execution.identity.document.clone(),
+                payload: Box::new(observation.execution.payload.clone()),
             },
         )
     }
@@ -321,25 +321,14 @@ impl WorkflowExecutionOverlayAccumulator {
     fn append(&mut self, observation: Observation) {
         match Placement::of(&observation) {
             Placement::Unplaced => {
-                if let WorkflowOverlayFact::Language {
-                    document,
-                    payload:
-                        TraceLanguageExecutionPayload::Ran {
-                            segment: Some(segment),
-                            ran,
-                        },
-                } = observation.fact
+                if let WorkflowOverlayFact::Language { document, payload } = observation.fact
+                    && let TraceLanguageExecutionPayload::Counts { counts } = *payload
                 {
-                    if let Some(loaded) = &self.document
-                        && loaded.reference() != document.as_ref()
-                    {
-                        self.document_state.claim(loaded, &document);
-                        return;
-                    }
-                    let totals = self.ran_segments.entry(segment).or_default();
-                    for (ordinal, count) in ran {
-                        let total = totals.entry(ordinal).or_default();
-                        *total = (*total).max(count);
+                    match counts {
+                        crate::TraceCountObservation::Cell(counts) => {
+                            self.cell_counts(&document, counts)
+                        }
+                        crate::TraceCountObservation::Process(_) => {}
                     }
                 }
             }
@@ -347,8 +336,12 @@ impl WorkflowExecutionOverlayAccumulator {
                 if let Some(document) = &self.document
                     && let WorkflowOverlayFact::Language {
                         document: claimed,
-                        payload: TraceLanguageExecutionPayload::ExecutionStarted { .. },
+                        payload,
                     } = &observation.fact
+                    && matches!(
+                        payload.as_ref(),
+                        TraceLanguageExecutionPayload::ExecutionStarted { .. }
+                    )
                 {
                     self.document_state.claim(document, claimed);
                 }
@@ -371,6 +364,24 @@ impl WorkflowExecutionOverlayAccumulator {
                     self.history_limit,
                 );
             }
+        }
+    }
+
+    fn cell_counts(
+        &mut self,
+        document: &crate::WorkflowDocumentRef,
+        counts: crate::TraceCellCounts,
+    ) {
+        if let Some(loaded) = &self.document
+            && loaded.reference() != document
+        {
+            self.document_state.claim(loaded, document);
+            return;
+        }
+        let totals = self.ran_segments.entry(counts.segment).or_default();
+        for (ordinal, count) in counts.totals {
+            let total = totals.entry(ordinal).or_default();
+            *total = (*total).max(count);
         }
     }
 
@@ -412,11 +423,10 @@ impl WorkflowExecutionOverlayAccumulator {
         let observation = self
             .execution_history
             .get(&Execution::Started)
-            .and_then(|started| match &started.fact {
-                WorkflowOverlayFact::Language {
-                    payload: TraceLanguageExecutionPayload::ExecutionStarted { observation },
-                    ..
-                } => Some(*observation),
+            .and_then(|started| match started.fact.language() {
+                Some((_, TraceLanguageExecutionPayload::ExecutionStarted { observation, .. })) => {
+                    Some(*observation)
+                }
                 _ => None,
             });
         let mut ran = BTreeMap::<u32, u64>::new();

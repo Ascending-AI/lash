@@ -8,6 +8,17 @@ use crate::{
     WorkflowDocumentEntry,
 };
 
+fn subject() -> TraceRuntimeSubject {
+    TraceRuntimeSubject::Effect {
+        address: lash_protocol_types::EffectAddress::new(
+            lash_protocol_types::ExecutionScope::turn("session-1", "turn-1"),
+            "exec-replay-1",
+        )
+        .expect("valid trace test effect address"),
+        effect_id: "exec-1".to_string(),
+    }
+}
+
 fn identity() -> LanguageIdentity {
     LanguageIdentity {
         scope: TraceRuntimeScope {
@@ -16,14 +27,6 @@ fn identity() -> LanguageIdentity {
             turn_index: Some(0),
             protocol_iteration: Some(0),
         },
-        subject: TraceRuntimeSubject::Effect {
-            address: lash_protocol_types::EffectAddress::new(
-                lash_protocol_types::ExecutionScope::turn("session-1", "turn-1"),
-                "exec-replay-1",
-            )
-            .expect("valid trace test effect address"),
-            effect_id: "exec-1".to_string(),
-        },
         document: reference(),
         entry_name: "main".to_string(),
         engine_execution_id: None,
@@ -31,12 +34,9 @@ fn identity() -> LanguageIdentity {
     }
 }
 
-fn process_identity(process: &ProcessId) -> LanguageIdentity {
+fn process_identity() -> LanguageIdentity {
     LanguageIdentity {
         scope: TraceRuntimeScope::none(),
-        subject: TraceRuntimeSubject::Process {
-            process_id: process.clone(),
-        },
         entry_name: "worker".to_string(),
         ..identity()
     }
@@ -70,6 +70,7 @@ fn occurrence_at(site: &WorkflowTaskSite, occurrence: u64) -> lash_protocol_type
 /// A fact about occurrence `occurrence` of the node `node`'s own site.
 fn node_fact(node: &str, occurrence: u64, fact: TraceNodeFact) -> TraceLanguageExecutionPayload {
     TraceLanguageExecutionPayload::Node {
+        subject: subject(),
         at: occurrence_at(&site(node), occurrence),
         fact,
     }
@@ -102,17 +103,22 @@ fn at(ms: i64) -> chrono::DateTime<Utc> {
 }
 
 fn language(event_key: &str, payload: TraceLanguageExecutionPayload) -> TraceLanguageExecution {
-    TraceLanguageExecution {
+    let mut event = TraceLanguageExecution {
         event_key: event_key.to_string(),
         identity: identity(),
         payload,
+    };
+    if let Some(key) = event.count_event_key() {
+        event.event_key = key;
     }
+    event
 }
 
 fn started_event(event_key: &str) -> TraceLanguageExecution {
     language(
         event_key,
         TraceLanguageExecutionPayload::ExecutionStarted {
+            subject: subject(),
             observation: lash_kernel_doc::RunObservation::Off,
         },
     )
@@ -122,6 +128,7 @@ fn started_at(event_key: &str, site: &WorkflowTaskSite, occurrence: u64) -> Trac
     language(
         event_key,
         TraceLanguageExecutionPayload::Node {
+            subject: subject(),
             at: occurrence_at(site, occurrence),
             fact: TraceNodeFact::Started { call_id: None },
         },
@@ -136,6 +143,7 @@ fn completed_at(
     language(
         event_key,
         TraceLanguageExecutionPayload::Node {
+            subject: subject(),
             at: occurrence_at(site, occurrence),
             fact: TraceNodeFact::Completed { call_id: None },
         },
@@ -182,6 +190,7 @@ fn execution_finished(event_key: &str, status: LanguageExecutionStatus) -> Trace
     language(
         event_key,
         TraceLanguageExecutionPayload::ExecutionFinished {
+            subject: subject(),
             status,
             error: None,
         },
@@ -236,7 +245,17 @@ fn step_record(step: StepBodyStarted, ms: i64) -> TraceRecord {
 }
 
 fn in_process(mut event: TraceLanguageExecution, process: &ProcessId) -> TraceLanguageExecution {
-    event.identity = process_identity(process);
+    event.identity = process_identity();
+    match &mut event.payload {
+        TraceLanguageExecutionPayload::Node { subject, .. }
+        | TraceLanguageExecutionPayload::ExecutionStarted { subject, .. }
+        | TraceLanguageExecutionPayload::ExecutionFinished { subject, .. } => {
+            *subject = TraceRuntimeSubject::Process {
+                process_id: process.clone(),
+            }
+        }
+        TraceLanguageExecutionPayload::Counts { .. } => panic!("node fixture"),
+    }
     event
 }
 
@@ -828,9 +847,11 @@ fn a_terminal_never_downgrades_and_the_next_occurrence_is_visible() {
 
     let failure = |attempt, process: &str, message: &str| {
         let mut event = node_failed("same-publication-key", 1, message);
-        event.identity.subject = TraceRuntimeSubject::Process {
-            process_id: ProcessId::fixture(process),
-        };
+        if let TraceLanguageExecutionPayload::Node { subject, .. } = &mut event.payload {
+            *subject = TraceRuntimeSubject::Process {
+                process_id: ProcessId::fixture(process),
+            };
+        }
         event.identity.generation = Some(crate::TraceLanguageExecutionGeneration::new(attempt));
         event
     };
@@ -1351,6 +1372,7 @@ fn a_fan_out_keeps_one_row_for_each_elements_run_of_a_site() {
     let failure = language(
         "fail-1",
         TraceLanguageExecutionPayload::Node {
+            subject: subject(),
             at: occurrence_at(&failed, 0),
             fact: TraceNodeFact::Failed {
                 call_id: None,
@@ -1419,23 +1441,32 @@ fn cell_counts_sum_segments_with_duplicate_and_shuffled_reports() {
     let start = language(
         "start",
         TraceLanguageExecutionPayload::ExecutionStarted {
+            subject: subject(),
             observation: RunObservation::Counts,
         },
     );
-    let report = |segment: &str, ran| {
+    let report = |segment: &str, frame, ran| {
         language(
             "report",
-            TraceLanguageExecutionPayload::Ran {
-                segment: Some(segment.into()),
-                ran,
+            TraceLanguageExecutionPayload::Counts {
+                counts: crate::TraceCountObservation::Cell(crate::TraceCellCounts {
+                    address: match subject() {
+                        TraceRuntimeSubject::Effect { address, .. } => address,
+                        _ => unreachable!(),
+                    },
+                    effect_id: "exec-1".into(),
+                    segment: segment.into(),
+                    frame,
+                    totals: ran,
+                }),
             },
         )
     };
     let records = [
         record_at(start, 0),
-        record_at(report("first", vec![(1, 1), (2, 2)]), 1),
-        record_at(report("first", vec![(1, 3), (2, 2)]), 2),
-        record_at(report("resumed", vec![(2, 1), (3, 1)]), 3),
+        record_at(report("first", 1, vec![(1, 1), (2, 2)]), 1),
+        record_at(report("first", 2, vec![(1, 3), (2, 2)]), 2),
+        record_at(report("resumed", 1, vec![(2, 1), (3, 1)]), 3),
     ];
     let ordered = fold_workflow_overlay(None, None, &records, 1).unwrap();
     assert_eq!(ordered.observation, Some(RunObservation::Counts));

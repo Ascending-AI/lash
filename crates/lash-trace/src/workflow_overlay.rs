@@ -17,10 +17,12 @@ use chrono::{DateTime, Utc};
 use serde::Serialize;
 use sha2::{Digest, Sha256};
 
+#[cfg(test)]
+use crate::TraceLanguageExecutionIdentity as LanguageIdentity;
+
 use crate::{
     TRACE_SCHEMA_VERSION, TraceBranchSelection, TraceEvent, TraceLanguageChildExecution,
-    TraceLanguageExecutionFailure, TraceLanguageExecutionGeneration,
-    TraceLanguageExecutionIdentity as LanguageIdentity, TraceLanguageExecutionPayload,
+    TraceLanguageExecutionFailure, TraceLanguageExecutionGeneration, TraceLanguageExecutionPayload,
     TraceLanguageExecutionStatus as LanguageExecutionStatus, TraceNodeFact, TraceRecord,
     TraceRuntimeScope, TraceRuntimeSubject, WorkflowDocumentRef,
 };
@@ -69,12 +71,12 @@ struct ExecutionName {
 }
 
 impl ExecutionRef {
-    fn of_language(identity: &LanguageIdentity) -> Self {
+    fn of_language(execution: &crate::TraceLanguageExecution) -> Self {
         Self {
-            subject: identity.subject.clone(),
+            subject: execution.subject(),
             name: Some(ExecutionName {
-                scope: identity.scope.clone(),
-                generation: identity.generation,
+                scope: execution.identity.scope.clone(),
+                generation: execution.identity.generation,
             }),
         }
     }
@@ -142,10 +144,10 @@ impl Incoming {
     fn of(record: &TraceRecord) -> Option<Self> {
         let (execution, fact) = match &record.event {
             TraceEvent::LanguageExecution { event, .. } => (
-                ExecutionRef::of_language(&event.identity),
+                ExecutionRef::of_language(event),
                 WorkflowOverlayFact::Language {
-                    document: Box::new(event.identity.document.clone()),
-                    payload: event.payload.clone(),
+                    document: event.identity.document.clone(),
+                    payload: Box::new(event.payload.clone()),
                 },
             ),
             TraceEvent::StepBodyStarted { step } => (

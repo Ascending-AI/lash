@@ -101,9 +101,6 @@ fn event_is_failed_identifies_all_failure_outcomes() {
                 event_key: "event-key".to_string(),
                 identity: TraceLanguageExecutionIdentity {
                     scope: TraceRuntimeScope::new("s1"),
-                    subject: TraceRuntimeSubject::Process {
-                        process_id: lash_protocol_types::ProcessId::fixture("p1"),
-                    },
                     document: crate::WorkflowDocumentRef {
                         document: lash_kernel_doc::DocumentId::from_bytes([1; 32]),
                         entry: crate::WorkflowDocumentEntry::Main,
@@ -158,6 +155,9 @@ fn event_is_failed_identifies_all_failure_outcomes() {
         (
             "language node failed",
             language_execution(TraceLanguageExecutionPayload::Node {
+                subject: TraceRuntimeSubject::Process {
+                    process_id: lash_protocol_types::ProcessId::fixture("p1"),
+                },
                 at: lash_protocol_types::effect_identity_fixture("n1", 1),
                 fact: TraceNodeFact::Failed {
                     call_id: None,
@@ -171,6 +171,9 @@ fn event_is_failed_identifies_all_failure_outcomes() {
         (
             "language execution failed",
             language_execution(TraceLanguageExecutionPayload::ExecutionFinished {
+                subject: TraceRuntimeSubject::Process {
+                    process_id: lash_protocol_types::ProcessId::fixture("p1"),
+                },
                 status: TraceLanguageExecutionStatus::Failed,
                 error: Some("failed".to_string()),
             }),
@@ -247,6 +250,9 @@ fn event_is_failed_identifies_all_failure_outcomes() {
         (
             "started language node",
             language_execution(TraceLanguageExecutionPayload::Node {
+                subject: TraceRuntimeSubject::Process {
+                    process_id: lash_protocol_types::ProcessId::fixture("p1"),
+                },
                 at: lash_protocol_types::effect_identity_fixture("n1", 1),
                 fact: TraceNodeFact::Started { call_id: None },
             }),
@@ -254,6 +260,9 @@ fn event_is_failed_identifies_all_failure_outcomes() {
         (
             "completed language execution",
             language_execution(TraceLanguageExecutionPayload::ExecutionFinished {
+                subject: TraceRuntimeSubject::Process {
+                    process_id: lash_protocol_types::ProcessId::fixture("p1"),
+                },
                 status: TraceLanguageExecutionStatus::Completed,
                 error: None,
             }),

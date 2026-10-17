@@ -149,7 +149,7 @@ describes recovery ownership.
 ## Node execution is telemetry
 
 Language execution records use `TraceLanguageExecutionPayload`: execution
-start and finish, and `Node { at, fact }` for a fact about one occurrence,
+start and finish, and `Node { subject, at, fact }` for a fact about one occurrence,
 where `fact` (`TraceNodeFact`) is a start, waiting, resumption, completion,
 failure or cancellation, a branch selection or a child start. `at` is the
 same `WorkflowOccurrence` a durable effect occurrence carries; a
@@ -158,6 +158,16 @@ numbers on. The enclosing `TraceRecord` supplies the timestamp;
 node and wait timings come from the observed records, not a durable path
 log. A child link names related execution; it does not imply that the host
 has received the child's records.
+
+`Counts { counts }` carries a closed `TraceCountObservation`: `Process`
+owns its process id, segment, frame and provisional delta; `Cell` owns its
+effect address and id, activation segment, frame and cumulative totals.
+Process overlays add deltas until committed `process.ran` replaces them.
+Cell overlays take elementwise maxima within each segment and sum segments.
+Count event keys derive from those typed subjects and coordinates; decoding
+refuses a conflicting key. The common execution identity holds scope and
+document context. Read the subject through `execution.subject()`; there is
+no independently supplied `identity.subject`.
 
 Each serving Lash node emits the execution records for work it observes.
 After an owner change, later records can come from another node. Collect

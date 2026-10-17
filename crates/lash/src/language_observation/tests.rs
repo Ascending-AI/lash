@@ -21,10 +21,12 @@ use std::time::Duration;
 fn record(subject: TraceRuntimeSubject, occurrence: u64) -> TraceRecord {
     let payload = if occurrence == 0 {
         TraceLanguageExecutionPayload::ExecutionStarted {
+            subject: subject.clone(),
             observation: lash_kernel_doc::RunObservation::Off,
         }
     } else {
         TraceLanguageExecutionPayload::Node {
+            subject: subject.clone(),
             at: lash_protocol_types::effect_identity_fixture("node", occurrence),
             fact: lash_trace::TraceNodeFact::Started { call_id: None },
         }
@@ -37,7 +39,6 @@ fn record(subject: TraceRuntimeSubject, occurrence: u64) -> TraceRecord {
                 event_key: format!("{subject:?}:{occurrence}"),
                 identity: TraceLanguageExecutionIdentity {
                     scope: TraceRuntimeScope::none(),
-                    subject,
                     document: lash_trace::WorkflowDocumentRef {
                         document: lash_kernel_doc::DocumentId::from_bytes([7; 32]),
                         entry: lash_trace::WorkflowDocumentEntry::Main,
@@ -130,6 +131,7 @@ async fn a_process_cancelled_while_blocked_has_a_committed_cancelled_graph() {
         match &mut event.payload {
             _ if occurrence == 2 => {
                 event.payload = TraceLanguageExecutionPayload::Node {
+                    subject: event.subject(),
                     at: lash_protocol_types::effect_identity_fixture("node", 1),
                     fact: lash_trace::TraceNodeFact::Waiting {
                         awaited: lash_trace::TraceNodeAwaited::Sleep { deadline_ms: None },
@@ -139,11 +141,13 @@ async fn a_process_cancelled_while_blocked_has_a_committed_cancelled_graph() {
             TraceLanguageExecutionPayload::Node {
                 at,
                 fact: lash_trace::TraceNodeFact::Started { .. },
+                ..
             } if occurrence == 3 => {
                 *at = lash_protocol_types::effect_identity_fixture("running", 1);
             }
             _ if occurrence == 4 => {
                 event.payload = TraceLanguageExecutionPayload::Node {
+                    subject: event.subject(),
                     at: lash_protocol_types::effect_identity_fixture("done", 1),
                     fact: lash_trace::TraceNodeFact::Completed { call_id: None },
                 };
@@ -398,7 +402,7 @@ async fn language_ingress_overflow_resnapshots_every_session_and_continues() {
                 Some("fixture-language"),
                 "routing is independent of dialect name"
             );
-            assert_eq!(observation.execution.identity.subject, subject);
+            assert_eq!(observation.execution.subject(), subject);
             assert_eq!(
                 event.revision(),
                 SessionRevision::new(0),

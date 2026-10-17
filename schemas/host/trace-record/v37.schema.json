@@ -2887,6 +2887,113 @@
       },
       "type": "object"
     },
+    "TraceCountObservation": {
+      "description": "A count observation owns the subject and coordinates that determine how\nits counts accumulate. No optional field selects the arithmetic.",
+      "oneOf": [
+        {
+          "additionalProperties": false,
+          "description": "Provisional deltas; committed `process.ran` remains authoritative.",
+          "properties": {
+            "delta": {
+              "items": {
+                "maxItems": 2,
+                "minItems": 2,
+                "prefixItems": [
+                  {
+                    "format": "uint32",
+                    "minimum": 0,
+                    "type": "integer"
+                  },
+                  {
+                    "format": "uint64",
+                    "minimum": 0,
+                    "type": "integer"
+                  }
+                ],
+                "type": "array"
+              },
+              "type": "array"
+            },
+            "frame": {
+              "format": "uint64",
+              "minimum": 0,
+              "type": "integer"
+            },
+            "process_id": {
+              "type": "string"
+            },
+            "segment": {
+              "type": "string"
+            },
+            "type": {
+              "const": "process",
+              "type": "string"
+            }
+          },
+          "required": [
+            "type",
+            "process_id",
+            "segment",
+            "frame",
+            "delta"
+          ],
+          "type": "object"
+        },
+        {
+          "additionalProperties": false,
+          "description": "Cumulative activation totals, folded by elementwise maximum.",
+          "properties": {
+            "address": {
+              "$ref": "#/$defs/EffectAddress"
+            },
+            "effect_id": {
+              "type": "string"
+            },
+            "frame": {
+              "format": "uint64",
+              "minimum": 0,
+              "type": "integer"
+            },
+            "segment": {
+              "type": "string"
+            },
+            "totals": {
+              "items": {
+                "maxItems": 2,
+                "minItems": 2,
+                "prefixItems": [
+                  {
+                    "format": "uint32",
+                    "minimum": 0,
+                    "type": "integer"
+                  },
+                  {
+                    "format": "uint64",
+                    "minimum": 0,
+                    "type": "integer"
+                  }
+                ],
+                "type": "array"
+              },
+              "type": "array"
+            },
+            "type": {
+              "const": "cell",
+              "type": "string"
+            }
+          },
+          "required": [
+            "type",
+            "address",
+            "effect_id",
+            "segment",
+            "frame",
+            "totals"
+          ],
+          "type": "object"
+        }
+      ]
+    },
     "TraceDomainCompletion": {
       "description": "The terminal of one durable domain operation.",
       "properties": {
@@ -3208,10 +3315,14 @@
             },
             "observation": {
               "$ref": "#/$defs/RunObservation"
+            },
+            "subject": {
+              "$ref": "#/$defs/TraceRuntimeSubject"
             }
           },
           "required": [
             "kind",
+            "subject",
             "observation"
           ],
           "type": "object"
@@ -3230,10 +3341,14 @@
             },
             "status": {
               "$ref": "#/$defs/TraceLanguageExecutionStatus"
+            },
+            "subject": {
+              "$ref": "#/$defs/TraceRuntimeSubject"
             }
           },
           "required": [
             "kind",
+            "subject",
             "status"
           ],
           "type": "object"
@@ -3250,53 +3365,33 @@
             "kind": {
               "const": "node",
               "type": "string"
+            },
+            "subject": {
+              "$ref": "#/$defs/TraceRuntimeSubject"
             }
           },
           "required": [
             "kind",
+            "subject",
             "at",
             "fact"
           ],
           "type": "object"
         },
         {
-          "description": "Document statement starts and empty-block entries by site ordinal.\nProcesses report provisional deltas; cells report cumulative totals\nwithin a stable activation segment, folded by elementwise maximum.",
+          "description": "Statement starts and empty-block entries, with their accumulation law.",
           "properties": {
+            "counts": {
+              "$ref": "#/$defs/TraceCountObservation"
+            },
             "kind": {
-              "const": "ran",
+              "const": "counts",
               "type": "string"
-            },
-            "ran": {
-              "items": {
-                "maxItems": 2,
-                "minItems": 2,
-                "prefixItems": [
-                  {
-                    "format": "uint32",
-                    "minimum": 0,
-                    "type": "integer"
-                  },
-                  {
-                    "format": "uint64",
-                    "minimum": 0,
-                    "type": "integer"
-                  }
-                ],
-                "type": "array"
-              },
-              "type": "array"
-            },
-            "segment": {
-              "description": "Present for cells: a stable activation id, with cumulative counts\nwithin that segment. Absent for process live deltas.",
-              "type": [
-                "string",
-                "null"
-              ]
             }
           },
           "required": [
             "kind",
-            "ran"
+            "counts"
           ],
           "type": "object"
         }
@@ -3313,7 +3408,8 @@
         "event_key",
         "identity"
       ],
-      "type": "object"
+      "type": "object",
+      "unevaluatedProperties": false
     },
     "TraceLanguageExecutionFailure": {
       "description": "The observed cause of a failed language node.",
@@ -3383,6 +3479,7 @@
       ]
     },
     "TraceLanguageExecutionIdentity": {
+      "additionalProperties": false,
       "properties": {
         "attempt": {
           "format": "uint32",
@@ -3403,14 +3500,10 @@
         },
         "scope": {
           "$ref": "#/$defs/TraceRuntimeScope"
-        },
-        "subject": {
-          "$ref": "#/$defs/TraceRuntimeSubject"
         }
       },
       "required": [
         "scope",
-        "subject",
         "document",
         "entry_name"
       ],

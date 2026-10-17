@@ -33,11 +33,10 @@ impl Observation {
     }
 
     fn finish_status(&self) -> Option<LanguageExecutionStatus> {
-        match &self.fact {
-            WorkflowOverlayFact::Language {
-                payload: TraceLanguageExecutionPayload::ExecutionFinished { status, .. },
-                ..
-            } => Some(*status),
+        match self.fact.language() {
+            Some((_, TraceLanguageExecutionPayload::ExecutionFinished { status, .. })) => {
+                Some(*status)
+            }
             _ => None,
         }
     }
@@ -187,11 +186,14 @@ impl ExecutionHistory {
 
     /// The document the execution's start named.
     pub(super) fn started_document(&self) -> Option<&WorkflowDocumentRef> {
-        match &self.get(&WorkflowOverlayExecutionTransition::Started)?.fact {
-            WorkflowOverlayFact::Language {
-                document,
-                payload: TraceLanguageExecutionPayload::ExecutionStarted { .. },
-            } => Some(document),
+        match self
+            .get(&WorkflowOverlayExecutionTransition::Started)?
+            .fact
+            .language()
+        {
+            Some((document, TraceLanguageExecutionPayload::ExecutionStarted { .. })) => {
+                Some(document)
+            }
             _ => None,
         }
     }
@@ -236,15 +238,15 @@ impl Placement {
             WorkflowOverlayFact::StepBodyStarted { step } => {
                 (&step.at, Transition::StepBody(step.attempt))
             }
-            WorkflowOverlayFact::Language { payload, .. } => match payload {
+            WorkflowOverlayFact::Language { payload, .. } => match payload.as_ref() {
                 Payload::ExecutionStarted { .. } => {
                     return Self::Execution(WorkflowOverlayExecutionTransition::Started);
                 }
                 Payload::ExecutionFinished { .. } => {
                     return Self::Execution(WorkflowOverlayExecutionTransition::Finished);
                 }
-                Payload::Ran { .. } => return Self::Unplaced,
-                Payload::Node { at, fact } => (
+                Payload::Counts { .. } => return Self::Unplaced,
+                Payload::Node { at, fact, .. } => (
                     at,
                     match fact {
                         TraceNodeFact::Started { .. } => Transition::Started,

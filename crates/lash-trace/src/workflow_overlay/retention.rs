@@ -83,14 +83,13 @@ impl SiteRetention {
             self.watermark_history.insert(transition, observation);
             return;
         }
-        if let WorkflowOverlayFact::Language {
-            payload:
-                TraceLanguageExecutionPayload::Node {
-                    fact: TraceNodeFact::ChildStarted { child },
-                    ..
-                },
-            ..
-        } = &observation.fact
+        if let Some((
+            _,
+            TraceLanguageExecutionPayload::Node {
+                fact: TraceNodeFact::ChildStarted { child },
+                ..
+            },
+        )) = observation.fact.language()
         {
             self.archived_children.insert(child);
         }

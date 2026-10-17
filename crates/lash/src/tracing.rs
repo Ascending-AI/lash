@@ -100,11 +100,12 @@ pub use lash_trace::{
 /// `lash-trace` re-exports rather than `rlm`-gated.
 pub use lash_trace::{
     ExecCodeFailureReason, StepBodyStarted, TRACE_SCHEMA_VERSION, TextProjectionMetadata,
-    TraceAgentFrameSwitch, TraceExecToolCall, TraceFailureCode, TraceLanguageChildExecution,
-    TraceLanguageExecution, TraceLanguageExecutionFailure, TraceLanguageExecutionGeneration,
+    TraceAgentFrameSwitch, TraceCellCounts, TraceCountObservation, TraceExecToolCall,
+    TraceFailureCode, TraceLanguageChildExecution, TraceLanguageExecution,
+    TraceLanguageExecutionFailure, TraceLanguageExecutionGeneration,
     TraceLanguageExecutionIdentity, TraceLanguageExecutionPayload, TraceLanguageExecutionStatus,
     TraceLlmTerminalReason, TraceNodeAwaited, TraceNodeFact, TraceNodeWaitKind,
-    TraceNodeWaitResolution, TraceNormalizedError, TraceProgramStepOutcome,
+    TraceNodeWaitResolution, TraceNormalizedError, TraceProcessCounts, TraceProgramStepOutcome,
     TraceProviderFailureKind, TraceRetryAttempt, TraceRetryAttemptDetail, TraceRetryClass,
     TraceRetryDeclineCause, TraceRetryWait, TraceStoreErrorClass, TraceToolArgs,
     TraceToolAttemptOutcome, TraceToolCallStatus, TraceToolName, TraceTurnCancellationEvidence,

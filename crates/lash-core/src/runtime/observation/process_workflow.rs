@@ -370,6 +370,12 @@ impl ProcessWorkflowOverlayAccumulator {
         }
     }
 
+    fn provisional_counts(&mut self, counts: &lash_trace::TraceProcessCounts) {
+        if !self.ended {
+            self.counted(&counts.delta, false);
+        }
+    }
+
     fn live_document(
         &mut self,
         document: &WorkflowDocumentRef,
@@ -415,26 +421,29 @@ impl ProcessWorkflowOverlayAccumulator {
                 // A process feed also carries its effects' nested language
                 // executions. Their sites belong to their own documents;
                 // the parent is still at the step that admitted the effect.
-                if let TraceRuntimeSubject::Effect { address, .. } = &execution.identity.subject
+                if let TraceRuntimeSubject::Effect { address, .. } = &execution.subject()
                     && matches!(&address.execution_scope,
                         lash_protocol_types::ExecutionScope::Process { process_id } if process_id == self.process_id)
                 {
                     return Ok(());
                 }
                 if &execution.identity.document != document
-                    || !matches!(&execution.identity.subject,
+                    || !matches!(&execution.subject(),
                     TraceRuntimeSubject::Process { process_id } if process_id == self.process_id)
                 {
                     return Err(ProcessWorkflowFoldError::DifferentExecution);
                 }
                 self.live_document(document)?;
                 self.live_coverage = ProcessWorkflowLiveCoverage::RetainedWindow;
-                if let TraceLanguageExecutionPayload::Ran { ran, .. } = &execution.payload
-                    && !self.ended
-                {
-                    self.counted(ran, false);
+                if let TraceLanguageExecutionPayload::Counts { counts } = &execution.payload {
+                    match counts {
+                        lash_trace::TraceCountObservation::Process(counts) => {
+                            self.provisional_counts(counts)
+                        }
+                        lash_trace::TraceCountObservation::Cell(_) => {}
+                    }
                 }
-                if let TraceLanguageExecutionPayload::Node { at, fact } = &execution.payload {
+                if let TraceLanguageExecutionPayload::Node { at, fact, .. } = &execution.payload {
                     let state = match fact {
                         TraceNodeFact::Started { .. } => {
                             self.enter_live(at);
@@ -562,15 +571,15 @@ mod tests {
                 event_key: "live-site".into(),
                 identity: TraceLanguageExecutionIdentity {
                     scope: TraceRuntimeScope::none(),
-                    subject: TraceRuntimeSubject::Process {
-                        process_id: process,
-                    },
                     document: document.clone(),
                     entry_name: "main".into(),
                     engine_execution_id: None,
                     generation: None,
                 },
                 payload: TraceLanguageExecutionPayload::Node {
+                    subject: TraceRuntimeSubject::Process {
+                        process_id: process,
+                    },
                     at: at.clone(),
                     fact: TraceNodeFact::Started { call_id: None },
                 },
@@ -581,6 +590,7 @@ mod tests {
             TraceNodeFact::Cancelled,
         ] {
             observation.execution.payload = TraceLanguageExecutionPayload::Node {
+                subject: observation.execution.subject(),
                 at: at.clone(),
                 fact,
             };
@@ -618,6 +628,7 @@ mod tests {
         let mut next = at.clone();
         next.occurrence = 1;
         observation.execution.payload = TraceLanguageExecutionPayload::Node {
+            subject: observation.execution.subject(),
             at: next,
             fact: TraceNodeFact::Started { call_id: None },
         };
@@ -667,23 +678,28 @@ mod tests {
             document: lash_kernel_doc::DocumentId::from_bytes([7; 32]),
             entry: WorkflowDocumentEntry::Main,
         };
-        let live = |ran: Vec<(u32, u64)>| {
+        let live = |frame, ran: Vec<(u32, u64)>| {
+            let identity = TraceLanguageExecutionIdentity {
+                scope: TraceRuntimeScope::none(),
+                document: document.clone(),
+                entry_name: "main".into(),
+                engine_execution_id: None,
+                generation: None,
+            };
+            let counts =
+                lash_trace::TraceCountObservation::Process(lash_trace::TraceProcessCounts {
+                    process_id: process.clone(),
+                    segment: "root".into(),
+                    frame,
+                    delta: ran,
+                });
             ProcessObservationEventPayload::LanguageExecution(LanguageExecutionObservation {
                 language: None,
                 observed_at_ms: 100,
                 execution: TraceLanguageExecution {
-                    event_key: "ran".into(),
-                    identity: TraceLanguageExecutionIdentity {
-                        scope: TraceRuntimeScope::none(),
-                        subject: TraceRuntimeSubject::Process {
-                            process_id: process.clone(),
-                        },
-                        document: document.clone(),
-                        entry_name: "main".into(),
-                        engine_execution_id: None,
-                        generation: None,
-                    },
-                    payload: TraceLanguageExecutionPayload::Ran { ran, segment: None },
+                    event_key: counts.event_key(&identity),
+                    identity,
+                    payload: TraceLanguageExecutionPayload::Counts { counts },
                 },
             })
         };
@@ -707,13 +723,13 @@ mod tests {
         let mut overlay = ProcessWorkflowOverlayAccumulator::new(process.clone())
             .observing(ProcessWorkflowObservation::Counts);
         overlay
-            .observe(&document, &live(vec![(3, 2)]))
+            .observe(&document, &live(1, vec![(3, 2)]))
             .expect("live counts");
         assert_eq!(counts(&overlay), [(3, 0, 2)]);
         overlay.committed(&committed(5, ran(vec![(3, 2), (4, 1)])));
         assert_eq!(counts(&overlay), [(3, 2, 0), (4, 1, 0)]);
         overlay
-            .observe(&document, &live(vec![(4, 5)]))
+            .observe(&document, &live(2, vec![(4, 5)]))
             .expect("live counts");
         assert_eq!(counts(&overlay), [(3, 2, 0), (4, 1, 5)]);
         overlay.committed(&committed(
@@ -763,15 +779,15 @@ mod tests {
                     event_key: "sleep".into(),
                     identity: TraceLanguageExecutionIdentity {
                         scope: TraceRuntimeScope::none(),
-                        subject: TraceRuntimeSubject::Process {
-                            process_id: process,
-                        },
                         document: document.clone(),
                         entry_name: "main".into(),
                         engine_execution_id: None,
                         generation: None,
                     },
                     payload: TraceLanguageExecutionPayload::Node {
+                        subject: TraceRuntimeSubject::Process {
+                            process_id: process,
+                        },
                         at: at.clone(),
                         fact: TraceNodeFact::Started { call_id: None },
                     },
@@ -898,15 +914,15 @@ mod tests {
                 event_key: "parent".into(),
                 identity: TraceLanguageExecutionIdentity {
                     scope: TraceRuntimeScope::none(),
-                    subject: TraceRuntimeSubject::Process {
-                        process_id: process.clone(),
-                    },
                     document: document.clone(),
                     entry_name: "main".into(),
                     engine_execution_id: Some(process.to_string()),
                     generation: None,
                 },
                 payload: TraceLanguageExecutionPayload::Node {
+                    subject: TraceRuntimeSubject::Process {
+                        process_id: process.clone(),
+                    },
                     at: lash_protocol_types::effect_identity_fixture("parent", 0),
                     fact: TraceNodeFact::Started { call_id: None },
                 },
@@ -921,7 +937,7 @@ mod tests {
         let before = overlay.snapshot();
         let mut nested = observation;
         nested.execution.event_key = "nested".into();
-        nested.execution.identity.subject = TraceRuntimeSubject::Effect {
+        let nested_subject = TraceRuntimeSubject::Effect {
             address: lash_protocol_types::EffectAddress::new(
                 lash_protocol_types::ExecutionScope::Process {
                     process_id: process,
@@ -934,6 +950,7 @@ mod tests {
         nested.execution.identity.document.document =
             lash_kernel_doc::DocumentId::from_bytes([8; 32]);
         nested.execution.payload = TraceLanguageExecutionPayload::Node {
+            subject: nested_subject,
             at: lash_protocol_types::effect_identity_fixture("child", 9),
             fact: TraceNodeFact::Started { call_id: None },
         };

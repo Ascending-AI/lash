@@ -503,8 +503,8 @@ impl TraceEvent {
                     | TraceNodeFact::BranchSelected { .. }
                     | TraceNodeFact::ChildStarted { .. } => {}
                 },
-                TraceLanguageExecutionPayload::ExecutionStarted { observation: _ }
-                | TraceLanguageExecutionPayload::Ran { segment: _, ran: _ } => {}
+                TraceLanguageExecutionPayload::ExecutionStarted { .. }
+                | TraceLanguageExecutionPayload::Counts { .. } => {}
             },
             Self::ExecCodeDiscarded {
                 trailing_discarded: _,

@@ -25,6 +25,8 @@ pub(super) struct CellTrace {
     tracing: PluginExecutionTrace,
     language: String,
     identity: TraceLanguageExecutionIdentity,
+    address: lash_protocol_types::EffectAddress,
+    effect_id: String,
     /// The model response that asked for the cell, while its turn holds
     /// it: nothing of the cell is traced before a commit holds it
     /// (FIG-6000).
@@ -64,16 +66,14 @@ impl CellTrace {
             counts: Arc::default(),
             tracing,
             language: language.to_owned(),
+            address,
+            effect_id: effect_id.to_string(),
             identity: TraceLanguageExecutionIdentity {
                 scope: TraceRuntimeScope {
                     session_id: invocation.attribution.session_id.clone(),
                     turn_id: invocation.attribution.turn_id.clone(),
                     turn_index: invocation.attribution.turn_index,
                     protocol_iteration: invocation.attribution.protocol_iteration,
-                },
-                subject: TraceRuntimeSubject::Effect {
-                    address,
-                    effect_id: effect_id.to_string(),
                 },
                 document: WorkflowDocumentRef {
                     document,
@@ -91,6 +91,7 @@ impl CellTrace {
 
     pub(super) fn started(&self) {
         self.emit(TraceLanguageExecutionPayload::ExecutionStarted {
+            subject: self.subject(),
             observation: self.observation,
         });
     }
@@ -111,17 +112,23 @@ impl CellTrace {
             .map(|(ordinal, count)| (*ordinal, *count))
             .collect();
         drop(counts);
-        self.emit_keyed(
-            Some(format!("ran:{}:{frame}", self.segment)),
-            TraceLanguageExecutionPayload::Ran {
-                segment: Some(self.segment.clone()),
-                ran,
-            },
-        );
+        self.emit(TraceLanguageExecutionPayload::Counts {
+            counts: lash_trace::TraceCountObservation::Cell(lash_trace::TraceCellCounts {
+                address: self.address.clone(),
+                effect_id: self.effect_id.clone(),
+                segment: self.segment.clone(),
+                frame,
+                totals: ran,
+            }),
+        });
     }
 
     pub(super) fn finished(&self, status: TraceLanguageExecutionStatus, error: Option<String>) {
-        self.emit(TraceLanguageExecutionPayload::ExecutionFinished { status, error });
+        self.emit(TraceLanguageExecutionPayload::ExecutionFinished {
+            subject: self.subject(),
+            status,
+            error,
+        });
     }
 
     /// The cell's `perform` at `at` was admitted as the tool call `call`.
@@ -164,34 +171,41 @@ impl CellTrace {
 
     fn node(&self, at: &EffectIdentity, fact: TraceNodeFact) {
         self.emit(TraceLanguageExecutionPayload::Node {
+            subject: self.subject(),
             at: at.clone(),
             fact,
         });
     }
 
-    /// Trace `payload` once a commit holds the cell's model response: now,
-    /// unless its turn still holds it.
-    fn emit(&self, payload: TraceLanguageExecutionPayload) {
-        self.emit_keyed(None, payload);
-    }
-
-    fn emit_keyed(&self, key: Option<String>, payload: TraceLanguageExecutionPayload) {
-        match &self.held {
-            Some(held) => {
-                let trace = self.clone();
-                held.after_commit(Box::new(move || trace.emit_now(key, payload)));
-            }
-            None => self.emit_now(key, payload),
+    fn subject(&self) -> TraceRuntimeSubject {
+        TraceRuntimeSubject::Effect {
+            address: self.address.clone(),
+            effect_id: self.effect_id.clone(),
         }
     }
 
-    fn emit_now(&self, key: Option<String>, payload: TraceLanguageExecutionPayload) {
+    /// Trace `payload` once a commit holds the cell's model response: now,
+    /// unless its turn still holds it.
+    fn emit(&self, payload: TraceLanguageExecutionPayload) {
+        match &self.held {
+            Some(held) => {
+                let trace = self.clone();
+                held.after_commit(Box::new(move || trace.emit_now(payload)));
+            }
+            None => self.emit_now(payload),
+        }
+    }
+
+    fn emit_now(&self, payload: TraceLanguageExecutionPayload) {
         use TraceLanguageExecutionPayload as Payload;
         let (suffix, node) = match &payload {
             Payload::ExecutionStarted { .. } => ("started".to_owned(), None),
             Payload::ExecutionFinished { .. } => ("finished".to_owned(), None),
-            Payload::Ran { .. } => (key.unwrap_or_default(), None),
-            Payload::Node { at, fact } => {
+            Payload::Counts { counts } => {
+                let event_key = counts.event_key(&self.identity);
+                (event_key, None)
+            }
+            Payload::Node { at, fact, .. } => {
                 // The whole identity names an occurrence: every task counts
                 // a site's occurrences from 0.
                 let occurrence = serde_json::to_string(at).unwrap_or_default();
@@ -211,7 +225,14 @@ impl CellTrace {
                 )
             }
         };
-        let event_key = format!("kernel_execution:{}:{suffix}", self.identity.graph_key());
+        let event_key = if matches!(&payload, Payload::Counts { .. }) {
+            suffix
+        } else {
+            format!(
+                "kernel_execution:{}:{suffix}",
+                self.identity.graph_key(&self.subject())
+            )
+        };
         let mut context = lash_trace::TraceContext {
             session_id: self.identity.scope.session_id.clone(),
             turn_id: self.identity.scope.turn_id.clone(),
@@ -220,9 +241,7 @@ impl CellTrace {
             graph_node_id: node,
             ..lash_trace::TraceContext::default()
         };
-        if let TraceRuntimeSubject::Effect { effect_id, .. } = &self.identity.subject {
-            context.effect_id = Some(effect_id.clone());
-        }
+        context.effect_id = Some(self.effect_id.clone());
         let event = TraceLanguageExecution {
             event_key,
             identity: self.identity.clone(),

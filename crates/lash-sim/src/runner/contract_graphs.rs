@@ -118,9 +118,7 @@ pub(super) fn contract_turn_events(
 impl lash::tracing::ProductObservationSink for ContractGraphs {
     fn observe(&self, record: &lash::tracing::TraceRecord) {
         let key = match &record.event {
-            lash::tracing::TraceEvent::LanguageExecution { event, .. } => {
-                event.identity.graph_key()
-            }
+            lash::tracing::TraceEvent::LanguageExecution { event, .. } => event.graph_key(),
             lash::tracing::TraceEvent::StepBodyStarted { step } => {
                 format!("process:{}", step.process_id)
             }

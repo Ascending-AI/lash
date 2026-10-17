@@ -1051,6 +1051,7 @@ main { finish null }
             if let lash_trace::TraceLanguageExecutionPayload::Node {
                 at,
                 fact: lash_trace::TraceNodeFact::Started { .. },
+                ..
             } = &observation.execution.payload
                 && at.site == call.site
             {

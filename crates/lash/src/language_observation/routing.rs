@@ -9,7 +9,7 @@ pub(super) enum Subject {
 }
 
 pub(super) fn subject(execution: &TraceLanguageExecution) -> Option<Subject> {
-    match &execution.identity.subject {
+    match &execution.subject() {
         TraceRuntimeSubject::Process { process_id } => Some(Subject::Process(process_id.clone())),
         TraceRuntimeSubject::Effect { address, .. } => match &address.execution_scope {
             ExecutionScope::Turn { session_id, .. }
