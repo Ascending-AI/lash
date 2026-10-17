@@ -47,6 +47,10 @@ mod fork_cases;
 #[path = "cross_backend_store_differential/generated_surface.rs"]
 mod generated_surface;
 
+#[path = "cross_backend_store_differential/durable_read_coverage.rs"]
+mod durable_read_coverage;
+#[path = "cross_backend_store_differential/model_call_coverage.rs"]
+mod model_call_coverage;
 #[path = "cross_backend_store_differential/obligation_cases.rs"]
 mod obligation_cases;
 #[path = "cross_backend_store_differential/observations.rs"]
@@ -1869,6 +1873,27 @@ fn generated_catalog_covers_required_adversarial_shapes() {
     let cases = generated_cases();
     assert_eq!(cases.len(), 24);
     assert!(cases.iter().all(|case| !case.operations.is_empty()));
+    // FIG-6687: a case label is no witness of the malformed submitted input.
+    let duplicate = cases
+        .iter()
+        .find(|case| matches!(case.name, CaseName::DuplicateWithinAppend))
+        .expect("the duplicate append case");
+    let mut witnessed = false;
+    for operation in &duplicate.operations {
+        if let StoreOperation::Commit { graph, .. } = operation {
+            for (index, node) in graph.nodes.iter().enumerate() {
+                witnessed |= graph.nodes[..index].iter().any(|prior| {
+                    prior.node_id == node.node_id
+                        && (prior.parent_node_id, prior.contents)
+                            != (node.parent_node_id, node.contents)
+                });
+            }
+        }
+    }
+    assert!(
+        witnessed,
+        "duplicate-node coverage must submit two distinct rows with the same id"
+    );
     assert_eq!(
         cases
             .iter()

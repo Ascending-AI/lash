@@ -178,7 +178,12 @@ async fn every_format_set_the_build_writes_has_a_decode_and_resume_fixture() {
             .expect("the image reads")
             .unwrap_or_else(|| panic!("image {} holds no actor {key}", image.name));
         assert!(
-            written.contains(&snapshot.formats),
+            snapshot.formats
+                == written[if key.kind() == ActorKind::Session {
+                    0
+                } else {
+                    1
+                }],
             "image {} is in {}, which this build does not write",
             image.name,
             snapshot.formats
@@ -250,7 +255,7 @@ async fn every_drain_format_is_in_an_actor_format_set() {
             members.split(',')
         })
         .collect();
-    let mut checked = 0;
+    let mut checked = std::collections::BTreeSet::new();
     for entry in lash::formats::durable_formats() {
         if entry.format.upgrade_policy() != UpgradePolicy::Drain
             || entry.probe == FormatProbe::NotPersisted
@@ -268,9 +273,79 @@ async fn every_drain_format_is_in_an_actor_format_set() {
             members.contains(&member.as_str()),
             "the drain format {name} ({member}) is in no set: {sets:?}"
         );
-        checked += 1;
+        assert!(
+            checked.insert(id),
+            "two drain formats claim the same actor format"
+        );
     }
-    assert_eq!(checked, 5, "the drain formats this build declares");
+    assert_eq!(checked.len(), 5, "the drain formats this build declares");
+
+    // FIG-6687: witness the actual wait writer and a cold typed read, rather
+    // than only finding wait-row's spelling in a declaration. The retained
+    // baseline actor above does not itself contain a pending wait.
+    use lash_durable::domain::{
+        DomainWrite, ScopeKey, WaitId, WaitLifecycle, WaitPurpose, WaitRow, WaitWrite,
+    };
+    use lash_durable::{CommitLabel, DurableInstant, FormatSet, MailTx, NodeSpec};
+    let stores = lash_sqlite_store::SqliteStoreSet::memory().await.unwrap();
+    let store = stores.durable_store();
+    let owner = ActorKey::session("format-wait-writer").unwrap();
+    let formats: FormatSet = sets[0].clone();
+    let mut mail = MailTx::new();
+    mail.create_actor(owner.clone(), formats.clone());
+    store
+        .commit_mail(mail, CommitLabel::new("format.wait.create"))
+        .await
+        .unwrap();
+    let node = store
+        .register_node(&NodeSpec {
+            node: lash_durable::NodeId::new("format-writer"),
+            decodes: vec![formats.clone()],
+            serves: Vec::new(),
+            ttl_millis: 60_000,
+        })
+        .await
+        .unwrap();
+    let epoch = store.claim(&node, 1).await.unwrap()[0].epoch;
+    let id = WaitId([0x67; 16]);
+    let scope = ScopeKey::Session(
+        lash_protocol_types::SessionId::try_from("format-wait-writer".to_owned()).unwrap(),
+    );
+    let purpose = WaitPurpose::Timer {
+        deadline: DurableInstant(1_900_000_000_000),
+    };
+    let mut tx = store.begin(&owner, epoch).await.unwrap();
+    tx.write(DomainWrite::Wait(WaitWrite::Pin {
+        id,
+        scope: scope.clone(),
+        purpose: purpose.clone(),
+    }));
+    store
+        .commit(tx, CommitLabel::new("format.wait.write"))
+        .await
+        .unwrap();
+    let peer = stores.reopen_with_clock(clock as _).await.unwrap();
+    use lash_durable::DurableReads as _;
+    assert_eq!(
+        peer.durable_store().wait(&id).await.unwrap(),
+        Some(WaitRow {
+            id,
+            owner: owner.clone(),
+            scope,
+            purpose,
+            lifecycle: WaitLifecycle::Pending,
+            created_epoch: epoch
+        })
+    );
+    assert_eq!(
+        peer.durable_store()
+            .actor(&owner)
+            .await
+            .unwrap()
+            .unwrap()
+            .formats,
+        formats
+    );
 }
 
 /// FIG-6474: every witness owns its archive file, so another recorder cannot
@@ -347,25 +422,39 @@ fn a_recorder_writes_only_its_selected_image() {
             let before = snapshot(root);
             let mut replacement: images::RetainedImage =
                 serde_json::from_slice(&serde_json::to_vec(image).unwrap()).unwrap();
-            // A changed payload makes an omitted selected write observable too.
-            replacement.db_gzip_base64 = set
-                .images
-                .iter()
-                .find(|other| other.name != image.name)
-                .unwrap()
-                .db_gzip_base64
-                .clone();
+            // Both carriers must change: DB replacement alone cannot witness a
+            // recorder that silently keeps the old WAL (FIG-6687 / FIG-6474).
+            replacement.db_gzip_base64 = format!("replacement database for {}", image.name);
+            replacement.wal_gzip_base64 = format!("replacement WAL for {}", image.name);
+            let expected = serde_json::to_value(&replacement).unwrap();
             images::rerecord_at(root, &set.build, replacement);
             let mut after = snapshot(root);
             let selected = std::path::PathBuf::from("corpus")
                 .join(&set.build)
                 .join(format!("{}.json", image.name));
-            assert_ne!(before[&selected].0, after[&selected].0);
+            let recorded: serde_json::Value = serde_json::from_slice(&after[&selected].0).unwrap();
+            assert_eq!(
+                recorded["images"][0], expected,
+                "both selected carriers and the old oracle survive"
+            );
             after.insert(selected.clone(), before[&selected].clone());
             assert_eq!(
                 before, after,
                 "refreshing {} touched another witness",
                 image.name
+            );
+            let before = snapshot(root);
+            let mut changed_oracle: images::RetainedImage =
+                serde_json::from_value(expected).unwrap();
+            changed_oracle.expected = serde_json::json!({"changed": "oracle"});
+            assert!(
+                std::panic::catch_unwind(|| images::rerecord_at(root, &set.build, changed_oracle))
+                    .is_err()
+            );
+            assert_eq!(
+                before,
+                snapshot(root),
+                "a changed oracle is refused before any write"
             );
         }
     }
@@ -379,7 +468,20 @@ fn a_recorder_writes_only_its_selected_image() {
         let mut after = snapshot(root);
         for file in ["db.gz", "db-wal.gz"] {
             let selected = std::path::PathBuf::from(image.name.as_ref()).join(file);
-            assert_ne!(before[&selected].0, after[&selected].0);
+            use std::io::Read as _;
+            let mut decoded = Vec::new();
+            flate2::read::GzDecoder::new(after[&selected].0.as_slice())
+                .read_to_end(&mut decoded)
+                .unwrap();
+            let expected: &[u8] = if file == "db.gz" {
+                b"new database bytes"
+            } else {
+                b"new WAL bytes"
+            };
+            assert_eq!(
+                decoded, expected,
+                "the selected baseline carrier is replaced exactly"
+            );
             after.insert(selected.clone(), before[&selected].clone());
         }
         assert_eq!(

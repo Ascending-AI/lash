@@ -9,7 +9,8 @@
 //!
 //! Answers are summarized coarsely and deliberately. Backend-generated ids,
 //! sequence counters, and wall-clock stamps are not cross-backend comparable;
-//! what a read *found* is. The durable contract itself is carried by the
+//! what a read *found* is. Model-call answers preserve complete typed facts
+//! and reservations, whose identities the fixture supplies. The durable contract is carried by the
 //! digest comparison the step loop already performs.
 
 use super::*;
@@ -23,6 +24,7 @@ const SURFACE_CHECKPOINT_RUN_ID: &str = "fig-2841-surface-checkpoint-run";
 #[derive(Default)]
 pub(super) struct SurfaceScratch {
     pub(super) answer: Option<String>,
+    pub(super) model_ledger: model_call_coverage::ModelLedger,
     pub(super) corrupt_backup: Option<CorruptBackup>,
     pub(super) corrupt_target: Option<corrupt_input_cases::CorruptTarget>,
     pub(super) batch_id: Option<String>,
@@ -39,6 +41,8 @@ pub(super) enum SurfaceMethod {
     EnvironmentBytes,
     LoadSession,
     RunFactsOf,
+    DurableRead(durable_read_coverage::DurableReadMethod),
+    PrepareModelCalls,
     ModelCalls,
     ModelCallPins,
     ClaimFacts,
@@ -190,6 +194,8 @@ impl SurfaceMethod {
             Self::EnvironmentBytes => "surface:environment_bytes",
             Self::LoadSession => "surface:load_session",
             Self::RunFactsOf => "surface:run_facts_of",
+            Self::DurableRead(method) => method.name(),
+            Self::PrepareModelCalls => "surface:prepare_model_calls",
             Self::ModelCalls => "surface:model_calls",
             Self::ModelCallPins => "surface:model_call_pins",
             Self::ClaimFacts => "surface:claim_facts",
@@ -322,7 +328,7 @@ const SURFACE_COMMITTED_TURN_ID: &str = "fig-2841-surface-committed-turn";
 const UNKNOWN_INPUT_ID: &str = "fig-2841-unknown-input";
 /// The run the sweep binds its next-turn input to, and the other run a
 /// second binding names.
-const SURFACE_RUN_ID: &str = "fig-3600-run";
+pub(super) const SURFACE_RUN_ID: &str = "fig-3600-run";
 const SURFACE_OTHER_RUN_ID: &str = "fig-3600-other-run";
 /// A session no case ever creates: closing it closes nothing.
 const UNKNOWN_CLOSE_SESSION_ID: &str = "fig-3600-never-created-session";
@@ -378,6 +384,67 @@ pub(super) fn surface_sweep_case() -> GeneratedCase {
             surface(SurfaceMethod::ProcessAuthority),
             surface(SurfaceMethod::EnvironmentBytes),
             surface(SurfaceMethod::RunFactsOf),
+            surface(SurfaceMethod::PrepareModelCalls),
+            surface(SurfaceMethod::DurableRead(
+                durable_read_coverage::DurableReadMethod::Turn,
+            )),
+            surface(SurfaceMethod::DurableRead(
+                durable_read_coverage::DurableReadMethod::TurnNamespaces,
+            )),
+            surface(SurfaceMethod::DurableRead(
+                durable_read_coverage::DurableReadMethod::TurnEnd,
+            )),
+            surface(SurfaceMethod::DurableRead(
+                durable_read_coverage::DurableReadMethod::RunFacts,
+            )),
+            surface(SurfaceMethod::DurableRead(
+                durable_read_coverage::DurableReadMethod::RunFactsOf,
+            )),
+            surface(SurfaceMethod::DurableRead(
+                durable_read_coverage::DurableReadMethod::RunFactsWithin,
+            )),
+            surface(SurfaceMethod::DurableRead(
+                durable_read_coverage::DurableReadMethod::ExecRoot,
+            )),
+            surface(SurfaceMethod::DurableRead(
+                durable_read_coverage::DurableReadMethod::CellRoots,
+            )),
+            surface(SurfaceMethod::DurableRead(
+                durable_read_coverage::DurableReadMethod::CellRootsWithin,
+            )),
+            surface(SurfaceMethod::DurableRead(
+                durable_read_coverage::DurableReadMethod::PendingWaits,
+            )),
+            surface(SurfaceMethod::DurableRead(
+                durable_read_coverage::DurableReadMethod::Wait,
+            )),
+            surface(SurfaceMethod::DurableRead(
+                durable_read_coverage::DurableReadMethod::Process,
+            )),
+            surface(SurfaceMethod::DurableRead(
+                durable_read_coverage::DurableReadMethod::LiveUntilDescendants,
+            )),
+            surface(SurfaceMethod::DurableRead(
+                durable_read_coverage::DurableReadMethod::UntilChildren,
+            )),
+            surface(SurfaceMethod::DurableRead(
+                durable_read_coverage::DurableReadMethod::SessionClose,
+            )),
+            surface(SurfaceMethod::DurableRead(
+                durable_read_coverage::DurableReadMethod::EndingScopes,
+            )),
+            surface(SurfaceMethod::DurableRead(
+                durable_read_coverage::DurableReadMethod::SessionMailbox,
+            )),
+            surface(SurfaceMethod::DurableRead(
+                durable_read_coverage::DurableReadMethod::PromptSnapshot,
+            )),
+            surface(SurfaceMethod::DurableRead(
+                durable_read_coverage::DurableReadMethod::PromptTexts,
+            )),
+            surface(SurfaceMethod::DurableRead(
+                durable_read_coverage::DurableReadMethod::Hydrate,
+            )),
             surface(SurfaceMethod::ModelCalls),
             surface(SurfaceMethod::ModelCallPins),
             surface(SurfaceMethod::ClaimFacts),
@@ -663,29 +730,26 @@ impl BackendRunner {
                     roots.len()
                 )
             }
-            SurfaceMethod::ModelCalls => {
-                let owner = lash_core::durable_port::domain::ModelCallId::turn_owner(
-                    &SURFACE_RUN_ID.into(),
-                );
-                let rows = self
-                    .lifecycle_backend
-                    .durable()
-                    .model_calls(&session_id, &owner)
-                    .await
-                    .map_err(|error| StoreError::Backend(error.to_string()))?;
-                format!("rows={}", rows.len())
+            SurfaceMethod::DurableRead(method) => {
+                durable_read_coverage::drive(
+                    self.lifecycle_backend.durable().as_ref(),
+                    &session_id,
+                    method,
+                    &mut self.surface.model_ledger.visited,
+                )
+                .await
             }
-            SurfaceMethod::ModelCallPins => {
-                let owner = lash_core::durable_port::domain::ModelCallId::turn_owner(
-                    &SURFACE_RUN_ID.into(),
-                );
-                let rows = self
-                    .lifecycle_backend
-                    .durable()
-                    .model_call_pins(&session_id, &owner)
+            SurfaceMethod::PrepareModelCalls
+            | SurfaceMethod::ModelCalls
+            | SurfaceMethod::ModelCallPins => {
+                self.surface
+                    .model_ledger
+                    .drive(
+                        self.lifecycle_backend.durable().as_ref(),
+                        &session_id,
+                        method,
+                    )
                     .await
-                    .map_err(|error| StoreError::Backend(error.to_string()))?;
-                format!("rows={}", rows.len())
             }
             SurfaceMethod::RunFactsOf => {
                 let owner = lash_core::durable_port::domain::OwnerKey::Turn(

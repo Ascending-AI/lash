@@ -7,6 +7,9 @@
 //! trait method that is neither executed by the harness nor named in an
 //! explicit exclusion list with a reason.
 //!
+//! DurableReads additionally requires actual runtime visitation of every
+//! declared method, with a nonempty model-call recovery history.
+//!
 //! Adding a fallible method to one of the gated traits therefore fails this
 //! test until the method is either executed or excluded on the record.
 
@@ -256,8 +259,27 @@ fn harness_drives(sources: &[String], method: &str) -> bool {
     sources.iter().any(|source| source.contains(&call))
 }
 
-#[test]
-fn store_trait_surface_is_fully_gated() {
+#[tokio::test]
+async fn store_trait_surface_is_fully_gated() {
+    let reached = super::model_call_coverage::reached_model_methods().await;
+    let declared: std::collections::BTreeSet<_> = fallible_trait_methods(
+        include_str!("../../../lash-durable/src/domain/mod.rs"),
+        "DurableReads",
+    )
+    .into_iter()
+    .collect();
+    assert_eq!(
+        reached
+            .iter()
+            .map(|method| (*method).to_owned())
+            .collect::<std::collections::BTreeSet<_>>(),
+        declared,
+        "every DurableReads method needs runtime visitation; model calls must reach the nonempty recovered ledger"
+    );
+    eprintln!(
+        "DurableReads coverage: reached={} reserved=2 accepted_unsealed=1 recovered=2 terminal=1 cold_peer_calls=2",
+        reached.len()
+    );
     let sources = harness_sources();
     let mut missing = Vec::new();
     let mut stale_exclusions = Vec::new();

@@ -172,6 +172,11 @@ kills only mutants the simulator, conformance or regression suites also kill,
 is a deletion candidate; so is a test that changes in refactor commits and has
 never failed on a real bug.
 
+- Witness the state before judging the result; for example, submit 129 eligible rows to exercise a 128-row page boundary.
+- Derive accounting and boundary expectations independently from nonempty typed facts; for example, assert one unknown logical call from two lost attempts rather than comparing two uses of the usage helper.
+- Give every reclamation example a retained control and distinguish immediate logical expiry from later physical drain; for example, retain a pinned neighbor while an expired row reads Released before its bytes are collected.
+- Report the semantic work a service or coverage gate reached; for example, count an executed nonempty model-call read rather than source-text presence, a skipped service, missing credentials or an empty selection.
+
 ### Expect tests versus conformance assertions
 
 Use an inline expect test when the review artifact is a short, deterministic behavior transcript and a changed ordering or rendered state should be judged as one coherent diff. Keep conformance suites assertion-based: they prove backend-independent invariants across implementations, where pinning one example interleaving would narrow the contract instead of strengthening it. Never bless an expect diff until its durable-write lines still distinguish the defect the test is meant to catch.
