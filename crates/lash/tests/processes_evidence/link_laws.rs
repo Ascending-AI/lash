@@ -7,7 +7,9 @@ use std::collections::BTreeMap;
 use std::sync::Arc;
 
 use lash::plugins::{FormatVersion, PluginError};
-use lash::process::{ProcessConfigKey, ProcessEnv, ProcessEnvRefusal};
+use lash::process::{
+    EffectLink, LinkKind, ProcessConfigKey, ProcessEnv, ProcessEnvRefusal, ProcessSurface,
+};
 use lash::tools::ToolDefinitionBindingExt as _;
 
 /// Serves `search_a` at `search.run`.
@@ -484,9 +486,18 @@ async fn an_env_links_exactly_what_its_entry_performs() {
 fn dynamic_links_cannot_disguise_ordinary_effects() {
     let tool = search_a();
     let effect = lash_core::EffectName::new("search.run").unwrap();
-    let mut encoded = serde_json::to_value(env(SEARCH_A, &[tool.clone()])).unwrap();
-    encoded["effects"]["search.run"]["kind"] = serde_json::json!("dynamic");
-    let forged: ProcessEnv = serde_json::from_value(encoded).unwrap();
+    let forged = ProcessEnv::builder(lash::MaxToolCalls::new(4))
+        .component(SEARCH_A, &())
+        .link(
+            effect.clone(),
+            EffectLink {
+                provider: SEARCH_A.tool_provider(lash::tool_provider_key!("tools")),
+                surface: ProcessSurface::of(&tool),
+                kind: LinkKind::Dynamic(Default::default()),
+            },
+        )
+        .build()
+        .expect("a policy-bearing dynamic link with an ordinary tool's surface");
     let performed = BTreeMap::from([(
         effect,
         lash_protocol_types::tool_signature(
