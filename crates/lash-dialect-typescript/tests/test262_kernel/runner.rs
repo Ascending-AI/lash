@@ -109,13 +109,29 @@ fn registry() -> &'static Arc<FunctionRegistry> {
         lash_ext_date_ecma::register(&mut registry).expect("date extension registration");
         lash_ext_url_whatwg::register(&mut registry).expect("URL extension registration");
         let mut library = NamedLibrary::from_registry(&registry).expect("unique library names");
+        let mut helpers = Vec::new();
         for definition in define_helpers(&mut library).expect("dialect library dependencies") {
-            registry
-                .register(definition, None)
-                .expect("dialect helper registration");
+            helpers.push(
+                registry
+                    .register(definition, None)
+                    .expect("dialect helper registration"),
+            );
         }
+        lash_ext_ts_core::implement(&mut registry, helpers).expect("TypeScript operation natives");
         Arc::new(registry)
     })
+}
+
+/// Test262 executes the worker's operation implementations, including their
+/// interpreted fallbacks, rather than an interpreter-only library fixture.
+#[test]
+fn conformance_registry_installs_the_workers_operation_natives() {
+    for operation in lash_ext_ts_core::OPERATIONS {
+        assert!(
+            registry().native_named(operation).is_some(),
+            "the worker's {operation} native is missing from the conformance registry"
+        );
+    }
 }
 
 pub(crate) struct Execution {
