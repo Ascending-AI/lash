@@ -587,6 +587,32 @@ pub struct WorkerWork {
     pub serialized_body_bytes: u64,
     pub decoded_body_bytes: u64,
     pub vm_steps: u64,
+    /// Execution-root publications in this exchange.
+    pub root_publishes: u64,
+    // Fixed implementation work: calls, copied rows, completed-trace work,
+    // and scratch maxima. Never instructions or guest charge. The standard
+    // census supplies accounting/trace counts; custom censuses do not.
+    pub task_resolutions: u64,
+    pub frame_resolutions: u64,
+    pub register_slots_initialized: u64,
+    pub register_slots_cleared: u64,
+    pub tree_leaf_clones: u64,
+    pub tree_index_clones: u64,
+    pub tree_rows_cloned: u64,
+    pub accounting_certificate_reads: u64,
+    pub accounting_additions: u64,
+    pub accounting_changes: u64,
+    pub accounting_reservations: u64,
+    pub refinement_attempts: u64,
+    pub completed_refinements: u64,
+    pub completed_trace_work: u64,
+    /// Maximum over completed traces; absent when no trace completed.
+    pub trace_bitmap_peak_bytes: Option<u64>,
+    /// Maximum over completed traces; absent when no trace completed.
+    pub trace_work_list_peak_bytes: Option<u64>,
+    /// Maximum over completed traces; absent when no trace completed.
+    pub trace_budget_peak_bytes: Option<u64>,
+
     /// Pages the worker's heap read through its page port (cache misses).
     pub pages_loaded: u64,
     /// Pages the worker's heap sealed into the activation's staging.
@@ -603,6 +629,31 @@ impl WorkerWork {
         self.serialized_body_bytes += next.serialized_body_bytes;
         self.decoded_body_bytes += next.decoded_body_bytes;
         self.vm_steps += next.vm_steps;
+        self.root_publishes += next.root_publishes;
+        self.task_resolutions += next.task_resolutions;
+        self.frame_resolutions += next.frame_resolutions;
+        self.register_slots_initialized += next.register_slots_initialized;
+        self.register_slots_cleared += next.register_slots_cleared;
+        self.tree_leaf_clones += next.tree_leaf_clones;
+        self.tree_index_clones += next.tree_index_clones;
+        self.tree_rows_cloned += next.tree_rows_cloned;
+        self.accounting_certificate_reads += next.accounting_certificate_reads;
+        self.accounting_additions += next.accounting_additions;
+        self.accounting_changes += next.accounting_changes;
+        self.accounting_reservations += next.accounting_reservations;
+        self.refinement_attempts += next.refinement_attempts;
+        self.completed_refinements += next.completed_refinements;
+        self.completed_trace_work += next.completed_trace_work;
+        self.trace_bitmap_peak_bytes = self
+            .trace_bitmap_peak_bytes
+            .max(next.trace_bitmap_peak_bytes);
+        self.trace_work_list_peak_bytes = self
+            .trace_work_list_peak_bytes
+            .max(next.trace_work_list_peak_bytes);
+        self.trace_budget_peak_bytes = self
+            .trace_budget_peak_bytes
+            .max(next.trace_budget_peak_bytes);
+
         self.pages_loaded += next.pages_loaded;
         self.pages_sealed += next.pages_sealed;
         self.encoded_nodes += next.encoded_nodes;

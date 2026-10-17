@@ -1,5 +1,7 @@
 //! Persistent semantic heap pages and the admitted requests resumed workers receive.
 pub mod paged;
+#[cfg(any(test, feature = "perf-witness"))]
+pub mod perf_witness;
 use lash_kernel_doc::graph_tokens::{TokenCodec, TokenError, TokenReader, TokenWriter};
 use lash_kernel_doc::{Datum, EffectIdentity, EffectName};
 use schemars::JsonSchema;

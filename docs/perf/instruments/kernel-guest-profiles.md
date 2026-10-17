@@ -151,3 +151,81 @@ instruction column's off-over-main share, and it is within the wall-time
 noise of this host. Peak RSS was 54.0 to 55.5 MiB in every configuration.
 These are diagnostic measurements of a loaded shared host, not calibrated
 overheads.
+
+## Native maintenance per equal statement population (FIG-6622)
+
+```sh
+. ./env.sh
+(ulimit -v 8388608; /usr/bin/time -v python3 scripts/profile_diff.py \
+  --kernel-cost baseline --iterations 100 --repeats 3 \
+  --out .kiln/FIG-6622/kernel-cost)
+```
+
+This maintained command builds the optimized symbolized `kernel_perf` example
+through Kiln. `--no-build --build-report <report>` reuses a materialized Kiln
+report. The output directory must be fresh. A program name or one `.ts`/`.py`
+file selects exactly one workload. `statement-phase-cost.txt` is the text
+reader; the JSON of that name retains every producer identity and raw repeat.
+`kernel-work.json` retains the same experiment ID, workload/artifact/result and
+ordered per-task statement-path digests, charge, backend, worker, terminal,
+compiler, allocator and window. This route is the in-process kernel over the
+memory page fixture, with its scripted host; it does not claim worker-process
+or deployed-host reach. Each measured run must finish with the reference
+result and charge. The statement path is recorded in a separate reference
+pass, outside the instruction window, and must match the counted pass.
+
+For each repeat, `perf stat -e instructions:u` uses acknowledged FIFO enable
+and disable around the run-to-terminal loop. Preparation, starts, machine
+destruction, validation and receipt writing are outside that window. The loop
+and scripted host are inside. The zero-work control follows the same loop and
+acknowledgements without driving a machine. Raw counts are retained without
+subtracting this control. The on/off order alternates across repeats. Each
+process has load1 before/after, GNU time peak RSS, raw perf event runtime and
+running fraction. The ratio is paired on/off physical instructions, never a
+universal instructions-per-charge predicate. Shared-host wall time is unclaimed.
+
+Fixed thread-local counters compile out of ordinary builds, and are inactive
+until enabled in diagnostic builds. The separate `work` pass adds
+`phase_counts` to each `kernel-work.json` program. `phase_counts_total` in the
+on pass must conserve that one-run population across iterations; the other
+passes leave it absent. Units are explicit:
+
+- `vm_steps`: machine steps; `root_publishes`: attempted publications through
+  the machine/native seam.
+- `task_resolutions`, `frame_resolutions`: slow resolutions after the active
+  location fast return, answering kp2-frame / FIG-6588.
+- `register_slots_initialized`: actual Null writes from physical growth and
+  reference-bearing value cleanup;
+  `register_slots_cleared`: logical slots cleared at statement boundaries,
+  answering hm-regs / FIG-6614. Neither is an allocation count.
+- `heap.tree_leaf_clones`, `tree_index_clones`, `tree_rows_cloned`: actual
+  owned node/row copies, including COW, load-to-edit and construction copies;
+  they are not bytes or exclusive COW instructions. Staged metadata copies
+  contain no copied rows and are excluded.
+- `heap.accounting_*`: certificate reads, additions, changes and reservation
+  calls of the standard census. A custom census is outside this population.
+- `refinement_attempts`, `completed_refinements`: attempted and successfully
+  swept standard-census refinements. `completed_trace_work` sums TraceStats
+  work units from completed traces only, including their sweep. The three
+  `trace_*_peak_bytes` fields are absent without a completed trace, otherwise
+  maxima over completed traces, respectively
+  bitmap payload, work-list capacity, and conservative scratch budget; they
+  are neither allocation traffic nor process RSS. Zero completed refinements
+  means no contributing trace population, not a measured zero-cost trace.
+
+A final, separate CPU sampling pass uses `perf_capture.py` and retains raw
+folded stacks and `sampled-phase-top.json`. Its exclusive symbol-family
+classification gives publication priority over refinement, then accounting,
+copying, frame resolution and register work; unrecognized or inlined work
+stays `other_or_unresolved`. It covers the whole process envelope, including
+setup and reference passes. These are **CPU cycle samples, not exact phase
+instructions**, and cannot divide the instruction window into exact shares.
+The sample counts conserve the folded population, with omitted top-N rows
+counted explicitly. All instrumented processes run under an 8 GiB address
+space cap. No thresholds, budgets or automatic regression gate are added.
+
+The worker's existing `--count-heap-work` mode also transports root
+publications and all fixed phase counts in `WorkerWork`. Additive counters
+sum across exchanges; completed-trace scratch peaks take a maximum. This is
+an internal wire-shape change on the unsealed 1.0 baseline: matching parent
+and worker binaries must be rebuilt together.

@@ -74,6 +74,11 @@ def main() -> int:
     source = parser.add_mutually_exclusive_group(required=True)
     source.add_argument("--folded", nargs=2, type=Path, metavar=("BEFORE", "AFTER"))
     source.add_argument("--commits", nargs=2, metavar=("BEFORE", "AFTER"))
+    source.add_argument("--kernel-cost", metavar="PROGRAM", help="Paired kernel phase instruction receipt")
+    parser.add_argument("--iterations", type=int, default=100)
+    parser.add_argument("--repeats", type=int, default=3)
+    parser.add_argument("--build-report", type=Path)
+    parser.add_argument("--no-build", action="store_true")
     parser.add_argument("--out", type=Path, required=True)
     parser.add_argument("--scenario", default="standard")
     parser.add_argument("--runs", type=int, default=1)
@@ -82,11 +87,16 @@ def main() -> int:
     parser.add_argument("--svg", action="store_true")
     parser.add_argument("--top", type=int, default=30)
     args = parser.parse_args()
-    if min(args.runs, args.turns, args.top) < 1:
+    if min(args.runs, args.turns, args.top, args.iterations, args.repeats) < 1:
         parser.error("runs, turns and top must be positive")
     out = args.out.resolve()
     root = Path(__file__).resolve().parents[1]
     try:
+        if args.kernel_cost:
+            from profile_kernel_cost import measure
+            print(measure(root, out, args.kernel_cost, args.iterations, args.repeats,
+                          args.build_report, build=not args.no_build, top=args.top), end="")
+            return 0
         paths = args.folded or sample_commits(root, args.commits, out, args.scenario,
                                              args.runs, args.turns)
         print(differential(*paths, out, normalize=args.normalize, svg=args.svg, top=args.top), end="")

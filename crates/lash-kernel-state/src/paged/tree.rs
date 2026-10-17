@@ -212,11 +212,33 @@ struct Branch<T: Cell> {
     members_known: bool,
     link: Link<T>,
 }
-#[derive(Clone)]
 enum Node<T: Cell> {
     Leaf(Vec<(Key, T)>),
     Index(Vec<Branch<T>>),
     Staged(PageRef, u64, bool),
+}
+
+impl<T: Cell> Clone for Node<T> {
+    #[inline]
+    fn clone(&self) -> Self {
+        #[cfg(any(test, feature = "perf-witness"))]
+        crate::perf_witness::record(|work| match self {
+            Self::Leaf(rows) => {
+                work.tree_leaf_clones += 1;
+                work.tree_rows_cloned += rows.len() as u64;
+            }
+            Self::Index(rows) => {
+                work.tree_index_clones += 1;
+                work.tree_rows_cloned += rows.len() as u64;
+            }
+            Self::Staged(..) => {}
+        });
+        match self {
+            Self::Leaf(rows) => Self::Leaf(rows.clone()),
+            Self::Index(rows) => Self::Index(rows.clone()),
+            Self::Staged(page, bytes, leaf) => Self::Staged(*page, *bytes, *leaf),
+        }
+    }
 }
 
 /// Ordered keys (directory/lookup) or ordinal keys (sequences). Sequence

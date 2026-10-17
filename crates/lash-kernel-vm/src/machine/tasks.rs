@@ -191,6 +191,8 @@ impl Tasks {
         }
         // Another task starts a new segment, even when it shares a bucket
         // with the protected task. Resolve both coordinates again on return.
+        #[cfg(any(test, feature = "perf-witness"))]
+        crate::perf_witness::record(|work| work.task_resolutions += 1);
         self.invalidate_active();
         #[cfg(test)]
         {

@@ -22,3 +22,4 @@ crates/lash-vm-library/src/lib.rs::standard::STANDARD  # the shipped function re
 crates/lash-vm-worker/src/heap_profile.rs::<module>::WINDOW  # opt-in dhat profiler window of the worker process; holds no guest value
 crates/lash-vm-worker/src/main.rs::<module>::ALLOCATOR  # dhat-heap feature global allocator; holds no guest value
 crates/lash-kernel-vm/src/perf_witness.rs::<module>::WORK  # opt-in diagnostic work counters, no guest values; cfg(any(test, feature = "perf-witness")) excludes default/release builds
+crates/lash-kernel-state/src/perf_witness.rs::<module>::WORK  # opt-in fixed integer work counts and completed-trace scratch maxima, no guest values or identities; cfg(any(test, feature = "perf-witness")) excludes ordinary builds

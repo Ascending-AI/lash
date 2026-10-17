@@ -40,6 +40,10 @@ impl Registers {
         {
             self.initializations += extent - self.values.len();
         }
+        #[cfg(any(test, feature = "perf-witness"))]
+        crate::perf_witness::record(|work| {
+            work.register_slots_initialized += (extent - self.values.len()) as u64
+        });
         self.values.resize(extent, Value::Null);
         self.written.resize(extent, false);
     }
@@ -90,6 +94,8 @@ impl Registers {
     }
 
     pub(super) fn clear(&mut self) {
+        #[cfg(any(test, feature = "perf-witness"))]
+        crate::perf_witness::record(|work| work.register_slots_cleared += self.extent as u64);
         // Reference-bearing entries die at the original statement boundary,
         // even when a later statement never overwrites this physical slot.
         if self.owns_values {
@@ -97,6 +103,10 @@ impl Registers {
             {
                 self.initializations += self.extent;
             }
+            #[cfg(any(test, feature = "perf-witness"))]
+            crate::perf_witness::record(|work| {
+                work.register_slots_initialized += self.extent as u64
+            });
             self.values[..self.extent].fill(Value::Null);
             self.owns_values = false;
         }

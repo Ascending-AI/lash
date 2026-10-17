@@ -102,6 +102,9 @@ mod pages;
 #[path = "../shared/gate_six.rs"]
 mod gate_six;
 
+#[path = "kernel_perf/phase.rs"]
+mod kernel_phase;
+
 #[path = "../shared/gate_six_registry.rs"]
 mod gate_six_registry;
 
@@ -312,6 +315,7 @@ enum Mode {
     Time,
     /// Counts each program's work into `kernel-work.json`.
     Work(PathBuf),
+    Phase(PathBuf),
     /// Samples each program's guest context into folded stacks.
     Guest(PathBuf),
 }
@@ -364,12 +368,15 @@ fn main() -> Result<(), String> {
         return Ok(());
     }
     let mode = match args.peek().map(String::as_str) {
-        Some(mode @ ("work" | "guest")) => {
+        Some(mode @ ("work" | "guest" | "phase")) => {
             let work = mode == "work";
+            let phase = mode == "phase";
             args.next();
             let dir = PathBuf::from(args.next().ok_or("an output directory")?);
             std::fs::create_dir_all(&dir).map_err(|error| format!("{dir:?}: {error}"))?;
-            if work {
+            if phase {
+                Mode::Phase(dir)
+            } else if work {
                 Mode::Work(dir)
             } else {
                 Mode::Guest(dir)
@@ -382,7 +389,7 @@ fn main() -> Result<(), String> {
             .next()
             .map_or(Ok(2000), |count| count.parse())
             .map_err(|error| format!("invalid iteration count: {error}"))?,
-        Mode::Work(_) | Mode::Guest(_) => 1,
+        Mode::Work(_) | Mode::Guest(_) | Mode::Phase(_) => 1,
     };
     if cap == 0 {
         return Err("iteration count must be positive".to_string());
@@ -504,7 +511,11 @@ fn main() -> Result<(), String> {
         match &mode {
             Mode::Time => {}
             Mode::Work(_) => {
-                work.push(count(name, &program));
+                work.push(count(name, &program, source, &artifact)?);
+                continue;
+            }
+            Mode::Phase(_) => {
+                work.push(kernel_phase::measure(name, &program, source, &artifact)?);
                 continue;
             }
             Mode::Guest(_) => {
@@ -640,6 +651,15 @@ fn main() -> Result<(), String> {
             std::fs::write(&path, text).map_err(|error| format!("{path:?}: {error}"))?;
             println!("{}", path.display());
         }
+        Mode::Phase(dir) => {
+            let path = dir.join("phase-run.json");
+            std::fs::write(
+                &path,
+                serde_json::to_string_pretty(&work).map_err(|error| error.to_string())?,
+            )
+            .map_err(|error| error.to_string())?;
+            println!("{}", path.display());
+        }
         Mode::Guest(dir) => guest.write(dir)?,
     }
     Ok(())
@@ -647,7 +667,8 @@ fn main() -> Result<(), String> {
 
 /// Runs one program once with its work counted, and checks the counts
 /// against the run and against a plain run.
-fn count(name: &str, program: &Program) -> Json {
+fn count(name: &str, program: &Program, source: &str, artifact: &str) -> Result<Json, String> {
+    lash_kernel_vm::perf_witness::disable_work();
     let plain = to_end(&mut start(program), name);
     let mut machine = start(program);
     machine.count_work();
@@ -670,7 +691,29 @@ fn count(name: &str, program: &Program) -> Json {
         work.unattributed_charge, 0,
         "{name}: charge with no function"
     );
-    work_json(name, &work, &machine.guest_symbols())
+    // Fixed counters get their own pass, without work attribution or path recording.
+    let mut fixed = start(program);
+    lash_kernel_vm::perf_witness::enable_work();
+    assert_eq!(
+        to_end(&mut fixed, name),
+        plain,
+        "{name}: phase counts changed the run"
+    );
+    let counts = lash_kernel_vm::perf_witness::take_work().ok_or("missing enabled phase counts")?;
+    lash_kernel_vm::perf_witness::disable_work();
+    let mut traced = start(program);
+    traced.trace_path();
+    assert_eq!(
+        to_end(&mut traced, name),
+        plain,
+        "{name}: path recording changed the run"
+    );
+    let path = traced.take_path().map_err(|error| error.to_string())?;
+    let mut report = work_json(name, &work, &machine.guest_symbols());
+    report["identity"] = kernel_phase::identity(name, source, artifact, &plain.1, plain.0, &path);
+    report["observer"] = json!("separate work, statement-path, and fixed-phase-counter passes");
+    report["phase_counts"] = kernel_phase::phase_counts(counts);
+    Ok(report)
 }
 
 fn work_json(name: &str, work: &WorkReport, symbols: &GuestSymbols) -> Json {

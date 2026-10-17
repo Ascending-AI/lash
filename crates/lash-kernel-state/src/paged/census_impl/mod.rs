@@ -80,10 +80,14 @@ impl AllocationCensus for Census {
     }
 
     fn certificate(&self) -> AccountingCertificate {
+        #[cfg(any(test, feature = "perf-witness"))]
+        crate::perf_witness::record(|work| work.accounting_certificate_reads += 1);
         self.certificate
     }
 
     fn added(&mut self, cost: LogicalBytes, entities: u64) -> Result<(), CensusFault> {
+        #[cfg(any(test, feature = "perf-witness"))]
+        crate::perf_witness::record(|work| work.accounting_additions += 1);
         let minimum = entities
             .checked_mul(MIN_ENTITY_COST.0)
             .ok_or_else(|| malformed("entity minimum overflow"))?;
@@ -107,6 +111,8 @@ impl AllocationCensus for Census {
     }
 
     fn changed(&mut self, before: LogicalBytes, after: LogicalBytes) -> Result<(), CensusFault> {
+        #[cfg(any(test, feature = "perf-witness"))]
+        crate::perf_witness::record(|work| work.accounting_changes += 1);
         let mut next = self.certificate;
         next.upper = LogicalBytes(
             next.upper
@@ -121,6 +127,8 @@ impl AllocationCensus for Census {
     }
 
     fn reserve(&mut self, bytes: LogicalBytes) -> ReservationDecision {
+        #[cfg(any(test, feature = "perf-witness"))]
+        crate::perf_witness::record(|work| work.accounting_reservations += 1);
         let total = self.certificate.upper.0.checked_add(bytes.0);
         if total.is_some_and(|total| total <= self.bound.0) {
             ReservationDecision::Granted(LogicalPermit { bytes })
@@ -138,6 +146,8 @@ impl AllocationCensus for Census {
         transient: &TransientRoots<'_>,
         pending: PendingReservation,
     ) -> Result<RefinedDecision, CensusFault> {
+        #[cfg(any(test, feature = "perf-witness"))]
+        crate::perf_witness::record(|work| work.refinement_attempts += 1);
         // All fallible marking finishes before any sweep. A failure never
         // installs a certificate or returns a partial guest decision.
         let refinements = self
@@ -154,6 +164,20 @@ impl AllocationCensus for Census {
         };
         Self::validate(next)?;
         self.last_trace = proof.sweep(graph)?;
+        #[cfg(any(test, feature = "perf-witness"))]
+        crate::perf_witness::record(|work| {
+            work.completed_refinements += 1;
+            work.completed_trace_work += self.last_trace.work;
+            work.trace_bitmap_peak_bytes = work
+                .trace_bitmap_peak_bytes
+                .max(self.last_trace.bitmap_peak as u64);
+            work.trace_work_list_peak_bytes = work
+                .trace_work_list_peak_bytes
+                .max(self.last_trace.work_list_peak as u64);
+            work.trace_budget_peak_bytes = work
+                .trace_budget_peak_bytes
+                .max(self.last_trace.budget_peak as u64);
+        });
         self.certificate = next;
         Ok(match next.upper.0.checked_add(pending.bytes.0) {
             Some(total) if total <= self.bound.0 => RefinedDecision::Granted(LogicalPermit {

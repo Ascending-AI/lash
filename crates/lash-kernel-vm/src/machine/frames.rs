@@ -607,6 +607,8 @@ impl Frames {
         if let Some(at) = self.active {
             return Ok(Some(self.cache[at].1.as_mut()));
         }
+        #[cfg(any(test, feature = "perf-witness"))]
+        crate::perf_witness::record(|work| work.frame_resolutions += 1);
         #[cfg(test)]
         {
             self.cache_probes += 1;

@@ -162,3 +162,74 @@ def run_profiled(cmd: list[str], *, receipt: Path, cpu: bool = False,
     finally:
         status_path.write_text(json.dumps(status, indent=2) + "\n")
         print(f"Profile capture receipt: {status_path}", file=sys.stderr)
+
+
+def instruction_window(cmd: list[str], directory: Path, *, env: dict, cwd: Path) -> dict:
+    """Capture an acknowledged instructions:u window, with raw perf/time evidence.
+
+    The producer must send enable/disable and retain acknowledgements in its
+    own receipt. GNU time's RSS covers the whole producer process, not its window.
+    """
+    import os
+    import resource
+    import signal
+
+    directory.mkdir(parents=True, exist_ok=False)
+    control, ack = directory / "control.fifo", directory / "ack.fifo"
+    os.mkfifo(control)
+    os.mkfifo(ack)
+    environment = dict(env, LASH_PERF_CONTROL=str(control), LASH_PERF_ACK=str(ack))
+    status = {"status": "failed", "event": "instructions:u", "command": cmd,
+              "load1_before": os.getloadavg()[0]}
+    status_path = directory / "instructions.json"
+    status_path.write_text(json.dumps(status, indent=2) + "\n")
+
+    def cap():
+        ceiling = 8 * 1024**3
+        _, hard = resource.getrlimit(resource.RLIMIT_AS)
+        if hard != resource.RLIM_INFINITY:
+            ceiling = min(ceiling, hard)
+        resource.setrlimit(resource.RLIMIT_AS, (ceiling, ceiling))
+
+    try:
+        command = [tool("perf"), "stat", "-e", "instructions:u", "--delay=-1",
+                   f"--control=fifo:{control},{ack}", "-x", ";", "-o",
+                   str(directory / "perf-stat.txt"), "--", "/usr/bin/time", "-v", "-o",
+                   str(directory / "resources.txt"), *cmd]
+        proc = subprocess.Popen(command, cwd=cwd, env=environment, text=True,
+                                stdout=subprocess.PIPE, stderr=subprocess.PIPE,
+                                start_new_session=True, preexec_fn=cap)
+        try:
+            stdout, stderr = proc.communicate(timeout=300)
+        except subprocess.TimeoutExpired:
+            os.killpg(proc.pid, signal.SIGKILL)
+            proc.communicate()
+            raise RuntimeError("instruction capture exceeded 300 seconds")
+        (directory / "stdout.txt").write_text(stdout)
+        (directory / "stderr.txt").write_text(stderr)
+        if proc.returncode:
+            raise RuntimeError(f"perf/workload exited {proc.returncode}: {stderr.strip()}")
+        raw = (directory / "perf-stat.txt").read_text()
+        rows = [line.split(";") for line in raw.splitlines()
+                if ";instructions:u;" in line]
+        if len(rows) != 1:
+            raise ValueError("expected exactly one instructions:u event")
+        row = rows[0]
+        instructions, runtime, fraction = int(row[0]), float(row[3]), float(row[4]) / 100
+        if instructions <= 0 or runtime <= 0 or not 0 < fraction <= 1:
+            raise ValueError("unsupported or empty instruction population")
+        resources = (directory / "resources.txt").read_text()
+        rss = re.search(r"Maximum resident set size \(kbytes\):\s*(\d+)", resources)
+        if not rss:
+            raise ValueError("missing GNU time peak RSS")
+        status.update(status="ok", instructions=instructions, event_runtime_ns=runtime,
+                      running_fraction=fraction, peak_rss_kib=int(rss[1]))
+        return status
+    except (OSError, ValueError, RuntimeError) as error:
+        status["reason"] = str(error)
+        raise
+    finally:
+        status["load1_after"] = os.getloadavg()[0]
+        status_path.write_text(json.dumps(status, indent=2) + "\n")
+        control.unlink(missing_ok=True)
+        ack.unlink(missing_ok=True)
