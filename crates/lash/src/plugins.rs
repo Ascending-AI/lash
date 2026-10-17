@@ -59,8 +59,8 @@ pub use lash_protocol_types::{
     ToolCatalogBuildError, ToolContractResolver,
 };
 pub use lash_sansio::{
-    CheckpointResumeAction, DriverAction, DriverContextView, EffectId, ExpandedRow,
-    ExpandedWrapper, ModelToolCalls, PendingWork, ProjectorContext, ResponseToolCalls,
+    CheckpointResumeAction, DriverAction, DriverContextView, EffectId as DriverEffectId,
+    ExpandedRow, ExpandedWrapper, ModelToolCalls, PendingWork, ProjectorContext, ResponseToolCalls,
     ToolExpansionPlan, ToolWave, TurnMachineConfig, TurnProtocol, UndecodableDriverState,
     UnitTurnProtocol, WriterFormats,
 };
