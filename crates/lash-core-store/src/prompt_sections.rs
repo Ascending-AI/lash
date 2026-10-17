@@ -858,93 +858,230 @@ fn fragment_tree(
     keep_fragment(&RequestFragment::Branch { left, right }, texts)
 }
 
+/// The active canonical tree and its distinct bodies. Reference counts keep
+/// duplicate leaves/subtrees alive when an append replaces the right path.
+#[derive(Default)]
+struct PreparedPrefix {
+    leaves: Vec<PromptTextRef>,
+    tree: Option<PreparedTree>,
+    texts: std::collections::BTreeMap<BlobRef, (EncodedRequestFragment, usize)>,
+}
+
+struct PreparedTree {
+    reference: PromptTextRef,
+    leaves: usize,
+    children: Option<Box<[Self; 2]>>,
+}
+
+impl PreparedTree {
+    /// A cold prefix is built once in postorder, without creating intermediate
+    /// append paths that would immediately be replaced.
+    fn build(leaves: &[&Leaf], prefix: &mut PreparedPrefix) -> Self {
+        if leaves.len() == 1 {
+            let (reference, encoded) = leaves[0];
+            prefix.keep(reference, encoded.clone());
+            prefix.leaves.push(reference.clone());
+            return Self {
+                reference: reference.clone(),
+                leaves: 1,
+                children: None,
+            };
+        }
+        let split = 1usize << (leaves.len() - 1).ilog2();
+        let left = Self::build(&leaves[..split], prefix);
+        let right = Self::build(&leaves[split..], prefix);
+        Self::branch(left, right, prefix)
+    }
+
+    fn branch(left: Self, right: Self, prefix: &mut PreparedPrefix) -> Self {
+        let (reference, encoded) = encode_fragment(&RequestFragment::Branch {
+            left: left.reference.clone(),
+            right: right.reference.clone(),
+        });
+        prefix.keep(&reference, encoded);
+        Self {
+            reference,
+            leaves: left.leaves + right.leaves,
+            children: Some(Box::new([left, right])),
+        }
+    }
+
+    fn append(self, leaf: Self, prefix: &mut PreparedPrefix) -> Self {
+        if self.leaves.is_power_of_two() {
+            return Self::branch(self, leaf, prefix);
+        }
+        prefix.remove(&self.reference.blob);
+        let [left, right] = *self.children.expect("an incomplete tree is a branch");
+        Self::branch(left, right.append(leaf, prefix), prefix)
+    }
+}
+
+impl PreparedPrefix {
+    fn keep(&mut self, reference: &PromptTextRef, encoded: EncodedRequestFragment) {
+        self.texts
+            .entry(reference.blob.clone())
+            .and_modify(|(_, uses)| *uses += 1)
+            .or_insert((encoded, 1));
+    }
+
+    fn remove(&mut self, hash: &BlobRef) {
+        if let Some((_, uses)) = self.texts.get_mut(hash) {
+            *uses -= 1;
+            if *uses == 0 {
+                self.texts.remove(hash);
+            }
+        }
+    }
+
+    /// A changed sequence (including a shortened compaction) invalidates the
+    /// carried tree. Only a verified append may retain its existing branches.
+    fn prepare<'a>(&mut self, leaves: impl Iterator<Item = &'a Leaf> + Clone) {
+        let shared = leaves
+            .clone()
+            .zip(&self.leaves)
+            .take_while(|((reference, _), held)| reference == *held)
+            .count();
+        if shared != self.leaves.len() {
+            *self = Self::default();
+        }
+        if self.leaves.is_empty() {
+            let leaves: Vec<_> = leaves.collect();
+            self.tree = Some(PreparedTree::build(&leaves, self));
+            return;
+        }
+        for (reference, encoded) in leaves.skip(self.leaves.len()) {
+            self.keep(reference, encoded.clone());
+            self.leaves.push(reference.clone());
+            let leaf = PreparedTree {
+                reference: reference.clone(),
+                leaves: 1,
+                children: None,
+            };
+            self.tree = Some(match self.tree.take() {
+                None => leaf,
+                Some(tree) => tree.append(leaf, self),
+            });
+        }
+    }
+}
+
+/// Own only encodings, never the segment that owns this memo: no cycle, and
+/// no process-global cache. A rewritten first item starts with an empty memo.
+#[derive(Default)]
+struct CarriedPrefix(std::sync::Mutex<PreparedPrefix>);
+
+enum SegmentLeaves {
+    Text(Vec<Leaf>),
+    Item(std::sync::Arc<ItemLeaves>),
+    Separated(std::sync::Arc<SeparatedItemLeaves>),
+}
+
+impl SegmentLeaves {
+    fn leaves(&self) -> &[Leaf] {
+        match self {
+            Self::Text(leaves) => leaves,
+            Self::Item(leaves) => &leaves.0,
+            Self::Separated(leaves) => &leaves.0,
+        }
+    }
+}
+
 impl ChunkedRequestTemplate {
-    /// One leaf per history item (with the separator before it), each
-    /// encoded once and kept with its item, so completed history is stable
-    /// and a new call encodes only its new items. Text segments split on
-    /// groups of eight messages once a leaf reaches 8 KiB; long rendered
-    /// strings also split at groups of eight escaped line boundaries. The
-    /// request envelope stays together instead of indexing every JSON
-    /// field. The reusable prefix ends with the last history item.
+    /// Prepare the history prefix incrementally beside its first shared item.
+    /// A call supplies the complete distinct fragment set even on a cache hit:
+    /// reuse never assumes that a different call/session installed its bodies.
+    /// The result is sorted by address, with each body listed once.
     pub fn chunk(
         template: &lash_protocol_types::llm::types::RecordedRequestTemplate,
     ) -> (Self, Vec<(BlobRef, EncodedRequestFragment)>) {
-        let mut leaves: Vec<Leaf> = Vec::new();
+        use lash_protocol_types::sync::MutexExt;
+        let mut groups = Vec::with_capacity(template.segments().len());
         let mut envelope = TextChunker::new(true);
         let mut items_end = None;
+        let mut text_prefix_end = None;
         let mut previous_item = false;
+        let mut count = 0;
+        let first_item = template.segments().iter().find(|segment| segment.is_item());
         for segment in template.segments() {
-            if segment.is_item() {
-                let kept = if previous_item {
-                    segment
-                        .derived(|item| SeparatedItemLeaves(item_leaves(item, true)))
-                        .0
-                        .clone()
+            let group = if segment.is_item() {
+                let group = if previous_item {
+                    SegmentLeaves::Separated(
+                        segment.derived(|item| SeparatedItemLeaves(item_leaves(item, true))),
+                    )
                 } else {
-                    segment
-                        .derived(|item| ItemLeaves(item_leaves(item, false)))
-                        .0
-                        .clone()
+                    SegmentLeaves::Item(
+                        segment.derived(|item| ItemLeaves(item_leaves(item, false))),
+                    )
                 };
-                leaves.extend(kept);
-                items_end = Some(leaves.len());
+                items_end = Some(count + group.leaves().len());
                 previous_item = true;
-                continue;
-            }
-            previous_item = false;
-            for part in segment.parts() {
-                match part {
-                    lash_protocol_types::llm::types::SegmentPart::Literal(text) => {
-                        envelope.literal(text, &mut leaves);
-                    }
-                    lash_protocol_types::llm::types::SegmentPart::Slot(slot) => {
-                        leaves.push(encode_fragment(&RequestFragment::Attachment {
-                            slot: slot.as_ref(),
-                        }));
+                group
+            } else {
+                previous_item = false;
+                let mut leaves = Vec::new();
+                envelope.prefix_end = None;
+                for part in segment.parts() {
+                    match part {
+                        lash_protocol_types::llm::types::SegmentPart::Literal(text) => {
+                            envelope.literal(text, &mut leaves);
+                        }
+                        lash_protocol_types::llm::types::SegmentPart::Slot(slot) => {
+                            leaves.push(encode_fragment(&RequestFragment::Attachment {
+                                slot: slot.as_ref(),
+                            }));
+                        }
                     }
                 }
+                if let Some(end) = envelope.prefix_end {
+                    text_prefix_end = Some(count + end);
+                }
+                SegmentLeaves::Text(leaves)
+            };
+            count += group.leaves().len();
+            groups.push(group);
+        }
+        let prefix_end = items_end
+            .or(text_prefix_end)
+            .filter(|end| *end > 0 && *end < count);
+        let carried = first_item.map_or_else(
+            || std::sync::Arc::new(CarriedPrefix::default()),
+            |item| item.derived(|_| CarriedPrefix::default()),
+        );
+        let mut prepared = carried.0.lock_recover();
+        let leaves = groups.iter().flat_map(|group| group.leaves());
+        prepared.prepare(leaves.clone().take(prefix_end.unwrap_or(count)));
+        let tree = prepared.tree.as_ref().expect("a template has fragments");
+        let prefix = prefix_end.map(|_| tree.reference.clone());
+        let mut inline = Vec::new();
+        let root = if let Some(end) = prefix_end {
+            let mut fragments = Vec::new();
+            for (reference, encoded) in leaves.skip(end) {
+                fragments.push(reference.clone());
+                inline.push((reference.blob.clone(), encoded.clone()));
             }
-        }
-        let prefix_end = items_end.or(envelope.prefix_end);
-        let mut fragments = Vec::with_capacity(leaves.len());
-        let mut texts = Vec::with_capacity(leaves.len() * 2);
-        for (reference, encoded) in leaves {
-            texts.push((reference.blob.clone(), encoded));
-            fragments.push(reference);
-        }
-        let prefix_start = texts.len();
-        let prefix = prefix_end
-            .filter(|end| *end > 0 && *end < fragments.len())
-            .map(|end| fragment_tree(&fragments[..end], &mut texts));
-        let prefix_hashes: std::collections::BTreeSet<_> = prefix_end
-            .filter(|_| prefix.is_some())
-            .into_iter()
-            .flat_map(|end| {
-                fragments[..end]
-                    .iter()
-                    .map(|reference| reference.blob.clone())
-            })
-            .chain(texts[prefix_start..].iter().map(|(hash, _)| hash.clone()))
-            .collect();
-        let root = if let (Some(prefix), Some(end)) = (&prefix, prefix_end) {
-            let right = fragment_tree(&fragments[end..], &mut texts);
+            let right = fragment_tree(&fragments, &mut inline);
             keep_fragment(
                 &RequestFragment::Branch {
-                    left: prefix.clone(),
+                    left: tree.reference.clone(),
                     right,
                 },
-                &mut texts,
+                &mut inline,
             )
         } else {
-            fragment_tree(&fragments, &mut texts)
+            tree.reference.clone()
         };
-        let (texts, inline) = if prefix.is_some() {
-            texts
-                .into_iter()
-                .partition(|(hash, _)| prefix_hashes.contains(hash))
-        } else {
-            (texts, Vec::new())
-        };
+        // Equal suffix fragments belong to the prefix, exactly as in a full
+        // rebuild's partition. Preserve the remaining inline nodes' wire order.
+        let inline = inline
+            .into_iter()
+            .filter(|(hash, _)| !prepared.texts.contains_key(hash))
+            .map(|(hash, fragment)| (hash, fragment.text.to_string()))
+            .collect();
+        let texts = prepared
+            .texts
+            .iter()
+            .map(|(hash, (text, _))| (hash.clone(), text.clone()))
+            .collect();
         (
             Self {
                 fetch_horizon: template.fetch_horizon,
@@ -954,10 +1091,7 @@ impl ChunkedRequestTemplate {
                 wire_features: template.wire_features.clone(),
                 root,
                 prefix,
-                inline: inline
-                    .into_iter()
-                    .map(|(hash, fragment)| (hash, fragment.text.to_string()))
-                    .collect(),
+                inline,
             },
             texts,
         )

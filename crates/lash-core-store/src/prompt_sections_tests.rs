@@ -188,3 +188,199 @@ fn growing_requests_submit_new_fragments_and_logarithmic_index_paths() {
         }
     }
 }
+
+/// PREFIX-CARRY: carrying prepared metadata is identical to rebuilding the
+/// exact fragment forest, even when compaction keeps the cache's first item.
+#[test]
+fn carried_prefix_matches_rebuild_across_appends_compaction_and_cache_break() {
+    use lash_protocol_types::llm::types::{
+        ProviderRouteIdentity, RecordedRequestTemplate, RequestSegment,
+    };
+    let route = ProviderRouteIdentity {
+        provider: "fixture".into(),
+        endpoint: "https://fixture.test".into(),
+        model: "model".into(),
+    };
+    let item =
+        |text: &str| RequestSegment::item_json(&serde_json::json!({"content": text})).unwrap();
+    let slot = lash_protocol_types::llm::types::AttachmentSlot {
+        reference: lash_protocol_types::AttachmentRef {
+            id: lash_protocol_types::AttachmentId::parse("ab".repeat(32)).unwrap(),
+            media_type: lash_protocol_types::MediaType::parse("image/png").unwrap(),
+            byte_len: 4,
+            type_metadata: None,
+            label: None,
+        },
+        position: lash_protocol_types::llm::attachment_delivery::AttachmentPosition::Message,
+        accepts: lash_protocol_types::llm::attachment_delivery::ProviderAccepts {
+            bytes: true,
+            url: true,
+            provider_file: None,
+        },
+        codec: lash_protocol_types::llm::types::SlotCodec {
+            name: "fixture".into(),
+            revision: 1,
+        },
+    };
+    let attachment = RequestSegment::from_parts(
+        lash_protocol_types::llm::types::SegmentKind::Item,
+        vec![lash_protocol_types::llm::types::SegmentPart::Slot(
+            Box::new(slot.clone()),
+        )],
+    )
+    .unwrap();
+    let mut items = vec![item("retained first item"), attachment];
+    for step in 0..24 {
+        if step == 10 {
+            // Keep the memo owner, but remove the middle of its old tree.
+            items.drain(1..8);
+        }
+        if step == 16 {
+            // A provider's cache breakpoint can rewrite an interior item.
+            items[1] = item("same history, changed provider cache breakpoint");
+        }
+        items.push(if step % 3 == 0 {
+            item(&"é\n\"\\".repeat(8192))
+        } else {
+            item("duplicate leaf")
+        });
+        let mut builder = RecordedRequestTemplate::builder(route.clone(), true, None);
+        builder.literal(if step >= 20 {
+            "{\"cache\":false,\"messages\":["
+        } else {
+            "{\"messages\":["
+        });
+        for item in &items {
+            builder.segment(item);
+        }
+        // This slot is also a prefix leaf: the full rebuild keeps its body
+        // with the prefix and omits that duplicate from the inline envelope.
+        builder
+            .literal("],\"echo\":")
+            .attachment(slot.clone())
+            .literal(",\"stream\":true}");
+        let template = builder.finish().unwrap();
+        let (carried, texts) = ChunkedRequestTemplate::chunk(&template);
+        let (rebuilt, rebuilt_texts) = rebuild_fragments(&template);
+        assert_eq!(
+            serde_json::to_vec(&carried).unwrap(),
+            serde_json::to_vec(&rebuilt).unwrap(),
+            "fragment and tree identities at step {step}"
+        );
+        let bodies = |texts: Vec<(BlobRef, EncodedRequestFragment)>| {
+            texts
+                .into_iter()
+                .map(|(hash, body)| (hash, (body.text, body.children)))
+                .collect::<std::collections::BTreeMap<_, _>>()
+        };
+        let texts = bodies(texts);
+        assert_eq!(texts, bodies(rebuilt_texts), "active forest at step {step}");
+        assert_eq!(
+            carried
+                .assemble(|hash| texts.get(hash).map(|(text, _)| text.as_ref()))
+                .unwrap(),
+            template
+        );
+    }
+}
+
+// Independent full rebuild of the canonical fragment forest.
+fn rebuild_fragments(
+    template: &lash_protocol_types::llm::types::RecordedRequestTemplate,
+) -> (
+    ChunkedRequestTemplate,
+    Vec<(BlobRef, EncodedRequestFragment)>,
+) {
+    let mut leaves: Vec<Leaf> = Vec::new();
+    let mut envelope = TextChunker::new(true);
+    let mut items_end = None;
+    let mut previous_item = false;
+    for segment in template.segments() {
+        if segment.is_item() {
+            let kept = if previous_item {
+                segment
+                    .derived(|item| SeparatedItemLeaves(item_leaves(item, true)))
+                    .0
+                    .clone()
+            } else {
+                segment
+                    .derived(|item| ItemLeaves(item_leaves(item, false)))
+                    .0
+                    .clone()
+            };
+            leaves.extend(kept);
+            items_end = Some(leaves.len());
+            previous_item = true;
+            continue;
+        }
+        previous_item = false;
+        for part in segment.parts() {
+            match part {
+                lash_protocol_types::llm::types::SegmentPart::Literal(text) => {
+                    envelope.literal(text, &mut leaves);
+                }
+                lash_protocol_types::llm::types::SegmentPart::Slot(slot) => {
+                    leaves.push(encode_fragment(&RequestFragment::Attachment {
+                        slot: slot.as_ref(),
+                    }));
+                }
+            }
+        }
+    }
+    let prefix_end = items_end.or(envelope.prefix_end);
+    let mut fragments = Vec::with_capacity(leaves.len());
+    let mut texts = Vec::with_capacity(leaves.len() * 2);
+    for (reference, encoded) in leaves {
+        texts.push((reference.blob.clone(), encoded));
+        fragments.push(reference);
+    }
+    let prefix_start = texts.len();
+    let prefix = prefix_end
+        .filter(|end| *end > 0 && *end < fragments.len())
+        .map(|end| fragment_tree(&fragments[..end], &mut texts));
+    let prefix_hashes: std::collections::BTreeSet<_> = prefix_end
+        .filter(|_| prefix.is_some())
+        .into_iter()
+        .flat_map(|end| {
+            fragments[..end]
+                .iter()
+                .map(|reference| reference.blob.clone())
+        })
+        .chain(texts[prefix_start..].iter().map(|(hash, _)| hash.clone()))
+        .collect();
+    let root = if let (Some(prefix), Some(end)) = (&prefix, prefix_end) {
+        let right = fragment_tree(&fragments[end..], &mut texts);
+        keep_fragment(
+            &RequestFragment::Branch {
+                left: prefix.clone(),
+                right,
+            },
+            &mut texts,
+        )
+    } else {
+        fragment_tree(&fragments, &mut texts)
+    };
+    let (texts, inline) = if prefix.is_some() {
+        texts
+            .into_iter()
+            .partition(|(hash, _)| prefix_hashes.contains(hash))
+    } else {
+        (texts, Vec::new())
+    };
+    (
+        ChunkedRequestTemplate {
+            fetch_horizon: template.fetch_horizon,
+            route: template.route.clone(),
+            transport_stream: template.transport_stream(),
+            generation: template.generation,
+            wire_features: template.wire_features.clone(),
+            root,
+            prefix,
+            inline: inline
+                .into_iter()
+                .map(|(hash, fragment)| (hash, fragment.text.to_string()))
+                .collect(),
+        },
+        texts,
+    )
+}

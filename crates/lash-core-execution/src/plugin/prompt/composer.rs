@@ -241,7 +241,6 @@ pub fn admission_record(
         },
         &serde_json::to_string(response.contract.as_ref())?,
     );
-    let request_texts: BTreeMap<_, _> = request_texts.into_iter().collect();
     let prefix = matches!(call.call, lash_durable::domain::ModelCallId::Turn { .. })
         .then(|| {
             recorded_body
@@ -263,8 +262,9 @@ pub fn admission_record(
             .map(|(hash, text)| PromptText {
                 hash: hash.as_str().to_owned(),
                 children: request_texts
-                    .get(hash)
-                    .map(|fragment| fragment.children.clone())
+                    .binary_search_by(|(candidate, _)| candidate.cmp(hash))
+                    .ok()
+                    .map(|index| request_texts[index].1.children.clone())
                     .unwrap_or_default(),
                 text: text.as_str().into(),
             })
