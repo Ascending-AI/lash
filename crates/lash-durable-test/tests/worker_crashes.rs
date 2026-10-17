@@ -17,6 +17,12 @@
 //! A worker lost to a limit lash itself set on it, its CPU budget or its
 //! compute deadline, is the cell's own end, never a crash: the cell is
 //! refused once with that limit, and the model reads it (FIG-6523).
+//!
+//! A worker names a page it sealed earlier in its activation under the
+//! grant the parent gave it, without sealing it again. What a later park
+//! of the activation commits stays stored while the activation can still
+//! name it: retirement of the root that first published the page leaves it
+//! in place until the activation ends (FIG-6629).
 #![allow(clippy::expect_used, clippy::unwrap_used)]
 
 #[path = "support/served.rs"]
@@ -511,7 +517,129 @@ async fn a_cell_start_worker_crash_is_never_a_recorded_host_cell_failure(tier: T
     setup_crash_case(tier, Request::Cell).await;
 }
 
+const RETIRE_TOOL: &str = "retire_pages";
+/// Cell 0 of `rows` is 0 under the first park's root, which the activation
+/// leases; 1 under the second's; 2 under the third's, which retires the
+/// second; and 1 again at the fourth park, whose page the worker sealed at
+/// the second and names again under that seal's grant.
+const RETIRE_CELL: &str = "const rows = []; for (let i = 0; i < 256; i++) { rows.push(0); }
+await tools.retire_pages({});
+rows[0] = 1;
+await tools.retire_pages({});
+rows[0] = 2;
+await tools.retire_pages({});
+rows[0] = 1;
+await tools.retire_pages({});
+await control.finish({ last: rows[0] });";
+
+/// `retire_pages`' body: it runs page retirement until a step finds
+/// nothing left to delete, so every retired root is peeled before the
+/// cell's next park.
+struct RetirePages {
+    stores: Arc<std::sync::OnceLock<Arc<dyn lash_core_execution::StoreSet>>>,
+}
+
+#[async_trait::async_trait]
+impl StaticToolExecute for RetirePages {
+    async fn execute(&self, _call: ToolCall<'_>) -> lash_core::ToolAttemptOutcome {
+        let pages = self
+            .stores
+            .get()
+            .expect("the store set is layered before the core runs")
+            .durable_store()
+            .pages()
+            .expect("the durable store publishes heap pages");
+        let budget = lash_durable::domain::pages::RetirementBudget { nodes: 4096 };
+        while pages.retire_step(budget).await.expect("a retirement step")
+            != lash_durable::domain::pages::RetirementProgress::default()
+        {}
+        ToolOutcome::ok(serde_json::json!({})).into()
+    }
+}
+
+/// FIG-6629: a cell whose fourth park names a page its second park
+/// committed, after the third park retired the second's root and that
+/// root was peeled, commits every park on its one worker lease and
+/// finishes. The activation leased only its first park's root, so the
+/// store refused the fourth park's candidate (`checkpoint graph refused:
+/// node … is missing`), and the cell ran again from its third park on a
+/// second lease.
+async fn a_page_an_earlier_park_committed_stays_stored_while_its_activation_names_it(tier: Tier) {
+    let stores = Arc::new(std::sync::OnceLock::new());
+    let definition = lash_core::ToolDefinition::raw(
+        RETIRE_TOOL,
+        RETIRE_TOOL,
+        "Retires every page no root holds.",
+        serde_json::json!({ "type": "object", "properties": {} }),
+        serde_json::json!({ "type": "object" }),
+    )
+    .expect("retire_pages' schemas")
+    .with_execution(std::time::Duration::from_secs(120))
+    .with_tool_binding(lash_core::ToolBinding::new(["tools"], RETIRE_TOOL));
+    let tools: Arc<dyn lash_core::ToolProvider> = Arc::new(StaticToolProvider::new(
+        vec![definition],
+        RetirePages {
+            stores: Arc::clone(&stores),
+        },
+    ));
+    let warming = AtomicBool::new(true);
+    let model = lash_core::testing::TestProvider::builder()
+        .kind("page-retirement")
+        .complete(move |_request: LlmRequest| {
+            let response = if warming.swap(false, Ordering::SeqCst) {
+                served::cell("await control.finish(\"warm\");")
+            } else {
+                served::cell(RETIRE_CELL)
+            };
+            async move { Ok(response) }
+        })
+        .build()
+        .into_handle();
+    let workers = lash::vm::WorkerService::default();
+    let Some(world) = World::layered_with_model(
+        tier,
+        |layered| {
+            assert!(stores.set(Arc::clone(&layered)).is_ok(), "layered once");
+            layered
+        },
+        model,
+        |backend| {
+            lash::LashCore::rlm_builder(backend.clone(), served::rlm(backend, workers.clone()))
+                .tools(lash::tool_provider_key!("tools"), tools)
+        },
+    )
+    .await
+    else {
+        return;
+    };
+    // A first cell starts the pool and warms its worker.
+    let warm = world.session("page-retirement-warm", served::spec(8)).await;
+    world.send(&warm, "warm the worker").await;
+    let checkouts = || {
+        workers
+            .pool()
+            .expect("the pool")
+            .measurements()
+            .counters
+            .checkouts
+    };
+    let before = checkouts();
+    let session = world.session("page-retirement", served::spec(8)).await;
+    let output = world.send(&session, "retire between parks").await;
+    assert_eq!(
+        output.finished().map(|(_, value)| value),
+        Some(&serde_json::json!({ "last": 1 }))
+    );
+    assert_eq!(
+        checkouts() - before,
+        1,
+        "every park of the cell commits on its one worker lease"
+    );
+    world.shutdown().await;
+}
+
 tiered_laws!(
+    a_page_an_earlier_park_committed_stays_stored_while_its_activation_names_it,
     a_lowering_worker_crash_is_never_a_recorded_host_cell_failure,
     a_cell_start_worker_crash_is_never_a_recorded_host_cell_failure,
     a_tool_and_finish_cell_crosses_the_worker_boundary_on_one_lease,

@@ -454,14 +454,15 @@ pub struct PageActivation {
     pub pages: SharedPages,
 }
 
-/// Ends `pages`' activation: the lease on the execution's root its broker
-/// took goes (its expiry would end it as well); the host's own stays.
+/// Ends `pages`' activation: the leases on the execution's roots its
+/// broker took go (their expiry would end them as well); the host's own
+/// stays.
 pub async fn end_activation(
     store: &dyn lash_durable::domain::pages::PageStore,
     pages: &SharedPages,
 ) {
-    let lease = pages.lock().await.end();
-    if let Some(lease) = lease {
+    let leases = pages.lock().await.end();
+    for lease in leases {
         let _ = store.release_root_lease(lease.id).await;
     }
 }
@@ -782,21 +783,26 @@ impl KernelBroker<'_> {
             .map_err(KernelFailure::Lease)
     }
 
-    /// After a park published `root`, an activation that read under no
-    /// lease of its own takes one on it: the pages its candidate staged
-    /// are the store's now, and read there.
+    /// After a park published `root`, the activation takes a lease on it:
+    /// the pages its candidate staged are the store's now, and read there
+    /// under the activation's lease, its first when it read under none. A
+    /// later park retires `root`, while the worker may still name those
+    /// pages under the capabilities it holds without sealing them again,
+    /// so the lease keeps `root` stored until the activation ends
+    /// (FIG-6629).
     async fn lease_published(
         &self,
         activation: &PageActivation,
         root: NodeId,
     ) -> Result<(), KernelFailure> {
         let mut pages = activation.pages.lock().await;
-        if pages.lease().is_some() {
-            return Ok(());
-        }
         let store = self.store.context().pages().map_err(KernelFailure::Lease)?;
         let lease = self.lease(&store, root).await?;
-        pages.lease_on(lease);
+        if pages.lease().is_some() {
+            pages.protect_published(lease);
+        } else {
+            pages.lease_on(lease);
+        }
         Ok(())
     }
 

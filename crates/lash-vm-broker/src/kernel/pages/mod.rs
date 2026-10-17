@@ -199,6 +199,13 @@ pub struct ActivationPages<R: ?Sized> {
     /// The committed root the activation reads under; none for a fresh run
     /// that reads only what it stages.
     lease: Option<RootLease>,
+    /// Leases on the roots the activation's parks published beside
+    /// `lease`'s, renewed with it and ended with the activation. A settled
+    /// candidate's pages stay named by their stage capabilities, and a
+    /// worker names one again without sealing it: once a later park
+    /// retires the root that published it, only its lease here keeps it
+    /// stored (FIG-6629).
+    published: Vec<RootLease>,
     /// Renew the lease once this long has passed since it was last renewed
     /// (a third of its ttl, `D-LEASE`).
     renew_every: Duration,
@@ -262,6 +269,7 @@ impl<R: LeasedReads + ?Sized> ActivationPages<R> {
             renewed: clock.now(),
             store,
             lease,
+            published: Vec::new(),
             renew_every,
             clock,
             key,
@@ -413,6 +421,13 @@ impl<R: LeasedReads + ?Sized> ActivationPages<R> {
         self.owned = true;
     }
 
+    /// Keeps the root a park of this activation published stored under
+    /// `lease` until the activation ends: what its candidate committed
+    /// stays named by the capabilities the activation issued for it.
+    pub fn protect_published(&mut self, lease: RootLease) {
+        self.published.push(lease);
+    }
+
     /// This activation, its lease one its broker took.
     #[must_use]
     pub fn owning(mut self) -> Self {
@@ -420,12 +435,15 @@ impl<R: LeasedReads + ?Sized> ActivationPages<R> {
         self
     }
 
-    /// Ends the activation's reads: the lease its broker took, which the
-    /// caller releases; none for the host's own.
-    pub fn end(&mut self) -> Option<RootLease> {
+    /// Ends the activation's reads: the leases its broker took, which the
+    /// caller releases; never the host's own.
+    pub fn end(&mut self) -> Vec<RootLease> {
         let owned = std::mem::take(&mut self.owned);
-        let lease = self.lease.take();
-        lease.filter(|_| owned)
+        let lease = self.lease.take().filter(|_| owned);
+        lease
+            .into_iter()
+            .chain(std::mem::take(&mut self.published))
+            .collect()
     }
 
     /// The spool, for pages the parent seals itself (a session's
@@ -483,9 +501,9 @@ impl<R: LeasedReads + ?Sized> ActivationPages<R> {
     }
 
     /// The activation's authority, checked on every exchange independent
-    /// of residency: the lease is renewed once `renew_every` (a third of
-    /// its ttl) passed since its last renewal, and a failed or timed-out
-    /// renewal refuses like a lost lease. Within `renew_every` of a
+    /// of residency: the lease, and each published root's, is renewed once
+    /// `renew_every` (a third of its ttl) passed since its last renewal,
+    /// and a failed or timed-out renewal refuses like a lost lease. Within `renew_every` of a
     /// confirmed renewal the store's expiry is still at least two thirds
     /// of a ttl away, so a lease that answers locally is live; past it,
     /// the store decides. An activation with no lease answers `Ok`.
@@ -503,14 +521,23 @@ impl<R: LeasedReads + ?Sized> ActivationPages<R> {
             return Ok(());
         }
         let before = self.clock.now();
-        let renewed = tokio::time::timeout(
-            self.span.saturating_sub(self.spent),
-            self.store.renew_root_lease(&lease),
-        )
-        .await
-        .map_err(|_| PageRefusal::Deadline)?
-        .map_err(|_| PageRefusal::LeaseLost)?;
+        let left = self.span.saturating_sub(self.spent);
+        let renew = |lease: RootLease| {
+            let store = Arc::clone(&self.store);
+            async move {
+                tokio::time::timeout(left, store.renew_root_lease(&lease))
+                    .await
+                    .map_err(|_| PageRefusal::Deadline)?
+                    .map_err(|_| PageRefusal::LeaseLost)
+            }
+        };
+        let renewed = renew(lease).await?;
+        let mut published = Vec::with_capacity(self.published.len());
+        for lease in self.published.clone() {
+            published.push(renew(lease).await?);
+        }
         self.lease = Some(renewed);
+        self.published = published;
         self.renewed = before;
         Ok(())
     }
