@@ -1,4 +1,5 @@
 //! The live fuzzer and the hermetic laws share exactly this machine adapter.
+use std::cell::RefCell;
 use std::collections::{BTreeMap, BTreeSet};
 use std::sync::Arc;
 
@@ -44,6 +45,7 @@ pub enum Lowered {
 pub struct Runner {
     library: NamedLibrary,
     prepared: PreparedLibrary,
+    layouts: RefCell<BTreeMap<u64, PreparedLibrary>>,
 }
 
 impl Runner {
@@ -88,7 +90,29 @@ impl Runner {
         Ok(Self {
             library,
             prepared: PreparedLibrary::new(Arc::new(registry)),
+            layouts: RefCell::new(BTreeMap::new()),
         })
+    }
+
+    /// Preparation belongs to the runner, like its default library. A cold
+    /// machine still opens fresh heap access at every park; only immutable
+    /// compiled code is shared between cases and continuations in a layout.
+    fn program_in_layout(&self, program: &Program, layout: Layout) -> Program {
+        let library = if layout == Layout::default() {
+            self.prepared.clone()
+        } else {
+            self.layouts
+                .borrow_mut()
+                .entry(layout.0)
+                .or_insert_with(|| {
+                    PreparedLibrary::with_layout(Arc::clone(self.prepared.registry()), layout)
+                })
+                .clone()
+        };
+        Program {
+            library,
+            ..program.clone()
+        }
     }
 
     pub fn run(&self, case: &Case) -> Result<Observed, String> {
@@ -175,7 +199,7 @@ impl Runner {
         };
         let source = crate::pages::Source::default();
         let mut machine = crate::pages::with_source(
-            program.clone(),
+            self.program_in_layout(program, first),
             bounds,
             CellStart {
                 target: Target::Main,
@@ -208,7 +232,13 @@ impl Runner {
                         reached.extend(Self::reached(&machine)?);
                         let charged = machine.meters().charged;
                         let layout = layouts.next().ok_or("a plan names a layout")?;
-                        crate::pages::reopen(&mut machine, program, bounds, &source, layout);
+                        crate::pages::reopen(
+                            &mut machine,
+                            &self.program_in_layout(program, layout),
+                            bounds,
+                            &source,
+                            layout,
+                        );
                         machine.count_work();
                         if machine.meters().charged != charged {
                             return Err("reopening changed the charge".into());

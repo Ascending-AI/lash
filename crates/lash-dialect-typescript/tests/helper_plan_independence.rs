@@ -29,6 +29,8 @@ use runner::{Case, Lowered, Runner};
 /// sealed and opened cold at each park, by turns, with natives answering
 /// through the general call (an odd layout), through prepared entries, and
 /// declining again.
+/// Each layout shares its prepared library across cases and cold opens;
+/// the machine and its heap access are fresh at every open.
 fn runs_alike_whichever_path_answers(dialect: &str, parity: Option<usize>) {
     let cases: Vec<Case> =
         serde_json::from_str(include_str!("helper_differential/cases.json")).unwrap();
