@@ -1,5 +1,10 @@
 # Kernel gate 6 receipts and history
 
+For the maintained external kernel speed yardstick, use
+[the QuickJS/Monty comparison](kernel-vs-embedded.md) and its
+[recorded results](../kernel-vs-embedded.md) (FIG-6675). The pre-heap ratio is
+accepted for 1.0; these receipts remain useful for internal change comparisons.
+
 `kernel_perf` measures TypeScript workloads on the in-process kernel with a
 scripted host. Lowering, registry assembly, preparation, the initial run and
 warmups precede the timed window. Each raw sample names its iteration, run and

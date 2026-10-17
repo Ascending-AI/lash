@@ -105,6 +105,9 @@ mod gate_six;
 #[path = "kernel_perf/phase.rs"]
 mod kernel_phase;
 
+#[path = "kernel_perf/embedded.rs"]
+mod embedded;
+
 #[path = "../shared/gate_six_registry.rs"]
 mod gate_six_registry;
 
@@ -353,6 +356,9 @@ fn start_observed(
     reason = "benchmark entry point: it reads its arguments, its program files and its switches, and reports on stdout"
 )]
 fn main() -> Result<(), String> {
+    if std::env::args().nth(1).as_deref() == Some("embedded") {
+        return embedded::main();
+    }
     if std::env::args().nth(1).as_deref() == Some("host-json") {
         return host_json_probe();
     }
