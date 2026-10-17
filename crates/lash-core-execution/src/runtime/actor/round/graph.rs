@@ -495,7 +495,8 @@ pub struct CallOutcome {
     pub output: ToolCallOutput,
     pub provider_call_id: Option<String>,
     pub replay: Option<lash_protocol_types::llm::types::ProviderReplayMeta>,
-    pub intent_outcomes: Vec<crate::ToolIntentExecutionOutcome>,
+    pub intent_outcomes:
+        Vec<lash_execution_contracts::tool_intent_outcome::ToolIntentExecutionOutcome>,
     pub presentation: PresentationRecipe,
 }
 
@@ -523,7 +524,7 @@ struct StoredOutcome {
     admission: Option<NodeId>,
     attempt: u64,
     replay: Option<lash_protocol_types::llm::types::ProviderReplayMeta>,
-    intent_outcomes: Vec<crate::ToolIntentExecutionOutcome>,
+    intent_outcomes: Vec<lash_execution_contracts::tool_intent_outcome::ToolIntentExecutionOutcome>,
     presentation: NodeId,
 }
 
@@ -532,7 +533,7 @@ fn encode_live_outcome(
     admission: Option<NodeId>,
     attempt: u64,
     replay: Option<&lash_protocol_types::llm::types::ProviderReplayMeta>,
-    intents: &[crate::ToolIntentExecutionOutcome],
+    intents: &[lash_execution_contracts::tool_intent_outcome::ToolIntentExecutionOutcome],
     presentation: NodeId,
     out: &mut TokenWriter,
 ) {

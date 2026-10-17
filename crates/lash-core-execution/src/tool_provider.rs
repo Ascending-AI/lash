@@ -7,10 +7,12 @@ use lash_protocol_types::llm::types::ProviderReplayMeta;
 use lash_protocol_types::sync::MutexExt;
 use serde::{Deserialize, Serialize};
 
-use crate::plugin::{
-    OwnerConfigView, PluginError, SessionLifecycleService, SessionSnapshot, SessionStateService,
-};
+use crate::plugin::OwnerConfigView;
+use crate::plugin::SessionLifecycleService;
+use crate::plugin::SessionSnapshot;
+use crate::plugin::SessionStateService;
 use crate::{ToolContract, ToolId, ToolManifest, ToolOutcome};
+use lash_execution_contracts::plugin_error::PluginError;
 
 mod attachments;
 mod completion_support;
@@ -150,15 +152,15 @@ impl AttemptProcessReads {
     /// Integrator class 3 listing through the attempt-safe process filter.
     pub async fn list_handles_filtered(
         &self,
-        filter: &crate::ProcessListFilter,
-    ) -> Result<Vec<crate::ProcessHandleView>, PluginError> {
+        filter: &lash_execution_contracts::process::ProcessListFilter,
+    ) -> Result<Vec<lash_execution_contracts::process::ProcessHandleView>, PluginError> {
         Ok(self
             .processes
             .list_visible_for_attempt(&self.owner, filter.list_mode())
             .await?
             .into_iter()
             .filter(|record| filter.matches_observed(record))
-            .map(crate::ProcessHandleView::from_observed)
+            .map(lash_execution_contracts::process::ProcessHandleView::from_observed)
             .collect())
     }
 }
@@ -219,8 +221,8 @@ pub struct AttemptContext<'run> {
     max_attempts: u32,
     /// The enclosing process's full recorded provenance, also supplied to
     /// child starts. `None` when the attempt runs outside a process.
-    process_spawn_provenance: Option<crate::ProcessProvenance>,
-    process_lineage: Option<crate::ProcessLineage>,
+    process_spawn_provenance: Option<lash_execution_contracts::process::ProcessProvenance>,
+    process_lineage: Option<lash_execution_contracts::process::ProcessLineage>,
     /// The process this attempt runs inside, with its recorded environment
     /// and settings: what a nested start's policy may inherit. `None`
     /// outside a process execution.
@@ -340,10 +342,13 @@ impl<'run> AttemptContext<'run> {
     /// against it and declares the decision; realization records this same
     /// context's ancestry beside it.
     ///
-    /// [`LifetimePolicy`]: crate::LifetimePolicy
-    pub fn start_cx(&self) -> Result<crate::StartCx, PluginError> {
-        crate::StartCx::materialize(&self.parent_scope, self.process_lineage.as_ref())
-            .map_err(|error| PluginError::Session(error.to_string()))
+    /// [`LifetimePolicy`]: lash_execution_contracts::process::LifetimePolicy
+    pub fn start_cx(&self) -> Result<lash_execution_contracts::process::StartCx, PluginError> {
+        lash_execution_contracts::process::StartCx::materialize(
+            &self.parent_scope,
+            self.process_lineage.as_ref(),
+        )
+        .map_err(|error| PluginError::Session(error.to_string()))
     }
 
     pub(crate) fn from_tool_context(
@@ -543,7 +548,9 @@ impl<'run> AttemptContext<'run> {
     ///
     /// `None` means this attempt runs outside a process, so a child takes
     /// the declaring session's originator.
-    pub fn process_spawn_provenance(&self) -> Option<&crate::ProcessProvenance> {
+    pub fn process_spawn_provenance(
+        &self,
+    ) -> Option<&lash_execution_contracts::process::ProcessProvenance> {
         self.process_spawn_provenance.as_ref()
     }
     /// The definition `target` names, read and verified before a start
@@ -558,7 +565,7 @@ impl<'run> AttemptContext<'run> {
     /// for a store fault.
     pub async fn resolve_start_target(
         &self,
-        target: &crate::ProcessDefinitionTarget,
+        target: &lash_execution_contracts::process::ProcessDefinitionTarget,
         args: serde_json::Map<String, serde_json::Value>,
     ) -> Result<crate::ResolvedStartTarget, ResolveTargetError> {
         let engines = &self.definition_engines;
@@ -577,7 +584,9 @@ impl<'run> AttemptContext<'run> {
                     "process definition `{definition_id}` is not stored"
                 ))
             })?;
-        if let crate::ProcessDefinitionTarget::Definition(claimed) = target {
+        if let lash_execution_contracts::process::ProcessDefinitionTarget::Definition(claimed) =
+            target
+        {
             engines
                 .verify_definition_claim(&resolved.draft, claimed)
                 .await
@@ -620,7 +629,9 @@ impl<'run> AttemptContext<'run> {
         args: serde_json::Map<String, serde_json::Value>,
     ) -> Result<crate::ResolvedInlineStart, ResolveTargetError> {
         let refused_or_fault = |error: PluginError| match error.class() {
-            crate::PluginErrorClass::Terminal => ResolveTargetError::Refused(error.to_string()),
+            lash_execution_contracts::plugin_error::PluginErrorClass::Terminal => {
+                ResolveTargetError::Refused(error.to_string())
+            }
             _ => ResolveTargetError::Fault(error),
         };
         let inline = self
@@ -630,8 +641,11 @@ impl<'run> AttemptContext<'run> {
             .inspect(&payload)
             .await
             .map_err(refused_or_fault)?;
-        let resolved = crate::ResolvedProcessDefinition {
-            definition: crate::ProcessDefinition::new(inline.draft.id(), inline.signature),
+        let resolved = lash_execution_contracts::process::ResolvedProcessDefinition {
+            definition: lash_execution_contracts::process::ProcessDefinition::new(
+                inline.draft.id(),
+                inline.signature,
+            ),
             draft: inline.draft,
         };
         let start_payload = resolved
@@ -685,12 +699,15 @@ impl<'run> AttemptContext<'run> {
         &self,
         choice: &crate::ProcessStartChoice,
         target: &crate::ResolvedStartTarget,
-    ) -> Result<crate::DeclaredDefinitionLaunch, crate::HoldEnvError> {
+    ) -> Result<lash_execution_contracts::process::DeclaredDefinitionLaunch, crate::HoldEnvError>
+    {
         let launch = self.declare_target_launch(choice, target).await?;
-        Ok(crate::DeclaredDefinitionLaunch::held(
-            target.definition_id.clone(),
-            launch,
-        ))
+        Ok(
+            lash_execution_contracts::process::model::launch::held_definition_launch(
+                target.definition_id.clone(),
+                launch,
+            ),
+        )
     }
 
     /// [`declare_launch`](Self::declare_launch) for a start of the function
@@ -704,20 +721,22 @@ impl<'run> AttemptContext<'run> {
         &self,
         choice: &crate::ProcessStartChoice,
         start: &crate::ResolvedInlineStart,
-    ) -> Result<crate::DeclaredInlineLaunch, crate::HoldEnvError> {
+    ) -> Result<lash_execution_contracts::process::DeclaredInlineLaunch, crate::HoldEnvError> {
         let launch = self.declare_target_launch(choice, &start.target).await?;
-        Ok(crate::DeclaredInlineLaunch::held(
-            start.target.engine_kind.clone(),
-            start.payload.clone(),
-            launch,
-        ))
+        Ok(
+            lash_execution_contracts::process::model::launch::held_inline_launch(
+                start.target.engine_kind.clone(),
+                start.payload.clone(),
+                launch,
+            ),
+        )
     }
 
     async fn declare_target_launch(
         &self,
         choice: &crate::ProcessStartChoice,
         target: &crate::ResolvedStartTarget,
-    ) -> Result<crate::DeclaredLaunch, crate::HoldEnvError> {
+    ) -> Result<lash_execution_contracts::process::DeclaredLaunch, crate::HoldEnvError> {
         let launch = crate::runtime::process::hold_launch_performing(
             &self.definition_engines,
             &self.execution_scope,
@@ -729,7 +748,7 @@ impl<'run> AttemptContext<'run> {
         )
         .await?;
         self.held_launches.lock_recover().push(launch.env.clone());
-        Ok(crate::DeclaredLaunch::held(launch))
+        Ok(lash_execution_contracts::process::model::launch::held_launch(launch))
     }
 
     /// [`declare_launch`](Self::declare_launch) for a start of the `kind`
@@ -739,7 +758,7 @@ impl<'run> AttemptContext<'run> {
         choice: &crate::ProcessStartChoice,
         kind: &str,
         payload: &serde_json::Value,
-    ) -> Result<crate::DeclaredLaunch, crate::HoldEnvError> {
+    ) -> Result<lash_execution_contracts::process::DeclaredLaunch, crate::HoldEnvError> {
         let launch = crate::runtime::process::hold_launch(
             &self.definition_engines,
             &self.execution_scope,
@@ -750,7 +769,7 @@ impl<'run> AttemptContext<'run> {
         )
         .await?;
         self.held_launches.lock_recover().push(launch.env.clone());
-        Ok(crate::DeclaredLaunch::held(launch))
+        Ok(lash_execution_contracts::process::model::launch::held_launch(launch))
     }
 
     /// Whether this attempt held `env` through
@@ -780,13 +799,15 @@ impl<'run> AttemptContext<'run> {
     /// A typed refusal when the capability is missing: the tool did not
     /// declare that its attempt may defer, or the call runs where no
     /// completion wait is pinned for it.
-    pub fn completion_key(&self) -> Result<crate::PinnedKey, crate::RuntimeError> {
+    pub fn completion_key(
+        &self,
+    ) -> Result<lash_execution_contracts::waits::PinnedKey, crate::RuntimeError> {
         self.completion.key()
     }
     /// The identity of the intent this attempt declares at `intent_index`,
     /// derived from its [`call_id`](Self::call_id).
     pub fn intent_identity(&self, intent_index: u32) -> crate::ToolIntentIdentity {
-        crate::derive_tool_intent_identity_under(
+        lash_execution_contracts::tool_intent::derive_tool_intent_identity_under(
             &self.owner.runtime_owner(),
             &self.execution_scope_id,
             &self.call_id,
@@ -798,22 +819,22 @@ impl<'run> AttemptContext<'run> {
 
 #[derive(Clone, Default)]
 pub(crate) struct ToolCompletionState {
-    key: Arc<Mutex<Option<crate::PinnedKey>>>,
+    key: Arc<Mutex<Option<lash_execution_contracts::waits::PinnedKey>>>,
 }
 
 impl ToolCompletionState {
-    pub(crate) fn store(&self, key: crate::PinnedKey) {
+    pub(crate) fn store(&self, key: lash_execution_contracts::waits::PinnedKey) {
         let mut guard = self.key.lock_recover();
         if guard.is_none() {
             *guard = Some(key);
         }
     }
 
-    pub(crate) fn take(&self) -> Option<crate::PinnedKey> {
+    pub(crate) fn take(&self) -> Option<lash_execution_contracts::waits::PinnedKey> {
         self.key.lock_recover().take()
     }
 
-    pub(crate) fn load(&self) -> Option<crate::PinnedKey> {
+    pub(crate) fn load(&self) -> Option<lash_execution_contracts::waits::PinnedKey> {
         self.key.lock_recover().clone()
     }
 }
@@ -1014,7 +1035,9 @@ impl<'run> ToolContext<'run> {
 
     /// The lineage of the process this tool call runs inside (FIG-3607 R1):
     /// the runtime context's when the call has one, else the dispatch's.
-    pub(crate) fn process_lineage(&self) -> Option<crate::ProcessLineage> {
+    pub(crate) fn process_lineage(
+        &self,
+    ) -> Option<lash_execution_contracts::process::ProcessLineage> {
         self.runtime_execution_context
             .as_ref()
             .and_then(crate::RuntimeExecutionContext::process_lineage)
@@ -1026,7 +1049,10 @@ impl<'run> ToolContext<'run> {
     }
 
     /// Hands the call the key of the completion wait its round pinned.
-    pub(crate) fn install_completion_key(&self, key: Option<crate::PinnedKey>) {
+    pub(crate) fn install_completion_key(
+        &self,
+        key: Option<lash_execution_contracts::waits::PinnedKey>,
+    ) {
         if let Some(key) = key {
             self.completion.store(key);
         }
@@ -1156,7 +1182,7 @@ impl<'run> ToolContext<'run> {
         self
     }
 
-    pub(crate) fn take_completion_key(&self) -> Option<crate::PinnedKey> {
+    pub(crate) fn take_completion_key(&self) -> Option<lash_execution_contracts::waits::PinnedKey> {
         self.completion.take()
     }
 
@@ -1318,7 +1344,7 @@ pub struct ToolPrepareContext {
     tool_execution_route: ToolExecutionRoute,
     /// The originator of the process chain the call runs in, when it runs
     /// inside a process.
-    process_originator: Option<crate::ProcessOriginator>,
+    process_originator: Option<lash_execution_contracts::process::ProcessOriginator>,
     /// The run's resolved config the call is prepared under.
     config: crate::plugin::OwnerConfigView,
 }
@@ -1352,7 +1378,7 @@ impl ToolPrepareContext {
 
     pub(crate) fn with_process_originator(
         mut self,
-        process_originator: Option<crate::ProcessOriginator>,
+        process_originator: Option<lash_execution_contracts::process::ProcessOriginator>,
     ) -> Self {
         self.process_originator = process_originator;
         self
@@ -1363,7 +1389,7 @@ impl ToolPrepareContext {
     pub fn for_testing(
         owner: crate::RuntimeOwner,
         sessions: Arc<dyn SessionStateService>,
-        process_originator: Option<crate::ProcessOriginator>,
+        process_originator: Option<lash_execution_contracts::process::ProcessOriginator>,
     ) -> Self {
         Self::with_execution_binding(
             owner,
@@ -1381,7 +1407,9 @@ impl ToolPrepareContext {
     /// outside a process. A child session that a call inside a process
     /// creates parents under the originator's session: the process has no
     /// session of its own.
-    pub fn process_originator(&self) -> Option<&crate::ProcessOriginator> {
+    pub fn process_originator(
+        &self,
+    ) -> Option<&lash_execution_contracts::process::ProcessOriginator> {
         self.process_originator.as_ref()
     }
 
@@ -1613,7 +1641,7 @@ impl<'a> ToolCall<'a> {
 ///
 /// Effects Lash owns — process starts, cancels and definitions — are not
 /// side effects of the body. A body returns them as
-/// declared [`ToolIntents`](crate::ToolIntents), which the runtime realizes
+/// declared [`ToolIntents`](lash_execution_contracts::tool_intent::ToolIntents), which the runtime realizes
 /// once per intent identity after the attempt's outcome is durable, behind
 /// a first-outcome fence keyed by the call id and the intent's index. A
 /// redelivered attempt that declares the same intents realizes none twice.
@@ -1625,7 +1653,7 @@ pub trait ToolProvider: Send + Sync + 'static {
     fn tool_manifests(
         &self,
         config: &OwnerConfigView,
-    ) -> Result<Vec<ToolManifest>, crate::PluginError>;
+    ) -> Result<Vec<ToolManifest>, lash_execution_contracts::plugin_error::PluginError>;
     fn resolve_manifest(&self, name: &str, config: &OwnerConfigView) -> Option<ToolManifest> {
         self.tool_manifests(config)
             .ok()?

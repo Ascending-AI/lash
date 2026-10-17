@@ -1,7 +1,7 @@
 //! Shared conformance for durable backends that fuse both artifact-store traits
 //! ADR-0013's engine rebuild path depends on:
-//! [`lash_core::ModuleArtifactStore`] (module artifacts)
-//! and [`lash_core::ProcessEnvStore`] (process-execution-env blobs).
+//! [`lash_execution_contracts::module_artifacts::ModuleArtifactStore`] (module artifacts)
+//! and [`lash_execution_contracts::process::ProcessEnvStore`] (process-execution-env blobs).
 //!
 //! Both ports live in the execution kernel and the per-port laws live in this
 //! crate, so the cross-namespace isolation case — which requires a single store viewed
@@ -12,15 +12,15 @@ use std::sync::Arc;
 
 use crate::ReopenableProcessEnvStore;
 use crate::module_artifact_store::{ReopenableModuleArtifactStore, SampleArtifact};
-use lash_core::ProcessEnvStore;
+use lash_execution_contracts::process::ProcessEnvStore;
 use pretty_assertions::assert_eq;
 
 /// A durable store accessed through both artifact-store traits over the same
 /// backing storage.
 pub struct ArtifactStoreHandles {
-    pub artifacts: Arc<dyn lash_core::ModuleArtifactStore>,
+    pub artifacts: Arc<dyn lash_execution_contracts::module_artifacts::ModuleArtifactStore>,
     pub process_env: Arc<dyn ProcessEnvStore>,
-    pub turn_preludes: Arc<dyn lash_core::TurnPreludeStore>,
+    pub turn_preludes: Arc<dyn lash_execution_contracts::turn_prelude::TurnPreludeStore>,
 }
 
 /// Writers plus a factory that constructs post-write handles over the same
@@ -48,7 +48,7 @@ where
 {
     crate::module_artifact_store::lash_vm_artifact_store_durability_tier(
         make().open.artifacts,
-        lash_core::DurabilityTier::Durable,
+        lash_execution_contracts::module_artifacts::DurabilityTier::Durable,
     )
     .await;
 }
@@ -202,7 +202,7 @@ where
     let handles = make().open;
     let artifacts = handles.artifacts;
     let artifact = sample_module_artifact("delta");
-    let env_spec = lash_core::testing::process_env_with_limit(1024);
+    let env_spec = lash_execution_contracts::testing::process_env_with_limit(1024);
     let env_ref = env_spec.stable_ref().expect("stable env ref");
     let env_bytes = env_spec.to_store_bytes().expect("encode env");
     let referrer = lash_core::ArtifactReferrer::HostPin(lash_core::HostArtifactPin::mint());

@@ -195,7 +195,7 @@ pub(super) fn install_candidate(
     }
     #[cfg(any(test, feature = "testing"))]
     CANDIDATE_PEAK_BUFFERED.store(edges.peak_buffered(), std::sync::atomic::Ordering::SeqCst);
-    if let Some(window) = lash_core_execution::facade_support::sql::Window::current() {
+    if let Some(window) = lash_core_ids::operational_metrics::sql::Window::current() {
         window.installed_graph(installed.newly_installed_canonical_bytes);
     }
     Ok(Ok(()))
@@ -653,7 +653,7 @@ impl PageStore for SqliteDurableStore {
         let blob_profile = self.blob_profile;
         let summary = candidate.manifest.summary();
         let mut candidate = candidate;
-        let actor = lash_core_execution::facade_support::sql::with_owner(
+        let actor = lash_core_ids::operational_metrics::sql::with_owner(
             tx.actor().as_str().to_owned(),
             tx.epoch().0,
             tx.revision().0,

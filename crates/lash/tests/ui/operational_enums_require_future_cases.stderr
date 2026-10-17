@@ -24,7 +24,7 @@ error[E0004]: non-exhaustive patterns: `_` not covered
    |           ^^^^^ pattern `_` not covered
    |
 note: `DurableBuildError` defined here
-  --> $WORKSPACE/crates/lash-core-execution/src/backend.rs
+  --> $WORKSPACE/crates/lash-execution-contracts/src/backend.rs
    |
    | pub enum DurableBuildError {
    | ^^^^^^^^^^^^^^^^^^^^^^^^^^

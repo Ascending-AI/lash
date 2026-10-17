@@ -125,7 +125,10 @@ struct CallContext {
     run: Option<lash_core::TurnId>,
 }
 
-fn assert_provenance(call: &CallContext, record: &lash_core::ProcessRecord) {
+fn assert_provenance(
+    call: &CallContext,
+    record: &lash_execution_contracts::process::ProcessRecord,
+) {
     assert_eq!(call.process, record.id);
     assert_eq!(
         call.provenance, record.provenance,
@@ -243,7 +246,10 @@ impl lash::process::ProcessComponentFactory for ProbeComponent {
         })
     }
 
-    fn recipe(self: Arc<Self>) -> Result<lash::plugins::ProcessRecipe, lash_core::PluginError> {
+    fn recipe(
+        self: Arc<Self>,
+    ) -> Result<lash::plugins::ProcessRecipe, lash_execution_contracts::plugin_error::PluginError>
+    {
         let mut reg =
             lash::plugins::PluginRegistrar::<Self, lash::plugins::registries::Process>::for_process(
                 self.declaration().id.as_str(),
@@ -257,10 +263,11 @@ impl lash::process::ProcessComponentFactory for ProbeComponent {
             reg,
             move |cx| {
                 if cx.process.is_some() {
-                    let env = cx
-                        .env
-                        .stable_ref()
-                        .map_err(|error| lash_core::PluginError::Session(error.to_string()))?;
+                    let env = cx.env.stable_ref().map_err(|error| {
+                        lash_execution_contracts::plugin_error::PluginError::Session(
+                            error.to_string(),
+                        )
+                    })?;
                     self.seen
                         .builds
                         .lock_recover()
@@ -340,7 +347,7 @@ fn metadata(model: &str) -> lash_core::LlmProfileMetadata {
 /// One boot `boot` of a code mode core over `stores`, its probe's wait
 /// holding when `holds`.
 fn worker(
-    stores: &Arc<dyn lash_core_execution::StoreSet>,
+    stores: &Arc<dyn lash_execution_contracts::backend::StoreSet>,
     seen: &Arc<Seen>,
     holds: bool,
     boot: &str,
@@ -377,7 +384,9 @@ fn worker(
         lash::rlm::CellDialect::typescript(),
     )
     .with_worker_service(lash::vm::WorkerService::default());
-    let lifetime = |_: &lash_core::StartCx| lash_core::Lifetime::Detached;
+    let lifetime = |_: &lash_execution_contracts::process::StartCx| {
+        lash_execution_contracts::process::Lifetime::Detached
+    };
     let models = [SESSION_MODEL, RUN_MODEL, CHANGED_MODEL].into_iter().fold(
         lash::LlmProfileRegistry::new(),
         |registry, name| {
@@ -429,14 +438,17 @@ fn worker(
 }
 
 /// The process labelled `label`, once it is registered.
-async fn labelled(backend: &lash::Backend, label: &str) -> lash_core::ProcessRecord {
+async fn labelled(
+    backend: &lash::Backend,
+    label: &str,
+) -> lash_execution_contracts::process::ProcessRecord {
     tokio::time::timeout(Duration::from_secs(60), async {
         loop {
             let records = lash_core::testing::process_roster_records_for_fixture(
                 backend.process_registry().as_ref(),
-                &lash_core::ProcessListFilter {
-                    status: lash_core::ProcessStatusFilter::Any,
-                    ..lash_core::ProcessListFilter::default()
+                &lash_execution_contracts::process::ProcessListFilter {
+                    status: lash_execution_contracts::process::ProcessStatusFilter::Any,
+                    ..lash_execution_contracts::process::ProcessListFilter::default()
                 },
             )
             .await
@@ -457,7 +469,7 @@ async fn labelled(backend: &lash::Backend, label: &str) -> lash_core::ProcessRec
 /// The environment `record` runs under, read from the store.
 async fn stored_env(
     backend: &lash::Backend,
-    record: &lash_core::ProcessRecord,
+    record: &lash_execution_contracts::process::ProcessRecord,
 ) -> lash::process::ProcessEnv {
     let bytes = backend
         .stores()
@@ -480,7 +492,7 @@ async fn stored_env(
 /// starting run before interruption, on resume and from nested children.
 #[tokio::test(flavor = "multi_thread", worker_threads = 4)]
 async fn a_process_runs_under_its_own_recorded_environment_after_its_session_is_gone() {
-    let stores: Arc<dyn lash_core_execution::StoreSet> = Arc::new(
+    let stores: Arc<dyn lash_execution_contracts::backend::StoreSet> = Arc::new(
         lash_sqlite_store::SqliteStoreSet::memory()
             .await
             .expect("an in-memory store set opens"),
@@ -615,7 +627,7 @@ async fn a_process_runs_under_its_own_recorded_environment_after_its_session_is_
     .await
     .expect("the process ends on the fresh worker within a minute")
     .expect("its end is read");
-    let lash_core::ProcessAwaitOutput::Settled { output } = output else {
+    let lash_execution_contracts::process::ProcessAwaitOutput::Settled { output } = output else {
         panic!("the process ended without an answer: {output:?}");
     };
     assert!(output.is_success(), "{output:?}");

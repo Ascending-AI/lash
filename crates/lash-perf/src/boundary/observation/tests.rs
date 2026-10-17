@@ -197,7 +197,7 @@ fn fleet_members_register_under_distinct_node_names() {
 #[tokio::test]
 async fn a_published_workflow_start_references_seventy_declarations_in_bounded_work() {
     use super::{Flavor, Fleet, QUIET_DOCUMENT, environment, publish, start};
-    use lash_core::perf_witness::Collector;
+    use lash_core_ids::perf_witness::Collector;
     use std::collections::{BTreeMap, BTreeSet};
 
     let dir = tempfile::tempdir().unwrap();

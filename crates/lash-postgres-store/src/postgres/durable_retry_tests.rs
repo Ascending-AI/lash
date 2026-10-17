@@ -28,17 +28,19 @@ const LABEL: CommitLabel = CommitLabel::new("law.write");
 
 /// Admit session `session` to the catalog, with no durable actor yet.
 async fn admit(storage: &PostgresStorage, session: &lash_protocol_types::SessionId) {
-    use lash_core_execution::{
-        MaxToolCalls, SessionCatalogStore as _, SessionCreationHead, SessionRelation,
-        SessionStoreCreateRequest, TurnBudget,
-    };
+    use lash_core_store::session_identity::SessionRelation;
+    use lash_core_store::session_store_factory_types::SessionCreationHead;
+    use lash_core_store::session_store_factory_types::SessionStoreCreateRequest;
+    use lash_core_store::store::SessionCatalogStore as _;
+    use lash_protocol_types::session_model::MaxToolCalls;
+    use lash_protocol_types::session_model::TurnBudget;
 
     storage
         .session_store_factory()
         .admit_session(&SessionStoreCreateRequest {
             session_id: session.clone(),
             relation: SessionRelation::Root,
-            config: lash_core_execution::PersistedSessionConfig::new(
+            config: lash_core_store::session_graph::PersistedSessionConfig::new(
                 TurnBudget::Unbounded,
                 MaxToolCalls::new(16),
                 lash_core::NoProgressBudget::bounded(12),
@@ -46,7 +48,7 @@ async fn admit(storage: &PostgresStorage, session: &lash_protocol_types::Session
             head: SessionCreationHead::Config,
             owning_process_id: None,
             pending_observer_intents: Vec::new(),
-            retention: lash_core_execution::Retention::UntilGc,
+            retention: lash_core_store::store::Retention::UntilGc,
         })
         .await
         .expect("the catalog admits the session");
@@ -54,7 +56,7 @@ async fn admit(storage: &PostgresStorage, session: &lash_protocol_types::Session
 
 /// The advisory key of session `session`'s artifact referrer lock.
 fn referrer_key(session: &lash_protocol_types::SessionId) -> String {
-    let referrer = lash_core_execution::ArtifactReferrer::Session(session.clone());
+    let referrer = lash_core_store::artifact_referrer::ArtifactReferrer::Session(session.clone());
     format!(
         "lash-artifact-referrer:{}:{}",
         referrer.kind().as_str(),
@@ -164,8 +166,8 @@ async fn a_waiting_admission_holds_no_history_or_referrer_lock(
 /// FIG-5423: a queued-work admission takes the actor row first.
 #[tokio::test(flavor = "multi_thread", worker_threads = 4)]
 async fn a_queued_admission_waiting_for_the_owner_holds_no_history_or_referrer_lock() {
-    use lash_core_execution::DeliveryPolicy;
-    use lash_core_execution::runtime::QueuedWorkBatchDraft;
+    use lash_core_store::queued_work_vocabulary::DeliveryPolicy;
+    use lash_core_store::queued_work_vocabulary::QueuedWorkBatchDraft;
 
     a_waiting_admission_holds_no_history_or_referrer_lock(
         "admission-lock-order",
@@ -177,7 +179,7 @@ async fn a_queued_admission_waiting_for_the_owner_holds_no_history_or_referrer_l
                 let batch = QueuedWorkBatchDraft::new(
                     session,
                     DeliveryPolicy::EarliestSafeBoundary,
-                    lash_core_execution::facade_support::SessionCommand::RefreshToolCatalog {
+                    lash_core_store::queued_work_vocabulary::SessionCommand::RefreshToolCatalog {
                         reason: "concurrent owner commit".into(),
                     },
                 );
@@ -196,16 +198,17 @@ async fn a_queued_admission_waiting_for_the_owner_holds_no_history_or_referrer_l
 /// waits for the actor.
 #[tokio::test(flavor = "multi_thread", worker_threads = 4)]
 async fn a_turn_input_admission_waiting_for_the_owner_holds_no_history_or_referrer_lock() {
-    use lash_core_execution::{PendingTurnInputBatch, TurnInputStore as _};
+    use lash_core_store::store::TurnInputStore as _;
+    use lash_core_store::turn_input_vocabulary::PendingTurnInputBatch;
 
     a_waiting_admission_holds_no_history_or_referrer_lock(
         "turn-input-lock-order",
         Box::new(|storage, session| {
             Box::pin(async move {
-                let draft = lash_core_execution::PendingTurnInputDraft::new(
+                let draft = lash_core_store::turn_input_vocabulary::PendingTurnInputDraft::new(
                     &session,
-                    lash_core_execution::TurnInputIngress::NextTurn,
-                    lash_core_execution::TurnInput::text("racing"),
+                    lash_core_store::turn_input_vocabulary::TurnInputIngress::NextTurn,
+                    lash_core_store::turn_input_vocabulary::TurnInput::text("racing"),
                 )
                 .with_source_key("racing-input");
                 storage
@@ -223,7 +226,7 @@ async fn a_turn_input_admission_waiting_for_the_owner_holds_no_history_or_referr
 /// so it never holds history while its wake waits for the actor.
 #[tokio::test(flavor = "multi_thread", worker_threads = 4)]
 async fn a_session_close_waiting_for_the_owner_holds_no_history_or_referrer_lock() {
-    use lash_core_execution::store::ControlIntentStore as _;
+    use lash_core_store::store::ControlIntentStore as _;
 
     a_waiting_admission_holds_no_history_or_referrer_lock(
         "session-close-lock-order",
@@ -251,7 +254,8 @@ async fn a_session_close_waiting_for_the_owner_holds_no_history_or_referrer_lock
 /// history without waiting.
 #[tokio::test(flavor = "multi_thread", worker_threads = 4)]
 async fn a_producer_queued_behind_the_actors_creation_takes_the_actor_row_before_history() {
-    use lash_core_execution::{PendingTurnInputBatch, TurnInputStore as _};
+    use lash_core_store::store::TurnInputStore as _;
+    use lash_core_store::turn_input_vocabulary::PendingTurnInputBatch;
 
     let name = "actor-creation-lock-order";
     let (_database, storage) = storage(name, &PostgresHostConfig::default())
@@ -271,10 +275,10 @@ async fn a_producer_queued_behind_the_actors_creation_takes_the_actor_row_before
         let store = storage.store();
         let session = session.clone();
         async move {
-            let draft = lash_core_execution::PendingTurnInputDraft::new(
+            let draft = lash_core_store::turn_input_vocabulary::PendingTurnInputDraft::new(
                 &session,
-                lash_core_execution::TurnInputIngress::NextTurn,
-                lash_core_execution::TurnInput::text("queued"),
+                lash_core_store::turn_input_vocabulary::TurnInputIngress::NextTurn,
+                lash_core_store::turn_input_vocabulary::TurnInput::text("queued"),
             )
             .with_source_key("queued-input");
             store

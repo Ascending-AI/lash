@@ -12,7 +12,10 @@ impl RuntimeSessionServices {
     /// to the surface the link retains.
     pub(in crate::runtime) fn process_step_surface(
         &self,
-    ) -> Result<(crate::SurfaceTools, Arc<crate::ToolCatalog>), crate::PluginError> {
+    ) -> Result<
+        (crate::SurfaceTools, Arc<crate::ToolCatalog>),
+        lash_execution_contracts::plugin_error::PluginError,
+    > {
         let (process_id, engine) = self.current.engine_process()?;
         let core = &self.current.host.core;
         let (routes, catalog) = engine.composition.linked_tools(
@@ -38,8 +41,9 @@ impl RuntimeSessionServices {
     pub(in crate::runtime) async fn process_step_tools(
         &self,
         cx: crate::ActorContext,
-        process: &crate::ProcessRecord,
-    ) -> Result<crate::runtime::ProcessStepTools, crate::PluginError> {
+        process: &lash_execution_contracts::process::ProcessRecord,
+    ) -> Result<crate::runtime::ProcessStepTools, lash_execution_contracts::plugin_error::PluginError>
+    {
         use lash_core_execution::core_internal::RuntimeExecutionContextRuntimeOps as _;
         let (routes, catalog) = self.process_step_surface()?;
         let (_, engine) = self.current.engine_process()?;
@@ -65,7 +69,9 @@ impl RuntimeSessionServices {
             .round_tools(crate::EffectOpener::Process {
                 process_id: process.id.clone(),
             })
-            .map_err(|error| crate::PluginError::Session(error.to_string()))?;
+            .map_err(|error| {
+                lash_execution_contracts::plugin_error::PluginError::Session(error.to_string())
+            })?;
         Ok(crate::runtime::ProcessStepTools {
             catalog,
             effects,
@@ -84,7 +90,10 @@ impl RuntimeSessionServices {
         routes: crate::SurfaceTools,
         catalog: Arc<crate::ToolCatalog>,
         effect_controller: crate::ActorContext,
-    ) -> Result<Arc<crate::tool_dispatch::ToolDispatchContext<'run>>, crate::PluginError> {
+    ) -> Result<
+        Arc<crate::tool_dispatch::ToolDispatchContext<'run>>,
+        lash_execution_contracts::plugin_error::PluginError,
+    > {
         let services = Arc::new(self.clone());
         let direct_completions = services.direct_completion_client(effect_controller.clone(), None);
         let (_, engine) = self.current.engine_process()?;
@@ -129,7 +138,7 @@ impl lash_core_execution::runtime::process::steps::ProcessStepContext for Runtim
     fn step_link(
         &self,
         effect: &lash_kernel_doc::EffectName,
-    ) -> Result<crate::plugin::StepLink, crate::PluginError> {
+    ) -> Result<crate::plugin::StepLink, lash_execution_contracts::plugin_error::PluginError> {
         let (_, engine) = self.current.engine_process()?;
         Ok(engine.composition.step_link(&engine.env, effect))
     }
@@ -140,7 +149,10 @@ impl lash_core_execution::runtime::process::steps::ProcessStepContext for Runtim
     fn matched_link(
         &self,
         matched: &crate::DeferredMatch,
-    ) -> Result<(crate::plugin::StepLink, Result<(), String>), crate::PluginError> {
+    ) -> Result<
+        (crate::plugin::StepLink, Result<(), String>),
+        lash_execution_contracts::plugin_error::PluginError,
+    > {
         let (_, engine) = self.current.engine_process()?;
         Ok((
             engine.composition.matched_link(matched),
@@ -153,7 +165,7 @@ impl lash_core_execution::runtime::process::steps::ProcessStepContext for Runtim
     async fn resolve_dynamic(
         &self,
         path: &str,
-    ) -> Result<crate::DeferredMatch, crate::PluginError> {
+    ) -> Result<crate::DeferredMatch, lash_execution_contracts::plugin_error::PluginError> {
         let (_, engine) = self.current.engine_process()?;
         let owner = self.current.execution_owner()?;
         engine
@@ -166,7 +178,10 @@ impl lash_core_execution::runtime::process::steps::ProcessStepContext for Runtim
     /// steps (§6.2): its environment's components' state/config format tokens.
     fn requirements(
         &self,
-    ) -> Result<std::collections::BTreeSet<crate::ObligationToken>, crate::PluginError> {
+    ) -> Result<
+        std::collections::BTreeSet<crate::ObligationToken>,
+        lash_execution_contracts::plugin_error::PluginError,
+    > {
         let (_, engine) = self.current.engine_process()?;
         let mut requires =
             crate::plugin::ProcessComponentDeclaration::env_requirements(&engine.env);

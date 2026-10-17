@@ -322,7 +322,7 @@ impl ProtocolDriverHandle<lash_core::HostTurnProtocol> for ScriptedProtocol {
                 format!(
                     "{}={}",
                     call.tool_name,
-                    serde_json::to_string(&lash_core::Durable(&call.output.outcome))
+                    serde_json::to_string(&lash_protocol_types::Durable(&call.output.outcome))
                         .unwrap_or_default()
                 )
             })
@@ -525,7 +525,7 @@ impl SimServices {
 /// The messages `row`'s turn starts with: one user message per input its
 /// admission took, read back from the session's store.
 async fn admitted_messages(
-    backend: &lash_core_execution::Backend,
+    backend: &lash_execution_contracts::backend::Backend,
     row: &TurnRow,
 ) -> Result<Vec<Message>, TurnError> {
     let catalog = backend.session_store_factory();

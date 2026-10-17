@@ -1,4 +1,4 @@
-use crate::plugin::PluginError;
+use lash_execution_contracts::plugin_error::PluginError;
 use std::sync::Arc;
 use std::sync::atomic::{AtomicUsize, Ordering};
 
@@ -160,16 +160,24 @@ impl PluginFactory for CounterFactory {
 
     fn recipe(
         self: Arc<Self>,
-    ) -> std::result::Result<crate::plugin::PluginRecipe, crate::plugin::PluginError> {
+    ) -> std::result::Result<
+        crate::plugin::PluginRecipe,
+        lash_execution_contracts::plugin_error::PluginError,
+    > {
         let recipe_factory = Arc::clone(&self);
-        let recipe: std::result::Result<crate::plugin::PluginRecipe, crate::plugin::PluginError> = {
+        let recipe: std::result::Result<
+            crate::plugin::PluginRecipe,
+            lash_execution_contracts::plugin_error::PluginError,
+        > = {
             let id = self.id();
             Ok(crate::plugin::PluginRecipe::empty(
                 id,
                 move |_ctx, _state| {
-                    Err(crate::PluginError::Session(
-                        "not built in these laws".to_string(),
-                    ))
+                    Err(
+                        lash_execution_contracts::plugin_error::PluginError::Session(
+                            "not built in these laws".to_string(),
+                        ),
+                    )
                 },
             ))
         };
@@ -886,11 +894,20 @@ fn registrations_that_cannot_stand_are_refused() {
 
         fn recipe(
             self: Arc<Self>,
-        ) -> std::result::Result<crate::plugin::PluginRecipe, crate::plugin::PluginError> {
+        ) -> std::result::Result<
+            crate::plugin::PluginRecipe,
+            lash_execution_contracts::plugin_error::PluginError,
+        > {
             let id = self.id();
             Ok(crate::plugin::PluginRecipe::empty(
                 id,
-                move |_ctx, _state| Err(crate::PluginError::Session("unused".to_string())),
+                move |_ctx, _state| {
+                    Err(
+                        lash_execution_contracts::plugin_error::PluginError::Session(
+                            "unused".to_string(),
+                        ),
+                    )
+                },
             ))
         }
     }
@@ -974,7 +991,10 @@ impl PluginFactory for FormattedCounter {
 
     fn recipe(
         self: Arc<Self>,
-    ) -> std::result::Result<crate::plugin::PluginRecipe, crate::plugin::PluginError> {
+    ) -> std::result::Result<
+        crate::plugin::PluginRecipe,
+        lash_execution_contracts::plugin_error::PluginError,
+    > {
         Arc::new(self.0.clone()).recipe()
     }
 }

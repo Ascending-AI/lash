@@ -30,8 +30,8 @@ impl SqliteBlobProbe {
 impl lash_conformance::SessionDeleteBlobProbe for SqliteBlobProbe {
     async fn session_config_ref(
         &self,
-        session_id: &lash_core_execution::SessionId,
-    ) -> lash_core_execution::BlobRef {
+        session_id: &lash_protocol_types::SessionId,
+    ) -> lash_core_store::store::BlobRef {
         let config_ref: String = rusqlite::Connection::open(&self.catalog)
             .expect("open SQLite config-root probe")
             .query_row(
@@ -45,7 +45,7 @@ impl lash_conformance::SessionDeleteBlobProbe for SqliteBlobProbe {
         config_ref.into()
     }
 
-    async fn blob_exists(&self, blob_ref: &lash_core_execution::BlobRef) -> bool {
+    async fn blob_exists(&self, blob_ref: &lash_core_store::store::BlobRef) -> bool {
         rusqlite::Connection::open(&self.catalog)
             .expect("open SQLite blob probe")
             .query_row(
@@ -83,8 +83,8 @@ impl lash_conformance::SessionDeleteBlobProbe for SqliteBlobProbe {
 
     async fn checkpoint_component_edge_exists(
         &self,
-        checkpoint_ref: &lash_core_execution::BlobRef,
-        blob_ref: &lash_core_execution::BlobRef,
+        checkpoint_ref: &lash_core_store::store::BlobRef,
+        blob_ref: &lash_core_store::store::BlobRef,
     ) -> Option<bool> {
         Some(
             rusqlite::Connection::open(&self.catalog)

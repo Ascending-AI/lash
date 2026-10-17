@@ -11,8 +11,10 @@ use std::future::Future;
 use std::pin::Pin;
 use std::sync::Arc;
 
-use super::{PluginError, PluginSession, RecordedTurnContribution};
+use super::PluginSession;
+use super::RecordedTurnContribution;
 use crate::{RuntimeEffectCommand, RuntimeEffectControllerError, RuntimeEffectOutcome};
+use lash_execution_contracts::plugin_error::PluginError;
 
 /// Which sequential callback slot a [`RuntimeEffectCommand::PluginCallbacks`]
 /// step records.

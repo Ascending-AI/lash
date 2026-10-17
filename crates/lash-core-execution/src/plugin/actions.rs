@@ -1,4 +1,5 @@
 use crate::SessionId;
+use lash_execution_contracts::session_types::PluginOwned;
 use std::future::Future;
 use std::pin::Pin;
 use std::sync::Arc;
@@ -326,9 +327,9 @@ pub trait ProcessReadService: Send + Sync {
     async fn list_visible(
         &self,
         _session_id: &SessionId,
-        _mode: crate::ProcessListMode,
+        _mode: lash_execution_contracts::process::ProcessListMode,
         _scope: crate::ProcessOpScope<'_>,
-    ) -> Result<Vec<crate::facade_support::ObservedProcess>, PluginError>;
+    ) -> Result<Vec<lash_execution_contracts::process::ObservedProcess>, PluginError>;
 }
 
 #[derive(Clone, Debug, Serialize, Deserialize)]

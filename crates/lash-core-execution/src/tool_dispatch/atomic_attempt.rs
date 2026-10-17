@@ -229,7 +229,7 @@ fn body_state(
     tool_id: &crate::ToolId,
     ids: &ToolCallIds,
     attempt: u32,
-    state: crate::plugin::StateCommands,
+    state: lash_execution_contracts::state_commands::StateCommands,
 ) -> BodyState {
     if state.is_empty() {
         return None;
@@ -343,7 +343,7 @@ async fn dispatch_prepared_tool_attempt_launch<'run>(
             let kinds: Vec<_> = intents
                 .intents
                 .iter()
-                .map(crate::ToolIntent::kind)
+                .map(lash_execution_contracts::tool_intent::ToolIntent::kind)
                 .collect();
             let (output, state) = result.into_parts();
             let admitted = output
@@ -362,8 +362,8 @@ async fn dispatch_prepared_tool_attempt_launch<'run>(
                 // the attempt is recorded: nothing it declared is realized.
                 Err(refusal) => (
                     declaration_refused(&tool_name, refusal),
-                    crate::ToolIntents::default(),
-                    crate::plugin::StateCommands::default(),
+                    lash_execution_contracts::tool_intent::ToolIntents::default(),
+                    lash_execution_contracts::state_commands::StateCommands::default(),
                 ),
             }
         }

@@ -1,10 +1,15 @@
 use lash_protocol_types::SessionId;
 use std::sync::Arc;
 
-use lash_core::{
-    DeploymentStore, LlmUsage, Message, MessageRole, Part, RuntimeCommit, RuntimeSessionState,
-    SessionPolicy, facade_support::LashRuntime,
-};
+use lash_core::LlmUsage;
+use lash_core::Message;
+use lash_core::MessageRole;
+use lash_core::Part;
+use lash_core::RuntimeCommit;
+use lash_core::RuntimeSessionState;
+use lash_core::SessionPolicy;
+use lash_core::facade_support::LashRuntime;
+use lash_execution_contracts::deployment::DeploymentStore;
 use lash_sqlite_store::SqliteStoreSet;
 
 #[expect(
@@ -64,7 +69,7 @@ async fn embedded_runtime_builder_loads_state_from_store() {
         ))
     };
     state.ensure_agent_frame_initialized();
-    let store = lash_core::runtime::admit_session_view(
+    let store = lash_execution_contracts::deployment::admit_session_view(
         &catalog,
         &lash_core::testing::store_fixtures::root_session_request(&state.session_id),
     )
@@ -135,7 +140,7 @@ async fn embedded_runtime_builder_rejects_store_bound_to_different_session_id() 
             lash_core::NoProgressBudget::bounded(12),
         ))
     };
-    let store = lash_core::runtime::admit_session_view(
+    let store = lash_execution_contracts::deployment::admit_session_view(
         &catalog,
         &lash_core::testing::store_fixtures::root_session_request(&state.session_id),
     )

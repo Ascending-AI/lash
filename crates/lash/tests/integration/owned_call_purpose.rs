@@ -50,7 +50,10 @@ impl lash::plugins::PluginFactory for Probe {
 
     fn recipe(
         self: Arc<Self>,
-    ) -> std::result::Result<lash_core::plugin::PluginRecipe, lash_core::plugin::PluginError> {
+    ) -> std::result::Result<
+        lash_core::plugin::PluginRecipe,
+        lash_execution_contracts::plugin_error::PluginError,
+    > {
         let mut reg = lash_core::plugin::PluginRegistrar::<Probe>::new(
             lash_core::plugin::PluginFactory::id(self.as_ref()),
         );
@@ -92,7 +95,7 @@ impl lash::plugins::SessionPlugin for Probe {
 impl Probe {
     fn declare(
         reg: &mut lash_core::plugin::PluginRegistrar<Self>,
-    ) -> std::result::Result<(), lash_core::plugin::PluginError> {
+    ) -> std::result::Result<(), lash_execution_contracts::plugin_error::PluginError> {
         section(reg, "turn", PromptPurpose::Turn, TURN_TEXT)?;
         section(
             reg,
@@ -134,7 +137,9 @@ impl Probe {
                     serde_json::json!({"type":"object","additionalProperties":false}),
                     serde_json::json!({"type":"string"}),
                 )
-                .map_err(|error| lash_core::plugin::PluginError::Session(error.to_string()))?
+                .map_err(|error| {
+                    lash_execution_contracts::plugin_error::PluginError::Session(error.to_string())
+                })?
                 .with_execution(std::time::Duration::from_secs(120));
                 Ok(Arc::new(StaticToolProvider::new(vec![definition], Probe)))
             })?;

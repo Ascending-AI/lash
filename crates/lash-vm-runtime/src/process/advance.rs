@@ -12,12 +12,16 @@
 //! against a recorded outcome: only `kernel_run`, an effect-free stretch of
 //! guest code, is ever run again.
 
-use lash_core::{
-    EngineAction, EngineEvent, EngineState, EngineStateFormat, EngineStepKind, ProcessInfraError,
-    StepName, StepRequest,
-};
 use lash_core_store::checkpoint_graph::{GraphRefusal, NodeKind};
 use lash_core_store::tool_run::SettledOutput;
+use lash_execution_contracts::process::EngineAction;
+use lash_execution_contracts::process::EngineEvent;
+use lash_execution_contracts::process::EngineState;
+use lash_execution_contracts::process::EngineStateFormat;
+use lash_execution_contracts::process::EngineStepKind;
+use lash_execution_contracts::process::ProcessInfraError;
+use lash_execution_contracts::process::StepName;
+use lash_execution_contracts::process::StepRequest;
 use lash_kernel_doc::KernelVersion;
 use lash_vm_client::wire::OutcomeWire;
 
@@ -37,10 +41,12 @@ pub(crate) fn state_format(kernel: KernelVersion) -> EngineStateFormat {
 }
 
 fn infra(message: impl Into<String>) -> ProcessInfraError {
-    ProcessInfraError::new(lash_core::PluginError::StoredDataCorrupt {
-        record_kind: "kernel process engine state".to_owned(),
-        message: message.into(),
-    })
+    ProcessInfraError::new(
+        lash_execution_contracts::plugin_error::PluginError::StoredDataCorrupt {
+            record_kind: "kernel process engine state".to_owned(),
+            message: message.into(),
+        },
+    )
 }
 
 /// `state` in the format of the kernel version its run is parked under,
@@ -303,7 +309,7 @@ fn run_settled(
                 .map_err(|error| infra(format!("kernel_run failure answered {error}")))?;
             state.phase = Phase::Ended;
             return Ok(EngineAction::Terminal(
-                lash_core::ProcessOutcome::from_tool_output(output),
+                lash_execution_contracts::process::ProcessOutcome::from_tool_output(output),
             ));
         }
         SettledOutput::TimedOut { cause, .. } => {
@@ -436,15 +442,17 @@ fn run_settled(
 }
 
 /// The earliest task timer, retaining the same task's execution identity.
-fn next_timer(state: &KernelEngineState) -> Option<lash_core::EngineWake> {
+fn next_timer(state: &KernelEngineState) -> Option<lash_execution_contracts::process::EngineWake> {
     state
         .waits
         .values()
         .filter_map(|wait| match wait {
-            Wait::Timer { until_ms, identity } => Some(lash_core::EngineWake {
-                until: lash_core::durable_port::DurableInstant(*until_ms),
-                site: Some(identity.clone()),
-            }),
+            Wait::Timer { until_ms, identity } => {
+                Some(lash_execution_contracts::process::EngineWake {
+                    until: lash_core::durable_port::DurableInstant(*until_ms),
+                    site: Some(identity.clone()),
+                })
+            }
             Wait::Step { .. } => None,
         })
         .min_by_key(|wake| wake.until)
@@ -494,9 +502,13 @@ fn run(
     })
 }
 
-fn cancelled(origin: lash_protocol_types::CancelOrigin) -> lash_core::ProcessOutcome {
-    lash_core::ProcessAwaitOutput::from_tool_output(lash_core::ToolCallOutput::cancelled(
-        lash_core::ToolCancellation::runtime("the process was cancelled"),
-    ))
+fn cancelled(
+    origin: lash_protocol_types::CancelOrigin,
+) -> lash_execution_contracts::process::ProcessOutcome {
+    lash_execution_contracts::process::ProcessAwaitOutput::from_tool_output(
+        lash_core::ToolCallOutput::cancelled(lash_core::ToolCancellation::runtime(
+            "the process was cancelled",
+        )),
+    )
     .with_cancel_origin(Some(origin))
 }

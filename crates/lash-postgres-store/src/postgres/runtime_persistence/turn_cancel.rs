@@ -4,28 +4,30 @@
 use super::*;
 
 pub(crate) fn requested_append_ancestor(
-    stamp: &lash_core_execution::RuntimeTurnCommitStamp,
+    stamp: &lash_core_store::store::RuntimeTurnCommitStamp,
 ) -> Option<&str> {
     match &stamp.append_request_identity {
-        lash_core_execution::AppendRequestIdentity::Append {
+        lash_core_store::store::AppendRequestIdentity::Append {
             requested_ancestor_node_id,
             ..
         } => requested_ancestor_node_id.as_deref(),
-        lash_core_execution::AppendRequestIdentity::PlainCommit
-        | lash_core_execution::AppendRequestIdentity::SemanticBoundary { .. } => None,
+        lash_core_store::store::AppendRequestIdentity::PlainCommit
+        | lash_core_store::store::AppendRequestIdentity::SemanticBoundary { .. } => None,
     }
 }
 
 pub(crate) type AppendIdentityColumns<'a> = (Option<&'a str>, Option<i64>, Option<i32>);
 
 pub(crate) fn append_identity_columns(
-    identity: &lash_core_execution::AppendRequestIdentity,
+    identity: &lash_core_store::store::AppendRequestIdentity,
 ) -> Result<AppendIdentityColumns<'_>, StoreError> {
     // A semantic-boundary identity persists without a node count; the NULL
     // count is what distinguishes its family on decode (FIG-2480).
     let (encoding_version, request_hash, requested_node_count) = match identity {
-        lash_core_execution::AppendRequestIdentity::PlainCommit => return Ok((None, None, None)),
-        lash_core_execution::AppendRequestIdentity::Append {
+        lash_core_store::store::AppendRequestIdentity::PlainCommit => {
+            return Ok((None, None, None));
+        }
+        lash_core_store::store::AppendRequestIdentity::Append {
             encoding_version,
             request_hash,
             requested_node_count,
@@ -35,7 +37,7 @@ pub(crate) fn append_identity_columns(
             request_hash.as_str(),
             Some(*requested_node_count as i64),
         ),
-        lash_core_execution::AppendRequestIdentity::SemanticBoundary {
+        lash_core_store::store::AppendRequestIdentity::SemanticBoundary {
             operation: _,
             encoding_version,
             request_hash,

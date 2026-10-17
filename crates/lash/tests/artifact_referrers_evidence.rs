@@ -149,7 +149,7 @@ fn rlm_core_with_plugins(
         fixture,
         queue,
         plugins,
-        lash_core::lifetime::session_or_starter,
+        lash_execution_contracts::process::lifetime::session_or_starter,
     )
 }
 
@@ -158,7 +158,9 @@ fn rlm_core_with_lifetime(
     fixture: &Fixture,
     queue: Arc<Mutex<VecDeque<LlmResponse>>>,
     plugins: Vec<Arc<dyn lash_core::facade_support::PluginFactory>>,
-    lifetime: fn(&lash_core::StartCx) -> lash_core::Lifetime,
+    lifetime: fn(
+        &lash_execution_contracts::process::StartCx,
+    ) -> lash_execution_contracts::process::Lifetime,
 ) -> LashCore {
     rlm_core_in_dialect(
         fixture,
@@ -174,7 +176,9 @@ fn rlm_core_in_dialect(
     fixture: &Fixture,
     queue: Arc<Mutex<VecDeque<LlmResponse>>>,
     plugins: Vec<Arc<dyn lash_core::facade_support::PluginFactory>>,
-    lifetime: fn(&lash_core::StartCx) -> lash_core::Lifetime,
+    lifetime: fn(
+        &lash_execution_contracts::process::StartCx,
+    ) -> lash_execution_contracts::process::Lifetime,
     dialect: lash_protocol_rlm::CellDialect,
 ) -> LashCore {
     let provider = lash::testing::TestProvider::builder()
@@ -395,7 +399,7 @@ await control.finish({ h, empty, byFunction, byHandle });",
             &fixture,
             queue,
             Vec::new(),
-            lash_core::lifetime::detached,
+            lash_execution_contracts::process::lifetime::detached,
             dialect,
         );
         let session = created_session(&core, "cell-start-signatures")
@@ -443,7 +447,8 @@ await control.finish({ h, empty, byFunction, byHandle });",
                 .await_output(&process)
                 .await
                 .expect("process result");
-            let lash_core::ProcessAwaitOutput::Settled { output } = end else {
+            let lash_execution_contracts::process::ProcessAwaitOutput::Settled { output } = end
+            else {
                 panic!("settled process")
             };
             assert!(
@@ -457,7 +462,8 @@ await control.finish({ h, empty, byFunction, byHandle });",
                 .await_output(&empty)
                 .await
                 .expect("no-return function result");
-            let lash_core::ProcessAwaitOutput::Settled { output } = empty else {
+            let lash_execution_contracts::process::ProcessAwaitOutput::Settled { output } = empty
+            else {
                 panic!("settled no-return function")
             };
             assert!(
@@ -698,7 +704,7 @@ async fn saved_function_process(
         &fixture,
         Arc::clone(&responses),
         Vec::new(),
-        lash_core::lifetime::detached,
+        lash_execution_contracts::process::lifetime::detached,
         dialect,
     );
     let session_id = "saved-function-process";
@@ -754,7 +760,7 @@ async fn saved_function_process(
     .await
     .expect("the process settles")
     .expect("the output reads");
-    let lash_core::ProcessAwaitOutput::Settled { output } = output else {
+    let lash_execution_contracts::process::ProcessAwaitOutput::Settled { output } = output else {
         panic!("the process settles with an output: {output:?}");
     };
     assert!(output.is_success(), "the process finishes: {output:?}");

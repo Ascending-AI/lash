@@ -164,7 +164,9 @@ impl RuntimeDrive {
             .plugins()
             .restore_run(namespaces)
             .map_err(|error| match error {
-                crate::PluginError::StoredDataCorrupt { .. } => TurnError::UndecodableState {
+                lash_execution_contracts::plugin_error::PluginError::StoredDataCorrupt {
+                    ..
+                } => TurnError::UndecodableState {
                     state: ParkedTurnState::PluginState,
                     reason: error.to_string(),
                 },

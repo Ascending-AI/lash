@@ -857,7 +857,7 @@ fn benchmark_plugin_factories(
                 lash::MaxToolCalls::new(1024),
             )
             .no_progress_budget(lash_core::NoProgressBudget::bounded(12)),
-            lash_core::lifetime::starter,
+            lash_execution_contracts::process::lifetime::starter,
         );
         let delegation = if scenario.execution_mode().is_rlm() {
             delegation.with_rlm_children()
@@ -915,11 +915,11 @@ struct InProcessLane {
 }
 
 fn measured_stores(
-    stores: Arc<dyn lash_core::StoreSet>,
-    catalog: Arc<dyn lash_core::DeploymentStore>,
+    stores: Arc<dyn lash_execution_contracts::backend::StoreSet>,
+    catalog: Arc<dyn lash_execution_contracts::deployment::DeploymentStore>,
     metrics: Arc<RuntimePerfStoreMetrics>,
     measure_commit_bytes: bool,
-) -> Arc<dyn lash_core::StoreSet> {
+) -> Arc<dyn lash_execution_contracts::backend::StoreSet> {
     lash_core::testing::runtime_helpers::LayeredStores::over(stores)
         .map_session_store_factory(|_| catalog)
         .map_durable_store(|inner| {
@@ -933,7 +933,8 @@ fn measured_stores(
 }
 
 async fn in_process_lane() -> anyhow::Result<InProcessLane> {
-    let raw: Arc<dyn lash_core::StoreSet> = Arc::new(sqlite_memory_stores().await?);
+    let raw: Arc<dyn lash_execution_contracts::backend::StoreSet> =
+        Arc::new(sqlite_memory_stores().await?);
     let stores =
         RuntimePerfStoreFactory::decorating_without_commit_measurement(raw.session_store_factory());
     let layered = measured_stores(raw, Arc::new(stores.clone()), stores.metrics(), false);
@@ -947,8 +948,12 @@ async fn in_process_lane() -> anyhow::Result<InProcessLane> {
 /// actor before a checkpoint names them (FIG-6418).
 pub(crate) async fn memory_perf_store(
     session_id: &SessionId,
-) -> anyhow::Result<(Arc<RuntimePerfStore>, lash_core::Backend)> {
-    let raw: Arc<dyn lash_core::StoreSet> = Arc::new(sqlite_memory_stores().await?);
+) -> anyhow::Result<(
+    Arc<RuntimePerfStore>,
+    lash_execution_contracts::backend::Backend,
+)> {
+    let raw: Arc<dyn lash_execution_contracts::backend::StoreSet> =
+        Arc::new(sqlite_memory_stores().await?);
     let factory =
         RuntimePerfStoreFactory::decorating_without_commit_measurement(raw.session_store_factory());
     Ok((factory.root_store(session_id).await?, durable_backend(raw)?))
@@ -1120,17 +1125,20 @@ pub(crate) async fn durable_sqlite_session_store_factory_without_commit_measurem
     sessions_root: PathBuf,
     _process_registry_path: &std::path::Path,
 ) -> anyhow::Result<(
-    Arc<dyn lash_core::DeploymentStore>,
+    Arc<dyn lash_execution_contracts::deployment::DeploymentStore>,
     Arc<RuntimePerfStoreMetrics>,
-    lash_core::Backend,
+    lash_execution_contracts::backend::Backend,
 )> {
     let sqlite = lash_sqlite_store::SqliteStoreSet::open(
         sessions_root.join("lash.db"),
         lash_sqlite_store::SqliteSynchronous::Full,
     )
     .await?;
-    lash_core::testing::process_execution_env_fixture(sqlite.process_env_store().as_ref()).await;
-    let sqlite: Arc<dyn lash_core::StoreSet> = Arc::new(sqlite);
+    lash_execution_contracts::testing::process_execution_env_fixture(
+        sqlite.process_env_store().as_ref(),
+    )
+    .await;
+    let sqlite: Arc<dyn lash_execution_contracts::backend::StoreSet> = Arc::new(sqlite);
     let factory = RuntimePerfStoreFactory::decorating_without_commit_measurement(
         sqlite.session_store_factory(),
     );
@@ -1143,9 +1151,9 @@ pub(crate) async fn durable_sqlite_session_store_factory_without_commit_measurem
 pub(crate) async fn durable_postgres_session_store_factory_without_commit_measurement(
     postgres: &lash_postgres_store::PostgresStorage,
 ) -> anyhow::Result<(
-    Arc<dyn lash_core::DeploymentStore>,
+    Arc<dyn lash_execution_contracts::deployment::DeploymentStore>,
     Arc<RuntimePerfStoreMetrics>,
-    lash_core::Backend,
+    lash_execution_contracts::backend::Backend,
 )> {
     let factory =
         RuntimePerfStoreFactory::decorating_without_commit_measurement(Arc::new(postgres.store()));
@@ -1154,7 +1162,10 @@ pub(crate) async fn durable_postgres_session_store_factory_without_commit_measur
         postgres,
         Arc::new(lash_core_execution::attachments::UnavailableAttachmentStore),
     );
-    lash_core::testing::process_execution_env_fixture(stores.process_env_store().as_ref()).await;
+    lash_execution_contracts::testing::process_execution_env_fixture(
+        stores.process_env_store().as_ref(),
+    )
+    .await;
     Ok((
         Arc::new(factory),
         metrics,
@@ -1166,7 +1177,7 @@ pub(crate) async fn build_runtime_with_sqlite_store(
     scenario: RuntimePerfScenario,
     root: PathBuf,
 ) -> anyhow::Result<BenchmarkRuntime> {
-    let stores: Arc<dyn lash_core::StoreSet> = Arc::new(
+    let stores: Arc<dyn lash_execution_contracts::backend::StoreSet> = Arc::new(
         lash_sqlite_store::SqliteStoreSet::open(
             root.join("lash.db"),
             lash_sqlite_store::SqliteSynchronous::Full,
@@ -1180,13 +1191,13 @@ pub(crate) async fn build_runtime_with_sqlite_store(
 /// Identical runtime, provider and plugin geometry on either durable store.
 pub(crate) async fn build_runtime_with_stores(
     scenario: RuntimePerfScenario,
-    stores: Arc<dyn lash_core::StoreSet>,
+    stores: Arc<dyn lash_execution_contracts::backend::StoreSet>,
 ) -> anyhow::Result<BenchmarkRuntime> {
     let wiring = scenario.wiring();
     let mode_id = scenario.execution_mode();
     let provider = benchmark_provider(scenario).into_handle();
     let (store_factory, store_metrics): (
-        Arc<dyn lash_core::DeploymentStore>,
+        Arc<dyn lash_execution_contracts::deployment::DeploymentStore>,
         Arc<RuntimePerfStoreMetrics>,
     ) = if wiring.measure_commit_bytes {
         let factory = RuntimePerfStoreFactory::decorating(stores.session_store_factory());

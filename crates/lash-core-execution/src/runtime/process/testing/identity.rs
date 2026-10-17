@@ -55,7 +55,10 @@ fn process_env_identity_corpus() -> [(String, String); 2] {
         )
         .build()
         .expect("the rich environment builds");
-    let specs = [crate::testing::process_env_fixture(), rich];
+    let specs = [
+        lash_execution_contracts::testing::process_env_fixture(),
+        rich,
+    ];
     specs.map(|spec| {
         let bytes = spec.to_store_bytes().expect("encode golden env");
         (

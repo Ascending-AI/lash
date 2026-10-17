@@ -3,7 +3,7 @@
 use lash_protocol_types::SessionId;
 use std::sync::{Arc, Mutex};
 
-use lash_core_execution::DeploymentStore;
+use lash_execution_contracts::deployment::DeploymentStore;
 use lash_protocol_types::sync::MutexExt;
 
 use super::Retained;
@@ -40,7 +40,7 @@ lash_conformance::store_maintenance_tests!({
         move || make_retained.open_blocking().blocking_store() as Arc<dyn DeploymentStore>,
         move || {
             bytes_retained.open_blocking().attachment_store()
-                as Arc<dyn lash_core_execution::AttachmentStore>
+                as Arc<dyn lash_core_store::attachments::AttachmentStore>
         },
     )
 });

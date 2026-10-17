@@ -4,15 +4,18 @@ mod steps;
 
 pub use steps::process_steps;
 
+use crate::PluginFactory;
+use crate::PluginHost;
+use crate::PluginStack;
 use crate::RuntimeHostConfig;
-use crate::{
-    DeploymentStore, PluginError, PluginFactory, PluginHost, PluginStack, ProcessRecord,
-    ProcessRegistry,
-};
 use lash_core::core_internal::{EngineProcessRuntime, ProcessRuntimePorts, SessionTurnRuntime};
 use lash_core_execution::runtime::actor::process::{
     SessionTurnCancel, SessionTurnMail, SessionTurns,
 };
+use lash_execution_contracts::deployment::DeploymentStore;
+use lash_execution_contracts::plugin_error::PluginError;
+use lash_execution_contracts::process::ProcessRecord;
+use lash_execution_contracts::process::ProcessRegistry;
 
 /// Deployment-local configuration for rebuilding durable process executions.
 ///
@@ -151,10 +154,9 @@ impl DurableProcessWorker {
             process_work: self.process_wiring(),
             lease_owner: self.config.lease_owner.clone(),
             turn_phase_probe: process.session_capability.as_ref().and_then(|session| {
-                self.config
-                    .runtime_host
-                    .turn_phase_probes
-                    .get_for_scope(&crate::SessionScope::new(session.clone()))
+                self.config.runtime_host.turn_phase_probes.get_for_scope(
+                    &lash_execution_contracts::process::SessionScope::new(session.clone()),
+                )
             }),
         }
     }
@@ -201,7 +203,10 @@ impl SessionTurns for DurableProcessWorker {
             .await
     }
 
-    async fn outcome(&self, process: &ProcessRecord) -> Result<crate::ProcessOutcome, PluginError> {
+    async fn outcome(
+        &self,
+        process: &ProcessRecord,
+    ) -> Result<lash_execution_contracts::process::ProcessOutcome, PluginError> {
         self.session_turn_runtime(process)
             .await?
             .session_turn_outcome(process)

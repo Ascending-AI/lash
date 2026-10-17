@@ -22,28 +22,46 @@
 //! registration; and the adoption of what was staged once the row committed
 //! ([`StartStaging::adopt`]).
 
+use lash_execution_contracts::process::StagedRegistration;
 use std::collections::BTreeSet;
 use std::sync::Arc;
 
 use futures_util::future::BoxFuture;
 use serde::{Deserialize, Serialize};
 
-use super::{
-    HoldEnvError, ProcessEngineRegistry, ProcessEnvPorts, ProcessEnvRef, ProcessEnvSelection,
-    ProcessEnvStore, ProcessInput, ProcessRecord, ProcessRegistration, ProcessRegistry,
-    ProcessStartRegistration, ProcessStartTarget, SessionId, StoreRealization,
-    artifact_referrer_ended,
-};
-use crate::{
-    ArtifactCleanup, ArtifactName, ArtifactReferrer, ArtifactStoreId, ModuleArtifactStore,
-    ProcessEnv, ReferrerClaim, ReferrerGuard, RuntimeEffectControllerError, StartKey,
-    TurnFailureCause, runtime::Clock, store::ArtifactCleanupLedger,
-};
+use super::HoldEnvError;
+use super::ProcessEngineRegistry;
+use super::ProcessEnvPorts;
+use super::ProcessEnvRef;
+use super::ProcessEnvSelection;
+use super::SessionId;
+use crate::ArtifactCleanup;
+use crate::ArtifactName;
+use crate::ArtifactReferrer;
+use crate::ArtifactStoreId;
+use crate::ProcessEnv;
+use crate::ReferrerClaim;
+use crate::ReferrerGuard;
+use crate::RuntimeEffectControllerError;
+use crate::StartKey;
+use crate::TurnFailureCause;
+use crate::runtime::Clock;
+use crate::store::ArtifactCleanupLedger;
+use lash_execution_contracts::module_artifacts::ModuleArtifactStore;
+use lash_execution_contracts::process::ProcessEnvStore;
+use lash_execution_contracts::process::ProcessInput;
+use lash_execution_contracts::process::ProcessRecord;
+use lash_execution_contracts::process::ProcessRegistration;
+use lash_execution_contracts::process::ProcessRegistry;
+use lash_execution_contracts::process::ProcessStartRegistration;
+use lash_execution_contracts::process::ProcessStartTarget;
+use lash_execution_contracts::process::StoreRealization;
+use lash_execution_contracts::process::artifact_referrer_ended;
 
 /// The artifact stores a referrer acquires through, and the cleanup ledger
 /// its guards arm in (ADR 0113 §2.1, §2.4): what a process start and a
 /// definition publication need to hold every artifact a
-/// [`ProcessEngine::start_artifacts`](super::ProcessEngine::start_artifacts)
+/// [`ProcessEngine::start_artifacts`](lash_execution_contracts::process::ProcessEngine::start_artifacts)
 /// name points at, whichever store holds it.
 #[derive(Clone)]
 pub struct ArtifactReferrerPorts {
@@ -85,7 +103,7 @@ impl ArtifactReferrerPorts {
     }
 
     /// The ports of `backend`'s store set.
-    pub fn of_backend(backend: &crate::Backend) -> Self {
+    pub fn of_backend(backend: &lash_execution_contracts::backend::Backend) -> Self {
         Self::new(
             backend.module_artifacts(),
             backend.process_env_store(),
@@ -133,7 +151,7 @@ impl ArtifactReferrerPorts {
         engines: &ProcessEngineRegistry,
         claim: &ReferrerClaim,
         names: &[ArtifactName],
-    ) -> Result<ReferrerAcquisition, crate::PluginError> {
+    ) -> Result<ReferrerAcquisition, lash_execution_contracts::plugin_error::PluginError> {
         let (engine_names, store_names): (Vec<&ArtifactName>, Vec<&ArtifactName>) = names
             .iter()
             .partition(|name| matches!(name.store, ArtifactStoreId::Engine(_)));
@@ -154,7 +172,7 @@ impl ArtifactReferrerPorts {
                 ArtifactStoreId::ProcessDefinition => {
                     let id =
                         super::ProcessDefinitionId::parse(&name.artifact_ref).map_err(|error| {
-                            crate::PluginError::Session(format!(
+                            lash_execution_contracts::plugin_error::PluginError::Session(format!(
                                 "artifact `{}` is not a process definition id: {error}",
                                 name.artifact_ref
                             ))
@@ -166,20 +184,27 @@ impl ArtifactReferrerPorts {
                 ArtifactStoreId::Engine(_) => continue,
                 // Tool material is held by Run-segment and source leases only.
                 ArtifactStoreId::ToolMaterial => {
-                    return Err(crate::PluginError::Session(format!(
-                        "a start cannot hold retained tool material `{}`",
-                        name.artifact_ref
-                    )));
+                    return Err(
+                        lash_execution_contracts::plugin_error::PluginError::Session(format!(
+                            "a start cannot hold retained tool material `{}`",
+                            name.artifact_ref
+                        )),
+                    );
                 }
                 // A recorded prelude is held by its turn's journal only.
                 ArtifactStoreId::TurnPrelude => {
-                    return Err(crate::PluginError::Session(format!(
-                        "a start cannot hold the recorded turn prelude `{}`",
-                        name.artifact_ref
-                    )));
+                    return Err(
+                        lash_execution_contracts::plugin_error::PluginError::Session(format!(
+                            "a start cannot hold the recorded turn prelude `{}`",
+                            name.artifact_ref
+                        )),
+                    );
                 }
             };
-            if let Some(ended) = held_or_ended(claim, acquired.map_err(crate::PluginError::from))? {
+            if let Some(ended) = held_or_ended(
+                claim,
+                acquired.map_err(lash_execution_contracts::plugin_error::PluginError::from),
+            )? {
                 return Ok(ended);
             }
         }
@@ -209,12 +234,15 @@ impl ArtifactReferrerPorts {
     /// # Errors
     ///
     /// The ledger's failure.
-    pub async fn arm(&self, cleanup: &ArtifactCleanup) -> Result<(), crate::PluginError> {
+    pub async fn arm(
+        &self,
+        cleanup: &ArtifactCleanup,
+    ) -> Result<(), lash_execution_contracts::plugin_error::PluginError> {
         self.cleanup
             .arm_cleanup(cleanup, self.clock.timestamp_ms())
             .await
             .map(|_| ())
-            .map_err(crate::PluginError::from)
+            .map_err(lash_execution_contracts::plugin_error::PluginError::from)
     }
 
     /// End `referrer` now: its `Ended` record with no carries and no gate.
@@ -222,7 +250,10 @@ impl ArtifactReferrerPorts {
     /// # Errors
     ///
     /// The ledger's failure.
-    pub async fn end(&self, referrer: ArtifactReferrer) -> Result<(), crate::PluginError> {
+    pub async fn end(
+        &self,
+        referrer: ArtifactReferrer,
+    ) -> Result<(), lash_execution_contracts::plugin_error::PluginError> {
         self.arm(&ArtifactCleanup::ended(referrer, Vec::new(), None))
             .await
     }
@@ -246,8 +277,8 @@ impl ArtifactReferrerPorts {
 /// it held, and the error otherwise.
 fn held_or_ended(
     claim: &ReferrerClaim,
-    acquired: Result<(), crate::PluginError>,
-) -> Result<Option<ReferrerAcquisition>, crate::PluginError> {
+    acquired: Result<(), lash_execution_contracts::plugin_error::PluginError>,
+) -> Result<Option<ReferrerAcquisition>, lash_execution_contracts::plugin_error::PluginError> {
     match acquired {
         Ok(()) => Ok(None),
         Err(error) if artifact_referrer_ended(&error) == Some(&claim.referrer()) => {
@@ -320,7 +351,7 @@ pub struct RegisteredProcessStart {
     /// registrar retains under the start key.
     pub record: ProcessRecord,
     /// Whether the registrar created the row for this start.
-    pub disposition: crate::ProcessRegistrationOutcome,
+    pub disposition: lash_execution_contracts::process::ProcessRegistrationOutcome,
     /// The execution environment the start's registration names once staged.
     pub env_ref: Option<ProcessEnvRef>,
 }
@@ -329,7 +360,10 @@ impl RegisteredProcessStart {
     /// The registry's verdict: a coalesced start is reported as a replay
     /// rather than a fresh start (FIG-3070).
     pub fn realization(&self) -> StoreRealization {
-        StoreRealization::from_wrote(self.disposition == crate::ProcessRegistrationOutcome::Created)
+        StoreRealization::from_wrote(
+            self.disposition
+                == lash_execution_contracts::process::ProcessRegistrationOutcome::Created,
+        )
     }
 
     /// The registration the started process runs, from the one the start
@@ -415,70 +449,10 @@ pub struct StagedProcessStart {
     /// the start's key.
     pub record: ProcessRecord,
     /// Whether committing the rows creates the row.
-    pub disposition: crate::ProcessRegistrationOutcome,
+    pub disposition: lash_execution_contracts::process::ProcessRegistrationOutcome,
     /// The rows that register the start; `None` when a process already
     /// holds its key, and so is the start.
     pub rows: Option<lash_durable::domain::ProcessStartRows>,
-}
-
-/// A prepared registration as a store-local start's rows carry it: what a
-/// dialect applies inside the commit that records the start's outcome.
-#[derive(Debug, Serialize, Deserialize)]
-#[serde(deny_unknown_fields)]
-pub struct StagedRegistration {
-    /// The registration, its trace span derived.
-    pub registration: ProcessRegistration,
-    /// The sessions that observe the process from its creation.
-    pub observers: Vec<SessionId>,
-    /// The process id the registrar minted.
-    pub process_id: super::ProcessId,
-    /// When the registration was prepared: the row's creation instant.
-    pub prepared_at_ms: u64,
-}
-
-impl StagedRegistration {
-    /// The record its rows register once they commit.
-    ///
-    /// # Errors
-    ///
-    /// A registration its admission refuses.
-    pub fn record(&self) -> Result<ProcessRecord, crate::PluginError> {
-        Ok(ProcessRecord::from_prepared_registration(
-            super::prepare_process_registration(self.registration.clone())?,
-            self.process_id.clone(),
-            self.prepared_at_ms,
-        ))
-    }
-
-    /// The rows a store-local start commits.
-    ///
-    /// # Errors
-    ///
-    /// A registration that does not encode.
-    pub fn rows(&self) -> Result<lash_durable::domain::ProcessStartRows, crate::PluginError> {
-        Ok(lash_durable::domain::ProcessStartRows {
-            process: self.process_id.clone(),
-            registration_json: serde_json::to_string(self).map_err(|error| {
-                crate::PluginError::Session(format!("failed to encode a process start: {error}"))
-            })?,
-        })
-    }
-
-    /// The registration `rows` carry.
-    ///
-    /// # Errors
-    ///
-    /// Rows that do not decode.
-    pub fn decode(
-        rows: &lash_durable::domain::ProcessStartRows,
-    ) -> Result<Self, crate::PluginError> {
-        serde_json::from_str(&rows.registration_json).map_err(|error| {
-            crate::PluginError::StoredDataCorrupt {
-                record_kind: "process start rows".to_owned(),
-                message: error.to_string(),
-            }
-        })
-    }
 }
 
 /// Stage one process start as a store-local effect: [`stage_process_start`],
@@ -510,10 +484,10 @@ pub async fn stage_store_local_start(
             .ok_or_else(|| crate::StoreError::PreparedProcessRegistrationStale {
                 process_id: registration.process_id().clone(),
             })
-            .map_err(crate::PluginError::from)?;
+            .map_err(lash_execution_contracts::plugin_error::PluginError::from)?;
         return Ok(StagedProcessStart {
             record,
-            disposition: crate::ProcessRegistrationOutcome::Existing,
+            disposition: lash_execution_contracts::process::ProcessRegistrationOutcome::Existing,
             rows: None,
         });
     }
@@ -545,7 +519,13 @@ pub async fn stage_store_local_start(
         {
             let start_key = registration.start_key.clone();
             staging.abandon(stores).await?;
-            return Err(crate::PluginError::ParentEnded { start_key, parent }.into());
+            return Err(
+                lash_execution_contracts::plugin_error::PluginError::ParentEnded {
+                    start_key,
+                    parent,
+                }
+                .into(),
+            );
         }
     }
     let staged = StagedRegistration {
@@ -558,7 +538,7 @@ pub async fn stage_store_local_start(
     let rows = staged.rows()?;
     Ok(StagedProcessStart {
         record,
-        disposition: crate::ProcessRegistrationOutcome::Created,
+        disposition: lash_execution_contracts::process::ProcessRegistrationOutcome::Created,
         rows: Some(rows),
     })
 }
@@ -569,7 +549,7 @@ pub struct PreparedProcessStart<'a> {
     /// What the start staged, adopted once the registration commits.
     pub staging: StartStaging<'a>,
     /// The registration to apply, its process id minted.
-    pub registration: crate::PreparedProcessRegistration,
+    pub registration: lash_execution_contracts::process::PreparedProcessRegistration,
 }
 
 /// What one prepared start staged under `Start(key)`.
@@ -660,15 +640,15 @@ async fn require_host_session_live(
     stores: &ProcessStartStores<'_>,
     registration: &ProcessStartRegistration,
 ) -> Result<(), RuntimeEffectControllerError> {
-    let super::model::LifetimeDecision::Until {
+    let lash_execution_contracts::process::LifetimeDecision::Until {
         scope: super::model::ScopeId::Session(session_id),
-        grant: super::model::ScopeGrant::HostSessionLookup,
+        grant: lash_execution_contracts::process::ScopeGrant::HostSessionLookup,
     } = &registration.lifetime
     else {
         return Ok(());
     };
     let live = match stores.session_catalog {
-        Some(catalog) => crate::runtime::session_is_live(catalog, session_id)
+        Some(catalog) => lash_execution_contracts::deployment::session_is_live(catalog, session_id)
             .await
             .map_err(RuntimeEffectControllerError::from)?,
         None => false,
@@ -773,9 +753,12 @@ async fn stage<'a>(
     .await?;
     registration.trace_class = match registration.input.as_ref() {
         ProcessInput::Engine { kind, .. } => stores.engines.require(kind)?.trace_class(),
-        ProcessInput::SessionTurn { .. } => super::ProcessTraceClass::Internal,
+        ProcessInput::SessionTurn { .. } => {
+            lash_execution_contracts::process::ProcessTraceClass::Internal
+        }
     };
-    registration.trace_nodes &= registration.trace_class == super::ProcessTraceClass::Workflow;
+    registration.trace_nodes &=
+        registration.trace_class == lash_execution_contracts::process::ProcessTraceClass::Workflow;
     check_sealed_settings(stores, &registration)?;
     let loaded = load_staged_env(stores, env.as_ref()).await?;
     registration.requires = loaded
@@ -840,7 +823,10 @@ impl StartStaging<'_> {
     pub async fn adopt(
         self,
         stores: &ProcessStartStores<'_>,
-        committed: Result<crate::ProcessRegistrationReceipt, crate::PluginError>,
+        committed: Result<
+            lash_execution_contracts::process::ProcessRegistrationReceipt,
+            lash_execution_contracts::plugin_error::PluginError,
+        >,
     ) -> Result<RegisteredProcessStart, RuntimeEffectControllerError> {
         let start_key = self.start_key.clone();
         match self.adopt_committed(stores, committed).await {
@@ -888,7 +874,10 @@ impl StartStaging<'_> {
     async fn adopt_committed(
         self,
         stores: &ProcessStartStores<'_>,
-        committed: Result<crate::ProcessRegistrationReceipt, crate::PluginError>,
+        committed: Result<
+            lash_execution_contracts::process::ProcessRegistrationReceipt,
+            lash_execution_contracts::plugin_error::PluginError,
+        >,
     ) -> Result<RegisteredProcessStart, RuntimeEffectControllerError> {
         let Self {
             start_key: _,
@@ -901,11 +890,15 @@ impl StartStaging<'_> {
         } = self;
         let registered = committed?;
         let disposition = registered.outcome;
-        let created = disposition == crate::ProcessRegistrationOutcome::Created;
+        let created =
+            disposition == lash_execution_contracts::process::ProcessRegistrationOutcome::Created;
         let record = registered.record;
-        let process_claim =
-            ReferrerClaim::unguarded(ArtifactReferrer::ProcessRecord(record.id.clone()))
-                .map_err(|error| crate::PluginError::Session(error.to_string()))?;
+        let process_claim = ReferrerClaim::unguarded(ArtifactReferrer::ProcessRecord(
+            record.id.clone(),
+        ))
+        .map_err(|error| {
+            lash_execution_contracts::plugin_error::PluginError::Session(error.to_string())
+        })?;
         let adopts_env = created || record.env_ref() == submitted_env_ref.as_ref();
         let adopts_engine = created || record.input == submitted_input;
         // A key is global, so another start's terminal refusal can end
@@ -929,7 +922,7 @@ impl StartStaging<'_> {
                 .ports
                 .acquire_definition(definition.engines, &process_claim, &definition.id)
                 .await?
-                == super::DefinitionAcquisition::Ended
+                == lash_execution_contracts::process::DefinitionAcquisition::Ended
         {
             return Err(RuntimeEffectControllerError::foreign(
                 "process_record_ended",
@@ -1058,7 +1051,7 @@ async fn start_ended_after_staging(
             .ports
             .acquire_definition(definition.engines, claim, &definition.id)
             .await?;
-        return Ok(acquired == super::DefinitionAcquisition::Ended);
+        return Ok(acquired == lash_execution_contracts::process::DefinitionAcquisition::Ended);
     }
     if let (Some(env_store), Some(env)) = (stores.env_store, env)
         && env.staged
@@ -1097,7 +1090,10 @@ async fn acquire_env(
         Ok(_) => Ok(()),
         Err(HoldEnvError::Fault(error)) => Err(error),
         Err(HoldEnvError::Refused(refusal)) => {
-            return Err(crate::PluginError::ProcessEnvRefused { refusal }.into());
+            return Err(
+                lash_execution_contracts::plugin_error::PluginError::ProcessEnvRefused { refusal }
+                    .into(),
+            );
         }
     };
     Ok(held_or_ended(claim, acquired)?.is_none())
@@ -1133,15 +1129,16 @@ async fn load_staged_env(
     let (Some(env), Some(env_store)) = (env, stores.env_store) else {
         return Ok(None);
     };
-    let loaded = crate::runtime::load_process_env(env_store.as_ref(), &env.env_ref)
-        .await
-        .map_err(|error| {
-            crate::runtime::effect::executor::unresolved_execution_env(
-                stores.executor,
-                &env.env_ref,
-                error,
-            )
-        })?;
+    let loaded =
+        lash_execution_contracts::process::load_process_env(env_store.as_ref(), &env.env_ref)
+            .await
+            .map_err(|error| {
+                crate::runtime::effect::executor::unresolved_execution_env(
+                    stores.executor,
+                    &env.env_ref,
+                    error,
+                )
+            })?;
     Ok(Some(loaded))
 }
 
@@ -1159,7 +1156,9 @@ async fn link_start(
     else {
         return Ok(());
     };
-    let refused = |refusal| crate::PluginError::ProcessEnvRefused { refusal };
+    let refused = |refusal| {
+        lash_execution_contracts::plugin_error::PluginError::ProcessEnvRefused { refusal }
+    };
     let performed = stores
         .engines
         .performed_effects(kind, payload)
@@ -1361,7 +1360,10 @@ async fn stage_inline(
     let engines = stores.engines;
     let starts = engines.inline_starts(engine_kind)?;
     let resolved = |inline: super::InlineDefinition| super::ResolvedProcessDefinition {
-        definition: super::ProcessDefinition::new(inline.draft.id(), inline.signature),
+        definition: lash_execution_contracts::process::ProcessDefinition::new(
+            inline.draft.id(),
+            inline.signature,
+        ),
         draft: inline.draft,
     };
     if let Some(retained) = stores.registry.get_process_by_start_key(start_key).await? {
@@ -1372,10 +1374,12 @@ async fn stage_inline(
         if start_key.fences_content()
             && retained.identity.definition_id.as_ref() != Some(&inline.draft.id())
         {
-            return Err(crate::PluginError::StartKeyConflict {
-                start_key: start_key.clone(),
-            }
-            .into());
+            return Err(
+                lash_execution_contracts::plugin_error::PluginError::StartKeyConflict {
+                    start_key: start_key.clone(),
+                }
+                .into(),
+            );
         }
         return Ok((false, resolved(inline)));
     }
@@ -1415,7 +1419,7 @@ async fn stage_inline(
 }
 
 fn definition_missing(definition_id: &super::ProcessDefinitionId) -> RuntimeEffectControllerError {
-    crate::PluginError::Runtime(crate::RuntimeError::new(
+    lash_execution_contracts::plugin_error::PluginError::Runtime(crate::RuntimeError::new(
         crate::RuntimeErrorCode::DefinitionMissing,
         format!("process definition `{definition_id}` is not stored: no referrer holds it"),
     ))
@@ -1449,8 +1453,10 @@ async fn stage_definition<'a>(
         .acquire_definition(engines, claim, definition_id)
         .await?
     {
-        super::DefinitionAcquisition::Held(resolved) => (resolved, true),
-        super::DefinitionAcquisition::Ended => {
+        lash_execution_contracts::process::DefinitionAcquisition::Held(resolved) => {
+            (resolved, true)
+        }
+        lash_execution_contracts::process::DefinitionAcquisition::Ended => {
             let Some(resolved) = ports.read_definition(engines, definition_id).await? else {
                 return Err(definition_missing(definition_id));
             };
@@ -1461,10 +1467,13 @@ async fn stage_definition<'a>(
         engines
             .verify_definition_claim(
                 &resolved.draft,
-                &super::ProcessDefinition::new(definition_id.clone(), signature.clone()),
+                &lash_execution_contracts::process::ProcessDefinition::new(
+                    definition_id.clone(),
+                    signature.clone(),
+                ),
             )
             .await
-            .map_err(crate::PluginError::from)?;
+            .map_err(lash_execution_contracts::plugin_error::PluginError::from)?;
     }
     let registration =
         definition_registration(stores, registration, &resolved, args, launch).await?;
@@ -1502,7 +1511,9 @@ async fn definition_registration(
             payload,
             launch: launch.clone(),
         }))
-        .with_admitted_identity(super::AdmittedProcessIdentity::admitted(identity))
+        .with_admitted_identity(
+            lash_execution_contracts::process::engine::admitted_process_identity(identity),
+        )
         .with_host_facing_label(declared_label))
 }
 

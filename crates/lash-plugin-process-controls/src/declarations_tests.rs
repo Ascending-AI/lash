@@ -8,7 +8,9 @@ use crate::SessionProcessAdminTools;
 fn tools() -> SessionProcessAdminTools {
     SessionProcessAdminTools {
         include_cancel_process: true,
-        lifetime: std::sync::Arc::new(lash_core::lifetime::session_or_starter),
+        lifetime: std::sync::Arc::new(
+            lash_execution_contracts::process::lifetime::session_or_starter,
+        ),
         environment: lash_core::runtime::env_policy::policy::refuse(
             "these laws never reach the environment policy",
         ),
@@ -80,9 +82,9 @@ fn id(byte: u8) -> lash_core::ProcessDefinitionId {
     lash_core::ProcessDefinitionId::from_sha256_digest([byte; 32])
 }
 fn definition() -> Value {
-    serde_json::to_value(lash_core::ProcessDefinition::new(
+    serde_json::to_value(lash_execution_contracts::process::ProcessDefinition::new(
         id(1),
-        lash_core::ProcessSignature::Unknown,
+        lash_execution_contracts::process::ProcessSignature::Unknown,
     ))
     .expect("definition")
 }
@@ -146,18 +148,18 @@ async fn an_unusable_declared_label_is_refused() {
 
 #[test]
 fn a_started_definition_is_the_definition_processes_list_filters_by() {
-    let registration = lash_core::testing::held_engine_registration(
+    let registration = lash_execution_contracts::testing::held_engine_registration(
         Value::Null,
-        lash_core::ProcessProvenance::host(),
-        lash_core::Lifetime::Detached,
+        lash_execution_contracts::process::ProcessProvenance::host(),
+        lash_execution_contracts::process::Lifetime::Detached,
     );
-    let mut record = lash_core::ProcessRecord::from_registration(
+    let mut record = lash_execution_contracts::process::ProcessRecord::from_registration(
         registration,
         lash_core::ProcessId::fixture("run"),
     );
     record.identity.definition_id = Some(id(1));
     for (candidate, matches) in [(id(1), true), (id(2), false)] {
-        let filter = lash_core::ProcessListFilter::decode(
+        let filter = lash_execution_contracts::process::ProcessListFilter::decode(
             &serde_json::json!({"definition_id": candidate.to_tagged_json(), "status": "any"}),
         )
         .expect("id filter");

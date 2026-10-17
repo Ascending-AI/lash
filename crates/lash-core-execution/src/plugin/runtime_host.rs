@@ -1,5 +1,9 @@
+pub use lash_core_store::session_append::{AppendSessionNodesOutcome, AppendSessionNodesRequest};
+
 use crate::SessionId;
 use crate::TurnId;
+use lash_execution_contracts::session_types::SessionCreateRequest;
+use lash_execution_contracts::session_types::SessionHandle;
 use serde::{Deserialize, Serialize};
 
 use super::*;
@@ -59,5 +63,3 @@ pub struct DirectLlmCompletion {
     pub usage: crate::LlmUsage,
     pub llm_call: crate::LlmCallRecord,
 }
-
-pub use lash_core_store::session_append::{AppendSessionNodesOutcome, AppendSessionNodesRequest};

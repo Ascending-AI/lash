@@ -10,11 +10,11 @@
 
 use std::num::NonZeroUsize;
 
-use lash_core::StoreSet;
 use lash_core::store::{
     HolderId, LeaseAnswer, LeaseClaim, LeaseName, ObligationId, ObligationKind,
     ObligationSettlement, StallReason,
 };
+use lash_execution_contracts::backend::StoreSet;
 
 use super::*;
 

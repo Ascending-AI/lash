@@ -52,7 +52,7 @@ impl Candidates for crate::executor::CodeModeExecutionState {
 
 /// A session actor claimed on a SQLite memory durable store.
 pub(crate) struct DurableHost {
-    backend: lash_core::Backend,
+    backend: lash_execution_contracts::backend::Backend,
     actor: ActorKey,
     admitted: lash_core::AdmittedScope,
     lease: NodeLease,
@@ -76,7 +76,9 @@ impl DurableHost {
         admitted: lash_core::AdmittedScope,
         probe: Arc<dyn lash_core::durable_port::DurableProbe>,
     ) -> Self {
-        let backend = lash_core::Backend::for_testing(super::sqlite_memory_store_set().await);
+        let backend = lash_execution_contracts::backend::Backend::for_testing(
+            super::sqlite_memory_store_set().await,
+        );
         let actor = match admitted.scope() {
             lash_core::ExecutionScope::Process { process_id } => {
                 ActorKey::process(process_id.as_str())
@@ -268,7 +270,7 @@ impl DurableHost {
     }
 }
 
-async fn register(backend: &lash_core::Backend, index: usize) -> NodeLease {
+async fn register(backend: &lash_execution_contracts::backend::Backend, index: usize) -> NodeLease {
     backend
         .durable()
         .register_node(&NodeSpec {
@@ -282,7 +284,7 @@ async fn register(backend: &lash_core::Backend, index: usize) -> NodeLease {
 }
 
 async fn claim(
-    backend: &lash_core::Backend,
+    backend: &lash_execution_contracts::backend::Backend,
     lease: &NodeLease,
     actor: &ActorKey,
     admitted: &lash_core::AdmittedScope,

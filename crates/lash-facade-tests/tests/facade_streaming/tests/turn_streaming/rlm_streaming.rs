@@ -697,7 +697,11 @@ pub(super) fn every_abandoned_attempt_reaches_the_provider_with_its_partial_rece
                         lash_core::hook_key!("fail-first-chunk"),
                         Arc::new(|_| {
                             Box::pin(async {
-                                Err(lash_core::PluginError::Session("stream hook failed".into()))
+                                Err(
+                                    lash_execution_contracts::plugin_error::PluginError::Session(
+                                        "stream hook failed".into(),
+                                    ),
+                                )
                             })
                         }),
                     ),
@@ -1739,7 +1743,7 @@ await control.finish(result);"#,
     // authors `processes.start` needs this factory installed. Its process
     // runs under the turn's run with the app tools' component.
     .plugin(Arc::new(
-        lash_plugin_process_controls::SessionProcessAdminPluginFactory::new(lash_core::lifetime::session_or_starter, lash_core::testing::run_policy_naming(&[APP_TOOLS])),
+        lash_plugin_process_controls::SessionProcessAdminPluginFactory::new(lash_execution_contracts::process::lifetime::session_or_starter, lash_core::testing::run_policy_naming(&[APP_TOOLS])),
     ))
     .build(lash_facade_tests::runtime_lease_owner())?;
     let session = created_session(

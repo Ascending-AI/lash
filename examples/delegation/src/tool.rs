@@ -12,14 +12,34 @@ use lash::process::{
 };
 use lash::rlm::{RLM_PROTOCOL_PLUGIN_ID, RlmCreateExtras, RlmSeed, TerminationMode};
 use lash::schema::JsonSchema;
-use lash::tools::{
-    AttemptContext, CancelHint, DeclaredStart, ExecutionOwner, ExecutionPolicy, PendingCompletion,
-    PendingToolCall, PreparedToolCall, StartProcessIntent, StaticToolExecute, StaticToolProvider,
-    ToolArgumentProjectionPolicy, ToolAttemptOutcome, ToolBinding, ToolCall, ToolCallOutput,
-    ToolControl, ToolDeclaration, ToolDefinition, ToolDefinitionBindingExt, ToolFailure,
-    ToolFailureCause, ToolFailureClass, ToolId, ToolIntentKind, ToolOutcome, ToolPrepareContext,
-    ToolProvider, ToolValue,
-};
+use lash::tools::AttemptContext;
+use lash::tools::CancelHint;
+use lash::tools::ExecutionOwner;
+use lash::tools::ExecutionPolicy;
+use lash::tools::PendingCompletion;
+use lash::tools::PendingToolCall;
+use lash::tools::PreparedToolCall;
+use lash::tools::StartProcessIntent;
+use lash::tools::StaticToolExecute;
+use lash::tools::StaticToolProvider;
+use lash::tools::ToolArgumentProjectionPolicy;
+use lash::tools::ToolAttemptOutcome;
+use lash::tools::ToolBinding;
+use lash::tools::ToolCall;
+use lash::tools::ToolCallOutput;
+use lash::tools::ToolControl;
+use lash::tools::ToolDeclaration;
+use lash::tools::ToolDefinition;
+use lash::tools::ToolDefinitionBindingExt;
+use lash::tools::ToolFailure;
+use lash::tools::ToolFailureCause;
+use lash::tools::ToolFailureClass;
+use lash::tools::ToolId;
+use lash::tools::ToolIntentKind;
+use lash::tools::ToolOutcome;
+use lash::tools::ToolPrepareContext;
+use lash::tools::ToolProvider;
+use lash::tools::ToolValue;
 use lash::{RuntimeOwner, SessionCreateRequest, SessionId, SessionStartPoint};
 use serde_json::{Value, json};
 
@@ -375,14 +395,12 @@ impl SpawnAgent {
             "subagent",
             Some("spawn".to_string()),
         ));
-        let start = DeclaredStart::new(
-            context,
-            StartProcessIntent {
+        let start = context
+            .declare_start(StartProcessIntent {
                 owner: context.owner().runtime_owner(),
                 declaration,
-            },
-        )
-        .map_err(|error| format!("spawn_agent could not declare its child: {error}"))?;
+            })
+            .map_err(|error| format!("spawn_agent could not declare its child: {error}"))?;
         let mut pending = PendingCompletion::new();
         pending.on_cancel = on_cancel;
         Ok(ToolAttemptOutcome::pending(

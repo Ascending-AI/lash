@@ -10,10 +10,11 @@
 
 use std::sync::Arc;
 
-use lash_core::{
-    PluginError, ProcessEventHistoryRetention, ProcessEventQueryMode, ProcessEventReadOutcome,
-    ProcessRegistry,
-};
+use lash_execution_contracts::plugin_error::PluginError;
+use lash_execution_contracts::process::ProcessEventHistoryRetention;
+use lash_execution_contracts::process::ProcessEventQueryMode;
+use lash_execution_contracts::process::ProcessEventReadOutcome;
+use lash_execution_contracts::process::ProcessRegistry;
 use lash_protocol_types::ProcessId;
 use serde::{Deserialize, Serialize};
 
@@ -55,7 +56,7 @@ impl ProcessHistoryContinuation {
 #[serde(remote = "Self")]
 pub struct ProcessEventsRead {
     #[serde(serialize_with = "crate::persistence::serialize_durable")]
-    pub outcome: lash_core::facade_support::ObservedProcessEventReadOutcome,
+    pub outcome: lash_execution_contracts::process::ObservedProcessEventReadOutcome,
     /// After the last event this page returned; after the released prefix
     /// when the read started inside one; unchanged when the page returned
     /// nothing or the process was pruned.
@@ -81,7 +82,8 @@ pub(crate) async fn read_events(
     limit: std::num::NonZeroUsize,
     mode: ProcessEventQueryMode,
 ) -> Result<ProcessEventsRead, PluginError> {
-    let observer = lash_core::facade_support::ProcessWorkObserver::new(Arc::clone(registry));
+    let observer =
+        lash_execution_contracts::process::ProcessWorkObserver::new(Arc::clone(registry));
     match registry.require_process_id(&from.process_id).await {
         Ok(_) => {}
         Err(PluginError::ProcessNoLongerRetained {

@@ -101,7 +101,7 @@ impl BenchmarkToolCatalogObserver {
     pub(crate) fn observe_session_catalog_composition(
         &self,
         session_id: &SessionId,
-    ) -> Result<(), lash_core::PluginError> {
+    ) -> Result<(), lash_execution_contracts::plugin_error::PluginError> {
         if self.suppress_composition_counting.load(Ordering::SeqCst) {
             return Ok(());
         }
@@ -200,7 +200,8 @@ impl ToolProvider for BenchmarkEchoTool {
     fn tool_manifests(
         &self,
         _config: &lash_core::OwnerConfigView,
-    ) -> std::result::Result<Vec<ToolManifest>, lash_core::PluginError> {
+    ) -> std::result::Result<Vec<ToolManifest>, lash_execution_contracts::plugin_error::PluginError>
+    {
         Ok(echo_tool_catalog().manifests.clone())
     }
 
@@ -236,7 +237,8 @@ impl ToolProvider for BenchmarkObliqueTools {
     fn tool_manifests(
         &self,
         _config: &lash_core::OwnerConfigView,
-    ) -> std::result::Result<Vec<ToolManifest>, lash_core::PluginError> {
+    ) -> std::result::Result<Vec<ToolManifest>, lash_execution_contracts::plugin_error::PluginError>
+    {
         Ok(oblique_tool_catalog().manifests.clone())
     }
 
@@ -743,7 +745,8 @@ impl ToolProvider for BenchmarkLargeToolCatalog {
     fn tool_manifests(
         &self,
         _config: &lash_core::OwnerConfigView,
-    ) -> std::result::Result<Vec<ToolManifest>, lash_core::PluginError> {
+    ) -> std::result::Result<Vec<ToolManifest>, lash_execution_contracts::plugin_error::PluginError>
+    {
         Ok(self.cache.manifests.clone())
     }
 

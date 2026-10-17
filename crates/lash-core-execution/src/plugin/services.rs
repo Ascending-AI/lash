@@ -60,7 +60,7 @@ impl PluginOperationInvokeError {
         match self {
             Self::Failed(failure) => *failure,
             Self::Runtime(error) | Self::AdmissionRefused(error) => {
-                super::error::runtime_operation_failure(*error)
+                lash_execution_contracts::plugin_error::runtime_operation_failure(*error)
             }
             error => {
                 let message = error.to_string();
@@ -87,7 +87,7 @@ pub struct RuntimeServices {
     pub plugins: Arc<PluginSession>,
 
     pub attachment_store: Arc<crate::RuntimeAttachmentStore>,
-    pub process_env_store: Arc<dyn crate::ProcessEnvStore>,
+    pub process_env_store: Arc<dyn lash_execution_contracts::process::ProcessEnvStore>,
     pub clock: Arc<dyn crate::Clock>,
     /// The session's view of the store it persists through.
     pub store: Option<crate::store::SessionStore>,
@@ -125,29 +125,42 @@ impl SessionReadService for NoopSessionManager {
         Option<lash_core_store::transcript::CommittedTurnWithCalls>,
         crate::plugin::CommittedTurnReadError,
     > {
-        Err(crate::PluginError::Session("operation is absent from this fixture".into()).into())
+        Err(
+            lash_execution_contracts::plugin_error::PluginError::Session(
+                "operation is absent from this fixture".into(),
+            )
+            .into(),
+        )
     }
 
-    async fn snapshot_current(&self) -> Result<crate::SessionSnapshot, crate::PluginError> {
-        Err(crate::PluginError::Session(
-            "operation is absent from this fixture".into(),
-        ))
+    async fn snapshot_current(
+        &self,
+    ) -> Result<crate::SessionSnapshot, lash_execution_contracts::plugin_error::PluginError> {
+        Err(
+            lash_execution_contracts::plugin_error::PluginError::Session(
+                "operation is absent from this fixture".into(),
+            ),
+        )
     }
     async fn snapshot_session(
         &self,
         _session_id: &crate::SessionId,
-    ) -> Result<crate::SessionSnapshot, crate::PluginError> {
-        Err(crate::PluginError::Session(
-            "operation is absent from this fixture".into(),
-        ))
+    ) -> Result<crate::SessionSnapshot, lash_execution_contracts::plugin_error::PluginError> {
+        Err(
+            lash_execution_contracts::plugin_error::PluginError::Session(
+                "operation is absent from this fixture".into(),
+            ),
+        )
     }
     async fn tool_catalog(
         &self,
         _session_id: &crate::SessionId,
-    ) -> Result<Vec<serde_json::Value>, crate::PluginError> {
-        Err(crate::PluginError::Session(
-            "operation is absent from this fixture".into(),
-        ))
+    ) -> Result<Vec<serde_json::Value>, lash_execution_contracts::plugin_error::PluginError> {
+        Err(
+            lash_execution_contracts::plugin_error::PluginError::Session(
+                "operation is absent from this fixture".into(),
+            ),
+        )
     }
 }
 #[cfg(test)]
@@ -156,12 +169,17 @@ impl ProcessReadService for NoopSessionManager {
     async fn list_visible(
         &self,
         _session_id: &crate::SessionId,
-        _mode: crate::ProcessListMode,
+        _mode: lash_execution_contracts::process::ProcessListMode,
         _scope: crate::ProcessOpScope<'_>,
-    ) -> Result<Vec<crate::facade_support::ObservedProcess>, crate::PluginError> {
-        Err(crate::PluginError::Session(
-            "operation is absent from this fixture".into(),
-        ))
+    ) -> Result<
+        Vec<lash_execution_contracts::process::ObservedProcess>,
+        lash_execution_contracts::plugin_error::PluginError,
+    > {
+        Err(
+            lash_execution_contracts::plugin_error::PluginError::Session(
+                "operation is absent from this fixture".into(),
+            ),
+        )
     }
 }
 #[cfg(test)]
@@ -171,10 +189,12 @@ impl SessionStateService for NoopSessionManager {
         &self,
         _session_id: &crate::SessionId,
         _turn_id: &crate::TurnId,
-    ) -> Result<crate::ExecutionScope, crate::PluginError> {
-        Err(crate::PluginError::Session(
-            "operation is absent from this fixture".into(),
-        ))
+    ) -> Result<crate::ExecutionScope, lash_execution_contracts::plugin_error::PluginError> {
+        Err(
+            lash_execution_contracts::plugin_error::PluginError::Session(
+                "operation is absent from this fixture".into(),
+            ),
+        )
     }
 }
 #[cfg(test)]
@@ -182,11 +202,16 @@ impl SessionStateService for NoopSessionManager {
 impl SessionLifecycleService for NoopSessionManager {
     async fn create_session(
         &self,
-        _request: crate::SessionCreateRequest,
-    ) -> Result<crate::SessionHandle, crate::PluginError> {
-        Err(crate::PluginError::Session(
-            "operation is absent from this fixture".into(),
-        ))
+        _request: lash_execution_contracts::session_types::SessionCreateRequest,
+    ) -> Result<
+        lash_execution_contracts::session_types::SessionHandle,
+        lash_execution_contracts::plugin_error::PluginError,
+    > {
+        Err(
+            lash_execution_contracts::plugin_error::PluginError::Session(
+                "operation is absent from this fixture".into(),
+            ),
+        )
     }
 }
 #[cfg(test)]
@@ -196,10 +221,13 @@ impl SessionGraphService for NoopSessionManager {
         &self,
         _session_id: &crate::SessionId,
         _request: crate::AppendSessionNodesRequest,
-    ) -> Result<crate::AppendSessionNodesOutcome, crate::PluginError> {
-        Err(crate::PluginError::Session(
-            "operation is absent from this fixture".into(),
-        ))
+    ) -> Result<crate::AppendSessionNodesOutcome, lash_execution_contracts::plugin_error::PluginError>
+    {
+        Err(
+            lash_execution_contracts::plugin_error::PluginError::Session(
+                "operation is absent from this fixture".into(),
+            ),
+        )
     }
 }
 impl RuntimeServices {
@@ -209,7 +237,7 @@ impl RuntimeServices {
     pub fn new(
         plugins: Arc<PluginSession>,
         attachment_store: Arc<crate::RuntimeAttachmentStore>,
-        process_env_store: Arc<dyn crate::ProcessEnvStore>,
+        process_env_store: Arc<dyn lash_execution_contracts::process::ProcessEnvStore>,
     ) -> Self {
         Self {
             tool_live: Arc::new(crate::ToolLive::default()),
@@ -240,7 +268,7 @@ impl RuntimeServices {
 
     pub fn with_process_env_store(
         mut self,
-        process_env_store: Arc<dyn crate::ProcessEnvStore>,
+        process_env_store: Arc<dyn lash_execution_contracts::process::ProcessEnvStore>,
     ) -> Self {
         self.process_env_store = process_env_store;
         self
@@ -254,7 +282,7 @@ impl PersistentRuntimeServices {
         plugins: Arc<PluginSession>,
         store: crate::store::SessionStore,
         attachment_store: Arc<crate::RuntimeAttachmentStore>,
-        process_env_store: Arc<dyn crate::ProcessEnvStore>,
+        process_env_store: Arc<dyn lash_execution_contracts::process::ProcessEnvStore>,
     ) -> Self {
         Self(RuntimeServices {
             tool_live: Arc::new(crate::ToolLive::default()),

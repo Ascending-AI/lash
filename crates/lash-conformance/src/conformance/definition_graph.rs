@@ -24,8 +24,9 @@ use std::collections::BTreeSet;
 
 use pretty_assertions::assert_eq;
 
-use lash_core::store::module_nodes::stage_module_node;
-use lash_core::{ModuleArtifactBody, ModuleArtifactHold};
+use lash_execution_contracts::module_artifacts::ModuleArtifactBody;
+use lash_execution_contracts::module_artifacts::ModuleArtifactHold;
+use lash_execution_contracts::module_nodes::stage_module_node;
 
 use super::{DEFINITION_ENGINE, World, pin};
 

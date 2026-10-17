@@ -13,11 +13,14 @@ use std::sync::atomic::{AtomicBool, AtomicUsize, Ordering};
 use std::time::Duration;
 
 use super::turn_feed_law::ArmLateCommit;
+use crate::SessionCatalogStore;
+use crate::SessionId;
+use crate::TurnId;
 use crate::store::{
     CommittedTurnCursor, OperationId, RuntimeCommit, RuntimeTurnCommitStamp, SessionCommitStore,
     SessionHistoryStore, TurnCommitOutcome,
 };
-use crate::{DeploymentStore, SessionCatalogStore, SessionId, TurnId};
+use lash_execution_contracts::deployment::DeploymentStore;
 
 /// How long the law lets the other sessions commit while the late turn is
 /// held.

@@ -1,522 +1,21 @@
+use super::*;
 use std::collections::BTreeMap;
 use std::sync::Arc;
-
-use super::definition_ref::{
-    ProcessDefinitionRef, ProcessDefinitionRefusal, ProcessDefinitionResolution,
-};
-use super::engine_state::{EngineAction, EngineEvent, EngineState, EngineStateFormat};
-use super::events::ProcessAwaitOutput;
-use super::model::{EngineSettings, ProcessIdentity};
-
-/// Result of one process invocation.
-#[derive(Clone, Debug, PartialEq)]
-pub enum ProcessRunOutcome {
-    /// The run ended. `prelude` is its terminal batch (FIG-3571): the
-    /// execution-owned events the run still owes the log (its pending
-    /// effect-summary occurrences, then its `process.effect_omissions`
-    /// record), which the runner commits ahead of the terminal event in the
-    /// completion's own transaction
-    /// ([`ProcessLifecycle::complete_process_with_prelude`](super::registry_concerns::ProcessLifecycle::complete_process_with_prelude)).
-    Terminal {
-        output: Box<ProcessAwaitOutput>,
-        prelude: Vec<super::events::ProcessEventAppendRequest>,
-    },
-}
-
-impl ProcessRunOutcome {
-    /// This is an **integrator class 3: process-engine implementor** seam.
-    pub fn is_terminal(&self) -> bool {
-        matches!(self, Self::Terminal { .. })
-    }
-
-    /// Borrow the terminal output.
-    ///
-    /// This is an **integrator class 3: process-engine implementor** seam.
-    pub fn terminal_output(&self) -> Option<&ProcessAwaitOutput> {
-        match self {
-            Self::Terminal { output, .. } => Some(output),
-        }
-    }
-}
-
-/// Failure of the host/runtime infrastructure needed to execute a process.
-///
-/// Infrastructure failures are not producer outcomes and must not be persisted
-/// as terminal process failures. The worker leaves the row claimable so its
-/// configured retry pacing and attempt budget can decide what happens next.
-#[derive(Debug)]
-pub struct ProcessInfraError {
-    source: crate::PluginError,
-}
-
-impl ProcessInfraError {
-    /// Constructs a `ProcessInfraError` for protocol and process-engine implementors while running
-    /// a durable process.
-    ///
-    /// An opaque session error names no cause. Met while running a process it
-    /// is the infrastructure's, so it is carried as the attempt's fault
-    /// ([`PluginError::attempt_fault`](crate::PluginError::attempt_fault)):
-    /// never the process's terminal. A typed error keeps its own class.
-    pub fn new(source: crate::PluginError) -> Self {
-        let source = match source {
-            crate::PluginError::Session(message) => crate::PluginError::attempt_fault(message),
-            typed => typed,
-        };
-        Self { source }
-    }
-
-    pub fn into_plugin_error(self) -> crate::PluginError {
-        self.source
-    }
-}
-
-impl std::fmt::Display for ProcessInfraError {
-    fn fmt(&self, formatter: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
-        self.source.fmt(formatter)
-    }
-}
-
-impl std::error::Error for ProcessInfraError {}
-
-impl From<crate::PluginError> for ProcessInfraError {
-    fn from(source: crate::PluginError) -> Self {
-        Self::new(source)
-    }
-}
-
-impl From<ProcessAwaitOutput> for ProcessRunOutcome {
-    fn from(output: ProcessAwaitOutput) -> Self {
-        Self::Terminal {
-            output: Box::new(output),
-            prelude: Vec::new(),
-        }
-    }
-}
-
-/// A host process engine: a state machine lash advances (ADR 0132 §7; S6
-/// of I0, FIG-5194). See [`super::engine_state`] for the advance contract
-/// and cancel.
-///
-/// The effects a process performs, each with the kernel signature its code
-/// was checked against (P3).
-pub type PerformedEffects =
-    std::collections::BTreeMap<lash_kernel_doc::EffectName, lash_kernel_doc::Signature>;
-
-/// Whether an engine is an internal process or a user-facing workflow.
-#[derive(Clone, Copy, Debug, Default, PartialEq, Eq, serde::Serialize, serde::Deserialize)]
-#[serde(rename_all = "snake_case")]
-pub enum ProcessTraceClass {
-    #[default]
-    Internal,
-    Workflow,
-}
-
-/// Every engine answers every execution question
-/// (law S1, no silent defaults). Core built-ins (`SessionTurn` and
-/// `External`) are not registered here.
-#[async_trait::async_trait]
-pub trait ProcessEngine: Send + Sync {
-    /// The kind every process of this engine is registered under.
-    fn kind(&self) -> &'static str;
-
-    /// The span taxonomy this engine explicitly declares for its processes.
-    fn trace_class(&self) -> ProcessTraceClass;
-
-    /// The encoding of this engine's state. L11's claim filter reads it.
-    fn state_format(&self) -> EngineStateFormat;
-
-    /// How long a cancelled process may run best-effort steps before lash
-    /// forces its terminal. A live engine control, read when the cancel's
-    /// `Started` is handled; it is not recorded with the process.
-    fn cancel_grace(&self) -> std::time::Duration;
-
-    /// The executable generation a run of `payload` would run as (FIG-3571),
-    /// or `None` for an engine whose runs carry no generation, or for a
-    /// payload the engine refuses anyway.
-    fn program_identity(&self, payload: &serde_json::Value) -> Option<crate::ExecutableGeneration>;
-
-    /// Check the settings a starter states for a start of `payload` (D4):
-    /// pure, called before the start is durable. It refuses an engine that
-    /// requires settings and gets none, and settings it cannot decode or does
-    /// not serve. Every run of the process reads the checked settings back
-    /// from its row, never a live default.
-    fn check_settings(
-        &self,
-        payload: &serde_json::Value,
-        settings: Option<&EngineSettings>,
-    ) -> Result<(), crate::PluginError>;
-
-    /// This build's default settings for a start of `payload`, or `None` for
-    /// an engine with no settings. Only a starter calls it, explicitly; lash
-    /// never calls it to fill a start's settings.
-    fn default_settings(
-        &self,
-        payload: &serde_json::Value,
-    ) -> Result<Option<EngineSettings>, crate::PluginError>;
-
-    /// The document statement starts and empty-block entries a settled
-    /// engine step of `kind` counted, by document site ordinal, as its
-    /// committed `output` records them (FIG-6370): pure, like `advance`.
-    /// Lash appends them as one `process.ran` in the transaction that hands
-    /// the step to `advance`. An engine whose steps count nothing, and a
-    /// step that counted nothing, answer none.
-    fn settled_ran(
-        &self,
-        kind: &super::engine_state::EngineStepKind,
-        output: &lash_core_store::tool_run::SettledOutput,
-    ) -> Vec<(u32, u64)>;
-
-    /// The next state and action for `event` over `state`: synchronous and
-    /// effect-free. The same state and event always give the same answer.
-    fn advance(
-        &self,
-        state: EngineState,
-        event: EngineEvent,
-    ) -> Result<(EngineState, EngineAction), ProcessInfraError>;
-
-    /// Every artifact a start payload names, with the store that holds it
-    /// (ADR 0113 §2.2).
-    fn start_artifacts(
-        &self,
-        payload: &serde_json::Value,
-    ) -> Result<Vec<crate::ArtifactName>, crate::PluginError>;
-
-    /// Apply a resolved cleanup to the engine's own artifact store. An engine
-    /// whose artifacts all live in a store-set port answers `Ok(())`. A carry
-    /// whose bytes are missing returns
-    /// `ArtifactStoreError::CarryArtifactMissing` so the cleanup row stalls
-    /// instead of retrying indefinitely.
-    async fn end_artifact_referrer(
-        &self,
-        cleanup: &crate::ResolvedArtifactCleanup,
-    ) -> Result<(), crate::ArtifactStoreError>;
-
-    /// Add the claim's edge to one artifact this engine's store holds,
-    /// refusing a fenced referrer with `ReferrerEnded`. Called only for names
-    /// `start_artifacts` reported under `ArtifactStoreId::Engine`, after the
-    /// caller armed the claim's guard.
-    async fn acquire_engine_artifact(
-        &self,
-        claim: &crate::ReferrerClaim,
-        artifact_ref: &str,
-    ) -> Result<(), crate::PluginError>;
-
-    /// The effects a run of `payload` performs (P3): each path its code
-    /// calls or spawns, with the kernel signature it was checked against.
-    /// An env links exactly these. An engine that performs no effect of its
-    /// own answers an empty map: its runs may link only `call_dynamic`.
-    ///
-    /// # Errors
-    ///
-    /// The payload names effects the engine cannot certify, typed.
-    async fn performed_effects(
-        &self,
-        payload: &serde_json::Value,
-    ) -> Result<PerformedEffects, crate::ProcessEnvRefusal>;
-
-    /// Check supplied start arguments against an authoritative signature.
-    /// Engines with no checkable signature return a typed refusal.
-    async fn check_args(
-        &self,
-        signature: &super::ProcessSignature,
-        args: &serde_json::Map<String, serde_json::Value>,
-        mode: super::ArgsMode,
-    ) -> Result<(), super::ArgsMismatch>;
-
-    /// What this engine's stored artifact says about a definition reference:
-    /// its authoritative signature.
-    /// The signature on the reference is a claim this method never reads; an
-    /// engine that stores no artifacts answers `ProcessSignature::Unknown`.
-    ///
-    /// Store and transport faults return `ProcessDefinitionError::Fault`;
-    /// only a definition judgment returns `ProcessDefinitionError::Refused`.
-    ///
-    /// This is an **integrator class 3: process-engine implementor** seam.
-    async fn resolve(
-        &self,
-        reference: &ProcessDefinitionRef,
-    ) -> Result<ProcessDefinitionResolution, super::ProcessDefinitionError>;
-}
-
-/// A definition's language document, as its engine's
-/// [`ProcessDocumentProvider`] answers it.
-///
-/// Core names no language: the document crosses it as the provider's own
-/// type, and the reader that knows the type takes it back with
-/// [`Self::downcast`].
-pub struct ProcessDocument(Box<dyn std::any::Any + Send + Sync>);
-
-impl ProcessDocument {
-    pub fn new<T: std::any::Any + Send + Sync>(document: T) -> Self {
-        Self(Box::new(document))
-    }
-
-    /// The document as `T`, or the document unchanged when it is another
-    /// type.
-    pub fn downcast<T: std::any::Any>(self) -> Result<T, Self> {
-        self.0
-            .downcast::<T>()
-            .map(|document| *document)
-            .map_err(Self)
-    }
-}
-
-impl std::fmt::Debug for ProcessDocument {
-    fn fmt(&self, formatter: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
-        formatter.write_str("ProcessDocument(..)")
-    }
-}
-
-/// What a document provider reads of one definition: its engine-neutral
-/// identity, derived from the same artifact read as its language document.
-#[derive(Debug)]
-pub struct InspectedProcessDefinition {
-    /// The content-derived id and the signature the stored artifact states.
-    pub definition: super::ProcessDefinition,
-    pub document: ProcessDocument,
-}
-
-/// The answer of a [`ProcessDocumentProvider`].
-#[derive(Debug)]
-pub enum ProcessDocumentRead {
-    Inspected(Box<InspectedProcessDefinition>),
-    /// Nothing retains an artifact the definition reads.
-    ArtifactMissing {
-        artifact: crate::ArtifactName,
-    },
-    /// An artifact the definition reads is retained with bytes that are not
-    /// the artifact its name says.
-    ArtifactCorrupt {
-        artifact: crate::ArtifactName,
-        message: String,
-    },
-}
-
-/// What a [`ProcessDocumentProvider`] reads for a document reference.
-#[derive(Debug)]
-pub enum ProcessExecutionDocumentRead {
-    Read(ProcessDocument),
-    /// Nothing retains the module the reference names, or an artifact it
-    /// reads.
-    ArtifactMissing {
-        artifact: crate::ArtifactName,
-    },
-    /// An artifact the document reads is retained with bytes that are not
-    /// the artifact its name says.
-    ArtifactCorrupt {
-        artifact: crate::ArtifactName,
-        message: String,
-    },
-}
-
-/// What a [`ProcessDocumentProvider`] names a definition's document by.
-#[derive(Clone, Debug, PartialEq, Eq)]
-pub enum ProcessDocumentRefRead {
-    Named(lash_trace::WorkflowDocumentRef),
-    /// Nothing retains an artifact the definition reads.
-    ArtifactMissing {
-        artifact: crate::ArtifactName,
-    },
-}
-
-/// An engine's optional reading of its definitions as a language document
-/// (FIG-5563), and its admission of such a document as a definition
-/// (FIG-5574). An engine registered without one has no document: a host's
-/// inspection of its processes and definitions, and its publication of a
-/// document, answer `Unsupported`.
-#[async_trait::async_trait]
-pub trait ProcessDocumentProvider: Send + Sync {
-    /// The document of the definition `payload` names: a start payload or a
-    /// definition value, as [`ProcessEngine::start_artifacts`] reads it.
-    async fn document(
-        &self,
-        payload: &serde_json::Value,
-    ) -> Result<ProcessDocumentRead, crate::PluginError>;
-
-    /// The reference of that document, without the document: what a process
-    /// observation snapshot carries.
-    async fn document_ref(
-        &self,
-        payload: &serde_json::Value,
-    ) -> Result<ProcessDocumentRefRead, crate::PluginError>;
-
-    /// The document `reference` names, with the entry it selects: what an
-    /// execution that named it runs, whether that is a definition's process
-    /// or a module's main body. The answer is the provider's own type, or
-    /// `ArtifactMissing` when nothing retains the module any more.
-    async fn execution_document(
-        &self,
-        reference: &lash_trace::WorkflowDocumentRef,
-    ) -> Result<ProcessExecutionDocumentRead, crate::PluginError>;
-
-    /// Admit a language document as a definition. The engine validates the
-    /// document itself, derives everything a definition states from it, and
-    /// only then holds what the definition executes under `claim` in its own
-    /// stores. A document it refuses holds nothing.
-    ///
-    /// Core names no language here either: `request` and the answer are the
-    /// provider's own types, which the caller that knows them builds and
-    /// takes back with [`ProcessDocument::downcast`].
-    async fn admit(
-        &self,
-        claim: &crate::ReferrerClaim,
-        request: ProcessDocument,
-    ) -> Result<ProcessDocument, crate::PluginError>;
-
-    /// What a document of this engine is written, edited and admitted
-    /// against, for the processes `request` describes. A host edits a
-    /// document against the same environment its publication is admitted
-    /// under, so an edit the engine would refuse is refused where it is
-    /// made. Nothing is stored. `request` and the answer are the
-    /// provider's own types.
-    async fn environment(
-        &self,
-        request: ProcessDocument,
-    ) -> Result<ProcessDocument, crate::PluginError>;
-
-    /// Replays recorded run segments of one process from what its journal
-    /// retains, on demand. It is a read: nothing runs that the process
-    /// performs, and nothing is recorded. `request` and the answer are the
-    /// provider's own types.
-    async fn replay(&self, request: ProcessDocument)
-    -> Result<ProcessDocument, crate::PluginError>;
-
-    /// Whether a process recorded with `settings` counts the statements its
-    /// run segments start: what its workflow overlay reports it observed.
-    fn counts_statements(&self, settings: Option<&EngineSettings>) -> bool;
-}
-
-/// What an engine reads of a function a start carries inline: the
-/// definition a start of it runs, its signature and the effects it performs
-/// (P3). Derived from the payload alone: nothing stored is read.
-#[derive(Clone, Debug, PartialEq)]
-pub struct InlineDefinition {
-    pub draft: super::ProcessDefinitionDraft,
-    pub signature: super::ProcessSignature,
-    pub performed: PerformedEffects,
-}
-
-/// An engine's start of a function carried inline
-/// ([`ProcessStartTarget::Inline`](super::ProcessStartTarget::Inline),
-/// FIG-6382). An engine registered without one refuses every inline start.
-///
-/// Core names no language here: the payload is the engine's own value of a
-/// function, which it checks itself.
-#[async_trait::async_trait]
-pub trait InlineStarts: Send + Sync {
-    /// Check `payload` and derive what a start of it runs. Stores nothing.
-    ///
-    /// # Errors
-    ///
-    /// A `DefinitionRefused` runtime error for a payload the engine refuses.
-    async fn inspect(
-        &self,
-        payload: &serde_json::Value,
-    ) -> Result<InlineDefinition, crate::PluginError>;
-
-    /// [`Self::inspect`], then hold what the definition executes under
-    /// `claim` in the engine's own stores, written the way the engine writes
-    /// every document it admits. The descriptor is not published: the
-    /// caller publishes [`InlineDefinition::draft`] under the same claim.
-    ///
-    /// # Errors
-    ///
-    /// [`Self::inspect`]'s refusal, the claim's fence (`ReferrerEnded`), and
-    /// every store failure.
-    async fn realize(
-        &self,
-        claim: &crate::ReferrerClaim,
-        payload: &serde_json::Value,
-    ) -> Result<InlineDefinition, crate::PluginError>;
-}
-
-/// A process identity the engine registry produced.
-///
-/// This is the only way an identity reaches a
-/// [`ProcessRegistration`](super::model::ProcessRegistration). A
-/// definition reference can therefore only appear on a durable row if the
-/// engine that owns the definition resolved it and agreed with the signature
-/// the reference claimed: a fabricated claim is refused before the row exists,
-/// and no caller can construct this value carrying one.
-#[derive(Clone, Debug, PartialEq)]
-pub struct AdmittedProcessIdentity {
-    identity: ProcessIdentity,
-}
-
-impl AdmittedProcessIdentity {
-    pub(crate) fn admitted(identity: ProcessIdentity) -> Self {
-        Self { identity }
-    }
-
-    /// Replay an identity that was admitted once and then durably pinned: a
-    /// process row a remote peer already created and is now reporting.
-    ///
-    /// This is a **replay**, never an admission. Do not reach for it on a path
-    /// that creates a durable row from caller-supplied input: there the
-    /// registry's [`admit`](ProcessEngineRegistry::admit) is the only route,
-    /// because it is what checks a signature claim.
-    pub fn pinned(identity: ProcessIdentity) -> Self {
-        Self { identity }
-    }
-
-    #[cfg(any(test, feature = "testing"))]
-    pub fn for_testing(identity: ProcessIdentity) -> Self {
-        Self { identity }
-    }
-
-    /// Borrow the admitted identity.
-    pub fn identity(&self) -> &ProcessIdentity {
-        &self.identity
-    }
-
-    pub fn into_identity(self) -> ProcessIdentity {
-        self.identity
-    }
-}
-
-/// Pure admission policy for immutable, recorded engine-start inputs.
-///
-/// The function pointer cannot capture an engine, store, catalog, or session.
-#[derive(Clone, Copy)]
-pub struct ProcessEngineAdmission {
-    kind: &'static str,
-    admit: fn(&'static str, &serde_json::Value) -> Result<ProcessIdentity, crate::PluginError>,
-}
-
-impl ProcessEngineAdmission {
-    pub const fn new(
-        kind: &'static str,
-        admit: fn(&'static str, &serde_json::Value) -> Result<ProcessIdentity, crate::PluginError>,
-    ) -> Self {
-        Self { kind, admit }
-    }
-
-    pub const fn accepting(kind: &'static str) -> Self {
-        Self::new(kind, |kind, _| Ok(ProcessIdentity::new(kind)))
-    }
-
-    pub fn kind(self) -> &'static str {
-        self.kind
-    }
-
-    pub fn admit(self, payload: &serde_json::Value) -> Result<ProcessIdentity, crate::PluginError> {
-        (self.admit)(self.kind, payload)
-    }
-}
-
 #[derive(Clone)]
 pub struct ProcessEngineRegistration {
     engine: Arc<dyn ProcessEngine>,
     admission: ProcessEngineAdmission,
-    engine_steps: Option<Arc<dyn super::engine_state::EngineSteps>>,
+    engine_steps: Option<Arc<dyn lash_execution_contracts::process::EngineSteps>>,
     document_provider: Option<Arc<dyn ProcessDocumentProvider>>,
-    state_migration: Option<Arc<dyn super::engine_state::EngineStateMigration>>,
-    succession: Option<Arc<dyn super::succession::EngineSuccession>>,
-    status_projection: Option<Arc<dyn super::engine_state::EngineStatusProjection>>,
+    state_migration: Option<Arc<dyn lash_execution_contracts::process::EngineStateMigration>>,
+    succession: Option<Arc<dyn lash_execution_contracts::process::EngineSuccession>>,
+    status_projection: Option<Arc<dyn lash_execution_contracts::process::EngineStatusProjection>>,
     inline_starts: Option<Arc<dyn InlineStarts>>,
     /// The host's retry policies for engine step kinds, over the engine's.
-    engine_step_retries:
-        BTreeMap<super::engine_state::EngineStepKind, lash_protocol_types::ExecutionPolicy>,
+    engine_step_retries: BTreeMap<
+        lash_execution_contracts::process::EngineStepKind,
+        lash_protocol_types::ExecutionPolicy,
+    >,
 }
 
 impl ProcessEngineRegistration {
@@ -526,13 +25,15 @@ impl ProcessEngineRegistration {
     pub fn new(
         engine: Arc<dyn ProcessEngine>,
         admission: ProcessEngineAdmission,
-    ) -> Result<Self, crate::PluginError> {
+    ) -> Result<Self, lash_execution_contracts::plugin_error::PluginError> {
         if engine.kind() != admission.kind() {
-            return Err(crate::PluginError::Registration(format!(
-                "process engine kind `{}` does not match admission kind `{}`",
-                engine.kind(),
-                admission.kind()
-            )));
+            return Err(
+                lash_execution_contracts::plugin_error::PluginError::Registration(format!(
+                    "process engine kind `{}` does not match admission kind `{}`",
+                    engine.kind(),
+                    admission.kind()
+                )),
+            );
         }
         Ok(Self {
             engine,
@@ -564,10 +65,13 @@ impl ProcessEngineRegistration {
     }
 
     /// Declare the engine's own step bodies: what runs a
-    /// [`StepRequest::Engine`](super::StepRequest::Engine) its `advance`
+    /// [`StepRequest::Engine`](lash_execution_contracts::process::StepRequest::Engine) its `advance`
     /// asks for.
     #[must_use]
-    pub fn with_engine_steps(mut self, steps: Arc<dyn super::engine_state::EngineSteps>) -> Self {
+    pub fn with_engine_steps(
+        mut self,
+        steps: Arc<dyn lash_execution_contracts::process::EngineSteps>,
+    ) -> Self {
         self.engine_steps = Some(steps);
         self
     }
@@ -585,7 +89,7 @@ impl ProcessEngineRegistration {
     #[must_use]
     pub fn with_state_migration(
         mut self,
-        migration: Arc<dyn super::engine_state::EngineStateMigration>,
+        migration: Arc<dyn lash_execution_contracts::process::EngineStateMigration>,
     ) -> Self {
         self.state_migration = Some(migration);
         self
@@ -597,7 +101,7 @@ impl ProcessEngineRegistration {
     #[must_use]
     pub fn with_succession(
         mut self,
-        succession: Arc<dyn super::succession::EngineSuccession>,
+        succession: Arc<dyn lash_execution_contracts::process::EngineSuccession>,
     ) -> Self {
         self.succession = Some(succession);
         self
@@ -609,7 +113,7 @@ impl ProcessEngineRegistration {
     #[must_use]
     pub fn with_status_projection(
         mut self,
-        projection: Arc<dyn super::engine_state::EngineStatusProjection>,
+        projection: Arc<dyn lash_execution_contracts::process::EngineStatusProjection>,
     ) -> Self {
         self.status_projection = Some(projection);
         self
@@ -625,12 +129,12 @@ impl ProcessEngineRegistration {
     }
 
     /// Retry the engine's `kind` steps under `policy` instead of the policy
-    /// its [`EngineSteps`](super::engine_state::EngineSteps) declare: the
+    /// its [`EngineSteps`](lash_execution_contracts::process::EngineSteps) declare: the
     /// host's override of the engine author's default, for this deployment.
     #[must_use]
     pub fn with_engine_step_retry(
         mut self,
-        kind: super::engine_state::EngineStepKind,
+        kind: lash_execution_contracts::process::EngineStepKind,
         policy: lash_protocol_types::ExecutionPolicy,
     ) -> Self {
         self.engine_step_retries.insert(kind, policy);
@@ -642,8 +146,9 @@ impl ProcessEngineRegistration {
 /// registry stays the size it is however many a kind declares.
 #[derive(Clone, Default)]
 struct KindHooks {
-    successions: BTreeMap<String, Arc<dyn super::succession::EngineSuccession>>,
-    status_projections: BTreeMap<String, Arc<dyn super::engine_state::EngineStatusProjection>>,
+    successions: BTreeMap<String, Arc<dyn lash_execution_contracts::process::EngineSuccession>>,
+    status_projections:
+        BTreeMap<String, Arc<dyn lash_execution_contracts::process::EngineStatusProjection>>,
     inline_starts: BTreeMap<String, Arc<dyn InlineStarts>>,
 }
 
@@ -651,9 +156,10 @@ struct KindHooks {
 pub struct ProcessEngineRegistry {
     engines: Arc<BTreeMap<String, Arc<dyn ProcessEngine>>>,
     admissions: Arc<BTreeMap<String, ProcessEngineAdmission>>,
-    engine_steps: Arc<BTreeMap<String, Arc<dyn super::engine_state::EngineSteps>>>,
+    engine_steps: Arc<BTreeMap<String, Arc<dyn lash_execution_contracts::process::EngineSteps>>>,
     document_providers: Arc<BTreeMap<String, Arc<dyn ProcessDocumentProvider>>>,
-    state_migrations: Arc<BTreeMap<String, Arc<dyn super::engine_state::EngineStateMigration>>>,
+    state_migrations:
+        Arc<BTreeMap<String, Arc<dyn lash_execution_contracts::process::EngineStateMigration>>>,
     /// Each kind's succession and status projection, in one map pair.
     hooks: Arc<KindHooks>,
     artifact_ports: Option<Arc<super::ArtifactReferrerPorts>>,
@@ -667,10 +173,12 @@ pub struct ProcessEngineRegistry {
 pub struct WeakProcessEngineRegistry {
     engines: std::sync::Weak<BTreeMap<String, Arc<dyn ProcessEngine>>>,
     admissions: std::sync::Weak<BTreeMap<String, ProcessEngineAdmission>>,
-    engine_steps: std::sync::Weak<BTreeMap<String, Arc<dyn super::engine_state::EngineSteps>>>,
+    engine_steps:
+        std::sync::Weak<BTreeMap<String, Arc<dyn lash_execution_contracts::process::EngineSteps>>>,
     document_providers: std::sync::Weak<BTreeMap<String, Arc<dyn ProcessDocumentProvider>>>,
-    state_migrations:
-        std::sync::Weak<BTreeMap<String, Arc<dyn super::engine_state::EngineStateMigration>>>,
+    state_migrations: std::sync::Weak<
+        BTreeMap<String, Arc<dyn lash_execution_contracts::process::EngineStateMigration>>,
+    >,
     hooks: std::sync::Weak<KindHooks>,
     artifact_ports: Option<Arc<super::ArtifactReferrerPorts>>,
     components: crate::plugin::ProcessComponentRegistry,
@@ -695,23 +203,29 @@ impl WeakProcessEngineRegistry {
 
 /// An engine's steps under the host's per-kind retry overrides.
 struct RetriedEngineSteps {
-    steps: Arc<dyn super::engine_state::EngineSteps>,
-    retries: BTreeMap<super::engine_state::EngineStepKind, lash_protocol_types::ExecutionPolicy>,
+    steps: Arc<dyn lash_execution_contracts::process::EngineSteps>,
+    retries: BTreeMap<
+        lash_execution_contracts::process::EngineStepKind,
+        lash_protocol_types::ExecutionPolicy,
+    >,
 }
 
 #[async_trait::async_trait]
-impl super::engine_state::EngineSteps for RetriedEngineSteps {
-    fn kinds(&self) -> Vec<super::engine_state::EngineStepKind> {
+impl lash_execution_contracts::process::EngineSteps for RetriedEngineSteps {
+    fn kinds(&self) -> Vec<lash_execution_contracts::process::EngineStepKind> {
         self.steps.kinds()
     }
 
-    fn execution(&self, kind: &super::engine_state::EngineStepKind) -> std::time::Duration {
+    fn execution(
+        &self,
+        kind: &lash_execution_contracts::process::EngineStepKind,
+    ) -> std::time::Duration {
         self.steps.execution(kind)
     }
 
     fn retry(
         &self,
-        kind: &super::engine_state::EngineStepKind,
+        kind: &lash_execution_contracts::process::EngineStepKind,
     ) -> lash_protocol_types::ExecutionPolicy {
         self.retries
             .get(kind)
@@ -721,9 +235,9 @@ impl super::engine_state::EngineSteps for RetriedEngineSteps {
 
     async fn run(
         &self,
-        run: super::engine_state::EngineStepRun,
+        run: lash_execution_contracts::process::EngineStepRun,
         cancel: tokio_util::sync::CancellationToken,
-    ) -> super::engine_state::EngineStepAnswer {
+    ) -> lash_execution_contracts::process::EngineStepAnswer {
         self.steps.run(run, cancel).await
     }
 }
@@ -850,20 +364,22 @@ impl ProcessEngineRegistry {
 
     /// The body that runs `kind` for processes of engine `engine`: the
     /// typed refusal, before admission, of a
-    /// [`StepRequest::Engine`](super::StepRequest::Engine) no registration
+    /// [`StepRequest::Engine`](lash_execution_contracts::process::StepRequest::Engine) no registration
     /// declares.
     ///
     /// # Errors
     ///
-    /// [`EngineStepRefusal`](super::engine_state::EngineStepRefusal) when
+    /// [`EngineStepRefusal`](lash_execution_contracts::process::EngineStepRefusal) when
     /// the engine is unknown, declares no engine steps, or not `kind`.
     pub fn engine_steps(
         &self,
         engine: &str,
-        kind: &super::engine_state::EngineStepKind,
-    ) -> Result<Arc<dyn super::engine_state::EngineSteps>, super::engine_state::EngineStepRefusal>
-    {
-        use super::engine_state::EngineStepRefusal;
+        kind: &lash_execution_contracts::process::EngineStepKind,
+    ) -> Result<
+        Arc<dyn lash_execution_contracts::process::EngineSteps>,
+        lash_execution_contracts::process::EngineStepRefusal,
+    > {
+        use lash_execution_contracts::process::EngineStepRefusal;
         if !self.engines.contains_key(engine) {
             return Err(EngineStepRefusal::UnknownEngine {
                 engine: engine.to_owned(),
@@ -896,12 +412,12 @@ impl ProcessEngineRegistry {
     pub async fn end_artifact_referrer(
         &self,
         cleanup: &crate::ResolvedArtifactCleanup,
-    ) -> Result<(), crate::ArtifactStoreError> {
+    ) -> Result<(), lash_execution_contracts::module_artifacts::ArtifactStoreError> {
         for (kind, engine) in self.engines.iter() {
-            let own = crate::ResolvedArtifactCleanup::for_store(
+            let own = lash_core_store::artifact_referrer::ResolvedArtifactCleanup::for_store(
                 &cleanup.referrer,
                 &cleanup.carries,
-                &crate::ArtifactStoreId::Engine(kind.clone()),
+                &lash_core_store::artifact_referrer::ArtifactStoreId::Engine(kind.clone()),
             );
             engine.end_artifact_referrer(&own).await?;
         }
@@ -914,12 +430,14 @@ impl ProcessEngineRegistry {
     pub(crate) fn try_with_engine(
         self,
         registration: ProcessEngineRegistration,
-    ) -> Result<Self, crate::PluginError> {
+    ) -> Result<Self, lash_execution_contracts::plugin_error::PluginError> {
         if self.engines.contains_key(registration.engine.kind()) {
-            return Err(crate::PluginError::Registration(format!(
-                "duplicate process engine kind `{}`; each engine kind may be registered once",
-                registration.engine.kind()
-            )));
+            return Err(
+                lash_execution_contracts::plugin_error::PluginError::Registration(format!(
+                    "duplicate process engine kind `{}`; each engine kind may be registered once",
+                    registration.engine.kind()
+                )),
+            );
         }
         Ok(self.with_registration(registration))
     }
@@ -928,7 +446,12 @@ impl ProcessEngineRegistry {
     /// engine kind.
     pub fn state_migrations(
         &self,
-    ) -> impl Iterator<Item = (&str, &Arc<dyn super::engine_state::EngineStateMigration>)> {
+    ) -> impl Iterator<
+        Item = (
+            &str,
+            &Arc<dyn lash_execution_contracts::process::EngineStateMigration>,
+        ),
+    > {
         self.state_migrations
             .iter()
             .map(|(kind, migration)| (kind.as_str(), migration))
@@ -937,7 +460,12 @@ impl ProcessEngineRegistry {
     /// Every registered engine's status projection, by engine kind.
     pub fn status_projections(
         &self,
-    ) -> impl Iterator<Item = (&str, &Arc<dyn super::engine_state::EngineStatusProjection>)> {
+    ) -> impl Iterator<
+        Item = (
+            &str,
+            &Arc<dyn lash_execution_contracts::process::EngineStatusProjection>,
+        ),
+    > {
         self.hooks
             .status_projections
             .iter()
@@ -946,7 +474,10 @@ impl ProcessEngineRegistry {
 
     /// How the `kind` engine carries a process onto a successor pair, when
     /// its registration declares it.
-    pub fn succession(&self, kind: &str) -> Option<Arc<dyn super::succession::EngineSuccession>> {
+    pub fn succession(
+        &self,
+        kind: &str,
+    ) -> Option<Arc<dyn lash_execution_contracts::process::EngineSuccession>> {
         self.hooks.successions.get(kind).cloned()
     }
 
@@ -956,12 +487,17 @@ impl ProcessEngineRegistry {
     ///
     /// A `DefinitionRefused` runtime error when the engine is not
     /// configured or starts no inline function.
-    pub fn inline_starts(&self, kind: &str) -> Result<Arc<dyn InlineStarts>, crate::PluginError> {
+    pub fn inline_starts(
+        &self,
+        kind: &str,
+    ) -> Result<Arc<dyn InlineStarts>, lash_execution_contracts::plugin_error::PluginError> {
         self.hooks.inline_starts.get(kind).cloned().ok_or_else(|| {
-            crate::PluginError::Runtime(crate::RuntimeError::new(
-                crate::RuntimeErrorCode::DefinitionRefused,
-                format!("process engine `{kind}` starts no function carried inline"),
-            ))
+            lash_execution_contracts::plugin_error::PluginError::Runtime(
+                lash_core_store::runtime_error::RuntimeError::new(
+                    lash_core_store::runtime_error::RuntimeErrorCode::DefinitionRefused,
+                    format!("process engine `{kind}` starts no function carried inline"),
+                ),
+            )
         })
     }
 
@@ -985,7 +521,7 @@ impl ProcessEngineRegistry {
         kind: &str,
         payload: &serde_json::Value,
         settings: Option<&EngineSettings>,
-    ) -> Result<(), crate::PluginError> {
+    ) -> Result<(), lash_execution_contracts::plugin_error::PluginError> {
         self.require(kind)?.check_settings(payload, settings)
     }
 
@@ -999,7 +535,7 @@ impl ProcessEngineRegistry {
         &self,
         kind: &str,
         payload: &serde_json::Value,
-    ) -> Result<Option<EngineSettings>, crate::PluginError> {
+    ) -> Result<Option<EngineSettings>, lash_execution_contracts::plugin_error::PluginError> {
         self.require(kind)?.default_settings(payload)
     }
 
@@ -1030,9 +566,14 @@ impl ProcessEngineRegistry {
         self.engines.keys().cloned().collect()
     }
 
-    pub fn require(&self, kind: &str) -> Result<Arc<dyn ProcessEngine>, crate::PluginError> {
+    pub fn require(
+        &self,
+        kind: &str,
+    ) -> Result<Arc<dyn ProcessEngine>, lash_execution_contracts::plugin_error::PluginError> {
         self.get(kind).ok_or_else(|| {
-            crate::PluginError::Session(format!("process engine `{kind}` is not configured"))
+            lash_execution_contracts::plugin_error::PluginError::Session(format!(
+                "process engine `{kind}` is not configured"
+            ))
         })
     }
 
@@ -1048,17 +589,21 @@ impl ProcessEngineRegistry {
         &self,
         kind: &str,
         payload: &serde_json::Value,
-    ) -> Result<AdmittedProcessIdentity, crate::PluginError> {
+    ) -> Result<AdmittedProcessIdentity, lash_execution_contracts::plugin_error::PluginError> {
         let identity = self
             .admissions
             .get(kind)
             .copied()
             .ok_or_else(|| {
-                crate::PluginError::Session(format!("process engine `{kind}` is not configured"))
+                lash_execution_contracts::plugin_error::PluginError::Session(format!(
+                    "process engine `{kind}` is not configured"
+                ))
             })?
             .admit(payload)?;
         let Some(reference) = identity.definition.clone() else {
-            return Ok(AdmittedProcessIdentity::admitted(identity));
+            return Ok(
+                lash_execution_contracts::process::engine::admitted_process_identity(identity),
+            );
         };
         let resolution = match self.resolve(&reference).await {
             Ok(resolution) => resolution,
@@ -1067,10 +612,12 @@ impl ProcessEngineRegistry {
             // reference unresolved; acquisition later checks its availability.
             // Operational faults are separate and propagate for retry, never
             // as a recorded definition refusal.
-            Err(super::ProcessDefinitionError::Refused(
+            Err(lash_execution_contracts::process::ProcessDefinitionError::Refused(
                 ProcessDefinitionRefusal::UnresolvableDefinition { .. },
             )) if reference.signature.is_unknown() => {
-                return Ok(AdmittedProcessIdentity::admitted(identity));
+                return Ok(
+                    lash_execution_contracts::process::engine::admitted_process_identity(identity),
+                );
             }
             Err(error) => return Err(error.into()),
         };
@@ -1082,7 +629,7 @@ impl ProcessEngineRegistry {
             definition: Some(reference.with_resolved_signature(resolution.signature)),
             ..identity
         };
-        Ok(AdmittedProcessIdentity::admitted(identity))
+        Ok(lash_execution_contracts::process::engine::admitted_process_identity(identity))
     }
 
     pub async fn resolve(

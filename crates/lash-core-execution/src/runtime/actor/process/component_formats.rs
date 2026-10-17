@@ -7,8 +7,10 @@ use serde::{Deserialize, Serialize};
 
 use super::activation::{Live, Pass, ProcessActivation, corrupt};
 use super::driver::Driver;
+use crate::ProcessEnv;
+use crate::ProcessEnvRef;
 use crate::plugin::{ComponentState, PluginState};
-use crate::{ProcessEnv, ProcessEnvRef, ProcessRecord};
+use lash_execution_contracts::process::ProcessRecord;
 
 /// The whole state/config postimage of a recorded component format cut.
 #[doc(hidden)]
@@ -102,28 +104,37 @@ impl ProcessActivation {
         let cut = match self.steps.convert_components(record).await {
             Ok(Some(cut)) => cut,
             Ok(None) => return Ok(Ok(tx)),
-            Err(crate::PluginError::Format(refusal)) => {
+            Err(lash_execution_contracts::plugin_error::PluginError::Format(refusal)) => {
                 return self
                     .park(
                         owned,
                         tx,
-                        &super::ProcessParkReason::ComponentFormatRefused { refusal },
+                        &lash_execution_contracts::park::ProcessParkReason::ComponentFormatRefused { refusal },
                     )
                     .await
                     .map(Err);
             }
-            Err(crate::PluginError::ProcessEnvRefused { refusal }) => {
-                return self
-                    .park(owned, tx, &super::ProcessParkReason::EnvRefused { refusal })
-                    .await
-                    .map(Err);
-            }
-            Err(error) if error.class() == crate::PluginErrorClass::Terminal => {
+            Err(lash_execution_contracts::plugin_error::PluginError::ProcessEnvRefused {
+                refusal,
+            }) => {
                 return self
                     .park(
                         owned,
                         tx,
-                        &super::ProcessParkReason::CompositionUnavailable {
+                        &lash_execution_contracts::park::ProcessParkReason::EnvRefused { refusal },
+                    )
+                    .await
+                    .map(Err);
+            }
+            Err(error)
+                if error.class()
+                    == lash_execution_contracts::plugin_error::PluginErrorClass::Terminal =>
+            {
+                return self
+                    .park(
+                        owned,
+                        tx,
+                        &lash_execution_contracts::park::ProcessParkReason::CompositionUnavailable {
                             message: error.to_string(),
                         },
                     )

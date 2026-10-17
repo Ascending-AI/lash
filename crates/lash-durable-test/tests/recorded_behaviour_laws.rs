@@ -333,7 +333,7 @@ async fn a_host_started_process_runs_under_the_behaviour_its_creation_recorded(t
         .host_artifacts()
         .publish_process_env(
             &lash_core::HostArtifactPin::mint(),
-            &lash_core_execution::testing::process_env_with_limit(16),
+            &lash_execution_contracts::testing::process_env_with_limit(16),
         )
         .await
         .expect("the environment is published");
@@ -345,12 +345,12 @@ async fn a_host_started_process_runs_under_the_behaviour_its_creation_recorded(t
     let started = first
         .processes()
         .start(
-            lash_core::ProcessStartRequest::engine(
+            lash_execution_contracts::process::ProcessStartRequest::engine(
                 lash_vm_runtime::LASH_VM_ENGINE_KIND.to_owned(),
                 payload,
-                lash_core::EngineLaunch::new(env_ref, settings),
-                lash_core::ProcessOriginator::host(),
-                lash_core::LifetimeDecision::Detached,
+                lash_execution_contracts::process::EngineLaunch::new(env_ref, settings),
+                lash_execution_contracts::process::ProcessOriginator::host(),
+                lash_execution_contracts::process::LifetimeDecision::Detached,
             ),
             first.effect_host(),
         )
@@ -379,11 +379,12 @@ async fn a_host_started_process_runs_under_the_behaviour_its_creation_recorded(t
         .await
         .expect("deadlock watchdog: the redeploying node never ran the process")
         .expect("the process's end is read");
-    let spelled = serde_json::to_string(&lash_core::Durable(&output)).expect("terminal JSON");
+    let spelled =
+        serde_json::to_string(&lash_protocol_types::Durable(&output)).expect("terminal JSON");
     assert!(
         matches!(
             output,
-            lash_core::ProcessAwaitOutput::Settled { ref output } if output.is_success()
+            lash_execution_contracts::process::ProcessAwaitOutput::Settled { ref output } if output.is_success()
         ) && spelled.contains(&format!("ran {LOOP_ITERATIONS}")),
         "the process ran its loop under the recorded bound: {spelled}"
     );

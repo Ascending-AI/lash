@@ -6,7 +6,7 @@
 //! reclaim law is asserted through raw catalog reads, and the conformance file is
 //! at its line budget.
 
-use lash_core_execution::SessionCatalogStore;
+use lash_core_store::store::SessionCatalogStore;
 use lash_postgres_store::{PostgresStorage, testing::IsolatedDatabase};
 use lash_protocol_types::SessionId;
 
@@ -21,10 +21,10 @@ async fn storage() -> Option<(IsolatedDatabase, PostgresStorage)> {
     Some((database, storage))
 }
 
-fn policy() -> lash_core_execution::SessionPolicy {
-    lash_core_execution::SessionPolicy::new(
-        lash_core_execution::TurnBudget::Unbounded,
-        lash_core_execution::MaxToolCalls::new(1024),
+fn policy() -> lash_core_store::session_policy::SessionPolicy {
+    lash_core_store::session_policy::SessionPolicy::new(
+        lash_protocol_types::session_model::TurnBudget::Unbounded,
+        lash_protocol_types::session_model::MaxToolCalls::new(1024),
         lash_core::NoProgressBudget::bounded(12),
     )
 }
@@ -46,25 +46,29 @@ async fn resident_tombstoned_node_ids(pool: &sqlx::PgPool) -> Vec<String> {
 }
 
 async fn commit_single_root_node(
-    factory: &(impl SessionCatalogStore + lash_core_execution::SessionCommitStore),
+    factory: &(impl SessionCatalogStore + lash_core_store::store::SessionCommitStore),
     session_id: &SessionId,
-    policy: &lash_core_execution::SessionPolicy,
+    policy: &lash_core_store::session_policy::SessionPolicy,
 ) -> String {
     factory
-        .admit_session(&lash_core_execution::SessionStoreCreateRequest {
-            owning_process_id: None,
-            pending_observer_intents: Vec::new(),
-            session_id: session_id.clone(),
-            relation: lash_core_execution::SessionRelation::Root,
-            config: lash_core_execution::PersistedSessionConfig::from_policy(&policy.clone()),
-            head: lash_core_execution::SessionCreationHead::Config,
-            retention: lash_core_execution::Retention::UntilGc,
-        })
+        .admit_session(
+            &lash_core_store::session_store_factory_types::SessionStoreCreateRequest {
+                owning_process_id: None,
+                pending_observer_intents: Vec::new(),
+                session_id: session_id.clone(),
+                relation: lash_core_store::session_identity::SessionRelation::Root,
+                config: lash_core_store::session_graph::PersistedSessionConfig::from_policy(
+                    &policy.clone(),
+                ),
+                head: lash_core_store::session_store_factory_types::SessionCreationHead::Config,
+                retention: lash_core_store::store::Retention::UntilGc,
+            },
+        )
         .await
         .expect("create store");
-    let mut state = lash_core_execution::RuntimeSessionState {
+    let mut state = lash_core_store::session_state::RuntimeSessionState {
         session_id: SessionId::fixture(session_id.to_string()),
-        ..lash_core_execution::RuntimeSessionState::fixture(policy.clone())
+        ..lash_core_store::session_state::RuntimeSessionState::fixture(policy.clone())
     };
     state.ensure_agent_frame_initialized();
     let leaf = state
@@ -74,7 +78,7 @@ async fn commit_single_root_node(
         .expect("root leaf node id");
     factory
         .commit_runtime_state(
-            lash_core_execution::store::RuntimeCommit::persisted_state_for_test(&state),
+            lash_core_store::store::RuntimeCommit::persisted_state_for_test(&state),
         )
         .await
         .expect("commit root node");
@@ -109,7 +113,7 @@ async fn postgres_delete_reclaims_tombstones_orphaned_by_earlier_delete_when_con
     factory
         .pin(
             &SessionId::from("orphan-owner"),
-            &lash_core_execution::Target::Revision(1),
+            &lash_core_store::store::Target::Revision(1),
         )
         .await
         .expect("pin the owner's committed revision");
@@ -127,26 +131,30 @@ async fn postgres_delete_reclaims_tombstones_orphaned_by_earlier_delete_when_con
     let parent_leaf =
         commit_single_root_node(&factory, &SessionId::from("orphan-fork-parent"), &policy).await;
     factory
-        .fork_session(&lash_core_execution::ForkSessionRequest {
-            pending_observer_intents: Vec::new(),
-            session_id: SessionId::from("orphan-fork-child"),
-            source_session_id: SessionId::from("orphan-fork-parent"),
-            head_revision: 1,
-            relation: lash_core_execution::SessionRelation::Root,
-            config: lash_core_execution::PersistedSessionConfig::from_policy(&policy.clone()),
-            retention: lash_core_execution::Retention::UntilGc,
-        })
+        .fork_session(
+            &lash_core_store::session_store_factory_types::ForkSessionRequest {
+                pending_observer_intents: Vec::new(),
+                session_id: SessionId::from("orphan-fork-child"),
+                source_session_id: SessionId::from("orphan-fork-parent"),
+                head_revision: 1,
+                relation: lash_core_store::session_identity::SessionRelation::Root,
+                config: lash_core_store::session_graph::PersistedSessionConfig::from_policy(
+                    &policy.clone(),
+                ),
+                retention: lash_core_store::store::Retention::UntilGc,
+            },
+        )
         .await
         .expect("fork at the parent's live tip");
     {
-        let child = lash_core_execution::store::SessionStore::new(
+        let child = lash_core_store::store::SessionStore::new(
             std::sync::Arc::new(factory.clone()),
             SessionId::from("orphan-fork-child"),
         )
         .expect("child session view");
-        let mut child_state = lash_core_execution::store::load_session_window_state(
+        let mut child_state = lash_core_store::store::load_session_window_state(
             &child,
-            lash_core_execution::store::WindowSelector::Current,
+            lash_core_store::store::WindowSelector::Current,
         )
         .await
         .expect("load child state")
@@ -155,16 +163,16 @@ async fn postgres_delete_reclaims_tombstones_orphaned_by_earlier_delete_when_con
         let parent_node_id = child_state.session_graph.leaf_node_id.clone();
         child_state
             .session_graph
-            .apply_append(&lash_core_execution::store::GraphAppend::Extend {
-                nodes: vec![lash_core_execution::SessionNodeRecord {
+            .apply_append(&lash_core_store::store::GraphAppend::Extend {
+                nodes: vec![lash_core_store::session_graph::SessionNodeRecord {
                     node_id: lash_core::NodeId::from("orphan-fork-child-node"),
                     parent_node_id,
                     timestamp: "2026-08-17T00:00:00.000000000Z"
                         .parse()
                         .expect("canonical node timestamp"),
-                    payload: lash_core_execution::SessionNodePayload::Event {
-                        event: lash_core_execution::SessionHistoryRecord::Protocol(
-                            lash_core_execution::ProtocolEvent::typed(
+                    payload: lash_core_store::session_graph::SessionNodePayload::Event {
+                        event: lash_protocol_types::session_model::SessionHistoryRecord::Protocol(
+                            lash_protocol_types::session_model::ProtocolEvent::typed(
                                 "orphan-fork-child-event",
                                 serde_json::json!({ "content": "child node" }),
                             )
@@ -176,7 +184,7 @@ async fn postgres_delete_reclaims_tombstones_orphaned_by_earlier_delete_when_con
             .expect("append child node");
         child
             .commit_runtime_state(
-                lash_core_execution::store::RuntimeCommit::persisted_state_for_test(&child_state),
+                lash_core_store::store::RuntimeCommit::persisted_state_for_test(&child_state),
             )
             .await
             .expect("advance forked child");

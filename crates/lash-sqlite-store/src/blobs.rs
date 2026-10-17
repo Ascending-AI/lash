@@ -11,7 +11,7 @@
 
 use super::*;
 use crate::artifact_store::artifact_sql;
-use lash_core_execution::FleetFormat;
+use lash_core_store::store::FleetFormat;
 
 lash_store_sql::statements! {
     /// `blobs` statements only SQLite issues.
@@ -182,7 +182,7 @@ impl SqliteStore {
         blob_ref: &BlobRef,
         fleet: FleetFormat,
     ) -> Result<(), StoreError> {
-        let version = fleet.writer_version(lash_core_execution::surface_format!(
+        let version = fleet.writer_version(lash_core_store::surface_format!(
             SQLITE_BLOB_ENVELOPE_VERSION
         ));
         let stored = encode_artifact_blob(&descriptor, profile, content, version)?;
@@ -205,7 +205,7 @@ impl SqliteStore {
         fleet: FleetFormat,
         images: &std::sync::Mutex<EncodedImages>,
     ) -> Result<Arc<[u8]>, StoreError> {
-        let version = fleet.writer_version(lash_core_execution::surface_format!(
+        let version = fleet.writer_version(lash_core_store::surface_format!(
             SQLITE_BLOB_ENVELOPE_VERSION
         ));
         images
@@ -246,7 +246,7 @@ impl SqliteStore {
         conn: &crate::conn::FencedTx<'_>,
         checkpoint: &HydratedSessionCheckpoint,
         profile: BuiltinBlobProfile,
-        fleet_format: lash_core_execution::FleetFormat,
+        fleet_format: lash_core_store::store::FleetFormat,
     ) -> Result<StoredSessionCheckpoint, StoreError> {
         Self::validate_checkpoint_component_refs_conn(
             conn,
@@ -275,7 +275,7 @@ impl SqliteStore {
                     body_ref,
                     fleet_format,
                 )?;
-                lash_core_execution::store::ensure_checkpoint_component_hash_agreement(
+                lash_core_store::store::ensure_checkpoint_component_hash_agreement(
                     key,
                     body_ref,
                     &descriptor.blob_ref,
@@ -289,8 +289,8 @@ impl SqliteStore {
                     fleet_format,
                 )?;
                 #[cfg(feature = "perf-witness")]
-                lash_core_execution::perf_witness::record_hash_pass(body.len());
-                lash_core_execution::store::ensure_checkpoint_component_hash_agreement(
+                lash_core_ids::perf_witness::record_hash_pass(body.len());
+                lash_core_store::store::ensure_checkpoint_component_hash_agreement(
                     key,
                     &stored_ref,
                     &descriptor.blob_ref,
@@ -306,7 +306,7 @@ impl SqliteStore {
         if let Some(node) = checkpoint
             .execution
             .as_ref()
-            .and_then(lash_core_execution::store::CheckpointExecution::node)
+            .and_then(lash_core_store::store::CheckpointExecution::node)
         {
             nodes.insert(node.id, node);
         }
@@ -327,7 +327,7 @@ impl SqliteStore {
     ) -> Result<(), StoreError> {
         let mut referenced = std::collections::BTreeSet::new();
         for (key, component) in &checkpoint.components {
-            lash_core_execution::store::ensure_checkpoint_component_encoding_version(
+            lash_core_store::store::ensure_checkpoint_component_encoding_version(
                 key,
                 component.encoding_version(),
             )?;
@@ -471,7 +471,7 @@ impl SqliteStore {
     pub(crate) fn get_checkpoint_conn(
         conn: &Connection,
         blob_ref: &BlobRef,
-        fleet: lash_core_execution::FleetFormat,
+        fleet: lash_core_store::store::FleetFormat,
         chunk_size: usize,
     ) -> Result<Option<HydratedSessionCheckpoint>, StoreError> {
         let Some((record, closure)) = Self::checkpoint_graph_conn(conn, blob_ref)? else {
@@ -498,7 +498,7 @@ impl SqliteStore {
                                 lash_core_store::checkpoint_graph::GraphRefusal::MissingNode(root),
                             )
                         })?;
-                Ok::<_, StoreError>(lash_core_execution::store::CheckpointExecution {
+                Ok::<_, StoreError>(lash_core_store::store::CheckpointExecution {
                     root,
                     descriptor: Some(descriptor),
                 })
@@ -526,7 +526,7 @@ impl SqliteStore {
                 })?;
             components.insert(
                 key.clone(),
-                lash_core_execution::HydratedCheckpointComponent::hydrated(
+                lash_core_store::store::HydratedCheckpointComponent::hydrated(
                     descriptor.clone(),
                     std::sync::Arc::clone(body),
                 ),

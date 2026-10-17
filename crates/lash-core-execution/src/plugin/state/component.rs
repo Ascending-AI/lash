@@ -81,11 +81,18 @@ impl StateAuthority for ComponentState {
 
 #[async_trait::async_trait]
 impl crate::plugin::ExecutionState for ComponentState {
-    fn propose(&self, proposal: Proposal) -> Result<(), crate::PluginError> {
-        propose(self, proposal).map_err(crate::PluginError::from)
+    fn propose(
+        &self,
+        proposal: Proposal,
+    ) -> Result<(), lash_execution_contracts::plugin_error::PluginError> {
+        propose(self, proposal).map_err(lash_execution_contracts::plugin_error::PluginError::from)
     }
-    fn propose_all(&self, proposals: Vec<Proposal>) -> Result<(), crate::PluginError> {
-        propose_all(self, proposals).map_err(crate::PluginError::from)
+    fn propose_all(
+        &self,
+        proposals: Vec<Proposal>,
+    ) -> Result<(), lash_execution_contracts::plugin_error::PluginError> {
+        propose_all(self, proposals)
+            .map_err(lash_execution_contracts::plugin_error::PluginError::from)
     }
     fn publish_committed_state(
         &self,

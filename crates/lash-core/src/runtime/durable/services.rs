@@ -100,9 +100,11 @@ impl RuntimeTurnServices {
         else {
             return Ok(None);
         };
-        let corrupt = |message: &str| crate::PluginError::StoredDataCorrupt {
-            record_kind: "CommittedTurn".to_owned(),
-            message: message.to_owned(),
+        let corrupt = |message: &str| {
+            lash_execution_contracts::plugin_error::PluginError::StoredDataCorrupt {
+                record_kind: "CommittedTurn".to_owned(),
+                message: message.to_owned(),
+            }
         };
         if committed != *turn {
             return Err(corrupt("the run terminal names another turn").into());
@@ -117,7 +119,7 @@ impl RuntimeTurnServices {
             .await?;
         let mut page =
             crate::transcript::CommittedTurnsPage::decode(page, decoders).map_err(|error| {
-                crate::PluginError::StoredDataCorrupt {
+                lash_execution_contracts::plugin_error::PluginError::StoredDataCorrupt {
                     record_kind: error.record_kind,
                     message: error.message,
                 }

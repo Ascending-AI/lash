@@ -27,7 +27,8 @@ pub fn native_format_two_component(id: &'static str) -> crate::plugin::ProcessCo
 
         fn recipe(
             self: std::sync::Arc<Self>,
-        ) -> Result<crate::plugin::ProcessRecipe, crate::PluginError> {
+        ) -> Result<crate::plugin::ProcessRecipe, lash_execution_contracts::plugin_error::PluginError>
+        {
             crate::plugin::ProcessComponentSpec::new().recipe(self.declaration().id.as_str())
         }
     }

@@ -58,10 +58,10 @@ pub async fn process_prune_preserves_independent_session_checkpoint_roots(
 )]
 async fn register_process(registry: &dyn crate::ProcessRegistry) -> ProcessId {
     registry
-        .register_process(lash_core::testing::held_engine_registration(
+        .register_process(lash_execution_contracts::testing::held_engine_registration(
             serde_json::Value::Null,
             crate::ProcessProvenance::host(),
-            lash_core::Lifetime::Detached,
+            lash_execution_contracts::process::Lifetime::Detached,
         ))
         .await
         .expect("register the pruned process")

@@ -71,7 +71,10 @@ pub async fn first_admission_wins_without_changing_business_identity(
     prefix: &str,
     stores: Arc<dyn crate::StoreSet>,
 ) {
-    lash_core::testing::process_execution_env_fixture(stores.process_env_store().as_ref()).await;
+    lash_execution_contracts::testing::process_execution_env_fixture(
+        stores.process_env_store().as_ref(),
+    )
+    .await;
     let session_id = crate::SessionId::fixture(format!("{prefix}-trace-first-writer"));
     let parts = TraceParts {
         store: crate::conformance::law_session_store(stores.as_ref(), &session_id).await,
@@ -200,7 +203,7 @@ async fn a_retried_start_keeps_its_first_scope(prefix: &str, stores: &Arc<dyn cr
     let created = registry
         .register_process_reporting_outcome(
             start(offer(FIRST, FIRST_SPAN))
-                .with_trace_class(lash_core::ProcessTraceClass::Workflow),
+                .with_trace_class(lash_execution_contracts::process::ProcessTraceClass::Workflow),
             &[],
         )
         .await
@@ -219,7 +222,7 @@ async fn a_retried_start_keeps_its_first_scope(prefix: &str, stores: &Arc<dyn cr
     assert_eq!(created.record.trace, Some(scope.clone()));
     assert_eq!(
         created.record.trace_class,
-        lash_core::ProcessTraceClass::Workflow
+        lash_execution_contracts::process::ProcessTraceClass::Workflow
     );
 
     // A host key fences the start's content, and the offer is not content:
@@ -234,7 +237,7 @@ async fn a_retried_start_keeps_its_first_scope(prefix: &str, stores: &Arc<dyn cr
         assert_eq!(retried.record.trace, Some(scope.clone()));
         assert_eq!(
             retried.record.trace_class,
-            lash_core::ProcessTraceClass::Workflow
+            lash_execution_contracts::process::ProcessTraceClass::Workflow
         );
         assert!(
             TraceScopeAdmission::of(scope.clone(), retried.is_created())
@@ -255,7 +258,7 @@ async fn a_retried_start_keeps_its_first_scope(prefix: &str, stores: &Arc<dyn cr
 
     // Changed content under the key is the typed conflict it always was.
     let mut changed = start(offer(FIRST, FIRST_SPAN));
-    changed.input = Arc::new(lash_core::testing::held_engine_input(
+    changed.input = Arc::new(lash_execution_contracts::testing::held_engine_input(
         serde_json::json!({"changed": true}),
     ));
     match registry
@@ -285,10 +288,12 @@ async fn a_resubmitted_intent_keeps_its_first_scope(
         0,
     );
     let cancel = || {
-        crate::ToolIntent::CancelProcess(lash_core::CancelProcessIntent {
-            owner: owner.clone(),
-            process_id: crate::ProcessId::fixture("trace-intent-target"),
-        })
+        crate::ToolIntent::CancelProcess(
+            lash_execution_contracts::tool_intent::CancelProcessIntent {
+                owner: owner.clone(),
+                process_id: crate::ProcessId::fixture("trace-intent-target"),
+            },
+        )
     };
     let submission = |_fire: TraceScopeOffer, submitted: TraceScopeOffer, at_ms: u64| {
         crate::ToolIntentSubmissionRecord::new(identity.clone(), cancel())

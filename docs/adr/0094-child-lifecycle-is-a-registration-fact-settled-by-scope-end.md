@@ -27,8 +27,8 @@ against ancestry. These scope rules belong to
 identity belongs to
 [ADR 0107](0107-a-process-is-named-by-a-minted-id-a-start-by-its-key.md).
 
-Evidence: `crates/lash-core-execution/src/runtime/process/model/scope_lifetime.rs`, and
-`crates/lash-core-execution/src/runtime/process/model/start_request.rs`.
+Evidence: `crates/lash-execution-contracts/src/process/model/scope_lifetime.rs`, and
+`crates/lash-execution-contracts/src/process/model/start_request.rs`.
 
 ### Storage and scope-close ledger
 
@@ -52,7 +52,7 @@ the cursor at the last committed batch, so the next owner continues from it.
 The per-scope/per-child request identity and settle marker are idempotent.
 Settlement does not await child termination.
 
-Evidence: `crates/lash-core-execution/src/runtime/process/registry.rs`,
+Evidence: `crates/lash-execution-contracts/src/process/registry.rs`,
 `crates/lash-sqlite-store/src/process_registry/parent_end.rs`,
 `crates/lash-core/src/runtime/durable/turn_scope.rs`,
 `crates/lash-sqlite-store/src/process_registry/registration.rs`, and
@@ -75,8 +75,8 @@ row follows the typed refusal path. The cancellation family is version 3 under
 permanent origin tag, and requester, with no timestamp.
 
 Evidence: `crates/lash-sansio/src/tool_output.rs`,
-`crates/lash-core-execution/src/runtime/process/validation.rs`, and
-`crates/lash-core-execution/src/runtime/process/events.rs`.
+`crates/lash-execution-contracts/src/process/validation.rs`, and
+`crates/lash-execution-contracts/src/process/events.rs`.
 
 ### Start compensation
 
@@ -88,7 +88,7 @@ that fails before its transaction commits leaves no row. A `StartFailed`
 request against a never-started row makes it Cancelled. A registration
 conflict cannot license cancellation of another start's record.
 
-Evidence: `crates/lash-core-execution/src/runtime/process/validation.rs`.
+Evidence: `crates/lash-execution-contracts/src/process/validation.rs`.
 
 ### 12. An opener close cancels waits, not registered processes
 

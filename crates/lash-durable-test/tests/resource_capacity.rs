@@ -18,7 +18,7 @@ use std::sync::Arc;
 use std::time::Duration;
 
 use lash_core::testing::ThreadCensus;
-use lash_core_execution::StoreSet;
+use lash_execution_contracts::backend::StoreSet;
 use serde_json::json;
 
 const MODEL: &str = "resource-capacity-model";
@@ -28,7 +28,7 @@ const LIFECYCLES: usize = 32;
 /// The environment a host start states in these laws: no tools and no
 /// components.
 fn environment() -> lash_core::ProcessEnv {
-    lash_core_execution::testing::process_env_with_limit(16)
+    lash_execution_contracts::testing::process_env_with_limit(16)
 }
 
 /// One lifecycle: a deployment that runs a process and a turn, shut down
@@ -85,12 +85,12 @@ async fn one_lifecycle(run: usize) -> std::sync::Weak<lash_sqlite_store::SqliteS
     let process = core
         .processes()
         .start(
-            lash_core::ProcessStartRequest::engine(
+            lash_execution_contracts::process::ProcessStartRequest::engine(
                 "testing-fixture".to_owned(),
                 json!({}),
-                lash_core::EngineLaunch::new(env_ref, None),
-                lash_core::ProcessOriginator::host(),
-                lash_core::LifetimeDecision::Detached,
+                lash_execution_contracts::process::EngineLaunch::new(env_ref, None),
+                lash_execution_contracts::process::ProcessOriginator::host(),
+                lash_execution_contracts::process::LifetimeDecision::Detached,
             ),
             core.effect_host(),
         )
@@ -105,7 +105,7 @@ async fn one_lifecycle(run: usize) -> std::sync::Weak<lash_sqlite_store::SqliteS
     .expect("the process ends within a minute")
     .expect("the process's end is read");
     assert!(
-        matches!(&output, lash_core::ProcessAwaitOutput::Settled { output }
+        matches!(&output, lash_execution_contracts::process::ProcessAwaitOutput::Settled { output }
             if matches!(&output.outcome, lash_core::ToolCallOutcome::Success(value)
                 if value.to_json_value() == json!({ "fixture": "complete" }))),
         "{output:?}"

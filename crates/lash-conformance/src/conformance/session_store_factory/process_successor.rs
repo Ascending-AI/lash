@@ -13,7 +13,7 @@ pub async fn a_same_start_key_successor_after_prune_has_independent_attachment_r
     registry: Arc<dyn crate::ProcessRegistry>,
     effect_host: ActorContext,
 ) {
-    lash_core::testing::process_execution_env_fixture(
+    lash_execution_contracts::testing::process_execution_env_fixture(
         effect_host.backend().process_env_store().as_ref(),
     )
     .await;

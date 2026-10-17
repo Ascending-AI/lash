@@ -5,9 +5,9 @@ use crate::support::{
     SessionListFilter, SessionView, StaticPluginFactory, ToolProvider,
 };
 use lash_core::ActorContext;
-use lash_core::Backend;
 use lash_core::facade_support;
 use lash_core_worker::DurableProcessWorkerConfig;
+use lash_execution_contracts::backend::Backend;
 use lash_protocol_types::SessionId;
 
 mod drain;
@@ -498,9 +498,9 @@ impl LashCore {
     ) -> Result<Arc<lash_core::ToolCatalog>> {
         let engines = &self.env.core.process_engines;
         let components = engines.components();
-        let composition = components
-            .compose(env, None)
-            .map_err(|refusal| lash_core::PluginError::ProcessEnvRefused { refusal })?;
+        let composition = components.compose(env, None).map_err(|refusal| {
+            lash_execution_contracts::plugin_error::PluginError::ProcessEnvRefused { refusal }
+        })?;
         // The catalog is resolved before any process exists: its owner is a
         // fresh process id that no record will carry.
         let (_, catalog) = composition.linked_tools(
@@ -757,7 +757,7 @@ pub struct LashCoreBuilder {
     /// The process components a process environment may name (FIG-6034),
     /// and the first registration refused, reported at build.
     process_components: lash_core::plugin::ProcessComponentRegistry,
-    process_component_refusal: Option<lash_core::PluginError>,
+    process_component_refusal: Option<lash_execution_contracts::plugin_error::PluginError>,
     /// Whole session plugins this deployment permanently removed.
     retired_session_plugins: lash_core::plugin::RetiredSessionPlugins,
     /// The session config-change observers the deployment uninstalled for
@@ -1420,10 +1420,12 @@ fn refuse_duplicate_tool_keys(
                 .chain(plugins.protocol_factory())
                 .any(|factory| factory.id() == key.as_str());
         if taken {
-            return Err(lash_core::PluginError::Registration(format!(
-                "tool provider key `{key}` names another builder tool provider or plugin"
-            ))
-            .into());
+            return Err(
+                lash_execution_contracts::plugin_error::PluginError::Registration(format!(
+                    "tool provider key `{key}` names another builder tool provider or plugin"
+                ))
+                .into(),
+            );
         }
     }
     Ok(())

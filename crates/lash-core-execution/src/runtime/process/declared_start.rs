@@ -14,7 +14,9 @@
 use lash_protocol_types::ToolCallId;
 use serde::{Deserialize, Serialize};
 
-use super::model::{ConsumerHold, ProcessStartRegistration, StartKey};
+use super::model::StartKey;
+use lash_execution_contracts::process::ConsumerHold;
+use lash_execution_contracts::process::ProcessStartRegistration;
 
 /// The implementation and start an isolated call binds before execution.
 #[derive(Clone, Debug)]
@@ -145,11 +147,14 @@ impl DeclaredStartObligation {
 
 #[cfg(test)]
 mod tests {
-    use super::super::{
-        ConsumerHold, EngineLaunch, Lifetime, ProcessEnvRef, ProcessInput, ProcessProvenance,
-        ScopeId,
-    };
+    use super::super::ProcessEnvRef;
+    use super::super::ScopeId;
     use super::*;
+    use lash_execution_contracts::process::ConsumerHold;
+    use lash_execution_contracts::process::EngineLaunch;
+    use lash_execution_contracts::process::Lifetime;
+    use lash_execution_contracts::process::ProcessInput;
+    use lash_execution_contracts::process::ProcessProvenance;
 
     fn registration(cancels: bool) -> ProcessStartRegistration {
         let mut registration = ProcessStartRegistration::of_target(

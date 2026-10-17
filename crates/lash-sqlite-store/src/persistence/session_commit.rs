@@ -3,18 +3,18 @@ mod graph_nodes;
 use super::*;
 use crate::session_sql::session_sql;
 use graph_nodes::{insert_graph_nodes_conn, occupied_node_ids_conn};
-use lash_core_execution::FleetFormatStore;
+use lash_core_store::store::FleetFormatStore;
 
 /// Apply a commit's frame transition: carry out of `ended` into the
 /// successor, then end every frame in `left` (the frames the commit leaves,
 /// `ended` among them) gated on the transition's execution.
 fn commit_frame_transition_tx(
     tx: &rusqlite::Connection,
-    transition: &lash_core_execution::store::FrameTransition,
-    left: &[lash_core_execution::FrameNodeId],
+    transition: &lash_core_store::store::FrameTransition,
+    left: &[lash_core_store::session_identity::FrameNodeId],
     now_ms: u64,
 ) -> Result<(), StoreError> {
-    use lash_core_execution::ArtifactReferrer;
+    use lash_core_store::artifact_referrer::ArtifactReferrer;
     let source = ArtifactReferrer::FrameEnvironment(transition.ended.clone());
     let successor = ArtifactReferrer::FrameEnvironment(transition.successor.clone());
     if crate::artifact_store::artifact_fenced_tx(tx, &successor).map_err(sqlite_error)? {
@@ -25,10 +25,10 @@ fn commit_frame_transition_tx(
     let sql = crate::artifact_store::artifact_sql();
     let mut carries = transition.carries.clone();
     for carry in &transition.carries {
-        if carry.store != lash_core_execution::ArtifactStoreId::ProcessDefinition {
+        if carry.store != lash_core_store::artifact_referrer::ArtifactStoreId::ProcessDefinition {
             continue;
         }
-        let id = lash_core_execution::ProcessDefinitionId::parse(&carry.artifact_ref)
+        let id = lash_protocol_types::ProcessDefinitionId::parse(&carry.artifact_ref)
             .map_err(|e| StoreError::Backend(e.to_string()))?;
         let blob: String = tx
             .query_row(
@@ -37,12 +37,14 @@ fn commit_frame_transition_tx(
                 |row| row.get(0),
             )
             .map_err(sqlite_error)?;
-        let bytes = SqliteStore::get_blob_conn(tx, &lash_core_execution::store::BlobRef(blob))?
+        let bytes = SqliteStore::get_blob_conn(tx, &lash_core_store::store::BlobRef(blob))?
             .ok_or_else(|| {
                 StoreError::Backend("carried definition has no descriptor bytes".into())
             })?;
-        let draft = lash_core_execution::ProcessDefinitionDraft::from_store_bytes(&id, &bytes)
-            .map_err(|e| StoreError::Backend(e.to_string()))?;
+        let draft = lash_execution_contracts::process::ProcessDefinitionDraft::from_store_bytes(
+            &id, &bytes,
+        )
+        .map_err(|e| StoreError::Backend(e.to_string()))?;
         carries.extend(draft.artifacts().iter().cloned());
     }
     carries.sort();
@@ -95,19 +97,26 @@ fn commit_frame_transition_tx(
 fn end_frames_tx(
     tx: &rusqlite::Connection,
     session_id: &SessionId,
-    left: &[lash_core_execution::FrameNodeId],
+    left: &[lash_core_store::session_identity::FrameNodeId],
     gate: Option<&lash_protocol_types::EffectJournalIdentity>,
     now_ms: u64,
 ) -> Result<(), StoreError> {
     for frame in left {
-        let referrer = lash_core_execution::ArtifactReferrer::FrameEnvironment(
-            lash_core_execution::FrameEnvironmentId::new(session_id.clone(), frame.clone()),
+        let referrer = lash_core_store::artifact_referrer::ArtifactReferrer::FrameEnvironment(
+            lash_core_store::artifact_referrer::FrameEnvironmentId::new(
+                session_id.clone(),
+                frame.clone(),
+            ),
         );
         crate::artifact_store::fence_artifact_referrer_tx(tx, &referrer, now_ms)
             .map_err(sqlite_error)?;
         crate::obligation_ledger::arm_cleanup_tx(
             tx,
-            &lash_core_execution::ArtifactCleanup::ended(referrer, Vec::new(), gate.cloned()),
+            &lash_core_store::artifact_referrer::ArtifactCleanup::ended(
+                referrer,
+                Vec::new(),
+                gate.cloned(),
+            ),
             now_ms,
         )?;
     }
@@ -119,10 +128,10 @@ impl SessionCommitStore for SqliteStore {
     async fn committed_turn_exists(
         &self,
         session_id: &SessionId,
-        turn_id: &lash_core_execution::TurnId,
+        turn_id: &lash_protocol_types::TurnId,
     ) -> Result<bool, StoreError> {
         let session_id = session_id.clone();
-        let key = lash_core_execution::store_backend_support::turn_commit_receipt_storage_key(
+        let key = lash_core_store::store_backend_support::turn_commit_receipt_storage_key(
             &session_id,
             turn_id,
         )?;
@@ -151,14 +160,14 @@ impl SessionCommitStore for SqliteStore {
     async fn admit_session_state(
         &self,
         session_id: &SessionId,
-    ) -> Result<lash_core_execution::store::SessionStateAdmission, StoreError> {
+    ) -> Result<lash_core_store::store::SessionStateAdmission, StoreError> {
         let session_id = session_id.clone();
         let fleet = self.fleet_format();
         self.read_connection()
             .call(move |conn| {
                 Ok(
                     read_session_state_version_conn(conn, &session_id, fleet).map(|version| {
-                        lash_core_execution::store::SessionStateAdmission {
+                        lash_core_store::store::SessionStateAdmission {
                             session_id: session_id.clone(),
                             version,
                         }
@@ -172,7 +181,7 @@ impl SessionCommitStore for SqliteStore {
     async fn retain_admission_base(
         &self,
         session_id: &SessionId,
-        base: &lash_core_execution::store::SessionHeadRef,
+        base: &lash_core_store::store::SessionHeadRef,
     ) -> Result<(), StoreError> {
         let session_id = session_id.clone();
         let checkpoint_ref = base.checkpoint.clone();
@@ -204,7 +213,7 @@ impl SessionCommitStore for SqliteStore {
         &self,
         commit: RuntimeCommit,
     ) -> Result<RuntimeCommitReceipt, StoreError> {
-        lash_core_execution::store::validate_session_id(&commit.session_id)?;
+        lash_core_store::store::validate_session_id(&commit.session_id)?;
         // The commit is planned before `BEGIN` under the handle's last
         // observed `F`. When the fence reads another writable epoch the
         // transaction writes nothing and the commit is planned again under
@@ -212,7 +221,7 @@ impl SessionCommitStore for SqliteStore {
         // release, so a second move inside one commit is contention.
         let mut planned_under = self.fleet_format();
         let mut planner =
-            lash_core_execution::store::RuntimeCommitPlanner::prepare(commit, planned_under)?;
+            lash_core_store::store::RuntimeCommitPlanner::prepare(commit, planned_under)?;
         let mut replanned = false;
         let blob_profile = self.options.blob_profile;
         let now = self.clock.timestamp_ms();
@@ -225,7 +234,7 @@ impl SessionCommitStore for SqliteStore {
                 CommitAttempt::FleetMoved(returned) if !replanned => {
                     replanned = true;
                     planned_under = self.fleet_format();
-                    planner = lash_core_execution::store::RuntimeCommitPlanner::prepare(
+                    planner = lash_core_store::store::RuntimeCommitPlanner::prepare(
                         returned.commit().clone(),
                         planned_under,
                     )?;
@@ -238,7 +247,7 @@ impl SessionCommitStore for SqliteStore {
     async fn settle_observer_intents(
         &self,
         session_id: &SessionId,
-        remaining: Vec<lash_core_execution::facade_support::SessionObserverIntent>,
+        remaining: Vec<lash_core_store::session_identity::SessionObserverIntent>,
     ) -> Result<(), StoreError> {
         SqliteStore::settle_observer_intents(self, session_id, remaining).await
     }
@@ -276,7 +285,7 @@ enum CommitAttempt {
     Done(Box<Result<RuntimeCommitReceipt, StoreError>>),
     /// The fence read an epoch other than the one the plan was made under;
     /// nothing was written, and the planner comes back to be planned again.
-    FleetMoved(Box<lash_core_execution::store::RuntimeCommitPlanner>),
+    FleetMoved(Box<lash_core_store::store::RuntimeCommitPlanner>),
 }
 
 /// A turn commit's stored receipt row, as the idempotent replay reads it.
@@ -297,8 +306,8 @@ impl SqliteStore {
     /// reads an epoch other than `planned_under`.
     async fn commit_attempt(
         &self,
-        planner: lash_core_execution::store::RuntimeCommitPlanner,
-        planned_under: lash_core_execution::FleetFormat,
+        planner: lash_core_store::store::RuntimeCommitPlanner,
+        planned_under: lash_core_store::store::FleetFormat,
         blob_profile: crate::BuiltinBlobProfile,
         now: u64,
     ) -> Result<CommitAttempt, StoreError> {
@@ -312,7 +321,7 @@ impl SqliteStore {
                 let outcome = apply_runtime_commit_conn(
                     tx,
                     &planner,
-                    lash_core_execution::store::HeadWriter::Store,
+                    lash_core_store::store::HeadWriter::Store,
                     blob_profile,
                     now,
                 );
@@ -338,8 +347,8 @@ impl SqliteStore {
 /// `writer` naming which.
 pub(crate) fn apply_runtime_commit_conn(
     tx: &crate::conn::FencedTx<'_>,
-    planner: &lash_core_execution::store::RuntimeCommitPlanner,
-    writer: lash_core_execution::store::HeadWriter,
+    planner: &lash_core_store::store::RuntimeCommitPlanner,
+    writer: lash_core_store::store::HeadWriter,
     blob_profile: crate::BuiltinBlobProfile,
     now: u64,
 ) -> Result<RuntimeCommitReceipt, StoreError> {
@@ -406,24 +415,24 @@ pub(crate) fn apply_runtime_commit_conn(
             // One codec owns the unit-shape and integer-range checks.
             // The ancestor stays write-only because the request hash binds it.
             let append_request_identity =
-                lash_core_execution::store_backend_support::decode_append_request_identity(
+                lash_core_store::store_backend_support::decode_append_request_identity(
                     &commit.turn_commit.operation.key,
                     stored_identity,
                     stored_version,
                     stored_requested_node_count,
                 )?;
-            let result = lash_core_execution::store::decode_runtime_commit_receipt_for_fleet(
+            let result = lash_core_store::store::decode_runtime_commit_receipt_for_fleet(
                 &commit.session_id,
                 planner.operation_key(),
                 &result_json,
                 (committed_at_ms, head_revision),
                 fleet,
             )?;
-            lash_core_execution::store::validate_turn_commit_outcome_code(
+            lash_core_store::store::validate_turn_commit_outcome_code(
                 &result,
                 stored_outcome.as_deref(),
             )?;
-            let prior = lash_core_execution::store::RuntimeCommitReceiptRecord {
+            let prior = lash_core_store::store::RuntimeCommitReceiptRecord {
                 turn_commit_hash: stored_hash,
                 result,
                 append_request_identity,
@@ -461,12 +470,12 @@ pub(crate) fn apply_runtime_commit_conn(
                         )
                     })?;
                     Ok((
-                        lash_core_execution::store::ParentNodeFacts {
+                        lash_core_store::store::ParentNodeFacts {
                             node_id: leaf_node_id.to_string().try_into()?,
                             generation,
                             frame_node_id: frame_node_id.try_into()?,
                         },
-                        lash_core_execution::store_backend_support::PathNode {
+                        lash_core_store::store_backend_support::PathNode {
                             node_id: leaf_node_id.to_string().try_into()?,
                             owner_session_id: owner.try_into()?,
                             generation,
@@ -509,7 +518,7 @@ pub(crate) fn apply_runtime_commit_conn(
             Some((owner, generation)) => crate::history::head_reaches(
                 tx,
                 parent_path_node.clone(),
-                lash_core_execution::store_backend_support::PathNode {
+                lash_core_store::store_backend_support::PathNode {
                     node_id: required.to_string().try_into()?,
                     owner_session_id: owner.try_into()?,
                     generation: u64::try_from(generation).map_err(|_| {
@@ -524,13 +533,13 @@ pub(crate) fn apply_runtime_commit_conn(
     };
     let occupied_node_ids = occupied_node_ids_conn(tx, commit.graph.nodes())?;
     let published_leaf = match old_leaf_node_id {
-        None => lash_core_execution::store::PublishedLeafFacts::Absent,
+        None => lash_core_store::store::PublishedLeafFacts::Absent,
         Some(node_id) => match parent_node_facts {
-            Some(parent) => lash_core_execution::store::PublishedLeafFacts::Live(parent),
-            None => lash_core_execution::store::PublishedLeafFacts::Retired { node_id },
+            Some(parent) => lash_core_store::store::PublishedLeafFacts::Live(parent),
+            None => lash_core_store::store::PublishedLeafFacts::Retired { node_id },
         },
     };
-    let plan = planner.plan(lash_core_execution::store::FreshRuntimeCommitFacts {
+    let plan = planner.plan(lash_core_store::store::FreshRuntimeCommitFacts {
         actual_head_revision: actual_revision,
         published_leaf,
         requested_ancestor_is_active,
@@ -541,13 +550,13 @@ pub(crate) fn apply_runtime_commit_conn(
     // command owns it. A replayed receipt above answered its
     // first outcome already, and the plan's own refusals (a
     // moved head) answer first.
-    if lash_core_execution::store::head_write_needs_ownership(
+    if lash_core_store::store::head_write_needs_ownership(
         commit,
         writer,
         existing.as_ref().is_some_and(|head| !head.is_created()),
     ) {
         let facts = crate::session_runs::head_ownership_facts_conn(tx, &commit.session_id)?;
-        lash_core_execution::store::require_unowned_head(&commit.session_id, facts)?;
+        lash_core_store::store::require_unowned_head(&commit.session_id, facts)?;
     }
     let sql_head_revision = sql_monotonic_counter_value(
         "session_head_revision",
@@ -568,7 +577,7 @@ pub(crate) fn apply_runtime_commit_conn(
     // head read is ever moved out of the write transaction,
     // this refuses the publication instead of publishing over
     // a revision nobody held.
-    lash_core_execution::store_backend_support::require_single_writer_head_publication(
+    lash_core_store::store_backend_support::require_single_writer_head_publication(
         &commit.session_id,
         crate::SQLITE_BACKEND,
         !tx.is_autocommit(),
@@ -592,12 +601,12 @@ pub(crate) fn apply_runtime_commit_conn(
         .transpose()
         .map_err(sqlite_error)?
         .unwrap_or(0);
-    match lash_core_execution::store_backend_support::head_publication_verdict(
+    match lash_core_store::store_backend_support::head_publication_verdict(
         plan.actual_head_revision(),
         published_revision,
     ) {
-        lash_core_execution::store_backend_support::HeadPublicationVerdict::Publish => {}
-        lash_core_execution::store_backend_support::HeadPublicationVerdict::HeadMoved {
+        lash_core_store::store_backend_support::HeadPublicationVerdict::Publish => {}
+        lash_core_store::store_backend_support::HeadPublicationVerdict::HeadMoved {
             observed_head_revision,
             ..
         } => {
@@ -607,7 +616,7 @@ pub(crate) fn apply_runtime_commit_conn(
             });
         }
     }
-    let left = lash_core_execution::store::frames_left_by_commit(
+    let left = lash_core_store::store::frames_left_by_commit(
         existing
             .as_ref()
             .and_then(|head| head.current_frame_node_id.as_ref()),
@@ -665,7 +674,7 @@ pub(crate) fn apply_runtime_commit_conn(
         )
         .optional()
         .map_err(sqlite_error)?
-        .map(|(kind, last_turns)| lash_core_execution::Retention::from_stored(&kind, last_turns))
+        .map(|(kind, last_turns)| lash_core_store::store::Retention::from_stored(&kind, last_turns))
         .transpose()?;
     if plan.head_changed()
         && let Some(old_leaf_node_id) = plan.old_leaf_node_id()
@@ -674,8 +683,8 @@ pub(crate) fn apply_runtime_commit_conn(
     }
     let turn_cancel_input_outcome =
         super::ingress_settlement::settle_commit_ingress_conn(tx, commit, now)?;
-    let claim = lash_core_execution::ReferrerClaim::unguarded(
-        lash_core_execution::ArtifactReferrer::Session(commit.session_id.clone()),
+    let claim = lash_core_store::artifact_referrer::ReferrerClaim::unguarded(
+        lash_core_store::artifact_referrer::ArtifactReferrer::Session(commit.session_id.clone()),
     )
     .map_err(|error| error.into_store_error("attachment session referrer"))?;
     crate::attachments::acquire_attachment_refs_conn(
@@ -701,7 +710,7 @@ pub(crate) fn apply_runtime_commit_conn(
     // other policies release what this publication moved out
     // of their window, once the run's terminal names it. A session with
     // no metadata row recorded no policy and releases nothing either.
-    if retention.is_some_and(lash_core_execution::Retention::releases_at_commit) {
+    if retention.is_some_and(lash_core_store::store::Retention::releases_at_commit) {
         crate::revisions::release_unretained_conn(
             tx,
             false,

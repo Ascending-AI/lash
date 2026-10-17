@@ -1,28 +1,30 @@
 use super::*;
-use lash_core_execution::{
-    ArtifactName, ArtifactReferrer, ArtifactStoreId, FrameEnvironmentId, FrameNodeId,
-};
+use lash_core_store::artifact_referrer::ArtifactName;
+use lash_core_store::artifact_referrer::ArtifactReferrer;
+use lash_core_store::artifact_referrer::ArtifactStoreId;
+use lash_core_store::artifact_referrer::FrameEnvironmentId;
+use lash_core_store::session_identity::FrameNodeId;
 
 #[test]
 fn first_commit_may_end_its_own_appended_frame_open() {
     let session = SessionId::from("first-turn-switch");
     let first = FrameNodeId::new("first-frame").expect("frame id");
     let successor = FrameNodeId::new("successor-frame").expect("frame id");
-    let graph = lash_core_execution::store::GraphAppend::Extend {
-        nodes: vec![lash_core_execution::SessionNodeRecord {
+    let graph = lash_core_store::store::GraphAppend::Extend {
+        nodes: vec![lash_core_store::session_graph::SessionNodeRecord {
             node_id: lash_core::NodeId::fixture(first.as_str().to_owned()),
             parent_node_id: None,
             timestamp: "2026-09-29T00:00:00.000000000Z"
                 .parse()
                 .expect("canonical node timestamp"),
-            payload: lash_core_execution::SessionNodePayload::FrameOpen {
-                frame_key: lash_core_execution::FrameKey::from_caller_material("first-frame")
+            payload: lash_core_store::session_graph::SessionNodePayload::FrameOpen {
+                frame_key: lash_protocol_types::FrameKey::from_caller_material("first-frame")
                     .expect("frame key"),
-                reason: lash_core_execution::AgentFrameReason::initial(),
-                assignment: lash_core_execution::AgentFrameAssignment::unconfigured(
-                    lash_core_execution::SessionPolicy::new(
-                        lash_core_execution::TurnBudget::Unbounded,
-                        lash_core_execution::MaxToolCalls::new(1024),
+                reason: lash_core_store::session_identity::AgentFrameReason::initial(),
+                assignment: lash_core_store::session_identity::AgentFrameAssignment::unconfigured(
+                    lash_core_store::session_policy::SessionPolicy::new(
+                        lash_protocol_types::session_model::TurnBudget::Unbounded,
+                        lash_protocol_types::session_model::MaxToolCalls::new(1024),
                         lash_core::NoProgressBudget::bounded(12),
                     ),
                 ),
@@ -30,7 +32,7 @@ fn first_commit_may_end_its_own_appended_frame_open() {
         }],
     };
     let frames_left = |prior: Option<&FrameNodeId>, new_head: &FrameNodeId| {
-        lash_core_execution::store::frames_left_by_commit(prior, &graph, Some(new_head))
+        lash_core_store::store::frames_left_by_commit(prior, &graph, Some(new_head))
     };
     assert_eq!(frames_left(None, &successor), vec![first.clone()]);
     assert!(frames_left(None, &first).is_empty());
@@ -70,7 +72,7 @@ fn first_commit_may_end_its_own_appended_frame_open() {
         ],
     )
     .expect("first frame edge");
-    let transition = lash_core_execution::store::FrameTransition {
+    let transition = lash_core_store::store::FrameTransition {
         ended,
         successor: FrameEnvironmentId::new(session, successor),
         carries: Vec::new(),
@@ -158,7 +160,7 @@ fn frame_transition_carries_then_fences_and_records_gated_cleanup() {
         ],
     )
     .expect("source edge");
-    let transition = lash_core_execution::store::FrameTransition {
+    let transition = lash_core_store::store::FrameTransition {
         ended: old,
         successor: next.clone(),
         carries: vec![ArtifactName {
@@ -204,7 +206,8 @@ fn frame_transition_carries_then_fences_and_records_gated_cleanup() {
         )
         .expect("cleanup record");
     assert_eq!(
-        lash_core_execution::ArtifactCleanup::from_json(&body, &source).expect("decode cleanup"),
+        lash_core_store::artifact_referrer::ArtifactCleanup::from_json(&body, &source)
+            .expect("decode cleanup"),
         transition.ended_cleanup()
     );
 }
@@ -214,20 +217,20 @@ async fn committed_first_frame(
     store: &SqliteStore,
     session: &str,
     clock: &lash_core::testing::TestClock,
-) -> lash_core_execution::RuntimeSessionState {
+) -> lash_core_store::session_state::RuntimeSessionState {
     let session_id = SessionId::fixture(session);
-    lash_core_execution::SessionCatalogStore::admit_session(
+    lash_core_store::store::SessionCatalogStore::admit_session(
         store,
         &lash_core_execution::testing::store_fixtures::root_session_request(&session_id),
     )
     .await
     .expect("admit session");
-    let mut state = lash_core_execution::RuntimeSessionState {
+    let mut state = lash_core_store::session_state::RuntimeSessionState {
         session_id,
-        ..lash_core_execution::RuntimeSessionState::fixture(
-            lash_core_execution::SessionPolicy::new(
-                lash_core_execution::TurnBudget::Unbounded,
-                lash_core_execution::MaxToolCalls::new(1024),
+        ..lash_core_store::session_state::RuntimeSessionState::fixture(
+            lash_core_store::session_policy::SessionPolicy::new(
+                lash_protocol_types::session_model::TurnBudget::Unbounded,
+                lash_protocol_types::session_model::MaxToolCalls::new(1024),
                 lash_core::NoProgressBudget::bounded(12),
             ),
         )
@@ -240,8 +243,8 @@ async fn committed_first_frame(
 /// Commit every pending frame open in `state`, with `transition` attached.
 async fn commit_frame_opens(
     store: &SqliteStore,
-    state: &mut lash_core_execution::RuntimeSessionState,
-    transition: Option<lash_core_execution::store::FrameTransition>,
+    state: &mut lash_core_store::session_state::RuntimeSessionState,
+    transition: Option<lash_core_store::store::FrameTransition>,
 ) {
     let mut commit = RuntimeCommit::persisted_state_for_test(state);
     let appended = commit
@@ -260,15 +263,15 @@ async fn commit_frame_opens(
 }
 
 fn open_resident_frame(
-    state: &mut lash_core_execution::RuntimeSessionState,
+    state: &mut lash_core_store::session_state::RuntimeSessionState,
     key: &str,
     clock: &lash_core::testing::TestClock,
 ) -> FrameNodeId {
     lash_core::runtime::state::open_agent_frame_in_state_with_clock(
         state,
-        lash_core_execution::OpenAgentFrameRequest::new(
-            lash_core_execution::FrameKey::from_caller_material(key).expect("frame key"),
-            lash_core_execution::AgentFrameReason::new("test"),
+        lash_core_store::session_identity::OpenAgentFrameRequest::new(
+            lash_protocol_types::FrameKey::from_caller_material(key).expect("frame key"),
+            lash_core_store::session_identity::AgentFrameReason::new("test"),
         ),
         clock,
     )
@@ -277,11 +280,11 @@ fn open_resident_frame(
 }
 
 async fn hold_module(store: &SqliteStore, frame: &FrameEnvironmentId, module_ref: &str) {
-    let claim = lash_core_execution::ReferrerClaim::unguarded(ArtifactReferrer::FrameEnvironment(
-        frame.clone(),
-    ))
+    let claim = lash_core_store::artifact_referrer::ReferrerClaim::unguarded(
+        ArtifactReferrer::FrameEnvironment(frame.clone()),
+    )
     .expect("frame claim");
-    lash_core_execution::ModuleArtifactStore::publish_module_artifact(
+    lash_execution_contracts::module_artifacts::ModuleArtifactStore::publish_module_artifact(
         store,
         &claim,
         module_ref,
@@ -296,7 +299,10 @@ async fn hold_module(store: &SqliteStore, frame: &FrameEnvironmentId, module_ref
 async fn frame_end(
     store: &SqliteStore,
     frame: &FrameEnvironmentId,
-) -> (bool, Option<lash_core_execution::ArtifactCleanup>) {
+) -> (
+    bool,
+    Option<lash_core_store::artifact_referrer::ArtifactCleanup>,
+) {
     let referrer = ArtifactReferrer::FrameEnvironment(frame.clone());
     store
         .conn
@@ -313,7 +319,7 @@ async fn frame_end(
             Ok((
                 fenced,
                 body.map(|body| {
-                    lash_core_execution::ArtifactCleanup::from_json(&body, &referrer)
+                    lash_core_store::artifact_referrer::ArtifactCleanup::from_json(&body, &referrer)
                         .expect("decode cleanup")
                 }),
             ))
@@ -355,7 +361,7 @@ async fn a_switch_out_of_a_resident_frame_ends_every_frame_the_commit_leaves() {
     );
     // The transition a switch out of an uncommitted frame names: the
     // last committed frame, with no carries.
-    let transition = lash_core_execution::store::FrameTransition {
+    let transition = lash_core_store::store::FrameTransition {
         ended: first.clone(),
         successor: successor.clone(),
         carries: Vec::new(),
@@ -368,7 +374,7 @@ async fn a_switch_out_of_a_resident_frame_ends_every_frame_the_commit_leaves() {
         assert!(fenced, "{frame:?} must be fenced by the switch commit");
         assert_eq!(
             cleanup,
-            Some(lash_core_execution::ArtifactCleanup::ended(
+            Some(lash_core_store::artifact_referrer::ArtifactCleanup::ended(
                 ArtifactReferrer::FrameEnvironment(frame.clone()),
                 Vec::new(),
                 Some(gate()),
@@ -406,7 +412,7 @@ async fn a_commit_without_a_transition_that_changes_the_frame_ends_the_frame_it_
     assert!(fenced, "the frame a park leaves must be fenced");
     assert_eq!(
         cleanup,
-        Some(lash_core_execution::ArtifactCleanup::ended(
+        Some(lash_core_store::artifact_referrer::ArtifactCleanup::ended(
             ArtifactReferrer::FrameEnvironment(first.clone()),
             Vec::new(),
             None,
@@ -433,11 +439,11 @@ async fn a_switch_carrying_a_module_its_frame_does_not_hold_fails_closed() {
         session.clone(),
         state.current_frame_node_id.clone().expect("first frame"),
     );
-    let pinned = lash_core_execution::ReferrerClaim::unguarded(ArtifactReferrer::HostPin(
-        lash_core_execution::HostArtifactPin::mint(),
-    ))
+    let pinned = lash_core_store::artifact_referrer::ReferrerClaim::unguarded(
+        ArtifactReferrer::HostPin(lash_core_store::artifact_referrer::HostArtifactPin::mint()),
+    )
     .expect("host pin claim");
-    lash_core_execution::ModuleArtifactStore::publish_module_artifact(
+    lash_execution_contracts::module_artifacts::ModuleArtifactStore::publish_module_artifact(
         store.as_ref(),
         &pinned,
         "held-by-a-host-pin",
@@ -452,7 +458,7 @@ async fn a_switch_carrying_a_module_its_frame_does_not_hold_fails_closed() {
     );
     for forged in ["never-stored", "held-by-a-host-pin"] {
         let mut commit = RuntimeCommit::persisted_state_for_test(&state);
-        commit.frame_transition = Some(lash_core_execution::store::FrameTransition {
+        commit.frame_transition = Some(lash_core_store::store::FrameTransition {
             ended: first.clone(),
             successor: successor.clone(),
             carries: vec![ArtifactName {

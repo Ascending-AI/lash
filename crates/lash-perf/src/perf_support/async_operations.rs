@@ -9,7 +9,7 @@ use std::sync::atomic::{AtomicBool, Ordering};
 use std::sync::{Arc, LazyLock, Mutex};
 use std::time::Instant;
 
-use lash_core::perf_witness::queues;
+use lash_core_ids::perf_witness::queues;
 use serde::Serialize;
 use tokio_metrics::TaskMonitor;
 

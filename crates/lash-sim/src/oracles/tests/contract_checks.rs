@@ -573,7 +573,7 @@ fn scenario_contract_generated_facts_fail_on_contract_specific_mutations() {
         call_id: None,
     });
     result["calls"] = json!(calls);
-    result["tool_calls"] = json!(records.each_ref().map(lash_core::Durable));
+    result["tool_calls"] = json!(records.each_ref().map(lash_protocol_types::Durable));
     assert!(
         exec_semantic_fact(
             &joined,
@@ -600,7 +600,7 @@ fn scenario_contract_generated_facts_fail_on_contract_specific_mutations() {
             "duplicate_record" => result["tool_calls"]
                 .as_array_mut()
                 .unwrap()
-                .push(json!(lash_core::Durable(&records[0]))),
+                .push(json!(lash_protocol_types::Durable(&records[0]))),
             "duplicate_dispatch" => result["calls"]
                 .as_array_mut()
                 .unwrap()

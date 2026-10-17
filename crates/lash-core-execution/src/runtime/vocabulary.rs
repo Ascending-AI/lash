@@ -12,7 +12,14 @@ use std::sync::Mutex as StdMutex;
 #[doc(hidden)]
 #[derive(Clone, Default)]
 pub struct RuntimeTurnPhaseProbeSlot {
-    probes: Arc<StdMutex<HashMap<crate::SessionScopeId, Arc<dyn RuntimeTurnPhaseProbe>>>>,
+    probes: Arc<
+        StdMutex<
+            HashMap<
+                lash_execution_contracts::process::SessionScopeId,
+                Arc<dyn RuntimeTurnPhaseProbe>,
+            >,
+        >,
+    >,
 }
 
 impl RuntimeTurnPhaseProbeSlot {
@@ -21,12 +28,15 @@ impl RuntimeTurnPhaseProbeSlot {
         session_id: impl Into<SessionId>,
         probe: Arc<dyn RuntimeTurnPhaseProbe>,
     ) {
-        self.set_for_scope(&crate::SessionScope::new(session_id), probe);
+        self.set_for_scope(
+            &lash_execution_contracts::process::SessionScope::new(session_id),
+            probe,
+        );
     }
 
     pub fn set_for_scope(
         &self,
-        scope: &crate::SessionScope,
+        scope: &lash_execution_contracts::process::SessionScope,
         probe: Arc<dyn RuntimeTurnPhaseProbe>,
     ) {
         self.probes.lock_recover().insert(scope.id(), probe);
@@ -34,12 +44,12 @@ impl RuntimeTurnPhaseProbeSlot {
 
     pub fn get_for_scope(
         &self,
-        scope: &crate::SessionScope,
+        scope: &lash_execution_contracts::process::SessionScope,
     ) -> Option<Arc<dyn RuntimeTurnPhaseProbe>> {
         let probes = self.probes.lock_recover();
         probes.get(&scope.id()).cloned().or_else(|| {
             probes
-                .get(&crate::SessionScope::new(&scope.session_id).id())
+                .get(&lash_execution_contracts::process::SessionScope::new(&scope.session_id).id())
                 .cloned()
         })
     }
@@ -402,7 +412,7 @@ pub async fn session_is_live(
 /// `None` when it is absent or deleted (ADR 0112 §2: `lookup_session` plus
 /// `SessionStore::new`). A catalog that cannot answer is `Err`.
 pub async fn live_session_view(
-    store: &Arc<dyn crate::DeploymentStore>,
+    store: &Arc<dyn lash_execution_contracts::deployment::DeploymentStore>,
     session_id: &SessionId,
 ) -> Result<Option<crate::store::SessionStore>, crate::StoreError> {
     match store.lookup_session(session_id).await? {
@@ -417,7 +427,7 @@ pub async fn live_session_view(
 /// Admit `request`'s session on the catalog and return its view (ADR 0112
 /// §2: `admit_session` plus `SessionStore::new`).
 pub async fn admit_session_view(
-    store: &Arc<dyn crate::DeploymentStore>,
+    store: &Arc<dyn lash_execution_contracts::deployment::DeploymentStore>,
     request: &crate::SessionStoreCreateRequest,
 ) -> Result<crate::store::SessionStore, crate::StoreError> {
     store.admit_session(request).await?;
@@ -469,10 +479,10 @@ pub enum ToolIntentActivityOutcome {
     Refused {
         intent_index: u32,
         kind: crate::ToolIntentKind,
-        refusal: crate::ToolIntentRefusalReason,
+        refusal: lash_execution_contracts::tool_intent_outcome::ToolIntentRefusalReason,
     },
     BatchRefused {
-        refusal: crate::ToolIntentRefusalReason,
+        refusal: lash_execution_contracts::tool_intent_outcome::ToolIntentRefusalReason,
     },
 }
 
@@ -487,16 +497,21 @@ pub enum ToolIntentActivityOutcome {
 pub enum ToolIntentRealizedRef {
     Process(crate::ProcessId),
     /// The signature is the definition admission's new outcome, alongside its id.
-    Definition(crate::ProcessDefinition),
+    Definition(lash_execution_contracts::process::ProcessDefinition),
     Cancel {
         process_id: crate::ProcessId,
-        status: crate::ProcessStatus,
+        status: lash_execution_contracts::process::ProcessStatus,
     },
 }
 
-impl From<&crate::ToolIntentExecutionOutcome> for ToolIntentActivityOutcome {
-    fn from(outcome: &crate::ToolIntentExecutionOutcome) -> Self {
-        use crate::{ToolIntentExecutionOutcome, ToolIntentRealized};
+impl From<&lash_execution_contracts::tool_intent_outcome::ToolIntentExecutionOutcome>
+    for ToolIntentActivityOutcome
+{
+    fn from(
+        outcome: &lash_execution_contracts::tool_intent_outcome::ToolIntentExecutionOutcome,
+    ) -> Self {
+        use lash_execution_contracts::tool_intent_outcome::ToolIntentExecutionOutcome;
+        use lash_execution_contracts::tool_intent_outcome::ToolIntentRealized;
         match outcome {
             ToolIntentExecutionOutcome::Executed { identity, realized } => Self::Executed {
                 intent_index: identity.intent_index,

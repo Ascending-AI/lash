@@ -66,7 +66,7 @@ pub enum DeferredResolutionError {
     #[error("deferred resolution requires an admitted ExecCode effect address")]
     MissingLinkIdentity,
     #[error("deferred provider address refused: {0}")]
-    ProviderRegistry(#[source] lash_core::PluginError),
+    ProviderRegistry(#[source] lash_execution_contracts::plugin_error::PluginError),
     #[error("failed to commit deferred matches: {0}")]
     Journal(#[source] lash_core::RuntimeEffectControllerError),
     #[error("journaled deferred matches are invalid: {0}")]
@@ -294,7 +294,7 @@ mod tests {
             .await
             .expect_err("the process address cannot resolve a session");
         assert!(
-            matches!(&error, DeferredResolutionError::ProviderRegistry(lash_core::PluginError::ProviderRegistryMismatch { expected: lash_core::RegistryKind::Session, provider }) if provider == &handle)
+            matches!(&error, DeferredResolutionError::ProviderRegistry(lash_execution_contracts::plugin_error::PluginError::ProviderRegistryMismatch { expected: lash_core::RegistryKind::Session, provider }) if provider == &handle)
         );
         let controller = error.runtime_effect_error();
         assert!(

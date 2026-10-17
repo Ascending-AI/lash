@@ -29,7 +29,7 @@ fn scripted(
 
 /// A standard core over `backend` running `model`, with `tools`.
 fn core_with(
-    backend: lash_core::Backend,
+    backend: lash_execution_contracts::backend::Backend,
     model: ProviderHandle,
     tools: Option<Arc<dyn ToolProvider>>,
 ) -> LashCore {
@@ -405,9 +405,11 @@ async fn queued_checkpoint_input_preserves_images() {
 fn failing_checkpoint_observer() -> Arc<dyn PluginFactory> {
     let hook: lash_core::plugin::CheckpointHook = Arc::new(|_| {
         Box::pin(async {
-            Err(lash_core::PluginError::Session(
-                "reject checkpoint delivery".to_string(),
-            ))
+            Err(
+                lash_execution_contracts::plugin_error::PluginError::Session(
+                    "reject checkpoint delivery".to_string(),
+                ),
+            )
         })
     });
     Arc::new(StaticPluginFactory::new(

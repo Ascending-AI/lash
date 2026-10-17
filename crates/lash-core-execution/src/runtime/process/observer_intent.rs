@@ -1,7 +1,8 @@
-use super::{ProcessObserverBy, ProcessRegistry};
 use crate::SessionId;
 use crate::store::{RuntimeStore, StoreError};
 use crate::{SessionObservedProcessOutcome, SessionObservedProcessReceipt, SessionObserverIntent};
+use lash_execution_contracts::process::ProcessObserverBy;
+use lash_execution_contracts::process::ProcessRegistry;
 
 /// Source of the relation whose process-observer intents must be settled.
 pub enum SessionObserverIntentSource<'a> {
@@ -111,7 +112,7 @@ async fn apply_process_observer(
     match process_registry.get_process(&intent.process_id).await {
         Ok(Some(_)) => {}
         Ok(None) => return SessionObservedProcessOutcome::NotFound,
-        Err(crate::PluginError::ProcessNoLongerRetained {
+        Err(lash_execution_contracts::plugin_error::PluginError::ProcessNoLongerRetained {
             terminal_label,
             pruned_at_ms,
         }) => {
@@ -132,7 +133,7 @@ async fn apply_process_observer(
         .await
     {
         Ok(()) => SessionObservedProcessOutcome::Observed,
-        Err(crate::PluginError::ProcessNoLongerRetained {
+        Err(lash_execution_contracts::plugin_error::PluginError::ProcessNoLongerRetained {
             terminal_label,
             pruned_at_ms,
         }) => SessionObservedProcessOutcome::NoLongerRetained {
@@ -145,10 +146,12 @@ async fn apply_process_observer(
             // specific typed outcome without hiding an unrelated apply error.
             match process_registry.get_process(&intent.process_id).await {
                 Ok(None) => SessionObservedProcessOutcome::NotFound,
-                Err(crate::PluginError::ProcessNoLongerRetained {
-                    terminal_label,
-                    pruned_at_ms,
-                }) => SessionObservedProcessOutcome::NoLongerRetained {
+                Err(
+                    lash_execution_contracts::plugin_error::PluginError::ProcessNoLongerRetained {
+                        terminal_label,
+                        pruned_at_ms,
+                    },
+                ) => SessionObservedProcessOutcome::NoLongerRetained {
                     terminal_label,
                     pruned_at_ms,
                 },

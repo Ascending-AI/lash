@@ -13,13 +13,22 @@
 
 use std::sync::Arc;
 
+use lash_core::ArtifactCleanup;
+use lash_core::ArtifactReferrer;
+use lash_core::ArtifactReferrerPorts;
+use lash_core::Clock;
 pub use lash_core::HostArtifactPin;
+use lash_core::ProcessDefinitionId;
+use lash_core::ProcessEngineRegistry;
+use lash_core::ProcessEnv;
+use lash_core::ProcessEnvRef;
+use lash_core::ReferrerClaim;
+use lash_core::ToolCatalog;
 use lash_core::store::ArtifactCleanupLedger;
-use lash_core::{
-    ArtifactCleanup, ArtifactReferrer, ArtifactReferrerPorts, Clock, DefinitionAcquisition,
-    ProcessDefinition, ProcessDefinitionDraft, ProcessDefinitionId, ProcessEngineRegistry,
-    ProcessEnv, ProcessEnvRef, ProcessEnvStore, ReferrerClaim, ToolCatalog,
-};
+use lash_execution_contracts::process::DefinitionAcquisition;
+use lash_execution_contracts::process::ProcessDefinition;
+use lash_execution_contracts::process::ProcessDefinitionDraft;
+use lash_execution_contracts::process::ProcessEnvStore;
 
 use crate::Result;
 
@@ -124,10 +133,9 @@ impl HostArtifacts {
     /// `process: None`. This is an observation of the serving build, not the
     /// catalog at the time the process started.
     pub fn process_catalog(&self, env: &ProcessEnv) -> Result<Arc<ToolCatalog>> {
-        self.engines
-            .components()
-            .admit(env)
-            .map_err(|refusal| lash_core::PluginError::ProcessEnvRefused { refusal })?;
+        self.engines.components().admit(env).map_err(|refusal| {
+            lash_execution_contracts::plugin_error::PluginError::ProcessEnvRefused { refusal }
+        })?;
         self.core.process_tool_catalog(env)
     }
 
@@ -152,7 +160,8 @@ impl HostArtifacts {
         .await
         .map_err(|error| match error {
             lash_core::HoldEnvError::Refused(refusal) => {
-                lash_core::PluginError::ProcessEnvRefused { refusal }.into()
+                lash_execution_contracts::plugin_error::PluginError::ProcessEnvRefused { refusal }
+                    .into()
             }
             lash_core::HoldEnvError::Fault(error) => error.into(),
         })
@@ -194,12 +203,14 @@ impl HostArtifacts {
             .await?
         {
             DefinitionAcquisition::Held(_) => Ok(()),
-            DefinitionAcquisition::Ended => Err(lash_core::PluginError::from(
-                lash_core::ArtifactStoreError::ReferrerEnded {
-                    referrer: claim.referrer().clone(),
-                },
-            )
-            .into()),
+            DefinitionAcquisition::Ended => {
+                Err(lash_execution_contracts::plugin_error::PluginError::from(
+                    lash_execution_contracts::module_artifacts::ArtifactStoreError::ReferrerEnded {
+                        referrer: claim.referrer().clone(),
+                    },
+                )
+                .into())
+            }
         }
     }
 
@@ -218,7 +229,7 @@ impl HostArtifacts {
     pub(crate) async fn resolved_definition(
         &self,
         id: &ProcessDefinitionId,
-    ) -> Result<Option<lash_core::ResolvedProcessDefinition>> {
+    ) -> Result<Option<lash_execution_contracts::process::ResolvedProcessDefinition>> {
         Ok(self
             .definition_ports
             .read_definition(&self.engines, id)
@@ -259,7 +270,9 @@ impl HostArtifacts {
         };
         let request = lash_vm_runtime::WorkflowEnvironmentRequest { tool_catalog };
         let answer = provider
-            .environment(lash_core::ProcessDocument::new(request))
+            .environment(lash_execution_contracts::process::ProcessDocument::new(
+                request,
+            ))
             .await?;
         Ok(answer.downcast().ok())
     }
@@ -487,7 +500,10 @@ impl HostArtifacts {
             tool_catalog: self.core.process_tool_catalog(environment)?,
         };
         let outcome = provider
-            .admit(&claim, lash_core::ProcessDocument::new(request))
+            .admit(
+                &claim,
+                lash_execution_contracts::process::ProcessDocument::new(request),
+            )
             .await?;
         let Ok(outcome) = outcome.downcast::<lash_vm_runtime::WorkflowAdmissionOutcome>() else {
             return Ok(unsupported());
@@ -506,7 +522,7 @@ impl HostArtifacts {
                 self.documents()
                     .publish_source_map(&claim, admitted.document.document(), map, text)
                     .await
-                    .map_err(lash_core::PluginError::from)?,
+                    .map_err(lash_execution_contracts::plugin_error::PluginError::from)?,
             ),
             None => None,
         };
@@ -533,21 +549,21 @@ impl HostArtifacts {
         value: &crate::workflow::document::FunctionValue,
         args: serde_json::Map<String, serde_json::Value>,
         start_key: impl AsRef<[u8]>,
-        launch: lash_core::EngineLaunch,
-    ) -> Result<lash_core::ProcessStartReceipt> {
-        let payload = value
-            .transport_json()
-            .map_err(|error| lash_core::PluginError::Invoke(error.to_string()))?;
+        launch: lash_execution_contracts::process::EngineLaunch,
+    ) -> Result<lash_execution_contracts::process::ProcessStartReceipt> {
+        let payload = value.transport_json().map_err(|error| {
+            lash_execution_contracts::plugin_error::PluginError::Invoke(error.to_string())
+        })?;
         self.core
             .processes()
             .start(
-                lash_core::ProcessStartRequest::inline(
+                lash_execution_contracts::process::ProcessStartRequest::inline(
                     lash_vm_runtime::LASH_VM_ENGINE_KIND,
                     payload,
                     args,
                     launch,
-                    lash_core::ProcessOriginator::host(),
-                    lash_core::LifetimeDecision::Detached,
+                    lash_execution_contracts::process::ProcessOriginator::host(),
+                    lash_execution_contracts::process::LifetimeDecision::Detached,
                 )
                 .with_host_start_key(start_key),
                 self.core.effect_host(),
@@ -569,7 +585,7 @@ impl HostArtifacts {
                 .documents()
                 .source_map(id)
                 .await
-                .map_err(lash_core::PluginError::from)?
+                .map_err(lash_execution_contracts::plugin_error::PluginError::from)?
             {
                 lash_vm_runtime::StoredSourceMap::Read { map, source } => {
                     SourceMapRead::Read { map, source }
@@ -615,8 +631,8 @@ impl HostArtifacts {
         if let WorkflowRead::Inspected(inspection) = &read
             && inspection.definition.id != *id
         {
-            return Err(lash_core::PluginError::from(
-                lash_core::ProcessDefinitionRefusal::DefinitionIdMismatch {
+            return Err(lash_execution_contracts::plugin_error::PluginError::from(
+                lash_execution_contracts::process::ProcessDefinitionRefusal::DefinitionIdMismatch {
                     claimed: id.clone(),
                     derived: inspection.definition.id.clone(),
                 },
@@ -644,21 +660,22 @@ impl HostArtifacts {
             return Ok(WorkflowDocumentRead::Unsupported);
         };
         Ok(match provider.execution_document(reference).await? {
-            lash_core::ProcessExecutionDocumentRead::Read(document) => {
+            lash_execution_contracts::process::ProcessExecutionDocumentRead::Read(document) => {
                 match document.downcast::<crate::workflow::ExecutionDocument>() {
                     Ok(document) => WorkflowDocumentRead::Read(Box::new(document)),
                     Err(_) => WorkflowDocumentRead::Unsupported,
                 }
             }
-            lash_core::ProcessExecutionDocumentRead::ArtifactMissing { artifact } => {
-                WorkflowDocumentRead::Unavailable(WorkflowUnavailable::Artifact { artifact })
-            }
-            lash_core::ProcessExecutionDocumentRead::ArtifactCorrupt { artifact, message } => {
-                WorkflowDocumentRead::Unavailable(WorkflowUnavailable::Corrupt {
-                    artifact,
-                    message,
-                })
-            }
+            lash_execution_contracts::process::ProcessExecutionDocumentRead::ArtifactMissing {
+                artifact,
+            } => WorkflowDocumentRead::Unavailable(WorkflowUnavailable::Artifact { artifact }),
+            lash_execution_contracts::process::ProcessExecutionDocumentRead::ArtifactCorrupt {
+                artifact,
+                message,
+            } => WorkflowDocumentRead::Unavailable(WorkflowUnavailable::Corrupt {
+                artifact,
+                message,
+            }),
         })
     }
 
@@ -676,8 +693,9 @@ impl HostArtifacts {
 }
 
 fn claim(pin: &HostArtifactPin) -> Result<ReferrerClaim> {
-    ReferrerClaim::unguarded(ArtifactReferrer::HostPin(pin.clone()))
-        .map_err(|error| lash_core::PluginError::Session(error.to_string()).into())
+    ReferrerClaim::unguarded(ArtifactReferrer::HostPin(pin.clone())).map_err(|error| {
+        lash_execution_contracts::plugin_error::PluginError::Session(error.to_string()).into()
+    })
 }
 
 /// Snapshot checks of a retained process definition, without starting a process.
@@ -692,23 +710,25 @@ impl ProcessDefinitions {
     /// The stored artifact's signature is authoritative. A forged signature claim,
     /// a missing definition, or an engine without argument validation is refused.
     /// This read acquires no lasting artifact pin and writes nothing.
-    /// `Ok(Err(refusal))` carries a stable [`lash_core::ArgsMismatch::code`].
+    /// `Ok(Err(refusal))` carries a stable [`lash_execution_contracts::process::ArgsMismatch::code`].
     /// Store and transport faults are outer errors; they never judge arguments.
     pub async fn check_args(
         &self,
         definition: &ProcessDefinition,
         args: &serde_json::Map<String, serde_json::Value>,
-        mode: lash_core::ArgsMode,
-    ) -> Result<std::result::Result<(), lash_core::ArgsMismatch>> {
+        mode: lash_execution_contracts::process::ArgsMode,
+    ) -> Result<std::result::Result<(), lash_execution_contracts::process::ArgsMismatch>> {
         let Some(draft) = self
             .artifacts
             .definition_ports
             .read_definition_draft(&definition.id)
             .await?
         else {
-            return Ok(Err(lash_core::ArgsMismatch::DefinitionMissing {
-                definition_id: definition.id.clone(),
-            }));
+            return Ok(Err(
+                lash_execution_contracts::process::ArgsMismatch::DefinitionMissing {
+                    definition_id: definition.id.clone(),
+                },
+            ));
         };
         let authoritative = match self
             .artifacts
@@ -717,11 +737,19 @@ impl ProcessDefinitions {
             .await
         {
             Ok(definition) => definition,
-            Err(lash_core::ProcessDefinitionError::Refused(source)) => {
-                return Ok(Err(lash_core::ArgsMismatch::DefinitionRefused { source }));
+            Err(lash_execution_contracts::process::ProcessDefinitionError::Refused(source)) => {
+                return Ok(Err(
+                    lash_execution_contracts::process::ArgsMismatch::DefinitionRefused { source },
+                ));
             }
-            Err(lash_core::ProcessDefinitionError::Fault(error)) => return Err(error.into()),
-            Err(error) => return Err(lash_core::PluginError::from(error).into()),
+            Err(lash_execution_contracts::process::ProcessDefinitionError::Fault(error)) => {
+                return Err(error.into());
+            }
+            Err(error) => {
+                return Err(
+                    lash_execution_contracts::plugin_error::PluginError::from(error).into(),
+                );
+            }
         };
         let engine = self
             .artifacts

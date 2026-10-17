@@ -23,13 +23,20 @@ pub mod turn;
 use std::sync::Arc;
 use std::time::Duration;
 
-use lash_core_execution::{
-    Ancestry, LifetimeDecision, PendingTurnInputDraft, ProcessId, ProcessInput, ProcessProvenance,
-    ProcessRegistration, ScopeGrant, ScopeId, TurnInput, TurnInputIngress,
-};
+use lash_core_execution::PendingTurnInputDraft;
+use lash_core_execution::ProcessId;
+use lash_core_execution::ScopeId;
+use lash_core_execution::TurnInput;
+use lash_core_execution::TurnInputIngress;
 use lash_durable::domain::TurnEnd;
 use lash_durable::{ActorKey, ActorState};
 use lash_durable_test::SimNodes;
+use lash_execution_contracts::process::Ancestry;
+use lash_execution_contracts::process::LifetimeDecision;
+use lash_execution_contracts::process::ProcessInput;
+use lash_execution_contracts::process::ProcessProvenance;
+use lash_execution_contracts::process::ProcessRegistration;
+use lash_execution_contracts::process::ScopeGrant;
 use lash_protocol_types::{SessionId, TurnId};
 use serde_json::Value;
 
@@ -153,8 +160,8 @@ pub async fn register(
         ProcessInput::Engine {
             kind: KIND.to_owned(),
             payload,
-            launch: lash_core_execution::EngineLaunch::new(
-                lash_core_execution::testing::process_execution_env_fixture_ref(),
+            launch: lash_execution_contracts::process::EngineLaunch::new(
+                lash_execution_contracts::testing::process_execution_env_fixture_ref(),
                 None,
             ),
         },
@@ -232,7 +239,10 @@ pub async fn outcome(world: &World, process: &ProcessId) -> Option<Value> {
         .await
         .ok()??;
     record.terminal().and_then(|terminal| {
-        serde_json::to_value(lash_core::Durable(&terminal.clone().into_await_output())).ok()
+        serde_json::to_value(lash_protocol_types::Durable(
+            &terminal.clone().into_await_output(),
+        ))
+        .ok()
     })
 }
 

@@ -12,7 +12,7 @@
 //!
 //! # Declared starts (ADR 0116 §3)
 //!
-//! A [`DeclaredStart`](crate::DeclaredStart) is staged before its call
+//! A [`DeclaredStart`](lash_execution_contracts::DeclaredStart) is staged before its call
 //! parks, under its own start key beneath the call's lineage, and registered
 //! by the commit that records the park, with the park's process-terminal
 //! wait: a crash leaves the park, its child and its wait together or none of
@@ -32,7 +32,7 @@ pub struct LaunchReceipt {
     /// The realized start, or its typed refusal, as the call's intent
     /// outcome for index 0. It is host-facing metadata: the model sees the
     /// child's value only.
-    pub outcome: crate::ToolIntentExecutionOutcome,
+    pub outcome: lash_execution_contracts::tool_intent_outcome::ToolIntentExecutionOutcome,
     /// The child the start registered, when it realized.
     pub process_id: Option<crate::ProcessId>,
 }
@@ -48,7 +48,7 @@ pub struct LaunchReceipt {
 pub(crate) async fn launch_parked_start(
     processes: &dyn crate::ProcessService,
     scope: crate::ProcessOpScope<'_>,
-    start: &crate::DeclaredStart,
+    start: &lash_execution_contracts::DeclaredStart,
     hold_key: String,
     cancels: bool,
     child_trace_hook: Option<&crate::ToolChildExecutionTraceHook>,
@@ -61,11 +61,12 @@ pub(crate) async fn launch_parked_start(
 > {
     // The child is registered under the call's hold, owned by the scope the
     // call runs under, so the row outlives every rerun of the start.
-    let hold = consumer_hold_owner(&scope).map(|owner| crate::ConsumerHold {
-        key: hold_key,
-        owner,
-        cancels,
-    });
+    let hold =
+        consumer_hold_owner(&scope).map(|owner| lash_execution_contracts::process::ConsumerHold {
+            key: hold_key,
+            owner,
+            cancels,
+        });
     let (outcome, effect) = super::intent_executor::realize_declared_start(
         processes,
         start,
@@ -74,8 +75,9 @@ pub(crate) async fn launch_parked_start(
     )
     .await?;
     let process_id = match &outcome {
-        crate::ToolIntentExecutionOutcome::Executed {
-            realized: crate::ToolIntentRealized::StartProcess(handle),
+        lash_execution_contracts::tool_intent_outcome::ToolIntentExecutionOutcome::Executed {
+            realized:
+                lash_execution_contracts::tool_intent_outcome::ToolIntentRealized::StartProcess(handle),
             ..
         } => Some(handle.process_id.clone()),
         _ => None,
@@ -94,7 +96,7 @@ pub(crate) async fn launch_parked_start(
 /// journaled or registered.
 pub(super) fn unbound_declaration(
     declaring: &crate::ToolIntentIdentity,
-    refusal: crate::ToolIntentRefusalReason,
+    refusal: lash_execution_contracts::tool_intent_outcome::ToolIntentRefusalReason,
 ) -> LaunchReceipt {
     tracing::warn!(
         target: "lash::tool_intent",
@@ -103,12 +105,13 @@ pub(super) fn unbound_declaration(
         "a declared start that does not belong to its call was refused before launch"
     );
     LaunchReceipt {
-        outcome: crate::ToolIntentExecutionOutcome::Refused {
-            identity: Some(declaring.clone()),
-            intent_index: declaring.intent_index,
-            kind: crate::ToolIntentKind::StartProcess,
-            refusal,
-        },
+        outcome:
+            lash_execution_contracts::tool_intent_outcome::ToolIntentExecutionOutcome::Refused {
+                identity: Some(declaring.clone()),
+                intent_index: declaring.intent_index,
+                kind: crate::ToolIntentKind::StartProcess,
+                refusal,
+            },
         process_id: None,
     }
 }
@@ -128,27 +131,29 @@ fn consumer_hold_owner(scope: &crate::ProcessOpScope<'_>) -> Option<crate::Scope
 /// or its scope refused keeps that refusal's own code; a declaration refused
 /// because it does not belong to its call is the declaring tool's fault, and
 /// fails under the refusal's typed code.
-pub(super) fn launch_refusal(outcome: &crate::ToolIntentExecutionOutcome) -> crate::ToolFailure {
+pub(super) fn launch_refusal(
+    outcome: &lash_execution_contracts::tool_intent_outcome::ToolIntentExecutionOutcome,
+) -> crate::ToolFailure {
     let (class, code, message) = match outcome {
-        crate::ToolIntentExecutionOutcome::Refused {
-            refusal: crate::ToolIntentRefusalReason::CommandFailed { cause },
+        lash_execution_contracts::tool_intent_outcome::ToolIntentExecutionOutcome::Refused {
+            refusal: lash_execution_contracts::tool_intent_outcome::ToolIntentRefusalReason::CommandFailed { cause },
             ..
         } => (
             cause.failure_class(),
             cause.code().to_string(),
             cause.to_string(),
         ),
-        crate::ToolIntentExecutionOutcome::Refused { refusal, .. } => (
+        lash_execution_contracts::tool_intent_outcome::ToolIntentExecutionOutcome::Refused { refusal, .. } => (
             crate::ToolFailureClass::Internal,
             refusal.code().to_string(),
             format!("the declared start did not launch: {}", refusal.describe()),
         ),
-        crate::ToolIntentExecutionOutcome::ProtocolRefused { refusal } => (
+        lash_execution_contracts::tool_intent_outcome::ToolIntentExecutionOutcome::ProtocolRefused { refusal } => (
             crate::ToolFailureClass::Unavailable,
             "declared_start_refused".to_string(),
             format!("the declared start did not launch: {}", refusal.describe()),
         ),
-        crate::ToolIntentExecutionOutcome::Executed { realized, .. } => (
+        lash_execution_contracts::tool_intent_outcome::ToolIntentExecutionOutcome::Executed { realized, .. } => (
             crate::ToolFailureClass::Unavailable,
             "declared_start_refused".to_string(),
             format!(
@@ -167,15 +172,15 @@ mod intent_shape_laws {
     #[test]
     fn terminal_start_conflict_keeps_its_failure_class_and_typed_key() {
         let key = crate::StartKey::for_host("conflicting-start");
-        let error = crate::PluginError::StartKeyConflict {
+        let error = lash_execution_contracts::plugin_error::PluginError::StartKeyConflict {
             start_key: key.clone(),
         };
-        let outcome = crate::ToolIntentExecutionOutcome::Refused {
+        let outcome = lash_execution_contracts::tool_intent_outcome::ToolIntentExecutionOutcome::Refused {
             identity: None,
             intent_index: 0,
             kind: crate::ToolIntentKind::StartProcess,
-            refusal: crate::ToolIntentRefusalReason::CommandFailed {
-                cause: crate::ToolIntentCommandFailure::from(&error),
+            refusal: lash_execution_contracts::tool_intent_outcome::ToolIntentRefusalReason::CommandFailed {
+                cause: lash_execution_contracts::plugin_error::ToolIntentCommandFailure::from(&error),
             },
         };
         let failure = launch_refusal(&outcome);
@@ -185,8 +190,11 @@ mod intent_shape_laws {
             bytes["refusal"]["cause"]["message"]["start_key"],
             serde_json::to_value(&key).expect("key")
         );
-        let widened = crate::PluginError::RuntimeEffectController(error.into());
-        let cause = crate::ToolIntentCommandFailure::from(&widened);
+        let widened = lash_execution_contracts::plugin_error::PluginError::RuntimeEffectController(
+            error.into(),
+        );
+        let cause =
+            lash_execution_contracts::plugin_error::ToolIntentCommandFailure::from(&widened);
         assert_eq!(
             cause.failure_class(),
             crate::ToolFailureClass::InvalidRequest
@@ -201,7 +209,7 @@ mod intent_shape_laws {
 
     #[test]
     fn realized_start_cannot_decode_without_its_handle() {
-        let identity = crate::derive_tool_intent_identity(
+        let identity = lash_execution_contracts::tool_intent::derive_tool_intent_identity(
             &crate::RuntimeOwner::Session(crate::SessionId::from("session")),
             "turn",
             &crate::ToolCallId::fixture("call"),
@@ -214,14 +222,20 @@ mod intent_shape_laws {
                 "realized": {"kind": "start_process", "result": result},
             });
             assert!(
-                serde_json::from_value::<crate::ToolIntentExecutionOutcome>(bytes.clone()).is_err(),
+                serde_json::from_value::<
+                    lash_execution_contracts::tool_intent_outcome::ToolIntentExecutionOutcome,
+                >(bytes.clone())
+                .is_err(),
                 "a durable start must carry a complete handle"
             );
             let object = bytes.as_object_mut().expect("receipt object");
             object.remove("kind");
             object.remove("result");
             assert!(
-                serde_json::from_value::<crate::ToolIntentExecutionOutcome>(bytes).is_err(),
+                serde_json::from_value::<
+                    lash_execution_contracts::tool_intent_outcome::ToolIntentExecutionOutcome,
+                >(bytes)
+                .is_err(),
                 "the realized payload must carry the complete handle"
             );
         }

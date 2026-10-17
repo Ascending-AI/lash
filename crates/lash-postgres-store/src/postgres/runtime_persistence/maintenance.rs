@@ -6,10 +6,10 @@ impl StoreMaintenance for PostgresStore {
     async fn vacuum(
         &self,
         session_id: &SessionId,
-    ) -> lash_core_execution::MaintenanceResult<VacuumReport> {
+    ) -> lash_core_store::store::MaintenanceResult<VacuumReport> {
         self.vacuum_tombstones(session_id)
             .await
-            .map_err(lash_core_execution::MaintenanceFailure::failed_before_any_work)
+            .map_err(lash_core_store::store::MaintenanceFailure::failed_before_any_work)
     }
 
     /// Release what the host's collection ends, retire what is held, then
@@ -19,14 +19,14 @@ impl StoreMaintenance for PostgresStore {
     /// pass against writers or readers. Lash VM artifact rows
     /// (`lash_lash_vm_artifacts`) are not blobs: only a bridged artifact's
     /// graph node is a root.
-    async fn gc_unreachable(&self) -> lash_core_execution::MaintenanceResult<GcReport> {
+    async fn gc_unreachable(&self) -> lash_core_store::store::MaintenanceResult<GcReport> {
         let mut report = GcReport::default();
         let outcome = self.gc_unreachable_blobs(&mut report).await;
         outcome.map(|()| report.clone()).map_err(|error| {
             if report.deleted_blob_count == 0 {
-                lash_core_execution::MaintenanceFailure::failed_before_any_work(error)
+                lash_core_store::store::MaintenanceFailure::failed_before_any_work(error)
             } else {
-                lash_core_execution::MaintenanceFailure::failed(error, report)
+                lash_core_store::store::MaintenanceFailure::failed(error, report)
             }
         })
     }

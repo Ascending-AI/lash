@@ -1,7 +1,10 @@
 //! Turn scopes derive their close from the retained run terminal. Other
 //! scopes retain their typed close ledger, including after a process is pruned.
 
-use lash_core_execution::{EffectOpener, ParentEndPlan, PluginError, ScopeId};
+use lash_core_store::effect_opener::EffectOpener;
+use lash_core_store::scope_identity::ScopeId;
+use lash_execution_contracts::plugin_error::PluginError;
+use lash_execution_contracts::process::ParentEndPlan;
 use rusqlite::{Connection, OptionalExtension, params};
 
 use super::sql::process_sql;
@@ -36,7 +39,7 @@ pub(crate) fn reclaim_settled_plans_conn(
 /// The typed payload a ledger row persists beside the projection key.
 fn ledger_payload(
     parent: &ScopeId,
-    fleet_format: lash_core_execution::FleetFormat,
+    fleet_format: lash_core_store::store::FleetFormat,
 ) -> Result<String, PluginError> {
     parent
         .storage_payload(fleet_format)
@@ -51,7 +54,7 @@ pub(crate) fn record_conn(
     conn: &Connection,
     parent: &ScopeId,
     ended_at_ms: u64,
-    fleet_format: lash_core_execution::FleetFormat,
+    fleet_format: lash_core_store::store::FleetFormat,
 ) -> Result<(), PluginError> {
     if matches!(parent.opener(), Some(EffectOpener::Turn { .. })) {
         return Ok(());
@@ -124,7 +127,7 @@ fn decode_plan(
     id: &str,
     payload: &str,
     ended: i64,
-    fleet_format: lash_core_execution::FleetFormat,
+    fleet_format: lash_core_store::store::FleetFormat,
 ) -> Result<ParentEndPlan, PluginError> {
     let parent =
         ScopeId::from_storage_columns(kind, id, payload, fleet_format).map_err(|error| {

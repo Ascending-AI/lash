@@ -74,6 +74,6 @@ The host tool-intent submission ledger is evidence under the same lever (FIG-150
 
 Producer-declared retention classes are rejected because retention windows are host operational policy rather than an execution correctness declaration. A projector watermark is required because pruning unacknowledged state would destroy completeness evidence. The host chooses how much eligible evidence to keep; Lash owns eligibility and atomic deletion.
 
-[Process retention contract](../../crates/lash-core-execution/src/runtime/process/registry_concerns.rs), [SQLite receipt retention](../../crates/lash-sqlite-store/src/retention.rs) and [PostgreSQL receipt retention](../../crates/lash-postgres-store/src/postgres/evidence_retention.rs) implement these levers.
+[Process retention contract](../../crates/lash-execution-contracts/src/process/registry_concerns.rs), [SQLite receipt retention](../../crates/lash-sqlite-store/src/retention.rs) and [PostgreSQL receipt retention](../../crates/lash-postgres-store/src/postgres/evidence_retention.rs) implement these levers.
 
 [ADR 0137](0137-the-host-owns-events-routing-and-scheduling.md) owns host events, routing and scheduling.

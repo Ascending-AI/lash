@@ -64,7 +64,7 @@ lash_conformance::attachment_stalled_retry_tests!({
         return;
     };
     reset(storage.pool()).await;
-    let clock = Arc::new(lash_core_execution::testing::TestClock::new(10_000));
+    let clock = Arc::new(lash_core_ids::test_clock::TestClock::new(10_000));
     let factory = Arc::new(storage.session_store_factory().with_clock(clock.clone()));
     let bytes_root = tempfile::tempdir().expect("attachment bytes root");
     let make_bytes = super::attachment_bytes(&bytes_root);

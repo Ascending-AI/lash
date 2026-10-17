@@ -68,8 +68,8 @@ fn is_recorded(namespace: &PluginNamespaceState, row: &NamespaceEntry) -> bool {
 
 /// A run's restore found a row whose values neither its body nor the state
 /// the run started from hold.
-fn unrecorded_values(plugin: &str) -> crate::plugin::PluginError {
-    crate::plugin::PluginError::StoredDataCorrupt {
+fn unrecorded_values(plugin: &str) -> lash_execution_contracts::plugin_error::PluginError {
+    lash_execution_contracts::plugin_error::PluginError::StoredDataCorrupt {
         record_kind: "turn namespace".into(),
         message: format!("plugin `{plugin}`'s run row names values no body holds"),
     }
@@ -172,16 +172,21 @@ impl crate::PluginSession {
     ///
     /// # Errors
     ///
-    /// [`crate::plugin::PluginError::StoredDataCorrupt`] for a row whose values neither its
+    /// [`lash_execution_contracts::plugin_error::PluginError::StoredDataCorrupt`] for a row whose values neither its
     /// body nor the run's base hold, or a body that does not decode; and
-    /// [`crate::plugin::PluginError::Session`] outside a durable run.
-    pub fn restore_run(&self, rows: Vec<TurnNamespace>) -> Result<(), crate::plugin::PluginError> {
+    /// [`lash_execution_contracts::plugin_error::PluginError::Session`] outside a durable run.
+    pub fn restore_run(
+        &self,
+        rows: Vec<TurnNamespace>,
+    ) -> Result<(), lash_execution_contracts::plugin_error::PluginError> {
         let mut guard = self.state.lock_recover();
         let registry = &mut *guard;
         let Some(run) = registry.run.as_mut() else {
-            return Err(crate::plugin::PluginError::Session(
-                "a run restores only over the state it began from".into(),
-            ));
+            return Err(
+                lash_execution_contracts::plugin_error::PluginError::Session(
+                    "a run restores only over the state it began from".into(),
+                ),
+            );
         };
         let mut state = run.base.clone();
         for row in &rows {

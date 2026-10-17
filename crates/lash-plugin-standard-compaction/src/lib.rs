@@ -36,12 +36,20 @@ use std::{collections::BTreeMap, sync::Arc};
 use async_trait::async_trait;
 
 use lash_core::facade_support::ModelToolReturnPart;
-use lash_core::plugin::{
-    AttachmentOmissionContext, AttachmentOmissionPolicy, CompactionContext, ContextCompaction,
-    ContextCompactor, ContextError, ContextPressureContext, ContextPressureDecision,
-    ContextPressureHook, HistoryPartId, PluginError, PluginFactory, omit_part_attachments,
-};
+use lash_core::plugin::AttachmentOmissionContext;
+use lash_core::plugin::AttachmentOmissionPolicy;
+use lash_core::plugin::CompactionContext;
+use lash_core::plugin::ContextCompaction;
+use lash_core::plugin::ContextCompactor;
+use lash_core::plugin::ContextError;
+use lash_core::plugin::ContextPressureContext;
+use lash_core::plugin::ContextPressureDecision;
+use lash_core::plugin::ContextPressureHook;
+use lash_core::plugin::HistoryPartId;
+use lash_core::plugin::PluginFactory;
+use lash_core::plugin::omit_part_attachments;
 use lash_core::{LlmUsage, Message, MessageOrigin, MessageRole, Part, PartKind, SessionSnapshot};
+use lash_execution_contracts::plugin_error::PluginError;
 
 /// Marker `plugin_id` stamped on compaction summary messages so the
 /// history pipeline can recognize them on subsequent turns.
@@ -763,7 +771,10 @@ impl PluginFactory for StandardCompactionPluginFactory {
 
     fn recipe(
         self: Arc<Self>,
-    ) -> std::result::Result<lash_core::plugin::PluginRecipe, lash_core::plugin::PluginError> {
+    ) -> std::result::Result<
+        lash_core::plugin::PluginRecipe,
+        lash_execution_contracts::plugin_error::PluginError,
+    > {
         let mut reg = lash_core::plugin::PluginRegistrar::<StandardCompactionPlugin>::new(
             lash_core::plugin::PluginFactory::id(self.as_ref()),
         );
@@ -774,9 +785,11 @@ impl PluginFactory for StandardCompactionPluginFactory {
             reg,
             move |_ctx, _state| {
                 if self.config.prune_context_percent > 100 {
-                    return Err(lash_core::plugin::PluginError::Registration(
-                        "prune_context_percent must be at most 100".into(),
-                    ));
+                    return Err(
+                        lash_execution_contracts::plugin_error::PluginError::Registration(
+                            "prune_context_percent must be at most 100".into(),
+                        ),
+                    );
                 }
                 Ok(Arc::new(StandardCompactionPlugin {
                     config: self.config.clone(),
@@ -804,13 +817,15 @@ struct StandardCompactionPlugin {
 impl StandardCompactionPlugin {
     fn declare(
         reg: &mut lash_core::plugin::PluginRegistrar<Self>,
-    ) -> std::result::Result<(), lash_core::plugin::PluginError> {
+    ) -> std::result::Result<(), lash_execution_contracts::plugin_error::PluginError> {
         use lash_core::plugin::prompt::PromptPurpose;
         reg.prompt().section(
             lash_core::plugin::prompt::PromptSectionSpec::new(
                 lash_core::prompt_sections::PromptSectionKey::new(SUMMARY_INSTRUCTION_SECTION)
                     .map_err(|error| {
-                        lash_core::plugin::PluginError::Registration(error.to_string())
+                        lash_execution_contracts::plugin_error::PluginError::Registration(
+                            error.to_string(),
+                        )
                     })?,
                 lash_core::prompt_sections::PromptPlacement::CurrentContext,
             )

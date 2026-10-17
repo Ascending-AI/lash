@@ -1,0 +1,1514 @@
+pub use lash_core_store::process_identity::*;
+use lash_protocol_types::CancelOrigin;
+use std::collections::BTreeSet;
+use std::fmt;
+use std::sync::Arc;
+
+use serde::{Deserialize, Serialize};
+
+use super::definition_ref::{ProcessDefinitionRef, ProcessEngineKind};
+use super::events::ProcessAwaitOutput;
+
+mod change_feed;
+pub use change_feed::{ProcessChange, ProcessChangeCursor, ProcessChangeKind, ProcessTombstone};
+
+mod lifecycle;
+use lifecycle::recorded_lineage;
+pub use lifecycle::{
+    ProcessLifecycleState, ProcessRecord, ProcessWaits, WaitKind, WaitSiteUnavailable, WaitState,
+};
+
+mod execution;
+pub use execution::*;
+mod session_ids;
+pub use session_ids::*;
+mod scope_lifetime;
+pub use scope_lifetime::*;
+mod start_request;
+pub use start_request::*;
+
+pub use lash_protocol_types::handle::HandleId;
+pub use lash_protocol_types::{ProcessId, SessionId};
+pub type ProcessOutcome = ProcessAwaitOutput;
+#[derive(Clone, Debug, PartialEq, Eq, Hash, Serialize, Deserialize)]
+#[serde(transparent)]
+pub struct SessionScopeId(String);
+
+impl SessionScopeId {
+    pub fn new(value: impl Into<String>) -> Self {
+        Self(value.into())
+    }
+
+    pub fn as_str(&self) -> &str {
+        &self.0
+    }
+}
+
+impl fmt::Display for SessionScopeId {
+    fn fmt(&self, formatter: &mut fmt::Formatter<'_>) -> fmt::Result {
+        formatter.write_str(&self.0)
+    }
+}
+
+impl From<String> for SessionScopeId {
+    fn from(value: String) -> Self {
+        Self::new(value)
+    }
+}
+
+impl From<&str> for SessionScopeId {
+    fn from(value: &str) -> Self {
+        Self::new(value)
+    }
+}
+
+/// Durable executable input for a process.
+///
+/// `SessionTurn` is the kernel process primitive: core owns its durable
+/// representation and execution semantics to coordinate child sessions.
+/// `Engine` is the extension point for deployment-specific process runtimes;
+/// those rows require a matching [`crate::ProcessEngine`] in the host's
+/// process engine registry. Work a host runs outside lash is an engine
+/// process that awaits that work's completion durably: lash executes every
+/// process it registers.
+/// A registered engine gives the work independent process lifetime; an
+/// engine input by itself is not an OS process boundary, and any hard
+/// isolation is the registered engine's own.
+#[derive(Debug, Serialize, Deserialize)]
+#[serde(tag = "type", rename_all = "snake_case")]
+pub enum ProcessInput {
+    Engine {
+        kind: String,
+        #[serde(default)]
+        payload: serde_json::Value,
+        /// The environment and engine settings the process runs under,
+        /// stated by its starter and sealed with the start (D4, D10).
+        launch: EngineLaunch,
+    },
+    SessionTurn {
+        /// Caller-owned revision for the growable session request/input pair.
+        /// Change this key whenever their executable meaning changes. The
+        /// definition fingerprint deliberately excludes `create_request` and
+        /// `turn_input`: keeping the key stable after changing either is a
+        /// deliberate false merge, so the process id must otherwise be unique
+        /// per definition.
+        definition_key: String,
+        create_request: Box<crate::SessionCreateRequest>,
+        turn_input: Box<crate::TurnInput>,
+        /// What the runner answers when the child turn finishes.
+        result: SessionTurnOutcome,
+    },
+}
+
+/// What a start names to run: an executable input, or the immutable
+/// definition one is resolved from.
+///
+/// A start request and its journal entries carry it; a
+/// process row carries the [`ProcessInput`] it resolved to. An input is
+/// spelled exactly as [`ProcessInput`] spells it, so a start of one reads the
+/// same on the wire as the row it registers.
+#[derive(Clone, Debug, PartialEq, Serialize, Deserialize)]
+#[serde(tag = "type", rename_all = "snake_case")]
+pub enum ProcessStartTarget {
+    /// A start of the immutable definition `definition_id` names, with its
+    /// arguments (ADR 0095, ADR 0113 §3.6). Realization acquires the
+    /// definition's closure under the start's referrer, has its engine check
+    /// it, and registers the engine start it resolves to, whose identity
+    /// names the id ([`register_process_start`](crate::runtime::register_process_start)).
+    Definition {
+        definition_id: super::ProcessDefinitionId,
+        #[serde(default, skip_serializing_if = "Option::is_none")]
+        signature_claim: Option<super::ProcessSignature>,
+        #[serde(default)]
+        args: serde_json::Map<String, serde_json::Value>,
+        /// The environment and engine settings the resolved engine start
+        /// runs under, stated by the starter (D4, D10).
+        launch: EngineLaunch,
+    },
+    /// A start of a function carried inline: `payload` is the `engine_kind`
+    /// engine's own value of it (for the kernel engine a function value),
+    /// which no store holds yet. Realization has the engine check it and
+    /// publish what it runs under the start's referrer, then publishes its
+    /// descriptor and starts that definition exactly as a
+    /// [`Self::Definition`] start does (FIG-6382). The committed start
+    /// carries the bytes, so every redrive realizes the same definition.
+    Inline {
+        engine_kind: String,
+        payload: serde_json::Value,
+        #[serde(default)]
+        args: serde_json::Map<String, serde_json::Value>,
+        launch: EngineLaunch,
+    },
+    /// A start of an input as its author stated it.
+    #[serde(untagged)]
+    Input(ProcessInput),
+}
+
+impl From<ProcessInput> for ProcessStartTarget {
+    fn from(input: ProcessInput) -> Self {
+        Self::Input(input)
+    }
+}
+
+impl ProcessStartTarget {
+    /// The input this start states, when it states one rather than naming a
+    /// definition to resolve.
+    pub fn input(&self) -> Option<&ProcessInput> {
+        match self {
+            Self::Input(input) => Some(input),
+            Self::Definition { .. } | Self::Inline { .. } => None,
+        }
+    }
+
+    /// The launch this start states: every engine-bearing target carries
+    /// one, and a session turn none.
+    pub fn launch(&self) -> Option<&EngineLaunch> {
+        match self {
+            Self::Input(input) => input.launch(),
+            Self::Definition { launch, .. } | Self::Inline { launch, .. } => Some(launch),
+        }
+    }
+
+    /// Stored attachments the target carries, sorted and deduplicated. A
+    /// definition's arguments, and an inline function's, are opaque JSON and
+    /// carry no typed attachments (ADR 0124).
+    pub fn stored_attachment_ids(&self) -> Vec<crate::AttachmentId> {
+        match self {
+            Self::Input(input) => input.stored_attachment_ids(),
+            Self::Definition { .. } | Self::Inline { .. } => Vec::new(),
+        }
+    }
+
+    /// The identity a start of this target is registered under until its
+    /// realization admits one: an input's derived identity, or a definition
+    /// named by its id, or an inline function, which realization replaces
+    /// with the identity its engine admits.
+    pub fn identity(&self) -> ProcessIdentity {
+        match self {
+            Self::Input(input) => ProcessIdentity::from_process_input(input),
+            Self::Definition { definition_id, .. } => ProcessIdentity {
+                kind: ProcessEngineKind::from("definition"),
+                label: None,
+                definition: None,
+                definition_id: Some(definition_id.clone()),
+            },
+            Self::Inline { .. } => ProcessIdentity {
+                kind: ProcessEngineKind::from("inline"),
+                label: None,
+                definition: None,
+                definition_id: None,
+            },
+        }
+    }
+}
+
+/// What a `ProcessInput::SessionTurn` runner answers with when the child's
+/// turn ends.
+///
+/// Failures and cancellations are the child's own under both modes: only a
+/// finished turn is projected differently.
+#[derive(Clone, Debug, PartialEq, Serialize, Deserialize)]
+#[serde(tag = "kind", rename_all = "snake_case")]
+pub enum SessionTurnOutcome {
+    /// The runner answers `{ process_id, child_session_id, turn_id, outcome }`.
+    /// No session read is embedded. Failure diagnostics preserve the committed
+    /// cause and permitted detail; retryability and provider kind are not
+    /// committed and are not surfaced.
+    Turn,
+    /// The runner answers the child's final value, checked against `schema`
+    /// when one is given.
+    FinalValue {
+        #[serde(default, skip_serializing_if = "Option::is_none")]
+        schema: Option<lash_protocol_types::JsonSchema>,
+    },
+}
+
+impl Clone for ProcessInput {
+    fn clone(&self) -> Self {
+        match self {
+            Self::Engine {
+                kind,
+                payload,
+                launch,
+            } => Self::Engine {
+                kind: kind.clone(),
+                payload: payload.clone(),
+                launch: launch.clone(),
+            },
+            Self::SessionTurn {
+                definition_key,
+                create_request,
+                turn_input,
+                result,
+            } => Self::SessionTurn {
+                definition_key: definition_key.clone(),
+                create_request: create_request.clone(),
+                turn_input: turn_input.clone(),
+                result: result.clone(),
+            },
+        }
+    }
+}
+
+impl PartialEq for ProcessInput {
+    fn eq(&self, other: &Self) -> bool {
+        serde_json::to_value(self).ok() == serde_json::to_value(other).ok()
+    }
+}
+
+impl ProcessInput {
+    /// The format set a process of this input is created in, before its
+    /// first transition: its engine's unstarted set, which any node with the
+    /// engine decodes, or the kernel set for a process with no engine. Its
+    /// first `process.advance` stamps the engine's state formats.
+    #[must_use]
+    pub fn unstarted_formats(&self) -> lash_durable::FormatSet {
+        match self {
+            Self::Engine { kind, .. } => lash_durable::FormatSet::unstarted_process(kind),
+            Self::SessionTurn { .. } => lash_durable::FormatSet::kernel_process(),
+        }
+    }
+
+    /// Stored attachments this input carries, sorted and deduplicated: a
+    /// `SessionTurn`'s turn input. Engine payloads are opaque JSON and carry
+    /// no typed attachments (ADR 0124).
+    pub fn stored_attachment_ids(&self) -> Vec<crate::AttachmentId> {
+        match self {
+            Self::SessionTurn { turn_input, .. } => turn_input.stored_attachment_ids(),
+            Self::Engine { .. } => Vec::new(),
+        }
+    }
+
+    /// Exposes engine kind to store and process-engine implementors while persisting and coordinating durable process execution.
+    pub fn engine_kind(&self) -> &'static str {
+        match self {
+            Self::Engine { .. } => "engine",
+            Self::SessionTurn { .. } => "session_turn",
+        }
+    }
+
+    pub fn engine_specific_kind(&self) -> Option<&str> {
+        match self {
+            Self::Engine { kind, .. } => Some(kind.as_str()),
+            _ => None,
+        }
+    }
+
+    /// The launch an engine input runs under; a session turn has none (D5).
+    pub fn launch(&self) -> Option<&EngineLaunch> {
+        match self {
+            Self::Engine { launch, .. } => Some(launch),
+            Self::SessionTurn { .. } => None,
+        }
+    }
+}
+
+/// The store of process execution environments (ADR 0113 §2.1): immutable
+/// bytes under a content-addressed reference, kept alive by referrer edges.
+/// Only the cleanup executor severs edges, through
+/// [`Self::end_process_env_referrer`].
+///
+/// The store answers the fleet record its publications are admitted against
+/// through [`FleetFormatStore`](crate::store::FleetFormatStore): a hold
+/// provisions its components' writer ranges in that same record, never in a
+/// second port's.
+#[async_trait::async_trait]
+pub trait ProcessEnvStore: crate::store::FleetFormatStore + Send + Sync {
+    /// Store `bytes` under `env_ref` if absent, verify they equal any stored
+    /// bytes, and add the claim's edge, in one transaction that first takes
+    /// the referrer's lock, checks its fence (`ReferrerEnded`) and arms the
+    /// claim's guard if it has one and no row exists.
+    async fn publish_process_env(
+        &self,
+        claim: &crate::ReferrerClaim,
+        env_ref: &ProcessEnvRef,
+        bytes: &[u8],
+    ) -> Result<(), crate::ArtifactStoreError>;
+
+    /// Add the claim's edge to bytes already stored, with the same lock,
+    /// fence check and guard arming. Absent bytes are `ArtifactMissing`.
+    async fn acquire_process_env(
+        &self,
+        claim: &crate::ReferrerClaim,
+        env_ref: &ProcessEnvRef,
+    ) -> Result<(), crate::ArtifactStoreError>;
+
+    /// Apply one resolved cleanup in one transaction (ADR 0113 §2.3).
+    async fn end_process_env_referrer(
+        &self,
+        cleanup: &crate::ResolvedArtifactCleanup,
+    ) -> Result<(), crate::ArtifactStoreError>;
+
+    async fn get_process_env(
+        &self,
+        env_ref: &ProcessEnvRef,
+    ) -> Result<Option<Vec<u8>>, crate::ArtifactStoreError>;
+}
+
+/// Map a store refusal raised by an artifact write to the session-facing
+/// plugin error, keeping the typed refusals as runtime codes rather than
+/// prose. Every other store failure stays a session error.
+pub fn artifact_store_plugin_error(error: crate::StoreError) -> crate::PluginError {
+    crate::ArtifactStoreError::from(error).into()
+}
+
+/// The fenced referrer an artifact store refused a publish or acquire under,
+/// if `error` is that refusal (ADR 0113 §2.7), however many conversions it
+/// has crossed. Every other error, store faults included, is `None`.
+pub fn artifact_referrer_ended(error: &crate::PluginError) -> Option<&crate::ArtifactReferrer> {
+    match error {
+        crate::PluginError::Runtime(error) => error.ended_referrer(),
+        crate::PluginError::RuntimeEffectController(error) => error.ended_referrer(),
+        _ => None,
+    }
+}
+
+/// Why a recorded process execution environment did not load.
+///
+/// The halves are distinct because they classify differently (FIG-3575). The
+/// store failing to answer — a pool that timed out, a lost connection — is a
+/// fact about this attempt, and a retry under a healthy store reads the
+/// environment. Every other variant is a fact about what the store durably
+/// holds under the reference, which every retry by this build meets again.
+#[derive(Debug, thiserror::Error)]
+pub enum ProcessEnvLoadError {
+    /// The store did not answer the read; its own error says why.
+    #[error(transparent)]
+    Store(crate::PluginError),
+    /// Nothing is stored under the reference.
+    #[error("missing process execution env `{0}`")]
+    Missing(ProcessEnvRef),
+    /// The stored bytes are not the ones the reference names under this
+    /// build's reference family.
+    #[error(
+        "unsupported or mismatched process execution env reference `{0}`; recreate the environment"
+    )]
+    Mismatched(ProcessEnvRef),
+    /// The stored bytes do not decode as this build's environment.
+    #[error("failed to decode process execution env `{env_ref}`: {message}")]
+    Undecodable {
+        env_ref: ProcessEnvRef,
+        message: String,
+    },
+}
+
+impl From<ProcessEnvLoadError> for crate::PluginError {
+    fn from(error: ProcessEnvLoadError) -> Self {
+        match error {
+            ProcessEnvLoadError::Store(error) => error,
+            unresolved => Self::Session(unresolved.to_string()),
+        }
+    }
+}
+
+pub async fn load_process_env(
+    env_store: &dyn ProcessEnvStore,
+    env_ref: &ProcessEnvRef,
+) -> Result<ProcessEnv, ProcessEnvLoadError> {
+    let bytes = env_store
+        .get_process_env(env_ref)
+        .await
+        .map_err(|error| ProcessEnvLoadError::Store(error.into()))?
+        .ok_or_else(|| ProcessEnvLoadError::Missing(env_ref.clone()))?;
+    if process_env_ref_for_bytes(&bytes) != *env_ref {
+        return Err(ProcessEnvLoadError::Mismatched(env_ref.clone()));
+    }
+    ProcessEnv::from_store_bytes(&bytes).map_err(|err| ProcessEnvLoadError::Undecodable {
+        env_ref: env_ref.clone(),
+        message: err.to_string(),
+    })
+}
+
+#[derive(Clone, Debug, Default)]
+pub struct ProcessStartOptions {
+    /// Explicit host-selected initial observer session ids.
+    pub initial_observers: Vec<SessionId>,
+    /// The enclosing process's full recorded provenance, supplied by its
+    /// runtime execution context. Children inherit its originator; Lash
+    /// stamps their run from the admitted start context and their caused-by
+    /// from the declaring invocation. `None` means a session start stamps
+    /// the creating session. This rides options, not the request: no model
+    /// or host input reaches `run`, and in-session callers cannot forge
+    /// provenance through the session surface.
+    pub spawn_provenance: Option<ProcessProvenance>,
+}
+
+impl ProcessStartOptions {
+    /// Constructs default start options for store and durable-substrate implementors coordinating durable process execution.
+    pub fn new() -> Self {
+        Self::default()
+    }
+
+    /// Sets the initial observer carried by a `ProcessStartOptions` for store and durable-substrate
+    /// implementors while persisting and coordinating durable process execution.
+    pub fn with_initial_observer(mut self, session_id: impl Into<SessionId>) -> Self {
+        self.initial_observers.push(session_id.into());
+        self
+    }
+
+    /// Sets the initial observers carried by a `ProcessStartOptions` for store and
+    /// durable-substrate implementors while persisting and coordinating durable process execution.
+    pub fn with_initial_observers(
+        mut self,
+        observers: impl IntoIterator<Item = impl Into<SessionId>>,
+    ) -> Self {
+        self.initial_observers = observers.into_iter().map(Into::into).collect();
+        self
+    }
+
+    /// Sets the spawn provenance carried by a `ProcessStartOptions` for store and durable-substrate
+    /// implementors while persisting and coordinating durable process execution.
+    pub fn with_spawn_provenance(mut self, spawn_provenance: ProcessProvenance) -> Self {
+        self.spawn_provenance = Some(spawn_provenance);
+        self
+    }
+}
+
+#[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize)]
+pub struct SessionScope {
+    pub session_id: SessionId,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub agent_frame_id: Option<crate::FrameNodeId>,
+}
+
+#[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize)]
+pub struct ProcessProvenance {
+    pub originator: ProcessOriginator,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub caused_by: Option<crate::CausalRef>,
+    /// The logical run that started the process: the declaring turn of a
+    /// model start, the enclosing process's run for a start inside a
+    /// process, and `None` for a host start. Lash stamps it; no model or
+    /// host input reaches it.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub run: Option<crate::TurnAddress>,
+}
+
+impl ProcessProvenance {
+    /// Constructs a `ProcessProvenance` for store and process-engine implementors while persisting
+    /// and coordinating durable process execution.
+    pub fn new(originator: ProcessOriginator) -> Self {
+        Self {
+            originator,
+            caused_by: None,
+            run: None,
+        }
+    }
+
+    /// Constructs a `ProcessProvenance` using host semantics for store and process-engine
+    /// implementors while persisting and coordinating durable process execution.
+    pub fn host() -> Self {
+        Self::new(ProcessOriginator::host())
+    }
+
+    /// Constructs a `ProcessProvenance` using session semantics for store and process-engine
+    /// implementors while persisting and coordinating durable process execution.
+    pub fn session(scope: SessionScope) -> Self {
+        Self::new(ProcessOriginator::session(scope))
+    }
+
+    /// Sets the caused by carried by a `ProcessProvenance` for store and process-engine
+    /// implementors while persisting and coordinating durable process execution.
+    pub fn with_caused_by(mut self, caused_by: Option<crate::CausalRef>) -> Self {
+        self.caused_by = caused_by;
+        self
+    }
+}
+
+#[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(tag = "type", rename_all = "snake_case")]
+pub enum ProcessOriginator {
+    Host {
+        #[serde(default, skip_serializing_if = "Option::is_none")]
+        scope: Option<String>,
+    },
+    Session {
+        session_id: SessionId,
+        #[serde(default, skip_serializing_if = "Option::is_none")]
+        agent_frame_id: Option<crate::FrameNodeId>,
+    },
+}
+
+impl ProcessOriginator {
+    /// Constructs a `ProcessOriginator` using host semantics for store and process-engine
+    /// implementors while persisting and coordinating durable process execution.
+    pub fn host() -> Self {
+        Self::Host { scope: None }
+    }
+
+    /// Constructs a `ProcessOriginator` using host scoped semantics for store and process-engine
+    /// implementors while persisting and coordinating durable process execution.
+    pub fn host_scoped(scope: impl Into<String>) -> Self {
+        Self::Host {
+            scope: Some(scope.into()),
+        }
+    }
+
+    /// Constructs a `ProcessOriginator` using session semantics for store and process-engine
+    /// implementors while persisting and coordinating durable process execution.
+    pub fn session(scope: SessionScope) -> Self {
+        Self::Session {
+            session_id: scope.session_id,
+            agent_frame_id: scope.agent_frame_id,
+        }
+    }
+
+    pub fn id(&self) -> String {
+        match self {
+            Self::Host { scope } => scope
+                .as_ref()
+                .map(|scope| format!("host:{scope}"))
+                .unwrap_or_else(|| "host".to_string()),
+            Self::Session { session_id, .. } => session_id.to_string(),
+        }
+    }
+}
+
+impl SessionScope {
+    pub fn new(session_id: impl Into<SessionId>) -> Self {
+        Self {
+            session_id: session_id.into(),
+            agent_frame_id: None,
+        }
+    }
+
+    /// Constructs a frame-scoped session identity for process-engine implementors binding work to
+    /// one durable agent frame.
+    pub fn for_agent_frame(
+        session_id: impl Into<SessionId>,
+        agent_frame_id: crate::FrameNodeId,
+    ) -> Self {
+        Self {
+            session_id: session_id.into(),
+            agent_frame_id: Some(agent_frame_id),
+        }
+    }
+
+    pub fn id(&self) -> SessionScopeId {
+        match self.agent_frame_id.as_deref() {
+            Some(frame_id) => {
+                SessionScopeId::new(format!("session:{}/frame:{frame_id}", self.session_id))
+            }
+            None => SessionScopeId::new(format!("session:{}", self.session_id)),
+        }
+    }
+}
+
+/// Serializable process spec used to start or recover a runtime process.
+///
+/// What it runs is `I`. A registrar, a process row and a running process hold
+/// a `ProcessRegistration`, whose input is executable. A start still to be
+/// realized holds a [`ProcessStartRegistration`], whose target may name a
+/// definition: realization resolves it, so no registrar is ever handed one.
+///
+/// Unknown fields are refused: the retired shape named its process with an
+/// `id` of its own, and must not decode as a keyless start.
+#[derive(Debug, Serialize, Deserialize)]
+#[serde(deny_unknown_fields)]
+pub struct ProcessRegistration<I = ProcessInput> {
+    /// The start's idempotency key (ADR 0107). While a process registered
+    /// under the same key is retained, registration returns that process
+    /// instead of minting another. `None` is a keyless start: always new.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub start_key: Option<StartKey>,
+    pub input: Arc<I>,
+    /// What ends the process: the recorded decision (FIG-3607 R4b).
+    pub lifetime: LifetimeDecision,
+    /// Where the start came from, nearest first; empty for a root start. A
+    /// runtime start's is its admitted start context's, set by
+    /// [`Self::with_start_cx`], never by the start's author.
+    pub ancestry: Ancestry,
+    /// The session the process's descendants may bind to, inherited through
+    /// `Until` and `Detached` alike (FIG-3607 R10).
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub session_capability: Option<SessionId>,
+    pub identity: ProcessIdentity,
+    pub provenance: ProcessProvenance,
+    /// The parked call that consumes this process's terminal, when a
+    /// declared start registered it (ADR 0116 §3.6). The registrar writes the
+    /// hold with the row, and prune leaves a held row alone.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub consumer_hold: Option<ConsumerHold>,
+    /// What the start offers the process's trace scope: its cause and
+    /// links; its span is derived from them. The registration that
+    /// inserts the row retains them as the record's
+    /// [`trace`](ProcessRecord::trace); one that finds the process already
+    /// retained under its key reads the retained scope back and drops the
+    /// offer. It is no part of the start: the retained-start check and the
+    /// start's effect identity never cover it.
+    #[serde(default, skip_serializing_if = "lash_trace::TraceScopeOffer::is_empty")]
+    pub trace: lash_trace::TraceScopeOffer,
+    /// Whether the process exports a span per workflow node occurrence: the
+    /// registering node's `TraceDetailPolicy` selects `Extended` for
+    /// `Workflow`. Start staging sets it; the inserting registration retains
+    /// it as the record's [`trace_nodes`](ProcessRecord::trace_nodes). It is
+    /// no part of the start, like [`Self::trace`].
+    #[serde(default, skip_serializing_if = "std::ops::Not::not")]
+    pub trace_nodes: bool,
+    /// The engine's taxonomy at creation. A terminal reads this retained
+    /// classification, including on a node that does not serve the engine.
+    pub trace_class: super::ProcessTraceClass,
+    /// The claim requirements the process's actor is created with: one
+    /// `component:<id>@fmt<format>` for every component its environment
+    /// names (FIG-6034 §6.2). Start staging derives them from the held
+    /// environment; a node runs the process only when it serves them all.
+    /// It is no part of the start, like [`Self::trace`].
+    #[serde(default, skip_serializing_if = "Vec::is_empty")]
+    pub requires: Vec<String>,
+}
+
+/// A start as its command carries it, before realization: its target may
+/// name a definition still to be resolved.
+pub type ProcessStartRegistration = ProcessRegistration<ProcessStartTarget>;
+
+impl<I> Clone for ProcessRegistration<I> {
+    fn clone(&self) -> Self {
+        Self {
+            start_key: self.start_key.clone(),
+            input: Arc::clone(&self.input),
+            lifetime: self.lifetime.clone(),
+            ancestry: self.ancestry.clone(),
+            session_capability: self.session_capability.clone(),
+            identity: self.identity.clone(),
+            provenance: self.provenance.clone(),
+            consumer_hold: self.consumer_hold.clone(),
+            trace: self.trace.clone(),
+            trace_nodes: self.trace_nodes,
+            trace_class: self.trace_class,
+            requires: self.requires.clone(),
+        }
+    }
+}
+
+/// A parked call's hold on the process whose terminal it consumes (ADR 0116
+/// §3.6).
+///
+/// A declared start registers its child with the hold, in the registration
+/// transaction, so the row cannot be pruned while the call may still redrive
+/// its start: a redrive always finds the child under its key, and a start
+/// whose receipt was lost can never register a second child. The call
+/// releases the hold once its wait has ended; the close of the owning scope
+/// releases every hold its calls still own, so an abandoned call leaks none.
+#[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize)]
+pub struct ConsumerHold {
+    /// The consuming call's completion key id.
+    pub key: String,
+    /// The scope whose close releases the hold: the opener the call ran
+    /// under.
+    pub owner: ScopeId,
+    /// Whether the call owes the process a cancel when it is abandoned
+    /// (`CancelHint::CancelExternalWork`): an opener that cancels the call
+    /// cancels the process it holds (ADR 0116 §3.4).
+    #[serde(default)]
+    pub cancels: bool,
+}
+
+impl ProcessRegistration {
+    /// Constructs a `ProcessRegistration` for store and durable-substrate implementors while
+    /// persisting and coordinating durable process execution.
+    ///
+    /// The registration carries no process id: the registrar mints one. A
+    /// start that must be idempotent adds its key with [`Self::with_start_key`].
+    pub fn new(
+        input: ProcessInput,
+        provenance: ProcessProvenance,
+        lifetime: impl Into<LifetimeDecision>,
+    ) -> Self {
+        let identity = ProcessIdentity::from_process_input(&input);
+        Self::with_derived_identity(input, identity, provenance, lifetime)
+    }
+
+    /// The lineage this process's body starts children under (FIG-3607 R1,
+    /// R10): the process, its own session when it runs one, then its recorded
+    /// ancestry and session capability.
+    pub fn lineage(&self, process_id: &ProcessId) -> ProcessLineage {
+        recorded_lineage(
+            process_id,
+            &self.input,
+            &self.ancestry,
+            self.session_capability.as_ref(),
+            self.provenance.run.as_ref(),
+        )
+    }
+}
+
+impl From<ProcessRegistration> for ProcessStartRegistration {
+    /// The start of an input a caller already holds as a registration.
+    fn from(registration: ProcessRegistration) -> Self {
+        let target = ProcessStartTarget::Input(registration.input.as_ref().clone());
+        registration.with_input(Arc::new(target))
+    }
+}
+
+impl ProcessStartRegistration {
+    /// The registration of the input this start states.
+    ///
+    /// # Errors
+    ///
+    /// The start itself, when its target names a definition or carries a
+    /// function inline: only realization resolves one
+    /// ([`register_process_start`](crate::runtime::register_process_start)).
+    pub fn stating_input(self) -> Result<ProcessRegistration, Box<Self>> {
+        match self.input.as_ref() {
+            ProcessStartTarget::Input(input) => {
+                let input = Arc::new(input.clone());
+                Ok(self.with_input(input))
+            }
+            ProcessStartTarget::Definition { .. } | ProcessStartTarget::Inline { .. } => {
+                Err(Box::new(self))
+            }
+        }
+    }
+
+    /// Constructs the registration of a start of `target`, with the identity
+    /// the target derives until realization admits one.
+    pub fn of_target(
+        target: impl Into<ProcessStartTarget>,
+        provenance: ProcessProvenance,
+        lifetime: impl Into<LifetimeDecision>,
+    ) -> Self {
+        let target = target.into();
+        let identity = target.identity();
+        Self::with_derived_identity(target, identity, provenance, lifetime)
+    }
+}
+
+impl<I> ProcessRegistration<I> {
+    fn with_derived_identity(
+        input: I,
+        identity: ProcessIdentity,
+        provenance: ProcessProvenance,
+        lifetime: impl Into<LifetimeDecision>,
+    ) -> Self {
+        let lifetime = lifetime.into();
+        // A root holds a session only through the host's lookup grant.
+        let session_capability = match &lifetime {
+            LifetimeDecision::Until {
+                scope: ScopeId::Session(session_id),
+                grant: ScopeGrant::HostSessionLookup,
+            } => Some(session_id.clone()),
+            LifetimeDecision::Until { .. } | LifetimeDecision::Detached => None,
+        };
+        Self {
+            start_key: None,
+            input: Arc::new(input),
+            lifetime,
+            ancestry: Ancestry::root(),
+            session_capability,
+            identity,
+            provenance,
+            consumer_hold: None,
+            trace: lash_trace::TraceScopeOffer::default(),
+            trace_nodes: false,
+            trace_class: super::ProcessTraceClass::Internal,
+            requires: Vec::new(),
+        }
+    }
+
+    /// The scopes whose close refuses this start (FIG-3607 R11, FIG-3948):
+    /// its starter, the scope its lifetime names, and the session each of
+    /// them lies inside, deduplicated in ledger-key order — the order a
+    /// backend that locks each scope must take the locks in.
+    ///
+    /// The enclosing session is what fences a turn that never became a
+    /// root: no run close ever records such a turn's row, and its session's
+    /// close is the fact that it can no longer become one.
+    #[must_use]
+    pub fn closing_scopes(&self) -> Vec<ScopeId> {
+        let mut scopes: Vec<ScopeId> = self
+            .ancestry
+            .starter()
+            .into_iter()
+            .chain(self.lifetime.scope())
+            .flat_map(|scope| std::iter::once(scope.clone()).chain(scope.enclosing_session()))
+            .collect();
+        scopes.sort_by_key(|scope| (scope.storage_kind(), scope.storage_id()));
+        scopes.dedup();
+        scopes
+    }
+
+    /// Sets the start's idempotency key.
+    pub fn with_start_key(mut self, start_key: Option<StartKey>) -> Self {
+        self.start_key = start_key;
+        self
+    }
+
+    /// This registration running `input` instead: everything else it
+    /// records is kept. Realization uses it to hand a registrar the input a
+    /// start's target resolved to.
+    pub fn with_input<J>(self, input: Arc<J>) -> ProcessRegistration<J> {
+        ProcessRegistration {
+            start_key: self.start_key,
+            input,
+            lifetime: self.lifetime,
+            ancestry: self.ancestry,
+            session_capability: self.session_capability,
+            identity: self.identity,
+            provenance: self.provenance,
+            consumer_hold: self.consumer_hold,
+            trace: self.trace,
+            trace_nodes: self.trace_nodes,
+            trace_class: self.trace_class,
+            requires: self.requires,
+        }
+    }
+
+    /// Sets the trace classification a process's first registration retains.
+    pub fn with_trace_class(mut self, trace_class: super::ProcessTraceClass) -> Self {
+        self.trace_class = trace_class;
+        self
+    }
+
+    /// Sets whether the process exports workflow node spans
+    /// ([`Self::trace_nodes`]).
+    pub fn with_trace_nodes(mut self, trace_nodes: bool) -> Self {
+        self.trace_nodes = trace_nodes;
+        self
+    }
+
+    /// Sets what the start offers the process's trace scope
+    /// ([`Self::trace`]).
+    pub fn with_trace(mut self, trace: lash_trace::TraceScopeOffer) -> Self {
+        self.trace = trace;
+        self
+    }
+
+    /// Records the admitted start context a runtime start was made in: its
+    /// ancestry and the session capability its descendants inherit. Only the
+    /// runtime's realization calls this, with the context it materialized
+    /// from the admitted scope; registration then checks the recorded
+    /// lifetime against it (FIG-3607 R3).
+    pub fn with_start_cx(mut self, cx: &StartCx) -> Self {
+        self.ancestry = cx.ancestry();
+        self.session_capability = cx.session_capability();
+        self.provenance.run = cx.run().cloned();
+        self
+    }
+
+    /// How a refusal names this start: a registration carries no process id
+    /// until the registrar mints one, so it is named by its key when it has
+    /// one (ADR 0107).
+    pub fn refusal_name(&self) -> String {
+        self.start_key
+            .as_ref()
+            .map_or_else(|| "keyless start".to_string(), |key| format!("start {key}"))
+    }
+
+    /// Sets the process provenance carried by a `ProcessRegistration` for store and
+    /// durable-substrate implementors while persisting and coordinating durable process execution.
+    pub fn with_process_provenance(mut self, provenance: ProcessProvenance) -> Self {
+        self.provenance = provenance;
+        self
+    }
+
+    /// Registers the process under a parked call's hold (ADR 0116 §3.6).
+    pub fn with_consumer_hold(mut self, consumer_hold: Option<ConsumerHold>) -> Self {
+        self.consumer_hold = consumer_hold;
+        self
+    }
+
+    /// Adopts the kind and label a host declared for this start.
+    pub fn with_declared_identity(mut self, declared: DeclaredProcessIdentity) -> Self {
+        self.identity = declared.into_identity();
+        self
+    }
+
+    /// Adopts an identity the engine registry admitted.
+    ///
+    /// This is the only way a registration's derived identity is replaced, and
+    /// [`AdmittedProcessIdentity`](crate::AdmittedProcessIdentity) is the only
+    /// carrier that can hold a definition reference.
+    ///
+    /// It replaces the label too. A label already on the registration is not
+    /// evidence that a host declared one: every derivation route puts a label
+    /// here (`ProcessIdentity::from_process_input`), and a fixture or a caller
+    /// may stamp an admitted identity more than once. Reading the label back
+    /// off the registration to decide whether to keep it therefore lets the
+    /// *first* stamp mask the second, which is how #1543 turned the
+    /// `process_roster_pages_match_enriched_filters` conformance law red. A
+    /// host-declared label is restored after admission, from the declaration
+    /// that carried it, by [`Self::with_host_facing_label`].
+    pub fn with_admitted_identity(mut self, admitted: crate::AdmittedProcessIdentity) -> Self {
+        self.identity = admitted.into_identity();
+        self
+    }
+
+    /// Restores the host-facing label a start *declared*, over the one the
+    /// engine derived (FIG-3122).
+    ///
+    /// A label is display metadata, never an identity input, so this moves
+    /// nothing else: admission stays the sole writer of the kind and of the
+    /// definition reference only the engine can resolve. `None` — a start that
+    /// declared no label — keeps the engine's derived label, which for a
+    /// scripted-program engine is the lift digest.
+    ///
+    /// The declaration is the only authority for "the host declared this
+    /// label", which is why the value is passed in rather than read back off
+    /// the registration: by the time admission has run, a derived label and a
+    /// declared one are indistinguishable on the row.
+    pub fn with_host_facing_label(mut self, label: Option<String>) -> Self {
+        if let Some(label) = label {
+            self.identity.label = Some(label);
+        }
+        self
+    }
+}
+
+/// Whether a durable write landed on this call, or coalesced onto a fact the
+/// store already held under the same durable key.
+///
+/// Every identity-bearing store write in this runtime is idempotent under its
+/// own durable key: a re-presented start, event append or cancellation
+/// request returns the recorded fact instead of writing a
+/// second one. The store is the only layer that knows which of the two
+/// happened, and callers that report replay to a host -- the tool-intent
+/// ingress above all -- cannot infer it from a successful `Ok` (FIG-3070).
+///
+/// This is a store verdict, never a journal verdict: an effect journal that
+/// replays a recorded outcome never reaches the store at all, so a caller
+/// reporting "was this a replay?" folds both together.
+#[derive(Clone, Copy, Debug, Default, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(rename_all = "snake_case")]
+pub enum StoreRealization {
+    /// This call wrote the durable fact.
+    #[default]
+    Realized,
+    /// The store already held this fact under the same durable key; this call
+    /// wrote nothing and returned what was already there.
+    Coalesced,
+}
+
+impl StoreRealization {
+    /// Whether the store coalesced this call onto an already-recorded fact.
+    pub fn is_coalesced(self) -> bool {
+        matches!(self, Self::Coalesced)
+    }
+
+    /// Whether this call wrote the durable fact.
+    ///
+    /// Named for serde's `skip_serializing_if`, which keeps the common arm off
+    /// the wire so adding this field leaves existing encodings byte-identical.
+    pub fn is_realized(&self) -> bool {
+        matches!(self, Self::Realized)
+    }
+
+    /// The verdict for a call that wrote when `wrote` and coalesced otherwise.
+    pub fn from_wrote(wrote: bool) -> Self {
+        if wrote {
+            Self::Realized
+        } else {
+            Self::Coalesced
+        }
+    }
+}
+
+/// What a registration call did to the registry.
+///
+/// Registration is idempotent by fingerprint on every backend: an exact repeat
+/// returns the recorded row instead of failing. `Created` therefore says
+/// something a successful `Ok` does not — that this call, and no earlier one,
+/// put the row there.
+#[derive(Clone, Copy, Debug, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(rename_all = "snake_case")]
+pub enum ProcessRegistrationOutcome {
+    /// This call inserted the row.
+    Created,
+    /// A row with this registration's fingerprint was already recorded; the
+    /// returned record is that row, untouched.
+    Existing,
+}
+
+/// Read-only registration composition with the registrar's actual proposed id.
+/// Its fields cannot be widened between preparation and the fenced commit.
+#[derive(Clone, Debug)]
+pub struct PreparedProcessRegistration {
+    registration: ProcessRegistration,
+    observers: Vec<SessionId>,
+    process_id: ProcessId,
+    retained: bool,
+    prepared_at_ms: u64,
+}
+impl PreparedProcessRegistration {
+    /// Backend constructor. Validation and id minting precede this read-only plan.
+    pub fn new(
+        registration: ProcessRegistration,
+        mut observers: Vec<SessionId>,
+        process_id: ProcessId,
+        retained: bool,
+        prepared_at_ms: u64,
+    ) -> Self {
+        observers.sort();
+        observers.dedup();
+        Self {
+            registration,
+            observers,
+            process_id,
+            retained,
+            prepared_at_ms,
+        }
+    }
+    pub fn process_id(&self) -> &ProcessId {
+        &self.process_id
+    }
+    /// Whether a retained process already holds the registration's start
+    /// key: its id is that process's, and applying it creates nothing.
+    #[must_use]
+    pub fn retained(&self) -> bool {
+        self.retained
+    }
+    pub fn trace(&self) -> &lash_trace::TraceScopeOffer {
+        &self.registration.trace
+    }
+    /// The retained preparation time used by the process trace scope.
+    pub fn prepared_at_ms(&self) -> u64 {
+        self.prepared_at_ms
+    }
+    /// The registration to commit, its trace offer carrying the process
+    /// span derived from its cause and the minted id, with its observers,
+    /// id, retention and preparation time.
+    pub fn into_commit(mut self) -> (ProcessRegistration, Vec<SessionId>, ProcessId, bool, u64) {
+        let scope = lash_trace::TraceScopeId::admission(lash_trace::TraceScopeOwner::Process {
+            process_id: self.process_id.clone(),
+        });
+        self.registration.trace = std::mem::take(&mut self.registration.trace).deriving(&scope);
+        (
+            self.registration,
+            self.observers,
+            self.process_id,
+            self.retained,
+            self.prepared_at_ms,
+        )
+    }
+}
+
+/// A registered process record together with its [`ProcessRegistrationOutcome`].
+#[derive(Clone, Debug)]
+pub struct ProcessRegistrationReceipt {
+    /// The registered record, newly created or already recorded.
+    pub record: ProcessRecord,
+    pub outcome: ProcessRegistrationOutcome,
+}
+
+impl ProcessRegistrationReceipt {
+    /// A record this call inserted.
+    pub fn created(record: ProcessRecord) -> Self {
+        Self {
+            record,
+            outcome: ProcessRegistrationOutcome::Created,
+        }
+    }
+
+    /// A record that was already recorded before this call.
+    pub fn existing(record: ProcessRecord) -> Self {
+        Self {
+            record,
+            outcome: ProcessRegistrationOutcome::Existing,
+        }
+    }
+
+    pub fn is_created(&self) -> bool {
+        self.outcome == ProcessRegistrationOutcome::Created
+    }
+}
+
+/// The kind and label a host declares for a start whose input core owns
+/// outright: a session turn or a tool call.
+///
+/// A declaration carries no definition reference, by construction: only the
+/// engine registry can put one on a durable row, and only after resolving it.
+#[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize)]
+pub struct DeclaredProcessIdentity {
+    pub kind: ProcessEngineKind,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub label: Option<String>,
+}
+
+impl DeclaredProcessIdentity {
+    pub fn new(kind: impl Into<ProcessEngineKind>) -> Self {
+        Self {
+            kind: kind.into(),
+            label: None,
+        }
+    }
+
+    pub fn labelled(kind: impl Into<ProcessEngineKind>, label: Option<impl Into<String>>) -> Self {
+        Self {
+            kind: kind.into(),
+            label: label.map(Into::into),
+        }
+    }
+
+    /// Widens the declaration to the durable identity shape, with no definition.
+    pub fn into_identity(self) -> ProcessIdentity {
+        ProcessIdentity::labelled(self.kind, self.label)
+    }
+}
+
+/// Canonical process identity stored alongside every durable process row.
+///
+/// `ProcessInput::Engine` keeps its payload opaque to core. Identity is a pure
+/// derivation: the non-engine input kinds derive it from the recorded input
+/// itself, and an engine start derives it through the engine registry's
+/// admission, which is the only thing that can name a definition reference.
+/// There are no setters — a durable row's identity is never edited into place.
+#[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(deny_unknown_fields)]
+pub struct ProcessIdentity {
+    pub kind: ProcessEngineKind,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub label: Option<String>,
+    /// The definition reference this row pins, for the engine starts that have
+    /// one. It is the whole reference, not a bare blob: the engine kind that
+    /// owns the definition, the definition value, and the signature claimed for
+    /// it when the row was created. These admission facts persist independently
+    /// of the immutable definition id.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub definition: Option<ProcessDefinitionRef>,
+    /// The immutable definition a start by id admitted this row from
+    /// (ADR 0113 §3.6): the row's `ProcessRecord` holds its descriptor and
+    /// manifest for as long as it holds the row's other inputs.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub definition_id: Option<super::ProcessDefinitionId>,
+}
+
+impl ProcessIdentity {
+    /// Constructs a `ProcessIdentity` naming only an engine kind, for protocol and process-engine
+    /// implementors while running a durable process.
+    pub fn new(kind: impl Into<ProcessEngineKind>) -> Self {
+        Self {
+            kind: kind.into(),
+            label: None,
+            definition: None,
+            definition_id: None,
+        }
+    }
+
+    /// Constructs a labelled `ProcessIdentity` for protocol and process-engine implementors while
+    /// running a durable process.
+    pub fn labelled(kind: impl Into<ProcessEngineKind>, label: Option<impl Into<String>>) -> Self {
+        Self {
+            kind: kind.into(),
+            label: label.map(Into::into),
+            definition: None,
+            definition_id: None,
+        }
+    }
+
+    /// The engine kind is taken from the reference, so the two can never drift.
+    pub fn for_definition(
+        reference: ProcessDefinitionRef,
+        label: Option<impl Into<String>>,
+    ) -> Self {
+        Self {
+            kind: reference.engine_kind.clone(),
+            label: label.map(Into::into),
+            definition: Some(reference),
+            definition_id: None,
+        }
+    }
+
+    /// An engine input derives only its kind here: its label and definition
+    /// reference come from the engine registry's admission, which is the only
+    /// authority over an opaque engine payload.
+    pub fn from_process_input(input: &ProcessInput) -> Self {
+        match input {
+            ProcessInput::Engine { kind, .. } => Self::new(kind.clone()),
+            ProcessInput::SessionTurn { create_request, .. } => Self::labelled(
+                "session_turn",
+                create_request.session_id.as_ref().map(ToString::to_string),
+            ),
+        }
+    }
+}
+
+/// Durable execution identity for background work accepted outside the local process.
+/// Hosts keep external metadata in their adapter, keyed by process id.
+#[derive(Clone, Debug, Default, Serialize, Deserialize, PartialEq)]
+#[serde(deny_unknown_fields)]
+pub struct ProcessExternalRef {
+    pub backend: String,
+    pub id: String,
+    /// Execution segment this reference was minted for.
+    ///
+    /// A run that hands over to a successor is a new segment with its own
+    /// backend identity, and the live host and the recovery pass can both
+    /// submit one. The reference is therefore written compare-and-set on this
+    /// ordinal: an absent or lower ordinal never displaces a higher one, so a
+    /// slow writer for an earlier segment cannot overwrite the owner a later
+    /// segment already recorded. `None` reads as segment zero: it is what a
+    /// writer that predates segmented references wrote, and every such writer
+    /// only ever minted the first segment's reference.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub segment_ordinal: Option<u64>,
+}
+
+impl ProcessExternalRef {
+    /// The segment this reference belongs to, reading an absent ordinal as zero.
+    pub fn segment_ordinal(&self) -> u64 {
+        self.segment_ordinal.unwrap_or(0)
+    }
+
+    pub fn supersedes(&self, existing: &Self) -> bool {
+        self.segment_ordinal() > existing.segment_ordinal()
+    }
+}
+
+/// A process, as the holder of a handle to it sees it.
+///
+/// The view is the one handle record (ADR 0095) plus the summary fields a
+/// holder is allowed to read. `id` is the opaque [`HandleId`], the marker field
+/// is a constant, and `process_id` is the part that id carries, filled in only
+/// by [`ProcessHandleView::new`].
+#[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize)]
+#[expect(
+    clippy::manual_non_exhaustive,
+    reason = "the private unit field is the serialized ADR 0095 marker, not a non-exhaustive guard; `#[non_exhaustive]` would drop the `__handle__` field from the wire"
+)]
+pub struct ProcessHandleView {
+    #[serde(rename = "__handle__", with = "handle_kind_field")]
+    handle_kind: (),
+    pub id: HandleId,
+    pub process_id: ProcessId,
+    pub kind: ProcessEngineKind,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub label: Option<String>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub definition_id: Option<super::ProcessDefinitionId>,
+    pub status: ProcessStatus,
+}
+
+/// Writes the handle marker field as the one kind, and refuses any other.
+///
+/// Serializing a constant rather than a carried string is what stops a view
+/// built here, or decoded from a peer, from claiming to be some other kind of
+/// handle.
+mod handle_kind_field {
+    pub fn serialize<S: serde::Serializer>(_: &(), serializer: S) -> Result<S::Ok, S::Error> {
+        serializer.serialize_str(lash_protocol_types::handle::HANDLE_KIND)
+    }
+
+    pub fn deserialize<'de, D: serde::Deserializer<'de>>(deserializer: D) -> Result<(), D::Error> {
+        use serde::Deserialize as _;
+        let kind = String::deserialize(deserializer)?;
+        if kind == lash_protocol_types::handle::HANDLE_KIND {
+            return Ok(());
+        }
+        Err(serde::de::Error::invalid_value(
+            serde::de::Unexpected::Str(&kind),
+            &lash_protocol_types::handle::HANDLE_KIND,
+        ))
+    }
+}
+
+impl ProcessHandleView {
+    /// Constructs a `ProcessHandleView` for store and durable-substrate implementors while
+    /// persisting and coordinating durable process execution.
+    ///
+    /// This is the only way to build one, so the id and the parts it reports can
+    /// never disagree.
+    pub fn new(process_id: ProcessId, identity: ProcessIdentity, status: ProcessStatus) -> Self {
+        Self {
+            handle_kind: (),
+            id: HandleId::process(&process_id),
+            process_id,
+            kind: identity.kind,
+            label: identity.label,
+            definition_id: identity.definition_id,
+            status,
+        }
+    }
+
+    /// Sets the definition carried by a `ProcessHandleView` for store and durable-substrate
+    /// implementors while persisting and coordinating durable process execution.
+    pub fn with_definition_id(mut self, definition_id: Option<super::ProcessDefinitionId>) -> Self {
+        self.definition_id = definition_id;
+        self
+    }
+
+    /// Builds a `ProcessHandleView` from record data for store and durable-substrate
+    /// implementors while persisting and coordinating durable process execution.
+    pub fn from_record(record: ProcessRecord) -> Self {
+        let status = record.status();
+        Self::new(record.id, record.identity, status)
+    }
+}
+
+/// What a process start answers: the process it names, the key that made
+/// the start idempotent, and whether this start created the process or found
+/// it already registered under that key.
+#[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(deny_unknown_fields)]
+pub struct ProcessStartReceipt {
+    /// The minted id of the started process.
+    pub process_id: ProcessId,
+    /// The key the process is registered under, when the start carried one.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub start_key: Option<StartKey>,
+    /// Whether this start created the process.
+    pub disposition: ProcessRegistrationOutcome,
+}
+
+impl ProcessHandleView {
+    pub fn from_observed(process: super::observation::ObservedProcess) -> Self {
+        let status = process.status();
+        Self::new(process.process_id, process.identity, status)
+    }
+}
+
+impl ProcessStartReceipt {
+    /// The receipt of a start that registered `record` with `disposition`.
+    pub fn of(record: &ProcessRecord, disposition: ProcessRegistrationOutcome) -> Self {
+        Self {
+            process_id: record.id.clone(),
+            start_key: record.start_key.clone(),
+            disposition,
+        }
+    }
+}
+
+#[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize)]
+pub struct ProcessCancelReceipt {
+    pub process_id: ProcessId,
+    pub status: ProcessStatus,
+    pub origin: CancelOrigin,
+}
+
+impl ProcessCancelReceipt {
+    pub fn from_observed(
+        process: super::observation::ObservedProcess,
+    ) -> Result<Self, crate::PluginError> {
+        let status = process.status();
+        let request = process.cancel_request.ok_or_else(|| {
+            crate::PluginError::Session(format!(
+                "process `{}` has no cancellation request",
+                process.process_id
+            ))
+        })?;
+        Ok(Self {
+            process_id: process.process_id,
+            status,
+            origin: request.origin,
+        })
+    }
+
+    /// Builds a `ProcessCancelReceipt` from record data for store and durable-substrate
+    /// implementors while persisting and coordinating durable process execution.
+    pub fn from_record(record: ProcessRecord) -> Result<Self, crate::PluginError> {
+        let status = record.status();
+        let request = record.cancel_request.ok_or_else(|| {
+            crate::PluginError::Session(format!(
+                "process `{}` has no cancellation request",
+                record.id
+            ))
+        })?;
+        Ok(Self {
+            process_id: record.id,
+            status,
+            origin: request.origin,
+        })
+    }
+}
+
+/// Any-of selection over the closed process lifecycle vocabulary.
+#[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(rename_all = "snake_case")]
+pub enum ProcessStatusFilter {
+    Any,
+    In(BTreeSet<ProcessStatus>),
+}
+
+impl Default for ProcessStatusFilter {
+    fn default() -> Self {
+        Self::In(BTreeSet::from([ProcessStatus::Running]))
+    }
+}
+
+impl ProcessStatusFilter {
+    pub fn any_of(statuses: impl IntoIterator<Item = ProcessStatus>) -> Self {
+        Self::In(statuses.into_iter().collect())
+    }
+    pub fn labels(&self) -> Option<Vec<&'static str>> {
+        match self {
+            Self::Any => None,
+            Self::In(statuses) => Some(statuses.iter().map(ProcessStatus::label).collect()),
+        }
+    }
+    pub fn decode(value: Option<&serde_json::Value>) -> Result<Self, String> {
+        value
+            .map(|value| {
+                serde_json::from_value(value.clone())
+                    .map_err(|error| format!("processes.list invalid status set: {error}"))
+            })
+            .unwrap_or_else(|| Ok(Self::default()))
+    }
+    /// Selects the live scan only when every selected status is live.
+    pub fn list_mode(&self) -> ProcessListMode {
+        match self {
+            Self::In(statuses) if statuses.iter().all(|status| !status.is_retired()) => {
+                ProcessListMode::Live
+            }
+            Self::In(_) | Self::Any => ProcessListMode::All,
+        }
+    }
+    pub fn matches(&self, status: ProcessStatus) -> bool {
+        match self {
+            Self::Any => true,
+            Self::In(statuses) => statuses.contains(&status),
+        }
+    }
+}
+
+mod list_filter;
+pub use list_filter::{ProcessListFilter, ProcessOriginatorFilter};
+
+#[derive(Clone, Copy, Debug, Default, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(rename_all = "snake_case")]
+pub enum ProcessListMode {
+    #[default]
+    Live,
+    All,
+}
+
+impl ProcessListMode {
+    pub fn as_str(self) -> &'static str {
+        match self {
+            Self::Live => "live",
+            Self::All => "all",
+        }
+    }
+}
+
+#[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize)]
+pub struct ProcessSessionDeleteReport {
+    pub session_id: SessionId,
+    pub removed_observer_count: usize,
+}
+
+#[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(tag = "kind", rename_all = "snake_case")]
+pub enum ProcessObserverBy {
+    Host { operation_id: String },
+}
+
+impl ProcessObserverBy {
+    /// Constructs a `ProcessObserverBy` using host semantics for store and durable-substrate
+    /// implementors while persisting and coordinating durable process execution.
+    pub fn host(operation_id: impl Into<String>) -> Self {
+        Self::Host {
+            operation_id: operation_id.into(),
+        }
+    }
+
+    /// Returns the stable observer-authority component process-store implementors include in
+    /// add/remove replay keys.
+    pub fn replay_component(&self) -> &str {
+        match self {
+            Self::Host { operation_id } => operation_id,
+        }
+    }
+}
+
+pub mod launch;
+pub use launch::{
+    DeclaredDefinitionLaunch, DeclaredInlineLaunch, DeclaredLaunch, EngineLaunch, EngineSettings,
+};

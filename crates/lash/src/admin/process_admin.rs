@@ -17,9 +17,9 @@ pub struct SessionProcessAdmin {
 /// the global observer pre-filtered by this session's observer scope (what the
 /// session may address), and every mutation delegates to the same runtime
 /// process path the global surface uses. It speaks the same
-/// [`ObservedProcess`](lash_core::facade_support::ObservedProcess) vocabulary as
+/// [`ObservedProcess`](lash_execution_contracts::process::ObservedProcess) vocabulary as
 /// [`Processes`](crate::process::Processes); [`start`](Self::start) returns the
-/// model-facing handle summary ([`lash_core::ProcessHandleView`]), the one row
+/// model-facing handle summary ([`lash_execution_contracts::process::ProcessHandleView`]), the one row
 /// type retained for the model/handle contract.
 impl SessionProcessAdmin {
     /// Observer-scoped read: the global observer filtered to this session.
@@ -27,8 +27,8 @@ impl SessionProcessAdmin {
     /// reimplements it.
     async fn list_observed(
         &self,
-        filter: &lash_core::ProcessListFilter,
-    ) -> Result<Vec<lash_core::facade_support::ObservedProcess>> {
+        filter: &lash_execution_contracts::process::ProcessListFilter,
+    ) -> Result<Vec<lash_execution_contracts::process::ObservedProcess>> {
         // A registry-less runtime has no processes to address; observe empty
         // rather than erroring, matching the pre-unification session read.
         let Some(observer) = self.process_observer_opt() else {
@@ -42,9 +42,9 @@ impl SessionProcessAdmin {
 
     pub async fn start(
         &self,
-        request: lash_core::ProcessStartRequest,
+        request: lash_execution_contracts::process::ProcessStartRequest,
         scoped_effect_controller: ActorContext,
-    ) -> Result<lash_core::ProcessHandleView> {
+    ) -> Result<lash_execution_contracts::process::ProcessHandleView> {
         let (session_id, processes) = {
             let writer = self.context.runtime.writer();
             let runtime = writer.lock().await;
@@ -53,8 +53,8 @@ impl SessionProcessAdmin {
                 runtime.process_service()?,
             )
         };
-        let request = request
-            .keyed_in(&scoped_effect_controller)
+        let request = scoped_effect_controller
+            .key_host_start(request)
             .map_err(EmbedError::Plugin)?;
         let start_key = request.start_key().cloned();
         let scope = lash_core::ProcessOpScope::new(scoped_effect_controller);
@@ -63,10 +63,10 @@ impl SessionProcessAdmin {
             .await
             .map_err(|error| {
                 EmbedError::Plugin(match error {
-                    lash_core::PluginError::RuntimeEffectController(error) => {
+                    lash_execution_contracts::plugin_error::PluginError::RuntimeEffectController(error) => {
                         crate::process_admin::host_start_refusal(start_key.as_ref(), error)
                     }
-                    lash_core::PluginError::Runtime(error) => {
+                    lash_execution_contracts::plugin_error::PluginError::Runtime(error) => {
                         crate::process_admin::host_start_refusal(start_key.as_ref(), error.into())
                     }
                     error => error,
@@ -77,24 +77,26 @@ impl SessionProcessAdmin {
 
     /// Live processes this session may address: running, or waiting on a
     /// call, a key, a sleep or another process.
-    pub async fn list(&self) -> Result<Vec<lash_core::facade_support::ObservedProcess>> {
-        self.list_observed(&lash_core::ProcessListFilter {
-            status: lash_core::ProcessStatusFilter::any_of(
-                lash_core::ProcessStatus::ALL
+    pub async fn list(&self) -> Result<Vec<lash_execution_contracts::process::ObservedProcess>> {
+        self.list_observed(&lash_execution_contracts::process::ProcessListFilter {
+            status: lash_execution_contracts::process::ProcessStatusFilter::any_of(
+                lash_execution_contracts::process::ProcessStatus::ALL
                     .iter()
                     .copied()
-                    .filter(lash_core::ProcessStatus::is_live),
+                    .filter(lash_execution_contracts::process::ProcessStatus::is_live),
             ),
-            ..lash_core::ProcessListFilter::default()
+            ..lash_execution_contracts::process::ProcessListFilter::default()
         })
         .await
     }
 
     /// Every process (any status) this session may address.
-    pub async fn list_all(&self) -> Result<Vec<lash_core::facade_support::ObservedProcess>> {
-        self.list_observed(&lash_core::ProcessListFilter {
-            status: lash_core::ProcessStatusFilter::Any,
-            ..lash_core::ProcessListFilter::default()
+    pub async fn list_all(
+        &self,
+    ) -> Result<Vec<lash_execution_contracts::process::ObservedProcess>> {
+        self.list_observed(&lash_execution_contracts::process::ProcessListFilter {
+            status: lash_execution_contracts::process::ProcessStatusFilter::Any,
+            ..lash_execution_contracts::process::ProcessListFilter::default()
         })
         .await
     }
@@ -103,7 +105,7 @@ impl SessionProcessAdmin {
     pub async fn get(
         &self,
         process_id: &ProcessId,
-    ) -> Result<Option<lash_core::facade_support::ObservedProcess>> {
+    ) -> Result<Option<lash_execution_contracts::process::ObservedProcess>> {
         Ok(self
             .list_all()
             .await?
@@ -117,22 +119,22 @@ impl SessionProcessAdmin {
         &self,
         from: crate::process_history::ProcessHistoryContinuation,
         limit: std::num::NonZeroUsize,
-        mode: lash_core::ProcessEventQueryMode,
+        mode: lash_execution_contracts::process::ProcessEventQueryMode,
     ) -> Result<crate::process_history::ProcessEventsRead> {
         let Some(registry) = self.context.runtime.observe().process_registry.clone() else {
             let events = match mode {
-                lash_core::ProcessEventQueryMode::Full => {
-                    lash_core::ProcessEventPageEvents::Full(Vec::new())
+                lash_execution_contracts::process::ProcessEventQueryMode::Full => {
+                    lash_execution_contracts::process::ProcessEventPageEvents::Full(Vec::new())
                 }
-                lash_core::ProcessEventQueryMode::Lite => {
-                    lash_core::ProcessEventPageEvents::Lite(Vec::new())
+                lash_execution_contracts::process::ProcessEventQueryMode::Lite => {
+                    lash_execution_contracts::process::ProcessEventPageEvents::Lite(Vec::new())
                 }
             };
             return Ok(crate::process_history::ProcessEventsRead {
-                outcome: lash_core::ProcessEventReadOutcome::Retained(
-                    lash_core::ProcessEventPage {
+                outcome: lash_execution_contracts::process::ProcessEventReadOutcome::Retained(
+                    lash_execution_contracts::process::ProcessEventPage {
                         events,
-                        more: lash_core::ProcessEventPageMore::Complete,
+                        more: lash_execution_contracts::process::ProcessEventPageMore::Complete,
                     },
                 ),
                 next: from,
@@ -144,7 +146,7 @@ impl SessionProcessAdmin {
     pub async fn await_output(
         &self,
         process_id: &ProcessId,
-    ) -> Result<lash_core::ProcessAwaitOutput> {
+    ) -> Result<lash_execution_contracts::process::ProcessAwaitOutput> {
         let process_work = &self.process_work;
         let process_id = self
             .process_registry()?
@@ -163,7 +165,7 @@ impl SessionProcessAdmin {
         &self,
         process_id: &ProcessId,
         scoped_effect_controller: ActorContext,
-    ) -> Result<lash_core::ProcessCancelReceipt> {
+    ) -> Result<lash_execution_contracts::process::ProcessCancelReceipt> {
         let (owner, processes) = {
             let writer = self.context.runtime.writer();
             let runtime = writer.lock().await;
@@ -180,7 +182,7 @@ impl SessionProcessAdmin {
         let summary = processes
             .cancel(&owner, process_id, scope)
             .await
-            .and_then(lash_core::ProcessCancelReceipt::from_observed)
+            .and_then(lash_execution_contracts::process::ProcessCancelReceipt::from_observed)
             .map_err(EmbedError::Plugin)?;
         Ok(summary)
     }
@@ -189,7 +191,7 @@ impl SessionProcessAdmin {
     pub async fn cancel_all(
         &self,
         scoped_effect_controller: ActorContext,
-    ) -> Result<Vec<lash_core::ProcessCancelReceipt>> {
+    ) -> Result<Vec<lash_execution_contracts::process::ProcessCancelReceipt>> {
         let (session_id, processes) = {
             let writer = self.context.runtime.writer();
             let runtime = writer.lock().await;
@@ -228,16 +230,20 @@ impl SessionProcessAdmin {
             .map_err(EmbedError::Plugin)
     }
 
-    fn process_registry(&self) -> Result<Arc<dyn lash_core::ProcessRegistry>> {
+    fn process_registry(
+        &self,
+    ) -> Result<Arc<dyn lash_execution_contracts::process::ProcessRegistry>> {
         self.context
             .runtime
             .observe()
             .process_registry
             .clone()
             .ok_or_else(|| {
-                EmbedError::Plugin(lash_core::PluginError::Session(
-                    "process registry is unavailable in this runtime".to_string(),
-                ))
+                EmbedError::Plugin(
+                    lash_execution_contracts::plugin_error::PluginError::Session(
+                        "process registry is unavailable in this runtime".to_string(),
+                    ),
+                )
             })
     }
 
@@ -245,10 +251,12 @@ impl SessionProcessAdmin {
     /// runtime has no registry. Session-scoped reads use this so a registry-less
     /// runtime observes an empty process set rather than erroring, matching the
     /// pre-unification `list_process_handles` behavior.
-    fn process_observer_opt(&self) -> Option<lash_core::facade_support::ProcessWorkObserver> {
+    fn process_observer_opt(
+        &self,
+    ) -> Option<lash_execution_contracts::process::ProcessWorkObserver> {
         let observation = self.context.runtime.observe();
         observation.process_registry.clone().map(|registry| {
-            lash_core::facade_support::ProcessWorkObserver::new(registry)
+            lash_execution_contracts::process::ProcessWorkObserver::new(registry)
                 .with_actor_parks(Arc::clone(observation.effect_host.backend().durable()))
                 .with_read_attempts(self.context.target.observer_pacing().snapshot_read_attempts)
                 .with_work_limits(self.observation_work_limits)
@@ -256,7 +264,7 @@ impl SessionProcessAdmin {
     }
 
     /// Observer edges are session-scoped and deliberately frame-less.
-    fn process_observer_scope(&self) -> lash_core::SessionScope {
+    fn process_observer_scope(&self) -> lash_execution_contracts::process::SessionScope {
         self.context.runtime.observe().process_scope()
     }
 }

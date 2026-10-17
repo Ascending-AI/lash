@@ -161,8 +161,8 @@ fn endless_provider(calls: &Arc<AtomicUsize>) -> ProviderHandle {
 /// [`RECORDED_TURNS`] model calls, typed: the next call is never made.
 /// `prefix` names the law's sessions.
 async fn a_recorded_budget_bounds_every_run_after_an_engine_restart(
-    first: lash_core::Backend,
-    restart: impl AsyncFnOnce() -> lash_core::Backend,
+    first: lash_execution_contracts::backend::Backend,
+    restart: impl AsyncFnOnce() -> lash_execution_contracts::backend::Backend,
     prefix: &str,
 ) -> Result<LashCore> {
     let created = format!("{prefix}-created-bounded");
@@ -230,7 +230,9 @@ async fn a_recorded_budget_bounds_every_run_after_an_engine_restart(
 }
 
 /// The law over `stores`: the restart is a new deployment over them.
-async fn after_a_restart_over(stores: Arc<dyn lash_core::StoreSet>) -> Result<()> {
+async fn after_a_restart_over(
+    stores: Arc<dyn lash_execution_contracts::backend::StoreSet>,
+) -> Result<()> {
     let unbounded = a_recorded_budget_bounds_every_run_after_an_engine_restart(
         lash_conformance::backend_over(Arc::clone(&stores)),
         async || lash_conformance::backend_over(stores),

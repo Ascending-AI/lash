@@ -74,7 +74,7 @@ impl ToolProvider for RaceTools {
 /// An RLM core over SQLite memory whose model answers with one cell running
 /// `source`, serving `tools`; the cell may sleep.
 fn race_core(
-    backend: lash_core::Backend,
+    backend: lash_execution_contracts::backend::Backend,
     source: &str,
     tools: Arc<dyn ToolProvider>,
 ) -> Result<LashCore> {

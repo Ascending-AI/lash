@@ -26,13 +26,15 @@
 //!   deferred match resolved, as the env retains it: its definition, on the
 //!   link's provider, under its binding, which this node must read before
 //!   the call is admitted. Nothing resolves it again.
-//! - **Engine steps** run through the [`EngineSteps`](crate::EngineSteps)
+//! - **Engine steps** run through the [`EngineSteps`](lash_execution_contracts::process::EngineSteps)
 //!   the registration of the process's engine declares, under the pinned
 //!   `Repeatable` policy. A registration that declares none, or not this
 //!   kind, refuses the step before admission.
 
 use std::sync::Arc;
 
+use lash_core_execution::ExecutionLimit;
+use lash_core_execution::MaxToolCalls;
 use lash_core_execution::runtime::actor::round::MemberPin;
 use lash_core_execution::runtime::actor::round::{AdmittedExecution, MemberBody, MemberOutcome};
 use lash_core_execution::runtime::actor::waits::Resolution;
@@ -41,11 +43,12 @@ use lash_core_execution::runtime::process::steps::{
     tool_step_refused, tool_step_resolved, tool_step_settled,
 };
 use lash_core_execution::tool_run::CompletionSource;
-use lash_core_execution::{
-    EngineStepRun, ExecutionLimit, MaxToolCalls, ProcessInput, ProcessRecord, StepRequest,
-};
 use lash_core_store::tool_run::Material;
 use lash_core_store::tool_run::SettledOutput;
+use lash_execution_contracts::process::EngineStepRun;
+use lash_execution_contracts::process::ProcessInput;
+use lash_execution_contracts::process::ProcessRecord;
+use lash_execution_contracts::process::StepRequest;
 
 use super::DurableProcessWorker;
 
@@ -287,7 +290,7 @@ impl ProcessSteps for WorkerSteps {
     fn succession(
         &self,
         process: &ProcessRecord,
-    ) -> Option<Arc<dyn lash_core_execution::EngineSuccession>> {
+    ) -> Option<Arc<dyn lash_execution_contracts::process::EngineSuccession>> {
         self.0
             .config
             .runtime_host
@@ -315,11 +318,12 @@ impl ProcessSteps for WorkerSteps {
         };
         match self.0.built_step_tools(runtime, process).await {
             Ok(_) => Ok(()),
-            Err(StepToolsError::Build(crate::PluginError::ProcessEnvRefused { refusal })) => {
-                Err(StepRefusal::EnvRefused { refusal })
-            }
+            Err(StepToolsError::Build(
+                lash_execution_contracts::plugin_error::PluginError::ProcessEnvRefused { refusal },
+            )) => Err(StepRefusal::EnvRefused { refusal }),
             Err(StepToolsError::Build(error))
-                if error.class() != crate::PluginErrorClass::Terminal =>
+                if error.class()
+                    != lash_execution_contracts::plugin_error::PluginErrorClass::Terminal =>
             {
                 Err(unavailable(error.to_string()))
             }
@@ -340,12 +344,12 @@ impl ProcessSteps for WorkerSteps {
         process: &ProcessRecord,
     ) -> Result<
         Option<lash_core_execution::runtime::actor::process::component_formats::ComponentFormatCut>,
-        crate::PluginError,
+        lash_execution_contracts::plugin_error::PluginError,
     > {
         use lash_core_execution::runtime::actor::process::component_formats::{
             ComponentFormatCut, recorded_component_cut, recorded_component_state,
         };
-        use lash_core_execution::runtime::actor::process::registry_error;
+        use lash_execution_contracts::plugin_error::registry_error;
         let backend = self.0.config.runtime_host.backend();
         let Some(env_ref) = process.env_ref() else {
             return Ok(None);
@@ -356,7 +360,7 @@ impl ProcessSteps for WorkerSteps {
         let (env, state) = match cut {
             Some(cut) => (cut.env, Some(cut.state)),
             None => (
-                lash_core_execution::runtime::load_process_env(
+                lash_execution_contracts::process::load_process_env(
                     backend.process_env_store().as_ref(),
                     env_ref,
                 )
@@ -403,7 +407,7 @@ impl ProcessSteps for WorkerSteps {
         if process.env_ref().is_none() {
             return Ok(None);
         }
-        let unavailable = |error: crate::PluginError| {
+        let unavailable = |error: lash_execution_contracts::plugin_error::PluginError| {
             lash_core::durable_port::DurableError::Store(lash_core::durable_port::StoreFailure {
                 kind: lash_core::durable_port::StoreFailureKind::Unavailable,
                 message: error.to_string(),
@@ -431,7 +435,7 @@ impl ProcessSteps for WorkerSteps {
         let Some(env_ref) = process.env_ref() else {
             return Ok(None);
         };
-        let environment = lash_core_execution::runtime::load_process_env(
+        let environment = lash_execution_contracts::process::load_process_env(
             self.0
                 .config
                 .runtime_host
@@ -478,9 +482,11 @@ impl ProcessSteps for WorkerSteps {
                 matched,
                 ..
             } => {
-                let unavailable = |error: crate::PluginError| StepRefusal::Unavailable {
-                    step: step.0.clone(),
-                    reason: error.to_string(),
+                let unavailable = |error: lash_execution_contracts::plugin_error::PluginError| {
+                    StepRefusal::Unavailable {
+                        step: step.0.clone(),
+                        reason: error.to_string(),
+                    }
                 };
                 // The target of a `call_dynamic` call is admitted as the
                 // tool its recorded match names, on the match's provider,
@@ -489,7 +495,13 @@ impl ProcessSteps for WorkerSteps {
                     .0
                     .built_step_tools(runtime, process)
                     .await
-                    .map_err(|error| unavailable(crate::PluginError::Session(error.to_string())))?;
+                    .map_err(|error| {
+                        unavailable(
+                            lash_execution_contracts::plugin_error::PluginError::Session(
+                                error.to_string(),
+                            ),
+                        )
+                    })?;
                 let link = match matched {
                     Some(matched) => {
                         let (link, binding) =
@@ -666,8 +678,8 @@ impl DurableProcessWorker {
         &self,
         runtime: &StepRuntime,
         process: ProcessRecord,
-        step: lash_core_execution::StepName,
-        kind: lash_core_execution::EngineStepKind,
+        step: lash_execution_contracts::process::StepName,
+        kind: lash_execution_contracts::process::EngineStepKind,
         input: serde_json::Value,
         token: tokio_util::sync::CancellationToken,
     ) -> MemberOutcome {
@@ -695,11 +707,15 @@ impl DurableProcessWorker {
             Err(refusal) => {
                 tracing::warn!(process_id = %process.id, %refusal, "an admitted engine step has no body here");
                 let code = match &refusal {
-                    crate::EngineStepRefusal::UnknownEngine { .. } => "engine_step_engine_missing",
-                    crate::EngineStepRefusal::NoEngineSteps { .. } => {
-                        "engine_step_registration_missing"
-                    }
-                    crate::EngineStepRefusal::UndeclaredStep { .. } => "engine_step_undeclared",
+                    lash_execution_contracts::process::EngineStepRefusal::UnknownEngine {
+                        ..
+                    } => "engine_step_engine_missing",
+                    lash_execution_contracts::process::EngineStepRefusal::NoEngineSteps {
+                        ..
+                    } => "engine_step_registration_missing",
+                    lash_execution_contracts::process::EngineStepRefusal::UndeclaredStep {
+                        ..
+                    } => "engine_step_undeclared",
                 };
                 return step_failure(
                     &process,
@@ -732,11 +748,14 @@ impl DurableProcessWorker {
             projection_providers: Some(Arc::clone(backend.projection_providers())),
             kind,
             input,
-            pages: cx.pages().ok().map(|store| lash_core_execution::StepPages {
-                store,
-                actor: cx.actor().clone(),
-                epoch: cx.epoch(),
-            }),
+            pages: cx
+                .pages()
+                .ok()
+                .map(|store| lash_execution_contracts::process::StepPages {
+                    store,
+                    actor: cx.actor().clone(),
+                    epoch: cx.epoch(),
+                }),
         };
         steps.run(run, token).await.into()
     }
@@ -764,7 +783,7 @@ fn step_failure(
                 process_id: process.id.clone(),
             },
             MaterialRole::AttemptOutput,
-            serde_json::to_string(&lash_core::Durable(&output))
+            serde_json::to_string(&lash_protocol_types::Durable(&output))
                 .expect("an engine step failure encodes"),
         )
         .failure(KnownFailureReason::Reported, None),

@@ -2,7 +2,8 @@
 
 use std::sync::Arc;
 
-use lash_core::plugin::{PluginError, PluginFactory};
+use lash_core::plugin::PluginFactory;
+use lash_execution_contracts::plugin_error::PluginError;
 use lash_vm_client::{RunBounds, service::Service};
 
 /// Registers the kernel process engine and its workflow document provider.
@@ -60,7 +61,10 @@ impl PluginFactory for KernelProcessPluginFactory {
 
     fn recipe(
         self: Arc<Self>,
-    ) -> std::result::Result<lash_core::plugin::PluginRecipe, lash_core::plugin::PluginError> {
+    ) -> std::result::Result<
+        lash_core::plugin::PluginRecipe,
+        lash_execution_contracts::plugin_error::PluginError,
+    > {
         let id = self.id();
         Ok(lash_core::plugin::PluginRecipe::from_registrar(
             id,
@@ -90,7 +94,7 @@ impl KernelProcessPluginFactory {
     /// The contribution boundary supplies trace and format policy separately.
     pub(crate) fn engine(
         &self,
-        store: Arc<dyn lash_core::ModuleArtifactStore>,
+        store: Arc<dyn lash_execution_contracts::module_artifacts::ModuleArtifactStore>,
     ) -> Result<crate::KernelProcessEngine, PluginError> {
         let documents = crate::KernelDocuments::new(store);
         let bounds = lash_kernel_vm::Bounds {

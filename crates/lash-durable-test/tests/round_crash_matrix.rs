@@ -43,14 +43,16 @@ use std::num::NonZeroU32;
 use std::sync::{Arc, Mutex};
 use std::time::Duration;
 
+use lash_core_execution::ActorContext;
+use lash_core_execution::AdmittedScope;
 use lash_core_execution::runtime::actor::round::{
     self, ExecutionDraft, MemberBodies, MemberBody, MemberOutcome, PolicyView, RoundDraft,
     RoundEnd, RoundRunner, RunFold,
 };
-use lash_core_execution::runtime::actor::waits::{
-    self, ParkDeadline, Resolution, ResolveAnswer, WaitDeadline, WaitId, WaitKind,
-};
-use lash_core_execution::{ActorContext, AdmittedScope, Backend};
+use lash_core_execution::runtime::actor::waits;
+use lash_core_execution::runtime::actor::waits::Resolution;
+use lash_core_execution::runtime::actor::waits::ResolveAnswer;
+use lash_core_execution::runtime::actor::waits::WaitId;
 use lash_core_store::effect_opener::EffectOpener;
 use lash_core_store::tool_run::Material;
 use lash_core_store::tool_run::SettledOutput;
@@ -58,6 +60,7 @@ use lash_core_store::tool_run::{
     CompletionSource, KnownFailureReason, MaterialDigest, MaterialLocation, MaterialOwner,
     MaterialRef, MaterialRole,
 };
+use lash_durable::domain::WaitKind;
 use lash_durable::domain::{AdmittedId, OwnerKey, RunFactKind, RunSeq};
 use lash_durable::runner::{Activation, Exit, Owned};
 use lash_durable::{
@@ -66,6 +69,9 @@ use lash_durable::{
 use lash_durable_test::{
     Cut, Fault, Matrix, Scenario, SimClock, SimNodes, SimNodesConfig, Stored, Tripwire, WriteKind,
 };
+use lash_execution_contracts::backend::Backend;
+use lash_execution_contracts::waits::ParkDeadline;
+use lash_execution_contracts::waits::WaitDeadline;
 use lash_protocol_types::sync::MutexExt as _;
 use lash_protocol_types::{
     ExecutionLimit, ExecutionPolicy, LimitCause, SessionId, ToolCallId, ToolId, TurnId,

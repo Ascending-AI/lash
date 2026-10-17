@@ -37,11 +37,18 @@
 use std::time::Duration;
 
 use lash_core_execution::runtime::actor::process::{self, CascadeProgress};
-use lash_core_execution::runtime::actor::waits::{self, ProcessWaitOutcome, WaitDeadline};
+use lash_core_execution::runtime::actor::waits;
 use lash_durable::domain::{ScopeKey, SessionCloseWrite};
 use lash_durable::{ActorTx, CommitLabel, DomainWrite, DurableError};
+use lash_execution_contracts::waits::ProcessWaitOutcome;
+use lash_execution_contracts::waits::WaitDeadline;
 
-use crate::{ActorContext, CancelOrigin, ProcessId, ProcessOutcome, SessionId, TurnId};
+use crate::ActorContext;
+use crate::CancelOrigin;
+use crate::ProcessId;
+use crate::SessionId;
+use crate::TurnId;
+use lash_execution_contracts::process::ProcessOutcome;
 
 /// Mark the next batch of `scope`'s `Until` children for cancel on `tx`, the
 /// batch sized by the backend's `cascade_batch`. The one call into L6's

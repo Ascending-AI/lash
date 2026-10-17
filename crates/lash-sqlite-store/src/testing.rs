@@ -269,9 +269,9 @@ fn stored_documents(bytes: &[u8]) -> Vec<serde_json::Value> {
 pub fn finalize_fleet_format(
     location: &crate::SqliteLocation,
     fleet: u32,
-) -> Result<(), lash_core_execution::StoreError> {
-    let writable = lash_core_execution::compat::VersionRange::new(1, fleet)
-        .map_err(|error| lash_core_execution::StoreError::Backend(error.to_string()))?;
+) -> Result<(), lash_core_store::store::StoreError> {
+    let writable = lash_core_store::compat::VersionRange::new(1, fleet)
+        .map_err(|error| lash_core_store::store::StoreError::Backend(error.to_string()))?;
     crate::compat::flip_epoch_for_testing(
         location,
         std::time::Duration::from_millis(u64::from(crate::conn::BUSY_TIMEOUT_MS)),

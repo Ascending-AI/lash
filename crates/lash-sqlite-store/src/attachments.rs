@@ -1,6 +1,9 @@
 //! Attachment edges and external-byte write state in the durable-core catalog.
 use super::*;
-use lash_core_execution::{ArtifactReferrer, AttachmentWrite, ReferrerClaim, SessionReferrerState};
+use lash_core_store::artifact_referrer::ArtifactReferrer;
+use lash_core_store::artifact_referrer::ReferrerClaim;
+use lash_core_store::store::AttachmentWrite;
+use lash_core_store::store::SessionReferrerState;
 use lash_protocol_types::sync::MutexExt;
 use lash_store_sql::attachment::{
     condemnation::CondemnationStatements, edges::AttachmentEdgeStatements,
@@ -30,9 +33,9 @@ const ATTACHMENT_REFERRER_KINDS: lash_store_sql::Vocabulary =
     lash_store_sql::Vocabulary::new(&[lash_store_sql::VocabularyTerm::new(
         "attachment_referrer_kind",
         |column| {
-            lash_core_execution::ArtifactReferrerKind::predicate_sql(
+            lash_core_store::artifact_referrer::ArtifactReferrerKind::predicate_sql(
                 column,
-                lash_core_execution::ArtifactReferrerKind::holds_attachments,
+                lash_core_store::artifact_referrer::ArtifactReferrerKind::holds_attachments,
             )
         },
     )]);
@@ -56,7 +59,7 @@ fn check_kind(referrer: &ArtifactReferrer) -> Result<(), StoreError> {
     if !referrer.kind().holds_attachments() {
         return Err(StoreError::ReferrerKindRefused {
             kind: referrer.kind(),
-            store: lash_core_execution::ReferrerStore::Attachment,
+            store: lash_core_store::artifact_referrer::ReferrerStore::Attachment,
         });
     }
     ArtifactReferrer::decode(referrer.kind().as_str(), &referrer.canonical_id())
@@ -324,10 +327,11 @@ fn outcome<T>(value: Result<T, StoreError>) -> rusqlite::Result<TxOutcome<Result
 impl SqliteStore {
     pub(crate) async fn attachment_root_page(
         &self,
-        source: lash_core_execution::attachments::AttachmentRootSource,
+        source: lash_core_store::attachments::AttachmentRootSource,
         after: Option<&AttachmentId>,
-    ) -> Result<lash_core_execution::attachments::AttachmentRootPage, StoreError> {
-        use lash_core_execution::attachments::{AttachmentRootPage, AttachmentRootSource};
+    ) -> Result<lash_core_store::attachments::AttachmentRootPage, StoreError> {
+        use lash_core_store::attachments::AttachmentRootPage;
+        use lash_core_store::attachments::AttachmentRootSource;
         let after = after.map(AttachmentId::to_string).unwrap_or_default();
         let ids = self
             .conn
@@ -386,7 +390,7 @@ impl SqliteStore {
     }
     pub(crate) async fn list_attachment_condemnations(
         &self,
-    ) -> Result<Vec<lash_core_execution::AttachmentCondemnationRecord>, StoreError> {
+    ) -> Result<Vec<lash_core_store::store::AttachmentCondemnationRecord>, StoreError> {
         let rows = self
             .conn
             .call(|conn| {
@@ -425,8 +429,8 @@ impl SqliteStore {
                             ));
                         }
                     };
-                    lash_core_execution::store::decode_attachment_condemnation_record(
-                        lash_core_execution::store::StoredAttachmentCondemnation {
+                    lash_core_store::store::decode_attachment_condemnation_record(
+                        lash_core_store::store::StoredAttachmentCondemnation {
                             digest,
                             phase,
                             write_token_present: token.is_some(),
@@ -452,7 +456,7 @@ impl SqliteStore {
     /// process is absent from it.
     pub(crate) async fn begin_attachment_sweep(
         &self,
-    ) -> Result<lash_core_execution::AttachmentSweepGeneration, StoreError> {
+    ) -> Result<lash_core_store::store::AttachmentSweepGeneration, StoreError> {
         let generation = self
             .conn
             .write(|tx| {
@@ -487,7 +491,7 @@ impl SqliteStore {
             }
             None => Box::new(LiveSweep::register(self.sweep_catalog_key(), generation)),
         };
-        Ok(lash_core_execution::AttachmentSweepGeneration::new(
+        Ok(lash_core_store::store::AttachmentSweepGeneration::new(
             generation, liveness,
         ))
     }
@@ -496,8 +500,8 @@ impl SqliteStore {
     /// longer live, in one `BEGIN IMMEDIATE` transaction.
     pub(crate) async fn adopt_attachment_condemnations(
         &self,
-        generation: &lash_core_execution::AttachmentSweepGeneration,
-    ) -> Result<lash_core_execution::AttachmentCondemnationAdoption, StoreError> {
+        generation: &lash_core_store::store::AttachmentSweepGeneration,
+    ) -> Result<lash_core_store::store::AttachmentCondemnationAdoption, StoreError> {
         let mine = sweep_generation_sql(generation)?;
         let catalog = self.sweep_catalog_key();
         let locks = self.sweep_locks();
@@ -525,9 +529,9 @@ impl SqliteStore {
                             .map_err(sqlite_error)?
                     };
                     let mut adoption =
-                        lash_core_execution::AttachmentCondemnationAdoption::default();
-                    for (digest, owner, phase, delete_attempts, stall_reason, next_delete_at_ms)
-                        in rows
+                        lash_core_store::store::AttachmentCondemnationAdoption::default();
+                    for (digest, owner, phase, delete_attempts, stall_reason, next_delete_at_ms) in
+                        rows
                     {
                         let id = AttachmentId::parse(&digest).map_err(|error| {
                             stored_data_corrupt(
@@ -537,11 +541,17 @@ impl SqliteStore {
                         })?;
                         let stalled = stall_reason
                             .map(|label| {
-                                lash_core_execution::AttachmentDeleteStallReason::from_label(&label)
-                                    .ok_or_else(|| stored_data_corrupt(
+                                lash_core_store::store::AttachmentDeleteStallReason::from_label(
+                                    &label,
+                                )
+                                .ok_or_else(|| {
+                                    stored_data_corrupt(
                                         "attachment condemnation",
-                                        format!("attachment `{id}` has unknown stall reason `{label}`"),
-                                    ))
+                                        format!(
+                                            "attachment `{id}` has unknown stall reason `{label}`"
+                                        ),
+                                    )
+                                })
                             })
                             .transpose()?;
                         let live = match &locks {
@@ -609,8 +619,8 @@ impl SqliteStore {
     pub(crate) async fn arm_attachment_delete(
         &self,
         attachment_id: &AttachmentId,
-        generation: &lash_core_execution::AttachmentSweepGeneration,
-    ) -> Result<lash_core_execution::AttachmentDeleteArming, StoreError> {
+        generation: &lash_core_store::store::AttachmentSweepGeneration,
+    ) -> Result<lash_core_store::store::AttachmentDeleteArming, StoreError> {
         let generation = sweep_generation_sql(generation)?;
         let attachment_id = attachment_id.as_str().to_string();
         let armed = self
@@ -625,9 +635,9 @@ impl SqliteStore {
             .await
             .map_err(sqlite_error)?;
         Ok(if armed == 1 {
-            lash_core_execution::AttachmentDeleteArming::Armed
+            lash_core_store::store::AttachmentDeleteArming::Armed
         } else {
-            lash_core_execution::AttachmentDeleteArming::Revoked
+            lash_core_store::store::AttachmentDeleteArming::Revoked
         })
     }
 
@@ -636,57 +646,58 @@ impl SqliteStore {
     pub(crate) async fn settle_attachment_condemnation(
         &self,
         attachment_id: &AttachmentId,
-        generation: &lash_core_execution::AttachmentSweepGeneration,
-        settlement: lash_core_execution::AttachmentCondemnationSettlement,
-    ) -> Result<lash_core_execution::AttachmentSettlementOutcome, StoreError> {
+        generation: &lash_core_store::store::AttachmentSweepGeneration,
+        settlement: lash_core_store::store::AttachmentCondemnationSettlement,
+    ) -> Result<lash_core_store::store::AttachmentSettlementOutcome, StoreError> {
         let generation = sweep_generation_sql(generation)?;
         let attachment_id = attachment_id.as_str().to_string();
         let now = crate::clamp_epoch_ms(self.clock.timestamp_ms()).min(i64::MAX - 900_000);
         let settled = self
             .conn
             .write(move |tx| match settlement {
-                lash_core_execution::AttachmentCondemnationSettlement::Deleted => {
+                lash_core_store::store::AttachmentCondemnationSettlement::Deleted => {
                     crate::conn::cached_execute(
                         tx,
                         attachment_sql().condemnation.delete_armed.sql(),
                         params![attachment_id, generation],
                     )
                 }
-                lash_core_execution::AttachmentCondemnationSettlement::Spared => {
+                lash_core_store::store::AttachmentCondemnationSettlement::Spared => {
                     crate::conn::cached_execute(
                         tx,
                         attachment_sql().condemnation.delete_spared.sql(),
                         params![attachment_id, generation],
                     )
                 }
-                lash_core_execution::AttachmentCondemnationSettlement::Failed { stall, error } => {
-                    crate::conn::cached_execute(
-                        tx,
-                        attachment_sql().condemnation.record_failed_delete.sql(),
-                        params![
-                            attachment_id,
-                            generation,
-                            error,
-                            stall.map(|reason| reason.as_str()),
-                            now
-                        ],
-                    )
-                }
+                lash_core_store::store::AttachmentCondemnationSettlement::Failed {
+                    stall,
+                    error,
+                } => crate::conn::cached_execute(
+                    tx,
+                    attachment_sql().condemnation.record_failed_delete.sql(),
+                    params![
+                        attachment_id,
+                        generation,
+                        error,
+                        stall.map(|reason| reason.as_str()),
+                        now
+                    ],
+                ),
             })
             .await
             .map_err(sqlite_error)?;
         Ok(if settled == 1 {
-            lash_core_execution::AttachmentSettlementOutcome::Applied
+            lash_core_store::store::AttachmentSettlementOutcome::Applied
         } else {
-            lash_core_execution::AttachmentSettlementOutcome::NotOwned
+            lash_core_store::store::AttachmentSettlementOutcome::NotOwned
         })
     }
 
     pub(crate) async fn condemn_attachment(
         &self,
         id: &AttachmentId,
-        generation: &lash_core_execution::AttachmentSweepGeneration,
-    ) -> Result<lash_core_execution::AttachmentCondemnation, StoreError> {
+        generation: &lash_core_store::store::AttachmentSweepGeneration,
+    ) -> Result<lash_core_store::store::AttachmentCondemnation, StoreError> {
         let generation = sweep_generation_sql(generation)?;
         let id = id.to_string();
         self.conn
@@ -702,7 +713,7 @@ impl SqliteStore {
                         .map_err(sqlite_error)?
                         .is_some()
                     {
-                        return Ok(lash_core_execution::AttachmentCondemnation::RootPresent);
+                        return Ok(lash_core_store::store::AttachmentCondemnation::RootPresent);
                     }
                     if tx
                         .query_row(
@@ -714,7 +725,9 @@ impl SqliteStore {
                         .map_err(sqlite_error)?
                         .is_some()
                     {
-                        return Ok(lash_core_execution::AttachmentCondemnation::AlreadyCondemned);
+                        return Ok(
+                            lash_core_store::store::AttachmentCondemnation::AlreadyCondemned,
+                        );
                     }
                     crate::conn::cached_execute(
                         tx,
@@ -728,7 +741,7 @@ impl SqliteStore {
                         params![id],
                     )
                     .map_err(sqlite_error)?;
-                    Ok(lash_core_execution::AttachmentCondemnation::Condemned)
+                    Ok(lash_core_store::store::AttachmentCondemnation::Condemned)
                 })())
             })
             .await
@@ -762,17 +775,17 @@ impl SqliteStore {
                         // Abort needs only the referrer; the claim's guard has already been armed.
                         let claim = match referrer {
                             ArtifactReferrer::Execution(journal) => Ok(ReferrerClaim::guarded(
-                                lash_core_execution::ReferrerGuard::Journal(journal),
+                                lash_core_store::artifact_referrer::ReferrerGuard::Journal(journal),
                             )),
                             ArtifactReferrer::Upload(upload) => Ok(ReferrerClaim::guarded(
-                                lash_core_execution::ReferrerGuard::Upload {
+                                lash_core_store::artifact_referrer::ReferrerGuard::Upload {
                                     upload,
                                     expires_at_ms: 0,
                                 },
                             )),
                             ArtifactReferrer::StartInput { start_key, starter } => {
                                 Ok(ReferrerClaim::guarded(
-                                    lash_core_execution::ReferrerGuard::StartInput {
+                                    lash_core_store::artifact_referrer::ReferrerGuard::StartInput {
                                         start_key,
                                         starter,
                                     },
@@ -885,7 +898,7 @@ impl Drop for LiveSweep {
 }
 
 fn sweep_generation_sql(
-    generation: &lash_core_execution::AttachmentSweepGeneration,
+    generation: &lash_core_store::store::AttachmentSweepGeneration,
 ) -> Result<i64, StoreError> {
     i64::try_from(generation.generation()).map_err(|_| {
         StoreError::Backend(format!(
@@ -899,11 +912,11 @@ fn adopted_condemnation(
     digest: AttachmentId,
     phase: &str,
     delete_attempts: i64,
-    stalled: Option<lash_core_execution::AttachmentDeleteStallReason>,
-) -> Result<lash_core_execution::AdoptedAttachmentCondemnation, StoreError> {
+    stalled: Option<lash_core_store::store::AttachmentDeleteStallReason>,
+) -> Result<lash_core_store::store::AdoptedAttachmentCondemnation, StoreError> {
     let phase = match phase {
-        "condemned" => lash_core_execution::AttachmentCondemnationPhase::Condemned,
-        "deleting" => lash_core_execution::AttachmentCondemnationPhase::Deleting,
+        "condemned" => lash_core_store::store::AttachmentCondemnationPhase::Condemned,
+        "deleting" => lash_core_store::store::AttachmentCondemnationPhase::Deleting,
         unknown => {
             return Err(stored_data_corrupt(
                 "attachment condemnation",
@@ -917,7 +930,7 @@ fn adopted_condemnation(
             format!("attachment `{digest}` has delete attempt count {delete_attempts}"),
         )
     })?;
-    Ok(lash_core_execution::AdoptedAttachmentCondemnation {
+    Ok(lash_core_store::store::AdoptedAttachmentCondemnation {
         digest,
         phase,
         delete_attempts,
@@ -930,10 +943,10 @@ impl AttachmentReferrers for SqliteStore {
     async fn begin_attachment_write(
         &self,
         write: &AttachmentWrite,
-    ) -> Result<lash_core_execution::AttachmentWriteFence, StoreError> {
+    ) -> Result<lash_core_store::store::AttachmentWriteFence, StoreError> {
         let write = write.clone();
         let now = self.clock.timestamp_ms();
-        let token = lash_core_execution::AttachmentWriteToken::new();
+        let token = lash_core_store::store::AttachmentWriteToken::new();
         self.conn
             .write_flow(move |tx| {
                 outcome((|| {
@@ -953,7 +966,7 @@ impl AttachmentReferrers for SqliteStore {
                     {
                         Some(("deleting", _)) | Some(("condemned", true)) => {
                             return Ok(
-                                lash_core_execution::AttachmentWriteFence::ReclamationInFlight,
+                                lash_core_store::store::AttachmentWriteFence::ReclamationInFlight,
                             );
                         }
                         None | Some(("condemned", false)) => {}
@@ -988,8 +1001,8 @@ impl AttachmentReferrers for SqliteStore {
                     if let Some(cleanup) = write.claim.guard_cleanup() {
                         crate::obligation_ledger::arm_cleanup_tx(tx, &cleanup, now)?;
                     }
-                    Ok(lash_core_execution::AttachmentWriteFence::Granted(
-                        lash_core_execution::AttachmentWritePermit::new(token),
+                    Ok(lash_core_store::store::AttachmentWriteFence::Granted(
+                        lash_core_store::store::AttachmentWritePermit::new(token),
                     ))
                 })())
             })
@@ -999,7 +1012,7 @@ impl AttachmentReferrers for SqliteStore {
     async fn complete_attachment_write(
         &self,
         write: &AttachmentWrite,
-        permit: lash_core_execution::AttachmentWritePermit,
+        permit: lash_core_store::store::AttachmentWritePermit,
     ) -> Result<(), StoreError> {
         let write = write.clone();
         let token = permit.write_id().as_hex();
@@ -1044,7 +1057,7 @@ impl AttachmentReferrers for SqliteStore {
     async fn abort_attachment_write(
         &self,
         write: &AttachmentWrite,
-        permit: lash_core_execution::AttachmentWritePermit,
+        permit: lash_core_store::store::AttachmentWritePermit,
     ) -> Result<(), StoreError> {
         let write = write.clone();
         let token = permit.write_id().as_hex();

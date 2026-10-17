@@ -325,8 +325,8 @@ async fn per_run_tool_selection_refuses_an_existing_namespace_binding() -> Resul
 #[cfg(feature = "rlm")]
 fn assert_namespace_collision(refusal: &lash_core::ConfigRefusal) {
     assert!(
-        matches!(refusal.owner_refusal::<lash_core::CoreConfigRefusal>(),
-        Some(lash_core::CoreConfigRefusal::ToolNamespaceCollision { root, binding })
+        matches!(refusal.owner_refusal::<lash_execution_contracts::config_error::CoreConfigRefusal>(),
+        Some(lash_execution_contracts::config_error::CoreConfigRefusal::ToolNamespaceCollision { root, binding })
             if root == "data" && binding == "data"),
         "{refusal:?}"
     );

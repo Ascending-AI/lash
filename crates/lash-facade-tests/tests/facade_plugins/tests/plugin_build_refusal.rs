@@ -22,7 +22,11 @@ async fn deployment_preflight_precedes_engine_binding() {
     let counter = Arc::clone(&binds);
     let mut reg = PluginRegistrar::<()>::new("missing-driver");
     reg.protocol()
-        .session(|_, _| Err(lash_core::PluginError::Invoke("cannot bind".into())))
+        .session(|_, _| {
+            Err(lash_execution_contracts::plugin_error::PluginError::Invoke(
+                "cannot bind".into(),
+            ))
+        })
         .unwrap();
     let recipe = PluginRecipe::bound("missing-driver", reg, |_, _| Ok(Arc::new(())))
         .with_process_engine("testing-fixture", move |_| {
@@ -40,11 +44,13 @@ async fn deployment_preflight_precedes_engine_binding() {
     assert!(
         matches!(
             result,
-            Err(EmbedError::Plugin(lash_core::PluginError::Preflight(
-                PreflightIssue::MissingPort {
-                    port: RequiredPort::ProtocolDriver
-                }
-            )))
+            Err(EmbedError::Plugin(
+                lash_execution_contracts::plugin_error::PluginError::Preflight(
+                    PreflightIssue::MissingPort {
+                        port: RequiredPort::ProtocolDriver
+                    }
+                )
+            ))
         ),
         "deployment refuses before advertising callbacks"
     );
@@ -74,7 +80,10 @@ async fn deployment_preflight_requires_process_host_port() {
         ) -> std::result::Result<(), lash_core::ProcessEnvRefusal> {
             Ok(())
         }
-        fn recipe(self: Arc<Self>) -> std::result::Result<ProcessRecipe, lash_core::PluginError> {
+        fn recipe(
+            self: Arc<Self>,
+        ) -> std::result::Result<ProcessRecipe, lash_execution_contracts::plugin_error::PluginError>
+        {
             let mut reg = PluginRegistrar::<(), lash::plugins::registries::Process>::for_process(
                 "needs-reads",
             );
@@ -109,12 +118,14 @@ async fn deployment_preflight_requires_process_host_port() {
     .build(lash_facade_tests::runtime_lease_owner());
     assert!(matches!(
         result,
-        Err(EmbedError::Plugin(lash_core::PluginError::Preflight(
-            PreflightIssue::MissingService {
-                service: ServiceKind::GrantedSessionReads,
-                ..
-            }
-        )))
+        Err(EmbedError::Plugin(
+            lash_execution_contracts::plugin_error::PluginError::Preflight(
+                PreflightIssue::MissingService {
+                    service: ServiceKind::GrantedSessionReads,
+                    ..
+                }
+            )
+        ))
     ));
     assert_eq!(binds.load(Ordering::SeqCst), 0);
 }
@@ -123,7 +134,10 @@ async fn deployment_preflight_requires_process_host_port() {
 /// and an empty plugin once that answers `None`.
 fn probe(
     builds: Arc<AtomicUsize>,
-    refusal: impl Fn(usize) -> Option<lash_core::PluginError> + Send + Sync + 'static,
+    refusal: impl Fn(usize) -> Option<lash_execution_contracts::plugin_error::PluginError>
+    + Send
+    + Sync
+    + 'static,
 ) -> Arc<dyn PluginFactory> {
     Arc::new(PluginRecipeFactory::new(
         PluginDeclaration::initial(REFUSING),
@@ -134,7 +148,10 @@ fn probe(
     ))
 }
 
-fn core_with(backend: lash_core::Backend, plugin: Arc<dyn PluginFactory>) -> LashCore {
+fn core_with(
+    backend: lash_execution_contracts::backend::Backend,
+    plugin: Arc<dyn PluginFactory>,
+) -> LashCore {
     explicit_ephemeral_facets(LashCore::standard_builder(backend))
         .serve_test_llm_profile(mock_provider(), mock_llm_profile_spec())
         .plugin(plugin)
@@ -143,7 +160,7 @@ fn core_with(backend: lash_core::Backend, plugin: Arc<dyn PluginFactory>) -> Las
 }
 
 async fn postgres_backend() -> (
-    lash_core::Backend,
+    lash_execution_contracts::backend::Backend,
     lash_postgres_store::testing::IsolatedDatabase,
     tempfile::TempDir,
 ) {
@@ -190,12 +207,14 @@ async fn assert_refused(session: &lash::DurableSession, input: &str) {
 /// A refusal the session's recorded config makes permanent: each turn ends
 /// refused with the factory's typed refusal, the session admits the next
 /// send (so no turn is left in flight), and the core shuts down.
-async fn a_refused_plugin_build_fails_the_turn_typed(backend: lash_core::Backend) {
+async fn a_refused_plugin_build_fails_the_turn_typed(
+    backend: lash_execution_contracts::backend::Backend,
+) {
     let builds = Arc::new(AtomicUsize::new(0));
     let core = core_with(
         backend,
         probe(Arc::clone(&builds), |_| {
-            Some(lash_core::PluginError::Registration(REFUSAL.into()))
+            Some(lash_execution_contracts::plugin_error::PluginError::Registration(REFUSAL.into()))
         }),
     );
     let session = core
@@ -214,14 +233,18 @@ async fn a_refused_plugin_build_fails_the_turn_typed(backend: lash_core::Backend
 
 /// A retryable refusal is retried: the factory refuses its first build as an
 /// unavailable store, builds on the next, and the turn answers.
-async fn a_retryably_refused_plugin_build_completes_the_turn(backend: lash_core::Backend) {
+async fn a_retryably_refused_plugin_build_completes_the_turn(
+    backend: lash_execution_contracts::backend::Backend,
+) {
     let builds = Arc::new(AtomicUsize::new(0));
     let core = core_with(
         backend,
         probe(Arc::clone(&builds), |attempt| {
-            (attempt == 1).then_some(lash_core::PluginError::StoreUnavailable {
-                fault: lash_core_store::store::StoreFault::Contended,
-            })
+            (attempt == 1).then_some(
+                lash_execution_contracts::plugin_error::PluginError::StoreUnavailable {
+                    fault: lash_core_store::store::StoreFault::Contended,
+                },
+            )
         }),
     );
     let session = core

@@ -1,6 +1,6 @@
 use super::*;
-use crate::ProcessRegistration;
-use crate::ProcessSignature;
+use lash_execution_contracts::process::ProcessRegistration;
+use lash_execution_contracts::process::ProcessSignature;
 
 const SIGNED_ENGINE_KIND: &str = "signed-engine";
 
@@ -17,32 +17,34 @@ fn authoritative_signature() -> ProcessSignature {
 impl ProcessEngine for SignedEngine {
     fn settled_ran(
         &self,
-        _kind: &crate::EngineStepKind,
+        _kind: &lash_execution_contracts::process::EngineStepKind,
         _output: &lash_core_store::tool_run::SettledOutput,
     ) -> Vec<(u32, u64)> {
         Vec::new()
     }
 
-    fn trace_class(&self) -> crate::ProcessTraceClass {
-        crate::ProcessTraceClass::Internal
+    fn trace_class(&self) -> lash_execution_contracts::process::ProcessTraceClass {
+        lash_execution_contracts::process::ProcessTraceClass::Internal
     }
 
     async fn performed_effects(
         &self,
         _payload: &serde_json::Value,
-    ) -> Result<crate::PerformedEffects, crate::ProcessEnvRefusal> {
-        Ok(crate::PerformedEffects::new())
+    ) -> Result<lash_execution_contracts::process::PerformedEffects, crate::ProcessEnvRefusal> {
+        Ok(lash_execution_contracts::process::PerformedEffects::new())
     }
 
     async fn check_args(
         &self,
-        _signature: &crate::ProcessSignature,
+        _signature: &lash_execution_contracts::process::ProcessSignature,
         _args: &serde_json::Map<String, serde_json::Value>,
-        _mode: crate::ArgsMode,
-    ) -> std::result::Result<(), crate::ArgsMismatch> {
-        Err(crate::ArgsMismatch::UnsupportedSignature {
-            engine_kind: self.kind().into(),
-        })
+        _mode: lash_execution_contracts::process::ArgsMode,
+    ) -> std::result::Result<(), lash_execution_contracts::process::ArgsMismatch> {
+        Err(
+            lash_execution_contracts::process::ArgsMismatch::UnsupportedSignature {
+                engine_kind: self.kind().into(),
+            },
+        )
     }
 
     fn kind(&self) -> &'static str {
@@ -52,14 +54,14 @@ impl ProcessEngine for SignedEngine {
     fn start_artifacts(
         &self,
         _payload: &serde_json::Value,
-    ) -> Result<Vec<crate::ArtifactName>, crate::PluginError> {
+    ) -> Result<Vec<crate::ArtifactName>, lash_execution_contracts::plugin_error::PluginError> {
         Ok(Vec::new())
     }
 
     async fn end_artifact_referrer(
         &self,
         _cleanup: &crate::ResolvedArtifactCleanup,
-    ) -> Result<(), crate::ArtifactStoreError> {
+    ) -> Result<(), lash_execution_contracts::module_artifacts::ArtifactStoreError> {
         Ok(())
     }
 
@@ -67,14 +69,17 @@ impl ProcessEngine for SignedEngine {
         &self,
         _claim: &crate::ReferrerClaim,
         _artifact_ref: &str,
-    ) -> Result<(), crate::PluginError> {
+    ) -> Result<(), lash_execution_contracts::plugin_error::PluginError> {
         unreachable!("resolution never starts the process")
     }
 
     async fn resolve(
         &self,
         reference: &ProcessDefinitionRef,
-    ) -> Result<ProcessDefinitionResolution, crate::ProcessDefinitionError> {
+    ) -> Result<
+        ProcessDefinitionResolution,
+        lash_execution_contracts::process::ProcessDefinitionError,
+    > {
         if reference.definition.as_json().get("program").is_none() {
             return Err(ProcessDefinitionRefusal::UnresolvableDefinition {
                 engine_kind: reference.engine_kind.clone(),
@@ -85,8 +90,8 @@ impl ProcessEngine for SignedEngine {
         Ok(ProcessDefinitionResolution::new(authoritative_signature()))
     }
 
-    fn state_format(&self) -> crate::EngineStateFormat {
-        crate::EngineStateFormat {
+    fn state_format(&self) -> lash_execution_contracts::process::EngineStateFormat {
+        lash_execution_contracts::process::EngineStateFormat {
             kind: self.kind().to_owned(),
             version: 0,
         }
@@ -106,29 +111,40 @@ impl ProcessEngine for SignedEngine {
     fn check_settings(
         &self,
         _payload: &serde_json::Value,
-        settings: Option<&crate::EngineSettings>,
-    ) -> std::result::Result<(), crate::PluginError> {
+        settings: Option<&lash_execution_contracts::process::EngineSettings>,
+    ) -> std::result::Result<(), lash_execution_contracts::plugin_error::PluginError> {
         match settings {
             None => Ok(()),
-            Some(_) => Err(crate::PluginError::Registration(format!(
-                "process engine `{}` takes no settings",
-                self.kind()
-            ))),
+            Some(_) => Err(
+                lash_execution_contracts::plugin_error::PluginError::Registration(format!(
+                    "process engine `{}` takes no settings",
+                    self.kind()
+                )),
+            ),
         }
     }
 
     fn default_settings(
         &self,
         _payload: &serde_json::Value,
-    ) -> std::result::Result<Option<crate::EngineSettings>, crate::PluginError> {
+    ) -> std::result::Result<
+        Option<lash_execution_contracts::process::EngineSettings>,
+        lash_execution_contracts::plugin_error::PluginError,
+    > {
         Ok(None)
     }
 
     fn advance(
         &self,
-        _state: crate::EngineState,
-        _event: crate::EngineEvent,
-    ) -> Result<(crate::EngineState, crate::EngineAction), crate::ProcessInfraError> {
+        _state: lash_execution_contracts::process::EngineState,
+        _event: lash_execution_contracts::process::EngineEvent,
+    ) -> Result<
+        (
+            lash_execution_contracts::process::EngineState,
+            lash_execution_contracts::process::EngineAction,
+        ),
+        lash_execution_contracts::process::ProcessInfraError,
+    > {
         unreachable!("resolution never advances the process")
     }
 }
@@ -139,7 +155,7 @@ impl ProcessEngine for SignedEngine {
 fn admit_signed(
     kind: &'static str,
     payload: &serde_json::Value,
-) -> Result<ProcessIdentity, crate::PluginError> {
+) -> Result<ProcessIdentity, lash_execution_contracts::plugin_error::PluginError> {
     let signature = match payload.get("signature") {
         Some(claim) => ProcessSignature::known(claim.clone()),
         None => ProcessSignature::Unknown,
@@ -238,7 +254,10 @@ fn a_duplicate_engine_kind_is_refused() {
         Ok(_) => panic!("a second engine under a held kind is refused"),
     };
     assert!(
-        matches!(refusal, crate::PluginError::Registration(_)),
+        matches!(
+            refusal,
+            lash_execution_contracts::plugin_error::PluginError::Registration(_)
+        ),
         "the refusal is a registration error: {refusal}"
     );
     assert_eq!(
@@ -268,24 +287,26 @@ fn a_duplicate_engine_kind_is_refused() {
 async fn a_declared_label_survives_the_admitted_stamp_byte_identical() {
     let engine_label = "__process_02178275819fb79b903c9a8b03a8b2d28c41708383b1728900e429e3a59b6a32";
     let admitted = || {
-        crate::AdmittedProcessIdentity::for_testing(ProcessIdentity::for_definition(
-            ProcessDefinitionRef::new(
-                SIGNED_ENGINE_KIND,
-                serde_json::json!({"program": "payout"}),
-                authoritative_signature(),
+        lash_execution_contracts::process::AdmittedProcessIdentity::for_testing(
+            ProcessIdentity::for_definition(
+                ProcessDefinitionRef::new(
+                    SIGNED_ENGINE_KIND,
+                    serde_json::json!({"program": "payout"}),
+                    authoritative_signature(),
+                ),
+                Some(engine_label),
             ),
-            Some(engine_label),
-        ))
+        )
     };
     let registration = || {
         ProcessRegistration::new(
-            crate::ProcessInput::Engine {
+            lash_execution_contracts::process::ProcessInput::Engine {
                 kind: SIGNED_ENGINE_KIND.to_string(),
                 payload: serde_json::json!({"program": "payout"}),
-                launch: crate::testing::fixture_engine_launch(),
+                launch: lash_execution_contracts::testing::fixture_engine_launch(),
             },
-            crate::ProcessProvenance::host(),
-            crate::Lifetime::Detached,
+            lash_execution_contracts::process::ProcessProvenance::host(),
+            lash_execution_contracts::process::Lifetime::Detached,
         )
     };
 
@@ -301,9 +322,11 @@ async fn a_declared_label_survives_the_admitted_stamp_byte_identical() {
     // A second admitted stamp is the engine speaking again, not a declaration:
     // it replaces the label outright. This is the regression #1543 shipped.
     let restamped = registration()
-        .with_admitted_identity(crate::AdmittedProcessIdentity::for_testing(
-            ProcessIdentity::labelled(SIGNED_ENGINE_KIND, Some("first-stamp")),
-        ))
+        .with_admitted_identity(
+            lash_execution_contracts::process::AdmittedProcessIdentity::for_testing(
+                ProcessIdentity::labelled(SIGNED_ENGINE_KIND, Some("first-stamp")),
+            ),
+        )
         .with_admitted_identity(admitted());
     assert_eq!(
         restamped.identity.label.as_deref(),
@@ -312,10 +335,12 @@ async fn a_declared_label_survives_the_admitted_stamp_byte_identical() {
     );
 
     let declared = registration()
-        .with_declared_identity(crate::DeclaredProcessIdentity::labelled(
-            SIGNED_ENGINE_KIND,
-            Some("immutable_deployment_probe"),
-        ))
+        .with_declared_identity(
+            lash_execution_contracts::process::DeclaredProcessIdentity::labelled(
+                SIGNED_ENGINE_KIND,
+                Some("immutable_deployment_probe"),
+            ),
+        )
         .with_admitted_identity(admitted())
         .with_host_facing_label(Some("immutable_deployment_probe".to_string()));
     assert_eq!(

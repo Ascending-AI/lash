@@ -292,7 +292,10 @@ impl lash_core::ToolProvider for NoTools {
     fn tool_manifests(
         &self,
         _config: &lash_core::OwnerConfigView,
-    ) -> std::result::Result<Vec<lash_core::ToolManifest>, lash_core::PluginError> {
+    ) -> std::result::Result<
+        Vec<lash_core::ToolManifest>,
+        lash_execution_contracts::plugin_error::PluginError,
+    > {
         Ok(Vec::new())
     }
 
@@ -517,7 +520,10 @@ impl lash_core::ToolProvider for EchoEndsTheTurn {
     fn tool_manifests(
         &self,
         _config: &lash_core::OwnerConfigView,
-    ) -> std::result::Result<Vec<lash_core::ToolManifest>, lash_core::PluginError> {
+    ) -> std::result::Result<
+        Vec<lash_core::ToolManifest>,
+        lash_execution_contracts::plugin_error::PluginError,
+    > {
         Ok(vec![Self::definition().manifest()])
     }
 

@@ -8,7 +8,8 @@
 //! the row still being open.
 
 use super::*;
-use lash_core_execution::store::{CheckpointAdmission, CheckpointAdmissionRequest};
+use lash_core_store::store::CheckpointAdmission;
+use lash_core_store::store::CheckpointAdmissionRequest;
 
 /// Lower a transaction body's outcome into the write flow's commit decision:
 /// an error rolls back and carries the typed error to the caller.
@@ -29,7 +30,7 @@ fn flow<T>(
 /// transaction. It also reports rows the step already bound, so a
 /// re-executed step always reaches the read-back.
 ///
-/// [`RunStore::admit_at_checkpoint`]: lash_core_execution::store::RunStore::admit_at_checkpoint
+/// [`RunStore::admit_at_checkpoint`]: lash_core_store::store::RunStore::admit_at_checkpoint
 pub(crate) async fn admit_at_checkpoint_sqlite(
     store: &crate::SqliteStore,
     request: &CheckpointAdmissionRequest,
@@ -51,10 +52,11 @@ pub(crate) async fn admit_at_checkpoint_sqlite(
         .write_flow(move |tx| {
             flow((|| {
                 let session_id = &request.session_id;
-                let mode = lash_core_execution::TurnInputAdmissionMode::ActiveTurn {
-                    turn_id: request.turn_id.clone(),
-                    checkpoint: request.checkpoint,
-                };
+                let mode =
+                    lash_core_store::turn_input_vocabulary::TurnInputAdmissionMode::ActiveTurn {
+                        turn_id: request.turn_id.clone(),
+                        checkpoint: request.checkpoint,
+                    };
                 let recorded = read_step_admission_conn(
                     tx,
                     session_id,
@@ -136,10 +138,10 @@ async fn checkpoint_work_pending_sqlite(
             // minimum-boundary set is what the checkpoint decides, and an
             // optional predicate over a bound boundary cannot seek an index.
             let sql = match checkpoint {
-                lash_core_execution::CheckpointKind::AfterWork => {
+                lash_protocol_types::plugin::CheckpointKind::AfterWork => {
                     family.checkpoint_work_pending_after_work.sql()
                 }
-                lash_core_execution::CheckpointKind::BeforeCompletion => {
+                lash_protocol_types::plugin::CheckpointKind::BeforeCompletion => {
                     family.checkpoint_work_pending_before_completion.sql()
                 }
             };
@@ -171,7 +173,7 @@ fn read_step_admission_conn(
     session_id: &SessionId,
     run: &TurnId,
     step: &str,
-    mode: lash_core_execution::TurnInputAdmissionMode,
+    mode: lash_core_store::turn_input_vocabulary::TurnInputAdmissionMode,
 ) -> Result<CheckpointAdmission, StoreError> {
     let sql = crate::turn_ingress::turn_ingress_sql();
     let input_rows = {
@@ -191,11 +193,13 @@ fn read_step_admission_conn(
         .map(pending_turn_input_from_row)
         .collect::<Result<Vec<_>, _>>()?;
     Ok(CheckpointAdmission {
-        inputs: (!inputs.is_empty()).then(|| lash_core_execution::AdmittedTurnInputs {
-            session_id: session_id.clone(),
-            mode,
-            inputs,
-            applications: Vec::new(),
+        inputs: (!inputs.is_empty()).then(|| {
+            lash_core_store::turn_input_vocabulary::AdmittedTurnInputs {
+                session_id: session_id.clone(),
+                mode,
+                inputs,
+                applications: Vec::new(),
+            }
         }),
     })
 }
@@ -206,15 +210,15 @@ fn compose_active_turn_inputs_conn(
     tx: &Connection,
     session_id: &SessionId,
     turn_id: &TurnId,
-    checkpoint: lash_core_execution::CheckpointKind,
+    checkpoint: lash_protocol_types::plugin::CheckpointKind,
     max_inputs: usize,
-) -> Result<Option<lash_core_execution::AdmittedTurnInputs>, StoreError> {
+) -> Result<Option<lash_core_store::turn_input_vocabulary::AdmittedTurnInputs>, StoreError> {
     let statements = &crate::turn_ingress::turn_ingress_sql().pending_inputs_sqlite;
     let statement = match checkpoint {
-        lash_core_execution::CheckpointKind::AfterWork => {
+        lash_protocol_types::plugin::CheckpointKind::AfterWork => {
             statements.admission_candidates_active_turn_after_work.sql()
         }
-        lash_core_execution::CheckpointKind::BeforeCompletion => statements
+        lash_protocol_types::plugin::CheckpointKind::BeforeCompletion => statements
             .admission_candidates_active_turn_before_completion
             .sql(),
     };
@@ -236,7 +240,7 @@ fn compose_active_turn_inputs_conn(
         .into_iter()
         .map(pending_turn_input_from_row)
         .collect::<Result<Vec<_>, _>>()?;
-    Ok(lash_core_execution::store::plan_checkpoint_input_admission(
+    Ok(lash_core_store::store::plan_checkpoint_input_admission(
         session_id, turn_id, checkpoint, inputs,
     ))
 }
@@ -246,9 +250,9 @@ fn bind_turn_inputs_conn(
     tx: &Connection,
     run: &TurnId,
     step: &str,
-    admitted: &lash_core_execution::AdmittedTurnInputs,
+    admitted: &lash_core_store::turn_input_vocabulary::AdmittedTurnInputs,
 ) -> Result<(), StoreError> {
-    let state = lash_core_execution::store::turn_input_state_after_admission(&admitted.mode)
+    let state = lash_core_store::store::turn_input_state_after_admission(&admitted.mode)
         .map(|state| state.as_str());
     let statement = &crate::turn_ingress::turn_ingress_sql().pending_inputs.admit;
     for input in &admitted.inputs {
@@ -266,8 +270,8 @@ fn bind_turn_inputs_conn(
         .map_err(sqlite_error)?;
         // Backstop: the composition read this row open in the same write
         // transaction, so the open predicate cannot legitimately miss.
-        lash_core_execution::store_backend_support::require_fenced_write_applied(
-            lash_core_execution::store_backend_support::FencedWrite::IngressAdmission,
+        lash_core_store::store_backend_support::require_fenced_write_applied(
+            lash_core_store::store_backend_support::FencedWrite::IngressAdmission,
             crate::SQLITE_BACKEND,
             input.input_id.as_str(),
             u64::try_from(bound).unwrap_or(u64::MAX),

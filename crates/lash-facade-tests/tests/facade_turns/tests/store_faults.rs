@@ -45,7 +45,7 @@ use std::sync::atomic::{AtomicBool, AtomicUsize, Ordering};
 /// bound turns a sender left waiting into a failure.
 const ANSWERS_WITHIN: std::time::Duration = std::time::Duration::from_secs(60);
 
-fn builder(backend: lash_core::Backend) -> lash::LashCoreBuilder {
+fn builder(backend: lash_execution_contracts::backend::Backend) -> lash::LashCoreBuilder {
     explicit_ephemeral_facets(LashCore::standard_builder(backend))
         .serve_test_llm_profile(mock_provider(), mock_llm_profile_spec())
 }
@@ -61,7 +61,7 @@ enum Storage {
 /// A store set, the test seams of its session store, and what must outlive
 /// both.
 struct Stores {
-    stores: Arc<dyn lash_core::StoreSet>,
+    stores: Arc<dyn lash_execution_contracts::backend::StoreSet>,
     seams: Arc<dyn lash_core::store::StoreTestSupport>,
     _held: Box<dyn std::any::Any + Send>,
 }
@@ -109,24 +109,29 @@ async fn stores_over(storage: Storage) -> Stores {
 /// `stores` with its session store wrapped by `script` under the engine, and
 /// the session store it wraps.
 fn scripted(
-    stores: &Arc<dyn lash_core::StoreSet>,
+    stores: &Arc<dyn lash_execution_contracts::backend::StoreSet>,
     script: &Script,
     actor: &str,
 ) -> (
-    Arc<dyn lash_core::StoreSet>,
-    Arc<dyn lash_core::DeploymentStore>,
+    Arc<dyn lash_execution_contracts::backend::StoreSet>,
+    Arc<dyn lash_execution_contracts::deployment::DeploymentStore>,
 ) {
     let inner = stores.session_store_factory();
     let layered = LayeredStores::over(Arc::clone(stores))
-        .map_session_store_factory(|inner| -> Arc<dyn lash_core::DeploymentStore> {
-            script.wrap(actor, inner)
-        })
+        .map_session_store_factory(
+            |inner| -> Arc<dyn lash_execution_contracts::deployment::DeploymentStore> {
+                script.wrap(actor, inner)
+            },
+        )
         .into_store_set();
     (layered, inner)
 }
 
 /// A core over `stores`, serving its sessions' work on its own node or not.
-fn core_over(stores: &Arc<dyn lash_core::StoreSet>, serve: bool) -> LashCore {
+fn core_over(
+    stores: &Arc<dyn lash_execution_contracts::backend::StoreSet>,
+    serve: bool,
+) -> LashCore {
     builder(lash_conformance::backend_over(Arc::clone(stores)))
         .serve_sessions(serve)
         .build(lash_facade_tests::runtime_lease_owner())
@@ -318,9 +323,11 @@ impl lash_core::facade_support::PluginFactory for RefusingFactory {
             reg,
             move |_ctx, _state| {
                 if self.refuse.load(Ordering::SeqCst) {
-                    return Err(lash_core::PluginError::Session(
-                        "the plugin refuses to build".to_string(),
-                    ));
+                    return Err(
+                        lash_execution_contracts::plugin_error::PluginError::Session(
+                            "the plugin refuses to build".to_string(),
+                        ),
+                    );
                 }
                 Ok(Arc::new(InertPlugin))
             },
@@ -903,9 +910,9 @@ mod sweep {
         let started = core
             .processes()
             .start(
-                lash_core::ProcessStartRequest::session_turn(
+                lash_execution_contracts::process::ProcessStartRequest::session_turn(
                     "sweep-child",
-                    lash_core::SessionCreateRequest::root(
+                    lash_execution_contracts::session_types::SessionCreateRequest::root(
                         lash_core::SessionStartPoint::Empty,
                         lash_core::PluginOptions::default(),
                     )
@@ -913,9 +920,11 @@ mod sweep {
                     .expect("a root spec")
                     .with_session_id(ID),
                     TurnInput::text("first"),
-                    lash_core::SessionTurnOutcome::FinalValue { schema: None },
-                    lash_core::ProcessOriginator::host(),
-                    lash_core::Lifetime::Detached,
+                    lash_execution_contracts::process::SessionTurnOutcome::FinalValue {
+                        schema: None,
+                    },
+                    lash_execution_contracts::process::ProcessOriginator::host(),
+                    lash_execution_contracts::process::Lifetime::Detached,
                 )
                 .with_host_start_key("sweep-child"),
                 core.effect_host(),
@@ -926,7 +935,8 @@ mod sweep {
 
     async fn child_answer(core: &LashCore, process: &lash_core::ProcessId) -> Result<Answer> {
         let output = core.processes().await_output(process).await?;
-        let lash_core::ProcessAwaitOutput::Settled { output } = output else {
+        let lash_execution_contracts::process::ProcessAwaitOutput::Settled { output } = output
+        else {
             panic!("the child settles: {output:?}");
         };
         Ok(match output.outcome {
@@ -1347,13 +1357,13 @@ mod sweep {
     // Returned-data corruption needs an argument-aware decorator. Script
     // injects errors; this fixture proves the loader detects a foreign window.
     struct ForeignWindow {
-        inner: Arc<dyn lash_core::DeploymentStore>,
+        inner: Arc<dyn lash_execution_contracts::deployment::DeploymentStore>,
         armed: Arc<AtomicBool>,
     }
 
     #[async_trait]
     impl lash_core::store::RuntimeStoreDecorator for ForeignWindow {
-        type Inner = dyn lash_core::DeploymentStore;
+        type Inner = dyn lash_execution_contracts::deployment::DeploymentStore;
         fn inner(&self) -> &Self::Inner {
             self.inner.as_ref()
         }
@@ -1385,15 +1395,21 @@ mod sweep {
             serde_json::to_value(refusal).expect("refusal fields"),
             expected
         );
-        let plugin = lash_core::PluginError::from(refusal.clone().into_store_error());
-        let plugin: lash_core::PluginError =
+        let plugin = lash_execution_contracts::plugin_error::PluginError::from(
+            refusal.clone().into_store_error(),
+        );
+        let plugin: lash_execution_contracts::plugin_error::PluginError =
             serde_json::from_value(serde_json::to_value(plugin).expect("encode the plugin error"))
                 .expect("decode the plugin error");
         let controller = lash_core::RuntimeEffectControllerError::from(plugin.clone());
         for plugin in [
             plugin,
-            lash_core::PluginError::RuntimeEffectController(controller.clone()),
-            lash_core::PluginError::Runtime(controller.into_runtime_error()),
+            lash_execution_contracts::plugin_error::PluginError::RuntimeEffectController(
+                controller.clone(),
+            ),
+            lash_execution_contracts::plugin_error::PluginError::Runtime(
+                controller.into_runtime_error(),
+            ),
         ] {
             let mapped = plugin.into_turn_failure(lash_core::RuntimeErrorCode::Plugin);
             assert_eq!(mapped.code, error.code);
@@ -1404,7 +1420,7 @@ mod sweep {
     /// An input accepted over `stores`, before the engine that serves it
     /// opens the session; the accepting core and the handle.
     async fn accepted(
-        stores: &Arc<dyn lash_core::StoreSet>,
+        stores: &Arc<dyn lash_execution_contracts::backend::StoreSet>,
         id: &str,
     ) -> (LashCore, lash::SendHandle) {
         let accepting = core_over(stores, false);
@@ -1426,12 +1442,14 @@ mod sweep {
         let stores = stores_over(storage).await;
         let armed = Arc::new(AtomicBool::new(false));
         let engine_stores = LayeredStores::over(Arc::clone(&stores.stores))
-            .map_session_store_factory(|inner| -> Arc<dyn lash_core::DeploymentStore> {
-                Arc::new(ForeignWindow {
-                    inner,
-                    armed: Arc::clone(&armed),
-                })
-            })
+            .map_session_store_factory(
+                |inner| -> Arc<dyn lash_execution_contracts::deployment::DeploymentStore> {
+                    Arc::new(ForeignWindow {
+                        inner,
+                        armed: Arc::clone(&armed),
+                    })
+                },
+            )
             .into_store_set();
         let (accepting, sent) = accepted(&stores.stores, SESSION).await;
         armed.store(true, Ordering::SeqCst);
@@ -1563,9 +1581,9 @@ mod sweep {
         let started = core
             .processes()
             .start(
-                lash_core::ProcessStartRequest::session_turn(
+                lash_execution_contracts::process::ProcessStartRequest::session_turn(
                     "fig4628-session-turn",
-                    lash_core::SessionCreateRequest::root(
+                    lash_execution_contracts::session_types::SessionCreateRequest::root(
                         lash_core::SessionStartPoint::Empty,
                         lash_core::PluginOptions::default(),
                     )
@@ -1573,9 +1591,9 @@ mod sweep {
                     .expect("a root spec")
                     .with_session_id(CHILD),
                     TurnInput::text("run the committed child"),
-                    lash_core::SessionTurnOutcome::Turn,
-                    lash_core::ProcessOriginator::host(),
-                    lash_core::Lifetime::Detached,
+                    lash_execution_contracts::process::SessionTurnOutcome::Turn,
+                    lash_execution_contracts::process::ProcessOriginator::host(),
+                    lash_execution_contracts::process::Lifetime::Detached,
                 )
                 .with_host_start_key("fig4628-committed-child"),
                 core.effect_host(),
@@ -1589,7 +1607,8 @@ mod sweep {
         .await
         .expect("the process ends")
         .expect("the process's terminal output");
-        let lash_core::ProcessAwaitOutput::Settled { output } = output else {
+        let lash_execution_contracts::process::ProcessAwaitOutput::Settled { output } = output
+        else {
             panic!("the process settles the refusal: {output:?}");
         };
         let lash_core::ToolCallOutcome::Failure(failure) = output.outcome else {

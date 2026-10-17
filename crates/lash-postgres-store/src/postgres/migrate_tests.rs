@@ -50,11 +50,14 @@ mod rollout {
     // workspace clippy ban targets production library code).
     #![allow(clippy::disallowed_methods)]
 
-    use lash_core_execution::compat::{CompatRefusal, VersionRange};
-    use lash_core_execution::{
-        SessionCatalogStore as _, SessionCommitStore as _, SessionId, SessionMeta, SessionRelation,
-        StoreError,
-    };
+    use lash_core_store::compat::CompatRefusal;
+    use lash_core_store::compat::VersionRange;
+    use lash_core_store::session_identity::SessionRelation;
+    use lash_core_store::store::SessionCatalogStore as _;
+    use lash_core_store::store::SessionCommitStore as _;
+    use lash_core_store::store::SessionMeta;
+    use lash_core_store::store::StoreError;
+    use lash_protocol_types::SessionId;
 
     use crate::PostgresStorage;
     use crate::testing::IsolatedDatabase;
@@ -92,7 +95,7 @@ mod rollout {
                 &pool,
                 &crate::guarded_tx::WriterFence::new(
                     NEXT,
-                    lash_core_execution::FleetFormat::current(),
+                    lash_core_store::store::FleetFormat::current(),
                 ),
             )
             .await

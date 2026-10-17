@@ -14,8 +14,10 @@
 use std::collections::{BTreeMap, BTreeSet};
 use std::sync::LazyLock;
 
-use lash_core_execution::store::module_nodes::stage_module_node;
-use lash_core_execution::{ArtifactReferrerKind, ArtifactStoreError, ReferrerClaim};
+use lash_core_store::artifact_referrer::ArtifactReferrerKind;
+use lash_core_store::artifact_referrer::ReferrerClaim;
+use lash_execution_contracts::module_artifacts::ArtifactStoreError;
+use lash_execution_contracts::module_nodes::stage_module_node;
 
 use super::*;
 
@@ -236,7 +238,7 @@ impl SqliteStore {
                 if !nodes.is_empty() {
                     crate::durable::install_staged(tx, &nodes)?.map_err(|refusal| {
                         artifact_failure(ArtifactStoreError::StoredDataCorrupt {
-                            source: lash_core_execution::ModuleArtifactCorruption::Storage {
+                            source: lash_protocol_types::module_artifact_refusal::ModuleArtifactCorruption::Storage {
                                 record_kind: "module artifact node".into(),
                                 message: refusal.to_string(),
                             },
@@ -275,7 +277,8 @@ impl SqliteStore {
         namespace: &str,
         artifact_refs: &[String],
     ) -> rusqlite::Result<()> {
-        use lash_core_execution::store::{EnumerationProgress, ReclamationEnumeration};
+        use lash_core_store::store::EnumerationProgress;
+        use lash_core_store::store::ReclamationEnumeration;
         if artifact_refs.is_empty() {
             return Ok(());
         }

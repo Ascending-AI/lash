@@ -33,7 +33,7 @@ wait row with a completion key and a deadline (ADR 0132 §6 and §10). Its
 deadline, cancellation and recovery are the process's own, so there is no
 second kind of row that lash never runs and only its host can close.
 
-Evidence: `crates/lash-core-execution/src/runtime/process/validation.rs`.
+Evidence: `crates/lash-execution-contracts/src/process/validation.rs`.
 
 ### 2. Recovery loads committed state
 
@@ -54,7 +54,7 @@ The registry refuses an execution write whose epoch is stale. A process's
 terminal transaction resolves every `process_terminal` wait on it, so waiters
 receive the terminal in that commit (ADR 0132 §11).
 
-Evidence: `crates/lash-core-execution/src/runtime/process/validation.rs:146`.
+Evidence: `crates/lash-execution-contracts/src/process/validation.rs:146`.
 
 ### 3. Effect implementors own the window before an outcome commits
 
@@ -87,7 +87,7 @@ claims the actor again from its committed state.
 
 The two deferred-work kinds have their own attempt policy, owned by ADR 0109.
 
-Evidence: `crates/lash-core-execution/src/runtime/process/model/start_request.rs`.
+Evidence: `crates/lash-execution-contracts/src/process/model/start_request.rs`.
 
 ### 5. Who writes `Abandoned`
 
@@ -100,8 +100,8 @@ a cancellation that ends the process without running its engine
 ([ADR 0027](0027-unleased-completion-carries-explicit-authority.md)). A stale
 owner cannot end a process a later owner carries.
 
-Evidence: `crates/lash-core-execution/src/runtime/process/events.rs:71`
-and `crates/lash-core-execution/src/runtime/process/events.rs:130`.
+Evidence: `crates/lash-execution-contracts/src/process/events.rs:71`
+and `crates/lash-execution-contracts/src/process/events.rs:130`.
 
 ### 6. Operators use cancellation
 
@@ -115,8 +115,8 @@ These operations record the outcome directly. There is no separate abandon
 request waiting for a Lash lease to expire, and closing a host does not
 abandon started work.
 
-Evidence: `crates/lash-core-execution/src/runtime/process/registry_concerns.rs:511`
-and `crates/lash-core-execution/src/runtime/process/events.rs:130`.
+Evidence: `crates/lash-execution-contracts/src/process/registry_concerns.rs:511`
+and `crates/lash-execution-contracts/src/process/events.rs:130`.
 
 ### 7. The durable engine owns process execution
 

@@ -26,7 +26,7 @@ mod test_writer;
 
 use std::sync::{Arc, LazyLock};
 
-use lash_core_execution::Clock;
+use lash_core_ids::clock::Clock;
 use lash_core_store::checkpoint_graph::{DecodeLimits, GraphRefusal};
 use lash_durable::domain::graph_commit::{check_graph, measure_owner_commit};
 use lash_durable::domain::pages::CandidatePublication;
@@ -431,7 +431,7 @@ pub struct SqliteDurableStore {
     conn: SqliteConnection,
     clock: Arc<dyn Clock>,
     blob_profile: crate::BuiltinBlobProfile,
-    observer: lash_core_execution::facade_support::StoreObserver,
+    observer: lash_core_ids::operational_metrics::StoreObserver,
 }
 
 impl std::fmt::Debug for SqliteDurableStore {
@@ -458,7 +458,7 @@ pub(crate) struct Committing<'a> {
     pub(crate) now: DurableInstant,
     /// The fleet format the transaction's fence read: registry rows a
     /// domain write touches are encoded under it.
-    pub(crate) fleet: lash_core_execution::FleetFormat,
+    pub(crate) fleet: lash_core_store::store::FleetFormat,
     /// How the session store a head commit writes keeps its blobs.
     pub(crate) blob_profile: crate::BuiltinBlobProfile,
     /// The roots its writes retired, moved to retirement holds before it
@@ -519,7 +519,7 @@ impl SqliteDurableStore {
         conn: SqliteConnection,
         clock: Arc<dyn Clock>,
         blob_profile: crate::BuiltinBlobProfile,
-        observer: lash_core_execution::facade_support::StoreObserver,
+        observer: lash_core_ids::operational_metrics::StoreObserver,
         graph_reads: lash_core_store::checkpoint_graph::GraphReadPolicy,
     ) -> Self {
         Self {
@@ -626,7 +626,7 @@ fn registered_boots(tx: &Connection) -> rusqlite::Result<Vec<Owner>> {
 }
 
 fn store_failure(error: rusqlite::Error) -> DurableError {
-    use lash_core_execution::StoreError;
+    use lash_core_store::store::StoreError;
     let kind = match &error {
         rusqlite::Error::FromSqlConversionFailure(..)
         | rusqlite::Error::InvalidColumnType(..)
@@ -1005,7 +1005,7 @@ pub(crate) fn wake_session_tx(
     session: &lash_protocol_types::SessionId,
     control: bool,
     at_ms: u64,
-) -> Result<Option<Woken>, lash_core_execution::StoreError> {
+) -> Result<Option<Woken>, lash_core_store::store::StoreError> {
     let (meta, deleted): (i64, i64) = tx
         .prepare_cached(SQL.session_mail.standing.sql())
         .and_then(|mut statement| {
@@ -1019,7 +1019,7 @@ pub(crate) fn wake_session_tx(
     match wake_session_within(tx, session, control, now).map_err(crate::sqlite_error)? {
         Ok(woken) => Ok(Some(woken)),
         Err(DurableError::MailRefused(MailRefusal::ActorTerminal(_))) => Ok(None),
-        Err(error) => Err(lash_core_execution::StoreError::Backend(format!(
+        Err(error) => Err(lash_core_store::store::StoreError::Backend(format!(
             "session {session} was not woken: {error}"
         ))),
     }
@@ -1053,7 +1053,7 @@ fn apply_mail_domain(
     tx: &Connection,
     write: &MailDomainWrite,
     now: DurableInstant,
-    fleet: lash_core_execution::FleetFormat,
+    fleet: lash_core_store::store::FleetFormat,
 ) -> Answer<(MailAnswer, Vec<Woken>)> {
     Ok(match write {
         MailDomainWrite::ResolveWait(resolution) => waits::resolve(tx, resolution, now)?
@@ -1227,8 +1227,8 @@ impl DurableStore for SqliteDurableStore {
             .await;
         #[cfg(feature = "perf-witness")]
         if answer.is_ok() {
-            lash_core_execution::perf_witness::startup::record(
-                lash_core_execution::perf_witness::startup::Phase::NodeRegistered,
+            lash_core_ids::perf_witness::startup::record(
+                lash_core_ids::perf_witness::startup::Phase::NodeRegistered,
             );
         }
         answer
@@ -1510,7 +1510,7 @@ impl DurableStore for SqliteDurableStore {
             });
         }
         let blob_profile = self.blob_profile;
-        lash_core_execution::facade_support::sql::with_owner(
+        lash_core_ids::operational_metrics::sql::with_owner(
             tx.actor().as_str().to_owned(),
             tx.epoch().0,
             tx.revision().0,

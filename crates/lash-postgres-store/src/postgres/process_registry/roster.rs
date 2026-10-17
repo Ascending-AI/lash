@@ -1,6 +1,8 @@
 //! Fleet discovery retains the feed's committed sequencing-before-read contract.
 use super::*;
-use lash_core_execution::{ProcessChangeBounds, ProcessRosterCursor, ProcessRosterRecords};
+use lash_execution_contracts::process::ProcessChangeBounds;
+use lash_execution_contracts::process::ProcessRosterCursor;
+use lash_execution_contracts::process::ProcessRosterRecords;
 
 async fn bounds_tx(tx: &mut sqlx::PgConnection) -> Result<ProcessChangeBounds, PluginError> {
     let row =
@@ -48,14 +50,14 @@ pub(super) async fn bounds(
 
 pub(super) async fn page(
     registry: &PostgresProcessRegistry,
-    filter: &lash_core_execution::ProcessListFilter,
+    filter: &lash_execution_contracts::process::ProcessListFilter,
     limit: std::num::NonZeroUsize,
     cursor: Option<ProcessRosterCursor>,
 ) -> Result<ProcessRosterRecords, PluginError> {
     sequence(registry).await?;
     let limit = limit
         .get()
-        .min(lash_core_execution::MAX_PROCESS_ROSTER_PAGE_SIZE);
+        .min(lash_execution_contracts::process::MAX_PROCESS_ROSTER_PAGE_SIZE);
     let store = format!("postgres:{}", registry.catalog_id);
     let mut tx = crate::observed_sql::control("BEGIN", registry.pool.begin())
         .await
@@ -106,8 +108,10 @@ pub(super) async fn page(
             query = query.bind(clamp_epoch_ms(before_ms));
         }
         let (kind, frame) = match &filter.originator {
-            Some(lash_core_execution::ProcessOriginatorFilter::Host { .. }) => (Some("host"), None),
-            Some(lash_core_execution::ProcessOriginatorFilter::Session(scope)) => (
+            Some(lash_execution_contracts::process::ProcessOriginatorFilter::Host { .. }) => {
+                (Some("host"), None)
+            }
+            Some(lash_execution_contracts::process::ProcessOriginatorFilter::Session(scope)) => (
                 Some("session"),
                 scope.agent_frame_id.as_ref().map(|id| id.as_str()),
             ),
@@ -153,14 +157,16 @@ async fn filtered_roster_page_decodes_only_matches_in_ten_thousand_rows() {
     let backend = crate::testing::connect(database.url())
         .await
         .expect("postgres store");
-    lash_core_execution::testing::process_execution_env_fixture(&backend.process_env_store()).await;
+    lash_execution_contracts::testing::process_execution_env_fixture(&backend.process_env_store())
+        .await;
     let registry = backend.process_registry();
 
-    use lash_core_execution::{
-        Lifetime, ProcessListFilter, ProcessProvenance, ProcessRegistrar as _,
-    };
+    use lash_execution_contracts::process::Lifetime;
+    use lash_execution_contracts::process::ProcessListFilter;
+    use lash_execution_contracts::process::ProcessProvenance;
+    use lash_execution_contracts::process::ProcessRegistrar as _;
     let base = registry
-        .register_process(lash_core_execution::testing::held_engine_registration(
+        .register_process(lash_execution_contracts::testing::held_engine_registration(
             serde_json::Value::Null,
             ProcessProvenance::host(),
             Lifetime::Detached,
@@ -191,7 +197,7 @@ async fn filtered_roster_page_decodes_only_matches_in_ten_thousand_rows() {
     let page = registry
         .list_processes_page(
             &ProcessListFilter {
-                status: lash_core_execution::ProcessStatusFilter::Any,
+                status: lash_execution_contracts::process::ProcessStatusFilter::Any,
                 identity_label: Some("selected".to_owned()),
                 ..ProcessListFilter::default()
             },

@@ -1,6 +1,6 @@
 mod admitted_scope_tests {
-    use crate::support::prelude::*;
     use crate::{ActorContext, AdmittedScope};
+    use lash_execution_contracts::{ProcessLifecycle, ProcessRegistrar, ProcessRetention};
 
     fn shared_controller() -> ActorContext {
         ActorContext::unavailable()
@@ -18,10 +18,10 @@ mod admitted_scope_tests {
             .await
             .process_registry();
         let registration = || {
-            crate::testing::held_engine_registration(
+            lash_execution_contracts::testing::held_engine_registration(
                 serde_json::Value::Null,
-                crate::ProcessProvenance::host(),
-                crate::Lifetime::Detached,
+                lash_execution_contracts::process::ProcessProvenance::host(),
+                lash_execution_contracts::process::Lifetime::Detached,
             )
         };
         let old = registry
@@ -31,15 +31,21 @@ mod admitted_scope_tests {
         registry
             .complete_process(
                 &old.id,
-                crate::ProcessAwaitOutput::from_tool_output(crate::ToolCallOutput::success(
-                    serde_json::json!("old"),
-                )),
-                crate::ProcessCompletionAuthority::workflow_key(&old.id),
+                lash_execution_contracts::process::ProcessAwaitOutput::from_tool_output(
+                    crate::ToolCallOutput::success(serde_json::json!("old")),
+                ),
+                lash_execution_contracts::process::ProcessCompletionAuthority::workflow_key(
+                    &old.id,
+                ),
             )
             .await
             .expect("complete the first process");
         registry
-            .prune_terminal_processes(u64::MAX, None, crate::ProjectionWatermark::NoProjector)
+            .prune_terminal_processes(
+                u64::MAX,
+                None,
+                lash_execution_contracts::process::ProjectionWatermark::NoProjector,
+            )
             .await
             .expect("prune the first process");
         let successor = registry

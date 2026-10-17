@@ -137,7 +137,7 @@ async fn a_shift_never_runs_on_a_session_opened_to_observe() -> Result<()> {
         crate::MaxToolCalls::new(1024),
         crate::NoProgressBudget::bounded(12),
     );
-    let store = lash_core::runtime::admit_session_view(
+    let store = lash_execution_contracts::deployment::admit_session_view(
         &fixture.core.store_factory,
         &lash_core::SessionStoreCreateRequest {
             owning_process_id: None,
@@ -268,7 +268,7 @@ async fn a_send_under_an_unserved_profile_key_is_refused_before_acceptance() -> 
             if runtime.code == lash_core::RuntimeErrorCode::LlmProfileUnknown),
         "the refusal is the typed unknown-model refusal: {error:?}"
     );
-    let store = lash_core::runtime::live_session_view(
+    let store = lash_execution_contracts::deployment::live_session_view(
         &fixture.core.store_factory,
         &lash_core::SessionId::from("send-bad-route"),
     )

@@ -1,16 +1,19 @@
 use super::*;
-use lash_core_execution::{
-    ArtifactCleanup, ArtifactReferrer, HostArtifactPin, ModuleArtifactStore as _, ReferrerClaim,
-    ResolvedArtifactCleanup,
-};
+use lash_core_store::artifact_referrer::ArtifactCleanup;
+use lash_core_store::artifact_referrer::ArtifactReferrer;
+use lash_core_store::artifact_referrer::HostArtifactPin;
+use lash_core_store::artifact_referrer::ReferrerClaim;
+use lash_core_store::artifact_referrer::ResolvedArtifactCleanup;
+use lash_execution_contracts::module_artifacts::ModuleArtifactStore as _;
 
 /// An admitted view of `session_id` on `storage`'s catalog.
 async fn session_store(
     storage: &PostgresStorage,
     session_id: SessionId,
-) -> lash_core_execution::store::SessionStore {
-    let store: Arc<dyn lash_core_execution::DeploymentStore> = Arc::new(storage.store());
-    lash_core_execution::runtime::admit_session_view(
+) -> lash_core_store::store::SessionStore {
+    let store: Arc<dyn lash_execution_contracts::deployment::DeploymentStore> =
+        Arc::new(storage.store());
+    lash_execution_contracts::deployment::admit_session_view(
         &store,
         &lash_core_execution::testing::store_fixtures::root_session_request(&session_id),
     )
@@ -18,13 +21,13 @@ async fn session_store(
     .expect("admit the session")
 }
 
-fn frame_state(session_id: &str) -> lash_core_execution::RuntimeSessionState {
-    let mut state = lash_core_execution::RuntimeSessionState {
+fn frame_state(session_id: &str) -> lash_core_store::session_state::RuntimeSessionState {
+    let mut state = lash_core_store::session_state::RuntimeSessionState {
         session_id: SessionId::fixture(session_id),
-        ..lash_core_execution::RuntimeSessionState::fixture(
-            lash_core_execution::SessionPolicy::new(
-                lash_core_execution::TurnBudget::Unbounded,
-                lash_core_execution::MaxToolCalls::new(1024),
+        ..lash_core_store::session_state::RuntimeSessionState::fixture(
+            lash_core_store::session_policy::SessionPolicy::new(
+                lash_protocol_types::session_model::TurnBudget::Unbounded,
+                lash_protocol_types::session_model::MaxToolCalls::new(1024),
                 lash_core::NoProgressBudget::bounded(12),
             ),
         )
@@ -34,20 +37,21 @@ fn frame_state(session_id: &str) -> lash_core_execution::RuntimeSessionState {
 }
 
 fn append_successor_frame(
-    state: &mut lash_core_execution::RuntimeSessionState,
-) -> lash_core_execution::FrameNodeId {
+    state: &mut lash_core_store::session_state::RuntimeSessionState,
+) -> lash_core_store::session_identity::FrameNodeId {
     // The commit derives a frame's node id from its key, so the successor
     // carries that id, the one the committed head will name.
     let key =
-        lash_core_execution::FrameKey::from_caller_material("successor-frame").expect("frame key");
-    let successor =
-        lash_core_execution::session_graph::frame_node_id(&state.session_id, key.as_str());
+        lash_protocol_types::FrameKey::from_caller_material("successor-frame").expect("frame key");
+    let successor = lash_core_store::session_graph::frame_node_id(&state.session_id, key.as_str());
     assert!(
         state.session_graph.append_frame_open_with_id_at(
             successor.clone(),
             key,
-            lash_core_execution::AgentFrameReason::initial(),
-            lash_core_execution::AgentFrameAssignment::unconfigured(state.policy.clone()),
+            lash_core_store::session_identity::AgentFrameReason::initial(),
+            lash_core_store::session_identity::AgentFrameAssignment::unconfigured(
+                state.policy.clone()
+            ),
             "2026-09-29T00:00:00.000000000Z"
                 .parse()
                 .expect("canonical node timestamp"),
@@ -59,12 +63,18 @@ fn append_successor_frame(
 
 fn frame_transition(
     session_id: &SessionId,
-    ended: lash_core_execution::FrameNodeId,
-    successor: lash_core_execution::FrameNodeId,
-) -> lash_core_execution::store::FrameTransition {
-    lash_core_execution::store::FrameTransition {
-        ended: lash_core_execution::FrameEnvironmentId::new(session_id.clone(), ended),
-        successor: lash_core_execution::FrameEnvironmentId::new(session_id.clone(), successor),
+    ended: lash_core_store::session_identity::FrameNodeId,
+    successor: lash_core_store::session_identity::FrameNodeId,
+) -> lash_core_store::store::FrameTransition {
+    lash_core_store::store::FrameTransition {
+        ended: lash_core_store::artifact_referrer::FrameEnvironmentId::new(
+            session_id.clone(),
+            ended,
+        ),
+        successor: lash_core_store::artifact_referrer::FrameEnvironmentId::new(
+            session_id.clone(),
+            successor,
+        ),
         carries: Vec::new(),
         gate: lash_protocol_types::ExecutionScope::runtime_operation("postgres-frame-switch")
             .journal_identity()
@@ -160,7 +170,10 @@ async fn postgres_first_commit_may_end_its_own_appended_frame_open() {
     let session_id = state.session_id.clone();
     let ended = state.current_frame_node_id.clone().expect("initial frame");
     let ended_referrer = ArtifactReferrer::FrameEnvironment(
-        lash_core_execution::FrameEnvironmentId::new(session_id.clone(), ended.clone()),
+        lash_core_store::artifact_referrer::FrameEnvironmentId::new(
+            session_id.clone(),
+            ended.clone(),
+        ),
     );
     let claim = ReferrerClaim::unguarded(ended_referrer.clone()).expect("frame claim");
     let artifacts = storage.lash_vm_artifact_store();
@@ -170,7 +183,7 @@ async fn postgres_first_commit_may_end_its_own_appended_frame_open() {
         .expect("publish under first frame");
     let mut state = state;
     let successor = append_successor_frame(&mut state);
-    let commit = lash_core_execution::RuntimeCommit::persisted_state_for_test(&state)
+    let commit = lash_core_store::store::RuntimeCommit::persisted_state_for_test(&state)
         .with_frame_transition(frame_transition(&session_id, ended, successor));
     session_store(&storage, session_id)
         .await
@@ -201,13 +214,13 @@ async fn postgres_first_commit_may_end_its_own_appended_frame_open() {
     assert!(fenced, "first frame must be fenced in the commit");
     assert!(matches!(
         cleanup,
-        lash_core_execution::ArtifactCleanup::Ended { .. }
+        lash_core_store::artifact_referrer::ArtifactCleanup::Ended { .. }
     ));
     assert!(matches!(
         artifacts
             .publish_module_artifact(&claim, "first-turn-module", b"bytes")
             .await,
-        Err(lash_core_execution::ArtifactStoreError::ReferrerEnded { .. })
+        Err(lash_execution_contracts::module_artifacts::ArtifactStoreError::ReferrerEnded { .. })
     ));
 }
 
@@ -220,8 +233,9 @@ async fn postgres_first_commit_rejects_unappended_transition_source() {
     let mut state = frame_state("first-turn-invalid-source");
     let session_id = state.session_id.clone();
     let successor = append_successor_frame(&mut state);
-    let missing = lash_core_execution::FrameNodeId::new("not-appended").expect("frame id");
-    let commit = lash_core_execution::RuntimeCommit::persisted_state_for_test(&state)
+    let missing =
+        lash_core_store::session_identity::FrameNodeId::new("not-appended").expect("frame id");
+    let commit = lash_core_store::store::RuntimeCommit::persisted_state_for_test(&state)
         .with_frame_transition(frame_transition(&session_id, missing, successor));
     let store = session_store(&storage, session_id.clone()).await;
     let admitted = committed_rows(&storage, &session_id).await;
@@ -242,12 +256,14 @@ async fn postgres_later_commit_rejects_transition_source_other_than_head_frame()
     let session_id = state.session_id.clone();
     let store = session_store(&storage, session_id.clone()).await;
     store
-        .commit_runtime_state(lash_core_execution::RuntimeCommit::persisted_state_for_test(&state))
+        .commit_runtime_state(
+            lash_core_store::store::RuntimeCommit::persisted_state_for_test(&state),
+        )
         .await
         .expect("commit initial frame");
-    let mut state = lash_core_execution::store::load_session_window_state(
+    let mut state = lash_core_store::store::load_session_window_state(
         &store,
-        lash_core_execution::store::WindowSelector::Current,
+        lash_core_store::store::WindowSelector::Current,
     )
     .await
     .expect("load state")
@@ -255,8 +271,9 @@ async fn postgres_later_commit_rejects_transition_source_other_than_head_frame()
     .state;
     let prior_revision = state.head_revision;
     let successor = append_successor_frame(&mut state);
-    let wrong = lash_core_execution::FrameNodeId::new("wrong-ended-frame").expect("frame id");
-    let commit = lash_core_execution::RuntimeCommit::persisted_state_for_test(&state)
+    let wrong =
+        lash_core_store::session_identity::FrameNodeId::new("wrong-ended-frame").expect("frame id");
+    let commit = lash_core_store::store::RuntimeCommit::persisted_state_for_test(&state)
         .with_frame_transition(frame_transition(&session_id, wrong, successor));
     assert!(matches!(
         store.commit_runtime_state(commit).await,
@@ -280,8 +297,9 @@ async fn postgres_first_commit_rejects_transition_successor_other_than_committed
     let session_id = state.session_id.clone();
     let ended = state.current_frame_node_id.clone().expect("initial frame");
     append_successor_frame(&mut state);
-    let wrong = lash_core_execution::FrameNodeId::new("wrong-successor").expect("frame id");
-    let commit = lash_core_execution::RuntimeCommit::persisted_state_for_test(&state)
+    let wrong =
+        lash_core_store::session_identity::FrameNodeId::new("wrong-successor").expect("frame id");
+    let commit = lash_core_store::store::RuntimeCommit::persisted_state_for_test(&state)
         .with_frame_transition(frame_transition(&session_id, ended, wrong));
     let store = session_store(&storage, session_id.clone()).await;
     let admitted = committed_rows(&storage, &session_id).await;
@@ -294,11 +312,11 @@ async fn postgres_first_commit_rejects_transition_successor_other_than_committed
 
 /// Commit every pending frame open in `state`, with `transition` attached.
 async fn commit_frame_opens(
-    store: &lash_core_execution::store::SessionStore,
-    state: &mut lash_core_execution::RuntimeSessionState,
-    transition: Option<lash_core_execution::store::FrameTransition>,
+    store: &lash_core_store::store::SessionStore,
+    state: &mut lash_core_store::session_state::RuntimeSessionState,
+    transition: Option<lash_core_store::store::FrameTransition>,
 ) {
-    let mut commit = lash_core_execution::RuntimeCommit::persisted_state_for_test(state);
+    let mut commit = lash_core_store::store::RuntimeCommit::persisted_state_for_test(state);
     let appended = commit
         .graph
         .nodes()
@@ -315,14 +333,14 @@ async fn commit_frame_opens(
 }
 
 fn open_resident_frame(
-    state: &mut lash_core_execution::RuntimeSessionState,
+    state: &mut lash_core_store::session_state::RuntimeSessionState,
     key: &str,
-) -> lash_core_execution::FrameEnvironmentId {
+) -> lash_core_store::artifact_referrer::FrameEnvironmentId {
     lash_core::runtime::state::open_agent_frame_in_state_with_clock(
         state,
-        lash_core_execution::OpenAgentFrameRequest::new(
-            lash_core_execution::FrameKey::from_caller_material(key).expect("frame key"),
-            lash_core_execution::AgentFrameReason::new("test"),
+        lash_core_store::session_identity::OpenAgentFrameRequest::new(
+            lash_protocol_types::FrameKey::from_caller_material(key).expect("frame key"),
+            lash_core_store::session_identity::AgentFrameReason::new("test"),
         ),
         &lash_core::testing::TestClock::new(1_000),
     )
@@ -331,9 +349,9 @@ fn open_resident_frame(
 }
 
 fn current_frame(
-    state: &lash_core_execution::RuntimeSessionState,
-) -> lash_core_execution::FrameEnvironmentId {
-    lash_core_execution::FrameEnvironmentId::new(
+    state: &lash_core_store::session_state::RuntimeSessionState,
+) -> lash_core_store::artifact_referrer::FrameEnvironmentId {
+    lash_core_store::artifact_referrer::FrameEnvironmentId::new(
         state.session_id.clone(),
         state.current_frame_node_id.clone().expect("current frame"),
     )
@@ -343,7 +361,7 @@ fn current_frame(
 /// edges, if one exists.
 async fn frame_end(
     storage: &PostgresStorage,
-    frame: &lash_core_execution::FrameEnvironmentId,
+    frame: &lash_core_store::artifact_referrer::FrameEnvironmentId,
 ) -> (bool, Option<ArtifactCleanup>) {
     let referrer = ArtifactReferrer::FrameEnvironment(frame.clone());
     let fenced: bool = sqlx::query_scalar(
@@ -394,7 +412,7 @@ async fn postgres_switch_out_of_a_resident_frame_ends_every_frame_the_commit_lea
     let successor = open_resident_frame(&mut state, "successor");
     // The transition a switch out of an uncommitted frame names: the last
     // committed frame, with no carries.
-    let transition = lash_core_execution::store::FrameTransition {
+    let transition = lash_core_store::store::FrameTransition {
         ended: first.clone(),
         successor: successor.clone(),
         carries: Vec::new(),
@@ -425,7 +443,7 @@ async fn postgres_switch_out_of_a_resident_frame_ends_every_frame_the_commit_lea
             .lash_vm_artifact_store()
             .publish_module_artifact(&claim, "held-by-resident-frame", b"bytes")
             .await,
-        Err(lash_core_execution::ArtifactStoreError::ReferrerEnded { .. })
+        Err(lash_execution_contracts::module_artifacts::ArtifactStoreError::ReferrerEnded { .. })
     ));
 }
 
@@ -495,11 +513,11 @@ async fn postgres_switch_carrying_a_module_its_frame_does_not_hold_fails_closed(
             first.frame_node_id().clone(),
             successor.frame_node_id().clone(),
         );
-        transition.carries = vec![lash_core_execution::ArtifactName {
-            store: lash_core_execution::ArtifactStoreId::KernelDocument,
+        transition.carries = vec![lash_core_store::artifact_referrer::ArtifactName {
+            store: lash_core_store::artifact_referrer::ArtifactStoreId::KernelDocument,
             artifact_ref: forged.into(),
         }];
-        let commit = lash_core_execution::RuntimeCommit::persisted_state_for_test(&state)
+        let commit = lash_core_store::store::RuntimeCommit::persisted_state_for_test(&state)
             .with_frame_transition(transition);
         let refused = store.commit_runtime_state(commit).await;
         assert!(
@@ -706,7 +724,7 @@ async fn postgres_referrer_fence_refuses_a_late_publisher() {
     retirement.await.expect("join end").expect("fence referrer");
     assert!(matches!(
         late.await.expect("join late publish"),
-        Err(lash_core_execution::ArtifactStoreError::ReferrerEnded { .. })
+        Err(lash_execution_contracts::module_artifacts::ArtifactStoreError::ReferrerEnded { .. })
     ));
     assert!(
         store
@@ -730,7 +748,7 @@ async fn postgres_ended_cleanup_arms_a_fence_before_delivery() {
         .publish_module_artifact(&claim, artifact_ref, b"bytes")
         .await
         .expect("publish under live host pin");
-    lash_core_execution::store::ArtifactCleanupLedger::arm_cleanup(
+    lash_core_store::store::ArtifactCleanupLedger::arm_cleanup(
         storage.artifact_cleanup().as_ref(),
         &ArtifactCleanup::ended(referrer, Vec::new(), None),
         42,
@@ -760,7 +778,7 @@ async fn postgres_ended_cleanup_arms_a_fence_before_delivery() {
         store
             .publish_module_artifact(&claim, artifact_ref, b"bytes")
             .await,
-        Err(lash_core_execution::ArtifactStoreError::ReferrerEnded { .. })
+        Err(lash_execution_contracts::module_artifacts::ArtifactStoreError::ReferrerEnded { .. })
     ));
 }
 

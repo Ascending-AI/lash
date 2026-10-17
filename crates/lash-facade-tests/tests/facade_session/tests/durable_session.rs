@@ -5,9 +5,11 @@ use lash_facade_tests::durable::*;
 
 #[tokio::test(flavor = "multi_thread", worker_threads = 2)]
 async fn catalog_contention_retains_its_type_and_retryability_across_existing_session_apis() {
-    use lash_core::{
-        PluginError, RuntimeEffectControllerError, RuntimeError, RuntimeErrorCode, SessionError,
-    };
+    use lash_core::RuntimeEffectControllerError;
+    use lash_core::RuntimeError;
+    use lash_core::RuntimeErrorCode;
+    use lash_core::SessionError;
+    use lash_execution_contracts::plugin_error::PluginError;
 
     catalog_failure_matrix(CatalogFailure::Contended).await;
 
@@ -1247,7 +1249,7 @@ async fn transcript_totally_projects_a_really_committed_rlm_trajectory() {
 #[tokio::test(flavor = "multi_thread", worker_threads = 2)]
 async fn an_rlm_cells_executed_calls_name_the_turns_tool_call_records_after_a_reopen() -> Result<()>
 {
-    fn core(backend: lash_core::Backend) -> Result<LashCore> {
+    fn core(backend: lash_execution_contracts::backend::Backend) -> Result<LashCore> {
         explicit_ephemeral_facets(rlm_core_builder_over(backend))
             .serve_test_llm_profile(
                 text_provider(
@@ -1350,7 +1352,7 @@ async fn an_rlm_cells_executed_calls_name_the_turns_tool_call_records_after_a_re
 #[cfg(feature = "rlm")]
 #[tokio::test(flavor = "multi_thread", worker_threads = 2)]
 async fn a_settled_turns_cell_tool_records_are_the_streamed_ones_after_a_reopen() -> Result<()> {
-    fn core(backend: lash_core::Backend) -> Result<LashCore> {
+    fn core(backend: lash_execution_contracts::backend::Backend) -> Result<LashCore> {
         explicit_ephemeral_facets(rlm_core_builder_over(backend))
             .serve_test_llm_profile(
                 text_provider(
@@ -1467,7 +1469,7 @@ async fn a_cancelled_turn_reports_the_tool_calls_its_cell_completed_after_a_reop
         let (answering, answered) = std::sync::mpsc::sync_channel(1);
         let (accept, accepted) = std::sync::mpsc::channel();
         let accepted = Arc::new(StdMutex::new(accepted));
-        let core = |backend: lash_core::Backend| {
+        let core = |backend: lash_execution_contracts::backend::Backend| {
             explicit_ephemeral_facets(rlm_core_builder_over(backend))
                 .serve_test_llm_profile(
                     text_provider(
@@ -1641,7 +1643,10 @@ async fn a_cells_assistant_context_and_record_read_back_from_the_transcript_afte
     fn native_arguments() -> String {
         serde_json::json!({ "code": PROGRAM }).to_string()
     }
-    fn core(backend: lash_core::Backend, channel: RlmChannel) -> Result<LashCore> {
+    fn core(
+        backend: lash_execution_contracts::backend::Backend,
+        channel: RlmChannel,
+    ) -> Result<LashCore> {
         let provider = lash::testing::TestProvider::builder()
             .kind("cell-record")
             .complete(move |_request| async move {

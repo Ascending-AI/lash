@@ -18,18 +18,41 @@ use std::path::{Path, PathBuf};
 use std::sync::Arc;
 use std::time::{Duration, SystemTime, UNIX_EPOCH};
 
+use lash_core::AttachmentId;
+use lash_core::BlobRef;
+use lash_core::Clock;
+use lash_core::DeliveryPolicy;
+use lash_core::EffectAddress;
+use lash_core::ExecutionScope;
+use lash_core::ForkSessionRequest;
+use lash_core::HydratedSessionCheckpoint;
+use lash_core::LlmUsage;
+use lash_core::PendingTurnInputDraft;
+use lash_core::PluginNamespaceState;
+use lash_core::ProtocolEvent;
+use lash_core::QueuedWorkAuthority;
+use lash_core::RuntimeCommit;
+use lash_core::RuntimeSessionState;
+use lash_core::RuntimeStore;
+use lash_core::RuntimeTurnCommitStamp;
+use lash_core::SessionCatalogStore as _;
+use lash_core::SessionCreationHead;
+use lash_core::SessionHistoryRecord;
+use lash_core::SessionMeta;
+use lash_core::SessionNodePayload;
+use lash_core::SessionNodeRecord;
+use lash_core::SessionRelation;
+use lash_core::SessionStoreCreateRequest;
+use lash_core::StoreError;
+use lash_core::TurnInput;
+use lash_core::TurnInputApplication;
+use lash_core::TurnInputIngress;
+use lash_core::TurnInputStateKind;
 use lash_core::runtime::QueuedWorkBatchDraft;
 use lash_core::store::{GraphAppend, RuntimeCommitReceipt};
-use lash_core::{
-    AttachmentId, BlobRef, Clock, DeliveryPolicy, DeploymentStore, EffectAddress, ExecutionScope,
-    ForkSessionRequest, HydratedSessionCheckpoint, LlmUsage, PendingTurnInputDraft,
-    PluginNamespaceState, ProcessRegistrar as _, ProtocolEvent, QueuedWorkAuthority, RuntimeCommit,
-    RuntimeSessionState, RuntimeStore, RuntimeTurnCommitStamp, SessionCatalogStore as _,
-    SessionCreationHead, SessionHistoryRecord, SessionMeta, SessionNodePayload, SessionNodeRecord,
-    SessionRelation, SessionStoreCreateRequest, StoreError, TurnInput, TurnInputApplication,
-    TurnInputIngress, TurnInputStateKind,
-};
 use lash_core_store::plugin_state::{NamespaceBody, PluginStateMap, namespace_component_key};
+use lash_execution_contracts::deployment::DeploymentStore;
+use lash_execution_contracts::process::ProcessRegistrar as _;
 use lash_postgres_store::PostgresStorage;
 use rusqlite::OptionalExtension;
 use sqlx::{Connection, PgConnection, PgPool};
@@ -1946,7 +1969,8 @@ async fn open_postgres_differential()
         .execute(&mut database_lock)
         .await?;
     let postgres = lash_postgres_store::testing::connect(&database_url).await?;
-    lash_core::testing::process_execution_env_fixture(&postgres.process_env_store()).await;
+    lash_execution_contracts::testing::process_execution_env_fixture(&postgres.process_env_store())
+        .await;
     Ok((database_lock, postgres, database_url))
 }
 

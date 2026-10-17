@@ -44,7 +44,7 @@ mod tests {
             "mock",
             crate::EffectAddress::new(crate::ExecutionScope::turn("capture-race", "run"), step)
                 .unwrap(),
-            crate::StateCommands::new().set("value", value),
+            lash_execution_contracts::state_commands::StateCommands::new().set("value", value),
         )
         .await
         .expect("the publication applies");
@@ -148,7 +148,8 @@ mod tests {
             &default_session,
             "mock",
             address("default-publish"),
-            crate::StateCommands::new().set("value", wide.clone()),
+            lash_execution_contracts::state_commands::StateCommands::new()
+                .set("value", wide.clone()),
         )
         .await
         .unwrap();
@@ -187,7 +188,8 @@ mod tests {
                 &plugins,
                 "mock",
                 address(key),
-                crate::StateCommands::new().set(key, wide.clone()),
+                lash_execution_contracts::state_commands::StateCommands::new()
+                    .set(key, wide.clone()),
             )
             .await
             .unwrap();
@@ -256,7 +258,7 @@ mod tests {
         let refusal = default_host.transition_plugins(request, snapshot, &Default::default());
         assert!(matches!(
             refusal.candidate(),
-            Err(crate::PluginError::State(crate::PluginStateError::ValueTooLarge { limit, .. }))
+            Err(lash_execution_contracts::plugin_error::PluginError::State(crate::PluginStateError::ValueTooLarge { limit, .. }))
                 if limit == StateCommandLimits::PUBLISHED.max_value_bytes
         ));
 
@@ -266,7 +268,7 @@ mod tests {
         });
         assert!(matches!(
             namespace_host.decode_state(snapshot),
-            Err(crate::PluginError::State(crate::PluginStateError::StoreTooLarge { limit, .. }))
+            Err(lash_execution_contracts::plugin_error::PluginError::State(crate::PluginStateError::StoreTooLarge { limit, .. }))
                 if limit == 128 * 1024
         ));
 

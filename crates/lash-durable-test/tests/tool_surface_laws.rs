@@ -145,7 +145,10 @@ impl lash_core::ToolProvider for Surface {
     fn tool_manifests(
         &self,
         _config: &lash_core::OwnerConfigView,
-    ) -> std::result::Result<Vec<lash_core::ToolManifest>, lash_core::PluginError> {
+    ) -> std::result::Result<
+        Vec<lash_core::ToolManifest>,
+        lash_execution_contracts::plugin_error::PluginError,
+    > {
         Ok({
             self.tools
                 .iter()
@@ -844,7 +847,8 @@ impl lash_core::ToolProvider for CellSurface {
     fn tool_manifests(
         &self,
         _config: &lash_core::OwnerConfigView,
-    ) -> Result<Vec<lash_core::ToolManifest>, lash_core::PluginError> {
+    ) -> Result<Vec<lash_core::ToolManifest>, lash_execution_contracts::plugin_error::PluginError>
+    {
         Ok(self
             .surface
             .tools
@@ -1044,7 +1048,7 @@ async fn a_recorded_cell_call_parks_on_a_node_serving_a_changed_tool(tier: Tier)
 /// The environment a host start states in these laws: no tools and no
 /// components.
 fn process_environment() -> lash_core::ProcessEnv {
-    lash_core_execution::testing::process_env_with_limit(16)
+    lash_execution_contracts::testing::process_env_with_limit(16)
 }
 
 /// A host start observes only the sessions it names: a default start
@@ -1073,12 +1077,12 @@ async fn a_host_start_observes_only_the_sessions_it_names(tier: Tier) {
         ("default-start", Vec::new()),
         ("explicit-start", vec![parent_id.clone()]),
     ] {
-        let mut request = lash_core::ProcessStartRequest::engine(
-            lash_core_execution::testing::HELD_PROCESS_ENGINE_KIND,
+        let mut request = lash_execution_contracts::process::ProcessStartRequest::engine(
+            lash_execution_contracts::testing::HELD_PROCESS_ENGINE_KIND,
             serde_json::json!({ "start": label }),
-            lash_core::EngineLaunch::new(env_ref.clone(), None),
-            lash_core::ProcessOriginator::host(),
-            lash_core::LifetimeDecision::Detached,
+            lash_execution_contracts::process::EngineLaunch::new(env_ref.clone(), None),
+            lash_execution_contracts::process::ProcessOriginator::host(),
+            lash_execution_contracts::process::LifetimeDecision::Detached,
         )
         .with_host_start_key(label);
         request.observers = observers;
@@ -1128,12 +1132,12 @@ async fn a_lost_host_start_acknowledgement_recovers_the_retained_process(tier: T
             .publish_process_env(&lash_core::HostArtifactPin::mint(), &process_environment())
             .await
             .expect("publish the environment");
-        let request = lash_core::ProcessStartRequest::engine(
-            lash_core_execution::testing::HELD_PROCESS_ENGINE_KIND,
+        let request = lash_execution_contracts::process::ProcessStartRequest::engine(
+            lash_execution_contracts::testing::HELD_PROCESS_ENGINE_KIND,
             serde_json::json!({ "work": 1 }),
-            lash_core::EngineLaunch::new(env_ref, None),
-            lash_core::ProcessOriginator::host(),
-            lash_core::LifetimeDecision::Detached,
+            lash_execution_contracts::process::EngineLaunch::new(env_ref, None),
+            lash_execution_contracts::process::ProcessOriginator::host(),
+            lash_execution_contracts::process::LifetimeDecision::Detached,
         )
         .with_host_start_key("lost-host-start-ack");
         // The host loses its acknowledgement; only the database keeps the id.
@@ -1143,8 +1147,8 @@ async fn a_lost_host_start_acknowledgement_recovers_the_retained_process(tier: T
             .start(request.clone(), world.core.effect_host())
             .await
             .expect("the first start commits");
-        let filter = lash_core::ProcessListFilter {
-            status: lash_core::ProcessStatusFilter::Any,
+        let filter = lash_execution_contracts::process::ProcessListFilter {
+            status: lash_execution_contracts::process::ProcessStatusFilter::Any,
             ..Default::default()
         };
         let retained = world
@@ -1184,7 +1188,7 @@ async fn a_lost_host_start_acknowledgement_recovers_the_retained_process(tier: T
                 .expect("the same host request recovers its id");
             assert_eq!(retry.process_id, original_id);
             let mut changed = request.clone();
-            let lash_core::ProcessStartTarget::Input(lash_core::ProcessInput::Engine {
+            let lash_execution_contracts::process::ProcessStartTarget::Input(lash_execution_contracts::process::ProcessInput::Engine {
                 payload,
                 ..
             }) = &mut changed.input
@@ -1200,7 +1204,7 @@ async fn a_lost_host_start_acknowledgement_recovers_the_retained_process(tier: T
                 .expect_err("a different request under the retained key conflicts");
             assert!(matches!(
                 error,
-                lash::EmbedError::Plugin(lash_core::PluginError::StartKeyConflict { start_key })
+                lash::EmbedError::Plugin(lash_execution_contracts::plugin_error::PluginError::StartKeyConflict { start_key })
                     if Some(&start_key) == request.start_key()
             ));
             let processes = world

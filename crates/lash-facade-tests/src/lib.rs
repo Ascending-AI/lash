@@ -154,7 +154,9 @@ pub fn typescript_block(source: &str) -> String {
 
 /// An RLM core builder over `backend`, with the default test factory.
 #[cfg(feature = "rlm")]
-pub fn rlm_core_builder_over(backend: lash_core::Backend) -> lash::LashCoreBuilder {
+pub fn rlm_core_builder_over(
+    backend: lash_execution_contracts::backend::Backend,
+) -> lash::LashCoreBuilder {
     let factory = rlm_factory();
     LashCore::rlm_builder(backend, factory)
 }
@@ -214,7 +216,7 @@ pub async fn delete_session_and_await(core: &LashCore, session_id: &str) -> Resu
 }
 
 /// A standard core over `backend`.
-pub fn standard_core_over(backend: lash_core::Backend) -> LashCore {
+pub fn standard_core_over(backend: lash_execution_contracts::backend::Backend) -> LashCore {
     standard_core_builder_over(backend)
         .build(runtime_lease_owner())
         .expect("standard core")
@@ -222,7 +224,9 @@ pub fn standard_core_over(backend: lash_core::Backend) -> LashCore {
 
 /// The builder of a standard core over `backend`, for a law that names the
 /// core's owner or pacing itself.
-pub fn standard_core_builder_over(backend: lash_core::Backend) -> lash::LashCoreBuilder {
+pub fn standard_core_builder_over(
+    backend: lash_execution_contracts::backend::Backend,
+) -> lash::LashCoreBuilder {
     explicit_ephemeral_facets(LashCore::standard_builder(backend))
         .serve_test_llm_profile(mock_provider(), mock_llm_profile_spec())
 }
@@ -481,7 +485,7 @@ pub mod session_process;
 
 pub mod history;
 
-pub fn diagnostic_core(backend: lash_core::Backend) -> LashCore {
+pub fn diagnostic_core(backend: lash_execution_contracts::backend::Backend) -> LashCore {
     explicit_ephemeral_facets(LashCore::standard_builder(backend))
         .serve_sessions(false)
         .serve_test_llm_profile(mock_provider(), mock_llm_profile_spec())

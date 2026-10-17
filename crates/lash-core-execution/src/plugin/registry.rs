@@ -2,18 +2,39 @@
 //! Specs feed the same declared registrations as authored recipes.
 
 use super::ServiceBindings;
+use lash_execution_contracts::declaration_error::PluginDeclarationError;
 use std::sync::Arc;
 
-use super::{
-    AfterTurnHook, AssistantResponseHook, AssistantStreamFinishedHook, AssistantStreamHook,
-    BeforeTurnHook, CheckpointHook, ContextCompactor, ContextPressureHook,
-    ErasedPluginOperationInvokeFuture, HookKey, PluginCommand, PluginCommandHandler, PluginError,
-    PluginHost, PluginLifecycleEventHook, PluginOperationOutcome, PluginOperationRegistration,
-    PluginOperationSpec, PluginQuery, PluginQueryHandler, PluginQueryInvokeFuture, PluginTask,
-    PluginTaskHandler, ToolArgsCheckHook, ToolArgsTransformHook, ToolCatalogContributor,
-    ToolPresentationStep, ToolResultCheckHook, ToolResultTransformHook,
-};
+use super::AfterTurnHook;
+use super::AssistantResponseHook;
+use super::AssistantStreamFinishedHook;
+use super::AssistantStreamHook;
+use super::BeforeTurnHook;
+use super::CheckpointHook;
+use super::ContextCompactor;
+use super::ContextPressureHook;
+use super::ErasedPluginOperationInvokeFuture;
+use super::HookKey;
+use super::PluginCommand;
+use super::PluginCommandHandler;
+use super::PluginHost;
+use super::PluginLifecycleEventHook;
+use super::PluginOperationOutcome;
+use super::PluginOperationRegistration;
+use super::PluginOperationSpec;
+use super::PluginQuery;
+use super::PluginQueryHandler;
+use super::PluginQueryInvokeFuture;
+use super::PluginTask;
+use super::PluginTaskHandler;
+use super::ToolArgsCheckHook;
+use super::ToolArgsTransformHook;
+use super::ToolCatalogContributor;
+use super::ToolPresentationStep;
+use super::ToolResultCheckHook;
+use super::ToolResultTransformHook;
 use crate::ToolProvider;
+use lash_execution_contracts::plugin_error::PluginError;
 
 #[derive(Clone, Debug, PartialEq, Eq, serde::Serialize, serde::Deserialize)]
 pub struct PluginExtensionContribution {
@@ -672,7 +693,7 @@ pub struct PluginDeclaration {
     /// What a fork of a session does with the plugin's namespace: copy it
     /// as of the fork point, or reset it to the plugin's initial state.
     /// Recorded with the namespace, so a later fork follows it.
-    pub state_fork: crate::plugin::StateFork,
+    pub state_fork: lash_core_store::plugin_state::StateFork,
 }
 
 impl PluginDeclaration {
@@ -684,47 +705,9 @@ impl PluginDeclaration {
             writable_formats: vec![FormatVersion::ONE],
             stream_state_format: FormatVersion::ONE,
             readable_stream_state_formats: vec![FormatVersion::ONE],
-            state_fork: crate::plugin::StateFork::Copy,
+            state_fork: lash_core_store::plugin_state::StateFork::Copy,
         }
     }
-}
-
-/// Why a factory's [`PluginDeclaration`] is refused.
-#[derive(
-    Clone,
-    Debug,
-    PartialEq,
-    Eq,
-    thiserror::Error,
-    serde::Serialize,
-    serde::Deserialize,
-    schemars::JsonSchema,
-)]
-#[serde(tag = "reason", rename_all = "snake_case", deny_unknown_fields)]
-#[non_exhaustive]
-pub enum PluginDeclarationError {
-    /// Two factories cannot own the same plugin namespace.
-    #[error("plugin id `{id}` is registered twice")]
-    DuplicatePluginId { id: String },
-    /// The declaration names another plugin than the factory that gave it.
-    #[error("plugin factory `{factory}` declares itself as `{declared}`")]
-    IdMismatch { factory: String, declared: String },
-    /// The plugin cannot read the stream state its callbacks write.
-    #[error("plugin `{plugin}` does not read its native stream-state format {format_version}")]
-    NativeStreamStateNotReadable {
-        plugin: String,
-        #[schemars(with = "std::num::NonZeroU32")]
-        format_version: FormatVersion,
-    },
-    /// The plugin cannot write the format it reads natively.
-    #[error(
-        "plugin `{plugin}` reads format {format_version} natively and does not declare it writable"
-    )]
-    NativeFormatNotWritable {
-        plugin: String,
-        #[schemars(with = "std::num::NonZeroU32")]
-        format_version: FormatVersion,
-    },
 }
 
 /// The plugins of one core in hook order: the order their factories are
@@ -932,7 +915,7 @@ pub trait PluginFactory: PluginMetadata + Send + Sync {
         Ok(())
     }
 
-    /// The [`Backend::binding_identity`](crate::Backend::binding_identity) of
+    /// The [`Backend::binding_identity`](lash_execution_contracts::backend::Backend::binding_identity) of
     /// the backend whose stores this factory keeps state in, when it keeps
     /// any: the RLM protocol keeps its Lash VM module artifacts there.
     ///
@@ -956,7 +939,7 @@ pub trait PluginFactory: PluginMetadata + Send + Sync {
 ///
 /// Integrator class (ADR 0051): **protocol and process-engine implementors**.
 /// This is the argument of the only method that yields
-/// [`ProcessEngine`](crate::ProcessEngine)s, so it is named by whoever ships an
+/// [`ProcessEngine`](lash_execution_contracts::process::ProcessEngine)s, so it is named by whoever ships an
 /// engine, and by a host whose factory wraps one that does (the RLM protocol
 /// factory, say): the wrapper forwards it, or the wrapped factory's engines
 /// are never contributed. The facade exports it as
@@ -964,7 +947,7 @@ pub trait PluginFactory: PluginMetadata + Send + Sync {
 pub struct ProcessEngineContributionContext<'a> {
     extensions: PluginExtensions,
     plugin_host: &'a super::PluginHost,
-    backend: &'a crate::Backend,
+    backend: &'a lash_execution_contracts::backend::Backend,
     trace_runtime: &'a crate::trace::TraceRuntime,
     process_lifecycle_available: bool,
 }
@@ -972,7 +955,7 @@ pub struct ProcessEngineContributionContext<'a> {
 impl<'a> ProcessEngineContributionContext<'a> {
     pub fn new(
         plugin_host: &'a super::PluginHost,
-        backend: &'a crate::Backend,
+        backend: &'a lash_execution_contracts::backend::Backend,
         trace_runtime: &'a crate::trace::TraceRuntime,
         process_lifecycle_available: bool,
     ) -> Result<Self, PluginError> {
@@ -997,7 +980,7 @@ impl<'a> ProcessEngineContributionContext<'a> {
     /// The backend the runtime is built over: an engine keeps what its
     /// processes run in this backend's stores, so a process resumed after a
     /// restart finds it and the backend's cleanup sweeps it.
-    pub fn backend(&self) -> &crate::Backend {
+    pub fn backend(&self) -> &lash_execution_contracts::backend::Backend {
         self.backend
     }
 

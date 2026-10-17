@@ -19,12 +19,20 @@ use lash_conformance::{
     GraphFactObservation, LineageConformanceHandles, LineageConformanceInjector,
     ReopenableProcessRegistry,
 };
-use lash_core_execution::store::{ConformanceDeployment, RuntimeStore};
-use lash_core_execution::{
-    DeploymentStore, ProcessCompletionAuthority, ProcessEnvStore, ProcessIdentity,
-    ProcessLifecycle as _, ProcessListFilter, ProcessProvenance, ProcessRegistrar as _,
-    ProcessRegistry, ProcessStatusFilter, SessionCatalogStore, SessionCommitStore,
-};
+use lash_core_execution::store::ConformanceDeployment;
+use lash_core_store::store::RuntimeStore;
+use lash_core_store::store::SessionCatalogStore;
+use lash_core_store::store::SessionCommitStore;
+use lash_execution_contracts::deployment::DeploymentStore;
+use lash_execution_contracts::process::ProcessCompletionAuthority;
+use lash_execution_contracts::process::ProcessEnvStore;
+use lash_execution_contracts::process::ProcessIdentity;
+use lash_execution_contracts::process::ProcessLifecycle as _;
+use lash_execution_contracts::process::ProcessListFilter;
+use lash_execution_contracts::process::ProcessProvenance;
+use lash_execution_contracts::process::ProcessRegistrar as _;
+use lash_execution_contracts::process::ProcessRegistry;
+use lash_execution_contracts::process::ProcessStatusFilter;
 
 use super::SUBSTRATE;
 use crate::backend_fixture::{Substrate, TestBackend, sync_await};
@@ -95,12 +103,12 @@ impl<B: BlockingFixture> Retained<B> {
 /// same backend.
 #[derive(Clone)]
 struct ScenarioBackends {
-    clock: Arc<dyn lash_core_execution::Clock>,
+    clock: Arc<dyn lash_core_ids::clock::Clock>,
     by_scenario: Arc<Mutex<HashMap<String, TestBackend>>>,
 }
 
 impl ScenarioBackends {
-    fn new(clock: Arc<dyn lash_core_execution::Clock>) -> Self {
+    fn new(clock: Arc<dyn lash_core_ids::clock::Clock>) -> Self {
         Self {
             clock,
             by_scenario: Arc::new(Mutex::new(HashMap::new())),
@@ -130,19 +138,21 @@ impl ScenarioBackends {
     }
 }
 
-fn root_session_request(session_id: &str) -> lash_core_execution::SessionStoreCreateRequest {
-    lash_core_execution::SessionStoreCreateRequest {
+fn root_session_request(
+    session_id: &str,
+) -> lash_core_store::session_store_factory_types::SessionStoreCreateRequest {
+    lash_core_store::session_store_factory_types::SessionStoreCreateRequest {
         owning_process_id: None,
         pending_observer_intents: Vec::new(),
         session_id: SessionId::fixture(session_id),
-        relation: lash_core_execution::SessionRelation::Root,
-        config: lash_core_execution::PersistedSessionConfig::new(
-            lash_core_execution::TurnBudget::Unbounded,
-            lash_core_execution::MaxToolCalls::new(1024),
+        relation: lash_core_store::session_identity::SessionRelation::Root,
+        config: lash_core_store::session_graph::PersistedSessionConfig::new(
+            lash_protocol_types::session_model::TurnBudget::Unbounded,
+            lash_protocol_types::session_model::MaxToolCalls::new(1024),
             lash_core::NoProgressBudget::bounded(12),
         ),
-        head: lash_core_execution::SessionCreationHead::Config,
-        retention: lash_core_execution::Retention::UntilGc,
+        head: lash_core_store::session_store_factory_types::SessionCreationHead::Config,
+        retention: lash_core_store::store::Retention::UntilGc,
     }
 }
 
@@ -200,22 +210,22 @@ async fn session_head_pointer_requires_a_revision() {
 async fn fork_session_rejects_a_malformed_target_session_id() {
     let backend = TestBackend::open(SUBSTRATE).await;
     let store = backend.store().await;
-    let request = lash_core_execution::ForkSessionRequest {
+    let request = lash_core_store::session_store_factory_types::ForkSessionRequest {
         session_id: SessionId::from("bad\0session"),
         source_session_id: SessionId::from("missing-fork-source"),
         head_revision: 0,
-        relation: lash_core_execution::SessionRelation::Root,
+        relation: lash_core_store::session_identity::SessionRelation::Root,
         pending_observer_intents: Vec::new(),
-        config: lash_core_execution::PersistedSessionConfig::new(
-            lash_core_execution::TurnBudget::Unbounded,
+        config: lash_core_store::session_graph::PersistedSessionConfig::new(
+            lash_protocol_types::session_model::TurnBudget::Unbounded,
             lash::MaxToolCalls::new(1024),
             lash_core::NoProgressBudget::bounded(12),
         ),
-        retention: lash_core_execution::Retention::UntilGc,
+        retention: lash_core_store::store::Retention::UntilGc,
     };
     assert!(matches!(
         store.fork_session(&request).await,
-        Err(lash_core_execution::StoreError::InvalidSessionId { .. })
+        Err(lash_core_store::store::StoreError::InvalidSessionId { .. })
     ));
 }
 
@@ -251,7 +261,7 @@ async fn sqlite_attachment_condemnation_enumeration_refuses_corrupt_rows() {
             &lash_core_execution::testing::store_fixtures::session_store_request(
                 &session_id,
                 "condemnation-corruption",
-                lash_core_execution::SessionRelation::Root,
+                lash_core_store::session_identity::SessionRelation::Root,
             ),
         )
         .await
@@ -266,8 +276,8 @@ async fn sqlite_attachment_condemnation_enumeration_refuses_corrupt_rows() {
         )
         .expect("inject unknown persisted phase");
     assert!(matches!(
-        lash_core_execution::AttachmentRootSet::list_condemnations(factory.as_ref()).await,
-        Err(lash_core_execution::StoreError::StoredDataCorrupt { .. })
+        lash_core_store::attachments::AttachmentRootSet::list_condemnations(factory.as_ref()).await,
+        Err(lash_core_store::store::StoreError::StoredDataCorrupt { .. })
     ));
     connection
         .execute_batch(
@@ -279,8 +289,8 @@ async fn sqlite_attachment_condemnation_enumeration_refuses_corrupt_rows() {
         )
         .expect("inject inconsistent persisted provenance");
     assert!(matches!(
-        lash_core_execution::AttachmentRootSet::list_condemnations(factory.as_ref()).await,
-        Err(lash_core_execution::StoreError::StoredDataCorrupt { .. })
+        lash_core_store::attachments::AttachmentRootSet::list_condemnations(factory.as_ref()).await,
+        Err(lash_core_store::store::StoreError::StoredDataCorrupt { .. })
     ));
     connection
         .execute_batch(
@@ -292,8 +302,8 @@ async fn sqlite_attachment_condemnation_enumeration_refuses_corrupt_rows() {
         )
         .expect("inject an unknown persisted stall reason");
     assert!(matches!(
-        lash_core_execution::AttachmentRootSet::list_condemnations(factory.as_ref()).await,
-        Err(lash_core_execution::StoreError::StoredDataCorrupt { .. })
+        lash_core_store::attachments::AttachmentRootSet::list_condemnations(factory.as_ref()).await,
+        Err(lash_core_store::store::StoreError::StoredDataCorrupt { .. })
     ));
 }
 
@@ -320,9 +330,10 @@ fn artifact_store_handles(
 ) -> lash_conformance::fused_artifact_store::ArtifactStoreHandles {
     let store = backend.blocking_store();
     lash_conformance::fused_artifact_store::ArtifactStoreHandles {
-        artifacts: Arc::clone(&store) as Arc<dyn lash_core::ModuleArtifactStore>,
+        artifacts: Arc::clone(&store)
+            as Arc<dyn lash_execution_contracts::module_artifacts::ModuleArtifactStore>,
         process_env: Arc::clone(&store) as Arc<dyn ProcessEnvStore>,
-        turn_preludes: store as Arc<dyn lash_core::TurnPreludeStore>,
+        turn_preludes: store as Arc<dyn lash_execution_contracts::turn_prelude::TurnPreludeStore>,
     }
 }
 
@@ -455,9 +466,9 @@ lash_conformance::process_registry_reopenable_tests!({
         retained.keep(&reopened);
         ReopenableProcessRegistry {
             open: backend.process_registry()
-                as Arc<dyn lash_core_execution::ConformanceProcessRegistry>,
+                as Arc<dyn lash_execution_contracts::process::ConformanceProcessRegistry>,
             reopen: reopened.process_registry()
-                as Arc<dyn lash_core_execution::ConformanceProcessRegistry>,
+                as Arc<dyn lash_execution_contracts::process::ConformanceProcessRegistry>,
         }
     })
 });
@@ -465,19 +476,22 @@ lash_conformance::process_registry_reopenable_tests!({
 #[tokio::test]
 async fn sqlite_recently_retired_filter_uses_the_extracted_updated_at_column() {
     let backend = TestBackend::open(SUBSTRATE).await;
-    lash_core::testing::process_execution_env_fixture(backend.process_env_store().as_ref()).await;
+    lash_execution_contracts::testing::process_execution_env_fixture(
+        backend.process_env_store().as_ref(),
+    )
+    .await;
     let registry = backend.process_registry();
     let recent_pushdown_id = registry
         .register_process(
-            lash_core::testing::held_engine_registration(
+            lash_execution_contracts::testing::held_engine_registration(
                 serde_json::Value::Null,
                 ProcessProvenance::host(),
-                lash_core_execution::Lifetime::Detached,
+                lash_execution_contracts::process::Lifetime::Detached,
             )
             .with_admitted_identity(
-                lash_core_execution::AdmittedProcessIdentity::for_testing(ProcessIdentity::new(
-                    "recent-pushdown-kind",
-                )),
+                lash_execution_contracts::process::AdmittedProcessIdentity::for_testing(
+                    ProcessIdentity::new("recent-pushdown-kind"),
+                ),
             ),
         )
         .await
@@ -486,17 +500,21 @@ async fn sqlite_recently_retired_filter_uses_the_extracted_updated_at_column() {
     let terminal = registry
         .complete_process(
             &recent_pushdown_id,
-            lash_core_execution::ProcessAwaitOutput::from_tool_output(
-                lash_core_execution::ToolCallOutput::success(serde_json::json!({})),
+            lash_execution_contracts::process::ProcessAwaitOutput::from_tool_output(
+                lash_protocol_types::tool_output::ToolCallOutput::success(serde_json::json!({})),
             ),
             ProcessCompletionAuthority::workflow_key(&recent_pushdown_id),
         )
         .await
         .expect("complete recently retired pushdown fixture");
     let terminal = match terminal {
-        lash_core_execution::ProcessCompletionOutcome::Committed(record)
-        | lash_core_execution::ProcessCompletionOutcome::AlreadyApplied { stored: record }
-        | lash_core_execution::ProcessCompletionOutcome::Superseded { stored: record } => record,
+        lash_execution_contracts::process::ProcessCompletionOutcome::Committed(record)
+        | lash_execution_contracts::process::ProcessCompletionOutcome::AlreadyApplied {
+            stored: record,
+        }
+        | lash_execution_contracts::process::ProcessCompletionOutcome::Superseded {
+            stored: record,
+        } => record,
     };
 
     let conn = backend.raw();
@@ -544,13 +562,16 @@ async fn sqlite_recently_retired_filter_uses_the_extracted_updated_at_column() {
 
 lash_conformance::process_projection_repair_tests!({
     let backend = TestBackend::open(SUBSTRATE).await;
-    lash_core::testing::process_execution_env_fixture(backend.process_env_store().as_ref()).await;
+    lash_execution_contracts::testing::process_execution_env_fixture(
+        backend.process_env_store().as_ref(),
+    )
+    .await;
     let registry = backend.process_registry();
     let corruption = backend.clone();
     (
         backend,
         registry as Arc<dyn ProcessRegistry>,
-        move |stale: lash_core_execution::ProcessRecord| async move {
+        move |stale: lash_execution_contracts::process::ProcessRecord| async move {
             let conn = corruption.raw();
             let changed = conn
                 .execute(
@@ -574,8 +595,10 @@ lash_conformance::store_contract_state_machine_tests!({
         async move {
             let backend = TestBackend::open(SUBSTRATE).await;
             retained.keep(&backend);
-            lash_core::testing::process_execution_env_fixture(backend.process_env_store().as_ref())
-                .await;
+            lash_execution_contracts::testing::process_execution_env_fixture(
+                backend.process_env_store().as_ref(),
+            )
+            .await;
             lash_conformance::StoreContractHandles {
                 registry: backend.process_registry() as Arc<dyn ProcessRegistry>,
                 runtime: backend.store().await as Arc<dyn RuntimeStore>,
@@ -649,9 +672,9 @@ lash_conformance::session_graph_append_tests!({
 });
 
 lash_conformance::store_recovery_tests!({
-    let clock = Arc::new(lash_core_execution::testing::TestClock::new(10_000));
+    let clock = Arc::new(lash_core_ids::test_clock::TestClock::new(10_000));
     let scenarios =
-        ScenarioBackends::new(Arc::clone(&clock) as Arc<dyn lash_core_execution::Clock>);
+        ScenarioBackends::new(Arc::clone(&clock) as Arc<dyn lash_core_ids::clock::Clock>);
     (
         (),
         move |scenario: &str| scenarios.store(scenario),
@@ -677,7 +700,7 @@ lash_conformance::append_head_switch_tests!({
     (
         backend,
         store as Arc<dyn RuntimeStore>,
-        move |leaf_node_id: lash_core_execution::NodeId| async move {
+        move |leaf_node_id: lash_protocol_types::NodeId| async move {
             let conn = mutation.raw();
             conn.execute_batch("PRAGMA foreign_keys = ON; BEGIN IMMEDIATE")
                 .expect("begin branch publication");
@@ -704,7 +727,7 @@ lash_conformance::append_tombstone_tests!({
     (
         backend,
         store as Arc<dyn RuntimeStore>,
-        move |node_id: lash_core_execution::NodeId| async move {
+        move |node_id: lash_protocol_types::NodeId| async move {
             let conn = mutation.raw();
             conn.execute(
                 "UPDATE graph_nodes SET tombstoned = 1 WHERE node_id = ?1",
@@ -831,7 +854,7 @@ lash_conformance::retention_tests!({
 });
 
 lash_conformance::attachment_stalled_retry_tests!({
-    let clock = Arc::new(lash_core_execution::testing::TestClock::new(10_000));
+    let clock = Arc::new(lash_core_ids::test_clock::TestClock::new(10_000));
     let backend = TestBackend::open_with_clock(SUBSTRATE, clock.clone()).await;
     let factory = backend.store().await;
     let bytes_root = tempfile::tempdir().expect("attachment bytes root");
@@ -850,7 +873,7 @@ lash_conformance::attachment_referrer_tests!({
         Box::pin(async move {
             injector.raw()
                 .execute("INSERT INTO attachment_referrer_edges (attachment_id, referrer_kind, referrer_id) VALUES (?1, ?2, ?3)", rusqlite::params![id.as_str(), kind, key])
-                .map(|_| ()).map_err(|error| lash_core_execution::StoreError::Backend(error.to_string()))
+                .map(|_| ()).map_err(|error| lash_core_store::store::StoreError::Backend(error.to_string()))
         })
     });
     let handles = lash_conformance::AttachmentReferrerHandles {
@@ -869,7 +892,7 @@ lash_conformance::checkpoint_profile_tests!({
             options.store.blob_profile = lash_sqlite_store::BuiltinBlobProfile::LowLatency;
             options
         },
-        Arc::new(lash_core_execution::testing::TestClock::new(10_000)),
+        Arc::new(lash_core_ids::test_clock::TestClock::new(10_000)),
     )
     .await;
     let balanced = first
@@ -878,7 +901,7 @@ lash_conformance::checkpoint_profile_tests!({
                 options.store.blob_profile = lash_sqlite_store::BuiltinBlobProfile::Balanced;
                 options
             },
-            Arc::new(lash_core_execution::testing::TestClock::new(10_000)),
+            Arc::new(lash_core_ids::test_clock::TestClock::new(10_000)),
         )
         .await;
     let compact = first
@@ -887,7 +910,7 @@ lash_conformance::checkpoint_profile_tests!({
                 options.store.blob_profile = lash_sqlite_store::BuiltinBlobProfile::Compact;
                 options
             },
-            Arc::new(lash_core_execution::testing::TestClock::new(10_000)),
+            Arc::new(lash_core_ids::test_clock::TestClock::new(10_000)),
         )
         .await;
     let stores = vec![

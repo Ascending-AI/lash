@@ -10,8 +10,10 @@ pub async fn fork_inherits_history_without_execution_queues_waits_or_journals(
     factory: Arc<dyn crate::store::ConformanceDeployment>,
     host: ActorContext,
 ) {
-    lash_core::testing::process_execution_env_fixture(host.backend().process_env_store().as_ref())
-        .await;
+    lash_execution_contracts::testing::process_execution_env_fixture(
+        host.backend().process_env_store().as_ref(),
+    )
+    .await;
     let source_id = SessionId::from("fork-isolated-source");
     let fork_id = SessionId::from("fork-isolated-branch");
     let source = factory
@@ -142,8 +144,10 @@ pub async fn reclaim_races_fork_and_unpin_without_using_process_roots(
     registry: Arc<dyn crate::ProcessRegistry>,
     host: ActorContext,
 ) {
-    lash_core::testing::process_execution_env_fixture(host.backend().process_env_store().as_ref())
-        .await;
+    lash_execution_contracts::testing::process_execution_env_fixture(
+        host.backend().process_env_store().as_ref(),
+    )
+    .await;
     let id = SessionId::from("reclaim-race-source");
     let source = factory
         .admit_view(&session_store_request(
@@ -170,7 +174,7 @@ pub async fn reclaim_races_fork_and_unpin_without_using_process_roots(
     let prefix = crate::Target::Revision(state.head_revision);
     factory.pin(&id, &prefix).await.expect("pin prefix");
     let process = registry
-        .register_process(lash_core::testing::held_engine_registration(
+        .register_process(lash_execution_contracts::testing::held_engine_registration(
             serde_json::Value::Null,
             crate::ProcessProvenance::host().with_caused_by(Some(crate::CausalRef::SessionNode {
                 session_id: id.clone(),

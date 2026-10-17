@@ -38,23 +38,27 @@ use lash_protocol_types::{ExecutionLimit, ExecutionPolicy};
 
 use lash_core_store::tool_run::{MaterialOwner, MaterialRole};
 
-use super::engine_state::StepRequest;
+use crate::ActorContext;
+use crate::ProcessId;
+use crate::RuntimeEffectControllerError;
+use crate::ToolCatalog;
+use crate::ToolId;
 use crate::runtime::actor::round::{
     AdmittedExecution, MemberBody, MemberOutcome, RoundTools, decode_completed,
 };
-use crate::runtime::actor::waits::{ParkDeadline, Resolution};
-use crate::{
-    ActorContext, PluginError, ProcessId, ProcessRecord, RuntimeEffectControllerError, ToolCatalog,
-    ToolId,
-};
+use crate::runtime::actor::waits::Resolution;
 use lash_core_store::tool_run::Material;
 use lash_core_store::tool_run::SettledOutput;
+use lash_execution_contracts::plugin_error::PluginError;
+use lash_execution_contracts::process::ProcessRecord;
+use lash_execution_contracts::process::StepRequest;
+use lash_execution_contracts::waits::ParkDeadline;
 
 /// A step's admission: what its tool's declaration pins before it runs.
 #[derive(Clone, Debug, PartialEq)]
 pub struct StepAdmission {
     /// The tool its admission records: the linked tool, or an engine step's
-    /// [`EngineStepKind::admitted_tool`](super::EngineStepKind::admitted_tool).
+    /// [`EngineStepKind::admitted_tool`](lash_execution_contracts::process::EngineStepKind::admitted_tool).
     pub tool: ToolId,
     /// The tool's execution policy.
     pub policy: ExecutionPolicy,
@@ -128,7 +132,7 @@ pub enum StepRefusal {
     },
     /// The step names an engine body the process's engine does not declare.
     #[error(transparent)]
-    Engine(#[from] super::engine_state::EngineStepRefusal),
+    Engine(#[from] lash_execution_contracts::process::EngineStepRefusal),
     /// The process's composition does not build on this node (FIG-6034):
     /// the activation parks it before any step is admitted or resumed.
     #[error("the process's composition does not build here: {reason}")]

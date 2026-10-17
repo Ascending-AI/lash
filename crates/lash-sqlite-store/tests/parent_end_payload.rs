@@ -8,14 +8,14 @@
 
 use std::sync::Arc;
 
-use lash_core_execution::ProcessRegistry;
+use lash_execution_contracts::process::ProcessRegistry;
 use lash_sqlite_store::SqliteProcessRegistry;
 
 /// A turn scope keeps no ledger row: its close is its run's terminal. A
 /// session operation's close is still its typed ledger row, so the
 /// refusals are proved on one.
-fn operation_scope(session: &str, operation: &str) -> lash_core_execution::ScopeId {
-    lash_core_execution::ScopeId::session_operation(
+fn operation_scope(session: &str, operation: &str) -> lash_core_store::scope_identity::ScopeId {
+    lash_core_store::scope_identity::ScopeId::session_operation(
         lash_protocol_types::SessionId::fixture(session),
         operation,
     )
@@ -49,7 +49,7 @@ async fn a_parent_scope_row_is_refused_as_malformed() {
 
     let scope = operation_scope("v2-session", "v2-operation");
     let payload = serde_json::json!({
-        "version": lash_core_execution::SCOPE_STORAGE_PAYLOAD_VERSION,
+        "version": lash_core_store::scope_identity::SCOPE_STORAGE_PAYLOAD_VERSION,
         "scope": {
             "kind": "session_operation",
             "session_id": "v2-session",
@@ -85,7 +85,7 @@ async fn an_unsupported_payload_version_is_refused() {
 
     let scope = operation_scope("version-session", "version-operation");
     let payload = serde_json::json!({
-        "version": lash_core_execution::SCOPE_STORAGE_PAYLOAD_VERSION + 1,
+        "version": lash_core_store::scope_identity::SCOPE_STORAGE_PAYLOAD_VERSION + 1,
         "scope": serde_json::to_value(&scope).expect("scope json"),
     })
     .to_string();
@@ -119,7 +119,7 @@ async fn a_payload_that_disagrees_with_its_projection_is_refused() {
 
     let scope = operation_scope("mismatch-session", "mismatch-operation");
     let payload = scope
-        .storage_payload(lash_core_execution::FleetFormat::current())
+        .storage_payload(lash_core_store::store::FleetFormat::current())
         .expect("encode the payload");
     // The payload names one operation; the projection names another. A reader that
     // trusted either side alone would resurrect the wrong scope.

@@ -296,7 +296,8 @@ impl DurableStore for CloseDuringRead {
 /// must not combine it with the new empty mailbox to answer `NotClosing`.
 #[tokio::test]
 async fn an_accepted_close_stays_pending_when_its_mail_is_acknowledged_between_reads() {
-    let stores: Arc<dyn lash_core::StoreSet> = crate::tests::sqlite_memory_store_set().await;
+    let stores: Arc<dyn lash_execution_contracts::backend::StoreSet> =
+        crate::tests::sqlite_memory_store_set().await;
     let inner = stores.durable_store();
     let session = SessionId::from("close-observer-race");
     let core = crate::tests::explicit_ephemeral_facets(LashCore::standard_builder(

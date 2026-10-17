@@ -2,11 +2,13 @@
 use std::collections::HashMap;
 use std::sync::{Arc, Mutex, OnceLock, Weak};
 
+use lash_core::LiveReplayEventDraft;
+use lash_core::LiveReplayStore;
+use lash_core::SessionObservationEventPayload;
+use lash_core::SessionProcessEventKind;
 use lash_core::facade_support::{ProcessEventSink, RuntimeHandle};
-use lash_core::{
-    LiveReplayEventDraft, LiveReplayStore, ProcessEvent, ProcessRegistry,
-    SessionObservationEventPayload, SessionProcessEventKind,
-};
+use lash_execution_contracts::process::ProcessEvent;
+use lash_execution_contracts::process::ProcessRegistry;
 use lash_protocol_types::sync::MutexExt;
 use lash_protocol_types::{ProcessId, SessionId};
 
@@ -116,7 +118,7 @@ impl ProcessEventSink for ProcessLifecycleFeed {
     async fn emit(&self, event: &ProcessEvent) {
         self.language_publisher.enqueue_committed(
             &event.process_id,
-            lash_core::facade_support::ObservedProcessEvent::from(event.clone()),
+            lash_execution_contracts::process::ObservedProcessEvent::from(event.clone()),
         );
         if let Some(kind) =
             SessionProcessEventKind::from_durable_event(event.fact.event_type(), event.sequence)

@@ -41,12 +41,12 @@ use matrix::MatrixTestExt as _;
 use std::sync::{Arc, Mutex};
 use std::time::Duration;
 
-use lash_core_execution::StoreSet;
 use lash_durable::runner::Activation;
 use lash_durable::{ActorKey, ActorState, CommitLabel, DurableStore};
 use lash_durable_test::{
     Cut, Fault, Matrix, Scenario, SimClock, SimNodes, SimNodesConfig, Tripwire,
 };
+use lash_execution_contracts::backend::StoreSet;
 use lash_protocol_types::sync::MutexExt as _;
 
 /// `worker()`: two sleeps, then its answer. Three `kernel_run` steps: one
@@ -263,12 +263,12 @@ impl KernelSteps {
             .map_err(|error| format!("the kernel's settings: {error}"))?;
         core.processes()
             .start(
-                lash_core::ProcessStartRequest::engine(
+                lash_execution_contracts::process::ProcessStartRequest::engine(
                     kind.to_owned(),
                     payload,
-                    lash_core::EngineLaunch::new(env_ref, settings),
-                    lash_core::ProcessOriginator::host(),
-                    lash_core::LifetimeDecision::Detached,
+                    lash_execution_contracts::process::EngineLaunch::new(env_ref, settings),
+                    lash_execution_contracts::process::ProcessOriginator::host(),
+                    lash_execution_contracts::process::LifetimeDecision::Detached,
                 ),
                 core.effect_host(),
             )
@@ -409,7 +409,8 @@ impl Scenario for KernelSteps {
                 .flatten()
                 .and_then(|record| record.terminal().cloned());
             let output = terminal.map(|terminal| {
-                serde_json::to_string(&lash_core::Durable(&terminal.into_await_output())).unwrap()
+                serde_json::to_string(&lash_protocol_types::Durable(&terminal.into_await_output()))
+                    .unwrap()
             });
             let mut uncut = UNCUT.lock_recover();
             let seen = uncut.iter().find(|(source, _)| *source == self.source);

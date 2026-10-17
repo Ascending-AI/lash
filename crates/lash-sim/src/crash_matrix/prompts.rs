@@ -234,7 +234,10 @@ impl lash_core::plugin::PluginFactory for Memo {
 
     fn recipe(
         self: Arc<Self>,
-    ) -> std::result::Result<lash_core::plugin::PluginRecipe, lash_core::plugin::PluginError> {
+    ) -> std::result::Result<
+        lash_core::plugin::PluginRecipe,
+        lash_execution_contracts::plugin_error::PluginError,
+    > {
         let mut reg = lash_core::plugin::PluginRegistrar::<Memo>::new(
             lash_core::plugin::PluginFactory::id(self.as_ref()),
         );
@@ -256,7 +259,7 @@ impl lash_core::plugin::SessionPlugin for Memo {
 impl Memo {
     fn declare(
         reg: &mut lash_core::plugin::PluginRegistrar<Self>,
-    ) -> std::result::Result<(), lash_core::plugin::PluginError> {
+    ) -> std::result::Result<(), lash_execution_contracts::plugin_error::PluginError> {
         reg.turn()
             .before(lash_core::hook_key!("note-turn"), move |this, _state| {
                 let _world = this.world.clone();
@@ -316,11 +319,9 @@ impl Memo {
                     Box::pin(async move {
                         let mut contributions = lash_core::plugin::TurnContributions::default();
                         if context.checkpoint == lash_core::CheckpointKind::AfterWork {
-                            contributions.state = lash_core::plugin::StateCommands::new().apply(
-                                "checkpoints",
-                                "count",
-                                serde_json::Value::Null,
-                            );
+                            contributions.state =
+                                lash_execution_contracts::state_commands::StateCommands::new()
+                                    .apply("checkpoints", "count", serde_json::Value::Null);
                         }
                         Ok(contributions)
                     })
@@ -367,7 +368,8 @@ impl Memo {
 }
 
 /// The memo's tools: `set_t` sets T, `speculate` proposes another T.
-fn tools() -> Result<Arc<dyn lash_core::ToolProvider>, lash_core::PluginError> {
+fn tools()
+-> Result<Arc<dyn lash_core::ToolProvider>, lash_execution_contracts::plugin_error::PluginError> {
     let definition = |name: &str, description: &str| {
         lash_core::ToolDefinition::raw(
             name,
@@ -387,7 +389,7 @@ fn tools() -> Result<Arc<dyn lash_core::ToolProvider>, lash_core::PluginError> {
                     1_000,
                 ))
         })
-        .map_err(|error| lash_core::PluginError::Registration(error.to_string()))
+        .map_err(|error| lash_execution_contracts::plugin_error::PluginError::Registration(error.to_string()))
     };
     Ok(Arc::new(StaticToolProvider::new(
         vec![
@@ -409,8 +411,10 @@ impl StaticToolExecute for MemoTools {
             "speculative"
         };
         lash_core::ToolAttemptOutcome::done_without_intents(
-            lash_core::ToolOutcomeDone::ok(serde_json::json!({ "t": t }))
-                .with_state(lash_core::plugin::StateCommands::new().set("t", serde_json::json!(t))),
+            lash_core::ToolOutcomeDone::ok(serde_json::json!({ "t": t })).with_state(
+                lash_execution_contracts::state_commands::StateCommands::new()
+                    .set("t", serde_json::json!(t)),
+            ),
         )
     }
 }
@@ -440,7 +444,10 @@ impl lash_core::plugin::PluginFactory for Frame {
 
     fn recipe(
         self: Arc<Self>,
-    ) -> std::result::Result<lash_core::plugin::PluginRecipe, lash_core::plugin::PluginError> {
+    ) -> std::result::Result<
+        lash_core::plugin::PluginRecipe,
+        lash_execution_contracts::plugin_error::PluginError,
+    > {
         let mut reg = lash_core::plugin::PluginRegistrar::<Frame>::new(
             lash_core::plugin::PluginFactory::id(self.as_ref()),
         );
@@ -462,9 +469,10 @@ impl lash_core::plugin::SessionPlugin for Frame {
 impl Frame {
     fn declare(
         reg: &mut lash_core::plugin::PluginRegistrar<Self>,
-    ) -> std::result::Result<(), lash_core::plugin::PluginError> {
-        let wrap = PromptWrapKey::new("frame")
-            .map_err(|error| lash_core::PluginError::Registration(error.to_string()))?;
+    ) -> std::result::Result<(), lash_execution_contracts::plugin_error::PluginError> {
+        let wrap = PromptWrapKey::new("frame").map_err(|error| {
+            lash_execution_contracts::plugin_error::PluginError::Registration(error.to_string())
+        })?;
         reg.prompt().wrap(
             PromptWrapSpec::new(wrap, memo_section()),
             move |this, _state| {

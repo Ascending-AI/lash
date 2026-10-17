@@ -10,13 +10,13 @@ struct PriorFamilyEnv {
 lash_core_execution::impl_current_fleet_format!(PriorFamilyEnv);
 
 #[async_trait::async_trait]
-impl crate::ProcessEnvStore for PriorFamilyEnv {
+impl lash_execution_contracts::process::ProcessEnvStore for PriorFamilyEnv {
     async fn publish_process_env(
         &self,
         _claim: &crate::ReferrerClaim,
         _env_ref: &ProcessEnvRef,
         _bytes: &[u8],
-    ) -> Result<(), crate::ArtifactStoreError> {
+    ) -> Result<(), lash_execution_contracts::module_artifacts::ArtifactStoreError> {
         unreachable!("the prior-family entry is read-only")
     }
 
@@ -24,28 +24,30 @@ impl crate::ProcessEnvStore for PriorFamilyEnv {
         &self,
         _claim: &crate::ReferrerClaim,
         _env_ref: &ProcessEnvRef,
-    ) -> Result<(), crate::ArtifactStoreError> {
+    ) -> Result<(), lash_execution_contracts::module_artifacts::ArtifactStoreError> {
         unreachable!("the prior-family entry is read-only")
     }
 
     async fn end_process_env_referrer(
         &self,
         _cleanup: &crate::ResolvedArtifactCleanup,
-    ) -> Result<(), crate::ArtifactStoreError> {
+    ) -> Result<(), lash_execution_contracts::module_artifacts::ArtifactStoreError> {
         unreachable!("the prior-family entry is read-only")
     }
 
     async fn get_process_env(
         &self,
         env_ref: &ProcessEnvRef,
-    ) -> Result<Option<Vec<u8>>, crate::ArtifactStoreError> {
+    ) -> Result<Option<Vec<u8>>, lash_execution_contracts::module_artifacts::ArtifactStoreError>
+    {
         Ok((env_ref == &self.env_ref).then(|| self.bytes.clone()))
     }
 }
 
 #[tokio::test]
 async fn runtime_feedback_process_environment_refuses_prior_family() {
-    use crate::{ProcessEnvStore, load_process_env};
+    use lash_execution_contracts::process::ProcessEnvStore;
+    use lash_execution_contracts::process::load_process_env;
     let backend = crate::support::sqlite_memory_store_set().await;
     let store = backend.process_env_store();
     let profile = crate::LlmProfileConfig::new(crate::RecordedLlmProfile::mint(
@@ -84,7 +86,7 @@ async fn runtime_feedback_process_environment_refuses_prior_family() {
         ));
         assert!(matches!(
             store.publish_process_env(&claim, &old, &bytes).await,
-            Err(crate::ArtifactStoreError::Immutable { .. })
+            Err(lash_execution_contracts::module_artifacts::ArtifactStoreError::Immutable { .. })
         ));
         // A store only accepts bytes under their own reference, so the bytes
         // an older build stored under its family's reference come from a

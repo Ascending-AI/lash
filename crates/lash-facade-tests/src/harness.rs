@@ -52,7 +52,10 @@ pub async fn sqlite_memory_store_set() -> Arc<lash_sqlite_store::SqliteStoreSet>
             .await
             .expect("open a SQLite memory store set"),
     );
-    lash_core::testing::process_execution_env_fixture(stores.process_env_store().as_ref()).await;
+    lash_execution_contracts::testing::process_execution_env_fixture(
+        stores.process_env_store().as_ref(),
+    )
+    .await;
     stores
 }
 
@@ -85,7 +88,7 @@ pub async fn postgres_store_parts() -> (
 
 /// A backend over a fresh SQLite memory store set whose effect host only
 /// records: for a test that needs a backend value but runs no effect.
-pub async fn sqlite_memory_store_backend() -> lash_core::Backend {
+pub async fn sqlite_memory_store_backend() -> lash_execution_contracts::backend::Backend {
     let stores = sqlite_memory_store_set().await;
     lash_conformance::backend_over(stores)
 }
@@ -93,13 +96,18 @@ pub async fn sqlite_memory_store_backend() -> lash_core::Backend {
 /// A backend over a fresh SQLite memory store set stamping from `clock`,
 /// whose effect host only records and which executes no session work: for a
 /// test that reads what the stores stamp.
-pub async fn store_backend_with_clock(clock: Arc<dyn lash_core::Clock>) -> lash_core::Backend {
+pub async fn store_backend_with_clock(
+    clock: Arc<dyn lash_core::Clock>,
+) -> lash_execution_contracts::backend::Backend {
     let stores = Arc::new(
         lash_sqlite_store::SqliteStoreSet::memory_with_clock(clock)
             .await
             .expect("open a SQLite memory store set"),
     );
-    lash_core::testing::process_execution_env_fixture(stores.process_env_store().as_ref()).await;
+    lash_execution_contracts::testing::process_execution_env_fixture(
+        stores.process_env_store().as_ref(),
+    )
+    .await;
     lash_conformance::backend_over(stores)
 }
 
@@ -109,7 +117,10 @@ pub async fn store_backend_with_clock(clock: Arc<dyn lash_core::Clock>) -> lash_
     clippy::disallowed_methods,
     reason = "the test host reads the PostgreSQL service URL its gate sets"
 )]
-pub async fn postgres_store_set() -> (Arc<dyn lash_core::StoreSet>, Box<dyn std::any::Any + Send>) {
+pub async fn postgres_store_set() -> (
+    Arc<dyn lash_execution_contracts::backend::StoreSet>,
+    Box<dyn std::any::Any + Send>,
+) {
     let url = lash_postgres_store::testing::required_database_url();
     let database = lash_postgres_store::testing::IsolatedDatabase::create(&url).await;
     let storage = lash_postgres_store::testing::connect(database.url())
@@ -125,7 +136,7 @@ pub async fn postgres_store_set() -> (Arc<dyn lash_core::StoreSet>, Box<dyn std:
         .await
         .expect("SQLite attachment store")
         .attachment_store(),
-    )) as Arc<dyn lash_core::StoreSet>;
+    )) as Arc<dyn lash_execution_contracts::backend::StoreSet>;
     (stores, Box::new((database, attachments, storage)))
 }
 
@@ -139,7 +150,7 @@ pub struct DecoratedBackend {
 }
 
 impl DecoratedBackend {
-    pub fn over(inner: lash_core::Backend) -> Self {
+    pub fn over(inner: lash_execution_contracts::backend::Backend) -> Self {
         Self {
             layered: lash_core::testing::runtime_helpers::LayeredBackend::over(inner),
         }
@@ -148,8 +159,8 @@ impl DecoratedBackend {
     pub fn session_store_factory(
         self,
         decorate: impl FnOnce(
-            Arc<dyn lash_core::DeploymentStore>,
-        ) -> Arc<dyn lash_core::DeploymentStore>,
+            Arc<dyn lash_execution_contracts::deployment::DeploymentStore>,
+        ) -> Arc<dyn lash_execution_contracts::deployment::DeploymentStore>,
     ) -> Self {
         Self {
             layered: self.layered.map_session_store_factory(decorate),
@@ -157,12 +168,12 @@ impl DecoratedBackend {
     }
 
     /// The decorated backend.
-    pub fn into_backend(self) -> lash_core::Backend {
+    pub fn into_backend(self) -> lash_execution_contracts::backend::Backend {
         self.layered.into_backend()
     }
 }
 
-impl From<DecoratedBackend> for lash_core::Backend {
+impl From<DecoratedBackend> for lash_execution_contracts::backend::Backend {
     fn from(decorated: DecoratedBackend) -> Self {
         decorated.into_backend()
     }

@@ -26,14 +26,21 @@
 //! reports a fixed placeholder.
 
 use async_trait::async_trait;
-use lash_core_execution::{
-    DurableScan, DurableScanPage, StoreBackend, StoreError, StorePreflight, StoreSchemaDatabase,
-    StoreSchemaStatus, StoreSchemaVerdict,
-};
+use lash_core_store::store::DurableScan;
+use lash_core_store::store::DurableScanPage;
+use lash_core_store::store::StoreBackend;
+use lash_core_store::store::StoreError;
+use lash_core_store::store::StorePreflight;
+use lash_core_store::store::StoreSchemaDatabase;
+use lash_core_store::store::StoreSchemaStatus;
+use lash_core_store::store::StoreSchemaVerdict;
 use sqlx::postgres::{PgConnectOptions, PgPool};
 
 use crate::schema::SchemaObservation;
-use lash_core_execution::compat::{self, CompatAdmission, ComponentId, StampRead};
+use lash_core_store::compat;
+use lash_core_store::compat::CompatAdmission;
+use lash_core_store::compat::ComponentId;
+use lash_core_store::compat::StampRead;
 
 pub(crate) mod walk;
 

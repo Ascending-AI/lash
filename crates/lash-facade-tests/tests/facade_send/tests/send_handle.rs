@@ -20,7 +20,9 @@ async fn input_probe_distinguishes_unknown_refused_and_accepted() -> Result<()> 
                 let calls = Arc::clone(&calls);
                 Box::pin(async move {
                     if calls.fetch_add(1, Ordering::SeqCst) == 0 {
-                        return Err(lash_core::PluginError::Invoke("probe refusal".to_owned()));
+                        return Err(lash_execution_contracts::plugin_error::PluginError::Invoke(
+                            "probe refusal".to_owned(),
+                        ));
                     }
                     Ok(Default::default())
                 })
@@ -269,7 +271,7 @@ impl StatusReads {
 
 /// A deployment store counting [`StatusReads`].
 struct CountedStatusReads {
-    inner: Arc<dyn lash_core::DeploymentStore>,
+    inner: Arc<dyn lash_execution_contracts::deployment::DeploymentStore>,
     reads: Arc<StatusReads>,
 }
 
@@ -277,7 +279,7 @@ impl lash_core::DeploymentStoreDecorator for CountedStatusReads {}
 
 #[async_trait]
 impl lash_core::RuntimeStoreDecorator for CountedStatusReads {
-    type Inner = dyn lash_core::DeploymentStore;
+    type Inner = dyn lash_execution_contracts::deployment::DeploymentStore;
 
     fn inner(&self) -> &Self::Inner {
         self.inner.as_ref()

@@ -17,7 +17,8 @@
 // library code).
 #![allow(clippy::disallowed_methods)]
 
-use lash_core_execution::{StoreError, compat::CompatRefusal};
+use lash_core_store::compat::CompatRefusal;
+use lash_core_store::store::StoreError;
 use lash_postgres_store::{
     ColumnValueSource, ForeignKeyAction, PostgresStorage, SchemaCheck, SchemaFinding,
 };
@@ -513,7 +514,7 @@ async fn an_alter_built_equivalent_schema_opens_clean() {
 /// A component version one above every version this build reads, in the
 /// active tier: a release past this build raised the reader floor to it.
 fn above_this_build() -> u32 {
-    lash_core_execution::compat::descriptor(lash_core_execution::compat::ComponentId::POSTGRES)
+    lash_core_store::compat::descriptor(lash_core_store::compat::ComponentId::POSTGRES)
         .expect("the build declares the PostgreSQL store")
         .reads
         .max()

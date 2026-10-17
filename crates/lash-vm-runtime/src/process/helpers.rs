@@ -231,7 +231,7 @@ pub struct HelperDependentSession {
 ///
 /// [`KernelMigrationSurveyError`]: a store did not answer.
 pub async fn survey_helper_processes(
-    backend: &lash_core::Backend,
+    backend: &lash_execution_contracts::backend::Backend,
     functions: &FunctionRegistry,
     retired: &RetiredHelpers,
 ) -> Result<Vec<HelperDependentProcess>, KernelMigrationSurveyError> {
@@ -242,12 +242,12 @@ pub async fn survey_helper_processes(
     }
     let documents = KernelDocuments::new(backend.module_artifacts());
     let registry = backend.process_registry();
-    let filter = lash_core::ProcessListFilter {
-        status: lash_core::ProcessStatusFilter::any_of([
-            lash_core::ProcessStatus::Running,
-            lash_core::ProcessStatus::Waiting,
+    let filter = lash_execution_contracts::process::ProcessListFilter {
+        status: lash_execution_contracts::process::ProcessStatusFilter::any_of([
+            lash_execution_contracts::process::ProcessStatus::Running,
+            lash_execution_contracts::process::ProcessStatus::Waiting,
         ]),
-        ..lash_core::ProcessListFilter::default()
+        ..lash_execution_contracts::process::ProcessListFilter::default()
     };
     let mut continuation = None;
     loop {
@@ -255,7 +255,8 @@ pub async fn survey_helper_processes(
             .list_processes_page(&filter, PAGE, continuation)
             .await?;
         for record in page.records {
-            let lash_core::ProcessInput::Engine { kind, payload, .. } = record.input.as_ref()
+            let lash_execution_contracts::process::ProcessInput::Engine { kind, payload, .. } =
+                record.input.as_ref()
             else {
                 continue;
             };

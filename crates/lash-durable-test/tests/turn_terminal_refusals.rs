@@ -138,7 +138,7 @@ const ENDS_WITHIN: std::time::Duration = std::time::Duration::from_secs(60);
 /// An after-turn callback that counts its calls and refuses with `fault`.
 fn refusing_after_turn(
     calls: &Arc<AtomicUsize>,
-    fault: fn() -> lash_core::PluginError,
+    fault: fn() -> lash_execution_contracts::plugin_error::PluginError,
 ) -> Arc<dyn lash_core::plugin::PluginFactory> {
     refusing_first_after_turns(calls, usize::MAX, fault)
 }
@@ -148,7 +148,7 @@ fn refusing_after_turn(
 fn refusing_first_after_turns(
     calls: &Arc<AtomicUsize>,
     refusals: usize,
-    fault: fn() -> lash_core::PluginError,
+    fault: fn() -> lash_execution_contracts::plugin_error::PluginError,
 ) -> Arc<dyn lash_core::plugin::PluginFactory> {
     let calls = Arc::clone(calls);
     Arc::new(lash_core::plugin::StaticPluginFactory::new(
@@ -169,13 +169,15 @@ fn refusing_first_after_turns(
 }
 
 /// A plugin's refusal over the turn it finalizes.
-fn invoke_refusal() -> lash_core::PluginError {
-    lash_core::PluginError::Invoke("the after-turn callback refuses this turn".to_owned())
+fn invoke_refusal() -> lash_execution_contracts::plugin_error::PluginError {
+    lash_execution_contracts::plugin_error::PluginError::Invoke(
+        "the after-turn callback refuses this turn".to_owned(),
+    )
 }
 
 /// A refusal under a plugin-minted code the plugin classes an outcome.
-fn minted_refusal() -> lash_core::PluginError {
-    lash_core::PluginError::Runtime(lash_core::RuntimeError::foreign(
+fn minted_refusal() -> lash_execution_contracts::plugin_error::PluginError {
+    lash_execution_contracts::plugin_error::PluginError::Runtime(lash_core::RuntimeError::foreign(
         "after-turn-plugin.refused",
         lash_core::TurnFailureCause::Outcome,
         "the after-turn callback refuses this turn",
@@ -185,7 +187,11 @@ fn minted_refusal() -> lash_core::PluginError {
 /// The run of a turn whose after-turn callback refuses with `fault` ends
 /// `Refused`: the callback and the model each ran once, and no turn
 /// committed.
-async fn refused_terminal(tier: Tier, name: &str, fault: fn() -> lash_core::PluginError) {
+async fn refused_terminal(
+    tier: Tier,
+    name: &str,
+    fault: fn() -> lash_execution_contracts::plugin_error::PluginError,
+) {
     let calls = Arc::new(AtomicUsize::new(0));
     let Some(world) = World::new(tier, |backend| {
         lash::LashCore::standard_builder(backend.clone()).plugin(refusing_after_turn(&calls, fault))

@@ -45,16 +45,16 @@ fn derive_commit_node_ids(
 
 pub(in crate::runtime) fn execution_state_capture_error(err: crate::SessionError) -> StoreError {
     match err {
-        crate::SessionError::Plugin(crate::PluginError::Runtime(error)) => {
-            StoreError::TurnOutcomeMaterializationRefused {
-                error: Box::new(error),
-            }
-        }
-        crate::SessionError::Plugin(crate::PluginError::RuntimeEffectController(error)) => {
-            StoreError::TurnOutcomeMaterializationRefused {
-                error: Box::new(error.into_runtime_error()),
-            }
-        }
+        crate::SessionError::Plugin(
+            lash_execution_contracts::plugin_error::PluginError::Runtime(error),
+        ) => StoreError::TurnOutcomeMaterializationRefused {
+            error: Box::new(error),
+        },
+        crate::SessionError::Plugin(
+            lash_execution_contracts::plugin_error::PluginError::RuntimeEffectController(error),
+        ) => StoreError::TurnOutcomeMaterializationRefused {
+            error: Box::new(error.into_runtime_error()),
+        },
         err => StoreError::ExecutionStateCaptureFailed {
             message: err.to_string(),
         },

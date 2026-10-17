@@ -8,8 +8,8 @@ fn retired_roster_page_uses_live_and_recency_indexes() {
     conn.execute_batch(crate::schema::PROCESS_SCHEMA)
         .expect("install process schema");
     let (sql, values) = roster_query(
-        &lash_core_execution::ProcessListFilter {
-            status: lash_core_execution::ProcessStatusFilter::Any,
+        &lash_execution_contracts::process::ProcessListFilter {
+            status: lash_execution_contracts::process::ProcessStatusFilter::Any,
             retired_since_ms: Some(100),
             ..Default::default()
         },
@@ -91,10 +91,10 @@ fn pending_cancel_roster_page_seeks_the_partial_cancel_index() {
     conn.execute_batch(crate::schema::PROCESS_SCHEMA)
         .expect("install process schema");
     let (sql, values) = roster_query(
-        &lash_core_execution::ProcessListFilter {
-            status: lash_core_execution::ProcessStatusFilter::Any,
+        &lash_execution_contracts::process::ProcessListFilter {
+            status: lash_execution_contracts::process::ProcessStatusFilter::Any,
             cancel_pending_before_ms: Some(1_700_000_000_000),
-            ..lash_core_execution::ProcessListFilter::default()
+            ..lash_execution_contracts::process::ProcessListFilter::default()
         },
         None,
         None,
@@ -125,13 +125,13 @@ fn until_scope_roster_page_seeks_the_lifetime_scope_index() {
     conn.execute_batch(crate::schema::PROCESS_SCHEMA)
         .expect("install process schema");
     let (sql, values) = roster_query(
-        &lash_core_execution::ProcessListFilter {
-            status: lash_core_execution::ProcessStatusFilter::Any,
-            until: Some(lash_core_execution::ScopeId::turn(
+        &lash_execution_contracts::process::ProcessListFilter {
+            status: lash_execution_contracts::process::ProcessStatusFilter::Any,
+            until: Some(lash_core_store::scope_identity::ScopeId::turn(
                 lash_protocol_types::SessionId::from("plan-session"),
-                lash_core_execution::TurnId::from("plan-turn"),
+                lash_protocol_types::TurnId::from("plan-turn"),
             )),
-            ..lash_core_execution::ProcessListFilter::default()
+            ..lash_execution_contracts::process::ProcessListFilter::default()
         },
         None,
         None,
@@ -192,11 +192,18 @@ fn retention_keeps_terminal_process_until_cascade_drains() {
 /// bytes; a batch saves once and replay saves nothing, while reads stay rich.
 #[test]
 fn process_lifecycle_write_size() {
-    use lash_core_execution::{
-        CancelOrigin, CancelRequest, EngineLaunch, FleetFormat, Lifetime, ProcessInput,
-        ProcessLifecycleState, ProcessProvenance, ProcessRegistration, ProcessWaits, WaitKind,
-        WaitState,
-    };
+    use lash_core_store::store::FleetFormat;
+    use lash_execution_contracts::process::EngineLaunch;
+    use lash_execution_contracts::process::Lifetime;
+    use lash_execution_contracts::process::ProcessInput;
+    use lash_execution_contracts::process::ProcessLifecycleState;
+    use lash_execution_contracts::process::ProcessProvenance;
+    use lash_execution_contracts::process::ProcessRegistration;
+    use lash_execution_contracts::process::ProcessWaits;
+    use lash_execution_contracts::process::WaitKind;
+    use lash_execution_contracts::process::WaitState;
+    use lash_protocol_types::tool_output::CancelOrigin;
+    use lash_protocol_types::tool_output::CancelRequest;
     use std::cell::RefCell;
 
     thread_local! {
@@ -221,7 +228,7 @@ fn process_lifecycle_write_size() {
                 kind: "write-size".into(),
                 payload: serde_json::json!({"body": payload, "escapes": "\0'雪"}),
                 launch: EngineLaunch::new(
-                    lash_core_execution::testing::process_execution_env_fixture_ref(),
+                    lash_execution_contracts::testing::process_execution_env_fixture_ref(),
                     None,
                 ),
             },
@@ -259,8 +266,8 @@ fn process_lifecycle_write_size() {
         .expect("insert start");
         let wait = WaitState {
             kind: WaitKind::Call {
-                call_id: lash_core_execution::ToolCallId::fixture("write-size"),
-                tool_id: lash_core_execution::ToolId::from("write-size"),
+                call_id: lash_protocol_types::ToolCallId::fixture("write-size"),
+                tool_id: lash_protocol_types::tool_contract::ToolId::from("write-size"),
             },
             since_ms: 20,
             site: None,
@@ -291,11 +298,11 @@ fn process_lifecycle_write_size() {
             BEGIN SELECT RAISE(ABORT, 'creation metadata is immutable'); END;",
         )
         .expect("guard creation metadata");
-        let successor = lash_core_execution::ProcessSuccessorRequest {
+        let successor = lash_execution_contracts::process::ProcessSuccessorRequest {
             payload: serde_json::json!({"successor": record.input}),
-            env: lash_core_execution::testing::process_execution_env_fixture_ref(),
+            env: lash_execution_contracts::testing::process_execution_env_fixture_ref(),
             definition_id: Some(
-                lash_core_execution::ProcessDefinitionId::from_sha256_digest([3; 32]),
+                lash_protocol_types::ProcessDefinitionId::from_sha256_digest([3; 32]),
             ),
         };
         let setup_wait = WaitState {

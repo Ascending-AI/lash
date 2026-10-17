@@ -289,7 +289,7 @@ mod tests {
                 .unwrap();
         let stores = crate::SqliteStoreSet::memory_with_options_and_clock(
             options,
-            std::sync::Arc::new(lash_core_execution::facade_support::SystemClock),
+            std::sync::Arc::new(lash_core_ids::clock::SystemClock),
         )
         .await
         .unwrap();
@@ -531,7 +531,7 @@ mod tests {
                 .expect("body");
             }
             let tx = conn.transaction().expect("read snapshot");
-            let (answer, receipt) = lash_core_execution::facade_support::sql::collect(
+            let (answer, receipt) = lash_core_ids::operational_metrics::sql::collect(
                 "graph.frontiers",
                 "sqlite",
                 async {
@@ -711,7 +711,7 @@ mod tests {
             actor: &actor,
             epoch: Epoch(1),
             now: lash_durable::DurableInstant(1),
-            fleet: lash_core_execution::FleetFormat::current(),
+            fleet: lash_core_store::store::FleetFormat::current(),
             blob_profile: crate::BuiltinBlobProfile::default(),
             retired: super::super::Retired::default(),
             open_roots: Default::default(),

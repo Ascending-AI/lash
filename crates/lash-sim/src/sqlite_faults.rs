@@ -8,10 +8,16 @@ use crate::backend_fault::{
     BackendFault, BackendFaultArm, BackendFaultKind, BackendFaultLane, BackendFaultObservation,
     BackendFaultScript,
 };
-use lash_core::{
-    DeploymentStore, OperationId, RuntimeCommit, RuntimeSessionState, RuntimeStore,
-    SessionCreationHead, SessionPolicy, SessionRelation, SessionStoreCreateRequest, StoreError,
-};
+use lash_core::OperationId;
+use lash_core::RuntimeCommit;
+use lash_core::RuntimeSessionState;
+use lash_core::RuntimeStore;
+use lash_core::SessionCreationHead;
+use lash_core::SessionPolicy;
+use lash_core::SessionRelation;
+use lash_core::SessionStoreCreateRequest;
+use lash_core::StoreError;
+use lash_execution_contracts::deployment::DeploymentStore;
 use serde::{Deserialize, Serialize};
 use serde_json::{Value, json};
 

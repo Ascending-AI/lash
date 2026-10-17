@@ -9,7 +9,6 @@
 //! and the cancel request are the registry's own writes on this commit's
 //! connection, so the registry and the actor never disagree.
 
-use lash_core_execution::runtime::actor::process::{scope_id, scope_index, subtree_roots};
 use lash_durable::domain::{
     CANCEL_MAIL, CancelAnswer, CancelRequest, DomainRefusal, ProcessActorRow, ProcessStartRows,
     ProcessWrite, ScopeKey,
@@ -18,6 +17,9 @@ use lash_durable::{
     ActorKey, DurableError, DurableInstant, Epoch, MailRefusal, StoreFailure, StoreFailureKind,
     Woken,
 };
+use lash_execution_contracts::scope::scope_id;
+use lash_execution_contracts::scope::scope_index;
+use lash_execution_contracts::scope::subtree_roots;
 use lash_protocol_types::{CancelOrigin, ProcessId};
 use rusqlite::{Connection, OptionalExtension};
 
@@ -28,7 +30,7 @@ use crate::process_registry::actor::CancelRecorded;
 
 /// A registry failure inside a durable commit: the registry row did not
 /// decode or refused, which the port reports as a store failure.
-fn registry_failure(error: &lash_core_execution::PluginError) -> DurableError {
+fn registry_failure(error: &lash_execution_contracts::plugin_error::PluginError) -> DurableError {
     DurableError::Store(StoreFailure {
         kind: StoreFailureKind::Corrupt,
         message: error.to_string(),
@@ -169,7 +171,7 @@ pub(crate) fn cancel_within(
     origin: CancelOrigin,
     requester: &str,
     now: DurableInstant,
-    fleet: lash_core_execution::FleetFormat,
+    fleet: lash_core_store::store::FleetFormat,
 ) -> Answer<(CancelAnswer, Option<Woken>)> {
     let recorded = match SqliteProcessRegistry::record_cancel_conn(
         tx,
@@ -243,7 +245,7 @@ fn register_within(
     commit: &Committing<'_>,
     rows: &ProcessStartRows,
 ) -> Result<(), DurableError> {
-    let Ok(staged) = lash_core_execution::runtime::StagedRegistration::decode(rows) else {
+    let Ok(staged) = lash_execution_contracts::process::StagedRegistration::decode(rows) else {
         return Err(super::corrupt(
             "process start rows",
             &rows.registration_json,
@@ -272,7 +274,7 @@ fn register_within(
         Err(error)
             if matches!(
                 error.class(),
-                lash_core_execution::PluginErrorClass::Terminal
+                lash_execution_contracts::plugin_error::PluginErrorClass::Terminal
             ) =>
         {
             Err(refused(error.to_string()))
@@ -346,15 +348,16 @@ pub(super) fn apply(tx: &Connection, commit: &Committing<'_>, write: &ProcessWri
             let Ok(payload) = serde_json::from_str(payload_json) else {
                 return Ok(Err(super::corrupt("process event payload", payload_json)));
             };
-            let request = match lash_core_execution::ProcessEventAppendRequest::from_stored(
-                event_type.as_str(),
-                payload,
-                replay_key.as_str(),
-                commit.fleet,
-            ) {
-                Ok(request) => request,
-                Err(error) => return Ok(Err(registry_failure(&error))),
-            };
+            let request =
+                match lash_execution_contracts::process::ProcessEventAppendRequest::from_stored(
+                    event_type.as_str(),
+                    payload,
+                    replay_key.as_str(),
+                    commit.fleet,
+                ) {
+                    Ok(request) => request,
+                    Err(error) => return Ok(Err(registry_failure(&error))),
+                };
             Ok(SqliteProcessRegistry::record_event_conn(
                 tx,
                 process,
@@ -368,7 +371,7 @@ pub(super) fn apply(tx: &Connection, commit: &Committing<'_>, write: &ProcessWri
             process,
             outcome_json,
         } => {
-            let output: lash_core_execution::ProcessAwaitOutput =
+            let output: lash_execution_contracts::process::ProcessAwaitOutput =
                 match serde_json::from_str(outcome_json) {
                     Ok(output) => output,
                     Err(_) => return Ok(Err(super::corrupt("process terminal", outcome_json))),
@@ -492,7 +495,7 @@ pub(super) fn request_cancel(
     tx: &Connection,
     request: &CancelRequest,
     now: DurableInstant,
-    fleet: lash_core_execution::FleetFormat,
+    fleet: lash_core_store::store::FleetFormat,
 ) -> Answer<(CancelAnswer, Option<Woken>)> {
     cancel_within(
         tx,
@@ -620,14 +623,14 @@ mod tests {
             actor: &actor,
             epoch: Epoch(1),
             now: DurableInstant(42),
-            fleet: lash_core_execution::FleetFormat::current(),
+            fleet: lash_core_store::store::FleetFormat::current(),
             blob_profile: crate::BuiltinBlobProfile::default(),
             retired: Default::default(),
             open_roots: Default::default(),
         };
         let scope = ScopeKey::Turn("session".into(), "run".into());
         let (answer, receipt) =
-            lash_core_execution::facade_support::sql::collect("turn.commit", "sqlite", async {
+            lash_core_ids::operational_metrics::sql::collect("turn.commit", "sqlite", async {
                 close_scope(&conn, &commit, &scope)
             })
             .await;
@@ -641,22 +644,24 @@ mod tests {
     /// TURN-HOLDS: registration persists the marker and closing releases its hold and marks.
     #[tokio::test]
     async fn a_turn_close_releases_registered_consumer_holds_and_abandonment_marks() {
-        use lash_core_execution::{ProcessRegistrar as _, ProcessRetention as _};
+        use lash_execution_contracts::process::ProcessRegistrar as _;
+        use lash_execution_contracts::process::ProcessRetention as _;
         let stores = crate::SqliteStoreSet::memory().await.expect("stores");
         let store = stores.open_store().await.expect("store");
-        lash_core_execution::testing::process_execution_env_fixture(
+        lash_execution_contracts::testing::process_execution_env_fixture(
             stores.process_env_store().as_ref(),
         )
         .await;
         store.conn.call(|conn| conn.execute("INSERT INTO session_runs (session_id, run) VALUES ('held-session', 'held-run')", [])).await.expect("run");
-        let owner = lash_core_execution::ScopeId::turn("held-session", "held-run");
-        let mut registration = lash_core_execution::testing::held_engine_registration(
+        let owner = lash_core_store::scope_identity::ScopeId::turn("held-session", "held-run");
+        let mut registration = lash_execution_contracts::testing::held_engine_registration(
             serde_json::json!({}),
-            lash_core_execution::ProcessProvenance::host(),
-            lash_core_execution::Lifetime::Detached,
+            lash_execution_contracts::process::ProcessProvenance::host(),
+            lash_execution_contracts::process::Lifetime::Detached,
         );
-        registration.ancestry = lash_core_execution::Ancestry::from_scopes([owner.clone()]);
-        registration.consumer_hold = Some(lash_core_execution::ConsumerHold {
+        registration.ancestry =
+            lash_execution_contracts::process::Ancestry::from_scopes([owner.clone()]);
+        registration.consumer_hold = Some(lash_execution_contracts::process::ConsumerHold {
             key: "held-call".into(),
             owner: owner.clone(),
             cancels: false,
@@ -676,7 +681,7 @@ mod tests {
             let actor = ActorKey::session("held-session").expect("actor");
             let commit = Committing {
                 actor: &actor, epoch: Epoch(1), now: DurableInstant(42),
-                fleet: lash_core_execution::FleetFormat::current(), blob_profile: crate::BuiltinBlobProfile::default(),
+                fleet: lash_core_store::store::FleetFormat::current(), blob_profile: crate::BuiltinBlobProfile::default(),
                 retired: Default::default(), open_roots: Default::default(),
             };
             close_scope(conn, &commit, &ScopeKey::Turn("held-session".into(), "held-run".into()))?.expect("close");

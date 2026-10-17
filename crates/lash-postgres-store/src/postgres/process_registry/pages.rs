@@ -39,11 +39,11 @@ pub(super) async fn collect_non_terminal_records(
 pub(super) async fn list_non_terminal_processes_page(
     registry: &PostgresProcessRegistry,
     limit: std::num::NonZeroUsize,
-    continuation: Option<lash_core_execution::ProcessRegistryCursor>,
-) -> Result<lash_core_execution::NonTerminalProcessPage, PluginError> {
+    continuation: Option<lash_execution_contracts::process::ProcessRegistryCursor>,
+) -> Result<lash_execution_contracts::process::NonTerminalProcessPage, PluginError> {
     let page_size = limit
         .get()
-        .min(lash_core_execution::MAX_NON_TERMINAL_PROCESS_PAGE_SIZE);
+        .min(lash_execution_contracts::process::MAX_NON_TERMINAL_PROCESS_PAGE_SIZE);
     if let Some(cursor) = continuation.as_ref()
         && cursor.backend() != CURSOR_BACKEND
     {
@@ -66,7 +66,7 @@ pub(super) async fn list_non_terminal_processes_page(
         {
             Some(process_id) => crate::stored_process_id(&process_id)?,
             None => {
-                return Ok(lash_core_execution::NonTerminalProcessPage {
+                return Ok(lash_execution_contracts::process::NonTerminalProcessPage {
                     records: Vec::new(),
                     continuation: None,
                 });
@@ -112,13 +112,13 @@ pub(super) async fn list_non_terminal_processes_page(
         reason = "`has_more` is only true when `records` held more than `limit` rows, so the truncated page is non-empty"
     )]
     let continuation = has_more.then(|| {
-        lash_core_execution::ProcessRegistryCursor::new(
+        lash_execution_contracts::process::ProcessRegistryCursor::new(
             CURSOR_BACKEND,
             records.last().expect("non-empty bounded page").id.clone(),
             through_process_id,
         )
     });
-    Ok(lash_core_execution::NonTerminalProcessPage {
+    Ok(lash_execution_contracts::process::NonTerminalProcessPage {
         records,
         continuation,
     })

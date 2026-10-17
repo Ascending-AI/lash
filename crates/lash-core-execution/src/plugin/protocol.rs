@@ -8,6 +8,7 @@ pub use lash_core_store::execution_state::{
     CheckpointComponentKey, ExecutionGraphCapture, ExecutionGraphPurpose, HydratedExecutionGraph,
     PluginOptions,
 };
+pub use lash_core_store::transcript::TranscriptDecoderPlugin;
 
 /// A cell's ordered archival-body references, which its turn retains when
 /// consuming the cell's saved root. The references contain no copied body.
@@ -38,7 +39,7 @@ pub trait ProtocolSessionPlugin: Send + Sync {
         &self,
         _catalog: &crate::ToolCatalog,
         _state: Option<&ProtocolSessionRestoreView>,
-    ) -> Result<(), crate::PluginError> {
+    ) -> Result<(), lash_execution_contracts::plugin_error::PluginError> {
         Ok(())
     }
 
@@ -72,7 +73,8 @@ pub trait ProtocolSessionPlugin: Send + Sync {
         &self,
         _ctx: ProtocolBeforeLlmCallContext,
         _request: &LlmRequest,
-    ) -> Result<Option<ProtocolLlmCallAction>, crate::PluginError> {
+    ) -> Result<Option<ProtocolLlmCallAction>, lash_execution_contracts::plugin_error::PluginError>
+    {
         Ok(None)
     }
 
@@ -574,5 +576,3 @@ pub trait ProtocolDriverPlugin: Send + Sync {
         Ok(None)
     }
 }
-
-pub use lash_core_store::transcript::TranscriptDecoderPlugin;

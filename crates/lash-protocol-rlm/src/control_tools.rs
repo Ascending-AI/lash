@@ -20,7 +20,8 @@ impl ToolProvider for RlmControlToolsProvider {
     fn tool_manifests(
         &self,
         _config: &lash_core::OwnerConfigView,
-    ) -> std::result::Result<Vec<ToolManifest>, lash_core::PluginError> {
+    ) -> std::result::Result<Vec<ToolManifest>, lash_execution_contracts::plugin_error::PluginError>
+    {
         Ok({
             vec![
                 continue_as_tool_definition_for(self.vocabulary).manifest(),
@@ -94,7 +95,8 @@ impl ToolProvider for RlmFinishProvider {
     fn tool_manifests(
         &self,
         config: &lash_core::OwnerConfigView,
-    ) -> std::result::Result<Vec<ToolManifest>, lash_core::PluginError> {
+    ) -> std::result::Result<Vec<ToolManifest>, lash_execution_contracts::plugin_error::PluginError>
+    {
         Ok(vec![self.definition(config).manifest()])
     }
 
@@ -318,15 +320,18 @@ mod tests {
     use lash_protocol_types::{ProcessId, SessionId};
     use std::sync::{Arc, Mutex};
 
+    use lash_core::SessionAppendNode;
+    use lash_core::SessionPolicy;
+    use lash_core::SessionSnapshot;
+    use lash_core::ToolProvider;
     use lash_core::plugin::runtime_host::{
         SessionGraphService, SessionLifecycleService, SessionStateService,
     };
-    use lash_core::plugin::{PluginError, SessionHandle};
     use lash_core::runtime::RuntimeSessionState;
-    use lash_core::{
-        SessionAppendNode, SessionCreateRequest, SessionPolicy, SessionSnapshot, ToolProvider,
-    };
     use lash_core::{ToolControl, TurnControl};
+    use lash_execution_contracts::plugin_error::PluginError;
+    use lash_execution_contracts::session_types::SessionCreateRequest;
+    use lash_execution_contracts::session_types::SessionHandle;
     use lash_rlm_types::RlmProtocolEvent;
 
     fn llm_profile_spec(model: &str) -> Option<lash_core::LlmProfileConfig> {
@@ -367,8 +372,10 @@ mod tests {
             lash_core::plugin::CommittedTurnReadError,
         > {
             Err(
-                lash_core::PluginError::Session("operation is absent from this fixture".into())
-                    .into(),
+                lash_execution_contracts::plugin_error::PluginError::Session(
+                    "operation is absent from this fixture".into(),
+                )
+                .into(),
             )
         }
 
@@ -397,10 +404,13 @@ mod tests {
             &self,
             _session_id: &lash_core::SessionId,
             _turn_id: &lash_core::TurnId,
-        ) -> Result<lash_core::ExecutionScope, lash_core::PluginError> {
-            Err(lash_core::PluginError::Session(
-                "operation is absent from this fixture".into(),
-            ))
+        ) -> Result<lash_core::ExecutionScope, lash_execution_contracts::plugin_error::PluginError>
+        {
+            Err(
+                lash_execution_contracts::plugin_error::PluginError::Session(
+                    "operation is absent from this fixture".into(),
+                ),
+            )
         }
     }
 
@@ -430,10 +440,15 @@ mod tests {
             &self,
             _session_id: &lash_core::SessionId,
             _request: lash_core::AppendSessionNodesRequest,
-        ) -> Result<lash_core::AppendSessionNodesOutcome, lash_core::PluginError> {
-            Err(lash_core::PluginError::Session(
-                "operation is absent from this fixture".into(),
-            ))
+        ) -> Result<
+            lash_core::AppendSessionNodesOutcome,
+            lash_execution_contracts::plugin_error::PluginError,
+        > {
+            Err(
+                lash_execution_contracts::plugin_error::PluginError::Session(
+                    "operation is absent from this fixture".into(),
+                ),
+            )
         }
     }
 
@@ -442,7 +457,7 @@ mod tests {
         async fn stage_recorded_start(
             &self,
             _owner: &lash_core::RuntimeOwner,
-            _request: lash_core::ProcessStartRequest,
+            _request: lash_execution_contracts::process::ProcessStartRequest,
             _scope: lash_core::ProcessOpScope<'_>,
         ) -> Result<lash_core::StagedProcessStart, PluginError> {
             Err(PluginError::Session(
@@ -453,10 +468,10 @@ mod tests {
         async fn start(
             &self,
             _session_id: &SessionId,
-            _registration: lash_core::ProcessStartRegistration,
-            _options: lash_core::ProcessStartOptions,
+            _registration: lash_execution_contracts::process::ProcessStartRegistration,
+            _options: lash_execution_contracts::process::ProcessStartOptions,
             _scope: lash_core::ProcessOpScope<'_>,
-        ) -> Result<lash_core::facade_support::ObservedProcess, PluginError> {
+        ) -> Result<lash_execution_contracts::process::ObservedProcess, PluginError> {
             Err(PluginError::Session(
                 "process starts are unavailable in this test".to_string(),
             ))
@@ -466,7 +481,7 @@ mod tests {
             &self,
             _process_id: &ProcessId,
             _scope: lash_core::ProcessOpScope<'_>,
-        ) -> Result<lash_core::ProcessAwaitOutput, PluginError> {
+        ) -> Result<lash_execution_contracts::process::ProcessAwaitOutput, PluginError> {
             Err(PluginError::Session(
                 "process awaiting is unavailable in this test".to_string(),
             ))
@@ -475,9 +490,9 @@ mod tests {
         async fn list_visible(
             &self,
             _session_id: &SessionId,
-            _mode: lash_core::ProcessListMode,
+            _mode: lash_execution_contracts::process::ProcessListMode,
             _scope: lash_core::ProcessOpScope<'_>,
-        ) -> Result<Vec<lash_core::facade_support::ObservedProcess>, PluginError> {
+        ) -> Result<Vec<lash_execution_contracts::process::ObservedProcess>, PluginError> {
             Ok(Vec::new())
         }
 
@@ -497,7 +512,7 @@ mod tests {
             _owner: &lash_core::RuntimeOwner,
             _process_id: &ProcessId,
             _scope: lash_core::ProcessOpScope<'_>,
-        ) -> Result<lash_core::facade_support::ObservedProcess, PluginError> {
+        ) -> Result<lash_execution_contracts::process::ObservedProcess, PluginError> {
             Err(PluginError::Session(
                 "process cancellation is unavailable in this test".to_string(),
             ))
@@ -509,7 +524,7 @@ mod tests {
             _process_id: &ProcessId,
             _identity: lash_core::ToolIntentIdentity,
             _scope: lash_core::ProcessOpScope<'_>,
-        ) -> Result<lash_core::facade_support::ObservedProcess, PluginError> {
+        ) -> Result<lash_execution_contracts::process::ObservedProcess, PluginError> {
             Err(PluginError::Session(
                 "recorded process cancellation is unavailable in this test".to_string(),
             ))
@@ -530,58 +545,79 @@ mod tests {
         async fn list_visible_for_attempt(
             &self,
             _owner: &lash_core::RuntimeOwner,
-            _mode: lash_core::ProcessListMode,
-        ) -> Result<Vec<lash_core::facade_support::ObservedProcess>, lash_core::PluginError>
-        {
-            Err(lash_core::PluginError::Session(
-                "operation is absent from this fixture".into(),
-            ))
+            _mode: lash_execution_contracts::process::ProcessListMode,
+        ) -> Result<
+            Vec<lash_execution_contracts::process::ObservedProcess>,
+            lash_execution_contracts::plugin_error::PluginError,
+        > {
+            Err(
+                lash_execution_contracts::plugin_error::PluginError::Session(
+                    "operation is absent from this fixture".into(),
+                ),
+            )
         }
         async fn start_from_request(
             &self,
             _session_id: &lash_core::SessionId,
-            _request: lash_core::ProcessStartRequest,
+            _request: lash_execution_contracts::process::ProcessStartRequest,
             _scope: lash_core::ProcessOpScope<'_>,
-        ) -> Result<lash_core::ProcessHandleView, lash_core::PluginError> {
-            Err(lash_core::PluginError::Session(
-                "operation is absent from this fixture".into(),
-            ))
+        ) -> Result<
+            lash_execution_contracts::process::ProcessHandleView,
+            lash_execution_contracts::plugin_error::PluginError,
+        > {
+            Err(
+                lash_execution_contracts::plugin_error::PluginError::Session(
+                    "operation is absent from this fixture".into(),
+                ),
+            )
         }
         async fn stage_bound(
             &self,
-            _registration: lash_core::ProcessStartRegistration,
+            _registration: lash_execution_contracts::process::ProcessStartRegistration,
             _scope: lash_core::ProcessOpScope<'_>,
-        ) -> Result<lash_core::StagedProcessStart, lash_core::PluginError> {
-            Err(lash_core::PluginError::Session(
-                "operation is absent from this fixture".into(),
-            ))
+        ) -> Result<
+            lash_core::StagedProcessStart,
+            lash_execution_contracts::plugin_error::PluginError,
+        > {
+            Err(
+                lash_execution_contracts::plugin_error::PluginError::Session(
+                    "operation is absent from this fixture".into(),
+                ),
+            )
         }
         async fn cancel_bound(
             &self,
             _process_id: &lash_core::ProcessId,
             _scope: lash_core::ProcessOpScope<'_>,
-        ) -> Result<(), lash_core::PluginError> {
-            Err(lash_core::PluginError::Session(
-                "operation is absent from this fixture".into(),
-            ))
+        ) -> Result<(), lash_execution_contracts::plugin_error::PluginError> {
+            Err(
+                lash_execution_contracts::plugin_error::PluginError::Session(
+                    "operation is absent from this fixture".into(),
+                ),
+            )
         }
         async fn release_consumer_hold(
             &self,
             _process_id: &lash_core::ProcessId,
             _key: &str,
-        ) -> Result<(), lash_core::PluginError> {
-            Err(lash_core::PluginError::Session(
-                "operation is absent from this fixture".into(),
-            ))
+        ) -> Result<(), lash_execution_contracts::plugin_error::PluginError> {
+            Err(
+                lash_execution_contracts::plugin_error::PluginError::Session(
+                    "operation is absent from this fixture".into(),
+                ),
+            )
         }
         async fn abandon_consumer_hold(
             &self,
             _key: &str,
             _owner: &lash_core::ScopeId,
-        ) -> Result<Vec<lash_core::ProcessId>, lash_core::PluginError> {
-            Err(lash_core::PluginError::Session(
-                "operation is absent from this fixture".into(),
-            ))
+        ) -> Result<Vec<lash_core::ProcessId>, lash_execution_contracts::plugin_error::PluginError>
+        {
+            Err(
+                lash_execution_contracts::plugin_error::PluginError::Session(
+                    "operation is absent from this fixture".into(),
+                ),
+            )
         }
     }
 
@@ -595,9 +631,11 @@ mod tests {
         let context = lash_core::testing::ToolCallFixture::with_host_and_direct_completions(
             manager,
             lash_core::facade_support::DirectCompletionClient::from_fn(|_, _| {
-                Err(lash_core::PluginError::Session(
-                    "direct completions are unavailable in continue_as tests".to_string(),
-                ))
+                Err(
+                    lash_execution_contracts::plugin_error::PluginError::Session(
+                        "direct completions are unavailable in continue_as tests".to_string(),
+                    ),
+                )
             }),
         )
         .processes(processes)

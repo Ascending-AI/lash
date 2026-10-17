@@ -8,13 +8,24 @@
 
 use std::sync::LazyLock;
 
-use lash_core_execution::store::{
-    CONTROL_INTENT_FORMAT, ControlIntent, ControlIntentId, ControlIntentKind, ControlIntentState,
-    RunAdmissionRecord, RunEndOutcome, RunStore, RunTerminal, RunTerminalCause,
-    RunTerminalWriteDecision, RunTurns, UnfinishedRun, decide_run_terminal_write,
-    run_binding_conflict, stored_intent_kind, stored_intent_state,
-};
-use lash_core_execution::store_backend_support::turn_cancel::EndedRunInputRelease;
+use lash_core_store::store::CONTROL_INTENT_FORMAT;
+use lash_core_store::store::ControlIntent;
+use lash_core_store::store::ControlIntentId;
+use lash_core_store::store::ControlIntentKind;
+use lash_core_store::store::ControlIntentState;
+use lash_core_store::store::RunAdmissionRecord;
+use lash_core_store::store::RunEndOutcome;
+use lash_core_store::store::RunStore;
+use lash_core_store::store::RunTerminal;
+use lash_core_store::store::RunTerminalCause;
+use lash_core_store::store::RunTerminalWriteDecision;
+use lash_core_store::store::RunTurns;
+use lash_core_store::store::UnfinishedRun;
+use lash_core_store::store::decide_run_terminal_write;
+use lash_core_store::store::run_binding_conflict;
+use lash_core_store::store::stored_intent_kind;
+use lash_core_store::store::stored_intent_state;
+use lash_core_store::store_backend_support::turn_cancel::EndedRunInputRelease;
 use lash_protocol_types::{InputId, SessionId, TurnId};
 use lash_store_sql::Dialect;
 use lash_store_sql::session_runs::{
@@ -248,25 +259,26 @@ async fn release_run_rows_conn(
         return Ok(());
     }
     // `select_request` yields request_id, origin, reason, disposition, mode.
-    let request: Option<
-        lash_core_execution::store_backend_support::turn_cancel::TurnCancelRequestRow,
-    > = crate::observed_sql::query_as(sql.cancel_requests.select_request.sql())
-        .bind(session_id.as_str())
-        .bind(run.as_str())
-        .fetch_optional(crate::observed_sql::executor(&mut *conn))
-        .await
-        .map_err(store_sqlx_error)?;
+    let request: Option<lash_core_store::store_backend_support::turn_cancel::TurnCancelRequestRow> =
+        crate::observed_sql::query_as(sql.cancel_requests.select_request.sql())
+            .bind(session_id.as_str())
+            .bind(run.as_str())
+            .fetch_optional(crate::observed_sql::executor(&mut *conn))
+            .await
+            .map_err(store_sqlx_error)?;
     let disposition = request
         .as_ref()
         .map(|row| {
-            lash_core_execution::store_backend_support::turn_cancel::turn_cancel_undelivered_from_wire(&row.3)
+            lash_core_store::store_backend_support::turn_cancel::turn_cancel_undelivered_from_wire(
+                &row.3,
+            )
         })
         .transpose()?;
     for input_id in addressed.dropped_inputs(disposition) {
         crate::observed_sql::query(sql.pending_inputs.cancel.sql())
             .bind(session_id.as_str())
             .bind(input_id.as_str())
-            .bind(lash_core_execution::runtime::TurnInputStateKind::Cancelled.as_str())
+            .bind(lash_core_store::turn_input_vocabulary::TurnInputStateKind::Cancelled.as_str())
             .bind(crate::support::clamp_epoch_ms(at_ms))
             .execute(crate::observed_sql::executor(&mut *conn))
             .await
@@ -282,10 +294,10 @@ pub(crate) async fn end_refused_run_tx(
     tx: &mut sqlx::Transaction<'_, sqlx::Postgres>,
     session_id: &SessionId,
     run: &TurnId,
-    refusal: &lash_core_execution::RuntimeError,
+    refusal: &lash_core_store::runtime_error::RuntimeError,
     at_ms: u64,
 ) -> Result<RunEndOutcome, StoreError> {
-    let target = lash_core_execution::engine::RunRef {
+    let target = lash_execution_contracts::run::RunRef {
         session: session_id.clone(),
         run: run.clone(),
     };
@@ -340,7 +352,7 @@ enum UnansweredRun {
 /// Where `target` stands, read under the session history lock.
 async fn unanswered_run_tx(
     tx: &mut sqlx::Transaction<'_, sqlx::Postgres>,
-    target: &lash_core_execution::engine::RunRef,
+    target: &lash_execution_contracts::run::RunRef,
 ) -> Result<UnansweredRun, StoreError> {
     let session = &target.session;
     let run = &target.run;
@@ -367,7 +379,7 @@ async fn unanswered_run_tx(
 /// End an open run no commit answered with `cause`.
 async fn write_unanswered_run_end_tx(
     tx: &mut sqlx::Transaction<'_, sqlx::Postgres>,
-    target: &lash_core_execution::engine::RunRef,
+    target: &lash_execution_contracts::run::RunRef,
     at_ms: u64,
     cause: RunTerminalCause,
 ) -> Result<RunTerminal, StoreError> {
@@ -402,7 +414,7 @@ async fn write_unanswered_run_end_tx(
         .bind(session.as_str())
         .bind(input)
         .bind(crate::support::clamp_epoch_ms(at_ms))
-        .bind(lash_core_execution::runtime::TurnInputStateKind::Cancelled.as_str())
+        .bind(lash_core_store::turn_input_vocabulary::TurnInputStateKind::Cancelled.as_str())
         .execute(crate::observed_sql::executor(&mut **tx))
         .await
         .map_err(store_sqlx_error)?;
@@ -467,7 +479,7 @@ pub(crate) async fn unfinished_run_conn(
 pub(crate) async fn head_ownership_facts_conn(
     conn: &mut PgConnection,
     session_id: &SessionId,
-) -> Result<lash_core_execution::store::HeadOwnershipFacts, StoreError> {
+) -> Result<lash_core_store::store::HeadOwnershipFacts, StoreError> {
     let unfinished_run = unfinished_run_conn(conn, session_id)
         .await?
         .map(|unfinished| unfinished.run);
@@ -481,7 +493,7 @@ pub(crate) async fn head_ownership_facts_conn(
     .fetch_one(crate::observed_sql::executor(&mut *conn))
     .await
     .map_err(store_sqlx_error)?;
-    Ok(lash_core_execution::store::HeadOwnershipFacts {
+    Ok(lash_core_store::store::HeadOwnershipFacts {
         unfinished_run,
         open_command: row
             .1
@@ -604,7 +616,7 @@ async fn input_status_conn(
     conn: &mut PgConnection,
     session_id: &SessionId,
     input: &InputId,
-) -> Result<lash_core_execution::store::InputStatus, StoreError> {
+) -> Result<lash_core_store::store::InputStatus, StoreError> {
     let row = crate::observed_sql::query(session_runs_sql().inputs.select_status.sql())
         .bind(session_id.as_str())
         .bind(input.as_str())
@@ -612,13 +624,13 @@ async fn input_status_conn(
         .await
         .map_err(store_sqlx_error)?;
     let run: Option<String> = row.try_get(0).map_err(store_sqlx_error)?;
-    Ok(lash_core_execution::store::InputStatus {
+    Ok(lash_core_store::store::InputStatus {
         run: run
             .map(TurnId::parse)
             .transpose()
             .map_err(StoreError::from)?,
         open: row.try_get(1).map_err(store_sqlx_error)?,
-        fault: lash_core_execution::store::SessionFault::from_stored_columns(
+        fault: lash_core_store::store::SessionFault::from_stored_columns(
             session_id,
             row.try_get(2).map_err(store_sqlx_error)?,
             row.try_get(3).map_err(store_sqlx_error)?,
@@ -756,7 +768,7 @@ pub(crate) async fn insert_intent_conn(
 /// session actor, whose close steps act on the intent, and answers the
 /// actor it woke for the wake sink once the transaction commits.
 ///
-/// [`ControlIntentStore::begin_session_close`]: lash_core_execution::store::ControlIntentStore::begin_session_close
+/// [`ControlIntentStore::begin_session_close`]: lash_core_store::store::ControlIntentStore::begin_session_close
 pub(crate) async fn begin_session_close_tx(
     tx: &mut sqlx::Transaction<'_, sqlx::Postgres>,
     session_id: &SessionId,
@@ -854,8 +866,8 @@ impl RunStore for PostgresStore {
 
     async fn admit_at_checkpoint(
         &self,
-        request: &lash_core_execution::store::CheckpointAdmissionRequest,
-    ) -> Result<lash_core_execution::store::CheckpointAdmission, StoreError> {
+        request: &lash_core_store::store::CheckpointAdmissionRequest,
+    ) -> Result<lash_core_store::store::CheckpointAdmission, StoreError> {
         crate::runtime_persistence::admit_at_checkpoint_postgres(self, request).await
     }
 
@@ -872,10 +884,10 @@ impl RunStore for PostgresStore {
         &self,
         session_id: &SessionId,
         run: &TurnId,
-        refusal: &lash_core_execution::RuntimeError,
+        refusal: &lash_core_store::runtime_error::RuntimeError,
         at_ms: u64,
     ) -> Result<RunEndOutcome, StoreError> {
-        lash_core_execution::store::validate_session_id(session_id)?;
+        lash_core_store::store::validate_session_id(session_id)?;
         let connection = acquire_runtime_connection(&self.pool, &self.observer).await?;
         let mut tx = crate::begin_guarded(connection, &self.fence).await?;
         let end = end_refused_run_tx(&mut tx, session_id, run, refusal, at_ms).await?;
@@ -889,7 +901,7 @@ impl RunStore for PostgresStore {
         run: &TurnId,
         at_ms: u64,
     ) -> Result<RunEndOutcome, StoreError> {
-        lash_core_execution::store::validate_session_id(session_id)?;
+        lash_core_store::store::validate_session_id(session_id)?;
         let connection = acquire_runtime_connection(&self.pool, &self.observer).await?;
         let mut tx = crate::begin_guarded(connection, &self.fence).await?;
         let end = end_command_run_tx(&mut tx, session_id, run, at_ms).await?;
@@ -912,7 +924,7 @@ impl RunStore for PostgresStore {
         &self,
         session_id: &SessionId,
         input: &InputId,
-    ) -> Result<lash_core_execution::store::InputStatus, StoreError> {
+    ) -> Result<lash_core_store::store::InputStatus, StoreError> {
         let mut connection = acquire_runtime_connection(&self.pool, &self.observer).await?;
         input_status_conn(&mut connection, session_id, input).await
     }

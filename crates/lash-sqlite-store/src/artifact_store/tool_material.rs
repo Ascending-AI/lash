@@ -3,11 +3,16 @@
 //! Run-segment and source edges in `artifact_referrer_edges` and fenced in
 //! `referrer_fences` like every other referrer.
 
-use lash_core_execution::store::ToolMaterialStore;
-use lash_core_execution::tool_run::{
-    MaterialBundle, MaterialHolder, MaterialLocation, MaterialOwner, MaterialPayload, MaterialRef,
-    MaterialRefusal, MaterialRetentionError, RetainedBundle,
-};
+use lash_core_store::store::ToolMaterialStore;
+use lash_core_store::tool_run::MaterialBundle;
+use lash_core_store::tool_run::MaterialHolder;
+use lash_core_store::tool_run::MaterialLocation;
+use lash_core_store::tool_run::MaterialOwner;
+use lash_core_store::tool_run::MaterialPayload;
+use lash_core_store::tool_run::MaterialRef;
+use lash_core_store::tool_run::MaterialRefusal;
+use lash_core_store::tool_run::MaterialRetentionError;
+use lash_core_store::tool_run::RetainedBundle;
 
 use super::*;
 

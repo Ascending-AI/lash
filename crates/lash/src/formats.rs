@@ -54,9 +54,9 @@ pub use lash_core::engine::UpgradePolicy;
 pub use lash_core::plugin::PLUGIN_ADMISSION_CHECKPOINT_VERSION;
 pub use lash_core::session_model::PLUGIN_RUNTIME_EVENT_VERSION;
 
+pub use lash_core::SCOPE_STORAGE_PAYLOAD_VERSION;
+pub use lash_core::SESSION_NODE_BODY_SCHEMA_VERSION;
 pub use lash_core::durable_port::domain::WAIT_ROW_FORMAT_VERSION;
-pub use lash_core::formats::BuildFormats;
-pub use lash_core::formats::RUN_RECORD_FORMAT_VERSION;
 pub use lash_core::store::{
     APPEND_REQUEST_IDENTITY_ENCODING_VERSION, CHECKPOINT_COMPONENT_ENCODING_VERSION,
     CREATE_SESSION_REQUEST_IDENTITY_ENCODING_VERSION, CURRENT_SESSION_STATE_VERSION,
@@ -64,15 +64,14 @@ pub use lash_core::store::{
     SESSION_CHECKPOINT_SCHEMA_VERSION, SESSION_HEAD_META_SCHEMA_VERSION,
 };
 pub use lash_core::tool_run::material::OUTCOME_MATERIAL_FORMAT_VERSION;
-pub use lash_core::{
-    PROCESS_EVENT_VOCABULARY_VERSION, SCOPE_STORAGE_PAYLOAD_VERSION,
-    SESSION_NODE_BODY_SCHEMA_VERSION,
-};
+pub use lash_execution_contracts::formats::BuildFormats;
+pub use lash_execution_contracts::formats::RUN_RECORD_FORMAT_VERSION;
+pub use lash_execution_contracts::process::PROCESS_EVENT_VOCABULARY_VERSION;
 #[cfg(feature = "rlm")]
 pub use lash_protocol_rlm::{
     CODEMODE_SNAPSHOT_VERSION, RLM_DRIVER_STATE_VERSION, RLM_PROTOCOL_EVENT_VERSION,
 };
-pub use lash_sansio::TURN_CHECKPOINT_SCHEMA_VERSION;
+pub use lash_protocol_types::TURN_CHECKPOINT_SCHEMA_VERSION;
 #[cfg(feature = "codemode")]
 pub use lash_vm_runtime::{
     KERNEL_DOCUMENT_SCHEMA_VERSION, KERNEL_HELPER_RELEASE, KERNEL_PARKED_STATE_VERSION,

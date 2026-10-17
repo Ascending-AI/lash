@@ -4,8 +4,6 @@
 //! its original path and adds the seams that need a runtime-side supertrait.
 pub use lash_core_store::store::*;
 
-pub mod module_nodes;
-
 #[cfg(any(test, feature = "testing"))]
 mod conformance_deployment;
 #[cfg(any(test, feature = "testing"))]

@@ -2,10 +2,14 @@ use lash_protocol_types::SessionId;
 use std::path::{Path, PathBuf};
 use std::sync::Arc;
 
-use lash_core::{
-    DeploymentStore, RuntimeCommit, RuntimeSessionState, RuntimeStore, SessionCreationHead,
-    SessionRelation, SessionStoreCreateRequest, StoreError,
-};
+use lash_core::RuntimeCommit;
+use lash_core::RuntimeSessionState;
+use lash_core::RuntimeStore;
+use lash_core::SessionCreationHead;
+use lash_core::SessionRelation;
+use lash_core::SessionStoreCreateRequest;
+use lash_core::StoreError;
+use lash_execution_contracts::deployment::DeploymentStore;
 use serde::Serialize;
 use serde_json::{Value, json};
 

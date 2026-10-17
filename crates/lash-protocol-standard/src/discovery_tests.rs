@@ -222,8 +222,9 @@ fn a_schema_presentation_refusal_keeps_its_presenter_and_code_when_recorded() {
         let replayed: PluginError =
             serde_json::from_value(encoded.clone()).expect("decode plugin refusal");
         assert_eq!(serde_json::to_value(&replayed).unwrap(), encoded);
-        let durable = lash_core::ToolIntentCommandFailure::from(&replayed);
-        let durable: lash_core::ToolIntentCommandFailure =
+        let durable =
+            lash_execution_contracts::plugin_error::ToolIntentCommandFailure::from(&replayed);
+        let durable: lash_execution_contracts::plugin_error::ToolIntentCommandFailure =
             serde_json::from_slice(&serde_json::to_vec(&durable).unwrap())
                 .expect("decode durable cause");
         assert_eq!(serde_json::to_value(durable).unwrap(), encoded);

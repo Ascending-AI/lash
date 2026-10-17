@@ -9,14 +9,14 @@ use super::ToolDispatchContext;
 /// admitted execution that runs its call, and stages what they write to the
 /// lash store to commit with the call's outcome (ADR 0132 §5).
 pub struct IntentRealizationContext<'run> {
-    pub limits: crate::tool_intent::ToolIntentLimits,
+    pub limits: lash_execution_contracts::tool_intent::ToolIntentLimits,
     pub effect_controller: crate::ActorContext,
     pub owner: crate::ExecutionOwner,
     pub processes: Arc<dyn crate::ProcessService>,
     pub process_engines: crate::ProcessEngineRegistry,
     pub parent_invocation: Option<crate::RuntimeInvocation>,
-    pub process_lineage: Option<crate::ProcessLineage>,
-    pub process_originator: Option<crate::ProcessOriginator>,
+    pub process_lineage: Option<lash_execution_contracts::process::ProcessLineage>,
+    pub process_originator: Option<lash_execution_contracts::process::ProcessOriginator>,
     /// The run this context serves; the context itself is `'static`.
     pub run: std::marker::PhantomData<&'run ()>,
 }
@@ -63,11 +63,14 @@ impl IntentRealizationContext<'_> {
 pub async fn execute_final_tool_intents(
     context: &IntentRealizationContext<'_>,
     tool_call_id: &lash_protocol_types::ToolCallId,
-    intents: &crate::ToolIntents,
+    intents: &lash_execution_contracts::tool_intent::ToolIntents,
     child_trace_hook: Option<&crate::ToolChildExecutionTraceHook>,
 ) -> Result<super::Realization, crate::RuntimeEffectControllerError> {
     let execution_scope_id = context.effect_controller.scope_id().to_string();
-    if intents.intents.is_empty() && intents.protocol_version == crate::TOOL_INTENT_PROTOCOL_V3 {
+    if intents.intents.is_empty()
+        && intents.protocol_version
+            == lash_execution_contracts::tool_intent::TOOL_INTENT_PROTOCOL_V3
+    {
         return Ok(super::Realization::default());
     }
     if let Some(refusal) = admit_batch(&context.owner.runtime_owner(), intents, context.limits) {
@@ -96,7 +99,7 @@ pub async fn execute_final_tool_intents(
                 index,
                 intent.kind(),
                 Some(identity),
-                crate::ToolIntentRefusalReason::MintingRunCancelled,
+                lash_execution_contracts::tool_intent_outcome::ToolIntentRefusalReason::MintingRunCancelled,
             ));
             continue;
         }
@@ -117,14 +120,14 @@ pub async fn execute_final_tool_intents(
         let outcome = match result {
             Ok((realized, effect)) => {
                 store_local.extend(effect);
-                crate::ToolIntentExecutionOutcome::Executed { identity, realized }
+                lash_execution_contracts::tool_intent_outcome::ToolIntentExecutionOutcome::Executed { identity, realized }
             }
-            Err(crate::PluginError::RuntimeEffectController(error))
+            Err(lash_execution_contracts::plugin_error::PluginError::RuntimeEffectController(error))
                 if error.code.is_replay_mismatch() =>
             {
                 return Err(error);
             }
-            Err(crate::PluginError::RuntimeEffectController(error))
+            Err(lash_execution_contracts::plugin_error::PluginError::RuntimeEffectController(error))
                 if error.code == crate::RuntimeErrorCode::RuntimeToolRunCancelDecided =>
             {
                 minting_cancelled = true;
@@ -132,24 +135,24 @@ pub async fn execute_final_tool_intents(
                     index,
                     intent.kind(),
                     Some(identity),
-                    crate::ToolIntentRefusalReason::MintingRunCancelled,
+                    lash_execution_contracts::tool_intent_outcome::ToolIntentRefusalReason::MintingRunCancelled,
                 )
             }
             Err(error) => refused(
                 index,
                 intent.kind(),
                 Some(identity),
-                crate::ToolIntentRefusalReason::CommandFailed {
-                    cause: crate::ToolIntentCommandFailure::from(&error),
+                lash_execution_contracts::tool_intent_outcome::ToolIntentRefusalReason::CommandFailed {
+                    cause: lash_execution_contracts::plugin_error::ToolIntentCommandFailure::from(&error),
                 },
             ),
         };
         tracing::debug!(
             target: "lash::tool_intent",
             outcome = match &outcome {
-                crate::ToolIntentExecutionOutcome::Executed { .. } => "executed",
-                crate::ToolIntentExecutionOutcome::Refused { .. } => "refused",
-                crate::ToolIntentExecutionOutcome::ProtocolRefused { .. } => "protocol_refused"
+                lash_execution_contracts::tool_intent_outcome::ToolIntentExecutionOutcome::Executed { .. } => "executed",
+                lash_execution_contracts::tool_intent_outcome::ToolIntentExecutionOutcome::Refused { .. } => "refused",
+                lash_execution_contracts::tool_intent_outcome::ToolIntentExecutionOutcome::ProtocolRefused { .. } => "protocol_refused"
             },
             "tool intent outcome"
         );
@@ -157,7 +160,7 @@ pub async fn execute_final_tool_intents(
     }
     let executed_count = outcomes
         .iter()
-        .filter(|outcome| matches!(outcome, crate::ToolIntentExecutionOutcome::Executed { .. }))
+        .filter(|outcome| matches!(outcome, lash_execution_contracts::tool_intent_outcome::ToolIntentExecutionOutcome::Executed { .. }))
         .count();
     tracing::info!(
         target: "lash::tool_intent",
@@ -184,12 +187,12 @@ pub async fn execute_final_tool_intents(
 /// `Err` is a fault the call cannot settle (see [`declared_start_fault`]).
 pub(crate) async fn realize_declared_start(
     processes: &dyn crate::ProcessService,
-    start: &crate::DeclaredStart,
+    start: &lash_execution_contracts::DeclaredStart,
     scope: crate::ProcessOpScope<'_>,
     child_trace_hook: Option<&crate::ToolChildExecutionTraceHook>,
 ) -> Result<
     (
-        crate::ToolIntentExecutionOutcome,
+        lash_execution_contracts::tool_intent_outcome::ToolIntentExecutionOutcome,
         Option<crate::runtime::actor::round::StoreLocalEffect>,
     ),
     crate::RuntimeEffectControllerError,
@@ -202,18 +205,19 @@ pub(crate) async fn realize_declared_start(
     });
     let scope = scope.with_parent_invocation(parent);
     let kind = crate::ToolIntentKind::StartProcess;
-    let request = start.request().with_trace_parent(
-        scope
-            .effect_controller
-            .trace_scope()
-            .and_then(lash_trace::DurableTraceScope::as_parent),
-    );
+    let request = lash_execution_contracts::declared_start::declared_start_request(start)
+        .with_trace_parent(
+            scope
+                .effect_controller
+                .trace_scope()
+                .and_then(lash_trace::DurableTraceScope::as_parent),
+        );
     match processes
         .stage_recorded_start(&start.start().owner, request, scope)
         .await
     {
         Ok(staged) => {
-            let handle = crate::ProcessHandleView::from_record(staged.record);
+            let handle = lash_execution_contracts::process::ProcessHandleView::from_record(staged.record);
             // The declared kind names the child's entry, so a trace links the
             // call to a child it can name.
             if let Some(hook) = child_trace_hook {
@@ -228,9 +232,9 @@ pub(crate) async fn realize_declared_start(
                 });
             }
             Ok((
-                crate::ToolIntentExecutionOutcome::Executed {
+                lash_execution_contracts::tool_intent_outcome::ToolIntentExecutionOutcome::Executed {
                     identity,
-                    realized: crate::ToolIntentRealized::StartProcess(handle),
+                    realized: lash_execution_contracts::tool_intent_outcome::ToolIntentRealized::StartProcess(handle),
                 },
                 staged
                     .rows
@@ -244,8 +248,8 @@ pub(crate) async fn realize_declared_start(
                     identity.intent_index as usize,
                     kind,
                     Some(identity),
-                    crate::ToolIntentRefusalReason::CommandFailed {
-                        cause: crate::ToolIntentCommandFailure::from(&error),
+                    lash_execution_contracts::tool_intent_outcome::ToolIntentRefusalReason::CommandFailed {
+                        cause: lash_execution_contracts::plugin_error::ToolIntentCommandFailure::from(&error),
                     },
                 ),
                 None,
@@ -261,40 +265,41 @@ pub(crate) async fn realize_declared_start(
 /// controller error such as a closed scope's `ParentEnded`, which a retry
 /// would only meet again.
 pub(crate) fn declared_start_fault(
-    error: &crate::PluginError,
+    error: &lash_execution_contracts::plugin_error::PluginError,
 ) -> Option<crate::RuntimeEffectControllerError> {
     match error {
-        crate::PluginError::RuntimeEffectController(error)
+        lash_execution_contracts::plugin_error::PluginError::RuntimeEffectController(error)
             if error.code.is_replay_mismatch()
                 || error.code == crate::RuntimeErrorCode::RuntimeToolRunCancelDecided
                 || error.turn_failure_cause() != crate::TurnFailureCause::Outcome =>
         {
             Some(error.clone())
         }
-        crate::PluginError::RuntimeEffectController(_) => None,
+        lash_execution_contracts::plugin_error::PluginError::RuntimeEffectController(_) => None,
         // A store that did not answer, a lost lease, a superseded execution:
         // the attempt's, under the code the controller carries it by.
         error => match error.class() {
-            crate::PluginErrorClass::Retryable | crate::PluginErrorClass::Redrivable => {
+            lash_execution_contracts::plugin_error::PluginErrorClass::Retryable
+            | lash_execution_contracts::plugin_error::PluginErrorClass::Redrivable => {
                 Some(crate::RuntimeEffectControllerError::from(error.clone()))
             }
-            crate::PluginErrorClass::Terminal => None,
+            lash_execution_contracts::plugin_error::PluginErrorClass::Terminal => None,
         },
     }
 }
 
 pub(super) fn admit_batch(
     owner: &crate::RuntimeOwner,
-    intents: &crate::ToolIntents,
-    limits: crate::tool_intent::ToolIntentLimits,
-) -> Option<crate::ToolIntentRefusalReason> {
-    if intents.protocol_version != crate::TOOL_INTENT_PROTOCOL_V3 {
-        return Some(crate::ToolIntentRefusalReason::UnsupportedProtocolVersion {
+    intents: &lash_execution_contracts::tool_intent::ToolIntents,
+    limits: lash_execution_contracts::tool_intent::ToolIntentLimits,
+) -> Option<lash_execution_contracts::tool_intent_outcome::ToolIntentRefusalReason> {
+    if intents.protocol_version != lash_execution_contracts::tool_intent::TOOL_INTENT_PROTOCOL_V3 {
+        return Some(lash_execution_contracts::tool_intent_outcome::ToolIntentRefusalReason::UnsupportedProtocolVersion {
             recorded: intents.protocol_version,
         });
     }
     if intents.intents.len() > limits.max_count() {
-        return Some(crate::ToolIntentRefusalReason::CountBudgetExceeded {
+        return Some(lash_execution_contracts::tool_intent_outcome::ToolIntentRefusalReason::CountBudgetExceeded {
             actual: intents.intents.len(),
             maximum: limits.max_count(),
         });
@@ -302,7 +307,7 @@ pub(super) fn admit_batch(
     let canonical_bytes = intents.declared_canonical_bytes().unwrap_or(usize::MAX);
     if canonical_bytes > limits.max_canonical_bytes() {
         return Some(
-            crate::ToolIntentRefusalReason::CanonicalByteBudgetExceeded {
+            lash_execution_contracts::tool_intent_outcome::ToolIntentRefusalReason::CanonicalByteBudgetExceeded {
                 actual: canonical_bytes,
                 maximum: limits.max_canonical_bytes(),
             },
@@ -315,14 +320,14 @@ pub(super) fn admit_batch(
             .or_insert((intent.kind(), 0));
         entry.1 += 1;
         if entry.1 > limits.max_per_kind() {
-            return Some(crate::ToolIntentRefusalReason::PerKindBudgetExceeded {
+            return Some(lash_execution_contracts::tool_intent_outcome::ToolIntentRefusalReason::PerKindBudgetExceeded {
                 kind: entry.0,
                 actual: entry.1,
                 maximum: limits.max_per_kind(),
             });
         }
         if intent.owner() != owner {
-            return Some(crate::ToolIntentRefusalReason::OwnerMismatch {
+            return Some(lash_execution_contracts::tool_intent_outcome::ToolIntentRefusalReason::OwnerMismatch {
                 expected: owner.clone(),
                 recorded: intent.owner().clone(),
             });
@@ -335,9 +340,9 @@ fn refuse_all(
     context: &IntentRealizationContext<'_>,
     execution_scope_id: &str,
     tool_call_id: &lash_protocol_types::ToolCallId,
-    intents: &crate::ToolIntents,
-    refusal: crate::ToolIntentRefusalReason,
-) -> Vec<crate::ToolIntentExecutionOutcome> {
+    intents: &lash_execution_contracts::tool_intent::ToolIntents,
+    refusal: lash_execution_contracts::tool_intent_outcome::ToolIntentRefusalReason,
+) -> Vec<lash_execution_contracts::tool_intent_outcome::ToolIntentExecutionOutcome> {
     if intents.intents.is_empty() {
         let span = tracing::debug_span!(
             target: "lash::tool_intent",
@@ -355,7 +360,7 @@ fn refuse_all(
             refusal_reason = %refusal.code(),
             "empty tool intent batch refused"
         );
-        return vec![crate::ToolIntentExecutionOutcome::ProtocolRefused { refusal }];
+        return vec![lash_execution_contracts::tool_intent_outcome::ToolIntentExecutionOutcome::ProtocolRefused { refusal }];
     }
     intents
         .intents
@@ -387,7 +392,7 @@ pub(crate) fn declaring_identity(
     tool_call_id: &lash_protocol_types::ToolCallId,
     minting_emission: &crate::RuntimeInvocation,
 ) -> crate::ToolIntentIdentity {
-    crate::derive_tool_intent_identity_under(
+    lash_execution_contracts::tool_intent::derive_tool_intent_identity_under(
         &context.owner.runtime_owner(),
         context.effect_controller.scope_id(),
         tool_call_id,
@@ -401,24 +406,30 @@ fn derive_identity(
     execution_scope_id: &str,
     tool_call_id: &lash_protocol_types::ToolCallId,
     intent_index: usize,
-) -> Result<crate::ToolIntentIdentity, crate::ToolIntentRefusalReason> {
-    let intent_index = u32::try_from(intent_index)
-        .map_err(|_| crate::ToolIntentRefusalReason::IntentIndexOverflow)?;
-    Ok(crate::derive_tool_intent_identity_under(
-        &context.owner.runtime_owner(),
-        execution_scope_id,
-        tool_call_id,
-        intent_index,
-        context.parent_invocation.as_ref(),
-    ))
+) -> Result<
+    crate::ToolIntentIdentity,
+    lash_execution_contracts::tool_intent_outcome::ToolIntentRefusalReason,
+> {
+    let intent_index = u32::try_from(intent_index).map_err(|_| {
+        lash_execution_contracts::tool_intent_outcome::ToolIntentRefusalReason::IntentIndexOverflow
+    })?;
+    Ok(
+        lash_execution_contracts::tool_intent::derive_tool_intent_identity_under(
+            &context.owner.runtime_owner(),
+            execution_scope_id,
+            tool_call_id,
+            intent_index,
+            context.parent_invocation.as_ref(),
+        ),
+    )
 }
 
 fn refused(
     index: usize,
     kind: crate::ToolIntentKind,
     identity: Option<crate::ToolIntentIdentity>,
-    refusal: crate::ToolIntentRefusalReason,
-) -> crate::ToolIntentExecutionOutcome {
+    refusal: lash_execution_contracts::tool_intent_outcome::ToolIntentRefusalReason,
+) -> lash_execution_contracts::tool_intent_outcome::ToolIntentExecutionOutcome {
     tracing::warn!(
         target: "lash::tool_intent",
         intent_kind = kind.as_str(),
@@ -426,7 +437,7 @@ fn refused(
         intent_index = index,
         "tool intent refused"
     );
-    crate::ToolIntentExecutionOutcome::Refused {
+    lash_execution_contracts::tool_intent_outcome::ToolIntentExecutionOutcome::Refused {
         identity,
         intent_index: u32::try_from(index).unwrap_or(u32::MAX),
         kind,
@@ -442,15 +453,15 @@ fn refused(
 /// start stages instead of writing.
 async fn execute_one(
     context: &IntentRealizationContext<'_>,
-    intent: &crate::ToolIntent,
+    intent: &lash_execution_contracts::tool_intent::ToolIntent,
     identity: &crate::ToolIntentIdentity,
     child_trace_hook: Option<&crate::ToolChildExecutionTraceHook>,
 ) -> Result<
     (
-        crate::ToolIntentRealized,
+        lash_execution_contracts::tool_intent_outcome::ToolIntentRealized,
         Option<crate::runtime::actor::round::StoreLocalEffect>,
     ),
-    crate::PluginError,
+    lash_execution_contracts::plugin_error::PluginError,
 > {
     let parent = context.parent_invocation.clone().unwrap_or_else(|| {
         crate::RuntimeInvocation::effect(
@@ -472,7 +483,7 @@ async fn execute_one(
         .with_process_lineage(context.process_lineage.clone());
 
     match intent {
-        crate::ToolIntent::StartProcess(intent) => {
+        lash_execution_contracts::tool_intent::ToolIntent::StartProcess(intent) => {
             // The declaration carries no id: the sole constructor on this path
             // derives it from this declaration's identity, so a redrive of the
             // same attempt starts the same process id (FIG-2994).
@@ -493,7 +504,7 @@ async fn execute_one(
                 });
             }
             Ok((
-                crate::ToolIntentRealized::StartProcess(crate::ProcessHandleView::from_record(
+                lash_execution_contracts::tool_intent_outcome::ToolIntentRealized::StartProcess(lash_execution_contracts::process::ProcessHandleView::from_record(
                     staged.record,
                 )),
                 staged
@@ -501,19 +512,19 @@ async fn execute_one(
                     .map(crate::runtime::actor::round::StoreLocalEffect::ProcessStart),
             ))
         }
-        crate::ToolIntent::CancelProcess(intent) => {
+        lash_execution_contracts::tool_intent::ToolIntent::CancelProcess(intent) => {
             let record = context
                 .processes
                 .cancel_recorded_intent(&intent.owner, &intent.process_id, identity.clone(), scope)
                 .await?;
             Ok((
-                crate::ToolIntentRealized::CancelProcess(
-                    crate::ProcessCancelReceipt::from_observed(record)?,
+                lash_execution_contracts::tool_intent_outcome::ToolIntentRealized::CancelProcess(
+                    lash_execution_contracts::process::ProcessCancelReceipt::from_observed(record)?,
                 ),
                 None,
             ))
         }
-        crate::ToolIntent::PublishDefinition(intent) => realize_definition(
+        lash_execution_contracts::tool_intent::ToolIntent::PublishDefinition(intent) => realize_definition(
             context,
             identity,
             crate::ProcessCommand::PublishDefinition {
@@ -523,11 +534,11 @@ async fn execute_one(
         .await
         .map(|definition| {
             (
-                crate::ToolIntentRealized::PublishDefinition(Box::new(definition)),
+                lash_execution_contracts::tool_intent_outcome::ToolIntentRealized::PublishDefinition(Box::new(definition)),
                 None,
             )
         }),
-        crate::ToolIntent::GetDefinition(intent) => realize_definition(
+        lash_execution_contracts::tool_intent::ToolIntent::GetDefinition(intent) => realize_definition(
             context,
             identity,
             crate::ProcessCommand::GetDefinition {
@@ -537,7 +548,7 @@ async fn execute_one(
         .await
         .map(|definition| {
             (
-                crate::ToolIntentRealized::GetDefinition(Box::new(definition)),
+                lash_execution_contracts::tool_intent_outcome::ToolIntentRealized::GetDefinition(Box::new(definition)),
                 None,
             )
         }),
@@ -552,7 +563,10 @@ async fn realize_definition(
     context: &IntentRealizationContext<'_>,
     identity: &crate::ToolIntentIdentity,
     command: crate::ProcessCommand,
-) -> Result<crate::ProcessDefinition, crate::PluginError> {
+) -> Result<
+    lash_execution_contracts::process::ProcessDefinition,
+    lash_execution_contracts::plugin_error::PluginError,
+> {
     let scoped = context.effect_controller.clone();
     let invocation = crate::RuntimeEffectInvocation::new(
         crate::EffectAddress::new(
@@ -582,9 +596,11 @@ async fn realize_definition(
         .into_process()?;
     match result {
         crate::ProcessEffectOutcome::Definition { definition } => Ok(*definition),
-        _ => Err(crate::PluginError::Session(
-            "definition effect returned a different outcome".into(),
-        )),
+        _ => Err(
+            lash_execution_contracts::plugin_error::PluginError::Session(
+                "definition effect returned a different outcome".into(),
+            ),
+        ),
     }
 }
 
@@ -597,24 +613,33 @@ mod tests {
         crate::RuntimeOwner::Session(crate::SessionId::fixture(id))
     }
 
-    fn cancel(owner: &crate::RuntimeOwner, index: usize) -> crate::ToolIntent {
-        crate::ToolIntent::CancelProcess(crate::CancelProcessIntent {
-            owner: owner.clone(),
-            process_id: crate::process_id_for_test(&format!("process-{index}")),
-        })
+    fn cancel(
+        owner: &crate::RuntimeOwner,
+        index: usize,
+    ) -> lash_execution_contracts::tool_intent::ToolIntent {
+        lash_execution_contracts::tool_intent::ToolIntent::CancelProcess(
+            lash_execution_contracts::tool_intent::CancelProcessIntent {
+                owner: owner.clone(),
+                process_id: crate::process_id_for_test(&format!("process-{index}")),
+            },
+        )
     }
 
     /// INTENT-ADMISSION-POLICY: the deployment's count, kind and byte budgets decide admission.
     #[test]
     fn a_nondefault_intent_policy_admits_and_refuses_its_own_bounds() {
         let owner = session("configured-intents");
-        let intents = crate::ToolIntents::v3(vec![cancel(&owner, 0), cancel(&owner, 1)]);
-        let limits = crate::tool_intent::ToolIntentLimits::new(2, usize::MAX, 2).unwrap();
+        let intents = lash_execution_contracts::tool_intent::ToolIntents::v3(vec![
+            cancel(&owner, 0),
+            cancel(&owner, 1),
+        ]);
+        let limits =
+            lash_execution_contracts::tool_intent::ToolIntentLimits::new(2, usize::MAX, 2).unwrap();
         assert_eq!(admit_batch(&owner, &intents, limits), None);
         for limits in [
-            crate::tool_intent::ToolIntentLimits::new(1, usize::MAX, 2).unwrap(),
-            crate::tool_intent::ToolIntentLimits::new(2, 1, 2).unwrap(),
-            crate::tool_intent::ToolIntentLimits::new(2, usize::MAX, 1).unwrap(),
+            lash_execution_contracts::tool_intent::ToolIntentLimits::new(1, usize::MAX, 2).unwrap(),
+            lash_execution_contracts::tool_intent::ToolIntentLimits::new(2, 1, 2).unwrap(),
+            lash_execution_contracts::tool_intent::ToolIntentLimits::new(2, usize::MAX, 1).unwrap(),
         ] {
             assert!(admit_batch(&owner, &intents, limits).is_some());
         }
@@ -623,7 +648,7 @@ mod tests {
     #[test]
     fn protocol_dispatch_refuses_predecessor_and_unknown_records() {
         for recorded in [0, 1, 2, 4] {
-            let intents = crate::ToolIntents {
+            let intents = lash_execution_contracts::tool_intent::ToolIntents {
                 protocol_version: recorded,
                 intents: vec![cancel(&session("session"), 1)],
             };
@@ -631,17 +656,17 @@ mod tests {
                 admit_batch(
                     &session("session"),
                     &intents,
-                    crate::tool_intent::ToolIntentLimits::standard()
+                    lash_execution_contracts::tool_intent::ToolIntentLimits::standard()
                 ),
-                Some(crate::ToolIntentRefusalReason::UnsupportedProtocolVersion { recorded })
+                Some(lash_execution_contracts::tool_intent_outcome::ToolIntentRefusalReason::UnsupportedProtocolVersion { recorded })
             );
         }
     }
 
     #[test]
     fn admission_is_all_or_nothing_for_total_count_overflow() {
-        let intents = crate::ToolIntents::v3(
-            (0..=crate::TOOL_INTENT_MAX_COUNT)
+        let intents = lash_execution_contracts::tool_intent::ToolIntents::v3(
+            (0..=lash_execution_contracts::tool_intent::TOOL_INTENT_MAX_COUNT)
                 .map(|index| cancel(&session("session"), index))
                 .collect(),
         );
@@ -649,9 +674,9 @@ mod tests {
             admit_batch(
                 &session("session"),
                 &intents,
-                crate::tool_intent::ToolIntentLimits::standard()
+                lash_execution_contracts::tool_intent::ToolIntentLimits::standard()
             ),
-            Some(crate::ToolIntentRefusalReason::CountBudgetExceeded {
+            Some(lash_execution_contracts::tool_intent_outcome::ToolIntentRefusalReason::CountBudgetExceeded {
                 actual: 33,
                 maximum: 32,
             })
@@ -660,8 +685,8 @@ mod tests {
 
     #[test]
     fn admission_is_all_or_nothing_for_per_kind_overflow() {
-        let intents = crate::ToolIntents::v3(
-            (0..=crate::TOOL_INTENT_MAX_PER_KIND)
+        let intents = lash_execution_contracts::tool_intent::ToolIntents::v3(
+            (0..=lash_execution_contracts::tool_intent::TOOL_INTENT_MAX_PER_KIND)
                 .map(|index| cancel(&session("session"), index))
                 .collect(),
         );
@@ -669,9 +694,9 @@ mod tests {
             admit_batch(
                 &session("session"),
                 &intents,
-                crate::tool_intent::ToolIntentLimits::standard()
+                lash_execution_contracts::tool_intent::ToolIntentLimits::standard()
             ),
-            Some(crate::ToolIntentRefusalReason::PerKindBudgetExceeded {
+            Some(lash_execution_contracts::tool_intent_outcome::ToolIntentRefusalReason::PerKindBudgetExceeded {
                 kind: crate::ToolIntentKind::CancelProcess,
                 actual: 17,
                 maximum: 16,
@@ -681,21 +706,28 @@ mod tests {
 
     /// A start carrying `payload` as its declared input under an execution
     /// env captured from a session whose recorded protocol prompt is `prompt`.
-    fn start_under_prompt(payload: serde_json::Value, prompt: String) -> crate::ToolIntent {
+    fn start_under_prompt(
+        payload: serde_json::Value,
+        prompt: String,
+    ) -> lash_execution_contracts::tool_intent::ToolIntent {
         let env = crate::testing::process_env_of_size(prompt.len());
-        crate::ToolIntent::StartProcess(Box::new(crate::StartProcessIntent {
-            owner: session("session"),
-            declaration: crate::ProcessStartDeclaration::engine(
-                lash_protocol_types::LASH_VM_ENGINE_KIND,
-                payload,
-                crate::DeclaredLaunch::held(crate::EngineLaunch::new(
-                    env.stable_ref().expect("environment digest"),
-                    None,
-                )),
-                crate::ProcessOriginator::host(),
-                crate::Lifetime::Detached,
-            ),
-        }))
+        lash_execution_contracts::tool_intent::ToolIntent::StartProcess(Box::new(
+            lash_execution_contracts::tool_intent::StartProcessIntent {
+                owner: session("session"),
+                declaration: lash_execution_contracts::process::ProcessStartDeclaration::engine(
+                    lash_protocol_types::LASH_VM_ENGINE_KIND,
+                    payload,
+                    lash_execution_contracts::process::model::launch::held_launch(
+                        lash_execution_contracts::process::EngineLaunch::new(
+                            env.stable_ref().expect("environment digest"),
+                            None,
+                        ),
+                    ),
+                    lash_execution_contracts::process::ProcessOriginator::host(),
+                    lash_execution_contracts::process::Lifetime::Detached,
+                ),
+            },
+        ))
     }
 
     #[test]
@@ -704,20 +736,23 @@ mod tests {
             serde_json::json!({"key": "child/0"}),
             "x".repeat(128 * 1024),
         );
-        let batch = crate::ToolIntents::v3(vec![intent.clone()]);
-        let identity = crate::derive_tool_intent_identity(
+        let batch = lash_execution_contracts::tool_intent::ToolIntents::v3(vec![intent.clone()]);
+        let identity = lash_execution_contracts::tool_intent::derive_tool_intent_identity(
             &session("session"),
             "scope",
             &crate::ToolCallId::fixture("start"),
             0,
         );
-        let submission = crate::ToolIntentSubmissionRecord::new(identity.clone(), intent.clone())
-            .expect("submission");
-        let crate::ToolIntent::StartProcess(start) = intent else {
+        let submission = lash_execution_contracts::tool_intent::ToolIntentSubmissionRecord::new(
+            identity.clone(),
+            intent.clone(),
+        )
+        .expect("submission");
+        let lash_execution_contracts::tool_intent::ToolIntent::StartProcess(start) = intent else {
             panic!("start");
         };
         let request = start.into_request(&identity);
-        let record = crate::ProcessRecord::from_registration(
+        let record = lash_execution_contracts::process::ProcessRecord::from_registration(
             request
                 .clone()
                 .into_registration()
@@ -743,7 +778,8 @@ mod tests {
             ("process row", serde_json::to_vec(&record).expect("record")),
         ] {
             assert!(
-                bytes.len() < crate::TOOL_INTENT_MAX_CANONICAL_BYTES,
+                bytes.len()
+                    < lash_execution_contracts::tool_intent::TOOL_INTENT_MAX_CANONICAL_BYTES,
                 "{name} stores {} bytes for a 128 KiB environment",
                 bytes.len()
             );
@@ -758,21 +794,23 @@ mod tests {
     /// digest, while large captured instructions live in the artifact store.
     #[test]
     fn admission_counts_the_complete_declaration_with_its_environment_digest() {
-        let prompt = "x".repeat(2 * crate::TOOL_INTENT_MAX_CANONICAL_BYTES);
-        let intents = crate::ToolIntents::v3(vec![start_under_prompt(
-            serde_json::json!({"key": "child/0"}),
-            prompt,
-        )]);
+        let prompt =
+            "x".repeat(2 * lash_execution_contracts::tool_intent::TOOL_INTENT_MAX_CANONICAL_BYTES);
+        let intents =
+            lash_execution_contracts::tool_intent::ToolIntents::v3(vec![start_under_prompt(
+                serde_json::json!({"key": "child/0"}),
+                prompt,
+            )]);
         assert!(
             serde_json::to_vec(&intents).expect("encode").len()
-                < crate::TOOL_INTENT_MAX_CANONICAL_BYTES,
+                < lash_execution_contracts::tool_intent::TOOL_INTENT_MAX_CANONICAL_BYTES,
             "the batch carries only the environment digest"
         );
         assert_eq!(
             admit_batch(
                 &session("session"),
                 &intents,
-                crate::tool_intent::ToolIntentLimits::standard()
+                lash_execution_contracts::tool_intent::ToolIntentLimits::standard()
             ),
             None
         );
@@ -782,19 +820,21 @@ mod tests {
     /// budget still refuses them.
     #[test]
     fn admission_still_bounds_what_a_start_declares() {
-        let intents = crate::ToolIntents::v3(vec![start_under_prompt(
-            serde_json::json!({"key": "x".repeat(crate::TOOL_INTENT_MAX_CANONICAL_BYTES)}),
-            String::new(),
-        )]);
+        let intents = lash_execution_contracts::tool_intent::ToolIntents::v3(vec![
+            start_under_prompt(
+                serde_json::json!({"key": "x".repeat(lash_execution_contracts::tool_intent::TOOL_INTENT_MAX_CANONICAL_BYTES)}),
+                String::new(),
+            ),
+        ]);
         assert!(matches!(
             admit_batch(
                 &session("session"),
                 &intents,
-                crate::tool_intent::ToolIntentLimits::standard()
+                lash_execution_contracts::tool_intent::ToolIntentLimits::standard()
             ),
             Some(
-                crate::ToolIntentRefusalReason::CanonicalByteBudgetExceeded {
-                    maximum: crate::TOOL_INTENT_MAX_CANONICAL_BYTES,
+                lash_execution_contracts::tool_intent_outcome::ToolIntentRefusalReason::CanonicalByteBudgetExceeded {
+                    maximum: lash_execution_contracts::tool_intent::TOOL_INTENT_MAX_CANONICAL_BYTES,
                     ..
                 }
             )
@@ -803,7 +843,7 @@ mod tests {
 
     #[test]
     fn admission_refuses_the_entire_batch_on_owner_mismatch() {
-        let intents = crate::ToolIntents::v3(vec![
+        let intents = lash_execution_contracts::tool_intent::ToolIntents::v3(vec![
             cancel(&session("session"), 0),
             cancel(&session("other-session"), 1),
         ]);
@@ -811,9 +851,9 @@ mod tests {
             admit_batch(
                 &session("session"),
                 &intents,
-                crate::tool_intent::ToolIntentLimits::standard()
+                lash_execution_contracts::tool_intent::ToolIntentLimits::standard()
             ),
-            Some(crate::ToolIntentRefusalReason::OwnerMismatch {
+            Some(lash_execution_contracts::tool_intent_outcome::ToolIntentRefusalReason::OwnerMismatch {
                 expected: session("session"),
                 recorded: session("other-session"),
             })

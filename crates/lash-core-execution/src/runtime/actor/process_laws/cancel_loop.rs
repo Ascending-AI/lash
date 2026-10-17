@@ -9,7 +9,8 @@ use lash_durable::CommitLabel;
 use super::blockers::observed;
 use super::*;
 use crate::testing::DurableCommitHook;
-use crate::{ProcessParkReason, ProcessParkState};
+use lash_execution_contracts::park::ProcessParkReason;
+use lash_execution_contracts::process::ProcessParkState;
 
 /// A process claimed only for its cancel (by a node whose engine does not
 /// decode its state) whose engine-free end crashes on every claim parks

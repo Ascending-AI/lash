@@ -13,7 +13,9 @@ use std::time::Instant;
 
 use futures_util::future::BoxFuture;
 use futures_util::stream::{BoxStream, StreamExt};
-use lash_core_execution::facade_support::{DurableCommitCost, StoreObserver, sql};
+use lash_core_ids::operational_metrics::DurableCommitCost;
+use lash_core_ids::operational_metrics::StoreObserver;
+use lash_core_ids::operational_metrics::sql;
 use lash_durable::{CommitLabel, DurableError};
 use sqlx::postgres::{PgQueryResult, PgRow, PgStatement, PgTypeInfo};
 use sqlx::{Describe, Either, Execute, Executor, Postgres, Row};
@@ -59,8 +61,7 @@ pub(crate) async fn checkout(
     }
     let started = Instant::now();
     #[cfg(feature = "perf-witness")]
-    let mut timing =
-        lash_core_execution::perf_witness::queues::Timer::enqueue("postgres.pool_checkout");
+    let mut timing = lash_core_ids::perf_witness::queues::Timer::enqueue("postgres.pool_checkout");
     let connection = pool.acquire().await;
     #[cfg(feature = "perf-witness")]
     if let Some(timing) = &mut timing {
@@ -169,7 +170,7 @@ pub(crate) fn transaction_started() {
 /// their complete elapsed time to the documented lock-wait upper bound.
 struct Statement {
     #[cfg(feature = "perf-witness")]
-    work: Option<lash_core_execution::perf_witness::sql_shapes::work::Execution>,
+    work: Option<lash_core_ids::perf_witness::sql_shapes::work::Execution>,
     #[cfg(feature = "perf-witness")]
     repeat_qualified: bool,
     state: Option<Shared>,
@@ -178,7 +179,7 @@ struct Statement {
     started: Instant,
     locking: bool,
     #[cfg(feature = "perf-witness")]
-    timing: Option<lash_core_execution::perf_witness::queues::Timer>,
+    timing: Option<lash_core_ids::perf_witness::queues::Timer>,
 }
 
 impl Statement {
@@ -188,12 +189,13 @@ impl Statement {
         let state = CURRENT.try_with(Arc::clone).ok();
         let window = sql::Window::current();
         #[cfg(feature = "perf-witness")]
-        let recording = lash_core_execution::perf_witness::queues::is_recording();
+        let recording = lash_core_ids::perf_witness::queues::is_recording();
         #[cfg(not(feature = "perf-witness"))]
         let recording = false;
         #[cfg(feature = "perf-witness")]
         let work = {
-            use lash_core_execution::perf_witness::{self, sql_shapes};
+            use lash_core_ids::perf_witness;
+            use lash_core_ids::perf_witness::sql_shapes;
             if perf_witness::collecting() {
                 perf_witness::record_sql_statement(sql);
             }
@@ -216,7 +218,7 @@ impl Statement {
         let joined = {
             #[cfg(feature = "perf-witness")]
             {
-                work.is_some() || lash_core_execution::perf_witness::collecting()
+                work.is_some() || lash_core_ids::perf_witness::collecting()
             }
             #[cfg(not(feature = "perf-witness"))]
             {
@@ -270,7 +272,7 @@ impl Statement {
             timing: if locking {
                 // Complete SQL elapsed time is an upper bound on lock wait,
                 // never an exact server wait; checkout is measured separately.
-                lash_core_execution::perf_witness::queues::Timer::enqueue(
+                lash_core_ids::perf_witness::queues::Timer::enqueue(
                     "postgres.lock_statement_upper_bound",
                 )
             } else {
@@ -293,7 +295,7 @@ impl Statement {
             .sum::<u64>();
         #[cfg(feature = "perf-witness")]
         {
-            lash_core_execution::perf_witness::record_sql_row_read(&self.sql);
+            lash_core_ids::perf_witness::record_sql_row_read(&self.sql);
             if let Some(work) = self.work {
                 work.row(bytes);
             }
@@ -427,7 +429,7 @@ impl<'c, E: Executor<'c, Database = Postgres>> Executor<'c> for Observed<E> {
         let joined = {
             #[cfg(feature = "perf-witness")]
             {
-                lash_core_execution::perf_witness::sql_shapes::enabled()
+                lash_core_ids::perf_witness::sql_shapes::enabled()
             }
             #[cfg(not(feature = "perf-witness"))]
             {
@@ -496,7 +498,7 @@ mod tests {
     #[cfg(feature = "perf-witness")]
     #[tokio::test]
     async fn checkout_and_lock_statement_windows_are_separate() {
-        use lash_core_execution::perf_witness::queues::Collector;
+        use lash_core_ids::perf_witness::queues::Collector;
         use std::future::Future;
         let database =
             crate::testing::IsolatedDatabase::create(&crate::testing::required_database_url())
@@ -688,7 +690,8 @@ mod tests {
             return;
         }
 
-        use lash_core_execution::perf_witness::{Collector, sql_shapes};
+        use lash_core_ids::perf_witness::Collector;
+        use lash_core_ids::perf_witness::sql_shapes;
         let database =
             crate::testing::IsolatedDatabase::create(&crate::testing::required_database_url())
                 .await;
@@ -706,27 +709,27 @@ mod tests {
         let work = collector.snapshot().sql_shapes.unwrap().work;
         assert!(work.complete && work.conserves());
         assert_eq!(
-            work.totals[&lash_core_execution::perf_witness::sql_shapes::work::Backend::Postgres]
+            work.totals[&lash_core_ids::perf_witness::sql_shapes::work::Backend::Postgres]
                 .statements,
             3
         );
         assert_eq!(
-            work.totals[&lash_core_execution::perf_witness::sql_shapes::work::Backend::Postgres]
+            work.totals[&lash_core_ids::perf_witness::sql_shapes::work::Backend::Postgres]
                 .rows_returned,
             2
         );
         assert_eq!(
-            work.totals[&lash_core_execution::perf_witness::sql_shapes::work::Backend::Postgres]
+            work.totals[&lash_core_ids::perf_witness::sql_shapes::work::Backend::Postgres]
                 .rows_affected,
             2
         ); // PostgreSQL SELECT completion
         assert_eq!(
-            work.totals[&lash_core_execution::perf_witness::sql_shapes::work::Backend::Postgres]
+            work.totals[&lash_core_ids::perf_witness::sql_shapes::work::Backend::Postgres]
                 .bound_bytes,
             24
         ); // binary int8, not literal spelling
         assert_eq!(
-            work.totals[&lash_core_execution::perf_witness::sql_shapes::work::Backend::Postgres]
+            work.totals[&lash_core_ids::perf_witness::sql_shapes::work::Backend::Postgres]
                 .result_bytes,
             16
         );
@@ -814,7 +817,7 @@ mod tests {
             .expect("store");
         let stores = crate::PostgresStoreSet::new(
             &storage,
-            Arc::new(lash_core_execution::attachments::UnavailableAttachmentStore),
+            Arc::new(lash_core_store::attachments::UnavailableAttachmentStore),
         );
         let receipts = lash_core_execution::testing::sql_work::receipts(&stores, "postgres").await;
         assert_eq!(receipts.len(), 10);
@@ -832,7 +835,7 @@ mod tests {
     async fn physical_summary_joins_the_owner_commit_and_caller_window() {
         let captured = std::sync::Arc::new(std::sync::Mutex::new(Vec::new()));
         let sink = captured.clone();
-        let observer = lash_core_execution::facade_support::StoreObserver::default().with_sql_sink(
+        let observer = lash_core_ids::operational_metrics::StoreObserver::default().with_sql_sink(
             move |receipt, outcome| {
                 if receipt.operation == "sql-work.owner" {
                     sink.lock().expect("sink").push((receipt.clone(), outcome));
@@ -851,9 +854,9 @@ mod tests {
         .expect("stores");
         let stores = crate::PostgresStoreSet::new(
             &storage,
-            Arc::new(lash_core_execution::attachments::UnavailableAttachmentStore),
+            Arc::new(lash_core_store::attachments::UnavailableAttachmentStore),
         );
-        let (identity, outer) = lash_core_execution::facade_support::sql::collect(
+        let (identity, outer) = lash_core_ids::operational_metrics::sql::collect(
             "caller/session/turn/record",
             "postgres",
             lash_core_execution::testing::sql_work::owner_commit(&stores),
@@ -885,7 +888,7 @@ pub(crate) use bindings::{Query, query, query_as, query_scalar};
 #[cfg(feature = "perf-witness")]
 struct JoinedQuery<Q> {
     inner: Q,
-    work: Option<lash_core_execution::perf_witness::sql_shapes::work::Execution>,
+    work: Option<lash_core_ids::perf_witness::sql_shapes::work::Execution>,
     repeat_qualified: bool,
 }
 #[cfg(feature = "perf-witness")]
@@ -914,7 +917,7 @@ impl<'q, Q: Execute<'q, Postgres>> Execute<'q, Postgres> for JoinedQuery<Q> {
         };
         let key = key.filter(|_| self.repeat_qualified).and_then(|key| {
             (key.len() + sql.len() + 8
-                <= lash_core_execution::perf_witness::sql_shapes::work::VALUE_LIMIT)
+                <= lash_core_ids::perf_witness::sql_shapes::work::VALUE_LIMIT)
                 .then(|| {
                     let mut identity = (sql.len() as u64).to_le_bytes().to_vec();
                     identity.extend_from_slice(sql.as_bytes());

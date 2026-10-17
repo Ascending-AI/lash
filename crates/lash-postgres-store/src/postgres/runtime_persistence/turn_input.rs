@@ -1,7 +1,7 @@
 use super::*;
 
 #[async_trait::async_trait]
-impl lash_core_execution::TurnInputStore for PostgresStore {
+impl lash_core_store::store::TurnInputStore for PostgresStore {
     async fn turn_input_submission_digest(
         &self,
         session_id: &SessionId,
@@ -25,8 +25,8 @@ impl lash_core_execution::TurnInputStore for PostgresStore {
         &self,
         session_id: &SessionId,
         source_key: &str,
-    ) -> Result<lash_core_execution::store::TurnInputForsaking, StoreError> {
-        lash_core_execution::store_backend_support::validate_forsaken_source_key(
+    ) -> Result<lash_core_store::store::TurnInputForsaking, StoreError> {
+        lash_core_store::store_backend_support::validate_forsaken_source_key(
             session_id, source_key,
         )?;
         let connection = acquire_runtime_connection(&self.pool, &self.observer).await?;
@@ -42,8 +42,8 @@ impl lash_core_execution::TurnInputStore for PostgresStore {
 
     async fn enqueue_pending_turn_inputs(
         &self,
-        batch: lash_core_execution::PendingTurnInputBatch,
-    ) -> Result<Vec<lash_core_execution::PendingTurnInput>, StoreError> {
+        batch: lash_core_store::turn_input_vocabulary::PendingTurnInputBatch,
+    ) -> Result<Vec<lash_core_store::turn_input_vocabulary::PendingTurnInput>, StoreError> {
         let connection = acquire_runtime_connection(&self.pool, &self.observer).await?;
         let mut tx = begin_guarded(connection, &self.fence).await?;
         #[cfg(any(test, feature = "testing"))]
@@ -60,19 +60,19 @@ impl lash_core_execution::TurnInputStore for PostgresStore {
     /// enqueue and the head read stay separate round-trips.
     async fn admit_pending_turn_inputs(
         &self,
-        batch: lash_core_execution::PendingTurnInputBatch,
-    ) -> Result<lash_core_execution::TurnInputAdmission, StoreError> {
+        batch: lash_core_store::turn_input_vocabulary::PendingTurnInputBatch,
+    ) -> Result<lash_core_store::store::TurnInputAdmission, StoreError> {
         self.read_session_state_version(batch.session_id()).await?;
         self.enqueue_pending_turn_inputs(batch)
             .await
-            .map(lash_core_execution::TurnInputAdmission::Enqueued)
+            .map(lash_core_store::store::TurnInputAdmission::Enqueued)
     }
 
     async fn load_run_spec(
         &self,
         session_id: &SessionId,
-        hash: &lash_core_execution::RunSpecHash,
-    ) -> Result<Option<lash_core_execution::RunSpec>, StoreError> {
+        hash: &lash_core_store::turn_input_vocabulary::RunSpecHash,
+    ) -> Result<Option<lash_core_store::turn_input_vocabulary::RunSpec>, StoreError> {
         let mut connection = acquire_runtime_connection(&self.pool, &self.observer).await?;
         let stored: Option<String> = crate::observed_sql::query_scalar(
             crate::turn_ingress::turn_ingress_sql()
@@ -87,12 +87,12 @@ impl lash_core_execution::TurnInputStore for PostgresStore {
         .map_err(store_sqlx_error)?;
         stored
             .map(|json| {
-                lash_core_execution::RunSpec::from_canonical_json(&json).map_err(|error| {
-                    StoreError::StoredDataCorrupt {
+                lash_core_store::turn_input_vocabulary::RunSpec::from_canonical_json(&json).map_err(
+                    |error| StoreError::StoredDataCorrupt {
                         record_kind: "RunSpec",
                         message: error.to_string(),
-                    }
-                })
+                    },
+                )
             })
             .transpose()
     }
@@ -100,7 +100,7 @@ impl lash_core_execution::TurnInputStore for PostgresStore {
     async fn list_pending_turn_inputs(
         &self,
         session_id: &SessionId,
-    ) -> Result<Vec<lash_core_execution::PendingTurnInputRead>, StoreError> {
+    ) -> Result<Vec<lash_core_store::turn_input_vocabulary::PendingTurnInputRead>, StoreError> {
         let connection = acquire_runtime_connection(&self.pool, &self.observer).await?;
         let mut tx = crate::observed_sql::control(
             "BEGIN",
@@ -144,8 +144,9 @@ impl lash_core_execution::TurnInputStore for PostgresStore {
     async fn pending_turn_input(
         &self,
         session_id: &SessionId,
-        input_id: &lash_core_execution::InputId,
-    ) -> Result<Option<lash_core_execution::PendingTurnInputRead>, StoreError> {
+        input_id: &lash_protocol_types::InputId,
+    ) -> Result<Option<lash_core_store::turn_input_vocabulary::PendingTurnInputRead>, StoreError>
+    {
         // One point read by primary key; the list's lifecycle filter is
         // applied to the one row here: a row is listed until it is completed
         // or cancelled, open or admitted to its run alike.
@@ -170,7 +171,7 @@ impl lash_core_execution::TurnInputStore for PostgresStore {
     async fn list_turn_input_applications(
         &self,
         session_id: &SessionId,
-    ) -> Result<Vec<lash_core_execution::TurnInputApplication>, StoreError> {
+    ) -> Result<Vec<lash_core_store::turn_input_vocabulary::TurnInputApplication>, StoreError> {
         let mut connection = acquire_runtime_connection(&self.pool, &self.observer).await?;
         let rows = crate::observed_sql::query(
             crate::session_sql::session_sql()
@@ -186,7 +187,7 @@ impl lash_core_execution::TurnInputStore for PostgresStore {
         for row in rows {
             let turn_id = row.get::<String, _>(0);
             let result_json: String = row.get(1);
-            let result = lash_core_execution::store::decode_runtime_commit_receipt_for_fleet(
+            let result = lash_core_store::store::decode_runtime_commit_receipt_for_fleet(
                 session_id,
                 &turn_id,
                 &result_json,
@@ -209,8 +210,11 @@ impl lash_core_execution::TurnInputStore for PostgresStore {
     async fn cancel_pending_turn_inputs(
         &self,
         session_id: &SessionId,
-        targets: &[lash_core_execution::PendingTurnInputCancelTarget],
-    ) -> Result<Vec<lash_core_execution::PendingTurnInputCancelReceipt>, StoreError> {
+        targets: &[lash_core_store::turn_input_vocabulary::PendingTurnInputCancelTarget],
+    ) -> Result<
+        Vec<lash_core_store::turn_input_vocabulary::PendingTurnInputCancelReceipt>,
+        StoreError,
+    > {
         let connection = acquire_runtime_connection(&self.pool, &self.observer).await?;
         let mut tx = begin_guarded(connection, &self.fence).await?;
         #[cfg(any(test, feature = "testing"))]
@@ -223,21 +227,29 @@ impl lash_core_execution::TurnInputStore for PostgresStore {
             if let Some(row) =
                 load_pending_turn_input_row_by_target_tx(&mut tx, session_id, target, false).await?
             {
-                covered.insert(lash_core_execution::InputId::parse(row.input_id)?);
+                covered.insert(lash_protocol_types::InputId::parse(row.input_id)?);
             }
         }
         lock_cancel_rows_in_queue_order(&mut tx, session_id, CancelLockScope::Targets(&covered))
             .await?;
         let mut results = Vec::with_capacity(targets.len());
         for target in targets {
-            let outcome =
-                match load_pending_turn_input_row_by_target_tx(&mut tx, session_id, &target, true)
-                    .await?
-                {
-                    Some(row) => cancel_pending_turn_input_row_tx(&mut tx, row, now).await?,
-                    None => lash_core_execution::PendingTurnInputCancelOutcome::NotFound,
-                };
-            results.push(lash_core_execution::PendingTurnInputCancelReceipt { target, outcome });
+            let outcome = match load_pending_turn_input_row_by_target_tx(
+                &mut tx, session_id, &target, true,
+            )
+            .await?
+            {
+                Some(row) => cancel_pending_turn_input_row_tx(&mut tx, row, now).await?,
+                None => {
+                    lash_core_store::turn_input_vocabulary::PendingTurnInputCancelOutcome::NotFound
+                }
+            };
+            results.push(
+                lash_core_store::turn_input_vocabulary::PendingTurnInputCancelReceipt {
+                    target,
+                    outcome,
+                },
+            );
         }
         tx.commit().await.map_err(store_sqlx_error)?;
         Ok(results)
@@ -246,8 +258,11 @@ impl lash_core_execution::TurnInputStore for PostgresStore {
     async fn cancel_pending_turn_input_suffix(
         &self,
         session_id: &SessionId,
-        anchor: &lash_core_execution::PendingTurnInputCancelTarget,
-    ) -> Result<lash_core_execution::PendingTurnInputSuffixCancelOutcome, StoreError> {
+        anchor: &lash_core_store::turn_input_vocabulary::PendingTurnInputCancelTarget,
+    ) -> Result<
+        lash_core_store::turn_input_vocabulary::PendingTurnInputSuffixCancelOutcome,
+        StoreError,
+    > {
         let connection = acquire_runtime_connection(&self.pool, &self.observer).await?;
         let mut tx = begin_guarded(connection, &self.fence).await?;
         #[cfg(any(test, feature = "testing"))]
@@ -260,7 +275,7 @@ impl lash_core_execution::TurnInputStore for PostgresStore {
         else {
             tx.commit().await.map_err(store_sqlx_error)?;
             return Ok(
-                lash_core_execution::PendingTurnInputSuffixCancelOutcome::AnchorNotFound { anchor },
+                lash_core_store::turn_input_vocabulary::PendingTurnInputSuffixCancelOutcome::AnchorNotFound { anchor },
             );
         };
         lock_cancel_rows_in_queue_order(
@@ -288,12 +303,17 @@ impl lash_core_execution::TurnInputStore for PostgresStore {
             outcomes.push(cancel_pending_turn_input_row_tx(&mut tx, row, now).await?);
         }
         tx.commit().await.map_err(store_sqlx_error)?;
-        Ok(lash_core_execution::PendingTurnInputSuffixCancelOutcome::Outcomes { anchor, outcomes })
+        Ok(
+            lash_core_store::turn_input_vocabulary::PendingTurnInputSuffixCancelOutcome::Outcomes {
+                anchor,
+                outcomes,
+            },
+        )
     }
 }
 
 #[async_trait::async_trait]
-impl lash_core_execution::QueuedWorkStore for PostgresStore {
+impl lash_core_store::store::QueuedWorkStore for PostgresStore {
     async fn enqueue_queued_work(
         &self,
         batch: QueuedWorkBatchDraft,
@@ -327,7 +347,7 @@ impl lash_core_execution::QueuedWorkStore for PostgresStore {
         &self,
         session_id: &SessionId,
         batch_id: &str,
-    ) -> Result<Option<lash_core_execution::store::RuntimeCommitReceipt>, StoreError> {
+    ) -> Result<Option<lash_core_store::store::RuntimeCommitReceipt>, StoreError> {
         self.queued_work_batch_completion_pg(session_id, batch_id)
             .await
     }
@@ -335,7 +355,7 @@ impl lash_core_execution::QueuedWorkStore for PostgresStore {
     async fn pending_session_work_ordering(
         &self,
         session_id: &SessionId,
-    ) -> Result<lash_core_execution::store::PendingSessionWorkOrdering, StoreError> {
+    ) -> Result<lash_core_store::store::PendingSessionWorkOrdering, StoreError> {
         self.pending_session_work_ordering_pg(session_id).await
     }
 
@@ -353,7 +373,7 @@ impl lash_core_execution::QueuedWorkStore for PostgresStore {
         self.list_open_queued_work_pg(session_id).await
     }
     async fn has_admissible_queued_work(&self, session_id: &SessionId) -> Result<bool, StoreError> {
-        lash_core_execution::store::validate_session_id(session_id)?;
+        lash_core_store::store::validate_session_id(session_id)?;
         crate::observed_sql::query_scalar(
             crate::turn_ingress::turn_ingress_sql()
                 .family
@@ -376,8 +396,8 @@ async fn forsake_turn_input_tx(
     session_id: &SessionId,
     source_key: &str,
     now: u64,
-) -> Result<lash_core_execution::store::TurnInputForsaking, StoreError> {
-    use lash_core_execution::store::TurnInputForsaking;
+) -> Result<lash_core_store::store::TurnInputForsaking, StoreError> {
+    use lash_core_store::store::TurnInputForsaking;
     // The session's write authority, held to the commit, as an admission
     // takes it: the absence read below holds until this write commits.
     ensure_session_not_deleted_tx(tx, session_id).await?;
@@ -391,12 +411,12 @@ async fn forsake_turn_input_tx(
             .map_err(store_sqlx_error)?;
     if let Some((input_id, _)) = held {
         return Ok(TurnInputForsaking::Held {
-            input_id: lash_core_execution::InputId::parse(input_id)?,
+            input_id: lash_protocol_types::InputId::parse(input_id)?,
         });
     }
     ensure_session_not_closing_tx(tx, session_id).await?;
     let input_id =
-        lash_core_execution::store_backend_support::forsaken_input_id(session_id, source_key);
+        lash_core_store::store_backend_support::forsaken_input_id(session_id, source_key);
     crate::observed_sql::query(sql.forsaken_inputs.insert.sql())
         .bind(session_id.as_str())
         .bind(source_key)
@@ -416,16 +436,16 @@ async fn forsake_turn_input_tx(
 /// Any refusal fails the whole batch; the caller's transaction rolls it back.
 pub(crate) async fn enqueue_pending_turn_inputs_tx(
     tx: &mut crate::guarded_tx::GuardedTx<'_>,
-    batch: &lash_core_execution::PendingTurnInputBatch,
+    batch: &lash_core_store::turn_input_vocabulary::PendingTurnInputBatch,
     now: u64,
 ) -> Result<
     (
-        Vec<lash_core_execution::PendingTurnInput>,
+        Vec<lash_core_store::turn_input_vocabulary::PendingTurnInput>,
         Option<lash_durable::Woken>,
     ),
     StoreError,
 > {
-    use lash_core_execution::store_backend_support as support;
+    use lash_core_store::store_backend_support as support;
     let session_id = batch.session_id();
     // The session's write authority, held to the commit: every ingress
     // producer takes it before it allocates, so the absences read below
@@ -477,8 +497,10 @@ pub(crate) async fn enqueue_pending_turn_inputs_tx(
             support::TurnInputDraftAdmission::New => {
                 ensure_session_not_closing_tx(tx, session_id).await?;
                 let ids = draft.input.stored_attachment_ids();
-                let claim = lash_core_execution::ReferrerClaim::unguarded(
-                    lash_core_execution::ArtifactReferrer::Session(session_id.clone()),
+                let claim = lash_core_store::artifact_referrer::ReferrerClaim::unguarded(
+                    lash_core_store::artifact_referrer::ArtifactReferrer::Session(
+                        session_id.clone(),
+                    ),
                 )
                 .map_err(|error| error.into_store_error("pending input attachment referrer"))?;
                 crate::artifact_store::lock_referrer_tx(tx, &claim.referrer())
@@ -508,7 +530,9 @@ pub(crate) async fn enqueue_pending_turn_inputs_tx(
                     &ids,
                 )
                 .await?;
-                let state = lash_core_execution::TurnInputState::open(draft.ingress.clone());
+                let state = lash_core_store::turn_input_vocabulary::TurnInputState::open(
+                    draft.ingress.clone(),
+                );
                 let run_spec = admit_run_spec_tx(tx, draft, &mut interned).await?;
                 let inserted = crate::observed_sql::query(sql.pending_inputs.insert_new.sql())
                     .bind(enqueue_seq)
@@ -521,11 +545,9 @@ pub(crate) async fn enqueue_pending_turn_inputs_tx(
                     .bind(&submission_digest)
                     .bind(now as i64)
                     .bind(run_spec.column())
-                    .bind(
-                        lash_core_execution::store_backend_support::encode_trace_cause(
-                            &draft.trace_cause,
-                        )?,
-                    )
+                    .bind(lash_core_store::store_backend_support::encode_trace_cause(
+                        &draft.trace_cause,
+                    )?)
                     .fetch_one(crate::observed_sql::executor(&mut ***tx))
                     .await
                     .map_err(|err| pending_turn_input_insert_error(err, session_id, &input_id))?;
@@ -538,7 +560,7 @@ pub(crate) async fn enqueue_pending_turn_inputs_tx(
             crate::revisions::pin_tx(
                 tx,
                 session_id,
-                &lash_core_execution::Target::Input(input_id.clone()),
+                &lash_core_store::store::Target::Input(input_id.clone()),
             )
             .await?;
         }
@@ -570,10 +592,10 @@ pub(crate) async fn enqueue_pending_turn_inputs_tx(
 /// bytes this or an earlier admission interned.
 async fn admit_run_spec_tx(
     tx: &mut sqlx::Transaction<'_, sqlx::Postgres>,
-    draft: &lash_core_execution::PendingTurnInputDraft,
+    draft: &lash_core_store::turn_input_vocabulary::PendingTurnInputDraft,
     interned: &mut std::collections::BTreeSet<String>,
-) -> Result<lash_core_execution::store_backend_support::RunSpecAdmission, StoreError> {
-    use lash_core_execution::store_backend_support as support;
+) -> Result<lash_core_store::store_backend_support::RunSpecAdmission, StoreError> {
+    use lash_core_store::store_backend_support as support;
     let spec = support::RunSpecAdmission::of(draft)?;
     let sql = crate::turn_ingress::turn_ingress_sql();
     if let Some(turn_id) = support::steering_run_spec_target(draft) {
@@ -633,21 +655,21 @@ async fn admit_run_spec_tx(
 ///   next-turn run under its own spec.
 async fn check_unsourced_steering_run_spec_tx(
     tx: &mut sqlx::Transaction<'_, sqlx::Postgres>,
-    draft: &lash_core_execution::PendingTurnInputDraft,
-    turn_id: &lash_core_execution::TurnId,
-    spec: &lash_core_execution::store_backend_support::RunSpecAdmission,
+    draft: &lash_core_store::turn_input_vocabulary::PendingTurnInputDraft,
+    turn_id: &lash_protocol_types::TurnId,
+    spec: &lash_core_store::store_backend_support::RunSpecAdmission,
 ) -> Result<(), StoreError> {
     if let Some(unfinished) =
         crate::session_runs::unfinished_run_conn(tx, &draft.session_id).await?
         && matches!(
             unfinished.head,
-            lash_core_execution::store::AdmittedHead::Batch(_)
+            lash_core_store::store::AdmittedHead::Batch(_)
         )
         && unfinished.run == *turn_id
     {
         // A queued-headed run starts from no input, so it runs the default
         // spec.
-        lash_core_execution::store_backend_support::check_running_run_spec(
+        lash_core_store::store_backend_support::check_running_run_spec(
             &draft.session_id,
             turn_id,
             spec,
@@ -663,8 +685,8 @@ async fn check_unsourced_steering_run_spec_tx(
 async fn turn_address_evidence_tx(
     tx: &mut sqlx::Transaction<'_, sqlx::Postgres>,
     session_id: &SessionId,
-    turn_id: &lash_core_execution::TurnId,
-) -> Result<lash_core_execution::store_backend_support::TurnAddressEvidence, StoreError> {
+    turn_id: &lash_protocol_types::TurnId,
+) -> Result<lash_core_store::store_backend_support::TurnAddressEvidence, StoreError> {
     let ended: bool = crate::observed_sql::query_scalar(
         crate::turn_ingress::turn_ingress_sql()
             .family
@@ -678,7 +700,7 @@ async fn turn_address_evidence_tx(
     .map_err(store_sqlx_error)?;
     let running = crate::session_runs::unfinished_run_turns_conn(tx, session_id).await?;
     Ok(
-        lash_core_execution::store_backend_support::turn_address_evidence(
+        lash_core_store::store_backend_support::turn_address_evidence(
             turn_id,
             running.as_ref(),
             ended,

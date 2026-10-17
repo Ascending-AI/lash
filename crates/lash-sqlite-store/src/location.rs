@@ -213,7 +213,7 @@ const RETIRED_LAYOUT_FILES: [&str; 3] = ["durable-core.db", "process-registry.db
 /// three-file layout is refused as [`CompatRefusal::RetiredSqliteLayout`]
 /// (typed in the error's source chain) and left unchanged.
 ///
-/// [`CompatRefusal::RetiredSqliteLayout`]: lash_core_execution::compat::CompatRefusal::RetiredSqliteLayout
+/// [`CompatRefusal::RetiredSqliteLayout`]: lash_core_store::compat::CompatRefusal::RetiredSqliteLayout
 #[expect(
     clippy::disallowed_methods,
     reason = "a file backend creates the directory of the host-supplied database path (FIG-2971)"
@@ -231,8 +231,8 @@ pub(crate) fn file_location(
             .collect();
         if !files.is_empty() {
             return Err(tokio_rusqlite::Error::Error(
-                crate::sqlite_conversion_error(lash_core_execution::StoreError::Incompatible {
-                    refusal: lash_core_execution::compat::CompatRefusal::RetiredSqliteLayout {
+                crate::sqlite_conversion_error(lash_core_store::store::StoreError::Incompatible {
+                    refusal: lash_core_store::compat::CompatRefusal::RetiredSqliteLayout {
                         location: path.display().to_string(),
                         files,
                     },

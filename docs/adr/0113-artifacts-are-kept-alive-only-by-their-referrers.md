@@ -69,8 +69,8 @@ acquire, end-referrer and read operations. Every publish or acquire takes a
 `ReferrerClaim`. Publish verifies identical bytes under an existing
 reference and adds the exact edge. Acquire requires stored bytes. Both
 check the referrer's fence and arm the claim's guard in the same store
-transaction (`crates/lash-core-execution/src/module_artifacts.rs:158-191`,
-`crates/lash-core-execution/src/runtime/process/model.rs:228-268`,
+transaction (`crates/lash-execution-contracts/src/module_artifacts.rs:158-191`,
+`crates/lash-execution-contracts/src/process/model.rs:228-268`,
 `crates/lash-sqlite-store/src/artifact_store.rs:198-283`,
 `crates/lash-postgres-store/src/postgres/artifact_store.rs:182-254`).
 
@@ -185,7 +185,7 @@ end path (`crates/lash-sqlite-store/src/obligation_ledger.rs:578-598`,
 `ArtifactCleanupRelay` uses `StoreSet::artifact_cleanup()` and the
 `ArtifactCleanup` obligation kind. It delivers the shares that cannot finish
 inside an end hook's transaction, and guarded crash-orphaned preparations
-(`crates/lash-core-execution/src/backend.rs:204`,
+(`crates/lash-execution-contracts/src/backend.rs:204`,
 `crates/lash-core/src/runtime/artifact_cleanup.rs:190-215`). Its delivery:
 
 1. Loads the cleanup; a row another relay settled is already delivered.
@@ -259,8 +259,8 @@ pin cannot publish again; another publication needs a fresh pin
 store refusal and backend failures, plus encode/decode failures. The
 `StoreError` conversions preserve the referrer and artifact names.
 `artifact_referrer_ended` classifies the typed refusal across the plugin
-boundary (`crates/lash-core-execution/src/module_artifacts.rs:31-96`,
-`crates/lash-core-execution/src/runtime/process/model.rs:271-310`).
+boundary (`crates/lash-execution-contracts/src/module_artifacts.rs:31-96`,
+`crates/lash-execution-contracts/src/process/model.rs:271-310`).
 
 ### 3. End hooks
 
@@ -419,8 +419,8 @@ content-derived `ProcessDefinitionId` (ADR 0095). It is the collectible
 artifact kind `ArtifactStoreId::ProcessDefinition`, not a referrer kind.
 The descriptor has no name, revision or lifecycle. Hosts own any names and
 versions; lash has no named definition registry or definition CAS
-(`crates/lash-core-execution/src/runtime/process/definition.rs:81-151,189-252`,
-`crates/lash-core-execution/src/runtime/process/definition_store.rs:4-25`).
+(`crates/lash-execution-contracts/src/process/definition.rs:81-151,189-252`,
+`crates/lash-execution-contracts/src/process/definition_store.rs:4-25`).
 
 Every reader holds the descriptor and complete manifest under the same
 referrer. A kernel definition's manifest holds its document and every helper
@@ -434,7 +434,7 @@ manifest and derives the signature before publication or acquisition. Engine-own
 the claim, with a guard where it has one; the descriptor and SQL-owned
 entries commit together. A usable result is exposed only after this closure
 is held. Partial preparations stay under their referrer's end rule
-(`crates/lash-core-execution/src/runtime/process/definition_store.rs:136-243`,
+(`crates/lash-execution-contracts/src/process/definition_store.rs:136-243`,
 `crates/lash-sqlite-store/src/artifact_store.rs:384-461`,
 `crates/lash-postgres-store/src/postgres/artifact_store.rs:255-356`).
 
@@ -445,7 +445,7 @@ stores descriptors in the `process_definition` namespace beside modules
 and environments. A start by id realizes an engine input and records that
 id in the process identity. Frame globals, starts, records,
 executions and host pins hold their own closure edges
-(`crates/lash-core-execution/src/runtime/process/definition_store.rs:49-85,229-243`,
+(`crates/lash-execution-contracts/src/process/definition_store.rs:49-85,229-243`,
 `crates/lash-core-execution/src/runtime/process/start_staging.rs:640-718`,
 `crates/lash-sqlite-store/src/artifact_store.rs:102-113`,
 `crates/lash/src/artifacts.rs:101-153`).
@@ -455,7 +455,7 @@ starts, availability without another reader requires an explicit host pin.
 Cleanup reclaims a descriptor and its dependencies after the last edge is
 severed, subject to settlement gates and carries. Shared modules remain while
 another referrer holds them
-(`crates/lash-core-execution/src/runtime/process/definition_store.rs:12-25,72-85`,
+(`crates/lash-execution-contracts/src/process/definition_store.rs:12-25,72-85`,
 `crates/lash-sqlite-store/src/artifact_store.rs:46-53`,
 `crates/lash/src/artifacts.rs:118-153`).
 
@@ -547,7 +547,7 @@ precedes activation across stores: guarded starts acquire
 before registration, and a frame prepares its engine share before SQL
 activation. The descriptor and its store-set manifest share one transaction
 (`crates/lash-core-execution/src/runtime/process/start_staging.rs:109-180`,
-`crates/lash-core-execution/src/runtime/process/definition_store.rs:12-22`,
+`crates/lash-execution-contracts/src/process/definition_store.rs:12-22`,
 `crates/lash-core/src/runtime/frame_definition_carry.rs:8-65`).
 
 Each store fences, carries, severs and reclaims in its own transaction;

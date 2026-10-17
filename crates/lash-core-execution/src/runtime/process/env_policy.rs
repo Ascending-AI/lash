@@ -16,9 +16,13 @@ use std::sync::Arc;
 use lash_core_store::process_env::{ProcessComponentEntry, ProcessEnv, ProcessEnvRefusal};
 use lash_core_store::run_spec::ResolvedRun;
 
-use super::model::{EngineLaunch, EngineSettings, ProcessEnvRef};
-use super::{ProcessDefinitionId, ProcessEngineRegistry, ProcessSignature};
+use super::ProcessDefinitionId;
+use super::ProcessEngineRegistry;
+use super::model::ProcessEnvRef;
 use crate::{EffectName, ExecutionOwner, ProcessId, SurfaceTools, ToolExecutionGrant};
+use lash_execution_contracts::process::EngineLaunch;
+use lash_execution_contracts::process::EngineSettings;
+use lash_execution_contracts::process::ProcessSignature;
 
 /// Chooses the environment and engine settings of a model's process start.
 ///
@@ -293,7 +297,7 @@ impl ProcessEngineRegistry {
     /// A missing effect, an unfit link, or a component that cannot serve it.
     pub fn capture_env(
         &self,
-        performed: &crate::PerformedEffects,
+        performed: &lash_execution_contracts::process::PerformedEffects,
         candidate: &ProcessEnv,
     ) -> Result<ProcessEnv, ProcessEnvRefusal> {
         let env = candidate
@@ -322,7 +326,7 @@ impl ProcessEngineRegistry {
 #[derive(Clone, Debug, PartialEq)]
 pub struct ProcessStartChoice {
     /// Per-effect fit checked before holding the launch; never stored.
-    pub fits: BTreeMap<crate::EffectName, crate::FitPolicy>,
+    pub fits: BTreeMap<crate::EffectName, lash_execution_contracts::process::FitPolicy>,
     pub env: ProcessEnvChoice,
     pub engine_settings: Option<EngineSettings>,
 }

@@ -27,7 +27,10 @@ impl lash_core::facade_support::PluginFactory for AppendRollbackProtocolFactory 
 
     fn recipe(
         self: Arc<Self>,
-    ) -> std::result::Result<lash_core::plugin::PluginRecipe, lash_core::plugin::PluginError> {
+    ) -> std::result::Result<
+        lash_core::plugin::PluginRecipe,
+        lash_execution_contracts::plugin_error::PluginError,
+    > {
         let mut reg = lash_core::plugin::PluginRegistrar::<AppendRollbackProtocolPlugin>::new(
             lash_core::plugin::PluginFactory::id(self.as_ref()),
         );
@@ -76,7 +79,7 @@ impl lash_core::facade_support::SessionPlugin for AppendRollbackProtocolPlugin {
 impl AppendRollbackProtocolPlugin {
     fn declare(
         reg: &mut lash_core::plugin::PluginRegistrar<Self>,
-    ) -> std::result::Result<(), lash_core::plugin::PluginError> {
+    ) -> std::result::Result<(), lash_execution_contracts::plugin_error::PluginError> {
         reg.protocol().session(move |this, _state| {
             Ok(Arc::new(AppendRollbackProtocolSession {
                 store: Arc::clone(&this.store),

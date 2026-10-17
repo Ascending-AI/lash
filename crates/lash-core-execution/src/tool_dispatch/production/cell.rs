@@ -397,13 +397,15 @@ impl CellMembers {
         if context.dispatch().process_engines.require(engine).is_ok() {
             return Ok(());
         }
-        Err(crate::PluginError::ToolRegistrationRefused {
-            source: Box::new(crate::RegistrationRefused::UnregisteredIsolationEngine {
-                tool: definition.manifest.name.clone(),
-                engine: engine.to_owned(),
-            }),
-        }
-        .into())
+        Err(
+            lash_execution_contracts::plugin_error::PluginError::ToolRegistrationRefused {
+                source: Box::new(crate::RegistrationRefused::UnregisteredIsolationEngine {
+                    tool: definition.manifest.name.clone(),
+                    engine: engine.to_owned(),
+                }),
+            }
+            .into(),
+        )
     }
 
     /// What the cell is answered with for `member`, from its committed

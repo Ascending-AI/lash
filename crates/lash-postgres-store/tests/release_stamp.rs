@@ -2,7 +2,9 @@
 
 use async_trait::async_trait;
 use lash_conformance::{ReleaseStampDeployment, release_stamp_conformance};
-use lash_core_execution::{StoreError, StorePreflight, StoreSchemaStatus};
+use lash_core_store::store::StoreError;
+use lash_core_store::store::StorePreflight;
+use lash_core_store::store::StoreSchemaStatus;
 use lash_postgres_store::{PostgresStorePreflight, SchemaCheck};
 
 use crate::harness::ScratchSchema;

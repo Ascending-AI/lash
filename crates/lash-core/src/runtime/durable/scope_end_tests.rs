@@ -35,10 +35,15 @@ use super::session_close::{
     run_session_close,
 };
 use super::turn_scope::{await_turn_children, continue_scope_ends, end_turn_scope};
+use crate::ActorContext;
+use crate::AdmittedScope;
+use crate::ProcessId;
+use crate::ScopeId;
+use crate::SessionId;
+use crate::TurnId;
 use crate::store::{ObligationKey, ObligationKind, ObligationState, SessionLookup};
-use crate::{
-    ActorContext, AdmittedScope, Backend, ProcessId, ScopeId, SessionId, StoreSet, TurnId,
-};
+use lash_execution_contracts::backend::Backend;
+use lash_execution_contracts::backend::StoreSet;
 
 /// The format set the laws' session actors are written in.
 const SESSION_FORMATS: &str = "law-session";
@@ -383,7 +388,7 @@ impl World {
     async fn new(
         session: &str,
         settings: DurableSettings,
-        engines: Vec<Arc<dyn crate::ProcessEngine>>,
+        engines: Vec<Arc<dyn lash_execution_contracts::process::ProcessEngine>>,
     ) -> Self {
         Self::layered(session, settings, engines, |stores| stores).await
     }
@@ -392,7 +397,7 @@ impl World {
     async fn layered(
         session: &str,
         settings: DurableSettings,
-        mut engines: Vec<Arc<dyn crate::ProcessEngine>>,
+        mut engines: Vec<Arc<dyn lash_execution_contracts::process::ProcessEngine>>,
         layer: impl FnOnce(
             crate::testing::runtime_helpers::LayeredStores,
         ) -> crate::testing::runtime_helpers::LayeredStores,
@@ -406,12 +411,12 @@ impl World {
                 .map_durable_store(move |_| cut)
                 .into_store_set()
         };
-        let backend = Backend::assemble(lash_core_execution::BackendParts {
+        let backend = Backend::assemble(lash_execution_contracts::backend::BackendParts {
             formats: Vec::new(),
             stores: layered,
             settings,
             engines,
-            providers: Arc::new(lash_core_execution::NoProjectionProviders),
+            providers: Arc::new(lash_execution_contracts::projection::NoProjectionProviders),
         })
         .expect("the law's backend assembles");
         let session = SessionId::parse(session).expect("a session id");
@@ -511,7 +516,7 @@ async fn a_session_close_cut_at_any_step_resumes_there_and_deletes_nothing_while
         let child = start_process(
             &world.backend,
             ScopeId::Session(world.session.clone()),
-            lash_core_execution::testing::HELD_PROCESS_ENGINE_KIND,
+            lash_execution_contracts::testing::HELD_PROCESS_ENGINE_KIND,
         )
         .await;
         let mut cx = world.claim().await;
@@ -646,7 +651,7 @@ async fn a_session_close_whose_process_ends_before_its_wait_commits_still_closes
     let child = start_process(
         &world.backend,
         ScopeId::Session(world.session.clone()),
-        lash_core_execution::testing::HELD_PROCESS_ENGINE_KIND,
+        lash_execution_contracts::testing::HELD_PROCESS_ENGINE_KIND,
     )
     .await;
     let cx = world.claim().await;
@@ -728,7 +733,7 @@ async fn a_live_grandchild_below_a_terminal_intermediate_blocks_the_session_clos
         )
         .await
         .expect("materialize the session");
-    let held = lash_core_execution::testing::HELD_PROCESS_ENGINE_KIND;
+    let held = lash_execution_contracts::testing::HELD_PROCESS_ENGINE_KIND;
     let intermediate = start_process(
         &world.backend,
         ScopeId::Session(world.session.clone()),
@@ -760,7 +765,7 @@ async fn a_turn_child_still_in_its_grace_blocks_the_session_close() {
     let child = start_process(
         &world.backend,
         ScopeId::turn(world.session.clone(), run.clone()),
-        lash_core_execution::testing::HELD_PROCESS_ENGINE_KIND,
+        lash_execution_contracts::testing::HELD_PROCESS_ENGINE_KIND,
     )
     .await;
     let cx = world.claim().await;
@@ -828,7 +833,7 @@ async fn assert_closes_only_after(world: &World, cx: &ActorContext, live: &Proce
 #[tokio::test(flavor = "multi_thread", worker_threads = 4)]
 async fn a_live_grandchild_below_a_terminal_intermediate_blocks_a_turn_stop() {
     let world = World::new("grandchild-stop", DurableSettings::default(), Vec::new()).await;
-    let held = lash_core_execution::testing::HELD_PROCESS_ENGINE_KIND;
+    let held = lash_execution_contracts::testing::HELD_PROCESS_ENGINE_KIND;
     let run = turn("stopping-turn");
     let intermediate = start_process(
         &world.backend,
@@ -899,7 +904,7 @@ async fn a_turn_cascade_larger_than_a_batch_ends_every_child_across_a_cut_at_eac
                 start_process(
                     &world.backend,
                     ScopeId::turn(world.session.clone(), run.clone()),
-                    lash_core_execution::testing::HELD_PROCESS_ENGINE_KIND,
+                    lash_execution_contracts::testing::HELD_PROCESS_ENGINE_KIND,
                 )
                 .await,
             );
@@ -994,7 +999,7 @@ async fn turn_end_ends_its_child_and_grandchild(at: ChildAt) {
     let grandchild = start_process(
         &world.backend,
         ScopeId::process(child.clone()),
-        lash_core_execution::testing::HELD_PROCESS_ENGINE_KIND,
+        lash_execution_contracts::testing::HELD_PROCESS_ENGINE_KIND,
     )
     .await;
     let cx = world.claim().await;
@@ -1192,35 +1197,37 @@ impl LawEngine {
 }
 
 #[async_trait::async_trait]
-impl crate::ProcessEngine for LawEngine {
+impl lash_execution_contracts::process::ProcessEngine for LawEngine {
     fn settled_ran(
         &self,
-        _kind: &crate::EngineStepKind,
+        _kind: &lash_execution_contracts::process::EngineStepKind,
         _output: &lash_core_store::tool_run::SettledOutput,
     ) -> Vec<(u32, u64)> {
         Vec::new()
     }
 
-    fn trace_class(&self) -> crate::ProcessTraceClass {
-        crate::ProcessTraceClass::Internal
+    fn trace_class(&self) -> lash_execution_contracts::process::ProcessTraceClass {
+        lash_execution_contracts::process::ProcessTraceClass::Internal
     }
 
     async fn performed_effects(
         &self,
         _payload: &serde_json::Value,
-    ) -> Result<crate::PerformedEffects, crate::ProcessEnvRefusal> {
-        Ok(crate::PerformedEffects::new())
+    ) -> Result<lash_execution_contracts::process::PerformedEffects, crate::ProcessEnvRefusal> {
+        Ok(lash_execution_contracts::process::PerformedEffects::new())
     }
 
     async fn check_args(
         &self,
-        _signature: &crate::ProcessSignature,
+        _signature: &lash_execution_contracts::process::ProcessSignature,
         _args: &serde_json::Map<String, serde_json::Value>,
-        _mode: crate::ArgsMode,
-    ) -> std::result::Result<(), crate::ArgsMismatch> {
-        Err(crate::ArgsMismatch::UnsupportedSignature {
-            engine_kind: self.kind().into(),
-        })
+        _mode: lash_execution_contracts::process::ArgsMode,
+    ) -> std::result::Result<(), lash_execution_contracts::process::ArgsMismatch> {
+        Err(
+            lash_execution_contracts::process::ArgsMismatch::UnsupportedSignature {
+                engine_kind: self.kind().into(),
+            },
+        )
     }
 
     fn kind(&self) -> &'static str {
@@ -1230,14 +1237,14 @@ impl crate::ProcessEngine for LawEngine {
     fn start_artifacts(
         &self,
         _payload: &serde_json::Value,
-    ) -> Result<Vec<crate::ArtifactName>, crate::PluginError> {
+    ) -> Result<Vec<crate::ArtifactName>, lash_execution_contracts::plugin_error::PluginError> {
         Ok(Vec::new())
     }
 
     async fn end_artifact_referrer(
         &self,
         _cleanup: &crate::ResolvedArtifactCleanup,
-    ) -> Result<(), crate::ArtifactStoreError> {
+    ) -> Result<(), lash_execution_contracts::module_artifacts::ArtifactStoreError> {
         Ok(())
     }
 
@@ -1245,14 +1252,16 @@ impl crate::ProcessEngine for LawEngine {
         &self,
         _claim: &crate::ReferrerClaim,
         artifact_ref: &str,
-    ) -> Result<(), crate::PluginError> {
-        Err(crate::PluginError::Session(format!(
-            "the law's engine stores no artifact `{artifact_ref}`"
-        )))
+    ) -> Result<(), lash_execution_contracts::plugin_error::PluginError> {
+        Err(
+            lash_execution_contracts::plugin_error::PluginError::Session(format!(
+                "the law's engine stores no artifact `{artifact_ref}`"
+            )),
+        )
     }
 
-    fn state_format(&self) -> crate::EngineStateFormat {
-        crate::EngineStateFormat {
+    fn state_format(&self) -> lash_execution_contracts::process::EngineStateFormat {
+        lash_execution_contracts::process::EngineStateFormat {
             kind: LAW_ENGINE_KIND.to_owned(),
             version: 0,
         }
@@ -1278,46 +1287,67 @@ impl crate::ProcessEngine for LawEngine {
     fn check_settings(
         &self,
         _payload: &serde_json::Value,
-        settings: Option<&crate::EngineSettings>,
-    ) -> std::result::Result<(), crate::PluginError> {
+        settings: Option<&lash_execution_contracts::process::EngineSettings>,
+    ) -> std::result::Result<(), lash_execution_contracts::plugin_error::PluginError> {
         match settings {
             None => Ok(()),
-            Some(_) => Err(crate::PluginError::Registration(format!(
-                "process engine `{}` takes no settings",
-                self.kind()
-            ))),
+            Some(_) => Err(
+                lash_execution_contracts::plugin_error::PluginError::Registration(format!(
+                    "process engine `{}` takes no settings",
+                    self.kind()
+                )),
+            ),
         }
     }
 
     fn default_settings(
         &self,
         _payload: &serde_json::Value,
-    ) -> std::result::Result<Option<crate::EngineSettings>, crate::PluginError> {
+    ) -> std::result::Result<
+        Option<lash_execution_contracts::process::EngineSettings>,
+        lash_execution_contracts::plugin_error::PluginError,
+    > {
         Ok(None)
     }
 
     fn advance(
         &self,
-        state: crate::EngineState,
-        event: crate::EngineEvent,
-    ) -> Result<(crate::EngineState, crate::EngineAction), crate::ProcessInfraError> {
+        state: lash_execution_contracts::process::EngineState,
+        event: lash_execution_contracts::process::EngineEvent,
+    ) -> Result<
+        (
+            lash_execution_contracts::process::EngineState,
+            lash_execution_contracts::process::EngineAction,
+        ),
+        lash_execution_contracts::process::ProcessInfraError,
+    > {
         self.advances.fetch_add(1, Ordering::SeqCst);
         match (self.mode, event) {
-            (LawEngineMode::RefuseStart, _) => Err(crate::ProcessInfraError::new(
-                crate::PluginError::Session("the law's engine refuses to start".into()),
-            )),
-            (LawEngineMode::SleepUntilCancelled, crate::EngineEvent::Started { .. }) => Ok((
+            (LawEngineMode::RefuseStart, _) => {
+                Err(lash_execution_contracts::process::ProcessInfraError::new(
+                    lash_execution_contracts::plugin_error::PluginError::Session(
+                        "the law's engine refuses to start".into(),
+                    ),
+                ))
+            }
+            (
+                LawEngineMode::SleepUntilCancelled,
+                lash_execution_contracts::process::EngineEvent::Started { .. },
+            ) => Ok((
                 state,
-                crate::EngineAction::Sleep {
+                lash_execution_contracts::process::EngineAction::Sleep {
                     until: DurableInstant(i64::MAX / 2),
                     site: None,
                 },
             )),
-            (LawEngineMode::RunForever, crate::EngineEvent::Started { .. }) => Ok((
+            (
+                LawEngineMode::RunForever,
+                lash_execution_contracts::process::EngineEvent::Started { .. },
+            ) => Ok((
                 state,
-                crate::EngineAction::Steps {
-                    steps: vec![crate::StepRequest::Tool {
-                        step: crate::StepName("forever".into()),
+                lash_execution_contracts::process::EngineAction::Steps {
+                    steps: vec![lash_execution_contracts::process::StepRequest::Tool {
+                        step: lash_execution_contracts::process::StepName("forever".into()),
                         effect: lash_core_execution::testing::effect(HANGING_TOOL),
                         input: serde_json::Value::Null,
                         site: None,
@@ -1328,26 +1358,36 @@ impl crate::ProcessEngine for LawEngine {
             )),
             // It ignores its cancel: only lash's forced terminal, at its
             // grace, ends it.
-            (LawEngineMode::RunForever, crate::EngineEvent::Cancelled { .. }) => {
-                Ok((state, crate::EngineAction::Idle))
-            }
-            (_, crate::EngineEvent::Cancelled { origin, .. }) => Ok((
+            (
+                LawEngineMode::RunForever,
+                lash_execution_contracts::process::EngineEvent::Cancelled { .. },
+            ) => Ok((state, lash_execution_contracts::process::EngineAction::Idle)),
+            (_, lash_execution_contracts::process::EngineEvent::Cancelled { origin, .. }) => Ok((
                 state,
-                crate::EngineAction::Terminal(process::cancelled(origin, false)),
+                lash_execution_contracts::process::EngineAction::Terminal(process::cancelled(
+                    origin, false,
+                )),
             )),
-            (_, event) => Err(crate::ProcessInfraError::new(crate::PluginError::Session(
-                format!("the law's engine did not expect {event:?}"),
-            ))),
+            (_, event) => Err(lash_execution_contracts::process::ProcessInfraError::new(
+                lash_execution_contracts::plugin_error::PluginError::Session(format!(
+                    "the law's engine did not expect {event:?}"
+                )),
+            )),
         }
     }
 
     async fn resolve(
         &self,
-        _reference: &crate::ProcessDefinitionRef,
-    ) -> Result<crate::ProcessDefinitionResolution, crate::ProcessDefinitionError> {
-        Ok(crate::ProcessDefinitionResolution::new(
-            crate::ProcessSignature::Unknown,
-        ))
+        _reference: &lash_execution_contracts::process::ProcessDefinitionRef,
+    ) -> Result<
+        lash_execution_contracts::process::ProcessDefinitionResolution,
+        lash_execution_contracts::process::ProcessDefinitionError,
+    > {
+        Ok(
+            lash_execution_contracts::process::ProcessDefinitionResolution::new(
+                lash_execution_contracts::process::ProcessSignature::Unknown,
+            ),
+        )
     }
 }
 
@@ -1408,8 +1448,8 @@ impl ProcessSteps for HangingSteps {
     async fn admit(
         &self,
         _runtime: &Arc<lash_core_execution::runtime::process::StepRuntime>,
-        _process: &crate::ProcessRecord,
-        _step: &crate::StepRequest,
+        _process: &lash_execution_contracts::process::ProcessRecord,
+        _step: &lash_execution_contracts::process::StepRequest,
         now_ms: u64,
     ) -> Result<StepAdmission, StepRefusal> {
         let long = Duration::from_secs(60);
@@ -1424,8 +1464,8 @@ impl ProcessSteps for HangingSteps {
     /// Never asked: no step of these parks.
     fn resolved(
         &self,
-        _process: &crate::ProcessRecord,
-        _step: &crate::StepRequest,
+        _process: &lash_execution_contracts::process::ProcessRecord,
+        _step: &lash_execution_contracts::process::StepRequest,
         _execution: &lash_core_execution::runtime::actor::round::AdmittedExecution,
         _parked: &lash_core_store::tool_run::Material<lash_core_store::tool_run::CompletionSource>,
         _resolution: lash_core_execution::runtime::actor::waits::Resolution,
@@ -1436,8 +1476,8 @@ impl ProcessSteps for HangingSteps {
     fn body(
         &self,
         _runtime: &std::sync::Arc<lash_core_execution::runtime::process::StepRuntime>,
-        _process: &crate::ProcessRecord,
-        _step: &crate::StepRequest,
+        _process: &lash_execution_contracts::process::ProcessRecord,
+        _step: &lash_execution_contracts::process::StepRequest,
         _execution: &lash_core_execution::runtime::actor::round::AdmittedExecution,
     ) -> lash_core_execution::runtime::actor::round::MemberBody {
         lash_core_execution::runtime::actor::round::member_body({
@@ -1460,27 +1500,27 @@ async fn try_start_process(
     backend: &Backend,
     scope: ScopeId,
     kind: &str,
-) -> Result<ProcessId, crate::PluginError> {
-    lash_core_execution::testing::process_execution_env_fixture(
+) -> Result<ProcessId, lash_execution_contracts::plugin_error::PluginError> {
+    lash_execution_contracts::testing::process_execution_env_fixture(
         backend.process_env_store().as_ref(),
     )
     .await;
-    let mut registration = crate::ProcessRegistration::new(
-        crate::ProcessInput::Engine {
+    let mut registration = lash_execution_contracts::process::ProcessRegistration::new(
+        lash_execution_contracts::process::ProcessInput::Engine {
             kind: kind.to_owned(),
             payload: serde_json::Value::Null,
-            launch: crate::EngineLaunch::new(
-                lash_core_execution::testing::process_execution_env_fixture_ref(),
+            launch: lash_execution_contracts::process::EngineLaunch::new(
+                lash_execution_contracts::testing::process_execution_env_fixture_ref(),
                 None,
             ),
         },
-        crate::ProcessProvenance::host(),
-        crate::LifetimeDecision::Until {
+        lash_execution_contracts::process::ProcessProvenance::host(),
+        lash_execution_contracts::process::LifetimeDecision::Until {
             scope: scope.clone(),
-            grant: crate::ScopeGrant::Ancestor,
+            grant: lash_execution_contracts::process::ScopeGrant::Ancestor,
         },
     );
-    registration.ancestry = crate::Ancestry::from_scopes([scope]);
+    registration.ancestry = lash_execution_contracts::process::Ancestry::from_scopes([scope]);
     backend
         .process_registry()
         .register_process(registration)

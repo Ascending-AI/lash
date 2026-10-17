@@ -32,6 +32,6 @@ Retention is host-scheduled through `prune_terminal_processes(cutoff, filter, wa
 
 A durable push feed is rejected because it duplicates the durable log's buffering and recovery responsibilities. Routing terminal waits through the sink is rejected because missed delivery must not strand a waiter. Stores stay state interfaces; decorators add freshness and local change ticks. Sink lifetime follows the observer registration, while retained state remains available independently of that observer.
 
-[Watched registry and registrations](../../crates/lash-core-execution/src/runtime/process/awaiter.rs), [event emission](../../crates/lash-core-execution/src/runtime/process/awaiter/registry_support.rs) and [retention contract](../../crates/lash-core-execution/src/runtime/process/registry_concerns.rs) implement the split.
+[Watched registry and registrations](../../crates/lash-core-execution/src/runtime/process/awaiter.rs), [event emission](../../crates/lash-core-execution/src/runtime/process/awaiter/registry_support.rs) and [retention contract](../../crates/lash-execution-contracts/src/process/registry_concerns.rs) implement the split.
 
 [ADR 0137](0137-the-host-owns-events-routing-and-scheduling.md) owns host events, routing and scheduling.

@@ -201,7 +201,7 @@ Sources: `crates/lash-sansio/src/session.rs` and
 (`crates/lash/src/tests/durable_session.rs`).
 
 Sources: `crates/lash-core-execution/src/tool_dispatch/attempt_coordinator.rs`,
-`crates/lash-core-execution/src/tool_intent.rs`,
+`crates/lash-execution-contracts/src/tool_intent.rs`,
 `crates/lash-core-store/src/await_event_identity.rs`, and
 `crates/lash-sansio/src/frame_key.rs`.
 

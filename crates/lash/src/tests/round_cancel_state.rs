@@ -133,7 +133,7 @@ impl ToolProvider for StatePlugin {
         lash_core::ToolAttemptOutcome::Done {
             result: lash_core::ToolOutcomeDone::ok(serde_json::json!({ "set": symbol }))
                 .with_state(crate::plugins::StateCommands::new().set(key, symbol.into())),
-            intents: lash_core::ToolIntents::default(),
+            intents: lash_execution_contracts::tool_intent::ToolIntents::default(),
         }
     }
 }
@@ -143,7 +143,7 @@ async fn committed_values(
     core: &LashCore,
     id: &str,
 ) -> Result<std::collections::BTreeMap<String, serde_json::Value>> {
-    let store = lash_core::runtime::live_session_view(
+    let store = lash_execution_contracts::deployment::live_session_view(
         &core.store_factory,
         &crate::SessionId::fixture(id.to_string()),
     )

@@ -27,7 +27,7 @@
 //! (receipt retention, tombstone compaction) sequences first under the lock
 //! it takes anyway.
 
-use lash_core_execution::StoreError;
+use lash_core_store::store::StoreError;
 use sqlx::{PgConnection, PgPool};
 
 use crate::guarded_tx::WriterFence;

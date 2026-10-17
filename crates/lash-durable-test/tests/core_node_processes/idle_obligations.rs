@@ -28,9 +28,9 @@ fn write_component_without_tool() -> Arc<dyn lash::process::ProcessComponentFact
 }
 
 /// A write step named `step` on `x`.
-fn write_step(step: &str, x: i64) -> lash_core::StepRequest {
-    lash_core::StepRequest::Tool {
-        step: lash_core::StepName(step.to_owned()),
+fn write_step(step: &str, x: i64) -> lash_execution_contracts::process::StepRequest {
+    lash_execution_contracts::process::StepRequest::Tool {
+        step: lash_execution_contracts::process::StepName(step.to_owned()),
         effect: lash_core_execution::testing::effect_of(&write_definition()),
         input: serde_json::json!({ "x": x }),
         site: None,
@@ -44,25 +44,31 @@ const IDLE_ENGINE: &str = "core-node-idle-engine";
 
 fn idle_engine_advance(
     state: &mut serde_json::Value,
-    event: lash_core::EngineEvent,
-) -> lash_core::EngineAction {
+    event: lash_execution_contracts::process::EngineEvent,
+) -> lash_execution_contracts::process::EngineAction {
     match event {
-        lash_core::EngineEvent::Started { payload } => {
+        lash_execution_contracts::process::EngineEvent::Started { payload } => {
             *state = payload;
-            lash_core::EngineAction::Steps {
+            lash_execution_contracts::process::EngineAction::Steps {
                 steps: vec![write_step("write", 1)],
                 wake: None,
             }
         }
-        lash_core::EngineEvent::StepSettled { .. } => lash_core::EngineAction::Sleep {
-            until: lash_core::durable_port::DurableInstant(
-                state["until_ms"].as_i64().unwrap_or_default(),
-            ),
-            site: None,
-        },
-        lash_core::EngineEvent::Woke => answer(serde_json::json!({ "woke": true })),
-        lash_core::EngineEvent::Cancelled { origin, .. } => cancelled(origin),
-        _ => lash_core::EngineAction::Idle,
+        lash_execution_contracts::process::EngineEvent::StepSettled { .. } => {
+            lash_execution_contracts::process::EngineAction::Sleep {
+                until: lash_core::durable_port::DurableInstant(
+                    state["until_ms"].as_i64().unwrap_or_default(),
+                ),
+                site: None,
+            }
+        }
+        lash_execution_contracts::process::EngineEvent::Woke => {
+            answer(serde_json::json!({ "woke": true }))
+        }
+        lash_execution_contracts::process::EngineEvent::Cancelled { origin, .. } => {
+            cancelled(origin)
+        }
+        _ => lash_execution_contracts::process::EngineAction::Idle,
     }
 }
 
@@ -72,15 +78,19 @@ const TWO_WRITE_ENGINE: &str = "core-node-two-write-engine";
 
 fn two_write_engine_advance(
     _state: &mut serde_json::Value,
-    event: lash_core::EngineEvent,
-) -> lash_core::EngineAction {
+    event: lash_execution_contracts::process::EngineEvent,
+) -> lash_execution_contracts::process::EngineAction {
     match event {
-        lash_core::EngineEvent::Started { .. } => lash_core::EngineAction::Steps {
-            steps: vec![write_step("quick", 1), write_step("held", -1)],
-            wake: None,
-        },
-        lash_core::EngineEvent::Cancelled { origin, .. } => cancelled(origin),
-        _ => lash_core::EngineAction::Idle,
+        lash_execution_contracts::process::EngineEvent::Started { .. } => {
+            lash_execution_contracts::process::EngineAction::Steps {
+                steps: vec![write_step("quick", 1), write_step("held", -1)],
+                wake: None,
+            }
+        }
+        lash_execution_contracts::process::EngineEvent::Cancelled { origin, .. } => {
+            cancelled(origin)
+        }
+        _ => lash_execution_contracts::process::EngineAction::Idle,
     }
 }
 
@@ -100,7 +110,7 @@ fn wall_millis() -> i64 {
 async fn a_process_holding_no_call_to_an_unserved_provider_still_runs(tier: Tier) {
     let world = Arc::new(World::default());
     let (stores, _keep) = stores(tier).await;
-    let engine = || -> Vec<Arc<dyn lash_core::ProcessEngine>> {
+    let engine = || -> Vec<Arc<dyn lash_execution_contracts::process::ProcessEngine>> {
         vec![Arc::new(ScriptEngine {
             kind: IDLE_ENGINE,
             advance: idle_engine_advance,
@@ -139,11 +149,12 @@ async fn a_process_holding_no_call_to_an_unserved_provider_still_runs(tier: Tier
                 !record.is_terminal(),
                 "the process ended before its sleep: {record:?}"
             );
-            if record
-                .waits()
-                .iter()
-                .any(|wait| matches!(wait.kind, lash_core::WaitKind::Sleep { .. }))
-            {
+            if record.waits().iter().any(|wait| {
+                matches!(
+                    wait.kind,
+                    lash_execution_contracts::process::WaitKind::Sleep { .. }
+                )
+            }) {
                 break;
             }
             tokio::time::sleep(Duration::from_millis(10)).await;
@@ -330,7 +341,10 @@ impl lash::process::ProcessComponentFactory for TypedWrite {
             })
     }
 
-    fn recipe(self: Arc<Self>) -> Result<lash::plugins::ProcessRecipe, lash_core::PluginError> {
+    fn recipe(
+        self: Arc<Self>,
+    ) -> Result<lash::plugins::ProcessRecipe, lash_execution_contracts::plugin_error::PluginError>
+    {
         lash::process::ProcessComponentSpec::new()
             .with_tool_provider(lash::tool_provider_key!("tools"), write_tool(&self.world))
             .recipe(TYPED_WRITE_COMPONENT.component())
@@ -577,7 +591,10 @@ impl lash::process::ProcessComponentFactory for FormatWrite {
             lash::plugins::FormatNamespace::Config => Ok(value),
         }
     }
-    fn recipe(self: Arc<Self>) -> Result<lash::plugins::ProcessRecipe, lash_core::PluginError> {
+    fn recipe(
+        self: Arc<Self>,
+    ) -> Result<lash::plugins::ProcessRecipe, lash_execution_contracts::plugin_error::PluginError>
+    {
         let mut reg = lash::plugins::PluginRegistrar::<
             StateWrite,
             lash::plugins::registries::Process,
@@ -639,7 +656,7 @@ async fn component_state_converts_at_a_cut_on_sqlite_memory() {
     let conversions = Arc::new(AtomicUsize::new(0));
     let seen = Arc::new(Mutex::new(Vec::new()));
     let (stores, _keep) = stores(Tier::SqliteMemory).await;
-    let engine = || -> Vec<Arc<dyn lash_core::ProcessEngine>> {
+    let engine = || -> Vec<Arc<dyn lash_execution_contracts::process::ProcessEngine>> {
         vec![Arc::new(ScriptEngine {
             kind: IDLE_ENGINE,
             advance: idle_engine_advance,

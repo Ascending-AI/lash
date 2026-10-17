@@ -11,8 +11,8 @@ use super::*;
 /// ref batches use, so the scalar-parameter ceiling is never in play.
 pub(super) fn occupied_node_ids_conn(
     tx: &crate::conn::FencedTx<'_>,
-    nodes: &[lash_core_execution::SessionNodeRecord],
-) -> Result<std::collections::HashSet<lash_core_execution::NodeId>, StoreError> {
+    nodes: &[lash_core_store::session_graph::SessionNodeRecord],
+) -> Result<std::collections::HashSet<lash_protocol_types::NodeId>, StoreError> {
     let mut occupied = std::collections::HashSet::new();
     if nodes.is_empty() {
         return Ok(occupied);
@@ -32,7 +32,7 @@ pub(super) fn occupied_node_ids_conn(
             .query_map(params![encoded], |row| row.get::<_, String>(0))
             .map_err(sqlite_error)?;
         for node_id in rows.collect::<Result<Vec<_>, _>>().map_err(sqlite_error)? {
-            occupied.insert(lash_core_execution::NodeId::parse(node_id)?);
+            occupied.insert(lash_protocol_types::NodeId::parse(node_id)?);
         }
     }
     Ok(occupied)
@@ -52,8 +52,8 @@ pub(super) fn occupied_node_ids_conn(
 pub(super) fn insert_graph_nodes_conn(
     tx: &crate::conn::FencedTx<'_>,
     session_id: &SessionId,
-    nodes: &[lash_core_execution::SessionNodeRecord],
-    plan: &lash_core_execution::store::RuntimeCommitPlan<'_>,
+    nodes: &[lash_core_store::session_graph::SessionNodeRecord],
+    plan: &lash_core_store::store::RuntimeCommitPlan<'_>,
 ) -> Result<(), StoreError> {
     for (nodes, facts) in nodes.chunks(tx.operational.graph_insert_chunk.get()).zip(
         plan.planned_node_facts()
@@ -102,9 +102,9 @@ pub(super) fn insert_graph_nodes_conn(
 fn insert_graph_nodes_one_at_a_time(
     tx: &crate::conn::FencedTx<'_>,
     session_id: &SessionId,
-    nodes: &[lash_core_execution::SessionNodeRecord],
-    facts: &[lash_core_execution::store::PlannedNodeFacts],
-    plan: &lash_core_execution::store::RuntimeCommitPlan<'_>,
+    nodes: &[lash_core_store::session_graph::SessionNodeRecord],
+    facts: &[lash_core_store::store::PlannedNodeFacts],
+    plan: &lash_core_store::store::RuntimeCommitPlan<'_>,
 ) -> Result<(), StoreError> {
     for (node, facts) in nodes.iter().zip(facts) {
         let node_json = node

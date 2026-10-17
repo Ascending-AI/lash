@@ -1,6 +1,6 @@
 use super::*;
 use crate::tests::host::ingress::*;
-use lash_core::ProcessRegistry;
+use lash_execution_contracts::process::ProcessRegistry;
 use lash_protocol_types::ProcessId;
 
 /// FIG-3070: a start committed before its submission outcome is retained
@@ -13,7 +13,7 @@ async fn a_store_coalesced_start_reports_replayed_through_ingress() -> Result<()
     let ingress = core.tool_intents(SessionId::from(SESSION), scope.clone())?;
     let key = ingress.key("store-coalesced-start", 0).expect("key");
     let intent = engine_start_intent(INGRESS_ENGINE_KIND, serde_json::json!({"program": "known"}));
-    let lash_core::ToolIntent::StartProcess(start) = &intent else {
+    let lash_execution_contracts::tool_intent::ToolIntent::StartProcess(start) = &intent else {
         panic!("start intent");
     };
     // Model the crash interval: the start exists, but ingress has no recorded
@@ -36,8 +36,11 @@ async fn a_store_coalesced_start_reports_replayed_through_ingress() -> Result<()
         &[],
     )
     .await
-    .map_err(lash_core::PluginError::from)?;
-    assert_eq!(started.realization(), lash_core::StoreRealization::Realized);
+    .map_err(lash_execution_contracts::plugin_error::PluginError::from)?;
+    assert_eq!(
+        started.realization(),
+        lash_execution_contracts::process::StoreRealization::Realized
+    );
     let coalesced = ingress.submit(key, intent).await;
     assert!(
         matches!(
@@ -93,7 +96,7 @@ async fn equivalent_recorded_start_has_the_same_identity_across_routes() -> Resu
         matches!(
             host_outcome,
             crate::tools::ToolIntentIngressOutcome::Admitted {
-                outcome: lash_core::ToolIntentExecutionOutcome::Executed { .. },
+                outcome: lash_execution_contracts::tool_intent_outcome::ToolIntentExecutionOutcome::Executed { .. },
                 ..
             }
         ),
@@ -123,7 +126,10 @@ async fn equivalent_recorded_start_has_the_same_identity_across_routes() -> Resu
         runtime.process_service()?
     };
     let intents =
-        lash_core::ToolIntents::v3(vec![engine_start_intent(INGRESS_ENGINE_KIND, payload)]);
+        lash_execution_contracts::tool_intent::ToolIntents::v3(vec![engine_start_intent(
+            INGRESS_ENGINE_KIND,
+            payload,
+        )]);
     let realization = lash_core::testing::execute_tool_intents_with_services(
         scoped,
         processes,
@@ -132,11 +138,12 @@ async fn equivalent_recorded_start_has_the_same_identity_across_routes() -> Resu
         &intents,
     )
     .await
-    .map_err(lash_core::PluginError::from)?;
+    .map_err(lash_execution_contracts::plugin_error::PluginError::from)?;
     let outcomes = &realization.receipt.outcomes;
     let [
-        lash_core::ToolIntentExecutionOutcome::Executed {
-            realized: lash_core::ToolIntentRealized::StartProcess(result),
+        lash_execution_contracts::tool_intent_outcome::ToolIntentExecutionOutcome::Executed {
+            realized:
+                lash_execution_contracts::tool_intent_outcome::ToolIntentRealized::StartProcess(result),
             ..
         },
     ] = outcomes.as_slice()
@@ -157,7 +164,7 @@ async fn equivalent_recorded_start_has_the_same_identity_across_routes() -> Resu
     let session_identity = staged.identity;
 
     assert_eq!(ingress_identity, session_identity);
-    let expected = lash_core::ProcessDefinitionDraft::new(
+    let expected = lash_execution_contracts::process::ProcessDefinitionDraft::new(
         INGRESS_ENGINE_KIND,
         serde_json::json!({
             "payload": {"program": "environment-sensitive"},
@@ -174,27 +181,37 @@ async fn equivalent_recorded_start_has_the_same_identity_across_routes() -> Resu
 }
 
 /// A start of the ingress engine owned by `session`, declaring `payload`.
-fn engine_start_for(session: &SessionId, payload: serde_json::Value) -> lash_core::ToolIntent {
-    lash_core::ToolIntent::StartProcess(Box::new(lash_core::StartProcessIntent {
-        owner: crate::RuntimeOwner::Session(session.clone()),
-        declaration: lash_core::ProcessStartDeclaration::engine(
-            INGRESS_ENGINE_KIND,
-            payload,
-            lash_core::testing::declared_launch_for_testing(
-                lash_core::testing::fixture_engine_launch(),
+fn engine_start_for(
+    session: &SessionId,
+    payload: serde_json::Value,
+) -> lash_execution_contracts::tool_intent::ToolIntent {
+    lash_execution_contracts::tool_intent::ToolIntent::StartProcess(Box::new(
+        lash_execution_contracts::tool_intent::StartProcessIntent {
+            owner: crate::RuntimeOwner::Session(session.clone()),
+            declaration: lash_execution_contracts::process::ProcessStartDeclaration::engine(
+                INGRESS_ENGINE_KIND,
+                payload,
+                lash_execution_contracts::testing::declared_launch_for_testing(
+                    lash_execution_contracts::testing::fixture_engine_launch(),
+                ),
+                lash_execution_contracts::process::ProcessOriginator::host(),
+                lash_execution_contracts::process::Lifetime::Detached,
             ),
-            lash_core::ProcessOriginator::host(),
-            lash_core::Lifetime::Detached,
-        ),
-    }))
+        },
+    ))
 }
 
 /// A cancel of `process` owned by `session`.
-fn cancel_for(session: &SessionId, process: &ProcessId) -> lash_core::ToolIntent {
-    lash_core::ToolIntent::CancelProcess(lash_core::CancelProcessIntent {
-        owner: crate::RuntimeOwner::Session(session.clone()),
-        process_id: process.clone(),
-    })
+fn cancel_for(
+    session: &SessionId,
+    process: &ProcessId,
+) -> lash_execution_contracts::tool_intent::ToolIntent {
+    lash_execution_contracts::tool_intent::ToolIntent::CancelProcess(
+        lash_execution_contracts::tool_intent::CancelProcessIntent {
+            owner: crate::RuntimeOwner::Session(session.clone()),
+            process_id: process.clone(),
+        },
+    )
 }
 
 /// What the ledger holds under `key`: the first writer's row, read by a
@@ -202,8 +219,8 @@ fn cancel_for(session: &SessionId, process: &ProcessId) -> lash_core::ToolIntent
 async fn ledger_row(
     registry: &Arc<dyn ProcessRegistry>,
     key: &crate::tools::ToolIntentIngressKey,
-) -> Result<lash_core::ToolIntentSubmissionRecord> {
-    let probe = lash_core::ToolIntentSubmissionRecord::new(
+) -> Result<lash_execution_contracts::tool_intent::ToolIntentSubmissionRecord> {
+    let probe = lash_execution_contracts::tool_intent::ToolIntentSubmissionRecord::new(
         key.identity().clone(),
         cancel_for(
             &SessionId::fixture("ledger-probe-session"),
@@ -212,13 +229,17 @@ async fn ledger_row(
     )
     .expect("the probe hashes");
     match registry.admit_tool_intent_submission(probe).await? {
-        lash_core::ToolIntentSubmissionAdmission::Existing(row) => Ok(*row),
+        lash_execution_contracts::tool_intent::ToolIntentSubmissionAdmission::Existing(row) => {
+            Ok(*row)
+        }
         other => panic!("the ledger answers the first writer: {other:?}"),
     }
 }
 
 /// Whether `row` still holds its first payload.
-fn payload_retained(row: &lash_core::ToolIntentSubmissionRecord) -> bool {
+fn payload_retained(
+    row: &lash_execution_contracts::tool_intent::ToolIntentSubmissionRecord,
+) -> bool {
     match &row.intent {
         crate::tools::ToolIntentSubmissionPayload::Retained(_) => true,
         crate::tools::ToolIntentSubmissionPayload::Expired => false,
@@ -228,7 +249,7 @@ fn payload_retained(row: &lash_core::ToolIntentSubmissionRecord) -> bool {
 /// The first outcome a submission answered.
 fn first_outcome(
     outcome: &crate::tools::ToolIntentIngressOutcome,
-) -> lash_core::ToolIntentExecutionOutcome {
+) -> lash_execution_contracts::tool_intent_outcome::ToolIntentExecutionOutcome {
     match outcome {
         crate::tools::ToolIntentIngressOutcome::Admitted {
             outcome,
@@ -241,7 +262,7 @@ fn first_outcome(
 /// `outcome` is the replay of `first`.
 fn assert_replays(
     outcome: &crate::tools::ToolIntentIngressOutcome,
-    first: &lash_core::ToolIntentExecutionOutcome,
+    first: &lash_execution_contracts::tool_intent_outcome::ToolIntentExecutionOutcome,
     what: &str,
 ) {
     assert_eq!(
@@ -283,7 +304,7 @@ async fn settled_tool_intent_payloads_follow_session_retention() -> Result<()> {
     core.host_artifacts()
         .publish_process_env(
             &lash_core::HostArtifactPin::mint(),
-            &lash_core::testing::process_env_fixture(),
+            &lash_execution_contracts::testing::process_env_fixture(),
         )
         .await?;
     let law = PayloadRetentionLaw {
@@ -358,8 +379,8 @@ impl PayloadRetentionLaw {
                 .await,
         );
         let process = match &started {
-            lash_core::ToolIntentExecutionOutcome::Executed {
-                realized: lash_core::ToolIntentRealized::StartProcess(handle),
+            lash_execution_contracts::tool_intent_outcome::ToolIntentExecutionOutcome::Executed {
+                realized: lash_execution_contracts::tool_intent_outcome::ToolIntentRealized::StartProcess(handle),
                 ..
             } => handle.process_id.clone(),
             other => panic!("the start executes: {other:?}"),
@@ -373,7 +394,7 @@ impl PayloadRetentionLaw {
         assert!(
             matches!(
                 cancelled,
-                lash_core::ToolIntentExecutionOutcome::Executed { .. }
+                lash_execution_contracts::tool_intent_outcome::ToolIntentExecutionOutcome::Executed { .. }
             ),
             "the cancel executes: {cancelled:?}"
         );
@@ -387,12 +408,12 @@ impl PayloadRetentionLaw {
         assert!(
             matches!(
                 refused,
-                lash_core::ToolIntentExecutionOutcome::Refused { .. }
+                lash_execution_contracts::tool_intent_outcome::ToolIntentExecutionOutcome::Refused { .. }
             ),
             "a cancel of no process is refused: {refused:?}"
         );
         let pending_key = first.key("pending", 0).expect("key");
-        let pending = lash_core::ToolIntentSubmissionRecord::new(
+        let pending = lash_execution_contracts::tool_intent::ToolIntentSubmissionRecord::new(
             pending_key.identity().clone(),
             cancel_for(&session_id, &missing),
         )
@@ -400,7 +421,7 @@ impl PayloadRetentionLaw {
         .owned_by_run(run("first"));
         assert!(matches!(
             registry.admit_tool_intent_submission(pending).await?,
-            lash_core::ToolIntentSubmissionAdmission::Admitted
+            lash_execution_contracts::tool_intent::ToolIntentSubmissionAdmission::Admitted
         ));
         let refused_row = ledger_row(registry, &refused_key).await?;
         release.notify_one();

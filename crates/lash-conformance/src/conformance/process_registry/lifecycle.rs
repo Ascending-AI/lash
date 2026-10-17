@@ -1,5 +1,7 @@
 use super::*;
-use lash_core::{LifetimeDecision, ScopeGrant, ScopeId};
+use lash_core::ScopeId;
+use lash_execution_contracts::process::LifetimeDecision;
+use lash_execution_contracts::process::ScopeGrant;
 use pretty_assertions::assert_eq;
 
 /// FIG-6047: facts recorded after a terminal do not extend its retention.

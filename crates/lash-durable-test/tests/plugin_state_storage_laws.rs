@@ -52,13 +52,13 @@ use lash_core::ToolCall;
 use lash_core::ToolDefinitionBindingExt as _;
 use lash_core::llm::types::LlmResponse;
 use lash_core::runtime::durable::session::SessionActivation;
-use lash_core_execution::StoreSet;
 use lash_durable::domain::TurnWrite;
 use lash_durable::runner::Activation;
 use lash_durable::{ActorKey, ActorState, CommitLabel, DomainWrite, DurableStore};
 use lash_durable_test::{
     Cut, Fault, Matrix, Scenario, SimClock, SimNodes, SimNodesConfig, Stored, Tripwire,
 };
+use lash_execution_contracts::backend::StoreSet;
 use lash_protocol_types::SessionId;
 use lash_protocol_types::sync::MutexExt as _;
 
@@ -289,7 +289,10 @@ impl lash_core::ToolProvider for StoragePlugin {
     fn tool_manifests(
         &self,
         _config: &lash_core::OwnerConfigView,
-    ) -> std::result::Result<Vec<lash_core::ToolManifest>, lash_core::PluginError> {
+    ) -> std::result::Result<
+        Vec<lash_core::ToolManifest>,
+        lash_execution_contracts::plugin_error::PluginError,
+    > {
         Ok(vec![tool_definition(self.tool()).manifest()])
     }
 
@@ -312,7 +315,7 @@ impl lash_core::ToolProvider for StoragePlugin {
             self.world.overlay_bodies.lock_recover().push(row.body);
             return lash_core::ToolAttemptOutcome::Done {
                 result: lash_core::ToolOutcomeDone::ok(serde_json::json!({ "inspected": true })),
-                intents: lash_core::ToolIntents::default(),
+                intents: lash_execution_contracts::tool_intent::ToolIntents::default(),
             };
         }
         let commands = if self.id == MEMORY {
@@ -326,7 +329,7 @@ impl lash_core::ToolProvider for StoragePlugin {
         lash_core::ToolAttemptOutcome::Done {
             result: lash_core::ToolOutcomeDone::ok(serde_json::json!({ "done": label }))
                 .with_state(commands),
-            intents: lash_core::ToolIntents::default(),
+            intents: lash_execution_contracts::tool_intent::ToolIntents::default(),
         }
     }
 }

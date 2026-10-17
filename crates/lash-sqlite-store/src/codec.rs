@@ -50,8 +50,8 @@ pub const SQLITE_BLOB_ENVELOPE_VERSION: u32 = 2;
 /// `Lift::Decoder` row admits (FIG-3802). The envelope keeps its shape across
 /// them, so each decodes natively.
 fn blob_envelope_admits(version: u32) -> bool {
-    lash_core_execution::store::upcast_chain_covers(
-        lash_core_execution::surface_format!(SQLITE_BLOB_ENVELOPE_VERSION),
+    lash_core_store::store::upcast_chain_covers(
+        lash_core_store::surface_format!(SQLITE_BLOB_ENVELOPE_VERSION),
         version,
         SQLITE_BLOB_ENVELOPE_VERSION,
     )
@@ -95,9 +95,11 @@ pub(crate) fn row_process_id(
 /// Parse a stored process id outside a row read, as a store error.
 pub(crate) fn stored_process_id(
     value: &str,
-) -> Result<lash_protocol_types::ProcessId, lash_core_execution::PluginError> {
+) -> Result<lash_protocol_types::ProcessId, lash_execution_contracts::plugin_error::PluginError> {
     lash_protocol_types::ProcessId::parse(value).map_err(|error| {
-        lash_core_execution::PluginError::Session(format!("corrupt stored process id: {error}"))
+        lash_execution_contracts::plugin_error::PluginError::Session(format!(
+            "corrupt stored process id: {error}"
+        ))
     })
 }
 
@@ -210,7 +212,7 @@ pub(crate) fn decode_artifact_blob(bytes: &[u8]) -> Result<Vec<u8>, StoreError> 
 pub(crate) fn try_load_session_head_meta_from_conn(
     conn: &Connection,
     session_id: &SessionId,
-    fleet: lash_core_execution::FleetFormat,
+    fleet: lash_core_store::store::FleetFormat,
     configs: Option<ConfigRead<'_>>,
 ) -> Result<Option<SessionHeadMeta>, StoreError> {
     let row = conn
@@ -271,7 +273,7 @@ pub(crate) fn assemble_session_head_meta(
         });
     }
     let current_frame_node_id = current_frame_node_id
-        .map(lash_core_execution::FrameNodeId::new)
+        .map(lash_core_store::session_identity::FrameNodeId::new)
         .transpose()
         .map_err(|error| stored_data_corrupt("SessionGraph", error))?;
     SessionHeadMeta::assemble(
@@ -280,7 +282,7 @@ pub(crate) fn assemble_session_head_meta(
         head_revision,
         checkpoint_ref.map(Into::into),
         leaf_node_id
-            .map(lash_core_execution::NodeId::parse)
+            .map(lash_protocol_types::NodeId::parse)
             .transpose()?,
         current_frame_node_id,
     )
@@ -310,7 +312,7 @@ pub(crate) fn decode_msgpack<T: serde::de::DeserializeOwned>(bytes: &[u8]) -> Op
 pub(crate) fn load_config_conn(
     conn: &Connection,
     reference: Option<&str>,
-    fleet: lash_core_execution::FleetFormat,
+    fleet: lash_core_store::store::FleetFormat,
     configs: Option<ConfigRead<'_>>,
 ) -> Result<SessionHeadPayload, StoreError> {
     use lash_core_store::checkpoint_graph::{DecodeLimits, GraphDecoder, NodeId, config};

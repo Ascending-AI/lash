@@ -1,6 +1,6 @@
 use std::sync::Arc;
 
-use lash_core::StoreSet;
+use lash_execution_contracts::backend::StoreSet;
 use lash_postgres_store::{PostgresStorage, PostgresStoreSet, testing::IsolatedDatabase};
 use lash_sqlite_store::{SqliteStoreSet, SqliteStoreSetOptions};
 

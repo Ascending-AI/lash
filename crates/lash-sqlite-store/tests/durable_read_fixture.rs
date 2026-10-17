@@ -10,7 +10,8 @@
 use std::path::{Path, PathBuf};
 use std::sync::Arc;
 
-use lash_core_execution::{DeploymentStore, ProcessEnvStore};
+use lash_execution_contracts::deployment::DeploymentStore;
+use lash_execution_contracts::process::ProcessEnvStore;
 use lash_sqlite_store::{SqliteStoreSet, SqliteStoreSetOptions};
 use serde::{Deserialize, Serialize};
 
@@ -158,16 +159,16 @@ fn pin_release_stamp_instant(core_path: &Path, timestamp_ms: u64) {
 
 async fn open_handles(root: &Path, timestamp_ms: u64) -> fixture::FixtureHandles {
     std::fs::create_dir_all(root).expect("create SQLite fixture root");
-    let clock = Arc::new(lash_core_execution::testing::TestClock::new(timestamp_ms));
+    let clock = Arc::new(lash_core_ids::test_clock::TestClock::new(timestamp_ms));
     // Prime and reopen one coherent substrate.
     let options = SqliteStoreSetOptions {
-        process_id_mint: lash_core_execution::ProcessIdMint::sequential_for_testing(),
+        process_id_mint: lash_core_store::process_identity::ProcessIdMint::sequential_for_testing(),
         ..SqliteStoreSetOptions::standard(lash_sqlite_store::SqliteSynchronous::Normal)
     };
     let priming = SqliteStoreSet::open_with_options_and_clock(
         root.join(DATABASE),
         options.clone(),
-        Arc::clone(&clock) as Arc<dyn lash_core_execution::Clock>,
+        Arc::clone(&clock) as Arc<dyn lash_core_ids::clock::Clock>,
     )
     .await
     .expect("prime SQLite fixture schemas");
@@ -176,7 +177,7 @@ async fn open_handles(root: &Path, timestamp_ms: u64) -> fixture::FixtureHandles
     let stores = SqliteStoreSet::open_with_options_and_clock(
         root.join(DATABASE),
         options,
-        Arc::clone(&clock) as Arc<dyn lash_core_execution::Clock>,
+        Arc::clone(&clock) as Arc<dyn lash_core_ids::clock::Clock>,
     )
     .await
     .expect("open the coherent SQLite fixture");
@@ -192,10 +193,10 @@ async fn open_handles(root: &Path, timestamp_ms: u64) -> fixture::FixtureHandles
     );
 
     fixture::FixtureHandles {
-        clock: Arc::clone(&clock) as Arc<dyn lash_core_execution::Clock>,
+        clock: Arc::clone(&clock) as Arc<dyn lash_core_ids::clock::Clock>,
         store: Arc::clone(&runtime) as Arc<dyn DeploymentStore>,
         processes: Arc::clone(&processes)
-            as Arc<dyn lash_core_execution::ConformanceProcessRegistry>,
+            as Arc<dyn lash_execution_contracts::process::ConformanceProcessRegistry>,
         process_envs: runtime as Arc<dyn ProcessEnvStore>,
     }
 }

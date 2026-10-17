@@ -1,6 +1,7 @@
 //! SQLite's single trace callback: physical rows and per-execution work,
 //! including cached statements, on the connection's own worker.
-use lash_core_execution::facade_support::sql::{SqliteWork, Window};
+use lash_core_ids::operational_metrics::sql::SqliteWork;
+use lash_core_ids::operational_metrics::sql::Window;
 use rusqlite::{StatementStatus, ffi};
 use std::cell::RefCell;
 use std::collections::HashMap;
@@ -70,16 +71,13 @@ impl WriteWitness {
     pub(crate) fn member(&mut self, connection: &rusqlite::Connection) {
         joined::flush(connection);
         let changes = connection.total_changes();
-        lash_core_execution::perf_witness::record_sql_writes(
-            changes.saturating_sub(self.changes),
-            0,
-        );
+        lash_core_ids::perf_witness::record_sql_writes(changes.saturating_sub(self.changes), 0);
         self.changes = changes;
     }
 
     pub(crate) fn finish(self, connection: &rusqlite::Connection) {
         joined::flush(connection);
-        lash_core_execution::perf_witness::record_sql_writes(
+        lash_core_ids::perf_witness::record_sql_writes(
             connection.total_changes().saturating_sub(self.changes),
             pages_written(connection),
         );
@@ -191,7 +189,7 @@ unsafe extern "C" fn trace(
                     window.payload(&sql, 0, 0, bytes);
                 }
                 #[cfg(feature = "perf-witness")]
-                lash_core_execution::perf_witness::record_sql_row_read(&sql);
+                lash_core_ids::perf_witness::record_sql_row_read(&sql);
             }
             ffi::SQLITE_TRACE_PROFILE => {
                 #[cfg(feature = "perf-witness")]
@@ -206,7 +204,7 @@ unsafe extern "C" fn trace(
                     window.payload(&sql, affected.max(0) as u64, 0, 0);
                 }
                 #[cfg(feature = "perf-witness")]
-                if lash_core_execution::perf_witness::collecting()
+                if lash_core_ids::perf_witness::collecting()
                     && ffi::sqlite3_stmt_readonly(statement) == 0
                     && ffi::sqlite3_bind_parameter_count(statement) > 0
                 {
@@ -214,11 +212,11 @@ unsafe extern "C" fn trace(
                     if !expanded.is_null() {
                         let bytes = bound_value_bytes(&sql, CStr::from_ptr(expanded).to_bytes());
                         ffi::sqlite3_free(expanded.cast());
-                        lash_core_execution::perf_witness::record_sql_bytes_written(bytes);
+                        lash_core_ids::perf_witness::record_sql_bytes_written(bytes);
                     }
                 }
                 #[cfg(feature = "perf-witness")]
-                if lash_core_execution::perf_witness::sql_receipts_enabled() {
+                if lash_core_ids::perf_witness::sql_receipts_enabled() {
                     let expanded = ffi::sqlite3_expanded_sql(statement);
                     let bytes = if expanded.is_null() {
                         0
@@ -228,9 +226,9 @@ unsafe extern "C" fn trace(
                     if !expanded.is_null() {
                         ffi::sqlite3_free(expanded.cast());
                     }
-                    lash_core_execution::perf_witness::record_sql_statement_bytes(&sql, bytes);
+                    lash_core_ids::perf_witness::record_sql_statement_bytes(&sql, bytes);
                 } else {
-                    lash_core_execution::perf_witness::record_sql_statement(&sql);
+                    lash_core_ids::perf_witness::record_sql_statement(&sql);
                 }
             }
             _ => {}
@@ -370,7 +368,7 @@ fn placeholders(sql: &str) -> impl Iterator<Item = std::ops::Range<usize>> + '_ 
 pub(crate) fn with_origin<T>(origin: &'static str, work: impl FnOnce() -> T) -> T {
     #[cfg(feature = "perf-witness")]
     {
-        lash_core_execution::perf_witness::sql_shapes::with_origin(origin, || {
+        lash_core_ids::perf_witness::sql_shapes::with_origin(origin, || {
             crate::write_observer::scope(origin, work)
         })
     }
@@ -437,7 +435,8 @@ mod tests {
             return;
         }
 
-        use lash_core_execution::perf_witness::{Collector, sql_shapes};
+        use lash_core_ids::perf_witness::Collector;
+        use lash_core_ids::perf_witness::sql_shapes;
         let connection = rusqlite::Connection::open_in_memory().unwrap();
         connection.execute_batch("CREATE TABLE a(id INTEGER); CREATE TABLE b(id INTEGER); INSERT INTO a VALUES(1); INSERT INTO b VALUES(1)").unwrap();
         connection.execute_batch("PRAGMA foreign_keys=ON; CREATE TABLE parent(id INTEGER PRIMARY KEY); CREATE TABLE child(parent INTEGER REFERENCES parent(id) ON DELETE CASCADE); INSERT INTO parent VALUES(1); INSERT INTO child VALUES(1),(1)").unwrap();
@@ -478,13 +477,12 @@ mod tests {
         let work = collector.snapshot().sql_shapes.unwrap().work;
         assert!(work.complete && work.conserves());
         assert_eq!(
-            work.totals[&lash_core_execution::perf_witness::sql_shapes::work::Backend::Sqlite]
+            work.totals[&lash_core_ids::perf_witness::sql_shapes::work::Backend::Sqlite]
                 .rows_affected,
             1
         );
         assert_eq!(
-            work.totals[&lash_core_execution::perf_witness::sql_shapes::work::Backend::Sqlite]
-                .statements,
+            work.totals[&lash_core_ids::perf_witness::sql_shapes::work::Backend::Sqlite].statements,
             4
         );
         // REAL's 15-digit expanded spelling cannot prove parameter equality.
@@ -502,7 +500,7 @@ mod tests {
         joined::flush(&connection);
         let work = collector.snapshot().sql_shapes.unwrap().work;
         assert_eq!(
-            work.totals[&lash_core_execution::perf_witness::sql_shapes::work::Backend::Sqlite]
+            work.totals[&lash_core_ids::perf_witness::sql_shapes::work::Backend::Sqlite]
                 .unqualified_read_identities,
             2
         );
@@ -571,7 +569,7 @@ mod tests {
             );
             return;
         }
-        use lash_core_execution::perf_witness::Collector;
+        use lash_core_ids::perf_witness::Collector;
         async fn injected_store_method(store: &crate::SqliteStore, extra: bool) {
             store
                 .conn
@@ -590,7 +588,7 @@ mod tests {
             options.inline_calls = inline;
             let stores = crate::SqliteStoreSet::memory_with_options_and_clock(
                 options,
-                std::sync::Arc::new(lash_core_execution::facade_support::SystemClock),
+                std::sync::Arc::new(lash_core_ids::clock::SystemClock),
             )
             .await
             .unwrap();
@@ -730,7 +728,7 @@ mod tests {
             }
             let mut tx = store.begin(&actor, Epoch(identity.epoch)).await.unwrap();
             tx.stage(graph.nodes().values().cloned());
-            let (answer, receipt) = lash_core_execution::facade_support::sql::collect(
+            let (answer, receipt) = lash_core_ids::operational_metrics::sql::collect(
                 format!("install-{sample}"),
                 "sqlite",
                 store.commit(tx, CommitLabel::new("sql-work.install")),
@@ -765,7 +763,7 @@ mod tests {
     async fn physical_summary_joins_the_owner_commit_and_caller_window() {
         let captured = std::sync::Arc::new(std::sync::Mutex::new(Vec::new()));
         let sink = captured.clone();
-        let observer = lash_core_execution::facade_support::StoreObserver::default().with_sql_sink(
+        let observer = lash_core_ids::operational_metrics::StoreObserver::default().with_sql_sink(
             move |receipt, outcome| {
                 if receipt.operation == "sql-work.owner" {
                     sink.lock().expect("sink").push((receipt.clone(), outcome));
@@ -776,11 +774,11 @@ mod tests {
         options.observer = observer;
         let stores = crate::SqliteStoreSet::memory_with_options_and_clock(
             options,
-            std::sync::Arc::new(lash_core_execution::facade_support::SystemClock),
+            std::sync::Arc::new(lash_core_ids::clock::SystemClock),
         )
         .await
         .expect("stores");
-        let (identity, outer) = lash_core_execution::facade_support::sql::collect(
+        let (identity, outer) = lash_core_ids::operational_metrics::sql::collect(
             "caller/session/turn/record",
             "sqlite",
             lash_core_execution::testing::sql_work::owner_commit(&stores),

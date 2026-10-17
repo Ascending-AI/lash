@@ -72,7 +72,7 @@ fn harness_sources() -> Vec<String> {
 /// attachment referrers are checked separately below.
 const GATED_SESSION_TRAITS: &[(&str, &str)] = &[
     (
-        include_str!("../../../lash-core-execution/src/backend.rs"),
+        include_str!("../../../lash-execution-contracts/src/backend.rs"),
         "ProcessAuthorityReads",
     ),
     (SESSION_CATALOG_SOURCE, "SessionCatalogStore"),

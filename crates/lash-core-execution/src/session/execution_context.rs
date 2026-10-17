@@ -108,7 +108,7 @@ pub struct RuntimeExecutionContext<'run> {
     pub(super) dispatch: Arc<ToolDispatchContext<'run>>,
     tool_material_store: Option<Arc<dyn crate::store::ToolMaterialStore>>,
 
-    pub(super) process_env_store: Arc<dyn crate::ProcessEnvStore>,
+    pub(super) process_env_store: Arc<dyn lash_execution_contracts::process::ProcessEnvStore>,
     /// `F` this execution's durable writers emit — recorded by the bound
     /// session's store, so a stamped surface version is the fleet's, not the
     /// build's newest (FIG-3796). Contexts with no store default to the
@@ -223,7 +223,7 @@ pub(crate) type RecordedGrants =
 #[derive(Clone)]
 pub(crate) struct RuntimeProcessExecution {
     pub process_id: ProcessId,
-    pub provenance: crate::ProcessProvenance,
+    pub provenance: lash_execution_contracts::process::ProcessProvenance,
     /// The process's recorded environment and settings, for an engine
     /// process whose runtime loaded them: what its children may inherit and
     /// the capability refs its execution binds.
@@ -281,10 +281,13 @@ impl<'run> RuntimeExecutionContext<'run> {
             .as_ref()
             .map(|execution| &execution.provenance.originator)
         {
-            Some(crate::ProcessOriginator::Host { .. }) => crate::RuntimeAttribution::none(),
-            Some(crate::ProcessOriginator::Session { session_id, .. }) => {
-                crate::RuntimeAttribution::for_session(session_id.clone())
+            Some(lash_execution_contracts::process::ProcessOriginator::Host { .. }) => {
+                crate::RuntimeAttribution::none()
             }
+            Some(lash_execution_contracts::process::ProcessOriginator::Session {
+                session_id,
+                ..
+            }) => crate::RuntimeAttribution::for_session(session_id.clone()),
             None => self
                 .dispatch
                 .owner
@@ -583,16 +586,23 @@ impl<'run> RuntimeExecutionContext<'run> {
     }
 
     /// The session scope of the frame this execution was admitted on, or
-    /// [`crate::PluginError::NotASessionRuntime`] inside a process.
-    pub fn session_scope(&self) -> Result<crate::SessionScope, crate::PluginError> {
+    /// [`lash_execution_contracts::plugin_error::PluginError::NotASessionRuntime`] inside a process.
+    pub fn session_scope(
+        &self,
+    ) -> Result<
+        lash_execution_contracts::process::SessionScope,
+        lash_execution_contracts::plugin_error::PluginError,
+    > {
         match &self.dispatch.owner {
             crate::ExecutionOwner::SessionFrame {
                 session_id,
                 agent_frame_id,
-            } => Ok(crate::SessionScope::for_agent_frame(
-                session_id.clone(),
-                agent_frame_id.clone(),
-            )),
+            } => Ok(
+                lash_execution_contracts::process::SessionScope::for_agent_frame(
+                    session_id.clone(),
+                    agent_frame_id.clone(),
+                ),
+            ),
             crate::ExecutionOwner::Process { process_id } => Err(
                 crate::runtime::not_a_session_runtime("session_scope", process_id),
             ),
@@ -959,11 +969,15 @@ impl<'run> RuntimeExecutionContext<'run> {
 
     /// The lineage of the process this context runs inside, when it runs
     /// inside one: what a start made here records above its starter.
-    pub(crate) fn process_lineage(&self) -> Option<crate::ProcessLineage> {
+    pub(crate) fn process_lineage(
+        &self,
+    ) -> Option<lash_execution_contracts::process::ProcessLineage> {
         self.dispatch.process_lineage.clone()
     }
 
-    pub(crate) fn process_spawn_provenance(&self) -> Option<crate::ProcessProvenance> {
+    pub(crate) fn process_spawn_provenance(
+        &self,
+    ) -> Option<lash_execution_contracts::process::ProcessProvenance> {
         self.process_execution
             .as_ref()
             .map(|exec| exec.provenance.clone())
@@ -972,8 +986,11 @@ impl<'run> RuntimeExecutionContext<'run> {
     fn child_process_observers(&self) -> Vec<crate::SessionId> {
         match self.process_execution.as_ref() {
             Some(exec) => match &exec.provenance.originator {
-                crate::ProcessOriginator::Host { .. } => Vec::new(),
-                crate::ProcessOriginator::Session { session_id, .. } => vec![session_id.clone()],
+                lash_execution_contracts::process::ProcessOriginator::Host { .. } => Vec::new(),
+                lash_execution_contracts::process::ProcessOriginator::Session {
+                    session_id,
+                    ..
+                } => vec![session_id.clone()],
             },
             None => self
                 .dispatch
@@ -998,8 +1015,8 @@ impl<'run> RuntimeExecutionContext<'run> {
     /// session-turn start names none.
     async fn hold_start_env(
         &self,
-        registration: &crate::ProcessStartRegistration,
-    ) -> Result<(), crate::PluginError> {
+        registration: &lash_execution_contracts::process::ProcessStartRegistration,
+    ) -> Result<(), lash_execution_contracts::plugin_error::PluginError> {
         let Some(launch) = registration.input.launch() else {
             return Ok(());
         };
@@ -1013,7 +1030,7 @@ impl<'run> RuntimeExecutionContext<'run> {
         .map(drop)
         .map_err(|error| match error {
             crate::HoldEnvError::Refused(refusal) => {
-                crate::PluginError::ProcessEnvRefused { refusal }
+                lash_execution_contracts::plugin_error::PluginError::ProcessEnvRefused { refusal }
             }
             crate::HoldEnvError::Fault(error) => error,
         })
@@ -1023,15 +1040,25 @@ impl<'run> RuntimeExecutionContext<'run> {
     /// from: the admitted scope the controller was built with, and the
     /// lineage of the process this context runs inside. There is no registry
     /// access here by design (FIG-3607 R2).
-    pub fn start_cx(&self) -> Result<crate::StartCx, crate::PluginError> {
+    pub fn start_cx(
+        &self,
+    ) -> Result<
+        lash_execution_contracts::process::StartCx,
+        lash_execution_contracts::plugin_error::PluginError,
+    > {
         let scoped = self.dispatch.effect_controller.clone();
-        crate::StartCx::materialize(scoped.admitted_scope(), self.process_lineage().as_ref())
-            .map_err(|error| crate::PluginError::Session(error.to_string()))
+        lash_execution_contracts::process::StartCx::materialize(
+            scoped.admitted_scope(),
+            self.process_lineage().as_ref(),
+        )
+        .map_err(|error| {
+            lash_execution_contracts::plugin_error::PluginError::Session(error.to_string())
+        })
     }
 
     pub async fn start_child_process(
         &self,
-        request: crate::ProcessStartRequest,
+        request: lash_execution_contracts::process::ProcessStartRequest,
         _kind: impl Into<String>,
         _label: Option<String>,
     ) -> crate::ToolInvocationReply {
@@ -1043,7 +1070,7 @@ impl<'run> RuntimeExecutionContext<'run> {
         // A redrive presents the same start key and gets the retained process
         // back untouched (ADR 0107), so the attempt bound it recorded stands
         // whatever this attempt resolved.
-        let mut options = crate::ProcessStartOptions::new()
+        let mut options = lash_execution_contracts::process::ProcessStartOptions::new()
             .with_initial_observers(self.child_process_observers());
         if let Some(spawn) = self.process_spawn_provenance() {
             options = options.with_spawn_provenance(spawn);
@@ -1082,7 +1109,7 @@ impl<'run> RuntimeExecutionContext<'run> {
     /// §9). `None` without a backend.
     pub fn projection_providers(
         &self,
-    ) -> Option<Arc<dyn crate::runtime::actor::projection::ProjectionProviders>> {
+    ) -> Option<Arc<dyn lash_execution_contracts::projection::ProjectionProviders>> {
         self.dispatch
             .effect_controller
             .projection_providers()
@@ -1225,8 +1252,10 @@ impl<'run> RuntimeExecutionContext<'run> {
     }
 
     /// The session this execution runs in, or
-    /// [`crate::PluginError::NotASessionRuntime`] inside a process.
-    pub fn session_id(&self) -> Result<&SessionId, crate::PluginError> {
+    /// [`lash_execution_contracts::plugin_error::PluginError::NotASessionRuntime`] inside a process.
+    pub fn session_id(
+        &self,
+    ) -> Result<&SessionId, lash_execution_contracts::plugin_error::PluginError> {
         self.dispatch.owner.require_session("execution_session_id")
     }
 

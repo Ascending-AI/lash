@@ -26,6 +26,7 @@ testing = []
 workspace = true
 
 [dependencies]
+lash-execution-contracts = { workspace = true }
 blake3 = { workspace = true }
 chrono = { workspace = true }
 lash-protocol-types = { workspace = true }

@@ -316,7 +316,7 @@ impl ModuleArtifactStore for Modules {
     async fn hold_module_artifacts(
         &self,
         _claim: &ReferrerClaim,
-        _artifacts: &[crate::ModuleArtifactHold<'_>],
+        _artifacts: &[lash_execution_contracts::module_artifacts::ModuleArtifactHold<'_>],
     ) -> Result<(), ArtifactStoreError> {
         Ok(())
     }
@@ -397,35 +397,37 @@ const ENGINE_KIND: &str = "cleanup-test-engine";
 struct Engine(Arc<Applied>);
 
 #[async_trait::async_trait]
-impl crate::ProcessEngine for Engine {
+impl lash_execution_contracts::process::ProcessEngine for Engine {
     fn settled_ran(
         &self,
-        _kind: &crate::EngineStepKind,
+        _kind: &lash_execution_contracts::process::EngineStepKind,
         _output: &lash_core_store::tool_run::SettledOutput,
     ) -> Vec<(u32, u64)> {
         Vec::new()
     }
 
-    fn trace_class(&self) -> crate::ProcessTraceClass {
-        crate::ProcessTraceClass::Internal
+    fn trace_class(&self) -> lash_execution_contracts::process::ProcessTraceClass {
+        lash_execution_contracts::process::ProcessTraceClass::Internal
     }
 
     async fn performed_effects(
         &self,
         _payload: &serde_json::Value,
-    ) -> Result<crate::PerformedEffects, crate::ProcessEnvRefusal> {
-        Ok(crate::PerformedEffects::new())
+    ) -> Result<lash_execution_contracts::process::PerformedEffects, crate::ProcessEnvRefusal> {
+        Ok(lash_execution_contracts::process::PerformedEffects::new())
     }
 
     async fn check_args(
         &self,
-        _signature: &crate::ProcessSignature,
+        _signature: &lash_execution_contracts::process::ProcessSignature,
         _args: &serde_json::Map<String, serde_json::Value>,
-        _mode: crate::ArgsMode,
-    ) -> std::result::Result<(), crate::ArgsMismatch> {
-        Err(crate::ArgsMismatch::UnsupportedSignature {
-            engine_kind: self.kind().into(),
-        })
+        _mode: lash_execution_contracts::process::ArgsMode,
+    ) -> std::result::Result<(), lash_execution_contracts::process::ArgsMismatch> {
+        Err(
+            lash_execution_contracts::process::ArgsMismatch::UnsupportedSignature {
+                engine_kind: self.kind().into(),
+            },
+        )
     }
 
     fn kind(&self) -> &'static str {
@@ -474,8 +476,8 @@ impl crate::ProcessEngine for Engine {
             .map_err(PluginError::from)
     }
 
-    fn state_format(&self) -> crate::EngineStateFormat {
-        crate::EngineStateFormat {
+    fn state_format(&self) -> lash_execution_contracts::process::EngineStateFormat {
+        lash_execution_contracts::process::EngineStateFormat {
             kind: self.kind().to_owned(),
             version: 0,
         }
@@ -495,39 +497,55 @@ impl crate::ProcessEngine for Engine {
     fn check_settings(
         &self,
         _payload: &serde_json::Value,
-        settings: Option<&crate::EngineSettings>,
-    ) -> std::result::Result<(), crate::PluginError> {
+        settings: Option<&lash_execution_contracts::process::EngineSettings>,
+    ) -> std::result::Result<(), lash_execution_contracts::plugin_error::PluginError> {
         match settings {
             None => Ok(()),
-            Some(_) => Err(crate::PluginError::Registration(format!(
-                "process engine `{}` takes no settings",
-                self.kind()
-            ))),
+            Some(_) => Err(
+                lash_execution_contracts::plugin_error::PluginError::Registration(format!(
+                    "process engine `{}` takes no settings",
+                    self.kind()
+                )),
+            ),
         }
     }
 
     fn default_settings(
         &self,
         _payload: &serde_json::Value,
-    ) -> std::result::Result<Option<crate::EngineSettings>, crate::PluginError> {
+    ) -> std::result::Result<
+        Option<lash_execution_contracts::process::EngineSettings>,
+        lash_execution_contracts::plugin_error::PluginError,
+    > {
         Ok(None)
     }
 
     fn advance(
         &self,
-        _state: crate::EngineState,
-        _event: crate::EngineEvent,
-    ) -> Result<(crate::EngineState, crate::EngineAction), crate::ProcessInfraError> {
+        _state: lash_execution_contracts::process::EngineState,
+        _event: lash_execution_contracts::process::EngineEvent,
+    ) -> Result<
+        (
+            lash_execution_contracts::process::EngineState,
+            lash_execution_contracts::process::EngineAction,
+        ),
+        lash_execution_contracts::process::ProcessInfraError,
+    > {
         unreachable!("cleanup never advances a process")
     }
 
     async fn resolve(
         &self,
-        _reference: &crate::ProcessDefinitionRef,
-    ) -> Result<crate::ProcessDefinitionResolution, crate::ProcessDefinitionError> {
-        Ok(crate::ProcessDefinitionResolution::new(
-            crate::ProcessSignature::Unknown,
-        ))
+        _reference: &lash_execution_contracts::process::ProcessDefinitionRef,
+    ) -> Result<
+        lash_execution_contracts::process::ProcessDefinitionResolution,
+        lash_execution_contracts::process::ProcessDefinitionError,
+    > {
+        Ok(
+            lash_execution_contracts::process::ProcessDefinitionResolution::new(
+                lash_execution_contracts::process::ProcessSignature::Unknown,
+            ),
+        )
     }
 }
 
@@ -741,7 +759,7 @@ async fn a_registered_start_carries_the_retained_record_onto_it() {
         input: Arc::new(ProcessInput::Engine {
             kind: ENGINE_KIND.to_owned(),
             payload: serde_json::json!({}),
-            launch: crate::testing::fixture_engine_launch(),
+            launch: lash_execution_contracts::testing::fixture_engine_launch(),
         }),
         definition_id: None,
     });
@@ -789,7 +807,7 @@ async fn a_registered_start_carries_the_retained_record_onto_it() {
 #[tokio::test]
 async fn a_start_by_id_carries_its_descriptor_and_manifest_onto_its_record() {
     let harness = harness();
-    let draft = crate::ProcessDefinitionDraft::new(
+    let draft = lash_execution_contracts::process::ProcessDefinitionDraft::new(
         ENGINE_KIND,
         serde_json::json!({"program": "p"}),
         [
@@ -816,7 +834,7 @@ async fn a_start_by_id_carries_its_descriptor_and_manifest_onto_its_record() {
         input: Arc::new(ProcessInput::Engine {
             kind: ENGINE_KIND.to_owned(),
             payload: serde_json::json!({}),
-            launch: crate::testing::fixture_engine_launch(),
+            launch: lash_execution_contracts::testing::fixture_engine_launch(),
         }),
         definition_id: Some(id.clone()),
     });
@@ -873,7 +891,7 @@ impl Harness {
             input: Arc::new(ProcessInput::Engine {
                 kind: ENGINE_KIND.to_owned(),
                 payload: serde_json::json!({}),
-                launch: crate::testing::fixture_engine_launch(),
+                launch: lash_execution_contracts::testing::fixture_engine_launch(),
             }),
             definition_id: None,
         });

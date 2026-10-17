@@ -9,7 +9,7 @@ use serde::{Deserialize, Serialize};
 #[derive(Clone, Debug, Default, PartialEq, Serialize, Deserialize)]
 #[serde(deny_unknown_fields)]
 pub struct RealizationReceipt {
-    pub outcomes: Vec<crate::ToolIntentExecutionOutcome>,
+    pub outcomes: Vec<lash_execution_contracts::tool_intent_outcome::ToolIntentExecutionOutcome>,
 }
 
 impl RealizationReceipt {

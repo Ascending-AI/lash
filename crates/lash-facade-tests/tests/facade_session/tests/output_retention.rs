@@ -109,7 +109,7 @@ fn appendix_step() -> lash_core::plugin::ToolPresentationStep {
                     appendix_text(),
                 ));
         }
-        Box::pin(async move { Ok::<_, lash_core::PluginError>(next) })
+        Box::pin(async move { Ok::<_, lash_execution_contracts::plugin_error::PluginError>(next) })
     })
 }
 
@@ -149,7 +149,7 @@ fn tool_calling_provider() -> ProviderHandle {
 
 /// The committed current frame of `session_id`, serialized, and the frame.
 async fn committed_frame(
-    backend: &lash_core::Backend,
+    backend: &lash_execution_contracts::backend::Backend,
     session_id: &str,
 ) -> (usize, lash_core::store::SessionWindowRead) {
     let window = lash_core::SessionHistoryStore::load_session_window(
@@ -168,7 +168,7 @@ async fn committed_frame(
 
 /// Sweeps the deployment's attachments with no grace: a retained attachment
 /// the commit names survives it.
-async fn sweep_without_grace(backend: &lash_core::Backend) {
+async fn sweep_without_grace(backend: &lash_execution_contracts::backend::Backend) {
     lash_core::facade_support::reclaim_unreferenced_attachments(
         backend.session_store_factory().as_ref(),
         backend.attachment_store().as_ref(),
@@ -178,7 +178,10 @@ async fn sweep_without_grace(backend: &lash_core::Backend) {
     .expect("sweep the attachments");
 }
 
-async fn stored_text(backend: &lash_core::Backend, reference: &lash_core::AttachmentRef) -> String {
+async fn stored_text(
+    backend: &lash_execution_contracts::backend::Backend,
+    reference: &lash_core::AttachmentRef,
+) -> String {
     let stored = backend
         .attachment_store()
         .get(&reference.id, 32 * 1024 * 1024)
@@ -189,7 +192,7 @@ async fn stored_text(backend: &lash_core::Backend, reference: &lash_core::Attach
 }
 
 async fn oversized_tool_output_is_retained_before_it_enters_history(
-    backend: lash_core::Backend,
+    backend: lash_execution_contracts::backend::Backend,
 ) -> Result<()> {
     const SESSION: &str = "standard-output-retention";
     let core = explicit_ephemeral_facets(LashCore::standard_builder(backend.clone()))
@@ -265,7 +268,7 @@ async fn oversized_tool_output_is_retained_before_it_enters_history(
 
 #[cfg(feature = "rlm")]
 async fn oversized_rlm_print_and_final_value_are_retained_before_they_enter_history(
-    backend: lash_core::Backend,
+    backend: lash_execution_contracts::backend::Backend,
 ) -> Result<()> {
     const SESSION: &str = "rlm-output-retention";
     let core = explicit_ephemeral_facets(rlm_core_builder_over(backend.clone()))
@@ -395,7 +398,10 @@ fn collect_retained(
 
 /// A backend over a fresh PostgreSQL store set. An explicitly selected
 /// PostgreSQL test requires the service URL.
-async fn postgres_backend() -> (lash_core::Backend, Box<dyn std::any::Any + Send>) {
+async fn postgres_backend() -> (
+    lash_execution_contracts::backend::Backend,
+    Box<dyn std::any::Any + Send>,
+) {
     let (stores, held) = postgres_store_set().await;
     (lash_conformance::backend_over(stores), held)
 }
@@ -553,7 +559,7 @@ async fn read_back_retained_rows<F, Fut>(
     between: F,
 ) -> Result<(serde_json::Value, serde_json::Value)>
 where
-    F: FnOnce(lash_core::Backend, lash_core::RetainedValue) -> Fut,
+    F: FnOnce(lash_execution_contracts::backend::Backend, lash_core::RetainedValue) -> Fut,
     Fut: std::future::Future<Output = ()>,
 {
     let backend = sqlite_memory_store_backend().await;
@@ -608,8 +614,10 @@ where
         lash::testing::tool_calls_for_activity(&session.durable(), &output.activities).await;
     Ok((
         value,
-        serde_json::to_value(lash_core::Durable(&output_tool_calls))
-            .expect("the records serialize"),
+        serde_json::to_value(lash_protocol_types::durable_serde::Durable(
+            &output_tool_calls,
+        ))
+        .expect("the records serialize"),
     ))
 }
 

@@ -37,15 +37,17 @@ use std::sync::Arc;
 use serde::Serialize;
 use serde::de::DeserializeOwned;
 
-pub use self::core::{CoreConfigOwner, CoreConfigRefusal};
+pub use self::core::CoreConfigOwner;
 pub use lash_core_store::config_transaction::{
     CORE_CONFIG_OWNER, ConfigCommandEntry, ConfigFault, ConfigRefusal, ConfigRefusalReason,
     ConfigResolution, ConfigResolutionDecision, ConfigTransactionOutcome, ConfigTransactionRecord,
     ConfigValueRole, CoreConfig, RecordedNamespaceCorrupt, RefusalSite,
 };
 pub use lash_core_store::execution_state::{AdmittedPluginConfig, PluginConfig};
+use lash_execution_contracts::config_error::CoreConfigRefusal;
 
-use super::{PluginFactory, PluginOptions};
+use super::PluginFactory;
+use lash_core_store::execution_state::PluginOptions;
 
 pub mod core;
 
@@ -144,39 +146,6 @@ pub struct OwnerChange<R, O> {
 type RecordedOf<C> = <<C as ConfigCommand>::Owner as ConfigOwner>::Recorded;
 type RefusalOf<C> = <<C as ConfigCommand>::Owner as ConfigOwner>::Refusal;
 
-/// A config registration that cannot stand.
-#[derive(
-    Clone,
-    Debug,
-    PartialEq,
-    Eq,
-    thiserror::Error,
-    Serialize,
-    serde::Deserialize,
-    schemars::JsonSchema,
-)]
-#[serde(tag = "kind", rename_all = "snake_case")]
-pub enum ConfigRegistrationError {
-    /// A factory id must be unique, even if its factory registers no config.
-    #[error("plugin id `{id}` is registered twice")]
-    DuplicatePluginId { id: String },
-    #[error("plugin `{plugin_id}` registered a second config owner")]
-    DuplicateOwner { plugin_id: String },
-    #[error("plugin `{plugin_id}` registered config command `{command}` twice")]
-    DuplicateCommand { plugin_id: String, command: String },
-    #[error(
-        "plugin `{plugin_id}` registered config command `{command}` for an owner type it did not \
-         register"
-    )]
-    ForeignCommand { plugin_id: String, command: String },
-    #[error("no plugin may own the reserved config owner id `{owner}`")]
-    ReservedOwner { owner: String },
-    #[error(
-        "plugin `{plugin_id}` registered its config owner under the run options key of `{key}`"
-    )]
-    ForeignRunOptionsKey { plugin_id: String, key: String },
-}
-
 /// Where a factory registers its config owner and commands. The namespace is
 /// the registering factory's id.
 #[derive(Clone)]
@@ -203,7 +172,7 @@ impl ConfigRegistrar {
         )
         .enumerate()
         .map(|(index, (kind, key))| super::ContributionDescriptor {
-            registry: super::RegistryKind::Session,
+            registry: lash_core_store::obligations::RegistryKind::Session,
             kind,
             key: super::ContributionKey::Named {
                 owner: self.owner_id.clone(),
@@ -909,7 +878,11 @@ impl ConfigRegistry {
                     .writer(plugin_id)
                     .unwrap_or_else(|| factory.plugin_declaration().format_version);
                 let encoded = factory
-                    .encode_format(writer, super::FormatNamespace::Config, &value)
+                    .encode_format(
+                        writer,
+                        lash_core_store::plugin_state::FormatNamespace::Config,
+                        &value,
+                    )
                     .map_err(|refusal| format_fault(refusal, RefusalSite::Creation))?;
                 config.insert_versioned(plugin_id.clone(), writer, encoded);
             }
@@ -1187,7 +1160,11 @@ impl ConfigRegistry {
                 .writer(id)
                 .unwrap_or_else(|| factory.plugin_declaration().format_version);
             let value = factory
-                .encode_format(writer, super::FormatNamespace::Config, value)
+                .encode_format(
+                    writer,
+                    lash_core_store::plugin_state::FormatNamespace::Config,
+                    value,
+                )
                 .map_err(|refusal| format_fault(refusal, RefusalSite::Candidate))?;
             encoded_namespaces.insert(
                 id.into(),
@@ -1304,3 +1281,5 @@ impl crate::RunOptionsOwner for ConfigRegistry {
 
 #[cfg(test)]
 mod tests;
+
+use lash_execution_contracts::config_error::ConfigRegistrationError;

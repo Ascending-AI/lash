@@ -48,7 +48,7 @@
 use std::sync::atomic::Ordering;
 use std::sync::{Arc, Mutex, RwLock};
 
-use lash_core_execution::facade_support::sql::Window;
+use lash_core_ids::operational_metrics::sql::Window;
 use rusqlite::{Connection, TransactionBehavior};
 
 use super::{CheckpointState, FencedTx, TxOutcome, WriterFence, timed_gate};
@@ -92,7 +92,7 @@ pub(crate) struct Member {
     #[cfg(feature = "perf-witness")]
     origin: &'static str,
     #[cfg(feature = "perf-witness")]
-    timing: Option<lash_core_execution::perf_witness::queues::Timer>,
+    timing: Option<lash_core_ids::perf_witness::queues::Timer>,
 }
 
 impl Member {
@@ -114,7 +114,7 @@ impl Member {
                 reply,
             }),
             #[cfg(feature = "perf-witness")]
-            timing: lash_core_execution::perf_witness::queues::Timer::enqueue("sqlite.worker"),
+            timing: lash_core_ids::perf_witness::queues::Timer::enqueue("sqlite.worker"),
         }
     }
 
@@ -294,7 +294,7 @@ pub(super) fn run(c: &mut Connection, mut members: Vec<Member>) -> Vec<Member> {
     let origin = "";
     let writer = Arc::clone(&members[0].writer);
     #[cfg(feature = "perf-witness")]
-    let busy = lash_core_execution::perf_witness::latency::Busy::enter(false);
+    let busy = lash_core_ids::perf_witness::latency::Busy::enter(false);
     #[cfg(feature = "perf-witness")]
     for member in &mut members {
         if let Some(timing) = member.timing.as_mut() {
@@ -347,7 +347,7 @@ pub(super) fn run(c: &mut Connection, mut members: Vec<Member>) -> Vec<Member> {
 /// Take one of the writer's gates, timing the wait apart from service.
 fn gate<'g, G, T>(gate: &'g G, _site: &'static str, take: impl FnOnce(&'g G) -> T) -> T {
     #[cfg(feature = "perf-witness")]
-    let mut timing = lash_core_execution::perf_witness::queues::Timer::enqueue(_site);
+    let mut timing = lash_core_ids::perf_witness::queues::Timer::enqueue(_site);
     let taken = timed_gate(|| take(gate));
     #[cfg(feature = "perf-witness")]
     if let Some(timing) = &mut timing {
@@ -367,13 +367,13 @@ fn transact(
 ) -> Settled {
     let mut members = members.into_iter();
     #[cfg(feature = "perf-witness")]
-    let witness = lash_core_execution::perf_witness::latency::Transaction::begin();
+    let witness = lash_core_ids::perf_witness::latency::Transaction::begin();
     let solo = members.len() == 1;
     let opened = c
         .transaction_with_behavior(TransactionBehavior::Immediate)
         .and_then(|tx| {
             #[cfg(feature = "perf-witness")]
-            lash_core_execution::perf_witness::latency::began_write();
+            lash_core_ids::perf_witness::latency::began_write();
             let fleet = writer.fence.check(&tx)?;
             Ok((tx, fleet))
         });
@@ -508,16 +508,13 @@ fn transact(
         #[cfg(feature = "perf-witness")]
         let before = witness
             .as_ref()
-            .map(|_| lash_core_execution::perf_witness::latency::Stamp::now());
+            .map(|_| lash_core_ids::perf_witness::latency::Stamp::now());
         let committed = tx.commit();
         #[cfg(feature = "perf-witness")]
         if committed.is_ok()
             && let Some((witness, before)) = witness.zip(before)
         {
-            witness.committed(
-                before,
-                lash_core_execution::perf_witness::latency::Stamp::now(),
-            );
+            witness.committed(before, lash_core_ids::perf_witness::latency::Stamp::now());
         }
         committed
     };
@@ -590,7 +587,7 @@ fn replicate(error: &rusqlite::Error) -> rusqlite::Error {
 }
 
 fn storage_failure(message: &str) -> rusqlite::Error {
-    crate::sqlite_conversion_error(lash_core_execution::StoreError::StorageFailure {
+    crate::sqlite_conversion_error(lash_core_store::store::StoreError::StorageFailure {
         backend: crate::SQLITE_BACKEND,
         message: message.to_owned(),
     })

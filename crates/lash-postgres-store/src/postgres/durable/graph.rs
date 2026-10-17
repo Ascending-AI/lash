@@ -1170,7 +1170,7 @@ pub(crate) async fn install(
             .await
             .map_err(db)?;
     }
-    if let Some(window) = lash_core_execution::facade_support::sql::Window::current() {
+    if let Some(window) = lash_core_ids::operational_metrics::sql::Window::current() {
         window.installed_graph(installed.newly_installed_canonical_bytes);
     }
     Ok(installed)
@@ -1486,7 +1486,7 @@ mod run_fact_tests {
                 }
             };
             let (answer, receipt) =
-                lash_core_execution::facade_support::sql::collect("fact-walk", "postgres", work)
+                lash_core_ids::operational_metrics::sql::collect("fact-walk", "postgres", work)
                     .await;
             let facts = answer.expect("read");
             let expected_rows = if run.is_some() { 2 } else { 16 };

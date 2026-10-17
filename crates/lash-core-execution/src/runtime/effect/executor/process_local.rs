@@ -3,7 +3,10 @@ use super::*;
 async fn await_process_terminal(
     process_work: &dyn crate::ProcessWorkSubstrate,
     process_id: &crate::ProcessId,
-) -> Result<crate::ProcessAwaitOutput, crate::PluginError> {
+) -> Result<
+    lash_execution_contracts::process::ProcessAwaitOutput,
+    lash_execution_contracts::plugin_error::PluginError,
+> {
     loop {
         match process_work.await_process_terminal(process_id).await? {
             crate::ProcessTerminalWait::Terminal(output) => return Ok(output),
@@ -17,17 +20,19 @@ async fn await_process_terminal(
 ///
 /// A terminal is a *fact*, never an error of the wait: a failed or cancelled
 /// process resolves its waiters successfully, carrying the whole
-/// [`ProcessAwaitOutput`](crate::ProcessAwaitOutput) as the resolution payload.
+/// [`ProcessAwaitOutput`](lash_execution_contracts::process::ProcessAwaitOutput) as the resolution payload.
 /// Only an unobservable terminal is an error resolution.
 ///
 /// That payload is the journaled fact, not the value a cell sees. The await
 /// site converts it with
-/// [`ProcessAwaitOutput::into_tool_output`](crate::ProcessAwaitOutput::into_tool_output)
+/// [`ProcessAwaitOutput::into_tool_output`](lash_execution_contracts::process::ProcessAwaitOutput::into_tool_output)
 /// — the same conversion the inline await path performs — so
 /// `await processes.await({ handle })` answers exactly what `await handle`
 /// answers, in every terminal state. See
 /// `crate::tool_result::tool_output_from_completion_resolution`.
-pub(crate) fn process_terminal_resolution(output: crate::ProcessAwaitOutput) -> Resolution {
+pub(crate) fn process_terminal_resolution(
+    output: lash_execution_contracts::process::ProcessAwaitOutput,
+) -> Resolution {
     match serde_json::to_value(crate::Durable(&output)) {
         Ok(value) => Resolution::Ok(value),
         Err(error) => Resolution::Err(crate::runtime::ExternalCompletionError {
@@ -42,8 +47,8 @@ pub(crate) fn process_terminal_resolution(output: crate::ProcessAwaitOutput) -> 
 /// that caused it, or, for a start with no causal effect, the start's own
 /// runtime-operation scope keyed by its start key (ADR 0113 §3.3).
 fn process_start_starter(
-    registration: &crate::ProcessStartRegistration,
-    execution_context: &crate::ProcessExecutionContext,
+    registration: &lash_execution_contracts::process::ProcessStartRegistration,
+    execution_context: &lash_execution_contracts::process::ProcessExecutionContext,
 ) -> Result<lash_protocol_types::EffectJournalIdentity, RuntimeEffectControllerError> {
     let journal = match (
         execution_context
@@ -71,8 +76,11 @@ fn process_start_starter(
 async fn delivered_output(
     attachments: Option<&Arc<dyn crate::AttachmentReferrers>>,
     receiver: &crate::ExecutionScope,
-    output: crate::ProcessAwaitOutput,
-) -> Result<crate::ProcessAwaitOutput, crate::PluginError> {
+    output: lash_execution_contracts::process::ProcessAwaitOutput,
+) -> Result<
+    lash_execution_contracts::process::ProcessAwaitOutput,
+    lash_execution_contracts::plugin_error::PluginError,
+> {
     match attachments {
         Some(attachments) => {
             crate::runtime::attachment_delivery::deliver_output(
@@ -121,7 +129,8 @@ impl ProcessLocalExecution {
             outcome_observer,
             actors,
         } = self;
-        let mut observer = crate::runtime::process::ProcessWorkObserver::new(Arc::clone(&registry));
+        let mut observer =
+            lash_execution_contracts::process::ProcessWorkObserver::new(Arc::clone(&registry));
         if let Some(actors) = actors {
             observer = observer.with_actor_parks(actors);
         }
@@ -159,7 +168,12 @@ impl ProcessLocalExecution {
                 let record = started.record;
                 Ok((
                     ProcessEffectOutcome::Start {
-                        record: Box::new(observer.observed(record).await?),
+                        record: Box::new(
+                            lash_execution_contracts::process::observation::observe_process_record(
+                                &observer, record,
+                            )
+                            .await?,
+                        ),
                         disposition,
                     },
                     realization,
@@ -171,32 +185,33 @@ impl ProcessLocalExecution {
                         session_scope,
                         mode,
                     } => match mode {
-                        crate::ProcessListMode::Live => {
+                        lash_execution_contracts::process::ProcessListMode::Live => {
                             registry
                                 .list_live_observed_by(&session_scope.session_id)
                                 .await?
                         }
-                        crate::ProcessListMode::All => {
-                            registry
-                                .list_observed_by(
-                                    &session_scope.session_id,
-                                    &crate::ProcessListFilter {
-                                        status: crate::ProcessStatusFilter::Any,
-                                        ..Default::default()
-                                    },
-                                )
-                                .await?
-                        }
+                        lash_execution_contracts::process::ProcessListMode::All => registry
+                            .list_observed_by(
+                                &session_scope.session_id,
+                                &lash_execution_contracts::process::ProcessListFilter {
+                                    status:
+                                        lash_execution_contracts::process::ProcessStatusFilter::Any,
+                                    ..Default::default()
+                                },
+                            )
+                            .await?,
                     },
                     crate::ProcessListSelection::HostRunning => {
-                        let filter = &crate::ProcessListFilter {
+                        let filter = &lash_execution_contracts::process::ProcessListFilter {
                             // Live, not only `running`: a process that
                             // sleeps or awaits reads `waiting`.
-                            status: crate::ProcessStatusFilter::any_of(
-                                crate::ProcessStatus::ALL
+                            status: lash_execution_contracts::process::ProcessStatusFilter::any_of(
+                                lash_execution_contracts::process::ProcessStatus::ALL
                                     .iter()
                                     .copied()
-                                    .filter(crate::ProcessStatus::is_live),
+                                    .filter(
+                                        lash_execution_contracts::process::ProcessStatus::is_live,
+                                    ),
                             ),
                             ..Default::default()
                         };
@@ -207,7 +222,7 @@ impl ProcessLocalExecution {
                                 .list_processes_page(
                                     filter,
                                     std::num::NonZeroUsize::MIN
-                                        .saturating_add(crate::MAX_PROCESS_ROSTER_PAGE_SIZE - 1),
+                                        .saturating_add(lash_execution_contracts::process::MAX_PROCESS_ROSTER_PAGE_SIZE - 1),
                                     continuation,
                                 )
                                 .await?;
@@ -222,9 +237,13 @@ impl ProcessLocalExecution {
                 };
                 Ok((
                     ProcessEffectOutcome::List {
-                        entries: observer.observe_records(entries).await?,
+                        entries:
+                            lash_execution_contracts::process::observation::observe_process_records(
+                                &observer, entries,
+                            )
+                            .await?,
                     },
-                    crate::StoreRealization::Realized,
+                    lash_execution_contracts::process::StoreRealization::Realized,
                 ))
             }
             ProcessCommand::ValidateVisible { owner, process_ids } => {
@@ -244,7 +263,7 @@ impl ProcessLocalExecution {
                         }
                     };
                     match visible {
-                        Ok(true) | Err(crate::PluginError::ProcessNoLongerRetained { .. }) => {}
+                        Ok(true) | Err(lash_execution_contracts::plugin_error::PluginError::ProcessNoLongerRetained { .. }) => {}
                         Ok(false) => {
                             not_visible = Some(process_id);
                             break;
@@ -254,7 +273,7 @@ impl ProcessLocalExecution {
                 }
                 Ok((
                     ProcessEffectOutcome::ValidateVisible { not_visible },
-                    crate::StoreRealization::Realized,
+                    lash_execution_contracts::process::StoreRealization::Realized,
                 ))
             }
             ProcessCommand::Transfer {
@@ -267,12 +286,14 @@ impl ProcessLocalExecution {
                         &from_scope.session_id,
                         &to_scope.session_id,
                         &process_ids,
-                        crate::ProcessObserverBy::host("runtime-effect-transfer"),
+                        lash_execution_contracts::process::ProcessObserverBy::host(
+                            "runtime-effect-transfer",
+                        ),
                     )
                     .await?;
                 Ok((
                     ProcessEffectOutcome::Transfer,
-                    crate::StoreRealization::Realized,
+                    lash_execution_contracts::process::StoreRealization::Realized,
                 ))
             }
             ProcessCommand::DeleteSession { session_id } => {
@@ -295,7 +316,7 @@ impl ProcessLocalExecution {
                     })?;
                 Ok((
                     ProcessEffectOutcome::DeleteSession { report },
-                    crate::StoreRealization::Realized,
+                    lash_execution_contracts::process::StoreRealization::Realized,
                 ))
             }
             ProcessCommand::Await { process_id } => {
@@ -330,7 +351,7 @@ impl ProcessLocalExecution {
                     ProcessEffectOutcome::Await {
                         output: Box::new(output),
                     },
-                    crate::StoreRealization::Realized,
+                    lash_execution_contracts::process::StoreRealization::Realized,
                 ))
             }
             ProcessCommand::Cancel {
@@ -351,7 +372,12 @@ impl ProcessLocalExecution {
                     .await?;
                 Ok((
                     ProcessEffectOutcome::Cancel {
-                        record: Box::new(observer.observed(record).await?),
+                        record: Box::new(
+                            lash_execution_contracts::process::observation::observe_process_record(
+                                &observer, record,
+                            )
+                            .await?,
+                        ),
                     },
                     realization,
                 ))
@@ -381,9 +407,9 @@ impl ProcessLocalExecution {
     /// The start's refusal, and any store failure staging it.
     pub async fn stage_start(
         self,
-        registration: crate::ProcessStartRegistration,
+        registration: lash_execution_contracts::process::ProcessStartRegistration,
         observers: Vec<crate::SessionId>,
-        execution_context: crate::ProcessExecutionContext,
+        execution_context: lash_execution_contracts::process::ProcessExecutionContext,
     ) -> Result<crate::StagedProcessStart, RuntimeEffectControllerError> {
         let starter = process_start_starter(&registration, &execution_context)?;
         // Boxed: staging holds the start and the registration it resolves
@@ -431,10 +457,12 @@ impl ProcessDefinitionLocalExecution {
                     .acquire_definition(&engines, &claim, &definition_id)
                     .await?
                 {
-                    crate::DefinitionAcquisition::Held(resolved) => resolved.definition,
-                    crate::DefinitionAcquisition::Ended => {
-                        return Err(crate::PluginError::from(
-                            crate::ArtifactStoreError::ReferrerEnded {
+                    lash_execution_contracts::process::DefinitionAcquisition::Held(resolved) => {
+                        resolved.definition
+                    }
+                    lash_execution_contracts::process::DefinitionAcquisition::Ended => {
+                        return Err(lash_execution_contracts::plugin_error::PluginError::from(
+                            lash_execution_contracts::module_artifacts::ArtifactStoreError::ReferrerEnded {
                                 referrer: claim.referrer().clone(),
                             },
                         )
@@ -462,7 +490,7 @@ mod terminal_wait_tests {
 
     struct ReattachOnce {
         waits: AtomicUsize,
-        terminal: crate::ProcessAwaitOutput,
+        terminal: lash_execution_contracts::process::ProcessAwaitOutput,
     }
 
     #[async_trait::async_trait]
@@ -470,7 +498,8 @@ mod terminal_wait_tests {
         async fn await_process_terminal(
             &self,
             process_id: &crate::ProcessId,
-        ) -> Result<crate::ProcessTerminalWait, crate::PluginError> {
+        ) -> Result<crate::ProcessTerminalWait, lash_execution_contracts::plugin_error::PluginError>
+        {
             assert_eq!(process_id, &crate::process_id_for_test("reattach-process"));
             if self.waits.fetch_add(1, Ordering::SeqCst) == 0 {
                 Ok(crate::ProcessTerminalWait::Reattach)
@@ -484,16 +513,16 @@ mod terminal_wait_tests {
             _process_id: &crate::ProcessId,
             _request: &crate::CancelRequest,
             _key: &str,
-        ) -> Result<(), crate::PluginError> {
+        ) -> Result<(), lash_execution_contracts::plugin_error::PluginError> {
             unreachable!("terminal-wait witness does not deliver cancels")
         }
     }
 
     #[tokio::test]
     async fn process_local_reattaches_once_then_returns_terminal_output() {
-        let terminal = crate::ProcessAwaitOutput::from_tool_output(crate::ToolCallOutput::success(
-            serde_json::json!({"done": true}),
-        ));
+        let terminal = lash_execution_contracts::process::ProcessAwaitOutput::from_tool_output(
+            crate::ToolCallOutput::success(serde_json::json!({"done": true})),
+        );
         let port = ReattachOnce {
             waits: AtomicUsize::new(0),
             terminal: terminal.clone(),

@@ -7,8 +7,8 @@
 use std::num::NonZeroUsize;
 use std::sync::Arc;
 
-use lash_core::DeploymentStore;
 use lash_core::store::{ControlIntent, ControlIntentId};
+use lash_execution_contracts::deployment::DeploymentStore;
 
 use crate::Result;
 

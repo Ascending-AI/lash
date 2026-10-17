@@ -17,10 +17,11 @@
 
 use std::sync::Arc;
 
-use lash_core_execution::{
-    ProcessCompletionAuthority, ProcessEventLog as _, ProcessLifecycle as _, ProcessProvenance,
-    ProcessRegistrar as _,
-};
+use lash_execution_contracts::process::ProcessCompletionAuthority;
+use lash_execution_contracts::process::ProcessEventLog as _;
+use lash_execution_contracts::process::ProcessLifecycle as _;
+use lash_execution_contracts::process::ProcessProvenance;
+use lash_execution_contracts::process::ProcessRegistrar as _;
 use lash_sqlite_store::SqliteProcessRegistry;
 
 #[path = "conformance/backend_fixture.rs"]
@@ -51,17 +52,20 @@ async fn a_lifecycle_page_read_keeps_its_identity_snapshot_during_prune() {
                 lash_sqlite_store::SqliteSynchronous::Normal,
             )
         },
-        Arc::new(lash_core_execution::facade_support::SystemClock),
+        Arc::new(lash_core_ids::clock::SystemClock),
     )
     .await
     .expect("open paused process registry reader");
-    lash_core::testing::process_execution_env_fixture(stores.process_env_store().as_ref()).await;
+    lash_execution_contracts::testing::process_execution_env_fixture(
+        stores.process_env_store().as_ref(),
+    )
+    .await;
     let reader = stores.process_registry();
     let process_id = reader
-        .register_process(lash_core::testing::held_engine_registration(
+        .register_process(lash_execution_contracts::testing::held_engine_registration(
             serde_json::Value::Null,
             ProcessProvenance::host(),
-            lash_core_execution::Lifetime::Detached,
+            lash_execution_contracts::process::Lifetime::Detached,
         ))
         .await
         .expect("register snapshot process")
@@ -69,7 +73,7 @@ async fn a_lifecycle_page_read_keeps_its_identity_snapshot_during_prune() {
     reader
         .request_process_cancel(
             &process_id,
-            lash_core_execution::CancelOrigin::OperatorRequested,
+            lash_protocol_types::tool_output::CancelOrigin::OperatorRequested,
             "snapshot-operator".to_owned(),
             None,
         )
@@ -78,8 +82,8 @@ async fn a_lifecycle_page_read_keeps_its_identity_snapshot_during_prune() {
     let terminal = reader
         .complete_process(
             &process_id,
-            lash_core_execution::ProcessAwaitOutput::from_tool_output(
-                lash_core_execution::ToolCallOutput::success(serde_json::Value::Null),
+            lash_execution_contracts::process::ProcessAwaitOutput::from_tool_output(
+                lash_protocol_types::tool_output::ToolCallOutput::success(serde_json::Value::Null),
             ),
             ProcessCompletionAuthority::workflow_key(&process_id),
         )
@@ -89,14 +93,16 @@ async fn a_lifecycle_page_read_keeps_its_identity_snapshot_during_prune() {
         .event_page(
             &process_id,
             std::num::NonZeroUsize::MIN,
-            lash_core_execution::ProcessEventQueryMode::Full,
+            lash_execution_contracts::process::ProcessEventQueryMode::Full,
         )
         .await
         .expect("read first event page");
-    let lash_core_execution::ProcessEventReadOutcome::Retained(first) = first else {
+    let lash_execution_contracts::process::ProcessEventReadOutcome::Retained(first) = first else {
         panic!("new process history must be retained");
     };
-    let lash_core_execution::ProcessEventPageMore::More { after_sequence } = first.more else {
+    let lash_execution_contracts::process::ProcessEventPageMore::More { after_sequence } =
+        first.more
+    else {
         panic!("fixture must leave a nonempty unread tail");
     };
 
@@ -110,7 +116,7 @@ async fn a_lifecycle_page_read_keeps_its_identity_snapshot_during_prune() {
                     &process_id,
                     after_sequence,
                     std::num::NonZeroUsize::new(16).expect("non-zero page size"),
-                    lash_core_execution::ProcessEventQueryMode::Full,
+                    lash_execution_contracts::process::ProcessEventQueryMode::Full,
                 )
                 .await
         }
@@ -152,9 +158,9 @@ async fn a_lifecycle_page_read_keeps_its_identity_snapshot_during_prune() {
     assert!(
         !matches!(
             outcome,
-            lash_core_execution::ProcessEventReadOutcome::Retained(lash_core_execution::ProcessEventPage {
-                events: lash_core_execution::ProcessEventPageEvents::Full(ref events),
-                more: lash_core_execution::ProcessEventPageMore::Complete,
+            lash_execution_contracts::process::ProcessEventReadOutcome::Retained(lash_execution_contracts::process::ProcessEventPage {
+                events: lash_execution_contracts::process::ProcessEventPageEvents::Full(ref events),
+                more: lash_execution_contracts::process::ProcessEventPageMore::Complete,
             }) if events.is_empty()
         ),
         "a prune between identity lookup and page fetch must not become false empty completion: {outcome:?}"
@@ -170,7 +176,7 @@ const SNAPSHOT_PRUNER_CUTOFF_MS: &str = "LASH_SQLITE_SNAPSHOT_PRUNER_CUTOFF_MS";
 #[tokio::test]
 #[ignore = "spawned by a_lifecycle_page_read_keeps_its_identity_snapshot_during_prune"]
 async fn lifecycle_snapshot_competing_pruner() {
-    use lash_core_execution::ProcessRetention as _;
+    use lash_execution_contracts::process::ProcessRetention as _;
 
     let root = std::env::var_os(SNAPSHOT_PRUNER_ROOT).expect("the law's store root");
     let cutoff_ms = std::env::var(SNAPSHOT_PRUNER_CUTOFF_MS)
@@ -188,7 +194,7 @@ async fn lifecycle_snapshot_competing_pruner() {
         .prune_terminal_processes(
             cutoff_ms,
             None,
-            lash_core_execution::ProjectionWatermark::NoProjector,
+            lash_execution_contracts::process::ProjectionWatermark::NoProjector,
         )
         .await
         .expect("prune process through competing connection");

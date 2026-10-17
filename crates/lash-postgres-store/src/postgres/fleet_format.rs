@@ -15,9 +15,11 @@
 //! or one outside this build's writable range, is refused with a typed error
 //! rather than allowed to emit a format the fleet never agreed to.
 
-use lash_core_execution::compat::VersionRange;
+use lash_core_store::compat::VersionRange;
 
-use lash_core_execution::{FleetFormat, FleetFormatState, StoreError};
+use lash_core_store::store::FleetFormat;
+use lash_core_store::store::FleetFormatState;
+use lash_core_store::store::StoreError;
 use sqlx::{Postgres, Transaction};
 
 use crate::session_sql::session_sql;
@@ -63,7 +65,7 @@ pub(crate) fn unrecorded(writable: VersionRange) -> Result<FleetFormat, StoreErr
 /// `[min_F, max_F]` — production opens pass [`FleetFormat::writable`], and a
 /// test simulating a different build passes that build's range instead.
 ///
-/// [`CompatRefusal::FleetUnrecorded`]: lash_core_execution::compat::CompatRefusal::FleetUnrecorded
+/// [`CompatRefusal::FleetUnrecorded`]: lash_core_store::compat::CompatRefusal::FleetUnrecorded
 pub(crate) async fn admit(
     tx: &mut Transaction<'_, Postgres>,
     writable: VersionRange,
@@ -145,7 +147,7 @@ fn missing_relation(err: &sqlx::Error) -> bool {
         .is_some_and(|code| code == "42P01")
 }
 
-impl lash_core_execution::FleetFormatStore for crate::PostgresStore {
+impl lash_core_store::store::FleetFormatStore for crate::PostgresStore {
     /// The fleet format this store's durable writers emit — the `F` of ADR
     /// 0106 §1 the opening `PostgresStorage` admitted.
     ///
@@ -158,14 +160,14 @@ impl lash_core_execution::FleetFormatStore for crate::PostgresStore {
         self.fence.fleet()
     }
 
-    fn plugin_writers(&self) -> lash_core_execution::store::PluginWriterRangesFuture<'_> {
+    fn plugin_writers(&self) -> lash_core_store::store::PluginWriterRangesFuture<'_> {
         Box::pin(read_plugin_writers(&self.pool))
     }
 
     fn provision_plugin_writers<'a>(
         &'a self,
-        registrations: &'a [lash_core_execution::store::plugin_writers::PluginWriterRegistration],
-    ) -> lash_core_execution::store::PluginWriterRangesFuture<'a> {
+        registrations: &'a [lash_core_store::store::plugin_writers::PluginWriterRegistration],
+    ) -> lash_core_store::store::PluginWriterRangesFuture<'a> {
         Box::pin(provision_plugin_writers(
             &self.pool,
             &self.fence,
@@ -176,19 +178,19 @@ impl lash_core_execution::FleetFormatStore for crate::PostgresStore {
 
 /// The artifact store's process environments are admitted against the same
 /// fleet record (FIG-4746), so a hold provisions its components there.
-impl lash_core_execution::FleetFormatStore for crate::PostgresLashVmArtifactStore {
+impl lash_core_store::store::FleetFormatStore for crate::PostgresLashVmArtifactStore {
     fn fleet_format(&self) -> FleetFormat {
         self.fence.fleet()
     }
 
-    fn plugin_writers(&self) -> lash_core_execution::store::PluginWriterRangesFuture<'_> {
+    fn plugin_writers(&self) -> lash_core_store::store::PluginWriterRangesFuture<'_> {
         Box::pin(read_plugin_writers(&self.pool))
     }
 
     fn provision_plugin_writers<'a>(
         &'a self,
-        registrations: &'a [lash_core_execution::store::plugin_writers::PluginWriterRegistration],
-    ) -> lash_core_execution::store::PluginWriterRangesFuture<'a> {
+        registrations: &'a [lash_core_store::store::plugin_writers::PluginWriterRegistration],
+    ) -> lash_core_store::store::PluginWriterRangesFuture<'a> {
         Box::pin(provision_plugin_writers(
             &self.pool,
             &self.fence,
@@ -199,7 +201,7 @@ impl lash_core_execution::FleetFormatStore for crate::PostgresLashVmArtifactStor
 
 async fn read_plugin_writers(
     pool: &sqlx::PgPool,
-) -> Result<lash_core_execution::store::plugin_writers::PluginWriterRanges, StoreError> {
+) -> Result<lash_core_store::store::plugin_writers::PluginWriterRanges, StoreError> {
     let mut connection = pool.acquire().await.map_err(crate::store_sqlx_error)?;
     crate::guarded_tx::read_plugin_writers(&mut connection).await
 }
@@ -207,8 +209,8 @@ async fn read_plugin_writers(
 async fn provision_plugin_writers(
     pool: &sqlx::PgPool,
     fence: &crate::guarded_tx::WriterFence,
-    registrations: &[lash_core_execution::store::plugin_writers::PluginWriterRegistration],
-) -> Result<lash_core_execution::store::plugin_writers::PluginWriterRanges, StoreError> {
+    registrations: &[lash_core_store::store::plugin_writers::PluginWriterRegistration],
+) -> Result<lash_core_store::store::plugin_writers::PluginWriterRanges, StoreError> {
     let mut tx = crate::guarded_tx::begin_guarded(pool, fence).await?;
     let ranges = tx.provision_plugin_writers(registrations).await?;
     tx.commit().await.map_err(crate::store_sqlx_error)?;

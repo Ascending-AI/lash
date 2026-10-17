@@ -9,7 +9,9 @@
 use std::sync::Arc;
 
 use lash_core_execution::runtime::actor::process_laws;
-use lash_core_execution::{Backend, BackendParts, NoProjectionProviders};
+use lash_execution_contracts::backend::Backend;
+use lash_execution_contracts::backend::BackendParts;
+use lash_execution_contracts::projection::NoProjectionProviders;
 
 use crate::PostgresStoreSet;
 use crate::testing::IsolatedDatabase;
@@ -30,7 +32,7 @@ macro_rules! law {
                 formats: Vec::new(),
                 stores: Arc::new(PostgresStoreSet::new(
                     &storage,
-                    Arc::new(lash_core_execution::attachments::UnavailableAttachmentStore),
+                    Arc::new(lash_core_store::attachments::UnavailableAttachmentStore),
                 )),
                 settings: process_laws::settings(),
                 engines: Vec::new(),
@@ -90,7 +92,7 @@ async fn a_deadlock_inside_a_process_terminal_is_retried() {
         formats: Vec::new(),
         stores: Arc::new(PostgresStoreSet::new(
             &storage,
-            Arc::new(lash_core_execution::attachments::UnavailableAttachmentStore),
+            Arc::new(lash_core_store::attachments::UnavailableAttachmentStore),
         )),
         settings: process_laws::settings(),
         engines: Vec::new(),
@@ -129,7 +131,7 @@ async fn a_deadlock_inside_a_cancel_is_retried() {
         formats: Vec::new(),
         stores: Arc::new(PostgresStoreSet::new(
             &storage,
-            Arc::new(lash_core_execution::attachments::UnavailableAttachmentStore),
+            Arc::new(lash_core_store::attachments::UnavailableAttachmentStore),
         )),
         settings: process_laws::settings(),
         engines: Vec::new(),
@@ -156,7 +158,8 @@ async fn a_deadlock_inside_a_cancel_is_retried() {
 /// write never waits on the cancel and the two never deadlock.
 #[tokio::test(flavor = "multi_thread", worker_threads = 4)]
 async fn a_cancel_behind_an_owner_commit_holds_no_lock_on_its_process() {
-    use lash_core_execution::{ProcessLifecycle as _, ProcessRegistrar as _};
+    use lash_execution_contracts::process::ProcessLifecycle as _;
+    use lash_execution_contracts::process::ProcessRegistrar as _;
 
     let database_url =
         crate::postgres_test_support::database_url().expect("hermetic PostgreSQL URL");
@@ -164,13 +167,14 @@ async fn a_cancel_behind_an_owner_commit_holds_no_lock_on_its_process() {
     let storage = crate::testing::connect(database.url())
         .await
         .expect("isolated store");
-    lash_core_execution::testing::process_execution_env_fixture(&storage.process_env_store()).await;
+    lash_execution_contracts::testing::process_execution_env_fixture(&storage.process_env_store())
+        .await;
     let process = storage
         .process_registry()
-        .register_process(lash_core_execution::testing::held_engine_registration(
+        .register_process(lash_execution_contracts::testing::held_engine_registration(
             serde_json::Value::Null,
-            lash_core_execution::ProcessProvenance::host(),
-            lash_core_execution::Lifetime::Detached,
+            lash_execution_contracts::process::ProcessProvenance::host(),
+            lash_execution_contracts::process::Lifetime::Detached,
         ))
         .await
         .expect("register the process")
@@ -195,7 +199,7 @@ async fn a_cancel_behind_an_owner_commit_holds_no_lock_on_its_process() {
             registry
                 .request_process_cancel(
                     &process,
-                    lash_core_execution::CancelOrigin::OperatorRequested,
+                    lash_protocol_types::tool_output::CancelOrigin::OperatorRequested,
                     "lock-order-law".to_owned(),
                     None,
                 )
@@ -251,27 +255,30 @@ async fn a_cancel_behind_an_owner_commit_holds_no_lock_on_its_process() {
 /// no turn advisory lock that the terminal's close would need in reverse order.
 #[tokio::test(flavor = "multi_thread", worker_threads = 4)]
 async fn a_turn_registration_behind_a_terminal_holds_no_lock_the_close_needs() {
-    use lash_core_execution::{PluginError, ProcessRegistrar as _};
+    use lash_execution_contracts::plugin_error::PluginError;
+    use lash_execution_contracts::process::ProcessRegistrar as _;
     let url = crate::testing::required_database_url();
     let database = IsolatedDatabase::create(&url).await;
     let storage = crate::testing::connect(database.url())
         .await
         .expect("store");
-    lash_core_execution::testing::process_execution_env_fixture(&storage.process_env_store()).await;
+    lash_execution_contracts::testing::process_execution_env_fixture(&storage.process_env_store())
+        .await;
     sqlx::query(
         "INSERT INTO lash_session_runs (session_id, run) VALUES ('held-session', 'held-run')",
     )
     .execute(storage.pool())
     .await
     .expect("run");
-    let scope = lash_core_execution::ScopeId::turn("held-session", "held-run");
-    let mut registration = lash_core_execution::testing::held_engine_registration(
+    let scope = lash_core_store::scope_identity::ScopeId::turn("held-session", "held-run");
+    let mut registration = lash_execution_contracts::testing::held_engine_registration(
         serde_json::Value::Null,
-        lash_core_execution::ProcessProvenance::host(),
-        lash_core_execution::Lifetime::Detached,
+        lash_execution_contracts::process::ProcessProvenance::host(),
+        lash_execution_contracts::process::Lifetime::Detached,
     );
-    registration.ancestry = lash_core_execution::Ancestry::from_scopes([scope.clone()]);
-    registration.consumer_hold = Some(lash_core_execution::ConsumerHold {
+    registration.ancestry =
+        lash_execution_contracts::process::Ancestry::from_scopes([scope.clone()]);
+    registration.consumer_hold = Some(lash_execution_contracts::process::ConsumerHold {
         key: "held-call".into(),
         owner: scope.clone(),
         cancels: false,
@@ -314,7 +321,7 @@ async fn a_turn_registration_behind_a_terminal_holds_no_lock_the_close_needs() {
         &mut closing,
         &scope,
         42,
-        lash_core_execution::FleetFormat::current(),
+        lash_core_store::store::FleetFormat::current(),
     )
     .await
     .expect("close cannot deadlock behind registration");

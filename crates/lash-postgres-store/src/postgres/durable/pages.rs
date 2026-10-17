@@ -336,7 +336,7 @@ pub(super) async fn install_candidate(
     }
     #[cfg(any(test, feature = "testing"))]
     CANDIDATE_PEAK_BUFFERED.store(edges.peak_buffered(), std::sync::atomic::Ordering::SeqCst);
-    if let Some(window) = lash_core_execution::facade_support::sql::Window::current() {
+    if let Some(window) = lash_core_ids::operational_metrics::sql::Window::current() {
         window.installed_graph(installed.newly_installed_canonical_bytes);
     }
     Ok(())

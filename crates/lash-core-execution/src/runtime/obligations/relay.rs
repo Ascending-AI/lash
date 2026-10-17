@@ -26,11 +26,12 @@
 use std::num::{NonZeroU32, NonZeroUsize};
 
 use crate::Clock;
+use crate::RuntimeErrorCode;
 use crate::store::{
     ClaimToken, ClaimedObligation, DeliveryError, ObligationId, ObligationKey, ObligationLedger,
     ObligationSettlement, SettleOutcome, StallReason, StoreError,
 };
-use crate::{PluginError, RuntimeErrorCode};
+use lash_execution_contracts::plugin_error::PluginError;
 
 /// Why one delivery attempt did not deliver. Every cause carries its typed
 /// code to the obligation row that retains it.

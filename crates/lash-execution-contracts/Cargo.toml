@@ -1,0 +1,52 @@
+[package]
+name = "lash-internal-execution-contracts"
+version.workspace = true
+edition.workspace = true
+license.workspace = true
+authors.workspace = true
+repository.workspace = true
+homepage.workspace = true
+readme.workspace = true
+rust-version.workspace = true
+description = "Shared execution records and persistence interfaces below the Lash runtime."
+keywords = ["lash", "agent", "runtime", "async", "ai"]
+categories = ["asynchronous", "api-bindings"]
+
+[lib]
+name = "lash_execution_contracts"
+doctest = false
+
+[features]
+# Keep the execution kernel portable by default.
+default = []
+synthetic-next = ["lash-core-store/synthetic-next", "lash-kernel-migrate/synthetic-next"]
+otel-trace = ["lash-trace/otel", "lash-core-ids/otel-trace", "lash-core-llm/otel-trace", "lash-core-store/otel-trace", "lash-core-effect/otel-trace"]
+# Internal performance instrumentation. Production builds leave every call
+# site compiled out unless an internal witness explicitly enables this feature.
+perf-witness = ["lash-core-ids/perf-witness", "lash-core-llm/perf-witness", "lash-core-store/perf-witness", "lash-core-effect/perf-witness"]
+# Expose `testing` fixtures shared with `lash-core`'s own tests.
+testing = ["lash-durable/testing", "lash-core-ids/testing", "lash-core-llm/testing", "lash-core-store/testing", "lash-core-effect/testing", "lash-trace/testing"]
+
+[lints]
+workspace = true
+
+[dependencies]
+lash-core-ids = { workspace = true }
+lash-core-llm = { workspace = true }
+lash-core-store = { workspace = true }
+lash-core-effect = { workspace = true }
+lash-durable = { workspace = true }
+lash-kernel-check = { workspace = true }
+lash-kernel-doc = { workspace = true }
+lash-kernel-migrate = { workspace = true }
+lash-protocol-types = { workspace = true, features = ["schema-validation"] }
+lash-trace = { workspace = true }
+serde = { workspace = true, features = ["derive", "rc"] }
+serde_json = { workspace = true }
+rmp-serde = { workspace = true }
+schemars = { workspace = true, features = ["derive"] }
+async-trait = { workspace = true }
+uuid = { workspace = true, features = ["v4"] }
+thiserror = { workspace = true }
+tokio-util = { workspace = true, features = ["rt"] }
+sha2 = { workspace = true }

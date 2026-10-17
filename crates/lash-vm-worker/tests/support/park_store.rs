@@ -4,9 +4,9 @@
 use std::sync::atomic::{AtomicUsize, Ordering};
 use std::sync::{Arc, Mutex};
 
-use lash_core_execution::StoreSet;
 use lash_durable::DurableStore;
 use lash_durable_test::{OffClockWork, SimClock};
+use lash_execution_contracts::backend::StoreSet;
 use lash_postgres_store::testing::IsolatedDatabase;
 
 #[derive(Clone, Copy)]

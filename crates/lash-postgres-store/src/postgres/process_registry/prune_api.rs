@@ -1,12 +1,14 @@
 use super::*;
 use lash_protocol_types::ProcessId;
 
-fn watermark_change_seq(watermark: lash_core_execution::ProjectionWatermark) -> Option<i64> {
+fn watermark_change_seq(
+    watermark: lash_execution_contracts::process::ProjectionWatermark,
+) -> Option<i64> {
     match watermark {
-        lash_core_execution::ProjectionWatermark::UpTo(cursor) => {
+        lash_execution_contracts::process::ProjectionWatermark::UpTo(cursor) => {
             Some(cursor.store_sequence() as i64)
         }
-        lash_core_execution::ProjectionWatermark::NoProjector => None,
+        lash_execution_contracts::process::ProjectionWatermark::NoProjector => None,
     }
 }
 
@@ -15,7 +17,7 @@ async fn select_prunable<'c>(
     sql: &str,
     cutoff: i64,
     max_change_seq: Option<i64>,
-    filter: Option<&lash_core_execution::ProcessListFilter>,
+    filter: Option<&lash_execution_contracts::process::ProcessListFilter>,
 ) -> Result<Vec<ProcessRecord>, PluginError> {
     let rows = crate::observed_sql::query(sql)
         .bind(cutoff)
@@ -40,8 +42,8 @@ async fn select_prunable<'c>(
 pub(super) async fn prunable_terminal_processes(
     registry: &PostgresProcessRegistry,
     cutoff_epoch_ms: u64,
-    filter: Option<lash_core_execution::ProcessListFilter>,
-    watermark: lash_core_execution::ProjectionWatermark,
+    filter: Option<lash_execution_contracts::process::ProcessListFilter>,
+    watermark: lash_execution_contracts::process::ProjectionWatermark,
 ) -> Result<Vec<ProcessId>, PluginError> {
     let cutoff = i64::try_from(cutoff_epoch_ms).unwrap_or(i64::MAX);
     Ok(select_prunable(
@@ -87,8 +89,8 @@ async fn reclaim_settled_parent_end_plans_tx(
 pub(super) async fn prune_terminal_processes(
     registry: &PostgresProcessRegistry,
     cutoff_epoch_ms: u64,
-    filter: Option<lash_core_execution::ProcessListFilter>,
-    watermark: lash_core_execution::ProjectionWatermark,
+    filter: Option<lash_execution_contracts::process::ProcessListFilter>,
+    watermark: lash_execution_contracts::process::ProjectionWatermark,
 ) -> Result<ProcessPruneReport, PluginError> {
     let cutoff = i64::try_from(cutoff_epoch_ms).unwrap_or(i64::MAX);
     let pruned_at_ms = crate::support::clamp_epoch_ms(registry.clock.timestamp_ms());

@@ -1,9 +1,14 @@
 //! The compatibility row of the deployment's SQLite database.
 
-use lash_core_execution::compat::{
-    self, CompatAdmission, CompatRefusal, CompatStamp, StampRead, VersionRange,
-};
-use lash_core_execution::{FleetFormat, FleetFormatState, StoreError};
+use lash_core_store::compat;
+use lash_core_store::compat::CompatAdmission;
+use lash_core_store::compat::CompatRefusal;
+use lash_core_store::compat::CompatStamp;
+use lash_core_store::compat::StampRead;
+use lash_core_store::compat::VersionRange;
+use lash_core_store::store::FleetFormat;
+use lash_core_store::store::FleetFormatState;
+use lash_core_store::store::StoreError;
 use rusqlite::{Connection, OptionalExtension, Transaction, params};
 
 use crate::location::SqliteLocation;
@@ -186,7 +191,7 @@ fn plugin_writer_refusal(refusal: CompatRefusal) -> rusqlite::Error {
 /// that cannot be read at all, is refused typed: the store fails closed.
 pub(crate) fn read_plugin_writers(
     conn: &Connection,
-) -> rusqlite::Result<lash_core_execution::store::plugin_writers::PluginWriterRanges> {
+) -> rusqlite::Result<lash_core_store::store::plugin_writers::PluginWriterRanges> {
     let unreadable = |error: rusqlite::Error| {
         plugin_writer_refusal(CompatRefusal::PluginWriterRangeMalformed {
             plugin: String::new(),
@@ -201,7 +206,7 @@ pub(crate) fn read_plugin_writers(
                 .collect()
         })
         .map_err(unreadable)?;
-    lash_core_execution::store::plugin_writers::PluginWriterRanges::from_rows(rows)
+    lash_core_store::store::plugin_writers::PluginWriterRanges::from_rows(rows)
         .map_err(plugin_writer_refusal)
 }
 
@@ -224,7 +229,7 @@ pub(crate) fn record_plugin_writers(
 /// transaction, and record the entries it provisions.
 pub(crate) fn admit_plugin_writers(
     tx: &Transaction<'_>,
-    publication: &lash_core_execution::store::plugin_writers::PluginPublication,
+    publication: &lash_core_store::store::plugin_writers::PluginPublication,
 ) -> rusqlite::Result<()> {
     if publication.is_empty() {
         return Ok(());
@@ -365,12 +370,12 @@ pub(crate) fn read_fleet_state(conn: &Connection) -> rusqlite::Result<FleetForma
 
 /// The handle answers the last `F` its writer fence observed, not the
 /// open-time value (ADR 0115 §2.3).
-impl lash_core_execution::FleetFormatStore for crate::SqliteStore {
+impl lash_core_store::store::FleetFormatStore for crate::SqliteStore {
     fn fleet_format(&self) -> FleetFormat {
         self.conn.fleet()
     }
 
-    fn plugin_writers(&self) -> lash_core_execution::store::PluginWriterRangesFuture<'_> {
+    fn plugin_writers(&self) -> lash_core_store::store::PluginWriterRangesFuture<'_> {
         Box::pin(async move {
             self.conn
                 .read(|tx| read_plugin_writers(tx))
@@ -381,8 +386,8 @@ impl lash_core_execution::FleetFormatStore for crate::SqliteStore {
 
     fn provision_plugin_writers<'a>(
         &'a self,
-        registrations: &'a [lash_core_execution::store::plugin_writers::PluginWriterRegistration],
-    ) -> lash_core_execution::store::PluginWriterRangesFuture<'a> {
+        registrations: &'a [lash_core_store::store::plugin_writers::PluginWriterRegistration],
+    ) -> lash_core_store::store::PluginWriterRangesFuture<'a> {
         let registrations = registrations.to_vec();
         Box::pin(async move {
             self.conn

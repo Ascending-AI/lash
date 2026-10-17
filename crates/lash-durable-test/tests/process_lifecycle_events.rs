@@ -22,8 +22,8 @@ mod sim;
 use std::sync::{Arc, Mutex};
 use std::time::Duration;
 
-use lash_core::ProcessEventLogTestSupport as _;
-use lash_core_execution::StoreSet;
+use lash_execution_contracts::backend::StoreSet;
+use lash_execution_contracts::process::ProcessEventLogTestSupport as _;
 
 /// The law `$law(tier)` on SQLite in memory and PostgreSQL; the PostgreSQL
 /// leg runs when the run is handed a server.
@@ -161,50 +161,62 @@ const KIND: &str = "lifecycle-events-engine";
 
 /// How the scripted engine answers each event: its state is a JSON value it
 /// rewrites in place.
-type Advance = fn(&mut serde_json::Value, lash_core::EngineEvent) -> lash_core::EngineAction;
+type Advance = fn(
+    &mut serde_json::Value,
+    lash_execution_contracts::process::EngineEvent,
+) -> lash_execution_contracts::process::EngineAction;
 
 struct ScriptEngine {
     advance: Advance,
     refuse_at: Option<u64>,
 }
 
-fn infra(error: impl std::fmt::Display) -> lash_core::ProcessInfraError {
-    lash_core::ProcessInfraError::new(lash_core::PluginError::Session(error.to_string()))
+fn infra(error: impl std::fmt::Display) -> lash_execution_contracts::process::ProcessInfraError {
+    lash_execution_contracts::process::ProcessInfraError::new(
+        lash_execution_contracts::plugin_error::PluginError::Session(error.to_string()),
+    )
 }
 
-fn answer(value: serde_json::Value) -> lash_core::EngineAction {
-    lash_core::EngineAction::Terminal(lash_core::ProcessOutcome::from_tool_output(
-        lash_core::ToolCallOutput::success(value),
-    ))
-}
-
-fn cancelled(origin: lash_protocol_types::CancelOrigin) -> lash_core::EngineAction {
-    lash_core::EngineAction::Terminal(lash_core::ProcessOutcome::from_tool_output(
-        lash_core::ToolCallOutput::cancelled(
-            lash_core::ToolCancellation::runtime("the scripted engine answered its cancel")
-                .with_origin(origin),
+fn answer(value: serde_json::Value) -> lash_execution_contracts::process::EngineAction {
+    lash_execution_contracts::process::EngineAction::Terminal(
+        lash_execution_contracts::process::ProcessOutcome::from_tool_output(
+            lash_core::ToolCallOutput::success(value),
         ),
-    ))
+    )
+}
+
+fn cancelled(
+    origin: lash_protocol_types::CancelOrigin,
+) -> lash_execution_contracts::process::EngineAction {
+    lash_execution_contracts::process::EngineAction::Terminal(
+        lash_execution_contracts::process::ProcessOutcome::from_tool_output(
+            lash_core::ToolCallOutput::cancelled(
+                lash_core::ToolCancellation::runtime("the scripted engine answered its cancel")
+                    .with_origin(origin),
+            ),
+        ),
+    )
 }
 
 #[async_trait::async_trait]
-impl lash_core::ProcessEngine for ScriptEngine {
+impl lash_execution_contracts::process::ProcessEngine for ScriptEngine {
     fn settled_ran(
         &self,
-        _kind: &lash_core::EngineStepKind,
+        _kind: &lash_execution_contracts::process::EngineStepKind,
         _output: &lash_core_store::tool_run::SettledOutput,
     ) -> Vec<(u32, u64)> {
         Vec::new()
     }
 
-    fn trace_class(&self) -> lash_core::ProcessTraceClass {
-        lash_core::ProcessTraceClass::Internal
+    fn trace_class(&self) -> lash_execution_contracts::process::ProcessTraceClass {
+        lash_execution_contracts::process::ProcessTraceClass::Internal
     }
 
     async fn performed_effects(
         &self,
         _payload: &serde_json::Value,
-    ) -> Result<lash_core::PerformedEffects, lash_core::ProcessEnvRefusal> {
+    ) -> Result<lash_execution_contracts::process::PerformedEffects, lash_core::ProcessEnvRefusal>
+    {
         Ok(lash_core_execution::testing::performs(
             &[write_definition()],
         ))
@@ -212,21 +224,23 @@ impl lash_core::ProcessEngine for ScriptEngine {
 
     async fn check_args(
         &self,
-        _signature: &lash_core_execution::ProcessSignature,
+        _signature: &lash_execution_contracts::process::ProcessSignature,
         _args: &serde_json::Map<String, serde_json::Value>,
-        _mode: lash_core_execution::ArgsMode,
-    ) -> std::result::Result<(), lash_core_execution::ArgsMismatch> {
-        Err(lash_core_execution::ArgsMismatch::UnsupportedSignature {
-            engine_kind: self.kind().into(),
-        })
+        _mode: lash_execution_contracts::process::ArgsMode,
+    ) -> std::result::Result<(), lash_execution_contracts::process::ArgsMismatch> {
+        Err(
+            lash_execution_contracts::process::ArgsMismatch::UnsupportedSignature {
+                engine_kind: self.kind().into(),
+            },
+        )
     }
 
     fn kind(&self) -> &'static str {
         KIND
     }
 
-    fn state_format(&self) -> lash_core::EngineStateFormat {
-        lash_core::EngineStateFormat {
+    fn state_format(&self) -> lash_execution_contracts::process::EngineStateFormat {
+        lash_execution_contracts::process::EngineStateFormat {
             kind: KIND.to_owned(),
             version: 0,
         }
@@ -246,30 +260,40 @@ impl lash_core::ProcessEngine for ScriptEngine {
     fn check_settings(
         &self,
         _payload: &serde_json::Value,
-        settings: Option<&lash_core::EngineSettings>,
-    ) -> std::result::Result<(), lash_core::PluginError> {
+        settings: Option<&lash_execution_contracts::process::EngineSettings>,
+    ) -> std::result::Result<(), lash_execution_contracts::plugin_error::PluginError> {
         match settings {
             None => Ok(()),
-            Some(_) => Err(lash_core::PluginError::Registration(format!(
-                "process engine `{}` takes no settings",
-                self.kind()
-            ))),
+            Some(_) => Err(
+                lash_execution_contracts::plugin_error::PluginError::Registration(format!(
+                    "process engine `{}` takes no settings",
+                    self.kind()
+                )),
+            ),
         }
     }
 
     fn default_settings(
         &self,
         _payload: &serde_json::Value,
-    ) -> std::result::Result<Option<lash_core::EngineSettings>, lash_core::PluginError> {
+    ) -> std::result::Result<
+        Option<lash_execution_contracts::process::EngineSettings>,
+        lash_execution_contracts::plugin_error::PluginError,
+    > {
         Ok(None)
     }
 
     fn advance(
         &self,
-        state: lash_core::EngineState,
-        event: lash_core::EngineEvent,
-    ) -> Result<(lash_core::EngineState, lash_core::EngineAction), lash_core::ProcessInfraError>
-    {
+        state: lash_execution_contracts::process::EngineState,
+        event: lash_execution_contracts::process::EngineEvent,
+    ) -> Result<
+        (
+            lash_execution_contracts::process::EngineState,
+            lash_execution_contracts::process::EngineAction,
+        ),
+        lash_execution_contracts::process::ProcessInfraError,
+    > {
         let mut script = if state.bytes.is_empty() {
             serde_json::Value::Null
         } else {
@@ -280,7 +304,7 @@ impl lash_core::ProcessEngine for ScriptEngine {
         }
         let action = (self.advance)(&mut script, event);
         Ok((
-            lash_core::EngineState {
+            lash_execution_contracts::process::EngineState {
                 format: self.state_format(),
                 bytes: serde_json::to_vec(&script).map_err(infra)?,
                 pages: None,
@@ -292,14 +316,15 @@ impl lash_core::ProcessEngine for ScriptEngine {
     fn start_artifacts(
         &self,
         _payload: &serde_json::Value,
-    ) -> Result<Vec<lash_core::ArtifactName>, lash_core::PluginError> {
+    ) -> Result<Vec<lash_core::ArtifactName>, lash_execution_contracts::plugin_error::PluginError>
+    {
         Ok(Vec::new())
     }
 
     async fn end_artifact_referrer(
         &self,
         _cleanup: &lash_core::ResolvedArtifactCleanup,
-    ) -> Result<(), lash_core::ArtifactStoreError> {
+    ) -> Result<(), lash_execution_contracts::module_artifacts::ArtifactStoreError> {
         Ok(())
     }
 
@@ -307,19 +332,26 @@ impl lash_core::ProcessEngine for ScriptEngine {
         &self,
         _claim: &lash_core::ReferrerClaim,
         artifact_ref: &str,
-    ) -> Result<(), lash_core::PluginError> {
-        Err(lash_core::PluginError::Session(format!(
-            "a scripted engine stores no artifact `{artifact_ref}`"
-        )))
+    ) -> Result<(), lash_execution_contracts::plugin_error::PluginError> {
+        Err(
+            lash_execution_contracts::plugin_error::PluginError::Session(format!(
+                "a scripted engine stores no artifact `{artifact_ref}`"
+            )),
+        )
     }
 
     async fn resolve(
         &self,
-        _reference: &lash_core::ProcessDefinitionRef,
-    ) -> Result<lash_core::ProcessDefinitionResolution, lash_core::ProcessDefinitionError> {
-        Ok(lash_core::ProcessDefinitionResolution::new(
-            lash_core::ProcessSignature::Unknown,
-        ))
+        _reference: &lash_execution_contracts::process::ProcessDefinitionRef,
+    ) -> Result<
+        lash_execution_contracts::process::ProcessDefinitionResolution,
+        lash_execution_contracts::process::ProcessDefinitionError,
+    > {
+        Ok(
+            lash_execution_contracts::process::ProcessDefinitionResolution::new(
+                lash_execution_contracts::process::ProcessSignature::Unknown,
+            ),
+        )
     }
 }
 
@@ -400,10 +432,14 @@ fn write_tool(world: &Arc<World>) -> Arc<dyn lash_core::ToolProvider> {
 }
 
 /// A write step for `x`, run for `site` when it names one.
-fn write(step: &str, x: u64, site: Option<(&str, u64)>) -> lash_core::EngineAction {
-    lash_core::EngineAction::Steps {
-        steps: vec![lash_core::StepRequest::Tool {
-            step: lash_core::StepName(step.to_owned()),
+fn write(
+    step: &str,
+    x: u64,
+    site: Option<(&str, u64)>,
+) -> lash_execution_contracts::process::EngineAction {
+    lash_execution_contracts::process::EngineAction::Steps {
+        steps: vec![lash_execution_contracts::process::StepRequest::Tool {
+            step: lash_execution_contracts::process::StepName(step.to_owned()),
             effect: lash_core_execution::testing::effect_of(&write_definition()),
             input: serde_json::json!({ "x": x }),
             site: site.map(|(node_id, occurrence)| {
@@ -437,12 +473,12 @@ async fn start(core: &lash::LashCore) -> lash_core::ProcessId {
         .publish_process_env(&lash_core::HostArtifactPin::mint(), &environment())
         .await
         .expect("the environment is published");
-    let request = lash_core::ProcessStartRequest::engine(
+    let request = lash_execution_contracts::process::ProcessStartRequest::engine(
         KIND.to_owned(),
         serde_json::Value::Null,
-        lash_core::EngineLaunch::new(env_ref, None),
-        lash_core::ProcessOriginator::host(),
-        lash_core::LifetimeDecision::Detached,
+        lash_execution_contracts::process::EngineLaunch::new(env_ref, None),
+        lash_execution_contracts::process::ProcessOriginator::host(),
+        lash_execution_contracts::process::LifetimeDecision::Detached,
     );
     core.processes()
         .start(request, core.effect_host())
@@ -482,9 +518,11 @@ async fn ended_while_writing(core: &lash::LashCore, process: &lash_core::Process
     }
 }
 
-fn succeeded<E: std::fmt::Debug>(output: Result<lash_core::ProcessAwaitOutput, E>) {
+fn succeeded<E: std::fmt::Debug>(
+    output: Result<lash_execution_contracts::process::ProcessAwaitOutput, E>,
+) {
     let output = output.expect("the process's end is read");
-    let lash_core::ProcessAwaitOutput::Settled { output } = output else {
+    let lash_execution_contracts::process::ProcessAwaitOutput::Settled { output } = output else {
         panic!("the process ended without an answer: {output:?}");
     };
     assert!(output.is_success(), "the process failed: {output:?}");
@@ -535,31 +573,32 @@ fn node_site(n: u64) -> lash_protocol_types::EffectIdentity {
 /// then ends.
 fn effects_advance(
     state: &mut serde_json::Value,
-    event: lash_core::EngineEvent,
-) -> lash_core::EngineAction {
+    event: lash_execution_contracts::process::EngineEvent,
+) -> lash_execution_contracts::process::EngineAction {
     effects_advance_to(state, event, NODE_WRITES)
 }
 
 fn effects_advance_to(
     state: &mut serde_json::Value,
-    event: lash_core::EngineEvent,
+    event: lash_execution_contracts::process::EngineEvent,
     writes: u64,
-) -> lash_core::EngineAction {
+) -> lash_execution_contracts::process::EngineAction {
     let write_at = |n: u64| {
         // x=999 is the fixture's deliberate parked call. The large-cost
         // probe uses a disjoint input range and still executes every visit.
         let x = n + if writes > NODE_WRITES { 1001 } else { 1 };
         let mut action = write(&format!("write-{n}"), x, None);
-        if let lash_core::EngineAction::Steps { steps, .. } = &mut action
-            && let Some(lash_core::StepRequest::Tool { site, .. }) = steps.first_mut()
+        if let lash_execution_contracts::process::EngineAction::Steps { steps, .. } = &mut action
+            && let Some(lash_execution_contracts::process::StepRequest::Tool { site, .. }) =
+                steps.first_mut()
         {
             *site = Some(node_site(n));
         }
         action
     };
     match event {
-        lash_core::EngineEvent::Started { .. } => write_at(0),
-        lash_core::EngineEvent::StepSettled { .. } => {
+        lash_execution_contracts::process::EngineEvent::Started { .. } => write_at(0),
+        lash_execution_contracts::process::EngineEvent::StepSettled { .. } => {
             let settled = state.as_u64().unwrap_or(0) + 1;
             *state = serde_json::json!(settled);
             if settled < writes {
@@ -568,8 +607,10 @@ fn effects_advance_to(
                 answer(serde_json::json!("done"))
             }
         }
-        lash_core::EngineEvent::Cancelled { origin, .. } => cancelled(origin),
-        _ => lash_core::EngineAction::Idle,
+        lash_execution_contracts::process::EngineEvent::Cancelled { origin, .. } => {
+            cancelled(origin)
+        }
+        _ => lash_execution_contracts::process::EngineAction::Idle,
     }
 }
 
@@ -590,14 +631,19 @@ async fn each_committed_effect_is_one_effect_outcome_event(tier: Tier) {
 
     let events = log(&backend, &process).await;
     let fleet = lash_core::FleetFormat::current();
-    let outcomes: Vec<lash_core::ProcessEffectOccurrence> =
-        of_type(&events, lash_core::PROCESS_EFFECT_OUTCOME_EVENT_TYPE)
-            .into_iter()
-            .map(|event| {
-                lash_core::ProcessEffectOccurrence::decode(event.fact.payload(), fleet)
-                    .expect("an effect outcome decodes")
-            })
-            .collect();
+    let outcomes: Vec<lash_execution_contracts::process::ProcessEffectOccurrence> = of_type(
+        &events,
+        lash_execution_contracts::process::PROCESS_EFFECT_OUTCOME_EVENT_TYPE,
+    )
+    .into_iter()
+    .map(|event| {
+        lash_execution_contracts::process::ProcessEffectOccurrence::decode(
+            event.fact.payload(),
+            fleet,
+        )
+        .expect("an effect outcome decodes")
+    })
+    .collect();
     let recorded: Vec<lash_protocol_types::EffectIdentity> =
         outcomes.iter().map(|outcome| outcome.at.clone()).collect();
     let first_cap: Vec<_> = (0..64).map(node_site).collect();
@@ -612,15 +658,21 @@ async fn each_committed_effect_is_one_effect_outcome_event(tier: Tier) {
         );
         assert_eq!(
             outcome.outcome_class,
-            lash_core::ProcessEffectOutcomeClass::Success
+            lash_execution_contracts::process::ProcessEffectOutcomeClass::Success
         );
         assert!(outcome.code.is_none());
     }
 
-    let omissions = of_type(&events, lash_core::PROCESS_EFFECT_OMISSIONS_EVENT_TYPE);
+    let omissions = of_type(
+        &events,
+        lash_execution_contracts::process::PROCESS_EFFECT_OMISSIONS_EVENT_TYPE,
+    );
     assert_eq!(omissions.len(), 1, "one omissions record: {events:#?}");
-    let omitted = lash_core::ProcessEffectOmissions::decode(omissions[0].fact.payload(), fleet)
-        .expect("the omissions decode");
+    let omitted = lash_execution_contracts::process::ProcessEffectOmissions::decode(
+        omissions[0].fact.payload(),
+        fleet,
+    )
+    .expect("the omissions decode");
     let node = node_site(0).site.to_string();
     assert_eq!(omitted.occurrence_cap, 64);
     assert_eq!(omitted.nodes[&node].success, 36);
@@ -686,14 +738,14 @@ async fn sequential_effect_occurrences_decode_constant_facts_per_occurrence() {
     for count in [12_u64, 1000] {
         fn dozen(
             state: &mut serde_json::Value,
-            event: lash_core::EngineEvent,
-        ) -> lash_core::EngineAction {
+            event: lash_execution_contracts::process::EngineEvent,
+        ) -> lash_execution_contracts::process::EngineAction {
             effects_advance_to(state, event, 12)
         }
         fn thousand(
             state: &mut serde_json::Value,
-            event: lash_core::EngineEvent,
-        ) -> lash_core::EngineAction {
+            event: lash_execution_contracts::process::EngineEvent,
+        ) -> lash_execution_contracts::process::EngineAction {
             effects_advance_to(state, event, 1000)
         }
         let (stores, _keep) = stores(Tier::SqliteMemory).await;
@@ -761,7 +813,11 @@ async fn sequential_effect_occurrences_decode_constant_facts_per_occurrence() {
             .sum();
         let events = log(&backend, &process).await;
         assert_eq!(
-            of_type(&events, lash_core::PROCESS_EFFECT_OUTCOME_EVENT_TYPE).len() as u64,
+            of_type(
+                &events,
+                lash_execution_contracts::process::PROCESS_EFFECT_OUTCOME_EVENT_TYPE
+            )
+            .len() as u64,
             count
         );
         assert_eq!(world.writes.lock().unwrap().len() as u64, count);
@@ -811,10 +867,11 @@ async fn redrive_uses_the_recorded_64_cut_under_a_16_cut_host(tier: Tier) {
     tokio::time::timeout(Duration::from_secs(60), async {
         loop {
             let record = first.processes().get(&process).await.unwrap().unwrap();
-            if let lash_core::ProcessParkState::Parked(reason) = record.park {
+            if let lash_execution_contracts::process::ProcessParkState::Parked(reason) = record.park
+            {
                 assert!(matches!(
                     reason,
-                    lash_core::ProcessParkReason::AdvanceRefused { .. }
+                    lash_execution_contracts::park::ProcessParkReason::AdvanceRefused { .. }
                 ));
                 break;
             }
@@ -853,23 +910,29 @@ async fn redrive_uses_the_recorded_64_cut_under_a_16_cut_host(tier: Tier) {
 on_every_tier!(redrive_uses_the_recorded_64_cut_under_a_16_cut_host);
 
 fn assert_effect_cut(events: &[lash::process::ProcessEvent], cap: u64) {
-    let outcomes = of_type(events, lash_core::PROCESS_EFFECT_OUTCOME_EVENT_TYPE);
+    let outcomes = of_type(
+        events,
+        lash_execution_contracts::process::PROCESS_EFFECT_OUTCOME_EVENT_TYPE,
+    );
     let retained = NODE_WRITES.min(cap);
     assert_eq!(u64::try_from(outcomes.len()).unwrap(), retained);
     for (n, event) in outcomes.iter().enumerate() {
-        let outcome = lash_core::ProcessEffectOccurrence::decode(
+        let outcome = lash_execution_contracts::process::ProcessEffectOccurrence::decode(
             event.fact.payload(),
             lash_core::FleetFormat::current(),
         )
         .unwrap();
         assert_eq!(outcome.at, node_site(u64::try_from(n).unwrap()));
     }
-    let omissions = of_type(events, lash_core::PROCESS_EFFECT_OMISSIONS_EVENT_TYPE);
+    let omissions = of_type(
+        events,
+        lash_execution_contracts::process::PROCESS_EFFECT_OMISSIONS_EVENT_TYPE,
+    );
     if retained == NODE_WRITES {
         assert!(omissions.is_empty(), "all occurrences were retained");
     } else {
         assert_eq!(omissions.len(), 1);
-        let omitted = lash_core::ProcessEffectOmissions::decode(
+        let omitted = lash_execution_contracts::process::ProcessEffectOmissions::decode(
             omissions[0].fact.payload(),
             lash_core::FleetFormat::current(),
         )
@@ -892,16 +955,22 @@ fn assert_effect_cut(events: &[lash::process::ProcessEvent], cap: u64) {
 async fn process_effects_name_their_tool_call_records_after_a_sqlite_reopen() {
     fn advance(
         state: &mut serde_json::Value,
-        event: lash_core::EngineEvent,
-    ) -> lash_core::EngineAction {
+        event: lash_execution_contracts::process::EngineEvent,
+    ) -> lash_execution_contracts::process::EngineAction {
         match event {
-            lash_core::EngineEvent::Started { .. } => write("first", 1, Some((NODE, 1))),
-            lash_core::EngineEvent::StepSettled { .. } if state.is_null() => {
+            lash_execution_contracts::process::EngineEvent::Started { .. } => {
+                write("first", 1, Some((NODE, 1)))
+            }
+            lash_execution_contracts::process::EngineEvent::StepSettled { .. }
+                if state.is_null() =>
+            {
                 *state = serde_json::json!("first");
                 write("second", 2, Some((NODE, 2)))
             }
-            lash_core::EngineEvent::StepSettled { .. } => answer(serde_json::json!("done")),
-            _ => lash_core::EngineAction::Idle,
+            lash_execution_contracts::process::EngineEvent::StepSettled { .. } => {
+                answer(serde_json::json!("done"))
+            }
+            _ => lash_execution_contracts::process::EngineAction::Idle,
         }
     }
     let directory = tempfile::tempdir().expect("a SQLite file directory");
@@ -932,7 +1001,10 @@ async fn process_effects_name_their_tool_call_records_after_a_sqlite_reopen() {
     );
     let (backend, core) = core(&stores, advance, &world, "after-reopen");
     let events = log(&backend, &process).await;
-    let outcomes = of_type(&events, lash_core::PROCESS_EFFECT_OUTCOME_EVENT_TYPE);
+    let outcomes = of_type(
+        &events,
+        lash_execution_contracts::process::PROCESS_EFFECT_OUTCOME_EVENT_TYPE,
+    );
     assert_eq!(
         outcomes.len(),
         2,
@@ -941,7 +1013,7 @@ async fn process_effects_name_their_tool_call_records_after_a_sqlite_reopen() {
     let executed = world.calls.lock().unwrap().clone();
     assert_eq!(executed.len(), 2);
     for (index, (event, expected)) in outcomes.iter().zip(&executed).enumerate() {
-        let occurrence = lash_core::ProcessEffectOccurrence::decode(
+        let occurrence = lash_execution_contracts::process::ProcessEffectOccurrence::decode(
             event.fact.payload(),
             lash_core::FleetFormat::current(),
         )
@@ -987,8 +1059,8 @@ impl lash_core_execution::runtime::process::steps::ProcessSteps for NoSteps {
     async fn admit(
         &self,
         _runtime: &Arc<lash_core_execution::runtime::process::StepRuntime>,
-        _process: &lash_core::ProcessRecord,
-        step: &lash_core::StepRequest,
+        _process: &lash_execution_contracts::process::ProcessRecord,
+        step: &lash_execution_contracts::process::StepRequest,
         _now_ms: u64,
     ) -> Result<
         lash_core_execution::runtime::process::steps::StepAdmission,
@@ -1007,8 +1079,8 @@ impl lash_core_execution::runtime::process::steps::ProcessSteps for NoSteps {
     /// Never asked: no step of these parks.
     fn resolved(
         &self,
-        _process: &lash_core::ProcessRecord,
-        _step: &lash_core::StepRequest,
+        _process: &lash_execution_contracts::process::ProcessRecord,
+        _step: &lash_execution_contracts::process::StepRequest,
         _execution: &lash_core_execution::runtime::actor::round::AdmittedExecution,
         _parked: &lash_core_store::tool_run::Material<lash_core_store::tool_run::CompletionSource>,
         _resolution: lash_core_execution::runtime::actor::waits::Resolution,
@@ -1019,8 +1091,8 @@ impl lash_core_execution::runtime::process::steps::ProcessSteps for NoSteps {
     fn body(
         &self,
         _runtime: &Arc<lash_core_execution::runtime::process::StepRuntime>,
-        _process: &lash_core::ProcessRecord,
-        step: &lash_core::StepRequest,
+        _process: &lash_execution_contracts::process::ProcessRecord,
+        step: &lash_execution_contracts::process::StepRequest,
         _execution: &lash_core_execution::runtime::actor::round::AdmittedExecution,
     ) -> lash_core_execution::runtime::actor::round::MemberBody {
         unreachable!("no step of `{}` is ever admitted", step.step().0)
@@ -1036,28 +1108,33 @@ const STEPS: usize = 400;
 /// watched registry; the nodes' own writes go through the fault script.
 struct Fleet {
     clock: Arc<lash_durable_test::SimClock>,
-    backend: lash_core_execution::Backend,
+    backend: lash_execution_contracts::backend::Backend,
     nodes: lash_durable_test::SimNodes,
 }
 
 impl Fleet {
     async fn new(
         script: lash_durable_test::Script,
-        advance: fn(&mut serde_json::Value, lash_core::EngineEvent) -> lash_core::EngineAction,
+        advance: fn(
+            &mut serde_json::Value,
+            lash_execution_contracts::process::EngineEvent,
+        ) -> lash_execution_contracts::process::EngineAction,
     ) -> Self {
         let clock = lash_durable_test::SimClock::new();
         let stores = sim::memory(Arc::clone(&clock)).await;
         let database: Arc<dyn lash_durable::DurableStore> = Arc::new(stores.durable_store());
-        let backend = lash_core_execution::Backend::assemble(lash_core_execution::BackendParts {
-            stores: Arc::new(stores),
-            settings: lash_core_execution::DurableSettings::default(),
-            engines: vec![Arc::new(ScriptEngine {
-                advance,
-                refuse_at: None,
-            })],
-            providers: Arc::new(lash_core_execution::NoProjectionProviders),
-            formats: Vec::new(),
-        })
+        let backend = lash_execution_contracts::backend::Backend::assemble(
+            lash_execution_contracts::backend::BackendParts {
+                stores: Arc::new(stores),
+                settings: lash_core_execution::DurableSettings::default(),
+                engines: vec![Arc::new(ScriptEngine {
+                    advance,
+                    refuse_at: None,
+                })],
+                providers: Arc::new(lash_execution_contracts::projection::NoProjectionProviders),
+                formats: Vec::new(),
+            },
+        )
         .expect("the fleet's backend assembles");
         let nodes = lash_durable_test::SimNodes::new(
             database,
@@ -1079,7 +1156,7 @@ impl Fleet {
     }
 
     fn activation(
-        backend: &lash_core_execution::Backend,
+        backend: &lash_execution_contracts::backend::Backend,
         watched: Option<&lash_core_execution::WatchedRegistry>,
     ) -> Arc<dyn lash_durable::runner::Activation> {
         let activation = lash_core_execution::runtime::actor::process::ProcessActivation::new(
@@ -1098,7 +1175,7 @@ impl Fleet {
     fn host(
         &self,
         node: &str,
-        inner: Arc<dyn lash_core::ProcessRegistry>,
+        inner: Arc<dyn lash_execution_contracts::process::ProcessRegistry>,
         heard: &Heard,
     ) -> (lash_core_execution::WatchedRegistry, impl Send + Sync) {
         let watched = lash_core_execution::runtime::watch_process_registry(inner);
@@ -1110,17 +1187,17 @@ impl Fleet {
 
     /// Register a detached process of the scripted engine.
     async fn register(&self) -> lash_core::ProcessId {
-        let registration = lash_core::ProcessRegistration::new(
-            lash_core::ProcessInput::Engine {
+        let registration = lash_execution_contracts::process::ProcessRegistration::new(
+            lash_execution_contracts::process::ProcessInput::Engine {
                 kind: KIND.to_owned(),
                 payload: serde_json::Value::Null,
-                launch: lash_core::EngineLaunch::new(
-                    lash_core_execution::testing::process_execution_env_fixture_ref(),
+                launch: lash_execution_contracts::process::EngineLaunch::new(
+                    lash_execution_contracts::testing::process_execution_env_fixture_ref(),
                     None,
                 ),
             },
-            lash_core::ProcessProvenance::host(),
-            lash_core::LifetimeDecision::Detached,
+            lash_execution_contracts::process::ProcessProvenance::host(),
+            lash_execution_contracts::process::LifetimeDecision::Detached,
         );
         self.backend
             .process_registry()
@@ -1338,13 +1415,19 @@ async fn a_takeover_after_a_cut_between_commit_and_publish_delivers_the_dead_own
 // FIG-5411: a deferred call has one waiting transition and resolution resumes it.
 fn deferred_advance(
     _: &mut serde_json::Value,
-    event: lash_core::EngineEvent,
-) -> lash_core::EngineAction {
+    event: lash_execution_contracts::process::EngineEvent,
+) -> lash_execution_contracts::process::EngineAction {
     match event {
-        lash_core::EngineEvent::Started { .. } => write("deferred", 999, None),
-        lash_core::EngineEvent::StepSettled { .. } => answer(serde_json::json!("done")),
-        lash_core::EngineEvent::Cancelled { origin, .. } => cancelled(origin),
-        _ => lash_core::EngineAction::Idle,
+        lash_execution_contracts::process::EngineEvent::Started { .. } => {
+            write("deferred", 999, None)
+        }
+        lash_execution_contracts::process::EngineEvent::StepSettled { .. } => {
+            answer(serde_json::json!("done"))
+        }
+        lash_execution_contracts::process::EngineEvent::Cancelled { origin, .. } => {
+            cancelled(origin)
+        }
+        _ => lash_execution_contracts::process::EngineAction::Idle,
     }
 }
 
@@ -1529,17 +1612,19 @@ on_every_tier!(a_deferred_call_survives_takeover);
 
 fn publication_idle(
     _state: &mut serde_json::Value,
-    event: lash_core::EngineEvent,
-) -> lash_core::EngineAction {
+    event: lash_execution_contracts::process::EngineEvent,
+) -> lash_execution_contracts::process::EngineAction {
     match event {
-        lash_core::EngineEvent::Cancelled { origin, .. } => cancelled(origin),
-        _ => lash_core::EngineAction::Idle,
+        lash_execution_contracts::process::EngineEvent::Cancelled { origin, .. } => {
+            cancelled(origin)
+        }
+        _ => lash_execution_contracts::process::EngineAction::Idle,
     }
 }
 
 fn publication_terminal(
     _state: &mut serde_json::Value,
-    _event: lash_core::EngineEvent,
-) -> lash_core::EngineAction {
+    _event: lash_execution_contracts::process::EngineEvent,
+) -> lash_execution_contracts::process::EngineAction {
     answer(serde_json::json!("done"))
 }

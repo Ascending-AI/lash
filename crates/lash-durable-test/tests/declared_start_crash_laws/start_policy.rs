@@ -20,10 +20,12 @@ const STATED_CHARGE: u64 = 5_000_000;
 
 /// The node's `defaults` with [`STATED_CHARGE`]: what the counting policy
 /// states for an engine that takes settings.
-fn stated_settings(defaults: lash_core::EngineSettings) -> lash_core::EngineSettings {
+fn stated_settings(
+    defaults: lash_execution_contracts::process::EngineSettings,
+) -> lash_execution_contracts::process::EngineSettings {
     let mut value = defaults.into_value();
     value["charge"] = serde_json::json!(STATED_CHARGE);
-    lash_core::EngineSettings::new(value)
+    lash_execution_contracts::process::EngineSettings::new(value)
 }
 
 /// What the counting policy states.
@@ -187,7 +189,9 @@ fn core_over(
         .serve_test_llm_profile(served::model(Arc::clone(scripts)), served::metadata())
         .plugin(Arc::new(
             lash::process_controls::SessionProcessAdminPluginFactory::new(
-                |_: &lash_core::StartCx| lash_core::Lifetime::Detached,
+                |_: &lash_execution_contracts::process::StartCx| {
+                    lash_execution_contracts::process::Lifetime::Detached
+                },
                 policy,
             ),
         ))
@@ -239,8 +243,8 @@ impl Deployment {
         );
         let pin = lash_core::HostArtifactPin::mint();
         if bounds.is_none() {
-            let draft = lash_core::ProcessDefinitionDraft::new(
-                lash_core_execution::testing::HELD_PROCESS_ENGINE_KIND,
+            let draft = lash_execution_contracts::process::ProcessDefinitionDraft::new(
+                lash_execution_contracts::testing::HELD_PROCESS_ENGINE_KIND,
                 serde_json::json!({ "fixture": "start-policy-once" }),
                 [],
             )
@@ -410,7 +414,9 @@ async fn a_start_policy_runs_once_per_committed_declaration() {
     let [child] = children.as_slice() else {
         panic!("one child: {children:#?}");
     };
-    let lash_core::ProcessInput::Engine { kind, payload, .. } = child.input.as_ref() else {
+    let lash_execution_contracts::process::ProcessInput::Engine { kind, payload, .. } =
+        child.input.as_ref()
+    else {
         panic!("a code mode closure is an engine start: {child:#?}");
     };
     let defaults = |core: &lash::LashCore| {

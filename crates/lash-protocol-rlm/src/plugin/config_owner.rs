@@ -25,10 +25,12 @@
 
 use lash_core::TerminationMode;
 use lash_core::facade_support::JsonSchema;
-use lash_core::plugin::{
-    CandidateFacts, ConfigCommand, ConfigOwner, ConfigRegistrar, ConfigRegistrationError,
-    OwnerChange,
-};
+use lash_core::plugin::CandidateFacts;
+use lash_core::plugin::ConfigCommand;
+use lash_core::plugin::ConfigOwner;
+use lash_core::plugin::ConfigRegistrar;
+use lash_core::plugin::OwnerChange;
+use lash_execution_contracts::config_error::ConfigRegistrationError;
 use lash_render::RenderParamsPatch;
 use lash_rlm_types::{RlmCreateExtras, RlmRenderPatch, RlmTurnOptions};
 

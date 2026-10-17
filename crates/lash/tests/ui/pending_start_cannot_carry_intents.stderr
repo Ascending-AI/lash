@@ -1,30 +1,30 @@
 error[E0308]: mismatched types
- --> tests/ui/pending_start_cannot_carry_intents.rs:7:53
+ --> tests/ui/pending_start_cannot_carry_intents.rs:9:47
   |
-7 |     let _from_intents = DeclaredStart::new(context, ToolIntents::default());
-  |                         ------------------          ^^^^^^^^^^^^^^^^^^^^^^ expected `StartProcessIntent`, found `ToolIntents`
-  |                         |
-  |                         arguments to this function are incorrect
+9 |     let _from_intents = context.declare_start(ToolIntents::default());
+  |                                 ------------- ^^^^^^^^^^^^^^^^^^^^^^ expected `StartProcessIntent`, found `ToolIntents`
+  |                                 |
+  |                                 arguments to this method are incorrect
   |
-note: associated function defined here
- --> $WORKSPACE/crates/lash-core-execution/src/tool_result.rs
+note: method defined here
+ --> $WORKSPACE/crates/lash-core-execution/src/tool_provider/live.rs
   |
-  |     pub fn new(
-  |            ^^^
+  |     pub fn declare_start(
+  |            ^^^^^^^^^^^^^
 
-error[E0061]: this function takes 2 arguments but 3 arguments were supplied
- --> tests/ui/pending_start_cannot_carry_intents.rs:8:23
-  |
-8 |     let _two_starts = DeclaredStart::new(context, first, second);
-  |                       ^^^^^^^^^^^^^^^^^^                 ------ unexpected argument #3 of type `StartProcessIntent`
-  |
-note: associated function defined here
- --> $WORKSPACE/crates/lash-core-execution/src/tool_result.rs
-  |
-  |     pub fn new(
-  |            ^^^
+error[E0061]: this method takes 1 argument but 2 arguments were supplied
+  --> tests/ui/pending_start_cannot_carry_intents.rs:10:31
+   |
+10 |     let _two_starts = context.declare_start(first, second);
+   |                               ^^^^^^^^^^^^^        ------ unexpected argument #2 of type `StartProcessIntent`
+   |
+note: method defined here
+  --> $WORKSPACE/crates/lash-core-execution/src/tool_provider/live.rs
+   |
+   |     pub fn declare_start(
+   |            ^^^^^^^^^^^^^
 help: remove the extra argument
-  |
-8 -     let _two_starts = DeclaredStart::new(context, first, second);
-8 +     let _two_starts = DeclaredStart::new(context, first);
-  |
+   |
+10 -     let _two_starts = context.declare_start(first, second);
+10 +     let _two_starts = context.declare_start(first);
+   |

@@ -10,16 +10,22 @@
 use std::collections::BTreeMap;
 use std::sync::Arc;
 
-use lash_core_execution::compat::{CompatRefusal, VersionRange};
-use lash_core_execution::store::RuntimeCommit;
-use lash_core_execution::store::plugin_writers::PluginWriterRegistration;
 use lash_core_execution::testing::store_fixtures::{
     commit_runtime_state_for_test, root_session_request,
 };
-use lash_core_execution::{
-    FormatNamespace, FormatVersion, PluginNamespaceState, PluginState, ProcessEnvStore as _,
-    RuntimeSessionState, RuntimeStore, SessionId, StoreError,
-};
+use lash_core_store::compat::CompatRefusal;
+use lash_core_store::compat::VersionRange;
+use lash_core_store::plugin_state::FormatNamespace;
+use lash_core_store::plugin_state::FormatVersion;
+use lash_core_store::plugin_state::PluginNamespaceState;
+use lash_core_store::plugin_state::PluginState;
+use lash_core_store::session_state::RuntimeSessionState;
+use lash_core_store::store::RuntimeCommit;
+use lash_core_store::store::RuntimeStore;
+use lash_core_store::store::StoreError;
+use lash_core_store::store::plugin_writers::PluginWriterRegistration;
+use lash_execution_contracts::process::ProcessEnvStore as _;
+use lash_protocol_types::SessionId;
 
 use crate::PostgresStorage;
 use crate::testing::IsolatedDatabase;
@@ -66,7 +72,10 @@ async fn fleet(database: &IsolatedDatabase) -> (PostgresStorage, PostgresStorage
             .expect("connect for the expand");
         crate::migrate::expand_for_testing(
             &pool,
-            &crate::guarded_tx::WriterFence::new(NEXT, lash_core_execution::FleetFormat::current()),
+            &crate::guarded_tx::WriterFence::new(
+                NEXT,
+                lash_core_store::store::FleetFormat::current(),
+            ),
         )
         .await
         .expect("N+1 expands the store");
@@ -116,10 +125,10 @@ async fn published(storage: &PostgresStorage) -> (i64, i64, i64, Vec<(String, St
 
 fn state(session_id: &str) -> RuntimeSessionState {
     RuntimeSessionState {
-        session_id: lash_core_execution::SessionId::fixture(session_id),
-        ..RuntimeSessionState::fixture(lash_core_execution::SessionPolicy::new(
-            lash_core_execution::TurnBudget::Unbounded,
-            lash_core_execution::MaxToolCalls::new(1024),
+        session_id: lash_protocol_types::SessionId::fixture(session_id),
+        ..RuntimeSessionState::fixture(lash_core_store::session_policy::SessionPolicy::new(
+            lash_protocol_types::session_model::TurnBudget::Unbounded,
+            lash_protocol_types::session_model::MaxToolCalls::new(1024),
             lash_core::NoProgressBudget::bounded(12),
         ))
     }
@@ -202,35 +211,35 @@ fn outside_for(
 }
 
 async fn publish_env(storage: &PostgresStorage, format: u32) -> Result<(), StoreError> {
-    let bytes =
-        lash_core_execution::ProcessEnv::builder(lash_core_execution::MaxToolCalls::new(1024))
-            .component(
-                lash_core_execution::ProcessConfigKey::<serde_json::Value>::new(
-                    PLUGIN,
-                    version(format),
-                ),
-                &serde_json::json!({"count": 1}),
-            )
-            .build()
-            .expect("the environment builds")
-            .to_store_bytes()
-            .expect("encode the environment");
+    let bytes = lash_core_store::process_env::ProcessEnv::builder(
+        lash_protocol_types::session_model::MaxToolCalls::new(1024),
+    )
+    .component(
+        lash_core_store::process_env::ProcessConfigKey::<serde_json::Value>::new(
+            PLUGIN,
+            version(format),
+        ),
+        &serde_json::json!({"count": 1}),
+    )
+    .build()
+    .expect("the environment builds")
+    .to_store_bytes()
+    .expect("encode the environment");
     let env_ref = lash_core_execution::process_env_ref_for_bytes(&bytes);
-    let claim =
-        lash_core_execution::ReferrerClaim::unguarded(
-            lash_core_execution::ArtifactReferrer::HostPin(
-                lash_core_execution::HostArtifactPin::mint(),
-            ),
-        )
-        .expect("host pin claim");
+    let claim = lash_core_store::artifact_referrer::ReferrerClaim::unguarded(
+        lash_core_store::artifact_referrer::ArtifactReferrer::HostPin(
+            lash_core_store::artifact_referrer::HostArtifactPin::mint(),
+        ),
+    )
+    .expect("host pin claim");
     storage
         .process_env_store()
         .publish_process_env(&claim, &env_ref, &bytes)
         .await
         .map_err(|error| match error {
-            lash_core_execution::ArtifactStoreError::Incompatible { refusal } => {
-                StoreError::Incompatible { refusal }
-            }
+            lash_execution_contracts::module_artifacts::ArtifactStoreError::Incompatible {
+                refusal,
+            } => StoreError::Incompatible { refusal },
             other => StoreError::Backend(other.to_string()),
         })
 }
@@ -432,16 +441,15 @@ async fn provisioning_records_a_registered_plugin_once() {
 async fn hold_native_two(
     storage: &PostgresStorage,
     component: &'static str,
-) -> Result<lash_core_execution::ProcessEnvRef, lash_core_execution::HoldEnvError> {
+) -> Result<lash_core_store::process_identity::ProcessEnvRef, lash_core_execution::HoldEnvError> {
     let registry = lash_core_execution::testing::native_format_two_component(component);
     let env = lash_core_execution::testing::component_env(component, version(2));
-    let claim =
-        lash_core_execution::ReferrerClaim::unguarded(
-            lash_core_execution::ArtifactReferrer::HostPin(
-                lash_core_execution::HostArtifactPin::mint(),
-            ),
-        )
-        .expect("host pin claim");
+    let claim = lash_core_store::artifact_referrer::ReferrerClaim::unguarded(
+        lash_core_store::artifact_referrer::ArtifactReferrer::HostPin(
+            lash_core_store::artifact_referrer::HostArtifactPin::mint(),
+        ),
+    )
+    .expect("host pin claim");
     let env_store = storage.process_env_store();
     lash_core_execution::hold_process_env(
         &lash_core_execution::ProcessEnvPorts::admitting(&env_store, &registry),
@@ -482,7 +490,7 @@ async fn a_component_publishes_its_native_config_format_only_on_a_finalized_flee
         matches!(
             &refused,
             lash_core_execution::HoldEnvError::Refused(
-                lash_core_execution::ProcessEnvRefusal::ConfigWriterOutsideFleetRange { id, format: 2 }
+                lash_core_store::process_env::ProcessEnvRefusal::ConfigWriterOutsideFleetRange { id, format: 2 }
             ) if id == "window-two"
         ),
         "{refused:?}"

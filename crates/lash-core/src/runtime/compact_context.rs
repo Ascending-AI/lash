@@ -215,7 +215,11 @@ impl LashRuntime {
             .await
         {
             Ok(opened) => opened,
-            Err(error) => return CompactionRun::failure(crate::PluginError::Runtime(error).into()),
+            Err(error) => {
+                return CompactionRun::failure(
+                    lash_execution_contracts::plugin_error::PluginError::Runtime(error).into(),
+                );
+            }
         };
         if !opened.result.opened {
             return Ok(CompactionRun::NothingToCompact);

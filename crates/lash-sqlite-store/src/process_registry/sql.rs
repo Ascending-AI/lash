@@ -9,7 +9,7 @@
 
 use std::sync::LazyLock;
 
-use lash_core_execution::store_backend_support as vocabulary;
+use lash_core_store::store_backend_support as vocabulary;
 use lash_store_sql::process::{
     abandoned_consumer_holds::AbandonedConsumerHoldStatements,
     event_horizons::EventHorizonStatements, events::EventStatements, observers::ObserverStatements,
@@ -20,7 +20,7 @@ use lash_store_sql::{Dialect, Vocabulary, VocabularyTerm};
 
 /// The process family's domain vocabulary, as this backend supplies it.
 ///
-/// Every expansion is generated from `lash_core_execution::ProcessStatus`, so
+/// Every expansion is generated from `lash_execution_contracts::process::ProcessStatus`, so
 /// adding a variant is still one edit in the enum rather than one per
 /// statement. The term names are the domain's and
 /// are identical in the PostgreSQL store.
@@ -618,7 +618,7 @@ pub(crate) fn process_sql() -> &'static ProcessSql {
 /// than a template with a hole. Choosing the statement and pushing the values
 /// in one place is what keeps a clause and the parameter it reads together.
 pub(crate) fn roster_query(
-    filter: &lash_core_execution::ProcessListFilter,
+    filter: &lash_execution_contracts::process::ProcessListFilter,
     status: Option<String>,
     definition: Option<String>,
     after: Option<&str>,
@@ -658,8 +658,10 @@ pub(crate) fn roster_query(
     }
 
     let (kind, frame) = match &filter.originator {
-        Some(lash_core_execution::ProcessOriginatorFilter::Host { .. }) => (Some("host"), None),
-        Some(lash_core_execution::ProcessOriginatorFilter::Session(scope)) => (
+        Some(lash_execution_contracts::process::ProcessOriginatorFilter::Host { .. }) => {
+            (Some("host"), None)
+        }
+        Some(lash_execution_contracts::process::ProcessOriginatorFilter::Session(scope)) => (
             Some("session"),
             scope.agent_frame_id.as_ref().map(|id| id.as_str()),
         ),

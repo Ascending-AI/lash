@@ -11,7 +11,9 @@
 
 use std::time::Duration;
 
-use lash_core_execution::{StorePreflight, StoreSchemaOutcome, StoreSchemaVerdict};
+use lash_core_store::store::StorePreflight;
+use lash_core_store::store::StoreSchemaOutcome;
+use lash_core_store::store::StoreSchemaVerdict;
 
 use super::{SqliteStorePreflight, verify_schema_at};
 use crate::{SqliteConnectionPolicy, SqliteStore, StoreOptions};
@@ -73,7 +75,7 @@ async fn durable_core_generation_43_is_refused_at_the_blake3_boundary() {
     // refuse that retired stamp rather than running the deleted 43-to-44
     // upgrade. The reported target belongs to the opening build's tier.
     let descriptor =
-        lash_core_execution::compat::descriptor(crate::schema::COMPONENT).expect("core descriptor");
+        lash_core_store::compat::descriptor(crate::schema::COMPONENT).expect("core descriptor");
     assert_eq!(expected, i64::from(descriptor.writes.max()));
 
     stamp_compat(&path, 43, 43);
@@ -81,9 +83,9 @@ async fn durable_core_generation_43_is_refused_at_the_blake3_boundary() {
     let found = verify_schema_at(&path).await;
     // Which side of the build's range 43 falls on is the admission rule's
     // to say; either way the stamp is refused typed.
-    let refusal = lash_core_execution::compat::admit(
+    let refusal = lash_core_store::compat::admit(
         descriptor,
-        lash_core_execution::compat::StampRead::Present(lash_core_execution::compat::CompatStamp {
+        lash_core_store::compat::StampRead::Present(lash_core_store::compat::CompatStamp {
             version: 43,
             min_reader: 43,
         }),
@@ -104,7 +106,7 @@ async fn preflight_answers_while_another_connection_holds_the_write_lock() {
     SqliteStore::open_file_for_testing(&path)
         .await
         .expect("provision the database");
-    let above = lash_core_execution::compat::descriptor(crate::schema::COMPONENT)
+    let above = lash_core_store::compat::descriptor(crate::schema::COMPONENT)
         .expect("core descriptor")
         .reads
         .max()
@@ -139,7 +141,7 @@ async fn preflight_answers_while_another_connection_holds_the_write_lock() {
     assert!(matches!(
         answered.verdict,
         StoreSchemaVerdict::Refused {
-            refusal: lash_core_execution::compat::CompatRefusal::ReaderFloorAbove { found, .. }
+            refusal: lash_core_store::compat::CompatRefusal::ReaderFloorAbove { found, .. }
         } if found == above
     ));
 
@@ -252,9 +254,11 @@ fn stamp_compat(path: &std::path::Path, version: i64, min_reader: i64) {
 /// two properties that make the answer usable: an item nobody can read is still
 /// an item, and a surface nobody read is never an empty one.
 mod walk {
-    use lash_core_execution::{
-        DurablePayload, DurableScan, DurableSurface, ScanCoverage, StorePreflight,
-    };
+    use lash_core_store::store::DurablePayload;
+    use lash_core_store::store::DurableScan;
+    use lash_core_store::store::DurableSurface;
+    use lash_core_store::store::ScanCoverage;
+    use lash_core_store::store::StorePreflight;
 
     use super::super::SqliteStorePreflight;
     use crate::SqliteStore;
@@ -302,11 +306,11 @@ mod walk {
         .expect("kernel document");
         let identity = document.identity().to_string();
         let json = document.to_json().expect("canonical document JSON");
-        lash_core_execution::ModuleArtifactStore::publish_module_artifact(
+        lash_execution_contracts::module_artifacts::ModuleArtifactStore::publish_module_artifact(
             &store,
-            &lash_core_execution::ReferrerClaim::unguarded(
-                lash_core_execution::ArtifactReferrer::HostPin(
-                    lash_core_execution::HostArtifactPin::mint(),
+            &lash_core_store::artifact_referrer::ReferrerClaim::unguarded(
+                lash_core_store::artifact_referrer::ArtifactReferrer::HostPin(
+                    lash_core_store::artifact_referrer::HostArtifactPin::mint(),
                 ),
             )
             .expect("host pin claim"),
@@ -338,11 +342,11 @@ mod walk {
         .expect("kernel document");
         let identity = document.identity().to_string();
         let json = document.to_json().expect("canonical document JSON");
-        lash_core_execution::ModuleArtifactStore::publish_module_artifact(
+        lash_execution_contracts::module_artifacts::ModuleArtifactStore::publish_module_artifact(
             store,
-            &lash_core_execution::ReferrerClaim::unguarded(
-                lash_core_execution::ArtifactReferrer::HostPin(
-                    lash_core_execution::HostArtifactPin::mint(),
+            &lash_core_store::artifact_referrer::ReferrerClaim::unguarded(
+                lash_core_store::artifact_referrer::ArtifactReferrer::HostPin(
+                    lash_core_store::artifact_referrer::HostArtifactPin::mint(),
                 ),
             )
             .expect("host pin claim"),
@@ -469,7 +473,7 @@ mod walk {
         .expect("install a bare checkpoint blob");
         crate::revisions::record_revision_conn(
             &raw,
-            &lash_core_execution::SessionId::from("bare-checkpoint-session"),
+            &lash_protocol_types::SessionId::from("bare-checkpoint-session"),
             0,
             None,
             Some("bare-checkpoint"),
@@ -505,7 +509,7 @@ mod walk {
         let store = SqliteStore::open_file_for_testing(&core)
             .await
             .expect("provision durable core");
-        let lash_core_execution::plugin::ExecutionGraphCapture::Replace(graph) =
+        let lash_core_store::execution_state::ExecutionGraphCapture::Replace(graph) =
             lash_core_store::testing::store_fixtures::execution_graph("execution state")
         else {
             unreachable!("the fixture stages a root")
@@ -513,11 +517,11 @@ mod walk {
         let execution_root = graph.root;
         let execution_bytes = graph.descriptor.to_vec();
         let stored = store
-            .put_checkpoint(&lash_core_execution::HydratedSessionCheckpoint {
-                turn_state: lash_core_execution::PersistedTurnState::default(),
+            .put_checkpoint(&lash_core_store::store::HydratedSessionCheckpoint {
+                turn_state: lash_core_store::session_graph::PersistedTurnState::default(),
                 namespace_nodes: Default::default(),
                 components: std::collections::BTreeMap::new(),
-                execution: Some(lash_core_execution::store::CheckpointExecution {
+                execution: Some(lash_core_store::store::CheckpointExecution {
                     root: execution_root,
                     descriptor: Some(graph.descriptor),
                 }),
@@ -529,7 +533,7 @@ mod walk {
         let raw = rusqlite::Connection::open(&core).expect("open raw core");
         crate::revisions::record_revision_conn(
             &raw,
-            &lash_core_execution::SessionId::from("published"),
+            &lash_protocol_types::SessionId::from("published"),
             0,
             None,
             Some(stored.checkpoint_ref.as_str()),
@@ -557,7 +561,7 @@ mod walk {
                     bytes: std::sync::Arc::from(bytes.as_slice()),
                 };
                 assert_eq!(node.id.to_hex(), stored.checkpoint_ref.as_str());
-                let named = lash_core_execution::store::SessionCheckpoint::named(&node)
+                let named = lash_core_store::store::SessionCheckpoint::named(&node)
                     .expect("the manifest node reads");
                 assert_eq!(named.execution, Some(execution_root), "{named:?}");
             }
@@ -602,11 +606,11 @@ mod walk {
         let mut components = std::collections::BTreeMap::new();
         components.insert(
             "something_else".to_string(),
-            lash_core_execution::HydratedCheckpointComponent::changed(vec![1, 2, 3]),
+            lash_core_store::store::HydratedCheckpointComponent::changed(vec![1, 2, 3]),
         );
         let stored = store
-            .put_checkpoint(&lash_core_execution::HydratedSessionCheckpoint {
-                turn_state: lash_core_execution::PersistedTurnState::default(),
+            .put_checkpoint(&lash_core_store::store::HydratedSessionCheckpoint {
+                turn_state: lash_core_store::session_graph::PersistedTurnState::default(),
                 namespace_nodes: Default::default(),
                 components,
                 execution: None,
@@ -618,7 +622,7 @@ mod walk {
         let raw = rusqlite::Connection::open(&core).expect("open raw core");
         crate::revisions::record_revision_conn(
             &raw,
-            &lash_core_execution::SessionId::from("stateless"),
+            &lash_protocol_types::SessionId::from("stateless"),
             0,
             None,
             Some(stored.checkpoint_ref.as_str()),
@@ -703,10 +707,13 @@ async fn assert_release_admission(writing: &str, build: &str, counter: i64, refu
     let early = crate::conn::SqliteConnection::check_release_before_open(&target, build).await;
     let mut connection = rusqlite::Connection::open(&path).expect("open for admission");
     let tx = connection.transaction().expect("open transaction");
-    let admission =
-        crate::compat::admit_with_release(&tx, lash_core_execution::FleetFormat::writable(), build);
+    let admission = crate::compat::admit_with_release(
+        &tx,
+        lash_core_store::store::FleetFormat::writable(),
+        build,
+    );
     if refuses {
-        let expected = lash_core_execution::compat::CompatRefusal::PreRelease {
+        let expected = lash_core_store::compat::CompatRefusal::PreRelease {
             component: "sqlite-core".into(),
             writing_release: Some(writing.into()),
         };
@@ -721,7 +728,7 @@ async fn assert_release_admission(writing: &str, build: &str, counter: i64, refu
             crate::sqlite_error(admission.expect_err("refuse in open transaction")),
         ] {
             assert!(
-                matches!(error, lash_core_execution::StoreError::Incompatible { refusal } if refusal == expected)
+                matches!(error, lash_core_store::store::StoreError::Incompatible { refusal } if refusal == expected)
             );
         }
     } else {
@@ -729,7 +736,7 @@ async fn assert_release_admission(writing: &str, build: &str, counter: i64, refu
         early.expect("release admitted before setup");
         assert_eq!(
             admission.expect("admit open").0,
-            lash_core_execution::compat::CompatAdmission::Native
+            lash_core_store::compat::CompatAdmission::Native
         );
     }
     tx.rollback().expect("rollback");

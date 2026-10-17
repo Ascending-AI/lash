@@ -12,10 +12,8 @@ use std::sync::atomic::{AtomicU64, Ordering};
 use std::sync::{Arc, Mutex};
 use std::time::Instant;
 
-use lash_core_execution::{
-    AttachmentStore, Clock, DeploymentStore, ModuleArtifactStore, ProcessEnvStore, ProcessRegistry,
-    StoreBindingId, StoreSet,
-};
+use lash_core_execution::AttachmentStore;
+use lash_core_execution::Clock;
 use lash_durable::domain::pages::{
     CandidatePublication, CandidateReceipt, PageStore, RetirementBacklog, RetirementBudget,
     RetirementProgress, RootLease, RootLeaseId, RootLeaseRequest, StoredPage,
@@ -29,6 +27,12 @@ use lash_durable::{
     DurableInstant, DurableReads, DurableStore, Epoch, FormatSet, HeartbeatOutcome, MailCommit,
     MailTx, NodeLease, NodeSpec, NodeWakes, Reaped,
 };
+use lash_execution_contracts::backend::StoreBindingId;
+use lash_execution_contracts::backend::StoreSet;
+use lash_execution_contracts::deployment::DeploymentStore;
+use lash_execution_contracts::module_artifacts::ModuleArtifactStore;
+use lash_execution_contracts::process::ProcessEnvStore;
+use lash_execution_contracts::process::ProcessRegistry;
 use lash_protocol_types::sync::MutexExt as _;
 use lash_protocol_types::{ProcessId, SessionId, TurnId};
 use serde::Serialize;
@@ -399,11 +403,11 @@ impl DurableStore for RecordingStore {
         let actor = tx.actor().to_string();
         let mut encoded = Encoded::of(&tx);
         let started = Instant::now();
-        let (answer, sql) = lash_core_execution::facade_support::sql::with_owner(
+        let (answer, sql) = lash_core_ids::operational_metrics::sql::with_owner(
             actor.clone(),
             tx.epoch().0,
             tx.revision().0,
-            lash_core_execution::facade_support::sql::collect(
+            lash_core_ids::operational_metrics::sql::collect(
                 format!("{actor}/{}", label.as_str()),
                 self.dialect,
                 self.inner.commit(tx, label),
@@ -426,7 +430,7 @@ impl DurableStore for RecordingStore {
             ..Encoded::default()
         };
         let started = Instant::now();
-        let (answer, sql) = lash_core_execution::facade_support::sql::collect(
+        let (answer, sql) = lash_core_ids::operational_metrics::sql::collect(
             format!("{}/{}", self.node, label.as_str()),
             self.dialect,
             self.inner.commit_mail(tx, label),
@@ -669,11 +673,11 @@ impl PageStore for RecordingStore {
         let actor = tx.actor().to_string();
         let mut encoded = Encoded::of(&tx);
         let started = Instant::now();
-        let (answer, sql) = lash_core_execution::facade_support::sql::with_owner(
+        let (answer, sql) = lash_core_ids::operational_metrics::sql::with_owner(
             actor.clone(),
             tx.epoch().0,
             tx.revision().0,
-            lash_core_execution::facade_support::sql::collect(
+            lash_core_ids::operational_metrics::sql::collect(
                 format!("{actor}/{}", label.as_str()),
                 self.dialect,
                 pages.commit_candidate(tx, candidate, label),
@@ -777,7 +781,9 @@ impl StoreSet for RecordingStores {
         self.inner.process_registry()
     }
 
-    fn process_authority_reads(&self) -> Arc<dyn lash_core::ProcessAuthorityReads> {
+    fn process_authority_reads(
+        &self,
+    ) -> Arc<dyn lash_execution_contracts::backend::ProcessAuthorityReads> {
         self.inner.process_authority_reads()
     }
 
@@ -785,7 +791,9 @@ impl StoreSet for RecordingStores {
         self.inner.process_env_store()
     }
 
-    fn turn_prelude_store(&self) -> Arc<dyn lash_core_execution::TurnPreludeStore> {
+    fn turn_prelude_store(
+        &self,
+    ) -> Arc<dyn lash_execution_contracts::turn_prelude::TurnPreludeStore> {
         self.inner.turn_prelude_store()
     }
 
@@ -793,7 +801,9 @@ impl StoreSet for RecordingStores {
         self.inner.tool_material_store()
     }
 
-    fn definition_store(&self) -> Arc<dyn lash_core_execution::ProcessDefinitionStore> {
+    fn definition_store(
+        &self,
+    ) -> Arc<dyn lash_execution_contracts::process::ProcessDefinitionStore> {
         self.inner.definition_store()
     }
 

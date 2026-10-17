@@ -8,8 +8,10 @@
 use std::sync::Arc;
 
 use lash_conformance::ReopenableRuntimeStore;
+use lash_core_execution::ActorContext;
 use lash_core_execution::store::ConformanceDeployment;
-use lash_core_execution::{ActorContext, SessionCatalogStore as _, StoreSet};
+use lash_core_store::store::SessionCatalogStore as _;
+use lash_execution_contracts::backend::StoreSet;
 
 use super::*;
 
@@ -38,19 +40,21 @@ async fn ingress_plugin_callbacks_publish_state_that_survives_a_checkpoint() {
     .await;
 }
 
-fn root_session_request(session_id: &str) -> lash_core_execution::SessionStoreCreateRequest {
-    lash_core_execution::SessionStoreCreateRequest {
+fn root_session_request(
+    session_id: &str,
+) -> lash_core_store::session_store_factory_types::SessionStoreCreateRequest {
+    lash_core_store::session_store_factory_types::SessionStoreCreateRequest {
         owning_process_id: None,
         pending_observer_intents: Vec::new(),
         session_id: SessionId::fixture(session_id.to_string()),
-        relation: lash_core_execution::SessionRelation::Root,
-        config: lash_core_execution::PersistedSessionConfig::new(
-            lash_core_execution::TurnBudget::Unbounded,
-            lash_core_execution::MaxToolCalls::new(1024),
+        relation: lash_core_store::session_identity::SessionRelation::Root,
+        config: lash_core_store::session_graph::PersistedSessionConfig::new(
+            lash_protocol_types::session_model::TurnBudget::Unbounded,
+            lash_protocol_types::session_model::MaxToolCalls::new(1024),
             lash_core::NoProgressBudget::bounded(12),
         ),
-        head: lash_core_execution::SessionCreationHead::Config,
-        retention: lash_core_execution::Retention::UntilGc,
+        head: lash_core_store::session_store_factory_types::SessionCreationHead::Config,
+        retention: lash_core_store::store::Retention::UntilGc,
     }
 }
 
@@ -104,7 +108,7 @@ macro_rules! session_store_factory_fixture {
                     .await
                     .expect("SQLite attachment store")
                     .attachment_store()
-                        as Arc<dyn lash_core_execution::AttachmentStore>,
+                        as Arc<dyn lash_core_store::attachments::AttachmentStore>,
                 )
             })
         };
@@ -172,7 +176,7 @@ mod runtime_persistence {
         let effect_host = durable_host(&host_stores);
         drop(storage);
         let database_url = database_fixture.url().to_owned();
-        let clock = Arc::new(lash_core_execution::testing::TestClock::new(10_000));
+        let clock = Arc::new(lash_core_ids::test_clock::TestClock::new(10_000));
         let lease_clock = Arc::clone(&clock);
         (
             (database_fixture, attachments),
@@ -190,14 +194,16 @@ mod runtime_persistence {
                         .expect("open independent Postgres conformance pool");
                     let open_factory = open_storage
                         .session_store_factory()
-                        .with_clock(Arc::clone(&clock) as Arc<dyn lash_core_execution::Clock>)
+                        .with_clock(Arc::clone(&clock) as Arc<dyn lash_core_ids::clock::Clock>)
                         .with_lease_clock_for_testing(
-                            Arc::clone(&clock) as Arc<dyn lash_core_execution::Clock>
+                            Arc::clone(&clock) as Arc<dyn lash_core_ids::clock::Clock>
                         );
                     let reopen_factory = reopen_storage
                         .session_store_factory()
-                        .with_clock(Arc::clone(&clock) as Arc<dyn lash_core_execution::Clock>)
-                        .with_lease_clock_for_testing(clock as Arc<dyn lash_core_execution::Clock>);
+                        .with_clock(Arc::clone(&clock) as Arc<dyn lash_core_ids::clock::Clock>)
+                        .with_lease_clock_for_testing(
+                            clock as Arc<dyn lash_core_ids::clock::Clock>,
+                        );
                     open_factory
                         .admit_session(&request)
                         .await

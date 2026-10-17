@@ -46,10 +46,18 @@ use tracing::Instrument as _;
 
 use super::head::{HeadCache, SessionHead};
 use super::{phases, turn_cancel, turn_trace};
-use crate::{
-    ActorContext, AdmittedScope, Backend, Effect, EffectId, HostTurnProtocol, LlmRequest,
-    SessionId, TurnId, TurnMachine, TurnMachineConfig, TurnOutcome,
-};
+use crate::ActorContext;
+use crate::AdmittedScope;
+use crate::Effect;
+use crate::EffectId;
+use crate::HostTurnProtocol;
+use crate::LlmRequest;
+use crate::SessionId;
+use crate::TurnId;
+use crate::TurnMachine;
+use crate::TurnMachineConfig;
+use crate::TurnOutcome;
+use lash_execution_contracts::backend::Backend;
 
 pub use lash_durable::domain::{
     ModelCall, ModelPin, TurnCancelAnswer, TurnCancelRequest, TurnRow, UnfinishedPhase,

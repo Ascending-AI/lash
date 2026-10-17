@@ -10,8 +10,10 @@
 
 use std::collections::BTreeMap;
 
-use super::{PluginError, PluginTraceEmitter, SessionReadView};
+use super::PluginTraceEmitter;
+use super::SessionReadView;
 use crate::{Message, Part, PartKind, SessionId};
+use lash_execution_contracts::plugin_error::PluginError;
 
 /// Part identities and plugin-authored replacement text, applied in history order.
 pub type AttachmentOmissions = BTreeMap<HistoryPartId, String>;

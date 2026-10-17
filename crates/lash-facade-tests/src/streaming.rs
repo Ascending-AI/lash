@@ -136,11 +136,14 @@ impl ToolProvider for FailingAppTools {
 /// `app_lookup` deferring its first call: it hands its completion key to
 /// the law and stays pending until the host resolves it.
 pub struct PendingAppTools {
-    pub key_tx: StdMutex<Option<tokio::sync::oneshot::Sender<lash_core::PinnedKey>>>,
+    pub key_tx:
+        StdMutex<Option<tokio::sync::oneshot::Sender<lash_execution_contracts::waits::PinnedKey>>>,
 }
 
 impl PendingAppTools {
-    pub fn new(key_tx: tokio::sync::oneshot::Sender<lash_core::PinnedKey>) -> Self {
+    pub fn new(
+        key_tx: tokio::sync::oneshot::Sender<lash_execution_contracts::waits::PinnedKey>,
+    ) -> Self {
         Self {
             key_tx: StdMutex::new(Some(key_tx)),
         }

@@ -60,7 +60,10 @@ pub fn looping_provider(calls: &Arc<AtomicUsize>) -> ProviderHandle {
         .into_handle()
 }
 
-pub fn core_over(backend: lash_core::Backend, provider: ProviderHandle) -> Result<LashCore> {
+pub fn core_over(
+    backend: lash_execution_contracts::backend::Backend,
+    provider: ProviderHandle,
+) -> Result<LashCore> {
     explicit_ephemeral_facets(LashCore::standard_builder(backend))
         .serve_test_llm_profile(provider, mock_llm_profile_spec())
         .tools(lash::tool_provider_key!("tools"), Arc::new(AppTools))

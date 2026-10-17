@@ -1,5 +1,6 @@
 use crate::*;
-use lash_core_execution::{ArtifactCleanup, ArtifactReferrer};
+use lash_core_store::artifact_referrer::ArtifactCleanup;
+use lash_core_store::artifact_referrer::ArtifactReferrer;
 use lash_protocol_types::ProcessId;
 
 pub(super) async fn prune_process_rows_tx(
@@ -95,10 +96,10 @@ pub(super) async fn prune_process_rows_tx(
 #[cfg(test)]
 mod tests {
     use super::*;
-    use lash_core_execution::{
-        ProcessEventLogTestSupport as _, ProcessLifecycle as _, ProcessQuery as _,
-        ProcessRegistrar as _,
-    };
+    use lash_execution_contracts::process::ProcessEventLogTestSupport as _;
+    use lash_execution_contracts::process::ProcessLifecycle as _;
+    use lash_execution_contracts::process::ProcessQuery as _;
+    use lash_execution_contracts::process::ProcessRegistrar as _;
 
     #[tokio::test(flavor = "multi_thread", worker_threads = 2)]
     async fn candidate_tombstone_divergence_rolls_back_all_prune_mutations() {
@@ -111,14 +112,17 @@ mod tests {
         let storage = crate::testing::connect(&database_url)
             .await
             .expect("connect prune rollback storage");
-        lash_core::testing::process_execution_env_fixture(&storage.process_env_store()).await;
-        let ghost_id = lash_core_execution::mint_process_id();
+        lash_execution_contracts::testing::process_execution_env_fixture(
+            &storage.process_env_store(),
+        )
+        .await;
+        let ghost_id = lash_core_store::process_identity::mint_process_id();
         let registry = storage.process_registry();
         let process_id = registry
-            .register_process(lash_core::testing::held_engine_registration(
+            .register_process(lash_execution_contracts::testing::held_engine_registration(
                 serde_json::Value::Null,
-                lash_core_execution::ProcessProvenance::host(),
-                lash_core_execution::Lifetime::Detached,
+                lash_execution_contracts::process::ProcessProvenance::host(),
+                lash_execution_contracts::process::Lifetime::Detached,
             ))
             .await
             .expect("register rollback process")
@@ -126,10 +130,14 @@ mod tests {
         registry
             .complete_process(
                 &process_id,
-                ProcessAwaitOutput::from_tool_output(lash_core_execution::ToolCallOutput::success(
-                    serde_json::Value::Null,
-                )),
-                lash_core_execution::ProcessCompletionAuthority::workflow_key(&process_id),
+                ProcessAwaitOutput::from_tool_output(
+                    lash_protocol_types::tool_output::ToolCallOutput::success(
+                        serde_json::Value::Null,
+                    ),
+                ),
+                lash_execution_contracts::process::ProcessCompletionAuthority::workflow_key(
+                    &process_id,
+                ),
             )
             .await
             .expect("complete rollback process");

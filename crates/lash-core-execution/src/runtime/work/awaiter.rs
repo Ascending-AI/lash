@@ -2,7 +2,11 @@ use crate::ProcessId;
 use std::sync::Arc;
 use std::time::Duration;
 
-use crate::{PluginError, ProcessAwaitOutput, ProcessEvent, ProcessRegistry, WorkCadencePolicy};
+use crate::WorkCadencePolicy;
+use lash_execution_contracts::plugin_error::PluginError;
+use lash_execution_contracts::process::ProcessAwaitOutput;
+use lash_execution_contracts::process::ProcessEvent;
+use lash_execution_contracts::process::ProcessRegistry;
 
 use super::super::process::ProcessChangeHub;
 
@@ -69,7 +73,7 @@ impl ProcessRegistryAwaiter {
     pub async fn await_event(
         &self,
         process_id: &ProcessId,
-        kind: crate::ProcessEventKind,
+        kind: lash_execution_contracts::process::ProcessEventKind,
         after_sequence: u64,
     ) -> Result<ProcessEvent, PluginError> {
         if let Some(event) = self.read_event(process_id, kind, after_sequence).await? {
@@ -150,7 +154,7 @@ impl ProcessRegistryAwaiter {
     async fn read_event(
         &self,
         process_id: &ProcessId,
-        kind: crate::ProcessEventKind,
+        kind: lash_execution_contracts::process::ProcessEventKind,
         after_sequence: u64,
     ) -> Result<Option<ProcessEvent>, PluginError> {
         let limit = std::num::NonZeroUsize::new(128).unwrap_or(std::num::NonZeroUsize::MIN);
@@ -162,13 +166,13 @@ impl ProcessRegistryAwaiter {
                     process_id,
                     after_sequence,
                     limit,
-                    crate::ProcessEventQueryMode::Full,
+                    lash_execution_contracts::process::ProcessEventQueryMode::Full,
                 )
                 .await?;
             let page = match outcome {
-                crate::ProcessEventReadOutcome::Retained(page) => page,
-                crate::ProcessEventReadOutcome::NoLongerRetained(
-                    crate::ProcessEventHistoryRetention::Pruned {
+                lash_execution_contracts::process::ProcessEventReadOutcome::Retained(page) => page,
+                lash_execution_contracts::process::ProcessEventReadOutcome::NoLongerRetained(
+                    lash_execution_contracts::process::ProcessEventHistoryRetention::Pruned {
                         terminal_label,
                         pruned_at_ms,
                     },
@@ -180,8 +184,10 @@ impl ProcessRegistryAwaiter {
                 }
                 // The event asked for may lie in the released prefix: say so
                 // rather than answer from the events after it.
-                crate::ProcessEventReadOutcome::NoLongerRetained(
-                    crate::ProcessEventHistoryRetention::Released { released_through },
+                lash_execution_contracts::process::ProcessEventReadOutcome::NoLongerRetained(
+                    lash_execution_contracts::process::ProcessEventHistoryRetention::Released {
+                        released_through,
+                    },
                 ) => {
                     return Err(PluginError::ProcessEventsReleased {
                         process_id: process_id.clone(),
@@ -189,15 +195,21 @@ impl ProcessRegistryAwaiter {
                     });
                 }
             };
-            let crate::ProcessEventPageEvents::Full(events) = page.events else {
+            let lash_execution_contracts::process::ProcessEventPageEvents::Full(events) =
+                page.events
+            else {
                 unreachable!("full process event query returned a lite page");
             };
             if let Some(event) = events.into_iter().find(|event| event.kind() == kind) {
                 return Ok(Some(event));
             }
             after_sequence = match page.more {
-                crate::ProcessEventPageMore::Complete => return Ok(None),
-                crate::ProcessEventPageMore::More { after_sequence } => after_sequence,
+                lash_execution_contracts::process::ProcessEventPageMore::Complete => {
+                    return Ok(None);
+                }
+                lash_execution_contracts::process::ProcessEventPageMore::More {
+                    after_sequence,
+                } => after_sequence,
             };
         }
     }

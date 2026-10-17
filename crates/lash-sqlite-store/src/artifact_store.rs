@@ -14,9 +14,11 @@
 
 use std::sync::LazyLock;
 
-use lash_core_execution::{
-    ArtifactReferrer, ArtifactStoreError, ArtifactStoreId, ReferrerClaim, ResolvedArtifactCleanup,
-};
+use lash_core_store::artifact_referrer::ArtifactReferrer;
+use lash_core_store::artifact_referrer::ArtifactStoreId;
+use lash_core_store::artifact_referrer::ReferrerClaim;
+use lash_core_store::artifact_referrer::ResolvedArtifactCleanup;
+use lash_execution_contracts::module_artifacts::ArtifactStoreError;
 use lash_store_sql::artifact::blobs::BlobStatements;
 use lash_store_sql::artifact::referrer_edges::ReferrerEdgeStatements;
 use lash_store_sql::artifact::referrer_fences::ReferrerFenceStatements;
@@ -152,9 +154,9 @@ fn artifact_failure(error: ArtifactStoreError) -> rusqlite::Error {
 
 fn decode_stored_edge(kind: &str, id: &str) -> Result<ArtifactReferrer, StoreError> {
     ArtifactReferrer::decode(kind, id).map_err(|error| match error {
-        lash_core_execution::ArtifactReferrerError::UnknownKind(label) => {
+        lash_core_store::artifact_referrer::ArtifactReferrerError::UnknownKind(label) => {
             StoreError::Incompatible {
-                refusal: lash_core_execution::compat::CompatRefusal::UnknownVocabulary {
+                refusal: lash_core_store::compat::CompatRefusal::UnknownVocabulary {
                     surface: "artifact referrer edge kind".to_owned(),
                     label,
                 },
@@ -168,9 +170,9 @@ fn decode_stored_edge(kind: &str, id: &str) -> Result<ArtifactReferrer, StoreErr
 /// its process. The writer orders this acquisition against source cleanup.
 pub(crate) fn acquire_process_env_tx(
     tx: &rusqlite::Connection,
-    env: &lash_core_execution::ProcessEnvRef,
-    process: &lash_core_execution::ProcessId,
-) -> Result<(), lash_core_execution::PluginError> {
+    env: &lash_core_store::process_identity::ProcessEnvRef,
+    process: &lash_protocol_types::ProcessId,
+) -> Result<(), lash_execution_contracts::plugin_error::PluginError> {
     let referrer = ArtifactReferrer::ProcessRecord(process.clone());
     if artifact_fenced_tx(tx, &referrer).map_err(artifact_sqlite_error)? {
         return Err(ArtifactStoreError::ReferrerEnded { referrer }.into());
@@ -242,7 +244,7 @@ impl SqliteStore {
         descriptor: BlobArtifactDescriptor,
         bytes: Vec<u8>,
         claim: ReferrerClaim,
-        plugin_publication: lash_core_execution::store::plugin_writers::PluginPublication,
+        plugin_publication: lash_core_store::store::plugin_writers::PluginPublication,
     ) -> Result<(), ArtifactStoreError> {
         if !claim.referrer().kind().holds_artifacts() {
             return Err(ArtifactStoreError::ReferrerKindRefused {
@@ -636,15 +638,15 @@ impl SqliteStore {
         )
         .map_err(sqlite_error)?
         .map_err(|refusal| corrupt(refusal.to_string()))?;
-        lash_core_execution::store::module_nodes::module_node_body(node, &closure)
+        lash_execution_contracts::module_nodes::module_node_body(node, &closure)
             .map_err(|error| corrupt(error.to_string()))
     }
 }
 
 #[async_trait::async_trait]
-impl lash_core_execution::ModuleArtifactStore for SqliteStore {
-    fn durability_tier(&self) -> lash_core_execution::DurabilityTier {
-        lash_core_execution::DurabilityTier::Durable
+impl lash_execution_contracts::module_artifacts::ModuleArtifactStore for SqliteStore {
+    fn durability_tier(&self) -> lash_execution_contracts::module_artifacts::DurabilityTier {
+        lash_execution_contracts::module_artifacts::DurabilityTier::Durable
     }
 
     async fn publish_module_artifact(
@@ -690,7 +692,7 @@ impl lash_core_execution::ModuleArtifactStore for SqliteStore {
     async fn hold_module_artifacts(
         &self,
         claim: &ReferrerClaim,
-        artifacts: &[lash_core_execution::ModuleArtifactHold<'_>],
+        artifacts: &[lash_execution_contracts::module_artifacts::ModuleArtifactHold<'_>],
     ) -> Result<(), ArtifactStoreError> {
         if artifacts.is_empty() {
             return Ok(());
@@ -709,7 +711,7 @@ impl lash_core_execution::ModuleArtifactStore for SqliteStore {
                     node: artifact.body().node_kind(),
                     verified: matches!(
                         artifact,
-                        lash_core_execution::ModuleArtifactHold::Publish { .. }
+                        lash_execution_contracts::module_artifacts::ModuleArtifactHold::Publish { .. }
                     ),
                 })
             })
@@ -732,7 +734,7 @@ impl lash_core_execution::ModuleArtifactStore for SqliteStore {
     ) -> Result<Option<Vec<u8>>, ArtifactStoreError> {
         if !crate::namespace::is_valid_opaque_key(module_ref) {
             return Err(ArtifactStoreError::StoredDataCorrupt {
-                source: lash_core_execution::ModuleArtifactCorruption::InvalidReference {
+                source: lash_protocol_types::module_artifact_refusal::ModuleArtifactCorruption::InvalidReference {
                     record_kind: "module".into(),
                     reference: module_ref.into(),
                 },
@@ -749,11 +751,11 @@ impl lash_core_execution::ModuleArtifactStore for SqliteStore {
 }
 
 #[async_trait::async_trait]
-impl lash_core_execution::ProcessEnvStore for SqliteStore {
+impl lash_execution_contracts::process::ProcessEnvStore for SqliteStore {
     async fn publish_process_env(
         &self,
         claim: &ReferrerClaim,
-        env_ref: &lash_core_execution::ProcessEnvRef,
+        env_ref: &lash_core_store::process_identity::ProcessEnvRef,
         bytes: &[u8],
     ) -> Result<(), ArtifactStoreError> {
         if !crate::namespace::is_valid_opaque_key(env_ref.as_str()) {
@@ -767,7 +769,7 @@ impl lash_core_execution::ProcessEnvStore for SqliteStore {
             });
         }
         let plugin_publication =
-            lash_core_execution::store::plugin_writers::PluginPublication::of_process_env(bytes)
+            lash_core_store::store::plugin_writers::PluginPublication::of_process_env(bytes)
                 .map_err(|error| ArtifactStoreError::Encode(error.to_string()))?;
         self.publish_artifact_ref_blob(
             PROCESS_ENV_NAMESPACE,
@@ -783,7 +785,7 @@ impl lash_core_execution::ProcessEnvStore for SqliteStore {
     async fn acquire_process_env(
         &self,
         claim: &ReferrerClaim,
-        env_ref: &lash_core_execution::ProcessEnvRef,
+        env_ref: &lash_core_store::process_identity::ProcessEnvRef,
     ) -> Result<(), ArtifactStoreError> {
         if !crate::namespace::is_valid_opaque_key(env_ref.as_str()) {
             return Err(ArtifactStoreError::Encode(
@@ -808,11 +810,11 @@ impl lash_core_execution::ProcessEnvStore for SqliteStore {
 
     async fn get_process_env(
         &self,
-        env_ref: &lash_core_execution::ProcessEnvRef,
+        env_ref: &lash_core_store::process_identity::ProcessEnvRef,
     ) -> Result<Option<Vec<u8>>, ArtifactStoreError> {
         if !crate::namespace::is_valid_opaque_key(env_ref.as_str()) {
             return Err(ArtifactStoreError::StoredDataCorrupt {
-                source: lash_core_execution::ModuleArtifactCorruption::InvalidReference {
+                source: lash_protocol_types::module_artifact_refusal::ModuleArtifactCorruption::InvalidReference {
                     record_kind: "process execution environment".into(),
                     reference: env_ref.as_str().into(),
                 },
@@ -829,11 +831,11 @@ impl lash_core_execution::ProcessEnvStore for SqliteStore {
 }
 
 #[async_trait::async_trait]
-impl lash_core_execution::TurnPreludeStore for SqliteStore {
+impl lash_execution_contracts::turn_prelude::TurnPreludeStore for SqliteStore {
     async fn publish_turn_prelude(
         &self,
         claim: &ReferrerClaim,
-        prelude_ref: &lash_core_execution::TurnPreludeRef,
+        prelude_ref: &lash_execution_contracts::turn_prelude::TurnPreludeRef,
         bytes: &[u8],
     ) -> Result<(), ArtifactStoreError> {
         if !prelude_ref.matches_store_bytes(bytes) {
@@ -849,7 +851,7 @@ impl lash_core_execution::TurnPreludeStore for SqliteStore {
             BlobArtifactDescriptor::turn_prelude(),
             bytes.to_vec(),
             claim.clone(),
-            lash_core_execution::store::plugin_writers::PluginPublication::default(),
+            lash_core_store::store::plugin_writers::PluginPublication::default(),
         )
         .await
     }
@@ -864,11 +866,11 @@ impl lash_core_execution::TurnPreludeStore for SqliteStore {
 
     async fn get_turn_prelude(
         &self,
-        prelude_ref: &lash_core_execution::TurnPreludeRef,
+        prelude_ref: &lash_execution_contracts::turn_prelude::TurnPreludeRef,
     ) -> Result<Option<Vec<u8>>, ArtifactStoreError> {
         if !crate::namespace::is_valid_opaque_key(prelude_ref.as_str()) {
             return Err(ArtifactStoreError::StoredDataCorrupt {
-                source: lash_core_execution::ModuleArtifactCorruption::InvalidReference {
+                source: lash_protocol_types::module_artifact_refusal::ModuleArtifactCorruption::InvalidReference {
                     record_kind: "turn prelude".into(),
                     reference: prelude_ref.as_str().into(),
                 },
@@ -887,7 +889,7 @@ impl lash_core_execution::TurnPreludeStore for SqliteStore {
 /// A manifest's store-set share as `(namespace, reference)` pairs. Only the
 /// module and environment stores share a definition's transaction.
 fn definition_manifest(
-    manifest: &[lash_core_execution::ArtifactName],
+    manifest: &[lash_core_store::artifact_referrer::ArtifactName],
 ) -> Result<Vec<(&'static str, String)>, ArtifactStoreError> {
     manifest
         .iter()
@@ -913,13 +915,13 @@ fn definition_manifest(
 }
 
 #[async_trait::async_trait]
-impl lash_core_execution::ProcessDefinitionStore for SqliteStore {
+impl lash_execution_contracts::process::ProcessDefinitionStore for SqliteStore {
     async fn publish_process_definition(
         &self,
         claim: &ReferrerClaim,
-        id: &lash_core_execution::ProcessDefinitionId,
+        id: &lash_protocol_types::ProcessDefinitionId,
         descriptor: &[u8],
-        manifest: &[lash_core_execution::ArtifactName],
+        manifest: &[lash_core_store::artifact_referrer::ArtifactName],
     ) -> Result<(), ArtifactStoreError> {
         self.hold_definition_closure(
             claim.clone(),
@@ -933,8 +935,8 @@ impl lash_core_execution::ProcessDefinitionStore for SqliteStore {
     async fn acquire_process_definition(
         &self,
         claim: &ReferrerClaim,
-        id: &lash_core_execution::ProcessDefinitionId,
-        manifest: &[lash_core_execution::ArtifactName],
+        id: &lash_protocol_types::ProcessDefinitionId,
+        manifest: &[lash_core_store::artifact_referrer::ArtifactName],
     ) -> Result<(), ArtifactStoreError> {
         self.hold_definition_closure(
             claim.clone(),
@@ -955,7 +957,7 @@ impl lash_core_execution::ProcessDefinitionStore for SqliteStore {
 
     async fn get_process_definition(
         &self,
-        id: &lash_core_execution::ProcessDefinitionId,
+        id: &lash_protocol_types::ProcessDefinitionId,
     ) -> Result<Option<Vec<u8>>, ArtifactStoreError> {
         self.get_artifact_ref_blob(
             PROCESS_DEFINITION_NAMESPACE,
@@ -970,9 +972,11 @@ impl lash_core_execution::ProcessDefinitionStore for SqliteStore {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use lash_core_execution::{
-        ArtifactCarry, ArtifactName, ArtifactStoreId, HostArtifactPin, ModuleArtifactStore,
-    };
+    use lash_core_store::artifact_referrer::ArtifactCarry;
+    use lash_core_store::artifact_referrer::ArtifactName;
+    use lash_core_store::artifact_referrer::ArtifactStoreId;
+    use lash_core_store::artifact_referrer::HostArtifactPin;
+    use lash_execution_contracts::module_artifacts::ModuleArtifactStore;
 
     fn pin() -> ArtifactReferrer {
         ArtifactReferrer::HostPin(HostArtifactPin::mint())
@@ -1059,7 +1063,9 @@ mod tests {
         let journal = lash_protocol_types::ExecutionScope::runtime_operation("guarded-publication")
             .journal_identity()
             .expect("journal identity");
-        let claim = ReferrerClaim::guarded(lash_core_execution::ReferrerGuard::Journal(journal));
+        let claim = ReferrerClaim::guarded(
+            lash_core_store::artifact_referrer::ReferrerGuard::Journal(journal),
+        );
         store
             .publish_module_artifact(&claim, "guarded-module", b"guarded")
             .await
@@ -1071,11 +1077,15 @@ mod tests {
             ))
         }).await.expect("read edge and guard");
         assert_eq!((edges, obligations), (1, 1));
-        use lash_core_execution::store::ArtifactCleanupLedger as _;
+        use lash_core_store::store::ArtifactCleanupLedger as _;
         let ledger = crate::obligation_ledger::SqliteArtifactCleanupLedger::new(store.conn.clone());
         ledger
             .arm_cleanup(
-                &lash_core_execution::ArtifactCleanup::ended(claim.referrer(), Vec::new(), None),
+                &lash_core_store::artifact_referrer::ArtifactCleanup::ended(
+                    claim.referrer(),
+                    Vec::new(),
+                    None,
+                ),
                 1,
             )
             .await
@@ -1105,9 +1115,9 @@ mod tests {
 
     #[tokio::test]
     async fn process_environment_publish_acquire_and_end_preserve_other_namespace() {
-        use lash_core_execution::ProcessEnvStore;
+        use lash_execution_contracts::process::ProcessEnvStore;
         let (_dir, store) = store().await;
-        let spec = lash_core_execution::testing::process_env_with_limit(1024);
+        let spec = lash_execution_contracts::testing::process_env_with_limit(1024);
         let bytes = spec.to_store_bytes().expect("encode environment");
         let env_ref = spec.stable_ref().expect("environment reference");
         let source = pin();
@@ -1331,14 +1341,14 @@ mod tests {
         assert!(matches!(
             &error,
             ArtifactStoreError::StoredDataCorrupt {
-                source: lash_core_execution::ModuleArtifactCorruption::Storage { record_kind, .. },
+                source: lash_protocol_types::module_artifact_refusal::ModuleArtifactCorruption::Storage { record_kind, .. },
             } if record_kind == "artifact referrer edge"
         ));
-        let plugin_error: lash_core_execution::PluginError = error.into();
+        let plugin_error: lash_execution_contracts::plugin_error::PluginError = error.into();
         assert!(matches!(
             plugin_error,
-            lash_core_execution::PluginError::Runtime(runtime)
-                if runtime.code == lash_core_execution::RuntimeErrorCode::RuntimeStoreCorrupt
+            lash_execution_contracts::plugin_error::PluginError::Runtime(runtime)
+                if runtime.code == lash_core_store::runtime_error::RuntimeErrorCode::RuntimeStoreCorrupt
         ));
     }
 
@@ -1374,7 +1384,7 @@ mod tests {
         assert!(matches!(
             store.get_module_artifact("future-edge").await,
             Err(ArtifactStoreError::Incompatible {
-                refusal: lash_core_execution::compat::CompatRefusal::UnknownVocabulary {
+                refusal: lash_core_store::compat::CompatRefusal::UnknownVocabulary {
                     label,
                     ..
                 }

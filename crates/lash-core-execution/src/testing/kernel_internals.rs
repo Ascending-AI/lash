@@ -18,11 +18,13 @@ pub use crate::plugin::{
     SessionObserverIntent,
 };
 
-pub use crate::runtime::load_process_env;
 pub use crate::session::{RuntimeExecutionTracing, Session};
 
-use crate::runtime::process::{ObservedWorkItem, ProcessRecord, ProcessWorkObserver};
-use crate::{PluginError, ProcessId};
+use crate::ProcessId;
+use lash_execution_contracts::plugin_error::PluginError;
+use lash_execution_contracts::process::ObservedWorkItem;
+use lash_execution_contracts::process::ProcessRecord;
+use lash_execution_contracts::process::ProcessWorkObserver;
 
 /// `ProcessWorkObserver::work_item_from_record`: the bounded record/event-tail
 /// retry the observation laws shift with a record read before a concurrent
@@ -31,13 +33,15 @@ pub async fn work_item_from_record(
     observer: &ProcessWorkObserver,
     record: ProcessRecord,
 ) -> Result<ObservedWorkItem, PluginError> {
-    observer.work_item_from_record(record).await
+    lash_execution_contracts::process::observation::work_item_from_record(observer, record).await
 }
 
 /// `process_terminal_resolution`: the resolution a process terminal delivers
 /// to the waits armed on it, which the attach-terminal laws compare a parked
 /// wait against.
-pub fn process_terminal_resolution(output: crate::ProcessAwaitOutput) -> crate::Resolution {
+pub fn process_terminal_resolution(
+    output: lash_execution_contracts::process::ProcessAwaitOutput,
+) -> crate::Resolution {
     crate::runtime::effect::executor::process_terminal_resolution(output)
 }
 
@@ -58,7 +62,7 @@ pub async fn publish_plugin_state(
     plugins: &std::sync::Arc<crate::PluginSession>,
     plugin_id: &str,
     address: crate::EffectAddress,
-    commands: crate::StateCommands,
+    commands: lash_execution_contracts::state_commands::StateCommands,
 ) -> Result<crate::RuntimeEffectOutcome, crate::RuntimeEffectControllerError> {
     let owner = plugins
         .host()
@@ -66,7 +70,9 @@ pub async fn publish_plugin_state(
         .iter()
         .find(|factory| factory.id() == plugin_id)
         .ok_or_else(|| {
-            crate::PluginError::Registration(format!("plugin `{plugin_id}` is not installed"))
+            lash_execution_contracts::plugin_error::PluginError::Registration(format!(
+                "plugin `{plugin_id}` is not installed"
+            ))
         })?;
     let proposal = crate::plugin::Proposal::for_tool(
         owner.id().to_owned(),
@@ -83,7 +89,7 @@ pub async fn publish_plugin_state(
         address.clone(),
         async move {
             crate::plugin::propose(body_plugins.as_ref(), proposal)
-                .map_err(crate::PluginError::from)?;
+                .map_err(lash_execution_contracts::plugin_error::PluginError::from)?;
             Ok(crate::RuntimeEffectOutcome::LanguageRuntimeValue {
                 value: serde_json::Value::Null,
             })
@@ -161,7 +167,7 @@ pub async fn await_process_with_cancellation(
     process_id: &crate::ProcessId,
     parent_invocation: Option<crate::RuntimeInvocation>,
     cancellation: Option<tokio_util::sync::CancellationToken>,
-) -> Result<crate::ProcessAwaitOutput, PluginError> {
+) -> Result<lash_execution_contracts::process::ProcessAwaitOutput, PluginError> {
     context
         .await_process_with_cancellation(process_id, parent_invocation, cancellation)
         .await
@@ -254,7 +260,7 @@ pub async fn complete_tool_output(
                     output,
                 },
                 attempts: Vec::new(),
-                intents: crate::ToolIntents::default(),
+                intents: lash_execution_contracts::tool_intent::ToolIntents::default(),
                 intent_outcomes: Vec::new(),
             },
             "test:call",

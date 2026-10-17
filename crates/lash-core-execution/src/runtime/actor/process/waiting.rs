@@ -5,9 +5,13 @@
 //! it no longer holds.
 use super::driver::{Blocked, Driver};
 use super::effects::append_event as append;
+use crate::ProcessId;
 use crate::runtime::actor::round::{MemberState, RunFold};
-use crate::{ProcessId, ProcessRecord, StepRequest, WaitKind, WaitState};
 use lash_durable::ActorTx;
+use lash_execution_contracts::process::ProcessRecord;
+use lash_execution_contracts::process::StepRequest;
+use lash_execution_contracts::process::WaitKind;
+use lash_execution_contracts::process::WaitState;
 
 /// What the engine itself waits for, beside its steps.
 fn engine_blocker(
@@ -63,7 +67,9 @@ pub(super) fn project(
         append(
             tx,
             process,
-            crate::ProcessEventAppendRequest::wait_cleared(process, wait),
+            lash_execution_contracts::process::ProcessEventAppendRequest::wait_cleared(
+                process, wait,
+            ),
         );
     }
     for (kind, site) in blockers {
@@ -82,7 +88,9 @@ pub(super) fn project(
         append(
             tx,
             process,
-            crate::ProcessEventAppendRequest::wait_entered(process, &wait),
+            lash_execution_contracts::process::ProcessEventAppendRequest::wait_entered(
+                process, &wait,
+            ),
         );
     }
 }
@@ -108,7 +116,9 @@ pub(super) fn settle(
             append(
                 tx,
                 process,
-                crate::ProcessEventAppendRequest::wait_cleared(process, wait),
+                lash_execution_contracts::process::ProcessEventAppendRequest::wait_cleared(
+                    process, wait,
+                ),
             );
         }
     }
@@ -120,7 +130,9 @@ pub(super) fn end(tx: &mut ActorTx, process: &ProcessId, record: &ProcessRecord)
         append(
             tx,
             process,
-            crate::ProcessEventAppendRequest::wait_cleared(process, wait),
+            lash_execution_contracts::process::ProcessEventAppendRequest::wait_cleared(
+                process, wait,
+            ),
         );
     }
 }

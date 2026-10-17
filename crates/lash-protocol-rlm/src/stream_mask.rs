@@ -9,10 +9,10 @@ use lash_protocol_types::sync::MutexExt;
 use std::sync::{Arc, Mutex};
 
 use lash_core::PluginRuntimeEvent;
-use lash_core::plugin::{
-    AssistantStreamFinishedContext, AssistantStreamHookContext, AssistantStreamTransform,
-    PluginError,
-};
+use lash_core::plugin::AssistantStreamFinishedContext;
+use lash_core::plugin::AssistantStreamHookContext;
+use lash_core::plugin::AssistantStreamTransform;
+use lash_execution_contracts::plugin_error::PluginError;
 
 use crate::cell_scan::{
     StreamedCellStart, complete_cell_start, complete_end_tag_span, possible_start_tag_suffix_len,

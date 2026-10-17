@@ -4,6 +4,7 @@ use crate::plugin::*;
 use crate::{
     ToolCall, ToolContract, ToolId, ToolManifest, ToolOutcome, ToolPrepareCall, ToolProvider,
 };
+use lash_execution_contracts::PluginError;
 use lash_protocol_types::sync::MutexExt;
 use std::collections::BTreeMap;
 use std::sync::{Arc, Mutex};

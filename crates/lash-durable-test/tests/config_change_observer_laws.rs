@@ -32,10 +32,10 @@ use std::time::Duration;
 
 use lash::config::{ConfigTransaction, ConfigTransactionOutcome, ConfigWrite, SetMaxToolCalls};
 use lash_core::runtime::durable::session::SessionActivation;
-use lash_core_execution::StoreSet;
 use lash_durable::runner::Activation;
 use lash_durable::{ActorKey, ActorState, CommitLabel, DurableStore};
 use lash_durable_test::{Fault, Matrix, Scenario, SimClock, SimNodes, SimNodesConfig, Tripwire};
+use lash_execution_contracts::backend::StoreSet;
 use lash_protocol_types::sync::MutexExt as _;
 use matrix::MatrixTestExt as _;
 use served::{Tier, World};
@@ -118,7 +118,10 @@ impl lash::plugins::PluginFactory for Observer {
 
     fn recipe(
         self: Arc<Self>,
-    ) -> std::result::Result<lash_core::plugin::PluginRecipe, lash_core::plugin::PluginError> {
+    ) -> std::result::Result<
+        lash_core::plugin::PluginRecipe,
+        lash_execution_contracts::plugin_error::PluginError,
+    > {
         let mut reg = lash_core::plugin::PluginRegistrar::<Observer>::new(
             lash_core::plugin::PluginFactory::id(self.as_ref()),
         );
@@ -154,7 +157,7 @@ impl lash::plugins::SessionPlugin for Observer {
 impl Observer {
     fn declare(
         reg: &mut lash_core::plugin::PluginRegistrar<Self>,
-    ) -> std::result::Result<(), lash_core::plugin::PluginError> {
+    ) -> std::result::Result<(), lash_execution_contracts::plugin_error::PluginError> {
         reg.lifecycle()
             .on_event(lash::hook_key!("observe"), move |this, _state| {
                 let seen = Arc::clone(&this.seen);

@@ -8,15 +8,17 @@ use std::sync::Arc;
 use lash_protocol_types::{ToolCallId, ToolIntentKind};
 use serde::{Deserialize, Serialize};
 
+use crate::EffectOpener;
+use crate::ProcessId;
+use crate::RuntimeEffectControllerError;
+use crate::StartKey;
 use crate::runtime::effect::{AttemptStream, AttemptStreamRecorder};
 use crate::runtime::process::{DeclaredStartObligation, DeclaredStartObligationRefusal};
 use crate::tool_run::{
     AdmissionRefusal, AdmittedBinding, AfterCheckVerdict, AttemptOrdinal, AttributedVerdict,
     CallDecision, DeclarationRefusal, ExternalCancelPolicy, HookCause, ToolDeclaration,
 };
-use crate::{
-    EffectOpener, ProcessId, ProcessStartRegistration, RuntimeEffectControllerError, StartKey,
-};
+use lash_execution_contracts::process::ProcessStartRegistration;
 
 /// One tool call to run in its owning Run.
 #[derive(Clone, Debug, PartialEq, Eq)]
@@ -203,7 +205,7 @@ impl SingletonCapture {
 pub enum SingletonBodyOutcome {
     Done {
         output: String,
-        commands: crate::plugin::StateCommands,
+        commands: lash_execution_contracts::state_commands::StateCommands,
         intents: Vec<ToolIntentKind>,
         /// One process start the result declares, under its stable start
         /// key. The Run binds its environment and consumer hold.
@@ -428,12 +430,12 @@ pub enum StartLaunch {
     /// or the one the key already holds, with no rows.
     Staged {
         /// The process.
-        handle: crate::ProcessHandleView,
+        handle: lash_execution_contracts::process::ProcessHandleView,
         /// The rows that register it with the call's outcome.
         effect: Option<crate::runtime::actor::round::StoreLocalEffect>,
     },
     /// The registrar refused the start for good, registering nothing.
-    Refused(crate::ToolIntentRefusalReason),
+    Refused(lash_execution_contracts::tool_intent_outcome::ToolIntentRefusalReason),
 }
 
 /// Why a call stopped before it ended. None of these runs a body.

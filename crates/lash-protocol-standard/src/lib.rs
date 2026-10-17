@@ -28,11 +28,15 @@ use std::sync::Arc;
 use async_trait::async_trait;
 use lash_core::facade_support::JsonSchema;
 use lash_core::llm::types::{ProviderReasoningReplay, ProviderReplayMeta, ResponseTextMeta};
-use lash_core::plugin::{
-    CandidateFacts, ConfigCommand, ConfigOwner, ConfigRegistrar, ConfigRegistrationError,
-    OwnerChange, PluginError, PluginFactory, ProtocolDriverPlugin, ProtocolSessionContext,
-    ProtocolSessionPlugin,
-};
+use lash_core::plugin::CandidateFacts;
+use lash_core::plugin::ConfigCommand;
+use lash_core::plugin::ConfigOwner;
+use lash_core::plugin::ConfigRegistrar;
+use lash_core::plugin::OwnerChange;
+use lash_core::plugin::PluginFactory;
+use lash_core::plugin::ProtocolDriverPlugin;
+use lash_core::plugin::ProtocolSessionContext;
+use lash_core::plugin::ProtocolSessionPlugin;
 use lash_core::sansio::{
     CheckpointResumeAction, CompletedToolCall, PendingToolCall, PendingWork, ProtocolDriverHandle,
 };
@@ -42,6 +46,8 @@ use lash_core::session_model::{
     ConversationRecord, Message, MessageRole, Part, SessionHistoryRecord, SessionStreamEvent,
     reassign_part_ids, shared_parts,
 };
+use lash_execution_contracts::config_error::ConfigRegistrationError;
+use lash_execution_contracts::plugin_error::PluginError;
 
 mod batch;
 mod finish;
@@ -562,11 +568,14 @@ impl PluginFactory for StandardProtocolPluginFactory {
     /// that recorded none is refused, never given this deployment's.
     fn recipe(
         self: Arc<Self>,
-    ) -> std::result::Result<lash_core::plugin::PluginRecipe, lash_core::plugin::PluginError> {
+    ) -> std::result::Result<
+        lash_core::plugin::PluginRecipe,
+        lash_execution_contracts::plugin_error::PluginError,
+    > {
         let recipe_factory = Arc::clone(&self);
         let recipe: std::result::Result<
             lash_core::plugin::PluginRecipe,
-            lash_core::plugin::PluginError,
+            lash_execution_contracts::plugin_error::PluginError,
         > = {
             let mut reg = lash_core::plugin::PluginRegistrar::<StandardProtocolPlugin>::new(
                 lash_core::plugin::PluginFactory::id(self.as_ref()),
@@ -581,7 +590,7 @@ impl PluginFactory for StandardProtocolPluginFactory {
                         .plugin_config
                         .decode::<StandardRecordedConfig>(STANDARD_PROTOCOL_PLUGIN_ID)
                         .map_err(|error| {
-                            lash_core::plugin::PluginError::Session(format!(
+                            lash_execution_contracts::plugin_error::PluginError::Session(format!(
                                 "invalid recorded standard-protocol session config: {error}"
                             ))
                         })?;
@@ -601,7 +610,7 @@ impl PluginFactory for StandardProtocolPluginFactory {
                         ) =>
                         {
                             return Err(
-                                lash_core::plugin::PluginError::MissingRecordedSessionConfig {
+                                lash_execution_contracts::plugin_error::PluginError::MissingRecordedSessionConfig {
                                     plugin_id: STANDARD_PROTOCOL_PLUGIN_ID.to_string(),
                                     field: BEHAVIOUR_FIELD.to_string(),
                                 },
@@ -614,7 +623,7 @@ impl PluginFactory for StandardProtocolPluginFactory {
                     };
                     if !self.config.tool_presenter.holds(&behaviour.tool_presenter) {
                         return Err(
-                            lash_core::plugin::PluginError::RecordedSessionConfigConflict {
+                            lash_execution_contracts::plugin_error::PluginError::RecordedSessionConfigConflict {
                                 plugin_id: STANDARD_PROTOCOL_PLUGIN_ID.to_string(),
                                 field: "tool_presenter".to_string(),
                                 recorded: behaviour.tool_presenter.id.clone(),
@@ -625,7 +634,7 @@ impl PluginFactory for StandardProtocolPluginFactory {
                     if let BatchSugar::Enabled { max_members } = behaviour.batch
                         && max_members.get() > BATCH_MEMBER_CEILING
                     {
-                        return Err(lash_core::plugin::PluginError::InvalidBatchMaximum {
+                        return Err(lash_execution_contracts::plugin_error::PluginError::InvalidBatchMaximum {
                             requested: max_members.get(),
                             ceiling: BATCH_MEMBER_CEILING,
                         });
@@ -694,7 +703,7 @@ struct StandardProtocolPlugin {
 impl StandardProtocolPlugin {
     fn declare(
         reg: &mut lash_core::plugin::PluginRegistrar<Self>,
-    ) -> std::result::Result<(), lash_core::plugin::PluginError> {
+    ) -> std::result::Result<(), lash_execution_contracts::plugin_error::PluginError> {
         prompt::register_sections(reg, |owner| prompt::StandardPromptBehaviour {
             batch: owner.config.batch,
             termination: owner.termination,

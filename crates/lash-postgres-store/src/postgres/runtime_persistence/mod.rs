@@ -82,7 +82,7 @@ pub(crate) async fn ensure_session_not_closing_tx(
         None => Ok(()),
         Some(intent) => Err(StoreError::SessionClosing {
             session_id: session_id.clone(),
-            intent: lash_core_execution::store::ControlIntentId::from_sequence(
+            intent: lash_core_store::store::ControlIntentId::from_sequence(
                 crate::support::u64_from_sql("SessionMeta", "closing_intent", intent)?,
             ),
         }),
@@ -206,12 +206,12 @@ pub(crate) async fn enqueue_queued_work_with_outcome_tx(
     batch: &QueuedWorkBatchDraft,
     now: u64,
 ) -> Result<(QueuedWorkEnqueueOutcome, Option<lash_durable::Woken>), StoreError> {
-    lash_core_execution::store_backend_support::validate_queued_work_draft(batch)?;
+    lash_core_store::store_backend_support::validate_queued_work_draft(batch)?;
     // The actor row, then history, then referrers: an owner commit's order,
     // which an admission from another domain's transaction keeps too.
     lock_session_history_mutation_tx(tx, &batch.session_id).await?;
-    let claim = lash_core_execution::ReferrerClaim::unguarded(
-        lash_core_execution::ArtifactReferrer::Session(batch.session_id.clone()),
+    let claim = lash_core_store::artifact_referrer::ReferrerClaim::unguarded(
+        lash_core_store::artifact_referrer::ArtifactReferrer::Session(batch.session_id.clone()),
     )
     .map_err(|error| error.into_store_error("queued attachment referrer"))?;
     crate::artifact_store::lock_referrer_tx(tx, &claim.referrer())
@@ -219,7 +219,7 @@ pub(crate) async fn enqueue_queued_work_with_outcome_tx(
         .map_err(store_sqlx_error)?;
     crate::attachments::acquire_attachment_refs_tx(tx, &claim, &batch.stored_attachment_ids(), now)
         .await?;
-    use lash_core_execution::store_backend_support as support;
+    use lash_core_store::store_backend_support as support;
     let sql = crate::turn_ingress::turn_ingress_sql();
     let submission_digest = support::queued_work_submission_digest(batch)?;
     // The session's write authority is held from before the source-key
@@ -262,7 +262,9 @@ pub(crate) async fn enqueue_queued_work_with_outcome_tx(
         .bind(now as i64)
         .bind(submission_digest.as_str())
         .bind(encode_json(&batch.payload)?)
-        .bind(lash_core_execution::store_backend_support::encode_trace_cause(&batch.trace_cause)?)
+        .bind(lash_core_store::store_backend_support::encode_trace_cause(
+            &batch.trace_cause,
+        )?)
         .execute(crate::observed_sql::executor(&mut *tx))
         .await
         .map_err(store_sqlx_error)?;
@@ -287,7 +289,7 @@ async fn read_session_state_version_tx(
     tx: &mut sqlx::PgConnection,
     session_id: &SessionId,
     lock: bool,
-    fleet: lash_core_execution::FleetFormat,
+    fleet: lash_core_store::store::FleetFormat,
 ) -> Result<u32, StoreError> {
     // One statement per filter shape, not a suffix appended per call: the
     // locked read is a different statement from the unlocked one.
@@ -305,7 +307,7 @@ async fn read_session_state_version_tx(
         .await
         .map_err(store_sqlx_error)?;
     let Some(marker) = marker else {
-        return Ok(lash_core_execution::store::CURRENT_SESSION_STATE_VERSION);
+        return Ok(lash_core_store::store::CURRENT_SESSION_STATE_VERSION);
     };
     let marker = marker
         .map(|version| {
@@ -315,7 +317,7 @@ async fn read_session_state_version_tx(
             })
         })
         .transpose()?;
-    lash_core_execution::store::resolve_session_state_version(marker, fleet)
+    lash_core_store::store::resolve_session_state_version(marker, fleet)
 }
 
 mod admission;

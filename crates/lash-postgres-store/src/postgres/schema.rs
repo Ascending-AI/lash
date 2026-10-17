@@ -30,11 +30,12 @@ pub(crate) const SCHEMA_ADVISORY_LOCK_KEY: (i32, i32) = (715421, 907001);
 pub(crate) async fn read_compat_stamp<'e, E>(
     executor: E,
     populated: bool,
-) -> lash_core_execution::compat::StampRead
+) -> lash_core_store::compat::StampRead
 where
     E: sqlx::Executor<'e, Database = sqlx::Postgres>,
 {
-    use lash_core_execution::compat::{CompatStamp, StampRead};
+    use lash_core_store::compat::CompatStamp;
+    use lash_core_store::compat::StampRead;
     match crate::observed_sql::query_as::<_, (i32, i32)>(
         "SELECT version, min_reader FROM lash_schema_versions WHERE component = $1",
     )
@@ -74,17 +75,17 @@ where
 pub(crate) async fn ensure_schema(
     pool: &PgPool,
     check: SchemaCheck,
-    writable: lash_core_execution::compat::VersionRange,
-) -> Result<(String, lash_core_execution::FleetFormat), StoreError> {
+    writable: lash_core_store::compat::VersionRange,
+) -> Result<(String, lash_core_store::store::FleetFormat), StoreError> {
     ensure_schema_with_release(pool, check, writable, crate::release_stamp::BUILD_RELEASE).await
 }
 
 pub(crate) async fn ensure_schema_with_release(
     pool: &PgPool,
     check: SchemaCheck,
-    writable: lash_core_execution::compat::VersionRange,
+    writable: lash_core_store::compat::VersionRange,
     build_release: &str,
-) -> Result<(String, lash_core_execution::FleetFormat), StoreError> {
+) -> Result<(String, lash_core_store::store::FleetFormat), StoreError> {
     let mut tx = crate::observed_sql::control("BEGIN", pool.begin())
         .await
         .map_err(store_sqlx_error)?;
@@ -102,11 +103,11 @@ pub(crate) async fn ensure_schema_with_release(
 
     let writing_release = crate::release_stamp::read_release_in_tx(&mut tx).await;
     let descriptor =
-        lash_core_execution::compat::descriptor(lash_core_execution::compat::ComponentId::POSTGRES)
+        lash_core_store::compat::descriptor(lash_core_store::compat::ComponentId::POSTGRES)
             .ok_or_else(|| {
                 StoreError::Backend("missing PostgreSQL compatibility descriptor".into())
             })?;
-    if let Some(refusal) = lash_core_execution::compat::CompatRefusal::pre_release(
+    if let Some(refusal) = lash_core_store::compat::CompatRefusal::pre_release(
         descriptor.component.as_str(),
         writing_release.as_deref(),
         build_release,
@@ -118,26 +119,26 @@ pub(crate) async fn ensure_schema_with_release(
     let stamp = if report.schema.is_some() {
         read_compat_stamp(&mut *tx, true).await
     } else {
-        lash_core_execution::compat::StampRead::Absent { populated: false }
+        lash_core_store::compat::StampRead::Absent { populated: false }
     };
     #[cfg(feature = "synthetic-next")]
     let synthetic_expanded = matches!(
         &stamp,
-        lash_core_execution::compat::StampRead::Present(stamp)
+        lash_core_store::compat::StampRead::Present(stamp)
             if stamp.version == descriptor.writes.max()
     );
     #[cfg(not(feature = "synthetic-next"))]
     let synthetic_expanded = false;
-    let admission = lash_core_execution::compat::admit(descriptor, stamp).map_err(|refusal| {
+    let admission = lash_core_store::compat::admit(descriptor, stamp).map_err(|refusal| {
         let refusal = refusal.with_writing_release(writing_release.clone());
         record_schema_gate_refusal(&report, check, &refusal);
         StoreError::Incompatible { refusal }
     })?;
     if matches!(
         admission,
-        lash_core_execution::compat::CompatAdmission::Provision
+        lash_core_store::compat::CompatAdmission::Provision
     ) {
-        let refusal = lash_core_execution::compat::CompatRefusal::Unstamped {
+        let refusal = lash_core_store::compat::CompatRefusal::Unstamped {
             component: descriptor.component.as_str().to_owned(),
             writing_release: writing_release.clone(),
         };
@@ -146,7 +147,7 @@ pub(crate) async fn ensure_schema_with_release(
     }
     if matches!(
         admission,
-        lash_core_execution::compat::CompatAdmission::Expanded { .. }
+        lash_core_store::compat::CompatAdmission::Expanded { .. }
     ) || synthetic_expanded
     {
         #[cfg(feature = "synthetic-next")]
@@ -158,7 +159,7 @@ pub(crate) async fn ensure_schema_with_release(
         #[cfg(not(feature = "synthetic-next"))]
         let findings = crate::schema_shape::expanded_findings(&mut tx, &report).await?;
         if !findings.is_empty() {
-            let refusal = lash_core_execution::compat::CompatRefusal::ShapeRefused {
+            let refusal = lash_core_store::compat::CompatRefusal::ShapeRefused {
                 component: descriptor.component.as_str().to_owned(),
                 findings,
                 writing_release: writing_release.clone(),
@@ -172,7 +173,7 @@ pub(crate) async fn ensure_schema_with_release(
             || synthetic_expanded
             || matches!(
                 admission,
-                lash_core_execution::compat::CompatAdmission::Expanded { .. }
+                lash_core_store::compat::CompatAdmission::Expanded { .. }
             ),
         check,
     ) {
@@ -232,11 +233,11 @@ pub(crate) async fn ensure_schema_with_release(
 fn record_schema_gate_refusal(
     report: &SchemaReport,
     check: SchemaCheck,
-    refusal: &lash_core_execution::compat::CompatRefusal,
+    refusal: &lash_core_store::compat::CompatRefusal,
 ) {
     let outcome = if matches!(
         refusal,
-        lash_core_execution::compat::CompatRefusal::ShapeRefused { .. }
+        lash_core_store::compat::CompatRefusal::ShapeRefused { .. }
     ) {
         "denied_shape"
     } else {
@@ -316,16 +317,16 @@ async fn schema_observation_connection(pool: &PgPool) -> Result<sqlx::PgConnecti
 /// Facts used by preflight, all read under the schema key in one snapshot.
 pub(crate) struct SchemaObservation {
     pub(crate) report: SchemaReport,
-    pub(crate) stamp: lash_core_execution::compat::StampRead,
+    pub(crate) stamp: lash_core_store::compat::StampRead,
     pub(crate) admission_findings: Vec<String>,
-    pub(crate) release: lash_core_execution::StoreReleaseState,
+    pub(crate) release: lash_core_store::store::StoreReleaseState,
     pub(crate) writing_release: Option<String>,
-    pub(crate) fleet_format: lash_core_execution::FleetFormatState,
+    pub(crate) fleet_format: lash_core_store::store::FleetFormatState,
 }
 
 pub(crate) async fn observe_schema(
     pool: &PgPool,
-    descriptor: &lash_core_execution::compat::CompatDescriptor,
+    descriptor: &lash_core_store::compat::CompatDescriptor,
 ) -> Result<SchemaObservation, StoreError> {
     let mut connection = schema_observation_connection(pool).await?;
     let observed = observe_within_repeatable_read(&mut connection, descriptor).await;
@@ -335,9 +336,10 @@ pub(crate) async fn observe_schema(
 
 async fn observe_within_repeatable_read(
     connection: &mut sqlx::PgConnection,
-    descriptor: &lash_core_execution::compat::CompatDescriptor,
+    descriptor: &lash_core_store::compat::CompatDescriptor,
 ) -> Result<SchemaObservation, StoreError> {
-    use lash_core_execution::compat::{CompatAdmission, StampRead};
+    use lash_core_store::compat::CompatAdmission;
+    use lash_core_store::compat::StampRead;
 
     let mut tx = crate::observed_sql::control("BEGIN", sqlx::Connection::begin(connection))
         .await
@@ -362,7 +364,7 @@ async fn observe_within_repeatable_read(
     } else {
         StampRead::Absent { populated: false }
     };
-    let admission_findings = match lash_core_execution::compat::admit(descriptor, stamp.clone()) {
+    let admission_findings = match lash_core_store::compat::admit(descriptor, stamp.clone()) {
         #[cfg(feature = "synthetic-next")]
         Ok(CompatAdmission::Native) if matches!(&stamp, StampRead::Present(stamp) if stamp.version == descriptor.writes.max()) => {
             crate::schema_shape::synthetic_next_findings(&mut tx, &report).await?
@@ -421,7 +423,7 @@ fn record_schema_gate_decision(
     report: &SchemaReport,
     check: SchemaCheck,
     outcome: &'static str,
-    refusal: Option<&lash_core_execution::compat::CompatRefusal>,
+    refusal: Option<&lash_core_store::compat::CompatRefusal>,
 ) {
     let counts = report.finding_counts();
     let fields = tracing::field::display(
@@ -553,8 +555,8 @@ pub(crate) fn version_mismatch_error(
         ),
     };
     StoreError::Incompatible {
-        refusal: lash_core_execution::compat::CompatRefusal::ShapeRefused {
-            component: lash_core_execution::compat::ComponentId::POSTGRES
+        refusal: lash_core_store::compat::CompatRefusal::ShapeRefused {
+            component: lash_core_store::compat::ComponentId::POSTGRES
                 .as_str()
                 .to_owned(),
             findings: vec![format!(

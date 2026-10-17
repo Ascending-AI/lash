@@ -46,10 +46,10 @@ pub(super) struct Node {
     pub(super) core: lash::LashCore,
     /// The node's product stores, for a workload that writes facts through a
     /// store port instead of executing them.
-    pub(super) stores: Arc<dyn lash_core::StoreSet>,
+    pub(super) stores: Arc<dyn lash_execution_contracts::backend::StoreSet>,
     /// The node's process registry with its seeding probe, for a workload
     /// that appends process facts as an owner's commit would.
-    pub(super) seeding: Arc<dyn lash_core::ConformanceProcessRegistry>,
+    pub(super) seeding: Arc<dyn lash_execution_contracts::process::ConformanceProcessRegistry>,
     pub(super) process_replay: Arc<ProcessReplayProbe>,
     pub(super) live_replay: Arc<LiveReplayProbe>,
 }
@@ -75,8 +75,8 @@ pub(super) struct Fleet {
 /// One node's backend, product stores and replay stores.
 type Wiring = (
     lash::Backend,
-    Arc<dyn lash_core::StoreSet>,
-    Arc<dyn lash_core::ConformanceProcessRegistry>,
+    Arc<dyn lash_execution_contracts::backend::StoreSet>,
+    Arc<dyn lash_execution_contracts::process::ConformanceProcessRegistry>,
     Arc<dyn lash_core::ProcessReplayStore>,
     Arc<dyn lash_core::LiveReplayStore>,
 );
@@ -142,7 +142,10 @@ impl lash_core::ToolProvider for Tools {
     fn tool_manifests(
         &self,
         _config: &lash_core::OwnerConfigView,
-    ) -> std::result::Result<Vec<lash_core::ToolManifest>, lash_core::PluginError> {
+    ) -> std::result::Result<
+        Vec<lash_core::ToolManifest>,
+        lash_execution_contracts::plugin_error::PluginError,
+    > {
         Ok(vec![self.mark.manifest()])
     }
     fn resolve_contract(
@@ -211,7 +214,7 @@ impl Fleet {
                         .await?,
                     );
                     let seeding = sqlite.process_registry();
-                    let stores: Arc<dyn lash_core::StoreSet> = sqlite;
+                    let stores: Arc<dyn lash_execution_contracts::backend::StoreSet> = sqlite;
                     (
                         facade::backend(stores.clone())?,
                         stores,
@@ -474,7 +477,7 @@ pub(super) async fn settled(core: &lash::LashCore, process: &lash::ProcessId) ->
     let output =
         within_population("process terminal", core.processes().await_output(process)).await??;
     ensure!(
-        matches!(&output, lash_core::ProcessAwaitOutput::Settled { output }
+        matches!(&output, lash_execution_contracts::process::ProcessAwaitOutput::Settled { output }
             if output.status() == lash_protocol_types::ToolCallStatus::Success),
         "the observed process failed: {output:?}"
     );

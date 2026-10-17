@@ -310,7 +310,7 @@ struct TerminalAttemptSettlement<'settlement> {
     recorded_call_id: &'settlement lash_protocol_types::ToolCallId,
 
     record: Box<ToolCallRecord>,
-    intents: crate::ToolIntents,
+    intents: lash_execution_contracts::tool_intent::ToolIntents,
     attempts: Vec<lash_trace::TraceRetryAttempt>,
 }
 
@@ -324,8 +324,8 @@ struct SealedToolFinal {
     /// uses.
     recorded_call_id: lash_protocol_types::ToolCallId,
     record: ToolCallRecord,
-    intents: crate::ToolIntents,
-    intent_outcomes: Vec<crate::ToolIntentExecutionOutcome>,
+    intents: lash_execution_contracts::tool_intent::ToolIntents,
+    intent_outcomes: Vec<lash_execution_contracts::tool_intent_outcome::ToolIntentExecutionOutcome>,
     attempts: Vec<lash_trace::TraceRetryAttempt>,
 }
 
@@ -420,20 +420,25 @@ async fn drain_sealed_final(
 
 /// Whether `outcome` is the attempt's declared process start at
 /// `intent_index`, realized or refused.
-fn declares_start_at(outcome: &crate::ToolIntentExecutionOutcome, intent_index: u32) -> bool {
+fn declares_start_at(
+    outcome: &lash_execution_contracts::tool_intent_outcome::ToolIntentExecutionOutcome,
+    intent_index: u32,
+) -> bool {
     declares_at(outcome, crate::ToolIntentKind::StartProcess, intent_index)
 }
 
 fn declares_at(
-    outcome: &crate::ToolIntentExecutionOutcome,
+    outcome: &lash_execution_contracts::tool_intent_outcome::ToolIntentExecutionOutcome,
     kind: crate::ToolIntentKind,
     intent_index: u32,
 ) -> bool {
     let (outcome_kind, index) = match outcome {
-        crate::ToolIntentExecutionOutcome::Executed {
-            identity, realized, ..
+        lash_execution_contracts::tool_intent_outcome::ToolIntentExecutionOutcome::Executed {
+            identity,
+            realized,
+            ..
         } => (realized.kind(), identity.intent_index),
-        crate::ToolIntentExecutionOutcome::Refused {
+        lash_execution_contracts::tool_intent_outcome::ToolIntentExecutionOutcome::Refused {
             intent_index: refused,
             kind,
             ..
@@ -448,13 +453,13 @@ fn declares_at(
 /// describe the intent protocol itself and stay in the typed intent-outcome
 /// stream.
 pub(super) fn superseding_refusal(
-    outcomes: &[crate::ToolIntentExecutionOutcome],
-) -> Option<&crate::ToolIntentExecutionOutcome> {
+    outcomes: &[lash_execution_contracts::tool_intent_outcome::ToolIntentExecutionOutcome],
+) -> Option<&lash_execution_contracts::tool_intent_outcome::ToolIntentExecutionOutcome> {
     outcomes.iter().find(|outcome| {
         matches!(
             outcome,
-            crate::ToolIntentExecutionOutcome::Refused {
-                refusal: crate::ToolIntentRefusalReason::CommandFailed { .. },
+            lash_execution_contracts::tool_intent_outcome::ToolIntentExecutionOutcome::Refused {
+                refusal: lash_execution_contracts::tool_intent_outcome::ToolIntentRefusalReason::CommandFailed { .. },
                 ..
             }
         )
@@ -463,12 +468,17 @@ pub(super) fn superseding_refusal(
 
 pub(super) fn project_recorded_intent_outcomes(
     output: &mut crate::ToolCallOutput,
-    outcomes: &[crate::ToolIntentExecutionOutcome],
+    outcomes: &[lash_execution_contracts::tool_intent_outcome::ToolIntentExecutionOutcome],
 ) {
-    if let Some(crate::ToolIntentExecutionOutcome::Refused {
-        refusal: crate::ToolIntentRefusalReason::CommandFailed { cause },
-        ..
-    }) = superseding_refusal(outcomes)
+    if let Some(
+        lash_execution_contracts::tool_intent_outcome::ToolIntentExecutionOutcome::Refused {
+            refusal:
+                lash_execution_contracts::tool_intent_outcome::ToolIntentRefusalReason::CommandFailed {
+                    cause,
+                },
+            ..
+        },
+    ) = superseding_refusal(outcomes)
     {
         // ADR 0042 deliberately seals the ToolAttempt terminal before draining
         // intents. Its optimistic provider value is therefore immutable; the
@@ -493,7 +503,7 @@ pub(super) fn project_recorded_intent_outcomes(
                 || declares_at(outcome, crate::ToolIntentKind::GetDefinition, index)
         });
         match outcome {
-            Some(crate::ToolIntentExecutionOutcome::Executed { realized, .. }) => {
+            Some(lash_execution_contracts::tool_intent_outcome::ToolIntentExecutionOutcome::Executed { realized, .. }) => {
                 match realized.model_value().and_then(serde_json::from_value) {
                     Ok(decoded) => *value = decoded,
                     Err(error) => {
@@ -505,7 +515,7 @@ pub(super) fn project_recorded_intent_outcomes(
                     }
                 }
             }
-            Some(crate::ToolIntentExecutionOutcome::Refused { refusal, .. }) => {
+            Some(lash_execution_contracts::tool_intent_outcome::ToolIntentExecutionOutcome::Refused { refusal, .. }) => {
                 *output = crate::ToolCallOutput::failure(crate::ToolFailure::runtime(
                     crate::ToolFailureClass::Unavailable,
                     refusal.code(),
@@ -532,16 +542,16 @@ pub(super) fn project_recorded_intent_outcomes(
             .find(|outcome| declares_start_at(outcome, intent_index))
     {
         let handle = match start {
-            crate::ToolIntentExecutionOutcome::Executed {
-                realized: crate::ToolIntentRealized::StartProcess(handle),
+            lash_execution_contracts::tool_intent_outcome::ToolIntentExecutionOutcome::Executed {
+                realized: lash_execution_contracts::tool_intent_outcome::ToolIntentRealized::StartProcess(handle),
                 ..
             } => Ok(realized_start_handle(handle)),
-            crate::ToolIntentExecutionOutcome::Executed { realized, .. } => Err(format!(
+            lash_execution_contracts::tool_intent_outcome::ToolIntentExecutionOutcome::Executed { realized, .. } => Err(format!(
                 "start slot names realized {}",
                 realized.kind().as_str()
             )),
-            crate::ToolIntentExecutionOutcome::Refused { refusal, .. }
-            | crate::ToolIntentExecutionOutcome::ProtocolRefused { refusal } => Err(format!(
+            lash_execution_contracts::tool_intent_outcome::ToolIntentExecutionOutcome::Refused { refusal, .. }
+            | lash_execution_contracts::tool_intent_outcome::ToolIntentExecutionOutcome::ProtocolRefused { refusal } => Err(format!(
                 "the declared process start did not register a process: it was refused with {}",
                 refusal.describe()
             )),
@@ -572,7 +582,9 @@ pub(super) fn project_recorded_intent_outcomes(
 
 /// The handle a realized start answers, including the immutable definition
 /// id when it started a definition. Lifecycle status remains a read.
-fn realized_start_handle(handle: &crate::ProcessHandleView) -> serde_json::Value {
+fn realized_start_handle(
+    handle: &lash_execution_contracts::process::ProcessHandleView,
+) -> serde_json::Value {
     let mut value = serde_json::json!({
         lash_protocol_types::handle::HANDLE_FIELD: lash_protocol_types::handle::HANDLE_KIND,
         "id": handle.id,
@@ -603,7 +615,7 @@ fn runtime_failure_outcome(
             )),
         },
         attempts,
-        intents: crate::ToolIntents::default(),
+        intents: lash_execution_contracts::tool_intent::ToolIntents::default(),
         intent_outcomes: Vec::new(),
     }
 }
@@ -645,8 +657,10 @@ mod projection_tests {
     use super::*;
     use crate::SessionId;
 
-    fn refusal(reason: crate::ToolIntentRefusalReason) -> crate::ToolIntentExecutionOutcome {
-        crate::ToolIntentExecutionOutcome::Refused {
+    fn refusal(
+        reason: lash_execution_contracts::tool_intent_outcome::ToolIntentRefusalReason,
+    ) -> lash_execution_contracts::tool_intent_outcome::ToolIntentExecutionOutcome {
+        lash_execution_contracts::tool_intent_outcome::ToolIntentExecutionOutcome::Refused {
             identity: None,
             intent_index: 0,
             kind: crate::ToolIntentKind::CancelProcess,
@@ -655,10 +669,10 @@ mod projection_tests {
     }
 
     fn executed_at(
-        realized: crate::ToolIntentRealized,
+        realized: lash_execution_contracts::tool_intent_outcome::ToolIntentRealized,
         intent_index: u32,
-    ) -> crate::ToolIntentExecutionOutcome {
-        crate::ToolIntentExecutionOutcome::Executed {
+    ) -> lash_execution_contracts::tool_intent_outcome::ToolIntentExecutionOutcome {
+        lash_execution_contracts::tool_intent_outcome::ToolIntentExecutionOutcome::Executed {
             identity: crate::ToolIntentIdentity {
                 owner: crate::RuntimeOwner::Session(SessionId::from("session")),
                 execution_scope_id: "turn".to_string(),
@@ -686,13 +700,18 @@ mod projection_tests {
         })
     }
 
-    fn start_outcome(label: &str, intent_index: u32) -> crate::ToolIntentExecutionOutcome {
+    fn start_outcome(
+        label: &str,
+        intent_index: u32,
+    ) -> lash_execution_contracts::tool_intent_outcome::ToolIntentExecutionOutcome {
         executed_at(
-            crate::ToolIntentRealized::StartProcess(crate::ProcessHandleView::new(
-                crate::process_id_for_test(label),
-                crate::ProcessIdentity::new("external"),
-                crate::ProcessStatus::Running,
-            )),
+            lash_execution_contracts::tool_intent_outcome::ToolIntentRealized::StartProcess(
+                lash_execution_contracts::process::ProcessHandleView::new(
+                    crate::process_id_for_test(label),
+                    lash_execution_contracts::process::ProcessIdentity::new("external"),
+                    lash_execution_contracts::process::ProcessStatus::Running,
+                ),
+            ),
             intent_index,
         )
     }
@@ -702,8 +721,8 @@ mod projection_tests {
         let mut output = crate::ToolCallOutput::success(serde_json::json!("optimistic"));
         project_recorded_intent_outcomes(
             &mut output,
-            &[refusal(crate::ToolIntentRefusalReason::CommandFailed {
-                cause: crate::ToolIntentCommandFailure::ProcessNotVisible {
+            &[refusal(lash_execution_contracts::tool_intent_outcome::ToolIntentRefusalReason::CommandFailed {
+                cause: lash_execution_contracts::plugin_error::ToolIntentCommandFailure::ProcessNotVisible {
                     process_id: crate::process_id_for_test("p-invisible"),
                 },
             })],
@@ -722,7 +741,7 @@ mod projection_tests {
         project_recorded_intent_outcomes(
             &mut output,
             &[refusal(
-                crate::ToolIntentRefusalReason::CountBudgetExceeded {
+                lash_execution_contracts::tool_intent_outcome::ToolIntentRefusalReason::CountBudgetExceeded {
                     actual: 33,
                     maximum: 32,
                 },
@@ -744,13 +763,13 @@ mod projection_tests {
 
         project_recorded_intent_outcomes(
             &mut output,
-            &[crate::ToolIntentExecutionOutcome::Refused {
+            &[lash_execution_contracts::tool_intent_outcome::ToolIntentExecutionOutcome::Refused {
                 identity: None,
                 intent_index: 0,
                 kind: crate::ToolIntentKind::StartProcess,
-                refusal: crate::ToolIntentRefusalReason::CanonicalByteBudgetExceeded {
+                refusal: lash_execution_contracts::tool_intent_outcome::ToolIntentRefusalReason::CanonicalByteBudgetExceeded {
                     actual: 139_000,
-                    maximum: crate::TOOL_INTENT_MAX_CANONICAL_BYTES,
+                    maximum: lash_execution_contracts::tool_intent::TOOL_INTENT_MAX_CANONICAL_BYTES,
                 },
             }],
         );
@@ -818,13 +837,15 @@ mod projection_tests {
     /// the model (FIG-6522).
     #[test]
     fn a_definition_slot_answers_the_resolved_definition_or_the_refusal() {
-        let definition = crate::ProcessDefinition::new(
+        let definition = lash_execution_contracts::process::ProcessDefinition::new(
             crate::ProcessDefinitionId::from_sha256_digest([7; 32]),
-            crate::ProcessSignature::Unknown,
+            lash_execution_contracts::process::ProcessSignature::Unknown,
         );
         let get = |realized| {
             executed_at(
-                crate::ToolIntentRealized::GetDefinition(Box::new(realized)),
+                lash_execution_contracts::tool_intent_outcome::ToolIntentRealized::GetDefinition(
+                    Box::new(realized),
+                ),
                 0,
             )
         };
@@ -840,11 +861,11 @@ mod projection_tests {
             crate::ToolCallOutput::success(lash_protocol_types::handle::definition_slot_json(0));
         project_recorded_intent_outcomes(
             &mut refused,
-            &[crate::ToolIntentExecutionOutcome::Refused {
+            &[lash_execution_contracts::tool_intent_outcome::ToolIntentExecutionOutcome::Refused {
                 identity: None,
                 intent_index: 0,
                 kind: crate::ToolIntentKind::GetDefinition,
-                refusal: crate::ToolIntentRefusalReason::MintingRunCancelled,
+                refusal: lash_execution_contracts::tool_intent_outcome::ToolIntentRefusalReason::MintingRunCancelled,
             }],
         );
         let crate::ToolCallOutcome::Failure(failure) = refused.outcome else {

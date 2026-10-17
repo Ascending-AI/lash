@@ -21,7 +21,7 @@ pub use lash_core_store::tool_run::PresentationBinding;
 use lash_protocol_types::sync::MutexExt as _;
 use serde::{Deserialize, Serialize};
 
-use super::executor::RuntimeEffectControllerError;
+use lash_core_store::runtime_error::RuntimeEffectControllerError;
 
 /// Record selection independently of the callback body. Both current completion
 /// paths consume this same K1 binding; replay never reselects installed hooks.

@@ -22,7 +22,7 @@ use lash_core::llm::types::{
 };
 use lash_core::runtime::durable::session::TurnServices;
 use lash_core::{ExecutionPolicy, LlmOutputPart, ToolCall, ToolOutcome};
-use lash_core_execution::Backend;
+use lash_execution_contracts::backend::Backend;
 use lash_protocol_types::SessionId;
 
 use crate::recorder::Recorder;

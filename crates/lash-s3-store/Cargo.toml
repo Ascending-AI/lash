@@ -23,6 +23,7 @@ workspace = true
 testing = []
 
 [dependencies]
+lash-execution-contracts = { workspace = true }
 async-trait = { workspace = true }
 futures-util = { workspace = true }
 lash-core = { workspace = true }

@@ -1,10 +1,12 @@
 use super::*;
 use crate::artifact_store::MODULE_ARTIFACT_NAMESPACE;
-use lash_core_execution::FleetFormat;
-use lash_core_execution::store::{StoreTestSupport as _, WindowSelector};
-use lash_core_execution::{
-    ModuleArtifactStore, QueuedWorkStore as _, SessionCatalogStore as _, SessionHistoryStore as _,
-};
+use lash_core_store::store::FleetFormat;
+use lash_core_store::store::QueuedWorkStore as _;
+use lash_core_store::store::SessionCatalogStore as _;
+use lash_core_store::store::SessionHistoryStore as _;
+use lash_core_store::store::StoreTestSupport as _;
+use lash_core_store::store::WindowSelector;
+use lash_execution_contracts::module_artifacts::ModuleArtifactStore;
 
 fn assert_corrupt<T>(result: Result<T, StoreError>, expected_kind: &'static str) {
     match result {
@@ -30,10 +32,10 @@ fn assert_storage_failure<T>(label: &str, result: Result<T, StoreError>) {
 
 fn assert_artifact_storage_failure<T>(
     label: &str,
-    result: Result<T, lash_core::ArtifactStoreError>,
+    result: Result<T, lash_execution_contracts::module_artifacts::ArtifactStoreError>,
 ) {
     match result {
-        Err(lash_core::ArtifactStoreError::StoreFault(
+        Err(lash_execution_contracts::module_artifacts::ArtifactStoreError::StoreFault(
             lash_core::store::StoreFault::StorageFailure { backend, message },
         )) => {
             assert_eq!(backend, "sqlite", "the artifact port preserves the backend");
@@ -181,9 +183,9 @@ async fn readonly_connection_rejects_every_surviving_blob_write_path() {
         let module = lash_conformance::module_artifact_store::SampleArtifact::named("fault");
         store
             .publish_module_artifact(
-                &lash_core_execution::ReferrerClaim::unguarded(
-                    lash_core_execution::ArtifactReferrer::HostPin(
-                        lash_core_execution::HostArtifactPin::mint(),
+                &lash_core_store::artifact_referrer::ReferrerClaim::unguarded(
+                    lash_core_store::artifact_referrer::ArtifactReferrer::HostPin(
+                        lash_core_store::artifact_referrer::HostArtifactPin::mint(),
                     ),
                 )
                 .expect("host pin claim"),
@@ -193,12 +195,12 @@ async fn readonly_connection_rejects_every_surviving_blob_write_path() {
             .await
     });
 
-    let state = lash_core_execution::RuntimeSessionState {
+    let state = lash_core_store::session_state::RuntimeSessionState {
         session_id: SessionId::from("readonly-session"),
-        ..lash_core_execution::RuntimeSessionState::fixture(
-            lash_core_execution::SessionPolicy::new(
-                lash_core_execution::TurnBudget::Unbounded,
-                lash_core_execution::MaxToolCalls::new(1024),
+        ..lash_core_store::session_state::RuntimeSessionState::fixture(
+            lash_core_store::session_policy::SessionPolicy::new(
+                lash_protocol_types::session_model::TurnBudget::Unbounded,
+                lash_protocol_types::session_model::MaxToolCalls::new(1024),
                 lash_core::NoProgressBudget::bounded(12),
             ),
         )
@@ -250,8 +252,8 @@ async fn queued_work_read_survives_a_consume_mid_hydration(session_id: &str, rea
         SqliteStore::open_at(
             &crate::location::DatabaseLocation::standalone_file(&path),
             StoreOptions::standard(crate::SqliteSynchronous::Normal),
-            Arc::new(lash_core_execution::facade_support::SystemClock),
-            lash_core_execution::FleetFormat::writable(),
+            Arc::new(lash_core_ids::clock::SystemClock),
+            lash_core_store::store::FleetFormat::writable(),
             crate::testing::ConnectionHooks {
                 pauses: Some(pauses.clone()),
                 inline_calls: false,
@@ -262,13 +264,15 @@ async fn queued_work_read_survives_a_consume_mid_hydration(session_id: &str, rea
     );
     let session_id = SessionId::fixture(session_id);
     let batch = store
-        .enqueue_queued_work(lash_core_execution::runtime::QueuedWorkBatchDraft::new(
-            session_id.clone(),
-            lash_core_execution::DeliveryPolicy::EarliestSafeBoundary,
-            lash_core_execution::runtime::SessionCommand::RefreshToolCatalog {
-                reason: "snapshot test".into(),
-            },
-        ))
+        .enqueue_queued_work(
+            lash_core_store::queued_work_vocabulary::QueuedWorkBatchDraft::new(
+                session_id.clone(),
+                lash_core_store::queued_work_vocabulary::DeliveryPolicy::EarliestSafeBoundary,
+                lash_core_store::queued_work_vocabulary::SessionCommand::RefreshToolCatalog {
+                    reason: "snapshot test".into(),
+                },
+            ),
+        )
         .await
         .expect("enqueue queued work");
 
@@ -343,19 +347,21 @@ async fn admit_and_seed(store: &SqliteStore, session_id: &SessionId) {
         )
         .await
         .expect("admit the seeded session");
-    let mut state = lash_core_execution::RuntimeSessionState {
+    let mut state = lash_core_store::session_state::RuntimeSessionState {
         session_id: session_id.clone(),
-        ..lash_core_execution::RuntimeSessionState::fixture(
-            lash_core_execution::SessionPolicy::new(
-                lash_core_execution::TurnBudget::Unbounded,
-                lash_core_execution::MaxToolCalls::new(1024),
+        ..lash_core_store::session_state::RuntimeSessionState::fixture(
+            lash_core_store::session_policy::SessionPolicy::new(
+                lash_protocol_types::session_model::TurnBudget::Unbounded,
+                lash_protocol_types::session_model::MaxToolCalls::new(1024),
                 lash_core::NoProgressBudget::bounded(12),
             ),
         )
     };
     state.ensure_agent_frame_initialized();
     store
-        .commit_runtime_state(lash_core_execution::RuntimeCommit::persisted_state_for_test(&state))
+        .commit_runtime_state(
+            lash_core_store::store::RuntimeCommit::persisted_state_for_test(&state),
+        )
         .await
         .expect("seed the session head");
 }
@@ -436,32 +442,37 @@ async fn seed_failure_evidence_session(
         )
         .await
         .expect("admit receipt session");
-    let state = lash_core_execution::RuntimeSessionState {
+    let state = lash_core_store::session_state::RuntimeSessionState {
         session_id: SessionId::fixture(session_id.to_string()),
-        ..lash_core_execution::RuntimeSessionState::fixture(
-            lash_core_execution::SessionPolicy::new(
-                lash_core_execution::TurnBudget::Unbounded,
-                lash_core_execution::MaxToolCalls::new(1024),
+        ..lash_core_store::session_state::RuntimeSessionState::fixture(
+            lash_core_store::session_policy::SessionPolicy::new(
+                lash_protocol_types::session_model::TurnBudget::Unbounded,
+                lash_protocol_types::session_model::MaxToolCalls::new(1024),
                 lash_core::NoProgressBudget::bounded(12),
             ),
         )
     };
-    let mut commit = lash_core_execution::RuntimeCommit::persisted_state_for_test(&state);
-    commit.failure_evidence = vec![lash_core_execution::TurnFailureEvidence {
-        partial_output: Some(lash_core_execution::TurnFailurePartialOutput::Complete {
-            text: "settled partial output".to_string(),
-        }),
-        billed_usage: lash_core_execution::llm::types::LlmUsage {
-            output_tokens: 3,
-            ..Default::default()
+    let mut commit = lash_core_store::store::RuntimeCommit::persisted_state_for_test(&state);
+    commit.failure_evidence = vec![
+        lash_core_store::turn_failure_evidence::TurnFailureEvidence {
+            partial_output: Some(
+                lash_core_store::turn_failure_evidence::TurnFailurePartialOutput::Complete {
+                    text: "settled partial output".to_string(),
+                },
+            ),
+            billed_usage: lash_protocol_types::session_model::LlmUsage {
+                output_tokens: 3,
+                ..Default::default()
+            },
+            refusal: lash_core_store::turn_failure_evidence::ChargeSafetyRefusalEvidence {
+                denial_reason:
+                    lash_protocol_types::llm::types::ChargeSafetyDenialReason::GuaranteeRequired,
+                protocol_position: lash_protocol_types::llm::types::ProtocolPosition::OutputStarted,
+                attempt_number: 1,
+                attempt_count: 1,
+            },
         },
-        refusal: lash_core_execution::ChargeSafetyRefusalEvidence {
-            denial_reason: lash_core_execution::ChargeSafetyDenialReason::GuaranteeRequired,
-            protocol_position: lash_core_execution::ProtocolPosition::OutputStarted,
-            attempt_number: 1,
-            attempt_count: 1,
-        },
-    }];
+    ];
     store
         .commit_runtime_state(commit)
         .await
@@ -543,7 +554,7 @@ async fn turn_failure_evidence_refuses_a_preversioned_receipt() {
 #[tokio::test]
 async fn turn_failure_evidence_refuses_a_newer_receipt_version() {
     const SESSION_ID: &str = "failure-evidence-newer-receipt";
-    let newer = lash_core_execution::store::RUNTIME_COMMIT_RECEIPT_SCHEMA_VERSION + 1;
+    let newer = lash_core_store::store::RUNTIME_COMMIT_RECEIPT_SCHEMA_VERSION + 1;
     let bad_json = format!(r#"{{"schema_version":{newer},"failure_evidence":[{{}}]}}"#);
     let store = seed_failure_evidence_session(SESSION_ID, &bad_json).await;
 
@@ -556,7 +567,7 @@ async fn turn_failure_evidence_refuses_a_newer_receipt_version() {
                 actual,
                 expected,
             } if *actual == newer
-                && *expected == lash_core_execution::store::RUNTIME_COMMIT_RECEIPT_SCHEMA_VERSION
+                && *expected == lash_core_store::store::RUNTIME_COMMIT_RECEIPT_SCHEMA_VERSION
         ),
         "the newer-version receipt refusal must be the typed version error: {error:?}"
     );
@@ -573,7 +584,7 @@ async fn absent_rows_remain_honest_successful_outcomes() {
             .lookup_session(&unknown)
             .await
             .expect("look up an unknown session"),
-        lash_core_execution::SessionLookup::Absent
+        lash_core_store::store::SessionLookup::Absent
     );
     assert!(
         store
@@ -623,16 +634,16 @@ async fn absent_rows_remain_honest_successful_outcomes() {
             .is_none()
     );
     assert!(
-        lash_core_execution::AttachmentReferrers::attachment_referrers(
+        lash_core_store::store::AttachmentReferrers::attachment_referrers(
             store.as_ref(),
-            &lash_core_execution::AttachmentId::parse("a1".repeat(32)).unwrap()
+            &lash_protocol_types::attachment::AttachmentId::parse("a1".repeat(32)).unwrap()
         )
         .await
         .expect("list uncommitted attachments")
         .is_empty()
     );
     assert!(
-        lash_core_execution::AttachmentRootSet::live_attachment_refs(store.as_ref())
+        lash_core_store::attachments::AttachmentRootSet::live_attachment_refs(store.as_ref())
             .await
             .expect("list attachment refs")
             .is_empty()
@@ -662,7 +673,7 @@ async fn malformed_durable_rows_surface_typed_corruption() {
          (session_id, relation_kind, session_state_version, retention_kind)
          VALUES ('corrupt', 'corrupt', ?1, 'until_gc')",
         [i64::from(
-            lash_core_execution::store::CURRENT_SESSION_STATE_VERSION,
+            lash_core_store::store::CURRENT_SESSION_STATE_VERSION,
         )],
     )
     .expect("insert malformed relation");
@@ -718,14 +729,15 @@ async fn malformed_durable_rows_surface_typed_corruption() {
 
     raw.pragma_update(None, "ignore_check_constraints", true)
         .expect("allow unknown durable enum injection");
-    let unknown_owner = lash_core_execution::AttachmentId::parse("b2".repeat(32)).unwrap();
+    let unknown_owner =
+        lash_protocol_types::attachment::AttachmentId::parse("b2".repeat(32)).unwrap();
     raw.execute(
         "INSERT INTO attachment_referrer_edges (attachment_id, referrer_kind, referrer_id) VALUES (?1, 'unknown', 'opaque')",
         params![unknown_owner.as_str()],
     )
     .expect("insert unknown owner kind");
     assert!(matches!(
-        lash_core_execution::AttachmentReferrers::attachment_referrers(&store, &unknown_owner)
+        lash_core_store::store::AttachmentReferrers::attachment_referrers(&store, &unknown_owner)
             .await,
         Err(StoreError::Incompatible { .. })
     ));
@@ -747,7 +759,7 @@ async fn malformed_durable_rows_surface_typed_corruption() {
     assert!(
         matches!(
             &artifact_error,
-            lash_core::ArtifactStoreError::StoredDataCorrupt {
+            lash_execution_contracts::module_artifacts::ArtifactStoreError::StoredDataCorrupt {
                 source: lash_core::ModuleArtifactCorruption::Storage { record_kind, .. },
             } if record_kind == "artifact reference"
         ),
@@ -818,7 +830,7 @@ async fn malformed_durable_rows_surface_typed_corruption() {
         store
             .load_session_window(
                 &session_id,
-                WindowSelector::Terminal(lash_core_execution::TurnId::from(
+                WindowSelector::Terminal(lash_protocol_types::TurnId::from(
                     "missing-config-window",
                 )),
             )
@@ -857,8 +869,8 @@ async fn corrupt_graph_node_surfaces_typed_corruption_from_history_reads() {
         store
             .load_ancestors(
                 &session_id,
-                lash_core_execution::store::HistoryAnchor::Head,
-                lash_core_execution::store::HistoryBudget {
+                lash_core_store::store::HistoryAnchor::Head,
+                lash_core_store::store::HistoryBudget {
                     max_nodes: std::num::NonZeroU32::new(64).expect("nonzero node budget"),
                     max_bytes: std::num::NonZeroU64::new(1 << 20).expect("nonzero byte budget"),
                 },
@@ -897,8 +909,8 @@ async fn closed_connection_surfaces_storage_failure_for_every_read_family() {
         store
             .load_ancestors(
                 &session_id,
-                lash_core_execution::store::HistoryAnchor::Head,
-                lash_core_execution::store::HistoryBudget {
+                lash_core_store::store::HistoryAnchor::Head,
+                lash_core_store::store::HistoryBudget {
                     max_nodes: std::num::NonZeroU32::MIN,
                     max_bytes: std::num::NonZeroU64::new(1024).expect("nonzero byte budget"),
                 },
@@ -919,14 +931,14 @@ async fn closed_connection_surfaces_storage_failure_for_every_read_family() {
     assert_storage_failure("get_checkpoint", store.get_checkpoint(&blob_ref).await);
     assert_storage_failure(
         "AttachmentReferrers::attachment_referrers",
-        lash_core_execution::AttachmentReferrers::attachment_referrers(
+        lash_core_store::store::AttachmentReferrers::attachment_referrers(
             store.as_ref(),
-            &lash_core_execution::AttachmentId::parse("a1".repeat(32)).unwrap(),
+            &lash_protocol_types::attachment::AttachmentId::parse("a1".repeat(32)).unwrap(),
         )
         .await,
     );
     assert_storage_failure(
         "AttachmentRootSet::live_attachment_refs",
-        lash_core_execution::AttachmentRootSet::live_attachment_refs(store.as_ref()).await,
+        lash_core_store::attachments::AttachmentRootSet::live_attachment_refs(store.as_ref()).await,
     );
 }

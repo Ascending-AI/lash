@@ -44,10 +44,13 @@
 
 use lash_protocol_types::SessionId;
 
-use lash_core_execution::{
-    DurableItem, DurablePayload, DurableScan, DurableScanPage, DurableSurface, ScanCoverage,
-    StoreError,
-};
+use lash_core_store::store::DurableItem;
+use lash_core_store::store::DurablePayload;
+use lash_core_store::store::DurableScan;
+use lash_core_store::store::DurableScanPage;
+use lash_core_store::store::DurableSurface;
+use lash_core_store::store::ScanCoverage;
+use lash_core_store::store::StoreError;
 use rusqlite::{Connection, params};
 
 use super::SqliteStorePreflight;
@@ -371,7 +374,7 @@ fn execution_state_blob_ref(manifest: &[u8]) -> Option<String> {
         id: lash_core_store::checkpoint_graph::NodeId::of_envelope(manifest),
         bytes: std::sync::Arc::from(manifest),
     };
-    lash_core_execution::store::SessionCheckpoint::named(&node)?
+    lash_core_store::store::SessionCheckpoint::named(&node)?
         .execution
         .map(|root| root.to_hex())
 }

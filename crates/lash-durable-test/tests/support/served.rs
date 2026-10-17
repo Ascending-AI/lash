@@ -21,7 +21,7 @@ use lash_core::facade_support::ProviderHandle;
 use lash_core::llm::types::{
     LlmRequest, LlmResponse, LlmRole, LlmStreamEvent, StreamBlockIdentity,
 };
-use lash_core_execution::StoreSet;
+use lash_execution_contracts::backend::StoreSet;
 use lash_protocol_types::sync::MutexExt as _;
 
 /// The database a law's core runs over.
@@ -48,7 +48,7 @@ pub type Keep = Vec<Box<dyn std::any::Any + Send>>;
 /// was handed no server for.
 pub async fn stores(tier: Tier) -> Option<(Arc<dyn StoreSet>, Keep)> {
     let (stores, keep) = unseeded(tier).await?;
-    lash_core_execution::testing::process_execution_env_fixture(
+    lash_execution_contracts::testing::process_execution_env_fixture(
         stores.process_env_store().as_ref(),
     )
     .await;
@@ -113,7 +113,7 @@ pub fn backend(stores: Arc<dyn StoreSet>) -> lash::Backend {
 /// The durable backend over `stores` advancing the host's `engines`.
 pub fn backend_with(
     stores: Arc<dyn StoreSet>,
-    engines: Vec<Arc<dyn lash_core::ProcessEngine>>,
+    engines: Vec<Arc<dyn lash_execution_contracts::process::ProcessEngine>>,
 ) -> lash::Backend {
     build(lash::durable::DurableBackendBuilder::new(stores), engines)
 }
@@ -122,7 +122,7 @@ pub fn backend_with(
 pub fn configured_backend(
     stores: Arc<dyn StoreSet>,
     settings: lash_core_execution::DurableSettings,
-    engines: Vec<Arc<dyn lash_core::ProcessEngine>>,
+    engines: Vec<Arc<dyn lash_execution_contracts::process::ProcessEngine>>,
 ) -> lash::Backend {
     build(
         lash::durable::DurableBackendBuilder::new(stores).config(settings),
@@ -132,7 +132,7 @@ pub fn configured_backend(
 
 fn build(
     builder: lash::durable::DurableBackendBuilder,
-    engines: Vec<Arc<dyn lash_core::ProcessEngine>>,
+    engines: Vec<Arc<dyn lash_execution_contracts::process::ProcessEngine>>,
 ) -> lash::Backend {
     engines
         .into_iter()
@@ -337,7 +337,7 @@ impl World {
     /// `engines`.
     pub async fn with_engines(
         tier: Tier,
-        engines: Vec<Arc<dyn lash_core::ProcessEngine>>,
+        engines: Vec<Arc<dyn lash_execution_contracts::process::ProcessEngine>>,
         builder: impl FnOnce(&lash::Backend) -> lash::LashCoreBuilder,
     ) -> Option<Self> {
         let scripts = Arc::new(Scripts::default());
@@ -378,7 +378,7 @@ impl World {
     /// own, rather than by the registered scripts.
     pub async fn with_model(
         tier: Tier,
-        engines: Vec<Arc<dyn lash_core::ProcessEngine>>,
+        engines: Vec<Arc<dyn lash_execution_contracts::process::ProcessEngine>>,
         model: ProviderHandle,
         builder: impl FnOnce(&lash::Backend) -> lash::LashCoreBuilder,
     ) -> Option<Self> {
@@ -445,7 +445,7 @@ impl World {
         tier: Tier,
         layer: impl FnOnce(Arc<dyn StoreSet>) -> Arc<dyn StoreSet>,
         settings: Option<lash_core_execution::DurableSettings>,
-        engines: Vec<Arc<dyn lash_core::ProcessEngine>>,
+        engines: Vec<Arc<dyn lash_execution_contracts::process::ProcessEngine>>,
         model: ProviderHandle,
         scripts: Arc<Scripts>,
         batching: lash::QueuedWorkBatchingConfig,

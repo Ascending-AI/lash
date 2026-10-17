@@ -71,7 +71,7 @@ Plugin composition is not part of the session set: plugin state is refused
 or admitted at session admission, so a plugin roll needs no drain.
 
 Evidence: `crates/lash-durable/src/formats.rs`,
-`crates/lash-core-execution/src/formats.rs`,
+`crates/lash-execution-contracts/src/formats.rs`,
 `crates/lash/src/formats.rs` (`actor_state_surfaces`),
 `crates/lash-durable/src/runner.rs`,
 `crates/lash-durable/src/laws/formats.rs`,

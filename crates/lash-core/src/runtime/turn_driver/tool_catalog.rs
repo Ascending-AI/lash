@@ -1,7 +1,8 @@
 use super::*;
+use crate::TurnDriverPreamble;
 use crate::sansio::ExecutionEnvironmentSyncFailureKind as SyncFailureKind;
 pub(in crate::runtime) use crate::session::ExecutionEnvironmentSyncError as SyncFailure;
-use crate::{PluginError, TurnDriverPreamble};
+use lash_execution_contracts::plugin_error::PluginError;
 
 pub(super) struct PreparedExecutionEnvironment {
     pub(super) tool_definitions: Vec<crate::ToolDefinition>,

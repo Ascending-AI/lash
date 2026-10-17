@@ -1,5 +1,5 @@
-use lash_core_execution::attachments::*;
 use lash_core_execution::*;
+use lash_core_store::attachments::*;
 use lash_protocol_types::MediaType;
 
 struct UnsupportedAttachmentRoots;
@@ -9,21 +9,25 @@ impl AttachmentRootSet for UnsupportedAttachmentRoots {
     async fn live_attachment_refs(
         &self,
     ) -> Result<
-        lash_core_execution::attachments::CompleteAttachmentRoots,
-        lash_core_execution::StoreError,
+        lash_core_store::attachments::CompleteAttachmentRoots,
+        lash_core_store::store::StoreError,
     > {
-        Err(lash_core_execution::StoreError::UnsupportedStoreOperation {
-            operation: "live_attachment_refs",
-        })
+        Err(
+            lash_core_store::store::StoreError::UnsupportedStoreOperation {
+                operation: "live_attachment_refs",
+            },
+        )
     }
 
     async fn has_live_attachment_ref(
         &self,
         _id: &AttachmentId,
-    ) -> Result<bool, lash_core_execution::StoreError> {
-        Err(lash_core_execution::StoreError::UnsupportedStoreOperation {
-            operation: "has_live_attachment_ref",
-        })
+    ) -> Result<bool, lash_core_store::store::StoreError> {
+        Err(
+            lash_core_store::store::StoreError::UnsupportedStoreOperation {
+                operation: "has_live_attachment_ref",
+            },
+        )
     }
 }
 
@@ -55,7 +59,7 @@ async fn unsupported_root_enumeration_aborts_sweep_and_preserves_blob() {
 
     assert!(matches!(
         &error.stop,
-        lash_core_execution::store::MaintenanceStop::Failed(
+        lash_core_store::store::MaintenanceStop::Failed(
             AttachmentStoreError::RootSetEnumerationFailed { source }
         ) if source.to_string().contains("live_attachment_refs")
     ));

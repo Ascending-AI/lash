@@ -696,7 +696,7 @@ impl DurableSnapshotStore {
             for deadline in timers {
                 waits::pin(
                     &mut tx,
-                    waits::WaitSpec {
+                    lash_execution_contracts::waits::WaitSpec {
                         scope: scope.clone(),
                         purpose: waits::WaitPurpose::Timer { deadline },
                     },

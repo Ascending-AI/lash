@@ -1,5 +1,5 @@
 use super::*;
-use lash_core_execution::ProcessProvenance;
+use lash_execution_contracts::process::ProcessProvenance;
 
 const REGISTERED: usize = 10;
 
@@ -10,10 +10,10 @@ async fn registered_and_paged_ids(registry: &dyn ProcessRegistry) -> (Vec<String
     for _ in 0..REGISTERED {
         registered.push(
             registry
-                .register_process(lash_core::testing::held_engine_registration(
+                .register_process(lash_execution_contracts::testing::held_engine_registration(
                     serde_json::Value::Null,
                     ProcessProvenance::host(),
-                    lash_core_execution::Lifetime::Detached,
+                    lash_execution_contracts::process::Lifetime::Detached,
                 ))
                 .await
                 .expect("register page fixture")
@@ -43,11 +43,15 @@ async fn non_terminal_page_order_is_byte_ordered_on_both_backends() {
         return;
     };
     reset(storage.pool()).await;
-    lash_core::testing::process_execution_env_fixture(&storage.process_env_store()).await;
+    lash_execution_contracts::testing::process_execution_env_fixture(&storage.process_env_store())
+        .await;
     let stores = lash_sqlite_store::SqliteStoreSet::memory()
         .await
         .expect("SQLite registry");
-    lash_core::testing::process_execution_env_fixture(stores.process_env_store().as_ref()).await;
+    lash_execution_contracts::testing::process_execution_env_fixture(
+        stores.process_env_store().as_ref(),
+    )
+    .await;
     let sqlite = stores.process_registry();
     for (name, registry) in [
         ("sqlite", sqlite.as_ref() as &dyn ProcessRegistry),

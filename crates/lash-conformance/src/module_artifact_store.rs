@@ -5,11 +5,19 @@
 
 use std::sync::Arc;
 
-use lash_core::{
-    ArtifactCarry, ArtifactName, ArtifactReferrer, ArtifactStoreError, ArtifactStoreId,
-    DurabilityTier, HostArtifactPin, ModuleArtifactBody, ModuleArtifactHold, ModuleArtifactStore,
-    ReferrerClaim, ReferrerGuard, ResolvedArtifactCleanup,
-};
+use lash_core::ArtifactCarry;
+use lash_core::ArtifactName;
+use lash_core::ArtifactReferrer;
+use lash_core::ArtifactStoreId;
+use lash_core::HostArtifactPin;
+use lash_core::ReferrerClaim;
+use lash_core::ReferrerGuard;
+use lash_core::ResolvedArtifactCleanup;
+use lash_execution_contracts::module_artifacts::ArtifactStoreError;
+use lash_execution_contracts::module_artifacts::DurabilityTier;
+use lash_execution_contracts::module_artifacts::ModuleArtifactBody;
+use lash_execution_contracts::module_artifacts::ModuleArtifactHold;
+use lash_execution_contracts::module_artifacts::ModuleArtifactStore;
 
 /// A writer and a fresh handle over the same durable store.
 pub struct ReopenableModuleArtifactStore {

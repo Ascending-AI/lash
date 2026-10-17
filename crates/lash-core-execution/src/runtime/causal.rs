@@ -1,11 +1,14 @@
-use crate::ProcessId;
-use crate::SessionId;
-use crate::TurnId;
-use crate::sansio::EffectId;
-use crate::{
-    CausalRef, EffectAddress, ExecutionScope, RuntimeAttribution, RuntimeEffectInvocation,
-    RuntimeEffectKind, RuntimeInvocation, RuntimeReplay, RuntimeSubject,
-};
+use crate::CausalRef;
+use crate::EffectAddress;
+use crate::ExecutionScope;
+use crate::runtime::effect::RuntimeEffectInvocation;
+use lash_core_store::effect_identity::RuntimeAttribution;
+use lash_core_store::effect_identity::RuntimeEffectKind;
+use lash_core_store::effect_identity::RuntimeInvocation;
+use lash_core_store::effect_identity::RuntimeReplay;
+use lash_protocol_types::SessionId;
+use lash_protocol_types::TurnId;
+use lash_sansio::sansio::EffectId;
 
 #[expect(
     clippy::expect_used,
@@ -281,7 +284,7 @@ impl<'a> CommandSubKey<'a> {
             }
         }
         let (id, operation) = sub.split_once(':')?;
-        let call_id = crate::ToolCallId::parse(id).ok()?;
+        let call_id = lash_protocol_types::ToolCallId::parse(id).ok()?;
         match operation {
             Self::AWAIT => Some(Self::ToolAwait { call_id }),
             Self::CANCEL_WORK => Some(Self::ToolCancelWork { call_id }),
@@ -450,26 +453,6 @@ pub fn process_effect_invocation(
     )
 }
 
-pub fn process_event_invocation(
-    process_id: &ProcessId,
-    sequence: u64,
-    event_type: &str,
-    replay: Option<RuntimeReplay>,
-) -> RuntimeInvocation {
-    RuntimeInvocation {
-        attribution: RuntimeAttribution::none(),
-        subject: RuntimeSubject::ProcessEvent {
-            process_id: process_id.clone(),
-            sequence,
-            event_type: event_type.to_string(),
-        },
-        caused_by: Some(CausalRef::Process {
-            process_id: process_id.clone(),
-        }),
-        replay,
-    }
-}
-
 #[expect(
     clippy::expect_used,
     reason = "the caller's live effect controller admitted this scope"
@@ -534,8 +517,12 @@ fn direct_effect_replay_preimage(
     // `process:<id>`. The effect address carries the execution scope too, so
     // the two owners' keys never share an address either way.
     match owner {
-        crate::RuntimeOwner::Session(session_id) => identity.string(session_id),
-        crate::RuntimeOwner::Process(_) => identity.string(&owner.to_string()),
+        lash_core_store::runtime_owner::RuntimeOwner::Session(session_id) => {
+            identity.string(session_id)
+        }
+        lash_core_store::runtime_owner::RuntimeOwner::Process(_) => {
+            identity.string(&owner.to_string())
+        }
     }
     identity.optional(turn_id, |identity, turn_id| identity.string(turn_id));
     identity.string(usage_source);
@@ -705,7 +692,7 @@ mod tests {
 
     #[test]
     fn command_sub_keys_round_trip_without_changing_journal_spellings() {
-        let call_id = crate::ToolCallId::fixture("sub-key");
+        let call_id = lash_protocol_types::ToolCallId::fixture("sub-key");
         let keys = [
             CommandSubKey::Value,
             CommandSubKey::Sleep,
@@ -782,7 +769,7 @@ mod tests {
             (
                 CausalRef::ToolCall {
                     session_id: SessionId::from("s"),
-                    call_id: crate::ToolCallId::fixture("c"),
+                    call_id: lash_protocol_types::ToolCallId::fixture("c"),
                 },
                 "direct-discriminator:v3:blake3:5eacc6971ae377333486f1358c05eb74d677fe1d4a891b3cd25bf7ecadcb2483",
             ),
@@ -860,7 +847,7 @@ mod tests {
 
         let discriminator = direct_request_discriminator(None, None, 1);
         let preimage = direct_effect_replay_preimage(
-            &crate::RuntimeOwner::Session(SessionId::from("s")),
+            &lash_core_store::runtime_owner::RuntimeOwner::Session(SessionId::from("s")),
             Some(&TurnId::from("t")),
             "u",
             &discriminator,
@@ -872,7 +859,7 @@ mod tests {
         assert_eq!(
             direct_effect_invocation(
                 &ExecutionScope::turn("s", "t"),
-                &crate::RuntimeOwner::Session(SessionId::from("s")),
+                &lash_core_store::runtime_owner::RuntimeOwner::Session(SessionId::from("s")),
                 "u",
                 discriminator,
                 Some(&TurnId::from("t")),
@@ -891,7 +878,7 @@ mod tests {
             0,
         );
         let first_preimage = direct_effect_replay_preimage(
-            &crate::RuntimeOwner::Session(SessionId::from("s")),
+            &lash_core_store::runtime_owner::RuntimeOwner::Session(SessionId::from("s")),
             Some(&TurnId::from("t")),
             "u",
             &first_discriminator,
@@ -902,7 +889,7 @@ mod tests {
         );
         let first = direct_effect_invocation(
             &ExecutionScope::turn("s", "t"),
-            &crate::RuntimeOwner::Session(SessionId::from("s")),
+            &lash_core_store::runtime_owner::RuntimeOwner::Session(SessionId::from("s")),
             "u",
             first_discriminator,
             Some(&TurnId::from("t")),
@@ -914,7 +901,7 @@ mod tests {
         );
         let second_discriminator = direct_request_discriminator(None, None, 1);
         let second_preimage = direct_effect_replay_preimage(
-            &crate::RuntimeOwner::Session(SessionId::from("s")),
+            &lash_core_store::runtime_owner::RuntimeOwner::Session(SessionId::from("s")),
             Some(&TurnId::from("t")),
             "u:direct:v2:caller:21:x",
             &second_discriminator,
@@ -925,7 +912,7 @@ mod tests {
         );
         let second = direct_effect_invocation(
             &ExecutionScope::turn("s", "t"),
-            &crate::RuntimeOwner::Session(SessionId::from("s")),
+            &lash_core_store::runtime_owner::RuntimeOwner::Session(SessionId::from("s")),
             "u:direct:v2:caller:21:x",
             second_discriminator,
             Some(&TurnId::from("t")),

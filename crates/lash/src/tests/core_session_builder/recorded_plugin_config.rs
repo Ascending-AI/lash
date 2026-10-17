@@ -211,7 +211,8 @@ impl ProbeFactory {
     pub fn declare_configuration(
         &self,
         registrar: &mut lash_core::ConfigRegistrar,
-    ) -> std::result::Result<(), lash_core::ConfigRegistrationError> {
+    ) -> std::result::Result<(), lash_execution_contracts::config_error::ConfigRegistrationError>
+    {
         registrar.owner(ProbeOwner)?;
         registrar.command::<RaiseProbeCap>(|recorded, command| {
             if command.turn_cap < recorded.turn_cap {
@@ -241,7 +242,10 @@ impl lash_core::plugin::PluginMetadata for ProbeFactory {
     }
 }
 
-async fn probe_core(backend: lash_core::Backend, probe: &Arc<ProbeFactory>) -> Result<LashCore> {
+async fn probe_core(
+    backend: lash_execution_contracts::backend::Backend,
+    probe: &Arc<ProbeFactory>,
+) -> Result<LashCore> {
     explicit_ephemeral_facets(LashCore::standard_builder(backend))
         .plugin(probe.clone())
         .serve_test_llm_profile(mock_provider(), mock_llm_profile_spec())

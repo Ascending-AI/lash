@@ -1,14 +1,28 @@
 use super::*;
-use lash_core_execution::store::{
-    AnchorUnavailable, CommittedTurnCursor, CommittedTurnNodesPage, CommittedTurnReceipt,
-    FailureEvidenceCursor, FailureEvidencePage, HistoryAnchor, HistoryBudget, HistoryCursor,
-    HistoryNode, HistoryPage, HistoryStop, LineageStamp, SessionHistoryStore, SessionWindowRead,
-    WindowSelector,
-};
-use lash_core_execution::store_backend_support::{
-    HeadPathProbe, OwnerExit, OwnerExitParent, OwnerLowestNode, PathNode, WindowCacheRead,
-    WindowFrame, WindowReuse,
-};
+use lash_core_store::store::AnchorUnavailable;
+use lash_core_store::store::CommittedTurnCursor;
+use lash_core_store::store::CommittedTurnNodesPage;
+use lash_core_store::store::CommittedTurnReceipt;
+use lash_core_store::store::FailureEvidenceCursor;
+use lash_core_store::store::FailureEvidencePage;
+use lash_core_store::store::HistoryAnchor;
+use lash_core_store::store::HistoryBudget;
+use lash_core_store::store::HistoryCursor;
+use lash_core_store::store::HistoryNode;
+use lash_core_store::store::HistoryPage;
+use lash_core_store::store::HistoryStop;
+use lash_core_store::store::LineageStamp;
+use lash_core_store::store::SessionHistoryStore;
+use lash_core_store::store::SessionWindowRead;
+use lash_core_store::store::WindowSelector;
+use lash_core_store::store_backend_support::HeadPathProbe;
+use lash_core_store::store_backend_support::OwnerExit;
+use lash_core_store::store_backend_support::OwnerExitParent;
+use lash_core_store::store_backend_support::OwnerLowestNode;
+use lash_core_store::store_backend_support::PathNode;
+use lash_core_store::store_backend_support::WindowCacheRead;
+use lash_core_store::store_backend_support::WindowFrame;
+use lash_core_store::store_backend_support::WindowReuse;
 use std::num::NonZeroU32;
 #[cfg(any(test, feature = "testing"))]
 use std::sync::atomic::Ordering;
@@ -40,7 +54,7 @@ pub(crate) async fn read_tx(store: &PostgresStore) -> Result<PgTx<'_>, StoreErro
 }
 
 async fn check_live(tx: &mut sqlx::PgConnection, session_id: &SessionId) -> Result<(), StoreError> {
-    lash_core_execution::store::validate_session_id(session_id)?;
+    lash_core_store::store::validate_session_id(session_id)?;
     let deleted: bool = crate::observed_sql::query_scalar(
         crate::session_sql::session_sql()
             .deleted_postgres
@@ -269,7 +283,7 @@ async fn missing_anchor(
     .map_err(store_sqlx_error)?;
     Ok(StoreError::HistoryAnchorUnavailable {
         session_id: session_id.clone(),
-        node_id: lash_core_execution::NodeId::parse(node_id)?,
+        node_id: lash_protocol_types::NodeId::parse(node_id)?,
         reason: if tombstoned == Some(true) {
             AnchorUnavailable::Tombstoned
         } else {
@@ -282,7 +296,7 @@ async fn missing_anchor(
 struct WindowRows<'a> {
     session_id: &'a SessionId,
     frame_id: &'a str,
-    fleet: lash_core_execution::FleetFormat,
+    fleet: lash_core_store::store::FleetFormat,
     #[cfg(any(test, feature = "testing"))]
     decoded: Option<&'a std::sync::atomic::AtomicU64>,
 }
@@ -326,8 +340,7 @@ impl WindowRows<'_> {
             if row.get::<String, _>("frame_node_id") != self.frame_id {
                 return Err(StoreError::InvalidWindowAnchor {
                     frame_node_id: self.frame_id.to_owned().try_into()?,
-                    violation:
-                        lash_core_execution::store::WindowAnchorViolation::ForeignFramePointer,
+                    violation: lash_core_store::store::WindowAnchorViolation::ForeignFramePointer,
                 });
             }
             let node = SessionNodeRecord::decode_storage_body_for_fleet(
@@ -354,11 +367,11 @@ async fn window_graph(
     conn: &mut sqlx::PgConnection,
     rows: &WindowRows<'_>,
     frame_row: &sqlx::postgres::PgRow,
-    leaf: lash_core_execution::NodeId,
+    leaf: lash_protocol_types::NodeId,
     first_generation: i64,
     leaf_generation: i64,
     windows: &WindowCacheRead,
-) -> Result<lash_core_execution::SessionGraph, StoreError> {
+) -> Result<lash_core_store::session_graph::SessionGraph, StoreError> {
     let session_id = rows.session_id;
     let external_parent: Option<String> = frame_row.get("parent_node_id");
     let generation = u64_from_sql("SessionGraph", "generation", first_generation)?;
@@ -398,21 +411,24 @@ async fn window_graph(
                     "frame parent is not the preceding live node",
                 ));
             }
-            lash_core_execution::FrameNodeId::new(row.get::<String, _>("frame_node_id"))
-                .map(Some)
-                .map_err(|error| corrupt("SessionGraph", error.to_string()))?
+            lash_core_store::session_identity::FrameNodeId::new(
+                row.get::<String, _>("frame_node_id"),
+            )
+            .map(Some)
+            .map_err(|error| corrupt("SessionGraph", error.to_string()))?
         }
         None => None,
     };
-    let frame_node_id = lash_core_execution::FrameNodeId::new(rows.frame_id.to_owned())
-        .map_err(|error| corrupt("SessionGraph", error.to_string()))?;
-    let anchor = lash_core_execution::session_graph::WindowAnchor {
+    let frame_node_id =
+        lash_core_store::session_identity::FrameNodeId::new(rows.frame_id.to_owned())
+            .map_err(|error| corrupt("SessionGraph", error.to_string()))?;
+    let anchor = lash_core_store::session_graph::WindowAnchor {
         frame_node_id,
         generation,
         external_parent: external_parent.map(TryInto::try_into).transpose()?,
         previous_frame_node_id,
     };
-    let graph = lash_core_execution::SessionGraph::from_window(nodes, leaf, anchor)?;
+    let graph = lash_core_store::session_graph::SessionGraph::from_window(nodes, leaf, anchor)?;
     Ok(windows.remember(session_id, &graph, leaf_at, bytes))
 }
 
@@ -420,7 +436,7 @@ pub(crate) async fn window_conn(
     conn: &mut sqlx::PgConnection,
     session_id: &SessionId,
     selector: WindowSelector,
-    fleet: lash_core_execution::FleetFormat,
+    fleet: lash_core_store::store::FleetFormat,
     chunk_size: usize,
     windows: &WindowCacheRead,
     #[cfg(any(test, feature = "testing"))] decoded: Option<&std::sync::atomic::AtomicU64>,
@@ -552,7 +568,7 @@ pub(crate) async fn window_conn(
         }
         graph
     } else {
-        lash_core_execution::SessionGraph::default()
+        lash_core_store::session_graph::SessionGraph::default()
     };
     let window = windows.attach(session_id, window);
     let read = SessionWindowRead::new(
@@ -790,7 +806,7 @@ impl SessionHistoryStore for PostgresStore {
             nodes.push(HistoryNode {
                 generation: header.generation,
                 owner_session_id: SessionId::parse(header.owner)?,
-                frame_node_id: lash_core_execution::FrameNodeId::new(header.frame)
+                frame_node_id: lash_core_store::session_identity::FrameNodeId::new(header.frame)
                     .map_err(|error| corrupt("SessionGraph", error.to_string()))?,
                 body_bytes: header.size,
                 record,
@@ -810,7 +826,7 @@ impl SessionHistoryStore for PostgresStore {
     async fn contains_active_ancestor(
         &self,
         session_id: &SessionId,
-        node_id: &lash_core_execution::NodeId,
+        node_id: &lash_protocol_types::NodeId,
     ) -> Result<bool, StoreError> {
         let mut tx = read_tx(self).await?;
         check_live(&mut tx, session_id).await?;
@@ -906,14 +922,14 @@ impl SessionHistoryStore for PostgresStore {
             let turn_id: String = row.get("turn_id");
             let result_json: String = row.get("result_json");
             let outcome_code: Option<String> = row.get("outcome_code");
-            let receipt = lash_core_execution::store::decode_runtime_commit_receipt_for_fleet(
+            let receipt = lash_core_store::store::decode_runtime_commit_receipt_for_fleet(
                 session_id,
                 &turn_id,
                 &result_json,
                 (row.get(0), row.get(4)),
                 self.fence.fleet(),
             )?;
-            lash_core_execution::store::validate_turn_commit_outcome_code(
+            lash_core_store::store::validate_turn_commit_outcome_code(
                 &receipt,
                 outcome_code.as_deref(),
             )?;
@@ -932,10 +948,12 @@ impl SessionHistoryStore for PostgresStore {
                 committed_at_ms,
                 turn_id.clone().try_into()?,
             ));
-            settlements.push(lash_core_execution::TurnFailureSettlement {
-                turn_id,
-                evidence: receipt.failure_evidence,
-            });
+            settlements.push(
+                lash_core_store::turn_failure_evidence::TurnFailureSettlement {
+                    turn_id,
+                    evidence: receipt.failure_evidence,
+                },
+            );
         }
         crate::observed_sql::control("COMMIT", tx.commit())
             .await
@@ -1020,7 +1038,7 @@ impl SessionHistoryStore for PostgresStore {
                     continue;
                 };
                 nodes.push(
-                    lash_core_execution::SessionNodeRecord::decode_storage_body_for_fleet(
+                    lash_core_store::session_graph::SessionNodeRecord::decode_storage_body_for_fleet(
                         node_id.to_string(),
                         parent,
                         &body,

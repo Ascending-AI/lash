@@ -8,13 +8,25 @@
 
 use std::sync::LazyLock;
 
-use lash_core_execution::store::{
-    CONTROL_INTENT_FORMAT, ControlIntent, ControlIntentId, ControlIntentKind, ControlIntentState,
-    InputStatus, RunAdmissionRecord, RunEndOutcome, RunStore, RunTerminal, RunTerminalCause,
-    RunTerminalWriteDecision, RunTurns, UnfinishedRun, decide_run_terminal_write,
-    run_binding_conflict, stored_intent_kind, stored_intent_state,
-};
-use lash_core_execution::store_backend_support::turn_cancel::EndedRunInputRelease;
+use lash_core_store::store::CONTROL_INTENT_FORMAT;
+use lash_core_store::store::ControlIntent;
+use lash_core_store::store::ControlIntentId;
+use lash_core_store::store::ControlIntentKind;
+use lash_core_store::store::ControlIntentState;
+use lash_core_store::store::InputStatus;
+use lash_core_store::store::RunAdmissionRecord;
+use lash_core_store::store::RunEndOutcome;
+use lash_core_store::store::RunStore;
+use lash_core_store::store::RunTerminal;
+use lash_core_store::store::RunTerminalCause;
+use lash_core_store::store::RunTerminalWriteDecision;
+use lash_core_store::store::RunTurns;
+use lash_core_store::store::UnfinishedRun;
+use lash_core_store::store::decide_run_terminal_write;
+use lash_core_store::store::run_binding_conflict;
+use lash_core_store::store::stored_intent_kind;
+use lash_core_store::store::stored_intent_state;
+use lash_core_store::store_backend_support::turn_cancel::EndedRunInputRelease;
 use lash_protocol_types::{InputId, SessionId, TurnId};
 use lash_store_sql::session_runs::{
     control_intents::ControlIntentStatements, run_inputs::SessionRunInputStatements,
@@ -267,7 +279,7 @@ fn release_run_rows_conn(
             params![
                 session_id.as_str(),
                 input_id.as_str(),
-                lash_core_execution::runtime::TurnInputStateKind::Cancelled.as_str(),
+                lash_core_store::turn_input_vocabulary::TurnInputStateKind::Cancelled.as_str(),
                 crate::clamp_epoch_ms(at_ms),
             ],
         )
@@ -283,10 +295,10 @@ pub(crate) fn end_refused_run_conn(
     tx: &crate::conn::FencedTx<'_>,
     session_id: &SessionId,
     run: &TurnId,
-    refusal: &lash_core_execution::RuntimeError,
+    refusal: &lash_core_store::runtime_error::RuntimeError,
     at_ms: u64,
 ) -> Result<RunEndOutcome, StoreError> {
-    let target = lash_core_execution::engine::RunRef {
+    let target = lash_execution_contracts::run::RunRef {
         session: session_id.clone(),
         run: run.clone(),
     };
@@ -337,7 +349,7 @@ enum UnansweredRun {
 
 fn unanswered_run_conn(
     tx: &Connection,
-    target: &lash_core_execution::engine::RunRef,
+    target: &lash_execution_contracts::run::RunRef,
 ) -> Result<UnansweredRun, StoreError> {
     let session = &target.session;
     let run = &target.run;
@@ -362,7 +374,7 @@ fn unanswered_run_conn(
 /// End an open run no commit answered with `cause`.
 fn write_unanswered_run_end_conn(
     tx: &crate::conn::FencedTx<'_>,
-    target: &lash_core_execution::engine::RunRef,
+    target: &lash_execution_contracts::run::RunRef,
     at_ms: u64,
     cause: RunTerminalCause,
 ) -> Result<RunTerminal, StoreError> {
@@ -403,7 +415,7 @@ fn write_unanswered_run_end_conn(
                 session.as_str(),
                 input,
                 crate::clamp_epoch_ms(at_ms),
-                lash_core_execution::runtime::TurnInputStateKind::Cancelled.as_str(),
+                lash_core_store::turn_input_vocabulary::TurnInputStateKind::Cancelled.as_str(),
             ],
         )
         .map_err(sqlite_error)?;
@@ -446,7 +458,7 @@ pub(crate) fn unfinished_run_conn(
 pub(crate) fn head_ownership_facts_conn(
     conn: &Connection,
     session_id: &SessionId,
-) -> Result<lash_core_execution::store::HeadOwnershipFacts, StoreError> {
+) -> Result<lash_core_store::store::HeadOwnershipFacts, StoreError> {
     let unfinished_run = unfinished_run_conn(conn, session_id)?.map(|unfinished| unfinished.run);
     let open_command: Option<i64> = conn
         .prepare_cached(
@@ -459,7 +471,7 @@ pub(crate) fn head_ownership_facts_conn(
             statement.query_row(params![session_id.as_str()], |row| row.get(1))
         })
         .map_err(sqlite_error)?;
-    Ok(lash_core_execution::store::HeadOwnershipFacts {
+    Ok(lash_core_store::store::HeadOwnershipFacts {
         unfinished_run,
         open_command: open_command
             .map(|seq| stored_u64("QueuedWorkBatch", seq))
@@ -575,7 +587,7 @@ pub(crate) fn admitted_batches_conn(
 /// turn ends the run (FIG-3600 S7).
 pub(crate) fn write_commit_run_terminal_conn(
     tx: &crate::conn::FencedTx<'_>,
-    commit: &lash_core_execution::store::RuntimeCommit,
+    commit: &lash_core_store::store::RuntimeCommit,
     head_revision: u64,
     at_ms: u64,
 ) -> Result<(), StoreError> {
@@ -635,7 +647,7 @@ fn input_status_conn(
             .transpose()
             .map_err(StoreError::from)?,
         open,
-        fault: lash_core_execution::store::SessionFault::from_stored_columns(
+        fault: lash_core_store::store::SessionFault::from_stored_columns(
             session_id,
             fault_json,
             fault_at_ms,
@@ -786,7 +798,7 @@ pub(crate) fn insert_intent_conn(
 /// session actor, whose close steps act on the intent, and answers the
 /// actor it woke for the wake sink once the transaction commits.
 ///
-/// [`ControlIntentStore::begin_session_close`]: lash_core_execution::store::ControlIntentStore::begin_session_close
+/// [`ControlIntentStore::begin_session_close`]: lash_core_store::store::ControlIntentStore::begin_session_close
 pub(crate) fn begin_session_close_conn(
     tx: &crate::conn::FencedTx<'_>,
     session_id: &SessionId,
@@ -899,8 +911,8 @@ impl RunStore for crate::SqliteStore {
 
     async fn admit_at_checkpoint(
         &self,
-        request: &lash_core_execution::store::CheckpointAdmissionRequest,
-    ) -> Result<lash_core_execution::store::CheckpointAdmission, StoreError> {
+        request: &lash_core_store::store::CheckpointAdmissionRequest,
+    ) -> Result<lash_core_store::store::CheckpointAdmission, StoreError> {
         crate::persistence::admit_at_checkpoint_sqlite(self, request).await
     }
 
@@ -921,10 +933,10 @@ impl RunStore for crate::SqliteStore {
         &self,
         session_id: &SessionId,
         run: &TurnId,
-        refusal: &lash_core_execution::RuntimeError,
+        refusal: &lash_core_store::runtime_error::RuntimeError,
         at_ms: u64,
     ) -> Result<RunEndOutcome, StoreError> {
-        lash_core_execution::store::validate_session_id(session_id)?;
+        lash_core_store::store::validate_session_id(session_id)?;
         let session_id = session_id.clone();
         let run = run.clone();
         let refusal = refusal.clone();
@@ -942,7 +954,7 @@ impl RunStore for crate::SqliteStore {
         run: &TurnId,
         at_ms: u64,
     ) -> Result<RunEndOutcome, StoreError> {
-        lash_core_execution::store::validate_session_id(session_id)?;
+        lash_core_store::store::validate_session_id(session_id)?;
         let session_id = session_id.clone();
         let run = run.clone();
         self.conn

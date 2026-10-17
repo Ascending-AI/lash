@@ -2,11 +2,11 @@ use sqlx::postgres::{PgPool, PgPoolOptions};
 use sqlx::{Connection, Executor};
 
 use super::*;
-use lash_core_execution::compat::CompatRefusal;
+use lash_core_store::compat::CompatRefusal;
 
 /// The PostgreSQL component's descriptor in the active tier.
-fn postgres_descriptor() -> &'static lash_core_execution::compat::CompatDescriptor {
-    lash_core_execution::compat::descriptor(lash_core_execution::compat::ComponentId::POSTGRES)
+fn postgres_descriptor() -> &'static lash_core_store::compat::CompatDescriptor {
+    lash_core_store::compat::descriptor(lash_core_store::compat::ComponentId::POSTGRES)
         .expect("the build declares the PostgreSQL store")
 }
 
@@ -62,11 +62,11 @@ impl Scratch {
             .expect("apply scratch DDL");
     }
 
-    async fn open(&self) -> Result<(String, lash_core_execution::FleetFormat), StoreError> {
+    async fn open(&self) -> Result<(String, lash_core_store::store::FleetFormat), StoreError> {
         ensure_schema(
             &self.pool,
             SchemaCheck::Enforce,
-            lash_core_execution::FleetFormat::writable(),
+            lash_core_store::store::FleetFormat::writable(),
         )
         .await
     }
@@ -220,7 +220,7 @@ async fn assert_release_admission(
     let open = ensure_schema_with_release(
         &scratch.pool,
         SchemaCheck::Enforce,
-        lash_core_execution::FleetFormat::writable(),
+        lash_core_store::store::FleetFormat::writable(),
         build,
     )
     .await;
@@ -231,7 +231,7 @@ async fn assert_release_admission(
         };
         assert_eq!(
             status.databases[0].verdict,
-            lash_core_execution::StoreSchemaVerdict::Refused {
+            lash_core_store::store::StoreSchemaVerdict::Refused {
                 refusal: expected.clone()
             }
         );
@@ -241,7 +241,7 @@ async fn assert_release_admission(
     } else {
         assert_eq!(
             status.databases[0].verdict,
-            lash_core_execution::StoreSchemaVerdict::Matches
+            lash_core_store::store::StoreSchemaVerdict::Matches
         );
         open.expect("admit open");
     }

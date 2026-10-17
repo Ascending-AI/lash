@@ -16,8 +16,8 @@ impl SqliteStore {
             .write_flow(move |tx| {
                 let outcome = ensure_session_not_deleted_conn(tx, &batch.session_id)
                     .and_then(|()| {
-                        let claim = lash_core_execution::ReferrerClaim::unguarded(
-                            lash_core_execution::ArtifactReferrer::Session(
+                        let claim = lash_core_store::artifact_referrer::ReferrerClaim::unguarded(
+                            lash_core_store::artifact_referrer::ArtifactReferrer::Session(
                                 batch.session_id.clone(),
                             ),
                         )
@@ -54,8 +54,8 @@ impl SqliteStore {
             .write_flow(move |tx| {
                 let outcome = ensure_session_not_deleted_conn(tx, &batch.session_id)
                     .and_then(|()| {
-                        let claim = lash_core_execution::ReferrerClaim::unguarded(
-                            lash_core_execution::ArtifactReferrer::Session(
+                        let claim = lash_core_store::artifact_referrer::ReferrerClaim::unguarded(
+                            lash_core_store::artifact_referrer::ArtifactReferrer::Session(
                                 batch.session_id.clone(),
                             ),
                         )
@@ -133,7 +133,7 @@ impl SqliteStore {
         &self,
         session_id: &SessionId,
         batch_id: &str,
-    ) -> Result<Option<lash_core_execution::store::RuntimeCommitReceipt>, StoreError> {
+    ) -> Result<Option<lash_core_store::store::RuntimeCommitReceipt>, StoreError> {
         let session_id = SessionId::parse(session_id.to_string())?;
         let batch_id = batch_id.to_string();
         let fleet = self.fleet_format();
@@ -153,7 +153,7 @@ impl SqliteStore {
                         .map_err(sqlite_error)?;
                     receipt
                         .map(|(operation_key, json, committed_at_ms, head_revision)| {
-                            lash_core_execution::store::decode_runtime_commit_receipt_for_fleet(
+                            lash_core_store::store::decode_runtime_commit_receipt_for_fleet(
                                 &session_id,
                                 &operation_key,
                                 &json,
@@ -211,12 +211,12 @@ impl SqliteStore {
     pub(super) async fn pending_session_work_ordering_sqlite(
         &self,
         session_id: &SessionId,
-    ) -> Result<lash_core_execution::store::PendingSessionWorkOrdering, StoreError> {
+    ) -> Result<lash_core_store::store::PendingSessionWorkOrdering, StoreError> {
         let session_id = SessionId::parse(session_id.to_string())?;
         self.conn
             .call(move |conn| {
                 let outcome: Result<
-                    lash_core_execution::store::PendingSessionWorkOrdering,
+                    lash_core_store::store::PendingSessionWorkOrdering,
                     StoreError,
                 > = (|| {
                     let (command_at, command_seq, input_at, input_seq): (
@@ -237,7 +237,7 @@ impl SqliteStore {
                     let ordering_key = |kind: &'static str, at: Option<i64>, seq: Option<i64>| {
                         at.zip(seq)
                             .map(|(at, seq)| -> Result<_, StoreError> {
-                                Ok(lash_core_execution::store::PendingWorkOrderingKey {
+                                Ok(lash_core_store::store::PendingWorkOrderingKey {
                                     enqueued_at_ms: u64_from_sql(kind, "enqueued_at_ms", at)
                                         .map_err(sqlite_error)?,
                                     enqueue_seq: u64_from_sql(kind, "enqueue_seq", seq)
@@ -246,7 +246,7 @@ impl SqliteStore {
                             })
                             .transpose()
                     };
-                    Ok(lash_core_execution::store::PendingSessionWorkOrdering {
+                    Ok(lash_core_store::store::PendingSessionWorkOrdering {
                         session_command: ordering_key("QueuedWorkBatch", command_at, command_seq)?,
                         turn_input: ordering_key("PendingTurnInput", input_at, input_seq)?,
                     })

@@ -365,10 +365,12 @@ impl DurableSession {
             &self.transcript_decoders,
         )
         .map_err(|error| {
-            crate::EmbedError::Plugin(lash_core::PluginError::StoredDataCorrupt {
-                record_kind: error.record_kind,
-                message: error.message,
-            })
+            crate::EmbedError::Plugin(
+                lash_execution_contracts::plugin_error::PluginError::StoredDataCorrupt {
+                    record_kind: error.record_kind,
+                    message: error.message,
+                },
+            )
         })
     }
 
@@ -878,10 +880,12 @@ impl DurableSession {
             .await?;
         crate::transcript::CommittedTurnsPage::decode(page, &self.transcript_decoders).map_err(
             |error| {
-                crate::EmbedError::Plugin(lash_core::PluginError::StoredDataCorrupt {
-                    record_kind: error.record_kind,
-                    message: error.message,
-                })
+                crate::EmbedError::Plugin(
+                    lash_execution_contracts::plugin_error::PluginError::StoredDataCorrupt {
+                        record_kind: error.record_kind,
+                        message: error.message,
+                    },
+                )
             },
         )
     }
@@ -964,9 +968,11 @@ pub(crate) async fn session_park(
         return Ok(None);
     };
     serde_json::from_str(&park).map(Some).map_err(|error| {
-        EmbedError::Plugin(lash_core::PluginError::StoredDataCorrupt {
-            record_kind: "session park".to_owned(),
-            message: error.to_string(),
-        })
+        EmbedError::Plugin(
+            lash_execution_contracts::plugin_error::PluginError::StoredDataCorrupt {
+                record_kind: "session park".to_owned(),
+                message: error.to_string(),
+            },
+        )
     })
 }

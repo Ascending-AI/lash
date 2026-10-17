@@ -603,7 +603,10 @@ impl lash_core::ToolProvider for NativeAndMcpProvider {
     fn tool_manifests(
         &self,
         config: &lash_core::OwnerConfigView,
-    ) -> std::result::Result<Vec<lash_core::ToolManifest>, lash_core::PluginError> {
+    ) -> std::result::Result<
+        Vec<lash_core::ToolManifest>,
+        lash_execution_contracts::plugin_error::PluginError,
+    > {
         Ok({
             let mut manifests = vec![self.native.manifest()];
             manifests.extend(self.mcp.tool_manifests(config)?);
@@ -1835,7 +1838,7 @@ async fn mcp_law_tool_error_preserves_cause_and_attachment_roots() {
     let roots = raw.attachments();
     assert_eq!(roots.len(), 1, "only the retained image is a typed root");
     let reloaded: lash_core::ToolCallOutput = serde_json::from_value(
-        serde_json::to_value(lash_core::Durable(&output)).expect("recorded output"),
+        serde_json::to_value(lash_protocol_types::Durable(&output)).expect("recorded output"),
     )
     .expect("replayed output");
     let lash_core::ToolCallOutcome::Failure(failure) = reloaded.outcome else {

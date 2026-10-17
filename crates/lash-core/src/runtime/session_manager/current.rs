@@ -16,17 +16,24 @@ impl CurrentOwnerCapability {
     }
 
     /// The current session named `session_id`, or an unknown-session error.
-    fn known_session(&self, session_id: &SessionId) -> Result<&CurrentSession, crate::PluginError> {
+    fn known_session(
+        &self,
+        session_id: &SessionId,
+    ) -> Result<&CurrentSession, lash_execution_contracts::plugin_error::PluginError> {
         self.session()
             .filter(|session| session.session_id == *session_id)
-            .ok_or_else(|| crate::PluginError::Session(format!("unknown session `{session_id}`")))
+            .ok_or_else(|| {
+                lash_execution_contracts::plugin_error::PluginError::Session(format!(
+                    "unknown session `{session_id}`"
+                ))
+            })
     }
 
     pub(in crate::runtime::session_manager) async fn turn_scope_by_id(
         &self,
         session_id: &SessionId,
         turn_id: &TurnId,
-    ) -> Result<crate::ExecutionScope, crate::PluginError> {
+    ) -> Result<crate::ExecutionScope, lash_execution_contracts::plugin_error::PluginError> {
         Ok(self
             .known_session(session_id)?
             .snapshot
@@ -36,14 +43,14 @@ impl CurrentOwnerCapability {
 
     pub(in crate::runtime) async fn current_snapshot_for_store_write(
         &self,
-    ) -> Result<RuntimeSessionState, crate::PluginError> {
+    ) -> Result<RuntimeSessionState, lash_execution_contracts::plugin_error::PluginError> {
         let session = self.require_session("session_store_write")?;
         let mut state = session.snapshot.to_runtime_state();
         if let Some(store) = &session.store {
             crate::store::refresh_session_window(store, &mut state)
                 .await
                 .map_err(|err| {
-                    crate::PluginError::Session(format!(
+                    lash_execution_contracts::plugin_error::PluginError::Session(format!(
                         "failed to refresh persisted session state: {err}"
                     ))
                 })?;
@@ -58,19 +65,27 @@ impl CurrentOwnerCapability {
     pub(in crate::runtime::session_manager) async fn snapshot_by_id(
         &self,
         session_id: &SessionId,
-    ) -> Result<SessionSnapshot, crate::PluginError> {
+    ) -> Result<SessionSnapshot, lash_execution_contracts::plugin_error::PluginError> {
         if let Some(state) = self.resident_state_by_id(session_id).await {
             return Ok(state.to_snapshot());
         }
-        let unknown = || crate::PluginError::Session(format!("unknown session `{session_id}`"));
-        let read_failed = |error: crate::StoreError| {
-            crate::PluginError::Session(format!("failed to read session `{session_id}`: {error}"))
+        let unknown = || {
+            lash_execution_contracts::plugin_error::PluginError::Session(format!(
+                "unknown session `{session_id}`"
+            ))
         };
-        let store =
-            crate::runtime::live_session_view(&self.host.core.session_store_factory(), session_id)
-                .await
-                .map_err(read_failed)?
-                .ok_or_else(unknown)?;
+        let read_failed = |error: crate::StoreError| {
+            lash_execution_contracts::plugin_error::PluginError::Session(format!(
+                "failed to read session `{session_id}`: {error}"
+            ))
+        };
+        let store = lash_execution_contracts::deployment::live_session_view(
+            &self.host.core.session_store_factory(),
+            session_id,
+        )
+        .await
+        .map_err(read_failed)?
+        .ok_or_else(unknown)?;
         let loaded =
             crate::store::load_session_window_state(&store, crate::store::WindowSelector::Current)
                 .await
@@ -82,7 +97,7 @@ impl CurrentOwnerCapability {
     pub(in crate::runtime::session_manager) async fn tool_catalog_by_id(
         &self,
         session_id: &SessionId,
-    ) -> Result<Vec<serde_json::Value>, crate::PluginError> {
+    ) -> Result<Vec<serde_json::Value>, lash_execution_contracts::plugin_error::PluginError> {
         Ok(self
             .shared_tool_catalog_by_id(session_id)
             .await?
@@ -93,7 +108,8 @@ impl CurrentOwnerCapability {
     pub(in crate::runtime::session_manager) async fn shared_tool_catalog_by_id(
         &self,
         session_id: &SessionId,
-    ) -> Result<Arc<Vec<serde_json::Value>>, crate::PluginError> {
+    ) -> Result<Arc<Vec<serde_json::Value>>, lash_execution_contracts::plugin_error::PluginError>
+    {
         self.known_session(session_id)?;
         Ok(Arc::new(
             self.session_plugins("tool_catalog_by_id")?.tool_catalog()?,
@@ -102,7 +118,7 @@ impl CurrentOwnerCapability {
 
     pub(in crate::runtime::session_manager) async fn snapshot_current(
         &self,
-    ) -> Result<SessionSnapshot, crate::PluginError> {
+    ) -> Result<SessionSnapshot, lash_execution_contracts::plugin_error::PluginError> {
         let session = self.require_session("snapshot_current")?;
         Ok(session.snapshot.to_runtime_state().to_snapshot())
     }
@@ -110,21 +126,22 @@ impl CurrentOwnerCapability {
     pub(in crate::runtime::session_manager) async fn snapshot_session(
         &self,
         session_id: &SessionId,
-    ) -> Result<SessionSnapshot, crate::PluginError> {
+    ) -> Result<SessionSnapshot, lash_execution_contracts::plugin_error::PluginError> {
         self.snapshot_by_id(session_id).await
     }
 
     pub(in crate::runtime::session_manager) async fn tool_catalog(
         &self,
         session_id: &SessionId,
-    ) -> Result<Vec<serde_json::Value>, crate::PluginError> {
+    ) -> Result<Vec<serde_json::Value>, lash_execution_contracts::plugin_error::PluginError> {
         self.tool_catalog_by_id(session_id).await
     }
 
     pub(in crate::runtime::session_manager) async fn shared_tool_catalog(
         &self,
         session_id: &SessionId,
-    ) -> Result<Arc<Vec<serde_json::Value>>, crate::PluginError> {
+    ) -> Result<Arc<Vec<serde_json::Value>>, lash_execution_contracts::plugin_error::PluginError>
+    {
         self.shared_tool_catalog_by_id(session_id).await
     }
 
@@ -132,7 +149,7 @@ impl CurrentOwnerCapability {
         &self,
         context: lash_trace::TraceContext,
         event: lash_trace::TraceEvent,
-    ) -> Result<(), crate::PluginError> {
+    ) -> Result<(), lash_execution_contracts::plugin_error::PluginError> {
         self.emit_trace(context, event);
         Ok(())
     }

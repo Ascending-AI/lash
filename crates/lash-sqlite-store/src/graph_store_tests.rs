@@ -4,7 +4,7 @@
 use std::collections::BTreeSet;
 use std::sync::Arc;
 
-use lash_core_execution::testing::TestClock;
+use lash_core_ids::test_clock::TestClock;
 use lash_core_store::checkpoint_graph::{GraphRefusal, NodeId};
 use lash_durable::DurableStore;
 use lash_durable::domain::pages::PageStore;
@@ -395,11 +395,11 @@ impl PageTier for Tier {
     async fn delete_session(&self, session: &str) -> u64 {
         let store = self._set.open_store().await.expect("the session store");
         let session =
-            lash_core_execution::SessionId::try_from(session.to_owned()).expect("a law session id");
-        let (answer, receipt) = lash_core_execution::facade_support::sql::collect(
+            lash_protocol_types::SessionId::try_from(session.to_owned()).expect("a law session id");
+        let (answer, receipt) = lash_core_ids::operational_metrics::sql::collect(
             "pages.session-delete",
             "sqlite",
-            lash_core_execution::SessionCatalogStore::delete_session(store.as_ref(), &session),
+            lash_core_store::store::SessionCatalogStore::delete_session(store.as_ref(), &session),
         )
         .await;
         answer.expect("the session delete commits");
@@ -648,7 +648,7 @@ async fn retiring_a_root_does_not_read_edges_of_retained_descendants() {
         .commit(tx, CommitLabel::new("peel.retire"))
         .await
         .unwrap();
-    let (answer, receipt) = lash_core_execution::facade_support::sql::collect(
+    let (answer, receipt) = lash_core_ids::operational_metrics::sql::collect(
         "peel.retire",
         "sqlite",
         settle(&tier.store),
@@ -831,7 +831,7 @@ async fn absent_graph_bodies_install_in_bounded_batches() {
     let tier = tier(false).await;
     let identity = lash_core_execution::testing::sql_work::owner_commit(&tier._set).await;
     let actor = ActorKey::session("sql-work-owner").unwrap();
-    let count = |receipt: &lash_core_execution::facade_support::sql::Receipt, table: &str| {
+    let count = |receipt: &lash_core_ids::operational_metrics::sql::Receipt, table: &str| {
         receipt
             .shapes
             .iter()
@@ -870,7 +870,7 @@ async fn absent_graph_bodies_install_in_bounded_batches() {
                     root,
                 }));
             }
-            let (answer, receipt) = lash_core_execution::facade_support::sql::collect(
+            let (answer, receipt) = lash_core_ids::operational_metrics::sql::collect(
                 "graph.batch",
                 "sqlite",
                 tier.store.commit(tx, CommitLabel::new("graph.batch")),
@@ -1112,7 +1112,7 @@ async fn a_park_publication_writes_a_counted_number_of_statements() {
         root: exec_root.id,
         commit_id: commit,
     }));
-    let (answer, receipt) = lash_core_execution::facade_support::sql::collect(
+    let (answer, receipt) = lash_core_ids::operational_metrics::sql::collect(
         "park.publish",
         "sqlite",
         tier.store.commit_candidate(

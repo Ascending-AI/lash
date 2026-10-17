@@ -12,6 +12,7 @@ use lash_core::facade_support::{
     ModelToolReturn, ModelToolReturnPart, RuntimeAttachmentStore, SystemClock,
 };
 use lash_core::*;
+use lash_execution_contracts::deployment::DeploymentStore;
 use std::sync::Arc;
 
 pub type InsertAttachmentEdge = Arc<

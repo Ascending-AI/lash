@@ -36,10 +36,16 @@
 use std::path::Path;
 
 use async_trait::async_trait;
-use lash_core_execution::{
-    DurableScan, DurableScanPage, FleetFormatState, StoreBackend, StoreError, StorePreflight,
-    StoreReleaseState, StoreSchemaDatabase, StoreSchemaStatus, StoreSchemaVerdict,
-};
+use lash_core_store::store::DurableScan;
+use lash_core_store::store::DurableScanPage;
+use lash_core_store::store::FleetFormatState;
+use lash_core_store::store::StoreBackend;
+use lash_core_store::store::StoreError;
+use lash_core_store::store::StorePreflight;
+use lash_core_store::store::StoreReleaseState;
+use lash_core_store::store::StoreSchemaDatabase;
+use lash_core_store::store::StoreSchemaStatus;
+use lash_core_store::store::StoreSchemaVerdict;
 
 pub(crate) mod walk;
 
@@ -110,7 +116,7 @@ async fn read_compat_verdict(
             // ones a pragma could trigger.
             c.pragma_update(None, "query_only", true)?;
             let release = crate::compat::writing_release(c);
-            if let Some(refusal) = lash_core_execution::compat::CompatRefusal::pre_release(
+            if let Some(refusal) = lash_core_store::compat::CompatRefusal::pre_release(
                 COMPONENT.as_str(),
                 release.as_deref(),
                 &build_release,
@@ -121,7 +127,7 @@ async fn read_compat_verdict(
                 return if crate::schema::has_user_schema_objects(c)? {
                     Ok((
                         StoreSchemaVerdict::Refused {
-                            refusal: lash_core_execution::compat::CompatRefusal::Unstamped {
+                            refusal: lash_core_store::compat::CompatRefusal::Unstamped {
                                 component: COMPONENT.as_str().to_owned(),
                                 writing_release: None,
                             },
@@ -132,19 +138,19 @@ async fn read_compat_verdict(
                     Ok((StoreSchemaVerdict::Absent, None))
                 };
             };
-            let descriptor = lash_core_execution::compat::descriptor(COMPONENT)
+            let descriptor = lash_core_store::compat::descriptor(COMPONENT)
                 .ok_or_else(|| rusqlite::Error::InvalidQuery)?;
             let floor = Some(i64::from(stamp.min_reader));
-            let admission = match lash_core_execution::compat::admit(
+            let admission = match lash_core_store::compat::admit(
                 descriptor,
-                lash_core_execution::compat::StampRead::Present(stamp),
+                lash_core_store::compat::StampRead::Present(stamp),
             ) {
                 Ok(admission) => admission,
                 Err(refusal) => return Ok((StoreSchemaVerdict::Refused { refusal }, floor)),
             };
-            if let Err(error) = lash_core_execution::FleetFormat::admit(
+            if let Err(error) = lash_core_store::store::FleetFormat::admit(
                 fleet,
-                lash_core_execution::FleetFormat::writable(),
+                lash_core_store::store::FleetFormat::writable(),
             ) {
                 return Ok((
                     match error {
@@ -159,7 +165,7 @@ async fn read_compat_verdict(
                 ));
             }
             let verdict = match admission {
-                lash_core_execution::compat::CompatAdmission::Expanded { .. } => {
+                lash_core_store::compat::CompatAdmission::Expanded { .. } => {
                     match crate::compat::verify_tolerant(c) {
                         Ok(()) => StoreSchemaVerdict::Expanded {
                             found: i64::from(stamp.version),
@@ -181,7 +187,7 @@ async fn read_compat_verdict(
                         },
                     }
                 }
-                lash_core_execution::compat::CompatAdmission::Native
+                lash_core_store::compat::CompatAdmission::Native
                     if stamp.version < crate::migration::target_version()? =>
                 {
                     StoreSchemaVerdict::Migratable {

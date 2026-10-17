@@ -54,13 +54,13 @@ use std::time::Duration;
 
 use lash_core::ToolDefinitionBindingExt as _;
 use lash_core::{ToolCall, ToolOutcome};
-use lash_core_execution::StoreSet;
 use lash_durable::runner::Activation;
 use lash_durable::{ActorKey, ActorState, CommitLabel, DurableError, DurableStore};
 use lash_durable_test::{
     Cut, Fault, Matrix, Scenario, Script, SimClock, SimNodes, SimNodesConfig, Stored, Tripwire,
     WriteKind,
 };
+use lash_execution_contracts::backend::StoreSet;
 use lash_protocol_types::SessionId;
 use lash_protocol_types::sync::MutexExt as _;
 
@@ -120,7 +120,10 @@ impl lash_core::ToolProvider for Probe {
     fn tool_manifests(
         &self,
         _config: &lash_core::OwnerConfigView,
-    ) -> std::result::Result<Vec<lash_core::ToolManifest>, lash_core::PluginError> {
+    ) -> std::result::Result<
+        Vec<lash_core::ToolManifest>,
+        lash_execution_contracts::plugin_error::PluginError,
+    > {
         Ok(vec![probe_definition().manifest()])
     }
 
@@ -244,7 +247,7 @@ impl Holding {
                     // registered runs on regardless.
                     .plugin(Arc::new(
                         lash::process_controls::SessionProcessAdminPluginFactory::new(|_| {
-                            lash_core::Lifetime::Detached
+                            lash_execution_contracts::process::Lifetime::Detached
                         },
                         lash_core::testing::run_policy_naming(&[
                             PROBE_COMPONENT,
@@ -255,7 +258,7 @@ impl Holding {
                     // (P2): the env names the process controls that serve it.
                     .process_component(
                         Arc::new(lash::process_controls::ProcessControlsComponent::new(
-                            |_| lash_core::Lifetime::Detached,
+                            |_| lash_execution_contracts::process::Lifetime::Detached,
                             lash_core::testing::run_policy_naming(&[PROBE_COMPONENT]),
                         )),
                         lash::process_controls::PROCESS_CONTROLS_CONFIG,
@@ -278,12 +281,12 @@ impl Holding {
             .clone()
     }
 
-    async fn registered(&self) -> Vec<lash_core::ProcessRecord> {
+    async fn registered(&self) -> Vec<lash_execution_contracts::process::ProcessRecord> {
         lash_core::testing::process_roster_records_for_fixture(
             self.backend().process_registry().as_ref(),
-            &lash_core::ProcessListFilter {
-                status: lash_core::ProcessStatusFilter::Any,
-                ..lash_core::ProcessListFilter::default()
+            &lash_execution_contracts::process::ProcessListFilter {
+                status: lash_execution_contracts::process::ProcessStatusFilter::Any,
+                ..lash_execution_contracts::process::ProcessListFilter::default()
             },
         )
         .await
@@ -346,15 +349,17 @@ impl Holding {
         }
         for process in &processes {
             let raw = match process.outcome() {
-                Some(lash_core::ProcessAwaitOutput::Settled { output }) => match output.outcome {
-                    lash_core::ToolCallOutcome::Failure(failure) => {
-                        failure.raw.map(|raw| raw.to_json_value())
+                Some(lash_execution_contracts::process::ProcessAwaitOutput::Settled { output }) => {
+                    match output.outcome {
+                        lash_core::ToolCallOutcome::Failure(failure) => {
+                            failure.raw.map(|raw| raw.to_json_value())
+                        }
+                        other => {
+                            violations.push(format!("the process ended {other:?}"));
+                            continue;
+                        }
                     }
-                    other => {
-                        violations.push(format!("the process ended {other:?}"));
-                        continue;
-                    }
-                },
+                }
                 other => {
                     violations.push(format!("the process ended {other:?}"));
                     continue;
@@ -454,7 +459,9 @@ impl Scenario for Holding {
             nodes.database().actor(&actor()).await,
             Ok(Some(snapshot)) if snapshot.state == ActorState::Idle
         ) && matches!(nodes.database().turn(&session()).await, Ok(None))
-            && processes.iter().all(lash_core::ProcessRecord::is_terminal)
+            && processes
+                .iter()
+                .all(lash_execution_contracts::process::ProcessRecord::is_terminal)
     }
 
     async fn check(&self, nodes: &SimNodes, cut: Option<&Cut>) -> Vec<String> {
@@ -741,7 +748,7 @@ async fn an_aggregate_sleep_past_every_step_bound_wakes_at_its_deadline_across_a
         ));
     }
     match ended.outcome() {
-        Some(lash_core::ProcessAwaitOutput::Settled { output })
+        Some(lash_execution_contracts::process::ProcessAwaitOutput::Settled { output })
             if output.is_success()
                 && output.value_for_projection() == serde_json::json!("woke") => {}
         other => violations.push(format!("the process answered {other:?}, not \"woke\"")),
@@ -826,7 +833,8 @@ impl lash_core::ToolProvider for Resolver {
     fn tool_manifests(
         &self,
         _config: &lash_core::OwnerConfigView,
-    ) -> Result<Vec<lash_core::ToolManifest>, lash_core::PluginError> {
+    ) -> Result<Vec<lash_core::ToolManifest>, lash_execution_contracts::plugin_error::PluginError>
+    {
         Ok(Vec::new())
     }
 
@@ -1044,12 +1052,12 @@ impl DynamicCalls {
             .clone()
     }
 
-    async fn registered(&self) -> Vec<lash_core::ProcessRecord> {
+    async fn registered(&self) -> Vec<lash_execution_contracts::process::ProcessRecord> {
         lash_core::testing::process_roster_records_for_fixture(
             self.backend().process_registry().as_ref(),
-            &lash_core::ProcessListFilter {
-                status: lash_core::ProcessStatusFilter::Any,
-                ..lash_core::ProcessListFilter::default()
+            &lash_execution_contracts::process::ProcessListFilter {
+                status: lash_execution_contracts::process::ProcessStatusFilter::Any,
+                ..lash_execution_contracts::process::ProcessListFilter::default()
             },
         )
         .await
@@ -1111,12 +1119,12 @@ impl DynamicCalls {
             .map_err(|error| format!("the kernel's settings: {error}"))?;
         core.processes()
             .start(
-                lash_core::ProcessStartRequest::engine(
+                lash_execution_contracts::process::ProcessStartRequest::engine(
                     kind.to_owned(),
                     payload,
-                    lash_core::EngineLaunch::new(env_ref, settings),
-                    lash_core::ProcessOriginator::host(),
-                    lash_core::LifetimeDecision::Detached,
+                    lash_execution_contracts::process::EngineLaunch::new(env_ref, settings),
+                    lash_execution_contracts::process::ProcessOriginator::host(),
+                    lash_execution_contracts::process::LifetimeDecision::Detached,
                 ),
                 core.effect_host(),
             )
@@ -1217,7 +1225,9 @@ impl DynamicCalls {
             }
         }
         let answer = match process.outcome() {
-            Some(lash_core::ProcessAwaitOutput::Settled { output }) if output.is_success() => {
+            Some(lash_execution_contracts::process::ProcessAwaitOutput::Settled { output })
+                if output.is_success() =>
+            {
                 output.value_for_projection()
             }
             other => {
@@ -1350,7 +1360,10 @@ impl Scenario for DynamicCalls {
 
     async fn done(&self, _nodes: &SimNodes) -> bool {
         let processes = self.registered().await;
-        !processes.is_empty() && processes.iter().all(lash_core::ProcessRecord::is_terminal)
+        !processes.is_empty()
+            && processes
+                .iter()
+                .all(lash_execution_contracts::process::ProcessRecord::is_terminal)
     }
 
     async fn check(&self, nodes: &SimNodes, cut: Option<&Cut>) -> Vec<String> {

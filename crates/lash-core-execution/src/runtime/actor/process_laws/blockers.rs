@@ -5,8 +5,12 @@
 //! resolve a wait.
 
 use super::*;
-use crate::runtime::process::{ObservedProcess, ProcessWorkObserver};
-use crate::{ProcessParkReason, ProcessStatus, WaitKind, WaitState};
+use lash_execution_contracts::park::ProcessParkReason;
+use lash_execution_contracts::process::ObservedProcess;
+use lash_execution_contracts::process::ProcessStatus;
+use lash_execution_contracts::process::ProcessWorkObserver;
+use lash_execution_contracts::process::WaitKind;
+use lash_execution_contracts::process::WaitState;
 
 /// `process` as a host observes it through `backend`.
 pub(super) async fn observed(
@@ -67,7 +71,7 @@ pub async fn a_sleeping_process_reads_waiting_on_its_sleep_and_its_site(
         ensure!(
             seen.status() == ProcessStatus::Waiting
                 && blockers(seen.waits()) == expected
-                && seen.park == crate::ProcessParkState::NotParked,
+                && seen.park == lash_execution_contracts::process::ProcessParkState::NotParked,
             "a sleeping process is observed {:?} on {:?}, parked {:?}",
             seen.lifecycle,
             seen.waits(),
@@ -221,8 +225,8 @@ pub async fn a_process_parked_on_an_unknown_engine_shows_its_park_reason_beside_
                 ProcessInput::Engine {
                     kind: ABSENT_ENGINE_KIND.to_owned(),
                     payload: json!({}),
-                    launch: crate::EngineLaunch::new(
-                        crate::testing::process_execution_env_fixture_ref(),
+                    launch: lash_execution_contracts::process::EngineLaunch::new(
+                        lash_execution_contracts::testing::process_execution_env_fixture_ref(),
                         None,
                     ),
                 },
@@ -238,9 +242,11 @@ pub async fn a_process_parked_on_an_unknown_engine_shows_its_park_reason_beside_
         let seen = observed(&backend, &process).await?;
         ensure!(
             seen.park
-                == crate::ProcessParkState::Parked(ProcessParkReason::UnknownEngine {
-                    kind: ABSENT_ENGINE_KIND.to_owned(),
-                })
+                == lash_execution_contracts::process::ProcessParkState::Parked(
+                    ProcessParkReason::UnknownEngine {
+                        kind: ABSENT_ENGINE_KIND.to_owned(),
+                    }
+                )
                 && seen.status() == ProcessStatus::Running
                 && seen.waits().is_empty(),
             "a process parked on an unknown engine is observed {:?} on {:?}, parked {:?}",

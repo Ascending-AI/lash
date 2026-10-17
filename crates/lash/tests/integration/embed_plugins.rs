@@ -84,11 +84,14 @@ impl PluginFactory for TestPluginFactory {
 
     fn recipe(
         self: Arc<Self>,
-    ) -> std::result::Result<lash_core::plugin::PluginRecipe, lash_core::plugin::PluginError> {
+    ) -> std::result::Result<
+        lash_core::plugin::PluginRecipe,
+        lash_execution_contracts::plugin_error::PluginError,
+    > {
         let recipe_factory = Arc::clone(&self);
         let recipe: std::result::Result<
             lash_core::plugin::PluginRecipe,
-            lash_core::plugin::PluginError,
+            lash_execution_contracts::plugin_error::PluginError,
         > = {
             let mut reg = lash_core::plugin::PluginRegistrar::<TestSessionPlugin>::new(
                 lash_core::plugin::PluginFactory::id(self.as_ref()),
@@ -104,7 +107,9 @@ impl PluginFactory for TestPluginFactory {
                         .config
                         .decode::<TestPluginConfig>(TEST_PLUGIN_ID)
                         .map_err(|error| {
-                            lash_core::plugin::PluginError::Session(error.to_string())
+                            lash_execution_contracts::plugin_error::PluginError::Session(
+                                error.to_string(),
+                            )
                         })?
                         .map(|config| config.label);
                     Ok(Arc::new(TestSessionPlugin {
@@ -159,7 +164,7 @@ impl SessionPlugin for TestSessionPlugin {
 impl TestSessionPlugin {
     fn declare(
         reg: &mut lash_core::plugin::PluginRegistrar<Self>,
-    ) -> std::result::Result<(), lash_core::plugin::PluginError> {
+    ) -> std::result::Result<(), lash_execution_contracts::plugin_error::PluginError> {
         reg.turn()
             .before(lash::hook_key!("turn-before-1"), move |this, _state| {
                 let hook_seen = Arc::clone(&this.hook_seen);
@@ -197,7 +202,8 @@ impl ToolProvider for TestTools {
     fn tool_manifests(
         &self,
         _config: &lash_core::OwnerConfigView,
-    ) -> std::result::Result<Vec<ToolManifest>, lash_core::PluginError> {
+    ) -> std::result::Result<Vec<ToolManifest>, lash_execution_contracts::plugin_error::PluginError>
+    {
         Ok({
             if self.label.is_some() {
                 vec![typed_probe_definition().manifest()]

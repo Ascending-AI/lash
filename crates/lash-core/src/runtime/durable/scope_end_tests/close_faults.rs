@@ -15,8 +15,10 @@ struct Faults {
 }
 
 /// The injected refusal of the process-state step.
-fn injected(step: SessionCloseStep) -> crate::PluginError {
-    crate::PluginError::Registration(format!("injected {step:?} failure"))
+fn injected(step: SessionCloseStep) -> lash_execution_contracts::plugin_error::PluginError {
+    lash_execution_contracts::plugin_error::PluginError::Registration(format!(
+        "injected {step:?} failure"
+    ))
 }
 
 /// The partial report the injected storage failure witnessed.

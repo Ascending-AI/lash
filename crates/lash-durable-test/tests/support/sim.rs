@@ -27,10 +27,12 @@ use std::path::Path;
 use std::sync::Arc;
 use std::time::Duration;
 
-use lash_core_execution::{
-    Backend, BackendParts, DurableSettings, NoProjectionProviders, StoreSet,
-};
+use lash_core_execution::DurableSettings;
 use lash_durable_test::{OffClockWork, SimClock};
+use lash_execution_contracts::backend::Backend;
+use lash_execution_contracts::backend::BackendParts;
+use lash_execution_contracts::backend::StoreSet;
+use lash_execution_contracts::projection::NoProjectionProviders;
 use lash_sqlite_store::{SqliteStoreSet, SqliteStoreSetOptions};
 
 /// How long a session with nothing to do stays hot before it releases.
@@ -108,7 +110,7 @@ pub async fn memory(clock: Arc<SimClock>) -> SqliteStoreSet {
     let stores = SqliteStoreSet::memory_with_options_and_clock(options, clock)
         .await
         .expect("an in-memory store set opens");
-    lash_core_execution::testing::process_execution_env_fixture(
+    lash_execution_contracts::testing::process_execution_env_fixture(
         stores.process_env_store().as_ref(),
     )
     .await;
@@ -125,7 +127,7 @@ pub async fn file(path: impl AsRef<Path>, clock: Arc<SimClock>) -> SqliteStoreSe
     let stores = SqliteStoreSet::open_with_options_and_clock(path, options, clock)
         .await
         .expect("a file store set opens");
-    lash_core_execution::testing::process_execution_env_fixture(
+    lash_execution_contracts::testing::process_execution_env_fixture(
         stores.process_env_store().as_ref(),
     )
     .await;

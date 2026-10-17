@@ -20,7 +20,7 @@ async fn empty_batch_dispatches_predecessor_and_unknown_versions_to_a_typed_prot
         let outcomes = execute_final_tool_intents(
             &context.intent_realization_context(),
             &crate::ToolCallId::fixture("empty-version-call"),
-            &crate::ToolIntents {
+            &lash_execution_contracts::tool_intent::ToolIntents {
                 protocol_version: recorded,
                 intents: Vec::new(),
             },
@@ -32,8 +32,8 @@ async fn empty_batch_dispatches_predecessor_and_unknown_versions_to_a_typed_prot
         .outcomes;
         assert_eq!(
             outcomes,
-            vec![crate::ToolIntentExecutionOutcome::ProtocolRefused {
-                refusal: crate::ToolIntentRefusalReason::UnsupportedProtocolVersion { recorded },
+            vec![lash_execution_contracts::tool_intent_outcome::ToolIntentExecutionOutcome::ProtocolRefused {
+                refusal: lash_execution_contracts::tool_intent_outcome::ToolIntentRefusalReason::UnsupportedProtocolVersion { recorded },
             }]
         );
     }

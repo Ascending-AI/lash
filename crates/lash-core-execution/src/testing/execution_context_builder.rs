@@ -56,7 +56,7 @@ impl From<ActorContext> for TestEffectController {
 #[derive(Clone)]
 pub struct TestExecutionPorts {
     pub effect_host: ActorContext,
-    pub process_env_store: Arc<dyn crate::ProcessEnvStore>,
+    pub process_env_store: Arc<dyn lash_execution_contracts::process::ProcessEnvStore>,
     pub artifact_ports: Option<crate::runtime::ArtifactReferrerPorts>,
     pub process_engines: crate::ProcessEngineRegistry,
     pub attachment_store: Arc<dyn crate::AttachmentStore>,
@@ -74,7 +74,7 @@ pub struct TestExecutionPorts {
 
 impl TestExecutionPorts {
     /// Every port from one backend, on its clock.
-    pub fn of(backend: &crate::Backend) -> Self {
+    pub fn of(backend: &lash_execution_contracts::backend::Backend) -> Self {
         Self::from(backend)
     }
 
@@ -84,7 +84,10 @@ impl TestExecutionPorts {
     /// The controller's admitted scope is the scope the context claims: the
     /// default test turn of the builder's session, or the scope of the parent
     /// invocation the fixture installs. The build refuses a disagreement.
-    pub fn lent(backend: &crate::Backend, controller: crate::ActorContext) -> Self {
+    pub fn lent(
+        backend: &lash_execution_contracts::backend::Backend,
+        controller: crate::ActorContext,
+    ) -> Self {
         Self {
             lent_controller: Some(controller),
             ..Self::from(backend)
@@ -95,8 +98,8 @@ impl TestExecutionPorts {
     /// backend's environment store and cleanup ledger.
     pub fn with_module_artifact_store(
         mut self,
-        backend: &crate::Backend,
-        modules: Arc<dyn crate::ModuleArtifactStore>,
+        backend: &lash_execution_contracts::backend::Backend,
+        modules: Arc<dyn lash_execution_contracts::module_artifacts::ModuleArtifactStore>,
     ) -> Self {
         self.artifact_ports = Some(crate::runtime::ArtifactReferrerPorts::new(
             modules,
@@ -115,7 +118,7 @@ impl TestExecutionPorts {
     /// system clock.
     pub fn over_host(
         effect_host: ActorContext,
-        process_env_store: Arc<dyn crate::ProcessEnvStore>,
+        process_env_store: Arc<dyn lash_execution_contracts::process::ProcessEnvStore>,
     ) -> Self {
         Self {
             effect_host,
@@ -129,8 +132,8 @@ impl TestExecutionPorts {
     }
 }
 
-impl From<&crate::Backend> for TestExecutionPorts {
-    fn from(backend: &crate::Backend) -> Self {
+impl From<&lash_execution_contracts::backend::Backend> for TestExecutionPorts {
+    fn from(backend: &lash_execution_contracts::backend::Backend) -> Self {
         Self {
             effect_host: ActorContext::detached(backend.clone()),
             process_env_store: backend.process_env_store(),
@@ -153,7 +156,7 @@ pub struct TestExecutionContextBuilder<'run> {
     processes: Arc<dyn crate::ProcessService>,
     process_engines: crate::ProcessEngineRegistry,
     direct_completions: Option<crate::DirectCompletionClient<'run>>,
-    process_env_store: Arc<dyn crate::ProcessEnvStore>,
+    process_env_store: Arc<dyn lash_execution_contracts::process::ProcessEnvStore>,
     facts: crate::plugin::ExecutionFacts,
     turn_context: crate::TurnContext,
     session_host_mode: TestSessionHostMode,
@@ -189,12 +192,12 @@ pub struct TestExecutionContextBuilder<'run> {
     /// The lineage of the process the context runs inside. `None` takes a
     /// root process's lineage when the context admits a process scope, and
     /// none otherwise.
-    process_lineage: Option<crate::ProcessLineage>,
+    process_lineage: Option<lash_execution_contracts::process::ProcessLineage>,
 }
 
 pub struct BuiltTestExecutionContext<'run> {
     pub dispatch: Arc<crate::tool_dispatch::ToolDispatchContext<'run>>,
-    pub process_env_store: Arc<dyn crate::ProcessEnvStore>,
+    pub process_env_store: Arc<dyn lash_execution_contracts::process::ProcessEnvStore>,
     pub turn_context: crate::TurnContext,
     pub runtime_parent_invocation: Option<crate::RuntimeInvocation>,
     /// Which cell of the turn this context executes; see
@@ -229,7 +232,7 @@ impl<'run> TestExecutionContextBuilder<'run> {
     fn assemble(
         effect_host: Option<ActorContext>,
         effect_controller: Option<TestEffectController>,
-        process_env_store: Arc<dyn crate::ProcessEnvStore>,
+        process_env_store: Arc<dyn lash_execution_contracts::process::ProcessEnvStore>,
         artifact_ports: Option<crate::runtime::ArtifactReferrerPorts>,
         process_engines: crate::ProcessEngineRegistry,
         attachment_store: Arc<dyn crate::AttachmentStore>,
@@ -275,7 +278,7 @@ impl<'run> TestExecutionContextBuilder<'run> {
     }
 
     /// A builder over every port of `backend`.
-    pub fn for_backend(backend: &crate::Backend) -> Self {
+    pub fn for_backend(backend: &lash_execution_contracts::backend::Backend) -> Self {
         Self::new(TestExecutionPorts::of(backend))
     }
 
@@ -500,7 +503,10 @@ impl<'run> TestExecutionContextBuilder<'run> {
 
     /// The lineage of the process the context runs inside (FIG-3607 R1):
     /// what a start made in it records above its starter.
-    pub fn process_lineage(mut self, lineage: crate::ProcessLineage) -> Self {
+    pub fn process_lineage(
+        mut self,
+        lineage: lash_execution_contracts::process::ProcessLineage,
+    ) -> Self {
         self.process_lineage = Some(lineage);
         self
     }
@@ -604,15 +610,15 @@ impl<'run> TestExecutionContextBuilder<'run> {
         let process_lineage =
             self.process_lineage
                 .or_else(|| match effect_controller.execution_scope() {
-                    crate::ExecutionScope::Process { process_id } => {
-                        Some(crate::ProcessLineage::of_process(
+                    crate::ExecutionScope::Process { process_id } => Some(
+                        lash_execution_contracts::process::ProcessLineage::of_process(
                             process_id,
-                            &crate::Ancestry::root(),
+                            &lash_execution_contracts::process::Ancestry::root(),
                             None,
                             None,
                             None,
-                        ))
-                    }
+                        ),
+                    ),
                     _ => None,
                 });
         let dispatch = Arc::new(crate::tool_dispatch::ToolDispatchContext {

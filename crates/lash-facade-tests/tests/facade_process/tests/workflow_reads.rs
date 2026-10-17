@@ -58,7 +58,10 @@ impl UndocumentedEngineFactory {
     pub fn bind_process_engine(
         &self,
         _ctx: &lash_core::ProcessEngineContributionContext<'_>,
-    ) -> std::result::Result<lash_core::ProcessEngineRegistration, lash_core::PluginError> {
+    ) -> std::result::Result<
+        lash_core::ProcessEngineRegistration,
+        lash_execution_contracts::plugin_error::PluginError,
+    > {
         Ok(lash_core::ProcessEngineRegistration::accepting(Arc::new(
             lash_core::testing::FixtureProcessEngine,
         )))
@@ -88,7 +91,7 @@ async fn an_engine_without_a_document_provider_reads_unsupported() {
         .expect("the core builds");
     let artifacts = core.host_artifacts();
     let pin = lash::process::HostArtifactPin::mint();
-    let draft = lash_core::ProcessDefinitionDraft::new(
+    let draft = lash_execution_contracts::process::ProcessDefinitionDraft::new(
         "testing-fixture",
         serde_json::json!({ "program": "undocumented" }),
         [],
@@ -108,7 +111,7 @@ async fn an_engine_without_a_document_provider_reads_unsupported() {
         }
     );
 
-    let unheld = lash_core::ProcessDefinitionDraft::new(
+    let unheld = lash_execution_contracts::process::ProcessDefinitionDraft::new(
         "testing-fixture",
         serde_json::json!({ "program": "never published" }),
         [],
@@ -131,23 +134,28 @@ async fn an_engine_without_a_document_provider_reads_unsupported() {
 /// deletion and filter exit, and restarts when compaction prunes its fence.
 #[tokio::test]
 async fn a_roster_and_changes_converge_and_restart_after_compaction() {
-    use lash_core::{ProcessLifecycle as _, ProcessRegistrar as _, ProcessRetention as _};
+    use lash_execution_contracts::process::ProcessLifecycle as _;
+    use lash_execution_contracts::process::ProcessRegistrar as _;
+    use lash_execution_contracts::process::ProcessRetention as _;
     let stores = Arc::new(
         lash_sqlite_store::SqliteStoreSet::memory()
             .await
             .expect("SQLite stores"),
     );
-    lash_core::testing::process_execution_env_fixture(stores.process_env_store().as_ref()).await;
+    lash_execution_contracts::testing::process_execution_env_fixture(
+        stores.process_env_store().as_ref(),
+    )
+    .await;
     let registry = stores.process_registry();
     let core = standard_core_builder_over(lash_conformance::backend_over(stores))
         .build(lash_facade_tests::runtime_lease_owner())
         .expect("core");
     let mut ids = Vec::new();
     for index in 0..3 {
-        let mut registration = lash_core::testing::held_engine_registration(
+        let mut registration = lash_execution_contracts::testing::held_engine_registration(
             serde_json::Value::Null,
-            lash_core::ProcessProvenance::host(),
-            lash_core::Lifetime::Detached,
+            lash_execution_contracts::process::ProcessProvenance::host(),
+            lash_execution_contracts::process::Lifetime::Detached,
         );
         registration.identity.label = Some(format!("roster-{index}"));
         ids.push(
@@ -160,13 +168,13 @@ async fn a_roster_and_changes_converge_and_restart_after_compaction() {
     }
     ids.sort();
     let processes = core.processes();
-    let filter = lash_core::ProcessListFilter {
+    let filter = lash_execution_contracts::process::ProcessListFilter {
         created_at_start_ms: Some(0),
         created_at_end_ms: Some(u64::MAX),
         retired_since_ms: Some(1),
-        ..lash_core::ProcessListFilter::default()
+        ..lash_execution_contracts::process::ProcessListFilter::default()
     };
-    let transported = |cursor: lash_core::ProcessRosterCursor| {
+    let transported = |cursor: lash_execution_contracts::process::ProcessRosterCursor| {
         let budget = lash::process::ProcessRosterTokenBudget::default();
         let token = cursor.to_token(budget).expect("token within budget");
         lash::process::ProcessRosterCursor::from_token(&token, budget)
@@ -180,7 +188,7 @@ async fn a_roster_and_changes_converge_and_restart_after_compaction() {
     assert_eq!(first.processes.len(), 1);
     let fence = first.change_cursor;
     let stale_continuation = first.continuation.clone().map(transported);
-    let changed_filter = lash_core::ProcessListFilter {
+    let changed_filter = lash_execution_contracts::process::ProcessListFilter {
         retired_since_ms: Some(2),
         ..filter.clone()
     };
@@ -189,21 +197,21 @@ async fn a_roster_and_changes_converge_and_restart_after_compaction() {
             .list(&changed_filter, bound, stale_continuation.clone())
             .await,
         Err(EmbedError::Plugin(
-            lash_core::PluginError::ProcessRosterFilterMismatch { .. }
+            lash_execution_contracts::plugin_error::PluginError::ProcessRosterFilterMismatch { .. }
         ))
     ));
     let other_store = lash_sqlite_store::SqliteStoreSet::memory()
         .await
         .expect("another store");
     assert!(matches!(
-        lash_core::ProcessQuery::list_processes_page(
+        lash_execution_contracts::process::ProcessQuery::list_processes_page(
             other_store.process_registry().as_ref(),
             &filter,
             bound,
             stale_continuation.clone(),
         )
         .await,
-        Err(lash_core::PluginError::ProcessRegistryCursorBackendMismatch { .. })
+        Err(lash_execution_contracts::plugin_error::PluginError::ProcessRegistryCursorBackendMismatch { .. })
     ));
 
     let mut roster: std::collections::BTreeSet<_> = first
@@ -224,10 +232,10 @@ async fn a_roster_and_changes_converge_and_restart_after_compaction() {
         registry
             .complete_process(
                 id,
-                lash_core::ProcessAwaitOutput::from_tool_output(
+                lash_execution_contracts::process::ProcessAwaitOutput::from_tool_output(
                     lash_core::ToolCallOutput::success(serde_json::Value::Null),
                 ),
-                lash_core::ProcessCompletionAuthority::workflow_key(id),
+                lash_execution_contracts::process::ProcessCompletionAuthority::workflow_key(id),
             )
             .await
             .expect("complete");
@@ -237,7 +245,7 @@ async fn a_roster_and_changes_converge_and_restart_after_compaction() {
     registry
         .prune_terminal_processes(
             u64::MAX,
-            Some(lash_core::ProcessListFilter {
+            Some(lash_execution_contracts::process::ProcessListFilter {
                 identity_label: Some(
                     processes
                         .get(&ids[0])
@@ -248,18 +256,18 @@ async fn a_roster_and_changes_converge_and_restart_after_compaction() {
                         .label
                         .expect("label"),
                 ),
-                status: lash_core::ProcessStatusFilter::Any,
-                ..lash_core::ProcessListFilter::default()
+                status: lash_execution_contracts::process::ProcessStatusFilter::Any,
+                ..lash_execution_contracts::process::ProcessListFilter::default()
             }),
-            lash_core::ProjectionWatermark::NoProjector,
+            lash_execution_contracts::process::ProjectionWatermark::NoProjector,
         )
         .await
         .expect("prune one terminal");
     let inserted = registry
-        .register_process(lash_core::testing::held_engine_registration(
+        .register_process(lash_execution_contracts::testing::held_engine_registration(
             serde_json::Value::Null,
-            lash_core::ProcessProvenance::host(),
-            lash_core::Lifetime::Detached,
+            lash_execution_contracts::process::ProcessProvenance::host(),
+            lash_execution_contracts::process::Lifetime::Detached,
         ))
         .await
         .expect("insert during scan")
@@ -289,7 +297,9 @@ async fn a_roster_and_changes_converge_and_restart_after_compaction() {
         }
         for change in page.changes {
             match change.kind {
-                lash_core::facade_support::ObservedProcessChangeKind::Upsert { process } => {
+                lash_execution_contracts::process::ObservedProcessChangeKind::Upsert {
+                    process,
+                } => {
                     if filter.status.matches(process.status()) {
                         roster.insert(process.process_id);
                     } else {
@@ -297,7 +307,9 @@ async fn a_roster_and_changes_converge_and_restart_after_compaction() {
                         roster.remove(&process.process_id);
                     }
                 }
-                lash_core::facade_support::ObservedProcessChangeKind::Deleted { tombstone } => {
+                lash_execution_contracts::process::ObservedProcessChangeKind::Deleted {
+                    tombstone,
+                } => {
                     saw_deletion = true;
                     roster.remove(&tombstone.process_id);
                 }
@@ -312,13 +324,16 @@ async fn a_roster_and_changes_converge_and_restart_after_compaction() {
     let expected = std::collections::BTreeSet::from([ids[2].clone(), inserted]);
     assert_eq!(roster, expected);
     registry
-        .compact_process_tombstones(u64::MAX, lash_core::ProjectionWatermark::NoProjector)
+        .compact_process_tombstones(
+            u64::MAX,
+            lash_execution_contracts::process::ProjectionWatermark::NoProjector,
+        )
         .await
         .expect("compact");
     assert!(matches!(
         processes.changed_since(fence, bound).await,
         Err(EmbedError::Plugin(
-            lash_core::PluginError::ProcessChangeCursorPruned { .. }
+            lash_execution_contracts::plugin_error::PluginError::ProcessChangeCursorPruned { .. }
         ))
     ));
     assert!(matches!(
@@ -326,7 +341,7 @@ async fn a_roster_and_changes_converge_and_restart_after_compaction() {
             .list(&filter, bound, stale_continuation.map(transported))
             .await,
         Err(EmbedError::Plugin(
-            lash_core::PluginError::ProcessChangeCursorPruned { .. }
+            lash_execution_contracts::plugin_error::PluginError::ProcessChangeCursorPruned { .. }
         ))
     ));
     let resumed = processes
@@ -361,13 +376,18 @@ async fn a_roster_and_changes_converge_and_restart_after_compaction() {
 /// checkpointed entry, without skipping the rest of that page.
 #[tokio::test]
 async fn a_process_projector_resumes_after_the_middle_entry_without_skipping_changes() {
-    use lash_core::{ProcessLifecycle as _, ProcessRegistrar as _, ProcessRetention as _};
+    use lash_execution_contracts::process::ProcessLifecycle as _;
+    use lash_execution_contracts::process::ProcessRegistrar as _;
+    use lash_execution_contracts::process::ProcessRetention as _;
     let stores = Arc::new(
         lash_sqlite_store::SqliteStoreSet::memory()
             .await
             .expect("SQLite stores"),
     );
-    lash_core::testing::process_execution_env_fixture(stores.process_env_store().as_ref()).await;
+    lash_execution_contracts::testing::process_execution_env_fixture(
+        stores.process_env_store().as_ref(),
+    )
+    .await;
     let registry = stores.process_registry();
     let core = standard_core_builder_over(lash_conformance::backend_over(stores))
         .build(lash_facade_tests::runtime_lease_owner())
@@ -376,10 +396,10 @@ async fn a_process_projector_resumes_after_the_middle_entry_without_skipping_cha
     for _ in 0..5 {
         ids.push(
             registry
-                .register_process(lash_core::testing::held_engine_registration(
+                .register_process(lash_execution_contracts::testing::held_engine_registration(
                     serde_json::Value::Null,
-                    lash_core::ProcessProvenance::host(),
-                    lash_core::Lifetime::Detached,
+                    lash_execution_contracts::process::ProcessProvenance::host(),
+                    lash_execution_contracts::process::Lifetime::Detached,
                 ))
                 .await
                 .expect("register")
@@ -389,32 +409,39 @@ async fn a_process_projector_resumes_after_the_middle_entry_without_skipping_cha
     registry
         .complete_process(
             &ids[1],
-            lash_core::ProcessAwaitOutput::from_tool_output(lash_core::ToolCallOutput::success(
-                serde_json::Value::Null,
-            )),
-            lash_core::ProcessCompletionAuthority::workflow_key(&ids[1]),
+            lash_execution_contracts::process::ProcessAwaitOutput::from_tool_output(
+                lash_core::ToolCallOutput::success(serde_json::Value::Null),
+            ),
+            lash_execution_contracts::process::ProcessCompletionAuthority::workflow_key(&ids[1]),
         )
         .await
         .expect("complete");
     registry
-        .prune_terminal_processes(u64::MAX, None, lash_core::ProjectionWatermark::NoProjector)
+        .prune_terminal_processes(
+            u64::MAX,
+            None,
+            lash_execution_contracts::process::ProjectionWatermark::NoProjector,
+        )
         .await
         .expect("prune into a deletion entry");
     let limit = std::num::NonZeroUsize::new(10).expect("page bound");
     let page = core
         .processes()
-        .changed_since(lash_core::ProcessChangeCursor::initial(), limit)
+        .changed_since(
+            lash_execution_contracts::process::ProcessChangeCursor::initial(),
+            limit,
+        )
         .await
         .expect("initial page");
     assert_eq!(page.changes.len(), 5);
-    let (stored, _) = lash_core::ProcessQuery::processes_changed_since(
+    let (stored, _) = lash_execution_contracts::process::ProcessQuery::processes_changed_since(
         registry.as_ref(),
-        lash_core::ProcessChangeCursor::initial(),
+        lash_execution_contracts::process::ProcessChangeCursor::initial(),
         limit.get(),
     )
     .await
     .expect("store-issued entries");
-    let mut previous = lash_core::ProcessChangeCursor::initial();
+    let mut previous = lash_execution_contracts::process::ProcessChangeCursor::initial();
     for (observed, stored) in page.changes.iter().zip(stored) {
         assert_eq!(
             observed.cursor, stored.cursor,
@@ -434,7 +461,7 @@ async fn a_process_projector_resumes_after_the_middle_entry_without_skipping_cha
     let mut checkpoint = serde_json::Value::Null;
     for change in &page.changes[..3] {
         checkpoint = serde_json::to_value(change.cursor).expect("serialize cursor");
-        let cursor: lash_core::ProcessChangeCursor =
+        let cursor: lash_execution_contracts::process::ProcessChangeCursor =
             serde_json::from_value(checkpoint.clone()).expect("durable opaque checkpoint");
         assert_eq!(cursor, change.cursor);
         projected.push(change.clone());

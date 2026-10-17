@@ -16,7 +16,6 @@ use std::process::Stdio;
 use std::sync::{Arc, Mutex};
 use std::time::{Duration, Instant};
 
-use lash_core_execution::StoreSet as _;
 use lash_durable::laws::node_wakes::{NodeWakeTier, serve_node};
 use lash_durable::runner::{Activation, Exit, Owned, Runner, RunnerConfig};
 use lash_durable::{
@@ -24,6 +23,7 @@ use lash_durable::{
     LeaseSettings, MailKind, MailTx, NodeId, NodeLease, NodeWakeEvent, NodeWakeFeed, NodeWakes,
     Owner, Reaped, WakeBatch,
 };
+use lash_execution_contracts::backend::StoreSet as _;
 use tokio::io::{AsyncBufReadExt as _, AsyncWriteExt as _};
 use tokio::sync::{mpsc, watch};
 
@@ -299,8 +299,8 @@ impl Activation for Tally {
 }
 
 /// The attachment the sweeper child condemns.
-fn swept() -> lash_core_execution::AttachmentId {
-    lash_core_execution::AttachmentId::parse("a1".repeat(32)).expect("an attachment id")
+fn swept() -> lash_protocol_types::attachment::AttachmentId {
+    lash_protocol_types::attachment::AttachmentId::parse("a1".repeat(32)).expect("an attachment id")
 }
 
 /// Facts observed at the production runner's node-wake boundary.
@@ -498,7 +498,7 @@ async fn run_child(role: &str, database: &Path) {
     let config = settings.validate().expect("the child's settings validate");
     let mut runner = Runner::new(
         Arc::new(stores.durable_store()),
-        Arc::new(lash_core_execution::runtime::SystemClock),
+        Arc::new(lash_core_ids::clock::SystemClock),
         RunnerConfig::new(NodeId::new(role), vec![formats()], &config),
         activation,
     );

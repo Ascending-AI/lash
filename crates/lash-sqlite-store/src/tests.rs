@@ -7,8 +7,9 @@ use super::*;
 use crate::session_listing::list_session_views;
 use std::collections::BTreeMap;
 
-use lash_core_execution::store::RunStore as _;
-use lash_core_execution::{SessionCatalogStore as _, SessionHistoryStore as _};
+use lash_core_store::store::RunStore as _;
+use lash_core_store::store::SessionCatalogStore as _;
+use lash_core_store::store::SessionHistoryStore as _;
 use lash_protocol_types::{ProcessId, SessionId};
 use std::sync::atomic::Ordering;
 
@@ -37,8 +38,8 @@ pub(crate) fn input_run_sql_fixture() -> Connection {
 fn a_settled_inputs_run_and_pinned_revision_survive_without_a_binding_table() {
     let connection = input_run_sql_fixture();
     let session = SessionId::from("session");
-    let input = lash_core_execution::InputId::from("input");
-    let run = lash_core_execution::TurnId::from("run");
+    let input = lash_protocol_types::InputId::from("input");
+    let run = lash_protocol_types::TurnId::from("run");
     crate::session_runs::bind_run_inputs_conn(
         &connection,
         &session,
@@ -100,7 +101,7 @@ fn a_settled_inputs_run_and_pinned_revision_survive_without_a_binding_table() {
     crate::revisions::pin_conn(
         &connection,
         &session,
-        &lash_core_execution::Target::Input(input),
+        &lash_core_store::store::Target::Input(input),
     )
     .expect("pin");
     let retained_revisions = || {
@@ -176,8 +177,8 @@ fn a_settled_inputs_run_and_pinned_revision_survive_without_a_binding_table() {
 fn a_fork_rebinds_only_the_inputs_the_old_run_released() {
     let connection = input_run_sql_fixture();
     let session = SessionId::from("session");
-    let input = lash_core_execution::InputId::from("input");
-    let run = lash_core_execution::TurnId::from("run");
+    let input = lash_protocol_types::InputId::from("input");
+    let run = lash_protocol_types::TurnId::from("run");
     crate::session_runs::bind_run_inputs_conn(
         &connection,
         &session,
@@ -194,7 +195,7 @@ fn a_fork_rebinds_only_the_inputs_the_old_run_released() {
             params!["session", "run"],
         )
         .expect("fork release");
-    let fork = lash_core_execution::TurnId::from("fork");
+    let fork = lash_protocol_types::TurnId::from("fork");
     crate::session_runs::bind_run_inputs_conn(
         &connection,
         &session,
@@ -229,12 +230,12 @@ fn a_terminal_turn_refuses_registration_without_a_parent_end_row() {
              state, input_json, submission_digest, enqueued_at_ms, admitted_run, terminal_at_ms)
          VALUES (1, 'input', 'session', 'alias', '{\"scope\":\"next_turn\"}', 'completed', '{}', 'digest', 0, 'run', 42)", []
     ).expect("settled alias");
-    let scope = lash_core_execution::ScopeId::turn("session", "run");
+    let scope = lash_core_store::scope_identity::ScopeId::turn("session", "run");
     crate::process_registry::parent_end::record_conn(
         &connection,
         &scope,
         42,
-        lash_core_execution::FleetFormat::current(),
+        lash_core_store::store::FleetFormat::current(),
     )
     .expect("close");
     let plans: i64 = connection
@@ -245,28 +246,29 @@ fn a_terminal_turn_refuses_registration_without_a_parent_end_row() {
     assert_eq!(plans, 0, "turn closure must come from its terminal");
     for scope in [
         scope,
-        lash_core_execution::ScopeId::turn("session", "alias"),
+        lash_core_store::scope_identity::ScopeId::turn("session", "alias"),
     ] {
         for lifetime in [
-            lash_core_execution::LifetimeDecision::Detached,
-            lash_core_execution::LifetimeDecision::Until {
+            lash_execution_contracts::process::LifetimeDecision::Detached,
+            lash_execution_contracts::process::LifetimeDecision::Until {
                 scope: scope.clone(),
-                grant: lash_core_execution::ScopeGrant::Ancestor,
+                grant: lash_execution_contracts::process::ScopeGrant::Ancestor,
             },
         ] {
-            let mut registration = lash_core_execution::testing::held_engine_registration(
+            let mut registration = lash_execution_contracts::testing::held_engine_registration(
                 serde_json::json!({}),
-                lash_core_execution::ProcessProvenance::host(),
-                lash_core_execution::Lifetime::Detached,
+                lash_execution_contracts::process::ProcessProvenance::host(),
+                lash_execution_contracts::process::Lifetime::Detached,
             );
-            registration.ancestry = lash_core_execution::Ancestry::from_scopes([scope.clone()]);
+            registration.ancestry =
+                lash_execution_contracts::process::Ancestry::from_scopes([scope.clone()]);
             registration.lifetime = lifetime;
             assert!(matches!(
                 SqliteProcessRegistry::apply_registration_conn(
                     &connection, registration, vec![], ProcessId::fixture("late-child"), false, 43,
-                    lash_core_execution::FleetFormat::current(),
+                    lash_core_store::store::FleetFormat::current(),
                 ),
-                Err(lash_core_execution::PluginError::ParentEnded { parent, .. }) if parent == scope
+                Err(lash_execution_contracts::plugin_error::PluginError::ParentEnded { parent, .. }) if parent == scope
             ));
         }
     }
@@ -389,7 +391,7 @@ fn pending_turn_inputs_reject_a_duplicate_source_key_insert() {
     let mapped = crate::sqlite_pending_turn_input_insert_error(
         error,
         &SessionId::from("session"),
-        &lash_core_execution::InputId::from("second"),
+        &lash_protocol_types::InputId::from("second"),
     );
     assert!(
         matches!(
@@ -405,7 +407,7 @@ fn pending_turn_inputs_reject_a_duplicate_source_key_insert() {
     let mapped = crate::sqlite_pending_turn_input_insert_error(
         error,
         &SessionId::from("session"),
-        &lash_core_execution::InputId::from("first"),
+        &lash_protocol_types::InputId::from("first"),
     );
     assert!(
         matches!(&mapped, StoreError::PendingTurnInputIdConflict { .. }),
@@ -562,9 +564,9 @@ async fn session_listing_statement_count_is_session_count_invariant() {
     for index in 0..8 {
         let session_id = SessionId::fixture(format!("listing-statement-count-{index}"));
         let relation = if index == 0 {
-            lash_core_execution::SessionRelation::Root
+            lash_core_store::session_identity::SessionRelation::Root
         } else {
-            lash_core_execution::SessionRelation::Fork {
+            lash_core_store::session_identity::SessionRelation::Fork {
                 source_session_id: SessionId::from("listing-statement-count-0"),
                 source_node_id: Some(lash_core::NodeId::fixture(format!("source-node-{index}"))),
             }
@@ -576,20 +578,20 @@ async fn session_listing_statement_count_is_session_count_invariant() {
                     Vec::new()
                 } else {
                     vec![
-                        lash_core_execution::facade_support::SessionObserverIntent::host_requested(
+                        lash_core_store::session_identity::SessionObserverIntent::host_requested(
                             ProcessId::fixture(&format!("intent-process-{index}")),
                         ),
                     ]
                 },
                 session_id: session_id.clone(),
                 relation: relation.clone(),
-                config: lash_core_execution::PersistedSessionConfig::new(
-                    lash_core_execution::TurnBudget::Unbounded,
-                    lash_core_execution::MaxToolCalls::new(1024),
+                config: lash_core_store::session_graph::PersistedSessionConfig::new(
+                    lash_protocol_types::session_model::TurnBudget::Unbounded,
+                    lash_protocol_types::session_model::MaxToolCalls::new(1024),
                     lash_core::NoProgressBudget::bounded(12),
                 ),
-                head: lash_core_execution::SessionCreationHead::Config,
-                retention: lash_core_execution::Retention::UntilGc,
+                head: lash_core_store::session_store_factory_types::SessionCreationHead::Config,
+                retention: lash_core_store::store::Retention::UntilGc,
             })
             .await
             .expect("create session listing fixture");
@@ -639,7 +641,7 @@ fn checkpoint_with_changed_components(depth: usize) -> HydratedSessionCheckpoint
             .map(|index| {
                 (
                     format!("arbitrary/depth-invariance/{index:05}"),
-                    lash_core_execution::HydratedCheckpointComponent::changed(
+                    lash_core_store::store::HydratedCheckpointComponent::changed(
                         format!("depth-invariance-body-{index:05}").into_bytes(),
                     ),
                 )
@@ -658,7 +660,7 @@ fn checkpoint_with_unchanged_components(manifest: &SessionCheckpoint) -> Hydrate
             .map(|(key, descriptor)| {
                 (
                     key.clone(),
-                    lash_core_execution::HydratedCheckpointComponent::unchanged(descriptor),
+                    lash_core_store::store::HydratedCheckpointComponent::unchanged(descriptor),
                 )
             })
             .collect(),
@@ -670,13 +672,13 @@ fn checkpoint_with_unchanged_components(manifest: &SessionCheckpoint) -> Hydrate
 async fn durable_state(
     store: &SqliteStore,
     session_id: &SessionId,
-) -> lash_core_execution::RuntimeSessionState {
-    let state = lash_core_execution::RuntimeSessionState {
+) -> lash_core_store::session_state::RuntimeSessionState {
+    let state = lash_core_store::session_state::RuntimeSessionState {
         session_id: session_id.clone(),
-        ..lash_core_execution::RuntimeSessionState::fixture(
-            lash_core_execution::SessionPolicy::new(
-                lash_core_execution::TurnBudget::Unbounded,
-                lash_core_execution::MaxToolCalls::new(1024),
+        ..lash_core_store::session_state::RuntimeSessionState::fixture(
+            lash_core_store::session_policy::SessionPolicy::new(
+                lash_protocol_types::session_model::TurnBudget::Unbounded,
+                lash_protocol_types::session_model::MaxToolCalls::new(1024),
                 lash_core::NoProgressBudget::bounded(12),
             ),
         )
@@ -684,12 +686,14 @@ async fn durable_state(
     store
         .admit_session(&SessionStoreCreateRequest {
             session_id: session_id.clone(),
-            relation: lash_core_execution::SessionRelation::Root,
-            config: lash_core_execution::PersistedSessionConfig::from_policy(&state.policy.clone()),
-            head: lash_core_execution::SessionCreationHead::Config,
+            relation: lash_core_store::session_identity::SessionRelation::Root,
+            config: lash_core_store::session_graph::PersistedSessionConfig::from_policy(
+                &state.policy.clone(),
+            ),
+            head: lash_core_store::session_store_factory_types::SessionCreationHead::Config,
             pending_observer_intents: Vec::new(),
             owning_process_id: None,
-            retention: lash_core_execution::Retention::UntilGc,
+            retention: lash_core_store::store::Retention::UntilGc,
         })
         .await
         .expect("admit SQLite test session");
@@ -703,7 +707,7 @@ lash_conformance::checkpoint_admission_probe_tests!({
     let counting_store = Arc::clone(&store);
     (
         (),
-        store as Arc<dyn lash_core_execution::RuntimeStore>,
+        store as Arc<dyn lash_core_store::store::RuntimeStore>,
         SessionId::from("sqlite-checkpoint-counter"),
         move || counting_store.checkpoint_admission_counts(),
         // An in-memory SQLite store needs no session teardown.
@@ -758,7 +762,7 @@ async fn checkpoint_component_statement_count_is_depth_invariant() {
         let loaded = store
             .load_session_window(
                 &state.session_id,
-                lash_core_execution::store::WindowSelector::Current,
+                lash_core_store::store::WindowSelector::Current,
             )
             .await
             .expect("load checkpoint component bodies")
@@ -808,11 +812,11 @@ async fn commit_pair(same_operation: bool, grouped: bool) -> (Vec<String>, u64, 
     let state = durable_state(&store, &session).await;
     let commit = |name: &str| {
         let mut state = state.clone();
-        state.append_active_read_delta(&[lash_core_execution::Message {
+        state.append_active_read_delta(&[lash_protocol_types::session_model::Message {
             id: name.to_owned(),
-            role: lash_core_execution::MessageRole::User,
+            role: lash_protocol_types::session_model::MessageRole::User,
             origin: None,
-            parts: Arc::new(vec![lash_core_execution::Part::text(
+            parts: Arc::new(vec![lash_protocol_types::session_model::Part::text(
                 format!("{name}.p0"),
                 name.to_owned(),
                 None,
@@ -821,7 +825,7 @@ async fn commit_pair(same_operation: bool, grouped: bool) -> (Vec<String>, u64, 
         }]);
         RuntimeCommit::persisted_state_with_operation(
             &mut state,
-            lash_core_execution::OperationId::turn(
+            lash_core_store::store::OperationId::turn(
                 &session,
                 lash_protocol_types::TurnId::fixture(name.to_owned()),
                 "commit",
@@ -959,7 +963,7 @@ async fn real_page_exhaustion_rolls_back_and_the_exact_retry_commits_once() {
     let mut commit = RuntimeCommit::persisted_state_for_test(&state);
     commit.checkpoint.components.insert(
         "full/body".to_owned(),
-        lash_core_execution::HydratedCheckpointComponent::changed(vec![b'x'; 524_288]),
+        lash_core_store::store::HydratedCheckpointComponent::changed(vec![b'x'; 524_288]),
     );
     store
         .conn
@@ -1102,32 +1106,32 @@ async fn catalog_lookup_and_repeated_admission_share_a_readable_snapshot() {
         owning_process_id: None,
         pending_observer_intents: Vec::new(),
         session_id: SessionId::from("catalog-lookup"),
-        relation: lash_core_execution::SessionRelation::Root,
-        config: lash_core_execution::PersistedSessionConfig::new(
-            lash_core_execution::TurnBudget::Unbounded,
-            lash_core_execution::MaxToolCalls::new(1024),
+        relation: lash_core_store::session_identity::SessionRelation::Root,
+        config: lash_core_store::session_graph::PersistedSessionConfig::new(
+            lash_protocol_types::session_model::TurnBudget::Unbounded,
+            lash_protocol_types::session_model::MaxToolCalls::new(1024),
             lash_core::NoProgressBudget::bounded(12),
         ),
-        head: lash_core_execution::SessionCreationHead::Config,
-        retention: lash_core_execution::Retention::UntilGc,
+        head: lash_core_store::session_store_factory_types::SessionCreationHead::Config,
+        retention: lash_core_store::store::Retention::UntilGc,
     };
     assert!(matches!(
         store.admit_session(&request).await.expect("admit session"),
-        lash_core_execution::SessionAdmission::Created
+        lash_core_store::store::SessionAdmission::Created
     ));
     assert!(matches!(
         store
             .lookup_session(&request.session_id)
             .await
             .expect("look up live session"),
-        lash_core_execution::SessionLookup::Live(_)
+        lash_core_store::store::SessionLookup::Live(_)
     ));
     assert!(matches!(
         store
             .admit_session(&request)
             .await
             .expect("readmit session"),
-        lash_core_execution::SessionAdmission::Rebound
+        lash_core_store::store::SessionAdmission::Rebound
     ));
 }
 
@@ -1142,14 +1146,14 @@ async fn lookup_session_aborts_on_unreadable_requested_session_meta() {
         owning_process_id: None,
         pending_observer_intents: Vec::new(),
         session_id: SessionId::from("corrupt-session-meta"),
-        relation: lash_core_execution::SessionRelation::Root,
-        config: lash_core_execution::PersistedSessionConfig::new(
-            lash_core_execution::TurnBudget::Unbounded,
-            lash_core_execution::MaxToolCalls::new(1024),
+        relation: lash_core_store::session_identity::SessionRelation::Root,
+        config: lash_core_store::session_graph::PersistedSessionConfig::new(
+            lash_protocol_types::session_model::TurnBudget::Unbounded,
+            lash_protocol_types::session_model::MaxToolCalls::new(1024),
             lash_core::NoProgressBudget::bounded(12),
         ),
-        head: lash_core_execution::SessionCreationHead::Config,
-        retention: lash_core_execution::Retention::UntilGc,
+        head: lash_core_store::session_store_factory_types::SessionCreationHead::Config,
+        retention: lash_core_store::store::Retention::UntilGc,
     };
 
     store
@@ -1190,27 +1194,27 @@ async fn concurrent_admission_creates_both_sessions_in_one_catalog() {
     .expect("open catalog");
     let request = |session_id: &str| SessionStoreCreateRequest {
         session_id: SessionId::fixture(session_id),
-        relation: lash_core_execution::SessionRelation::Root,
-        config: lash_core_execution::PersistedSessionConfig::new(
-            lash_core_execution::TurnBudget::Unbounded,
-            lash_core_execution::MaxToolCalls::new(1024),
+        relation: lash_core_store::session_identity::SessionRelation::Root,
+        config: lash_core_store::session_graph::PersistedSessionConfig::new(
+            lash_protocol_types::session_model::TurnBudget::Unbounded,
+            lash_protocol_types::session_model::MaxToolCalls::new(1024),
             lash_core::NoProgressBudget::bounded(12),
         ),
-        head: lash_core_execution::SessionCreationHead::Config,
+        head: lash_core_store::session_store_factory_types::SessionCreationHead::Config,
         pending_observer_intents: Vec::new(),
         owning_process_id: None,
-        retention: lash_core_execution::Retention::UntilGc,
+        retention: lash_core_store::store::Retention::UntilGc,
     };
     let first = request("admission-a");
     let second = request("admission-b");
     let (a, b) = tokio::join!(store.admit_session(&first), store.admit_session(&second));
     assert!(matches!(
         a,
-        Ok(lash_core_execution::SessionAdmission::Created)
+        Ok(lash_core_store::store::SessionAdmission::Created)
     ));
     assert!(matches!(
         b,
-        Ok(lash_core_execution::SessionAdmission::Created)
+        Ok(lash_core_store::store::SessionAdmission::Created)
     ));
     for session_id in [&first.session_id, &second.session_id] {
         assert!(matches!(
@@ -1218,7 +1222,7 @@ async fn concurrent_admission_creates_both_sessions_in_one_catalog() {
                 .lookup_session(session_id)
                 .await
                 .expect("lookup admitted session"),
-            lash_core_execution::SessionLookup::Live(_)
+            lash_core_store::store::SessionLookup::Live(_)
         ));
     }
 }
@@ -1229,8 +1233,8 @@ async fn concurrent_admission_creates_both_sessions_in_one_catalog() {
 /// recorded step would journal as its answer.
 #[test]
 fn a_registry_sql_fault_is_a_retryable_store_fault_at_the_plugin_boundary() {
-    use lash_core_execution::PluginError;
-    use lash_core_execution::store::StoreFault;
+    use lash_core_store::store::StoreFault;
+    use lash_execution_contracts::plugin_error::PluginError;
 
     for code in [rusqlite::ffi::SQLITE_BUSY, rusqlite::ffi::SQLITE_LOCKED] {
         let fault = process_sqlite_error(rusqlite::Error::SqliteFailure(
@@ -1276,7 +1280,7 @@ async fn a_session_delete_and_fork_answer_inline_on_the_store_connection() {
             inline_calls: true,
             ..SqliteStoreSetOptions::memory()
         },
-        Arc::new(lash_core_execution::facade_support::SystemClock),
+        Arc::new(lash_core_ids::clock::SystemClock),
     )
     .await
     .expect("open an inline store set");
@@ -1289,18 +1293,18 @@ async fn a_session_delete_and_fork_answer_inline_on_the_store_connection() {
         deleted.as_mut().poll(&mut context).is_ready(),
         "a session delete answers at its first poll"
     );
-    let request = lash_core_execution::ForkSessionRequest {
+    let request = lash_core_store::session_store_factory_types::ForkSessionRequest {
         pending_observer_intents: Vec::new(),
         session_id: SessionId::from("fork"),
         source_session_id: SessionId::from("never-made-either"),
         head_revision: 0,
-        relation: lash_core_execution::SessionRelation::Root,
-        config: lash_core_execution::PersistedSessionConfig::new(
-            lash_core_execution::TurnBudget::Unbounded,
-            lash_core_execution::MaxToolCalls::new(1024),
+        relation: lash_core_store::session_identity::SessionRelation::Root,
+        config: lash_core_store::session_graph::PersistedSessionConfig::new(
+            lash_protocol_types::session_model::TurnBudget::Unbounded,
+            lash_protocol_types::session_model::MaxToolCalls::new(1024),
             lash_core::NoProgressBudget::bounded(12),
         ),
-        retention: lash_core_execution::Retention::UntilGc,
+        retention: lash_core_store::store::Retention::UntilGc,
     };
     let mut forked = std::pin::pin!(store.fork_session(&request));
     assert!(
@@ -1323,16 +1327,16 @@ async fn a_commit_sqlite_refuses_is_a_storage_failure_that_leaves_nothing_behind
         .expect("open catalog");
     let request = SessionStoreCreateRequest {
         session_id: SessionId::fixture("commit-refused"),
-        relation: lash_core_execution::SessionRelation::Root,
-        config: lash_core_execution::PersistedSessionConfig::new(
-            lash_core_execution::TurnBudget::Unbounded,
-            lash_core_execution::MaxToolCalls::new(1024),
+        relation: lash_core_store::session_identity::SessionRelation::Root,
+        config: lash_core_store::session_graph::PersistedSessionConfig::new(
+            lash_protocol_types::session_model::TurnBudget::Unbounded,
+            lash_protocol_types::session_model::MaxToolCalls::new(1024),
             lash_core::NoProgressBudget::bounded(12),
         ),
-        head: lash_core_execution::SessionCreationHead::Config,
+        head: lash_core_store::session_store_factory_types::SessionCreationHead::Config,
         pending_observer_intents: Vec::new(),
         owning_process_id: None,
-        retention: lash_core_execution::Retention::UntilGc,
+        retention: lash_core_store::store::Retention::UntilGc,
     };
     let refuse_commits = |refuse: bool| {
         store.conn.call(move |connection| {
@@ -1364,14 +1368,14 @@ async fn a_commit_sqlite_refuses_is_a_storage_failure_that_leaves_nothing_behind
                 .lookup_session(&request.session_id)
                 .await
                 .expect("look the session up"),
-            lash_core_execution::SessionLookup::Absent
+            lash_core_store::store::SessionLookup::Absent
         ),
         "the refused transaction left no session behind"
     );
     assert!(
         matches!(
             store.admit_session(&request).await,
-            Ok(lash_core_execution::SessionAdmission::Created)
+            Ok(lash_core_store::store::SessionAdmission::Created)
         ),
         "the same admission creates the session once COMMIT lands"
     );
@@ -1381,7 +1385,7 @@ async fn a_commit_sqlite_refuses_is_a_storage_failure_that_leaves_nothing_behind
                 .lookup_session(&request.session_id)
                 .await
                 .expect("look the admitted session up"),
-            lash_core_execution::SessionLookup::Live(_)
+            lash_core_store::store::SessionLookup::Live(_)
         ),
         "the committed admission is complete"
     );
@@ -1458,11 +1462,11 @@ async fn a_terminal_writes_its_window_in_constant_bytes_at_every_history_positio
     let mut written = Vec::new();
     let mut runs = Vec::new();
     for position in 0..24_u64 {
-        state.append_active_read_delta(&[lash_core_execution::Message {
+        state.append_active_read_delta(&[lash_protocol_types::session_model::Message {
             id: format!("history-{position}"),
-            role: lash_core_execution::MessageRole::User,
+            role: lash_protocol_types::session_model::MessageRole::User,
             origin: None,
-            parts: Arc::new(vec![lash_core_execution::Part::text(
+            parts: Arc::new(vec![lash_protocol_types::session_model::Part::text(
                 format!("history-{position}.p0"),
                 format!("{position}:{}", "h".repeat(2_048)),
                 None,
@@ -1472,7 +1476,7 @@ async fn a_terminal_writes_its_window_in_constant_bytes_at_every_history_positio
         let run = lash_protocol_types::TurnId::fixture(format!("terminal-window-{position}"));
         let (commit, appended) = RuntimeCommit::persisted_state_with_operation(
             &mut state,
-            lash_core_execution::OperationId::turn(&session, run.clone(), "commit"),
+            lash_core_store::store::OperationId::turn(&session, run.clone(), "commit"),
         )
         .expect("prepare a longer history");
         let receipt = store
@@ -1499,7 +1503,7 @@ async fn a_terminal_writes_its_window_in_constant_bytes_at_every_history_positio
             store
                 .load_session_window(
                     &session,
-                    lash_core_execution::store::WindowSelector::Terminal(run),
+                    lash_core_store::store::WindowSelector::Terminal(run),
                 )
                 .await
                 .map(|window| {
@@ -1685,28 +1689,33 @@ async fn receipt_replay_uses_scalar_columns_and_preserves_the_original_answer() 
     let session = SessionId::from("compact-receipt");
     let mut state = durable_state(&store, &session).await;
     let mut commit = RuntimeCommit::persisted_state_for_test(&state);
-    commit.turn_commit = lash_core_execution::store::RuntimeTurnCommitStamp::new(
-        lash_core_execution::store::OperationId::new(
+    commit.turn_commit = lash_core_store::store::RuntimeTurnCommitStamp::new(
+        lash_core_store::store::OperationId::new(
             lash_core_execution::ExecutionScope::turn(
                 session.clone(),
-                lash_core_execution::TurnId::from("receipt-turn"),
+                lash_protocol_types::TurnId::from("receipt-turn"),
             ),
             "final",
         ),
     );
-    commit.outcome = Some(lash_core_execution::store::TurnCommitOutcome::Completed);
-    commit.failure_evidence = vec![lash_core_execution::TurnFailureEvidence {
-        partial_output: Some(lash_core_execution::TurnFailurePartialOutput::Complete {
-            text: "original partial output".to_owned(),
-        }),
-        billed_usage: Default::default(),
-        refusal: lash_core_execution::ChargeSafetyRefusalEvidence {
-            denial_reason: lash_core_execution::ChargeSafetyDenialReason::GuaranteeRequired,
-            protocol_position: lash_core_execution::ProtocolPosition::OutputStarted,
-            attempt_number: 1,
-            attempt_count: 1,
+    commit.outcome = Some(lash_core_store::store::TurnCommitOutcome::Completed);
+    commit.failure_evidence = vec![
+        lash_core_store::turn_failure_evidence::TurnFailureEvidence {
+            partial_output: Some(
+                lash_core_store::turn_failure_evidence::TurnFailurePartialOutput::Complete {
+                    text: "original partial output".to_owned(),
+                },
+            ),
+            billed_usage: Default::default(),
+            refusal: lash_core_store::turn_failure_evidence::ChargeSafetyRefusalEvidence {
+                denial_reason:
+                    lash_protocol_types::llm::types::ChargeSafetyDenialReason::GuaranteeRequired,
+                protocol_position: lash_protocol_types::llm::types::ProtocolPosition::OutputStarted,
+                attempt_number: 1,
+                attempt_count: 1,
+            },
         },
-    }];
+    ];
     let original = store
         .commit_runtime_state(commit.clone())
         .await
@@ -1777,7 +1786,7 @@ async fn receipt_replay_uses_scalar_columns_and_preserves_the_original_answer() 
         .load_failure_evidence_page(&session, None, limit)
         .await
         .expect("failure page after replay");
-    let turn_facts = |page: lash_core_execution::store::CommittedTurnNodesPage| {
+    let turn_facts = |page: lash_core_store::store::CommittedTurnNodesPage| {
         serde_json::json!({ "next": page.next, "turns": page.turns.into_iter().map(|turn| serde_json::json!({
             "turn": turn.turn_id, "cursor": turn.cursor, "at": turn.committed_at_ms,
             "outcome": turn.outcome, "nodes": turn.nodes,
@@ -1825,8 +1834,13 @@ async fn idle_sessions_release_cached_graph_bytes_and_reload_on_reopen() {
 }
 
 async fn cache_release_population(delete: bool) {
-    use lash_core_execution::store::{SessionStore, WindowSelector, load_session_window_state};
-    use lash_core_execution::{Message, MessageRole, Part, SessionReadView};
+    use lash_core_store::session_read_view::SessionReadView;
+    use lash_core_store::store::SessionStore;
+    use lash_core_store::store::WindowSelector;
+    use lash_core_store::store::load_session_window_state;
+    use lash_protocol_types::session_model::Message;
+    use lash_protocol_types::session_model::MessageRole;
+    use lash_protocol_types::session_model::Part;
     let mut retained = Vec::new();
     for depth in [8, 64] {
         for count in [1, 5, 20] {

@@ -21,12 +21,12 @@ pub(crate) fn runtime_perf_plugin_stack(
     }
     let processes = if include_cancel_process {
         SessionProcessAdminPluginFactory::new(
-            lash_core::lifetime::session_or_starter,
+            lash_execution_contracts::process::lifetime::session_or_starter,
             lash_core::testing::run_policy_naming(components),
         )
     } else {
         SessionProcessAdminPluginFactory::without_cancel_process(
-            lash_core::lifetime::session_or_starter,
+            lash_execution_contracts::process::lifetime::session_or_starter,
             lash_core::testing::run_policy_naming(components),
         )
     };

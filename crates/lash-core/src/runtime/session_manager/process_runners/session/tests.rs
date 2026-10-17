@@ -1,16 +1,16 @@
 use super::*;
 
 fn recording_factory(
-    backend: &crate::Backend,
+    backend: &lash_execution_contracts::backend::Backend,
 ) -> crate::testing::runtime_helpers::RecordingDeploymentStore {
     crate::testing::runtime_helpers::RecordingDeploymentStore::over(backend.session_store_factory())
 }
 
 /// `backend` with its session catalog recorded by `factory`.
 fn recording_backend(
-    backend: crate::Backend,
+    backend: lash_execution_contracts::backend::Backend,
     factory: &crate::testing::runtime_helpers::RecordingDeploymentStore,
-) -> crate::Backend {
+) -> lash_execution_contracts::backend::Backend {
     let factory = factory.clone();
     crate::testing::runtime_helpers::LayeredBackend::over(backend)
         .map_session_store_factory(move |_| Arc::new(factory))
@@ -24,27 +24,27 @@ fn recording_backend(
 #[test]
 fn every_non_cancelled_child_stop_is_distinguishable_to_the_parent() {
     let stops = [
-        crate::TurnStop::Incomplete,
-        crate::TurnStop::InvalidInput,
-        crate::TurnStop::MaxTurns,
-        crate::TurnStop::ToolFailure,
-        crate::TurnStop::ProviderError {
+        lash_protocol_types::session_model::TurnStop::Incomplete,
+        lash_protocol_types::session_model::TurnStop::InvalidInput,
+        lash_protocol_types::session_model::TurnStop::MaxTurns,
+        lash_protocol_types::session_model::TurnStop::ToolFailure,
+        lash_protocol_types::session_model::TurnStop::ProviderError {
             cause: lash_protocol_types::TurnErrorCause::new(
                 lash_protocol_types::TurnErrorCode::ProviderRejected,
             ),
         },
-        crate::TurnStop::ContextOverflow,
-        crate::TurnStop::PluginAbort,
-        crate::TurnStop::RuntimeError {
+        lash_protocol_types::session_model::TurnStop::ContextOverflow,
+        lash_protocol_types::session_model::TurnStop::PluginAbort,
+        lash_protocol_types::session_model::TurnStop::RuntimeError {
             cause: lash_protocol_types::TurnErrorCause::new(
                 lash_protocol_types::TurnErrorCode::RuntimeRefused,
             ),
         },
-        crate::TurnStop::AgentFrameSwitchLimit,
-        crate::TurnStop::SubmittedError {
+        lash_protocol_types::session_model::TurnStop::AgentFrameSwitchLimit,
+        lash_protocol_types::session_model::TurnStop::SubmittedError {
             value: serde_json::json!({ "reason": "missing shard amber" }),
         },
-        crate::TurnStop::ToolError {
+        lash_protocol_types::session_model::TurnStop::ToolError {
             tool_name: "submit_error".to_string(),
             value: serde_json::json!({
                 "class": "execution",
@@ -66,7 +66,10 @@ fn every_non_cancelled_child_stop_is_distinguishable_to_the_parent() {
             failure.message, "background session turn failed",
             "{stop:?} still collapses onto the shared generic message"
         );
-        assert_eq!(failure.source, crate::ToolFailureSource::Tool);
+        assert_eq!(
+            failure.source,
+            lash_protocol_types::tool_output::ToolFailureSource::Tool
+        );
     }
     assert_eq!(seen.len(), 11);
 }
@@ -75,27 +78,30 @@ fn every_non_cancelled_child_stop_is_distinguishable_to_the_parent() {
 /// model reads the child's reason, not a summary of it.
 #[test]
 fn a_child_authored_stop_reason_reaches_the_parent_verbatim() {
-    let submitted = failed_child_failure(crate::TurnStop::SubmittedError {
-        value: serde_json::json!({ "reason": "missing shard amber" }),
-    });
+    let submitted = failed_child_failure(
+        lash_protocol_types::session_model::TurnStop::SubmittedError {
+            value: serde_json::json!({ "reason": "missing shard amber" }),
+        },
+    );
     assert_eq!(submitted.message, "missing shard amber");
     assert_eq!(submitted.code, "process_session_turn_submitted_error");
 
-    let tool_error = failed_child_failure(crate::TurnStop::ToolError {
-        tool_name: "submit_error".to_string(),
-        value: serde_json::json!({
-            "class": "execution",
-            "code": "child_submit_error",
-            "message": "missing shard amber",
-        }),
-    });
+    let tool_error =
+        failed_child_failure(lash_protocol_types::session_model::TurnStop::ToolError {
+            tool_name: "submit_error".to_string(),
+            value: serde_json::json!({
+                "class": "execution",
+                "code": "child_submit_error",
+                "message": "missing shard amber",
+            }),
+        });
     assert_eq!(tool_error.message, "missing shard amber");
     assert_eq!(tool_error.code, "process_session_turn_tool_error");
     assert!(
         tool_error
             .raw
             .as_ref()
-            .map(crate::ToolValue::to_json_value)
+            .map(lash_protocol_types::tool_output::ToolValue::to_json_value)
             .is_some_and(|raw| raw["stop"]
                 .as_str()
                 .is_some_and(|stop| stop.contains("child_submit_error"))),
@@ -106,29 +112,31 @@ fn a_child_authored_stop_reason_reaches_the_parent_verbatim() {
 /// Run one stopped child turn through the runner's own projection, so the
 /// assertions cover the failure a parent, a process record and a terminal
 /// process event all read.
-fn failed_child_failure(stop: crate::TurnStop) -> crate::ToolFailure {
-    let turn = crate::TurnOutcome::Stopped(stop);
-    crate::testing::held_engine_registration(
+fn failed_child_failure(
+    stop: lash_protocol_types::session_model::TurnStop,
+) -> lash_protocol_types::tool_output::ToolFailure {
+    let turn = lash_protocol_types::session_model::TurnOutcome::Stopped(stop);
+    lash_execution_contracts::testing::held_engine_registration(
         serde_json::Value::Null,
-        crate::ProcessProvenance::host(),
-        crate::Lifetime::Detached,
+        lash_execution_contracts::process::ProcessProvenance::host(),
+        lash_execution_contracts::process::Lifetime::Detached,
     );
     let state = process_terminal_state_for_turn(&turn);
     assert_eq!(
         state,
-        crate::ProcessStatus::Failed,
+        lash_execution_contracts::process::ProcessStatus::Failed,
         "precondition: the stop must fold to a failed process"
     );
     let output = output_from_process_turn(
-        &crate::ProcessId::fixture("failing-child-process"),
+        &lash_protocol_types::ProcessId::fixture("failing-child-process"),
         &SessionId::from("failing-child"),
-        &crate::TurnId::fixture("projected-child-turn"),
+        &lash_protocol_types::TurnId::fixture("projected-child-turn"),
         turn,
-        &crate::SessionTurnOutcome::Turn,
+        &lash_execution_contracts::process::SessionTurnOutcome::Turn,
         lash_core_store::execution_limits::DiagnosticLimits::standard(),
         lash_protocol_types::session_model::RuntimeOutputCuts::standard(),
     );
-    let crate::ToolCallOutcome::Failure(failure) = output.outcome else {
+    let lash_protocol_types::tool_output::ToolCallOutcome::Failure(failure) = output.outcome else {
         panic!("a failed child turn must project a tool failure");
     };
     failure
@@ -149,14 +157,14 @@ use std::sync::Arc;
 async fn predecessor_snapshot_start_decodes_and_is_refused_terminally() {
     let backend = crate::testing::sqlite_recording_backend().await;
     let child_session_id = SessionId::from("snapshot-start-child");
-    let process_id = crate::ProcessId::fixture("process:child:snapshot-start-child");
+    let process_id = lash_protocol_types::ProcessId::fixture("process:child:snapshot-start-child");
     let factory = recording_factory(&backend);
     let backend = recording_backend(backend, &factory);
     let host = crate::EmbeddedRuntimeHost::new(crate::RuntimeHostConfig::new(
         backend.clone(),
-        crate::CommitBudget::bounded(1024 * 1024, 512),
+        lash_core_store::store::CommitBudget::bounded(1024 * 1024, 512),
         crate::QueuedWorkBatchingConfig::new(1),
-        crate::ExecutionBudgets::recommended(),
+        lash_protocol_types::ExecutionBudgets::recommended(),
         crate::runtime::DeltaCoalescing::recommended(),
         crate::DataRetentionConfig::standard(),
     ));
@@ -168,12 +176,13 @@ async fn predecessor_snapshot_start_decodes_and_is_refused_terminally() {
     let services = runtime
         .runtime_session_services()
         .expect("runtime session services");
-    let create_request = crate::SessionCreateRequest::child_session(
-        runtime.session_id(),
-        crate::SessionStartPoint::Empty,
-        crate::PluginOptions::default(),
-    )
-    .with_session_id(&child_session_id);
+    let create_request =
+        lash_execution_contracts::session_types::SessionCreateRequest::child_session(
+            runtime.session_id(),
+            lash_core_store::session_identity::SessionStartPoint::Empty,
+            lash_core_store::execution_state::PluginOptions::default(),
+        )
+        .with_session_id(&child_session_id);
 
     // Rewrite the recorded request's `start` to the predecessor durable
     // spelling — what a pre-FIG-3378 `ProcessInput::SessionTurn` row
@@ -181,23 +190,23 @@ async fn predecessor_snapshot_start_decodes_and_is_refused_terminally() {
     let mut recorded = serde_json::to_value(&create_request).expect("serialize recorded request");
     recorded["start"] = serde_json::json!({
         "kind": "snapshot",
-        "snapshot": serde_json::to_value(crate::SessionSnapshot::new(SessionId::from("session"),
+        "snapshot": serde_json::to_value(lash_core_store::session_identity::SessionSnapshot::new(SessionId::from("session"),
             runtime.state.policy().clone(),
         ))
         .expect("serialize predecessor snapshot"),
     });
-    let predecessor_request: crate::SessionCreateRequest =
+    let predecessor_request: lash_execution_contracts::session_types::SessionCreateRequest =
         serde_json::from_value(recorded).expect("predecessor snapshot payload decodes");
     assert!(matches!(
         predecessor_request.start,
-        crate::SessionStartPoint::Snapshot { .. }
+        lash_core_store::session_identity::SessionStartPoint::Snapshot { .. }
     ));
 
     let mailed = services
         .mail_process_session_turn(
             &process_id,
             predecessor_request,
-            crate::TurnInput::text("run"),
+            lash_core_store::turn_input_vocabulary::TurnInput::text("run"),
             None,
         )
         .await
@@ -207,7 +216,7 @@ async fn predecessor_snapshot_start_decodes_and_is_refused_terminally() {
         panic!("the snapshot start must terminalize, got {mailed:?}");
     };
     let failure = match output.into_tool_output().outcome {
-        crate::ToolCallOutcome::Failure(failure) => failure,
+        lash_protocol_types::tool_output::ToolCallOutcome::Failure(failure) => failure,
         outcome => panic!("the snapshot start must terminalize, got {outcome:?}"),
     };
     assert_eq!(failure.code, "process_session_turn_refused");
@@ -229,18 +238,18 @@ async fn predecessor_snapshot_start_decodes_and_is_refused_terminally() {
 
 #[tokio::test]
 async fn child_turn_cancellation_evidence_survives_runner_record_and_parent_result() {
-    let child_session_id = crate::SessionId::from("child-turn-cancellation-evidence");
-    let registration = crate::testing::held_engine_registration(
+    let child_session_id = lash_protocol_types::SessionId::from("child-turn-cancellation-evidence");
+    let registration = lash_execution_contracts::testing::held_engine_registration(
         serde_json::json!({"fixture": "child-turn-cancellation-evidence"}),
-        crate::ProcessProvenance::host(),
-        crate::Lifetime::Detached,
+        lash_execution_contracts::process::ProcessProvenance::host(),
+        lash_execution_contracts::process::Lifetime::Detached,
     );
-    let evidence = crate::TurnCancellationEvidence {
+    let evidence = lash_protocol_types::session_model::TurnCancellationEvidence {
         request_id: "child-request-17".to_string(),
         origin: Some("opaque-host-origin".to_string()),
         reason: Some("child turn stopped by its host".to_string()),
-        undelivered: crate::TurnCancelUndeliveredInputPolicy::Defer,
-        mode: crate::TurnCancelMode::Immediate,
+        undelivered: lash_protocol_types::session_model::TurnCancelUndeliveredInputPolicy::Defer,
+        mode: lash_protocol_types::session_model::TurnCancelMode::Immediate,
         honoured_after_step: None,
     };
     let registry = crate::testing::sqlite_recording_backend()
@@ -251,16 +260,18 @@ async fn child_turn_cancellation_evidence_survives_runner_record_and_parent_resu
         .await
         .expect("register child-turn process")
         .id;
-    let turn = crate::TurnOutcome::Stopped(crate::TurnStop::Cancelled {
-        evidence: evidence.clone(),
-    });
+    let turn = lash_protocol_types::session_model::TurnOutcome::Stopped(
+        lash_protocol_types::session_model::TurnStop::Cancelled {
+            evidence: evidence.clone(),
+        },
+    );
 
     let runner_output = output_from_process_turn(
         &process_id,
         &child_session_id,
-        &crate::TurnId::fixture("projected-child-turn"),
+        &lash_protocol_types::TurnId::fixture("projected-child-turn"),
         turn,
-        &crate::SessionTurnOutcome::FinalValue { schema: None },
+        &lash_execution_contracts::process::SessionTurnOutcome::FinalValue { schema: None },
         lash_core_store::execution_limits::DiagnosticLimits::standard(),
         lash_protocol_types::session_model::RuntimeOutputCuts::standard(),
     );
@@ -269,8 +280,10 @@ async fn child_turn_cancellation_evidence_survives_runner_record_and_parent_resu
     let completion = registry
         .complete_process(
             &process_id,
-            crate::ProcessAwaitOutput::from_tool_output(runner_output),
-            crate::ProcessCompletionAuthority::workflow_key(&process_id),
+            lash_execution_contracts::process::ProcessAwaitOutput::from_tool_output(runner_output),
+            lash_execution_contracts::process::ProcessCompletionAuthority::workflow_key(
+                &process_id,
+            ),
         )
         .await
         .expect("persist child-turn cancellation");
@@ -292,32 +305,37 @@ async fn child_turn_cancellation_evidence_survives_runner_record_and_parent_resu
 }
 
 fn assert_child_turn_cancellation(
-    output: &crate::ToolCallOutput,
-    evidence: &crate::TurnCancellationEvidence,
+    output: &lash_protocol_types::tool_output::ToolCallOutput,
+    evidence: &lash_protocol_types::session_model::TurnCancellationEvidence,
 ) {
-    let crate::ToolCallOutcome::Cancelled(cancellation) = &output.outcome else {
+    let lash_protocol_types::tool_output::ToolCallOutcome::Cancelled(cancellation) =
+        &output.outcome
+    else {
         panic!("expected child-turn cancellation, got {:?}", output.outcome);
     };
-    assert_eq!(cancellation.origin, Some(crate::CancelOrigin::TurnStopped));
+    assert_eq!(
+        cancellation.origin,
+        Some(lash_protocol_types::tool_output::CancelOrigin::TurnStopped)
+    );
     assert_eq!(cancellation.message, evidence.reason.as_deref().unwrap());
     assert_eq!(
         cancellation
             .raw
             .as_ref()
-            .map(crate::ToolValue::to_json_value),
+            .map(lash_protocol_types::tool_output::ToolValue::to_json_value),
         Some(serde_json::to_value(evidence).expect("encode turn cancellation evidence"))
     );
 }
 
 /// Project one ended child turn through the runner under `result`.
 fn project_turn(
-    turn: crate::TurnOutcome,
-    result: &crate::SessionTurnOutcome,
-) -> crate::ToolCallOutput {
+    turn: lash_protocol_types::session_model::TurnOutcome,
+    result: &lash_execution_contracts::process::SessionTurnOutcome,
+) -> lash_protocol_types::tool_output::ToolCallOutput {
     output_from_process_turn(
-        &crate::ProcessId::fixture("projected-child-process"),
+        &lash_protocol_types::ProcessId::fixture("projected-child-process"),
         &SessionId::from("projected-child"),
-        &crate::TurnId::fixture("projected-child-turn"),
+        &lash_protocol_types::TurnId::fixture("projected-child-turn"),
         turn,
         result,
         lash_core_store::execution_limits::DiagnosticLimits::standard(),
@@ -325,12 +343,16 @@ fn project_turn(
     )
 }
 
-fn finished_turn(finish: crate::TurnFinish) -> crate::TurnOutcome {
-    crate::TurnOutcome::Finished(finish)
+fn finished_turn(
+    finish: lash_protocol_types::session_model::TurnFinish,
+) -> lash_protocol_types::session_model::TurnOutcome {
+    lash_protocol_types::session_model::TurnOutcome::Finished(finish)
 }
 
-fn projected_failure(output: crate::ToolCallOutput) -> crate::ToolFailure {
-    let crate::ToolCallOutcome::Failure(failure) = output.outcome else {
+fn projected_failure(
+    output: lash_protocol_types::tool_output::ToolCallOutput,
+) -> lash_protocol_types::tool_output::ToolFailure {
+    let lash_protocol_types::tool_output::ToolCallOutcome::Failure(failure) = output.outcome else {
         panic!("expected a projected failure, got {:?}", output.outcome);
     };
     failure
@@ -341,10 +363,12 @@ fn projected_failure(output: crate::ToolCallOutput) -> crate::ToolFailure {
 fn child_final_value_preserves_assistant_text() {
     for text in [" \tuseful prose  \r\nnext\t\n", "   ", ""] {
         let output = project_turn(
-            finished_turn(crate::TurnFinish::AssistantMessage {
-                text: text.to_string(),
-            }),
-            &crate::SessionTurnOutcome::FinalValue { schema: None },
+            finished_turn(
+                lash_protocol_types::session_model::TurnFinish::AssistantMessage {
+                    text: text.to_string(),
+                },
+            ),
+            &lash_execution_contracts::process::SessionTurnOutcome::FinalValue { schema: None },
         );
         assert_eq!(output.value_for_projection(), serde_json::json!(text));
     }
@@ -355,7 +379,7 @@ fn child_final_value_preserves_assistant_text() {
 #[test]
 fn child_final_value_keeps_typed_values_and_checks_the_schema() {
     let value = serde_json::json!({ "answer": 42 });
-    let typed = crate::SessionTurnOutcome::FinalValue {
+    let typed = lash_execution_contracts::process::SessionTurnOutcome::FinalValue {
         schema: Some(
             lash_protocol_types::JsonSchema::admit(serde_json::json!({
                 "type": "object",
@@ -366,12 +390,12 @@ fn child_final_value_keeps_typed_values_and_checks_the_schema() {
             .expect("declared result schema"),
         ),
     };
-    for finish in [crate::TurnFinish::Finished {
+    for finish in [lash_protocol_types::session_model::TurnFinish::Finished {
         tool_name: "finish".to_string(),
         value: value.clone(),
     }] {
         for result in [
-            &crate::SessionTurnOutcome::FinalValue { schema: None },
+            &lash_execution_contracts::process::SessionTurnOutcome::FinalValue { schema: None },
             &typed,
         ] {
             assert_eq!(
@@ -387,18 +411,18 @@ fn child_final_value_keeps_typed_values_and_checks_the_schema() {
     ] {
         assert_eq!(
             project_turn(
-                finished_turn(crate::TurnFinish::Finished {
+                finished_turn(lash_protocol_types::session_model::TurnFinish::Finished {
                     tool_name: "finish".to_string(),
                     value: value.clone()
                 }),
-                &crate::SessionTurnOutcome::FinalValue { schema: None }
+                &lash_execution_contracts::process::SessionTurnOutcome::FinalValue { schema: None }
             )
             .value_for_projection(),
             value
         );
     }
     let failure = projected_failure(project_turn(
-        finished_turn(crate::TurnFinish::Finished {
+        finished_turn(lash_protocol_types::session_model::TurnFinish::Finished {
             tool_name: "finish".to_string(),
             value: serde_json::json!({ "answer": "forty-two" }),
         }),
@@ -417,26 +441,32 @@ fn child_final_value_keeps_typed_values_and_checks_the_schema() {
 /// ADR 0116 §3.7: a frame switch or stopped turn cannot supply a final value.
 #[test]
 fn child_final_value_refuses_a_frame_switch_or_stopped_turn() {
-    let switched = crate::TurnOutcome::AgentFrameSwitch {
-        frame_key: crate::FrameKey::from_caller_material("next-frame").expect("frame key"),
+    let switched = lash_protocol_types::session_model::TurnOutcome::AgentFrameSwitch {
+        frame_key: lash_protocol_types::FrameKey::from_caller_material("next-frame")
+            .expect("frame key"),
         task: "continue elsewhere".to_string(),
         initial_nodes: Vec::new(),
-        next_run: crate::RunSpec::default()
+        next_run: lash_core_store::turn_input_vocabulary::RunSpec::default()
             .next_run()
             .expect("the default spec encodes"),
     };
     let failure = projected_failure(project_turn(
         switched.clone(),
-        &crate::SessionTurnOutcome::FinalValue { schema: None },
+        &lash_execution_contracts::process::SessionTurnOutcome::FinalValue { schema: None },
     ));
     assert_eq!(failure.code, "process_session_turn_frame_switch");
-    let turn = project_turn(switched.clone(), &crate::SessionTurnOutcome::Turn);
+    let turn = project_turn(
+        switched.clone(),
+        &lash_execution_contracts::process::SessionTurnOutcome::Turn,
+    );
     assert_eq!(
         turn.value_for_projection()["outcome"],
         serde_json::to_value(&switched).expect("typed outcome")
     );
 
-    let stopped = crate::TurnOutcome::Stopped(crate::TurnStop::Incomplete);
+    let stopped = lash_protocol_types::session_model::TurnOutcome::Stopped(
+        lash_protocol_types::session_model::TurnStop::Incomplete,
+    );
     let failure = final_value_of_turn(&stopped).expect_err("a stopped child has no final value");
     assert_eq!(failure.code, "process_session_turn_stopped");
 }
@@ -448,9 +478,9 @@ async fn plugin_process_reads_are_canonical_observations() {
     let backend = crate::testing::sqlite_memory_store_backend().await;
     let host = crate::EmbeddedRuntimeHost::new(crate::RuntimeHostConfig::new(
         backend.clone(),
-        crate::CommitBudget::bounded(1024 * 1024, 512),
+        lash_core_store::store::CommitBudget::bounded(1024 * 1024, 512),
         crate::QueuedWorkBatchingConfig::new(1),
-        crate::ExecutionBudgets::recommended(),
+        lash_protocol_types::ExecutionBudgets::recommended(),
         crate::runtime::DeltaCoalescing::recommended(),
         crate::DataRetentionConfig::standard(),
     ));
@@ -463,10 +493,10 @@ async fn plugin_process_reads_are_canonical_observations() {
     .await;
     let registry = backend.process_registry();
     let record = registry
-        .register_process(crate::testing::held_engine_registration(
+        .register_process(lash_execution_contracts::testing::held_engine_registration(
             serde_json::json!({"probe": true}),
-            crate::ProcessProvenance::host(),
-            crate::Lifetime::Detached,
+            lash_execution_contracts::process::ProcessProvenance::host(),
+            lash_execution_contracts::process::Lifetime::Detached,
         ))
         .await
         .expect("register");
@@ -474,21 +504,21 @@ async fn plugin_process_reads_are_canonical_observations() {
         .add_observer(
             runtime.session_id(),
             &record.id,
-            crate::ProcessObserverBy::host("law"),
+            lash_execution_contracts::process::ProcessObserverBy::host("law"),
         )
         .await
         .expect("visible");
     let services = runtime.runtime_session_services().expect("services");
-    let rows: Vec<crate::facade_support::ObservedProcess> = services
+    let rows: Vec<lash_execution_contracts::process::ObservedProcess> = services
         .process_read_service()
         .list_visible(
             runtime.session_id(),
-            crate::ProcessListMode::All,
+            lash_execution_contracts::process::ProcessListMode::All,
             crate::ProcessOpScope::new(crate::ActorContext::detached(backend.clone())),
         )
         .await
         .expect("plugin read");
-    let observer = crate::facade_support::ProcessWorkObserver::new(registry)
+    let observer = lash_execution_contracts::process::ProcessWorkObserver::new(registry)
         .with_actor_parks(Arc::clone(backend.durable()));
     assert_eq!(
         rows,

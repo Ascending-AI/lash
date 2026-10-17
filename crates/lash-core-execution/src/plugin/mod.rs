@@ -9,7 +9,9 @@ pub use transition::{
     PluginTransitionId, PluginTransitionRecord, PluginTransitionRequest,
 };
 
-use crate::{SessionPolicy, ToolManifest, ToolProvider};
+use crate::ToolProvider;
+use lash_core_store::session_policy::SessionPolicy;
+use lash_protocol_types::ToolManifest;
 
 pub use lash_core_store::store::plugin_writers::{
     PluginCallbackIdentity, RecordedCallbackUnavailable, StreamStateFormatRefusal,
@@ -39,11 +41,8 @@ pub(crate) use execution_state::proposal_failure_message;
 pub use execution_views::{ExecutionFacts, OwnerConfigView, RecordedCallFacts};
 mod attachment_omission;
 pub mod config;
-mod error;
 pub use lash_core_store::plugin_registrations::ToolProviderHandle;
 
-#[cfg(test)]
-mod error_class_tests;
 pub(crate) mod history;
 mod hook_key;
 mod hooks;
@@ -58,7 +57,6 @@ mod runtime_impl;
 mod services;
 pub mod session_obj;
 pub use session_obj::{ResolvedToolSurface, plugin_lifecycle_hook_issue};
-pub(crate) mod session_types;
 pub(crate) mod state;
 pub use recorded_callbacks::{PluginCallbackBody, RecordedCallbackPhase, record_plugin_callbacks};
 use state::PluginStateRegistry;
@@ -86,16 +84,26 @@ pub use attachment_omission::{
     AttachmentOmissionContext, AttachmentOmissionPolicy, AttachmentOmissions, HistoryPartId,
     apply_attachment_omissions, omit_part_attachments,
 };
-pub use config::{
-    AdmittedPluginConfig, CandidateFacts, ConfigCommand, ConfigCommandCatalog,
-    ConfigCommandDescriptor, ConfigOwner, ConfigRegistrar, ConfigRegistrationError, ConfigRegistry,
-    ConfigSubmitError, ConfigTransaction, ConfigWire, CoreConfigOwner, CoreConfigRefusal,
-    CreationConfigError, NoRunOptions, OwnerChange, PluginConfig,
-};
-pub use error::{
-    PluginError, PluginErrorClass, ToolIntentCommandFailure, ToolIntentRuntimeFailure,
-    durable_identity_conflict, is_durable_identity_conflict,
-};
+pub use config::AdmittedPluginConfig;
+pub use config::CandidateFacts;
+pub use config::ConfigCommand;
+pub use config::ConfigCommandCatalog;
+pub use config::ConfigCommandDescriptor;
+pub use config::ConfigOwner;
+pub use config::ConfigRegistrar;
+pub use config::ConfigRegistry;
+pub use config::ConfigSubmitError;
+pub use config::ConfigTransaction;
+pub use config::ConfigWire;
+pub use config::CoreConfigOwner;
+
+pub use config::CreationConfigError;
+pub use config::NoRunOptions;
+pub use config::OwnerChange;
+pub use config::PluginConfig;
+
+use lash_execution_contracts::plugin_error::PluginError;
+
 pub use history::{
     CompactionContext, ContextCompaction, ContextCompactor, ContextError, ContextPressureContext,
     ContextPressureDecision, ContextPressureHook, DecidedContextPressure, PluginTraceEmitter,
@@ -141,12 +149,37 @@ pub use recipe::{
     ToolResultRegistrations, TraceScopeOf, TurnRegistrations,
 };
 pub(crate) use registrar::{BoundRegistrar, PluginContributions, RegisteredHook};
-pub use registry::{
-    FormatVersion, PluginComposition, PluginDeclaration, PluginDeclarationError,
-    PluginExecutionTrace, PluginExtensionContribution, PluginExtensions, PluginFactory, PluginId,
-    PluginMetadata, PluginSessionContext, PluginSessionMaterialization, PluginSpec,
-    ProcessEngineContributionContext, SessionPlugin, SessionReadyContext, StaticPluginFactory,
-};
+pub use registry::FormatVersion;
+pub use registry::PluginComposition;
+pub use registry::PluginDeclaration;
+pub use registry::PluginExecutionTrace;
+pub use registry::PluginExtensionContribution;
+pub use registry::PluginExtensions;
+pub use registry::PluginFactory;
+pub use registry::PluginId;
+pub use registry::PluginMetadata;
+pub use registry::PluginSessionContext;
+pub use registry::PluginSessionMaterialization;
+pub use registry::PluginSpec;
+pub use registry::ProcessEngineContributionContext;
+pub use registry::SessionPlugin;
+pub use registry::SessionReadyContext;
+pub use registry::StaticPluginFactory;
+
+pub use lash_core_store::session_identity::AgentFrameAssignment;
+pub use lash_core_store::session_identity::AgentFrameReason;
+pub use lash_core_store::session_identity::AgentFrameRecord;
+pub use lash_core_store::session_identity::FrameNodeId;
+pub use lash_core_store::session_identity::FrameNodeIdError;
+pub use lash_core_store::session_identity::OpenAgentFrameOutcome;
+pub use lash_core_store::session_identity::OpenAgentFrameRequest;
+pub use lash_core_store::session_identity::SessionLineage;
+pub use lash_core_store::session_identity::SessionObservedProcessOutcome;
+pub use lash_core_store::session_identity::SessionObservedProcessReceipt;
+pub use lash_core_store::session_identity::SessionObserverIntent;
+pub use lash_core_store::session_identity::SessionRelation;
+pub use lash_core_store::session_identity::SessionSnapshot;
+pub use lash_core_store::session_identity::SessionStartPoint;
 pub use runtime_host::{
     AppendSessionNodesOutcome, AppendSessionNodesRequest, DirectCompletion, DirectLlmCompletion,
     SessionGraphService, SessionLifecycleService, SessionStateService,
@@ -159,21 +192,35 @@ pub use service_bindings::*;
 pub(crate) use services::NoopSessionManager;
 pub use services::{PersistentRuntimeServices, PluginOperationInvokeError, RuntimeServices};
 pub use session_obj::PluginSession;
-pub use session_types::{
-    AgentFrameAssignment, AgentFrameReason, AgentFrameRecord, FrameNodeId, FrameNodeIdError,
-    OpenAgentFrameOutcome, OpenAgentFrameRequest, PluginOwned, SessionCreateRequest, SessionHandle,
-    SessionLineage, SessionObservedProcessOutcome, SessionObservedProcessReceipt,
-    SessionObserverIntent, SessionRelation, SessionSnapshot, SessionStartPoint,
-    UnstatedSessionConfig,
-};
-pub use state::{
-    FrontierRefusal, FrontierStep, HookCause, HookOccurrence, KeyRejection, NamespaceBody,
-    NamespaceEncoding, NamespaceEntry, NamespaceFrontierRefusal, NamespaceValues,
-    PluginNamespaceState, PluginState, PluginStateEffect, PluginStateError, PluginStateView,
-    PublicationOrdinal, ResolvedStateChange, StagedPluginState, StateCommand, StateCommandOrigin,
-    StateCommandRefusal, StateCommands, StateFork, StateFrontier, StateReducer, StateReduction,
-    StateResolution, StateResolutionOutcome,
-};
+
+pub use lash_core_store::plugin_state::KeyRejection;
+pub use lash_core_store::plugin_state::NamespaceEntry;
+pub use lash_core_store::plugin_state::NamespaceValues;
+pub use lash_core_store::plugin_state::PluginNamespaceState;
+pub use lash_core_store::plugin_state::PluginState;
+pub use lash_core_store::plugin_state::PluginStateError;
+pub use lash_core_store::tool_run::FrontierRefusal;
+pub use lash_core_store::tool_run::FrontierStep;
+pub use lash_core_store::tool_run::HookCause;
+pub use lash_core_store::tool_run::HookOccurrence;
+pub use lash_core_store::tool_run::NamespaceFrontierRefusal;
+pub use lash_core_store::tool_run::PublicationOrdinal;
+pub use lash_core_store::tool_run::ResolvedStateChange;
+pub use lash_core_store::tool_run::StateCommand;
+pub use lash_core_store::tool_run::StateCommandOrigin;
+pub use lash_core_store::tool_run::StateCommandRefusal;
+pub use state::NamespaceBody;
+pub use state::NamespaceEncoding;
+pub use state::PluginStateEffect;
+pub use state::PluginStateView;
+pub use state::StagedPluginState;
+
+pub use lash_core_store::plugin_state::StateFork;
+pub use lash_core_store::tool_run::StateFrontier;
+pub use lash_core_store::tool_run::StateResolution;
+pub use lash_core_store::tool_run::StateResolutionOutcome;
+pub use state::StateReducer;
+pub use state::StateReduction;
 pub use tool_catalog::{
     AfterTurnContributions, AfterTurnDecisions, CheckpointApplication, PluginAbort,
     PluginRecordContribution, RecordedTurnContribution, SessionContributions, ToolCatalogContext,
@@ -224,14 +271,15 @@ pub(crate) fn builtin_plugin_factories() -> Vec<Arc<dyn PluginFactory>> {
 
 #[cfg(test)]
 mod tests {
-    use crate::SessionId;
     use crate::ToolOutcome;
+    use lash_execution_contracts::ToolIntentCommandFailure;
+    use lash_protocol_types::SessionId;
     use schemars::JsonSchema;
     use serde::{Deserialize, Serialize};
     use serde_json::json;
 
     use super::*;
-    use crate::ToolDefinition;
+    use lash_protocol_types::ToolDefinition;
 
     struct MockToolProvider;
 
@@ -284,7 +332,7 @@ mod tests {
             .collect();
         let session = PluginHost::new(
             factories,
-            crate::ExecutionBudgets::recommended(),
+            lash_protocol_types::ExecutionBudgets::recommended(),
             crate::trace::TraceRuntime::new(std::sync::Arc::new(crate::SystemClock)),
         )
         .build_session(PluginSessionRequest::creation(
@@ -335,7 +383,8 @@ mod tests {
                 assert_eq!(origin.operation, "original-operation");
             }
         }
-        let runtime = replayed.into_turn_failure(crate::RuntimeErrorCode::Plugin);
+        let runtime =
+            replayed.into_turn_failure(lash_core_store::runtime_error::RuntimeErrorCode::Plugin);
         let runtime: crate::RuntimeError =
             serde_json::from_slice(&serde_json::to_vec(&runtime).unwrap()).unwrap();
         let Some(crate::RuntimeErrorCause::PluginHooks { causes }) = runtime.cause else {
@@ -413,7 +462,10 @@ mod tests {
         fn tool_manifests(
             &self,
             _config: &crate::OwnerConfigView,
-        ) -> std::result::Result<Vec<ToolManifest>, crate::PluginError> {
+        ) -> std::result::Result<
+            Vec<ToolManifest>,
+            lash_execution_contracts::plugin_error::PluginError,
+        > {
             Ok({
                 self.tool_definitions()
                     .into_iter()
@@ -468,7 +520,10 @@ mod tests {
 
         fn recipe(
             self: Arc<Self>,
-        ) -> std::result::Result<crate::plugin::PluginRecipe, crate::plugin::PluginError> {
+        ) -> std::result::Result<
+            crate::plugin::PluginRecipe,
+            lash_execution_contracts::plugin_error::PluginError,
+        > {
             let mut reg = crate::plugin::PluginRegistrar::<MockPlugin>::new(
                 crate::plugin::PluginFactory::id(self.as_ref()),
             );
@@ -479,7 +534,7 @@ mod tests {
                 reg,
                 move |ctx, _state| {
                     let session_id = ctx.owner.session_id().cloned().ok_or_else(|| {
-                        crate::plugin::PluginError::Session(
+                        lash_execution_contracts::plugin_error::PluginError::Session(
                             "the mock plugin serves sessions".to_string(),
                         )
                     })?;
@@ -512,7 +567,7 @@ mod tests {
     impl MockPlugin {
         fn declare(
             reg: &mut crate::plugin::PluginRegistrar<Self>,
-        ) -> std::result::Result<(), crate::plugin::PluginError> {
+        ) -> std::result::Result<(), lash_execution_contracts::plugin_error::PluginError> {
             reg.tools()
                 .provider(crate::tool_provider_key!("mock"), move |_this, _state| {
                     Ok(Arc::new(MockToolProvider))
@@ -560,7 +615,7 @@ Ok(move |ctx: crate::plugin::PluginQueryContext, args: <TypedEchoOp as crate::pl
     async fn external_query_defaults_to_current_session_when_requested() {
         let host = PluginHost::new(
             vec![Arc::new(MockPluginFactory)],
-            crate::ExecutionBudgets::recommended(),
+            lash_protocol_types::ExecutionBudgets::recommended(),
             crate::trace::TraceRuntime::new(std::sync::Arc::new(crate::SystemClock)),
         );
         let session = host
@@ -590,7 +645,7 @@ Ok(move |ctx: crate::plugin::PluginQueryContext, args: <TypedEchoOp as crate::pl
     fn typed_operation_publishes_its_declared_error_schema() {
         let host = PluginHost::new(
             vec![Arc::new(MockPluginFactory)],
-            crate::ExecutionBudgets::recommended(),
+            lash_protocol_types::ExecutionBudgets::recommended(),
             crate::trace::TraceRuntime::new(Arc::new(crate::SystemClock)),
         );
         let session = host
@@ -606,7 +661,8 @@ Ok(move |ctx: crate::plugin::PluginQueryContext, args: <TypedEchoOp as crate::pl
             .expect("typed operation declaration");
         assert_eq!(def.error_type, "mock.typed_echo");
         assert_eq!(def.error_version, crate::FormatVersion::ONE);
-        let schema = crate::JsonSchema::admit(def.error_schema).expect("admitted error schema");
+        let schema = lash_protocol_types::JsonSchema::admit(def.error_schema)
+            .expect("admitted error schema");
         assert_eq!(schema.validate(&json!("declared error")), Ok(()));
         for invalid in [json!(7), json!({"message": "declared error"})] {
             assert!(schema.validate(&invalid).is_err(), "{invalid}");
@@ -617,7 +673,7 @@ Ok(move |ctx: crate::plugin::PluginQueryContext, args: <TypedEchoOp as crate::pl
     async fn plugin_query_generates_schema_and_invokes_typed_output() {
         let host = PluginHost::new(
             vec![Arc::new(MockPluginFactory)],
-            crate::ExecutionBudgets::recommended(),
+            lash_protocol_types::ExecutionBudgets::recommended(),
             crate::trace::TraceRuntime::new(std::sync::Arc::new(crate::SystemClock)),
         );
         let session = host
@@ -686,7 +742,8 @@ Ok(move |ctx: crate::plugin::PluginQueryContext, args: <TypedEchoOp as crate::pl
         impl CrossKindPlugin {
             fn declare(
                 reg: &mut crate::plugin::PluginRegistrar<Self>,
-            ) -> std::result::Result<(), crate::plugin::PluginError> {
+            ) -> std::result::Result<(), lash_execution_contracts::plugin_error::PluginError>
+            {
                 reg.operations()
                     .typed_query::<TypedEchoOp, _, _>(move |_this, _state| {
 Ok(move |ctx: crate::plugin::PluginQueryContext, args: <TypedEchoOp as crate::plugin::PluginOperation>::Args| async move {
@@ -716,8 +773,10 @@ Ok(move |ctx: crate::plugin::PluginTaskContext, args: <EchoTaskOp as crate::plug
 
             fn recipe(
                 self: Arc<Self>,
-            ) -> std::result::Result<crate::plugin::PluginRecipe, crate::plugin::PluginError>
-            {
+            ) -> std::result::Result<
+                crate::plugin::PluginRecipe,
+                lash_execution_contracts::plugin_error::PluginError,
+            > {
                 let mut reg = crate::plugin::PluginRegistrar::<CrossKindPlugin>::new(
                     crate::plugin::PluginFactory::id(self.as_ref()),
                 );
@@ -744,7 +803,7 @@ Ok(move |ctx: crate::plugin::PluginTaskContext, args: <EchoTaskOp as crate::plug
 
         let err = match PluginHost::new(
             vec![Arc::new(CrossKindFactory)],
-            crate::ExecutionBudgets::recommended(),
+            lash_protocol_types::ExecutionBudgets::recommended(),
             crate::trace::TraceRuntime::new(std::sync::Arc::new(crate::SystemClock)),
         )
         .build_session(PluginSessionRequest::creation(
@@ -841,7 +900,7 @@ Ok(move |ctx: crate::plugin::PluginTaskContext, args: <EchoTaskOp as crate::plug
     async fn plugin_session_queries_forked_session() {
         let host = PluginHost::new(
             vec![Arc::new(MockPluginFactory)],
-            crate::ExecutionBudgets::recommended(),
+            lash_protocol_types::ExecutionBudgets::recommended(),
             crate::trace::TraceRuntime::new(std::sync::Arc::new(crate::SystemClock)),
         );
         let root = host
@@ -880,7 +939,7 @@ Ok(move |ctx: crate::plugin::PluginTaskContext, args: <EchoTaskOp as crate::plug
     fn plugin_host_unregisters_sessions() {
         let host = PluginHost::new(
             vec![Arc::new(MockPluginFactory)],
-            crate::ExecutionBudgets::recommended(),
+            lash_protocol_types::ExecutionBudgets::recommended(),
             crate::trace::TraceRuntime::new(std::sync::Arc::new(crate::SystemClock)),
         );
         let _session = host

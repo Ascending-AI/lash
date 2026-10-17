@@ -137,6 +137,15 @@ use std::sync::atomic::{AtomicBool, Ordering};
 
 use tokio_util::sync::CancellationToken;
 
+use crate::CheckpointKind;
+use crate::PersistentRuntimeServices;
+use crate::PluginOperationInvokeError;
+use crate::RuntimeServices;
+use crate::Session;
+use crate::SessionError;
+use crate::SessionSnapshot;
+use crate::TurnOutcome;
+use crate::TurnStop;
 use crate::llm::types::{
     LlmOutputPart, LlmProviderTraceDirection, LlmProviderTraceEvent, LlmProviderTraceSender,
     LlmRequest, LlmResponse, LlmStreamEvent, LlmUsage, StreamBlockIdentity,
@@ -147,12 +156,9 @@ use crate::session_model::{
     Message, MessageRole, Part, RuntimeSessionPolicy, SessionPolicy, SessionStreamEvent,
     make_error_event, shared_parts,
 };
-use crate::{
-    CheckpointKind, PersistentRuntimeServices, PluginOperationInvokeError, RuntimeServices,
-    Session, SessionCreateRequest, SessionError, SessionHandle, SessionSnapshot, TurnOutcome,
-    TurnStop,
-};
 use crate::{Effect, TurnMachine};
+use lash_execution_contracts::session_types::SessionCreateRequest;
+use lash_execution_contracts::session_types::SessionHandle;
 use lash_protocol_types::LlmCallError;
 
 use host::*;
@@ -198,7 +204,7 @@ pub(crate) fn response_synthesized_from_aborted_stream(
     response
 }
 pub use builder::EmbeddedRuntimeBuilder;
-pub use causal::process_event_invocation;
+
 pub use causal::{CommandReplayKey, command_invocation};
 pub use clock::{Clock, ClockWallTime, SystemClock};
 pub use durable_queue::{DurableSessionOps, EMPTY_HEAD_REVISION, QueueWithdrawalObservation};
@@ -226,8 +232,7 @@ pub use effect::{
     RuntimeEffectOutcome, RuntimeEffectReplayMismatchReport, RuntimeEffectReplayTrace,
     RuntimeInvocation, RuntimeLlmCallOutcome, RuntimeReplay, RuntimeReplayAttribution,
     RuntimeSleepOptions, RuntimeSubject, SegmentProgress, ServedOnly, ServedOnlyRange, SleepSpec,
-    ToolAttemptEffectOutcome, ToolAttemptLaunch, TurnPrelude, TurnPreludeRef, TurnPreludeStore,
-    validate_replayed_effect_envelope,
+    ToolAttemptEffectOutcome, ToolAttemptLaunch, TurnPrelude, validate_replayed_effect_envelope,
 };
 pub use environment::{ParkRefused, ParkedSession, RuntimeEnvironment, RuntimeEnvironmentBuilder};
 pub(crate) use error::runtime_error_from_store_commit;
@@ -278,76 +283,84 @@ pub use observation::{
 };
 pub use observation_publisher::{ObservationSource, work_with_observations};
 pub use process::ProcessChangeSubscription;
-pub use process::registry_transitions;
-pub use process::{
-    AbandonEvidence, AbandonWriter, AdmittedProcessIdentity, Ancestry, ArgsMismatch, ArgsMode,
-    CanonicalProcessEventAppend, CapacityCause, CapacityVerdict, DeclaredDefinitionLaunch,
-    DeclaredInlineLaunch, DeclaredLaunch, DeclaredProcessIdentity, DefinitionAcquisition,
-    EnclosingProcess, EngineAction, EngineEvent, EngineLaunch, EngineSettings, EngineState,
-    EngineStateFormat, EngineStateMigration, EngineStateRefusal, EngineStatus,
-    EngineStatusProjection, EngineStepAnswer, EngineStepKind, EngineStepRefusal, EngineStepRun,
-    EngineSteps, EngineWake, FitPolicy, HandleId, HoldEnvError, InlineDefinition, InlineStarts,
-    InspectedProcessDefinition, InvalidProcessDefinitionId, InvalidStartKey, KeyName, Lifetime,
-    LifetimeDecision, LifetimePolicy, MAX_NON_TERMINAL_PROCESS_PAGE_SIZE,
-    MAX_PROCESS_ROSTER_PAGE_SIZE, NonTerminalProcessPage, ObservedProcess, ObservedProcessChange,
-    ObservedProcessChangeKind, ObservedProcessEvent, ObservedProcessEventLite,
-    ObservedProcessEventPage, ObservedProcessEventReadOutcome, ObservedWorkItem,
-    ObservedWorkItemState, PROCESS_EFFECT_OMISSIONS_EVENT_TYPE, PROCESS_EFFECT_OUTCOME_EVENT_TYPE,
-    PROCESS_EVENT_VOCABULARY_VERSION, PROCESS_RAN_EVENT_TYPE, ParentEndPlan,
-    PreparedProcessRegistration, ProcessAwaitOutput, ProcessCancelReceipt, ProcessChange,
-    ProcessChangeBounds, ProcessChangeCursor, ProcessChangeHub, ProcessChangeKind,
-    ProcessClockRebind, ProcessCompletionAuthority, ProcessCompletionOutcome,
-    ProcessComponentConfig, ProcessComponentEntry, ProcessComponentId, ProcessComponentIdError,
-    ProcessConfigKey, ProcessDefinition, ProcessDefinitionDraft, ProcessDefinitionDraftError,
-    ProcessDefinitionError, ProcessDefinitionId, ProcessDefinitionRef, ProcessDefinitionRefusal,
-    ProcessDefinitionResolution, ProcessDefinitionStore, ProcessDefinitionStoredError,
-    ProcessDefinitionTarget, ProcessDefinitionValue, ProcessDocument, ProcessDocumentProvider,
-    ProcessDocumentRead, ProcessDocumentRefRead, ProcessEffectNodeReport, ProcessEffectOccurrence,
-    ProcessEffectOmissions, ProcessEffectOmittedCounts, ProcessEffectOutcomeClass,
-    ProcessEffectReport, ProcessEffectReportError, ProcessEngine, ProcessEngineAdmission,
-    ProcessEngineKind, ProcessEngineRegistration, ProcessEngineRegistry, ProcessEnv,
-    ProcessEnvBuilder, ProcessEnvChoice, ProcessEnvCx, ProcessEnvPolicy, ProcessEnvPolicyError,
-    ProcessEnvPorts, ProcessEnvRef, ProcessEnvRefusal, ProcessEnvSelection, ProcessEnvStore,
-    ProcessEvent, ProcessEventAppendPlan, ProcessEventAppendReceipt, ProcessEventAppendRequest,
-    ProcessEventHistoryRetention, ProcessEventKind, ProcessEventLite, ProcessEventLog,
-    ProcessEventPage, ProcessEventPageEvents, ProcessEventPageMore, ProcessEventQueryMode,
-    ProcessEventReadOutcome, ProcessEventRelease, ProcessEventSink, ProcessExecutionContext,
-    ProcessExecutionDocumentRead, ProcessExternalRef, ProcessHandleView, ProcessId, ProcessIdMint,
-    ProcessIdentity, ProcessInfraError, ProcessInput, ProcessLifecycle, ProcessLifecycleFact,
-    ProcessLifecycleState, ProcessLimits, ProcessLineage, ProcessListFilter, ProcessListMode,
-    ProcessLiveReferenceView, ProcessModel, ProcessObserverBy, ProcessObserverRegistry,
-    ProcessOpScope, ProcessOriginator, ProcessOriginatorFilter, ProcessOutcome,
-    ProcessOutcomeNotRetained, ProcessParkReason, ProcessParkState, ProcessProvenance,
-    ProcessPruneReport, ProcessQuery, ProcessRan, ProcessRecord, ProcessRegistrar,
-    ProcessRegistration, ProcessRegistrationOutcome, ProcessRegistrationReceipt,
-    ProcessRegistrationRefusal, ProcessRegistry, ProcessRegistryCursor, ProcessResumeRefusal,
-    ProcessRetention, ProcessRosterCursor, ProcessRosterPage, ProcessRosterRecords,
-    ProcessRosterTokenBudget, ProcessRosterTokenError, ProcessRunOutcome, ProcessService,
-    ProcessSessionDeleteReport, ProcessSignature, ProcessStartChoice, ProcessStartDeclaration,
-    ProcessStartOptions, ProcessStartReceipt, ProcessStartRegistration, ProcessStartRequest,
-    ProcessStartTarget, ProcessStatus, ProcessStatusFilter, ProcessTerminal, ProcessTombstone,
-    ProcessToolIntents, ProcessToolVisibilityFilter, ProcessTraceClass, ProcessTransition,
-    ProcessTransitionPlan, ProcessWaits, ProcessWorkObserver, ProcessWorkSnapshot,
-    ProjectedObservedProcess, ProjectedProcessEvent, ProjectedProcessLifecycleState,
-    ProjectedProcessTerminal, ProjectionWatermark, ResolvedInlineStart, ResolvedProcessDefinition,
-    ResolvedStartTarget, RetiredProcessStatus, SCOPE_STORAGE_PAYLOAD_VERSION, ScopeGrant, ScopeId,
-    ScopeRef, ScopeStorageError, SessionId, SessionObserverIntentSource, SessionScope,
-    SessionScopeId, StagedProcessStart, StartCx, StartCxError, StartKey, StepCandidate, StepName,
-    StepPages, StepPublication, StepRequest, StoreRealization, TerminalProcessStatus, WaitKind,
-    WaitSiteUnavailable, WaitState, WatchedRegistry, WeakProcessEngineRegistry,
-    allocate_process_event_sequence, apply_process_event_projection, artifact_store_plugin_error,
-    check_links, check_retained_start, current_epoch_ms, fold_process_record, hold_process_env,
-    lifetime, load_process_env, mint_process_id, prepare_process_event_append,
-    prepare_process_registration, prepare_process_transition, process_child_session_id,
-    process_session_id, process_session_turn_id, reconcile_session_process_observer_intents,
-    terminal_append_request, tool_failure_code, watch_process_registry,
-};
-#[cfg(any(test, feature = "testing"))]
-pub use process::{
-    ConformanceProcessRegistry, PROCESS_REFUSAL_FIXTURE_START_KEY, ProcessEventLogTestSupport,
-    ProcessRegistryTestSupport, accepted_process_registration, refused_process_registrations,
-};
-pub use process::{ConsumerHold, SessionTurnOutcome};
+
+pub use process::EnclosingProcess;
+
+pub use lash_protocol_types::handle::HandleId;
+pub use process::HoldEnvError;
+
+pub use lash_core_store::process_identity::InvalidStartKey;
+pub use lash_protocol_types::InvalidProcessDefinitionId;
+
+pub use process::ProcessChangeHub;
+
+pub use lash_core_store::process_env::ProcessComponentConfig;
+pub use lash_core_store::process_env::ProcessComponentEntry;
+pub use lash_core_store::process_env::ProcessComponentId;
+pub use lash_core_store::process_env::ProcessComponentIdError;
+pub use lash_core_store::process_env::ProcessConfigKey;
+
+pub use lash_protocol_types::ProcessDefinitionId;
+
+pub use lash_core_store::process_env::ProcessEnv;
+pub use lash_core_store::process_env::ProcessEnvBuilder;
+pub use lash_core_store::process_env::ProcessEnvRefusal;
+pub use lash_core_store::process_identity::ProcessEnvRef;
+pub use process::ProcessEngineRegistration;
+pub use process::ProcessEngineRegistry;
+pub use process::ProcessEnvChoice;
+pub use process::ProcessEnvCx;
+pub use process::ProcessEnvPolicy;
+pub use process::ProcessEnvPolicyError;
+pub use process::ProcessEnvPorts;
+pub use process::ProcessEnvSelection;
+
+pub use process::ProcessEventSink;
+
+pub use lash_core_store::process_identity::ProcessIdMint;
+pub use lash_protocol_types::ProcessId;
+
+pub use lash_core_store::process_env::ProcessLimits;
+
+pub use lash_core_store::process_env::ProcessModel;
+
+pub use process::ProcessOpScope;
+
+pub use process::ProcessService;
+
+pub use process::ProcessStartChoice;
+
+pub use process::ProcessToolVisibilityFilter;
+
+pub use process::ResolvedInlineStart;
+
+pub use process::ResolvedStartTarget;
+
+pub use lash_core_store::scope_identity::SCOPE_STORAGE_PAYLOAD_VERSION;
+
+pub use lash_core_store::scope_identity::ScopeId;
+
+pub use lash_core_store::scope_identity::ScopeStorageError;
+pub use lash_protocol_types::SessionId;
+pub use process::SessionObserverIntentSource;
+
+pub use process::StagedProcessStart;
+
+pub use lash_core_store::process_identity::StartKey;
+
+pub use process::WatchedRegistry;
+pub use process::WeakProcessEngineRegistry;
+
+pub use process::current_epoch_ms;
+
+pub use process::hold_process_env;
+
+pub use lash_core_store::process_identity::mint_process_id;
+
+pub use process::reconcile_session_process_observer_intents;
+
+pub use process::watch_process_registry;
+
 pub use process::{DeclaredStartPhase, StartCancelDecision};
 pub use process::{
     HostStartAdmission, PreparedProcessStart, ProcessStartStores, RegisteredProcessStart,
@@ -397,12 +410,20 @@ use usage::nonzero_usage;
 // reaching up into the runtime. Re-exported here at their original paths.
 pub use lash_core_llm::turn_vocabulary::{TurnExecutionMetrics, TurnIssue, TurnIssueSeverity};
 
-pub use lash_core_execution::runtime::{
-    CodeOutputRecord, DeploymentStore, DeploymentStoreDecorator, EventSink, NOOP_EVENT_SINK,
-    NOOP_TURN_ACTIVITY_SINK, NoopEventSink, NoopTurnActivitySink, ProtocolSessionExtension,
-    ToolIntentActivityOutcome, ToolIntentRealizedRef, TurnActivity, TurnActivitySink, TurnEvent,
-    admit_session_state_generation, admit_session_view, live_session_view, session_is_live,
-};
+pub use lash_core_execution::runtime::CodeOutputRecord;
+
+pub use lash_core_execution::runtime::DeploymentStoreDecorator;
+pub use lash_core_execution::runtime::EventSink;
+pub use lash_core_execution::runtime::NOOP_EVENT_SINK;
+pub use lash_core_execution::runtime::NOOP_TURN_ACTIVITY_SINK;
+pub use lash_core_execution::runtime::NoopEventSink;
+pub use lash_core_execution::runtime::NoopTurnActivitySink;
+pub use lash_core_execution::runtime::ProtocolSessionExtension;
+pub use lash_core_execution::runtime::ToolIntentActivityOutcome;
+pub use lash_core_execution::runtime::ToolIntentRealizedRef;
+pub use lash_core_execution::runtime::TurnActivity;
+pub use lash_core_execution::runtime::TurnActivitySink;
+pub use lash_core_execution::runtime::TurnEvent;
 
 mod normalized_item {
     pub use lash_core_store::input_normalization::NormalizedItem;

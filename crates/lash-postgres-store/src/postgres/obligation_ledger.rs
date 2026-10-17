@@ -9,13 +9,26 @@
 use std::num::NonZeroUsize;
 use std::sync::LazyLock;
 
-use lash_core_execution::store::{
-    ArtifactCleanupLedger, ClaimToken, ClaimedObligation, CleanupUpsert, DeliveryError, KeyColumn,
-    KeyColumnType, ObligationId, ObligationKey, ObligationKind, ObligationLedger,
-    ObligationSettlement, ObligationStanding, ObligationState, SettleOutcome, StallReason,
-    StalledObligation, UndecodableObligation,
-};
-use lash_core_execution::{ArtifactCleanup, ArtifactReferrer};
+use lash_core_store::artifact_referrer::ArtifactCleanup;
+use lash_core_store::artifact_referrer::ArtifactReferrer;
+use lash_core_store::store::ArtifactCleanupLedger;
+use lash_core_store::store::ClaimToken;
+use lash_core_store::store::ClaimedObligation;
+use lash_core_store::store::CleanupUpsert;
+use lash_core_store::store::DeliveryError;
+use lash_core_store::store::KeyColumn;
+use lash_core_store::store::KeyColumnType;
+use lash_core_store::store::ObligationId;
+use lash_core_store::store::ObligationKey;
+use lash_core_store::store::ObligationKind;
+use lash_core_store::store::ObligationLedger;
+use lash_core_store::store::ObligationSettlement;
+use lash_core_store::store::ObligationStanding;
+use lash_core_store::store::ObligationState;
+use lash_core_store::store::SettleOutcome;
+use lash_core_store::store::StallReason;
+use lash_core_store::store::StalledObligation;
+use lash_core_store::store::UndecodableObligation;
 use lash_store_sql::Dialect;
 use lash_store_sql::artifact::cleanup_obligations::{
     CleanupObligationLedgerStatements, CleanupObligationStatements,
@@ -478,7 +491,7 @@ impl ObligationLedger for PostgresObligationLedger {
                         .map_err(|_| corrupt("a negative attempt count"))?,
                     last_error: match (last_error, last_error_code) {
                         (Some(message), Some(code)) => Some(DeliveryError::new(
-                            lash_core_execution::RuntimeErrorCode::from_wire_code(&code),
+                            lash_core_store::runtime_error::RuntimeErrorCode::from_wire_code(&code),
                             message,
                         )),
                         (None, None) => None,

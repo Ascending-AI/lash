@@ -1252,7 +1252,7 @@ mod tests {
             .await
             .expect("open a SQLite memory store set");
         lash_conformance::attachment_reference_lifecycle_with_store(
-            lash_core::StoreSet::session_store_factory(&stores),
+            lash_execution_contracts::backend::StoreSet::session_store_factory(&stores),
             Arc::new(S3AttachmentStore::from_config(config).expect("store"))
                 as Arc<dyn AttachmentStore>,
         )
@@ -1266,8 +1266,8 @@ mod tests {
             .await
             .expect("open store set");
         lash_conformance::AttachmentReferrerHandles {
-            factory: lash_core::StoreSet::session_store_factory(&stores),
-            cleanup: lash_core::StoreSet::artifact_cleanup(&stores),
+            factory: lash_execution_contracts::backend::StoreSet::session_store_factory(&stores),
+            cleanup: lash_execution_contracts::backend::StoreSet::artifact_cleanup(&stores),
             bytes: Arc::new(move || {
                 Arc::new(S3AttachmentStore::from_config(config.clone()).expect("S3 store"))
                     as Arc<dyn AttachmentStore>

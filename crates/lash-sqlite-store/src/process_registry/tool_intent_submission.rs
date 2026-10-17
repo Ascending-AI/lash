@@ -1,7 +1,10 @@
-use lash_core_execution::{
-    PluginError, SessionId, ToolIntentExecutionOutcome, ToolIntentLedgerColumns,
-    ToolIntentSubmissionAdmission, ToolIntentSubmissionRecord, TurnId,
-};
+use lash_execution_contracts::plugin_error::PluginError;
+use lash_execution_contracts::tool_intent::ToolIntentLedgerColumns;
+use lash_execution_contracts::tool_intent::ToolIntentSubmissionAdmission;
+use lash_execution_contracts::tool_intent::ToolIntentSubmissionRecord;
+use lash_execution_contracts::tool_intent_outcome::ToolIntentExecutionOutcome;
+use lash_protocol_types::SessionId;
+use lash_protocol_types::TurnId;
 use rusqlite::{OptionalExtension as _, Transaction, params};
 
 use super::{SqliteProcessRegistry, process_decode_error, process_sqlite_error, tx_outcome};
@@ -76,7 +79,7 @@ pub(super) async fn complete(
     registry: &SqliteProcessRegistry,
     replay_key: &str,
     outcome: ToolIntentExecutionOutcome,
-) -> Result<lash_core_execution::store::StoreTransition<ToolIntentSubmissionRecord>, PluginError> {
+) -> Result<lash_core_store::store::StoreTransition<ToolIntentSubmissionRecord>, PluginError> {
     let replay_key = replay_key.to_string();
     let at_ms = registry.clock.timestamp_ms();
     registry
@@ -96,7 +99,7 @@ pub(super) async fn complete(
                     )
                     .map_err(process_sqlite_error)?;
                 }
-                Ok(lash_core_execution::store::StoreTransition {
+                Ok(lash_core_store::store::StoreTransition {
                     record: submission,
                     changed,
                 })

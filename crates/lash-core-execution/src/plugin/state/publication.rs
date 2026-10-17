@@ -207,7 +207,7 @@ where
 /// namespace from durable state.
 fn fenced_fault(error: PluginStateError) -> RuntimeEffectControllerError {
     let PluginStateError::PublicationFenced { plugin } = &error else {
-        return crate::PluginError::State(error).into();
+        return lash_execution_contracts::plugin_error::PluginError::State(error).into();
     };
     let mut fault = RuntimeEffectControllerError::new(
         crate::RuntimeErrorCode::PluginSessionManager,
@@ -706,7 +706,10 @@ impl StateDesk<'_> {
         };
         if state.owner != *self.owner {
             self.abandon_publication(address);
-            return Err(crate::PluginError::State(PluginStateError::EffectOwnerMismatch).into());
+            return Err(lash_execution_contracts::plugin_error::PluginError::State(
+                PluginStateError::EffectOwnerMismatch,
+            )
+            .into());
         }
         self.publish_run_resolutions(address, state.resolutions)?;
         *result
@@ -780,7 +783,7 @@ impl StateDesk<'_> {
             tracing::warn!(event = "plugin_state.frontier_refused", ?address, owner_segment = segment.0, %error, "recorded plugin-state publication refused");
             drop(registry);
             self.abandon_publication(address);
-            return Err(crate::PluginError::State(error).into());
+            return Err(lash_execution_contracts::plugin_error::PluginError::State(error).into());
         }
         if candidate != registry.data {
             registry.data = candidate;

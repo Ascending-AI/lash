@@ -773,7 +773,7 @@ fn event_bytes(
             serde_json::to_writer(&mut counter, observation)
         }
         super::ProcessObservationEventPayload::Committed { event } => {
-            serde_json::to_writer(&mut counter, &crate::Durable(event))
+            serde_json::to_writer(&mut counter, &lash_protocol_types::Durable(event))
         }
     };
     counted.map_err(|_| capacity_error())?;

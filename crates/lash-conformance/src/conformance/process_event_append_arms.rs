@@ -170,10 +170,10 @@ async fn durable_effect_outcome_event_crash_windows(
         .await
         .expect("register effect-summary process")
         .id;
-    let recorded = lash_core::ProcessEffectOccurrence::new(
+    let recorded = lash_execution_contracts::process::ProcessEffectOccurrence::new(
         lash_protocol_types::effect_identity_fixture("node:tool", 1),
         "tool:fixture",
-        lash_core::ProcessEffectOutcomeClass::Failure,
+        lash_execution_contracts::process::ProcessEffectOutcomeClass::Failure,
         Some(lash_protocol_types::FailureCode::from_foreign_wire(
             "fixture:refused",
         )),
@@ -188,7 +188,7 @@ async fn durable_effect_outcome_event_crash_windows(
     assert_eq!(inserted.event.sequence, 1);
     assert_eq!(
         inserted.event.fact.event_type(),
-        lash_core::PROCESS_EFFECT_OUTCOME_EVENT_TYPE
+        lash_execution_contracts::process::PROCESS_EFFECT_OUTCOME_EVENT_TYPE
     );
 
     // The acknowledgement is lost; the redrive recovers the original append.
@@ -231,12 +231,12 @@ async fn durable_effect_outcome_event_crash_windows(
                     kind: "conformance-effect-engine".to_string(),
                     payload: serde_json::Value::Null,
                     launch: crate::EngineLaunch::new(
-                        lash_core::testing::process_execution_env_fixture_ref(),
+                        lash_execution_contracts::testing::process_execution_env_fixture_ref(),
                         None,
                     ),
                 },
                 ProcessProvenance::host(),
-                lash_core::Lifetime::Detached,
+                lash_execution_contracts::process::Lifetime::Detached,
             )
             .with_admitted_identity(crate::AdmittedProcessIdentity::for_testing(
                 ProcessIdentity::for_definition(
@@ -285,7 +285,8 @@ async fn durable_effect_outcome_event_crash_windows(
     assert_eq!(
         events
             .iter()
-            .filter(|event| event.fact.event_type() == lash_core::PROCESS_EFFECT_OUTCOME_EVENT_TYPE)
+            .filter(|event| event.fact.event_type()
+                == lash_execution_contracts::process::PROCESS_EFFECT_OUTCOME_EVENT_TYPE)
             .count(),
         1,
         "exactly one effect outcome survives every redrive: {events:?}"

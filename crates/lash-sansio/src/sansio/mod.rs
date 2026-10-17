@@ -63,13 +63,12 @@ use machine_state::{
     CheckpointState, CheckpointWindow, EffectDeliveryStatus, MachineState, ProgressBoundary,
     RunAbort,
 };
-pub use machine_state::{
-    SavedTurn, TURN_CHECKPOINT_SCHEMA_VERSION, TurnCheckpoint, TurnCheckpointRestoreError,
-    TurnMachine,
-};
+pub use machine_state::{SavedTurn, TurnCheckpoint, TurnCheckpointRestoreError, TurnMachine};
 mod helpers;
 mod turn_machine;
 use helpers::{checked_turn_usage_from_llm_usage, refine_terminal_reason_for_context_window};
 
 #[cfg(test)]
 mod tests;
+
+use lash_protocol_types::TURN_CHECKPOINT_SCHEMA_VERSION;

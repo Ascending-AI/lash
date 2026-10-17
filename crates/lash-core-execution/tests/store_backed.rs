@@ -21,6 +21,7 @@ pub use lash_core_execution::core_internal::StartKeyDerivation;
 pub use lash_core_execution::facade_support::*;
 pub use lash_core_execution::testing::kernel_internals::*;
 pub use lash_core_execution::*;
+use lash_execution_contracts::DeploymentStore;
 
 #[path = "store_backed/support.rs"]
 mod support;

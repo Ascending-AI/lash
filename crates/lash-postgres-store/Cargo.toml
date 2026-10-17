@@ -22,19 +22,21 @@ doctest = false
 workspace = true
 
 [features]
-perf-witness = ["lash-core-execution/perf-witness"]
+perf-witness = ["lash-execution-contracts/perf-witness"]
 # Test/performance-only seams. Production builds cannot bypass the schema gate.
-testing = ["lash-store-sql/testing", "lash-core-execution/testing"]
-synthetic-next = ["lash-core-store/synthetic-next", "lash-core-execution/synthetic-next"]
+testing = ["lash-store-sql/testing", "lash-execution-contracts/testing"]
+synthetic-next = ["lash-core-store/synthetic-next", "lash-execution-contracts/synthetic-next"]
 
 [dependencies]
+lash-trace = { workspace = true }
+lash-core-ids = { workspace = true }
+lash-execution-contracts = { workspace = true }
 futures-util.workspace = true
 lash-store-sql = { workspace = true }
 lash-core-store = { workspace = true }
 lash-durable = { workspace = true }
 lash-protocol-types = { workspace = true }
 async-trait = { workspace = true }
-lash-core-execution = { workspace = true }
 rmp-serde = { workspace = true }
 serde = { workspace = true, features = ["derive"] }
 serde_json = { workspace = true }
@@ -46,6 +48,7 @@ tracing = { workspace = true }
 uuid = { workspace = true, features = ["v4"] }
 
 [dev-dependencies]
+lash-core-execution = { workspace = true, features = ["testing"] }
 lash-durable-test = { workspace = true }
 lash-kernel-doc = { workspace = true }
 lash-durable = { workspace = true, features = ["testing"] }

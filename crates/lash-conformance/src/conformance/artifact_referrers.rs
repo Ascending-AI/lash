@@ -5,12 +5,19 @@
 
 use crate::fused_artifact_store::ReopenableArtifactStore;
 use crate::module_artifact_store::SampleArtifact;
+use lash_core::ArtifactCarry;
+use lash_core::ArtifactName;
+use lash_core::ArtifactReferrer;
+use lash_core::ArtifactReferrerKind;
+use lash_core::ArtifactStoreId;
+use lash_core::FrameEnvironmentId;
+use lash_core::HostArtifactPin;
+use lash_core::ReferrerClaim;
+use lash_core::ReferrerGuard;
+use lash_core::ResolvedArtifactCleanup;
 use lash_core::testing::Gate;
-use lash_core::{
-    ArtifactCarry, ArtifactName, ArtifactReferrer, ArtifactReferrerKind, ArtifactStoreError,
-    ArtifactStoreId, FrameEnvironmentId, HostArtifactPin, ModuleArtifactStore, ReferrerClaim,
-    ReferrerGuard, ResolvedArtifactCleanup,
-};
+use lash_execution_contracts::module_artifacts::ArtifactStoreError;
+use lash_execution_contracts::module_artifacts::ModuleArtifactStore;
 use pretty_assertions::assert_eq;
 use std::sync::Arc;
 
@@ -41,7 +48,7 @@ struct HeldPublication {
 
 #[async_trait::async_trait]
 impl ModuleArtifactStore for HeldPublication {
-    fn durability_tier(&self) -> lash_core::DurabilityTier {
+    fn durability_tier(&self) -> lash_execution_contracts::module_artifacts::DurabilityTier {
         self.inner.durability_tier()
     }
 
@@ -68,7 +75,7 @@ impl ModuleArtifactStore for HeldPublication {
     async fn hold_module_artifacts(
         &self,
         claim: &ReferrerClaim,
-        artifacts: &[lash_core::ModuleArtifactHold<'_>],
+        artifacts: &[lash_execution_contracts::module_artifacts::ModuleArtifactHold<'_>],
     ) -> Result<(), ArtifactStoreError> {
         self.gate.pass().await;
         self.inner.hold_module_artifacts(claim, artifacts).await
@@ -166,7 +173,7 @@ where
     let artifact = module("pinned");
     let module_ref = artifact.key();
     let module_bytes = artifact.to_store_bytes().expect("module bytes");
-    let env = lash_core::testing::process_env_with_limit(1024);
+    let env = lash_execution_contracts::testing::process_env_with_limit(1024);
     let env_ref = env.stable_ref().expect("env ref");
     let env_bytes = env.to_store_bytes().expect("env bytes");
     let (pin, claim) = pin_claim();
@@ -279,7 +286,7 @@ where
     let artifact = module("idempotent");
     let key = artifact.key();
     let bytes = artifact.to_store_bytes().expect("module bytes");
-    let env = lash_core::testing::process_env_with_limit(1024);
+    let env = lash_execution_contracts::testing::process_env_with_limit(1024);
     let env_ref = env.stable_ref().expect("env ref");
     let env_bytes = env.to_store_bytes().expect("env bytes");
     let (source, source_claim) = pin_claim();
@@ -548,7 +555,7 @@ where
     F: Fn() -> ReopenableArtifactStore,
 {
     let handles = make().open;
-    let env = lash_core::testing::process_env_with_limit(1024);
+    let env = lash_execution_contracts::testing::process_env_with_limit(1024);
     let env_ref = env.stable_ref().expect("environment reference");
     let env_bytes = env.to_store_bytes().expect("environment bytes");
     let claims = [
@@ -617,20 +624,21 @@ where
                 matches!(error, ArtifactStoreError::ReferrerKindRefused { kind: found } if found == kind),
                 "{kind} refusal must be typed: {error:?}"
             );
-            let plugin = lash_core::PluginError::from(error);
+            let plugin = lash_execution_contracts::plugin_error::PluginError::from(error);
             let refusal = lash_core::store::StoreRefusal::ReferrerKindRefused {
                 kind,
                 store: lash_core::ReferrerStore::Artifact,
             };
             assert!(
-                matches!(&plugin, lash_core::PluginError::StoreRefusal(found) if *found == refusal)
+                matches!(&plugin, lash_execution_contracts::plugin_error::PluginError::StoreRefusal(found) if *found == refusal)
             );
-            let plugin: lash_core::PluginError = serde_json::from_value(
-                serde_json::to_value(plugin).expect("encode plugin refusal"),
-            )
-            .expect("decode plugin refusal");
+            let plugin: lash_execution_contracts::plugin_error::PluginError =
+                serde_json::from_value(
+                    serde_json::to_value(plugin).expect("encode plugin refusal"),
+                )
+                .expect("decode plugin refusal");
             assert!(
-                matches!(&plugin, lash_core::PluginError::StoreRefusal(found) if *found == refusal)
+                matches!(&plugin, lash_execution_contracts::plugin_error::PluginError::StoreRefusal(found) if *found == refusal)
             );
             let host = lash_core::RuntimeEffectControllerError::from(plugin).into_runtime_error();
             assert!(host.is_terminal());

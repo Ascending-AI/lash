@@ -36,7 +36,8 @@ impl ToolProvider for NoTools {
     fn tool_manifests(
         &self,
         _config: &lash_core::OwnerConfigView,
-    ) -> std::result::Result<Vec<ToolManifest>, lash_core::PluginError> {
+    ) -> std::result::Result<Vec<ToolManifest>, lash_execution_contracts::plugin_error::PluginError>
+    {
         Ok(Vec::new())
     }
 
@@ -58,7 +59,8 @@ impl ToolProvider for SeedSwitchTool {
     fn tool_manifests(
         &self,
         _config: &lash_core::OwnerConfigView,
-    ) -> std::result::Result<Vec<ToolManifest>, lash_core::PluginError> {
+    ) -> std::result::Result<Vec<ToolManifest>, lash_execution_contracts::plugin_error::PluginError>
+    {
         Ok(vec![switch_tool_definition().manifest()])
     }
 
@@ -438,7 +440,8 @@ impl ToolProvider for BoundedSwitchTools {
     fn tool_manifests(
         &self,
         _config: &lash_core::OwnerConfigView,
-    ) -> std::result::Result<Vec<ToolManifest>, lash_core::PluginError> {
+    ) -> std::result::Result<Vec<ToolManifest>, lash_execution_contracts::plugin_error::PluginError>
+    {
         Ok({
             (0..self.switch_count)
                 .map(|index| Self::definition(index).manifest())

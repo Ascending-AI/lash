@@ -140,7 +140,9 @@ impl RuntimePersistenceBindings {
 }
 
 impl LashRuntime {
-    pub fn unregister_plugin_session(&self) -> Result<(), crate::PluginError> {
+    pub fn unregister_plugin_session(
+        &self,
+    ) -> Result<(), lash_execution_contracts::plugin_error::PluginError> {
         if let Some(session) = self.session.as_ref() {
             session
                 .plugins()
@@ -178,7 +180,7 @@ impl LashRuntime {
                 if let Some(crate::SessionHistoryRecord::Protocol(event)) = node.event() {
                     crate::session_model::plugin_runtime_event_from_protocol(event).map_err(
                         |error| {
-                            SessionError::Plugin(crate::PluginError::StoredDataCorrupt {
+                            SessionError::Plugin(lash_execution_contracts::plugin_error::PluginError::StoredDataCorrupt {
                                 record_kind: error.record_kind,
                                 message: error.message,
                             })
@@ -251,10 +253,9 @@ impl LashRuntime {
         // the config of the run that recorded it, which a later config
         // transaction supersedes (FIG-5897).
         let resident_session = ResidentSessionContinuity::fresh();
-        let turn_phase_probe = host
-            .core
-            .turn_phase_probes
-            .get_for_scope(&crate::SessionScope::new(state.session_id.clone()));
+        let turn_phase_probe = host.core.turn_phase_probes.get_for_scope(
+            &lash_execution_contracts::process::SessionScope::new(state.session_id.clone()),
+        );
         let mut runtime = Self {
             plugin_bindings: None,
             session: None,
@@ -291,7 +292,7 @@ impl LashRuntime {
                         .await?,
                     );
                 }
-                Err(crate::PluginError::Format(_)) => {}
+                Err(lash_execution_contracts::plugin_error::PluginError::Format(_)) => {}
                 Err(error) => return Err(error.into()),
             }
         }
@@ -689,12 +690,17 @@ impl LashRuntime {
         self.park_store()?;
         self.reload_invalidated_resident_session_state_for_session()
             .await?;
-        self.adopt_committed_head()
-            .await
-            .map_err(|error| SessionError::Plugin(crate::PluginError::Runtime(error)))?;
+        self.adopt_committed_head().await.map_err(|error| {
+            SessionError::Plugin(
+                lash_execution_contracts::plugin_error::PluginError::Runtime(error),
+            )
+        })?;
         let store = self.park_store()?;
-        self.stamp_live_plugin_state()
-            .map_err(|error| SessionError::Plugin(crate::PluginError::Runtime(error)))?;
+        self.stamp_live_plugin_state().map_err(|error| {
+            SessionError::Plugin(
+                lash_execution_contracts::plugin_error::PluginError::Runtime(error),
+            )
+        })?;
         // Under the settled-state contract every durable mutation commits at
         // its own boundary (turn final commit, session commands), so a runtime
         // between boundaries already equals its last commit. Flushing is only

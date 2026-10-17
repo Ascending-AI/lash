@@ -21,6 +21,14 @@ use std::future::Future;
 use std::pin::Pin;
 use std::sync::Arc;
 
+use lash_core::ActorContext;
+use lash_core::AdmittedScope;
+use lash_core::DeliveryPolicy;
+use lash_core::PendingTurnInputDraft;
+use lash_core::PendingTurnInputReadStatus;
+use lash_core::SessionId;
+use lash_core::TurnInput;
+use lash_core::TurnInputIngress;
 use lash_core::durable_port::domain::SESSION_ACTOR_FORMATS;
 use lash_core::durable_port::{
     ActorKey, ActorTx, CommitLabel, DurableError, DurableStore, FormatSet, NodeId, NodeLease,
@@ -29,10 +37,8 @@ use lash_core::durable_port::{
 use lash_core::runtime::durable::session_mail::{
     OneInputPerRun, SessionMailDrain, drain_session_mail,
 };
-use lash_core::{
-    ActorContext, AdmittedScope, Backend, DeliveryPolicy, PendingTurnInputDraft,
-    PendingTurnInputReadStatus, SessionId, StoreSet, TurnInput, TurnInputIngress,
-};
+use lash_execution_contracts::backend::Backend;
+use lash_execution_contracts::backend::StoreSet;
 
 /// Arms and disarms a cut of the producer transactions on the store under
 /// test: while armed, the transaction fails at the session actor's wake, the

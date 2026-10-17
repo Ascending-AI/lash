@@ -1,4 +1,5 @@
-use crate::ClockWallTime;
+use lash_core_ids::clock::ClockWallTime;
+use lash_core_store::runtime_error::RuntimeEffectControllerError;
 use std::pin::Pin;
 use std::sync::Arc;
 
@@ -7,7 +8,6 @@ use tokio_util::sync::CancellationToken;
 mod await_event_support;
 #[doc(hidden)]
 pub mod control;
-mod controller_error;
 mod conversions;
 mod direct;
 mod process_local;
@@ -29,13 +29,12 @@ pub use control::{
     JournalReplay, ProcessDriveStep, RecordedKeyFence, RefusedWriteRange, Resolution,
     ResolveOutcome, SegmentProgress, ServedOnlyRange,
 };
-pub use controller_error::RuntimeEffectControllerError;
 pub use lash_core_store::admitted_scope::AdmittedScope;
 pub use lash_core_store::effect_opener::EffectOpener;
 #[cfg(feature = "testing")]
 pub(crate) use process_local::process_terminal_resolution;
 
-use crate::ProcessRegistry;
+use lash_execution_contracts::process::ProcessRegistry;
 
 use super::envelope::{
     ProcessCommand, ProcessEffectOutcome, RuntimeEffectCommand, RuntimeEffectEnvelope,
@@ -77,12 +76,13 @@ struct WaitControls {
 /// whether the durable write landed on this call or coalesced onto a fact the
 /// store already held under the same durable key (FIG-3070). Commands that
 /// carry no durable identity report [`StoreRealization::Realized`].
-pub type ProcessOutcomeObserver = Arc<dyn Fn(crate::StoreRealization) + Send + Sync + 'static>;
+pub type ProcessOutcomeObserver =
+    Arc<dyn Fn(lash_execution_contracts::process::StoreRealization) + Send + Sync + 'static>;
 
 pub struct ProcessLocalExecution {
     pub registry: Arc<dyn ProcessRegistry>,
     pub process_work: Arc<dyn crate::ProcessWorkSubstrate>,
-    pub process_env_store: Option<Arc<dyn crate::ProcessEnvStore>>,
+    pub process_env_store: Option<Arc<dyn lash_execution_contracts::process::ProcessEnvStore>>,
     /// The required registry that admits every engine start inside its recorded step.
     pub process_engines: crate::ProcessEngineRegistry,
     /// What a host start's recorded admission consults: the session catalog
@@ -118,7 +118,7 @@ pub struct AdmittedDirectSend {
     /// What every send reads its response under, as admitted: a first send
     /// and a resend are handed the same one, and add their own senders.
     pub response: lash_protocol_types::llm::types::ResponseContext,
-    pub deliveries: Arc<dyn crate::provider::SlotDeliveries>,
+    pub deliveries: Arc<dyn lash_core_llm::provider::SlotDeliveries>,
     pub limit: crate::ExecutionLimit,
 }
 
@@ -145,7 +145,7 @@ pub(super) struct LocalDirectEffectRunner {
     template: Arc<lash_protocol_types::llm::types::RecordedRequestTemplate>,
     /// The call's response context, as its admission recorded it.
     response: lash_protocol_types::llm::types::ResponseContext,
-    deliveries: Arc<dyn crate::provider::SlotDeliveries>,
+    deliveries: Arc<dyn lash_core_llm::provider::SlotDeliveries>,
     /// Who the call spends for (ADR 0127).
     owner: crate::RuntimeOwner,
     /// The request is the body's own work, so its records are made inside
@@ -224,7 +224,7 @@ enum LocalTarget {
 /// The store a [`LoadExecutionEnv`](RuntimeEffectCommand::LoadExecutionEnv)
 /// step reads, and whose environment it is, for the refusal's message.
 pub struct ExecutionEnvLoadExecution {
-    store: Arc<dyn crate::ProcessEnvStore>,
+    store: Arc<dyn lash_execution_contracts::process::ProcessEnvStore>,
     subject: String,
 }
 
@@ -236,7 +236,7 @@ impl ExecutionEnvLoadExecution {
         let claim = crate::session::execution_claim_of(envelope.invocation.execution_scope())?;
         let RuntimeEffectCommand::LoadExecutionEnv { env } = envelope.command else {
             return Err(RuntimeEffectControllerError::new(
-                crate::RuntimeErrorCode::RuntimeEffectLocalExecutorMismatch,
+                lash_core_store::runtime_error::RuntimeErrorCode::RuntimeEffectLocalExecutorMismatch,
                 format!(
                     "execution-environment executor cannot execute {} command directly",
                     envelope.command.kind().as_str()
@@ -250,10 +250,10 @@ impl ExecutionEnvLoadExecution {
                 unresolved_execution_env(
                     &self.subject,
                     &env,
-                    crate::runtime::ProcessEnvLoadError::Store(error.into()),
+                    lash_execution_contracts::process::ProcessEnvLoadError::Store(error.into()),
                 )
             })?;
-        match crate::runtime::load_process_env(self.store.as_ref(), &env).await {
+        match lash_execution_contracts::process::load_process_env(self.store.as_ref(), &env).await {
             Ok(_) => Ok(RuntimeEffectOutcome::LoadExecutionEnv { env }),
             Err(error) => Err(unresolved_execution_env(&self.subject, &env, error)),
         }
@@ -274,12 +274,12 @@ impl ExecutionEnvLoadExecution {
 pub(crate) fn unresolved_execution_env(
     subject: &str,
     env: &crate::ProcessEnvRef,
-    error: crate::runtime::ProcessEnvLoadError,
+    error: lash_execution_contracts::process::ProcessEnvLoadError,
 ) -> RuntimeEffectControllerError {
-    let refusal = crate::RuntimeErrorCode::ProcessEnvUnresolved;
+    let refusal = lash_core_store::runtime_error::RuntimeErrorCode::ProcessEnvUnresolved;
     let context = format!("{subject} could not resolve its recorded execution environment `{env}`");
     match error {
-        crate::runtime::ProcessEnvLoadError::Store(store) => {
+        lash_execution_contracts::process::ProcessEnvLoadError::Store(store) => {
             let mut settled = RuntimeEffectControllerError::from(store.into_turn_failure(refusal));
             settled.message = format!("{context}: {}", settled.message);
             if settled.turn_failure_cause() == crate::TurnFailureCause::LiveFault {
@@ -321,7 +321,7 @@ impl PresentationLocalExecution {
         } = envelope.command
         else {
             return Err(RuntimeEffectControllerError::new(
-                crate::RuntimeErrorCode::RuntimeEffectLocalExecutorMismatch,
+                lash_core_store::runtime_error::RuntimeErrorCode::RuntimeEffectLocalExecutorMismatch,
                 format!(
                     "presentation executor cannot execute {} command directly",
                     envelope.command.kind().as_str()
@@ -515,7 +515,10 @@ impl<'run> RuntimeEffectLocalExecutor<'run> {
     ///
     /// This is an **integrator class 3: effect-host implementor** seam for
     /// executors that realize serialized process-start commands.
-    pub fn with_process_env_store(mut self, store: Arc<dyn crate::ProcessEnvStore>) -> Self {
+    pub fn with_process_env_store(
+        mut self,
+        store: Arc<dyn lash_execution_contracts::process::ProcessEnvStore>,
+    ) -> Self {
         if let RuntimeEffectLocalExecutorState::Target(LocalTarget::Process(execution)) =
             &mut self.state
         {
@@ -635,7 +638,7 @@ impl<'run> RuntimeEffectLocalExecutor<'run> {
     /// validates and holds on its first execution; replay resolves the
     /// recorded digest. `subject` names whose environment it is in a refusal.
     pub fn execution_env_load(
-        store: Arc<dyn crate::ProcessEnvStore>,
+        store: Arc<dyn lash_execution_contracts::process::ProcessEnvStore>,
         subject: impl Into<String>,
     ) -> Self {
         Self {
@@ -889,7 +892,7 @@ impl<'run> RuntimeEffectLocalExecutor<'run> {
             }) => execute_local_sleep(envelope, cancellation, clock.as_ref()).await,
             RuntimeEffectLocalExecutorState::Target(LocalTarget::Unavailable) => {
                 Err(RuntimeEffectControllerError::new(
-                    crate::RuntimeErrorCode::RuntimeEffectLocalExecutorUnavailable,
+                    lash_core_store::runtime_error::RuntimeErrorCode::RuntimeEffectLocalExecutorUnavailable,
                     format!(
                         "no local executor is available for {}",
                         envelope.command.kind().as_str()
@@ -898,7 +901,7 @@ impl<'run> RuntimeEffectLocalExecutor<'run> {
             }
             RuntimeEffectLocalExecutorState::Target(LocalTarget::Process(_)) => {
                 Err(RuntimeEffectControllerError::new(
-                    crate::RuntimeErrorCode::RuntimeEffectLocalExecutorMismatch,
+                    lash_core_store::runtime_error::RuntimeErrorCode::RuntimeEffectLocalExecutorMismatch,
                     format!(
                         "process executor cannot execute {} command directly",
                         envelope.command.kind().as_str()
@@ -907,7 +910,7 @@ impl<'run> RuntimeEffectLocalExecutor<'run> {
             }
             RuntimeEffectLocalExecutorState::Target(LocalTarget::Definition(_)) => {
                 Err(RuntimeEffectControllerError::new(
-                    crate::RuntimeErrorCode::RuntimeEffectLocalExecutorMismatch,
+                    lash_core_store::runtime_error::RuntimeErrorCode::RuntimeEffectLocalExecutorMismatch,
                     format!(
                         "process-definition executor cannot execute {} command directly",
                         envelope.command.kind().as_str()
@@ -923,7 +926,7 @@ impl<'run> RuntimeEffectLocalExecutor<'run> {
             RuntimeEffectLocalExecutorState::Target(LocalTarget::TurnAcceptance(store)) => {
                 let RuntimeEffectCommand::AcceptTurnInput { draft } = envelope.command else {
                     return Err(RuntimeEffectControllerError::new(
-                        crate::RuntimeErrorCode::RuntimeEffectLocalExecutorMismatch,
+                        lash_core_store::runtime_error::RuntimeErrorCode::RuntimeEffectLocalExecutorMismatch,
                         format!(
                             "turn-acceptance executor cannot execute {} command directly",
                             envelope.command.kind().as_str()
@@ -1010,7 +1013,7 @@ impl RuntimeEffectLocalRunner for LocalDirectEffectRunner {
                 Ok(RuntimeEffectOutcome::Sleep)
             }
             command => Err(RuntimeEffectControllerError::new(
-                crate::RuntimeErrorCode::RuntimeEffectLocalExecutorMismatch,
+                lash_core_store::runtime_error::RuntimeErrorCode::RuntimeEffectLocalExecutorMismatch,
                 format!(
                     "local direct executor cannot execute {} command",
                     command.kind().as_str()
@@ -1032,7 +1035,7 @@ async fn execute_local_sleep(
             Ok(RuntimeEffectOutcome::Sleep)
         }
         command => Err(RuntimeEffectControllerError::new(
-            crate::RuntimeErrorCode::RuntimeEffectLocalExecutorMismatch,
+            lash_core_store::runtime_error::RuntimeErrorCode::RuntimeEffectLocalExecutorMismatch,
             format!(
                 "local sleep executor cannot execute {} command",
                 command.kind().as_str()
@@ -1057,7 +1060,7 @@ pub async fn sleep_with_cancellation(
     tokio::pin!(sleep);
     tokio::select! {
         _ = cancellation.cancelled() => Err(RuntimeEffectControllerError::new(
-            crate::RuntimeErrorCode::RuntimeEffectSleepCancelled,
+            lash_core_store::runtime_error::RuntimeErrorCode::RuntimeEffectSleepCancelled,
             "runtime effect sleep was cancelled",
         )),
         _ = &mut sleep => Ok(()),
@@ -1135,7 +1138,7 @@ mod task_boundary_tests {
                             "task-boundary:exec",
                         )
                         .expect("valid task-boundary address"),
-                        crate::RuntimeAttribution::none(),
+                        lash_core_store::effect_identity::RuntimeAttribution::none(),
                         "exec",
                     ),
                     RuntimeEffectCommand::ExecCode {

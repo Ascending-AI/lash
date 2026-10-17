@@ -22,10 +22,12 @@
 use std::collections::VecDeque;
 use std::sync::{Arc, Mutex};
 
-use lash_core::{
-    ArtifactName, ArtifactStoreError, ModuleArtifactBody, ModuleArtifactHold, ModuleArtifactStore,
-    ReferrerClaim,
-};
+use lash_core::ArtifactName;
+use lash_core::ReferrerClaim;
+use lash_execution_contracts::module_artifacts::ArtifactStoreError;
+use lash_execution_contracts::module_artifacts::ModuleArtifactBody;
+use lash_execution_contracts::module_artifacts::ModuleArtifactHold;
+use lash_execution_contracts::module_artifacts::ModuleArtifactStore;
 use lash_kernel_check::{WorkflowDocument, WorkflowDocumentError};
 use lash_kernel_doc::graph_tokens::decode_body;
 use lash_kernel_doc::{
@@ -148,7 +150,7 @@ pub enum DocumentStoreError {
     Store(#[from] ArtifactStoreError),
 }
 
-impl From<DocumentStoreError> for lash_core::PluginError {
+impl From<DocumentStoreError> for lash_execution_contracts::plugin_error::PluginError {
     fn from(error: DocumentStoreError) -> Self {
         match error {
             DocumentStoreError::Store(error) => error.into(),
@@ -205,7 +207,8 @@ struct PreparedEffects {
     document: DocumentId,
     entry: lash_kernel_doc::Name,
     functions: Arc<lash_kernel_doc::FunctionRegistry>,
-    result: Result<lash_core::PerformedEffects, lash_core::ProcessEnvRefusal>,
+    result:
+        Result<lash_execution_contracts::process::PerformedEffects, lash_core::ProcessEnvRefusal>,
     bytes: usize,
 }
 
@@ -218,7 +221,8 @@ impl EffectPreparations {
         document: &Document,
         functions: &Arc<lash_kernel_doc::FunctionRegistry>,
         entry: &lash_kernel_doc::Name,
-    ) -> Result<lash_core::PerformedEffects, lash_core::ProcessEnvRefusal> {
+    ) -> Result<lash_execution_contracts::process::PerformedEffects, lash_core::ProcessEnvRefusal>
+    {
         if let Some(index) = self.entries.iter().position(|prepared| {
             prepared.document == identity
                 && prepared.entry == *entry
@@ -1048,7 +1052,7 @@ mod tests {
     /// repeated when the same process resumes.
     #[tokio::test]
     async fn activation_effects_are_prepared_once_per_document_and_registry() {
-        use lash_core::ProcessEngine as _;
+        use lash_execution_contracts::process::ProcessEngine as _;
         let mut registry = lash_kernel_doc::FunctionRegistry::new();
         let helper = registry
             .register(

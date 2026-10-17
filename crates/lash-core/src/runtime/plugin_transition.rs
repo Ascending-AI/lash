@@ -5,7 +5,10 @@ use crate::runtime::effect::executor::RuntimeEffectLocalRunner;
 /// native writer before resolving creation config or recording a transition.
 pub(super) fn native_plugin_admission(
     host: &crate::PluginHost,
-) -> Result<crate::store::plugin_writers::PluginAdmission, crate::PluginError> {
+) -> Result<
+    crate::store::plugin_writers::PluginAdmission,
+    lash_execution_contracts::plugin_error::PluginError,
+> {
     let composition = host.composition()?;
     Ok(crate::store::plugin_writers::PluginAdmission::from_plugins(
         composition
@@ -25,7 +28,10 @@ pub(super) async fn record_native_transition(
     request: crate::plugin::PluginTransitionRequest,
     state: crate::PluginState,
     config: crate::PluginConfig,
-) -> Result<crate::plugin::PluginTransitionRecord, crate::PluginError> {
+) -> Result<
+    crate::plugin::PluginTransitionRecord,
+    lash_execution_contracts::plugin_error::PluginError,
+> {
     let attribution = match &request.owner {
         crate::RuntimeOwner::Session(id) => crate::RuntimeAttribution::for_session(id.clone()),
         crate::RuntimeOwner::Process(_) => crate::RuntimeAttribution::none(),

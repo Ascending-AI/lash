@@ -393,7 +393,10 @@ impl lash_core::ToolProvider for ContractAppTools {
     fn tool_manifests(
         &self,
         _config: &lash_core::OwnerConfigView,
-    ) -> std::result::Result<Vec<lash_core::ToolManifest>, lash_core::PluginError> {
+    ) -> std::result::Result<
+        Vec<lash_core::ToolManifest>,
+        lash_execution_contracts::plugin_error::PluginError,
+    > {
         Ok(vec![contract_app_lookup_definition().manifest()])
     }
 
@@ -443,13 +446,21 @@ fn contract_app_lookup_definition() -> lash_core::ToolDefinition {
 }
 
 pub(super) struct ContractDurableInputTools {
-    key_tx: Mutex<Option<tokio::sync::oneshot::Sender<Result<lash_core::PinnedKey, String>>>>,
+    key_tx: Mutex<
+        Option<
+            tokio::sync::oneshot::Sender<
+                Result<lash_execution_contracts::waits::PinnedKey, String>,
+            >,
+        >,
+    >,
     attempt_count: Mutex<usize>,
 }
 
 impl ContractDurableInputTools {
     pub(super) fn new(
-        key_tx: tokio::sync::oneshot::Sender<Result<lash_core::PinnedKey, String>>,
+        key_tx: tokio::sync::oneshot::Sender<
+            Result<lash_execution_contracts::waits::PinnedKey, String>,
+        >,
     ) -> Self {
         Self {
             key_tx: Mutex::new(Some(key_tx)),
@@ -465,7 +476,7 @@ impl ContractDurableInputTools {
         *self.attempt_count.lock_recover() += 1;
     }
 
-    fn send_key_result(&self, result: Result<lash_core::PinnedKey, String>) {
+    fn send_key_result(&self, result: Result<lash_execution_contracts::waits::PinnedKey, String>) {
         if let Some(tx) = self.key_tx.lock_recover().take() {
             let _ = tx.send(result);
         }
@@ -477,7 +488,10 @@ impl lash_core::ToolProvider for ContractDurableInputTools {
     fn tool_manifests(
         &self,
         _config: &lash_core::OwnerConfigView,
-    ) -> std::result::Result<Vec<lash_core::ToolManifest>, lash_core::PluginError> {
+    ) -> std::result::Result<
+        Vec<lash_core::ToolManifest>,
+        lash_execution_contracts::plugin_error::PluginError,
+    > {
         Ok(vec![contract_durable_input_definition().manifest()])
     }
 

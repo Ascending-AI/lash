@@ -1,9 +1,12 @@
 use std::collections::BTreeMap;
 
-use super::{
-    FormatNamespace, FormatRefusal, FormatVersion, PluginConfig, PluginError, PluginHost,
-    PluginState,
-};
+use super::FormatNamespace;
+use super::FormatRefusal;
+use super::FormatVersion;
+use super::PluginConfig;
+use super::PluginHost;
+use super::PluginState;
+use lash_execution_contracts::plugin_error::PluginError;
 
 impl PluginHost {
     fn check_stamp(

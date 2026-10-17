@@ -56,7 +56,10 @@ impl lash_core::ToolProvider for Inspector {
     fn tool_manifests(
         &self,
         _config: &lash_core::OwnerConfigView,
-    ) -> std::result::Result<Vec<lash_core::ToolManifest>, lash_core::PluginError> {
+    ) -> std::result::Result<
+        Vec<lash_core::ToolManifest>,
+        lash_execution_contracts::plugin_error::PluginError,
+    > {
         Ok(vec![inspect_definition().manifest()])
     }
 
@@ -89,7 +92,7 @@ async fn world(tier: Tier, inspector: &Arc<Inspector>) -> Option<World> {
         )
         .plugin(Arc::new(
             lash::process_controls::SessionProcessAdminPluginFactory::new(
-                lash_core::lifetime::detached,
+                lash_execution_contracts::process::lifetime::detached,
                 lash_core::runtime::env_policy::policy::from_run(|_| Ok(Vec::new())),
             ),
         ))
@@ -99,12 +102,12 @@ async fn world(tier: Tier, inspector: &Arc<Inspector>) -> Option<World> {
 }
 
 /// Every process the core's registry holds.
-async fn processes(world: &World) -> Vec<lash_core::ProcessRecord> {
+async fn processes(world: &World) -> Vec<lash_execution_contracts::process::ProcessRecord> {
     lash_core::testing::process_roster_records_for_fixture(
         world.backend.process_registry().as_ref(),
-        &lash_core::ProcessListFilter {
-            status: lash_core::ProcessStatusFilter::Any,
-            ..lash_core::ProcessListFilter::default()
+        &lash_execution_contracts::process::ProcessListFilter {
+            status: lash_execution_contracts::process::ProcessStatusFilter::Any,
+            ..lash_execution_contracts::process::ProcessListFilter::default()
         },
     )
     .await
@@ -291,7 +294,10 @@ impl lash_core::ToolProvider for InboxTools {
     fn tool_manifests(
         &self,
         _config: &lash_core::OwnerConfigView,
-    ) -> std::result::Result<Vec<lash_core::ToolManifest>, lash_core::PluginError> {
+    ) -> std::result::Result<
+        Vec<lash_core::ToolManifest>,
+        lash_execution_contracts::plugin_error::PluginError,
+    > {
         Ok(Vec::new())
     }
 
@@ -334,7 +340,10 @@ impl lash_core::ToolProvider for Resolver {
     fn tool_manifests(
         &self,
         _config: &lash_core::OwnerConfigView,
-    ) -> std::result::Result<Vec<lash_core::ToolManifest>, lash_core::PluginError> {
+    ) -> std::result::Result<
+        Vec<lash_core::ToolManifest>,
+        lash_execution_contracts::plugin_error::PluginError,
+    > {
         Ok(Vec::new())
     }
 
@@ -435,7 +444,7 @@ fn inbox_core(backend: &lash::Backend, inbox: &Arc<Inbox>) -> lash::LashCoreBuil
     )
     .plugin(Arc::new(
         lash::process_controls::SessionProcessAdminPluginFactory::new(
-            lash_core::lifetime::detached,
+            lash_execution_contracts::process::lifetime::detached,
             policy,
         ),
     ))
@@ -454,7 +463,7 @@ fn inbox_core(backend: &lash::Backend, inbox: &Arc<Inbox>) -> lash::LashCoreBuil
     .process_component(component(CODEC, TWO), CODEC)
     .process_component(
         Arc::new(lash::process_controls::ProcessControlsComponent::new(
-            lash_core::lifetime::detached,
+            lash_execution_contracts::process::lifetime::detached,
             lash_core::runtime::env_policy::policy::restrict_or(
                 lash_core::runtime::env_policy::policy::refuse(
                     "a process starts only inside a process here",
@@ -524,7 +533,7 @@ async fn started_process_captures_committed_deferred_binding(tier: Tier) {
     .await
     .expect("the process ends within two minutes")
     .expect("its end is read");
-    let lash_core::ProcessAwaitOutput::Settled { output } = answer else {
+    let lash_execution_contracts::process::ProcessAwaitOutput::Settled { output } = answer else {
         panic!("the process ended without an answer: {answer:?}");
     };
     assert!(output.is_success(), "{output:?}");

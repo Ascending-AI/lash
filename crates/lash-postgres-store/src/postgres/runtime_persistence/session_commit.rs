@@ -11,9 +11,10 @@ use crate::session_sql::session_sql;
 pub(crate) async fn frames_left_facts_tx(
     tx: &mut sqlx::Transaction<'_, sqlx::Postgres>,
     commit: &RuntimeCommit,
-    left: &[lash_core_execution::FrameNodeId],
+    left: &[lash_core_store::session_identity::FrameNodeId],
 ) -> Result<FramesLeft, StoreError> {
-    use lash_core_execution::{ArtifactReferrer, FrameEnvironmentId};
+    use lash_core_store::artifact_referrer::ArtifactReferrer;
+    use lash_core_store::artifact_referrer::FrameEnvironmentId;
     if left.is_empty() {
         return Ok((Vec::new(), Vec::new()));
     }
@@ -62,7 +63,7 @@ pub(crate) async fn frames_left_facts_tx(
     for frame in ended_frames {
         let decision = crate::obligation_ledger::cleanup_decision_tx(
             tx,
-            &lash_core_execution::ArtifactCleanup::ended(
+            &lash_core_store::artifact_referrer::ArtifactCleanup::ended(
                 frame.clone(),
                 Vec::new(),
                 transition.map(|transition| transition.gate.clone()),
@@ -78,8 +79,8 @@ pub(crate) async fn frames_left_facts_tx(
 /// `(namespace, artifact_ref)` pairs a transition carries.
 pub(crate) type FramesLeft = (
     Vec<(
-        lash_core_execution::ArtifactReferrer,
-        lash_core_execution::store::CleanupUpsert,
+        lash_core_store::artifact_referrer::ArtifactReferrer,
+        lash_core_store::store::CleanupUpsert,
     )>,
     Vec<(&'static str, String)>,
 );
@@ -89,9 +90,9 @@ pub(crate) type FramesLeft = (
 /// and held by the ended frame. A fenced successor refuses the transition.
 async fn carries_into_successor_tx(
     tx: &mut sqlx::Transaction<'_, sqlx::Postgres>,
-    transition: &lash_core_execution::store::FrameTransition,
+    transition: &lash_core_store::store::FrameTransition,
 ) -> Result<Vec<(&'static str, String)>, StoreError> {
-    use lash_core_execution::ArtifactReferrer;
+    use lash_core_store::artifact_referrer::ArtifactReferrer;
     let ended = ArtifactReferrer::FrameEnvironment(transition.ended.clone());
     let successor = ArtifactReferrer::FrameEnvironment(transition.successor.clone());
     let sql = crate::artifact_store::artifact_sql();
@@ -109,10 +110,10 @@ async fn carries_into_successor_tx(
     }
     let mut closure = transition.carries.clone();
     for carry in &transition.carries {
-        if carry.store != lash_core_execution::ArtifactStoreId::ProcessDefinition {
+        if carry.store != lash_core_store::artifact_referrer::ArtifactStoreId::ProcessDefinition {
             continue;
         }
-        let id = lash_core_execution::ProcessDefinitionId::parse(&carry.artifact_ref)
+        let id = lash_protocol_types::ProcessDefinitionId::parse(&carry.artifact_ref)
             .map_err(|e| StoreError::Backend(e.to_string()))?;
         let bytes: Vec<u8> =
             crate::observed_sql::query_scalar(sql.lash_vm_artifacts.select_bytes.sql())
@@ -121,8 +122,10 @@ async fn carries_into_successor_tx(
                 .fetch_one(crate::observed_sql::executor(&mut **tx))
                 .await
                 .map_err(store_sqlx_error)?;
-        let draft = lash_core_execution::ProcessDefinitionDraft::from_store_bytes(&id, &bytes)
-            .map_err(|e| StoreError::Backend(e.to_string()))?;
+        let draft = lash_execution_contracts::process::ProcessDefinitionDraft::from_store_bytes(
+            &id, &bytes,
+        )
+        .map_err(|e| StoreError::Backend(e.to_string()))?;
         closure.extend(draft.artifacts().iter().cloned());
     }
     let mut carries = closure
@@ -130,7 +133,7 @@ async fn carries_into_successor_tx(
         .filter(|artifact| {
             !matches!(
                 artifact.store,
-                lash_core_execution::ArtifactStoreId::Engine(_)
+                lash_core_store::artifact_referrer::ArtifactStoreId::Engine(_)
             )
         })
         .map(|artifact| {
@@ -180,9 +183,9 @@ impl SessionCommitStore for PostgresStore {
     async fn committed_turn_exists(
         &self,
         session_id: &SessionId,
-        turn_id: &lash_core_execution::TurnId,
+        turn_id: &lash_protocol_types::TurnId,
     ) -> Result<bool, StoreError> {
-        let key = lash_core_execution::store_backend_support::turn_commit_receipt_storage_key(
+        let key = lash_core_store::store_backend_support::turn_commit_receipt_storage_key(
             session_id, turn_id,
         )?;
         let mut connection = acquire_runtime_connection(&self.pool, &self.observer).await?;
@@ -215,7 +218,7 @@ impl SessionCommitStore for PostgresStore {
     async fn admit_session_state(
         &self,
         session_id: &SessionId,
-    ) -> Result<lash_core_execution::store::SessionStateAdmission, StoreError> {
+    ) -> Result<lash_core_store::store::SessionStateAdmission, StoreError> {
         let connection = acquire_runtime_connection(&self.pool, &self.observer).await?;
         let mut tx = crate::observed_sql::control(
             "BEGIN",
@@ -228,7 +231,7 @@ impl SessionCommitStore for PostgresStore {
         crate::observed_sql::control("COMMIT", tx.commit())
             .await
             .map_err(store_sqlx_error)?;
-        Ok(lash_core_execution::store::SessionStateAdmission {
+        Ok(lash_core_store::store::SessionStateAdmission {
             session_id: session_id.clone(),
             version,
         })
@@ -237,7 +240,7 @@ impl SessionCommitStore for PostgresStore {
     async fn retain_admission_base(
         &self,
         session_id: &SessionId,
-        base: &lash_core_execution::store::SessionHeadRef,
+        base: &lash_core_store::store::SessionHeadRef,
     ) -> Result<(), StoreError> {
         let connection = acquire_runtime_connection(&self.pool, &self.observer).await?;
         let mut tx = begin_guarded(connection, &self.fence).await?;
@@ -304,12 +307,11 @@ impl SessionCommitStore for PostgresStore {
         commit: RuntimeCommit,
     ) -> Result<RuntimeCommitReceipt, StoreError> {
         let encoded_under = self.fence.fleet();
-        let planner =
-            lash_core_execution::store::RuntimeCommitPlanner::prepare(commit, encoded_under)?;
+        let planner = lash_core_store::store::RuntimeCommitPlanner::prepare(commit, encoded_under)?;
         match self.commit_encoded(&planner, encoded_under).await? {
             Ok(receipt) => Ok(receipt),
             Err(moved) => {
-                let planner = lash_core_execution::store::RuntimeCommitPlanner::prepare(
+                let planner = lash_core_store::store::RuntimeCommitPlanner::prepare(
                     planner.commit().clone(),
                     moved.current,
                 )?;
@@ -323,7 +325,7 @@ impl SessionCommitStore for PostgresStore {
     async fn settle_observer_intents(
         &self,
         session_id: &SessionId,
-        remaining: Vec<lash_core_execution::facade_support::SessionObserverIntent>,
+        remaining: Vec<lash_core_store::session_identity::SessionObserverIntent>,
     ) -> Result<(), StoreError> {
         let connection = acquire_runtime_connection(&self.pool, &self.observer).await?;
         let mut tx = begin_guarded(connection, &self.fence).await?;
@@ -384,8 +386,8 @@ impl PostgresStore {
     /// written nothing.
     async fn commit_encoded(
         &self,
-        planner: &lash_core_execution::store::RuntimeCommitPlanner,
-        encoded_under: lash_core_execution::FleetFormat,
+        planner: &lash_core_store::store::RuntimeCommitPlanner,
+        encoded_under: lash_core_store::store::FleetFormat,
     ) -> Result<Result<RuntimeCommitReceipt, FleetMoved>, StoreError> {
         let now = self.clock.timestamp_ms();
         let connection = acquire_runtime_connection(&self.pool, &self.observer).await?;
@@ -412,9 +414,9 @@ impl PostgresStore {
 /// operation committed before: what the planner adjudicates a replay over.
 pub(crate) async fn committed_receipt_tx(
     tx: &mut GuardedTx<'_>,
-    planner: &lash_core_execution::store::RuntimeCommitPlanner,
-    fleet: lash_core_execution::FleetFormat,
-) -> Result<Option<lash_core_execution::store::RuntimeCommitReceiptRecord>, StoreError> {
+    planner: &lash_core_store::store::RuntimeCommitPlanner,
+    fleet: lash_core_store::store::FleetFormat,
+) -> Result<Option<lash_core_store::store::RuntimeCommitReceiptRecord>, StoreError> {
     let commit = planner.commit();
     let prior = crate::observed_sql::query(session_sql().turn_commits.select_receipt.sql())
         .bind(commit.session_id.as_str())
@@ -437,30 +439,25 @@ pub(crate) async fn committed_receipt_tx(
     // Its semantic value is already bound by the stored request hash.
     // Fresh-append ancestor fencing follows receipt adjudication.
     let append_request_identity =
-        lash_core_execution::store_backend_support::decode_append_request_identity(
+        lash_core_store::store_backend_support::decode_append_request_identity(
             &commit.turn_commit.operation.key,
             stored_identity,
             stored_version.map(i64::from),
             stored_requested_node_count,
         )?;
-    let result = lash_core_execution::store::decode_runtime_commit_receipt_for_fleet(
+    let result = lash_core_store::store::decode_runtime_commit_receipt_for_fleet(
         &commit.session_id,
         planner.operation_key(),
         &result_json,
         (row.get(6), row.get(7)),
         fleet,
     )?;
-    lash_core_execution::store::validate_turn_commit_outcome_code(
-        &result,
-        stored_outcome.as_deref(),
-    )?;
-    Ok(Some(
-        lash_core_execution::store::RuntimeCommitReceiptRecord {
-            turn_commit_hash: hash,
-            result,
-            append_request_identity,
-        },
-    ))
+    lash_core_store::store::validate_turn_commit_outcome_code(&result, stored_outcome.as_deref())?;
+    Ok(Some(lash_core_store::store::RuntimeCommitReceiptRecord {
+        turn_commit_hash: hash,
+        result,
+        append_request_identity,
+    }))
 }
 
 /// Whether the ancestor `commit`'s append requests is active under the
@@ -470,13 +467,13 @@ pub(crate) async fn committed_receipt_tx(
 pub(crate) async fn requested_ancestor_is_active_tx(
     tx: &mut GuardedTx<'_>,
     commit: &RuntimeCommit,
-    leaf: &lash_core_execution::store::PublishedLeafFacts,
+    leaf: &lash_core_store::store::PublishedLeafFacts,
     leaf_owner: Option<String>,
 ) -> Result<bool, StoreError> {
     let Some(required) = requested_append_ancestor(&commit.turn_commit) else {
         return Ok(true);
     };
-    let lash_core_execution::store::PublishedLeafFacts::Live(parent) = leaf else {
+    let lash_core_store::store::PublishedLeafFacts::Live(parent) = leaf else {
         return Ok(false);
     };
     let Some(owner) = leaf_owner else {
@@ -498,12 +495,12 @@ pub(crate) async fn requested_ancestor_is_active_tx(
     };
     super::history::head_reaches(
         &mut *tx,
-        Some(lash_core_execution::store_backend_support::PathNode {
+        Some(lash_core_store::store_backend_support::PathNode {
             node_id: parent.node_id.clone(),
             owner_session_id: owner.try_into()?,
             generation: parent.generation,
         }),
-        lash_core_execution::store_backend_support::PathNode {
+        lash_core_store::store_backend_support::PathNode {
             node_id: required.to_string().try_into()?,
             owner_session_id: ancestor_owner.try_into()?,
             generation: u64_from_sql("SessionGraph node", "generation", generation)?,

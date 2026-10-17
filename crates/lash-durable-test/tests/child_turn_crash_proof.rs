@@ -35,16 +35,23 @@ use std::time::Duration;
 use lash_core::LlmOutputPart;
 use lash_core::facade_support::ProviderHandle;
 use lash_core::llm::types::{LlmRequest, LlmResponse, LlmStreamEvent, StreamBlockIdentity};
-use lash_core_execution::{
-    Backend, BackendParts, LifetimeDecision, NoProjectionProviders, ProcessId, ProcessInput,
-    ProcessProvenance, ProcessRegistration, SessionCreateRequest, SessionStartPoint,
-    SessionTurnOutcome, StoreSet,
-};
+use lash_core_execution::ProcessId;
+use lash_core_execution::SessionStartPoint;
 use lash_durable::runner::Activation;
 use lash_durable::{ActorKey, ActorState, CommitLabel, DurableError, DurableStore};
 use lash_durable_test::{
     Cut, Fault, Matrix, Scenario, SimClock, SimNodes, SimNodesConfig, Stored, Tripwire, WriteKind,
 };
+use lash_execution_contracts::backend::Backend;
+use lash_execution_contracts::backend::BackendParts;
+use lash_execution_contracts::backend::StoreSet;
+use lash_execution_contracts::process::LifetimeDecision;
+use lash_execution_contracts::process::ProcessInput;
+use lash_execution_contracts::process::ProcessProvenance;
+use lash_execution_contracts::process::ProcessRegistration;
+use lash_execution_contracts::process::SessionTurnOutcome;
+use lash_execution_contracts::projection::NoProjectionProviders;
+use lash_execution_contracts::session_types::SessionCreateRequest;
 use lash_protocol_types::SessionId;
 use lash_protocol_types::sync::MutexExt as _;
 
@@ -295,7 +302,9 @@ impl Scenario for ChildTurn {
                 .as_ref()
                 .and_then(|record| record.terminal())
                 .map(|terminal| {
-                    serde_json::to_value(lash_core::Durable(&terminal.clone().into_await_output()))
+                    serde_json::to_value(lash_protocol_types::Durable(
+                        &terminal.clone().into_await_output(),
+                    ))
                 })
         }) {
             Ok(Some(Ok(answer))) if answer.to_string().contains(ANSWER) => {}

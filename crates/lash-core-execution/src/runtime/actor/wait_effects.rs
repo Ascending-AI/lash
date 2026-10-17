@@ -6,8 +6,11 @@ use lash_durable::CommitLabel;
 use lash_durable::domain::ScopeKey;
 
 use super::ActorContext;
-use super::waits::{self, RaceWinner, WaitRef, WaitSpec};
+use super::waits;
 use crate::{RuntimeErrorCode, SleepSpec};
+use lash_execution_contracts::waits::RaceWinner;
+use lash_execution_contracts::waits::WaitRef;
+use lash_execution_contracts::waits::WaitSpec;
 
 impl ActorContext {
     /// The wait effects: `Sleep` is a timer wait raced against cancel. Any

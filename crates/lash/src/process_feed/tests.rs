@@ -6,24 +6,28 @@
 //! a lost or late publication.
 
 use super::*;
+use lash_core::InMemoryProcessReplayStore;
+use lash_core::InMemoryProcessReplayStoreConfig;
+use lash_core::ProcessReplayEventDraft;
+use lash_core::ProcessReplayGapReason;
 use lash_core::testing::{process_language_observation, process_observation_label};
-use lash_core::{
-    InMemoryProcessReplayStore, InMemoryProcessReplayStoreConfig, ProcessEvent,
-    ProcessReplayEventDraft, ProcessReplayGapReason,
-};
+use lash_execution_contracts::process::ProcessEvent;
 
 /// One lifecycle append: the `n`th tick enters a wait on the `n`th call, so
 /// every tick is a new event at the next sequence.
-fn tick(process_id: &ProcessId, n: u64) -> lash_core::ProcessEventAppendRequest {
-    let wait = lash_core::WaitState {
+fn tick(
+    process_id: &ProcessId,
+    n: u64,
+) -> lash_execution_contracts::process::ProcessEventAppendRequest {
+    let wait = lash_execution_contracts::process::WaitState {
         since_ms: i64::try_from(n).expect("fixture time"),
-        kind: lash_core::WaitKind::Call {
+        kind: lash_execution_contracts::process::WaitKind::Call {
             call_id: lash_core::ToolCallId::fixture(&format!("feed-call-{n}")),
             tool_id: lash_core::ToolId::from("feed-fixture"),
         },
         site: None,
     };
-    lash_core::ProcessEventAppendRequest::wait_entered(process_id, &wait)
+    lash_execution_contracts::process::ProcessEventAppendRequest::wait_entered(process_id, &wait)
 }
 
 struct Fixture {
@@ -38,7 +42,7 @@ struct Fixture {
     limits: lash_trace::ObservationWorkLimits,
     process_id: ProcessId,
     /// The registry beneath the watch, seeding the commits an owner makes.
-    seeding: Arc<dyn lash_core::ConformanceProcessRegistry>,
+    seeding: Arc<dyn lash_execution_contracts::process::ConformanceProcessRegistry>,
     /// The watch an owner publishes its commits through.
     watched: lash_core::runtime::WatchedRegistry,
     ticks: std::sync::atomic::AtomicU64,
@@ -56,15 +60,16 @@ impl Fixture {
         let sqlite = crate::tests::sqlite_memory_store_set()
             .await
             .process_registry();
-        let seeding: Arc<dyn lash_core::ConformanceProcessRegistry> = sqlite.clone();
+        let seeding: Arc<dyn lash_execution_contracts::process::ConformanceProcessRegistry> =
+            sqlite.clone();
         let watched = lash_core::runtime::watch_process_registry(sqlite);
         let registry = Arc::clone(watched.registry());
         let commits = watched.emitted_hub().clone();
         let process_id = registry
-            .register_process(lash_core::ProcessRegistration::new(
-                lash_core::testing::held_engine_input(serde_json::Value::Null),
-                lash_core::ProcessProvenance::host(),
-                lash_core::Lifetime::Detached,
+            .register_process(lash_execution_contracts::process::ProcessRegistration::new(
+                lash_execution_contracts::testing::held_engine_input(serde_json::Value::Null),
+                lash_execution_contracts::process::ProcessProvenance::host(),
+                lash_execution_contracts::process::Lifetime::Detached,
             ))
             .await
             .expect("register the feed process")
@@ -104,7 +109,9 @@ impl Fixture {
             source: ProcessFeedSource::new(
                 process_id.clone(),
                 Arc::clone(&self.registry),
-                lash_core::facade_support::ProcessWorkObserver::new(Arc::clone(&self.registry)),
+                lash_execution_contracts::process::ProcessWorkObserver::new(Arc::clone(
+                    &self.registry,
+                )),
                 lash_core::ProcessEngineRegistry::default(),
                 self.replay.clone(),
                 self.limits,
@@ -247,17 +254,17 @@ async fn an_unknown_engine_park_is_shared_by_get_list_snapshot_and_gap() {
         .expect("durable backend with no host engines");
     let process_id = backend
         .process_registry()
-        .register_process(lash_core::ProcessRegistration::new(
-            lash_core::ProcessInput::Engine {
+        .register_process(lash_execution_contracts::process::ProcessRegistration::new(
+            lash_execution_contracts::process::ProcessInput::Engine {
                 kind: "absent-feed-engine".into(),
                 payload: serde_json::Value::Null,
-                launch: lash_core::EngineLaunch::new(
-                    lash_core::testing::process_execution_env_fixture_ref(),
+                launch: lash_execution_contracts::process::EngineLaunch::new(
+                    lash_execution_contracts::testing::process_execution_env_fixture_ref(),
                     None,
                 ),
             },
-            lash_core::ProcessProvenance::host(),
-            lash_core::Lifetime::Detached,
+            lash_execution_contracts::process::ProcessProvenance::host(),
+            lash_execution_contracts::process::Lifetime::Detached,
         ))
         .await
         .expect("register the process")
@@ -286,7 +293,7 @@ async fn an_unknown_engine_park_is_shared_by_get_list_snapshot_and_gap() {
         .begin(&actor, claims[0].epoch)
         .await
         .expect("actor transaction");
-    let reason = lash_core::ProcessParkReason::UnknownEngine {
+    let reason = lash_execution_contracts::park::ProcessParkReason::UnknownEngine {
         kind: "absent-feed-engine".into(),
     };
     tx.write(crate::durable::DomainWrite::ActorPark {
@@ -307,10 +314,13 @@ async fn an_unknown_engine_park_is_shared_by_get_list_snapshot_and_gap() {
         .await
         .expect("get")
         .expect("retained process");
-    assert_eq!(get.park, lash_core::ProcessParkState::Parked(reason));
+    assert_eq!(
+        get.park,
+        lash_execution_contracts::process::ProcessParkState::Parked(reason)
+    );
     let list = processes
         .list(
-            &lash_core::ProcessListFilter::default(),
+            &lash_execution_contracts::process::ProcessListFilter::default(),
             std::num::NonZeroUsize::MIN,
             None,
         )

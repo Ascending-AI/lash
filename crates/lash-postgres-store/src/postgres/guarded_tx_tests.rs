@@ -7,11 +7,17 @@
 
 use std::time::Duration;
 
-use lash_core_execution::compat::VersionRange;
-use lash_core_execution::{
-    FleetFormat, ProcessRegistrar as _, ProcessRetention as _, SessionCatalogStore as _,
-    SessionCommitStore as _, SessionId, SessionMeta, SessionRelation, StoreError, WriterPin,
-};
+use lash_core_store::compat::VersionRange;
+use lash_core_store::session_identity::SessionRelation;
+use lash_core_store::store::FleetFormat;
+use lash_core_store::store::SessionCatalogStore as _;
+use lash_core_store::store::SessionCommitStore as _;
+use lash_core_store::store::SessionMeta;
+use lash_core_store::store::StoreError;
+use lash_core_store::store::WriterPin;
+use lash_execution_contracts::process::ProcessRegistrar as _;
+use lash_execution_contracts::process::ProcessRetention as _;
+use lash_protocol_types::SessionId;
 
 use super::WriterFence;
 use crate::PostgresStorage;
@@ -184,10 +190,10 @@ async fn pg_fence_refuses_a_writer_after_finalize_with_zero_writes() {
 
     let error = storage
         .process_registry()
-        .register_process(lash_core_execution::testing::held_engine_registration(
+        .register_process(lash_execution_contracts::testing::held_engine_registration(
             serde_json::Value::Null,
-            lash_core_execution::ProcessProvenance::host(),
-            lash_core_execution::Lifetime::Detached,
+            lash_execution_contracts::process::ProcessProvenance::host(),
+            lash_execution_contracts::process::Lifetime::Detached,
         ))
         .await
         .expect_err("a process-registry write after the move of F is fenced");
@@ -243,23 +249,25 @@ async fn pg_fence_encodes_again_when_f_moves() {
     finalize_fleet_epoch(storage.pool(), NEXT)
         .await
         .expect("finalize the next release");
-    let state = lash_core_execution::RuntimeSessionState {
+    let state = lash_core_store::session_state::RuntimeSessionState {
         session_id: session_id.clone(),
-        ..lash_core_execution::RuntimeSessionState::fixture(
-            lash_core_execution::SessionPolicy::new(
-                lash_core_execution::TurnBudget::Unbounded,
-                lash_core_execution::MaxToolCalls::new(1024),
+        ..lash_core_store::session_state::RuntimeSessionState::fixture(
+            lash_core_store::session_policy::SessionPolicy::new(
+                lash_protocol_types::session_model::TurnBudget::Unbounded,
+                lash_protocol_types::session_model::MaxToolCalls::new(1024),
                 lash_core::NoProgressBudget::bounded(12),
             ),
         )
     };
     let receipt = store
-        .commit_runtime_state(lash_core_execution::RuntimeCommit::persisted_state_for_test(&state))
+        .commit_runtime_state(
+            lash_core_store::store::RuntimeCommit::persisted_state_for_test(&state),
+        )
         .await
         .expect("the commit re-encodes under the moved epoch and lands");
     assert_eq!(
         receipt.schema_version,
-        lash_core_execution::store::RUNTIME_COMMIT_RECEIPT_SCHEMA_VERSION
+        lash_core_store::store::RUNTIME_COMMIT_RECEIPT_SCHEMA_VERSION
     );
 
     let stored: String = sqlx::query_scalar(
@@ -272,7 +280,7 @@ async fn pg_fence_encodes_again_when_f_moves() {
     let stored: serde_json::Value = serde_json::from_str(&stored).expect("decode the receipt");
     assert_eq!(
         stored["schema_version"],
-        serde_json::json!(lash_core_execution::store::RUNTIME_COMMIT_RECEIPT_SCHEMA_VERSION),
+        serde_json::json!(lash_core_store::store::RUNTIME_COMMIT_RECEIPT_SCHEMA_VERSION),
         "the stored receipt was encoded under epoch {NEXT}, not epoch 1's pin {PINNED}"
     );
     assert_eq!(storage.fleet_format().version(), NEXT);
@@ -308,7 +316,7 @@ async fn pg_fence_retries_contended_with_a_fresh_read() {
         async move {
             registry
                 .release_consumer_hold(
-                    &lash_core_execution::ProcessId::fixture("fence-retry"),
+                    &lash_protocol_types::ProcessId::fixture("fence-retry"),
                     "fence-retry",
                 )
                 .await

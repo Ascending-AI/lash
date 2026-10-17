@@ -1,5 +1,8 @@
+use crate::LlmResponse;
+use crate::LlmUsage;
+use crate::RuntimeEffectOutcome;
 use crate::runtime::DecodedEffectOutcome as _;
-use crate::{LlmResponse, LlmUsage, PluginError, RuntimeEffectOutcome};
+use lash_execution_contracts::plugin_error::PluginError;
 
 // =============================================================================
 // Direct-completion outcome plumbing
@@ -73,8 +76,10 @@ mod tests {
         })
         .expect_err("the host refused before spending");
         let live = serde_json::to_value(&refusal).expect("encode live cause");
-        let recorded = serde_json::to_value(crate::ToolIntentCommandFailure::from(&refusal))
-            .expect("encode recorded cause");
+        let recorded = serde_json::to_value(
+            lash_execution_contracts::plugin_error::ToolIntentCommandFailure::from(&refusal),
+        )
+        .expect("encode recorded cause");
         let runtime = refusal
             .clone()
             .into_turn_failure(crate::RuntimeErrorCode::Plugin);

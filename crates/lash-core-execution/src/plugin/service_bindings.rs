@@ -1,10 +1,18 @@
 //! Optional callable host ports, shared by preflight and invocation.
 use super::*;
-use crate::{
-    ProcessAwaitOutput, ProcessHandleView, ProcessId, ProcessListMode, ProcessOpScope,
-    ProcessStartOptions, ProcessStartRegistration, ProcessStartRequest, SessionId,
-    StagedProcessStart, TurnId,
-};
+use crate::ProcessId;
+use crate::ProcessOpScope;
+use crate::SessionId;
+use crate::StagedProcessStart;
+use crate::TurnId;
+use lash_execution_contracts::process::ProcessAwaitOutput;
+use lash_execution_contracts::process::ProcessHandleView;
+use lash_execution_contracts::process::ProcessListMode;
+use lash_execution_contracts::process::ProcessStartOptions;
+use lash_execution_contracts::process::ProcessStartRegistration;
+use lash_execution_contracts::process::ProcessStartRequest;
+use lash_execution_contracts::session_types::SessionCreateRequest;
+use lash_execution_contracts::session_types::SessionHandle;
 use std::sync::Arc;
 
 #[async_trait::async_trait]
@@ -68,9 +76,9 @@ pub trait ProcessListPort: Send + Sync {
     async fn list_visible(
         &self,
         _session_id: &SessionId,
-        _mode: crate::ProcessListMode,
+        _mode: lash_execution_contracts::process::ProcessListMode,
         _scope: crate::ProcessOpScope<'_>,
-    ) -> Result<Vec<crate::facade_support::ObservedProcess>, PluginError>;
+    ) -> Result<Vec<lash_execution_contracts::process::ObservedProcess>, PluginError>;
 }
 
 #[async_trait::async_trait]
@@ -79,7 +87,7 @@ pub trait ProcessListForAttemptPort: Send + Sync {
         &self,
         owner: &crate::RuntimeOwner,
         mode: ProcessListMode,
-    ) -> Result<Vec<crate::facade_support::ObservedProcess>, PluginError>;
+    ) -> Result<Vec<lash_execution_contracts::process::ObservedProcess>, PluginError>;
 }
 
 #[async_trait::async_trait]
@@ -128,7 +136,7 @@ pub trait ProcessStartPort: Send + Sync {
         registration: ProcessStartRegistration,
         options: ProcessStartOptions,
         scope: ProcessOpScope<'_>,
-    ) -> Result<crate::facade_support::ObservedProcess, PluginError>;
+    ) -> Result<lash_execution_contracts::process::ObservedProcess, PluginError>;
 }
 
 #[async_trait::async_trait]
@@ -175,7 +183,7 @@ pub trait ProcessCancelPort: Send + Sync {
         owner: &crate::RuntimeOwner,
         process_id: &ProcessId,
         scope: ProcessOpScope<'_>,
-    ) -> Result<crate::facade_support::ObservedProcess, PluginError>;
+    ) -> Result<lash_execution_contracts::process::ObservedProcess, PluginError>;
 }
 
 #[async_trait::async_trait]
@@ -186,7 +194,7 @@ pub trait ProcessRecordedCancelPort: Send + Sync {
         process_id: &ProcessId,
         identity: crate::ToolIntentIdentity,
         scope: ProcessOpScope<'_>,
-    ) -> Result<crate::facade_support::ObservedProcess, PluginError>;
+    ) -> Result<lash_execution_contracts::process::ObservedProcess, PluginError>;
 }
 
 #[async_trait::async_trait]
@@ -320,9 +328,9 @@ impl ServiceBindings {
     pub async fn list_visible(
         &self,
         _session_id: &SessionId,
-        _mode: crate::ProcessListMode,
+        _mode: lash_execution_contracts::process::ProcessListMode,
         _scope: crate::ProcessOpScope<'_>,
-    ) -> Result<Vec<crate::facade_support::ObservedProcess>, PluginError> {
+    ) -> Result<Vec<lash_execution_contracts::process::ObservedProcess>, PluginError> {
         let service = self.list_visible.as_ref().ok_or_else(|| {
             PluginError::Preflight(PreflightIssue::MissingService {
                 owner: "invocation".into(),
@@ -335,7 +343,7 @@ impl ServiceBindings {
         &self,
         owner: &crate::RuntimeOwner,
         mode: ProcessListMode,
-    ) -> Result<Vec<crate::facade_support::ObservedProcess>, PluginError> {
+    ) -> Result<Vec<lash_execution_contracts::process::ObservedProcess>, PluginError> {
         let service = self.list_visible_for_attempt.as_ref().ok_or_else(|| {
             PluginError::Preflight(PreflightIssue::MissingService {
                 owner: "invocation".into(),
@@ -404,7 +412,7 @@ impl ServiceBindings {
         registration: ProcessStartRegistration,
         options: ProcessStartOptions,
         scope: ProcessOpScope<'_>,
-    ) -> Result<crate::facade_support::ObservedProcess, PluginError> {
+    ) -> Result<lash_execution_contracts::process::ObservedProcess, PluginError> {
         let service = self.start.as_ref().ok_or_else(|| {
             PluginError::Preflight(PreflightIssue::MissingService {
                 owner: "invocation".into(),
@@ -473,7 +481,7 @@ impl ServiceBindings {
         owner: &crate::RuntimeOwner,
         process_id: &ProcessId,
         scope: ProcessOpScope<'_>,
-    ) -> Result<crate::facade_support::ObservedProcess, PluginError> {
+    ) -> Result<lash_execution_contracts::process::ObservedProcess, PluginError> {
         let service = self.cancel.as_ref().ok_or_else(|| {
             PluginError::Preflight(PreflightIssue::MissingService {
                 owner: "invocation".into(),
@@ -488,7 +496,7 @@ impl ServiceBindings {
         process_id: &ProcessId,
         identity: crate::ToolIntentIdentity,
         scope: ProcessOpScope<'_>,
-    ) -> Result<crate::facade_support::ObservedProcess, PluginError> {
+    ) -> Result<lash_execution_contracts::process::ObservedProcess, PluginError> {
         let service = self.cancel_recorded_intent.as_ref().ok_or_else(|| {
             PluginError::Preflight(PreflightIssue::MissingService {
                 owner: "invocation".into(),
@@ -866,9 +874,9 @@ impl ProcessListPort for ProcessReadServiceBindings {
     async fn list_visible(
         &self,
         _session_id: &SessionId,
-        _mode: crate::ProcessListMode,
+        _mode: lash_execution_contracts::process::ProcessListMode,
         _scope: crate::ProcessOpScope<'_>,
-    ) -> Result<Vec<crate::facade_support::ObservedProcess>, PluginError> {
+    ) -> Result<Vec<lash_execution_contracts::process::ObservedProcess>, PluginError> {
         self.0.list_visible(_session_id, _mode, _scope).await
     }
 }
@@ -877,9 +885,9 @@ impl ProcessReadService for ServiceBindings {
     async fn list_visible(
         &self,
         _session_id: &SessionId,
-        _mode: crate::ProcessListMode,
+        _mode: lash_execution_contracts::process::ProcessListMode,
         _scope: crate::ProcessOpScope<'_>,
-    ) -> Result<Vec<crate::facade_support::ObservedProcess>, PluginError> {
+    ) -> Result<Vec<lash_execution_contracts::process::ObservedProcess>, PluginError> {
         let service = self.list_visible.as_ref().ok_or_else(|| {
             PluginError::Preflight(PreflightIssue::MissingService {
                 owner: "invocation".into(),
@@ -896,7 +904,7 @@ impl ProcessListForAttemptPort for ProcessServiceBindings {
         &self,
         owner: &crate::RuntimeOwner,
         mode: ProcessListMode,
-    ) -> Result<Vec<crate::facade_support::ObservedProcess>, PluginError> {
+    ) -> Result<Vec<lash_execution_contracts::process::ObservedProcess>, PluginError> {
         self.0.list_visible_for_attempt(owner, mode).await
     }
 }
@@ -950,7 +958,7 @@ impl ProcessStartPort for ProcessServiceBindings {
         registration: ProcessStartRegistration,
         options: ProcessStartOptions,
         scope: ProcessOpScope<'_>,
-    ) -> Result<crate::facade_support::ObservedProcess, PluginError> {
+    ) -> Result<lash_execution_contracts::process::ObservedProcess, PluginError> {
         self.0.start(session_id, registration, options, scope).await
     }
 }
@@ -991,7 +999,7 @@ impl ProcessListPort for ProcessServiceBindings {
         session_id: &SessionId,
         mode: ProcessListMode,
         scope: ProcessOpScope<'_>,
-    ) -> Result<Vec<crate::facade_support::ObservedProcess>, PluginError> {
+    ) -> Result<Vec<lash_execution_contracts::process::ObservedProcess>, PluginError> {
         self.0.list_visible(session_id, mode, scope).await
     }
 }
@@ -1013,7 +1021,7 @@ impl ProcessCancelPort for ProcessServiceBindings {
         owner: &crate::RuntimeOwner,
         process_id: &ProcessId,
         scope: ProcessOpScope<'_>,
-    ) -> Result<crate::facade_support::ObservedProcess, PluginError> {
+    ) -> Result<lash_execution_contracts::process::ObservedProcess, PluginError> {
         self.0.cancel(owner, process_id, scope).await
     }
 }
@@ -1025,7 +1033,7 @@ impl ProcessRecordedCancelPort for ProcessServiceBindings {
         process_id: &ProcessId,
         identity: crate::ToolIntentIdentity,
         scope: ProcessOpScope<'_>,
-    ) -> Result<crate::facade_support::ObservedProcess, PluginError> {
+    ) -> Result<lash_execution_contracts::process::ObservedProcess, PluginError> {
         self.0
             .cancel_recorded_intent(owner, process_id, identity, scope)
             .await
@@ -1051,7 +1059,7 @@ impl crate::ProcessService for ServiceBindings {
         &self,
         owner: &crate::RuntimeOwner,
         mode: ProcessListMode,
-    ) -> Result<Vec<crate::facade_support::ObservedProcess>, PluginError> {
+    ) -> Result<Vec<lash_execution_contracts::process::ObservedProcess>, PluginError> {
         let service = self.list_visible_for_attempt.as_ref().ok_or_else(|| {
             PluginError::Preflight(PreflightIssue::MissingService {
                 owner: "invocation".into(),
@@ -1120,7 +1128,7 @@ impl crate::ProcessService for ServiceBindings {
         registration: ProcessStartRegistration,
         options: ProcessStartOptions,
         scope: ProcessOpScope<'_>,
-    ) -> Result<crate::facade_support::ObservedProcess, PluginError> {
+    ) -> Result<lash_execution_contracts::process::ObservedProcess, PluginError> {
         let service = self.start.as_ref().ok_or_else(|| {
             PluginError::Preflight(PreflightIssue::MissingService {
                 owner: "invocation".into(),
@@ -1175,7 +1183,7 @@ impl crate::ProcessService for ServiceBindings {
         session_id: &SessionId,
         mode: ProcessListMode,
         scope: ProcessOpScope<'_>,
-    ) -> Result<Vec<crate::facade_support::ObservedProcess>, PluginError> {
+    ) -> Result<Vec<lash_execution_contracts::process::ObservedProcess>, PluginError> {
         let service = self.list_visible.as_ref().ok_or_else(|| {
             PluginError::Preflight(PreflightIssue::MissingService {
                 owner: "invocation".into(),
@@ -1203,7 +1211,7 @@ impl crate::ProcessService for ServiceBindings {
         owner: &crate::RuntimeOwner,
         process_id: &ProcessId,
         scope: ProcessOpScope<'_>,
-    ) -> Result<crate::facade_support::ObservedProcess, PluginError> {
+    ) -> Result<lash_execution_contracts::process::ObservedProcess, PluginError> {
         let service = self.cancel.as_ref().ok_or_else(|| {
             PluginError::Preflight(PreflightIssue::MissingService {
                 owner: "invocation".into(),
@@ -1218,7 +1226,7 @@ impl crate::ProcessService for ServiceBindings {
         process_id: &ProcessId,
         identity: crate::ToolIntentIdentity,
         scope: ProcessOpScope<'_>,
-    ) -> Result<crate::facade_support::ObservedProcess, PluginError> {
+    ) -> Result<lash_execution_contracts::process::ObservedProcess, PluginError> {
         let service = self.cancel_recorded_intent.as_ref().ok_or_else(|| {
             PluginError::Preflight(PreflightIssue::MissingService {
                 owner: "invocation".into(),

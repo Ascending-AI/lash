@@ -1,4 +1,4 @@
-use super::PluginError;
+use lash_execution_contracts::plugin_error::PluginError;
 
 /// The longest local key a hook registration may carry.
 const MAX_HOOK_KEY_BYTES: usize = 64;

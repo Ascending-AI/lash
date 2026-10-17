@@ -238,7 +238,7 @@ fn batch_config_ceiling_is_refused_at_build() {
     assert!(
         matches!(
             refused,
-            lash_core::plugin::PluginError::InvalidBatchMaximum {
+            lash_execution_contracts::plugin_error::PluginError::InvalidBatchMaximum {
                 requested: 65,
                 ceiling: 64
             }

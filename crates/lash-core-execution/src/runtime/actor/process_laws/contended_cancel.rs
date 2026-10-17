@@ -5,7 +5,7 @@
 
 use super::*;
 
-use crate::ProcessEventKind;
+use lash_execution_contracts::process::ProcessEventKind;
 
 /// A live process whose cancel commit meets contention is still cancelled:
 /// the cancel answers success, the process ends cancelled by the operator,

@@ -56,10 +56,10 @@ lash_conformance::artifact_referrer_tests!({
                 .expect("open first Postgres artifact pool");
             let open = lash_conformance::fused_artifact_store::ArtifactStoreHandles {
                 artifacts: Arc::new(open_storage.lash_vm_artifact_store())
-                    as Arc<dyn lash_core::ModuleArtifactStore>,
+                    as Arc<dyn lash_execution_contracts::module_artifacts::ModuleArtifactStore>,
                 process_env: Arc::new(open_storage.process_env_store()) as Arc<dyn ProcessEnvStore>,
                 turn_preludes: Arc::new(open_storage.process_env_store())
-                    as Arc<dyn lash_core::TurnPreludeStore>,
+                    as Arc<dyn lash_execution_contracts::turn_prelude::TurnPreludeStore>,
             };
             let reopen_url = database_url.clone();
             lash_conformance::fused_artifact_store::ReopenableArtifactStore {
@@ -73,11 +73,13 @@ lash_conformance::artifact_referrer_tests!({
                     });
                     lash_conformance::fused_artifact_store::ArtifactStoreHandles {
                         artifacts: Arc::new(reopened.lash_vm_artifact_store())
-                            as Arc<dyn lash_core::ModuleArtifactStore>,
+                            as Arc<
+                                dyn lash_execution_contracts::module_artifacts::ModuleArtifactStore,
+                            >,
                         process_env: Arc::new(reopened.process_env_store())
                             as Arc<dyn ProcessEnvStore>,
                         turn_preludes: Arc::new(reopened.process_env_store())
-                            as Arc<dyn lash_core::TurnPreludeStore>,
+                            as Arc<dyn lash_execution_contracts::turn_prelude::TurnPreludeStore>,
                     }
                 }),
             }

@@ -1158,10 +1158,12 @@ impl<Output, Error> RunHandle<Output, Error> {
                     output,
                     events: events
                         .into_iter()
-                        .map(|value| lash_core::facade_support::PluginOwned {
-                            plugin_id: plugin_id.clone(),
-                            value,
-                        })
+                        .map(
+                            |value| lash_execution_contracts::session_types::PluginOwned {
+                                plugin_id: plugin_id.clone(),
+                                value,
+                            },
+                        )
                         .collect(),
                     pending_turn_inputs,
                 }),
@@ -1217,7 +1219,9 @@ impl<Output: serde::de::DeserializeOwned, Error> RunHandle<Output, Error> {
         })?;
         let output = serde_json::from_value(receipt.output).map_err(|error| {
             crate::admin::PluginTaskResultError::Host(Box::new(EmbedError::Plugin(
-                lash_core::PluginError::Invoke(format!("invalid {name} output: {error}")),
+                lash_execution_contracts::plugin_error::PluginError::Invoke(format!(
+                    "invalid {name} output: {error}"
+                )),
             )))
         })?;
         Ok(lash_core::facade_support::PluginOperationReceipt {

@@ -59,7 +59,10 @@ impl ToolProvider for ExactDispatchTools {
     fn tool_manifests(
         &self,
         _config: &crate::plugin::OwnerConfigView,
-    ) -> std::result::Result<Vec<crate::ToolManifest>, crate::PluginError> {
+    ) -> std::result::Result<
+        Vec<crate::ToolManifest>,
+        lash_execution_contracts::plugin_error::PluginError,
+    > {
         Ok(Vec::new())
     }
 
@@ -143,7 +146,7 @@ async fn refusing_dispatch_context(plugins: Arc<PluginSession>) -> ToolDispatchC
         parent_invocation: None,
         observation_call_key: None,
         facts: crate::plugin::ExecutionFacts::of_process(
-            &lash_core_execution::testing::process_env_with_limit(1024),
+            &lash_execution_contracts::testing::process_env_with_limit(1024),
         ),
         owner: crate::ExecutionOwner::SessionFrame {
             session_id: crate::SessionId::from("session"),
@@ -313,7 +316,10 @@ async fn dispatch_allows_unknown_mcp_args_when_schema_does_not_forbid_them() {
         fn tool_manifests(
             &self,
             _config: &crate::plugin::OwnerConfigView,
-        ) -> std::result::Result<Vec<crate::ToolManifest>, crate::PluginError> {
+        ) -> std::result::Result<
+            Vec<crate::ToolManifest>,
+            lash_execution_contracts::plugin_error::PluginError,
+        > {
             Ok(manifests(vec![definition()]))
         }
 
@@ -384,7 +390,10 @@ async fn before_tool_hook_receives_resolved_argument_projection_policy() {
         fn tool_manifests(
             &self,
             _config: &crate::plugin::OwnerConfigView,
-        ) -> std::result::Result<Vec<crate::ToolManifest>, crate::PluginError> {
+        ) -> std::result::Result<
+            Vec<crate::ToolManifest>,
+            lash_execution_contracts::plugin_error::PluginError,
+        > {
             Ok(manifests(vec![definition()]))
         }
 
@@ -462,7 +471,8 @@ async fn a_deferred_only_granted_cell_call_executes_once_or_parks_for_missing_re
         fn tool_manifests(
             &self,
             _config: &crate::plugin::OwnerConfigView,
-        ) -> Result<Vec<crate::ToolManifest>, crate::PluginError> {
+        ) -> Result<Vec<crate::ToolManifest>, lash_execution_contracts::plugin_error::PluginError>
+        {
             Ok(Vec::new())
         }
 

@@ -21,7 +21,7 @@ pub async fn sqlite_memory_store_set() -> std::sync::Arc<lash_sqlite_store::Sqli
 
 /// [`sqlite_memory_store_set`] as a backend whose effect host is the recording
 /// double: for a test that needs a `Backend` value but runs no effect.
-pub async fn sqlite_memory_store_backend() -> lash_core_execution::Backend {
+pub async fn sqlite_memory_store_backend() -> lash_execution_contracts::backend::Backend {
     lash_conformance::backend_over(sqlite_memory_store_set().await)
 }
 
@@ -29,14 +29,20 @@ pub async fn sqlite_memory_store_backend() -> lash_core_execution::Backend {
 pub async fn sqlite_memory_process_store_set() -> std::sync::Arc<lash_sqlite_store::SqliteStoreSet>
 {
     let stores = sqlite_memory_store_set().await;
-    crate::testing::process_execution_env_fixture(stores.process_env_store().as_ref()).await;
+    lash_execution_contracts::testing::process_execution_env_fixture(
+        stores.process_env_store().as_ref(),
+    )
+    .await;
     stores
 }
 
 /// A registry fixture whose held-engine registrations name stored bytes.
-pub async fn sqlite_memory_process_store_backend() -> lash_core_execution::Backend {
+pub async fn sqlite_memory_process_store_backend() -> lash_execution_contracts::backend::Backend {
     let backend = sqlite_memory_store_backend().await;
-    crate::testing::process_execution_env_fixture(backend.process_env_store().as_ref()).await;
+    lash_execution_contracts::testing::process_execution_env_fixture(
+        backend.process_env_store().as_ref(),
+    )
+    .await;
     backend
 }
 
@@ -53,16 +59,6 @@ pub async fn after_millisecond_tick(epoch_ms: u64) {
         }
         tokio::time::sleep(std::time::Duration::from_millis(1)).await;
     }
-}
-
-/// The kernel traits whose methods the relocated tests call, in scope under
-/// `_` names so a test module imports them with one glob.
-pub mod prelude {
-    pub use crate::{
-        ProcessEnvStore as _, ProcessEventLogTestSupport as _, ProcessLifecycle as _,
-        ProcessObserverRegistry as _, ProcessQuery as _, ProcessRegistrar as _,
-        ProcessRetention as _,
-    };
 }
 
 /// A plugin host over `factories` plus the standard-protocol fake a session

@@ -9,12 +9,9 @@
 //! attachment policies. The journal's guarded execution edge keeps
 //! the prelude until settlement (ADR 0113 §2.1).
 
-use crate::runtime::effect::RuntimeEffectControllerError;
+use lash_core_store::runtime_error::RuntimeEffectControllerError;
+use lash_execution_contracts::turn_prelude::{TurnPreludeRef, TurnPreludeStore};
 use lash_protocol_types::core_support::MessageCoreSupport as _;
-
-/// version_surface = "coexist"
-/// version_guard(items(TURN_PRELUDE_DOMAIN, of_store_bytes))
-const TURN_PRELUDE_DOMAIN: &str = "lash-turn-prelude/v1";
 
 /// Preparation facts retained with the environment render. Pressure hooks
 /// replay through nested effects; consumers adopt these recorded facts.
@@ -26,7 +23,7 @@ pub struct TurnPrelude {
     /// on the active ancestry while the run can resume; checkpoint tails
     /// are recorded in the history view rather than naming a collectable
     /// checkpoint.
-    pub history: crate::store::SessionHeadRef,
+    pub history: lash_core_store::store::SessionHeadRef,
     history_view: MessageView,
     prompt_view: MessageView,
     pub before_turn: Option<crate::EffectAddress>,
@@ -79,7 +76,7 @@ impl MessageView {
                 .any(|pair| pair[0].0 >= pair[1].0)
         {
             return Err(RuntimeEffectControllerError::new(
-                crate::RuntimeErrorCode::RuntimeStoreCorrupt,
+                lash_core_store::runtime_error::RuntimeErrorCode::RuntimeStoreCorrupt,
                 "the recorded prelude's message edits do not address its window",
             ));
         }
@@ -96,68 +93,6 @@ impl MessageView {
     }
 }
 
-/// The digest of one recorded prelude's store bytes: the only part of the
-/// prelude the environment sync journals.
-#[derive(Clone, Debug, PartialEq, Eq, Hash, serde::Serialize, serde::Deserialize)]
-#[serde(transparent)]
-pub struct TurnPreludeRef(String);
-
-impl TurnPreludeRef {
-    /// The reference that addresses `bytes`.
-    #[must_use]
-    pub fn of_store_bytes(bytes: &[u8]) -> Self {
-        Self(crate::stable_hash::blake3_hex(TURN_PRELUDE_DOMAIN, bytes))
-    }
-
-    /// The reference as stored and journaled.
-    #[must_use]
-    pub fn as_str(&self) -> &str {
-        &self.0
-    }
-
-    /// Whether `bytes` are exactly the bytes this reference addresses.
-    #[must_use]
-    pub fn matches_store_bytes(&self, bytes: &[u8]) -> bool {
-        Self::of_store_bytes(bytes) == *self
-    }
-}
-
-impl std::fmt::Display for TurnPreludeRef {
-    fn fmt(&self, formatter: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
-        formatter.write_str(&self.0)
-    }
-}
-
-/// The store of recorded turn preludes: immutable bytes under their digest,
-/// kept alive by referrer edges over the shared artifact edges and fences
-/// (ADR 0113). Only the cleanup executor severs edges, through
-/// [`Self::end_turn_prelude_referrer`].
-#[async_trait::async_trait]
-pub trait TurnPreludeStore: Send + Sync {
-    /// Store `bytes` under `prelude_ref` if absent and add the claim's edge,
-    /// in one transaction that first checks the referrer's fence
-    /// (`ReferrerEnded`) and arms the claim's guard. Bytes that are not the
-    /// ones `prelude_ref` addresses are `Immutable`.
-    async fn publish_turn_prelude(
-        &self,
-        claim: &crate::ReferrerClaim,
-        prelude_ref: &TurnPreludeRef,
-        bytes: &[u8],
-    ) -> Result<(), crate::ArtifactStoreError>;
-
-    /// Apply one resolved cleanup in one transaction (ADR 0113 §2.3).
-    async fn end_turn_prelude_referrer(
-        &self,
-        cleanup: &crate::ResolvedArtifactCleanup,
-    ) -> Result<(), crate::ArtifactStoreError>;
-
-    /// The bytes stored under `prelude_ref`, or `None` when none are.
-    async fn get_turn_prelude(
-        &self,
-        prelude_ref: &TurnPreludeRef,
-    ) -> Result<Option<Vec<u8>>, crate::ArtifactStoreError>;
-}
-
 impl TurnPrelude {
     /// Start preparation over the named committed window. Capture the live
     /// views with [`Self::capture_messages`] before recording it.
@@ -165,7 +100,7 @@ impl TurnPrelude {
     pub fn new(
         configuration: crate::EffectAddress,
         pressure: Vec<crate::plugin::DecidedContextPressure>,
-        mut history: crate::store::SessionHeadRef,
+        mut history: lash_core_store::store::SessionHeadRef,
         before_turn: Option<crate::EffectAddress>,
     ) -> Self {
         // Only graph facts are the base. A phase checkpoint can be retired
@@ -202,7 +137,7 @@ impl TurnPrelude {
     /// their typed cause and retry classification.
     pub async fn restore(
         &self,
-        store: &crate::store::SessionStore,
+        store: &lash_core_store::store::SessionStore,
     ) -> Result<
         (
             crate::MessageSequence,
@@ -214,11 +149,13 @@ impl TurnPrelude {
         self.check_session(store.session_id())?;
         let base = crate::store::load_session_window_state(
             store,
-            crate::store::WindowSelector::Admitted(self.history.clone()),
+            lash_core_store::store::WindowSelector::Admitted(self.history.clone()),
         )
         .await
         .map_err(|error| {
-            let settled = RuntimeEffectControllerError::from(crate::PluginError::from(error));
+            let settled = RuntimeEffectControllerError::from(
+                lash_execution_contracts::plugin_error::PluginError::from(error),
+            );
             if settled.turn_failure_cause() == crate::TurnFailureCause::LiveFault {
                 settled.retryable_uncommitted_derivation()
             } else {
@@ -227,14 +164,14 @@ impl TurnPrelude {
         })?
         .ok_or_else(|| {
             RuntimeEffectControllerError::new(
-                crate::RuntimeErrorCode::ArtifactMissing,
+                lash_core_store::runtime_error::RuntimeErrorCode::ArtifactMissing,
                 "the recorded prelude's history window is not stored",
             )
         })?;
         let read = base.state.read_model();
         self.restore_over(
             store.session_id(),
-            crate::MessageSequence::from_base(read.messages)
+            lash_protocol_types::MessageSequence::from_base(read.messages)
                 .with_base_render_cache(read.prompt_render_cache),
         )
     }
@@ -275,7 +212,7 @@ impl TurnPrelude {
     ) -> Result<(), RuntimeEffectControllerError> {
         if self.configuration.execution_scope.session_id() != Some(session) {
             return Err(RuntimeEffectControllerError::new(
-                crate::RuntimeErrorCode::RuntimeStoreCorrupt,
+                lash_core_store::runtime_error::RuntimeErrorCode::RuntimeStoreCorrupt,
                 "the recorded prelude names another session's history",
             ));
         }
@@ -298,7 +235,7 @@ impl TurnPrelude {
     ) -> Result<TurnPreludeRef, RuntimeEffectControllerError> {
         let bytes = serde_json::to_vec(self).map_err(|error| {
             RuntimeEffectControllerError::new(
-                crate::RuntimeErrorCode::RuntimeStoreCorrupt,
+                lash_core_store::runtime_error::RuntimeErrorCode::RuntimeStoreCorrupt,
                 format!("the turn prelude could not be encoded: {error}"),
             )
         })?;
@@ -313,7 +250,7 @@ impl TurnPrelude {
     }
 }
 
-impl TurnPreludeRef {
+impl TurnPrelude {
     /// The prelude this reference recorded, read from `store` and verified
     /// against the digest. A replay never re-derives a prelude: bytes that
     /// are gone are `ArtifactMissing`, and bytes that are not the recorded
@@ -324,29 +261,29 @@ impl TurnPreludeRef {
     /// The typed refusals above; a store that did not answer is a live
     /// fault, so a redrive reads again.
     pub async fn read(
-        &self,
+        reference: &TurnPreludeRef,
         store: &dyn TurnPreludeStore,
     ) -> Result<Box<TurnPrelude>, RuntimeEffectControllerError> {
         let bytes = store
-            .get_turn_prelude(self)
+            .get_turn_prelude(reference)
             .await
-            .map_err(|error| store_failure(self, error.into()))?
+            .map_err(|error| store_failure(reference, error.into()))?
             .ok_or_else(|| {
                 RuntimeEffectControllerError::new(
-                    crate::RuntimeErrorCode::ArtifactMissing,
-                    format!("the recorded turn prelude `{self}` is not stored"),
+                    lash_core_store::runtime_error::RuntimeErrorCode::ArtifactMissing,
+                    format!("the recorded turn prelude `{reference}` is not stored"),
                 )
             })?;
-        if !self.matches_store_bytes(&bytes) {
+        if !reference.matches_store_bytes(&bytes) {
             return Err(RuntimeEffectControllerError::new(
-                crate::RuntimeErrorCode::RuntimeStoreCorrupt,
-                format!("the stored turn prelude `{self}` is not the recorded one"),
+                lash_core_store::runtime_error::RuntimeErrorCode::RuntimeStoreCorrupt,
+                format!("the stored turn prelude `{reference}` is not the recorded one"),
             ));
         }
         serde_json::from_slice(&bytes).map_err(|error| {
             RuntimeEffectControllerError::new(
-                crate::RuntimeErrorCode::RuntimeStoreCorrupt,
-                format!("the stored turn prelude `{self}` does not decode: {error}"),
+                lash_core_store::runtime_error::RuntimeErrorCode::RuntimeStoreCorrupt,
+                format!("the stored turn prelude `{reference}` does not decode: {error}"),
             )
         })
     }
@@ -356,7 +293,7 @@ impl TurnPreludeRef {
 /// cause: a live fault stays unrecorded and retryable.
 fn store_failure(
     prelude_ref: &TurnPreludeRef,
-    error: crate::PluginError,
+    error: lash_execution_contracts::plugin_error::PluginError,
 ) -> RuntimeEffectControllerError {
     let mut settled = RuntimeEffectControllerError::from(error);
     settled.message = format!("turn prelude `{prelude_ref}`: {}", settled.message);

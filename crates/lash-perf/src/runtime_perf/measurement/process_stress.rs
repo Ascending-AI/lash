@@ -9,9 +9,10 @@ pub(super) async fn run_once_process_list_stress(
     let mut run = RunRecorder::start(scenario, chat_turns);
     let (registry, session_scope) = run
         .build(async {
-            let registry: Arc<dyn lash_core::ProcessRegistry> =
+            let registry: Arc<dyn lash_execution_contracts::process::ProcessRegistry> =
                 sqlite_memory_stores().await?.process_registry();
-            let session_scope = lash_core::SessionScope::new("runtime-perf-process-list");
+            let session_scope =
+                lash_execution_contracts::process::SessionScope::new("runtime-perf-process-list");
             Ok((registry, session_scope))
         })
         .await?;
@@ -31,7 +32,7 @@ pub(super) async fn run_once_process_list_stress(
                     .add_observer(
                         &session_scope.session_id,
                         &process_id,
-                        lash_core::ProcessObserverBy::host(format!(
+                        lash_execution_contracts::process::ProcessObserverBy::host(format!(
                             "process-list-stress-{index:05}"
                         )),
                     )
@@ -40,12 +41,12 @@ pub(super) async fn run_once_process_list_stress(
                     registry
                         .complete_process(
                             &process_id,
-                            lash_core::ProcessAwaitOutput::from_tool_output(
+                            lash_execution_contracts::process::ProcessAwaitOutput::from_tool_output(
                                 lash_core::ToolCallOutput::success(
                                     serde_json::json!({ "index": index }),
                                 ),
                             ),
-                            lash_core::ProcessCompletionAuthority::workflow_key(&process_id),
+                            lash_execution_contracts::process::ProcessCompletionAuthority::workflow_key(&process_id),
                         )
                         .await?;
                 }
@@ -81,7 +82,7 @@ pub(super) async fn run_once_process_list_stress(
                 );
                 if live_entries
                     .iter()
-                    .any(lash_core::ProcessRecord::is_terminal)
+                    .any(lash_execution_contracts::process::ProcessRecord::is_terminal)
                 {
                     anyhow::bail!("process_list_stress live listing included a terminal process");
                 }
@@ -92,8 +93,8 @@ pub(super) async fn run_once_process_list_stress(
                 let all_entries = registry
                     .list_observed_by(
                         &session_scope.session_id,
-                        &lash_core::ProcessListFilter {
-                            status: lash_core::ProcessStatusFilter::Any,
+                        &lash_execution_contracts::process::ProcessListFilter {
+                            status: lash_execution_contracts::process::ProcessStatusFilter::Any,
                             ..Default::default()
                         },
                     )
@@ -122,9 +123,9 @@ pub(super) async fn run_once_process_list_stress(
                 let phase_before_memory = process_memory_sample();
                 let global_records = async {
                     let registry = &registry;
-                    let filter = &lash_core::ProcessListFilter {
-                        status: lash_core::ProcessStatusFilter::Any,
-                        ..lash_core::ProcessListFilter::default()
+                    let filter = &lash_execution_contracts::process::ProcessListFilter {
+                        status: lash_execution_contracts::process::ProcessStatusFilter::Any,
+                        ..lash_execution_contracts::process::ProcessListFilter::default()
                     };
                     let mut records = Vec::new();
                     let mut continuation = None;
@@ -132,15 +133,19 @@ pub(super) async fn run_once_process_list_stress(
                         let page = registry
                             .list_processes_page(
                                 filter,
-                                std::num::NonZeroUsize::MIN
-                                    .saturating_add(lash_core::MAX_PROCESS_ROSTER_PAGE_SIZE - 1),
+                                std::num::NonZeroUsize::MIN.saturating_add(
+                                    lash_execution_contracts::process::MAX_PROCESS_ROSTER_PAGE_SIZE
+                                        - 1,
+                                ),
                                 continuation,
                             )
                             .await?;
                         records.extend(page.records);
                         continuation = page.continuation;
                         if continuation.is_none() {
-                            break Ok::<_, lash_core::PluginError>(records);
+                            break Ok::<_, lash_execution_contracts::plugin_error::PluginError>(
+                                records,
+                            );
                         }
                     }
                 }
@@ -258,22 +263,24 @@ pub(super) async fn run_once_process_list_stress(
 }
 
 fn process_list_stress_registration(
-    session_scope: lash_core::SessionScope,
+    session_scope: lash_execution_contracts::process::SessionScope,
     index: usize,
-) -> lash_core::ProcessRegistration {
-    lash_core::testing::held_engine_registration(
+) -> lash_execution_contracts::process::ProcessRegistration {
+    lash_execution_contracts::testing::held_engine_registration(
         serde_json::json!({ "index": index }),
-        lash_core::ProcessProvenance::session(session_scope),
-        lash_core::Lifetime::Detached,
+        lash_execution_contracts::process::ProcessProvenance::session(session_scope),
+        lash_execution_contracts::process::Lifetime::Detached,
     )
 }
 
-fn process_list_tool_payload(entries: &[lash_core::ProcessRecord]) -> serde_json::Value {
+fn process_list_tool_payload(
+    entries: &[lash_execution_contracts::process::ProcessRecord],
+) -> serde_json::Value {
     serde_json::json!(
         entries
             .iter()
             .map(|record| {
-                lash_core::ProcessHandleView::new(
+                lash_execution_contracts::process::ProcessHandleView::new(
                     record.id.clone(),
                     record.identity.clone(),
                     record.status(),

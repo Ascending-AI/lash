@@ -17,13 +17,21 @@ use super::activation::{Live, Pass, corrupt, millis, refused, unavailable};
 use super::driver::{Blocked, Driver, Immediate, InFlight, Pinned, StoredWaitId};
 use super::effects::record_omitted_effects;
 use super::node_trace::NodeCloses;
-use super::terminal::{ProcessParkReason, record_terminal};
+use super::terminal::record_terminal;
+use crate::ProcessId;
 use crate::runtime::actor::round::{self, AdmittedExecution, ExecutionDraft, RoundDraft, RunFold};
-use crate::runtime::actor::waits::{self, ParkDeadline, WaitDeadline, WaitPurpose, WaitSpec};
+use crate::runtime::actor::waits;
+use crate::runtime::actor::waits::WaitPurpose;
 use crate::runtime::process::StepRuntime;
-use crate::runtime::process::engine_state::{EngineAction, StepRequest};
 use crate::runtime::process::steps::StepRefusal;
-use crate::{ProcessId, ProcessInput, ProcessRecord};
+use lash_execution_contracts::park::ProcessParkReason;
+use lash_execution_contracts::process::EngineAction;
+use lash_execution_contracts::process::ProcessInput;
+use lash_execution_contracts::process::ProcessRecord;
+use lash_execution_contracts::process::StepRequest;
+use lash_execution_contracts::waits::ParkDeadline;
+use lash_execution_contracts::waits::WaitDeadline;
+use lash_execution_contracts::waits::WaitSpec;
 
 use super::ProcessActivation;
 
@@ -60,7 +68,7 @@ pub(super) enum Admission {
     /// Every step is admitted on the transaction.
     Admitted,
     /// The process ends with this outcome instead.
-    Ended(crate::ProcessOutcome),
+    Ended(lash_execution_contracts::process::ProcessOutcome),
     /// A step was refused before its admission.
     Refused(StepRefusal),
 }
@@ -202,7 +210,7 @@ impl ProcessActivation {
         process: &ProcessId,
         record: &ProcessRecord,
         driver: &Driver,
-        outcome: crate::ProcessOutcome,
+        outcome: lash_execution_contracts::process::ProcessOutcome,
     ) -> Result<Pass, DurableError> {
         super::waiting::end(&mut tx, process, record);
         record_omitted_effects(&mut tx, process, driver, self.fleet());
@@ -383,12 +391,16 @@ fn step_request_material(
 /// The terminal of a process refused a round of tool steps past its
 /// `max_tool_calls`: the typed refusal itself, as a cell's call settles with
 /// it (FIG-4546).
-fn tool_call_limit(exceeded: crate::ToolCallLimitExceeded) -> crate::ProcessOutcome {
+fn tool_call_limit(
+    exceeded: crate::ToolCallLimitExceeded,
+) -> lash_execution_contracts::process::ProcessOutcome {
     let mut failure = crate::session::tool_execution::tool_call_limit_failure(exceeded);
     failure.raw = Some(crate::ToolValue::untrusted_json(
         serde_json::json!({ "tool_call_limit": exceeded }),
     ));
-    crate::ProcessAwaitOutput::from_tool_output(crate::ToolCallOutput::failure(failure))
+    lash_execution_contracts::process::ProcessAwaitOutput::from_tool_output(
+        crate::ToolCallOutput::failure(failure),
+    )
 }
 
 /// The steps `driver` holds: those admitted and not yet answered to the
@@ -444,7 +456,7 @@ impl ProcessActivation {
         action: EngineAction,
         now: DurableInstant,
         fresh: &mut Vec<AdmittedExecution>,
-    ) -> Result<Option<crate::ProcessOutcome>, DurableError> {
+    ) -> Result<Option<lash_execution_contracts::process::ProcessOutcome>, DurableError> {
         let ProcessInput::Engine { .. } = record.input.as_ref() else {
             return Err(corrupt("an advanced process", "it runs no engine"));
         };

@@ -7,17 +7,22 @@ impl CurrentOwnerCapability {
         background: &ProcessCapability,
         session_id: &SessionId,
         request: crate::AppendSessionNodesRequest,
-    ) -> Result<crate::AppendSessionNodesOutcome, crate::PluginError> {
+    ) -> Result<crate::AppendSessionNodesOutcome, lash_execution_contracts::plugin_error::PluginError>
+    {
         if request.operation_id.trim().is_empty() {
-            return Err(crate::PluginError::Session(
-                "session graph append requires a non-empty stable operation_id".to_string(),
-            ));
+            return Err(
+                lash_execution_contracts::plugin_error::PluginError::Session(
+                    "session graph append requires a non-empty stable operation_id".to_string(),
+                ),
+            );
         }
         let session = self.require_session("append_session_nodes")?;
         if *session_id != session.session_id {
-            return Err(crate::PluginError::Session(format!(
-                "unknown session `{session_id}`"
-            )));
+            return Err(
+                lash_execution_contracts::plugin_error::PluginError::Session(format!(
+                    "unknown session `{session_id}`"
+                )),
+            );
         }
 
         let mut state = match &session.snapshot {
@@ -29,9 +34,11 @@ impl CurrentOwnerCapability {
             CurrentSnapshot::Owned(_) => self.current_snapshot_for_store_write().await?,
         };
         let Some(store) = &session.store else {
-            return Err(crate::PluginError::Session(
-                "session graph mutation requires a runtime store".to_string(),
-            ));
+            return Err(
+                lash_execution_contracts::plugin_error::PluginError::Session(
+                    "session graph mutation requires a runtime store".to_string(),
+                ),
+            );
         };
         let operation = super::super::state::boundary_operation(
             &state.session_id,
@@ -43,10 +50,12 @@ impl CurrentOwnerCapability {
             request.requires_ancestor_node_id.as_deref(),
             &request.nodes,
         )
-        .map_err(|err| crate::PluginError::Session(err.to_string()))?;
-        let draft_namespace = operation
-            .storage_key()
-            .map_err(|err| crate::PluginError::Session(err.to_string()))?;
+        .map_err(|err| {
+            lash_execution_contracts::plugin_error::PluginError::Session(err.to_string())
+        })?;
+        let draft_namespace = operation.storage_key().map_err(|err| {
+            lash_execution_contracts::plugin_error::PluginError::Session(err.to_string())
+        })?;
         let node_ids = append_session_nodes_to_state_with_clock(
             &mut state,
             &request.nodes,
@@ -57,7 +66,9 @@ impl CurrentOwnerCapability {
         let mut graph = state.pending_graph_commit();
         let node_id_mapping = graph
             .derive_node_ids(&state.session_id, &operation)
-            .map_err(|err| crate::PluginError::Session(err.to_string()))?;
+            .map_err(|err| {
+                lash_execution_contracts::plugin_error::PluginError::Session(err.to_string())
+            })?;
         let persisted_node_ids = node_id_mapping
             .iter()
             .map(|(_, derived)| derived.clone())
@@ -72,7 +83,7 @@ impl CurrentOwnerCapability {
                 self.session_plugins("append_session_nodes")?,
                 self.fleet_format(),
             )
-            .map_err(crate::PluginError::Runtime)?;
+            .map_err(lash_execution_contracts::plugin_error::PluginError::Runtime)?;
         let mut commit =
             crate::store::RuntimeCommit::persisted_state_with_graph_commit_and_operation_and_budget(
                 &state,
@@ -81,7 +92,7 @@ impl CurrentOwnerCapability {
                 self.host.core.durability.commit_budget,
                 self.fleet_format(),
             )
-            .map_err(|err| crate::PluginError::Session(err.to_string()))?;
+            .map_err(|err| lash_execution_contracts::plugin_error::PluginError::Session(err.to_string()))?;
         commit.turn_commit = append_stamp;
         commit.debug_assert_append_envelope_scope();
         let commit_result = super::super::state::commit_in_lane_context(
@@ -100,7 +111,7 @@ impl CurrentOwnerCapability {
                 session_id,
                 operation_key,
             }) => {
-                return Err(crate::PluginError::AppendOperationIdentityConflict {
+                return Err(lash_execution_contracts::plugin_error::PluginError::AppendOperationIdentityConflict {
                     session_id,
                     operation_key,
                 });
@@ -111,7 +122,7 @@ impl CurrentOwnerCapability {
                 stored,
                 attempted,
             }) => {
-                return Err(crate::PluginError::AppendReceiptRequestedNodeCountCorrupt {
+                return Err(lash_execution_contracts::plugin_error::PluginError::AppendReceiptRequestedNodeCountCorrupt {
                     session_id,
                     operation_key,
                     stored,
@@ -119,21 +130,29 @@ impl CurrentOwnerCapability {
                 });
             }
             Err(crate::StoreError::SessionExecutionLeaseExpired { session_id }) => {
-                return Err(crate::PluginError::SessionExecutionLeaseLost { session_id });
+                return Err(lash_execution_contracts::plugin_error::PluginError::SessionExecutionLeaseLost { session_id });
             }
             Err(error @ crate::StoreError::SessionHeadOwned { .. }) => {
                 return Err(error.into());
             }
-            Err(err) => return Err(crate::PluginError::Session(err.to_string())),
+            Err(err) => {
+                return Err(
+                    lash_execution_contracts::plugin_error::PluginError::Session(err.to_string()),
+                );
+            }
         };
         let receipt_replayed = result.receipt_replayed;
         let committed_leaf_node_id = result.committed_leaf_node_id.clone();
         let node_ids =
             super::super::state::resolve_append_node_ids(&result, locally_derived_node_ids)
-                .map_err(|err| crate::PluginError::Session(err.to_string()))?;
+                .map_err(|err| {
+                    lash_execution_contracts::plugin_error::PluginError::Session(err.to_string())
+                })?;
         if !receipt_replayed {
             super::super::state::apply_graph_commit_node_id_mapping(&mut state, &node_id_mapping)
-                .map_err(|err| crate::PluginError::Session(err.to_string()))?;
+                .map_err(|err| {
+                lash_execution_contracts::plugin_error::PluginError::Session(err.to_string())
+            })?;
             state.apply_persisted_commit_result(result);
         }
         background.sync_needed.store(true, Ordering::Release);

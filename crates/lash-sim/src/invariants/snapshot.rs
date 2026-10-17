@@ -478,7 +478,7 @@ impl StoreSnapshot {
 
 /// Read an active transcript directly from its store, including child sessions.
 async fn transcript_from(
-    factory: &dyn lash_core::DeploymentStore,
+    factory: &dyn lash_execution_contracts::deployment::DeploymentStore,
     session: &lash_core::SessionId,
 ) -> Result<Vec<(String, String)>, String> {
     if !matches!(

@@ -161,12 +161,14 @@ fn unheld_launch(
     outcome: &crate::ToolAttemptOutcome,
     attempt: &crate::AttemptContext<'_>,
 ) -> Option<crate::ProcessEnvRef> {
-    let starts: Vec<&crate::StartProcessIntent> = match outcome {
+    let starts: Vec<&lash_execution_contracts::tool_intent::StartProcessIntent> = match outcome {
         crate::ToolAttemptOutcome::Done { intents, .. } => intents
             .intents
             .iter()
             .filter_map(|intent| match intent {
-                crate::ToolIntent::StartProcess(start) => Some(start.as_ref()),
+                lash_execution_contracts::tool_intent::ToolIntent::StartProcess(start) => {
+                    Some(start.as_ref())
+                }
                 _ => None,
             })
             .collect(),

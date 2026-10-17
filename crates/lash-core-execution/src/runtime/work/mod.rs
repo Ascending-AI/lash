@@ -2,7 +2,7 @@
 //! ([`ProcessWorkSubstrate`], [`ProcessWorkWiring`]), with the pieces every
 //! deployment shares: the registry awaiter and its pacing. Session work has no
 //! port: a producer wakes the session
-//! actor in its own transaction ([`crate::Backend::wake_session`] outside
+//! actor in its own transaction ([`lash_execution_contracts::backend::Backend::wake_session`] outside
 //! one).
 
 use std::sync::Arc;
@@ -18,8 +18,10 @@ pub use cadence::{
 };
 pub use durable::DurableProcessWork;
 
-use super::process::{ProcessRegistry, WatchedRegistry};
-use crate::{PluginError, ProcessAwaitOutput};
+use super::process::WatchedRegistry;
+use lash_execution_contracts::plugin_error::PluginError;
+use lash_execution_contracts::process::ProcessAwaitOutput;
+use lash_execution_contracts::process::ProcessRegistry;
 
 /// Deployment port for durable process work.
 #[async_trait::async_trait]
@@ -149,9 +151,9 @@ impl NoProcessWork {
     pub async fn await_event(
         &self,
         process_id: &crate::ProcessId,
-        kind: crate::ProcessEventKind,
+        kind: lash_execution_contracts::process::ProcessEventKind,
         after_sequence: u64,
-    ) -> Result<crate::ProcessEvent, PluginError> {
+    ) -> Result<lash_execution_contracts::process::ProcessEvent, PluginError> {
         self.terminal_awaiter
             .await_event(process_id, kind, after_sequence)
             .await

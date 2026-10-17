@@ -79,8 +79,11 @@ use lash_protocol_types::{ExecutionLimit, ExecutionPolicy, LimitCause};
 use tokio_util::sync::CancellationToken;
 
 use super::ActorContext;
-use super::waits::{ParkDeadline, WaitId, WaitKind, WaitRef};
+use super::waits::WaitId;
 use crate::{ToolCallId, ToolId};
+use lash_durable::domain::WaitKind;
+use lash_execution_contracts::waits::ParkDeadline;
+use lash_execution_contracts::waits::WaitRef;
 
 pub use crate::plugin::StagedPluginState;
 pub use lash_durable::domain::{OwnerKey, ProcessStartRows, RunSeq};
@@ -108,7 +111,7 @@ pub use lifecycle::{
 };
 
 pub use parked::{CallOwner, ParkedCall, PinnedWaits, parked};
-pub use records::RUN_RECORD_FORMAT_VERSION;
+
 pub use rounds::{
     PinnedRound, PresentRecord, admit_round, pin_round, present, presentation, settle_retry,
     start_retry,
@@ -966,8 +969,8 @@ pub(crate) enum Stop {
     Durable(DurableError),
     /// The host lacked capacity for the attempt, which the lifecycle
     /// honours: no outcome, and the step runs again uncounted
-    /// ([`CapacityVerdict`](crate::runtime::process::CapacityVerdict)).
-    Capacity(crate::runtime::process::CapacityVerdict),
+    /// ([`CapacityVerdict`](lash_execution_contracts::process::CapacityVerdict)).
+    Capacity(lash_execution_contracts::process::CapacityVerdict),
 }
 
 /// Run `admitted`'s body under its limit, the context's cancel token,

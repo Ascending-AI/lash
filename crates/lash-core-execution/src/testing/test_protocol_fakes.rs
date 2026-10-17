@@ -7,15 +7,20 @@ use std::sync::Arc;
 use async_trait::async_trait;
 
 use super::*;
-use crate::plugin::{
-    CandidateFacts, ConfigOwner, ConfigRegistrar, ConfigRegistrationError, PluginFactory,
-    ProtocolDriverPlugin, ProtocolSessionContext, ProtocolSessionPlugin, SessionPlugin,
-};
+use crate::plugin::CandidateFacts;
+use crate::plugin::ConfigOwner;
+use crate::plugin::ConfigRegistrar;
+use crate::plugin::PluginFactory;
+use crate::plugin::ProtocolDriverPlugin;
+use crate::plugin::ProtocolSessionContext;
+use crate::plugin::ProtocolSessionPlugin;
+use crate::plugin::SessionPlugin;
 use crate::sansio::{CompletedToolCall, PendingWork, ProtocolDriverHandle};
 use crate::{
     DriverAction, DriverContextView, ExecResponse, ProtocolBuildInput, TurnDriverConfig,
     TurnDriverPreamble,
 };
+use lash_execution_contracts::config_error::ConfigRegistrationError;
 use lash_protocol_types::llm::types::LlmResponse;
 
 pub fn test_standard_protocol_factories() -> Vec<Arc<dyn PluginFactory>> {
@@ -108,9 +113,15 @@ impl PluginFactory for TestProtocolFactory {
     /// standard fake registers no config.
     fn recipe(
         self: Arc<Self>,
-    ) -> std::result::Result<crate::plugin::PluginRecipe, crate::plugin::PluginError> {
+    ) -> std::result::Result<
+        crate::plugin::PluginRecipe,
+        lash_execution_contracts::plugin_error::PluginError,
+    > {
         let recipe_factory = Arc::clone(&self);
-        let recipe: std::result::Result<crate::plugin::PluginRecipe, crate::plugin::PluginError> = {
+        let recipe: std::result::Result<
+            crate::plugin::PluginRecipe,
+            lash_execution_contracts::plugin_error::PluginError,
+        > = {
             let mut reg = crate::plugin::PluginRegistrar::<TestProtocolPlugin>::new(
                 crate::plugin::PluginFactory::id(self.as_ref()),
             );
@@ -172,7 +183,7 @@ impl TestProtocolPlugin {
     fn declare(
         reg: &mut crate::plugin::PluginRegistrar<Self>,
         code: bool,
-    ) -> std::result::Result<(), crate::plugin::PluginError> {
+    ) -> std::result::Result<(), lash_execution_contracts::plugin_error::PluginError> {
         reg.protocol().session(move |this, _state| {
             Ok(this
                 .session_override
@@ -183,7 +194,7 @@ impl TestProtocolPlugin {
         if code {
             reg.execution().code_executor(move |this, _| {
                 this.code_executor.clone().ok_or_else(|| {
-                    crate::plugin::PluginError::Registration(
+                    lash_execution_contracts::plugin_error::PluginError::Registration(
                         "declared code executor is absent".into(),
                     )
                 })

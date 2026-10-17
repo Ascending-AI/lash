@@ -9,22 +9,26 @@ use super::*;
 /// payload, and ends with what the body answered.
 fn engine_step_advance(
     _state: &mut serde_json::Value,
-    event: lash_core::EngineEvent,
-) -> lash_core::EngineAction {
+    event: lash_execution_contracts::process::EngineEvent,
+) -> lash_execution_contracts::process::EngineAction {
     match event {
-        lash_core::EngineEvent::Started { payload } => lash_core::EngineAction::Steps {
-            steps: vec![lash_core::StepRequest::Engine {
-                step: lash_core::StepName("double".to_owned()),
-                kind: lash_core::EngineStepKind::new(DOUBLE),
-                input: payload,
-            }],
-            wake: None,
-        },
-        lash_core::EngineEvent::StepSettled { outcome, .. } => {
+        lash_execution_contracts::process::EngineEvent::Started { payload } => {
+            lash_execution_contracts::process::EngineAction::Steps {
+                steps: vec![lash_execution_contracts::process::StepRequest::Engine {
+                    step: lash_execution_contracts::process::StepName("double".to_owned()),
+                    kind: lash_execution_contracts::process::EngineStepKind::new(DOUBLE),
+                    input: payload,
+                }],
+                wake: None,
+            }
+        }
+        lash_execution_contracts::process::EngineEvent::StepSettled { outcome, .. } => {
             answer(serde_json::json!({ "step": settled(&outcome) }))
         }
-        lash_core::EngineEvent::Cancelled { origin, .. } => cancelled(origin),
-        _ => lash_core::EngineAction::Idle,
+        lash_execution_contracts::process::EngineEvent::Cancelled { origin, .. } => {
+            cancelled(origin)
+        }
+        _ => lash_execution_contracts::process::EngineAction::Idle,
     }
 }
 
@@ -44,8 +48,8 @@ struct Double {
 }
 
 #[async_trait::async_trait]
-impl lash_core::EngineSteps for Double {
-    fn kinds(&self) -> Vec<lash_core::EngineStepKind> {
+impl lash_execution_contracts::process::EngineSteps for Double {
+    fn kinds(&self) -> Vec<lash_execution_contracts::process::EngineStepKind> {
         if self
             .declarations
             .as_ref()
@@ -53,23 +57,31 @@ impl lash_core::EngineSteps for Double {
         {
             Vec::new()
         } else {
-            vec![lash_core::EngineStepKind::new(DOUBLE)]
+            vec![lash_execution_contracts::process::EngineStepKind::new(
+                DOUBLE,
+            )]
         }
     }
 
-    fn execution(&self, _kind: &lash_core::EngineStepKind) -> std::time::Duration {
+    fn execution(
+        &self,
+        _kind: &lash_execution_contracts::process::EngineStepKind,
+    ) -> std::time::Duration {
         std::time::Duration::from_secs(30)
     }
 
-    fn retry(&self, _kind: &lash_core::EngineStepKind) -> lash_core::ExecutionPolicy {
+    fn retry(
+        &self,
+        _kind: &lash_execution_contracts::process::EngineStepKind,
+    ) -> lash_core::ExecutionPolicy {
         lash_core::ExecutionPolicy::Once
     }
 
     async fn run(
         &self,
-        run: lash_core::EngineStepRun,
+        run: lash_execution_contracts::process::EngineStepRun,
         _cancel: tokio_util::sync::CancellationToken,
-    ) -> lash_core::EngineStepAnswer {
+    ) -> lash_execution_contracts::process::EngineStepAnswer {
         use lash_core::tool_run::{MaterialOwner, MaterialRole};
         self.runs.fetch_add(1, Ordering::SeqCst);
         let text = (run.input.as_i64().unwrap_or_default() * 2).to_string();
@@ -104,7 +116,7 @@ impl lash_core::plugin::SessionPlugin for NoSessionPlugin {
 impl NoSessionPlugin {
     fn declare(
         _reg: &mut lash_core::plugin::PluginRegistrar<Self>,
-    ) -> std::result::Result<(), lash_core::plugin::PluginError> {
+    ) -> std::result::Result<(), lash_execution_contracts::plugin_error::PluginError> {
         Ok(())
     }
 }
@@ -116,11 +128,14 @@ impl lash_core::plugin::PluginFactory for EnginePlugin {
 
     fn recipe(
         self: Arc<Self>,
-    ) -> std::result::Result<lash_core::plugin::PluginRecipe, lash_core::plugin::PluginError> {
+    ) -> std::result::Result<
+        lash_core::plugin::PluginRecipe,
+        lash_execution_contracts::plugin_error::PluginError,
+    > {
         let recipe_factory = Arc::clone(&self);
         let recipe: std::result::Result<
             lash_core::plugin::PluginRecipe,
-            lash_core::plugin::PluginError,
+            lash_execution_contracts::plugin_error::PluginError,
         > = {
             let mut reg = lash_core::plugin::PluginRegistrar::<NoSessionPlugin>::new(
                 lash_core::plugin::PluginFactory::id(self.as_ref()),
@@ -145,7 +160,10 @@ impl EnginePlugin {
     pub fn bind_process_engine(
         &self,
         _ctx: &lash_core::ProcessEngineContributionContext<'_>,
-    ) -> Result<lash_core::ProcessEngineRegistration, lash_core::PluginError> {
+    ) -> Result<
+        lash_core::ProcessEngineRegistration,
+        lash_execution_contracts::plugin_error::PluginError,
+    > {
         Ok(
             lash_core::ProcessEngineRegistration::accepting(Arc::new(ScriptEngine {
                 kind: PLUGIN_ENGINE,
@@ -211,7 +229,7 @@ async fn engine_step_without_the_capability_is_refused_before_admission(tier: Ti
     let process = start(&deployment.core, BARE_ENGINE, serde_json::json!(21)).await;
     let output = ended(&deployment.core, &process).await;
     assert!(!output.is_success(), "the process failed: {output:?}");
-    let refusal = lash_core::EngineStepRefusal::NoEngineSteps {
+    let refusal = lash_execution_contracts::process::EngineStepRefusal::NoEngineSteps {
         engine: BARE_ENGINE.to_owned(),
     }
     .to_string();
@@ -244,24 +262,32 @@ struct Flaky {
 }
 
 #[async_trait::async_trait]
-impl lash_core::EngineSteps for Flaky {
-    fn kinds(&self) -> Vec<lash_core::EngineStepKind> {
-        vec![lash_core::EngineStepKind::new(FLAKY)]
+impl lash_execution_contracts::process::EngineSteps for Flaky {
+    fn kinds(&self) -> Vec<lash_execution_contracts::process::EngineStepKind> {
+        vec![lash_execution_contracts::process::EngineStepKind::new(
+            FLAKY,
+        )]
     }
 
-    fn execution(&self, _kind: &lash_core::EngineStepKind) -> std::time::Duration {
+    fn execution(
+        &self,
+        _kind: &lash_execution_contracts::process::EngineStepKind,
+    ) -> std::time::Duration {
         std::time::Duration::from_secs(30)
     }
 
-    fn retry(&self, _kind: &lash_core::EngineStepKind) -> lash_core::ExecutionPolicy {
+    fn retry(
+        &self,
+        _kind: &lash_execution_contracts::process::EngineStepKind,
+    ) -> lash_core::ExecutionPolicy {
         self.retry
     }
 
     async fn run(
         &self,
-        run: lash_core::EngineStepRun,
+        run: lash_execution_contracts::process::EngineStepRun,
         _cancel: tokio_util::sync::CancellationToken,
-    ) -> lash_core::EngineStepAnswer {
+    ) -> lash_execution_contracts::process::EngineStepAnswer {
         use lash_core::tool_run::{KnownFailureReason, MaterialOwner, MaterialRole};
         self.runs.fetch_add(1, Ordering::SeqCst);
         let output = lash_core::ToolCallOutput::failure(lash_core::ToolFailure::runtime(
@@ -275,7 +301,8 @@ impl lash_core::EngineSteps for Flaky {
                     process_id: run.process,
                 },
                 MaterialRole::AttemptOutput,
-                serde_json::to_string(&lash_core::Durable(&output)).expect("a tool output encodes"),
+                serde_json::to_string(&lash_protocol_types::Durable(&output))
+                    .expect("a tool output encodes"),
             )
             .failure(KnownFailureReason::Reported, None),
         )
@@ -285,22 +312,26 @@ impl lash_core::EngineSteps for Flaky {
 
 fn flaky_advance(
     _state: &mut serde_json::Value,
-    event: lash_core::EngineEvent,
-) -> lash_core::EngineAction {
+    event: lash_execution_contracts::process::EngineEvent,
+) -> lash_execution_contracts::process::EngineAction {
     match event {
-        lash_core::EngineEvent::Started { .. } => lash_core::EngineAction::Steps {
-            steps: vec![lash_core::StepRequest::Engine {
-                step: lash_core::StepName("flaky".to_owned()),
-                kind: lash_core::EngineStepKind::new(FLAKY),
-                input: serde_json::Value::Null,
-            }],
-            wake: None,
-        },
-        lash_core::EngineEvent::StepSettled { outcome, .. } => {
+        lash_execution_contracts::process::EngineEvent::Started { .. } => {
+            lash_execution_contracts::process::EngineAction::Steps {
+                steps: vec![lash_execution_contracts::process::StepRequest::Engine {
+                    step: lash_execution_contracts::process::StepName("flaky".to_owned()),
+                    kind: lash_execution_contracts::process::EngineStepKind::new(FLAKY),
+                    input: serde_json::Value::Null,
+                }],
+                wake: None,
+            }
+        }
+        lash_execution_contracts::process::EngineEvent::StepSettled { outcome, .. } => {
             answer(serde_json::json!({ "step": settled(&outcome) }))
         }
-        lash_core::EngineEvent::Cancelled { origin, .. } => cancelled(origin),
-        _ => lash_core::EngineAction::Idle,
+        lash_execution_contracts::process::EngineEvent::Cancelled { origin, .. } => {
+            cancelled(origin)
+        }
+        _ => lash_execution_contracts::process::EngineAction::Idle,
     }
 }
 
@@ -323,7 +354,7 @@ impl lash_core::plugin::SessionPlugin for NoRetrySessionPlugin {
 impl NoRetrySessionPlugin {
     fn declare(
         _reg: &mut lash_core::plugin::PluginRegistrar<Self>,
-    ) -> std::result::Result<(), lash_core::plugin::PluginError> {
+    ) -> std::result::Result<(), lash_execution_contracts::plugin_error::PluginError> {
         Ok(())
     }
 }
@@ -335,11 +366,14 @@ impl lash_core::plugin::PluginFactory for RetryPlugin {
 
     fn recipe(
         self: Arc<Self>,
-    ) -> std::result::Result<lash_core::plugin::PluginRecipe, lash_core::plugin::PluginError> {
+    ) -> std::result::Result<
+        lash_core::plugin::PluginRecipe,
+        lash_execution_contracts::plugin_error::PluginError,
+    > {
         let recipe_factory = Arc::clone(&self);
         let recipe: std::result::Result<
             lash_core::plugin::PluginRecipe,
-            lash_core::plugin::PluginError,
+            lash_execution_contracts::plugin_error::PluginError,
         > = {
             let mut reg = lash_core::plugin::PluginRegistrar::<NoRetrySessionPlugin>::new(
                 lash_core::plugin::PluginFactory::id(self.as_ref()),
@@ -364,7 +398,10 @@ impl RetryPlugin {
     pub fn bind_process_engine(
         &self,
         _ctx: &lash_core::ProcessEngineContributionContext<'_>,
-    ) -> Result<lash_core::ProcessEngineRegistration, lash_core::PluginError> {
+    ) -> Result<
+        lash_core::ProcessEngineRegistration,
+        lash_execution_contracts::plugin_error::PluginError,
+    > {
         let registration =
             lash_core::ProcessEngineRegistration::accepting(Arc::new(ScriptEngine {
                 kind: RETRY_ENGINE,
@@ -376,9 +413,10 @@ impl RetryPlugin {
                 retry: self.declared,
             }));
         Ok(match self.overridden {
-            Some(policy) => {
-                registration.with_engine_step_retry(lash_core::EngineStepKind::new(FLAKY), policy)
-            }
+            Some(policy) => registration.with_engine_step_retry(
+                lash_execution_contracts::process::EngineStepKind::new(FLAKY),
+                policy,
+            ),
             None => registration,
         })
     }
@@ -471,7 +509,7 @@ async fn a_missing_engine_step_registration_ends_failed_with_its_typed_reason(ti
             "step_kind": DOUBLE,
         })
     );
-    let source: lash_core::EngineStepRefusal = serde_json::from_value(
+    let source: lash_execution_contracts::process::EngineStepRefusal = serde_json::from_value(
         failure
             .raw
             .as_ref()
@@ -482,9 +520,9 @@ async fn a_missing_engine_step_registration_ends_failed_with_its_typed_reason(ti
     .expect("the refusal remains typed");
     assert_eq!(
         source,
-        lash_core::EngineStepRefusal::UndeclaredStep {
+        lash_execution_contracts::process::EngineStepRefusal::UndeclaredStep {
             engine: PLUGIN_ENGINE.to_owned(),
-            kind: lash_core::EngineStepKind::new(DOUBLE),
+            kind: lash_execution_contracts::process::EngineStepKind::new(DOUBLE),
         }
     );
     let record = deployment
@@ -494,10 +532,15 @@ async fn a_missing_engine_step_registration_ends_failed_with_its_typed_reason(ti
         .await
         .expect("the process is read")
         .expect("the process exists");
-    let lash_core::ProcessLifecycleState::Terminal { outcome: end, .. } = &record.lifecycle else {
+    let lash_execution_contracts::process::ProcessLifecycleState::Terminal { outcome: end, .. } =
+        &record.lifecycle
+    else {
         panic!("the failed process has a canonical terminal: {record:?}");
     };
-    assert_eq!(*end, lash_core::ProcessTerminal::from_tool_output(output));
+    assert_eq!(
+        *end,
+        lash_execution_contracts::process::ProcessTerminal::from_tool_output(output)
+    );
     assert_eq!(runs.load(Ordering::SeqCst), 0, "no body ran");
 }
 
@@ -506,18 +549,18 @@ on_every_tier!(a_missing_engine_step_registration_ends_failed_with_its_typed_rea
 /// A process engine retains a failed step's output as its terminal answer.
 fn failed_step_advance(
     state: &mut serde_json::Value,
-    event: lash_core::EngineEvent,
-) -> lash_core::EngineAction {
-    if let lash_core::EngineEvent::StepSettled {
+    event: lash_execution_contracts::process::EngineEvent,
+) -> lash_execution_contracts::process::EngineAction {
+    if let lash_execution_contracts::process::EngineEvent::StepSettled {
         outcome: lash_core_store::tool_run::SettledOutput::Failed(failure),
         ..
     } = &event
     {
         let output =
             serde_json::from_str(failure.payload()).expect("a failed body retains its output");
-        return lash_core::EngineAction::Terminal(lash_core::ProcessOutcome::from_tool_output(
-            output,
-        ));
+        return lash_execution_contracts::process::EngineAction::Terminal(
+            lash_execution_contracts::process::ProcessOutcome::from_tool_output(output),
+        );
     }
     engine_step_advance(state, event)
 }
@@ -528,9 +571,11 @@ const FAILING_CATALOG: lash_core::ProcessConfigKey<()> =
 
 fn failing_catalog_component() -> Arc<dyn lash::process::ProcessComponentFactory> {
     let refuse: lash_core::plugin::ToolCatalogContributor = Arc::new(|_| {
-        Err(lash_core::PluginError::Registration(
-            "catalog law refusal".to_owned(),
-        ))
+        Err(
+            lash_execution_contracts::plugin_error::PluginError::Registration(
+                "catalog law refusal".to_owned(),
+            ),
+        )
     });
     Arc::new(
         lash_core::plugin::StaticPluginFactory::new(
@@ -579,7 +624,9 @@ async fn an_unreadable_engine_step_catalog_parks_the_process_with_its_typed_reas
                 .await
                 .expect("the process is read")
                 .expect("the process exists");
-            if let lash_core::ProcessParkState::Parked(reason) = observed.park.clone() {
+            if let lash_execution_contracts::process::ProcessParkState::Parked(reason) =
+                observed.park.clone()
+            {
                 break (reason, observed);
             }
             tokio::time::sleep(Duration::from_millis(20)).await;
@@ -588,7 +635,10 @@ async fn an_unreadable_engine_step_catalog_parks_the_process_with_its_typed_reas
     .await
     .expect("the process parks within a minute");
     let (reason, observed) = park;
-    let lash_core::ProcessParkReason::CompositionUnavailable { message, .. } = &reason else {
+    let lash_execution_contracts::park::ProcessParkReason::CompositionUnavailable {
+        message, ..
+    } = &reason
+    else {
         panic!("the process parked for another reason: {reason:?}");
     };
     assert!(
@@ -598,7 +648,7 @@ async fn an_unreadable_engine_step_catalog_parks_the_process_with_its_typed_reas
     assert!(
         !matches!(
             observed.lifecycle,
-            lash_core::ProcessLifecycleState::Terminal { .. }
+            lash_execution_contracts::process::ProcessLifecycleState::Terminal { .. }
         ),
         "nothing settled: {observed:?}"
     );

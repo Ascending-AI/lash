@@ -4,12 +4,12 @@ use super::*;
 pub(crate) mod catalog_reads;
 
 #[async_trait::async_trait]
-impl lash_core_execution::SessionCatalogStore for SqliteStore {
+impl lash_core_store::store::SessionCatalogStore for SqliteStore {
     async fn admit_session(
         &self,
         request: &SessionStoreCreateRequest,
-    ) -> Result<lash_core_execution::SessionAdmission, StoreError> {
-        lash_core_execution::store::validate_session_id(&request.session_id)?;
+    ) -> Result<lash_core_store::store::SessionAdmission, StoreError> {
+        lash_core_store::store::validate_session_id(&request.session_id)?;
         let meta = SessionMeta {
             owning_process_id: request.owning_process_id.clone(),
             session_id: request.session_id.clone(),
@@ -37,12 +37,12 @@ impl lash_core_execution::SessionCatalogStore for SqliteStore {
                         // the fleet record's writer ranges before the head
                         // that carries them is written (FIG-4746).
                         tx.admit_plugin_writers(
-                            &lash_core_execution::store::plugin_writers::PluginPublication::of_session_config(&config),
+                            &lash_core_store::store::plugin_writers::PluginPublication::of_session_config(&config),
                         )
                         .map_err(crate::sqlite_error)?;
                         // The creator's config is baked in with the catalog
                         // row, in this transaction (FIG-4099).
-                        let created_head = lash_core_execution::store::SessionHeadMeta::created(
+                        let created_head = lash_core_store::store::SessionHeadMeta::created(
                             &meta.session_id,
                             config.clone(),
                             fleet_format,
@@ -64,18 +64,18 @@ impl lash_core_execution::SessionCatalogStore for SqliteStore {
                             rusqlite::params![created_head.session_id.as_str()],
                         )
                         .map_err(crate::sqlite_error)?;
-                        return Ok(lash_core_execution::SessionAdmission::Created);
+                        return Ok(lash_core_store::store::SessionAdmission::Created);
                     }
                     let recorded = session_meta::load_recorded_lineage(tx, &meta.session_id)?
                         .ok_or_else(|| StoreError::SessionBindingNotMaterialized {
                             session_id: meta.session_id.clone(),
                         })?;
-                    lash_core_execution::store_backend_support::guard_rebind_lineage(
+                    lash_core_store::store_backend_support::guard_rebind_lineage(
                         &meta.session_id,
                         &recorded,
                         &meta.relation,
                     )?;
-                    Ok(lash_core_execution::SessionAdmission::Rebound)
+                    Ok(lash_core_store::store::SessionAdmission::Rebound)
                 })();
                 Ok(match outcome {
                     Ok(admission) => TxOutcome::Commit(Ok(admission)),
@@ -89,8 +89,8 @@ impl lash_core_execution::SessionCatalogStore for SqliteStore {
     async fn lookup_session(
         &self,
         session_id: &SessionId,
-    ) -> Result<lash_core_execution::SessionLookup, StoreError> {
-        lash_core_execution::store::validate_session_id(session_id)?;
+    ) -> Result<lash_core_store::store::SessionLookup, StoreError> {
+        lash_core_store::store::validate_session_id(session_id)?;
         let session_id = session_id.clone();
         self.read_connection()
             .read(move |conn| {
@@ -107,13 +107,13 @@ impl lash_core_execution::SessionCatalogStore for SqliteStore {
                     .optional()?
                     .is_some();
                 if deleted {
-                    return Ok(Ok(lash_core_execution::SessionLookup::Deleted));
+                    return Ok(Ok(lash_core_store::store::SessionLookup::Deleted));
                 }
                 let meta = crate::session_meta::load_session_meta_in_tx(conn, Some(&session_id));
                 Ok(meta.map(|meta| {
                     meta.map_or(
-                        lash_core_execution::SessionLookup::Absent,
-                        lash_core_execution::SessionLookup::Live,
+                        lash_core_store::store::SessionLookup::Absent,
+                        lash_core_store::store::SessionLookup::Live,
                     )
                 }))
             })
@@ -134,9 +134,9 @@ impl lash_core_execution::SessionCatalogStore for SqliteStore {
 
     async fn fork_session(
         &self,
-        request: &lash_core_execution::ForkSessionRequest,
-    ) -> Result<lash_core_execution::ForkSessionReceipt, StoreError> {
-        lash_core_execution::store::validate_session_id(&request.session_id)?;
+        request: &lash_core_store::session_store_factory_types::ForkSessionRequest,
+    ) -> Result<lash_core_store::session_store_factory_types::ForkSessionReceipt, StoreError> {
+        lash_core_store::store::validate_session_id(&request.session_id)?;
         fork_at_in_catalog(
             &self.conn,
             request,
@@ -149,22 +149,22 @@ impl lash_core_execution::SessionCatalogStore for SqliteStore {
     async fn resolve_target(
         &self,
         session_id: &SessionId,
-        target: &lash_core_execution::Target,
-    ) -> Result<lash_core_execution::RetainedRevision, StoreError> {
+        target: &lash_core_store::store::Target,
+    ) -> Result<lash_core_store::store::RetainedRevision, StoreError> {
         self.resolve_target_in_catalog(session_id, target).await
     }
 
     async fn revisions(
         &self,
         session_id: &SessionId,
-    ) -> Result<Vec<lash_core_execution::RetainedRevision>, StoreError> {
+    ) -> Result<Vec<lash_core_store::store::RetainedRevision>, StoreError> {
         self.revisions_in_catalog(session_id).await
     }
 
     async fn pin(
         &self,
         session_id: &SessionId,
-        target: &lash_core_execution::Target,
+        target: &lash_core_store::store::Target,
     ) -> Result<(), StoreError> {
         self.pin_in_catalog(session_id, target).await
     }
@@ -172,7 +172,7 @@ impl lash_core_execution::SessionCatalogStore for SqliteStore {
     async fn unpin(
         &self,
         session_id: &SessionId,
-        target: &lash_core_execution::Target,
+        target: &lash_core_store::store::Target,
     ) -> Result<(), StoreError> {
         self.unpin_in_catalog(session_id, target).await
     }
@@ -180,14 +180,14 @@ impl lash_core_execution::SessionCatalogStore for SqliteStore {
     async fn retention(
         &self,
         session_id: &SessionId,
-    ) -> Result<lash_core_execution::Retention, StoreError> {
+    ) -> Result<lash_core_store::store::Retention, StoreError> {
         self.retention_in_catalog(session_id).await
     }
 
     async fn set_retention(
         &self,
         session_id: &SessionId,
-        retention: lash_core_execution::Retention,
+        retention: lash_core_store::store::Retention,
     ) -> Result<(), StoreError> {
         self.set_retention_in_catalog(session_id, retention).await
     }
@@ -195,9 +195,10 @@ impl lash_core_execution::SessionCatalogStore for SqliteStore {
     async fn delete_session(
         &self,
         session_id: &SessionId,
-    ) -> lash_core_execution::MaintenanceResult<lash_core_execution::SessionBlobReclaimReport> {
-        lash_core_execution::store::validate_session_id(session_id)
-            .map_err(lash_core_execution::MaintenanceFailure::failed_before_any_work)?;
+    ) -> lash_core_store::store::MaintenanceResult<lash_core_store::store::SessionBlobReclaimReport>
+    {
+        lash_core_store::store::validate_session_id(session_id)
+            .map_err(lash_core_store::store::MaintenanceFailure::failed_before_any_work)?;
         let report =
             delete_session_from_catalog(&self.conn, session_id, self.clock.timestamp_ms()).await?;
         self.windows.forget(session_id);
@@ -206,10 +207,10 @@ impl lash_core_execution::SessionCatalogStore for SqliteStore {
 }
 
 #[async_trait::async_trait]
-impl lash_core_execution::DeploymentStore for SqliteStore {
+impl lash_execution_contracts::deployment::DeploymentStore for SqliteStore {
     async fn artifact_frame_is_retained(
         &self,
-        frame: &lash_core_execution::FrameEnvironmentId,
+        frame: &lash_core_store::artifact_referrer::FrameEnvironmentId,
     ) -> Result<bool, StoreError> {
         let frame = frame.clone();
         self.read_connection()
@@ -233,8 +234,8 @@ impl lash_core_execution::DeploymentStore for SqliteStore {
 
     async fn reclaim_retained_evidence(
         &self,
-        bound: lash_core_execution::store::RetentionBound,
-    ) -> lash_core_execution::MaintenanceResult<lash_core_execution::store::RetentionReport> {
+        bound: lash_core_store::store::RetentionBound,
+    ) -> lash_core_store::store::MaintenanceResult<lash_core_store::store::RetentionReport> {
         let report = crate::retention::reclaim(self, bound)
             .await
             .map_err(|failure| *failure)?;
@@ -242,9 +243,9 @@ impl lash_core_execution::DeploymentStore for SqliteStore {
     }
     async fn count_unsettled_turns(
         &self,
-    ) -> Result<lash_core_execution::store::UnsettledTurnCounts, StoreError> {
+    ) -> Result<lash_core_store::store::UnsettledTurnCounts, StoreError> {
         if !self.location.target().exists() {
-            return Ok(lash_core_execution::store::UnsettledTurnCounts::default());
+            return Ok(lash_core_store::store::UnsettledTurnCounts::default());
         }
         let conn = self.read_connection();
         let (in_flight, held_by_stalled_close): (i64, i64) = conn
@@ -261,24 +262,24 @@ impl lash_core_execution::DeploymentStore for SqliteStore {
             })
             .await
             .map_err(sqlite_error)?;
-        Ok(lash_core_execution::store::UnsettledTurnCounts {
+        Ok(lash_core_store::store::UnsettledTurnCounts {
             in_flight_turns: usize::try_from(in_flight).unwrap_or_default(),
             held_by_stalled_close: usize::try_from(held_by_stalled_close).unwrap_or_default(),
         })
     }
     async fn turns_changed_since(
         &self,
-        after: lash_core_execution::store::TurnChangeCursor,
+        after: lash_core_store::store::TurnChangeCursor,
         limit: std::num::NonZeroUsize,
-    ) -> Result<lash_core_execution::store::TurnChangePage, StoreError> {
+    ) -> Result<lash_core_store::store::TurnChangePage, StoreError> {
         self.read_turn_changes(after, limit).await
     }
 
     async fn list_control_intents(
         &self,
-        after: Option<lash_core_execution::store::ControlIntentId>,
+        after: Option<lash_core_store::store::ControlIntentId>,
         limit: std::num::NonZeroUsize,
-    ) -> Result<Vec<lash_core_execution::store::ControlIntent>, StoreError> {
+    ) -> Result<Vec<lash_core_store::store::ControlIntent>, StoreError> {
         let Some(conn) = self.control_ledger().await? else {
             return Ok(Vec::new());
         };
@@ -305,12 +306,12 @@ impl lash_core_execution::DeploymentStore for SqliteStore {
 }
 
 #[async_trait::async_trait]
-impl lash_core_execution::AttachmentRootSet for SqliteStore {
+impl lash_core_store::attachments::AttachmentRootSet for SqliteStore {
     async fn attachment_root_page(
         &self,
-        source: lash_core_execution::attachments::AttachmentRootSource,
-        after: Option<&lash_core_execution::AttachmentId>,
-    ) -> Result<lash_core_execution::attachments::AttachmentRootPage, StoreError> {
+        source: lash_core_store::attachments::AttachmentRootSource,
+        after: Option<&lash_protocol_types::attachment::AttachmentId>,
+    ) -> Result<lash_core_store::attachments::AttachmentRootPage, StoreError> {
         if !self.location.target().exists() {
             return Err(StoreError::Backend(format!(
                 "attachment catalog {} does not exist",
@@ -322,61 +323,67 @@ impl lash_core_execution::AttachmentRootSet for SqliteStore {
     async fn list_condemnations(
         &self,
     ) -> Result<
-        Vec<lash_core_execution::AttachmentCondemnationRecord>,
-        lash_core_execution::StoreError,
+        Vec<lash_core_store::store::AttachmentCondemnationRecord>,
+        lash_core_store::store::StoreError,
     > {
         let store = self;
         store.list_attachment_condemnations().await
     }
     async fn has_live_attachment_ref(
         &self,
-        id: &lash_core_execution::AttachmentId,
-    ) -> Result<bool, lash_core_execution::StoreError> {
+        id: &lash_protocol_types::attachment::AttachmentId,
+    ) -> Result<bool, lash_core_store::store::StoreError> {
         self.has_attachment_root(id).await
     }
-    fn fence(&self) -> lash_core_execution::AttachmentGcFence {
-        lash_core_execution::AttachmentGcFence::Fenced
+    fn fence(&self) -> lash_core_store::attachments::AttachmentGcFence {
+        lash_core_store::attachments::AttachmentGcFence::Fenced
     }
     async fn begin_attachment_sweep(
         &self,
-    ) -> Result<lash_core_execution::AttachmentSweepGeneration, lash_core_execution::StoreError>
+    ) -> Result<lash_core_store::store::AttachmentSweepGeneration, lash_core_store::store::StoreError>
     {
         SqliteStore::begin_attachment_sweep(self).await
     }
     async fn adopt_attachment_condemnations(
         &self,
-        generation: &lash_core_execution::AttachmentSweepGeneration,
-    ) -> Result<lash_core_execution::AttachmentCondemnationAdoption, lash_core_execution::StoreError>
-    {
+        generation: &lash_core_store::store::AttachmentSweepGeneration,
+    ) -> Result<
+        lash_core_store::store::AttachmentCondemnationAdoption,
+        lash_core_store::store::StoreError,
+    > {
         SqliteStore::adopt_attachment_condemnations(self, generation).await
     }
     async fn condemn_attachment(
         &self,
-        id: &lash_core_execution::AttachmentId,
-        generation: &lash_core_execution::AttachmentSweepGeneration,
-    ) -> Result<lash_core_execution::AttachmentCondemnation, lash_core_execution::StoreError> {
+        id: &lash_protocol_types::attachment::AttachmentId,
+        generation: &lash_core_store::store::AttachmentSweepGeneration,
+    ) -> Result<lash_core_store::store::AttachmentCondemnation, lash_core_store::store::StoreError>
+    {
         SqliteStore::condemn_attachment(self, id, generation).await
     }
     async fn arm_attachment_delete(
         &self,
-        id: &lash_core_execution::AttachmentId,
-        generation: &lash_core_execution::AttachmentSweepGeneration,
-    ) -> Result<lash_core_execution::AttachmentDeleteArming, lash_core_execution::StoreError> {
+        id: &lash_protocol_types::attachment::AttachmentId,
+        generation: &lash_core_store::store::AttachmentSweepGeneration,
+    ) -> Result<lash_core_store::store::AttachmentDeleteArming, lash_core_store::store::StoreError>
+    {
         SqliteStore::arm_attachment_delete(self, id, generation).await
     }
     async fn settle_attachment_condemnation(
         &self,
-        id: &lash_core_execution::AttachmentId,
-        generation: &lash_core_execution::AttachmentSweepGeneration,
-        settlement: lash_core_execution::AttachmentCondemnationSettlement,
-    ) -> Result<lash_core_execution::AttachmentSettlementOutcome, lash_core_execution::StoreError>
-    {
+        id: &lash_protocol_types::attachment::AttachmentId,
+        generation: &lash_core_store::store::AttachmentSweepGeneration,
+        settlement: lash_core_store::store::AttachmentCondemnationSettlement,
+    ) -> Result<
+        lash_core_store::store::AttachmentSettlementOutcome,
+        lash_core_store::store::StoreError,
+    > {
         SqliteStore::settle_attachment_condemnation(self, id, generation, settlement).await
     }
     async fn recover_abandoned_attachment_write(
         &self,
-        id: &lash_core_execution::AttachmentId,
-    ) -> Result<(), lash_core_execution::StoreError> {
+        id: &lash_protocol_types::attachment::AttachmentId,
+    ) -> Result<(), lash_core_store::store::StoreError> {
         let store = self;
         store.recover_abandoned_attachment_write(id).await
     }

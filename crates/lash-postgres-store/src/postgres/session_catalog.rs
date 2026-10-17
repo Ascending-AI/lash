@@ -1,5 +1,5 @@
 use crate::*;
-use lash_core_execution::SessionEntry;
+use lash_core_store::session_catalog::SessionEntry;
 
 pub(crate) async fn list_sessions(
     pool: &PgPool,

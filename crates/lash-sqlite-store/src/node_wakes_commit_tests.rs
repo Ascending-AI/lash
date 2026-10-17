@@ -4,7 +4,7 @@ use super::*;
 use lash_durable::laws::node_wakes::{Claims, CountingStore};
 
 /// The capture-buffer reads `receipt` counts.
-fn capture_reads(receipt: &lash_core_execution::facade_support::sql::Receipt) -> u64 {
+fn capture_reads(receipt: &lash_core_ids::operational_metrics::sql::Receipt) -> u64 {
     receipt
         .shapes
         .iter()
@@ -32,7 +32,7 @@ async fn a_wake_capture_is_read_only_when_a_trigger_captured() {
         })
         .await
         .unwrap();
-    let (answer, quiet) = lash_core_execution::facade_support::sql::collect(
+    let (answer, quiet) = lash_core_ids::operational_metrics::sql::collect(
         "node.heartbeat",
         "sqlite",
         store.heartbeat(&lease),
@@ -45,7 +45,7 @@ async fn a_wake_capture_is_read_only_when_a_trigger_captured() {
     );
     assert_eq!(capture_reads(&quiet), 0, "nothing was captured");
     let actor = ActorKey::session("capture-woken").unwrap();
-    let (_, woke) = lash_core_execution::facade_support::sql::collect(
+    let (_, woke) = lash_core_ids::operational_metrics::sql::collect(
         "mail.create",
         "sqlite",
         create(&store, &actor),

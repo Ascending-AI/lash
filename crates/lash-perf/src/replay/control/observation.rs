@@ -10,7 +10,7 @@ use serde::{Deserialize, Serialize};
 use super::{Phase, SampleArgs};
 use crate::replay::provider::ScriptBook;
 use crate::replay::script::ToolCallSpec;
-use lash_core_execution::facade_support::sql;
+use lash_core_ids::operational_metrics::sql;
 
 #[derive(Clone, Debug, Serialize, Deserialize)]
 pub struct Resume {

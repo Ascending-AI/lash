@@ -21,7 +21,10 @@ pub(crate) async fn sqlite_memory_store_set() -> std::sync::Arc<lash_sqlite_stor
             .expect("open a SQLite memory store set"),
     );
     TEST_STORE_SETS.with(|held| held.borrow_mut().push(std::sync::Arc::clone(&stores)));
-    lash_core::testing::process_execution_env_fixture(stores.process_env_store().as_ref()).await;
+    lash_execution_contracts::testing::process_execution_env_fixture(
+        stores.process_env_store().as_ref(),
+    )
+    .await;
     stores
 }
 
@@ -185,7 +188,10 @@ impl lash_core::ToolProvider for NoTools {
     fn tool_manifests(
         &self,
         _config: &lash_core::OwnerConfigView,
-    ) -> std::result::Result<Vec<lash_core::ToolManifest>, lash_core::PluginError> {
+    ) -> std::result::Result<
+        Vec<lash_core::ToolManifest>,
+        lash_execution_contracts::plugin_error::PluginError,
+    > {
         Ok(Vec::new())
     }
 
@@ -214,7 +220,10 @@ impl lash_core::ToolProvider for WithFinish {
     fn tool_manifests(
         &self,
         config: &lash_core::OwnerConfigView,
-    ) -> std::result::Result<Vec<lash_core::ToolManifest>, lash_core::PluginError> {
+    ) -> std::result::Result<
+        Vec<lash_core::ToolManifest>,
+        lash_execution_contracts::plugin_error::PluginError,
+    > {
         Ok({
             let mut manifests = self.tools.tool_manifests(config)?;
             manifests.push(self.finish.manifest());

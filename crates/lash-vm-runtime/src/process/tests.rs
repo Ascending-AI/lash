@@ -1,7 +1,11 @@
 use lash_core::tool_run::{MaterialOwner, MaterialRole};
-use lash_core::{EngineAction, EngineEvent, EngineState, StepName, StepRequest};
 use lash_core_store::tool_run::Material;
 use lash_core_store::tool_run::SettledOutput;
+use lash_execution_contracts::process::EngineAction;
+use lash_execution_contracts::process::EngineEvent;
+use lash_execution_contracts::process::EngineState;
+use lash_execution_contracts::process::StepName;
+use lash_execution_contracts::process::StepRequest;
 use lash_kernel_doc::{DocumentId, EffectIdentity, Site, TaskIdentity, Unit};
 use lash_vm_client::wire::OutcomeWire;
 
@@ -79,7 +83,7 @@ fn every_engine_state_holding_a_run_names_its_page_to_the_process_root() {
         advance(KernelVersion::NEWEST, state, EngineEvent::Woke).expect("a wake advances");
     let (run2, _, _) = run_of(&action);
     written.push(state.clone());
-    let outcome = lash_core::ProcessAwaitOutput::from_tool_output(
+    let outcome = lash_execution_contracts::process::ProcessAwaitOutput::from_tool_output(
         lash_core::ToolCallOutput::success(serde_json::json!("done")),
     );
     let (ended, _) = settle(
@@ -288,7 +292,7 @@ fn a_fan_out_waits_on_every_element_and_delivers_each_outcome_once_in_any_order(
         OutcomeWire::Completed(lash_kernel_doc::Datum::Text("a".to_owned()))
     );
 
-    let outcome = lash_core::ProcessAwaitOutput::from_tool_output(
+    let outcome = lash_execution_contracts::process::ProcessAwaitOutput::from_tool_output(
         lash_core::ToolCallOutput::success(serde_json::json!(["a", "b"])),
     );
     let (state, action) = settle(
@@ -361,7 +365,7 @@ fn a_refused_effect_is_raised_without_a_step_and_a_withdrawn_wait_is_never_deliv
     };
     assert_eq!(
         *wake,
-        Some(lash_core::EngineWake {
+        Some(lash_execution_contracts::process::EngineWake {
             until: lash_core::durable_port::DurableInstant(5_000),
             site: Some(element(2))
         })
@@ -489,8 +493,10 @@ fn engine_settings_decode_strictly_to_recorded_settings() {
     let mut unknown = engine.value().clone();
     unknown["unknown"] = serde_json::json!(true);
     assert!(
-        KernelRecordedSettings::from_engine_settings(&lash_core::EngineSettings::new(unknown))
-            .is_err()
+        KernelRecordedSettings::from_engine_settings(
+            &lash_execution_contracts::process::EngineSettings::new(unknown)
+        )
+        .is_err()
     );
     for (key, value) in [
         ("charge", serde_json::json!(-1)),
@@ -499,8 +505,10 @@ fn engine_settings_decode_strictly_to_recorded_settings() {
         let mut invalid = engine.value().clone();
         invalid[key] = value;
         assert!(
-            KernelRecordedSettings::from_engine_settings(&lash_core::EngineSettings::new(invalid))
-                .is_err()
+            KernelRecordedSettings::from_engine_settings(
+                &lash_execution_contracts::process::EngineSettings::new(invalid)
+            )
+            .is_err()
         );
     }
 }
@@ -521,25 +529,30 @@ fn migration_refusal_round_trip(
     if let Some(cause) = cause {
         assert_eq!(value["refusal"]["reason"], cause);
     }
-    let engine = lash_core::EngineStateRefusal {
+    let engine = lash_execution_contracts::process::EngineStateRefusal {
         refusal: refusal.clone(),
         message: refusal.to_string(),
         fatal: true,
     };
     let encoded = serde_json::to_string(&engine).unwrap();
     assert_eq!(
-        serde_json::from_str::<lash_core::EngineStateRefusal>(&encoded).unwrap(),
+        serde_json::from_str::<lash_execution_contracts::process::EngineStateRefusal>(&encoded)
+            .unwrap(),
         engine
     );
-    let park = lash_core::ProcessParkReason::MigrationRefused {
+    let park = lash_execution_contracts::park::ProcessParkReason::MigrationRefused {
         kind: "lashvm".to_owned(),
         version: 1,
         refusal: refusal.clone(),
         message: refusal.to_string(),
     };
-    let decoded: lash_core::ProcessParkReason = serde_json::from_str(&park.encode()).unwrap();
+    let decoded: lash_execution_contracts::park::ProcessParkReason =
+        serde_json::from_str(&park.encode()).unwrap();
     assert_eq!(decoded, park);
-    let lash_core::ProcessParkReason::MigrationRefused { refusal: found, .. } = decoded else {
+    let lash_execution_contracts::park::ProcessParkReason::MigrationRefused {
+        refusal: found, ..
+    } = decoded
+    else {
         panic!("a migration refusal stays a migration refusal");
     };
     assert_eq!(found, refusal);

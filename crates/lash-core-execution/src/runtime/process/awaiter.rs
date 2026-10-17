@@ -4,12 +4,12 @@ use std::collections::HashMap;
 use std::sync::{Arc, Mutex, Weak};
 
 use super::model::SessionId;
-use super::registry::ProcessRegistry;
 use super::registry_delegate::{
     delegate_process_event_log, delegate_process_lifecycle, delegate_process_observer_registry,
     delegate_process_query, delegate_process_registrar, delegate_process_retention,
     delegate_process_tool_intents,
 };
+use lash_execution_contracts::process::ProcessRegistry;
 
 mod change_hub;
 #[path = "awaiter/event_sink.rs"]
@@ -254,15 +254,16 @@ delegate_process_registrar!(
     WatchedProcessRegistry,
     inner,
     registration | watched,
-    forwarded | {
-        let record = forwarded.await?;
-        watched.hub.notify(
-            crate::runtime::process::registry_delegate::RegisteredProcess::registered_process_id(
+    forwarded
+        | {
+            let record = forwarded.await?;
+            watched.hub.notify(
+            lash_execution_contracts::process::registry_delegate::RegisteredProcess::registered_process_id(
                 &record,
             ),
         );
-        Ok(record)
-    },
+            Ok(record)
+        },
     event | watched,
     process_id,
     forwarded | {
@@ -309,7 +310,7 @@ delegate_process_tool_intents!(WatchedProcessRegistry, inner);
 // await seam).
 delegate_process_retention!(WatchedProcessRegistry, inner);
 
-impl super::registry::ProcessClockRebind for WatchedProcessRegistry {
+impl lash_execution_contracts::process::ProcessClockRebind for WatchedProcessRegistry {
     fn with_runtime_clock(&self, clock: Arc<dyn crate::Clock>) -> Option<Arc<dyn ProcessRegistry>> {
         self.inner.with_runtime_clock(clock).map(|inner| {
             Arc::new(Self {

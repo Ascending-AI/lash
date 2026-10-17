@@ -12,11 +12,11 @@ use std::time::{Duration, Instant};
 
 use anyhow::{Context as _, Result, ensure};
 use futures_util::future::try_join_all;
-use lash_core_execution::StoreSet;
 use lash_durable::{
     ActorKey, CommitLabel, DurableStore, FormatSet, MailTx, NodeId, NodeLease, NodeSpec,
     NodeWakeEvent, NodeWakes, Release, WakeBatch,
 };
+use lash_execution_contracts::backend::StoreSet;
 use lash_postgres_store::{
     PostgresEndpoints, PostgresHostConfig, PostgresStorage, PostgresStoreSet,
 };

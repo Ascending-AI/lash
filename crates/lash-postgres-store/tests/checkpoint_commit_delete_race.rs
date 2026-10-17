@@ -5,11 +5,15 @@
 use lash_protocol_types::SessionId;
 use std::time::Duration;
 
-use lash_core_execution::{
-    HydratedCheckpointComponent, RuntimeCommit, RuntimeSessionState, SessionCatalogStore,
-    SessionCommitStore, SessionCreationHead, SessionRelation, SessionStoreCreateRequest,
-    StoreError,
-};
+use lash_core_store::session_identity::SessionRelation;
+use lash_core_store::session_state::RuntimeSessionState;
+use lash_core_store::session_store_factory_types::SessionCreationHead;
+use lash_core_store::session_store_factory_types::SessionStoreCreateRequest;
+use lash_core_store::store::HydratedCheckpointComponent;
+use lash_core_store::store::RuntimeCommit;
+use lash_core_store::store::SessionCatalogStore;
+use lash_core_store::store::SessionCommitStore;
+use lash_core_store::store::StoreError;
 use lash_postgres_store::{SchemaCheck, testing::IsolatedDatabase};
 use sqlx::postgres::PgPoolOptions;
 
@@ -284,12 +288,12 @@ fn request(session_id: &SessionId) -> SessionStoreCreateRequest {
         pending_observer_intents: Vec::new(),
         session_id: session_id.clone(),
         relation: SessionRelation::Root,
-        config: lash_core_execution::PersistedSessionConfig::new(
-            lash_core_execution::TurnBudget::Unbounded,
-            lash_core_execution::MaxToolCalls::new(1024),
+        config: lash_core_store::session_graph::PersistedSessionConfig::new(
+            lash_protocol_types::session_model::TurnBudget::Unbounded,
+            lash_protocol_types::session_model::MaxToolCalls::new(1024),
             lash_core::NoProgressBudget::bounded(12),
         ),
         head: SessionCreationHead::Config,
-        retention: lash_core_execution::Retention::UntilGc,
+        retention: lash_core_store::store::Retention::UntilGc,
     }
 }

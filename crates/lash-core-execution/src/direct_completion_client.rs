@@ -10,7 +10,7 @@ pub trait DirectCompletionService: Send + Sync {
         turn_id: Option<&crate::TurnId>,
         position: DirectExecutionPosition,
         effect_attempt: Option<&crate::EffectAttempt>,
-    ) -> Result<crate::DirectCompletion, crate::PluginError>;
+    ) -> Result<crate::DirectCompletion, lash_execution_contracts::plugin_error::PluginError>;
 
     #[expect(
         clippy::too_many_arguments,
@@ -27,7 +27,7 @@ pub trait DirectCompletionService: Send + Sync {
         position: DirectExecutionPosition,
         caused_by: Option<crate::CausalRef>,
         effect_attempt: Option<&crate::EffectAttempt>,
-    ) -> Result<crate::DirectLlmCompletion, crate::PluginError>;
+    ) -> Result<crate::DirectLlmCompletion, lash_execution_contracts::plugin_error::PluginError>;
 }
 
 /// Runtime-backed direct completion source.
@@ -45,15 +45,24 @@ struct RuntimeDirectSource<'run> {
 
 #[cfg(any(test, feature = "testing"))]
 type TestDirectFn = Arc<
-    dyn Fn(crate::DirectRequest, String) -> Result<crate::DirectCompletion, crate::PluginError>
+    dyn Fn(
+            crate::DirectRequest,
+            String,
+        )
+            -> Result<crate::DirectCompletion, lash_execution_contracts::plugin_error::PluginError>
         + Send
         + Sync,
 >;
 
 #[cfg(any(test, feature = "testing"))]
 type TestDirectLlmFn = Arc<
-    dyn Fn(crate::LlmRequest, String) -> Result<crate::DirectLlmCompletion, crate::PluginError>
-        + Send
+    dyn Fn(
+            crate::LlmRequest,
+            String,
+        ) -> Result<
+            crate::DirectLlmCompletion,
+            lash_execution_contracts::plugin_error::PluginError,
+        > + Send
         + Sync,
 >;
 
@@ -176,7 +185,7 @@ impl<'run> DirectCompletionClient<'run> {
         &self,
         request: crate::DirectRequest,
         usage_source: &str,
-    ) -> Result<crate::DirectCompletion, crate::PluginError> {
+    ) -> Result<crate::DirectCompletion, lash_execution_contracts::plugin_error::PluginError> {
         self.direct_completion_at(request, usage_source, self.position(None))
             .await
     }
@@ -186,7 +195,7 @@ impl<'run> DirectCompletionClient<'run> {
         request: crate::DirectRequest,
         usage_source: &str,
         parent_invocation: Option<&crate::RuntimeInvocation>,
-    ) -> Result<crate::DirectCompletion, crate::PluginError> {
+    ) -> Result<crate::DirectCompletion, lash_execution_contracts::plugin_error::PluginError> {
         self.direct_completion_at(request, usage_source, self.position(parent_invocation))
             .await
     }
@@ -196,7 +205,7 @@ impl<'run> DirectCompletionClient<'run> {
         request: crate::DirectRequest,
         usage_source: &str,
         position: DirectExecutionPosition,
-    ) -> Result<crate::DirectCompletion, crate::PluginError> {
+    ) -> Result<crate::DirectCompletion, lash_execution_contracts::plugin_error::PluginError> {
         match &self.source {
             DirectCompletionSource::Runtime(source) => {
                 // The attempt's run rides into the service, whose dispatch
@@ -216,14 +225,16 @@ impl<'run> DirectCompletionClient<'run> {
             }
             #[cfg(any(test, feature = "testing"))]
             DirectCompletionSource::Unavailable(message) => {
-                Err(crate::PluginError::Session(message.clone()))
+                Err(lash_execution_contracts::plugin_error::PluginError::Session(message.clone()))
             }
             #[cfg(any(test, feature = "testing"))]
             DirectCompletionSource::TestFn(invoke) => invoke(request, usage_source.to_string()),
             #[cfg(any(test, feature = "testing"))]
-            DirectCompletionSource::TestLlmFn(_) => Err(crate::PluginError::Session(
-                "text direct completions are unavailable in this test context".to_string(),
-            )),
+            DirectCompletionSource::TestLlmFn(_) => Err(
+                lash_execution_contracts::plugin_error::PluginError::Session(
+                    "text direct completions are unavailable in this test context".to_string(),
+                ),
+            ),
         }
     }
 
@@ -244,7 +255,8 @@ impl<'run> DirectCompletionClient<'run> {
         &self,
         request: crate::LlmRequest,
         usage_source: &str,
-    ) -> Result<crate::DirectLlmCompletion, crate::PluginError> {
+    ) -> Result<crate::DirectLlmCompletion, lash_execution_contracts::plugin_error::PluginError>
+    {
         self.direct_llm_completion_for(
             request,
             crate::prompt_sections::PromptPurpose::Direct {
@@ -274,7 +286,8 @@ impl<'run> DirectCompletionClient<'run> {
         facts: Option<Arc<dyn std::any::Any + Send + Sync>>,
         usage_source: &str,
         caused_by: Option<crate::CausalRef>,
-    ) -> Result<crate::DirectLlmCompletion, crate::PluginError> {
+    ) -> Result<crate::DirectLlmCompletion, lash_execution_contracts::plugin_error::PluginError>
+    {
         match &self.source {
             DirectCompletionSource::Runtime(source) => {
                 source
@@ -294,12 +307,14 @@ impl<'run> DirectCompletionClient<'run> {
             }
             #[cfg(any(test, feature = "testing"))]
             DirectCompletionSource::Unavailable(message) => {
-                Err(crate::PluginError::Session(message.clone()))
+                Err(lash_execution_contracts::plugin_error::PluginError::Session(message.clone()))
             }
             #[cfg(any(test, feature = "testing"))]
-            DirectCompletionSource::TestFn(_) => Err(crate::PluginError::Session(
-                "direct LLM completions are unavailable in this test context".to_string(),
-            )),
+            DirectCompletionSource::TestFn(_) => Err(
+                lash_execution_contracts::plugin_error::PluginError::Session(
+                    "direct LLM completions are unavailable in this test context".to_string(),
+                ),
+            ),
             #[cfg(any(test, feature = "testing"))]
             DirectCompletionSource::TestLlmFn(invoke) => {
                 let _ = (purpose, facts);
@@ -321,8 +336,13 @@ impl<'run> DirectCompletionClient<'run> {
     #[cfg(any(test, feature = "testing"))]
     pub fn from_fn<F>(invoke: F) -> Self
     where
-        F: Fn(crate::DirectRequest, String) -> Result<crate::DirectCompletion, crate::PluginError>
-            + Send
+        F: Fn(
+                crate::DirectRequest,
+                String,
+            ) -> Result<
+                crate::DirectCompletion,
+                lash_execution_contracts::plugin_error::PluginError,
+            > + Send
             + Sync
             + 'static,
     {
@@ -339,8 +359,13 @@ impl<'run> DirectCompletionClient<'run> {
     #[cfg(any(test, feature = "testing"))]
     pub fn from_llm_fn<F>(invoke: F) -> Self
     where
-        F: Fn(crate::LlmRequest, String) -> Result<crate::DirectLlmCompletion, crate::PluginError>
-            + Send
+        F: Fn(
+                crate::LlmRequest,
+                String,
+            ) -> Result<
+                crate::DirectLlmCompletion,
+                lash_execution_contracts::plugin_error::PluginError,
+            > + Send
             + Sync
             + 'static,
     {

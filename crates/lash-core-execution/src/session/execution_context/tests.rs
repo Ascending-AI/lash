@@ -11,7 +11,10 @@ impl ToolProvider for NoopTools {
     fn tool_manifests(
         &self,
         _config: &crate::OwnerConfigView,
-    ) -> std::result::Result<Vec<crate::ToolManifest>, crate::PluginError> {
+    ) -> std::result::Result<
+        Vec<crate::ToolManifest>,
+        lash_execution_contracts::plugin_error::PluginError,
+    > {
         Ok(Vec::new())
     }
 
@@ -33,7 +36,7 @@ fn test_execution_context() -> RuntimeExecutionContext<'static> {
 }
 
 fn test_execution_context_with_env_store(
-    env_store: Arc<dyn crate::ProcessEnvStore>,
+    env_store: Arc<dyn lash_execution_contracts::process::ProcessEnvStore>,
 ) -> RuntimeExecutionContext<'static> {
     let plugins = crate::plugin::PluginHost::empty(
         crate::ExecutionBudgets::recommended(),
@@ -68,9 +71,9 @@ fn test_execution_context_with_env_store(
         ),
         parent_invocation: None,
         observation_call_key: None,
-        facts: crate::plugin::ExecutionFacts::of_process(&crate::testing::process_env_with_limit(
-            1024,
-        )),
+        facts: crate::plugin::ExecutionFacts::of_process(
+            &lash_execution_contracts::testing::process_env_with_limit(1024),
+        ),
         owner: crate::ExecutionOwner::SessionFrame {
             session_id: SessionId::from("session"),
             agent_frame_id: crate::FrameNodeId::new("test-frame").unwrap(),
@@ -111,9 +114,9 @@ fn parentless_effect_envelopes_use_process_originator_not_ambient_session() {
     let mut host_process = test_execution_context();
     host_process.process_execution = Some(RuntimeProcessExecution {
         process_id: crate::process_id_for_test("host-process"),
-        provenance: crate::ProcessProvenance::new(crate::ProcessOriginator::host_scoped(
-            "automation",
-        )),
+        provenance: lash_execution_contracts::process::ProcessProvenance::new(
+            lash_execution_contracts::process::ProcessOriginator::host_scoped("automation"),
+        ),
         enclosing: None,
     });
     assert_eq!(
@@ -125,7 +128,9 @@ fn parentless_effect_envelopes_use_process_originator_not_ambient_session() {
     let mut session_process = test_execution_context();
     session_process.process_execution = Some(RuntimeProcessExecution {
         process_id: crate::process_id_for_test("session-process"),
-        provenance: crate::ProcessProvenance::session(crate::SessionScope::new("origin-session")),
+        provenance: lash_execution_contracts::process::ProcessProvenance::session(
+            lash_execution_contracts::process::SessionScope::new("origin-session"),
+        ),
         enclosing: None,
     });
     assert_eq!(

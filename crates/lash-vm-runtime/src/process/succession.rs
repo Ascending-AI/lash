@@ -16,7 +16,10 @@
 
 use std::collections::BTreeMap;
 
-use lash_core::{EngineState, ProcessId, SuccessionError, SuccessorCarry};
+use lash_core::ProcessId;
+use lash_execution_contracts::process::EngineState;
+use lash_execution_contracts::process::SuccessionError;
+use lash_execution_contracts::process::SuccessorCarry;
 use lash_kernel_doc::{FunctionId, FunctionName};
 
 use super::helpers::{HelperAdoptionRefusal, plan_carry};
@@ -42,7 +45,7 @@ fn undecodable(message: impl std::fmt::Display) -> SuccessionError {
 }
 
 #[async_trait::async_trait]
-impl lash_core::EngineSuccession for KernelSuccession {
+impl lash_execution_contracts::process::EngineSuccession for KernelSuccession {
     async fn carry(
         &self,
         process: &ProcessId,

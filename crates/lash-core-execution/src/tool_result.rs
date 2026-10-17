@@ -1,3 +1,5 @@
+use lash_execution_contracts::DeclaredStart;
+
 /// What a pending tool call signals about its out-of-band work when cancelled.
 #[derive(Clone, Copy, Debug, PartialEq, Eq, serde::Serialize, serde::Deserialize)]
 #[serde(rename_all = "snake_case")]
@@ -48,139 +50,6 @@ impl PendingResolver {
             Self::ProcessTerminal { .. } | Self::DeclaredStart(_) => true,
         }
     }
-}
-
-/// The one process start a pending call declares, and whose terminal resolves
-/// the call.
-///
-/// A pending attempt carries no [`ToolIntents`](crate::ToolIntents), so a
-/// deferred call cannot declare a start the ordinary way. This is the one
-/// start it may declare instead. It is sealed: the only constructor validates
-/// the start against the attempt that declares it, and it holds exactly one
-/// [`StartProcessIntent`](crate::StartProcessIntent). Its intent identity is
-/// the declaring attempt's identity for index 0, so its start key is
-/// [`StartKeyDerivation::for_tool_intent`](crate::StartKeyDerivation::for_tool_intent) of that
-/// identity and every redrive reaches the same child.
-///
-/// Only the attempt whose `Pending` the runtime records ever launches: a
-/// retried or superseded attempt's declaration is discarded with it.
-///
-/// It decodes, because it is durable, and so a decoded declaration is bound
-/// to the admitted call again before it launches: a start naming another
-/// session, or an identity that is not its declaring attempt's for index 0,
-/// is refused with nothing registered.
-#[derive(Clone, Debug, serde::Serialize, serde::Deserialize)]
-#[serde(from = "DeclaredStartWire")]
-pub struct DeclaredStart {
-    // Both boxed: a pending completion rides every recorded attempt launch.
-    start: Box<crate::StartProcessIntent>,
-    identity: Box<crate::ToolIntentIdentity>,
-}
-
-/// What a [`DeclaredStart`] decodes from: its start through the
-/// crate-private stored form.
-#[derive(serde::Deserialize)]
-struct DeclaredStartWire {
-    start: Box<crate::tool_intent::StartProcessIntentWire>,
-    identity: Box<crate::ToolIntentIdentity>,
-}
-
-impl From<DeclaredStartWire> for DeclaredStart {
-    fn from(wire: DeclaredStartWire) -> Self {
-        Self {
-            start: wire.start.into(),
-            identity: wire.identity,
-        }
-    }
-}
-
-impl PartialEq for DeclaredStart {
-    fn eq(&self, other: &Self) -> bool {
-        self.identity == other.identity
-            && serde_json::to_value(&self.start).ok() == serde_json::to_value(&other.start).ok()
-    }
-}
-
-impl DeclaredStart {
-    /// Validates the one start against the attempt that declares it.
-    ///
-    /// The start must name the declaring owner, and the attempt must have
-    /// a completion key: the key is what the launched
-    /// child's terminal resolves, so a tool that returns a declared start
-    /// declares `may_defer` for it.
-    pub fn new(
-        context: &crate::AttemptContext<'_>,
-        start: crate::StartProcessIntent,
-    ) -> Result<Self, DeclaredStartRefused> {
-        if start.owner != context.owner().runtime_owner() {
-            return Err(DeclaredStartRefused::ForeignOwner);
-        }
-        if context.completion_key().is_err() {
-            return Err(DeclaredStartRefused::CompletionUnavailable);
-        }
-        let identity = context.intent_identity(0);
-        Ok(Self {
-            start: Box::new(start),
-            identity: Box::new(identity),
-        })
-    }
-
-    /// The declared start.
-    pub fn start(&self) -> &crate::StartProcessIntent {
-        &self.start
-    }
-
-    /// The declaring attempt's intent identity for the start.
-    pub fn identity(&self) -> &crate::ToolIntentIdentity {
-        &self.identity
-    }
-
-    /// Refuses a declaration that does not belong to the call that admitted
-    /// it (ADR 0116 §3.1).
-    ///
-    /// A declared start is durable, so it decodes without its constructor,
-    /// and a decoded one names whatever owner and identity its bytes say.
-    /// `declaring` is the identity the runtime derived for index 0 from the
-    /// admitted call itself: its owner, execution scope, `ToolCallId` and
-    /// the attempt emission that minted the declaration. The start must name
-    /// that owner, and its identity must be exactly that one, or the launch
-    /// would register a child under another call's key, another owner's, or
-    /// one its own fields do not derive.
-    pub(crate) fn bound_to(
-        &self,
-        declaring: &crate::ToolIntentIdentity,
-    ) -> Result<(), crate::ToolIntentRefusalReason> {
-        if self.start.owner != declaring.owner {
-            return Err(crate::ToolIntentRefusalReason::OwnerMismatch {
-                expected: declaring.owner.clone(),
-                recorded: self.start.owner.clone(),
-            });
-        }
-        if *self.identity != *declaring {
-            return Err(
-                crate::ToolIntentRefusalReason::DeclaredStartIdentityMismatch {
-                    expected: Box::new(declaring.clone()),
-                    recorded: self.identity.clone(),
-                },
-            );
-        }
-        Ok(())
-    }
-
-    /// The start request realization presents: the declaration under its
-    /// derived key.
-    pub(crate) fn request(&self) -> crate::ProcessStartRequest {
-        self.start.into_request(&self.identity)
-    }
-}
-
-/// Why [`DeclaredStart::new`] refused a start.
-#[derive(Clone, Debug, PartialEq, Eq, thiserror::Error)]
-pub enum DeclaredStartRefused {
-    #[error("a declared start must name the declaring owner")]
-    ForeignOwner,
-    #[error("a declared start needs a completion key")]
-    CompletionUnavailable,
 }
 
 /// Configuration carried by a [`ToolOutcome::Pending`] result: what to do if
@@ -506,7 +375,7 @@ where
 /// A wait the runtime armed on a process terminal carries that terminal as its
 /// resolution payload, because a terminal is a fact and a failed or cancelled
 /// process is not an error *of the wait*. The inline path
-/// ([`ProcessAwaitOutput::into_tool_output`](crate::ProcessAwaitOutput::into_tool_output))
+/// ([`ProcessAwaitOutput::into_tool_output`](lash_execution_contracts::process::ProcessAwaitOutput::into_tool_output))
 /// is what turns that fact into the call's outcome, so the parked path calls
 /// exactly it. Skipping this and letting the envelope through would hand the
 /// cell a `{"type":"settled","output":{...}}` record — and with it the internal
@@ -520,7 +389,9 @@ pub fn tool_output_from_completion_resolution(
 ) -> crate::ToolCallOutput {
     if let (Some(resolver), crate::Resolution::Ok(value)) = (resolver, &resolution)
         && resolver.awaits_process_terminal()
-        && let Ok(terminal) = serde_json::from_value::<crate::ProcessAwaitOutput>(value.clone())
+        && let Ok(terminal) = serde_json::from_value::<
+            lash_execution_contracts::process::ProcessAwaitOutput,
+        >(value.clone())
     {
         return terminal.into_tool_output();
     }
@@ -593,7 +464,9 @@ mod tests {
 
     /// The durable wait carries the terminal itself; this is the payload
     /// `process_terminal_resolution` journals.
-    fn terminal_resolution(terminal: &crate::ProcessAwaitOutput) -> crate::Resolution {
+    fn terminal_resolution(
+        terminal: &lash_execution_contracts::process::ProcessAwaitOutput,
+    ) -> crate::Resolution {
         crate::Resolution::Ok(
             serde_json::to_value(crate::Durable(terminal)).expect("a process terminal serializes"),
         )
@@ -601,9 +474,9 @@ mod tests {
 
     #[test]
     fn a_settled_process_terminal_answers_the_childs_own_value_not_the_envelope() {
-        let terminal = crate::ProcessAwaitOutput::from_tool_output(crate::ToolCallOutput::success(
-            serde_json::json!({ "lookup": "lookup:left" }),
-        ));
+        let terminal = lash_execution_contracts::process::ProcessAwaitOutput::from_tool_output(
+            crate::ToolCallOutput::success(serde_json::json!({ "lookup": "lookup:left" })),
+        );
         let inline = terminal.clone().into_tool_output();
 
         let parked = tool_output_from_completion_resolution(
@@ -645,8 +518,9 @@ mod tests {
         failure.raw = Some(crate::ToolValue::untrusted_json(serde_json::json!({
             "detail": "boom"
         })));
-        let terminal =
-            crate::ProcessAwaitOutput::from_tool_output(crate::ToolCallOutput::failure(failure));
+        let terminal = lash_execution_contracts::process::ProcessAwaitOutput::from_tool_output(
+            crate::ToolCallOutput::failure(failure),
+        );
         let inline = terminal.clone().into_tool_output();
 
         let parked = tool_output_from_completion_resolution(
@@ -660,10 +534,11 @@ mod tests {
 
     #[test]
     fn a_cancelled_process_terminal_answers_the_inline_cancellation_verbatim() {
-        let terminal =
-            crate::ProcessAwaitOutput::from_tool_output(crate::ToolCallOutput::cancelled(
-                crate::ToolCancellation::runtime("child cancelled by its parent"),
-            ));
+        let terminal = lash_execution_contracts::process::ProcessAwaitOutput::from_tool_output(
+            crate::ToolCallOutput::cancelled(crate::ToolCancellation::runtime(
+                "child cancelled by its parent",
+            )),
+        );
         let inline = terminal.clone().into_tool_output();
 
         let parked = tool_output_from_completion_resolution(
@@ -682,15 +557,15 @@ mod tests {
     /// so its resolution unwraps exactly as a named terminal's does (ADR 0116
     /// §3.7): the call answers the child's own value, never the envelope.
     fn declared_start() -> crate::PendingResolver {
-        let start = crate::StartProcessIntent {
+        let start = lash_execution_contracts::tool_intent::StartProcessIntent {
             owner: crate::RuntimeOwner::Session(crate::SessionId::from("parent")),
-            declaration: crate::testing::held_engine_declaration(
+            declaration: lash_execution_contracts::testing::held_engine_declaration(
                 serde_json::Value::Null,
-                crate::ProcessOriginator::host(),
-                crate::Lifetime::Detached,
+                lash_execution_contracts::process::ProcessOriginator::host(),
+                lash_execution_contracts::process::Lifetime::Detached,
             ),
         };
-        let identity = crate::derive_tool_intent_identity_under(
+        let identity = lash_execution_contracts::tool_intent::derive_tool_intent_identity_under(
             &crate::RuntimeOwner::Session(crate::SessionId::from("parent")),
             "turn-1",
             &crate::ToolCallId::fixture("call-1"),
@@ -708,9 +583,9 @@ mod tests {
 
     #[test]
     fn a_declared_start_terminal_answers_the_childs_own_value() {
-        let terminal = crate::ProcessAwaitOutput::from_tool_output(crate::ToolCallOutput::success(
-            serde_json::json!({ "summary": "done" }),
-        ));
+        let terminal = lash_execution_contracts::process::ProcessAwaitOutput::from_tool_output(
+            crate::ToolCallOutput::success(serde_json::json!({ "summary": "done" })),
+        );
         let parked = tool_output_from_completion_resolution(
             terminal_resolution(&terminal),
             Some(&declared_start()),
@@ -743,9 +618,9 @@ mod tests {
             bytes["identity"] = serde_json::to_value(&recorded).expect("encode identity");
             let decoded: DeclaredStart = serde_json::from_value(bytes).expect("decode declaration");
             assert_eq!(
-                decoded.bound_to(&declaring),
+                lash_execution_contracts::declared_start::bound_declared_start(&decoded, &declaring),
                 Err(
-                    crate::ToolIntentRefusalReason::DeclaredStartIdentityMismatch {
+                    lash_execution_contracts::tool_intent_outcome::ToolIntentRefusalReason::DeclaredStartIdentityMismatch {
                         expected: Box::new(declaring.clone()),
                         recorded: Box::new(recorded),
                     }
@@ -763,7 +638,10 @@ mod tests {
             unreachable!()
         };
         let declaring = declared.identity().clone();
-        assert_eq!(declared.bound_to(&declaring), Ok(()));
+        assert_eq!(
+            lash_execution_contracts::declared_start::bound_declared_start(&declared, &declaring),
+            Ok(())
+        );
 
         let with_identity = |identity: crate::ToolIntentIdentity| -> DeclaredStart {
             let mut bytes = serde_json::to_value(&declared).expect("encode");
@@ -771,7 +649,7 @@ mod tests {
             serde_json::from_value(bytes).expect("a forged declaration decodes")
         };
         let derive = |session: &str, scope: &str, call: &str, index: u32| {
-            crate::derive_tool_intent_identity_under(
+            lash_execution_contracts::tool_intent::derive_tool_intent_identity_under(
                 &crate::RuntimeOwner::Session(crate::SessionId::fixture(session)),
                 scope,
                 &crate::ToolCallId::fixture(call),
@@ -799,7 +677,7 @@ mod tests {
             ("a nonzero index", derive("parent", "turn-1", "call-1", 1)),
             (
                 "another minting emission",
-                crate::derive_tool_intent_identity_under(
+                lash_execution_contracts::tool_intent::derive_tool_intent_identity_under(
                     &crate::RuntimeOwner::Session(crate::SessionId::from("parent")),
                     "turn-1",
                     &crate::ToolCallId::fixture("call-1"),
@@ -815,9 +693,9 @@ mod tests {
         ];
         for (what, identity) in mismatches {
             assert_eq!(
-                with_identity(identity.clone()).bound_to(&declaring),
+                lash_execution_contracts::declared_start::bound_declared_start(&with_identity(identity.clone()), &declaring),
                 Err(
-                    crate::ToolIntentRefusalReason::DeclaredStartIdentityMismatch {
+                    lash_execution_contracts::tool_intent_outcome::ToolIntentRefusalReason::DeclaredStartIdentityMismatch {
                         expected: Box::new(declaring.clone()),
                         recorded: Box::new(identity),
                     }
@@ -830,8 +708,8 @@ mod tests {
         bytes["start"]["owner"] = serde_json::json!({"session": "other"});
         let foreign: DeclaredStart = serde_json::from_value(bytes).expect("decode");
         assert_eq!(
-            foreign.bound_to(&declaring),
-            Err(crate::ToolIntentRefusalReason::OwnerMismatch {
+            lash_execution_contracts::declared_start::bound_declared_start(&foreign, &declaring),
+            Err(lash_execution_contracts::tool_intent_outcome::ToolIntentRefusalReason::OwnerMismatch {
                 expected: crate::RuntimeOwner::Session(crate::SessionId::from("parent")),
                 recorded: crate::RuntimeOwner::Session(crate::SessionId::from("other")),
             }),

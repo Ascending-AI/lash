@@ -168,7 +168,9 @@ impl crate::StoreSet for StoreLawStores {
         Self::no_second_substrate("tool material store")
     }
 
-    fn process_authority_reads(&self) -> Arc<dyn lash_core::ProcessAuthorityReads> {
+    fn process_authority_reads(
+        &self,
+    ) -> Arc<dyn lash_execution_contracts::backend::ProcessAuthorityReads> {
         Self::no_second_substrate("process authority reads")
     }
 

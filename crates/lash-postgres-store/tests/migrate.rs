@@ -137,7 +137,7 @@ fn provisioned_stamp() -> (i32, i32) {
 /// its compatibility descriptor writes.
 fn written_version() -> i32 {
     let writes =
-        lash_core_execution::compat::descriptor(lash_core_execution::compat::ComponentId::POSTGRES)
+        lash_core_store::compat::descriptor(lash_core_store::compat::ComponentId::POSTGRES)
             .expect("the build declares the PostgreSQL store")
             .writes
             .max();
@@ -356,7 +356,8 @@ async fn migrate_seeds_the_fleet_epoch_and_an_open_never_records_one() {
     let database_url = database.url().to_string();
     let schema = create_scratch_schema(&database_url).await;
     let url = scratch_url(&database_url, &schema);
-    let seed = lash_core_execution::FleetFormat::seed(lash_core_execution::FleetFormat::writable());
+    let seed =
+        lash_core_store::store::FleetFormat::seed(lash_core_store::store::FleetFormat::writable());
     let seeded = i32::try_from(seed.version()).expect("epoch fits");
 
     lash_postgres_store::testing::migrate(&url, MigrationPhase::Expand)
@@ -383,8 +384,8 @@ async fn migrate_seeds_the_fleet_epoch_and_an_open_never_records_one() {
     assert!(
         matches!(
             &refused,
-            lash_core_execution::StoreError::Incompatible {
-                refusal: lash_core_execution::compat::CompatRefusal::FleetUnrecorded { component, writing_release }
+            lash_core_store::store::StoreError::Incompatible {
+                refusal: lash_core_store::compat::CompatRefusal::FleetUnrecorded { component, writing_release }
             } if component == "postgres"
                 && writing_release.as_deref() == Some(env!("CARGO_PKG_VERSION"))
         ),
@@ -497,9 +498,9 @@ async fn a_database_stamped_with_an_unknown_version_is_refused() {
         assert!(
             matches!(
                 &error,
-                MigrateError::Store(lash_core_execution::StoreError::Incompatible {
-                    refusal: lash_core_execution::compat::CompatRefusal::ShapeRefused { component, .. }
-                }) if component == lash_core_execution::compat::ComponentId::POSTGRES.as_str()
+                MigrateError::Store(lash_core_store::store::StoreError::Incompatible {
+                    refusal: lash_core_store::compat::CompatRefusal::ShapeRefused { component, .. }
+                }) if component == lash_core_store::compat::ComponentId::POSTGRES.as_str()
             ),
             "the {what} refusal stays typed: {error:?}"
         );
@@ -876,7 +877,7 @@ async fn migrate_refuses_a_holder_only_after_the_documented_bound() {
         matches!(
             result,
             Err(MigrateError::Store(
-                lash_core_execution::StoreError::Contended
+                lash_core_store::store::StoreError::Contended
             ))
         ),
         "a holder past the bound must return typed Contended: {result:?}"

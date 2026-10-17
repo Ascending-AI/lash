@@ -220,13 +220,18 @@ pub(super) fn assert_not_stored(directory: &std::path::Path, token: &str) {
     }
 }
 
-pub(super) async fn file_backend(path: &std::path::Path) -> lash_core::Backend {
+pub(super) async fn file_backend(
+    path: &std::path::Path,
+) -> lash_execution_contracts::backend::Backend {
     let stores = Arc::new(
         lash_sqlite_store::SqliteStoreSet::open(path, lash_sqlite_store::SqliteSynchronous::Normal)
             .await
             .expect("open the SQLite file store"),
     );
-    lash_core::testing::process_execution_env_fixture(stores.process_env_store().as_ref()).await;
+    lash_execution_contracts::testing::process_execution_env_fixture(
+        stores.process_env_store().as_ref(),
+    )
+    .await;
     lash_conformance::backend_over(stores)
 }
 

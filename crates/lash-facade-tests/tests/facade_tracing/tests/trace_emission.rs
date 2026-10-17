@@ -583,7 +583,7 @@ async fn a_submitted_tool_intent_exports_one_span_for_its_settlement() -> Result
             matches!(
                 &outcome,
                 lash::tools::ToolIntentIngressOutcome::Admitted {
-                    outcome: lash_core::ToolIntentExecutionOutcome::Executed { .. },
+                    outcome: lash_execution_contracts::tool_intent_outcome::ToolIntentExecutionOutcome::Executed { .. },
                     replayed: was,
                 } if *was == replayed
             ),
@@ -600,7 +600,7 @@ async fn a_submitted_tool_intent_exports_one_span_for_its_settlement() -> Result
         matches!(
             &refused,
             lash::tools::ToolIntentIngressOutcome::Admitted {
-                outcome: lash_core::ToolIntentExecutionOutcome::Refused { .. },
+                outcome: lash_execution_contracts::tool_intent_outcome::ToolIntentExecutionOutcome::Refused { .. },
                 ..
             }
         ),
@@ -684,7 +684,10 @@ async fn an_ended_process_exports_one_lash_process_span() -> Result<()> {
         .get_process(&process)
         .await?
         .expect("the started process");
-    let lash_core::ProcessLifecycleState::Terminal { occurred_at_ms, .. } = record.lifecycle else {
+    let lash_execution_contracts::process::ProcessLifecycleState::Terminal {
+        occurred_at_ms, ..
+    } = record.lifecycle
+    else {
         panic!("the process ended: {:?}", record.lifecycle);
     };
 
@@ -782,7 +785,10 @@ async fn a_parked_process_counts_one_park() -> Result<()> {
 #[tokio::test(flavor = "multi_thread", worker_threads = 2)]
 async fn a_workflow_cancelled_without_its_engine_keeps_its_recorded_trace_class() -> Result<()> {
     let backend = sqlite_memory_store_backend().await;
-    lash_core::testing::process_execution_env_fixture(backend.process_env_store().as_ref()).await;
+    lash_execution_contracts::testing::process_execution_env_fixture(
+        backend.process_env_store().as_ref(),
+    )
+    .await;
     let registry = backend.process_registry();
     let (observed, builder) = Observed::install(explicit_ephemeral_facets(
         LashCore::standard_builder(backend),
@@ -793,19 +799,19 @@ async fn a_workflow_cancelled_without_its_engine_keeps_its_recorded_trace_class(
         None,
     )
     .unwrap();
-    let mut registration = lash_core::ProcessRegistration::new(
-        lash_core::ProcessInput::Engine {
+    let mut registration = lash_execution_contracts::process::ProcessRegistration::new(
+        lash_execution_contracts::process::ProcessInput::Engine {
             kind: "absent-workflow-engine".into(),
             payload: serde_json::json!({}),
-            launch: lash_core::EngineLaunch::new(
-                lash_core::testing::process_execution_env_fixture_ref(),
+            launch: lash_execution_contracts::process::EngineLaunch::new(
+                lash_execution_contracts::testing::process_execution_env_fixture_ref(),
                 None,
             ),
         },
-        lash_core::ProcessProvenance::host(),
-        lash_core::LifetimeDecision::Detached,
+        lash_execution_contracts::process::ProcessProvenance::host(),
+        lash_execution_contracts::process::LifetimeDecision::Detached,
     )
-    .with_trace_class(lash_core::ProcessTraceClass::Workflow)
+    .with_trace_class(lash_execution_contracts::process::ProcessTraceClass::Workflow)
     .with_trace(lash_trace::TraceScopeOffer::new(
         lash_trace::TraceCause::Parent(parent),
         lash_trace::TraceLinks::new(),
@@ -848,7 +854,7 @@ async fn a_workflow_cancelled_without_its_engine_keeps_its_recorded_trace_class(
     assert!(!failed(&spans[0]));
     assert_eq!(
         registry.get_process(&record.id).await?.unwrap().trace_class,
-        lash_core::ProcessTraceClass::Workflow
+        lash_execution_contracts::process::ProcessTraceClass::Workflow
     );
     core.shutdown().await?;
     Ok(())

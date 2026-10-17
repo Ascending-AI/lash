@@ -1,12 +1,13 @@
+use lash_core_store::artifact_referrer::{ArtifactName, ArtifactStoreId};
 use std::sync::Arc;
 
 use super::*;
-use crate::ProcessIdentity;
-use crate::identity_json::{optional_payloads_equal, payload_leaf, payloads_equal};
-use crate::runtime::process::definition_ref::ProcessDefinitionResolution;
-use crate::runtime::process::engine::{
-    ProcessEngine, ProcessEngineAdmission, ProcessEngineRegistration,
-};
+use crate::runtime::process::engine::ProcessEngineRegistration;
+use lash_core_ids::identity_json::{optional_payloads_equal, payload_leaf, payloads_equal};
+use lash_execution_contracts::process::ProcessDefinitionResolution;
+use lash_execution_contracts::process::ProcessEngine;
+use lash_execution_contracts::process::ProcessEngineAdmission;
+use lash_execution_contracts::process::ProcessIdentity;
 
 const SIGNED_ENGINE_KIND: &str = "signed-engine";
 
@@ -55,32 +56,34 @@ fn authoritative_signature() -> ProcessSignature {
 impl ProcessEngine for SignedEngine {
     fn settled_ran(
         &self,
-        _kind: &crate::EngineStepKind,
+        _kind: &lash_execution_contracts::process::EngineStepKind,
         _output: &lash_core_store::tool_run::SettledOutput,
     ) -> Vec<(u32, u64)> {
         Vec::new()
     }
 
-    fn trace_class(&self) -> crate::ProcessTraceClass {
-        crate::ProcessTraceClass::Internal
+    fn trace_class(&self) -> lash_execution_contracts::process::ProcessTraceClass {
+        lash_execution_contracts::process::ProcessTraceClass::Internal
     }
 
     async fn performed_effects(
         &self,
         _payload: &serde_json::Value,
-    ) -> Result<crate::PerformedEffects, crate::ProcessEnvRefusal> {
-        Ok(crate::PerformedEffects::new())
+    ) -> Result<lash_execution_contracts::process::PerformedEffects, crate::ProcessEnvRefusal> {
+        Ok(lash_execution_contracts::process::PerformedEffects::new())
     }
 
     async fn check_args(
         &self,
-        _signature: &crate::ProcessSignature,
+        _signature: &lash_execution_contracts::process::ProcessSignature,
         _args: &serde_json::Map<String, serde_json::Value>,
-        _mode: crate::ArgsMode,
-    ) -> std::result::Result<(), crate::ArgsMismatch> {
-        Err(crate::ArgsMismatch::UnsupportedSignature {
-            engine_kind: self.kind().into(),
-        })
+        _mode: lash_execution_contracts::process::ArgsMode,
+    ) -> std::result::Result<(), lash_execution_contracts::process::ArgsMismatch> {
+        Err(
+            lash_execution_contracts::process::ArgsMismatch::UnsupportedSignature {
+                engine_kind: self.kind().into(),
+            },
+        )
     }
 
     fn kind(&self) -> &'static str {
@@ -91,15 +94,17 @@ impl ProcessEngine for SignedEngine {
     fn start_artifacts(
         &self,
         payload: &serde_json::Value,
-    ) -> Result<Vec<crate::ArtifactName>, crate::PluginError> {
+    ) -> Result<Vec<crate::ArtifactName>, lash_execution_contracts::plugin_error::PluginError> {
         let program = payload
             .get("program")
             .and_then(serde_json::Value::as_str)
             .ok_or_else(|| {
-                crate::PluginError::Runtime(crate::RuntimeError::new(
-                    crate::RuntimeErrorCode::DefinitionRefused,
-                    "definition names no program",
-                ))
+                lash_execution_contracts::plugin_error::PluginError::Runtime(
+                    crate::RuntimeError::new(
+                        crate::RuntimeErrorCode::DefinitionRefused,
+                        "definition names no program",
+                    ),
+                )
             })?;
         Ok(vec![module(&format!("module:{program}"))])
     }
@@ -107,7 +112,7 @@ impl ProcessEngine for SignedEngine {
     async fn end_artifact_referrer(
         &self,
         _cleanup: &crate::ResolvedArtifactCleanup,
-    ) -> Result<(), crate::ArtifactStoreError> {
+    ) -> Result<(), lash_execution_contracts::module_artifacts::ArtifactStoreError> {
         Ok(())
     }
 
@@ -115,14 +120,17 @@ impl ProcessEngine for SignedEngine {
         &self,
         _claim: &crate::ReferrerClaim,
         _artifact_ref: &str,
-    ) -> Result<(), crate::PluginError> {
+    ) -> Result<(), lash_execution_contracts::plugin_error::PluginError> {
         unreachable!("deriving a definition never acquires an artifact")
     }
 
     async fn resolve(
         &self,
         reference: &ProcessDefinitionRef,
-    ) -> Result<ProcessDefinitionResolution, crate::ProcessDefinitionError> {
+    ) -> Result<
+        ProcessDefinitionResolution,
+        lash_execution_contracts::process::ProcessDefinitionError,
+    > {
         if reference.definition.as_json().get("program").is_none() {
             return Err(ProcessDefinitionRefusal::UnresolvableDefinition {
                 engine_kind: reference.engine_kind.clone(),
@@ -133,8 +141,8 @@ impl ProcessEngine for SignedEngine {
         Ok(ProcessDefinitionResolution::new(authoritative_signature()))
     }
 
-    fn state_format(&self) -> crate::EngineStateFormat {
-        crate::EngineStateFormat {
+    fn state_format(&self) -> lash_execution_contracts::process::EngineStateFormat {
+        lash_execution_contracts::process::EngineStateFormat {
             kind: self.kind().to_owned(),
             version: 0,
         }
@@ -154,29 +162,40 @@ impl ProcessEngine for SignedEngine {
     fn check_settings(
         &self,
         _payload: &serde_json::Value,
-        settings: Option<&crate::EngineSettings>,
-    ) -> std::result::Result<(), crate::PluginError> {
+        settings: Option<&lash_execution_contracts::process::EngineSettings>,
+    ) -> std::result::Result<(), lash_execution_contracts::plugin_error::PluginError> {
         match settings {
             None => Ok(()),
-            Some(_) => Err(crate::PluginError::Registration(format!(
-                "process engine `{}` takes no settings",
-                self.kind()
-            ))),
+            Some(_) => Err(
+                lash_execution_contracts::plugin_error::PluginError::Registration(format!(
+                    "process engine `{}` takes no settings",
+                    self.kind()
+                )),
+            ),
         }
     }
 
     fn default_settings(
         &self,
         _payload: &serde_json::Value,
-    ) -> std::result::Result<Option<crate::EngineSettings>, crate::PluginError> {
+    ) -> std::result::Result<
+        Option<lash_execution_contracts::process::EngineSettings>,
+        lash_execution_contracts::plugin_error::PluginError,
+    > {
         Ok(None)
     }
 
     fn advance(
         &self,
-        _state: crate::EngineState,
-        _event: crate::EngineEvent,
-    ) -> Result<(crate::EngineState, crate::EngineAction), crate::ProcessInfraError> {
+        _state: lash_execution_contracts::process::EngineState,
+        _event: lash_execution_contracts::process::EngineEvent,
+    ) -> Result<
+        (
+            lash_execution_contracts::process::EngineState,
+            lash_execution_contracts::process::EngineAction,
+        ),
+        lash_execution_contracts::process::ProcessInfraError,
+    > {
         unreachable!("deriving a definition never advances a process")
     }
 }
@@ -184,7 +203,7 @@ impl ProcessEngine for SignedEngine {
 fn admit_signed(
     kind: &'static str,
     payload: &serde_json::Value,
-) -> Result<ProcessIdentity, crate::PluginError> {
+) -> Result<ProcessIdentity, lash_execution_contracts::plugin_error::PluginError> {
     Ok(ProcessIdentity::for_definition(
         ProcessDefinitionRef::unclaimed(kind, payload.clone()),
         None::<String>,
@@ -653,9 +672,11 @@ async fn a_manifest_that_disagrees_with_the_engine_is_refused() {
                     &ProcessDefinition::new(declared.id(), ProcessSignature::Unknown)
                 )
                 .await,
-            Err(crate::ProcessDefinitionError::Refused(
-                ProcessDefinitionRefusal::ManifestMismatch { .. }
-            ))
+            Err(
+                lash_execution_contracts::process::ProcessDefinitionError::Refused(
+                    ProcessDefinitionRefusal::ManifestMismatch { .. }
+                )
+            )
         ));
     }
     let malformed = registry

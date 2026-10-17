@@ -1,12 +1,14 @@
 //! Production A/X/D/V callbacks. Canonical preparation and body facts live
 //! in their owning records; live maps carry invocation attribution and body stops.
 use super::*;
+use crate::PreparedToolCall;
+use crate::RuntimeEffectControllerError;
+use crate::RuntimeExecutionContext;
+use crate::ToolCallOutput;
+use crate::ToolCallRecord;
 use crate::session::runtime_ops::RuntimeExecutionContextRuntimeOps as _;
 use crate::tool_run::*;
-use crate::{
-    PreparedToolCall, RuntimeEffectControllerError, RuntimeExecutionContext, ToolCallOutput,
-    ToolCallRecord, ToolIntents,
-};
+use lash_execution_contracts::tool_intent::ToolIntents;
 use lash_protocol_types::sync::MutexExt;
 use serde::{Deserialize, Serialize};
 use std::collections::BTreeMap;
@@ -31,11 +33,16 @@ pub(crate) struct ProductionToolHandlers<'run> {
     model_call_owner: Option<lash_durable::domain::ModelCallOwner>,
     expiry_evidence: Mutex<BTreeMap<crate::ToolCallId, crate::ToolValue>>,
     contributions: Mutex<BTreeMap<crate::ToolCallId, Vec<CheckContribution>>>,
-    declarations: Mutex<BTreeMap<crate::ToolCallId, Vec<crate::ToolIntentExecutionOutcome>>>,
+    declarations: Mutex<
+        BTreeMap<
+            crate::ToolCallId,
+            Vec<lash_execution_contracts::tool_intent_outcome::ToolIntentExecutionOutcome>,
+        >,
+    >,
     /// The process each admitted isolated call's provider bound it to.
     isolated: Mutex<BTreeMap<crate::ToolCallId, IsolatedToolStart>>,
     /// The key of the completion wait a round member's round pinned for it.
-    completion_key: Option<crate::PinnedKey>,
+    completion_key: Option<lash_execution_contracts::waits::PinnedKey>,
     /// The declaration a round member's admission pinned: what its attempt
     /// settles under, whatever its tool declares now.
     admitted_declaration: Option<crate::ToolDeclaration>,
@@ -111,7 +118,8 @@ struct Captured {
     /// The typed refusal of the start the call declared, which settled the
     /// call as this failure: reported as the call's intent outcome.
     #[serde(default, skip_serializing_if = "Option::is_none")]
-    start_refusal: Option<crate::ToolIntentExecutionOutcome>,
+    start_refusal:
+        Option<lash_execution_contracts::tool_intent_outcome::ToolIntentExecutionOutcome>,
 }
 
 #[derive(Clone, Serialize, Deserialize)]
@@ -123,7 +131,7 @@ struct CheckContribution {
 #[derive(Serialize, Deserialize)]
 struct Presented {
     presentation: crate::runtime::effect::ToolPresentation,
-    intent_outcomes: Vec<crate::ToolIntentExecutionOutcome>,
+    intent_outcomes: Vec<lash_execution_contracts::tool_intent_outcome::ToolIntentExecutionOutcome>,
 }
 
 fn stopped_before_completion() -> crate::ToolAttemptOutcome {
@@ -254,20 +262,22 @@ impl<'run> ProductionToolHandlers<'run> {
             &start.payload,
         )
         .await?;
-        let provenance =
-            owner
-                .session_id()
-                .map_or_else(crate::ProcessProvenance::host, |session_id| {
-                    crate::ProcessProvenance::session(crate::SessionScope::new(session_id.clone()))
-                });
-        let registration = crate::ProcessStartRegistration::of_target(
-            crate::ProcessInput::Engine {
+        let provenance = owner.session_id().map_or_else(
+            lash_execution_contracts::process::ProcessProvenance::host,
+            |session_id| {
+                lash_execution_contracts::process::ProcessProvenance::session(
+                    lash_execution_contracts::process::SessionScope::new(session_id.clone()),
+                )
+            },
+        );
+        let registration = lash_execution_contracts::process::ProcessStartRegistration::of_target(
+            lash_execution_contracts::process::ProcessInput::Engine {
                 kind: engine.to_owned(),
                 payload: start.payload,
                 launch,
             },
             provenance,
-            crate::Lifetime::Detached,
+            lash_execution_contracts::process::Lifetime::Detached,
         )
         .with_start_key(Some(
             crate::StartKeyDerivation::LASH_START_PATHS.for_isolated_call(owner, call_id),
@@ -408,7 +418,10 @@ impl<'run> ProductionToolHandlers<'run> {
 
     /// These handlers, handing their call the key of the completion wait
     /// its round pinned.
-    pub(crate) fn with_completion_key(mut self, key: Option<crate::PinnedKey>) -> Self {
+    pub(crate) fn with_completion_key(
+        mut self,
+        key: Option<lash_execution_contracts::waits::PinnedKey>,
+    ) -> Self {
         self.completion_key = key;
         self
     }
@@ -441,7 +454,7 @@ impl<'run> ProductionToolHandlers<'run> {
     async fn launch_parked(
         &self,
         call_id: &crate::ToolCallId,
-        start: &crate::DeclaredStart,
+        start: &lash_execution_contracts::DeclaredStart,
         cancels: bool,
     ) -> Result<
         (
@@ -860,7 +873,10 @@ impl SingletonToolHandlers for ProductionToolHandlers<'_> {
                     })
                 } else if let Some(crate::PendingResolver::DeclaredStart(start)) =
                     &pending.resolved_by
-                    && let Err(refusal) = start.bound_to(&declaring)
+                    && let Err(refusal) =
+                        lash_execution_contracts::declared_start::bound_declared_start(
+                            start, &declaring,
+                        )
                 {
                     // A declared start decodes without its constructor, so
                     // its bytes may name another session, another call or a
@@ -966,7 +982,7 @@ impl SingletonToolHandlers for ProductionToolHandlers<'_> {
                                 intents: &intents
                                     .intents
                                     .iter()
-                                    .map(crate::ToolIntent::kind)
+                                    .map(lash_execution_contracts::tool_intent::ToolIntent::kind)
                                     .collect::<Vec<_>>(),
                                 control: output.turn_control_kind(),
                             })
@@ -1001,7 +1017,7 @@ impl SingletonToolHandlers for ProductionToolHandlers<'_> {
                             .intents
                             .intents
                             .iter()
-                            .map(crate::ToolIntent::kind)
+                            .map(lash_execution_contracts::tool_intent::ToolIntent::kind)
                             .collect(),
                         start: None,
                     }),
@@ -1230,7 +1246,7 @@ impl SingletonToolHandlers for ProductionToolHandlers<'_> {
             .await;
         match staged {
             Ok(staged) => Ok(StartLaunch::Staged {
-                handle: crate::ProcessHandleView::from_record(staged.record),
+                handle: lash_execution_contracts::process::ProcessHandleView::from_record(staged.record),
                 effect: staged
                     .rows
                     .map(crate::runtime::actor::round::StoreLocalEffect::ProcessStart),
@@ -1238,8 +1254,8 @@ impl SingletonToolHandlers for ProductionToolHandlers<'_> {
             // A terminal refusal, such as a closed starter scope's, is the
             // start's own: a retry would only meet it again (ADR 0116 §3.2).
             Err(error) if super::intent_executor::declared_start_fault(&error).is_none() => Ok(
-                StartLaunch::Refused(crate::ToolIntentRefusalReason::CommandFailed {
-                    cause: crate::ToolIntentCommandFailure::from(&error),
+                StartLaunch::Refused(lash_execution_contracts::tool_intent_outcome::ToolIntentRefusalReason::CommandFailed {
+                    cause: lash_execution_contracts::plugin_error::ToolIntentCommandFailure::from(&error),
                 }),
             ),
             Err(error) => {

@@ -114,10 +114,10 @@ use lash_core::{
     facade_support::TurnOutcome, facade_support::shared_parts,
 };
 use lash_core::{LlmOutputPart, LlmRequest, LlmResponse};
+use lash_core_execution::ActorContext;
 use lash_core_execution::runtime::actor::round::{
     AcceptedStop, AdmittedExecution, CompletedCall, MemberBody, MemberPin, PolicyView, RoundTools,
 };
-use lash_core_execution::{ActorContext, Backend};
 use lash_core_store::store::{AdmittedInputIds, AdmittedTurnRows, RunAdmissionRecord};
 use lash_durable::domain::graph::{OWNER_READ_LIMITS, RootOwner};
 use lash_durable::domain::{
@@ -132,6 +132,7 @@ use lash_durable::{
 use lash_durable_test::{
     Cut, Fault, Matrix, Scenario, SimClock, SimNodes, SimNodesConfig, Stored, Tripwire, WriteKind,
 };
+use lash_execution_contracts::backend::Backend;
 use lash_protocol_types::sync::MutexExt as _;
 use lash_protocol_types::{
     ExecutionBudgets, ExecutionBudgetsConfig, ProviderAttemptLimits, SessionId, TurnCancelMode,

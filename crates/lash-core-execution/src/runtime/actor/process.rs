@@ -25,7 +25,9 @@ pub use activation::ProcessActivation;
 pub use carry::stored_engine_state;
 pub use driver::engine_status;
 pub use session_turn::{SessionTurnCancel, SessionTurnMail, SessionTurns};
-pub use terminal::{ProcessParkReason, cancelled, park_of, record_park, record_terminal};
+pub use terminal::cancelled;
+pub use terminal::record_park;
+pub use terminal::record_terminal;
 
 use lash_durable::domain::{ProcessWrite, ScopeKey};
 use lash_durable::{ActorTx, DomainWrite, DurableError, DurableReads};
@@ -42,100 +44,6 @@ pub enum CascadeProgress {
         /// How many children this batch marked.
         marked: usize,
     },
-}
-
-/// The registry's scope for `scope`: what its `Until` children name and
-/// what its closure fact is keyed by. A code cell owns no `Until`
-/// processes.
-#[must_use]
-pub fn scope_id(scope: &ScopeKey) -> Option<crate::ScopeId> {
-    Some(match scope {
-        ScopeKey::Turn(session_id, turn_id) => crate::ScopeId::Opener(crate::EffectOpener::Turn {
-            session_id: session_id.clone(),
-            turn_id: turn_id.clone(),
-        }),
-        ScopeKey::Operation(session_id, operation_id) => crate::ScopeId::Opener(
-            crate::EffectOpener::session_operation(session_id.clone(), operation_id.clone()),
-        ),
-        ScopeKey::Session(session_id) => crate::ScopeId::Session(session_id.clone()),
-        ScopeKey::Process(process_id) => crate::ScopeId::Opener(crate::EffectOpener::Process {
-            process_id: process_id.clone(),
-        }),
-        ScopeKey::Cell(..) => return None,
-    })
-}
-
-/// The registry's index columns for `scope`, `(lifetime_scope_kind,
-/// lifetime_scope_id)`: the projection its `Until` children are found by.
-#[must_use]
-pub fn scope_index(scope: &ScopeKey) -> Option<(&'static str, String)> {
-    scope_id(scope).map(|scope| (scope.storage_kind(), scope.storage_id()))
-}
-
-/// `error`, met by a registry write on the transaction that also writes the
-/// process's actor rows, as the registry's error. A store fault keeps its
-/// class (FIG-5855): contention or an unreachable store rolled the write
-/// back, and the identical write may succeed when it is made again, so it
-/// is never the write's terminal answer. A refusal, or a row that does not
-/// decode, is.
-#[must_use]
-pub fn registry_error(error: DurableError) -> crate::PluginError {
-    use lash_durable::{StoreFailure, StoreFailureKind};
-    match error {
-        DurableError::Store(StoreFailure {
-            kind: StoreFailureKind::Contended,
-            ..
-        }) => crate::PluginError::StoreUnavailable {
-            fault: crate::store::StoreFault::Contended,
-        },
-        DurableError::Store(StoreFailure {
-            kind: StoreFailureKind::Unavailable,
-            message,
-        }) => crate::PluginError::StoreUnavailable {
-            fault: crate::store::StoreFault::Backend { message },
-        },
-        error => crate::PluginError::Session(error.to_string()),
-    }
-}
-
-/// The roots of `scope`'s `Until` subtree, as the live-subtree read binds
-/// them: the scope's own index columns and, for a session, the index-id
-/// prefixes of the turn and session-operation scopes inside it, whose
-/// processes live in the session's tree too.
-#[derive(Clone, Debug, PartialEq, Eq)]
-pub struct SubtreeRoots {
-    /// The scope's `lifetime_scope_kind`.
-    pub kind: &'static str,
-    /// The scope's `lifetime_scope_id`.
-    pub id: String,
-    /// For a session, the prefix of its turn scopes' ids.
-    pub turns: Option<String>,
-    /// For a session, the prefix of its session-operation scopes' ids.
-    pub operations: Option<String>,
-}
-
-/// The roots of `scope`'s `Until` subtree; `None` for a code cell.
-#[must_use]
-pub fn subtree_roots(scope: &ScopeKey) -> Option<SubtreeRoots> {
-    let (kind, id) = scope_index(scope)?;
-    let (turns, operations) = match scope {
-        // Each range's lower bound is the prefix every encoding in it
-        // starts with.
-        ScopeKey::Session(session_id) => (
-            Some(crate::EffectOpener::session_turn_encoding_range(session_id).0),
-            Some(crate::EffectOpener::session_operation_encoding_range(session_id).0),
-        ),
-        ScopeKey::Turn(..)
-        | ScopeKey::Operation(..)
-        | ScopeKey::Process(_)
-        | ScopeKey::Cell(..) => (None, None),
-    };
-    Some(SubtreeRoots {
-        kind,
-        id,
-        turns,
-        operations,
-    })
 }
 
 /// Close `scope` on `tx`, the transaction that ended it: its closure fact
@@ -237,10 +145,12 @@ impl ActorContext {
                     })
                     .await
             }
-            other => Err(crate::RuntimeEffectControllerError::new(
-                crate::RuntimeErrorCode::EngineControlUnsupported,
-                format!("`{:?}` is not a process effect", other.kind()),
-            )),
+            other => Err(
+                lash_core_store::runtime_error::RuntimeEffectControllerError::new(
+                    lash_core_store::runtime_error::RuntimeErrorCode::EngineControlUnsupported,
+                    format!("`{:?}` is not a process effect", other.kind()),
+                ),
+            ),
         }
     }
 
@@ -267,11 +177,11 @@ impl ActorContext {
             .map_err(|error| match error {
                 // A fault of the store is its class, not the registry's
                 // absence: the identical read may answer when made again.
-                error @ crate::PluginError::StoreUnavailable { .. } => {
-                    crate::RuntimeEffectControllerError::from(error)
-                }
-                error => crate::RuntimeEffectControllerError::new(
-                    crate::RuntimeErrorCode::ProcessRegistryUnavailable,
+                error @ lash_execution_contracts::plugin_error::PluginError::StoreUnavailable {
+                    ..
+                } => lash_core_store::runtime_error::RuntimeEffectControllerError::from(error),
+                error => lash_core_store::runtime_error::RuntimeEffectControllerError::new(
+                    lash_core_store::runtime_error::RuntimeErrorCode::ProcessRegistryUnavailable,
                     error.to_string(),
                 ),
             })?;
@@ -291,6 +201,6 @@ impl ActorContext {
         // Nothing is replayed (ADR 0132): the step runs, and its registry
         // write is its own record.
         step.await
-            .map_err(crate::RuntimeEffectControllerError::from)
+            .map_err(lash_core_store::runtime_error::RuntimeEffectControllerError::from)
     }
 }

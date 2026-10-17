@@ -37,8 +37,11 @@ use std::num::NonZeroUsize;
 use std::path::{Path, PathBuf};
 use std::time::{Duration, Instant, SystemTime};
 
-use lash_core_execution::compat::{self, CompatRefusal, CompatStamp};
-use lash_core_execution::{Clock, StoreError};
+use lash_core_ids::clock::Clock;
+use lash_core_store::compat;
+use lash_core_store::compat::CompatRefusal;
+use lash_core_store::compat::CompatStamp;
+use lash_core_store::store::StoreError;
 use rusqlite::Transaction;
 use serde::{Deserialize, Serialize};
 
@@ -765,7 +768,7 @@ impl Migration<'_> {
             }
             let stamp: Stamp = serde_json::from_slice(&bytes).map_err(|error| {
                 Stop::Failed(StoreError::Incompatible {
-                    refusal: lash_core_execution::compat::CompatRefusal::MalformedStamp {
+                    refusal: lash_core_store::compat::CompatRefusal::MalformedStamp {
                         component: path.display().to_string(),
                         detail: error.to_string(),
                         writing_release: None,
@@ -774,7 +777,7 @@ impl Migration<'_> {
             })?;
             if stamp.format != SQLITE_MIGRATION_BACKUP_VERSION {
                 return Err(Stop::Failed(StoreError::Incompatible {
-                    refusal: lash_core_execution::compat::CompatRefusal::UnknownVocabulary {
+                    refusal: lash_core_store::compat::CompatRefusal::UnknownVocabulary {
                         surface: format!("SQLite migration backup format at {}", path.display()),
                         label: stamp.format.to_string(),
                     },
@@ -782,7 +785,7 @@ impl Migration<'_> {
             }
             let manifest = serde_json::from_slice::<Manifest>(&bytes).map_err(|error| {
                 Stop::Failed(StoreError::Incompatible {
-                    refusal: lash_core_execution::compat::CompatRefusal::MalformedStamp {
+                    refusal: lash_core_store::compat::CompatRefusal::MalformedStamp {
                         component: path.display().to_string(),
                         detail: error.to_string(),
                         writing_release: None,

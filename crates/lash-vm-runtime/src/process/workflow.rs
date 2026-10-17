@@ -94,8 +94,8 @@ pub struct WorkflowAdmissionRequest {
 #[derive(Clone, Debug, PartialEq)]
 pub struct AdmittedWorkflow {
     /// The definition's descriptor, which the caller publishes.
-    pub draft: lash_core::ProcessDefinitionDraft,
-    pub signature: lash_core::ProcessSignature,
+    pub draft: lash_execution_contracts::process::ProcessDefinitionDraft,
+    pub signature: lash_execution_contracts::process::ProcessSignature,
     pub document: WorkflowDocument,
 }
 
@@ -110,18 +110,22 @@ pub(crate) struct KernelDocumentProvider {
     pub(crate) engine: Arc<KernelProcessEngine>,
 }
 
-fn unresolvable(message: String) -> lash_core::PluginError {
-    lash_core::PluginError::from(
-        lash_core::ProcessDefinitionRefusal::UnresolvableDefinition {
+fn unresolvable(message: String) -> lash_execution_contracts::plugin_error::PluginError {
+    lash_execution_contracts::plugin_error::PluginError::from(
+        lash_execution_contracts::process::ProcessDefinitionRefusal::UnresolvableDefinition {
             engine_kind: LASH_VM_ENGINE_KIND.into(),
             message,
         },
     )
 }
 
-pub(super) fn store_fault(error: super::DocumentStoreError) -> lash_core::PluginError {
+pub(super) fn store_fault(
+    error: super::DocumentStoreError,
+) -> lash_execution_contracts::plugin_error::PluginError {
     match error {
-        super::DocumentStoreError::Store(error) => lash_core::PluginError::from(error),
+        super::DocumentStoreError::Store(error) => {
+            lash_execution_contracts::plugin_error::PluginError::from(error)
+        }
         other => unresolvable(other.to_string()),
     }
 }
@@ -133,7 +137,7 @@ impl KernelDocumentProvider {
     async fn read(
         &self,
         reference: &WorkflowDocumentRef,
-    ) -> Result<super::StoredWorkflow, lash_core::PluginError> {
+    ) -> Result<super::StoredWorkflow, lash_execution_contracts::plugin_error::PluginError> {
         self.engine
             .documents
             .workflow(reference)
@@ -143,11 +147,14 @@ impl KernelDocumentProvider {
 }
 
 #[async_trait::async_trait]
-impl lash_core::ProcessDocumentProvider for KernelDocumentProvider {
+impl lash_execution_contracts::process::ProcessDocumentProvider for KernelDocumentProvider {
     async fn document(
         &self,
         payload: &serde_json::Value,
-    ) -> Result<lash_core::ProcessDocumentRead, lash_core::PluginError> {
+    ) -> Result<
+        lash_execution_contracts::process::ProcessDocumentRead,
+        lash_execution_contracts::plugin_error::PluginError,
+    > {
         let definition = super::payload_definition(payload)?;
         let reference = WorkflowDocumentRef {
             document: definition.document,
@@ -158,10 +165,19 @@ impl lash_core::ProcessDocumentProvider for KernelDocumentProvider {
         let read = match self.read(&reference).await? {
             super::StoredWorkflow::Read(read) => read,
             super::StoredWorkflow::Unretained(super::Unretained::Missing { artifact }) => {
-                return Ok(lash_core::ProcessDocumentRead::ArtifactMissing { artifact });
+                return Ok(
+                    lash_execution_contracts::process::ProcessDocumentRead::ArtifactMissing {
+                        artifact,
+                    },
+                );
             }
             super::StoredWorkflow::Unretained(super::Unretained::Corrupt { artifact, message }) => {
-                return Ok(lash_core::ProcessDocumentRead::ArtifactCorrupt { artifact, message });
+                return Ok(
+                    lash_execution_contracts::process::ProcessDocumentRead::ArtifactCorrupt {
+                        artifact,
+                        message,
+                    },
+                );
             }
         };
         let document = read.document;
@@ -179,106 +195,139 @@ impl lash_core::ProcessDocumentProvider for KernelDocumentProvider {
         }
         let draft =
             definition_draft(&definition).map_err(|error| unresolvable(error.to_string()))?;
-        let signature = document
-            .entry_signature()
-            .map_or(lash_core::ProcessSignature::Unknown, entry_signature);
-        Ok(lash_core::ProcessDocumentRead::Inspected(Box::new(
-            lash_core::InspectedProcessDefinition {
-                definition: lash_core::ProcessDefinition::new(draft.id(), signature),
-                document: lash_core::ProcessDocument::new(document),
-            },
-        )))
+        let signature = document.entry_signature().map_or(
+            lash_execution_contracts::process::ProcessSignature::Unknown,
+            entry_signature,
+        );
+        Ok(
+            lash_execution_contracts::process::ProcessDocumentRead::Inspected(Box::new(
+                lash_execution_contracts::process::InspectedProcessDefinition {
+                    definition: lash_execution_contracts::process::ProcessDefinition::new(
+                        draft.id(),
+                        signature,
+                    ),
+                    document: lash_execution_contracts::process::ProcessDocument::new(document),
+                },
+            )),
+        )
     }
 
     async fn document_ref(
         &self,
         payload: &serde_json::Value,
-    ) -> Result<lash_core::ProcessDocumentRefRead, lash_core::PluginError> {
+    ) -> Result<
+        lash_execution_contracts::process::ProcessDocumentRefRead,
+        lash_execution_contracts::plugin_error::PluginError,
+    > {
         let definition = super::payload_definition(payload)?;
-        Ok(lash_core::ProcessDocumentRefRead::Named(
-            WorkflowDocumentRef {
+        Ok(
+            lash_execution_contracts::process::ProcessDocumentRefRead::Named(WorkflowDocumentRef {
                 document: definition.document,
                 entry: WorkflowDocumentEntry::Entry {
                     function: definition.entry,
                 },
-            },
-        ))
+            }),
+        )
     }
 
     async fn execution_document(
         &self,
         reference: &WorkflowDocumentRef,
-    ) -> Result<lash_core::ProcessExecutionDocumentRead, lash_core::PluginError> {
+    ) -> Result<
+        lash_execution_contracts::process::ProcessExecutionDocumentRead,
+        lash_execution_contracts::plugin_error::PluginError,
+    > {
         Ok(match self.read(reference).await? {
-            super::StoredWorkflow::Read(read) => lash_core::ProcessExecutionDocumentRead::Read(
-                lash_core::ProcessDocument::new(*read),
-            ),
+            super::StoredWorkflow::Read(read) => {
+                lash_execution_contracts::process::ProcessExecutionDocumentRead::Read(
+                    lash_execution_contracts::process::ProcessDocument::new(*read),
+                )
+            }
             super::StoredWorkflow::Unretained(super::Unretained::Missing { artifact }) => {
-                lash_core::ProcessExecutionDocumentRead::ArtifactMissing { artifact }
+                lash_execution_contracts::process::ProcessExecutionDocumentRead::ArtifactMissing {
+                    artifact,
+                }
             }
             super::StoredWorkflow::Unretained(super::Unretained::Corrupt { artifact, message }) => {
-                lash_core::ProcessExecutionDocumentRead::ArtifactCorrupt { artifact, message }
+                lash_execution_contracts::process::ProcessExecutionDocumentRead::ArtifactCorrupt {
+                    artifact,
+                    message,
+                }
             }
         })
     }
 
     async fn environment(
         &self,
-        request: lash_core::ProcessDocument,
-    ) -> Result<lash_core::ProcessDocument, lash_core::PluginError> {
+        request: lash_execution_contracts::process::ProcessDocument,
+    ) -> Result<
+        lash_execution_contracts::process::ProcessDocument,
+        lash_execution_contracts::plugin_error::PluginError,
+    > {
         let request = request
             .downcast::<WorkflowEnvironmentRequest>()
             .map_err(|_| {
-                lash_core::PluginError::Invoke(
+                lash_execution_contracts::plugin_error::PluginError::Invoke(
                     "the kernel engine answers a `WorkflowEnvironmentRequest`".to_owned(),
                 )
             })?;
         let boundary = HostBoundary::of_catalog(&request.tool_catalog)
             .map_err(|error| unresolvable(error.to_string()))?;
-        Ok(lash_core::ProcessDocument::new(WorkflowEnvironment {
-            effects: boundary.signatures(),
-            functions: Arc::clone(&self.engine.functions),
-            workers: self.engine.workers.clone(),
-        }))
+        Ok(lash_execution_contracts::process::ProcessDocument::new(
+            WorkflowEnvironment {
+                effects: boundary.signatures(),
+                functions: Arc::clone(&self.engine.functions),
+                workers: self.engine.workers.clone(),
+            },
+        ))
     }
 
     async fn replay(
         &self,
-        request: lash_core::ProcessDocument,
-    ) -> Result<lash_core::ProcessDocument, lash_core::PluginError> {
+        request: lash_execution_contracts::process::ProcessDocument,
+    ) -> Result<
+        lash_execution_contracts::process::ProcessDocument,
+        lash_execution_contracts::plugin_error::PluginError,
+    > {
         let request = request
             .downcast::<super::ProcessReplayRequest>()
             .map_err(|_| {
-                lash_core::PluginError::Invoke(
+                lash_execution_contracts::plugin_error::PluginError::Invoke(
                     "the kernel engine replays a `ProcessReplayRequest`".to_owned(),
                 )
             })?;
-        let answers = self
-            .engine
-            .replay(&request)
-            .await
-            .map_err(|fault| lash_core::PluginError::Invoke(fault.to_string()))?;
-        Ok(lash_core::ProcessDocument::new(answers))
+        let answers = self.engine.replay(&request).await.map_err(|fault| {
+            lash_execution_contracts::plugin_error::PluginError::Invoke(fault.to_string())
+        })?;
+        Ok(lash_execution_contracts::process::ProcessDocument::new(
+            answers,
+        ))
     }
 
-    fn counts_statements(&self, settings: Option<&lash_core::EngineSettings>) -> bool {
+    fn counts_statements(
+        &self,
+        settings: Option<&lash_execution_contracts::process::EngineSettings>,
+    ) -> bool {
         super::KernelRecordedSettings::observed(settings) == lash_kernel_vm::Observe::Counts
     }
 
     async fn admit(
         &self,
         claim: &lash_core::ReferrerClaim,
-        request: lash_core::ProcessDocument,
-    ) -> Result<lash_core::ProcessDocument, lash_core::PluginError> {
+        request: lash_execution_contracts::process::ProcessDocument,
+    ) -> Result<
+        lash_execution_contracts::process::ProcessDocument,
+        lash_execution_contracts::plugin_error::PluginError,
+    > {
         let request = request
             .downcast::<WorkflowAdmissionRequest>()
             .map_err(|_| {
-                lash_core::PluginError::Invoke(
+                lash_execution_contracts::plugin_error::PluginError::Invoke(
                     "the kernel engine admits a `WorkflowAdmissionRequest`".to_owned(),
                 )
             })?;
         let refused = |refusal| {
-            Ok(lash_core::ProcessDocument::new(
+            Ok(lash_execution_contracts::process::ProcessDocument::new(
                 WorkflowAdmissionOutcome::Refused(refusal),
             ))
         };
@@ -329,7 +378,7 @@ impl lash_core::ProcessDocumentProvider for KernelDocumentProvider {
             .publish(claim, &identified, &declarations)
             .await
             .map_err(store_fault)?;
-        Ok(lash_core::ProcessDocument::new(
+        Ok(lash_execution_contracts::process::ProcessDocument::new(
             WorkflowAdmissionOutcome::Admitted(Box::new(AdmittedWorkflow {
                 draft,
                 signature,

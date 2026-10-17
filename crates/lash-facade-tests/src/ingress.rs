@@ -1,5 +1,5 @@
 use super::*;
-use lash_core::ProcessRegistry;
+use lash_execution_contracts::process::ProcessRegistry;
 
 use lash_protocol_types::ProcessId;
 
@@ -13,8 +13,11 @@ pub const SCOPE: &str = "intent-ingress-turn";
 pub fn started_process_id(outcome: &lash::tools::ToolIntentIngressOutcome) -> ProcessId {
     let lash::tools::ToolIntentIngressOutcome::Admitted {
         outcome:
-            lash_core::ToolIntentExecutionOutcome::Executed {
-                realized: lash_core::ToolIntentRealized::StartProcess(result),
+            lash_execution_contracts::tool_intent_outcome::ToolIntentExecutionOutcome::Executed {
+                realized:
+                    lash_execution_contracts::tool_intent_outcome::ToolIntentRealized::StartProcess(
+                        result,
+                    ),
                 ..
             },
         ..
@@ -29,9 +32,9 @@ pub fn started_process_id(outcome: &lash::tools::ToolIntentIngressOutcome) -> Pr
 pub async fn registered_process_count(registry: &Arc<dyn ProcessRegistry>) -> Result<usize> {
     Ok(lash_core::testing::process_roster_records_for_fixture(
         registry.as_ref(),
-        &lash_core::ProcessListFilter {
-            status: lash_core::ProcessStatusFilter::Any,
-            ..lash_core::ProcessListFilter::default()
+        &lash_execution_contracts::process::ProcessListFilter {
+            status: lash_execution_contracts::process::ProcessStatusFilter::Any,
+            ..lash_execution_contracts::process::ProcessListFilter::default()
         },
     )
     .await?
@@ -39,15 +42,17 @@ pub async fn registered_process_count(registry: &Arc<dyn ProcessRegistry>) -> Re
 }
 
 /// A held process start under the fixture environment.
-pub fn start_intent(session_id: &SessionId) -> lash_core::ToolIntent {
-    lash_core::ToolIntent::StartProcess(Box::new(lash_core::StartProcessIntent {
-        owner: lash::RuntimeOwner::Session(session_id.clone()),
-        declaration: lash_core::testing::held_engine_declaration(
-            serde_json::Value::Null,
-            lash_core::ProcessOriginator::host(),
-            lash_core::Lifetime::Detached,
-        ),
-    }))
+pub fn start_intent(session_id: &SessionId) -> lash_execution_contracts::tool_intent::ToolIntent {
+    lash_execution_contracts::tool_intent::ToolIntent::StartProcess(Box::new(
+        lash_execution_contracts::tool_intent::StartProcessIntent {
+            owner: lash::RuntimeOwner::Session(session_id.clone()),
+            declaration: lash_execution_contracts::testing::held_engine_declaration(
+                serde_json::Value::Null,
+                lash_execution_contracts::process::ProcessOriginator::host(),
+                lash_execution_contracts::process::Lifetime::Detached,
+            ),
+        },
+    ))
 }
 
 pub const INGRESS_ENGINE_KIND: &str = "ingress-admission-engine";
@@ -60,35 +65,40 @@ struct IngressAdmissionEngine {
 }
 
 #[async_trait::async_trait]
-impl lash_core::ProcessEngine for IngressAdmissionEngine {
+impl lash_execution_contracts::process::ProcessEngine for IngressAdmissionEngine {
     fn settled_ran(
         &self,
-        _kind: &lash_core::EngineStepKind,
+        _kind: &lash_execution_contracts::process::EngineStepKind,
         _output: &lash_core_store::tool_run::SettledOutput,
     ) -> Vec<(u32, u64)> {
         Vec::new()
     }
 
-    fn trace_class(&self) -> lash_core::ProcessTraceClass {
-        lash_core::ProcessTraceClass::Internal
+    fn trace_class(&self) -> lash_execution_contracts::process::ProcessTraceClass {
+        lash_execution_contracts::process::ProcessTraceClass::Internal
     }
 
     async fn performed_effects(
         &self,
         _payload: &serde_json::Value,
-    ) -> std::result::Result<lash_core::PerformedEffects, lash_core::ProcessEnvRefusal> {
-        Ok(lash_core::PerformedEffects::new())
+    ) -> std::result::Result<
+        lash_execution_contracts::process::PerformedEffects,
+        lash_core::ProcessEnvRefusal,
+    > {
+        Ok(lash_execution_contracts::process::PerformedEffects::new())
     }
 
     async fn check_args(
         &self,
-        _signature: &lash_core::ProcessSignature,
+        _signature: &lash_execution_contracts::process::ProcessSignature,
         _args: &serde_json::Map<String, serde_json::Value>,
-        _mode: lash_core::ArgsMode,
-    ) -> std::result::Result<(), lash_core::ArgsMismatch> {
-        Err(lash_core::ArgsMismatch::UnsupportedSignature {
-            engine_kind: self.kind().into(),
-        })
+        _mode: lash_execution_contracts::process::ArgsMode,
+    ) -> std::result::Result<(), lash_execution_contracts::process::ArgsMismatch> {
+        Err(
+            lash_execution_contracts::process::ArgsMismatch::UnsupportedSignature {
+                engine_kind: self.kind().into(),
+            },
+        )
     }
 
     fn kind(&self) -> &'static str {
@@ -98,14 +108,18 @@ impl lash_core::ProcessEngine for IngressAdmissionEngine {
     fn start_artifacts(
         &self,
         _payload: &serde_json::Value,
-    ) -> std::result::Result<Vec<lash_core::ArtifactName>, lash_core::PluginError> {
+    ) -> std::result::Result<
+        Vec<lash_core::ArtifactName>,
+        lash_execution_contracts::plugin_error::PluginError,
+    > {
         Ok(Vec::new())
     }
 
     async fn end_artifact_referrer(
         &self,
         _cleanup: &lash_core::ResolvedArtifactCleanup,
-    ) -> std::result::Result<(), lash_core::ArtifactStoreError> {
+    ) -> std::result::Result<(), lash_execution_contracts::module_artifacts::ArtifactStoreError>
+    {
         Ok(())
     }
 
@@ -113,12 +127,12 @@ impl lash_core::ProcessEngine for IngressAdmissionEngine {
         &self,
         _claim: &lash_core::ReferrerClaim,
         _artifact_ref: &str,
-    ) -> std::result::Result<(), lash_core::PluginError> {
+    ) -> std::result::Result<(), lash_execution_contracts::plugin_error::PluginError> {
         unreachable!("the ingress engine stores no artifacts")
     }
 
-    fn state_format(&self) -> lash_core::EngineStateFormat {
-        lash_core::EngineStateFormat {
+    fn state_format(&self) -> lash_execution_contracts::process::EngineStateFormat {
+        lash_execution_contracts::process::EngineStateFormat {
             kind: self.kind().to_owned(),
             version: 0,
         }
@@ -138,77 +152,103 @@ impl lash_core::ProcessEngine for IngressAdmissionEngine {
     fn check_settings(
         &self,
         _payload: &serde_json::Value,
-        settings: Option<&lash_core::EngineSettings>,
-    ) -> std::result::Result<(), lash_core::PluginError> {
+        settings: Option<&lash_execution_contracts::process::EngineSettings>,
+    ) -> std::result::Result<(), lash_execution_contracts::plugin_error::PluginError> {
         match (settings, &self.defaults) {
             (None, _) | (Some(_), Some(_)) => Ok(()),
-            (Some(_), None) => Err(lash_core::PluginError::Registration(format!(
-                "process engine `{}` takes no settings",
-                self.kind()
-            ))),
+            (Some(_), None) => Err(
+                lash_execution_contracts::plugin_error::PluginError::Registration(format!(
+                    "process engine `{}` takes no settings",
+                    self.kind()
+                )),
+            ),
         }
     }
 
     fn default_settings(
         &self,
         _payload: &serde_json::Value,
-    ) -> std::result::Result<Option<lash_core::EngineSettings>, lash_core::PluginError> {
-        Ok(self.defaults.clone().map(lash_core::EngineSettings::new))
+    ) -> std::result::Result<
+        Option<lash_execution_contracts::process::EngineSettings>,
+        lash_execution_contracts::plugin_error::PluginError,
+    > {
+        Ok(self
+            .defaults
+            .clone()
+            .map(lash_execution_contracts::process::EngineSettings::new))
     }
 
     fn advance(
         &self,
-        state: lash_core::EngineState,
-        event: lash_core::EngineEvent,
+        state: lash_execution_contracts::process::EngineState,
+        event: lash_execution_contracts::process::EngineEvent,
     ) -> std::result::Result<
-        (lash_core::EngineState, lash_core::EngineAction),
-        lash_core::ProcessInfraError,
+        (
+            lash_execution_contracts::process::EngineState,
+            lash_execution_contracts::process::EngineAction,
+        ),
+        lash_execution_contracts::process::ProcessInfraError,
     > {
         // The `refuse` program's first transition is refused: its process parks.
-        if let lash_core::EngineEvent::Started { payload } = &event
+        if let lash_execution_contracts::process::EngineEvent::Started { payload } = &event
             && payload.get("program").and_then(serde_json::Value::as_str) == Some("refuse")
         {
-            return Err(lash_core::ProcessInfraError::new(
-                lash_core::PluginError::Session("the ingress engine refuses this program".into()),
+            return Err(lash_execution_contracts::process::ProcessInfraError::new(
+                lash_execution_contracts::plugin_error::PluginError::Session(
+                    "the ingress engine refuses this program".into(),
+                ),
             ));
         }
         Ok((
             state,
-            lash_core::EngineAction::Terminal(lash_core::ProcessAwaitOutput::from_tool_output(
-                lash_core::ToolCallOutput::success(serde_json::json!({"ingress_engine": "ran"})),
-            )),
+            lash_execution_contracts::process::EngineAction::Terminal(
+                lash_execution_contracts::process::ProcessAwaitOutput::from_tool_output(
+                    lash_core::ToolCallOutput::success(
+                        serde_json::json!({"ingress_engine": "ran"}),
+                    ),
+                ),
+            ),
         ))
     }
 
     async fn resolve(
         &self,
-        _reference: &lash_core::ProcessDefinitionRef,
+        _reference: &lash_execution_contracts::process::ProcessDefinitionRef,
     ) -> std::result::Result<
-        lash_core::ProcessDefinitionResolution,
-        lash_core::ProcessDefinitionError,
+        lash_execution_contracts::process::ProcessDefinitionResolution,
+        lash_execution_contracts::process::ProcessDefinitionError,
     > {
-        Ok(lash_core::ProcessDefinitionResolution::new(
-            lash_core::ProcessSignature::Unknown,
-        ))
+        Ok(
+            lash_execution_contracts::process::ProcessDefinitionResolution::new(
+                lash_execution_contracts::process::ProcessSignature::Unknown,
+            ),
+        )
     }
 }
 
 pub fn admit_ingress_engine(
     _kind: &'static str,
     payload: &serde_json::Value,
-) -> std::result::Result<lash_core::ProcessIdentity, lash_core::PluginError> {
+) -> std::result::Result<
+    lash_execution_contracts::process::ProcessIdentity,
+    lash_execution_contracts::plugin_error::PluginError,
+> {
     if payload.get("program").and_then(serde_json::Value::as_str) == Some("invalid") {
-        return Err(lash_core::PluginError::Session(
-            "invalid ingress engine program".to_owned(),
-        ));
+        return Err(
+            lash_execution_contracts::plugin_error::PluginError::Session(
+                "invalid ingress engine program".to_owned(),
+            ),
+        );
     }
-    let draft = lash_core::ProcessDefinitionDraft::new(
+    let draft = lash_execution_contracts::process::ProcessDefinitionDraft::new(
         INGRESS_ENGINE_KIND,
         serde_json::json!({ "payload": payload }),
         [],
     )
-    .map_err(|error| lash_core::PluginError::Session(error.to_string()))?;
-    let mut identity = lash_core::ProcessIdentity::labelled(
+    .map_err(|error| {
+        lash_execution_contracts::plugin_error::PluginError::Session(error.to_string())
+    })?;
+    let mut identity = lash_execution_contracts::process::ProcessIdentity::labelled(
         INGRESS_ENGINE_KIND,
         payload.get("program").and_then(serde_json::Value::as_str),
     );
@@ -268,12 +308,18 @@ impl IngressAdmissionEngineFactory {
     pub fn bind_process_engine(
         &self,
         _ctx: &lash_core::ProcessEngineContributionContext<'_>,
-    ) -> std::result::Result<lash_core::ProcessEngineRegistration, lash_core::PluginError> {
+    ) -> std::result::Result<
+        lash_core::ProcessEngineRegistration,
+        lash_execution_contracts::plugin_error::PluginError,
+    > {
         lash_core::ProcessEngineRegistration::new(
             Arc::new(IngressAdmissionEngine {
                 defaults: self.defaults.clone(),
             }),
-            lash_core::ProcessEngineAdmission::new(INGRESS_ENGINE_KIND, admit_ingress_engine),
+            lash_execution_contracts::process::ProcessEngineAdmission::new(
+                INGRESS_ENGINE_KIND,
+                admit_ingress_engine,
+            ),
         )
     }
 }
@@ -290,7 +336,7 @@ impl lash_core::plugin::PluginMetadata for IngressAdmissionEngineFactory {
 }
 
 pub async fn ingress_engine_core(
-    backend: lash_core::Backend,
+    backend: lash_execution_contracts::backend::Backend,
 ) -> Result<(LashCore, Arc<dyn ProcessRegistry>)> {
     ingress_engine_core_with(backend, |builder| builder).await
 }
@@ -298,7 +344,7 @@ pub async fn ingress_engine_core(
 /// A core over `backend` serving the ingress engine, whose node defaults are
 /// `defaults`.
 pub fn ingress_node_builder(
-    backend: &lash_core::Backend,
+    backend: &lash_execution_contracts::backend::Backend,
     defaults: Option<serde_json::Value>,
 ) -> lash::LashCoreBuilder {
     explicit_ephemeral_facets(LashCore::standard_builder(backend.clone()))
@@ -308,7 +354,7 @@ pub fn ingress_node_builder(
 
 /// [`ingress_engine_core`] with the host's own additions to its builder.
 pub async fn ingress_engine_core_with(
-    backend: lash_core::Backend,
+    backend: lash_execution_contracts::backend::Backend,
     configure: impl FnOnce(lash::LashCoreBuilder) -> lash::LashCoreBuilder,
 ) -> Result<(LashCore, Arc<dyn ProcessRegistry>)> {
     let registry = backend.process_registry();
@@ -317,7 +363,7 @@ pub async fn ingress_engine_core_with(
     core.host_artifacts()
         .publish_process_env(
             &lash_core::HostArtifactPin::mint(),
-            &lash_core::testing::process_env_fixture(),
+            &lash_execution_contracts::testing::process_env_fixture(),
         )
         .await?;
     let _session = created_session(
@@ -330,17 +376,22 @@ pub async fn ingress_engine_core_with(
     Ok((core, registry))
 }
 
-pub fn engine_start_intent(kind: &str, payload: serde_json::Value) -> lash_core::ToolIntent {
-    lash_core::ToolIntent::StartProcess(Box::new(lash_core::StartProcessIntent {
-        owner: lash::RuntimeOwner::Session(SessionId::fixture(SESSION.to_string())),
-        declaration: lash_core::ProcessStartDeclaration::engine(
-            kind,
-            payload,
-            lash_core::testing::declared_launch_for_testing(
-                lash_core::testing::fixture_engine_launch(),
+pub fn engine_start_intent(
+    kind: &str,
+    payload: serde_json::Value,
+) -> lash_execution_contracts::tool_intent::ToolIntent {
+    lash_execution_contracts::tool_intent::ToolIntent::StartProcess(Box::new(
+        lash_execution_contracts::tool_intent::StartProcessIntent {
+            owner: lash::RuntimeOwner::Session(SessionId::fixture(SESSION.to_string())),
+            declaration: lash_execution_contracts::process::ProcessStartDeclaration::engine(
+                kind,
+                payload,
+                lash_execution_contracts::testing::declared_launch_for_testing(
+                    lash_execution_contracts::testing::fixture_engine_launch(),
+                ),
+                lash_execution_contracts::process::ProcessOriginator::host(),
+                lash_execution_contracts::process::Lifetime::Detached,
             ),
-            lash_core::ProcessOriginator::host(),
-            lash_core::Lifetime::Detached,
-        ),
-    }))
+        },
+    ))
 }

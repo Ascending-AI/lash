@@ -17,7 +17,8 @@ use lash_durable::domain::{ExecKey, ExecRootRow, RootOwner, SnapshotRev};
 use lash_durable::{ActorTx, DomainWrite, DurableError, DurableReads};
 
 use crate::ProcessId;
-use crate::runtime::process::engine_state::{EngineState, EngineStateFormat};
+use lash_execution_contracts::process::EngineState;
+use lash_execution_contracts::process::EngineStateFormat;
 
 fn mismatch(reason: &str) -> GraphRefusal {
     GraphRefusal::InvalidBody {

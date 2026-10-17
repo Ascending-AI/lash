@@ -26,7 +26,10 @@ impl ToolProvider for CountingTools {
     fn tool_manifests(
         &self,
         _config: &crate::plugin::OwnerConfigView,
-    ) -> std::result::Result<Vec<crate::ToolManifest>, crate::PluginError> {
+    ) -> std::result::Result<
+        Vec<crate::ToolManifest>,
+        lash_execution_contracts::plugin_error::PluginError,
+    > {
         Ok(manifests(vec![named_beta_tool("beta")]))
     }
 
@@ -350,7 +353,11 @@ async fn a_failing_check_denies_and_the_others_still_run() {
                     PluginSpec::new().with_tool_args_check(
                         hook_key!("check"),
                         Arc::new(|_| {
-                            Box::pin(async { Err(crate::PluginError::Invoke("broken".into())) })
+                            Box::pin(async {
+                                Err(lash_execution_contracts::plugin_error::PluginError::Invoke(
+                                    "broken".into(),
+                                ))
+                            })
                         }),
                     ),
                 ),
@@ -390,7 +397,11 @@ async fn a_failing_transform_fails_the_call() {
                 PluginSpec::new().with_tool_args_transform(
                     hook_key!("normalize"),
                     Arc::new(|_| {
-                        Box::pin(async { Err(crate::PluginError::Invoke("broken".into())) })
+                        Box::pin(async {
+                            Err(lash_execution_contracts::plugin_error::PluginError::Invoke(
+                                "broken".into(),
+                            ))
+                        })
                     }),
                 ),
             )],
@@ -508,7 +519,7 @@ async fn result_checks_without_a_decision_record_publish_no_state_before_settlem
                                 Box::pin(async move {
                                     Ok(AfterToolContributions {
                                         verdict,
-                                        state: crate::StateCommands::new().apply(
+                                        state: lash_execution_contracts::state_commands::StateCommands::new().apply(
                                             "value",
                                             "store",
                                             json!("cached"),
@@ -582,9 +593,10 @@ async fn result_checks_without_a_decision_record_publish_no_state_before_settlem
                     plugin: "cache".into(),
                 })
             );
-            let restored: crate::ToolFailure =
-                serde_json::from_value(serde_json::to_value(crate::Durable(&failure)).unwrap())
-                    .unwrap();
+            let restored: crate::ToolFailure = serde_json::from_value(
+                serde_json::to_value(lash_protocol_types::Durable(&failure)).unwrap(),
+            )
+            .unwrap();
             assert_eq!(
                 restored.cause, failure.cause,
                 "the host receives a typed refusal"
@@ -694,7 +706,7 @@ async fn displaced_terminals_are_published_as_composition_evidence() {
             &self,
             _context: lash_trace::TraceContext,
             event: lash_trace::TraceEvent,
-        ) -> Result<(), crate::PluginError> {
+        ) -> Result<(), lash_execution_contracts::plugin_error::PluginError> {
             self.events.lock_recover().push(event);
             Ok(())
         }
@@ -703,10 +715,15 @@ async fn displaced_terminals_are_published_as_composition_evidence() {
             &self,
             _session_id: &crate::SessionId,
             _request: crate::AppendSessionNodesRequest,
-        ) -> Result<crate::AppendSessionNodesOutcome, crate::PluginError> {
-            Err(crate::PluginError::Session(
-                "operation is absent from this fixture".into(),
-            ))
+        ) -> Result<
+            crate::AppendSessionNodesOutcome,
+            lash_execution_contracts::plugin_error::PluginError,
+        > {
+            Err(
+                lash_execution_contracts::plugin_error::PluginError::Session(
+                    "operation is absent from this fixture".into(),
+                ),
+            )
         }
     }
 

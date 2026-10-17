@@ -234,7 +234,7 @@ async fn start_exec_without_code_executor_stops_as_runtime_error() -> Result<()>
 
 #[tokio::test(flavor = "multi_thread", worker_threads = 2)]
 async fn runtime_stop_cause_survives_owner_replacement() -> Result<()> {
-    fn core(backend: lash_core::Backend) -> Result<LashCore> {
+    fn core(backend: lash_execution_contracts::backend::Backend) -> Result<LashCore> {
         explicit_ephemeral_facets(LashCore::builder(backend).protocol_plugin(Arc::new(
             TestProtocolFactory(Arc::new(std::sync::Mutex::new(Vec::new())), false),
         )))

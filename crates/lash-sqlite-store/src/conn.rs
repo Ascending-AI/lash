@@ -49,8 +49,8 @@
 //!   ever deal in `rusqlite::Result<T>` and callers receive the inner
 //!   `rusqlite::Error` to feed through `sqlite_error` / `process_sqlite_error`.
 
-use lash_core_execution::FleetFormat;
-use lash_core_execution::compat::VersionRange;
+use lash_core_store::compat::VersionRange;
+use lash_core_store::store::FleetFormat;
 use rusqlite::{Connection, Transaction, TransactionBehavior};
 use std::collections::HashMap;
 use std::path::PathBuf;
@@ -448,7 +448,7 @@ impl WriterFence {
     fn check(&self, tx: &Transaction<'_>) -> rusqlite::Result<FleetFormat> {
         let Some(armed) = self.armed.get() else {
             return Err(crate::sqlite_conversion_error(
-                lash_core_execution::StoreError::StorageFailure {
+                lash_core_store::store::StoreError::StorageFailure {
                     backend: crate::SQLITE_BACKEND,
                     message: "write on a SQLite connection whose database no installer admitted"
                         .to_owned(),
@@ -492,7 +492,7 @@ impl FencedTx<'_> {
     /// caller's rollback leaves nothing published.
     pub(crate) fn admit_plugin_writers(
         &self,
-        publication: &lash_core_execution::store::plugin_writers::PluginPublication,
+        publication: &lash_core_store::store::plugin_writers::PluginPublication,
     ) -> rusqlite::Result<()> {
         crate::compat::admit_plugin_writers(&self.tx, publication)
     }
@@ -643,15 +643,15 @@ impl SqliteConnection {
         let reads = read_gate(target);
         let path = target.open_name();
         #[cfg(feature = "perf-witness")]
-        lash_core_execution::perf_witness::startup::record(
-            lash_core_execution::perf_witness::startup::Phase::StoreOpenStarted,
+        lash_core_ids::perf_witness::startup::record(
+            lash_core_ids::perf_witness::startup::Phase::StoreOpenStarted,
         );
         let inner =
             AsyncConnection::start(move || open_connection(path, rusqlite::OpenFlags::default()))
                 .await?;
         #[cfg(feature = "perf-witness")]
-        lash_core_execution::perf_witness::startup::record(
-            lash_core_execution::perf_witness::startup::Phase::StoreOpened,
+        lash_core_ids::perf_witness::startup::record(
+            lash_core_ids::perf_witness::startup::Phase::StoreOpened,
         );
         let pragmas = crate::connection_sql::open_pragmas(policy);
         let setup_gate = Arc::clone(&gate);
@@ -662,7 +662,7 @@ impl SqliteConnection {
                 // transition can otherwise race their schema/header locks.
                 #[cfg(feature = "perf-witness")]
                 let mut setup_timing =
-                    lash_core_execution::perf_witness::queues::Timer::enqueue("sqlite.setup_gate");
+                    lash_core_ids::perf_witness::queues::Timer::enqueue("sqlite.setup_gate");
                 let _setup_gate = setup_gate
                     .lock()
                     .unwrap_or_else(std::sync::PoisonError::into_inner);
@@ -686,8 +686,8 @@ impl SqliteConnection {
             })
             .await?;
         #[cfg(feature = "perf-witness")]
-        lash_core_execution::perf_witness::startup::record(
-            lash_core_execution::perf_witness::startup::Phase::StoreSetupFinished,
+        lash_core_ids::perf_witness::startup::record(
+            lash_core_ids::perf_witness::startup::Phase::StoreSetupFinished,
         );
         let checkpoint = checkpoint_state(
             target,
@@ -754,7 +754,7 @@ impl SqliteConnection {
                 // before spending the read-only SQLite busy budget.
                 #[cfg(feature = "perf-witness")]
                 let mut setup_timing =
-                    lash_core_execution::perf_witness::queues::Timer::enqueue("sqlite.setup_gate");
+                    lash_core_ids::perf_witness::queues::Timer::enqueue("sqlite.setup_gate");
                 let _setup_gate = setup_gate
                     .lock()
                     .unwrap_or_else(std::sync::PoisonError::into_inner);
@@ -827,11 +827,11 @@ impl SqliteConnection {
         let build_release = build_release.to_owned();
         let result = connection.call(move |c| {
             let writing_release = crate::release_stamp::read_release(c);
-            if let Some(refusal) = lash_core_execution::compat::CompatRefusal::pre_release(
+            if let Some(refusal) = lash_core_store::compat::CompatRefusal::pre_release(
                 crate::schema::COMPONENT.as_str(), writing_release.as_deref(), &build_release,
             ) {
                 tracing::warn!(writing_release = ?writing_release, build_release, refusal = %refusal, "lash SQLite release gate refused the database");
-                Err(crate::sqlite_conversion_error(lash_core_execution::StoreError::Incompatible { refusal }))
+                Err(crate::sqlite_conversion_error(lash_core_store::store::StoreError::Incompatible { refusal }))
             } else {
                 Ok(())
             }
@@ -847,7 +847,7 @@ impl SqliteConnection {
         target: &DatabaseTarget,
         busy_timeout: Duration,
         operational: crate::SqliteOperationalSettings,
-    ) -> rusqlite::Result<Option<lash_core_execution::compat::CompatStamp>> {
+    ) -> rusqlite::Result<Option<lash_core_store::compat::CompatStamp>> {
         let connection = flatten(
             Self::open_readonly_configured(target, operational)
                 .await
@@ -913,13 +913,13 @@ impl SqliteConnection {
         T: Send + 'static,
         F: FnOnce(&mut Connection) -> rusqlite::Result<T> + Send + 'static,
     {
-        let window = lash_core_execution::facade_support::sql::Window::current();
+        let window = lash_core_ids::operational_metrics::sql::Window::current();
         #[cfg(feature = "perf-witness")]
         let reader = self.reader;
         let f = move |c: &mut Connection| {
             crate::observed_sql::physical_scope(std::any::type_name::<F>(), || {
                 #[cfg(feature = "perf-witness")]
-                let _busy = lash_core_execution::perf_witness::latency::Busy::enter(reader);
+                let _busy = lash_core_ids::perf_witness::latency::Busy::enter(reader);
                 let observed = window.is_some() && !cfg!(feature = "perf-witness");
                 if observed {
                     crate::observed_sql::enable(c);
@@ -927,7 +927,7 @@ impl SqliteConnection {
                 #[cfg(feature = "perf-witness")]
                 let writes = crate::observed_sql::WriteWitness::start(c);
                 let result =
-                    lash_core_execution::facade_support::sql::Window::on_worker(window, || f(c));
+                    lash_core_ids::operational_metrics::sql::Window::on_worker(window, || f(c));
                 #[cfg(feature = "perf-witness")]
                 writes.finish(c);
                 if observed {
@@ -956,7 +956,7 @@ impl SqliteConnection {
             self.run(move |c| {
                 #[cfg(feature = "perf-witness")]
                 let mut read_timing =
-                    lash_core_execution::perf_witness::queues::Timer::enqueue("sqlite.read_gate");
+                    lash_core_ids::perf_witness::queues::Timer::enqueue("sqlite.read_gate");
                 let _read_gate = timed_gate(|| {
                     read_gate
                         .read()
@@ -996,7 +996,7 @@ impl SqliteConnection {
             self.run(move |c| {
                 #[cfg(feature = "perf-witness")]
                 let mut read_timing =
-                    lash_core_execution::perf_witness::queues::Timer::enqueue("sqlite.read_gate");
+                    lash_core_ids::perf_witness::queues::Timer::enqueue("sqlite.read_gate");
                 let _read_gate = timed_gate(|| {
                     read_gate
                         .read()
@@ -1050,7 +1050,7 @@ impl SqliteConnection {
             self.run(move |c| {
                 #[cfg(feature = "perf-witness")]
                 let mut read_timing =
-                    lash_core_execution::perf_witness::queues::Timer::enqueue("sqlite.read_gate");
+                    lash_core_ids::perf_witness::queues::Timer::enqueue("sqlite.read_gate");
                 let _read_gate = timed_gate(|| {
                     read_gate
                         .read()
@@ -1063,7 +1063,7 @@ impl SqliteConnection {
                 }
                 #[cfg(feature = "perf-witness")]
                 let mut write_timing =
-                    lash_core_execution::perf_witness::queues::Timer::enqueue("sqlite.write_gate");
+                    lash_core_ids::perf_witness::queues::Timer::enqueue("sqlite.write_gate");
                 let _write_gate = timed_gate(|| {
                     write_gate
                         .lock()
@@ -1076,7 +1076,7 @@ impl SqliteConnection {
                 }
                 let tx = c.transaction_with_behavior(TransactionBehavior::Immediate)?;
                 #[cfg(feature = "perf-witness")]
-                lash_core_execution::perf_witness::latency::began_write();
+                lash_core_ids::perf_witness::latency::began_write();
                 let fleet = f(&tx)?;
                 tx.commit()?;
                 Ok(Ok(fleet))
@@ -1183,7 +1183,7 @@ fn flatten<T>(result: tokio_rusqlite::Result<rusqlite::Result<T>>) -> rusqlite::
 fn timed_gate<T>(f: impl FnOnce() -> T) -> T {
     #[cfg(feature = "perf-witness")]
     {
-        lash_core_execution::perf_witness::latency::gate(f)
+        lash_core_ids::perf_witness::latency::gate(f)
     }
     #[cfg(not(feature = "perf-witness"))]
     {
@@ -1202,7 +1202,9 @@ mod tests {
     #[cfg(feature = "perf-witness")]
     #[tokio::test]
     async fn latency_witness_counts_rollbacks_without_publishing_their_clocks() {
-        use lash_core_execution::perf_witness::latency::{Collector, CommitMark, stage};
+        use lash_core_ids::perf_witness::latency::Collector;
+        use lash_core_ids::perf_witness::latency::CommitMark;
+        use lash_core_ids::perf_witness::latency::stage;
         let dir = tempfile::tempdir().unwrap();
         let target = DatabaseTarget::File(dir.path().join("witness.db"));
         let conn = installed(
@@ -1295,7 +1297,7 @@ mod tests {
     /// rather than importing earlier executions of the same prepared statement.
     #[tokio::test]
     async fn sql_operation_reports_exact_shapes_rows_and_work() {
-        use lash_core_execution::facade_support::sql;
+        use lash_core_ids::operational_metrics::sql;
         let dir = tempfile::tempdir().expect("tempdir");
         let target = DatabaseTarget::File(dir.path().join("sql.db"));
         let conn = installed(

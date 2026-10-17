@@ -32,9 +32,9 @@ use lash_core::llm::types::{
 };
 use lash_core::runtime::durable::session::TurnServices;
 use lash_core::{ExecutionPolicy, LlmOutputPart, ToolCall, ToolOutcome};
-use lash_core_execution::Backend;
 use lash_durable::domain::{ExecKey, OwnerKey};
 use lash_durable_test::SimClock;
+use lash_execution_contracts::backend::Backend;
 use lash_protocol_types::{SessionId, TurnId};
 
 use super::cases::run_of;
@@ -131,7 +131,10 @@ impl lash_core::plugin::PluginFactory for Watch {
 
     fn recipe(
         self: Arc<Self>,
-    ) -> std::result::Result<lash_core::plugin::PluginRecipe, lash_core::plugin::PluginError> {
+    ) -> std::result::Result<
+        lash_core::plugin::PluginRecipe,
+        lash_execution_contracts::plugin_error::PluginError,
+    > {
         let mut reg = lash_core::plugin::PluginRegistrar::<Watch>::new(
             lash_core::plugin::PluginFactory::id(self.as_ref()),
         );
@@ -153,7 +156,7 @@ impl lash_core::plugin::SessionPlugin for Watch {
 impl Watch {
     fn declare(
         reg: &mut lash_core::plugin::PluginRegistrar<Self>,
-    ) -> std::result::Result<(), lash_core::plugin::PluginError> {
+    ) -> std::result::Result<(), lash_execution_contracts::plugin_error::PluginError> {
         reg.turn()
             .checkpoint(lash_core::hook_key!("watch"), move |_this, _state| {
                 Ok(Arc::new(|_| {

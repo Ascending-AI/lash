@@ -13,26 +13,45 @@
 //! [`DurableSerialize`] lets hosts opt their own containers into that format.
 //! [`serialize_durable`] is the field adapter for derived `Serialize` containers:
 //! `#[serde(serialize_with = "lash::persistence::serialize_durable")]`.
-pub use lash_core::{Durable, ProcessAuthorityReads};
 pub use lash_core_store::checkpoint_graph::{
     DecodeLimits as GraphDecodeLimits, GraphReadPolicy, KernelDataLimits,
 };
+pub use lash_execution_contracts::backend::ProcessAuthorityReads;
+pub use lash_protocol_types::Durable;
 pub use lash_protocol_types::DurableSerialize;
 pub use lash_protocol_types::durable_serde::serialize as serialize_durable;
 
+pub use lash_core::ProcessOpScope;
+pub use lash_core::StagedProcessStart;
 #[cfg(any(test, feature = "testing"))]
-pub use lash_core::{
-    ConformanceProcessRegistry, ProcessEventLogTestSupport, ProcessRegistryTestSupport,
-};
-pub use lash_core::{
-    NonTerminalProcessPage, ProcessCancelReceipt, ProcessChange, ProcessChangeKind,
-    ProcessClockRebind, ProcessCompletionAuthority, ProcessCompletionOutcome,
-    ProcessEventAppendRequest, ProcessEventLog, ProcessHandleView, ProcessLifecycle,
-    ProcessListFilter, ProcessLiveReferenceView, ProcessObserverRegistry, ProcessOpScope,
-    ProcessQuery, ProcessRecord, ProcessRegistrar, ProcessRegistrationReceipt, ProcessRegistry,
-    ProcessRetention, ProcessRosterRecords, ProcessStartReceipt, ProcessToolIntents,
-    StagedProcessStart,
-};
+pub use lash_execution_contracts::process::ConformanceProcessRegistry;
+pub use lash_execution_contracts::process::NonTerminalProcessPage;
+pub use lash_execution_contracts::process::ProcessCancelReceipt;
+pub use lash_execution_contracts::process::ProcessChange;
+pub use lash_execution_contracts::process::ProcessChangeKind;
+pub use lash_execution_contracts::process::ProcessClockRebind;
+pub use lash_execution_contracts::process::ProcessCompletionAuthority;
+pub use lash_execution_contracts::process::ProcessCompletionOutcome;
+pub use lash_execution_contracts::process::ProcessEventAppendRequest;
+pub use lash_execution_contracts::process::ProcessEventLog;
+#[cfg(any(test, feature = "testing"))]
+pub use lash_execution_contracts::process::ProcessEventLogTestSupport;
+pub use lash_execution_contracts::process::ProcessHandleView;
+pub use lash_execution_contracts::process::ProcessLifecycle;
+pub use lash_execution_contracts::process::ProcessListFilter;
+pub use lash_execution_contracts::process::ProcessLiveReferenceView;
+pub use lash_execution_contracts::process::ProcessObserverRegistry;
+pub use lash_execution_contracts::process::ProcessQuery;
+pub use lash_execution_contracts::process::ProcessRecord;
+pub use lash_execution_contracts::process::ProcessRegistrar;
+pub use lash_execution_contracts::process::ProcessRegistrationReceipt;
+pub use lash_execution_contracts::process::ProcessRegistry;
+#[cfg(any(test, feature = "testing"))]
+pub use lash_execution_contracts::process::ProcessRegistryTestSupport;
+pub use lash_execution_contracts::process::ProcessRetention;
+pub use lash_execution_contracts::process::ProcessRosterRecords;
+pub use lash_execution_contracts::process::ProcessStartReceipt;
+pub use lash_execution_contracts::process::ProcessToolIntents;
 
 // The vocabulary this module's signatures name (the facade-completeness rule).
 pub use lash_core_store::artifact_referrer::{
@@ -67,27 +86,43 @@ pub use lash_protocol_types::SessionHistoryRecord as GenericSessionHistoryRecord
 pub use lash_protocol_types::{VersionRange, VersionRangeError};
 
 pub use lash_core::CheckpointKind;
-/// The store halves a [`StoreSet`](crate::StoreSet) hands out as trait
-/// objects, nameable so a host can decorate a store set (FIG-4373).
-pub use lash_core::ProcessDefinitionStore;
 pub use lash_core::RunSpecHash;
 pub use lash_core::attachments::{
     AttachmentRootPage, AttachmentRootSource, CompleteAttachmentRoots,
 };
-/// The logical run reference a run store ends a run by.
-pub use lash_core::engine::RunRef;
 /// Durable session-store inputs and outputs exposed to storage integrators.
-pub use lash_core::runtime::{
-    ActiveTurnIngress, AdmissionBoundary, AdmittedQueuedWork, AdmittedTurnInputs, DeliveryPolicy,
-    DeploymentStore, DeploymentStoreDecorator, ForkSessionReceipt, ForkSessionRequest,
-    LiveReplayOutcome, LiveReplaySubscription, PendingTurnInputBatch, PendingTurnInputDraft,
-    QueuedCheckpointTurnInput, QueuedWorkAuthority, QueuedWorkBatch, QueuedWorkBatchDraft,
-    QueuedWorkCompletion, QueuedWorkEnqueueOutcome, QueuedWorkPayload, RuntimeCheckpointComponents,
-    RuntimeSessionState, SessionCreationHead, SessionCursorError, SessionStoreCreateRequest,
-    TurnInputAdmissionMode, TurnInputCheckpointBoundary, TurnInputCompletion,
-    TurnInputCompletionData, TurnInputIngress, TurnInputState, TurnInputStateKind,
-    TurnLaneAdmissionPolicy,
-};
+pub use lash_core::runtime::ActiveTurnIngress;
+pub use lash_core::runtime::AdmissionBoundary;
+pub use lash_core::runtime::AdmittedQueuedWork;
+pub use lash_core::runtime::AdmittedTurnInputs;
+pub use lash_core::runtime::DeliveryPolicy;
+pub use lash_core::runtime::DeploymentStoreDecorator;
+pub use lash_core::runtime::ForkSessionReceipt;
+pub use lash_core::runtime::ForkSessionRequest;
+pub use lash_core::runtime::LiveReplayOutcome;
+pub use lash_core::runtime::LiveReplaySubscription;
+pub use lash_core::runtime::PendingTurnInputBatch;
+pub use lash_core::runtime::PendingTurnInputDraft;
+pub use lash_core::runtime::QueuedCheckpointTurnInput;
+pub use lash_core::runtime::QueuedWorkAuthority;
+pub use lash_core::runtime::QueuedWorkBatch;
+pub use lash_core::runtime::QueuedWorkBatchDraft;
+pub use lash_core::runtime::QueuedWorkCompletion;
+pub use lash_core::runtime::QueuedWorkEnqueueOutcome;
+pub use lash_core::runtime::QueuedWorkPayload;
+pub use lash_core::runtime::RuntimeCheckpointComponents;
+pub use lash_core::runtime::RuntimeSessionState;
+pub use lash_core::runtime::SessionCreationHead;
+pub use lash_core::runtime::SessionCursorError;
+pub use lash_core::runtime::SessionStoreCreateRequest;
+pub use lash_core::runtime::TurnInputAdmissionMode;
+pub use lash_core::runtime::TurnInputCheckpointBoundary;
+pub use lash_core::runtime::TurnInputCompletion;
+pub use lash_core::runtime::TurnInputCompletionData;
+pub use lash_core::runtime::TurnInputIngress;
+pub use lash_core::runtime::TurnInputState;
+pub use lash_core::runtime::TurnInputStateKind;
+pub use lash_core::runtime::TurnLaneAdmissionPolicy;
 pub use lash_core::session_graph::RealizedNodeTimestamp;
 /// The artifact-cleanup ledger a [`StoreSet`](crate::StoreSet) hands out
 /// as a trait object (FIG-4373).
@@ -110,6 +145,12 @@ pub use lash_core::{
     ArtifactName, ArtifactReferrer, FrameEnvironmentId, ReferrerClaim, ResolvedArtifactCleanup,
 };
 pub use lash_core::{AttachmentReferrers, AttachmentWrite, SessionReferrerState};
+pub use lash_execution_contracts::deployment::DeploymentStore;
+/// The store halves a [`StoreSet`](crate::StoreSet) hands out as trait
+/// objects, nameable so a host can decorate a store set (FIG-4373).
+pub use lash_execution_contracts::process::ProcessDefinitionStore;
+/// The logical run reference a run store ends a run by.
+pub use lash_execution_contracts::run::RunRef;
 /// Queued-work ordering values and admission-selection helpers.
 pub mod queued_work {
     // The vocabulary this module's signatures name (the facade-completeness rule).
@@ -121,9 +162,47 @@ pub mod queued_work {
         select_leading_session_command,
     };
 }
+/// Attachment ownership, retention and reclamation contracts.
+pub use lash_core::AdoptedAttachmentCondemnation;
+pub use lash_core::AttachmentBlobPage;
+pub use lash_core::AttachmentCondemnation;
+pub use lash_core::AttachmentCondemnationAdoption;
+pub use lash_core::AttachmentCondemnationPhase;
+pub use lash_core::AttachmentCondemnationProvenance;
+pub use lash_core::AttachmentCondemnationRecord;
+pub use lash_core::AttachmentCondemnationSettlement;
+pub use lash_core::AttachmentContentMismatch;
+pub use lash_core::AttachmentDeleteArming;
+pub use lash_core::AttachmentDeleteStallReason;
+pub use lash_core::AttachmentPolicy;
+pub use lash_core::AttachmentReadPolicy;
+pub use lash_core::AttachmentReclamationPolicy;
+pub use lash_core::AttachmentRetentionFailure;
+pub use lash_core::AttachmentRetentionStoreFailure;
+pub use lash_core::AttachmentRootSet;
+pub use lash_core::AttachmentSettlementOutcome;
+pub use lash_core::AttachmentStore;
+pub use lash_core::AttachmentStoreError;
+pub use lash_core::AttachmentStoreFailureClass;
+pub use lash_core::AttachmentStorePersistence;
+pub use lash_core::AttachmentSweepGeneration;
+pub use lash_core::AttachmentWriteFence;
+pub use lash_core::AttachmentWritePermit;
+pub use lash_core::AttachmentWriteToken;
+pub use lash_core::EmptyRootSetPolicy;
+pub use lash_core::MAX_ATTACHMENT_DELETE_ATTEMPTS;
+pub use lash_core::ModuleArtifactCorruption;
+pub use lash_core::ModuleArtifactRefusal;
+pub use lash_core::StoredAttachment;
+pub use lash_core::StoredBlobRef;
+pub use lash_core::attachments::AttachmentReclamationFailure;
 pub use lash_core::attachments::{
     AttachmentReclamationRetryPolicy, AttachmentReclamationRetryPolicyError,
 };
+pub use lash_core::facade_support::AttachmentGcFence;
+pub use lash_core::facade_support::AttachmentReclamationReport;
+pub use lash_core::facade_support::RuntimeAttachmentStore;
+pub use lash_core::facade_support::reclaim_unreferenced_attachments;
 pub use lash_core::session_graph::WindowAnchor;
 pub use lash_core::store::PluginWriterRangesFuture;
 /// A session's fault record (ADR 0109 §9): one segment of
@@ -178,26 +257,6 @@ pub use lash_core::store::{
 pub use lash_core::store::{
     ConformanceDeployment, ConformanceStore, DecodedRowCounts, GraphRowCorruption, StoreTestSupport,
 };
-/// Attachment ownership, retention and reclamation contracts.
-pub use lash_core::{
-    AdoptedAttachmentCondemnation, AttachmentBlobPage, AttachmentCondemnation,
-    AttachmentCondemnationAdoption, AttachmentCondemnationPhase, AttachmentCondemnationProvenance,
-    AttachmentCondemnationRecord, AttachmentCondemnationSettlement, AttachmentContentMismatch,
-    AttachmentDeleteArming, AttachmentDeleteStallReason, AttachmentPolicy, AttachmentReadPolicy,
-    AttachmentReclamationPolicy, AttachmentRetentionFailure, AttachmentRetentionStoreFailure,
-    AttachmentRootSet, AttachmentSettlementOutcome, AttachmentStore, AttachmentStoreError,
-    AttachmentStoreFailureClass, AttachmentStorePersistence, AttachmentSweepGeneration,
-    AttachmentWriteFence, AttachmentWritePermit, AttachmentWriteToken, EmptyRootSetPolicy,
-    MAX_ATTACHMENT_DELETE_ATTEMPTS, ProcessEnvStore, StoredAttachment, StoredBlobRef,
-    TurnPreludeStore, attachments::AttachmentReclamationFailure, facade_support::AttachmentGcFence,
-    facade_support::AttachmentReclamationReport, facade_support::RuntimeAttachmentStore,
-    facade_support::reclaim_unreferenced_attachments,
-};
-/// The Lash VM module-artifact port a backend's store set supplies.
-pub use lash_core::{
-    ArtifactStoreError, DurabilityTier, ModuleArtifactBody, ModuleArtifactCorruption,
-    ModuleArtifactHold, ModuleArtifactRefusal, ModuleArtifactStore,
-};
 pub use lash_core::{
     BlobRef, CallResultSummary, DurableItem, DurablePayload, DurableScan, DurableScanPage,
     DurableSurface, ExecutedCall, ExecutedCallOutcome, FLEET_FORMAT_VERSION, FleetFormat,
@@ -223,3 +282,13 @@ pub use lash_core_store::attachments::{
     ContentMismatchDetail, ProviderFileCacheLimits, ProviderFileDelivery, ProviderFileUploader,
     UploadedProviderFile,
 };
+/// The Lash VM module-artifact port a backend's store set supplies.
+pub use lash_execution_contracts::module_artifacts::ArtifactStoreError;
+pub use lash_execution_contracts::module_artifacts::DurabilityTier;
+pub use lash_execution_contracts::module_artifacts::ModuleArtifactBody;
+pub use lash_execution_contracts::module_artifacts::ModuleArtifactHold;
+pub use lash_execution_contracts::module_artifacts::ModuleArtifactStore;
+pub use lash_execution_contracts::process::ProcessEnvStore;
+pub use lash_execution_contracts::turn_prelude::TurnPreludeStore;
+
+pub use lash_execution_contracts::process::registry_delegate::RegisteredProcess;

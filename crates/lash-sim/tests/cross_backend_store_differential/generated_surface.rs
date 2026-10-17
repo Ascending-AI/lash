@@ -74,7 +74,7 @@ use observation::*;
 struct SurfaceRunner {
     name: &'static str,
     scenario: StoreContractScenario,
-    registry: Arc<dyn lash_core::ProcessRegistry>,
+    registry: Arc<dyn lash_execution_contracts::process::ProcessRegistry>,
     /// The durable store the registry commits through.
     reader: SurfaceReader,
 }
@@ -178,8 +178,10 @@ async fn surface_runners(
     )
     .await
     .unwrap();
-    lash_core::testing::process_execution_env_fixture(sqlite_stores.process_env_store().as_ref())
-        .await;
+    lash_execution_contracts::testing::process_execution_env_fixture(
+        sqlite_stores.process_env_store().as_ref(),
+    )
+    .await;
     let sqlite_registry = sqlite_stores.process_registry();
 
     let postgres_store = Arc::new(
@@ -194,7 +196,8 @@ async fn surface_runners(
     let postgres_runtime: Arc<dyn RuntimeStore> = postgres_store;
     // Every generated registration names the fixture execution env, and the
     // per-case reset truncates it, so each backend publishes it per case.
-    lash_core::testing::process_execution_env_fixture(&storage.process_env_store()).await;
+    lash_execution_contracts::testing::process_execution_env_fixture(&storage.process_env_store())
+        .await;
     let postgres_registry = Arc::new(
         storage
             .process_registry()

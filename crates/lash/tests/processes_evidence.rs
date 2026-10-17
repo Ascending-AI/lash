@@ -533,8 +533,8 @@ fn processes_area_witnesses() {
     });
     // W0278: lash::process::ProcessStartOptions [struct]
     type_witness::<lash::process::ProcessStartOptions>();
-    // W0279: lash::process::ProcessStartOptions::execution_context [function]
-    let _ = lash::process::ProcessStartOptions::execution_context;
+    // W0279: lash::persistence::ProcessOpScope::execution_context [function]
+    let _ = lash::persistence::ProcessOpScope::execution_context;
     // W0280: lash::process::ProcessStartOptions::initial_observers [field]
     field_witness(|value: &lash::process::ProcessStartOptions| {
         let _ = &value.initial_observers;
@@ -739,7 +739,8 @@ mod named_component_laws {
 
         fn recipe(
             self: Arc<Self>,
-        ) -> Result<lash::plugins::ProcessRecipe, lash_core::plugin::PluginError> {
+        ) -> Result<lash::plugins::ProcessRecipe, lash_execution_contracts::plugin_error::PluginError>
+        {
             let mut reg =
                 lash::plugins::PluginRegistrar::<Self, lash::plugins::registries::Process>::for_process(self.declaration().id.as_str());
             let key = lash::hook_key!("record");
@@ -811,7 +812,7 @@ mod named_component_laws {
     impl Inert {
         fn declare(
             reg: &mut lash_core::plugin::PluginRegistrar<Self>,
-        ) -> std::result::Result<(), lash_core::plugin::PluginError> {
+        ) -> std::result::Result<(), lash_execution_contracts::plugin_error::PluginError> {
             reg.prompt().section(
                 lash_core::plugin::prompt::PromptSectionSpec::new(
                     lash::prompt::PromptSectionKey::new("authority-offer")
@@ -840,8 +841,10 @@ mod named_component_laws {
 
         fn recipe(
             self: Arc<Self>,
-        ) -> std::result::Result<lash_core::plugin::PluginRecipe, lash_core::plugin::PluginError>
-        {
+        ) -> std::result::Result<
+            lash_core::plugin::PluginRecipe,
+            lash_execution_contracts::plugin_error::PluginError,
+        > {
             let mut reg = lash_core::plugin::PluginRegistrar::<Inert>::new(
                 lash_core::plugin::PluginFactory::id(self.as_ref()),
             );
@@ -1254,8 +1257,9 @@ mod named_component_laws {
             let result = self.inner.process_authority(id).await?;
             Ok(result.map(|(mut record, bytes)| {
                 if let Some(env_ref) = self.reads.override_env_ref.lock_recover().clone() {
-                    if let lash_core::ProcessInput::Engine { launch, .. } =
-                        Arc::make_mut(&mut record.input)
+                    if let lash_execution_contracts::process::ProcessInput::Engine {
+                        launch, ..
+                    } = Arc::make_mut(&mut record.input)
                     {
                         launch.env = env_ref;
                     }
@@ -1474,7 +1478,9 @@ mod named_component_laws {
         world.core.shutdown().await.unwrap();
         let children = lash_conformance::env_authority_read(world.stores.clone()).await;
         for child in children {
-            let lash_core::ProcessInput::SessionTurn { create_request, .. } = child.input.as_ref()
+            let lash_execution_contracts::process::ProcessInput::SessionTurn {
+                create_request, ..
+            } = child.input.as_ref()
             else {
                 assert!(matches!(
                     world.core.processes().environment(&child.id).await,
@@ -1484,10 +1490,9 @@ mod named_component_laws {
                 ));
                 continue;
             };
-            let expected = create_request
-                .session_id
-                .clone()
-                .unwrap_or_else(|| lash_core::facade_support::process_child_session_id(&child.id));
+            let expected = create_request.session_id.clone().unwrap_or_else(|| {
+                lash_execution_contracts::process::process_child_session_id(&child.id)
+            });
             let before = reads.calls.load(Ordering::SeqCst);
             let view = world
                 .core

@@ -229,12 +229,15 @@ async fn builder_with_process_tools(
 
 /// A node's builder over `stores` whose processes run on `workers`.
 async fn builder_on_workers(
-    stores: Arc<dyn lash_core::StoreSet>,
+    stores: Arc<dyn lash_execution_contracts::backend::StoreSet>,
     process_tools: bool,
     echo: EchoComponent,
     workers: lash::vm::WorkerService,
 ) -> lash::LashCoreBuilder {
-    lash_core::testing::process_execution_env_fixture(stores.process_env_store().as_ref()).await;
+    lash_execution_contracts::testing::process_execution_env_fixture(
+        stores.process_env_store().as_ref(),
+    )
+    .await;
     let backend = lash_conformance::backend_over(stores);
     let bounds = lash::vm::RunBounds {
         charge: 1_000_000,
@@ -265,13 +268,13 @@ async fn builder_on_workers(
         builder
             .plugin(Arc::new(
                 lash::process_controls::SessionProcessAdminPluginFactory::new(
-                    lash_core::lifetime::session_or_starter,
+                    lash_execution_contracts::process::lifetime::session_or_starter,
                     lash::process::env::policy::from_run(|_| Ok(Vec::new())),
                 ),
             ))
             .process_component(
                 Arc::new(lash::process_controls::ProcessControlsComponent::new(
-                    lash_core::lifetime::session_or_starter,
+                    lash_execution_contracts::process::lifetime::session_or_starter,
                     lash::process::env::policy::restrict_or(lash::process::env::policy::refuse(
                         "a workflow process starts only inside a process",
                     )),
@@ -611,7 +614,7 @@ async fn a_host_captures_exactly_the_published_entrys_environment() {
 async fn start(
     core: &lash::LashCore,
     env_ref: &lash_core::ProcessEnvRef,
-    definition: &lash_core::ProcessDefinition,
+    definition: &lash_execution_contracts::process::ProcessDefinition,
     key: &str,
     name: &str,
 ) -> lash_core::ProcessId {
@@ -623,17 +626,17 @@ async fn start(
 async fn start_with(
     core: &lash::LashCore,
     env_ref: &lash_core::ProcessEnvRef,
-    definition: &lash_core::ProcessDefinition,
+    definition: &lash_execution_contracts::process::ProcessDefinition,
     key: &str,
     args: serde_json::Map<String, serde_json::Value>,
 ) -> lash_core::ProcessId {
     core.processes()
         .start(
-            lash_core::ProcessStartRequest::definition(
+            lash_execution_contracts::process::ProcessStartRequest::definition(
                 definition.id.clone(),
                 Some(definition.signature.clone()),
                 args,
-                lash_core::EngineLaunch::new(
+                lash_execution_contracts::process::EngineLaunch::new(
                     env_ref.clone(),
                     core.processes()
                         .engine_defaults(
@@ -642,8 +645,8 @@ async fn start_with(
                         )
                         .expect("the kernel states its settings"),
                 ),
-                lash_core::ProcessOriginator::host(),
-                lash_core::LifetimeDecision::Detached,
+                lash_execution_contracts::process::ProcessOriginator::host(),
+                lash_execution_contracts::process::LifetimeDecision::Detached,
             )
             .with_host_start_key(key),
             core.effect_host(),
@@ -662,7 +665,7 @@ async fn finished(core: &lash::LashCore, process_id: &lash_core::ProcessId) -> s
     .await
     .expect("the process settles")
     .expect("the output reads");
-    let lash_core::ProcessAwaitOutput::Settled { output } = output else {
+    let lash_execution_contracts::process::ProcessAwaitOutput::Settled { output } = output else {
         panic!("the process settles with an output: {output:?}");
     };
     assert!(output.is_success(), "the process finishes: {output:?}");
@@ -1249,7 +1252,7 @@ async fn a_process_starts_another_entry_of_its_document_by_function_reference_an
         .await
         .process_component(
             Arc::new(lash::process_controls::ProcessControlsComponent::new(
-                lash_core::lifetime::session_or_starter,
+                lash_execution_contracts::process::lifetime::session_or_starter,
                 Arc::new(WorkerLaunch),
             )),
             lash::process_controls::PROCESS_CONTROLS_CONFIG,
@@ -1334,12 +1337,12 @@ async fn a_process_starts_another_entry_of_its_document_by_function_reference_an
             .is_none(),
         "starting the extracted child publishes no sibling descriptor"
     );
-    use lash_core::ProcessQuery as _;
+    use lash_execution_contracts::process::ProcessQuery as _;
     let rows = stores
         .process_registry()
         .list_processes_page(
-            &lash_core::ProcessListFilter {
-                status: lash_core::ProcessStatusFilter::Any,
+            &lash_execution_contracts::process::ProcessListFilter {
+                status: lash_execution_contracts::process::ProcessStatusFilter::Any,
                 ..Default::default()
             },
             std::num::NonZeroUsize::new(10).expect("limit"),
@@ -1401,7 +1404,7 @@ async fn timer_park_after(
                 .expect("the process is retained");
             trace.push(format!("{observed:?}"));
             for wait in observed.lifecycle.waits() {
-                if let lash_core::WaitKind::Sleep { until_ms } = wait.kind {
+                if let lash_execution_contracts::process::WaitKind::Sleep { until_ms } = wait.kind {
                     let until = u64::try_from(until_ms).expect("a nonnegative timer instant");
                     if until > after {
                         return until;
@@ -1685,7 +1688,10 @@ async fn a_sealed_env_linking_a_retired_components_effect_parks_with_the_typed_r
                 .await
                 .expect("the process reads")
                 .expect("the process is retained");
-            if matches!(observed.park, lash_core::ProcessParkState::Parked(_)) {
+            if matches!(
+                observed.park,
+                lash_execution_contracts::process::ProcessParkState::Parked(_)
+            ) {
                 break observed;
             }
             tokio::time::sleep(std::time::Duration::from_millis(20)).await;
@@ -1695,12 +1701,14 @@ async fn a_sealed_env_linking_a_retired_components_effect_parks_with_the_typed_r
     .expect("the process parks within two minutes");
     assert_eq!(
         observed.park,
-        lash_core::ProcessParkState::Parked(lash_core::ProcessParkReason::EnvRefused {
-            refusal: lash::process::ProcessEnvRefusal::RetiredComponentServes {
-                id: echo_id(),
-                effect: "tools.echo".to_owned(),
-            },
-        })
+        lash_execution_contracts::process::ProcessParkState::Parked(
+            lash_execution_contracts::park::ProcessParkReason::EnvRefused {
+                refusal: lash::process::ProcessEnvRefusal::RetiredComponentServes {
+                    id: echo_id(),
+                    effect: "tools.echo".to_owned(),
+                },
+            }
+        )
     );
     assert!(
         observed.lifecycle.terminal().is_none(),

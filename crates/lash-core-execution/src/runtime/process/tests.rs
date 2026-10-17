@@ -1,10 +1,10 @@
 use super::*;
 
 fn registration(_id: &str) -> ProcessRegistration {
-    crate::testing::held_engine_registration(
+    lash_execution_contracts::testing::held_engine_registration(
         serde_json::Value::Null,
         ProcessProvenance::host(),
-        crate::Lifetime::Detached,
+        lash_execution_contracts::process::Lifetime::Detached,
     )
 }
 
@@ -16,7 +16,7 @@ fn plan_append(
     last_event_sequence: Option<u64>,
     replay_lookup: Option<ProcessEvent>,
     occurred_at_ms: u64,
-) -> Result<ProcessEventAppendPlan, crate::PluginError> {
+) -> Result<ProcessEventAppendPlan, lash_execution_contracts::plugin_error::PluginError> {
     prepare_process_event_append(
         record,
         request.canonical(record, crate::FleetFormat::current())?,
@@ -242,10 +242,11 @@ fn replayed_generic_non_tail_does_not_rewind_projection_timestamp() {
 #[test]
 fn an_ended_referrer_classifies_by_its_typed_cause_not_its_message() {
     let referrer = crate::ArtifactReferrer::ProcessRecord(crate::ProcessId::fixture("ended"));
-    let ended: crate::PluginError = crate::ArtifactStoreError::ReferrerEnded {
-        referrer: referrer.clone(),
-    }
-    .into();
+    let ended: lash_execution_contracts::plugin_error::PluginError =
+        lash_execution_contracts::module_artifacts::ArtifactStoreError::ReferrerEnded {
+            referrer: referrer.clone(),
+        }
+        .into();
     assert_eq!(artifact_referrer_ended(&ended), Some(&referrer));
     assert!(!ended.is_retryable());
     // A permanent fence is terminal: a redrive meets it again.
@@ -263,20 +264,27 @@ fn an_ended_referrer_classifies_by_its_typed_cause_not_its_message() {
     let journaled: crate::RuntimeEffectControllerError =
         serde_json::from_value(serde_json::to_value(&controller).expect("encode")).expect("decode");
     assert_eq!(
-        artifact_referrer_ended(&crate::PluginError::RuntimeEffectController(journaled)),
+        artifact_referrer_ended(
+            &lash_execution_contracts::plugin_error::PluginError::RuntimeEffectController(
+                journaled
+            )
+        ),
         Some(&referrer)
     );
 
-    let quoted = crate::PluginError::Session(format!("artifact referrer `{referrer}` has ended"));
+    let quoted = lash_execution_contracts::plugin_error::PluginError::Session(format!(
+        "artifact referrer `{referrer}` has ended"
+    ));
     assert_eq!(
         artifact_referrer_ended(&quoted),
         None,
         "prose that quotes the refusal is not a typed fence"
     );
-    let missing: crate::PluginError = crate::ArtifactStoreError::ArtifactMissing {
-        artifact_ref: "env".to_string(),
-    }
-    .into();
+    let missing: lash_execution_contracts::plugin_error::PluginError =
+        lash_execution_contracts::module_artifacts::ArtifactStoreError::ArtifactMissing {
+            artifact_ref: "env".to_string(),
+        }
+        .into();
     assert_eq!(
         artifact_referrer_ended(&missing),
         None,

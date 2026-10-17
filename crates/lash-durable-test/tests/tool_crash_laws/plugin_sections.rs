@@ -31,7 +31,7 @@ impl Installed {
             Self::Section => builder.plugin(Arc::new(Sectioned)),
             Self::Delegation => builder.plugin(Arc::new(delegation::DelegationPluginFactory::new(
                 served::spec(16),
-                lash_core::lifetime::starter,
+                lash_execution_contracts::process::lifetime::starter,
             ))),
         }
     }
@@ -70,7 +70,10 @@ impl lash::plugins::PluginFactory for Sectioned {
 
     fn recipe(
         self: Arc<Self>,
-    ) -> std::result::Result<lash_core::plugin::PluginRecipe, lash_core::plugin::PluginError> {
+    ) -> std::result::Result<
+        lash_core::plugin::PluginRecipe,
+        lash_execution_contracts::plugin_error::PluginError,
+    > {
         let mut reg = lash_core::plugin::PluginRegistrar::<Sectioned>::new(SECTIONED);
         reg.prompt().section(
             lash::plugins::PromptSectionSpec::new(

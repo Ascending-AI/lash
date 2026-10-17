@@ -35,7 +35,7 @@ pub async fn an_awaited_engine_key_records_a_waiting_fact(backend: &Backend) -> 
         })
         .await?;
         let waiting = record(&backend, &process).await?;
-        let key = crate::WaitKind::Key {
+        let key = lash_execution_contracts::process::WaitKind::Key {
             name: KeyName(PEER_KEY.to_owned()),
         };
         ensure!(

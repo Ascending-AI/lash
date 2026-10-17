@@ -1132,7 +1132,10 @@ impl lash::tools::ToolProvider for AskTwice {
     fn tool_manifests(
         &self,
         _config: &lash_core::OwnerConfigView,
-    ) -> std::result::Result<Vec<lash::tools::ToolManifest>, lash_core::PluginError> {
+    ) -> std::result::Result<
+        Vec<lash::tools::ToolManifest>,
+        lash_execution_contracts::plugin_error::PluginError,
+    > {
         Ok(vec![ask_twice_definition().manifest()])
     }
 

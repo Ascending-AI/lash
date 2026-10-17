@@ -26,16 +26,17 @@ use lash_core::{
     Message, MessageRole, Part, ProtocolTurnOptions, TurnMachine, TurnMachineConfig,
     facade_support::TurnFinish, facade_support::TurnOutcome, facade_support::shared_parts,
 };
+use lash_core_execution::ActorContext;
 use lash_core_execution::runtime::actor::round::{
     AcceptedStop, AdmittedExecution, CompletedCall, MemberBody, MemberOutcome, MemberPin,
     PolicyView, RoundTools,
 };
-use lash_core_execution::{ActorContext, Backend};
 use lash_core_store::effect_opener::EffectOpener;
 use lash_core_store::tool_run::Material;
 use lash_core_store::tool_run::SettledOutput;
 use lash_core_store::tool_run::{CompletionSource, MaterialOwner, MaterialRole};
 use lash_durable::ActorKey;
+use lash_execution_contracts::backend::Backend;
 use lash_protocol_types::sync::MutexExt as _;
 use lash_protocol_types::{
     ExecutionBudgets, ExecutionPolicy, ModelToolReturn, SessionId, ToolCallOutput, ToolFailure,
@@ -303,7 +304,7 @@ impl ProtocolDriverHandle<lash_core::HostTurnProtocol> for Protocol {
                 format!(
                     "{}={}",
                     call.tool_name,
-                    serde_json::to_string(&lash_core::Durable(&call.output.outcome))
+                    serde_json::to_string(&lash_protocol_types::Durable(&call.output.outcome))
                         .unwrap_or_default()
                 )
             })

@@ -1,5 +1,7 @@
 //! Conformance for referrer-bound process environment storage.
 
+use lash_core::TurnPrelude;
+
 use super::*;
 use pretty_assertions::assert_eq;
 
@@ -10,7 +12,7 @@ pub struct ReopenableProcessEnvStore {
 }
 
 fn sample_env_spec() -> crate::ProcessEnv {
-    lash_core::testing::process_env_with_limit(1024)
+    lash_execution_contracts::testing::process_env_with_limit(1024)
 }
 
 #[expect(
@@ -303,8 +305,7 @@ pub async fn turn_prelude_reads_back_by_digest(
         .expect("read")
         .expect("the recorded prelude is stored");
     assert!(prelude_ref.matches_store_bytes(&bytes));
-    let read = prelude_ref
-        .read(reopened.as_ref())
+    let read = TurnPrelude::read(&prelude_ref, reopened.as_ref())
         .await
         .expect("the prelude reads back by its digest");
     assert_eq!(prelude_json(&read), prelude_json(&prelude));
@@ -328,8 +329,7 @@ pub async fn turn_prelude_reads_back_by_digest(
         reopened.get_turn_prelude(&unrecorded).await.expect("read"),
         None
     );
-    let missing = unrecorded
-        .read(reopened.as_ref())
+    let missing = TurnPrelude::read(&unrecorded, reopened.as_ref())
         .await
         .expect_err("a digest nothing wrote is no prelude");
     assert_eq!(missing.code, crate::RuntimeErrorCode::ArtifactMissing);
@@ -363,8 +363,7 @@ pub async fn turn_prelude_is_released_with_its_journal(store: Arc<dyn crate::Tur
         .end_turn_prelude_referrer(&cleanup(first))
         .await
         .expect("end the first journal");
-    let read = prelude_ref
-        .read(store.as_ref())
+    let read = TurnPrelude::read(&prelude_ref, store.as_ref())
         .await
         .expect("the second journal still holds the prelude");
     assert_eq!(prelude_json(&read), prelude_json(&prelude));
@@ -378,8 +377,7 @@ pub async fn turn_prelude_is_released_with_its_journal(store: Arc<dyn crate::Tur
             None
         );
     }
-    let missing = prelude_ref
-        .read(store.as_ref())
+    let missing = TurnPrelude::read(&prelude_ref, store.as_ref())
         .await
         .expect_err("a released prelude is never re-derived");
     assert_eq!(missing.code, crate::RuntimeErrorCode::ArtifactMissing);

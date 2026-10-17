@@ -235,7 +235,10 @@ async fn exact_host_import_does_not_resolve_ambiguous_library_labels() {
             .await
             .expect("SQLite memory"),
     );
-    lash_core::testing::process_execution_env_fixture(stores.process_env_store().as_ref()).await;
+    lash_execution_contracts::testing::process_execution_env_fixture(
+        stores.process_env_store().as_ref(),
+    )
+    .await;
     let workers = lash::vm::WorkerService::default();
     let bounds = workers.config().run_bounds;
     let core = lash::LashCore::standard_builder(lash_conformance::backend_over(stores))

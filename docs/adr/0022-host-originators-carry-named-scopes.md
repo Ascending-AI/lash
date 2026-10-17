@@ -8,6 +8,6 @@
 
 Hosts choose grouping labels such as automation ids or CLI profiles. Lash assigns no product meaning or security policy to them. A single host bucket is insufficient for independent lifecycle groups. Synthetic session ids are rejected because they misstate provenance and require downstream readers to interpret that fiction.
 
-Absent scope preserves the unscoped host representation. [Originator construction and projection](../../crates/lash-core-execution/src/runtime/process/model.rs) own the identity.
+Absent scope preserves the unscoped host representation. [Originator construction and projection](../../crates/lash-execution-contracts/src/process/model.rs) own the identity.
 
 [ADR 0137](0137-the-host-owns-events-routing-and-scheduling.md) owns host events, routing and scheduling.

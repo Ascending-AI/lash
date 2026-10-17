@@ -7,9 +7,12 @@ use std::str::FromStr;
 
 use async_trait::async_trait;
 use lash_conformance::{FleetFormatDeployment, fleet_format_conformance};
-use lash_core_execution::{
-    FLEET_FORMAT_VERSION, FleetFormat, StoreError, StorePreflight, StoreSchemaStatus, WriterPin,
-};
+use lash_core_store::store::FLEET_FORMAT_VERSION;
+use lash_core_store::store::FleetFormat;
+use lash_core_store::store::StoreError;
+use lash_core_store::store::StorePreflight;
+use lash_core_store::store::StoreSchemaStatus;
+use lash_core_store::store::WriterPin;
 use lash_postgres_store::{PostgresStorePreflight, SchemaCheck};
 use sqlx::postgres::{PgConnectOptions, PgPool, PgPoolOptions};
 use sqlx::{Connection, Executor, PgConnection};
@@ -32,7 +35,7 @@ impl FleetFormatDeployment for PostgresDeployment {
 
     async fn open_admitting(
         &self,
-        writable: lash_core_execution::compat::VersionRange,
+        writable: lash_core_store::compat::VersionRange,
     ) -> Result<FleetFormat, StoreError> {
         lash_postgres_store::testing::from_pool_as(
             self.scratch.pool.clone(),

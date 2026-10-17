@@ -1,14 +1,28 @@
 use super::*;
-use lash_core_execution::store::{
-    AnchorUnavailable, CommittedTurnCursor, CommittedTurnNodesPage, CommittedTurnReceipt,
-    FailureEvidenceCursor, FailureEvidencePage, HistoryAnchor, HistoryBudget, HistoryCursor,
-    HistoryNode, HistoryPage, HistoryStop, LineageStamp, SessionHistoryStore, SessionWindowRead,
-    WindowSelector,
-};
-use lash_core_execution::store_backend_support::{
-    HeadPathProbe, OwnerExit, OwnerExitParent, OwnerLowestNode, PathNode, WindowCacheRead,
-    WindowFrame, WindowReuse,
-};
+use lash_core_store::store::AnchorUnavailable;
+use lash_core_store::store::CommittedTurnCursor;
+use lash_core_store::store::CommittedTurnNodesPage;
+use lash_core_store::store::CommittedTurnReceipt;
+use lash_core_store::store::FailureEvidenceCursor;
+use lash_core_store::store::FailureEvidencePage;
+use lash_core_store::store::HistoryAnchor;
+use lash_core_store::store::HistoryBudget;
+use lash_core_store::store::HistoryCursor;
+use lash_core_store::store::HistoryNode;
+use lash_core_store::store::HistoryPage;
+use lash_core_store::store::HistoryStop;
+use lash_core_store::store::LineageStamp;
+use lash_core_store::store::SessionHistoryStore;
+use lash_core_store::store::SessionWindowRead;
+use lash_core_store::store::WindowSelector;
+use lash_core_store::store_backend_support::HeadPathProbe;
+use lash_core_store::store_backend_support::OwnerExit;
+use lash_core_store::store_backend_support::OwnerExitParent;
+use lash_core_store::store_backend_support::OwnerLowestNode;
+use lash_core_store::store_backend_support::PathNode;
+use lash_core_store::store_backend_support::WindowCacheRead;
+use lash_core_store::store_backend_support::WindowFrame;
+use lash_core_store::store_backend_support::WindowReuse;
 use std::num::NonZeroU32;
 use std::sync::atomic::Ordering;
 
@@ -22,7 +36,7 @@ fn nonnegative(kind: &'static str, field: &'static str, value: i64) -> Result<u6
     u64::try_from(value).map_err(|_| corrupt(kind, format!("{field} is negative: {value}")))
 }
 fn live(conn: &Connection, session_id: &SessionId) -> Result<(), StoreError> {
-    lash_core_execution::store::validate_session_id(session_id)?;
+    lash_core_store::store::validate_session_id(session_id)?;
     if conn
         .prepare_cached(session_sql::session_sql().deleted_sqlite.exists.sql())
         .and_then(|mut statement| statement.query_row(params![session_id.as_str()], |_| Ok(())))
@@ -77,7 +91,7 @@ fn missing_anchor(
     let tombstoned = visible_header(conn, session, node)?.is_some_and(|row| row.tombstoned);
     Ok(StoreError::HistoryAnchorUnavailable {
         session_id: session.clone(),
-        node_id: lash_core_execution::NodeId::parse(node)?,
+        node_id: lash_protocol_types::NodeId::parse(node)?,
         reason: if tombstoned {
             AnchorUnavailable::Tombstoned
         } else {
@@ -246,10 +260,10 @@ fn lineage(conn: &Connection, session: &SessionId) -> Result<LineageStamp, Store
 fn terminal_head(
     conn: &Connection,
     session: &SessionId,
-    run: &lash_core_execution::TurnId,
-    fleet: lash_core_execution::FleetFormat,
+    run: &lash_protocol_types::TurnId,
+    fleet: lash_core_store::store::FleetFormat,
     configs: &lash_core_store::store_backend_support::ConfigCache,
-) -> Result<Option<lash_core_execution::store::SessionHeadMeta>, StoreError> {
+) -> Result<Option<lash_core_store::store::SessionHeadMeta>, StoreError> {
     let Some((config_ref, revision, leaf, checkpoint, frame, retained)) = conn
         .prepare_cached(
             crate::session_runs::session_runs_sql()
@@ -306,9 +320,9 @@ fn window_nodes(
     frame: &Header,
     from: i64,
     to: i64,
-    fleet: lash_core_execution::FleetFormat,
+    fleet: lash_core_store::store::FleetFormat,
     decoded: &AtomicU64,
-) -> Result<(Vec<lash_core_execution::SessionNodeRecord>, u64), StoreError> {
+) -> Result<(Vec<lash_core_store::session_graph::SessionNodeRecord>, u64), StoreError> {
     let mut stmt = conn
         .prepare_cached(session_sql::session_sql().graph_sqlite.window_rows.sql())
         .map_err(sqlite_error)?;
@@ -334,7 +348,7 @@ fn window_nodes(
         if pointer != frame.id {
             return Err(StoreError::InvalidWindowAnchor {
                 frame_node_id: frame.id.clone().try_into()?,
-                violation: lash_core_execution::store::WindowAnchorViolation::ForeignFramePointer,
+                violation: lash_core_store::store::WindowAnchorViolation::ForeignFramePointer,
             });
         }
         let bytes = nonnegative("SessionGraph", "body_bytes", bytes)?;
@@ -345,7 +359,7 @@ fn window_nodes(
             ));
         }
         nodes.push(
-            lash_core_execution::SessionNodeRecord::decode_storage_body_for_fleet(
+            lash_core_store::session_graph::SessionNodeRecord::decode_storage_body_for_fleet(
                 id, parent, &body, fleet,
             )
             .map_err(|error| corrupt("SessionGraph node", error.to_string()))?,
@@ -365,11 +379,11 @@ fn window_graph(
     session: &SessionId,
     frame: &Header,
     last: &Header,
-    fleet: lash_core_execution::FleetFormat,
+    fleet: lash_core_store::store::FleetFormat,
     decoded: &AtomicU64,
     windows: &WindowCacheRead,
-) -> Result<lash_core_execution::SessionGraph, StoreError> {
-    let leaf: lash_core_execution::NodeId = last.id.clone().try_into()?;
+) -> Result<lash_core_store::session_graph::SessionGraph, StoreError> {
+    let leaf: lash_protocol_types::NodeId = last.id.clone().try_into()?;
     let leaf_generation = nonnegative("SessionGraph", "generation", last.generation)?;
     let read_under = WindowFrame {
         frame_node_id: &frame.id,
@@ -408,20 +422,20 @@ fn window_graph(
                 .filter(|h| !h.tombstoned)
                 .ok_or_else(|| corrupt("SessionGraph", "frame parent is missing"))?;
             Some(
-                lash_core_execution::FrameNodeId::new(row.frame)
+                lash_core_store::session_identity::FrameNodeId::new(row.frame)
                     .map_err(|error| corrupt("SessionGraph", error.to_string()))?,
             )
         }
         None => None,
     };
-    let anchor = lash_core_execution::session_graph::WindowAnchor {
-        frame_node_id: lash_core_execution::FrameNodeId::new(frame.id.clone())
+    let anchor = lash_core_store::session_graph::WindowAnchor {
+        frame_node_id: lash_core_store::session_identity::FrameNodeId::new(frame.id.clone())
             .map_err(|error| corrupt("SessionGraph", error.to_string()))?,
         generation: read_under.generation,
         external_parent: frame.parent.clone().map(TryInto::try_into).transpose()?,
         previous_frame_node_id: previous,
     };
-    let graph = lash_core_execution::SessionGraph::from_window(nodes, leaf, anchor)?;
+    let graph = lash_core_store::session_graph::SessionGraph::from_window(nodes, leaf, anchor)?;
     Ok(windows.remember(session, &graph, leaf_generation, bytes))
 }
 
@@ -436,7 +450,7 @@ fn window(
     conn: &Connection,
     session: &SessionId,
     selector: WindowSelector,
-    fleet: lash_core_execution::FleetFormat,
+    fleet: lash_core_store::store::FleetFormat,
     read: &WindowReadContext,
 ) -> Result<Option<SessionWindowRead>, StoreError> {
     let WindowReadContext {
@@ -535,7 +549,7 @@ fn window(
         }
         graph
     } else {
-        lash_core_execution::SessionGraph::default()
+        lash_core_store::session_graph::SessionGraph::default()
     };
     let graph = windows.attach(session, graph);
     SessionWindowRead::new(
@@ -594,7 +608,7 @@ impl SessionHistoryStore for SqliteStore {
     async fn contains_active_ancestor(
         &self,
         session_id: &SessionId,
-        node_id: &lash_core_execution::NodeId,
+        node_id: &lash_protocol_types::NodeId,
     ) -> Result<bool, StoreError> {
         let session = session_id.clone();
         let node = node_id.clone();
@@ -696,7 +710,7 @@ fn committed_turns(
     session: &SessionId,
     after: u64,
     limit: NonZeroU32,
-    fleet: lash_core_execution::FleetFormat,
+    fleet: lash_core_store::store::FleetFormat,
     decoded: &AtomicU64,
 ) -> Result<CommittedTurnNodesPage, StoreError> {
     live(conn, session)?;
@@ -769,7 +783,7 @@ fn committed_turns(
                 ));
             }
             nodes.push(
-                lash_core_execution::SessionNodeRecord::decode_storage_body_for_fleet(
+                lash_core_store::session_graph::SessionNodeRecord::decode_storage_body_for_fleet(
                     node_id.to_string(),
                     parent,
                     &body,
@@ -798,7 +812,7 @@ fn ancestors(
     session: &SessionId,
     anchor: HistoryAnchor,
     budget: HistoryBudget,
-    fleet: lash_core_execution::FleetFormat,
+    fleet: lash_core_store::store::FleetFormat,
     decoded: &AtomicU64,
     configs: &lash_core_store::store_backend_support::ConfigCache,
 ) -> Result<HistoryPage, StoreError> {
@@ -969,18 +983,19 @@ fn ancestors(
                 format!("body_bytes differs at `{}`", header.id),
             ));
         }
-        let record = lash_core_execution::SessionNodeRecord::decode_storage_body_for_fleet(
-            header.id,
-            header.parent,
-            &body,
-            fleet,
-        )
-        .map_err(|error| corrupt("SessionGraph node", error.to_string()))?;
+        let record =
+            lash_core_store::session_graph::SessionNodeRecord::decode_storage_body_for_fleet(
+                header.id,
+                header.parent,
+                &body,
+                fleet,
+            )
+            .map_err(|error| corrupt("SessionGraph node", error.to_string()))?;
         decoded.fetch_add(1, Ordering::Relaxed);
         nodes.push(HistoryNode {
             generation: nonnegative("SessionGraph", "generation", header.generation)?,
             owner_session_id: SessionId::parse(header.owner)?,
-            frame_node_id: lash_core_execution::FrameNodeId::new(header.frame)
+            frame_node_id: lash_core_store::session_identity::FrameNodeId::new(header.frame)
                 .map_err(|error| corrupt("SessionGraph", error.to_string()))?,
             body_bytes: nonnegative("SessionGraph", "body_bytes", header.bytes)?,
             record,
@@ -999,7 +1014,7 @@ fn failure_page(
     session: &SessionId,
     after: Option<FailureEvidenceCursor>,
     limit: NonZeroU32,
-    fleet: lash_core_execution::FleetFormat,
+    fleet: lash_core_store::store::FleetFormat,
     decoded: &AtomicU64,
 ) -> Result<FailureEvidencePage, StoreError> {
     live(conn, session)?;
@@ -1044,14 +1059,14 @@ fn failure_page(
     let mut settlements = Vec::new();
     let mut last = None;
     for (committed_at_ms, turn_id, result_json, outcome_code, head_revision) in rows {
-        let receipt = lash_core_execution::store::decode_runtime_commit_receipt_for_fleet(
+        let receipt = lash_core_store::store::decode_runtime_commit_receipt_for_fleet(
             session,
             &turn_id,
             &result_json,
             (committed_at_ms, head_revision),
             fleet,
         )?;
-        lash_core_execution::store::validate_turn_commit_outcome_code(
+        lash_core_store::store::validate_turn_commit_outcome_code(
             &receipt,
             outcome_code.as_deref(),
         )?;
@@ -1067,10 +1082,12 @@ fn failure_page(
             nonnegative("RuntimeCommitReceipt", "committed_at_ms", committed_at_ms)?,
             turn_id.clone().try_into()?,
         ));
-        settlements.push(lash_core_execution::TurnFailureSettlement {
-            turn_id,
-            evidence: receipt.failure_evidence,
-        });
+        settlements.push(
+            lash_core_store::turn_failure_evidence::TurnFailureSettlement {
+                turn_id,
+                evidence: receipt.failure_evidence,
+            },
+        );
     }
     Ok(FailureEvidencePage {
         settlements,

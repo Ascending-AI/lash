@@ -49,32 +49,35 @@ fn module_of(payload: &serde_json::Value) -> Result<String, crate::PluginError> 
 impl crate::ProcessEngine for ModuleDefinitionEngine {
     fn settled_ran(
         &self,
-        _kind: &lash_core::EngineStepKind,
+        _kind: &lash_execution_contracts::process::EngineStepKind,
         _output: &lash_core_store::tool_run::SettledOutput,
     ) -> Vec<(u32, u64)> {
         Vec::new()
     }
 
-    fn trace_class(&self) -> lash_core::ProcessTraceClass {
-        lash_core::ProcessTraceClass::Internal
+    fn trace_class(&self) -> lash_execution_contracts::process::ProcessTraceClass {
+        lash_execution_contracts::process::ProcessTraceClass::Internal
     }
 
     async fn performed_effects(
         &self,
         _payload: &serde_json::Value,
-    ) -> Result<lash_core::PerformedEffects, lash_core::ProcessEnvRefusal> {
-        Ok(lash_core::PerformedEffects::new())
+    ) -> Result<lash_execution_contracts::process::PerformedEffects, lash_core::ProcessEnvRefusal>
+    {
+        Ok(lash_execution_contracts::process::PerformedEffects::new())
     }
 
     async fn check_args(
         &self,
-        _signature: &lash_core::ProcessSignature,
+        _signature: &lash_execution_contracts::process::ProcessSignature,
         _args: &serde_json::Map<String, serde_json::Value>,
-        _mode: lash_core::ArgsMode,
-    ) -> std::result::Result<(), lash_core::ArgsMismatch> {
-        Err(lash_core::ArgsMismatch::UnsupportedSignature {
-            engine_kind: self.kind().into(),
-        })
+        _mode: lash_execution_contracts::process::ArgsMode,
+    ) -> std::result::Result<(), lash_execution_contracts::process::ArgsMismatch> {
+        Err(
+            lash_execution_contracts::process::ArgsMismatch::UnsupportedSignature {
+                engine_kind: self.kind().into(),
+            },
+        )
     }
 
     fn kind(&self) -> &'static str {
@@ -413,7 +416,7 @@ impl World {
                 launch: crate::EngineLaunch::new(env_ref, None),
             },
             crate::ProcessProvenance::host(),
-            lash_core::Lifetime::Detached,
+            lash_execution_contracts::process::Lifetime::Detached,
         )
         .with_start_key(Some(key.clone()));
         crate::register_process_start(&self.stores(starter), registration, &[]).await
@@ -452,7 +455,7 @@ impl World {
 }
 
 fn env_spec() -> crate::ProcessEnv {
-    lash_core::testing::process_env_with_limit(1024)
+    lash_execution_contracts::testing::process_env_with_limit(1024)
 }
 
 #[expect(clippy::expect_used, reason = "fixture builds valid claims")]

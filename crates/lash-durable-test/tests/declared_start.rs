@@ -24,10 +24,12 @@ use std::sync::{Arc, Mutex};
 use std::time::Duration;
 
 use lash_core::llm::types::{LlmContentBlock, LlmRequest, LlmResponse};
-use lash_core_execution::facade_support::process_child_session_id;
-use lash_core_execution::{
-    ProcessId, ProcessListFilter, ProcessRecord, ProcessStatus, ProcessStatusFilter,
-};
+use lash_core_execution::ProcessId;
+use lash_execution_contracts::process::ProcessListFilter;
+use lash_execution_contracts::process::ProcessRecord;
+use lash_execution_contracts::process::ProcessStatus;
+use lash_execution_contracts::process::ProcessStatusFilter;
+use lash_execution_contracts::process::process_child_session_id;
 use lash_protocol_types::SessionId;
 use lash_protocol_types::sync::MutexExt as _;
 
@@ -350,7 +352,7 @@ impl Probe {
 /// the bytes a decoded one may carry.
 #[derive(Clone, Copy, Debug, Default, PartialEq, Eq)]
 enum Forge {
-    /// The declaration exactly as `DeclaredStart::new` built it.
+    /// The declaration exactly as `AttemptContext::declare_start` built it.
     #[default]
     None,
     /// The start and its identity name another session, the identity
@@ -424,7 +426,7 @@ struct DeclaringProbe {
     /// The serialized declaration a [`Forge::Keep`] call kept.
     kept: Mutex<Option<serde_json::Value>>,
     /// The scope a [`Forge::KeepScope`] call kept.
-    scope: Mutex<Option<lash_core::ScopeRef>>,
+    scope: Mutex<Option<lash_execution_contracts::process::ScopeRef>>,
 }
 
 impl DeclaringProbe {
@@ -434,11 +436,12 @@ impl DeclaringProbe {
     fn declare(
         &self,
         context: &lash_core::AttemptContext<'_>,
-        start: lash_core::StartProcessIntent,
+        start: lash_execution_contracts::tool_intent::StartProcessIntent,
         forge: Forge,
-    ) -> Result<Option<lash_core::DeclaredStart>, String> {
-        let declared =
-            lash_core::DeclaredStart::new(context, start).map_err(|error| error.to_string())?;
+    ) -> Result<Option<lash_execution_contracts::DeclaredStart>, String> {
+        let declared = context
+            .declare_start(start)
+            .map_err(|error| error.to_string())?;
         let mut bytes = serde_json::to_value(&declared).map_err(|error| error.to_string())?;
         match forge {
             Forge::None | Forge::EndedScope | Forge::KeepScope => return Ok(Some(declared)),
@@ -447,7 +450,8 @@ impl DeclaringProbe {
                 let mut identity = context.intent_identity(0);
                 let foreign = lash_core::RuntimeOwner::Session(SessionId::from(FOREIGN_SESSION));
                 identity.owner = foreign.clone();
-                let identity = lash_core::rederive_tool_intent_identity(&identity);
+                let identity =
+                    lash_execution_contracts::tool_intent::rederive_tool_intent_identity(&identity);
                 bytes["start"]["owner"] =
                     serde_json::to_value(&foreign).map_err(|error| error.to_string())?;
                 bytes["identity"] =
@@ -478,7 +482,7 @@ impl DeclaringProbe {
         &self,
         context: &lash_core::AttemptContext<'_>,
         probe: Probe,
-    ) -> Result<lash_core::StartProcessIntent, String> {
+    ) -> Result<lash_execution_contracts::tool_intent::StartProcessIntent, String> {
         let session_id = context
             .session_id()
             .map_err(|error| error.to_string())?
@@ -489,45 +493,47 @@ impl DeclaringProbe {
             .clone();
         let start_cx = context.start_cx().map_err(|error| error.to_string())?;
         let lifetime = if probe.detached {
-            lash_core::Lifetime::Detached
+            lash_execution_contracts::process::Lifetime::Detached
         } else if probe.forge == Forge::EndedScope {
-            lash_core::Lifetime::Until(
+            lash_execution_contracts::process::Lifetime::Until(
                 self.scope
                     .lock_recover()
                     .clone()
                     .ok_or("no earlier turn kept its scope")?,
             )
         } else {
-            lash_core::lifetime::starter(&start_cx)
+            lash_execution_contracts::process::lifetime::starter(&start_cx)
         };
         let payload = serde_json::json!({
             PROBE_MARKER: session_id.as_str(),
             "attempt": context.attempt_number(),
         });
         let launch = if probe.forge == Forge::Unheld {
-            lash_core::testing::declared_launch_for_testing(
-                lash_core::testing::fixture_engine_launch(),
+            lash_execution_contracts::testing::declared_launch_for_testing(
+                lash_execution_contracts::testing::fixture_engine_launch(),
             )
         } else {
             lash_core_execution::testing::held_engine_launch(context, &payload)
                 .await
                 .map_err(|error| error.to_string())?
         };
-        let declaration = lash_core::ProcessStartDeclaration::engine(
-            lash_core_execution::testing::HELD_PROCESS_ENGINE_KIND,
+        let declaration = lash_execution_contracts::process::ProcessStartDeclaration::engine(
+            lash_execution_contracts::testing::HELD_PROCESS_ENGINE_KIND,
             payload,
             launch,
-            lash_core::ProcessOriginator::Session {
+            lash_execution_contracts::process::ProcessOriginator::Session {
                 session_id: session_id.clone(),
                 agent_frame_id: Some(agent_frame_id),
             },
             lifetime,
         )
-        .with_declared_identity(lash_core::DeclaredProcessIdentity::labelled(
-            "probe",
-            None::<String>,
-        ));
-        Ok(lash_core::StartProcessIntent {
+        .with_declared_identity(
+            lash_execution_contracts::process::DeclaredProcessIdentity::labelled(
+                "probe",
+                None::<String>,
+            ),
+        );
+        Ok(lash_execution_contracts::tool_intent::StartProcessIntent {
             owner: lash_core::RuntimeOwner::Session(session_id),
             declaration,
         })
@@ -539,7 +545,10 @@ impl lash_core::ToolProvider for DeclaringProbe {
     fn tool_manifests(
         &self,
         _config: &lash_core::OwnerConfigView,
-    ) -> std::result::Result<Vec<lash_core::ToolManifest>, lash_core::PluginError> {
+    ) -> std::result::Result<
+        Vec<lash_core::ToolManifest>,
+        lash_execution_contracts::plugin_error::PluginError,
+    > {
         Ok(vec![probe_tool().manifest()])
     }
 
@@ -574,9 +583,11 @@ impl lash_core::ToolProvider for DeclaringProbe {
                     "the probe's first attempt fails",
                     Some(1),
                 )),
-                lash_core::ToolIntents::v3(vec![lash_core::ToolIntent::StartProcess(Box::new(
-                    start,
-                ))]),
+                lash_execution_contracts::tool_intent::ToolIntents::v3(vec![
+                    lash_execution_contracts::tool_intent::ToolIntent::StartProcess(Box::new(
+                        start,
+                    )),
+                ]),
             );
         }
         let start = match self.declare(call.context, start, probe.forge) {
@@ -680,7 +691,7 @@ impl lash_core::plugin::SessionPlugin for FactsPlugin {
 impl FactsPlugin {
     fn declare(
         _reg: &mut lash_core::plugin::PluginRegistrar<Self>,
-    ) -> std::result::Result<(), lash_core::plugin::PluginError> {
+    ) -> std::result::Result<(), lash_execution_contracts::plugin_error::PluginError> {
         Ok(())
     }
 }
@@ -692,11 +703,14 @@ impl lash_core::facade_support::PluginFactory for FactsFactory {
 
     fn recipe(
         self: Arc<Self>,
-    ) -> std::result::Result<lash_core::plugin::PluginRecipe, lash_core::plugin::PluginError> {
+    ) -> std::result::Result<
+        lash_core::plugin::PluginRecipe,
+        lash_execution_contracts::plugin_error::PluginError,
+    > {
         let recipe_factory = Arc::clone(&self);
         let recipe: std::result::Result<
             lash_core::plugin::PluginRecipe,
-            lash_core::plugin::PluginError,
+            lash_execution_contracts::plugin_error::PluginError,
         > = {
             let mut reg = lash_core::plugin::PluginRegistrar::<FactsPlugin>::new(
                 lash_core::plugin::PluginFactory::id(self.as_ref()),
@@ -728,7 +742,7 @@ impl FactsFactory {
     pub fn declare_configuration(
         &self,
         registrar: &mut lash_core::ConfigRegistrar,
-    ) -> Result<(), lash_core::ConfigRegistrationError> {
+    ) -> Result<(), lash_execution_contracts::config_error::ConfigRegistrationError> {
         registrar.owner(FactsOwner)
     }
 }
@@ -811,12 +825,15 @@ fn delegation(
     rlm: bool,
 ) -> Arc<dyn lash_core::facade_support::PluginFactory> {
     let factory = match lifetimes {
-        Lifetimes::Starter => {
-            delegation::DelegationPluginFactory::new(served::spec(64), lash_core::lifetime::starter)
-        }
+        Lifetimes::Starter => delegation::DelegationPluginFactory::new(
+            served::spec(64),
+            lash_execution_contracts::process::lifetime::starter,
+        ),
         Lifetimes::Session => delegation::DelegationPluginFactory::new(served::spec(64), |cx| {
-            cx.session()
-                .map_or(lash_core::Lifetime::Detached, lash_core::Lifetime::Until)
+            cx.session().map_or(
+                lash_execution_contracts::process::Lifetime::Detached,
+                lash_execution_contracts::process::Lifetime::Until,
+            )
         }),
     };
     Arc::new(if rlm {
@@ -959,7 +976,7 @@ impl World {
             .filter(|record| {
                 matches!(
                     record.input.as_ref(),
-                    lash_core::ProcessInput::SessionTurn { definition_key, .. }
+                    lash_execution_contracts::process::ProcessInput::SessionTurn { definition_key, .. }
                         if definition_key == CHILD_DEFINITION
                 )
             })
@@ -974,7 +991,7 @@ impl World {
             .filter(|record| {
                 matches!(
                     record.input.as_ref(),
-                    lash_core::ProcessInput::Engine { payload, .. }
+                    lash_execution_contracts::process::ProcessInput::Engine { payload, .. }
                         if payload.get(PROBE_MARKER).is_some()
                 )
             })
@@ -1073,7 +1090,7 @@ async fn spawn_agent_record_carries_child_identity(tier: Tier) {
     assert!(
         matches!(
             &child.provenance.originator,
-            lash_core::ProcessOriginator::Session { session_id, agent_frame_id: Some(_) }
+            lash_execution_contracts::process::ProcessOriginator::Session { session_id, agent_frame_id: Some(_) }
                 if *session_id == parent
         ),
         "the parent session's frame started the child: {:?}",
@@ -1404,7 +1421,7 @@ async fn probes_of(backend: &lash::Backend) -> Vec<ProcessRecord> {
     .filter(|record| {
         matches!(
             record.input.as_ref(),
-            lash_core::ProcessInput::Engine { payload, .. }
+            lash_execution_contracts::process::ProcessInput::Engine { payload, .. }
                 if payload.get(PROBE_MARKER).is_some()
         )
     })
@@ -1442,7 +1459,9 @@ async fn declared_start_discarded_retry_launches_nothing(tier: Tier) {
         .await;
     let probes = world.probes().await;
     assert_eq!(probes.len(), 1, "one child: {probes:#?}");
-    let lash_core::ProcessInput::Engine { payload, .. } = probe.input.as_ref() else {
+    let lash_execution_contracts::process::ProcessInput::Engine { payload, .. } =
+        probe.input.as_ref()
+    else {
         panic!("the probe's child is an engine process: {probe:#?}");
     };
     assert_eq!(

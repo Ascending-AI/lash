@@ -12,7 +12,12 @@ impl crate::plugin::SessionReadService for MockSessionManager {
         Option<lash_core_store::transcript::CommittedTurnWithCalls>,
         crate::plugin::CommittedTurnReadError,
     > {
-        Err(crate::PluginError::Session("operation is absent from this fixture".into()).into())
+        Err(
+            lash_execution_contracts::plugin_error::PluginError::Session(
+                "operation is absent from this fixture".into(),
+            )
+            .into(),
+        )
     }
 
     async fn snapshot_current(&self) -> Result<SessionSnapshot, PluginError> {
@@ -62,9 +67,12 @@ impl crate::plugin::SessionGraphService for MockSessionManager {
         &self,
         _session_id: &crate::SessionId,
         _request: crate::AppendSessionNodesRequest,
-    ) -> Result<crate::AppendSessionNodesOutcome, crate::PluginError> {
-        Err(crate::PluginError::Session(
-            "operation is absent from this fixture".into(),
-        ))
+    ) -> Result<crate::AppendSessionNodesOutcome, lash_execution_contracts::plugin_error::PluginError>
+    {
+        Err(
+            lash_execution_contracts::plugin_error::PluginError::Session(
+                "operation is absent from this fixture".into(),
+            ),
+        )
     }
 }

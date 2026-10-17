@@ -31,24 +31,32 @@ struct Saturating {
 }
 
 #[async_trait::async_trait]
-impl lash_core::EngineSteps for Saturating {
-    fn kinds(&self) -> Vec<lash_core::EngineStepKind> {
-        vec![lash_core::EngineStepKind::new(SATURATING)]
+impl lash_execution_contracts::process::EngineSteps for Saturating {
+    fn kinds(&self) -> Vec<lash_execution_contracts::process::EngineStepKind> {
+        vec![lash_execution_contracts::process::EngineStepKind::new(
+            SATURATING,
+        )]
     }
 
-    fn execution(&self, _kind: &lash_core::EngineStepKind) -> std::time::Duration {
+    fn execution(
+        &self,
+        _kind: &lash_execution_contracts::process::EngineStepKind,
+    ) -> std::time::Duration {
         std::time::Duration::from_secs(30)
     }
 
-    fn retry(&self, _kind: &lash_core::EngineStepKind) -> lash_core::ExecutionPolicy {
+    fn retry(
+        &self,
+        _kind: &lash_execution_contracts::process::EngineStepKind,
+    ) -> lash_core::ExecutionPolicy {
         lash_core::ExecutionPolicy::repeatable(std::num::NonZeroU32::MIN.saturating_add(2), 0, 0)
     }
 
     async fn run(
         &self,
-        run: lash_core::EngineStepRun,
+        run: lash_execution_contracts::process::EngineStepRun,
         _cancel: tokio_util::sync::CancellationToken,
-    ) -> lash_core::EngineStepAnswer {
+    ) -> lash_execution_contracts::process::EngineStepAnswer {
         use lash_core::tool_run::{KnownFailureReason, MaterialOwner, MaterialRole};
         self.runs.fetch_add(1, Ordering::SeqCst);
         let saturated = self
@@ -60,11 +68,13 @@ impl lash_core::EngineSteps for Saturating {
             })
             .is_ok();
         if saturated {
-            return lash_core::EngineStepAnswer::Capacity(lash_core::CapacityVerdict::new(
-                lash_core::CapacityCause::QueueFull,
-                Duration::from_millis(1),
-                "the law's host is saturated",
-            ));
+            return lash_execution_contracts::process::EngineStepAnswer::Capacity(
+                lash_execution_contracts::process::CapacityVerdict::new(
+                    lash_execution_contracts::process::CapacityCause::QueueFull,
+                    Duration::from_millis(1),
+                    "the law's host is saturated",
+                ),
+            );
         }
         let material = |text: String| {
             lash_core_store::tool_run::Material::journal_local(
@@ -88,7 +98,7 @@ impl lash_core::EngineSteps for Saturating {
                 ));
                 lash_core_store::tool_run::SettledOutput::Failed(
                     material(
-                        serde_json::to_string(&lash_core::Durable(&output))
+                        serde_json::to_string(&lash_protocol_types::Durable(&output))
                             .expect("a tool output encodes"),
                     )
                     .failure(KnownFailureReason::Reported, None),
@@ -101,22 +111,26 @@ impl lash_core::EngineSteps for Saturating {
 
 fn saturating_advance(
     _state: &mut serde_json::Value,
-    event: lash_core::EngineEvent,
-) -> lash_core::EngineAction {
+    event: lash_execution_contracts::process::EngineEvent,
+) -> lash_execution_contracts::process::EngineAction {
     match event {
-        lash_core::EngineEvent::Started { .. } => lash_core::EngineAction::Steps {
-            steps: vec![lash_core::StepRequest::Engine {
-                step: lash_core::StepName(SATURATING.to_owned()),
-                kind: lash_core::EngineStepKind::new(SATURATING),
-                input: serde_json::Value::Null,
-            }],
-            wake: None,
-        },
-        lash_core::EngineEvent::StepSettled { outcome, .. } => {
+        lash_execution_contracts::process::EngineEvent::Started { .. } => {
+            lash_execution_contracts::process::EngineAction::Steps {
+                steps: vec![lash_execution_contracts::process::StepRequest::Engine {
+                    step: lash_execution_contracts::process::StepName(SATURATING.to_owned()),
+                    kind: lash_execution_contracts::process::EngineStepKind::new(SATURATING),
+                    input: serde_json::Value::Null,
+                }],
+                wake: None,
+            }
+        }
+        lash_execution_contracts::process::EngineEvent::StepSettled { outcome, .. } => {
             answer(serde_json::json!({ "step": settled(&outcome) }))
         }
-        lash_core::EngineEvent::Cancelled { origin, .. } => cancelled(origin),
-        _ => lash_core::EngineAction::Idle,
+        lash_execution_contracts::process::EngineEvent::Cancelled { origin, .. } => {
+            cancelled(origin)
+        }
+        _ => lash_execution_contracts::process::EngineAction::Idle,
     }
 }
 
@@ -142,7 +156,10 @@ impl lash_core::plugin::PluginFactory for SaturatingPlugin {
 
     fn recipe(
         self: Arc<Self>,
-    ) -> std::result::Result<lash_core::plugin::PluginRecipe, lash_core::plugin::PluginError> {
+    ) -> std::result::Result<
+        lash_core::plugin::PluginRecipe,
+        lash_execution_contracts::plugin_error::PluginError,
+    > {
         let reg = lash_core::plugin::PluginRegistrar::<NoSaturatingSessionPlugin>::new(
             lash_core::plugin::PluginFactory::id(self.as_ref()),
         );
@@ -305,7 +322,9 @@ async fn persistent_saturation_parks_and_a_redrive_completes(tier: Tier) {
                 .await
                 .expect("the process is read")
                 .expect("the process exists");
-            if let lash_core::ProcessParkState::Parked(reason) = observed.park.clone() {
+            if let lash_execution_contracts::process::ProcessParkState::Parked(reason) =
+                observed.park.clone()
+            {
                 break (reason, observed);
             }
             tokio::time::sleep(Duration::from_millis(20)).await;
@@ -314,13 +333,16 @@ async fn persistent_saturation_parks_and_a_redrive_completes(tier: Tier) {
     .await
     .expect("the process parks within a minute");
     assert!(
-        matches!(reason, lash_core::ProcessParkReason::ActivationLoop { .. }),
+        matches!(
+            reason,
+            lash_execution_contracts::park::ProcessParkReason::ActivationLoop { .. }
+        ),
         "the process parked through the activation-loop budget: {reason:?}"
     );
     assert!(
         !matches!(
             observed.lifecycle,
-            lash_core::ProcessLifecycleState::Terminal { .. }
+            lash_execution_contracts::process::ProcessLifecycleState::Terminal { .. }
         ),
         "a capacity verdict never ends the process: {observed:?}"
     );
@@ -405,7 +427,7 @@ async fn a_kernel_run_waits_for_a_full_worker_pool(tier: Tier) {
             assert!(
                 !matches!(
                     observed.lifecycle,
-                    lash_core::ProcessLifecycleState::Terminal { .. }
+                    lash_execution_contracts::process::ProcessLifecycleState::Terminal { .. }
                 ),
                 "a full worker pool ended the process: {observed:?}"
             );

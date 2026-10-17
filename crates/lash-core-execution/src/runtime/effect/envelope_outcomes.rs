@@ -16,7 +16,10 @@ impl RuntimeEffectOutcome {
     pub fn into_before_llm_call(
         self,
     ) -> Result<
-        Result<Option<crate::ProtocolLlmCallAction>, crate::PluginError>,
+        Result<
+            Option<crate::ProtocolLlmCallAction>,
+            lash_execution_contracts::plugin_error::PluginError,
+        >,
         RuntimeEffectControllerError,
     > {
         match self {

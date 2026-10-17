@@ -12,7 +12,7 @@
 //! - **Mail** reaches a hot owner by the wake hint of a mailbox commit made
 //!   on this node ([`Backend::commit_mail`]) or of a producer commit of the
 //!   store set's (an accepted send: its
-//!   [`StoreSet::wake_sink`](crate::StoreSet::wake_sink)), published
+//!   [`StoreSet::wake_sink`](lash_execution_contracts::backend::StoreSet::wake_sink)), published
 //!   to the owner's node when the store set has node wakes and the notifier
 //!   is `AfterCommit`, or by
 //!   the owner's own read at every claim poll: the poll is the correctness
@@ -54,7 +54,7 @@ use lash_durable::{
 };
 
 use super::session::{SessionActivation, SessionParkReason};
-use crate::Backend;
+use lash_execution_contracts::backend::Backend;
 
 /// What one node serves.
 pub struct NodeServe {

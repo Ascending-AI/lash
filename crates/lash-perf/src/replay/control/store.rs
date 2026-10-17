@@ -1,6 +1,6 @@
 //! Observes the served node's transactions over the same store as its catalog.
 use super::observation::Observation;
-use lash_core_execution::facade_support::sql;
+use lash_core_ids::operational_metrics::sql;
 use lash_durable::{domain::*, *};
 use lash_protocol_types::{ProcessId, SessionId, TurnId};
 use std::sync::Arc;

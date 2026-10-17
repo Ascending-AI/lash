@@ -2,7 +2,7 @@
 //!
 //! A process is not a session: it has no session state, no session store, no
 //! agent frame and no catalog row. Every session-only service refuses it with
-//! [`crate::PluginError::NotASessionRuntime`].
+//! [`lash_execution_contracts::plugin_error::PluginError::NotASessionRuntime`].
 //!
 //! - An engine process runs under [`EngineProcessRuntime`]: the environment
 //!   its start stated, built only from the process components that
@@ -50,13 +50,15 @@ impl EngineProcessRuntime {
     /// or a component it names does not build here.
     pub async fn for_record(
         ports: ProcessRuntimePorts,
-        process: &crate::ProcessRecord,
-    ) -> Result<Self, crate::PluginError> {
+        process: &lash_execution_contracts::process::ProcessRecord,
+    ) -> Result<Self, lash_execution_contracts::plugin_error::PluginError> {
         let process_id = process.id.clone();
         let Some(env_ref) = process.env_ref() else {
-            return Err(crate::PluginError::Session(format!(
-                "process `{process_id}` runs a session turn, which has no environment"
-            )));
+            return Err(
+                lash_execution_contracts::plugin_error::PluginError::Session(format!(
+                    "process `{process_id}` runs a session turn, which has no environment"
+                )),
+            );
         };
         use lash_core_execution::runtime::actor::process::component_formats::{
             recorded_component_cut, recorded_component_state,
@@ -64,11 +66,11 @@ impl EngineProcessRuntime {
         let backend = ports.host.backend();
         let cut = recorded_component_cut(backend.durable().as_ref(), process)
             .await
-            .map_err(lash_core_execution::runtime::actor::process::registry_error)?;
+            .map_err(lash_execution_contracts::plugin_error::registry_error)?;
         let (env, snapshot) = match cut {
             Some(cut) => (cut.env, Some(cut.state)),
             None => (
-                crate::runtime::load_process_env(
+                lash_execution_contracts::process::load_process_env(
                     ports.host.durability.process_env_store.as_ref(),
                     env_ref,
                 )
@@ -79,12 +81,14 @@ impl EngineProcessRuntime {
         let snapshot =
             recorded_component_state(backend.durable().as_ref(), process, &env, snapshot)
                 .await
-                .map_err(lash_core_execution::runtime::actor::process::registry_error)?;
+                .map_err(lash_execution_contracts::plugin_error::registry_error)?;
         let env = Arc::new(env);
         let components = ports.host.process_engines.components();
         let composition = components
             .compose_with_state(&env, Some(&process_id), &snapshot)
-            .map_err(|refusal| crate::PluginError::ProcessEnvRefused { refusal })?;
+            .map_err(|refusal| {
+                lash_execution_contracts::plugin_error::PluginError::ProcessEnvRefused { refusal }
+            })?;
         let state = Arc::new(crate::plugin::ComponentState::new(
             process_id.clone(),
             &composition,
@@ -121,8 +125,11 @@ impl EngineProcessRuntime {
     pub async fn step_tools(
         &self,
         cx: crate::ActorContext,
-        process: &crate::ProcessRecord,
-    ) -> Result<lash_core_execution::runtime::process::ProcessStepTools, crate::PluginError> {
+        process: &lash_execution_contracts::process::ProcessRecord,
+    ) -> Result<
+        lash_core_execution::runtime::process::ProcessStepTools,
+        lash_execution_contracts::plugin_error::PluginError,
+    > {
         require_own(&self.process_id, process)?;
         self.services.process_step_tools(cx, process).await
     }
@@ -145,14 +152,18 @@ impl SessionTurnRuntime {
     /// `process` is not a session-turn process.
     pub fn for_record(
         ports: ProcessRuntimePorts,
-        process: &crate::ProcessRecord,
-    ) -> Result<Self, crate::PluginError> {
+        process: &lash_execution_contracts::process::ProcessRecord,
+    ) -> Result<Self, lash_execution_contracts::plugin_error::PluginError> {
         let process_id = process.id.clone();
-        if let crate::ProcessInput::Engine { kind, .. } = process.input.as_ref() {
-            return Err(crate::PluginError::Invoke(format!(
-                "process `{process_id}` runs engine `{kind}`, which its process actor drives by \
+        if let lash_execution_contracts::process::ProcessInput::Engine { kind, .. } =
+            process.input.as_ref()
+        {
+            return Err(lash_execution_contracts::plugin_error::PluginError::Invoke(
+                format!(
+                    "process `{process_id}` runs engine `{kind}`, which its process actor drives by \
                  advance"
-            )));
+                ),
+            ));
         }
         Ok(Self {
             services: process_services(&process_id, ports, None, None),
@@ -170,27 +181,29 @@ impl SessionTurnRuntime {
     /// The `SessionTurn` input of this runtime's process, or why it is not one.
     fn session_turn<'a>(
         &self,
-        process: &'a crate::ProcessRecord,
+        process: &'a lash_execution_contracts::process::ProcessRecord,
     ) -> Result<
         (
-            &'a crate::SessionCreateRequest,
+            &'a lash_execution_contracts::session_types::SessionCreateRequest,
             &'a crate::TurnInput,
-            &'a crate::SessionTurnOutcome,
+            &'a lash_execution_contracts::process::SessionTurnOutcome,
         ),
-        crate::PluginError,
+        lash_execution_contracts::plugin_error::PluginError,
     > {
         require_own(&self.process_id, process)?;
         match process.input.as_ref() {
-            crate::ProcessInput::SessionTurn {
+            lash_execution_contracts::process::ProcessInput::SessionTurn {
                 create_request,
                 turn_input,
                 result,
                 ..
             } => Ok((create_request, turn_input, result)),
-            crate::ProcessInput::Engine { kind, .. } => Err(crate::PluginError::Invoke(format!(
-                "process `{}` runs engine `{kind}`, which its process actor drives by advance",
-                process.id
-            ))),
+            lash_execution_contracts::process::ProcessInput::Engine { kind, .. } => Err(
+                lash_execution_contracts::plugin_error::PluginError::Invoke(format!(
+                    "process `{}` runs engine `{kind}`, which its process actor drives by advance",
+                    process.id
+                )),
+            ),
         }
     }
 
@@ -202,9 +215,11 @@ impl SessionTurnRuntime {
     /// A failure another pass may not meet.
     pub async fn mail_session_turn(
         &self,
-        process: &crate::ProcessRecord,
-    ) -> Result<lash_core_execution::runtime::actor::process::SessionTurnMail, crate::PluginError>
-    {
+        process: &lash_execution_contracts::process::ProcessRecord,
+    ) -> Result<
+        lash_core_execution::runtime::actor::process::SessionTurnMail,
+        lash_execution_contracts::plugin_error::PluginError,
+    > {
         let (create_request, turn_input, _) = self.session_turn(process)?;
         // The child turn joins the process's trace: it runs on the
         // process's behalf.
@@ -229,9 +244,11 @@ impl SessionTurnRuntime {
     /// A store failure.
     pub async fn cancel_session_turn(
         &self,
-        process: &crate::ProcessRecord,
-    ) -> Result<lash_core_execution::runtime::actor::process::SessionTurnCancel, crate::PluginError>
-    {
+        process: &lash_execution_contracts::process::ProcessRecord,
+    ) -> Result<
+        lash_core_execution::runtime::actor::process::SessionTurnCancel,
+        lash_execution_contracts::plugin_error::PluginError,
+    > {
         let (create_request, _, _) = self.session_turn(process)?;
         let requester = process
             .cancel_request
@@ -249,8 +266,11 @@ impl SessionTurnRuntime {
     /// A store failure, or a child turn that has not ended.
     pub async fn session_turn_outcome(
         &self,
-        process: &crate::ProcessRecord,
-    ) -> Result<crate::ProcessOutcome, crate::PluginError> {
+        process: &lash_execution_contracts::process::ProcessRecord,
+    ) -> Result<
+        lash_execution_contracts::process::ProcessOutcome,
+        lash_execution_contracts::plugin_error::PluginError,
+    > {
         let (create_request, _, result) = self.session_turn(process)?;
         self.services
             .process_session_turn_outcome(&process.id, create_request.clone(), result)
@@ -260,15 +280,17 @@ impl SessionTurnRuntime {
 
 fn require_own(
     process_id: &crate::ProcessId,
-    process: &crate::ProcessRecord,
-) -> Result<(), crate::PluginError> {
+    process: &lash_execution_contracts::process::ProcessRecord,
+) -> Result<(), lash_execution_contracts::plugin_error::PluginError> {
     if process.id == *process_id {
         return Ok(());
     }
-    Err(crate::PluginError::attempt_fault(format!(
-        "the runtime of process `{process_id}` cannot run process `{}`",
-        process.id
-    )))
+    Err(
+        lash_execution_contracts::plugin_error::PluginError::attempt_fault(format!(
+            "the runtime of process `{process_id}` cannot run process `{}`",
+            process.id
+        )),
+    )
 }
 
 /// The services a process runtime runs through, keyed by `process_id`.

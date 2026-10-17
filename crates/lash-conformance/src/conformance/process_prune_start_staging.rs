@@ -24,7 +24,7 @@ pub async fn prune_and_late_transfer_fences(
         start_key: key.clone(),
         starter,
     });
-    let spec = lash_core::testing::process_env_with_limit(1024);
+    let spec = lash_execution_contracts::testing::process_env_with_limit(1024);
     let env_ref = spec.stable_ref().expect("stable env ref");
     let bytes = spec.to_store_bytes().expect("encode env");
     env_store
@@ -40,7 +40,7 @@ pub async fn prune_and_late_transfer_fences(
                     launch: crate::EngineLaunch::new(env_ref.clone(), None),
                 },
                 crate::ProcessProvenance::host(),
-                lash_core::Lifetime::Detached,
+                lash_execution_contracts::process::Lifetime::Detached,
             )
             .with_start_key(Some(key)),
         )
@@ -146,13 +146,13 @@ pub async fn a_refused_start_never_strands_a_concurrent_start_under_its_key(
     registry: Arc<dyn crate::ProcessRegistry>,
     ports: crate::ArtifactReferrerPorts,
 ) {
-    lash_core::testing::process_execution_env_fixture(ports.env().as_ref()).await;
+    lash_execution_contracts::testing::process_execution_env_fixture(ports.env().as_ref()).await;
     let key = crate::StartKey::for_host("refused-start-concurrent-stager");
     let external = || {
-        lash_core::testing::held_engine_registration(
+        lash_execution_contracts::testing::held_engine_registration(
             serde_json::Value::Null,
             crate::ProcessProvenance::host(),
-            lash_core::Lifetime::Detached,
+            lash_execution_contracts::process::Lifetime::Detached,
         )
     };
     // An engine start: it carries an environment to stage.
@@ -164,7 +164,7 @@ pub async fn a_refused_start_never_strands_a_concurrent_start_under_its_key(
                 launch: crate::EngineLaunch::new(env, None),
             },
             crate::ProcessProvenance::host(),
-            lash_core::Lifetime::Detached,
+            lash_execution_contracts::process::Lifetime::Detached,
         )
         .with_start_key(Some(key.clone()))
     };
@@ -206,8 +206,8 @@ pub async fn a_refused_start_never_strands_a_concurrent_start_under_its_key(
         starter,
     };
     let (stores_a, stores_b) = (stores(&starter_a), stores(&starter_b));
-    let spec_b = lash_core::testing::process_env_with_limit(1024);
-    let spec_a = lash_core::testing::process_env_with_limit(3);
+    let spec_b = lash_execution_contracts::testing::process_env_with_limit(1024);
+    let spec_a = lash_execution_contracts::testing::process_env_with_limit(3);
     let env_b = spec_b.stable_ref().expect("B's environment ref");
     let bytes_b = spec_b.to_store_bytes().expect("B's environment bytes");
     assert_ne!(spec_a.stable_ref().expect("A's environment ref"), env_b);
@@ -314,7 +314,7 @@ pub async fn a_start_key_end_applied_before_the_rescue_keeps_the_concurrent_star
                 launch: crate::EngineLaunch::new(env, None),
             },
             crate::ProcessProvenance::host(),
-            lash_core::Lifetime::Detached,
+            lash_execution_contracts::process::Lifetime::Detached,
         )
         .with_start_key(Some(key.clone()))
     };
@@ -324,13 +324,13 @@ pub async fn a_start_key_end_applied_before_the_rescue_keeps_the_concurrent_star
         )
     };
 
-    lash_core::testing::process_execution_env_fixture(ports.env().as_ref()).await;
+    lash_execution_contracts::testing::process_execution_env_fixture(ports.env().as_ref()).await;
     // A's starter: a process that has ended, so a start it makes is refused.
     let ended = registry
-        .register_process(lash_core::testing::held_engine_registration(
+        .register_process(lash_execution_contracts::testing::held_engine_registration(
             serde_json::Value::Null,
             crate::ProcessProvenance::host(),
-            lash_core::Lifetime::Detached,
+            lash_execution_contracts::process::Lifetime::Detached,
         ))
         .await
         .expect("register the ended starter");
@@ -406,8 +406,8 @@ pub async fn a_start_key_end_applied_before_the_rescue_keeps_the_concurrent_star
         executor: "conformance process start",
         starter: &starter_b,
     };
-    let spec_a = lash_core::testing::process_env_with_limit(5);
-    let spec_b = lash_core::testing::process_env_with_limit(7);
+    let spec_a = lash_execution_contracts::testing::process_env_with_limit(5);
+    let spec_b = lash_execution_contracts::testing::process_env_with_limit(7);
     let (env_a, env_b) = (
         spec_a.stable_ref().expect("A's environment ref"),
         spec_b.stable_ref().expect("B's environment ref"),
@@ -538,32 +538,35 @@ struct ModuleNamingEngine;
 impl crate::ProcessEngine for ModuleNamingEngine {
     fn settled_ran(
         &self,
-        _kind: &lash_core::EngineStepKind,
+        _kind: &lash_execution_contracts::process::EngineStepKind,
         _output: &lash_core_store::tool_run::SettledOutput,
     ) -> Vec<(u32, u64)> {
         Vec::new()
     }
 
-    fn trace_class(&self) -> lash_core::ProcessTraceClass {
-        lash_core::ProcessTraceClass::Internal
+    fn trace_class(&self) -> lash_execution_contracts::process::ProcessTraceClass {
+        lash_execution_contracts::process::ProcessTraceClass::Internal
     }
 
     async fn performed_effects(
         &self,
         _payload: &serde_json::Value,
-    ) -> Result<lash_core::PerformedEffects, lash_core::ProcessEnvRefusal> {
-        Ok(lash_core::PerformedEffects::new())
+    ) -> Result<lash_execution_contracts::process::PerformedEffects, lash_core::ProcessEnvRefusal>
+    {
+        Ok(lash_execution_contracts::process::PerformedEffects::new())
     }
 
     async fn check_args(
         &self,
-        _signature: &lash_core::ProcessSignature,
+        _signature: &lash_execution_contracts::process::ProcessSignature,
         _args: &serde_json::Map<String, serde_json::Value>,
-        _mode: lash_core::ArgsMode,
-    ) -> std::result::Result<(), lash_core::ArgsMismatch> {
-        Err(lash_core::ArgsMismatch::UnsupportedSignature {
-            engine_kind: self.kind().into(),
-        })
+        _mode: lash_execution_contracts::process::ArgsMode,
+    ) -> std::result::Result<(), lash_execution_contracts::process::ArgsMismatch> {
+        Err(
+            lash_execution_contracts::process::ArgsMismatch::UnsupportedSignature {
+                engine_kind: self.kind().into(),
+            },
+        )
     }
 
     fn kind(&self) -> &'static str {
@@ -957,7 +960,7 @@ pub async fn env_authority_read(stores: Arc<dyn crate::StoreSet>) -> Vec<crate::
         env.capabilities(),
         "binding, contract and args survive by ref"
     );
-    let absent = lash_core::testing::process_env_with_limit(99)
+    let absent = lash_execution_contracts::testing::process_env_with_limit(99)
         .stable_ref()
         .expect("absent ref");
     assert_eq!(

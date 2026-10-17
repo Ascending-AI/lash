@@ -1,6 +1,8 @@
 //! First SQL-work artifact and its maintained text reader, on the replay route.
 use anyhow::{Context, Result, ensure};
-use lash_core::perf_witness::sql_shapes::work::{Backend, Counts, Receipt};
+use lash_core_ids::perf_witness::sql_shapes::work::Backend;
+use lash_core_ids::perf_witness::sql_shapes::work::Counts;
+use lash_core_ids::perf_witness::sql_shapes::work::Receipt;
 use serde_json::json;
 use std::collections::BTreeMap;
 use std::fmt::Write as _;

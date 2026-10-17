@@ -1,6 +1,7 @@
 //! Backend certification laws shared by store implementations.
 
 use lash_core::*;
+use lash_execution_contracts::*;
 mod conformance;
 pub use conformance::*;
 use lash_core::attachments::*;
@@ -25,3 +26,5 @@ mod process_replay_store_tests;
 
 #[cfg(test)]
 mod host_admission_tests;
+
+use lash_core::testing;

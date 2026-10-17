@@ -38,10 +38,11 @@ use std::sync::atomic::{AtomicUsize, Ordering};
 use std::sync::{Arc, Mutex};
 use std::time::Duration;
 
+use lash_core_execution::ActorContext;
+use lash_core_execution::AdmittedScope;
 use lash_core_execution::runtime::actor::round::lifecycle::{MemberBodies, MemberBody};
 use lash_core_execution::runtime::actor::round::{AdmittedExecution, PolicyView};
 use lash_core_execution::runtime::actor::waits::Resolution;
-use lash_core_execution::{ActorContext, AdmittedScope, Backend};
 use lash_core_store::checkpoint_graph::NodeId;
 use lash_core_store::checkpoint_graph::bodies::{ExecRoot, ExecStatus};
 use lash_core_store::checkpoint_graph::{GraphDecoder, NodeKind};
@@ -55,6 +56,7 @@ use lash_durable::{
     ActorKey, ActorState, CommitLabel, DurableError, DurableStore, FormatSet, MailTx, Release,
 };
 use lash_durable_test::{Matrix, Scenario, SimClock, SimNodes, SimNodesConfig};
+use lash_execution_contracts::backend::Backend;
 use lash_kernel_doc::graph_tokens::encode_body;
 use lash_kernel_doc::heap::PageId;
 use lash_kernel_doc::{

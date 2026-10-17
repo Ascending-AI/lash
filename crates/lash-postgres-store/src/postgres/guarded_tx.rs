@@ -52,11 +52,14 @@ use std::pin::Pin;
 use std::sync::Arc;
 use std::sync::atomic::{AtomicU32, Ordering};
 
-use lash_core_execution::compat::{CompatRefusal, ComponentId, VersionRange};
-use lash_core_execution::store::plugin_writers::{
-    PluginPublication, PluginWriterRanges, PluginWriterRegistration,
-};
-use lash_core_execution::{FleetFormat, StoreError};
+use lash_core_store::compat::CompatRefusal;
+use lash_core_store::compat::ComponentId;
+use lash_core_store::compat::VersionRange;
+use lash_core_store::store::FleetFormat;
+use lash_core_store::store::StoreError;
+use lash_core_store::store::plugin_writers::PluginPublication;
+use lash_core_store::store::plugin_writers::PluginWriterRanges;
+use lash_core_store::store::plugin_writers::PluginWriterRegistration;
 use sqlx::pool::PoolConnection;
 use sqlx::{Acquire, PgConnection, PgPool, Postgres, Transaction};
 
@@ -868,10 +871,10 @@ where
 pub(crate) async fn retry_contended<T, F, Fut>(
     fence: &WriterFence,
     attempt: F,
-) -> Result<T, lash_core_execution::PluginError>
+) -> Result<T, lash_execution_contracts::plugin_error::PluginError>
 where
     F: FnMut() -> Fut,
-    Fut: Future<Output = Result<T, lash_core_execution::PluginError>>,
+    Fut: Future<Output = Result<T, lash_execution_contracts::plugin_error::PluginError>>,
 {
     let deadline = fence
         .state
@@ -883,11 +886,11 @@ where
         .retry
         .run(
             deadline,
-            |error: &lash_core_execution::PluginError| {
+            |error: &lash_execution_contracts::plugin_error::PluginError| {
                 matches!(
                     error,
-                    lash_core_execution::PluginError::StoreUnavailable {
-                        fault: lash_core_execution::store::StoreFault::Contended,
+                    lash_execution_contracts::plugin_error::PluginError::StoreUnavailable {
+                        fault: lash_core_store::store::StoreFault::Contended,
                     }
                 )
             },

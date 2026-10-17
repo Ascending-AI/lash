@@ -8,7 +8,7 @@ impl SqliteProcessRegistry {
     pub(crate) fn released_through_conn(
         conn: &Connection,
         process_id: &ProcessId,
-    ) -> Result<u64, lash_core_execution::PluginError> {
+    ) -> Result<u64, lash_execution_contracts::plugin_error::PluginError> {
         conn.query_row(
             process_sql().event_horizon.select_released_through.sql(),
             params![process_id.as_str()],
@@ -25,7 +25,10 @@ impl SqliteProcessRegistry {
         &self,
         process_id: &ProcessId,
         through: u64,
-    ) -> Result<lash_core_execution::ProcessEventRelease, lash_core_execution::PluginError> {
+    ) -> Result<
+        lash_execution_contracts::process::ProcessEventRelease,
+        lash_execution_contracts::plugin_error::PluginError,
+    > {
         let process_id = process_id.clone();
         self.conn
             .write_flow(move |tx| {
@@ -47,13 +50,16 @@ impl SqliteProcessRegistry {
         conn: &crate::conn::FencedTx<'_>,
         process_id: &ProcessId,
         through: u64,
-        fleet_format: lash_core_execution::FleetFormat,
-    ) -> Result<lash_core_execution::ProcessEventRelease, lash_core_execution::PluginError> {
+        fleet_format: lash_core_store::store::FleetFormat,
+    ) -> Result<
+        lash_execution_contracts::process::ProcessEventRelease,
+        lash_execution_contracts::plugin_error::PluginError,
+    > {
         let record = Self::require_process_conn(conn, process_id)?;
         let previous = Self::released_through_conn(conn, process_id)?;
         let target = through.min(record.last_event_sequence);
         if target <= previous {
-            return Ok(lash_core_execution::ProcessEventRelease {
+            return Ok(lash_execution_contracts::process::ProcessEventRelease {
                 released_through: previous,
                 released_events: 0,
             });
@@ -86,9 +92,9 @@ impl SqliteProcessRegistry {
             for (sequence, json) in rows {
                 let event = ProcessEvent::decode(&json, fleet_format)?;
                 if let Some(digest) =
-                    lash_core_execution::runtime::release_process_event_payload(&event)
+                    lash_execution_contracts::process::release_process_event_payload(&event)
                 {
-                    let released = lash_core_execution::ReleasedProcessEvent {
+                    let released = lash_execution_contracts::process::ReleasedProcessEvent {
                         process_id: event.process_id.clone(),
                         sequence: event.sequence,
                         event_type: event.fact.event_type().to_owned(),
@@ -117,7 +123,7 @@ impl SqliteProcessRegistry {
             params![process_id.as_str(), target_bound],
         )
         .map_err(process_sqlite_error)?;
-        Ok(lash_core_execution::ProcessEventRelease {
+        Ok(lash_execution_contracts::process::ProcessEventRelease {
             released_through: target,
             released_events,
         })

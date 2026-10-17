@@ -2,7 +2,7 @@
 //! `get`.
 //!
 //! Each one is an ordinary leaf tool. None of them performs its durable act in
-//! the attempt body: every one declares a [`lash_core::ToolIntent`] and lets
+//! the attempt body: every one declares a [`lash_execution_contracts::tool_intent::ToolIntent`] and lets
 //! the shared realization router run it behind the attempt's own commit. That
 //! is what makes them redrive-safe — a body that started a child, appended an
 //! event or installed a subscription before its attempt committed would leave
@@ -17,10 +17,15 @@
 
 use serde_json::Value;
 
-use lash_core::{
-    AttemptContext, ToolAttemptOutcome, ToolDeclaration, ToolDefinition, ToolIntent,
-    ToolIntentKind, ToolIntents, ToolOutcome, ToolOutcomeDone,
-};
+use lash_core::AttemptContext;
+use lash_core::ToolAttemptOutcome;
+use lash_core::ToolDeclaration;
+use lash_core::ToolDefinition;
+use lash_core::ToolIntentKind;
+use lash_core::ToolOutcome;
+use lash_core::ToolOutcomeDone;
+use lash_execution_contracts::tool_intent::ToolIntent;
+use lash_execution_contracts::tool_intent::ToolIntents;
 use lash_tool_support::{ToolBinding, ToolDefinitionBindingExt};
 
 use crate::done_without_intents;
@@ -100,7 +105,7 @@ pub fn execute_process_get_tool_call(
     ToolAttemptOutcome::done(
         ToolOutcomeDone::ok(lash_protocol_types::handle::definition_slot_json(0)),
         ToolIntents::v3(vec![ToolIntent::GetDefinition(
-            lash_core::GetDefinitionIntent {
+            lash_execution_contracts::tool_intent::GetDefinitionIntent {
                 owner: context.owner().runtime_owner(),
                 definition_id: id,
             },
@@ -148,7 +153,7 @@ fn refuse(message: impl std::fmt::Display) -> ToolAttemptOutcome {
 /// A retryable attempt fault: it took no effect, so the attempt runs again,
 /// and it is never recorded as the call's answer or a refusal (D9). A
 /// terminal cause stays the call's failure.
-fn host_failed(error: lash_core::PluginError) -> ToolAttemptOutcome {
+fn host_failed(error: lash_execution_contracts::plugin_error::PluginError) -> ToolAttemptOutcome {
     ToolAttemptOutcome::host_failed(
         lash_core::RuntimeEffectControllerError::from(error).retryable_uncommitted_derivation(),
     )
@@ -162,7 +167,7 @@ fn host_failed(error: lash_core::PluginError) -> ToolAttemptOutcome {
 pub async fn execute_process_start_tool_call(
     context: &AttemptContext<'_>,
     args: &Value,
-    lifetime: &lash_core::LifetimePolicy,
+    lifetime: &lash_execution_contracts::process::LifetimePolicy,
     environment: &dyn lash_core::ProcessEnvPolicy,
 ) -> ToolAttemptOutcome {
     let fields = match exact_fields(args, &["definition", "definition_id", "args", "label"]) {
@@ -204,7 +209,7 @@ pub async fn execute_process_start_tool_call(
             };
             match context
                 .resolve_start_target(
-                    &lash_core::ProcessDefinitionTarget::DefinitionId(id),
+                    &lash_execution_contracts::process::ProcessDefinitionTarget::DefinitionId(id),
                     run_args,
                 )
                 .await
@@ -238,7 +243,7 @@ pub async fn execute_process_start_tool_call(
                 session_id,
                 agent_frame_id,
             },
-        ) => lash_core::ProcessOriginator::Session {
+        ) => lash_execution_contracts::process::ProcessOriginator::Session {
             session_id: session_id.clone(),
             agent_frame_id: Some(agent_frame_id.clone()),
         },
@@ -258,7 +263,9 @@ pub async fn execute_process_start_tool_call(
         Ok(choice) => choice,
         Err(lash_core::ProcessEnvPolicyError::Refused(refusal)) => return refuse(refusal),
         Err(lash_core::ProcessEnvPolicyError::Fault(message)) => {
-            return host_failed(lash_core::PluginError::attempt_fault(message));
+            return host_failed(
+                lash_execution_contracts::plugin_error::PluginError::attempt_fault(message),
+            );
         }
     };
     let declaration = match inline {
@@ -268,7 +275,7 @@ pub async fn execute_process_start_tool_call(
                 Err(lash_core::HoldEnvError::Refused(refusal)) => return refuse(refusal),
                 Err(lash_core::HoldEnvError::Fault(error)) => return host_failed(error),
             };
-            lash_core::ProcessStartDeclaration::inline(
+            lash_execution_contracts::process::ProcessStartDeclaration::inline(
                 resolved.args.clone(),
                 launch,
                 originator,
@@ -281,7 +288,7 @@ pub async fn execute_process_start_tool_call(
                 Err(lash_core::HoldEnvError::Refused(refusal)) => return refuse(refusal),
                 Err(lash_core::HoldEnvError::Fault(error)) => return host_failed(error),
             };
-            lash_core::ProcessStartDeclaration::definition(
+            lash_execution_contracts::process::ProcessStartDeclaration::definition(
                 Some(resolved.signature.clone()),
                 resolved.args.clone(),
                 launch,
@@ -293,7 +300,10 @@ pub async fn execute_process_start_tool_call(
     let declaration = match label {
         None => declaration,
         Some(label) => declaration.with_declared_identity(
-            lash_core::DeclaredProcessIdentity::labelled("definition", Some(label)),
+            lash_execution_contracts::process::DeclaredProcessIdentity::labelled(
+                "definition",
+                Some(label),
+            ),
         ),
     };
     // The process id is minted when the declared start is realized, after
@@ -305,7 +315,7 @@ pub async fn execute_process_start_tool_call(
             identity.intent_index,
         )),
         ToolIntents::v3(vec![ToolIntent::StartProcess(Box::new(
-            lash_core::StartProcessIntent { owner, declaration },
+            lash_execution_contracts::tool_intent::StartProcessIntent { owner, declaration },
         ))]),
     )
 }

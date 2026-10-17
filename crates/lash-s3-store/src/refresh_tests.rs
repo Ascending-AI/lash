@@ -294,7 +294,7 @@ async fn refresh_survives_a_stale_listing_and_later_reclaims(paginated: bool) {
     assert_eq!(report.fence, AttachmentGcFence::BestEffort);
     assert_eq!((report.scanned_blob_count, report.reclaimed_count), (1, 0));
     let stores = lash_sqlite_store::SqliteStoreSet::memory().await.unwrap();
-    let fenced = lash_core::StoreSet::session_store_factory(&stores);
+    let fenced = lash_execution_contracts::backend::StoreSet::session_store_factory(&stores);
     assert_eq!(fenced.fence(), AttachmentGcFence::Fenced);
     let report = reclaim_unreferenced_attachments(fenced.as_ref(), &store, policy)
         .await

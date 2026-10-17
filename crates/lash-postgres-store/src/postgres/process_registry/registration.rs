@@ -31,7 +31,7 @@ pub(crate) async fn apply_registration_tx(
     process_id: ProcessId,
     retained: bool,
     now: u64,
-    fleet: lash_core_execution::FleetFormat,
+    fleet: lash_core_store::store::FleetFormat,
 ) -> Result<AppliedRegistration, PluginError> {
     let mut observers = observers;
     observers.sort();
@@ -46,7 +46,7 @@ pub(crate) async fn apply_registration_tx(
     {
         if retained && existing.id != process_id {
             return Err(
-                lash_core_execution::StoreError::PreparedProcessRegistrationStale {
+                lash_core_store::store::StoreError::PreparedProcessRegistrationStale {
                     process_id: process_id.clone(),
                 }
                 .into(),
@@ -56,13 +56,14 @@ pub(crate) async fn apply_registration_tx(
     }
     if retained {
         return Err(
-            lash_core_execution::StoreError::PreparedProcessRegistrationStale {
+            lash_core_store::store::StoreError::PreparedProcessRegistrationStale {
                 process_id: process_id.clone(),
             }
             .into(),
         );
     }
-    let registration = lash_core_execution::runtime::prepare_process_registration(registration)?;
+    let registration =
+        lash_execution_contracts::process::prepare_process_registration(registration)?;
     // Admission against closure (FIG-3607 R11): a new start is refused
     // once its starter has ended, whatever its own lifetime, once the
     // scope its lifetime names has closed, and once the session either
@@ -101,10 +102,12 @@ pub(crate) async fn apply_registration_tx(
                 .await
                 .map_err(plugin_sqlx_error)?;
         if abandoned {
-            return Err(lash_core_execution::runtime::abandoned_consumer_refusal(
-                registration.start_key.as_ref(),
-                &hold.key,
-            ));
+            return Err(
+                lash_execution_contracts::process::abandoned_consumer_refusal(
+                    registration.start_key.as_ref(),
+                    &hold.key,
+                ),
+            );
         }
     }
     if let Some(hold) = consumer_hold.as_ref() {
@@ -121,7 +124,7 @@ pub(crate) async fn apply_registration_tx(
                 record
                     .start_key
                     .as_ref()
-                    .map(lash_core_execution::StartKey::as_str),
+                    .map(lash_core_store::process_identity::StartKey::as_str),
             )
             .bind(record.originator_id().as_str())
             .bind(record.identity.kind.as_str())
@@ -132,13 +135,13 @@ pub(crate) async fn apply_registration_tx(
                 record
                     .lifetime
                     .scope()
-                    .map(lash_core_execution::ScopeId::storage_kind),
+                    .map(lash_core_store::scope_identity::ScopeId::storage_kind),
             )
             .bind(
                 record
                     .lifetime
                     .scope()
-                    .map(lash_core_execution::ScopeId::storage_id),
+                    .map(lash_core_store::scope_identity::ScopeId::storage_id),
             )
             .bind(record.lifetime.storage_label())
             .bind(lifecycle_json)
@@ -185,7 +188,7 @@ pub(crate) async fn apply_registration_tx(
         lash_durable::DurableInstant(i64::try_from(now).unwrap_or(i64::MAX)),
     )
     .await
-    .map_err(lash_core_execution::runtime::actor::process::registry_error)?;
+    .map_err(lash_execution_contracts::plugin_error::registry_error)?;
     let process_id = record.id.clone();
     for session_id in observers {
         crate::observed_sql::query(process_sql().observer.insert.sql())

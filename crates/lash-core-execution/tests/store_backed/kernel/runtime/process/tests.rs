@@ -1,20 +1,28 @@
+use lash_execution_contracts::{
+    ProcessEnvStore, ProcessEventLogTestSupport, ProcessLifecycle, ProcessRegistrar,
+    ProcessRetention,
+};
 use std::sync::Arc;
 
-use crate::support::prelude::*;
-
-use crate::runtime::process::{
-    ProcessAwaitOutput, ProcessCompletionAuthority, ProcessInput, ProcessObserverBy,
-    ProcessProvenance, ProcessRegistration, ProjectionWatermark,
-};
-use crate::{Lifetime, ProcessRegistry, SessionId, StoreSet as _};
+use crate::SessionId;
+use lash_execution_contracts::backend::StoreSet as _;
+use lash_execution_contracts::process::Lifetime;
+use lash_execution_contracts::process::ProcessAwaitOutput;
+use lash_execution_contracts::process::ProcessCompletionAuthority;
+use lash_execution_contracts::process::ProcessInput;
+use lash_execution_contracts::process::ProcessObserverBy;
+use lash_execution_contracts::process::ProcessProvenance;
+use lash_execution_contracts::process::ProcessRegistration;
+use lash_execution_contracts::process::ProcessRegistry;
+use lash_execution_contracts::process::ProjectionWatermark;
 
 use crate::support::sqlite_memory_process_store_set;
 
 fn registration(_id: &str) -> ProcessRegistration {
-    crate::testing::held_engine_registration(
+    lash_execution_contracts::testing::held_engine_registration(
         serde_json::Value::Null,
         ProcessProvenance::host(),
-        crate::Lifetime::Detached,
+        lash_execution_contracts::process::Lifetime::Detached,
     )
 }
 
@@ -27,8 +35,8 @@ async fn prune_retains_exact_artifact_cleanup_until_acknowledged() {
         ProcessInput::Engine {
             kind: "test-engine".to_string(),
             payload: serde_json::json!({"module_ref": "module-1"}),
-            launch: lash_core_execution::EngineLaunch::new(
-                crate::testing::process_execution_env_fixture_ref(),
+            launch: lash_execution_contracts::process::EngineLaunch::new(
+                lash_execution_contracts::testing::process_execution_env_fixture_ref(),
                 None,
             ),
         },
@@ -221,7 +229,7 @@ async fn delete_session_process_command_revokes_only_observer_edges() {
 async fn env_store_reports_typed_referrer_fences_and_carry_refusals() {
     let backend = crate::support::sqlite_memory_store_set().await;
     let store = backend.process_env_store();
-    let spec = lash_core_execution::testing::process_env_with_limit(1024);
+    let spec = lash_execution_contracts::testing::process_env_with_limit(1024);
     let env_ref = spec.stable_ref().expect("stable env ref");
     let bytes = spec.to_store_bytes().expect("encode env spec");
     let staged = crate::ArtifactReferrer::HostPin(crate::HostArtifactPin::mint());
@@ -264,7 +272,7 @@ async fn env_store_reports_typed_referrer_fences_and_carry_refusals() {
         .await
         .expect_err("the destination remains fenced");
     assert!(
-        matches!(destination_error, crate::ArtifactStoreError::ReferrerEnded { ref referrer } if *referrer == retired_destination),
+        matches!(destination_error, lash_execution_contracts::module_artifacts::ArtifactStoreError::ReferrerEnded { ref referrer } if *referrer == retired_destination),
         "destination fence classifies by referrer: {destination_error}"
     );
 
@@ -285,7 +293,7 @@ async fn env_store_reports_typed_referrer_fences_and_carry_refusals() {
     assert!(
         matches!(
             missing_edge,
-            crate::ArtifactStoreError::CarryArtifactMissing { .. }
+            lash_execution_contracts::module_artifacts::ArtifactStoreError::CarryArtifactMissing { .. }
         ),
         "missing carry bytes classify by code: {missing_edge}"
     );
@@ -302,7 +310,7 @@ async fn env_store_reports_typed_referrer_fences_and_carry_refusals() {
         .await
         .expect_err("a retired staging owner refuses publication");
     assert!(
-        matches!(retired_error, crate::ArtifactStoreError::ReferrerEnded { ref referrer } if *referrer == staged),
+        matches!(retired_error, lash_execution_contracts::module_artifacts::ArtifactStoreError::ReferrerEnded { ref referrer } if *referrer == staged),
         "staged referrer fence classifies by code: {retired_error}"
     );
 }

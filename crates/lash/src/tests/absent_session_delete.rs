@@ -17,7 +17,7 @@ use crate::{SessionId, TurnInput, TurnOutcome};
 async fn stores(
     storage: &str,
 ) -> (
-    Arc<dyn lash_core::StoreSet>,
+    Arc<dyn lash_execution_contracts::backend::StoreSet>,
     Vec<Box<dyn std::any::Any + Send>>,
 ) {
     match storage {

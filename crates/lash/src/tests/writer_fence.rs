@@ -19,7 +19,7 @@ const ID: &str = "writer-fenced-send";
 /// the send is refused typed and writes nothing. `finalize` moves the fleet
 /// format to the epoch it answers.
 async fn a_send_to_a_finalized_store_is_refused_typed_and_writes_nothing(
-    backend: lash_core::Backend,
+    backend: lash_execution_contracts::backend::Backend,
     finalize: impl AsyncFnOnce() -> u32,
 ) {
     let calls = Arc::new(AtomicUsize::new(0));
@@ -74,11 +74,13 @@ async fn a_send_to_a_finalized_store_is_refused_typed_and_writes_nothing(
         error.is_terminal() && !error.is_retryable(),
         "a fence is never retried: {error:?}"
     );
-    let unfenced =
-        lash_core::runtime::live_session_view(&core.store_factory, &lash_core::SessionId::from(ID))
-            .await
-            .expect("a reader is never fenced")
-            .expect("the session exists");
+    let unfenced = lash_execution_contracts::deployment::live_session_view(
+        &core.store_factory,
+        &lash_core::SessionId::from(ID),
+    )
+    .await
+    .expect("a reader is never fenced")
+    .expect("the session exists");
     assert!(
         unfenced
             .list_pending_turn_inputs()

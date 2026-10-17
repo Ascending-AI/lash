@@ -157,13 +157,17 @@ impl ToolProvider for CountedEcho {
 }
 
 /// One build's core over `stores`, serving as node `owner`.
-fn build_core(stores: Arc<dyn lash_core::StoreSet>, owner: &str, script: &Arc<Script>) -> LashCore {
+fn build_core(
+    stores: Arc<dyn lash_execution_contracts::backend::StoreSet>,
+    owner: &str,
+    script: &Arc<Script>,
+) -> LashCore {
     build_boot(stores, owner, "boot-1", script)
 }
 
 /// `owner`'s boot `boot` over `stores`.
 fn build_boot(
-    stores: Arc<dyn lash_core::StoreSet>,
+    stores: Arc<dyn lash_execution_contracts::backend::StoreSet>,
     owner: &str,
     boot: &str,
     script: &Arc<Script>,
@@ -209,7 +213,7 @@ async fn within<T>(what: &str, future: impl std::future::Future<Output = T>) -> 
 }
 
 async fn a_drained_nodes_sessions_resume_on_the_next_builds_node(
-    stores: Arc<dyn lash_core::StoreSet>,
+    stores: Arc<dyn lash_execution_contracts::backend::StoreSet>,
 ) {
     let script = Arc::new(Script::default());
     let old = build_core(Arc::clone(&stores), "drain-old-build", &script);
@@ -348,7 +352,8 @@ async fn a_drained_nodes_sessions_resume_on_the_next_builds_node_on_postgres() {
 /// stopped `Requested`; a core that serves no sessions runs no node.
 #[tokio::test(flavor = "multi_thread", worker_threads = 2)]
 async fn a_host_learns_why_its_cores_node_stopped() {
-    let stores: Arc<dyn lash_core::StoreSet> = sqlite_memory_store_set().await;
+    let stores: Arc<dyn lash_execution_contracts::backend::StoreSet> =
+        sqlite_memory_store_set().await;
     let script = Arc::new(Script::default());
     let old = build_boot(Arc::clone(&stores), "restarted-owner", "boot-1", &script);
     old.session(session_id("served"))

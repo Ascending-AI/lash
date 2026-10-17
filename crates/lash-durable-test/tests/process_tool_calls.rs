@@ -113,7 +113,10 @@ impl lash_core::ToolProvider for Probe {
     fn tool_manifests(
         &self,
         _config: &lash_core::OwnerConfigView,
-    ) -> std::result::Result<Vec<lash_core::ToolManifest>, lash_core::PluginError> {
+    ) -> std::result::Result<
+        Vec<lash_core::ToolManifest>,
+        lash_execution_contracts::plugin_error::PluginError,
+    > {
         Ok({
             [PROBE, DEFERRED]
                 .into_iter()
@@ -188,7 +191,7 @@ async fn world(tier: Tier, witness: &Arc<Witness>) -> Option<World> {
         )
         .plugin(Arc::new(
             lash::process_controls::SessionProcessAdminPluginFactory::new(
-                lash_core::lifetime::starter,
+                lash_execution_contracts::process::lifetime::starter,
                 lash_core::testing::run_policy_naming(&[
                     PROBE_COMPONENT,
                     lash::process_controls::PROCESS_CONTROLS_CONFIG,
@@ -199,7 +202,7 @@ async fn world(tier: Tier, witness: &Arc<Witness>) -> Option<World> {
         // (P2): the env names the process controls that serve it.
         .process_component(
             Arc::new(lash::process_controls::ProcessControlsComponent::new(
-                lash_core::lifetime::starter,
+                lash_execution_contracts::process::lifetime::starter,
                 lash_core::testing::run_policy_naming(&[PROBE_COMPONENT]),
             )),
             lash::process_controls::PROCESS_CONTROLS_CONFIG,
@@ -321,9 +324,9 @@ async fn tool_call_limit_counts_what_a_process_holds(tier: Tier) {
     );
     let processes = lash_core::testing::process_roster_records_for_fixture(
         world.backend.process_registry().as_ref(),
-        &lash_core::ProcessListFilter {
-            status: lash_core::ProcessStatusFilter::Any,
-            ..lash_core::ProcessListFilter::default()
+        &lash_execution_contracts::process::ProcessListFilter {
+            status: lash_execution_contracts::process::ProcessStatusFilter::Any,
+            ..lash_execution_contracts::process::ProcessListFilter::default()
         },
     )
     .await
@@ -332,7 +335,9 @@ async fn tool_call_limit_counts_what_a_process_holds(tier: Tier) {
         .iter()
         .find(|process| process.is_terminal())
         .unwrap_or_else(|| panic!("the holding process ended: {processes:#?}"));
-    let Some(lash_core::ProcessAwaitOutput::Settled { output }) = held.outcome() else {
+    let Some(lash_execution_contracts::process::ProcessAwaitOutput::Settled { output }) =
+        held.outcome()
+    else {
         panic!("the holding process settled: {held:#?}");
     };
     let lash_core::ToolCallOutcome::Failure(failure) = &output.outcome else {
@@ -570,7 +575,11 @@ async fn a_pruned_process_leaves_no_run_fact_or_wait(tier: Tier) {
 
     let now = world.backend.clock().timestamp_ms();
     let report = processes
-        .prune(now + 1, None, lash_core::ProjectionWatermark::NoProjector)
+        .prune(
+            now + 1,
+            None,
+            lash_execution_contracts::process::ProjectionWatermark::NoProjector,
+        )
         .await
         .unwrap();
     assert_eq!(report.pruned_processes, 1, "{report:?}");
@@ -600,14 +609,14 @@ async fn a_pruned_process_leaves_no_run_fact_or_wait(tier: Tier) {
 /// activation's own reads, so the law fails loudly where frames are not
 /// symbolized.
 struct BodyReadFault {
-    inner: Arc<dyn lash_core::ProcessEnvStore>,
+    inner: Arc<dyn lash_execution_contracts::process::ProcessEnvStore>,
     armed: std::sync::atomic::AtomicBool,
     activation_reads: Arc<std::sync::atomic::AtomicUsize>,
 }
 
 impl BodyReadFault {
     fn over(
-        inner: Arc<dyn lash_core::ProcessEnvStore>,
+        inner: Arc<dyn lash_execution_contracts::process::ProcessEnvStore>,
         activation_reads: Arc<std::sync::atomic::AtomicUsize>,
     ) -> Arc<Self> {
         Arc::new(Self {
@@ -636,13 +645,13 @@ impl lash_core::store::FleetFormatStore for BodyReadFault {
 }
 
 #[async_trait::async_trait]
-impl lash_core::ProcessEnvStore for BodyReadFault {
+impl lash_execution_contracts::process::ProcessEnvStore for BodyReadFault {
     async fn publish_process_env(
         &self,
         claim: &lash_core::ReferrerClaim,
         env_ref: &lash_core::ProcessEnvRef,
         bytes: &[u8],
-    ) -> Result<(), lash_core::ArtifactStoreError> {
+    ) -> Result<(), lash_execution_contracts::module_artifacts::ArtifactStoreError> {
         self.inner.publish_process_env(claim, env_ref, bytes).await
     }
 
@@ -650,21 +659,22 @@ impl lash_core::ProcessEnvStore for BodyReadFault {
         &self,
         claim: &lash_core::ReferrerClaim,
         env_ref: &lash_core::ProcessEnvRef,
-    ) -> Result<(), lash_core::ArtifactStoreError> {
+    ) -> Result<(), lash_execution_contracts::module_artifacts::ArtifactStoreError> {
         self.inner.acquire_process_env(claim, env_ref).await
     }
 
     async fn end_process_env_referrer(
         &self,
         cleanup: &lash_core::ResolvedArtifactCleanup,
-    ) -> Result<(), lash_core::ArtifactStoreError> {
+    ) -> Result<(), lash_execution_contracts::module_artifacts::ArtifactStoreError> {
         self.inner.end_process_env_referrer(cleanup).await
     }
 
     async fn get_process_env(
         &self,
         env_ref: &lash_core::ProcessEnvRef,
-    ) -> Result<Option<Vec<u8>>, lash_core::ArtifactStoreError> {
+    ) -> Result<Option<Vec<u8>>, lash_execution_contracts::module_artifacts::ArtifactStoreError>
+    {
         let stack = std::backtrace::Backtrace::force_capture().to_string();
         if stack.contains("ProcessActivation>::pass") {
             self.activation_reads
@@ -673,9 +683,11 @@ impl lash_core::ProcessEnvStore for BodyReadFault {
         if stack.contains("DurableProcessWorker>::tool_step")
             && self.armed.swap(false, std::sync::atomic::Ordering::SeqCst)
         {
-            return Err(lash_core::ArtifactStoreError::Backend(
-                "the law's connection reset".to_owned(),
-            ));
+            return Err(
+                lash_execution_contracts::module_artifacts::ArtifactStoreError::Backend(
+                    "the law's connection reset".to_owned(),
+                ),
+            );
         }
         self.inner.get_process_env(env_ref).await
     }
@@ -695,7 +707,8 @@ async fn a_store_fault_after_prepare_never_settles_a_step(tier: Tier) {
     let Some(world) = World::new(tier, move |backend| {
         let layered = lash_core::testing::runtime_helpers::LayeredBackend::over(backend.clone())
             .map_process_env_store(|inner| {
-                BodyReadFault::over(inner, store_reads) as Arc<dyn lash_core::ProcessEnvStore>
+                BodyReadFault::over(inner, store_reads)
+                    as Arc<dyn lash_execution_contracts::process::ProcessEnvStore>
             })
             .into_backend();
         let probe: Arc<dyn lash_core::ToolProvider> = Arc::new(Probe {
@@ -708,7 +721,7 @@ async fn a_store_fault_after_prepare_never_settles_a_step(tier: Tier) {
         )
         .plugin(Arc::new(
             lash::process_controls::SessionProcessAdminPluginFactory::new(
-                lash_core::lifetime::starter,
+                lash_execution_contracts::process::lifetime::starter,
                 lash_core::testing::run_policy_naming(&[
                     PROBE_COMPONENT,
                     lash::process_controls::PROCESS_CONTROLS_CONFIG,
@@ -719,7 +732,7 @@ async fn a_store_fault_after_prepare_never_settles_a_step(tier: Tier) {
         // (P2): the env names the process controls that serve it.
         .process_component(
             Arc::new(lash::process_controls::ProcessControlsComponent::new(
-                lash_core::lifetime::starter,
+                lash_execution_contracts::process::lifetime::starter,
                 lash_core::testing::run_policy_naming(&[PROBE_COMPONENT]),
             )),
             lash::process_controls::PROCESS_CONTROLS_CONFIG,
@@ -744,9 +757,9 @@ async fn a_store_fault_after_prepare_never_settles_a_step(tier: Tier) {
     served::assert_answered("the turn that awaits the process", &output);
     let processes = lash_core::testing::process_roster_records_for_fixture(
         world.backend.process_registry().as_ref(),
-        &lash_core::ProcessListFilter {
-            status: lash_core::ProcessStatusFilter::Any,
-            ..lash_core::ProcessListFilter::default()
+        &lash_execution_contracts::process::ProcessListFilter {
+            status: lash_execution_contracts::process::ProcessStatusFilter::Any,
+            ..lash_execution_contracts::process::ProcessListFilter::default()
         },
     )
     .await
@@ -754,7 +767,9 @@ async fn a_store_fault_after_prepare_never_settles_a_step(tier: Tier) {
     let [process] = processes.as_slice() else {
         panic!("one process: {processes:#?}");
     };
-    let Some(lash_core::ProcessAwaitOutput::Settled { output }) = process.outcome() else {
+    let Some(lash_execution_contracts::process::ProcessAwaitOutput::Settled { output }) =
+        process.outcome()
+    else {
         panic!("the process settled: {process:#?}");
     };
     assert!(
@@ -808,7 +823,10 @@ impl lash_core::ToolProvider for Search {
     fn tool_manifests(
         &self,
         _config: &lash_core::OwnerConfigView,
-    ) -> std::result::Result<Vec<lash_core::ToolManifest>, lash_core::PluginError> {
+    ) -> std::result::Result<
+        Vec<lash_core::ToolManifest>,
+        lash_execution_contracts::plugin_error::PluginError,
+    > {
         Ok(vec![search_definition().manifest()])
     }
 
@@ -870,7 +888,7 @@ async fn search_world(
         )
         .plugin(Arc::new(
             lash::process_controls::SessionProcessAdminPluginFactory::new(
-                lash_core::lifetime::starter,
+                lash_execution_contracts::process::lifetime::starter,
                 lash_core::testing::run_policy_naming(&[
                     SEARCH_COMPONENT,
                     lash::process_controls::PROCESS_CONTROLS_CONFIG,
@@ -879,7 +897,7 @@ async fn search_world(
         ))
         .process_component(
             Arc::new(lash::process_controls::ProcessControlsComponent::new(
-                lash_core::lifetime::starter,
+                lash_execution_contracts::process::lifetime::starter,
                 lash_core::testing::run_policy_naming(&[SEARCH_COMPONENT]),
             )),
             lash::process_controls::PROCESS_CONTROLS_CONFIG,

@@ -41,7 +41,8 @@ pub type CellFailureFeedbackHook =
 /// Realized declarations available to presentation callbacks.
 #[derive(Clone, Debug, Default)]
 pub struct ToolPresentationFacts {
-    pub intent_outcomes: Vec<crate::ToolIntentExecutionOutcome>,
+    pub intent_outcomes:
+        Vec<lash_execution_contracts::tool_intent_outcome::ToolIntentExecutionOutcome>,
 }
 
 /// One presentation step folds the previous return with recorded declaration facts.

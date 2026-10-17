@@ -19,27 +19,26 @@ doctest = false
 [features]
 # Keep the execution kernel portable by default.
 default = []
-synthetic-next = ["lash-core-store/synthetic-next", "lash-kernel-migrate/synthetic-next"]
-otel-trace = ["lash-trace/otel", "lash-core-ids/otel-trace", "lash-core-llm/otel-trace", "lash-core-store/otel-trace", "lash-core-effect/otel-trace"]
+synthetic-next = ["lash-execution-contracts/synthetic-next", "lash-core-store/synthetic-next"]
+otel-trace = ["lash-execution-contracts/otel-trace", "lash-trace/otel", "lash-core-ids/otel-trace", "lash-core-llm/otel-trace", "lash-core-store/otel-trace", "lash-core-effect/otel-trace"]
 # Internal performance instrumentation. Production builds leave every call
 # site compiled out unless an internal witness explicitly enables this feature.
-perf-witness = ["lash-core-ids/perf-witness", "lash-core-llm/perf-witness", "lash-core-store/perf-witness", "lash-core-effect/perf-witness"]
+perf-witness = ["lash-execution-contracts/perf-witness", "lash-core-ids/perf-witness", "lash-core-llm/perf-witness", "lash-core-store/perf-witness", "lash-core-effect/perf-witness"]
 # Expose `testing` fixtures shared with `lash-core`'s own tests.
-testing = ["lash-durable/testing", "dep:tracing-subscriber", "lash-core-ids/testing", "lash-core-llm/testing", "lash-core-store/testing", "lash-core-effect/testing", "lash-trace/testing"]
+testing = ["lash-execution-contracts/testing", "lash-durable/testing", "dep:tracing-subscriber", "lash-core-ids/testing", "lash-core-llm/testing", "lash-core-store/testing", "lash-core-effect/testing", "lash-trace/testing"]
 
 [lints]
 workspace = true
 
 [dependencies]
+lash-execution-contracts = { workspace = true }
 lash-transport-failure = { workspace = true }
 lash-core-ids = { workspace = true }
 lash-core-llm = { workspace = true }
 lash-core-store = { workspace = true }
 lash-core-effect = { workspace = true }
 lash-durable = { workspace = true }
-lash-kernel-check = { workspace = true }
 lash-kernel-doc = { workspace = true }
-lash-kernel-migrate = { workspace = true }
 lash-sansio = { workspace = true, features = ["schema-validation"] }
 lash-protocol-types = { workspace = true, features = ["schema-validation"] }
 lash-trace = { workspace = true }

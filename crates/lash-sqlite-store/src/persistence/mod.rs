@@ -1,6 +1,6 @@
 //! Capability-segment implementations for [`SqliteStore`]:
-//! [`SessionCommitStore`], [`lash_core_execution::TurnInputStore`],
-//! [`lash_core_execution::QueuedWorkStore`], and [`StoreMaintenance`].
+//! [`SessionCommitStore`], [`lash_core_store::store::TurnInputStore`],
+//! [`lash_core_store::store::QueuedWorkStore`], and [`StoreMaintenance`].
 //!
 //! Every operation scopes its session explicitly or through its request.
 //!
@@ -28,7 +28,7 @@ use lash_protocol_types::TurnId;
 fn read_session_state_version_conn(
     conn: &rusqlite::Connection,
     session_id: &SessionId,
-    fleet: lash_core_execution::FleetFormat,
+    fleet: lash_core_store::store::FleetFormat,
 ) -> Result<u32, StoreError> {
     let marker = conn
         .prepare_cached(session_sql().meta.select_state_version.sql())
@@ -40,7 +40,7 @@ fn read_session_state_version_conn(
         .optional()
         .map_err(sqlite_error)?;
     let Some(marker) = marker else {
-        return Ok(lash_core_execution::store::CURRENT_SESSION_STATE_VERSION);
+        return Ok(lash_core_store::store::CURRENT_SESSION_STATE_VERSION);
     };
     let marker = marker
         .map(|version| {
@@ -50,7 +50,7 @@ fn read_session_state_version_conn(
             })
         })
         .transpose()?;
-    lash_core_execution::store::resolve_session_state_version(marker, fleet)
+    lash_core_store::store::resolve_session_state_version(marker, fleet)
 }
 
 /// Refuse a write into session `session_id` once its close began: the
@@ -72,7 +72,7 @@ pub(crate) fn ensure_session_not_closing_conn(
         None => Ok(()),
         Some(intent) => Err(StoreError::SessionClosing {
             session_id: session_id.clone(),
-            intent: lash_core_execution::store::ControlIntentId::from_sequence(
+            intent: lash_core_store::store::ControlIntentId::from_sequence(
                 u64::try_from(intent).map_err(|_| {
                     stored_data_corrupt("SessionMeta", "closing_intent must be non-negative")
                 })?,

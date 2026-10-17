@@ -4,12 +4,12 @@
 use std::collections::BTreeSet;
 use std::sync::Arc;
 
-use lash_core::runtime::ObservedProcessEvent;
 use lash_core::{
     LanguageExecutionObservation, ProcessId, ProcessObservationCursor, ProcessObservationEvent,
     ProcessObservationEventPayload, ProcessObservationIdentity, ProcessReplayEventDraft,
     ProcessReplayStoreError, ProcessSequence,
 };
+use lash_execution_contracts::process::ObservedProcessEvent;
 
 /// The stored form of [`ProcessObservationEventPayload`], one variant each.
 #[derive(serde::Serialize, serde::Deserialize)]
@@ -31,7 +31,7 @@ fn serialize_event<S: serde::Serializer>(
     event: &ObservedProcessEvent,
     serializer: S,
 ) -> Result<S::Ok, S::Error> {
-    serde::Serialize::serialize(&lash_core::Durable(event), serializer)
+    serde::Serialize::serialize(&lash_protocol_types::Durable(event), serializer)
 }
 
 fn codec_error(context: &str, error: impl std::fmt::Display) -> ProcessReplayStoreError {

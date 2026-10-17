@@ -87,7 +87,7 @@ impl DurableStore for RuntimePerfDurableStore {
             let bytes: u64 = tx.graph().values().map(|node| node.len()).sum();
             let alloc_before = crate::GLOBAL_ALLOCATOR.stats();
             eprintln!("MEASURE_COMMIT_BEGIN {}", label.as_str());
-            let (answer, receipt) = lash_core_execution::facade_support::sql::collect(
+            let (answer, receipt) = lash_core_ids::operational_metrics::sql::collect(
                 label.as_str(),
                 if std::env::var("LASH_PERF_COMMIT_TRACE").as_deref() == Ok("postgres") {
                     "postgres"

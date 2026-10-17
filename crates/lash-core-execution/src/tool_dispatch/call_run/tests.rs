@@ -63,10 +63,10 @@ impl SingletonToolHandlers for SlowOrdinary {
         _call: &SingletonToolCall,
     ) -> Option<crate::tool_dispatch::IsolatedToolStart> {
         Some(crate::tool_dispatch::IsolatedToolStart {
-            registration: crate::testing::held_engine_registration(
+            registration: lash_execution_contracts::testing::held_engine_registration(
                 serde_json::Value::Null,
-                crate::ProcessProvenance::host(),
-                crate::Lifetime::Detached,
+                lash_execution_contracts::process::ProcessProvenance::host(),
+                lash_execution_contracts::process::Lifetime::Detached,
             )
             .into(),
         })
@@ -137,7 +137,7 @@ async fn slow_or_timed_out_ordinary_work_is_never_rerun_as_a_process() {
         },
         SingletonBodyOutcome::Done {
             output: "done".into(),
-            commands: crate::plugin::StateCommands::default(),
+            commands: lash_execution_contracts::state_commands::StateCommands::default(),
             intents: Vec::new(),
             start: None,
         },

@@ -777,7 +777,10 @@ impl crate::ToolProvider for Keyed {
     fn tool_manifests(
         &self,
         _config: &crate::OwnerConfigView,
-    ) -> std::result::Result<Vec<crate::ToolManifest>, crate::PluginError> {
+    ) -> std::result::Result<
+        Vec<crate::ToolManifest>,
+        lash_execution_contracts::plugin_error::PluginError,
+    > {
         Ok({
             if self.advertises {
                 vec![Self::definition().manifest()]
@@ -1049,7 +1052,10 @@ impl crate::ToolProvider for Knowledge {
     fn tool_manifests(
         &self,
         _config: &crate::OwnerConfigView,
-    ) -> std::result::Result<Vec<crate::ToolManifest>, crate::PluginError> {
+    ) -> std::result::Result<
+        Vec<crate::ToolManifest>,
+        lash_execution_contracts::plugin_error::PluginError,
+    > {
         Ok(vec![lookup_definition().manifest()])
     }
 

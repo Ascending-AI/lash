@@ -346,7 +346,7 @@ mod pacing_laws {
     use super::*;
     use std::time::Duration;
 
-    fn builder(backend: lash_core::Backend) -> LashCoreBuilder {
+    fn builder(backend: lash_execution_contracts::backend::Backend) -> LashCoreBuilder {
         crate::tests::explicit_ephemeral_facets(LashCore::standard_builder(backend))
             .serve_sessions(false)
     }
@@ -358,10 +358,10 @@ mod pacing_laws {
         let backend = crate::tests::sqlite_memory_store_backend().await;
         let raw = backend.process_registry();
         let registered = raw
-            .register_process(crate::testing::held_engine_registration(
+            .register_process(lash_execution_contracts::testing::held_engine_registration(
                 serde_json::json!({}),
-                lash_core::ProcessProvenance::host(),
-                lash_core::Lifetime::Detached,
+                lash_execution_contracts::process::ProcessProvenance::host(),
+                lash_execution_contracts::process::Lifetime::Detached,
             ))
             .await
             .expect("register held process");

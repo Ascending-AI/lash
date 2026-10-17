@@ -37,15 +37,20 @@ use std::time::Duration;
 
 use lash::tools::{StaticToolExecute, StaticToolProvider};
 use lash_core::ToolDefinitionBindingExt as _;
-use lash_core_execution::{
-    Backend, EngineAction, EngineEvent, EngineState, EngineStateFormat, ProcessEngine, ProcessId,
-    ProcessInfraError, StoreSet,
-};
+use lash_core_execution::ProcessId;
 use lash_durable::runner::Activation;
 use lash_durable::{ActorKey, ActorState, CommitLabel, DurableError, DurableStore};
 use lash_durable_test::{
     Cut, Fault, Matrix, Scenario, SimClock, SimNodes, SimNodesConfig, Stored, Tripwire, WriteKind,
 };
+use lash_execution_contracts::backend::Backend;
+use lash_execution_contracts::backend::StoreSet;
+use lash_execution_contracts::process::EngineAction;
+use lash_execution_contracts::process::EngineEvent;
+use lash_execution_contracts::process::EngineState;
+use lash_execution_contracts::process::EngineStateFormat;
+use lash_execution_contracts::process::ProcessEngine;
+use lash_execution_contracts::process::ProcessInfraError;
 use lash_protocol_types::sync::MutexExt as _;
 
 const ENGINE: &str = "process-step-proof";
@@ -125,27 +130,30 @@ fn ext_write(world: &Arc<ExternalWorld>) -> Arc<dyn lash::process::ProcessCompon
 struct WriteEngine;
 
 fn infra(error: impl std::fmt::Display) -> ProcessInfraError {
-    ProcessInfraError::new(lash_core::PluginError::Session(error.to_string()))
+    ProcessInfraError::new(
+        lash_execution_contracts::plugin_error::PluginError::Session(error.to_string()),
+    )
 }
 
 #[async_trait::async_trait]
 impl ProcessEngine for WriteEngine {
     fn settled_ran(
         &self,
-        _kind: &lash_core_execution::EngineStepKind,
+        _kind: &lash_execution_contracts::process::EngineStepKind,
         _output: &lash_core_store::tool_run::SettledOutput,
     ) -> Vec<(u32, u64)> {
         Vec::new()
     }
 
-    fn trace_class(&self) -> lash_core::ProcessTraceClass {
-        lash_core::ProcessTraceClass::Internal
+    fn trace_class(&self) -> lash_execution_contracts::process::ProcessTraceClass {
+        lash_execution_contracts::process::ProcessTraceClass::Internal
     }
 
     async fn performed_effects(
         &self,
         _payload: &serde_json::Value,
-    ) -> Result<lash_core::PerformedEffects, lash_core::ProcessEnvRefusal> {
+    ) -> Result<lash_execution_contracts::process::PerformedEffects, lash_core::ProcessEnvRefusal>
+    {
         Ok(lash_core_execution::testing::performs(&[
             ext_write_definition(),
         ]))
@@ -153,13 +161,15 @@ impl ProcessEngine for WriteEngine {
 
     async fn check_args(
         &self,
-        _signature: &lash_core_execution::ProcessSignature,
+        _signature: &lash_execution_contracts::process::ProcessSignature,
         _args: &serde_json::Map<String, serde_json::Value>,
-        _mode: lash_core_execution::ArgsMode,
-    ) -> std::result::Result<(), lash_core_execution::ArgsMismatch> {
-        Err(lash_core_execution::ArgsMismatch::UnsupportedSignature {
-            engine_kind: self.kind().into(),
-        })
+        _mode: lash_execution_contracts::process::ArgsMode,
+    ) -> std::result::Result<(), lash_execution_contracts::process::ArgsMismatch> {
+        Err(
+            lash_execution_contracts::process::ArgsMismatch::UnsupportedSignature {
+                engine_kind: self.kind().into(),
+            },
+        )
     }
 
     fn kind(&self) -> &'static str {
@@ -187,14 +197,16 @@ impl ProcessEngine for WriteEngine {
     fn check_settings(
         &self,
         _payload: &serde_json::Value,
-        settings: Option<&lash_core_execution::EngineSettings>,
-    ) -> std::result::Result<(), lash_core_execution::PluginError> {
+        settings: Option<&lash_execution_contracts::process::EngineSettings>,
+    ) -> std::result::Result<(), lash_execution_contracts::plugin_error::PluginError> {
         match settings {
             None => Ok(()),
-            Some(_) => Err(lash_core_execution::PluginError::Registration(format!(
-                "process engine `{}` takes no settings",
-                self.kind()
-            ))),
+            Some(_) => Err(
+                lash_execution_contracts::plugin_error::PluginError::Registration(format!(
+                    "process engine `{}` takes no settings",
+                    self.kind()
+                )),
+            ),
         }
     }
 
@@ -202,8 +214,8 @@ impl ProcessEngine for WriteEngine {
         &self,
         _payload: &serde_json::Value,
     ) -> std::result::Result<
-        Option<lash_core_execution::EngineSettings>,
-        lash_core_execution::PluginError,
+        Option<lash_execution_contracts::process::EngineSettings>,
+        lash_execution_contracts::plugin_error::PluginError,
     > {
         Ok(None)
     }
@@ -215,9 +227,9 @@ impl ProcessEngine for WriteEngine {
     ) -> Result<(EngineState, EngineAction), ProcessInfraError> {
         let action = match event {
             EngineEvent::Started { payload } => {
-                let step = lash_core_execution::StepName("write".to_owned());
+                let step = lash_execution_contracts::process::StepName("write".to_owned());
                 EngineAction::Steps {
-                    steps: vec![lash_core_execution::StepRequest::Tool {
+                    steps: vec![lash_execution_contracts::process::StepRequest::Tool {
                         step,
                         effect: lash_core_execution::testing::effect_of(&ext_write_definition()),
                         input: payload,
@@ -227,21 +239,21 @@ impl ProcessEngine for WriteEngine {
                     wake: None,
                 }
             }
-            EngineEvent::StepSettled { outcome, .. } => {
-                EngineAction::Terminal(lash_core_execution::ProcessOutcome::from_tool_output(
+            EngineEvent::StepSettled { outcome, .. } => EngineAction::Terminal(
+                lash_execution_contracts::process::ProcessOutcome::from_tool_output(
                     lash_core_execution::ToolCallOutput::success(serde_json::json!({
                         "step": outcome.payload().unwrap_or("interrupted"),
                     })),
-                ))
-            }
-            EngineEvent::Cancelled { origin, .. } => {
-                EngineAction::Terminal(lash_core_execution::ProcessOutcome::from_tool_output(
+                ),
+            ),
+            EngineEvent::Cancelled { origin, .. } => EngineAction::Terminal(
+                lash_execution_contracts::process::ProcessOutcome::from_tool_output(
                     lash_core_execution::ToolCallOutput::cancelled(
                         lash_core_execution::ToolCancellation::runtime("cancelled")
                             .with_origin(origin),
                     ),
-                ))
-            }
+                ),
+            ),
             _ => EngineAction::Idle,
         };
         let state = EngineState {
@@ -255,14 +267,17 @@ impl ProcessEngine for WriteEngine {
     fn start_artifacts(
         &self,
         _payload: &serde_json::Value,
-    ) -> Result<Vec<lash_core_execution::ArtifactName>, lash_core_execution::PluginError> {
+    ) -> Result<
+        Vec<lash_core_execution::ArtifactName>,
+        lash_execution_contracts::plugin_error::PluginError,
+    > {
         Ok(Vec::new())
     }
 
     async fn end_artifact_referrer(
         &self,
         _cleanup: &lash_core_execution::ResolvedArtifactCleanup,
-    ) -> Result<(), lash_core_execution::ArtifactStoreError> {
+    ) -> Result<(), lash_execution_contracts::module_artifacts::ArtifactStoreError> {
         Ok(())
     }
 
@@ -270,22 +285,26 @@ impl ProcessEngine for WriteEngine {
         &self,
         _claim: &lash_core_execution::ReferrerClaim,
         artifact_ref: &str,
-    ) -> Result<(), lash_core_execution::PluginError> {
-        Err(lash_core_execution::PluginError::Session(format!(
-            "the proof engine stores no artifact `{artifact_ref}`"
-        )))
+    ) -> Result<(), lash_execution_contracts::plugin_error::PluginError> {
+        Err(
+            lash_execution_contracts::plugin_error::PluginError::Session(format!(
+                "the proof engine stores no artifact `{artifact_ref}`"
+            )),
+        )
     }
 
     async fn resolve(
         &self,
-        _reference: &lash_core_execution::ProcessDefinitionRef,
+        _reference: &lash_execution_contracts::process::ProcessDefinitionRef,
     ) -> Result<
-        lash_core_execution::ProcessDefinitionResolution,
-        lash_core_execution::ProcessDefinitionError,
+        lash_execution_contracts::process::ProcessDefinitionResolution,
+        lash_execution_contracts::process::ProcessDefinitionError,
     > {
-        Ok(lash_core_execution::ProcessDefinitionResolution::new(
-            lash_core_execution::ProcessSignature::Unknown,
-        ))
+        Ok(
+            lash_execution_contracts::process::ProcessDefinitionResolution::new(
+                lash_execution_contracts::process::ProcessSignature::Unknown,
+            ),
+        )
     }
 }
 
@@ -376,12 +395,12 @@ impl StepProof {
             .publish_process_env(&lash_core::HostArtifactPin::mint(), &environment())
             .await
             .map_err(|error| format!("publish the environment: {error}"))?;
-        let request = lash_core::ProcessStartRequest::engine(
+        let request = lash_execution_contracts::process::ProcessStartRequest::engine(
             ENGINE.to_owned(),
             serde_json::json!({ "x": 7 }),
-            lash_core::EngineLaunch::new(env_ref, None),
-            lash_core::ProcessOriginator::host_scoped("proof-host"),
-            lash_core::LifetimeDecision::Detached,
+            lash_execution_contracts::process::EngineLaunch::new(env_ref, None),
+            lash_execution_contracts::process::ProcessOriginator::host_scoped("proof-host"),
+            lash_execution_contracts::process::LifetimeDecision::Detached,
         );
         core.processes()
             .start(request, core.effect_host())

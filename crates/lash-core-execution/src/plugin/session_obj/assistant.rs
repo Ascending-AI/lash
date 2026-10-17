@@ -1,6 +1,7 @@
 //! Assistant transforms and receipt stream replay.
 
 use super::*;
+use lash_execution_contracts::session_types::PluginOwned;
 
 impl PluginSession {
     pub async fn transform_assistant_stream(

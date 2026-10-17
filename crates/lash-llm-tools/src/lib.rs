@@ -1,13 +1,14 @@
 use std::sync::Arc;
 
 use async_trait::async_trait;
-use lash_core::plugin::{PluginError, PluginFactory};
+use lash_core::plugin::PluginFactory;
 use lash_core::{
     AttemptContext, ToolCall, ToolDefinition, ToolOutcome, ToolProvider,
     facade_support::DirectJsonSchema, facade_support::DirectMessage,
     facade_support::DirectOutputSpec, facade_support::DirectPart, facade_support::DirectRequest,
     facade_support::DirectRole,
 };
+use lash_execution_contracts::plugin_error::PluginError;
 use lash_tool_support::{
     StaticToolExecute, StaticToolProvider, ToolBinding, ToolDefinitionBindingExt,
 };
@@ -49,7 +50,10 @@ impl PluginFactory for LlmToolsPluginFactory {
 
     fn recipe(
         self: Arc<Self>,
-    ) -> std::result::Result<lash_core::plugin::PluginRecipe, lash_core::plugin::PluginError> {
+    ) -> std::result::Result<
+        lash_core::plugin::PluginRecipe,
+        lash_execution_contracts::plugin_error::PluginError,
+    > {
         let mut reg = lash_core::plugin::PluginRegistrar::<LlmToolsPlugin>::new(
             lash_core::plugin::PluginFactory::id(self.as_ref()),
         );
@@ -79,7 +83,7 @@ impl lash_core::facade_support::SessionPlugin for LlmToolsPlugin {
 impl LlmToolsPlugin {
     fn declare(
         reg: &mut lash_core::plugin::PluginRegistrar<Self>,
-    ) -> std::result::Result<(), lash_core::plugin::PluginError> {
+    ) -> std::result::Result<(), lash_execution_contracts::plugin_error::PluginError> {
         reg.tools()
             .provider(LLM_QUERY_PROVIDER_KEY, move |this, _state| {
                 Ok(Arc::clone(&this.provider))
@@ -154,7 +158,10 @@ impl lash_core::plugin::ProcessComponentFactory for LlmToolsComponent {
 
     fn recipe(
         self: Arc<Self>,
-    ) -> std::result::Result<lash_core::plugin::ProcessRecipe, lash_core::plugin::PluginError> {
+    ) -> std::result::Result<
+        lash_core::plugin::ProcessRecipe,
+        lash_execution_contracts::plugin_error::PluginError,
+    > {
         let (section, renderer) = llm_query_section()?;
         lash_core::plugin::ProcessComponentSpec::new()
             .with_tool_provider(LLM_QUERY_PROVIDER_KEY, Arc::new(llm_query_provider()))
@@ -479,12 +486,16 @@ mod tests {
     use std::sync::Mutex;
 
     use async_trait::async_trait;
+    use lash_core::SessionId;
+    use lash_core::SessionSnapshot;
+    use lash_core::ToolCall;
     use lash_core::plugin::runtime_host::{
         SessionGraphService, SessionLifecycleService, SessionStateService,
     };
-    use lash_core::plugin::{PluginError, SessionHandle};
     use lash_core::runtime::RuntimeSessionState;
-    use lash_core::{SessionCreateRequest, SessionId, SessionSnapshot, ToolCall};
+    use lash_execution_contracts::plugin_error::PluginError;
+    use lash_execution_contracts::session_types::SessionCreateRequest;
+    use lash_execution_contracts::session_types::SessionHandle;
 
     async fn run_llm_query(
         provider: &StaticToolProvider<LlmToolsProvider>,
@@ -561,8 +572,10 @@ mod tests {
             lash_core::plugin::CommittedTurnReadError,
         > {
             Err(
-                lash_core::PluginError::Session("operation is absent from this fixture".into())
-                    .into(),
+                lash_execution_contracts::plugin_error::PluginError::Session(
+                    "operation is absent from this fixture".into(),
+                )
+                .into(),
             )
         }
 
@@ -591,10 +604,13 @@ mod tests {
             &self,
             _session_id: &lash_core::SessionId,
             _turn_id: &lash_core::TurnId,
-        ) -> Result<lash_core::ExecutionScope, lash_core::PluginError> {
-            Err(lash_core::PluginError::Session(
-                "operation is absent from this fixture".into(),
-            ))
+        ) -> Result<lash_core::ExecutionScope, lash_execution_contracts::plugin_error::PluginError>
+        {
+            Err(
+                lash_execution_contracts::plugin_error::PluginError::Session(
+                    "operation is absent from this fixture".into(),
+                ),
+            )
         }
     }
 
@@ -614,10 +630,15 @@ mod tests {
             &self,
             _session_id: &lash_core::SessionId,
             _request: lash_core::AppendSessionNodesRequest,
-        ) -> Result<lash_core::AppendSessionNodesOutcome, lash_core::PluginError> {
-            Err(lash_core::PluginError::Session(
-                "operation is absent from this fixture".into(),
-            ))
+        ) -> Result<
+            lash_core::AppendSessionNodesOutcome,
+            lash_execution_contracts::plugin_error::PluginError,
+        > {
+            Err(
+                lash_execution_contracts::plugin_error::PluginError::Session(
+                    "operation is absent from this fixture".into(),
+                ),
+            )
         }
     }
 

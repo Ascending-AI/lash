@@ -21,11 +21,11 @@ impl SqliteProcessRegistry {
     pub(crate) fn record_cancel_conn(
         conn: &rusqlite::Connection,
         process_id: &ProcessId,
-        origin: lash_core_execution::CancelOrigin,
+        origin: lash_protocol_types::tool_output::CancelOrigin,
         requester: &str,
         now_ms: u64,
-        fleet_format: lash_core_execution::FleetFormat,
-    ) -> Result<CancelRecorded, lash_core_execution::PluginError> {
+        fleet_format: lash_core_store::store::FleetFormat,
+    ) -> Result<CancelRecorded, lash_execution_contracts::plugin_error::PluginError> {
         let mut record = Self::require_process_conn(conn, process_id)?;
         if record.is_terminal() {
             return Ok(CancelRecorded::Ended);
@@ -35,8 +35,9 @@ impl SqliteProcessRegistry {
                 at_ms: existing.requested_at_ms,
             });
         }
-        let request = lash_core_execution::CancelRequest::new(origin, requester, now_ms);
-        match lash_core_execution::runtime::prepare_process_transition(
+        let request =
+            lash_protocol_types::tool_output::CancelRequest::new(origin, requester, now_ms);
+        match lash_execution_contracts::process::prepare_process_transition(
             &record,
             ProcessTransition::RequestCancel(request),
         )? {
@@ -54,18 +55,19 @@ impl SqliteProcessRegistry {
     pub(crate) fn record_terminal_conn(
         conn: &rusqlite::Connection,
         process_id: &ProcessId,
-        output: &lash_core_execution::ProcessAwaitOutput,
+        output: &lash_execution_contracts::process::ProcessAwaitOutput,
         epoch: u64,
         now_ms: u64,
-        fleet_format: lash_core_execution::FleetFormat,
-    ) -> Result<bool, lash_core_execution::PluginError> {
+        fleet_format: lash_core_store::store::FleetFormat,
+    ) -> Result<bool, lash_execution_contracts::plugin_error::PluginError> {
         let mut record = Self::require_process_conn(conn, process_id)?;
         if record.is_terminal() {
             return Ok(false);
         }
-        let authority = lash_core_execution::ProcessCompletionAuthority::ActorEpoch { epoch };
+        let authority =
+            lash_execution_contracts::process::ProcessCompletionAuthority::ActorEpoch { epoch };
         let mut batch = ProcessEventBatch::for_fleet(fleet_format);
-        let request = lash_core_execution::facade_support::terminal_append_request(
+        let request = lash_execution_contracts::process::terminal_append_request(
             process_id,
             output,
             Some(&authority),
@@ -82,8 +84,8 @@ impl SqliteProcessRegistry {
         process_id: &ProcessId,
         request: ProcessEventAppendRequest,
         now_ms: u64,
-        fleet_format: lash_core_execution::FleetFormat,
-    ) -> Result<(), lash_core_execution::PluginError> {
+        fleet_format: lash_core_store::store::FleetFormat,
+    ) -> Result<(), lash_execution_contracts::plugin_error::PluginError> {
         let mut record = Self::require_process_conn(conn, process_id)?;
         Self::append_event_conn(conn, &mut record, request, now_ms, fleet_format)?;
         Ok(())

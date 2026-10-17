@@ -17,7 +17,7 @@ use lash_protocol_types::sync::MutexExt;
 
 use super::execution_context::RuntimeExecutionContext;
 use crate::ProcessId;
-use crate::runtime::effect::executor::RuntimeEffectControllerError;
+use lash_core_store::runtime_error::RuntimeEffectControllerError;
 
 pub use lash_core_store::effect_opener::{IncorporationLedger, SettlementSource};
 

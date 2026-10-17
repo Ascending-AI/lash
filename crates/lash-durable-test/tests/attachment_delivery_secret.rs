@@ -17,8 +17,8 @@ use lash_core::{
     AttachmentCreateMeta, AttachmentId, AttachmentRef, AttachmentStore, AttachmentStoreError,
     AttachmentStorePersistence, LlmResponse, StoredAttachment, StoredBlobRef,
 };
-use lash_core_execution::StoreSet;
 use lash_durable_test::{Matrix, Script, SimClock, SimNodes, SimNodesConfig, Tripwire};
+use lash_execution_contracts::backend::StoreSet;
 use lash_protocol_types::sync::MutexExt as _;
 use lash_protocol_types::{
     llm::attachment_delivery::AttachmentPosition, llm::attachment_delivery::Delivery,

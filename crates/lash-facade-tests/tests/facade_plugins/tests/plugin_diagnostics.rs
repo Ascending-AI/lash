@@ -1,7 +1,6 @@
 //! CLAIM-EXPLANATION-MATCHES-PREDICATE and retained attribution (D3/D4).
 use super::*;
 use lash::plugins::diagnostics::*;
-use lash_core::Backend;
 use lash_core::durable_port::domain::{
     CANCEL_MAIL, DomainWrite, MailDomainWrite, SESSION_CLOSE_MAIL, SessionCloseWrite,
     TurnCancelRequest, TurnWrite,
@@ -9,6 +8,7 @@ use lash_core::durable_port::domain::{
 use lash_core::durable_port::{
     CommitLabel, MailKind, MailTx, NodeId, NodeLease, NodeSpec, Release,
 };
+use lash_execution_contracts::backend::Backend;
 fn node_snapshot(lease: &NodeLease) -> NodeServingSnapshot {
     NodeServingSnapshot {
         owner: Some(lease.owner.clone()),
@@ -386,7 +386,9 @@ async fn retained_expiry_check_attribution_survives_removal() {
                 &output,
             ),
             output,
-            intent_outcomes: Vec::<lash_core::ToolIntentExecutionOutcome>::new(),
+            intent_outcomes: Vec::<
+                lash_execution_contracts::tool_intent_outcome::ToolIntentExecutionOutcome,
+            >::new(),
             replay: None,
         };
         let material = MaterialNode::Outcome(

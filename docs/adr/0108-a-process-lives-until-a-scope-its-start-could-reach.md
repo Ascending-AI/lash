@@ -31,7 +31,7 @@ process) or a session. A `ScopeRef` pairs it with one grant:
 the chosen scope and grant. `Detached` names no cancelling scope.
 
 Evidence:
-`crates/lash-core-execution/src/runtime/process/model/scope_lifetime.rs:34`.
+`crates/lash-execution-contracts/src/process/model/scope_lifetime.rs:34`.
 
 ### 2. Every start records its ancestry
 
@@ -51,7 +51,7 @@ owner's row. If retention has pruned that owner, the context contains the
 turn and session without the owner's lineage.
 
 Evidence:
-`crates/lash-core-execution/src/runtime/process/model/scope_lifetime.rs:309`
+`crates/lash-execution-contracts/src/process/model/scope_lifetime.rs:309`
 and `crates/lash-core/src/runtime/session_manager/process_runners/control.rs:1177`.
 
 ### 3. Registration checks reachability, in every build
@@ -62,7 +62,7 @@ A session capability must be in the ancestry or be the session granted to
 that run by its `HostSessionLookup` lifetime. These checks return typed
 registration refusals and run in production builds.
 
-Evidence: `crates/lash-core-execution/src/runtime/process/validation.rs:1155`.
+Evidence: `crates/lash-execution-contracts/src/process/validation.rs:1155`.
 
 ### 4. A policy decides, and the decision is recorded
 
@@ -77,8 +77,8 @@ rules. A parked call's cancellation or deadline can owe its child a cancel
 independently of the child's lifetime. Consumer holds follow ADR 0116 §3.6.
 
 Evidence:
-`crates/lash-core-execution/src/runtime/process/model/scope_lifetime.rs:126`
-and `crates/lash-core-execution/src/runtime/process/model/scope_lifetime.rs:399`.
+`crates/lash-execution-contracts/src/process/model/scope_lifetime.rs:126`
+and `crates/lash-execution-contracts/src/process/model/scope_lifetime.rs:399`.
 
 ### 5. A scope closes once, after its end is durable
 

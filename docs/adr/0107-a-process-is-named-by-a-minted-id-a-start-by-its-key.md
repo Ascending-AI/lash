@@ -30,7 +30,7 @@ there is no label-to-process lookup.
 Evidence: `crates/lash-sansio/src/identity.rs:212`,
 `crates/lash-core-store/src/process_identity.rs:19`, and
 `crates/lash-sqlite-store/src/process_registry/registration.rs:74`, and
-`crates/lash-core-execution/src/runtime/process/registry_concerns.rs:846`.
+`crates/lash-execution-contracts/src/process/registry_concerns.rs:846`.
 
 ### 2. A start is keyed by an optional `StartKey`
 
@@ -68,8 +68,8 @@ and runtime root do not export. After pruning, a key can register a fresh
 process with a fresh id.
 
 Evidence: `crates/lash-core-store/src/process_identity.rs:190`,
-`crates/lash-core-execution/src/runtime/process/validation.rs:1003`, and
-`crates/lash-core-execution/src/runtime/process/model/start_request.rs:217`.
+`crates/lash-execution-contracts/src/process/validation.rs:1003`, and
+`crates/lash-execution-contracts/src/process/model/start_request.rs:217`.
 
 ### 3. The start effect is addressed by the key
 

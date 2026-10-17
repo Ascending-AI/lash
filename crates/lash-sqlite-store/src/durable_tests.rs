@@ -4,7 +4,7 @@
 use std::sync::Arc;
 use std::time::Duration;
 
-use lash_core_execution::testing::TestClock;
+use lash_core_ids::test_clock::TestClock;
 use lash_durable::laws;
 
 use crate::SqliteStoreSet;
@@ -13,23 +13,25 @@ use crate::SqliteStoreSet;
 /// transaction; SQLite supplies its snapshot for the statement itself.
 #[tokio::test]
 async fn a_process_row_read_uses_only_its_select() {
-    use lash_core_execution::ProcessRegistrar as _;
     use lash_durable::DurableReads as _;
+    use lash_execution_contracts::process::ProcessRegistrar as _;
 
     let set = SqliteStoreSet::memory().await.unwrap();
-    lash_core_execution::testing::process_execution_env_fixture(set.process_env_store().as_ref())
-        .await;
+    lash_execution_contracts::testing::process_execution_env_fixture(
+        set.process_env_store().as_ref(),
+    )
+    .await;
     let registered = set
         .process_registry()
-        .register_process(lash_core_execution::testing::held_engine_registration(
+        .register_process(lash_execution_contracts::testing::held_engine_registration(
             serde_json::Value::Null,
-            lash_core_execution::ProcessProvenance::host(),
-            lash_core_execution::Lifetime::Detached,
+            lash_execution_contracts::process::ProcessProvenance::host(),
+            lash_execution_contracts::process::Lifetime::Detached,
         ))
         .await
         .unwrap();
     let store = set.durable_store();
-    let (answer, receipt) = lash_core_execution::facade_support::sql::collect(
+    let (answer, receipt) = lash_core_ids::operational_metrics::sql::collect(
         "process.row",
         "sqlite",
         store.process(&registered.id),
@@ -62,7 +64,7 @@ async fn single_statement_durable_reads_use_their_implicit_snapshots() {
         lash_durable::domain::CellId::new("metadata"),
     );
     let ((), receipt) =
-        lash_core_execution::facade_support::sql::collect("durable.metadata", "sqlite", async {
+        lash_core_ids::operational_metrics::sql::collect("durable.metadata", "sqlite", async {
             assert!(store.turn_end(&session, &run).await.unwrap().is_none());
             assert!(store.exec_root(&exec).await.unwrap().is_none());
             assert!(store.cell_roots(&session, &run).await.unwrap().is_empty());
@@ -330,7 +332,7 @@ async fn a_model_start_binds_only_the_text_bodies_the_store_lacks() {
         let (store, actor) = (&store, &actor);
         async move {
             let ((), receipt) =
-                lash_core_execution::facade_support::sql::collect(label, "sqlite", async {
+                lash_core_ids::operational_metrics::sql::collect(label, "sqlite", async {
                     let mut tx = store.begin(actor, epoch).await.expect("begin");
                     for write in writes {
                         tx.write(write);
@@ -666,7 +668,7 @@ async fn sequential_calls_submit_only_new_fragments_across_settlement() {
             DomainWrite::Prompt(PromptWrite::Record {
                 prefix, request, ..
             }) => {
-                let record: lash_core_execution::prompt_sections::AdmittedRequest =
+                let record: lash_core_store::prompt_sections::AdmittedRequest =
                     serde_json::from_str(request).unwrap();
                 (
                     prefix.clone().expect("a history prefix"),
@@ -676,7 +678,7 @@ async fn sequential_calls_submit_only_new_fragments_across_settlement() {
             _ => unreachable!(),
         };
         let ((), receipt) =
-            lash_core_execution::facade_support::sql::collect("model.start", "sqlite", async {
+            lash_core_ids::operational_metrics::sql::collect("model.start", "sqlite", async {
                 let mut tx = store.begin(&actor, epoch).await.unwrap();
                 tx.write(write);
                 store
@@ -920,7 +922,7 @@ async fn prompt_reclamation_reads_one_edge_batch_per_level() {
             session: session.clone(),
             run: Some(lash_protocol_types::TurnId::from(run)),
         }));
-        let (answer, receipt) = lash_core_execution::facade_support::sql::collect(
+        let (answer, receipt) = lash_core_ids::operational_metrics::sql::collect(
             "prompt.release",
             "sqlite",
             store.commit(tx, CommitLabel::new("prompt.release")),
@@ -1008,7 +1010,7 @@ async fn prompt_text_reads_are_batched_in_request_order() {
         .iter()
         .filter_map(|hash| texts.iter().find(|text| text.hash == *hash).cloned())
         .collect();
-    let (answer, receipt) = lash_core_execution::facade_support::sql::collect(
+    let (answer, receipt) = lash_core_ids::operational_metrics::sql::collect(
         "prompt.texts",
         "sqlite",
         store.prompt_texts(&hashes),

@@ -536,7 +536,7 @@ await control.finish({ last: rows[0] });";
 /// nothing left to delete, so every retired root is peeled before the
 /// cell's next park.
 struct RetirePages {
-    stores: Arc<std::sync::OnceLock<Arc<dyn lash_core_execution::StoreSet>>>,
+    stores: Arc<std::sync::OnceLock<Arc<dyn lash_execution_contracts::backend::StoreSet>>>,
 }
 
 #[async_trait::async_trait]

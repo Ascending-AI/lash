@@ -51,7 +51,7 @@ pub(crate) async fn load_process_tx(
 /// registration transaction that read it.
 pub(crate) async fn load_process_by_start_key_tx(
     tx: &mut sqlx::PgConnection,
-    start_key: &lash_core_execution::StartKey,
+    start_key: &lash_core_store::process_identity::StartKey,
 ) -> Result<Option<ProcessRecord>, PluginError> {
     let json: Option<String> = crate::observed_sql::query_scalar(
         process_sql().process.select_record_json_by_start_key.sql(),
@@ -138,8 +138,8 @@ pub(crate) async fn save_process_tx(
 pub(crate) async fn load_event_by_key_tx(
     tx: &mut sqlx::PgConnection,
     process_id: &ProcessId,
-    append: &lash_core_execution::facade_support::CanonicalProcessEventAppend,
-    fleet_format: lash_core_execution::FleetFormat,
+    append: &lash_execution_contracts::process::CanonicalProcessEventAppend,
+    fleet_format: lash_core_store::store::FleetFormat,
 ) -> Result<Option<ProcessEvent>, PluginError> {
     let Some(row) = crate::observed_sql::query(process_sql().event.select_by_replay_key.sql())
         .bind(process_id.as_str())
@@ -153,7 +153,7 @@ pub(crate) async fn load_event_by_key_tx(
     let json: String = row.get(0);
     let released_digest: Option<String> = row.get(1);
     let event = match released_digest {
-        Some(digest) => lash_core_execution::runtime::restore_released_process_event(
+        Some(digest) => lash_execution_contracts::process::restore_released_process_event(
             serde_json::from_str(&json).map_err(process_decode_error)?,
             &digest,
             append,
@@ -176,7 +176,8 @@ pub(crate) async fn next_process_event_sequence_tx(
     let last_sequence = last_sequence
         .map(|sequence| plugin_u64_from_sql("ProcessEvent", "sequence", sequence))
         .transpose()?;
-    let sequence = lash_core_execution::runtime::allocate_process_event_sequence(last_sequence)?;
+    let sequence =
+        lash_execution_contracts::process::allocate_process_event_sequence(last_sequence)?;
     Ok((last_sequence, sequence))
 }
 
@@ -195,14 +196,14 @@ pub(crate) enum ProcessEventAppendArm {
 /// A batch of process-event appends staged against one in-memory projection
 /// inside one transaction (FIG-3571), saved once by [`Self::commit`].
 pub(crate) struct ProcessEventBatch {
-    fleet_format: lash_core_execution::FleetFormat,
+    fleet_format: lash_core_store::store::FleetFormat,
     record_changed: bool,
     execution_changed: bool,
 }
 
 impl ProcessEventBatch {
     /// Start an empty batch whose appends stamp `fleet_format`'s versions.
-    pub(crate) fn for_fleet(fleet_format: lash_core_execution::FleetFormat) -> Self {
+    pub(crate) fn for_fleet(fleet_format: lash_core_store::store::FleetFormat) -> Self {
         Self {
             fleet_format,
             record_changed: false,
@@ -237,7 +238,8 @@ impl ProcessEventBatch {
                 .await?;
         self.record_changed |= record_changed;
         self.execution_changed |= record_changed
-            && receipt.event.fact.kind() == lash_core_execution::ProcessEventKind::Succeeded;
+            && receipt.event.fact.kind()
+                == lash_execution_contracts::process::ProcessEventKind::Succeeded;
         Ok((receipt, arm))
     }
 
@@ -262,7 +264,7 @@ pub(crate) async fn apply_process_event_append_tx(
     record: &mut ProcessRecord,
     request: ProcessEventAppendRequest,
     occurred_at_ms: u64,
-    fleet_format: lash_core_execution::FleetFormat,
+    fleet_format: lash_core_store::store::FleetFormat,
 ) -> Result<(ProcessEventAppendReceipt, ProcessEventAppendArm), PluginError> {
     let (receipt, arm, record_changed) =
         stage_process_event_append_tx(tx, record, request, occurred_at_ms, fleet_format).await?;
@@ -270,7 +272,8 @@ pub(crate) async fn apply_process_event_append_tx(
         save_process_tx(
             tx,
             record,
-            receipt.event.fact.kind() == lash_core_execution::ProcessEventKind::Succeeded,
+            receipt.event.fact.kind()
+                == lash_execution_contracts::process::ProcessEventKind::Succeeded,
         )
         .await?;
     }
@@ -296,13 +299,13 @@ async fn stage_process_event_append_tx(
     record: &mut ProcessRecord,
     request: ProcessEventAppendRequest,
     occurred_at_ms: u64,
-    fleet_format: lash_core_execution::FleetFormat,
+    fleet_format: lash_core_store::store::FleetFormat,
 ) -> Result<(ProcessEventAppendReceipt, ProcessEventAppendArm, bool), PluginError> {
     let process_id = record.id.clone();
     let append = request.canonical(record, fleet_format)?;
     let replay_lookup = load_event_by_key_tx(tx, &process_id, &append, fleet_format).await?;
     let (last_sequence, sequence) = next_process_event_sequence_tx(tx, &process_id).await?;
-    let prepared = lash_core_execution::runtime::prepare_process_event_append(
+    let prepared = lash_execution_contracts::process::prepare_process_event_append(
         record,
         append,
         sequence,
@@ -311,7 +314,7 @@ async fn stage_process_event_append_tx(
         occurred_at_ms,
     )?;
     match prepared {
-        lash_core_execution::facade_support::ProcessEventAppendPlan::Replay {
+        lash_execution_contracts::process::ProcessEventAppendPlan::Replay {
             event,
             repair_record,
             ..
@@ -323,14 +326,14 @@ async fn stage_process_event_append_tx(
             Ok((
                 ProcessEventAppendReceipt {
                     last_event_sequence: record.last_event_sequence,
-                    realization: lash_core_execution::StoreRealization::Coalesced,
+                    realization: lash_execution_contracts::process::StoreRealization::Coalesced,
                     event,
                 },
                 ProcessEventAppendArm::Replayed,
                 repaired,
             ))
         }
-        lash_core_execution::facade_support::ProcessEventAppendPlan::Insert {
+        lash_execution_contracts::process::ProcessEventAppendPlan::Insert {
             event,
             projected_record,
         } => {
@@ -350,7 +353,7 @@ async fn stage_process_event_append_tx(
             if record.is_terminal() {
                 crate::process_registry::parent_end::record_tx(
                     tx,
-                    &lash_core_execution::ScopeId::process(process_id.clone()),
+                    &lash_core_store::scope_identity::ScopeId::process(process_id.clone()),
                     occurred_at_ms,
                     fleet_format,
                 )
@@ -359,7 +362,7 @@ async fn stage_process_event_append_tx(
             Ok((
                 ProcessEventAppendReceipt {
                     last_event_sequence: event.sequence,
-                    realization: lash_core_execution::StoreRealization::Realized,
+                    realization: lash_execution_contracts::process::StoreRealization::Realized,
                     event,
                 },
                 ProcessEventAppendArm::Inserted,
@@ -374,7 +377,7 @@ pub(crate) async fn append_process_event_tx(
     record: &mut ProcessRecord,
     request: ProcessEventAppendRequest,
     occurred_at_ms: u64,
-    fleet_format: lash_core_execution::FleetFormat,
+    fleet_format: lash_core_store::store::FleetFormat,
 ) -> Result<ProcessEventAppendReceipt, PluginError> {
     apply_process_event_append_tx(tx, record, request, occurred_at_ms, fleet_format)
         .await
@@ -397,10 +400,10 @@ pub(crate) enum CancelRecorded {
 pub(crate) async fn record_cancel_tx(
     tx: &mut GuardedTx<'_>,
     process_id: &ProcessId,
-    origin: lash_core_execution::CancelOrigin,
+    origin: lash_protocol_types::tool_output::CancelOrigin,
     requester: &str,
     now_ms: u64,
-    fleet_format: lash_core_execution::FleetFormat,
+    fleet_format: lash_core_store::store::FleetFormat,
 ) -> Result<CancelRecorded, PluginError> {
     let mut record = require_process_tx(tx, process_id).await?;
     if record.is_terminal() {
@@ -411,11 +414,11 @@ pub(crate) async fn record_cancel_tx(
             at_ms: existing.requested_at_ms,
         });
     }
-    let request = lash_core_execution::CancelRequest::new(origin, requester, now_ms);
-    if let lash_core_execution::runtime::ProcessTransitionPlan::Append(append) =
-        lash_core_execution::runtime::prepare_process_transition(
+    let request = lash_protocol_types::tool_output::CancelRequest::new(origin, requester, now_ms);
+    if let lash_execution_contracts::process::ProcessTransitionPlan::Append(append) =
+        lash_execution_contracts::process::prepare_process_transition(
             &record,
-            lash_core_execution::runtime::ProcessTransition::RequestCancel(request),
+            lash_execution_contracts::process::ProcessTransition::RequestCancel(request),
         )?
     {
         append_process_event_tx(tx, &mut record, *append, now_ms, fleet_format).await?;
@@ -432,15 +435,16 @@ pub(crate) async fn record_terminal_tx(
     output: &ProcessAwaitOutput,
     epoch: u64,
     now_ms: u64,
-    fleet_format: lash_core_execution::FleetFormat,
+    fleet_format: lash_core_store::store::FleetFormat,
 ) -> Result<bool, PluginError> {
     let mut record = require_process_tx(tx, process_id).await?;
     if record.is_terminal() {
         return Ok(false);
     }
-    let authority = lash_core_execution::ProcessCompletionAuthority::ActorEpoch { epoch };
+    let authority =
+        lash_execution_contracts::process::ProcessCompletionAuthority::ActorEpoch { epoch };
     let mut batch = ProcessEventBatch::for_fleet(fleet_format);
-    let request = lash_core_execution::facade_support::terminal_append_request(
+    let request = lash_execution_contracts::process::terminal_append_request(
         process_id,
         output,
         Some(&authority),
@@ -457,7 +461,7 @@ pub(crate) async fn record_event_tx(
     process_id: &ProcessId,
     request: ProcessEventAppendRequest,
     now_ms: u64,
-    fleet_format: lash_core_execution::FleetFormat,
+    fleet_format: lash_core_store::store::FleetFormat,
 ) -> Result<(), PluginError> {
     let mut record = require_process_tx(tx, process_id).await?;
     append_process_event_tx(tx, &mut record, request, now_ms, fleet_format).await?;

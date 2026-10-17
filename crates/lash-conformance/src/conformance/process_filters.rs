@@ -58,9 +58,11 @@ pub async fn process_roster_pages_match_enriched_filters(registry: Arc<dyn Proce
     let target = registry
         .register_process(
             registration("proc-filter-target")
-                .with_admitted_identity(lash_core::AdmittedProcessIdentity::for_testing(
-                    ProcessIdentity::labelled("filter-kind", Some("target-label")),
-                ))
+                .with_admitted_identity(
+                    lash_execution_contracts::process::AdmittedProcessIdentity::for_testing(
+                        ProcessIdentity::labelled("filter-kind", Some("target-label")),
+                    ),
+                )
                 .with_process_provenance(ProcessProvenance::session(scope).with_caused_by(Some(
                     CausalRef::Process {
                         process_id: crate::ProcessId::fixture("filter-cause"),
@@ -72,10 +74,9 @@ pub async fn process_roster_pages_match_enriched_filters(registry: Arc<dyn Proce
     tokio::time::sleep(std::time::Duration::from_millis(5)).await;
     registry
         .register_process(registration("proc-filter-other").with_admitted_identity(
-            lash_core::AdmittedProcessIdentity::for_testing(ProcessIdentity::labelled(
-                "other-kind",
-                Some("other-label"),
-            )),
+            lash_execution_contracts::process::AdmittedProcessIdentity::for_testing(
+                ProcessIdentity::labelled("other-kind", Some("other-label")),
+            ),
         ))
         .await
         .expect("register other");
@@ -97,10 +98,15 @@ pub async fn process_roster_pages_match_enriched_filters(registry: Arc<dyn Proce
         registry
             .register_process(
                 registration(&format!("proc-filter-definition-{suffix}")).with_admitted_identity(
-                    lash_core::AdmittedProcessIdentity::for_testing(definition_identity(
-                        lash_core::ProcessDefinitionRef::unclaimed("definition-kind", definition),
-                        Some(&format!("definition-{suffix}")),
-                    )),
+                    lash_execution_contracts::process::AdmittedProcessIdentity::for_testing(
+                        definition_identity(
+                            lash_execution_contracts::process::ProcessDefinitionRef::unclaimed(
+                                "definition-kind",
+                                definition,
+                            ),
+                            Some(&format!("definition-{suffix}")),
+                        ),
+                    ),
                 ),
             )
             .await
@@ -176,9 +182,13 @@ pub async fn process_roster_pages_match_enriched_filters(registry: Arc<dyn Proce
             ProcessListFilter {
                 status: ProcessStatusFilter::Any,
                 definition_id: Some(
-                    lash_core::ProcessDefinitionDraft::new("definition-kind", definition, [])
-                        .expect("filter descriptor")
-                        .id(),
+                    lash_execution_contracts::process::ProcessDefinitionDraft::new(
+                        "definition-kind",
+                        definition,
+                        [],
+                    )
+                    .expect("filter descriptor")
+                    .id(),
                 ),
                 ..ProcessListFilter::default()
             },
@@ -242,10 +252,9 @@ pub async fn process_roster_pages_bound_retired_rows_without_hiding_live_rows(
             registry
                 .register_process_with_observers(
                     registration(label).with_admitted_identity(
-                        lash_core::AdmittedProcessIdentity::for_testing(ProcessIdentity::labelled(
-                            KIND,
-                            Some(label),
-                        )),
+                        lash_execution_contracts::process::AdmittedProcessIdentity::for_testing(
+                            ProcessIdentity::labelled(KIND, Some(label)),
+                        ),
                     ),
                     &[SessionId::from("recent-filter-observer")],
                 )
@@ -268,10 +277,9 @@ pub async fn process_roster_pages_bound_retired_rows_without_hiding_live_rows(
     let recent_filter_fresh_id = registry
         .register_process_with_observers(
             registration("recent-filter-fresh").with_admitted_identity(
-                lash_core::AdmittedProcessIdentity::for_testing(ProcessIdentity::labelled(
-                    KIND,
-                    Some("recent-filter-fresh"),
-                )),
+                lash_execution_contracts::process::AdmittedProcessIdentity::for_testing(
+                    ProcessIdentity::labelled(KIND, Some("recent-filter-fresh")),
+                ),
             ),
             &[SessionId::from("recent-filter-observer")],
         )
@@ -657,17 +665,18 @@ pub async fn process_roster_pages_match_scope_frame_and_cancel_filters(
     reason = "conformance fixture uses a valid descriptor without dependencies"
 )]
 fn definition_identity(
-    reference: lash_core::ProcessDefinitionRef,
+    reference: lash_execution_contracts::process::ProcessDefinitionRef,
     label: Option<impl Into<String>>,
-) -> lash_core::ProcessIdentity {
-    let id = lash_core::ProcessDefinitionDraft::new(
+) -> lash_execution_contracts::process::ProcessIdentity {
+    let id = lash_execution_contracts::process::ProcessDefinitionDraft::new(
         reference.engine_kind.clone(),
         reference.definition.as_json().clone(),
         [],
     )
     .expect("fixture descriptor")
     .id();
-    let mut identity = lash_core::ProcessIdentity::labelled(reference.engine_kind, label);
+    let mut identity =
+        lash_execution_contracts::process::ProcessIdentity::labelled(reference.engine_kind, label);
     identity.definition_id = Some(id);
     identity
 }

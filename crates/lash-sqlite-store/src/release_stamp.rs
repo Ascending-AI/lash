@@ -18,7 +18,9 @@
 //! schema-open path runs before any runtime exists, and the field is deployment
 //! metadata rather than a durable domain fact that replay depends on.
 
-use lash_core_execution::{StoreComponentVersion, StoreReleaseStamp, StoreReleaseState};
+use lash_core_store::store::StoreComponentVersion;
+use lash_core_store::store::StoreReleaseStamp;
+use lash_core_store::store::StoreReleaseState;
 use rusqlite::{Connection, OptionalExtension, Transaction, params};
 
 use crate::session_sql::session_sql;
@@ -33,7 +35,7 @@ pub(crate) const BUILD_RELEASE: &str = env!("CARGO_PKG_VERSION");
 /// What the SQLite database required when this build wrote the stamp: the
 /// version its compatibility descriptor writes.
 pub(crate) fn build_schema_versions() -> Vec<StoreComponentVersion> {
-    lash_core_execution::compat::descriptor(crate::schema::COMPONENT)
+    lash_core_store::compat::descriptor(crate::schema::COMPONENT)
         .map(|descriptor| StoreComponentVersion {
             component: crate::schema::DATABASE_NAME.to_string(),
             version: i64::from(descriptor.writes.max()),
@@ -112,7 +114,7 @@ pub(crate) fn write(tx: &Transaction<'_>) -> rusqlite::Result<()> {
         )
         .optional()?;
     if let Some(existing) = existing
-        && !lash_core_execution::release_stamp_advances(&existing, BUILD_RELEASE)
+        && !lash_core_store::store::release_stamp_advances(&existing, BUILD_RELEASE)
     {
         return Ok(());
     }

@@ -14,9 +14,12 @@ type PgTx<'c> = sqlx::Transaction<'c, sqlx::Postgres>;
 /// A row a cancel released or dropped: its disposition, and for an input
 /// its ingress position with what the outcome reports of it.
 pub(crate) type ReleasedRow = (
-    lash_core_execution::store::IngressRowId,
-    lash_core_execution::TurnCancelUndeliveredInputPolicy,
-    Option<(u64, lash_core_execution::TurnCancelAffectedInput)>,
+    lash_core_store::store::IngressRowId,
+    lash_protocol_types::session_model::TurnCancelUndeliveredInputPolicy,
+    Option<(
+        u64,
+        lash_core_store::turn_control_vocabulary::TurnCancelAffectedInput,
+    )>,
 );
 
 /// The rows `commit`'s cancel released or dropped, each verdict taken
@@ -34,27 +37,27 @@ pub(crate) async fn released_rows_tx(
     for (rows, disposition) in [
         (
             &ingress.released,
-            lash_core_execution::TurnCancelUndeliveredInputPolicy::Defer,
+            lash_protocol_types::session_model::TurnCancelUndeliveredInputPolicy::Defer,
         ),
         (
             &ingress.dropped,
-            lash_core_execution::TurnCancelUndeliveredInputPolicy::Drop,
+            lash_protocol_types::session_model::TurnCancelUndeliveredInputPolicy::Drop,
         ),
     ] {
         for row in rows {
             let affected = match row {
-                lash_core_execution::store::IngressRowId::Input(input_id) => {
+                lash_core_store::store::IngressRowId::Input(input_id) => {
                     let held = admitted_input_tx(tx, session_id, run, input_id).await?;
                     Some((
                         held.enqueue_seq,
-                        lash_core_execution::TurnCancelAffectedInput {
+                        lash_core_store::turn_control_vocabulary::TurnCancelAffectedInput {
                             input_id: input_id.clone(),
                             payload: held.input.into_live("PendingTurnInput")?,
                             disposition,
                         },
                     ))
                 }
-                lash_core_execution::store::IngressRowId::Batch(batch_id) => {
+                lash_core_store::store::IngressRowId::Batch(batch_id) => {
                     admitted_batch_tx(tx, session_id, run, batch_id).await?;
                     None
                 }
@@ -70,8 +73,8 @@ async fn admitted_input_tx(
     tx: &mut sqlx::PgConnection,
     session_id: &SessionId,
     run: &TurnId,
-    input_id: &lash_core_execution::InputId,
-) -> Result<lash_core_execution::PendingTurnInput, StoreError> {
+    input_id: &lash_protocol_types::InputId,
+) -> Result<lash_core_store::turn_input_vocabulary::PendingTurnInput, StoreError> {
     let row = crate::observed_sql::query(
         crate::turn_ingress::turn_ingress_sql()
             .pending_inputs_postgres
@@ -85,7 +88,7 @@ async fn admitted_input_tx(
     .map_err(store_sqlx_error)?
     .map(pending_turn_input_row)
     .transpose()?;
-    lash_core_execution::store_backend_support::require_admitted_to_run(
+    lash_core_store::store_backend_support::require_admitted_to_run(
         session_id,
         run,
         &input_row(input_id),
@@ -101,7 +104,7 @@ async fn admitted_batch_tx(
     tx: &mut sqlx::PgConnection,
     session_id: &SessionId,
     run: &TurnId,
-    batch_id: &lash_core_execution::BatchId,
+    batch_id: &lash_protocol_types::BatchId,
 ) -> Result<(), StoreError> {
     let sql = crate::turn_ingress::turn_ingress_sql();
     let observed: Option<Option<String>> =
@@ -111,16 +114,16 @@ async fn admitted_batch_tx(
             .fetch_optional(crate::observed_sql::executor(&mut *tx))
             .await
             .map_err(store_sqlx_error)?;
-    lash_core_execution::store_backend_support::require_admitted_to_run(
+    lash_core_store::store_backend_support::require_admitted_to_run(
         session_id,
         run,
-        &lash_core_execution::store::IngressRowId::Batch(batch_id.clone()),
+        &lash_core_store::store::IngressRowId::Batch(batch_id.clone()),
         observed.as_ref().map(Option::as_deref),
     )
 }
 
-fn input_row(input_id: &lash_core_execution::InputId) -> lash_core_execution::store::IngressRowId {
-    lash_core_execution::store::IngressRowId::Input(input_id.clone())
+fn input_row(input_id: &lash_protocol_types::InputId) -> lash_core_store::store::IngressRowId {
+    lash_core_store::store::IngressRowId::Input(input_id.clone())
 }
 
 /// Why `row`'s settlement under `run` refused: the shared verdict over the
@@ -130,23 +133,23 @@ pub(crate) async fn ingress_refusal_tx(
     tx: &mut sqlx::PgConnection,
     session_id: &SessionId,
     run: &TurnId,
-    row: &lash_core_execution::store::IngressRowId,
+    row: &lash_core_store::store::IngressRowId,
 ) -> StoreError {
     let verdict = match row {
-        lash_core_execution::store::IngressRowId::Input(input_id) => {
+        lash_core_store::store::IngressRowId::Input(input_id) => {
             admitted_input_tx(tx, session_id, run, input_id)
                 .await
                 .map(drop)
         }
-        lash_core_execution::store::IngressRowId::Batch(batch_id) => {
+        lash_core_store::store::IngressRowId::Batch(batch_id) => {
             admitted_batch_tx(tx, session_id, run, batch_id).await
         }
     };
     if let Err(error) = verdict {
         return error;
     }
-    match lash_core_execution::store_backend_support::require_fenced_write_applied(
-        lash_core_execution::store_backend_support::FencedWrite::IngressSettlement,
+    match lash_core_store::store_backend_support::require_fenced_write_applied(
+        lash_core_store::store_backend_support::FencedWrite::IngressSettlement,
         crate::POSTGRES_BACKEND,
         &row.to_string(),
         0,
@@ -167,7 +170,7 @@ pub(crate) async fn ingress_refusal_tx(
 pub(crate) async fn command_refusal_tx(
     tx: &mut sqlx::PgConnection,
     session_id: &SessionId,
-    batch_id: &lash_core_execution::BatchId,
+    batch_id: &lash_protocol_types::BatchId,
 ) -> StoreError {
     let sql = crate::turn_ingress::turn_ingress_sql();
     let observed: Result<Option<Option<String>>, _> =
@@ -180,15 +183,15 @@ pub(crate) async fn command_refusal_tx(
         Ok(observed) => observed,
         Err(error) => return store_sqlx_error(error),
     };
-    if let Err(error) = lash_core_execution::store_backend_support::require_open_command(
+    if let Err(error) = lash_core_store::store_backend_support::require_open_command(
         session_id,
         batch_id,
         observed.as_ref().map(Option::as_deref),
     ) {
         return error;
     }
-    match lash_core_execution::store_backend_support::require_fenced_write_applied(
-        lash_core_execution::store_backend_support::FencedWrite::IngressSettlement,
+    match lash_core_store::store_backend_support::require_fenced_write_applied(
+        lash_core_store::store_backend_support::FencedWrite::IngressSettlement,
         crate::POSTGRES_BACKEND,
         batch_id.as_str(),
         0,

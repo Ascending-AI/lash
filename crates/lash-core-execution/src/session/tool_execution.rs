@@ -170,7 +170,10 @@ impl RuntimeExecutionContext<'_> {
         &self,
         tool: &crate::ToolId,
         granted: Option<&crate::plugin::ToolProviderHandle>,
-    ) -> Result<crate::plugin::ToolProviderHandle, crate::PluginError> {
+    ) -> Result<
+        crate::plugin::ToolProviderHandle,
+        lash_execution_contracts::plugin_error::PluginError,
+    > {
         self.dispatch
             .composition
             .tool_provider(tool, self.dispatch.routed_provider(tool, granted))
@@ -350,8 +353,8 @@ impl RuntimeExecutionContext<'_> {
                 .intent_outcomes
                 .iter()
                 .filter_map(|outcome| match outcome {
-                    crate::ToolIntentExecutionOutcome::Executed {
-                        realized: crate::ToolIntentRealized::StartProcess(handle),
+                    lash_execution_contracts::tool_intent_outcome::ToolIntentExecutionOutcome::Executed {
+                        realized: lash_execution_contracts::tool_intent_outcome::ToolIntentRealized::StartProcess(handle),
                         ..
                     } => Some(handle.process_id.clone()),
                     _ => None,
@@ -412,7 +415,7 @@ impl RuntimeExecutionContext<'_> {
         &self,
         call_key: &str,
         call_id: &crate::ToolCallId,
-        intent_outcomes: &[crate::ToolIntentExecutionOutcome],
+        intent_outcomes: &[lash_execution_contracts::tool_intent_outcome::ToolIntentExecutionOutcome],
     ) {
         let context = self.with_call_observation_key(self.call_observation_key(call_key));
         let mut cursor = context.observation_cursor(&format!("tool:{call_id}:intents"));
@@ -524,7 +527,10 @@ impl RuntimeExecutionContext<'_> {
         process_id: &crate::ProcessId,
         parent_invocation: Option<crate::RuntimeInvocation>,
         cancellation: Option<tokio_util::sync::CancellationToken>,
-    ) -> Result<crate::ProcessAwaitOutput, crate::PluginError> {
+    ) -> Result<
+        lash_execution_contracts::process::ProcessAwaitOutput,
+        lash_execution_contracts::plugin_error::PluginError,
+    > {
         let _phase = self.named_phase("process.await_handle");
         let cancellation = cancellation.unwrap_or_default();
         let process_scope = self

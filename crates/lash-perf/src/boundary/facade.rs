@@ -21,7 +21,9 @@ pub(super) fn spec() -> Result<lash::SessionSpec> {
     )
     .no_progress_budget(lash::NoProgressBudget::bounded(12)))
 }
-pub(super) fn backend(stores: Arc<dyn lash_core::StoreSet>) -> Result<lash::Backend> {
+pub(super) fn backend(
+    stores: Arc<dyn lash_execution_contracts::backend::StoreSet>,
+) -> Result<lash::Backend> {
     let mut settings = lash::durable::DurableSettings::standard();
     settings.activation_loop_budget = 1;
     Ok(lash::durable::DurableBackendBuilder::new(stores)
@@ -112,7 +114,10 @@ impl lash_core::ToolProvider for DeferredTools {
     fn tool_manifests(
         &self,
         _config: &lash_core::OwnerConfigView,
-    ) -> std::result::Result<Vec<lash_core::ToolManifest>, lash_core::PluginError> {
+    ) -> std::result::Result<
+        Vec<lash_core::ToolManifest>,
+        lash_execution_contracts::plugin_error::PluginError,
+    > {
         Ok(vec![self.0.manifest()])
     }
     fn resolve_contract(
@@ -186,41 +191,42 @@ pub(super) async fn run(
         1
     };
     for n in 0..nodes {
-        let stores: Arc<dyn lash_core::StoreSet> = if matches!(args.case, Case::PgFacade) {
-            let url = instrument
-                .map(|(instrument, _)| instrument.workload_url.as_str())
-                .or(args.postgres_url.as_deref())
-                .ok_or_else(|| anyhow::anyhow!("PG18 case requires --postgres-url"))?;
-            let endpoints = lash_postgres_store::PostgresEndpoints::from_url(url)?;
-            let pg = lash_postgres_store::PostgresStorage::connect(
-                &endpoints,
-                &Default::default(),
-                Default::default(),
-            )
-            .await?;
-            crate::perf_support::require_durable_postgres(pg.pool()).await?;
-            let version: String = sqlx::query_scalar("SHOW server_version_num")
-                .fetch_one(pg.pool())
-                .await?;
-            ensure!(
-                version.parse::<u32>()? / 10000 == 18,
-                "PG facade requires PostgreSQL 18"
-            );
-            let stores = lash_postgres_store::PostgresStoreSet::new(
-                &pg,
-                Arc::new(lash_core::attachments::UnavailableAttachmentStore),
-            );
-            storage.push(pg);
-            Arc::new(stores)
-        } else {
-            Arc::new(
-                lash_sqlite_store::SqliteStoreSet::open(
-                    args.store_dir.join("lash.db"),
-                    lash_sqlite_store::SqliteSynchronous::Full,
+        let stores: Arc<dyn lash_execution_contracts::backend::StoreSet> =
+            if matches!(args.case, Case::PgFacade) {
+                let url = instrument
+                    .map(|(instrument, _)| instrument.workload_url.as_str())
+                    .or(args.postgres_url.as_deref())
+                    .ok_or_else(|| anyhow::anyhow!("PG18 case requires --postgres-url"))?;
+                let endpoints = lash_postgres_store::PostgresEndpoints::from_url(url)?;
+                let pg = lash_postgres_store::PostgresStorage::connect(
+                    &endpoints,
+                    &Default::default(),
+                    Default::default(),
                 )
-                .await?,
-            )
-        };
+                .await?;
+                crate::perf_support::require_durable_postgres(pg.pool()).await?;
+                let version: String = sqlx::query_scalar("SHOW server_version_num")
+                    .fetch_one(pg.pool())
+                    .await?;
+                ensure!(
+                    version.parse::<u32>()? / 10000 == 18,
+                    "PG facade requires PostgreSQL 18"
+                );
+                let stores = lash_postgres_store::PostgresStoreSet::new(
+                    &pg,
+                    Arc::new(lash_core::attachments::UnavailableAttachmentStore),
+                );
+                storage.push(pg);
+                Arc::new(stores)
+            } else {
+                Arc::new(
+                    lash_sqlite_store::SqliteStoreSet::open(
+                        args.store_dir.join("lash.db"),
+                        lash_sqlite_store::SqliteSynchronous::Full,
+                    )
+                    .await?,
+                )
+            };
         let b = backend(stores)?;
         let core = build(
             b,
@@ -565,9 +571,9 @@ async fn lifecycle(
     let mut ids = std::collections::BTreeSet::new();
     for n in 0..operations {
         let start = Instant::now();
-        let request = lash_core::ProcessStartRequest::session_turn(
+        let request = lash_execution_contracts::process::ProcessStartRequest::session_turn(
             "boundary-child",
-            lash_core::SessionCreateRequest::child(
+            lash_execution_contracts::session_types::SessionCreateRequest::child(
                 "lifecycle-parent",
                 lash_core::SessionStartPoint::Empty,
                 lash_core::SessionPolicy {
@@ -588,9 +594,9 @@ async fn lifecycle(
             } else {
                 format!("child-{n}")
             }),
-            lash_core::SessionTurnOutcome::Turn,
-            lash_core::ProcessOriginator::host(),
-            lash_core::LifetimeDecision::Detached,
+            lash_execution_contracts::process::SessionTurnOutcome::Turn,
+            lash_execution_contracts::process::ProcessOriginator::host(),
+            lash_execution_contracts::process::LifetimeDecision::Detached,
         );
         let started = core.processes().start(request, core.effect_host()).await?;
         meter.operation("process.start", &started.process_id, "ok", start);
@@ -623,7 +629,7 @@ async fn lifecycle(
             lash_protocol_types::ToolCallStatus::Success
         };
         ensure!(
-            matches!(&output, lash_core::ProcessAwaitOutput::Settled { output } if output.status() == status),
+            matches!(&output, lash_execution_contracts::process::ProcessAwaitOutput::Settled { output } if output.status() == status),
             "process failed: {output:?}"
         );
         meter.operation(

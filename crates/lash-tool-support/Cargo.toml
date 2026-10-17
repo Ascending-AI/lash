@@ -23,6 +23,7 @@ default = []
 workspace = true
 
 [dependencies]
+lash-execution-contracts = { workspace = true }
 lash-core = { workspace = true }
 async-trait = { workspace = true }
 serde = { workspace = true, features = ["derive"] }

@@ -12,9 +12,13 @@
 
 use std::sync::Arc;
 
+use lash_core::ProcessId;
 use lash_core::tool_run::{KnownFailureReason, MaterialOwner, MaterialRole};
-use lash_core::{CapacityCause, CapacityVerdict, EngineStepAnswer, EngineStepRun, ProcessId};
 use lash_core_store::tool_run::{Material, SettledOutput};
+use lash_execution_contracts::process::CapacityCause;
+use lash_execution_contracts::process::CapacityVerdict;
+use lash_execution_contracts::process::EngineStepAnswer;
+use lash_execution_contracts::process::EngineStepRun;
 use lash_kernel_doc::{Datum, Document, ErrorDatum, Handle, Integer, Timestamp};
 use lash_kernel_vm::{Bounds, End, Request, RunError, Target};
 use lash_vm_broker::ParentFault;
@@ -73,7 +77,9 @@ pub(crate) async fn run_kernel_step(
                 match candidate {
                     Some(candidate) => EngineStepAnswer::Paged {
                         output,
-                        candidate: lash_core::StepCandidate(Arc::new(candidate)),
+                        candidate: lash_execution_contracts::process::StepCandidate(Arc::new(
+                            candidate,
+                        )),
                     },
                     None => EngineStepAnswer::Settled(output),
                 }
@@ -216,7 +222,9 @@ impl RunHost for StepHost {
 /// What a run answers: its output, with the candidate its park sealed.
 type Answered = (KernelRunOutput, Option<RunCandidate>);
 
-fn ended(outcome: lash_core::ProcessOutcome) -> Result<Answered, Unsettled> {
+fn ended(
+    outcome: lash_execution_contracts::process::ProcessOutcome,
+) -> Result<Answered, Unsettled> {
     Ok((
         KernelRunOutput::Ended {
             outcome: Box::new(outcome),
@@ -487,7 +495,7 @@ pub(super) struct Driven {
 async fn drive(
     machines: &lash_vm_client::RemoteMachines,
     engine: &KernelProcessEngine,
-    step: &lash_core::StepPages,
+    step: &lash_execution_contracts::process::StepPages,
     process: &ProcessId,
     clock: std::sync::Arc<dyn lash_core_execution::runtime::Clock>,
     input: KernelRunInput,
@@ -781,7 +789,7 @@ fn issue(boundary: &HostBoundary, now_ms: i64, request: Request) -> Issued {
 }
 
 /// How a run's end becomes the output its awaiter reads.
-pub(super) fn outcome_of_end(end: End) -> lash_core::ProcessOutcome {
+pub(super) fn outcome_of_end(end: End) -> lash_execution_contracts::process::ProcessOutcome {
     let json = |value: &Datum| {
         datum_to_json(value)
             .ok()
@@ -789,7 +797,7 @@ pub(super) fn outcome_of_end(end: End) -> lash_core::ProcessOutcome {
     };
     match end {
         End::Finished(finished) => match json(&finished.result) {
-            Some(value) => lash_core::ProcessAwaitOutput::from_tool_output(
+            Some(value) => lash_execution_contracts::process::ProcessAwaitOutput::from_tool_output(
                 lash_core::ToolCallOutput::success(value),
             ),
             None => failure(
@@ -825,11 +833,11 @@ pub(super) fn outcome_of_end(end: End) -> lash_core::ProcessOutcome {
             error.to_string(),
             None,
         ),
-        End::Cancelled => {
-            lash_core::ProcessAwaitOutput::from_tool_output(lash_core::ToolCallOutput::cancelled(
-                lash_core::ToolCancellation::runtime("the process was cancelled"),
-            ))
-        }
+        End::Cancelled => lash_execution_contracts::process::ProcessAwaitOutput::from_tool_output(
+            lash_core::ToolCallOutput::cancelled(lash_core::ToolCancellation::runtime(
+                "the process was cancelled",
+            )),
+        ),
     }
 }
 

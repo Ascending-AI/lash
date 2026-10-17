@@ -153,3 +153,58 @@ pub use llm::types::{
     LlmCallError, append_assistant_text_part, normalized_response_parts, reasoning_part,
     visible_response_parts, visible_response_text_from_parts,
 };
+
+/// Serialized schema version for [`TurnCheckpoint`].
+///
+/// Version 1 is the historical unstamped checkpoint shape. Version 2 adds the
+/// host-reporting effect for tool calls refused before dispatch. Version 3
+/// removes the terminal-turn scheduling state; older checkpoints are not
+/// compatible because replaying them could re-enter the deleted extra turn.
+/// Version 4 was the typed-failure-code representation audit. Version 5
+/// (FIG-3371) carries the streamed-block event vocabulary:
+/// `SessionStreamEvent` inside `Effect::Emit` gained `stream_block_started` /
+/// `stream_block_completed` and required `block` identities on text and
+/// reasoning deltas, so v4 checkpoints holding pending text effects cannot
+/// deserialize faithfully.
+/// Version 6 carries parts-only plugin messages and removes part lifecycle fields.
+/// Version 7 (FIG-3435) renames failure codes by
+/// author: workspace-authored codes serialize as `lash:<spelling>` where
+/// earlier checkpoints wrote `adapter:`/`refusal:`, and a v6 reader would
+/// recolor a `lash:` code as provider vocabulary rather than refuse it.
+/// Version 8 (FIG-3515) answers each tool call with one tool-result part
+/// carrying ordered text and attachment `blocks`; v7 checkpoints holding
+/// text-only results or call-bound attachment parts are refused.
+/// Version 9 (FIG-3586) records the replay-key grammar the iteration's
+/// execution-environment sync served (`synced_cell_replay_grammar`); a v8
+/// checkpoint has no stamp, and a cell resumed from it would run under no
+/// grammar.
+/// Version 10 (FIG-3587) drops `update_machine_config` from the pending
+/// execution-environment sync: every sync, the protocol-start one included,
+/// now returns the environment the iteration's model call is built from, and
+/// a v9 checkpoint parked on a host-only protocol-start sync would resume
+/// with its first model call built from the live registry.
+/// Version 11 (FIG-3571) drops `synced_cell_replay_grammar`: a turn's
+/// executable generation is recorded once, at its admission, and checked
+/// there before any effect, so no iteration carries a grammar of its own. A
+/// v10 checkpoint's cells were fenced by a per-iteration stamp this build no
+/// longer reads, so it is refused.
+///
+/// Version 11 changed in place before the 1.0 cut (FIG-5171, ruling #68): the
+/// checkpoint holds bounded machine state and names its transcript (messages,
+/// prompt view, history events and a pending model request) by content
+/// digest; the content travels beside it as [`TurnCheckpointContent`].
+/// It changed in place again (FIG-5206): it names the committed window the
+/// turn started from by the host's pin ([`TurnWindow`]), and its content
+/// holds only what the turn added to it.
+///
+/// version_guard(
+///     shapes(
+///         path = "crates/lash-sansio/src/sansio/machine_state.rs",
+///         path = "crates/lash-sansio/src/sansio/turn_protocol.rs",
+///         cover(TurnCheckpoint, CheckpointState, CheckpointWork, Effect),
+///     ),
+///     roots(path = "crates/lash-protocol-types/src/session_model/message.rs", FlatPart, FlatPartRef),
+/// )
+/// version_surface = "drain"
+/// format_manifest = "TurnCheckpoint"
+pub const TURN_CHECKPOINT_SCHEMA_VERSION: u32 = 1;

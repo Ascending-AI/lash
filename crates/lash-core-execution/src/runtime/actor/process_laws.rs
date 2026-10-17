@@ -9,6 +9,13 @@
 //! the tag its start payload carries, so a law counts the engine code a
 //! process ran.
 
+use lash_core_store::tool_run::{Material, SettledOutput};
+use lash_execution_contracts::backend::{Backend, BackendParts};
+use lash_execution_contracts::process::{
+    Ancestry, EngineAction, EngineEvent, EngineState, EngineStateFormat, KeyName, LifetimeDecision,
+    ProcessEngine, ProcessInfraError, ProcessInput, ProcessOutcome, ProcessProvenance,
+    ProcessRecord, ProcessRegistration, ScopeGrant, StepName, StepRequest,
+};
 use std::collections::BTreeMap;
 use std::sync::atomic::{AtomicU64, Ordering};
 use std::sync::{Arc, Mutex, PoisonError};
@@ -23,21 +30,22 @@ use tokio_util::sync::CancellationToken;
 
 use super::process::ProcessActivation;
 use super::wait_laws::{LawBroken, LawOutcome};
+use crate::CancelOrigin;
+use crate::DurableSettings;
+use crate::ProcessId;
+use crate::ScopeId;
+use crate::ToolCallId;
+use crate::ToolCallOutput;
+use crate::ToolCancellation;
 use crate::runtime::actor::round::{self, AdmittedExecution, MemberState, PolicyView};
-use crate::runtime::actor::waits::{self, ParkDeadline, Resolution, WaitDeadline};
+use crate::runtime::actor::waits;
+use crate::runtime::actor::waits::Resolution;
 use crate::runtime::process::steps::{ProcessSteps, StepAdmission, StepRefusal};
-use crate::{
-    Ancestry, Backend, BackendParts, CancelOrigin, DurableSettings, EngineAction, EngineEvent,
-    EngineState, EngineStateFormat, KeyName, LifetimeDecision, ProcessEngine, ProcessId,
-    ProcessInfraError, ProcessInput, ProcessOutcome, ProcessProvenance, ProcessRecord,
-    ProcessRegistration, ScopeGrant, ScopeId, StepName, StepRequest, ToolCallId, ToolCallOutput,
-    ToolCancellation,
-};
-use lash_core_store::tool_run::Material;
-use lash_core_store::tool_run::SettledOutput;
 use lash_core_store::tool_run::{
     CompletionSource, KnownFailureReason, MaterialOwner, MaterialRole,
 };
+use lash_execution_contracts::waits::ParkDeadline;
+use lash_execution_contracts::waits::WaitDeadline;
 
 macro_rules! ensure {
     ($condition:expr, $($message:tt)+) => {
@@ -131,7 +139,7 @@ fn with_engines(
         stores: backend.stores(),
         settings: settings(),
         engines,
-        providers: Arc::new(super::projection::NoProjectionProviders),
+        providers: Arc::new(lash_execution_contracts::projection::NoProjectionProviders),
     })
     .map_err(|error| LawBroken(error.to_string()))
 }
@@ -257,7 +265,9 @@ impl LawEngine {
 }
 
 fn infra(error: impl std::fmt::Display) -> ProcessInfraError {
-    ProcessInfraError::new(crate::PluginError::Session(error.to_string()))
+    ProcessInfraError::new(
+        lash_execution_contracts::plugin_error::PluginError::Session(error.to_string()),
+    )
 }
 
 fn await_action(script: &Value) -> Result<EngineAction, ProcessInfraError> {
@@ -338,32 +348,34 @@ fn ended(value: Value) -> EngineAction {
 impl ProcessEngine for LawEngine {
     fn settled_ran(
         &self,
-        _kind: &crate::EngineStepKind,
+        _kind: &lash_execution_contracts::process::EngineStepKind,
         _output: &lash_core_store::tool_run::SettledOutput,
     ) -> Vec<(u32, u64)> {
         Vec::new()
     }
 
-    fn trace_class(&self) -> crate::ProcessTraceClass {
-        crate::ProcessTraceClass::Internal
+    fn trace_class(&self) -> lash_execution_contracts::process::ProcessTraceClass {
+        lash_execution_contracts::process::ProcessTraceClass::Internal
     }
 
     async fn performed_effects(
         &self,
         _payload: &serde_json::Value,
-    ) -> Result<crate::PerformedEffects, crate::ProcessEnvRefusal> {
-        Ok(crate::PerformedEffects::new())
+    ) -> Result<lash_execution_contracts::process::PerformedEffects, crate::ProcessEnvRefusal> {
+        Ok(lash_execution_contracts::process::PerformedEffects::new())
     }
 
     async fn check_args(
         &self,
-        _signature: &crate::ProcessSignature,
+        _signature: &lash_execution_contracts::process::ProcessSignature,
         _args: &serde_json::Map<String, serde_json::Value>,
-        _mode: crate::ArgsMode,
-    ) -> std::result::Result<(), crate::ArgsMismatch> {
-        Err(crate::ArgsMismatch::UnsupportedSignature {
-            engine_kind: self.kind().into(),
-        })
+        _mode: lash_execution_contracts::process::ArgsMode,
+    ) -> std::result::Result<(), lash_execution_contracts::process::ArgsMismatch> {
+        Err(
+            lash_execution_contracts::process::ArgsMismatch::UnsupportedSignature {
+                engine_kind: self.kind().into(),
+            },
+        )
     }
 
     fn kind(&self) -> &'static str {
@@ -388,21 +400,26 @@ impl ProcessEngine for LawEngine {
     fn check_settings(
         &self,
         _payload: &serde_json::Value,
-        settings: Option<&crate::EngineSettings>,
-    ) -> std::result::Result<(), crate::PluginError> {
+        settings: Option<&lash_execution_contracts::process::EngineSettings>,
+    ) -> std::result::Result<(), lash_execution_contracts::plugin_error::PluginError> {
         match settings {
             None => Ok(()),
-            Some(_) => Err(crate::PluginError::Registration(format!(
-                "process engine `{}` takes no settings",
-                self.kind()
-            ))),
+            Some(_) => Err(
+                lash_execution_contracts::plugin_error::PluginError::Registration(format!(
+                    "process engine `{}` takes no settings",
+                    self.kind()
+                )),
+            ),
         }
     }
 
     fn default_settings(
         &self,
         _payload: &serde_json::Value,
-    ) -> std::result::Result<Option<crate::EngineSettings>, crate::PluginError> {
+    ) -> std::result::Result<
+        Option<lash_execution_contracts::process::EngineSettings>,
+        lash_execution_contracts::plugin_error::PluginError,
+    > {
         Ok(None)
     }
 
@@ -522,14 +539,14 @@ impl ProcessEngine for LawEngine {
     fn start_artifacts(
         &self,
         _payload: &Value,
-    ) -> Result<Vec<crate::ArtifactName>, crate::PluginError> {
+    ) -> Result<Vec<crate::ArtifactName>, lash_execution_contracts::plugin_error::PluginError> {
         Ok(Vec::new())
     }
 
     async fn end_artifact_referrer(
         &self,
         _cleanup: &crate::ResolvedArtifactCleanup,
-    ) -> Result<(), crate::ArtifactStoreError> {
+    ) -> Result<(), lash_execution_contracts::module_artifacts::ArtifactStoreError> {
         Ok(())
     }
 
@@ -537,19 +554,26 @@ impl ProcessEngine for LawEngine {
         &self,
         _claim: &crate::ReferrerClaim,
         artifact_ref: &str,
-    ) -> Result<(), crate::PluginError> {
-        Err(crate::PluginError::Session(format!(
-            "the law engine stores no artifact `{artifact_ref}`"
-        )))
+    ) -> Result<(), lash_execution_contracts::plugin_error::PluginError> {
+        Err(
+            lash_execution_contracts::plugin_error::PluginError::Session(format!(
+                "the law engine stores no artifact `{artifact_ref}`"
+            )),
+        )
     }
 
     async fn resolve(
         &self,
-        _reference: &crate::ProcessDefinitionRef,
-    ) -> Result<crate::ProcessDefinitionResolution, crate::ProcessDefinitionError> {
-        Ok(crate::ProcessDefinitionResolution::new(
-            crate::ProcessSignature::Unknown,
-        ))
+        _reference: &lash_execution_contracts::process::ProcessDefinitionRef,
+    ) -> Result<
+        lash_execution_contracts::process::ProcessDefinitionResolution,
+        lash_execution_contracts::process::ProcessDefinitionError,
+    > {
+        Ok(
+            lash_execution_contracts::process::ProcessDefinitionResolution::new(
+                lash_execution_contracts::process::ProcessSignature::Unknown,
+            ),
+        )
     }
 }
 
@@ -781,8 +805,8 @@ fn registration(payload: Value, lifetime: LifetimeDecision) -> ProcessRegistrati
         ProcessInput::Engine {
             kind: LAW_ENGINE_KIND.to_owned(),
             payload,
-            launch: crate::EngineLaunch::new(
-                crate::testing::process_execution_env_fixture_ref(),
+            launch: lash_execution_contracts::process::EngineLaunch::new(
+                lash_execution_contracts::testing::process_execution_env_fixture_ref(),
                 None,
             ),
         },
@@ -795,7 +819,10 @@ async fn register(
     backend: &Backend,
     registration: ProcessRegistration,
 ) -> Result<ProcessId, LawBroken> {
-    crate::testing::process_execution_env_fixture(backend.process_env_store().as_ref()).await;
+    lash_execution_contracts::testing::process_execution_env_fixture(
+        backend.process_env_store().as_ref(),
+    )
+    .await;
     backend
         .process_registry()
         .register_process(registration)
@@ -1243,7 +1270,7 @@ async fn tell_peer(backend: &Backend, process: &ProcessId, peer: Value) -> LawOu
         );
         tokio::time::sleep(Duration::from_millis(10)).await;
     };
-    let key = waits::PinnedKey::of(&pinned);
+    let key = lash_execution_contracts::waits::PinnedKey::of(&pinned);
     waits::resolve_host(backend, key.as_str(), Resolution::Ok(peer)).await?;
     Ok(())
 }
@@ -1367,7 +1394,7 @@ pub async fn engine_free_end_runs_no_engine_code(backend: &Backend) -> LawOutcom
     unknown.input = Arc::new(ProcessInput::Engine {
         kind: "law-missing".to_owned(),
         payload: json!({}),
-        launch: crate::testing::fixture_engine_launch(),
+        launch: lash_execution_contracts::testing::fixture_engine_launch(),
     });
     let unknown = register(&backend, unknown).await?;
     let undecodable_tag = tag("free-undecodable");
@@ -1635,144 +1662,8 @@ pub async fn a_transition_in_another_format_commits_no_state(backend: &Backend) 
     result
 }
 
-/// A7 (FIG-5226): a `Repeatable` step whose first attempt fails with a
-/// known failure its pinned contract retries records a retry, starts its
-/// next attempt at the run's next ordinal once the retry is due, and
-/// settles from that second attempt: the engine is handed its completion,
-/// never the first attempt's failure.
-///
-/// # Errors
-///
-/// The first rule broken.
-pub async fn a_repeatable_step_that_fails_retryably_once_succeeds_on_its_second_ordinal(
-    backend: &Backend,
-) -> LawOutcome {
-    let backend = law_backend(backend)?;
-    let serving = serve(&backend);
-    let result = async {
-        let process = root(&backend, payload(&tag("retry"), "retry")).await?;
-        eventually(SETTLE, "the retried step's process ended", || async {
-            Ok(terminal(&backend, &process).await?.is_some())
-        })
-        .await?;
-        let outcome = terminal(&backend, &process).await?.unwrap_or_default();
-        ensure!(
-            find(&outcome, "settled") == Some(&json!("completed")),
-            "the step settled as {outcome}, not completed by its retry"
-        );
-        let rows = backend
-            .durable()
-            .run_facts(&lash_durable::domain::OwnerKey::Process(process.clone()))
-            .await?;
-        let waits = round::PinnedWaits::read(backend.durable().as_ref(), &rows).await?;
-        let fold = round::fold(&rows, &PolicyView::default(), &waits)
-            .map_err(|refusal| LawBroken(refusal.to_string()))?;
-        let member = fold
-            .rounds()
-            .next()
-            .and_then(|view| view.members().first())
-            .ok_or_else(|| LawBroken("the step was never admitted".to_owned()))?;
-        ensure!(
-            member.starts().len() == 2,
-            "the step took {} attempts, not its failure and one retry",
-            member.starts().len()
-        );
-        ensure!(
-            matches!(
-                member.state(),
-                MemberState::Final { start, outcome: SettledOutput::Completed(_) }
-                    if Some(start) == member.starts().get(1)
-            ),
-            "the step's final outcome {:?} is not its second ordinal's completion",
-            member.state()
-        );
-        ensure!(
-            step_entries(member.call()) == 2,
-            "the step's body was entered {} times, not once per attempt",
-            step_entries(member.call())
-        );
-        Ok(())
-    }
-    .await;
-    serving.stop().await;
-    result
-}
-
-/// A7 (FIG-5226): a step whose body parks on its completion wait records
-/// `Waiting`, its process releases `waiting` holding nothing, and the host's
-/// resolution of the step's key settles the step from that resolution: the
-/// engine is handed it, and the parked body is never entered again.
-///
-/// # Errors
-///
-/// The first rule broken.
-pub async fn a_step_parked_on_its_wait_settles_when_the_wait_resolves(
-    backend: &Backend,
-) -> LawOutcome {
-    let backend = law_backend(backend)?;
-    let serving = serve(&backend);
-    let result = async {
-        let tag = tag("park");
-        let process = root(&backend, payload(&tag, "park")).await?;
-        eventually(
-            SETTLE,
-            "the parked step's process released waiting",
-            || async {
-                Ok(PARKED_KEYS
-                    .lock()
-                    .unwrap_or_else(PoisonError::into_inner)
-                    .contains_key(&tag)
-                    && settled_waiting(&backend, &process).await?)
-            },
-        )
-        .await?;
-        ensure!(
-            terminal(&backend, &process).await?.is_none(),
-            "the process ended before its parked step's wait resolved"
-        );
-        let key = PARKED_KEYS
-            .lock()
-            .unwrap_or_else(PoisonError::into_inner)
-            .get(&tag)
-            .cloned()
-            .unwrap_or_default();
-        let answer =
-            waits::resolve_host(&backend, &key, Resolution::Ok(json!({ "approved": tag }))).await?;
-        ensure!(
-            answer == lash_durable::domain::ResolveAnswer::Resolved,
-            "the host's resolution of the parked step's key answered {answer:?}"
-        );
-        eventually(SETTLE, "the parked step's process ended", || async {
-            Ok(terminal(&backend, &process).await?.is_some())
-        })
-        .await?;
-        let outcome = terminal(&backend, &process).await?.unwrap_or_default();
-        ensure!(
-            find(&outcome, "settled") == Some(&json!("completed"))
-                && outcome.to_string().contains("approved"),
-            "the parked step settled as {outcome}, not from its wait's resolution"
-        );
-        let rows = backend
-            .durable()
-            .run_facts(&lash_durable::domain::OwnerKey::Process(process.clone()))
-            .await?;
-        let waits = round::PinnedWaits::read(backend.durable().as_ref(), &rows).await?;
-        let fold = round::fold(&rows, &PolicyView::default(), &waits)
-            .map_err(|refusal| LawBroken(refusal.to_string()))?;
-        let call = fold
-            .rounds()
-            .next()
-            .and_then(|view| view.members().first())
-            .map(|member| member.call().clone())
-            .ok_or_else(|| LawBroken("the step was never admitted".to_owned()))?;
-        ensure!(
-            step_entries(&call) == 1,
-            "the parked step's body was entered {} times",
-            step_entries(&call)
-        );
-        Ok(())
-    }
-    .await;
-    serving.stop().await;
-    result
-}
+mod step_laws;
+pub use step_laws::{
+    a_repeatable_step_that_fails_retryably_once_succeeds_on_its_second_ordinal,
+    a_step_parked_on_its_wait_settles_when_the_wait_resolves,
+};

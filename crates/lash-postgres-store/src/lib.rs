@@ -46,31 +46,58 @@ use lash_protocol_types::SessionId;
 mod namespace;
 mod observed_sql;
 
-use lash_core_execution::facade_support::StoreObserver;
+use lash_core_ids::operational_metrics::StoreObserver;
 use std::sync::Arc;
 
-use lash_core_execution::PluginError;
-use lash_core_execution::runtime::{
-    QueuedWorkAuthority, QueuedWorkBatch, QueuedWorkBatchDraft, QueuedWorkEnqueueOutcome,
-};
-use lash_core_execution::store::queued_work::{
-    SESSION_COMMAND_BATCHES_PER_RUN, TurnLaneCandidate, admission_scan_limit, derive_batch_id,
-    select_leading_session_command,
-};
-use lash_core_execution::store::{
-    HydratedCheckpointComponent, HydratedSessionCheckpoint, RuntimeCommit, RuntimeCommitReceipt,
-    SessionCheckpoint, SessionHeadMeta, SessionHeadPayload,
-};
-use lash_core_execution::{
-    AttachmentId, AttachmentReferrers, BlobRef, DeliveryPolicy, GcReport, ProcessAwaitOutput,
-    ProcessChange, ProcessChangeCursor, ProcessChangeKind, ProcessEvent, ProcessEventAppendReceipt,
-    ProcessEventAppendRequest, ProcessExternalRef, ProcessLiveReferenceView, ProcessObserverBy,
-    ProcessPruneReport, ProcessRecord, ProcessRegistration, ProcessRegistry, SessionCommitStore,
-    SessionListFilter, SessionMeta, SessionNodeRecord, SessionRelationKind,
-    SessionStoreCreateRequest, SessionView, StoreError, StoreMaintenance, VacuumReport,
-    facade_support::ProcessTransition, facade_support::ProcessTransitionPlan,
-    facade_support::registry_transitions,
-};
+use lash_core_store::queued_work_vocabulary::DeliveryPolicy;
+use lash_core_store::queued_work_vocabulary::QueuedWorkAuthority;
+use lash_core_store::queued_work_vocabulary::QueuedWorkBatch;
+use lash_core_store::queued_work_vocabulary::QueuedWorkBatchDraft;
+use lash_core_store::queued_work_vocabulary::QueuedWorkEnqueueOutcome;
+use lash_core_store::session_catalog::SessionListFilter;
+use lash_core_store::session_catalog::SessionRelationKind;
+use lash_core_store::session_catalog::SessionView;
+use lash_core_store::session_graph::SessionNodeRecord;
+use lash_core_store::session_store_factory_types::SessionStoreCreateRequest;
+use lash_core_store::store::AttachmentReferrers;
+use lash_core_store::store::BlobRef;
+use lash_core_store::store::GcReport;
+use lash_core_store::store::HydratedCheckpointComponent;
+use lash_core_store::store::HydratedSessionCheckpoint;
+use lash_core_store::store::RuntimeCommit;
+use lash_core_store::store::RuntimeCommitReceipt;
+use lash_core_store::store::SessionCheckpoint;
+use lash_core_store::store::SessionCommitStore;
+use lash_core_store::store::SessionHeadMeta;
+use lash_core_store::store::SessionHeadPayload;
+use lash_core_store::store::SessionMeta;
+use lash_core_store::store::StoreError;
+use lash_core_store::store::StoreMaintenance;
+use lash_core_store::store::VacuumReport;
+use lash_core_store::store::queued_work::SESSION_COMMAND_BATCHES_PER_RUN;
+use lash_core_store::store::queued_work::TurnLaneCandidate;
+use lash_core_store::store::queued_work::admission_scan_limit;
+use lash_core_store::store::queued_work::derive_batch_id;
+use lash_core_store::store::queued_work::select_leading_session_command;
+use lash_execution_contracts::plugin_error::PluginError;
+use lash_execution_contracts::process::ProcessAwaitOutput;
+use lash_execution_contracts::process::ProcessChange;
+use lash_execution_contracts::process::ProcessChangeCursor;
+use lash_execution_contracts::process::ProcessChangeKind;
+use lash_execution_contracts::process::ProcessEvent;
+use lash_execution_contracts::process::ProcessEventAppendReceipt;
+use lash_execution_contracts::process::ProcessEventAppendRequest;
+use lash_execution_contracts::process::ProcessExternalRef;
+use lash_execution_contracts::process::ProcessLiveReferenceView;
+use lash_execution_contracts::process::ProcessObserverBy;
+use lash_execution_contracts::process::ProcessPruneReport;
+use lash_execution_contracts::process::ProcessRecord;
+use lash_execution_contracts::process::ProcessRegistration;
+use lash_execution_contracts::process::ProcessRegistry;
+use lash_execution_contracts::process::ProcessTransition;
+use lash_execution_contracts::process::ProcessTransitionPlan;
+use lash_execution_contracts::process::registry_transitions;
+use lash_protocol_types::attachment::AttachmentId;
 use sqlx::pool::PoolConnection;
 use sqlx::postgres::{PgPool, PgRow};
 use sqlx::{Acquire, Postgres, Row};
@@ -80,7 +107,7 @@ const SCHEMA_COMPONENT: &str = "lash-postgres-store";
 /// Backend name this store reports in shared fencing diagnostics.
 ///
 /// Every fenced write names its backend so
-/// [`StoreError::FencedWriteVerdictDisagreed`](lash_core_execution::StoreError::FencedWriteVerdictDisagreed)
+/// [`StoreError::FencedWriteVerdictDisagreed`](lash_core_store::store::StoreError::FencedWriteVerdictDisagreed)
 /// says which store's locked read and backstop predicate disagreed.
 pub(crate) const POSTGRES_BACKEND: &str = "postgres";
 
@@ -88,9 +115,11 @@ pub(crate) const POSTGRES_BACKEND: &str = "postgres";
 /// minted id, so any other spelling is corrupt stored data.
 pub(crate) fn stored_process_id(
     value: &str,
-) -> Result<lash_protocol_types::ProcessId, lash_core_execution::PluginError> {
+) -> Result<lash_protocol_types::ProcessId, lash_execution_contracts::plugin_error::PluginError> {
     lash_protocol_types::ProcessId::parse(value).map_err(|error| {
-        lash_core_execution::PluginError::Session(format!("corrupt stored process id: {error}"))
+        lash_execution_contracts::plugin_error::PluginError::Session(format!(
+            "corrupt stored process id: {error}"
+        ))
     })
 }
 
@@ -114,16 +143,16 @@ async fn acquire_runtime_connection(
     }
     #[cfg(feature = "perf-witness")]
     if connection.is_ok() {
-        lash_core_execution::perf_witness::record_pool_checkout_wait(perf_started_at.elapsed());
+        lash_core_ids::perf_witness::record_pool_checkout_wait(perf_started_at.elapsed());
     }
     connection.map_err(store_sqlx_error)
 }
 
 /// The version `schema.sql` provisions and the shape artifact names, in the
 /// stamp column's type. The number is the PostgreSQL descriptor's, declared
-/// once in [`lash_core_execution::compat::POSTGRES_SCHEMA_VERSION`] beside
+/// once in [`lash_core_store::compat::POSTGRES_SCHEMA_VERSION`] beside
 /// the shapes it guards.
-const SCHEMA_VERSION: i32 = lash_core_execution::compat::POSTGRES_SCHEMA_VERSION as i32;
+const SCHEMA_VERSION: i32 = lash_core_store::compat::POSTGRES_SCHEMA_VERSION as i32;
 
 /// The oldest component schema version this build admits at open (FIG-3797).
 ///
@@ -157,14 +186,14 @@ pub struct PostgresStorage {
     wakes: lash_durable::runner::WakeSink,
     /// The windows this storage's handles decoded, which their later reads
     /// extend (FIG-5930).
-    windows: Arc<lash_core_execution::store_backend_support::WindowCache>,
+    windows: Arc<lash_core_store::store_backend_support::WindowCache>,
     configs: Arc<lash_core_store::store_backend_support::ConfigCache>,
 }
 
 #[derive(Clone)]
 pub struct PostgresStore {
     #[cfg(any(test, feature = "testing"))]
-    lease_clock_for_testing: Option<Arc<dyn lash_core_execution::Clock>>,
+    lease_clock_for_testing: Option<Arc<dyn lash_core_ids::clock::Clock>>,
     pool: PgPool,
     pools: Arc<host::RolePools>,
     observer: StoreObserver,
@@ -173,9 +202,9 @@ pub struct PostgresStore {
     /// The storage's wake sink, which this store's producer commits deliver
     /// to.
     wakes: lash_durable::runner::WakeSink,
-    windows: Arc<lash_core_execution::store_backend_support::WindowCache>,
+    windows: Arc<lash_core_store::store_backend_support::WindowCache>,
     configs: Arc<lash_core_store::store_backend_support::ConfigCache>,
-    clock: Arc<dyn lash_core_execution::Clock>,
+    clock: Arc<dyn lash_core_ids::clock::Clock>,
     #[cfg(any(test, feature = "testing"))]
     decoded_graph_node_bodies: Arc<std::sync::atomic::AtomicU64>,
     #[cfg(any(test, feature = "testing"))]
@@ -191,12 +220,12 @@ pub struct PostgresProcessRegistry {
     catalog_id: Arc<str>,
     pool: PgPool,
     pools: Arc<host::RolePools>,
-    clock: Arc<dyn lash_core_execution::Clock>,
+    clock: Arc<dyn lash_core_ids::clock::Clock>,
     /// Effect hosts whose scope fence registration lifts (ADR 0049). The
     /// PostgreSQL journal's own fence rows share the pool and are cleared in
     /// the registration transaction itself.
     /// Where registration mints process ids (ADR 0107).
-    process_id_mint: lash_core_execution::ProcessIdMint,
+    process_id_mint: lash_core_store::process_identity::ProcessIdMint,
     /// The storage's writer fence: every mutation fences on `F`, and every
     /// process-event payload the registry stamps goes
     /// through the fenced `F`'s `writer_version`, never a bare build constant
@@ -207,7 +236,7 @@ pub struct PostgresProcessRegistry {
 }
 
 impl PostgresProcessRegistry {
-    pub fn with_clock(mut self, clock: Arc<dyn lash_core_execution::Clock>) -> Self {
+    pub fn with_clock(mut self, clock: Arc<dyn lash_core_ids::clock::Clock>) -> Self {
         self.clock = clock;
         self
     }
@@ -217,7 +246,7 @@ impl PostgresProcessRegistry {
     #[doc(hidden)]
     pub fn with_process_id_mint_for_testing(
         mut self,
-        mint: lash_core_execution::ProcessIdMint,
+        mint: lash_core_store::process_identity::ProcessIdMint,
     ) -> Self {
         self.process_id_mint = mint;
         self
@@ -230,11 +259,11 @@ pub struct PostgresLashVmArtifactStore {
     fence: guarded_tx::WriterFence,
     /// The store set's clock: the instant a guard's cleanup is due and a
     /// referrer's fence is stamped, read on the clock the relay claims by.
-    clock: Arc<dyn lash_core_execution::Clock>,
+    clock: Arc<dyn lash_core_ids::clock::Clock>,
 }
 
 impl PostgresLashVmArtifactStore {
-    pub fn with_clock(mut self, clock: Arc<dyn lash_core_execution::Clock>) -> Self {
+    pub fn with_clock(mut self, clock: Arc<dyn lash_core_ids::clock::Clock>) -> Self {
         self.clock = clock;
         self
     }
@@ -277,7 +306,7 @@ impl PostgresStorage {
                 pools,
                 config.clone(),
                 observer,
-                lash_core_execution::FleetFormat::writable(),
+                lash_core_store::store::FleetFormat::writable(),
             ))
             .await?;
             if has_session_endpoint {
@@ -322,7 +351,7 @@ impl PostgresStorage {
             pools,
             config,
             observer,
-            lash_core_execution::FleetFormat::writable(),
+            lash_core_store::store::FleetFormat::writable(),
         ))
         .await
     }
@@ -332,7 +361,7 @@ impl PostgresStorage {
     ///
     /// Testing seam for FIG-3796's rollout proofs: the recorded fleet-format
     /// row is read against `writable` rather than this binary's own
-    /// [`lash_core_execution::FleetFormat::writable_range`], so a test can
+    /// [`lash_core_store::store::FleetFormat::writable_range`], so a test can
     /// stand in for a build whose range does — or does not — still write the
     /// generation the fleet recorded. Production opens always pass this
     /// build's range.
@@ -340,7 +369,7 @@ impl PostgresStorage {
     pub async fn from_pool_set_with_fleet_writable_range_for_testing(
         pools: PostgresPoolSet,
         config: &PostgresHostConfig,
-        writable: lash_core_execution::compat::VersionRange,
+        writable: lash_core_store::compat::VersionRange,
     ) -> Result<Self, PostgresHostError> {
         let config = host::effective_config(&pools, config)?;
         config.validate()?;
@@ -359,7 +388,7 @@ impl PostgresStorage {
         pools: PostgresPoolSet,
         config: PostgresHostConfig,
         observer: StoreObserver,
-        writable: lash_core_execution::compat::VersionRange,
+        writable: lash_core_store::compat::VersionRange,
     ) -> Result<Self, PostgresHostError> {
         if let Some(deployment) = &config.deployment {
             let capacity = host::connection_capacity(&pools.work).await?;
@@ -460,15 +489,16 @@ impl PostgresStorage {
     /// data precondition; only structural verification is skipped.
     #[cfg(feature = "testing")]
     pub async fn from_preverified_pool_for_testing(pool: PgPool) -> Result<Self, StoreError> {
-        let descriptor = lash_core_execution::compat::descriptor(
-            lash_core_execution::compat::ComponentId::POSTGRES,
-        )
-        .ok_or_else(|| StoreError::Backend("missing PostgreSQL compatibility descriptor".into()))?;
+        let descriptor =
+            lash_core_store::compat::descriptor(lash_core_store::compat::ComponentId::POSTGRES)
+                .ok_or_else(|| {
+                    StoreError::Backend("missing PostgreSQL compatibility descriptor".into())
+                })?;
         let mut tx = crate::observed_sql::control("BEGIN", pool.begin())
             .await
             .map_err(store_sqlx_error)?;
         let writing_release = crate::release_stamp::read_release_in_tx(&mut tx).await;
-        if let Some(refusal) = lash_core_execution::compat::CompatRefusal::pre_release(
+        if let Some(refusal) = lash_core_store::compat::CompatRefusal::pre_release(
             descriptor.component.as_str(),
             writing_release.as_deref(),
             crate::release_stamp::BUILD_RELEASE,
@@ -478,7 +508,7 @@ impl PostgresStorage {
         crate::observed_sql::control("COMMIT", tx.commit())
             .await
             .map_err(store_sqlx_error)?;
-        lash_core_execution::compat::admit(
+        lash_core_store::compat::admit(
             descriptor,
             crate::schema::read_compat_stamp(&pool, true).await,
         )
@@ -488,17 +518,17 @@ impl PostgresStorage {
             .map_err(store_sqlx_error)?
             .ok_or_else(crate::schema::missing_catalog_identity_error)?;
         let fleet_format = match crate::fleet_format::read(&pool).await {
-            lash_core_execution::FleetFormatState::Recorded(format) => format,
-            lash_core_execution::FleetFormatState::Unreadable { reason } => {
+            lash_core_store::store::FleetFormatState::Recorded(format) => format,
+            lash_core_store::store::FleetFormatState::Unreadable { reason } => {
                 return Err(StoreError::Backend(reason));
             }
-            _ => crate::fleet_format::unrecorded(lash_core_execution::FleetFormat::writable())?,
+            _ => crate::fleet_format::unrecorded(lash_core_store::store::FleetFormat::writable())?,
         };
         let pools = Arc::new(host::RolePools::sharing(pool.clone()));
         Ok(Self {
             pool,
             fence: guarded_tx::WriterFence::guarded(
-                lash_core_execution::FleetFormat::writable(),
+                lash_core_store::store::FleetFormat::writable(),
                 fleet_format,
                 pools.preludes.ordinary.clone(),
                 pools.store_retry,
@@ -554,7 +584,7 @@ impl PostgresStorage {
     /// The version `schema.sql` provisions: the component version its seed
     /// row stamps into `lash_schema_versions`, the migration ledger records
     /// and the shape artifact names. It is the PostgreSQL descriptor's number
-    /// ([`lash_core_execution::compat::POSTGRES_SCHEMA_VERSION`]).
+    /// ([`lash_core_store::compat::POSTGRES_SCHEMA_VERSION`]).
     pub fn schema_version() -> i32 {
         SCHEMA_VERSION
     }
@@ -707,7 +737,7 @@ impl PostgresStorage {
     /// This is the hook durable writers consult for their writer version:
     /// `fleet_format.writer_version(CURRENT_…)` maps a format's build-newest
     /// version onto the generation the fleet agreed to write.
-    pub fn fleet_format(&self) -> lash_core_execution::FleetFormat {
+    pub fn fleet_format(&self) -> lash_core_store::store::FleetFormat {
         self.fence.fleet()
     }
 
@@ -741,7 +771,7 @@ impl PostgresStorage {
             configs: Arc::clone(&self.configs),
             #[cfg(any(test, feature = "testing"))]
             lease_clock_for_testing: None,
-            clock: Arc::new(lash_core_execution::facade_support::SystemClock),
+            clock: Arc::new(lash_core_ids::clock::SystemClock),
             #[cfg(any(test, feature = "testing"))]
             decoded_graph_node_bodies: Arc::new(std::sync::atomic::AtomicU64::new(0)),
             #[cfg(any(test, feature = "testing"))]
@@ -758,8 +788,8 @@ impl PostgresStorage {
             catalog_id: Arc::clone(&self.catalog_id),
             pool: self.pool.clone(),
             pools: Arc::clone(&self.pools),
-            clock: Arc::new(lash_core_execution::facade_support::SystemClock),
-            process_id_mint: lash_core_execution::ProcessIdMint::default(),
+            clock: Arc::new(lash_core_ids::clock::SystemClock),
+            process_id_mint: lash_core_store::process_identity::ProcessIdMint::default(),
             #[cfg(test)]
             decoded_roster_records: Arc::default(),
             fence: self.fence.clone(),
@@ -770,7 +800,7 @@ impl PostgresStorage {
         PostgresLashVmArtifactStore {
             pool: self.pool.clone(),
             fence: self.fence.clone(),
-            clock: Arc::new(lash_core_execution::facade_support::SystemClock),
+            clock: Arc::new(lash_core_ids::clock::SystemClock),
         }
     }
 
@@ -778,7 +808,7 @@ impl PostgresStorage {
         PostgresLashVmArtifactStore {
             pool: self.pool.clone(),
             fence: self.fence.clone(),
-            clock: Arc::new(lash_core_execution::facade_support::SystemClock),
+            clock: Arc::new(lash_core_ids::clock::SystemClock),
         }
     }
 
@@ -788,7 +818,7 @@ impl PostgresStorage {
         PostgresLashVmArtifactStore {
             pool: self.pool.clone(),
             fence: self.fence.clone(),
-            clock: Arc::new(lash_core_execution::facade_support::SystemClock),
+            clock: Arc::new(lash_core_ids::clock::SystemClock),
         }
     }
 
@@ -811,8 +841,8 @@ impl PostgresStorage {
     /// catalog (ADR 0109 §1.3).
     pub fn obligation_ledger(
         &self,
-        kind: lash_core_execution::store::ObligationKind,
-    ) -> Arc<dyn lash_core_execution::store::ObligationLedger> {
+        kind: lash_core_store::store::ObligationKind,
+    ) -> Arc<dyn lash_core_store::store::ObligationLedger> {
         Arc::new(crate::obligation_ledger::PostgresObligationLedger::new(
             kind,
             self.pool.clone(),
@@ -820,9 +850,9 @@ impl PostgresStorage {
         ))
     }
 
-    pub fn artifact_cleanup(&self) -> Arc<dyn lash_core_execution::store::ArtifactCleanupLedger> {
+    pub fn artifact_cleanup(&self) -> Arc<dyn lash_core_store::store::ArtifactCleanupLedger> {
         Arc::new(crate::obligation_ledger::PostgresObligationLedger::new(
-            lash_core_execution::store::ObligationKind::ArtifactCleanup,
+            lash_core_store::store::ObligationKind::ArtifactCleanup,
             self.pool.clone(),
             self.fence.clone(),
         ))
@@ -834,7 +864,7 @@ impl PostgresStore {
         storage.store()
     }
 
-    pub fn with_clock(mut self, clock: Arc<dyn lash_core_execution::Clock>) -> Self {
+    pub fn with_clock(mut self, clock: Arc<dyn lash_core_ids::clock::Clock>) -> Self {
         self.clock = clock;
         self
     }

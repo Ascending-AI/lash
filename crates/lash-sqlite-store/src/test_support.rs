@@ -3,7 +3,9 @@
 //! production store traits carry none.
 
 use super::*;
-use lash_core_execution::store::{DecodedRowCounts, GraphRowCorruption, StoreTestSupport};
+use lash_core_store::store::DecodedRowCounts;
+use lash_core_store::store::GraphRowCorruption;
+use lash_core_store::store::StoreTestSupport;
 
 #[async_trait::async_trait]
 impl StoreTestSupport for SqliteStore {
@@ -18,7 +20,7 @@ impl StoreTestSupport for SqliteStore {
 
     async fn corrupt_graph_row_for_testing(
         &self,
-        node_id: &lash_core_execution::NodeId,
+        node_id: &lash_protocol_types::NodeId,
         corruption: GraphRowCorruption,
     ) -> Result<(), StoreError> {
         self.windows.forget_all();
@@ -38,7 +40,7 @@ impl StoreTestSupport for SqliteStore {
                         sql.set_parent_for_testing.sql(),
                         params![
                             node_id.as_str(),
-                            parent.as_ref().map(lash_core_execution::NodeId::as_str)
+                            parent.as_ref().map(lash_protocol_types::NodeId::as_str)
                         ],
                     )?,
                     GraphRowCorruption::SetFramePointer(frame) => crate::conn::cached_execute(
@@ -71,7 +73,7 @@ impl StoreTestSupport for SqliteStore {
                             |row| Ok((row.get(0)?, row.get(1)?)),
                         )?;
                         let mut node =
-                            lash_core_execution::SessionNodeRecord::decode_storage_body_for_fleet(
+                            lash_core_store::session_graph::SessionNodeRecord::decode_storage_body_for_fleet(
                                 node_id.as_str().to_owned(),
                                 parent,
                                 &body,
@@ -105,7 +107,7 @@ impl StoreTestSupport for SqliteStore {
     async fn force_fork_lineage_for_testing(
         &self,
         session_id: &SessionId,
-        ancestor_node_id: &lash_core_execution::NodeId,
+        ancestor_node_id: &lash_protocol_types::NodeId,
     ) -> Result<(), StoreError> {
         self.windows.forget_all();
         let session_id = session_id.clone();
@@ -222,7 +224,7 @@ pub(crate) async fn sqlite_memory_store_with_options(
             store: options,
             ..crate::SqliteStoreSetOptions::memory()
         },
-        Arc::new(lash_core_execution::facade_support::SystemClock),
+        Arc::new(lash_core_ids::clock::SystemClock),
     )
     .await?
     .open_store()

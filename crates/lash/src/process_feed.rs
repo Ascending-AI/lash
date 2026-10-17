@@ -51,17 +51,33 @@ use std::task::{Context, Poll};
 
 use futures_util::future::BoxFuture;
 use futures_util::{FutureExt as _, Stream, StreamExt as _};
+use lash_core::ProcessEffectCoverage;
+use lash_core::ProcessEffectEvidence;
+use lash_core::ProcessEffectGapReason;
+use lash_core::ProcessObservation;
+use lash_core::ProcessObservationCursor;
+use lash_core::ProcessObservationEnd;
+use lash_core::ProcessObservationEvent;
+use lash_core::ProcessObservationEventPayload;
+use lash_core::ProcessObservationGapCause;
+use lash_core::ProcessObservationReplacement;
+use lash_core::ProcessReadView;
+use lash_core::ProcessReplayStore;
+use lash_core::ProcessReplayStoreError;
+use lash_core::ProcessReplaySubscribeOutcome;
+use lash_core::ProcessReplaySubscription;
+use lash_core::ProcessSequence;
+use lash_core::RetainedProcessView;
 use lash_core::runtime::{ProcessChangeHub, ProcessChangeSubscription};
-use lash_core::{
-    PluginError, ProcessEffectCoverage, ProcessEffectEvidence, ProcessEffectGapReason,
-    ProcessEffectReport, ProcessEventHistoryRetention, ProcessEventPageEvents,
-    ProcessEventPageMore, ProcessEventQueryMode, ProcessEventReadOutcome, ProcessObservation,
-    ProcessObservationCursor, ProcessObservationEnd, ProcessObservationEvent,
-    ProcessObservationEventPayload, ProcessObservationGapCause, ProcessObservationReplacement,
-    ProcessReadView, ProcessRegistry, ProcessReplayStore, ProcessReplayStoreError,
-    ProcessReplaySubscribeOutcome, ProcessReplaySubscription, ProcessSequence, RetainedProcessView,
-    RetiredProcessStatus,
-};
+use lash_execution_contracts::plugin_error::PluginError;
+use lash_execution_contracts::process::ProcessEffectReport;
+use lash_execution_contracts::process::ProcessEventHistoryRetention;
+use lash_execution_contracts::process::ProcessEventPageEvents;
+use lash_execution_contracts::process::ProcessEventPageMore;
+use lash_execution_contracts::process::ProcessEventQueryMode;
+use lash_execution_contracts::process::ProcessEventReadOutcome;
+use lash_execution_contracts::process::ProcessRegistry;
+use lash_execution_contracts::process::RetiredProcessStatus;
 use lash_protocol_types::ProcessId;
 
 use crate::language_observation::CommittedPublication;
@@ -138,7 +154,10 @@ pub(crate) async fn fold_effects(
         .await?
     {
         ProcessEventReadOutcome::Retained(Some(event)) => {
-            if let lash_core::ProcessLifecycleFact::EffectOmissions(omissions) = &event.fact {
+            if let lash_execution_contracts::process::ProcessLifecycleFact::EffectOmissions(
+                omissions,
+            ) = &event.fact
+            {
                 if report.fold_event(&event.fact, fleet_format).is_ok() {
                     recorded_cap = omissions.occurrence_cap;
                 } else {
@@ -250,7 +269,7 @@ pub(crate) struct ProcessFeedSource {
     work_limits: lash_trace::ObservationWorkLimits,
     process_id: ProcessId,
     registry: Arc<dyn ProcessRegistry>,
-    observer: lash_core::facade_support::ProcessWorkObserver,
+    observer: lash_execution_contracts::process::ProcessWorkObserver,
     /// The engines whose document providers name a process's document.
     engines: lash_core::ProcessEngineRegistry,
     replay: Arc<dyn ProcessReplayStore>,
@@ -262,7 +281,7 @@ impl ProcessFeedSource {
     pub(crate) fn new(
         process_id: ProcessId,
         registry: Arc<dyn ProcessRegistry>,
-        observer: lash_core::facade_support::ProcessWorkObserver,
+        observer: lash_execution_contracts::process::ProcessWorkObserver,
         engines: lash_core::ProcessEngineRegistry,
         replay: Arc<dyn ProcessReplayStore>,
         work_limits: lash_trace::ObservationWorkLimits,
@@ -375,9 +394,11 @@ impl ProcessFeedSource {
     /// provider reads its recorded settings: `off` for any other process.
     fn observation(
         &self,
-        process: &lash_core::facade_support::ObservedProcess,
+        process: &lash_execution_contracts::process::ObservedProcess,
     ) -> lash_core::ProcessWorkflowObservation {
-        let lash_core::ProcessInput::Engine { kind, launch, .. } = &process.input else {
+        let lash_execution_contracts::process::ProcessInput::Engine { kind, launch, .. } =
+            &process.input
+        else {
             return lash_core::ProcessWorkflowObservation::Off;
         };
         match self.engines.document_provider(kind) {
@@ -392,22 +413,24 @@ impl ProcessFeedSource {
     /// provider from the process's recorded input.
     async fn document(
         &self,
-        process: &lash_core::facade_support::ObservedProcess,
+        process: &lash_execution_contracts::process::ObservedProcess,
     ) -> Result<lash_core::ProcessDocumentIdentity> {
         use lash_core::ProcessDocumentIdentity;
-        let lash_core::ProcessInput::Engine { kind, payload, .. } = &process.input else {
+        let lash_execution_contracts::process::ProcessInput::Engine { kind, payload, .. } =
+            &process.input
+        else {
             return Ok(ProcessDocumentIdentity::Unsupported);
         };
         let Some(provider) = self.engines.document_provider(kind) else {
             return Ok(ProcessDocumentIdentity::Unsupported);
         };
         Ok(match provider.document_ref(payload).await? {
-            lash_core::ProcessDocumentRefRead::Named(reference) => {
+            lash_execution_contracts::process::ProcessDocumentRefRead::Named(reference) => {
                 ProcessDocumentIdentity::Available(reference)
             }
-            lash_core::ProcessDocumentRefRead::ArtifactMissing { artifact } => {
-                ProcessDocumentIdentity::ArtifactUnavailable { artifact }
-            }
+            lash_execution_contracts::process::ProcessDocumentRefRead::ArtifactMissing {
+                artifact,
+            } => ProcessDocumentIdentity::ArtifactUnavailable { artifact },
         })
     }
 
@@ -452,7 +475,7 @@ impl ProcessFeedSource {
                             &event.payload,
                             ProcessObservationEventPayload::Committed { event }
                                 if event.sequence <= view.process.last_event_sequence
-                                    && matches!(event.fact, lash_core::ProcessLifecycleFact::Ran(_))
+                                    && matches!(event.fact, lash_execution_contracts::process::ProcessLifecycleFact::Ran(_))
                         )
                     });
                     for (position, event) in events.into_iter().enumerate() {

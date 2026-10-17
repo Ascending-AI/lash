@@ -59,8 +59,8 @@ impl ProductionToolHandlers<'_> {
         let possession = outcomes
             .iter()
             .filter_map(|outcome| match outcome {
-                crate::ToolIntentExecutionOutcome::Executed {
-                    realized: crate::ToolIntentRealized::StartProcess(handle),
+                lash_execution_contracts::tool_intent_outcome::ToolIntentExecutionOutcome::Executed {
+                    realized: lash_execution_contracts::tool_intent_outcome::ToolIntentRealized::StartProcess(handle),
                     ..
                 } => Some(handle.process_id.clone()),
                 _ => None,

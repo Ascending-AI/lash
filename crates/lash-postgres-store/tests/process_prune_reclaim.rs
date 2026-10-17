@@ -6,10 +6,12 @@
 
 use std::sync::Arc;
 
-use lash_core_execution::{
-    DeploymentStore, ProcessEnvStore, ProcessLifecycle as _, ProcessRegistrar as _,
-    ProcessRegistry, ProcessRetention as _,
-};
+use lash_execution_contracts::deployment::DeploymentStore;
+use lash_execution_contracts::process::ProcessEnvStore;
+use lash_execution_contracts::process::ProcessLifecycle as _;
+use lash_execution_contracts::process::ProcessRegistrar as _;
+use lash_execution_contracts::process::ProcessRegistry;
+use lash_execution_contracts::process::ProcessRetention as _;
 use lash_postgres_store::{PostgresStorage, testing::IsolatedDatabase};
 
 use crate::support::database_url;
@@ -35,7 +37,8 @@ lash_conformance::process_prune_reclaim_tests!({
     };
     let storage = Arc::new(storage);
     let factory = Arc::new(storage.store()) as Arc<dyn DeploymentStore>;
-    lash_core::testing::process_execution_env_fixture(&storage.process_env_store()).await;
+    lash_execution_contracts::testing::process_execution_env_fixture(&storage.process_env_store())
+        .await;
     let registry = Arc::new(storage.process_registry()) as Arc<dyn ProcessRegistry>;
     let probe = Arc::new(blob_probe::PostgresBlobProbe::new(
         storage,
@@ -54,9 +57,9 @@ lash_conformance::process_start_staging_tests!({
         Arc::new(storage.lash_vm_artifact_store()),
         Arc::new(storage.process_env_store()),
         Arc::new(storage.lash_vm_artifact_store()),
-        Arc::new(storage.store()) as Arc<dyn lash_core_execution::AttachmentReferrers>,
+        Arc::new(storage.store()) as Arc<dyn lash_core_store::store::AttachmentReferrers>,
         storage.artifact_cleanup(),
-        Arc::new(lash_core_execution::facade_support::SystemClock),
+        Arc::new(lash_core_ids::clock::SystemClock),
     );
     (database, registry, ports)
 });
@@ -93,9 +96,9 @@ lash_conformance::process_definition_tests!({
         Arc::new(storage.lash_vm_artifact_store()),
         Arc::new(storage.process_env_store()),
         Arc::new(storage.lash_vm_artifact_store()),
-        Arc::new(storage.store()) as Arc<dyn lash_core_execution::AttachmentReferrers>,
+        Arc::new(storage.store()) as Arc<dyn lash_core_store::store::AttachmentReferrers>,
         storage.artifact_cleanup(),
-        Arc::new(lash_core_execution::facade_support::SystemClock),
+        Arc::new(lash_core_ids::clock::SystemClock),
     );
     (database, registry, ports)
 });
@@ -111,9 +114,9 @@ lash_conformance::process_definition_graph_tests!({
         Arc::new(storage.lash_vm_artifact_store()),
         Arc::new(storage.process_env_store()),
         Arc::new(storage.lash_vm_artifact_store()),
-        Arc::new(storage.store()) as Arc<dyn lash_core_execution::AttachmentReferrers>,
+        Arc::new(storage.store()) as Arc<dyn lash_core_store::store::AttachmentReferrers>,
         storage.artifact_cleanup(),
-        Arc::new(lash_core_execution::facade_support::SystemClock),
+        Arc::new(lash_core_ids::clock::SystemClock),
     );
     let probe = Arc::new(definition_graph_probe::PostgresDefinitionGraphProbe::new(
         storage,
@@ -137,30 +140,33 @@ async fn postgres_process_prune_fence_and_obligation_survive_reopen_when_configu
         eprintln!("skipping Postgres process cleanup recovery: database URL is not set");
         return;
     };
-    lash_core::testing::process_execution_env_fixture(&storage.process_env_store()).await;
+    lash_execution_contracts::testing::process_execution_env_fixture(&storage.process_env_store())
+        .await;
     let registry = storage.process_registry();
     let registered = registry
-        .register_process(lash_core_execution::ProcessRegistration::new(
-            lash_core_execution::ProcessInput::Engine {
+        .register_process(lash_execution_contracts::process::ProcessRegistration::new(
+            lash_execution_contracts::process::ProcessInput::Engine {
                 kind: "test-engine".to_string(),
                 payload: serde_json::json!({"module_ref": "module-postgres"}),
-                launch: lash_core::EngineLaunch::new(
-                    lash_core::testing::process_execution_env_fixture_ref(),
+                launch: lash_execution_contracts::process::EngineLaunch::new(
+                    lash_execution_contracts::testing::process_execution_env_fixture_ref(),
                     None,
                 ),
             },
-            lash_core_execution::ProcessProvenance::host(),
-            lash_core_execution::Lifetime::Detached,
+            lash_execution_contracts::process::ProcessProvenance::host(),
+            lash_execution_contracts::process::Lifetime::Detached,
         ))
         .await
         .expect("register cleanup process");
     registry
         .complete_process(
             &registered.id,
-            lash_core_execution::ProcessAwaitOutput::from_tool_output(
-                lash_core_execution::ToolCallOutput::success(serde_json::Value::Null),
+            lash_execution_contracts::process::ProcessAwaitOutput::from_tool_output(
+                lash_protocol_types::tool_output::ToolCallOutput::success(serde_json::Value::Null),
             ),
-            lash_core_execution::ProcessCompletionAuthority::workflow_key("postgres-prune-cleanup"),
+            lash_execution_contracts::process::ProcessCompletionAuthority::workflow_key(
+                "postgres-prune-cleanup",
+            ),
         )
         .await
         .expect("complete cleanup process");
@@ -168,13 +174,14 @@ async fn postgres_process_prune_fence_and_obligation_survive_reopen_when_configu
         .prune_terminal_processes(
             u64::MAX,
             None,
-            lash_core_execution::ProjectionWatermark::NoProjector,
+            lash_execution_contracts::process::ProjectionWatermark::NoProjector,
         )
         .await
         .expect("prune with cleanup evidence");
     drop(registry);
 
-    let referrer = lash_core_execution::ArtifactReferrer::ProcessRecord(registered.id);
+    let referrer =
+        lash_core_store::artifact_referrer::ArtifactReferrer::ProcessRecord(registered.id);
     let fenced: bool = sqlx::query_scalar(
         "SELECT EXISTS (SELECT 1 FROM lash_referrer_fences
          WHERE referrer_kind = $1 AND referrer_id = $2)",
@@ -194,15 +201,15 @@ async fn postgres_process_prune_fence_and_obligation_survive_reopen_when_configu
     .fetch_one(storage.pool())
     .await
     .expect("read durable cleanup obligation");
-    let cleanup = lash_core_execution::store::ArtifactCleanupLedger::load_cleanup(
+    let cleanup = lash_core_store::store::ArtifactCleanupLedger::load_cleanup(
         storage.artifact_cleanup().as_ref(),
-        &lash_core_execution::store::ObligationId::new(id),
+        &lash_core_store::store::ObligationId::new(id),
     )
     .await
     .expect("load cleanup body")
     .expect("prune owes a cleanup");
     assert_eq!(cleanup.referrer(), referrer);
     assert!(
-        matches!(cleanup, lash_core_execution::ArtifactCleanup::Ended { ref carries, .. } if carries.is_empty())
+        matches!(cleanup, lash_core_store::artifact_referrer::ArtifactCleanup::Ended { ref carries, .. } if carries.is_empty())
     );
 }

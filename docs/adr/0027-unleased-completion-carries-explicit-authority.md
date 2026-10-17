@@ -26,6 +26,6 @@ Process execution writes carry the same epoch fence. A writer whose epoch is sta
 
 Caller convention alone cannot establish who may write a terminal. The required argument, uniform transactional validation and retained evidence make that discipline inspectable. In-process tokens are not an auth boundary; the embedding host owns security policy. SQLite file, SQLite memory and PostgreSQL enforce the same rule.
 
-Terminal construction shares `terminal_append_request` helpers. [Completion authority](../../crates/lash-core-execution/src/runtime/process/events.rs), [invocation authority](../../crates/lash-core-execution/src/runtime/process/model/execution.rs) and [registry transitions](../../crates/lash-core-execution/src/runtime/process/registry_transitions.rs) define the contract.
+Terminal construction shares `terminal_append_request` helpers. [Completion authority](../../crates/lash-execution-contracts/src/process/events.rs), [invocation authority](../../crates/lash-execution-contracts/src/process/model/execution.rs) and [registry transitions](../../crates/lash-execution-contracts/src/process/registry_transitions.rs) define the contract.
 
 [ADR 0137](0137-the-host-owns-events-routing-and-scheduling.md) owns host events, routing and scheduling.

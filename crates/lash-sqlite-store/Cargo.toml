@@ -19,20 +19,21 @@ name = "lash_sqlite_store"
 doctest = false
 
 [features]
-perf-witness = ["lash-core-execution/perf-witness", "rusqlite/trace"]
-testing = ["lash-store-sql/testing", "lash-core-execution/testing"]
+perf-witness = ["lash-execution-contracts/perf-witness", "rusqlite/trace"]
+testing = ["lash-store-sql/testing", "lash-execution-contracts/testing"]
 # Phase A's synthetic successor (ADR 0115 §6): the SQLite components'
 # descriptors move with the migration catalog that reaches them.
-synthetic-next = ["lash-core-store/synthetic-next", "lash-core-execution/synthetic-next"]
+synthetic-next = ["lash-core-store/synthetic-next", "lash-execution-contracts/synthetic-next"]
 
 [lints]
 workspace = true
 
 [dependencies]
+lash-core-ids = { workspace = true }
+lash-execution-contracts = { workspace = true }
 lash-store-sql = { workspace = true }
 lash-durable = { workspace = true }
 lash-protocol-types = { workspace = true }
-lash-core-execution = { workspace = true }
 lash-core-store = { workspace = true }
 async-trait = { workspace = true }
 flate2 = "1"
@@ -47,6 +48,7 @@ tracing = { workspace = true }
 uuid = { workspace = true, features = ["v4"] }
 
 [dev-dependencies]
+lash-core-execution = { workspace = true, features = ["testing"] }
 lash-kernel-doc = { workspace = true }
 lash-durable = { workspace = true, features = ["testing"] }
 lash.workspace = true

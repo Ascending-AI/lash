@@ -8,8 +8,10 @@
 
 use super::*;
 use crate::session_sql::session_sql;
-use lash_core_execution::store_backend_support::TargetResolution;
-use lash_core_execution::{RetainedRevision, Retention, Target};
+use lash_core_store::store::RetainedRevision;
+use lash_core_store::store::Retention;
+use lash_core_store::store::Target;
+use lash_core_store::store_backend_support::TargetResolution;
 use sqlx::PgConnection;
 
 type Tx<'c> = sqlx::Transaction<'c, sqlx::Postgres>;
@@ -280,8 +282,8 @@ impl RevisionRow {
     async fn config(
         &self,
         conn: &mut PgConnection,
-        fleet: lash_core_execution::FleetFormat,
-    ) -> Result<lash_core_execution::PersistedSessionConfig, StoreError> {
+        fleet: lash_core_store::store::FleetFormat,
+    ) -> Result<lash_core_store::session_graph::PersistedSessionConfig, StoreError> {
         let payload =
             crate::support::load_config_tx(conn, self.config_ref.as_deref(), fleet, None).await?;
         Ok(payload.config)
@@ -318,7 +320,7 @@ async fn retained_revision(
     row: RevisionRow,
     head_revision: u64,
     pins: &[(Target, Option<u64>)],
-    fleet: lash_core_execution::FleetFormat,
+    fleet: lash_core_store::store::FleetFormat,
 ) -> Result<RetainedRevision, StoreError> {
     Ok(RetainedRevision {
         session_id: session_id.clone(),

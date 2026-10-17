@@ -114,7 +114,10 @@ async fn traced_core(
 /// The `nodes` workflow published on `core`, with the env it starts under.
 async fn publish_nodes(
     core: &lash::LashCore,
-) -> (lash_core::ProcessEnvRef, lash_core::ProcessDefinition) {
+) -> (
+    lash_core::ProcessEnvRef,
+    lash_execution_contracts::process::ProcessDefinition,
+) {
     let artifacts = core.host_artifacts();
     let pin = lash::process::HostArtifactPin::mint();
     let environment = environment(false);

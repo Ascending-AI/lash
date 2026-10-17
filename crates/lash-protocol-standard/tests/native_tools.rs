@@ -9,7 +9,7 @@ use lash_core::facade_support::PluginHost;
 fn a_catalogue_tool_named_batch_is_refused_while_the_sugar_is_offered() {
     fn catalog_with_batch_tool(
         config: lash_protocol_standard::StandardProtocolConfig,
-    ) -> Result<Vec<String>, lash_core::PluginError> {
+    ) -> Result<Vec<String>, lash_execution_contracts::plugin_error::PluginError> {
         let tools: Arc<dyn lash_core::ToolProvider> = Arc::new(NamedBatch);
         let session = PluginHost::new(
             vec![
@@ -43,7 +43,7 @@ fn a_catalogue_tool_named_batch_is_refused_while_the_sugar_is_offered() {
     assert!(
         matches!(
             offered,
-            Err(lash_core::PluginError::ResidentToolDuplicateName { ref name }) if name == "batch"
+            Err(lash_execution_contracts::plugin_error::PluginError::ResidentToolDuplicateName { ref name }) if name == "batch"
         ),
         "{offered:?}"
     );
@@ -74,7 +74,10 @@ impl lash_core::ToolProvider for NamedBatch {
     fn tool_manifests(
         &self,
         _config: &lash_core::OwnerConfigView,
-    ) -> std::result::Result<Vec<lash_core::ToolManifest>, lash_core::PluginError> {
+    ) -> std::result::Result<
+        Vec<lash_core::ToolManifest>,
+        lash_execution_contracts::plugin_error::PluginError,
+    > {
         Ok(vec![named_batch().manifest()])
     }
 

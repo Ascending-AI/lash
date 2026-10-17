@@ -15,11 +15,17 @@
     reason = "test target: clippy's allow-unwrap-in-tests only exempts #[test] functions, and the setup helpers around them in this target are test code too"
 )]
 
-use lash_core_execution::store::SessionCheckpoint;
-use lash_core_execution::{
-    ArtifactReferrer, BlobRef, DurablePayload, DurableScan, DurableSurface, HostArtifactPin,
-    ModuleArtifactStore, ReferrerClaim, ScanCoverage, StorePreflight,
-};
+use lash_core_store::artifact_referrer::ArtifactReferrer;
+use lash_core_store::artifact_referrer::HostArtifactPin;
+use lash_core_store::artifact_referrer::ReferrerClaim;
+use lash_core_store::store::BlobRef;
+use lash_core_store::store::DurablePayload;
+use lash_core_store::store::DurableScan;
+use lash_core_store::store::DurableSurface;
+use lash_core_store::store::ScanCoverage;
+use lash_core_store::store::SessionCheckpoint;
+use lash_core_store::store::StorePreflight;
+use lash_execution_contracts::module_artifacts::ModuleArtifactStore;
 use lash_postgres_store::PostgresStorePreflight;
 use lash_protocol_types::SessionId;
 
@@ -292,8 +298,8 @@ fn encoded_manifest(
     execution: Option<lash_core::durable_port::domain::checkpoint_graph::NodeId>,
 ) -> (String, Vec<u8>) {
     let manifest = SessionCheckpoint {
-        schema_version: lash_core_execution::store::SESSION_CHECKPOINT_SCHEMA_VERSION,
-        turn_state: lash_core_execution::PersistedTurnState::default(),
+        schema_version: lash_core_store::store::SESSION_CHECKPOINT_SCHEMA_VERSION,
+        turn_state: lash_core_store::session_graph::PersistedTurnState::default(),
         components: std::collections::BTreeMap::new(),
         execution_ref: execution.map(|root| BlobRef(root.to_hex())),
     };
@@ -306,7 +312,7 @@ fn execution_root_node() -> (
     lash_core::durable_port::domain::checkpoint_graph::NodeId,
     Vec<u8>,
 ) {
-    let lash_core_execution::plugin::ExecutionGraphCapture::Replace(graph) =
+    let lash_core_store::execution_state::ExecutionGraphCapture::Replace(graph) =
         lash_core::testing::store_fixtures::execution_graph("execution state")
     else {
         unreachable!("the fixture stages a root")

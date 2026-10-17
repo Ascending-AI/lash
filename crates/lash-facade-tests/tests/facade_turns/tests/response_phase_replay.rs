@@ -61,7 +61,7 @@ async fn replay_callbacks(
     recorded: &lash_core::facade_support::PluginSession,
     live: &lash_core::facade_support::PluginSession,
     states: &[lash_core::AssistantStreamHookState],
-) -> std::result::Result<String, lash_core::PluginError> {
+) -> std::result::Result<String, lash_execution_contracts::plugin_error::PluginError> {
     let plan: lash_core::AssistantResponsePlan =
         serde_json::from_value(serde_json::to_value(recorded.assistant_response_plan()).unwrap())
             .unwrap();

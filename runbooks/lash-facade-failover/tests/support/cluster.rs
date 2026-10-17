@@ -12,8 +12,11 @@ use std::process::Stdio;
 use std::sync::{Arc, Mutex};
 use std::time::{Duration, Instant};
 
-use lash_core_execution::{Backend, BackendParts, NoProjectionProviders, StoreSet};
 use lash_durable::{DurableStore, Notifier};
+use lash_execution_contracts::backend::Backend;
+use lash_execution_contracts::backend::BackendParts;
+use lash_execution_contracts::backend::StoreSet;
+use lash_execution_contracts::projection::NoProjectionProviders;
 use lash_facade_failover::events::{Command, Event, Report};
 use lash_facade_failover::node::host_config;
 use lash_facade_failover::witness::Hold;

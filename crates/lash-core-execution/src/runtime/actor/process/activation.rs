@@ -63,24 +63,35 @@ use super::node_trace::{NodeCloses, StepCall, StepToolSpans};
 use super::session_turn::SessionTurns;
 use super::step_admission::{Consumed, Handoff};
 use super::succession::{Current, Succession};
-use super::terminal::{ProcessParkReason, cancelled, record_park, record_terminal};
+use super::terminal::cancelled;
+use super::terminal::record_park;
+use super::terminal::record_terminal;
 use super::{CascadeProgress, end_scope};
+use crate::ActorContext;
+use crate::AdmittedScope;
+use crate::CancelOrigin;
+use crate::ProcessId;
+use crate::ToolCallId;
 use crate::runtime::actor::activation_loop;
 use crate::runtime::actor::round::lifecycle::{Act, Idle, Lifecycle};
 use crate::runtime::actor::round::{
     self, AdmittedExecution, MemberBodies, MemberBody, PolicyView, RoundError, RunFold,
 };
-use crate::runtime::actor::waits::{self, Resolution, WaitKind};
-use crate::runtime::process::engine_state::{
-    CapacityVerdict, EngineEvent, EngineState, StepRequest,
-};
+use crate::runtime::actor::waits;
+use crate::runtime::actor::waits::Resolution;
 use crate::runtime::process::steps::{ProcessSteps, StepRefusal, StepRuntime};
-use crate::{
-    ActorContext, AdmittedScope, Backend, CancelOrigin, ProcessEngine, ProcessId, ProcessInput,
-    ProcessRecord, ToolCallId,
-};
 use lash_core_store::tool_run::Material;
 use lash_core_store::tool_run::SettledOutput;
+use lash_durable::domain::WaitKind;
+use lash_execution_contracts::backend::Backend;
+use lash_execution_contracts::park::ProcessParkReason;
+use lash_execution_contracts::process::CapacityVerdict;
+use lash_execution_contracts::process::EngineEvent;
+use lash_execution_contracts::process::EngineState;
+use lash_execution_contracts::process::ProcessEngine;
+use lash_execution_contracts::process::ProcessInput;
+use lash_execution_contracts::process::ProcessRecord;
+use lash_execution_contracts::process::StepRequest;
 
 /// The activation of claimed process actors: one per node, routed by
 /// [`lash_durable::ActorDispatch`].
@@ -221,7 +232,9 @@ pub(super) fn corrupt(what: &str, error: impl std::fmt::Display) -> DurableError
     })
 }
 
-pub(super) fn registry_failure(error: &crate::PluginError) -> DurableError {
+pub(super) fn registry_failure(
+    error: &lash_execution_contracts::plugin_error::PluginError,
+) -> DurableError {
     DurableError::Store(StoreFailure {
         kind: StoreFailureKind::Unavailable,
         message: error.to_string(),
@@ -806,7 +819,7 @@ impl ProcessActivation {
             record_terminal(
                 &mut tx,
                 process,
-                &crate::ProcessOutcome::from_tool_output(output),
+                &lash_execution_contracts::process::ProcessOutcome::from_tool_output(output),
             )?;
             tx.ack_seen();
             let nodes = nodes.and(NodeCloses::open(&record, &fold, &driver));
@@ -840,7 +853,7 @@ impl ProcessActivation {
             .status_projection(kind)
             .and_then(|projection| projection.status(&next))
             .map(|status| {
-                Box::new(crate::EngineStatus {
+                Box::new(lash_execution_contracts::process::EngineStatus {
                     format: next.format.clone(),
                     status,
                 })
@@ -1181,7 +1194,7 @@ impl ProcessActivation {
                     })?;
                     EngineEvent::KeyPinned {
                         name,
-                        key: waits::PinnedKey::new(pinned.key.clone()),
+                        key: lash_execution_contracts::waits::PinnedKey::new(pinned.key.clone()),
                     }
                 }
             }));
@@ -1300,7 +1313,10 @@ impl ProcessActivation {
                     // recorded end, first winner, and read the winner.
                     waits::resolve_ended_terminal(
                         &self.backend,
-                        &waits::WaitRef::new(wait.0, WaitKind::ProcessTerminal),
+                        &lash_execution_contracts::waits::WaitRef::new(
+                            wait.0,
+                            WaitKind::ProcessTerminal,
+                        ),
                     )
                     .await?;
                     row = process_wait(reads, &wait).await?;
@@ -1337,14 +1353,14 @@ impl ProcessActivation {
 }
 
 /// A process ended because the store refused its commit as corrupt.
-fn commit_refused(message: &str) -> crate::ProcessOutcome {
-    crate::ProcessAwaitOutput::from_tool_output(crate::ToolCallOutput::failure(
-        crate::ToolFailure::runtime(
+fn commit_refused(message: &str) -> lash_execution_contracts::process::ProcessOutcome {
+    lash_execution_contracts::process::ProcessAwaitOutput::from_tool_output(
+        crate::ToolCallOutput::failure(crate::ToolFailure::runtime(
             crate::ToolFailureClass::Internal,
             "process_commit_refused",
             message,
-        ),
-    ))
+        )),
+    )
 }
 
 /// A step's declaration that could not be read now: the pass commits
@@ -1356,14 +1372,14 @@ pub(super) fn unavailable(reason: String) -> DurableError {
     })
 }
 
-pub(super) fn refused(message: String) -> crate::ProcessOutcome {
-    crate::ProcessAwaitOutput::from_tool_output(crate::ToolCallOutput::failure(
-        crate::ToolFailure::runtime(
+pub(super) fn refused(message: String) -> lash_execution_contracts::process::ProcessOutcome {
+    lash_execution_contracts::process::ProcessAwaitOutput::from_tool_output(
+        crate::ToolCallOutput::failure(crate::ToolFailure::runtime(
             crate::ToolFailureClass::InvalidRequest,
             "process_action_refused",
             message,
-        ),
-    ))
+        )),
+    )
 }
 
 /// The engine-event adapter: the first in-flight step whose call the fold

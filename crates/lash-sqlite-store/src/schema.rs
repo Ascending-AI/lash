@@ -764,15 +764,15 @@ CREATE TABLE IF NOT EXISTS tool_intent_retired_owners (
 // `lash_core_store::compat::SQLITE_CORE_SCHEMA_VERSION`.
 
 /// The compatibility component of the deployment's one database file.
-pub(crate) const COMPONENT: lash_core_execution::compat::ComponentId =
-    lash_core_execution::compat::ComponentId::SQLITE_CORE;
+pub(crate) const COMPONENT: lash_core_store::compat::ComponentId =
+    lash_core_store::compat::ComponentId::SQLITE_CORE;
 
 /// The name reports and refusals give the database.
 pub(crate) const DATABASE_NAME: &str = "SQLite database";
 
 /// This build's compatibility version for the database.
 pub(crate) fn expected_version() -> i64 {
-    lash_core_execution::compat::descriptor(COMPONENT)
+    lash_core_store::compat::descriptor(COMPONENT)
         .map_or(0, |descriptor| i64::from(descriptor.writes.max()))
 }
 
@@ -827,12 +827,13 @@ pub(crate) async fn apply_pragmas(conn: &SqliteConnection) -> rusqlite::Result<(
 /// connection thread so admission and DDL share one transaction: the
 /// connection's installer, which arms its writer fence (ADR 0115 §2.2).
 pub(crate) async fn ensure_versioned_schema(conn: &SqliteConnection) -> rusqlite::Result<()> {
-    ensure_versioned_schema_with_writable(conn, lash_core_execution::FleetFormat::writable()).await
+    ensure_versioned_schema_with_writable(conn, lash_core_store::store::FleetFormat::writable())
+        .await
 }
 
 pub(crate) async fn ensure_versioned_schema_with_writable(
     conn: &SqliteConnection,
-    writable: lash_core_execution::compat::VersionRange,
+    writable: lash_core_store::compat::VersionRange,
 ) -> rusqlite::Result<()> {
     conn.install(writable, move |tx| {
         apply_versioned_schema_tx_with_writable(tx, writable)
@@ -851,30 +852,30 @@ pub(crate) fn prepare_versioned_schema(
 
 #[cfg(test)]
 fn apply_versioned_schema_tx(tx: &Transaction<'_>) -> rusqlite::Result<()> {
-    apply_versioned_schema_tx_with_writable(tx, lash_core_execution::FleetFormat::writable())
+    apply_versioned_schema_tx_with_writable(tx, lash_core_store::store::FleetFormat::writable())
         .map(drop)
 }
 
 /// The installer's transaction body; answers the admitted `F`.
 fn apply_versioned_schema_tx_with_writable(
     tx: &Transaction<'_>,
-    writable: lash_core_execution::compat::VersionRange,
-) -> rusqlite::Result<lash_core_execution::FleetFormat> {
+    writable: lash_core_store::compat::VersionRange,
+) -> rusqlite::Result<lash_core_store::store::FleetFormat> {
     let (admission, mut fleet) = crate::compat::admit(tx, writable)?;
     match admission {
-        lash_core_execution::compat::CompatAdmission::Provision => {
+        lash_core_store::compat::CompatAdmission::Provision => {
             for statements in provisioning_statements() {
                 tx.execute_batch(statements)?;
             }
             crate::compat::provision(tx, writable)?;
             // The handle answers the epoch the row was just seeded at, not
             // this build's newest: a synthetic N+1 seeds a fresh store at N.
-            fleet = lash_core_execution::FleetFormat::seed(writable);
+            fleet = lash_core_store::store::FleetFormat::seed(writable);
         }
-        lash_core_execution::compat::CompatAdmission::Native => {
+        lash_core_store::compat::CompatAdmission::Native => {
             crate::compat::refuse_unmigrated(tx)?;
         }
-        lash_core_execution::compat::CompatAdmission::Expanded { .. } => {
+        lash_core_store::compat::CompatAdmission::Expanded { .. } => {
             crate::compat::verify_tolerant(tx)?;
         }
     }
@@ -896,7 +897,7 @@ pub(crate) fn has_user_schema_objects(conn: &Connection) -> rusqlite::Result<boo
 #[cfg(test)]
 mod compat_tests {
     use super::*;
-    use lash_core_execution::compat::CompatRefusal;
+    use lash_core_store::compat::CompatRefusal;
 
     fn provision(connection: &mut Connection) {
         connection
@@ -929,7 +930,7 @@ mod compat_tests {
     /// §2.1).
     #[test]
     fn sqlite_provisioning_seeds_the_opening_build_s_fleet_floor() {
-        use lash_core_execution::compat::VersionRange;
+        use lash_core_store::compat::VersionRange;
         for writable in [VersionRange::between(1, 2), VersionRange::between(2, 3)] {
             let mut connection = Connection::open_in_memory().expect("open database");
             for _ in 0..2 {
@@ -954,7 +955,7 @@ mod compat_tests {
 
     #[test]
     fn sqlite_refuses_a_raised_floor_typed() {
-        let above = lash_core_execution::compat::descriptor(COMPONENT)
+        let above = lash_core_store::compat::descriptor(COMPONENT)
             .expect("database descriptor")
             .reads
             .max()
@@ -1037,15 +1038,13 @@ mod observer_intent_migration_tests {
         // Which side of the build's range 43 falls on is the admission
         // rule's to say; either way the stamp is refused typed.
         let descriptor =
-            lash_core_execution::compat::descriptor(COMPONENT).expect("database descriptor");
-        let expected = lash_core_execution::compat::admit(
+            lash_core_store::compat::descriptor(COMPONENT).expect("database descriptor");
+        let expected = lash_core_store::compat::admit(
             descriptor,
-            lash_core_execution::compat::StampRead::Present(
-                lash_core_execution::compat::CompatStamp {
-                    version: 43,
-                    min_reader: 43,
-                },
-            ),
+            lash_core_store::compat::StampRead::Present(lash_core_store::compat::CompatStamp {
+                version: 43,
+                min_reader: 43,
+            }),
         )
         .expect_err("a retired stamp is refused");
         assert!(

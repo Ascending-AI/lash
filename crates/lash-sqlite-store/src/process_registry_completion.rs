@@ -20,8 +20,11 @@ pub(super) async fn complete_process(
     process_id: &ProcessId,
     await_output: ProcessAwaitOutput,
     prelude: Vec<ProcessEventAppendRequest>,
-    authority: lash_core_execution::ProcessCompletionAuthority,
-) -> Result<lash_core_execution::ProcessCompletionOutcome, lash_core_execution::PluginError> {
+    authority: lash_execution_contracts::process::ProcessCompletionAuthority,
+) -> Result<
+    lash_execution_contracts::process::ProcessCompletionOutcome,
+    lash_execution_contracts::plugin_error::PluginError,
+> {
     let process_id = process_id.clone();
     let now = registry.clock.timestamp_ms();
     registry
@@ -42,7 +45,7 @@ pub(super) async fn complete_process(
                 // slip between the check and the append.
                 authority.validate(&record)?;
                 if record.is_terminal() {
-                    return Ok(lash_core_execution::ProcessCompletionOutcome::from_stored(
+                    return Ok(lash_execution_contracts::process::ProcessCompletionOutcome::from_stored(
                         record,
                         &await_output,
                     ));
@@ -51,7 +54,7 @@ pub(super) async fn complete_process(
                 for request in prelude {
                     batch.stage(tx, &mut record, request, now)?;
                 }
-                let request = lash_core_execution::facade_support::terminal_append_request(
+                let request = lash_execution_contracts::process::terminal_append_request(
                     &process_id,
                     &await_output,
                     Some(&authority),
@@ -60,12 +63,12 @@ pub(super) async fn complete_process(
                 batch.commit(tx, &record)?;
                 Ok(match arm {
                     ProcessEventAppendArm::Replayed { .. } => {
-                        lash_core_execution::ProcessCompletionOutcome::AlreadyApplied {
+                        lash_execution_contracts::process::ProcessCompletionOutcome::AlreadyApplied {
                             stored: record,
                         }
                     }
                     ProcessEventAppendArm::Inserted => {
-                        lash_core_execution::ProcessCompletionOutcome::Committed(record)
+                        lash_execution_contracts::process::ProcessCompletionOutcome::Committed(record)
                     }
                 })
             })()))

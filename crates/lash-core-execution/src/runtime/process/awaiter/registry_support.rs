@@ -112,14 +112,16 @@ impl WatchedProcessRegistry {
                     process_id,
                     after_sequence,
                     limit,
-                    crate::ProcessEventQueryMode::Full,
+                    lash_execution_contracts::process::ProcessEventQueryMode::Full,
                 )
                 .await;
             let page = match read {
                 Ok(outcome) => {
                     self.feed_read_recovered(process_id, "event_page");
                     match outcome {
-                        crate::ProcessEventReadOutcome::Retained(page) => page,
+                        lash_execution_contracts::process::ProcessEventReadOutcome::Retained(
+                            page,
+                        ) => page,
                         _ => break,
                     }
                 }
@@ -128,7 +130,9 @@ impl WatchedProcessRegistry {
                     break;
                 }
             };
-            let crate::ProcessEventPageEvents::Full(events) = page.events else {
+            let lash_execution_contracts::process::ProcessEventPageEvents::Full(events) =
+                page.events
+            else {
                 break;
             };
             for event in events {
@@ -138,8 +142,8 @@ impl WatchedProcessRegistry {
                 after_sequence = after_sequence.max(event.sequence);
             }
             match page.more {
-                crate::ProcessEventPageMore::Complete => break,
-                crate::ProcessEventPageMore::More {
+                lash_execution_contracts::process::ProcessEventPageMore::Complete => break,
+                lash_execution_contracts::process::ProcessEventPageMore::More {
                     after_sequence: more,
                 } => after_sequence = after_sequence.max(more),
             }
@@ -156,9 +160,9 @@ impl WatchedProcessRegistry {
         &self,
         process_id: &ProcessId,
         operation: &'static str,
-        error: &crate::PluginError,
+        error: &lash_execution_contracts::plugin_error::PluginError,
     ) {
-        let failure = crate::ToolIntentCommandFailure::from(error);
+        let failure = lash_execution_contracts::plugin_error::ToolIntentCommandFailure::from(error);
         self.feed_read_failed(
             process_id,
             operation,

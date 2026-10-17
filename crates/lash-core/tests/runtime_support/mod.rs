@@ -18,14 +18,14 @@ std::thread_local! {
 
 /// A fresh SQLite memory store set behind a recording effect host, held for
 /// the running test.
-pub(crate) async fn sqlite_recording_backend() -> lash_core::Backend {
+pub(crate) async fn sqlite_recording_backend() -> lash_execution_contracts::backend::Backend {
     lash_conformance::backend_over(std::sync::Arc::new(sqlite_memory_backend().await))
 }
 
 /// [`sqlite_recording_backend`] on `clock`: its storage ports read and wait on `clock`.
 pub(crate) async fn sqlite_recording_backend_with_clock(
     clock: std::sync::Arc<dyn lash_core::Clock>,
-) -> lash_core::Backend {
+) -> lash_execution_contracts::backend::Backend {
     let backend = lash_sqlite_store::SqliteStoreSet::memory_with_clock(clock)
         .await
         .expect("open a clocked SQLite memory backend");
@@ -75,13 +75,16 @@ pub(crate) async fn sqlite_memory_store_set() -> std::sync::Arc<lash_sqlite_stor
             .expect("open a SQLite memory store set"),
     );
     TEST_STORE_SETS.with(|held| held.borrow_mut().push(std::sync::Arc::clone(&stores)));
-    lash_core::testing::process_execution_env_fixture(stores.process_env_store().as_ref()).await;
+    lash_execution_contracts::testing::process_execution_env_fixture(
+        stores.process_env_store().as_ref(),
+    )
+    .await;
     stores
 }
 
 /// [`sqlite_memory_store_set`] as a backend whose effect host is the recording
 /// double: for a test that needs a `Backend` value but runs no effect.
-pub(crate) async fn sqlite_memory_store_backend() -> lash_core::Backend {
+pub(crate) async fn sqlite_memory_store_backend() -> lash_execution_contracts::backend::Backend {
     lash_conformance::backend_over(sqlite_memory_store_set().await)
 }
 
@@ -89,14 +92,14 @@ pub(crate) async fn sqlite_memory_store_backend() -> lash_core::Backend {
 /// admits on it is a [`lash_core::store::SessionStore`] view of this one
 /// store. `backend` is one [`sqlite_recording_backend`] opened.
 pub(crate) async fn unbound_store(
-    backend: &lash_core::Backend,
+    backend: &lash_execution_contracts::backend::Backend,
 ) -> std::sync::Arc<dyn lash_core::RuntimeStore> {
     backend.session_store_factory()
 }
 
 /// [`unbound_store`] under a recording decorator.
 pub(crate) async fn unbound_recording_store(
-    backend: &lash_core::Backend,
+    backend: &lash_execution_contracts::backend::Backend,
 ) -> std::sync::Arc<lash_core::testing::runtime_helpers::RecordingStore> {
     std::sync::Arc::new(lash_core::testing::runtime_helpers::RecordingStore::over(
         unbound_store(backend).await,
@@ -108,7 +111,7 @@ pub(crate) async fn unbound_recording_store(
 /// [`sqlite_memory_store_backend`] and a double's `lash_backend` alike: a test that
 /// runs no effect still gets the recording decorator's seams.
 pub(crate) async fn recording_unbound_store_on(
-    backend: &lash_core::Backend,
+    backend: &lash_execution_contracts::backend::Backend,
 ) -> std::sync::Arc<lash_core::testing::runtime_helpers::RecordingStore> {
     std::sync::Arc::new(lash_core::testing::runtime_helpers::RecordingStore::over(
         backend.session_store_factory(),
@@ -119,7 +122,7 @@ pub(crate) async fn recording_unbound_store_on(
 /// `clock`, over the same databases as `backend`: a second handle on the
 /// backend configured with another clock.
 pub(crate) async fn unbound_recording_store_with_clock(
-    backend: &lash_core::Backend,
+    backend: &lash_execution_contracts::backend::Backend,
     clock: std::sync::Arc<dyn lash_core::Clock>,
 ) -> std::sync::Arc<lash_core::testing::runtime_helpers::RecordingStore> {
     let identity = backend.binding_identity().to_string();
@@ -143,7 +146,9 @@ pub(crate) async fn unbound_recording_store_with_clock(
 
 /// Fresh handles on `backend`'s databases: what a second process over the
 /// same substrate is. `backend` is one [`sqlite_recording_backend`] opened.
-pub(crate) async fn reopened_backend(backend: &lash_core::Backend) -> lash_core::Backend {
+pub(crate) async fn reopened_backend(
+    backend: &lash_execution_contracts::backend::Backend,
+) -> lash_execution_contracts::backend::Backend {
     let identity = backend.binding_identity().to_string();
     let sqlite = TEST_BACKENDS
         .with(|held| {

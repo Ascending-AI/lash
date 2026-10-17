@@ -22,11 +22,13 @@ use std::sync::atomic::{AtomicU64, Ordering};
 use std::sync::{Arc, Mutex};
 use std::time::{Duration, Instant};
 
+use lash_core::DeploymentStoreDecorator;
+use lash_core::RuntimeCommit;
+use lash_core::SessionCreationHead;
+use lash_core::SessionStoreCreateRequest;
+use lash_core::StoreError;
 use lash_core::store::{RuntimeCommitReceipt, RuntimeStoreDecorator};
-use lash_core::{
-    DeploymentStore, DeploymentStoreDecorator, RuntimeCommit, SessionCreationHead,
-    SessionStoreCreateRequest, StoreError,
-};
+use lash_execution_contracts::deployment::DeploymentStore;
 
 /// One measured store for the catalog. Its node counter holds no identities.
 #[derive(Clone)]

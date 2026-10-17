@@ -205,7 +205,7 @@ impl SessionRuntimes for CoreRuntimes {
 /// What the core's node serves.
 pub(crate) struct NodeActivations {
     /// The core's backend, advancing every engine the core registers.
-    pub(crate) backend: lash_core::Backend,
+    pub(crate) backend: lash_execution_contracts::backend::Backend,
     /// Runs the claimed sessions' turns.
     pub(crate) sessions: Arc<SessionActivation>,
     /// Runs the claimed processes on the core's process worker, or why the

@@ -686,8 +686,9 @@ async fn facade_agent_process_execution_with_options(
 async fn facade_agent_durable_input_execution(
     host_delay: std::time::Duration,
 ) -> Result<Value, FixedScriptRunnerError> {
-    let (key_tx, mut key_rx) =
-        tokio::sync::oneshot::channel::<Result<lash_core::PinnedKey, String>>();
+    let (key_tx, mut key_rx) = tokio::sync::oneshot::channel::<
+        Result<lash_execution_contracts::waits::PinnedKey, String>,
+    >();
     let tools = Arc::new(ContractDurableInputTools::new(key_tx));
     facade_agent_durable_input_execution_with(
         Arc::clone(&tools),
@@ -701,7 +702,9 @@ async fn facade_agent_durable_input_execution(
 async fn facade_agent_durable_input_execution_with(
     tools: Arc<ContractDurableInputTools>,
     registered_tools: Arc<dyn lash_core::ToolProvider>,
-    key_rx: &mut tokio::sync::oneshot::Receiver<Result<lash_core::PinnedKey, String>>,
+    key_rx: &mut tokio::sync::oneshot::Receiver<
+        Result<lash_execution_contracts::waits::PinnedKey, String>,
+    >,
     host_delay: std::time::Duration,
 ) -> Result<Value, FixedScriptRunnerError> {
     let (core, graph_store, engine) = agent_process_contract_core_with_tools(
@@ -895,13 +898,13 @@ fn with_contract_processes(
     let mut builder = builder
         .plugin(Arc::new(
             lash_plugin_process_controls::SessionProcessAdminPluginFactory::new(
-                lash_core::lifetime::session_or_starter,
+                lash_execution_contracts::process::lifetime::session_or_starter,
                 policy(),
             ),
         ))
         .process_component(
             Arc::new(lash_plugin_process_controls::ProcessControlsComponent::new(
-                lash_core::lifetime::session_or_starter,
+                lash_execution_contracts::process::lifetime::session_or_starter,
                 policy(),
             )),
             lash_plugin_process_controls::PROCESS_CONTROLS_CONFIG,
@@ -936,15 +939,17 @@ fn agent_contract_delegation_plugin(
                 lash::MaxToolCalls::new(1024),
             )
             .no_progress_budget(lash_core::NoProgressBudget::bounded(12)),
-            lash_core::lifetime::starter,
+            lash_execution_contracts::process::lifetime::starter,
         )
         .with_rlm_children()
     }
 }
 
 async fn wait_for_contract_durable_input_key(
-    key_rx: &mut tokio::sync::oneshot::Receiver<Result<lash_core::PinnedKey, String>>,
-) -> Result<lash_core::PinnedKey, FixedScriptRunnerError> {
+    key_rx: &mut tokio::sync::oneshot::Receiver<
+        Result<lash_execution_contracts::waits::PinnedKey, String>,
+    >,
+) -> Result<lash_execution_contracts::waits::PinnedKey, FixedScriptRunnerError> {
     match key_rx.await {
         Ok(Ok(key)) => Ok(key),
         Ok(Err(err)) => Err(FixedScriptRunnerError::Runtime(err)),
@@ -968,9 +973,9 @@ async fn wait_for_contract_durable_input_park(
     let processes = core
         .processes()
         .list(
-            &lash_core::ProcessListFilter {
-                status: lash_core::ProcessStatusFilter::Any,
-                ..lash_core::ProcessListFilter::default()
+            &lash_execution_contracts::process::ProcessListFilter {
+                status: lash_execution_contracts::process::ProcessStatusFilter::Any,
+                ..lash_execution_contracts::process::ProcessListFilter::default()
             },
             std::num::NonZeroUsize::new(2).unwrap_or(std::num::NonZeroUsize::MIN),
             None,
@@ -986,7 +991,7 @@ async fn wait_for_contract_durable_input_park(
     };
     let actor = lash_durable::ActorKey::process(process.process_id.as_str())
         .map_err(|err| FixedScriptRunnerError::Runtime(err.to_string()))?;
-    let store = lash_core_execution::StoreSet::durable_store(engine.stores());
+    let store = lash_execution_contracts::backend::StoreSet::durable_store(engine.stores());
     let deadline = tokio::time::Instant::now() + std::time::Duration::from_secs(30);
     loop {
         let snapshot = store
@@ -1114,9 +1119,9 @@ async fn agent_contract_process_observations(
     core: &lash::LashCore,
 ) -> Result<Vec<AgentContractProcessObservation>, FixedScriptRunnerError> {
     let processes = core.processes();
-    let filter = lash_core::ProcessListFilter {
-        status: lash_core::ProcessStatusFilter::Any,
-        ..lash_core::ProcessListFilter::default()
+    let filter = lash_execution_contracts::process::ProcessListFilter {
+        status: lash_execution_contracts::process::ProcessStatusFilter::Any,
+        ..lash_execution_contracts::process::ProcessListFilter::default()
     };
     let mut observed = Vec::new();
     let mut continuation = None;
@@ -1163,7 +1168,7 @@ async fn agent_contract_process_observations(
 /// rather than quietly uncounting.
 async fn agent_contract_process_document_entry(
     core: &lash::LashCore,
-    process: &lash_core::facade_support::ObservedProcess,
+    process: &lash_execution_contracts::process::ObservedProcess,
 ) -> Result<Option<String>, FixedScriptRunnerError> {
     if process.identity.kind.as_str() != lash_vm_runtime::LASH_VM_ENGINE_KIND
         || process.identity.definition_id.is_none()
@@ -1192,7 +1197,9 @@ async fn agent_contract_process_document_entry(
     }
 }
 
-fn agent_contract_process_ref(process: &lash_core::facade_support::ObservedProcess) -> String {
+fn agent_contract_process_ref(
+    process: &lash_execution_contracts::process::ObservedProcess,
+) -> String {
     let kind = process.identity.kind.as_str();
     let label = process.identity.label.as_deref();
     let status = process.status().label();

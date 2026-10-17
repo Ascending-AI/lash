@@ -63,7 +63,7 @@ impl MemberDraft {
             lash_protocol_types::ExecutionPolicy,
             lash_protocol_types::ExecutionLimit,
         ),
-        park: Option<lash_core_execution::runtime::actor::waits::ParkDeadline>,
+        park: Option<lash_execution_contracts::waits::ParkDeadline>,
     ) -> Result<Self, ParentFault> {
         let mut scratch = GraphStaging::new(EncodeBudget::new(ExplicitLimit::new(u64::MAX)));
         let node = request

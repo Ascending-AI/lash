@@ -70,17 +70,17 @@ pub fn process_registry_alternate_environment_ref() -> crate::ProcessEnvRef {
 }
 
 fn alternate_process_environment() -> crate::ProcessEnv {
-    lash_core::testing::process_env_with_limit(1)
+    lash_execution_contracts::testing::process_env_with_limit(1)
 }
 
 /// Publish the two environments registry fixtures register under. Admission
 /// requires stored bytes even when a law concerns only the registry's rows.
 #[expect(clippy::expect_used, reason = "conformance environment fixture")]
 pub async fn publish_process_registry_fixture_environments(store: &dyn crate::ProcessEnvStore) {
-    lash_core::testing::process_execution_env_fixture(store).await;
+    lash_execution_contracts::testing::process_execution_env_fixture(store).await;
     lash_core::testing::publish_process_env_for_testing(
         store,
-        &lash_core::testing::host_pin_claim_for_testing(),
+        &lash_execution_contracts::testing::host_pin_claim_for_testing(),
         &alternate_process_environment(),
     )
     .await

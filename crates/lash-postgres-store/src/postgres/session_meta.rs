@@ -4,7 +4,9 @@ use lash_protocol_types::ProcessId;
 use lash_protocol_types::SessionId;
 use lash_protocol_types::TurnId;
 
-use lash_core_execution::store_backend_support::{CausalColumns, SessionMetaCodec, StoredRelation};
+use lash_core_store::store_backend_support::CausalColumns;
+use lash_core_store::store_backend_support::SessionMetaCodec;
+use lash_core_store::store_backend_support::StoredRelation;
 
 const SESSION_META_CODEC: SessionMetaCodec = SessionMetaCodec::new("PostgreSQL BIGINT");
 
@@ -24,7 +26,7 @@ pub(crate) fn stored_relation_from_row(row: &PgRow) -> Result<StoredRelation, St
                 .transpose()?,
             turn_id: row
                 .get::<Option<String>, _>("caused_by_turn_id")
-                .map(lash_core_execution::TurnId::parse)
+                .map(lash_protocol_types::TurnId::parse)
                 .transpose()?,
             effect_id: row.get("caused_by_effect_id"),
             call_id: row.get("caused_by_call_id"),
@@ -52,7 +54,7 @@ pub(crate) fn stored_relation_from_row(row: &PgRow) -> Result<StoredRelation, St
 pub(crate) fn decode_catalog_relation(
     stored: StoredRelation,
     observer_intent_rows_json: &str,
-) -> Result<lash_core_execution::SessionRelation, StoreError> {
+) -> Result<lash_core_store::session_identity::SessionRelation, StoreError> {
     let observer_intent_rows =
         serde_json::from_str(observer_intent_rows_json).map_err(|error| {
             SessionMetaCodec::corrupt(
@@ -76,7 +78,7 @@ pub(crate) fn decode_catalog_relation(
 pub(crate) async fn load_recorded_lineage_tx(
     tx: &mut sqlx::Transaction<'_, sqlx::Postgres>,
     session_id: &SessionId,
-) -> Result<Option<lash_core_execution::SessionLineage>, StoreError> {
+) -> Result<Option<lash_core_store::session_identity::SessionLineage>, StoreError> {
     let row = crate::observed_sql::query(session_sql().meta.select_lineage.sql())
         .bind(session_id.as_str())
         .fetch_optional(crate::observed_sql::executor(&mut **tx))
@@ -102,9 +104,9 @@ pub(crate) async fn load_recorded_lineage_tx(
 pub(crate) async fn write_session_meta_tx(
     tx: &mut sqlx::Transaction<'_, sqlx::Postgres>,
     meta: &SessionMeta,
-    retention: lash_core_execution::Retention,
+    retention: lash_core_store::store::Retention,
     created_at_ms: u64,
-    fleet_format: lash_core_execution::FleetFormat,
+    fleet_format: lash_core_store::store::FleetFormat,
 ) -> Result<bool, StoreError> {
     let stored = SessionMetaCodec::encode(SESSION_META_CODEC, meta)?;
     let sql = session_sql().meta_postgres.insert.sql();
@@ -124,8 +126,8 @@ pub(crate) async fn write_session_meta_tx(
         .bind(&stored.source_node_id)
         .bind(i64::try_from(created_at_ms).unwrap_or(i64::MAX))
         .bind(
-            fleet_format.writer_version(lash_core_execution::surface_format!(
-                lash_core_execution::store::CURRENT_SESSION_STATE_VERSION
+            fleet_format.writer_version(lash_core_store::surface_format!(
+                lash_core_store::store::CURRENT_SESSION_STATE_VERSION
             )) as i32,
         )
         .bind(meta.owning_process_id.as_ref().map(ProcessId::as_str))
@@ -145,7 +147,7 @@ pub(crate) async fn write_session_meta_tx(
 pub(crate) async fn settle_observer_intents_tx(
     tx: &mut sqlx::Transaction<'_, sqlx::Postgres>,
     session_id: &SessionId,
-    remaining: &[lash_core_execution::facade_support::SessionObserverIntent],
+    remaining: &[lash_core_store::session_identity::SessionObserverIntent],
 ) -> Result<(), StoreError> {
     crate::observed_sql::query(session_sql().observer_intents.delete_by_session.sql())
         .bind(session_id.as_str())
@@ -228,7 +230,7 @@ pub(crate) async fn load_session_meta(
             ));
         }
         stored.pending_observer_intents.push(
-            lash_core_execution::store_backend_support::StoredObserverIntent {
+            lash_core_store::store_backend_support::StoredObserverIntent {
                 process_id: ProcessId::parse(&process_id).map_err(|error| {
                     StoreError::StoredDataCorrupt {
                         record_kind: "SessionMeta observer intent",

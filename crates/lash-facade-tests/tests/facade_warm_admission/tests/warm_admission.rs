@@ -14,7 +14,10 @@ const NO_POLL: std::time::Duration = std::time::Duration::from_secs(3600);
 const BOUND: std::time::Duration = std::time::Duration::from_secs(30);
 
 /// A serving core over `stores` whose claim poll is `claim_poll`.
-fn serving(stores: Arc<dyn lash_core::StoreSet>, claim_poll: std::time::Duration) -> LashCore {
+fn serving(
+    stores: Arc<dyn lash_execution_contracts::backend::StoreSet>,
+    claim_poll: std::time::Duration,
+) -> LashCore {
     let mut settings = lash::durable::DurableSettings::default();
     settings.lease.claim_poll = claim_poll;
     let backend = lash::durable::DurableBackendBuilder::new(stores)

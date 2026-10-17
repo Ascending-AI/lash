@@ -82,12 +82,12 @@ use lash_core::{
     facade_support::TurnOutcome, facade_support::shared_parts,
 };
 use lash_core::{LlmOutputPart, LlmRequest, LlmResponse};
+use lash_core_execution::ActorContext;
 use lash_core_execution::runtime::actor::round::{
     self, AcceptedStop, AdmittedExecution, CompletedCall, MemberBody, MemberOutcome, MemberPin,
     PolicyView, RoundTools, RunFold,
 };
-use lash_core_execution::runtime::actor::waits::{self, ParkDeadline};
-use lash_core_execution::{ActorContext, Backend, StoreSet};
+use lash_core_execution::runtime::actor::waits;
 use lash_core_store::tool_run::Material;
 use lash_core_store::tool_run::SettledOutput;
 use lash_core_store::tool_run::{
@@ -99,6 +99,9 @@ use lash_durable::{ActorKey, ActorState, CommitLabel, DurableError, DurableStore
 use lash_durable_test::{
     Cut, Fault, Matrix, Scenario, SimClock, SimNodes, SimNodesConfig, Stored, Tripwire, WriteKind,
 };
+use lash_execution_contracts::backend::Backend;
+use lash_execution_contracts::backend::StoreSet;
+use lash_execution_contracts::waits::ParkDeadline;
 use lash_protocol_types::sync::MutexExt as _;
 use lash_protocol_types::{
     ExecutionBudgets, ExecutionPolicy, LimitCause, ModelToolReturn, ParkBound, SessionId,
@@ -415,7 +418,7 @@ impl ProtocolDriverHandle<lash_core::HostTurnProtocol> for ScriptedProtocol {
 }
 
 fn render_output(output: &ToolCallOutput) -> String {
-    serde_json::to_string(&lash_core::Durable(&output.outcome)).unwrap()
+    serde_json::to_string(&lash_protocol_types::Durable(&output.outcome)).unwrap()
 }
 
 #[derive(Debug)]

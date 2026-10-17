@@ -9,7 +9,7 @@
 //!
 //! **Update rule.** Written on the first open of an unstamped database and
 //! advanced only by a strictly newer release
-//! ([`lash_core_execution::release_stamp_advances`]). A reopen under the same release
+//! ([`lash_core_store::store::release_stamp_advances`]). A reopen under the same release
 //! leaves the row alone, so `written_at_epoch_ms` stays the instant this release
 //! took the database over; an older build never downgrades the stamp; and a pair
 //! this build cannot order leaves the existing row for an operator to read.
@@ -17,7 +17,9 @@
 //! The instant is the PostgreSQL server's, not the opening host's: two hosts
 //! opening one database would otherwise stamp it from two unrelated clocks.
 
-use lash_core_execution::{StoreComponentVersion, StoreReleaseStamp, StoreReleaseState};
+use lash_core_store::store::StoreComponentVersion;
+use lash_core_store::store::StoreReleaseStamp;
+use lash_core_store::store::StoreReleaseState;
 use sqlx::{Postgres, Transaction};
 
 use crate::SCHEMA_COMPONENT;
@@ -34,7 +36,7 @@ pub(crate) const BUILD_RELEASE: &str = env!("CARGO_PKG_VERSION");
 /// compatibility descriptor writes. PostgreSQL carries one component, so the
 /// tuple has one entry.
 pub(crate) fn build_schema_versions() -> Vec<StoreComponentVersion> {
-    lash_core_execution::compat::descriptor(lash_core_execution::compat::ComponentId::POSTGRES)
+    lash_core_store::compat::descriptor(lash_core_store::compat::ComponentId::POSTGRES)
         .into_iter()
         .map(|descriptor| StoreComponentVersion {
             component: SCHEMA_COMPONENT.to_string(),
@@ -68,7 +70,7 @@ pub(crate) async fn write(tx: &mut Transaction<'_, Postgres>) -> Result<(), sqlx
             .fetch_optional(crate::observed_sql::executor(&mut **tx))
             .await?;
     if let Some(existing) = existing
-        && !lash_core_execution::release_stamp_advances(&existing, BUILD_RELEASE)
+        && !lash_core_store::store::release_stamp_advances(&existing, BUILD_RELEASE)
     {
         return Ok(());
     }

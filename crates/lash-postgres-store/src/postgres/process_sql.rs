@@ -10,7 +10,7 @@
 
 use std::sync::LazyLock;
 
-use lash_core_execution::store_backend_support as vocabulary;
+use lash_core_store::store_backend_support as vocabulary;
 use lash_store_sql::process::{
     abandoned_consumer_holds::AbandonedConsumerHoldStatements,
     event_horizons::EventHorizonStatements, events::EventStatements, observers::ObserverStatements,
@@ -21,7 +21,7 @@ use lash_store_sql::{Dialect, Vocabulary, VocabularyTerm};
 
 /// The process family's domain vocabulary, as this backend supplies it.
 ///
-/// Every expansion is generated from `lash_core_execution::ProcessStatus`. The
+/// Every expansion is generated from `lash_execution_contracts::process::ProcessStatus`. The
 /// term names are the domain's, not a dialect's, and are identical in the
 /// SQLite store.
 const PROCESS_LIFECYCLE: Vocabulary = Vocabulary::new(&[
@@ -568,7 +568,9 @@ pub(crate) fn process_sql() -> &'static ProcessSql {
 /// they exist to use — so each combination is its own named statement rather
 /// than a template with a hole. The caller binds the always-bound eight
 /// parameters and then, in this same order, the clauses' own.
-pub(crate) fn roster_sql(filter: &lash_core_execution::ProcessListFilter) -> &'static str {
+pub(crate) fn roster_sql(
+    filter: &lash_execution_contracts::process::ProcessListFilter,
+) -> &'static str {
     let statements = &process_sql().process_postgres;
     match (
         filter.until.is_some(),

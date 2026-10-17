@@ -1,29 +1,8 @@
 //! Process engines, linked tool twins, and launches used by in-tree fixtures.
 
-use super::{fixture_engine_launch, process_execution_env_fixture_ref};
+use lash_execution_contracts::testing::HELD_PROCESS_ENGINE_KIND;
+use lash_execution_contracts::testing::process_execution_env_fixture_ref;
 use std::sync::Arc;
-
-/// The kind [`HeldProcessEngine`] runs.
-#[cfg(any(test, feature = "testing"))]
-pub const HELD_PROCESS_ENGINE_KIND: &str = "testing-held";
-
-/// An engine input of [`HeldProcessEngine`]'s kind: the trivial process a law
-/// registers when it is about the row rather than about what runs it.
-#[cfg(any(test, feature = "testing"))]
-pub fn held_engine_input(payload: serde_json::Value) -> crate::ProcessInput {
-    crate::ProcessInput::Engine {
-        kind: HELD_PROCESS_ENGINE_KIND.to_string(),
-        payload,
-        launch: fixture_engine_launch(),
-    }
-}
-
-/// `launch` as a declaration states it once its environment is held: what a
-/// fixture declares when no start-policy round produced it.
-#[cfg(any(test, feature = "testing"))]
-pub fn declared_launch_for_testing(launch: crate::EngineLaunch) -> crate::DeclaredLaunch {
-    crate::DeclaredLaunch::held(launch)
-}
 
 /// A process component of `key`'s id whose only contribution is
 /// `provider`'s tools, its config `()` (FIG-6034 §3.2): what a fixture
@@ -74,40 +53,6 @@ pub fn run_policy_naming(
     ))
 }
 
-/// A host start of [`held_engine_input`] under the fixture environment,
-/// which the host must have published (see [`process_execution_env_fixture`]).
-#[cfg(any(test, feature = "testing"))]
-pub fn held_engine_request(
-    payload: serde_json::Value,
-    originator: crate::ProcessOriginator,
-    lifetime: impl Into<crate::LifetimeDecision>,
-) -> crate::ProcessStartRequest {
-    crate::ProcessStartRequest::engine(
-        HELD_PROCESS_ENGINE_KIND,
-        payload,
-        fixture_engine_launch(),
-        originator,
-        lifetime,
-    )
-}
-
-/// A declared start of [`held_engine_input`]: the declaration a recorded
-/// start of the held engine journals, its launch the fixture environment.
-#[cfg(any(test, feature = "testing"))]
-pub fn held_engine_declaration(
-    payload: serde_json::Value,
-    originator: crate::ProcessOriginator,
-    lifetime: impl Into<crate::LifetimeDecision>,
-) -> crate::ProcessStartDeclaration {
-    crate::ProcessStartDeclaration::engine(
-        HELD_PROCESS_ENGINE_KIND,
-        payload,
-        crate::DeclaredLaunch::held(fixture_engine_launch()),
-        originator,
-        lifetime,
-    )
-}
-
 /// Hold the fixture environment under `context`'s execution claim for a
 /// start of [`held_engine_input`] with `payload`, as a start policy's choice
 /// is held (D10): the launch a tool body declares the held engine under.
@@ -119,7 +64,7 @@ pub fn held_engine_declaration(
 pub async fn held_engine_launch(
     context: &crate::AttemptContext<'_>,
     payload: &serde_json::Value,
-) -> Result<crate::DeclaredLaunch, crate::HoldEnvError> {
+) -> Result<lash_execution_contracts::process::DeclaredLaunch, crate::HoldEnvError> {
     context
         .declare_engine_launch(
             &crate::ProcessStartChoice {
@@ -133,18 +78,6 @@ pub async fn held_engine_launch(
         .await
 }
 
-/// A registration of [`held_engine_input`], whose launch names the fixture
-/// environment. Publish it with [`process_execution_env_fixture`] in the
-/// store receiving the registration.
-#[cfg(any(test, feature = "testing"))]
-pub fn held_engine_registration(
-    payload: serde_json::Value,
-    provenance: crate::ProcessProvenance,
-    lifetime: impl Into<crate::LifetimeDecision>,
-) -> crate::ProcessRegistration {
-    crate::ProcessRegistration::new(held_engine_input(payload), provenance, lifetime)
-}
-
 /// Engine fixture whose process runs until it is cancelled, and then answers
 /// its cancellation: a process that stays open until the law ends it.
 #[cfg(any(test, feature = "testing"))]
@@ -152,35 +85,37 @@ pub struct HeldProcessEngine;
 
 #[cfg(any(test, feature = "testing"))]
 #[async_trait::async_trait]
-impl crate::ProcessEngine for HeldProcessEngine {
+impl lash_execution_contracts::process::ProcessEngine for HeldProcessEngine {
     fn settled_ran(
         &self,
-        _kind: &crate::EngineStepKind,
+        _kind: &lash_execution_contracts::process::EngineStepKind,
         _output: &lash_core_store::tool_run::SettledOutput,
     ) -> Vec<(u32, u64)> {
         Vec::new()
     }
 
-    fn trace_class(&self) -> crate::ProcessTraceClass {
-        crate::ProcessTraceClass::Internal
+    fn trace_class(&self) -> lash_execution_contracts::process::ProcessTraceClass {
+        lash_execution_contracts::process::ProcessTraceClass::Internal
     }
 
     async fn performed_effects(
         &self,
         _payload: &serde_json::Value,
-    ) -> Result<crate::PerformedEffects, crate::ProcessEnvRefusal> {
-        Ok(crate::PerformedEffects::new())
+    ) -> Result<lash_execution_contracts::process::PerformedEffects, crate::ProcessEnvRefusal> {
+        Ok(lash_execution_contracts::process::PerformedEffects::new())
     }
 
     async fn check_args(
         &self,
-        _signature: &crate::ProcessSignature,
+        _signature: &lash_execution_contracts::process::ProcessSignature,
         _args: &serde_json::Map<String, serde_json::Value>,
-        _mode: crate::ArgsMode,
-    ) -> std::result::Result<(), crate::ArgsMismatch> {
-        Err(crate::ArgsMismatch::UnsupportedSignature {
-            engine_kind: self.kind().into(),
-        })
+        _mode: lash_execution_contracts::process::ArgsMode,
+    ) -> std::result::Result<(), lash_execution_contracts::process::ArgsMismatch> {
+        Err(
+            lash_execution_contracts::process::ArgsMismatch::UnsupportedSignature {
+                engine_kind: self.kind().into(),
+            },
+        )
     }
 
     fn kind(&self) -> &'static str {
@@ -190,14 +125,14 @@ impl crate::ProcessEngine for HeldProcessEngine {
     fn start_artifacts(
         &self,
         _payload: &serde_json::Value,
-    ) -> Result<Vec<crate::ArtifactName>, crate::PluginError> {
+    ) -> Result<Vec<crate::ArtifactName>, lash_execution_contracts::plugin_error::PluginError> {
         Ok(Vec::new())
     }
 
     async fn end_artifact_referrer(
         &self,
         _cleanup: &crate::ResolvedArtifactCleanup,
-    ) -> Result<(), crate::ArtifactStoreError> {
+    ) -> Result<(), lash_execution_contracts::module_artifacts::ArtifactStoreError> {
         Ok(())
     }
 
@@ -205,14 +140,16 @@ impl crate::ProcessEngine for HeldProcessEngine {
         &self,
         _claim: &crate::ReferrerClaim,
         artifact_ref: &str,
-    ) -> Result<(), crate::PluginError> {
-        Err(crate::PluginError::Session(format!(
-            "the held engine stores no artifact `{artifact_ref}`"
-        )))
+    ) -> Result<(), lash_execution_contracts::plugin_error::PluginError> {
+        Err(
+            lash_execution_contracts::plugin_error::PluginError::Session(format!(
+                "the held engine stores no artifact `{artifact_ref}`"
+            )),
+        )
     }
 
-    fn state_format(&self) -> crate::EngineStateFormat {
-        crate::EngineStateFormat {
+    fn state_format(&self) -> lash_execution_contracts::process::EngineStateFormat {
+        lash_execution_contracts::process::EngineStateFormat {
             kind: self.kind().to_owned(),
             version: 0,
         }
@@ -232,47 +169,67 @@ impl crate::ProcessEngine for HeldProcessEngine {
     fn check_settings(
         &self,
         _payload: &serde_json::Value,
-        settings: Option<&crate::EngineSettings>,
-    ) -> std::result::Result<(), crate::PluginError> {
+        settings: Option<&lash_execution_contracts::process::EngineSettings>,
+    ) -> std::result::Result<(), lash_execution_contracts::plugin_error::PluginError> {
         match settings {
             None => Ok(()),
-            Some(_) => Err(crate::PluginError::Registration(format!(
-                "process engine `{}` takes no settings",
-                self.kind()
-            ))),
+            Some(_) => Err(
+                lash_execution_contracts::plugin_error::PluginError::Registration(format!(
+                    "process engine `{}` takes no settings",
+                    self.kind()
+                )),
+            ),
         }
     }
 
     fn default_settings(
         &self,
         _payload: &serde_json::Value,
-    ) -> std::result::Result<Option<crate::EngineSettings>, crate::PluginError> {
+    ) -> std::result::Result<
+        Option<lash_execution_contracts::process::EngineSettings>,
+        lash_execution_contracts::plugin_error::PluginError,
+    > {
         Ok(None)
     }
 
     fn advance(
         &self,
-        state: crate::EngineState,
-        event: crate::EngineEvent,
-    ) -> Result<(crate::EngineState, crate::EngineAction), crate::ProcessInfraError> {
+        state: lash_execution_contracts::process::EngineState,
+        event: lash_execution_contracts::process::EngineEvent,
+    ) -> Result<
+        (
+            lash_execution_contracts::process::EngineState,
+            lash_execution_contracts::process::EngineAction,
+        ),
+        lash_execution_contracts::process::ProcessInfraError,
+    > {
         let action = match event {
-            crate::EngineEvent::Cancelled { .. } => crate::EngineAction::Terminal(
-                crate::ProcessAwaitOutput::from_tool_output(crate::ToolCallOutput::cancelled(
-                    crate::ToolCancellation::runtime("the held process was cancelled"),
-                )),
-            ),
-            _ => crate::EngineAction::Idle,
+            lash_execution_contracts::process::EngineEvent::Cancelled { .. } => {
+                lash_execution_contracts::process::EngineAction::Terminal(
+                    lash_execution_contracts::process::ProcessAwaitOutput::from_tool_output(
+                        crate::ToolCallOutput::cancelled(crate::ToolCancellation::runtime(
+                            "the held process was cancelled",
+                        )),
+                    ),
+                )
+            }
+            _ => lash_execution_contracts::process::EngineAction::Idle,
         };
         Ok((state, action))
     }
 
     async fn resolve(
         &self,
-        _reference: &crate::ProcessDefinitionRef,
-    ) -> Result<crate::ProcessDefinitionResolution, crate::ProcessDefinitionError> {
-        Ok(crate::ProcessDefinitionResolution::new(
-            crate::ProcessSignature::Unknown,
-        ))
+        _reference: &lash_execution_contracts::process::ProcessDefinitionRef,
+    ) -> Result<
+        lash_execution_contracts::process::ProcessDefinitionResolution,
+        lash_execution_contracts::process::ProcessDefinitionError,
+    > {
+        Ok(
+            lash_execution_contracts::process::ProcessDefinitionResolution::new(
+                lash_execution_contracts::process::ProcessSignature::Unknown,
+            ),
+        )
     }
 }
 
@@ -283,35 +240,37 @@ pub struct FixtureProcessEngine;
 
 #[cfg(any(test, feature = "testing"))]
 #[async_trait::async_trait]
-impl crate::ProcessEngine for FixtureProcessEngine {
+impl lash_execution_contracts::process::ProcessEngine for FixtureProcessEngine {
     fn settled_ran(
         &self,
-        _kind: &crate::EngineStepKind,
+        _kind: &lash_execution_contracts::process::EngineStepKind,
         _output: &lash_core_store::tool_run::SettledOutput,
     ) -> Vec<(u32, u64)> {
         Vec::new()
     }
 
-    fn trace_class(&self) -> crate::ProcessTraceClass {
-        crate::ProcessTraceClass::Internal
+    fn trace_class(&self) -> lash_execution_contracts::process::ProcessTraceClass {
+        lash_execution_contracts::process::ProcessTraceClass::Internal
     }
 
     async fn performed_effects(
         &self,
         _payload: &serde_json::Value,
-    ) -> Result<crate::PerformedEffects, crate::ProcessEnvRefusal> {
-        Ok(crate::PerformedEffects::new())
+    ) -> Result<lash_execution_contracts::process::PerformedEffects, crate::ProcessEnvRefusal> {
+        Ok(lash_execution_contracts::process::PerformedEffects::new())
     }
 
     async fn check_args(
         &self,
-        _signature: &crate::ProcessSignature,
+        _signature: &lash_execution_contracts::process::ProcessSignature,
         _args: &serde_json::Map<String, serde_json::Value>,
-        _mode: crate::ArgsMode,
-    ) -> std::result::Result<(), crate::ArgsMismatch> {
-        Err(crate::ArgsMismatch::UnsupportedSignature {
-            engine_kind: self.kind().into(),
-        })
+        _mode: lash_execution_contracts::process::ArgsMode,
+    ) -> std::result::Result<(), lash_execution_contracts::process::ArgsMismatch> {
+        Err(
+            lash_execution_contracts::process::ArgsMismatch::UnsupportedSignature {
+                engine_kind: self.kind().into(),
+            },
+        )
     }
 
     fn kind(&self) -> &'static str {
@@ -321,14 +280,14 @@ impl crate::ProcessEngine for FixtureProcessEngine {
     fn start_artifacts(
         &self,
         _payload: &serde_json::Value,
-    ) -> Result<Vec<crate::ArtifactName>, crate::PluginError> {
+    ) -> Result<Vec<crate::ArtifactName>, lash_execution_contracts::plugin_error::PluginError> {
         Ok(Vec::new())
     }
 
     async fn end_artifact_referrer(
         &self,
         _cleanup: &crate::ResolvedArtifactCleanup,
-    ) -> Result<(), crate::ArtifactStoreError> {
+    ) -> Result<(), lash_execution_contracts::module_artifacts::ArtifactStoreError> {
         Ok(())
     }
 
@@ -336,14 +295,16 @@ impl crate::ProcessEngine for FixtureProcessEngine {
         &self,
         _claim: &crate::ReferrerClaim,
         artifact_ref: &str,
-    ) -> Result<(), crate::PluginError> {
-        Err(crate::PluginError::Session(format!(
-            "the fixture engine stores no artifact `{artifact_ref}`"
-        )))
+    ) -> Result<(), lash_execution_contracts::plugin_error::PluginError> {
+        Err(
+            lash_execution_contracts::plugin_error::PluginError::Session(format!(
+                "the fixture engine stores no artifact `{artifact_ref}`"
+            )),
+        )
     }
 
-    fn state_format(&self) -> crate::EngineStateFormat {
-        crate::EngineStateFormat {
+    fn state_format(&self) -> lash_execution_contracts::process::EngineStateFormat {
+        lash_execution_contracts::process::EngineStateFormat {
             kind: self.kind().to_owned(),
             version: 0,
         }
@@ -363,44 +324,62 @@ impl crate::ProcessEngine for FixtureProcessEngine {
     fn check_settings(
         &self,
         _payload: &serde_json::Value,
-        settings: Option<&crate::EngineSettings>,
-    ) -> std::result::Result<(), crate::PluginError> {
+        settings: Option<&lash_execution_contracts::process::EngineSettings>,
+    ) -> std::result::Result<(), lash_execution_contracts::plugin_error::PluginError> {
         match settings {
             None => Ok(()),
-            Some(_) => Err(crate::PluginError::Registration(format!(
-                "process engine `{}` takes no settings",
-                self.kind()
-            ))),
+            Some(_) => Err(
+                lash_execution_contracts::plugin_error::PluginError::Registration(format!(
+                    "process engine `{}` takes no settings",
+                    self.kind()
+                )),
+            ),
         }
     }
 
     fn default_settings(
         &self,
         _payload: &serde_json::Value,
-    ) -> std::result::Result<Option<crate::EngineSettings>, crate::PluginError> {
+    ) -> std::result::Result<
+        Option<lash_execution_contracts::process::EngineSettings>,
+        lash_execution_contracts::plugin_error::PluginError,
+    > {
         Ok(None)
     }
 
     fn advance(
         &self,
-        state: crate::EngineState,
-        _event: crate::EngineEvent,
-    ) -> Result<(crate::EngineState, crate::EngineAction), crate::ProcessInfraError> {
+        state: lash_execution_contracts::process::EngineState,
+        _event: lash_execution_contracts::process::EngineEvent,
+    ) -> Result<
+        (
+            lash_execution_contracts::process::EngineState,
+            lash_execution_contracts::process::EngineAction,
+        ),
+        lash_execution_contracts::process::ProcessInfraError,
+    > {
         Ok((
             state,
-            crate::EngineAction::Terminal(crate::ProcessAwaitOutput::from_tool_output(
-                crate::ToolCallOutput::success(serde_json::json!({ "fixture": "complete" })),
-            )),
+            lash_execution_contracts::process::EngineAction::Terminal(
+                lash_execution_contracts::process::ProcessAwaitOutput::from_tool_output(
+                    crate::ToolCallOutput::success(serde_json::json!({ "fixture": "complete" })),
+                ),
+            ),
         ))
     }
 
     async fn resolve(
         &self,
-        _reference: &crate::ProcessDefinitionRef,
-    ) -> Result<crate::ProcessDefinitionResolution, crate::ProcessDefinitionError> {
-        Ok(crate::ProcessDefinitionResolution::new(
-            crate::ProcessSignature::Unknown,
-        ))
+        _reference: &lash_execution_contracts::process::ProcessDefinitionRef,
+    ) -> Result<
+        lash_execution_contracts::process::ProcessDefinitionResolution,
+        lash_execution_contracts::process::ProcessDefinitionError,
+    > {
+        Ok(
+            lash_execution_contracts::process::ProcessDefinitionResolution::new(
+                lash_execution_contracts::process::ProcessSignature::Unknown,
+            ),
+        )
     }
 }
 
@@ -427,7 +406,7 @@ impl crate::SessionPlugin for FixtureProcessEnginePlugin {
 impl FixtureProcessEnginePlugin {
     fn declare(
         _reg: &mut crate::plugin::PluginRegistrar<Self>,
-    ) -> std::result::Result<(), crate::plugin::PluginError> {
+    ) -> std::result::Result<(), lash_execution_contracts::plugin_error::PluginError> {
         Ok(())
     }
 }
@@ -443,9 +422,15 @@ impl crate::PluginFactory for FixtureProcessEngineFactory {
 
     fn recipe(
         self: Arc<Self>,
-    ) -> std::result::Result<crate::plugin::PluginRecipe, crate::plugin::PluginError> {
+    ) -> std::result::Result<
+        crate::plugin::PluginRecipe,
+        lash_execution_contracts::plugin_error::PluginError,
+    > {
         let _recipe_factory = Arc::clone(&self);
-        let recipe: std::result::Result<crate::plugin::PluginRecipe, crate::plugin::PluginError> = {
+        let recipe: std::result::Result<
+            crate::plugin::PluginRecipe,
+            lash_execution_contracts::plugin_error::PluginError,
+        > = {
             let mut reg = crate::plugin::PluginRegistrar::<FixtureProcessEnginePlugin>::new(
                 crate::plugin::PluginFactory::id(self.as_ref()),
             );

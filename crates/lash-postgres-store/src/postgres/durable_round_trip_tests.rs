@@ -7,11 +7,12 @@
 // hands it.
 #![allow(clippy::disallowed_methods)]
 
-use lash_core_execution::store::{AdmittedTurnRows, RunAdmissionRecord};
 use lash_core_store::checkpoint_graph::{
     CommitId, EncodeBudget, ExplicitLimit, GraphStaging, NodeId as GraphNode, NodeKind,
     TokenWriter, TypedBody,
 };
+use lash_core_store::store::AdmittedTurnRows;
+use lash_core_store::store::RunAdmissionRecord;
 use lash_durable::domain::{
     DomainWrite, ExecKey, ExecRootWrite, ModelPin, Ordinal, OwnerKey, PhaseAdvance, RunFactKind,
     RunFactWrite, RunSeq, SessionMailWrite, SnapshotRev, TurnWrite, UnfinishedPhase,
@@ -56,7 +57,7 @@ async fn owned(name: &'static str) -> Option<Owned> {
         .await
         .expect("open the isolated store");
     let session = SessionId::from(name);
-    lash_core_execution::SessionCatalogStore::admit_session(
+    lash_core_store::store::SessionCatalogStore::admit_session(
         &storage.store(),
         &lash_core_execution::testing::store_fixtures::root_session_request(&session),
     )
@@ -105,11 +106,12 @@ fn staged(tx: &mut ActorTx, kind: NodeKind, text: &str) -> GraphNode {
 
 /// Accept input `id` for `owned`'s session, as a producer does.
 async fn accept(owned: &Owned, id: &str) -> lash_protocol_types::InputId {
-    use lash_core_execution::{PendingTurnInputBatch, TurnInputStore as _};
-    let draft = lash_core_execution::PendingTurnInputDraft::new(
+    use lash_core_store::store::TurnInputStore as _;
+    use lash_core_store::turn_input_vocabulary::PendingTurnInputBatch;
+    let draft = lash_core_store::turn_input_vocabulary::PendingTurnInputDraft::new(
         &owned.session,
-        lash_core_execution::TurnInputIngress::NextTurn,
-        lash_core_execution::TurnInput::text("round trips"),
+        lash_core_store::turn_input_vocabulary::TurnInputIngress::NextTurn,
+        lash_core_store::turn_input_vocabulary::TurnInput::text("round trips"),
     )
     .with_source_key(id);
     let accepted = owned
@@ -134,7 +136,7 @@ fn admit(tx: &mut ActorTx, owned: &Owned, run: &TurnId, input: lash_protocol_typ
         run: run.clone(),
         admission: RunAdmissionRecord::Turn {
             took: AdmittedTurnRows::Inputs {
-                ids: lash_core_execution::store::AdmittedInputIds::one(input),
+                ids: lash_core_store::store::AdmittedInputIds::one(input),
             },
             trace: None,
         },
@@ -377,8 +379,8 @@ async fn a_turn_commit_stays_within_its_round_trip_budget() {
 }
 
 async fn turn_commit_round_trips(holds_artifacts: bool) {
-    use lash_core_execution::ModuleArtifactStore as _;
-    use lash_core_execution::store::SessionHistoryStore as _;
+    use lash_core_store::store::SessionHistoryStore as _;
+    use lash_execution_contracts::module_artifacts::ModuleArtifactStore as _;
     let Some(owned) = owned("round-trips-turn-commit").await else {
         return;
     };
@@ -395,20 +397,21 @@ async fn turn_commit_round_trips(holds_artifacts: bool) {
         .journal_identity()
         .expect("turn journal");
     let artifacts = owned.storage.lash_vm_artifact_store();
-    let claim = lash_core_execution::ReferrerClaim::guarded(
-        lash_core_execution::ReferrerGuard::Journal(journal.clone()),
+    let claim = lash_core_store::artifact_referrer::ReferrerClaim::guarded(
+        lash_core_store::artifact_referrer::ReferrerGuard::Journal(journal.clone()),
     );
     if holds_artifacts {
         artifacts
             .publish_module_artifact(&claim, "round-trips-module", b"module")
             .await
             .expect("the execution's artifact");
-        let frame = lash_core_execution::FrameEnvironmentId::new(
+        let frame = lash_core_store::artifact_referrer::FrameEnvironmentId::new(
             owned.session.clone(),
-            lash_core_execution::FrameNodeId::new("round-trips-old-frame").expect("frame"),
+            lash_core_store::session_identity::FrameNodeId::new("round-trips-old-frame")
+                .expect("frame"),
         );
-        let frame_claim = lash_core_execution::ReferrerClaim::guarded(
-            lash_core_execution::ReferrerGuard::Frame {
+        let frame_claim = lash_core_store::artifact_referrer::ReferrerClaim::guarded(
+            lash_core_store::artifact_referrer::ReferrerGuard::Frame {
                 frame: frame.clone(),
                 creator: journal.clone(),
             },
@@ -421,8 +424,8 @@ async fn turn_commit_round_trips(holds_artifacts: bool) {
             .storage
             .artifact_cleanup()
             .arm_cleanup(
-                &lash_core_execution::ArtifactCleanup::ended(
-                    lash_core_execution::ArtifactReferrer::FrameEnvironment(frame),
+                &lash_core_store::artifact_referrer::ArtifactCleanup::ended(
+                    lash_core_store::artifact_referrer::ArtifactReferrer::FrameEnvironment(frame),
                     Vec::new(),
                     Some(journal),
                 ),
@@ -432,34 +435,36 @@ async fn turn_commit_round_trips(holds_artifacts: bool) {
             .expect("the frame waits for the turn to settle");
     }
     let factory = owned.storage.store();
-    let mut state = lash_core_execution::store::window_state(
+    let mut state = lash_core_store::store::window_state(
         factory
             .load_session_window(
                 &owned.session,
-                lash_core_execution::store::WindowSelector::Current,
+                lash_core_store::store::WindowSelector::Current,
             )
             .await
             .expect("the session's window")
             .expect("the session's head"),
-        lash_core_execution::FleetFormat::current(),
+        lash_core_store::store::FleetFormat::current(),
     )
     .expect("the session's state")
     .state;
-    let head = lash_core_execution::store::append_request_commit_with_clock_for_testing(
+    let head = lash_core_store::store::append_request_commit_with_clock_for_testing(
         &mut state,
         "round-trips",
-        &[lash_core_execution::SessionAppendNode::message(
-            lash_core_execution::PluginMessage::text(
-                lash_core_execution::MessageRole::Assistant,
-                "done",
+        &[
+            lash_protocol_types::session_model::SessionAppendNode::message(
+                lash_protocol_types::plugin::PluginMessage::text(
+                    lash_protocol_types::session_model::MessageRole::Assistant,
+                    "done",
+                ),
             ),
-        )],
+        ],
         None,
-        &lash_core::facade_support::SystemClock,
+        &lash_core_ids::clock::SystemClock,
     )
     .expect("the head commit");
     let expected_head = head.expected_head_revision;
-    let encoded = lash_core_execution::store::encode_session_commit(&head).expect("encode");
+    let encoded = lash_core_store::store::encode_session_commit(&head).expect("encode");
     let scope = lash_durable::domain::ScopeKey::Turn(owned.session.clone(), run.clone());
     let (_, trips) = round_trips(async {
         let mut tx = store.begin(&owned.actor, owned.epoch).await.expect("open");
@@ -484,10 +489,10 @@ async fn turn_commit_round_trips(holds_artifacts: bool) {
         tx.write(DomainWrite::Turn(TurnWrite::Terminal {
             session: owned.session.clone(),
             run: run.clone(),
-            cause: Box::new(lash_core_execution::store::RunTerminalCause::Committed {
-                commit: lash_core_execution::store::TurnCommitId::new(run.clone(), 0),
+            cause: Box::new(lash_core_store::store::RunTerminalCause::Committed {
+                commit: lash_core_store::store::TurnCommitId::new(run.clone(), 0),
                 turn: run.clone(),
-                outcome: lash_core_execution::store::RunCommittedOutcome::Finished {
+                outcome: lash_core_store::store::RunCommittedOutcome::Finished {
                     finish: lash_protocol_types::TurnFinish::AssistantMessage {
                         text: "done".to_owned(),
                     },
@@ -534,7 +539,9 @@ async fn turn_commit_round_trips(holds_artifacts: bool) {
             artifacts
                 .publish_module_artifact(&claim, "late-module", b"module")
                 .await,
-            Err(lash_core_execution::ArtifactStoreError::ReferrerEnded { .. })
+            Err(
+                lash_execution_contracts::module_artifacts::ArtifactStoreError::ReferrerEnded { .. }
+            )
         ),
         "empty and non-empty executions both keep their publication fence"
     );

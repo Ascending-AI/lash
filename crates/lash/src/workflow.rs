@@ -440,13 +440,16 @@ pub(crate) async fn read(
         return Ok(unsupported());
     };
     let inspected = match provider.document(payload).await? {
-        lash_core::ProcessDocumentRead::Inspected(inspected) => *inspected,
-        lash_core::ProcessDocumentRead::ArtifactMissing { artifact } => {
+        lash_execution_contracts::process::ProcessDocumentRead::Inspected(inspected) => *inspected,
+        lash_execution_contracts::process::ProcessDocumentRead::ArtifactMissing { artifact } => {
             return Ok(WorkflowRead::Unavailable(WorkflowUnavailable::Artifact {
                 artifact,
             }));
         }
-        lash_core::ProcessDocumentRead::ArtifactCorrupt { artifact, message } => {
+        lash_execution_contracts::process::ProcessDocumentRead::ArtifactCorrupt {
+            artifact,
+            message,
+        } => {
             return Ok(WorkflowRead::Unavailable(WorkflowUnavailable::Corrupt {
                 artifact,
                 message,

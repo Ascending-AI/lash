@@ -2,9 +2,10 @@
 
 use super::*;
 
+use lash_core::PluginStateError;
 use lash_core::facade_support::SessionPlugin;
 use lash_core::plugin::SessionReadyContext;
-use lash_core::{PluginError, PluginStateError};
+use lash_execution_contracts::plugin_error::PluginError;
 
 /// FIG-5500: cold open requires recorded identity even when the row is root.
 #[tokio::test]
@@ -201,7 +202,8 @@ impl SessionPlugin for StateHook {
             }
             2 => {
                 let keyed = std::collections::BTreeMap::from([((1, 2), 3)]);
-                lash_core::plugin::StateCommands::new().set_as("k", &keyed)?;
+                lash_execution_contracts::state_commands::StateCommands::new()
+                    .set_as("k", &keyed)?;
             }
             _ => {
                 self.seen.lock().expect("seen").push(ctx.state.get("k"));

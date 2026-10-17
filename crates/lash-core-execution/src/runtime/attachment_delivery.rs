@@ -8,9 +8,12 @@
 //! under the claim its scope names: a process receiver holds through its
 //! record, every other receiver through its journal.
 
+use crate::AttachmentId;
 use crate::AttachmentReferrers;
-use crate::{AttachmentId, ExecutionScope, PluginError, ProcessAwaitOutput};
+use crate::ExecutionScope;
 use lash_core_store::artifact_referrer::{ArtifactReferrer, ReferrerClaim, ReferrerGuard};
+use lash_execution_contracts::plugin_error::PluginError;
+use lash_execution_contracts::process::ProcessAwaitOutput;
 use serde::{Deserialize, Serialize};
 
 /// Stored attachment ids of a process terminal output, sorted and
@@ -228,7 +231,7 @@ pub async fn acquire_completion_output(
 /// the registering caller dies. A missing upload refuses the step.
 pub async fn acquire_start_input(
     attachments: &dyn AttachmentReferrers,
-    record: &crate::ProcessRecord,
+    record: &lash_execution_contracts::process::ProcessRecord,
 ) -> Result<(), PluginError> {
     let ids = record.input.stored_attachment_ids();
     match acquire_under(attachments, &process_record_claim(&record.id)?, &ids).await? {

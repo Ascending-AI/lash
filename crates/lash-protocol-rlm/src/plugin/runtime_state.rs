@@ -44,41 +44,49 @@ impl RlmRuntimeState {
         &self,
         catalog: &lash_core::ToolCatalog,
         state: Option<&lash_core::plugin::ProtocolSessionRestoreView>,
-    ) -> Result<(), lash_core::PluginError> {
+    ) -> Result<(), lash_execution_contracts::plugin_error::PluginError> {
         let names = match state {
             Some(state) => self.stored_check_names(catalog, state).await?,
             None => {
-                let mut names = self
-                    .execution
-                    .lock()
-                    .await
-                    .session_names()
-                    .await
-                    .map_err(|error| lash_core::PluginError::Session(error.to_string()))?;
+                let mut names =
+                    self.execution
+                        .lock()
+                        .await
+                        .session_names()
+                        .await
+                        .map_err(|error| {
+                            lash_execution_contracts::plugin_error::PluginError::Session(
+                                error.to_string(),
+                            )
+                        })?;
                 names.extend(self.protected_projected_binding_names().await);
                 names
             }
         };
         for tool in &catalog.tools {
-            let binding = lash_vm_runtime::required_tool_executable(&tool.manifest)
-                .map_err(|error| lash_core::PluginError::Session(error.to_string()))?;
+            let binding =
+                lash_vm_runtime::required_tool_executable(&tool.manifest).map_err(|error| {
+                    lash_execution_contracts::plugin_error::PluginError::Session(error.to_string())
+                })?;
             if let Some(root) = binding.module_path.first()
                 && names.contains(root)
             {
                 let refusal = lash_core::ConfigRefusal::by_owner(
                     lash_core::CORE_CONFIG_OWNER,
                     lash_core::RefusalSite::Candidate,
-                    &lash_core::CoreConfigRefusal::ToolNamespaceCollision {
+                    &lash_execution_contracts::config_error::CoreConfigRefusal::ToolNamespaceCollision {
                         root: root.clone(),
                         binding: root.clone(),
                     },
                 );
-                return Err(lash_core::PluginError::Runtime(
-                    lash_core::RuntimeEffectControllerError::run_shape_refused(
-                        lash_core::RunShapeRefusal::Owner { refusal },
-                    )
-                    .into_runtime_error(),
-                ));
+                return Err(
+                    lash_execution_contracts::plugin_error::PluginError::Runtime(
+                        lash_core::RuntimeEffectControllerError::run_shape_refused(
+                            lash_core::RunShapeRefusal::Owner { refusal },
+                        )
+                        .into_runtime_error(),
+                    ),
+                );
             }
         }
         Ok(())
@@ -91,15 +99,18 @@ impl RlmRuntimeState {
         &self,
         catalog: &lash_core::ToolCatalog,
         state: &lash_core::plugin::ProtocolSessionRestoreView,
-    ) -> Result<BTreeSet<String>, lash_core::PluginError> {
+    ) -> Result<BTreeSet<String>, lash_execution_contracts::plugin_error::PluginError> {
         let snapshot = state.execution_state.as_ref().map_err(|error| {
-            lash_core::PluginError::Session(format!("cannot read session bindings: {error}"))
+            lash_execution_contracts::plugin_error::PluginError::Session(format!(
+                "cannot read session bindings: {error}"
+            ))
         })?;
         let mut names = BTreeSet::new();
         for event in &state.active_events {
             if let SessionHistoryRecord::Protocol(event) = event
-                && let Some(event) = decode_rlm_protocol_event(event)
-                    .map_err(|error| lash_core::PluginError::Session(error.to_string()))?
+                && let Some(event) = decode_rlm_protocol_event(event).map_err(|error| {
+                    lash_execution_contracts::plugin_error::PluginError::Session(error.to_string())
+                })?
             {
                 match &*event {
                     RlmProtocolEvent::RlmGlobalsPatch(patch) => {
@@ -117,7 +128,9 @@ impl RlmRuntimeState {
             .as_ref()
             .map(crate::executor::stored_session_descriptor)
             .transpose()
-            .map_err(|error| lash_core::PluginError::Session(error.to_string()))?
+            .map_err(|error| {
+                lash_execution_contracts::plugin_error::PluginError::Session(error.to_string())
+            })?
         else {
             return Ok(names);
         };
@@ -127,7 +140,11 @@ impl RlmRuntimeState {
             .map(|tool| {
                 lash_vm_runtime::required_tool_executable(&tool.manifest)
                     .map(|binding| binding.module_path.first().cloned())
-                    .map_err(|error| lash_core::PluginError::Session(error.to_string()))
+                    .map_err(|error| {
+                        lash_execution_contracts::plugin_error::PluginError::Session(
+                            error.to_string(),
+                        )
+                    })
             })
             .collect::<Result<Vec<Option<String>>, _>>()?
             .into_iter()
@@ -138,14 +155,16 @@ impl RlmRuntimeState {
             return Ok(names);
         }
         let pages = state.pages.as_ref().ok_or_else(|| {
-            lash_core::PluginError::Session(
+            lash_execution_contracts::plugin_error::PluginError::Session(
                 "the stored bindings check cannot read the session's pages".to_owned(),
             )
         })?;
         names.extend(
             crate::executor::stored_binding_roots(pages, &bindings, &roots)
                 .await
-                .map_err(|error| lash_core::PluginError::Session(error.to_string()))?,
+                .map_err(|error| {
+                    lash_execution_contracts::plugin_error::PluginError::Session(error.to_string())
+                })?,
         );
         Ok(names)
     }
@@ -690,10 +709,12 @@ pub(crate) fn reject_reserved_projected_binding_names(
 }
 
 fn history_corruption(error: lash_core::StoredDataCorruption) -> SessionError {
-    SessionError::Plugin(lash_core::PluginError::StoredDataCorrupt {
-        record_kind: error.record_kind,
-        message: error.message,
-    })
+    SessionError::Plugin(
+        lash_execution_contracts::plugin_error::PluginError::StoredDataCorrupt {
+            record_kind: error.record_kind,
+            message: error.message,
+        },
+    )
 }
 
 #[cfg(test)]
@@ -897,7 +918,10 @@ mod tests {
         fn tool_manifests(
             &self,
             _config: &lash_core::OwnerConfigView,
-        ) -> std::result::Result<Vec<lash_core::ToolManifest>, lash_core::PluginError> {
+        ) -> std::result::Result<
+            Vec<lash_core::ToolManifest>,
+            lash_execution_contracts::plugin_error::PluginError,
+        > {
             Ok(Vec::new())
         }
 

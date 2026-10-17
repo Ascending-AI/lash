@@ -1,12 +1,12 @@
 fn page_wait(
     id: &lash_protocol_types::ProcessId,
     label: &str,
-) -> lash_core::ProcessEventAppendRequest {
-    lash_core::ProcessEventAppendRequest::wait_entered(
+) -> lash_execution_contracts::process::ProcessEventAppendRequest {
+    lash_execution_contracts::process::ProcessEventAppendRequest::wait_entered(
         id,
-        &lash_core::WaitState {
+        &lash_execution_contracts::process::WaitState {
             since_ms: 1,
-            kind: lash_core::WaitKind::Call {
+            kind: lash_execution_contracts::process::WaitKind::Call {
                 call_id: lash_protocol_types::ToolCallId::fixture(label),
                 tool_id: lash_protocol_types::ToolId::new("page_fixture"),
             },
@@ -16,18 +16,18 @@ fn page_wait(
 }
 
 use super::*;
-use lash_core::ProcessEventLogTestSupport as _;
-use lash_core::ProcessRegistryTestSupport as _;
+use lash_execution_contracts::process::ProcessEventLogTestSupport as _;
+use lash_execution_contracts::process::ProcessRegistryTestSupport as _;
 
 #[expect(
     clippy::expect_used,
     reason = "differential fixture: setup and oracle failures stop the comparison"
 )]
 async fn release_observations(
-    registry: &dyn lash_core::ConformanceProcessRegistry,
+    registry: &dyn lash_execution_contracts::process::ConformanceProcessRegistry,
 ) -> (
     lash_protocol_types::ProcessId,
-    Vec<lash_core::ProcessEventRelease>,
+    Vec<lash_execution_contracts::process::ProcessEventRelease>,
 ) {
     let bounds = registry
         .process_change_bounds()
@@ -35,7 +35,7 @@ async fn release_observations(
         .expect("roster change bounds");
     let page = registry
         .list_processes_page(
-            &lash_core::ProcessListFilter::default(),
+            &lash_execution_contracts::process::ProcessListFilter::default(),
             std::num::NonZeroUsize::MIN,
             None,
         )
@@ -44,10 +44,10 @@ async fn release_observations(
     assert!(page.records.len() <= 1);
     assert!(page.change_cursor.store_sequence() >= bounds.current.store_sequence());
     let process_id = registry
-        .register_process(lash_core::testing::held_engine_registration(
+        .register_process(lash_execution_contracts::testing::held_engine_registration(
             serde_json::Value::Null,
-            lash_core::ProcessProvenance::host(),
-            lash_core::Lifetime::Detached,
+            lash_execution_contracts::process::ProcessProvenance::host(),
+            lash_execution_contracts::process::Lifetime::Detached,
         ))
         .await
         .expect("register release process")
@@ -81,16 +81,16 @@ async fn release_observations(
     }
     let limit = std::num::NonZeroUsize::MIN;
     for mode in [
-        lash_core::ProcessEventQueryMode::Full,
-        lash_core::ProcessEventQueryMode::Lite,
+        lash_execution_contracts::process::ProcessEventQueryMode::Full,
+        lash_execution_contracts::process::ProcessEventQueryMode::Lite,
     ] {
         assert_eq!(
             registry
                 .event_page_after(&process_id, 0, limit, mode)
                 .await
                 .expect("read released prefix"),
-            lash_core::ProcessEventReadOutcome::NoLongerRetained(
-                lash_core::ProcessEventHistoryRetention::Released {
+            lash_execution_contracts::process::ProcessEventReadOutcome::NoLongerRetained(
+                lash_execution_contracts::process::ProcessEventHistoryRetention::Released {
                     released_through: 3,
                 }
             )
@@ -102,7 +102,10 @@ async fn release_observations(
         .expect("replay released event");
     assert_eq!(replay.event.sequence, 1);
     assert_eq!(replay.event.fact.payload(), request(1).fact.payload());
-    assert_eq!(replay.realization, lash_core::StoreRealization::Coalesced);
+    assert_eq!(
+        replay.realization,
+        lash_execution_contracts::process::StoreRealization::Coalesced
+    );
     assert_eq!(
         registry
             .append_event_for_testing(&process_id, request(4))
@@ -127,23 +130,29 @@ async fn event_release_differential_on_sqlite_memory_and_file() {
     )
     .await
     .expect("SQLite file store set");
-    lash_core::testing::process_execution_env_fixture(memory.process_env_store().as_ref()).await;
-    lash_core::testing::process_execution_env_fixture(file.process_env_store().as_ref()).await;
+    lash_execution_contracts::testing::process_execution_env_fixture(
+        memory.process_env_store().as_ref(),
+    )
+    .await;
+    lash_execution_contracts::testing::process_execution_env_fixture(
+        file.process_env_store().as_ref(),
+    )
+    .await;
     let (_, memory_releases) = release_observations(memory.process_registry().as_ref()).await;
     let (_, file_releases) = release_observations(file.process_registry().as_ref()).await;
     assert_eq!(memory_releases, file_releases);
     assert_eq!(
         memory_releases,
         vec![
-            lash_core::ProcessEventRelease {
+            lash_execution_contracts::process::ProcessEventRelease {
                 released_through: 2,
                 released_events: 2,
             },
-            lash_core::ProcessEventRelease {
+            lash_execution_contracts::process::ProcessEventRelease {
                 released_through: 2,
                 released_events: 0,
             },
-            lash_core::ProcessEventRelease {
+            lash_execution_contracts::process::ProcessEventRelease {
                 released_through: 3,
                 released_events: 1,
             },
@@ -154,10 +163,10 @@ async fn event_release_differential_on_sqlite_memory_and_file() {
 async fn read_all_event_metadata<R>(
     registry: &R,
     process_id: &lash_protocol_types::ProcessId,
-    mode: lash_core::ProcessEventQueryMode,
-) -> Result<(u64, Vec<usize>), lash_core::PluginError>
+    mode: lash_execution_contracts::process::ProcessEventQueryMode,
+) -> Result<(u64, Vec<usize>), lash_execution_contracts::plugin_error::PluginError>
 where
-    R: lash_core::ProcessEventLog + ?Sized,
+    R: lash_execution_contracts::process::ProcessEventLog + ?Sized,
 {
     let limit = std::num::NonZeroUsize::new(127).unwrap_or(std::num::NonZeroUsize::MIN);
     let mut after_sequence = 0;
@@ -167,7 +176,8 @@ where
         let outcome = registry
             .event_page_after(process_id, after_sequence, limit, mode)
             .await?;
-        let lash_core::ProcessEventReadOutcome::Retained(page) = outcome else {
+        let lash_execution_contracts::process::ProcessEventReadOutcome::Retained(page) = outcome
+        else {
             panic!("seeded event history must remain retained");
         };
         assert!(
@@ -180,14 +190,18 @@ where
             "event-page continuation did not advance through 10,000 rows"
         );
         let metadata = match page.events {
-            lash_core::ProcessEventPageEvents::Full(page_events) => page_events
-                .into_iter()
-                .map(|event| (event.sequence, event.fact.event_type()))
-                .collect::<Vec<_>>(),
-            lash_core::ProcessEventPageEvents::Lite(page_events) => page_events
-                .into_iter()
-                .map(|event| (event.sequence, event.kind.as_str()))
-                .collect::<Vec<_>>(),
+            lash_execution_contracts::process::ProcessEventPageEvents::Full(page_events) => {
+                page_events
+                    .into_iter()
+                    .map(|event| (event.sequence, event.fact.event_type()))
+                    .collect::<Vec<_>>()
+            }
+            lash_execution_contracts::process::ProcessEventPageEvents::Lite(page_events) => {
+                page_events
+                    .into_iter()
+                    .map(|event| (event.sequence, event.kind.as_str()))
+                    .collect::<Vec<_>>()
+            }
         };
         for (sequence, event_type) in metadata {
             assert_eq!(sequence, expected_sequence);
@@ -195,8 +209,10 @@ where
             expected_sequence += 1;
         }
         after_sequence = match page.more {
-            lash_core::ProcessEventPageMore::Complete => break,
-            lash_core::ProcessEventPageMore::More { after_sequence } => after_sequence,
+            lash_execution_contracts::process::ProcessEventPageMore::Complete => break,
+            lash_execution_contracts::process::ProcessEventPageMore::More { after_sequence } => {
+                after_sequence
+            }
         };
     }
     Ok((expected_sequence - 1, page_lengths))
@@ -214,10 +230,10 @@ pub(super) async fn compare_bounded_process_event_pages(
     // The differential verifies ordered Full/Lite pages of at most 127 events over 10,000 rows on both backends; bounded memory is inferred from the limited SQL reads (rendered-SQL pin), not measured.
     const EVENT_COUNT: u64 = 10_000;
     let registration = || {
-        lash_core::testing::held_engine_registration(
+        lash_execution_contracts::testing::held_engine_registration(
             serde_json::Value::Null,
-            lash_core::ProcessProvenance::host(),
-            lash_core::Lifetime::Detached,
+            lash_execution_contracts::process::ProcessProvenance::host(),
+            lash_execution_contracts::process::Lifetime::Detached,
         )
     };
 
@@ -305,8 +321,8 @@ pub(super) async fn compare_bounded_process_event_pages(
     .expect("seed PostgreSQL process events");
 
     for mode in [
-        lash_core::ProcessEventQueryMode::Full,
-        lash_core::ProcessEventQueryMode::Lite,
+        lash_execution_contracts::process::ProcessEventQueryMode::Full,
+        lash_execution_contracts::process::ProcessEventQueryMode::Lite,
     ] {
         let sqlite_events = read_all_event_metadata(&sqlite, &process_id, mode)
             .await
@@ -320,27 +336,29 @@ pub(super) async fn compare_bounded_process_event_pages(
 
     let effect_label = format!("effect-pages-{run_nonce}");
     let effect_registration = || {
-        lash_core::ProcessRegistration::new(
-            lash_core::ProcessInput::Engine {
+        lash_execution_contracts::process::ProcessRegistration::new(
+            lash_execution_contracts::process::ProcessInput::Engine {
                 kind: "effect-differential".to_string(),
                 payload: serde_json::Value::Null,
-                launch: lash_core::EngineLaunch::new(
-                    lash_core::testing::process_execution_env_fixture_ref(),
+                launch: lash_execution_contracts::process::EngineLaunch::new(
+                    lash_execution_contracts::testing::process_execution_env_fixture_ref(),
                     None,
                 ),
             },
-            lash_core::ProcessProvenance::host(),
-            lash_core::Lifetime::Detached,
+            lash_execution_contracts::process::ProcessProvenance::host(),
+            lash_execution_contracts::process::Lifetime::Detached,
         )
-        .with_admitted_identity(lash_core::AdmittedProcessIdentity::for_testing(
-            lash_core::ProcessIdentity::for_definition(
-                lash_core::ProcessDefinitionRef::unclaimed(
-                    "effect-differential",
-                    serde_json::Value::Null,
+        .with_admitted_identity(
+            lash_execution_contracts::process::AdmittedProcessIdentity::for_testing(
+                lash_execution_contracts::process::ProcessIdentity::for_definition(
+                    lash_execution_contracts::process::ProcessDefinitionRef::unclaimed(
+                        "effect-differential",
+                        serde_json::Value::Null,
+                    ),
+                    Some(effect_label.as_str()),
                 ),
-                Some(effect_label.as_str()),
             ),
-        ))
+        )
     };
     let sqlite_effect_record = sqlite
         .register_process(effect_registration())
@@ -362,22 +380,22 @@ pub(super) async fn compare_bounded_process_event_pages(
     let effect_node_id = lash_protocol_types::effect_identity_fixture("repeated-node", 1)
         .site
         .to_string();
-    let mut omitted = lash_core::ProcessEffectOmittedCounts::default();
+    let mut omitted = lash_execution_contracts::process::ProcessEffectOmittedCounts::default();
     let mut recorded = Vec::new();
     for occurrence in 1..=10 {
         let replay_key = format!("fixture-effect:{occurrence}");
         let is_failure = occurrence == 7 || occurrence == 9;
         let class = if is_failure {
-            lash_core::ProcessEffectOutcomeClass::Failure
+            lash_execution_contracts::process::ProcessEffectOutcomeClass::Failure
         } else {
-            lash_core::ProcessEffectOutcomeClass::Success
+            lash_execution_contracts::process::ProcessEffectOutcomeClass::Success
         };
         if occurrence > 8 {
             omitted.record(class);
             continue;
         }
         recorded.push(
-            lash_core::ProcessEffectOccurrence::new(
+            lash_execution_contracts::process::ProcessEffectOccurrence::new(
                 lash_protocol_types::effect_identity_fixture("repeated-node", occurrence),
                 if is_failure { "fixture.write" } else { "now" },
                 class,
@@ -389,7 +407,7 @@ pub(super) async fn compare_bounded_process_event_pages(
             .append_request(),
         );
     }
-    let omissions = lash_core::ProcessEffectOmissions::new(
+    let omissions = lash_execution_contracts::process::ProcessEffectOmissions::new(
         std::collections::BTreeMap::from([(effect_node_id.clone(), omitted)]),
         8,
         lash_core::FleetFormat::current(),
@@ -398,20 +416,20 @@ pub(super) async fn compare_bounded_process_event_pages(
     // batch, a wait's enter and its clear, each after its prelude, and the
     // terminal batch closing with the omission record. Each boundary is
     // written twice, as a redrive after a lost acknowledgement writes it.
-    let wait = lash_core::WaitState {
+    let wait = lash_execution_contracts::process::WaitState {
         since_ms: 1,
-        kind: lash_core::WaitKind::Call {
+        kind: lash_execution_contracts::process::WaitKind::Call {
             call_id: lash_protocol_types::ToolCallId::fixture("process-wait-law"),
             tool_id: lash_protocol_types::ToolId::new("process_wait"),
         },
         site: None,
     };
-    let terminal = lash_core::ProcessAwaitOutput::from_tool_output(
+    let terminal = lash_execution_contracts::process::ProcessAwaitOutput::from_tool_output(
         lash_core::ToolCallOutput::success(serde_json::json!({ "summary": "committed" })),
     );
     for registry in [
-        &sqlite as &dyn lash_core::ConformanceProcessRegistry,
-        &postgres_registry as &dyn lash_core::ConformanceProcessRegistry,
+        &sqlite as &dyn lash_execution_contracts::process::ConformanceProcessRegistry,
+        &postgres_registry as &dyn lash_execution_contracts::process::ConformanceProcessRegistry,
     ] {
         for _ in 0..2 {
             let receipts = registry
@@ -422,9 +440,11 @@ pub(super) async fn compare_bounded_process_event_pages(
         }
         for _ in 0..2 {
             let mut boundary = recorded[4..6].to_vec();
-            boundary.push(lash_core::ProcessEventAppendRequest::wait_entered(
-                &effect_id, &wait,
-            ));
+            boundary.push(
+                lash_execution_contracts::process::ProcessEventAppendRequest::wait_entered(
+                    &effect_id, &wait,
+                ),
+            );
             registry
                 .append_events_for_testing(&effect_id, boundary)
                 .await
@@ -432,9 +452,11 @@ pub(super) async fn compare_bounded_process_event_pages(
         }
         for _ in 0..2 {
             let mut boundary = recorded[6..].to_vec();
-            boundary.push(lash_core::ProcessEventAppendRequest::wait_cleared(
-                &effect_id, &wait,
-            ));
+            boundary.push(
+                lash_execution_contracts::process::ProcessEventAppendRequest::wait_cleared(
+                    &effect_id, &wait,
+                ),
+            );
             registry
                 .append_events_for_testing(&effect_id, boundary)
                 .await
@@ -446,7 +468,9 @@ pub(super) async fn compare_bounded_process_event_pages(
                     &effect_id,
                     terminal.clone(),
                     vec![omissions.append_request("fixture-effect:omissions")],
-                    lash_core::ProcessCompletionAuthority::workflow_key(effect_id.to_string()),
+                    lash_execution_contracts::process::ProcessCompletionAuthority::workflow_key(
+                        effect_id.to_string(),
+                    ),
                 )
                 .await
                 .expect("complete with the terminal batch, then recover it");
@@ -454,8 +478,8 @@ pub(super) async fn compare_bounded_process_event_pages(
     }
     let mut keyed_reads = Vec::new();
     for registry in [
-        &sqlite as &dyn lash_core::ProcessRegistry,
-        &postgres_registry as &dyn lash_core::ProcessRegistry,
+        &sqlite as &dyn lash_execution_contracts::process::ProcessRegistry,
+        &postgres_registry as &dyn lash_execution_contracts::process::ProcessRegistry,
     ] {
         let through = registry
             .get_process(&effect_id)
@@ -467,26 +491,30 @@ pub(super) async fn compare_bounded_process_event_pages(
             .event_by_replay_key(&effect_id, "fixture-effect:omissions", through)
             .await
             .expect("indexed omission read");
-        let lash_core::ProcessEventReadOutcome::Retained(Some(event)) = read else {
+        let lash_execution_contracts::process::ProcessEventReadOutcome::Retained(Some(event)) =
+            read
+        else {
             panic!("the omission record is retained");
         };
         assert_eq!(
             event.fact,
-            lash_core::ProcessLifecycleFact::EffectOmissions(omissions.clone())
+            lash_execution_contracts::process::ProcessLifecycleFact::EffectOmissions(
+                omissions.clone()
+            )
         );
         assert_eq!(
             registry
                 .event_by_replay_key(&effect_id, "fixture-effect:omissions", event.sequence - 1)
                 .await
                 .expect("bounded omission read"),
-            lash_core::ProcessEventReadOutcome::Retained(None)
+            lash_execution_contracts::process::ProcessEventReadOutcome::Retained(None)
         );
         assert_eq!(
             registry
                 .event_by_replay_key(&effect_id, "missing-effect-key", through)
                 .await
                 .expect("absent key"),
-            lash_core::ProcessEventReadOutcome::Retained(None)
+            lash_execution_contracts::process::ProcessEventReadOutcome::Retained(None)
         );
         keyed_reads.push((event.sequence, event.fact));
     }
@@ -497,8 +525,8 @@ pub(super) async fn compare_bounded_process_event_pages(
     let logs = {
         let mut logs = Vec::new();
         for registry in [
-            &sqlite as &dyn lash_core::ProcessRegistry,
-            &postgres_registry as &dyn lash_core::ProcessRegistry,
+            &sqlite as &dyn lash_execution_contracts::process::ProcessRegistry,
+            &postgres_registry as &dyn lash_execution_contracts::process::ProcessRegistry,
         ] {
             logs.push(
                 registry
@@ -521,10 +549,10 @@ pub(super) async fn compare_bounded_process_event_pages(
     assert_eq!(logs[0], logs[1], "the boundary batches diverged");
     let mut summaries = Vec::new();
     for registry in [
-        &sqlite as &dyn lash_core::ProcessRegistry,
-        &postgres_registry as &dyn lash_core::ProcessRegistry,
+        &sqlite as &dyn lash_execution_contracts::process::ProcessRegistry,
+        &postgres_registry as &dyn lash_execution_contracts::process::ProcessRegistry,
     ] {
-        let mut summary = lash_core::ProcessEffectReport::default();
+        let mut summary = lash_execution_contracts::process::ProcessEffectReport::default();
         for event in registry
             .full_event_window(&effect_id, 0)
             .await
@@ -546,11 +574,11 @@ pub(super) async fn compare_bounded_process_event_pages(
     assert_eq!(node.omitted.success, 1);
     assert_eq!(
         node.occurrences[6].outcome_class,
-        lash_core::ProcessEffectOutcomeClass::Failure
+        lash_execution_contracts::process::ProcessEffectOutcomeClass::Failure
     );
     for registry in [
-        &sqlite as &dyn lash_core::ProcessRegistry,
-        &postgres_registry as &dyn lash_core::ProcessRegistry,
+        &sqlite as &dyn lash_execution_contracts::process::ProcessRegistry,
+        &postgres_registry as &dyn lash_execution_contracts::process::ProcessRegistry,
     ] {
         let horizon = keyed_reads[0].0;
         registry
@@ -562,8 +590,8 @@ pub(super) async fn compare_bounded_process_event_pages(
                 .event_by_replay_key(&effect_id, "fixture-effect:omissions", horizon)
                 .await
                 .expect("released omission read"),
-            lash_core::ProcessEventReadOutcome::NoLongerRetained(
-                lash_core::ProcessEventHistoryRetention::Released {
+            lash_execution_contracts::process::ProcessEventReadOutcome::NoLongerRetained(
+                lash_execution_contracts::process::ProcessEventHistoryRetention::Released {
                     released_through: horizon
                 }
             )
@@ -593,13 +621,13 @@ pub(super) async fn compare_bounded_process_event_pages(
 }
 
 async fn prepared_registration_race(
-    registry: &dyn lash_core::ProcessRegistry,
+    registry: &dyn lash_execution_contracts::process::ProcessRegistry,
     nonce: &str,
 ) -> String {
-    let registration = lash_core::testing::held_engine_registration(
+    let registration = lash_execution_contracts::testing::held_engine_registration(
         serde_json::json!({"start": "race"}),
-        lash_core::ProcessProvenance::host(),
-        lash_core::Lifetime::Detached,
+        lash_execution_contracts::process::ProcessProvenance::host(),
+        lash_execution_contracts::process::Lifetime::Detached,
     )
     .with_start_key(Some(lash_core::StartKey::for_host(format!(
         "{nonce}:prepared-race"
@@ -679,7 +707,10 @@ async fn prepared_registration_race_keeps_the_first_scope() {
     let stores = lash_sqlite_store::SqliteStoreSet::memory()
         .await
         .unwrap_or_else(|error| panic!("SQLite memory: {error}"));
-    lash_core::testing::process_execution_env_fixture(stores.process_env_store().as_ref()).await;
+    lash_execution_contracts::testing::process_execution_env_fixture(
+        stores.process_env_store().as_ref(),
+    )
+    .await;
     assert_eq!(
         prepared_registration_race(stores.process_registry().as_ref(), "memory").await,
         "prepared=read-only writers=one anchor=winner"
@@ -714,8 +745,14 @@ async fn prepared_registration_scope_matches_across_backends() {
         .attachment_store(),
     );
     let nonce = run_nonce();
-    lash_core::testing::process_execution_env_fixture(memory.process_env_store().as_ref()).await;
-    lash_core::testing::process_execution_env_fixture(file.process_env_store().as_ref()).await;
+    lash_execution_contracts::testing::process_execution_env_fixture(
+        memory.process_env_store().as_ref(),
+    )
+    .await;
+    lash_execution_contracts::testing::process_execution_env_fixture(
+        file.process_env_store().as_ref(),
+    )
+    .await;
     let expected = prepared_registration_race(memory.process_registry().as_ref(), &nonce).await;
     assert_eq!(
         prepared_registration_race(file.process_registry().as_ref(), &nonce).await,

@@ -40,9 +40,9 @@ pub(crate) fn record_session_terminal(
 impl SqliteStore {
     pub(crate) async fn read_turn_changes(
         &self,
-        after: lash_core_execution::store::TurnChangeCursor,
+        after: lash_core_store::store::TurnChangeCursor,
         limit: std::num::NonZeroUsize,
-    ) -> Result<lash_core_execution::store::TurnChangePage, StoreError> {
+    ) -> Result<lash_core_store::store::TurnChangePage, StoreError> {
         let fleet = self.conn.fleet();
         self.read_connection()
             .read(move |conn| {
@@ -91,7 +91,7 @@ impl SqliteStore {
                     for row in rows {
                         let (seq, session, operation, payload, code, at_ms, head_revision) =
                             row.map_err(sqlite_error)?;
-                        changes.push(lash_core_execution::store::TurnChange::from_stored(
+                        changes.push(lash_core_store::store::TurnChange::from_stored(
                             seq,
                             session,
                             operation,
@@ -102,16 +102,14 @@ impl SqliteStore {
                         )?);
                     }
                     let next = changes.last().map_or(
-                        lash_core_execution::store::TurnChangeCursor::from_store_sequence(current),
+                        lash_core_store::store::TurnChangeCursor::from_store_sequence(current),
                         |change| change.cursor,
                     );
-                    Ok(lash_core_execution::store::TurnChangePage {
+                    Ok(lash_core_store::store::TurnChangePage {
                         changes,
                         next,
                         retained_after:
-                            lash_core_execution::store::TurnChangeCursor::from_store_sequence(
-                                horizon,
-                            ),
+                            lash_core_store::store::TurnChangeCursor::from_store_sequence(horizon),
                     })
                 })())
             })

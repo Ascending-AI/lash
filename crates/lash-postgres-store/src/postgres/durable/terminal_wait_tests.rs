@@ -10,7 +10,9 @@
 use std::sync::Arc;
 
 use lash_core_execution::runtime::actor::wait_laws;
-use lash_core_execution::{Backend, BackendParts, NoProjectionProviders};
+use lash_execution_contracts::backend::Backend;
+use lash_execution_contracts::backend::BackendParts;
+use lash_execution_contracts::projection::NoProjectionProviders;
 
 use crate::PostgresStoreSet;
 use crate::testing::IsolatedDatabase;
@@ -55,9 +57,11 @@ async fn until_waiting(
 #[tokio::test(flavor = "multi_thread", worker_threads = 4)]
 async fn a_terminal_wait_pinned_during_the_targets_terminal_commit_is_resolved() {
     use lash_core_execution::runtime::actor::process::record_terminal;
-    use lash_core_execution::runtime::actor::waits::{self, WaitPurpose, WaitSpec};
+    use lash_core_execution::runtime::actor::waits;
+    use lash_core_execution::runtime::actor::waits::WaitPurpose;
     use lash_durable::domain::{ScopeKey, WaitState};
     use lash_durable::{ActorKey, CommitLabel, FormatSet, MailTx, NodeId, NodeSpec};
+    use lash_execution_contracts::waits::WaitSpec;
     use sqlx::Connection as _;
 
     let Some(database_url) = crate::postgres_test_support::database_url() else {
@@ -72,7 +76,7 @@ async fn a_terminal_wait_pinned_during_the_targets_terminal_commit_is_resolved()
         formats: Vec::new(),
         stores: Arc::new(PostgresStoreSet::new(
             &storage,
-            Arc::new(lash_core_execution::attachments::UnavailableAttachmentStore),
+            Arc::new(lash_core_store::attachments::UnavailableAttachmentStore),
         )),
         settings: wait_laws::settings(),
         engines: Vec::new(),
@@ -82,29 +86,29 @@ async fn a_terminal_wait_pinned_during_the_targets_terminal_commit_is_resolved()
     let store = backend.durable();
 
     // The target: a registered process. The awaiter: an actor of its own.
-    lash_core_execution::testing::process_execution_env_fixture(
+    lash_execution_contracts::testing::process_execution_env_fixture(
         backend.process_env_store().as_ref(),
     )
     .await;
     let target = backend
         .process_registry()
-        .register_process(lash_core_execution::ProcessRegistration::new(
-            lash_core_execution::ProcessInput::Engine {
+        .register_process(lash_execution_contracts::process::ProcessRegistration::new(
+            lash_execution_contracts::process::ProcessInput::Engine {
                 kind: "terminal-law".to_owned(),
                 payload: serde_json::json!({}),
-                launch: lash_core_execution::EngineLaunch::new(
-                    lash_core_execution::testing::process_execution_env_fixture_ref(),
+                launch: lash_execution_contracts::process::EngineLaunch::new(
+                    lash_execution_contracts::testing::process_execution_env_fixture_ref(),
                     None,
                 ),
             },
-            lash_core_execution::ProcessProvenance::host(),
-            lash_core_execution::LifetimeDecision::Detached,
+            lash_execution_contracts::process::ProcessProvenance::host(),
+            lash_execution_contracts::process::LifetimeDecision::Detached,
         ))
         .await
         .expect("register the target")
         .id;
     let target_actor = ActorKey::process(target.as_str()).expect("the target's key");
-    let awaiter = lash_core_execution::ProcessId::fixture("terminal-law-awaiter");
+    let awaiter = lash_protocol_types::ProcessId::fixture("terminal-law-awaiter");
     let awaiter_actor = ActorKey::process(awaiter.as_str()).expect("the awaiter's key");
     let awaiter_formats = FormatSet::new("terminal-law");
     let mut create = MailTx::new();
@@ -172,8 +176,8 @@ async fn a_terminal_wait_pinned_during_the_targets_terminal_commit_is_resolved()
 
     // The terminal transaction resolves the waits it sees (none yet), then
     // waits at its scope's revocation.
-    let outcome = lash_core_execution::ProcessAwaitOutput::from_tool_output(
-        lash_core_execution::ToolCallOutput::success(serde_json::json!("ended")),
+    let outcome = lash_execution_contracts::process::ProcessAwaitOutput::from_tool_output(
+        lash_protocol_types::tool_output::ToolCallOutput::success(serde_json::json!("ended")),
     );
     let terminal = tokio::spawn({
         let store = Arc::clone(store);

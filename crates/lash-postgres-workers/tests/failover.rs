@@ -442,7 +442,7 @@ async fn a_process_killed_mid_wait_finishes_on_another_node_with_its_start_key_f
         "the step after the wait"
     );
     // The engine state carried its count across the move.
-    let output = serde_json::to_value(lash_core::Durable(&terminal.into_await_output()))
+    let output = serde_json::to_value(lash_protocol_types::Durable(&terminal.into_await_output()))
         .expect("the outcome encodes");
     let transitions = find(&output, "transitions").and_then(Value::as_u64);
     assert_eq!(

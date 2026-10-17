@@ -1,6 +1,6 @@
 use super::*;
 use crate::session_sql::session_sql;
-use lash_core_execution::FleetFormat;
+use lash_core_store::store::FleetFormat;
 
 /// Delete `session_id` from the deployment's catalog on `conn`, the store's
 /// writer connection, so the delete keeps the store's connection policy and
@@ -9,13 +9,13 @@ pub(super) async fn delete_session_from_catalog(
     conn: &SqliteConnection,
     session_id: &SessionId,
     now_ms: u64,
-) -> lash_core_execution::MaintenanceResult<lash_core_execution::SessionBlobReclaimReport> {
+) -> lash_core_store::store::MaintenanceResult<lash_core_store::store::SessionBlobReclaimReport> {
     let session_id = session_id.clone();
     conn.write_flow(move |tx| {
-        let mut report = lash_core_execution::SessionBlobReclaimReport::default();
+        let mut report = lash_core_store::store::SessionBlobReclaimReport::default();
         let outcome: Result<
-            lash_core_execution::SessionBlobReclaimReport,
-            lash_core_execution::StoreError,
+            lash_core_store::store::SessionBlobReclaimReport,
+            lash_core_store::store::StoreError,
         > = (|| {
             let existed = tx
                 .query_row(
@@ -70,20 +70,29 @@ pub(super) async fn delete_session_from_catalog(
                 None,
             )? && let Some(frame_node_id) = meta.current_frame_node_id
             {
-                let referrer = lash_core_execution::ArtifactReferrer::FrameEnvironment(
-                    lash_core_execution::FrameEnvironmentId::new(session_id.clone(), frame_node_id),
-                );
+                let referrer =
+                    lash_core_store::artifact_referrer::ArtifactReferrer::FrameEnvironment(
+                        lash_core_store::artifact_referrer::FrameEnvironmentId::new(
+                            session_id.clone(),
+                            frame_node_id,
+                        ),
+                    );
                 crate::artifact_store::fence_artifact_referrer_tx(tx, &referrer, now_ms)
                     .map_err(sqlite_error)?;
-                let cleanup =
-                    lash_core_execution::ArtifactCleanup::ended(referrer, Vec::new(), None);
+                let cleanup = lash_core_store::artifact_referrer::ArtifactCleanup::ended(
+                    referrer,
+                    Vec::new(),
+                    None,
+                );
                 crate::obligation_ledger::arm_cleanup_tx(tx, &cleanup, now_ms)?;
             }
             if existed {
                 crate::obligation_ledger::arm_cleanup_tx(
                     tx,
-                    &lash_core_execution::ArtifactCleanup::Await(
-                        lash_core_execution::ReferrerGuard::SessionGraphRetired(session_id.clone()),
+                    &lash_core_store::artifact_referrer::ArtifactCleanup::Await(
+                        lash_core_store::artifact_referrer::ReferrerGuard::SessionGraphRetired(
+                            session_id.clone(),
+                        ),
                     ),
                     now_ms,
                 )?;
@@ -93,13 +102,14 @@ pub(super) async fn delete_session_from_catalog(
             // transcripts and its admission base. Its pins, revisions, runs and
             // metadata go with it, so each root they held is retired here and
             // held below.
-            let text_column = |sql: &str| -> Result<Vec<String>, lash_core_execution::StoreError> {
-                let mut stmt = tx.prepare(sql).map_err(sqlite_error)?;
-                let rows = stmt
-                    .query_map(params![session_id.as_str()], |row| row.get::<_, String>(0))
-                    .map_err(sqlite_error)?;
-                rows.collect::<Result<Vec<_>, _>>().map_err(sqlite_error)
-            };
+            let text_column =
+                |sql: &str| -> Result<Vec<String>, lash_core_store::store::StoreError> {
+                    let mut stmt = tx.prepare(sql).map_err(sqlite_error)?;
+                    let rows = stmt
+                        .query_map(params![session_id.as_str()], |row| row.get::<_, String>(0))
+                        .map_err(sqlite_error)?;
+                    rows.collect::<Result<Vec<_>, _>>().map_err(sqlite_error)
+                };
             let mut roots: std::collections::BTreeSet<String> =
                 text_column(session_sql().revisions.select_session_checkpoints.sql())?
                     .into_iter()
@@ -235,7 +245,7 @@ pub(super) async fn delete_session_from_catalog(
             Ok(value) => TxOutcome::Commit(Ok(value)),
             Err(err) => {
                 report.held_root_count = 0;
-                TxOutcome::Rollback(Err(lash_core_execution::MaintenanceFailure::failed(
+                TxOutcome::Rollback(Err(lash_core_store::store::MaintenanceFailure::failed(
                     err, report,
                 )))
             }
@@ -243,6 +253,6 @@ pub(super) async fn delete_session_from_catalog(
     })
     .await
     .map_err(|err| {
-        lash_core_execution::MaintenanceFailure::failed_before_any_work(sqlite_error(err))
+        lash_core_store::store::MaintenanceFailure::failed_before_any_work(sqlite_error(err))
     })?
 }

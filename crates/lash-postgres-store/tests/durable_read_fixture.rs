@@ -11,7 +11,8 @@ use std::path::{Path, PathBuf};
 use std::process::Command;
 use std::sync::Arc;
 
-use lash_core_execution::{DeploymentStore, ProcessEnvStore};
+use lash_execution_contracts::deployment::DeploymentStore;
+use lash_execution_contracts::process::ProcessEnvStore;
 use lash_postgres_store::PostgresStorage;
 use serde::{Deserialize, Serialize};
 use sqlx::postgres::PgPoolOptions;
@@ -150,29 +151,32 @@ async fn release_postgres_fixture_reads_retained_semantics() {
 }
 
 fn open_handles(storage: &PostgresStorage, timestamp_ms: u64) -> fixture::FixtureHandles {
-    let clock = Arc::new(lash_core_execution::testing::TestClock::new(timestamp_ms));
+    let clock = Arc::new(lash_core_ids::test_clock::TestClock::new(timestamp_ms));
     let processes = Arc::new(
         storage
             .process_registry()
-            .with_clock(Arc::clone(&clock) as Arc<dyn lash_core_execution::Clock>)
+            .with_clock(Arc::clone(&clock) as Arc<dyn lash_core_ids::clock::Clock>)
             .with_process_id_mint_for_testing(
-                lash_core_execution::ProcessIdMint::sequential_for_testing(),
+                lash_core_store::process_identity::ProcessIdMint::sequential_for_testing(),
             ),
     );
     let process_envs = Arc::new(storage.process_env_store());
 
-    let store = Arc::new(
-        storage
-            .session_store_factory()
-            .with_lease_clock_for_testing(Arc::clone(&clock) as Arc<dyn lash_core_execution::Clock>)
-            .with_clock(Arc::clone(&clock) as Arc<dyn lash_core_execution::Clock>),
-    );
+    let store =
+        Arc::new(
+            storage
+                .session_store_factory()
+                .with_lease_clock_for_testing(
+                    Arc::clone(&clock) as Arc<dyn lash_core_ids::clock::Clock>
+                )
+                .with_clock(Arc::clone(&clock) as Arc<dyn lash_core_ids::clock::Clock>),
+        );
     fixture::FixtureHandles {
-        clock: Arc::clone(&clock) as Arc<dyn lash_core_execution::Clock>,
+        clock: Arc::clone(&clock) as Arc<dyn lash_core_ids::clock::Clock>,
 
         store: store as Arc<dyn DeploymentStore>,
         processes: Arc::clone(&processes)
-            as Arc<dyn lash_core_execution::ConformanceProcessRegistry>,
+            as Arc<dyn lash_execution_contracts::process::ConformanceProcessRegistry>,
         process_envs: process_envs as Arc<dyn ProcessEnvStore>,
     }
 }

@@ -39,7 +39,7 @@ async fn world(
         let builder = lash::LashCore::rlm_builder(backend.clone(), served::rlm(backend, workers))
             .plugin(Arc::new(
                 lash::process_controls::SessionProcessAdminPluginFactory::new(
-                    lash_core::lifetime::starter,
+                    lash_execution_contracts::process::lifetime::starter,
                     lash_core::runtime::env_policy::policy::from_run(|_| Ok(Vec::new())),
                 ),
             ));

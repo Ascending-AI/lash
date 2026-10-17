@@ -2,30 +2,33 @@ use crate::ActorContext;
 use crate::SessionId;
 use std::sync::Arc;
 
-use super::process::{
-    ArtifactReferrerPorts, ProcessEngineRegistry, ProcessEnvStore, ProcessRegistry,
-};
-use super::{DeploymentStore, ProcessWorkSubstrate, ProcessWorkWiring};
+use super::ProcessWorkSubstrate;
+use super::ProcessWorkWiring;
+use super::process::ArtifactReferrerPorts;
+use super::process::ProcessEngineRegistry;
+use lash_execution_contracts::deployment::DeploymentStore;
+use lash_execution_contracts::process::ProcessEnvStore;
+use lash_execution_contracts::process::ProcessRegistry;
 
 /// Deployment payload admission, independent of execution time and commit budgets.
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 pub struct RuntimeDataLimits {
     pub plugin_state: crate::tool_run::StateCommandLimits,
-    pub tool_intents: crate::tool_intent::ToolIntentLimits,
+    pub tool_intents: lash_execution_contracts::tool_intent::ToolIntentLimits,
 }
 impl RuntimeDataLimits {
     /// The existing plugin-state and intent limits, with no imposed host maximum.
     pub const fn standard() -> Self {
         Self {
             plugin_state: crate::tool_run::StateCommandLimits::PUBLISHED,
-            tool_intents: crate::tool_intent::ToolIntentLimits::standard(),
+            tool_intents: lash_execution_contracts::tool_intent::ToolIntentLimits::standard(),
         }
     }
 }
 
 /// Required host configuration for all runtimes.
 ///
-/// A config is built over exactly one [`Backend`](crate::Backend) (ADR 0102,
+/// A config is built over exactly one [`Backend`](lash_execution_contracts::backend::Backend) (ADR 0102,
 /// D2): its effect host, attachment port, process-exec-env store and clock
 /// start as the backend's, and every other port a runtime reaches — the
 /// session-store factory and the process-definition registry — is read from the same backend. There is no in-memory default.
@@ -35,7 +38,7 @@ pub struct RuntimeHostConfig {
     pub data_limits: RuntimeDataLimits,
     /// Working budgets shared by this host's observation surfaces.
     pub observation_work_limits: lash_trace::ObservationWorkLimits,
-    backend: crate::Backend,
+    backend: lash_execution_contracts::backend::Backend,
     provider_file_uploaders: Vec<Arc<dyn crate::attachments::ProviderFileUploader>>,
     provider_file_cache: crate::attachments::ProviderFileCacheLimits,
     pub durability: RuntimeDurabilityConfig,
@@ -74,7 +77,7 @@ pub struct RuntimeDurabilityConfig {
     pub process_env_store: Arc<dyn ProcessEnvStore>,
     /// Where a turn's environment sync records its preparation, which the
     /// sync's outcome journals by digest (FIG-5133).
-    pub turn_prelude_store: Arc<dyn crate::TurnPreludeStore>,
+    pub turn_prelude_store: Arc<dyn lash_execution_contracts::turn_prelude::TurnPreludeStore>,
 }
 
 /// What a host keeps and for how long: its attachment and retained-output
@@ -315,7 +318,7 @@ impl RuntimeHostConfig {
     /// local durable choice is the durable engine over one SQLite database
     /// file (ADR 0132 §1).
     pub fn new(
-        backend: crate::Backend,
+        backend: lash_execution_contracts::backend::Backend,
         commit_budget: crate::CommitBudget,
         queued_work_batching: crate::QueuedWorkBatchingConfig,
         execution_budgets: crate::ExecutionBudgets,
@@ -382,7 +385,7 @@ impl RuntimeHostConfig {
     }
 
     /// The backend this config's ports come from.
-    pub fn backend(&self) -> &crate::Backend {
+    pub fn backend(&self) -> &lash_execution_contracts::backend::Backend {
         &self.backend
     }
 
@@ -390,7 +393,7 @@ impl RuntimeHostConfig {
     /// process-exec-env store and clock become `backend`'s, with every other
     /// setting kept. Every backend-bound port moves together, so the config
     /// still names exactly one backend (ADR 0102, D2).
-    pub fn with_backend(mut self, backend: crate::Backend) -> Self {
+    pub fn with_backend(mut self, backend: lash_execution_contracts::backend::Backend) -> Self {
         self.durability.attachment_store = Arc::new(
             crate::RuntimeAttachmentStore::ephemeral(
                 self.delivery_backend(backend.attachment_store()),
@@ -495,7 +498,7 @@ impl RuntimeHostConfig {
     pub(crate) fn install_contributed_process_engine(
         &mut self,
         registration: crate::ProcessEngineRegistration,
-    ) -> Result<(), crate::PluginError> {
+    ) -> Result<(), lash_execution_contracts::plugin_error::PluginError> {
         self.process_engines = self.process_engines.clone().try_with_engine(registration)?;
         Ok(())
     }
@@ -644,13 +647,16 @@ impl RuntimeHost {
         &self,
         owner: &crate::RuntimeOwner,
         policy: crate::SessionPolicy,
-    ) -> Result<crate::RuntimeSessionPolicy, crate::PluginError> {
+    ) -> Result<crate::RuntimeSessionPolicy, lash_execution_contracts::plugin_error::PluginError>
+    {
         self.runtime_policy(policy).ok_or_else(|| {
             let owner = match owner {
                 crate::RuntimeOwner::Session(session_id) => format!("session `{session_id}`"),
                 crate::RuntimeOwner::Process(process_id) => format!("process `{process_id}`"),
             };
-            crate::PluginError::Session(format!("{owner} has selected no model"))
+            lash_execution_contracts::plugin_error::PluginError::Session(format!(
+                "{owner} has selected no model"
+            ))
         })
     }
 

@@ -30,7 +30,10 @@ fn reliability(attempts: u32) -> lash_core::facade_support::ProviderOptions {
     }
 }
 
-fn core_over(backend: lash_core::Backend, model: ProviderHandle) -> LashCore {
+fn core_over(
+    backend: lash_execution_contracts::backend::Backend,
+    model: ProviderHandle,
+) -> LashCore {
     explicit_ephemeral_facets(LashCore::standard_builder(backend))
         .serve_test_llm_profile(model, mock_llm_profile_spec())
         .build(lash_facade_tests::runtime_lease_owner())
@@ -465,10 +468,13 @@ async fn retryable_mid_stream_failure_preserves_durable_charge_safety_evidence()
     }
 
     let session_id = lash::SessionId::from("paid-output-retry");
-    let view = lash_core::runtime::live_session_view(&backend.session_store_factory(), &session_id)
-        .await
-        .expect("the catalog answers")
-        .expect("the session is live");
+    let view = lash_execution_contracts::deployment::live_session_view(
+        &backend.session_store_factory(),
+        &session_id,
+    )
+    .await
+    .expect("the catalog answers")
+    .expect("the session is live");
     let evidence = view
         .load_failure_evidence_page(None, std::num::NonZeroU32::new(10).expect("nonzero"))
         .await

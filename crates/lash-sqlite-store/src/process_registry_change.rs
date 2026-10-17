@@ -3,13 +3,13 @@ use crate::process_registry::sql::process_sql;
 use lash_protocol_types::ProcessId;
 
 pub(crate) fn max_change_sequence(
-    watermark: lash_core_execution::ProjectionWatermark,
+    watermark: lash_execution_contracts::process::ProjectionWatermark,
 ) -> Option<i64> {
     match watermark {
-        lash_core_execution::ProjectionWatermark::UpTo(cursor) => {
+        lash_execution_contracts::process::ProjectionWatermark::UpTo(cursor) => {
             Some(cursor.store_sequence() as i64)
         }
-        lash_core_execution::ProjectionWatermark::NoProjector => None,
+        lash_execution_contracts::process::ProjectionWatermark::NoProjector => None,
     }
 }
 
@@ -17,7 +17,7 @@ pub(crate) fn compact_process_tombstones_conn(
     conn: &Connection,
     cutoff_epoch_ms: i64,
     max_change_seq: Option<i64>,
-) -> Result<usize, lash_core_execution::PluginError> {
+) -> Result<usize, lash_execution_contracts::plugin_error::PluginError> {
     let compacted_through: Option<i64> = conn
         .query_row(
             process_sql()
@@ -49,7 +49,10 @@ pub(crate) fn processes_changed_since_conn(
     conn: &Connection,
     cursor: ProcessChangeCursor,
     limit: usize,
-) -> Result<(Vec<ProcessChange>, ProcessChangeCursor), lash_core_execution::PluginError> {
+) -> Result<
+    (Vec<ProcessChange>, ProcessChangeCursor),
+    lash_execution_contracts::plugin_error::PluginError,
+> {
     let tx = conn.unchecked_transaction().map_err(process_sqlite_error)?;
     let result = processes_changed_since_tx(&tx, cursor, limit);
     if result.is_ok() {
@@ -62,7 +65,10 @@ fn processes_changed_since_tx(
     conn: &Connection,
     cursor: ProcessChangeCursor,
     limit: usize,
-) -> Result<(Vec<ProcessChange>, ProcessChangeCursor), lash_core_execution::PluginError> {
+) -> Result<
+    (Vec<ProcessChange>, ProcessChangeCursor),
+    lash_execution_contracts::plugin_error::PluginError,
+> {
     let horizon = conn
         .query_row(
             process_sql().clock_sqlite.select_compaction_horizon.sql(),
@@ -77,7 +83,7 @@ fn processes_changed_since_tx(
     )?;
     if cursor.store_sequence() < horizon {
         return Err(
-            lash_core_execution::PluginError::ProcessChangeCursorPruned {
+            lash_execution_contracts::plugin_error::PluginError::ProcessChangeCursorPruned {
                 requested_cursor: cursor,
                 tombstone_compaction_horizon: ProcessChangeCursor::from_store_sequence(horizon),
             },
@@ -133,7 +139,7 @@ pub(crate) fn prune_terminal_processes_conn(
     pruned_at_ms: i64,
     filter: Option<ProcessListFilter>,
     max_change_seq: Option<u64>,
-) -> Result<ProcessPruneReport, lash_core_execution::PluginError> {
+) -> Result<ProcessPruneReport, lash_execution_contracts::plugin_error::PluginError> {
     let prunable = prunable_terminal_process_ids_conn(conn, cutoff, filter, max_change_seq)?;
     crate::process_registry::parent_end::reclaim_settled_plans_conn(conn, cutoff)?;
     if prunable.is_empty() {
@@ -150,7 +156,7 @@ fn prune_process_rows_conn(
     conn: &Connection,
     prunable: &[ProcessId],
     pruned_at_ms: i64,
-) -> Result<ProcessPruneReport, lash_core_execution::PluginError> {
+) -> Result<ProcessPruneReport, lash_execution_contracts::plugin_error::PluginError> {
     let process_ids_json = serde_json::to_string(&prunable).map_err(process_decode_error)?;
     let process_count = prunable.len() as i64;
     crate::conn::cached_execute(
@@ -177,16 +183,18 @@ fn prune_process_rows_conn(
         )
         .map_err(process_sqlite_error)?;
     if inserted_tombstones != prunable.len() {
-        return Err(lash_core_execution::PluginError::Session(format!(
-            "process prune candidate/tombstone divergence: expected {}, inserted {inserted_tombstones}",
-            prunable.len()
-        )));
+        return Err(
+            lash_execution_contracts::plugin_error::PluginError::Session(format!(
+                "process prune candidate/tombstone divergence: expected {}, inserted {inserted_tombstones}",
+                prunable.len()
+            )),
+        );
     }
 
     for process_id in prunable {
         crate::durable::retire_process_rows(conn, process_id).map_err(process_sqlite_error)?;
-        let cleanup = lash_core_execution::ArtifactCleanup::ended(
-            lash_core_execution::ArtifactReferrer::ProcessRecord(process_id.clone()),
+        let cleanup = lash_core_store::artifact_referrer::ArtifactCleanup::ended(
+            lash_core_store::artifact_referrer::ArtifactReferrer::ProcessRecord(process_id.clone()),
             Vec::new(),
             None,
         );
@@ -195,7 +203,7 @@ fn prune_process_rows_conn(
             &cleanup,
             u64::try_from(pruned_at_ms).unwrap_or(0),
         )
-        .map_err(lash_core_execution::PluginError::from)?;
+        .map_err(lash_execution_contracts::plugin_error::PluginError::from)?;
     }
 
     let sql = process_sql();
@@ -219,10 +227,12 @@ fn prune_process_rows_conn(
         .map_err(process_sqlite_error)?;
 
     if pruned_processes != prunable.len() {
-        return Err(lash_core_execution::PluginError::Session(format!(
-            "process prune candidate/tombstone divergence: expected {}, deleted {pruned_processes}",
-            prunable.len()
-        )));
+        return Err(
+            lash_execution_contracts::plugin_error::PluginError::Session(format!(
+                "process prune candidate/tombstone divergence: expected {}, deleted {pruned_processes}",
+                prunable.len()
+            )),
+        );
     }
 
     Ok(ProcessPruneReport {
@@ -237,7 +247,7 @@ pub(crate) fn prunable_terminal_process_ids_conn(
     cutoff: i64,
     filter: Option<ProcessListFilter>,
     max_change_seq: Option<u64>,
-) -> Result<Vec<ProcessId>, lash_core_execution::PluginError> {
+) -> Result<Vec<ProcessId>, lash_execution_contracts::plugin_error::PluginError> {
     let max_change_seq = max_change_seq.map(|seq| seq as i64);
     let mut stmt = conn
         .prepare(process_sql().process_sqlite.list_prunable_terminal.sql())
@@ -267,25 +277,27 @@ pub(crate) fn prunable_terminal_process_ids_conn(
 mod tests {
     use super::*;
     use crate::process_registry::tx_outcome;
-    use lash_core_execution::{
-        ProcessEventLogTestSupport as _, ProcessLifecycle as _, ProcessQuery as _,
-        ProcessRegistrar as _,
-    };
+    use lash_execution_contracts::process::ProcessEventLogTestSupport as _;
+    use lash_execution_contracts::process::ProcessLifecycle as _;
+    use lash_execution_contracts::process::ProcessQuery as _;
+    use lash_execution_contracts::process::ProcessRegistrar as _;
 
     #[tokio::test]
     async fn candidate_tombstone_divergence_rolls_back_all_prune_mutations() {
         let stores = crate::SqliteStoreSet::memory()
             .await
             .expect("open prune rollback registry");
-        lash_core::testing::process_execution_env_fixture(stores.process_env_store().as_ref())
-            .await;
+        lash_execution_contracts::testing::process_execution_env_fixture(
+            stores.process_env_store().as_ref(),
+        )
+        .await;
         let registry = stores.process_registry();
-        let ghost_id = lash_core_execution::mint_process_id();
+        let ghost_id = lash_core_store::process_identity::mint_process_id();
         let process_id = registry
-            .register_process(lash_core::testing::held_engine_registration(
+            .register_process(lash_execution_contracts::testing::held_engine_registration(
                 serde_json::Value::Null,
-                lash_core_execution::ProcessProvenance::host(),
-                lash_core_execution::Lifetime::Detached,
+                lash_execution_contracts::process::ProcessProvenance::host(),
+                lash_execution_contracts::process::Lifetime::Detached,
             ))
             .await
             .expect("register rollback process")
@@ -293,10 +305,14 @@ mod tests {
         registry
             .complete_process(
                 &process_id,
-                ProcessAwaitOutput::from_tool_output(lash_core_execution::ToolCallOutput::success(
-                    serde_json::Value::Null,
-                )),
-                lash_core_execution::ProcessCompletionAuthority::workflow_key(&process_id),
+                ProcessAwaitOutput::from_tool_output(
+                    lash_protocol_types::tool_output::ToolCallOutput::success(
+                        serde_json::Value::Null,
+                    ),
+                ),
+                lash_execution_contracts::process::ProcessCompletionAuthority::workflow_key(
+                    &process_id,
+                ),
             )
             .await
             .expect("complete rollback process");

@@ -35,3 +35,25 @@ pub(super) fn bind(context: &ToolContext<'_>) -> crate::ToolLivePublisher {
         },
     )
 }
+
+impl crate::AttemptContext<'_> {
+    /// Declare the one pending child against this admitted attempt.
+    pub fn declare_start(
+        &self,
+        start: lash_execution_contracts::tool_intent::StartProcessIntent,
+    ) -> Result<
+        lash_execution_contracts::DeclaredStart,
+        lash_execution_contracts::DeclaredStartRefused,
+    > {
+        if start.owner != self.owner().runtime_owner() {
+            return Err(lash_execution_contracts::DeclaredStartRefused::ForeignOwner);
+        }
+        if self.completion_key().is_err() {
+            return Err(lash_execution_contracts::DeclaredStartRefused::CompletionUnavailable);
+        }
+        let identity = self.intent_identity(0);
+        Ok(lash_execution_contracts::declared_start::declared_start(
+            start, identity,
+        ))
+    }
+}

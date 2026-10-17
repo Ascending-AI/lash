@@ -283,7 +283,7 @@ struct StandardToolResult {
     tool_name: &'static str,
     output: ToolCallOutput,
     model_return_text: &'static str,
-    intent_outcomes: Vec<lash_core::ToolIntentExecutionOutcome>,
+    intent_outcomes: Vec<lash_execution_contracts::tool_intent_outcome::ToolIntentExecutionOutcome>,
 }
 
 impl StandardToolResult {
@@ -423,7 +423,9 @@ impl StandardProtocolExpectations {
         assert_eq!(
             run.intent_outcomes
                 .iter()
-                .filter_map(lash_core::ToolIntentExecutionOutcome::kind)
+                .filter_map(
+                    lash_execution_contracts::tool_intent_outcome::ToolIntentExecutionOutcome::kind
+                )
                 .collect::<Vec<_>>(),
             self.intent_kinds,
             "{scenario_name} typed intent evidence changed"
@@ -451,7 +453,7 @@ struct StandardProtocolRun {
     errors: Vec<String>,
     turn_outcomes: Vec<TurnOutcome>,
     model_request_texts: Vec<String>,
-    intent_outcomes: Vec<lash_core::ToolIntentExecutionOutcome>,
+    intent_outcomes: Vec<lash_execution_contracts::tool_intent_outcome::ToolIntentExecutionOutcome>,
 }
 
 impl StandardProtocolRun {

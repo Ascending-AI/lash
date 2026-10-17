@@ -1,10 +1,12 @@
 use std::collections::BTreeSet;
 use std::sync::LazyLock;
 
-use lash_core_execution::store::module_nodes::stage_module_node;
-use lash_core_execution::{
-    ArtifactReferrer, ArtifactStoreError, ReferrerClaim, ResolvedArtifactCleanup, StoreError,
-};
+use lash_core_store::artifact_referrer::ArtifactReferrer;
+use lash_core_store::artifact_referrer::ReferrerClaim;
+use lash_core_store::artifact_referrer::ResolvedArtifactCleanup;
+use lash_core_store::store::StoreError;
+use lash_execution_contracts::module_artifacts::ArtifactStoreError;
+use lash_execution_contracts::module_nodes::stage_module_node;
 use lash_store_sql::Dialect;
 use lash_store_sql::artifact::referrer_edges::ReferrerEdgeStatements;
 use lash_store_sql::artifact::referrer_fences::ReferrerFenceStatements;
@@ -112,9 +114,9 @@ mod tool_material;
 /// The namespace of a store-set artifact store; an engine's own store has
 /// none here.
 pub(crate) fn store_namespace(
-    store: &lash_core_execution::ArtifactStoreId,
+    store: &lash_core_store::artifact_referrer::ArtifactStoreId,
 ) -> Option<&'static str> {
-    use lash_core_execution::ArtifactStoreId;
+    use lash_core_store::artifact_referrer::ArtifactStoreId;
     match store {
         ArtifactStoreId::KernelDocument => Some(MODULE_ARTIFACT_NAMESPACE),
         ArtifactStoreId::ProcessEnv => Some(PROCESS_ENV_NAMESPACE),
@@ -128,9 +130,9 @@ pub(crate) fn store_namespace(
 /// A manifest's store-set share as `(namespace, reference)` pairs. Only the
 /// module and environment stores share a definition's transaction.
 fn definition_manifest(
-    manifest: &[lash_core_execution::ArtifactName],
+    manifest: &[lash_core_store::artifact_referrer::ArtifactName],
 ) -> Result<Vec<(&'static str, String)>, ArtifactStoreError> {
-    use lash_core_execution::ArtifactStoreId;
+    use lash_core_store::artifact_referrer::ArtifactStoreId;
     manifest
         .iter()
         .map(|artifact| {
@@ -187,9 +189,9 @@ pub(crate) async fn lock_referrer_tx(
 /// The artifact lock orders this acquisition against source cleanup.
 pub(crate) async fn acquire_process_env_tx(
     tx: &mut crate::guarded_tx::GuardedTx<'_>,
-    env: &lash_core_execution::ProcessEnvRef,
-    process: &lash_core_execution::ProcessId,
-) -> Result<(), lash_core_execution::PluginError> {
+    env: &lash_core_store::process_identity::ProcessEnvRef,
+    process: &lash_protocol_types::ProcessId,
+) -> Result<(), lash_execution_contracts::plugin_error::PluginError> {
     let referrer = ArtifactReferrer::ProcessRecord(process.clone());
     lock_referrer_tx(tx, &referrer).await.map_err(backend)?;
     if is_fenced_tx(tx, &referrer).await? {
@@ -254,9 +256,9 @@ fn decode_edge_referrer(row: &PgRow) -> Result<ArtifactReferrer, ArtifactStoreEr
     let kind: String = row.try_get("referrer_kind").map_err(backend)?;
     let id: String = row.try_get("referrer_id").map_err(backend)?;
     ArtifactReferrer::decode(&kind, &id).map_err(|error| match error {
-        lash_core_execution::ArtifactReferrerError::UnknownKind(label) => {
+        lash_core_store::artifact_referrer::ArtifactReferrerError::UnknownKind(label) => {
             StoreError::Incompatible {
-                refusal: lash_core_execution::compat::CompatRefusal::UnknownVocabulary {
+                refusal: lash_core_store::compat::CompatRefusal::UnknownVocabulary {
                     surface: "artifact referrer edge kind".to_owned(),
                     label,
                 },
@@ -289,7 +291,7 @@ impl PostgresLashVmArtifactStore {
         // ranges before the artifact is written (FIG-4746).
         let plugin_publication = match bytes {
             Some(bytes) if namespace == PROCESS_ENV_NAMESPACE => {
-                lash_core_execution::store::plugin_writers::PluginPublication::of_process_env(bytes)
+                lash_core_store::store::plugin_writers::PluginPublication::of_process_env(bytes)
                     .map_err(|error| ArtifactStoreError::Encode(error.to_string()))?
             }
             _ => Default::default(),
@@ -368,7 +370,7 @@ impl PostgresLashVmArtifactStore {
     async fn hold_module_artifact_batch(
         &self,
         claim: &ReferrerClaim,
-        artifacts: &[lash_core_execution::ModuleArtifactHold<'_>],
+        artifacts: &[lash_execution_contracts::module_artifacts::ModuleArtifactHold<'_>],
     ) -> Result<(), ArtifactStoreError> {
         if !claim.referrer().kind().holds_artifacts() {
             return Err(ArtifactStoreError::ReferrerKindRefused {
@@ -391,10 +393,10 @@ impl PostgresLashVmArtifactStore {
             .filter(|artifact| {
                 matches!(
                     artifact,
-                    lash_core_execution::ModuleArtifactHold::Acquire { .. }
+                    lash_execution_contracts::module_artifacts::ModuleArtifactHold::Acquire { .. }
                 )
             })
-            .map(lash_core_execution::ModuleArtifactHold::module_ref)
+            .map(lash_execution_contracts::module_artifacts::ModuleArtifactHold::module_ref)
             .collect();
         let unheld: BTreeSet<String> = if acquired.is_empty() {
             BTreeSet::new()
@@ -412,15 +414,19 @@ impl PostgresLashVmArtifactStore {
             .into_iter()
             .collect()
         };
-        let artifacts: Vec<&lash_core_execution::ModuleArtifactHold<'_>> = artifacts
-            .iter()
-            .filter(|artifact| match artifact {
-                lash_core_execution::ModuleArtifactHold::Publish { .. } => true,
-                lash_core_execution::ModuleArtifactHold::Acquire { module_ref, .. } => {
-                    unheld.contains(*module_ref)
-                }
-            })
-            .collect();
+        let artifacts: Vec<&lash_execution_contracts::module_artifacts::ModuleArtifactHold<'_>> =
+            artifacts
+                .iter()
+                .filter(|artifact| match artifact {
+                    lash_execution_contracts::module_artifacts::ModuleArtifactHold::Publish {
+                        ..
+                    } => true,
+                    lash_execution_contracts::module_artifacts::ModuleArtifactHold::Acquire {
+                        module_ref,
+                        ..
+                    } => unheld.contains(*module_ref),
+                })
+                .collect();
         let mut locked: Vec<&str> = artifacts
             .iter()
             .map(|artifact| artifact.module_ref())
@@ -439,7 +445,7 @@ impl PostgresLashVmArtifactStore {
             let artifact_ref = artifact.module_ref();
             let verified = matches!(
                 artifact,
-                lash_core_execution::ModuleArtifactHold::Publish { .. }
+                lash_execution_contracts::module_artifacts::ModuleArtifactHold::Publish { .. }
             );
             match artifact.body().node_kind() {
                 None => {
@@ -810,7 +816,8 @@ impl PostgresLashVmArtifactStore {
         .await
         .map_err(backend)?;
         for artifact_ref in &source_refs {
-            use lash_core_execution::store::{EnumerationProgress, ReclamationEnumeration};
+            use lash_core_store::store::EnumerationProgress;
+            use lash_core_store::store::ReclamationEnumeration;
             let rows = crate::observed_sql::query(artifact_sql().edges.select_artifact_edges.sql())
                 .bind(namespace)
                 .bind(artifact_ref)
@@ -825,10 +832,13 @@ impl PostgresLashVmArtifactStore {
                 })
                 .collect::<Result<Vec<_>, _>>()?;
             let mut enumeration = ReclamationEnumeration::<
-                lash_core_execution::ArtifactReferrerKind,
-                (lash_core_execution::ArtifactReferrerKind, String),
+                lash_core_store::artifact_referrer::ArtifactReferrerKind,
+                (
+                    lash_core_store::artifact_referrer::ArtifactReferrerKind,
+                    String,
+                ),
             >::new();
-            for kind in lash_core_execution::ArtifactReferrerKind::ALL {
+            for kind in lash_core_store::artifact_referrer::ArtifactReferrerKind::ALL {
                 enumeration
                     .page(
                         kind,
@@ -876,7 +886,7 @@ impl PostgresLashVmArtifactStore {
         tx: &mut sqlx::PgConnection,
         namespace: &str,
         artifact_ref: &str,
-        referrers: &lash_core_execution::store::CompleteArtifactReferrers,
+        referrers: &lash_core_store::store::CompleteArtifactReferrers,
     ) -> Result<(), ArtifactStoreError> {
         if !referrers.is_empty() {
             return Ok(());
@@ -932,10 +942,11 @@ impl PostgresLashVmArtifactStore {
     ) -> Result<Option<Vec<u8>>, ArtifactStoreError> {
         use lash_core_store::checkpoint_graph::{GraphRefusal, NodeId};
         let corrupt = |message: String| ArtifactStoreError::StoredDataCorrupt {
-            source: lash_core_execution::ModuleArtifactCorruption::Storage {
-                record_kind: "module artifact node".into(),
-                message,
-            },
+            source:
+                lash_protocol_types::module_artifact_refusal::ModuleArtifactCorruption::Storage {
+                    record_kind: "module artifact node".into(),
+                    message,
+                },
         };
         let root = root
             .and_then(NodeId::from_hex)
@@ -952,7 +963,7 @@ impl PostgresLashVmArtifactStore {
             Err(GraphRefusal::MissingNode(missing)) if missing == root => return Ok(None),
             Err(refusal) => return Err(corrupt(refusal.to_string())),
         };
-        lash_core_execution::store::module_nodes::module_node_body(root, &closure).map(Some)
+        lash_execution_contracts::module_nodes::module_node_body(root, &closure).map(Some)
     }
 }
 
@@ -962,7 +973,7 @@ fn module_node_refused(
     refusal: lash_core_store::checkpoint_graph::GraphRefusal,
 ) -> ArtifactStoreError {
     ArtifactStoreError::StoredDataCorrupt {
-        source: lash_core_execution::ModuleArtifactCorruption::Storage {
+        source: lash_protocol_types::module_artifact_refusal::ModuleArtifactCorruption::Storage {
             record_kind: "module artifact node".into(),
             message: refusal.to_string(),
         },
@@ -970,9 +981,11 @@ fn module_node_refused(
 }
 
 #[async_trait::async_trait]
-impl lash_core_execution::ModuleArtifactStore for PostgresLashVmArtifactStore {
-    fn durability_tier(&self) -> lash_core_execution::DurabilityTier {
-        lash_core_execution::DurabilityTier::Durable
+impl lash_execution_contracts::module_artifacts::ModuleArtifactStore
+    for PostgresLashVmArtifactStore
+{
+    fn durability_tier(&self) -> lash_execution_contracts::module_artifacts::DurabilityTier {
+        lash_execution_contracts::module_artifacts::DurabilityTier::Durable
     }
 
     async fn publish_module_artifact(
@@ -1007,7 +1020,7 @@ impl lash_core_execution::ModuleArtifactStore for PostgresLashVmArtifactStore {
     async fn hold_module_artifacts(
         &self,
         claim: &ReferrerClaim,
-        artifacts: &[lash_core_execution::ModuleArtifactHold<'_>],
+        artifacts: &[lash_execution_contracts::module_artifacts::ModuleArtifactHold<'_>],
     ) -> Result<(), ArtifactStoreError> {
         if artifacts.is_empty() {
             return Ok(());
@@ -1046,11 +1059,11 @@ impl lash_core_execution::ModuleArtifactStore for PostgresLashVmArtifactStore {
 }
 
 #[async_trait::async_trait]
-impl lash_core_execution::ProcessEnvStore for PostgresLashVmArtifactStore {
+impl lash_execution_contracts::process::ProcessEnvStore for PostgresLashVmArtifactStore {
     async fn publish_process_env(
         &self,
         claim: &ReferrerClaim,
-        env_ref: &lash_core_execution::ProcessEnvRef,
+        env_ref: &lash_core_store::process_identity::ProcessEnvRef,
         bytes: &[u8],
     ) -> Result<(), ArtifactStoreError> {
         if !crate::namespace::is_valid_opaque_key(env_ref.as_str()) {
@@ -1070,7 +1083,7 @@ impl lash_core_execution::ProcessEnvStore for PostgresLashVmArtifactStore {
     async fn acquire_process_env(
         &self,
         claim: &ReferrerClaim,
-        env_ref: &lash_core_execution::ProcessEnvRef,
+        env_ref: &lash_core_store::process_identity::ProcessEnvRef,
     ) -> Result<(), ArtifactStoreError> {
         if !crate::namespace::is_valid_opaque_key(env_ref.as_str()) {
             return Err(ArtifactStoreError::Encode(
@@ -1090,7 +1103,7 @@ impl lash_core_execution::ProcessEnvStore for PostgresLashVmArtifactStore {
 
     async fn get_process_env(
         &self,
-        env_ref: &lash_core_execution::ProcessEnvRef,
+        env_ref: &lash_core_store::process_identity::ProcessEnvRef,
     ) -> Result<Option<Vec<u8>>, ArtifactStoreError> {
         if !crate::namespace::is_valid_opaque_key(env_ref.as_str()) {
             return Err(ArtifactStoreError::Encode(
@@ -1103,11 +1116,11 @@ impl lash_core_execution::ProcessEnvStore for PostgresLashVmArtifactStore {
 }
 
 #[async_trait::async_trait]
-impl lash_core_execution::TurnPreludeStore for PostgresLashVmArtifactStore {
+impl lash_execution_contracts::turn_prelude::TurnPreludeStore for PostgresLashVmArtifactStore {
     async fn publish_turn_prelude(
         &self,
         claim: &ReferrerClaim,
-        prelude_ref: &lash_core_execution::TurnPreludeRef,
+        prelude_ref: &lash_execution_contracts::turn_prelude::TurnPreludeRef,
         bytes: &[u8],
     ) -> Result<(), ArtifactStoreError> {
         if !prelude_ref.matches_store_bytes(bytes) {
@@ -1133,7 +1146,7 @@ impl lash_core_execution::TurnPreludeStore for PostgresLashVmArtifactStore {
 
     async fn get_turn_prelude(
         &self,
-        prelude_ref: &lash_core_execution::TurnPreludeRef,
+        prelude_ref: &lash_execution_contracts::turn_prelude::TurnPreludeRef,
     ) -> Result<Option<Vec<u8>>, ArtifactStoreError> {
         if !crate::namespace::is_valid_opaque_key(prelude_ref.as_str()) {
             return Err(ArtifactStoreError::Encode(
@@ -1146,13 +1159,13 @@ impl lash_core_execution::TurnPreludeStore for PostgresLashVmArtifactStore {
 }
 
 #[async_trait::async_trait]
-impl lash_core_execution::ProcessDefinitionStore for PostgresLashVmArtifactStore {
+impl lash_execution_contracts::process::ProcessDefinitionStore for PostgresLashVmArtifactStore {
     async fn publish_process_definition(
         &self,
         claim: &ReferrerClaim,
-        id: &lash_core_execution::ProcessDefinitionId,
+        id: &lash_protocol_types::ProcessDefinitionId,
         descriptor: &[u8],
-        manifest: &[lash_core_execution::ArtifactName],
+        manifest: &[lash_core_store::artifact_referrer::ArtifactName],
     ) -> Result<(), ArtifactStoreError> {
         self.hold_definition_closure(
             claim,
@@ -1166,8 +1179,8 @@ impl lash_core_execution::ProcessDefinitionStore for PostgresLashVmArtifactStore
     async fn acquire_process_definition(
         &self,
         claim: &ReferrerClaim,
-        id: &lash_core_execution::ProcessDefinitionId,
-        manifest: &[lash_core_execution::ArtifactName],
+        id: &lash_protocol_types::ProcessDefinitionId,
+        manifest: &[lash_core_store::artifact_referrer::ArtifactName],
     ) -> Result<(), ArtifactStoreError> {
         self.hold_definition_closure(claim, id.as_str(), None, &definition_manifest(manifest)?)
             .await
@@ -1183,7 +1196,7 @@ impl lash_core_execution::ProcessDefinitionStore for PostgresLashVmArtifactStore
 
     async fn get_process_definition(
         &self,
-        id: &lash_core_execution::ProcessDefinitionId,
+        id: &lash_protocol_types::ProcessDefinitionId,
     ) -> Result<Option<Vec<u8>>, ArtifactStoreError> {
         self.get_namespaced(PROCESS_DEFINITION_NAMESPACE, id.as_str())
             .await

@@ -21,7 +21,10 @@
 use std::sync::Mutex;
 
 use lash::workflow::document::{FunctionValue, parse_document};
-use lash_core::{ArtifactStoreError, ModuleArtifactHold, ModuleArtifactStore, ReferrerClaim};
+use lash_core::ReferrerClaim;
+use lash_execution_contracts::module_artifacts::ArtifactStoreError;
+use lash_execution_contracts::module_artifacts::ModuleArtifactHold;
+use lash_execution_contracts::module_artifacts::ModuleArtifactStore;
 
 use super::*;
 
@@ -115,7 +118,7 @@ struct CutModules {
 
 #[lash::async_trait]
 impl ModuleArtifactStore for CutModules {
-    fn durability_tier(&self) -> lash_core::DurabilityTier {
+    fn durability_tier(&self) -> lash_execution_contracts::module_artifacts::DurabilityTier {
         self.inner.durability_tier()
     }
 
@@ -186,12 +189,12 @@ impl ModuleArtifactStore for CutModules {
 }
 
 struct CutDefinitions {
-    inner: Arc<dyn lash_core::ProcessDefinitionStore>,
+    inner: Arc<dyn lash_execution_contracts::process::ProcessDefinitionStore>,
     cuts: Arc<Cuts>,
 }
 
 #[lash::async_trait]
-impl lash_core::ProcessDefinitionStore for CutDefinitions {
+impl lash_execution_contracts::process::ProcessDefinitionStore for CutDefinitions {
     async fn publish_process_definition(
         &self,
         claim: &ReferrerClaim,
@@ -298,7 +301,9 @@ impl lash::tools::StaticToolExecute for Launch {
                         .push(Cut::BeforeDocument(String::new()));
                     return lash::tools::ToolAttemptOutcome::host_failed(
                         lash_core::RuntimeEffectControllerError::from(
-                            lash_core::PluginError::attempt_fault("the node died before declaring"),
+                            lash_execution_contracts::plugin_error::PluginError::attempt_fault(
+                                "the node died before declaring",
+                            ),
                         )
                         .retryable_uncommitted_derivation(),
                     );
@@ -314,7 +319,7 @@ impl lash::tools::StaticToolExecute for Launch {
             Err(error) => return refuse(error.to_string()),
         };
         // The child outlives the spawner, which answers its handle at once.
-        let lifetime = lash_core::lifetime::detached(&cx);
+        let lifetime = lash_execution_contracts::process::lifetime::detached(&cx);
         let originator = context
             .process_spawn_provenance()
             .expect("the tool runs inside a process")
@@ -329,18 +334,20 @@ impl lash::tools::StaticToolExecute for Launch {
             Err(error) => return refuse(format!("{error:?}")),
         };
         let identity = context.intent_identity(0);
-        let declaration = lash_core::ProcessStartDeclaration::inline(
+        let declaration = lash_execution_contracts::process::ProcessStartDeclaration::inline(
             resolved.target.args.clone(),
             launch,
             originator,
             lifetime,
         );
-        let intents = lash_core::ToolIntents::v3(vec![lash_core::ToolIntent::StartProcess(
-            Box::new(lash_core::StartProcessIntent {
-                owner: context.owner().runtime_owner(),
-                declaration,
-            }),
-        )]);
+        let intents = lash_execution_contracts::tool_intent::ToolIntents::v3(vec![
+            lash_execution_contracts::tool_intent::ToolIntent::StartProcess(Box::new(
+                lash_execution_contracts::tool_intent::StartProcessIntent {
+                    owner: context.owner().runtime_owner(),
+                    declaration,
+                },
+            )),
+        ]);
         let counted = shipped(&call.args["function"])
             .counted_bytes()
             .expect("the function value encodes");
@@ -424,7 +431,7 @@ async fn cut_core(
 ) -> (lash::LashCore, lash_core::testing::ProcessRegistryFaults) {
     let mut registry = None;
     let layered = lash_core::testing::runtime_helpers::LayeredStores::over(
-        Arc::clone(stores) as Arc<dyn lash_core::StoreSet>
+        Arc::clone(stores) as Arc<dyn lash_execution_contracts::backend::StoreSet>
     )
     .map_module_artifacts(|inner| {
         Arc::new(CutModules {
@@ -482,7 +489,7 @@ async fn sqlite() -> Arc<lash_sqlite_store::SqliteStoreSet> {
 }
 
 /// The launch an inline start runs under: an environment of no effects.
-async fn empty_launch(core: &lash::LashCore) -> lash_core::EngineLaunch {
+async fn empty_launch(core: &lash::LashCore) -> lash_execution_contracts::process::EngineLaunch {
     let env_ref = core
         .host_artifacts()
         .publish_process_env(
@@ -491,7 +498,7 @@ async fn empty_launch(core: &lash::LashCore) -> lash_core::EngineLaunch {
         )
         .await
         .expect("publish the empty environment");
-    lash_core::EngineLaunch::new(
+    lash_execution_contracts::process::EngineLaunch::new(
         env_ref,
         core.processes()
             .engine_defaults(lash::process::LASH_VM_ENGINE_KIND, &serde_json::Value::Null)
@@ -502,25 +509,25 @@ async fn empty_launch(core: &lash::LashCore) -> lash_core::EngineLaunch {
 fn inline_request(
     value: &FunctionValue,
     n: i64,
-    launch: &lash_core::EngineLaunch,
+    launch: &lash_execution_contracts::process::EngineLaunch,
     key: &str,
-) -> lash_core::ProcessStartRequest {
+) -> lash_execution_contracts::process::ProcessStartRequest {
     let mut args = serde_json::Map::new();
     args.insert("n".to_owned(), serde_json::json!(n));
-    lash_core::ProcessStartRequest::inline(
+    lash_execution_contracts::process::ProcessStartRequest::inline(
         lash::process::LASH_VM_ENGINE_KIND,
         transport(value),
         args,
         launch.clone(),
-        lash_core::ProcessOriginator::host(),
-        lash_core::LifetimeDecision::Detached,
+        lash_execution_contracts::process::ProcessOriginator::host(),
+        lash_execution_contracts::process::LifetimeDecision::Detached,
     )
     .with_host_start_key(key)
 }
 
 async fn host_start(
     core: &lash::LashCore,
-    request: lash_core::ProcessStartRequest,
+    request: lash_execution_contracts::process::ProcessStartRequest,
 ) -> lash::Result<lash_core::ProcessId> {
     core.processes()
         .start(request, core.effect_host())
@@ -531,8 +538,8 @@ async fn host_start(
 /// Every process the registry holds, whatever its status.
 async fn every_process(
     stores: &Arc<lash_sqlite_store::SqliteStoreSet>,
-) -> Vec<lash_core::ProcessRecord> {
-    use lash_core::ProcessQuery as _;
+) -> Vec<lash_execution_contracts::process::ProcessRecord> {
+    use lash_execution_contracts::process::ProcessQuery as _;
     stores
         .process_registry()
         .list_processes_page(
@@ -724,9 +731,9 @@ async fn an_inline_start_retry_is_exact_and_a_conflicting_or_refused_one_starts_
     assert_eq!(again, process, "an exact retry is the same start");
 
     let other_launch = empty_launch(&core).await;
-    let other_launch = lash_core::EngineLaunch::new(
+    let other_launch = lash_execution_contracts::process::EngineLaunch::new(
         other_launch.env,
-        Some(lash_core::EngineSettings::new({
+        Some(lash_execution_contracts::process::EngineSettings::new({
             let mut settings = launch
                 .settings
                 .clone()
@@ -915,7 +922,9 @@ async fn a_declared_inline_start_realizes_once_across_a_crash_at_each_realizatio
             .into_iter()
             .find(|record| record.id == child)
             .expect("the child is registered");
-        let lash_core::ProcessInput::Engine { payload, .. } = shipped.input.as_ref() else {
+        let lash_execution_contracts::process::ProcessInput::Engine { payload, .. } =
+            shipped.input.as_ref()
+        else {
             panic!("the child runs an engine input");
         };
         let shipped_document = payload["document"]
@@ -996,7 +1005,7 @@ async fn an_uncommitted_declared_inline_start_leaves_no_process_and_holds_nothin
     .await
     .expect("the spawner settles")
     .expect("the output reads");
-    let lash_core::ProcessAwaitOutput::Settled { output } = output else {
+    let lash_execution_contracts::process::ProcessAwaitOutput::Settled { output } = output else {
         panic!("the spawner settles with an output: {output:?}");
     };
     assert!(
@@ -1016,7 +1025,7 @@ async fn an_uncommitted_declared_inline_start_leaves_no_process_and_holds_nothin
     artifacts.release(pin).await.expect("the pin is released");
     // The staging's guard rechecks its starter after the relay's backoff;
     // the law makes that pass due now.
-    use lash_core::StoreSet as _;
+    use lash_execution_contracts::backend::StoreSet as _;
     let staged_under = cuts
         .staged_under
         .lock()
@@ -1112,7 +1121,7 @@ async fn an_inline_start_past_the_value_or_batch_bound_publishes_and_starts_noth
     .await
     .expect("the spawner settles")
     .expect("the output reads");
-    let lash_core::ProcessAwaitOutput::Settled { output } = output else {
+    let lash_execution_contracts::process::ProcessAwaitOutput::Settled { output } = output else {
         panic!("the spawner settles with an output: {output:?}");
     };
     let (_, counted, declared) = LAUNCH_SIZES
@@ -1127,7 +1136,9 @@ async fn an_inline_start_past_the_value_or_batch_bound_publishes_and_starts_noth
         "the value is within its own bound: {counted}"
     );
     assert!(
-        declared > lash_core::ToolIntentLimits::standard().max_canonical_bytes(),
+        declared
+            > lash_execution_contracts::tool_intent::ToolIntentLimits::standard()
+                .max_canonical_bytes(),
         "the declaration takes the batch past its bound: {declared}"
     );
     assert!(

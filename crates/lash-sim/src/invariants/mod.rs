@@ -435,7 +435,7 @@ impl ToolObserver {
     }
 
     /// Record that `call` registered `key`.
-    pub fn registered(&self, call: CallRef, key: &lash_core::PinnedKey) {
+    pub fn registered(&self, call: CallRef, key: &lash_execution_contracts::waits::PinnedKey) {
         self.recorder.record(Fact::CompletionRegistered {
             key: completion_key_label(key),
             call,
@@ -461,7 +461,7 @@ pub async fn check_engine(
 
 /// A completion key as a history names it: its wait id, which is the key.
 #[must_use]
-pub fn completion_key_label(key: &lash_core::PinnedKey) -> String {
+pub fn completion_key_label(key: &lash_execution_contracts::waits::PinnedKey) -> String {
     key.as_str().to_owned()
 }
 
@@ -469,18 +469,18 @@ pub fn completion_key_label(key: &lash_core::PinnedKey) -> String {
 /// `receipt`, whose process the registry holds as `answered`.
 pub fn record_start_answered(
     recorder: &HistoryRecorder,
-    requested: &lash_core::ProcessOriginator,
-    receipt: &lash_core::ProcessStartReceipt,
-    answered: &lash_core::ProcessRecord,
+    requested: &lash_execution_contracts::process::ProcessOriginator,
+    receipt: &lash_execution_contracts::process::ProcessStartReceipt,
+    answered: &lash_execution_contracts::process::ProcessRecord,
 ) {
-    let originator = |originator: &lash_core::ProcessOriginator| {
+    let originator = |originator: &lash_execution_contracts::process::ProcessOriginator| {
         serde_json::to_string(originator).unwrap_or_else(|_| format!("{originator:?}"))
     };
     recorder.record(Fact::ProcessStartAnswered {
         process: receipt.process_id.to_string(),
         disposition: match receipt.disposition {
-            lash_core::ProcessRegistrationOutcome::Created => "created",
-            lash_core::ProcessRegistrationOutcome::Existing => "existing",
+            lash_execution_contracts::process::ProcessRegistrationOutcome::Created => "created",
+            lash_execution_contracts::process::ProcessRegistrationOutcome::Existing => "existing",
         }
         .to_owned(),
         requested_originator: originator(requested),

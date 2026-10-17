@@ -19,7 +19,10 @@ use lash_protocol_types::SessionId;
 async fn await_process_terminal(
     process_work: &dyn lash_core::ProcessWorkSubstrate,
     process_id: &ProcessId,
-) -> std::result::Result<lash_core::ProcessAwaitOutput, lash_core::PluginError> {
+) -> std::result::Result<
+    lash_execution_contracts::process::ProcessAwaitOutput,
+    lash_execution_contracts::plugin_error::PluginError,
+> {
     loop {
         match process_work.await_process_terminal(process_id).await? {
             lash_core::ProcessTerminalWait::Terminal(output) => return Ok(output),
@@ -39,7 +42,7 @@ pub struct Processes {
 pub struct ProcessEnvView {
     pub process: ProcessId,
     pub authority: ProcessAuthority,
-    pub provenance: lash_core::ProcessProvenance,
+    pub provenance: lash_execution_contracts::process::ProcessProvenance,
 }
 
 /// Engine processes carry an explicit environment; session-turn processes
@@ -49,7 +52,7 @@ pub enum ProcessAuthority {
     Engine {
         env_ref: lash_core::ProcessEnvRef,
         env: Box<lash_core::ProcessEnv>,
-        engine_settings: Option<lash_core::EngineSettings>,
+        engine_settings: Option<lash_execution_contracts::process::EngineSettings>,
         /// The components `env` names that this core declares retired, in
         /// env order: the process builds without them (FIG-6296).
         retired: Vec<lash_core::ProcessComponentId>,
@@ -128,13 +131,18 @@ impl Processes {
         let steps = lash_core::facade_support::read_process_steps(&host, process_id).await?;
         let process = match self.make_observer().process(process_id).await {
             Ok(Some(process)) => process,
-            Ok(None) | Err(lash_core::PluginError::ProcessUnknown { .. }) => return Ok(Vec::new()),
-            Err(lash_core::PluginError::ProcessNoLongerRetained { .. }) => {
+            Ok(None)
+            | Err(lash_execution_contracts::plugin_error::PluginError::ProcessUnknown { .. }) => {
+                return Ok(Vec::new());
+            }
+            Err(lash_execution_contracts::plugin_error::PluginError::ProcessNoLongerRetained {
+                ..
+            }) => {
                 return Ok(pruned(&segments));
             }
             Err(error) => return Err(error.into()),
         };
-        let lash_core::ProcessInput::Engine {
+        let lash_execution_contracts::process::ProcessInput::Engine {
             kind,
             payload,
             launch,
@@ -155,11 +163,13 @@ impl Processes {
             segments,
         };
         provider
-            .replay(lash_core::ProcessDocument::new(request))
+            .replay(lash_execution_contracts::process::ProcessDocument::new(
+                request,
+            ))
             .await?
             .downcast::<Vec<SegmentReplay>>()
             .map_err(|_| {
-                lash_core::PluginError::Invoke(format!(
+                lash_execution_contracts::plugin_error::PluginError::Invoke(format!(
                     "the `{kind}` engine answered a replay with another type"
                 ))
                 .into()
@@ -193,12 +203,12 @@ impl Processes {
         }
     }
 
-    fn registry(&self) -> Arc<dyn lash_core::ProcessRegistry> {
+    fn registry(&self) -> Arc<dyn lash_execution_contracts::process::ProcessRegistry> {
         self.core.process_registry.clone()
     }
 
-    fn make_observer(&self) -> lash_core::facade_support::ProcessWorkObserver {
-        lash_core::facade_support::ProcessWorkObserver::new(self.registry())
+    fn make_observer(&self) -> lash_execution_contracts::process::ProcessWorkObserver {
+        lash_execution_contracts::process::ProcessWorkObserver::new(self.registry())
             .with_actor_parks(Arc::clone(self.core.backend.durable()))
             .with_read_attempts(self.core.observer_pacing.snapshot_read_attempts)
             .with_work_limits(self.core.env.core.observation_work_limits)
@@ -209,24 +219,24 @@ impl Processes {
     /// so the journals retired are exactly the rows the prune can delete, and
     /// absence widens to every status rather than the `Running` default.
     fn prune_selection(
-        filter: Option<&lash_core::ProcessListFilter>,
-    ) -> Result<lash_core::ProcessListFilter> {
+        filter: Option<&lash_execution_contracts::process::ProcessListFilter>,
+    ) -> Result<lash_execution_contracts::process::ProcessListFilter> {
         let Some(filter) = filter else {
-            return Ok(lash_core::ProcessListFilter {
-                status: lash_core::ProcessStatusFilter::Any,
-                ..lash_core::ProcessListFilter::default()
+            return Ok(lash_execution_contracts::process::ProcessListFilter {
+                status: lash_execution_contracts::process::ProcessStatusFilter::Any,
+                ..lash_execution_contracts::process::ProcessListFilter::default()
             });
         };
-        if matches!(&filter.status, lash_core::ProcessStatusFilter::In(statuses) if !statuses.is_empty() && statuses.iter().all(|status| !status.is_retired()))
+        if matches!(&filter.status, lash_execution_contracts::process::ProcessStatusFilter::In(statuses) if !statuses.is_empty() && statuses.iter().all(|status| !status.is_retired()))
         {
-            return Err(EmbedError::Plugin(lash_core::PluginError::Session(
-                format!(
+            return Err(EmbedError::Plugin(
+                lash_execution_contracts::plugin_error::PluginError::Session(format!(
                     "process retention filter selects the live status set `{:?}`, \
                      which no prunable row can hold; pass \
                      `ProcessStatusFilter::Any` or a set containing a retired status",
                     filter.status
-                ),
-            )));
+                )),
+            ));
         }
         Ok(filter.clone())
     }
@@ -296,7 +306,7 @@ impl Processes {
         match outcome {
             lash_core::RuntimeEffectOutcome::Process { result } => Ok(result),
             _ => Err(lash_core::RuntimeEffectControllerError::from(
-                lash_core::PluginError::Session(
+                lash_execution_contracts::plugin_error::PluginError::Session(
                     "process effect returned non-process outcome".to_string(),
                 ),
             )),
@@ -306,7 +316,7 @@ impl Processes {
     /// The scope a host start may live until: `session_id`, looked up now.
     ///
     /// A host start is a root: it has no starter, so its lifetime is
-    /// [`Lifetime::Detached`](lash_core::Lifetime::Detached) or `Until` a
+    /// [`Lifetime::Detached`](lash_execution_contracts::process::Lifetime::Detached) or `Until` a
     /// session this lookup grants (FIG-3607 R3). A process started `Until` it
     /// is cancelled when the session is deleted, and its descendants inherit
     /// the session as their session capability.
@@ -315,15 +325,20 @@ impl Processes {
     ///
     /// [`EmbedError::UnknownSession`] when the session does not exist or was
     /// deleted.
-    pub async fn session_scope(&self, session_id: &SessionId) -> Result<lash_core::ScopeRef> {
+    pub async fn session_scope(
+        &self,
+        session_id: &SessionId,
+    ) -> Result<lash_execution_contracts::process::ScopeRef> {
         self.require_live_session(session_id).await?;
-        Ok(lash_core::ScopeRef::host_session_lookup(session_id.clone()))
+        Ok(lash_execution_contracts::process::ScopeRef::host_session_lookup(session_id.clone()))
     }
 
     async fn require_live_session(&self, session_id: &SessionId) -> Result<()> {
-        let live =
-            lash_core::runtime::session_is_live(self.core.store_factory.as_ref(), session_id)
-                .await?;
+        let live = lash_execution_contracts::deployment::session_is_live(
+            self.core.store_factory.as_ref(),
+            session_id,
+        )
+        .await?;
         if live {
             Ok(())
         } else {
@@ -347,14 +362,14 @@ impl Processes {
     /// its policy or its model unstated.
     fn check_host_session_turn(
         &self,
-        create_request: &lash_core::SessionCreateRequest,
+        create_request: &lash_execution_contracts::session_types::SessionCreateRequest,
     ) -> Result<()> {
         if let Some(unstated) = create_request.unstated_root_config() {
             return Err(EmbedError::SessionTurnStartUnspecified { unstated });
         }
         if create_request.policy.is_none() {
             return Err(EmbedError::SessionTurnStartUnspecified {
-                unstated: lash_core::UnstatedSessionConfig::Policy,
+                unstated: lash_execution_contracts::session_types::UnstatedSessionConfig::Policy,
             });
         }
         crate::support::build_plugin_host(
@@ -377,7 +392,7 @@ impl Processes {
 
     fn host_session_turn_admission(
         &self,
-        request: lash_core::SessionCreateRequest,
+        request: lash_execution_contracts::session_types::SessionCreateRequest,
     ) -> lash_core::runtime::SessionTurnAdmission {
         let core = self.core.clone();
         Arc::new(move |fresh, _claim| {
@@ -429,7 +444,7 @@ impl Processes {
     /// A session-turn start carries no environment: it is a root creation,
     /// and takes an explicit spec like every other (FIG-4594): build its
     /// create request with
-    /// [`SessionCreateRequest::with_spec`](lash_core::SessionCreateRequest::with_spec).
+    /// [`SessionCreateRequest::with_spec`](lash_execution_contracts::session_types::SessionCreateRequest::with_spec).
     /// One that leaves its policy or model unstated is refused with
     /// [`EmbedError::SessionTurnStartUnspecified`] and nothing is
     /// registered. The start is registered exactly as stated, so a retry
@@ -437,9 +452,9 @@ impl Processes {
     /// host passes to other starts by then.
     pub async fn start(
         &self,
-        request: lash_core::ProcessStartRequest,
+        request: lash_execution_contracts::process::ProcessStartRequest,
         scoped_effect_controller: ActorContext,
-    ) -> Result<lash_core::ProcessStartReceipt> {
+    ) -> Result<lash_execution_contracts::process::ProcessStartReceipt> {
         // The start's `lash.process.start` producer opens here, before the
         // first await, under the caller's context the request chose (else
         // the ambient one): the process is admitted under it.
@@ -456,8 +471,8 @@ impl Processes {
             // 0107). The request is registered as the host stated it: lash
             // lays nothing of its own under a session-turn start (FIG-4594),
             // so the start-key fence compares only what the host stated.
-            let request = request
-                .keyed_in(&scoped_effect_controller)
+            let request = scoped_effect_controller
+                .key_host_start(request)
                 .map_err(EmbedError::Plugin)?;
             // A root start's session grant is the host's lookup, whether it
             // came from `session_scope` or from a remote start's
@@ -473,10 +488,11 @@ impl Processes {
             // names no execution of the start's own: the core's host context
             // is one scope every host start shares, settled at once.
             let mut session_turn_admission = None;
-            if let lash_core::ProcessStartTarget::Input(lash_core::ProcessInput::SessionTurn {
-                create_request,
-                ..
-            }) = registration.input.as_ref()
+            if let lash_execution_contracts::process::ProcessStartTarget::Input(
+                lash_execution_contracts::process::ProcessInput::SessionTurn {
+                    create_request, ..
+                },
+            ) = registration.input.as_ref()
             {
                 self.check_host_session_turn(create_request)?;
                 session_turn_admission =
@@ -486,7 +502,9 @@ impl Processes {
             let command = lash_core::ProcessCommand::Start {
                 registration,
                 observers,
-                execution_context: Box::new(lash_core::ProcessExecutionContext::default()),
+                execution_context: Box::new(
+                    lash_execution_contracts::process::ProcessExecutionContext::default(),
+                ),
             };
             let outcome = self
                 .execute_command(
@@ -503,9 +521,11 @@ impl Processes {
                 disposition,
             } = outcome
             else {
-                return Err(EmbedError::Plugin(lash_core::PluginError::Session(
-                    "process start returned the wrong outcome".to_string(),
-                )));
+                return Err(EmbedError::Plugin(
+                    lash_execution_contracts::plugin_error::PluginError::Session(
+                        "process start returned the wrong outcome".to_string(),
+                    ),
+                ));
             };
             Ok((record, disposition, start_key))
         }
@@ -519,12 +539,16 @@ impl Processes {
         };
         producer.ids_mut().process = Some(record.process_id.clone());
         producer.settle(match &disposition {
-            lash_core::ProcessRegistrationOutcome::Created => lash_core::ProducerOutcome::Selected,
-            lash_core::ProcessRegistrationOutcome::Existing => lash_core::ProducerOutcome::Reused,
+            lash_execution_contracts::process::ProcessRegistrationOutcome::Created => {
+                lash_core::ProducerOutcome::Selected
+            }
+            lash_execution_contracts::process::ProcessRegistrationOutcome::Existing => {
+                lash_core::ProducerOutcome::Reused
+            }
         });
         // Registration created the process's actor ready, in the same
         // transaction: nothing is left to deliver.
-        Ok(lash_core::ProcessStartReceipt {
+        Ok(lash_execution_contracts::process::ProcessStartReceipt {
             process_id: record.process_id,
             start_key,
             disposition,
@@ -538,10 +562,10 @@ impl Processes {
     /// authorizes this unscoped read and reapplies its selection to changes.
     pub async fn list(
         &self,
-        filter: &lash_core::ProcessListFilter,
+        filter: &lash_execution_contracts::process::ProcessListFilter,
         limit: std::num::NonZeroUsize,
-        continuation: Option<lash_core::ProcessRosterCursor>,
-    ) -> Result<lash_core::facade_support::ProcessRosterPage> {
+        continuation: Option<lash_execution_contracts::process::ProcessRosterCursor>,
+    ) -> Result<lash_execution_contracts::process::ProcessRosterPage> {
         self.make_observer()
             .list(filter, limit, continuation)
             .await
@@ -554,9 +578,9 @@ impl Processes {
     /// is thin sugar over this method pre-scoped to the session's observer edge.
     pub async fn list_observed_by(
         &self,
-        session_scope: &lash_core::SessionScope,
-        filter: &lash_core::ProcessListFilter,
-    ) -> Result<Vec<lash_core::facade_support::ObservedProcess>> {
+        session_scope: &lash_execution_contracts::process::SessionScope,
+        filter: &lash_execution_contracts::process::ProcessListFilter,
+    ) -> Result<Vec<lash_execution_contracts::process::ObservedProcess>> {
         self.make_observer()
             .list_observed_by(session_scope, filter)
             .await
@@ -570,9 +594,9 @@ impl Processes {
     /// does not.
     pub async fn list_originated_by(
         &self,
-        session_scope: &lash_core::SessionScope,
-        filter: &lash_core::ProcessListFilter,
-    ) -> Result<Vec<lash_core::facade_support::ObservedProcess>> {
+        session_scope: &lash_execution_contracts::process::SessionScope,
+        filter: &lash_execution_contracts::process::ProcessListFilter,
+    ) -> Result<Vec<lash_execution_contracts::process::ObservedProcess>> {
         self.make_observer()
             .list_originated_by(session_scope, filter)
             .await
@@ -593,12 +617,12 @@ impl Processes {
     /// it, so the host must authorize access.
     pub async fn changed_since(
         &self,
-        after: lash_core::ProcessChangeCursor,
+        after: lash_execution_contracts::process::ProcessChangeCursor,
         limit: std::num::NonZeroUsize,
     ) -> Result<
         crate::ChangePage<
-            lash_core::facade_support::ObservedProcessChange,
-            lash_core::ProcessChangeCursor,
+            lash_execution_contracts::process::ObservedProcessChange,
+            lash_execution_contracts::process::ProcessChangeCursor,
         >,
     > {
         let bounds = self.registry().process_change_bounds().await?;
@@ -606,7 +630,9 @@ impl Processes {
             .make_observer()
             .changed_since(
                 after,
-                limit.get().min(lash_core::MAX_PROCESS_ROSTER_PAGE_SIZE),
+                limit
+                    .get()
+                    .min(lash_execution_contracts::process::MAX_PROCESS_ROSTER_PAGE_SIZE),
             )
             .await?;
         if changes.is_empty() && next.store_sequence() < bounds.current.store_sequence() {
@@ -631,7 +657,7 @@ impl Processes {
         &self,
         kind: &str,
         payload: &serde_json::Value,
-    ) -> Result<Option<lash_core::EngineSettings>> {
+    ) -> Result<Option<lash_execution_contracts::process::EngineSettings>> {
         Ok(self
             .core
             .host_process_engines
@@ -652,12 +678,14 @@ impl Processes {
                 &serde_json::Value::Null,
             )?
             .ok_or_else(|| {
-                crate::error::EmbedError::Plugin(lash_core::PluginError::Registration(
-                    "the kernel engine returned no settings".to_owned(),
-                ))
+                crate::error::EmbedError::Plugin(
+                    lash_execution_contracts::plugin_error::PluginError::Registration(
+                        "the kernel engine returned no settings".to_owned(),
+                    ),
+                )
             })?;
         crate::process::KernelRecordedSettings::from_engine_settings(&settings).map_err(|error| {
-            lash_core::PluginError::Registration(format!(
+            lash_execution_contracts::plugin_error::PluginError::Registration(format!(
                 "the kernel settings do not decode: {error}"
             ))
             .into()
@@ -669,7 +697,7 @@ impl Processes {
     pub async fn get(
         &self,
         process_id: &ProcessId,
-    ) -> Result<Option<lash_core::facade_support::ObservedProcess>> {
+    ) -> Result<Option<lash_execution_contracts::process::ObservedProcess>> {
         self.make_observer()
             .process(process_id)
             .await
@@ -684,13 +712,15 @@ impl Processes {
     pub async fn engine_status(
         &self,
         process_id: &ProcessId,
-    ) -> Result<Option<lash_core::EngineStatus>> {
+    ) -> Result<Option<lash_execution_contracts::process::EngineStatus>> {
         lash_core::runtime::durable::engine_status(self.core.backend.durable().as_ref(), process_id)
             .await
             .map_err(|error| {
-                EmbedError::Plugin(lash_core::PluginError::Session(format!(
-                    "read process `{process_id}`'s engine status: {error}"
-                )))
+                EmbedError::Plugin(
+                    lash_execution_contracts::plugin_error::PluginError::Session(format!(
+                        "read process `{process_id}`'s engine status: {error}"
+                    )),
+                )
             })
     }
 
@@ -711,13 +741,13 @@ impl Processes {
                     terminal_label,
                     pruned_at_ms,
                 } => {
-                    match lash_core::runtime::registry_transitions::ProcessTombstoneStamp::from_row(
+                    match lash_execution_contracts::process::registry_transitions::ProcessTombstoneStamp::from_row(
                         id,
                         &terminal_label,
                         pruned_at_ms,
                     ) {
                         Ok(stamp) => EmbedError::Plugin(
-                            lash_core::runtime::registry_transitions::process_no_longer_retained(
+                            lash_execution_contracts::process::registry_transitions::process_no_longer_retained(
                                 stamp,
                             ),
                         ),
@@ -730,7 +760,7 @@ impl Processes {
             return Ok(None);
         };
         let authority = match record.input.as_ref() {
-            lash_core::ProcessInput::Engine { launch, .. } => {
+            lash_execution_contracts::process::ProcessInput::Engine { launch, .. } => {
                 let bytes = bytes.ok_or_else(|| {
                     crate::plugins::ProcessEnvLoadError::Missing(launch.env.clone())
                 })?;
@@ -742,11 +772,11 @@ impl Processes {
                     engine_settings: launch.settings.clone(),
                 }
             }
-            lash_core::ProcessInput::SessionTurn { create_request, .. } => {
-                ProcessAuthority::SessionTurn {
-                    session: lash_core::runtime::process_session_id(id, create_request),
-                }
-            }
+            lash_execution_contracts::process::ProcessInput::SessionTurn {
+                create_request, ..
+            } => ProcessAuthority::SessionTurn {
+                session: lash_execution_contracts::process::process_session_id(id, create_request),
+            },
         };
         Ok(Some(ProcessEnvView {
             process: record.id,
@@ -790,8 +820,11 @@ impl Processes {
                 ))
             })?;
         let payload = resolved.start_payload(&Default::default())?;
-        let refused =
-            |refusal| EmbedError::Plugin(lash_core::PluginError::ProcessEnvRefused { refusal });
+        let refused = |refusal| {
+            EmbedError::Plugin(
+                lash_execution_contracts::plugin_error::PluginError::ProcessEnvRefused { refusal },
+            )
+        };
         let performed = engines
             .performed_effects(resolved.draft.engine_kind().as_str(), &payload)
             .await
@@ -815,16 +848,22 @@ impl Processes {
         kind: &str,
         payload: &serde_json::Value,
         env: &lash_core::ProcessEnv,
-        fits: &std::collections::BTreeMap<lash_core::EffectName, lash_core::FitPolicy>,
+        fits: &std::collections::BTreeMap<
+            lash_core::EffectName,
+            lash_execution_contracts::process::FitPolicy,
+        >,
     ) -> Result<()> {
-        let refused =
-            |refusal| EmbedError::Plugin(lash_core::PluginError::ProcessEnvRefused { refusal });
+        let refused = |refusal| {
+            EmbedError::Plugin(
+                lash_execution_contracts::plugin_error::PluginError::ProcessEnvRefused { refusal },
+            )
+        };
         let engines = &self.core.host_process_engines;
         let performed = engines
             .performed_effects(kind, payload)
             .await
             .map_err(refused)?;
-        lash_core::check_links(env, &performed, fits).map_err(refused)?;
+        lash_execution_contracts::process::check_links(env, &performed, fits).map_err(refused)?;
         engines
             .components()
             .check_served(&std::sync::Arc::new(env.clone()))
@@ -851,14 +890,14 @@ impl Processes {
     ///
     /// # Errors
     ///
-    /// [`PluginError::ProcessSuccessorRefused`](lash_core::PluginError::ProcessSuccessorRefused)
+    /// [`PluginError::ProcessSuccessorRefused`](lash_execution_contracts::plugin_error::PluginError::ProcessSuccessorRefused)
     /// with the typed reason: nothing was recorded, and the process goes on
     /// as written.
     pub async fn succeed(
         &self,
         id: &ProcessId,
-        successor: lash_core::ProcessSuccessor,
-    ) -> Result<lash_core::ProcessSuccession> {
+        successor: lash_execution_contracts::process::ProcessSuccessor,
+    ) -> Result<lash_execution_contracts::process::ProcessSuccession> {
         Ok(lash_core::request_process_successor(
             &self.core.backend,
             &self.core.host_process_engines,
@@ -903,14 +942,16 @@ impl Processes {
                 process_id: process_id.clone(),
             }));
         };
-        let lash_core::ProcessInput::Engine { kind, payload, .. } = &process.input else {
+        let lash_execution_contracts::process::ProcessInput::Engine { kind, payload, .. } =
+            &process.input
+        else {
             return Ok(WorkflowRead::Unsupported {
                 engine_kind: process.identity.kind.clone(),
             });
         };
         crate::workflow::read(
             &self.core.host_process_engines,
-            &lash_core::ProcessEngineKind::from(kind.as_str()),
+            &lash_execution_contracts::process::ProcessEngineKind::from(kind.as_str()),
             payload,
         )
         .await
@@ -924,7 +965,7 @@ impl Processes {
         &self,
         from: crate::process_history::ProcessHistoryContinuation,
         limit: std::num::NonZeroUsize,
-        mode: lash_core::ProcessEventQueryMode,
+        mode: lash_execution_contracts::process::ProcessEventQueryMode,
     ) -> Result<crate::process_history::ProcessEventsRead> {
         Ok(crate::process_history::read_events(&self.registry(), from, limit, mode).await?)
     }
@@ -932,7 +973,7 @@ impl Processes {
     pub async fn await_output(
         &self,
         process_id: &ProcessId,
-    ) -> Result<lash_core::ProcessAwaitOutput> {
+    ) -> Result<lash_execution_contracts::process::ProcessAwaitOutput> {
         let process_id = self
             .core
             .process_registry
@@ -948,7 +989,7 @@ impl Processes {
         &self,
         process_id: &ProcessId,
         scoped_effect_controller: ActorContext,
-    ) -> Result<lash_core::ProcessCancelReceipt> {
+    ) -> Result<lash_execution_contracts::process::ProcessCancelReceipt> {
         #[expect(
             clippy::expect_used,
             reason = "an execution scope is a struct of opaque string identities, whose \
@@ -967,11 +1008,13 @@ impl Processes {
             .run_command(command, scoped_effect_controller.clone())
             .await?;
         let lash_core::ProcessEffectOutcome::Cancel { record } = outcome else {
-            return Err(EmbedError::Plugin(lash_core::PluginError::Session(
-                "process cancel returned the wrong outcome".to_string(),
-            )));
+            return Err(EmbedError::Plugin(
+                lash_execution_contracts::plugin_error::PluginError::Session(
+                    "process cancel returned the wrong outcome".to_string(),
+                ),
+            ));
         };
-        Ok(lash_core::ProcessCancelReceipt::from_observed(*record)?)
+        Ok(lash_execution_contracts::process::ProcessCancelReceipt::from_observed(*record)?)
     }
 
     /// Redrives a parked process (ADR 0132 §11): clears its park and its
@@ -984,21 +1027,25 @@ impl Processes {
             .backend
             .redrive_process(process_id, requester)
             .await
-            .map_err(|error| EmbedError::Plugin(lash_core::PluginError::Invoke(error.to_string())))
+            .map_err(|error| {
+                EmbedError::Plugin(lash_execution_contracts::plugin_error::PluginError::Invoke(
+                    error.to_string(),
+                ))
+            })
     }
 
     /// Returns the current process-session snapshot.
     pub async fn session_snapshot(
         &self,
         session_id: SessionId,
-    ) -> Result<lash_core::facade_support::ProcessWorkSnapshot> {
+    ) -> Result<lash_execution_contracts::process::ProcessWorkSnapshot> {
         self.make_observer()
             .snapshot_for_session(session_id)
             .await
             .map_err(Into::into)
     }
 
-    pub fn observer(&self) -> Result<lash_core::facade_support::ProcessWorkObserver> {
+    pub fn observer(&self) -> Result<lash_execution_contracts::process::ProcessWorkObserver> {
         Ok(self.make_observer())
     }
 
@@ -1008,7 +1055,7 @@ impl Processes {
     pub async fn cancel_all(
         &self,
         scoped_effect_controller: ActorContext,
-    ) -> Result<Vec<lash_core::ProcessCancelReceipt>> {
+    ) -> Result<Vec<lash_execution_contracts::process::ProcessCancelReceipt>> {
         let outcome = self
             .run_command(
                 lash_core::ProcessCommand::List {
@@ -1018,9 +1065,11 @@ impl Processes {
             )
             .await?;
         let lash_core::ProcessEffectOutcome::List { entries: running } = outcome else {
-            return Err(EmbedError::Plugin(lash_core::PluginError::Session(
-                "process listing returned the wrong outcome".to_string(),
-            )));
+            return Err(EmbedError::Plugin(
+                lash_execution_contracts::plugin_error::PluginError::Session(
+                    "process listing returned the wrong outcome".to_string(),
+                ),
+            ));
         };
         let mut summaries = Vec::with_capacity(running.len());
         for process in running {
@@ -1035,8 +1084,8 @@ impl Processes {
     /// Processes are global; this re-homes only observer membership, never the process itself.
     pub async fn transfer(
         &self,
-        from_scope: &lash_core::SessionScope,
-        to_scope: &lash_core::SessionScope,
+        from_scope: &lash_execution_contracts::process::SessionScope,
+        to_scope: &lash_execution_contracts::process::SessionScope,
         process_ids: &[ProcessId],
     ) -> Result<()> {
         self.registry()
@@ -1044,7 +1093,7 @@ impl Processes {
                 &from_scope.session_id,
                 &to_scope.session_id,
                 process_ids,
-                lash_core::ProcessObserverBy::host("admin-transfer"),
+                lash_execution_contracts::process::ProcessObserverBy::host("admin-transfer"),
             )
             .await
             .map_err(Into::into)
@@ -1062,7 +1111,7 @@ impl Processes {
     /// moves back, so repeating the call releases nothing new. Released events
     /// keep their sequence, kind and replay identity, so the release
     /// is safe while the process runs. A read starting below the horizon
-    /// answers [`ProcessEventHistoryRetention::Released`](lash_core::ProcessEventHistoryRetention::Released)
+    /// answers [`ProcessEventHistoryRetention::Released`](lash_execution_contracts::process::ProcessEventHistoryRetention::Released)
     /// with a continuation after it, and an observation snapshot reports its
     /// effect evidence incomplete with
     /// [`ProcessEffectGapReason::HistoryReleased`](lash_core::ProcessEffectGapReason::HistoryReleased).
@@ -1071,7 +1120,7 @@ impl Processes {
         &self,
         process_id: &ProcessId,
         through: u64,
-    ) -> Result<lash_core::ProcessEventRelease> {
+    ) -> Result<lash_execution_contracts::process::ProcessEventRelease> {
         Ok(self
             .registry()
             .release_process_events(process_id, through)
@@ -1087,9 +1136,9 @@ impl Processes {
     /// and a later await after pruning receives the typed
     /// `ProcessNoLongerRetained` outcome. Pass
     /// either the projector's acknowledged
-    /// [`ProjectionWatermark::UpTo`](lash_core::ProjectionWatermark::UpTo)
+    /// [`ProjectionWatermark::UpTo`](lash_execution_contracts::process::ProjectionWatermark::UpTo)
     /// cursor or an explicit
-    /// [`ProjectionWatermark::NoProjector`](lash_core::ProjectionWatermark::NoProjector).
+    /// [`ProjectionWatermark::NoProjector`](lash_execution_contracts::process::ProjectionWatermark::NoProjector).
     ///
     /// `filter` narrows *which* eligible retired rows this call reclaims (ADR
     /// 0023): retention is differentiated host policy, so a host expresses
@@ -1103,9 +1152,9 @@ impl Processes {
     pub async fn prune(
         &self,
         cutoff_epoch_ms: u64,
-        filter: Option<&lash_core::ProcessListFilter>,
-        watermark: lash_core::ProjectionWatermark,
-    ) -> Result<lash_core::ProcessPruneReport> {
+        filter: Option<&lash_execution_contracts::process::ProcessListFilter>,
+        watermark: lash_execution_contracts::process::ProjectionWatermark,
+    ) -> Result<lash_execution_contracts::process::ProcessPruneReport> {
         let registry = self.registry();
         Self::prune_selection(filter)?;
         Ok(registry
@@ -1118,7 +1167,7 @@ impl Processes {
     pub async fn compact_tombstones(
         &self,
         cutoff_epoch_ms: u64,
-        watermark: lash_core::ProjectionWatermark,
+        watermark: lash_execution_contracts::process::ProjectionWatermark,
     ) -> Result<usize> {
         Ok(self
             .registry()
@@ -1131,16 +1180,16 @@ impl Processes {
 pub(crate) fn host_start_refusal(
     start_key: Option<&lash_core::StartKey>,
     error: lash_core::RuntimeEffectControllerError,
-) -> lash_core::PluginError {
+) -> lash_execution_contracts::plugin_error::PluginError {
     if let Some(start_key) = start_key
         && (error.code == lash_core::RuntimeErrorCode::ProcessStartKeyConflict
             || (start_key.is_host_supplied() && error.code.is_replay_mismatch()))
     {
-        return lash_core::PluginError::StartKeyConflict {
+        return lash_execution_contracts::plugin_error::PluginError::StartKeyConflict {
             start_key: start_key.clone(),
         };
     }
-    lash_core::PluginError::RuntimeEffectController(error)
+    lash_execution_contracts::plugin_error::PluginError::RuntimeEffectController(error)
 }
 
 #[cfg(test)]
@@ -1150,7 +1199,7 @@ mod terminal_wait_tests {
 
     struct ReattachOnce {
         waits: AtomicUsize,
-        terminal: lash_core::ProcessAwaitOutput,
+        terminal: lash_execution_contracts::process::ProcessAwaitOutput,
     }
 
     #[async_trait::async_trait]
@@ -1158,7 +1207,10 @@ mod terminal_wait_tests {
         async fn await_process_terminal(
             &self,
             process_id: &lash_core::ProcessId,
-        ) -> std::result::Result<lash_core::ProcessTerminalWait, lash_core::PluginError> {
+        ) -> std::result::Result<
+            lash_core::ProcessTerminalWait,
+            lash_execution_contracts::plugin_error::PluginError,
+        > {
             assert_eq!(
                 process_id,
                 &lash_core::ProcessId::fixture("admin-reattach-process")
@@ -1177,14 +1229,14 @@ mod terminal_wait_tests {
             _process_id: &lash_core::ProcessId,
             _request: &lash_core::CancelRequest,
             _key: &str,
-        ) -> std::result::Result<(), lash_core::PluginError> {
+        ) -> std::result::Result<(), lash_execution_contracts::plugin_error::PluginError> {
             unreachable!("terminal-wait witness does not deliver cancels")
         }
     }
 
     #[tokio::test]
     async fn process_admin_reattaches_once_then_returns_terminal_output() {
-        let terminal = lash_core::ProcessAwaitOutput::from_tool_output(
+        let terminal = lash_execution_contracts::process::ProcessAwaitOutput::from_tool_output(
             lash_core::ToolCallOutput::success(serde_json::json!({"done": true})),
         );
         let port = ReattachOnce {
@@ -1207,7 +1259,9 @@ mod terminal_wait_tests {
 #[cfg(test)]
 mod host_start_refusal_tests {
     use super::host_start_refusal;
-    use lash_core::{PluginError, RuntimeEffectControllerError, RuntimeErrorCode};
+    use lash_core::RuntimeEffectControllerError;
+    use lash_core::RuntimeErrorCode;
+    use lash_execution_contracts::plugin_error::PluginError;
 
     #[test]
     fn a_host_start_preserves_the_controller_refusal_and_its_class() {

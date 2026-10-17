@@ -4,7 +4,9 @@
 //! `CloseSession` intent is kept as its tombstone.
 
 use super::*;
-use lash_core_execution::store::{ControlIntent, ControlIntentId, ControlIntentStore};
+use lash_core_store::store::ControlIntent;
+use lash_core_store::store::ControlIntentId;
+use lash_core_store::store::ControlIntentStore;
 
 use crate::session_runs::{begin_session_close_conn, close_session_intent_conn, load_intent_conn};
 
@@ -23,7 +25,7 @@ impl ControlIntentStore for SqliteStore {
         session_id: &SessionId,
         at_ms: u64,
     ) -> Result<Option<ControlIntent>, StoreError> {
-        lash_core_execution::store::validate_session_id(session_id)?;
+        lash_core_store::store::validate_session_id(session_id)?;
         let Some(conn) = self.control_ledger().await? else {
             return Ok(None);
         };

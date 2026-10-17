@@ -1,7 +1,7 @@
 //! How an isolated tool's call becomes the process that runs it.
 //!
 //! An isolated call has no inline body. Its manifest names the registered
-//! [`ProcessEngine`](crate::ProcessEngine) that runs it
+//! [`ProcessEngine`](lash_execution_contracts::process::ProcessEngine) that runs it
 //! ([`ToolManifest::isolation_engine`](crate::ToolManifest::isolation_engine)),
 //! and the tool enters a catalog only where that engine is registered, so a
 //! call is never refused for it. Admission asks the call's provider for the
@@ -39,5 +39,5 @@ pub struct IsolatedProcessRequest<'a> {
 pub struct IsolatedStart {
     pub payload: serde_json::Value,
     pub env: crate::ProcessEnvChoice,
-    pub engine_settings: Option<crate::EngineSettings>,
+    pub engine_settings: Option<lash_execution_contracts::process::EngineSettings>,
 }

@@ -9,7 +9,10 @@ use std::sync::Arc;
 use std::time::{Duration, Instant};
 
 use anyhow::{Context, Result};
-use lash_core::perf_witness::latency::{Collector, Snapshot, Stamp, Worker};
+use lash_core_ids::perf_witness::latency::Collector;
+use lash_core_ids::perf_witness::latency::Snapshot;
+use lash_core_ids::perf_witness::latency::Stamp;
+use lash_core_ids::perf_witness::latency::Worker;
 use serde::Serialize;
 
 use lash_protocol_types::SessionId;
@@ -1329,7 +1332,8 @@ mod tests {
 
     #[tokio::test]
     async fn startup_store_phases_are_complete_and_ordered() {
-        use lash_core::perf_witness::startup::{Phase, Recorder};
+        use lash_core_ids::perf_witness::startup::Phase;
+        use lash_core_ids::perf_witness::startup::Recorder;
         let recorder = Recorder::install().unwrap();
         let dir = tempfile::tempdir().unwrap();
         let _stores = lash_sqlite_store::SqliteStoreSet::open(

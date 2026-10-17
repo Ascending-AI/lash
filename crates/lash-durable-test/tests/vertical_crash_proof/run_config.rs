@@ -188,11 +188,14 @@ impl lash::plugins::PluginFactory for HostPluginFactory {
 
     fn recipe(
         self: Arc<Self>,
-    ) -> std::result::Result<lash_core::plugin::PluginRecipe, lash_core::plugin::PluginError> {
+    ) -> std::result::Result<
+        lash_core::plugin::PluginRecipe,
+        lash_execution_contracts::plugin_error::PluginError,
+    > {
         let recipe_factory = Arc::clone(&self);
         let recipe: std::result::Result<
             lash_core::plugin::PluginRecipe,
-            lash_core::plugin::PluginError,
+            lash_execution_contracts::plugin_error::PluginError,
         > = {
             let mut reg = lash_core::plugin::PluginRegistrar::<HostPlugin>::new(
                 lash_core::plugin::PluginFactory::id(self.as_ref()),
@@ -258,7 +261,7 @@ impl lash::plugins::SessionPlugin for HostPlugin {
 impl HostPlugin {
     fn declare(
         reg: &mut lash_core::plugin::PluginRegistrar<Self>,
-    ) -> std::result::Result<(), lash_core::plugin::PluginError> {
+    ) -> std::result::Result<(), lash_execution_contracts::plugin_error::PluginError> {
         reg.prompt().section(
             lash::plugins::PromptSectionSpec::new(
                 lash::prompt::PromptSectionKey::new("host-facts")

@@ -7,6 +7,7 @@
 
 use lash_core::facade_support::*;
 use lash_core::*;
+use lash_execution_contracts::Backend;
 use lash_protocol_types::core_support::ModelToolReturnCoreSupport as _;
 use std::sync::Arc;
 

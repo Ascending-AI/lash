@@ -19,15 +19,17 @@ pub async fn process_roster_pages_match_status_sets_and_definition(
                         }),
                     ),
                 )
-                .with_admitted_identity(lash_core::AdmittedProcessIdentity::for_testing(
-                    definition_identity(
-                        lash_core::ProcessDefinitionRef::unclaimed(
-                            "indexed-filter-kind",
-                            serde_json::json!({"definition": "target"}),
+                .with_admitted_identity(
+                    lash_execution_contracts::process::AdmittedProcessIdentity::for_testing(
+                        definition_identity(
+                            lash_execution_contracts::process::ProcessDefinitionRef::unclaimed(
+                                "indexed-filter-kind",
+                                serde_json::json!({"definition": "target"}),
+                            ),
+                            Some("filter-label"),
                         ),
-                        Some("filter-label"),
                     ),
-                )),
+                ),
             lash_core::ScopeId::turn(
                 SessionId::from("filter-origin"),
                 crate::TurnId::from("filter-turn"),
@@ -135,17 +137,18 @@ pub async fn process_roster_pages_match_status_sets_and_definition(
     reason = "conformance fixture uses a valid descriptor without dependencies"
 )]
 fn definition_identity(
-    reference: lash_core::ProcessDefinitionRef,
+    reference: lash_execution_contracts::process::ProcessDefinitionRef,
     label: Option<impl Into<String>>,
-) -> lash_core::ProcessIdentity {
-    let id = lash_core::ProcessDefinitionDraft::new(
+) -> lash_execution_contracts::process::ProcessIdentity {
+    let id = lash_execution_contracts::process::ProcessDefinitionDraft::new(
         reference.engine_kind.clone(),
         reference.definition.as_json().clone(),
         [],
     )
     .expect("fixture descriptor")
     .id();
-    let mut identity = lash_core::ProcessIdentity::labelled(reference.engine_kind, label);
+    let mut identity =
+        lash_execution_contracts::process::ProcessIdentity::labelled(reference.engine_kind, label);
     identity.definition_id = Some(id);
     identity
 }

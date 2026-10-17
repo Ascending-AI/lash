@@ -4,7 +4,9 @@
 
 use std::sync::Arc;
 
-use lash_core_execution::{DeploymentStore, ProcessEnvStore, ProcessRegistry};
+use lash_execution_contracts::deployment::DeploymentStore;
+use lash_execution_contracts::process::ProcessEnvStore;
+use lash_execution_contracts::process::ProcessRegistry;
 
 use super::SUBSTRATE;
 use crate::backend_fixture::TestBackend;
@@ -14,7 +16,10 @@ use crate::backend_fixture::TestBackend;
 lash_conformance::process_prune_reclaim_tests!({
     let backend = TestBackend::open(SUBSTRATE).await;
     let factory = backend.store().await as Arc<dyn DeploymentStore>;
-    lash_core::testing::process_execution_env_fixture(backend.process_env_store().as_ref()).await;
+    lash_execution_contracts::testing::process_execution_env_fixture(
+        backend.process_env_store().as_ref(),
+    )
+    .await;
     let registry = backend.process_registry() as Arc<dyn ProcessRegistry>;
     let probe = Arc::new(crate::blob_probe::SqliteBlobProbe::new(
         backend.database_uri(),
@@ -28,12 +33,12 @@ lash_conformance::process_start_staging_tests!({
     let backend = TestBackend::open(SUBSTRATE).await;
     let registry = backend.process_registry() as Arc<dyn ProcessRegistry>;
     let ports = lash_core_execution::runtime::ArtifactReferrerPorts::new(
-        lash_core_execution::StoreSet::module_artifacts(&*backend),
+        lash_execution_contracts::backend::StoreSet::module_artifacts(&*backend),
         backend.process_env_store(),
-        lash_core_execution::StoreSet::definition_store(&*backend),
-        lash_core_execution::StoreSet::attachment_referrers(&*backend),
-        lash_core_execution::StoreSet::artifact_cleanup(&*backend),
-        Arc::new(lash_core_execution::facade_support::SystemClock),
+        lash_execution_contracts::backend::StoreSet::definition_store(&*backend),
+        lash_execution_contracts::backend::StoreSet::attachment_referrers(&*backend),
+        lash_execution_contracts::backend::StoreSet::artifact_cleanup(&*backend),
+        Arc::new(lash_core_ids::clock::SystemClock),
     );
     (backend, registry, ports)
 });
@@ -48,12 +53,12 @@ lash_conformance::process_definition_tests!({
     let backend = TestBackend::open(SUBSTRATE).await;
     let registry = backend.process_registry() as Arc<dyn ProcessRegistry>;
     let ports = lash_core_execution::runtime::ArtifactReferrerPorts::new(
-        lash_core_execution::StoreSet::module_artifacts(&*backend),
+        lash_execution_contracts::backend::StoreSet::module_artifacts(&*backend),
         backend.process_env_store(),
-        lash_core_execution::StoreSet::definition_store(&*backend),
-        lash_core_execution::StoreSet::attachment_referrers(&*backend),
-        lash_core_execution::StoreSet::artifact_cleanup(&*backend),
-        Arc::new(lash_core_execution::facade_support::SystemClock),
+        lash_execution_contracts::backend::StoreSet::definition_store(&*backend),
+        lash_execution_contracts::backend::StoreSet::attachment_referrers(&*backend),
+        lash_execution_contracts::backend::StoreSet::artifact_cleanup(&*backend),
+        Arc::new(lash_core_ids::clock::SystemClock),
     );
     (backend, registry, ports)
 });
@@ -62,12 +67,12 @@ lash_conformance::process_definition_graph_tests!({
     let backend = TestBackend::open(SUBSTRATE).await;
     let registry = backend.process_registry() as Arc<dyn ProcessRegistry>;
     let ports = lash_core_execution::runtime::ArtifactReferrerPorts::new(
-        lash_core_execution::StoreSet::module_artifacts(&*backend),
+        lash_execution_contracts::backend::StoreSet::module_artifacts(&*backend),
         backend.process_env_store(),
-        lash_core_execution::StoreSet::definition_store(&*backend),
-        lash_core_execution::StoreSet::attachment_referrers(&*backend),
-        lash_core_execution::StoreSet::artifact_cleanup(&*backend),
-        Arc::new(lash_core_execution::facade_support::SystemClock),
+        lash_execution_contracts::backend::StoreSet::definition_store(&*backend),
+        lash_execution_contracts::backend::StoreSet::attachment_referrers(&*backend),
+        lash_execution_contracts::backend::StoreSet::artifact_cleanup(&*backend),
+        Arc::new(lash_core_ids::clock::SystemClock),
     );
     let probe = Arc::new(crate::blob_probe::SqliteDefinitionGraphProbe::new(
         backend.database_uri(),

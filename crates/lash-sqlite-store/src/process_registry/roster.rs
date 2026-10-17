@@ -1,10 +1,12 @@
 //! Fleet scans capture their change fence before reading the first keyset.
 use super::*;
-use lash_core_execution::{ProcessChangeBounds, ProcessRosterCursor, ProcessRosterRecords};
+use lash_execution_contracts::process::ProcessChangeBounds;
+use lash_execution_contracts::process::ProcessRosterCursor;
+use lash_execution_contracts::process::ProcessRosterRecords;
 
 pub(super) fn bounds_conn(
     conn: &Connection,
-) -> Result<ProcessChangeBounds, lash_core_execution::PluginError> {
+) -> Result<ProcessChangeBounds, lash_execution_contracts::plugin_error::PluginError> {
     let current = conn
         .query_row(process_sql().clock_sqlite.select_current.sql(), [], |row| {
             row.get::<_, i64>(0)
@@ -33,7 +35,7 @@ pub(super) fn bounds_conn(
 
 pub(super) async fn bounds(
     registry: &SqliteProcessRegistry,
-) -> Result<ProcessChangeBounds, lash_core_execution::PluginError> {
+) -> Result<ProcessChangeBounds, lash_execution_contracts::plugin_error::PluginError> {
     registry
         .conn
         .call(|conn| {
@@ -53,12 +55,12 @@ pub(super) async fn page(
     filter: &ProcessListFilter,
     limit: std::num::NonZeroUsize,
     cursor: Option<ProcessRosterCursor>,
-) -> Result<ProcessRosterRecords, lash_core_execution::PluginError> {
+) -> Result<ProcessRosterRecords, lash_execution_contracts::plugin_error::PluginError> {
     let store = format!("sqlite:{}", registry.location.target().canonical_name());
     let filter = filter.clone();
     let limit = limit
         .get()
-        .min(lash_core_execution::MAX_PROCESS_ROSTER_PAGE_SIZE);
+        .min(lash_execution_contracts::process::MAX_PROCESS_ROSTER_PAGE_SIZE);
     #[cfg(test)]
     let decoded = Arc::clone(&registry.decoded_roster_records);
     registry
@@ -143,15 +145,17 @@ pub(super) async fn page(
 #[tokio::test]
 async fn filtered_roster_page_decodes_only_matches_in_ten_thousand_rows() {
     let backend = crate::SqliteStoreSet::memory().await.expect("memory store");
-    lash_core_execution::testing::process_execution_env_fixture(
+    lash_execution_contracts::testing::process_execution_env_fixture(
         backend.process_env_store().as_ref(),
     )
     .await;
     let registry = backend.process_registry();
 
-    use lash_core_execution::{Lifetime, ProcessProvenance, ProcessRegistrar as _};
+    use lash_execution_contracts::process::Lifetime;
+    use lash_execution_contracts::process::ProcessProvenance;
+    use lash_execution_contracts::process::ProcessRegistrar as _;
     let base = registry
-        .register_process(lash_core_execution::testing::held_engine_registration(
+        .register_process(lash_execution_contracts::testing::held_engine_registration(
             serde_json::Value::Null,
             ProcessProvenance::host(),
             Lifetime::Detached,
@@ -185,7 +189,7 @@ async fn filtered_roster_page_decodes_only_matches_in_ten_thousand_rows() {
     let page = registry
         .list_processes_page(
             &ProcessListFilter {
-                status: lash_core_execution::ProcessStatusFilter::Any,
+                status: lash_execution_contracts::process::ProcessStatusFilter::Any,
                 identity_label: Some("selected".to_owned()),
                 ..ProcessListFilter::default()
             },

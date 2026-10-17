@@ -163,7 +163,7 @@ pub(super) async fn session_namespace(factory: Arc<dyn crate::DeploymentStore>) 
     reason = "conformance-law fixture: each result is established by the setup above"
 )]
 pub async fn process_environment_namespace(store: Arc<dyn crate::ProcessEnvStore>) {
-    let spec = lash_core::testing::process_env_with_limit(1024);
+    let spec = lash_execution_contracts::testing::process_env_with_limit(1024);
     let bytes = spec.to_store_bytes().expect("encode test environment");
     let claim = crate::ReferrerClaim::unguarded(crate::ArtifactReferrer::HostPin(
         crate::HostArtifactPin::mint(),
@@ -223,10 +223,10 @@ pub async fn process_namespace(registry: Arc<dyn crate::ConformanceProcessRegist
     // stored opaquely: each hostile key finds its own process again and no
     // two alias.
     let registration = |raw: &str| {
-        lash_core::testing::held_engine_registration(
+        lash_execution_contracts::testing::held_engine_registration(
             serde_json::Value::Null,
             crate::ProcessProvenance::host(),
-            lash_core::Lifetime::Detached,
+            lash_execution_contracts::process::Lifetime::Detached,
         )
         .with_start_key(Some(crate::StartKey::for_host(raw)))
     };

@@ -6,36 +6,38 @@ use super::*;
 /// Seed one process into `waiting` and assert the retention contract: live rows
 /// are listed as non-terminal and are never prune candidates.
 async fn assert_waiting_process_is_live_not_prunable(
-    registry: &dyn lash_core_execution::ConformanceProcessRegistry,
+    registry: &dyn lash_execution_contracts::process::ConformanceProcessRegistry,
 ) {
     let process_id = &registry
-        .register_process(lash_core_execution::ProcessRegistration::new(
-            lash_core_execution::ProcessInput::Engine {
+        .register_process(lash_execution_contracts::process::ProcessRegistration::new(
+            lash_execution_contracts::process::ProcessInput::Engine {
                 kind: "retention-test".to_string(),
                 payload: serde_json::Value::Null,
-                launch: lash_core::EngineLaunch::new(
-                    lash_core::testing::process_execution_env_fixture_ref(),
+                launch: lash_execution_contracts::process::EngineLaunch::new(
+                    lash_execution_contracts::testing::process_execution_env_fixture_ref(),
                     None,
                 ),
             },
-            lash_core_execution::ProcessProvenance::host(),
-            lash_core_execution::Lifetime::Detached,
+            lash_execution_contracts::process::ProcessProvenance::host(),
+            lash_execution_contracts::process::Lifetime::Detached,
         ))
         .await
         .expect("register waiting retention process")
         .id;
-    let wait = lash_core_execution::WaitState {
+    let wait = lash_execution_contracts::process::WaitState {
         since_ms: 1,
-        kind: lash_core_execution::WaitKind::Call {
-            call_id: lash_core_execution::ToolCallId::fixture("retention-call"),
-            tool_id: lash_core_execution::ToolId::new("retention"),
+        kind: lash_execution_contracts::process::WaitKind::Call {
+            call_id: lash_protocol_types::ToolCallId::fixture("retention-call"),
+            tool_id: lash_protocol_types::tool_contract::ToolId::new("retention"),
         },
         site: None,
     };
     registry
         .append_event_for_testing(
             process_id,
-            lash_core_execution::ProcessEventAppendRequest::wait_entered(process_id, &wait),
+            lash_execution_contracts::process::ProcessEventAppendRequest::wait_entered(
+                process_id, &wait,
+            ),
         )
         .await
         .expect("enter wait");
@@ -68,7 +70,7 @@ async fn assert_waiting_process_is_live_not_prunable(
         .prune_terminal_processes(
             u64::MAX,
             None,
-            lash_core_execution::ProjectionWatermark::NoProjector,
+            lash_execution_contracts::process::ProjectionWatermark::NoProjector,
         )
         .await
         .expect("prune terminal processes");
@@ -97,7 +99,8 @@ async fn postgres_waiting_processes_are_live_not_prunable_when_configured() {
         return;
     };
     reset(storage.pool()).await;
-    lash_core::testing::process_execution_env_fixture(&storage.process_env_store()).await;
+    lash_execution_contracts::testing::process_execution_env_fixture(&storage.process_env_store())
+        .await;
     let registry = storage.process_registry();
     assert_waiting_process_is_live_not_prunable(&registry).await;
 }
@@ -124,9 +127,9 @@ fn postgres_status_list_literals_derive_from_the_shared_constant() {
         )
     };
     let live_labels =
-        lash_core_execution::facade_support::registry_transitions::LIVE_PROCESS_STATUS_LABELS;
+        lash_execution_contracts::process::registry_transitions::LIVE_PROCESS_STATUS_LABELS;
     let retired_labels =
-        lash_core_execution::facade_support::registry_transitions::RETIRED_PROCESS_STATUS_LABELS;
+        lash_execution_contracts::process::registry_transitions::RETIRED_PROCESS_STATUS_LABELS;
     let live = render(&live_labels);
     let vocabulary = render(
         &live_labels
@@ -158,9 +161,7 @@ fn postgres_status_list_literals_derive_from_the_shared_constant() {
     // generated, so the expectation here is the generator's own output rather
     // than a second spelling of it.
     let nonterminal =
-        lash_core_execution::store_backend_support::nonterminal_process_status_predicate_sql(
-            "status",
-        );
+        lash_core_store::store_backend_support::nonterminal_process_status_predicate_sql("status");
     let terminal = nonterminal
         .strip_prefix("status NOT IN ")
         .expect("the nonterminal predicate is spelled as a NOT IN list")

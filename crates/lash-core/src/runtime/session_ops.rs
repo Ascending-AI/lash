@@ -68,7 +68,11 @@ impl LashRuntime {
         request: crate::AppendSessionNodesRequest,
     ) -> Result<crate::AppendSessionNodesOutcome, SessionError> {
         self.refuse_store_backed_host_write("append_session_nodes")
-            .map_err(|error| SessionError::Plugin(crate::PluginError::Runtime(error)))?;
+            .map_err(|error| {
+                SessionError::Plugin(
+                    lash_execution_contracts::plugin_error::PluginError::Runtime(error),
+                )
+            })?;
         if request.operation_id.trim().is_empty() {
             return Err(SessionError::Protocol(
                 "session graph append requires a non-empty stable operation_id".to_string(),
@@ -108,8 +112,11 @@ impl LashRuntime {
                 )
                 .await?;
         }
-        self.stamp_live_plugin_state()
-            .map_err(|error| SessionError::Plugin(crate::PluginError::Runtime(error)))?;
+        self.stamp_live_plugin_state().map_err(|error| {
+            SessionError::Plugin(
+                lash_execution_contracts::plugin_error::PluginError::Runtime(error),
+            )
+        })?;
         Ok(crate::AppendSessionNodesOutcome::Appended {
             node_ids,
             leaf_node_id: self.state.session_graph.leaf_node_id.clone(),
@@ -269,8 +276,10 @@ impl LashRuntime {
         plugin_id: &str,
         events: Vec<crate::PluginRuntimeEvent>,
         directives: &[crate::PluginRuntimeDirective],
-    ) -> Result<Vec<crate::PluginOwned<crate::PluginRuntimeEvent>>, PluginOperationInvokeError>
-    {
+    ) -> Result<
+        Vec<lash_execution_contracts::session_types::PluginOwned<crate::PluginRuntimeEvent>>,
+        PluginOperationInvokeError,
+    > {
         if !directives.is_empty() {
             return Err(PluginOperationInvokeError::protocol(
                 "a storeless runtime has no durable queue to queue a plugin's turn on".to_string(),
@@ -278,10 +287,12 @@ impl LashRuntime {
         }
         let owned_events = events
             .into_iter()
-            .map(|event| crate::PluginOwned {
-                plugin_id: plugin_id.to_string(),
-                value: event,
-            })
+            .map(
+                |event| lash_execution_contracts::session_types::PluginOwned {
+                    plugin_id: plugin_id.to_string(),
+                    value: event,
+                },
+            )
             .collect::<Vec<_>>();
         if !owned_events.is_empty() {
             let nodes = owned_events

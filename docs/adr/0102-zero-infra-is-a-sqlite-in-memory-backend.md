@@ -26,7 +26,7 @@ in one module per dialect. Recovery loads committed state rather than rebuilding
 A code cell resumes from its committed VM snapshot; computation after that
 snapshot may run again under ADR 0132 §8.
 
-Evidence: `crates/lash-core-execution/src/backend.rs:39`.
+Evidence: `crates/lash-execution-contracts/src/backend.rs:39`.
 
 ### D2. One backend supplies every port
 
@@ -47,7 +47,7 @@ attachment-byte store at construction. Module artifacts belong to the store
 set that reopens the session. The kernel's contracts name no concrete SQL
 store.
 
-Evidence: `crates/lash-core-execution/src/backend.rs`,
+Evidence: `crates/lash-execution-contracts/src/backend.rs`,
 `crates/lash-core-execution/src/runtime/host.rs`,
 `crates/lash/src/session.rs`,
 `crates/lash-sqlite-store/src/backend.rs`,

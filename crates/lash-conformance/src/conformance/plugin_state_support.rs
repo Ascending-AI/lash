@@ -31,7 +31,7 @@ pub(super) async fn publish(
     plugins: &Arc<crate::PluginSession>,
     plugin: &str,
     name: &str,
-    commands: lash_core::StateCommands,
+    commands: lash_execution_contracts::state_commands::StateCommands,
 ) -> RuntimeEffectOutcome {
     let address = crate::EffectAddress::new(
         crate::ExecutionScope::turn(

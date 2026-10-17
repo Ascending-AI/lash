@@ -19,11 +19,22 @@ use lash_durable::{
 use tokio_util::sync::CancellationToken;
 
 use super::ActorContext;
-use super::waits::{
-    self, PinnedKey, ProcessWaitOutcome, RaceWinner, ResolveAnswer, WaitDeadline, WaitId, WaitKind,
-    WaitPurpose, WaitRef, WaitSpec,
-};
-use crate::{AdmittedScope, Backend, DurableSettings, ProcessId, Resolution};
+use super::waits;
+use super::waits::ResolveAnswer;
+use super::waits::WaitId;
+use super::waits::WaitPurpose;
+use crate::AdmittedScope;
+use crate::DurableSettings;
+use crate::ProcessId;
+use crate::Resolution;
+use lash_durable::domain::WaitKind;
+use lash_execution_contracts::backend::Backend;
+use lash_execution_contracts::waits::PinnedKey;
+use lash_execution_contracts::waits::ProcessWaitOutcome;
+use lash_execution_contracts::waits::RaceWinner;
+use lash_execution_contracts::waits::WaitDeadline;
+use lash_execution_contracts::waits::WaitRef;
+use lash_execution_contracts::waits::WaitSpec;
 
 /// A broken law: what was expected, and what happened.
 #[derive(Debug)]
@@ -692,7 +703,7 @@ pub async fn a_completion_before_the_await_is_already_resolved(backend: &Backend
     ensure!(resolved == ResolveAnswer::Resolved, "resolve: {resolved:?}");
     let won = waits::await_external(&cx, &wait).await?;
     ensure!(
-        won == waits::ExternalWaitOutcome::Resolved(answer("early")),
+        won == lash_execution_contracts::waits::ExternalWaitOutcome::Resolved(answer("early")),
         "the await saw {won:?}"
     );
     Ok(())
@@ -766,7 +777,7 @@ pub async fn the_awaiters_cancel_ends_its_wait(backend: &Backend) -> LawOutcome 
         .await
         .map_err(|error| LawBroken(error.to_string()))??;
     ensure!(
-        won == waits::ExternalWaitOutcome::Cancelled,
+        won == lash_execution_contracts::waits::ExternalWaitOutcome::Cancelled,
         "the cancelled await saw {won:?}"
     );
     ensure!(
@@ -935,7 +946,7 @@ pub async fn a_key_that_never_resolves_times_out(backend: &Backend) -> LawOutcom
     let (wait, _) = pin(&cx, WaitKind::ToolCompletion, None, Some(SHORT)).await?;
     let won = waits::await_external(&cx, &wait).await?;
     ensure!(
-        won == waits::ExternalWaitOutcome::TimedOut,
+        won == lash_execution_contracts::waits::ExternalWaitOutcome::TimedOut,
         "the await saw {won:?}"
     );
     let stored = row(backend, &wait).await?;
@@ -975,8 +986,8 @@ pub async fn await_process_is_bounded_and_cancellable(backend: &Backend) -> LawO
             now.after_millis(i64::try_from(after.as_millis()).unwrap_or(i64::MAX)),
         ))
     };
-    let outcome = crate::ProcessAwaitOutput::NoLongerRetained {
-        terminal_label: crate::RetiredProcessStatus::Completed,
+    let outcome = lash_execution_contracts::process::ProcessAwaitOutput::NoLongerRetained {
+        terminal_label: lash_execution_contracts::process::RetiredProcessStatus::Completed,
         pruned_at_ms: 1,
     };
 

@@ -573,7 +573,7 @@ async fn a_withdrawn_or_waiting_input_refuses_typed() -> Result<()> {
 /// is named under `prefix`. Answers the core, which serves the session's
 /// shift until the caller's deployment has finished.
 async fn a_held_turn_pinned_both_ways_forks_after_collection(
-    backend: lash_core::Backend,
+    backend: lash_execution_contracts::backend::Backend,
     prefix: &str,
 ) -> Result<LashCore> {
     let release = Arc::new(Notify::new());

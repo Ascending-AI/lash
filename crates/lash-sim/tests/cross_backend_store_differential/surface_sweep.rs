@@ -667,7 +667,7 @@ impl BackendRunner {
                 format!("present={}", record.is_some())
             }
             SurfaceMethod::EnvironmentBytes => {
-                let env_ref = lash_core::testing::process_env_with_limit(999)
+                let env_ref = lash_execution_contracts::testing::process_env_with_limit(999)
                     .stable_ref()
                     .map_err(|error| StoreError::Backend(error.to_string()))?;
                 let bytes = self

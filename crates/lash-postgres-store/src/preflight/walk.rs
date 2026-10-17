@@ -38,10 +38,13 @@
 //! failed on it would take the whole report down with it.
 
 use crate::artifact_store::MODULE_ARTIFACT_NAMESPACE;
-use lash_core_execution::{
-    DurableItem, DurablePayload, DurableScan, DurableScanPage, DurableSurface, ScanCoverage,
-    StoreError,
-};
+use lash_core_store::store::DurableItem;
+use lash_core_store::store::DurablePayload;
+use lash_core_store::store::DurableScan;
+use lash_core_store::store::DurableScanPage;
+use lash_core_store::store::DurableSurface;
+use lash_core_store::store::ScanCoverage;
+use lash_core_store::store::StoreError;
 use lash_protocol_types::SessionId;
 use sqlx::postgres::PgPool;
 use sqlx::{Postgres, Transaction};
@@ -296,7 +299,7 @@ fn execution_state_ref(manifest: &[u8]) -> Option<String> {
         id: lash_core_store::checkpoint_graph::NodeId::of_envelope(manifest),
         bytes: std::sync::Arc::from(manifest),
     };
-    lash_core_execution::store::SessionCheckpoint::named(&node)?
+    lash_core_store::store::SessionCheckpoint::named(&node)?
         .execution
         .map(|root| root.to_hex())
 }
@@ -474,13 +477,14 @@ mod tests {
 
     #[test]
     fn a_manifest_without_execution_state_names_nothing() {
-        use lash_core_execution::store::{BlobRef, SessionCheckpoint};
+        use lash_core_store::store::BlobRef;
+        use lash_core_store::store::SessionCheckpoint;
         let manifest_bytes = |execution_ref: Option<BlobRef>| {
             let manifest = SessionCheckpoint::new(
-                lash_core_execution::PersistedTurnState::default(),
+                lash_core_store::session_graph::PersistedTurnState::default(),
                 std::collections::BTreeMap::new(),
                 execution_ref,
-                lash_core_execution::FleetFormat::current(),
+                lash_core_store::store::FleetFormat::current(),
             );
             let (root, nodes) = manifest.to_graph().expect("the manifest stages");
             nodes[&root].bytes.to_vec()

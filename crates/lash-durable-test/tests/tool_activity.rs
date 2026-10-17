@@ -113,24 +113,29 @@ impl ActivityTools {
     async fn start(
         call: &ToolCall<'_>,
         label: &str,
-    ) -> Result<lash_core::StartProcessIntent, lash_core::PluginError> {
+    ) -> Result<
+        lash_execution_contracts::tool_intent::StartProcessIntent,
+        lash_execution_contracts::plugin_error::PluginError,
+    > {
         let session_id = call.context.session_id()?.clone();
         let agent_frame_id = call.context.agent_frame_id()?.clone();
         let payload = serde_json::json!({ "activity-law": label });
         let launch = lash_core_execution::testing::held_engine_launch(call.context, &payload)
             .await
-            .map_err(|error| lash_core::PluginError::Session(error.to_string()))?;
-        let declaration = lash_core::ProcessStartDeclaration::engine(
-            lash_core_execution::testing::HELD_PROCESS_ENGINE_KIND,
+            .map_err(|error| {
+                lash_execution_contracts::plugin_error::PluginError::Session(error.to_string())
+            })?;
+        let declaration = lash_execution_contracts::process::ProcessStartDeclaration::engine(
+            lash_execution_contracts::testing::HELD_PROCESS_ENGINE_KIND,
             payload,
             launch,
-            lash_core::ProcessOriginator::Session {
+            lash_execution_contracts::process::ProcessOriginator::Session {
                 session_id: session_id.clone(),
                 agent_frame_id: Some(agent_frame_id),
             },
-            lash_core::Lifetime::Detached,
+            lash_execution_contracts::process::Lifetime::Detached,
         );
-        Ok(lash_core::StartProcessIntent {
+        Ok(lash_execution_contracts::tool_intent::StartProcessIntent {
             owner: lash_core::RuntimeOwner::Session(session_id),
             declaration,
         })
@@ -142,7 +147,10 @@ impl lash_core::ToolProvider for ActivityTools {
     fn tool_manifests(
         &self,
         _config: &lash_core::OwnerConfigView,
-    ) -> std::result::Result<Vec<lash_core::ToolManifest>, lash_core::PluginError> {
+    ) -> std::result::Result<
+        Vec<lash_core::ToolManifest>,
+        lash_execution_contracts::plugin_error::PluginError,
+    > {
         Ok({
             [GATED, DEFERRED]
                 .into_iter()
@@ -192,14 +200,19 @@ impl lash_core::ToolProvider for ActivityTools {
                 serde_json::json!({ "answered": label })
             });
         if !call.args["start"].as_bool().unwrap_or_default() {
-            return lash_core::ToolAttemptOutcome::done(answer, lash_core::ToolIntents::default());
+            return lash_core::ToolAttemptOutcome::done(
+                answer,
+                lash_execution_contracts::tool_intent::ToolIntents::default(),
+            );
         }
         match Self::start(&call, &label).await {
             Ok(start) => lash_core::ToolAttemptOutcome::done(
                 answer,
-                lash_core::ToolIntents::v3(vec![lash_core::ToolIntent::StartProcess(Box::new(
-                    start,
-                ))]),
+                lash_execution_contracts::tool_intent::ToolIntents::v3(vec![
+                    lash_execution_contracts::tool_intent::ToolIntent::StartProcess(Box::new(
+                        start,
+                    )),
+                ]),
             ),
             Err(error) => lash_core::ToolOutcome::err_fmt(error).into(),
         }

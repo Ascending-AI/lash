@@ -36,28 +36,31 @@ impl crate::plugin::SessionReadService for RuntimeSessionStateService {
         .await
     }
 
-    async fn snapshot_current(&self) -> Result<SessionSnapshot, crate::PluginError> {
+    async fn snapshot_current(
+        &self,
+    ) -> Result<SessionSnapshot, lash_execution_contracts::plugin_error::PluginError> {
         self.services.current.snapshot_current().await
     }
 
     async fn snapshot_session(
         &self,
         session_id: &SessionId,
-    ) -> Result<SessionSnapshot, crate::PluginError> {
+    ) -> Result<SessionSnapshot, lash_execution_contracts::plugin_error::PluginError> {
         self.services.current.snapshot_session(session_id).await
     }
 
     async fn tool_catalog(
         &self,
         session_id: &SessionId,
-    ) -> Result<Vec<serde_json::Value>, crate::PluginError> {
+    ) -> Result<Vec<serde_json::Value>, lash_execution_contracts::plugin_error::PluginError> {
         self.services.current.tool_catalog(session_id).await
     }
 
     async fn shared_tool_catalog(
         &self,
         session_id: &SessionId,
-    ) -> Result<Arc<Vec<serde_json::Value>>, crate::PluginError> {
+    ) -> Result<Arc<Vec<serde_json::Value>>, lash_execution_contracts::plugin_error::PluginError>
+    {
         self.services.current.shared_tool_catalog(session_id).await
     }
 }
@@ -68,7 +71,7 @@ impl crate::plugin::SessionStateService for RuntimeSessionStateService {
         &self,
         session_id: &SessionId,
         turn_id: &TurnId,
-    ) -> Result<crate::ExecutionScope, crate::PluginError> {
+    ) -> Result<crate::ExecutionScope, lash_execution_contracts::plugin_error::PluginError> {
         self.services
             .current
             .turn_scope_by_id(session_id, turn_id)
@@ -83,7 +86,7 @@ impl crate::plugin::SessionLifecycleService for RuntimeSessionLifecycleService {
     async fn create_session(
         &self,
         request: SessionCreateRequest,
-    ) -> Result<SessionHandle, crate::PluginError> {
+    ) -> Result<SessionHandle, lash_execution_contracts::plugin_error::PluginError> {
         Box::pin(super::session_init::create_session(
             &self.services.current,
             request,
@@ -100,7 +103,8 @@ impl crate::plugin::SessionGraphService for RuntimeSessionGraphService {
         &self,
         session_id: &SessionId,
         request: crate::AppendSessionNodesRequest,
-    ) -> Result<crate::AppendSessionNodesOutcome, crate::PluginError> {
+    ) -> Result<crate::AppendSessionNodesOutcome, lash_execution_contracts::plugin_error::PluginError>
+    {
         Box::pin(self.services.current.append_session_nodes(
             &self.services.processes,
             session_id,
@@ -112,7 +116,7 @@ impl crate::plugin::SessionGraphService for RuntimeSessionGraphService {
         &self,
         context: lash_trace::TraceContext,
         event: lash_trace::TraceEvent,
-    ) -> Result<(), crate::PluginError> {
+    ) -> Result<(), lash_execution_contracts::plugin_error::PluginError> {
         self.services.current.emit_trace_event(context, event).await
     }
 }
@@ -122,9 +126,12 @@ impl crate::plugin::ProcessReadService for RuntimeSessionProcessService {
     async fn list_visible(
         &self,
         session_id: &SessionId,
-        mode: crate::ProcessListMode,
+        mode: lash_execution_contracts::process::ProcessListMode,
         scope: crate::ProcessOpScope<'_>,
-    ) -> Result<Vec<crate::facade_support::ObservedProcess>, crate::PluginError> {
+    ) -> Result<
+        Vec<lash_execution_contracts::process::ObservedProcess>,
+        lash_execution_contracts::plugin_error::PluginError,
+    > {
         if self
             .visibility
             .consults_filter(ProcessVisibilityOperation::ListVisible)
@@ -147,8 +154,11 @@ impl crate::ProcessService for RuntimeSessionProcessService {
     async fn list_visible_for_attempt(
         &self,
         owner: &crate::RuntimeOwner,
-        mode: crate::ProcessListMode,
-    ) -> Result<Vec<crate::facade_support::ObservedProcess>, crate::PluginError> {
+        mode: lash_execution_contracts::process::ProcessListMode,
+    ) -> Result<
+        Vec<lash_execution_contracts::process::ObservedProcess>,
+        lash_execution_contracts::plugin_error::PluginError,
+    > {
         if self
             .visibility
             .consults_filter(ProcessVisibilityOperation::ListVisibleForAttempt)
@@ -168,28 +178,33 @@ impl crate::ProcessService for RuntimeSessionProcessService {
     async fn start_from_request(
         &self,
         session_id: &SessionId,
-        request: crate::ProcessStartRequest,
+        request: lash_execution_contracts::process::ProcessStartRequest,
         scope: crate::ProcessOpScope<'_>,
-    ) -> Result<crate::ProcessHandleView, crate::PluginError> {
+    ) -> Result<
+        lash_execution_contracts::process::ProcessHandleView,
+        lash_execution_contracts::plugin_error::PluginError,
+    > {
         let observers = request.observers.clone();
         let registration = request.into_registration();
         let record = self
             .start(
                 session_id,
                 registration,
-                crate::ProcessStartOptions::new().with_initial_observers(observers),
+                lash_execution_contracts::process::ProcessStartOptions::new()
+                    .with_initial_observers(observers),
                 scope,
             )
             .await?;
-        Ok(crate::ProcessHandleView::from_observed(record))
+        Ok(lash_execution_contracts::process::ProcessHandleView::from_observed(record))
     }
 
     async fn stage_recorded_start(
         &self,
         owner: &crate::RuntimeOwner,
-        request: crate::ProcessStartRequest,
+        request: lash_execution_contracts::process::ProcessStartRequest,
         scope: crate::ProcessOpScope<'_>,
-    ) -> Result<crate::StagedProcessStart, crate::PluginError> {
+    ) -> Result<crate::StagedProcessStart, lash_execution_contracts::plugin_error::PluginError>
+    {
         self.services
             .processes
             .stage_recorded_start_process(&self.services.current, owner, request, scope)
@@ -198,9 +213,10 @@ impl crate::ProcessService for RuntimeSessionProcessService {
 
     async fn stage_bound(
         &self,
-        registration: crate::ProcessStartRegistration,
+        registration: lash_execution_contracts::process::ProcessStartRegistration,
         scope: crate::ProcessOpScope<'_>,
-    ) -> Result<crate::StagedProcessStart, crate::PluginError> {
+    ) -> Result<crate::StagedProcessStart, lash_execution_contracts::plugin_error::PluginError>
+    {
         self.services
             .processes
             .stage_bound_process(&self.services.current, registration, scope)
@@ -211,7 +227,7 @@ impl crate::ProcessService for RuntimeSessionProcessService {
         &self,
         process_id: &ProcessId,
         scope: crate::ProcessOpScope<'_>,
-    ) -> Result<(), crate::PluginError> {
+    ) -> Result<(), lash_execution_contracts::plugin_error::PluginError> {
         self.services
             .processes
             .cancel_bound_process(&self.services.current, process_id, scope)
@@ -221,10 +237,13 @@ impl crate::ProcessService for RuntimeSessionProcessService {
     async fn start(
         &self,
         session_id: &SessionId,
-        registration: crate::ProcessStartRegistration,
-        options: crate::ProcessStartOptions,
+        registration: lash_execution_contracts::process::ProcessStartRegistration,
+        options: lash_execution_contracts::process::ProcessStartOptions,
         scope: crate::ProcessOpScope<'_>,
-    ) -> Result<crate::facade_support::ObservedProcess, crate::PluginError> {
+    ) -> Result<
+        lash_execution_contracts::process::ObservedProcess,
+        lash_execution_contracts::plugin_error::PluginError,
+    > {
         self.services
             .processes
             .start_process(
@@ -241,7 +260,10 @@ impl crate::ProcessService for RuntimeSessionProcessService {
         &self,
         process_id: &ProcessId,
         scope: crate::ProcessOpScope<'_>,
-    ) -> Result<crate::ProcessAwaitOutput, crate::PluginError> {
+    ) -> Result<
+        lash_execution_contracts::process::ProcessAwaitOutput,
+        lash_execution_contracts::plugin_error::PluginError,
+    > {
         self.services
             .processes
             .await_process(&self.services.current, process_id, scope)
@@ -252,7 +274,10 @@ impl crate::ProcessService for RuntimeSessionProcessService {
         &self,
         process_id: &crate::ProcessId,
         scope: crate::ProcessOpScope<'_>,
-    ) -> Result<crate::ProcessAwaitOutput, crate::PluginError> {
+    ) -> Result<
+        lash_execution_contracts::process::ProcessAwaitOutput,
+        lash_execution_contracts::plugin_error::PluginError,
+    > {
         self.services
             .processes
             .await_process_ref(&self.services.current, process_id.clone(), scope)
@@ -263,7 +288,7 @@ impl crate::ProcessService for RuntimeSessionProcessService {
         &self,
         key: &str,
         owner: &crate::ScopeId,
-    ) -> Result<Vec<ProcessId>, crate::PluginError> {
+    ) -> Result<Vec<ProcessId>, lash_execution_contracts::plugin_error::PluginError> {
         match self.services.current.host.process_registry() {
             Some(registry) => registry.abandon_consumer_hold(key, owner).await,
             None => Ok(Vec::new()),
@@ -274,14 +299,14 @@ impl crate::ProcessService for RuntimeSessionProcessService {
         &self,
         process_id: &ProcessId,
         key: &str,
-    ) -> Result<(), crate::PluginError> {
+    ) -> Result<(), lash_execution_contracts::plugin_error::PluginError> {
         let registry = self
             .services
             .current
             .host
             .process_registry()
             .ok_or_else(|| {
-                crate::PluginError::Session(
+                lash_execution_contracts::plugin_error::PluginError::Session(
                     "process registry is unavailable in this runtime".to_string(),
                 )
             })?;
@@ -291,9 +316,12 @@ impl crate::ProcessService for RuntimeSessionProcessService {
     async fn list_visible(
         &self,
         session_id: &SessionId,
-        mode: crate::ProcessListMode,
+        mode: lash_execution_contracts::process::ProcessListMode,
         scope: crate::ProcessOpScope<'_>,
-    ) -> Result<Vec<crate::facade_support::ObservedProcess>, crate::PluginError> {
+    ) -> Result<
+        Vec<lash_execution_contracts::process::ObservedProcess>,
+        lash_execution_contracts::plugin_error::PluginError,
+    > {
         if self
             .visibility
             .consults_filter(ProcessVisibilityOperation::ListVisible)
@@ -315,7 +343,7 @@ impl crate::ProcessService for RuntimeSessionProcessService {
         owner: &crate::RuntimeOwner,
         handle_ids: &[ProcessId],
         scope: crate::ProcessOpScope<'_>,
-    ) -> Result<(), crate::PluginError> {
+    ) -> Result<(), lash_execution_contracts::plugin_error::PluginError> {
         if self
             .visibility
             .consults_filter(ProcessVisibilityOperation::ValidateVisible)
@@ -342,7 +370,10 @@ impl crate::ProcessService for RuntimeSessionProcessService {
         owner: &crate::RuntimeOwner,
         process_id: &ProcessId,
         scope: crate::ProcessOpScope<'_>,
-    ) -> Result<crate::facade_support::ObservedProcess, crate::PluginError> {
+    ) -> Result<
+        lash_execution_contracts::process::ObservedProcess,
+        lash_execution_contracts::plugin_error::PluginError,
+    > {
         self.services
             .processes
             .cancel_process(&self.services.current, owner, process_id, scope)
@@ -355,7 +386,10 @@ impl crate::ProcessService for RuntimeSessionProcessService {
         process_id: &ProcessId,
         identity: crate::ToolIntentIdentity,
         scope: crate::ProcessOpScope<'_>,
-    ) -> Result<crate::facade_support::ObservedProcess, crate::PluginError> {
+    ) -> Result<
+        lash_execution_contracts::process::ObservedProcess,
+        lash_execution_contracts::plugin_error::PluginError,
+    > {
         self.services
             .processes
             .cancel_recorded_intent(&self.services.current, process_id, identity, scope)
@@ -368,7 +402,7 @@ impl crate::ProcessService for RuntimeSessionProcessService {
         to_session_id: &SessionId,
         process_ids: Vec<ProcessId>,
         scope: crate::ProcessOpScope<'_>,
-    ) -> Result<(), crate::PluginError> {
+    ) -> Result<(), lash_execution_contracts::plugin_error::PluginError> {
         self.services
             .processes
             .transfer_process_handles(

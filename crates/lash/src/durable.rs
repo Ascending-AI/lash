@@ -7,15 +7,20 @@
 
 use std::sync::Arc;
 
+pub use lash_core::ResolveAnswer;
 /// The durable store port: actors, nodes, epochs, the owner and mailbox
 /// transactions, the domain rows the substrate lanes add, and the substrate's
 /// parameters.
 pub use lash_core::durable_port::*;
-use lash_core::{Backend, ProcessEngine, StoreSet};
-pub use lash_core::{
-    BackendParts, DurableBuildError, NoProjectionProviders, PinnedKey, ProjectionProviders,
-    ResolveAnswer, RetirementCheck,
-};
+use lash_execution_contracts::backend::Backend;
+pub use lash_execution_contracts::backend::BackendParts;
+pub use lash_execution_contracts::backend::DurableBuildError;
+pub use lash_execution_contracts::backend::RetirementCheck;
+use lash_execution_contracts::backend::StoreSet;
+use lash_execution_contracts::process::ProcessEngine;
+pub use lash_execution_contracts::projection::NoProjectionProviders;
+pub use lash_execution_contracts::projection::ProjectionProviders;
+pub use lash_execution_contracts::waits::PinnedKey;
 
 /// Builds the one [`Backend`] a [`LashCore`](crate::LashCore) takes: lash's
 /// own durable engine over one store set.
@@ -301,7 +306,7 @@ fn helper_catalog_error(error: crate::vm::LibraryError) -> DurableBuildError {
 #[cfg(feature = "codemode")]
 fn projection_catalog(
     providers: Vec<Arc<dyn crate::vm::ProjectionProvider>>,
-) -> Result<Arc<dyn lash_core::ProjectionProviders>, DurableBuildError> {
+) -> Result<Arc<dyn lash_execution_contracts::projection::ProjectionProviders>, DurableBuildError> {
     if providers.is_empty() {
         return Ok(Arc::new(NoProjectionProviders));
     }

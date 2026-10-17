@@ -30,7 +30,9 @@ mod tests;
 
 use std::sync::Arc;
 
-use lash_core::{EngineStepAnswer, EngineStepKind, EngineStepRun};
+use lash_execution_contracts::process::EngineStepAnswer;
+use lash_execution_contracts::process::EngineStepKind;
+use lash_execution_contracts::process::EngineStepRun;
 use lash_kernel_doc::{Document, DocumentId, Name, Signature};
 use tokio_util::sync::CancellationToken;
 
@@ -122,14 +124,16 @@ pub(crate) fn failure(
     code: KernelProcessFailureCode,
     message: impl Into<String>,
     raw: Option<serde_json::Value>,
-) -> lash_core::ProcessAwaitOutput {
+) -> lash_execution_contracts::process::ProcessAwaitOutput {
     let mut failure = lash_core::ToolFailure::runtime(
         lash_core::ToolFailureClass::Execution,
         code.as_str(),
         message,
     );
     failure.raw = raw.map(lash_core::ToolValue::untrusted_json);
-    lash_core::ProcessAwaitOutput::from_tool_output(lash_core::ToolCallOutput::failure(failure))
+    lash_execution_contracts::process::ProcessAwaitOutput::from_tool_output(
+        lash_core::ToolCallOutput::failure(failure),
+    )
 }
 
 /// The kernel engine's settings, which a start states and its row records
@@ -198,7 +202,7 @@ impl KernelRecordedSettings {
     /// Unknown fields, missing fields and invalid values return the typed
     /// JSON decoding error; no default settings replace a refused value.
     pub fn from_engine_settings(
-        settings: &lash_core::EngineSettings,
+        settings: &lash_execution_contracts::process::EngineSettings,
     ) -> Result<Self, KernelSettingsError> {
         serde_json::from_value(settings.value().clone())
             .map_err(|source| KernelSettingsError { source })
@@ -206,14 +210,16 @@ impl KernelRecordedSettings {
 
     /// The engine settings a start records, including its typed observation choice.
     #[must_use]
-    pub fn into_engine_settings(self) -> lash_core::EngineSettings {
-        lash_core::EngineSettings::new(serde_json::json!(self))
+    pub fn into_engine_settings(self) -> lash_execution_contracts::process::EngineSettings {
+        lash_execution_contracts::process::EngineSettings::new(serde_json::json!(self))
     }
 
     /// The level a process recorded with `settings` is observed at: `off`
     /// when it recorded none, or settings that do not decode.
     #[must_use]
-    pub fn observed(settings: Option<&lash_core::EngineSettings>) -> lash_kernel_vm::Observe {
+    pub fn observed(
+        settings: Option<&lash_execution_contracts::process::EngineSettings>,
+    ) -> lash_kernel_vm::Observe {
         settings
             .and_then(|settings| serde_json::from_value::<Self>(settings.value().clone()).ok())
             .map_or(lash_kernel_vm::Observe::Off, |settings| settings.observe)
@@ -268,7 +274,10 @@ mod observe_level {
 /// The draft's refusal, which a well-formed identity never meets.
 pub fn definition_draft(
     definition: &KernelProcessDefinition,
-) -> Result<lash_core::ProcessDefinitionDraft, lash_core::ProcessDefinitionDraftError> {
+) -> Result<
+    lash_execution_contracts::process::ProcessDefinitionDraft,
+    lash_execution_contracts::process::ProcessDefinitionDraftError,
+> {
     let mut value = serde_json::json!({
         "document": definition.document,
         "entry": definition.entry,
@@ -276,19 +285,21 @@ pub fn definition_draft(
     if !definition.functions.is_empty() {
         value["functions"] = serde_json::json!(definition.functions);
     }
-    lash_core::ProcessDefinitionDraft::new(
-        lash_core::ProcessEngineKind::new(LASH_VM_ENGINE_KIND),
-        lash_core::ProcessDefinitionValue::new(value),
+    lash_execution_contracts::process::ProcessDefinitionDraft::new(
+        lash_execution_contracts::process::ProcessEngineKind::new(LASH_VM_ENGINE_KIND),
+        lash_execution_contracts::process::ProcessDefinitionValue::new(value),
         definition.artifacts(),
     )
 }
 
 /// The signature a definition of an entry states: the entry's kernel
 /// signature, as data.
-pub fn entry_signature(signature: &Signature) -> lash_core::ProcessSignature {
+pub fn entry_signature(
+    signature: &Signature,
+) -> lash_execution_contracts::process::ProcessSignature {
     match serde_json::to_value(signature) {
-        Ok(encoding) => lash_core::ProcessSignature::known(encoding),
-        Err(_) => lash_core::ProcessSignature::Unknown,
+        Ok(encoding) => lash_execution_contracts::process::ProcessSignature::known(encoding),
+        Err(_) => lash_execution_contracts::process::ProcessSignature::Unknown,
     }
 }
 
@@ -308,7 +319,7 @@ pub fn definition_of_entry(
         function.clone(),
     ))
     .map_err(|error| error.to_string())?;
-    serde_json::to_value(lash_core::ProcessDefinition::new(
+    serde_json::to_value(lash_execution_contracts::process::ProcessDefinition::new(
         draft.id(),
         entry_signature(&signature.signature),
     ))
@@ -346,7 +357,7 @@ pub struct KernelRunPolicy {
     pub retry_max_ms: u64,
     /// How long a process whose run the worker pool lacked capacity for
     /// backs off before its next claim, doubled for each claim in a row
-    /// that made no progress ([`lash_core::CapacityVerdict`]). Such a run
+    /// that made no progress ([`lash_execution_contracts::process::CapacityVerdict`]). Such a run
     /// spends none of `attempts`.
     pub capacity_backoff: std::time::Duration,
     /// How long a replay's reader lease on a retained run record lives
@@ -518,23 +529,25 @@ impl KernelProcessEngine {
 
 fn payload_definition(
     payload: &serde_json::Value,
-) -> Result<KernelProcessDefinition, lash_core::PluginError> {
+) -> Result<KernelProcessDefinition, lash_execution_contracts::plugin_error::PluginError> {
     KernelProcessDefinition::from_payload(payload).map_err(|error| {
-        lash_core::PluginError::Session(format!("invalid kernel process payload: {error}"))
+        lash_execution_contracts::plugin_error::PluginError::Session(format!(
+            "invalid kernel process payload: {error}"
+        ))
     })
 }
 
 #[async_trait::async_trait]
-impl lash_core::ProcessEngine for KernelProcessEngine {
+impl lash_execution_contracts::process::ProcessEngine for KernelProcessEngine {
     fn kind(&self) -> &'static str {
         LASH_VM_ENGINE_KIND
     }
 
-    fn trace_class(&self) -> lash_core::ProcessTraceClass {
-        lash_core::ProcessTraceClass::Workflow
+    fn trace_class(&self) -> lash_execution_contracts::process::ProcessTraceClass {
+        lash_execution_contracts::process::ProcessTraceClass::Workflow
     }
 
-    fn state_format(&self) -> lash_core::EngineStateFormat {
+    fn state_format(&self) -> lash_execution_contracts::process::EngineStateFormat {
         advance::state_format(self.writes)
     }
 
@@ -547,7 +560,8 @@ impl lash_core::ProcessEngine for KernelProcessEngine {
     async fn performed_effects(
         &self,
         payload: &serde_json::Value,
-    ) -> Result<lash_core::PerformedEffects, lash_core::ProcessEnvRefusal> {
+    ) -> Result<lash_execution_contracts::process::PerformedEffects, lash_core::ProcessEnvRefusal>
+    {
         let uncertified = |reason: String| lash_core::ProcessEnvRefusal::Uncertified { reason };
         let definition = KernelProcessDefinition::from_payload(payload)
             .map_err(|error| uncertified(format!("invalid kernel process payload: {error}")))?;
@@ -586,23 +600,27 @@ impl lash_core::ProcessEngine for KernelProcessEngine {
     fn check_settings(
         &self,
         _payload: &serde_json::Value,
-        settings: Option<&lash_core::EngineSettings>,
-    ) -> Result<(), lash_core::PluginError> {
+        settings: Option<&lash_execution_contracts::process::EngineSettings>,
+    ) -> Result<(), lash_execution_contracts::plugin_error::PluginError> {
         let Some(settings) = settings else {
-            return Err(lash_core::PluginError::Registration(
-                "a kernel process start states its settings".to_owned(),
-            ));
+            return Err(
+                lash_execution_contracts::plugin_error::PluginError::Registration(
+                    "a kernel process start states its settings".to_owned(),
+                ),
+            );
         };
         let settings = KernelRecordedSettings::from_engine_settings(settings).map_err(|error| {
-            lash_core::PluginError::Registration(format!(
+            lash_execution_contracts::plugin_error::PluginError::Registration(format!(
                 "the kernel settings do not decode: {error}"
             ))
         })?;
         if settings.dialect != self.dialect {
-            return Err(lash_core::PluginError::Registration(format!(
-                "the kernel settings name dialect `{}`, and this engine's workers serve `{}`",
-                settings.dialect, self.dialect
-            )));
+            return Err(
+                lash_execution_contracts::plugin_error::PluginError::Registration(format!(
+                    "the kernel settings name dialect `{}`, and this engine's workers serve `{}`",
+                    settings.dialect, self.dialect
+                )),
+            );
         }
         Ok(())
     }
@@ -611,16 +629,25 @@ impl lash_core::ProcessEngine for KernelProcessEngine {
     fn default_settings(
         &self,
         _payload: &serde_json::Value,
-    ) -> Result<Option<lash_core::EngineSettings>, lash_core::PluginError> {
+    ) -> Result<
+        Option<lash_execution_contracts::process::EngineSettings>,
+        lash_execution_contracts::plugin_error::PluginError,
+    > {
         serde_json::to_value(KernelRecordedSettings::new(&self.dialect, self.bounds))
-            .map(|value| Some(lash_core::EngineSettings::new(value)))
-            .map_err(|error| lash_core::PluginError::Registration(error.to_string()))
+            .map(|value| {
+                Some(lash_execution_contracts::process::EngineSettings::new(
+                    value,
+                ))
+            })
+            .map_err(|error| {
+                lash_execution_contracts::plugin_error::PluginError::Registration(error.to_string())
+            })
     }
 
     /// A `kernel_run`'s counts, which it records at `observe: counts`.
     fn settled_ran(
         &self,
-        kind: &lash_core::EngineStepKind,
+        kind: &lash_execution_contracts::process::EngineStepKind,
         output: &lash_core_store::tool_run::SettledOutput,
     ) -> Vec<(u32, u64)> {
         match output {
@@ -637,10 +664,15 @@ impl lash_core::ProcessEngine for KernelProcessEngine {
 
     fn advance(
         &self,
-        state: lash_core::EngineState,
-        event: lash_core::EngineEvent,
-    ) -> Result<(lash_core::EngineState, lash_core::EngineAction), lash_core::ProcessInfraError>
-    {
+        state: lash_execution_contracts::process::EngineState,
+        event: lash_execution_contracts::process::EngineEvent,
+    ) -> Result<
+        (
+            lash_execution_contracts::process::EngineState,
+            lash_execution_contracts::process::EngineAction,
+        ),
+        lash_execution_contracts::process::ProcessInfraError,
+    > {
         advance::advance(self.writes, state, event)
     }
 
@@ -650,13 +682,16 @@ impl lash_core::ProcessEngine for KernelProcessEngine {
     fn start_artifacts(
         &self,
         payload: &serde_json::Value,
-    ) -> Result<Vec<lash_core::ArtifactName>, lash_core::PluginError> {
+    ) -> Result<Vec<lash_core::ArtifactName>, lash_execution_contracts::plugin_error::PluginError>
+    {
         Ok(KernelProcessDefinition::from_payload(payload)
             .map_err(|error| {
-                lash_core::PluginError::Runtime(lash_core::RuntimeError::new(
-                    lash_core::RuntimeErrorCode::DefinitionRefused,
-                    format!("invalid kernel process payload: {error}"),
-                ))
+                lash_execution_contracts::plugin_error::PluginError::Runtime(
+                    lash_core::RuntimeError::new(
+                        lash_core::RuntimeErrorCode::DefinitionRefused,
+                        format!("invalid kernel process payload: {error}"),
+                    ),
+                )
             })?
             .artifacts())
     }
@@ -666,7 +701,7 @@ impl lash_core::ProcessEngine for KernelProcessEngine {
     async fn end_artifact_referrer(
         &self,
         _cleanup: &lash_core::ResolvedArtifactCleanup,
-    ) -> Result<(), lash_core::ArtifactStoreError> {
+    ) -> Result<(), lash_execution_contracts::module_artifacts::ArtifactStoreError> {
         Ok(())
     }
 
@@ -676,28 +711,33 @@ impl lash_core::ProcessEngine for KernelProcessEngine {
         &self,
         _claim: &lash_core::ReferrerClaim,
         artifact_ref: &str,
-    ) -> Result<(), lash_core::PluginError> {
-        Err(lash_core::PluginError::Invoke(format!(
-            "the kernel engine keeps no engine artifact store; `{artifact_ref}` belongs to the \
+    ) -> Result<(), lash_execution_contracts::plugin_error::PluginError> {
+        Err(lash_execution_contracts::plugin_error::PluginError::Invoke(
+            format!(
+                "the kernel engine keeps no engine artifact store; `{artifact_ref}` belongs to the \
              module port"
-        )))
+            ),
+        ))
     }
 
     async fn check_args(
         &self,
-        signature: &lash_core::ProcessSignature,
+        signature: &lash_execution_contracts::process::ProcessSignature,
         supplied: &serde_json::Map<String, serde_json::Value>,
-        mode: lash_core::ArgsMode,
-    ) -> Result<(), lash_core::ArgsMismatch> {
-        let unsupported = || lash_core::ArgsMismatch::UnsupportedSignature {
-            engine_kind: LASH_VM_ENGINE_KIND.into(),
-        };
+        mode: lash_execution_contracts::process::ArgsMode,
+    ) -> Result<(), lash_execution_contracts::process::ArgsMismatch> {
+        let unsupported =
+            || lash_execution_contracts::process::ArgsMismatch::UnsupportedSignature {
+                engine_kind: LASH_VM_ENGINE_KIND.into(),
+            };
         let encoding = signature.encoding().ok_or_else(unsupported)?;
         let signature: Signature =
             serde_json::from_value(encoding.clone()).map_err(|_| unsupported())?;
-        let argument = |path: &str, message: String| lash_core::ArgsMismatch::Argument {
-            path: path.to_owned(),
-            message,
+        let argument = |path: &str, message: String| {
+            lash_execution_contracts::process::ArgsMismatch::Argument {
+                path: path.to_owned(),
+                message,
+            }
         };
         for name in supplied.keys() {
             if !signature
@@ -714,11 +754,14 @@ impl lash_core::ProcessEngine for KernelProcessEngine {
                     crate::boundary::json_serves(&param.ty, value)
                         .map_err(|message| argument(param.name.as_str(), message))?;
                 }
-                None if param.optional || mode != lash_core::ArgsMode::Complete => {}
+                None if param.optional
+                    || mode != lash_execution_contracts::process::ArgsMode::Complete => {}
                 None => {
-                    return Err(lash_core::ArgsMismatch::ArgumentMissing {
-                        path: param.name.to_string(),
-                    });
+                    return Err(
+                        lash_execution_contracts::process::ArgsMismatch::ArgumentMissing {
+                            path: param.name.to_string(),
+                        },
+                    );
                 }
             }
         }
@@ -727,24 +770,32 @@ impl lash_core::ProcessEngine for KernelProcessEngine {
 
     async fn resolve(
         &self,
-        reference: &lash_core::ProcessDefinitionRef,
-    ) -> Result<lash_core::ProcessDefinitionResolution, lash_core::ProcessDefinitionError> {
-        let unresolvable =
-            |message: String| lash_core::ProcessDefinitionRefusal::UnresolvableDefinition {
+        reference: &lash_execution_contracts::process::ProcessDefinitionRef,
+    ) -> Result<
+        lash_execution_contracts::process::ProcessDefinitionResolution,
+        lash_execution_contracts::process::ProcessDefinitionError,
+    > {
+        let unresolvable = |message: String| {
+            lash_execution_contracts::process::ProcessDefinitionRefusal::UnresolvableDefinition {
                 engine_kind: reference.engine_kind.clone(),
                 message,
-            };
+            }
+        };
         let definition = KernelProcessDefinition::from_payload(reference.definition.as_json())
             .map_err(|error| unresolvable(error.to_string()))?;
         let (_, signature) = self
             .entry(&definition)
             .await
-            .map_err(|error| lash_core::ProcessDefinitionError::Fault(error.into()))?
+            .map_err(|error| {
+                lash_execution_contracts::process::ProcessDefinitionError::Fault(error.into())
+            })?
             .map_err(unresolvable)?;
 
-        Ok(lash_core::ProcessDefinitionResolution::new(
-            entry_signature(&signature),
-        ))
+        Ok(
+            lash_execution_contracts::process::ProcessDefinitionResolution::new(entry_signature(
+                &signature,
+            )),
+        )
     }
 }
 
@@ -763,7 +814,7 @@ impl KernelEngineSteps {
 }
 
 #[async_trait::async_trait]
-impl lash_core::EngineSteps for KernelEngineSteps {
+impl lash_execution_contracts::process::EngineSteps for KernelEngineSteps {
     fn kinds(&self) -> Vec<EngineStepKind> {
         vec![EngineStepKind::new(KERNEL_RUN_STEP)]
     }
@@ -789,15 +840,20 @@ impl lash_core::EngineSteps for KernelEngineSteps {
 pub fn admit_kernel_process(
     _kind: &'static str,
     payload: &serde_json::Value,
-) -> Result<lash_core::ProcessIdentity, lash_core::PluginError> {
+) -> Result<
+    lash_execution_contracts::process::ProcessIdentity,
+    lash_execution_contracts::plugin_error::PluginError,
+> {
     let definition = payload_definition(payload)?;
-    let mut identity = lash_core::ProcessIdentity::labelled(
+    let mut identity = lash_execution_contracts::process::ProcessIdentity::labelled(
         LASH_VM_ENGINE_KIND,
         Some(definition.entry.to_string()),
     );
     identity.definition_id = Some(
         definition_draft(&definition)
-            .map_err(|error| lash_core::PluginError::Session(error.to_string()))?
+            .map_err(|error| {
+                lash_execution_contracts::plugin_error::PluginError::Session(error.to_string())
+            })?
             .id(),
     );
     Ok(identity)
@@ -815,7 +871,10 @@ pub fn kernel_process_engine_registration(
     let engine = Arc::new(engine);
     let registration = lash_core::ProcessEngineRegistration::new(
         engine.clone(),
-        lash_core::ProcessEngineAdmission::new(LASH_VM_ENGINE_KIND, admit_kernel_process),
+        lash_execution_contracts::process::ProcessEngineAdmission::new(
+            LASH_VM_ENGINE_KIND,
+            admit_kernel_process,
+        ),
     )
     .expect("the kernel engine and its admission share a fixed kind")
     .with_document_provider(Arc::new(workflow::KernelDocumentProvider {

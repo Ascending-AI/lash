@@ -6,7 +6,8 @@
 //! Waits and cancels become wait rows and mail, filled by their owners.
 
 use super::{ProcessTerminalWait, ProcessWorkSubstrate};
-use crate::{Backend, PluginError};
+use lash_execution_contracts::backend::Backend;
+use lash_execution_contracts::plugin_error::PluginError;
 
 /// Process work over the durable backend: a start wakes the process actor.
 pub struct DurableProcessWork {

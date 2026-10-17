@@ -245,7 +245,7 @@ await control.finish("must not finish");"#
             )
             .plugin(Arc::new(
                 lash_plugin_process_controls::SessionProcessAdminPluginFactory::new(
-                    lash_core::lifetime::session_or_starter,
+                    lash_execution_contracts::process::lifetime::session_or_starter,
                     lash_core::testing::run_policy_naming(&[PANIC_COMPONENT]),
                 ),
             ))

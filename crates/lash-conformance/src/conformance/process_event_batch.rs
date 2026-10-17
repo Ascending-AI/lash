@@ -18,12 +18,12 @@ fn batch_registration() -> ProcessRegistration {
             kind: "test-engine".to_string(),
             payload: serde_json::Value::Null,
             launch: crate::EngineLaunch::new(
-                lash_core::testing::process_execution_env_fixture_ref(),
+                lash_execution_contracts::testing::process_execution_env_fixture_ref(),
                 None,
             ),
         },
         ProcessProvenance::host(),
-        lash_core::Lifetime::Detached,
+        lash_execution_contracts::process::Lifetime::Detached,
     )
 }
 
@@ -41,10 +41,10 @@ async fn registered(registry: &Arc<dyn ProcessRegistry>) -> ProcessId {
 }
 
 fn occurrence(node: &str, occurrence: u64, replay_key: &str) -> ProcessEventAppendRequest {
-    lash_core::ProcessEffectOccurrence::new(
+    lash_execution_contracts::process::ProcessEffectOccurrence::new(
         lash_protocol_types::effect_identity_fixture(node, occurrence),
         "tool:batch_law",
-        lash_core::ProcessEffectOutcomeClass::Success,
+        lash_execution_contracts::process::ProcessEffectOutcomeClass::Success,
         None,
         replay_key,
         lash_core::FleetFormat::current(),
@@ -144,10 +144,10 @@ pub async fn a_boundary_commits_its_prelude_in_its_own_transaction(
     // The terminal batch: the last occurrence, the omission record, the
     // terminal, one commit.
     let clock = change_clock(&registry).await;
-    let omissions = lash_core::ProcessEffectOmissions::new(
+    let omissions = lash_execution_contracts::process::ProcessEffectOmissions::new(
         [(
             "node:a".to_string(),
-            lash_core::ProcessEffectOmittedCounts {
+            lash_execution_contracts::process::ProcessEffectOmittedCounts {
                 success: 0,
                 failure: 1,
                 cancelled: 0,
@@ -165,14 +165,16 @@ pub async fn a_boundary_commits_its_prelude_in_its_own_transaction(
                 serde_json::json!({ "done": true }),
             )),
             vec![occurrence("node:c", 1, "boundary-law:c:1"), omissions],
-            lash_core::ProcessCompletionAuthority::workflow_key(id.to_string()),
+            lash_execution_contracts::process::ProcessCompletionAuthority::workflow_key(
+                id.to_string(),
+            ),
         )
         .await
         .expect("complete with the terminal batch");
     assert!(
         matches!(
             completion,
-            lash_core::ProcessCompletionOutcome::Committed(ref record) if record.is_terminal()
+            lash_execution_contracts::process::ProcessCompletionOutcome::Committed(ref record) if record.is_terminal()
         ),
         "the terminal committed: {completion:?}"
     );
@@ -185,8 +187,8 @@ pub async fn a_boundary_commits_its_prelude_in_its_own_transaction(
     assert_eq!(
         event_types(&events)[events.len() - 3..],
         [
-            lash_core::PROCESS_EFFECT_OUTCOME_EVENT_TYPE,
-            lash_core::PROCESS_EFFECT_OMISSIONS_EVENT_TYPE,
+            lash_execution_contracts::process::PROCESS_EFFECT_OUTCOME_EVENT_TYPE,
+            lash_execution_contracts::process::PROCESS_EFFECT_OMISSIONS_EVENT_TYPE,
             "process.completed",
         ],
         "the omission record is the terminal batch's penultimate event"
@@ -201,14 +203,16 @@ pub async fn a_boundary_commits_its_prelude_in_its_own_transaction(
                 serde_json::json!({ "done": true }),
             )),
             vec![occurrence("node:c", 1, "boundary-law:c:1")],
-            lash_core::ProcessCompletionAuthority::workflow_key(id.to_string()),
+            lash_execution_contracts::process::ProcessCompletionAuthority::workflow_key(
+                id.to_string(),
+            ),
         )
         .await
         .expect("replay the completion");
     assert!(
         matches!(
             replayed,
-            lash_core::ProcessCompletionOutcome::AlreadyApplied { .. }
+            lash_execution_contracts::process::ProcessCompletionOutcome::AlreadyApplied { .. }
         ),
         "{replayed:?}"
     );

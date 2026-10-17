@@ -3,17 +3,31 @@
 use lash_protocol_types::SessionId;
 use std::sync::Arc;
 
-use lash_core_execution::runtime::QueuedWorkBatchDraft;
-use lash_core_execution::store::{CheckpointAdmissionRequest, RunStore};
-use lash_core_execution::testing::TestClock;
-use lash_core_execution::{
-    CheckpointKind, Clock, DeliveryPolicy, PendingTurnInputCancelOutcome,
-    PendingTurnInputCancelTarget, PendingTurnInputDraft, PendingTurnInputReadStatus,
-    QueuedWorkStore, RuntimeCommit, RuntimeSessionState, SessionCatalogStore as _,
-    SessionCommitStore, SessionCreationHead, SessionRelation, SessionStoreCreateRequest, TurnId,
-    TurnInput, TurnInputIngress, TurnInputStore, facade_support::SessionCommand,
-};
+use lash_core_ids::clock::Clock;
+use lash_core_ids::test_clock::TestClock;
+use lash_core_store::queued_work_vocabulary::DeliveryPolicy;
+use lash_core_store::queued_work_vocabulary::QueuedWorkBatchDraft;
+use lash_core_store::queued_work_vocabulary::SessionCommand;
+use lash_core_store::session_identity::SessionRelation;
+use lash_core_store::session_state::RuntimeSessionState;
+use lash_core_store::session_store_factory_types::SessionCreationHead;
+use lash_core_store::session_store_factory_types::SessionStoreCreateRequest;
+use lash_core_store::store::CheckpointAdmissionRequest;
+use lash_core_store::store::QueuedWorkStore;
+use lash_core_store::store::RunStore;
+use lash_core_store::store::RuntimeCommit;
+use lash_core_store::store::SessionCatalogStore as _;
+use lash_core_store::store::SessionCommitStore;
+use lash_core_store::store::TurnInputStore;
+use lash_core_store::turn_input_vocabulary::PendingTurnInputCancelOutcome;
+use lash_core_store::turn_input_vocabulary::PendingTurnInputCancelTarget;
+use lash_core_store::turn_input_vocabulary::PendingTurnInputDraft;
+use lash_core_store::turn_input_vocabulary::PendingTurnInputReadStatus;
+use lash_core_store::turn_input_vocabulary::TurnInput;
+use lash_core_store::turn_input_vocabulary::TurnInputIngress;
 use lash_postgres_store::PostgresStorage;
+use lash_protocol_types::TurnId;
+use lash_protocol_types::plugin::CheckpointKind;
 
 // Keep subsequent lines stable for machine-checked public API evidence anchors.
 // Shared test support now lives at the grouped integration-harness run.
@@ -227,13 +241,13 @@ async fn session_command_and_pending_input_decisions_follow_the_postgres_clock()
             pending_observer_intents: Vec::new(),
             session_id: session.clone(),
             relation: SessionRelation::Root,
-            config: lash_core_execution::PersistedSessionConfig::new(
-                lash_core_execution::TurnBudget::Unbounded,
-                lash_core_execution::MaxToolCalls::new(1024),
+            config: lash_core_store::session_graph::PersistedSessionConfig::new(
+                lash_protocol_types::session_model::TurnBudget::Unbounded,
+                lash_protocol_types::session_model::MaxToolCalls::new(1024),
                 lash_core::NoProgressBudget::bounded(12),
             ),
             head: SessionCreationHead::Config,
-            retention: lash_core_execution::Retention::UntilGc,
+            retention: lash_core_store::store::Retention::UntilGc,
         })
         .await
         .expect("create skewed-clock session store");
@@ -292,17 +306,19 @@ async fn session_command_and_pending_input_decisions_follow_the_postgres_clock()
     );
     let mut state = RuntimeSessionState {
         session_id: session.clone(),
-        ..RuntimeSessionState::fixture(lash_core_execution::SessionPolicy::new(
-            lash_core_execution::TurnBudget::Unbounded,
-            lash_core_execution::MaxToolCalls::new(1024),
+        ..RuntimeSessionState::fixture(lash_core_store::session_policy::SessionPolicy::new(
+            lash_protocol_types::session_model::TurnBudget::Unbounded,
+            lash_protocol_types::session_model::MaxToolCalls::new(1024),
             lash_core::NoProgressBudget::bounded(12),
         ))
     };
     let mut command_commit = RuntimeCommit::persisted_state_for_test(&state);
-    command_commit.applied_commands = Some(lash_core_execution::runtime::QueuedWorkCompletion {
-        session_id: session.clone(),
-        batch_ids: vec![command.batch_id.clone()],
-    });
+    command_commit.applied_commands = Some(
+        lash_core_store::queued_work_vocabulary::QueuedWorkCompletion {
+            session_id: session.clone(),
+            batch_ids: vec![command.batch_id.clone()],
+        },
+    );
     let command_receipt = store
         .commit_runtime_state(command_commit)
         .await
@@ -391,22 +407,22 @@ async fn final_turn_commit_stamps_follow_the_injected_store_clock() {
             pending_observer_intents: Vec::new(),
             session_id: SessionId::fixture(session_id.clone()),
             relation: SessionRelation::Root,
-            config: lash_core_execution::PersistedSessionConfig::new(
-                lash_core_execution::TurnBudget::Unbounded,
-                lash_core_execution::MaxToolCalls::new(1024),
+            config: lash_core_store::session_graph::PersistedSessionConfig::new(
+                lash_protocol_types::session_model::TurnBudget::Unbounded,
+                lash_protocol_types::session_model::MaxToolCalls::new(1024),
                 lash_core::NoProgressBudget::bounded(12),
             ),
             head: SessionCreationHead::Config,
-            retention: lash_core_execution::Retention::UntilGc,
+            retention: lash_core_store::store::Retention::UntilGc,
         })
         .await
         .expect("create final-commit session store");
     let store = factory;
     let state = RuntimeSessionState {
         session_id: SessionId::fixture(session_id.clone()),
-        ..RuntimeSessionState::fixture(lash_core_execution::SessionPolicy::new(
-            lash_core_execution::TurnBudget::Unbounded,
-            lash_core_execution::MaxToolCalls::new(1024),
+        ..RuntimeSessionState::fixture(lash_core_store::session_policy::SessionPolicy::new(
+            lash_protocol_types::session_model::TurnBudget::Unbounded,
+            lash_protocol_types::session_model::MaxToolCalls::new(1024),
             lash_core::NoProgressBudget::bounded(12),
         ))
     };
@@ -470,13 +486,13 @@ async fn artifact_cleanups_are_armed_on_the_injected_store_clock() {
             pending_observer_intents: Vec::new(),
             session_id: session_id.clone(),
             relation: SessionRelation::Root,
-            config: lash_core_execution::PersistedSessionConfig::new(
-                lash_core_execution::TurnBudget::Unbounded,
-                lash_core_execution::MaxToolCalls::new(1024),
-                lash_core_execution::NoProgressBudget::bounded(12),
+            config: lash_core_store::session_graph::PersistedSessionConfig::new(
+                lash_protocol_types::session_model::TurnBudget::Unbounded,
+                lash_protocol_types::session_model::MaxToolCalls::new(1024),
+                lash_protocol_types::session_model::NoProgressBudget::bounded(12),
             ),
             head: SessionCreationHead::Config,
-            retention: lash_core_execution::Retention::UntilGc,
+            retention: lash_core_store::store::Retention::UntilGc,
         })
         .await
         .expect("create the session to delete");
@@ -496,14 +512,14 @@ async fn artifact_cleanups_are_armed_on_the_injected_store_clock() {
         "turn",
     );
     let journal = scope.journal_identity().expect("a turn journal identity");
-    let referrer = lash_core_execution::ArtifactReferrer::Execution(journal.clone());
-    let claim = lash_core_execution::ReferrerClaim::guarded(
-        lash_core_execution::ReferrerGuard::Journal(journal),
+    let referrer = lash_core_store::artifact_referrer::ArtifactReferrer::Execution(journal.clone());
+    let claim = lash_core_store::artifact_referrer::ReferrerClaim::guarded(
+        lash_core_store::artifact_referrer::ReferrerGuard::Journal(journal),
     );
     let artifacts = storage
         .lash_vm_artifact_store()
         .with_clock(Arc::clone(&clock));
-    lash_core_execution::ModuleArtifactStore::publish_module_artifact(
+    lash_execution_contracts::module_artifacts::ModuleArtifactStore::publish_module_artifact(
         &artifacts,
         &claim,
         &unique_id("clock-contract-module"),

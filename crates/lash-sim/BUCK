@@ -166,7 +166,7 @@ lash_rust_integration_test(
         "//crates/lash-postgres-store:package_files",
         "//crates/lash-sqlite-store:package_files",
         "//crates/lash-core-store:package_files",
-        "//crates/lash-core-execution:package_files",
+        "//crates/lash-execution-contracts:package_files",
         "//crates/lash-durable:package_files",
     ],
     extra_data = [

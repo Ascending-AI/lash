@@ -9,9 +9,10 @@
 use anyhow::{Context as _, Result, ensure};
 use lash::tools::{StaticToolExecute, StaticToolProvider, ToolDefinitionBindingExt as _};
 use lash_core::llm::types::{LlmRequest, LlmRole};
-use lash_core::perf_witness::{Collector, Snapshot};
-use lash_core_execution::StoreSet;
+use lash_core_ids::perf_witness::Collector;
+use lash_core_ids::perf_witness::Snapshot;
 use lash_durable::domain::pages::{RetirementBudget, RetirementProgress};
+use lash_execution_contracts::backend::StoreSet;
 use lash_vm_client::{PoolCounters, WorkerPool};
 use std::path::Path;
 use std::sync::{Arc, Mutex};
@@ -325,7 +326,7 @@ async fn sample(run: &super::Run<'_>, scenario: &str, h: usize) -> Result<Vec<Ro
             )
             .await?;
             (
-                Arc::new(stores) as Arc<dyn lash_core_execution::StoreSet>,
+                Arc::new(stores) as Arc<dyn lash_execution_contracts::backend::StoreSet>,
                 "sqlite",
                 None,
             )
@@ -350,7 +351,7 @@ fn worker_service(worker: &Path) -> lash::vm::WorkerService {
 
 async fn sample_with_stores(
     service: lash::vm::WorkerService,
-    stores: Arc<dyn lash_core_execution::StoreSet>,
+    stores: Arc<dyn lash_execution_contracts::backend::StoreSet>,
     store: &'static str,
     scenario: &str,
     h: usize,
@@ -834,8 +835,8 @@ mod tests {
     #[tokio::test]
     async fn another_stores_retirement_is_not_counted() {
         use super::super::recorder::{Recorder, RecordingStores};
-        use lash_core_execution::StoreSet;
         use lash_durable::domain::pages::RetirementBudget;
+        use lash_execution_contracts::backend::StoreSet;
         use std::sync::Arc;
         let _sample = HEAP_SAMPLES.lock().await;
         // Even stores reporting transactions to the same recorder keep

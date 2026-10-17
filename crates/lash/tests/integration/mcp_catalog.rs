@@ -394,7 +394,7 @@ async fn make_stores(
     store: Store,
     root: &std::path::Path,
     storage: Option<&PostgresStorage>,
-) -> Arc<dyn lash_core::StoreSet> {
+) -> Arc<dyn lash_execution_contracts::backend::StoreSet> {
     match store {
         Store::SqliteMemory => Arc::new(
             lash_sqlite_store::SqliteStoreSet::memory()
@@ -617,7 +617,8 @@ async fn turn_witness(store: Store, failure_law: bool) {
                 );
             }
             let replayed: lash::tools::ToolCallOutput = serde_json::from_slice(
-                &serde_json::to_vec(&lash_core::Durable(&record.output)).expect("recorded output"),
+                &serde_json::to_vec(&lash_protocol_types::Durable(&record.output))
+                    .expect("recorded output"),
             )
             .expect("replayed output");
             assert_eq!(replayed.outcome, record.output.outcome);

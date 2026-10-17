@@ -7,7 +7,8 @@
 //! whole store is refused at open rather than replayed against a missing
 //! digest.
 
-use lash_core_execution::{StoreError, compat::CompatRefusal};
+use lash_core_store::compat::CompatRefusal;
+use lash_core_store::store::StoreError;
 
 use crate::support::{IsolatedSchema, database_url};
 

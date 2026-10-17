@@ -47,7 +47,7 @@ pub enum EmbedError {
     /// Returned when a registered plugin factory's declaration is refused:
     /// it names another plugin than its factory, or cannot write the format
     /// it reads natively (FIG-4744). Nothing is built.
-    PluginDeclaration(#[from] lash_core::plugin::PluginDeclarationError),
+    PluginDeclaration(#[from] lash_execution_contracts::declaration_error::PluginDeclarationError),
     #[error("a model key is required; a root session's spec must name a registered model")]
     /// Returned when a creation's spec states no model: an overlay
     /// passed where a
@@ -104,7 +104,7 @@ pub enum EmbedError {
     /// Nothing is registered.
     SessionTurnStartUnspecified {
         /// The part of the session's config the request left unstated.
-        unstated: lash_core::UnstatedSessionConfig,
+        unstated: lash_execution_contracts::session_types::UnstatedSessionConfig,
     },
     #[error(
         "commit budget is required; provide explicit byte and node limits with .commit_budget(...).data_retention(crate::DataRetention::standard())"
@@ -204,7 +204,7 @@ pub enum EmbedError {
     #[error("config transaction not admitted: {0}")]
     ConfigSubmit(lash_core::ConfigSubmitError),
     #[error("runtime plugin/control error: {0}")]
-    Plugin(#[from] lash_core::PluginError),
+    Plugin(#[from] lash_execution_contracts::plugin_error::PluginError),
     /// The protocol refused the renderer a new process environment captures.
     #[cfg(feature = "codemode")]
     #[error(transparent)]
@@ -281,17 +281,21 @@ impl EmbedError {
 
         match self {
             Self::Runtime(error)
-            | Self::Plugin(lash_core::PluginError::Runtime(error))
-            | Self::Session(SessionError::Plugin(lash_core::PluginError::Runtime(error)))
-            | Self::ProcessEnvLoad(crate::plugins::ProcessEnvLoadError::Store(
-                lash_core::PluginError::Runtime(error),
-            )) => error.host_resource(),
-            Self::Plugin(lash_core::PluginError::RuntimeEffectController(error))
+            | Self::Plugin(lash_execution_contracts::plugin_error::PluginError::Runtime(error))
             | Self::Session(SessionError::Plugin(
-                lash_core::PluginError::RuntimeEffectController(error),
+                lash_execution_contracts::plugin_error::PluginError::Runtime(error),
             ))
             | Self::ProcessEnvLoad(crate::plugins::ProcessEnvLoadError::Store(
-                lash_core::PluginError::RuntimeEffectController(error),
+                lash_execution_contracts::plugin_error::PluginError::Runtime(error),
+            )) => error.host_resource(),
+            Self::Plugin(
+                lash_execution_contracts::plugin_error::PluginError::RuntimeEffectController(error),
+            )
+            | Self::Session(SessionError::Plugin(
+                lash_execution_contracts::plugin_error::PluginError::RuntimeEffectController(error),
+            ))
+            | Self::ProcessEnvLoad(crate::plugins::ProcessEnvLoadError::Store(
+                lash_execution_contracts::plugin_error::PluginError::RuntimeEffectController(error),
             )) => error.clone().into_runtime_error().host_resource(),
             Self::Control(
                 PluginOperationInvokeError::Runtime(error)
@@ -309,18 +313,22 @@ impl EmbedError {
     /// encountered it. Store and transport faults return `None`.
     pub fn process_env_refusal(&self) -> Option<&crate::process::ProcessEnvRefusal> {
         let cause = match self {
-            Self::Plugin(lash_core::PluginError::ProcessEnvRefused { refusal })
-            | Self::Session(SessionError::Plugin(lash_core::PluginError::ProcessEnvRefused {
-                refusal,
-            })) => return Some(refusal),
-            Self::Runtime(error)
-            | Self::Plugin(lash_core::PluginError::Runtime(error))
-            | Self::Session(SessionError::Plugin(lash_core::PluginError::Runtime(error))) => {
-                error.cause.as_ref()
-            }
-            Self::Plugin(lash_core::PluginError::RuntimeEffectController(error))
+            Self::Plugin(
+                lash_execution_contracts::plugin_error::PluginError::ProcessEnvRefused { refusal },
+            )
             | Self::Session(SessionError::Plugin(
-                lash_core::PluginError::RuntimeEffectController(error),
+                lash_execution_contracts::plugin_error::PluginError::ProcessEnvRefused { refusal },
+            )) => return Some(refusal),
+            Self::Runtime(error)
+            | Self::Plugin(lash_execution_contracts::plugin_error::PluginError::Runtime(error))
+            | Self::Session(SessionError::Plugin(
+                lash_execution_contracts::plugin_error::PluginError::Runtime(error),
+            )) => error.cause.as_ref(),
+            Self::Plugin(
+                lash_execution_contracts::plugin_error::PluginError::RuntimeEffectController(error),
+            )
+            | Self::Session(SessionError::Plugin(
+                lash_execution_contracts::plugin_error::PluginError::RuntimeEffectController(error),
             )) => error.cause.as_ref(),
             _ => None,
         };
@@ -337,13 +345,15 @@ impl EmbedError {
     pub fn artifact_refusal(&self) -> Option<crate::process::HostArtifactRefusal> {
         match self {
             Self::Runtime(error)
-            | Self::Plugin(lash_core::PluginError::Runtime(error))
-            | Self::Session(SessionError::Plugin(lash_core::PluginError::Runtime(error))) => {
-                crate::process::HostArtifactRefusal::of_runtime(error)
-            }
-            Self::Plugin(lash_core::PluginError::RuntimeEffectController(error))
+            | Self::Plugin(lash_execution_contracts::plugin_error::PluginError::Runtime(error))
             | Self::Session(SessionError::Plugin(
-                lash_core::PluginError::RuntimeEffectController(error),
+                lash_execution_contracts::plugin_error::PluginError::Runtime(error),
+            )) => crate::process::HostArtifactRefusal::of_runtime(error),
+            Self::Plugin(
+                lash_execution_contracts::plugin_error::PluginError::RuntimeEffectController(error),
+            )
+            | Self::Session(SessionError::Plugin(
+                lash_execution_contracts::plugin_error::PluginError::RuntimeEffectController(error),
             )) => crate::process::HostArtifactRefusal::of_controller(error),
             _ => None,
         }
@@ -418,10 +428,13 @@ impl EmbedError {
     /// a hook or in a tool body (FIG-5324).
     pub fn plugin_state_refusal(&self) -> Option<&lash_core::PluginStateError> {
         match self {
-            Self::Runtime(error) | Self::Plugin(lash_core::PluginError::Runtime(error)) => {
+            Self::Runtime(error)
+            | Self::Plugin(lash_execution_contracts::plugin_error::PluginError::Runtime(error)) => {
                 error.plugin_state_refusal()
             }
-            Self::Plugin(lash_core::PluginError::State(refusal)) => Some(refusal),
+            Self::Plugin(lash_execution_contracts::plugin_error::PluginError::State(refusal)) => {
+                Some(refusal)
+            }
             _ => None,
         }
     }
@@ -439,7 +452,7 @@ impl EmbedError {
             }
             Self::Runtime(error) => error.session_state_version_refusal(),
             Self::Plugin(error) | Self::Session(SessionError::Plugin(error)) => {
-                use lash_core::PluginError;
+                use lash_execution_contracts::plugin_error::PluginError;
                 match error {
                     PluginError::Runtime(error) => error.session_state_version_refusal(),
                     PluginError::RuntimeEffectController(error) => {
@@ -726,10 +739,13 @@ pub type Result<T> = std::result::Result<T, EmbedError>;
 #[cfg(test)]
 mod tests {
     use super::EmbedError;
-    use lash_core::{
-        PluginError, RuntimeEffectControllerError, RuntimeError, RuntimeErrorCause,
-        RuntimeErrorCode, SessionError, StoreError,
-    };
+    use lash_core::RuntimeEffectControllerError;
+    use lash_core::RuntimeError;
+    use lash_core::RuntimeErrorCause;
+    use lash_core::RuntimeErrorCode;
+    use lash_core::SessionError;
+    use lash_core::StoreError;
+    use lash_execution_contracts::plugin_error::PluginError;
     use lash_protocol_types::SessionId;
 
     /// FIG-6549: exhaustion stays typed through runtime, plugin and session wrappers.
@@ -1037,7 +1053,7 @@ mod tests {
             EmbedError::MissingTurnBudget,
             EmbedError::MissingMaxToolCalls,
             EmbedError::SessionTurnStartUnspecified {
-                unstated: lash_core::UnstatedSessionConfig::Policy,
+                unstated: lash_execution_contracts::session_types::UnstatedSessionConfig::Policy,
             },
             runtime_error(RuntimeErrorCode::MissingExecutionScopeId),
         ] {
@@ -1329,7 +1345,10 @@ mod artifact_code_tests {
     /// conversion; infrastructure faults have no refusal name.
     #[test]
     fn artifact_refusals_have_stable_local_codes() {
-        use lash_core::{ArtifactStoreError, PluginError, RuntimeError, RuntimeErrorCode};
+        use lash_core::RuntimeError;
+        use lash_core::RuntimeErrorCode;
+        use lash_execution_contracts::module_artifacts::ArtifactStoreError;
+        use lash_execution_contracts::plugin_error::PluginError;
         let errors = [
             (
                 PluginError::from(ArtifactStoreError::ReferrerEnded {
@@ -1359,9 +1378,11 @@ mod artifact_code_tests {
                 "conflict",
             ),
             (
-                PluginError::from(lash_core::ProcessDefinitionRefusal::UnknownEngine {
-                    engine_kind: "absent".into(),
-                }),
+                PluginError::from(
+                    lash_execution_contracts::process::ProcessDefinitionRefusal::UnknownEngine {
+                        engine_kind: "absent".into(),
+                    },
+                ),
                 "definition_refused",
             ),
         ];

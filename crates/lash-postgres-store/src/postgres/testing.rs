@@ -120,7 +120,7 @@ pub async fn from_pool(
 pub async fn from_pool_as(
     pool: sqlx::PgPool,
     config: &crate::PostgresHostConfig,
-    writable: lash_core_execution::compat::VersionRange,
+    writable: lash_core_store::compat::VersionRange,
 ) -> Result<crate::PostgresStorage, crate::StoreError> {
     let config = fitted(&pool, config);
     crate::PostgresStorage::from_pool_set_with_fleet_writable_range_for_testing(
@@ -243,13 +243,13 @@ pub struct StoredCell {
 /// The account of a connection or a read that fails.
 pub async fn raw_checkpoint_for_testing(
     pool: &sqlx::PgPool,
-    blob_ref: &lash_core_execution::BlobRef,
-) -> Result<Option<lash_core_execution::store::HydratedSessionCheckpoint>, String> {
+    blob_ref: &lash_core_store::store::BlobRef,
+) -> Result<Option<lash_core_store::store::HydratedSessionCheckpoint>, String> {
     let mut connection = pool.acquire().await.map_err(|error| error.to_string())?;
     crate::support::get_checkpoint_tx(
         &mut connection,
         blob_ref,
-        lash_core_execution::FleetFormat::current(),
+        lash_core_store::store::FleetFormat::current(),
         crate::host::MaintenancePolicy::default().checkpoint_ref_chunk as usize,
     )
     .await
@@ -348,7 +348,7 @@ struct AfterFenceState {
 #[derive(Debug)]
 struct ArmedPause {
     reached: tokio::sync::oneshot::Sender<u32>,
-    gate: std::sync::Arc<lash_core_execution::testing::Gate>,
+    gate: std::sync::Arc<lash_core_store::testing::Gate>,
 }
 
 /// One armed pause: the transaction that takes it waits after its fence
@@ -356,7 +356,7 @@ struct ArmedPause {
 #[derive(Debug)]
 pub struct FencePause {
     reached: Option<tokio::sync::oneshot::Receiver<u32>>,
-    gate: std::sync::Arc<lash_core_execution::testing::Gate>,
+    gate: std::sync::Arc<lash_core_store::testing::Gate>,
 }
 
 impl AfterFence {
@@ -367,9 +367,8 @@ impl AfterFence {
     /// Pause the next guarded transaction that passes its fence.
     pub fn pause_next(&self) -> FencePause {
         let (reached_tx, reached_rx) = tokio::sync::oneshot::channel();
-        let gate = std::sync::Arc::new(lash_core_execution::testing::Gate::new(
-            "postgres writer fence",
-        ));
+        let gate =
+            std::sync::Arc::new(lash_core_store::testing::Gate::new("postgres writer fence"));
         self.lock_state().armed.push_back(ArmedPause {
             reached: reached_tx,
             gate: std::sync::Arc::clone(&gate),
@@ -463,7 +462,7 @@ pub struct BeforeTurnCommit {
 /// [`Self::release`], or until this handle is dropped.
 #[derive(Clone, Debug)]
 pub struct TurnCommitPause {
-    gate: std::sync::Arc<lash_core_execution::testing::Gate>,
+    gate: std::sync::Arc<lash_core_store::testing::Gate>,
 }
 
 impl BeforeTurnCommit {
@@ -475,9 +474,7 @@ impl BeforeTurnCommit {
     pub fn pause_next(&self) -> TurnCommitPause {
         use lash_protocol_types::sync::MutexExt;
         let pause = TurnCommitPause {
-            gate: std::sync::Arc::new(lash_core_execution::testing::Gate::new(
-                "postgres turn commit",
-            )),
+            gate: std::sync::Arc::new(lash_core_store::testing::Gate::new("postgres turn commit")),
         };
         self.armed.lock_recover().push_back(pause.clone());
         pause
@@ -530,16 +527,13 @@ pub struct StorageGates {
 }
 
 /// A pause armed at a point, and the gate it holds there.
-type ArmedPoint = (
-    StoragePoint,
-    std::sync::Arc<lash_core_execution::testing::Gate>,
-);
+type ArmedPoint = (StoragePoint, std::sync::Arc<lash_core_store::testing::Gate>);
 
 /// One armed [`StorageGates`] pause: the transaction that takes it waits at
 /// its point until [`Self::release`], or until this handle is dropped.
 #[derive(Debug)]
 pub struct StoragePause {
-    gate: std::sync::Arc<lash_core_execution::testing::Gate>,
+    gate: std::sync::Arc<lash_core_store::testing::Gate>,
 }
 
 impl StorageGates {
@@ -550,7 +544,7 @@ impl StorageGates {
     /// Pause the next transaction that reaches `point`.
     pub fn pause_next(&self, point: StoragePoint) -> StoragePause {
         use lash_protocol_types::sync::MutexExt;
-        let gate = std::sync::Arc::new(lash_core_execution::testing::Gate::new(format!(
+        let gate = std::sync::Arc::new(lash_core_store::testing::Gate::new(format!(
             "postgres storage point {point:?}"
         )));
         self.armed
@@ -609,13 +603,13 @@ impl HeldFinalize {
     pub async fn begin(
         pool: &sqlx::PgPool,
         epoch: u32,
-    ) -> Result<Self, lash_core_execution::StoreError> {
-        use lash_core_execution::StoreError;
-        let writable = lash_core_execution::compat::VersionRange::new(1, epoch)
+    ) -> Result<Self, lash_core_store::store::StoreError> {
+        use lash_core_store::store::StoreError;
+        let writable = lash_core_store::compat::VersionRange::new(1, epoch)
             .map_err(|error| StoreError::Backend(error.to_string()))?;
         let fence = crate::guarded_tx::WriterFence::new(
             writable,
-            lash_core_execution::FleetFormat::from_version(epoch),
+            lash_core_store::store::FleetFormat::from_version(epoch),
         );
         let mut row = crate::guarded_tx::begin_fleet_row(pool, &fence).await?;
         if row.recorded < epoch {
@@ -638,7 +632,7 @@ impl HeldFinalize {
     }
 
     /// Commit the move.
-    pub async fn commit(self) -> Result<(), lash_core_execution::StoreError> {
+    pub async fn commit(self) -> Result<(), lash_core_store::store::StoreError> {
         self.row.commit().await?;
         self.fence.observe(self.epoch);
         Ok(())
@@ -780,7 +774,7 @@ impl CommitFault {
 pub async fn finalize_fleet_epoch(
     pool: &sqlx::PgPool,
     epoch: u32,
-) -> Result<(), lash_core_execution::StoreError> {
+) -> Result<(), lash_core_store::store::StoreError> {
     HeldFinalize::begin(pool, epoch).await?.commit().await
 }
 

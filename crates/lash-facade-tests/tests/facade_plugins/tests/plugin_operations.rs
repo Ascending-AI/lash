@@ -136,7 +136,7 @@ async fn a_session_operation_keeps_its_artifact_referrer_live_until_settlement()
             .module_artifacts()
             .publish_module_artifact(&claim, "operation-after-settlement", b"ended")
             .await,
-        Err(lash_core::ArtifactStoreError::ReferrerEnded { .. })
+        Err(lash_execution_contracts::module_artifacts::ArtifactStoreError::ReferrerEnded { .. })
     ));
     core.shutdown().await?;
     Ok(())
@@ -315,14 +315,20 @@ async fn a_session_lifetime_process_survives_operation_completion() -> Result<()
                     .expect("an operation is an opener");
                 let mut started = Vec::new();
                 for (key, lifetime) in [
-                    ("child", lash_core::lifetime::session_or_starter(&cx)),
-                    ("until", lash_core::lifetime::starter(&cx)),
+                    (
+                        "child",
+                        lash_execution_contracts::process::lifetime::session_or_starter(&cx),
+                    ),
+                    (
+                        "until",
+                        lash_execution_contracts::process::lifetime::starter(&cx),
+                    ),
                 ] {
-                    let request = lash_core::testing::held_engine_request(
+                    let request = lash_execution_contracts::testing::held_engine_request(
                         serde_json::Value::Null,
-                        lash_core::ProcessOriginator::session(lash_core::SessionScope::new(
-                            session.clone(),
-                        )),
+                        lash_execution_contracts::process::ProcessOriginator::session(
+                            lash_execution_contracts::process::SessionScope::new(session.clone()),
+                        ),
                         lifetime,
                     )
                     .with_host_start_key(format!("operation-session-process:{key}"));
@@ -337,8 +343,10 @@ async fn a_session_lifetime_process_survives_operation_completion() -> Result<()
             });
         let backend = sqlite_memory_store_backend().await;
         let registry = backend.process_registry();
-        lash_core::testing::process_execution_env_fixture(backend.process_env_store().as_ref())
-            .await;
+        lash_execution_contracts::testing::process_execution_env_fixture(
+            backend.process_env_store().as_ref(),
+        )
+        .await;
         let core = explicit_ephemeral_facets(LashCore::standard_builder(backend))
             .serve_test_llm_profile(mock_provider(), mock_llm_profile_spec())
             .plugin(lash_core::testing::process_engine_plugin_fixture())
@@ -439,7 +447,10 @@ impl PluginCommand for FailureProbe {}
 async fn plugin_operation_failure_reaches_the_facade_as_a_typed_settlement() -> Result<()> {
     {
         use lash::plugins::{PluginDeclarationError, PluginFailureClass};
-        use lash_core::{PluginError, PluginStateError, RuntimeError, RuntimeErrorCode};
+        use lash_core::PluginStateError;
+        use lash_core::RuntimeError;
+        use lash_core::RuntimeErrorCode;
+        use lash_execution_contracts::plugin_error::PluginError;
         let mut sources = vec![
             PluginOperationFailure::from(PluginError::StoredDataCorrupt {
                 record_kind: "plugin checkpoint".into(),

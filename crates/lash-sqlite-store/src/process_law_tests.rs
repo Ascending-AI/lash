@@ -5,7 +5,9 @@
 use std::sync::Arc;
 
 use lash_core_execution::runtime::actor::process_laws;
-use lash_core_execution::{Backend, BackendParts, NoProjectionProviders};
+use lash_execution_contracts::backend::Backend;
+use lash_execution_contracts::backend::BackendParts;
+use lash_execution_contracts::projection::NoProjectionProviders;
 
 use crate::SqliteStoreSet;
 

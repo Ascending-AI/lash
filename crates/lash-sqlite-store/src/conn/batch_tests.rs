@@ -209,7 +209,7 @@ async fn a_member_refusal_or_failure_leaves_its_siblings_committed_in_order() {
         |tx| {
             insert(tx, "failed")?;
             Err::<TxOutcome<&str>, _>(crate::sqlite_conversion_error(
-                lash_core_execution::StoreError::Contended,
+                lash_core_store::store::StoreError::Contended,
             ))
         },
         {
@@ -219,8 +219,8 @@ async fn a_member_refusal_or_failure_leaves_its_siblings_committed_in_order() {
                     &result,
                     Err(rusqlite::Error::ToSqlConversionFailure(error))
                         if matches!(
-                            error.downcast_ref::<lash_core_execution::StoreError>(),
-                            Some(lash_core_execution::StoreError::Contended)
+                            error.downcast_ref::<lash_core_store::store::StoreError>(),
+                            Some(lash_core_store::store::StoreError::Contended)
                         )
                 );
                 answers.lock().expect("answers").push((
@@ -476,7 +476,7 @@ async fn batch_bounds_cap_members_and_rows() {
 /// no wait for company, and answers at once.
 #[tokio::test(flavor = "multi_thread", worker_threads = 2)]
 async fn a_lone_write_is_a_plain_transaction_with_no_wait() {
-    use lash_core_execution::facade_support::sql;
+    use lash_core_ids::operational_metrics::sql;
     let world = world(32, 4_096).await;
     let started = std::time::Instant::now();
     let (answer, receipt) = sql::collect(

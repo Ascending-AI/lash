@@ -7,11 +7,13 @@ mod served;
 mod sim;
 
 use lash_core::llm::types::{LlmOutputPart, LlmResponse};
-use lash_core::plugin::{
-    BeforeToolDecision, PluginDeclaration, PluginError, PluginSpec, StaticPluginFactory,
-};
+use lash_core::plugin::BeforeToolDecision;
+use lash_core::plugin::PluginDeclaration;
+use lash_core::plugin::PluginSpec;
+use lash_core::plugin::StaticPluginFactory;
 use lash_core::testing::runtime_helpers::{EchoTool, MockCall, mock_provider};
 use lash_durable_test::SimClock;
+use lash_execution_contracts::plugin_error::PluginError;
 use std::sync::{
     Arc,
     atomic::{AtomicUsize, Ordering},
@@ -205,8 +207,11 @@ async fn prove(tool: bool, denied: bool) {
         .unwrap();
     let recorded_outcome = serde_json::to_value(&output.outcome).unwrap();
     let recorded_calls = session.read_turn_tool_calls(&run).await.unwrap();
-    let text =
-        serde_json::to_string(&(&output.outcome, lash_core::Durable(&recorded_calls))).unwrap();
+    let text = serde_json::to_string(&(
+        &output.outcome,
+        lash_protocol_types::Durable(&recorded_calls),
+    ))
+    .unwrap();
     assert!(
         text.contains("control_phase_expired"),
         "typed expiry missing: {text}"
@@ -280,11 +285,11 @@ async fn prove(tool: bool, denied: bool) {
         recorded_outcome
     );
     assert_eq!(
-        serde_json::to_value(lash_core::Durable(
+        serde_json::to_value(lash_protocol_types::durable_serde::Durable(
             &session.read_turn_tool_calls(&run).await.unwrap()
         ))
         .unwrap(),
-        serde_json::to_value(lash_core::Durable(&recorded_calls)).unwrap()
+        serde_json::to_value(lash_protocol_types::durable_serde::Durable(&recorded_calls)).unwrap()
     );
     assert_eq!(
         invoked.load(Ordering::SeqCst),

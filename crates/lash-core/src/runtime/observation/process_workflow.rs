@@ -10,9 +10,12 @@ use lash_trace::{
 use schemars::JsonSchema;
 use serde::{Deserialize, Serialize};
 
-use super::super::ObservedProcessEvent;
 use super::process_replay::ProcessObservationEventPayload;
-use crate::{ProcessEffectOutcomeClass, ProcessId, ProcessLifecycleFact, WaitKind};
+use crate::ProcessId;
+use lash_execution_contracts::process::ObservedProcessEvent;
+use lash_execution_contracts::process::ProcessEffectOutcomeClass;
+use lash_execution_contracts::process::ProcessLifecycleFact;
+use lash_execution_contracts::process::WaitKind;
 
 /// What was observed at a site's latest occurrence. An unobserved terminal
 /// does not claim the action succeeded: the process ended without that fact.
@@ -532,7 +535,7 @@ mod tests {
             (19, 1, false, 7, Some(19)),
         ] {
             at.occurrence = occurrence;
-            let wait = crate::WaitState {
+            let wait = lash_execution_contracts::process::WaitState {
                 kind: WaitKind::Sleep { until_ms: 100 },
                 since_ms: 1,
                 site: Some(at.clone()),
@@ -609,15 +612,18 @@ mod tests {
         overlay.committed(&ObservedProcessEvent {
             sequence: 7,
             occurred_at_ms: 1,
-            fact: ProcessLifecycleFact::EffectOutcome(crate::ProcessEffectOccurrence {
-                vocabulary_version: crate::PROCESS_EVENT_VOCABULARY_VERSION,
-                at: at.clone(),
-                operation: "fixture".into(),
-                outcome_class: ProcessEffectOutcomeClass::Failure,
-                code: None,
-                call_id: None,
-                replay_key: "fixture".into(),
-            }),
+            fact: ProcessLifecycleFact::EffectOutcome(
+                lash_execution_contracts::process::ProcessEffectOccurrence {
+                    vocabulary_version:
+                        lash_execution_contracts::process::PROCESS_EVENT_VOCABULARY_VERSION,
+                    at: at.clone(),
+                    operation: "fixture".into(),
+                    outcome_class: ProcessEffectOutcomeClass::Failure,
+                    code: None,
+                    call_id: None,
+                    replay_key: "fixture".into(),
+                },
+            ),
         });
         let snapshot = overlay.snapshot();
         assert_eq!(snapshot.sites[0].first_entered, Some(7));
@@ -641,15 +647,18 @@ mod tests {
         overlay.committed(&ObservedProcessEvent {
             sequence: 9,
             occurred_at_ms: 2,
-            fact: ProcessLifecycleFact::EffectOutcome(crate::ProcessEffectOccurrence {
-                vocabulary_version: crate::PROCESS_EVENT_VOCABULARY_VERSION,
-                at,
-                operation: "fixture".into(),
-                outcome_class: ProcessEffectOutcomeClass::Success,
-                code: None,
-                call_id: None,
-                replay_key: "fixture".into(),
-            }),
+            fact: ProcessLifecycleFact::EffectOutcome(
+                lash_execution_contracts::process::ProcessEffectOccurrence {
+                    vocabulary_version:
+                        lash_execution_contracts::process::PROCESS_EVENT_VOCABULARY_VERSION,
+                    at,
+                    operation: "fixture".into(),
+                    outcome_class: ProcessEffectOutcomeClass::Success,
+                    code: None,
+                    call_id: None,
+                    replay_key: "fixture".into(),
+                },
+            ),
         });
         let snapshot = overlay.snapshot();
         let site = &snapshot.sites[0];
@@ -709,7 +718,10 @@ mod tests {
             fact,
         };
         let ran = |ran: Vec<(u32, u64)>| {
-            ProcessLifecycleFact::Ran(crate::ProcessRan::new(ran, crate::FleetFormat::current()))
+            ProcessLifecycleFact::Ran(lash_execution_contracts::process::ProcessRan::new(
+                ran,
+                crate::FleetFormat::current(),
+            ))
         };
         let counts = |overlay: &ProcessWorkflowOverlayAccumulator| {
             overlay
@@ -734,11 +746,13 @@ mod tests {
         assert_eq!(counts(&overlay), [(3, 2, 0), (4, 1, 5)]);
         overlay.committed(&committed(
             6,
-            ProcessLifecycleFact::Succeeded(crate::ProcessSuccessorRequest {
-                payload: serde_json::Value::Null,
-                env: crate::ProcessEnvRef::new("successor"),
-                definition_id: None,
-            }),
+            ProcessLifecycleFact::Succeeded(
+                lash_execution_contracts::process::ProcessSuccessorRequest {
+                    payload: serde_json::Value::Null,
+                    env: crate::ProcessEnvRef::new("successor"),
+                    definition_id: None,
+                },
+            ),
         ));
         assert_eq!(counts(&overlay), []);
         overlay.committed(&committed(7, ran(vec![(1, 1)])));
@@ -795,7 +809,7 @@ mod tests {
             }),
         )
         .expect("live entry");
-        let wait = crate::WaitState {
+        let wait = lash_execution_contracts::process::WaitState {
             kind: WaitKind::Sleep { until_ms: 3 },
             since_ms: 2,
             site: Some(at),
@@ -831,19 +845,19 @@ mod tests {
     fn a_stored_projected_terminal_settles_unfinished_sites() {
         let mut overlay =
             ProcessWorkflowOverlayAccumulator::new(ProcessId::fixture("projected-terminal"));
-        let sleep = crate::WaitState {
+        let sleep = lash_execution_contracts::process::WaitState {
             kind: WaitKind::Sleep { until_ms: 2 },
             since_ms: 1,
             site: Some(lash_protocol_types::effect_identity_fixture("settled", 0)),
         };
-        let running = crate::WaitState {
+        let running = lash_execution_contracts::process::WaitState {
             kind: WaitKind::Process {
                 process_id: ProcessId::fixture("child"),
             },
             since_ms: 3,
             site: Some(lash_protocol_types::effect_identity_fixture("running", 0)),
         };
-        let waiting = crate::WaitState {
+        let waiting = lash_execution_contracts::process::WaitState {
             kind: WaitKind::Sleep { until_ms: 100 },
             since_ms: 5,
             site: Some(lash_protocol_types::effect_identity_fixture("waiting", 0)),
@@ -859,9 +873,9 @@ mod tests {
             ProcessLifecycleFact::Resumed { wait: running },
             ProcessLifecycleFact::Waiting { wait: waiting },
             ProcessLifecycleFact::Terminal {
-                outcome: crate::ProcessTerminal::from_tool_output(crate::ToolCallOutput::success(
-                    serde_json::json!("done"),
-                )),
+                outcome: lash_execution_contracts::process::ProcessTerminal::from_tool_output(
+                    crate::ToolCallOutput::success(serde_json::json!("done")),
+                ),
                 authority: None,
             },
         ];
@@ -872,7 +886,7 @@ mod tests {
                 fact,
             };
             let stored = serde_json::to_value(event.projection()).expect("host event row");
-            let row: crate::ProjectedProcessEvent =
+            let row: lash_execution_contracts::process::ProjectedProcessEvent =
                 serde_json::from_value(stored.clone()).expect("read host row");
             if row.event_type.terminal_status().is_some() {
                 assert_eq!(row.payload["await_output"]["status"], "completed");

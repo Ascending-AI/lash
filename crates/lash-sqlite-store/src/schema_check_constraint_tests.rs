@@ -223,20 +223,21 @@ const PROCESS_FIXTURE_COLUMNS: &str = "process_id, originator_id,
 /// A process record's JSON, as far as its row's columns read it: the event
 /// sequence, the lifecycle and the cancel request, each in its own codec.
 fn process_lifecycle_json(
-    status: lash_core_execution::ProcessStatus,
+    status: lash_execution_contracts::process::ProcessStatus,
     last_event_sequence: u64,
     cancel_requested_at_ms: Option<u64>,
 ) -> String {
     let mut record = serde_json::json!({
         "last_event_sequence": last_event_sequence,
-        "lifecycle": lash_core_execution::Durable(&lash_core_execution::ProcessLifecycleState::fixture(status)),
+        "lifecycle": lash_protocol_types::durable_serde::Durable(&lash_execution_contracts::process::ProcessLifecycleState::fixture(status)),
     });
     if let Some(at) = cancel_requested_at_ms {
-        record["cancel_request"] = serde_json::json!(lash_core_execution::CancelRequest::new(
-            lash_core_execution::CancelOrigin::OperatorRequested,
-            "operator",
-            at,
-        ));
+        record["cancel_request"] =
+            serde_json::json!(lash_protocol_types::tool_output::CancelRequest::new(
+                lash_protocol_types::tool_output::CancelOrigin::OperatorRequested,
+                "operator",
+                at,
+            ));
     }
     record.to_string()
 }
@@ -250,7 +251,7 @@ fn process_lifecycle_json(
 /// still written.
 #[test]
 fn a_process_row_takes_its_lifecycle_columns_from_its_record_alone() {
-    use lash_core_execution::ProcessStatus;
+    use lash_execution_contracts::process::ProcessStatus;
 
     let process = Connection::open_in_memory().expect("open process projection fixture");
     process

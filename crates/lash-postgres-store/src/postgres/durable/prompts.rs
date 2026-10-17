@@ -742,7 +742,9 @@ pub(super) async fn texts(
 #[cfg(test)]
 mod tests {
     use super::*;
-    use lash_core_execution::{SessionCatalogStore as _, StoreMaintenance as _, Target};
+    use lash_core_store::store::SessionCatalogStore as _;
+    use lash_core_store::store::StoreMaintenance as _;
+    use lash_core_store::store::Target;
     use lash_durable::{ActorKey, CommitLabel, DomainWrite, DurableReads, DurableStore};
 
     /// PROMPT-AUDIT-RETENTION: revision expiry releases settled audit plans
@@ -754,7 +756,7 @@ mod tests {
         let storage = crate::testing::connect(database.url()).await.unwrap();
         let stores = crate::PostgresStoreSet::new(
             &storage,
-            std::sync::Arc::new(lash_core_execution::attachments::UnavailableAttachmentStore),
+            std::sync::Arc::new(lash_core_store::attachments::UnavailableAttachmentStore),
         );
         let identity = lash_core_execution::testing::sql_work::owner_commit(&stores).await;
         let store = storage.durable_store();
@@ -816,8 +818,8 @@ mod tests {
         )
         .await
         .unwrap();
-        let admission = lash_core_execution::store::RunAdmissionRecord::Command {
-            batch: lash_core_execution::BatchId::from("finish"),
+        let admission = lash_core_store::store::RunAdmissionRecord::Command {
+            batch: lash_protocol_types::BatchId::from("finish"),
         }
         .to_stored()
         .unwrap();
@@ -898,7 +900,7 @@ mod tests {
             lash_durable::domain::TurnWrite::Terminal {
                 session: session.clone(),
                 run: TurnId::from("finish"),
-                cause: Box::new(lash_core_execution::store::RunTerminalCause::CommandsApplied),
+                cause: Box::new(lash_core_store::store::RunTerminalCause::CommandsApplied),
                 head_revision: Some(2),
                 transcript: None,
             },

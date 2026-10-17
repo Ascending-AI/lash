@@ -20,8 +20,9 @@ fn ingress_start_without_lifetime_is_refused_before_submission() {
         remove_lifetime(&mut payload),
         "valid start had a required lifetime"
     );
-    let error = serde_json::from_value::<lash_core::ToolIntent>(payload)
-        .expect_err("missing lifetime must not decode");
+    let error =
+        serde_json::from_value::<lash_execution_contracts::tool_intent::ToolIntent>(payload)
+            .expect_err("missing lifetime must not decode");
     assert!(error.to_string().contains("lifetime"));
 }
 
@@ -47,9 +48,9 @@ async fn ingress_start_intent_crosses_the_engine_admission_gate() -> Result<()> 
     match &refused {
         lash::tools::ToolIntentIngressOutcome::Admitted {
             outcome:
-                lash_core::ToolIntentExecutionOutcome::Refused {
+                lash_execution_contracts::tool_intent_outcome::ToolIntentExecutionOutcome::Refused {
                     kind: lash_core::ToolIntentKind::StartProcess,
-                    refusal: lash_core::ToolIntentRefusalReason::CommandFailed { cause, .. },
+                    refusal: lash_execution_contracts::tool_intent_outcome::ToolIntentRefusalReason::CommandFailed { cause, .. },
                     ..
                 },
             replayed: false,
@@ -82,7 +83,7 @@ async fn ingress_start_intent_crosses_the_engine_admission_gate() -> Result<()> 
         matches!(
             invalid,
             lash::tools::ToolIntentIngressOutcome::Admitted {
-                outcome: lash_core::ToolIntentExecutionOutcome::Refused { .. },
+                outcome: lash_execution_contracts::tool_intent_outcome::ToolIntentExecutionOutcome::Refused { .. },
                 ..
             }
         ),
@@ -104,8 +105,8 @@ async fn ingress_start_intent_crosses_the_engine_admission_gate() -> Result<()> 
         matches!(
             &admitted,
             lash::tools::ToolIntentIngressOutcome::Admitted {
-                outcome: lash_core::ToolIntentExecutionOutcome::Executed {
-                    realized: lash_core::ToolIntentRealized::StartProcess(_),
+                outcome: lash_execution_contracts::tool_intent_outcome::ToolIntentExecutionOutcome::Executed {
+                    realized: lash_execution_contracts::tool_intent_outcome::ToolIntentRealized::StartProcess(_),
                     ..
                 },
                 ..
@@ -175,22 +176,26 @@ async fn a_journaled_host_start_registers_the_settings_it_declared() -> Result<(
         .engine_defaults(INGRESS_ENGINE_KIND, &payload)?;
     assert_ne!(declared, restarted, "the nodes' defaults differ");
     // An environment no node has published until A's submission refused.
-    let env = lash_core::testing::process_env_with_limit(61);
+    let env = lash_execution_contracts::testing::process_env_with_limit(61);
     let env_ref = env.stable_ref().expect("the environment encodes");
     let start = || {
-        lash_core::ToolIntent::StartProcess(Box::new(lash_core::StartProcessIntent {
-            owner: lash::RuntimeOwner::Session(session.clone()),
-            declaration: lash_core::ProcessStartDeclaration::engine(
-                INGRESS_ENGINE_KIND,
-                payload.clone(),
-                lash_core::testing::declared_launch_for_testing(lash_core::EngineLaunch::new(
-                    env_ref.clone(),
-                    declared.clone(),
-                )),
-                lash_core::ProcessOriginator::host(),
-                lash_core::Lifetime::Detached,
-            ),
-        }))
+        lash_execution_contracts::tool_intent::ToolIntent::StartProcess(Box::new(
+            lash_execution_contracts::tool_intent::StartProcessIntent {
+                owner: lash::RuntimeOwner::Session(session.clone()),
+                declaration: lash_execution_contracts::process::ProcessStartDeclaration::engine(
+                    INGRESS_ENGINE_KIND,
+                    payload.clone(),
+                    lash_execution_contracts::testing::declared_launch_for_testing(
+                        lash_execution_contracts::process::EngineLaunch::new(
+                            env_ref.clone(),
+                            declared.clone(),
+                        ),
+                    ),
+                    lash_execution_contracts::process::ProcessOriginator::host(),
+                    lash_execution_contracts::process::Lifetime::Detached,
+                ),
+            },
+        ))
     };
     let scope = || lash_core::ExecutionScope::turn(SESSION, "declared-settings");
     let ingress = first.tool_intents(session.clone(), scope())?;
@@ -204,7 +209,7 @@ async fn a_journaled_host_start_registers_the_settings_it_declared() -> Result<(
         matches!(
             &refused,
             lash::tools::ToolIntentIngressOutcome::Admitted {
-                outcome: lash_core::ToolIntentExecutionOutcome::Refused { .. },
+                outcome: lash_execution_contracts::tool_intent_outcome::ToolIntentExecutionOutcome::Refused { .. },
                 ..
             }
         ),

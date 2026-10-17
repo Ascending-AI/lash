@@ -249,10 +249,12 @@ impl PluginOperations {
                         output,
                         events: events
                             .into_iter()
-                            .map(|value| lash_core::facade_support::PluginOwned {
-                                plugin_id: plugin_id.clone(),
-                                value,
-                            })
+                            .map(
+                                |value| lash_execution_contracts::session_types::PluginOwned {
+                                    plugin_id: plugin_id.clone(),
+                                    value,
+                                },
+                            )
                             .collect(),
                         pending_turn_inputs,
                     },
@@ -306,7 +308,9 @@ impl PluginOperations {
 
     async fn record_plugin_operation_observations(
         &self,
-        events: &[lash_core::facade_support::PluginOwned<lash_core::PluginRuntimeEvent>],
+        events: &[lash_execution_contracts::session_types::PluginOwned<
+            lash_core::PluginRuntimeEvent,
+        >],
         pending_turn_inputs: &[lash_core::PendingTurnInput],
     ) {
         for owned in events {
@@ -340,10 +344,9 @@ fn encode_plugin_args<Op: lash_core::facade_support::PluginOperation>(
     args: Op::Args,
 ) -> Result<serde_json::Value> {
     serde_json::to_value(args).map_err(|err| {
-        EmbedError::Plugin(lash_core::PluginError::Invoke(format!(
-            "invalid {} args: {err}",
-            Op::NAME
-        )))
+        EmbedError::Plugin(lash_execution_contracts::plugin_error::PluginError::Invoke(
+            format!("invalid {} args: {err}", Op::NAME),
+        ))
     })
 }
 
@@ -351,9 +354,8 @@ fn decode_plugin_output<Op: lash_core::facade_support::PluginOperation>(
     output: serde_json::Value,
 ) -> Result<Op::Output> {
     serde_json::from_value(output).map_err(|err| {
-        EmbedError::Plugin(lash_core::PluginError::Invoke(format!(
-            "invalid {} output: {err}",
-            Op::NAME
-        )))
+        EmbedError::Plugin(lash_execution_contracts::plugin_error::PluginError::Invoke(
+            format!("invalid {} output: {err}", Op::NAME),
+        ))
     })
 }

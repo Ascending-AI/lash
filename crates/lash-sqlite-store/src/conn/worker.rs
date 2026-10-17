@@ -191,7 +191,7 @@ impl Connection {
         let command = match command {
             Command::Call(work) => {
                 if let Some(mut timing) =
-                    lash_core_execution::perf_witness::queues::Timer::enqueue("sqlite.worker")
+                    lash_core_ids::perf_witness::queues::Timer::enqueue("sqlite.worker")
                 {
                     Command::Call(Box::new(move |connection| {
                         timing.start_service();
@@ -219,7 +219,7 @@ impl Connection {
 #[cfg(all(test, feature = "perf-witness"))]
 mod tests {
     use super::*;
-    use lash_core_execution::perf_witness::queues::Collector;
+    use lash_core_ids::perf_witness::queues::Collector;
     use std::future::Future;
 
     // FIG-5663: work accepted behind a blocked writer belongs to queue wait,

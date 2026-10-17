@@ -20,17 +20,20 @@
 
 use super::*;
 
-async fn plan_for(filter: &lash_core_execution::ProcessListFilter) -> Option<String> {
+async fn plan_for(filter: &lash_execution_contracts::process::ProcessListFilter) -> Option<String> {
     let url = crate::testing::required_database_url();
     let database = crate::testing::IsolatedDatabase::create(&url).await;
     let storage = crate::testing::connect(database.url())
         .await
         .expect("connect the planner-witness database");
-    use lash_core_execution::{Lifetime, ProcessProvenance, ProcessRegistrar as _};
-    lash_core_execution::testing::process_execution_env_fixture(&storage.process_env_store()).await;
+    use lash_execution_contracts::process::Lifetime;
+    use lash_execution_contracts::process::ProcessProvenance;
+    use lash_execution_contracts::process::ProcessRegistrar as _;
+    lash_execution_contracts::testing::process_execution_env_fixture(&storage.process_env_store())
+        .await;
     let template = storage
         .process_registry()
-        .register_process(lash_core_execution::testing::held_engine_registration(
+        .register_process(lash_execution_contracts::testing::held_engine_registration(
             serde_json::Value::Null,
             ProcessProvenance::host(),
             Lifetime::Detached,
@@ -42,17 +45,20 @@ async fn plan_for(filter: &lash_core_execution::ProcessListFilter) -> Option<Str
         let mut record = template.clone();
         record.id = ProcessId::fixture(&format!("planner-{index:05}"));
         if matches!(index, 1000 | 5000 | 9000) {
-            record.cancel_request = Some(Box::new(lash_core_execution::CancelRequest::new(
-                lash_core_execution::CancelOrigin::OperatorRequested,
-                "planner",
-                1,
-            )));
+            record.cancel_request = Some(Box::new(
+                lash_protocol_types::tool_output::CancelRequest::new(
+                    lash_protocol_types::tool_output::CancelOrigin::OperatorRequested,
+                    "planner",
+                    1,
+                ),
+            ));
             if let Some(scope) = &filter.until {
-                record.lifetime = lash_core_execution::LifetimeDecision::Until {
+                record.lifetime = lash_execution_contracts::process::LifetimeDecision::Until {
                     scope: scope.clone(),
-                    grant: lash_core_execution::ScopeGrant::Ancestor,
+                    grant: lash_execution_contracts::process::ScopeGrant::Ancestor,
                 };
-                record.ancestry = lash_core_execution::Ancestry::from_scopes([scope.clone()]);
+                record.ancestry =
+                    lash_execution_contracts::process::Ancestry::from_scopes([scope.clone()]);
             }
         }
         let scope = record.lifetime.scope();
@@ -116,10 +122,10 @@ async fn plan_for(filter: &lash_core_execution::ProcessListFilter) -> Option<Str
 
 #[tokio::test(flavor = "multi_thread", worker_threads = 4)]
 async fn pending_cancel_roster_page_uses_the_partial_cancel_index() {
-    let Some(plan) = plan_for(&lash_core_execution::ProcessListFilter {
-        status: lash_core_execution::ProcessStatusFilter::Any,
+    let Some(plan) = plan_for(&lash_execution_contracts::process::ProcessListFilter {
+        status: lash_execution_contracts::process::ProcessStatusFilter::Any,
         cancel_pending_before_ms: Some(1_700_000_000_000),
-        ..lash_core_execution::ProcessListFilter::default()
+        ..lash_execution_contracts::process::ProcessListFilter::default()
     })
     .await
     else {
@@ -133,13 +139,13 @@ async fn pending_cancel_roster_page_uses_the_partial_cancel_index() {
 
 #[tokio::test(flavor = "multi_thread", worker_threads = 4)]
 async fn until_scope_roster_page_uses_the_lifetime_scope_index() {
-    let Some(plan) = plan_for(&lash_core_execution::ProcessListFilter {
-        status: lash_core_execution::ProcessStatusFilter::Any,
-        until: Some(lash_core_execution::ScopeId::turn(
+    let Some(plan) = plan_for(&lash_execution_contracts::process::ProcessListFilter {
+        status: lash_execution_contracts::process::ProcessStatusFilter::Any,
+        until: Some(lash_core_store::scope_identity::ScopeId::turn(
             SessionId::from("plan-session"),
-            lash_core_execution::TurnId::from("plan-turn"),
+            lash_protocol_types::TurnId::from("plan-turn"),
         )),
-        ..lash_core_execution::ProcessListFilter::default()
+        ..lash_execution_contracts::process::ProcessListFilter::default()
     })
     .await
     else {

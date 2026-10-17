@@ -27,10 +27,10 @@ does not make process-owned rows prune-eligible.
 | Live program and Run state | VM stacks, values, aggregate prefixes, unseated finals, source seals, material, state frontier, capacity and owed starts/cancels survive takeover. | Run consumption, protected drain, dependency release and identity-fenced retirement under ADRs 0065 and 0099. | Nothing. Age cannot discard live state; Closing is not garbage collection. |
 
 Evidence: [event SQL](../../crates/lash-store-sql/src/process/events.rs),
-[append and replay matching](../../crates/lash-core-execution/src/runtime/process/validation.rs),
-[effect accounting](../../crates/lash-core-execution/src/runtime/process/effect_summary.rs),
+[append and replay matching](../../crates/lash-execution-contracts/src/process/validation.rs),
+[effect accounting](../../crates/lash-execution-contracts/src/process/effect_summary.rs),
 [snapshot SQL](../../crates/lash-store-sql/src/durable/snapshots.rs),
-[outbox and retention contracts](../../crates/lash-core-execution/src/runtime/process/registry_concerns.rs),
+[outbox and retention contracts](../../crates/lash-execution-contracts/src/process/registry_concerns.rs),
 [SQLite pruning](../../crates/lash-sqlite-store/src/process_registry_change.rs),
 [row ownership](../adr/0067-durable-rows-name-one-owner-and-one-reclaim-trigger.md).
 
@@ -71,13 +71,13 @@ The schema adds `process_events.released_payload_digest` and
 its deletion at process pruning. Versions stay frozen and fixtures change in
 place.
 
-Evidence: [release types and digest](../../crates/lash-core-execution/src/runtime/process/events.rs),
+Evidence: [release types and digest](../../crates/lash-execution-contracts/src/process/events.rs),
 [SQLite release](../../crates/lash-sqlite-store/src/process_registry/event_release.rs),
 [PostgreSQL release](../../crates/lash-postgres-store/src/postgres/process_registry/event_release.rs),
 [host API](../../crates/lash/src/process_admin.rs),
 [snapshot fold](../../crates/lash/src/process_feed.rs),
 [event awaits](../../crates/lash-core-execution/src/runtime/work/awaiter.rs) and
-[process wait projection](../../crates/lash-core-execution/src/runtime/process/validation.rs).
+[process wait projection](../../crates/lash-execution-contracts/src/process/validation.rs).
 
 ## Safety and ownership
 

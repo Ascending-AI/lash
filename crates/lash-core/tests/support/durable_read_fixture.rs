@@ -65,20 +65,55 @@ use lash_protocol_types::{ProcessId, SessionId};
 use std::collections::BTreeMap;
 use std::sync::Arc;
 
-use lash_core::runtime::{
-    DeliveryPolicy, QueuedWorkBatchDraft, QueuedWorkPayload, SessionCommand, load_process_env,
-};
-use lash_core::{
-    ArtifactReferrer, AttachmentId, AttachmentReferrers, AttachmentWrite, Clock, DeploymentStore,
-    ExecutionScope, LlmUsage, MessageOrigin, MessageRole, OperationId, PartKind,
-    PendingTurnInputDraft, PluginNamespaceState, PluginState, ProcessAwaitOutput,
-    ProcessChangeCursor, ProcessChangeKind, ProcessCompletionAuthority, ProcessEnv, ProcessEnvRef,
-    ProcessEnvStore, ProcessEventLogTestSupport as _, ProcessIdentity, ProcessInput,
-    ProcessProvenance, ProcessRecord, ProcessRegistration, ProcessRegistry, ProcessStatus,
-    ProjectionWatermark, ReferrerClaim, RuntimeCommit, RuntimeSessionState, SessionAppendNode,
-    SessionCreationHead, SessionNodePayload, SessionRelation, SessionStoreCreateRequest,
-    StoreError, TurnInput, TurnInputIngress, WaitKind, WaitState,
-};
+use lash_core::ArtifactReferrer;
+use lash_core::AttachmentId;
+use lash_core::AttachmentReferrers;
+use lash_core::AttachmentWrite;
+use lash_core::Clock;
+use lash_core::ExecutionScope;
+use lash_core::LlmUsage;
+use lash_core::MessageOrigin;
+use lash_core::MessageRole;
+use lash_core::OperationId;
+use lash_core::PartKind;
+use lash_core::PendingTurnInputDraft;
+use lash_core::PluginNamespaceState;
+use lash_core::PluginState;
+use lash_core::ProcessEnv;
+use lash_core::ProcessEnvRef;
+use lash_core::ReferrerClaim;
+use lash_core::RuntimeCommit;
+use lash_core::RuntimeSessionState;
+use lash_core::SessionAppendNode;
+use lash_core::SessionCreationHead;
+use lash_core::SessionNodePayload;
+use lash_core::SessionRelation;
+use lash_core::SessionStoreCreateRequest;
+use lash_core::StoreError;
+use lash_core::TurnInput;
+use lash_core::TurnInputIngress;
+use lash_core::runtime::DeliveryPolicy;
+use lash_core::runtime::QueuedWorkBatchDraft;
+use lash_core::runtime::QueuedWorkPayload;
+use lash_core::runtime::SessionCommand;
+use lash_execution_contracts::deployment::DeploymentStore;
+use lash_execution_contracts::process::ProcessAwaitOutput;
+use lash_execution_contracts::process::ProcessChangeCursor;
+use lash_execution_contracts::process::ProcessChangeKind;
+use lash_execution_contracts::process::ProcessCompletionAuthority;
+use lash_execution_contracts::process::ProcessEnvStore;
+use lash_execution_contracts::process::ProcessEventLogTestSupport as _;
+use lash_execution_contracts::process::ProcessIdentity;
+use lash_execution_contracts::process::ProcessInput;
+use lash_execution_contracts::process::ProcessProvenance;
+use lash_execution_contracts::process::ProcessRecord;
+use lash_execution_contracts::process::ProcessRegistration;
+use lash_execution_contracts::process::ProcessRegistry;
+use lash_execution_contracts::process::ProcessStatus;
+use lash_execution_contracts::process::ProjectionWatermark;
+use lash_execution_contracts::process::WaitKind;
+use lash_execution_contracts::process::WaitState;
+use lash_execution_contracts::process::load_process_env;
 use serde::{Deserialize, Serialize};
 
 pub const SESSION_ID: &str = "durable-read-fixture";
@@ -169,11 +204,11 @@ fn fixture_cancelled_command() -> QueuedWorkBatchDraft {
 }
 const INPUT_SOURCE_KEY: &str = "durable-read-input-source";
 
-fn fixture_effect_outcome() -> lash_core::ProcessEffectOccurrence {
-    lash_core::ProcessEffectOccurrence::new(
+fn fixture_effect_outcome() -> lash_execution_contracts::process::ProcessEffectOccurrence {
+    lash_execution_contracts::process::ProcessEffectOccurrence::new(
         lash_protocol_types::effect_identity_fixture("durable-read-tool-node", 1),
         "tool:fixture",
-        lash_core::ProcessEffectOutcomeClass::Failure,
+        lash_execution_contracts::process::ProcessEffectOutcomeClass::Failure,
         Some(lash_core::FailureCode::provider("durable-read-fixture")),
         "durable-read-tool-effect:1",
         lash_core::FleetFormat::current(),
@@ -182,11 +217,11 @@ fn fixture_effect_outcome() -> lash_core::ProcessEffectOccurrence {
 
 const FIXTURE_EFFECT_OMISSIONS_KEY: &str = "durable-read-effect-omissions";
 
-fn fixture_effect_omissions() -> lash_core::ProcessEffectOmissions {
-    lash_core::ProcessEffectOmissions::new(
+fn fixture_effect_omissions() -> lash_execution_contracts::process::ProcessEffectOmissions {
+    lash_execution_contracts::process::ProcessEffectOmissions::new(
         std::collections::BTreeMap::from([(
             "durable-read-tool-node".to_string(),
-            lash_core::ProcessEffectOmittedCounts {
+            lash_execution_contracts::process::ProcessEffectOmittedCounts {
                 success: 3,
                 failure: 1,
                 cancelled: 0,
@@ -201,7 +236,7 @@ pub struct FixtureHandles {
     pub clock: Arc<dyn Clock>,
     /// The deployment's catalog store; the fixture session is a view of it.
     pub store: Arc<dyn DeploymentStore>,
-    pub processes: Arc<dyn lash_core::ConformanceProcessRegistry>,
+    pub processes: Arc<dyn lash_execution_contracts::process::ConformanceProcessRegistry>,
     pub process_envs: Arc<dyn ProcessEnvStore>,
 }
 
@@ -426,7 +461,7 @@ pub async fn seed(handles: &FixtureHandles) -> ExpectedFixture {
         .append_events_for_testing(
             &waiting_process_id(),
             vec![
-                lash_core::ProcessEventAppendRequest::wait_entered(
+                lash_execution_contracts::process::ProcessEventAppendRequest::wait_entered(
                     &waiting_process_id(),
                     &fixture_wait_state(),
                 ),
@@ -437,13 +472,14 @@ pub async fn seed(handles: &FixtureHandles) -> ExpectedFixture {
         .await
         .expect("persist fixture process wait state and effect events");
 
-    lash_core::testing::process_execution_env_fixture(handles.process_envs.as_ref()).await;
+    lash_execution_contracts::testing::process_execution_env_fixture(handles.process_envs.as_ref())
+        .await;
     let running_process_id = handles
         .processes
-        .register_process(lash_core::testing::held_engine_registration(
+        .register_process(lash_execution_contracts::testing::held_engine_registration(
             serde_json::json!({"fixture": "running"}),
             ProcessProvenance::host(),
-            lash_core::Lifetime::Detached,
+            lash_execution_contracts::process::Lifetime::Detached,
         ))
         .await
         .expect("register fixture running process")
@@ -452,10 +488,10 @@ pub async fn seed(handles: &FixtureHandles) -> ExpectedFixture {
 
     let tombstone_process_id = handles
         .processes
-        .register_process(lash_core::testing::held_engine_registration(
+        .register_process(lash_execution_contracts::testing::held_engine_registration(
             serde_json::json!({"fixture": "tombstone"}),
             ProcessProvenance::host(),
-            lash_core::Lifetime::Detached,
+            lash_execution_contracts::process::Lifetime::Detached,
         ))
         .await
         .expect("register fixture process to prune")
@@ -815,10 +851,10 @@ pub async fn assert_semantics(handles: &FixtureHandles, expected: &ExpectedFixtu
     );
     assert_eq!(
         process_events[2].fact.event_type(),
-        lash_core::PROCESS_EFFECT_OUTCOME_EVENT_TYPE
+        lash_execution_contracts::process::PROCESS_EFFECT_OUTCOME_EVENT_TYPE
     );
     assert_eq!(
-        lash_core::ProcessEffectOccurrence::decode(
+        lash_execution_contracts::process::ProcessEffectOccurrence::decode(
             process_events[2].fact.payload(),
             lash_core::FleetFormat::current()
         )
@@ -827,10 +863,10 @@ pub async fn assert_semantics(handles: &FixtureHandles, expected: &ExpectedFixtu
     );
     assert_eq!(
         process_events[3].fact.event_type(),
-        lash_core::PROCESS_EFFECT_OMISSIONS_EVENT_TYPE
+        lash_execution_contracts::process::PROCESS_EFFECT_OMISSIONS_EVENT_TYPE
     );
     assert_eq!(
-        lash_core::ProcessEffectOmissions::decode(
+        lash_execution_contracts::process::ProcessEffectOmissions::decode(
             process_events[3].fact.payload(),
             lash_core::FleetFormat::current()
         )
@@ -890,11 +926,14 @@ pub async fn assert_semantics(handles: &FixtureHandles, expected: &ExpectedFixtu
     );
 
     match handles.processes.get_process(&tombstone_process_id()).await {
-        Err(lash_core::PluginError::ProcessNoLongerRetained {
+        Err(lash_execution_contracts::plugin_error::PluginError::ProcessNoLongerRetained {
             terminal_label,
             pruned_at_ms,
         }) => {
-            assert_eq!(terminal_label, lash_core::RetiredProcessStatus::Completed);
+            assert_eq!(
+                terminal_label,
+                lash_execution_contracts::process::RetiredProcessStatus::Completed
+            );
             assert_eq!(pruned_at_ms, FIXTURE_WRITE_MS);
         }
         other => panic!(
@@ -961,7 +1000,7 @@ fn assert_graph_payloads(nodes: &[std::sync::Arc<lash_core::SessionNodeRecord>])
             assert_eq!(plugin_type, "durable-read-plugin");
             assert_eq!(
                 body.as_ref(),
-                &serde_json::json!({"fixture": true, "order": 2, "output": lash_core::Durable(&fixture_tool_output())}),
+                &serde_json::json!({"fixture": true, "order": 2, "output": lash_protocol_types::Durable(&fixture_tool_output())}),
                 "durable fixture semantic drift: plugin node body changed"
             );
         }
@@ -1002,7 +1041,7 @@ async fn assert_process_change_feed(processes: &dyn ProcessRegistry) {
             ProcessChangeKind::Deleted { tombstone } => {
                 assert_eq!(
                     tombstone.terminal_label,
-                    lash_core::RetiredProcessStatus::Completed
+                    lash_execution_contracts::process::RetiredProcessStatus::Completed
                 );
                 assert_eq!(tombstone.pruned_at_ms, FIXTURE_WRITE_MS);
                 observed.insert(tombstone.process_id, "deleted".to_string());
@@ -1090,7 +1129,7 @@ fn fixture_append_nodes() -> Vec<SessionAppendNode> {
         )),
         SessionAppendNode::plugin(
             "durable-read-plugin",
-            serde_json::json!({"fixture": true, "order": 2, "output": lash_core::Durable(&fixture_tool_output())}),
+            serde_json::json!({"fixture": true, "order": 2, "output": lash_protocol_types::Durable(&fixture_tool_output())}),
         ),
     ]
 }
@@ -1120,23 +1159,25 @@ fn waiting_process_registration(env_ref: ProcessEnvRef) -> ProcessRegistration {
         ProcessInput::Engine {
             kind: "durable-read-engine".to_string(),
             payload: serde_json::json!({"fixture": "process"}),
-            launch: lash_core::EngineLaunch::new(env_ref, None),
+            launch: lash_execution_contracts::process::EngineLaunch::new(env_ref, None),
         },
         ProcessProvenance::host(),
-        lash_core::Lifetime::Detached,
+        lash_execution_contracts::process::Lifetime::Detached,
     )
     .with_start_key(Some(lash_core::StartKey::for_host(
         WAITING_PROCESS_START_KEY,
     )))
-    .with_admitted_identity(lash_core::AdmittedProcessIdentity::for_testing(
-        ProcessIdentity::for_definition(
-            lash_core::ProcessDefinitionRef::unclaimed(
-                "durable-read-engine",
-                serde_json::json!({"fixture": "process"}),
+    .with_admitted_identity(
+        lash_execution_contracts::process::AdmittedProcessIdentity::for_testing(
+            ProcessIdentity::for_definition(
+                lash_execution_contracts::process::ProcessDefinitionRef::unclaimed(
+                    "durable-read-engine",
+                    serde_json::json!({"fixture": "process"}),
+                ),
+                Some("Durable read fixture".to_string()),
             ),
-            Some("Durable read fixture".to_string()),
         ),
-    ))
+    )
 }
 
 fn fixture_wait_state() -> WaitState {

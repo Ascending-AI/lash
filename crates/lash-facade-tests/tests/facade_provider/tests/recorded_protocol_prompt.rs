@@ -76,7 +76,10 @@ impl PluginFactory for Sections {
 
     fn recipe(
         self: Arc<Self>,
-    ) -> std::result::Result<lash::plugins::PluginRecipe, lash_core::PluginError> {
+    ) -> std::result::Result<
+        lash::plugins::PluginRecipe,
+        lash_execution_contracts::plugin_error::PluginError,
+    > {
         let mut reg = lash::plugins::PluginRegistrar::<Self>::new(
             lash::plugins::PluginFactory::id(self.as_ref()),
         );
@@ -158,7 +161,10 @@ fn scripted_provider(served: &Served, script: &Arc<Script>) -> ProviderHandle {
 }
 
 /// A core over `backend` with the sections and `app_lookup` installed.
-fn core_over(backend: lash_core::Backend, provider: ProviderHandle) -> Result<LashCore> {
+fn core_over(
+    backend: lash_execution_contracts::backend::Backend,
+    provider: ProviderHandle,
+) -> Result<LashCore> {
     explicit_ephemeral_facets(LashCore::standard_builder(backend))
         .tools(lash::tool_provider_key!("tools"), Arc::new(AppTools))
         .plugin(Arc::new(Sections))
@@ -214,7 +220,7 @@ async fn run(core: &LashCore, id: &str, text: &str) -> Result<()> {
 /// restart, on the engine's open and on a host open, is served as its
 /// session recorded; a session the new deployment creates records B.
 async fn a_session_created_under_defaults_a_reopens_under_a(
-    stores: Arc<dyn lash_core::StoreSet>,
+    stores: Arc<dyn lash_execution_contracts::backend::StoreSet>,
 ) -> Result<()> {
     const ID: &str = "recorded-prompt-defaults";
     const LATER: &str = "recorded-prompt-created-later";
@@ -291,7 +297,7 @@ async fn a_session_created_under_defaults_a_reopens_under_a_on_postgres() -> Res
 /// call, which still carries A, however far the command got meanwhile. The
 /// next run carries the commanded plan.
 async fn a_prompt_command_reaches_the_next_run_and_not_the_running_one(
-    stores: Arc<dyn lash_core::StoreSet>,
+    stores: Arc<dyn lash_execution_contracts::backend::StoreSet>,
 ) -> Result<()> {
     const ID: &str = "recorded-prompt-command";
     let served: Served = Arc::default();
@@ -409,7 +415,9 @@ fn assert_not_run_options(refused: &lash::EmbedError, owner: &str, what: &str) {
 /// run ends `RunShapeRefused` with the owner and the unreadable run options
 /// as its cause, makes no model call, and leaves the recorded config as it
 /// was. A run stating its render options runs under the recorded plan.
-async fn a_run_options_prompt_is_refused(stores: Arc<dyn lash_core::StoreSet>) -> Result<()> {
+async fn a_run_options_prompt_is_refused(
+    stores: Arc<dyn lash_execution_contracts::backend::StoreSet>,
+) -> Result<()> {
     const ID: &str = "recorded-prompt-run-options";
     let served: Served = Arc::default();
     let script = Arc::new(Script::default());

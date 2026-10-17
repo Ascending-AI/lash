@@ -118,11 +118,11 @@ pub use lash_trace::{
 pub(crate) fn refused(error: &crate::EmbedError) -> ProducerOutcome {
     let code = match error {
         crate::EmbedError::Runtime(error)
-        | crate::EmbedError::Plugin(lash_core::PluginError::Runtime(error)) => {
-            serde_json::to_value(&error.code)
-                .ok()
-                .and_then(|code| code.as_str().map(str::to_owned))
-        }
+        | crate::EmbedError::Plugin(
+            lash_execution_contracts::plugin_error::PluginError::Runtime(error),
+        ) => serde_json::to_value(&error.code)
+            .ok()
+            .and_then(|code| code.as_str().map(str::to_owned)),
         _ => None,
     };
     ProducerOutcome::Refused {

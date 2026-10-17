@@ -19,7 +19,14 @@
 // serves its own store-backed tests and is not re-exported here.
 /// Opt in to implementing runtime service substitutes in tests.
 pub use crate::core_internal::RuntimeService;
+#[cfg(test)]
+use lash_execution_contracts::testing::process_execution_env_fixture;
 
+pub use lash_core_execution::testing::DurableCommitHook;
+pub use lash_core_execution::testing::EmptyToolProvider;
+pub use lash_core_execution::testing::FIXTURE_ECHO_TOOL;
+pub use lash_core_execution::testing::FixtureProcessEngine;
+pub use lash_core_execution::testing::FixtureTools;
 pub use lash_core_execution::testing::extension_trace::{
     BoundExtensionTrace, bound_extension_trace, bound_tool_trace,
 };
@@ -28,39 +35,83 @@ pub use lash_core_execution::testing::{
     Call, CallbackCounts, DeploymentOp, FaultKind, GATE_DEADLINE, Gate, Op, Outcome, Phase, Script,
     Scripted, ScriptedError, StoreOp,
 };
-pub use lash_core_execution::testing::{
-    DurableCommitHook, EmptyToolProvider, FIXTURE_ECHO_TOOL, FixtureProcessEngine, FixtureTools,
-    HELD_PROCESS_ENGINE_KIND, HeldProcessEngine, MockSessionManager, NonTerminalPagePause,
-    NonTerminalPageRead, ProcessRegistryFaults, RegistrationHoldPoint,
-    RuntimeCommitBudgetMeasurement, TestClock, TestExecutionContextBuilder, TestExecutionPorts,
-    TestProvider, TestProviderBuilder, ToolCallFixture, UnavailableProcessEnvStore,
-    UnavailableTurnPreludeStore, behavior_transcript, cancelled_code_execution_context,
-    code_execution_context, code_execution_context_for_process,
-    code_execution_context_with_deferred_provider, code_execution_context_with_invocation,
-    code_execution_context_with_process_dependencies, code_execution_context_with_tool_catalog,
-    code_execution_context_with_tool_provider_and_catalog,
-    code_execution_context_with_tool_provider_catalog_and_invocation,
-    code_execution_context_with_tool_provider_catalog_scoped_effect_controller_and_invocation,
-    declared_launch_for_testing, effect_backed_process_service, exec_code_invocation,
-    execute_effect_locally, execute_tool_intents_with_services,
-    execute_tool_intents_with_services_and_hook, fixture_echo_definition, fixture_engine_launch,
-    graph_integrity, held_engine_declaration, held_engine_input, held_engine_registration,
-    held_engine_request, host_pin_claim_for_testing, lineage, llm_profiles_serving,
-    measure_runtime_commit_budget, mock_attempt_context,
-    mock_attempt_context_with_execution_binding, mock_attempt_context_with_host,
-    mock_session_policy, process_engine_fixture, process_engine_plugin_fixture,
-    process_env_fixture, process_env_of_size, process_env_with_limit,
-    process_execution_env_fixture, process_execution_env_fixture_ref,
-    process_roster_records_for_fixture, process_work_wiring_for_registry,
-    publish_process_env_for_testing, queued_work_admission_policy, run_policy_naming, run_tool,
-    run_tool_granted, runtime_lease_owner, runtime_services_without_ports, sansio_transcript,
-    single_llm_profile_registry, stage_execution_graph, staged_start_record,
-    standard_test_llm_profiles, standard_test_policy, store_fixtures, test_code_protocol_factories,
-    test_llm_profile_config, test_llm_profile_metadata, test_plugin_host,
-    test_protocol_factories_ending_without_done, test_standard_protocol_factories,
-    test_standard_protocol_factory_with_runtime_state, test_tools_provider, tool_component,
-    tool_hook_context, tool_plugin, trace_capture,
-};
+
+pub use lash_core_execution::testing::HeldProcessEngine;
+pub use lash_core_execution::testing::MockSessionManager;
+pub use lash_core_execution::testing::NonTerminalPagePause;
+pub use lash_core_execution::testing::NonTerminalPageRead;
+pub use lash_core_execution::testing::ProcessRegistryFaults;
+pub use lash_core_execution::testing::RegistrationHoldPoint;
+pub use lash_core_execution::testing::RuntimeCommitBudgetMeasurement;
+pub use lash_core_execution::testing::TestClock;
+pub use lash_core_execution::testing::TestExecutionContextBuilder;
+pub use lash_core_execution::testing::TestExecutionPorts;
+pub use lash_core_execution::testing::TestProvider;
+pub use lash_core_execution::testing::TestProviderBuilder;
+pub use lash_core_execution::testing::ToolCallFixture;
+pub use lash_core_execution::testing::UnavailableProcessEnvStore;
+pub use lash_core_execution::testing::UnavailableTurnPreludeStore;
+pub use lash_core_execution::testing::behavior_transcript;
+pub use lash_core_execution::testing::cancelled_code_execution_context;
+pub use lash_core_execution::testing::code_execution_context;
+pub use lash_core_execution::testing::code_execution_context_for_process;
+pub use lash_core_execution::testing::code_execution_context_with_deferred_provider;
+pub use lash_core_execution::testing::code_execution_context_with_invocation;
+pub use lash_core_execution::testing::code_execution_context_with_process_dependencies;
+pub use lash_core_execution::testing::code_execution_context_with_tool_catalog;
+pub use lash_core_execution::testing::code_execution_context_with_tool_provider_and_catalog;
+pub use lash_core_execution::testing::code_execution_context_with_tool_provider_catalog_and_invocation;
+pub use lash_core_execution::testing::code_execution_context_with_tool_provider_catalog_scoped_effect_controller_and_invocation;
+
+pub use lash_core_execution::testing::effect_backed_process_service;
+pub use lash_core_execution::testing::exec_code_invocation;
+pub use lash_core_execution::testing::execute_effect_locally;
+pub use lash_core_execution::testing::execute_tool_intents_with_services;
+pub use lash_core_execution::testing::execute_tool_intents_with_services_and_hook;
+pub use lash_core_execution::testing::fixture_echo_definition;
+
+pub use lash_core_execution::testing::graph_integrity;
+
+pub use lash_core_execution::testing::lineage;
+pub use lash_core_execution::testing::llm_profiles_serving;
+pub use lash_core_execution::testing::measure_runtime_commit_budget;
+pub use lash_core_execution::testing::mock_attempt_context;
+pub use lash_core_execution::testing::mock_attempt_context_with_execution_binding;
+pub use lash_core_execution::testing::mock_attempt_context_with_host;
+pub use lash_core_execution::testing::mock_session_policy;
+pub use lash_core_execution::testing::process_engine_fixture;
+pub use lash_core_execution::testing::process_engine_plugin_fixture;
+
+pub use lash_core_execution::testing::process_env_of_size;
+
+pub use lash_core_execution::testing::process_roster_records_for_fixture;
+pub use lash_core_execution::testing::process_work_wiring_for_registry;
+pub use lash_core_execution::testing::publish_process_env_for_testing;
+pub use lash_core_execution::testing::queued_work_admission_policy;
+pub use lash_core_execution::testing::run_policy_naming;
+pub use lash_core_execution::testing::run_tool;
+pub use lash_core_execution::testing::run_tool_granted;
+pub use lash_core_execution::testing::runtime_lease_owner;
+pub use lash_core_execution::testing::runtime_services_without_ports;
+pub use lash_core_execution::testing::sansio_transcript;
+pub use lash_core_execution::testing::single_llm_profile_registry;
+pub use lash_core_execution::testing::stage_execution_graph;
+pub use lash_core_execution::testing::staged_start_record;
+pub use lash_core_execution::testing::standard_test_llm_profiles;
+pub use lash_core_execution::testing::standard_test_policy;
+pub use lash_core_execution::testing::store_fixtures;
+pub use lash_core_execution::testing::test_code_protocol_factories;
+pub use lash_core_execution::testing::test_llm_profile_config;
+pub use lash_core_execution::testing::test_llm_profile_metadata;
+pub use lash_core_execution::testing::test_plugin_host;
+pub use lash_core_execution::testing::test_protocol_factories_ending_without_done;
+pub use lash_core_execution::testing::test_standard_protocol_factories;
+pub use lash_core_execution::testing::test_standard_protocol_factory_with_runtime_state;
+pub use lash_core_execution::testing::test_tools_provider;
+pub use lash_core_execution::testing::tool_component;
+pub use lash_core_execution::testing::tool_hook_context;
+pub use lash_core_execution::testing::tool_plugin;
+pub use lash_core_execution::testing::trace_capture;
 
 /// Prompt composition over a cut a test states (ADR 0133).
 pub use lash_core_execution::testing::prompt;
@@ -122,7 +173,7 @@ pub(crate) async fn sqlite_memory_backend() -> lash_sqlite_store::SqliteStoreSet
 
 /// [`sqlite_memory_backend`] behind a recording test effect host.
 #[cfg(test)]
-pub(crate) async fn sqlite_recording_backend() -> crate::Backend {
+pub(crate) async fn sqlite_recording_backend() -> lash_execution_contracts::backend::Backend {
     lash_conformance::backend_over(std::sync::Arc::new(sqlite_memory_backend().await))
 }
 
@@ -144,7 +195,7 @@ pub(crate) async fn sqlite_memory_store_set() -> std::sync::Arc<lash_sqlite_stor
             .expect("open a SQLite memory store set"),
     );
     TEST_STORE_SETS.with(|held| held.borrow_mut().push(std::sync::Arc::clone(&stores)));
-    lash_core_execution::testing::process_execution_env_fixture(
+    lash_execution_contracts::testing::process_execution_env_fixture(
         stores.process_env_store().as_ref(),
     )
     .await;
@@ -154,7 +205,7 @@ pub(crate) async fn sqlite_memory_store_set() -> std::sync::Arc<lash_sqlite_stor
 /// [`sqlite_memory_store_set`] as a backend whose effect host is the recording
 /// double: for a test that needs a `Backend` value but runs no effect.
 #[cfg(test)]
-pub(crate) async fn sqlite_memory_store_backend() -> crate::Backend {
+pub(crate) async fn sqlite_memory_store_backend() -> lash_execution_contracts::backend::Backend {
     lash_conformance::backend_over(sqlite_memory_store_set().await)
 }
 
@@ -171,7 +222,9 @@ pub(crate) async fn unbound_recording_store() -> runtime_helpers::RecordingStore
 pub(crate) async fn unbound_recording_store_on(
     backend: &lash_sqlite_store::SqliteStoreSet,
 ) -> runtime_helpers::RecordingStore {
-    runtime_helpers::RecordingStore::over(crate::StoreSet::session_store_factory(backend))
+    runtime_helpers::RecordingStore::over(
+        lash_execution_contracts::backend::StoreSet::session_store_factory(backend),
+    )
 }
 
 /// Marks resident state stale for downstream reload-race tests.

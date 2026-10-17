@@ -89,7 +89,10 @@ async fn a_process_cancelled_while_blocked_has_a_committed_cancelled_graph() {
             .await
             .expect("SQLite stores"),
     );
-    lash_core::testing::process_execution_env_fixture(stores.process_env_store().as_ref()).await;
+    lash_execution_contracts::testing::process_execution_env_fixture(
+        stores.process_env_store().as_ref(),
+    )
+    .await;
     let backend = crate::durable::DurableBackendBuilder::new(stores)
         .process_engine(Arc::new(lash_core::testing::HeldProcessEngine))
         .build()
@@ -100,10 +103,10 @@ async fn a_process_cancelled_while_blocked_has_a_committed_cancelled_graph() {
     let started = core
         .processes()
         .start(
-            lash_core::testing::held_engine_request(
+            lash_execution_contracts::testing::held_engine_request(
                 serde_json::Value::Null,
-                lash_core::ProcessOriginator::host(),
-                lash_core::LifetimeDecision::Detached,
+                lash_execution_contracts::process::ProcessOriginator::host(),
+                lash_execution_contracts::process::LifetimeDecision::Detached,
             ),
             core.effect_host(),
         )
@@ -240,7 +243,7 @@ async fn a_process_cancelled_while_blocked_has_a_committed_cancelled_graph() {
     .expect("committed terminal");
     assert_eq!(
         committed.terminal_status(),
-        Some(lash_core::TerminalProcessStatus::Cancelled)
+        Some(lash_execution_contracts::process::TerminalProcessStatus::Cancelled)
     );
     loop {
         let item = next(&mut subscription).await;
@@ -251,7 +254,7 @@ async fn a_process_cancelled_while_blocked_has_a_committed_cancelled_graph() {
         {
             assert_eq!(
                 terminal.status(),
-                lash_core::TerminalProcessStatus::Cancelled
+                lash_execution_contracts::process::TerminalProcessStatus::Cancelled
             );
             graph.settle(lash_trace::WorkflowOverlaySettlement {
                 terminal: lash_trace::WorkflowOverlayTerminal::Cancelled,
@@ -416,9 +419,9 @@ async fn language_ingress_overflow_resnapshots_every_session_and_continues() {
 /// A dispatcher over a SQLite process registry and a replay store a law
 /// chooses, whose feeds look at the durable process only when told to.
 struct Dispatch {
-    registry: Arc<dyn lash_core::ProcessRegistry>,
+    registry: Arc<dyn lash_execution_contracts::process::ProcessRegistry>,
     /// The same registry, seeding the commits an owner makes.
-    seeding: Arc<dyn lash_core::ConformanceProcessRegistry>,
+    seeding: Arc<dyn lash_execution_contracts::process::ConformanceProcessRegistry>,
     replay: Arc<dyn ProcessReplayStore>,
     publisher: Arc<LanguageObservationPublisher>,
 }
@@ -446,10 +449,10 @@ impl Dispatch {
 
     async fn register(&self) -> ProcessId {
         self.registry
-            .register_process(lash_core::ProcessRegistration::new(
-                lash_core::testing::held_engine_input(serde_json::Value::Null),
-                lash_core::ProcessProvenance::host(),
-                lash_core::Lifetime::Detached,
+            .register_process(lash_execution_contracts::process::ProcessRegistration::new(
+                lash_execution_contracts::testing::held_engine_input(serde_json::Value::Null),
+                lash_execution_contracts::process::ProcessProvenance::host(),
+                lash_execution_contracts::process::Lifetime::Detached,
             ))
             .await
             .expect("register process")
@@ -461,7 +464,7 @@ impl Dispatch {
             source: crate::process_feed::ProcessFeedSource::new(
                 process.clone(),
                 self.registry.clone(),
-                lash_core::facade_support::ProcessWorkObserver::new(self.registry.clone()),
+                lash_execution_contracts::process::ProcessWorkObserver::new(self.registry.clone()),
                 lash_core::ProcessEngineRegistry::default(),
                 self.replay.clone(),
                 lash_trace::ObservationWorkLimits::standard(),
@@ -475,9 +478,9 @@ impl Dispatch {
 
     /// Commit one lifecycle fact of `process` as its owner does, unpublished.
     async fn commit_fact(&self, process: &ProcessId) {
-        let wait = lash_core::WaitState {
+        let wait = lash_execution_contracts::process::WaitState {
             since_ms: 0,
-            kind: lash_core::WaitKind::Call {
+            kind: lash_execution_contracts::process::WaitKind::Call {
                 call_id: lash_core::ToolCallId::fixture("dispatched"),
                 tool_id: lash_core::ToolId::from("dispatched"),
             },
@@ -486,7 +489,9 @@ impl Dispatch {
         self.seeding
             .append_event_for_testing(
                 process,
-                lash_core::ProcessEventAppendRequest::wait_entered(process, &wait),
+                lash_execution_contracts::process::ProcessEventAppendRequest::wait_entered(
+                    process, &wait,
+                ),
             )
             .await
             .expect("commit without publishing");
@@ -710,9 +715,9 @@ async fn an_oversized_committed_fact_invalidates_only_its_own_process() {
         dispatch.publisher.start();
         assert!(is_language(&next(&mut other_feed).await));
 
-        let wait = lash_core::WaitState {
+        let wait = lash_execution_contracts::process::WaitState {
             since_ms: 0,
-            kind: lash_core::WaitKind::Call {
+            kind: lash_execution_contracts::process::WaitKind::Call {
                 call_id: lash_core::ToolCallId::fixture("oversized"),
                 tool_id: lash_core::ToolId::from("x".repeat(2 * LIMIT)),
             },
@@ -722,7 +727,9 @@ async fn an_oversized_committed_fact_invalidates_only_its_own_process() {
             .seeding
             .append_event_for_testing(
                 &large,
-                lash_core::ProcessEventAppendRequest::wait_entered(&large, &wait),
+                lash_execution_contracts::process::ProcessEventAppendRequest::wait_entered(
+                    &large, &wait,
+                ),
             )
             .await
             .expect("commit the oversized fact")

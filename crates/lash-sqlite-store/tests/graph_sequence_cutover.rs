@@ -1,5 +1,5 @@
-use lash_core_execution::StoreSchemaVerdict;
-use lash_core_execution::compat::CompatRefusal;
+use lash_core_store::compat::CompatRefusal;
+use lash_core_store::store::StoreSchemaVerdict;
 use lash_sqlite_store::{SqliteStore, verify_schema_at};
 
 #[tokio::test]
@@ -29,7 +29,7 @@ async fn sqlite_retained_prior_durable_core_is_refused_at_open() {
         content: b"pre-cutover payload",
     })
     .expect("encode the pre-cutover envelope shape");
-    let blob_ref = lash_core_execution::BlobRef::for_content(b"pre-cutover payload");
+    let blob_ref = lash_core_store::store::BlobRef::for_content(b"pre-cutover payload");
     connection
         .execute(
             "INSERT INTO blobs (hash, content, encoding) VALUES (?1, ?2, 0)",

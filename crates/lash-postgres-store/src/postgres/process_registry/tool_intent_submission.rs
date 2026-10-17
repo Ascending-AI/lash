@@ -1,7 +1,10 @@
-use lash_core_execution::{
-    PluginError, SessionId, ToolIntentExecutionOutcome, ToolIntentLedgerColumns,
-    ToolIntentSubmissionAdmission, ToolIntentSubmissionRecord, TurnId,
-};
+use lash_execution_contracts::plugin_error::PluginError;
+use lash_execution_contracts::tool_intent::ToolIntentLedgerColumns;
+use lash_execution_contracts::tool_intent::ToolIntentSubmissionAdmission;
+use lash_execution_contracts::tool_intent::ToolIntentSubmissionRecord;
+use lash_execution_contracts::tool_intent_outcome::ToolIntentExecutionOutcome;
+use lash_protocol_types::SessionId;
+use lash_protocol_types::TurnId;
 use sqlx::{PgConnection, PgPool, Row};
 
 use crate::{plugin_sqlx_error, process_decode_error};
@@ -80,7 +83,7 @@ pub(super) async fn complete(
     replay_key: &str,
     outcome: ToolIntentExecutionOutcome,
     at_ms: u64,
-) -> Result<lash_core_execution::store::StoreTransition<ToolIntentSubmissionRecord>, PluginError> {
+) -> Result<lash_core_store::store::StoreTransition<ToolIntentSubmissionRecord>, PluginError> {
     let mut tx = crate::begin_guarded(pool, fence)
         .await
         .map_err(crate::plugin_store_error)?;
@@ -105,7 +108,7 @@ pub(super) async fn complete(
             .map_err(plugin_sqlx_error)?;
     }
     tx.commit().await.map_err(plugin_sqlx_error)?;
-    Ok(lash_core_execution::store::StoreTransition {
+    Ok(lash_core_store::store::StoreTransition {
         record: submission,
         changed,
     })

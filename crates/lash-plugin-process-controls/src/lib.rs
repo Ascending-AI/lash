@@ -51,11 +51,11 @@ pub fn process_tool_definition(tool: ProcessControlTool) -> ToolDefinition {
 /// [`StaticPluginFactory`], so it does not hand-roll the `SessionPlugin` +
 /// `register` ceremony.
 ///
-/// The [`LifetimePolicy`](lash_core::LifetimePolicy) and the
+/// The [`LifetimePolicy`](lash_execution_contracts::process::LifetimePolicy) and the
 /// [`ProcessEnvPolicy`](lash_core::ProcessEnvPolicy) are required and have no
 /// default: they choose the lifetime, environment and engine settings of every
 /// process the model's `start_process` declares, against the start's admitted
-/// [`StartCx`](lash_core::StartCx) and the attempt's recorded run. The model
+/// [`StartCx`](lash_execution_contracts::process::StartCx) and the attempt's recorded run. The model
 /// never picks them (FIG-3607, FIG-6034).
 pub struct SessionProcessAdminPluginFactory {
     inner: StaticPluginFactory,
@@ -63,11 +63,16 @@ pub struct SessionProcessAdminPluginFactory {
 
 impl SessionProcessAdminPluginFactory {
     /// Process controls whose starts take `lifetime`, for example
-    /// [`lash_core::lifetime::session_or_starter`], and the environment
+    /// [`lash_execution_contracts::process::lifetime::session_or_starter`], and the environment
     /// `environment` states, for example
     /// [`lash_core::runtime::env_policy::policy::from_run`].
     pub fn new(
-        lifetime: impl Fn(&lash_core::StartCx) -> lash_core::Lifetime + Send + Sync + 'static,
+        lifetime: impl Fn(
+            &lash_execution_contracts::process::StartCx,
+        ) -> lash_execution_contracts::process::Lifetime
+        + Send
+        + Sync
+        + 'static,
         environment: Arc<dyn lash_core::ProcessEnvPolicy>,
     ) -> Self {
         Self::with_cancel_process(Arc::new(lifetime), environment, true)
@@ -75,14 +80,19 @@ impl SessionProcessAdminPluginFactory {
 
     /// The same controls without `cancel_process`.
     pub fn without_cancel_process(
-        lifetime: impl Fn(&lash_core::StartCx) -> lash_core::Lifetime + Send + Sync + 'static,
+        lifetime: impl Fn(
+            &lash_execution_contracts::process::StartCx,
+        ) -> lash_execution_contracts::process::Lifetime
+        + Send
+        + Sync
+        + 'static,
         environment: Arc<dyn lash_core::ProcessEnvPolicy>,
     ) -> Self {
         Self::with_cancel_process(Arc::new(lifetime), environment, false)
     }
 
     fn with_cancel_process(
-        lifetime: lash_core::LifetimePolicy,
+        lifetime: lash_execution_contracts::process::LifetimePolicy,
         environment: Arc<dyn lash_core::ProcessEnvPolicy>,
         include_cancel_process: bool,
     ) -> Self {
@@ -98,7 +108,7 @@ impl SessionProcessAdminPluginFactory {
 /// The spec both twins install: one provider, so a process whose
 /// environment names the controls starts children exactly as a session does.
 fn controls_spec(
-    lifetime: lash_core::LifetimePolicy,
+    lifetime: lash_execution_contracts::process::LifetimePolicy,
     environment: Arc<dyn lash_core::ProcessEnvPolicy>,
     include_cancel_process: bool,
 ) -> PluginSpec {
@@ -149,7 +159,12 @@ pub struct ProcessControlsComponent {
 impl ProcessControlsComponent {
     /// Process controls whose starts take `lifetime` and `environment`.
     pub fn new(
-        lifetime: impl Fn(&lash_core::StartCx) -> lash_core::Lifetime + Send + Sync + 'static,
+        lifetime: impl Fn(
+            &lash_execution_contracts::process::StartCx,
+        ) -> lash_execution_contracts::process::Lifetime
+        + Send
+        + Sync
+        + 'static,
         environment: Arc<dyn lash_core::ProcessEnvPolicy>,
     ) -> Self {
         Self::with_cancel_process(Arc::new(lifetime), environment, true)
@@ -157,7 +172,12 @@ impl ProcessControlsComponent {
 
     /// The same controls without `cancel_process`.
     pub fn without_cancel_process(
-        lifetime: impl Fn(&lash_core::StartCx) -> lash_core::Lifetime + Send + Sync + 'static,
+        lifetime: impl Fn(
+            &lash_execution_contracts::process::StartCx,
+        ) -> lash_execution_contracts::process::Lifetime
+        + Send
+        + Sync
+        + 'static,
         environment: Arc<dyn lash_core::ProcessEnvPolicy>,
     ) -> Self {
         Self::with_cancel_process(Arc::new(lifetime), environment, false)
@@ -168,7 +188,7 @@ impl ProcessControlsComponent {
         reason = "the controls spec fills only the provider, which a process component admits"
     )]
     fn with_cancel_process(
-        lifetime: lash_core::LifetimePolicy,
+        lifetime: lash_execution_contracts::process::LifetimePolicy,
         environment: Arc<dyn lash_core::ProcessEnvPolicy>,
         include_cancel_process: bool,
     ) -> Self {
@@ -203,7 +223,10 @@ impl lash_core::plugin::ProcessComponentFactory for ProcessControlsComponent {
 
     fn recipe(
         self: Arc<Self>,
-    ) -> std::result::Result<lash_core::plugin::ProcessRecipe, lash_core::plugin::PluginError> {
+    ) -> std::result::Result<
+        lash_core::plugin::ProcessRecipe,
+        lash_execution_contracts::plugin_error::PluginError,
+    > {
         Arc::new(self.inner.clone()).recipe()
     }
 }
@@ -215,7 +238,10 @@ impl PluginFactory for SessionProcessAdminPluginFactory {
 
     fn recipe(
         self: Arc<Self>,
-    ) -> std::result::Result<lash_core::plugin::PluginRecipe, lash_core::plugin::PluginError> {
+    ) -> std::result::Result<
+        lash_core::plugin::PluginRecipe,
+        lash_execution_contracts::plugin_error::PluginError,
+    > {
         Arc::new(self.inner.clone()).recipe()
     }
 }
@@ -233,7 +259,7 @@ impl lash_core::plugin::PluginMetadata for SessionProcessAdminPluginFactory {
 
 struct SessionProcessAdminTools {
     include_cancel_process: bool,
-    lifetime: lash_core::LifetimePolicy,
+    lifetime: lash_execution_contracts::process::LifetimePolicy,
     environment: Arc<dyn lash_core::ProcessEnvPolicy>,
 }
 
@@ -275,12 +301,14 @@ impl StaticToolExecute for SessionProcessAdminTools {
                 "process_id": process_id,
                 "status": "cancelled",
             })),
-            lash_core::ToolIntents::v3(vec![lash_core::ToolIntent::CancelProcess(
-                lash_core::CancelProcessIntent {
-                    owner: call.context.owner().runtime_owner(),
-                    process_id,
-                },
-            )]),
+            lash_execution_contracts::tool_intent::ToolIntents::v3(vec![
+                lash_execution_contracts::tool_intent::ToolIntent::CancelProcess(
+                    lash_execution_contracts::tool_intent::CancelProcessIntent {
+                        owner: call.context.owner().runtime_owner(),
+                        process_id,
+                    },
+                ),
+            ]),
         )
     }
 }
@@ -508,7 +536,7 @@ pub async fn execute_process_list_tool_call(
         };
         args["definition_id"] = inline.target.definition_id.to_tagged_json();
     }
-    let filter = match lash_core::ProcessListFilter::decode(&args) {
+    let filter = match lash_execution_contracts::process::ProcessListFilter::decode(&args) {
         Ok(filter) => filter,
         Err(err) => return ToolOutcome::err_fmt(err),
     };
@@ -522,7 +550,7 @@ pub async fn execute_process_list_tool_call(
 
 /// The one handle shape `processes.list` answers with.
 ///
-/// Written from [`lash_core::ProcessHandleView`]'s own serde shape rather than
+/// Written from [`lash_execution_contracts::process::ProcessHandleView`]'s own serde shape rather than
 /// from a reading of what a caller might want: the contract a cell type-checks
 /// against and the record it actually receives are the same shape, and
 /// `list_output_contract_matches_the_handle_view` fails if they drift. The
@@ -536,7 +564,7 @@ fn process_list_output_schema() -> Value {
     })
 }
 
-/// The schema of one [`lash_core::ProcessHandleView`].
+/// The schema of one [`lash_execution_contracts::process::ProcessHandleView`].
 pub fn process_handle_view_schema() -> Value {
     serde_json::json!({
         "type": "object",
@@ -583,16 +611,18 @@ mod tests {
         // must be the same shape. Comparing the schema's property set against a
         // real `ProcessHandleView` serialization is what catches the drift the
         // previous hand-written schema had already accumulated.
-        let view = lash_core::ProcessHandleView::new(
+        let view = lash_execution_contracts::process::ProcessHandleView::new(
             lash_core::ProcessId::fixture("process-1"),
             {
-                let mut identity =
-                    lash_core::ProcessIdentity::labelled("lashvm", Some("on_button"));
+                let mut identity = lash_execution_contracts::process::ProcessIdentity::labelled(
+                    "lashvm",
+                    Some("on_button"),
+                );
                 identity.definition_id =
                     Some(lash_core::ProcessDefinitionId::from_sha256_digest([1; 32]));
                 identity
             },
-            lash_core::ProcessStatus::Running,
+            lash_execution_contracts::process::ProcessStatus::Running,
         );
         let serialized = serde_json::to_value(&view).expect("a handle view serializes");
         let serialized = serialized.as_object().expect("a handle view is an object");
@@ -710,7 +740,7 @@ mod certification {
     #[tokio::test]
     async fn process_controls_pass_certification() {
         let factory = SessionProcessAdminPluginFactory::new(
-            lash_core::lifetime::session_or_starter,
+            lash_execution_contracts::process::lifetime::session_or_starter,
             lash_core::runtime::env_policy::policy::from_run(|_| Ok(Vec::new())),
         );
         let scenario: Arc<dyn lash::testing::PluginScenario> = Arc::new(List);

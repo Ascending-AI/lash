@@ -441,18 +441,23 @@ async fn append_facts(
     snapshot: impl AsyncFnOnce(&lash::ProcessId) -> Result<lash_core::ProcessObservation>,
     meter: &Meter,
 ) -> Result<(lash::ProcessId, lash_core::ProcessObservation)> {
-    use lash_core::{
-        ProcessCompletionAuthority, ProcessEventAppendRequest, ProcessRegistration, ToolCallId,
-        ToolId, WaitKind, WaitState,
-    };
-    lash_core::testing::process_execution_env_fixture(node.stores.process_env_store().as_ref())
-        .await;
+    use lash_core::ToolCallId;
+    use lash_core::ToolId;
+    use lash_execution_contracts::process::ProcessCompletionAuthority;
+    use lash_execution_contracts::process::ProcessEventAppendRequest;
+    use lash_execution_contracts::process::ProcessRegistration;
+    use lash_execution_contracts::process::WaitKind;
+    use lash_execution_contracts::process::WaitState;
+    lash_execution_contracts::testing::process_execution_env_fixture(
+        node.stores.process_env_store().as_ref(),
+    )
+    .await;
     let registry = &node.seeding;
     let process = registry
         .register_process(ProcessRegistration::new(
-            lash_core::testing::held_engine_input(serde_json::Value::Null),
-            lash_core::ProcessProvenance::host(),
-            lash_core::Lifetime::Detached,
+            lash_execution_contracts::testing::held_engine_input(serde_json::Value::Null),
+            lash_execution_contracts::process::ProcessProvenance::host(),
+            lash_execution_contracts::process::Lifetime::Detached,
         ))
         .await?
         .id;
@@ -478,9 +483,9 @@ async fn append_facts(
     registry
         .complete_process(
             &process,
-            lash_core::ProcessAwaitOutput::from_tool_output(lash_core::ToolCallOutput::success(
-                serde_json::Value::Null,
-            )),
+            lash_execution_contracts::process::ProcessAwaitOutput::from_tool_output(
+                lash_core::ToolCallOutput::success(serde_json::Value::Null),
+            ),
             ProcessCompletionAuthority::workflow_key(&process),
         )
         .await?;
@@ -576,12 +581,12 @@ async fn roster(args: &Args, fleet: &Fleet, meter: &Meter) -> Outcome {
     meter.window("process.roster.populate", started, window);
 
     let limit = NonZeroUsize::new(128).context("page size")?;
-    let everything = lash_core::ProcessListFilter {
-        status: lash_core::ProcessStatusFilter::Any,
+    let everything = lash_execution_contracts::process::ProcessListFilter {
+        status: lash_execution_contracts::process::ProcessStatusFilter::Any,
         ..Default::default()
     };
     // The default filter selects running processes, and every one has ended.
-    let nothing = lash_core::ProcessListFilter::default();
+    let nothing = lash_execution_contracts::process::ProcessListFilter::default();
     let mut scans = serde_json::Map::new();
     for (name, boundary, filter) in [
         ("unfiltered", "process.roster.page", &everything),
@@ -619,7 +624,7 @@ async fn roster(args: &Args, fleet: &Fleet, meter: &Meter) -> Outcome {
 
     let window = Instant::now();
     let (mut pages, mut changes) = (0, 0);
-    let mut cursor = lash_core::ProcessChangeCursor::initial();
+    let mut cursor = lash_execution_contracts::process::ProcessChangeCursor::initial();
     loop {
         let at = Instant::now();
         let page = within("change page", processes.changed_since(cursor, limit)).await??;

@@ -93,7 +93,7 @@ preparation or execution; it is not a store-dependent start-admission verdict.
 
 ## Implementation
 
-- [Opaque provider and attempt context](../../crates/lash-core-execution/src/tool_provider.rs) and [exclusive outcome variants](../../crates/lash-core-execution/src/tool_intent.rs).
+- [Opaque provider and attempt context](../../crates/lash-core-execution/src/tool_provider.rs) and [exclusive outcome variants](../../crates/lash-execution-contracts/src/tool_intent.rs).
 - [Prepared atomic attempt runner](../../crates/lash-core-execution/src/tool_dispatch/atomic_attempt.rs). Run callers share validation, attempt-local completion and capture buffers, and body execution. The runner consumes the admitted prepared call and issues no coordination commands.
 - [Pending declarations](../../crates/lash-core-execution/src/tool_result.rs) and [pending launch](../../crates/lash-core-execution/src/tool_dispatch/pending_resolver.rs).
 - [Final recording and intent drain](../../crates/lash-core-execution/src/runtime/actor/round/lifecycle.rs).

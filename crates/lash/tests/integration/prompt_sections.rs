@@ -9,7 +9,9 @@
     reason = "test target: the setup helpers around the law are test code too"
 )]
 
-use lash_core::plugin::{PluginError, PluginRecipe, PluginRegistrar};
+use lash_core::plugin::PluginRecipe;
+use lash_core::plugin::PluginRegistrar;
+use lash_execution_contracts::plugin_error::PluginError;
 use std::sync::Arc;
 
 use lash::plugins::{
@@ -101,7 +103,7 @@ impl lash::plugins::SessionPlugin for Witness {
 impl Witness {
     fn declare(
         reg: &mut lash_core::plugin::PluginRegistrar<Self>,
-    ) -> std::result::Result<(), lash_core::plugin::PluginError> {
+    ) -> std::result::Result<(), lash_execution_contracts::plugin_error::PluginError> {
         reg.prompt().section(
             lash_core::plugin::prompt::PromptSectionSpec::new(
                 lash_core::prompt_sections::PromptSectionKey::new("notes")

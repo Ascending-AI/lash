@@ -10,13 +10,20 @@ use std::collections::HashMap;
 use std::sync::{Arc, Mutex};
 use std::time::{Duration, Instant};
 
-use lash_core_execution::runtime::actor::waits::PinnedKey;
+use lash_core_execution::ToolCallOutput;
+use lash_core_execution::ToolCancellation;
 use lash_core_execution::runtime::process::steps::{ProcessSteps, StepAdmission, StepRefusal};
-use lash_core_execution::{
-    EngineAction, EngineEvent, EngineState, EngineStateFormat, KeyName, ProcessEngine,
-    ProcessInfraError, ProcessOutcome, ProcessRecord, StepRequest, ToolCallOutput,
-    ToolCancellation,
-};
+use lash_execution_contracts::process::EngineAction;
+use lash_execution_contracts::process::EngineEvent;
+use lash_execution_contracts::process::EngineState;
+use lash_execution_contracts::process::EngineStateFormat;
+use lash_execution_contracts::process::KeyName;
+use lash_execution_contracts::process::ProcessEngine;
+use lash_execution_contracts::process::ProcessInfraError;
+use lash_execution_contracts::process::ProcessOutcome;
+use lash_execution_contracts::process::ProcessRecord;
+use lash_execution_contracts::process::StepRequest;
+use lash_execution_contracts::waits::PinnedKey;
 use lash_protocol_types::sync::MutexExt as _;
 use serde_json::{Value, json};
 use tokio::sync::mpsc;
@@ -60,7 +67,9 @@ pub fn payload(token: &str, waits: usize) -> Value {
 }
 
 fn infra(error: impl std::fmt::Display) -> ProcessInfraError {
-    ProcessInfraError::new(lash_core_execution::PluginError::Session(error.to_string()))
+    ProcessInfraError::new(
+        lash_execution_contracts::plugin_error::PluginError::Session(error.to_string()),
+    )
 }
 
 /// The bench's process engine.
@@ -98,32 +107,35 @@ fn ended(text: &str) -> EngineAction {
 impl ProcessEngine for BenchEngine {
     fn settled_ran(
         &self,
-        _kind: &lash_core_execution::EngineStepKind,
+        _kind: &lash_execution_contracts::process::EngineStepKind,
         _output: &lash_core_store::tool_run::SettledOutput,
     ) -> Vec<(u32, u64)> {
         Vec::new()
     }
 
-    fn trace_class(&self) -> lash_core_execution::ProcessTraceClass {
-        lash_core_execution::ProcessTraceClass::Internal
+    fn trace_class(&self) -> lash_execution_contracts::process::ProcessTraceClass {
+        lash_execution_contracts::process::ProcessTraceClass::Internal
     }
 
     async fn performed_effects(
         &self,
         _payload: &serde_json::Value,
-    ) -> Result<lash_core::PerformedEffects, lash_core::ProcessEnvRefusal> {
-        Ok(lash_core::PerformedEffects::new())
+    ) -> Result<lash_execution_contracts::process::PerformedEffects, lash_core::ProcessEnvRefusal>
+    {
+        Ok(lash_execution_contracts::process::PerformedEffects::new())
     }
 
     async fn check_args(
         &self,
-        _signature: &lash_core_execution::ProcessSignature,
+        _signature: &lash_execution_contracts::process::ProcessSignature,
         _args: &serde_json::Map<String, serde_json::Value>,
-        _mode: lash_core_execution::ArgsMode,
-    ) -> std::result::Result<(), lash_core_execution::ArgsMismatch> {
-        Err(lash_core_execution::ArgsMismatch::UnsupportedSignature {
-            engine_kind: self.kind().into(),
-        })
+        _mode: lash_execution_contracts::process::ArgsMode,
+    ) -> std::result::Result<(), lash_execution_contracts::process::ArgsMismatch> {
+        Err(
+            lash_execution_contracts::process::ArgsMismatch::UnsupportedSignature {
+                engine_kind: self.kind().into(),
+            },
+        )
     }
 
     fn kind(&self) -> &'static str {
@@ -151,14 +163,16 @@ impl ProcessEngine for BenchEngine {
     fn check_settings(
         &self,
         _payload: &serde_json::Value,
-        settings: Option<&lash_core_execution::EngineSettings>,
-    ) -> std::result::Result<(), lash_core_execution::PluginError> {
+        settings: Option<&lash_execution_contracts::process::EngineSettings>,
+    ) -> std::result::Result<(), lash_execution_contracts::plugin_error::PluginError> {
         match settings {
             None => Ok(()),
-            Some(_) => Err(lash_core_execution::PluginError::Registration(format!(
-                "process engine `{}` takes no settings",
-                self.kind()
-            ))),
+            Some(_) => Err(
+                lash_execution_contracts::plugin_error::PluginError::Registration(format!(
+                    "process engine `{}` takes no settings",
+                    self.kind()
+                )),
+            ),
         }
     }
 
@@ -166,8 +180,8 @@ impl ProcessEngine for BenchEngine {
         &self,
         _payload: &serde_json::Value,
     ) -> std::result::Result<
-        Option<lash_core_execution::EngineSettings>,
-        lash_core_execution::PluginError,
+        Option<lash_execution_contracts::process::EngineSettings>,
+        lash_execution_contracts::plugin_error::PluginError,
     > {
         Ok(None)
     }
@@ -225,14 +239,17 @@ impl ProcessEngine for BenchEngine {
     fn start_artifacts(
         &self,
         _payload: &Value,
-    ) -> Result<Vec<lash_core_execution::ArtifactName>, lash_core_execution::PluginError> {
+    ) -> Result<
+        Vec<lash_core_execution::ArtifactName>,
+        lash_execution_contracts::plugin_error::PluginError,
+    > {
         Ok(Vec::new())
     }
 
     async fn end_artifact_referrer(
         &self,
         _cleanup: &lash_core_execution::ResolvedArtifactCleanup,
-    ) -> Result<(), lash_core_execution::ArtifactStoreError> {
+    ) -> Result<(), lash_execution_contracts::module_artifacts::ArtifactStoreError> {
         Ok(())
     }
 
@@ -240,22 +257,26 @@ impl ProcessEngine for BenchEngine {
         &self,
         _claim: &lash_core_execution::ReferrerClaim,
         artifact_ref: &str,
-    ) -> Result<(), lash_core_execution::PluginError> {
-        Err(lash_core_execution::PluginError::Session(format!(
-            "the bench engine stores no artifact `{artifact_ref}`"
-        )))
+    ) -> Result<(), lash_execution_contracts::plugin_error::PluginError> {
+        Err(
+            lash_execution_contracts::plugin_error::PluginError::Session(format!(
+                "the bench engine stores no artifact `{artifact_ref}`"
+            )),
+        )
     }
 
     async fn resolve(
         &self,
-        _reference: &lash_core_execution::ProcessDefinitionRef,
+        _reference: &lash_execution_contracts::process::ProcessDefinitionRef,
     ) -> Result<
-        lash_core_execution::ProcessDefinitionResolution,
-        lash_core_execution::ProcessDefinitionError,
+        lash_execution_contracts::process::ProcessDefinitionResolution,
+        lash_execution_contracts::process::ProcessDefinitionError,
     > {
-        Ok(lash_core_execution::ProcessDefinitionResolution::new(
-            lash_core_execution::ProcessSignature::Unknown,
-        ))
+        Ok(
+            lash_execution_contracts::process::ProcessDefinitionResolution::new(
+                lash_execution_contracts::process::ProcessSignature::Unknown,
+            ),
+        )
     }
 }
 

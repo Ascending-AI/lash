@@ -11,13 +11,25 @@
 use std::num::NonZeroUsize;
 use std::sync::LazyLock;
 
-use lash_core_execution::store::{
-    ArtifactCleanupLedger, ClaimToken, ClaimedObligation, CleanupUpsert, DeliveryError, KeyColumn,
-    KeyColumnType, ObligationId, ObligationKey, ObligationKind, ObligationLedger,
-    ObligationSettlement, ObligationStanding, ObligationState, SettleOutcome, StallReason,
-    StalledObligation,
-};
-use lash_core_execution::{ArtifactCleanup, ArtifactReferrer};
+use lash_core_store::artifact_referrer::ArtifactCleanup;
+use lash_core_store::artifact_referrer::ArtifactReferrer;
+use lash_core_store::store::ArtifactCleanupLedger;
+use lash_core_store::store::ClaimToken;
+use lash_core_store::store::ClaimedObligation;
+use lash_core_store::store::CleanupUpsert;
+use lash_core_store::store::DeliveryError;
+use lash_core_store::store::KeyColumn;
+use lash_core_store::store::KeyColumnType;
+use lash_core_store::store::ObligationId;
+use lash_core_store::store::ObligationKey;
+use lash_core_store::store::ObligationKind;
+use lash_core_store::store::ObligationLedger;
+use lash_core_store::store::ObligationSettlement;
+use lash_core_store::store::ObligationStanding;
+use lash_core_store::store::ObligationState;
+use lash_core_store::store::SettleOutcome;
+use lash_core_store::store::StallReason;
+use lash_core_store::store::StalledObligation;
 use lash_store_sql::artifact::cleanup_obligations::{
     CleanupObligationLedgerStatements, CleanupObligationStatements,
 };
@@ -53,7 +65,7 @@ fn stored_delivery_error(
 ) -> Result<Option<DeliveryError>, StoreError> {
     match (message, code) {
         (Some(message), Some(code)) => Ok(Some(DeliveryError::new(
-            lash_core_execution::RuntimeErrorCode::from_wire_code(&code),
+            lash_core_store::runtime_error::RuntimeErrorCode::from_wire_code(&code),
             message,
         ))),
         (None, None) => Ok(None),
@@ -69,7 +81,7 @@ fn read_key(
     kind: ObligationKind,
     row: &Row<'_>,
     first: usize,
-) -> rusqlite::Result<Result<ObligationKey, lash_core_execution::store::UndecodableObligation>> {
+) -> rusqlite::Result<Result<ObligationKey, lash_core_store::store::UndecodableObligation>> {
     let mut columns = Vec::with_capacity(kind.key_column_types().len());
     for (offset, column_type) in kind.key_column_types().iter().enumerate() {
         let value: Value = row.get(first + offset)?;
@@ -78,7 +90,7 @@ fn read_key(
             (KeyColumnType::Integer, Value::Integer(integer)) => KeyColumn::Integer(integer),
             (_, other) => {
                 return Ok(Err(
-                    lash_core_execution::store::UndecodableObligation::malformed(format!(
+                    lash_core_store::store::UndecodableObligation::malformed(format!(
                         "{kind} obligation key column {offset} holds {other:?}, not {column_type:?}"
                     )),
                 ));
@@ -92,7 +104,7 @@ fn read_key(
 type ClaimRow = (
     String,
     i64,
-    Result<ObligationKey, lash_core_execution::store::UndecodableObligation>,
+    Result<ObligationKey, lash_core_store::store::UndecodableObligation>,
 );
 
 pub(crate) fn read_claim(kind: ObligationKind, row: &Row<'_>) -> rusqlite::Result<ClaimRow> {
@@ -326,7 +338,7 @@ impl ObligationLedger for SqliteObligationLedger {
             Option<String>,
             Option<String>,
             i64,
-            Result<ObligationKey, lash_core_execution::store::UndecodableObligation>,
+            Result<ObligationKey, lash_core_store::store::UndecodableObligation>,
         );
         let rows: Vec<StalledRow> = self
             .conn
@@ -685,12 +697,12 @@ impl ArtifactCleanupLedger for SqliteArtifactCleanupLedger {
 #[cfg(test)]
 mod artifact_cleanup_tests {
     use super::*;
-    use lash_core_execution::ReferrerGuard;
+    use lash_core_store::artifact_referrer::ReferrerGuard;
     use rusqlite::OptionalExtension;
 
     #[tokio::test]
     async fn cleanup_kind_mismatch_is_stored_corruption() {
-        use lash_core_execution::StoreSet as _;
+        use lash_execution_contracts::backend::StoreSet as _;
         let memory = crate::SqliteStoreSet::memory().await.expect("memory store");
         let dir = tempfile::tempdir().expect("file root");
         let file = crate::SqliteStoreSet::open(
@@ -700,7 +712,9 @@ mod artifact_cleanup_tests {
         .await
         .expect("file store");
         for set in [&memory, &file] {
-            let referrer = ArtifactReferrer::HostPin(lash_core_execution::HostArtifactPin::mint());
+            let referrer = ArtifactReferrer::HostPin(
+                lash_core_store::artifact_referrer::HostArtifactPin::mint(),
+            );
             let ledger = set.artifact_cleanup();
             let id = ledger
                 .arm_cleanup(&ArtifactCleanup::ended(referrer.clone(), vec![], None), 1)
@@ -795,7 +809,7 @@ mod artifact_cleanup_tests {
     }
 
     async fn cleanup_arm_rolls_back_when_the_end_fence_fails_on(set: &crate::SqliteStoreSet) {
-        use lash_core_execution::StoreSet as _;
+        use lash_execution_contracts::backend::StoreSet as _;
         let ledger = set.artifact_cleanup();
         let core = set.process_env_store();
         let execution = |name: &str| {

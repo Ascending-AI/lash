@@ -38,6 +38,7 @@ synthetic-next = [
 workspace = true
 
 [dependencies]
+lash-execution-contracts = { workspace = true }
 lash-vm-client = { workspace = true }
 lash-vm-protocol = { workspace = true }
 lash-core-store = { workspace = true }

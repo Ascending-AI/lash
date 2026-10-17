@@ -107,10 +107,10 @@ pub async fn completion_replay_repairs_projection<C, Fut>(
     Fut: std::future::Future<Output = ()>,
 {
     let base = registry
-        .register_process(lash_core::testing::held_engine_registration(
+        .register_process(lash_execution_contracts::testing::held_engine_registration(
             serde_json::Value::Null,
             ProcessProvenance::host(),
-            lash_core::Lifetime::Detached,
+            lash_execution_contracts::process::Lifetime::Detached,
         ))
         .await
         .expect("register replay repair process");
@@ -431,20 +431,22 @@ pub async fn process_prune_batch_tombstones(registry: Arc<dyn ProcessRegistry>) 
 }
 
 pub(super) fn registration(id: &str) -> ProcessRegistration {
-    lash_core::testing::held_engine_registration(
+    lash_execution_contracts::testing::held_engine_registration(
         serde_json::Value::Null,
         ProcessProvenance::host(),
-        lash_core::Lifetime::Detached,
+        lash_execution_contracts::process::Lifetime::Detached,
     )
-    .with_admitted_identity(lash_core::AdmittedProcessIdentity::for_testing(
-        definition_identity(
-            lash_core::ProcessDefinitionRef::unclaimed(
-                "conformance",
-                serde_json::json!({"suite": "process_registry"}),
+    .with_admitted_identity(
+        lash_execution_contracts::process::AdmittedProcessIdentity::for_testing(
+            definition_identity(
+                lash_execution_contracts::process::ProcessDefinitionRef::unclaimed(
+                    "conformance",
+                    serde_json::json!({"suite": "process_registry"}),
+                ),
+                Some(id),
             ),
-            Some(id),
         ),
-    ))
+    )
 }
 
 /// A process of the `conformance` engine kind, under the shared published
@@ -455,22 +457,24 @@ pub(super) fn executed_registration(id: &str) -> ProcessRegistration {
             kind: "conformance".to_string(),
             payload: serde_json::json!({"suite": "process_registry", "id": id}),
             launch: crate::EngineLaunch::new(
-                lash_core::testing::process_execution_env_fixture_ref(),
+                lash_execution_contracts::testing::process_execution_env_fixture_ref(),
                 None,
             ),
         },
         ProcessProvenance::host(),
-        lash_core::Lifetime::Detached,
+        lash_execution_contracts::process::Lifetime::Detached,
     )
-    .with_admitted_identity(lash_core::AdmittedProcessIdentity::for_testing(
-        definition_identity(
-            lash_core::ProcessDefinitionRef::unclaimed(
-                "conformance",
-                serde_json::json!({"suite": "process_registry"}),
+    .with_admitted_identity(
+        lash_execution_contracts::process::AdmittedProcessIdentity::for_testing(
+            definition_identity(
+                lash_execution_contracts::process::ProcessDefinitionRef::unclaimed(
+                    "conformance",
+                    serde_json::json!({"suite": "process_registry"}),
+                ),
+                Some(id),
             ),
-            Some(id),
         ),
-    ))
+    )
 }
 
 #[expect(
@@ -769,7 +773,7 @@ pub async fn non_terminal_process_pages_visit_every_row_across_the_page_bound(
     registry: Arc<dyn ProcessRegistry>,
 ) {
     let mut process_ids = Vec::new();
-    for index in 0..=lash_core::MAX_NON_TERMINAL_PROCESS_PAGE_SIZE {
+    for index in 0..=lash_execution_contracts::process::MAX_NON_TERMINAL_PROCESS_PAGE_SIZE {
         process_ids.push(
             registry
                 .register_process(registration(&format!("bounded-page-{index:04}")))
@@ -785,7 +789,8 @@ pub async fn non_terminal_process_pages_visit_every_row_across_the_page_bound(
         .await
         .expect("read first bounded process page");
     assert!(
-        first.records.len() <= lash_core::MAX_NON_TERMINAL_PROCESS_PAGE_SIZE,
+        first.records.len()
+            <= lash_execution_contracts::process::MAX_NON_TERMINAL_PROCESS_PAGE_SIZE,
         "a caller request cannot exceed the hard page bound"
     );
 
@@ -802,7 +807,8 @@ pub async fn non_terminal_process_pages_visit_every_row_across_the_page_bound(
             .await
             .expect("read bounded process continuation");
         assert!(
-            page.records.len() <= lash_core::MAX_NON_TERMINAL_PROCESS_PAGE_SIZE,
+            page.records.len()
+                <= lash_execution_contracts::process::MAX_NON_TERMINAL_PROCESS_PAGE_SIZE,
             "each continuation respects the hard page bound"
         );
         page_count += 1;
@@ -971,12 +977,12 @@ async fn refolded_process_record_matches_stored_projection(
                 kind: "refold-conformance".to_string(),
                 payload: serde_json::json!({"case": case}),
                 launch: crate::EngineLaunch::new(
-                    lash_core::testing::process_execution_env_fixture_ref(),
+                    lash_execution_contracts::testing::process_execution_env_fixture_ref(),
                     None,
                 ),
             },
             ProcessProvenance::host(),
-            lash_core::Lifetime::Detached,
+            lash_execution_contracts::process::Lifetime::Detached,
         ))
         .await
         .expect("register refold process");
@@ -1169,7 +1175,7 @@ pub async fn waiting_processes_remain_in_the_non_terminal_scan(
 ) {
     let registry: Arc<dyn ProcessRegistry> = seeding.clone();
     let definition = serde_json::json!({"suite": "waiting-non-terminal-scan"});
-    let env_ref = lash_core::testing::process_execution_env_fixture_ref();
+    let env_ref = lash_execution_contracts::testing::process_execution_env_fixture_ref();
     let count_before = registry
         .count_non_terminal_processes()
         .await
@@ -1183,17 +1189,19 @@ pub async fn waiting_processes_remain_in_the_non_terminal_scan(
                     launch: crate::EngineLaunch::new(env_ref.clone(), None),
                 },
                 ProcessProvenance::host(),
-                lash_core::Lifetime::Detached,
+                lash_execution_contracts::process::Lifetime::Detached,
             )
-            .with_admitted_identity(lash_core::AdmittedProcessIdentity::for_testing(
-                definition_identity(
-                    lash_core::ProcessDefinitionRef::unclaimed(
-                        "waiting-non-terminal-scan",
-                        definition.clone(),
+            .with_admitted_identity(
+                lash_execution_contracts::process::AdmittedProcessIdentity::for_testing(
+                    definition_identity(
+                        lash_execution_contracts::process::ProcessDefinitionRef::unclaimed(
+                            "waiting-non-terminal-scan",
+                            definition.clone(),
+                        ),
+                        None::<String>,
                     ),
-                    None::<String>,
                 ),
-            )),
+            ),
         )
         .await
         .expect("register waiting process");
@@ -1738,17 +1746,18 @@ pub async fn terminal_completion_replay_keeps_original_authority_and_writes_noth
     reason = "conformance fixture uses a valid descriptor without dependencies"
 )]
 fn definition_identity(
-    reference: lash_core::ProcessDefinitionRef,
+    reference: lash_execution_contracts::process::ProcessDefinitionRef,
     label: Option<impl Into<String>>,
-) -> lash_core::ProcessIdentity {
-    let id = lash_core::ProcessDefinitionDraft::new(
+) -> lash_execution_contracts::process::ProcessIdentity {
+    let id = lash_execution_contracts::process::ProcessDefinitionDraft::new(
         reference.engine_kind.clone(),
         reference.definition.as_json().clone(),
         [],
     )
     .expect("fixture descriptor")
     .id();
-    let mut identity = lash_core::ProcessIdentity::labelled(reference.engine_kind, label);
+    let mut identity =
+        lash_execution_contracts::process::ProcessIdentity::labelled(reference.engine_kind, label);
     identity.definition_id = Some(id);
     identity
 }

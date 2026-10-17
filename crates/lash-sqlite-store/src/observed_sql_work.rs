@@ -2,8 +2,9 @@
 //! total_changes updates (notably DELETE's truncate path). Read the final
 //! delta at the next statement start or the connection-call boundary.
 use super::*;
-use lash_core_execution::perf_witness::sql_shapes;
-use lash_core_execution::perf_witness::sql_shapes::work::{Backend, Execution};
+use lash_core_ids::perf_witness::sql_shapes;
+use lash_core_ids::perf_witness::sql_shapes::work::Backend;
+use lash_core_ids::perf_witness::sql_shapes::work::Execution;
 thread_local! {
     static ACTIVE: RefCell<HashMap<usize, (Execution, i64)>> = RefCell::new(HashMap::new());
     static FINISHED: RefCell<HashMap<usize, (Execution, i64)>> = RefCell::new(HashMap::new());

@@ -64,7 +64,7 @@ pub enum ReplaySegments {
 pub struct ProcessReplayRequest {
     pub pages: Arc<dyn PageStore>,
     pub process: ProcessId,
-    pub settings: Option<lash_core::EngineSettings>,
+    pub settings: Option<lash_execution_contracts::process::EngineSettings>,
     pub payload: serde_json::Value,
     pub steps: Vec<RecordedProcessStep>,
     pub segments: ReplaySegments,
@@ -392,7 +392,7 @@ impl KernelProcessEngine {
         &self,
         request: &ProcessReplayRequest,
     ) -> Result<Vec<SegmentReplay>, ReplayFault> {
-        let kind = lash_core::EngineStepKind::new(KERNEL_RUN_STEP)
+        let kind = lash_execution_contracts::process::EngineStepKind::new(KERNEL_RUN_STEP)
             .admitted_tool(crate::LASH_VM_ENGINE_KIND)
             .as_str()
             .to_owned();
@@ -408,7 +408,9 @@ impl KernelProcessEngine {
                 .iter()
                 .enumerate()
                 .map(|(segment, step)| {
-                    let name = lash_core::StepName(format!("{KERNEL_RUN_STEP}.{segment}"));
+                    let name = lash_execution_contracts::process::StepName(format!(
+                        "{KERNEL_RUN_STEP}.{segment}"
+                    ));
                     if step.call != process_step_call(&request.process, &name, step.run) {
                         return None;
                     }
@@ -621,7 +623,7 @@ impl KernelProcessEngine {
                     && asked == recorded_asks
             }
             (MachineStep::Ended(end), KernelRunOutput::Ended { outcome, .. }) => {
-                let durable = |outcome: &lash_core::ProcessOutcome| {
+                let durable = |outcome: &lash_execution_contracts::process::ProcessOutcome| {
                     serde_json::to_value(lash_protocol_types::Durable(outcome)).ok()
                 };
                 durable(&outcome_of_end(end.clone())) == durable(outcome)

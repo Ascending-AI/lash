@@ -15,7 +15,10 @@ use arc_swap::ArcSwap;
 use std::sync::Arc;
 use tokio::sync::Mutex;
 
-use super::{LashRuntime, ProcessHandleView, ProcessRecord, ProcessRegistry};
+use super::LashRuntime;
+use lash_execution_contracts::process::ProcessHandleView;
+use lash_execution_contracts::process::ProcessRecord;
+use lash_execution_contracts::process::ProcessRegistry;
 
 pub use process_replay::{
     InMemoryProcessReplayStore, InMemoryProcessReplayStoreConfig, LanguageExecutionObservation,
@@ -222,11 +225,11 @@ impl RuntimeObservation {
         }
     }
 
-    pub fn process_scope(&self) -> crate::SessionScope {
-        crate::SessionScope::new(self.session_id.clone())
+    pub fn process_scope(&self) -> lash_execution_contracts::process::SessionScope {
+        lash_execution_contracts::process::SessionScope::new(self.session_id.clone())
     }
 
-    pub fn process_scope_id(&self) -> crate::SessionScopeId {
+    pub fn process_scope_id(&self) -> lash_execution_contracts::process::SessionScopeId {
         self.process_scope().id()
     }
 
@@ -262,27 +265,33 @@ impl RuntimeObservation {
         let Some(executor) = self.process_registry.as_ref() else {
             return Vec::new();
         };
-        self.list_process_handles_with_mode(executor, crate::ProcessListMode::Live)
-            .await
+        self.list_process_handles_with_mode(
+            executor,
+            lash_execution_contracts::process::ProcessListMode::Live,
+        )
+        .await
     }
 
     pub async fn list_all_process_handles(&self) -> Vec<ProcessHandleView> {
         let Some(executor) = self.process_registry.as_ref() else {
             return Vec::new();
         };
-        self.list_process_handles_with_mode(executor, crate::ProcessListMode::All)
-            .await
+        self.list_process_handles_with_mode(
+            executor,
+            lash_execution_contracts::process::ProcessListMode::All,
+        )
+        .await
     }
 
     async fn list_process_handles_with_mode(
         &self,
-        executor: &Arc<dyn crate::ProcessRegistry>,
-        mode: crate::ProcessListMode,
+        executor: &Arc<dyn lash_execution_contracts::process::ProcessRegistry>,
+        mode: lash_execution_contracts::process::ProcessListMode,
     ) -> Vec<ProcessHandleView> {
         let root_scope = self.process_scope();
         let mut entries = list_scope_process_handles(executor, &root_scope, mode).await;
         if let Some(agent_frame_id) = self.current_frame_node_id.as_ref() {
-            let frame_scope = crate::SessionScope::for_agent_frame(
+            let frame_scope = lash_execution_contracts::process::SessionScope::for_agent_frame(
                 self.session_id.clone(),
                 agent_frame_id.clone(),
             );
@@ -338,18 +347,20 @@ pub async fn load_durable_observation_head(
 }
 
 async fn list_scope_process_handles(
-    executor: &Arc<dyn crate::ProcessRegistry>,
-    scope: &crate::SessionScope,
-    mode: crate::ProcessListMode,
+    executor: &Arc<dyn lash_execution_contracts::process::ProcessRegistry>,
+    scope: &lash_execution_contracts::process::SessionScope,
+    mode: lash_execution_contracts::process::ProcessListMode,
 ) -> Vec<ProcessRecord> {
     match mode {
-        crate::ProcessListMode::Live => executor.list_live_observed_by(&scope.session_id).await,
-        crate::ProcessListMode::All => {
+        lash_execution_contracts::process::ProcessListMode::Live => {
+            executor.list_live_observed_by(&scope.session_id).await
+        }
+        lash_execution_contracts::process::ProcessListMode::All => {
             executor
                 .list_observed_by(
                     &scope.session_id,
-                    &crate::ProcessListFilter {
-                        status: crate::ProcessStatusFilter::Any,
+                    &lash_execution_contracts::process::ProcessListFilter {
+                        status: lash_execution_contracts::process::ProcessStatusFilter::Any,
                         ..Default::default()
                     },
                 )
@@ -367,7 +378,7 @@ pub struct WeakRuntimeHandle {
     runtime: std::sync::Weak<Mutex<LashRuntime>>,
     observation: std::sync::Weak<ArcSwap<RuntimeObservation>>,
     live_replay_store: std::sync::Weak<dyn LiveReplayStore>,
-    process_env_store: std::sync::Weak<dyn crate::ProcessEnvStore>,
+    process_env_store: std::sync::Weak<dyn lash_execution_contracts::process::ProcessEnvStore>,
     process_engines: crate::WeakProcessEngineRegistry,
 }
 
@@ -402,7 +413,7 @@ pub struct RuntimeHandle {
     pub runtime: Arc<Mutex<LashRuntime>>,
     pub observation: Arc<ArcSwap<RuntimeObservation>>,
     pub live_replay_store: Arc<dyn LiveReplayStore>,
-    pub process_env_store: Arc<dyn crate::ProcessEnvStore>,
+    pub process_env_store: Arc<dyn lash_execution_contracts::process::ProcessEnvStore>,
     pub process_engines: crate::ProcessEngineRegistry,
 }
 

@@ -4,7 +4,9 @@ use lash_protocol_types::ProcessId;
 use lash_protocol_types::SessionId;
 use lash_protocol_types::TurnId;
 
-use lash_core_execution::store_backend_support::{CausalColumns, SessionMetaCodec, StoredRelation};
+use lash_core_store::store_backend_support::CausalColumns;
+use lash_core_store::store_backend_support::SessionMetaCodec;
+use lash_core_store::store_backend_support::StoredRelation;
 
 const SESSION_META_CODEC: SessionMetaCodec = SessionMetaCodec::new("SQLite INTEGER");
 
@@ -49,7 +51,7 @@ pub(crate) fn stored_relation_from_row(
 pub(crate) fn decode_catalog_relation(
     stored: StoredRelation,
     observer_intent_rows_json: &str,
-) -> Result<lash_core_execution::SessionRelation, StoreError> {
+) -> Result<lash_core_store::session_identity::SessionRelation, StoreError> {
     let observer_intent_rows =
         serde_json::from_str(observer_intent_rows_json).map_err(|error| {
             SessionMetaCodec::corrupt(
@@ -68,9 +70,9 @@ pub(crate) fn decode_catalog_relation(
 pub(crate) fn write_session_meta(
     conn: &Connection,
     meta: &SessionMeta,
-    retention: lash_core_execution::Retention,
+    retention: lash_core_store::store::Retention,
     created_at_ms: u64,
-    fleet_format: lash_core_execution::FleetFormat,
+    fleet_format: lash_core_store::store::FleetFormat,
 ) -> Result<bool, StoreError> {
     let stored = SessionMetaCodec::encode(SESSION_META_CODEC, meta)?;
     let sql = session_sql().meta_sqlite.insert.sql();
@@ -92,8 +94,8 @@ pub(crate) fn write_session_meta(
                 stored.source_session_id.as_deref(),
                 stored.source_node_id,
                 crate::clamp_epoch_ms(created_at_ms),
-                fleet_format.writer_version(lash_core_execution::surface_format!(
-                    lash_core_execution::store::CURRENT_SESSION_STATE_VERSION
+                fleet_format.writer_version(lash_core_store::surface_format!(
+                    lash_core_store::store::CURRENT_SESSION_STATE_VERSION
                 )),
                 meta.owning_process_id.as_ref().map(ProcessId::as_str),
                 retention.kind(),
@@ -112,7 +114,7 @@ pub(crate) fn write_session_meta(
 pub(crate) fn settle_observer_intents_conn(
     conn: &Connection,
     session_id: &SessionId,
-    remaining: &[lash_core_execution::facade_support::SessionObserverIntent],
+    remaining: &[lash_core_store::session_identity::SessionObserverIntent],
 ) -> Result<(), StoreError> {
     crate::conn::cached_execute(
         conn,
@@ -143,7 +145,7 @@ pub(crate) fn settle_observer_intents_conn(
 pub(crate) fn load_recorded_lineage(
     conn: &Connection,
     session_id: &SessionId,
-) -> Result<Option<lash_core_execution::SessionLineage>, StoreError> {
+) -> Result<Option<lash_core_store::session_identity::SessionLineage>, StoreError> {
     let row = conn
         .prepare_cached(session_sql().meta.select_lineage.sql())
         .and_then(|mut statement| {
@@ -243,7 +245,7 @@ pub(crate) fn load_session_meta_in_tx(
         }
         stored
             .pending_observer_intents
-            .push(lash_core_execution::store_backend_support::StoredObserverIntent { process_id });
+            .push(lash_core_store::store_backend_support::StoredObserverIntent { process_id });
     }
     let session_id = stored.session_id.clone();
     let mut meta = SessionMetaCodec::decode(SESSION_META_CODEC, stored)?;
@@ -269,7 +271,7 @@ pub(crate) fn load_session_meta_in_tx(
 pub(crate) fn retain_admission_base_conn(
     conn: &rusqlite::Connection,
     session_id: &SessionId,
-    checkpoint_ref: Option<&lash_core_execution::store::BlobRef>,
+    checkpoint_ref: Option<&lash_core_store::store::BlobRef>,
 ) -> Result<(), StoreError> {
     let replaced = conn
         .prepare_cached(session_sql().meta.select_admission_base.sql())

@@ -27,7 +27,7 @@ const TOOL: &str = "held_tool";
 async fn stores(
     storage: &str,
 ) -> (
-    Arc<dyn lash_core::StoreSet>,
+    Arc<dyn lash_execution_contracts::backend::StoreSet>,
     Vec<Box<dyn std::any::Any + Send>>,
 ) {
     match storage {
@@ -123,7 +123,7 @@ fn tool_calling_model(calls: &Calls) -> ProviderHandle {
 }
 
 /// The deployment that runs the turn, serving the held tool's provider.
-fn deploy(backend: &lash_core::Backend, calls: &Calls) -> Result<LashCore> {
+fn deploy(backend: &lash_execution_contracts::backend::Backend, calls: &Calls) -> Result<LashCore> {
     explicit_ephemeral_facets(LashCore::standard_builder(backend.clone()))
         .serve_test_llm_profile(tool_calling_model(calls), mock_llm_profile_spec())
         .tools(
@@ -135,7 +135,10 @@ fn deploy(backend: &lash_core::Backend, calls: &Calls) -> Result<LashCore> {
 
 /// A deployment of the same model that registers no provider of the held
 /// tool: it serves none of the stranded session's requirements.
-pub(super) fn deploy_unserving(backend: &lash_core::Backend, calls: &Calls) -> Result<LashCore> {
+pub(super) fn deploy_unserving(
+    backend: &lash_execution_contracts::backend::Backend,
+    calls: &Calls,
+) -> Result<LashCore> {
     explicit_ephemeral_facets(LashCore::standard_builder(backend.clone()))
         .serve_test_llm_profile(tool_calling_model(calls), mock_llm_profile_spec())
         .build(lash_facade_tests::runtime_lease_owner())
@@ -145,7 +148,7 @@ pub(super) fn deploy_unserving(backend: &lash_core::Backend, calls: &Calls) -> R
 /// its admitted call holding the held tool's provider required; with the
 /// provider calls counted when the node stopped.
 pub(super) struct Stranded {
-    pub(super) backend: lash_core::Backend,
+    pub(super) backend: lash_execution_contracts::backend::Backend,
     pub(super) calls: Calls,
     pub(super) before: (usize, usize),
 }
@@ -172,7 +175,10 @@ async fn stranded(
 pub(super) async fn stranded_over(
     storage: &str,
     id: &str,
-    layer: impl FnOnce(Arc<dyn lash_core::StoreSet>) -> Arc<dyn lash_core::StoreSet> + Send,
+    layer: impl FnOnce(
+        Arc<dyn lash_execution_contracts::backend::StoreSet>,
+    ) -> Arc<dyn lash_execution_contracts::backend::StoreSet>
+    + Send,
 ) -> Result<(Stranded, Vec<Box<dyn std::any::Any + Send>>)> {
     let (stores, held) = stores(storage).await;
     let backend = lash_conformance::backend_over(layer(stores));

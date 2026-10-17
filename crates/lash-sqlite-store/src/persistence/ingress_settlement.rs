@@ -15,7 +15,7 @@ pub(super) fn settle_commit_ingress_conn(
     tx: &Connection,
     commit: &RuntimeCommit,
     now: u64,
-) -> Result<lash_core_execution::TurnCancelInputOutcome, StoreError> {
+) -> Result<lash_core_store::turn_control_vocabulary::TurnCancelInputOutcome, StoreError> {
     let session_id = &commit.session_id;
     if let Some(commands) = commit.applied_commands.as_ref() {
         for batch_id in &commands.batch_ids {
@@ -33,7 +33,7 @@ pub(super) fn settle_commit_ingress_conn(
                     session_id,
                     run,
                     input_id,
-                    lash_core_execution::runtime::TurnInputStateKind::Completed,
+                    lash_core_store::turn_input_vocabulary::TurnInputStateKind::Completed,
                     now,
                 )?;
             }
@@ -45,8 +45,8 @@ pub(super) fn settle_commit_ingress_conn(
                     session_id,
                     run,
                     batch_id,
-                    lash_core_execution::store::IngressTerminal {
-                        cause: lash_core_execution::store::IngressTerminalCause::Delivered,
+                    lash_core_store::store::IngressTerminal {
+                        cause: lash_core_store::store::IngressTerminalCause::Delivered,
                         at_ms: now,
                     },
                 )?;
@@ -55,59 +55,59 @@ pub(super) fn settle_commit_ingress_conn(
         for (rows, disposition) in [
             (
                 &ingress.released,
-                lash_core_execution::TurnCancelUndeliveredInputPolicy::Defer,
+                lash_protocol_types::session_model::TurnCancelUndeliveredInputPolicy::Defer,
             ),
             (
                 &ingress.dropped,
-                lash_core_execution::TurnCancelUndeliveredInputPolicy::Drop,
+                lash_protocol_types::session_model::TurnCancelUndeliveredInputPolicy::Drop,
             ),
         ] {
             for row in rows {
                 match row {
-                    lash_core_execution::store::IngressRowId::Input(input_id) => {
+                    lash_core_store::store::IngressRowId::Input(input_id) => {
                         let held = admitted_input_conn(tx, session_id, run, input_id)?;
                         let payload =
                             decode_turn_input(held.input_json)?.into_live("PendingTurnInput")?;
                         match disposition {
-                            lash_core_execution::TurnCancelUndeliveredInputPolicy::Defer => {
+                            lash_protocol_types::session_model::TurnCancelUndeliveredInputPolicy::Defer => {
                                 release_admitted_input_conn(tx, session_id, run, input_id)?;
                             }
-                            lash_core_execution::TurnCancelUndeliveredInputPolicy::Drop => {
+                            lash_protocol_types::session_model::TurnCancelUndeliveredInputPolicy::Drop => {
                                 settle_admitted_input_conn(
                                     tx,
                                     session_id,
                                     run,
                                     input_id,
-                                    lash_core_execution::runtime::TurnInputStateKind::Cancelled,
+                                    lash_core_store::turn_input_vocabulary::TurnInputStateKind::Cancelled,
                                     now,
                                 )?;
                             }
                         }
                         affected_inputs.push((
                             held.enqueue_seq,
-                            lash_core_execution::TurnCancelAffectedInput {
+                            lash_core_store::turn_control_vocabulary::TurnCancelAffectedInput {
                                 input_id: input_id.clone(),
                                 payload,
                                 disposition,
                             },
                         ));
                     }
-                    lash_core_execution::store::IngressRowId::Batch(batch_id) => {
+                    lash_core_store::store::IngressRowId::Batch(batch_id) => {
                         match disposition {
                             // A deferred command keeps its ingress position.
-                            lash_core_execution::TurnCancelUndeliveredInputPolicy::Defer => {
+                            lash_protocol_types::session_model::TurnCancelUndeliveredInputPolicy::Defer => {
                                 admitted_batch_conn(tx, session_id, run, batch_id)?;
                                 release_admitted_batch_conn(tx, session_id, run, batch_id)?;
                             }
-                            lash_core_execution::TurnCancelUndeliveredInputPolicy::Drop => {
+                            lash_protocol_types::session_model::TurnCancelUndeliveredInputPolicy::Drop => {
                                 crate::queued_work::complete_admitted_batch_conn(
                                     tx,
                                     session_id,
                                     run,
                                     batch_id,
-                                    lash_core_execution::store::IngressTerminal {
+                                    lash_core_store::store::IngressTerminal {
                                         cause:
-                                            lash_core_execution::store::IngressTerminalCause::Cancelled,
+                                            lash_core_store::store::IngressTerminalCause::Cancelled,
                                         at_ms: now,
                                     },
                                 )?;
@@ -121,12 +121,14 @@ pub(super) fn settle_commit_ingress_conn(
     // The outcome reports every row the commit released or dropped, in the
     // order they were submitted.
     affected_inputs.sort_by_key(|(enqueue_seq, _)| *enqueue_seq);
-    Ok(lash_core_execution::TurnCancelInputOutcome {
-        affected_inputs: affected_inputs
-            .into_iter()
-            .map(|(_, affected)| affected)
-            .collect(),
-    })
+    Ok(
+        lash_core_store::turn_control_vocabulary::TurnCancelInputOutcome {
+            affected_inputs: affected_inputs
+                .into_iter()
+                .map(|(_, affected)| affected)
+                .collect(),
+        },
+    )
 }
 
 /// The row of input `input_id`, which run `run` must hold.
@@ -134,7 +136,7 @@ fn admitted_input_conn(
     tx: &Connection,
     session_id: &SessionId,
     run: &TurnId,
-    input_id: &lash_core_execution::InputId,
+    input_id: &lash_protocol_types::InputId,
 ) -> Result<PendingTurnInputRow, StoreError> {
     let row = tx
         .query_row(
@@ -147,10 +149,10 @@ fn admitted_input_conn(
         )
         .optional()
         .map_err(sqlite_error)?;
-    lash_core_execution::store_backend_support::require_admitted_to_run(
+    lash_core_store::store_backend_support::require_admitted_to_run(
         session_id,
         run,
-        &lash_core_execution::store::IngressRowId::Input(input_id.clone()),
+        &lash_core_store::store::IngressRowId::Input(input_id.clone()),
         row.as_ref().map(|row| row.admitted_run.as_deref()),
     )?;
     row.ok_or_else(|| StoreError::Backend(format!("admitted input `{input_id}` vanished")))
@@ -161,7 +163,7 @@ fn admitted_batch_conn(
     tx: &Connection,
     session_id: &SessionId,
     run: &TurnId,
-    batch_id: &lash_core_execution::BatchId,
+    batch_id: &lash_protocol_types::BatchId,
 ) -> Result<QueuedWorkBatch, StoreError> {
     let row = tx
         .query_row(
@@ -175,10 +177,10 @@ fn admitted_batch_conn(
         .optional()
         .map_err(sqlite_error)?
         .filter(|row| row.session_id == *session_id);
-    lash_core_execution::store_backend_support::require_admitted_to_run(
+    lash_core_store::store_backend_support::require_admitted_to_run(
         session_id,
         run,
-        &lash_core_execution::store::IngressRowId::Batch(batch_id.clone()),
+        &lash_core_store::store::IngressRowId::Batch(batch_id.clone()),
         row.as_ref().map(|row| row.admitted_run.as_deref()),
     )?;
     let row =
@@ -192,8 +194,8 @@ fn settle_admitted_input_conn(
     tx: &Connection,
     session_id: &SessionId,
     run: &TurnId,
-    input_id: &lash_core_execution::InputId,
-    state: lash_core_execution::runtime::TurnInputStateKind,
+    input_id: &lash_protocol_types::InputId,
+    state: lash_core_store::turn_input_vocabulary::TurnInputStateKind,
     now: u64,
 ) -> Result<(), StoreError> {
     let settled = crate::conn::cached_execute(
@@ -219,7 +221,7 @@ fn release_admitted_input_conn(
     tx: &Connection,
     session_id: &SessionId,
     run: &TurnId,
-    input_id: &lash_core_execution::InputId,
+    input_id: &lash_protocol_types::InputId,
 ) -> Result<(), StoreError> {
     let released = crate::conn::cached_execute(
         tx,
@@ -238,7 +240,7 @@ fn release_admitted_batch_conn(
     tx: &Connection,
     session_id: &SessionId,
     run: &TurnId,
-    batch_id: &lash_core_execution::BatchId,
+    batch_id: &lash_protocol_types::BatchId,
 ) -> Result<(), StoreError> {
     let released = crate::conn::cached_execute(
         tx,
@@ -252,13 +254,13 @@ fn release_admitted_batch_conn(
     require_settlement_applied(
         session_id,
         run,
-        lash_core_execution::store::IngressRowId::Batch(batch_id.clone()),
+        lash_core_store::store::IngressRowId::Batch(batch_id.clone()),
         released,
     )
 }
 
-fn input_row(input_id: &lash_core_execution::InputId) -> lash_core_execution::store::IngressRowId {
-    lash_core_execution::store::IngressRowId::Input(input_id.clone())
+fn input_row(input_id: &lash_protocol_types::InputId) -> lash_core_store::store::IngressRowId {
+    lash_core_store::store::IngressRowId::Input(input_id.clone())
 }
 
 /// Backstop: the verdict was taken over this row earlier in the same write
@@ -267,11 +269,11 @@ fn input_row(input_id: &lash_core_execution::InputId) -> lash_core_execution::st
 fn require_settlement_applied(
     session_id: &SessionId,
     run: &TurnId,
-    row: lash_core_execution::store::IngressRowId,
+    row: lash_core_store::store::IngressRowId,
     rows_affected: usize,
 ) -> Result<(), StoreError> {
-    lash_core_execution::store_backend_support::require_fenced_write_applied(
-        lash_core_execution::store_backend_support::FencedWrite::IngressSettlement,
+    lash_core_store::store_backend_support::require_fenced_write_applied(
+        lash_core_store::store_backend_support::FencedWrite::IngressSettlement,
         crate::SQLITE_BACKEND,
         &row.to_string(),
         u64::try_from(rows_affected).unwrap_or(u64::MAX),

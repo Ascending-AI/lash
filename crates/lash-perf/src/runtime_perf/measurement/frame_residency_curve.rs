@@ -69,7 +69,7 @@ async fn open_catalog(
     scenario: RuntimePerfScenario,
     sqlite_root: Option<&std::path::Path>,
     postgres_url: Option<&str>,
-) -> anyhow::Result<Arc<dyn lash_core::DeploymentStore>> {
+) -> anyhow::Result<Arc<dyn lash_execution_contracts::deployment::DeploymentStore>> {
     if scenario.uses_postgres() {
         let url = postgres_url.ok_or_else(|| anyhow::anyhow!("PostgreSQL URL is required"))?;
         let storage = lash_postgres_store::testing::connect(url).await?;
@@ -88,7 +88,7 @@ async fn open_catalog(
 }
 
 async fn load_frame(
-    store: Arc<dyn lash_core::DeploymentStore>,
+    store: Arc<dyn lash_execution_contracts::deployment::DeploymentStore>,
     session_id: &SessionId,
 ) -> anyhow::Result<RuntimeSessionState> {
     let runtime: Arc<dyn lash_core::RuntimeStore> = store;
@@ -120,7 +120,7 @@ fn append_messages(state: &mut RuntimeSessionState, prefix: &str, count: usize) 
 }
 
 async fn commit_state(
-    store: &dyn lash_core::DeploymentStore,
+    store: &dyn lash_execution_contracts::deployment::DeploymentStore,
     state: &RuntimeSessionState,
 ) -> anyhow::Result<(f64, usize)> {
     let commit = RuntimeCommit::persisted_state_for_test_with_budget(state, SEED_BUDGET);

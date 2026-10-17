@@ -35,7 +35,7 @@ async fn child_turn_panic_is_typed_and_the_parent_remains_alive() -> Result<()> 
     .await
     .expect("the panicked child's process ends within a minute")?;
     assert!(
-        matches!(&output, lash_core::ProcessAwaitOutput::Settled { output }
+        matches!(&output, lash_execution_contracts::process::ProcessAwaitOutput::Settled { output }
             if matches!(&output.outcome, lash_core::ToolCallOutcome::Failure(failure)
                 if failure.code == "process_session_turn_provider_error")),
         "the panicked child's process ends a typed failure: {output:?}"
@@ -87,7 +87,7 @@ async fn a_session_turn_process_cancelled_mid_turn_ends_cancelled_and_keeps_its_
     .await
     .expect("the cancelled process settles")?;
     assert!(
-        matches!(&output, lash_core::ProcessAwaitOutput::Settled { output }
+        matches!(&output, lash_execution_contracts::process::ProcessAwaitOutput::Settled { output }
             if matches!(output.outcome, lash_core::ToolCallOutcome::Cancelled(_))),
         "the process ends cancelled: {output:?}"
     );
@@ -117,16 +117,18 @@ async fn a_session_turn_process_cancelled_mid_turn_ends_cancelled_and_keeps_its_
 async fn a_partially_created_child_finishes_from_its_recorded_creation_request() -> Result<()> {
     use lash_core::testing::{Script, StoreOp};
     const REDEPLOYED_WINDOW: usize = 123_456;
-    let stores: Arc<dyn lash_core::StoreSet> = Arc::new(
+    let stores: Arc<dyn lash_execution_contracts::backend::StoreSet> = Arc::new(
         lash_sqlite_store::SqliteStoreSet::memory()
             .await
             .expect("SQLite memory stores"),
     );
     let script = Script::new();
     let layered = lash_core::testing::runtime_helpers::LayeredStores::over(Arc::clone(&stores))
-        .map_session_store_factory(|inner| -> Arc<dyn lash_core::DeploymentStore> {
-            script.wrap("catalog", inner)
-        })
+        .map_session_store_factory(
+            |inner| -> Arc<dyn lash_execution_contracts::deployment::DeploymentStore> {
+                script.wrap("catalog", inner)
+            },
+        )
         .into_store_set();
     let core = deploy(
         &lash_conformance::backend_over(layered),
@@ -175,7 +177,7 @@ async fn a_partially_created_child_finishes_from_its_recorded_creation_request()
     .await
     .expect("the partially created child's process settles")?;
     assert!(
-        matches!(&output, lash_core::ProcessAwaitOutput::Settled { output }
+        matches!(&output, lash_execution_contracts::process::ProcessAwaitOutput::Settled { output }
             if output.is_success()),
         "the finished child's turn answered: {output:?}"
     );
@@ -253,7 +255,7 @@ async fn a_session_turn_on_an_unserved_profile_is_repaired_by_a_serving_deployme
     .await
     .expect("the serving deployment settles the process")?;
     assert!(
-        matches!(&output, lash_core::ProcessAwaitOutput::Settled { output }
+        matches!(&output, lash_execution_contracts::process::ProcessAwaitOutput::Settled { output }
             if output.is_success()),
         "the child's turn ran on the serving deployment: {output:?}"
     );
@@ -291,7 +293,7 @@ async fn child_turn_provider_cause_reaches_the_parent() -> Result<()> {
     )
     .await
     .expect("child settles")?;
-    let lash_core::ProcessAwaitOutput::Settled { output } = answer else {
+    let lash_execution_contracts::process::ProcessAwaitOutput::Settled { output } = answer else {
         panic!("settled child")
     };
     let lash_core::ToolCallOutcome::Failure(failure) = output.outcome else {

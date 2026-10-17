@@ -32,7 +32,7 @@ impl RuntimeExecutionContext<'_> {
 pub trait RuntimeExecutionContextRuntimeOps<'run>: Sized {
     fn new(
         dispatch: Arc<ToolDispatchContext<'run>>,
-        process_env_store: Arc<dyn crate::ProcessEnvStore>,
+        process_env_store: Arc<dyn lash_execution_contracts::process::ProcessEnvStore>,
         attachment_store: Arc<crate::RuntimeAttachmentStore>,
         chronological_projection: Arc<crate::ChronologicalProjection>,
         turn_context: crate::TurnContext,
@@ -52,7 +52,7 @@ pub trait RuntimeExecutionContextRuntimeOps<'run>: Sized {
     #[must_use]
     fn with_process_execution(
         self,
-        process: &crate::ProcessRecord,
+        process: &lash_execution_contracts::process::ProcessRecord,
         env: Option<Arc<crate::ProcessEnv>>,
     ) -> Self;
 
@@ -90,7 +90,7 @@ pub trait RuntimeExecutionContextRuntimeOps<'run>: Sized {
 impl<'run> RuntimeExecutionContextRuntimeOps<'run> for RuntimeExecutionContext<'run> {
     fn new(
         dispatch: Arc<ToolDispatchContext<'run>>,
-        process_env_store: Arc<dyn crate::ProcessEnvStore>,
+        process_env_store: Arc<dyn lash_execution_contracts::process::ProcessEnvStore>,
         attachment_store: Arc<crate::RuntimeAttachmentStore>,
         chronological_projection: Arc<crate::ChronologicalProjection>,
         turn_context: crate::TurnContext,
@@ -154,7 +154,7 @@ impl<'run> RuntimeExecutionContextRuntimeOps<'run> for RuntimeExecutionContext<'
 
     fn with_process_execution(
         mut self,
-        process: &crate::ProcessRecord,
+        process: &lash_execution_contracts::process::ProcessRecord,
         env: Option<Arc<crate::ProcessEnv>>,
     ) -> Self {
         // The lineage the process's body starts children under (FIG-3607 R1),
@@ -226,10 +226,12 @@ impl RuntimeExecutionContext<'_> {
 /// `process` with its recorded environment `env`, when it is an engine
 /// process: what a child it starts may inherit.
 fn enclosing_process(
-    process: &crate::ProcessRecord,
+    process: &lash_execution_contracts::process::ProcessRecord,
     env: Option<Arc<crate::ProcessEnv>>,
 ) -> Option<Arc<crate::EnclosingProcess>> {
-    let crate::ProcessInput::Engine { kind, launch, .. } = process.input.as_ref() else {
+    let lash_execution_contracts::process::ProcessInput::Engine { kind, launch, .. } =
+        process.input.as_ref()
+    else {
         return None;
     };
     Some(Arc::new(crate::EnclosingProcess {

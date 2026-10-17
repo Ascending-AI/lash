@@ -1,18 +1,23 @@
 mod tests {
-    use crate::support::prelude::*;
+    use lash_execution_contracts::{ProcessLifecycle, ProcessQuery, ProcessRegistrar};
     use std::sync::Arc;
     use std::time::Duration;
 
     use serde_json::json;
 
-    use crate::runtime::process::{
-        ObservedWorkItemState, ProcessAwaitOutput, ProcessListFilter, ProcessRegistryFaults,
-        ProcessWorkObserver,
-    };
-    use crate::{ProcessId, ProcessRegistry, SessionId};
-    use crate::{
-        ProcessObserverBy, ProcessProvenance, ProcessRegistration, SessionScope, ToolFailureClass,
-    };
+    use crate::ProcessId;
+    use crate::SessionId;
+    use crate::ToolFailureClass;
+    use crate::runtime::process::ProcessRegistryFaults;
+    use lash_execution_contracts::process::ObservedWorkItemState;
+    use lash_execution_contracts::process::ProcessAwaitOutput;
+    use lash_execution_contracts::process::ProcessListFilter;
+    use lash_execution_contracts::process::ProcessObserverBy;
+    use lash_execution_contracts::process::ProcessProvenance;
+    use lash_execution_contracts::process::ProcessRegistration;
+    use lash_execution_contracts::process::ProcessRegistry;
+    use lash_execution_contracts::process::ProcessWorkObserver;
+    use lash_execution_contracts::process::SessionScope;
 
     async fn memory_registry() -> Arc<dyn ProcessRegistry> {
         crate::support::sqlite_memory_process_store_set()
@@ -25,10 +30,10 @@ mod tests {
     }
 
     fn external_registration(label: &str) -> ProcessRegistration {
-        crate::testing::held_engine_registration(
+        lash_execution_contracts::testing::held_engine_registration(
             json!({ "label": label }),
             ProcessProvenance::host(),
-            crate::Lifetime::Detached,
+            lash_execution_contracts::process::Lifetime::Detached,
         )
     }
 
@@ -70,7 +75,9 @@ mod tests {
             .complete_process(
                 &process_id,
                 ProcessAwaitOutput::from_tool_output(crate::ToolCallOutput::success(json!({}))),
-                crate::ProcessCompletionAuthority::workflow_key(&process_id),
+                lash_execution_contracts::process::ProcessCompletionAuthority::workflow_key(
+                    &process_id,
+                ),
             )
             .await
             .expect("complete process between record and event-tail reads");
@@ -108,7 +115,9 @@ mod tests {
             .complete_process(
                 &process_id,
                 ProcessAwaitOutput::from_tool_output(crate::ToolCallOutput::success(json!({}))),
-                crate::ProcessCompletionAuthority::workflow_key(&process_id),
+                lash_execution_contracts::process::ProcessCompletionAuthority::workflow_key(
+                    &process_id,
+                ),
             )
             .await
             .expect("complete process between record and event-tail reads");
@@ -162,7 +171,7 @@ mod tests {
 
         let runtime_items = observer(registry)
             .snapshot_all(&ProcessListFilter {
-                status: crate::ProcessStatusFilter::Any,
+                status: lash_execution_contracts::process::ProcessStatusFilter::Any,
                 ..ProcessListFilter::default()
             })
             .await
@@ -215,8 +224,8 @@ mod tests {
             .with_actor_parks(Arc::new(stores.durable_store()));
         let failure =
             crate::ToolFailure::runtime(ToolFailureClass::External, "boom", "failed loudly");
-        let evidence = crate::AbandonEvidence {
-            writer: crate::AbandonWriter::Producer,
+        let evidence = lash_execution_contracts::process::AbandonEvidence {
+            writer: lash_execution_contracts::process::AbandonWriter::Producer,
             owner: None,
             epoch_ms: 7,
         };
@@ -240,7 +249,9 @@ mod tests {
                 .complete_process(
                     &id,
                     outcome.clone(),
-                    crate::ProcessCompletionAuthority::workflow_key(&id),
+                    lash_execution_contracts::process::ProcessCompletionAuthority::workflow_key(
+                        &id,
+                    ),
                 )
                 .await
                 .expect("end the process");
@@ -249,7 +260,10 @@ mod tests {
                 .await
                 .expect("read the ended process")
                 .expect("the ended process is retained");
-            assert_eq!(seen.park, crate::ProcessParkState::NotRead);
+            assert_eq!(
+                seen.park,
+                lash_execution_contracts::process::ProcessParkState::NotRead
+            );
             assert_eq!(
                 actor_observer
                     .process(&id)
@@ -257,16 +271,19 @@ mod tests {
                     .expect("read actor park")
                     .expect("retained process")
                     .park,
-                crate::ProcessParkState::NotParked
+                lash_execution_contracts::process::ProcessParkState::NotParked
             );
-            let expected =
-                crate::ProcessTerminal::try_from(outcome).expect("the outcome is terminal");
+            let expected = lash_execution_contracts::process::ProcessTerminal::try_from(outcome)
+                .expect("the outcome is terminal");
             assert_eq!(
                 seen.terminal(),
                 Some(&expected),
                 "an ended process is observed with the outcome it ended in"
             );
-            assert_eq!(seen.status(), crate::ProcessStatus::from(expected.status()));
+            assert_eq!(
+                seen.status(),
+                lash_execution_contracts::process::ProcessStatus::from(expected.status())
+            );
         }
 
         let id = registry
@@ -274,18 +291,18 @@ mod tests {
             .await
             .expect("register")
             .id;
-        let wait = crate::WaitState {
-            kind: crate::WaitKind::Call {
+        let wait = lash_execution_contracts::process::WaitState {
+            kind: lash_execution_contracts::process::WaitKind::Call {
                 call_id: crate::ToolCallId::fixture("observation-law"),
                 tool_id: crate::ToolId::from("observation_law"),
             },
             since_ms: 3,
             site: None,
         };
-        crate::ProcessRegistryTestSupport::append_event_for_testing(
+        lash_execution_contracts::process::ProcessRegistryTestSupport::append_event_for_testing(
             seeding.as_ref(),
             &id,
-            crate::ProcessEventAppendRequest::wait_entered(&id, &wait),
+            lash_execution_contracts::process::ProcessEventAppendRequest::wait_entered(&id, &wait),
         )
         .await
         .expect("enter the wait");
@@ -294,7 +311,10 @@ mod tests {
             .await
             .expect("read the waiting process")
             .expect("the waiting process is retained");
-        assert_eq!(seen.park, crate::ProcessParkState::NotRead);
+        assert_eq!(
+            seen.park,
+            lash_execution_contracts::process::ProcessParkState::NotRead
+        );
         assert_eq!(
             actor_observer
                 .process(&id)
@@ -302,12 +322,12 @@ mod tests {
                 .expect("read actor park")
                 .expect("retained process")
                 .park,
-            crate::ProcessParkState::NotParked
+            lash_execution_contracts::process::ProcessParkState::NotParked
         );
         assert_eq!(
             seen.lifecycle,
-            crate::ProcessLifecycleState::Waiting {
-                waits: crate::ProcessWaits::new(wait)
+            lash_execution_contracts::process::ProcessLifecycleState::Waiting {
+                waits: lash_execution_contracts::process::ProcessWaits::new(wait)
             },
             "a waiting process is observed with what it waits on"
         );
@@ -329,7 +349,7 @@ mod tests {
             .complete_process(
                 &id,
                 ProcessAwaitOutput::from_tool_output(crate::ToolCallOutput::success(json!({}))),
-                crate::ProcessCompletionAuthority::workflow_key(&id),
+                lash_execution_contracts::process::ProcessCompletionAuthority::workflow_key(&id),
             )
             .await
             .expect("end the process");

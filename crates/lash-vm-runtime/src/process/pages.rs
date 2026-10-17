@@ -14,13 +14,14 @@
 use std::sync::Arc;
 use std::time::Duration;
 
-use lash_core::{ProcessId, StepPages};
+use lash_core::ProcessId;
 use lash_core_execution::runtime::Clock;
 use lash_core_store::checkpoint_graph::stage::StageFault;
 use lash_core_store::checkpoint_graph::{CommitId, NodeId};
 use lash_durable::DurableError;
 use lash_durable::domain::pages::{LeaseFence, PageStore, RootLeaseId, RootLeaseRequest};
 use lash_durable::domain::{ExecKey, RootOwner};
+use lash_execution_contracts::process::StepPages;
 use lash_kernel_state::AdmittedWait;
 use lash_vm_broker::kernel::pages::{
     ActivationPages, CapabilityKey, PageLimits, SharedPages, SpoolRoot,
@@ -243,7 +244,7 @@ fn staging(fault: StageFault) -> DurableError {
 }
 
 #[async_trait::async_trait]
-impl lash_core::StepPublication for RunCandidate {
+impl lash_execution_contracts::process::StepPublication for RunCandidate {
     fn root(&self) -> NodeId {
         self.root
     }

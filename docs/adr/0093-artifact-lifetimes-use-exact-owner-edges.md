@@ -41,7 +41,7 @@ evidence, not elapsed time or an absent worker. Host pins remain until release.
 
 Evidence: `crates/lash-vm/src/compile.rs:38`,
 `crates/lash-core-store/src/artifact_referrer.rs:46`, `:146`, `:201`,
-`crates/lash-core-execution/src/module_artifacts.rs:132`,
+`crates/lash-execution-contracts/src/module_artifacts.rs:132`,
 `crates/lash-core-execution/src/runtime/process/start_staging.rs:385`,
 `crates/lash-sqlite-store/src/artifact_store.rs:186`, `:309`, `:538`, and
 `crates/lash-postgres-store/src/postgres/artifact_store.rs`.

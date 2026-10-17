@@ -3,8 +3,11 @@
 //! identities, digests and receipts stay.
 
 use super::*;
-use lash_core_execution::store::{QueuedWorkStore as _, TurnInputStore as _};
-use lash_core_execution::{Retention, SessionCatalogStore as _, Target};
+use lash_core_store::store::QueuedWorkStore as _;
+use lash_core_store::store::Retention;
+use lash_core_store::store::SessionCatalogStore as _;
+use lash_core_store::store::Target;
+use lash_core_store::store::TurnInputStore as _;
 use lash_protocol_types::SessionId;
 
 /// A body large enough that keeping it is a real cost.
@@ -12,11 +15,14 @@ fn large(tag: &str) -> String {
     format!("{tag}:{}", "x".repeat(64 * 1024))
 }
 
-fn input_draft(session: &SessionId, text: &str) -> lash_core_execution::PendingTurnInputDraft {
-    lash_core_execution::PendingTurnInputDraft::new(
+fn input_draft(
+    session: &SessionId,
+    text: &str,
+) -> lash_core_store::turn_input_vocabulary::PendingTurnInputDraft {
+    lash_core_store::turn_input_vocabulary::PendingTurnInputDraft::new(
         session.clone(),
-        lash_core_execution::TurnInputIngress::NextTurn,
-        lash_core_execution::TurnInput::text(text),
+        lash_core_store::turn_input_vocabulary::TurnInputIngress::NextTurn,
+        lash_core_store::turn_input_vocabulary::TurnInput::text(text),
     )
     .with_source_key("input:large")
 }
@@ -24,8 +30,8 @@ fn input_draft(session: &SessionId, text: &str) -> lash_core_execution::PendingT
 fn command_draft(session: &SessionId, reason: &str) -> QueuedWorkBatchDraft {
     QueuedWorkBatchDraft::new(
         session.clone(),
-        lash_core_execution::DeliveryPolicy::EarliestSafeBoundary,
-        lash_core_execution::runtime::SessionCommand::RefreshToolCatalog {
+        lash_core_store::queued_work_vocabulary::DeliveryPolicy::EarliestSafeBoundary,
+        lash_core_store::queued_work_vocabulary::SessionCommand::RefreshToolCatalog {
             reason: reason.to_owned(),
         },
     )
@@ -39,13 +45,13 @@ async fn head_commit(store: &SqliteStore, session: &SessionId) -> RuntimeCommit 
         .await
         .expect("head")
         .map_or(0, |meta| meta.head_revision);
-    let state = lash_core_execution::RuntimeSessionState {
+    let state = lash_core_store::session_state::RuntimeSessionState {
         session_id: session.clone(),
         head_revision,
-        ..lash_core_execution::RuntimeSessionState::fixture(
-            lash_core_execution::SessionPolicy::new(
-                lash_core_execution::TurnBudget::Unbounded,
-                lash_core_execution::MaxToolCalls::new(1024),
+        ..lash_core_store::session_state::RuntimeSessionState::fixture(
+            lash_core_store::session_policy::SessionPolicy::new(
+                lash_protocol_types::session_model::TurnBudget::Unbounded,
+                lash_protocol_types::session_model::MaxToolCalls::new(1024),
                 lash_core::NoProgressBudget::bounded(12),
             ),
         )
@@ -146,15 +152,15 @@ async fn settled_ingress_bodies_follow_head_only_retention() {
     store
         .admit_session(&SessionStoreCreateRequest {
             session_id: session.clone(),
-            relation: lash_core_execution::SessionRelation::Root,
-            config: lash_core_execution::PersistedSessionConfig::from_policy(
-                &lash_core_execution::SessionPolicy::new(
-                    lash_core_execution::TurnBudget::Unbounded,
-                    lash_core_execution::MaxToolCalls::new(1024),
+            relation: lash_core_store::session_identity::SessionRelation::Root,
+            config: lash_core_store::session_graph::PersistedSessionConfig::from_policy(
+                &lash_core_store::session_policy::SessionPolicy::new(
+                    lash_protocol_types::session_model::TurnBudget::Unbounded,
+                    lash_protocol_types::session_model::MaxToolCalls::new(1024),
                     lash_core::NoProgressBudget::bounded(12),
                 ),
             ),
-            head: lash_core_execution::SessionCreationHead::Config,
+            head: lash_core_store::session_store_factory_types::SessionCreationHead::Config,
             pending_observer_intents: Vec::new(),
             owning_process_id: None,
             retention: Retention::HeadOnly,
@@ -172,11 +178,13 @@ async fn settled_ingress_bodies_follow_head_only_retention() {
         .await
         .expect("enqueue the large input");
     let unconsumed = store
-        .enqueue_pending_turn_input(lash_core_execution::PendingTurnInputDraft::new(
-            session.clone(),
-            lash_core_execution::TurnInputIngress::NextTurn,
-            lash_core_execution::TurnInput::text("still waiting"),
-        ))
+        .enqueue_pending_turn_input(
+            lash_core_store::turn_input_vocabulary::PendingTurnInputDraft::new(
+                session.clone(),
+                lash_core_store::turn_input_vocabulary::TurnInputIngress::NextTurn,
+                lash_core_store::turn_input_vocabulary::TurnInput::text("still waiting"),
+            ),
+        )
         .await
         .expect("enqueue an input no run takes");
     hold_attachments(
@@ -212,18 +220,17 @@ async fn settled_ingress_bodies_follow_head_only_retention() {
         .await
         .expect("pin the input");
     let mut delivering = head_commit(&store, &session).await;
-    let mut settlement = lash_core_execution::store::IngressSettlement::new(
-        lash_core_execution::TurnId::from("run-1"),
-    );
-    settlement
-        .completed_inputs
-        .push(lash_core_execution::TurnInputCompletion {
+    let mut settlement =
+        lash_core_store::store::IngressSettlement::new(lash_protocol_types::TurnId::from("run-1"));
+    settlement.completed_inputs.push(
+        lash_core_store::turn_input_vocabulary::TurnInputCompletion {
             session_id: session.clone(),
-            data: lash_core_execution::TurnInputCompletionData {
+            data: lash_core_store::turn_input_vocabulary::TurnInputCompletionData {
                 input_ids: vec![input.input_id.clone()],
                 applications: Vec::new(),
             },
-        });
+        },
+    );
     delivering.ingress = Some(settlement);
     let delivered = store
         .commit_runtime_state(delivering)
@@ -259,10 +266,12 @@ async fn settled_ingress_bodies_follow_head_only_retention() {
         .await
         .expect("open the command run");
     let mut applying = head_commit(&store, &session).await;
-    applying.applied_commands = Some(lash_core_execution::runtime::QueuedWorkCompletion {
-        session_id: session.clone(),
-        batch_ids: vec![command.batch_id.clone()],
-    });
+    applying.applied_commands = Some(
+        lash_core_store::queued_work_vocabulary::QueuedWorkCompletion {
+            session_id: session.clone(),
+            batch_ids: vec![command.batch_id.clone()],
+        },
+    );
     let applied = store
         .commit_runtime_state(applying)
         .await
@@ -304,13 +313,13 @@ async fn settled_ingress_bodies_follow_head_only_retention() {
     assert!(
         matches!(
             replayed.input,
-            lash_core_execution::runtime::SubmittedBody::Released
+            lash_core_store::turn_input_vocabulary::SubmittedBody::Released
         ),
         "a released body reads released, never a substitute"
     );
     assert_eq!(
         replayed.state.kind(),
-        lash_core_execution::runtime::TurnInputStateKind::Completed
+        lash_core_store::turn_input_vocabulary::TurnInputStateKind::Completed
     );
     assert!(matches!(
         store

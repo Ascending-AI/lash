@@ -6,14 +6,14 @@ pub const CHILD: &str = "session-turn-child";
 
 /// A detached `SessionTurn` start whose child session `CHILD` runs one turn
 /// on the profile `model`, its metadata recorded in the start.
-pub fn request(model: &str) -> lash_core::ProcessStartRequest {
+pub fn request(model: &str) -> lash_execution_contracts::process::ProcessStartRequest {
     started(model, false)
 }
 
 /// A detached `SessionTurn` start of [`request`]'s shape that names its
 /// profile by key only when `keyed`: the deployment that creates the child
 /// resolves the key's metadata.
-pub fn started(model: &str, keyed: bool) -> lash_core::ProcessStartRequest {
+pub fn started(model: &str, keyed: bool) -> lash_execution_contracts::process::ProcessStartRequest {
     let metadata = lash_core::LlmProfileMetadata::builder(model)
         .cache_retention(lash_core::provider::CacheRetention::Short)
         .context_window_tokens(200_000)
@@ -23,7 +23,7 @@ pub fn started(model: &str, keyed: bool) -> lash_core::ProcessStartRequest {
         lash::LlmProfileKey::new(model),
         metadata,
     ));
-    let mut create_request = lash_core::SessionCreateRequest::child(
+    let mut create_request = lash_execution_contracts::session_types::SessionCreateRequest::child(
         PARENT,
         lash_core::SessionStartPoint::Empty,
         lash_core::SessionPolicy {
@@ -40,13 +40,13 @@ pub fn started(model: &str, keyed: bool) -> lash_core::ProcessStartRequest {
     if keyed {
         create_request.model = Some(lash::LlmProfileKey::new(model));
     }
-    lash_core::ProcessStartRequest::session_turn(
+    lash_execution_contracts::process::ProcessStartRequest::session_turn(
         "child-turn",
         create_request,
         lash::TurnInput::text("do the child's work"),
-        lash_core::SessionTurnOutcome::Turn,
-        lash_core::ProcessOriginator::host(),
-        lash_core::LifetimeDecision::Detached,
+        lash_execution_contracts::process::SessionTurnOutcome::Turn,
+        lash_execution_contracts::process::ProcessOriginator::host(),
+        lash_execution_contracts::process::LifetimeDecision::Detached,
     )
 }
 
@@ -65,7 +65,7 @@ pub enum ChildModel {
 /// what `child` says on the child's, serving each profile of `served`. The
 /// first deployment over `backend` creates the parent's session.
 pub async fn deploy(
-    backend: &lash_core::Backend,
+    backend: &lash_execution_contracts::backend::Backend,
     child: ChildModel,
     served: &[lash_core::LlmProfileMetadata],
     first: bool,
@@ -128,10 +128,9 @@ pub async fn observed_child_session_matches_execution(named: bool) -> Result<()>
     .serve_test_llm_profile(provider, mock_llm_profile_spec())
     .build(runtime_lease_owner())?;
     let mut request = request("mock-model");
-    let lash_core::ProcessStartTarget::Input(lash_core::ProcessInput::SessionTurn {
-        create_request,
-        ..
-    }) = &mut request.input
+    let lash_execution_contracts::process::ProcessStartTarget::Input(
+        lash_execution_contracts::process::ProcessInput::SessionTurn { create_request, .. },
+    ) = &mut request.input
     else {
         panic!("the fixture starts a child session turn");
     };
@@ -145,7 +144,7 @@ pub async fn observed_child_session_matches_execution(named: bool) -> Result<()>
     .await
     .expect("the child's turn settles")?;
     assert!(
-        matches!(&output, lash_core::ProcessAwaitOutput::Settled { output }
+        matches!(&output, lash_execution_contracts::process::ProcessAwaitOutput::Settled { output }
             if output.is_success()),
         "the child ran successfully: {output:?}"
     );
@@ -154,7 +153,9 @@ pub async fn observed_child_session_matches_execution(named: bool) -> Result<()>
         .get(&started.process_id)
         .await?
         .expect("the completed process remains observable");
-    let lash_core::ProcessInput::SessionTurn { create_request, .. } = &observed.input else {
+    let lash_execution_contracts::process::ProcessInput::SessionTurn { create_request, .. } =
+        &observed.input
+    else {
         panic!("the observed process is a session turn");
     };
     assert_eq!(create_request.session_id, stated_id);

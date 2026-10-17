@@ -31,9 +31,11 @@ pub use identity::CodeCallIdentities;
 pub use lash_core_execution::runtime::actor::round::ExecutionDraft;
 #[doc(hidden)]
 pub use lash_core_execution::runtime::actor::round::graph as round_graph;
-pub use lash_core_execution::runtime::actor::waits::{PinnedKey, WaitRef, WaitSpec};
 pub use lash_durable::DurableInstant;
 pub use lash_durable::domain::{CellId, ExecKey, SnapshotRev};
+pub use lash_execution_contracts::waits::PinnedKey;
+pub use lash_execution_contracts::waits::WaitRef;
+pub use lash_execution_contracts::waits::WaitSpec;
 pub use members::{Decide, Driven};
 pub use snapshot::{
     BrokerInvariant, DriveRefusal, DurableSnapshotStore, OperationId, QuietPointRefusal,

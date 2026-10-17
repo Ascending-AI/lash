@@ -1,6 +1,9 @@
 //! Session-catalog view listing over the durable-core catalog.
 
-use lash_core_execution::{SessionEntry, SessionListFilter, SessionRelationKind, SessionView};
+use lash_core_store::session_catalog::SessionEntry;
+use lash_core_store::session_catalog::SessionListFilter;
+use lash_core_store::session_catalog::SessionRelationKind;
+use lash_core_store::session_catalog::SessionView;
 use rusqlite::Connection;
 
 use crate::{sqlite_conversion_error, stored_data_corrupt, u64_from_sql};

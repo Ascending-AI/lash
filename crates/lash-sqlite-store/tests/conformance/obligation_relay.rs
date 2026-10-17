@@ -3,14 +3,14 @@
 
 use std::sync::Arc;
 
-use lash_core_execution::StoreSet as _;
+use lash_execution_contracts::backend::StoreSet as _;
 
 use super::SUBSTRATE;
 use crate::backend_fixture::TestBackend;
 
 lash_conformance::obligation_relay_tests!({
     let backend = TestBackend::open(SUBSTRATE).await;
-    let stores: Arc<dyn lash_core_execution::StoreSet> = Arc::new((*backend).clone());
+    let stores: Arc<dyn lash_execution_contracts::backend::StoreSet> = Arc::new((*backend).clone());
     (
         backend,
         lash_conformance::ObligationLawFixture {
@@ -39,7 +39,7 @@ lash_conformance::recovery_leader_tests!(|label| {
 #[tokio::test(flavor = "multi_thread", worker_threads = 2)]
 async fn an_unknown_referrer_kind_is_refused_typed_and_stalled() {
     let backend = TestBackend::open(SUBSTRATE).await;
-    let label = lash_core_execution::SYNTHETIC_NEXT_REFERRER_KIND;
+    let label = lash_core_store::artifact_referrer::SYNTHETIC_NEXT_REFERRER_KIND;
     let id = "core:obligation-written-by-a-later-build";
     let raw = backend.raw();
     raw.execute(
@@ -50,10 +50,10 @@ async fn an_unknown_referrer_kind_is_refused_typed_and_stalled() {
         rusqlite::params![label, id],
     )
     .expect("a later build writes its kind without a table rebuild");
-    let stores: Arc<dyn lash_core_execution::StoreSet> = Arc::new((*backend).clone());
+    let stores: Arc<dyn lash_execution_contracts::backend::StoreSet> = Arc::new((*backend).clone());
     lash_conformance::an_unknown_referrer_kind_is_refused_typed_and_stalled(
         stores,
-        lash_core_execution::store::ObligationId::new(id),
+        lash_core_store::store::ObligationId::new(id),
         label,
     )
     .await;

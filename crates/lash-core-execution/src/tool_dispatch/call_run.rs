@@ -18,6 +18,9 @@ use super::singleton_run::{
     SingletonBodyOutcome, SingletonCapture, SingletonPreparedRequest, SingletonPresentationError,
     SingletonRunError, SingletonToolCall, SingletonToolHandlers, StartLaunch,
 };
+use crate::ProcessId;
+use crate::ScopeId;
+use crate::ToolCallId;
 use crate::runtime::actor::round::StoreLocalEffect;
 use crate::runtime::effect::AttemptStreamRecorder;
 use crate::runtime::process::{
@@ -29,7 +32,8 @@ use crate::tool_run::{
     CheckRank, CheckRecord, DeclarationRefusal, ExecutionPolicy, ExternalCancelPolicy, HookCause,
     OutcomeShape, RankedVerdict, ResultSource,
 };
-use crate::{ConsumerHold, ProcessId, ProcessStartRegistration, ScopeId, ToolCallId};
+use lash_execution_contracts::process::ConsumerHold;
+use lash_execution_contracts::process::ProcessStartRegistration;
 use lash_protocol_types::ToolIntentKind;
 
 #[cfg(test)]
@@ -201,7 +205,9 @@ fn isolated_binding(
     let start = handlers
         .isolated_start(call)
         .ok_or(AdmissionRefusal::UnsupportedIsolation { member: 0 })?;
-    let Some(crate::ProcessInput::Engine { kind, .. }) = start.registration.input.input() else {
+    let Some(lash_execution_contracts::process::ProcessInput::Engine { kind, .. }) =
+        start.registration.input.input()
+    else {
         return Err(IsolatedStartRefusal::NotEngine.into());
     };
     let engine_kind = kind.clone();

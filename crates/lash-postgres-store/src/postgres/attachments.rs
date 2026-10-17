@@ -1,6 +1,9 @@
 //! Attachment edges and external-byte write state, serialized by referrer then digest.
 use crate::*;
-use lash_core_execution::{ArtifactReferrer, AttachmentWrite, ReferrerClaim, SessionReferrerState};
+use lash_core_store::artifact_referrer::ArtifactReferrer;
+use lash_core_store::artifact_referrer::ReferrerClaim;
+use lash_core_store::store::AttachmentWrite;
+use lash_core_store::store::SessionReferrerState;
 use lash_store_sql::Dialect;
 use lash_store_sql::attachment::{
     condemnation::CondemnationStatements, edges::AttachmentEdgeStatements,
@@ -29,9 +32,9 @@ const ATTACHMENT_REFERRER_KINDS: lash_store_sql::Vocabulary =
     lash_store_sql::Vocabulary::new(&[lash_store_sql::VocabularyTerm::new(
         "attachment_referrer_kind",
         |column| {
-            lash_core_execution::ArtifactReferrerKind::predicate_sql(
+            lash_core_store::artifact_referrer::ArtifactReferrerKind::predicate_sql(
                 column,
-                lash_core_execution::ArtifactReferrerKind::holds_attachments,
+                lash_core_store::artifact_referrer::ArtifactReferrerKind::holds_attachments,
             )
         },
     )]);
@@ -55,7 +58,7 @@ fn check_kind(referrer: &ArtifactReferrer) -> Result<(), StoreError> {
     if !referrer.kind().holds_attachments() {
         return Err(StoreError::ReferrerKindRefused {
             kind: referrer.kind(),
-            store: lash_core_execution::ReferrerStore::Attachment,
+            store: lash_core_store::artifact_referrer::ReferrerStore::Attachment,
         });
     }
     ArtifactReferrer::decode(referrer.kind().as_str(), &referrer.canonical_id())
@@ -396,7 +399,7 @@ pub(crate) async fn begin_attachment_sweep(
     pools: &crate::host::RolePools,
     fence: &crate::guarded_tx::WriterFence,
     catalog_id: &str,
-) -> Result<lash_core_execution::AttachmentSweepGeneration, StoreError> {
+) -> Result<lash_core_store::store::AttachmentSweepGeneration, StoreError> {
     let session = tokio::time::timeout(
         pools.session.options().get_acquire_timeout(),
         std::sync::Arc::clone(&pools.sweep_sessions).acquire_owned(),
@@ -436,7 +439,7 @@ pub(crate) async fn begin_attachment_sweep(
                     "attachment sweep clock minted negative generation {generation}"
                 ))
             })?;
-            return Ok(lash_core_execution::AttachmentSweepGeneration::new(
+            return Ok(lash_core_store::store::AttachmentSweepGeneration::new(
                 generation,
                 Box::new(PostgresSweepLiveness {
                     _connection: std::sync::Mutex::new(connection),
@@ -510,9 +513,9 @@ pub(crate) async fn adopt_attachment_condemnations(
     probe_timeout: std::time::Duration,
     fence: &crate::guarded_tx::WriterFence,
     catalog_id: &str,
-    generation: &lash_core_execution::AttachmentSweepGeneration,
+    generation: &lash_core_store::store::AttachmentSweepGeneration,
     now: u64,
-) -> Result<lash_core_execution::AttachmentCondemnationAdoption, StoreError> {
+) -> Result<lash_core_store::store::AttachmentCondemnationAdoption, StoreError> {
     let mine = sweep_generation_sql(generation)?;
     let now = i64::try_from(now).unwrap_or(i64::MAX);
     let rows = crate::observed_sql::query_as::<_, (String, i64, String, i32, Option<String>, i64)>(
@@ -523,12 +526,12 @@ pub(crate) async fn adopt_attachment_condemnations(
     .await
     .map_err(store_sqlx_error)?;
     let mut dead = std::collections::BTreeMap::new();
-    let mut adoption = lash_core_execution::AttachmentCondemnationAdoption::default();
+    let mut adoption = lash_core_store::store::AttachmentCondemnationAdoption::default();
     for (digest, owner, phase, delete_attempts, stall_reason, next_delete_at_ms) in rows {
         let id = attachment_id_from_sql("attachment condemnation", "attachment_id", digest)?;
         let stalled = stall_reason
             .map(|label| {
-                lash_core_execution::AttachmentDeleteStallReason::from_label(&label).ok_or_else(
+                lash_core_store::store::AttachmentDeleteStallReason::from_label(&label).ok_or_else(
                     || StoreError::StoredDataCorrupt {
                         record_kind: "attachment condemnation",
                         message: format!("attachment `{id}` has unknown stall reason `{label}`"),
@@ -573,8 +576,8 @@ pub(crate) async fn adopt_attachment_condemnations(
         tx.commit().await.map_err(store_sqlx_error)?;
         if adopted == 1 {
             let phase = match phase.as_str() {
-                "condemned" => lash_core_execution::AttachmentCondemnationPhase::Condemned,
-                "deleting" => lash_core_execution::AttachmentCondemnationPhase::Deleting,
+                "condemned" => lash_core_store::store::AttachmentCondemnationPhase::Condemned,
+                "deleting" => lash_core_store::store::AttachmentCondemnationPhase::Deleting,
                 unknown => {
                     return Err(StoreError::StoredDataCorrupt {
                         record_kind: "attachment condemnation",
@@ -591,7 +594,7 @@ pub(crate) async fn adopt_attachment_condemnations(
                 })?;
             adoption
                 .adopted
-                .push(lash_core_execution::AdoptedAttachmentCondemnation {
+                .push(lash_core_store::store::AdoptedAttachmentCondemnation {
                     digest: id,
                     phase,
                     delete_attempts,
@@ -608,30 +611,30 @@ pub(crate) async fn settle_attachment_condemnation(
     pool: &PgPool,
     fence: &crate::guarded_tx::WriterFence,
     attachment_id: &str,
-    generation: &lash_core_execution::AttachmentSweepGeneration,
-    settlement: lash_core_execution::AttachmentCondemnationSettlement,
+    generation: &lash_core_store::store::AttachmentSweepGeneration,
+    settlement: lash_core_store::store::AttachmentCondemnationSettlement,
     now: u64,
-) -> Result<lash_core_execution::AttachmentSettlementOutcome, StoreError> {
+) -> Result<lash_core_store::store::AttachmentSettlementOutcome, StoreError> {
     let generation = sweep_generation_sql(generation)?;
     let mut tx = crate::begin_guarded(pool, fence).await?;
     lock_attachment_fence_tx(&mut tx, attachment_id).await?;
     let statements = &attachment_sql().condemnation;
     let settled = match settlement {
-        lash_core_execution::AttachmentCondemnationSettlement::Deleted => {
+        lash_core_store::store::AttachmentCondemnationSettlement::Deleted => {
             crate::observed_sql::query(statements.delete_armed.sql())
                 .bind(attachment_id)
                 .bind(generation)
                 .execute(crate::observed_sql::executor(&mut **tx))
                 .await
         }
-        lash_core_execution::AttachmentCondemnationSettlement::Spared => {
+        lash_core_store::store::AttachmentCondemnationSettlement::Spared => {
             crate::observed_sql::query(statements.delete_spared.sql())
                 .bind(attachment_id)
                 .bind(generation)
                 .execute(crate::observed_sql::executor(&mut **tx))
                 .await
         }
-        lash_core_execution::AttachmentCondemnationSettlement::Failed { stall, error } => {
+        lash_core_store::store::AttachmentCondemnationSettlement::Failed { stall, error } => {
             crate::observed_sql::query(statements.record_failed_delete.sql())
                 .bind(attachment_id)
                 .bind(generation)
@@ -650,14 +653,14 @@ pub(crate) async fn settle_attachment_condemnation(
     .rows_affected();
     tx.commit().await.map_err(store_sqlx_error)?;
     Ok(if settled == 1 {
-        lash_core_execution::AttachmentSettlementOutcome::Applied
+        lash_core_store::store::AttachmentSettlementOutcome::Applied
     } else {
-        lash_core_execution::AttachmentSettlementOutcome::NotOwned
+        lash_core_store::store::AttachmentSettlementOutcome::NotOwned
     })
 }
 
 pub(crate) fn sweep_generation_sql(
-    generation: &lash_core_execution::AttachmentSweepGeneration,
+    generation: &lash_core_store::store::AttachmentSweepGeneration,
 ) -> Result<i64, StoreError> {
     i64::try_from(generation.generation()).map_err(|_| {
         StoreError::Backend(format!(
@@ -669,7 +672,7 @@ pub(crate) fn sweep_generation_sql(
 
 pub(crate) async fn list_attachment_condemnations(
     pool: &PgPool,
-) -> Result<Vec<lash_core_execution::AttachmentCondemnationRecord>, StoreError> {
+) -> Result<Vec<lash_core_store::store::AttachmentCondemnationRecord>, StoreError> {
     let rows = crate::observed_sql::query(attachment_sql().condemnation.select_all.sql())
         .fetch_all(crate::observed_sql::executor(pool))
         .await
@@ -690,8 +693,8 @@ pub(crate) async fn list_attachment_condemnations(
                     });
                 }
             };
-            lash_core_execution::store::decode_attachment_condemnation_record(
-                lash_core_execution::store::StoredAttachmentCondemnation {
+            lash_core_store::store::decode_attachment_condemnation_record(
+                lash_core_store::store::StoredAttachmentCondemnation {
                     digest: attachment_id_from_sql(
                         "attachment condemnation",
                         "attachment_id",
@@ -756,9 +759,9 @@ impl AttachmentReferrers for PostgresStore {
     async fn begin_attachment_write(
         &self,
         write: &AttachmentWrite,
-    ) -> Result<lash_core_execution::AttachmentWriteFence, StoreError> {
+    ) -> Result<lash_core_store::store::AttachmentWriteFence, StoreError> {
         let referrer = &write.claim.referrer();
-        let token = lash_core_execution::AttachmentWriteToken::new();
+        let token = lash_core_store::store::AttachmentWriteToken::new();
         let now = self.clock.timestamp_ms();
         let mut tx = crate::begin_guarded(&self.pool, &self.fence).await?;
         lock_attachment_referrer_tx(&mut tx, referrer).await?;
@@ -784,7 +787,7 @@ impl AttachmentReferrers for PostgresStore {
         {
             Some(("deleting", _)) | Some(("condemned", true)) => {
                 tx.commit().await.map_err(store_sqlx_error)?;
-                return Ok(lash_core_execution::AttachmentWriteFence::ReclamationInFlight);
+                return Ok(lash_core_store::store::AttachmentWriteFence::ReclamationInFlight);
             }
             None | Some(("condemned", false)) => {}
             Some((phase, _)) => {
@@ -816,14 +819,14 @@ impl AttachmentReferrers for PostgresStore {
             crate::obligation_ledger::arm_cleanup_tx(&mut tx, &cleanup, now).await?;
         }
         tx.commit().await.map_err(store_sqlx_error)?;
-        Ok(lash_core_execution::AttachmentWriteFence::Granted(
-            lash_core_execution::AttachmentWritePermit::new(token),
+        Ok(lash_core_store::store::AttachmentWriteFence::Granted(
+            lash_core_store::store::AttachmentWritePermit::new(token),
         ))
     }
     async fn complete_attachment_write(
         &self,
         write: &AttachmentWrite,
-        permit: lash_core_execution::AttachmentWritePermit,
+        permit: lash_core_store::store::AttachmentWritePermit,
     ) -> Result<(), StoreError> {
         let referrer = &write.claim.referrer();
         let token = permit.write_id().as_hex();
@@ -860,7 +863,7 @@ impl AttachmentReferrers for PostgresStore {
     async fn abort_attachment_write(
         &self,
         write: &AttachmentWrite,
-        permit: lash_core_execution::AttachmentWritePermit,
+        permit: lash_core_store::store::AttachmentWritePermit,
     ) -> Result<(), StoreError> {
         let mut tx = crate::begin_guarded(&self.pool, &self.fence).await?;
         let token = permit.write_id().as_hex();

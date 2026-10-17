@@ -3,24 +3,32 @@ use lash_protocol_types::SessionId;
 
 pub(crate) fn decode_turn_input_ingress(
     value: String,
-) -> Result<lash_core_execution::TurnInputIngress, StoreError> {
+) -> Result<lash_core_store::turn_input_vocabulary::TurnInputIngress, StoreError> {
     serde_json::from_str(&value).map_err(|err| stored_data_corrupt("TurnInputIngress", err))
 }
 
 pub(crate) fn decode_turn_input_state(
     value: String,
-    ingress: lash_core_execution::TurnInputIngress,
+    ingress: lash_core_store::turn_input_vocabulary::TurnInputIngress,
     terminal_at_ms: Option<u64>,
-) -> Result<lash_core_execution::TurnInputState, StoreError> {
-    lash_core_execution::TurnInputState::from_persisted(&value, ingress, terminal_at_ms)
+) -> Result<lash_core_store::turn_input_vocabulary::TurnInputState, StoreError> {
+    lash_core_store::turn_input_vocabulary::TurnInputState::from_persisted(
+        &value,
+        ingress,
+        terminal_at_ms,
+    )
 }
 
-/// The submitted input, or [`Released`](lash_core_execution::runtime::SubmittedBody::Released)
+/// The submitted input, or [`Released`](lash_core_store::turn_input_vocabulary::SubmittedBody::Released)
 /// once the session's retention released the settled body (FIG-6607).
 pub(crate) fn decode_turn_input(
     value: Option<String>,
-) -> Result<lash_core_execution::runtime::SubmittedBody<lash_core_execution::TurnInput>, StoreError>
-{
+) -> Result<
+    lash_core_store::turn_input_vocabulary::SubmittedBody<
+        lash_core_store::turn_input_vocabulary::TurnInput,
+    >,
+    StoreError,
+> {
     value
         .map(|value| serde_json::from_str(&value))
         .transpose()
@@ -71,9 +79,9 @@ pub(crate) fn pending_turn_input_row_from_sql(
 
 pub(crate) fn pending_turn_input_from_row(
     row: PendingTurnInputRow,
-) -> Result<lash_core_execution::PendingTurnInput, StoreError> {
+) -> Result<lash_core_store::turn_input_vocabulary::PendingTurnInput, StoreError> {
     let ingress = decode_turn_input_ingress(row.ingress_json)?;
-    Ok(lash_core_execution::PendingTurnInput {
+    Ok(lash_core_store::turn_input_vocabulary::PendingTurnInput {
         input_id: row.input_id.try_into()?,
         session_id: row.session_id,
         enqueue_seq: row.enqueue_seq,
@@ -83,8 +91,8 @@ pub(crate) fn pending_turn_input_from_row(
         input: decode_turn_input(row.input_json)?,
         run_spec: row
             .run_spec_hash
-            .map(lash_core_execution::RunSpecHash::from_stored),
-        trace_cause: lash_core_execution::store_backend_support::decode_trace_cause(
+            .map(lash_core_store::turn_input_vocabulary::RunSpecHash::from_stored),
+        trace_cause: lash_core_store::store_backend_support::decode_trace_cause(
             "PendingTurnInput",
             row.trace_cause_json.as_deref(),
         )?,
@@ -93,17 +101,17 @@ pub(crate) fn pending_turn_input_from_row(
 
 pub(crate) fn pending_turn_input_read_from_row(
     row: PendingTurnInputRow,
-) -> Result<lash_core_execution::PendingTurnInputRead, StoreError> {
+) -> Result<lash_core_store::turn_input_vocabulary::PendingTurnInputRead, StoreError> {
     let admitted_run = (!matches!(row.state.as_str(), "completed" | "cancelled"))
         .then(|| row.admitted_run.clone())
         .flatten();
     let input = pending_turn_input_from_row(row)?;
     Ok(match admitted_run {
-        Some(run) => lash_core_execution::PendingTurnInputRead::admitted(
+        Some(run) => lash_core_store::turn_input_vocabulary::PendingTurnInputRead::admitted(
             input,
-            lash_core_execution::TurnId::parse(run)?,
+            lash_protocol_types::TurnId::parse(run)?,
         ),
-        None => lash_core_execution::PendingTurnInputRead::open(input),
+        None => lash_core_store::turn_input_vocabulary::PendingTurnInputRead::open(input),
     })
 }
 
@@ -111,7 +119,7 @@ pub(crate) fn load_pending_turn_input_by_id_conn(
     conn: &Connection,
     session_id: &SessionId,
     input_id: &str,
-) -> Result<Option<lash_core_execution::PendingTurnInput>, StoreError> {
+) -> Result<Option<lash_core_store::turn_input_vocabulary::PendingTurnInput>, StoreError> {
     let row = conn
         .prepare_cached(
             crate::turn_ingress::turn_ingress_sql()
@@ -133,21 +141,24 @@ pub(crate) fn load_pending_turn_input_by_id_conn(
 pub(crate) fn load_pending_turn_input_row_by_target_conn(
     conn: &Connection,
     session_id: &SessionId,
-    target: &lash_core_execution::PendingTurnInputCancelTarget,
+    target: &lash_core_store::turn_input_vocabulary::PendingTurnInputCancelTarget,
 ) -> Result<Option<PendingTurnInputRow>, StoreError> {
     let sql = crate::turn_ingress::turn_ingress_sql();
     match target {
-        lash_core_execution::PendingTurnInputCancelTarget::InputId(input_id) => conn
-            .prepare_cached(sql.pending_inputs.select_by_id.sql())
-            .and_then(|mut statement| {
-                statement.query_row(
-                    params![session_id.as_str(), input_id.as_str()],
-                    pending_turn_input_row_from_sql,
-                )
-            })
-            .optional()
-            .map_err(sqlite_error),
-        lash_core_execution::PendingTurnInputCancelTarget::SourceKey(source_key) => conn
+        lash_core_store::turn_input_vocabulary::PendingTurnInputCancelTarget::InputId(input_id) => {
+            conn.prepare_cached(sql.pending_inputs.select_by_id.sql())
+                .and_then(|mut statement| {
+                    statement.query_row(
+                        params![session_id.as_str(), input_id.as_str()],
+                        pending_turn_input_row_from_sql,
+                    )
+                })
+                .optional()
+                .map_err(sqlite_error)
+        }
+        lash_core_store::turn_input_vocabulary::PendingTurnInputCancelTarget::SourceKey(
+            source_key,
+        ) => conn
             .prepare_cached(sql.pending_inputs.select_by_source_key.sql())
             .and_then(|mut statement| {
                 statement.query_row(

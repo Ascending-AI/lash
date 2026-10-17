@@ -9,8 +9,10 @@
 
 use super::*;
 use crate::session_sql::session_sql;
-use lash_core_execution::store_backend_support::TargetResolution;
-use lash_core_execution::{RetainedRevision, Retention, Target};
+use lash_core_store::store::RetainedRevision;
+use lash_core_store::store::Retention;
+use lash_core_store::store::Target;
+use lash_core_store::store_backend_support::TargetResolution;
 
 /// Record revision `head_revision` of `session_id` in the transaction that
 /// publishes it. `head_json` is the head document the revision was published
@@ -220,7 +222,7 @@ fn resolve_conn(
     session_id: &SessionId,
     target: &Target,
 ) -> Result<TargetResolution, StoreError> {
-    let of_run = |run: &lash_core_execution::TurnId| {
+    let of_run = |run: &lash_protocol_types::TurnId| {
         crate::session_runs::run_terminal_conn(conn, session_id, run)
             .map(|terminal| TargetResolution::of_run(terminal.as_ref()))
     };
@@ -270,9 +272,9 @@ impl RevisionRow {
     fn config(
         &self,
         conn: &Connection,
-        fleet: lash_core_execution::FleetFormat,
+        fleet: lash_core_store::store::FleetFormat,
         configs: &lash_core_store::store_backend_support::ConfigCache,
-    ) -> Result<lash_core_execution::PersistedSessionConfig, StoreError> {
+    ) -> Result<lash_core_store::session_graph::PersistedSessionConfig, StoreError> {
         let payload = crate::codec::load_config_conn(
             conn,
             self.config_ref.as_deref(),
@@ -341,7 +343,7 @@ fn retained_revision(
     row: RevisionRow,
     head_revision: u64,
     pins: &[(Target, Option<u64>)],
-    fleet: lash_core_execution::FleetFormat,
+    fleet: lash_core_store::store::FleetFormat,
     configs: &lash_core_store::store_backend_support::ConfigCache,
 ) -> Result<RetainedRevision, StoreError> {
     Ok(RetainedRevision {
@@ -365,7 +367,7 @@ pub(crate) fn resolve_target_conn(
     conn: &Connection,
     session_id: &SessionId,
     target: &Target,
-    fleet: lash_core_execution::FleetFormat,
+    fleet: lash_core_store::store::FleetFormat,
     configs: &lash_core_store::store_backend_support::ConfigCache,
 ) -> Result<RetainedRevision, StoreError> {
     require_session_conn(conn, session_id)?;
@@ -385,7 +387,7 @@ pub(crate) fn resolve_target_conn(
 pub(crate) fn revisions_conn(
     conn: &Connection,
     session_id: &SessionId,
-    fleet: lash_core_execution::FleetFormat,
+    fleet: lash_core_store::store::FleetFormat,
     configs: &lash_core_store::store_backend_support::ConfigCache,
 ) -> Result<Vec<RetainedRevision>, StoreError> {
     require_session_conn(conn, session_id)?;
@@ -461,7 +463,7 @@ impl SqliteStore {
         T: Send + 'static,
         F: FnOnce(
                 &Connection,
-                lash_core_execution::FleetFormat,
+                lash_core_store::store::FleetFormat,
                 &lash_core_store::store_backend_support::ConfigCache,
             ) -> Result<T, StoreError>
             + Send
@@ -470,8 +472,10 @@ impl SqliteStore {
         let configs = Arc::clone(&self.configs);
         self.read_connection()
             .read(move |tx| {
-                let fleet =
-                    crate::compat::read_recorded(tx, lash_core_execution::FleetFormat::writable())?;
+                let fleet = crate::compat::read_recorded(
+                    tx,
+                    lash_core_store::store::FleetFormat::writable(),
+                )?;
                 Ok(f(tx, fleet, &configs))
             })
             .await

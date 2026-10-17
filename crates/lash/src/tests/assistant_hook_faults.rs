@@ -12,10 +12,15 @@ const ANSWERS_WITHIN: std::time::Duration = std::time::Duration::from_secs(60);
 /// A core whose assistant-response hook answers its `n`th call with
 /// `answer(n)`, and the model's call count.
 fn hooked_core(
-    answer: impl Fn(usize) -> std::result::Result<(), lash_core::PluginError> + Send + Sync + 'static,
+    answer: impl Fn(
+        usize,
+    ) -> std::result::Result<(), lash_execution_contracts::plugin_error::PluginError>
+    + Send
+    + Sync
+    + 'static,
     hook_calls: &Arc<AtomicUsize>,
     model_calls: &Arc<AtomicUsize>,
-    backend: lash_core::Backend,
+    backend: lash_execution_contracts::backend::Backend,
 ) -> Result<LashCore> {
     let answer = Arc::new(answer);
     let hook_calls = Arc::clone(hook_calls);
@@ -55,7 +60,7 @@ fn hooked_core(
 
 /// The committed transcript of `id`'s session: role and text per message.
 async fn transcript(core: &LashCore, id: &str) -> Result<Vec<(String, String)>> {
-    let store = lash_core::runtime::live_session_view(
+    let store = lash_execution_contracts::deployment::live_session_view(
         &core.store_factory,
         &crate::SessionId::fixture(id.to_string()),
     )
@@ -91,7 +96,7 @@ async fn an_assistant_hook_session_fault_retries_the_step_without_recording_it()
     let core = hooked_core(
         |call| {
             if call == 1 {
-                Err(lash_core::PluginError::Invoke(
+                Err(lash_execution_contracts::plugin_error::PluginError::Invoke(
                     "fig3726: the session lease was lost mid-derivation".into(),
                 ))
             } else {
@@ -154,9 +159,11 @@ async fn a_deterministic_assistant_hook_failure_is_the_steps_recorded_outcome() 
     let (hook_calls, model_calls) = (Arc::default(), Arc::default());
     let core = hooked_core(
         |_| {
-            Err(lash_core::PluginError::Session(
-                "fig3726: deterministic failure".into(),
-            ))
+            Err(
+                lash_execution_contracts::plugin_error::PluginError::Session(
+                    "fig3726: deterministic failure".into(),
+                ),
+            )
         },
         &hook_calls,
         &model_calls,
@@ -228,9 +235,11 @@ async fn a_retained_model_answer_requires_its_response_hook_until_it_is_derived(
                     let (entered, release) = (Arc::clone(&entered), Arc::clone(&release));
                     Box::pin(async move {
                         if call == 1 {
-                            return Err(lash_core::PluginError::Invoke(
-                                "fig6164: the hook faults once".into(),
-                            ));
+                            return Err(
+                                lash_execution_contracts::plugin_error::PluginError::Invoke(
+                                    "fig6164: the hook faults once".into(),
+                                ),
+                            );
                         }
                         entered.notify_one();
                         release.notified().await;

@@ -6,12 +6,14 @@ use lash_protocol_types::sync::MutexExt;
 use std::collections::BTreeMap;
 use std::sync::{Arc, Mutex};
 
+use crate::AttachmentId;
+use crate::BlobRef;
 use crate::store::{
     RuntimeCommit, RuntimeCommitReceipt, RuntimeStore, RuntimeStoreDecorator, StoreError,
     WindowSelector,
 };
-use crate::{AttachmentId, BlobRef, DeploymentStore};
 use lash_core_execution::DeploymentStoreDecorator;
+use lash_execution_contracts::deployment::DeploymentStore;
 use serde::{Deserialize, Serialize};
 
 /// Schema tag carried on every observed commit.

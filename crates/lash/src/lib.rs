@@ -146,17 +146,25 @@ pub mod config {
     pub use crate::admin::config_transactions::{
         ConfigSettlement, ConfigWrite, SessionConfigAdmin,
     };
+    pub use lash_core::CORE_CONFIG_OWNER;
+    pub use lash_core::ConfigCommandCatalog;
+    pub use lash_core::ConfigCommandDescriptor;
+    pub use lash_core::ConfigCommandEntry;
+    pub use lash_core::ConfigRefusal;
+    pub use lash_core::ConfigRefusalReason;
+    pub use lash_core::ConfigSubmitError;
+    pub use lash_core::ConfigTransaction;
+    pub use lash_core::ConfigTransactionOutcome;
+    pub use lash_core::ConfigValueRole;
+    pub use lash_core::CoreConfig;
     /// The owner of the core configuration the commands below change.
     pub use lash_core::CoreConfigOwner;
+    pub use lash_core::RefusalSite;
     pub use lash_core::plugin::config::core::{
         SetAttachmentAcceptance, SetChargeSafety, SetGeneration, SetLlmProfile, SetMaxToolCalls,
         SetNoProgressBudget, SetPromptPlan, SetReasoning, SetTurnBudget,
     };
-    pub use lash_core::{
-        CORE_CONFIG_OWNER, ConfigCommandCatalog, ConfigCommandDescriptor, ConfigCommandEntry,
-        ConfigRefusal, ConfigRefusalReason, ConfigSubmitError, ConfigTransaction,
-        ConfigTransactionOutcome, ConfigValueRole, CoreConfig, CoreConfigRefusal, RefusalSite,
-    };
+    pub use lash_execution_contracts::config_error::CoreConfigRefusal;
 }
 /// The standard protocol's host surface: its creation options, its recorded
 /// namespace and the command that changes it.
@@ -277,6 +285,99 @@ pub use lash_core::runtime::durable::session::{
 /// Display labels for the shipped kernel and dialect helpers.
 pub use lash_helper_labels as helper_labels;
 mod pacing;
+pub use lash_core::AwaitEventKey;
+pub use lash_core::AwaitEventWaitIdentity;
+pub use lash_core::BatchId;
+pub use lash_core::ChargeSafetyPolicy;
+pub use lash_core::ChargeSafetyRefusalEvidence;
+pub use lash_core::CommitBudget;
+pub use lash_core::CommitBudgetLimit;
+pub use lash_core::DrainMode;
+pub use lash_core::DrainModePolicy;
+pub use lash_core::EmptyLlmProfiles;
+pub use lash_core::FrameKey;
+pub use lash_core::InputId;
+pub use lash_core::InputItem;
+pub use lash_core::LlmCallRecord;
+pub use lash_core::LlmProfileConfig;
+pub use lash_core::LlmProfileKey;
+pub use lash_core::LlmProfileLimits;
+pub use lash_core::LlmProfileLimitsError;
+pub use lash_core::LlmProfileMetadata;
+pub use lash_core::LlmProfileMetadataBuilder;
+pub use lash_core::LlmProfileRegistry;
+pub use lash_core::LlmProfileUnavailable;
+pub use lash_core::LlmProfileUnavailableReason;
+pub use lash_core::LlmProfiles;
+pub use lash_core::LlmUsage;
+pub use lash_core::MaxToolCalls;
+pub use lash_core::NoProgressBudget;
+pub use lash_core::NodeId;
+pub use lash_core::OutputTokenLimits;
+pub use lash_core::PendingTurnInput;
+pub use lash_core::PendingTurnInputCancelOutcome;
+pub use lash_core::PendingTurnInputCancelReceipt;
+pub use lash_core::PendingTurnInputCancelTarget;
+pub use lash_core::PendingTurnInputRead;
+pub use lash_core::PendingTurnInputReadStatus;
+pub use lash_core::PendingTurnInputSuffixCancelOutcome;
+pub use lash_core::ProcessId;
+pub use lash_core::QueuedDrainCandidate;
+pub use lash_core::QueuedDrainFamily;
+pub use lash_core::QueuedDrainPolicy;
+pub use lash_core::QueuedDrainRequest;
+pub use lash_core::QueuedDrainSelection;
+pub use lash_core::QueuedWorkBatchingConfig;
+pub use lash_core::ReasoningRefused;
+pub use lash_core::RecordedLlmProfile;
+pub use lash_core::RegisteredLlmProfile;
+pub use lash_core::RegistrationError;
+pub use lash_core::Resolution;
+pub use lash_core::ResolveOutcome;
+pub use lash_core::RuntimeOwner;
+pub use lash_core::SessionEntry;
+pub use lash_core::SessionError;
+pub use lash_core::SessionId;
+pub use lash_core::SessionListFilter;
+pub use lash_core::SessionRelationKind;
+pub use lash_core::SessionStartPoint;
+pub use lash_core::SessionView;
+pub use lash_core::SubmittedBody;
+pub use lash_core::ToolCallLimitExceeded;
+pub use lash_core::ToolCallLimitScope;
+pub use lash_core::TurnActivity;
+pub use lash_core::TurnActivityId;
+pub use lash_core::TurnBudget;
+pub use lash_core::TurnEvent;
+pub use lash_core::TurnFailureEvidence;
+pub use lash_core::TurnFailurePartialOutput;
+pub use lash_core::TurnFailureSettlement;
+pub use lash_core::TurnId;
+pub use lash_core::TurnInput;
+pub use lash_core::TurnInputApplication;
+pub use lash_core::facade_support::GenerationOverlay;
+pub use lash_core::facade_support::OperationCancelOutcome;
+pub use lash_core::facade_support::PluginStack;
+pub use lash_core::facade_support::PluginStage;
+pub use lash_core::facade_support::QueueWithdrawalPublisher;
+pub use lash_core::facade_support::SessionCommand;
+pub use lash_core::facade_support::SessionCommandReceipt;
+pub use lash_core::facade_support::TurnActivitySink;
+pub use lash_core::facade_support::TurnAddress;
+pub use lash_core::facade_support::TurnAttach;
+pub use lash_core::facade_support::TurnCancelOutcome;
+pub use lash_core::facade_support::TurnCancelReceipt;
+pub use lash_core::facade_support::TurnCancelRequest;
+pub use lash_core::facade_support::TurnCancellationEvidence;
+pub use lash_core::facade_support::TurnErrorCause;
+pub use lash_core::facade_support::TurnErrorCode;
+pub use lash_core::facade_support::TurnExecutionMetrics;
+pub use lash_core::facade_support::TurnFinish;
+pub use lash_core::facade_support::TurnInputAcceptanceReceipt;
+pub use lash_core::facade_support::TurnOutcome;
+pub use lash_core::facade_support::TurnStop;
+pub use lash_core::facade_support::TurnTerminal;
+pub use lash_core::facade_support::TurnWorkDriver;
 pub use lash_core::facade_support::{
     TurnCancelAffectedInput, TurnCancelInputOutcome, TurnCancelMode,
     TurnCancelUndeliveredInputPolicy,
@@ -290,35 +391,6 @@ pub use lash_core::runtime::{DeltaCoalescing, DeltaCoalescingError};
 pub use lash_core::store::{
     DeliveryError, ObligationId, ObligationKey, ObligationKind, ObligationState, SessionFault,
     SessionFaultOrigin, SessionFaultRecord, StallReason, StalledObligation, UndecodableObligation,
-};
-pub use lash_core::{
-    AwaitEventKey, AwaitEventWaitIdentity, BatchId, ChargeSafetyPolicy,
-    ChargeSafetyRefusalEvidence, CommitBudget, CommitBudgetLimit, DrainMode, DrainModePolicy,
-    EmptyLlmProfiles, FrameKey, InputId, InputItem, LlmCallRecord, LlmProfileConfig, LlmProfileKey,
-    LlmProfileLimits, LlmProfileLimitsError, LlmProfileMetadata, LlmProfileMetadataBuilder,
-    LlmProfileRegistry, LlmProfileUnavailable, LlmProfileUnavailableReason, LlmProfiles, LlmUsage,
-    MaxToolCalls, NoProgressBudget, NodeId, OutputTokenLimits, PendingTurnInput,
-    PendingTurnInputCancelOutcome, PendingTurnInputCancelReceipt, PendingTurnInputCancelTarget,
-    PendingTurnInputRead, PendingTurnInputReadStatus, PendingTurnInputSuffixCancelOutcome,
-    ProcessId, QueuedDrainCandidate, QueuedDrainFamily, QueuedDrainPolicy, QueuedDrainRequest,
-    QueuedDrainSelection, QueuedWorkBatchingConfig, ReasoningRefused, RecordedLlmProfile,
-    RegisteredLlmProfile, RegistrationError, Resolution, ResolveOutcome, RuntimeOwner,
-    SessionCreateRequest, SessionEntry, SessionError, SessionId, SessionListFilter,
-    SessionRelationKind, SessionStartPoint, SessionView, SubmittedBody, ToolCallLimitExceeded,
-    ToolCallLimitScope, TurnActivity, TurnActivityId, TurnBudget, TurnEvent, TurnFailureEvidence,
-    TurnFailurePartialOutput, TurnFailureSettlement, TurnId, TurnInput, TurnInputApplication,
-    UnstatedSessionConfig, facade_support::GenerationOverlay,
-    facade_support::OperationCancelOutcome, facade_support::PluginStack,
-    facade_support::PluginStage, facade_support::QueueWithdrawalPublisher,
-    facade_support::SessionCommand, facade_support::SessionCommandReceipt,
-    facade_support::SessionSpec, facade_support::SpecResolveError,
-    facade_support::TurnActivitySink, facade_support::TurnAddress, facade_support::TurnAttach,
-    facade_support::TurnCancelOutcome, facade_support::TurnCancelReceipt,
-    facade_support::TurnCancelRequest, facade_support::TurnCancellationEvidence,
-    facade_support::TurnErrorCause, facade_support::TurnErrorCode,
-    facade_support::TurnExecutionMetrics, facade_support::TurnFinish,
-    facade_support::TurnInputAcceptanceReceipt, facade_support::TurnOutcome,
-    facade_support::TurnStop, facade_support::TurnTerminal, facade_support::TurnWorkDriver,
 };
 /// Lash's own execution bounds (`LashCoreBuilder::execution_budgets`), the
 /// limit one executable stretch runs under, and the registration refusal of
@@ -338,6 +410,10 @@ pub use lash_core_store::execution_limits::{
     DiagnosticLimitsField, EvidenceLimits, EvidenceLimitsBuilder, EvidenceLimitsError,
     EvidenceLimitsField, LimitBounds,
 };
+pub use lash_execution_contracts::session_spec::SessionSpec;
+pub use lash_execution_contracts::session_spec::SpecResolveError;
+pub use lash_execution_contracts::session_types::SessionCreateRequest;
+pub use lash_execution_contracts::session_types::UnstatedSessionConfig;
 pub use pacing::{
     CommitAdmissionPolicy, CommitAdmissionPolicyError, ObserverPacing, PollPacing, RecoveryPacing,
     RelayPolicy, RelayPolicyError, RuntimePacingPolicy, WorkCadencePolicy,
@@ -353,11 +429,6 @@ pub use lash_core::runtime::{
     SessionCommandOutcome, SessionCommandSettlement,
 };
 pub use lash_core::store::SessionHeadOwner;
-/// The one substrate a [`LashCore`] takes every persistence port and its
-/// durable store from: the concrete durable backend over one [`StoreSet`]
-/// (ADR 0132 §1). [`LashCore::builder`] requires one, which
-/// [`durable::DurableBackendBuilder`] builds.
-pub use lash_core::{Backend, StoreBindingId, StoreSet};
 /// The shape a sent input runs under (FIG-3838): a [`RunSpec`] set on
 /// [`SendBuilder::run`], or through its one-shot setters, the typed run
 /// options a send states for a config owner under the [`RunOptionsKey`] its
@@ -372,6 +443,13 @@ pub use lash_core::{
 /// idempotency on, through [`tools::AttemptContext::call_id`].
 pub use lash_core::{InvalidToolCallId, ToolCallId, ToolCallRootError};
 pub use lash_core::{SessionAdministration, SessionDeleteContext, SessionDeleteExecution};
+/// The one substrate a [`LashCore`] takes every persistence port and its
+/// durable store from: the concrete durable backend over one [`StoreSet`]
+/// (ADR 0132 §1). [`LashCore::builder`] requires one, which
+/// [`durable::DurableBackendBuilder`] builds.
+pub use lash_execution_contracts::backend::Backend;
+pub use lash_execution_contracts::backend::StoreBindingId;
+pub use lash_execution_contracts::backend::StoreSet;
 /// Cooperative cancellation handle; re-exported so embedders hold one
 /// without depending on `tokio-util` themselves.
 pub use tokio_util::sync::CancellationToken;
@@ -479,42 +557,75 @@ pub mod tools {
         XLashParam, XLashSignature, XLashType, is_named_type_reference,
     };
     // The vocabulary this module's signatures name (the facade-completeness rule).
-    pub use lash_core::{GetDefinitionIntent, PublishDefinitionIntent};
+    pub use lash_execution_contracts::tool_intent::GetDefinitionIntent;
+    pub use lash_execution_contracts::tool_intent::PublishDefinitionIntent;
     pub use lash_protocol_types::{ModelTool, ToolCallStatus};
 
     pub use crate::tool_intent_ingress::{
         ToolIntentIngress, ToolIntentIngressKey, ToolIntentIngressOutcome, ToolIntentIngressRefusal,
     };
+    pub use lash_core::AttemptContext;
+    pub use lash_core::AttemptProcessReads;
+    pub use lash_core::AttemptSessionReads;
+    pub use lash_core::CancelHint;
+    pub use lash_core::ExecutionOwner;
+    pub use lash_core::IsolatedProcessRequest;
+    pub use lash_core::IsolatedStart;
+    pub use lash_core::PendingCompletion;
+    pub use lash_core::PendingResolver;
+    pub use lash_core::PreparedToolCall;
+    pub use lash_core::ResolveTargetError;
+    pub use lash_core::SurfaceTools;
+    pub use lash_core::ToolArgumentProjectionPolicy;
+    pub use lash_core::ToolAttachmentClient;
+    pub use lash_core::ToolAttemptOutcome;
+    pub use lash_core::ToolCall;
+    pub use lash_core::ToolCallOutcome;
+    pub use lash_core::ToolCallOutput;
+    pub use lash_core::ToolCallRecord;
     /// Typed cancellation evidence constructed by tool implementors; pass it to
     /// [`ToolCallOutput::cancelled`] when a tool stops without completing.
     pub use lash_core::ToolCancellation;
+    pub use lash_core::ToolCatalogEntry;
+    pub use lash_core::ToolContract;
+    pub use lash_core::ToolDefinition;
+    pub use lash_core::ToolDirectCompletionClient;
+    pub use lash_core::ToolDiscovery;
+    pub use lash_core::ToolDraft;
+    pub use lash_core::ToolExecutionGrant;
+    pub use lash_core::ToolFailure;
+    pub use lash_core::ToolFailureCause;
+    pub use lash_core::ToolFailureClass;
+    pub use lash_core::ToolFailureSource;
     pub use lash_core::ToolId;
+    pub use lash_core::ToolIntentActivityOutcome;
+    pub use lash_core::ToolIntentIdentity;
+    pub use lash_core::ToolIntentKind;
+    pub use lash_core::ToolIntentRealizedRef;
+    pub use lash_core::ToolManifest;
+    pub use lash_core::ToolModule;
+    pub use lash_core::ToolOutcome;
+    pub use lash_core::ToolOutcomeDone;
+    pub use lash_core::ToolOutputContract;
+    pub use lash_core::ToolPrepareCall;
+    pub use lash_core::ToolPrepareContext;
+    pub use lash_core::ToolProvider;
+    pub use lash_core::ToolRegistry;
+    pub use lash_core::ToolSessionLlmProfile;
+    pub use lash_core::ToolValue;
+    pub use lash_core::ToolView;
+    pub use lash_core::ToolViewBlock;
+    pub use lash_core::ToolViewMeta;
+    pub use lash_core::facade_support::ReconfigureError;
     /// The pending model call passed to a tool's preparation hook.
     pub use lash_core::sansio::PendingToolCall;
-    pub use lash_core::{
-        AttemptContext, AttemptProcessReads, AttemptSessionReads, CancelHint, CancelProcessIntent,
-        ExecutionOwner, IsolatedProcessRequest, IsolatedStart, PendingCompletion, PendingResolver,
-        PreparedToolCall, ResolveTargetError, StartProcessIntent, SurfaceTools,
-        TOOL_INTENT_MAX_CANONICAL_BYTES, TOOL_INTENT_MAX_COUNT, TOOL_INTENT_MAX_PER_KIND,
-        TOOL_INTENT_PROTOCOL_V3, ToolArgumentProjectionPolicy, ToolAttachmentClient,
-        ToolAttemptOutcome, ToolCall, ToolCallOutcome, ToolCallOutput, ToolCallRecord,
-        ToolCatalogEntry, ToolContract, ToolDefinition, ToolDirectCompletionClient, ToolDiscovery,
-        ToolDraft, ToolExecutionGrant, ToolFailure, ToolFailureCause, ToolFailureClass,
-        ToolFailureSource, ToolIntent, ToolIntentActivityOutcome, ToolIntentCommandFailure,
-        ToolIntentExecutionOutcome, ToolIntentIdentity, ToolIntentKind, ToolIntentLimits,
-        ToolIntentRealized, ToolIntentRealizedRef, ToolIntentRefusalReason,
-        ToolIntentRuntimeFailure, ToolIntents, ToolManifest, ToolModule, ToolOutcome,
-        ToolOutcomeDone, ToolOutputContract, ToolPrepareCall, ToolPrepareContext, ToolProvider,
-        ToolRegistry, ToolSessionLlmProfile, ToolValue, ToolView, ToolViewBlock, ToolViewMeta,
-        derive_tool_intent_identity, facade_support::ReconfigureError, turn_stop_from_tool_control,
-    };
+    pub use lash_core::turn_stop_from_tool_control;
     /// Per-call execution contract carried by [`ToolDefinition::with_execution_policy`].
     pub use lash_core::{Backoff, BoundedRetry, ExecutionPolicy, LimitCause};
     /// The three capabilities a tool declares with
     /// [`ToolDefinition::with_declaration`], and what refuses a declaration
     /// or an outcome it does not admit.
     pub use lash_core::{DeclarationRefusal, OutcomeShape, ToolDeclaration};
-    pub use lash_core::{DeclaredStart, DeclaredStartRefused};
     /// The deferred provider and what it records: a [`DeferredMatch`] per
     /// call path, committed once, with the [`ExecutionBinding`] that routes a
     /// resolved tool's calls.
@@ -557,11 +668,30 @@ pub mod tools {
     /// is lash's internal projection — hosts never read or write it, and which
     /// dialect executes a bound tool is decided inside lash.
     pub use lash_core::{ToolBinding, ToolDefinitionBindingExt};
+    pub use lash_execution_contracts::DeclaredStart;
+    pub use lash_execution_contracts::DeclaredStartRefused;
+    pub use lash_execution_contracts::plugin_error::ToolIntentCommandFailure;
+    pub use lash_execution_contracts::plugin_error::ToolIntentRuntimeFailure;
+    pub use lash_execution_contracts::tool_intent::CancelProcessIntent;
+    pub use lash_execution_contracts::tool_intent::StartProcessIntent;
+    pub use lash_execution_contracts::tool_intent::TOOL_INTENT_MAX_CANONICAL_BYTES;
+    pub use lash_execution_contracts::tool_intent::TOOL_INTENT_MAX_COUNT;
+    pub use lash_execution_contracts::tool_intent::TOOL_INTENT_MAX_PER_KIND;
+    pub use lash_execution_contracts::tool_intent::TOOL_INTENT_PROTOCOL_V3;
+    pub use lash_execution_contracts::tool_intent::ToolIntent;
     /// Engine-owned tool-intent admission records used by process-registry integrators.
-    pub use lash_core::{
-        ToolIntentLedgerColumns, ToolIntentSubmissionAdmission, ToolIntentSubmissionOutcome,
-        ToolIntentSubmissionPayload, ToolIntentSubmissionRecord, ToolIntentSubmissionSettlement,
-    };
+    pub use lash_execution_contracts::tool_intent::ToolIntentLedgerColumns;
+    pub use lash_execution_contracts::tool_intent::ToolIntentLimits;
+    pub use lash_execution_contracts::tool_intent::ToolIntentSubmissionAdmission;
+    pub use lash_execution_contracts::tool_intent::ToolIntentSubmissionOutcome;
+    pub use lash_execution_contracts::tool_intent::ToolIntentSubmissionPayload;
+    pub use lash_execution_contracts::tool_intent::ToolIntentSubmissionRecord;
+    pub use lash_execution_contracts::tool_intent::ToolIntentSubmissionSettlement;
+    pub use lash_execution_contracts::tool_intent::ToolIntents;
+    pub use lash_execution_contracts::tool_intent::derive_tool_intent_identity;
+    pub use lash_execution_contracts::tool_intent_outcome::ToolIntentExecutionOutcome;
+    pub use lash_execution_contracts::tool_intent_outcome::ToolIntentRealized;
+    pub use lash_execution_contracts::tool_intent_outcome::ToolIntentRefusalReason;
     #[cfg(feature = "rlm")]
     pub use lash_protocol_rlm::DeferredResolutionError;
     #[cfg(feature = "rlm")]
@@ -676,347 +806,7 @@ pub mod prompt {
 /// [`LashCoreBuilder::trace_sink`](crate::core::LashCoreBuilder::trace_sink).
 mod plugin_diagnostics;
 
-pub mod plugins {
-    /// Host-only live and retained plugin evidence.
-    pub mod diagnostics {
-        pub use crate::plugin_diagnostics::*;
-    }
-    pub use lash_core::plugin::ToolProviderHandle;
-    pub use lash_core::plugin::{
-        CommittedTurnReadPort, CurrentSessionSnapshotPort, NamedSessionSnapshotPort,
-        ProcessAbandonHoldPort, ProcessAwaitPort, ProcessBoundCancelPort, ProcessBoundStartPort,
-        ProcessCancelPort, ProcessListForAttemptPort, ProcessListPort, ProcessRecordedCancelPort,
-        ProcessRecordedStartPort, ProcessReleaseHoldPort, ProcessStartFromRequestPort,
-        ProcessStartPort, ProcessTransferPort, ProcessValidateVisiblePort, RecordedToolCatalogPort,
-        ServiceBindings, SessionCreatePort, SessionGraphAppendPort, TurnScopePort,
-    };
-    pub use lash_core_store::tool_run::{StateAuthority, StateCommandLimits};
-    // The vocabulary this module's signatures name (the facade-completeness rule).
-    pub use lash_core::ConfigRegistry;
-    pub use lash_core::plugin::{
-        AssistantProseProjectorPlugin, AssistantStreamFinishedHook, DecidedContextPressure,
-        PluginFuture, PluginLifecycleEventHook, PluginLifecycleFuture, ResolvedToolSurface,
-        ToolCatalogContributor, ToolPresentationArtifacts, ToolPresentationFacts,
-        ToolPresentationInput, ToolPresentationStep, TranscriptDecoderPlugin,
-    };
-    /// The neutral composition and state sink shared by execution owners.
-    pub use lash_core::plugin::{
-        CallbackSlot, ContributionDescriptor, ContributionDetails, ContributionKey,
-        ContributionKind, ContributionReadiness, ExecutionComposition, ExecutionState,
-        InstalledInventory, InventoryScope, MaterializedInventoryReader, PluginRecipe,
-        PluginRecipeFactory, PreflightIssue, ProcessRecipe, Proposal, RequiredPort, Requirements,
-        RetiredConfigObservers, ServiceKind, ToolProviderKey, ToolProviderKeyError, TraceScopeOf,
-        WeakMaterializedInventoryReader,
-    };
-    pub use lash_core::runtime::ToolAttemptEffectOutcome;
-    pub use lash_core::runtime::{
-        AttemptStream, AttemptStreamChannel, AttemptStreamEvent, AttemptStreamTruncation,
-        DecodedStreamEvent,
-    };
-    pub use lash_core::session::{
-        CompletedProtocolToolCall, Incorporated, IncorporationLedger, SettlementSource,
-    };
-    pub use lash_core::tool_dispatch::{
-        LaunchReceipt, ToolCallIds, ToolDispatchOutcome, ToolPreparationOutcome,
-    };
-    pub use lash_core::{
-        ArtifactReferrerPorts, CommandJournalGuard, CommandReplayKey, DefinitionAcquisition,
-        RecordedKeyFence, ReferrerAcquisition, RefusedWriteRange, ResolvedProcessDefinition,
-        ServedOnlyRange, WeakProcessEngineRegistry,
-    };
-    pub use lash_core_store::session_identity::FrameNodeIdError;
-    pub use lash_core_store::transcript::CellCallLedger;
-    pub use lash_core_worker::execution::runtime::ProcessEnvLoadError;
-    pub use lash_protocol_standard::BatchSugar;
-    pub use lash_protocol_types::{
-        AttachmentMaterializationNotice, CompletionCandidate, CompletionDisposition,
-        DecidedCompletion, DegradedBinding, ModelToolOutcome, ModelToolReturn, SessionStreamEvent,
-        StreamMessageKind, ToolCatalogBuildError, ToolContractResolver,
-    };
-    pub use lash_sansio::{
-        CheckpointResumeAction, DriverAction, DriverContextView, EffectId, ExpandedRow,
-        ExpandedWrapper, ModelToolCalls, PendingWork, ProjectorContext, ResponseToolCalls,
-        ToolExpansionPlan, ToolWave, TurnMachineConfig, TurnProtocol, UndecodableDriverState,
-        UnitTurnProtocol, WriterFormats,
-    };
-    /// The protocol-generic forms [`TurnDriverConfig`] and
-    /// [`TurnDriverPreamble`] specialize to the host's turn protocol.
-    pub use lash_sansio::{
-        TurnDriverConfig as GenericTurnDriverConfig,
-        TurnDriverPreamble as GenericTurnDriverPreamble,
-    };
-
-    /// A claim token: what an actor's outstanding work requires and a
-    /// node's installed registrations serve (S7).
-    pub use lash_core::ObligationToken;
-    /// What an engine registry holds beside its engines: the process
-    /// components installed on the deployment, and the environment ports a
-    /// start's launch is held through (FIG-6034).
-    pub use lash_core::ProcessEnvPorts;
-    pub use lash_core::RegistryKind;
-    /// Host-specialized driver configuration required by every [`TurnDriverPreamble`].
-    pub use lash_core::TurnDriverConfig;
-    /// A turn's prepared request history, as its prelude records it.
-    pub use lash_core::facade_support::PreparedContext;
-    /// Durable session-lifecycle operations a hook context carries, alongside
-    /// [`SessionStateService`] and [`SessionGraphService`]; runtime-implemented.
-    pub use lash_core::facade_support::SessionLifecycleService;
-    /// The schema crate config wire types derive with, so an owner's
-    /// namespace, commands and refusals generate the schemas the config
-    /// command catalog publishes: derive
-    /// `#[derive(lash::plugins::schemars::JsonSchema)]` with
-    /// `#[schemars(crate = "lash::plugins::schemars")]`.
-    pub use lash_core::facade_support::schemars;
-    pub use lash_core::plugin::RetirementRefusal;
-    pub use lash_core::plugin::prompt::PromptRenderPoolConfig;
-    /// Prompt sections (ADR 0133): a plugin registers keyed sections and
-    /// trusted wrappers through `reg.prompt()`. A renderer reads only a
-    /// [`PromptInput`]: the call's committed cut, its own frozen namespace
-    /// and its admitted config. The host's plan and the recorded snapshots
-    /// are in [`prompt`](crate::prompt).
-    pub use lash_core::plugin::prompt::{
-        CommittedPluginNamespace, OfferedTools, ProjectedHistoryStats, PromptCall,
-        PromptFamilySection, PromptInput, PromptModel, PromptRegistrations, PromptRenderError,
-        PromptSection, PromptSectionFamilySpec, PromptSectionSource, PromptSectionSpec,
-        PromptSectionWrap, PromptWrapSpec, PromptWrapTarget, SectionText,
-    };
-    /// A session's registered sections, families and wrappers, read back
-    /// and previewed against a plan, and the facts a protocol states for its
-    /// own sections. Only the runtime builds a call's cut and composes it, at
-    /// the call's admission; a test composes through
-    /// `lash::testing::prompt`.
-    pub use lash_core::plugin::prompt::{
-        PromptCatalog, PromptCatalogSnapshot, PromptSectionFamilyInfo, PromptSectionInfo,
-        ProtocolPromptFacts,
-    };
-    /// Which registry a [`PluginRegistrar`] declares for, as a type
-    /// (`Session` or `Process`), and the contribution table that decides
-    /// which of its methods each registry offers and judges descriptors
-    /// offered to another registry (FIG-6273).
-    pub use lash_core::plugin::registries;
-    pub use lash_core::plugin::registries::{Process, Session};
-    /// The tool hook phases (ADR 0128): argument transforms, before-checks
-    /// over the prepared call, result transforms, and after-checks over the
-    /// final result.
-    pub use lash_core::plugin::{
-        AfterToolContributions, AfterToolDecision, AttemptOrdinal, BeforeToolDecision,
-        CachedToolSuccess, CheckRank, PreparedCallReadView, RankedVerdict, ToolArgsCheckHook,
-        ToolArgsCheckInput, ToolArgsTransformHook, ToolArgsTransformInput, ToolHookContext,
-        ToolHookOccurrence, ToolHookPhase, ToolResultCandidate, ToolResultCheckHook,
-        ToolResultCheckInput, ToolResultTransformHook, ToolResultTransformInput,
-    };
-    /// Hook contracts and reports used by plugin authors. Every hook
-    /// registers under a [`HookKey`] (see [`hook_key!`](crate::hook_key));
-    /// ADR 0128 is the composition table every seam follows.
-    pub use lash_core::plugin::{
-        AfterTurnContributions, AfterTurnHook, AssistantResponseHook, AssistantResponseHookContext,
-        AssistantResponseTransform, AssistantStreamFinishReason, AssistantStreamFinishedContext,
-        AssistantStreamHook, AssistantStreamHookContext, AssistantStreamTransform, BeforeTurnHook,
-        CellFailureDiagnostic, CellFailureFeedbackHook, CheckpointHook, CheckpointHookContext,
-        CommittedTurnReadError, CompactionContext, ContextCompaction, ContextCompactor,
-        ContextError, ContextPressureContext, ContextPressureDecision, ContextPressureHook,
-        ControlPhaseExpired, HookKey, PluginExtensionContribution, PluginRecordContribution,
-        PluginSessionMaterialization, PluginTraceEmitter, SessionContributions,
-        StaticPluginFactory, ToolCatalogContext, ToolPresentationPresenter,
-        ToolResultProjectionContext, TurnContributions, TurnFinalized, TurnHookReport,
-    };
-    /// Protocol and process-engine contracts, including their complete runtime-owned state closure.
-    pub use lash_core::plugin::{
-        AfterTurnDecisions, CellCallReferences, CheckpointApplication, CheckpointComponentKey,
-        CodeExecutionOutcome, CodeExecutorPlugin, ExecutionCandidate, ExecutionGraphCapture,
-        ExecutionGraphPurpose, HydratedExecutionGraph, NamespaceBody, NamespaceEncoding,
-        NamespaceEntry, NamespaceValues, PluginAbort, PluginNamespaceState,
-        PluginSessionMaterializationRequest, PluginSessionRequest, PluginState, PluginStateEffect,
-        PluginTransitionBase, PluginTransitionId, PluginTransitionRecord, PluginTransitionRequest,
-        ProtocolBeforeLlmCallContext, ProtocolDriverPlugin, ProtocolLlmCallAction,
-        ProtocolSessionContext, ProtocolSessionPlugin, ProtocolSessionRestoreView,
-        RecordedCallbackPhase, RecordedTurnContribution, SessionAuthorityContext,
-        SessionPageReader, SessionPages, StoredCell, TurnPreparation,
-    };
-    /// The attachment-omission history policy (ADR 0133): a plugin names the
-    /// attachments of a turn's projected history its request omits, and core
-    /// substitutes the plugin-authored placeholder. Stored history stays unchanged.
-    pub use lash_core::plugin::{
-        AttachmentOmissionContext, AttachmentOmissionPolicy, AttachmentOmissions, HistoryPartId,
-    };
-    /// The registration groups [`PluginRegistrar`]'s accessors return
-    /// (`reg.tools()`, `reg.session()`, ...), nameable so a helper can take
-    /// one as a parameter.
-    pub use lash_core::plugin::{
-        ContextRegistrations, ExecutionRegistrations, OutputRegistrations,
-        PluginOperationRegistrations, ProtocolRegistrations, SessionRegistrations,
-        ToolCallRegistrations, ToolCatalogRegistrations, ToolRegistrations,
-        ToolResultRegistrations, TurnRegistrations,
-    };
-    /// What an execution runs under: its model, generation, charge safety,
-    /// attachment rules, tool-call limit and render, and what one tool call
-    /// records of them at its admission (FIG-6034).
-    pub use lash_core::plugin::{ExecutionFacts, RecordedCallFacts};
-    /// Host-mediated JSON state: a plugin reads its namespace through a
-    /// read-only [`PluginStateView`] and changes it only by returning
-    /// [`StateCommands`] from a tool body or a before-turn, after-turn,
-    /// checkpoint or after-tool callback. Their recorded resolution is
-    /// published once durable and persisted at boundary commits.
-    pub use lash_core::plugin::{
-        FormatNamespace, FormatRefusal, FrontierRefusal, FrontierStep, HookCause, HookOccurrence,
-        KeyRejection, NamespaceFrontierRefusal, PluginConfigNamespace, PluginStateError,
-        PluginStateView, PublicationOrdinal, ResolvedStateChange, SessionReadyContext,
-        StateCommand, StateCommandOrigin, StateCommandRefusal, StateCommands, StateFork,
-        StateFrontier, StateReducer, StateReduction, StateResolution, StateResolutionOutcome,
-    };
-    /// Plugin identities, namespace formats and readable stream-state formats.
-    pub use lash_core::plugin::{
-        FormatVersion, PluginCallbackIdentity, PluginComposition, PluginDeclaration,
-        PluginDeclarationError, PluginId, PluginMetadata, RecordedCallbackUnavailable,
-        StreamStateFormatRefusal,
-    };
-    /// Plugin operations: the query / command / task vocabulary. A plugin
-    /// author declares an operation by implementing [`PluginOperation`] plus
-    /// one of [`PluginQuery`], [`PluginCommand`] or [`PluginTask`], registers a
-    /// handler through
-    /// [`PluginRegistrar::operations`](lash_core::plugin::PluginRegistrar::operations)
-    /// or [`PluginSpec`], and receives the matching context
-    /// ([`PluginQueryContext`], [`PluginCommandContext`], [`PluginTaskContext`]).
-    /// Command and task handlers return a [`PluginOperationOutcome`], which is
-    /// how a plugin asks the runtime to do something on its behalf — today one
-    /// [`PluginRuntimeDirective`]. Hosts invoke operations through
-    /// [`PluginOperations`](crate::admin::PluginOperations) and read the
-    /// resulting [`PluginOperationReceipt`].
-    ///
-    /// This is authoring surface in full: writing a plugin that carries
-    /// operations needs no `lash-core` dependency (ADR 0051).
-    pub use lash_core::plugin::{
-        PluginCommand, PluginCommandContext, PluginFailureClass, PluginFailureOrigin,
-        PluginHookFailure, PluginOperation, PluginOperationDef, PluginOperationFailure,
-        PluginOperationInvokeError, PluginOperationKind, PluginOperationOutcome,
-        PluginOperationReceipt, PluginOwned, PluginQuery, PluginQueryContext,
-        PluginRuntimeDirective, PluginTask, PluginTaskContext, ProcessReadService, SessionParam,
-        SessionReadService,
-    };
-    /// What a recipe's process-engine binders receive. A host factory that
-    /// wraps another preserves its recipe's engine entries (FIG-4373).
-    pub use lash_core::plugin::{PluginExecutionTrace, ProcessEngineContributionContext};
-    pub use lash_core::plugin::{ProcessComponentRegistry, ProcessComposition, StepLink};
-    /// Engine registry and narrowed execution contexts used to host custom process engines.
-    pub use lash_core::runtime::ProcessEngineRegistry;
-    /// Engine-extension contracts for a tool call's admission, attempts,
-    /// decision and presentation. A call runs in memory inside the admitted
-    /// execution that makes it durable; hosts submit work through session
-    /// handles.
-    pub use lash_core::tool_dispatch::{
-        AdmittedToolCall, AttemptEnd, BeforeCheckReply, CallEnd, DeclaredStartObligation,
-        DeclaredStartObligationRefusal, IntentRealizationContext, IsolatedBinding,
-        IsolatedProcessDescriptor, IsolatedStartRefusal, IsolatedToolStart, Realization,
-        RealizationReceipt, RunCutRefusal, SingletonAttempt, SingletonBodyOutcome,
-        SingletonCapture, SingletonPreparedRequest, SingletonPresentationError, SingletonRunError,
-        SingletonToolCall, SingletonToolHandlers, StartLaunch,
-    };
-    /// One recorded Run attempt's outcome, distinct from the provider's
-    /// [`crate::provider::AttemptOutcome`].
-    pub use lash_core::tool_run::run_event::AttemptOutcome as RunAttemptOutcome;
-    pub use lash_core::tool_run::run_event::{
-        AvailableEvidence, CallDecision, CompletionSource, KnownFailure, KnownFailureReason,
-        ResultSource,
-    };
-    pub use lash_core::tool_run::{
-        AdmissionRefusal as ToolRunAdmissionRefusal, AdmittedBinding, AdmittedCall, AdmittedRound,
-        AfterCheckVerdict, AttributedVerdict, BeforeCheckVerdict, BeforeSelection, CapacityScope,
-        RoundAdmission, RuntimeCallPolicy, SegmentOrdinal,
-    };
-    /// Recorded Run data needed by engine extensions and effect-host journals.
-    pub use lash_core::tool_run::{
-        CheckRecord, InvalidMaterialDigest, MaterialBundle, MaterialDigest, MaterialEntry,
-        MaterialHolder, MaterialLocation, MaterialOwner, MaterialPayload, MaterialRef,
-        MaterialRefusal, MaterialRetentionError, MaterialRole, OperationRun, RetainedBundle,
-        RunInputKind,
-    };
-    /// A session's recorded plugin configuration and the owner contract that
-    /// creates and changes it (FIG-4379): each installed plugin registers the
-    /// owner of its namespace and the typed config commands that change it,
-    /// and reads the recorded value on every open and in every scoped hook.
-    pub use lash_core::{
-        AdmittedPluginConfig, CandidateFacts, ConfigCommand, ConfigFault, ConfigOwner,
-        ConfigRegistrar, ConfigRegistrationError, ConfigWire, CreationConfigError, NoRunOptions,
-        OwnerChange, PluginConfig, RecordedNamespaceCorrupt, RenderFault,
-    };
-    /// Protocol-driver and process-engine inputs that core owns independently of plugin storage.
-    pub use lash_core::{
-        AgentFrameAssignment, AgentFrameReason, AgentFrameRecord, FrameNodeId, HostTurnProtocol,
-        InlineDefinition, InlineStarts, InspectedProcessDefinition, ProcessDocument,
-        ProcessDocumentProvider, ProcessDocumentRead, ProcessDocumentRefRead, ProcessEngine,
-        ProcessEngineAdmission, ProcessEngineRegistration, ProcessExecutionDocumentRead,
-        ProcessInfraError, ProcessRunOutcome, ProcessTraceClass, ProtocolBuildInput,
-        ProtocolDriverState, ProtocolTurnOptionsError, TurnDriverPreamble,
-    };
-    /// The session services a hook context hands a plugin: read-through state
-    /// access ([`SessionStateService`]) and durable graph appends
-    /// ([`SessionGraphService`]), plus the append request/result vocabulary.
-    /// Both are runtime-implemented — a plugin receives one, never writes one.
-    pub use lash_core::{
-        AppendSessionNodesOutcome, AppendSessionNodesRequest, PluginExtensions, SessionAppendNode,
-        SessionGraphService, SessionStateService,
-    };
-    /// A host process engine's state machine (ADR 0132 §6): the state it
-    /// keeps, the events lash delivers to `advance`, and the action it
-    /// answers with.
-    pub use lash_core::{
-        CapacityCause, CapacityVerdict, EngineAction, EngineEvent, EngineState, EngineStateFormat,
-        EngineStateMigration, EngineStateRefusal, EngineStatus, EngineStatusProjection,
-        EngineStepAnswer, EngineStepKind, EngineStepRefusal, EngineStepRun, EngineSteps,
-        EngineWake, KeyName, StepCandidate, StepName, StepPages, StepPublication, StepRequest,
-    };
-    /// Code-executor request, response, and runtime capability context.
-    pub use lash_core::{
-        CellDefect, CellFailure, CellFailureKind, CellFailureRepair, ExecRequest, ExecResponse,
-        RuntimeExecutionContext,
-    };
-    pub use lash_core::{CompletedToolCall, PluginOptions};
-    /// How a host process engine carries a process onto a successor pair its
-    /// host names (FIG-6121, D2).
-    pub use lash_core::{EngineSuccession, SuccessionError, SuccessorCarry};
-    /// Executable identity and terminal rendering returned by protocol integrators.
-    pub use lash_core::{ExecutableGeneration, RecordedRender};
-    pub use lash_core::{
-        PluginError, PluginErrorClass, PluginMessage, PluginRuntimeEvent, ToolCatalog,
-        ToolCheckConflict, ToolCheckPhase, ToolCheckReply, ToolCheckVerdictKind,
-        facade_support::PluginFactory, facade_support::PluginHost, facade_support::PluginRegistrar,
-        facade_support::PluginSession, facade_support::PluginSessionContext,
-        facade_support::PluginSpec, facade_support::SessionPlugin,
-        facade_support::ToolCatalogContribution, facade_support::TurnHookContext,
-        facade_support::TurnResultHookContext,
-    };
-    /// Lifecycle observation: what a `reg.lifecycle().on_event(..)` hook receives
-    /// when a turn is finalized, a session is restored, or its configuration
-    /// changes, and the contexts each event carries.
-    ///
-    /// Hosts that need durable post-commit work keep a durable progress cursor
-    /// and page through [`DurableSession::history`](crate::DurableSession::history)
-    /// across frame and fork boundaries. Advance progress after successful,
-    /// idempotent output and schedule reconciliation independently of hooks.
-    pub use lash_core::{
-        facade_support::ModelCallAddress, facade_support::PluginLifecycleEvent,
-        facade_support::SessionConfigChangedContext, facade_support::SessionConfigField,
-    };
-    pub use lash_core_store::tool_run::{
-        Material, NamesMaterial, SettledOutput, SettledOutputRefusal,
-    };
-    pub use lash_plugin_standard_compaction::{
-        OMITTED_ATTACHMENT_PLACEHOLDER, StandardCompactionConfig, StandardCompactionPluginFactory,
-    };
-    pub use lash_protocol_standard::{StandardProtocolConfig, StandardProtocolPluginFactory};
-    /// Model-facing tool declaration carried by [`TurnDriverPreamble::tool_specs`].
-    pub use lash_protocol_types::llm::types::LlmToolSpec;
-    pub use lash_protocol_types::session_model::message::HistoryPresentation;
-    /// Default chat projector installed by [`TurnDriverConfig::chat`].
-    pub use lash_sansio::ChatContextProjector;
-    pub use lash_sansio::CompletedToolCall as GenericCompletedToolCall;
-    /// Projection contract stored by [`TurnDriverConfig`] when a protocol supplies a custom
-    /// context projector.
-    pub use lash_sansio::ContextProjector;
-    /// Sans-I/O protocol handle accepted by [`TurnDriverConfig::chat`]; custom host drivers use
-    /// [`HostTurnProtocol`] as its protocol parameter.
-    pub use lash_sansio::ProtocolDriverHandle;
-}
+pub mod plugins;
 
 /// Protocol message and content types.
 pub mod messages {
@@ -1087,147 +877,7 @@ pub mod secrets {
 ///
 /// Hosts and plugins read [`ObservedProcess`]. Raw rows and their store ports
 /// live in [`crate::persistence`].
-pub mod process {
-    /// Statement observation requested by a kernel-engine start.
-    #[cfg(feature = "codemode")]
-    pub use lash_vm_runtime::Observe;
-    /// Typed settings for a kernel-engine start.
-    #[cfg(feature = "codemode")]
-    pub use lash_vm_runtime::{KernelBounds, KernelRecordedSettings, KernelSettingsError};
-    // The vocabulary this module's signatures name (the facade-completeness rule).
-    pub use lash_core::{
-        ConsumerHold, FitPolicy, ProcessDefinitionStoredError, ProcessStartDeclaration,
-    };
-    pub use lash_core_store::effect_opener::EffectOpenerError;
-    pub use lash_protocol_types::HandleTarget;
-
-    pub use crate::admin::process_admin::SessionProcessAdmin;
-    pub use crate::artifacts::{
-        HostArtifactPin, HostArtifactRefusal, HostArtifacts, ProcessDefinitions,
-    };
-    pub use crate::process_admin::{ProcessAuthority, ProcessEnvView, Processes};
-    /// A host's successor pair for a process (FIG-6121, D2): what
-    /// [`Processes::succeed`] takes and answers, and the request its owner
-    /// records.
-    pub use lash_core::{
-        ProcessSuccession, ProcessSuccessor, ProcessSuccessorRefusal, ProcessSuccessorRequest,
-    };
-    /// Compare recorded process authority with a host's current grants.
-    pub mod authority {
-        pub use crate::process_authority::{
-            ExcessLink, capabilities_excess, components_excess, session_grants, tools_excess,
-            tools_within,
-        };
-    }
-    pub use crate::process_feed::{
-        ObservableProcess, ProcessObservationEventId, ProcessObservationStream,
-        ProcessObservationStreamItem,
-    };
-    pub use crate::process_history::{ProcessEventsRead, ProcessHistoryContinuation};
-    /// The environment and engine settings a process runs under, which its
-    /// starter states (FIG-6034), and the process components an environment
-    /// names.
-    pub use lash_core::plugin::{
-        ProcessComponentContext, ProcessComponentDeclaration, ProcessComponentFactory,
-        ProcessComponentHost, ProcessComponentPorts, ProcessComponentSpec, ProcessSessionReads,
-        StaticProcessComponent,
-    };
-    /// The fixed `call_dynamic` endpoint a process links to its env's
-    /// deferred provider ([`EffectLink::dynamic`]), the effect path it is
-    /// performed under and the input it takes.
-    pub use lash_core::{CALL_DYNAMIC_EFFECT, DynamicCall, call_dynamic_endpoint};
-    pub use lash_core::{
-        DeclaredDefinitionLaunch, DeclaredInlineLaunch, DeclaredLaunch, EnclosingProcess,
-        EngineLaunch, EngineSettings, HoldEnvError, ProcessComponentConfig, ProcessComponentEntry,
-        ProcessComponentId, ProcessComponentIdError, ProcessConfigKey, ProcessEnv,
-        ProcessEnvBuilder, ProcessEnvChoice, ProcessEnvCx, ProcessEnvPolicy, ProcessEnvPolicyError,
-        ProcessEnvRefusal, ProcessLimits, ProcessModel, ProcessStartChoice, ResolvedInlineStart,
-        ResolvedStartTarget,
-    };
-    /// What an env links each effect a process performs to: the tool, the
-    /// component provider that serves it and the dispatch surface the link
-    /// was checked against, and the effects an engine declares it performs.
-    pub use lash_core::{
-        EffectLink, LinkKind, PerformedEffects, ProcessSurface, ResolvedLink, effect_path_of,
-    };
-    /// Explicit environment choices for a start policy. None is a default:
-    /// a host states which it uses.
-    pub mod env {
-        pub use lash_core::runtime::env_policy::policy;
-    }
-    /// The origin of a lifecycle cancellation submitted to a registry.
-    pub use lash_core::CancelOrigin;
-    pub use lash_core::SessionTurnOutcome;
-    /// Registry admission receipts and lifecycle write outcomes.
-    pub use lash_core::runtime::StoreRealization;
-    /// Process-registry and event types that complete the store and engine signature closure.
-    pub use lash_core::runtime::{
-        ParentEndPlan, ProcessOutcome, ProcessParkReason, ProcessParkState, ProcessTombstone,
-        ProcessWaits, WaitKind, WaitSiteUnavailable, WaitState,
-    };
-    /// The one lifecycle state a process record holds, and the outcome a
-    /// terminal one ends in.
-    pub use lash_core::runtime::{
-        ProcessLifecycleState, ProcessOutcomeNotRetained, ProcessTerminal,
-        ProjectedObservedProcess, ProjectedProcessEvent, ProjectedProcessLifecycleState,
-        ProjectedProcessTerminal,
-    };
-    pub use lash_core::{
-        AbandonEvidence, AbandonWriter, AdmittedProcessIdentity, Ancestry, CausalRef,
-        DeclaredProcessIdentity, HandleId, InvalidProcessDefinitionId, InvalidStartKey, Lifetime,
-        LifetimeDecision, LifetimePolicy, MAX_NON_TERMINAL_PROCESS_PAGE_SIZE,
-        MAX_PROCESS_ROSTER_PAGE_SIZE, NoProcessWork, PROCESS_EFFECT_OMISSIONS_EVENT_TYPE,
-        PROCESS_EFFECT_OUTCOME_EVENT_TYPE, PROCESS_RAN_EVENT_TYPE, ProcessAwaitOutput,
-        ProcessChangeBounds, ProcessChangeCursor, ProcessDefinition, ProcessDefinitionDraft,
-        ProcessDefinitionDraftError, ProcessDefinitionError, ProcessDefinitionId,
-        ProcessDefinitionRef, ProcessDefinitionRefusal, ProcessDefinitionResolution,
-        ProcessDefinitionTarget, ProcessDefinitionValue, ProcessEffectNodeReport,
-        ProcessEffectOccurrence, ProcessEffectOmissions, ProcessEffectOmittedCounts,
-        ProcessEffectOutcomeClass, ProcessEffectReport, ProcessEffectReportError,
-        ProcessEngineKind, ProcessEnvRef, ProcessEvent, ProcessEventAppendReceipt,
-        ProcessEventHistoryRetention, ProcessEventKind, ProcessEventLite, ProcessEventPage,
-        ProcessEventPageEvents, ProcessEventPageMore, ProcessEventQueryMode,
-        ProcessEventReadOutcome, ProcessEventRelease, ProcessExecutionContext, ProcessExternalRef,
-        ProcessIdentity, ProcessInput, ProcessLifecycleFact, ProcessLineage, ProcessListMode,
-        ProcessObserverBy, ProcessOriginator, ProcessOriginatorFilter, ProcessProvenance,
-        ProcessPruneReport, ProcessRan, ProcessRegistration, ProcessRegistrationOutcome,
-        ProcessRegistryCursor, ProcessResumeRefusal, ProcessRosterCursor, ProcessRosterTokenBudget,
-        ProcessRosterTokenError, ProcessService, ProcessSessionDeleteReport, ProcessSignature,
-        ProcessStartOptions, ProcessStartRegistration, ProcessStartRequest, ProcessStartTarget,
-        ProcessStatus, ProcessStatusFilter, ProcessTerminalWait, ProcessWorkSubstrate,
-        ProcessWorkWiring, ProjectionWatermark, RetiredProcessStatus, ScopeGrant, ScopeId,
-        ScopeRef, ScopeStorageError, SessionScope, StagedPluginState, StartCx, StartCxError,
-        StartKey, StoreLocalEffect, StoreLocalRows, TerminalProcessStatus, WatchedRegistry,
-        facade_support::CanonicalProcessEventAppend, facade_support::ObservedProcess,
-        facade_support::ObservedProcessChange, facade_support::ObservedProcessChangeKind,
-        facade_support::ObservedProcessEvent, facade_support::ObservedProcessEventLite,
-        facade_support::ObservedProcessEventPage, facade_support::ObservedProcessEventReadOutcome,
-        facade_support::ObservedWorkItem, facade_support::ObservedWorkItemState,
-        facade_support::ProcessChangeHub, facade_support::ProcessChangeSubscription,
-        facade_support::ProcessEventSink, facade_support::ProcessRosterPage,
-        facade_support::ProcessRuntimeHost, facade_support::ProcessToolVisibilityFilter,
-        facade_support::ProcessWorkObserver, facade_support::ProcessWorkSnapshot,
-        facade_support::SessionScopeId, facade_support::watch_process_registry, lifetime,
-    };
-    pub use lash_core::{ArgsMismatch, ArgsMode};
-    /// Process observation's contract: the snapshot, cursor, stream events,
-    /// typed gaps and the replay store behind a process feed.
-    pub use lash_core::{
-        InMemoryProcessReplayStore, InMemoryProcessReplayStoreConfig, LanguageExecutionObservation,
-        ParsedProcessObservationCursor, ProcessDocumentIdentity, ProcessEffectCoverage,
-        ProcessEffectEvidence, ProcessEffectGapReason, ProcessObservation,
-        ProcessObservationCursor, ProcessObservationCursorError, ProcessObservationEnd,
-        ProcessObservationEvent, ProcessObservationEventPayload, ProcessObservationGapCause,
-        ProcessObservationIdentity, ProcessObservationReplacement, ProcessReadView,
-        ProcessReplayEventDraft, ProcessReplayGapReason, ProcessReplayOutcome,
-        ProcessReplayPublishLimits, ProcessReplayStore, ProcessReplayStoreError,
-        ProcessReplaySubscribeOutcome, ProcessReplaySubscription, ProcessSequence,
-        RetainedProcessView, StepBodyStartedObservation,
-    };
-    pub use lash_core_store::execution_limits::MAX_PROCESS_EFFECT_OCCURRENCES;
-    #[cfg(feature = "codemode")]
-    pub use lash_vm_runtime::{KernelProcessDefinition, KernelProcessInput, LASH_VM_ENGINE_KIND};
-}
+pub mod process;
 
 /// Store-author durability configuration and backend contracts.
 ///
@@ -1272,9 +922,14 @@ pub mod runtime {
     /// [`RuntimeEffectLocalExecutor::direct`] takes: bound only when an
     /// unjournaled completion's body runs.
     pub use lash_core::LlmProfileBinding;
+    /// The durable session extension and turn options exposed to runtime integrators.
+    pub use lash_core::ProtocolSessionExtension;
+    pub use lash_core::ProtocolTurnOptions;
     /// Structured cause carried by a [`RuntimeError`], so a host distinguishes
     /// an expected retirement (a deleted session) from a real fault.
     pub use lash_core::RuntimeErrorCause;
+    pub use lash_core::SessionPolicy;
+    pub use lash_core::SessionSnapshot;
     /// The session-state generations an admission refused, carried in-process
     /// on the error a refused call returns (FIG-3619).
     pub use lash_core::SessionStateVersionRefusal;
@@ -1283,33 +938,60 @@ pub mod runtime {
     /// How a failed turn settles (FIG-3575): an outcome is recorded, a live
     /// fault aborts. A host minting a foreign error code chooses its class.
     pub use lash_core::TurnFailureCause;
+    pub use lash_core::runtime::AdmittedDirectSend;
+    pub use lash_core::runtime::AdmittedScope;
+    pub use lash_core::runtime::AssistantResponseHookEvents;
+    pub use lash_core::runtime::AssistantResponsePlan;
+    pub use lash_core::runtime::AssistantStreamCapsule;
+    pub use lash_core::runtime::AssistantStreamHookState;
+    pub use lash_core::runtime::CheckpointAdmittedSet;
+    pub use lash_core::runtime::DirectCompletionClient;
+    pub use lash_core::runtime::EffectAddress;
+    pub use lash_core::runtime::EmbeddedRuntimeHost;
+    pub use lash_core::runtime::EventSink;
+    pub use lash_core::runtime::ExecutionScope;
+    pub use lash_core::runtime::LlmRequestSpec;
+    pub use lash_core::runtime::LlmStreamRecord;
+    pub use lash_core::runtime::NoopEventSink;
+    pub use lash_core::runtime::NoopTurnActivitySink;
+    pub use lash_core::runtime::ProcessCommand;
+    pub use lash_core::runtime::ProcessEffectOutcome;
+    pub use lash_core::runtime::ProcessListSelection;
+    pub use lash_core::runtime::RunAggregateWakePolicy;
+    pub use lash_core::runtime::RuntimeAttribution;
+    pub use lash_core::runtime::RuntimeControlConfig;
+    pub use lash_core::runtime::RuntimeDurabilityConfig;
+    pub use lash_core::runtime::RuntimeEffectCommand;
+    pub use lash_core::runtime::RuntimeEffectControllerError;
+    pub use lash_core::runtime::RuntimeEffectEnvelope;
+    pub use lash_core::runtime::RuntimeEffectInvocation;
+    pub use lash_core::runtime::RuntimeEffectKind;
+    pub use lash_core::runtime::RuntimeEffectLocalExecutor;
+    pub use lash_core::runtime::RuntimeEffectOutcome;
+    pub use lash_core::runtime::RuntimeEffectReplayMismatchReport;
+    pub use lash_core::runtime::RuntimeEnvironmentBuilder;
+    pub use lash_core::runtime::RuntimeError;
+    pub use lash_core::runtime::RuntimeErrorCode;
+    pub use lash_core::runtime::RuntimeInvocation;
+    pub use lash_core::runtime::RuntimeProviderConfig;
+    pub use lash_core::runtime::SleepSpec;
+    pub use lash_core::runtime::TraceEmitter;
+    pub use lash_core::runtime::TraceRuntime;
+    pub use lash_core::runtime::TurnCancelWait;
+    pub use lash_core::runtime::TurnContext;
+    pub use lash_core::runtime::TurnPrelude;
+    pub use lash_core::runtime::WorkCadenceError;
     /// Wall-clock milliseconds since the Unix epoch, as the runtime stamps its
     /// own process records. A host that mints a record the runtime will compare
     /// against uses the same reading rather than its own.
     pub use lash_core::runtime::current_epoch_ms;
-    pub use lash_core::runtime::{
-        AdmittedDirectSend, AdmittedScope, AssistantResponseHookEvents, AssistantResponsePlan,
-        AssistantStreamCapsule, AssistantStreamHookState, CheckpointAdmittedSet,
-        DirectCompletionClient, EffectAddress, EmbeddedRuntimeHost, EventSink, ExecutionScope,
-        LlmRequestSpec, LlmStreamRecord, NoopEventSink, NoopTurnActivitySink, ProcessCommand,
-        ProcessEffectOutcome, ProcessListSelection, RunAggregateWakePolicy, RuntimeAttribution,
-        RuntimeControlConfig, RuntimeDurabilityConfig, RuntimeEffectCommand,
-        RuntimeEffectControllerError, RuntimeEffectEnvelope, RuntimeEffectInvocation,
-        RuntimeEffectKind, RuntimeEffectLocalExecutor, RuntimeEffectOutcome,
-        RuntimeEffectReplayMismatchReport, RuntimeEnvironmentBuilder, RuntimeError,
-        RuntimeErrorCode, RuntimeInvocation, RuntimeProviderConfig, SleepSpec, TraceEmitter,
-        TraceRuntime, TurnCancelWait, TurnContext, TurnPrelude, TurnPreludeRef, WorkCadenceError,
-    };
     /// The host clock a [`Backend`](crate::Backend) is opened on, used
     /// for runtime sleeps and store timestamps. [`SystemClock`] is the
     /// wall-clock default; tests open a backend on their own to make expiry
     /// deterministic.
     pub use lash_core::{Clock, ClockWallTime, facade_support::SystemClock};
-    /// The durable session extension and turn options exposed to runtime integrators.
-    pub use lash_core::{
-        ProtocolSessionExtension, ProtocolTurnOptions, SessionPolicy, SessionSnapshot,
-        facade_support::SessionHandle,
-    };
+    pub use lash_execution_contracts::session_types::SessionHandle;
+    pub use lash_execution_contracts::turn_prelude::TurnPreludeRef;
 }
 
 /// Structural admission of host JSON before DTO allocation. The budget is

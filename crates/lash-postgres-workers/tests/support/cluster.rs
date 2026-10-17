@@ -13,11 +13,15 @@ use std::process::Stdio;
 use std::sync::{Arc, Mutex};
 use std::time::{Duration, Instant};
 
-use lash_core_execution::{
-    Backend, BackendParts, NoProjectionProviders, ProcessId, ProcessInput, ProcessProvenance,
-    ProcessRecord, ProcessRegistration,
-};
+use lash_core_execution::ProcessId;
 use lash_durable::{DurableStore, Notifier};
+use lash_execution_contracts::backend::Backend;
+use lash_execution_contracts::backend::BackendParts;
+use lash_execution_contracts::process::ProcessInput;
+use lash_execution_contracts::process::ProcessProvenance;
+use lash_execution_contracts::process::ProcessRecord;
+use lash_execution_contracts::process::ProcessRegistration;
+use lash_execution_contracts::projection::NoProjectionProviders;
 use lash_postgres_workers::events::{Command, Event, Report};
 use lash_postgres_workers::node::{Database, stores};
 use lash_postgres_workers::process::WorkerEngine;
@@ -458,7 +462,7 @@ impl Cluster {
     /// Register a runbook process that waits `wait` between its steps, under
     /// `start_key`.
     pub async fn register_process(&self, start_key: &str, wait: Duration) -> ProcessRecord {
-        lash_core_execution::testing::process_execution_env_fixture(
+        lash_execution_contracts::testing::process_execution_env_fixture(
             self.backend.process_env_store().as_ref(),
         )
         .await;
@@ -466,13 +470,13 @@ impl Cluster {
             ProcessInput::Engine {
                 kind: lash_postgres_workers::process::KIND.to_owned(),
                 payload: lash_postgres_workers::process::payload(wait),
-                launch: lash_core::EngineLaunch::new(
-                    lash_core_execution::testing::process_execution_env_fixture_ref(),
+                launch: lash_execution_contracts::process::EngineLaunch::new(
+                    lash_execution_contracts::testing::process_execution_env_fixture_ref(),
                     None,
                 ),
             },
             ProcessProvenance::host(),
-            lash_core_execution::LifetimeDecision::Detached,
+            lash_execution_contracts::process::LifetimeDecision::Detached,
         )
         .with_start_key(Some(lash_core_execution::StartKey::for_host(start_key)));
         self.backend

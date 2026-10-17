@@ -1,39 +1,42 @@
 use super::*;
-use lash_core_execution::ProcessRetention as _;
+use lash_execution_contracts::process::ProcessRetention as _;
 
 /// Seed one process into `waiting` and assert the retention contract: live rows
 /// are listed as non-terminal and are never prune candidates.
 async fn assert_waiting_process_is_live_not_prunable(
-    registry: &dyn lash_core_execution::ConformanceProcessRegistry,
+    registry: &dyn lash_execution_contracts::process::ConformanceProcessRegistry,
 ) {
     let process_id = registry
-        .register_process(lash_core_execution::ProcessRegistration::new(
-            lash_core_execution::ProcessInput::Engine {
+        .register_process(lash_execution_contracts::process::ProcessRegistration::new(
+            lash_execution_contracts::process::ProcessInput::Engine {
                 kind: "retention-test".to_string(),
                 payload: serde_json::Value::Null,
-                launch: lash_core::EngineLaunch::new(
-                    lash_core::testing::process_execution_env_fixture_ref(),
+                launch: lash_execution_contracts::process::EngineLaunch::new(
+                    lash_execution_contracts::testing::process_execution_env_fixture_ref(),
                     None,
                 ),
             },
-            lash_core_execution::ProcessProvenance::host(),
-            lash_core_execution::Lifetime::Detached,
+            lash_execution_contracts::process::ProcessProvenance::host(),
+            lash_execution_contracts::process::Lifetime::Detached,
         ))
         .await
         .expect("register waiting retention process")
         .id;
-    let wait = lash_core_execution::WaitState {
+    let wait = lash_execution_contracts::process::WaitState {
         since_ms: 1,
-        kind: lash_core_execution::WaitKind::Call {
-            call_id: lash_core_execution::ToolCallId::fixture("retention-call"),
-            tool_id: lash_core_execution::ToolId::new("retention"),
+        kind: lash_execution_contracts::process::WaitKind::Call {
+            call_id: lash_protocol_types::ToolCallId::fixture("retention-call"),
+            tool_id: lash_protocol_types::tool_contract::ToolId::new("retention"),
         },
         site: None,
     };
     registry
         .append_event_for_testing(
             &process_id,
-            lash_core_execution::ProcessEventAppendRequest::wait_entered(&process_id, &wait),
+            lash_execution_contracts::process::ProcessEventAppendRequest::wait_entered(
+                &process_id,
+                &wait,
+            ),
         )
         .await
         .expect("enter wait");
@@ -66,7 +69,7 @@ async fn assert_waiting_process_is_live_not_prunable(
         .prune_terminal_processes(
             u64::MAX,
             None,
-            lash_core_execution::ProjectionWatermark::NoProjector,
+            lash_execution_contracts::process::ProjectionWatermark::NoProjector,
         )
         .await
         .expect("prune terminal processes");
@@ -86,7 +89,7 @@ async fn assert_waiting_process_is_live_not_prunable(
 
 /// A waiting process is live, not prunable.
 ///
-/// `lash_core_execution::facade_support::registry_transitions::LIVE_PROCESS_STATUS_LABELS`
+/// `lash_execution_contracts::process::registry_transitions::LIVE_PROCESS_STATUS_LABELS`
 /// is the shared retention contract, and since FIG-2844 this backend's queries
 /// build their predicates from `ProcessStatus` instead of respelling it. The law
 /// test in core proves the constant partitions `ProcessStatus`; this is the
@@ -95,7 +98,10 @@ async fn assert_waiting_process_is_live_not_prunable(
 #[tokio::test(flavor = "multi_thread", worker_threads = 4)]
 async fn sqlite_waiting_processes_are_live_not_prunable() {
     let backend = TestBackend::open(SUBSTRATE).await;
-    lash_core::testing::process_execution_env_fixture(backend.process_env_store().as_ref()).await;
+    lash_execution_contracts::testing::process_execution_env_fixture(
+        backend.process_env_store().as_ref(),
+    )
+    .await;
     let registry = backend.process_registry();
     assert_waiting_process_is_live_not_prunable(registry.as_ref()).await;
 }
@@ -103,30 +109,35 @@ async fn sqlite_waiting_processes_are_live_not_prunable() {
 #[tokio::test(flavor = "multi_thread", worker_threads = 4)]
 async fn sqlite_prune_cleanup_obligation_survives_reopen() {
     let backend = TestBackend::open(SUBSTRATE).await;
-    lash_core::testing::process_execution_env_fixture(backend.process_env_store().as_ref()).await;
+    lash_execution_contracts::testing::process_execution_env_fixture(
+        backend.process_env_store().as_ref(),
+    )
+    .await;
     let registry = backend.process_registry();
     let registered = registry
-        .register_process(lash_core_execution::ProcessRegistration::new(
-            lash_core_execution::ProcessInput::Engine {
+        .register_process(lash_execution_contracts::process::ProcessRegistration::new(
+            lash_execution_contracts::process::ProcessInput::Engine {
                 kind: "test-engine".to_string(),
                 payload: serde_json::json!({"module_ref": "module-sqlite"}),
-                launch: lash_core::EngineLaunch::new(
-                    lash_core::testing::process_execution_env_fixture_ref(),
+                launch: lash_execution_contracts::process::EngineLaunch::new(
+                    lash_execution_contracts::testing::process_execution_env_fixture_ref(),
                     None,
                 ),
             },
-            lash_core_execution::ProcessProvenance::host(),
-            lash_core_execution::Lifetime::Detached,
+            lash_execution_contracts::process::ProcessProvenance::host(),
+            lash_execution_contracts::process::Lifetime::Detached,
         ))
         .await
         .expect("register cleanup process");
     registry
         .complete_process(
             &registered.id,
-            lash_core_execution::ProcessAwaitOutput::from_tool_output(
-                lash_core_execution::ToolCallOutput::success(serde_json::Value::Null),
+            lash_execution_contracts::process::ProcessAwaitOutput::from_tool_output(
+                lash_protocol_types::tool_output::ToolCallOutput::success(serde_json::Value::Null),
             ),
-            lash_core_execution::ProcessCompletionAuthority::workflow_key("sqlite-prune-cleanup"),
+            lash_execution_contracts::process::ProcessCompletionAuthority::workflow_key(
+                "sqlite-prune-cleanup",
+            ),
         )
         .await
         .expect("complete cleanup process");
@@ -134,7 +145,7 @@ async fn sqlite_prune_cleanup_obligation_survives_reopen() {
         .prune_terminal_processes(
             u64::MAX,
             None,
-            lash_core_execution::ProjectionWatermark::NoProjector,
+            lash_execution_contracts::process::ProjectionWatermark::NoProjector,
         )
         .await
         .expect("prune with atomic cleanup evidence");
@@ -159,11 +170,12 @@ async fn sqlite_prune_cleanup_obligation_survives_reopen() {
         )
         .expect("read cleanup obligation after reopen");
     assert_eq!(state, "due");
-    let referrer = lash_core_execution::ArtifactReferrer::decode(&kind, &referrer_id)
-        .expect("decode process referrer");
+    let referrer =
+        lash_core_store::artifact_referrer::ArtifactReferrer::decode(&kind, &referrer_id)
+            .expect("decode process referrer");
     assert_eq!(
         obligation_id,
-        lash_core_execution::store::ObligationKey::ArtifactCleanup {
+        lash_core_store::store::ObligationKey::ArtifactCleanup {
             referrer: referrer.clone(),
         }
         .id()
@@ -171,12 +183,12 @@ async fn sqlite_prune_cleanup_obligation_survives_reopen() {
     );
     assert_eq!(
         referrer,
-        lash_core_execution::ArtifactReferrer::ProcessRecord(registered.id)
+        lash_core_store::artifact_referrer::ArtifactReferrer::ProcessRecord(registered.id)
     );
-    let cleanup = lash_core_execution::ArtifactCleanup::from_json(&body, &referrer)
+    let cleanup = lash_core_store::artifact_referrer::ArtifactCleanup::from_json(&body, &referrer)
         .expect("decode cleanup body");
     assert!(
-        matches!(cleanup, lash_core_execution::ArtifactCleanup::Ended { ref carries, .. } if carries.is_empty())
+        matches!(cleanup, lash_core_store::artifact_referrer::ArtifactCleanup::Ended { ref carries, .. } if carries.is_empty())
     );
     assert!(cleanup.gate().is_none());
 }
@@ -207,9 +219,9 @@ fn sqlite_status_list_literals_derive_from_the_shared_constant() {
         )
     };
     let live_labels =
-        lash_core_execution::facade_support::registry_transitions::LIVE_PROCESS_STATUS_LABELS;
+        lash_execution_contracts::process::registry_transitions::LIVE_PROCESS_STATUS_LABELS;
     let retired_labels =
-        lash_core_execution::facade_support::registry_transitions::RETIRED_PROCESS_STATUS_LABELS;
+        lash_execution_contracts::process::registry_transitions::RETIRED_PROCESS_STATUS_LABELS;
     let live = render(&live_labels);
     let vocabulary = render(
         &live_labels
@@ -245,9 +257,7 @@ fn sqlite_status_list_literals_derive_from_the_shared_constant() {
     // generated, so the expectation here is the generator's own output rather
     // than a second spelling of it.
     let nonterminal =
-        lash_core_execution::store_backend_support::nonterminal_process_status_predicate_sql(
-            "status",
-        );
+        lash_core_store::store_backend_support::nonterminal_process_status_predicate_sql("status");
     let terminal = nonterminal
         .strip_prefix("status NOT IN ")
         .expect("the nonterminal predicate is spelled as a NOT IN list")

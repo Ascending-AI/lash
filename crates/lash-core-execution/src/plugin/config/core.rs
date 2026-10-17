@@ -26,84 +26,20 @@
 //!    by the build that admits its command run. Adding a command changes no
 //!    existing reducer.
 
-use super::{
-    CORE_CONFIG_OWNER, CandidateFacts, ConfigCommand, ConfigOwner, ConfigRegistrar,
-    ConfigRegistrationError, CoreConfig, OwnerChange, RegisteredOwner,
-};
+use super::CandidateFacts;
+use super::ConfigCommand;
+use super::ConfigOwner;
+use super::ConfigRegistrar;
+use super::OwnerChange;
+use super::RegisteredOwner;
+use lash_core_store::config_transaction::CORE_CONFIG_OWNER;
+use lash_core_store::config_transaction::CoreConfig;
+use lash_execution_contracts::config_error::ConfigRegistrationError;
+use lash_execution_contracts::config_error::CoreConfigRefusal;
 
 /// The owner of the session's core config.
 #[derive(Clone, Copy, Debug, Default)]
 pub struct CoreConfigOwner;
-
-/// Why the core owner refused a candidate.
-#[derive(
-    Clone, Debug, PartialEq, Eq, serde::Serialize, serde::Deserialize, schemars::JsonSchema,
-)]
-#[serde(tag = "kind", rename_all = "snake_case")]
-pub enum CoreConfigRefusal {
-    /// The host's models register no model under the key a [`SetLlmProfile`]
-    /// named.
-    UnknownLlmProfile { key: crate::LlmProfileKey },
-    /// The candidate's reasoning does not fit the capability its recorded
-    /// model declares.
-    ReasoningRefused {
-        key: crate::LlmProfileKey,
-        reasoning: crate::ReasoningSelection,
-        category: crate::provider::LlmProfileEffortValidationCategory,
-        message: String,
-    },
-    /// A charge-safety policy that accepts more unsafe retries than Lash admits.
-    UnsafeRetriesAboveCeiling { requested: u8, ceiling: u8 },
-    /// The candidate selects a reasoning but records no model to run it
-    /// with.
-    ReasoningWithoutLlmProfile {
-        reasoning: crate::ReasoningSelection,
-    },
-    /// A [`SetPromptPlan`] states a plan that orders or places a section
-    /// twice, or a per-section limit above its total.
-    PromptPlanRefused {
-        error: crate::prompt_sections::PromptPlanError,
-    },
-    /// A creation states no policy. Creating a session is explicit: no
-    /// other session supplies the turn budget, tool-call limit or model a
-    /// request leaves unstated (ADR 0134).
-    PolicyUnstated,
-    /// FIG-5824: offering this tool namespace would hide a session binding.
-    ToolNamespaceCollision { root: String, binding: String },
-    /// The tools the candidate's providers advertise do not build into one
-    /// surface (S4): two share a model-facing name, or a tool id.
-    ToolSurfaceRefused { refusal: Box<crate::SurfaceRefusal> },
-}
-
-impl std::fmt::Display for CoreConfigRefusal {
-    fn fmt(&self, formatter: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
-        match self {
-            Self::UnknownLlmProfile { key } => {
-                write!(formatter, "the host's models register no model `{key}`")
-            }
-            Self::ReasoningRefused { message, .. } => formatter.write_str(message),
-            Self::ToolNamespaceCollision { root, binding } => write!(
-                formatter,
-                "tool namespace `{root}` conflicts with top-level binding `{binding}`; rename `{binding}` to `{binding}_` before offering these tools"
-            ),
-            Self::ToolSurfaceRefused { refusal } => write!(formatter, "{refusal}"),
-            Self::ReasoningWithoutLlmProfile { reasoning } => write!(
-                formatter,
-                "reasoning {reasoning:?} needs a model, and the session records none"
-            ),
-            Self::PromptPlanRefused { error } => write!(formatter, "prompt plan refused: {error}"),
-            Self::PolicyUnstated => formatter.write_str(
-                "the create request states no policy, and no other session supplies one",
-            ),
-            Self::UnsafeRetriesAboveCeiling { requested, ceiling } => write!(
-                formatter,
-                "charge safety accepts {requested} unsafe retries, above the ceiling of {ceiling}"
-            ),
-        }
-    }
-}
-
-impl std::error::Error for CoreConfigRefusal {}
 
 impl CoreConfigOwner {
     /// Validate the charge safety stated at creation or by `SetChargeSafety`.
@@ -125,23 +61,11 @@ impl CoreConfigOwner {
 }
 
 impl CoreConfigOwner {
-    /// The core owner's refusal of a candidate whose providers' tools do
-    /// not build into one surface.
-    pub fn surface_refusal(refusal: crate::SurfaceRefusal) -> super::ConfigRefusal {
-        super::ConfigRefusal::by_owner(
-            super::CORE_CONFIG_OWNER,
-            super::RefusalSite::Candidate,
-            &CoreConfigRefusal::ToolSurfaceRefused {
-                refusal: Box::new(refusal),
-            },
-        )
-    }
-
     /// The core owner's `refusal` of a session's creation.
     pub fn creation_refusal(refusal: CoreConfigRefusal) -> super::ConfigRefusal {
-        super::ConfigRefusal::by_owner(
+        lash_core_store::config_transaction::ConfigRefusal::by_owner(
             super::CORE_CONFIG_OWNER,
-            super::RefusalSite::Creation,
+            lash_core_store::config_transaction::RefusalSite::Creation,
             &refusal,
         )
     }
@@ -220,7 +144,7 @@ impl ConfigCommand for SetReasoning {
 #[derive(Clone, Debug, PartialEq, serde::Serialize, serde::Deserialize, schemars::JsonSchema)]
 #[serde(deny_unknown_fields)]
 pub struct SetAttachmentAcceptance {
-    pub acceptance: crate::provider::AttachmentCapabilitySnapshot,
+    pub acceptance: lash_core_llm::provider::AttachmentCapabilitySnapshot,
 }
 
 impl ConfigCommand for SetAttachmentAcceptance {

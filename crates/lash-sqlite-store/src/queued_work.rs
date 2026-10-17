@@ -14,11 +14,11 @@ pub(crate) fn decode_authority(value: String) -> Result<QueuedWorkAuthority, Sto
     serde_json::from_str(&value).map_err(|err| stored_data_corrupt("QueuedWorkAuthority", err))
 }
 
-/// The submitted payload, or [`Released`](lash_core_execution::runtime::SubmittedBody::Released)
+/// The submitted payload, or [`Released`](lash_core_store::turn_input_vocabulary::SubmittedBody::Released)
 /// once the session's retention released the settled body (FIG-6607).
 pub(crate) fn decode_queued_payload(
     value: Option<String>,
-) -> Result<lash_core_execution::runtime::SubmittedBody<QueuedWorkPayload>, StoreError> {
+) -> Result<lash_core_store::turn_input_vocabulary::SubmittedBody<QueuedWorkPayload>, StoreError> {
     value
         .map(|value| serde_json::from_str(&value))
         .transpose()
@@ -76,12 +76,12 @@ impl QueuedBatchRow {
             enqueued_at_ms: self.enqueued_at_ms,
             payload,
             submission_digest: self.submission_digest,
-            terminal: lash_core_execution::store_backend_support::decode_ingress_terminal(
+            terminal: lash_core_store::store_backend_support::decode_ingress_terminal(
                 "QueuedWorkBatch",
                 self.terminal_cause.as_deref(),
                 self.terminal_at_ms,
             )?,
-            trace_cause: lash_core_execution::store_backend_support::decode_trace_cause(
+            trace_cause: lash_core_store::store_backend_support::decode_trace_cause(
                 "QueuedWorkBatch",
                 self.trace_cause_json.as_deref(),
             )?,
@@ -164,7 +164,7 @@ pub(crate) fn enqueue_queued_work_conn_with_outcome(
     now: u64,
     nonce: u64,
 ) -> Result<(QueuedWorkEnqueueOutcome, Option<lash_durable::Woken>), StoreError> {
-    use lash_core_execution::store_backend_support as support;
+    use lash_core_store::store_backend_support as support;
     support::validate_queued_work_draft(batch)?;
     let sql = crate::turn_ingress::turn_ingress_sql();
     let submission_digest = support::queued_work_submission_digest(batch)?;
@@ -206,7 +206,7 @@ pub(crate) fn enqueue_queued_work_conn_with_outcome(
             crate::session_ingress::allocate_sequence(conn, &batch.session_id)?,
             submission_digest.as_str(),
             encode_json(&batch.payload)?,
-            lash_core_execution::store_backend_support::encode_trace_cause(&batch.trace_cause)?,
+            lash_core_store::store_backend_support::encode_trace_cause(&batch.trace_cause)?,
         ],
     )
     .map_err(sqlite_error)?;
@@ -234,12 +234,12 @@ pub(crate) fn enqueue_queued_work_conn_with_outcome(
 pub(crate) fn complete_admitted_batch_conn(
     conn: &Connection,
     session_id: &SessionId,
-    run: &lash_core_execution::TurnId,
-    batch_id: &lash_core_execution::BatchId,
-    terminal: lash_core_execution::store::IngressTerminal,
+    run: &lash_protocol_types::TurnId,
+    batch_id: &lash_protocol_types::BatchId,
+    terminal: lash_core_store::store::IngressTerminal,
 ) -> Result<(), StoreError> {
     let turn_ingress = crate::turn_ingress::turn_ingress_sql();
-    let row = lash_core_execution::store::IngressRowId::Batch(batch_id.clone());
+    let row = lash_core_store::store::IngressRowId::Batch(batch_id.clone());
     let observed: Option<Option<String>> = conn
         .query_row(
             turn_ingress.queued_batches_sqlite.settlement_facts.sql(),
@@ -248,7 +248,7 @@ pub(crate) fn complete_admitted_batch_conn(
         )
         .optional()
         .map_err(sqlite_error)?;
-    lash_core_execution::store_backend_support::require_admitted_to_run(
+    lash_core_store::store_backend_support::require_admitted_to_run(
         session_id,
         run,
         &row,
@@ -266,8 +266,8 @@ pub(crate) fn complete_admitted_batch_conn(
             ],
         )
         .map_err(sqlite_error)?;
-    lash_core_execution::store_backend_support::require_fenced_write_applied(
-        lash_core_execution::store_backend_support::FencedWrite::IngressSettlement,
+    lash_core_store::store_backend_support::require_fenced_write_applied(
+        lash_core_store::store_backend_support::FencedWrite::IngressSettlement,
         crate::SQLITE_BACKEND,
         batch_id.as_str(),
         u64::try_from(settled).unwrap_or(u64::MAX),
@@ -286,17 +286,19 @@ pub(crate) fn complete_admitted_batch_conn(
 /// since the shift read it refuses the whole commit.
 pub(crate) fn settle_open_command_conn(
     conn: &Connection,
-    commit: &lash_core_execution::store::RuntimeCommit,
-    batch_id: &lash_core_execution::BatchId,
+    commit: &lash_core_store::store::RuntimeCommit,
+    batch_id: &lash_protocol_types::BatchId,
     at_ms: u64,
 ) -> Result<(), StoreError> {
     let session_id = &commit.session_id;
     let operation_key = commit.turn_commit.operation.storage_key()?;
     let cause = match commit.command_outcomes.get(batch_id) {
-        Some(lash_core_execution::runtime::SessionCommandOutcome::ConfigTransaction {
-            outcome: lash_core_execution::ConfigTransactionOutcome::Stale { .. },
-        }) => lash_core_execution::store::IngressTerminalCause::StaleConfigRevision,
-        _ => lash_core_execution::store::IngressTerminalCause::Applied,
+        Some(
+            lash_core_store::queued_work_vocabulary::SessionCommandOutcome::ConfigTransaction {
+                outcome: lash_core_store::config_transaction::ConfigTransactionOutcome::Stale { .. },
+            },
+        ) => lash_core_store::store::IngressTerminalCause::StaleConfigRevision,
+        _ => lash_core_store::store::IngressTerminalCause::Applied,
     };
     let turn_ingress = crate::turn_ingress::turn_ingress_sql();
     let observed: Option<Option<String>> = conn
@@ -307,7 +309,7 @@ pub(crate) fn settle_open_command_conn(
         )
         .optional()
         .map_err(sqlite_error)?;
-    lash_core_execution::store_backend_support::require_open_command(
+    lash_core_store::store_backend_support::require_open_command(
         session_id,
         batch_id,
         observed.as_ref().map(Option::as_deref),
@@ -324,8 +326,8 @@ pub(crate) fn settle_open_command_conn(
             ],
         )
         .map_err(sqlite_error)?;
-    lash_core_execution::store_backend_support::require_fenced_write_applied(
-        lash_core_execution::store_backend_support::FencedWrite::IngressSettlement,
+    lash_core_store::store_backend_support::require_fenced_write_applied(
+        lash_core_store::store_backend_support::FencedWrite::IngressSettlement,
         crate::SQLITE_BACKEND,
         batch_id.as_str(),
         u64::try_from(settled).unwrap_or(u64::MAX),

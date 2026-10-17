@@ -57,7 +57,7 @@ pub(super) enum Storage {
 pub(super) async fn stores_of(
     storage: Storage,
 ) -> (
-    Arc<dyn lash_core::StoreSet>,
+    Arc<dyn lash_execution_contracts::backend::StoreSet>,
     Box<dyn std::any::Any + Send>,
     Arc<dyn lash_core::store::StoreTestSupport>,
 ) {
@@ -107,7 +107,10 @@ pub(super) async fn stores_of(
 
 /// A core serving its own node over `stores`, whose commits fit `nodes`
 /// nodes.
-fn core_over(stores: &Arc<dyn lash_core::StoreSet>, nodes: usize) -> Result<LashCore> {
+fn core_over(
+    stores: &Arc<dyn lash_execution_contracts::backend::StoreSet>,
+    nodes: usize,
+) -> Result<LashCore> {
     explicit_ephemeral_facets_with_budget(
         LashCore::standard_builder(lash_conformance::backend_over(Arc::clone(stores))),
         crate::CommitBudget::bounded(1024 * 1024, nodes),
@@ -122,7 +125,7 @@ fn core_over(stores: &Arc<dyn lash_core::StoreSet>, nodes: usize) -> Result<Lash
 /// restarts as a new boot of the same owner, which fences the old boot and
 /// serves its sessions, and the old core still admits work and follows it.
 struct Deployment {
-    stores: Arc<dyn lash_core::StoreSet>,
+    stores: Arc<dyn lash_execution_contracts::backend::StoreSet>,
     nodes: usize,
     /// The core the law built first: its handles admit work and follow it
     /// whichever boot serves.
@@ -132,7 +135,10 @@ struct Deployment {
 }
 
 impl Deployment {
-    fn over(stores: &Arc<dyn lash_core::StoreSet>, nodes: usize) -> Result<Self> {
+    fn over(
+        stores: &Arc<dyn lash_execution_contracts::backend::StoreSet>,
+        nodes: usize,
+    ) -> Result<Self> {
         Ok(Self {
             stores: Arc::clone(stores),
             nodes,
@@ -195,7 +201,7 @@ async fn headless_row(
         .delete_session_head_for_testing(&session_id)
         .await
         .map_err(EmbedError::Store)?;
-    lash_core::runtime::live_session_view(&core.store_factory, &session_id)
+    lash_execution_contracts::deployment::live_session_view(&core.store_factory, &session_id)
         .await
         .map_err(EmbedError::Store)?
         .ok_or_else(|| {
@@ -236,7 +242,7 @@ async fn crashed_create(core: &LashCore, session: &str) -> Result<CrashedCreate>
     // request states the creator's policy.
     let policy = creator.policy_snapshot();
     let request = |id: &str| {
-        let mut request = lash_core::SessionCreateRequest::root(
+        let mut request = lash_execution_contracts::session_types::SessionCreateRequest::root(
             lash_core::SessionStartPoint::Empty,
             lash_core::PluginOptions::default(),
         )
@@ -274,7 +280,7 @@ async fn crashed_create(core: &LashCore, session: &str) -> Result<CrashedCreate>
     let view = |id: &str| {
         let id = SessionId::fixture(id);
         async move {
-            lash_core::runtime::live_session_view(&core.store_factory, &id)
+            lash_execution_contracts::deployment::live_session_view(&core.store_factory, &id)
                 .await
                 .map_err(EmbedError::Store)
         }

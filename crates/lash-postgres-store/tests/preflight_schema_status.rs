@@ -11,10 +11,12 @@
     reason = "test target: clippy's allow-unwrap-in-tests only exempts #[test] functions, and the setup helpers around them in this target are test code too"
 )]
 
-use lash_core_execution::{
-    FleetFormat, FleetFormatState, StorePreflight, StoreReleaseState, StoreSchemaOutcome,
-    StoreSchemaVerdict,
-};
+use lash_core_store::store::FleetFormat;
+use lash_core_store::store::FleetFormatState;
+use lash_core_store::store::StorePreflight;
+use lash_core_store::store::StoreReleaseState;
+use lash_core_store::store::StoreSchemaOutcome;
+use lash_core_store::store::StoreSchemaVerdict;
 use lash_postgres_store::{MigrationPhase, PostgresStorage, PostgresStorePreflight, SchemaCheck};
 
 #[allow(dead_code)]
@@ -41,7 +43,9 @@ fn next() -> i64 {
 
 #[test]
 fn synthetic_feature_selects_the_owning_compatibility_descriptor() {
-    use lash_core_execution::compat::{ComponentId, VersionRange, descriptor};
+    use lash_core_store::compat::ComponentId;
+    use lash_core_store::compat::VersionRange;
+    use lash_core_store::compat::descriptor;
 
     let descriptor = descriptor(ComponentId::POSTGRES).expect("PostgreSQL descriptor");
     let written = if cfg!(feature = "synthetic-next") {
@@ -177,7 +181,7 @@ async fn stamp_two_preflight_and_open_agree_on_synthetic_shape() {
                 matches!(
                     &status.databases[0].verdict,
                     StoreSchemaVerdict::Refused {
-                        refusal: lash_core_execution::compat::CompatRefusal::ShapeRefused { findings, .. }
+                        refusal: lash_core_store::compat::CompatRefusal::ShapeRefused { findings, .. }
                     } if findings.iter().any(|finding| finding.contains(missing))
                 ),
                 "the synthetic generation requires {missing}: {status:?}"
@@ -226,7 +230,7 @@ async fn an_unstamped_schema_is_refused_by_preflight_exactly_as_by_open() {
     assert_eq!(
         status.databases[0].verdict,
         StoreSchemaVerdict::Refused {
-            refusal: lash_core_execution::compat::CompatRefusal::Unstamped {
+            refusal: lash_core_store::compat::CompatRefusal::Unstamped {
                 component: "postgres".to_string(),
                 writing_release: None,
             },
@@ -323,7 +327,7 @@ async fn seed_release(scratch: &ScratchSchema) {
         .await;
 }
 
-fn assert_release(status: &lash_core_execution::StoreSchemaStatus, expected: &str) {
+fn assert_release(status: &lash_core_store::store::StoreSchemaStatus, expected: &str) {
     let StoreReleaseState::Stamped(stamp) = &status.release else {
         panic!("the release must remain readable: {:?}", status.release);
     };
@@ -411,7 +415,7 @@ async fn status_holds_the_schema_lock_through_optional_probes_and_migration() {
     assert!(matches!(
         &after.databases[0].verdict,
         StoreSchemaVerdict::Refused {
-            refusal: lash_core_execution::compat::CompatRefusal::ShapeRefused { findings, .. }
+            refusal: lash_core_store::compat::CompatRefusal::ShapeRefused { findings, .. }
         } if findings.iter().any(|finding| finding.contains("observation_restriction"))
     ));
     assert_eq!(after.databases[0].min_reader, Some(provisioned()));
@@ -708,7 +712,7 @@ async fn status_preserves_expanded_and_synthetic_policy_without_writes() {
         assert!(matches!(
             &missing.databases[0].verdict,
             StoreSchemaVerdict::Refused {
-                refusal: lash_core_execution::compat::CompatRefusal::ShapeRefused { findings, .. }
+                refusal: lash_core_store::compat::CompatRefusal::ShapeRefused { findings, .. }
             } if findings.iter().any(|finding| finding.contains("missing nullable lash_session_head.synthetic_next_note"))
         ));
     } else {

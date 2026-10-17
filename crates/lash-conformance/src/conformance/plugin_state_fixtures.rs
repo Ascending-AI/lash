@@ -36,7 +36,10 @@ impl PluginFactory for MockPlugin {
     }
     fn recipe(
         self: Arc<Self>,
-    ) -> std::result::Result<lash_core::plugin::PluginRecipe, lash_core::plugin::PluginError> {
+    ) -> std::result::Result<
+        lash_core::plugin::PluginRecipe,
+        lash_execution_contracts::plugin_error::PluginError,
+    > {
         let mut reg = lash_core::plugin::PluginRegistrar::<Self>::new(
             lash_core::plugin::PluginFactory::id(self.as_ref()),
         );
@@ -45,9 +48,11 @@ impl PluginFactory for MockPlugin {
                 .before(crate::hook_key!("failing-writer"), |_, _| {
                     Ok(Arc::new(move |_| {
                         Box::pin(async move {
-                            Err(lash_core::plugin::PluginError::Session(
-                                "deliberate hook failure before any command".into(),
-                            ))
+                            Err(
+                                lash_execution_contracts::plugin_error::PluginError::Session(
+                                    "deliberate hook failure before any command".into(),
+                                ),
+                            )
                         })
                     }))
                 })?;

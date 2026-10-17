@@ -38,11 +38,14 @@ impl lash_core::plugin::PluginFactory for DialectOwner {
 
     fn recipe(
         self: Arc<Self>,
-    ) -> std::result::Result<lash_core::plugin::PluginRecipe, lash_core::plugin::PluginError> {
+    ) -> std::result::Result<
+        lash_core::plugin::PluginRecipe,
+        lash_execution_contracts::plugin_error::PluginError,
+    > {
         let recipe_factory = Arc::clone(&self);
         let recipe: std::result::Result<
             lash_core::plugin::PluginRecipe,
-            lash_core::plugin::PluginError,
+            lash_execution_contracts::plugin_error::PluginError,
         > = {
             let mut reg = lash_core::plugin::PluginRegistrar::<DialectOwnerPlugin>::new(
                 lash_core::plugin::PluginFactory::id(self.as_ref()),
@@ -68,7 +71,7 @@ impl DialectOwner {
     pub fn declare_configuration(
         &self,
         registrar: &mut lash_core::ConfigRegistrar,
-    ) -> Result<(), lash_core::ConfigRegistrationError> {
+    ) -> Result<(), lash_execution_contracts::config_error::ConfigRegistrationError> {
         registrar.owner(DialectConfigOwner)?;
         registrar.command::<SetDialect>(|_, command| {
             Ok(lash_core::OwnerChange {
@@ -178,7 +181,7 @@ impl lash_core::plugin::SessionPlugin for DialectOwnerPlugin {
 impl DialectOwnerPlugin {
     fn declare(
         _reg: &mut lash_core::plugin::PluginRegistrar<Self>,
-    ) -> std::result::Result<(), lash_core::plugin::PluginError> {
+    ) -> std::result::Result<(), lash_execution_contracts::plugin_error::PluginError> {
         Ok(())
     }
 }

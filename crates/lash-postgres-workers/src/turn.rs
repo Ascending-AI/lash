@@ -20,8 +20,8 @@ use lash_core::llm::types::{
     LlmRequest, LlmResponse, LlmRole, LlmStreamEvent, StreamBlockIdentity,
 };
 use lash_core::{ExecutionPolicy, LlmOutputPart, ToolCall, ToolOutcome};
-use lash_core_execution::Backend;
 use lash_durable::ActorKey;
+use lash_execution_contracts::backend::Backend;
 use lash_protocol_types::{SessionId, TurnId};
 
 use crate::events::{Event, report};

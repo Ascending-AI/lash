@@ -145,7 +145,7 @@ A writer's epoch is its store's recorded one. Only a writer holding no store
 uses the build's own epoch (`crates/lash-core/src/runtime/session_manager/mod.rs`,
 `crates/lash-core-execution/src/runtime/actor/process.rs`).
 A payload validator admits the version each epoch in the writable range
-assigns (`crates/lash-core-execution/src/runtime/process/effect_summary.rs`).
+assigns (`crates/lash-execution-contracts/src/process/effect_summary.rs`).
 
 #### 2.2 The guarded transaction entry
 

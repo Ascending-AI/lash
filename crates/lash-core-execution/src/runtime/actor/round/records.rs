@@ -11,28 +11,8 @@ use lash_durable::{ActorTx, DomainWrite};
 
 use super::ExecutionDraft;
 use super::graph::{self, AdmitMember, PinnedMember, RoundFact, SettledFact};
-use crate::ToolCallId;
 use lash_core_store::tool_run::SettledOutput;
-
-/// The format of a run record's body: the RoundFact node (kind 21) each
-/// record names, and the admission, start, outcome, retry and presentation
-/// bodies it holds. Bodies carry no stamp of their own: the record's actor
-/// carries this version in its format set, so only a node that decodes them
-/// claims it (ADR 0106 §1).
-///
-/// version_guard(
-///     shapes(
-///         path = "crates/lash-core-execution/src/runtime/actor/round/graph.rs",
-///         cover(RoundFact, AdmitMember, PinnedMember, SettledFact, MaterialNode, StoredOutcome, CallOutcome, ReportView),
-///         path = "crates/lash-core-execution/src/runtime/actor/round/call_body.rs",
-///         cover(StoredBody, CallBody),
-///         path = "crates/lash-core-execution/src/runtime/actor/round/transcript.rs",
-///         cover(TurnTranscript, TranscriptEntry),
-///     ),
-/// )
-/// version_surface = "drain"
-/// format_manifest = "RunRecord"
-pub const RUN_RECORD_FORMAT_VERSION: u32 = 1;
+use lash_protocol_types::ToolCallId;
 
 /// The admission's ordinal.
 pub(super) const ADMIT_ORDINAL: Ordinal = Ordinal(0);

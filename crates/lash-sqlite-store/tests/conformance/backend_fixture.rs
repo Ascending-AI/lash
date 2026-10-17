@@ -61,12 +61,12 @@ pub(crate) fn attachment_bytes(
             .await
             .expect("SQLite attachment store")
             .attachment_store()
-        }) as Arc<dyn lash_core_execution::AttachmentStore>
+        }) as Arc<dyn lash_core_store::attachments::AttachmentStore>
     })
 }
 
-pub(crate) fn system_clock() -> Arc<dyn lash_core_execution::Clock> {
-    Arc::new(lash_core_execution::facade_support::SystemClock)
+pub(crate) fn system_clock() -> Arc<dyn lash_core_ids::clock::Clock> {
+    Arc::new(lash_core_ids::clock::SystemClock)
 }
 
 /// One raw connection to `database` over `uri`, for fault injection and
@@ -86,7 +86,7 @@ impl TestBackend {
 
     pub(crate) async fn open_with_clock(
         substrate: Substrate,
-        clock: Arc<dyn lash_core_execution::Clock>,
+        clock: Arc<dyn lash_core_ids::clock::Clock>,
     ) -> Self {
         Self::open_with(substrate, |options| options, clock).await
     }
@@ -96,7 +96,7 @@ impl TestBackend {
     pub(crate) async fn open_with(
         substrate: Substrate,
         configure: impl FnOnce(SqliteStoreSetOptions) -> SqliteStoreSetOptions,
-        clock: Arc<dyn lash_core_execution::Clock>,
+        clock: Arc<dyn lash_core_ids::clock::Clock>,
     ) -> Self {
         match substrate {
             Substrate::File => {
@@ -127,16 +127,16 @@ impl TestBackend {
         }
     }
 
-    /// The store set as the [`StoreSet`](lash_core_execution::StoreSet) a law
+    /// The store set as the [`StoreSet`](lash_execution_contracts::backend::StoreSet) a law
     /// runs over.
-    pub(crate) fn as_stores(&self) -> Arc<dyn lash_core_execution::StoreSet> {
+    pub(crate) fn as_stores(&self) -> Arc<dyn lash_execution_contracts::backend::StoreSet> {
         Arc::new(self.stores.clone())
     }
 
     /// The store set with an engine-free recording host as the
-    /// [`Backend`](lash_core_execution::Backend) a storage law's runtime runs
+    /// [`Backend`](lash_execution_contracts::backend::Backend) a storage law's runtime runs
     /// over.
-    pub(crate) fn as_backend(&self) -> lash_core_execution::Backend {
+    pub(crate) fn as_backend(&self) -> lash_execution_contracts::backend::Backend {
         lash_conformance::backend_over(Arc::new(self.stores.clone()))
     }
 
@@ -158,7 +158,7 @@ impl TestBackend {
     pub(crate) async fn reopen_with(
         &self,
         configure: impl FnOnce(SqliteStoreSetOptions) -> SqliteStoreSetOptions,
-        clock: Arc<dyn lash_core_execution::Clock>,
+        clock: Arc<dyn lash_core_ids::clock::Clock>,
     ) -> Self {
         Self {
             stores: self

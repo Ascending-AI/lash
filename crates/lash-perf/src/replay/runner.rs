@@ -46,7 +46,11 @@ type Keep = Vec<Box<dyn std::any::Any + Send>>;
 async fn open_stores(
     choice: &StoreChoice,
     workload: &str,
-) -> Result<(Arc<dyn lash_core_execution::StoreSet>, StoreProbe, Keep)> {
+) -> Result<(
+    Arc<dyn lash_execution_contracts::backend::StoreSet>,
+    StoreProbe,
+    Keep,
+)> {
     match choice {
         StoreChoice::SqliteFile(dir) => {
             let dir = dir.join(workload);
@@ -657,7 +661,8 @@ fn sql_shape_round(
     after: lash_core::perf_witness::sql_shapes::Receipt,
     metrics: &std::collections::BTreeMap<String, f64>,
 ) -> Result<serde_json::Value> {
-    use lash_core::perf_witness::sql_shapes::{Counts, Row};
+    use lash_core_ids::perf_witness::sql_shapes::Counts;
+    use lash_core_ids::perf_witness::sql_shapes::Row;
     ensure!(
         after.overflow == Counts::default(),
         "SQL shape attribution exceeded its row limit; refusing incomplete export"

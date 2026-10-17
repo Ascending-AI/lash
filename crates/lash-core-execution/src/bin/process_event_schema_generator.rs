@@ -6,10 +6,11 @@
 //! appends against, stamped with [`PROCESS_EVENT_VOCABULARY_VERSION`]. There is
 //! no second description of these payloads to drift from.
 
-use lash_core_execution::runtime::process::{
-    PROCESS_EFFECT_OMISSIONS_EVENT_TYPE, PROCESS_EFFECT_OUTCOME_EVENT_TYPE,
-    PROCESS_EVENT_VOCABULARY_VERSION, PROCESS_RAN_EVENT_TYPE, ProcessEventKind,
-};
+use lash_execution_contracts::process::PROCESS_EFFECT_OMISSIONS_EVENT_TYPE;
+use lash_execution_contracts::process::PROCESS_EFFECT_OUTCOME_EVENT_TYPE;
+use lash_execution_contracts::process::PROCESS_EVENT_VOCABULARY_VERSION;
+use lash_execution_contracts::process::PROCESS_RAN_EVENT_TYPE;
+use lash_execution_contracts::process::ProcessEventKind;
 use serde::Serialize;
 use serde_json::{Value, json};
 

@@ -11,14 +11,14 @@ fn held(
     cancels: bool,
 ) -> ProcessRegistration {
     crate::started_detached(
-        lash_core::testing::held_engine_registration(
+        lash_execution_contracts::testing::held_engine_registration(
             serde_json::Value::Null,
             ProcessProvenance::session(SessionScope::new(session.clone())),
-            lash_core::Lifetime::Detached,
+            lash_execution_contracts::process::Lifetime::Detached,
         ),
         owner.clone(),
     )
-    .with_consumer_hold(Some(lash_core::ConsumerHold {
+    .with_consumer_hold(Some(lash_execution_contracts::process::ConsumerHold {
         key: key.to_string(),
         owner: owner.clone(),
         cancels,

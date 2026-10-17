@@ -11,7 +11,7 @@ use lash_core::SessionId;
 /// must never reach `admit_session`; these counters are what makes that a
 /// test rather than a claim.
 pub struct CountingDeploymentStore {
-    pub inner: Arc<dyn lash_core::DeploymentStore>,
+    pub inner: Arc<dyn lash_execution_contracts::deployment::DeploymentStore>,
     /// Every call of the creating seam, whatever it answered.
     pub admissions: AtomicUsize,
     pub creates: AtomicUsize,
@@ -21,7 +21,7 @@ pub struct CountingDeploymentStore {
 }
 
 impl CountingDeploymentStore {
-    pub fn new(inner: Arc<dyn lash_core::DeploymentStore>) -> Self {
+    pub fn new(inner: Arc<dyn lash_execution_contracts::deployment::DeploymentStore>) -> Self {
         Self {
             inner,
             admissions: AtomicUsize::new(0),
@@ -39,7 +39,7 @@ impl CountingDeploymentStore {
 
 #[async_trait]
 impl lash_core::store::RuntimeStoreDecorator for CountingDeploymentStore {
-    type Inner = dyn lash_core::DeploymentStore;
+    type Inner = dyn lash_execution_contracts::deployment::DeploymentStore;
 
     fn inner(&self) -> &Self::Inner {
         self.inner.as_ref()
@@ -72,7 +72,10 @@ impl lash_core::store::RuntimeStoreDecorator for CountingDeploymentStore {
 impl lash_core::DeploymentStoreDecorator for CountingDeploymentStore {}
 
 /// A SQLite memory backend whose catalog counts, and its counter.
-pub async fn counting_backend() -> (lash_core::Backend, Arc<CountingDeploymentStore>) {
+pub async fn counting_backend() -> (
+    lash_execution_contracts::backend::Backend,
+    Arc<CountingDeploymentStore>,
+) {
     let inner = sqlite_memory_store_backend().await;
     let counting = Arc::new(CountingDeploymentStore::new(inner.session_store_factory()));
     let catalog = Arc::clone(&counting);
@@ -83,7 +86,7 @@ pub async fn counting_backend() -> (lash_core::Backend, Arc<CountingDeploymentSt
 }
 
 /// A core over `backend` that serves its sessions when `serve` says so.
-pub fn core_serving(backend: lash_core::Backend, serve: bool) -> LashCore {
+pub fn core_serving(backend: lash_execution_contracts::backend::Backend, serve: bool) -> LashCore {
     explicit_ephemeral_facets(LashCore::standard_builder(backend))
         .serve_test_llm_profile(mock_provider(), mock_llm_profile_spec())
         .serve_sessions(serve)
@@ -282,7 +285,7 @@ impl RuntimeBuildProbePlugin {
 
 /// A probed core over `backend`, serving its sessions when `serve` says so.
 pub fn probed_core(
-    backend: lash_core::Backend,
+    backend: lash_execution_contracts::backend::Backend,
     counters: &Arc<RuntimeBuildCounters>,
     serve: bool,
 ) -> LashCore {
@@ -297,11 +300,17 @@ pub fn probed_core(
 }
 
 /// Read the session head's committed `tool_state`.
-pub async fn persisted_tool_state(backend: &lash_core::Backend, session_id: &SessionId) -> String {
-    let store = lash_core::runtime::live_session_view(&backend.session_store_factory(), session_id)
-        .await
-        .expect("session view")
-        .expect("the session has a store");
+pub async fn persisted_tool_state(
+    backend: &lash_execution_contracts::backend::Backend,
+    session_id: &SessionId,
+) -> String {
+    let store = lash_execution_contracts::deployment::live_session_view(
+        &backend.session_store_factory(),
+        session_id,
+    )
+    .await
+    .expect("session view")
+    .expect("the session has a store");
     let head = store
         .load_session_head_meta()
         .await
@@ -312,14 +321,14 @@ pub async fn persisted_tool_state(backend: &lash_core::Backend, session_id: &Ses
 
 /// A catalog that creates and deletes but cannot resolve a session by id.
 pub struct NoByIdLookupFactory {
-    pub inner: Arc<dyn lash_core::DeploymentStore>,
+    pub inner: Arc<dyn lash_execution_contracts::deployment::DeploymentStore>,
 }
 
 pub const NO_BY_ID_LOOKUP_OPERATION: &str = "SessionCatalogStore::lookup_session";
 
 #[async_trait]
 impl lash_core::store::RuntimeStoreDecorator for NoByIdLookupFactory {
-    type Inner = dyn lash_core::DeploymentStore;
+    type Inner = dyn lash_execution_contracts::deployment::DeploymentStore;
 
     fn inner(&self) -> &Self::Inner {
         self.inner.as_ref()

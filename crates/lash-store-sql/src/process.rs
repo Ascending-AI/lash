@@ -9,7 +9,7 @@
 //! # Vocabulary
 //!
 //! `processes.status` carries domain vocabulary generated from
-//! `lash_core::ProcessStatus` (FIG-2815). No statement in this family spells
+//! `lash_execution_contracts::process::ProcessStatus` (FIG-2815). No statement in this family spells
 //! it: each names the predicate it wants as a `{{term(column)}}` token and the
 //! backend's [`crate::Vocabulary`] expands it at startup from the one source
 //! those labels have.

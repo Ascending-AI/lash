@@ -47,9 +47,7 @@ impl PostgresDurableStore {
             .bounded(async {
                 #[cfg(feature = "perf-witness")]
                 let mut timing = if route.admitted {
-                    lash_core_execution::perf_witness::queues::Timer::enqueue(
-                        "postgres.work_admission",
-                    )
+                    lash_core_ids::perf_witness::queues::Timer::enqueue("postgres.work_admission")
                 } else {
                     None
                 };
@@ -89,7 +87,7 @@ impl PostgresDurableStore {
 #[cfg(all(test, feature = "perf-witness"))]
 mod tests {
     use super::*;
-    use lash_core_execution::perf_witness::queues::Collector;
+    use lash_core_ids::perf_witness::queues::Collector;
     use std::future::Future;
     use std::time::{Duration, Instant};
 

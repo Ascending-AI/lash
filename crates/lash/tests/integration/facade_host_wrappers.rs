@@ -56,7 +56,10 @@ impl lash::plugins::PluginFactory for HostRlmFactory {
 
     fn recipe(
         self: Arc<Self>,
-    ) -> std::result::Result<lash_core::plugin::PluginRecipe, lash_core::plugin::PluginError> {
+    ) -> std::result::Result<
+        lash_core::plugin::PluginRecipe,
+        lash_execution_contracts::plugin_error::PluginError,
+    > {
         let recipe_factory = Arc::clone(&self);
         let mut recipe = Arc::clone(&self.inner).recipe()?;
         let witness = Arc::clone(&recipe_factory.contributed_engines);
@@ -121,7 +124,9 @@ impl lash::StoreSet for HostStores {
         self.inner.process_registry()
     }
 
-    fn process_authority_reads(&self) -> Arc<dyn lash_core::ProcessAuthorityReads> {
+    fn process_authority_reads(
+        &self,
+    ) -> Arc<dyn lash_execution_contracts::backend::ProcessAuthorityReads> {
         self.inner.process_authority_reads()
     }
 

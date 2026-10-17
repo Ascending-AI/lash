@@ -1,19 +1,19 @@
 //! Terminal-session receipt sweep and dependent-root reconciliation.
 use crate::session_sql::session_sql;
 use crate::*;
-use lash_core_execution::SessionCatalogStore as _;
+use lash_core_store::store::SessionCatalogStore as _;
 
 pub(crate) type ReclaimResult = Result<
-    lash_core_execution::store::RetentionReport,
-    Box<lash_core_execution::MaintenanceFailure<lash_core_execution::store::RetentionReport>>,
+    lash_core_store::store::RetentionReport,
+    Box<lash_core_store::store::MaintenanceFailure<lash_core_store::store::RetentionReport>>,
 >;
 
 pub(crate) async fn reclaim(
     store: &SqliteStore,
-    bound: lash_core_execution::store::RetentionBound,
+    bound: lash_core_store::store::RetentionBound,
 ) -> ReclaimResult {
-    let failed_before_any_work = |error: lash_core_execution::StoreError| {
-        Box::new(lash_core_execution::MaintenanceFailure::failed_before_any_work(error))
+    let failed_before_any_work = |error: lash_core_store::store::StoreError| {
+        Box::new(lash_core_store::store::MaintenanceFailure::failed_before_any_work(error))
     };
     let cutoff = clamp_epoch_ms(bound.committed_before_epoch_ms);
     let mut report = store
@@ -59,7 +59,7 @@ pub(crate) async fn reclaim(
                     )
                     .map_err(sqlite_error)?;
 
-                    Ok(lash_core_execution::store::RetentionReport {
+                    Ok(lash_core_store::store::RetentionReport {
                         removed_receipt_count,
                         removed_session_terminal_count,
                         removed_tool_intent_submission_count: 0,
@@ -78,7 +78,7 @@ pub(crate) async fn reclaim(
     report.removed_tool_intent_submission_count = reclaim_tool_intent_submissions(store, cutoff)
         .await
         .map_err(|error| {
-            Box::new(lash_core_execution::MaintenanceFailure::failed(
+            Box::new(lash_core_store::store::MaintenanceFailure::failed(
                 error,
                 report.clone(),
             ))
@@ -120,7 +120,9 @@ async fn reclaim_tool_intent_submissions(
                     "tool-intent submission names a malformed session owner `{owner_id}`: {error}"
                 ),
             })?;
-        if store.lookup_session(&session_id).await? == lash_core_execution::SessionLookup::Deleted {
+        if store.lookup_session(&session_id).await?
+            == lash_core_store::store::SessionLookup::Deleted
+        {
             deleted_owner_ids.push(owner_id);
         }
     }

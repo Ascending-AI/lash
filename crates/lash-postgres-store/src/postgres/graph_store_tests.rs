@@ -12,8 +12,8 @@
 use std::collections::{BTreeMap, BTreeSet};
 use std::sync::Arc;
 
-use lash_core_execution::facade_support::sql;
-use lash_core_execution::testing::TestClock;
+use lash_core_ids::operational_metrics::sql;
+use lash_core_ids::test_clock::TestClock;
 use lash_core_store::checkpoint_graph::{
     DecodeLimits, EncodeBudget, EncodedNode, ExplicitLimit, GraphRefusal, GraphStaging, NodeId,
     NodeKind, TokenWriter, TypedBody,
@@ -487,11 +487,11 @@ impl PageTier for Tier {
     async fn delete_session(&self, session: &str) -> u64 {
         let factory = self._storage.session_store_factory();
         let session =
-            lash_core_execution::SessionId::try_from(session.to_owned()).expect("a law session id");
+            lash_protocol_types::SessionId::try_from(session.to_owned()).expect("a law session id");
         let (answer, receipt) = sql::collect(
             "pages.session-delete",
             "postgres",
-            lash_core_execution::SessionCatalogStore::delete_session(&factory, &session),
+            lash_core_store::store::SessionCatalogStore::delete_session(&factory, &session),
         )
         .await;
         answer.expect("the session delete commits");
@@ -622,7 +622,7 @@ async fn a_large_candidate_installs_within_bounded_buffers() {
         }
     });
     let resources_before = bounded_install_resources(&tier);
-    let (result, sql) = lash_core_execution::facade_support::sql::collect(
+    let (result, sql) = lash_core_ids::operational_metrics::sql::collect(
         "bounded-candidate-install",
         "postgres",
         pages::a_large_candidate_installs_within_bounded_buffers(&tier, 20_000),

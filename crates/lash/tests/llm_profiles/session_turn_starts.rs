@@ -9,11 +9,11 @@ pub(super) fn session_turn_start(
     key: &str,
     text: &str,
     spec: &lash::SessionSpec,
-) -> lash_core::ProcessStartRequest {
+) -> lash_execution_contracts::process::ProcessStartRequest {
     session_turn_start_of(
         key,
         text,
-        lash_core::SessionCreateRequest::root(
+        lash_execution_contracts::session_types::SessionCreateRequest::root(
             lash_core::SessionStartPoint::Empty,
             lash_core::PluginOptions::default(),
         )
@@ -26,15 +26,15 @@ pub(super) fn session_turn_start(
 pub(super) fn session_turn_start_of(
     key: &str,
     text: &str,
-    create_request: lash_core::SessionCreateRequest,
-) -> lash_core::ProcessStartRequest {
-    lash_core::ProcessStartRequest::session_turn(
+    create_request: lash_execution_contracts::session_types::SessionCreateRequest,
+) -> lash_execution_contracts::process::ProcessStartRequest {
+    lash_execution_contracts::process::ProcessStartRequest::session_turn(
         "keys-session-turn-start",
         create_request.with_session_id(lash_core::SessionId::fixture(format!("{key}-child"))),
         TurnInput::text(text),
-        lash_core::SessionTurnOutcome::Turn,
-        lash_core::ProcessOriginator::host(),
-        lash_core::Lifetime::Detached,
+        lash_execution_contracts::process::SessionTurnOutcome::Turn,
+        lash_execution_contracts::process::ProcessOriginator::host(),
+        lash_execution_contracts::process::Lifetime::Detached,
     )
     .with_host_start_key(key)
 }
@@ -45,8 +45,8 @@ pub(super) async fn start_on(
     _double: &Double,
     core: &LashCore,
     _operation: &str,
-    request: lash_core::ProcessStartRequest,
-) -> Result<lash_core::ProcessStartReceipt, lash::EmbedError> {
+    request: lash_execution_contracts::process::ProcessStartRequest,
+) -> Result<lash_execution_contracts::process::ProcessStartReceipt, lash::EmbedError> {
     core.processes().start(request, core.effect_host()).await
 }
 
@@ -54,7 +54,7 @@ pub(super) async fn start_on(
 pub(super) async fn recorded_create_request(
     double: &Double,
     process_id: &lash::ProcessId,
-) -> lash_core::SessionCreateRequest {
+) -> lash_execution_contracts::session_types::SessionCreateRequest {
     let record = double
         .backend()
         .process_registry()
@@ -62,7 +62,9 @@ pub(super) async fn recorded_create_request(
         .await
         .expect("read the process")
         .expect("the process is retained");
-    let lash_core::ProcessInput::SessionTurn { create_request, .. } = record.input.as_ref() else {
+    let lash_execution_contracts::process::ProcessInput::SessionTurn { create_request, .. } =
+        record.input.as_ref()
+    else {
         panic!("the retained start is a session turn: {record:?}");
     };
     create_request.as_ref().clone()
@@ -110,7 +112,7 @@ pub(super) async fn a_session_turn_start_retried_after_the_host_changed_what_it_
 
     // A start that states no spec is refused typed, and so is one that
     // states a policy and names no model; neither registers anything.
-    let bare = lash_core::SessionCreateRequest::root(
+    let bare = lash_execution_contracts::session_types::SessionCreateRequest::root(
         lash_core::SessionStartPoint::Empty,
         lash_core::PluginOptions::default(),
     );
@@ -125,7 +127,7 @@ pub(super) async fn a_session_turn_start_retried_after_the_host_changed_what_it_
         matches!(
             &unstated,
             Err(lash::EmbedError::SessionTurnStartUnspecified {
-                unstated: lash_core::UnstatedSessionConfig::Policy
+                unstated: lash_execution_contracts::session_types::UnstatedSessionConfig::Policy
             })
         ),
         "a start with no spec is refused typed: {unstated:?}"
@@ -147,7 +149,7 @@ pub(super) async fn a_session_turn_start_retried_after_the_host_changed_what_it_
         matches!(
             &unstated,
             Err(lash::EmbedError::SessionTurnStartUnspecified {
-                unstated: lash_core::UnstatedSessionConfig::Model
+                unstated: lash_execution_contracts::session_types::UnstatedSessionConfig::Model
             })
         ),
         "a start that names no model is refused typed: {unstated:?}"
@@ -163,7 +165,7 @@ pub(super) async fn a_session_turn_start_retried_after_the_host_changed_what_it_
     .expect("the first start registers");
     assert_eq!(
         started.disposition,
-        lash_core::ProcessRegistrationOutcome::Created,
+        lash_execution_contracts::process::ProcessRegistrationOutcome::Created,
         "the refused starts registered nothing under the key"
     );
     let recorded = recorded_create_request(&double, &started.process_id).await;
@@ -202,7 +204,7 @@ pub(super) async fn a_session_turn_start_retried_after_the_host_changed_what_it_
     assert_eq!(after_edit.process_id, started.process_id);
     assert_eq!(
         after_edit.disposition,
-        lash_core::ProcessRegistrationOutcome::Existing
+        lash_execution_contracts::process::ProcessRegistrationOutcome::Existing
     );
     drop(edited);
 
@@ -263,7 +265,7 @@ pub(super) async fn a_session_turn_start_retried_after_the_host_changed_what_it_
     assert_eq!(after_change.process_id, started.process_id);
     assert_eq!(
         after_change.disposition,
-        lash_core::ProcessRegistrationOutcome::Existing
+        lash_execution_contracts::process::ProcessRegistrationOutcome::Existing
     );
     let after_retries = recorded_create_request(&double, &started.process_id).await;
     assert_eq!(
@@ -284,7 +286,9 @@ pub(super) async fn a_session_turn_start_retried_after_the_host_changed_what_it_
     ] {
         let other = start_on(&double, &moved, operation, request).await;
         match &other {
-            Err(lash::EmbedError::Plugin(lash_core::PluginError::StartKeyConflict { .. })) => {}
+            Err(lash::EmbedError::Plugin(
+                lash_execution_contracts::plugin_error::PluginError::StartKeyConflict { .. },
+            )) => {}
             other => panic!("{operation}: another start under the key conflicts, got: {other:?}"),
         }
     }

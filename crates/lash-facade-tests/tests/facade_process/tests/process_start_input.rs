@@ -10,7 +10,7 @@ const SESSION: &str = "upload-session";
 
 /// A core over `backend` whose sessions are on a served mock profile, with
 /// the host's session created.
-async fn upload_core(backend: lash_core::Backend) -> Result<LashCore> {
+async fn upload_core(backend: lash_execution_contracts::backend::Backend) -> Result<LashCore> {
     let core = explicit_ephemeral_facets(LashCore::standard_builder(backend))
         .serve_test_llm_profile(mock_provider(), mock_llm_profile_spec())
         .build(lash_facade_tests::runtime_lease_owner())?;
@@ -32,10 +32,12 @@ fn uploads(core: &LashCore) -> lash_core::facade_support::RuntimeAttachmentStore
 }
 
 /// A detached `SessionTurn` start whose child turn reads `input`.
-fn request(input: lash_core::AttachmentRef) -> lash_core::ProcessStartRequest {
-    lash_core::ProcessStartRequest::session_turn(
+fn request(
+    input: lash_core::AttachmentRef,
+) -> lash_execution_contracts::process::ProcessStartRequest {
+    lash_execution_contracts::process::ProcessStartRequest::session_turn(
         "uploaded-start-input",
-        lash_core::SessionCreateRequest::child(
+        lash_execution_contracts::session_types::SessionCreateRequest::child(
             SESSION,
             lash_core::SessionStartPoint::Empty,
             lash_core::SessionPolicy {
@@ -49,9 +51,9 @@ fn request(input: lash_core::AttachmentRef) -> lash_core::ProcessStartRequest {
             lash_core::PluginOptions::default(),
         ),
         lash::TurnInput::text("read the host upload").with_attachment(input),
-        lash_core::SessionTurnOutcome::Turn,
-        lash_core::ProcessOriginator::host(),
-        lash_core::LifetimeDecision::Detached,
+        lash_execution_contracts::process::SessionTurnOutcome::Turn,
+        lash_execution_contracts::process::ProcessOriginator::host(),
+        lash_execution_contracts::process::LifetimeDecision::Detached,
     )
 }
 
@@ -64,12 +66,14 @@ fn octets() -> lash_core::AttachmentCreateMeta {
 }
 
 /// Every process the registry holds.
-async fn processes(core: &LashCore) -> Result<Vec<lash_core::ProcessRecord>> {
+async fn processes(
+    core: &LashCore,
+) -> Result<Vec<lash_execution_contracts::process::ProcessRecord>> {
     Ok(lash_core::testing::process_roster_records_for_fixture(
         core.backend().process_registry().as_ref(),
-        &lash_core::ProcessListFilter {
-            status: lash_core::ProcessStatusFilter::Any,
-            ..lash_core::ProcessListFilter::default()
+        &lash_execution_contracts::process::ProcessListFilter {
+            status: lash_execution_contracts::process::ProcessStatusFilter::Any,
+            ..lash_execution_contracts::process::ProcessListFilter::default()
         },
     )
     .await?)
@@ -233,7 +237,7 @@ impl lash_core::AttachmentReferrers for ContendedOnce {
 /// process, which holds the input.
 #[tokio::test(flavor = "multi_thread", worker_threads = 4)]
 async fn a_start_input_acquisition_fault_retries_the_same_registered_process() -> Result<()> {
-    let stores: Arc<dyn lash_core::StoreSet> = Arc::new(
+    let stores: Arc<dyn lash_execution_contracts::backend::StoreSet> = Arc::new(
         lash_sqlite_store::SqliteStoreSet::memory()
             .await
             .expect("SQLite memory stores"),

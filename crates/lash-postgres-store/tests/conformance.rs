@@ -48,7 +48,7 @@ fn attachment_bytes(root: &tempfile::TempDir) -> lash_conformance::AttachmentByt
             .await
             .expect("SQLite attachment store")
             .attachment_store()
-        }) as Arc<dyn lash_core_execution::AttachmentStore>
+        }) as Arc<dyn lash_core_store::attachments::AttachmentStore>
     })
 }
 
@@ -70,11 +70,15 @@ use lash_conformance::{
     GraphFactObservation, LineageConformanceHandles, LineageConformanceInjector,
     ReopenableProcessRegistry,
 };
-use lash_core_execution::compat::CompatRefusal;
-use lash_core_execution::{
-    AttachmentReferrers as _, DeploymentStore, ProcessEnvStore, ProcessRegistry, RuntimeStore,
-    SessionCatalogStore as _, SessionCommitStore as _, StoreError,
-};
+use lash_core_store::compat::CompatRefusal;
+use lash_core_store::store::AttachmentReferrers as _;
+use lash_core_store::store::RuntimeStore;
+use lash_core_store::store::SessionCatalogStore as _;
+use lash_core_store::store::SessionCommitStore as _;
+use lash_core_store::store::StoreError;
+use lash_execution_contracts::deployment::DeploymentStore;
+use lash_execution_contracts::process::ProcessEnvStore;
+use lash_execution_contracts::process::ProcessRegistry;
 use lash_postgres_store::PostgresStorage;
 
 #[allow(dead_code)]
@@ -129,7 +133,10 @@ async fn storage() -> Option<(IsolatedDatabase, PostgresStorage)> {
 /// bytes in a database the caller keeps alive.
 fn pg_law_stores(
     storage: &PostgresStorage,
-) -> (tempfile::TempDir, Arc<dyn lash_core_execution::StoreSet>) {
+) -> (
+    tempfile::TempDir,
+    Arc<dyn lash_execution_contracts::backend::StoreSet>,
+) {
     let attachments = tempfile::tempdir().expect("attachment directory");
     let path = attachments.path().join("attachments.db");
     let bytes = sync_await(async move {
@@ -285,7 +292,7 @@ lash_conformance::append_head_switch_tests!({
     (
         _database_fixture,
         Arc::new(storage.store()) as Arc<dyn RuntimeStore>,
-        move |leaf_node_id: lash_core_execution::NodeId| async move {
+        move |leaf_node_id: lash_protocol_types::NodeId| async move {
             sqlx::query(
                 "WITH recorded AS (
                      INSERT INTO lash_session_revisions (session_id, head_revision, leaf_node_id, checkpoint_ref, config_ref)
@@ -313,7 +320,7 @@ lash_conformance::append_tombstone_tests!({
     (
         _database_fixture,
         Arc::new(storage.store()) as Arc<dyn RuntimeStore>,
-        move |node_id: lash_core_execution::NodeId| async move {
+        move |node_id: lash_protocol_types::NodeId| async move {
             sqlx::query("UPDATE lash_graph_nodes SET tombstoned = TRUE WHERE node_id = $1")
                 .bind(node_id.into_inner())
                 .execute(&pool)
@@ -377,10 +384,10 @@ lash_conformance::artifact_store_reopenable_tests!({
                 .expect("open first Postgres artifact pool");
             let open = lash_conformance::fused_artifact_store::ArtifactStoreHandles {
                 artifacts: Arc::new(open_storage.lash_vm_artifact_store())
-                    as Arc<dyn lash_core::ModuleArtifactStore>,
+                    as Arc<dyn lash_execution_contracts::module_artifacts::ModuleArtifactStore>,
                 process_env: Arc::new(open_storage.process_env_store()) as Arc<dyn ProcessEnvStore>,
                 turn_preludes: Arc::new(open_storage.process_env_store())
-                    as Arc<dyn lash_core::TurnPreludeStore>,
+                    as Arc<dyn lash_execution_contracts::turn_prelude::TurnPreludeStore>,
             };
             let reopen_url = database_url.clone();
             lash_conformance::fused_artifact_store::ReopenableArtifactStore {
@@ -394,11 +401,13 @@ lash_conformance::artifact_store_reopenable_tests!({
                     });
                     lash_conformance::fused_artifact_store::ArtifactStoreHandles {
                         artifacts: Arc::new(reopened.lash_vm_artifact_store())
-                            as Arc<dyn lash_core::ModuleArtifactStore>,
+                            as Arc<
+                                dyn lash_execution_contracts::module_artifacts::ModuleArtifactStore,
+                            >,
                         process_env: Arc::new(reopened.process_env_store())
                             as Arc<dyn ProcessEnvStore>,
                         turn_preludes: Arc::new(reopened.process_env_store())
-                            as Arc<dyn lash_core::TurnPreludeStore>,
+                            as Arc<dyn lash_execution_contracts::turn_prelude::TurnPreludeStore>,
                     }
                 }),
             }
@@ -558,35 +567,39 @@ async fn postgres_turn_commit_stamps_use_injected_store_clock_when_configured() 
     const SESSION_ID: &str = "postgres-injected-commit-clock";
     const TURN_ID: &str = "postgres-injected-clock-turn";
     const NOW_MS: u64 = 1_234_567;
-    let clock = Arc::new(lash_core_execution::testing::TestClock::new(NOW_MS));
+    let clock = Arc::new(lash_core_ids::test_clock::TestClock::new(NOW_MS));
     let factory = storage.store().with_clock(clock);
     factory
-        .admit_session(&lash_core_execution::SessionStoreCreateRequest {
-            owning_process_id: None,
-            pending_observer_intents: Vec::new(),
-            session_id: SessionId::fixture(SESSION_ID.to_string()),
-            relation: lash_core_execution::SessionRelation::default(),
-            config: lash_core_execution::PersistedSessionConfig::new(
-                lash_core_execution::TurnBudget::Unbounded,
-                lash_core_execution::MaxToolCalls::new(1024),
-                lash_core::NoProgressBudget::bounded(12),
-            ),
-            head: lash_core_execution::SessionCreationHead::Config,
-            retention: lash_core_execution::Retention::UntilGc,
-        })
+        .admit_session(
+            &lash_core_store::session_store_factory_types::SessionStoreCreateRequest {
+                owning_process_id: None,
+                pending_observer_intents: Vec::new(),
+                session_id: SessionId::fixture(SESSION_ID.to_string()),
+                relation: lash_core_store::session_identity::SessionRelation::default(),
+                config: lash_core_store::session_graph::PersistedSessionConfig::new(
+                    lash_protocol_types::session_model::TurnBudget::Unbounded,
+                    lash_protocol_types::session_model::MaxToolCalls::new(1024),
+                    lash_core::NoProgressBudget::bounded(12),
+                ),
+                head: lash_core_store::session_store_factory_types::SessionCreationHead::Config,
+                retention: lash_core_store::store::Retention::UntilGc,
+            },
+        )
         .await
         .expect("admit clocked Postgres session");
     let store = factory.clone();
-    let clock_intent = lash_core_execution::AttachmentWrite {
-        attachment_id: lash_core_execution::attachments::content_id(
+    let clock_intent = lash_core_store::store::AttachmentWrite {
+        attachment_id: lash_core_store::attachments::content_id(
             ("postgres-clock-attachment").as_bytes(),
         ),
-        claim: lash_core_execution::ReferrerClaim::unguarded(
-            lash_core_execution::ArtifactReferrer::Session(SessionId::from(SESSION_ID)),
+        claim: lash_core_store::artifact_referrer::ReferrerClaim::unguarded(
+            lash_core_store::artifact_referrer::ArtifactReferrer::Session(SessionId::from(
+                SESSION_ID,
+            )),
         )
         .expect("session claim"),
     };
-    let lash_core_execution::AttachmentWriteFence::Granted(clock_permit) = store
+    let lash_core_store::store::AttachmentWriteFence::Granted(clock_permit) = store
         .begin_attachment_write(&clock_intent)
         .await
         .expect("begin turn-owned write")
@@ -597,21 +610,21 @@ async fn postgres_turn_commit_stamps_use_injected_store_clock_when_configured() 
         .complete_attachment_write(&clock_intent, clock_permit)
         .await
         .expect("stamp turn-owned upload");
-    let state = lash_core_execution::RuntimeSessionState {
+    let state = lash_core_store::session_state::RuntimeSessionState {
         session_id: SessionId::fixture(SESSION_ID.to_string()),
-        ..lash_core_execution::RuntimeSessionState::fixture(
-            lash_core_execution::SessionPolicy::new(
-                lash_core_execution::TurnBudget::Unbounded,
-                lash_core_execution::MaxToolCalls::new(1024),
+        ..lash_core_store::session_state::RuntimeSessionState::fixture(
+            lash_core_store::session_policy::SessionPolicy::new(
+                lash_protocol_types::session_model::TurnBudget::Unbounded,
+                lash_protocol_types::session_model::MaxToolCalls::new(1024),
                 lash_core::NoProgressBudget::bounded(12),
             ),
         )
     };
     // A mid-turn commit: the stamps are the subject, and a final commit
     // would also need its run's admitted cancellation snapshot (FIG-4848).
-    let operation = lash_core_execution::OperationId::turn(SESSION_ID, TURN_ID, "checkpoint");
+    let operation = lash_core_store::store::OperationId::turn(SESSION_ID, TURN_ID, "checkpoint");
     let operation_key = operation.storage_key().expect("canonical operation key");
-    let (commit, _) = lash_core_execution::RuntimeCommit::persisted_state_for_test(&state)
+    let (commit, _) = lash_core_store::store::RuntimeCommit::persisted_state_for_test(&state)
         .with_committed_attachments(vec![clock_intent.attachment_id.clone()])
         .with_operation(operation)
         .expect("stamp clock test commit");
@@ -686,9 +699,9 @@ lash_conformance::process_registry_tests!(@catalogue reopenable {
             )
             .await;
             let open = Arc::new(storage.process_registry())
-                as Arc<dyn lash_core_execution::ConformanceProcessRegistry>;
+                as Arc<dyn lash_execution_contracts::process::ConformanceProcessRegistry>;
             let reopen = Arc::new(storage.process_registry())
-                as Arc<dyn lash_core_execution::ConformanceProcessRegistry>;
+                as Arc<dyn lash_execution_contracts::process::ConformanceProcessRegistry>;
             ReopenableProcessRegistry { open, reopen }
         })
     })
@@ -698,10 +711,11 @@ lash_conformance::process_registry_tests!(@catalogue reopenable {
 /// survive reopening through a post-write pool with the original closed.
 #[tokio::test(flavor = "multi_thread", worker_threads = 4)]
 async fn process_registry_reopen_conformance() {
-    use lash_core_execution::{
-        ProcessEventLogTestSupport as _, ProcessLifecycle as _, ProcessObserverRegistry as _,
-        ProcessQuery as _, ProcessRegistrar as _,
-    };
+    use lash_execution_contracts::process::ProcessEventLogTestSupport as _;
+    use lash_execution_contracts::process::ProcessLifecycle as _;
+    use lash_execution_contracts::process::ProcessObserverRegistry as _;
+    use lash_execution_contracts::process::ProcessQuery as _;
+    use lash_execution_contracts::process::ProcessRegistrar as _;
     let (database_fixture, storage) = storage().await.expect("PostgreSQL fixture");
     lash_conformance::publish_process_registry_fixture_environments(&storage.process_env_store())
         .await;
@@ -709,10 +723,10 @@ async fn process_registry_reopen_conformance() {
     let observer = SessionId::from("cold-observer");
     let terminal_base = open
         .register_process_with_observers(
-            lash_core::testing::held_engine_registration(
+            lash_execution_contracts::testing::held_engine_registration(
                 serde_json::json!({"case": "cold-terminal"}),
-                lash_core_execution::ProcessProvenance::host(),
-                lash_core_execution::Lifetime::Detached,
+                lash_execution_contracts::process::ProcessProvenance::host(),
+                lash_execution_contracts::process::Lifetime::Detached,
             ),
             std::slice::from_ref(&observer),
         )
@@ -720,10 +734,14 @@ async fn process_registry_reopen_conformance() {
         .expect("register observed process");
     open.complete_process(
         &terminal_base.id,
-        lash_core_execution::ProcessAwaitOutput::from_tool_output(
-            lash_core_execution::ToolCallOutput::success(serde_json::json!({"committed": true})),
+        lash_execution_contracts::process::ProcessAwaitOutput::from_tool_output(
+            lash_protocol_types::tool_output::ToolCallOutput::success(
+                serde_json::json!({"committed": true}),
+            ),
         ),
-        lash_core_execution::ProcessCompletionAuthority::workflow_key(&terminal_base.id),
+        lash_execution_contracts::process::ProcessCompletionAuthority::workflow_key(
+            &terminal_base.id,
+        ),
     )
     .await
     .expect("commit terminal");
@@ -733,10 +751,10 @@ async fn process_registry_reopen_conformance() {
         .expect("terminal projection")
         .expect("retained terminal");
     let live = open
-        .register_process(lash_core::testing::held_engine_registration(
+        .register_process(lash_execution_contracts::testing::held_engine_registration(
             serde_json::json!({"case": "cold-live"}),
-            lash_core_execution::ProcessProvenance::host(),
-            lash_core_execution::Lifetime::Detached,
+            lash_execution_contracts::process::ProcessProvenance::host(),
+            lash_execution_contracts::process::Lifetime::Detached,
         ))
         .await
         .expect("register live process");
@@ -757,7 +775,7 @@ async fn process_registry_reopen_conformance() {
             .full_event_window(&base.id, 0)
             .await
             .expect("read committed event log");
-        let folded = lash_core_execution::runtime::fold_process_record(base.clone(), &events)
+        let folded = lash_execution_contracts::process::fold_process_record(base.clone(), &events)
             .expect("refold committed events");
         assert_eq!(folded, stored);
     }
@@ -769,8 +787,8 @@ async fn process_registry_reopen_conformance() {
     );
     let retained = lash_core::testing::process_roster_records_for_fixture(
         &reader,
-        &lash_core_execution::ProcessListFilter {
-            status: lash_core_execution::ProcessStatusFilter::Any,
+        &lash_execution_contracts::process::ProcessListFilter {
+            status: lash_execution_contracts::process::ProcessStatusFilter::Any,
             ..Default::default()
         },
     )
@@ -808,7 +826,8 @@ lash_conformance::process_change_horizon_tests!({
         return;
     };
     reset(storage.pool()).await;
-    lash_core::testing::process_execution_env_fixture(&storage.process_env_store()).await;
+    lash_execution_contracts::testing::process_execution_env_fixture(&storage.process_env_store())
+        .await;
     let registry = Arc::new(storage.process_registry()) as Arc<dyn ProcessRegistry>;
     (database_fixture, registry)
 });
@@ -820,12 +839,13 @@ lash_conformance::process_projection_repair_tests!({
     };
     reset(storage.pool()).await;
     let pool = storage.pool().clone();
-    lash_core::testing::process_execution_env_fixture(&storage.process_env_store()).await;
+    lash_execution_contracts::testing::process_execution_env_fixture(&storage.process_env_store())
+        .await;
     let registry = Arc::new(storage.process_registry()) as Arc<dyn ProcessRegistry>;
     (
         database_fixture,
         registry,
-        move |stale: lash_core_execution::ProcessRecord| async move {
+        move |stale: lash_execution_contracts::process::ProcessRecord| async move {
             let changed =
                 sqlx::query("UPDATE lash_processes SET lifecycle_json = $2 WHERE process_id = $1")
                     .bind(stale.id.as_str())
@@ -858,7 +878,7 @@ lash_conformance::tool_intent_retention_tests!({
                 |storage: &PostgresStorage| lash_conformance::ToolIntentRetentionHandles {
                     registry: Arc::new(storage.process_registry()) as Arc<dyn ProcessRegistry>,
                     sessions: Arc::new(storage.store())
-                        as Arc<dyn lash_core_execution::DeploymentStore>,
+                        as Arc<dyn lash_execution_contracts::deployment::DeploymentStore>,
                 };
             let open = handles(&storage);
             let reopen: lash_conformance::ToolIntentRetentionReopen = Arc::new(move || {
@@ -882,7 +902,10 @@ lash_conformance::store_contract_state_machine_tests!({
         let storage = Arc::clone(&storage);
         async move {
             reset(storage.pool()).await;
-            lash_core::testing::process_execution_env_fixture(&storage.process_env_store()).await;
+            lash_execution_contracts::testing::process_execution_env_fixture(
+                &storage.process_env_store(),
+            )
+            .await;
             lash_conformance::StoreContractHandles {
                 registry: Arc::new(storage.process_registry()) as Arc<dyn ProcessRegistry>,
                 runtime: Arc::new(storage.store()) as Arc<dyn RuntimeStore>,
@@ -1053,7 +1076,7 @@ lash_conformance::attachment_referrer_tests!({
                 .map_err(|error| StoreError::Backend(error.to_string()))?;
             sqlx::query("ALTER TABLE lash_attachment_referrer_edges DROP CONSTRAINT IF EXISTS ck_attachment_referrer_edges_kind").execute(&mut *tx).await.map_err(|error| StoreError::Backend(error.to_string()))?;
             sqlx::query("INSERT INTO lash_attachment_referrer_edges (attachment_id, referrer_kind, referrer_id) VALUES ($1, $2, $3)").bind(id.as_str()).bind(kind).bind(key).execute(&mut *tx).await.map_err(|error| StoreError::Backend(error.to_string()))?;
-            sqlx::query(&format!("ALTER TABLE lash_attachment_referrer_edges ADD CONSTRAINT ck_attachment_referrer_edges_kind CHECK ({}) NOT VALID", lash_core_execution::ArtifactReferrerKind::predicate_sql("referrer_kind", lash_core_execution::ArtifactReferrerKind::holds_attachments))).execute(&mut *tx).await.map_err(|error| StoreError::Backend(error.to_string()))?;
+            sqlx::query(&format!("ALTER TABLE lash_attachment_referrer_edges ADD CONSTRAINT ck_attachment_referrer_edges_kind CHECK ({}) NOT VALID", lash_core_store::artifact_referrer::ArtifactReferrerKind::predicate_sql("referrer_kind", lash_core_store::artifact_referrer::ArtifactReferrerKind::holds_attachments))).execute(&mut *tx).await.map_err(|error| StoreError::Backend(error.to_string()))?;
             tx.commit()
                 .await
                 .map_err(|error| StoreError::Backend(error.to_string()))

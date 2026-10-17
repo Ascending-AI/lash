@@ -2,12 +2,17 @@
 
 use std::sync::Arc;
 
+use lash_core_execution::NoProcessWork;
+use lash_core_execution::ProcessEngineRegistration;
+use lash_core_execution::ProcessEngineRegistry;
+use lash_core_execution::RuntimeEffectLocalExecutor;
+use lash_core_execution::StartKey;
 use lash_core_execution::runtime::ProcessLocalExecution;
 use lash_core_execution::runtime::actor::round::StoreLocalEffect;
-use lash_core_execution::{
-    LifetimeDecision, NoProcessWork, ProcessEngineRegistration, ProcessEngineRegistry,
-    ProcessInput, ProcessProvenance, ProcessRegistration, RuntimeEffectLocalExecutor, StartKey,
-};
+use lash_execution_contracts::process::LifetimeDecision;
+use lash_execution_contracts::process::ProcessInput;
+use lash_execution_contracts::process::ProcessProvenance;
+use lash_execution_contracts::process::ProcessRegistration;
 use lash_protocol_types::ToolCallId;
 
 use super::engine::{KIND, SimProcessEngine, ends_at_once};
@@ -45,7 +50,7 @@ fn executor(world: &World) -> Result<ProcessLocalExecution, String> {
 ///
 /// The start is refused.
 pub async fn spawn(world: &World, call: &ToolCallId) -> Result<Vec<StoreLocalEffect>, String> {
-    let env = lash_core_execution::testing::process_execution_env_fixture(
+    let env = lash_execution_contracts::testing::process_execution_env_fixture(
         world.backend()?.process_env_store().as_ref(),
     )
     .await;
@@ -53,7 +58,7 @@ pub async fn spawn(world: &World, call: &ToolCallId) -> Result<Vec<StoreLocalEff
         ProcessInput::Engine {
             kind: KIND.to_owned(),
             payload: ends_at_once("spawned"),
-            launch: lash_core_execution::EngineLaunch::new(env, None),
+            launch: lash_execution_contracts::process::EngineLaunch::new(env, None),
         },
         ProcessProvenance::host(),
         LifetimeDecision::Detached,

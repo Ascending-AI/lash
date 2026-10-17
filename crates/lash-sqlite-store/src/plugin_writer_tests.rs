@@ -10,16 +10,23 @@ use std::collections::BTreeMap;
 use std::sync::Arc;
 use std::time::Duration;
 
-use lash_core_execution::compat::{CompatRefusal, VersionRange};
-use lash_core_execution::store::RuntimeCommit;
-use lash_core_execution::store::plugin_writers::PluginWriterRegistration;
 use lash_core_execution::testing::store_fixtures::{
     commit_runtime_state_for_test, root_session_request,
 };
-use lash_core_execution::{
-    FleetFormat, FormatNamespace, FormatVersion, PluginNamespaceState, PluginState,
-    ProcessEnvStore as _, RuntimeSessionState, RuntimeStore, SessionId, StoreError,
-};
+use lash_core_store::compat::CompatRefusal;
+use lash_core_store::compat::VersionRange;
+use lash_core_store::plugin_state::FormatNamespace;
+use lash_core_store::plugin_state::FormatVersion;
+use lash_core_store::plugin_state::PluginNamespaceState;
+use lash_core_store::plugin_state::PluginState;
+use lash_core_store::session_state::RuntimeSessionState;
+use lash_core_store::store::FleetFormat;
+use lash_core_store::store::RuntimeCommit;
+use lash_core_store::store::RuntimeStore;
+use lash_core_store::store::StoreError;
+use lash_core_store::store::plugin_writers::PluginWriterRegistration;
+use lash_execution_contracts::process::ProcessEnvStore as _;
+use lash_protocol_types::SessionId;
 use rusqlite::Connection;
 
 use crate::{SqliteLocation, SqliteStoreSet};
@@ -109,10 +116,10 @@ fn published(location: &SqliteLocation) -> (i64, i64, i64, Vec<(String, String)>
 
 fn state(session_id: &str) -> RuntimeSessionState {
     RuntimeSessionState {
-        session_id: lash_core_execution::SessionId::fixture(session_id),
-        ..RuntimeSessionState::fixture(lash_core_execution::SessionPolicy::new(
-            lash_core_execution::TurnBudget::Unbounded,
-            lash_core_execution::MaxToolCalls::new(1024),
+        session_id: lash_protocol_types::SessionId::fixture(session_id),
+        ..RuntimeSessionState::fixture(lash_core_store::session_policy::SessionPolicy::new(
+            lash_protocol_types::session_model::TurnBudget::Unbounded,
+            lash_protocol_types::session_model::MaxToolCalls::new(1024),
             lash_core::NoProgressBudget::bounded(12),
         ))
     }
@@ -166,18 +173,20 @@ fn outside(error: &StoreError, namespace: FormatNamespace, writer: u32, permitte
 }
 
 fn env_bytes(format: u32) -> Vec<u8> {
-    lash_core_execution::ProcessEnv::builder(lash_core_execution::MaxToolCalls::new(1024))
-        .component(
-            lash_core_execution::ProcessConfigKey::<serde_json::Value>::new(
-                PLUGIN,
-                version(format),
-            ),
-            &serde_json::json!({"count": 1}),
-        )
-        .build()
-        .expect("the environment builds")
-        .to_store_bytes()
-        .expect("encode the environment")
+    lash_core_store::process_env::ProcessEnv::builder(
+        lash_protocol_types::session_model::MaxToolCalls::new(1024),
+    )
+    .component(
+        lash_core_store::process_env::ProcessConfigKey::<serde_json::Value>::new(
+            PLUGIN,
+            version(format),
+        ),
+        &serde_json::json!({"count": 1}),
+    )
+    .build()
+    .expect("the environment builds")
+    .to_store_bytes()
+    .expect("encode the environment")
 }
 
 /// The writer a process environment's `PLUGIN` component stamps: a
@@ -212,20 +221,19 @@ fn outside_for(
 async fn publish_env(set: &SqliteStoreSet, format: u32) -> Result<(), StoreError> {
     let bytes = env_bytes(format);
     let env_ref = lash_core_execution::process_env_ref_for_bytes(&bytes);
-    let claim =
-        lash_core_execution::ReferrerClaim::unguarded(
-            lash_core_execution::ArtifactReferrer::HostPin(
-                lash_core_execution::HostArtifactPin::mint(),
-            ),
-        )
-        .expect("host pin claim");
+    let claim = lash_core_store::artifact_referrer::ReferrerClaim::unguarded(
+        lash_core_store::artifact_referrer::ArtifactReferrer::HostPin(
+            lash_core_store::artifact_referrer::HostArtifactPin::mint(),
+        ),
+    )
+    .expect("host pin claim");
     set.process_env_store()
         .publish_process_env(&claim, &env_ref, &bytes)
         .await
         .map_err(|error| match error {
-            lash_core_execution::ArtifactStoreError::Incompatible { refusal } => {
-                StoreError::Incompatible { refusal }
-            }
+            lash_execution_contracts::module_artifacts::ArtifactStoreError::Incompatible {
+                refusal,
+            } => StoreError::Incompatible { refusal },
             other => StoreError::Backend(other.to_string()),
         })
 }
@@ -560,13 +568,12 @@ async fn a_component_publishes_its_native_config_format_on_a_finalized_fleet() {
     let store = set.process_env_store();
     let registry = lash_core_execution::testing::native_format_two_component(COMPONENT);
     let env = lash_core_execution::testing::component_env(COMPONENT, version(2));
-    let claim =
-        lash_core_execution::ReferrerClaim::unguarded(
-            lash_core_execution::ArtifactReferrer::HostPin(
-                lash_core_execution::HostArtifactPin::mint(),
-            ),
-        )
-        .expect("host pin claim");
+    let claim = lash_core_store::artifact_referrer::ReferrerClaim::unguarded(
+        lash_core_store::artifact_referrer::ArtifactReferrer::HostPin(
+            lash_core_store::artifact_referrer::HostArtifactPin::mint(),
+        ),
+    )
+    .expect("host pin claim");
     let held = lash_core_execution::hold_process_env(
         &lash_core_execution::ProcessEnvPorts::admitting(store.as_ref(), &registry),
         &claim,
@@ -575,13 +582,13 @@ async fn a_component_publishes_its_native_config_format_on_a_finalized_fleet() {
     .await
     .expect("the native format publishes");
     assert_eq!(
-        lash_core_execution::FleetFormatStore::fleet_format(store.as_ref()).version(),
+        lash_core_store::store::FleetFormatStore::fleet_format(store.as_ref()).version(),
         FleetFormat::writable().max(),
         "the hold wrote under this build's own fleet epoch"
     );
     assert_eq!(held, env.stable_ref().expect("the environment's reference"));
     assert_eq!(
-        lash_core_execution::FleetFormatStore::plugin_writers(store.as_ref())
+        lash_core_store::store::FleetFormatStore::plugin_writers(store.as_ref())
             .await
             .expect("read the ranges")
             .permitted_writer(&format!("component:{COMPONENT}")),

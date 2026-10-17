@@ -39,12 +39,12 @@ use std::sync::{Arc, Mutex};
 use std::time::Duration;
 
 use lash_core::runtime::durable::session::SessionActivation;
-use lash_core_execution::StoreSet;
 use lash_durable::runner::Activation;
 use lash_durable::{ActorKey, ActorState, CommitLabel, DurableError, DurableStore};
 use lash_durable_test::{
     Cut, Fault, Matrix, Scenario, SimClock, SimNodes, SimNodesConfig, Stored, Tripwire, WriteKind,
 };
+use lash_execution_contracts::backend::StoreSet;
 use lash_protocol_types::SessionId;
 use lash_protocol_types::sync::MutexExt as _;
 use matrix::MatrixTestExt as _;

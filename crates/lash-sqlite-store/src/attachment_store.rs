@@ -17,13 +17,19 @@
 
 use std::sync::{Arc, LazyLock};
 
-use lash_core_execution::attachments::content_id;
-use lash_core_execution::attachments::{ContentMismatchDetail, validate_attachment_bytes};
-use lash_core_execution::{
-    AttachmentBlobPage, AttachmentCreateMeta, AttachmentId, AttachmentRef, AttachmentStore,
-    AttachmentStoreError, AttachmentStoreFailureClass, AttachmentStorePersistence,
-    StoredAttachment, StoredBlobRef,
-};
+use lash_core_store::attachments::AttachmentBlobPage;
+use lash_core_store::attachments::AttachmentStore;
+use lash_core_store::attachments::AttachmentStoreError;
+use lash_core_store::attachments::AttachmentStoreFailureClass;
+use lash_core_store::attachments::AttachmentStorePersistence;
+use lash_core_store::attachments::ContentMismatchDetail;
+use lash_core_store::attachments::StoredAttachment;
+use lash_core_store::attachments::StoredBlobRef;
+use lash_core_store::attachments::content_id;
+use lash_core_store::attachments::validate_attachment_bytes;
+use lash_protocol_types::attachment::AttachmentCreateMeta;
+use lash_protocol_types::attachment::AttachmentId;
+use lash_protocol_types::attachment::AttachmentRef;
 use lash_protocol_types::{
     llm::attachment_delivery::Delivery, llm::attachment_delivery::DeliveryLimits,
     llm::attachment_delivery::ProviderAccepts,
@@ -88,7 +94,7 @@ pub(crate) fn attachment_blob_sql() -> &'static AttachmentBlobSqliteStatements {
 /// store's clock.
 pub struct SqliteAttachmentStore {
     conn: SqliteConnection,
-    clock: Arc<dyn lash_core_execution::Clock>,
+    clock: Arc<dyn lash_core_ids::clock::Clock>,
     persistence: AttachmentStorePersistence,
 }
 

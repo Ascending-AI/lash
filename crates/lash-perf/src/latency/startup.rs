@@ -6,7 +6,10 @@ use super::{
 };
 use crate::runtime_perf::openai_compat::OpenAiCompatBenchServer;
 use anyhow::{Context, Result, ensure};
-use lash_core::perf_witness::startup::{self, Marker, Phase, Recorder};
+use lash_core_ids::perf_witness::startup;
+use lash_core_ids::perf_witness::startup::Marker;
+use lash_core_ids::perf_witness::startup::Phase;
+use lash_core_ids::perf_witness::startup::Recorder;
 use lash_http_transport::{HttpRequest, HttpResponse, HttpTransport};
 use lash_transport_failure::LlmTransportError;
 use serde::{Deserialize, Serialize};

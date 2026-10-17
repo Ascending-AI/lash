@@ -91,14 +91,22 @@ use tokio_util::sync::CancellationToken;
 use tracing::Instrument as _;
 
 use super::super::ActorContext;
-use super::super::waits::{self, ParkDeadline, RaceWinner, Resolution, WaitId, WaitKind, WaitRef};
+use super::super::waits;
+use super::super::waits::Resolution;
+use super::super::waits::WaitId;
 use super::{
     AdmittedExecution, PolicyView, Recovery, RoundError, RoundView, RunFold, Stop,
     StoreLocalEffect, ToolBody, run_bounded, settle, settle_retry, start_retry,
 };
-use crate::runtime::process::{CapacityVerdict, EngineStepAnswer, StepCandidate};
 use lash_core_store::tool_run::Material;
 use lash_core_store::tool_run::SettledOutput;
+use lash_durable::domain::WaitKind;
+use lash_execution_contracts::process::CapacityVerdict;
+use lash_execution_contracts::process::EngineStepAnswer;
+use lash_execution_contracts::process::StepCandidate;
+use lash_execution_contracts::waits::ParkDeadline;
+use lash_execution_contracts::waits::RaceWinner;
+use lash_execution_contracts::waits::WaitRef;
 
 /// What a member's body answers: its output, and the store-local effects
 /// its completion or its park commits with.
@@ -1220,7 +1228,7 @@ impl Lifecycle {
         if let (SettledOutput::Waiting(source), Some(process)) = (&mut output, terminal) {
             let (wait, _) = waits::pin(
                 tx,
-                waits::WaitSpec {
+                lash_execution_contracts::waits::WaitSpec {
                     scope: waits::execution_wait_scope(&self.cx, &execution.id().owner)?,
                     purpose: waits::WaitPurpose::ProcessTerminal {
                         process,
@@ -1228,7 +1236,7 @@ impl Lifecycle {
                             .draft()
                             .park()
                             .and_then(ParkDeadline::deadline)
-                            .map(waits::WaitDeadline::at),
+                            .map(lash_execution_contracts::waits::WaitDeadline::at),
                     },
                 },
             );

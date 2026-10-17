@@ -117,7 +117,7 @@ fn decode_input(
     ingress_json: &str,
     trace_cause: Option<&str>,
 ) -> Result<MailInput, DurableError> {
-    let ingress: lash_core_execution::TurnInputIngress =
+    let ingress: lash_core_store::turn_input_vocabulary::TurnInputIngress =
         serde_json::from_str(ingress_json).map_err(|error| undecodable("input delivery", error))?;
     let active_turn = match state {
         "pending_active" => ingress.active_turn_id().cloned(),
@@ -129,7 +129,7 @@ fn decode_input(
         source_key,
         run_spec_hash,
         active_turn,
-        trace_cause: lash_core_execution::store_backend_support::decode_trace_cause(
+        trace_cause: lash_core_store::store_backend_support::decode_trace_cause(
             "pending turn input",
             trace_cause,
         )
@@ -155,13 +155,14 @@ fn decode_batch(
 
 /// What a batch whose payload is `payload_json` asks the session for.
 fn batch_kind(payload_json: &str) -> Result<MailBatchKind, DurableError> {
-    let payload: lash_core_execution::runtime::QueuedWorkPayload =
+    let payload: lash_core_store::queued_work_vocabulary::QueuedWorkPayload =
         serde_json::from_str(payload_json).map_err(|error| undecodable("batch payload", error))?;
-    let lash_core_execution::runtime::QueuedWorkPayload::SessionCommand { command } = &payload;
+    let lash_core_store::queued_work_vocabulary::QueuedWorkPayload::SessionCommand { command } =
+        &payload;
     Ok(
         if matches!(
             **command,
-            lash_core_execution::runtime::SessionCommand::RunPluginTask { .. }
+            lash_core_store::queued_work_vocabulary::SessionCommand::RunPluginTask { .. }
         ) {
             MailBatchKind::Operation
         } else {
@@ -236,7 +237,7 @@ pub(super) fn settle_held(
         .execute(rusqlite::params![
             session.as_str(),
             run.as_str(),
-            lash_core_execution::runtime::TurnInputStateKind::Cancelled.as_str(),
+            lash_core_store::turn_input_vocabulary::TurnInputStateKind::Cancelled.as_str(),
             now_ms,
         ])?;
     tx.prepare_cached(SQL.session_mail.settle_held_batches.sql())?
@@ -251,8 +252,8 @@ pub(super) fn cancel_inputs(
     tx: &Connection,
     session: &SessionId,
     run: &TurnId,
-    disposition: lash_core_execution::TurnCancelUndeliveredInputPolicy,
-) -> Answer<lash_core_execution::TurnCancelInputOutcome> {
+    disposition: lash_protocol_types::session_model::TurnCancelUndeliveredInputPolicy,
+) -> Answer<lash_core_store::turn_control_vocabulary::TurnCancelInputOutcome> {
     let rows = tx
         .prepare_cached(SQL.session_mail.cancel_inputs.sql())?
         .query_map([session.as_str()], |row| {
@@ -263,9 +264,9 @@ pub(super) fn cancel_inputs(
             ))
         })?
         .collect::<rusqlite::Result<Vec<_>>>()?;
-    let mut outcome = lash_core_execution::TurnCancelInputOutcome::default();
+    let mut outcome = lash_core_store::turn_control_vocabulary::TurnCancelInputOutcome::default();
     for (input, payload, ingress) in rows {
-        let affected = match lash_core_execution::store_backend_support::turn_cancel::affected_input(
+        let affected = match lash_core_store::store_backend_support::turn_cancel::affected_input(
             run,
             disposition,
             input,
@@ -276,7 +277,7 @@ pub(super) fn cancel_inputs(
             Ok(None) => continue,
             Err(error) => return Ok(Err(undecodable("cancelled input", error))),
         };
-        if disposition == lash_core_execution::TurnCancelUndeliveredInputPolicy::Drop
+        if disposition == lash_protocol_types::session_model::TurnCancelUndeliveredInputPolicy::Drop
             && let Err(error) = admit(
                 tx,
                 session,
@@ -322,7 +323,7 @@ pub(super) fn withdraw_queued(
                 rusqlite::params![
                     session.as_str(),
                     input.as_str(),
-                    lash_core_execution::runtime::TurnInputStateKind::Cancelled.as_str(),
+                    lash_core_store::turn_input_vocabulary::TurnInputStateKind::Cancelled.as_str(),
                     now_ms,
                 ],
                 |_| Ok(()),
@@ -403,12 +404,15 @@ fn enqueue(
             },
         )))
     };
-    let draft: lash_core_execution::PendingTurnInputDraft = match serde_json::from_str(draft_json) {
-        Ok(draft) => draft,
-        Err(error) => return Ok(Err(undecodable("owner input", error))),
-    };
-    let batch = match lash_core_execution::PendingTurnInputBatch::new(session.clone(), vec![draft])
-    {
+    let draft: lash_core_store::turn_input_vocabulary::PendingTurnInputDraft =
+        match serde_json::from_str(draft_json) {
+            Ok(draft) => draft,
+            Err(error) => return Ok(Err(undecodable("owner input", error))),
+        };
+    let batch = match lash_core_store::turn_input_vocabulary::PendingTurnInputBatch::new(
+        session.clone(),
+        vec![draft],
+    ) {
         Ok(batch) => batch,
         Err(error) => return refused(error.to_string()),
     };
@@ -417,7 +421,7 @@ fn enqueue(
     // wake needs no hint.
     match crate::persistence::enqueue_pending_turn_inputs_conn(tx, &batch, now, 0) {
         Ok(_) => Ok(Ok(())),
-        Err(lash_core_execution::StoreError::Contended) => {
+        Err(lash_core_store::store::StoreError::Contended) => {
             Ok(Err(DurableError::Store(StoreFailure {
                 kind: StoreFailureKind::Contended,
                 message: "the owner's session mail contended".to_owned(),
@@ -492,7 +496,7 @@ mod tests {
         let conn = crate::tests::input_run_sql_fixture();
         crate::observed_sql::enable(&conn);
         let (answer, receipt) =
-            lash_core_execution::facade_support::sql::collect("session.admit", "sqlite", async {
+            lash_core_ids::operational_metrics::sql::collect("session.admit", "sqlite", async {
                 admit(
                     &conn,
                     &"session".into(),

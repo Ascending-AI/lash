@@ -8,8 +8,10 @@ use std::collections::BTreeMap;
 use lash_durable::domain::WaitId;
 use serde::{Deserialize, Serialize};
 
-use crate::runtime::process::engine_state::{KeyName, StepName, StepRequest};
 use crate::{ProcessId, ToolCallId};
+use lash_execution_contracts::process::KeyName;
+use lash_execution_contracts::process::StepName;
+use lash_execution_contracts::process::StepRequest;
 
 /// The driver's state of one process.
 #[derive(Clone, Debug, Default, PartialEq, Serialize, Deserialize)]
@@ -49,16 +51,16 @@ pub(super) struct Driver {
     /// outcome class: recorded once, with the terminal.
     #[serde(default, skip_serializing_if = "BTreeMap::is_empty")]
     pub(super) omitted_effects:
-        BTreeMap<String, crate::runtime::process::ProcessEffectOmittedCounts>,
+        BTreeMap<String, lash_execution_contracts::process::ProcessEffectOmittedCounts>,
     /// A host's successor request (FIG-6121), recorded by the pass that read
     /// its mail and applied, or refused, once the run is at rest.
     #[serde(default, skip_serializing_if = "Option::is_none")]
-    pub(super) successor: Option<crate::ProcessSuccessorRequest>,
+    pub(super) successor: Option<lash_execution_contracts::process::ProcessSuccessorRequest>,
     /// The status the engine projected from the state the last transition
     /// committed, when its registration declares a projection: recorded in
     /// that transition's own commit, read back by [`engine_status`].
     #[serde(default, skip_serializing_if = "Option::is_none")]
-    pub(super) status: Option<Box<crate::EngineStatus>>,
+    pub(super) status: Option<Box<lash_execution_contracts::process::EngineStatus>>,
 }
 
 impl Driver {
@@ -226,13 +228,13 @@ pub(crate) fn in_flight_effects(
 pub async fn engine_status(
     reads: &dyn lash_durable::DurableReads,
     process: &ProcessId,
-) -> Result<Option<crate::EngineStatus>, lash_durable::DurableError> {
+) -> Result<Option<lash_execution_contracts::process::EngineStatus>, lash_durable::DurableError> {
     /// The one field of a driver row this read decodes: a `SessionTurn`
     /// process's driver is another shape, and records no status.
     #[derive(Deserialize)]
     struct Recorded {
         #[serde(default)]
-        status: Option<crate::EngineStatus>,
+        status: Option<lash_execution_contracts::process::EngineStatus>,
     }
     let Some(row) = reads.process(process).await? else {
         return Ok(None);

@@ -4,8 +4,8 @@ impl PostgresStore {
     pub(crate) async fn admit_session_inner(
         &self,
         request: &SessionStoreCreateRequest,
-    ) -> Result<lash_core_execution::SessionAdmission, StoreError> {
-        lash_core_execution::store::validate_session_id(&request.session_id)?;
+    ) -> Result<lash_core_store::store::SessionAdmission, StoreError> {
+        lash_core_store::store::validate_session_id(&request.session_id)?;
         let meta = SessionMeta {
             owning_process_id: request.owning_process_id.clone(),
             session_id: request.session_id.clone(),
@@ -43,14 +43,14 @@ impl PostgresStore {
             // record's writer ranges before the head that carries them is
             // written (FIG-4746).
             tx.admit_plugin_writers(
-                &lash_core_execution::store::plugin_writers::PluginPublication::of_session_config(
+                &lash_core_store::store::plugin_writers::PluginPublication::of_session_config(
                     &request.config,
                 ),
             )
             .await?;
             // The creator's config is baked in with the catalog row, in this
             // transaction (FIG-4099).
-            let created_head = lash_core_execution::store::SessionHeadMeta::created(
+            let created_head = lash_core_store::store::SessionHeadMeta::created(
                 &request.session_id,
                 request.config.clone(),
                 self.fence.fleet(),
@@ -79,7 +79,7 @@ impl PostgresStore {
                     .ok_or_else(|| StoreError::SessionBindingNotMaterialized {
                         session_id: request.session_id.clone(),
                     })?;
-            lash_core_execution::store_backend_support::guard_rebind_lineage(
+            lash_core_store::store_backend_support::guard_rebind_lineage(
                 &request.session_id,
                 &recorded,
                 &request.relation,
@@ -87,9 +87,9 @@ impl PostgresStore {
         }
         tx.commit().await.map_err(store_sqlx_error)?;
         Ok(if inserted {
-            lash_core_execution::SessionAdmission::Created
+            lash_core_store::store::SessionAdmission::Created
         } else {
-            lash_core_execution::SessionAdmission::Rebound
+            lash_core_store::store::SessionAdmission::Rebound
         })
     }
 }

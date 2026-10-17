@@ -86,12 +86,20 @@ async fn window_rejects_corrupt_anchors() {
 /// physical prelude sizes are bounded independently of transcript depth.
 #[tokio::test]
 async fn turn_prelude_bytes_do_not_grow_with_history_depth() {
-    use lash_core_execution::{
-        EffectAddress, ExecutionScope, Message, MessageRole, Part, RuntimeCommit,
-        RuntimeSessionState, SessionCatalogStore, SessionCommitStore, SessionId, SessionPolicy,
-        TurnPrelude, TurnPreludeStore,
-    };
+    use lash_core_execution::EffectAddress;
+    use lash_core_execution::ExecutionScope;
+    use lash_core_execution::TurnPrelude;
+    use lash_core_store::session_policy::SessionPolicy;
+    use lash_core_store::session_state::RuntimeSessionState;
+    use lash_core_store::store::RuntimeCommit;
+    use lash_core_store::store::SessionCatalogStore;
+    use lash_core_store::store::SessionCommitStore;
+    use lash_execution_contracts::turn_prelude::TurnPreludeStore;
     use lash_protocol_types::MessageSequence;
+    use lash_protocol_types::SessionId;
+    use lash_protocol_types::session_model::Message;
+    use lash_protocol_types::session_model::MessageRole;
+    use lash_protocol_types::session_model::Part;
     let mut sizes = Vec::new();
     for depth in [8, 128] {
         let backend = TestBackend::open(SUBSTRATE).await;
@@ -106,9 +114,9 @@ async fn turn_prelude_bytes_do_not_grow_with_history_depth() {
         let mut state = RuntimeSessionState {
             session_id: session_id.clone(),
             ..RuntimeSessionState::fixture(SessionPolicy::new(
-                lash_core_execution::TurnBudget::Unbounded,
-                lash_core_execution::MaxToolCalls::new(1024),
-                lash_core_execution::NoProgressBudget::bounded(12),
+                lash_protocol_types::session_model::TurnBudget::Unbounded,
+                lash_protocol_types::session_model::MaxToolCalls::new(1024),
+                lash_protocol_types::session_model::NoProgressBudget::bounded(12),
             ))
         };
         let message = |ordinal: usize| Message {
@@ -132,12 +140,11 @@ async fn turn_prelude_bytes_do_not_grow_with_history_depth() {
             .await
             .expect("commit history");
         state.apply_persisted_commit_result(receipt);
-        let session_store =
-            lash_core_execution::store::SessionStore::new(store.clone(), session_id)
-                .expect("session store");
-        let loaded = lash_core_execution::store::load_session_window_state(
+        let session_store = lash_core_store::store::SessionStore::new(store.clone(), session_id)
+            .expect("session store");
+        let loaded = lash_core_store::store::load_session_window_state(
             &session_store,
-            lash_core_execution::store::WindowSelector::Current,
+            lash_core_store::store::WindowSelector::Current,
         )
         .await
         .expect("window read")
@@ -157,7 +164,7 @@ async fn turn_prelude_bytes_do_not_grow_with_history_depth() {
         let mut prelude = TurnPrelude::new(
             EffectAddress::new(scope.clone(), "turn-config").expect("address"),
             Vec::new(),
-            lash_core_execution::store::SessionHeadRef {
+            lash_core_store::store::SessionHeadRef {
                 generation: 0,
                 revision: state.head_revision,
                 leaf: state.session_graph.leaf_node_id.clone(),
@@ -189,13 +196,10 @@ async fn turn_prelude_bytes_do_not_grow_with_history_depth() {
             .await
             .expect("collect old revisions and checkpoints");
         let reopened = backend.reopen().await.store().await;
-        let session_store = lash_core_execution::store::SessionStore::new(
-            reopened.clone(),
-            state.session_id.clone(),
-        )
-        .expect("reopened session store");
-        let restored = reference
-            .read(reopened.as_ref())
+        let session_store =
+            lash_core_store::store::SessionStore::new(reopened.clone(), state.session_id.clone())
+                .expect("reopened session store");
+        let restored = TurnPrelude::read(&reference, reopened.as_ref())
             .await
             .expect("restore prelude");
         let (_, restored_history, restored_context) = restored

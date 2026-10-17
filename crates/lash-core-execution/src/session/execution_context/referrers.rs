@@ -16,7 +16,9 @@ impl RuntimeExecutionContext<'_> {
     /// # Errors
     ///
     /// A scope with no journal identity.
-    pub fn execution_referrer(&self) -> Result<crate::ArtifactReferrer, crate::PluginError> {
+    pub fn execution_referrer(
+        &self,
+    ) -> Result<crate::ArtifactReferrer, lash_execution_contracts::plugin_error::PluginError> {
         execution_referrer_of(self.dispatch.effect_controller.execution_scope())
     }
 
@@ -26,7 +28,9 @@ impl RuntimeExecutionContext<'_> {
     /// # Errors
     ///
     /// A scope with no journal identity.
-    pub fn execution_claim(&self) -> Result<crate::ReferrerClaim, crate::PluginError> {
+    pub fn execution_claim(
+        &self,
+    ) -> Result<crate::ReferrerClaim, lash_execution_contracts::plugin_error::PluginError> {
         execution_claim_of(self.dispatch.effect_controller.execution_scope())
     }
 
@@ -39,9 +43,11 @@ impl RuntimeExecutionContext<'_> {
     ///
     /// # Errors
     ///
-    /// [`crate::PluginError::NotASessionRuntime`] inside a process, which has
+    /// [`lash_execution_contracts::plugin_error::PluginError::NotASessionRuntime`] inside a process, which has
     /// no frame.
-    pub fn frame_referrer(&self) -> Result<crate::ArtifactReferrer, crate::PluginError> {
+    pub fn frame_referrer(
+        &self,
+    ) -> Result<crate::ArtifactReferrer, lash_execution_contracts::plugin_error::PluginError> {
         match &self.dispatch.owner {
             crate::ExecutionOwner::SessionFrame {
                 session_id,
@@ -60,31 +66,36 @@ impl RuntimeExecutionContext<'_> {
     ///
     /// # Errors
     ///
-    /// [`crate::PluginError::NotASessionRuntime`] inside a process; otherwise
+    /// [`lash_execution_contracts::plugin_error::PluginError::NotASessionRuntime`] inside a process; otherwise
     /// never for a frame referrer, and the error is the claim constructor's.
-    pub fn frame_claim(&self) -> Result<crate::ReferrerClaim, crate::PluginError> {
-        crate::ReferrerClaim::unguarded(self.frame_referrer()?)
-            .map_err(|error| crate::PluginError::Session(error.to_string()))
+    pub fn frame_claim(
+        &self,
+    ) -> Result<crate::ReferrerClaim, lash_execution_contracts::plugin_error::PluginError> {
+        crate::ReferrerClaim::unguarded(self.frame_referrer()?).map_err(|error| {
+            lash_execution_contracts::plugin_error::PluginError::Session(error.to_string())
+        })
     }
 }
 
 /// The execution referrer of `scope`: its journal (ADR 0113 §3.7).
 fn execution_referrer_of(
     scope: &crate::ExecutionScope,
-) -> Result<crate::ArtifactReferrer, crate::PluginError> {
+) -> Result<crate::ArtifactReferrer, lash_execution_contracts::plugin_error::PluginError> {
     scope
         .journal_identity()
         .map(crate::ArtifactReferrer::Execution)
-        .map_err(|error| crate::PluginError::Session(error.to_string()))
+        .map_err(|error| {
+            lash_execution_contracts::plugin_error::PluginError::Session(error.to_string())
+        })
 }
 
 /// The claim of `scope`'s execution referrer, armed with its journal guard.
 pub(crate) fn execution_claim_of(
     scope: &crate::ExecutionScope,
-) -> Result<crate::ReferrerClaim, crate::PluginError> {
-    let journal = scope
-        .journal_identity()
-        .map_err(|error| crate::PluginError::Session(error.to_string()))?;
+) -> Result<crate::ReferrerClaim, lash_execution_contracts::plugin_error::PluginError> {
+    let journal = scope.journal_identity().map_err(|error| {
+        lash_execution_contracts::plugin_error::PluginError::Session(error.to_string())
+    })?;
     Ok(crate::ReferrerClaim::guarded(
         crate::ReferrerGuard::Journal(journal),
     ))

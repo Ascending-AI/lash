@@ -9,10 +9,12 @@
 
 use std::sync::Arc;
 
-use lash_core::Backend;
+use lash_execution_contracts::backend::Backend;
 
 /// The durable engine's backend over `stores`.
-pub(crate) fn durable_backend(stores: Arc<dyn lash_core::StoreSet>) -> anyhow::Result<Backend> {
+pub(crate) fn durable_backend(
+    stores: Arc<dyn lash_execution_contracts::backend::StoreSet>,
+) -> anyhow::Result<Backend> {
     lash::durable::DurableBackendBuilder::new(stores)
         .build()
         .map_err(|err| anyhow::anyhow!(err.to_string()))
@@ -24,6 +26,9 @@ pub(crate) async fn sqlite_memory_stores() -> anyhow::Result<lash_sqlite_store::
     let stores = lash_sqlite_store::SqliteStoreSet::memory()
         .await
         .map_err(|err| anyhow::anyhow!(err.to_string()))?;
-    lash_core::testing::process_execution_env_fixture(stores.process_env_store().as_ref()).await;
+    lash_execution_contracts::testing::process_execution_env_fixture(
+        stores.process_env_store().as_ref(),
+    )
+    .await;
     Ok(stores)
 }

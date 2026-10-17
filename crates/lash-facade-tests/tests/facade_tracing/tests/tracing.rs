@@ -5,6 +5,7 @@
 //! deleted with the engine double).
 
 use super::*;
+use lash_execution_contracts::waits::PinnedKey;
 
 use lash_protocol_types::{llm::types::StreamBlockEvent, llm::types::StreamBlockKind};
 
@@ -37,7 +38,7 @@ impl Traced {
 
     /// A core over `backend`, its own node under `owner`.
     fn over(
-        backend: lash_core::Backend,
+        backend: lash_execution_contracts::backend::Backend,
         owner: lash::persistence::LeaseOwnerIdentity,
         provider: ProviderHandle,
         configure: impl FnOnce(lash::LashCoreBuilder) -> lash::LashCoreBuilder,
@@ -749,7 +750,7 @@ async fn before_tool_hook_refusal_emits_an_ordered_lifecycle_pair() -> Result<()
 
 /// An `echo_tool` whose completion the law resolves out of band.
 pub(super) struct PendingEchoTool(
-    pub(super) tokio::sync::mpsc::UnboundedSender<(lash_core::PinnedKey, String)>,
+    pub(super) tokio::sync::mpsc::UnboundedSender<(PinnedKey, String)>,
 );
 
 #[async_trait]
@@ -1345,7 +1346,7 @@ fn tree_provider() -> ProviderHandle {
     .into_handle()
 }
 
-async fn resolve_tree_key(core: &LashCore, key: &lash_core::PinnedKey) -> Result<()> {
+async fn resolve_tree_key(core: &LashCore, key: &PinnedKey) -> Result<()> {
     assert_eq!(
         core.completions()
             .resolve(
@@ -1395,7 +1396,9 @@ async fn golden_tree_survives_a_kill_and_resume_on_another_node() -> Result<()> 
     let stores = sqlite_memory_store_set().await;
     let (keys, mut published) = tokio::sync::mpsc::unbounded_channel();
     let node_a = Traced::over(
-        lash_conformance::backend_over(Arc::clone(&stores) as Arc<dyn lash_core::StoreSet>),
+        lash_conformance::backend_over(
+            Arc::clone(&stores) as Arc<dyn lash_execution_contracts::backend::StoreSet>
+        ),
         lash::persistence::LeaseOwnerIdentity::opaque(
             lash::persistence::LeaseOwnerId::new("golden-tree"),
             lash::persistence::LeaseIncarnationId::new("node-a"),
@@ -1417,7 +1420,9 @@ async fn golden_tree_survives_a_kill_and_resume_on_another_node() -> Result<()> 
 
     let (keys, _) = tokio::sync::mpsc::unbounded_channel();
     let node_b = Traced::over(
-        lash_conformance::backend_over(Arc::clone(&stores) as Arc<dyn lash_core::StoreSet>),
+        lash_conformance::backend_over(
+            Arc::clone(&stores) as Arc<dyn lash_execution_contracts::backend::StoreSet>
+        ),
         lash::persistence::LeaseOwnerIdentity::opaque(
             lash::persistence::LeaseOwnerId::new("golden-tree"),
             lash::persistence::LeaseIncarnationId::new("node-b"),

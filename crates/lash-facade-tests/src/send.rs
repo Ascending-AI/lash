@@ -52,14 +52,18 @@ pub async fn composing_fixture() -> Result<Fixture> {
 /// [`fixture`] over the store set's backend as `layer` rebuilds it.
 pub async fn fixture_over(
     batch: usize,
-    layer: impl FnOnce(lash_core::Backend) -> lash_core::Backend,
+    layer: impl FnOnce(
+        lash_execution_contracts::backend::Backend,
+    ) -> lash_execution_contracts::backend::Backend,
 ) -> Result<Fixture> {
     fixture_over_with_batching(lash::QueuedWorkBatchingConfig::new(batch), layer).await
 }
 
 pub async fn fixture_over_with_batching(
     batching: lash::QueuedWorkBatchingConfig,
-    layer: impl FnOnce(lash_core::Backend) -> lash_core::Backend,
+    layer: impl FnOnce(
+        lash_execution_contracts::backend::Backend,
+    ) -> lash_execution_contracts::backend::Backend,
 ) -> Result<Fixture> {
     let backend = layer(sqlite_memory_store_backend().await);
     let release = Arc::new(Notify::new());
@@ -100,7 +104,9 @@ pub async fn reaches(counter: &AtomicUsize, count: usize, what: &str) {
 
 /// Wraps the deployment store a fixture's catalog hands out.
 pub type StoreMap = Arc<
-    dyn Fn(Arc<dyn lash_core::DeploymentStore>) -> Arc<dyn lash_core::DeploymentStore>
+    dyn Fn(
+            Arc<dyn lash_execution_contracts::deployment::DeploymentStore>,
+        ) -> Arc<dyn lash_execution_contracts::deployment::DeploymentStore>
         + Send
         + Sync,
 >;

@@ -3,7 +3,7 @@
 
 use std::sync::Arc;
 
-use lash_core_execution::ProcessRegistry;
+use lash_execution_contracts::process::ProcessRegistry;
 use lash_sqlite_store::SqliteStoreSet;
 
 mod file {
@@ -17,8 +17,10 @@ mod file {
         )
         .await
         .expect("open the prune-horizon file backend");
-        lash_core::testing::process_execution_env_fixture(backend.process_env_store().as_ref())
-            .await;
+        lash_execution_contracts::testing::process_execution_env_fixture(
+            backend.process_env_store().as_ref(),
+        )
+        .await;
         let registry = backend.process_registry() as Arc<dyn ProcessRegistry>;
         ((dir, backend), registry)
     });
@@ -31,8 +33,10 @@ mod memory {
         let backend = SqliteStoreSet::memory()
             .await
             .expect("open the prune-horizon memory backend");
-        lash_core::testing::process_execution_env_fixture(backend.process_env_store().as_ref())
-            .await;
+        lash_execution_contracts::testing::process_execution_env_fixture(
+            backend.process_env_store().as_ref(),
+        )
+        .await;
         let registry = backend.process_registry() as Arc<dyn ProcessRegistry>;
         (backend, registry)
     });

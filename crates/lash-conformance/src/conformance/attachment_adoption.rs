@@ -5,6 +5,7 @@ use super::attachment_referrers::{claim, permit, write};
 use lash_core::facade_support::{RuntimeAttachmentStore, reclaim_unreferenced_attachments};
 use lash_core::testing::store_fixtures::session_store_request;
 use lash_core::*;
+use lash_execution_contracts::deployment::DeploymentStore;
 use pretty_assertions::assert_eq;
 use std::future::Future;
 use std::sync::Arc;

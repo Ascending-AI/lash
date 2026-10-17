@@ -4,7 +4,7 @@
 //! through the crate-root glob.
 
 use crate::*;
-use lash_core_execution::runtime::QueuedWorkPayload;
+use lash_core_store::queued_work_vocabulary::QueuedWorkPayload;
 
 #[derive(Clone, Debug)]
 pub(crate) struct QueuedBatchRow {
@@ -13,13 +13,13 @@ pub(crate) struct QueuedBatchRow {
     session_id: SessionId,
     source_key: Option<String>,
     pub(crate) delivery_policy: DeliveryPolicy,
-    pub(crate) payload: lash_core_execution::runtime::SubmittedBody<QueuedWorkPayload>,
+    pub(crate) payload: lash_core_store::turn_input_vocabulary::SubmittedBody<QueuedWorkPayload>,
     pub(crate) authority: QueuedWorkAuthority,
     pub(crate) merge_key: Option<String>,
     enqueued_at_ms: u64,
     submission_digest: String,
-    terminal: Option<lash_core_execution::store::IngressTerminal>,
-    trace_cause: lash_core_execution::TraceCause,
+    terminal: Option<lash_core_store::store::IngressTerminal>,
+    trace_cause: lash_trace::TraceCause,
 }
 
 /// The turn-lane candidate `batch` offers an admission.
@@ -55,14 +55,14 @@ pub(crate) fn queued_batch_row(row: PgRow) -> Result<QueuedBatchRow, StoreError>
             row.get("enqueued_at_ms"),
         )?,
         submission_digest: row.get("submission_digest"),
-        terminal: lash_core_execution::store_backend_support::decode_ingress_terminal(
+        terminal: lash_core_store::store_backend_support::decode_ingress_terminal(
             "QueuedWorkBatch",
             row.get::<Option<String>, _>("terminal_cause").as_deref(),
             row.get::<Option<i64>, _>("terminal_at_ms")
                 .map(|at| u64_from_sql("QueuedWorkBatch", "terminal_at_ms", at))
                 .transpose()?,
         )?,
-        trace_cause: lash_core_execution::store_backend_support::decode_trace_cause(
+        trace_cause: lash_core_store::store_backend_support::decode_trace_cause(
             "QueuedWorkBatch",
             row.get::<Option<String>, _>("trace_cause_json").as_deref(),
         )?,

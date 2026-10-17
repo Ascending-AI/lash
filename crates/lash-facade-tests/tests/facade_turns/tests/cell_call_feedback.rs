@@ -28,7 +28,7 @@ fn message_strings<'a>(value: &'a serde_json::Value, found: &mut Vec<&'a str>) {
 /// A core whose sessions are created under `presentation`, answering from
 /// `responses` and recording each request's messages in `requests`.
 fn core(
-    backend: lash_core::Backend,
+    backend: lash_execution_contracts::backend::Backend,
     dialect: lash::rlm::CellDialect,
     channel: lash::rlm::RlmChannel,
     presentation: lash::rlm::RlmPresentationConfig,
@@ -47,7 +47,7 @@ fn core(
 }
 
 fn core_with_feedback(
-    backend: lash_core::Backend,
+    backend: lash_execution_contracts::backend::Backend,
     dialect: lash::rlm::CellDialect,
     channel: lash::rlm::RlmChannel,
     presentation: lash::rlm::RlmPresentationConfig,

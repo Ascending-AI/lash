@@ -2,7 +2,7 @@
 
 use std::sync::Arc;
 
-use lash_core_execution::ProcessRegistry;
+use lash_execution_contracts::process::ProcessRegistry;
 
 use super::{Retained, SUBSTRATE};
 use crate::backend_fixture::TestBackend;
@@ -10,7 +10,8 @@ use crate::backend_fixture::TestBackend;
 async fn handles(backend: &TestBackend) -> lash_conformance::ToolIntentRetentionHandles {
     lash_conformance::ToolIntentRetentionHandles {
         registry: backend.process_registry() as Arc<dyn ProcessRegistry>,
-        sessions: backend.store().await as Arc<dyn lash_core_execution::DeploymentStore>,
+        sessions: backend.store().await
+            as Arc<dyn lash_execution_contracts::deployment::DeploymentStore>,
     }
 }
 

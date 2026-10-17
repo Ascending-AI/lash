@@ -163,28 +163,28 @@ impl ToolRegistry {
     pub fn advertise(
         &self,
         config: &OwnerConfigView,
-    ) -> Result<Vec<SurfaceEntry>, crate::PluginError> {
+    ) -> Result<Vec<SurfaceEntry>, lash_execution_contracts::plugin_error::PluginError> {
         let mut entries = Vec::new();
         for (key, provider) in &self.providers {
             config.validate_provider(key)?;
             let mut ids = std::collections::BTreeSet::new();
             for manifest in provider.tool_manifests(config)? {
                 if !ids.insert(manifest.id.clone()) {
-                    return Err(crate::PluginError::ResidentToolDuplicateId {
+                    return Err(lash_execution_contracts::plugin_error::PluginError::ResidentToolDuplicateId {
                         tool_id: manifest.id,
                     });
                 }
                 // A read is a valid one, and its provider reads it: it never
                 // falls back to the provider's recorded execution.
                 if let Some(refusal) = manifest.read_refusal() {
-                    return Err(crate::PluginError::ToolRegistrationRefused {
+                    return Err(lash_execution_contracts::plugin_error::PluginError::ToolRegistrationRefused {
                         source: Box::new(refusal),
                     });
                 }
                 if manifest.execution_policy == crate::ExecutionPolicy::Read
                     && !self.reads.contains_key(key)
                 {
-                    return Err(crate::PluginError::ToolRegistrationRefused {
+                    return Err(lash_execution_contracts::plugin_error::PluginError::ToolRegistrationRefused {
                         source: Box::new(
                             lash_protocol_types::RegistrationRefused::ReadWithoutReader {
                                 tool: manifest.name.clone(),
@@ -225,12 +225,14 @@ fn served_definition(
     provider: &dyn ToolProvider,
     manifest: ToolManifest,
     config: &OwnerConfigView,
-) -> Result<ToolDefinition, crate::PluginError> {
+) -> Result<ToolDefinition, lash_execution_contracts::plugin_error::PluginError> {
     let contract = provider
         .resolve_contract_by_id(&manifest.id, config)
-        .ok_or_else(|| crate::PluginError::ResidentToolContractUnavailable {
-            tool_id: manifest.id.clone(),
-            name: manifest.name.clone(),
+        .ok_or_else(|| {
+            lash_execution_contracts::plugin_error::PluginError::ResidentToolContractUnavailable {
+                tool_id: manifest.id.clone(),
+                name: manifest.name.clone(),
+            }
         })?;
     Ok(ToolDefinition {
         manifest,
@@ -532,7 +534,8 @@ impl ToolProvider for SurfaceTools {
     fn tool_manifests(
         &self,
         _config: &OwnerConfigView,
-    ) -> std::result::Result<Vec<ToolManifest>, crate::PluginError> {
+    ) -> std::result::Result<Vec<ToolManifest>, lash_execution_contracts::plugin_error::PluginError>
+    {
         Ok({
             self.routes
                 .values()

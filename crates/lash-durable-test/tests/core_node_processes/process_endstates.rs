@@ -28,12 +28,12 @@ async fn a_kernel_process_whose_document_is_not_stored_is_refused_at_its_start(t
         .core
         .processes()
         .start(
-            lash_core::ProcessStartRequest::engine(
+            lash_execution_contracts::process::ProcessStartRequest::engine(
                 lash_vm_runtime::LASH_VM_ENGINE_KIND.to_owned(),
                 payload,
-                lash_core::EngineLaunch::new(env_ref, settings),
-                lash_core::ProcessOriginator::host(),
-                lash_core::LifetimeDecision::Detached,
+                lash_execution_contracts::process::EngineLaunch::new(env_ref, settings),
+                lash_execution_contracts::process::ProcessOriginator::host(),
+                lash_execution_contracts::process::LifetimeDecision::Detached,
             ),
             deployment.core.effect_host(),
         )
@@ -171,11 +171,12 @@ async fn a_sleeping_kernel_process_ends_cancelled(tier: Tier, state: SleepState)
                 !record.is_terminal(),
                 "the process ended before its sleep: {record:?}"
             );
-            if record
-                .waits()
-                .iter()
-                .any(|wait| matches!(wait.kind, lash_core::WaitKind::Sleep { .. }))
-            {
+            if record.waits().iter().any(|wait| {
+                matches!(
+                    wait.kind,
+                    lash_execution_contracts::process::WaitKind::Sleep { .. }
+                )
+            }) {
                 break;
             }
             tokio::time::sleep(Duration::from_millis(20)).await;
@@ -209,7 +210,7 @@ async fn a_sleeping_kernel_process_ends_cancelled(tier: Tier, state: SleepState)
     assert!(
         matches!(
             &record.lifecycle,
-            lash_core::ProcessLifecycleState::Terminal { .. }
+            lash_execution_contracts::process::ProcessLifecycleState::Terminal { .. }
         ) && record.waits().is_empty(),
         "the cancelled process holds its terminal and no wait: {record:?}"
     );

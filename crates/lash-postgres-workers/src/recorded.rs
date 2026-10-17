@@ -15,10 +15,8 @@
 use std::sync::Arc;
 use std::sync::atomic::{AtomicBool, Ordering};
 
-use lash_core_execution::{
-    AttachmentStore, Clock, DeploymentStore, ModuleArtifactStore, ProcessEnvStore, ProcessRegistry,
-    StoreBindingId, StoreSet,
-};
+use lash_core_execution::AttachmentStore;
+use lash_core_execution::Clock;
 use lash_durable::domain::{
     ExecKey, ExecRootRow, HydratedGraph, OwnerKey, ProcessActorRow, RootOwner, RunFacts, ScopeKey,
     SessionCloseRow, TurnEnd, TurnRow, WaitId, WaitRow,
@@ -28,6 +26,12 @@ use lash_durable::{
     DurableError, DurableInstant, DurableReads, DurableStore, Epoch, HeartbeatOutcome, MailCommit,
     MailTx, NodeLease, NodeSpec, NodeWakeFeed, NodeWakes, Owner, Reaped, WakeBatch,
 };
+use lash_execution_contracts::backend::StoreBindingId;
+use lash_execution_contracts::backend::StoreSet;
+use lash_execution_contracts::deployment::DeploymentStore;
+use lash_execution_contracts::module_artifacts::ModuleArtifactStore;
+use lash_execution_contracts::process::ProcessEnvStore;
+use lash_execution_contracts::process::ProcessRegistry;
 use lash_protocol_types::{ProcessId, SessionId, TurnId};
 use tokio::sync::Notify;
 
@@ -562,7 +566,9 @@ impl StoreSet for RecordedStores {
         self.inner.process_registry()
     }
 
-    fn process_authority_reads(&self) -> Arc<dyn lash_core::ProcessAuthorityReads> {
+    fn process_authority_reads(
+        &self,
+    ) -> Arc<dyn lash_execution_contracts::backend::ProcessAuthorityReads> {
         self.inner.process_authority_reads()
     }
 
@@ -570,7 +576,9 @@ impl StoreSet for RecordedStores {
         self.inner.process_env_store()
     }
 
-    fn turn_prelude_store(&self) -> Arc<dyn lash_core_execution::TurnPreludeStore> {
+    fn turn_prelude_store(
+        &self,
+    ) -> Arc<dyn lash_execution_contracts::turn_prelude::TurnPreludeStore> {
         self.inner.turn_prelude_store()
     }
 
@@ -578,7 +586,9 @@ impl StoreSet for RecordedStores {
         self.inner.tool_material_store()
     }
 
-    fn definition_store(&self) -> Arc<dyn lash_core_execution::ProcessDefinitionStore> {
+    fn definition_store(
+        &self,
+    ) -> Arc<dyn lash_execution_contracts::process::ProcessDefinitionStore> {
         self.inner.definition_store()
     }
 

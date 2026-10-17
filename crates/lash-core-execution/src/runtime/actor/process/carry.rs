@@ -2,7 +2,7 @@
 //! at its claim (ADR 0106 §1, §2).
 //!
 //! An engine registered with an
-//! [`EngineStateMigration`](crate::EngineStateMigration) decodes the formats
+//! [`EngineStateMigration`](lash_execution_contracts::process::EngineStateMigration) decodes the formats
 //! it carries beside its own, so its node claims a process the previous
 //! build left in one. The claimer carries the state to the engine's own
 //! format as its first commit, before any transition, once every live node
@@ -19,9 +19,11 @@ use lash_durable::{
 
 use super::activation::{Pass, ProcessActivation};
 use super::driver::Driver;
-use super::terminal::ProcessParkReason;
-use crate::runtime::process::engine_state::{EngineState, EngineStateFormat};
-use crate::{ProcessEngine, ProcessId};
+use crate::ProcessId;
+use lash_execution_contracts::park::ProcessParkReason;
+use lash_execution_contracts::process::EngineState;
+use lash_execution_contracts::process::EngineStateFormat;
+use lash_execution_contracts::process::ProcessEngine;
 
 /// What the claim-time step did with the pass's transaction.
 pub(super) enum Carry {

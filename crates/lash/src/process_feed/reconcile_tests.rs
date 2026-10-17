@@ -5,7 +5,7 @@ use super::*;
 
 use std::time::Duration;
 
-use lash_core::StoreSet as _;
+use lash_execution_contracts::backend::StoreSet as _;
 
 fn committed_sequence(item: ProcessObservationStreamItem) -> u64 {
     match item {
@@ -58,7 +58,7 @@ async fn a_follower_whose_missed_facts_were_released_gets_one_gap() {
 
     fixture.commit().await;
     let last = fixture.commit().await;
-    lash_core::ProcessRetention::release_process_events(
+    lash_execution_contracts::process::ProcessRetention::release_process_events(
         fixture.registry.as_ref(),
         &fixture.process_id,
         last.sequence,
@@ -156,7 +156,10 @@ async fn a_follower_on_one_core_observes_the_terminal_another_core_commits() {
     let dir = tempfile::tempdir().expect("two-core tempdir");
     let database = dir.path().join("lash.db");
     let (stores, core_a) = core_on(&database, "fig-5549-follower").await;
-    lash_core::testing::process_execution_env_fixture(stores.process_env_store().as_ref()).await;
+    lash_execution_contracts::testing::process_execution_env_fixture(
+        stores.process_env_store().as_ref(),
+    )
+    .await;
     let (_stores_b, core_b) = core_on(&database, "fig-5549-committer").await;
     // Both nodes listen before the commit: each holds its boot's liveness
     // lock once its listener is open.
@@ -175,10 +178,10 @@ async fn a_follower_on_one_core_observes_the_terminal_another_core_commits() {
 
     let committer = core_b.process_registry.clone();
     let process_id = committer
-        .register_process(lash_core::ProcessRegistration::new(
-            lash_core::testing::held_engine_input(serde_json::Value::Null),
-            lash_core::ProcessProvenance::host(),
-            lash_core::Lifetime::Detached,
+        .register_process(lash_execution_contracts::process::ProcessRegistration::new(
+            lash_execution_contracts::testing::held_engine_input(serde_json::Value::Null),
+            lash_execution_contracts::process::ProcessProvenance::host(),
+            lash_execution_contracts::process::Lifetime::Detached,
         ))
         .await
         .expect("register on core B")
@@ -193,10 +196,12 @@ async fn a_follower_on_one_core_observes_the_terminal_another_core_commits() {
     let terminal = committer
         .complete_process(
             &process_id,
-            lash_core::ProcessAwaitOutput::from_tool_output(lash_core::ToolCallOutput::success(
-                serde_json::Value::Null,
-            )),
-            lash_core::ProcessCompletionAuthority::workflow_key(&process_id),
+            lash_execution_contracts::process::ProcessAwaitOutput::from_tool_output(
+                lash_core::ToolCallOutput::success(serde_json::Value::Null),
+            ),
+            lash_execution_contracts::process::ProcessCompletionAuthority::workflow_key(
+                &process_id,
+            ),
         )
         .await
         .expect("complete on core B");
@@ -209,7 +214,10 @@ async fn a_follower_on_one_core_observes_the_terminal_another_core_commits() {
         };
         assert_eq!(fact.sequence, sequence + 1, "every commit, in order");
         sequence = fact.sequence;
-        if matches!(fact.fact, lash_core::ProcessLifecycleFact::Terminal { .. }) {
+        if matches!(
+            fact.fact,
+            lash_execution_contracts::process::ProcessLifecycleFact::Terminal { .. }
+        ) {
             break;
         }
     }
@@ -285,17 +293,20 @@ async fn a_local_commit_is_published_once_however_many_feeds_are_open() {
         open: tokio::sync::watch::channel(true).0,
     });
     let stores = crate::tests::sqlite_memory_store_set().await;
-    lash_core::testing::process_execution_env_fixture(stores.process_env_store().as_ref()).await;
+    lash_execution_contracts::testing::process_execution_env_fixture(
+        stores.process_env_store().as_ref(),
+    )
+    .await;
     let core = crate::tests::standard_core_builder_over(lash_conformance::backend_over(stores))
         .process_replay_store(replay.clone())
         .build(crate::tests::host::runtime_lease_owner())
         .expect("standard core");
     let registry = core.process_registry.clone();
     let process_id = registry
-        .register_process(lash_core::ProcessRegistration::new(
-            lash_core::testing::held_engine_input(serde_json::Value::Null),
-            lash_core::ProcessProvenance::host(),
-            lash_core::Lifetime::Detached,
+        .register_process(lash_execution_contracts::process::ProcessRegistration::new(
+            lash_execution_contracts::testing::held_engine_input(serde_json::Value::Null),
+            lash_execution_contracts::process::ProcessProvenance::host(),
+            lash_execution_contracts::process::Lifetime::Detached,
         ))
         .await
         .expect("register the process")
@@ -353,10 +364,12 @@ async fn a_local_commit_is_published_once_however_many_feeds_are_open() {
     let terminal = registry
         .complete_process(
             &process_id,
-            lash_core::ProcessAwaitOutput::from_tool_output(lash_core::ToolCallOutput::success(
-                serde_json::Value::Null,
-            )),
-            lash_core::ProcessCompletionAuthority::workflow_key(&process_id),
+            lash_execution_contracts::process::ProcessAwaitOutput::from_tool_output(
+                lash_core::ToolCallOutput::success(serde_json::Value::Null),
+            ),
+            lash_execution_contracts::process::ProcessCompletionAuthority::workflow_key(
+                &process_id,
+            ),
         )
         .await
         .expect("complete the process");

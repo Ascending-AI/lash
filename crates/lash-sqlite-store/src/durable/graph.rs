@@ -1197,7 +1197,7 @@ pub(super) fn install(
         edges.push(']');
         cached_execute(tx, SQL.sqlite.insert_edges.sql(), [edges])?;
     }
-    if let Some(window) = lash_core_execution::facade_support::sql::Window::current() {
+    if let Some(window) = lash_core_ids::operational_metrics::sql::Window::current() {
         window.installed_graph(installed.newly_installed_canonical_bytes);
     }
     Ok(Ok(installed))

@@ -4,7 +4,8 @@ use crate::dialect::SessionDialect;
 use crate::plugin::RlmProtocolPluginConfig;
 
 use crate::plugin::tool_args::normalize_projected_tool_args;
-use lash_core::plugin::{PluginError, PluginRegistrar};
+use lash_core::plugin::PluginRegistrar;
+use lash_execution_contracts::plugin_error::PluginError;
 
 pub(crate) fn register_native_plugin(
     reg: &mut PluginRegistrar<crate::plugin::RlmProtocolPlugin>,

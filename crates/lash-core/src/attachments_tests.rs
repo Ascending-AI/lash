@@ -361,12 +361,13 @@ async fn put_delivery_advice_matches_the_single_slot_read_boundary() {
 }
 
 async fn committed_factory_attachment() -> (
-    Arc<dyn crate::DeploymentStore>,
+    Arc<dyn lash_execution_contracts::deployment::DeploymentStore>,
     Arc<dyn AttachmentStore>,
     AttachmentId,
 ) {
     let substrate = crate::testing::sqlite_memory_store_set().await;
-    let factory: Arc<dyn crate::DeploymentStore> = substrate.session_store_factory();
+    let factory: Arc<dyn lash_execution_contracts::deployment::DeploymentStore> =
+        substrate.session_store_factory();
     let request = crate::SessionStoreCreateRequest {
         owning_process_id: None,
         pending_observer_intents: Vec::new(),
@@ -410,7 +411,7 @@ async fn committed_factory_attachment() -> (
 /// is therefore blind; only the factory's condemn CAS — the authority the
 /// writer's intent lives in — can still see the root.
 struct EmptySnapshotFactoryRoots<'a> {
-    factory: &'a dyn crate::DeploymentStore,
+    factory: &'a dyn lash_execution_contracts::deployment::DeploymentStore,
 }
 
 #[async_trait::async_trait]
@@ -1119,7 +1120,7 @@ impl AttachmentStore for WindowHookedStore {
 }
 
 struct FencedFixture {
-    factory: Arc<dyn crate::DeploymentStore>,
+    factory: Arc<dyn lash_execution_contracts::deployment::DeploymentStore>,
     store: crate::store::SessionStore,
     backend: Arc<dyn AttachmentStore>,
     session: Arc<RuntimeAttachmentStore>,
@@ -1130,7 +1131,8 @@ struct FencedFixture {
 
 async fn fenced_fixture(session_id: &SessionId) -> FencedFixture {
     let substrate = crate::testing::sqlite_memory_store_set().await;
-    let factory: Arc<dyn crate::DeploymentStore> = substrate.session_store_factory();
+    let factory: Arc<dyn lash_execution_contracts::deployment::DeploymentStore> =
+        substrate.session_store_factory();
     let request = crate::SessionStoreCreateRequest {
         owning_process_id: None,
         pending_observer_intents: Vec::new(),

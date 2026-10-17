@@ -7,9 +7,9 @@ pub use lash_core_store::model_calls::ModelCallFact;
 
 pub use lash_core::{EffectAttempt, RecordedEffectExecution};
 // The vocabulary this module's signatures name (the facade-completeness rule).
-pub use lash_core::PreparedProcessRegistration;
 pub use lash_core::RecordedKeys;
 pub use lash_core_store::effect_opener::EffectOpener;
+pub use lash_execution_contracts::process::PreparedProcessRegistration;
 pub use lash_protocol_types::{CancelRequest, ToolCallAdmission};
 
 /// Effect-host inputs, replay projections, and local execution capabilities.

@@ -15,7 +15,9 @@ use std::path::{Path, PathBuf};
 use std::sync::{Arc, Mutex};
 use std::time::{Duration, Instant};
 
-use lash_core_execution::{SessionCatalogStore as _, SessionId, StoreError};
+use lash_core_store::store::SessionCatalogStore as _;
+use lash_core_store::store::StoreError;
+use lash_protocol_types::SessionId;
 use rusqlite::{Connection, OpenFlags};
 
 use super::{
@@ -96,7 +98,7 @@ async fn open(root: &Path, options: SqliteStoreSetOptions) -> Result<SqliteStore
     SqliteStoreSet::open_with_options_and_clock(
         root.join(FILE),
         options,
-        Arc::new(lash_core_execution::facade_support::SystemClock),
+        Arc::new(lash_core_ids::clock::SystemClock),
     )
     .await
     .map_err(crate::sqlite_async_error)
@@ -137,7 +139,7 @@ async fn predecessor() -> (tempfile::TempDir, Vec<u8>) {
 
 /// The predecessor's version and the one this build writes.
 fn versions() -> (i64, i64) {
-    let descriptor = lash_core_execution::compat::descriptor(crate::schema::COMPONENT)
+    let descriptor = lash_core_store::compat::descriptor(crate::schema::COMPONENT)
         .expect("the build declares the database");
     (
         i64::from(descriptor.reads.min()),
@@ -192,10 +194,10 @@ async fn assert_migrated(root: &Path) {
     store
         .admit_session(
             &lash_core_execution::testing::store_fixtures::session_request_from_meta_for_test(
-                lash_core_execution::SessionMeta {
+                lash_core_store::store::SessionMeta {
                     owning_process_id: None,
                     session_id: SessionId::from("after-migration"),
-                    relation: lash_core_execution::SessionRelation::Root,
+                    relation: lash_core_store::session_identity::SessionRelation::Root,
                     pending_observer_intents: Vec::new(),
                 },
             ),

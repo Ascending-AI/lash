@@ -12,12 +12,14 @@ use std::sync::Arc;
 
 use lash_core::runtime::durable::node::{NodeServe, serve};
 use lash_core::runtime::durable::session::SessionActivation;
+use lash_core_execution::DurableSettings;
 use lash_core_execution::runtime::actor::process::ProcessActivation;
-use lash_core_execution::{
-    Backend, BackendParts, DurableSettings, NoProjectionProviders, StoreSet,
-};
 use lash_durable::runner::Stopped;
 use lash_durable::{NoProbe, NodeId, Notifier};
+use lash_execution_contracts::backend::Backend;
+use lash_execution_contracts::backend::BackendParts;
+use lash_execution_contracts::backend::StoreSet;
+use lash_execution_contracts::projection::NoProjectionProviders;
 use lash_postgres_store::{PostgresStorage, PostgresStoreSet};
 use tokio::io::AsyncBufReadExt as _;
 

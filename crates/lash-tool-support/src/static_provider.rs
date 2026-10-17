@@ -106,7 +106,8 @@ impl<E: StaticToolExecute> ToolProvider for StaticToolProvider<E> {
     fn tool_manifests(
         &self,
         config: &OwnerConfigView,
-    ) -> std::result::Result<Vec<ToolManifest>, lash_core::PluginError> {
+    ) -> std::result::Result<Vec<ToolManifest>, lash_execution_contracts::plugin_error::PluginError>
+    {
         Ok({
             self.manifests
                 .iter()

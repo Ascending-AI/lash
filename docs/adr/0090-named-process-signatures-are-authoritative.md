@@ -48,7 +48,7 @@ as specified by
 Evidence: `crates/lash-vm/src/ast.rs:219`, `:1252`, `:1354`,
 `crates/lash-vm/src/linker/pass_validation.rs:4`, `:415`,
 `crates/lash-vm/src/artifact.rs:273`, `:334`, `:1053`, and
-`crates/lash-core-execution/src/runtime/process/definition.rs:417`.
+`crates/lash-execution-contracts/src/process/definition.rs:417`.
 
 ## Alternatives considered
 

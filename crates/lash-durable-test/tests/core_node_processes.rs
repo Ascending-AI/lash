@@ -23,7 +23,7 @@ use lash_core::facade_support::ProviderHandle;
 use lash_core::llm::types::{
     LlmRequest, LlmResponse, LlmStreamEvent, LlmUsage, StreamBlockIdentity,
 };
-use lash_core_execution::StoreSet;
+use lash_execution_contracts::backend::StoreSet;
 use lash_protocol_types::SessionId;
 
 const MODEL: &str = "core-node-model";
@@ -118,7 +118,7 @@ async fn stores(tier: Tier) -> (Arc<dyn StoreSet>, Vec<Box<dyn std::any::Any + S
 /// and a standard core `configure` builds over it.
 async fn deploy(
     tier: Tier,
-    engines: Vec<Arc<dyn lash_core::ProcessEngine>>,
+    engines: Vec<Arc<dyn lash_execution_contracts::process::ProcessEngine>>,
     configure: impl FnOnce(lash::LashCoreBuilder) -> lash::LashCoreBuilder,
 ) -> Deployment {
     deploy_with(tier, engines, |backend| {
@@ -130,7 +130,7 @@ async fn deploy(
 /// [`deploy`], the core `build` builds over the backend.
 async fn deploy_with(
     tier: Tier,
-    engines: Vec<Arc<dyn lash_core::ProcessEngine>>,
+    engines: Vec<Arc<dyn lash_execution_contracts::process::ProcessEngine>>,
     build: impl FnOnce(&lash::Backend) -> lash::LashCoreBuilder,
 ) -> Deployment {
     deploy_configured(
@@ -146,7 +146,7 @@ async fn deploy_with(
 async fn deploy_configured(
     tier: Tier,
     settings: lash_core_execution::DurableSettings,
-    engines: Vec<Arc<dyn lash_core::ProcessEngine>>,
+    engines: Vec<Arc<dyn lash_execution_contracts::process::ProcessEngine>>,
     build: impl FnOnce(&lash::Backend) -> lash::LashCoreBuilder,
 ) -> Deployment {
     let (stores, keep) = stores(tier).await;
@@ -163,7 +163,7 @@ async fn deploy_configured(
 fn node_over(
     stores: Arc<dyn StoreSet>,
     settings: lash_core_execution::DurableSettings,
-    engines: Vec<Arc<dyn lash_core::ProcessEngine>>,
+    engines: Vec<Arc<dyn lash_execution_contracts::process::ProcessEngine>>,
     build: impl FnOnce(&lash::Backend) -> lash::LashCoreBuilder,
 ) -> (lash::Backend, lash::LashCore) {
     let backend = engines
@@ -298,7 +298,10 @@ const PARENT_DONE: &str = "the parent saw its child";
 /// The host's delegation tool (`examples/delegation`): children are created
 /// from [`spec`], stated explicitly, and live until their starter ends.
 fn delegation() -> delegation::DelegationPluginFactory {
-    delegation::DelegationPluginFactory::new(spec(), lash_core::lifetime::starter)
+    delegation::DelegationPluginFactory::new(
+        spec(),
+        lash_execution_contracts::process::lifetime::starter,
+    )
 }
 
 /// A parent turn sent to the core calls `spawn_agent`: the core's node runs
@@ -1107,7 +1110,10 @@ mod sqlite_memory_report_usage {
 
 /// How a scripted engine answers each event: its state is a JSON value it
 /// rewrites in place.
-type Advance = fn(&mut serde_json::Value, lash_core::EngineEvent) -> lash_core::EngineAction;
+type Advance = fn(
+    &mut serde_json::Value,
+    lash_execution_contracts::process::EngineEvent,
+) -> lash_execution_contracts::process::EngineAction;
 
 /// A host process engine of `kind` whose transitions `advance` scripts.
 struct ScriptEngine {
@@ -1127,55 +1133,62 @@ fn writes() -> Vec<lash_core::ToolDefinition> {
     vec![write_definition()]
 }
 
-fn infra(error: impl std::fmt::Display) -> lash_core::ProcessInfraError {
-    lash_core::ProcessInfraError::new(lash_core::PluginError::Session(error.to_string()))
+fn infra(error: impl std::fmt::Display) -> lash_execution_contracts::process::ProcessInfraError {
+    lash_execution_contracts::process::ProcessInfraError::new(
+        lash_execution_contracts::plugin_error::PluginError::Session(error.to_string()),
+    )
 }
 
 /// The terminal that carries `value` as the process's answer.
-fn answer(value: serde_json::Value) -> lash_core::EngineAction {
-    lash_core::EngineAction::Terminal(lash_core::ProcessOutcome::from_tool_output(
-        lash_core::ToolCallOutput::success(value),
-    ))
+fn answer(value: serde_json::Value) -> lash_execution_contracts::process::EngineAction {
+    lash_execution_contracts::process::EngineAction::Terminal(
+        lash_execution_contracts::process::ProcessOutcome::from_tool_output(
+            lash_core::ToolCallOutput::success(value),
+        ),
+    )
 }
 
 #[async_trait::async_trait]
-impl lash_core::ProcessEngine for ScriptEngine {
+impl lash_execution_contracts::process::ProcessEngine for ScriptEngine {
     fn settled_ran(
         &self,
-        _kind: &lash_core::EngineStepKind,
+        _kind: &lash_execution_contracts::process::EngineStepKind,
         _output: &lash_core_store::tool_run::SettledOutput,
     ) -> Vec<(u32, u64)> {
         Vec::new()
     }
 
-    fn trace_class(&self) -> lash_core::ProcessTraceClass {
-        lash_core::ProcessTraceClass::Internal
+    fn trace_class(&self) -> lash_execution_contracts::process::ProcessTraceClass {
+        lash_execution_contracts::process::ProcessTraceClass::Internal
     }
 
     async fn performed_effects(
         &self,
         _payload: &serde_json::Value,
-    ) -> Result<lash_core::PerformedEffects, lash_core::ProcessEnvRefusal> {
+    ) -> Result<lash_execution_contracts::process::PerformedEffects, lash_core::ProcessEnvRefusal>
+    {
         Ok(lash_core_execution::testing::performs(&(self.performs)()))
     }
 
     async fn check_args(
         &self,
-        _signature: &lash_core_execution::ProcessSignature,
+        _signature: &lash_execution_contracts::process::ProcessSignature,
         _args: &serde_json::Map<String, serde_json::Value>,
-        _mode: lash_core_execution::ArgsMode,
-    ) -> std::result::Result<(), lash_core_execution::ArgsMismatch> {
-        Err(lash_core_execution::ArgsMismatch::UnsupportedSignature {
-            engine_kind: self.kind().into(),
-        })
+        _mode: lash_execution_contracts::process::ArgsMode,
+    ) -> std::result::Result<(), lash_execution_contracts::process::ArgsMismatch> {
+        Err(
+            lash_execution_contracts::process::ArgsMismatch::UnsupportedSignature {
+                engine_kind: self.kind().into(),
+            },
+        )
     }
 
     fn kind(&self) -> &'static str {
         self.kind
     }
 
-    fn state_format(&self) -> lash_core::EngineStateFormat {
-        lash_core::EngineStateFormat {
+    fn state_format(&self) -> lash_execution_contracts::process::EngineStateFormat {
+        lash_execution_contracts::process::EngineStateFormat {
             kind: self.kind.to_owned(),
             version: 0,
         }
@@ -1195,30 +1208,40 @@ impl lash_core::ProcessEngine for ScriptEngine {
     fn check_settings(
         &self,
         _payload: &serde_json::Value,
-        settings: Option<&lash_core::EngineSettings>,
-    ) -> std::result::Result<(), lash_core::PluginError> {
+        settings: Option<&lash_execution_contracts::process::EngineSettings>,
+    ) -> std::result::Result<(), lash_execution_contracts::plugin_error::PluginError> {
         match settings {
             None => Ok(()),
-            Some(_) => Err(lash_core::PluginError::Registration(format!(
-                "process engine `{}` takes no settings",
-                self.kind()
-            ))),
+            Some(_) => Err(
+                lash_execution_contracts::plugin_error::PluginError::Registration(format!(
+                    "process engine `{}` takes no settings",
+                    self.kind()
+                )),
+            ),
         }
     }
 
     fn default_settings(
         &self,
         _payload: &serde_json::Value,
-    ) -> std::result::Result<Option<lash_core::EngineSettings>, lash_core::PluginError> {
+    ) -> std::result::Result<
+        Option<lash_execution_contracts::process::EngineSettings>,
+        lash_execution_contracts::plugin_error::PluginError,
+    > {
         Ok(None)
     }
 
     fn advance(
         &self,
-        state: lash_core::EngineState,
-        event: lash_core::EngineEvent,
-    ) -> Result<(lash_core::EngineState, lash_core::EngineAction), lash_core::ProcessInfraError>
-    {
+        state: lash_execution_contracts::process::EngineState,
+        event: lash_execution_contracts::process::EngineEvent,
+    ) -> Result<
+        (
+            lash_execution_contracts::process::EngineState,
+            lash_execution_contracts::process::EngineAction,
+        ),
+        lash_execution_contracts::process::ProcessInfraError,
+    > {
         let mut script = if state.bytes.is_empty() {
             serde_json::Value::Null
         } else {
@@ -1226,7 +1249,7 @@ impl lash_core::ProcessEngine for ScriptEngine {
         };
         let action = (self.advance)(&mut script, event);
         Ok((
-            lash_core::EngineState {
+            lash_execution_contracts::process::EngineState {
                 format: self.state_format(),
                 bytes: serde_json::to_vec(&script).map_err(infra)?,
                 pages: None,
@@ -1238,14 +1261,15 @@ impl lash_core::ProcessEngine for ScriptEngine {
     fn start_artifacts(
         &self,
         _payload: &serde_json::Value,
-    ) -> Result<Vec<lash_core::ArtifactName>, lash_core::PluginError> {
+    ) -> Result<Vec<lash_core::ArtifactName>, lash_execution_contracts::plugin_error::PluginError>
+    {
         Ok(Vec::new())
     }
 
     async fn end_artifact_referrer(
         &self,
         _cleanup: &lash_core::ResolvedArtifactCleanup,
-    ) -> Result<(), lash_core::ArtifactStoreError> {
+    ) -> Result<(), lash_execution_contracts::module_artifacts::ArtifactStoreError> {
         Ok(())
     }
 
@@ -1253,30 +1277,41 @@ impl lash_core::ProcessEngine for ScriptEngine {
         &self,
         _claim: &lash_core::ReferrerClaim,
         artifact_ref: &str,
-    ) -> Result<(), lash_core::PluginError> {
-        Err(lash_core::PluginError::Session(format!(
-            "a scripted engine stores no artifact `{artifact_ref}`"
-        )))
+    ) -> Result<(), lash_execution_contracts::plugin_error::PluginError> {
+        Err(
+            lash_execution_contracts::plugin_error::PluginError::Session(format!(
+                "a scripted engine stores no artifact `{artifact_ref}`"
+            )),
+        )
     }
 
     async fn resolve(
         &self,
-        _reference: &lash_core::ProcessDefinitionRef,
-    ) -> Result<lash_core::ProcessDefinitionResolution, lash_core::ProcessDefinitionError> {
-        Ok(lash_core::ProcessDefinitionResolution::new(
-            lash_core::ProcessSignature::Unknown,
-        ))
+        _reference: &lash_execution_contracts::process::ProcessDefinitionRef,
+    ) -> Result<
+        lash_execution_contracts::process::ProcessDefinitionResolution,
+        lash_execution_contracts::process::ProcessDefinitionError,
+    > {
+        Ok(
+            lash_execution_contracts::process::ProcessDefinitionResolution::new(
+                lash_execution_contracts::process::ProcessSignature::Unknown,
+            ),
+        )
     }
 }
 
 /// A cancel answered at once: what every scripted engine does with one.
-fn cancelled(origin: lash_protocol_types::CancelOrigin) -> lash_core::EngineAction {
-    lash_core::EngineAction::Terminal(lash_core::ProcessOutcome::from_tool_output(
-        lash_core::ToolCallOutput::cancelled(
-            lash_core::ToolCancellation::runtime("the scripted engine answered its cancel")
-                .with_origin(origin),
+fn cancelled(
+    origin: lash_protocol_types::CancelOrigin,
+) -> lash_execution_contracts::process::EngineAction {
+    lash_execution_contracts::process::EngineAction::Terminal(
+        lash_execution_contracts::process::ProcessOutcome::from_tool_output(
+            lash_core::ToolCallOutput::cancelled(
+                lash_core::ToolCancellation::runtime("the scripted engine answered its cancel")
+                    .with_origin(origin),
+            ),
         ),
-    ))
+    )
 }
 
 /// What a settled step answered: a tool step's output value, an engine
@@ -1418,16 +1453,16 @@ async fn a_start_with_a_missing_environment_is_refused_at_admission(tier: Tier) 
     let spec = environment();
     let env_ref = spec.stable_ref().expect("the environment's reference");
     let key = lash_core::StartKey::for_host("missing-environment-law");
-    let registration = lash_core_execution::testing::held_engine_registration(
+    let registration = lash_execution_contracts::testing::held_engine_registration(
         serde_json::Value::Null,
-        lash_core::ProcessProvenance::host(),
-        lash_core::Lifetime::Detached,
+        lash_execution_contracts::process::ProcessProvenance::host(),
+        lash_execution_contracts::process::Lifetime::Detached,
     )
     .with_start_key(Some(key.clone()));
     let registration = with_launch(registration, &env_ref);
     let mut first = None;
     for source_ends_after_prepare in [false, true] {
-        let pin = lash_core_execution::testing::host_pin_claim_for_testing();
+        let pin = lash_execution_contracts::testing::host_pin_claim_for_testing();
         if source_ends_after_prepare {
             lash_core_execution::testing::publish_process_env_for_testing(
                 env_store.as_ref(),
@@ -1455,11 +1490,14 @@ async fn a_start_with_a_missing_environment_is_refused_at_admission(tier: Tier) 
             .commit_process_registration(prepared)
             .await
             .expect_err("a reference with no stored bytes is refused at admission");
-        let lash_core::PluginError::Runtime(runtime) = &error else {
+        let lash_execution_contracts::plugin_error::PluginError::Runtime(runtime) = &error else {
             panic!("the refusal keeps its typed runtime error: {error:?}");
         };
         assert_eq!(runtime.code, lash_core::RuntimeErrorCode::ArtifactMissing);
-        assert_eq!(error.class(), lash_core::PluginErrorClass::Terminal);
+        assert_eq!(
+            error.class(),
+            lash_execution_contracts::plugin_error::PluginErrorClass::Terminal
+        );
         assert!(error.to_string().contains(env_ref.as_str()));
         let encoded = serde_json::to_value(runtime).expect("typed refusal encodes");
         if let Some(first) = &first {
@@ -1497,7 +1535,7 @@ async fn an_admitted_process_keeps_its_environment_after_the_source_pin_ends(tie
     let (stores, _keep) = stores(tier).await;
     let registry = stores.process_registry();
     let env_store = stores.process_env_store();
-    let pin = lash_core_execution::testing::host_pin_claim_for_testing();
+    let pin = lash_execution_contracts::testing::host_pin_claim_for_testing();
     let spec = environment();
     let env_ref = lash_core_execution::testing::publish_process_env_for_testing(
         env_store.as_ref(),
@@ -1506,10 +1544,10 @@ async fn an_admitted_process_keeps_its_environment_after_the_source_pin_ends(tie
     )
     .await
     .expect("publish the source environment");
-    let registration = lash_core_execution::testing::held_engine_registration(
+    let registration = lash_execution_contracts::testing::held_engine_registration(
         serde_json::Value::Null,
-        lash_core::ProcessProvenance::host(),
-        lash_core::Lifetime::Detached,
+        lash_execution_contracts::process::ProcessProvenance::host(),
+        lash_execution_contracts::process::Lifetime::Detached,
     )
     .with_start_key(Some(lash_core::StartKey::for_host(
         "admitted-environment-law",
@@ -1527,7 +1565,7 @@ async fn an_admitted_process_keeps_its_environment_after_the_source_pin_ends(tie
         .await
         .expect("end the source pin");
     assert_eq!(
-        lash_core::runtime::load_process_env(env_store.as_ref(), &env_ref)
+        lash_execution_contracts::process::load_process_env(env_store.as_ref(), &env_ref)
             .await
             .expect("the admitted process still resolves its environment"),
         spec
@@ -1546,14 +1584,15 @@ on_every_tier!(an_admitted_process_keeps_its_environment_after_the_source_pin_en
 
 /// `registration`, its engine launched under `env_ref`.
 fn with_launch(
-    mut registration: lash_core::ProcessRegistration,
+    mut registration: lash_execution_contracts::process::ProcessRegistration,
     env_ref: &lash_core::ProcessEnvRef,
-) -> lash_core::ProcessRegistration {
-    let lash_core::ProcessInput::Engine { launch, .. } = Arc::make_mut(&mut registration.input)
+) -> lash_execution_contracts::process::ProcessRegistration {
+    let lash_execution_contracts::process::ProcessInput::Engine { launch, .. } =
+        Arc::make_mut(&mut registration.input)
     else {
         unreachable!("a held registration is an engine start")
     };
-    *launch = lash_core::EngineLaunch::new(env_ref.clone(), None);
+    *launch = lash_execution_contracts::process::EngineLaunch::new(env_ref.clone(), None);
     registration
 }
 
@@ -1572,7 +1611,9 @@ async fn start_as(
     core: &lash::LashCore,
     kind: &str,
     payload: serde_json::Value,
-    shape: impl FnOnce(lash_core::ProcessStartRequest) -> lash_core::ProcessStartRequest,
+    shape: impl FnOnce(
+        lash_execution_contracts::process::ProcessStartRequest,
+    ) -> lash_execution_contracts::process::ProcessStartRequest,
 ) -> lash_core::ProcessId {
     start_under(core, &environment(), kind, payload, shape).await
 }
@@ -1583,7 +1624,9 @@ async fn start_under(
     env: &lash::process::ProcessEnv,
     kind: &str,
     payload: serde_json::Value,
-    shape: impl FnOnce(lash_core::ProcessStartRequest) -> lash_core::ProcessStartRequest,
+    shape: impl FnOnce(
+        lash_execution_contracts::process::ProcessStartRequest,
+    ) -> lash_execution_contracts::process::ProcessStartRequest,
 ) -> lash_core::ProcessId {
     let env_ref = core
         .host_artifacts()
@@ -1594,12 +1637,12 @@ async fn start_under(
         .processes()
         .engine_defaults(kind, &payload)
         .expect("the engine's default settings");
-    let request = lash_core::ProcessStartRequest::engine(
+    let request = lash_execution_contracts::process::ProcessStartRequest::engine(
         kind.to_owned(),
         payload,
-        lash_core::EngineLaunch::new(env_ref, settings),
-        lash_core::ProcessOriginator::host(),
-        lash_core::LifetimeDecision::Detached,
+        lash_execution_contracts::process::EngineLaunch::new(env_ref, settings),
+        lash_execution_contracts::process::ProcessOriginator::host(),
+        lash_execution_contracts::process::LifetimeDecision::Detached,
     );
     core.processes()
         .start(shape(request), core.effect_host())
@@ -1619,7 +1662,7 @@ async fn ended(core: &lash::LashCore, process: &lash_core::ProcessId) -> lash_co
     .expect("the process ends within a minute")
     .expect("the process's end is read");
     match output {
-        lash_core::ProcessAwaitOutput::Settled { output } => *output,
+        lash_execution_contracts::process::ProcessAwaitOutput::Settled { output } => *output,
         other => panic!("the process ended without an answer: {other:?}"),
     }
 }
@@ -1636,18 +1679,18 @@ const TOOL_ENGINE: &str = "core-node-tool-engine";
 
 fn tool_engine_advance(
     _state: &mut serde_json::Value,
-    event: lash_core::EngineEvent,
-) -> lash_core::EngineAction {
+    event: lash_execution_contracts::process::EngineEvent,
+) -> lash_execution_contracts::process::EngineAction {
     match event {
-        lash_core::EngineEvent::Started { payload } => {
+        lash_execution_contracts::process::EngineEvent::Started { payload } => {
             let x = payload
                 .pointer("/x")
                 .or_else(|| payload.pointer("/args/x"))
                 .cloned()
                 .unwrap_or_default();
-            lash_core::EngineAction::Steps {
-                steps: vec![lash_core::StepRequest::Tool {
-                    step: lash_core::StepName("write".to_owned()),
+            lash_execution_contracts::process::EngineAction::Steps {
+                steps: vec![lash_execution_contracts::process::StepRequest::Tool {
+                    step: lash_execution_contracts::process::StepName("write".to_owned()),
                     effect: lash_core_execution::testing::effect_of(&write_definition()),
                     input: serde_json::json!({ "x": x }),
                     site: None,
@@ -1656,11 +1699,13 @@ fn tool_engine_advance(
                 wake: None,
             }
         }
-        lash_core::EngineEvent::StepSettled { outcome, .. } => {
+        lash_execution_contracts::process::EngineEvent::StepSettled { outcome, .. } => {
             answer(serde_json::json!({ "step": settled(&outcome) }))
         }
-        lash_core::EngineEvent::Cancelled { origin, .. } => cancelled(origin),
-        _ => lash_core::EngineAction::Idle,
+        lash_execution_contracts::process::EngineEvent::Cancelled { origin, .. } => {
+            cancelled(origin)
+        }
+        _ => lash_execution_contracts::process::EngineAction::Idle,
     }
 }
 
@@ -1707,15 +1752,19 @@ const HOLD_ENGINE: &str = "core-node-hold-engine";
 
 fn holding_engine_advance(
     _state: &mut serde_json::Value,
-    event: lash_core::EngineEvent,
-) -> lash_core::EngineAction {
+    event: lash_execution_contracts::process::EngineEvent,
+) -> lash_execution_contracts::process::EngineAction {
     match event {
-        lash_core::EngineEvent::Cancelled { origin, .. } => lash_core::EngineAction::Terminal(
-            lash_core::ProcessOutcome::from_tool_output(lash_core::ToolCallOutput::cancelled(
-                lash_core::ToolCancellation::runtime("host cancelled").with_origin(origin),
-            )),
-        ),
-        _ => lash_core::EngineAction::Idle,
+        lash_execution_contracts::process::EngineEvent::Cancelled { origin, .. } => {
+            lash_execution_contracts::process::EngineAction::Terminal(
+                lash_execution_contracts::process::ProcessOutcome::from_tool_output(
+                    lash_core::ToolCallOutput::cancelled(
+                        lash_core::ToolCancellation::runtime("host cancelled").with_origin(origin),
+                    ),
+                ),
+            )
+        }
+        _ => lash_execution_contracts::process::EngineAction::Idle,
     }
 }
 
@@ -1751,12 +1800,12 @@ async fn a_host_starts_preparation_is_held_by_its_own_start(tier: Tier) {
             .publish_process_env(&pin, &environment())
             .await
             .expect("the environment is published");
-        let request = lash_core::ProcessStartRequest::engine(
+        let request = lash_execution_contracts::process::ProcessStartRequest::engine(
             HOLD_ENGINE.to_owned(),
             serde_json::json!({ "run": run }),
-            lash_core::EngineLaunch::new(env_ref.clone(), None),
-            lash_core::ProcessOriginator::host(),
-            lash_core::LifetimeDecision::Detached,
+            lash_execution_contracts::process::EngineLaunch::new(env_ref.clone(), None),
+            lash_execution_contracts::process::ProcessOriginator::host(),
+            lash_execution_contracts::process::LifetimeDecision::Detached,
         );
         let receipt = deployment
             .core
@@ -1788,7 +1837,7 @@ async fn a_host_starts_preparation_is_held_by_its_own_start(tier: Tier) {
             .expect("the cleanup relay's due pass");
         }
         assert_eq!(
-            lash_core::runtime::load_process_env(env_store.as_ref(), &env_ref)
+            lash_execution_contracts::process::load_process_env(env_store.as_ref(), &env_ref)
                 .await
                 .expect("the started process still resolves its environment"),
             environment()
@@ -1886,14 +1935,16 @@ const ISOLATED_TOOL: &str = "iso_run";
 
 fn isolated_engine_advance(
     _state: &mut serde_json::Value,
-    event: lash_core::EngineEvent,
-) -> lash_core::EngineAction {
+    event: lash_execution_contracts::process::EngineEvent,
+) -> lash_execution_contracts::process::EngineAction {
     match event {
-        lash_core::EngineEvent::Started { payload } => {
+        lash_execution_contracts::process::EngineEvent::Started { payload } => {
             answer(serde_json::json!({ "isolated": payload }))
         }
-        lash_core::EngineEvent::Cancelled { origin, .. } => cancelled(origin),
-        _ => lash_core::EngineAction::Idle,
+        lash_execution_contracts::process::EngineEvent::Cancelled { origin, .. } => {
+            cancelled(origin)
+        }
+        _ => lash_execution_contracts::process::EngineAction::Idle,
     }
 }
 
@@ -1929,7 +1980,10 @@ impl lash_core::ToolProvider for IsolatedTools {
     fn tool_manifests(
         &self,
         _config: &lash_core::OwnerConfigView,
-    ) -> std::result::Result<Vec<lash_core::ToolManifest>, lash_core::PluginError> {
+    ) -> std::result::Result<
+        Vec<lash_core::ToolManifest>,
+        lash_execution_contracts::plugin_error::PluginError,
+    > {
         Ok(vec![isolated_definition().manifest()])
     }
 
@@ -1961,7 +2015,7 @@ impl lash_core::ToolProvider for IsolatedTools {
 }
 
 /// The engine [`ISOLATED_TOOL`] is isolated in.
-fn isolated_engine() -> Arc<dyn lash_core::ProcessEngine> {
+fn isolated_engine() -> Arc<dyn lash_execution_contracts::process::ProcessEngine> {
     Arc::new(ScriptEngine {
         kind: ISOLATED_ENGINE,
         advance: isolated_engine_advance,
@@ -1988,12 +2042,14 @@ fn isolated_core(backend: &lash::Backend, tools: &Arc<IsolatedTools>) -> lash::L
 }
 
 /// The processes of the isolated engine the registry holds.
-async fn isolated_processes(backend: &lash::Backend) -> Vec<lash_core::ProcessRecord> {
+async fn isolated_processes(
+    backend: &lash::Backend,
+) -> Vec<lash_execution_contracts::process::ProcessRecord> {
     lash_core::testing::process_roster_records_for_fixture(
         backend.process_registry().as_ref(),
-        &lash_core::ProcessListFilter {
-            status: lash_core::ProcessStatusFilter::Any,
-            ..lash_core::ProcessListFilter::default()
+        &lash_execution_contracts::process::ProcessListFilter {
+            status: lash_execution_contracts::process::ProcessStatusFilter::Any,
+            ..lash_execution_contracts::process::ProcessListFilter::default()
         },
     )
     .await
@@ -2002,7 +2058,7 @@ async fn isolated_processes(backend: &lash::Backend) -> Vec<lash_core::ProcessRe
     .filter(|record| {
         matches!(
             record.input.as_ref(),
-            lash_core::ProcessInput::Engine { kind, .. } if kind == ISOLATED_ENGINE
+            lash_execution_contracts::process::ProcessInput::Engine { kind, .. } if kind == ISOLATED_ENGINE
         )
     })
     .collect()
@@ -2223,9 +2279,9 @@ async fn process_outcome_projections_are_readable_on_sqlite_memory() {
     const KIND: &str = "projected-outcome";
     fn advance(
         _: &mut serde_json::Value,
-        event: lash_core::EngineEvent,
-    ) -> lash_core::EngineAction {
-        let lash_core::EngineEvent::Started { payload } = event else {
+        event: lash_execution_contracts::process::EngineEvent,
+    ) -> lash_execution_contracts::process::EngineAction {
+        let lash_execution_contracts::process::EngineEvent::Started { payload } = event else {
             panic!("the engine completes at its start");
         };
         let output = if payload["fail"] == true {
@@ -2242,7 +2298,9 @@ async fn process_outcome_projections_are_readable_on_sqlite_memory() {
         } else {
             lash_core::ToolCallOutput::success(serde_json::json!({"answer": 42}))
         };
-        lash_core::EngineAction::Terminal(lash_core::ProcessOutcome::from_tool_output(output))
+        lash_execution_contracts::process::EngineAction::Terminal(
+            lash_execution_contracts::process::ProcessOutcome::from_tool_output(output),
+        )
     }
     let deployment = deploy(
         Tier::SqliteMemory,
@@ -2296,8 +2354,10 @@ async fn process_outcome_projections_are_readable_on_sqlite_memory() {
         assert_eq!(decoded, record_projection);
         assert_eq!(
             serde_json::to_value(lash::persistence::Durable(terminal)).unwrap(),
-            serde_json::to_value(lash_core::Durable(&terminal.clone().into_await_output()))
-                .unwrap(),
+            serde_json::to_value(lash_protocol_types::Durable(
+                &terminal.clone().into_await_output()
+            ))
+            .unwrap(),
             "durable terminals retain the existing await encoding"
         );
         // All other observed facts survive the projection unchanged.

@@ -19,7 +19,12 @@ pub use progress::SegmentProgress;
 /// One registry step of a process drive, for
 /// [`ActorContext::record_process_drive_step`].
 pub type ProcessDriveStep<'step> = std::pin::Pin<
-    Box<dyn std::future::Future<Output = Result<(), crate::PluginError>> + Send + 'step>,
+    Box<
+        dyn std::future::Future<
+                Output = Result<(), lash_execution_contracts::plugin_error::PluginError>,
+            > + Send
+            + 'step,
+    >,
 >;
 
 #[cfg(test)]

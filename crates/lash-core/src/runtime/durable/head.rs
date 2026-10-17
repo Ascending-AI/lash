@@ -25,9 +25,15 @@ use lash_sansio::TurnWindowPin;
 use lash_durable::{ActorKey, Epoch};
 
 use super::session::{TurnCommit, TurnDone, TurnError};
+use crate::ActorContext;
+use crate::Clock;
+use crate::CommitBudget;
+use crate::SessionId;
+use crate::TurnId;
+use crate::TurnOutcome;
 use crate::runtime::{RuntimeSessionState, TurnBoundary};
 use crate::store::{SessionHeadRef, SessionStore, StoreError, WindowSelector};
-use crate::{ActorContext, Backend, Clock, CommitBudget, SessionId, TurnId, TurnOutcome};
+use lash_execution_contracts::backend::Backend;
 
 /// The committed window a session's turn starts from.
 pub type TurnWindow = lash_sansio::TurnWindow<crate::ProtocolEvent>;

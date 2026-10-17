@@ -6,10 +6,13 @@ use std::path::PathBuf;
 
 use async_trait::async_trait;
 use lash_conformance::{FleetFormatDeployment, fleet_format_conformance};
-use lash_core_execution::{
-    FleetFormat, FleetFormatStore, SessionCatalogStore as _, StoreError, StorePreflight,
-    StoreSchemaStatus, WriterPin,
-};
+use lash_core_store::store::FleetFormat;
+use lash_core_store::store::FleetFormatStore;
+use lash_core_store::store::SessionCatalogStore as _;
+use lash_core_store::store::StoreError;
+use lash_core_store::store::StorePreflight;
+use lash_core_store::store::StoreSchemaStatus;
+use lash_core_store::store::WriterPin;
 use lash_sqlite_store::{SqliteStore, SqliteStorePreflight};
 
 struct SqliteBackend {
@@ -29,7 +32,7 @@ impl FleetFormatDeployment for SqliteBackend {
 
     async fn open_admitting(
         &self,
-        writable: lash_core_execution::compat::VersionRange,
+        writable: lash_core_store::compat::VersionRange,
     ) -> Result<FleetFormat, StoreError> {
         SqliteStore::open_with_fleet_writable_range_for_testing(&self.durable_core, writable)
             .await

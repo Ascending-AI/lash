@@ -66,20 +66,13 @@ use std::sync::{Arc, Mutex};
 #[cfg(any(test, feature = "testing"))]
 #[cfg(any(test, feature = "testing"))]
 pub fn process_work_wiring_for_registry(
-    registry: Arc<dyn crate::ProcessRegistry>,
+    registry: Arc<dyn lash_execution_contracts::process::ProcessRegistry>,
 ) -> crate::ProcessWorkWiring {
     let watched = crate::facade_support::watch_process_registry(registry);
     let port = Arc::new(crate::NoProcessWork::for_registry(Arc::clone(
         watched.registry(),
     )));
     crate::ProcessWorkWiring::new(watched, port)
-}
-
-/// The fixed fixture process environment: no tools, no components, a
-/// tool-call limit of 1024.
-#[cfg(any(test, feature = "testing"))]
-pub fn process_env_fixture() -> crate::ProcessEnv {
-    process_env_with_limit(1024)
 }
 
 /// An environment whose one component, `fixture-payload`, carries a config
@@ -105,10 +98,17 @@ pub fn process_env_of_size(bytes: usize) -> crate::ProcessEnv {
 /// link names, and an engine step records its body's id.
 #[cfg(any(test, feature = "testing"))]
 #[must_use]
-pub fn step_tool(step: &crate::StepRequest, engine: &str) -> crate::ToolId {
+pub fn step_tool(
+    step: &lash_execution_contracts::process::StepRequest,
+    engine: &str,
+) -> crate::ToolId {
     match step {
-        crate::StepRequest::Tool { effect, .. } => crate::ToolId::new(effect.as_str()),
-        crate::StepRequest::Engine { kind, .. } => kind.admitted_tool(engine),
+        lash_execution_contracts::process::StepRequest::Tool { effect, .. } => {
+            crate::ToolId::new(effect.as_str())
+        }
+        lash_execution_contracts::process::StepRequest::Engine { kind, .. } => {
+            kind.admitted_tool(engine)
+        }
     }
 }
 
@@ -133,7 +133,9 @@ pub fn effect_of(definition: &crate::ToolDefinition) -> crate::EffectName {
 /// effect, under the signature its schemas project to.
 #[cfg(any(test, feature = "testing"))]
 #[must_use]
-pub fn performs(tools: &[crate::ToolDefinition]) -> crate::PerformedEffects {
+pub fn performs(
+    tools: &[crate::ToolDefinition],
+) -> lash_execution_contracts::process::PerformedEffects {
     tools
         .iter()
         .map(|tool| {
@@ -148,37 +150,15 @@ pub fn performs(tools: &[crate::ToolDefinition]) -> crate::PerformedEffects {
         .collect()
 }
 
-/// A component-free environment that admits no tool and holds at most
-/// `max_tool_calls` calls at once: distinct limits are distinct environments.
-#[cfg(any(test, feature = "testing"))]
-#[expect(clippy::expect_used, reason = "fixture environment")]
-pub fn process_env_with_limit(max_tool_calls: usize) -> crate::ProcessEnv {
-    crate::ProcessEnv::builder(crate::MaxToolCalls::new(max_tool_calls))
-        .build()
-        .expect("the fixture process environment encodes")
-}
-
-/// Publishes the fixed fixture execution environment into `env_store`, held
-/// by a fresh host pin the fixture never releases, and returns its reference.
-#[cfg(any(test, feature = "testing"))]
-pub async fn process_execution_env_fixture(
-    env_store: &dyn crate::ProcessEnvStore,
-) -> crate::ProcessEnvRef {
-    publish_process_env_for_testing(
-        env_store,
-        &host_pin_claim_for_testing(),
-        &process_env_fixture(),
-    )
-    .await
-    .expect("fixed process execution environment fixture publishes")
-}
-
 /// Collect a fixture's roster through single-record pages, exercising continuations.
 #[cfg(any(test, feature = "testing"))]
 pub async fn process_roster_records_for_fixture(
-    registry: &dyn crate::ProcessQuery,
-    filter: &crate::ProcessListFilter,
-) -> Result<Vec<crate::ProcessRecord>, crate::PluginError> {
+    registry: &dyn lash_execution_contracts::process::ProcessQuery,
+    filter: &lash_execution_contracts::process::ProcessListFilter,
+) -> Result<
+    Vec<lash_execution_contracts::process::ProcessRecord>,
+    lash_execution_contracts::plugin_error::PluginError,
+> {
     let mut records = Vec::new();
     let mut continuation = None;
     loop {
@@ -193,32 +173,14 @@ pub async fn process_roster_records_for_fixture(
     }
 }
 
-/// The reference [`process_execution_env_fixture`] publishes under. An
-/// environment reference is content-addressed, so it names the fixture
-/// environment in every store: a subscription draft that records the
-/// reference, and never loads it, takes this instead of publishing.
-#[cfg(any(test, feature = "testing"))]
-pub fn process_execution_env_fixture_ref() -> crate::ProcessEnvRef {
-    process_env_fixture()
-        .stable_ref()
-        .expect("fixed process execution environment fixture encodes")
-}
-
-/// The launch of an engine start under the fixture environment, with no
-/// engine settings.
-#[cfg(any(test, feature = "testing"))]
-pub fn fixture_engine_launch() -> crate::EngineLaunch {
-    crate::EngineLaunch::new(process_execution_env_fixture_ref(), None)
-}
-
 /// Publish `env` under `claim` through the one hold path, admitted against
 /// no installed component: what a fixture whose environment names none uses.
 #[cfg(any(test, feature = "testing"))]
 pub async fn publish_process_env_for_testing(
-    env_store: &dyn crate::ProcessEnvStore,
+    env_store: &dyn lash_execution_contracts::process::ProcessEnvStore,
     claim: &crate::ReferrerClaim,
     env: &crate::ProcessEnv,
-) -> Result<crate::ProcessEnvRef, crate::PluginError> {
+) -> Result<crate::ProcessEnvRef, lash_execution_contracts::plugin_error::PluginError> {
     let components = crate::plugin::ProcessComponentRegistry::new();
     crate::hold_process_env(
         &crate::ProcessEnvPorts::admitting(env_store, &components),
@@ -227,36 +189,29 @@ pub async fn publish_process_env_for_testing(
     )
     .await
     .map_err(|error| match error {
-        crate::HoldEnvError::Refused(refusal) => crate::PluginError::ProcessEnvRefused { refusal },
+        crate::HoldEnvError::Refused(refusal) => {
+            lash_execution_contracts::plugin_error::PluginError::ProcessEnvRefused { refusal }
+        }
         crate::HoldEnvError::Fault(error) => error,
     })
-}
-
-/// A claim under a freshly minted host pin: an unguarded referrer a fixture
-/// publishes under and never releases.
-#[cfg(any(test, feature = "testing"))]
-pub fn host_pin_claim_for_testing() -> crate::ReferrerClaim {
-    crate::ReferrerClaim::unguarded(crate::ArtifactReferrer::HostPin(
-        crate::HostArtifactPin::mint(),
-    ))
-    .expect("a host pin is an unguarded referrer")
 }
 
 #[cfg(any(test, feature = "testing"))]
 mod process_fixtures;
 #[cfg(any(test, feature = "testing"))]
 pub use process_fixtures::{
-    FixtureProcessEngine, HELD_PROCESS_ENGINE_KIND, HeldProcessEngine, declared_launch_for_testing,
-    held_engine_declaration, held_engine_input, held_engine_launch, held_engine_registration,
-    held_engine_request, process_engine_fixture, process_engine_plugin_fixture, run_policy_naming,
-    tool_component, tool_plugin,
+    FixtureProcessEngine, HeldProcessEngine, held_engine_launch, process_engine_fixture,
+    process_engine_plugin_fixture, run_policy_naming, tool_component, tool_plugin,
 };
 
 use crate::llm::types::{LlmRequest, LlmResponse};
-use crate::plugin::{PluginError, SessionCreateRequest, SessionHandle, SessionSnapshot};
+use crate::plugin::SessionSnapshot;
 use crate::provider::{Provider, ProviderComponents, ProviderHandle};
 use crate::session_model::{ConversationRecord, SessionHistoryRecord};
 use crate::{ProviderOptions, RuntimeSessionState, TurnFinish, TurnOutcome, TurnStop};
+use lash_execution_contracts::plugin_error::PluginError;
+use lash_execution_contracts::session_types::SessionCreateRequest;
+use lash_execution_contracts::session_types::SessionHandle;
 use lash_transport_failure::LlmTransportError;
 
 /// Generous claim bounds for store/runtime conformance tests whose subject is
@@ -1009,8 +964,8 @@ pub async fn execute_effect_locally(
 pub struct UnavailableProcessEnvStore;
 
 impl UnavailableProcessEnvStore {
-    fn refused() -> crate::ArtifactStoreError {
-        crate::ArtifactStoreError::Backend(
+    fn refused() -> lash_execution_contracts::module_artifacts::ArtifactStoreError {
+        lash_execution_contracts::module_artifacts::ArtifactStoreError::Backend(
             "this context has no process execution environment store".into(),
         )
     }
@@ -1034,13 +989,13 @@ impl crate::store::FleetFormatStore for UnavailableProcessEnvStore {
 }
 
 #[async_trait::async_trait]
-impl crate::ProcessEnvStore for UnavailableProcessEnvStore {
+impl lash_execution_contracts::process::ProcessEnvStore for UnavailableProcessEnvStore {
     async fn publish_process_env(
         &self,
         _claim: &crate::ReferrerClaim,
         _env_ref: &crate::ProcessEnvRef,
         _bytes: &[u8],
-    ) -> Result<(), crate::ArtifactStoreError> {
+    ) -> Result<(), lash_execution_contracts::module_artifacts::ArtifactStoreError> {
         Err(Self::refused())
     }
 
@@ -1048,21 +1003,22 @@ impl crate::ProcessEnvStore for UnavailableProcessEnvStore {
         &self,
         _claim: &crate::ReferrerClaim,
         _env_ref: &crate::ProcessEnvRef,
-    ) -> Result<(), crate::ArtifactStoreError> {
+    ) -> Result<(), lash_execution_contracts::module_artifacts::ArtifactStoreError> {
         Err(Self::refused())
     }
 
     async fn end_process_env_referrer(
         &self,
         _cleanup: &crate::ResolvedArtifactCleanup,
-    ) -> Result<(), crate::ArtifactStoreError> {
+    ) -> Result<(), lash_execution_contracts::module_artifacts::ArtifactStoreError> {
         Ok(())
     }
 
     async fn get_process_env(
         &self,
         _env_ref: &crate::ProcessEnvRef,
-    ) -> Result<Option<Vec<u8>>, crate::ArtifactStoreError> {
+    ) -> Result<Option<Vec<u8>>, lash_execution_contracts::module_artifacts::ArtifactStoreError>
+    {
         Ok(None)
     }
 }
@@ -1076,29 +1032,32 @@ impl crate::ProcessEnvStore for UnavailableProcessEnvStore {
 pub struct UnavailableTurnPreludeStore;
 
 #[async_trait::async_trait]
-impl crate::TurnPreludeStore for UnavailableTurnPreludeStore {
+impl lash_execution_contracts::turn_prelude::TurnPreludeStore for UnavailableTurnPreludeStore {
     async fn publish_turn_prelude(
         &self,
         _claim: &crate::ReferrerClaim,
-        _prelude_ref: &crate::TurnPreludeRef,
+        _prelude_ref: &lash_execution_contracts::turn_prelude::TurnPreludeRef,
         _bytes: &[u8],
-    ) -> Result<(), crate::ArtifactStoreError> {
-        Err(crate::ArtifactStoreError::Backend(
-            "this context has no turn prelude store".into(),
-        ))
+    ) -> Result<(), lash_execution_contracts::module_artifacts::ArtifactStoreError> {
+        Err(
+            lash_execution_contracts::module_artifacts::ArtifactStoreError::Backend(
+                "this context has no turn prelude store".into(),
+            ),
+        )
     }
 
     async fn end_turn_prelude_referrer(
         &self,
         _cleanup: &crate::ResolvedArtifactCleanup,
-    ) -> Result<(), crate::ArtifactStoreError> {
+    ) -> Result<(), lash_execution_contracts::module_artifacts::ArtifactStoreError> {
         Ok(())
     }
 
     async fn get_turn_prelude(
         &self,
-        _prelude_ref: &crate::TurnPreludeRef,
-    ) -> Result<Option<Vec<u8>>, crate::ArtifactStoreError> {
+        _prelude_ref: &lash_execution_contracts::turn_prelude::TurnPreludeRef,
+    ) -> Result<Option<Vec<u8>>, lash_execution_contracts::module_artifacts::ArtifactStoreError>
+    {
         Ok(None)
     }
 }
@@ -1122,7 +1081,10 @@ impl crate::ToolProvider for EmptyToolProvider {
     fn tool_manifests(
         &self,
         _config: &crate::plugin::OwnerConfigView,
-    ) -> std::result::Result<Vec<crate::ToolManifest>, crate::PluginError> {
+    ) -> std::result::Result<
+        Vec<crate::ToolManifest>,
+        lash_execution_contracts::plugin_error::PluginError,
+    > {
         Ok(Vec::new())
     }
 
@@ -1190,13 +1152,16 @@ pub fn code_execution_context<'run>(
 pub fn code_execution_context_for_process<'run>(
     ports: impl Into<TestExecutionPorts>,
     process_id: crate::ProcessId,
-    registration: &crate::ProcessRegistration,
+    registration: &lash_execution_contracts::process::ProcessRegistration,
 ) -> crate::RuntimeExecutionContext<'run> {
     TestExecutionContextBuilder::new(ports.into())
         .build()
         .into_runtime()
         .with_process_execution(
-            &crate::ProcessRecord::from_registration(registration.clone(), process_id),
+            &lash_execution_contracts::process::ProcessRecord::from_registration(
+                registration.clone(),
+                process_id,
+            ),
             None,
         )
 }
@@ -1324,7 +1289,7 @@ pub async fn execute_tool_intents_with_services(
     processes: Arc<dyn crate::ProcessService>,
     session_id: &SessionId,
     tool_call_id: &crate::ToolCallId,
-    intents: &crate::ToolIntents,
+    intents: &lash_execution_contracts::tool_intent::ToolIntents,
 ) -> Result<crate::tool_dispatch::Realization, crate::RuntimeEffectControllerError> {
     execute_tool_intents_with_services_and_hook(
         scoped_effect_controller,
@@ -1345,10 +1310,10 @@ pub async fn execute_tool_intents_with_services(
 /// Rows that do not decode, or a registration its admission refuses.
 pub fn staged_start_record(
     effect: &crate::runtime::actor::round::StoreLocalEffect,
-) -> Result<Option<crate::ProcessRecord>, PluginError> {
+) -> Result<Option<lash_execution_contracts::process::ProcessRecord>, PluginError> {
     match effect {
         crate::runtime::actor::round::StoreLocalEffect::ProcessStart(rows) => {
-            crate::runtime::StagedRegistration::decode(rows)?
+            lash_execution_contracts::process::StagedRegistration::decode(rows)?
                 .record()
                 .map(Some)
         }
@@ -1363,7 +1328,7 @@ pub async fn execute_tool_intents_with_services_and_hook(
     processes: Arc<dyn crate::ProcessService>,
     session_id: &SessionId,
     tool_call_id: &crate::ToolCallId,
-    intents: &crate::ToolIntents,
+    intents: &lash_execution_contracts::tool_intent::ToolIntents,
     child_trace_hook: Option<&crate::ToolChildExecutionTraceHook>,
 ) -> Result<crate::tool_dispatch::Realization, crate::RuntimeEffectControllerError> {
     let parent_invocation = crate::RuntimeInvocation::effect(
@@ -1402,8 +1367,8 @@ pub async fn execute_tool_intents_with_services_and_hook(
 /// routing decision per method, so a route that journals in production journals
 /// here too.
 struct EffectBackedProcessService {
-    registry: Arc<dyn crate::ProcessRegistry>,
-    process_env_store: Arc<dyn crate::ProcessEnvStore>,
+    registry: Arc<dyn lash_execution_contracts::process::ProcessRegistry>,
+    process_env_store: Arc<dyn lash_execution_contracts::process::ProcessEnvStore>,
 }
 
 impl EffectBackedProcessService {
@@ -1427,7 +1392,8 @@ impl EffectBackedProcessService {
         &self,
         scope: crate::ProcessOpScope<'_>,
         command: crate::ProcessCommand,
-    ) -> Result<crate::ProcessEffectOutcome, crate::PluginError> {
+    ) -> Result<crate::ProcessEffectOutcome, lash_execution_contracts::plugin_error::PluginError>
+    {
         let effect_id = command.effect_id();
         // Production derives the nested invocation from the parent invocation
         // the ToolContext carries (`process_effect_invocation`), so a nested
@@ -1466,12 +1432,19 @@ impl EffectBackedProcessService {
                 local_executor,
             )
             .await?;
-        outcome.into_process().map_err(crate::PluginError::from)
+        outcome
+            .into_process()
+            .map_err(lash_execution_contracts::plugin_error::PluginError::from)
     }
 
     /// The process executor production stages a call's starts on, over
     /// this service's stores.
-    fn stager(&self) -> Result<crate::runtime::ProcessLocalExecution, crate::PluginError> {
+    fn stager(
+        &self,
+    ) -> Result<
+        crate::runtime::ProcessLocalExecution,
+        lash_execution_contracts::plugin_error::PluginError,
+    > {
         crate::RuntimeEffectLocalExecutor::processes(
             Arc::clone(&self.registry),
             Arc::new(crate::NoProcessWork::for_registry(Arc::clone(
@@ -1482,7 +1455,7 @@ impl EffectBackedProcessService {
         )
         .with_process_env_store(Arc::clone(&self.process_env_store))
         .into_process()
-        .map_err(crate::PluginError::from)
+        .map_err(lash_execution_contracts::plugin_error::PluginError::from)
     }
 }
 
@@ -1492,9 +1465,9 @@ impl EffectBackedProcessService {
 /// runtime's realization does (FIG-3607 R1, R2): these test services stand in
 /// for that realization.
 fn admitted_registration(
-    registration: crate::ProcessStartRegistration,
+    registration: lash_execution_contracts::process::ProcessStartRegistration,
     scope: &crate::ProcessOpScope<'_>,
-) -> Result<crate::ProcessStartRegistration, PluginError> {
+) -> Result<lash_execution_contracts::process::ProcessStartRegistration, PluginError> {
     match scope
         .start_cx()
         .map_err(|error| PluginError::Session(format!("process start refused: {error}")))?
@@ -1505,8 +1478,8 @@ fn admitted_registration(
 }
 
 pub fn effect_backed_process_service(
-    registry: Arc<dyn crate::ProcessRegistry>,
-    process_env_store: Arc<dyn crate::ProcessEnvStore>,
+    registry: Arc<dyn lash_execution_contracts::process::ProcessRegistry>,
+    process_env_store: Arc<dyn lash_execution_contracts::process::ProcessEnvStore>,
 ) -> Arc<dyn crate::ProcessService> {
     Arc::new(EffectBackedProcessService {
         registry,
@@ -1584,7 +1557,7 @@ pub struct MockSessionManager {
     /// default) is a session manager with no process port: every process
     /// route refuses, so a tool test that never touches processes needs no
     /// backend, and one that does hands in its backend's registry.
-    pub process_registry: Option<Arc<dyn crate::ProcessRegistry>>,
+    pub process_registry: Option<Arc<dyn lash_execution_contracts::process::ProcessRegistry>>,
     pub created: Mutex<Vec<SessionCreateRequest>>,
 }
 
@@ -1614,7 +1587,7 @@ impl MockSessionManager {
     /// Routes the mock's process operations through `process_registry`.
     pub fn with_process_registry(
         mut self,
-        process_registry: Arc<dyn crate::ProcessRegistry>,
+        process_registry: Arc<dyn lash_execution_contracts::process::ProcessRegistry>,
     ) -> Self {
         self.process_registry = Some(process_registry);
         self
@@ -1622,7 +1595,9 @@ impl MockSessionManager {
 
     /// The registry the process routes use, or the refusal a mock with no
     /// process port answers.
-    pub fn registry(&self) -> Result<&Arc<dyn crate::ProcessRegistry>, PluginError> {
+    pub fn registry(
+        &self,
+    ) -> Result<&Arc<dyn lash_execution_contracts::process::ProcessRegistry>, PluginError> {
         self.process_registry.as_ref().ok_or_else(|| {
             PluginError::Session(
                 "this mock session manager has no process registry; hand one in with \
@@ -1682,3 +1657,7 @@ pub(crate) use test_protocol_fakes::register_inventory_protocol;
 
 mod callback_counts;
 pub use callback_counts::CallbackCounts;
+
+#[cfg(any(test, feature = "testing"))]
+use lash_execution_contracts::testing::held_engine_registration;
+use lash_execution_contracts::testing::process_execution_env_fixture;

@@ -27,17 +27,21 @@ use std::sync::Arc;
 use lash_durable::CommitLabel;
 use lash_durable::domain::{ModelCallId, PromptCallKey};
 
+use crate::ActorContext;
+use crate::ExecutionBudgets;
+use crate::ExecutionLimit;
+use crate::FailureCode;
+use crate::LlmCallError;
+use crate::LlmRequest;
+use crate::TurnFailureCode;
 use crate::plugin::prompt::{
     AdmittedCallLoadError, OfferedTools, ProjectedHistoryStats, PromptCall, PromptCompositionError,
     PromptCutParts, PromptModel, admission_record, load_admitted_call,
 };
 use crate::prompt_sections::{PromptPlan, PromptPurpose};
-use crate::{
-    ActorContext, ExecutionBudgets, ExecutionLimit, FailureCode, LlmCallError, LlmRequest,
-    PluginError, TurnFailureCode,
-};
 use lash_core_execution::AdmittedDirectSend;
 use lash_core_execution::core_internal::{compose_prompt, prompt_cut};
+use lash_execution_contracts::plugin_error::PluginError;
 
 /// What an owned call composes its prompt from: the owner's recorded plan,
 /// config and plugins, and its committed session view when a session owns
@@ -342,8 +346,10 @@ pub(in crate::runtime) async fn hold_slots(
     }
     ids.sort();
     ids.dedup();
-    let live = |error: crate::PluginError| match error {
-        crate::PluginError::RuntimeEffectController(error) => error,
+    let live = |error: lash_execution_contracts::plugin_error::PluginError| match error {
+        lash_execution_contracts::plugin_error::PluginError::RuntimeEffectController(error) => {
+            error
+        }
         other => crate::RuntimeEffectControllerError::new(
             crate::RuntimeErrorCode::RuntimeEffectAttachmentStore,
             other.to_string(),

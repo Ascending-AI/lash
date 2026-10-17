@@ -36,9 +36,9 @@ fn resolved_finish(
         serde_json::to_string(&parked).expect("a parked call encodes"),
     )
     .parked("wait".to_owned());
-    let terminal = crate::ProcessAwaitOutput::from_tool_output(ToolCallOutput::finish(
-        crate::ToolValue::untrusted_json(value),
-    ));
+    let terminal = lash_execution_contracts::process::ProcessAwaitOutput::from_tool_output(
+        ToolCallOutput::finish(crate::ToolValue::untrusted_json(value)),
+    );
     let call = crate::sansio::PendingToolCall {
         call_id: crate::ToolCallId::fixture("parked-finish"),
         provider_call_id: None,
@@ -143,7 +143,7 @@ async fn an_empty_invalid_version_batch_emits_only_a_batch_refusal() {
     let realization = crate::tool_dispatch::execute_final_tool_intents(
         &context.dispatch().intent_realization_context(),
         &call,
-        &crate::ToolIntents {
+        &lash_execution_contracts::tool_intent::ToolIntents {
             protocol_version: 0,
             intents: Vec::new(),
         },
@@ -155,7 +155,7 @@ async fn an_empty_invalid_version_batch_emits_only_a_batch_refusal() {
     let activity = observed.try_recv().expect("the batch refusal is observed");
     assert!(
         matches!(&activity.event, crate::TurnEvent::ToolIntentOutcome { call_id, outcome: crate::ToolIntentActivityOutcome::BatchRefused {
-        refusal: crate::ToolIntentRefusalReason::UnsupportedProtocolVersion { recorded: 0 },
+        refusal: lash_execution_contracts::tool_intent_outcome::ToolIntentRefusalReason::UnsupportedProtocolVersion { recorded: 0 },
     }} if call_id == &call)
     );
     let encoded = serde_json::to_value(activity.event).expect("the activity serializes");

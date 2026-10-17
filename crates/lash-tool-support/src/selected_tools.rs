@@ -10,13 +10,18 @@
 use std::sync::Arc;
 
 use async_trait::async_trait;
-use lash_core::plugin::{
-    CandidateFacts, ConfigCommand, ConfigOwner, ConfigRegistrar, ConfigRegistrationError,
-    OwnerChange, PluginDeclaration, PluginError, PluginFactory,
-};
+use lash_core::plugin::CandidateFacts;
+use lash_core::plugin::ConfigCommand;
+use lash_core::plugin::ConfigOwner;
+use lash_core::plugin::ConfigRegistrar;
+use lash_core::plugin::OwnerChange;
+use lash_core::plugin::PluginDeclaration;
+use lash_core::plugin::PluginFactory;
 use lash_core::{
     OwnerConfigView, ToolCall, ToolContract, ToolId, ToolManifest, ToolPrepareCall, ToolProvider,
 };
+use lash_execution_contracts::config_error::ConfigRegistrationError;
+use lash_execution_contracts::plugin_error::PluginError;
 use serde::{Deserialize, Serialize};
 
 use crate::ToolSelection;
@@ -149,11 +154,14 @@ impl PluginFactory for SelectedToolsPlugin {
 
     fn recipe(
         self: Arc<Self>,
-    ) -> std::result::Result<lash_core::plugin::PluginRecipe, lash_core::plugin::PluginError> {
+    ) -> std::result::Result<
+        lash_core::plugin::PluginRecipe,
+        lash_execution_contracts::plugin_error::PluginError,
+    > {
         let recipe_factory = Arc::clone(&self);
         let recipe: std::result::Result<
             lash_core::plugin::PluginRecipe,
-            lash_core::plugin::PluginError,
+            lash_execution_contracts::plugin_error::PluginError,
         > = {
             let mut reg = lash_core::plugin::PluginRegistrar::<SelectedToolsSession>::new(
                 lash_core::plugin::PluginFactory::id(self.as_ref()),
@@ -206,7 +214,7 @@ struct SelectedToolsSession {
 impl SelectedToolsSession {
     fn declare(
         reg: &mut lash_core::plugin::PluginRegistrar<Self>,
-    ) -> std::result::Result<(), lash_core::plugin::PluginError> {
+    ) -> std::result::Result<(), lash_execution_contracts::plugin_error::PluginError> {
         reg.tools().provider(
             lash_core::tool_provider_key!("tools"),
             move |this, _state| Ok(Arc::clone(&this.provider)),
@@ -234,7 +242,8 @@ impl ToolProvider for Selected {
     fn tool_manifests(
         &self,
         config: &OwnerConfigView,
-    ) -> std::result::Result<Vec<ToolManifest>, lash_core::PluginError> {
+    ) -> std::result::Result<Vec<ToolManifest>, lash_execution_contracts::plugin_error::PluginError>
+    {
         let selection =
             ToolSelection::of(config, self.owner).map_err(|error| PluginError::ProviderConfig {
                 owner: self.owner.into(),

@@ -31,7 +31,7 @@ pub(super) async fn retain_document(
         lash_vm_runtime::KernelDocuments::new(ctx.actor_context().backend().module_artifacts());
     let frame = match ctx.frame_claim() {
         Ok(frame) => Some(frame),
-        Err(lash_core::PluginError::NotASessionRuntime { .. }) => None,
+        Err(lash_execution_contracts::plugin_error::PluginError::NotASessionRuntime { .. }) => None,
         Err(error) => return Err(error.to_string()),
     };
     let retained = match &frame {
@@ -46,7 +46,9 @@ pub(super) async fn retain_document(
         // The refusal held nothing: the frame's fence is checked first.
         (
             Err(lash_vm_runtime::DocumentStoreError::Store(
-                lash_core::ArtifactStoreError::ReferrerEnded { referrer },
+                lash_execution_contracts::module_artifacts::ArtifactStoreError::ReferrerEnded {
+                    referrer,
+                },
             )),
             Some(frame),
         ) if referrer == frame.referrer() => {

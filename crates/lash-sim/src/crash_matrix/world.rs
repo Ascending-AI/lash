@@ -14,10 +14,10 @@ use std::sync::{Arc, Mutex, OnceLock, Weak};
 use std::time::Duration;
 
 use lash_core::sync::MutexExt as _;
-use lash_core_execution::Backend;
 use lash_durable::domain::OwnerKey;
 use lash_durable::{ActorKey, DurableError, StoreFailureKind};
 use lash_durable_test::{SimClock, SimNodes, Tripwire};
+use lash_execution_contracts::backend::Backend;
 use lash_protocol_types::{ExecutionPolicy, ToolCallId};
 
 /// One body entry, noted before the body does anything else.

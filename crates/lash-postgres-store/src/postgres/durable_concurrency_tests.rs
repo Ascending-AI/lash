@@ -10,7 +10,7 @@ use std::sync::atomic::{AtomicUsize, Ordering};
 use std::sync::{Arc, Mutex};
 use std::time::{Duration, Instant};
 
-use lash_core_execution::testing::TestClock;
+use lash_core_ids::test_clock::TestClock;
 use lash_durable::{
     ActorKey, ActorState, CommitLabel, DurableError, DurableStore, Epoch, FormatSet, MailKind,
     MailTx, NodeId, NodeLease, NodeSpec, Release, StoreFailure, StoreFailureKind,

@@ -88,7 +88,7 @@ omission counts.
 
 Evidence: `crates/lash-core/src/runtime/observation/process_replay.rs`,
 `crates/lash/src/process_feed.rs`, and
-`crates/lash-core-execution/src/runtime/process/observation.rs`.
+`crates/lash-execution-contracts/src/process/observation.rs`.
 
 ### R3: logical identity is not publication position
 
@@ -131,9 +131,9 @@ error delivered to the program. This does not promise exactly-once external
 I/O for an effect whose outcome has not committed. Pure computations, branches, and iterations gain no durable
 summary events.
 
-Evidence: `crates/lash-core-execution/src/runtime/process/effect_summary.rs:26`,
+Evidence: `crates/lash-execution-contracts/src/process/effect_summary.rs:26`,
 `:62`, `:79`, `:153`,
-`crates/lash-core-execution/src/runtime/process/validation.rs`, and
+`crates/lash-execution-contracts/src/process/validation.rs`, and
 `crates/lash-conformance/src/conformance/process_event_batch.rs:1`.
 
 ### R5: attempt is telemetry identity only
@@ -201,7 +201,7 @@ The owners and fences are in `crates/lash-kernel-doc/src/document.rs`,
 `crates/lash-vm-runtime/src/formats.rs`,
 `crates/lash-trace/src/lib.rs:164`, `:187`,
 `crates/lash-trace/src/workflow_overlay/model.rs`, and
-`crates/lash-core-execution/src/runtime/process/effect_summary.rs:17`, `:125`.
+`crates/lash-execution-contracts/src/process/effect_summary.rs:17`, `:125`.
 
 Checked-in JSON Schemas live under `schemas/host/`. Their generator and drift
 check are `scripts/generate-workflow-schemas.py`. Full event SQL selects payloads;

@@ -47,14 +47,14 @@ impl ToolIntentIngressKey {
         tool_call_id: &lash_core::ToolCallId,
         intent_index: u32,
     ) -> Self {
-        let identity = lash_core::derive_tool_intent_identity(
+        let identity = lash_execution_contracts::tool_intent::derive_tool_intent_identity(
             &lash_core::RuntimeOwner::Session(session_id.clone()),
             execution_scope_id.as_ref(),
             tool_call_id,
             intent_index,
         );
         Self {
-            protocol_version: lash_core::TOOL_INTENT_PROTOCOL_V3,
+            protocol_version: lash_execution_contracts::tool_intent::TOOL_INTENT_PROTOCOL_V3,
             identity,
         }
     }
@@ -148,7 +148,7 @@ pub enum ToolIntentIngressOutcome {
     /// Carries the admitted tool-intent outcome and whether it was replayed.
     Admitted {
         /// Execution outcome produced for the admitted intent.
-        outcome: lash_core::ToolIntentExecutionOutcome,
+        outcome: lash_execution_contracts::tool_intent_outcome::ToolIntentExecutionOutcome,
         /// `false` only when this submission wrote the durable fact.
         ///
         /// `true` covers both ways a submission can realize nothing: the
@@ -194,15 +194,18 @@ struct SubmissionTrace {
 impl SubmissionTrace {
     fn offered(
         &self,
-        record: lash_core::ToolIntentSubmissionRecord,
-    ) -> lash_core::ToolIntentSubmissionRecord {
+        record: lash_execution_contracts::tool_intent::ToolIntentSubmissionRecord,
+    ) -> lash_execution_contracts::tool_intent::ToolIntentSubmissionRecord {
         record.with_trace_offer(self.offer.clone(), self.submitted_at_ms)
     }
 }
 
 enum RealizationFailure {
     Refused(ToolIntentIngressRefusal),
-    Command(lash_core::ToolIntentKind, lash_core::PluginError),
+    Command(
+        lash_core::ToolIntentKind,
+        lash_execution_contracts::plugin_error::PluginError,
+    ),
 }
 
 impl crate::LashCore {
@@ -354,7 +357,7 @@ impl ToolIntentIngress {
     pub async fn submit(
         &self,
         key: ToolIntentIngressKey,
-        intent: lash_core::ToolIntent,
+        intent: lash_execution_contracts::tool_intent::ToolIntent,
     ) -> ToolIntentIngressOutcome {
         let identity = key.identity().clone();
         let span = tracing::info_span!(
@@ -401,7 +404,7 @@ impl ToolIntentIngress {
     async fn submit_inner(
         &self,
         key: ToolIntentIngressKey,
-        intent: lash_core::ToolIntent,
+        intent: lash_execution_contracts::tool_intent::ToolIntent,
         trace: &SubmissionTrace,
     ) -> ToolIntentIngressOutcome {
         if let Some(refusal) = self.validate(&key, &intent) {
@@ -411,7 +414,7 @@ impl ToolIntentIngress {
         let submitted_intent = intent.clone();
         let (outcome, replayed) = match self.realize(&identity, intent, trace).await {
             Ok((result, replayed)) => (
-                lash_core::ToolIntentExecutionOutcome::Executed {
+                lash_execution_contracts::tool_intent_outcome::ToolIntentExecutionOutcome::Executed {
                     identity: identity.clone(),
                     realized: result,
                 },
@@ -421,24 +424,24 @@ impl ToolIntentIngress {
                 return ToolIntentIngressOutcome::Refused { refusal };
             }
             Err(RealizationFailure::Command(kind, error)) => {
-                let mut outcome = lash_core::ToolIntentExecutionOutcome::Refused {
+                let mut outcome = lash_execution_contracts::tool_intent_outcome::ToolIntentExecutionOutcome::Refused {
                     identity: Some(identity.clone()),
                     intent_index: identity.intent_index,
                     kind,
-                    refusal: lash_core::ToolIntentRefusalReason::CommandFailed {
-                        cause: lash_core::ToolIntentCommandFailure::from(&error),
+                    refusal: lash_execution_contracts::tool_intent_outcome::ToolIntentRefusalReason::CommandFailed {
+                        cause: lash_execution_contracts::plugin_error::ToolIntentCommandFailure::from(&error),
                     },
                 };
                 if let Err(store_error) = self
                     .retain_outcome(&identity, submitted_intent.clone(), outcome.clone(), trace)
                     .await
                 {
-                    outcome = lash_core::ToolIntentExecutionOutcome::Refused {
+                    outcome = lash_execution_contracts::tool_intent_outcome::ToolIntentExecutionOutcome::Refused {
                         identity: Some(identity.clone()),
                         intent_index: identity.intent_index,
                         kind,
-                        refusal: lash_core::ToolIntentRefusalReason::CommandFailed {
-                            cause: lash_core::ToolIntentCommandFailure::from(&store_error),
+                        refusal: lash_execution_contracts::tool_intent_outcome::ToolIntentRefusalReason::CommandFailed {
+                            cause: lash_execution_contracts::plugin_error::ToolIntentCommandFailure::from(&store_error),
                         },
                     };
                 }
@@ -499,9 +502,9 @@ impl ToolIntentIngress {
     fn validate(
         &self,
         key: &ToolIntentIngressKey,
-        intent: &lash_core::ToolIntent,
+        intent: &lash_execution_contracts::tool_intent::ToolIntent,
     ) -> Option<ToolIntentIngressRefusal> {
-        if key.protocol_version != lash_core::TOOL_INTENT_PROTOCOL_V3 {
+        if key.protocol_version != lash_execution_contracts::tool_intent::TOOL_INTENT_PROTOCOL_V3 {
             return Some(ToolIntentIngressRefusal::UnsupportedProtocolVersion {
                 recorded: key.protocol_version,
             });
@@ -543,15 +546,21 @@ impl ToolIntentIngress {
     fn expected_identity(
         identity: &lash_core::ToolIntentIdentity,
     ) -> lash_core::ToolIntentIdentity {
-        lash_core::rederive_tool_intent_identity(identity)
+        lash_execution_contracts::tool_intent::rederive_tool_intent_identity(identity)
     }
 
     async fn realize(
         &self,
         identity: &lash_core::ToolIntentIdentity,
-        intent: lash_core::ToolIntent,
+        intent: lash_execution_contracts::tool_intent::ToolIntent,
         trace: &SubmissionTrace,
-    ) -> std::result::Result<(lash_core::ToolIntentRealized, bool), RealizationFailure> {
+    ) -> std::result::Result<
+        (
+            lash_execution_contracts::tool_intent_outcome::ToolIntentRealized,
+            bool,
+        ),
+        RealizationFailure,
+    > {
         let kind = intent.kind();
         let submitted_intent = intent.clone();
         let (recorded, parent) = self.admit_submission(identity, &intent, trace).await?;
@@ -565,22 +574,22 @@ impl ToolIntentIngress {
         let realized = match result {
             RealizedIntent::Process(result) => match result {
                 lash_core::ProcessEffectOutcome::Start { record, .. } => {
-                    lash_core::ToolIntentRealized::StartProcess(
-                        lash_core::ProcessHandleView::from_observed(*record),
+                    lash_execution_contracts::tool_intent_outcome::ToolIntentRealized::StartProcess(
+                        lash_execution_contracts::process::ProcessHandleView::from_observed(*record),
                     )
                 }
                 lash_core::ProcessEffectOutcome::Cancel { record } => {
-                    lash_core::ToolIntentRealized::CancelProcess(
-                        lash_core::ProcessCancelReceipt::from_observed(*record)
+                    lash_execution_contracts::tool_intent_outcome::ToolIntentRealized::CancelProcess(
+                        lash_execution_contracts::process::ProcessCancelReceipt::from_observed(*record)
                             .map_err(|error| RealizationFailure::Command(kind, error))?,
                     )
                 }
                 lash_core::ProcessEffectOutcome::Definition { definition } => match kind {
                     lash_core::ToolIntentKind::PublishDefinition => {
-                        lash_core::ToolIntentRealized::PublishDefinition(definition)
+                        lash_execution_contracts::tool_intent_outcome::ToolIntentRealized::PublishDefinition(definition)
                     }
                     lash_core::ToolIntentKind::GetDefinition => {
-                        lash_core::ToolIntentRealized::GetDefinition(definition)
+                        lash_execution_contracts::tool_intent_outcome::ToolIntentRealized::GetDefinition(definition)
                     }
                     lash_core::ToolIntentKind::StartProcess
                     | lash_core::ToolIntentKind::CancelProcess => {
@@ -612,10 +621,11 @@ impl ToolIntentIngress {
                 },
             ));
         }
-        let outcome = lash_core::ToolIntentExecutionOutcome::Executed {
-            identity: identity.clone(),
-            realized: realized.clone(),
-        };
+        let outcome =
+            lash_execution_contracts::tool_intent_outcome::ToolIntentExecutionOutcome::Executed {
+                identity: identity.clone(),
+                realized: realized.clone(),
+            };
         self.retain_outcome(identity, submitted_intent, outcome, trace)
             .await
             .map_err(|error| RealizationFailure::Command(kind, error))?;
@@ -656,26 +666,29 @@ impl ToolIntentIngress {
     async fn admit_submission(
         &self,
         identity: &lash_core::ToolIntentIdentity,
-        intent: &lash_core::ToolIntent,
+        intent: &lash_execution_contracts::tool_intent::ToolIntent,
         trace: &SubmissionTrace,
     ) -> std::result::Result<
         (
-            Option<lash_core::ToolIntentRealized>,
+            Option<lash_execution_contracts::tool_intent_outcome::ToolIntentRealized>,
             Option<lash_core::TraceParent>,
         ),
         RealizationFailure,
     > {
         let kind = intent.kind();
-        let record = lash_core::ToolIntentSubmissionRecord::new(identity.clone(), intent.clone())
-            .map(|record| self.owned(record))
-            .map_err(|error| {
-                RealizationFailure::Command(
-                    kind,
-                    lash_core::PluginError::Session(format!(
-                        "failed to hash tool-intent submission: {error}"
-                    )),
-                )
-            })?;
+        let record = lash_execution_contracts::tool_intent::ToolIntentSubmissionRecord::new(
+            identity.clone(),
+            intent.clone(),
+        )
+        .map(|record| self.owned(record))
+        .map_err(|error| {
+            RealizationFailure::Command(
+                kind,
+                lash_execution_contracts::plugin_error::PluginError::Session(format!(
+                    "failed to hash tool-intent submission: {error}"
+                )),
+            )
+        })?;
         let registry = self
             .process_registry()
             .map_err(|error| RealizationFailure::Command(kind, error))?;
@@ -697,17 +710,21 @@ impl ToolIntentIngress {
             Err(error) => return Err(RealizationFailure::Command(kind, error)),
         };
         let existing = match admission {
-            lash_core::ToolIntentSubmissionAdmission::Admitted => {
+            lash_execution_contracts::tool_intent::ToolIntentSubmissionAdmission::Admitted => {
                 return Ok((None, scope.as_parent()));
             }
-            lash_core::ToolIntentSubmissionAdmission::Existing(existing) => existing,
-            lash_core::ToolIntentSubmissionAdmission::Reclaimed => {
+            lash_execution_contracts::tool_intent::ToolIntentSubmissionAdmission::Existing(
+                existing,
+            ) => existing,
+            lash_execution_contracts::tool_intent::ToolIntentSubmissionAdmission::Reclaimed => {
                 return Err(RealizationFailure::Refused(
                     ToolIntentIngressRefusal::SubmissionOwnerReclaimed,
                 ));
             }
         };
-        if existing.protocol_version != lash_core::TOOL_INTENT_PROTOCOL_V3 {
+        if existing.protocol_version
+            != lash_execution_contracts::tool_intent::TOOL_INTENT_PROTOCOL_V3
+        {
             return Err(RealizationFailure::Refused(
                 ToolIntentIngressRefusal::UnsupportedProtocolVersion {
                     recorded: existing.protocol_version,
@@ -738,7 +755,7 @@ impl ToolIntentIngress {
             .and_then(lash_core::DurableTraceScope::as_parent);
         Ok((
             match existing.execution_outcome() {
-                Some(lash_core::ToolIntentExecutionOutcome::Executed { realized, .. }) => {
+                Some(lash_execution_contracts::tool_intent_outcome::ToolIntentExecutionOutcome::Executed { realized, .. }) => {
                     Some(realized)
                 }
                 _ => None,
@@ -753,8 +770,8 @@ impl ToolIntentIngress {
     /// no run, and the payload stays while the row lives.
     fn owned(
         &self,
-        record: lash_core::ToolIntentSubmissionRecord,
-    ) -> lash_core::ToolIntentSubmissionRecord {
+        record: lash_execution_contracts::tool_intent::ToolIntentSubmissionRecord,
+    ) -> lash_execution_contracts::tool_intent::ToolIntentSubmissionRecord {
         match self.scope.logical_run() {
             Some(run) => record.owned_by_run(run),
             None => record,
@@ -768,28 +785,35 @@ impl ToolIntentIngress {
     async fn retain_outcome(
         &self,
         identity: &lash_core::ToolIntentIdentity,
-        submitted: lash_core::ToolIntent,
-        outcome: lash_core::ToolIntentExecutionOutcome,
+        submitted: lash_execution_contracts::tool_intent::ToolIntent,
+        outcome: lash_execution_contracts::tool_intent_outcome::ToolIntentExecutionOutcome,
         trace: &SubmissionTrace,
-    ) -> Result<(), lash_core::PluginError> {
+    ) -> Result<(), lash_execution_contracts::plugin_error::PluginError> {
         let registry = self.process_registry()?;
-        let submission = lash_core::ToolIntentSubmissionRecord::new(identity.clone(), submitted)
-            .map(|record| trace.offered(self.owned(record)))
-            .map_err(|error| {
-                lash_core::PluginError::Runtime(lash_core::RuntimeError::new(
+        let submission = lash_execution_contracts::tool_intent::ToolIntentSubmissionRecord::new(
+            identity.clone(),
+            submitted,
+        )
+        .map(|record| trace.offered(self.owned(record)))
+        .map_err(|error| {
+            lash_execution_contracts::plugin_error::PluginError::Runtime(
+                lash_core::RuntimeError::new(
                     lash_core::RuntimeErrorCode::RecordEncodingFailed,
                     format!("failed to hash admitted tool-intent submission: {error}"),
-                ))
-            })?;
+                ),
+            )
+        })?;
         let recorded = match registry.admit_tool_intent_submission(submission).await? {
-            lash_core::ToolIntentSubmissionAdmission::Admitted => false,
-            lash_core::ToolIntentSubmissionAdmission::Existing(existing) => {
-                existing.settlement.is_some()
-            }
+            lash_execution_contracts::tool_intent::ToolIntentSubmissionAdmission::Admitted => false,
+            lash_execution_contracts::tool_intent::ToolIntentSubmissionAdmission::Existing(
+                existing,
+            ) => existing.settlement.is_some(),
             // The owner was deleted and its ledger reclaimed while this
             // submission realized: its fence already refuses every redelivery,
             // so there is no row left to retain the outcome in.
-            lash_core::ToolIntentSubmissionAdmission::Reclaimed => return Ok(()),
+            lash_execution_contracts::tool_intent::ToolIntentSubmissionAdmission::Reclaimed => {
+                return Ok(());
+            }
         };
         if !recorded {
             let receipt = registry
@@ -798,7 +822,7 @@ impl ToolIntentIngress {
             let permit = receipt.permit();
             let runtime = &self.core.env.core.tracing;
             let status = match receipt.record.execution_outcome().as_ref() {
-                Some(lash_core::ToolIntentExecutionOutcome::Executed { .. }) => {
+                Some(lash_execution_contracts::tool_intent_outcome::ToolIntentExecutionOutcome::Executed { .. }) => {
                     lash_core::operational_metrics::record_tool_intent_executed(
                         runtime.metrics(),
                         permit.as_ref(),
@@ -807,8 +831,8 @@ impl ToolIntentIngress {
                     lash_trace::TraceDomainStatus::Completed
                 }
                 Some(
-                    lash_core::ToolIntentExecutionOutcome::Refused { refusal, .. }
-                    | lash_core::ToolIntentExecutionOutcome::ProtocolRefused { refusal },
+                    lash_execution_contracts::tool_intent_outcome::ToolIntentExecutionOutcome::Refused { refusal, .. }
+                    | lash_execution_contracts::tool_intent_outcome::ToolIntentExecutionOutcome::ProtocolRefused { refusal },
                 ) => {
                     lash_core::operational_metrics::record_tool_intent_refused(
                         runtime.metrics(),
@@ -858,9 +882,9 @@ impl ToolIntentIngress {
     /// reaches the host as a typed duplicate-identity refusal.
     fn realization_failure(
         kind: lash_core::ToolIntentKind,
-        error: lash_core::PluginError,
+        error: lash_execution_contracts::plugin_error::PluginError,
     ) -> RealizationFailure {
-        if lash_core::is_durable_identity_conflict(&error) {
+        if lash_execution_contracts::plugin_error::is_durable_identity_conflict(&error) {
             return RealizationFailure::Refused(ToolIntentIngressRefusal::DuplicateIdentity {
                 kind,
             });
@@ -879,18 +903,18 @@ impl ToolIntentIngress {
     async fn realize_inner(
         &self,
         identity: &lash_core::ToolIntentIdentity,
-        intent: lash_core::ToolIntent,
+        intent: lash_execution_contracts::tool_intent::ToolIntent,
         parent: Option<lash_core::TraceParent>,
-    ) -> Result<(RealizedIntent, bool), lash_core::PluginError> {
+    ) -> Result<(RealizedIntent, bool), lash_execution_contracts::plugin_error::PluginError> {
         // The launch the declaration sealed is held under this realization's
         // journal guard until registration carries it onto the record. A
         // published environment is only acquired: nothing is admitted or
         // chosen here.
         if let Some(env_ref) = intent.env_ref() {
             let claim = lash_core::ReferrerClaim::guarded(lash_core::ReferrerGuard::Journal(
-                self.scope
-                    .journal_identity()
-                    .map_err(|error| lash_core::PluginError::Session(error.to_string()))?,
+                self.scope.journal_identity().map_err(|error| {
+                    lash_execution_contracts::plugin_error::PluginError::Session(error.to_string())
+                })?,
             ));
             lash_core::hold_process_env(
                 &lash_core::ProcessEnvPorts::published_only(
@@ -902,13 +926,15 @@ impl ToolIntentIngress {
             .await
             .map_err(|error| match error {
                 lash_core::HoldEnvError::Refused(refusal) => {
-                    lash_core::PluginError::ProcessEnvRefused { refusal }
+                    lash_execution_contracts::plugin_error::PluginError::ProcessEnvRefused {
+                        refusal,
+                    }
                 }
                 lash_core::HoldEnvError::Fault(error) => error,
             })?;
         }
         let command = match intent {
-            lash_core::ToolIntent::StartProcess(intent) => {
+            lash_execution_contracts::tool_intent::ToolIntent::StartProcess(intent) => {
                 // The declaration carries no id. The replay key is the process
                 // id, so a re-submitted declaration starts the same process:
                 // one constructor, shared with core's recorded-intent seam
@@ -924,10 +950,12 @@ impl ToolIntentIngress {
                 lash_core::ProcessCommand::Start {
                     registration,
                     observers,
-                    execution_context: Box::new(lash_core::ProcessExecutionContext::default()),
+                    execution_context: Box::new(
+                        lash_execution_contracts::process::ProcessExecutionContext::default(),
+                    ),
                 }
             }
-            lash_core::ToolIntent::CancelProcess(intent) => {
+            lash_execution_contracts::tool_intent::ToolIntent::CancelProcess(intent) => {
                 // The recorded cancel admission refuses an unknown or pruned
                 // target; no registry read comes ahead of it (ADR 0105 §1).
                 let process_id = intent.process_id;
@@ -945,12 +973,12 @@ impl ToolIntentIngress {
                     )),
                 }
             }
-            lash_core::ToolIntent::PublishDefinition(intent) => {
+            lash_execution_contracts::tool_intent::ToolIntent::PublishDefinition(intent) => {
                 lash_core::ProcessCommand::PublishDefinition {
                     draft: intent.draft,
                 }
             }
-            lash_core::ToolIntent::GetDefinition(intent) => {
+            lash_execution_contracts::tool_intent::ToolIntent::GetDefinition(intent) => {
                 lash_core::ProcessCommand::GetDefinition {
                     definition_id: intent.definition_id,
                 }
@@ -962,9 +990,12 @@ impl ToolIntentIngress {
 
     fn process_registry(
         &self,
-    ) -> Result<std::sync::Arc<dyn lash_core::ProcessRegistry>, lash_core::PluginError> {
+    ) -> Result<
+        std::sync::Arc<dyn lash_execution_contracts::process::ProcessRegistry>,
+        lash_execution_contracts::plugin_error::PluginError,
+    > {
         self.core.env.process_registry().cloned().ok_or_else(|| {
-            lash_core::PluginError::Session(
+            lash_execution_contracts::plugin_error::PluginError::Session(
                 "process registry is unavailable in this runtime".to_string(),
             )
         })
@@ -974,7 +1005,10 @@ impl ToolIntentIngress {
         &self,
         identity: &lash_core::ToolIntentIdentity,
         command: lash_core::ProcessCommand,
-    ) -> Result<(lash_core::ProcessEffectOutcome, bool), lash_core::PluginError> {
+    ) -> Result<
+        (lash_core::ProcessEffectOutcome, bool),
+        lash_execution_contracts::plugin_error::PluginError,
+    > {
         self.run_command_with_replay_key(identity, identity.replay_key.clone(), command)
             .await
     }
@@ -984,7 +1018,10 @@ impl ToolIntentIngress {
         identity: &lash_core::ToolIntentIdentity,
         replay_key: String,
         command: lash_core::ProcessCommand,
-    ) -> Result<(lash_core::ProcessEffectOutcome, bool), lash_core::PluginError> {
+    ) -> Result<
+        (lash_core::ProcessEffectOutcome, bool),
+        lash_execution_contracts::plugin_error::PluginError,
+    > {
         let registry = self.process_registry()?;
         let scoped = self
             .core
@@ -993,7 +1030,7 @@ impl ToolIntentIngress {
             .control
             .effect_host
             .scoped(lash_core::AdmittedScope::new(self.scope.clone()))
-            .map_err(lash_core::PluginError::Runtime)?;
+            .map_err(lash_execution_contracts::plugin_error::PluginError::Runtime)?;
         #[expect(
             clippy::expect_used,
             reason = "the scope comes from the effect host's own `scoped` handle, which \
@@ -1022,8 +1059,9 @@ impl ToolIntentIngress {
         // Only the store knows the second, so it reports its verdict through
         // the observer instead of the ingress inferring one from "did we
         // execute locally".
-        let store_realization =
-            std::sync::Arc::new(std::sync::Mutex::new(None::<lash_core::StoreRealization>));
+        let store_realization = std::sync::Arc::new(std::sync::Mutex::new(
+            None::<lash_execution_contracts::process::StoreRealization>,
+        ));
         let outcome_observer: lash_core::ProcessOutcomeObserver = {
             let store_realization = std::sync::Arc::clone(&store_realization);
             std::sync::Arc::new(move |realization| {
@@ -1039,9 +1077,11 @@ impl ToolIntentIngress {
             lash_core::RuntimeEffectLocalExecutor::definition_artifacts(
                 self.core.host_process_engines.clone(),
                 lash_core::ReferrerClaim::guarded(lash_core::ReferrerGuard::Journal(
-                    self.scope
-                        .journal_identity()
-                        .map_err(|error| lash_core::PluginError::Session(error.to_string()))?,
+                    self.scope.journal_identity().map_err(|error| {
+                        lash_execution_contracts::plugin_error::PluginError::Session(
+                            error.to_string(),
+                        )
+                    })?,
                 )),
             )
         } else {
@@ -1075,11 +1115,13 @@ impl ToolIntentIngress {
             // refusal travels as a `RuntimeErrorCode`, and `realization_failure`
             // reads that code to produce the shared `DuplicateIdentity`
             // vocabulary.
-            .map_err(lash_core::PluginError::RuntimeEffectController)?;
+            .map_err(lash_execution_contracts::plugin_error::PluginError::RuntimeEffectController)?;
         let lash_core::RuntimeEffectOutcome::Process { result } = outcome else {
-            return Err(lash_core::PluginError::Session(
-                "tool-intent ingress effect returned a non-process outcome".to_string(),
-            ));
+            return Err(
+                lash_execution_contracts::plugin_error::PluginError::Session(
+                    "tool-intent ingress effect returned a non-process outcome".to_string(),
+                ),
+            );
         };
         let replayed = match *store_realization.lock_recover() {
             // Local execution never ran: the journal replayed this effect.

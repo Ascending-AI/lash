@@ -27,7 +27,7 @@ enum Retry {
 
 /// The session actor's park once it parked, read within `within`.
 async fn parked(
-    backend: &lash_core::Backend,
+    backend: &lash_execution_contracts::backend::Backend,
     actor: &ActorKey,
     within: std::time::Duration,
 ) -> Option<lash::SessionParkReason> {

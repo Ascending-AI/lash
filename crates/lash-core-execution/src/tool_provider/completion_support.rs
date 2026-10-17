@@ -9,7 +9,7 @@
 pub(crate) enum AttemptCompletionSupport {
     /// The key of the completion wait the call's round pinned for a
     /// declared deferrer.
-    Available(crate::PinnedKey),
+    Available(lash_execution_contracts::waits::PinnedKey),
     /// The tool's admitted [`ToolDeclaration`](crate::ToolDeclaration) does not
     /// declare `may_defer`, so no key was reserved for it.
     NotDeclared,
@@ -22,7 +22,9 @@ impl AttemptCompletionSupport {
     /// The reserved key, or the refusal that actually applies, so the
     /// integrator lands in the right file: their own provider declaration, or
     /// the host's controller.
-    pub(crate) fn key(&self) -> Result<crate::PinnedKey, crate::RuntimeError> {
+    pub(crate) fn key(
+        &self,
+    ) -> Result<lash_execution_contracts::waits::PinnedKey, crate::RuntimeError> {
         match self {
             Self::Available(key) => Ok(key.clone()),
             Self::NotDeclared => Err(crate::RuntimeError::new(

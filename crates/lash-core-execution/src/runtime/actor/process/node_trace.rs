@@ -20,11 +20,12 @@ use lash_trace::{
 };
 
 use super::driver::{Driver, InFlight};
+use crate::ToolCallId;
 use crate::runtime::actor::round::{RoundView, RunFold};
-use crate::runtime::process::engine_state::StepRequest;
 use crate::trace::TraceRuntime;
-use crate::{ProcessRecord, ToolCallId};
 use lash_core_store::tool_run::SettledOutput;
+use lash_execution_contracts::process::ProcessRecord;
+use lash_execution_contracts::process::StepRequest;
 
 /// The tool scope `call`, the call of `request` admitted at `now_ms`, is
 /// admitted with: under its occurrence's node when `record` retained

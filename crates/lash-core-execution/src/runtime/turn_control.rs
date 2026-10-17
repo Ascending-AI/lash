@@ -24,7 +24,9 @@ pub use lash_protocol_types::{
 };
 
 use super::RuntimeError;
-use crate::{Backend, TurnOutcome, TurnStop};
+use crate::TurnOutcome;
+use crate::TurnStop;
+use lash_execution_contracts::backend::Backend;
 use lash_protocol_types::{InputId, SessionId};
 
 /// What a cancel request did.

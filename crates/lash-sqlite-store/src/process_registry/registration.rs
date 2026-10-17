@@ -1,37 +1,44 @@
 use super::*;
-use lash_core_execution::ScopeId;
+use lash_core_store::scope_identity::ScopeId;
 
 #[async_trait::async_trait]
-impl lash_core_execution::ProcessRegistrar for SqliteProcessRegistry {
+impl lash_execution_contracts::process::ProcessRegistrar for SqliteProcessRegistry {
     async fn prepare_process_registration(
         &self,
         registration: ProcessRegistration,
         observers: &[SessionId],
-    ) -> Result<lash_core_execution::PreparedProcessRegistration, lash_core_execution::PluginError>
-    {
+    ) -> Result<
+        lash_execution_contracts::process::PreparedProcessRegistration,
+        lash_execution_contracts::plugin_error::PluginError,
+    > {
         let registration =
-            lash_core_execution::runtime::prepare_process_registration(registration)?;
+            lash_execution_contracts::process::prepare_process_registration(registration)?;
         let existing = match registration.start_key.as_ref() {
             Some(key) => {
-                lash_core_execution::ProcessQuery::get_process_by_start_key(self, key).await?
+                lash_execution_contracts::process::ProcessQuery::get_process_by_start_key(self, key)
+                    .await?
             }
             None => None,
         };
         let retained = existing.is_some();
         let process_id = existing.map_or_else(|| self.process_id_mint.mint(), |record| record.id);
-        Ok(lash_core_execution::PreparedProcessRegistration::new(
-            registration,
-            observers.to_vec(),
-            process_id,
-            retained,
-            self.clock.timestamp_ms(),
-        ))
+        Ok(
+            lash_execution_contracts::process::PreparedProcessRegistration::new(
+                registration,
+                observers.to_vec(),
+                process_id,
+                retained,
+                self.clock.timestamp_ms(),
+            ),
+        )
     }
     async fn commit_process_registration(
         &self,
-        prepared: lash_core_execution::PreparedProcessRegistration,
-    ) -> Result<lash_core_execution::ProcessRegistrationReceipt, lash_core_execution::PluginError>
-    {
+        prepared: lash_execution_contracts::process::PreparedProcessRegistration,
+    ) -> Result<
+        lash_execution_contracts::process::ProcessRegistrationReceipt,
+        lash_execution_contracts::plugin_error::PluginError,
+    > {
         let (registration, observers, process_id, retained, now) = prepared.into_commit();
         self.conn
             .write_flow(move |tx| {
@@ -54,7 +61,7 @@ impl lash_core_execution::ProcessRegistrar for SqliteProcessRegistry {
         &self,
         process_id: &ProcessId,
         external_ref: ProcessExternalRef,
-    ) -> Result<ProcessRecord, lash_core_execution::PluginError> {
+    ) -> Result<ProcessRecord, lash_execution_contracts::plugin_error::PluginError> {
         let process_id = process_id.clone();
         let now = self.clock.timestamp_ms();
         let record = self
@@ -63,7 +70,7 @@ impl lash_core_execution::ProcessRegistrar for SqliteProcessRegistry {
                 let fleet_format = tx.fleet();
                 Ok(tx_outcome((|| {
                     let mut record = Self::require_process_conn(tx, &process_id)?;
-                    match lash_core_execution::runtime::prepare_process_transition(
+                    match lash_execution_contracts::process::prepare_process_transition(
                         &record,
                         ProcessTransition::SetExternalRef(external_ref),
                     )? {
@@ -92,9 +99,11 @@ impl SqliteProcessRegistry {
         process_id: ProcessId,
         retained: bool,
         now: u64,
-        fleet_format: lash_core_execution::FleetFormat,
-    ) -> Result<lash_core_execution::ProcessRegistrationReceipt, lash_core_execution::PluginError>
-    {
+        fleet_format: lash_core_store::store::FleetFormat,
+    ) -> Result<
+        lash_execution_contracts::process::ProcessRegistrationReceipt,
+        lash_execution_contracts::plugin_error::PluginError,
+    > {
         let mut observers = observers;
         observers.sort();
         observers.dedup();
@@ -108,20 +117,20 @@ impl SqliteProcessRegistry {
         {
             if retained && existing.id != process_id {
                 return Err(
-                    lash_core_execution::StoreError::PreparedProcessRegistrationStale {
+                    lash_core_store::store::StoreError::PreparedProcessRegistrationStale {
                         process_id: process_id.clone(),
                     }
                     .into(),
                 );
             }
-            lash_core_execution::runtime::check_retained_start(&registration, &existing)?;
-            return Ok(lash_core_execution::ProcessRegistrationReceipt::existing(
-                existing,
-            ));
+            lash_execution_contracts::process::check_retained_start(&registration, &existing)?;
+            return Ok(
+                lash_execution_contracts::process::ProcessRegistrationReceipt::existing(existing),
+            );
         }
         if retained {
             return Err(
-                lash_core_execution::StoreError::PreparedProcessRegistrationStale {
+                lash_core_store::store::StoreError::PreparedProcessRegistrationStale {
                     process_id: process_id.clone(),
                 }
                 .into(),
@@ -137,10 +146,12 @@ impl SqliteProcessRegistry {
         // sees the row and is refused.
         for scope in registration.closing_scopes() {
             if super::parent_end::plan_exists_conn(tx, &scope)? {
-                return Err(lash_core_execution::PluginError::ParentEnded {
-                    start_key: registration.start_key.clone(),
-                    parent: scope,
-                });
+                return Err(
+                    lash_execution_contracts::plugin_error::PluginError::ParentEnded {
+                        start_key: registration.start_key.clone(),
+                        parent: scope,
+                    },
+                );
             }
         }
         // A start whose consuming call was abandoned is refused:
@@ -155,10 +166,12 @@ impl SqliteProcessRegistry {
                 )
                 .map_err(process_sqlite_error)?
         {
-            return Err(lash_core_execution::runtime::abandoned_consumer_refusal(
-                registration.start_key.as_ref(),
-                &hold.key,
-            ));
+            return Err(
+                lash_execution_contracts::process::abandoned_consumer_refusal(
+                    registration.start_key.as_ref(),
+                    &hold.key,
+                ),
+            );
         }
         if let Some(env) = registration.input.launch().map(|launch| &launch.env) {
             crate::artifact_store::acquire_process_env_tx(tx, env, &process_id)?;
@@ -180,7 +193,7 @@ impl SqliteProcessRegistry {
                 record
                     .start_key
                     .as_ref()
-                    .map(lash_core_execution::StartKey::as_str),
+                    .map(lash_core_store::process_identity::StartKey::as_str),
                 originator_id.as_str(),
                 record.identity.kind.as_str(),
                 record.identity.label.as_deref(),
@@ -211,7 +224,7 @@ impl SqliteProcessRegistry {
             lash_durable::DurableInstant(i64::try_from(now).unwrap_or(i64::MAX)),
         )
         .map_err(process_sqlite_error)?
-        .map_err(lash_core_execution::runtime::actor::process::registry_error)?;
+        .map_err(lash_execution_contracts::plugin_error::registry_error)?;
         let mut record = record;
         let process_id = record.id.clone();
         for session_id in &observers {
@@ -233,8 +246,6 @@ impl SqliteProcessRegistry {
                 fleet_format,
             )?;
         }
-        Ok(lash_core_execution::ProcessRegistrationReceipt::created(
-            record,
-        ))
+        Ok(lash_execution_contracts::process::ProcessRegistrationReceipt::created(record))
     }
 }

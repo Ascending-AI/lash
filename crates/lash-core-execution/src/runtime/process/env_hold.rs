@@ -9,9 +9,13 @@
 
 use lash_core_store::process_env::{ProcessEnv, ProcessEnvRefusal};
 
-use super::model::{ProcessEnvRef, ProcessEnvStore, process_env_ref_for_bytes};
+use super::model::ProcessEnvRef;
+use super::model::process_env_ref_for_bytes;
+use crate::ReferrerClaim;
 use crate::plugin::ProcessComponentRegistry;
-use crate::{ArtifactStoreError, PluginError, ReferrerClaim};
+use lash_execution_contracts::module_artifacts::ArtifactStoreError;
+use lash_execution_contracts::plugin_error::PluginError;
+use lash_execution_contracts::process::ProcessEnvStore;
 
 /// Which environment a start holds: one stated now, admitted and published
 /// by the hold, or one already published.
@@ -254,7 +258,7 @@ pub(crate) async fn hold_launch_performing(
             let ports = ports()?;
             let claim = crate::session::execution_claim_of(scope).map_err(HoldEnvError::Fault)?;
             let held = hold_process_env(&ports, &claim, &selection).await?;
-            let env = super::model::load_process_env(ports.store, env_ref)
+            let env = lash_execution_contracts::process::load_process_env(ports.store, env_ref)
                 .await
                 .map_err(|error| HoldEnvError::Fault(error.into()))?;
             (env, Some(held))
@@ -273,7 +277,7 @@ pub(crate) async fn hold_launch_performing(
             hold_process_env(&ports, &claim, &selection).await?
         }
     };
-    Ok(super::EngineLaunch::new(
+    Ok(lash_execution_contracts::process::EngineLaunch::new(
         env_ref,
         choice.engine_settings.clone(),
     ))
@@ -282,7 +286,7 @@ pub(crate) async fn hold_launch_performing(
 /// An engine that refuses the stated settings refuses the start; an engine
 /// this build does not serve is a fault another build may not meet.
 pub(crate) fn settings_error(kind: &str, error: PluginError) -> HoldEnvError {
-    if error.class() == crate::plugin::PluginErrorClass::Terminal {
+    if error.class() == lash_execution_contracts::plugin_error::PluginErrorClass::Terminal {
         HoldEnvError::Refused(ProcessEnvRefusal::SettingsRefused {
             engine: kind.to_owned(),
             reason: error.to_string(),

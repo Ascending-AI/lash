@@ -137,85 +137,97 @@ impl HoldingStoreSet {
     }
 }
 
-impl lash_core_execution::StoreSet for HoldingStoreSet {
+impl lash_execution_contracts::backend::StoreSet for HoldingStoreSet {
     fn durable_store(&self) -> Arc<dyn DurableStore> {
         Arc::new(HoldingDurableStore {
-            inner: lash_core_execution::StoreSet::durable_store(self.inner.as_ref()),
+            inner: lash_execution_contracts::backend::StoreSet::durable_store(self.inner.as_ref()),
             holds: Arc::clone(&self.holds),
             observers: Arc::clone(&self.observers),
-            sessions: lash_core_execution::StoreSet::session_store_factory(self.inner.as_ref()),
+            sessions: lash_execution_contracts::backend::StoreSet::session_store_factory(
+                self.inner.as_ref(),
+            ),
         })
     }
 
     fn wake_sink(&self) -> lash_durable::runner::WakeSink {
-        lash_core_execution::StoreSet::wake_sink(self.inner.as_ref())
+        lash_execution_contracts::backend::StoreSet::wake_sink(self.inner.as_ref())
     }
 
     fn node_wakes(&self) -> Option<Arc<dyn lash_durable::NodeWakes>> {
-        lash_core_execution::StoreSet::node_wakes(self.inner.as_ref())
+        lash_execution_contracts::backend::StoreSet::node_wakes(self.inner.as_ref())
     }
 
-    fn binding_identity(&self) -> &lash_core_execution::StoreBindingId {
-        lash_core_execution::StoreSet::binding_identity(self.inner.as_ref())
+    fn binding_identity(&self) -> &lash_execution_contracts::backend::StoreBindingId {
+        lash_execution_contracts::backend::StoreSet::binding_identity(self.inner.as_ref())
     }
 
     fn clock(&self) -> Arc<dyn lash_core_execution::Clock> {
-        lash_core_execution::StoreSet::clock(self.inner.as_ref())
+        lash_execution_contracts::backend::StoreSet::clock(self.inner.as_ref())
     }
 
-    fn session_store_factory(&self) -> Arc<dyn lash_core_execution::DeploymentStore> {
-        lash_core_execution::StoreSet::session_store_factory(self.inner.as_ref())
+    fn session_store_factory(
+        &self,
+    ) -> Arc<dyn lash_execution_contracts::deployment::DeploymentStore> {
+        lash_execution_contracts::backend::StoreSet::session_store_factory(self.inner.as_ref())
     }
 
     fn attachment_referrers(&self) -> Arc<dyn lash_core_execution::AttachmentReferrers> {
-        lash_core_execution::StoreSet::attachment_referrers(self.inner.as_ref())
+        lash_execution_contracts::backend::StoreSet::attachment_referrers(self.inner.as_ref())
     }
 
-    fn process_registry(&self) -> Arc<dyn lash_core_execution::ProcessRegistry> {
-        lash_core_execution::StoreSet::process_registry(self.inner.as_ref())
+    fn process_registry(&self) -> Arc<dyn lash_execution_contracts::process::ProcessRegistry> {
+        lash_execution_contracts::backend::StoreSet::process_registry(self.inner.as_ref())
     }
 
-    fn process_authority_reads(&self) -> Arc<dyn lash_core_execution::ProcessAuthorityReads> {
-        lash_core_execution::StoreSet::process_authority_reads(self.inner.as_ref())
+    fn process_authority_reads(
+        &self,
+    ) -> Arc<dyn lash_execution_contracts::backend::ProcessAuthorityReads> {
+        lash_execution_contracts::backend::StoreSet::process_authority_reads(self.inner.as_ref())
     }
 
-    fn process_env_store(&self) -> Arc<dyn lash_core_execution::ProcessEnvStore> {
-        lash_core_execution::StoreSet::process_env_store(self.inner.as_ref())
+    fn process_env_store(&self) -> Arc<dyn lash_execution_contracts::process::ProcessEnvStore> {
+        lash_execution_contracts::backend::StoreSet::process_env_store(self.inner.as_ref())
     }
 
-    fn turn_prelude_store(&self) -> Arc<dyn lash_core_execution::TurnPreludeStore> {
-        lash_core_execution::StoreSet::turn_prelude_store(self.inner.as_ref())
+    fn turn_prelude_store(
+        &self,
+    ) -> Arc<dyn lash_execution_contracts::turn_prelude::TurnPreludeStore> {
+        lash_execution_contracts::backend::StoreSet::turn_prelude_store(self.inner.as_ref())
     }
 
     fn tool_material_store(&self) -> Arc<dyn lash_core_execution::store::ToolMaterialStore> {
-        lash_core_execution::StoreSet::tool_material_store(self.inner.as_ref())
+        lash_execution_contracts::backend::StoreSet::tool_material_store(self.inner.as_ref())
     }
 
-    fn definition_store(&self) -> Arc<dyn lash_core_execution::ProcessDefinitionStore> {
-        lash_core_execution::StoreSet::definition_store(self.inner.as_ref())
+    fn definition_store(
+        &self,
+    ) -> Arc<dyn lash_execution_contracts::process::ProcessDefinitionStore> {
+        lash_execution_contracts::backend::StoreSet::definition_store(self.inner.as_ref())
     }
 
     fn attachment_store(&self) -> Arc<dyn lash_core_execution::AttachmentStore> {
-        lash_core_execution::StoreSet::attachment_store(self.inner.as_ref())
+        lash_execution_contracts::backend::StoreSet::attachment_store(self.inner.as_ref())
     }
 
-    fn module_artifacts(&self) -> Arc<dyn lash_core_execution::ModuleArtifactStore> {
-        lash_core_execution::StoreSet::module_artifacts(self.inner.as_ref())
+    fn module_artifacts(
+        &self,
+    ) -> Arc<dyn lash_execution_contracts::module_artifacts::ModuleArtifactStore> {
+        lash_execution_contracts::backend::StoreSet::module_artifacts(self.inner.as_ref())
     }
 
     fn recovery_leader(&self) -> Arc<dyn lash_core_execution::store::RecoveryLeaderStore> {
-        lash_core_execution::StoreSet::recovery_leader(self.inner.as_ref())
+        lash_execution_contracts::backend::StoreSet::recovery_leader(self.inner.as_ref())
     }
 
     fn obligation_ledger(
         &self,
         kind: lash_core_execution::store::ObligationKind,
     ) -> Arc<dyn lash_core_execution::store::ObligationLedger> {
-        lash_core_execution::StoreSet::obligation_ledger(self.inner.as_ref(), kind)
+        lash_execution_contracts::backend::StoreSet::obligation_ledger(self.inner.as_ref(), kind)
     }
 
     fn artifact_cleanup(&self) -> Arc<dyn lash_core_execution::store::ArtifactCleanupLedger> {
-        lash_core_execution::StoreSet::artifact_cleanup(self.inner.as_ref())
+        lash_execution_contracts::backend::StoreSet::artifact_cleanup(self.inner.as_ref())
     }
 }
 
@@ -226,7 +238,7 @@ struct HoldingDurableStore {
     holds: Arc<SessionHolds>,
     observers: Arc<CommitObservers>,
     /// The session store the observed commits are read back from.
-    sessions: Arc<dyn lash_core_execution::DeploymentStore>,
+    sessions: Arc<dyn lash_execution_contracts::deployment::DeploymentStore>,
 }
 
 #[async_trait::async_trait]

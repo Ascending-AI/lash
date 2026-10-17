@@ -69,15 +69,12 @@ use lash_core::facade_support::ProviderHandle;
 use lash_core::llm::types::{LlmRequest, LlmResponse, LlmStreamEvent, StreamBlockIdentity};
 use lash_core::runtime::durable::session::SessionActivation;
 use lash_core::{ExecutionPolicy, LlmOutputPart, ToolCall, ToolCallId, ToolOutcome};
+use lash_core_execution::ProcessId;
+use lash_core_execution::ToolCallOutput;
+use lash_core_execution::ToolCancellation;
 use lash_core_execution::runtime::actor::process::ProcessActivation;
 use lash_core_execution::runtime::actor::round::{AdmittedExecution, MemberBody};
 use lash_core_execution::runtime::process::steps::{ProcessSteps, StepAdmission, StepRefusal};
-use lash_core_execution::{
-    Backend, BackendParts, EngineAction, EngineEvent, EngineState, EngineStateFormat,
-    LifetimeDecision, NoProjectionProviders, ProcessEngine, ProcessId, ProcessInfraError,
-    ProcessInput, ProcessOutcome, ProcessProvenance, ProcessRecord, ProcessRegistration,
-    StepRequest, StoreSet, ToolCallOutput, ToolCancellation,
-};
 use lash_core_store::tool_run::Material;
 use lash_core_store::tool_run::SettledOutput;
 use lash_durable::domain::WaitKind;
@@ -88,6 +85,23 @@ use lash_durable::{
 use lash_durable_test::{
     Cut, Fault, Matrix, Scenario, Script, SimClock, SimNodes, SimNodesConfig, Stored, Tripwire,
 };
+use lash_execution_contracts::backend::Backend;
+use lash_execution_contracts::backend::BackendParts;
+use lash_execution_contracts::backend::StoreSet;
+use lash_execution_contracts::process::EngineAction;
+use lash_execution_contracts::process::EngineEvent;
+use lash_execution_contracts::process::EngineState;
+use lash_execution_contracts::process::EngineStateFormat;
+use lash_execution_contracts::process::LifetimeDecision;
+use lash_execution_contracts::process::ProcessEngine;
+use lash_execution_contracts::process::ProcessInfraError;
+use lash_execution_contracts::process::ProcessInput;
+use lash_execution_contracts::process::ProcessOutcome;
+use lash_execution_contracts::process::ProcessProvenance;
+use lash_execution_contracts::process::ProcessRecord;
+use lash_execution_contracts::process::ProcessRegistration;
+use lash_execution_contracts::process::StepRequest;
+use lash_execution_contracts::projection::NoProjectionProviders;
 use lash_protocol_types::SessionId;
 use lash_protocol_types::sync::MutexExt as _;
 use serde_json::{Value, json};
@@ -320,7 +334,10 @@ impl lash_core::ToolProvider for DeferredTools {
     fn tool_manifests(
         &self,
         config: &lash_core::OwnerConfigView,
-    ) -> std::result::Result<Vec<lash_core::ToolManifest>, lash_core::PluginError> {
+    ) -> std::result::Result<
+        Vec<lash_core::ToolManifest>,
+        lash_execution_contracts::plugin_error::PluginError,
+    > {
         Ok({
             let mut manifests = self.listed.tool_manifests(config)?;
             if self
@@ -425,7 +442,10 @@ impl lash_core::ToolProvider for GrantingResolver {
     fn tool_manifests(
         &self,
         _config: &lash_core::OwnerConfigView,
-    ) -> std::result::Result<Vec<lash_core::ToolManifest>, lash_core::PluginError> {
+    ) -> std::result::Result<
+        Vec<lash_core::ToolManifest>,
+        lash_execution_contracts::plugin_error::PluginError,
+    > {
         Ok(Vec::new())
     }
 
@@ -578,39 +598,44 @@ fn sliced_workers(clock: &Arc<SimClock>, slice: u64) -> lash::vm::WorkerService 
 struct SleepEngine;
 
 fn infra(error: impl std::fmt::Display) -> ProcessInfraError {
-    ProcessInfraError::new(lash_core_execution::PluginError::Session(error.to_string()))
+    ProcessInfraError::new(
+        lash_execution_contracts::plugin_error::PluginError::Session(error.to_string()),
+    )
 }
 
 #[async_trait::async_trait]
 impl ProcessEngine for SleepEngine {
     fn settled_ran(
         &self,
-        _kind: &lash_core_execution::EngineStepKind,
+        _kind: &lash_execution_contracts::process::EngineStepKind,
         _output: &lash_core_store::tool_run::SettledOutput,
     ) -> Vec<(u32, u64)> {
         Vec::new()
     }
 
-    fn trace_class(&self) -> lash_core::ProcessTraceClass {
-        lash_core::ProcessTraceClass::Internal
+    fn trace_class(&self) -> lash_execution_contracts::process::ProcessTraceClass {
+        lash_execution_contracts::process::ProcessTraceClass::Internal
     }
 
     async fn performed_effects(
         &self,
         _payload: &serde_json::Value,
-    ) -> Result<lash_core::PerformedEffects, lash_core::ProcessEnvRefusal> {
-        Ok(lash_core::PerformedEffects::new())
+    ) -> Result<lash_execution_contracts::process::PerformedEffects, lash_core::ProcessEnvRefusal>
+    {
+        Ok(lash_execution_contracts::process::PerformedEffects::new())
     }
 
     async fn check_args(
         &self,
-        _signature: &lash_core_execution::ProcessSignature,
+        _signature: &lash_execution_contracts::process::ProcessSignature,
         _args: &serde_json::Map<String, serde_json::Value>,
-        _mode: lash_core_execution::ArgsMode,
-    ) -> std::result::Result<(), lash_core_execution::ArgsMismatch> {
-        Err(lash_core_execution::ArgsMismatch::UnsupportedSignature {
-            engine_kind: self.kind().into(),
-        })
+        _mode: lash_execution_contracts::process::ArgsMode,
+    ) -> std::result::Result<(), lash_execution_contracts::process::ArgsMismatch> {
+        Err(
+            lash_execution_contracts::process::ArgsMismatch::UnsupportedSignature {
+                engine_kind: self.kind().into(),
+            },
+        )
     }
 
     fn kind(&self) -> &'static str {
@@ -638,14 +663,16 @@ impl ProcessEngine for SleepEngine {
     fn check_settings(
         &self,
         _payload: &serde_json::Value,
-        settings: Option<&lash_core_execution::EngineSettings>,
-    ) -> std::result::Result<(), lash_core_execution::PluginError> {
+        settings: Option<&lash_execution_contracts::process::EngineSettings>,
+    ) -> std::result::Result<(), lash_execution_contracts::plugin_error::PluginError> {
         match settings {
             None => Ok(()),
-            Some(_) => Err(lash_core_execution::PluginError::Registration(format!(
-                "process engine `{}` takes no settings",
-                self.kind()
-            ))),
+            Some(_) => Err(
+                lash_execution_contracts::plugin_error::PluginError::Registration(format!(
+                    "process engine `{}` takes no settings",
+                    self.kind()
+                )),
+            ),
         }
     }
 
@@ -653,8 +680,8 @@ impl ProcessEngine for SleepEngine {
         &self,
         _payload: &serde_json::Value,
     ) -> std::result::Result<
-        Option<lash_core_execution::EngineSettings>,
-        lash_core_execution::PluginError,
+        Option<lash_execution_contracts::process::EngineSettings>,
+        lash_execution_contracts::plugin_error::PluginError,
     > {
         Ok(None)
     }
@@ -697,14 +724,17 @@ impl ProcessEngine for SleepEngine {
     fn start_artifacts(
         &self,
         _payload: &Value,
-    ) -> Result<Vec<lash_core_execution::ArtifactName>, lash_core_execution::PluginError> {
+    ) -> Result<
+        Vec<lash_core_execution::ArtifactName>,
+        lash_execution_contracts::plugin_error::PluginError,
+    > {
         Ok(Vec::new())
     }
 
     async fn end_artifact_referrer(
         &self,
         _cleanup: &lash_core_execution::ResolvedArtifactCleanup,
-    ) -> Result<(), lash_core_execution::ArtifactStoreError> {
+    ) -> Result<(), lash_execution_contracts::module_artifacts::ArtifactStoreError> {
         Ok(())
     }
 
@@ -712,22 +742,26 @@ impl ProcessEngine for SleepEngine {
         &self,
         _claim: &lash_core_execution::ReferrerClaim,
         artifact_ref: &str,
-    ) -> Result<(), lash_core_execution::PluginError> {
-        Err(lash_core_execution::PluginError::Session(format!(
-            "the sleep engine stores no artifact `{artifact_ref}`"
-        )))
+    ) -> Result<(), lash_execution_contracts::plugin_error::PluginError> {
+        Err(
+            lash_execution_contracts::plugin_error::PluginError::Session(format!(
+                "the sleep engine stores no artifact `{artifact_ref}`"
+            )),
+        )
     }
 
     async fn resolve(
         &self,
-        _reference: &lash_core_execution::ProcessDefinitionRef,
+        _reference: &lash_execution_contracts::process::ProcessDefinitionRef,
     ) -> Result<
-        lash_core_execution::ProcessDefinitionResolution,
-        lash_core_execution::ProcessDefinitionError,
+        lash_execution_contracts::process::ProcessDefinitionResolution,
+        lash_execution_contracts::process::ProcessDefinitionError,
     > {
-        Ok(lash_core_execution::ProcessDefinitionResolution::new(
-            lash_core_execution::ProcessSignature::Unknown,
-        ))
+        Ok(
+            lash_execution_contracts::process::ProcessDefinitionResolution::new(
+                lash_execution_contracts::process::ProcessSignature::Unknown,
+            ),
+        )
     }
 }
 
@@ -895,7 +929,7 @@ impl CellTurn {
                     .tools(lash::tool_provider_key!("tools"), tools)
                     .plugin(Arc::new(
                         lash::process_controls::SessionProcessAdminPluginFactory::new(
-                            lash_core::lifetime::session_or_starter,
+                            lash_execution_contracts::process::lifetime::session_or_starter,
                             lash_core::runtime::env_policy::policy::from_run(|_| Ok(Vec::new())),
                         ),
                     ))
@@ -1855,8 +1889,8 @@ async fn parked_on_a_process(
             ProcessInput::Engine {
                 kind: ENGINE.to_owned(),
                 payload: json!({ "until_ms": until }),
-                launch: lash_core::EngineLaunch::new(
-                    lash_core_execution::testing::process_execution_env_fixture_ref(),
+                launch: lash_execution_contracts::process::EngineLaunch::new(
+                    lash_execution_contracts::testing::process_execution_env_fixture_ref(),
                     None,
                 ),
             },

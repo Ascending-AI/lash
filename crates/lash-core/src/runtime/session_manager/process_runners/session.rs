@@ -13,14 +13,16 @@ impl RuntimeSessionServices {
     /// error another pass may not meet.
     pub(in crate::runtime) async fn mail_process_session_turn(
         &self,
-        process_id: &crate::ProcessId,
-        create_request: crate::SessionCreateRequest,
-        turn_input: crate::TurnInput,
+        process_id: &lash_protocol_types::ProcessId,
+        create_request: lash_execution_contracts::session_types::SessionCreateRequest,
+        turn_input: lash_core_store::turn_input_vocabulary::TurnInput,
         parent: Option<lash_trace::TraceParent>,
-    ) -> Result<lash_core_execution::runtime::actor::process::SessionTurnMail, crate::PluginError>
-    {
+    ) -> Result<
+        lash_core_execution::runtime::actor::process::SessionTurnMail,
+        lash_execution_contracts::plugin_error::PluginError,
+    > {
         let create_request = self.child_create_request(process_id, create_request);
-        let turn_id = crate::runtime::process_session_turn_id(process_id);
+        let turn_id = lash_execution_contracts::process::process_session_turn_id(process_id);
         match Box::pin(self.initialize_session_and_mail_turn(
             create_request,
             process_id,
@@ -62,31 +64,36 @@ impl RuntimeSessionServices {
     /// the child's session actor honours.
     pub(in crate::runtime) async fn cancel_process_session_turn(
         &self,
-        process_id: &crate::ProcessId,
-        create_request: crate::SessionCreateRequest,
+        process_id: &lash_protocol_types::ProcessId,
+        create_request: lash_execution_contracts::session_types::SessionCreateRequest,
         requester: Option<String>,
-    ) -> Result<lash_core_execution::runtime::actor::process::SessionTurnCancel, crate::PluginError>
-    {
+    ) -> Result<
+        lash_core_execution::runtime::actor::process::SessionTurnCancel,
+        lash_execution_contracts::plugin_error::PluginError,
+    > {
         use lash_core_execution::runtime::actor::process::SessionTurnCancel;
         let session_id = self
             .child_create_request(process_id, create_request)
             .session_id;
-        let turn_id = crate::runtime::process_session_turn_id(process_id);
+        let turn_id = lash_execution_contracts::process::process_session_turn_id(process_id);
         let run = self
             .withdraw_process_child_inputs(session_id.as_ref(), process_id, &turn_id)
             .await?;
         let Some(session_id) = session_id else {
             return Ok(SessionTurnCancel::Withdrawn);
         };
-        let request = crate::TurnCancelRequest::new(
-            crate::TurnAddress::new(session_id.clone(), run.unwrap_or_else(|| turn_id.clone())),
+        let request = lash_core_store::turn_control_vocabulary::TurnCancelRequest::new(
+            lash_core_store::turn_control_vocabulary::TurnAddress::new(
+                session_id.clone(),
+                run.unwrap_or_else(|| turn_id.clone()),
+            ),
             format!("process-cancel:{process_id}"),
             requester,
         );
         let receipt = crate::TurnWorkDriver::new(self.current.host.core.backend().clone())
             .request_cancel(request)
             .await
-            .map_err(crate::PluginError::Runtime)?;
+            .map_err(lash_execution_contracts::plugin_error::PluginError::Runtime)?;
         Ok(match receipt.outcome {
             crate::TurnCancelOutcome::Requested(_)
             | crate::TurnCancelOutcome::Escalated(_)
@@ -109,10 +116,13 @@ impl RuntimeSessionServices {
     /// projected onto what `result` asks for.
     pub(in crate::runtime) async fn process_session_turn_outcome(
         &self,
-        process_id: &crate::ProcessId,
-        create_request: crate::SessionCreateRequest,
-        result: &crate::SessionTurnOutcome,
-    ) -> Result<crate::ProcessOutcome, crate::PluginError> {
+        process_id: &lash_protocol_types::ProcessId,
+        create_request: lash_execution_contracts::session_types::SessionCreateRequest,
+        result: &lash_execution_contracts::process::SessionTurnOutcome,
+    ) -> Result<
+        lash_execution_contracts::process::ProcessOutcome,
+        lash_execution_contracts::plugin_error::PluginError,
+    > {
         // The store's refusal of the child's committed end is met again by
         // every pass: the process ends with it (FIG-5358).
         match self
@@ -129,33 +139,38 @@ impl RuntimeSessionServices {
 
     async fn child_turn_outcome(
         &self,
-        process_id: &crate::ProcessId,
-        create_request: crate::SessionCreateRequest,
-        result: &crate::SessionTurnOutcome,
-    ) -> Result<crate::ProcessOutcome, crate::PluginError> {
+        process_id: &lash_protocol_types::ProcessId,
+        create_request: lash_execution_contracts::session_types::SessionCreateRequest,
+        result: &lash_execution_contracts::process::SessionTurnOutcome,
+    ) -> Result<
+        lash_execution_contracts::process::ProcessOutcome,
+        lash_execution_contracts::plugin_error::PluginError,
+    > {
         let session_id = self
             .child_create_request(process_id, create_request)
             .session_id
             .ok_or_else(|| {
-                crate::PluginError::Session(format!(
+                lash_execution_contracts::plugin_error::PluginError::Session(format!(
                     "process `{process_id}` names no child session"
                 ))
             })?;
-        let turn_id = crate::runtime::process_session_turn_id(process_id);
+        let turn_id = lash_execution_contracts::process::process_session_turn_id(process_id);
         let cause = self
             .child_run_terminal(&session_id, &turn_id)
             .await?
             .ok_or_else(|| {
-                crate::PluginError::Session(format!(
+                lash_execution_contracts::plugin_error::PluginError::Session(format!(
                     "process `{process_id}`'s child turn in `{session_id}` has not ended"
                 ))
             })?;
         let outcome = match cause {
             crate::store::RunTerminalCause::Committed { outcome, .. } => {
-                crate::TurnOutcome::from(outcome)
+                lash_protocol_types::session_model::TurnOutcome::from(outcome)
             }
             crate::store::RunTerminalCause::Cancelled { evidence, .. } => {
-                crate::TurnOutcome::Stopped(crate::TurnStop::Cancelled { evidence })
+                lash_protocol_types::session_model::TurnOutcome::Stopped(
+                    lash_protocol_types::session_model::TurnStop::Cancelled { evidence },
+                )
             }
             // The child run's refusal answers its process under its own
             // code, as it answers the run's inputs (FIG-5358).
@@ -163,22 +178,26 @@ impl RuntimeSessionServices {
                 return Ok(refused_output(refusal.code.as_str(), refusal.message));
             }
             other => {
-                return Err(crate::PluginError::Session(format!(
-                    "process `{process_id}`'s child turn ended without an outcome: {other:?}"
-                )));
+                return Err(
+                    lash_execution_contracts::plugin_error::PluginError::Session(format!(
+                        "process `{process_id}`'s child turn ended without an outcome: {other:?}"
+                    )),
+                );
             }
         };
-        Ok(crate::ProcessAwaitOutput::from_tool_output(
-            output_from_process_turn(
-                process_id,
-                &session_id,
-                &turn_id,
-                outcome,
-                result,
-                self.current.host.core.tracing.diagnostic_limits(),
-                self.current.host.core.control.output_cuts,
+        Ok(
+            lash_execution_contracts::process::ProcessAwaitOutput::from_tool_output(
+                output_from_process_turn(
+                    process_id,
+                    &session_id,
+                    &turn_id,
+                    outcome,
+                    result,
+                    self.current.host.core.tracing.diagnostic_limits(),
+                    self.current.host.core.control.output_cuts,
+                ),
             ),
-        ))
+        )
     }
 
     /// The child session's create request as the process runs it: caused by
@@ -187,12 +206,13 @@ impl RuntimeSessionServices {
     /// is filled from the starter's environment (ADR 0134).
     fn child_create_request(
         &self,
-        process_id: &crate::ProcessId,
-        create_request: crate::SessionCreateRequest,
-    ) -> crate::SessionCreateRequest {
-        let session = crate::runtime::process_session_id(process_id, &create_request);
+        process_id: &lash_protocol_types::ProcessId,
+        create_request: lash_execution_contracts::session_types::SessionCreateRequest,
+    ) -> lash_execution_contracts::session_types::SessionCreateRequest {
+        let session =
+            lash_execution_contracts::process::process_session_id(process_id, &create_request);
         create_request
-            .with_caused_by(crate::CausalRef::Process {
+            .with_caused_by(lash_protocol_types::causal::CausalRef::Process {
                 process_id: process_id.clone(),
             })
             .with_session_id(session)
@@ -202,18 +222,21 @@ impl RuntimeSessionServices {
     async fn child_store(
         &self,
         session_id: &SessionId,
-    ) -> Result<crate::store::SessionStore, crate::PluginError> {
+    ) -> Result<crate::store::SessionStore, lash_execution_contracts::plugin_error::PluginError>
+    {
         let factory = self.current.host.core.session_store_factory();
-        crate::runtime::live_session_view(&factory, session_id)
+        lash_execution_contracts::deployment::live_session_view(&factory, session_id)
             .await
             .map_err(|error| {
-                crate::PluginError::of_store_error(
+                lash_execution_contracts::plugin_error::PluginError::of_store_error(
                     format_args!("failed to open child session `{session_id}`"),
                     error,
                 )
             })?
             .ok_or_else(|| {
-                crate::PluginError::Session(format!("child session `{session_id}` is not live"))
+                lash_execution_contracts::plugin_error::PluginError::Session(format!(
+                    "child session `{session_id}` is not live"
+                ))
             })
     }
 
@@ -221,11 +244,14 @@ impl RuntimeSessionServices {
     async fn child_run_terminal(
         &self,
         session_id: &SessionId,
-        turn_id: &crate::TurnId,
-    ) -> Result<Option<crate::store::RunTerminalCause>, crate::PluginError> {
+        turn_id: &lash_protocol_types::TurnId,
+    ) -> Result<
+        Option<crate::store::RunTerminalCause>,
+        lash_execution_contracts::plugin_error::PluginError,
+    > {
         let store = self.child_store(session_id).await?;
         let terminal = store.run_terminal(turn_id).await.map_err(|error| {
-            crate::PluginError::of_store_error(
+            lash_execution_contracts::plugin_error::PluginError::of_store_error(
                 format_args!("failed to read child run `{turn_id}` of `{session_id}`"),
                 error,
             )
@@ -234,15 +260,20 @@ impl RuntimeSessionServices {
     }
 }
 
-fn process_terminal_state_for_turn(outcome: &crate::TurnOutcome) -> crate::ProcessStatus {
+fn process_terminal_state_for_turn(
+    outcome: &lash_protocol_types::session_model::TurnOutcome,
+) -> lash_execution_contracts::process::ProcessStatus {
     match outcome {
-        crate::TurnOutcome::Finished(_) | crate::TurnOutcome::AgentFrameSwitch { .. } => {
-            crate::ProcessStatus::Completed
+        lash_protocol_types::session_model::TurnOutcome::Finished(_)
+        | lash_protocol_types::session_model::TurnOutcome::AgentFrameSwitch { .. } => {
+            lash_execution_contracts::process::ProcessStatus::Completed
         }
-        crate::TurnOutcome::Stopped(crate::TurnStop::Cancelled { .. }) => {
-            crate::ProcessStatus::Cancelled
+        lash_protocol_types::session_model::TurnOutcome::Stopped(
+            lash_protocol_types::session_model::TurnStop::Cancelled { .. },
+        ) => lash_execution_contracts::process::ProcessStatus::Cancelled,
+        lash_protocol_types::session_model::TurnOutcome::Stopped(_) => {
+            lash_execution_contracts::process::ProcessStatus::Failed
         }
-        crate::TurnOutcome::Stopped(_) => crate::ProcessStatus::Failed,
     }
 }
 
@@ -252,73 +283,77 @@ fn process_terminal_state_for_turn(outcome: &crate::TurnOutcome) -> crate::Proce
 /// error from a refusal without reading prose; the sentence is the fallback
 /// message for a stop whose child authored no text of its own.
 fn process_turn_stop_classification(
-    stop: &crate::TurnStop,
-) -> (crate::ToolFailureClass, &'static str, &'static str) {
-    use crate::ToolFailureClass as Class;
+    stop: &lash_protocol_types::session_model::TurnStop,
+) -> (
+    lash_protocol_types::tool_output::ToolFailureClass,
+    &'static str,
+    &'static str,
+) {
+    use lash_protocol_types::tool_output::ToolFailureClass as Class;
     match stop {
         // Cancellation never reaches here: `output_from_process_turn` settles a
         // cancelled child before classifying a failure.
-        crate::TurnStop::Cancelled { .. } => (
+        lash_protocol_types::session_model::TurnStop::Cancelled { .. } => (
             Class::Execution,
             "process_session_turn_cancelled",
             "background session turn was cancelled",
         ),
-        crate::TurnStop::Incomplete => (
+        lash_protocol_types::session_model::TurnStop::Incomplete => (
             Class::Execution,
             "process_session_turn_incomplete",
             "background session turn ended before producing a result",
         ),
-        crate::TurnStop::InvalidInput => (
+        lash_protocol_types::session_model::TurnStop::InvalidInput => (
             Class::InvalidRequest,
             "process_session_turn_invalid_input",
             "background session turn input was refused",
         ),
-        crate::TurnStop::MaxTurns => (
+        lash_protocol_types::session_model::TurnStop::MaxTurns => (
             Class::ResourceLimit,
             "process_session_turn_max_turns",
             "background session turn reached its turn limit",
         ),
-        crate::TurnStop::ToolPanicked { .. } => (
+        lash_protocol_types::session_model::TurnStop::ToolPanicked { .. } => (
             Class::Internal,
             "tool_panicked",
             "a host tool panicked in the child turn",
         ),
-        crate::TurnStop::ToolFailure => (
+        lash_protocol_types::session_model::TurnStop::ToolFailure => (
             Class::Execution,
             "process_session_turn_tool_failure",
             "background session turn stopped on a failed tool call",
         ),
-        crate::TurnStop::ProviderError { .. } => (
+        lash_protocol_types::session_model::TurnStop::ProviderError { .. } => (
             Class::External,
             "process_session_turn_provider_error",
             "background session turn stopped on a provider error",
         ),
-        crate::TurnStop::ContextOverflow => (
+        lash_protocol_types::session_model::TurnStop::ContextOverflow => (
             Class::ResourceLimit,
             "process_session_turn_context_overflow",
             "background session turn exceeded the model's context window",
         ),
-        crate::TurnStop::PluginAbort => (
+        lash_protocol_types::session_model::TurnStop::PluginAbort => (
             Class::Execution,
             "process_session_turn_plugin_abort",
             "background session turn was aborted by a plugin",
         ),
-        crate::TurnStop::AgentFrameSwitchLimit => (
+        lash_protocol_types::session_model::TurnStop::AgentFrameSwitchLimit => (
             Class::ResourceLimit,
             "process_session_turn_agent_frame_switch_limit",
             "background session turn reached its agent frame switch limit",
         ),
-        crate::TurnStop::RuntimeError { .. } => (
+        lash_protocol_types::session_model::TurnStop::RuntimeError { .. } => (
             Class::Internal,
             "process_session_turn_runtime_error",
             "background session turn stopped on a runtime error",
         ),
-        crate::TurnStop::SubmittedError { .. } => (
+        lash_protocol_types::session_model::TurnStop::SubmittedError { .. } => (
             Class::Execution,
             "process_session_turn_submitted_error",
             "background session turn submitted a failure without a reason",
         ),
-        crate::TurnStop::ToolError { .. } => (
+        lash_protocol_types::session_model::TurnStop::ToolError { .. } => (
             Class::Execution,
             "process_session_turn_tool_error",
             "background session turn stopped on a tool error without a message",
@@ -329,7 +364,7 @@ fn process_turn_stop_classification(
 /// The child's own text for a stop that carries one.
 ///
 /// `submit_error` and every other `task.fail` spelling land as a projected
-/// [`crate::ToolFailure`], whose human reason is `message`; a value that
+/// [`lash_protocol_types::tool_output::ToolFailure`], whose human reason is `message`; a value that
 /// carries a bare `reason` string (a host-authored `SubmittedError`) is read
 /// from that field. Nothing is invented: a stop with no authored text yields
 /// `None` and the caller falls back to the stop's own sentence.
@@ -348,16 +383,16 @@ fn authored_stop_text(value: &serde_json::Value) -> Option<String> {
 ///
 /// The child's own reason is the message wherever the child authored one, the
 /// stop's code keeps the categories apart, and the typed diagnostics — the
-/// child's [`crate::TurnErrorCode`] and the
+/// child's [`lash_protocol_types::session_model::TurnErrorCode`] and the
 /// stop's projected value — ride the existing `raw` channel, bounded.
 fn failure_from_process_turn(
-    outcome: &crate::TurnOutcome,
+    outcome: &lash_protocol_types::session_model::TurnOutcome,
     limits: lash_core_store::execution_limits::DiagnosticLimits,
     cuts: lash_protocol_types::session_model::RuntimeOutputCuts,
-) -> crate::ToolFailure {
-    let crate::TurnOutcome::Stopped(stop) = &outcome else {
-        return crate::ToolFailure::tool(
-            crate::ToolFailureClass::Internal,
+) -> lash_protocol_types::tool_output::ToolFailure {
+    let lash_protocol_types::session_model::TurnOutcome::Stopped(stop) = &outcome else {
+        return lash_protocol_types::tool_output::ToolFailure::tool(
+            lash_protocol_types::tool_output::ToolFailureClass::Internal,
             "process_session_turn_failed",
             "background session turn failed",
         );
@@ -365,7 +400,8 @@ fn failure_from_process_turn(
     let (class, code, sentence) = process_turn_stop_classification(stop);
     let cause = outcome.error_cause();
     let (authored, stop_value) = match stop {
-        crate::TurnStop::SubmittedError { value } | crate::TurnStop::ToolError { value, .. } => {
+        lash_protocol_types::session_model::TurnStop::SubmittedError { value }
+        | lash_protocol_types::session_model::TurnStop::ToolError { value, .. } => {
             (authored_stop_text(value), Some(value))
         }
         _ => (
@@ -386,19 +422,19 @@ fn failure_from_process_turn(
         (Some(text), false) => format!("{sentence}: {text}"),
         (None, _) => sentence.to_string(),
     };
-    let mut failure = crate::ToolFailure::tool(
+    let mut failure = lash_protocol_types::tool_output::ToolFailure::tool(
         class,
         code,
         lash_protocol_types::session_model::truncate_raw_error(&message, cuts.raw_error_max_chars),
     );
-    failure.raw =
-        process_turn_failure_raw(stop, cause, limits).map(crate::ToolValue::untrusted_json);
+    failure.raw = process_turn_failure_raw(stop, cause, limits)
+        .map(lash_protocol_types::tool_output::ToolValue::untrusted_json);
     failure
 }
 
 /// Bounded stop diagnostics, with the committed cause and permitted detail when present.
 fn process_turn_failure_raw(
-    stop: &crate::TurnStop,
+    stop: &lash_protocol_types::session_model::TurnStop,
     cause: Option<&lash_protocol_types::TurnErrorCause>,
     limits: lash_core_store::execution_limits::DiagnosticLimits,
 ) -> Option<serde_json::Value> {
@@ -419,67 +455,75 @@ fn process_turn_failure_raw(
 /// Project the child's ended turn onto the process's answer.
 ///
 /// A cancelled or failed child answers its own cancellation or failure under
-/// every [`crate::SessionTurnOutcome`]. A finished child answers its committed
+/// every [`lash_execution_contracts::process::SessionTurnOutcome`]. A finished child answers its committed
 /// outcome and identity under `Turn`, and its final value under `FinalValue`.
 fn output_from_process_turn(
-    process_id: &crate::ProcessId,
+    process_id: &lash_protocol_types::ProcessId,
     child_session_id: &SessionId,
-    turn_id: &crate::TurnId,
-    outcome: crate::TurnOutcome,
-    result: &crate::SessionTurnOutcome,
+    turn_id: &lash_protocol_types::TurnId,
+    outcome: lash_protocol_types::session_model::TurnOutcome,
+    result: &lash_execution_contracts::process::SessionTurnOutcome,
     limits: lash_core_store::execution_limits::DiagnosticLimits,
     cuts: lash_protocol_types::session_model::RuntimeOutputCuts,
-) -> crate::ToolCallOutput {
+) -> lash_protocol_types::tool_output::ToolCallOutput {
     let state = process_terminal_state_for_turn(&outcome);
-    if state == crate::ProcessStatus::Cancelled {
+    if state == lash_execution_contracts::process::ProcessStatus::Cancelled {
         let cancellation = match &outcome {
-            crate::TurnOutcome::Stopped(crate::TurnStop::Cancelled { evidence }) => {
-                crate::ToolCancellation {
-                    message: evidence
-                        .reason
-                        .clone()
-                        .unwrap_or_else(|| "background session turn was cancelled".to_string()),
-                    source: crate::ToolFailureSource::Cancellation,
-                    origin: Some(crate::CancelOrigin::TurnStopped),
-                    raw: serde_json::to_value(evidence)
-                        .ok()
-                        .map(crate::ToolValue::untrusted_json),
-                    forced: false,
-                }
-            }
-            _ => crate::ToolCancellation::runtime("background session turn was cancelled"),
+            lash_protocol_types::session_model::TurnOutcome::Stopped(
+                lash_protocol_types::session_model::TurnStop::Cancelled { evidence },
+            ) => lash_protocol_types::tool_output::ToolCancellation {
+                message: evidence
+                    .reason
+                    .clone()
+                    .unwrap_or_else(|| "background session turn was cancelled".to_string()),
+                source: lash_protocol_types::tool_output::ToolFailureSource::Cancellation,
+                origin: Some(lash_protocol_types::tool_output::CancelOrigin::TurnStopped),
+                raw: serde_json::to_value(evidence)
+                    .ok()
+                    .map(lash_protocol_types::tool_output::ToolValue::untrusted_json),
+                forced: false,
+            },
+            _ => lash_protocol_types::tool_output::ToolCancellation::runtime(
+                "background session turn was cancelled",
+            ),
         };
-        return crate::ToolCallOutput::cancelled(cancellation);
+        return lash_protocol_types::tool_output::ToolCallOutput::cancelled(cancellation);
     }
-    if let crate::TurnOutcome::Stopped(crate::TurnStop::ToolPanicked {
-        tool_name,
-        call_id,
-        message,
-    }) = &outcome
+    if let lash_protocol_types::session_model::TurnOutcome::Stopped(
+        lash_protocol_types::session_model::TurnStop::ToolPanicked {
+            tool_name,
+            call_id,
+            message,
+        },
+    ) = &outcome
     {
-        return crate::ToolCallOutput::failure(crate::ToolFailure::runtime(
-            crate::ToolFailureClass::Internal, "tool_panicked",
+        return lash_protocol_types::tool_output::ToolCallOutput::failure(lash_protocol_types::tool_output::ToolFailure::runtime(
+            lash_protocol_types::tool_output::ToolFailureClass::Internal, "tool_panicked",
             "The tool panicked. Outside work may already have happened; check outside state before calling again.",
-        ).with_cause(crate::ToolFailureCause::Panicked {
+        ).with_cause(lash_protocol_types::tool_output::ToolFailureCause::Panicked {
             tool_name: tool_name.clone(), call_id: call_id.clone(), message: message.clone(),
         }));
     }
-    if state == crate::ProcessStatus::Failed {
-        return crate::ToolCallOutput::failure(failure_from_process_turn(&outcome, limits, cuts));
+    if state == lash_execution_contracts::process::ProcessStatus::Failed {
+        return lash_protocol_types::tool_output::ToolCallOutput::failure(
+            failure_from_process_turn(&outcome, limits, cuts),
+        );
     }
     match result {
-        crate::SessionTurnOutcome::Turn => crate::ToolCallOutput::success(serde_json::json!({
-            "process_id": process_id,
-            "child_session_id": child_session_id,
-            "turn_id": turn_id,
-            "outcome": outcome,
-        })),
-        crate::SessionTurnOutcome::FinalValue { schema } => {
+        lash_execution_contracts::process::SessionTurnOutcome::Turn => {
+            lash_protocol_types::tool_output::ToolCallOutput::success(serde_json::json!({
+                "process_id": process_id,
+                "child_session_id": child_session_id,
+                "turn_id": turn_id,
+                "outcome": outcome,
+            }))
+        }
+        lash_execution_contracts::process::SessionTurnOutcome::FinalValue { schema } => {
             match final_value_of_turn(&outcome)
                 .and_then(|value| checked_final_value(value, schema.as_ref()))
             {
-                Ok(value) => crate::ToolCallOutput::success(value),
-                Err(failure) => crate::ToolCallOutput::failure(*failure),
+                Ok(value) => lash_protocol_types::tool_output::ToolCallOutput::success(value),
+                Err(failure) => lash_protocol_types::tool_output::ToolCallOutput::failure(*failure),
             }
         }
     }
@@ -492,25 +536,29 @@ fn output_from_process_turn(
 /// A child that switched agent frames or stopped has no final value, and says
 /// so as a typed failure rather than as an empty success.
 fn final_value_of_turn(
-    outcome: &crate::TurnOutcome,
-) -> Result<serde_json::Value, Box<crate::ToolFailure>> {
+    outcome: &lash_protocol_types::session_model::TurnOutcome,
+) -> Result<serde_json::Value, Box<lash_protocol_types::tool_output::ToolFailure>> {
     match outcome {
-        crate::TurnOutcome::Finished(crate::TurnFinish::Finished { value, .. }) => {
-            Ok(value.clone())
-        }
-        crate::TurnOutcome::Finished(crate::TurnFinish::AssistantMessage { text }) => {
-            Ok(serde_json::Value::String(text.clone()))
-        }
-        crate::TurnOutcome::AgentFrameSwitch { .. } => Err(Box::new(crate::ToolFailure::tool(
-            crate::ToolFailureClass::Execution,
-            "process_session_turn_frame_switch",
-            "the child switched agent frames instead of producing a final value",
-        ))),
-        crate::TurnOutcome::Stopped(_) => Err(Box::new(crate::ToolFailure::tool(
-            crate::ToolFailureClass::Internal,
-            "process_session_turn_stopped",
-            "the child turn stopped without producing a final value",
-        ))),
+        lash_protocol_types::session_model::TurnOutcome::Finished(
+            lash_protocol_types::session_model::TurnFinish::Finished { value, .. },
+        ) => Ok(value.clone()),
+        lash_protocol_types::session_model::TurnOutcome::Finished(
+            lash_protocol_types::session_model::TurnFinish::AssistantMessage { text },
+        ) => Ok(serde_json::Value::String(text.clone())),
+        lash_protocol_types::session_model::TurnOutcome::AgentFrameSwitch { .. } => Err(Box::new(
+            lash_protocol_types::tool_output::ToolFailure::tool(
+                lash_protocol_types::tool_output::ToolFailureClass::Execution,
+                "process_session_turn_frame_switch",
+                "the child switched agent frames instead of producing a final value",
+            ),
+        )),
+        lash_protocol_types::session_model::TurnOutcome::Stopped(_) => Err(Box::new(
+            lash_protocol_types::tool_output::ToolFailure::tool(
+                lash_protocol_types::tool_output::ToolFailureClass::Internal,
+                "process_session_turn_stopped",
+                "the child turn stopped without producing a final value",
+            ),
+        )),
     }
 }
 
@@ -519,30 +567,41 @@ fn final_value_of_turn(
 /// the child to repair it.
 fn checked_final_value(
     value: serde_json::Value,
-    schema: Option<&crate::JsonSchema>,
-) -> Result<serde_json::Value, Box<crate::ToolFailure>> {
+    schema: Option<&lash_protocol_types::schema_contract::JsonSchema>,
+) -> Result<serde_json::Value, Box<lash_protocol_types::tool_output::ToolFailure>> {
     let Some(schema) = schema else {
         return Ok(value);
     };
     schema.validate(&value).map(|()| value).map_err(|error| {
         Box::new(
-            crate::ToolFailure::tool(
-                crate::ToolFailureClass::Execution,
+            lash_protocol_types::tool_output::ToolFailure::tool(
+                lash_protocol_types::tool_output::ToolFailureClass::Execution,
                 "process_session_turn_result_schema_mismatch",
                 format!(
                     "the child's final value did not match the declared output schema: {error}"
                 ),
             )
-            .with_cause(crate::ToolFailureCause::ValueMismatch { source: error }),
+            .with_cause(
+                lash_protocol_types::tool_output::ToolFailureCause::ValueMismatch { source: error },
+            ),
         )
     })
 }
 
 /// A session-turn process's refused end, failed under `code`.
-fn refused_output(code: &str, message: String) -> crate::ProcessAwaitOutput {
-    crate::ProcessAwaitOutput::from_tool_output(crate::ToolCallOutput::failure(
-        crate::ToolFailure::tool(crate::ToolFailureClass::Execution, code, message),
-    ))
+fn refused_output(
+    code: &str,
+    message: String,
+) -> lash_execution_contracts::process::ProcessAwaitOutput {
+    lash_execution_contracts::process::ProcessAwaitOutput::from_tool_output(
+        lash_protocol_types::tool_output::ToolCallOutput::failure(
+            lash_protocol_types::tool_output::ToolFailure::tool(
+                lash_protocol_types::tool_output::ToolFailureClass::Execution,
+                code,
+                message,
+            ),
+        ),
+    )
 }
 
 #[cfg(test)]

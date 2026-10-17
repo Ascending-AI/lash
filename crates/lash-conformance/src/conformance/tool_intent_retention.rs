@@ -48,10 +48,12 @@ fn identity(session: &'static str, call: &'static str) -> crate::ToolIntentIdent
     reason = "conformance-law fixture: each result is established by the setup above"
 )]
 fn submission(identity: &crate::ToolIntentIdentity) -> crate::ToolIntentSubmissionRecord {
-    let intent = crate::ToolIntent::CancelProcess(lash_core::CancelProcessIntent {
-        owner: identity.owner.clone(),
-        process_id: crate::ProcessId::fixture("tool-intent-retention-target"),
-    });
+    let intent = crate::ToolIntent::CancelProcess(
+        lash_execution_contracts::tool_intent::CancelProcessIntent {
+            owner: identity.owner.clone(),
+            process_id: crate::ProcessId::fixture("tool-intent-retention-target"),
+        },
+    );
     crate::ToolIntentSubmissionRecord::new(identity.clone(), intent)
         .expect("the submission has a payload hash")
 }

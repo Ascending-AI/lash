@@ -53,7 +53,7 @@ pub fn host_admitted_scope(
 /// over `backend` runs on, so its process wiring and env store are the
 /// runtime's own.
 pub fn backend_admitted_scope(
-    backend: &crate::Backend,
+    backend: &lash_execution_contracts::backend::Backend,
     admitted: crate::AdmittedScope,
 ) -> crate::ActorContext {
     crate::ActorContext::detached(backend.clone())
@@ -63,7 +63,7 @@ pub fn backend_admitted_scope(
 
 /// `backend_admitted_scope` for a turn scope.
 pub fn backend_turn_scope(
-    backend: &crate::Backend,
+    backend: &lash_execution_contracts::backend::Backend,
     session_id: &SessionId,
     turn_id: &TurnId,
 ) -> crate::ActorContext {
@@ -73,7 +73,7 @@ pub fn backend_turn_scope(
 /// `backend_admitted_scope` for a process scope, standing in for the
 /// worker's admission step.
 pub fn backend_process_scope(
-    backend: &crate::Backend,
+    backend: &lash_execution_contracts::backend::Backend,
     process_id: &ProcessId,
 ) -> crate::ActorContext {
     backend_admitted_scope(backend, crate::AdmittedScope::process(process_id.clone()))
@@ -392,7 +392,9 @@ pub use crate::testing::standard_test_policy;
 
 /// A host over `backend` whose models serve the standard test model with an
 /// empty mock provider.
-pub fn test_host_config(backend: &crate::Backend) -> EmbeddedRuntimeHost {
+pub fn test_host_config(
+    backend: &lash_execution_contracts::backend::Backend,
+) -> EmbeddedRuntimeHost {
     EmbeddedRuntimeHost::new(test_runtime_host_config_with_provider(
         backend,
         mock_provider(Vec::new()).into_handle(),
@@ -530,7 +532,7 @@ pub async fn create_runtime_fixture_session_with_config(
 
 /// Create a fresh fixture session explicitly, refusing accidental fixture reuse.
 pub async fn create_session_store(
-    factory: &Arc<dyn crate::DeploymentStore>,
+    factory: &Arc<dyn lash_execution_contracts::deployment::DeploymentStore>,
     request: &crate::SessionStoreCreateRequest,
 ) -> Result<crate::store::SessionStore, crate::StoreError> {
     assert_eq!(
@@ -545,7 +547,7 @@ pub async fn create_session_store(
 /// A fresh root session store for `session_id` from `backend`'s catalog,
 /// under a [`RecordingStore`].
 pub async fn recording_session_store(
-    backend: &crate::Backend,
+    backend: &lash_execution_contracts::backend::Backend,
     session_id: impl Into<SessionId>,
 ) -> Arc<RecordingStore> {
     let session_id = session_id.into();
@@ -575,7 +577,9 @@ pub fn test_commit_budget() -> crate::CommitBudget {
 
 /// A host config over `backend` with the test commit budget and a batching
 /// bound of one.
-pub fn test_runtime_host_config(backend: &crate::Backend) -> RuntimeHostConfig {
+pub fn test_runtime_host_config(
+    backend: &lash_execution_contracts::backend::Backend,
+) -> RuntimeHostConfig {
     RuntimeHostConfig::new(
         backend.clone(),
         test_commit_budget(),
@@ -587,7 +591,7 @@ pub fn test_runtime_host_config(backend: &crate::Backend) -> RuntimeHostConfig {
 }
 
 pub fn test_runtime_host_config_with_provider(
-    backend: &crate::Backend,
+    backend: &lash_execution_contracts::backend::Backend,
     provider: crate::ProviderHandle,
 ) -> RuntimeHostConfig {
     let mut config = test_runtime_host_config(backend);
@@ -605,7 +609,10 @@ impl crate::ToolProvider for EmptyTools {
     fn tool_manifests(
         &self,
         _config: &crate::OwnerConfigView,
-    ) -> std::result::Result<Vec<crate::ToolManifest>, crate::PluginError> {
+    ) -> std::result::Result<
+        Vec<crate::ToolManifest>,
+        lash_execution_contracts::plugin_error::PluginError,
+    > {
         Ok(Vec::new())
     }
 
@@ -641,14 +648,17 @@ pub struct TestRuntime {
     transport: TestProvider,
     host: EmbeddedRuntimeHost,
     store: Option<Arc<dyn crate::RuntimeStore>>,
-    process_registry: Option<Arc<dyn crate::ProcessRegistry>>,
+    process_registry: Option<Arc<dyn lash_execution_contracts::process::ProcessRegistry>>,
     session_id: Option<SessionId>,
 }
 
 impl TestRuntime {
     /// A runtime over `backend`: its host, and its process registry unless
     /// [`Self::without_process_registry`] drops it.
-    pub fn new(backend: &crate::Backend, transport: TestProvider) -> Self {
+    pub fn new(
+        backend: &lash_execution_contracts::backend::Backend,
+        transport: TestProvider,
+    ) -> Self {
         Self {
             attachment_acceptance: Default::default(),
             plugins: crate::testing::test_standard_protocol_factories(),
@@ -699,7 +709,10 @@ impl TestRuntime {
         self
     }
 
-    pub fn process_registry(mut self, process_registry: Arc<dyn crate::ProcessRegistry>) -> Self {
+    pub fn process_registry(
+        mut self,
+        process_registry: Arc<dyn lash_execution_contracts::process::ProcessRegistry>,
+    ) -> Self {
         self.process_registry = Some(process_registry);
         self
     }
@@ -843,13 +856,13 @@ impl TestRuntime {
 }
 
 pub async fn standard_runtime_with_transport(
-    backend: &crate::Backend,
+    backend: &lash_execution_contracts::backend::Backend,
     transport: TestProvider,
 ) -> LashRuntime {
     TestRuntime::new(backend, transport).build().await
 }
 pub async fn runtime_with_plugins(
-    backend: &crate::Backend,
+    backend: &lash_execution_contracts::backend::Backend,
     plugins: Vec<Arc<dyn crate::PluginFactory>>,
     transport: TestProvider,
 ) -> LashRuntime {
@@ -860,7 +873,7 @@ pub async fn runtime_with_plugins(
 }
 
 pub async fn runtime_with_plugins_and_tools(
-    backend: &crate::Backend,
+    backend: &lash_execution_contracts::backend::Backend,
     plugins: Vec<Arc<dyn crate::PluginFactory>>,
     tools: Arc<dyn crate::ToolProvider>,
     transport: TestProvider,
@@ -928,7 +941,10 @@ impl crate::ToolProvider for EchoTool {
     fn tool_manifests(
         &self,
         _config: &crate::OwnerConfigView,
-    ) -> std::result::Result<Vec<crate::ToolManifest>, crate::PluginError> {
+    ) -> std::result::Result<
+        Vec<crate::ToolManifest>,
+        lash_execution_contracts::plugin_error::PluginError,
+    > {
         Ok(vec![echo_tool_definition().manifest()])
     }
 
@@ -967,7 +983,10 @@ impl crate::ToolProvider for TerminalControlTool {
     fn tool_manifests(
         &self,
         _config: &crate::OwnerConfigView,
-    ) -> std::result::Result<Vec<crate::ToolManifest>, crate::PluginError> {
+    ) -> std::result::Result<
+        Vec<crate::ToolManifest>,
+        lash_execution_contracts::plugin_error::PluginError,
+    > {
         Ok({
             (0..self.controls.len())
                 .map(|index| self.definition(index).manifest())
@@ -1055,7 +1074,10 @@ impl crate::ToolProvider for SlowTool {
     fn tool_manifests(
         &self,
         _config: &crate::OwnerConfigView,
-    ) -> std::result::Result<Vec<crate::ToolManifest>, crate::PluginError> {
+    ) -> std::result::Result<
+        Vec<crate::ToolManifest>,
+        lash_execution_contracts::plugin_error::PluginError,
+    > {
         Ok(vec![slow_tool_definition().manifest()])
     }
 
@@ -1107,7 +1129,10 @@ impl crate::ToolProvider for MemoryProbeTool {
     fn tool_manifests(
         &self,
         _config: &crate::OwnerConfigView,
-    ) -> std::result::Result<Vec<crate::ToolManifest>, crate::PluginError> {
+    ) -> std::result::Result<
+        Vec<crate::ToolManifest>,
+        lash_execution_contracts::plugin_error::PluginError,
+    > {
         Ok(vec![memory_probe_tool_definition().manifest()])
     }
 
@@ -1157,10 +1182,11 @@ pub fn reopen_session_runtime<'a>(
 ) -> std::pin::Pin<Box<dyn std::future::Future<Output = LashRuntime> + Send + 'a>> {
     Box::pin(async move {
         let deployment = parent.host.core.session_store_factory();
-        let store = lash_core_execution::live_session_view(&deployment, session_id)
-            .await
-            .expect("open child session store")
-            .expect("child session store exists");
+        let store =
+            lash_execution_contracts::deployment::live_session_view(&deployment, session_id)
+                .await
+                .expect("open child session store")
+                .expect("child session store exists");
         let state =
             crate::store::load_session_window_state(&store, crate::store::WindowSelector::Current)
                 .await

@@ -10,7 +10,12 @@ use lash_durable::{
 };
 use tokio_util::sync::CancellationToken;
 
-use crate::{AdmittedScope, Backend, Clock, ExecutionScope, RuntimeError, TurnId};
+use crate::AdmittedScope;
+use crate::Clock;
+use crate::ExecutionScope;
+use crate::RuntimeError;
+use crate::TurnId;
+use lash_execution_contracts::backend::Backend;
 
 /// The one effect context of an owned actor.
 ///
@@ -751,7 +756,9 @@ impl ActorContext {
     /// The backend's projection providers (ADR 0132 §9); none on
     /// [`Self::unavailable`], which has no backend.
     #[must_use]
-    pub fn projection_providers(&self) -> Option<&Arc<dyn super::projection::ProjectionProviders>> {
+    pub fn projection_providers(
+        &self,
+    ) -> Option<&Arc<dyn lash_execution_contracts::projection::ProjectionProviders>> {
         self.inner
             .backend
             .as_ref()

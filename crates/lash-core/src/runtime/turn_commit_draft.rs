@@ -119,7 +119,8 @@ impl TurnGraphAppendDraft {
         &self,
         session_id: &SessionId,
         request: &crate::AppendSessionNodesRequest,
-    ) -> Result<crate::AppendSessionNodesOutcome, crate::PluginError> {
+    ) -> Result<crate::AppendSessionNodesOutcome, lash_execution_contracts::plugin_error::PluginError>
+    {
         Self::record_append(&mut self.inner.lock_recover(), session_id, request)
     }
 
@@ -127,23 +128,28 @@ impl TurnGraphAppendDraft {
         inner: &mut TurnGraphAppendDraftInner,
         session_id: &SessionId,
         request: &crate::AppendSessionNodesRequest,
-    ) -> Result<crate::AppendSessionNodesOutcome, crate::PluginError> {
+    ) -> Result<crate::AppendSessionNodesOutcome, lash_execution_contracts::plugin_error::PluginError>
+    {
         if request.operation_id.trim().is_empty() {
-            return Err(crate::PluginError::Session(
-                "session graph append requires a non-empty stable operation_id".into(),
-            ));
+            return Err(
+                lash_execution_contracts::plugin_error::PluginError::Session(
+                    "session graph append requires a non-empty stable operation_id".into(),
+                ),
+            );
         }
         let operation =
             boundary_operation(session_id, &request.operation_id, "append-session-nodes");
-        let draft_namespace = operation
-            .storage_key()
-            .map_err(|err| crate::PluginError::Session(err.to_string()))?;
+        let draft_namespace = operation.storage_key().map_err(|err| {
+            lash_execution_contracts::plugin_error::PluginError::Session(err.to_string())
+        })?;
         let identity = crate::RuntimeTurnCommitStamp::append_session_nodes(
             operation,
             request.requires_ancestor_node_id.as_deref(),
             &request.nodes,
         )
-        .map_err(|err| crate::PluginError::Session(err.to_string()))?
+        .map_err(|err| {
+            lash_execution_contracts::plugin_error::PluginError::Session(err.to_string())
+        })?
         .append_request_identity;
         if let Some(existing) = inner
             .recorded
@@ -153,7 +159,7 @@ impl TurnGraphAppendDraft {
             if existing.identity == identity {
                 return Ok(existing.outcome.clone());
             }
-            return Err(crate::PluginError::AppendOperationIdentityConflict {
+            return Err(lash_execution_contracts::plugin_error::PluginError::AppendOperationIdentityConflict {
                 session_id: SessionId::parse(session_id.to_string())?,
                 operation_key: draft_namespace,
             });
@@ -191,7 +197,7 @@ impl TurnGraphAppendDraft {
         &self,
         session_id: &SessionId,
         contributions: &[crate::plugin::SessionContributions],
-    ) -> Result<(), crate::PluginError> {
+    ) -> Result<(), lash_execution_contracts::plugin_error::PluginError> {
         if contributions
             .iter()
             .all(crate::plugin::SessionContributions::is_empty)
@@ -606,7 +612,7 @@ mod tests {
                 &SessionId::from("draft-answers"),
                 &plugin_append("op-a", &["changed"])
             ),
-            Err(crate::PluginError::AppendOperationIdentityConflict { .. })
+            Err(lash_execution_contracts::plugin_error::PluginError::AppendOperationIdentityConflict { .. })
         ));
 
         // Ancestors resolve against the resident active path plus nodes the

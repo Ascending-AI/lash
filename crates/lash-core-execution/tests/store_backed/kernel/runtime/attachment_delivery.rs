@@ -12,10 +12,11 @@ mod tests {
         SessionReferrerState, StoreError,
     };
 
+    use crate::AttachmentId;
     use crate::runtime::attachment_delivery::{
         DeliveryAcquisition, acquire_under, deliver_output, receiving_claim, source_gone_output,
     };
-    use crate::{AttachmentId, StoreSet as _};
+    use lash_execution_contracts::backend::StoreSet as _;
 
     /// The store set's own referrers, except that every acquisition is
     /// refused as a store whose stamp this build does not read.
@@ -116,16 +117,17 @@ mod tests {
         );
 
         let unknown = lash_core_store::attachments::content_id(b"never uploaded");
-        let output =
-            crate::ProcessAwaitOutput::from_tool_output(crate::ToolCallOutput::success_tool_value(
-                crate::ToolValue::Attachment(crate::AttachmentRef::new(
+        let output = lash_execution_contracts::process::ProcessAwaitOutput::from_tool_output(
+            crate::ToolCallOutput::success_tool_value(crate::ToolValue::Attachment(
+                crate::AttachmentRef::new(
                     unknown.clone(),
                     crate::MediaType::parse("text/plain").unwrap(),
                     14,
                     None,
                     None,
-                )),
-            ));
+                ),
+            )),
+        );
         let recorded = deliver_output(referrers.as_ref(), &receiver, output)
             .await
             .expect("a gone source is a typed delivery");

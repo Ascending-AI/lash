@@ -79,13 +79,16 @@ use lash_core::llm::types::{LlmRequest, LlmResponse, LlmStreamEvent, StreamBlock
 use lash_core::runtime::durable::session::SessionActivation;
 use lash_core::{LlmOutputPart, LlmTerminalReason};
 use lash_core_execution::store::{HistoryAnchor, HistoryBudget};
-use lash_core_execution::{Backend, BackendParts, NoProjectionProviders, StoreSet};
 use lash_core_store::store::{RunCommittedOutcome, RunTerminalCause, RunTerminalKind};
 use lash_durable::runner::Activation;
 use lash_durable::{ActorKey, ActorState, CommitLabel, DurableError, DurableStore};
 use lash_durable_test::{
     Cut, Fault, Matrix, Scenario, SimClock, SimNodes, SimNodesConfig, Stored, Tripwire, WriteKind,
 };
+use lash_execution_contracts::backend::Backend;
+use lash_execution_contracts::backend::BackendParts;
+use lash_execution_contracts::backend::StoreSet;
+use lash_execution_contracts::projection::NoProjectionProviders;
 use lash_protocol_types::sync::MutexExt as _;
 use lash_protocol_types::{SessionId, TurnId};
 

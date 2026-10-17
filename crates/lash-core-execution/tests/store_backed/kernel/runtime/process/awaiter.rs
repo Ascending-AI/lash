@@ -9,7 +9,7 @@ mod tests {
 
     #[async_trait::async_trait]
     impl ProcessEventSink for TestSink {
-        async fn emit(&self, _: &crate::ProcessEvent) {}
+        async fn emit(&self, _: &lash_execution_contracts::process::ProcessEvent) {}
     }
 
     #[tokio::test]
@@ -27,14 +27,15 @@ mod tests {
     #[tokio::test]
     async fn process_feed_cursor_fault_reports_one_degradation_and_absence_reports_none() {
         use crate::testing::{ProcessRegistryFaults, trace_capture::capturing};
-        use crate::{ProcessProvenance, ProcessRegistrar};
+        use lash_execution_contracts::process::ProcessProvenance;
+        use lash_execution_contracts::process::ProcessRegistrar;
         let backend = sqlite_memory_process_store_set().await;
         let faults = Arc::new(ProcessRegistryFaults::new(backend.process_registry()));
         let record = faults
-            .register_process(crate::testing::held_engine_registration(
+            .register_process(lash_execution_contracts::testing::held_engine_registration(
                 serde_json::json!({}),
                 ProcessProvenance::host(),
-                crate::Lifetime::Detached,
+                lash_execution_contracts::process::Lifetime::Detached,
             ))
             .await
             .expect("registered process");
@@ -58,9 +59,11 @@ mod tests {
         assert!(absent.named("process_feed.degraded").is_empty());
         faults.set_process_read_absent(false);
         let (_, failed) = capturing(|| async {
-            faults.set_process_read_error(Some(crate::PluginError::from(
-                crate::store::StoreFault::Contended,
-            )));
+            faults.set_process_read_error(Some(
+                lash_execution_contracts::plugin_error::PluginError::from(
+                    crate::store::StoreFault::Contended,
+                ),
+            ));
             for _ in 0..3 {
                 cancel()
                     .await

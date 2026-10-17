@@ -26,13 +26,14 @@ mod tests {
             env_store.as_ref(),
             "observed-effects",
             engine_registration("observed-effects", "valid"),
-            lash_core_execution::testing::process_env_with_limit(1024),
+            lash_execution_contracts::testing::process_env_with_limit(1024),
         )
         .await;
-        let started: crate::facade_support::ObservedProcess =
+        let started: lash_execution_contracts::process::ObservedProcess =
             started_record(execute_start(envelope, executor()).await.expect("start"));
-        let observer = crate::runtime::process::ProcessWorkObserver::new(Arc::clone(&registry))
-            .with_actor_parks(Arc::clone(backend.durable()));
+        let observer =
+            lash_execution_contracts::process::ProcessWorkObserver::new(Arc::clone(&registry))
+                .with_actor_parks(Arc::clone(backend.durable()));
         assert_eq!(
             Some(started.clone()),
             observer.process(&started.process_id).await.expect("read")
@@ -83,8 +84,12 @@ mod tests {
         registry
             .complete_process(
                 &started.process_id,
-                crate::ProcessAwaitOutput::from_tool_output(output.clone()),
-                crate::ProcessCompletionAuthority::workflow_key(&started.process_id),
+                lash_execution_contracts::process::ProcessAwaitOutput::from_tool_output(
+                    output.clone(),
+                ),
+                lash_execution_contracts::process::ProcessCompletionAuthority::workflow_key(
+                    &started.process_id,
+                ),
             )
             .await
             .expect("terminal");
@@ -93,7 +98,7 @@ mod tests {
             .add_observer(
                 &session_id,
                 &started.process_id,
-                crate::ProcessObserverBy::host("law"),
+                lash_execution_contracts::process::ProcessObserverBy::host("law"),
             )
             .await
             .expect("observer");
@@ -104,8 +109,10 @@ mod tests {
                 &receiver,
                 crate::ProcessCommand::List {
                     selection: crate::ProcessListSelection::Observed {
-                        session_scope: crate::SessionScope::new(session_id),
-                        mode: crate::ProcessListMode::All,
+                        session_scope: lash_execution_contracts::process::SessionScope::new(
+                            session_id,
+                        ),
+                        mode: lash_execution_contracts::process::ProcessListMode::All,
                     },
                 },
             )
@@ -129,8 +136,8 @@ mod tests {
     async fn a_journaled_environment_load_keeps_its_bytes_after_the_source_pin_ends() {
         let backend = crate::support::sqlite_memory_store_backend().await;
         let store = backend.process_env_store();
-        let pin = crate::testing::host_pin_claim_for_testing();
-        let spec = lash_core_execution::testing::process_env_with_limit(1024);
+        let pin = lash_execution_contracts::testing::host_pin_claim_for_testing();
+        let spec = lash_execution_contracts::testing::process_env_with_limit(1024);
         let env_ref = lash_core_execution::testing::publish_process_env_for_testing(
             store.as_ref(),
             &pin,
@@ -164,7 +171,7 @@ mod tests {
             .await
             .expect("source pin ends");
         assert_eq!(
-            crate::load_process_env(store.as_ref(), &env_ref)
+            lash_execution_contracts::process::load_process_env(store.as_ref(), &env_ref)
                 .await
                 .expect("replay resolves bytes"),
             spec
@@ -192,18 +199,18 @@ mod tests {
         let engines = crate::ProcessEngineRegistry::new().with_registration(
             crate::ProcessEngineRegistration::new(
                 Arc::new(crate::testing::FixtureProcessEngine),
-                crate::ProcessEngineAdmission::new("testing-fixture", |kind, payload| {
+                lash_execution_contracts::process::ProcessEngineAdmission::new("testing-fixture", |kind, payload| {
                     if payload["marker"] == "invalid" {
-                        return Err(crate::PluginError::Session(
+                        return Err(lash_execution_contracts::plugin_error::PluginError::Session(
                             "invalid fixture payload".to_owned(),
                         ));
                     }
                     if payload["marker"] == "missing-config" {
-                        return Err(crate::PluginError::MissingRecordedProcessConfig {
+                        return Err(lash_execution_contracts::plugin_error::PluginError::MissingRecordedProcessConfig {
                             engine_kind: kind.to_owned(),
                         });
                     }
-                    Ok(crate::ProcessIdentity::labelled(kind, Some("engine-stamp")))
+                    Ok(lash_execution_contracts::process::ProcessIdentity::labelled(kind, Some("engine-stamp")))
                 }),
             )
             .expect("matching engine kind"),
@@ -215,7 +222,7 @@ mod tests {
                 env_store.as_ref(),
                 marker,
                 registration,
-                lash_core_execution::testing::process_env_with_limit(1024),
+                lash_execution_contracts::testing::process_env_with_limit(1024),
             )
             .await;
             let crate::RuntimeEffectCommand::Process { command } = envelope.command else {
@@ -276,7 +283,10 @@ mod tests {
                 };
                 assert_eq!(
                     record.identity,
-                    crate::ProcessIdentity::labelled("testing-fixture", Some("engine-stamp"))
+                    lash_execution_contracts::process::ProcessIdentity::labelled(
+                        "testing-fixture",
+                        Some("engine-stamp")
+                    )
                 );
             }
         }
@@ -293,7 +303,7 @@ mod tests {
             env_store.as_ref(),
             "seam-admission",
             registration,
-            lash_core_execution::testing::process_env_with_limit(1024),
+            lash_execution_contracts::testing::process_env_with_limit(1024),
         )
         .await;
         let outcome = crate::RuntimeEffectLocalExecutor::processes(
@@ -328,30 +338,36 @@ mod tests {
     }
 
     /// A start keyed by `key`: a journaled start is addressed by its key.
-    fn engine_registration(key: &str, marker: &str) -> crate::ProcessRegistration {
-        crate::ProcessRegistration::new(
-            crate::ProcessInput::Engine {
+    fn engine_registration(
+        key: &str,
+        marker: &str,
+    ) -> lash_execution_contracts::process::ProcessRegistration {
+        lash_execution_contracts::process::ProcessRegistration::new(
+            lash_execution_contracts::process::ProcessInput::Engine {
                 kind: "testing-fixture".to_string(),
                 payload: serde_json::json!({"marker": marker}),
-                launch: lash_core_execution::testing::fixture_engine_launch(),
+                launch: lash_execution_contracts::testing::fixture_engine_launch(),
             },
-            crate::ProcessProvenance::host(),
-            crate::Lifetime::Detached,
+            lash_execution_contracts::process::ProcessProvenance::host(),
+            lash_execution_contracts::process::Lifetime::Detached,
         )
         .with_start_key(Some(crate::StartKey::for_host(key)))
     }
 
     /// `registration` launched under `env`.
     fn with_env(
-        mut registration: crate::ProcessRegistration,
+        mut registration: lash_execution_contracts::process::ProcessRegistration,
         env: crate::ProcessEnvRef,
-    ) -> crate::ProcessRegistration {
-        if let crate::ProcessInput::Engine { kind, payload, .. } = registration.input.as_ref() {
-            registration.input = Arc::new(crate::ProcessInput::Engine {
-                kind: kind.clone(),
-                payload: payload.clone(),
-                launch: crate::EngineLaunch::new(env, None),
-            });
+    ) -> lash_execution_contracts::process::ProcessRegistration {
+        if let lash_execution_contracts::process::ProcessInput::Engine { kind, payload, .. } =
+            registration.input.as_ref()
+        {
+            registration.input =
+                Arc::new(lash_execution_contracts::process::ProcessInput::Engine {
+                    kind: kind.clone(),
+                    payload: payload.clone(),
+                    launch: lash_execution_contracts::process::EngineLaunch::new(env, None),
+                });
         }
         registration
     }
@@ -364,9 +380,9 @@ mod tests {
     }
 
     async fn start_envelope(
-        env_store: &dyn crate::ProcessEnvStore,
+        env_store: &dyn lash_execution_contracts::process::ProcessEnvStore,
         effect_id: &str,
-        registration: crate::ProcessRegistration,
+        registration: lash_execution_contracts::process::ProcessRegistration,
         env_spec: crate::ProcessEnv,
     ) -> crate::RuntimeEffectEnvelope {
         let starter = crate::ExecutionScope::runtime_operation("runtime")
@@ -394,7 +410,9 @@ mod tests {
             crate::RuntimeEffectCommand::process(crate::ProcessCommand::Start {
                 registration: with_env(registration, env_ref).into(),
                 observers: Vec::new(),
-                execution_context: Box::new(crate::ProcessExecutionContext::default()),
+                execution_context: Box::new(
+                    lash_execution_contracts::process::ProcessExecutionContext::default(),
+                ),
             }),
         )
     }
@@ -419,7 +437,7 @@ mod tests {
 
     fn started_record(
         outcome: crate::RuntimeEffectOutcome,
-    ) -> crate::facade_support::ObservedProcess {
+    ) -> lash_execution_contracts::process::ObservedProcess {
         let crate::RuntimeEffectOutcome::Process {
             result: ProcessEffectOutcome::Start { record, .. },
         } = outcome
@@ -459,9 +477,11 @@ mod tests {
     async fn process_start_replays_and_carries_environment_to_process() {
         let key = "owned-env-start";
         let backend = crate::support::sqlite_memory_store_backend().await;
-        let registry: Arc<dyn crate::ProcessRegistry> = backend.process_registry();
-        let env_store: Arc<dyn crate::ProcessEnvStore> = backend.process_env_store();
-        let env_spec = lash_core_execution::testing::process_env_with_limit(1024);
+        let registry: Arc<dyn lash_execution_contracts::process::ProcessRegistry> =
+            backend.process_registry();
+        let env_store: Arc<dyn lash_execution_contracts::process::ProcessEnvStore> =
+            backend.process_env_store();
+        let env_spec = lash_execution_contracts::testing::process_env_with_limit(1024);
         let env_ref = env_spec.stable_ref().expect("stable environment reference");
         let command = start_envelope(
             env_store.as_ref(),
@@ -526,7 +546,7 @@ mod tests {
     /// A store that fences the start just before its first acquire, as a
     /// concurrent attempt can settle the same key before this one stages.
     struct FenceStartBeforeFirstAcquire {
-        inner: Arc<dyn crate::ProcessEnvStore>,
+        inner: Arc<dyn lash_execution_contracts::process::ProcessEnvStore>,
         start: crate::ArtifactReferrer,
         interleavings: AtomicUsize,
     }
@@ -549,13 +569,13 @@ mod tests {
     }
 
     #[async_trait::async_trait]
-    impl crate::ProcessEnvStore for FenceStartBeforeFirstAcquire {
+    impl lash_execution_contracts::process::ProcessEnvStore for FenceStartBeforeFirstAcquire {
         async fn publish_process_env(
             &self,
             claim: &crate::ReferrerClaim,
             env_ref: &crate::ProcessEnvRef,
             bytes: &[u8],
-        ) -> Result<(), crate::ArtifactStoreError> {
+        ) -> Result<(), lash_execution_contracts::module_artifacts::ArtifactStoreError> {
             self.inner.publish_process_env(claim, env_ref, bytes).await
         }
 
@@ -563,7 +583,7 @@ mod tests {
             &self,
             claim: &crate::ReferrerClaim,
             env_ref: &crate::ProcessEnvRef,
-        ) -> Result<(), crate::ArtifactStoreError> {
+        ) -> Result<(), lash_execution_contracts::module_artifacts::ArtifactStoreError> {
             if self.interleavings.fetch_add(1, Ordering::SeqCst) == 0 {
                 self.inner
                     .end_process_env_referrer(&end(self.start.clone()))
@@ -575,14 +595,15 @@ mod tests {
         async fn end_process_env_referrer(
             &self,
             cleanup: &crate::ResolvedArtifactCleanup,
-        ) -> Result<(), crate::ArtifactStoreError> {
+        ) -> Result<(), lash_execution_contracts::module_artifacts::ArtifactStoreError> {
             self.inner.end_process_env_referrer(cleanup).await
         }
 
         async fn get_process_env(
             &self,
             env_ref: &crate::ProcessEnvRef,
-        ) -> Result<Option<Vec<u8>>, crate::ArtifactStoreError> {
+        ) -> Result<Option<Vec<u8>>, lash_execution_contracts::module_artifacts::ArtifactStoreError>
+        {
             self.inner.get_process_env(env_ref).await
         }
     }
@@ -598,11 +619,13 @@ mod tests {
     async fn a_start_acquires_its_environment_after_a_concurrent_attempt_fences_its_referrer() {
         let key = "raced-staging-owner-start";
         let backend = crate::support::sqlite_memory_store_backend().await;
-        let registry: Arc<dyn crate::ProcessRegistry> = backend.process_registry();
-        let env_spec = lash_core_execution::testing::process_env_with_limit(1024);
+        let registry: Arc<dyn lash_execution_contracts::process::ProcessRegistry> =
+            backend.process_registry();
+        let env_spec = lash_execution_contracts::testing::process_env_with_limit(1024);
         let env_ref = env_spec.stable_ref().expect("stable environment reference");
         let bytes = env_spec.to_store_bytes().expect("encode environment");
-        let inner: Arc<dyn crate::ProcessEnvStore> = backend.process_env_store();
+        let inner: Arc<dyn lash_execution_contracts::process::ProcessEnvStore> =
+            backend.process_env_store();
         // The host pin's own edge, exactly as a host holds it.
         let subscription = crate::ArtifactReferrer::HostPin(crate::HostArtifactPin::mint());
         let subscription_claim =
@@ -630,7 +653,9 @@ mod tests {
                 registration: with_env(engine_registration(key, "delivery"), env_ref.clone())
                     .into(),
                 observers: Vec::new(),
-                execution_context: Box::new(crate::ProcessExecutionContext::default()),
+                execution_context: Box::new(
+                    lash_execution_contracts::process::ProcessExecutionContext::default(),
+                ),
             }),
         );
         let executor = crate::RuntimeEffectLocalExecutor::processes(
@@ -639,7 +664,9 @@ mod tests {
             crate::testing::process_engine_fixture(),
             crate::runtime::HostStartAdmission::default(),
         )
-        .with_process_env_store(Arc::clone(&env_store) as Arc<dyn crate::ProcessEnvStore>);
+        .with_process_env_store(
+            Arc::clone(&env_store) as Arc<dyn lash_execution_contracts::process::ProcessEnvStore>
+        );
 
         let started = started_record(
             execute_start(envelope, executor)
@@ -694,15 +721,17 @@ mod tests {
     #[tokio::test]
     async fn a_changed_content_retry_after_a_crash_keeps_the_retained_environment() {
         let backend = crate::support::sqlite_memory_store_backend().await;
-        let registry: Arc<dyn crate::ProcessRegistry> = backend.process_registry();
-        let env_store: Arc<dyn crate::ProcessEnvStore> = backend.process_env_store();
-        let first_env = lash_core_execution::testing::process_env_with_limit(1024);
-        let retry_env = lash_core_execution::testing::process_env_with_limit(3);
+        let registry: Arc<dyn lash_execution_contracts::process::ProcessRegistry> =
+            backend.process_registry();
+        let env_store: Arc<dyn lash_execution_contracts::process::ProcessEnvStore> =
+            backend.process_env_store();
+        let first_env = lash_execution_contracts::testing::process_env_with_limit(1024);
+        let retry_env = lash_execution_contracts::testing::process_env_with_limit(3);
         let first_ref = first_env.stable_ref().expect("first environment reference");
         let retry_ref = retry_env.stable_ref().expect("retry environment reference");
         assert_ne!(first_ref, retry_ref, "the retry submits different content");
         let key = crate::StartKeyDerivation::LASH_START_PATHS.for_tool_intent(
-            &crate::derive_tool_intent_identity(
+            &lash_execution_contracts::tool_intent::derive_tool_intent_identity(
                 &crate::RuntimeOwner::Session(crate::SessionId::from("session")),
                 "runtime",
                 &lash_core_execution::ToolCallId::fixture("crashed-start"),
@@ -751,7 +780,9 @@ mod tests {
             crate::RuntimeEffectCommand::process(crate::ProcessCommand::Start {
                 registration: with_env(registration("retry"), retry_ref.clone()).into(),
                 observers: Vec::new(),
-                execution_context: Box::new(crate::ProcessExecutionContext::default()),
+                execution_context: Box::new(
+                    lash_execution_contracts::process::ProcessExecutionContext::default(),
+                ),
             }),
         );
         let executor = crate::RuntimeEffectLocalExecutor::processes(
@@ -816,13 +847,14 @@ mod tests {
     async fn a_process_start_issued_through_the_actor_context_registers_its_process() {
         let key = "actor-context-start";
         let backend = crate::support::sqlite_memory_store_backend().await;
-        let registry: Arc<dyn crate::ProcessRegistry> = backend.process_registry();
+        let registry: Arc<dyn lash_execution_contracts::process::ProcessRegistry> =
+            backend.process_registry();
         let env_store = backend.process_env_store();
         let envelope = start_envelope(
             env_store.as_ref(),
             key,
             engine_registration(key, "context"),
-            lash_core_execution::testing::process_env_with_limit(1024),
+            lash_execution_contracts::testing::process_env_with_limit(1024),
         )
         .await;
         let executor = crate::RuntimeEffectLocalExecutor::processes(

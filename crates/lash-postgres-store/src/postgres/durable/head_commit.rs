@@ -24,12 +24,16 @@
 use std::collections::BTreeSet;
 use std::sync::LazyLock;
 
-use lash_core_execution::store::{
-    HeadWriter, ParentNodeFacts, PublishedLeafFacts, RuntimeCommitPlan, RuntimeCommitPlanner,
-    RuntimeCommitReceipt,
-};
-use lash_core_execution::{FrameNodeId, NodeId, StoreError};
+use lash_core_store::session_identity::FrameNodeId;
+use lash_core_store::store::HeadWriter;
+use lash_core_store::store::ParentNodeFacts;
+use lash_core_store::store::PublishedLeafFacts;
+use lash_core_store::store::RuntimeCommitPlan;
+use lash_core_store::store::RuntimeCommitPlanner;
+use lash_core_store::store::RuntimeCommitReceipt;
+use lash_core_store::store::StoreError;
 use lash_durable::{ActorKey, DurableInstant};
+use lash_protocol_types::NodeId;
 use lash_store_sql::Dialect;
 use sqlx::Row as _;
 
@@ -265,14 +269,14 @@ pub(super) enum Refusal {
     LeafRetired(NodeId),
     Occupied,
     Collision,
-    Command(lash_core_execution::BatchId),
+    Command(lash_protocol_types::BatchId),
     /// An ingress settlement always names the run that planned it.
     Ingress {
-        run: lash_core_execution::TurnId,
-        row: lash_core_execution::store::IngressRowId,
+        run: lash_protocol_types::TurnId,
+        row: lash_core_store::store::IngressRowId,
     },
     SessionEnded,
-    Attachment(lash_core_execution::AttachmentId),
+    Attachment(lash_protocol_types::attachment::AttachmentId),
 }
 
 /// The facts a head commit is planned on.
@@ -404,17 +408,20 @@ impl SessionHints {
 /// lock: how it is settled and what the outcome reports of it.
 #[derive(Clone, Debug)]
 pub(super) struct Released {
-    row: lash_core_execution::store::IngressRowId,
-    disposition: lash_core_execution::TurnCancelUndeliveredInputPolicy,
-    affected: Option<(u64, lash_core_execution::TurnCancelAffectedInput)>,
+    row: lash_core_store::store::IngressRowId,
+    disposition: lash_protocol_types::session_model::TurnCancelUndeliveredInputPolicy,
+    affected: Option<(
+        u64,
+        lash_core_store::turn_control_vocabulary::TurnCancelAffectedInput,
+    )>,
 }
 
 /// The cleanup a frame the commit leaves arms, decided under its
 /// referrer's lock.
 #[derive(Clone, Debug)]
 struct EndedFrame {
-    referrer: lash_core_execution::ArtifactReferrer,
-    decision: lash_core_execution::store::CleanupUpsert,
+    referrer: lash_core_store::artifact_referrer::ArtifactReferrer,
+    decision: lash_core_store::store::CleanupUpsert,
 }
 
 /// What the explicit form reads beyond the head's facts, under the locks
@@ -527,7 +534,7 @@ pub(super) fn program(
             None,
         ),
     };
-    let plan = planner.plan(lash_core_execution::store::FreshRuntimeCommitFacts {
+    let plan = planner.plan(lash_core_store::store::FreshRuntimeCommitFacts {
         actual_head_revision: facts.revision,
         published_leaf: facts.leaf.clone(),
         requested_ancestor_is_active: read.requested_ancestor_is_active,
@@ -545,7 +552,7 @@ pub(super) fn program(
         None => crate::support::checkpoint_parts(&commit.checkpoint, fleet)?,
     };
     let meta = plan.head_meta(checkpoint.checkpoint_ref.clone());
-    let left = lash_core_execution::store::frames_left_by_commit(
+    let left = lash_core_store::store::frames_left_by_commit(
         facts.frame.as_ref(),
         &commit.graph,
         meta.current_frame_node_id.as_ref(),
@@ -576,9 +583,10 @@ pub(super) fn program(
         now,
         false,
     );
-    result.turn_cancel_input_outcome = lash_core_execution::TurnCancelInputOutcome {
-        affected_inputs: affected.into_iter().map(|(_, input)| input).collect(),
-    };
+    result.turn_cancel_input_outcome =
+        lash_core_store::turn_control_vocabulary::TurnCancelInputOutcome {
+            affected_inputs: affected.into_iter().map(|(_, input)| input).collect(),
+        };
     let after_leaf = match &meta.leaf_node_id {
         None => Some(PublishedLeafFacts::Absent),
         Some(leaf) => match plan
@@ -823,12 +831,13 @@ pub(super) fn program(
 /// ungated end.
 fn end_frames_left(
     program: &mut Program,
-    commit: &lash_core_execution::RuntimeCommit,
+    commit: &lash_core_store::store::RuntimeCommit,
     read: &ReadFacts,
 ) -> Result<(), StoreError> {
     if let Some(transition) = &commit.frame_transition {
-        let successor =
-            lash_core_execution::ArtifactReferrer::FrameEnvironment(transition.successor.clone());
+        let successor = lash_core_store::artifact_referrer::ArtifactReferrer::FrameEnvironment(
+            transition.successor.clone(),
+        );
         for (namespace, artifact_ref) in &read.carries {
             program.push(
                 Step::any(
@@ -858,7 +867,7 @@ fn end_frames_left(
             ),
             Refusal::Backstop,
         );
-        let cleanup = lash_core_execution::ArtifactCleanup::ended(
+        let cleanup = lash_core_store::artifact_referrer::ArtifactCleanup::ended(
             ended.referrer.clone(),
             Vec::new(),
             gate.clone(),
@@ -866,11 +875,11 @@ fn end_frames_left(
         let json = cleanup
             .to_json()
             .map_err(|error| StoreError::Backend(error.to_string()))?;
-        let obligation = lash_core_execution::store::ObligationKey::ArtifactCleanup {
+        let obligation = lash_core_store::store::ObligationKey::ArtifactCleanup {
             referrer: ended.referrer.clone(),
         }
         .id();
-        use lash_core_execution::store::CleanupUpsert;
+        use lash_core_store::store::CleanupUpsert;
         match ended.decision {
             CleanupUpsert::Insert => program.push(
                 Step::any(
@@ -913,17 +922,18 @@ fn end_frames_left(
 /// rows a cancel released or dropped.
 fn settle_ingress(
     program: &mut Program,
-    commit: &lash_core_execution::RuntimeCommit,
+    commit: &lash_core_store::store::RuntimeCommit,
     read: &ReadFacts,
 ) -> Result<(), StoreError> {
-    use lash_core_execution::store::{IngressRowId, IngressTerminalCause};
+    use lash_core_store::store::IngressRowId;
+    use lash_core_store::store::IngressTerminalCause;
     let session = commit.session_id.as_str();
     if let Some(commands) = commit.applied_commands.as_ref() {
         let operation_key = commit.turn_commit.operation.storage_key()?;
         for batch in &commands.batch_ids {
             let cause = match commit.command_outcomes.get(batch) {
-                Some(lash_core_execution::runtime::SessionCommandOutcome::ConfigTransaction {
-                    outcome: lash_core_execution::ConfigTransactionOutcome::Stale { .. },
+                Some(lash_core_store::queued_work_vocabulary::SessionCommandOutcome::ConfigTransaction {
+                    outcome: lash_core_store::config_transaction::ConfigTransactionOutcome::Stale { .. },
                 }) => IngressTerminalCause::StaleConfigRevision,
                 _ => IngressTerminalCause::Applied,
             };
@@ -946,7 +956,7 @@ fn settle_ingress(
         return Ok(());
     };
     let run = ingress.run.as_str();
-    let settle_input = |input: &lash_core_execution::InputId, state: &str| {
+    let settle_input = |input: &lash_protocol_types::InputId, state: &str| {
         Step::one(
             &SETTLE_INPUT,
             vec![
@@ -958,7 +968,7 @@ fn settle_ingress(
             ],
         )
     };
-    let settle_batch = |batch: &lash_core_execution::BatchId, cause: IngressTerminalCause| {
+    let settle_batch = |batch: &lash_protocol_types::BatchId, cause: IngressTerminalCause| {
         Step::one(
             &SETTLE_BATCH,
             vec![
@@ -970,7 +980,7 @@ fn settle_ingress(
             ],
         )
     };
-    let completed = lash_core_execution::runtime::TurnInputStateKind::Completed.as_str();
+    let completed = lash_core_store::turn_input_vocabulary::TurnInputStateKind::Completed.as_str();
     for completion in &ingress.completed_inputs {
         for input in &completion.input_ids {
             program.push(
@@ -993,7 +1003,7 @@ fn settle_ingress(
             );
         }
     }
-    use lash_core_execution::TurnCancelUndeliveredInputPolicy as Disposition;
+    use lash_protocol_types::session_model::TurnCancelUndeliveredInputPolicy as Disposition;
     for released in &read.released {
         let step = match (&released.row, released.disposition) {
             (IngressRowId::Input(input), Disposition::Defer) => Step::one(
@@ -1002,7 +1012,7 @@ fn settle_ingress(
             ),
             (IngressRowId::Input(input), Disposition::Drop) => settle_input(
                 input,
-                lash_core_execution::runtime::TurnInputStateKind::Cancelled.as_str(),
+                lash_core_store::turn_input_vocabulary::TurnInputStateKind::Cancelled.as_str(),
             ),
             (IngressRowId::Batch(batch), Disposition::Defer) => Step::one(
                 &RELEASE_BATCH,
@@ -1026,12 +1036,13 @@ fn settle_ingress(
 /// unless it is being deleted or was never uploaded.
 fn acquire_attachments(
     program: &mut Program,
-    commit: &lash_core_execution::RuntimeCommit,
+    commit: &lash_core_store::store::RuntimeCommit,
 ) -> Result<(), StoreError> {
     if commit.committed_attachment_ids.is_empty() {
         return Ok(());
     }
-    let referrer = lash_core_execution::ArtifactReferrer::Session(commit.session_id.clone());
+    let referrer =
+        lash_core_store::artifact_referrer::ArtifactReferrer::Session(commit.session_id.clone());
     program.push(
         Step::none(
             &REFERRER_FENCED,
@@ -1145,7 +1156,7 @@ pub(super) async fn read_facts(
     // is refused while a run or an open command owns it. The session lock
     // serializes the read with every admission; the plan's own refusals (a
     // moved head) answer before the ownership's.
-    let ownership = if lash_core_execution::store::head_write_needs_ownership(
+    let ownership = if lash_core_store::store::head_write_needs_ownership(
         commit,
         writer,
         existing.as_ref().is_some_and(|head| !head.is_created()),
@@ -1241,19 +1252,19 @@ pub(super) async fn read_facts(
     };
     // The frames the commit leaves are the plan's: its derived frame
     // against the head's.
-    let plan = planner.plan(lash_core_execution::store::FreshRuntimeCommitFacts {
+    let plan = planner.plan(lash_core_store::store::FreshRuntimeCommitFacts {
         actual_head_revision: head.revision,
         published_leaf: head.leaf.clone(),
         requested_ancestor_is_active,
         occupied_node_ids: std::collections::HashSet::clone(&occupied),
     })?;
     if let Some(facts) = ownership {
-        lash_core_execution::store::require_unowned_head(&commit.session_id, facts)?;
+        lash_core_store::store::require_unowned_head(&commit.session_id, facts)?;
     }
     let derived = plan
-        .head_meta(lash_core_execution::BlobRef(String::new()))
+        .head_meta(lash_core_store::store::BlobRef(String::new()))
         .current_frame_node_id;
-    let left = lash_core_execution::store::frames_left_by_commit(
+    let left = lash_core_store::store::frames_left_by_commit(
         head.frame.as_ref(),
         &commit.graph,
         derived.as_ref(),
@@ -1287,7 +1298,7 @@ pub(super) async fn read_facts(
 /// Name the refusal of `program`'s step `index`, reading in `tx`.
 pub(super) async fn classify(
     tx: &mut sqlx::PgConnection,
-    commit: &lash_core_execution::RuntimeCommit,
+    commit: &lash_core_store::store::RuntimeCommit,
     program: &Program,
     refused: &super::steps::Refused,
 ) -> StoreError {
@@ -1376,7 +1387,9 @@ pub(super) async fn classify(
             crate::runtime_persistence::ingress_refusal_tx(tx, session, run, row).await
         }
         Refusal::SessionEnded => StoreError::ArtifactReferrerEnded {
-            referrer: lash_core_execution::ArtifactReferrer::Session(session.clone()),
+            referrer: lash_core_store::artifact_referrer::ArtifactReferrer::Session(
+                session.clone(),
+            ),
         },
         Refusal::Attachment(id) => StoreError::UnknownAttachment { digest: id.clone() },
     }

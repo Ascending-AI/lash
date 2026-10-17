@@ -14,7 +14,7 @@ A record cursor keeps truth in state reads while the sink under ADR 0017 supplie
 
 A host may atomically commit each projection effect and that entry's cursor in its own database, then resume strictly after the checkpoint following a crash partway through a page. Lash provides no cross-database transaction. A page-level checkpoint is committed only after every returned entry is applied.
 
-Projectors acknowledge a cursor and supply `ProjectionWatermark::UpTo(cursor)` when pruning. Hosts with no projector explicitly choose `NoProjector`. Mutation feeds can coalesce repeated changes to a record; they do not replace per-process event history. [Change-read contract](../../crates/lash-core-execution/src/runtime/process/registry_concerns.rs) and [SQL cursor and tombstone projection](../../crates/lash-sqlite-store/src/process_registry_change.rs) implement the feed.
+Projectors acknowledge a cursor and supply `ProjectionWatermark::UpTo(cursor)` when pruning. Hosts with no projector explicitly choose `NoProjector`. Mutation feeds can coalesce repeated changes to a record; they do not replace per-process event history. [Change-read contract](../../crates/lash-execution-contracts/src/process/registry_concerns.rs) and [SQL cursor and tombstone projection](../../crates/lash-sqlite-store/src/process_registry_change.rs) implement the feed.
 
 ## Host source reconciliation
 

@@ -116,7 +116,10 @@ impl lash_core::ToolProvider for ControlRaceTools {
     fn tool_manifests(
         &self,
         _config: &lash_core::OwnerConfigView,
-    ) -> std::result::Result<Vec<lash_core::ToolManifest>, lash_core::PluginError> {
+    ) -> std::result::Result<
+        Vec<lash_core::ToolManifest>,
+        lash_execution_contracts::plugin_error::PluginError,
+    > {
         Ok({
             ["slow", "fast", "release"]
                 .map(|name| definition(name, name, "tools", name).manifest())
@@ -365,7 +368,10 @@ impl lash_core::ToolProvider for CellTools {
     fn tool_manifests(
         &self,
         _config: &lash_core::OwnerConfigView,
-    ) -> std::result::Result<Vec<lash_core::ToolManifest>, lash_core::PluginError> {
+    ) -> std::result::Result<
+        Vec<lash_core::ToolManifest>,
+        lash_execution_contracts::plugin_error::PluginError,
+    > {
         Ok({
             vec![
                 definition("tool:echo", "echo", "echo", "say").manifest(),
@@ -500,7 +506,10 @@ macro_rules! resolves_only {
             fn tool_manifests(
                 &self,
                 _config: &lash_core::OwnerConfigView,
-            ) -> std::result::Result<Vec<lash_core::ToolManifest>, lash_core::PluginError> {
+            ) -> std::result::Result<
+                Vec<lash_core::ToolManifest>,
+                lash_execution_contracts::plugin_error::PluginError,
+            > {
                 Ok({ Vec::new() })
             }
 
@@ -1310,7 +1319,8 @@ async fn local_methods_stay_in_the_language(dialect: CellDialect, code: &str) {
         fn tool_manifests(
             &self,
             _config: &lash_core::OwnerConfigView,
-        ) -> Result<Vec<lash_core::ToolManifest>, lash_core::PluginError> {
+        ) -> Result<Vec<lash_core::ToolManifest>, lash_execution_contracts::plugin_error::PluginError>
+        {
             Ok(vec![
                 definition("tool:items_sort", "items_sort", "items", "sort").manifest(),
             ])

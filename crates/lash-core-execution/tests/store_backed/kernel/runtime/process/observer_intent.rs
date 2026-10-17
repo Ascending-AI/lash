@@ -2,7 +2,10 @@ mod tests {
     use crate::SessionId;
     use crate::plugin::{SessionObservedProcessOutcome, SessionObserverIntent};
     use crate::runtime::{SessionObserverIntentSource, reconcile_session_process_observer_intents};
-    use crate::support::prelude::*;
+    use lash_execution_contracts::{
+        ProcessEventLogTestSupport, ProcessLifecycle, ProcessObserverRegistry, ProcessRegistrar,
+        ProcessRetention,
+    };
 
     use crate::support::sqlite_memory_process_store_set;
 
@@ -11,20 +14,22 @@ mod tests {
         let backend = sqlite_memory_process_store_set().await;
         let registry = backend.process_registry();
         let registered = registry
-            .register_process(crate::testing::held_engine_registration(
+            .register_process(lash_execution_contracts::testing::held_engine_registration(
                 serde_json::Value::Null,
-                crate::ProcessProvenance::host(),
-                crate::Lifetime::Detached,
+                lash_execution_contracts::process::ProcessProvenance::host(),
+                lash_execution_contracts::process::Lifetime::Detached,
             ))
             .await
             .expect("register process before pruning");
         let pruned = registry
             .complete_process(
                 &registered.id,
-                crate::ProcessAwaitOutput::from_tool_output(crate::ToolCallOutput::success(
-                    serde_json::Value::Null,
-                )),
-                crate::ProcessCompletionAuthority::workflow_key(&registered.id),
+                lash_execution_contracts::process::ProcessAwaitOutput::from_tool_output(
+                    crate::ToolCallOutput::success(serde_json::Value::Null),
+                ),
+                lash_execution_contracts::process::ProcessCompletionAuthority::workflow_key(
+                    &registered.id,
+                ),
             )
             .await
             .expect("complete process before pruning");
@@ -33,7 +38,7 @@ mod tests {
             .prune_terminal_processes(
                 pruned.updated_at_ms.saturating_add(1),
                 None,
-                crate::ProjectionWatermark::NoProjector,
+                lash_execution_contracts::process::ProjectionWatermark::NoProjector,
             )
             .await
             .expect("prune terminal process");
@@ -73,10 +78,10 @@ mod tests {
         let mut ids = std::collections::BTreeMap::new();
         for label in ["named", "unnamed", "pruned"] {
             let registered = registry
-                .register_process(crate::testing::held_engine_registration(
+                .register_process(lash_execution_contracts::testing::held_engine_registration(
                     serde_json::Value::Null,
-                    crate::ProcessProvenance::host(),
-                    crate::Lifetime::Detached,
+                    lash_execution_contracts::process::ProcessProvenance::host(),
+                    lash_execution_contracts::process::Lifetime::Detached,
                 ))
                 .await
                 .expect("register an observer test process");
@@ -85,10 +90,12 @@ mod tests {
         let pruned = registry
             .complete_process(
                 &ids["pruned"],
-                crate::ProcessAwaitOutput::from_tool_output(crate::ToolCallOutput::success(
-                    serde_json::Value::Null,
-                )),
-                crate::ProcessCompletionAuthority::workflow_key(&ids["pruned"]),
+                lash_execution_contracts::process::ProcessAwaitOutput::from_tool_output(
+                    crate::ToolCallOutput::success(serde_json::Value::Null),
+                ),
+                lash_execution_contracts::process::ProcessCompletionAuthority::workflow_key(
+                    &ids["pruned"],
+                ),
             )
             .await
             .expect("complete the process before pruning");
@@ -97,7 +104,7 @@ mod tests {
             .prune_terminal_processes(
                 pruned.updated_at_ms.saturating_add(1),
                 None,
-                crate::ProjectionWatermark::NoProjector,
+                lash_execution_contracts::process::ProjectionWatermark::NoProjector,
             )
             .await
             .expect("prune the terminal process");
@@ -135,7 +142,7 @@ mod tests {
         assert!(matches!(
             &receipts[2].outcome,
             SessionObservedProcessOutcome::NoLongerRetained { terminal_label, .. }
-                if *terminal_label == crate::RetiredProcessStatus::Completed
+                if *terminal_label == lash_execution_contracts::process::RetiredProcessStatus::Completed
         ));
         assert!(
             registry
@@ -155,7 +162,9 @@ mod tests {
             .await
             .expect("read the observer audit events")
             .into_iter()
-            .filter(|event| event.kind() == crate::ProcessEventKind::ObserverAdded)
+            .filter(|event| {
+                event.kind() == lash_execution_contracts::process::ProcessEventKind::ObserverAdded
+            })
             .count();
         assert_eq!(
             observer_events, 1,
@@ -166,10 +175,10 @@ mod tests {
     async fn a_selected_pruned_process_never_retargets_to_a_later_process() {
         let backend = sqlite_memory_process_store_set().await;
         let registry = backend.process_registry();
-        let registration = crate::testing::held_engine_registration(
+        let registration = lash_execution_contracts::testing::held_engine_registration(
             serde_json::Value::Null,
-            crate::ProcessProvenance::host(),
-            crate::Lifetime::Detached,
+            lash_execution_contracts::process::ProcessProvenance::host(),
+            lash_execution_contracts::process::Lifetime::Detached,
         );
         let first = registry
             .register_process(registration.clone())
@@ -179,10 +188,12 @@ mod tests {
         let terminal = registry
             .complete_process(
                 &first.id,
-                crate::ProcessAwaitOutput::from_tool_output(crate::ToolCallOutput::success(
-                    serde_json::Value::Null,
-                )),
-                crate::ProcessCompletionAuthority::workflow_key(&first.id),
+                lash_execution_contracts::process::ProcessAwaitOutput::from_tool_output(
+                    crate::ToolCallOutput::success(serde_json::Value::Null),
+                ),
+                lash_execution_contracts::process::ProcessCompletionAuthority::workflow_key(
+                    &first.id,
+                ),
             )
             .await
             .expect("finish first run");
@@ -191,7 +202,7 @@ mod tests {
             .prune_terminal_processes(
                 terminal.updated_at_ms.saturating_add(1),
                 None,
-                crate::ProjectionWatermark::NoProjector,
+                lash_execution_contracts::process::ProjectionWatermark::NoProjector,
             )
             .await
             .expect("prune selected run");

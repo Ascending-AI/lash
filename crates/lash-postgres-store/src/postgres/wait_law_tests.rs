@@ -9,7 +9,9 @@
 use std::sync::Arc;
 
 use lash_core_execution::runtime::actor::wait_laws;
-use lash_core_execution::{Backend, BackendParts, NoProjectionProviders};
+use lash_execution_contracts::backend::Backend;
+use lash_execution_contracts::backend::BackendParts;
+use lash_execution_contracts::projection::NoProjectionProviders;
 
 use crate::PostgresStoreSet;
 use crate::testing::IsolatedDatabase;
@@ -30,7 +32,7 @@ macro_rules! law {
                 formats: Vec::new(),
                 stores: Arc::new(PostgresStoreSet::new(
                     &storage,
-                    Arc::new(lash_core_execution::attachments::UnavailableAttachmentStore),
+                    Arc::new(lash_core_store::attachments::UnavailableAttachmentStore),
                 )),
                 settings: wait_laws::settings(),
                 engines: Vec::new(),
@@ -74,7 +76,7 @@ impl lash_durable::runner::Activation for ParkOnWait {
         {
             tx.write(DomainWrite::Wait(WaitWrite::Pin {
                 id: self.wait,
-                scope: ScopeKey::Process(lash_core_execution::ProcessId::fixture("resolved-wait")),
+                scope: ScopeKey::Process(lash_protocol_types::ProcessId::fixture("resolved-wait")),
                 purpose: WaitPurpose::EngineKey {
                     name: "law".to_owned(),
                     deadline: None,
@@ -133,7 +135,7 @@ async fn resolved_wait_wake(hint: bool) {
         formats: Vec::new(),
         stores: Arc::new(PostgresStoreSet::new(
             &storage,
-            Arc::new(lash_core_execution::attachments::UnavailableAttachmentStore),
+            Arc::new(lash_core_store::attachments::UnavailableAttachmentStore),
         )),
         settings,
         engines: Vec::new(),

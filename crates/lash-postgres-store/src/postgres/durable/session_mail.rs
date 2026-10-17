@@ -147,28 +147,28 @@ pub(super) async fn cancel_inputs(
     context: &steps::Context<'_>,
     session: &SessionId,
     run: &TurnId,
-    disposition: lash_core_execution::TurnCancelUndeliveredInputPolicy,
-) -> Result<lash_core_execution::TurnCancelInputOutcome, DurableError> {
+    disposition: lash_protocol_types::session_model::TurnCancelUndeliveredInputPolicy,
+) -> Result<lash_core_store::turn_control_vocabulary::TurnCancelInputOutcome, DurableError> {
     let rows = crate::observed_sql::query(SQL.session_mail.cancel_inputs.sql())
         .bind(session.as_str())
         .fetch_all(crate::observed_sql::executor(&mut *tx))
         .await
         .map_err(sqlx_failure)?;
-    let mut outcome = lash_core_execution::TurnCancelInputOutcome::default();
+    let mut outcome = lash_core_store::turn_control_vocabulary::TurnCancelInputOutcome::default();
     for row in &rows {
-        let Some(affected) =
-            lash_core_execution::store_backend_support::turn_cancel::affected_input(
-                run,
-                disposition,
-                get(row, 0)?,
-                &get::<String>(row, 1)?,
-                &get::<String>(row, 2)?,
-            )
-            .map_err(|error| undecodable("cancelled input", error))?
+        let Some(affected) = lash_core_store::store_backend_support::turn_cancel::affected_input(
+            run,
+            disposition,
+            get(row, 0)?,
+            &get::<String>(row, 1)?,
+            &get::<String>(row, 2)?,
+        )
+        .map_err(|error| undecodable("cancelled input", error))?
         else {
             continue;
         };
-        if disposition == lash_core_execution::TurnCancelUndeliveredInputPolicy::Drop {
+        if disposition == lash_protocol_types::session_model::TurnCancelUndeliveredInputPolicy::Drop
+        {
             let write = SessionMailWrite::Admit {
                 session: session.clone(),
                 run: run.clone(),
@@ -263,7 +263,7 @@ fn decode_input(
     ingress_json: &str,
     trace_cause: Option<&str>,
 ) -> Result<MailInput, DurableError> {
-    let ingress: lash_core_execution::TurnInputIngress =
+    let ingress: lash_core_store::turn_input_vocabulary::TurnInputIngress =
         serde_json::from_str(ingress_json).map_err(|error| undecodable("input delivery", error))?;
     let active_turn = match state {
         "pending_active" => ingress.active_turn_id().cloned(),
@@ -275,7 +275,7 @@ fn decode_input(
         source_key,
         run_spec_hash,
         active_turn,
-        trace_cause: lash_core_execution::store_backend_support::decode_trace_cause(
+        trace_cause: lash_core_store::store_backend_support::decode_trace_cause(
             "pending turn input",
             trace_cause,
         )
@@ -301,13 +301,14 @@ fn decode_batch(
 
 /// What a batch whose payload is `payload_json` asks the session for.
 fn batch_kind(payload_json: &str) -> Result<MailBatchKind, DurableError> {
-    let payload: lash_core_execution::runtime::QueuedWorkPayload =
+    let payload: lash_core_store::queued_work_vocabulary::QueuedWorkPayload =
         serde_json::from_str(payload_json).map_err(|error| undecodable("batch payload", error))?;
-    let lash_core_execution::runtime::QueuedWorkPayload::SessionCommand { command } = &payload;
+    let lash_core_store::queued_work_vocabulary::QueuedWorkPayload::SessionCommand { command } =
+        &payload;
     Ok(
         if matches!(
             **command,
-            lash_core_execution::runtime::SessionCommand::RunPluginTask { .. }
+            lash_core_store::queued_work_vocabulary::SessionCommand::RunPluginTask { .. }
         ) {
             MailBatchKind::Operation
         } else {
@@ -412,7 +413,9 @@ pub(super) async fn withdraw_queued(
             crate::observed_sql::query_scalar(SQL.session_mail.withdraw_input.sql())
                 .bind(session.as_str())
                 .bind(input.as_str())
-                .bind(lash_core_execution::runtime::TurnInputStateKind::Cancelled.as_str())
+                .bind(
+                    lash_core_store::turn_input_vocabulary::TurnInputStateKind::Cancelled.as_str(),
+                )
                 .bind(now_ms)
                 .fetch_optional(crate::observed_sql::executor(&mut *tx))
                 .await
@@ -486,16 +489,21 @@ async fn enqueue(
     if !live || closing {
         return Ok(());
     }
-    let draft: lash_core_execution::PendingTurnInputDraft =
+    let draft: lash_core_store::turn_input_vocabulary::PendingTurnInputDraft =
         serde_json::from_str(draft_json).map_err(|error| undecodable("owner input", error))?;
-    let batch = lash_core_execution::PendingTurnInputBatch::new(session.clone(), vec![draft])
-        .map_err(|error| refused(error.to_string()))?;
+    let batch = lash_core_store::turn_input_vocabulary::PendingTurnInputBatch::new(
+        session.clone(),
+        vec![draft],
+    )
+    .map_err(|error| refused(error.to_string()))?;
     let now = u64::try_from(commit.now.0).unwrap_or(0);
     // The owner mails its own session: its next pass reads the input, so the
     // wake needs no hint.
     match crate::runtime_persistence::enqueue_pending_turn_inputs_tx(tx, &batch, now).await {
         Ok(_) => Ok(()),
-        Err(error @ lash_core_execution::StoreError::Contended) => Err(super::store_failure(error)),
+        Err(error @ lash_core_store::store::StoreError::Contended) => {
+            Err(super::store_failure(error))
+        }
         Err(error) => Err(refused(error.to_string())),
     }
 }

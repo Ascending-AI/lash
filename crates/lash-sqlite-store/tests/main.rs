@@ -25,8 +25,10 @@ mod boundary_retry;
 /// What the admission rule answers for a durable core stamped `{found,
 /// found}` that this build does not open: older than it reads, or
 /// contracted past it, whichever side of the build's range `found` is on.
-fn retired_core_refusal(found: u32) -> lash_core_execution::compat::CompatRefusal {
-    use lash_core_execution::compat::{CompatStamp, StampRead, admit};
+fn retired_core_refusal(found: u32) -> lash_core_store::compat::CompatRefusal {
+    use lash_core_store::compat::CompatStamp;
+    use lash_core_store::compat::StampRead;
+    use lash_core_store::compat::admit;
     admit(
         sqlite_core(),
         StampRead::Present(CompatStamp {
@@ -37,7 +39,7 @@ fn retired_core_refusal(found: u32) -> lash_core_execution::compat::CompatRefusa
     .expect_err("a retired stamp is refused")
 }
 
-fn sqlite_core() -> &'static lash_core_execution::compat::CompatDescriptor {
-    lash_core_execution::compat::descriptor(lash_core_execution::compat::ComponentId::SQLITE_CORE)
+fn sqlite_core() -> &'static lash_core_store::compat::CompatDescriptor {
+    lash_core_store::compat::descriptor(lash_core_store::compat::ComponentId::SQLITE_CORE)
         .expect("the build declares the durable core")
 }

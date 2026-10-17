@@ -34,7 +34,9 @@ pub use crate::prompt_sections::{
     ResolvedPromptWrap,
 };
 
-use super::{BoundRegistrar, PluginError, PluginStateError};
+use super::BoundRegistrar;
+use super::PluginStateError;
+use lash_execution_contracts::plugin_error::PluginError;
 
 /// A section's or wrapper's output: exact text, or an explicit omission. An
 /// error is never an omission.

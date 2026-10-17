@@ -28,13 +28,19 @@ use lash_durable::{
 use super::activation::{Live, Pass, ProcessActivation, corrupt};
 use super::driver::Driver;
 use super::effects::append_event;
+use crate::ProcessId;
 use crate::runtime::actor::round::RunFold;
-use crate::runtime::process::engine_state::EngineState;
-use crate::runtime::process::{
-    ProcessEventAppendRequest, ProcessSuccessorRefusal, ProcessSuccessorRequest, SUCCESSOR_MAIL,
-    SuccessorCarry, carry_refusal, relinked_step,
-};
-use crate::{ProcessEngine, ProcessId, ProcessInput, ProcessRecord};
+use crate::runtime::process::carry_refusal;
+use crate::runtime::process::relinked_step;
+use lash_execution_contracts::process::EngineState;
+use lash_execution_contracts::process::ProcessEngine;
+use lash_execution_contracts::process::ProcessEventAppendRequest;
+use lash_execution_contracts::process::ProcessInput;
+use lash_execution_contracts::process::ProcessRecord;
+use lash_execution_contracts::process::ProcessSuccessorRefusal;
+use lash_execution_contracts::process::ProcessSuccessorRequest;
+use lash_execution_contracts::process::SUCCESSOR_MAIL;
+use lash_execution_contracts::process::SuccessorCarry;
 
 /// What a successor step did with the pass's transaction.
 pub(super) enum Succession {
@@ -81,7 +87,14 @@ impl ProcessActivation {
         };
         tx.ack_through(mail.seq);
         let request = match serde_json::from_str::<ProcessSuccessorRequest>(&mail.body) {
-            Ok(request) if !request.is_current(current.record) => request,
+            Ok(request)
+                if !lash_execution_contracts::process::succession::successor_is_current(
+                    &request,
+                    current.record,
+                ) =>
+            {
+                request
+            }
             // A resend of the pair the process already runs, or mail that
             // is no request: acknowledged, and nothing changes.
             Ok(_) => {
@@ -169,7 +182,7 @@ impl ProcessActivation {
             let load = |env_ref| {
                 let envs = std::sync::Arc::clone(&envs);
                 async move {
-                    crate::runtime::process::load_process_env(envs.as_ref(), &env_ref)
+                    lash_execution_contracts::process::load_process_env(envs.as_ref(), &env_ref)
                         .await
                         .map_err(unavailable)
                 }
@@ -220,17 +233,17 @@ impl ProcessActivation {
             }
         };
         let mut next = current.record.clone();
-        crate::runtime::process::apply_successor_input(&mut next, &request)
+        lash_execution_contracts::process::validation::apply_successor_input(&mut next, &request)
             .map_err(|error| corrupt("a successor request", error))?;
         match self.steps.convert_components(&next).await {
             Ok(Some(cut)) => driver.component_formats = Some(cut),
             Ok(None) => {}
-            Err(crate::PluginError::Format(refusal)) => {
+            Err(lash_execution_contracts::plugin_error::PluginError::Format(refusal)) => {
                 return self
                     .park(
                         owned,
                         tx,
-                        &super::ProcessParkReason::ComponentFormatRefused { refusal },
+                        &lash_execution_contracts::park::ProcessParkReason::ComponentFormatRefused { refusal },
                     )
                     .await
                     .map(Succession::Ended);

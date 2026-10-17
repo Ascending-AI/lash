@@ -3,7 +3,7 @@
 use std::fs::File;
 use std::time::{Duration, Instant};
 
-use lash_core_execution::StoreError;
+use lash_core_store::store::StoreError;
 
 use crate::SqliteLocation;
 

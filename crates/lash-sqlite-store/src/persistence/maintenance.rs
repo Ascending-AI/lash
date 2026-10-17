@@ -6,7 +6,7 @@ impl StoreMaintenance for SqliteStore {
     async fn vacuum(
         &self,
         session_id: &SessionId,
-    ) -> lash_core_execution::MaintenanceResult<VacuumReport> {
+    ) -> lash_core_store::store::MaintenanceResult<VacuumReport> {
         // `deleted_sessions` is deliberately exempt: it is permanent identity
         // evidence and must survive every retention-pruning pass (FIG-754 / FIG-748).
         let session_id = session_id.clone();
@@ -94,7 +94,7 @@ impl StoreMaintenance for SqliteStore {
             .and_then(|vacuumed| vacuumed)
             // Every delete rides in one transaction: a failure rolls them back,
             // so no rows survived to report.
-            .map_err(lash_core_execution::MaintenanceFailure::failed_before_any_work)?;
+            .map_err(lash_core_store::store::MaintenanceFailure::failed_before_any_work)?;
         Ok(VacuumReport {
             removed_node_count,
             removed_pending_turn_input_tombstone_count,
@@ -102,7 +102,7 @@ impl StoreMaintenance for SqliteStore {
         })
     }
 
-    async fn gc_unreachable(&self) -> lash_core_execution::MaintenanceResult<GcReport> {
+    async fn gc_unreachable(&self) -> lash_core_store::store::MaintenanceResult<GcReport> {
         SqliteStore::gc_unreachable(self).await
     }
 }

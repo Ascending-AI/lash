@@ -1,14 +1,14 @@
 use super::*;
 
 #[async_trait::async_trait]
-impl lash_core_execution::ProcessLifecycle for PostgresProcessRegistry {
+impl lash_execution_contracts::process::ProcessLifecycle for PostgresProcessRegistry {
     async fn complete_process_with_prelude(
         &self,
         process_id: &ProcessId,
         await_output: ProcessAwaitOutput,
         prelude: Vec<ProcessEventAppendRequest>,
-        authority: lash_core_execution::ProcessCompletionAuthority,
-    ) -> Result<lash_core_execution::ProcessCompletionOutcome, PluginError> {
+        authority: lash_execution_contracts::process::ProcessCompletionAuthority,
+    ) -> Result<lash_execution_contracts::process::ProcessCompletionOutcome, PluginError> {
         // Load (FOR UPDATE), validate the authority against the row's input
         // class, and append the run's terminal batch (`prelude`, then the
         // terminal event, one process save; FIG-3571) as one transaction. The
@@ -31,10 +31,12 @@ impl lash_core_execution::ProcessLifecycle for PostgresProcessRegistry {
         authority.validate(&record)?;
         if record.is_terminal() {
             tx.commit().await.map_err(plugin_sqlx_error)?;
-            return Ok(lash_core_execution::ProcessCompletionOutcome::from_stored(
-                record,
-                &await_output,
-            ));
+            return Ok(
+                lash_execution_contracts::process::ProcessCompletionOutcome::from_stored(
+                    record,
+                    &await_output,
+                ),
+            );
         }
         let occurred_at_ms = self.clock.timestamp_ms();
         let mut batch = ProcessEventBatch::for_fleet(self.fence.fleet());
@@ -43,8 +45,11 @@ impl lash_core_execution::ProcessLifecycle for PostgresProcessRegistry {
                 .stage(&mut tx, &mut record, request, occurred_at_ms)
                 .await?;
         }
-        let request =
-            facade_support::terminal_append_request(process_id, &await_output, Some(&authority));
+        let request = lash_execution_contracts::process::terminal_append_request(
+            process_id,
+            &await_output,
+            Some(&authority),
+        );
         let (_, arm) = batch
             .stage_arm(&mut tx, &mut record, request, occurred_at_ms)
             .await?;
@@ -52,27 +57,29 @@ impl lash_core_execution::ProcessLifecycle for PostgresProcessRegistry {
         tx.commit().await.map_err(plugin_sqlx_error)?;
         Ok(match arm {
             ProcessEventAppendArm::Replayed => {
-                lash_core_execution::ProcessCompletionOutcome::AlreadyApplied { stored: record }
+                lash_execution_contracts::process::ProcessCompletionOutcome::AlreadyApplied {
+                    stored: record,
+                }
             }
             ProcessEventAppendArm::Inserted => {
-                lash_core_execution::ProcessCompletionOutcome::Committed(record)
+                lash_execution_contracts::process::ProcessCompletionOutcome::Committed(record)
             }
         })
     }
 
     async fn get_parent_end_plan(
         &self,
-        parent: &lash_core_execution::ScopeId,
-    ) -> Result<Option<lash_core_execution::ParentEndPlan>, PluginError> {
+        parent: &lash_core_store::scope_identity::ScopeId,
+    ) -> Result<Option<lash_execution_contracts::process::ParentEndPlan>, PluginError> {
         parent_end::get(&self.pool, parent, self.fence.fleet()).await
     }
 
     async fn request_process_cancel(
         &self,
         process_id: &ProcessId,
-        origin: lash_core_execution::CancelOrigin,
+        origin: lash_protocol_types::tool_output::CancelOrigin,
         requester: String,
-        attribution: Option<lash_core_execution::RuntimeReplayAttribution>,
+        attribution: Option<lash_core_store::effect_identity::RuntimeReplayAttribution>,
     ) -> Result<ProcessRecord, PluginError> {
         self.request_process_cancel_reporting_realization(
             process_id,
@@ -87,15 +94,21 @@ impl lash_core_execution::ProcessLifecycle for PostgresProcessRegistry {
     async fn request_process_cancel_reporting_realization(
         &self,
         process_id: &ProcessId,
-        origin: lash_core_execution::CancelOrigin,
+        origin: lash_protocol_types::tool_output::CancelOrigin,
         requester: String,
-        attribution: Option<lash_core_execution::RuntimeReplayAttribution>,
-    ) -> Result<(ProcessRecord, lash_core_execution::StoreRealization), PluginError> {
+        attribution: Option<lash_core_store::effect_identity::RuntimeReplayAttribution>,
+    ) -> Result<
+        (
+            ProcessRecord,
+            lash_execution_contracts::process::StoreRealization,
+        ),
+        PluginError,
+    > {
         // The request is fixed before the first attempt, so an attempt the
         // database rolled back for contention runs again as the identical
         // write (FIG-5855).
         let now = self.clock.timestamp_ms();
-        let request = lash_core_execution::CancelRequest::new(origin, requester, now);
+        let request = lash_protocol_types::tool_output::CancelRequest::new(origin, requester, now);
         let (request, attribution) = (&request, &attribution);
         crate::guarded_tx::retry_contended(&self.fence, || async move {
             let mut tx = begin_guarded(&self.pool, &self.fence)
@@ -124,21 +137,30 @@ impl lash_core_execution::ProcessLifecycle for PostgresProcessRegistry {
 async fn request_cancel_tx(
     tx: &mut crate::guarded_tx::GuardedTx<'_>,
     process_id: &ProcessId,
-    request: &lash_core_execution::CancelRequest,
-    attribution: Option<lash_core_execution::RuntimeReplayAttribution>,
+    request: &lash_protocol_types::tool_output::CancelRequest,
+    attribution: Option<lash_core_store::effect_identity::RuntimeReplayAttribution>,
     now: u64,
-) -> Result<(ProcessRecord, lash_core_execution::StoreRealization), PluginError> {
+) -> Result<
+    (
+        ProcessRecord,
+        lash_execution_contracts::process::StoreRealization,
+    ),
+    PluginError,
+> {
     let fleet = tx.fleet();
     crate::durable::processes::lock_actor_within(tx, process_id)
         .await
-        .map_err(lash_core_execution::runtime::actor::process::registry_error)?;
+        .map_err(lash_execution_contracts::plugin_error::registry_error)?;
     let mut record = require_process_tx(tx, process_id).await?;
-    match lash_core_execution::runtime::prepare_process_transition(
+    match lash_execution_contracts::process::prepare_process_transition(
         &record,
         ProcessTransition::RequestCancel(request.clone()),
     )? {
         ProcessTransitionPlan::Unchanged => {
-            return Ok((record, lash_core_execution::StoreRealization::Coalesced));
+            return Ok((
+                record,
+                lash_execution_contracts::process::StoreRealization::Coalesced,
+            ));
         }
         ProcessTransitionPlan::Append(mut append) => {
             if let Some(replay) = append.replay.as_mut() {
@@ -162,7 +184,10 @@ async fn request_cancel_tx(
             lash_durable::DurableInstant(i64::try_from(now).unwrap_or(i64::MAX)),
         )
         .await
-        .map_err(lash_core_execution::runtime::actor::process::registry_error)?;
+        .map_err(lash_execution_contracts::plugin_error::registry_error)?;
     }
-    Ok((record, lash_core_execution::StoreRealization::Realized))
+    Ok((
+        record,
+        lash_execution_contracts::process::StoreRealization::Realized,
+    ))
 }

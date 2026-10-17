@@ -5,7 +5,7 @@ use std::sync::atomic::Ordering;
 
 struct ProcessCommandRunner<'scope> {
     current: &'scope CurrentOwnerCapability,
-    registry: Arc<dyn crate::ProcessRegistry>,
+    registry: Arc<dyn lash_execution_contracts::process::ProcessRegistry>,
     parent_invocation: Option<crate::RuntimeInvocation>,
     scoped_effect_controller: crate::ActorContext,
     turn_cancellation: Option<crate::ProcessTurnCancellation>,
@@ -16,9 +16,13 @@ impl<'scope> ProcessCommandRunner<'scope> {
         current: &'scope CurrentOwnerCapability,
         scope: &'scope crate::ProcessOpScope<'scope>,
         unavailable_message: &'static str,
-    ) -> Result<Self, crate::PluginError> {
+    ) -> Result<Self, lash_execution_contracts::plugin_error::PluginError> {
         let Some(registry) = current.host.process_registry() else {
-            return Err(crate::PluginError::Session(unavailable_message.to_string()));
+            return Err(
+                lash_execution_contracts::plugin_error::PluginError::Session(
+                    unavailable_message.to_string(),
+                ),
+            );
         };
         Ok(Self {
             current,
@@ -31,10 +35,13 @@ impl<'scope> ProcessCommandRunner<'scope> {
 
     async fn start(
         &self,
-        registration: crate::ProcessStartRegistration,
+        registration: lash_execution_contracts::process::ProcessStartRegistration,
         observers: Vec<SessionId>,
-        execution_context: crate::ProcessExecutionContext,
-    ) -> Result<crate::facade_support::ObservedProcess, crate::PluginError> {
+        execution_context: lash_execution_contracts::process::ProcessExecutionContext,
+    ) -> Result<
+        lash_execution_contracts::process::ObservedProcess,
+        lash_execution_contracts::plugin_error::PluginError,
+    > {
         match self
             .run(crate::ProcessCommand::Start {
                 registration,
@@ -53,10 +60,11 @@ impl<'scope> ProcessCommandRunner<'scope> {
     /// registered only by the commit that records the call's outcome.
     async fn stage(
         &self,
-        registration: crate::ProcessStartRegistration,
+        registration: lash_execution_contracts::process::ProcessStartRegistration,
         observers: Vec<SessionId>,
-        execution_context: crate::ProcessExecutionContext,
-    ) -> Result<crate::StagedProcessStart, crate::PluginError> {
+        execution_context: lash_execution_contracts::process::ProcessExecutionContext,
+    ) -> Result<crate::StagedProcessStart, lash_execution_contracts::plugin_error::PluginError>
+    {
         Ok(self
             .local_executor()
             .into_process()?
@@ -105,7 +113,10 @@ impl<'scope> ProcessCommandRunner<'scope> {
     async fn await_process_ref(
         &self,
         process_id: crate::ProcessId,
-    ) -> Result<crate::ProcessAwaitOutput, crate::PluginError> {
+    ) -> Result<
+        lash_execution_contracts::process::ProcessAwaitOutput,
+        lash_execution_contracts::plugin_error::PluginError,
+    > {
         match self
             .run(crate::ProcessCommand::Await { process_id })
             .await?
@@ -117,9 +128,12 @@ impl<'scope> ProcessCommandRunner<'scope> {
 
     async fn list(
         &self,
-        session_scope: crate::SessionScope,
-        mode: crate::ProcessListMode,
-    ) -> Result<Vec<crate::facade_support::ObservedProcess>, crate::PluginError> {
+        session_scope: lash_execution_contracts::process::SessionScope,
+        mode: lash_execution_contracts::process::ProcessListMode,
+    ) -> Result<
+        Vec<lash_execution_contracts::process::ObservedProcess>,
+        lash_execution_contracts::plugin_error::PluginError,
+    > {
         match self
             .run(crate::ProcessCommand::List {
                 selection: crate::ProcessListSelection::Observed {
@@ -140,7 +154,10 @@ impl<'scope> ProcessCommandRunner<'scope> {
         origin: crate::CancelOrigin,
         requester: String,
         attribution: Option<crate::RuntimeReplayAttribution>,
-    ) -> Result<crate::facade_support::ObservedProcess, crate::PluginError> {
+    ) -> Result<
+        lash_execution_contracts::process::ObservedProcess,
+        lash_execution_contracts::plugin_error::PluginError,
+    > {
         // The recorded cancel admission checks the process is retained and
         // records its answer: a replay after the process was pruned reads
         // that answer, never a registry that has moved on (ADR 0105 §1).
@@ -158,10 +175,10 @@ impl<'scope> ProcessCommandRunner<'scope> {
 
     async fn transfer(
         &self,
-        from_scope: crate::SessionScope,
-        to_scope: crate::SessionScope,
+        from_scope: lash_execution_contracts::process::SessionScope,
+        to_scope: lash_execution_contracts::process::SessionScope,
         process_ids: Vec<ProcessId>,
-    ) -> Result<(), crate::PluginError> {
+    ) -> Result<(), lash_execution_contracts::plugin_error::PluginError> {
         match self
             .run(crate::ProcessCommand::Transfer {
                 from_scope,
@@ -178,12 +195,13 @@ impl<'scope> ProcessCommandRunner<'scope> {
     async fn run(
         &self,
         command: crate::ProcessCommand,
-    ) -> Result<crate::ProcessEffectOutcome, crate::PluginError> {
+    ) -> Result<crate::ProcessEffectOutcome, lash_execution_contracts::plugin_error::PluginError>
+    {
         let effect_id = command.effect_id();
         let scoped = self.scoped_effect_controller.clone();
-        scoped
-            .admit_journal_write()
-            .map_err(crate::PluginError::RuntimeEffectController)?;
+        scoped.admit_journal_write().map_err(
+            lash_execution_contracts::plugin_error::PluginError::RuntimeEffectController,
+        )?;
         let attribution = self
             .parent_invocation
             .as_ref()
@@ -207,12 +225,16 @@ impl<'scope> ProcessCommandRunner<'scope> {
         );
         let local_executor = self.local_executor();
         let outcome = scoped.process_effect(envelope, local_executor).await?;
-        outcome.into_process().map_err(crate::PluginError::from)
+        outcome
+            .into_process()
+            .map_err(lash_execution_contracts::plugin_error::PluginError::from)
     }
 }
 
-fn wrong_process_outcome(op: &str) -> crate::PluginError {
-    crate::PluginError::Session(format!("process {op} returned the wrong outcome"))
+fn wrong_process_outcome(op: &str) -> lash_execution_contracts::plugin_error::PluginError {
+    lash_execution_contracts::plugin_error::PluginError::Session(format!(
+        "process {op} returned the wrong outcome"
+    ))
 }
 
 impl ProcessCapability {
@@ -220,7 +242,8 @@ impl ProcessCapability {
         &self,
         current: &'scope CurrentOwnerCapability,
         scope: &'scope crate::ProcessOpScope<'scope>,
-    ) -> Result<ProcessCommandRunner<'scope>, crate::PluginError> {
+    ) -> Result<ProcessCommandRunner<'scope>, lash_execution_contracts::plugin_error::PluginError>
+    {
         ProcessCommandRunner::new(
             current,
             scope,
@@ -232,10 +255,15 @@ impl ProcessCapability {
         &self,
         session_id: &SessionId,
         agent_frame_id: Option<&crate::FrameNodeId>,
-    ) -> crate::SessionScope {
+    ) -> lash_execution_contracts::process::SessionScope {
         agent_frame_id
-            .map(|frame_id| crate::SessionScope::for_agent_frame(session_id, frame_id.clone()))
-            .unwrap_or_else(|| crate::SessionScope::new(session_id))
+            .map(|frame_id| {
+                lash_execution_contracts::process::SessionScope::for_agent_frame(
+                    session_id,
+                    frame_id.clone(),
+                )
+            })
+            .unwrap_or_else(|| lash_execution_contracts::process::SessionScope::new(session_id))
     }
 
     /// K5 stages the Run's admitted registration on the same process
@@ -244,20 +272,24 @@ impl ProcessCapability {
     pub(in crate::runtime::session_manager) async fn stage_bound_process(
         &self,
         current: &CurrentOwnerCapability,
-        registration: crate::ProcessStartRegistration,
+        registration: lash_execution_contracts::process::ProcessStartRegistration,
         scope: crate::ProcessOpScope<'_>,
-    ) -> Result<crate::StagedProcessStart, crate::PluginError> {
+    ) -> Result<crate::StagedProcessStart, lash_execution_contracts::plugin_error::PluginError>
+    {
         let observers = match &registration.provenance.originator {
-            crate::ProcessOriginator::Session { session_id, .. } => {
+            lash_execution_contracts::process::ProcessOriginator::Session {
+                session_id, ..
+            } => {
                 self.mark_current_process_sync_needed(current, session_id);
                 vec![session_id.clone()]
             }
-            crate::ProcessOriginator::Host { .. } => Vec::new(),
+            lash_execution_contracts::process::ProcessOriginator::Host { .. } => Vec::new(),
         };
         let registration = with_admitted_start_cx(current, registration, &scope).await?;
         let registration = self.admit_session_turn_start(current, registration)?;
-        let options = crate::ProcessStartOptions::new().with_initial_observers(observers);
-        let execution_context = options.execution_context(&scope);
+        let options = lash_execution_contracts::process::ProcessStartOptions::new()
+            .with_initial_observers(observers);
+        let execution_context = scope.execution_context();
         let staged = self
             .command_runner(current, &scope)?
             .stage(
@@ -274,10 +306,13 @@ impl ProcessCapability {
         &self,
         current: &CurrentOwnerCapability,
         session_id: &SessionId,
-        registration: crate::ProcessStartRegistration,
-        options: crate::ProcessStartOptions,
+        registration: lash_execution_contracts::process::ProcessStartRegistration,
+        options: lash_execution_contracts::process::ProcessStartOptions,
         scope: crate::ProcessOpScope<'_>,
-    ) -> Result<crate::facade_support::ObservedProcess, crate::PluginError> {
+    ) -> Result<
+        lash_execution_contracts::process::ObservedProcess,
+        lash_execution_contracts::plugin_error::PluginError,
+    > {
         self.ensure_known_process_session(current, session_id)
             .await?;
         self.mark_current_process_sync_needed(current, session_id);
@@ -295,14 +330,17 @@ impl ProcessCapability {
         // stamped from the admitted start context below, never host options.
         let originator = match options.spawn_provenance.clone() {
             Some(spawn) => spawn.originator,
-            None => crate::ProcessOriginator::session(creator_scope.clone()),
+            None => {
+                lash_execution_contracts::process::ProcessOriginator::session(creator_scope.clone())
+            }
         };
         let registration = registration.with_process_provenance(
-            crate::ProcessProvenance::new(originator).with_caused_by(caused_by),
+            lash_execution_contracts::process::ProcessProvenance::new(originator)
+                .with_caused_by(caused_by),
         );
         let registration = with_admitted_start_cx(current, registration, &scope).await?;
         let registration = self.admit_session_turn_start(current, registration)?;
-        let execution_context = options.execution_context(&scope);
+        let execution_context = scope.execution_context();
         let runner = ProcessCommandRunner::new(
             current,
             &scope,
@@ -324,9 +362,10 @@ impl ProcessCapability {
         &self,
         current: &CurrentOwnerCapability,
         owner: &crate::RuntimeOwner,
-        request: crate::ProcessStartRequest,
+        request: lash_execution_contracts::process::ProcessStartRequest,
         scope: crate::ProcessOpScope<'_>,
-    ) -> Result<crate::StagedProcessStart, crate::PluginError> {
+    ) -> Result<crate::StagedProcessStart, lash_execution_contracts::plugin_error::PluginError>
+    {
         if let Some(session_id) = owner.session_id() {
             self.mark_current_process_sync_needed(current, session_id);
         }
@@ -355,8 +394,8 @@ impl ProcessCapability {
         // path's `child_process_observers` does.
         let observers = if request.observers.is_empty() {
             match &request.originator {
-                crate::ProcessOriginator::Host { .. } => Vec::new(),
-                crate::ProcessOriginator::Session {
+                lash_execution_contracts::process::ProcessOriginator::Host { .. } => Vec::new(),
+                lash_execution_contracts::process::ProcessOriginator::Session {
                     session_id: originator_session_id,
                     ..
                 } => vec![originator_session_id.clone()],
@@ -378,15 +417,17 @@ impl ProcessCapability {
         let registration = request
             .into_registration()
             .with_process_provenance(
-                crate::ProcessProvenance::new(originator).with_caused_by(caused_by),
+                lash_execution_contracts::process::ProcessProvenance::new(originator)
+                    .with_caused_by(caused_by),
             )
             .with_consumer_hold(scope.consumer_hold.clone());
         let registration = with_admitted_start_cx(current, registration, &scope).await?;
         let registration = self
             .admit_session_turn_start(current, registration)?
             .with_host_facing_label(declared_label);
-        let options = crate::ProcessStartOptions::new().with_initial_observers(observers);
-        let execution_context = options.execution_context(&scope);
+        let options = lash_execution_contracts::process::ProcessStartOptions::new()
+            .with_initial_observers(observers);
+        let execution_context = scope.execution_context();
         self.command_runner(current, &scope)?
             .stage(
                 registration,
@@ -402,12 +443,14 @@ impl ProcessCapability {
     fn admit_session_turn_start(
         &self,
         current: &CurrentOwnerCapability,
-        registration: crate::ProcessStartRegistration,
-    ) -> Result<crate::ProcessStartRegistration, crate::PluginError> {
-        if let crate::ProcessStartTarget::Input(crate::ProcessInput::SessionTurn {
-            create_request,
-            ..
-        }) = registration.input.as_ref()
+        registration: lash_execution_contracts::process::ProcessStartRegistration,
+    ) -> Result<
+        lash_execution_contracts::process::ProcessStartRegistration,
+        lash_execution_contracts::plugin_error::PluginError,
+    > {
+        if let lash_execution_contracts::process::ProcessStartTarget::Input(
+            lash_execution_contracts::process::ProcessInput::SessionTurn { create_request, .. },
+        ) = registration.input.as_ref()
         {
             super::super::session_init::admit_session_turn_child(
                 current,
@@ -423,7 +466,10 @@ impl ProcessCapability {
         current: &CurrentOwnerCapability,
         process_id: &ProcessId,
         scope: crate::ProcessOpScope<'_>,
-    ) -> Result<crate::ProcessAwaitOutput, crate::PluginError> {
+    ) -> Result<
+        lash_execution_contracts::process::ProcessAwaitOutput,
+        lash_execution_contracts::plugin_error::PluginError,
+    > {
         // The await's recorded existence guard answers an unknown or pruned
         // process, so a replay after a prune reads what the first run saw.
         self.await_process_ref(current, process_id.clone(), scope)
@@ -435,7 +481,10 @@ impl ProcessCapability {
         current: &CurrentOwnerCapability,
         process_id: crate::ProcessId,
         scope: crate::ProcessOpScope<'_>,
-    ) -> Result<crate::ProcessAwaitOutput, crate::PluginError> {
+    ) -> Result<
+        lash_execution_contracts::process::ProcessAwaitOutput,
+        lash_execution_contracts::plugin_error::PluginError,
+    > {
         self.command_runner(current, &scope)?
             .await_process_ref(process_id)
             .await
@@ -445,9 +494,12 @@ impl ProcessCapability {
         &self,
         current: &CurrentOwnerCapability,
         session_id: &SessionId,
-        mode: crate::ProcessListMode,
+        mode: lash_execution_contracts::process::ProcessListMode,
         scope: crate::ProcessOpScope<'_>,
-    ) -> Result<Vec<crate::facade_support::ObservedProcess>, crate::PluginError> {
+    ) -> Result<
+        Vec<lash_execution_contracts::process::ObservedProcess>,
+        lash_execution_contracts::plugin_error::PluginError,
+    > {
         self.command_runner(current, &scope)?
             .list(
                 self.process_scope_for_op(session_id, scope.agent_frame_id()),
@@ -460,9 +512,12 @@ impl ProcessCapability {
         &self,
         current: &CurrentOwnerCapability,
         session_id: &SessionId,
-        mode: crate::ProcessListMode,
+        mode: lash_execution_contracts::process::ProcessListMode,
         scope: crate::ProcessOpScope<'_>,
-    ) -> Result<Vec<crate::facade_support::ObservedProcess>, crate::PluginError> {
+    ) -> Result<
+        Vec<lash_execution_contracts::process::ObservedProcess>,
+        lash_execution_contracts::plugin_error::PluginError,
+    > {
         let records = self
             .list_process_handles(current, session_id, mode, scope)
             .await?;
@@ -478,8 +533,11 @@ impl ProcessCapability {
         &self,
         current: &CurrentOwnerCapability,
         owner: &crate::RuntimeOwner,
-        mode: crate::ProcessListMode,
-    ) -> Result<Vec<crate::facade_support::ObservedProcess>, crate::PluginError> {
+        mode: lash_execution_contracts::process::ProcessListMode,
+    ) -> Result<
+        Vec<lash_execution_contracts::process::ObservedProcess>,
+        lash_execution_contracts::plugin_error::PluginError,
+    > {
         let records = self
             .list_process_handles_for_attempt(current, owner, mode)
             .await?;
@@ -498,22 +556,27 @@ impl ProcessCapability {
         &self,
         current: &CurrentOwnerCapability,
         owner: &crate::RuntimeOwner,
-        mode: crate::ProcessListMode,
-    ) -> Result<Vec<crate::facade_support::ObservedProcess>, crate::PluginError> {
+        mode: lash_execution_contracts::process::ProcessListMode,
+    ) -> Result<
+        Vec<lash_execution_contracts::process::ObservedProcess>,
+        lash_execution_contracts::plugin_error::PluginError,
+    > {
         let registry = current.host.process_registry().ok_or_else(|| {
-            crate::PluginError::Session(
+            lash_execution_contracts::plugin_error::PluginError::Session(
                 "process registry is unavailable in this runtime".to_string(),
             )
         })?;
         let records = match owner {
             crate::RuntimeOwner::Session(session_id) => match mode {
-                crate::ProcessListMode::Live => registry.list_live_observed_by(session_id).await,
-                crate::ProcessListMode::All => {
+                lash_execution_contracts::process::ProcessListMode::Live => {
+                    registry.list_live_observed_by(session_id).await
+                }
+                lash_execution_contracts::process::ProcessListMode::All => {
                     registry
                         .list_observed_by(
                             session_id,
-                            &crate::ProcessListFilter {
-                                status: crate::ProcessStatusFilter::Any,
+                            &lash_execution_contracts::process::ProcessListFilter {
+                                status: lash_execution_contracts::process::ProcessStatusFilter::Any,
                                 ..Default::default()
                             },
                         )
@@ -522,8 +585,8 @@ impl ProcessCapability {
             },
             crate::RuntimeOwner::Process(process_id) => {
                 let starter = crate::ScopeId::process(process_id.clone());
-                let filter = &crate::ProcessListFilter {
-                    status: crate::ProcessStatusFilter::Any,
+                let filter = &lash_execution_contracts::process::ProcessListFilter {
+                    status: lash_execution_contracts::process::ProcessStatusFilter::Any,
                     until: Some(starter.clone()),
                     ..Default::default()
                 };
@@ -533,8 +596,9 @@ impl ProcessCapability {
                     let page = registry
                         .list_processes_page(
                             filter,
-                            std::num::NonZeroUsize::MIN
-                                .saturating_add(crate::MAX_PROCESS_ROSTER_PAGE_SIZE - 1),
+                            std::num::NonZeroUsize::MIN.saturating_add(
+                                lash_execution_contracts::process::MAX_PROCESS_ROSTER_PAGE_SIZE - 1,
+                            ),
                             continuation,
                         )
                         .await?;
@@ -548,14 +612,16 @@ impl ProcessCapability {
                     .into_iter()
                     .filter(|record| record.ancestry.starter() == Some(&starter))
                     .filter(|record| match mode {
-                        crate::ProcessListMode::Live => !record.status().is_retired(),
-                        crate::ProcessListMode::All => true,
+                        lash_execution_contracts::process::ProcessListMode::Live => {
+                            !record.status().is_retired()
+                        }
+                        lash_execution_contracts::process::ProcessListMode::All => true,
                     })
                     .collect())
             }
         }?;
-        crate::facade_support::observe_process_records(
-            &crate::facade_support::ProcessWorkObserver::new(Arc::clone(registry))
+        lash_execution_contracts::process::observation::observe_process_records(
+            &lash_execution_contracts::process::ProcessWorkObserver::new(Arc::clone(registry))
                 .with_actor_parks(Arc::clone(current.host.core.backend().durable())),
             records,
         )
@@ -572,7 +638,10 @@ impl ProcessCapability {
         owner: &crate::RuntimeOwner,
         process_id: &ProcessId,
         scope: crate::ProcessOpScope<'_>,
-    ) -> Result<crate::facade_support::ObservedProcess, crate::PluginError> {
+    ) -> Result<
+        lash_execution_contracts::process::ObservedProcess,
+        lash_execution_contracts::plugin_error::PluginError,
+    > {
         let runner = self.command_runner(current, &scope)?;
         let _ = owner;
         runner
@@ -599,13 +668,15 @@ impl ProcessCapability {
         current: &CurrentOwnerCapability,
         process_id: &ProcessId,
         scope: crate::ProcessOpScope<'_>,
-    ) -> Result<(), crate::PluginError> {
+    ) -> Result<(), lash_execution_contracts::plugin_error::PluginError> {
         let (Some(registry), Some(delivery)) =
             (current.host.process_registry(), current.host.process_work())
         else {
-            return Err(crate::PluginError::Session(
-                "processes are unavailable in this runtime".to_owned(),
-            ));
+            return Err(
+                lash_execution_contracts::plugin_error::PluginError::Session(
+                    "processes are unavailable in this runtime".to_owned(),
+                ),
+            );
         };
         let requester = serde_json::to_string(scope.effect_controller.execution_scope())
             .expect("execution scopes contain only serializable identities");
@@ -623,14 +694,20 @@ impl ProcessCapability {
             // pruned once ended needs nothing more: the first request
             // stands (ADR 0094).
             Err(
-                crate::PluginError::ProcessAlreadyTerminal { .. }
-                | crate::PluginError::ProcessCancelConflict { .. }
-                | crate::PluginError::ProcessNoLongerRetained { .. },
+                lash_execution_contracts::plugin_error::PluginError::ProcessAlreadyTerminal {
+                    ..
+                }
+                | lash_execution_contracts::plugin_error::PluginError::ProcessCancelConflict {
+                    ..
+                }
+                | lash_execution_contracts::plugin_error::PluginError::ProcessNoLongerRetained {
+                    ..
+                },
             ) => return Ok(()),
             Err(error) => return Err(error),
         };
         let request = record.cancel_request.ok_or_else(|| {
-            crate::PluginError::Session(format!(
+            lash_execution_contracts::plugin_error::PluginError::Session(format!(
                 "process `{process_id}` accepted a cancel without recording it"
             ))
         })?;
@@ -649,7 +726,10 @@ impl ProcessCapability {
         process_id: &ProcessId,
         identity: crate::ToolIntentIdentity,
         scope: crate::ProcessOpScope<'_>,
-    ) -> Result<crate::facade_support::ObservedProcess, crate::PluginError> {
+    ) -> Result<
+        lash_execution_contracts::process::ObservedProcess,
+        lash_execution_contracts::plugin_error::PluginError,
+    > {
         let runner = self.command_runner(current, &scope)?;
         runner
             .cancel_named(
@@ -667,7 +747,7 @@ impl ProcessCapability {
         owner: &crate::RuntimeOwner,
         handle_ids: &[ProcessId],
         scope: crate::ProcessOpScope<'_>,
-    ) -> Result<(), crate::PluginError> {
+    ) -> Result<(), lash_execution_contracts::plugin_error::PluginError> {
         if handle_ids.is_empty() {
             return Ok(());
         }
@@ -693,7 +773,7 @@ impl ProcessCapability {
         owner: &crate::RuntimeOwner,
         handle_ids: &[ProcessId],
         scope: crate::ProcessOpScope<'_>,
-    ) -> Result<(), crate::PluginError> {
+    ) -> Result<(), lash_execution_contracts::plugin_error::PluginError> {
         self.validate_process_handles_observed(current, owner, handle_ids, scope)
             .await?;
         match owner {
@@ -712,7 +792,7 @@ impl ProcessCapability {
         to_session_id: &SessionId,
         process_ids: Vec<ProcessId>,
         scope: crate::ProcessOpScope<'_>,
-    ) -> Result<(), crate::PluginError> {
+    ) -> Result<(), lash_execution_contracts::plugin_error::PluginError> {
         if process_ids.is_empty() {
             return Ok(());
         }
@@ -729,13 +809,15 @@ impl ProcessCapability {
         &self,
         current: &CurrentOwnerCapability,
         session_id: &SessionId,
-    ) -> Result<(), crate::PluginError> {
+    ) -> Result<(), lash_execution_contracts::plugin_error::PluginError> {
         if current.is_current_session(session_id) {
             return Ok(());
         }
-        Err(crate::PluginError::Session(format!(
-            "unknown session `{session_id}`"
-        )))
+        Err(
+            lash_execution_contracts::plugin_error::PluginError::Session(format!(
+                "unknown session `{session_id}`"
+            )),
+        )
     }
 
     fn mark_current_process_sync_needed(
@@ -751,8 +833,8 @@ impl ProcessCapability {
     fn narrow_tool_visible_records(
         current: &CurrentOwnerCapability,
         session_id: &SessionId,
-        records: Vec<crate::facade_support::ObservedProcess>,
-    ) -> Vec<crate::facade_support::ObservedProcess> {
+        records: Vec<lash_execution_contracts::process::ObservedProcess>,
+    ) -> Vec<lash_execution_contracts::process::ObservedProcess> {
         let Some(filter) = current
             .host
             .core
@@ -803,7 +885,7 @@ impl ProcessCapability {
         current: &CurrentOwnerCapability,
         session_id: &SessionId,
         process_ids: &[ProcessId],
-    ) -> Result<(), crate::PluginError> {
+    ) -> Result<(), lash_execution_contracts::plugin_error::PluginError> {
         let Some(filter) = current
             .host
             .core
@@ -840,8 +922,10 @@ impl ProcessCapability {
     }
 }
 
-fn process_visibility_miss(process_id: &ProcessId) -> crate::PluginError {
-    crate::PluginError::ProcessNotVisible {
+fn process_visibility_miss(
+    process_id: &ProcessId,
+) -> lash_execution_contracts::plugin_error::PluginError {
+    lash_execution_contracts::plugin_error::PluginError::ProcessNotVisible {
         process_id: process_id.clone(),
     }
 }
@@ -866,9 +950,12 @@ fn process_visibility_miss(process_id: &ProcessId) -> crate::PluginError {
 /// above the session (R1).
 async fn with_admitted_start_cx(
     current: &CurrentOwnerCapability,
-    registration: crate::ProcessStartRegistration,
+    registration: lash_execution_contracts::process::ProcessStartRegistration,
     scope: &crate::ProcessOpScope<'_>,
-) -> Result<crate::ProcessStartRegistration, crate::PluginError> {
+) -> Result<
+    lash_execution_contracts::process::ProcessStartRegistration,
+    lash_execution_contracts::plugin_error::PluginError,
+> {
     let process_id = match scope.start_cx() {
         Ok(Some(cx)) => {
             if scope.process_lineage.is_none()
@@ -876,35 +963,45 @@ async fn with_admitted_start_cx(
                 && let Some(owner) = owning_process_lineage(current, &session_id).await?
             {
                 let cx = scope.start_cx_under(&owner).map_err(|error| {
-                    crate::PluginError::Session(format!("process start refused: {error}"))
+                    lash_execution_contracts::plugin_error::PluginError::Session(format!(
+                        "process start refused: {error}"
+                    ))
                 })?;
                 return Ok(registration.with_start_cx(&cx));
             }
             return Ok(registration.with_start_cx(&cx));
         }
         Ok(None) => return Ok(registration),
-        Err(crate::StartCxError::MissingLineage { process_id }) => process_id,
+        Err(lash_execution_contracts::process::StartCxError::MissingLineage { process_id }) => {
+            process_id
+        }
         Err(error) => {
-            return Err(crate::PluginError::Session(format!(
-                "process start refused: {error}"
-            )));
+            return Err(
+                lash_execution_contracts::plugin_error::PluginError::Session(format!(
+                    "process start refused: {error}"
+                )),
+            );
         }
     };
     let registry = current.host.process_registry().ok_or_else(|| {
-        crate::PluginError::Session(format!(
+        lash_execution_contracts::plugin_error::PluginError::Session(format!(
             "process start refused: no registry holds the lineage of enclosing process \
              `{process_id}`"
         ))
     })?;
     let enclosing = registry.get_process(&process_id).await?.ok_or_else(|| {
-        crate::PluginError::Session(format!(
+        lash_execution_contracts::plugin_error::PluginError::Session(format!(
             "process start refused: enclosing process `{process_id}` has no row to read its \
              lineage from"
         ))
     })?;
     let cx = scope
         .start_cx_under(&enclosing.lineage())
-        .map_err(|error| crate::PluginError::Session(format!("process start refused: {error}")))?;
+        .map_err(|error| {
+            lash_execution_contracts::plugin_error::PluginError::Session(format!(
+                "process start refused: {error}"
+            ))
+        })?;
     Ok(registration.with_start_cx(&cx))
 }
 
@@ -916,16 +1013,19 @@ async fn with_admitted_start_cx(
 async fn owning_process_lineage(
     current: &CurrentOwnerCapability,
     session_id: &SessionId,
-) -> Result<Option<crate::ProcessLineage>, crate::PluginError> {
+) -> Result<
+    Option<lash_execution_contracts::process::ProcessLineage>,
+    lash_execution_contracts::plugin_error::PluginError,
+> {
     let store = match current.session().and_then(|session| session.store.as_ref()) {
         Some(store) if current.is_current_session(session_id) => Some(store.clone()),
-        _ => crate::runtime::live_session_view(
+        _ => lash_execution_contracts::deployment::live_session_view(
             &current.host.core.session_store_factory(),
             session_id,
         )
         .await
         .map_err(|error| {
-            crate::PluginError::Session(format!(
+            lash_execution_contracts::plugin_error::PluginError::Session(format!(
                 "process start refused: the owner of session `{session_id}` cannot be \
                      read: {error}"
             ))
@@ -938,7 +1038,7 @@ async fn owning_process_lineage(
         .load_session_meta()
         .await
         .map_err(|error| {
-            crate::PluginError::Session(format!(
+            lash_execution_contracts::plugin_error::PluginError::Session(format!(
                 "process start refused: the owner of session `{session_id}` cannot be read: \
                  {error}"
             ))
@@ -948,7 +1048,7 @@ async fn owning_process_lineage(
         return Ok(None);
     };
     let registry = current.host.process_registry().ok_or_else(|| {
-        crate::PluginError::Session(format!(
+        lash_execution_contracts::plugin_error::PluginError::Session(format!(
             "process start refused: no registry holds the lineage of process `{owner}`, which \
              owns session `{session_id}`"
         ))

@@ -10,16 +10,17 @@ error[E0599]: no method named `start` found for struct `AttemptProcessReads` in 
 7 |     let _ = context.processes().start(request.clone());
   |                                 ^^^^^ method not found in `AttemptProcessReads`
 
-error[E0624]: method `with_start_key` is private
+error[E0599]: no method named `with_start_key` found for struct `ProcessStartRequest` in the current scope
  --> tests/ui/model_code_cannot_mint_a_host_start_key.rs:8:29
   |
 8 |     let _ = request.clone().with_start_key(Some(StartKey::for_host("model-chosen")));
-  |                             ^^^^^^^^^^^^^^ private method
+  |                             ^^^^^^^^^^^^^^
   |
- ::: $WORKSPACE/crates/lash-core-execution/src/runtime/process/model/start_request.rs
+help: there is a method `start_key` with a similar name, but with different arguments
+ --> $WORKSPACE/crates/lash-execution-contracts/src/process/model/start_request.rs
   |
-  |     pub(crate) fn with_start_key(mut self, start_key: Option<crate::StartKey>) -> Self {
-  |     ---------------------------------------------------------------------------------- private method defined here
+  |     pub fn start_key(&self) -> Option<&crate::StartKey> {
+  |     ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
 
 error[E0616]: field `start_key` of struct `ProcessStartRequest` is private
  --> tests/ui/model_code_cannot_mint_a_host_start_key.rs:9:22

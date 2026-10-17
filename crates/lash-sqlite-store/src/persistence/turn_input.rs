@@ -1,7 +1,7 @@
 use super::*;
 
 #[async_trait::async_trait]
-impl lash_core_execution::TurnInputStore for SqliteStore {
+impl lash_core_store::store::TurnInputStore for SqliteStore {
     async fn turn_input_submission_digest(
         &self,
         session_id: &SessionId,
@@ -32,8 +32,8 @@ impl lash_core_execution::TurnInputStore for SqliteStore {
         &self,
         session_id: &SessionId,
         source_key: &str,
-    ) -> Result<lash_core_execution::store::TurnInputForsaking, StoreError> {
-        lash_core_execution::store_backend_support::validate_forsaken_source_key(
+    ) -> Result<lash_core_store::store::TurnInputForsaking, StoreError> {
+        lash_core_store::store_backend_support::validate_forsaken_source_key(
             session_id, source_key,
         )?;
         let session_id = session_id.clone();
@@ -52,8 +52,8 @@ impl lash_core_execution::TurnInputStore for SqliteStore {
 
     async fn enqueue_pending_turn_inputs(
         &self,
-        batch: lash_core_execution::PendingTurnInputBatch,
-    ) -> Result<Vec<lash_core_execution::PendingTurnInput>, StoreError> {
+        batch: lash_core_store::turn_input_vocabulary::PendingTurnInputBatch,
+    ) -> Result<Vec<lash_core_store::turn_input_vocabulary::PendingTurnInput>, StoreError> {
         let drafts = batch.drafts().len() as u64;
         let first_nonce = self.commit_count.fetch_add(drafts, AtomicOrdering::Relaxed);
         let now = self.clock.timestamp_ms();
@@ -74,8 +74,8 @@ impl lash_core_execution::TurnInputStore for SqliteStore {
 
     async fn admit_pending_turn_inputs(
         &self,
-        batch: lash_core_execution::PendingTurnInputBatch,
-    ) -> Result<lash_core_execution::TurnInputAdmission, StoreError> {
+        batch: lash_core_store::turn_input_vocabulary::PendingTurnInputBatch,
+    ) -> Result<lash_core_store::store::TurnInputAdmission, StoreError> {
         let drafts = batch.drafts().len() as u64;
         let first_nonce = self.commit_count.fetch_add(drafts, AtomicOrdering::Relaxed);
         let now = self.clock.timestamp_ms();
@@ -97,8 +97,8 @@ impl lash_core_execution::TurnInputStore for SqliteStore {
     async fn load_run_spec(
         &self,
         session_id: &SessionId,
-        hash: &lash_core_execution::RunSpecHash,
-    ) -> Result<Option<lash_core_execution::RunSpec>, StoreError> {
+        hash: &lash_core_store::turn_input_vocabulary::RunSpecHash,
+    ) -> Result<Option<lash_core_store::turn_input_vocabulary::RunSpec>, StoreError> {
         let session_id = session_id.clone();
         let hash = hash.clone();
         self.conn
@@ -117,12 +117,15 @@ impl lash_core_execution::TurnInputStore for SqliteStore {
                         .map_err(sqlite_error)?;
                     stored
                         .map(|json| {
-                            lash_core_execution::RunSpec::from_canonical_json(&json).map_err(
-                                |error| StoreError::StoredDataCorrupt {
+                            lash_core_store::turn_input_vocabulary::RunSpec::from_canonical_json(
+                                &json,
+                            )
+                            .map_err(|error| {
+                                StoreError::StoredDataCorrupt {
                                     record_kind: "RunSpec",
                                     message: error.to_string(),
-                                },
-                            )
+                                }
+                            })
                         })
                         .transpose()
                 })();
@@ -135,41 +138,43 @@ impl lash_core_execution::TurnInputStore for SqliteStore {
     async fn list_pending_turn_inputs(
         &self,
         session_id: &SessionId,
-    ) -> Result<Vec<lash_core_execution::PendingTurnInputRead>, StoreError> {
+    ) -> Result<Vec<lash_core_store::turn_input_vocabulary::PendingTurnInputRead>, StoreError> {
         let session_id = SessionId::parse(session_id.to_string())?;
         // Open and admitted rows, and the rows a checkpoint accepted into a
         // running run, read in one snapshot and listed in `enqueue_seq`
         // order (FIG-4044).
         self.conn
             .read(move |tx| {
-                let outcome: Result<Vec<lash_core_execution::PendingTurnInputRead>, StoreError> =
-                    (|| {
-                        let statements = &crate::turn_ingress::turn_ingress_sql().pending_inputs;
-                        let mut rows = Vec::new();
-                        for sql in [
-                            statements.list_undelivered.sql(),
-                            statements.list_accepted.sql(),
-                        ] {
-                            let mut stmt = tx.prepare_cached(sql).map_err(sqlite_error)?;
-                            let listed = stmt
-                                .query_map(
-                                    params![session_id.as_str()],
-                                    pending_turn_input_row_from_sql,
-                                )
-                                .map_err(sqlite_error)?;
-                            rows.extend(
-                                listed
-                                    .collect::<Result<Vec<_>, _>>()
-                                    .map_err(sqlite_error)?,
-                            );
-                        }
-                        let mut reads = rows
-                            .into_iter()
-                            .map(pending_turn_input_read_from_row)
-                            .collect::<Result<Vec<_>, StoreError>>()?;
-                        reads.sort_by_key(|read| read.input.enqueue_seq);
-                        Ok(reads)
-                    })();
+                let outcome: Result<
+                    Vec<lash_core_store::turn_input_vocabulary::PendingTurnInputRead>,
+                    StoreError,
+                > = (|| {
+                    let statements = &crate::turn_ingress::turn_ingress_sql().pending_inputs;
+                    let mut rows = Vec::new();
+                    for sql in [
+                        statements.list_undelivered.sql(),
+                        statements.list_accepted.sql(),
+                    ] {
+                        let mut stmt = tx.prepare_cached(sql).map_err(sqlite_error)?;
+                        let listed = stmt
+                            .query_map(
+                                params![session_id.as_str()],
+                                pending_turn_input_row_from_sql,
+                            )
+                            .map_err(sqlite_error)?;
+                        rows.extend(
+                            listed
+                                .collect::<Result<Vec<_>, _>>()
+                                .map_err(sqlite_error)?,
+                        );
+                    }
+                    let mut reads = rows
+                        .into_iter()
+                        .map(pending_turn_input_read_from_row)
+                        .collect::<Result<Vec<_>, StoreError>>()?;
+                    reads.sort_by_key(|read| read.input.enqueue_seq);
+                    Ok(reads)
+                })();
                 Ok(outcome)
             })
             .await
@@ -179,8 +184,9 @@ impl lash_core_execution::TurnInputStore for SqliteStore {
     async fn pending_turn_input(
         &self,
         session_id: &SessionId,
-        input_id: &lash_core_execution::InputId,
-    ) -> Result<Option<lash_core_execution::PendingTurnInputRead>, StoreError> {
+        input_id: &lash_protocol_types::InputId,
+    ) -> Result<Option<lash_core_store::turn_input_vocabulary::PendingTurnInputRead>, StoreError>
+    {
         let session_id = session_id.clone();
         let input_id = input_id.clone();
         self.conn
@@ -218,7 +224,7 @@ impl lash_core_execution::TurnInputStore for SqliteStore {
     async fn list_turn_input_applications(
         &self,
         session_id: &SessionId,
-    ) -> Result<Vec<lash_core_execution::TurnInputApplication>, StoreError> {
+    ) -> Result<Vec<lash_core_store::turn_input_vocabulary::TurnInputApplication>, StoreError> {
         let session_id = SessionId::parse(session_id.to_string())?;
         let fleet = self.fleet_format();
         self.conn
@@ -248,14 +254,14 @@ impl lash_core_execution::TurnInputStore for SqliteStore {
                         let (turn_id, result_json, outcome_code, committed_at_ms, head_revision) =
                             row.map_err(sqlite_error)?;
                         let result =
-                            lash_core_execution::store::decode_runtime_commit_receipt_for_fleet(
+                            lash_core_store::store::decode_runtime_commit_receipt_for_fleet(
                                 &session_id,
                                 &turn_id,
                                 &result_json,
                                 (committed_at_ms, head_revision),
                                 fleet,
                             )?;
-                        lash_core_execution::store::validate_turn_commit_outcome_code(
+                        lash_core_store::store::validate_turn_commit_outcome_code(
                             &result,
                             outcome_code.as_deref(),
                         )?;
@@ -282,15 +288,18 @@ impl lash_core_execution::TurnInputStore for SqliteStore {
     async fn cancel_pending_turn_inputs(
         &self,
         session_id: &SessionId,
-        targets: &[lash_core_execution::PendingTurnInputCancelTarget],
-    ) -> Result<Vec<lash_core_execution::PendingTurnInputCancelReceipt>, StoreError> {
+        targets: &[lash_core_store::turn_input_vocabulary::PendingTurnInputCancelTarget],
+    ) -> Result<
+        Vec<lash_core_store::turn_input_vocabulary::PendingTurnInputCancelReceipt>,
+        StoreError,
+    > {
         let session_id = SessionId::parse(session_id.to_string())?;
         let targets = targets.to_vec();
         let now = self.clock.timestamp_ms();
         self.conn
             .write_flow(move |tx| {
                 let outcome: Result<
-                    Vec<lash_core_execution::PendingTurnInputCancelReceipt>,
+                    Vec<lash_core_store::turn_input_vocabulary::PendingTurnInputCancelReceipt>,
                     StoreError,
                 > = (|| {
                     let mut results = Vec::with_capacity(targets.len());
@@ -301,9 +310,9 @@ impl lash_core_execution::TurnInputStore for SqliteStore {
                             &target,
                         )? {
                             Some(row) => cancel_pending_turn_input_row_conn(tx, row, now)?,
-                            None => lash_core_execution::PendingTurnInputCancelOutcome::NotFound,
+                            None => lash_core_store::turn_input_vocabulary::PendingTurnInputCancelOutcome::NotFound,
                         };
-                        results.push(lash_core_execution::PendingTurnInputCancelReceipt {
+                        results.push(lash_core_store::turn_input_vocabulary::PendingTurnInputCancelReceipt {
                             target,
                             outcome,
                         });
@@ -322,20 +331,23 @@ impl lash_core_execution::TurnInputStore for SqliteStore {
     async fn cancel_pending_turn_input_suffix(
         &self,
         session_id: &SessionId,
-        anchor: &lash_core_execution::PendingTurnInputCancelTarget,
-    ) -> Result<lash_core_execution::PendingTurnInputSuffixCancelOutcome, StoreError> {
+        anchor: &lash_core_store::turn_input_vocabulary::PendingTurnInputCancelTarget,
+    ) -> Result<
+        lash_core_store::turn_input_vocabulary::PendingTurnInputSuffixCancelOutcome,
+        StoreError,
+    > {
         let session_id = SessionId::parse(session_id.to_string())?;
         let anchor = anchor.clone();
         let now = self.clock.timestamp_ms();
         self.conn
             .write_flow(move |tx| {
-                let outcome: Result<lash_core_execution::PendingTurnInputSuffixCancelOutcome, StoreError> =
+                let outcome: Result<lash_core_store::turn_input_vocabulary::PendingTurnInputSuffixCancelOutcome, StoreError> =
                     (|| {
                         let Some(anchor_row) =
                             load_pending_turn_input_row_by_target_conn(tx, &session_id, &anchor)?
                         else {
                             return Ok(
-                                lash_core_execution::PendingTurnInputSuffixCancelOutcome::AnchorNotFound {
+                                lash_core_store::turn_input_vocabulary::PendingTurnInputSuffixCancelOutcome::AnchorNotFound {
                                     anchor,
                                 },
                             );
@@ -361,7 +373,7 @@ impl lash_core_execution::TurnInputStore for SqliteStore {
                         for row in rows {
                             outcomes.push(cancel_pending_turn_input_row_conn(tx, row, now)?);
                         }
-                        Ok(lash_core_execution::PendingTurnInputSuffixCancelOutcome::Outcomes {
+                        Ok(lash_core_store::turn_input_vocabulary::PendingTurnInputSuffixCancelOutcome::Outcomes {
                             anchor,
                             outcomes,
                         })
@@ -377,7 +389,7 @@ impl lash_core_execution::TurnInputStore for SqliteStore {
 }
 
 #[async_trait::async_trait]
-impl lash_core_execution::QueuedWorkStore for SqliteStore {
+impl lash_core_store::store::QueuedWorkStore for SqliteStore {
     async fn enqueue_queued_work(
         &self,
         batch: QueuedWorkBatchDraft,
@@ -412,7 +424,7 @@ impl lash_core_execution::QueuedWorkStore for SqliteStore {
         &self,
         session_id: &SessionId,
         batch_id: &str,
-    ) -> Result<Option<lash_core_execution::store::RuntimeCommitReceipt>, StoreError> {
+    ) -> Result<Option<lash_core_store::store::RuntimeCommitReceipt>, StoreError> {
         self.queued_work_batch_completion_sqlite(session_id, batch_id)
             .await
     }
@@ -420,7 +432,7 @@ impl lash_core_execution::QueuedWorkStore for SqliteStore {
     async fn pending_session_work_ordering(
         &self,
         session_id: &SessionId,
-    ) -> Result<lash_core_execution::store::PendingSessionWorkOrdering, StoreError> {
+    ) -> Result<lash_core_store::store::PendingSessionWorkOrdering, StoreError> {
         self.pending_session_work_ordering_sqlite(session_id).await
     }
 
@@ -439,7 +451,7 @@ impl lash_core_execution::QueuedWorkStore for SqliteStore {
     }
 
     async fn has_admissible_queued_work(&self, session_id: &SessionId) -> Result<bool, StoreError> {
-        lash_core_execution::store::validate_session_id(session_id)?;
+        lash_core_store::store::validate_session_id(session_id)?;
         let session_id = session_id.clone();
         self.read_connection()
             .call(move |conn| {
@@ -465,17 +477,17 @@ impl lash_core_execution::QueuedWorkStore for SqliteStore {
 /// for the wake sink once the transaction commits.
 pub(crate) fn enqueue_pending_turn_inputs_conn(
     tx: &Connection,
-    batch: &lash_core_execution::PendingTurnInputBatch,
+    batch: &lash_core_store::turn_input_vocabulary::PendingTurnInputBatch,
     now: u64,
     first_nonce: u64,
 ) -> Result<
     (
-        Vec<lash_core_execution::PendingTurnInput>,
+        Vec<lash_core_store::turn_input_vocabulary::PendingTurnInput>,
         Option<lash_durable::Woken>,
     ),
     StoreError,
 > {
-    use lash_core_execution::store_backend_support as support;
+    use lash_core_store::store_backend_support as support;
     let session_id = batch.session_id();
     ensure_session_not_deleted_conn(tx, session_id)?;
     for draft in batch.drafts() {
@@ -529,8 +541,10 @@ pub(crate) fn enqueue_pending_turn_inputs_conn(
             support::TurnInputDraftAdmission::New => {
                 ensure_session_not_closing_conn(tx, session_id)?;
                 let ids = draft.input.stored_attachment_ids();
-                let claim = lash_core_execution::ReferrerClaim::unguarded(
-                    lash_core_execution::ArtifactReferrer::Session(session_id.clone()),
+                let claim = lash_core_store::artifact_referrer::ReferrerClaim::unguarded(
+                    lash_core_store::artifact_referrer::ArtifactReferrer::Session(
+                        session_id.clone(),
+                    ),
                 )
                 .map_err(|error| error.into_store_error("pending input attachment referrer"))?;
                 crate::attachments::acquire_attachment_refs_conn(tx, &claim, &ids, now)?;
@@ -556,14 +570,15 @@ pub(crate) fn enqueue_pending_turn_inputs_conn(
                     input_id.as_str(),
                     &ids,
                 )?;
-                let state = lash_core_execution::TurnInputState::open(draft.ingress.clone());
+                let state = lash_core_store::turn_input_vocabulary::TurnInputState::open(
+                    draft.ingress.clone(),
+                );
                 let run_spec = admit_run_spec_conn(tx, draft, &mut interned)?;
                 let sequence = crate::session_ingress::allocate_sequence(tx, session_id)?;
                 let ingress_json = encode_json(&draft.ingress)?;
                 let input_json = encode_json(&draft.input)?;
-                let trace_cause = lash_core_execution::store_backend_support::encode_trace_cause(
-                    &draft.trace_cause,
-                )?;
+                let trace_cause =
+                    lash_core_store::store_backend_support::encode_trace_cause(&draft.trace_cause)?;
                 let inserted = tx
                     .prepare_cached(sql.pending_inputs.insert_new.sql())
                     .and_then(|mut statement| {
@@ -588,8 +603,8 @@ pub(crate) fn enqueue_pending_turn_inputs_conn(
                         crate::sqlite_pending_turn_input_insert_error(err, session_id, &input_id)
                     })?;
                 #[cfg(feature = "perf-witness")]
-                lash_core_execution::perf_witness::latency::stage(|| {
-                    lash_core_execution::perf_witness::latency::CommitMark::Accepted {
+                lash_core_ids::perf_witness::latency::stage(|| {
+                    lash_core_ids::perf_witness::latency::CommitMark::Accepted {
                         input: input_id.as_str().to_owned(),
                     }
                 });
@@ -602,7 +617,7 @@ pub(crate) fn enqueue_pending_turn_inputs_conn(
             crate::revisions::pin_conn(
                 tx,
                 session_id,
-                &lash_core_execution::Target::Input(input_id.clone()),
+                &lash_core_store::store::Target::Input(input_id.clone()),
             )?;
         }
         // A new input is the row its insert returned; a replayed one is read.
@@ -631,8 +646,8 @@ fn forsake_turn_input_conn(
     session_id: &SessionId,
     source_key: &str,
     now: u64,
-) -> Result<lash_core_execution::store::TurnInputForsaking, StoreError> {
-    use lash_core_execution::store::TurnInputForsaking;
+) -> Result<lash_core_store::store::TurnInputForsaking, StoreError> {
+    use lash_core_store::store::TurnInputForsaking;
     ensure_session_not_deleted_conn(tx, session_id)?;
     let sql = crate::turn_ingress::turn_ingress_sql();
     let held: Option<String> = tx
@@ -645,12 +660,12 @@ fn forsake_turn_input_conn(
         .map_err(sqlite_error)?;
     if let Some(input_id) = held {
         return Ok(TurnInputForsaking::Held {
-            input_id: lash_core_execution::InputId::parse(input_id)?,
+            input_id: lash_protocol_types::InputId::parse(input_id)?,
         });
     }
     ensure_session_not_closing_conn(tx, session_id)?;
     let input_id =
-        lash_core_execution::store_backend_support::forsaken_input_id(session_id, source_key);
+        lash_core_store::store_backend_support::forsaken_input_id(session_id, source_key);
     crate::conn::cached_execute(
         tx,
         sql.forsaken_inputs.insert.sql(),
@@ -670,8 +685,8 @@ fn forsake_turn_input_conn(
 fn turn_address_evidence_conn(
     tx: &Connection,
     session_id: &SessionId,
-    turn_id: &lash_core_execution::TurnId,
-) -> Result<lash_core_execution::store_backend_support::TurnAddressEvidence, StoreError> {
+    turn_id: &lash_protocol_types::TurnId,
+) -> Result<lash_core_store::store_backend_support::TurnAddressEvidence, StoreError> {
     let ended: bool = tx
         .query_row(
             crate::turn_ingress::turn_ingress_sql()
@@ -684,7 +699,7 @@ fn turn_address_evidence_conn(
         .map_err(sqlite_error)?;
     let running = crate::session_runs::unfinished_run_turns_conn(tx, session_id)?;
     Ok(
-        lash_core_execution::store_backend_support::turn_address_evidence(
+        lash_core_store::store_backend_support::turn_address_evidence(
             turn_id,
             running.as_ref(),
             ended,
@@ -698,12 +713,12 @@ fn turn_address_evidence_conn(
 /// back, as the separate calls would have.
 fn admit_pending_turn_inputs_conn(
     tx: &crate::conn::FencedTx<'_>,
-    batch: &lash_core_execution::PendingTurnInputBatch,
+    batch: &lash_core_store::turn_input_vocabulary::PendingTurnInputBatch,
     now: u64,
     first_nonce: u64,
 ) -> Result<
     (
-        lash_core_execution::TurnInputAdmission,
+        lash_core_store::store::TurnInputAdmission,
         Option<lash_durable::Woken>,
     ),
     StoreError,
@@ -719,7 +734,7 @@ fn admit_pending_turn_inputs_conn(
         Some(crate::codec::ConfigRead::Uncommitted(&tx.configs)),
     )?;
     Ok((
-        lash_core_execution::TurnInputAdmission::Fused {
+        lash_core_store::store::TurnInputAdmission::Fused {
             rows,
             committed_head,
         },
@@ -734,10 +749,10 @@ fn admit_pending_turn_inputs_conn(
 /// batch's transaction already interned (`interned`) is not interned again.
 fn admit_run_spec_conn(
     tx: &Connection,
-    draft: &lash_core_execution::PendingTurnInputDraft,
+    draft: &lash_core_store::turn_input_vocabulary::PendingTurnInputDraft,
     interned: &mut std::collections::BTreeSet<String>,
-) -> Result<lash_core_execution::store_backend_support::RunSpecAdmission, StoreError> {
-    use lash_core_execution::store_backend_support as support;
+) -> Result<lash_core_store::store_backend_support::RunSpecAdmission, StoreError> {
+    use lash_core_store::store_backend_support as support;
     let spec = support::RunSpecAdmission::of(draft)?;
     let sql = crate::turn_ingress::turn_ingress_sql();
     if let Some(turn_id) = support::steering_run_spec_target(draft) {
@@ -792,20 +807,20 @@ fn admit_run_spec_conn(
 ///   next-turn run under its own spec.
 fn check_unsourced_steering_run_spec_conn(
     tx: &Connection,
-    draft: &lash_core_execution::PendingTurnInputDraft,
-    turn_id: &lash_core_execution::TurnId,
-    spec: &lash_core_execution::store_backend_support::RunSpecAdmission,
+    draft: &lash_core_store::turn_input_vocabulary::PendingTurnInputDraft,
+    turn_id: &lash_protocol_types::TurnId,
+    spec: &lash_core_store::store_backend_support::RunSpecAdmission,
 ) -> Result<(), StoreError> {
     if let Some(unfinished) = crate::session_runs::unfinished_run_conn(tx, &draft.session_id)?
         && matches!(
             unfinished.head,
-            lash_core_execution::store::AdmittedHead::Batch(_)
+            lash_core_store::store::AdmittedHead::Batch(_)
         )
         && unfinished.run == *turn_id
     {
         // A queued-headed run starts from no input, so it runs the default
         // spec.
-        lash_core_execution::store_backend_support::check_running_run_spec(
+        lash_core_store::store_backend_support::check_running_run_spec(
             &draft.session_id,
             turn_id,
             spec,

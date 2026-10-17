@@ -247,7 +247,7 @@ pub async fn scope_replay_cancel_and_trace_ignore_environment_rebinding(
     engine.input = crate::ProcessInput::Engine {
         kind: "scope-environment".into(),
         payload: serde_json::Value::Null,
-        launch: lash_core::testing::fixture_engine_launch(),
+        launch: lash_execution_contracts::testing::fixture_engine_launch(),
     }
     .into();
     let request = crate::started_until_starter(engine, scope.clone()).with_start_key(Some(key));

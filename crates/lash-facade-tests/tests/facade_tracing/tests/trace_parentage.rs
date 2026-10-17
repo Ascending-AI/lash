@@ -14,7 +14,8 @@ use lash::TurnInput;
 use lash_core::testing::runtime_helpers::mock_provider;
 use opentelemetry_sdk::trace::SpanData;
 
-type Keys = tokio::sync::mpsc::UnboundedReceiver<(lash_core::PinnedKey, String)>;
+type Keys =
+    tokio::sync::mpsc::UnboundedReceiver<(lash_execution_contracts::waits::PinnedKey, String)>;
 
 /// The context a host's caller `caller` sends under: a sampled span of its
 /// own trace.
@@ -99,7 +100,7 @@ async fn a_serialized_process_start_links_its_explicit_caller() -> Result<()> {
     .await
     .expect("the child's turn settles")?;
     assert!(
-        matches!(&output, lash_core::ProcessAwaitOutput::Settled { output }
+        matches!(&output, lash_execution_contracts::process::ProcessAwaitOutput::Settled { output }
             if output.is_success()),
         "the queued start ran successfully: {output:?}"
     );
@@ -247,7 +248,7 @@ const D: u8 = 0xd;
 /// eligible input into one run, whose `echo_tool` parks until the host
 /// resolves it, observed.
 fn consuming_node(
-    backend: lash_core::Backend,
+    backend: lash_execution_contracts::backend::Backend,
     owner: lash::persistence::LeaseOwnerIdentity,
     calls: Vec<lash_core::testing::runtime_helpers::MockCall>,
 ) -> Result<(Observed, LashCore, Keys)> {
@@ -433,8 +434,11 @@ async fn a_consumed_input_is_linked_never_a_second_parent() -> Result<()> {
 #[tokio::test(flavor = "multi_thread", worker_threads = 2)]
 async fn a_consumed_input_stays_linked_across_a_resume_on_another_owner() -> Result<()> {
     let stores = sqlite_memory_store_set().await;
-    let backend =
-        || lash_conformance::backend_over(Arc::clone(&stores) as Arc<dyn lash_core::StoreSet>);
+    let backend = || {
+        lash_conformance::backend_over(
+            Arc::clone(&stores) as Arc<dyn lash_execution_contracts::backend::StoreSet>
+        )
+    };
     let (observed_a, node_a, mut keys) = consuming_node(
         backend(),
         node("node-a"),
@@ -514,7 +518,7 @@ async fn a_session_turn_child_shares_the_trace_of_its_process() -> Result<()> {
     .await
     .expect("the child's turn settles")?;
     assert!(
-        matches!(&output, lash_core::ProcessAwaitOutput::Settled { output }
+        matches!(&output, lash_execution_contracts::process::ProcessAwaitOutput::Settled { output }
             if output.is_success()),
         "the child ran successfully: {output:?}"
     );

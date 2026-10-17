@@ -1,7 +1,8 @@
 use lash::{LashCore, Result, async_trait};
+use lash_core::ToolProvider;
 use lash_core::facade_support::PluginFactory;
 use lash_core::plugin::StaticPluginFactory;
-use lash_core::{ProcessRegistry, ToolProvider};
+use lash_execution_contracts::process::ProcessRegistry;
 use std::sync::Arc;
 
 use lash_core::facade_support::ProviderHandle;

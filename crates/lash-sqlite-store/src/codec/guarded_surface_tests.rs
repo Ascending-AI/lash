@@ -16,7 +16,7 @@ fn write_envelope(fleet: FleetFormat) -> Vec<u8> {
         &BlobArtifactDescriptor::checkpoint_component(),
         BuiltinBlobProfile::Balanced,
         CONTENT,
-        fleet.writer_version(lash_core_execution::surface_format!(
+        fleet.writer_version(lash_core_store::surface_format!(
             SQLITE_BLOB_ENVELOPE_VERSION
         )),
     )

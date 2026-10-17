@@ -23,7 +23,7 @@ use std::time::Duration;
 use lash_core::{
     ArtifactReferrer, AttachmentId, ClockWallTime as _, ToolDefinitionBindingExt as _, ToolProvider,
 };
-use lash_core_execution::StoreSet;
+use lash_execution_contracts::backend::StoreSet;
 use lash_protocol_types::sync::MutexExt as _;
 
 use served::{Keep, Tier, WATCHDOG};
@@ -188,21 +188,22 @@ impl BlobTools {
             .session_id()
             .map_err(|error| error.to_string())?
             .clone();
-        let mut create_request = lash_core::SessionCreateRequest::child_session(
-            session_id.clone(),
-            lash_core::SessionStartPoint::Empty,
-            lash_core::PluginOptions::default(),
-        )
-        .with_spec(&served::spec(1024))
-        .map_err(|error| error.to_string())?;
+        let mut create_request =
+            lash_execution_contracts::session_types::SessionCreateRequest::child_session(
+                session_id.clone(),
+                lash_core::SessionStartPoint::Empty,
+                lash_core::PluginOptions::default(),
+            )
+            .with_spec(&served::spec(1024))
+            .map_err(|error| error.to_string())?;
         // The child runs in the session its process id derives.
         create_request.session_id = None;
-        let declaration = lash_core::ProcessStartDeclaration::session_turn(
+        let declaration = lash_execution_contracts::process::ProcessStartDeclaration::session_turn(
             "law-session-turn:v1".to_owned(),
             create_request,
             lash::TurnInput::text("read the attached input").with_attachment(stored),
-            lash_core::SessionTurnOutcome::Turn,
-            lash_core::ProcessOriginator::Session {
+            lash_execution_contracts::process::SessionTurnOutcome::Turn,
+            lash_execution_contracts::process::ProcessOriginator::Session {
                 session_id,
                 agent_frame_id: Some(
                     context
@@ -211,20 +212,24 @@ impl BlobTools {
                         .clone(),
                 ),
             },
-            lash_core::Lifetime::Detached,
+            lash_execution_contracts::process::Lifetime::Detached,
         )
-        .with_declared_identity(lash_core::DeclaredProcessIdentity::labelled(
-            "law-session-turn",
-            None::<String>,
-        ));
+        .with_declared_identity(
+            lash_execution_contracts::process::DeclaredProcessIdentity::labelled(
+                "law-session-turn",
+                None::<String>,
+            ),
+        );
         Ok(lash_core::ToolAttemptOutcome::done(
             lash_core::ToolOutcomeDone::ok(serde_json::json!("started")),
-            lash_core::ToolIntents::v3(vec![lash_core::ToolIntent::StartProcess(Box::new(
-                lash_core::StartProcessIntent {
-                    owner: context.owner().runtime_owner(),
-                    declaration,
-                },
-            ))]),
+            lash_execution_contracts::tool_intent::ToolIntents::v3(vec![
+                lash_execution_contracts::tool_intent::ToolIntent::StartProcess(Box::new(
+                    lash_execution_contracts::tool_intent::StartProcessIntent {
+                        owner: context.owner().runtime_owner(),
+                        declaration,
+                    },
+                )),
+            ]),
         ))
     }
 }
@@ -234,7 +239,10 @@ impl ToolProvider for BlobTools {
     fn tool_manifests(
         &self,
         _config: &lash_core::OwnerConfigView,
-    ) -> std::result::Result<Vec<lash_core::ToolManifest>, lash_core::PluginError> {
+    ) -> std::result::Result<
+        Vec<lash_core::ToolManifest>,
+        lash_execution_contracts::plugin_error::PluginError,
+    > {
         Ok({
             vec![
                 put_blob_definition().manifest(),
@@ -487,7 +495,7 @@ impl Law {
         )
         .plugin(Arc::new(
             lash::process_controls::SessionProcessAdminPluginFactory::new(
-                lash_core::lifetime::session_or_starter,
+                lash_execution_contracts::process::lifetime::session_or_starter,
                 lash_core::testing::run_policy_naming(&[BLOB_COMPONENT]),
             ),
         ))
@@ -603,7 +611,7 @@ impl Law {
             loop {
                 self.core
                     .processes()
-                    .prune(u64::MAX, None, lash_core::ProjectionWatermark::NoProjector)
+                    .prune(u64::MAX, None, lash_execution_contracts::process::ProjectionWatermark::NoProjector)
                     .await
                     .expect("prune terminal processes");
                 match self
@@ -613,7 +621,7 @@ impl Law {
                     .await
                 {
                     Ok(Some(_)) => {}
-                    Ok(None) | Err(lash_core::PluginError::ProcessNoLongerRetained { .. }) => {
+                    Ok(None) | Err(lash_execution_contracts::plugin_error::PluginError::ProcessNoLongerRetained { .. }) => {
                         return;
                     }
                     Err(error) => panic!("read the pruned process: {error}"),
@@ -669,7 +677,10 @@ impl Law {
             .expect("read the process terminal");
     }
 
-    async fn record(&self, process_id: &lash_core::ProcessId) -> lash_core::ProcessRecord {
+    async fn record(
+        &self,
+        process_id: &lash_core::ProcessId,
+    ) -> lash_execution_contracts::process::ProcessRecord {
         self.backend
             .process_registry()
             .get_process(process_id)
@@ -1121,7 +1132,7 @@ async fn a_cancelled_child_keeps_its_puts_until_pruned(tier: Tier) {
     let terminal = law.record(&engine).await;
     assert_eq!(
         terminal.status(),
-        lash_core::ProcessStatus::Cancelled,
+        lash_execution_contracts::process::ProcessStatus::Cancelled,
         "a cancelled child reaches its typed terminal: {terminal:?}"
     );
     law.witness.release_one();
@@ -1233,19 +1244,22 @@ impl lash_core::AttachmentReferrers for AdoptionCut {
 
 /// A host's detached SessionTurn start under host key `key`, whose child
 /// turn reads `input`.
-fn host_start(key: &str, input: lash_core::AttachmentRef) -> lash_core::ProcessStartRequest {
-    lash_core::ProcessStartRequest::session_turn(
+fn host_start(
+    key: &str,
+    input: lash_core::AttachmentRef,
+) -> lash_execution_contracts::process::ProcessStartRequest {
+    lash_execution_contracts::process::ProcessStartRequest::session_turn(
         "law-host-start-input:v1".to_owned(),
-        lash_core::SessionCreateRequest::root(
+        lash_execution_contracts::session_types::SessionCreateRequest::root(
             lash_core::SessionStartPoint::Empty,
             lash_core::PluginOptions::default(),
         )
         .with_spec(&served::spec(1024))
         .expect("a root spec states its model and turn budget"),
         lash::TurnInput::text("read the host upload").with_attachment(input),
-        lash_core::SessionTurnOutcome::Turn,
-        lash_core::ProcessOriginator::host(),
-        lash_core::Lifetime::Detached,
+        lash_execution_contracts::process::SessionTurnOutcome::Turn,
+        lash_execution_contracts::process::ProcessOriginator::host(),
+        lash_execution_contracts::process::Lifetime::Detached,
     )
     .with_host_start_key(key)
 }
@@ -1368,7 +1382,7 @@ async fn a_host_start_cut_between_registration_and_adoption_keeps_its_uploaded_i
         let terminal = law.record(&record.id).await;
         assert_eq!(
             terminal.status(),
-            lash_core::ProcessStatus::Completed,
+            lash_execution_contracts::process::ProcessStatus::Completed,
             "{fault}: the taken-over turn reads its input: {terminal:?}"
         );
         assert_eq!(

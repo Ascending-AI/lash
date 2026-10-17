@@ -84,7 +84,7 @@ pub(crate) async fn graph_node_collision(
     connection: &mut sqlx::PgConnection,
     session_id: &SessionId,
     generation: u64,
-    node_id: &lash_core_execution::NodeId,
+    node_id: &lash_protocol_types::NodeId,
 ) -> StoreError {
     let taken: Result<Vec<String>, _> = crate::observed_sql::query_scalar(
         crate::session_sql::session_sql()
@@ -118,7 +118,7 @@ pub(crate) async fn graph_node_collision(
 pub(crate) fn pending_turn_input_insert_error(
     err: sqlx::Error,
     session_id: &SessionId,
-    input_id: &lash_core_execution::InputId,
+    input_id: &lash_protocol_types::InputId,
 ) -> StoreError {
     if let sqlx::Error::Database(database) = &err
         && database.code().as_deref() == Some("23505")
@@ -387,14 +387,14 @@ type CheckpointComponents = (
 /// The parts of `checkpoint`'s put under `fleet_format`.
 pub(crate) fn checkpoint_parts(
     checkpoint: &HydratedSessionCheckpoint,
-    fleet_format: lash_core_execution::FleetFormat,
+    fleet_format: lash_core_store::store::FleetFormat,
 ) -> Result<CheckpointParts, StoreError> {
     checkpoint_graph_parts(checkpoint, checkpoint_components(checkpoint, fleet_format)?)
 }
 
 fn checkpoint_components(
     checkpoint: &HydratedSessionCheckpoint,
-    fleet_format: lash_core_execution::FleetFormat,
+    fleet_format: lash_core_store::store::FleetFormat,
 ) -> Result<CheckpointComponents, StoreError> {
     let manifest = checkpoint.manifest(fleet_format)?;
     let mut acquisition_order = manifest
@@ -422,12 +422,12 @@ fn checkpoint_components(
             HydratedCheckpointComponent::Hydrated { body, .. } => {
                 let stored_ref = BlobRef::for_content(body);
                 #[cfg(feature = "perf-witness")]
-                lash_core_execution::perf_witness::record_hash_pass(body.len());
+                lash_core_ids::perf_witness::record_hash_pass(body.len());
                 (stored_ref, body)
             }
             HydratedCheckpointComponent::Unchanged { .. } => continue,
         };
-        lash_core_execution::store::ensure_checkpoint_component_hash_agreement(
+        lash_core_store::store::ensure_checkpoint_component_hash_agreement(
             key,
             &stored_ref,
             &descriptor.blob_ref,
@@ -452,7 +452,7 @@ fn checkpoint_graph_parts(
     if let Some(node) = checkpoint
         .execution
         .as_ref()
-        .and_then(lash_core_execution::store::CheckpointExecution::node)
+        .and_then(lash_core_store::store::CheckpointExecution::node)
     {
         nodes.insert(node.id, node);
     }
@@ -472,7 +472,7 @@ fn checkpoint_graph_parts(
 pub(crate) async fn put_checkpoint_tx(
     tx: &mut sqlx::Transaction<'_, sqlx::Postgres>,
     checkpoint: &HydratedSessionCheckpoint,
-    fleet_format: lash_core_execution::FleetFormat,
+    fleet_format: lash_core_store::store::FleetFormat,
     chunk_size: usize,
 ) -> Result<CheckpointParts, StoreError> {
     // Global PostgreSQL checkpoint lock order:
@@ -542,7 +542,7 @@ async fn checkpoint_graph_tx(
 pub(crate) async fn get_checkpoint_tx(
     tx: &mut sqlx::PgConnection,
     blob_ref: &BlobRef,
-    fleet: lash_core_execution::FleetFormat,
+    fleet: lash_core_store::store::FleetFormat,
     chunk_size: usize,
 ) -> Result<Option<HydratedSessionCheckpoint>, StoreError> {
     let Some((manifest, closure)) = checkpoint_graph_tx(tx, blob_ref).await? else {
@@ -567,7 +567,7 @@ pub(crate) async fn get_checkpoint_tx(
                         lash_core_store::checkpoint_graph::GraphRefusal::MissingNode(root),
                     )
                 })?;
-            Ok::<_, StoreError>(lash_core_execution::store::CheckpointExecution {
+            Ok::<_, StoreError>(lash_core_store::store::CheckpointExecution {
                 root,
                 descriptor: Some(descriptor),
             })
@@ -591,7 +591,7 @@ pub(crate) async fn get_checkpoint_tx(
         })?;
         components.insert(
             key.clone(),
-            lash_core_execution::HydratedCheckpointComponent::hydrated(
+            lash_core_store::store::HydratedCheckpointComponent::hydrated(
                 descriptor.clone(),
                 std::sync::Arc::clone(body),
             ),
@@ -635,7 +635,7 @@ pub(crate) async fn load_session_head_meta_tx(
     tx: &mut sqlx::PgConnection,
     session_id: &SessionId,
     for_update: bool,
-    fleet: lash_core_execution::FleetFormat,
+    fleet: lash_core_store::store::FleetFormat,
     configs: Option<&lash_core_store::store_backend_support::ConfigCache>,
 ) -> Result<Option<SessionHeadMeta>, StoreError> {
     let sql = if for_update {
@@ -660,8 +660,8 @@ pub(crate) async fn load_session_head_meta_tx(
 pub(crate) async fn load_terminal_head_meta_tx(
     tx: &mut sqlx::PgConnection,
     session_id: &SessionId,
-    run: &lash_core_execution::TurnId,
-    fleet: lash_core_execution::FleetFormat,
+    run: &lash_protocol_types::TurnId,
+    fleet: lash_core_store::store::FleetFormat,
 ) -> Result<Option<SessionHeadMeta>, StoreError> {
     let row = crate::observed_sql::query(
         crate::session_runs::session_runs_sql()
@@ -693,7 +693,7 @@ async fn decode_session_head_meta_row(
     tx: &mut sqlx::PgConnection,
     session_id: &SessionId,
     row: Option<sqlx::postgres::PgRow>,
-    fleet: lash_core_execution::FleetFormat,
+    fleet: lash_core_store::store::FleetFormat,
     configs: Option<&lash_core_store::store_backend_support::ConfigCache>,
 ) -> Result<Option<SessionHeadMeta>, StoreError> {
     let Some(row) = row else {
@@ -716,7 +716,7 @@ async fn decode_session_head_meta_row(
         });
     }
     let current_frame_node_id = current_frame_node_id
-        .map(lash_core_execution::FrameNodeId::new)
+        .map(lash_core_store::session_identity::FrameNodeId::new)
         .transpose()
         .map_err(|error| StoreError::StoredDataCorrupt {
             record_kind: "SessionGraph",
@@ -730,7 +730,7 @@ async fn decode_session_head_meta_row(
         head_revision,
         checkpoint_ref.map(Into::into),
         leaf_node_id
-            .map(lash_core_execution::NodeId::parse)
+            .map(lash_protocol_types::NodeId::parse)
             .transpose()?,
         current_frame_node_id,
     )?))
@@ -740,7 +740,7 @@ async fn decode_session_head_meta_row(
 pub(crate) async fn load_config_tx(
     tx: &mut sqlx::PgConnection,
     reference: Option<&str>,
-    fleet: lash_core_execution::FleetFormat,
+    fleet: lash_core_store::store::FleetFormat,
     configs: Option<&lash_core_store::store_backend_support::ConfigCache>,
 ) -> Result<SessionHeadPayload, StoreError> {
     use lash_core_store::checkpoint_graph::{DecodeLimits, GraphDecoder, NodeId, config};
@@ -802,8 +802,8 @@ pub(crate) fn config_store_error(
 mod contention_tests {
     use super::{is_contention_sqlstate, plugin_sqlx_error, store_sqlx_error};
     use crate::StoreError;
-    use lash_core_execution::PluginError;
-    use lash_core_execution::store::StoreFault;
+    use lash_core_store::store::StoreFault;
+    use lash_execution_contracts::plugin_error::PluginError;
 
     /// A database error carrying only a SQLSTATE.
     #[derive(Debug)]

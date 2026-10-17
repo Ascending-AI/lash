@@ -522,7 +522,7 @@ async fn read_state(
         .await
         .map_err(store_sqlx_error)?
     {
-        lash_core_execution::FleetFormatState::Recorded(fleet) => Some(fleet.version()),
+        lash_core_store::store::FleetFormatState::Recorded(fleet) => Some(fleet.version()),
         _ => None,
     };
     // Last: on a catalog that predates the release stamp the read fails,
@@ -573,7 +573,7 @@ async fn read_stamp_version(
 /// its compatibility descriptor writes.
 fn written_version() -> Result<i32, StoreError> {
     let descriptor =
-        lash_core_execution::compat::descriptor(lash_core_execution::compat::ComponentId::POSTGRES)
+        lash_core_store::compat::descriptor(lash_core_store::compat::ComponentId::POSTGRES)
             .ok_or_else(|| {
                 StoreError::Backend("the build has no descriptor for the PostgreSQL store".into())
             })?;
@@ -803,7 +803,7 @@ pub(crate) async fn expand_for_testing(
 /// installed catalog, including a rerun against one that a build predating
 /// the seed migrated. A recorded epoch is left alone.
 ///
-/// [`FleetFormat::seed`]: lash_core_execution::FleetFormat::seed
+/// [`FleetFormat::seed`]: lash_core_store::store::FleetFormat::seed
 async fn seed_fleet_format(
     connection: &mut sqlx::PgConnection,
     fence: &WriterFence,
@@ -811,7 +811,7 @@ async fn seed_fleet_format(
     let mut tx = crate::guarded_tx::begin_migration(connection, fence).await?;
     crate::fleet_format::seed(
         &mut tx,
-        lash_core_execution::FleetFormat::seed(fence.writable()),
+        lash_core_store::store::FleetFormat::seed(fence.writable()),
     )
     .await?;
     tx.commit().await.map_err(store_sqlx_error)

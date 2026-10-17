@@ -20,15 +20,18 @@ pub async fn fork_observer_transient_failure_retains_intent_until_publication(
 ) {
     const SESSION_ID: &str = "fork-observer-transient-session";
 
-    lash_core::testing::process_execution_env_fixture(backend.process_env_store().as_ref()).await;
+    lash_execution_contracts::testing::process_execution_env_fixture(
+        backend.process_env_store().as_ref(),
+    )
+    .await;
     let factory = backend.session_store_factory();
     let registry = crate::testing::ProcessRegistryFaults::new(backend.process_registry());
     let session_id = SessionId::from(SESSION_ID);
     let process_id = registry
-        .register_process(lash_core::testing::held_engine_registration(
+        .register_process(lash_execution_contracts::testing::held_engine_registration(
             serde_json::Value::Null,
             crate::ProcessProvenance::host(),
-            lash_core::Lifetime::Detached,
+            lash_execution_contracts::process::Lifetime::Detached,
         ))
         .await
         .expect("register fork observer process")
@@ -72,8 +75,8 @@ pub async fn fork_observer_transient_failure_retains_intent_until_publication(
         registry
             .list_observed_by(
                 &SessionId::from(SESSION_ID),
-                &lash_core::ProcessListFilter {
-                    status: lash_core::ProcessStatusFilter::Any,
+                &lash_execution_contracts::process::ProcessListFilter {
+                    status: lash_execution_contracts::process::ProcessStatusFilter::Any,
                     ..Default::default()
                 }
             )
@@ -96,19 +99,19 @@ pub async fn fork_observer_transient_failure_retains_intent_until_publication(
     );
 
     let second = registry
-        .register_process(lash_core::testing::held_engine_registration(
+        .register_process(lash_execution_contracts::testing::held_engine_registration(
             serde_json::Value::Null,
             crate::ProcessProvenance::host(),
-            lash_core::Lifetime::Detached,
+            lash_execution_contracts::process::Lifetime::Detached,
         ))
         .await
         .expect("register second selected process")
         .id;
     let pruned = registry
-        .register_process(lash_core::testing::held_engine_registration(
+        .register_process(lash_execution_contracts::testing::held_engine_registration(
             serde_json::Value::Null,
             crate::ProcessProvenance::host(),
-            lash_core::Lifetime::Detached,
+            lash_execution_contracts::process::Lifetime::Detached,
         ))
         .await
         .expect("register process selected before pruning")

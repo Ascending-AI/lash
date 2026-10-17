@@ -73,9 +73,7 @@ impl ProjectionCatalog {
     /// The catalog a backend carries, read back typed; empty for a backend
     /// built without providers.
     pub fn of_backend(
-        providers: Option<
-            &dyn lash_core_execution::runtime::actor::projection::ProjectionProviders,
-        >,
+        providers: Option<&dyn lash_execution_contracts::projection::ProjectionProviders>,
     ) -> Self {
         providers
             .and_then(|providers| providers.as_any().downcast_ref::<Self>())
@@ -103,7 +101,7 @@ impl ProjectionCatalog {
     }
 }
 
-impl lash_core_execution::runtime::actor::projection::ProjectionProviders for ProjectionCatalog {
+impl lash_execution_contracts::projection::ProjectionProviders for ProjectionCatalog {
     fn projection_types(&self) -> Vec<String> {
         self.providers.keys().cloned().collect()
     }

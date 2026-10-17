@@ -8,10 +8,12 @@
 use std::sync::Arc;
 
 use lash_conformance::ReopenableRuntimeStore;
-use lash_core_execution::store::{ConformanceDeployment, RuntimeStore};
-use lash_core_execution::{
-    ActorContext, DeploymentStore, ProcessRegistry, SessionCatalogStore as _,
-};
+use lash_core_execution::ActorContext;
+use lash_core_execution::store::ConformanceDeployment;
+use lash_core_store::store::RuntimeStore;
+use lash_core_store::store::SessionCatalogStore as _;
+use lash_execution_contracts::deployment::DeploymentStore;
+use lash_execution_contracts::process::ProcessRegistry;
 
 use super::{Retained, SUBSTRATE, root_session_request};
 use crate::backend_fixture::{TestBackend, sync_await};
@@ -51,7 +53,8 @@ macro_rules! session_store_factory_fixture {
             let backend = attached_retained.open_blocking();
             (
                 backend.blocking_store() as Arc<dyn ConformanceDeployment>,
-                backend.attachment_store() as Arc<dyn lash_core_execution::AttachmentStore>,
+                backend.attachment_store()
+                    as Arc<dyn lash_core_store::attachments::AttachmentStore>,
             )
         };
         let backend = TestBackend::open(SUBSTRATE).await;
@@ -84,7 +87,10 @@ async fn fork_inherits_history_without_execution_queues_waits_or_journals() {
 
 lash_conformance::process_prune_session_store_tests!({
     let backend = TestBackend::open(SUBSTRATE).await;
-    lash_core::testing::process_execution_env_fixture(backend.process_env_store().as_ref()).await;
+    lash_execution_contracts::testing::process_execution_env_fixture(
+        backend.process_env_store().as_ref(),
+    )
+    .await;
     let registry = backend.process_registry() as Arc<dyn ProcessRegistry>;
     let factory = backend.store().await as Arc<dyn DeploymentStore>;
     let host = durable_host(&backend);
@@ -96,13 +102,13 @@ mod runtime_persistence {
 
     lash_conformance::runtime_persistence_reopenable_tests!({
         let retained: Retained<TestBackend> = Retained::default();
-        let clock = Arc::new(lash_core_execution::testing::TestClock::new(10_000));
+        let clock = Arc::new(lash_core_ids::test_clock::TestClock::new(10_000));
         let store_clock = Arc::clone(&clock);
         (
             retained.clone(),
             move |session_id: &str| {
                 let request = root_session_request(session_id);
-                let clock = store_clock.clone() as Arc<dyn lash_core_execution::Clock>;
+                let clock = store_clock.clone() as Arc<dyn lash_core_ids::clock::Clock>;
                 let (backend, open, reopen) = sync_await(async move {
                     let backend = TestBackend::open_with_clock(SUBSTRATE, clock).await;
                     let open = backend.store().await;

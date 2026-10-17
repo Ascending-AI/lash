@@ -20,8 +20,10 @@ async fn plugin_context_host_exports_cannot_escape_namespaces() {
             &self,
             _: &crate::RuntimeOwner,
             _: &crate::PluginConfig,
-        ) -> Result<std::collections::BTreeMap<String, serde_json::Value>, crate::PluginError>
-        {
+        ) -> Result<
+            std::collections::BTreeMap<String, serde_json::Value>,
+            lash_execution_contracts::plugin_error::PluginError,
+        > {
             Ok(std::collections::BTreeMap::from([(
                 self.id.into(),
                 serde_json::json!(self.id),
@@ -29,8 +31,10 @@ async fn plugin_context_host_exports_cannot_escape_namespaces() {
         }
         fn recipe(
             self: Arc<Self>,
-        ) -> std::result::Result<lash_core::plugin::PluginRecipe, lash_core::plugin::PluginError>
-        {
+        ) -> std::result::Result<
+            lash_core::plugin::PluginRecipe,
+            lash_execution_contracts::plugin_error::PluginError,
+        > {
             let mut reg = lash_core::plugin::PluginRegistrar::<Fixture>::new(
                 lash_core::plugin::PluginFactory::id(self.as_ref()),
             );
@@ -57,7 +61,7 @@ async fn plugin_context_host_exports_cannot_escape_namespaces() {
         fn session_ready(
             &self,
             ctx: crate::plugin::SessionReadyContext,
-        ) -> Result<(), crate::PluginError> {
+        ) -> Result<(), lash_execution_contracts::plugin_error::PluginError> {
             assert_eq!(ctx.state.keys(), vec![self.id.to_string()]);
             let session_id = ctx.owner.session_id().unwrap().clone();
             let session = ctx.host.session(&session_id).unwrap();
@@ -78,7 +82,7 @@ async fn plugin_context_host_exports_cannot_escape_namespaces() {
     impl Fixture {
         fn declare(
             reg: &mut lash_core::plugin::PluginRegistrar<Self>,
-        ) -> std::result::Result<(), lash_core::plugin::PluginError> {
+        ) -> std::result::Result<(), lash_execution_contracts::plugin_error::PluginError> {
             reg.turn()
                 .before(crate::hook_key!("turn-before-1"), move |this, state| {
                     let state = state.clone();
@@ -143,31 +147,45 @@ async fn plugin_context_host_exports_cannot_escape_namespaces() {
             Option<crate::transcript::CommittedTurnWithCalls>,
             crate::plugin::CommittedTurnReadError,
         > {
-            Err(crate::PluginError::Session("operation is absent from this fixture".into()).into())
+            Err(
+                lash_execution_contracts::plugin_error::PluginError::Session(
+                    "operation is absent from this fixture".into(),
+                )
+                .into(),
+            )
         }
 
         async fn snapshot_current(
             &self,
-        ) -> Result<lash_core::SessionSnapshot, lash_core::PluginError> {
-            Err(lash_core::PluginError::Session(
-                "operation is absent from this fixture".into(),
-            ))
+        ) -> Result<lash_core::SessionSnapshot, lash_execution_contracts::plugin_error::PluginError>
+        {
+            Err(
+                lash_execution_contracts::plugin_error::PluginError::Session(
+                    "operation is absent from this fixture".into(),
+                ),
+            )
         }
         async fn snapshot_session(
             &self,
             _session_id: &lash_core::SessionId,
-        ) -> Result<lash_core::SessionSnapshot, lash_core::PluginError> {
-            Err(lash_core::PluginError::Session(
-                "operation is absent from this fixture".into(),
-            ))
+        ) -> Result<lash_core::SessionSnapshot, lash_execution_contracts::plugin_error::PluginError>
+        {
+            Err(
+                lash_execution_contracts::plugin_error::PluginError::Session(
+                    "operation is absent from this fixture".into(),
+                ),
+            )
         }
         async fn tool_catalog(
             &self,
             _session_id: &lash_core::SessionId,
-        ) -> Result<Vec<serde_json::Value>, lash_core::PluginError> {
-            Err(lash_core::PluginError::Session(
-                "operation is absent from this fixture".into(),
-            ))
+        ) -> Result<Vec<serde_json::Value>, lash_execution_contracts::plugin_error::PluginError>
+        {
+            Err(
+                lash_execution_contracts::plugin_error::PluginError::Session(
+                    "operation is absent from this fixture".into(),
+                ),
+            )
         }
     }
     let hosts = Arc::new(Mutex::new(Vec::new()));
@@ -324,7 +342,7 @@ async fn plugin_context_host_exports_cannot_escape_namespaces() {
     .await;
     assert!(matches!(
         restricted_runtime,
-        Err(crate::SessionError::Plugin(crate::PluginError::Session(message)))
+        Err(crate::SessionError::Plugin(lash_execution_contracts::plugin_error::PluginError::Session(message)))
             if message == "plugin-facing session handles cannot construct a host runtime"
     ));
     assert_eq!(restores.load(std::sync::atomic::Ordering::SeqCst), 0);

@@ -13,10 +13,12 @@ use std::collections::BTreeSet;
 
 use lash_core_store::obligations::{ObligationToken, RegistryKind};
 
-use super::{
-    CallbackSlot, ContributionKey, ContributionKind, PluginCallbackIdentity, PluginError,
-    PluginHost,
-};
+use super::CallbackSlot;
+use super::ContributionKey;
+use super::ContributionKind;
+use super::PluginCallbackIdentity;
+use super::PluginHost;
+use lash_execution_contracts::plugin_error::PluginError;
 
 /// The session config-change observers a deployment uninstalled for good
 /// and declared retired, each by its exact identity.

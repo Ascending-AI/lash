@@ -56,7 +56,8 @@ impl ToolProvider for FixtureTools {
     fn tool_manifests(
         &self,
         _config: &crate::OwnerConfigView,
-    ) -> std::result::Result<Vec<ToolManifest>, crate::PluginError> {
+    ) -> std::result::Result<Vec<ToolManifest>, lash_execution_contracts::plugin_error::PluginError>
+    {
         Ok(vec![fixture_echo_definition().manifest()])
     }
 

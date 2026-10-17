@@ -23,6 +23,8 @@ doctest = false
 workspace = true
 
 [dependencies]
+lash-durable = { workspace = true }
+lash-execution-contracts = { workspace = true }
 lash-transport-failure = { workspace = true }
 lash-dialect-typescript = { workspace = true, optional = true }
 lash-dialect-python = { workspace = true, optional = true }

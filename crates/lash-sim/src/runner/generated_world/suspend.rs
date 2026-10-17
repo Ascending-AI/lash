@@ -12,7 +12,7 @@ pub(super) struct SuspendingTurn {
     core: lash::LashCore,
     handle: tokio::task::JoinHandle<Result<lash::TurnOutput, FixedScriptRunnerError>>,
     events: Arc<RuntimeProofRecordingEvents>,
-    key_slot: Arc<tokio::sync::Mutex<Option<lash_core::PinnedKey>>>,
+    key_slot: Arc<tokio::sync::Mutex<Option<lash_execution_contracts::waits::PinnedKey>>>,
     suspend_kind: BoundaryKind,
     tool_name: String,
     resolution: Value,
@@ -31,7 +31,7 @@ pub(super) struct SuspendingTurn {
     resolution_at: u64,
     transport: Arc<ScriptedLlmHttpTransport>,
     scripts: Vec<ProviderWireScript>,
-    reopen: Arc<dyn lash_core::DeploymentStore>,
+    reopen: Arc<dyn lash_execution_contracts::deployment::DeploymentStore>,
 }
 
 impl SuspendingTurn {
@@ -56,7 +56,7 @@ pub(super) struct FinishedSuspend {
     transport: Arc<ScriptedLlmHttpTransport>,
     scripts: Vec<ProviderWireScript>,
     tool_result: crate::content_oracle::ToolResultContent,
-    reopen: Arc<dyn lash_core::DeploymentStore>,
+    reopen: Arc<dyn lash_execution_contracts::deployment::DeploymentStore>,
 }
 
 impl FinishedSuspend {
@@ -387,7 +387,7 @@ impl GeneratedRuntimeWorld {
             "tool_name": turn.tool_name,
             "tool_call_id": event.boundary_id,
             "execution_count": 1,
-            "runtime_tool_output": lash_core::Durable(&lash_core::ToolCallOutput::success(resolution.clone())),
+            "runtime_tool_output": lash_protocol_types::Durable(&lash_core::ToolCallOutput::success(resolution.clone())),
             "runtime_suspend": {
                 "suspend_kind": boundary_kind_label(turn.suspend_kind),
                 "turn_suspended_before_completion": suspended_before_completion,
@@ -436,14 +436,14 @@ fn boundary_kind_label(kind: BoundaryKind) -> &'static str {
 /// generated suspend sessions (Tool / DurableEffect / ExecCode).
 struct SuspendToolProvider {
     tool_name: String,
-    key_slot: Arc<tokio::sync::Mutex<Option<lash_core::PinnedKey>>>,
+    key_slot: Arc<tokio::sync::Mutex<Option<lash_execution_contracts::waits::PinnedKey>>>,
     observer: crate::invariants::ToolObserver,
 }
 
 impl SuspendToolProvider {
     fn new(
         tool_name: String,
-        key_slot: Arc<tokio::sync::Mutex<Option<lash_core::PinnedKey>>>,
+        key_slot: Arc<tokio::sync::Mutex<Option<lash_execution_contracts::waits::PinnedKey>>>,
         observer: crate::invariants::ToolObserver,
     ) -> Self {
         Self {
@@ -486,7 +486,10 @@ impl lash_core::ToolProvider for SuspendToolProvider {
     fn tool_manifests(
         &self,
         _config: &lash_core::OwnerConfigView,
-    ) -> std::result::Result<Vec<lash_core::ToolManifest>, lash_core::PluginError> {
+    ) -> std::result::Result<
+        Vec<lash_core::ToolManifest>,
+        lash_execution_contracts::plugin_error::PluginError,
+    > {
         Ok(vec![self.definition().manifest()])
     }
 

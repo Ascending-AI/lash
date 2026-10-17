@@ -160,9 +160,7 @@
       "src/runtime/actor/journal_tests.rs",
       "src/runtime/effect/executor/control/journal_identity_tests.rs",
       "src/runtime/process/engine_resolve_tests.rs",
-      "src/runtime/process/model_filter_tests.rs",
       "src/runtime/process/tests.rs",
-      "src/runtime/process/validation_tests.rs",
       "src/runtime/work/awaiter/tests.rs",
       "src/session/execution_context/tests.rs",
       "src/trace_feedback_tests.rs"
@@ -1056,6 +1054,16 @@
       "src/value_shape.rs",
       "src/worker_limit.rs",
       "src/workflow_site.rs"
+    ]
+  },
+  "crates/lash-execution-contracts": {
+    "library_test_sources": [
+      "src/process/model_filter_tests.rs",
+      "src/process/validation_tests.rs"
+    ],
+    "unit_test_sources": [
+      "src/lib.rs",
+      "src/**/*.rs"
     ]
   }
 }

@@ -43,12 +43,12 @@
 //! measured node-and-byte budget for graph, checkpoint, and attachment-adoption
 //! payloads before entering the catalog write transaction.
 //!
-//! [`DeploymentStore`]: lash_core_execution::DeploymentStore
-//! [`AttachmentReferrers`]: lash_core_execution::AttachmentReferrers
+//! [`DeploymentStore`]: lash_execution_contracts::deployment::DeploymentStore
+//! [`AttachmentReferrers`]: lash_core_store::store::AttachmentReferrers
 
 #![deny(clippy::future_not_send)]
 
-use lash_core_execution::FleetFormatStore;
+use lash_core_store::store::FleetFormatStore;
 use lash_protocol_types::SessionId;
 mod namespace;
 mod observed_sql;
@@ -67,27 +67,56 @@ use std::sync::atomic::AtomicUsize;
 use std::sync::atomic::{AtomicU64, Ordering as AtomicOrdering};
 
 use flate2::{Compression, read::ZlibDecoder, write::ZlibEncoder};
-use lash_core_execution::runtime::{
-    QueuedWorkAuthority, QueuedWorkBatch, QueuedWorkBatchDraft, QueuedWorkEnqueueOutcome,
-    QueuedWorkPayload, prepare_process_event_append, prepare_process_registration,
-};
-use lash_core_execution::store::queued_work::{
-    SESSION_COMMAND_BATCHES_PER_RUN, TurnLaneCandidate, admission_scan_limit, derive_batch_id,
-    select_leading_session_command,
-};
-use lash_core_execution::store::{
-    HydratedCheckpointComponent, HydratedSessionCheckpoint, RuntimeCommit, RuntimeCommitReceipt,
-    SessionCheckpoint, SessionHeadMeta, SessionHeadPayload,
-};
-use lash_core_execution::{
-    AttachmentId, AttachmentReferrers, BlobRef, DeliveryPolicy, GcReport, ProcessAwaitOutput,
-    ProcessChange, ProcessChangeCursor, ProcessChangeKind, ProcessEvent, ProcessEventAppendReceipt,
-    ProcessEventAppendRequest, ProcessExternalRef, ProcessListFilter, ProcessLiveReferenceView,
-    ProcessObserverBy, ProcessPruneReport, ProcessRecord, ProcessRegistration, ProcessRegistry,
-    SessionCommitStore, SessionListFilter, SessionMeta, SessionStoreCreateRequest, SessionView,
-    StoreError, StoreMaintenance, VacuumReport, facade_support::ProcessTransition,
-    facade_support::ProcessTransitionPlan, facade_support::registry_transitions,
-};
+use lash_core_store::queued_work_vocabulary::DeliveryPolicy;
+use lash_core_store::queued_work_vocabulary::QueuedWorkAuthority;
+use lash_core_store::queued_work_vocabulary::QueuedWorkBatch;
+use lash_core_store::queued_work_vocabulary::QueuedWorkBatchDraft;
+use lash_core_store::queued_work_vocabulary::QueuedWorkEnqueueOutcome;
+use lash_core_store::queued_work_vocabulary::QueuedWorkPayload;
+use lash_core_store::session_catalog::SessionListFilter;
+use lash_core_store::session_catalog::SessionView;
+use lash_core_store::session_store_factory_types::SessionStoreCreateRequest;
+use lash_core_store::store::AttachmentReferrers;
+use lash_core_store::store::BlobRef;
+use lash_core_store::store::GcReport;
+use lash_core_store::store::HydratedCheckpointComponent;
+use lash_core_store::store::HydratedSessionCheckpoint;
+use lash_core_store::store::RuntimeCommit;
+use lash_core_store::store::RuntimeCommitReceipt;
+use lash_core_store::store::SessionCheckpoint;
+use lash_core_store::store::SessionCommitStore;
+use lash_core_store::store::SessionHeadMeta;
+use lash_core_store::store::SessionHeadPayload;
+use lash_core_store::store::SessionMeta;
+use lash_core_store::store::StoreError;
+use lash_core_store::store::StoreMaintenance;
+use lash_core_store::store::VacuumReport;
+use lash_core_store::store::queued_work::SESSION_COMMAND_BATCHES_PER_RUN;
+use lash_core_store::store::queued_work::TurnLaneCandidate;
+use lash_core_store::store::queued_work::admission_scan_limit;
+use lash_core_store::store::queued_work::derive_batch_id;
+use lash_core_store::store::queued_work::select_leading_session_command;
+use lash_execution_contracts::process::ProcessAwaitOutput;
+use lash_execution_contracts::process::ProcessChange;
+use lash_execution_contracts::process::ProcessChangeCursor;
+use lash_execution_contracts::process::ProcessChangeKind;
+use lash_execution_contracts::process::ProcessEvent;
+use lash_execution_contracts::process::ProcessEventAppendReceipt;
+use lash_execution_contracts::process::ProcessEventAppendRequest;
+use lash_execution_contracts::process::ProcessExternalRef;
+use lash_execution_contracts::process::ProcessListFilter;
+use lash_execution_contracts::process::ProcessLiveReferenceView;
+use lash_execution_contracts::process::ProcessObserverBy;
+use lash_execution_contracts::process::ProcessPruneReport;
+use lash_execution_contracts::process::ProcessRecord;
+use lash_execution_contracts::process::ProcessRegistration;
+use lash_execution_contracts::process::ProcessRegistry;
+use lash_execution_contracts::process::ProcessTransition;
+use lash_execution_contracts::process::ProcessTransitionPlan;
+use lash_execution_contracts::process::prepare_process_event_append;
+use lash_execution_contracts::process::prepare_process_registration;
+use lash_execution_contracts::process::registry_transitions;
+use lash_protocol_types::attachment::AttachmentId;
 use rusqlite::{Connection, OptionalExtension, Transaction, params};
 
 use conn::SqliteConnection;
@@ -159,7 +188,7 @@ pub use migration::{SqliteBackupLocation, SqliteMigrationBackup};
 /// Backend name this store reports in shared fencing diagnostics.
 ///
 /// Every fenced write names its backend so
-/// [`StoreError::FencedWriteVerdictDisagreed`](lash_core_execution::StoreError::FencedWriteVerdictDisagreed)
+/// [`StoreError::FencedWriteVerdictDisagreed`](lash_core_store::store::StoreError::FencedWriteVerdictDisagreed)
 /// says which store's locked read and backstop predicate disagreed.
 pub(crate) const SQLITE_BACKEND: &str = "sqlite";
 
@@ -181,7 +210,7 @@ pub struct SqliteStore {
     /// The writer connection. Its fence holds the durable-format generation
     /// this store's writers emit: `F` as the most recent fence read it
     /// (ADR 0115 §2.3), which writers consult through
-    /// [`lash_core_execution::FleetFormat::writer_version`] instead of binding
+    /// [`lash_core_store::store::FleetFormat::writer_version`] instead of binding
     /// the build's constants directly.
     conn: SqliteConnection,
     /// The database this store is open on. Held so a store opened on a
@@ -193,11 +222,11 @@ pub struct SqliteStore {
     decoded_turn_receipt_bodies: Arc<AtomicU64>,
     /// The windows this store decoded, which its later reads extend
     /// (FIG-5930).
-    windows: Arc<lash_core_execution::store_backend_support::WindowCache>,
+    windows: Arc<lash_core_store::store_backend_support::WindowCache>,
     /// The module-artifact envelopes this store encoded (FIG-6457).
     encoded_images: Arc<std::sync::Mutex<blobs::EncodedImages>>,
     configs: Arc<lash_core_store::store_backend_support::ConfigCache>,
-    clock: Arc<dyn lash_core_execution::Clock>,
+    clock: Arc<dyn lash_core_ids::clock::Clock>,
     options: StoreOptions,
     commit_count: AtomicU64,
     #[cfg(test)]
@@ -215,13 +244,13 @@ impl SqliteStore {
     }
 
     /// Stand this store's writers up on `fleet_format` — typically one
-    /// carrying a pin table via [`lash_core_execution::FleetFormat::with_writer_pins`]
+    /// carrying a pin table via [`lash_core_store::store::FleetFormat::with_writer_pins`]
     /// — so a test proves they emit the version `F` assigns rather than the
     /// build constant they would stamp anyway (FIG-3796).
     #[cfg(any(test, feature = "testing"))]
     pub fn with_fleet_format_for_testing(
         self,
-        fleet_format: lash_core_execution::FleetFormat,
+        fleet_format: lash_core_store::store::FleetFormat,
     ) -> Self {
         self.conn.observe_fleet_for_testing(fleet_format);
         self
@@ -235,11 +264,11 @@ impl SqliteStore {
 /// state and handle visibility across all sessions sharing the registry.
 pub struct SqliteProcessRegistry {
     conn: SqliteConnection,
-    clock: Arc<dyn lash_core_execution::Clock>,
+    clock: Arc<dyn lash_core_ids::clock::Clock>,
     /// This registry's database.
     location: DatabaseLocation,
     /// Where registration mints process ids (ADR 0107).
-    process_id_mint: lash_core_execution::ProcessIdMint,
+    process_id_mint: lash_core_store::process_identity::ProcessIdMint,
     #[cfg(test)]
     decoded_roster_records: Arc<std::sync::atomic::AtomicUsize>,
 }
@@ -293,7 +322,7 @@ fn sqlite_async_error(error: tokio_rusqlite::Error) -> StoreError {
 fn sqlite_pending_turn_input_insert_error(
     err: rusqlite::Error,
     session_id: &SessionId,
-    input_id: &lash_core_execution::InputId,
+    input_id: &lash_protocol_types::InputId,
 ) -> StoreError {
     if let rusqlite::Error::SqliteFailure(code, message) = &err
         && code.code == rusqlite::ErrorCode::ConstraintViolation
@@ -315,7 +344,7 @@ fn sqlite_graph_node_insert_error(
     err: rusqlite::Error,
     session_id: &SessionId,
     generation: u64,
-    node_id: &lash_core_execution::NodeId,
+    node_id: &lash_protocol_types::NodeId,
 ) -> StoreError {
     if let rusqlite::Error::SqliteFailure(code, message) = &err
         && code.code == rusqlite::ErrorCode::ConstraintViolation
@@ -364,10 +393,12 @@ fn plugin_u64_from_sql(
     record_kind: &'static str,
     field: &'static str,
     value: i64,
-) -> Result<u64, lash_core_execution::PluginError> {
-    u64::try_from(value).map_err(|_| lash_core_execution::PluginError::StoredDataCorrupt {
-        record_kind: record_kind.to_string(),
-        message: format!("{field} must be non-negative, got {value}"),
+) -> Result<u64, lash_execution_contracts::plugin_error::PluginError> {
+    u64::try_from(value).map_err(|_| {
+        lash_execution_contracts::plugin_error::PluginError::StoredDataCorrupt {
+            record_kind: record_kind.to_string(),
+            message: format!("{field} must be non-negative, got {value}"),
+        }
     })
 }
 
@@ -430,21 +461,27 @@ fn clamp_sequence_bound(value: impl TryInto<i64>) -> i64 {
     value.try_into().unwrap_or(i64::MAX)
 }
 
-fn process_sqlite_error(err: rusqlite::Error) -> lash_core_execution::PluginError {
-    lash_core_execution::PluginError::from(sqlite_error(err))
+fn process_sqlite_error(
+    err: rusqlite::Error,
+) -> lash_execution_contracts::plugin_error::PluginError {
+    lash_execution_contracts::plugin_error::PluginError::from(sqlite_error(err))
 }
 
-fn process_decode_error(err: serde_json::Error) -> lash_core_execution::PluginError {
-    lash_core_execution::PluginError::Session(format!(
+fn process_decode_error(
+    err: serde_json::Error,
+) -> lash_execution_contracts::plugin_error::PluginError {
+    lash_execution_contracts::plugin_error::PluginError::Session(format!(
         "failed to decode process registry row: {err}"
     ))
 }
 
 fn process_encode_json<T: serde::Serialize>(
     value: &T,
-) -> Result<String, lash_core_execution::PluginError> {
+) -> Result<String, lash_execution_contracts::plugin_error::PluginError> {
     serde_json::to_string(value).map_err(|err| {
-        lash_core_execution::PluginError::Session(format!("failed to encode process row: {err}"))
+        lash_execution_contracts::plugin_error::PluginError::Session(format!(
+            "failed to encode process row: {err}"
+        ))
     })
 }
 

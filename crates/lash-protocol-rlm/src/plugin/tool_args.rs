@@ -1,4 +1,5 @@
-use lash_core::plugin::{PluginError, ToolArgsTransformInput};
+use lash_core::plugin::ToolArgsTransformInput;
+use lash_execution_contracts::plugin_error::PluginError;
 
 /// The argument transform both RLM paths register: projected values in a
 /// call's arguments become what the tool's projection policy asks for. It

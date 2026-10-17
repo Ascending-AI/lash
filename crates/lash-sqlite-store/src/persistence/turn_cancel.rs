@@ -2,7 +2,7 @@
 //! each running inside the caller's write transaction.
 
 use super::*;
-use lash_core_execution::store_backend_support::turn_cancel::*;
+use lash_core_store::store_backend_support::turn_cancel::*;
 
 /// Withdraw one row for the host at `now` (FIG-3927): an open row is
 /// cancelled in one write (FIG-4098); a row a run admitted is that run's to
@@ -12,22 +12,26 @@ pub(super) fn cancel_pending_turn_input_row_conn(
     conn: &Connection,
     row: PendingTurnInputRow,
     now: u64,
-) -> Result<lash_core_execution::PendingTurnInputCancelOutcome, StoreError> {
+) -> Result<lash_core_store::turn_input_vocabulary::PendingTurnInputCancelOutcome, StoreError> {
     let admitted_run = row.admitted_run.clone();
     let mut input = pending_turn_input_from_row(row)?;
     match input.state.kind() {
-        lash_core_execution::runtime::TurnInputStateKind::Cancelled => {
-            Ok(lash_core_execution::PendingTurnInputCancelOutcome::AlreadyCancelled(input))
-        }
-        lash_core_execution::runtime::TurnInputStateKind::Completed => {
-            Ok(lash_core_execution::PendingTurnInputCancelOutcome::AlreadyCompleted(input))
-        }
-        lash_core_execution::runtime::TurnInputStateKind::PendingActive
-        | lash_core_execution::runtime::TurnInputStateKind::DeferredNextTurn
-        | lash_core_execution::runtime::TurnInputStateKind::Accepted => {
+        lash_core_store::turn_input_vocabulary::TurnInputStateKind::Cancelled => Ok(
+            lash_core_store::turn_input_vocabulary::PendingTurnInputCancelOutcome::AlreadyCancelled(
+                input,
+            ),
+        ),
+        lash_core_store::turn_input_vocabulary::TurnInputStateKind::Completed => Ok(
+            lash_core_store::turn_input_vocabulary::PendingTurnInputCancelOutcome::AlreadyCompleted(
+                input,
+            ),
+        ),
+        lash_core_store::turn_input_vocabulary::TurnInputStateKind::PendingActive
+        | lash_core_store::turn_input_vocabulary::TurnInputStateKind::DeferredNextTurn
+        | lash_core_store::turn_input_vocabulary::TurnInputStateKind::Accepted => {
             if let Some(run) = admitted_run {
                 return Ok(
-                    lash_core_execution::PendingTurnInputCancelOutcome::AlreadyAdmitted {
+                    lash_core_store::turn_input_vocabulary::PendingTurnInputCancelOutcome::AlreadyAdmitted {
                         input,
                         run: TurnId::parse(run)?,
                     },
@@ -42,7 +46,7 @@ pub(super) fn cancel_pending_turn_input_row_conn(
                 params![
                     input.session_id.as_str(),
                     input.input_id.as_str(),
-                    lash_core_execution::runtime::TurnInputStateKind::Cancelled.as_str(),
+                    lash_core_store::turn_input_vocabulary::TurnInputStateKind::Cancelled.as_str(),
                     crate::clamp_epoch_ms(now),
                 ],
             )
@@ -53,11 +57,15 @@ pub(super) fn cancel_pending_turn_input_row_conn(
                     input.input_id
                 )));
             }
-            input.state = lash_core_execution::TurnInputState::Cancelled {
+            input.state = lash_core_store::turn_input_vocabulary::TurnInputState::Cancelled {
                 ingress: input.state.ingress(),
                 at_ms: now.min(i64::MAX as u64),
             };
-            Ok(lash_core_execution::PendingTurnInputCancelOutcome::Cancelled(input))
+            Ok(
+                lash_core_store::turn_input_vocabulary::PendingTurnInputCancelOutcome::Cancelled(
+                    input,
+                ),
+            )
         }
     }
 }
@@ -68,7 +76,7 @@ pub(crate) fn load_turn_cancel_request_conn(
     conn: &Connection,
     session_id: &SessionId,
     turn_id: &TurnId,
-) -> Result<Option<lash_core_execution::facade_support::TurnCancelRequest>, StoreError> {
+) -> Result<Option<lash_core_store::turn_control_vocabulary::TurnCancelRequest>, StoreError> {
     let row = conn
         .query_row(
             crate::turn_ingress::turn_ingress_sql()
@@ -92,8 +100,10 @@ pub(crate) fn load_turn_cancel_request_conn(
         return Ok(None);
     };
     Ok(Some(
-        lash_core_execution::facade_support::TurnCancelRequest {
-            address: lash_core_execution::facade_support::TurnAddress::new(session_id, turn_id),
+        lash_core_store::turn_control_vocabulary::TurnCancelRequest {
+            address: lash_core_store::turn_control_vocabulary::TurnAddress::new(
+                session_id, turn_id,
+            ),
             request_id,
             origin,
             reason,
@@ -104,24 +114,24 @@ pub(crate) fn load_turn_cancel_request_conn(
 }
 
 pub(super) fn requested_append_ancestor(
-    stamp: &lash_core_execution::RuntimeTurnCommitStamp,
+    stamp: &lash_core_store::store::RuntimeTurnCommitStamp,
 ) -> Option<&str> {
     match &stamp.append_request_identity {
-        lash_core_execution::AppendRequestIdentity::Append {
+        lash_core_store::store::AppendRequestIdentity::Append {
             requested_ancestor_node_id,
             ..
         } => requested_ancestor_node_id.as_deref(),
-        lash_core_execution::AppendRequestIdentity::PlainCommit
-        | lash_core_execution::AppendRequestIdentity::SemanticBoundary { .. } => None,
+        lash_core_store::store::AppendRequestIdentity::PlainCommit
+        | lash_core_store::store::AppendRequestIdentity::SemanticBoundary { .. } => None,
     }
 }
 
 pub(super) fn append_identity_columns(
-    identity: &lash_core_execution::AppendRequestIdentity,
+    identity: &lash_core_store::store::AppendRequestIdentity,
 ) -> (Option<&str>, Option<i64>, Option<i64>) {
     match identity {
-        lash_core_execution::AppendRequestIdentity::PlainCommit => (None, None, None),
-        lash_core_execution::AppendRequestIdentity::Append {
+        lash_core_store::store::AppendRequestIdentity::PlainCommit => (None, None, None),
+        lash_core_store::store::AppendRequestIdentity::Append {
             encoding_version,
             request_hash,
             requested_node_count,
@@ -133,7 +143,7 @@ pub(super) fn append_identity_columns(
         ),
         // A semantic-boundary identity persists without a node count; the
         // NULL count is what distinguishes its family on decode (FIG-2480).
-        lash_core_execution::AppendRequestIdentity::SemanticBoundary {
+        lash_core_store::store::AppendRequestIdentity::SemanticBoundary {
             operation: _,
             encoding_version,
             request_hash,

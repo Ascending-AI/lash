@@ -11,7 +11,7 @@ use std::sync::{
 };
 
 #[cfg(feature = "perf-witness")]
-use lash_core_execution::perf_witness::sql_shapes::work::BindingCapture;
+use lash_core_ids::perf_witness::sql_shapes::work::BindingCapture;
 
 /// The query owns admission; encoder values only borrow its copyable token.
 /// Cancellation before argument extraction must release the admission too.
@@ -46,7 +46,7 @@ impl<Q> Bound<Q> {
     fn new(inner: Q) -> Self {
         Self {
             inner,
-            bytes: (lash_core_execution::facade_support::sql::Window::current().is_some()
+            bytes: (lash_core_ids::operational_metrics::sql::Window::current().is_some()
                 || cfg!(any(test, feature = "perf-witness")))
             .then(Arc::default),
             unmeasured_binds: false,
@@ -113,7 +113,7 @@ impl<'q, Q: Execute<'q, Postgres>> Execute<'q, Postgres> for Bound<Q> {
             self.bytes.as_ref().map(|b| b.load(Ordering::Relaxed)),
             self.exact.take(),
         );
-        if let Some(window) = lash_core_execution::facade_support::sql::Window::current() {
+        if let Some(window) = lash_core_ids::operational_metrics::sql::Window::current() {
             window.payload(
                 self.inner.sql(),
                 0,
@@ -125,7 +125,7 @@ impl<'q, Q: Execute<'q, Postgres>> Execute<'q, Postgres> for Bound<Q> {
         }
         let arguments = self.inner.take_arguments()?;
         if arguments.is_some() && self.unmeasured_binds {
-            if let Some(window) = lash_core_execution::facade_support::sql::Window::current() {
+            if let Some(window) = lash_core_ids::operational_metrics::sql::Window::current() {
                 window.unmeasured_bound(self.inner.sql());
             }
             self.unmeasured_binds = false;

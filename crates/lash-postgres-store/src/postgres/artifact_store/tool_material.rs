@@ -3,11 +3,16 @@
 //! Run-segment and source edges and fenced like every other referrer, on the
 //! same referrer-then-artifact lock order as the other artifact writers.
 
-use lash_core_execution::store::ToolMaterialStore;
-use lash_core_execution::tool_run::{
-    MaterialBundle, MaterialHolder, MaterialLocation, MaterialOwner, MaterialPayload, MaterialRef,
-    MaterialRefusal, MaterialRetentionError, RetainedBundle,
-};
+use lash_core_store::store::ToolMaterialStore;
+use lash_core_store::tool_run::MaterialBundle;
+use lash_core_store::tool_run::MaterialHolder;
+use lash_core_store::tool_run::MaterialLocation;
+use lash_core_store::tool_run::MaterialOwner;
+use lash_core_store::tool_run::MaterialPayload;
+use lash_core_store::tool_run::MaterialRef;
+use lash_core_store::tool_run::MaterialRefusal;
+use lash_core_store::tool_run::MaterialRetentionError;
+use lash_core_store::tool_run::RetainedBundle;
 
 use super::*;
 use crate::support::store_sqlx_error;
@@ -140,7 +145,9 @@ impl ToolMaterialStore for PostgresLashVmArtifactStore {
                 },
             ));
         };
-        if bundle.artifact.store != lash_core_execution::ArtifactStoreId::ToolMaterial {
+        if bundle.artifact.store
+            != lash_core_store::artifact_referrer::ArtifactStoreId::ToolMaterial
+        {
             return Err(missing(first));
         }
         let referrer = holder.referrer();
@@ -192,7 +199,7 @@ impl ToolMaterialStore for PostgresLashVmArtifactStore {
         let MaterialLocation::RetainedArtifact { artifact } = &reference.location else {
             return Err(missing(reference));
         };
-        if artifact.store != lash_core_execution::ArtifactStoreId::ToolMaterial {
+        if artifact.store != lash_core_store::artifact_referrer::ArtifactStoreId::ToolMaterial {
             return Err(missing(reference));
         }
         let referrer = holder.referrer();

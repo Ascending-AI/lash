@@ -7,9 +7,10 @@
 
 use std::time::Duration;
 
-use lash_core_execution::{
-    DeploymentStore as _, SessionCatalogStore as _, SessionCommitStore as _, SessionId,
-};
+use lash_core_store::store::SessionCatalogStore as _;
+use lash_core_store::store::SessionCommitStore as _;
+use lash_execution_contracts::deployment::DeploymentStore as _;
+use lash_protocol_types::SessionId;
 
 use crate::testing::{BeforeTurnCommit, IsolatedDatabase};
 
@@ -17,7 +18,7 @@ use crate::testing::{BeforeTurnCommit, IsolatedDatabase};
 async fn read_the_feed(store: &crate::PostgresStore) {
     store
         .turns_changed_since(
-            lash_core_execution::store::TurnChangeCursor::initial(),
+            lash_core_store::store::TurnChangeCursor::initial(),
             std::num::NonZeroUsize::MIN,
         )
         .await
@@ -32,13 +33,13 @@ async fn isolated() -> Option<IsolatedDatabase> {
     Some(IsolatedDatabase::create(&database_url).await)
 }
 
-fn persisted_state(session_id: &SessionId) -> lash_core_execution::RuntimeSessionState {
-    lash_core_execution::RuntimeSessionState {
+fn persisted_state(session_id: &SessionId) -> lash_core_store::session_state::RuntimeSessionState {
+    lash_core_store::session_state::RuntimeSessionState {
         session_id: session_id.clone(),
-        ..lash_core_execution::RuntimeSessionState::fixture(
-            lash_core_execution::SessionPolicy::new(
-                lash_core_execution::TurnBudget::Unbounded,
-                lash_core_execution::MaxToolCalls::new(1024),
+        ..lash_core_store::session_state::RuntimeSessionState::fixture(
+            lash_core_store::session_policy::SessionPolicy::new(
+                lash_protocol_types::session_model::TurnBudget::Unbounded,
+                lash_protocol_types::session_model::MaxToolCalls::new(1024),
                 lash_core::NoProgressBudget::bounded(12),
             ),
         )
@@ -76,7 +77,9 @@ async fn a_held_turn_commit_does_not_hold_another_sessions_commit() {
     // uncommitted copy.
     store
         .commit_runtime_state(
-            lash_core_execution::RuntimeCommit::persisted_state_for_test(&persisted_state(&warm)),
+            lash_core_store::store::RuntimeCommit::persisted_state_for_test(&persisted_state(
+                &warm,
+            )),
         )
         .await
         .expect("the warm-up commit lands");
@@ -88,7 +91,7 @@ async fn a_held_turn_commit_does_not_hold_another_sessions_commit() {
         async move {
             store
                 .commit_runtime_state(
-                    lash_core_execution::RuntimeCommit::persisted_state_for_test(&state),
+                    lash_core_store::store::RuntimeCommit::persisted_state_for_test(&state),
                 )
                 .await
         }
@@ -98,7 +101,7 @@ async fn a_held_turn_commit_does_not_hold_another_sessions_commit() {
     tokio::time::timeout(
         Duration::from_secs(5),
         store.commit_runtime_state(
-            lash_core_execution::RuntimeCommit::persisted_state_for_test(&state),
+            lash_core_store::store::RuntimeCommit::persisted_state_for_test(&state),
         ),
     )
     .await

@@ -1,6 +1,7 @@
 use std::sync::Arc;
 
-use lash_core::plugin::{PluginError, PluginFactory};
+use lash_core::plugin::PluginFactory;
+use lash_execution_contracts::plugin_error::PluginError;
 
 use super::registration::register_rlm_protocol_plugin;
 use super::{
@@ -268,11 +269,14 @@ impl PluginFactory for RlmProtocolPluginFactory {
     /// it is pinned at creation, so the value at build is every run's.
     fn recipe(
         self: Arc<Self>,
-    ) -> std::result::Result<lash_core::plugin::PluginRecipe, lash_core::plugin::PluginError> {
+    ) -> std::result::Result<
+        lash_core::plugin::PluginRecipe,
+        lash_execution_contracts::plugin_error::PluginError,
+    > {
         let recipe_factory = Arc::clone(&self);
         let recipe: std::result::Result<
             lash_core::plugin::PluginRecipe,
-            lash_core::plugin::PluginError,
+            lash_execution_contracts::plugin_error::PluginError,
         > = {
             let mut reg = lash_core::plugin::PluginRegistrar::<RlmProtocolPlugin>::new(
                 lash_core::plugin::PluginFactory::id(self.as_ref()),
@@ -322,7 +326,11 @@ impl PluginFactory for RlmProtocolPluginFactory {
 
                     let runtime_state = Arc::new(
                         super::runtime_state::RlmRuntimeState::new(Arc::clone(&dialect)).map_err(
-                            |error| lash_core::plugin::PluginError::Session(error.to_string()),
+                            |error| {
+                                lash_execution_contracts::plugin_error::PluginError::Session(
+                                    error.to_string(),
+                                )
+                            },
                         )?,
                     );
                     let code_executor = Arc::new(super::runtime_state::CodeModeCodeExecutor::new(
@@ -363,7 +371,7 @@ impl RlmProtocolPluginFactory {
     pub fn declare_configuration(
         &self,
         registrar: &mut lash_core::plugin::ConfigRegistrar,
-    ) -> Result<(), lash_core::plugin::ConfigRegistrationError> {
+    ) -> Result<(), lash_execution_contracts::config_error::ConfigRegistrationError> {
         super::config_owner::register(
             registrar,
             super::config_owner::RlmConfigOwner {

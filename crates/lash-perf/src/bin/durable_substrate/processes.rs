@@ -5,11 +5,15 @@
 use std::time::{Duration, Instant};
 
 use anyhow::{Context as _, Result, bail};
-use lash_core_execution::runtime::actor::waits::{PinnedKey, ResolveAnswer, resolve_host};
-use lash_core_execution::{
-    Backend, LifetimeDecision, ProcessInput, ProcessProvenance, ProcessRegistration,
-};
+use lash_core_execution::runtime::actor::waits::ResolveAnswer;
+use lash_core_execution::runtime::actor::waits::resolve_host;
 use lash_durable::{ActorKey, ActorState};
+use lash_execution_contracts::backend::Backend;
+use lash_execution_contracts::process::LifetimeDecision;
+use lash_execution_contracts::process::ProcessInput;
+use lash_execution_contracts::process::ProcessProvenance;
+use lash_execution_contracts::process::ProcessRegistration;
+use lash_execution_contracts::waits::PinnedKey;
 use serde::Serialize;
 use tokio::sync::mpsc::UnboundedReceiver;
 
@@ -26,8 +30,8 @@ async fn start(backend: &Backend, token: &str, waits: usize) -> Result<ActorKey>
         ProcessInput::Engine {
             kind: KIND.to_owned(),
             payload: payload(token, waits),
-            launch: lash_core::EngineLaunch::new(
-                lash_core_execution::testing::process_execution_env_fixture_ref(),
+            launch: lash_execution_contracts::process::EngineLaunch::new(
+                lash_execution_contracts::testing::process_execution_env_fixture_ref(),
                 None,
             ),
         },

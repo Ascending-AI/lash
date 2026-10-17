@@ -5,9 +5,9 @@
 use std::sync::atomic::{AtomicUsize, Ordering};
 use std::sync::{Arc, Mutex};
 
-use lash_core_execution::StoreSet;
 use lash_durable::DurableStore;
 use lash_durable_test::{OffClockWork, SimClock};
+use lash_execution_contracts::backend::StoreSet;
 use lash_protocol_types::sync::MutexExt as _;
 
 /// Where a scenario's database lives.
@@ -99,11 +99,11 @@ pub async fn open(
                 .attachment_store(),
                 clock,
             );
-            lash_core_execution::testing::process_execution_env_fixture(
+            lash_execution_contracts::testing::process_execution_env_fixture(
                 stores.process_env_store().as_ref(),
             )
             .await;
-            let database = lash_core_execution::StoreSet::durable_store(&stores);
+            let database = lash_execution_contracts::backend::StoreSet::durable_store(&stores);
             keep.lock_recover().extend([
                 Box::new(isolated) as Box<dyn std::any::Any + Send>,
                 Box::new(attachments),

@@ -1568,9 +1568,11 @@ impl RuntimeTurnDriver<'_> {
 /// recorded callback or an unreadable stream-state format parks the turn, an
 /// invocation failure is a live fault the next derivation retries from the
 /// same receipt, and any other failure is the hook's own.
-fn response_derivation_error(err: crate::PluginError) -> RuntimeEffectControllerError {
+fn response_derivation_error(
+    err: lash_execution_contracts::plugin_error::PluginError,
+) -> RuntimeEffectControllerError {
     match err {
-        crate::PluginError::Runtime(error)
+        lash_execution_contracts::plugin_error::PluginError::Runtime(error)
             if matches!(
                 error.code,
                 crate::RuntimeErrorCode::RecordedCallbackUnavailable
@@ -1579,7 +1581,7 @@ fn response_derivation_error(err: crate::PluginError) -> RuntimeEffectController
         {
             RuntimeEffectControllerError::from(error)
         }
-        err @ crate::PluginError::Invoke(_) => {
+        err @ lash_execution_contracts::plugin_error::PluginError::Invoke(_) => {
             // The receipt is committed: an invocation failure leaves only
             // this derivation to run again.
             let mut failure = crate::PluginOperationFailure::from(err);
@@ -1591,10 +1593,10 @@ fn response_derivation_error(err: crate::PluginError) -> RuntimeEffectController
             });
             error
         }
-        err => {
-            RuntimeEffectControllerError::from(crate::PluginError::Operation(Box::new(err.into())))
-                .retryable_uncommitted_derivation()
-        }
+        err => RuntimeEffectControllerError::from(
+            lash_execution_contracts::plugin_error::PluginError::Operation(Box::new(err.into())),
+        )
+        .retryable_uncommitted_derivation(),
     }
 }
 

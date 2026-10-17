@@ -26,12 +26,14 @@ use lash_core::facade_support::ProviderHandle;
 use lash_core::llm::types::{LlmRequest, LlmResponse, LlmStreamEvent, StreamBlockIdentity};
 use lash_core::runtime::durable::session::SessionActivation;
 use lash_core::{ExecutionPolicy, LlmOutputPart, ToolCall, ToolOutcome};
-use lash_core_execution::{
-    Backend, BackendParts, DurableSettings, NoProjectionProviders, StoreSet,
-};
+use lash_core_execution::DurableSettings;
 use lash_durable::runner::Activation;
 use lash_durable::{ActorKey, ActorState, DurableStore, LeaseConfig};
 use lash_durable_test::{Matrix, Scenario, SimClock, SimNodes, SimNodesConfig, Tripwire};
+use lash_execution_contracts::backend::Backend;
+use lash_execution_contracts::backend::BackendParts;
+use lash_execution_contracts::backend::StoreSet;
+use lash_execution_contracts::projection::NoProjectionProviders;
 use lash_protocol_types::sync::MutexExt as _;
 use lash_protocol_types::{SessionId, TurnId};
 
@@ -318,7 +320,7 @@ impl Wide {
 impl Scenario for Wide {
     async fn database(&self, clock: Arc<SimClock>) -> Arc<dyn DurableStore> {
         let stores = small_pool(self.postgres_url.clone(), clock, &self.keep).await;
-        let database = lash_core_execution::StoreSet::durable_store(stores.as_ref());
+        let database = lash_execution_contracts::backend::StoreSet::durable_store(stores.as_ref());
         *self.backend.lock_recover() = Some(
             Backend::assemble(BackendParts {
                 stores,

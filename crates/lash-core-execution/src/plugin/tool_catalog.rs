@@ -77,7 +77,7 @@ impl SessionContributions {
 pub struct TurnContributions {
     pub events: Vec<PluginRuntimeEvent>,
     /// Published with the callback's recorded decision (K10).
-    pub state: super::StateCommands,
+    pub state: lash_execution_contracts::state_commands::StateCommands,
     pub session: SessionContributions,
 }
 
@@ -91,7 +91,7 @@ pub struct AfterTurnContributions {
     pub records: Vec<PluginRecordContribution>,
     /// Committed with the turn, and published once that commit is
     /// acknowledged.
-    pub state: super::StateCommands,
+    pub state: lash_execution_contracts::state_commands::StateCommands,
     pub session: SessionContributions,
 }
 

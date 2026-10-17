@@ -13,7 +13,7 @@ use std::ffi::{c_int, c_void};
 use std::sync::Arc;
 use std::sync::atomic::{AtomicBool, Ordering};
 
-use lash_core_execution::Clock;
+use lash_core_ids::clock::Clock;
 use lash_durable::{ActorKey, ActorState, BootId, NodeId, Owner, WakeBatch, Woken};
 use rusqlite::Connection;
 

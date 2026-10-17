@@ -11,6 +11,16 @@
 //!   nothing of it: no commit lands under a stale epoch.
 //! - **Tripwire:** draining mail re-runs nothing.
 
+use lash_core::ActorContext;
+use lash_core::AdmittedScope;
+use lash_core::CancellationToken;
+use lash_core::InputId;
+use lash_core::PendingTurnInputDraft;
+use lash_core::PendingTurnInputReadStatus;
+use lash_core::SessionId;
+use lash_core::TurnId;
+use lash_core::TurnInput;
+use lash_core::TurnInputIngress;
 use lash_core::durable_port::domain::SESSION_ACTOR_FORMATS;
 use lash_core::durable_port::runner::{Activation, Exit, Owned};
 use lash_core::durable_port::{
@@ -18,11 +28,9 @@ use lash_core::durable_port::{
     StateRevision,
 };
 use lash_core::runtime::durable::session_mail::{OneInputPerRun, drain_session_mail};
-use lash_core::{
-    ActorContext, AdmittedScope, Backend, CancellationToken, InputId, PendingTurnInputDraft,
-    PendingTurnInputReadStatus, SessionId, StoreSet, TurnId, TurnInput, TurnInputIngress,
-};
 use lash_durable_test::{Cut, Fault, Scenario, SimClock, SimNodes, SimNodesConfig, Tripwire};
+use lash_execution_contracts::backend::Backend;
+use lash_execution_contracts::backend::StoreSet;
 use lash_protocol_types::sync::MutexExt as _;
 use std::sync::{Arc, Mutex, OnceLock};
 

@@ -23,6 +23,7 @@ openai = ["http-transport", "lash/openai"]
 http-transport = ["lash/http-transport"]
 
 [dependencies]
+lash-execution-contracts = { workspace = true }
 lash = { path = "../lash", package = "lash-runtime", default-features = false, features = ["testing"] }
 lash-core = { workspace = true, features = ["testing"] }
 lash-core-store.workspace = true

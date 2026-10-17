@@ -7,12 +7,13 @@
 
 use std::sync::Arc;
 
-use lash_core_execution::{AttachmentStore, Clock};
+use lash_core_ids::clock::Clock;
+use lash_core_store::attachments::AttachmentStore;
 
 use crate::{PostgresLashVmArtifactStore, PostgresProcessRegistry, PostgresStorage, PostgresStore};
 
 /// Every persistence port of one PostgreSQL database: the
-/// [`StoreSet`](lash_core_execution::StoreSet) the durable engine persists
+/// [`StoreSet`](lash_execution_contracts::backend::StoreSet) the durable engine persists
 /// its state through.
 ///
 /// The session-store factory declares the registry shared, because it is: the
@@ -25,7 +26,7 @@ pub struct PostgresStoreSet {
 struct StoreParts {
     storage: PostgresStorage,
     /// `postgres:<database>.<schema>`, the catalog this store set is over.
-    binding: lash_core_execution::StoreBindingId,
+    binding: lash_execution_contracts::backend::StoreBindingId,
     clock: Arc<dyn Clock>,
     /// The clock the durable store reads in place of the database's: a
     /// test's virtual clock, never set outside tests.
@@ -44,7 +45,7 @@ impl PostgresStoreSet {
         Self::with_clock(
             storage,
             attachment_store,
-            Arc::new(lash_core_execution::facade_support::SystemClock),
+            Arc::new(lash_core_ids::clock::SystemClock),
         )
     }
 
@@ -57,7 +58,7 @@ impl PostgresStoreSet {
         Self {
             inner: Arc::new(StoreParts {
                 storage: storage.clone(),
-                binding: lash_core_execution::StoreBindingId::new(format!(
+                binding: lash_execution_contracts::backend::StoreBindingId::new(format!(
                     "postgres:{}",
                     storage.catalog_id()
                 )),
@@ -119,7 +120,7 @@ impl PostgresStoreSet {
     }
 }
 
-impl lash_core_execution::StoreSet for PostgresStoreSet {
+impl lash_execution_contracts::backend::StoreSet for PostgresStoreSet {
     fn durable_store(&self) -> Arc<dyn lash_durable::DurableStore> {
         let store = self.inner.storage.durable_store();
         #[cfg(any(test, feature = "testing"))]
@@ -137,7 +138,7 @@ impl lash_core_execution::StoreSet for PostgresStoreSet {
         self.inner.storage.wake_sink().clone()
     }
 
-    fn binding_identity(&self) -> &lash_core_execution::StoreBindingId {
+    fn binding_identity(&self) -> &lash_execution_contracts::backend::StoreBindingId {
         &self.inner.binding
     }
 
@@ -145,30 +146,36 @@ impl lash_core_execution::StoreSet for PostgresStoreSet {
         Arc::clone(&self.inner.clock)
     }
 
-    fn session_store_factory(&self) -> Arc<dyn lash_core_execution::DeploymentStore> {
+    fn session_store_factory(
+        &self,
+    ) -> Arc<dyn lash_execution_contracts::deployment::DeploymentStore> {
         PostgresStoreSet::session_store_factory(self)
     }
-    fn attachment_referrers(&self) -> Arc<dyn lash_core_execution::AttachmentReferrers> {
+    fn attachment_referrers(&self) -> Arc<dyn lash_core_store::store::AttachmentReferrers> {
         PostgresStoreSet::session_store_factory(self)
     }
 
-    fn process_registry(&self) -> Arc<dyn lash_core_execution::ProcessRegistry> {
+    fn process_registry(&self) -> Arc<dyn lash_execution_contracts::process::ProcessRegistry> {
         PostgresStoreSet::process_registry(self)
     }
 
-    fn tool_material_store(&self) -> Arc<dyn lash_core_execution::store::ToolMaterialStore> {
+    fn tool_material_store(&self) -> Arc<dyn lash_core_store::store::ToolMaterialStore> {
         PostgresStoreSet::process_env_store(self)
     }
 
-    fn process_authority_reads(&self) -> Arc<dyn lash_core_execution::ProcessAuthorityReads> {
+    fn process_authority_reads(
+        &self,
+    ) -> Arc<dyn lash_execution_contracts::backend::ProcessAuthorityReads> {
         self.inner.process_registry.clone()
     }
 
-    fn process_env_store(&self) -> Arc<dyn lash_core_execution::ProcessEnvStore> {
+    fn process_env_store(&self) -> Arc<dyn lash_execution_contracts::process::ProcessEnvStore> {
         PostgresStoreSet::process_env_store(self)
     }
 
-    fn turn_prelude_store(&self) -> Arc<dyn lash_core_execution::TurnPreludeStore> {
+    fn turn_prelude_store(
+        &self,
+    ) -> Arc<dyn lash_execution_contracts::turn_prelude::TurnPreludeStore> {
         PostgresStoreSet::process_env_store(self)
     }
 
@@ -178,17 +185,21 @@ impl lash_core_execution::StoreSet for PostgresStoreSet {
 
     /// The store that keeps the process execution environments keeps the
     /// Lash VM module artifacts too.
-    fn module_artifacts(&self) -> Arc<dyn lash_core_execution::ModuleArtifactStore> {
+    fn module_artifacts(
+        &self,
+    ) -> Arc<dyn lash_execution_contracts::module_artifacts::ModuleArtifactStore> {
         PostgresStoreSet::process_env_store(self)
     }
 
     /// Definition descriptors live beside the modules and environments their
     /// manifests name, so one transaction holds a whole closure.
-    fn definition_store(&self) -> Arc<dyn lash_core_execution::ProcessDefinitionStore> {
+    fn definition_store(
+        &self,
+    ) -> Arc<dyn lash_execution_contracts::process::ProcessDefinitionStore> {
         PostgresStoreSet::process_env_store(self)
     }
 
-    fn recovery_leader(&self) -> Arc<dyn lash_core_execution::store::RecoveryLeaderStore> {
+    fn recovery_leader(&self) -> Arc<dyn lash_core_store::store::RecoveryLeaderStore> {
         Arc::new(crate::recovery_leader::PostgresRecoveryLeader::new(
             self.inner.storage.pool().clone(),
             self.inner.storage.fence.clone(),
@@ -197,12 +208,12 @@ impl lash_core_execution::StoreSet for PostgresStoreSet {
 
     fn obligation_ledger(
         &self,
-        kind: lash_core_execution::store::ObligationKind,
-    ) -> Arc<dyn lash_core_execution::store::ObligationLedger> {
+        kind: lash_core_store::store::ObligationKind,
+    ) -> Arc<dyn lash_core_store::store::ObligationLedger> {
         self.inner.storage.obligation_ledger(kind)
     }
 
-    fn artifact_cleanup(&self) -> Arc<dyn lash_core_execution::store::ArtifactCleanupLedger> {
+    fn artifact_cleanup(&self) -> Arc<dyn lash_core_store::store::ArtifactCleanupLedger> {
         self.inner.storage.artifact_cleanup()
     }
 }

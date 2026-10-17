@@ -177,6 +177,7 @@ The generated region below is checked against the live filenames and headings.
 | 0143 | [Plugins are fully trusted code](0143-plugins-are-fully-trusted-code.md) |
 | 0144 | [Declared reads are owned by the caller's saved state](0144-declared-reads-are-owned-by-the-callers-saved-state.md) |
 | 0145 | [Kernel execution and its checkpoints share one persistent heap](0145-kernel-execution-and-its-checkpoints-share-one-persistent-heap.md) |
+| 0146 | [SQL stores depend on execution contracts](0146-sql-stores-depend-on-execution-contracts.md) |
 <!-- adr-index:end -->
 
 ## Replaced and retired decisions

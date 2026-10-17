@@ -10,18 +10,18 @@
 #![allow(clippy::disallowed_methods)]
 
 use super::*;
-use lash_core_execution::TurnId;
-use lash_core_execution::TurnInputStore as _;
-use lash_core_execution::store::RunStore as _;
-use lash_core_execution::{SessionCatalogStore as _, SessionHistoryStore as _};
+use lash_core_store::store::RunStore as _;
+use lash_core_store::store::SessionCatalogStore as _;
+use lash_core_store::store::SessionHistoryStore as _;
+use lash_core_store::store::TurnInputStore as _;
+use lash_protocol_types::TurnId;
 use sqlx::postgres::PgPoolOptions;
 use std::time::Duration;
 
 #[tokio::test(flavor = "current_thread")]
 async fn runtime_pool_failures_observe_the_injected_store_instruments() {
     let observed = lash_core::operational_metrics::TestMetrics::install();
-    let runtime =
-        lash_core::trace::TraceRuntime::new(Arc::new(lash_core::facade_support::SystemClock));
+    let runtime = lash_core::trace::TraceRuntime::new(Arc::new(lash_core_ids::clock::SystemClock));
     let observer = StoreObserver::new(runtime.metrics().clone());
     let pool = PgPoolOptions::new()
         .connect_lazy("postgres://fixture:fixture@127.0.0.1:1/fixture")
@@ -58,18 +58,20 @@ async fn persisted_record_decode_store(
         )
         .await
         .expect("admit persisted-record decode session");
-    let state = lash_core_execution::RuntimeSessionState {
+    let state = lash_core_store::session_state::RuntimeSessionState {
         session_id: session_id.clone(),
-        ..lash_core_execution::RuntimeSessionState::fixture(
-            lash_core_execution::SessionPolicy::new(
-                lash_core_execution::TurnBudget::Unbounded,
-                lash_core_execution::MaxToolCalls::new(1024),
+        ..lash_core_store::session_state::RuntimeSessionState::fixture(
+            lash_core_store::session_policy::SessionPolicy::new(
+                lash_protocol_types::session_model::TurnBudget::Unbounded,
+                lash_protocol_types::session_model::MaxToolCalls::new(1024),
                 lash_core::NoProgressBudget::bounded(12),
             ),
         )
     };
     store
-        .commit_runtime_state(lash_core_execution::RuntimeCommit::persisted_state_for_test(&state))
+        .commit_runtime_state(
+            lash_core_store::store::RuntimeCommit::persisted_state_for_test(&state),
+        )
         .await
         .expect("seed persisted-record decode session");
     (session_id, store)
@@ -144,7 +146,7 @@ async fn postgres_persisted_record_decode_classification_checkpoint_when_configu
     let checkpoint_error = checkpoint_store
         .load_session_window(
             &checkpoint_session_id,
-            lash_core_execution::store::WindowSelector::Current,
+            lash_core_store::store::WindowSelector::Current,
         )
         .await
         .expect_err("malformed checkpoint MessagePack must refuse");
@@ -183,32 +185,37 @@ async fn seed_failure_evidence_session(
         )
         .await
         .expect("bind receipt-refusal session");
-    let state = lash_core_execution::RuntimeSessionState {
+    let state = lash_core_store::session_state::RuntimeSessionState {
         session_id: SessionId::fixture(session_id.to_string()),
-        ..lash_core_execution::RuntimeSessionState::fixture(
-            lash_core_execution::SessionPolicy::new(
-                lash_core_execution::TurnBudget::Unbounded,
-                lash_core_execution::MaxToolCalls::new(1024),
+        ..lash_core_store::session_state::RuntimeSessionState::fixture(
+            lash_core_store::session_policy::SessionPolicy::new(
+                lash_protocol_types::session_model::TurnBudget::Unbounded,
+                lash_protocol_types::session_model::MaxToolCalls::new(1024),
                 lash_core::NoProgressBudget::bounded(12),
             ),
         )
     };
-    let mut commit = lash_core_execution::RuntimeCommit::persisted_state_for_test(&state);
-    commit.failure_evidence = vec![lash_core_execution::TurnFailureEvidence {
-        partial_output: Some(lash_core_execution::TurnFailurePartialOutput::Complete {
-            text: "settled partial output".to_string(),
-        }),
-        billed_usage: lash_core_execution::llm::types::LlmUsage {
-            output_tokens: 3,
-            ..Default::default()
+    let mut commit = lash_core_store::store::RuntimeCommit::persisted_state_for_test(&state);
+    commit.failure_evidence = vec![
+        lash_core_store::turn_failure_evidence::TurnFailureEvidence {
+            partial_output: Some(
+                lash_core_store::turn_failure_evidence::TurnFailurePartialOutput::Complete {
+                    text: "settled partial output".to_string(),
+                },
+            ),
+            billed_usage: lash_protocol_types::session_model::LlmUsage {
+                output_tokens: 3,
+                ..Default::default()
+            },
+            refusal: lash_core_store::turn_failure_evidence::ChargeSafetyRefusalEvidence {
+                denial_reason:
+                    lash_protocol_types::llm::types::ChargeSafetyDenialReason::GuaranteeRequired,
+                protocol_position: lash_protocol_types::llm::types::ProtocolPosition::OutputStarted,
+                attempt_number: 1,
+                attempt_count: 1,
+            },
         },
-        refusal: lash_core_execution::ChargeSafetyRefusalEvidence {
-            denial_reason: lash_core_execution::ChargeSafetyDenialReason::GuaranteeRequired,
-            protocol_position: lash_core_execution::ProtocolPosition::OutputStarted,
-            attempt_number: 1,
-            attempt_count: 1,
-        },
-    }];
+    ];
     store
         .commit_runtime_state(commit)
         .await
@@ -308,7 +315,7 @@ async fn turn_failure_reopen_refuses_a_newer_receipt_version() {
         eprintln!("skipping Postgres receipt refusal: database URL is not set");
         return;
     };
-    let newer = lash_core_execution::store::RUNTIME_COMMIT_RECEIPT_SCHEMA_VERSION + 1;
+    let newer = lash_core_store::store::RUNTIME_COMMIT_RECEIPT_SCHEMA_VERSION + 1;
     let bad_json = format!(r#"{{"schema_version":{newer},"failure_evidence":[{{}}]}}"#);
     let (storage, _database_lock) = seed_failure_evidence_session(SESSION_ID, &bad_json).await;
 
@@ -329,7 +336,7 @@ async fn turn_failure_reopen_refuses_a_newer_receipt_version() {
                 actual,
                 expected,
             } if *actual == newer
-                && *expected == lash_core_execution::store::RUNTIME_COMMIT_RECEIPT_SCHEMA_VERSION
+                && *expected == lash_core_store::store::RUNTIME_COMMIT_RECEIPT_SCHEMA_VERSION
         ),
         "the newer-version receipt refusal must be the typed version error: {error:?}"
     );
@@ -360,7 +367,7 @@ async fn direct_session_store_defers_missing_identity_validation() {
             )
             .await
             .expect("admit missing direct-constructor session"),
-        lash_core_execution::SessionAdmission::Created
+        lash_core_store::store::SessionAdmission::Created
     );
     // FIG-4951: fixture setup must preserve the seeded feed clock. A missing
     // row refuses allocation just like an exhausted sequence, poisoning every
@@ -428,7 +435,7 @@ async fn postgres_graph_generation_uniqueness_is_typed() {
         &mut connection,
         &session_id,
         3,
-        &lash_core_execution::NodeId::fixture(second_node.as_str()),
+        &lash_protocol_types::NodeId::fixture(second_node.as_str()),
     )
     .await;
     assert!(matches!(
@@ -463,7 +470,7 @@ lash_conformance::checkpoint_admission_probe_tests!({
     let teardown_session = session_id.clone();
     (
         database_lock,
-        store as Arc<dyn lash_core_execution::RuntimeStore>,
+        store as Arc<dyn lash_core_store::store::RuntimeStore>,
         session_id,
         move || counting_store.checkpoint_admission_counts(),
         async move {
@@ -507,7 +514,7 @@ async fn arming_a_delete_and_a_concurrent_writer_never_both_win() {
     ));
     let store = std::sync::Arc::new(storage.store());
     let factory = storage.session_store_factory();
-    let attachment_id = lash_core_execution::attachments::content_id(
+    let attachment_id = lash_core_store::attachments::content_id(
         format!("fence-race-{}", std::process::id()).as_bytes(),
     );
     sqlx::query("DELETE FROM lash_attachment_condemnations WHERE attachment_id = $1")
@@ -518,10 +525,10 @@ async fn arming_a_delete_and_a_concurrent_writer_never_both_win() {
     let intent = {
         let session_id = session_id.clone();
         let attachment_id = attachment_id.clone();
-        move || lash_core_execution::AttachmentWrite {
+        move || lash_core_store::store::AttachmentWrite {
             attachment_id: attachment_id.clone(),
-            claim: lash_core_execution::ReferrerClaim::unguarded(
-                lash_core_execution::ArtifactReferrer::Session(session_id.clone()),
+            claim: lash_core_store::artifact_referrer::ReferrerClaim::unguarded(
+                lash_core_store::artifact_referrer::ArtifactReferrer::Session(session_id.clone()),
             )
             .expect("claim"),
         }
@@ -530,20 +537,20 @@ async fn arming_a_delete_and_a_concurrent_writer_never_both_win() {
     crate::attachments::FENCE_WRITER_WINDOW_DELAY_MS
         .store(20, std::sync::atomic::Ordering::Relaxed);
 
-    let pass = lash_core_execution::AttachmentRootSet::begin_attachment_sweep(&factory)
+    let pass = lash_core_store::attachments::AttachmentRootSet::begin_attachment_sweep(&factory)
         .await
         .expect("open an attachment sweep pass");
     // Both orderings, every round: the fixed code holds for all of them.
     for round in 0..12 {
         assert_eq!(
-            lash_core_execution::AttachmentRootSet::condemn_attachment(
+            lash_core_store::attachments::AttachmentRootSet::condemn_attachment(
                 &factory,
                 &attachment_id,
                 &pass
             )
             .await
             .expect("condemn"),
-            lash_core_execution::AttachmentCondemnation::Condemned,
+            lash_core_store::store::AttachmentCondemnation::Condemned,
             "round {round}: the digest must start each round rootless and free"
         );
 
@@ -551,7 +558,7 @@ async fn arming_a_delete_and_a_concurrent_writer_never_both_win() {
             let store = std::sync::Arc::clone(&store);
             let intent = intent.clone();
             async move {
-                lash_core_execution::AttachmentReferrers::begin_attachment_write(
+                lash_core_store::store::AttachmentReferrers::begin_attachment_write(
                     &*store,
                     &(intent()),
                 )
@@ -566,7 +573,7 @@ async fn arming_a_delete_and_a_concurrent_writer_never_both_win() {
             // outcome, and the invariant below holds for either ordering.
             tokio::time::sleep(std::time::Duration::from_millis(5)).await;
         }
-        let armed = lash_core_execution::AttachmentRootSet::arm_attachment_delete(
+        let armed = lash_core_store::attachments::AttachmentRootSet::arm_attachment_delete(
             &factory,
             &attachment_id,
             &pass,
@@ -575,17 +582,19 @@ async fn arming_a_delete_and_a_concurrent_writer_never_both_win() {
         .expect("arm");
         let fence = writer.await.expect("join writer").expect("fenced write");
 
-        let contains_ref =
-            lash_core_execution::AttachmentReferrers::attachment_referrers(&*store, &attachment_id)
-                .await
-                .map(|refs| !refs.is_empty())
-                .expect("contains_ref");
+        let contains_ref = lash_core_store::store::AttachmentReferrers::attachment_referrers(
+            &*store,
+            &attachment_id,
+        )
+        .await
+        .map(|refs| !refs.is_empty())
+        .expect("contains_ref");
         match (armed, fence) {
             // The sweeper won: the delete is armed and the writer parked
             // without recording anything, so no bytes can land inside it.
             (
-                lash_core_execution::AttachmentDeleteArming::Armed,
-                lash_core_execution::AttachmentWriteFence::ReclamationInFlight,
+                lash_core_store::store::AttachmentDeleteArming::Armed,
+                lash_core_store::store::AttachmentWriteFence::ReclamationInFlight,
             ) => {
                 assert!(
                     !contains_ref,
@@ -595,15 +604,15 @@ async fn arming_a_delete_and_a_concurrent_writer_never_both_win() {
             // The writer won: it took the digest back before the delete was
             // armed, and the sweeper issues no delete at all.
             (
-                lash_core_execution::AttachmentDeleteArming::Revoked,
-                lash_core_execution::AttachmentWriteFence::Granted(permit),
+                lash_core_store::store::AttachmentDeleteArming::Revoked,
+                lash_core_store::store::AttachmentWriteFence::Granted(permit),
             ) => {
                 assert!(
                     contains_ref,
                     "round {round}: a granted writer records its intent"
                 );
                 let completed_intent = intent();
-                lash_core_execution::AttachmentReferrers::complete_attachment_write(
+                lash_core_store::store::AttachmentReferrers::complete_attachment_write(
                     &*store,
                     &completed_intent,
                     permit,
@@ -618,16 +627,16 @@ async fn arming_a_delete_and_a_concurrent_writer_never_both_win() {
             ),
         }
 
-        lash_core_execution::AttachmentRootSet::settle_attachment_condemnation(
+        lash_core_store::attachments::AttachmentRootSet::settle_attachment_condemnation(
             &factory,
             &attachment_id,
             &pass,
-            lash_core_execution::AttachmentCondemnationSettlement::Spared,
+            lash_core_store::store::AttachmentCondemnationSettlement::Spared,
         )
         .await
         .expect("spare");
         if contains_ref {
-            lash_core_execution::AttachmentReferrers::forget_attachment_ref(
+            lash_core_store::store::AttachmentReferrers::forget_attachment_ref(
                 &*store,
                 &intent().claim.referrer(),
                 &attachment_id,
@@ -668,14 +677,14 @@ async fn attachment_gc_refuses_an_empty_postgres_root_database() {
         owning_process_id: None,
         pending_observer_intents: Vec::new(),
         session_id: SessionId::from("postgres-wrong-database-live-attachment"),
-        relation: lash_core_execution::SessionRelation::Root,
-        config: lash_core_execution::PersistedSessionConfig::new(
-            lash_core_execution::TurnBudget::Unbounded,
-            lash_core_execution::MaxToolCalls::new(1024),
+        relation: lash_core_store::session_identity::SessionRelation::Root,
+        config: lash_core_store::session_graph::PersistedSessionConfig::new(
+            lash_protocol_types::session_model::TurnBudget::Unbounded,
+            lash_protocol_types::session_model::MaxToolCalls::new(1024),
             lash_core::NoProgressBudget::bounded(12),
         ),
-        head: lash_core_execution::SessionCreationHead::Config,
-        retention: lash_core_execution::Retention::UntilGc,
+        head: lash_core_store::session_store_factory_types::SessionCreationHead::Config,
+        retention: lash_core_store::store::Retention::UntilGc,
     };
     live_store
         .admit_session(&request)
@@ -689,7 +698,7 @@ async fn attachment_gc_refuses_an_empty_postgres_root_database() {
     .await
     .expect("SQLite attachment store")
     .attachment_store();
-    let attachment = lash_core_execution::AttachmentStore::put(
+    let attachment = lash_core_store::attachments::AttachmentStore::put(
         backend.as_ref(),
         b"postgres-live-committed-blob".to_vec(),
         lash_protocol_types::AttachmentCreateMeta::new(
@@ -700,15 +709,17 @@ async fn attachment_gc_refuses_an_empty_postgres_root_database() {
     )
     .await
     .expect("put shared backend blob");
-    let live_intent = lash_core_execution::AttachmentWrite {
+    let live_intent = lash_core_store::store::AttachmentWrite {
         attachment_id: attachment.id.clone(),
-        claim: lash_core_execution::ReferrerClaim::unguarded(
-            lash_core_execution::ArtifactReferrer::Session(request.session_id.clone()),
+        claim: lash_core_store::artifact_referrer::ReferrerClaim::unguarded(
+            lash_core_store::artifact_referrer::ArtifactReferrer::Session(
+                request.session_id.clone(),
+            ),
         )
         .expect("claim"),
     };
-    let lash_core_execution::AttachmentWriteFence::Granted(live_permit) =
-        lash_core_execution::AttachmentReferrers::begin_attachment_write(
+    let lash_core_store::store::AttachmentWriteFence::Granted(live_permit) =
+        lash_core_store::store::AttachmentReferrers::begin_attachment_write(
             &*live_store,
             &(live_intent.clone()),
         )
@@ -717,17 +728,19 @@ async fn attachment_gc_refuses_an_empty_postgres_root_database() {
     else {
         panic!("a free digest must grant its writer");
     };
-    lash_core_execution::AttachmentReferrers::complete_attachment_write(
+    lash_core_store::store::AttachmentReferrers::complete_attachment_write(
         &*live_store,
         &live_intent,
         live_permit,
     )
     .await
     .expect("stamp live attachment upload");
-    lash_core_execution::AttachmentReferrers::acquire_attachment_refs(
+    lash_core_store::store::AttachmentReferrers::acquire_attachment_refs(
         &*live_store,
-        &lash_core_execution::ReferrerClaim::unguarded(
-            lash_core_execution::ArtifactReferrer::Session(request.session_id.clone()),
+        &lash_core_store::artifact_referrer::ReferrerClaim::unguarded(
+            lash_core_store::artifact_referrer::ArtifactReferrer::Session(
+                request.session_id.clone(),
+            ),
         )
         .expect("claim"),
         std::slice::from_ref(&attachment.id),
@@ -735,12 +748,12 @@ async fn attachment_gc_refuses_an_empty_postgres_root_database() {
     .await
     .expect("commit live attachment ref");
 
-    let result = lash_core_execution::attachments::reclaim_unreferenced_attachments(
+    let result = lash_core_store::attachments::reclaim_unreferenced_attachments(
         &wrong_factory,
         backend.as_ref(),
-        lash_core_execution::AttachmentReclamationPolicy::new(
+        lash_core_store::attachments::AttachmentReclamationPolicy::new(
             0,
-            lash_core_execution::EmptyRootSetPolicy::Refuse,
+            lash_core_store::attachments::EmptyRootSetPolicy::Refuse,
         ),
     )
     .await;
@@ -748,16 +761,20 @@ async fn attachment_gc_refuses_an_empty_postgres_root_database() {
     let failure = result.expect_err("an empty Postgres root database must refuse deletion");
     assert_eq!(
         failure.refusal(),
-        Some(&lash_core_execution::MaintenanceRefusal::EmptyRootSetUnauthorized),
+        Some(&lash_core_store::store::MaintenanceRefusal::EmptyRootSetUnauthorized),
         "an empty Postgres root database must refuse deletion: {failure:?}"
     );
     assert_eq!(
         failure.partial.scanned_blob_count, 1,
         "the refusal must carry the report accumulated before it: {failure:?}"
     );
-    lash_core_execution::AttachmentStore::get(backend.as_ref(), &attachment.id, 32 * 1024 * 1024)
-        .await
-        .expect("live committed blob survives the refused sweep");
+    lash_core_store::attachments::AttachmentStore::get(
+        backend.as_ref(),
+        &attachment.id,
+        32 * 1024 * 1024,
+    )
+    .await
+    .expect("live committed blob survives the refused sweep");
 }
 
 /// A session over `storage` with a committed head and one next-turn input
@@ -768,8 +785,8 @@ async fn admitted_input_fixture(
     run: &TurnId,
 ) -> (
     PostgresStore,
-    lash_core_execution::RuntimeSessionState,
-    lash_core_execution::InputId,
+    lash_core_store::session_state::RuntimeSessionState,
+    lash_protocol_types::InputId,
 ) {
     let session_id = SessionId::fixture(format!("{label}:{}", uuid::Uuid::new_v4()));
     let store = storage.store();
@@ -779,27 +796,31 @@ async fn admitted_input_fixture(
         )
         .await
         .expect("admit the fixture session");
-    let mut state = lash_core_execution::RuntimeSessionState {
+    let mut state = lash_core_store::session_state::RuntimeSessionState {
         session_id: session_id.clone(),
-        ..lash_core_execution::RuntimeSessionState::fixture(
-            lash_core_execution::SessionPolicy::new(
-                lash_core_execution::TurnBudget::Unbounded,
-                lash_core_execution::MaxToolCalls::new(1024),
+        ..lash_core_store::session_state::RuntimeSessionState::fixture(
+            lash_core_store::session_policy::SessionPolicy::new(
+                lash_protocol_types::session_model::TurnBudget::Unbounded,
+                lash_protocol_types::session_model::MaxToolCalls::new(1024),
                 lash_core::NoProgressBudget::bounded(12),
             ),
         )
     };
     let seeded = store
-        .commit_runtime_state(lash_core_execution::RuntimeCommit::persisted_state_for_test(&state))
+        .commit_runtime_state(
+            lash_core_store::store::RuntimeCommit::persisted_state_for_test(&state),
+        )
         .await
         .expect("seed the fixture head");
     state.head_revision = seeded.head_revision;
     let input = store
-        .enqueue_pending_turn_input(lash_core_execution::PendingTurnInputDraft::new(
-            &session_id,
-            lash_core_execution::TurnInputIngress::NextTurn,
-            lash_core_execution::TurnInput::text("the admitted input"),
-        ))
+        .enqueue_pending_turn_input(
+            lash_core_store::turn_input_vocabulary::PendingTurnInputDraft::new(
+                &session_id,
+                lash_core_store::turn_input_vocabulary::TurnInputIngress::NextTurn,
+                lash_core_store::turn_input_vocabulary::TurnInput::text("the admitted input"),
+            ),
+        )
         .await
         .expect("enqueue the fixture input");
     store
@@ -912,20 +933,20 @@ async fn postgres_settlement_verdict_decides_before_the_settlement_write() {
     .await
     .expect("rebind the admitted row");
 
-    let mut settlement = lash_core_execution::store::IngressSettlement::new(run.clone());
-    settlement
-        .completed_inputs
-        .push(lash_core_execution::TurnInputCompletion {
+    let mut settlement = lash_core_store::store::IngressSettlement::new(run.clone());
+    settlement.completed_inputs.push(
+        lash_core_store::turn_input_vocabulary::TurnInputCompletion {
             session_id: state.session_id.clone(),
-            data: lash_core_execution::TurnInputCompletionData {
+            data: lash_core_store::turn_input_vocabulary::TurnInputCompletionData {
                 input_ids: vec![input_id],
                 applications: Vec::new(),
             },
-        });
+        },
+    );
     let error = store
         .commit_runtime_state(
             lash_core_execution::testing::store_fixtures::settling_commit_for_test(
-                lash_core_execution::RuntimeCommit::persisted_state_for_test(&state),
+                lash_core_store::store::RuntimeCommit::persisted_state_for_test(&state),
                 settlement,
             ),
         )
@@ -980,10 +1001,12 @@ async fn postgres_commit_meta_preflight_answers_on_a_pool_of_one_when_configured
         )
         .await
         .expect("admit the pool-of-one session");
-    let meta =
-        lash_core_execution::SessionCommitStore::load_session_meta_for_commit(&store, &session_id)
-            .await
-            .expect("the preflight answers on a pool of one");
+    let meta = lash_core_store::store::SessionCommitStore::load_session_meta_for_commit(
+        &store,
+        &session_id,
+    )
+    .await
+    .expect("the preflight answers on a pool of one");
     assert!(meta.is_some(), "the admitted session has its metadata");
 }
 
@@ -998,8 +1021,7 @@ async fn durable_labels_observe_physical_cost_and_group_members() {
     let url =
         crate::postgres_test_support::database_url().expect("this cost law requires PostgreSQL");
     let database = crate::testing::IsolatedDatabase::create(&url).await;
-    let runtime =
-        lash_core::trace::TraceRuntime::new(Arc::new(lash_core::facade_support::SystemClock));
+    let runtime = lash_core::trace::TraceRuntime::new(Arc::new(lash_core_ids::clock::SystemClock));
     let storage = PostgresStorage::connect(
         &crate::PostgresEndpoints::from_url(database.url()).expect("parse the database URL"),
         &crate::testing::fixture_config(),
@@ -1049,7 +1071,7 @@ async fn durable_labels_observe_physical_cost_and_group_members() {
         tx.write(DomainWrite::RunFact(RunFactWrite::Append {
             owner: OwnerKey::Turn(
                 SessionId::from("cost-law"),
-                lash_core_execution::TurnId::from("run"),
+                lash_protocol_types::TurnId::from("run"),
             ),
             run: RunSeq(0),
             ordinal: Ordinal(ordinal),
@@ -1123,26 +1145,28 @@ async fn a_terminal_window_is_unchanged_by_later_commits() {
     let first = store
         .load_session_window(
             &session,
-            lash_core_execution::store::WindowSelector::Terminal(run.clone()),
+            lash_core_store::store::WindowSelector::Terminal(run.clone()),
         )
         .await
         .expect("terminal window")
         .expect("terminal has a window");
-    let mut later = lash_core_execution::store::window_state(
+    let mut later = lash_core_store::store::window_state(
         first.clone(),
-        lash_core_execution::FleetFormat::current(),
+        lash_core_store::store::FleetFormat::current(),
     )
     .expect("stored state")
     .state;
     later.turn_index += 1;
     store
-        .commit_runtime_state(lash_core_execution::RuntimeCommit::persisted_state_for_test(&later))
+        .commit_runtime_state(
+            lash_core_store::store::RuntimeCommit::persisted_state_for_test(&later),
+        )
         .await
         .expect("later commit");
     let again = store
         .load_session_window(
             &session,
-            lash_core_execution::store::WindowSelector::Terminal(run),
+            lash_core_store::store::WindowSelector::Terminal(run),
         )
         .await
         .expect("terminal window")

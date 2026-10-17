@@ -11,7 +11,7 @@ enum HandleAuthority {
 
 impl RuntimeExecutionContext<'_> {
     /// `process_id` rides beside the opaque id for the same reason
-    /// [`ProcessHandleView`](crate::ProcessHandleView) carries it: the process
+    /// [`ProcessHandleView`](lash_execution_contracts::process::ProcessHandleView) carries it: the process
     /// tools take a `process_id`, and reading one out of the handle id is
     /// exactly what the opaque id forbids.
     pub fn process_handle_json(process_id: &crate::ProcessId) -> serde_json::Value {
@@ -23,7 +23,7 @@ impl RuntimeExecutionContext<'_> {
     }
 
     pub(super) fn process_status_value(
-        status: &crate::facade_support::ObservedProcess,
+        status: &lash_execution_contracts::process::ObservedProcess,
     ) -> serde_json::Value {
         json!({
             "process_id": status.process_id,
@@ -43,7 +43,7 @@ impl RuntimeExecutionContext<'_> {
     async fn authorize_handle(
         &self,
         process_id: &crate::ProcessId,
-    ) -> Result<HandleAuthority, crate::PluginError> {
+    ) -> Result<HandleAuthority, lash_execution_contracts::plugin_error::PluginError> {
         if self.is_run_local_process(process_id) {
             return Ok(HandleAuthority::RunLocalPossession);
         }
@@ -111,13 +111,15 @@ impl RuntimeExecutionContext<'_> {
             // The wait was handed to the Run's successor segment (FIG-4739):
             // it has no outcome here, so nothing of the call is recorded or
             // observed. The caller stops on it.
-            Err(crate::PluginError::RuntimeEffectController(err))
-                if err.code == crate::RuntimeErrorCode::TurnWaitHandedOver =>
-            {
+            Err(lash_execution_contracts::plugin_error::PluginError::RuntimeEffectController(
+                err,
+            )) if err.code == crate::RuntimeErrorCode::TurnWaitHandedOver => {
                 self.record_wait_handed_over();
                 return ToolInvocationReply::error(json!(err.to_string()));
             }
-            Err(crate::PluginError::RuntimeEffectController(err)) => {
+            Err(lash_execution_contracts::plugin_error::PluginError::RuntimeEffectController(
+                err,
+            )) => {
                 self.record_nested_effect_error(err.clone());
                 ToolInvocationReply::error(json!(err.to_string())).output
             }

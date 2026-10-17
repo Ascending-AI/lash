@@ -7,13 +7,13 @@ use crate::*;
 /// times the size of the report alone (`clippy::result_large_err`); the
 /// factory's trait method, whose signature the trait fixes, unboxes it.
 pub(crate) type ReclaimResult = Result<
-    lash_core_execution::store::RetentionReport,
-    Box<lash_core_execution::MaintenanceFailure<lash_core_execution::store::RetentionReport>>,
+    lash_core_store::store::RetentionReport,
+    Box<lash_core_store::store::MaintenanceFailure<lash_core_store::store::RetentionReport>>,
 >;
 
 pub(crate) async fn reclaim(
     factory: &PostgresStore,
-    bound: lash_core_execution::store::RetentionBound,
+    bound: lash_core_store::store::RetentionBound,
 ) -> ReclaimResult {
     async {
         let mut tx = begin_guarded(&factory.pool, &factory.fence).await?;
@@ -94,7 +94,7 @@ pub(crate) async fn reclaim(
                 .map_err(store_sqlx_error)?
                 .rows_affected() as usize;
         tx.commit().await.map_err(store_sqlx_error)?;
-        Ok(lash_core_execution::store::RetentionReport {
+        Ok(lash_core_store::store::RetentionReport {
             removed_receipt_count,
             removed_session_terminal_count,
             removed_tool_intent_submission_count,
@@ -106,6 +106,6 @@ pub(crate) async fn reclaim(
     }
     .await
     .map_err(|error| {
-        Box::new(lash_core_execution::MaintenanceFailure::failed_before_any_work(error))
+        Box::new(lash_core_store::store::MaintenanceFailure::failed_before_any_work(error))
     })
 }

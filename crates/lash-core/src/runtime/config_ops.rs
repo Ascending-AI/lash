@@ -19,8 +19,11 @@ impl LashRuntime {
             ));
         };
         session.refresh_tool_catalog();
-        self.stamp_live_plugin_state()
-            .map_err(|error| SessionError::Plugin(crate::PluginError::Runtime(error)))?;
+        self.stamp_live_plugin_state().map_err(|error| {
+            SessionError::Plugin(
+                lash_execution_contracts::plugin_error::PluginError::Runtime(error),
+            )
+        })?;
         Ok(())
     }
 }
@@ -34,7 +37,7 @@ pub(super) async fn validate_config_tool_catalog(
     page_reader: Option<&crate::plugin::SessionPageReader>,
     config: &crate::PersistedSessionConfig,
     live: Option<&std::sync::Arc<dyn crate::plugin::ProtocolSessionPlugin>>,
-) -> Result<(), crate::PluginError> {
+) -> Result<(), lash_execution_contracts::plugin_error::PluginError> {
     let authority = crate::plugin::SessionAuthorityContext {
         plugin_config: crate::AdmittedPluginConfig::new(
             config.plugin_config.clone(),
@@ -60,12 +63,18 @@ pub(super) async fn validate_config_tool_catalog(
 /// Return a candidate catalog's config refusal (a namespace collision, or
 /// a surface its providers cannot build) without losing its type at a
 /// plugin boundary. Other failures remain infrastructure failures.
-pub(super) fn catalog_config_refusal(error: &crate::PluginError) -> Option<crate::ConfigRefusal> {
+pub(super) fn catalog_config_refusal(
+    error: &lash_execution_contracts::plugin_error::PluginError,
+) -> Option<crate::ConfigRefusal> {
     match error {
-        crate::PluginError::ToolSurfaceRefused { refusal } => Some(
-            crate::plugin::CoreConfigOwner::surface_refusal(refusal.as_ref().clone()),
-        ),
-        crate::PluginError::Runtime(error) => error
+        lash_execution_contracts::plugin_error::PluginError::ToolSurfaceRefused { refusal } => {
+            Some(
+                lash_execution_contracts::config_error::CoreConfigRefusal::surface_refusal(
+                    refusal.as_ref().clone(),
+                ),
+            )
+        }
+        lash_execution_contracts::plugin_error::PluginError::Runtime(error) => error
             .run_shape_refusal()
             .and_then(catalog_refusal_of)
             .cloned(),
@@ -81,10 +90,10 @@ pub(super) fn catalog_refusal_of(
     match refusal {
         crate::RunShapeRefusal::Owner { refusal }
             if matches!(
-                refusal.owner_refusal::<crate::CoreConfigRefusal>(),
+                refusal.owner_refusal::<lash_execution_contracts::config_error::CoreConfigRefusal>(),
                 Some(
-                    crate::CoreConfigRefusal::ToolNamespaceCollision { .. }
-                        | crate::CoreConfigRefusal::ToolSurfaceRefused { .. }
+                    lash_execution_contracts::config_error::CoreConfigRefusal::ToolNamespaceCollision { .. }
+                        | lash_execution_contracts::config_error::CoreConfigRefusal::ToolSurfaceRefused { .. }
                 )
             ) =>
         {

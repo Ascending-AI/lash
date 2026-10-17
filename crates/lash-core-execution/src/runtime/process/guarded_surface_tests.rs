@@ -3,10 +3,10 @@
 
 use lash_core_store::testing::guarded_surfaces::{self as laws, SurfaceProbe};
 
-use super::effect_summary::{
-    PROCESS_EVENT_VOCABULARY_VERSION, ProcessEffectOccurrence, ProcessEffectOutcomeClass,
-};
 use crate::{FleetFormat, SCOPE_STORAGE_PAYLOAD_VERSION};
+use lash_execution_contracts::process::PROCESS_EVENT_VOCABULARY_VERSION;
+use lash_execution_contracts::process::ProcessEffectOccurrence;
+use lash_execution_contracts::process::ProcessEffectOutcomeClass;
 
 const OWNER: &str = "lash-core-execution";
 

@@ -7,11 +7,13 @@
 
 use std::sync::LazyLock;
 
-use lash_core_execution::store::{HeadWriter, RunAdmissionRecord, RunTerminalCause};
-use lash_core_execution::store_backend_support::turn_cancel::{
-    turn_cancel_mode_from_wire, turn_cancel_mode_wire, turn_cancel_undelivered_from_wire,
-    turn_cancel_undelivered_wire,
-};
+use lash_core_store::store::HeadWriter;
+use lash_core_store::store::RunAdmissionRecord;
+use lash_core_store::store::RunTerminalCause;
+use lash_core_store::store_backend_support::turn_cancel::turn_cancel_mode_from_wire;
+use lash_core_store::store_backend_support::turn_cancel::turn_cancel_mode_wire;
+use lash_core_store::store_backend_support::turn_cancel::turn_cancel_undelivered_from_wire;
+use lash_core_store::store_backend_support::turn_cancel::turn_cancel_undelivered_wire;
 use lash_durable::domain::namespace_value::NamespaceValue;
 use lash_durable::domain::{
     DomainRefusal, ExecKey, SessionCommitWrite, StoredValues, TurnCancelAnswer, TurnCancelRequest,
@@ -90,7 +92,7 @@ fn refuse<T>(refusal: DomainRefusal) -> Answer<T> {
 }
 
 /// A store codec's refusal, as the durable port reports it.
-fn encoding(error: &lash_core_execution::StoreError) -> DurableError {
+fn encoding(error: &lash_core_store::store::StoreError) -> DurableError {
     DurableError::Store(lash_durable::StoreFailure {
         kind: lash_durable::StoreFailureKind::Corrupt,
         message: error.to_string(),
@@ -118,8 +120,8 @@ pub(super) fn apply(
             turn_deadline,
         } => {
             #[cfg(feature = "perf-witness")]
-            lash_core_execution::perf_witness::latency::stage(|| {
-                lash_core_execution::perf_witness::latency::CommitMark::Admitted {
+            lash_core_ids::perf_witness::latency::stage(|| {
+                lash_core_ids::perf_witness::latency::CommitMark::Admitted {
                     session: session.as_str().to_owned(),
                     run: run.as_str().to_owned(),
                     inputs: admission
@@ -358,8 +360,8 @@ pub(super) fn apply(
             transcript,
         } => {
             #[cfg(feature = "perf-witness")]
-            lash_core_execution::perf_witness::latency::stage(|| {
-                lash_core_execution::perf_witness::latency::CommitMark::Terminal {
+            lash_core_ids::perf_witness::latency::stage(|| {
+                lash_core_ids::perf_witness::latency::CommitMark::Terminal {
                     run: run.as_str().to_owned(),
                 }
             });
@@ -473,14 +475,13 @@ pub(super) fn apply_session_commit(
     write: &SessionCommitWrite,
 ) -> Answer<()> {
     commit.open_roots.forget();
-    let refused = |error: &lash_core_execution::StoreError| {
+    let refused = |error: &lash_core_store::store::StoreError| {
         Ok(Err(DurableError::session_commit(
             write.session.clone(),
             error,
         )))
     };
-    let runtime_commit = match lash_core_execution::store::decode_session_commit(&write.commit_json)
-    {
+    let runtime_commit = match lash_core_store::store::decode_session_commit(&write.commit_json) {
         Ok(runtime_commit) => runtime_commit,
         Err(error) => return refused(&error),
     };
@@ -489,7 +490,7 @@ pub(super) fn apply_session_commit(
     {
         return refuse(DomainRefusal::SessionCommitRefused {
             session: write.session.clone(),
-            code: lash_core_execution::RuntimeErrorCode::StoreRefused,
+            code: lash_core_store::runtime_error::RuntimeErrorCode::StoreRefused,
             cause: None,
             reason: format!(
                 "the commit names session {} at head {}, not {} at {}",
@@ -501,8 +502,7 @@ pub(super) fn apply_session_commit(
         });
     }
     let planner =
-        match lash_core_execution::store::RuntimeCommitPlanner::prepare(runtime_commit, tx.fleet())
-        {
+        match lash_core_store::store::RuntimeCommitPlanner::prepare(runtime_commit, tx.fleet()) {
             Ok(planner) => planner,
             Err(error) => return refused(&error),
         };

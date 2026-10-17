@@ -3,14 +3,24 @@
 
 use super::*;
 
-use lash_core_execution::attachments::{RuntimeAttachmentStore, reclaim_unreferenced_attachments};
-use lash_core_execution::{
-    AttachmentCreateMeta, AttachmentGcFence, AttachmentReclamationPolicy, AttachmentRef,
-    AttachmentReferrers as _, AttachmentStore, AttachmentStoreError, AttachmentStorePersistence,
-    EmptyRootSetPolicy, Message, MessageRole, Part, RuntimeSessionState, SessionCatalogStore,
-    SessionRelation,
-};
+use lash_core_store::attachments::AttachmentGcFence;
+use lash_core_store::attachments::AttachmentReclamationPolicy;
+use lash_core_store::attachments::AttachmentStore;
+use lash_core_store::attachments::AttachmentStoreError;
+use lash_core_store::attachments::AttachmentStorePersistence;
+use lash_core_store::attachments::EmptyRootSetPolicy;
+use lash_core_store::attachments::RuntimeAttachmentStore;
+use lash_core_store::attachments::reclaim_unreferenced_attachments;
+use lash_core_store::session_identity::SessionRelation;
+use lash_core_store::session_state::RuntimeSessionState;
+use lash_core_store::store::AttachmentReferrers as _;
+use lash_core_store::store::SessionCatalogStore;
 use lash_protocol_types::MediaType;
+use lash_protocol_types::attachment::AttachmentCreateMeta;
+use lash_protocol_types::attachment::AttachmentRef;
+use lash_protocol_types::session_model::Message;
+use lash_protocol_types::session_model::MessageRole;
+use lash_protocol_types::session_model::Part;
 
 /// What the catalog's bytes outlive: a file, or the memory backend.
 const PERSISTENCE: AttachmentStorePersistence = match SUBSTRATE {
@@ -92,7 +102,7 @@ fn checkpoint_blob_count(backend: &TestBackend) -> i64 {
 async fn sweep(
     factory: &lash_sqlite_store::SqliteStore,
     attachments: &Arc<dyn AttachmentStore>,
-) -> lash_core_execution::attachments::AttachmentReclamationReport {
+) -> lash_core_store::attachments::AttachmentReclamationReport {
     reclaim_unreferenced_attachments(
         factory,
         attachments.as_ref(),
@@ -129,13 +139,13 @@ async fn sqlite_attachment_gc_never_collects_a_blob_a_referrer_row_holds() {
     let held = RuntimeAttachmentStore::new(
         Arc::clone(&attachments),
         session.clone(),
-        lash_core_execution::RuntimeOwner::Session(session_id.clone()),
-        lash_core_execution::attachments::AttachmentPolicy::standard(),
+        lash_protocol_types::identity::RuntimeOwner::Session(session_id.clone()),
+        lash_core_store::attachments::AttachmentPolicy::standard(),
     )
     .put(b"held by a committed turn".to_vec(), octet_meta())
     .await
     .expect("session put records an intent and stores the bytes");
-    let mut commit = lash_core_execution::store::RuntimeCommit::persisted_state_for_test(
+    let mut commit = lash_core_store::store::RuntimeCommit::persisted_state_for_test(
         &state_referencing(&session_id, &held),
     );
     commit.committed_attachment_ids = vec![held.id.clone()];
@@ -201,7 +211,10 @@ async fn sqlite_attachment_gc_never_collects_a_blob_a_referrer_row_holds() {
         .await
         .expect("read holders before deletion")
     {
-        if matches!(referrer, lash_core_execution::ArtifactReferrer::Upload(_)) {
+        if matches!(
+            referrer,
+            lash_core_store::artifact_referrer::ArtifactReferrer::Upload(_)
+        ) {
             factory
                 .end_attachment_referrer(&referrer)
                 .await
@@ -214,9 +227,9 @@ async fn sqlite_attachment_gc_never_collects_a_blob_a_referrer_row_holds() {
         .await
         .expect("delete the holding session");
     factory
-        .end_attachment_referrer(&lash_core_execution::ArtifactReferrer::Session(
-            session_id.clone(),
-        ))
+        .end_attachment_referrer(
+            &lash_core_store::artifact_referrer::ArtifactReferrer::Session(session_id.clone()),
+        )
         .await
         .expect("apply graph-retired session cleanup");
     assert_eq!(

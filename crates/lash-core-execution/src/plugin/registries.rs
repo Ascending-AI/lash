@@ -208,10 +208,12 @@ impl<R: Registry, D: Clone> RegistryRetirements<R, D> {
     }
     pub fn check_installation(&self, id: &str) -> Result<(), super::PluginError> {
         if self.contains_key(id) {
-            return Err(super::PluginError::Registration(format!(
-                "{:?} registration `{id}` is installed and retired",
-                R::KIND
-            )));
+            return Err(
+                lash_execution_contracts::plugin_error::PluginError::Registration(format!(
+                    "{:?} registration `{id}` is installed and retired",
+                    R::KIND
+                )),
+            );
         }
         Ok(())
     }
@@ -222,16 +224,20 @@ impl<R: Registry, D: Clone> RegistryRetirements<R, D> {
         installed: bool,
     ) -> Result<(), super::PluginError> {
         if installed {
-            return Err(super::PluginError::Registration(format!(
-                "{:?} registration `{id}` is installed and retired",
-                R::KIND
-            )));
+            return Err(
+                lash_execution_contracts::plugin_error::PluginError::Registration(format!(
+                    "{:?} registration `{id}` is installed and retired",
+                    R::KIND
+                )),
+            );
         }
         if self.contains_key(id) {
-            return Err(super::PluginError::Registration(format!(
-                "{:?} registration `{id}` is retired twice",
-                R::KIND
-            )));
+            return Err(
+                lash_execution_contracts::plugin_error::PluginError::Registration(format!(
+                    "{:?} registration `{id}` is retired twice",
+                    R::KIND
+                )),
+            );
         }
         std::sync::Arc::make_mut(&mut self.entries).insert(id.to_owned(), declaration);
         Ok(())
@@ -248,13 +254,15 @@ impl<R: Registry, D: Clone> RegistryRetirements<R, D> {
                 .get(id)
                 .is_some_and(|namespace| !namespace.values.is_empty())
             {
-                return Err(super::PluginError::Runtime(
-                    super::RetirementRefusal::HasState {
-                        registry: R::KIND,
-                        id: id.to_owned(),
-                    }
-                    .into_runtime_error(),
-                ));
+                return Err(
+                    lash_execution_contracts::plugin_error::PluginError::Runtime(
+                        super::RetirementRefusal::HasState {
+                            registry: R::KIND,
+                            id: id.to_owned(),
+                        }
+                        .into_runtime_error(),
+                    ),
+                );
             }
         }
         Ok(())

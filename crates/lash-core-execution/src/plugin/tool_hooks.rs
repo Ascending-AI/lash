@@ -301,7 +301,7 @@ impl RankedVerdict for AfterToolDecision {
 pub struct AfterToolContributions {
     pub verdict: AfterToolDecision,
     pub events: Vec<PluginRuntimeEvent>,
-    pub state: super::StateCommands,
+    pub state: lash_execution_contracts::state_commands::StateCommands,
 }
 
 impl From<AfterToolDecision> for AfterToolContributions {

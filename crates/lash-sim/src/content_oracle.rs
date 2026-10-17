@@ -9,7 +9,7 @@
 use std::collections::BTreeMap;
 use std::fmt;
 
-use lash_core::DeploymentStore;
+use lash_execution_contracts::deployment::DeploymentStore;
 use lash_protocol_standard::{BuiltinToolOutputRenderer, ToolOutputRenderer, ToolRenderParams};
 use lash_protocol_types::SessionId;
 use serde::Serialize;

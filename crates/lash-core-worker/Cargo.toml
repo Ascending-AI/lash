@@ -26,6 +26,8 @@ testing = ["lash-core/testing", "lash-core-ids/testing", "lash-core-execution/te
 workspace = true
 
 [dependencies]
+lash-protocol-types = { workspace = true }
+lash-execution-contracts = { workspace = true }
 lash-core-store = { workspace = true }
 lash-core = { workspace = true }
 lash-core-ids = { workspace = true }

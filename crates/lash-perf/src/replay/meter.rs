@@ -269,7 +269,7 @@ impl Meter {
             && affected.is_none_or(|rows| {
                 rows == work
                     .totals
-                    .get(&lash_core::perf_witness::sql_shapes::work::Backend::Sqlite)
+                    .get(&lash_core_ids::perf_witness::sql_shapes::work::Backend::Sqlite)
                     .map_or(0, |c| c.rows_affected)
             });
         let reference = serde_json::json!({"statements": snapshot.sql_statements,

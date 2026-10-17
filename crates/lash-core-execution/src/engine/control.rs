@@ -1,14 +1,6 @@
 //! The engine control vocabulary: run references and refusals.
 
 use crate::store::StoreError;
-use crate::{SessionId, TurnId};
-
-/// One logical run, as an engine's control verbs address it.
-#[derive(Clone, Debug, PartialEq, Eq, Hash)]
-pub struct RunRef {
-    pub session: SessionId,
-    pub run: TurnId,
-}
 
 /// Whether the identical ask may succeed when it is made again.
 #[derive(Clone, Copy, Debug, PartialEq, Eq, Hash)]
@@ -85,11 +77,14 @@ impl From<StoreError> for EngineRefusal {
 
 /// A plugin's answer keeps its class. A redrive needs fresh authority, so
 /// repeating the identical control request cannot repair it.
-impl From<crate::PluginError> for EngineRefusal {
-    fn from(error: crate::PluginError) -> Self {
+impl From<lash_execution_contracts::plugin_error::PluginError> for EngineRefusal {
+    fn from(error: lash_execution_contracts::plugin_error::PluginError) -> Self {
         let disposition = match error.class() {
-            crate::PluginErrorClass::Retryable => RefusalClass::Retryable,
-            crate::PluginErrorClass::Redrivable | crate::PluginErrorClass::Terminal => {
+            lash_execution_contracts::plugin_error::PluginErrorClass::Retryable => {
+                RefusalClass::Retryable
+            }
+            lash_execution_contracts::plugin_error::PluginErrorClass::Redrivable
+            | lash_execution_contracts::plugin_error::PluginErrorClass::Terminal => {
                 RefusalClass::Permanent
             }
         };
@@ -105,6 +100,7 @@ impl From<crate::PluginError> for EngineRefusal {
 #[cfg(test)]
 mod refusal_classification_tests {
     use super::*;
+    use lash_protocol_types::SessionId;
 
     #[test]
     fn engine_refusal_retries_only_retryable_plugin_operations() {
@@ -113,7 +109,7 @@ mod refusal_classification_tests {
             .zip(StoreError::samples_for_testing())
         {
             let code = error.runtime_code();
-            let plugin = crate::PluginError::from(plugin_error);
+            let plugin = lash_execution_contracts::plugin_error::PluginError::from(plugin_error);
             let plugin_code = crate::RuntimeEffectControllerError::from(plugin.clone()).code;
             let through_plugin = EngineRefusal::from(plugin);
             let refusal = EngineRefusal::from(error);
@@ -123,19 +119,22 @@ mod refusal_classification_tests {
             assert_eq!(through_plugin.code, plugin_code);
         }
         for plugin in [
-            crate::PluginError::from(StoreError::Contended),
-            crate::PluginError::from(StoreError::StoredDataCorrupt {
-                record_kind: "process record",
-                message: "invalid JSON".into(),
-            }),
-            crate::PluginError::SessionExecutionLeaseLost {
+            lash_execution_contracts::plugin_error::PluginError::from(StoreError::Contended),
+            lash_execution_contracts::plugin_error::PluginError::from(
+                StoreError::StoredDataCorrupt {
+                    record_kind: "process record",
+                    message: "invalid JSON".into(),
+                },
+            ),
+            lash_execution_contracts::plugin_error::PluginError::SessionExecutionLeaseLost {
                 session_id: SessionId::fixture("lost-authority"),
             },
-            crate::PluginError::ProcessExecutionSuperseded {
+            lash_execution_contracts::plugin_error::PluginError::ProcessExecutionSuperseded {
                 process_id: crate::process_id_for_test("superseded-process"),
             },
         ] {
-            let expected = plugin.class() == crate::PluginErrorClass::Retryable;
+            let expected = plugin.class()
+                == lash_execution_contracts::plugin_error::PluginErrorClass::Retryable;
             let code = crate::RuntimeEffectControllerError::from(plugin.clone()).code;
             let refusal = EngineRefusal::from(plugin);
             assert_eq!(refusal.code, code);

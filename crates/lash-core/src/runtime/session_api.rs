@@ -133,16 +133,20 @@ impl LashRuntime {
     }
     pub fn active_tool_catalog_shared(
         &self,
-    ) -> Result<Arc<Vec<serde_json::Value>>, crate::PluginError> {
+    ) -> Result<Arc<Vec<serde_json::Value>>, lash_execution_contracts::plugin_error::PluginError>
+    {
         match self.resident_session.validity() {
             ResidentSessionState::Invalidated { decision_id } => {
                 self.trace_synchronous_resident_state_refusal(
                     decision_id,
                     "active_tool_catalog_shared",
                 );
-                return Err(crate::PluginError::Session(
-                    "resident session state is invalidated; durable reload is required".to_string(),
-                ));
+                return Err(
+                    lash_execution_contracts::plugin_error::PluginError::Session(
+                        "resident session state is invalidated; durable reload is required"
+                            .to_string(),
+                    ),
+                );
             }
             ResidentSessionState::Valid => {}
         }
@@ -378,7 +382,9 @@ impl LashRuntime {
             .await
             .map_err(|(_stage, error)| {
                 if error.cause.is_some() {
-                    SessionError::Plugin(crate::PluginError::Runtime(error))
+                    SessionError::Plugin(
+                        lash_execution_contracts::plugin_error::PluginError::Runtime(error),
+                    )
                 } else {
                     SessionError::Protocol(format!(
                         "failed to restore the adopted session head: {error}"
@@ -527,7 +533,7 @@ impl LashRuntime {
     /// what its next run records before that run's own options. It records
     /// nothing.
     pub fn offered_tool_surface(&self) -> Result<crate::plugin::ResolvedToolSurface, RuntimeError> {
-        let plugin = |error: crate::PluginError| {
+        let plugin = |error: lash_execution_contracts::plugin_error::PluginError| {
             RuntimeError::new(RuntimeErrorCode::Plugin, error.to_string())
         };
         // A session no run materialized yet builds its capabilities first.

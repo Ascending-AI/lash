@@ -57,7 +57,10 @@ mod tests {
         fn tool_manifests(
             &self,
             _config: &crate::plugin::OwnerConfigView,
-        ) -> std::result::Result<Vec<crate::ToolManifest>, crate::PluginError> {
+        ) -> std::result::Result<
+            Vec<crate::ToolManifest>,
+            lash_execution_contracts::plugin_error::PluginError,
+        > {
             Ok(vec![process_tool_definition().manifest()])
         }
 
@@ -122,7 +125,8 @@ mod tests {
             .expect("plugin session");
         let tool_catalog = Arc::new(catalog_for(&provider));
         let backend = crate::support::sqlite_memory_process_store_set().await;
-        let registry: Arc<dyn crate::ProcessRegistry> = backend.process_registry();
+        let registry: Arc<dyn lash_execution_contracts::process::ProcessRegistry> =
+            backend.process_registry();
         let host = Arc::new(
             crate::testing::MockSessionManager::default()
                 .with_process_registry(Arc::clone(&registry)),
@@ -152,7 +156,7 @@ mod tests {
             parent_invocation: None,
             observation_call_key: None,
             facts: crate::plugin::ExecutionFacts::of_process(
-                &lash_core_execution::testing::process_env_with_limit(1024),
+                &lash_execution_contracts::testing::process_env_with_limit(1024),
             ),
             owner: crate::ExecutionOwner::SessionFrame {
                 session_id: SessionId::from("session"),
@@ -260,16 +264,17 @@ mod tests {
             .expect("plugin session");
         let tool_catalog = Arc::new(catalog_for(&provider));
         let backend = crate::support::sqlite_memory_process_store_set().await;
-        let registry: Arc<dyn crate::ProcessRegistry> = backend.process_registry();
+        let registry: Arc<dyn lash_execution_contracts::process::ProcessRegistry> =
+            backend.process_registry();
         let host = Arc::new(
             crate::testing::MockSessionManager::default()
                 .with_process_registry(Arc::clone(&registry)),
         );
         let hidden_process = registry
-            .register_process(crate::testing::held_engine_registration(
+            .register_process(lash_execution_contracts::testing::held_engine_registration(
                 serde_json::Value::Null,
-                crate::ProcessProvenance::host(),
-                crate::Lifetime::Detached,
+                lash_execution_contracts::process::ProcessProvenance::host(),
+                lash_execution_contracts::process::Lifetime::Detached,
             ))
             .await
             .expect("register hidden process");
@@ -298,7 +303,7 @@ mod tests {
             parent_invocation: None,
             observation_call_key: None,
             facts: crate::plugin::ExecutionFacts::of_process(
-                &lash_core_execution::testing::process_env_with_limit(1024),
+                &lash_execution_contracts::testing::process_env_with_limit(1024),
             ),
             owner: crate::ExecutionOwner::SessionFrame {
                 session_id: SessionId::from("session"),
@@ -372,10 +377,10 @@ mod tests {
 
         let mut local_ids = BTreeMap::new();
         for label in ["local-cancel", "local-await"] {
-            let registration = crate::testing::held_engine_registration(
+            let registration = lash_execution_contracts::testing::held_engine_registration(
                 serde_json::Value::Null,
-                crate::ProcessProvenance::host(),
-                crate::Lifetime::Detached,
+                lash_execution_contracts::process::ProcessProvenance::host(),
+                lash_execution_contracts::process::Lifetime::Detached,
             );
             let record = registry
                 .register_process(registration)
@@ -387,10 +392,12 @@ mod tests {
         registry
             .complete_process(
                 &local_ids["local-await"],
-                crate::ProcessAwaitOutput::from_tool_output(crate::ToolCallOutput::success(json!(
-                    "local done"
-                ))),
-                crate::ProcessCompletionAuthority::workflow_key(&local_ids["local-await"]),
+                lash_execution_contracts::process::ProcessAwaitOutput::from_tool_output(
+                    crate::ToolCallOutput::success(json!("local done")),
+                ),
+                lash_execution_contracts::process::ProcessCompletionAuthority::workflow_key(
+                    &local_ids["local-await"],
+                ),
             )
             .await
             .expect("complete run-local await process");
@@ -419,7 +426,11 @@ mod tests {
             );
         }
         let local_prune = registry
-            .prune_terminal_processes(u64::MAX, None, crate::ProjectionWatermark::NoProjector)
+            .prune_terminal_processes(
+                u64::MAX,
+                None,
+                lash_execution_contracts::process::ProjectionWatermark::NoProjector,
+            )
             .await
             .expect("prune terminal run-local fixtures");
         assert_eq!(local_prune.pruned_processes, 1);
@@ -427,10 +438,12 @@ mod tests {
         registry
             .complete_process(
                 &hidden_process.id,
-                crate::ProcessAwaitOutput::from_tool_output(crate::ToolCallOutput::success(json!(
-                    "done"
-                ))),
-                crate::ProcessCompletionAuthority::workflow_key(&hidden_process.id),
+                lash_execution_contracts::process::ProcessAwaitOutput::from_tool_output(
+                    crate::ToolCallOutput::success(json!("done")),
+                ),
+                lash_execution_contracts::process::ProcessCompletionAuthority::workflow_key(
+                    &hidden_process.id,
+                ),
             )
             .await
             .expect("complete observed process");
@@ -438,7 +451,9 @@ mod tests {
             .add_observer(
                 &SessionId::from("session"),
                 &hidden_process.id,
-                crate::ProcessObserverBy::host("observe-hidden-process"),
+                lash_execution_contracts::process::ProcessObserverBy::host(
+                    "observe-hidden-process",
+                ),
             )
             .await
             .expect("observe process");
@@ -452,14 +467,16 @@ mod tests {
             .prune_terminal_processes(
                 retained.updated_at_ms.saturating_add(1),
                 None,
-                crate::ProjectionWatermark::NoProjector,
+                lash_execution_contracts::process::ProjectionWatermark::NoProjector,
             )
             .await
             .expect("prune observed process");
         assert_eq!(prune.pruned_processes, 1);
         assert!(matches!(
             registry.get_process(&hidden_process.id).await,
-            Err(crate::PluginError::ProcessNoLongerRetained { .. })
+            Err(
+                lash_execution_contracts::plugin_error::PluginError::ProcessNoLongerRetained { .. }
+            )
         ));
         let pruned_await = crate::await_process_handle(
             &context,
@@ -526,16 +543,17 @@ mod tests {
             .expect("plugin session");
         let tool_catalog = Arc::new(catalog_for(&provider));
         let backend = crate::support::sqlite_memory_process_store_backend().await;
-        let registry: Arc<dyn crate::ProcessRegistry> = backend.process_registry();
+        let registry: Arc<dyn lash_execution_contracts::process::ProcessRegistry> =
+            backend.process_registry();
         let host = Arc::new(
             crate::testing::MockSessionManager::default()
                 .with_process_registry(Arc::clone(&registry)),
         );
         let started = registry
-            .register_process(crate::testing::held_engine_registration(
+            .register_process(lash_execution_contracts::testing::held_engine_registration(
                 serde_json::Value::Null,
-                crate::ProcessProvenance::host(),
-                crate::Lifetime::Detached,
+                lash_execution_contracts::process::ProcessProvenance::host(),
+                lash_execution_contracts::process::Lifetime::Detached,
             ))
             .await
             .expect("register the child a start declaration realizes");
@@ -543,10 +561,10 @@ mod tests {
         registry
             .complete_process(
                 &child,
-                crate::ProcessAwaitOutput::from_tool_output(crate::ToolCallOutput::success(json!(
-                    "child done"
-                ))),
-                crate::ProcessCompletionAuthority::workflow_key(&child),
+                lash_execution_contracts::process::ProcessAwaitOutput::from_tool_output(
+                    crate::ToolCallOutput::success(json!("child done")),
+                ),
+                lash_execution_contracts::process::ProcessCompletionAuthority::workflow_key(&child),
             )
             .await
             .expect("complete the started child");
@@ -577,7 +595,7 @@ mod tests {
             parent_invocation: None,
             observation_call_key: None,
             facts: crate::plugin::ExecutionFacts::of_process(
-                &lash_core_execution::testing::process_env_with_limit(1024),
+                &lash_execution_contracts::testing::process_env_with_limit(1024),
             ),
             owner: crate::ExecutionOwner::SessionFrame {
                 session_id: SessionId::from("session"),
@@ -645,14 +663,14 @@ mod tests {
                         output: crate::ToolCallOutput::success(realized_handle.clone()),
                     },
                     attempts: Vec::new(),
-                    intents: crate::ToolIntents::default(),
-                    intent_outcomes: vec![crate::ToolIntentExecutionOutcome::Executed {
+                    intents: lash_execution_contracts::tool_intent::ToolIntents::default(),
+                    intent_outcomes: vec![lash_execution_contracts::tool_intent_outcome::ToolIntentExecutionOutcome::Executed {
                         identity,
-                        realized: crate::ToolIntentRealized::StartProcess(
-                            crate::ProcessHandleView::new(
+                        realized: lash_execution_contracts::tool_intent_outcome::ToolIntentRealized::StartProcess(
+                            lash_execution_contracts::process::ProcessHandleView::new(
                                 child.clone(),
-                                crate::ProcessIdentity::new("external"),
-                                crate::ProcessStatus::Running,
+                                lash_execution_contracts::process::ProcessIdentity::new("external"),
+                                lash_execution_contracts::process::ProcessStatus::Running,
                             ),
                         ),
                     }],

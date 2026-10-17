@@ -31,7 +31,7 @@ pub(super) fn map_effect_task_join(
                         message,
                     })),
                 }),
-                intents: crate::ToolIntents::default(),
+                intents: lash_execution_contracts::tool_intent::ToolIntents::default(),
             }),
         }),
         None => Err(RuntimeEffectControllerError::new(

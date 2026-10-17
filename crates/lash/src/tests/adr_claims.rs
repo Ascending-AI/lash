@@ -83,7 +83,7 @@ async fn root_and_child_materialization_install_the_same_plugin_owned_engines() 
         )))
         .build(crate::tests::host::runtime_lease_owner());
     assert!(
-        matches!(duplicate, Err(EmbedError::Plugin(lash_core::PluginError::Registration(message)))
+        matches!(duplicate, Err(EmbedError::Plugin(lash_execution_contracts::plugin_error::PluginError::Registration(message)))
             if message == "duplicate process engine kind `lashvm`; each engine kind may be registered once"),
         "two plugin-owned engines of one kind must be refused"
     );
@@ -302,10 +302,12 @@ async fn resumed_session_observe_wait_cancel_shift_keep_original_owners() -> Res
     let source_process = source_backend
         .process_registry()
         .register_process_with_observers(
-            lash_core::testing::held_engine_registration(
+            lash_execution_contracts::testing::held_engine_registration(
                 serde_json::json!({"owner": "source"}),
-                lash_core::ProcessProvenance::session(session.observe().process_scope()),
-                lash_core::Lifetime::Detached,
+                lash_execution_contracts::process::ProcessProvenance::session(
+                    session.observe().process_scope(),
+                ),
+                lash_execution_contracts::process::Lifetime::Detached,
             ),
             &[SessionId::from(id)],
         )
@@ -314,10 +316,12 @@ async fn resumed_session_observe_wait_cancel_shift_keep_original_owners() -> Res
     let receiving_process = receiving_backend
         .process_registry()
         .register_process_with_observers(
-            lash_core::testing::held_engine_registration(
+            lash_execution_contracts::testing::held_engine_registration(
                 serde_json::json!({"owner": "receiving"}),
-                lash_core::ProcessProvenance::session(receiving_session.observe().process_scope()),
-                lash_core::Lifetime::Detached,
+                lash_execution_contracts::process::ProcessProvenance::session(
+                    receiving_session.observe().process_scope(),
+                ),
+                lash_execution_contracts::process::Lifetime::Detached,
             ),
             &[SessionId::from(id)],
         )
@@ -343,7 +347,7 @@ async fn resumed_session_observe_wait_cancel_shift_keep_original_owners() -> Res
         .expect("the source process");
     assert!(matches!(
         original_row.input,
-        lash_core::ProcessInput::Engine { payload, .. } if payload == serde_json::json!({"owner": "source"})
+        lash_execution_contracts::process::ProcessInput::Engine { payload, .. } if payload == serde_json::json!({"owner": "source"})
     ));
     let receiving_row = receiving_session
         .admin()
@@ -353,7 +357,7 @@ async fn resumed_session_observe_wait_cancel_shift_keep_original_owners() -> Res
         .expect("the receiving process");
     assert!(matches!(
         receiving_row.input,
-        lash_core::ProcessInput::Engine { payload, .. } if payload == serde_json::json!({"owner": "receiving"})
+        lash_execution_contracts::process::ProcessInput::Engine { payload, .. } if payload == serde_json::json!({"owner": "receiving"})
     ));
     assert!(
         resumed

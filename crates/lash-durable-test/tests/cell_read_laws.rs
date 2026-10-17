@@ -51,7 +51,6 @@ use lash_core::{ExecutionPolicy, LlmOutputPart, ToolCall, ToolCallId, ToolOutcom
 use lash_core_execution::runtime::actor::process::ProcessActivation;
 use lash_core_execution::runtime::actor::round::{AdmittedExecution, MemberBody};
 use lash_core_execution::runtime::process::steps::{ProcessSteps, StepAdmission, StepRefusal};
-use lash_core_execution::{Backend, BackendParts, NoProjectionProviders, StoreSet};
 use lash_core_store::tool_run::Material;
 use lash_core_store::tool_run::SettledOutput;
 use lash_durable::domain::WaitKind;
@@ -60,6 +59,10 @@ use lash_durable::{ActorDispatch, ActorKey, ActorState, CommitLabel, DurableStor
 use lash_durable_test::{
     Cut, Fault, Matrix, Scenario, Script, SimClock, SimNodes, SimNodesConfig, Tripwire, WriteKind,
 };
+use lash_execution_contracts::backend::Backend;
+use lash_execution_contracts::backend::BackendParts;
+use lash_execution_contracts::backend::StoreSet;
+use lash_execution_contracts::projection::NoProjectionProviders;
 use lash_protocol_types::SessionId;
 use lash_protocol_types::sync::MutexExt as _;
 use serde_json::{Value, json};
@@ -276,8 +279,8 @@ impl ProcessSteps for NoSteps {
     async fn admit(
         &self,
         _runtime: &Arc<lash_core_execution::runtime::process::StepRuntime>,
-        _process: &lash_core_execution::ProcessRecord,
-        step: &lash_core_execution::StepRequest,
+        _process: &lash_execution_contracts::process::ProcessRecord,
+        step: &lash_execution_contracts::process::StepRequest,
         _now_ms: u64,
     ) -> Result<StepAdmission, StepRefusal> {
         Err(StepRefusal::UnknownTool {
@@ -288,8 +291,8 @@ impl ProcessSteps for NoSteps {
 
     fn resolved(
         &self,
-        _process: &lash_core_execution::ProcessRecord,
-        _step: &lash_core_execution::StepRequest,
+        _process: &lash_execution_contracts::process::ProcessRecord,
+        _step: &lash_execution_contracts::process::StepRequest,
         _execution: &AdmittedExecution,
         _parked: &Material<lash_core_store::tool_run::CompletionSource>,
         _resolution: lash_core_execution::runtime::actor::waits::Resolution,
@@ -300,8 +303,8 @@ impl ProcessSteps for NoSteps {
     fn body(
         &self,
         _runtime: &Arc<lash_core_execution::runtime::process::StepRuntime>,
-        _process: &lash_core_execution::ProcessRecord,
-        step: &lash_core_execution::StepRequest,
+        _process: &lash_execution_contracts::process::ProcessRecord,
+        step: &lash_execution_contracts::process::StepRequest,
         _execution: &AdmittedExecution,
     ) -> MemberBody {
         unreachable!("no step of `{}` is ever admitted", step.step().0)

@@ -1,7 +1,11 @@
 use std::sync::Arc;
 
-use super::{PluginError, PluginNamespaceState, PluginSession, Proposal, StateResolution};
+use super::PluginNamespaceState;
+use super::PluginSession;
+use super::Proposal;
+use super::StateResolution;
 use lash_durable::domain::TurnNamespaceWrite;
+use lash_execution_contracts::plugin_error::PluginError;
 
 /// The state sink of the owner executing a call. Publication remains tied
 /// to the recorded outcome, including reservations held by staged changes.
@@ -137,8 +141,9 @@ mod tests {
     #[test]
     fn configured_intent_limits_follow_the_state_sink() {
         let mut limits = crate::runtime::RuntimeDataLimits::standard();
-        limits.tool_intents = crate::ToolIntentLimits::new(2, 4_096, 1)
-            .expect("the configured count fits the intent index");
+        limits.tool_intents =
+            lash_execution_contracts::tool_intent::ToolIntentLimits::new(2, 4_096, 1)
+                .expect("the configured count fits the intent index");
         let session = PluginHost::empty(
             crate::ExecutionBudgets::recommended(),
             crate::trace::TraceRuntime::new(Arc::new(crate::SystemClock)),

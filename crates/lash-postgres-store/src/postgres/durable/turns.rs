@@ -7,12 +7,14 @@
 
 use std::sync::LazyLock;
 
-use lash_core_execution::store::{HeadWriter, RunAdmissionRecord, RunTerminalCause};
-use lash_core_execution::store_backend_support::turn_cancel::{
-    turn_cancel_mode_from_wire, turn_cancel_mode_wire, turn_cancel_undelivered_from_wire,
-    turn_cancel_undelivered_wire,
-};
 use lash_core_store::checkpoint_graph::NodeId;
+use lash_core_store::store::HeadWriter;
+use lash_core_store::store::RunAdmissionRecord;
+use lash_core_store::store::RunTerminalCause;
+use lash_core_store::store_backend_support::turn_cancel::turn_cancel_mode_from_wire;
+use lash_core_store::store_backend_support::turn_cancel::turn_cancel_mode_wire;
+use lash_core_store::store_backend_support::turn_cancel::turn_cancel_undelivered_from_wire;
+use lash_core_store::store_backend_support::turn_cancel::turn_cancel_undelivered_wire;
 use lash_durable::domain::namespace_value::NamespaceValue;
 use lash_durable::domain::{
     DomainRefusal, ExecKey, OwnerKey, SessionCommitWrite, StoredValues, TurnCancelAnswer,
@@ -103,7 +105,7 @@ fn refuse<T>(refusal: DomainRefusal) -> Result<T, DurableError> {
 }
 
 /// A store codec's refusal, as the durable port reports it.
-fn encoding(error: &lash_core_execution::StoreError) -> DurableError {
+fn encoding(error: &lash_core_store::store::StoreError) -> DurableError {
     DurableError::Store(lash_durable::StoreFailure {
         kind: lash_durable::StoreFailureKind::Corrupt,
         message: error.to_string(),
@@ -265,9 +267,9 @@ const TERMINAL_RETENTION: u8 = 2;
 
 /// The end of `referrer`'s local edges, gated on `gate`, as a step.
 pub(super) fn end_local_step(
-    referrer: &lash_core_execution::ArtifactReferrer,
+    referrer: &lash_core_store::artifact_referrer::ArtifactReferrer,
     gate: Option<&lash_protocol_types::EffectJournalIdentity>,
-) -> Result<Step, lash_core_execution::StoreError> {
+) -> Result<Step, lash_core_store::store::StoreError> {
     let end = crate::artifact_store::LocalEndArguments::of(referrer, gate)?;
     Ok(Step::one(
         &END_LOCAL,
@@ -288,7 +290,7 @@ pub(super) fn end_local_step(
 /// publication takes them referrer first.
 pub(super) fn lock_ending_executions(
     writes: &[lash_durable::DomainWrite],
-) -> Result<Vec<Step>, lash_core_execution::StoreError> {
+) -> Result<Vec<Step>, lash_core_store::store::StoreError> {
     Ok(crate::obligation_ledger::ending_executions(writes)?
         .iter()
         .map(|referrer| {
@@ -353,7 +355,7 @@ fn terminal_steps(
     // cancel) leaves its inputs and batches cancelled (ADR 0132 §11).
     let mut inputs = turn();
     inputs.extend([
-        Value::text(lash_core_execution::runtime::TurnInputStateKind::Cancelled.as_str()),
+        Value::text(lash_core_store::turn_input_vocabulary::TurnInputStateKind::Cancelled.as_str()),
         Value::Now,
     ]);
     program.push(Step::any(&SETTLE_HELD_INPUTS, inputs));
@@ -365,7 +367,7 @@ fn terminal_steps(
         .map_err(|error| corrupt("turn journal", &error.to_string()))?;
     program.push(
         end_local_step(
-            &lash_core_execution::ArtifactReferrer::Execution(journal.clone()),
+            &lash_core_store::artifact_referrer::ArtifactReferrer::Execution(journal.clone()),
             Some(&journal),
         )
         .map_err(|error| encoding(&error))?,
@@ -644,17 +646,17 @@ pub(super) async fn apply_session_commit(
     commit: &Committing<'_>,
     write: &SessionCommitWrite,
 ) -> Result<(), DurableError> {
-    let refused = |error: &lash_core_execution::StoreError| {
+    let refused = |error: &lash_core_store::store::StoreError| {
         DurableError::session_commit(write.session.clone(), error)
     };
-    let runtime_commit = lash_core_execution::store::decode_session_commit(&write.commit_json)
+    let runtime_commit = lash_core_store::store::decode_session_commit(&write.commit_json)
         .map_err(|error| refused(&error))?;
     if runtime_commit.session_id != write.session
         || runtime_commit.expected_head_revision != write.expected_head
     {
         return Err(DurableError::Domain(DomainRefusal::SessionCommitRefused {
             session: write.session.clone(),
-            code: lash_core_execution::RuntimeErrorCode::StoreRefused,
+            code: lash_core_store::runtime_error::RuntimeErrorCode::StoreRefused,
             cause: None,
             reason: format!(
                 "the commit names session {} at head {}, not {} at {}",
@@ -665,9 +667,8 @@ pub(super) async fn apply_session_commit(
             ),
         }));
     }
-    let planner =
-        lash_core_execution::store::RuntimeCommitPlanner::prepare(runtime_commit, tx.fleet())
-            .map_err(|error| refused(&error))?;
+    let planner = lash_core_store::store::RuntimeCommitPlanner::prepare(runtime_commit, tx.fleet())
+        .map_err(|error| refused(&error))?;
     let writer = head_writer(commit.actor, &write.session);
     super::head_commit::apply(
         tx,
@@ -686,13 +687,13 @@ pub(super) async fn apply_session_commit(
 /// explicit form refuses.
 pub(super) fn prepared(
     write: &SessionCommitWrite,
-    fleet: lash_core_execution::FleetFormat,
-) -> Option<lash_core_execution::store::RuntimeCommitPlanner> {
-    let commit = lash_core_execution::store::decode_session_commit(&write.commit_json).ok()?;
+    fleet: lash_core_store::store::FleetFormat,
+) -> Option<lash_core_store::store::RuntimeCommitPlanner> {
+    let commit = lash_core_store::store::decode_session_commit(&write.commit_json).ok()?;
     if commit.session_id != write.session || commit.expected_head_revision != write.expected_head {
         return None;
     }
-    lash_core_execution::store::RuntimeCommitPlanner::prepare(commit, fleet).ok()
+    lash_core_store::store::RuntimeCommitPlanner::prepare(commit, fleet).ok()
 }
 
 /// Who writes a session head commit fenced by `actor`: the session's own

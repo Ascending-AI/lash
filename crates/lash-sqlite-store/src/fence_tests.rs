@@ -9,11 +9,16 @@
 
 use std::time::Duration;
 
-use lash_core_execution::compat::{CompatRefusal, VersionRange};
-use lash_core_execution::{
-    FleetFormat, FleetFormatStore, ProcessRegistrar as _, SessionCatalogStore as _, SessionId,
-    SessionMeta, SessionRelation, StoreError,
-};
+use lash_core_store::compat::CompatRefusal;
+use lash_core_store::compat::VersionRange;
+use lash_core_store::session_identity::SessionRelation;
+use lash_core_store::store::FleetFormat;
+use lash_core_store::store::FleetFormatStore;
+use lash_core_store::store::SessionCatalogStore as _;
+use lash_core_store::store::SessionMeta;
+use lash_core_store::store::StoreError;
+use lash_execution_contracts::process::ProcessRegistrar as _;
+use lash_protocol_types::SessionId;
 use rusqlite::Connection;
 
 use crate::compat::AdvanceStep;
@@ -151,10 +156,10 @@ async fn sqlite_fence_refuses_a_writer_of_each_family_after_finalize() {
     let processes_before = count(&location, "processes");
     let registry_error = set
         .process_registry()
-        .register_process(lash_core_execution::testing::held_engine_registration(
+        .register_process(lash_execution_contracts::testing::held_engine_registration(
             serde_json::Value::Null,
-            lash_core_execution::ProcessProvenance::host(),
-            lash_core_execution::Lifetime::Detached,
+            lash_execution_contracts::process::ProcessProvenance::host(),
+            lash_execution_contracts::process::Lifetime::Detached,
         ))
         .await
         .expect_err("the process-registry writer is fenced");
@@ -306,7 +311,7 @@ async fn sqlite_finalize_waits_for_a_writer_paused_after_its_fence() {
             pauses: Some(pauses.clone()),
             ..crate::SqliteStoreSetOptions::standard(crate::SqliteSynchronous::Normal)
         },
-        std::sync::Arc::new(lash_core_execution::facade_support::SystemClock),
+        std::sync::Arc::new(lash_core_ids::clock::SystemClock),
     )
     .await
     .expect("open the store set");
@@ -410,7 +415,7 @@ async fn sqlite_fence_observes_a_writable_move_of_f() {
 
 #[tokio::test]
 async fn sqlite_session_delete_after_finalize_stays_writer_fenced() {
-    use lash_core_execution::SessionCatalogStore as _;
+    use lash_core_store::store::SessionCatalogStore as _;
     let (_run, set) = file_set().await;
     let factory = set.session_store_factory();
     let session = SessionId::from("fenced-delete");
@@ -431,7 +436,7 @@ async fn sqlite_session_delete_after_finalize_stays_writer_fenced() {
     assert!(
         matches!(
             error.stop,
-            lash_core_execution::MaintenanceStop::Failed(StoreError::WriterFenced {
+            lash_core_store::store::MaintenanceStop::Failed(StoreError::WriterFenced {
                 recorded,
                 ..
             }) if recorded == next
@@ -443,7 +448,8 @@ async fn sqlite_session_delete_after_finalize_stays_writer_fenced() {
 
 #[tokio::test]
 async fn sqlite_fence_encodes_again_when_f_moves() {
-    use lash_core_execution::{SessionCatalogStore as _, SessionCommitStore as _};
+    use lash_core_store::store::SessionCatalogStore as _;
+    use lash_core_store::store::SessionCommitStore as _;
     let (_run, set) = file_set().await;
     let path = set
         .location()
@@ -458,7 +464,7 @@ async fn sqlite_fence_encodes_again_when_f_moves() {
     .await
     .expect("open with next writer range")
     .with_fleet_format_for_testing(FleetFormat::from_version(1).with_writer_pins(&[
-        lash_core_execution::WriterPin {
+        lash_core_store::store::WriterPin {
             constant: "RUNTIME_COMMIT_RECEIPT_SCHEMA_VERSION",
             generation: 1,
             version: 7,
@@ -472,18 +478,20 @@ async fn sqlite_fence_encodes_again_when_f_moves() {
         .await
         .expect("admit under old epoch");
     crate::testing::finalize_fleet_format(set.location(), 2).expect("finalize");
-    let state = lash_core_execution::RuntimeSessionState {
+    let state = lash_core_store::session_state::RuntimeSessionState {
         session_id: session.clone(),
-        ..lash_core_execution::RuntimeSessionState::fixture(
-            lash_core_execution::SessionPolicy::new(
-                lash_core_execution::TurnBudget::Unbounded,
-                lash_core_execution::MaxToolCalls::new(1024),
+        ..lash_core_store::session_state::RuntimeSessionState::fixture(
+            lash_core_store::session_policy::SessionPolicy::new(
+                lash_protocol_types::session_model::TurnBudget::Unbounded,
+                lash_protocol_types::session_model::MaxToolCalls::new(1024),
                 lash_core::NoProgressBudget::bounded(12),
             ),
         )
     };
     let receipt = store
-        .commit_runtime_state(lash_core_execution::RuntimeCommit::persisted_state_for_test(&state))
+        .commit_runtime_state(
+            lash_core_store::store::RuntimeCommit::persisted_state_for_test(&state),
+        )
         .await
         .expect("commit re-encodes under writable epoch");
     assert_ne!(receipt.schema_version, 7);

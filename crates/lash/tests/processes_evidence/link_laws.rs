@@ -253,12 +253,12 @@ async fn start(
         .expect("the kernel's settings");
     core.processes()
         .start(
-            lash_core::ProcessStartRequest::engine(
+            lash_execution_contracts::process::ProcessStartRequest::engine(
                 KIND.to_owned(),
                 payload,
-                lash_core::EngineLaunch::new(env_ref, settings),
-                lash_core::ProcessOriginator::host(),
-                lash_core::LifetimeDecision::Detached,
+                lash_execution_contracts::process::EngineLaunch::new(env_ref, settings),
+                lash_execution_contracts::process::ProcessOriginator::host(),
+                lash_execution_contracts::process::LifetimeDecision::Detached,
             ),
             core.effect_host(),
         )
@@ -292,7 +292,7 @@ async fn answer(core: &lash::LashCore, process: &lash_core::ProcessId) -> serde_
     .await
     .expect("the process ends within a minute")
     .expect("its end is read");
-    let lash_core::ProcessAwaitOutput::Settled { output } = output else {
+    let lash_execution_contracts::process::ProcessAwaitOutput::Settled { output } = output else {
         panic!("the process ended without an answer: {output:?}");
     };
     assert!(output.is_success(), "{output:?}");
@@ -342,7 +342,7 @@ async fn a_compatible_tool_links_unless_the_host_asks_for_an_exact_fit() {
         .check_link(KIND, &payload, &wide, &BTreeMap::new())
         .await
         .expect("a compatible tool links");
-    let exact = [(effect, lash_core::FitPolicy::Exact)]
+    let exact = [(effect, lash_execution_contracts::process::FitPolicy::Exact)]
         .into_iter()
         .collect();
     let refused = core
@@ -506,7 +506,7 @@ fn dynamic_links_cannot_disguise_ordinary_effects() {
         ),
     )]);
     assert!(
-        matches!(lash_core::check_links(&forged, &performed, &BTreeMap::new()),
+        matches!(lash_execution_contracts::process::check_links(&forged, &performed, &BTreeMap::new()),
         Err(ProcessEnvRefusal::EffectUnfit { effect, .. }) if effect == "search.run")
     );
 }

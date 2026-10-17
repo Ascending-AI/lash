@@ -356,7 +356,7 @@ fn sample_events() -> Vec<(&'static str, TurnEvent, serde_json::Value)> {
                 outcome: ToolIntentActivityOutcome::Refused {
                     intent_index: 2,
                     kind: ToolIntentKind::CancelProcess,
-                    refusal: lash_core::ToolIntentRefusalReason::MintingRunCancelled,
+                    refusal: lash_execution_contracts::tool_intent_outcome::ToolIntentRefusalReason::MintingRunCancelled,
                 },
             },
             json!({"type":"tool_intent_outcome", "call_id":lash_core::ToolCallId::fixture("call-1"),
@@ -367,7 +367,7 @@ fn sample_events() -> Vec<(&'static str, TurnEvent, serde_json::Value)> {
             TurnEvent::ToolIntentOutcome {
                 call_id: lash_core::ToolCallId::fixture("call-1"),
                 outcome: ToolIntentActivityOutcome::BatchRefused {
-                    refusal: lash_core::ToolIntentRefusalReason::UnsupportedProtocolVersion {
+                    refusal: lash_execution_contracts::tool_intent_outcome::ToolIntentRefusalReason::UnsupportedProtocolVersion {
                         recorded: 0,
                     },
                 },

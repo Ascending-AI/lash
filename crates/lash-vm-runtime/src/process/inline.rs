@@ -1,5 +1,5 @@
 //! A function a start carries inline (FIG-6382): the kernel engine's
-//! [`lash_core::InlineStarts`].
+//! [`lash_execution_contracts::process::InlineStarts`].
 //!
 //! The payload is a function value as a tool receives it,
 //! `{"$lash_function": <FunctionValue>}`. The tag carries a value, not
@@ -22,8 +22,8 @@ pub(crate) struct KernelInlineStarts {
     pub(crate) engine: Arc<KernelProcessEngine>,
 }
 
-fn refused(message: impl std::fmt::Display) -> lash_core::PluginError {
-    lash_core::PluginError::Runtime(lash_core::RuntimeError::new(
+fn refused(message: impl std::fmt::Display) -> lash_execution_contracts::plugin_error::PluginError {
+    lash_execution_contracts::plugin_error::PluginError::Runtime(lash_core::RuntimeError::new(
         lash_core::RuntimeErrorCode::DefinitionRefused,
         format!("the function carried inline is refused: {message}"),
     ))
@@ -35,7 +35,13 @@ impl KernelInlineStarts {
     fn check(
         &self,
         payload: &serde_json::Value,
-    ) -> Result<(IdentifiedDocument, lash_core::InlineDefinition), lash_core::PluginError> {
+    ) -> Result<
+        (
+            IdentifiedDocument,
+            lash_execution_contracts::process::InlineDefinition,
+        ),
+        lash_execution_contracts::plugin_error::PluginError,
+    > {
         let engine = &self.engine;
         let value = FunctionValue::from_transport_json(
             payload,
@@ -81,7 +87,7 @@ impl KernelInlineStarts {
         .map_err(refused)?;
         Ok((
             identified,
-            lash_core::InlineDefinition {
+            lash_execution_contracts::process::InlineDefinition {
                 draft,
                 signature,
                 performed,
@@ -91,11 +97,14 @@ impl KernelInlineStarts {
 }
 
 #[async_trait::async_trait]
-impl lash_core::InlineStarts for KernelInlineStarts {
+impl lash_execution_contracts::process::InlineStarts for KernelInlineStarts {
     async fn inspect(
         &self,
         payload: &serde_json::Value,
-    ) -> Result<lash_core::InlineDefinition, lash_core::PluginError> {
+    ) -> Result<
+        lash_execution_contracts::process::InlineDefinition,
+        lash_execution_contracts::plugin_error::PluginError,
+    > {
         self.check(payload).map(|(_, inline)| inline)
     }
 
@@ -103,7 +112,10 @@ impl lash_core::InlineStarts for KernelInlineStarts {
         &self,
         claim: &lash_core::ReferrerClaim,
         payload: &serde_json::Value,
-    ) -> Result<lash_core::InlineDefinition, lash_core::PluginError> {
+    ) -> Result<
+        lash_execution_contracts::process::InlineDefinition,
+        lash_execution_contracts::plugin_error::PluginError,
+    > {
         let (document, inline) = self.check(payload)?;
         let declarations = lash_kernel_doc::CheckedDeclarations::required(
             document.document(),

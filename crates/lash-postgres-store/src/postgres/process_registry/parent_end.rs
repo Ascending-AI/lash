@@ -1,7 +1,10 @@
 //! Turn scopes derive their close from the retained run terminal. Other
 //! scopes retain their typed close ledger, including after a process is pruned.
 
-use lash_core_execution::{EffectOpener, ParentEndPlan, PluginError, ScopeId};
+use lash_core_store::effect_opener::EffectOpener;
+use lash_core_store::scope_identity::ScopeId;
+use lash_execution_contracts::plugin_error::PluginError;
+use lash_execution_contracts::process::ParentEndPlan;
 use sqlx::{PgPool, Row};
 
 use crate::process_sql::process_sql;
@@ -15,7 +18,7 @@ fn ledger_key(scope: &ScopeId) -> (&'static str, String) {
 /// The typed payload a ledger row persists beside the projection key.
 fn ledger_payload(
     parent: &ScopeId,
-    fleet_format: lash_core_execution::FleetFormat,
+    fleet_format: lash_core_store::store::FleetFormat,
 ) -> Result<String, PluginError> {
     parent
         .storage_payload(fleet_format)
@@ -29,7 +32,7 @@ fn decode_plan(
     id: &str,
     payload: &str,
     ended_at_ms: i64,
-    fleet_format: lash_core_execution::FleetFormat,
+    fleet_format: lash_core_store::store::FleetFormat,
 ) -> Result<ParentEndPlan, PluginError> {
     let parent =
         ScopeId::from_storage_columns(kind, id, payload, fleet_format).map_err(|error| {
@@ -86,7 +89,7 @@ pub(crate) async fn record_tx(
     tx: &mut sqlx::PgConnection,
     parent: &ScopeId,
     ended_at_ms: u64,
-    fleet_format: lash_core_execution::FleetFormat,
+    fleet_format: lash_core_store::store::FleetFormat,
 ) -> Result<(), PluginError> {
     lock_parent_scope_tx(tx, parent).await?;
     if matches!(parent.opener(), Some(EffectOpener::Turn { .. })) {
@@ -177,7 +180,7 @@ pub(crate) async fn plan_exists_tx(
 pub(super) async fn get(
     pool: &PgPool,
     parent: &ScopeId,
-    fleet_format: lash_core_execution::FleetFormat,
+    fleet_format: lash_core_store::store::FleetFormat,
 ) -> Result<Option<ParentEndPlan>, PluginError> {
     if let Some(EffectOpener::Turn {
         session_id,

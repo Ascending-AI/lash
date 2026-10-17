@@ -1,4 +1,5 @@
-use crate::plugin::{DirectCompletion, PluginError};
+use crate::plugin::DirectCompletion;
+use lash_execution_contracts::plugin_error::PluginError;
 
 #[derive(Clone)]
 pub struct ToolDirectCompletionClient<'run> {

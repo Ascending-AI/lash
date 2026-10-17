@@ -10,7 +10,6 @@
 //! commit's connection, so the registry and the actor never disagree.
 
 use crate::guarded_tx::GuardedTx;
-use lash_core_execution::runtime::actor::process::{scope_id, scope_index, subtree_roots};
 use lash_durable::domain::{
     CANCEL_MAIL, CancelAnswer, CancelRequest, DomainRefusal, ProcessActorRow, ProcessStartRows,
     ProcessWrite, ScopeKey,
@@ -19,6 +18,9 @@ use lash_durable::{
     ActorKey, DurableError, DurableInstant, Epoch, MailRefusal, StoreFailure, StoreFailureKind,
     Woken,
 };
+use lash_execution_contracts::scope::scope_id;
+use lash_execution_contracts::scope::scope_index;
+use lash_execution_contracts::scope::subtree_roots;
 use lash_protocol_types::{CancelOrigin, ProcessId};
 use sqlx::PgConnection;
 
@@ -31,13 +33,13 @@ use crate::process_helpers::{
 /// A registry failure inside a durable commit: the registry row did not
 /// decode or refused, which the port reports as a store failure. Transient
 /// substrate faults retain their typed classification for retry.
-fn registry_failure(error: &lash_core_execution::PluginError) -> DurableError {
+fn registry_failure(error: &lash_execution_contracts::plugin_error::PluginError) -> DurableError {
     DurableError::Store(StoreFailure {
         kind: match error {
-            lash_core_execution::PluginError::StoreUnavailable {
-                fault: lash_core_execution::store::StoreFault::Contended,
+            lash_execution_contracts::plugin_error::PluginError::StoreUnavailable {
+                fault: lash_core_store::store::StoreFault::Contended,
             } => StoreFailureKind::Contended,
-            lash_core_execution::PluginError::StoreUnavailable { .. } => {
+            lash_execution_contracts::plugin_error::PluginError::StoreUnavailable { .. } => {
                 StoreFailureKind::Unavailable
             }
             _ => StoreFailureKind::Corrupt,
@@ -147,7 +149,7 @@ pub(crate) async fn cancel_within(
     origin: CancelOrigin,
     requester: &str,
     now: DurableInstant,
-    fleet: lash_core_execution::FleetFormat,
+    fleet: lash_core_store::store::FleetFormat,
 ) -> Result<(CancelAnswer, Option<Woken>), DurableError> {
     lock_actor_within(tx, process).await?;
     let recorded = record_cancel_tx(tx, process, origin, requester, millis(now)?, fleet)
@@ -184,7 +186,7 @@ async fn register_within(
     rows: &ProcessStartRows,
 ) -> Result<(), DurableError> {
     use crate::process_registry::registration::{AppliedRegistration, apply_registration_tx};
-    let Ok(staged) = lash_core_execution::runtime::StagedRegistration::decode(rows) else {
+    let Ok(staged) = lash_execution_contracts::process::StagedRegistration::decode(rows) else {
         return Err(corrupt("process start rows", &rows.registration_json));
     };
     let refused = |reason: String| {
@@ -216,7 +218,7 @@ async fn register_within(
         Err(error)
             if matches!(
                 error.class(),
-                lash_core_execution::PluginErrorClass::Terminal
+                lash_execution_contracts::plugin_error::PluginErrorClass::Terminal
             ) =>
         {
             Err(refused(error.to_string()))
@@ -288,13 +290,14 @@ pub(super) async fn apply(
         } => {
             let payload = serde_json::from_str(payload_json)
                 .map_err(|_| corrupt("process event payload", payload_json))?;
-            let request = lash_core_execution::ProcessEventAppendRequest::from_stored(
-                event_type.as_str(),
-                payload,
-                replay_key.as_str(),
-                commit.fleet,
-            )
-            .map_err(|error| registry_failure(&error))?;
+            let request =
+                lash_execution_contracts::process::ProcessEventAppendRequest::from_stored(
+                    event_type.as_str(),
+                    payload,
+                    replay_key.as_str(),
+                    commit.fleet,
+                )
+                .map_err(|error| registry_failure(&error))?;
             record_event_tx(tx, process, request, millis(commit.now)?, commit.fleet)
                 .await
                 .map_err(|error| registry_failure(&error))
@@ -303,7 +306,7 @@ pub(super) async fn apply(
             process,
             outcome_json,
         } => {
-            let output: lash_core_execution::ProcessAwaitOutput =
+            let output: lash_execution_contracts::process::ProcessAwaitOutput =
                 serde_json::from_str(outcome_json)
                     .map_err(|_| corrupt("process terminal", outcome_json))?;
             let ended = record_terminal_tx(
@@ -502,7 +505,7 @@ pub(super) async fn request_cancel(
     tx: &mut GuardedTx<'_>,
     request: &CancelRequest,
     now: DurableInstant,
-    fleet: lash_core_execution::FleetFormat,
+    fleet: lash_core_store::store::FleetFormat,
 ) -> Result<(CancelAnswer, Option<Woken>), DurableError> {
     cancel_within(
         tx,

@@ -126,14 +126,12 @@ pub fn process_step_body_started(
 pub fn process_committed_event(
     sequence: u64,
     requester: &str,
-) -> crate::runtime::ObservedProcessEvent {
-    crate::runtime::ObservedProcessEvent {
+) -> lash_execution_contracts::process::ObservedProcessEvent {
+    lash_execution_contracts::process::ObservedProcessEvent {
         sequence,
-        fact: crate::ProcessLifecycleFact::CancelRequested(crate::CancelRequest::new(
-            crate::CancelOrigin::OperatorRequested,
-            requester,
-            sequence,
-        )),
+        fact: lash_execution_contracts::process::ProcessLifecycleFact::CancelRequested(
+            crate::CancelRequest::new(crate::CancelOrigin::OperatorRequested, requester, sequence),
+        ),
         occurred_at_ms: sequence,
     }
 }

@@ -61,7 +61,10 @@ impl lash::plugins::PluginFactory for Instruction {
 
     fn recipe(
         self: Arc<Self>,
-    ) -> std::result::Result<lash_core::plugin::PluginRecipe, lash_core::plugin::PluginError> {
+    ) -> std::result::Result<
+        lash_core::plugin::PluginRecipe,
+        lash_execution_contracts::plugin_error::PluginError,
+    > {
         let mut reg = lash_core::plugin::PluginRegistrar::<Instruction>::new(
             lash_core::plugin::PluginFactory::id(self.as_ref()),
         );
@@ -83,7 +86,7 @@ impl lash::plugins::SessionPlugin for Instruction {
 impl Instruction {
     fn declare(
         reg: &mut lash_core::plugin::PluginRegistrar<Self>,
-    ) -> std::result::Result<(), lash_core::plugin::PluginError> {
+    ) -> std::result::Result<(), lash_execution_contracts::plugin_error::PluginError> {
         reg.turn()
             .before(lash::hook_key!("before"), move |_this, _state| {
                 Ok(Arc::new(|_| {

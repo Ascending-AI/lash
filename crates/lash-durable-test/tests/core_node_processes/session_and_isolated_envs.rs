@@ -9,7 +9,7 @@ use super::*;
 /// new incarnation: a cold worker that holds nothing of an earlier one.
 fn booted(
     stores: &Arc<dyn StoreSet>,
-    engines: Vec<Arc<dyn lash_core::ProcessEngine>>,
+    engines: Vec<Arc<dyn lash_execution_contracts::process::ProcessEngine>>,
     boot: &str,
     build: impl FnOnce(&lash::Backend) -> lash::LashCoreBuilder,
 ) -> (lash::Backend, lash::LashCore) {
@@ -36,12 +36,14 @@ fn booted(
 }
 
 /// Every process the registry holds.
-async fn all_processes(backend: &lash::Backend) -> Vec<lash_core::ProcessRecord> {
+async fn all_processes(
+    backend: &lash::Backend,
+) -> Vec<lash_execution_contracts::process::ProcessRecord> {
     lash_core::testing::process_roster_records_for_fixture(
         backend.process_registry().as_ref(),
-        &lash_core::ProcessListFilter {
-            status: lash_core::ProcessStatusFilter::Any,
-            ..lash_core::ProcessListFilter::default()
+        &lash_execution_contracts::process::ProcessListFilter {
+            status: lash_execution_contracts::process::ProcessStatusFilter::Any,
+            ..lash_execution_contracts::process::ProcessListFilter::default()
         },
     )
     .await
@@ -74,7 +76,9 @@ const TOOL_CHILD_TASK: &str = "session-turn-env tool child: hold";
 
 /// A host's detached session-turn start of the child `HOST_CHILD` of
 /// `TURN_PARENT`, its creation stating `plugin_options`.
-fn host_session_turn(plugin_options: lash_core::PluginOptions) -> lash_core::ProcessStartRequest {
+fn host_session_turn(
+    plugin_options: lash_core::PluginOptions,
+) -> lash_execution_contracts::process::ProcessStartRequest {
     let policy = lash_core::SessionPolicy {
         model: Some(lash::LlmProfileConfig::new(lash::RecordedLlmProfile::mint(
             lash::LlmProfileKey::new(MODEL),
@@ -86,20 +90,20 @@ fn host_session_turn(plugin_options: lash_core::PluginOptions) -> lash_core::Pro
             lash_core::NoProgressBudget::bounded(12),
         )
     };
-    let create_request = lash_core::SessionCreateRequest::child(
+    let create_request = lash_execution_contracts::session_types::SessionCreateRequest::child(
         TURN_PARENT,
         lash_core::SessionStartPoint::Empty,
         policy,
         plugin_options,
     )
     .with_session_id(SessionId::fixture(HOST_CHILD.to_owned()));
-    lash_core::ProcessStartRequest::session_turn(
+    lash_execution_contracts::process::ProcessStartRequest::session_turn(
         "host-child-turn",
         create_request,
         lash::TurnInput::text("answer the host"),
-        lash_core::SessionTurnOutcome::Turn,
-        lash_core::ProcessOriginator::host(),
-        lash_core::LifetimeDecision::Detached,
+        lash_execution_contracts::process::SessionTurnOutcome::Turn,
+        lash_execution_contracts::process::ProcessOriginator::host(),
+        lash_execution_contracts::process::LifetimeDecision::Detached,
     )
 }
 
@@ -209,7 +213,7 @@ async fn a_session_turn_process_runs_without_an_environment_on_a_cold_worker() {
         assert!(
             matches!(
                 process.input.as_ref(),
-                lash_core::ProcessInput::SessionTurn { .. }
+                lash_execution_contracts::process::ProcessInput::SessionTurn { .. }
             ),
             "{process:#?}"
         );
@@ -239,7 +243,7 @@ async fn a_session_turn_process_runs_without_an_environment_on_a_cold_worker() {
     .expect("the cancelled process ends within a minute")
     .expect("its end is read");
     assert!(
-        matches!(&cancelled, lash_core::ProcessAwaitOutput::Settled { output }
+        matches!(&cancelled, lash_execution_contracts::process::ProcessAwaitOutput::Settled { output }
             if matches!(output.outcome, lash_core::ToolCallOutcome::Cancelled(_))),
         "the tool-declared process ends cancelled: {cancelled:?}"
     );
@@ -281,24 +285,28 @@ const B_COMPONENT: lash_core::ProcessConfigKey<()> =
 /// The engine runs `B_TOOL` once and ends with its answer.
 fn explicit_engine_advance(
     _state: &mut serde_json::Value,
-    event: lash_core::EngineEvent,
-) -> lash_core::EngineAction {
+    event: lash_execution_contracts::process::EngineEvent,
+) -> lash_execution_contracts::process::EngineAction {
     match event {
-        lash_core::EngineEvent::Started { payload } => lash_core::EngineAction::Steps {
-            steps: vec![lash_core::StepRequest::Tool {
-                step: lash_core::StepName("b".to_owned()),
-                effect: lash_core_execution::testing::effect("b.run"),
-                input: payload,
-                site: None,
-                matched: None,
-            }],
-            wake: None,
-        },
-        lash_core::EngineEvent::StepSettled { outcome, .. } => {
+        lash_execution_contracts::process::EngineEvent::Started { payload } => {
+            lash_execution_contracts::process::EngineAction::Steps {
+                steps: vec![lash_execution_contracts::process::StepRequest::Tool {
+                    step: lash_execution_contracts::process::StepName("b".to_owned()),
+                    effect: lash_core_execution::testing::effect("b.run"),
+                    input: payload,
+                    site: None,
+                    matched: None,
+                }],
+                wake: None,
+            }
+        }
+        lash_execution_contracts::process::EngineEvent::StepSettled { outcome, .. } => {
             answer(serde_json::json!({ "step": settled(&outcome) }))
         }
-        lash_core::EngineEvent::Cancelled { origin, .. } => cancelled(origin),
-        _ => lash_core::EngineAction::Idle,
+        lash_execution_contracts::process::EngineEvent::Cancelled { origin, .. } => {
+            cancelled(origin)
+        }
+        _ => lash_execution_contracts::process::EngineAction::Idle,
     }
 }
 
@@ -377,7 +385,10 @@ impl lash_core::ToolProvider for SessionTools {
     fn tool_manifests(
         &self,
         _config: &lash_core::OwnerConfigView,
-    ) -> std::result::Result<Vec<lash_core::ToolManifest>, lash_core::PluginError> {
+    ) -> std::result::Result<
+        Vec<lash_core::ToolManifest>,
+        lash_execution_contracts::plugin_error::PluginError,
+    > {
         Ok({
             vec![
                 explicit_definition().manifest(),
@@ -518,7 +529,7 @@ async fn an_isolated_tool_runs_its_process_under_its_providers_explicit_environm
             kind: EXPLICIT_ENGINE,
             advance: explicit_engine_advance,
             performs: b_runs,
-        }) as Arc<dyn lash_core::ProcessEngine>
+        }) as Arc<dyn lash_execution_contracts::process::ProcessEngine>
     };
     let before = stored_envs(&database);
 

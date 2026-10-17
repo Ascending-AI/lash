@@ -23,7 +23,7 @@ impl crate::ToolProvider for Answer {
     fn tool_manifests(
         &self,
         _: &crate::OwnerConfigView,
-    ) -> Result<Vec<crate::ToolManifest>, crate::PluginError> {
+    ) -> Result<Vec<crate::ToolManifest>, lash_execution_contracts::plugin_error::PluginError> {
         Ok(vec![self.0.manifest.clone()])
     }
     fn resolve_contract(
@@ -73,15 +73,15 @@ fn registry_of(
 }
 fn target() -> ResolvedStartTarget {
     ResolvedStartTarget {
-        definition_id: crate::ProcessDefinitionDraft::new(
-            crate::testing::HELD_PROCESS_ENGINE_KIND,
+        definition_id: lash_execution_contracts::process::ProcessDefinitionDraft::new(
+            lash_execution_contracts::testing::HELD_PROCESS_ENGINE_KIND,
             serde_json::json!({}),
             [],
         )
         .unwrap()
         .id(),
-        engine_kind: crate::testing::HELD_PROCESS_ENGINE_KIND.into(),
-        signature: crate::ProcessSignature::Unknown,
+        engine_kind: lash_execution_contracts::testing::HELD_PROCESS_ENGINE_KIND.into(),
+        signature: lash_execution_contracts::process::ProcessSignature::Unknown,
         payload: serde_json::json!({}),
         args: Default::default(),
         performed: std::collections::BTreeMap::from([(
@@ -227,7 +227,10 @@ async fn an_exact_fit_is_required_before_a_launch_is_held() {
     crate::check_links(&env, &performed, &Default::default())
         .expect("the wider tool is compatible");
     let choice = ProcessStartChoice {
-        fits: std::collections::BTreeMap::from([(effect, crate::FitPolicy::Exact)]),
+        fits: std::collections::BTreeMap::from([(
+            effect,
+            lash_execution_contracts::process::FitPolicy::Exact,
+        )]),
         env: ProcessEnvChoice::New(env),
         engine_settings: None,
     };
@@ -253,23 +256,23 @@ async fn an_exact_fit_is_required_before_a_launch_is_held() {
 
 struct SearchEngine;
 #[async_trait::async_trait]
-impl crate::ProcessEngine for SearchEngine {
+impl lash_execution_contracts::process::ProcessEngine for SearchEngine {
     fn settled_ran(
         &self,
-        _kind: &crate::EngineStepKind,
+        _kind: &lash_execution_contracts::process::EngineStepKind,
         _output: &lash_core_store::tool_run::SettledOutput,
     ) -> Vec<(u32, u64)> {
         Vec::new()
     }
 
-    fn trace_class(&self) -> crate::ProcessTraceClass {
-        crate::ProcessTraceClass::Internal
+    fn trace_class(&self) -> lash_execution_contracts::process::ProcessTraceClass {
+        lash_execution_contracts::process::ProcessTraceClass::Internal
     }
 
     async fn performed_effects(
         &self,
         _payload: &serde_json::Value,
-    ) -> Result<crate::PerformedEffects, crate::ProcessEnvRefusal> {
+    ) -> Result<lash_execution_contracts::process::PerformedEffects, crate::ProcessEnvRefusal> {
         Ok(std::collections::BTreeMap::from([(
             crate::EffectName::new("search.run").unwrap(),
             lash_protocol_types::tool_signature(
@@ -281,30 +284,32 @@ impl crate::ProcessEngine for SearchEngine {
 
     async fn check_args(
         &self,
-        _signature: &crate::ProcessSignature,
+        _signature: &lash_execution_contracts::process::ProcessSignature,
         _args: &serde_json::Map<String, serde_json::Value>,
-        _mode: crate::ArgsMode,
-    ) -> std::result::Result<(), crate::ArgsMismatch> {
-        Err(crate::ArgsMismatch::UnsupportedSignature {
-            engine_kind: self.kind().into(),
-        })
+        _mode: lash_execution_contracts::process::ArgsMode,
+    ) -> std::result::Result<(), lash_execution_contracts::process::ArgsMismatch> {
+        Err(
+            lash_execution_contracts::process::ArgsMismatch::UnsupportedSignature {
+                engine_kind: self.kind().into(),
+            },
+        )
     }
 
     fn kind(&self) -> &'static str {
-        crate::testing::HELD_PROCESS_ENGINE_KIND
+        lash_execution_contracts::testing::HELD_PROCESS_ENGINE_KIND
     }
 
     fn start_artifacts(
         &self,
         _payload: &serde_json::Value,
-    ) -> Result<Vec<crate::ArtifactName>, crate::PluginError> {
+    ) -> Result<Vec<crate::ArtifactName>, lash_execution_contracts::plugin_error::PluginError> {
         Ok(Vec::new())
     }
 
     async fn end_artifact_referrer(
         &self,
         _cleanup: &crate::ResolvedArtifactCleanup,
-    ) -> Result<(), crate::ArtifactStoreError> {
+    ) -> Result<(), lash_execution_contracts::module_artifacts::ArtifactStoreError> {
         Ok(())
     }
 
@@ -312,14 +317,16 @@ impl crate::ProcessEngine for SearchEngine {
         &self,
         _claim: &crate::ReferrerClaim,
         artifact_ref: &str,
-    ) -> Result<(), crate::PluginError> {
-        Err(crate::PluginError::Session(format!(
-            "the held engine stores no artifact `{artifact_ref}`"
-        )))
+    ) -> Result<(), lash_execution_contracts::plugin_error::PluginError> {
+        Err(
+            lash_execution_contracts::plugin_error::PluginError::Session(format!(
+                "the held engine stores no artifact `{artifact_ref}`"
+            )),
+        )
     }
 
-    fn state_format(&self) -> crate::EngineStateFormat {
-        crate::EngineStateFormat {
+    fn state_format(&self) -> lash_execution_contracts::process::EngineStateFormat {
+        lash_execution_contracts::process::EngineStateFormat {
             kind: self.kind().to_owned(),
             version: 0,
         }
@@ -339,46 +346,66 @@ impl crate::ProcessEngine for SearchEngine {
     fn check_settings(
         &self,
         _payload: &serde_json::Value,
-        settings: Option<&crate::EngineSettings>,
-    ) -> std::result::Result<(), crate::PluginError> {
+        settings: Option<&lash_execution_contracts::process::EngineSettings>,
+    ) -> std::result::Result<(), lash_execution_contracts::plugin_error::PluginError> {
         match settings {
             None => Ok(()),
-            Some(_) => Err(crate::PluginError::Registration(format!(
-                "process engine `{}` takes no settings",
-                self.kind()
-            ))),
+            Some(_) => Err(
+                lash_execution_contracts::plugin_error::PluginError::Registration(format!(
+                    "process engine `{}` takes no settings",
+                    self.kind()
+                )),
+            ),
         }
     }
 
     fn default_settings(
         &self,
         _payload: &serde_json::Value,
-    ) -> std::result::Result<Option<crate::EngineSettings>, crate::PluginError> {
+    ) -> std::result::Result<
+        Option<lash_execution_contracts::process::EngineSettings>,
+        lash_execution_contracts::plugin_error::PluginError,
+    > {
         Ok(None)
     }
 
     fn advance(
         &self,
-        state: crate::EngineState,
-        event: crate::EngineEvent,
-    ) -> Result<(crate::EngineState, crate::EngineAction), crate::ProcessInfraError> {
+        state: lash_execution_contracts::process::EngineState,
+        event: lash_execution_contracts::process::EngineEvent,
+    ) -> Result<
+        (
+            lash_execution_contracts::process::EngineState,
+            lash_execution_contracts::process::EngineAction,
+        ),
+        lash_execution_contracts::process::ProcessInfraError,
+    > {
         let action = match event {
-            crate::EngineEvent::Cancelled { .. } => crate::EngineAction::Terminal(
-                crate::ProcessAwaitOutput::from_tool_output(crate::ToolCallOutput::cancelled(
-                    crate::ToolCancellation::runtime("the held process was cancelled"),
-                )),
-            ),
-            _ => crate::EngineAction::Idle,
+            lash_execution_contracts::process::EngineEvent::Cancelled { .. } => {
+                lash_execution_contracts::process::EngineAction::Terminal(
+                    lash_execution_contracts::process::ProcessAwaitOutput::from_tool_output(
+                        crate::ToolCallOutput::cancelled(crate::ToolCancellation::runtime(
+                            "the held process was cancelled",
+                        )),
+                    ),
+                )
+            }
+            _ => lash_execution_contracts::process::EngineAction::Idle,
         };
         Ok((state, action))
     }
 
     async fn resolve(
         &self,
-        _reference: &crate::ProcessDefinitionRef,
-    ) -> Result<crate::ProcessDefinitionResolution, crate::ProcessDefinitionError> {
-        Ok(crate::ProcessDefinitionResolution::new(
-            crate::ProcessSignature::Unknown,
-        ))
+        _reference: &lash_execution_contracts::process::ProcessDefinitionRef,
+    ) -> Result<
+        lash_execution_contracts::process::ProcessDefinitionResolution,
+        lash_execution_contracts::process::ProcessDefinitionError,
+    > {
+        Ok(
+            lash_execution_contracts::process::ProcessDefinitionResolution::new(
+                lash_execution_contracts::process::ProcessSignature::Unknown,
+            ),
+        )
     }
 }

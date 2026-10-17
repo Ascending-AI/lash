@@ -11,7 +11,7 @@
 //! from `lifecycle_json` in both dialects. Every changed batch saves that object
 //! once, with its indexed timestamp and change sequence, in the event transaction.
 //!
-//! `status` carries domain vocabulary (`lash_core::ProcessStatus`). A
+//! `status` carries domain vocabulary (`lash_execution_contracts::process::ProcessStatus`). A
 //! statement here names a lifecycle partition as a `{{term(column)}}` token
 //! and never spells it.
 

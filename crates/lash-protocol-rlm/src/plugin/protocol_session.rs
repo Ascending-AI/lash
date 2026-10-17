@@ -1,10 +1,11 @@
 use std::sync::Arc;
 
-use lash_core::plugin::{
-    CheckpointHookContext, PluginError, ProtocolSessionContext, ProtocolSessionPlugin,
-    TurnContributions,
-};
+use lash_core::plugin::CheckpointHookContext;
+use lash_core::plugin::ProtocolSessionContext;
+use lash_core::plugin::ProtocolSessionPlugin;
+use lash_core::plugin::TurnContributions;
 use lash_core::{CheckpointKind, ProtocolTurnOptions, SessionError};
+use lash_execution_contracts::plugin_error::PluginError;
 use lash_rlm_types::RlmSessionConfig;
 
 use super::budget_warning::BUDGET_WARNING_STATUS;
@@ -196,32 +197,41 @@ mod tests {
             lash_core::plugin::CommittedTurnReadError,
         > {
             Err(
-                lash_core::PluginError::Session("operation is absent from this fixture".into())
-                    .into(),
+                lash_execution_contracts::plugin_error::PluginError::Session(
+                    "operation is absent from this fixture".into(),
+                )
+                .into(),
             )
         }
 
         async fn snapshot_current(
             &self,
-        ) -> Result<lash_core::SessionSnapshot, lash_core::plugin::PluginError> {
-            Err(lash_core::plugin::PluginError::Session(
-                "not used".to_string(),
-            ))
+        ) -> Result<lash_core::SessionSnapshot, lash_execution_contracts::plugin_error::PluginError>
+        {
+            Err(
+                lash_execution_contracts::plugin_error::PluginError::Session(
+                    "not used".to_string(),
+                ),
+            )
         }
 
         async fn snapshot_session(
             &self,
             _session_id: &SessionId,
-        ) -> Result<lash_core::SessionSnapshot, lash_core::plugin::PluginError> {
-            Err(lash_core::plugin::PluginError::Session(
-                "not used".to_string(),
-            ))
+        ) -> Result<lash_core::SessionSnapshot, lash_execution_contracts::plugin_error::PluginError>
+        {
+            Err(
+                lash_execution_contracts::plugin_error::PluginError::Session(
+                    "not used".to_string(),
+                ),
+            )
         }
 
         async fn tool_catalog(
             &self,
             _session_id: &SessionId,
-        ) -> Result<Vec<serde_json::Value>, lash_core::plugin::PluginError> {
+        ) -> Result<Vec<serde_json::Value>, lash_execution_contracts::plugin_error::PluginError>
+        {
             Ok(Vec::new())
         }
     }

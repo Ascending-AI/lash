@@ -1,11 +1,18 @@
 //! SQL-WORK fixture: five real store operations at two stored-history sizes.
 //! Setup has no active window and is excluded. No node/background polling runs.
-use crate::facade_support::sql::{self, Receipt};
+use crate::MaxToolCalls;
+use crate::MessageRole;
+use crate::NoProgressBudget;
+use crate::PluginMessage;
+use crate::RuntimeSessionState;
+use crate::SessionAppendNode;
+use crate::SessionId;
+use crate::SessionPolicy;
+use crate::TurnBudget;
+use crate::facade_support::sql::Receipt;
 use crate::store::{HistoryAnchor, HistoryBudget, WindowSelector};
-use crate::{
-    MaxToolCalls, MessageRole, NoProgressBudget, PluginMessage, RuntimeSessionState,
-    SessionAppendNode, SessionId, SessionPolicy, StoreSet, TurnBudget,
-};
+use lash_core_ids::operational_metrics::sql;
+use lash_execution_contracts::backend::StoreSet;
 use std::num::{NonZeroU32, NonZeroU64};
 
 /// Functional physical receipts; every returned number is an operation-window
@@ -102,8 +109,8 @@ pub async fn receipts(stores: &dyn StoreSet, backend: &'static str) -> Vec<Recei
         receipts.push(receipt);
         let registration = super::held_engine_registration(
             serde_json::json!({"size": size}),
-            crate::ProcessProvenance::host(),
-            crate::Lifetime::Detached,
+            lash_execution_contracts::process::ProcessProvenance::host(),
+            lash_execution_contracts::process::Lifetime::Detached,
         );
         let (answer, receipt) = sql::collect(
             format!("{session}/process-register"),

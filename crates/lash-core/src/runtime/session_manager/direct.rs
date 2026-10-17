@@ -34,7 +34,7 @@ impl DirectCompletionService for RuntimeSessionServices {
         turn_id: Option<&crate::TurnId>,
         position: DirectExecutionPosition,
         effect_attempt: Option<&crate::EffectAttempt>,
-    ) -> Result<crate::DirectCompletion, crate::PluginError> {
+    ) -> Result<crate::DirectCompletion, lash_execution_contracts::plugin_error::PluginError> {
         self.direct
             .invoke_direct_completion(
                 self.direct_invocation_context(
@@ -60,7 +60,8 @@ impl DirectCompletionService for RuntimeSessionServices {
         position: DirectExecutionPosition,
         caused_by: Option<crate::CausalRef>,
         effect_attempt: Option<&crate::EffectAttempt>,
-    ) -> Result<crate::DirectLlmCompletion, crate::PluginError> {
+    ) -> Result<crate::DirectLlmCompletion, lash_execution_contracts::plugin_error::PluginError>
+    {
         self.direct
             .invoke_direct_llm_completion(
                 self.direct_invocation_context(
@@ -107,12 +108,14 @@ impl DirectInvocationContext<'_> {
         &self,
         caused_by: Option<&crate::CausalRef>,
         usage_source: &str,
-    ) -> Result<u64, crate::PluginError> {
+    ) -> Result<u64, lash_execution_contracts::plugin_error::PluginError> {
         let lane = Self::replay_lane(caused_by, usage_source);
         let mut ordinals = self.replay_ordinals.lock_recover();
         let ordinal = ordinals.entry(lane).or_default();
         *ordinal = ordinal.checked_add(1).ok_or_else(|| {
-            crate::PluginError::Session("direct replay ordinal exhausted".to_string())
+            lash_execution_contracts::plugin_error::PluginError::Session(
+                "direct replay ordinal exhausted".to_string(),
+            )
         })?;
         Ok(*ordinal)
     }
@@ -121,13 +124,16 @@ impl DirectInvocationContext<'_> {
         &self,
         caused_by: Option<&crate::CausalRef>,
         usage_source: &str,
-    ) -> Result<DirectUnkeyedGuard<'_>, crate::PluginError> {
+    ) -> Result<DirectUnkeyedGuard<'_>, lash_execution_contracts::plugin_error::PluginError> {
         let lane = Self::replay_lane(caused_by, usage_source);
         let mut in_flight = self.unkeyed_in_flight.lock_recover();
         if !in_flight.insert(lane.clone()) {
-            return Err(crate::PluginError::Session(
-                "concurrent direct completions require distinct explicit replay keys".to_string(),
-            ));
+            return Err(
+                lash_execution_contracts::plugin_error::PluginError::Session(
+                    "concurrent direct completions require distinct explicit replay keys"
+                        .to_string(),
+                ),
+            );
         }
         Ok(DirectUnkeyedGuard {
             in_flight: self.unkeyed_in_flight,
@@ -174,7 +180,10 @@ impl CurrentOwnerCapability {
     fn owned_prompt(
         &self,
         facts: Option<Arc<dyn std::any::Any + Send + Sync>>,
-    ) -> Result<crate::runtime::owned_call::OwnedPrompt, crate::PluginError> {
+    ) -> Result<
+        crate::runtime::owned_call::OwnedPrompt,
+        lash_execution_contracts::plugin_error::PluginError,
+    > {
         if let Some(session) = self.session() {
             let plugins = self.session_plugins("owned_prompt")?;
             let state = session.snapshot.to_runtime_state();
@@ -238,8 +247,10 @@ impl DirectCompletionCapability {
         prompt: DirectPromptInput,
         usage_source: &str,
         replay_position: DirectReplayPosition<'_>,
-    ) -> Result<(crate::LlmResponse, crate::LlmUsage, crate::LlmCallRecord), crate::PluginError>
-    {
+    ) -> Result<
+        (crate::LlmResponse, crate::LlmUsage, crate::LlmCallRecord),
+        lash_execution_contracts::plugin_error::PluginError,
+    > {
         let DirectPromptInput { purpose, facts } = prompt;
         let current = context.current;
         let DirectReplayPosition {
@@ -287,7 +298,9 @@ impl DirectCompletionCapability {
         // meets is: the tool never receives it as an error to act on.
         let admission = match (Box::pin(admit).await, context.position) {
             (
-                Err(crate::PluginError::RuntimeEffectController(fault)),
+                Err(lash_execution_contracts::plugin_error::PluginError::RuntimeEffectController(
+                    fault,
+                )),
                 DirectExecutionPosition::ToolAttempt,
             ) if fault.is_attempt_fault()
                 && let Some(attempt) = &context.effect_attempt =>
@@ -308,7 +321,7 @@ impl DirectCompletionCapability {
                     .effect_controller
                     .durable_reads()
                     .map_err(|error| {
-                        crate::PluginError::RuntimeEffectController(
+                        lash_execution_contracts::plugin_error::PluginError::RuntimeEffectController(
                             crate::RuntimeEffectControllerError::new(
                                 crate::RuntimeErrorCode::StoreCommitFailed,
                                 error.to_string(),
@@ -318,7 +331,7 @@ impl DirectCompletionCapability {
                     .model_call_pins(&key.session, &key.call.owner_column())
                     .await
                     .map_err(|error| {
-                        crate::PluginError::RuntimeEffectController(
+                        lash_execution_contracts::plugin_error::PluginError::RuntimeEffectController(
                             crate::RuntimeEffectControllerError::new(
                                 crate::RuntimeErrorCode::StoreCommitFailed,
                                 error.to_string(),
@@ -441,7 +454,7 @@ impl DirectCompletionCapability {
         context: DirectInvocationContext<'_>,
         request: crate::DirectRequest,
         usage_source: &str,
-    ) -> Result<crate::DirectCompletion, crate::PluginError> {
+    ) -> Result<crate::DirectCompletion, lash_execution_contracts::plugin_error::PluginError> {
         let policy = context.current.resolve_policy()?;
         let binding = policy.binding().clone();
         let model = policy.llm_profile_config().clone();
@@ -463,8 +476,9 @@ impl DirectCompletionCapability {
         } else {
             context.next_replay_ordinal(caused_by.as_ref(), usage_source)?
         };
-        let mut normalized = crate::direct::build_llm_request(request, model)
-            .map_err(|error| crate::PluginError::Session(error.to_string()))?;
+        let mut normalized = crate::direct::build_llm_request(request, model).map_err(|error| {
+            lash_execution_contracts::plugin_error::PluginError::Session(error.to_string())
+        })?;
         // A durable direct completion renders attachments under its session's
         // recorded acceptance rules, never a caller's.
         normalized.attachment_acceptance = match context.current.execution_facts() {
@@ -506,13 +520,17 @@ impl DirectCompletionCapability {
         facts: Option<Arc<dyn std::any::Any + Send + Sync>>,
         usage_source: &str,
         caused_by: Option<crate::CausalRef>,
-    ) -> Result<crate::DirectLlmCompletion, crate::PluginError> {
+    ) -> Result<crate::DirectLlmCompletion, lash_execution_contracts::plugin_error::PluginError>
+    {
         let policy = context.current.resolve_policy()?;
         let binding = policy.binding().clone();
         if request.scope.request_id.trim().is_empty() {
-            return Err(crate::PluginError::Session(
-                "direct LLM completion request_id must be non-empty for durable replay".to_string(),
-            ));
+            return Err(
+                lash_execution_contracts::plugin_error::PluginError::Session(
+                    "direct LLM completion request_id must be non-empty for durable replay"
+                        .to_string(),
+                ),
+            );
         }
         request.model = policy.llm_profile_config().clone();
         request.attachment_acceptance = match context.current.execution_facts() {
@@ -623,7 +641,8 @@ mod tests {
             fault.is_attempt_fault(),
             "the fault is the attempt's, never the call's recorded result"
         );
-        let error = crate::PluginError::RuntimeEffectController(fault);
+        let error =
+            lash_execution_contracts::plugin_error::PluginError::RuntimeEffectController(fault);
         assert!(error.is_retryable() && !error.is_terminal());
     }
 }

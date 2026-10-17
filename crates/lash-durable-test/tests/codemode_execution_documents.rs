@@ -71,7 +71,7 @@ async fn world_with_tools(
         lash::LashCore::rlm_builder(backend.clone(), served::rlm(backend, workers))
             .plugin(Arc::new(
                 lash::process_controls::SessionProcessAdminPluginFactory::new(
-                    lash_core::lifetime::session_or_starter,
+                    lash_execution_contracts::process::lifetime::session_or_starter,
                     lash_core::testing::run_policy_naming(&[TOOLS_COMPONENT]),
                 ),
             ))
@@ -153,7 +153,10 @@ impl lash_core::ToolProvider for ReadingFetch {
     fn tool_manifests(
         &self,
         _config: &lash_core::OwnerConfigView,
-    ) -> std::result::Result<Vec<lash_core::ToolManifest>, lash_core::PluginError> {
+    ) -> std::result::Result<
+        Vec<lash_core::ToolManifest>,
+        lash_execution_contracts::plugin_error::PluginError,
+    > {
         Ok(vec![web_fetch::fetch_definition().manifest()])
     }
 

@@ -8,7 +8,7 @@
 use std::sync::Arc;
 use std::time::Duration;
 
-use lash_core_execution::testing::TestClock;
+use lash_core_ids::test_clock::TestClock;
 use lash_durable::laws;
 
 use crate::testing::IsolatedDatabase;
@@ -288,7 +288,7 @@ async fn sequential_calls_submit_only_new_fragments_across_settlement() {
             DomainWrite::Prompt(PromptWrite::Record {
                 prefix, request, ..
             }) => {
-                let record: lash_core_execution::prompt_sections::AdmittedRequest =
+                let record: lash_core_store::prompt_sections::AdmittedRequest =
                     serde_json::from_str(request).unwrap();
                 (
                     prefix.clone().expect("a history prefix"),
@@ -298,7 +298,7 @@ async fn sequential_calls_submit_only_new_fragments_across_settlement() {
             _ => unreachable!(),
         };
         let ((), receipt) =
-            lash_core_execution::facade_support::sql::collect("model.start", "postgres", async {
+            lash_core_ids::operational_metrics::sql::collect("model.start", "postgres", async {
                 let mut tx = store.begin(&actor, epoch).await.unwrap();
                 tx.write(write);
                 store
@@ -369,7 +369,7 @@ async fn sequential_calls_submit_only_new_fragments_across_settlement() {
                 .request_texts,
         );
         let ((), settlement) =
-            lash_core_execution::facade_support::sql::collect("model.done", "postgres", async {
+            lash_core_ids::operational_metrics::sql::collect("model.done", "postgres", async {
                 let mut tx = store.begin(&actor, epoch).await.unwrap();
                 let ModelCallId::Turn { run, .. } = &call.call else {
                     unreachable!()

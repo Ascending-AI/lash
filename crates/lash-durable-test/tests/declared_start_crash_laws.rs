@@ -50,17 +50,20 @@ use std::sync::atomic::{AtomicUsize, Ordering};
 use std::sync::{Arc, Mutex};
 use std::time::Duration;
 
-use lash_core_execution::facade_support::process_child_session_id;
-use lash_core_execution::{
-    ProcessId, ProcessListFilter, ProcessRecord, ProcessStatus, ProcessStatusFilter,
-    ProjectionWatermark, StoreSet,
-};
+use lash_core_execution::ProcessId;
 use lash_durable::runner::Activation;
 use lash_durable::{ActorKey, ActorState, CommitLabel, DurableError, DurableStore};
 use lash_durable_test::{
     Cut, Fault, Matrix, Scenario, Script, SimClock, SimNodes, SimNodesConfig, Stored, Tripwire,
     WriteKind,
 };
+use lash_execution_contracts::backend::StoreSet;
+use lash_execution_contracts::process::ProcessListFilter;
+use lash_execution_contracts::process::ProcessRecord;
+use lash_execution_contracts::process::ProcessStatus;
+use lash_execution_contracts::process::ProcessStatusFilter;
+use lash_execution_contracts::process::ProjectionWatermark;
+use lash_execution_contracts::process::process_child_session_id;
 use lash_protocol_types::SessionId;
 use lash_protocol_types::sync::MutexExt as _;
 
@@ -101,7 +104,7 @@ fn child_session_actor(process: &ProcessId) -> ActorKey {
 fn delegation() -> Arc<dyn lash_core::facade_support::PluginFactory> {
     Arc::new(delegation::DelegationPluginFactory::new(
         served::spec(16),
-        lash_core::lifetime::starter,
+        lash_execution_contracts::process::lifetime::starter,
     ))
 }
 
@@ -170,7 +173,10 @@ impl lash_core::ToolProvider for Echo {
     fn tool_manifests(
         &self,
         _config: &lash_core::OwnerConfigView,
-    ) -> std::result::Result<Vec<lash_core::ToolManifest>, lash_core::PluginError> {
+    ) -> std::result::Result<
+        Vec<lash_core::ToolManifest>,
+        lash_execution_contracts::plugin_error::PluginError,
+    > {
         Ok(vec![echo_definition().manifest()])
     }
 
@@ -337,7 +343,7 @@ impl Spawn {
                     builder
                         .plugin(Arc::new(
                             lash::process_controls::SessionProcessAdminPluginFactory::new(
-                                lash_core::lifetime::starter,
+                                lash_execution_contracts::process::lifetime::starter,
                                 lash_core::runtime::env_policy::policy::from_run(
                                     |_| Ok(Vec::new()),
                                 ),
@@ -389,18 +395,18 @@ impl Spawn {
             .host_artifacts()
             .publish_process_env(
                 &lash_core::HostArtifactPin::mint(),
-                &lash_core_execution::testing::process_env_with_limit(16),
+                &lash_execution_contracts::testing::process_env_with_limit(16),
             )
             .await
             .map_err(|error| format!("publish the target's environment: {error}"))?;
-        let mut request = lash_core::ProcessStartRequest::engine(
-            lash_core_execution::testing::HELD_PROCESS_ENGINE_KIND,
+        let mut request = lash_execution_contracts::process::ProcessStartRequest::engine(
+            lash_execution_contracts::testing::HELD_PROCESS_ENGINE_KIND,
             serde_json::json!({
                 "fixture": "migrated-tools",
             }),
-            lash_core::EngineLaunch::new(env_ref, None),
-            lash_core::ProcessOriginator::host(),
-            lash_core::LifetimeDecision::Detached,
+            lash_execution_contracts::process::EngineLaunch::new(env_ref, None),
+            lash_execution_contracts::process::ProcessOriginator::host(),
+            lash_execution_contracts::process::LifetimeDecision::Detached,
         );
         request.observers = vec![session()];
         core.processes()
@@ -562,11 +568,12 @@ impl Scenario for Spawn {
             &self.keep,
         )
         .await;
-        let engines: Vec<Arc<dyn lash_core::ProcessEngine>> = if self.migrated {
-            vec![Arc::new(lash_core_execution::testing::HeldProcessEngine)]
-        } else {
-            Vec::new()
-        };
+        let engines: Vec<Arc<dyn lash_execution_contracts::process::ProcessEngine>> =
+            if self.migrated {
+                vec![Arc::new(lash_core_execution::testing::HeldProcessEngine)]
+            } else {
+                Vec::new()
+            };
         *self.backend.lock_recover() =
             Some(served::configured_backend(stores, sim::settings(), engines));
         database

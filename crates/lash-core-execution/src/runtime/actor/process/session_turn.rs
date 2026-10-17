@@ -30,9 +30,16 @@ use serde::{Deserialize, Serialize};
 use super::ProcessActivation;
 use super::activation::{Live, Pass, corrupt, registry_failure};
 use super::driver::StoredWaitId;
-use super::terminal::{ProcessParkReason, record_terminal};
-use crate::runtime::actor::waits::{self, WaitPurpose, WaitSpec};
-use crate::{CancelOrigin, PluginError, ProcessId, ProcessOutcome, ProcessRecord};
+use super::terminal::record_terminal;
+use crate::CancelOrigin;
+use crate::ProcessId;
+use crate::runtime::actor::waits;
+use crate::runtime::actor::waits::WaitPurpose;
+use lash_execution_contracts::park::ProcessParkReason;
+use lash_execution_contracts::plugin_error::PluginError;
+use lash_execution_contracts::process::ProcessOutcome;
+use lash_execution_contracts::process::ProcessRecord;
+use lash_execution_contracts::waits::WaitSpec;
 
 /// The session work a node runs `SessionTurn` processes with: the child
 /// session's creation, the mail of its turn's input, the turn's cancel and

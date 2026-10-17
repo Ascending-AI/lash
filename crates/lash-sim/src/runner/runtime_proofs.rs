@@ -710,13 +710,13 @@ pub(super) fn rlm_final_value_provider() -> ProviderHandle {
 }
 
 struct PendingToolProvider {
-    key_tx: Mutex<Option<tokio::sync::oneshot::Sender<lash_core::PinnedKey>>>,
+    key_tx: Mutex<Option<tokio::sync::oneshot::Sender<lash_execution_contracts::waits::PinnedKey>>>,
     observer: crate::invariants::ToolObserver,
 }
 
 impl PendingToolProvider {
     fn new(
-        key_tx: tokio::sync::oneshot::Sender<lash_core::PinnedKey>,
+        key_tx: tokio::sync::oneshot::Sender<lash_execution_contracts::waits::PinnedKey>,
         observer: crate::invariants::ToolObserver,
     ) -> Self {
         Self {
@@ -731,7 +731,10 @@ impl lash_core::ToolProvider for PendingToolProvider {
     fn tool_manifests(
         &self,
         _config: &lash_core::OwnerConfigView,
-    ) -> std::result::Result<Vec<lash_core::ToolManifest>, lash_core::PluginError> {
+    ) -> std::result::Result<
+        Vec<lash_core::ToolManifest>,
+        lash_execution_contracts::plugin_error::PluginError,
+    > {
         Ok(vec![pending_tool_definition().manifest()])
     }
 

@@ -1,8 +1,11 @@
 use crate::ActorContext;
 use std::sync::Arc;
 
-use super::{AdmittedScope, DeploymentStore, ProcessWorkWiring, RuntimeError};
+use super::AdmittedScope;
+use super::ProcessWorkWiring;
+use super::RuntimeError;
 use crate::SessionId;
+use lash_execution_contracts::deployment::DeploymentStore;
 
 /// Lifecycle services selected together for session administration.
 ///
@@ -14,7 +17,7 @@ pub struct SessionAdministration {
     store_factory: Arc<dyn DeploymentStore>,
     effect_host: ActorContext,
     process: Option<ProcessWorkWiring>,
-    process_env_store: Arc<dyn crate::ProcessEnvStore>,
+    process_env_store: Arc<dyn lash_execution_contracts::process::ProcessEnvStore>,
     process_engines: crate::ProcessEngineRegistry,
 }
 
@@ -27,7 +30,7 @@ impl SessionAdministration {
         store_factory: Arc<dyn DeploymentStore>,
         effect_host: ActorContext,
         process: Option<ProcessWorkWiring>,
-        process_env_store: Arc<dyn crate::ProcessEnvStore>,
+        process_env_store: Arc<dyn lash_execution_contracts::process::ProcessEnvStore>,
         process_engines: crate::ProcessEngineRegistry,
     ) -> Self {
         Self {
@@ -59,7 +62,9 @@ impl SessionAdministration {
         self.process.as_ref()
     }
 
-    pub fn process_env_store(&self) -> &Arc<dyn crate::ProcessEnvStore> {
+    pub fn process_env_store(
+        &self,
+    ) -> &Arc<dyn lash_execution_contracts::process::ProcessEnvStore> {
         &self.process_env_store
     }
 

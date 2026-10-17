@@ -6,20 +6,27 @@ use std::sync::Arc;
 
 use serde::{Deserialize, Serialize};
 
+use crate::CausalRef;
+use crate::CheckpointDelivery;
 use crate::CheckpointKind;
+use crate::EffectAddress;
+use crate::ExecResponse;
+use crate::ExecutionScope;
+use crate::LlmRequest as CoreLlmRequest;
+use crate::LlmResponse;
 use crate::llm::types::{
     LlmEventSender, LlmMessage, LlmOutputSpec, LlmProviderTraceSender, LlmToolChoice, LlmToolSpec,
 };
 use crate::sansio::{ExecutionEnvironmentSync, ExecutionEnvironmentSyncFailure};
-use crate::{
-    CausalRef, CheckpointDelivery, EffectAddress, ExecResponse, ExecutionScope,
-    LlmRequest as CoreLlmRequest, LlmResponse, ProcessAwaitOutput, ProcessExecutionContext,
-    ProcessListMode, ProcessStartRegistration, SessionScope,
-};
+use lash_execution_contracts::process::ProcessAwaitOutput;
+use lash_execution_contracts::process::ProcessExecutionContext;
+use lash_execution_contracts::process::ProcessListMode;
+use lash_execution_contracts::process::ProcessStartRegistration;
+use lash_execution_contracts::process::SessionScope;
 use lash_protocol_types::LlmCallError;
 
-use super::executor::RuntimeEffectControllerError;
 use super::llm_outcome::{AssistantResponsePlan, AssistantStreamCapsule, LlmStreamRecord};
+use lash_core_store::runtime_error::RuntimeEffectControllerError;
 
 /// Effect-specific header whose address is present by construction.
 ///
@@ -619,7 +626,7 @@ pub enum ProcessCommand {
     /// seam like every other journaled admission, so a redrive replays the
     /// recorded definition instead of writing a second one (ADR 0113 §3.6).
     PublishDefinition {
-        draft: crate::ProcessDefinitionDraft,
+        draft: lash_execution_contracts::process::ProcessDefinitionDraft,
     },
     GetDefinition {
         definition_id: crate::ProcessDefinitionId,
@@ -664,7 +671,7 @@ enum ProcessCommandDecode {
         attribution: Option<crate::RuntimeReplayAttribution>,
     },
     PublishDefinition {
-        draft: crate::ProcessDefinitionDraft,
+        draft: lash_execution_contracts::process::ProcessDefinitionDraft,
     },
     GetDefinition {
         definition_id: crate::ProcessDefinitionId,
@@ -846,21 +853,21 @@ pub enum ProcessEffectOutcome {
         // Boxed so the fat durable record does not size the whole outcome enum
         // (and the runtime effect enum wrapping it) inline through the recursive
         // effect executor.
-        #[serde(serialize_with = "crate::runtime::process::durable_serde::serialize")]
-        record: Box<crate::facade_support::ObservedProcess>,
+        #[serde(serialize_with = "lash_execution_contracts::process::durable_serde::serialize")]
+        record: Box<lash_execution_contracts::process::ObservedProcess>,
         /// Whether this start created the process or found it registered.
-        disposition: crate::ProcessRegistrationOutcome,
+        disposition: lash_execution_contracts::process::ProcessRegistrationOutcome,
     },
     List {
-        #[serde(serialize_with = "crate::runtime::process::durable_serde::serialize")]
-        entries: Vec<crate::facade_support::ObservedProcess>,
+        #[serde(serialize_with = "lash_execution_contracts::process::durable_serde::serialize")]
+        entries: Vec<lash_execution_contracts::process::ObservedProcess>,
     },
     ValidateVisible {
         not_visible: Option<ProcessId>,
     },
     Transfer,
     DeleteSession {
-        report: crate::ProcessSessionDeleteReport,
+        report: lash_execution_contracts::process::ProcessSessionDeleteReport,
     },
     Await {
         // Keep the full terminal record while bounding every process outcome
@@ -869,11 +876,11 @@ pub enum ProcessEffectOutcome {
         output: Box<ProcessAwaitOutput>,
     },
     Cancel {
-        #[serde(serialize_with = "crate::runtime::process::durable_serde::serialize")]
-        record: Box<crate::facade_support::ObservedProcess>,
+        #[serde(serialize_with = "lash_execution_contracts::process::durable_serde::serialize")]
+        record: Box<lash_execution_contracts::process::ObservedProcess>,
     },
     Definition {
-        definition: Box<crate::ProcessDefinition>,
+        definition: Box<lash_execution_contracts::process::ProcessDefinition>,
     },
 }
 
@@ -891,7 +898,7 @@ pub enum ToolAttemptLaunch {
     Done {
         #[serde(serialize_with = "lash_protocol_types::durable_serde::serialize")]
         record: Box<crate::ToolCallRecord>,
-        intents: crate::ToolIntents,
+        intents: lash_execution_contracts::tool_intent::ToolIntents,
     },
 }
 
@@ -947,7 +954,10 @@ pub enum RuntimeEffectOutcome {
         at_ms: u64,
     },
     BeforeLlmCall {
-        decision: Result<Option<crate::ProtocolLlmCallAction>, crate::PluginError>,
+        decision: Result<
+            Option<crate::ProtocolLlmCallAction>,
+            lash_execution_contracts::plugin_error::PluginError,
+        >,
     },
     LlmCall {
         result: Box<Result<LlmResponse, LlmCallError>>,
@@ -1000,7 +1010,10 @@ pub enum RuntimeEffectOutcome {
     /// A sequential callback slot's recorded decisions, or the failure of
     /// one of its callbacks, which publishes none of the slot's commands.
     PluginCallbacks {
-        result: Result<Vec<crate::plugin::RecordedTurnContribution>, crate::PluginError>,
+        result: Result<
+            Vec<crate::plugin::RecordedTurnContribution>,
+            lash_execution_contracts::plugin_error::PluginError,
+        >,
     },
 
     /// The base an administrative compaction recorded before its summarizer
@@ -1129,7 +1142,8 @@ mod outcomes;
 pub use outcomes::ServedExecutionEnvironmentSync;
 #[path = "turn_prelude.rs"]
 mod turn_prelude;
-pub use turn_prelude::{TurnPrelude, TurnPreludeRef, TurnPreludeStore};
+use lash_execution_contracts::turn_prelude::TurnPreludeRef;
+pub use turn_prelude::TurnPrelude;
 
 impl From<RuntimeEffectInvocation> for crate::RuntimeInvocation {
     fn from(invocation: RuntimeEffectInvocation) -> Self {

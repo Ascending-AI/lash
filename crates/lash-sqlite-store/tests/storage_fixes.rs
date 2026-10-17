@@ -13,16 +13,20 @@
 // library code).
 #![allow(clippy::disallowed_methods)]
 
-use lash_core_execution::compat::CompatRefusal;
+use lash_core_store::compat::CompatRefusal;
 use lash_protocol_types::ProcessId;
 use lash_protocol_types::SessionId;
 use std::future::Future;
 use std::sync::Arc;
 
-use lash_core_execution::{
-    AttachmentReferrers, AttachmentRootSet, RuntimeCommit, RuntimeSessionState,
-    SessionCatalogStore, SessionCommitStore, StoreError, StoreSchemaVerdict,
-};
+use lash_core_store::attachments::AttachmentRootSet;
+use lash_core_store::session_state::RuntimeSessionState;
+use lash_core_store::store::AttachmentReferrers;
+use lash_core_store::store::RuntimeCommit;
+use lash_core_store::store::SessionCatalogStore;
+use lash_core_store::store::SessionCommitStore;
+use lash_core_store::store::StoreError;
+use lash_core_store::store::StoreSchemaVerdict;
 use lash_sqlite_store::{SqliteStore, verify_schema_at};
 
 fn unique_db_path(name: &str) -> std::path::PathBuf {
@@ -53,9 +57,9 @@ fn commit_at(
 ) -> RuntimeCommit {
     let state = RuntimeSessionState {
         session_id: session_id.clone(),
-        ..RuntimeSessionState::fixture(lash_core_execution::SessionPolicy::new(
-            lash_core_execution::TurnBudget::Unbounded,
-            lash_core_execution::MaxToolCalls::new(1024),
+        ..RuntimeSessionState::fixture(lash_core_store::session_policy::SessionPolicy::new(
+            lash_protocol_types::session_model::TurnBudget::Unbounded,
+            lash_protocol_types::session_model::MaxToolCalls::new(1024),
             lash_core::NoProgressBudget::bounded(12),
         ))
     };
@@ -64,7 +68,7 @@ fn commit_at(
         ..RuntimeCommit::persisted_state_for_test(&state)
     };
     commit
-        .with_operation(lash_core_execution::OperationId::new(
+        .with_operation(lash_core_store::store::OperationId::new(
             lash_core_execution::ExecutionScope::runtime_operation(format!(
                 "head-cas:{session_id}:{writer_id}"
             )),
@@ -222,10 +226,12 @@ fn concurrent_first_open_never_observes_an_unstamped_schema() {
             "sqlite-core".to_owned(),
             i64::from(core.writes.max()),
             i64::from(core.reads.min()),
-            i64::from(lash_core_execution::FleetFormat::seed(
-                lash_core_execution::FleetFormat::writable()
-            )
-            .version()),
+            i64::from(
+                lash_core_store::store::FleetFormat::seed(
+                    lash_core_store::store::FleetFormat::writable()
+                )
+                .version()
+            ),
         )
     );
 }
@@ -239,32 +245,32 @@ async fn process_record_is_a_root_without_registry_liveness() {
     )
     .await
     .expect("open catalog");
-    let request = lash_core_execution::SessionStoreCreateRequest {
+    let request = lash_core_store::session_store_factory_types::SessionStoreCreateRequest {
         owning_process_id: None,
         pending_observer_intents: Vec::new(),
         session_id: SessionId::from("unwired-process-owner"),
-        relation: lash_core_execution::SessionRelation::default(),
-        config: lash_core_execution::PersistedSessionConfig::new(
-            lash_core_execution::TurnBudget::Unbounded,
-            lash_core_execution::MaxToolCalls::new(1024),
+        relation: lash_core_store::session_identity::SessionRelation::default(),
+        config: lash_core_store::session_graph::PersistedSessionConfig::new(
+            lash_protocol_types::session_model::TurnBudget::Unbounded,
+            lash_protocol_types::session_model::MaxToolCalls::new(1024),
             lash_core::NoProgressBudget::bounded(12),
         ),
-        head: lash_core_execution::SessionCreationHead::Config,
-        retention: lash_core_execution::Retention::UntilGc,
+        head: lash_core_store::session_store_factory_types::SessionCreationHead::Config,
+        retention: lash_core_store::store::Retention::UntilGc,
     };
     store.admit_session(&request).await.expect("admit session");
-    let attachment_id =
-        lash_core_execution::AttachmentId::parse("a1".repeat(32)).expect("valid attachment id");
-    let intent = lash_core_execution::AttachmentWrite {
+    let attachment_id = lash_protocol_types::attachment::AttachmentId::parse("a1".repeat(32))
+        .expect("valid attachment id");
+    let intent = lash_core_store::store::AttachmentWrite {
         attachment_id: attachment_id.clone(),
-        claim: lash_core_execution::ReferrerClaim::unguarded(
-            lash_core_execution::ArtifactReferrer::ProcessRecord(ProcessId::fixture(
-                "lasting-process",
-            )),
+        claim: lash_core_store::artifact_referrer::ReferrerClaim::unguarded(
+            lash_core_store::artifact_referrer::ArtifactReferrer::ProcessRecord(
+                ProcessId::fixture("lasting-process"),
+            ),
         )
         .expect("claim"),
     };
-    let lash_core_execution::AttachmentWriteFence::Granted(permit) = store
+    let lash_core_store::store::AttachmentWriteFence::Granted(permit) = store
         .begin_attachment_write(&(intent.clone()))
         .await
         .expect("begin process-owned write")

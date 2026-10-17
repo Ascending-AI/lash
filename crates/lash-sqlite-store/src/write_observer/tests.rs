@@ -41,7 +41,7 @@ fn traffic_conservation_rewrites_checkpoint_and_incomplete_boundaries() {
         )
         .unwrap();
     crate::observed_sql::enable(&connection);
-    let witness = lash_core_execution::perf_witness::Collector::install().unwrap();
+    let witness = lash_core_ids::perf_witness::Collector::install().unwrap();
     let (before_work, before) = observer.cut(|| witness.snapshot());
     for (origin, value) in [
         ("sample.update.first", "second"),

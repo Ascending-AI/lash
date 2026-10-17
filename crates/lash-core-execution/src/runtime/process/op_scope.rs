@@ -23,16 +23,24 @@ pub struct ProcessOpScope<'scope> {
     pub turn_cancellation: Option<crate::ProcessTurnCancellation>,
     /// The lineage of the process this operation runs inside, when it runs
     /// inside one: what a start made here records above its starter.
-    pub process_lineage: Option<crate::ProcessLineage>,
+    pub process_lineage: Option<lash_execution_contracts::process::ProcessLineage>,
     /// The parked call a start made here registers its child under, when the
     /// start is a call's declared start (ADR 0116 §3.6).
-    pub consumer_hold: Option<crate::ConsumerHold>,
+    pub consumer_hold: Option<lash_execution_contracts::process::ConsumerHold>,
     pub(crate) language_call: Option<std::sync::Arc<LanguageCallAttribution>>,
     /// The scope this operation runs in; the context itself is `'static`.
     pub(crate) scope: std::marker::PhantomData<&'scope ()>,
 }
 
 impl<'scope> ProcessOpScope<'scope> {
+    /// The execution context carried by this runtime scope.
+    pub fn execution_context(&self) -> lash_execution_contracts::process::ProcessExecutionContext {
+        lash_execution_contracts::process::ProcessExecutionContext {
+            segment_ordinal: 0,
+            causal_invocation: self.parent_invocation.clone(),
+        }
+    }
+
     /// Constructs a `ProcessOpScope` for store and durable-substrate implementors while persisting
     /// and coordinating durable process execution.
     pub fn new(scoped_effect_controller: crate::ActorContext) -> Self {
@@ -53,7 +61,7 @@ impl<'scope> ProcessOpScope<'scope> {
     pub fn observe_process_started(
         &self,
         tracing: &crate::trace::TraceRuntime,
-        record: &crate::ProcessRecord,
+        record: &lash_execution_contracts::process::ProcessRecord,
     ) {
         let Some(call) = self.language_call.clone() else {
             return;
@@ -132,13 +140,19 @@ impl<'scope> ProcessOpScope<'scope> {
     }
 
     /// Registers a start made under this operation with a parked call's hold.
-    pub fn with_consumer_hold(mut self, consumer_hold: Option<crate::ConsumerHold>) -> Self {
+    pub fn with_consumer_hold(
+        mut self,
+        consumer_hold: Option<lash_execution_contracts::process::ConsumerHold>,
+    ) -> Self {
         self.consumer_hold = consumer_hold;
         self
     }
 
     /// Sets the lineage of the process this operation runs inside.
-    pub fn with_process_lineage(mut self, lineage: Option<crate::ProcessLineage>) -> Self {
+    pub fn with_process_lineage(
+        mut self,
+        lineage: Option<lash_execution_contracts::process::ProcessLineage>,
+    ) -> Self {
         self.process_lineage = lineage;
         self
     }
@@ -149,13 +163,18 @@ impl<'scope> ProcessOpScope<'scope> {
     /// start registers as a root and may only be `Detached`. A process scope
     /// run without its lineage answers `MissingLineage` rather than a root, so
     /// a start never silently loses the ancestry it ran under.
-    pub fn start_cx(&self) -> Result<Option<crate::StartCx>, crate::StartCxError> {
-        match crate::StartCx::materialize(
+    pub fn start_cx(
+        &self,
+    ) -> Result<
+        Option<lash_execution_contracts::process::StartCx>,
+        lash_execution_contracts::process::StartCxError,
+    > {
+        match lash_execution_contracts::process::StartCx::materialize(
             self.effect_controller.admitted_scope(),
             self.process_lineage.as_ref(),
         ) {
             Ok(cx) => Ok(Some(cx)),
-            Err(crate::StartCxError::NotAnOpener(_)) => Ok(None),
+            Err(lash_execution_contracts::process::StartCxError::NotAnOpener(_)) => Ok(None),
             Err(error) => Err(error),
         }
     }
@@ -165,9 +184,15 @@ impl<'scope> ProcessOpScope<'scope> {
     /// that runs inside the process without carrying its lineage.
     pub fn start_cx_under(
         &self,
-        lineage: &crate::ProcessLineage,
-    ) -> Result<crate::StartCx, crate::StartCxError> {
-        crate::StartCx::materialize(self.effect_controller.admitted_scope(), Some(lineage))
+        lineage: &lash_execution_contracts::process::ProcessLineage,
+    ) -> Result<
+        lash_execution_contracts::process::StartCx,
+        lash_execution_contracts::process::StartCxError,
+    > {
+        lash_execution_contracts::process::StartCx::materialize(
+            self.effect_controller.admitted_scope(),
+            Some(lineage),
+        )
     }
 
     /// Sets the parent invocation carried by a `ProcessOpScope` for store and durable-substrate
@@ -217,8 +242,8 @@ mod controller_tests {
         let controller = crate::ActorContext::unavailable()
             .scoped(admitted.clone())
             .expect("valid process scope");
-        let refusal = crate::RuntimeEffectControllerError::new(
-            crate::RuntimeErrorCode::ExecutionScopeAdmissionRefused,
+        let refusal = lash_core_store::runtime_error::RuntimeEffectControllerError::new(
+            lash_core_store::runtime_error::RuntimeErrorCode::ExecutionScopeAdmissionRefused,
             "refused command write",
         );
         let guard = Arc::new(crate::CommandJournalGuard::refusing(

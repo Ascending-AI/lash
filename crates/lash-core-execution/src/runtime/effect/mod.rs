@@ -1,4 +1,5 @@
 mod recorded_keys;
+pub use lash_core_store::runtime_error::RuntimeEffectControllerError;
 pub use recorded_keys::{RecordedKeyRange, RecordedKeys};
 mod envelope;
 #[doc(hidden)]
@@ -28,7 +29,7 @@ pub use envelope::{
     RuntimeAssistantResponseHooksOutcome, RuntimeDirectLlmOutcome, RuntimeEffectCommand,
     RuntimeEffectEnvelope, RuntimeEffectInvocation, RuntimeEffectOutcome, RuntimeInvocation,
     ServedExecutionEnvironmentSync, SleepSpec, ToolAttemptEffectOutcome, ToolAttemptLaunch,
-    TurnPrelude, TurnPreludeRef, TurnPreludeStore,
+    TurnPrelude,
 };
 /// Effect-executor contracts, including process local-execution capabilities.
 pub use executor::{
@@ -36,8 +37,8 @@ pub use executor::{
     EffectJournalIdentity, EffectJournalRetirement, EffectOpener, EffectRetirementGate,
     ExecutionScope, ExternalCompletionError, JournalReplay, ProcessDefinitionLocalExecution,
     ProcessDriveStep, ProcessLocalExecution, ProcessOutcomeObserver, ProcessTurnCancellation,
-    RecordedKeyFence, RefusedWriteRange, Resolution, ResolveOutcome, RuntimeEffectControllerError,
-    RuntimeEffectLocalExecutor, RuntimeSleepOptions, SegmentProgress, ServedOnlyRange,
+    RecordedKeyFence, RefusedWriteRange, Resolution, ResolveOutcome, RuntimeEffectLocalExecutor,
+    RuntimeSleepOptions, SegmentProgress, ServedOnlyRange,
 };
 pub use identity_types::{
     RuntimeAttribution, RuntimeEffectKind, RuntimeReplay, RuntimeReplayAttribution, RuntimeSubject,
@@ -70,7 +71,7 @@ mod captured_environment_row_tests {
         };
         let bytes = serde_json::to_vec(&outcome).expect("load journal outcome");
         assert!(
-            bytes.len() < crate::TOOL_INTENT_MAX_CANONICAL_BYTES,
+            bytes.len() < lash_execution_contracts::tool_intent::TOOL_INTENT_MAX_CANONICAL_BYTES,
             "environment load journals {} bytes for 128 KiB of instructions",
             bytes.len()
         );

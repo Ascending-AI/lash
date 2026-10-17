@@ -113,10 +113,10 @@ async fn pre_heap_images_are_refused_naming_their_format() {
         .expect("the process's execution root reads")
         .expect("the image parks the process");
     assert_eq!(written_by, LASH_VM_ENGINE_KIND);
-    let refused = lash_core_execution::ProcessEngine::advance(
+    let refused = lash_execution_contracts::process::ProcessEngine::advance(
         engine.as_ref(),
         state,
-        lash_core_execution::EngineEvent::Woke,
+        lash_execution_contracts::process::EngineEvent::Woke,
     )
     .map(|_| ())
     .expect_err("a pre-heap parked run is never advanced")
@@ -130,7 +130,7 @@ async fn pre_heap_images_are_refused_naming_their_format() {
     assert!(
         matches!(
             &refused,
-            lash_core_execution::PluginError::StoredDataCorrupt { record_kind, message }
+            lash_execution_contracts::plugin_error::PluginError::StoredDataCorrupt { record_kind, message }
                 if record_kind == "kernel process engine state" && *message == named
         ),
         "{refused:?}"
@@ -212,12 +212,12 @@ fn actor_format_id(format: lash::formats::DurableFormat) -> Option<String> {
     use lash::formats::DurableFormat;
     match format {
         DurableFormat::TurnCheckpoint => {
-            Some(lash_core_execution::formats::TURN_CHECKPOINT_FORMAT_ID)
+            Some(lash_execution_contracts::formats::TURN_CHECKPOINT_FORMAT_ID)
         }
-        DurableFormat::RunRecord => Some(lash_core_execution::formats::RUN_RECORD_FORMAT_ID),
-        DurableFormat::WaitRow => Some(lash_core_execution::formats::WAIT_ROW_FORMAT_ID),
+        DurableFormat::RunRecord => Some(lash_execution_contracts::formats::RUN_RECORD_FORMAT_ID),
+        DurableFormat::WaitRow => Some(lash_execution_contracts::formats::WAIT_ROW_FORMAT_ID),
         DurableFormat::OutcomeMaterial => {
-            Some(lash_core_execution::formats::OUTCOME_MATERIAL_FORMAT_ID)
+            Some(lash_execution_contracts::formats::OUTCOME_MATERIAL_FORMAT_ID)
         }
         DurableFormat::KernelParkedState => Some("kernel-parked-state"),
         _ => None,

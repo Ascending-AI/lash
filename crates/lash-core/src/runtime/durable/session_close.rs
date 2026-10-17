@@ -50,8 +50,10 @@ use lash_durable::{
 
 use super::session::{Pass, TurnError, cancel_open_turn};
 use super::turn_scope::{continue_scope_ends, end_turn_scope, mark_until_children};
-use crate::{ActorContext, Backend, SessionId};
+use crate::ActorContext;
+use crate::SessionId;
 use lash_core_execution::runtime::actor::process::{self, CascadeProgress};
+use lash_execution_contracts::backend::Backend;
 
 /// The reason a session close's `cancel` step gives the open turn's cancel.
 pub const SESSION_CLOSED: &str = "session_closed";
@@ -217,7 +219,7 @@ pub enum SessionCloseError {
     Storage(Box<crate::store::MaintenanceFailure<crate::store::SessionBlobReclaimReport>>),
     /// The process registry did not delete the session's process state.
     #[error("process state: {0}")]
-    Process(crate::PluginError),
+    Process(lash_execution_contracts::plugin_error::PluginError),
 }
 
 /// Run what remains of `session`'s close, from the step after the stored

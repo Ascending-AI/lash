@@ -27,8 +27,8 @@ use std::sync::Arc;
 use lash_trace::{TraceDetailPolicy, TraceSink};
 
 use super::host::RuntimeWork;
-use super::process::ProcessRegistry;
 use super::{ProcessWorkWiring, RuntimeHostConfig};
+use lash_execution_contracts::process::ProcessRegistry;
 
 /// Shared runtime infrastructure an embedder builds once and reuses
 /// across every `LashRuntime` it constructs.

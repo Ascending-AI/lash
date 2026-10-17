@@ -17,7 +17,7 @@
 use std::path::Path;
 use std::sync::Arc;
 
-use lash_core_execution::Clock;
+use lash_core_ids::clock::Clock;
 
 use crate::location::{DatabaseLocation, MemoryAnchors, SqliteLocation};
 use crate::{
@@ -31,13 +31,13 @@ use crate::{
 pub struct SqliteStoreSetOptions {
     pub graph_reads: lash_core_store::checkpoint_graph::GraphReadPolicy,
     /// Physical store observations; SQLite has no connection-pool wait to report.
-    pub observer: lash_core_execution::facade_support::StoreObserver,
+    pub observer: lash_core_ids::operational_metrics::StoreObserver,
     /// Blob and connection policy for the database.
     pub store: StoreOptions,
     /// Where the process registry mints process ids (ADR 0107): at random,
     /// unless a test that replays committed bytes needs them deterministic.
     #[doc(hidden)]
-    pub process_id_mint: lash_core_execution::ProcessIdMint,
+    pub process_id_mint: lash_core_store::process_identity::ProcessIdMint,
     /// Where the open-time migration backs the store up before it changes
     /// it, and how many backups it keeps ([`crate::migration`]).
     pub migration_backup: crate::SqliteMigrationBackup,
@@ -67,8 +67,8 @@ impl SqliteStoreSetOptions {
             graph_reads: lash_core_store::checkpoint_graph::GraphReadPolicy::standard(),
             store: StoreOptions::development(synchronous),
             migration_backup: crate::SqliteMigrationBackup::development(),
-            observer: lash_core_execution::facade_support::StoreObserver::default(),
-            process_id_mint: lash_core_execution::ProcessIdMint::default(),
+            observer: lash_core_ids::operational_metrics::StoreObserver::default(),
+            process_id_mint: lash_core_store::process_identity::ProcessIdMint::default(),
             #[cfg(feature = "testing")]
             pauses: None,
             #[cfg(feature = "testing")]
@@ -83,10 +83,10 @@ impl SqliteStoreSetOptions {
     /// the standard migration backup.
     pub fn standard(synchronous: SqliteSynchronous) -> Self {
         Self {
-            observer: lash_core_execution::facade_support::StoreObserver::default(),
+            observer: lash_core_ids::operational_metrics::StoreObserver::default(),
             graph_reads: lash_core_store::checkpoint_graph::GraphReadPolicy::standard(),
             store: StoreOptions::standard(synchronous),
-            process_id_mint: lash_core_execution::ProcessIdMint::default(),
+            process_id_mint: lash_core_store::process_identity::ProcessIdMint::default(),
             migration_backup: crate::SqliteMigrationBackup::standard(),
             #[cfg(feature = "testing")]
             pauses: None,
@@ -109,7 +109,7 @@ impl SqliteStoreSetOptions {
 }
 
 /// Every persistence port of one SQLite substrate:
-/// the [`StoreSet`](lash_core_execution::StoreSet) the durable engine
+/// the [`StoreSet`](lash_execution_contracts::backend::StoreSet) the durable engine
 /// persists its state through (ADR 0102, D2; ADR 0132 §1).
 ///
 /// Cloning shares the store set.
@@ -124,7 +124,7 @@ struct StoreParts {
     /// identity is taken from.
     identity: Arc<str>,
     /// [`Self::identity`] as the store set's binding identity.
-    binding: lash_core_execution::StoreBindingId,
+    binding: lash_execution_contracts::backend::StoreBindingId,
     anchors: Option<Arc<MemoryAnchors>>,
     options: SqliteStoreSetOptions,
     clock: Arc<dyn Clock>,
@@ -137,14 +137,14 @@ struct StoreParts {
 }
 
 fn system_clock() -> Arc<dyn Clock> {
-    Arc::new(lash_core_execution::facade_support::SystemClock)
+    Arc::new(lash_core_ids::clock::SystemClock)
 }
 
 impl SqliteStoreSet {
     /// The file store set in the database file at `path`, created with
     /// every table of the deployment if it is absent. A directory in the
     /// retired three-file layout refuses with
-    /// [`CompatRefusal::RetiredSqliteLayout`](lash_core_execution::compat::CompatRefusal::RetiredSqliteLayout)
+    /// [`CompatRefusal::RetiredSqliteLayout`](lash_core_store::compat::CompatRefusal::RetiredSqliteLayout)
     /// in the error's source chain.
     ///
     /// `synchronous` is the host's durability choice
@@ -259,7 +259,7 @@ impl SqliteStoreSet {
                 &database,
                 options.store,
                 Arc::clone(&clock),
-                lash_core_execution::FleetFormat::writable(),
+                lash_core_store::store::FleetFormat::writable(),
                 #[cfg(feature = "testing")]
                 crate::testing::ConnectionHooks {
                     pauses: options.pauses.clone(),
@@ -297,7 +297,9 @@ impl SqliteStoreSet {
         };
         Ok(Self {
             inner: Arc::new(StoreParts {
-                binding: lash_core_execution::StoreBindingId::new(Arc::clone(&identity)),
+                binding: lash_execution_contracts::backend::StoreBindingId::new(Arc::clone(
+                    &identity,
+                )),
                 identity,
                 location,
                 anchors,
@@ -382,7 +384,7 @@ impl SqliteStoreSet {
     }
 }
 
-impl lash_core_execution::StoreSet for SqliteStoreSet {
+impl lash_execution_contracts::backend::StoreSet for SqliteStoreSet {
     fn durable_store(&self) -> Arc<dyn lash_durable::DurableStore> {
         Arc::new(SqliteStoreSet::durable_store(self))
     }
@@ -400,7 +402,7 @@ impl lash_core_execution::StoreSet for SqliteStoreSet {
         self.inner.process_env_store.conn.wakes().clone()
     }
 
-    fn binding_identity(&self) -> &lash_core_execution::StoreBindingId {
+    fn binding_identity(&self) -> &lash_execution_contracts::backend::StoreBindingId {
         &self.inner.binding
     }
 
@@ -408,66 +410,76 @@ impl lash_core_execution::StoreSet for SqliteStoreSet {
         Arc::clone(&self.inner.clock)
     }
 
-    fn session_store_factory(&self) -> Arc<dyn lash_core_execution::DeploymentStore> {
+    fn session_store_factory(
+        &self,
+    ) -> Arc<dyn lash_execution_contracts::deployment::DeploymentStore> {
         SqliteStoreSet::session_store_factory(self)
     }
-    fn attachment_referrers(&self) -> Arc<dyn lash_core_execution::AttachmentReferrers> {
+    fn attachment_referrers(&self) -> Arc<dyn lash_core_store::store::AttachmentReferrers> {
         SqliteStoreSet::session_store_factory(self)
     }
 
-    fn process_registry(&self) -> Arc<dyn lash_core_execution::ProcessRegistry> {
+    fn process_registry(&self) -> Arc<dyn lash_execution_contracts::process::ProcessRegistry> {
         SqliteStoreSet::process_registry(self)
     }
 
-    fn tool_material_store(&self) -> Arc<dyn lash_core_execution::store::ToolMaterialStore> {
+    fn tool_material_store(&self) -> Arc<dyn lash_core_store::store::ToolMaterialStore> {
         SqliteStoreSet::process_env_store(self)
     }
 
-    fn process_authority_reads(&self) -> Arc<dyn lash_core_execution::ProcessAuthorityReads> {
+    fn process_authority_reads(
+        &self,
+    ) -> Arc<dyn lash_execution_contracts::backend::ProcessAuthorityReads> {
         self.inner.process_registry.clone()
     }
 
-    fn process_env_store(&self) -> Arc<dyn lash_core_execution::ProcessEnvStore> {
+    fn process_env_store(&self) -> Arc<dyn lash_execution_contracts::process::ProcessEnvStore> {
         SqliteStoreSet::process_env_store(self)
     }
 
-    fn turn_prelude_store(&self) -> Arc<dyn lash_core_execution::TurnPreludeStore> {
+    fn turn_prelude_store(
+        &self,
+    ) -> Arc<dyn lash_execution_contracts::turn_prelude::TurnPreludeStore> {
         SqliteStoreSet::process_env_store(self)
     }
 
-    fn attachment_store(&self) -> Arc<dyn lash_core_execution::AttachmentStore> {
+    fn attachment_store(&self) -> Arc<dyn lash_core_store::attachments::AttachmentStore> {
         SqliteStoreSet::attachment_store(self)
     }
 
     /// The durable-core store that keeps the process execution environments
     /// keeps the Lash VM module artifacts too.
-    fn module_artifacts(&self) -> Arc<dyn lash_core_execution::ModuleArtifactStore> {
+    fn module_artifacts(
+        &self,
+    ) -> Arc<dyn lash_execution_contracts::module_artifacts::ModuleArtifactStore> {
         SqliteStoreSet::process_env_store(self)
     }
 
     /// Definition descriptors live beside the modules and environments their
     /// manifests name, so one transaction holds a whole closure.
-    fn definition_store(&self) -> Arc<dyn lash_core_execution::ProcessDefinitionStore> {
+    fn definition_store(
+        &self,
+    ) -> Arc<dyn lash_execution_contracts::process::ProcessDefinitionStore> {
         SqliteStoreSet::process_env_store(self)
     }
 
-    fn recovery_leader(&self) -> Arc<dyn lash_core_execution::store::RecoveryLeaderStore> {
+    fn recovery_leader(&self) -> Arc<dyn lash_core_store::store::RecoveryLeaderStore> {
         self.inner.recovery_leader.clone()
     }
 
     fn obligation_ledger(
         &self,
-        kind: lash_core_execution::store::ObligationKind,
-    ) -> Arc<dyn lash_core_execution::store::ObligationLedger> {
+        kind: lash_core_store::store::ObligationKind,
+    ) -> Arc<dyn lash_core_store::store::ObligationLedger> {
         let conn = self.inner.process_env_store.conn.clone();
         match kind {
-            lash_core_execution::store::ObligationKind::ArtifactCleanup => Arc::new(
+            lash_core_store::store::ObligationKind::ArtifactCleanup => Arc::new(
                 crate::obligation_ledger::SqliteArtifactCleanupLedger::new(conn),
             ),
         }
     }
 
-    fn artifact_cleanup(&self) -> Arc<dyn lash_core_execution::store::ArtifactCleanupLedger> {
+    fn artifact_cleanup(&self) -> Arc<dyn lash_core_store::store::ArtifactCleanupLedger> {
         Arc::new(crate::obligation_ledger::SqliteArtifactCleanupLedger::new(
             self.inner.process_env_store.conn.clone(),
         ))
@@ -486,7 +498,7 @@ impl std::fmt::Debug for SqliteStoreSet {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use lash_core_execution::SessionCatalogStore as _;
+    use lash_core_store::store::SessionCatalogStore as _;
 
     /// A SQLite deployment is one database file (FIG-5195): a directory in
     /// the retired three-file layout is refused typed, naming the layout's
@@ -514,10 +526,9 @@ mod tests {
         else {
             panic!("the refusal must preserve its typed source: {error:?}");
         };
-        let Some(lash_core_execution::StoreError::Incompatible {
-            refusal:
-                lash_core_execution::compat::CompatRefusal::RetiredSqliteLayout { location, files },
-        }) = source.downcast_ref::<lash_core_execution::StoreError>()
+        let Some(lash_core_store::store::StoreError::Incompatible {
+            refusal: lash_core_store::compat::CompatRefusal::RetiredSqliteLayout { location, files },
+        }) = source.downcast_ref::<lash_core_store::store::StoreError>()
         else {
             panic!("expected a retired-layout refusal: {error:?}");
         };
@@ -557,11 +568,11 @@ mod tests {
         let uri = stores.database_uri();
         let store = stores.open_store().await.expect("open catalog");
         let request = lash_core_execution::testing::store_fixtures::session_store_request(
-            &lash_core_execution::SessionId::from("memory-lifetime"),
+            &lash_protocol_types::SessionId::from("memory-lifetime"),
             "memory-lifetime",
-            lash_core_execution::SessionRelation::Root,
+            lash_core_store::session_identity::SessionRelation::Root,
         );
-        lash_core_execution::SessionCatalogStore::admit_session(store.as_ref(), &request)
+        lash_core_store::store::SessionCatalogStore::admit_session(store.as_ref(), &request)
             .await
             .expect("create a session");
         drop(store);
@@ -576,7 +587,7 @@ mod tests {
             .await
             .expect("look up the session");
         assert!(
-            matches!(reopened, lash_core_execution::SessionLookup::Live(_)),
+            matches!(reopened, lash_core_store::store::SessionLookup::Live(_)),
             "a session written through one handle is read through a fresh one"
         );
         drop(reopened);

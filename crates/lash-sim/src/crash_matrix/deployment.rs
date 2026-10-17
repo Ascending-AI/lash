@@ -19,11 +19,14 @@ use std::sync::atomic::{AtomicUsize, Ordering};
 use std::time::Duration;
 
 use lash_core::runtime::durable::session::SessionActivation;
+use lash_core_execution::DurableSettings;
 use lash_core_execution::runtime::actor::process::ProcessActivation;
-use lash_core_execution::{Backend, BackendParts, DurableSettings, NoProjectionProviders};
 use lash_durable::runner::Activation;
 use lash_durable::{ActorDispatch, ActorKey, DurableStore, LeaseConfig};
 use lash_durable_test::{Cut, Matrix, OffClockWork, Scenario, SimClock, SimNodes, SimNodesConfig};
+use lash_execution_contracts::backend::Backend;
+use lash_execution_contracts::backend::BackendParts;
+use lash_execution_contracts::projection::NoProjectionProviders;
 
 use super::Case;
 use super::engine::{SimProcessEngine, SimSteps};
@@ -196,11 +199,11 @@ async fn postgres(
         Arc::new(lash_core_store::attachments::UnavailableAttachmentStore),
         clock,
     );
-    lash_core_execution::testing::process_execution_env_fixture(
-        lash_core_execution::StoreSet::process_env_store(&stores).as_ref(),
+    lash_execution_contracts::testing::process_execution_env_fixture(
+        lash_execution_contracts::backend::StoreSet::process_env_store(&stores).as_ref(),
     )
     .await;
-    let database = lash_core_execution::StoreSet::durable_store(&stores);
+    let database = lash_execution_contracts::backend::StoreSet::durable_store(&stores);
     keep.push(Box::new(isolated));
     Ok((assemble(Arc::new(stores))?, database))
 }
@@ -293,7 +296,7 @@ pub async fn sqlite(clock: Arc<SimClock>) -> Result<(Backend, Arc<dyn DurableSto
     let stores = lash_sqlite_store::SqliteStoreSet::memory_with_options_and_clock(options, clock)
         .await
         .map_err(|error| error.to_string())?;
-    lash_core_execution::testing::process_execution_env_fixture(
+    lash_execution_contracts::testing::process_execution_env_fixture(
         stores.process_env_store().as_ref(),
     )
     .await;
@@ -329,7 +332,7 @@ pub async fn sqlite_file(
     )
     .await
     .map_err(|error| error.to_string())?;
-    lash_core_execution::testing::process_execution_env_fixture(
+    lash_execution_contracts::testing::process_execution_env_fixture(
         stores.process_env_store().as_ref(),
     )
     .await;
@@ -345,7 +348,9 @@ pub async fn sqlite_file(
 /// # Errors
 ///
 /// The backend does not assemble.
-pub fn assemble(stores: Arc<dyn lash_core_execution::StoreSet>) -> Result<Backend, String> {
+pub fn assemble(
+    stores: Arc<dyn lash_execution_contracts::backend::StoreSet>,
+) -> Result<Backend, String> {
     Backend::assemble(BackendParts {
         stores,
         settings: settings(),

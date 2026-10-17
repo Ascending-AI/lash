@@ -98,7 +98,7 @@ async fn a_function_a_process_ships_runs_from_its_own_document_as_it_was() {
             &value.transport_json().expect("transport"),
         )
         .expect("explicit kernel settings");
-    let launch = lash_core::EngineLaunch::new(env_ref, settings);
+    let launch = lash_execution_contracts::process::EngineLaunch::new(env_ref, settings);
     let run = artifacts
         .start_function(&value, args.clone(), "held-factorial", launch.clone())
         .await

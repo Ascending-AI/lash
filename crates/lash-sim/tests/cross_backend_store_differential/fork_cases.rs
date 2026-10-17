@@ -386,7 +386,7 @@ pub(super) async fn selected_observer_intents(
     postgres: &PostgresStorage,
     nonce: &str,
 ) {
-    use lash_core::ProcessEventLogTestSupport as _;
+    use lash_execution_contracts::process::ProcessEventLogTestSupport as _;
     let root = sqlite_root.join("selected-observer-sessions");
     let path = sqlite_root.join("selected-observer-processes.db");
     let sqlite = lash_sqlite_store::SqliteProcessRegistry::open_standalone_for_testing(&path)
@@ -395,10 +395,13 @@ pub(super) async fn selected_observer_intents(
     let memory = lash_sqlite_store::SqliteStoreSet::memory()
         .await
         .expect("SQLite memory observer backend");
-    lash_core::testing::process_execution_env_fixture(memory.process_env_store().as_ref()).await;
+    lash_execution_contracts::testing::process_execution_env_fixture(
+        memory.process_env_store().as_ref(),
+    )
+    .await;
     let backends: Vec<(
         Arc<dyn DeploymentStore>,
-        Arc<dyn lash_core::ProcessRegistry>,
+        Arc<dyn lash_execution_contracts::process::ProcessRegistry>,
     )> = vec![
         (memory.session_store_factory(), memory.process_registry()),
         (
@@ -419,10 +422,10 @@ pub(super) async fn selected_observer_intents(
     ];
     for (index, (factory, registry)) in backends.into_iter().enumerate() {
         let session_id = SessionId::fixture(format!("selected-observer-{nonce}-{index}"));
-        let registration = lash_core::testing::held_engine_registration(
+        let registration = lash_execution_contracts::testing::held_engine_registration(
             serde_json::Value::Null,
-            lash_core::ProcessProvenance::host(),
-            lash_core::Lifetime::Detached,
+            lash_execution_contracts::process::ProcessProvenance::host(),
+            lash_execution_contracts::process::Lifetime::Detached,
         );
         let first = registry
             .register_process(registration.clone())
@@ -505,7 +508,9 @@ pub(super) async fn selected_observer_intents(
             .add_observer(
                 &session_id,
                 &selected,
-                lash_core::ProcessObserverBy::host(format!("session-create:{session_id}")),
+                lash_execution_contracts::process::ProcessObserverBy::host(format!(
+                    "session-create:{session_id}"
+                )),
             )
             .await
             .expect("first observer publication");
@@ -548,10 +553,12 @@ pub(super) async fn selected_observer_intents(
         let terminal = registry
             .complete_process(
                 &first.id,
-                lash_core::ProcessAwaitOutput::from_tool_output(
+                lash_execution_contracts::process::ProcessAwaitOutput::from_tool_output(
                     lash_core::ToolCallOutput::success(serde_json::Value::Null),
                 ),
-                lash_core::ProcessCompletionAuthority::workflow_key(&first.id),
+                lash_execution_contracts::process::ProcessCompletionAuthority::workflow_key(
+                    &first.id,
+                ),
             )
             .await
             .expect("finish selected run");
@@ -559,7 +566,7 @@ pub(super) async fn selected_observer_intents(
             .prune_terminal_processes(
                 terminal.updated_at_ms.saturating_add(1),
                 None,
-                lash_core::ProjectionWatermark::NoProjector,
+                lash_execution_contracts::process::ProjectionWatermark::NoProjector,
             )
             .await
             .expect("prune selected run");

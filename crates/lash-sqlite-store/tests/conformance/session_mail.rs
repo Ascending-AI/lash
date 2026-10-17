@@ -27,7 +27,7 @@ impl lash_conformance::WakeCut for WakeTrigger {
     }
 }
 
-fn stores(backend: &TestBackend) -> Arc<dyn lash_core_execution::StoreSet> {
+fn stores(backend: &TestBackend) -> Arc<dyn lash_execution_contracts::backend::StoreSet> {
     Arc::new((**backend).clone())
 }
 

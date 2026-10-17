@@ -38,7 +38,7 @@ lash_conformance::recovery_leader_tests!(|label| {
 /// The kind check a build of this window declares on the cleanup table,
 /// widened by `extra` labels.
 fn cleanup_kind_check(extra: &[&str]) -> String {
-    let labels = lash_core_execution::ArtifactReferrerKind::ALL
+    let labels = lash_core_store::artifact_referrer::ArtifactReferrerKind::ALL
         .iter()
         .map(|kind| kind.as_str())
         .chain(extra.iter().copied())
@@ -64,7 +64,7 @@ async fn an_unknown_referrer_kind_is_refused_typed_and_stalled() {
         return;
     };
     reset(storage.pool()).await;
-    let label = lash_core_execution::SYNTHETIC_NEXT_REFERRER_KIND;
+    let label = lash_core_store::artifact_referrer::SYNTHETIC_NEXT_REFERRER_KIND;
     let id = "obligation-written-by-a-later-build";
     sqlx::raw_sql(&cleanup_kind_check(&[label]))
         .execute(storage.pool())
@@ -84,7 +84,7 @@ async fn an_unknown_referrer_kind_is_refused_typed_and_stalled() {
     let (_attachments, stores) = pg_law_stores(&storage);
     lash_conformance::an_unknown_referrer_kind_is_refused_typed_and_stalled(
         stores,
-        lash_core_execution::store::ObligationId::new(id),
+        lash_core_store::store::ObligationId::new(id),
         label,
     )
     .await;

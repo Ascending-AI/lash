@@ -356,8 +356,8 @@ fn processes_area_witnesses_b() {
         String::new(),
         todo!(),
     );
-    // W0606: lash_core::facade_support::registry_transitions::RETIRED_PROCESS_STATUS_LABELS [constant]
-    let _ = lash_core::facade_support::registry_transitions::RETIRED_PROCESS_STATUS_LABELS;
+    // W0606: lash_execution_contracts::process::registry_transitions::RETIRED_PROCESS_STATUS_LABELS [constant]
+    let _ = lash_execution_contracts::process::registry_transitions::RETIRED_PROCESS_STATUS_LABELS;
     // W0609: lash::testing::RuntimeNamedPhase [struct]
     type_witness::<lash::testing::RuntimeNamedPhase>();
     // W0610: lash::testing::RuntimeNamedPhase::begin [function]

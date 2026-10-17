@@ -255,7 +255,7 @@ pub(crate) fn scope<T>(origin: &'static str, work: impl FnOnce() -> T) -> T {
                 .active -= 1;
         }
     }
-    let operation = lash_core_execution::facade_support::sql::Window::current()
+    let operation = lash_core_ids::operational_metrics::sql::Window::current()
         .map(|w| w.snapshot().operation)
         .unwrap_or_else(|| "sqlite.connection".into());
     let old = CONTEXT.with(|slot| slot.replace((operation, origin.into())));

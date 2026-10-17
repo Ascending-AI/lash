@@ -36,8 +36,8 @@ use std::sync::Arc;
 use std::time::Duration;
 
 use lash::workflow::document::KernelVersion;
-use lash_core::StoreSet;
 use lash_core::durable_port::{ActorKey, ActorState};
+use lash_execution_contracts::backend::StoreSet;
 
 /// `worker()`: a loop that prints, sleeps and goes on. The synthetic
 /// successor spells `print` otherwise and prices the loop's test
@@ -313,12 +313,12 @@ async fn start_under(
         .processes()
         .engine_defaults(KIND, &payload)
         .expect("the kernel engine's default settings");
-    let request = lash_core::ProcessStartRequest::engine(
+    let request = lash_execution_contracts::process::ProcessStartRequest::engine(
         KIND.to_owned(),
         payload,
-        lash_core::EngineLaunch::new(env_ref, settings),
-        lash_core::ProcessOriginator::host(),
-        lash_core::LifetimeDecision::Detached,
+        lash_execution_contracts::process::EngineLaunch::new(env_ref, settings),
+        lash_execution_contracts::process::ProcessOriginator::host(),
+        lash_execution_contracts::process::LifetimeDecision::Detached,
     );
     core.processes()
         .start(request, core.effect_host())
@@ -453,7 +453,7 @@ async fn a_process_parked_by_build_n_is_resumed_by_build_n_plus_1_in_the_version
     .await
     .expect("the process ends within a minute")
     .expect("the process's end is read");
-    let lash_core::ProcessAwaitOutput::Settled { output } = output else {
+    let lash_execution_contracts::process::ProcessAwaitOutput::Settled { output } = output else {
         panic!("the process ended without an answer: {output:?}");
     };
     assert!(output.is_success(), "the process failed: {output:?}");
@@ -908,7 +908,7 @@ async fn a_process_parked_inside_a_changed_helper_stays_pinned_and_resumes_on_th
     .await
     .expect("the process ends within a minute")
     .expect("the process's end is read");
-    let lash_core::ProcessAwaitOutput::Settled { output } = output else {
+    let lash_execution_contracts::process::ProcessAwaitOutput::Settled { output } = output else {
         panic!("the process ended without an answer: {output:?}");
     };
     assert!(output.is_success(), "the process failed: {output:?}");
@@ -1140,7 +1140,7 @@ fn current_for_each() -> String {
 async fn record(
     backend: &lash::Backend,
     process: &lash_core::ProcessId,
-) -> lash_core::ProcessRecord {
+) -> lash_execution_contracts::process::ProcessRecord {
     backend
         .process_registry()
         .get_process(process)
@@ -1155,7 +1155,7 @@ async fn pair(
     process: &lash_core::ProcessId,
 ) -> (serde_json::Value, lash_core::ProcessEnvRef) {
     match record(backend, process).await.input.as_ref() {
-        lash_core::ProcessInput::Engine {
+        lash_execution_contracts::process::ProcessInput::Engine {
             payload, launch, ..
         } => (payload.clone(), launch.env.clone()),
         other => panic!("a kernel process runs an engine: {other:?}"),
@@ -1301,7 +1301,7 @@ async fn a_successor_pair_for_a_parked_run_is_refused_and_the_process_goes_on() 
     .await
     .expect("the process ends within a minute")
     .expect("the process's end is read");
-    let lash_core::ProcessAwaitOutput::Settled { output } = output else {
+    let lash_execution_contracts::process::ProcessAwaitOutput::Settled { output } = output else {
         panic!("the process ended without an answer: {output:?}");
     };
     assert!(output.is_success(), "the process failed: {output:?}");
@@ -1630,7 +1630,7 @@ async fn a_later_build_without_the_component_never_claims_its_process() {
                 .expect("the process is read")
                 .is_some_and(|record| !matches!(
                     record.lifecycle,
-                    lash_core::ProcessLifecycleState::Terminal { .. }
+                    lash_execution_contracts::process::ProcessLifecycleState::Terminal { .. }
                 )),
             "the admitted step stays unsettled"
         );
@@ -1654,7 +1654,7 @@ async fn a_later_build_without_the_component_never_claims_its_process() {
     .expect("the cancelled process ends within a minute")
     .expect("its end is read");
     assert!(
-        matches!(&output, lash_core::ProcessAwaitOutput::Settled { output }
+        matches!(&output, lash_execution_contracts::process::ProcessAwaitOutput::Settled { output }
             if matches!(output.outcome, lash_core::ToolCallOutcome::Cancelled(_))),
         "the cancel ends the process engine-free: {output:?}"
     );
@@ -1670,7 +1670,7 @@ async fn a_later_build_without_the_component_never_claims_its_process() {
     .await
     .expect("the capable build ends the process within a minute")
     .expect("its end is read");
-    let lash_core::ProcessAwaitOutput::Settled { output } = output else {
+    let lash_execution_contracts::process::ProcessAwaitOutput::Settled { output } = output else {
         panic!("the process ended without an answer: {output:?}");
     };
     assert!(output.is_success(), "{output:?}");
@@ -1716,7 +1716,7 @@ async fn process_step_crosses_deploy() {
     .await
     .unwrap()
     .unwrap();
-    let lash_core::ProcessAwaitOutput::Settled { output } = output else {
+    let lash_execution_contracts::process::ProcessAwaitOutput::Settled { output } = output else {
         panic!("the process must settle");
     };
     assert!(output.is_success(), "{output:?}");
@@ -1799,7 +1799,7 @@ async fn a_changed_tool_answers_a_new_process_call_with_a_typed_catchable_error(
     .await
     .expect("the later build ends the process within a minute")
     .expect("its end is read");
-    let lash_core::ProcessAwaitOutput::Settled { output } = output else {
+    let lash_execution_contracts::process::ProcessAwaitOutput::Settled { output } = output else {
         panic!("the process ended without an answer: {output:?}");
     };
     assert!(
@@ -1859,7 +1859,7 @@ async fn an_admitted_call_on_a_changed_surface_settles_typed_without_restarting(
     .await
     .unwrap()
     .unwrap();
-    let lash_core::ProcessAwaitOutput::Settled { output } = output else {
+    let lash_execution_contracts::process::ProcessAwaitOutput::Settled { output } = output else {
         panic!("{output:?}")
     };
     assert!(output.is_success(), "{output:?}");

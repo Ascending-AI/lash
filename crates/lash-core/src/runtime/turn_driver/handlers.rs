@@ -558,10 +558,12 @@ impl RuntimeTurnDriver<'_> {
         // the journal already holds what followed the sync, so settling the
         // turn here would diverge from it. A live fault is retried; a prelude
         // that is gone or not the recorded one refuses the run, typed.
-        let prelude = prelude
-            .read(self.host.core.durability.turn_prelude_store.as_ref())
-            .await
-            .map_err(RuntimeEffectControllerError::into_runtime_error)?;
+        let prelude = crate::TurnPrelude::read(
+            &prelude,
+            self.host.core.durability.turn_prelude_store.as_ref(),
+        )
+        .await
+        .map_err(RuntimeEffectControllerError::into_runtime_error)?;
         let store = self.session.history_store().ok_or_else(|| {
             RuntimeError::new(
                 RuntimeErrorCode::ArtifactMissing,
@@ -1290,7 +1292,7 @@ mod tests {
 
         let process = RuntimeInvocation {
             attribution: RuntimeAttribution::for_turn("session-1", "turn-1", 2, 3),
-            subject: crate::RuntimeSubject::Process {
+            subject: lash_core_store::effect_identity::RuntimeSubject::Process {
                 process_id: crate::ProcessId::fixture("process-1"),
             },
             caused_by: None,

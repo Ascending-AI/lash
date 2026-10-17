@@ -23,9 +23,10 @@ use std::task::{Context, Poll};
 use futures_util::Stream;
 pub use lash_trace::{LanguageExecutionObservation, StepBodyStartedObservation};
 
-use super::super::{
-    ObservedProcess, ObservedProcessEvent, ProcessEffectReport, RetiredProcessStatus,
-};
+use lash_execution_contracts::process::ObservedProcess;
+use lash_execution_contracts::process::ObservedProcessEvent;
+use lash_execution_contracts::process::ProcessEffectReport;
+use lash_execution_contracts::process::RetiredProcessStatus;
 
 #[path = "process_replay/memory.rs"]
 mod memory;

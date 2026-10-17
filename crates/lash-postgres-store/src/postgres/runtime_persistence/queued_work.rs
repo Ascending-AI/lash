@@ -78,7 +78,7 @@ impl PostgresStore {
         &self,
         session_id: &SessionId,
         batch_id: &str,
-    ) -> Result<Option<lash_core_execution::store::RuntimeCommitReceipt>, StoreError> {
+    ) -> Result<Option<lash_core_store::store::RuntimeCommitReceipt>, StoreError> {
         let mut connection = acquire_runtime_connection(&self.pool, &self.observer).await?;
         let row = crate::observed_sql::query(
             crate::turn_ingress::turn_ingress_sql()
@@ -94,7 +94,7 @@ impl PostgresStore {
         row.map(|row| {
             let operation_key: String = row.get(0);
             let result_json: String = row.get(1);
-            lash_core_execution::store::decode_runtime_commit_receipt_for_fleet(
+            lash_core_store::store::decode_runtime_commit_receipt_for_fleet(
                 session_id,
                 &operation_key,
                 &result_json,
@@ -150,7 +150,7 @@ impl PostgresStore {
     pub(super) async fn pending_session_work_ordering_pg(
         &self,
         session_id: &SessionId,
-    ) -> Result<lash_core_execution::store::PendingSessionWorkOrdering, StoreError> {
+    ) -> Result<lash_core_store::store::PendingSessionWorkOrdering, StoreError> {
         let connection = acquire_runtime_connection(&self.pool, &self.observer).await?;
         let mut tx = crate::observed_sql::control(
             "BEGIN",
@@ -182,14 +182,14 @@ impl PostgresStore {
         let ordering_key = |kind: &'static str, at: Option<i64>, seq: Option<i64>| {
             at.zip(seq)
                 .map(|(at, seq)| -> Result<_, StoreError> {
-                    Ok(lash_core_execution::store::PendingWorkOrderingKey {
+                    Ok(lash_core_store::store::PendingWorkOrderingKey {
                         enqueued_at_ms: u64_from_sql(kind, "enqueued_at_ms", at)?,
                         enqueue_seq: u64_from_sql(kind, "enqueue_seq", seq)?,
                     })
                 })
                 .transpose()
         };
-        Ok(lash_core_execution::store::PendingSessionWorkOrdering {
+        Ok(lash_core_store::store::PendingSessionWorkOrdering {
             session_command: ordering_key("QueuedWorkBatch", command_at, command_seq)?,
             turn_input: ordering_key("PendingTurnInput", input_at, input_seq)?,
         })

@@ -7,10 +7,10 @@ use std::sync::Arc;
 use std::sync::atomic::{AtomicUsize, Ordering};
 
 use super::super::model::{ProcessId, SessionId};
-use super::super::registry::ProcessRegistry;
 use super::super::registry_delegate::{
     delegate_process_observer_registry, delegate_process_registrar, delegate_process_tool_intents,
 };
+use lash_execution_contracts::process::ProcessRegistry;
 
 /// Wraps a registry so a test can make its point reads of one process fail,
 /// miss, or answer a stale record, can fail terminal,
@@ -18,7 +18,7 @@ use super::super::registry_delegate::{
 /// read processes.
 ///
 /// Reads are faulted at the point reads —
-/// [`get_process`](super::super::registry_concerns::ProcessQuery::get_process)
+/// [`get_process`](lash_execution_contracts::process::ProcessQuery::get_process)
 /// and the exact-incarnation reads built on it — and every fault applies only
 /// to callers that go through this decorator: the wrapped backend's own
 /// writes never see the faults. Every other operation forwards unchanged.
@@ -35,20 +35,23 @@ type ExternalRefWriteHold =
 
 #[derive(Default)]
 struct ReadFaultPlan {
-    delete_error: Option<crate::PluginError>,
-    error: Option<crate::PluginError>,
-    error_after: Option<(usize, crate::PluginError)>,
+    delete_error: Option<lash_execution_contracts::plugin_error::PluginError>,
+    error: Option<lash_execution_contracts::plugin_error::PluginError>,
+    error_after: Option<(usize, lash_execution_contracts::plugin_error::PluginError)>,
     absent: bool,
-    record_override: Option<crate::ProcessRecord>,
-    pinned: Option<crate::ProcessRecord>,
-    events_read_error: Option<crate::PluginError>,
-    terminal_write_error: Option<crate::PluginError>,
-    terminal_write_outcome: Option<crate::ProcessCompletionOutcome>,
-    external_ref_write_error: Option<crate::PluginError>,
+    record_override: Option<lash_execution_contracts::process::ProcessRecord>,
+    pinned: Option<lash_execution_contracts::process::ProcessRecord>,
+    events_read_error: Option<lash_execution_contracts::plugin_error::PluginError>,
+    terminal_write_error: Option<lash_execution_contracts::plugin_error::PluginError>,
+    terminal_write_outcome: Option<lash_execution_contracts::process::ProcessCompletionOutcome>,
+    external_ref_write_error: Option<lash_execution_contracts::plugin_error::PluginError>,
     external_ref_write_hold: Option<ExternalRefWriteHold>,
-    cancel_request_write_error: Option<crate::PluginError>,
+    cancel_request_write_error: Option<lash_execution_contracts::plugin_error::PluginError>,
     non_terminal_page_reads: Vec<NonTerminalPageRead>,
-    non_terminal_page_errors: Option<(usize, std::collections::VecDeque<crate::PluginError>)>,
+    non_terminal_page_errors: Option<(
+        usize,
+        std::collections::VecDeque<lash_execution_contracts::plugin_error::PluginError>,
+    )>,
     non_terminal_page_pause: Option<NonTerminalPagePause>,
     event_page_pause: Option<NonTerminalPagePause>,
     registration_hold: Option<RegistrationHold>,
@@ -76,7 +79,10 @@ struct RegistrationHold {
 
 /// One non-terminal-page read the decorator saw: the page limit and the
 /// continuation it was asked from.
-pub type NonTerminalPageRead = (usize, Option<crate::ProcessRegistryCursor>);
+pub type NonTerminalPageRead = (
+    usize,
+    Option<lash_execution_contracts::process::ProcessRegistryCursor>,
+);
 
 /// Holds the next non-terminal-page read until the test resumes it.
 #[derive(Clone)]
@@ -116,14 +122,20 @@ impl ProcessRegistryFaults {
     }
 
     /// The next session cleanup fails before changing process state.
-    pub fn fail_next_session_delete(&self, error: crate::PluginError) {
+    pub fn fail_next_session_delete(
+        &self,
+        error: lash_execution_contracts::plugin_error::PluginError,
+    ) {
         self.faults.lock_recover().delete_error = Some(error);
     }
 
     async fn delete_session_faulted(
         &self,
         session_id: &SessionId,
-    ) -> Result<crate::ProcessSessionDeleteReport, crate::PluginError> {
+    ) -> Result<
+        lash_execution_contracts::process::ProcessSessionDeleteReport,
+        lash_execution_contracts::plugin_error::PluginError,
+    > {
         let error = self.faults.lock_recover().delete_error.take();
         if let Some(error) = error {
             return Err(error);
@@ -132,13 +144,20 @@ impl ProcessRegistryFaults {
     }
 
     /// Every point read fails with `error` until cleared with `None`.
-    pub fn set_process_read_error(&self, error: Option<crate::PluginError>) {
+    pub fn set_process_read_error(
+        &self,
+        error: Option<lash_execution_contracts::plugin_error::PluginError>,
+    ) {
         self.faults.lock_recover().error = error;
     }
 
     /// The point read after `successful_reads` more successful ones fails
     /// with `error`, once.
-    pub fn set_process_read_error_after(&self, successful_reads: usize, error: crate::PluginError) {
+    pub fn set_process_read_error_after(
+        &self,
+        successful_reads: usize,
+        error: lash_execution_contracts::plugin_error::PluginError,
+    ) {
         self.faults.lock_recover().error_after = Some((successful_reads, error));
     }
 
@@ -148,7 +167,10 @@ impl ProcessRegistryFaults {
     }
 
     /// The next point read answers `record`, once.
-    pub fn set_process_read_override(&self, record: crate::ProcessRecord) {
+    pub fn set_process_read_override(
+        &self,
+        record: lash_execution_contracts::process::ProcessRecord,
+    ) {
         self.faults.lock_recover().record_override = Some(record);
     }
 
@@ -156,7 +178,10 @@ impl ProcessRegistryFaults {
     /// reaching the wrapped registry. A reader polling a pinned record does no
     /// backend I/O, so a paused-clock test can step its cadence without that
     /// I/O idling the runtime into auto-advancing the clock.
-    pub fn set_process_read_pinned(&self, record: Option<crate::ProcessRecord>) {
+    pub fn set_process_read_pinned(
+        &self,
+        record: Option<lash_execution_contracts::process::ProcessRecord>,
+    ) {
         self.faults.lock_recover().pinned = record;
     }
 
@@ -166,24 +191,36 @@ impl ProcessRegistryFaults {
     }
 
     /// The next event-history read fails with `error`, once.
-    pub fn set_process_events_read_error(&self, error: crate::PluginError) {
+    pub fn set_process_events_read_error(
+        &self,
+        error: lash_execution_contracts::plugin_error::PluginError,
+    ) {
         self.faults.lock_recover().events_read_error = Some(error);
     }
 
     /// Every fenced terminal write fails with `error` until cleared with
     /// `None`.
-    pub fn set_process_terminal_write_error(&self, error: Option<crate::PluginError>) {
+    pub fn set_process_terminal_write_error(
+        &self,
+        error: Option<lash_execution_contracts::plugin_error::PluginError>,
+    ) {
         self.faults.lock_recover().terminal_write_error = error;
     }
 
     /// The next fenced terminal write answers `outcome` without writing, once.
-    pub fn set_process_terminal_write_outcome(&self, outcome: crate::ProcessCompletionOutcome) {
+    pub fn set_process_terminal_write_outcome(
+        &self,
+        outcome: lash_execution_contracts::process::ProcessCompletionOutcome,
+    ) {
         self.faults.lock_recover().terminal_write_outcome = Some(outcome);
     }
 
     /// The next external-reference write fails with `error`, once, without
     /// reaching the wrapped registry.
-    pub fn fail_next_external_ref_write(&self, error: crate::PluginError) {
+    pub fn fail_next_external_ref_write(
+        &self,
+        error: lash_execution_contracts::plugin_error::PluginError,
+    ) {
         self.faults.lock_recover().external_ref_write_error = Some(error);
     }
 
@@ -201,7 +238,10 @@ impl ProcessRegistryFaults {
 
     /// The next cancellation request fails with `error`, once, without
     /// reaching the wrapped registry.
-    pub fn fail_next_cancel_request(&self, error: crate::PluginError) {
+    pub fn fail_next_cancel_request(
+        &self,
+        error: lash_execution_contracts::plugin_error::PluginError,
+    ) {
         self.faults.lock_recover().cancel_request_write_error = Some(error);
     }
 
@@ -210,7 +250,7 @@ impl ProcessRegistryFaults {
     pub fn set_non_terminal_page_errors(
         &self,
         successful_reads: usize,
-        errors: Vec<crate::PluginError>,
+        errors: Vec<lash_execution_contracts::plugin_error::PluginError>,
     ) {
         self.faults.lock_recover().non_terminal_page_errors =
             Some((successful_reads, errors.into()));
@@ -285,7 +325,14 @@ impl ProcessRegistryFaults {
         pause
     }
 
-    fn faulted_read(&self) -> Option<Result<Option<crate::ProcessRecord>, crate::PluginError>> {
+    fn faulted_read(
+        &self,
+    ) -> Option<
+        Result<
+            Option<lash_execution_contracts::process::ProcessRecord>,
+            lash_execution_contracts::plugin_error::PluginError,
+        >,
+    > {
         let mut plan = self.faults.lock_recover();
         if let Some(error) = plan.error.clone() {
             return Some(Err(error));
@@ -307,7 +354,9 @@ impl ProcessRegistryFaults {
         plan.pinned.clone().map(|record| Ok(Some(record)))
     }
 
-    fn take_events_read_fault(&self) -> Result<(), crate::PluginError> {
+    fn take_events_read_fault(
+        &self,
+    ) -> Result<(), lash_execution_contracts::plugin_error::PluginError> {
         self.faults
             .lock_recover()
             .events_read_error
@@ -315,7 +364,9 @@ impl ProcessRegistryFaults {
             .map_or(Ok(()), Err)
     }
 
-    fn non_terminal_page_fault(&self) -> Result<(), crate::PluginError> {
+    fn non_terminal_page_fault(
+        &self,
+    ) -> Result<(), lash_execution_contracts::plugin_error::PluginError> {
         let mut plan = self.faults.lock_recover();
         let Some((successful_reads, errors)) = plan.non_terminal_page_errors.as_mut() else {
             return Ok(());
@@ -336,11 +387,14 @@ impl ProcessRegistryFaults {
 /// bodies, which read through [`get_process`](Self::get_process): an exact
 /// incarnation read sees the same faults a point read does.
 #[async_trait::async_trait]
-impl super::super::registry_concerns::ProcessQuery for ProcessRegistryFaults {
+impl lash_execution_contracts::process::ProcessQuery for ProcessRegistryFaults {
     async fn get_process_by_start_key(
         &self,
         start_key: &crate::StartKey,
-    ) -> Result<Option<crate::ProcessRecord>, crate::PluginError> {
+    ) -> Result<
+        Option<lash_execution_contracts::process::ProcessRecord>,
+        lash_execution_contracts::plugin_error::PluginError,
+    > {
         let read = self.inner.get_process_by_start_key(start_key).await;
         let pause = self.faults.lock_recover().start_key_read_pause.take();
         if let Some(pause) = pause {
@@ -352,7 +406,10 @@ impl super::super::registry_concerns::ProcessQuery for ProcessRegistryFaults {
     async fn get_process(
         &self,
         process_id: &ProcessId,
-    ) -> Result<Option<crate::ProcessRecord>, crate::PluginError> {
+    ) -> Result<
+        Option<lash_execution_contracts::process::ProcessRecord>,
+        lash_execution_contracts::plugin_error::PluginError,
+    > {
         self.process_point_reads.fetch_add(1, Ordering::SeqCst);
         if let Some(faulted) = self.faulted_read() {
             return faulted;
@@ -362,10 +419,13 @@ impl super::super::registry_concerns::ProcessQuery for ProcessRegistryFaults {
 
     async fn list_processes_page(
         &self,
-        filter: &crate::ProcessListFilter,
+        filter: &lash_execution_contracts::process::ProcessListFilter,
         limit: std::num::NonZeroUsize,
-        continuation: Option<crate::ProcessRosterCursor>,
-    ) -> Result<crate::ProcessRosterRecords, crate::PluginError> {
+        continuation: Option<lash_execution_contracts::process::ProcessRosterCursor>,
+    ) -> Result<
+        lash_execution_contracts::process::ProcessRosterRecords,
+        lash_execution_contracts::plugin_error::PluginError,
+    > {
         self.inner
             .list_processes_page(filter, limit, continuation)
             .await
@@ -373,23 +433,35 @@ impl super::super::registry_concerns::ProcessQuery for ProcessRegistryFaults {
 
     async fn process_change_bounds(
         &self,
-    ) -> Result<crate::ProcessChangeBounds, crate::PluginError> {
+    ) -> Result<
+        lash_execution_contracts::process::ProcessChangeBounds,
+        lash_execution_contracts::plugin_error::PluginError,
+    > {
         self.inner.process_change_bounds().await
     }
 
     async fn processes_changed_since(
         &self,
-        cursor: crate::ProcessChangeCursor,
+        cursor: lash_execution_contracts::process::ProcessChangeCursor,
         limit: usize,
-    ) -> Result<(Vec<crate::ProcessChange>, crate::ProcessChangeCursor), crate::PluginError> {
+    ) -> Result<
+        (
+            Vec<lash_execution_contracts::process::ProcessChange>,
+            lash_execution_contracts::process::ProcessChangeCursor,
+        ),
+        lash_execution_contracts::plugin_error::PluginError,
+    > {
         self.inner.processes_changed_since(cursor, limit).await
     }
 
     async fn list_non_terminal_processes_page(
         &self,
         limit: std::num::NonZeroUsize,
-        continuation: Option<crate::ProcessRegistryCursor>,
-    ) -> Result<crate::NonTerminalProcessPage, crate::PluginError> {
+        continuation: Option<lash_execution_contracts::process::ProcessRegistryCursor>,
+    ) -> Result<
+        lash_execution_contracts::process::NonTerminalProcessPage,
+        lash_execution_contracts::plugin_error::PluginError,
+    > {
         let pause = {
             let mut plan = self.faults.lock_recover();
             plan.non_terminal_page_reads
@@ -408,7 +480,7 @@ impl super::super::registry_concerns::ProcessQuery for ProcessRegistryFaults {
     async fn filter_unregistered_process_ids(
         &self,
         process_ids: &[ProcessId],
-    ) -> Result<Vec<ProcessId>, crate::PluginError> {
+    ) -> Result<Vec<ProcessId>, lash_execution_contracts::plugin_error::PluginError> {
         self.inner
             .filter_unregistered_process_ids(process_ids)
             .await
@@ -417,17 +489,22 @@ impl super::super::registry_concerns::ProcessQuery for ProcessRegistryFaults {
     async fn filter_tombstoned_process_ids(
         &self,
         process_ids: &[ProcessId],
-    ) -> Result<Vec<ProcessId>, crate::PluginError> {
+    ) -> Result<Vec<ProcessId>, lash_execution_contracts::plugin_error::PluginError> {
         self.inner.filter_tombstoned_process_ids(process_ids).await
     }
 
     async fn live_reference_summary(
         &self,
-    ) -> Result<Vec<crate::ProcessLiveReferenceView>, crate::PluginError> {
+    ) -> Result<
+        Vec<lash_execution_contracts::process::ProcessLiveReferenceView>,
+        lash_execution_contracts::plugin_error::PluginError,
+    > {
         self.inner.live_reference_summary().await
     }
 
-    async fn count_non_terminal_processes(&self) -> Result<usize, crate::PluginError> {
+    async fn count_non_terminal_processes(
+        &self,
+    ) -> Result<usize, lash_execution_contracts::plugin_error::PluginError> {
         self.inner.count_non_terminal_processes().await
     }
 }
@@ -481,7 +558,7 @@ delegate_process_registrar!(
 delegate_process_observer_registry!(ProcessRegistryFaults, inner, delete_session_faulted);
 
 #[async_trait::async_trait]
-impl super::super::registry_concerns::ProcessEventLog for ProcessRegistryFaults {
+impl lash_execution_contracts::process::ProcessEventLog for ProcessRegistryFaults {
     // `event_page` keeps the trait's provided body, which reads through
     // `event_page_after`: a by-id read sees the same fault.
     async fn event_by_replay_key(
@@ -489,8 +566,12 @@ impl super::super::registry_concerns::ProcessEventLog for ProcessRegistryFaults 
         process_id: &crate::ProcessId,
         replay_key: &str,
         through_sequence: u64,
-    ) -> Result<crate::ProcessEventReadOutcome<Option<crate::ProcessEvent>>, crate::PluginError>
-    {
+    ) -> Result<
+        lash_execution_contracts::process::ProcessEventReadOutcome<
+            Option<lash_execution_contracts::process::ProcessEvent>,
+        >,
+        lash_execution_contracts::plugin_error::PluginError,
+    > {
         self.take_events_read_fault()?;
         self.inner
             .event_by_replay_key(process_id, replay_key, through_sequence)
@@ -502,8 +583,13 @@ impl super::super::registry_concerns::ProcessEventLog for ProcessRegistryFaults 
         process_id: &crate::ProcessId,
         after_sequence: u64,
         limit: std::num::NonZeroUsize,
-        mode: crate::ProcessEventQueryMode,
-    ) -> Result<crate::ProcessEventReadOutcome<crate::ProcessEventPage>, crate::PluginError> {
+        mode: lash_execution_contracts::process::ProcessEventQueryMode,
+    ) -> Result<
+        lash_execution_contracts::process::ProcessEventReadOutcome<
+            lash_execution_contracts::process::ProcessEventPage,
+        >,
+        lash_execution_contracts::plugin_error::PluginError,
+    > {
         self.take_events_read_fault()?;
         let pause = self.faults.lock_recover().event_page_pause.take();
         if let Some(pause) = pause {
@@ -518,20 +604,26 @@ impl super::super::registry_concerns::ProcessEventLog for ProcessRegistryFaults 
         &self,
         process_id: &ProcessId,
         limit: usize,
-    ) -> Result<Vec<crate::ProcessEvent>, crate::PluginError> {
+    ) -> Result<
+        Vec<lash_execution_contracts::process::ProcessEvent>,
+        lash_execution_contracts::plugin_error::PluginError,
+    > {
         self.take_events_read_fault()?;
         self.inner.recent_events(process_id, limit).await
     }
 }
 
 #[async_trait::async_trait]
-impl super::super::registry_concerns::ProcessLifecycle for ProcessRegistryFaults {
+impl lash_execution_contracts::process::ProcessLifecycle for ProcessRegistryFaults {
     async fn complete_process(
         &self,
         process_id: &ProcessId,
-        await_output: crate::ProcessAwaitOutput,
-        authority: crate::ProcessCompletionAuthority,
-    ) -> Result<crate::ProcessCompletionOutcome, crate::PluginError> {
+        await_output: lash_execution_contracts::process::ProcessAwaitOutput,
+        authority: lash_execution_contracts::process::ProcessCompletionAuthority,
+    ) -> Result<
+        lash_execution_contracts::process::ProcessCompletionOutcome,
+        lash_execution_contracts::plugin_error::PluginError,
+    > {
         self.inner
             .complete_process(process_id, await_output, authority)
             .await
@@ -540,10 +632,13 @@ impl super::super::registry_concerns::ProcessLifecycle for ProcessRegistryFaults
     async fn complete_process_with_prelude(
         &self,
         process_id: &ProcessId,
-        await_output: crate::ProcessAwaitOutput,
-        prelude: Vec<crate::ProcessEventAppendRequest>,
-        authority: crate::ProcessCompletionAuthority,
-    ) -> Result<crate::ProcessCompletionOutcome, crate::PluginError> {
+        await_output: lash_execution_contracts::process::ProcessAwaitOutput,
+        prelude: Vec<lash_execution_contracts::process::ProcessEventAppendRequest>,
+        authority: lash_execution_contracts::process::ProcessCompletionAuthority,
+    ) -> Result<
+        lash_execution_contracts::process::ProcessCompletionOutcome,
+        lash_execution_contracts::plugin_error::PluginError,
+    > {
         self.inner
             .complete_process_with_prelude(process_id, await_output, prelude, authority)
             .await
@@ -552,7 +647,10 @@ impl super::super::registry_concerns::ProcessLifecycle for ProcessRegistryFaults
     async fn get_parent_end_plan(
         &self,
         parent: &crate::ScopeId,
-    ) -> Result<Option<crate::ParentEndPlan>, crate::PluginError> {
+    ) -> Result<
+        Option<lash_execution_contracts::process::ParentEndPlan>,
+        lash_execution_contracts::plugin_error::PluginError,
+    > {
         self.inner.get_parent_end_plan(parent).await
     }
 
@@ -562,7 +660,10 @@ impl super::super::registry_concerns::ProcessLifecycle for ProcessRegistryFaults
         origin: crate::CancelOrigin,
         requester: String,
         attribution: Option<crate::RuntimeReplayAttribution>,
-    ) -> Result<crate::ProcessRecord, crate::PluginError> {
+    ) -> Result<
+        lash_execution_contracts::process::ProcessRecord,
+        lash_execution_contracts::plugin_error::PluginError,
+    > {
         self.request_process_cancel_reporting_realization(
             process_id,
             origin,
@@ -579,7 +680,13 @@ impl super::super::registry_concerns::ProcessLifecycle for ProcessRegistryFaults
         origin: crate::CancelOrigin,
         requester: String,
         attribution: Option<crate::RuntimeReplayAttribution>,
-    ) -> Result<(crate::ProcessRecord, crate::StoreRealization), crate::PluginError> {
+    ) -> Result<
+        (
+            lash_execution_contracts::process::ProcessRecord,
+            lash_execution_contracts::process::StoreRealization,
+        ),
+        lash_execution_contracts::plugin_error::PluginError,
+    > {
         let injected = self.faults.lock_recover().cancel_request_write_error.take();
         if let Some(error) = injected {
             return Err(error);
@@ -598,12 +705,12 @@ impl super::super::registry_concerns::ProcessLifecycle for ProcessRegistryFaults
 delegate_process_tool_intents!(ProcessRegistryFaults, inner);
 
 #[async_trait::async_trait]
-impl super::super::registry_concerns::ProcessRetention for ProcessRegistryFaults {
+impl lash_execution_contracts::process::ProcessRetention for ProcessRegistryFaults {
     async fn compact_process_tombstones(
         &self,
         cutoff_epoch_ms: u64,
-        watermark: crate::ProjectionWatermark,
-    ) -> Result<usize, crate::PluginError> {
+        watermark: lash_execution_contracts::process::ProjectionWatermark,
+    ) -> Result<usize, lash_execution_contracts::plugin_error::PluginError> {
         self.inner
             .compact_process_tombstones(cutoff_epoch_ms, watermark)
             .await
@@ -613,16 +720,22 @@ impl super::super::registry_concerns::ProcessRetention for ProcessRegistryFaults
         &self,
         process_id: &crate::ProcessId,
         through: u64,
-    ) -> Result<crate::ProcessEventRelease, crate::PluginError> {
+    ) -> Result<
+        lash_execution_contracts::process::ProcessEventRelease,
+        lash_execution_contracts::plugin_error::PluginError,
+    > {
         self.inner.release_process_events(process_id, through).await
     }
 
     async fn prune_terminal_processes(
         &self,
         cutoff_epoch_ms: u64,
-        filter: Option<crate::ProcessListFilter>,
-        watermark: crate::ProjectionWatermark,
-    ) -> Result<crate::ProcessPruneReport, crate::PluginError> {
+        filter: Option<lash_execution_contracts::process::ProcessListFilter>,
+        watermark: lash_execution_contracts::process::ProjectionWatermark,
+    ) -> Result<
+        lash_execution_contracts::process::ProcessPruneReport,
+        lash_execution_contracts::plugin_error::PluginError,
+    > {
         self.inner
             .prune_terminal_processes(cutoff_epoch_ms, filter, watermark)
             .await
@@ -631,9 +744,9 @@ impl super::super::registry_concerns::ProcessRetention for ProcessRegistryFaults
     async fn prunable_terminal_processes(
         &self,
         cutoff_epoch_ms: u64,
-        filter: Option<crate::ProcessListFilter>,
-        watermark: crate::ProjectionWatermark,
-    ) -> Result<Vec<ProcessId>, crate::PluginError> {
+        filter: Option<lash_execution_contracts::process::ProcessListFilter>,
+        watermark: lash_execution_contracts::process::ProjectionWatermark,
+    ) -> Result<Vec<ProcessId>, lash_execution_contracts::plugin_error::PluginError> {
         self.inner
             .prunable_terminal_processes(cutoff_epoch_ms, filter, watermark)
             .await
@@ -643,7 +756,7 @@ impl super::super::registry_concerns::ProcessRetention for ProcessRegistryFaults
         &self,
         process_id: &ProcessId,
         key: &str,
-    ) -> Result<(), crate::PluginError> {
+    ) -> Result<(), lash_execution_contracts::plugin_error::PluginError> {
         let pause = self.faults.lock_recover().consumer_release_pause.take();
         if let Some(pause) = pause {
             pause.hold().await;
@@ -660,12 +773,12 @@ impl super::super::registry_concerns::ProcessRetention for ProcessRegistryFaults
         &self,
         key: &str,
         owner: &crate::ScopeId,
-    ) -> Result<Vec<ProcessId>, crate::PluginError> {
+    ) -> Result<Vec<ProcessId>, lash_execution_contracts::plugin_error::PluginError> {
         self.inner.abandon_consumer_hold(key, owner).await
     }
 }
 
-impl super::super::registry_concerns::ProcessClockRebind for ProcessRegistryFaults {
+impl lash_execution_contracts::process::ProcessClockRebind for ProcessRegistryFaults {
     fn with_runtime_clock(&self, clock: Arc<dyn crate::Clock>) -> Option<Arc<dyn ProcessRegistry>> {
         self.inner.with_runtime_clock(clock).map(|inner| {
             Arc::new(Self {

@@ -55,7 +55,7 @@ pub(in crate::runtime::session_manager) struct InitializedSession {
 pub(in crate::runtime::session_manager) async fn resolve_session_init(
     current: &CurrentOwnerCapability,
     request: SessionCreateRequest,
-) -> Result<SessionInitPlan, crate::PluginError> {
+) -> Result<SessionInitPlan, lash_execution_contracts::plugin_error::PluginError> {
     let (session_id, request) = identified_create_request(request)?;
     let facts = resolve_child_facts(&StarterFacts::of(current), &request, &session_id)?;
     plan_session_init(current, request, session_id, facts)
@@ -72,7 +72,7 @@ fn recorded_creation_plan(
     current: &CurrentOwnerCapability,
     request: SessionCreateRequest,
     created: &RuntimeSessionState,
-) -> Result<SessionInitPlan, crate::PluginError> {
+) -> Result<SessionInitPlan, lash_execution_contracts::plugin_error::PluginError> {
     let (session_id, mut request) = identified_create_request(request)?;
     let policy = created.policy.clone();
     request.prompt_plan = Some(created.authority.prompt_plan.clone());
@@ -87,7 +87,8 @@ fn recorded_creation_plan(
 /// A start point initialisation does not admit is refused.
 fn identified_create_request(
     mut request: SessionCreateRequest,
-) -> Result<(SessionId, SessionCreateRequest), crate::PluginError> {
+) -> Result<(SessionId, SessionCreateRequest), lash_execution_contracts::plugin_error::PluginError>
+{
     let session_id = request
         .session_id
         .take()
@@ -99,9 +100,11 @@ fn identified_create_request(
     // never run — refuse it here so the refusal is typed rather than a
     // silent reinterpretation.
     if !matches!(request.start, crate::SessionStartPoint::Empty) {
-        return Err(crate::PluginError::Session(format!(
-            "session `{session_id}` create request carries a start point initialisation does not admit; snapshot starts were removed with the managed-session machinery (FIG-3378)"
-        )));
+        return Err(
+            lash_execution_contracts::plugin_error::PluginError::Session(format!(
+                "session `{session_id}` create request carries a start point initialisation does not admit; snapshot starts were removed with the managed-session machinery (FIG-3378)"
+            )),
+        );
     }
     Ok((session_id, request))
 }
@@ -113,13 +116,13 @@ fn plan_session_init(
     mut request: SessionCreateRequest,
     session_id: SessionId,
     facts: ChildFacts,
-) -> Result<SessionInitPlan, crate::PluginError> {
+) -> Result<SessionInitPlan, lash_execution_contracts::plugin_error::PluginError> {
     if let Some(plan) = request.prompt_plan.as_ref() {
         plan.validate().map_err(|error| {
-            crate::PluginError::Runtime(crate::RuntimeError::session_config_refused(
+            lash_execution_contracts::plugin_error::PluginError::Runtime(crate::RuntimeError::session_config_refused(
                 &session_id,
                 crate::CoreConfigOwner::creation_refusal(
-                    crate::CoreConfigRefusal::PromptPlanRefused { error },
+                    lash_execution_contracts::config_error::CoreConfigRefusal::PromptPlanRefused { error },
                 ),
             ))
         })?;
@@ -153,7 +156,9 @@ fn plan_session_init(
         recorded_plugin_config,
         current.host.core.clock.as_ref(),
     )
-    .map_err(|error| crate::PluginError::Session(error.to_string()))?;
+    .map_err(|error| {
+        lash_execution_contracts::plugin_error::PluginError::Session(error.to_string())
+    })?;
     let plugin_config = crate::plugin::SessionAuthorityContext {
         plugin_config: initial_runtime_state.admitted_plugin_config(),
     };
@@ -218,7 +223,7 @@ pub(in crate::runtime::session_manager) struct ChildFacts {
 /// or namespace fills what the request leaves unstated.
 ///
 /// A request that states no policy is refused with
-/// [`CoreConfigRefusal::PolicyUnstated`](crate::CoreConfigRefusal::PolicyUnstated)
+/// [`CoreConfigRefusal::PolicyUnstated`](lash_execution_contracts::config_error::CoreConfigRefusal::PolicyUnstated)
 /// inside
 /// [`RuntimeErrorCode::SessionConfigRefused`](crate::RuntimeErrorCode::SessionConfigRefused).
 /// A request that names a model key of its own mints it, here, through the
@@ -237,18 +242,22 @@ pub(in crate::runtime::session_manager) fn resolve_child_facts(
     starter: &StarterFacts<'_>,
     request: &SessionCreateRequest,
     session_id: &SessionId,
-) -> Result<ChildFacts, crate::PluginError> {
+) -> Result<ChildFacts, lash_execution_contracts::plugin_error::PluginError> {
     let Some(mut policy) = request.policy.clone() else {
-        return Err(crate::PluginError::Runtime(
-            crate::RuntimeError::session_config_refused(
-                session_id,
-                crate::CoreConfigOwner::creation_refusal(crate::CoreConfigRefusal::PolicyUnstated),
+        return Err(
+            lash_execution_contracts::plugin_error::PluginError::Runtime(
+                crate::RuntimeError::session_config_refused(
+                    session_id,
+                    crate::CoreConfigOwner::creation_refusal(
+                        lash_execution_contracts::config_error::CoreConfigRefusal::PolicyUnstated,
+                    ),
+                ),
             ),
-        ));
+        );
     };
     if let Some(key) = request.model.as_ref() {
         let recorded = starter.models.snapshot(key).map_err(|source| {
-            crate::PluginError::Runtime(crate::RuntimeError::new(
+            lash_execution_contracts::plugin_error::PluginError::Runtime(crate::RuntimeError::new(
                 crate::RuntimeErrorCode::LlmProfileUnknown,
                 crate::SessionError::LlmProfileUnknown {
                     session_id: session_id.clone(),
@@ -264,7 +273,7 @@ pub(in crate::runtime::session_manager) fn resolve_child_facts(
         // The reasoning the request states is judged against the capability
         // of the model its key minted (FIG-4531).
         model.validate_reasoning().map_err(|refused| {
-            crate::PluginError::Runtime(crate::RuntimeError::new(
+            lash_execution_contracts::plugin_error::PluginError::Runtime(crate::RuntimeError::new(
                 crate::RuntimeErrorCode::ReasoningRefused,
                 format!("session `{session_id}` create request is refused: {refused}"),
             ))
@@ -282,15 +291,21 @@ pub(in crate::runtime::session_manager) fn resolve_child_facts(
         )
         .map_err(|error| match error {
             crate::CreationConfigError::Recipe(error) => *error,
-            crate::CreationConfigError::Format(refusal) => crate::PluginError::Format(refusal),
-            crate::CreationConfigError::Refused(refusal) => crate::PluginError::Runtime(
-                crate::RuntimeError::session_config_refused(session_id, refusal),
-            ),
+            crate::CreationConfigError::Format(refusal) => {
+                lash_execution_contracts::plugin_error::PluginError::Format(refusal)
+            }
+            crate::CreationConfigError::Refused(refusal) => {
+                lash_execution_contracts::plugin_error::PluginError::Runtime(
+                    crate::RuntimeError::session_config_refused(session_id, refusal),
+                )
+            }
             crate::CreationConfigError::RecordedCorrupt(corrupt) => {
-                crate::PluginError::from(corrupt.into_store_error())
+                lash_execution_contracts::plugin_error::PluginError::from(
+                    corrupt.into_store_error(),
+                )
             }
             crate::CreationConfigError::Registration(error) => {
-                crate::PluginError::ConfigRegistration(error)
+                lash_execution_contracts::plugin_error::PluginError::ConfigRegistration(error)
             }
         })?;
     Ok(ChildFacts {
@@ -308,7 +323,7 @@ pub(in crate::runtime::session_manager) fn admit_session_turn_child(
     current: &CurrentOwnerCapability,
     create_request: &SessionCreateRequest,
     start_name: &str,
-) -> Result<(), crate::PluginError> {
+) -> Result<(), lash_execution_contracts::plugin_error::PluginError> {
     // A child whose request names no session takes the id the worker
     // derives from the minted process id (ADR 0107); before registration it
     // only names a refusal.
@@ -321,10 +336,10 @@ pub(in crate::runtime::session_manager) fn admit_session_turn_child(
 
 /// Whether `error` is the reasoning refusal [`resolve_child_facts`] mints:
 /// the recorded request's reasoning does not fit the model its key mints.
-fn reasoning_refused(error: &crate::PluginError) -> bool {
+fn reasoning_refused(error: &lash_execution_contracts::plugin_error::PluginError) -> bool {
     matches!(
         error,
-        crate::PluginError::Runtime(runtime)
+        lash_execution_contracts::plugin_error::PluginError::Runtime(runtime)
             if runtime.code == crate::RuntimeErrorCode::ReasoningRefused
     )
 }
@@ -334,11 +349,12 @@ fn reasoning_refused(error: &crate::PluginError) -> bool {
 /// fenced writer, a foreign view, or bytes it cannot decode. Every pass
 /// meets it again, so the session turn ends with it (FIG-5358).
 pub(in crate::runtime::session_manager) fn store_refusal(
-    error: &crate::PluginError,
+    error: &lash_execution_contracts::plugin_error::PluginError,
 ) -> Option<crate::RuntimeError> {
     matches!(
         error,
-        crate::PluginError::StoreRefusal(_) | crate::PluginError::StoredDataCorrupt { .. }
+        lash_execution_contracts::plugin_error::PluginError::StoreRefusal(_)
+            | lash_execution_contracts::plugin_error::PluginError::StoredDataCorrupt { .. }
     )
     .then(|| {
         error
@@ -349,11 +365,11 @@ pub(in crate::runtime::session_manager) fn store_refusal(
 
 /// Whether `error` is the creation refusal [`resolve_child_facts`] mints.
 pub(in crate::runtime::session_manager) fn session_config_refused(
-    error: &crate::PluginError,
+    error: &lash_execution_contracts::plugin_error::PluginError,
 ) -> bool {
     matches!(
         error,
-        crate::PluginError::Runtime(runtime)
+        lash_execution_contracts::plugin_error::PluginError::Runtime(runtime)
             if runtime.code == crate::RuntimeErrorCode::SessionConfigRefused
     )
 }
@@ -394,7 +410,7 @@ fn build_runtime_state(
 async fn materialize_session_init(
     current: &CurrentOwnerCapability,
     plan: &SessionInitPlan,
-) -> Result<MaterializedSession, crate::PluginError> {
+) -> Result<MaterializedSession, lash_execution_contracts::plugin_error::PluginError> {
     let plugins = current
         .plugins
         .plugin_host()
@@ -421,7 +437,7 @@ async fn materialize_session_init(
     .await
     .map_err(|err| match err {
         crate::SessionError::Plugin(error) => error,
-        error => crate::PluginError::Session(error.to_string()),
+        error => lash_execution_contracts::plugin_error::PluginError::Session(error.to_string()),
     })?;
 
     Ok(MaterializedSession {
@@ -438,7 +454,7 @@ async fn materialize_session_init(
 async fn bind_session_store(
     current: &CurrentOwnerCapability,
     plan: &SessionInitPlan,
-) -> Result<crate::store::SessionStore, crate::PluginError> {
+) -> Result<crate::store::SessionStore, lash_execution_contracts::plugin_error::PluginError> {
     let catalog = current.host.core.session_store_factory();
     let request = SessionStoreCreateRequest {
         session_id: plan.session_id.clone(),
@@ -450,10 +466,9 @@ async fn bind_session_store(
         retention: current.host.core.durability.session_retention,
     };
     let creation_error = |error: crate::StoreError| {
-        crate::PluginError::Session(session_creation_store_factory_error(
-            &plan.session_id,
-            error.to_string(),
-        ))
+        lash_execution_contracts::plugin_error::PluginError::Session(
+            session_creation_store_factory_error(&plan.session_id, error.to_string()),
+        )
     };
     // The created head is written outside any runtime commit, so it is
     // measured against the commit budget here (FIG-4393).
@@ -492,9 +507,9 @@ fn session_creation_store_factory_error(session_id: &SessionId, message: String)
 async fn validate_created_session_store_binding(
     store: &crate::store::SessionStore,
     session_id: &SessionId,
-) -> Result<(), crate::PluginError> {
+) -> Result<(), lash_execution_contracts::plugin_error::PluginError> {
     let meta = store.load_session_meta().await.map_err(|err| {
-        crate::PluginError::Session(format!(
+        lash_execution_contracts::plugin_error::PluginError::Session(format!(
             "failed to inspect store for session `{session_id}`: {err}. {}",
             session_creation_store_guidance()
         ))
@@ -502,11 +517,13 @@ async fn validate_created_session_store_binding(
     if let Some(meta) = meta
         && meta.session_id != session_id
     {
-        return Err(crate::PluginError::Session(format!(
-            "configured session-creation store is already bound to session `{}` and cannot be used for session `{session_id}`. {}",
-            meta.session_id,
-            session_creation_store_guidance()
-        )));
+        return Err(
+            lash_execution_contracts::plugin_error::PluginError::Session(format!(
+                "configured session-creation store is already bound to session `{}` and cannot be used for session `{session_id}`. {}",
+                meta.session_id,
+                session_creation_store_guidance()
+            )),
+        );
     }
     Ok(())
 }
@@ -519,12 +536,14 @@ async fn commit_initialized_session(
     current: &CurrentOwnerCapability,
     plan: SessionInitPlan,
     mut materialized: MaterializedSession,
-) -> Result<(SessionHandle, RuntimeHandle), crate::PluginError> {
+) -> Result<(SessionHandle, RuntimeHandle), lash_execution_contracts::plugin_error::PluginError> {
     let mut persisted_state = materialized
         .runtime
         .export_persisted_state()
         .await
-        .map_err(|err| crate::PluginError::Session(err.to_string()))?;
+        .map_err(|err| {
+            lash_execution_contracts::plugin_error::PluginError::Session(err.to_string())
+        })?;
     let operation = super::super::state::boundary_operation(
         &persisted_state.session_id,
         &plan.session_id,
@@ -537,12 +556,14 @@ async fn commit_initialized_session(
             materialized.runtime.host.core.durability.commit_budget,
             materialized.runtime.fleet_format(),
         )
-        .map_err(|err| crate::PluginError::Session(err.to_string()))?;
+        .map_err(|err| {
+            lash_execution_contracts::plugin_error::PluginError::Session(err.to_string())
+        })?;
     // Stamp last: the semantic-boundary identity hashes the commit's
     // canonical request content, so every content edit must precede it.
-    commit
-        .stamp_semantic_boundary()
-        .map_err(|err| crate::PluginError::Session(err.to_string()))?;
+    commit.stamp_semantic_boundary().map_err(|err| {
+        lash_execution_contracts::plugin_error::PluginError::Session(err.to_string())
+    })?;
     // Lane-less by construction: the session is being created before it
     // owns an execution lane. A guard for another session cannot authorize
     // this commit.
@@ -550,7 +571,9 @@ async fn commit_initialized_session(
         .store_binding
         .commit_runtime_state_verified(commit, materialized.runtime.host.core.tracing.metrics())
         .await
-        .map_err(|err| crate::PluginError::Session(err.to_string()))?;
+        .map_err(|err| {
+            lash_execution_contracts::plugin_error::PluginError::Session(err.to_string())
+        })?;
     persisted_state.apply_persisted_commit_result(result);
     persisted_state.mark_node_ids_persisted(persisted_node_ids);
     materialized
@@ -575,7 +598,10 @@ async fn settle_session_observer_intents(
     current: &CurrentOwnerCapability,
     session_id: &SessionId,
     store: &crate::store::SessionStore,
-) -> Result<Vec<crate::plugin::SessionObservedProcessReceipt>, crate::PluginError> {
+) -> Result<
+    Vec<crate::plugin::SessionObservedProcessReceipt>,
+    lash_execution_contracts::plugin_error::PluginError,
+> {
     let observer_intent_source =
         crate::runtime::SessionObserverIntentSource::Persisted(store.store().as_ref());
     crate::runtime::reconcile_session_process_observer_intents(
@@ -585,7 +611,7 @@ async fn settle_session_observer_intents(
     )
     .await
     .map_err(|error| {
-        crate::PluginError::Session(format!(
+        lash_execution_contracts::plugin_error::PluginError::Session(format!(
             "failed to settle session-create observer intents: {error}"
         ))
     })
@@ -594,10 +620,12 @@ async fn settle_session_observer_intents(
 /// Whether a session-init failure is the catalog's typed "no by-id lookup"
 /// refusal rather than a transient inspect failure. `durable_session_store`
 /// mints the code; this is the single consumer-side recognizer.
-fn session_catalog_lookup_unsupported(error: &crate::PluginError) -> bool {
+fn session_catalog_lookup_unsupported(
+    error: &lash_execution_contracts::plugin_error::PluginError,
+) -> bool {
     matches!(
         error,
-        crate::PluginError::Runtime(runtime)
+        lash_execution_contracts::plugin_error::PluginError::Runtime(runtime)
             if runtime.code == crate::RuntimeErrorCode::SessionCatalogLookupUnsupported
     )
 }
@@ -606,29 +634,31 @@ fn session_catalog_lookup_unsupported(error: &crate::PluginError) -> bool {
 async fn durable_session_store(
     current: &CurrentOwnerCapability,
     session_id: &SessionId,
-) -> Result<Option<crate::store::SessionStore>, crate::PluginError> {
-    crate::runtime::live_session_view(&current.host.core.session_store_factory(), session_id)
-        .await
-        .map_err(|error| match error {
-            // A catalog that cannot resolve a session by id can never serve
-            // the session this call names: the refusal is a deployment fact,
-            // not a transient miss. Carrying it as a typed, terminal code —
-            // not an ordinary `PluginError::Session` lookup failure — is what
-            // lets the `SessionTurn` caller refuse rather than re-admit the
-            // process forever (FIG-3487).
-            crate::StoreError::UnsupportedStoreOperation { .. } => {
-                crate::PluginError::Runtime(crate::RuntimeError::new(
-                    crate::RuntimeErrorCode::SessionCatalogLookupUnsupported,
-                    format!(
-                        "failed to inspect session `{session_id}` before initialisation: {error}"
-                    ),
-                ))
-            }
-            error => crate::PluginError::of_store_error(
-                format_args!("failed to inspect session `{session_id}` before initialisation"),
-                error,
-            ),
-        })
+) -> Result<Option<crate::store::SessionStore>, lash_execution_contracts::plugin_error::PluginError>
+{
+    lash_execution_contracts::deployment::live_session_view(
+        &current.host.core.session_store_factory(),
+        session_id,
+    )
+    .await
+    .map_err(|error| match error {
+        // A catalog that cannot resolve a session by id can never serve
+        // the session this call names: the refusal is a deployment fact,
+        // not a transient miss. Carrying it as a typed, terminal code —
+        // not an ordinary `PluginError::Session` lookup failure — is what
+        // lets the `SessionTurn` caller refuse rather than re-admit the
+        // process forever (FIG-3487).
+        crate::StoreError::UnsupportedStoreOperation { .. } => {
+            lash_execution_contracts::plugin_error::PluginError::Runtime(crate::RuntimeError::new(
+                crate::RuntimeErrorCode::SessionCatalogLookupUnsupported,
+                format!("failed to inspect session `{session_id}` before initialisation: {error}"),
+            ))
+        }
+        error => lash_execution_contracts::plugin_error::PluginError::of_store_error(
+            format_args!("failed to inspect session `{session_id}` before initialisation"),
+            error,
+        ),
+    })
 }
 
 /// `SessionLifecycleService::create_session`: a host's fresh create. The
@@ -637,15 +667,17 @@ async fn durable_session_store(
 pub(in crate::runtime::session_manager) async fn create_session(
     current: &CurrentOwnerCapability,
     request: SessionCreateRequest,
-) -> Result<SessionHandle, crate::PluginError> {
+) -> Result<SessionHandle, lash_execution_contracts::plugin_error::PluginError> {
     let plan = resolve_session_init(current, request).await?;
     if durable_session_store(current, &plan.session_id)
         .await?
         .is_some()
     {
-        return Err(crate::PluginError::SessionAlreadyExists {
-            session_id: plan.session_id,
-        });
+        return Err(
+            lash_execution_contracts::plugin_error::PluginError::SessionAlreadyExists {
+                session_id: plan.session_id,
+            },
+        );
     }
     let materialized = materialize_session_init(current, &plan).await?;
     // A host create returns only the durable handle: the runtime it assembled
@@ -673,7 +705,7 @@ async fn initialize_session(
     current: &CurrentOwnerCapability,
     request: SessionCreateRequest,
     owning_process_id: &crate::ProcessId,
-) -> Result<InitializedSession, crate::PluginError> {
+) -> Result<InitializedSession, lash_execution_contracts::plugin_error::PluginError> {
     if let Some(session_id) = request.session_id.as_ref()
         && let Some(store) = durable_session_store(current, session_id).await?
         && let Some(state) = recorded_session_state(session_id, &request.relation, &store).await?
@@ -707,13 +739,13 @@ async fn initialize_session(
 /// position is.
 fn unserved_profile_key(
     key: Option<&crate::LlmProfileKey>,
-    error: crate::PluginError,
-) -> crate::PluginError {
+    error: lash_execution_contracts::plugin_error::PluginError,
+) -> lash_execution_contracts::plugin_error::PluginError {
     match (key, error) {
-        (Some(key), crate::PluginError::Runtime(runtime))
+        (Some(key), lash_execution_contracts::plugin_error::PluginError::Runtime(runtime))
             if runtime.code == crate::RuntimeErrorCode::LlmProfileUnknown =>
         {
-            crate::PluginError::Runtime(
+            lash_execution_contracts::plugin_error::PluginError::Runtime(
                 crate::RuntimeEffectControllerError::llm_profile_unavailable(
                     key,
                     format!(
@@ -733,16 +765,20 @@ fn unserved_profile_key(
 /// store error classified as every read of the reopen is. Nothing on that
 /// path binds a model (FIG-4404), so the one model refusal it can meet is a
 /// recorded head that selects none: the terminal `LlmProfileUnconfigured`.
-fn recorded_session_error(error: crate::SessionError) -> crate::PluginError {
+fn recorded_session_error(
+    error: crate::SessionError,
+) -> lash_execution_contracts::plugin_error::PluginError {
     match error {
         crate::SessionError::Plugin(error) => error,
         crate::SessionError::Store { context, source } => {
-            crate::PluginError::of_store_error(context, source)
+            lash_execution_contracts::plugin_error::PluginError::of_store_error(context, source)
         }
-        error @ crate::SessionError::LlmProfileUnconfigured { .. } => crate::PluginError::Runtime(
-            crate::runtime::turn_config::llm_profile_unconfigured(error),
-        ),
-        error => crate::PluginError::Session(error.to_string()),
+        error @ crate::SessionError::LlmProfileUnconfigured { .. } => {
+            lash_execution_contracts::plugin_error::PluginError::Runtime(
+                crate::runtime::turn_config::llm_profile_unconfigured(error),
+            )
+        }
+        error => lash_execution_contracts::plugin_error::PluginError::Session(error.to_string()),
     }
 }
 
@@ -751,7 +787,7 @@ fn recorded_session_error(error: crate::SessionError) -> crate::PluginError {
 async fn commit_fresh_session_init(
     current: &CurrentOwnerCapability,
     plan: SessionInitPlan,
-) -> Result<InitializedSession, crate::PluginError> {
+) -> Result<InitializedSession, lash_execution_contracts::plugin_error::PluginError> {
     let materialized = materialize_session_init(current, &plan).await?;
     let (handle_view, handle) =
         Box::pin(commit_initialized_session(current, plan, materialized)).await?;
@@ -770,12 +806,13 @@ async fn recorded_session_state(
     session_id: &SessionId,
     relation: &crate::SessionRelation,
     store: &crate::store::SessionStore,
-) -> Result<Option<crate::RuntimeSessionState>, crate::PluginError> {
+) -> Result<Option<crate::RuntimeSessionState>, lash_execution_contracts::plugin_error::PluginError>
+{
     // The durable row decides lineage. A redelivery replays the same recorded
     // request, so a recorded relation that disagrees is a conflict, never a
     // silent adopt.
     let meta = store.load_session_meta().await.map_err(|error| {
-        crate::PluginError::of_store_error(
+        lash_execution_contracts::plugin_error::PluginError::of_store_error(
             format_args!("failed to inspect session `{session_id}` before reopen"),
             error,
         )
@@ -783,10 +820,12 @@ async fn recorded_session_state(
     if let Some(meta) = &meta
         && meta.relation != *relation
     {
-        return Err(crate::PluginError::Session(format!(
-            "session `{}` already exists with relation {:?}; a redelivery must replay its recorded relation, not {:?}",
-            session_id, meta.relation, relation
-        )));
+        return Err(
+            lash_execution_contracts::plugin_error::PluginError::Session(format!(
+                "session `{}` already exists with relation {:?}; a redelivery must replay its recorded relation, not {:?}",
+                session_id, meta.relation, relation
+            )),
+        );
     }
     crate::store::load_session_window_state(store, crate::store::WindowSelector::Current)
         .await
@@ -795,7 +834,7 @@ async fn recorded_session_state(
         // every attempt: it stays typed, so the process ends with it instead
         // of retrying a reopen no attempt can make (FIG-4628).
         .map_err(|error| {
-            crate::PluginError::of_store_error(
+            lash_execution_contracts::plugin_error::PluginError::of_store_error(
                 format_args!("failed to load session `{session_id}` for reopen"),
                 error,
             )
@@ -810,7 +849,7 @@ async fn reopen_committed_session(
     session_id: &SessionId,
     store: crate::store::SessionStore,
     state: crate::RuntimeSessionState,
-) -> Result<InitializedSession, crate::PluginError> {
+) -> Result<InitializedSession, lash_execution_contracts::plugin_error::PluginError> {
     // The reopened session runs the configuration it recorded, never the
     // redelivered request's (FIG-4379).
     let authority = crate::plugin::SessionAuthorityContext {
@@ -889,7 +928,7 @@ impl RuntimeSessionServices {
         // instead of retrying an unrunnable row on every pass.
         if !matches!(create_request.start, crate::SessionStartPoint::Empty) {
             return Err(SessionTurnInitError::Refused {
-                source: Box::new(crate::PluginError::Session(
+                source: Box::new(lash_execution_contracts::plugin_error::PluginError::Session(
                     "the recorded session create request carries a start point initialisation does not admit; snapshot starts were removed with the managed-session machinery (FIG-3378)".to_string(),
                 )),
             });
@@ -927,9 +966,11 @@ impl RuntimeSessionServices {
         let store = handle.runtime.lock().await.services.store.clone();
         let store = store.ok_or_else(|| SessionTurnInitError::Create {
             session_id: Some(session_id.clone()),
-            source: Box::new(crate::PluginError::Session(format!(
-                "process child session `{session_id}` has no store to mail its turn to"
-            ))),
+            source: Box::new(
+                lash_execution_contracts::plugin_error::PluginError::Session(format!(
+                    "process child session `{session_id}` has no store to mail its turn to"
+                )),
+            ),
         })?;
         let draft = crate::PendingTurnInputDraft::new(
             session_id.clone(),
@@ -943,7 +984,7 @@ impl RuntimeSessionServices {
             .enqueue_pending_turn_input(draft)
             .await
             .map_err(|error| {
-                let source = Box::new(crate::PluginError::of_store_error(
+                let source = Box::new(lash_execution_contracts::plugin_error::PluginError::of_store_error(
                     format_args!(
                         "failed to mail the turn of process `{process_id}` to its child session `{session_id}`"
                     ),
@@ -973,7 +1014,7 @@ impl RuntimeSessionServices {
         requested_session_id: Option<&SessionId>,
         process_id: &crate::ProcessId,
         turn_id: &TurnId,
-    ) -> Result<Option<TurnId>, crate::PluginError> {
+    ) -> Result<Option<TurnId>, lash_execution_contracts::plugin_error::PluginError> {
         let factory = self.current.host.core.session_store_factory();
         let mut candidates: Vec<SessionId> = requested_session_id.cloned().into_iter().collect();
         match factory
@@ -994,9 +1035,11 @@ impl RuntimeSessionServices {
             }
             Err(crate::StoreError::UnsupportedStoreOperation { .. }) => {}
             Err(error) => {
-                return Err(crate::PluginError::Session(format!(
-                    "failed to enumerate sessions caused by cancelled process `{process_id}`: {error}"
-                )));
+                return Err(
+                    lash_execution_contracts::plugin_error::PluginError::Session(format!(
+                        "failed to enumerate sessions caused by cancelled process `{process_id}`: {error}"
+                    )),
+                );
             }
         }
         let mut admitted = None;
@@ -1013,21 +1056,27 @@ impl RuntimeSessionServices {
 
     async fn withdraw_open_process_child_input(
         &self,
-        factory: &Arc<dyn crate::DeploymentStore>,
+        factory: &Arc<dyn lash_execution_contracts::deployment::DeploymentStore>,
         session_id: &SessionId,
         process_id: &crate::ProcessId,
         turn_id: &TurnId,
-    ) -> Result<Option<TurnId>, crate::PluginError> {
-        let store = match crate::runtime::live_session_view(factory, session_id).await {
+    ) -> Result<Option<TurnId>, lash_execution_contracts::plugin_error::PluginError> {
+        let store = match lash_execution_contracts::deployment::live_session_view(
+            factory, session_id,
+        )
+        .await
+        {
             Ok(store) => store,
             // A catalog without the by-id seam can hold no admissible input
             // this reconcile could reach — the same toleration
             // `list_sessions` got above (FIG-3487).
             Err(crate::StoreError::UnsupportedStoreOperation { .. }) => return Ok(None),
             Err(error) => {
-                return Err(crate::PluginError::Session(format!(
-                    "failed to inspect cancelled process `{process_id}` child session `{session_id}`: {error}"
-                )));
+                return Err(
+                    lash_execution_contracts::plugin_error::PluginError::Session(format!(
+                        "failed to inspect cancelled process `{process_id}` child session `{session_id}`: {error}"
+                    )),
+                );
             }
         };
         let Some(store) = store else {
@@ -1037,7 +1086,7 @@ impl RuntimeSessionServices {
             .list_pending_turn_inputs()
             .await
             .map_err(|error| {
-                crate::PluginError::Session(format!(
+                lash_execution_contracts::plugin_error::PluginError::Session(format!(
                     "failed to list cancelled process `{process_id}` child session `{session_id}` inputs: {error}"
                 ))
             })?;
@@ -1058,7 +1107,7 @@ impl RuntimeSessionServices {
             .cancel_pending_turn_inputs(&targets)
             .await
             .map_err(|error| {
-                crate::PluginError::Session(format!(
+                lash_execution_contracts::plugin_error::PluginError::Session(format!(
                     "failed to withdraw cancelled process `{process_id}` child session `{session_id}` inputs: {error}"
                 ))
             })?;
@@ -1082,7 +1131,7 @@ pub(in crate::runtime::session_manager) enum SessionTurnInitError {
     /// retained session *may* already exist for that id.
     Create {
         session_id: Option<SessionId>,
-        source: Box<crate::PluginError>,
+        source: Box<lash_execution_contracts::plugin_error::PluginError>,
     },
     /// The recorded request can never be initialized by this deployment —
     /// a predecessor payload whose start point `SessionStartPoint` keeps
@@ -1090,7 +1139,9 @@ pub(in crate::runtime::session_manager) enum SessionTurnInitError {
     /// recorded session by id, or a config its plugin set refuses.
     /// Deterministic: no pass can run it, so the process terminalizes with
     /// the refusal rather than retrying an unrunnable row forever.
-    Refused { source: Box<crate::PluginError> },
+    Refused {
+        source: Box<lash_execution_contracts::plugin_error::PluginError>,
+    },
 }
 
 #[cfg(test)]
@@ -1143,7 +1194,9 @@ mod tests {
     }
 
     /// Resolve `request`'s facts on a deployment of [`child_llm_profiles`].
-    fn child_facts(request: &SessionCreateRequest) -> Result<ChildFacts, crate::PluginError> {
+    fn child_facts(
+        request: &SessionCreateRequest,
+    ) -> Result<ChildFacts, lash_execution_contracts::plugin_error::PluginError> {
         let plugin_host = crate::testing::test_plugin_host(Vec::new());
         let models = child_llm_profiles();
         resolve_child_facts(
@@ -1158,9 +1211,13 @@ mod tests {
         )
     }
 
-    fn runtime_code(error: &crate::PluginError) -> Option<&crate::RuntimeErrorCode> {
+    fn runtime_code(
+        error: &lash_execution_contracts::plugin_error::PluginError,
+    ) -> Option<&crate::RuntimeErrorCode> {
         match error {
-            crate::PluginError::Runtime(runtime) => Some(&runtime.code),
+            lash_execution_contracts::plugin_error::PluginError::Runtime(runtime) => {
+                Some(&runtime.code)
+            }
             _ => None,
         }
     }
@@ -1235,7 +1292,8 @@ mod tests {
             on_worker.is_retryable() && !on_worker.is_terminal(),
             "an admitted start's unserved key retries until a deployment serves it"
         );
-        let crate::PluginError::Runtime(on_worker) = on_worker else {
+        let lash_execution_contracts::plugin_error::PluginError::Runtime(on_worker) = on_worker
+        else {
             unreachable!("the code was read from a runtime error");
         };
         assert_eq!(
@@ -1260,7 +1318,7 @@ mod tests {
     /// key minted with the reasoning it states.
     #[test]
     fn a_request_that_states_its_spec_records_it() {
-        let spec = crate::SessionSpec::new(
+        let spec = lash_execution_contracts::session_spec::SessionSpec::new(
             THINKER,
             crate::TurnBudget::bounded(4),
             crate::MaxToolCalls::new(1024),
@@ -1281,7 +1339,7 @@ mod tests {
 
         assert_eq!(
             root_request().unstated_root_config(),
-            Some(crate::UnstatedSessionConfig::Policy)
+            Some(lash_execution_contracts::session_types::UnstatedSessionConfig::Policy)
         );
     }
 
@@ -1300,15 +1358,17 @@ mod tests {
         let refused = child_facts(&unstated)
             .err()
             .expect("a request with no policy is refused");
-        let crate::PluginError::Runtime(runtime) = &refused else {
+        let lash_execution_contracts::plugin_error::PluginError::Runtime(runtime) = &refused else {
             panic!("the refusal is a runtime error: {refused:?}");
         };
         assert_eq!(runtime.code, crate::RuntimeErrorCode::SessionConfigRefused);
         assert_eq!(
-            runtime
-                .config_refusal()
-                .and_then(crate::ConfigRefusal::owner_refusal::<crate::CoreConfigRefusal>),
-            Some(crate::CoreConfigRefusal::PolicyUnstated),
+            runtime.config_refusal().and_then(
+                crate::ConfigRefusal::owner_refusal::<
+                    lash_execution_contracts::config_error::CoreConfigRefusal,
+                >
+            ),
+            Some(lash_execution_contracts::config_error::CoreConfigRefusal::PolicyUnstated),
             "{runtime:?}"
         );
 
@@ -1360,11 +1420,12 @@ mod tests {
             at: crate::RefusalSite::Creation,
             reason: crate::ConfigRefusalReason::UnknownOwner,
         };
-        let decoded: crate::PluginError =
+        let decoded: lash_execution_contracts::plugin_error::PluginError =
             serde_json::from_slice(&serde_json::to_vec(&refused).expect("encode the refusal"))
                 .expect("decode the refusal");
         for error in [refused, decoded] {
-            let crate::PluginError::Runtime(runtime) = error else {
+            let lash_execution_contracts::plugin_error::PluginError::Runtime(runtime) = error
+            else {
                 panic!("the refusal is a runtime error: {error:?}");
             };
             assert_eq!(runtime.code, crate::RuntimeErrorCode::SessionConfigRefused);

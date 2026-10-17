@@ -57,6 +57,8 @@ required-features = ["default"]
 workspace = true
 
 [dependencies]
+lash-core-ids = { workspace = true }
+lash-execution-contracts = { workspace = true }
 lash-transport-failure = { workspace = true }
 lash-kernel-doc.workspace = true
 lash-kernel-check.workspace = true

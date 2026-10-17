@@ -1,3 +1,4 @@
+use lash_execution_contracts::session_types::PluginOwned;
 use std::sync::Arc;
 
 use super::*;

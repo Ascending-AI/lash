@@ -7,8 +7,7 @@
 mod roster;
 
 use crate::*;
-use lash_core_execution::ProcessQuery as _;
-use lash_core_execution::facade_support;
+use lash_execution_contracts::process::ProcessQuery as _;
 use lash_protocol_types::ProcessId;
 use lash_protocol_types::SessionId;
 #[path = "process_registry/event_release.rs"]
@@ -35,17 +34,17 @@ pub(crate) mod registration;
 use prune::prune_process_rows_tx;
 use registration::{AppliedRegistration, apply_registration_tx};
 use retention::{filter_tombstoned_process_ids, filter_unregistered_process_ids};
-impl lash_core_execution::FleetFormatStore for PostgresProcessRegistry {
-    fn fleet_format(&self) -> lash_core_execution::FleetFormat {
+impl lash_core_store::store::FleetFormatStore for PostgresProcessRegistry {
+    fn fleet_format(&self) -> lash_core_store::store::FleetFormat {
         self.fence.fleet()
     }
 }
 
 #[async_trait::async_trait]
-impl lash_core_execution::ProcessQuery for PostgresProcessRegistry {
+impl lash_execution_contracts::process::ProcessQuery for PostgresProcessRegistry {
     async fn get_process_by_start_key(
         &self,
-        start_key: &lash_core_execution::StartKey,
+        start_key: &lash_core_store::process_identity::StartKey,
     ) -> Result<Option<ProcessRecord>, PluginError> {
         let mut tx = crate::observed_sql::control("BEGIN", self.pool.begin())
             .await
@@ -83,16 +82,16 @@ impl lash_core_execution::ProcessQuery for PostgresProcessRegistry {
 
     async fn list_processes_page(
         &self,
-        filter: &lash_core_execution::ProcessListFilter,
+        filter: &lash_execution_contracts::process::ProcessListFilter,
         limit: std::num::NonZeroUsize,
-        continuation: Option<lash_core_execution::ProcessRosterCursor>,
-    ) -> Result<lash_core_execution::ProcessRosterRecords, PluginError> {
+        continuation: Option<lash_execution_contracts::process::ProcessRosterCursor>,
+    ) -> Result<lash_execution_contracts::process::ProcessRosterRecords, PluginError> {
         roster::page(self, filter, limit, continuation).await
     }
 
     async fn process_change_bounds(
         &self,
-    ) -> Result<lash_core_execution::ProcessChangeBounds, PluginError> {
+    ) -> Result<lash_execution_contracts::process::ProcessChangeBounds, PluginError> {
         roster::bounds(self).await
     }
 
@@ -165,8 +164,8 @@ impl lash_core_execution::ProcessQuery for PostgresProcessRegistry {
     async fn list_non_terminal_processes_page(
         &self,
         limit: std::num::NonZeroUsize,
-        continuation: Option<lash_core_execution::ProcessRegistryCursor>,
-    ) -> Result<lash_core_execution::NonTerminalProcessPage, PluginError> {
+        continuation: Option<lash_execution_contracts::process::ProcessRegistryCursor>,
+    ) -> Result<lash_execution_contracts::process::NonTerminalProcessPage, PluginError> {
         pages::list_non_terminal_processes_page(self, limit, continuation).await
     }
 
@@ -195,34 +194,37 @@ impl lash_core_execution::ProcessQuery for PostgresProcessRegistry {
 }
 
 #[async_trait::async_trait]
-impl lash_core_execution::ProcessRegistrar for PostgresProcessRegistry {
+impl lash_execution_contracts::process::ProcessRegistrar for PostgresProcessRegistry {
     async fn prepare_process_registration(
         &self,
         registration: ProcessRegistration,
         observers: &[SessionId],
-    ) -> Result<lash_core_execution::PreparedProcessRegistration, PluginError> {
+    ) -> Result<lash_execution_contracts::process::PreparedProcessRegistration, PluginError> {
         let registration =
-            lash_core_execution::runtime::prepare_process_registration(registration)?;
+            lash_execution_contracts::process::prepare_process_registration(registration)?;
         let existing = match registration.start_key.as_ref() {
             Some(key) => {
-                lash_core_execution::ProcessQuery::get_process_by_start_key(self, key).await?
+                lash_execution_contracts::process::ProcessQuery::get_process_by_start_key(self, key)
+                    .await?
             }
             None => None,
         };
         let retained = existing.is_some();
         let process_id = existing.map_or_else(|| self.process_id_mint.mint(), |record| record.id);
-        Ok(lash_core_execution::PreparedProcessRegistration::new(
-            registration,
-            observers.to_vec(),
-            process_id,
-            retained,
-            self.clock.timestamp_ms(),
-        ))
+        Ok(
+            lash_execution_contracts::process::PreparedProcessRegistration::new(
+                registration,
+                observers.to_vec(),
+                process_id,
+                retained,
+                self.clock.timestamp_ms(),
+            ),
+        )
     }
     async fn commit_process_registration(
         &self,
-        prepared: lash_core_execution::PreparedProcessRegistration,
-    ) -> Result<lash_core_execution::ProcessRegistrationReceipt, PluginError> {
+        prepared: lash_execution_contracts::process::PreparedProcessRegistration,
+    ) -> Result<lash_execution_contracts::process::ProcessRegistrationReceipt, PluginError> {
         let (registration, observers, process_id, retained, now) = prepared.into_commit();
         let unprepared = registration.clone();
         let mut tx = begin_guarded(&self.pool, &self.fence)
@@ -241,16 +243,12 @@ impl lash_core_execution::ProcessRegistrar for PostgresProcessRegistry {
         {
             AppliedRegistration::Created(record) => {
                 tx.commit().await.map_err(plugin_sqlx_error)?;
-                Ok(lash_core_execution::ProcessRegistrationReceipt::created(
-                    record,
-                ))
+                Ok(lash_execution_contracts::process::ProcessRegistrationReceipt::created(record))
             }
             AppliedRegistration::Retained { record } => {
                 tx.commit().await.map_err(plugin_sqlx_error)?;
-                lash_core_execution::runtime::check_retained_start(&unprepared, &record)?;
-                Ok(lash_core_execution::ProcessRegistrationReceipt::existing(
-                    record,
-                ))
+                lash_execution_contracts::process::check_retained_start(&unprepared, &record)?;
+                Ok(lash_execution_contracts::process::ProcessRegistrationReceipt::existing(record))
             }
             // The rollback takes the staged row and the observer rows with
             // it, so the loser adds no event and no `change_seq` of its own
@@ -258,10 +256,8 @@ impl lash_core_execution::ProcessRegistrar for PostgresProcessRegistry {
             // winner's process.
             AppliedRegistration::LostRace { winner } => {
                 tx.rollback().await.map_err(plugin_sqlx_error)?;
-                lash_core_execution::runtime::check_retained_start(&unprepared, &winner)?;
-                Ok(lash_core_execution::ProcessRegistrationReceipt::existing(
-                    winner,
-                ))
+                lash_execution_contracts::process::check_retained_start(&unprepared, &winner)?;
+                Ok(lash_execution_contracts::process::ProcessRegistrationReceipt::existing(winner))
             }
         }
     }
@@ -275,7 +271,7 @@ impl lash_core_execution::ProcessRegistrar for PostgresProcessRegistry {
             .await
             .map_err(plugin_store_error)?;
         let mut record = require_process_tx(&mut tx, process_id).await?;
-        match lash_core_execution::runtime::prepare_process_transition(
+        match lash_execution_contracts::process::prepare_process_transition(
             &record,
             ProcessTransition::SetExternalRef(external_ref),
         )? {
@@ -300,7 +296,7 @@ impl lash_core_execution::ProcessRegistrar for PostgresProcessRegistry {
 }
 
 #[async_trait::async_trait]
-impl lash_core_execution::ProcessObserverRegistry for PostgresProcessRegistry {
+impl lash_execution_contracts::process::ProcessObserverRegistry for PostgresProcessRegistry {
     async fn add_observer(
         &self,
         session_id: &SessionId,
@@ -417,7 +413,7 @@ impl lash_core_execution::ProcessObserverRegistry for PostgresProcessRegistry {
     async fn list_observed_by(
         &self,
         session_id: &SessionId,
-        filter: &lash_core_execution::ProcessListFilter,
+        filter: &lash_execution_contracts::process::ProcessListFilter,
     ) -> Result<Vec<ProcessRecord>, PluginError> {
         let rows = crate::observed_sql::query(process_sql().registry_postgres.list_observed.sql())
             .bind(session_id.as_str())
@@ -482,7 +478,7 @@ impl lash_core_execution::ProcessObserverRegistry for PostgresProcessRegistry {
     async fn delete_session_process_state(
         &self,
         session_id: &SessionId,
-    ) -> Result<lash_core_execution::ProcessSessionDeleteReport, PluginError> {
+    ) -> Result<lash_execution_contracts::process::ProcessSessionDeleteReport, PluginError> {
         // The session's scope is not closed here: its `CloseSession` intent
         // is the one owner of that row (FIG-3607 R10, ADR 0108 §5).
         let mut tx = begin_guarded(&self.pool, &self.fence)
@@ -496,23 +492,28 @@ impl lash_core_execution::ProcessObserverRegistry for PostgresProcessRegistry {
                 .map_err(plugin_sqlx_error)?
                 .rows_affected() as usize;
         tx.commit().await.map_err(plugin_sqlx_error)?;
-        Ok(lash_core_execution::ProcessSessionDeleteReport {
-            session_id: session_id.clone(),
-            removed_observer_count,
-        })
+        Ok(
+            lash_execution_contracts::process::ProcessSessionDeleteReport {
+                session_id: session_id.clone(),
+                removed_observer_count,
+            },
+        )
     }
 }
 
 #[async_trait::async_trait]
-impl lash_core_execution::ProcessEventLog for PostgresProcessRegistry {
+impl lash_execution_contracts::process::ProcessEventLog for PostgresProcessRegistry {
     async fn event_by_replay_key(
         &self,
         process_id: &ProcessId,
         replay_key: &str,
         through_sequence: u64,
-    ) -> Result<lash_core_execution::ProcessEventReadOutcome<Option<ProcessEvent>>, PluginError>
-    {
-        use lash_core_execution::{ProcessEventHistoryRetention, ProcessEventReadOutcome};
+    ) -> Result<
+        lash_execution_contracts::process::ProcessEventReadOutcome<Option<ProcessEvent>>,
+        PluginError,
+    > {
+        use lash_execution_contracts::process::ProcessEventHistoryRetention;
+        use lash_execution_contracts::process::ProcessEventReadOutcome;
         let through_sequence = i64::try_from(through_sequence).map_err(|_| {
             PluginError::Session("process event sequence exceeds the SQL cursor range".into())
         })?;
@@ -572,9 +573,11 @@ impl lash_core_execution::ProcessEventLog for PostgresProcessRegistry {
         process_id: &ProcessId,
         after_sequence: u64,
         limit: std::num::NonZeroUsize,
-        mode: lash_core_execution::ProcessEventQueryMode,
+        mode: lash_execution_contracts::process::ProcessEventQueryMode,
     ) -> Result<
-        lash_core_execution::ProcessEventReadOutcome<lash_core_execution::ProcessEventPage>,
+        lash_execution_contracts::process::ProcessEventReadOutcome<
+            lash_execution_contracts::process::ProcessEventPage,
+        >,
         PluginError,
     > {
         let mut tx = crate::observed_sql::control("BEGIN", self.pool.begin())
@@ -590,8 +593,8 @@ impl lash_core_execution::ProcessEventLog for PostgresProcessRegistry {
                     .await
                     .map_err(plugin_sqlx_error)?;
                 return Ok(
-                    lash_core_execution::ProcessEventReadOutcome::NoLongerRetained(
-                        lash_core_execution::ProcessEventHistoryRetention::Pruned {
+                    lash_execution_contracts::process::ProcessEventReadOutcome::NoLongerRetained(
+                        lash_execution_contracts::process::ProcessEventHistoryRetention::Pruned {
                             terminal_label,
                             pruned_at_ms,
                         },
@@ -611,8 +614,8 @@ impl lash_core_execution::ProcessEventLog for PostgresProcessRegistry {
                 .await
                 .map_err(plugin_sqlx_error)?;
             return Ok(
-                lash_core_execution::ProcessEventReadOutcome::NoLongerRetained(
-                    lash_core_execution::ProcessEventHistoryRetention::Released {
+                lash_execution_contracts::process::ProcessEventReadOutcome::NoLongerRetained(
+                    lash_execution_contracts::process::ProcessEventHistoryRetention::Released {
                         released_through,
                     },
                 ),
@@ -627,7 +630,7 @@ impl lash_core_execution::ProcessEventLog for PostgresProcessRegistry {
             .and_then(|value| i64::try_from(value).ok())
             .ok_or_else(|| PluginError::Session("process event page limit is too large".into()))?;
         let page = match mode {
-            lash_core_execution::ProcessEventQueryMode::Full => {
+            lash_execution_contracts::process::ProcessEventQueryMode::Full => {
                 let rows = crate::observed_sql::query(process_sql().event.page_full.sql())
                     .bind(process_id.as_str())
                     .bind(after_sequence)
@@ -640,9 +643,9 @@ impl lash_core_execution::ProcessEventLog for PostgresProcessRegistry {
                     .into_iter()
                     .map(|row| ProcessEvent::decode(&row.get::<String, _>(0), fleet_format))
                     .collect::<Result<Vec<_>, _>>()?;
-                lash_core_execution::ProcessEventPage::from_full_rows(events, limit)
+                lash_execution_contracts::process::ProcessEventPage::from_full_rows(events, limit)
             }
-            lash_core_execution::ProcessEventQueryMode::Lite => {
+            lash_execution_contracts::process::ProcessEventQueryMode::Lite => {
                 let rows = crate::observed_sql::query(process_sql().event.page_lite.sql())
                     .bind(process_id.as_str())
                     .bind(after_sequence)
@@ -653,13 +656,13 @@ impl lash_core_execution::ProcessEventLog for PostgresProcessRegistry {
                 let events = rows
                     .into_iter()
                     .map(|row| {
-                        Ok(lash_core_execution::ProcessEventLite {
+                        Ok(lash_execution_contracts::process::ProcessEventLite {
                             sequence: plugin_u64_from_sql(
                                 "ProcessEventLite",
                                 "sequence",
                                 row.get(0),
                             )?,
-                            kind: lash_core_execution::ProcessEventKind::parse(
+                            kind: lash_execution_contracts::process::ProcessEventKind::parse(
                                 &row.get::<String, _>(1),
                             )
                             .ok_or_else(|| {
@@ -668,13 +671,13 @@ impl lash_core_execution::ProcessEventLog for PostgresProcessRegistry {
                         })
                     })
                     .collect::<Result<Vec<_>, PluginError>>()?;
-                lash_core_execution::ProcessEventPage::from_lite_rows(events, limit)
+                lash_execution_contracts::process::ProcessEventPage::from_lite_rows(events, limit)
             }
         };
         crate::observed_sql::control("COMMIT", tx.commit())
             .await
             .map_err(plugin_sqlx_error)?;
-        Ok(lash_core_execution::ProcessEventReadOutcome::Retained(page))
+        Ok(lash_execution_contracts::process::ProcessEventReadOutcome::Retained(page))
     }
 
     async fn recent_events(
@@ -703,11 +706,12 @@ impl lash_core_execution::ProcessEventLog for PostgresProcessRegistry {
 }
 
 #[async_trait::async_trait]
-impl lash_core_execution::ProcessToolIntents for PostgresProcessRegistry {
+impl lash_execution_contracts::process::ProcessToolIntents for PostgresProcessRegistry {
     async fn admit_tool_intent_submission(
         &self,
-        submission: lash_core_execution::ToolIntentSubmissionRecord,
-    ) -> Result<lash_core_execution::ToolIntentSubmissionAdmission, PluginError> {
+        submission: lash_execution_contracts::tool_intent::ToolIntentSubmissionRecord,
+    ) -> Result<lash_execution_contracts::tool_intent::ToolIntentSubmissionAdmission, PluginError>
+    {
         tool_intent_submission::admit(
             &self.pool,
             &self.fence,
@@ -720,10 +724,10 @@ impl lash_core_execution::ProcessToolIntents for PostgresProcessRegistry {
     async fn complete_tool_intent_submission(
         &self,
         replay_key: &str,
-        outcome: lash_core_execution::ToolIntentExecutionOutcome,
+        outcome: lash_execution_contracts::tool_intent_outcome::ToolIntentExecutionOutcome,
     ) -> Result<
-        lash_core_execution::store::StoreTransition<
-            lash_core_execution::ToolIntentSubmissionRecord,
+        lash_core_store::store::StoreTransition<
+            lash_execution_contracts::tool_intent::ToolIntentSubmissionRecord,
         >,
         PluginError,
     > {
@@ -739,26 +743,26 @@ impl lash_core_execution::ProcessToolIntents for PostgresProcessRegistry {
 }
 
 #[async_trait::async_trait]
-impl lash_core_execution::ProcessRetention for PostgresProcessRegistry {
+impl lash_execution_contracts::process::ProcessRetention for PostgresProcessRegistry {
     async fn release_process_events(
         &self,
         process_id: &ProcessId,
         through: u64,
-    ) -> Result<lash_core_execution::ProcessEventRelease, PluginError> {
+    ) -> Result<lash_execution_contracts::process::ProcessEventRelease, PluginError> {
         event_release::release_process_events(self, process_id, through).await
     }
 
     async fn compact_process_tombstones(
         &self,
         cutoff_epoch_ms: u64,
-        watermark: lash_core_execution::ProjectionWatermark,
+        watermark: lash_execution_contracts::process::ProjectionWatermark,
     ) -> Result<usize, PluginError> {
         let cutoff_epoch_ms = clamp_epoch_ms(cutoff_epoch_ms);
         let max_change_seq = match watermark {
-            lash_core_execution::ProjectionWatermark::UpTo(cursor) => {
+            lash_execution_contracts::process::ProjectionWatermark::UpTo(cursor) => {
                 Some(cursor.store_sequence() as i64)
             }
-            lash_core_execution::ProjectionWatermark::NoProjector => None,
+            lash_execution_contracts::process::ProjectionWatermark::NoProjector => None,
         };
         let mut tx = begin_guarded(&self.pool, &self.fence)
             .await
@@ -802,8 +806,8 @@ impl lash_core_execution::ProcessRetention for PostgresProcessRegistry {
     async fn prune_terminal_processes(
         &self,
         cutoff_epoch_ms: u64,
-        filter: Option<lash_core_execution::ProcessListFilter>,
-        watermark: lash_core_execution::ProjectionWatermark,
+        filter: Option<lash_execution_contracts::process::ProcessListFilter>,
+        watermark: lash_execution_contracts::process::ProjectionWatermark,
     ) -> Result<ProcessPruneReport, PluginError> {
         prune_api::prune_terminal_processes(self, cutoff_epoch_ms, filter, watermark).await
     }
@@ -811,8 +815,8 @@ impl lash_core_execution::ProcessRetention for PostgresProcessRegistry {
     async fn prunable_terminal_processes(
         &self,
         cutoff_epoch_ms: u64,
-        filter: Option<lash_core_execution::ProcessListFilter>,
-        watermark: lash_core_execution::ProjectionWatermark,
+        filter: Option<lash_execution_contracts::process::ProcessListFilter>,
+        watermark: lash_execution_contracts::process::ProjectionWatermark,
     ) -> Result<Vec<ProcessId>, PluginError> {
         prune_api::prunable_terminal_processes(self, cutoff_epoch_ms, filter, watermark).await
     }
@@ -840,14 +844,14 @@ impl lash_core_execution::ProcessRetention for PostgresProcessRegistry {
     async fn abandon_consumer_hold(
         &self,
         key: &str,
-        owner: &lash_core_execution::ScopeId,
+        owner: &lash_core_store::scope_identity::ScopeId,
     ) -> Result<Vec<ProcessId>, PluginError> {
         let mut tx = begin_guarded(&self.pool, &self.fence)
             .await
             .map_err(plugin_store_error)?;
         if matches!(
             owner.opener(),
-            Some(lash_core_execution::EffectOpener::Turn { .. })
+            Some(lash_core_store::effect_opener::EffectOpener::Turn { .. })
         ) {
             parent_end::lock_parent_scope_tx(&mut tx, owner).await?;
             if parent_end::plan_exists_tx(&mut tx, owner).await? {
@@ -881,17 +885,17 @@ impl lash_core_execution::ProcessRetention for PostgresProcessRegistry {
             .collect()
     }
 }
-impl lash_core_execution::ProcessClockRebind for PostgresProcessRegistry {
+impl lash_execution_contracts::process::ProcessClockRebind for PostgresProcessRegistry {
     fn with_runtime_clock(
         &self,
-        clock: Arc<dyn lash_core_execution::Clock>,
+        clock: Arc<dyn lash_core_ids::clock::Clock>,
     ) -> Option<Arc<dyn ProcessRegistry>> {
         Some(Arc::new(self.clone().with_clock(clock)))
     }
 }
 #[cfg(any(test, feature = "testing"))]
 #[async_trait::async_trait]
-impl lash_core_execution::ProcessRegistryTestSupport for PostgresProcessRegistry {
+impl lash_execution_contracts::process::ProcessRegistryTestSupport for PostgresProcessRegistry {
     async fn append_events_for_testing(
         &self,
         process_id: &ProcessId,
@@ -921,10 +925,10 @@ impl lash_core_execution::ProcessRegistryTestSupport for PostgresProcessRegistry
 }
 
 #[async_trait::async_trait]
-impl lash_core_execution::ProcessAuthorityReads for PostgresProcessRegistry {
+impl lash_execution_contracts::backend::ProcessAuthorityReads for PostgresProcessRegistry {
     async fn environment_bytes(
         &self,
-        env: &lash_core_execution::ProcessEnvRef,
+        env: &lash_core_store::process_identity::ProcessEnvRef,
     ) -> Result<Option<Vec<u8>>, StoreError> {
         let row = crate::observed_sql::query(
             process_sql()

@@ -187,7 +187,7 @@ impl CommitBase {
 /// what an owner does before each pass, so a commit whose publication was
 /// lost still reaches the session's subscribers.
 pub(in crate::runtime) async fn announce_head(
-    backend: &crate::Backend,
+    backend: &lash_execution_contracts::backend::Backend,
     live: &dyn LiveReplayStore,
     published: &PublishedHeads,
     session: &SessionId,

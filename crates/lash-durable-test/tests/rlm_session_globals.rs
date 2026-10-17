@@ -50,7 +50,7 @@ fn builder(backend: &lash::Backend) -> lash::LashCoreBuilder {
     )
     .plugin(Arc::new(
         lash::process_controls::SessionProcessAdminPluginFactory::new(
-            lash_core::lifetime::starter,
+            lash_execution_contracts::process::lifetime::starter,
             lash_core::runtime::env_policy::policy::from_run(|_| Ok(Vec::new())),
         ),
     ))

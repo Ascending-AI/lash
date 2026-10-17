@@ -46,10 +46,10 @@ use std::time::Duration;
 
 use lash::workflow::{ReplaySegments, SegmentAnswer, SegmentReplay, Unreplayable};
 use lash_core::facade_support::RecordedProcessStep;
-use lash_core_execution::StoreSet;
 use lash_durable::runner::Activation;
 use lash_durable::{ActorKey, ActorState, DurableStore};
 use lash_durable_test::{Cut, Fault, Matrix, Scenario, SimClock, SimNodes, SimNodesConfig};
+use lash_execution_contracts::backend::StoreSet;
 use lash_protocol_types::sync::MutexExt as _;
 
 /// `counted()`: a draw it branches on, a sleep, a clock read and a second
@@ -253,12 +253,12 @@ impl Counted {
         let settings = recorded.observing(observe).into_engine_settings();
         core.processes()
             .start(
-                lash_core::ProcessStartRequest::engine(
+                lash_execution_contracts::process::ProcessStartRequest::engine(
                     kind.to_owned(),
                     payload,
-                    lash_core::EngineLaunch::new(env_ref, Some(settings)),
-                    lash_core::ProcessOriginator::host(),
-                    lash_core::LifetimeDecision::Detached,
+                    lash_execution_contracts::process::EngineLaunch::new(env_ref, Some(settings)),
+                    lash_execution_contracts::process::ProcessOriginator::host(),
+                    lash_execution_contracts::process::LifetimeDecision::Detached,
                 ),
                 core.effect_host(),
             )
@@ -293,14 +293,17 @@ impl Counted {
             .await
             .into_iter()
             .filter_map(|fact| match fact {
-                lash_core::ProcessLifecycleFact::Ran(ran) => Some(ran.ran),
+                lash_execution_contracts::process::ProcessLifecycleFact::Ran(ran) => Some(ran.ran),
                 _ => None,
             })
             .collect()
     }
 
     /// Every fact the process committed, in order.
-    async fn facts(&self, process: &lash_core::ProcessId) -> Vec<lash_core::ProcessLifecycleFact> {
+    async fn facts(
+        &self,
+        process: &lash_core::ProcessId,
+    ) -> Vec<lash_execution_contracts::process::ProcessLifecycleFact> {
         let read = self
             .core()
             .processes()
@@ -433,7 +436,12 @@ impl Counted {
             .facts(process)
             .await
             .into_iter()
-            .filter(|fact| matches!(fact, lash_core::ProcessLifecycleFact::Succeeded(_)))
+            .filter(|fact| {
+                matches!(
+                    fact,
+                    lash_execution_contracts::process::ProcessLifecycleFact::Succeeded(_)
+                )
+            })
             .count();
         let expected = usize::from(self.plan == Plan::Carried);
         if carries != expected {
@@ -483,7 +491,7 @@ impl Counted {
             .await
             .expect("the process reads")
             .expect("the process is retained");
-        let lash_core::ProcessInput::Engine {
+        let lash_execution_contracts::process::ProcessInput::Engine {
             payload, launch, ..
         } = &record.input
         else {
@@ -774,7 +782,11 @@ impl Counted {
         let report = self
             .core()
             .processes()
-            .prune(cutoff, None, lash_core::ProjectionWatermark::NoProjector)
+            .prune(
+                cutoff,
+                None,
+                lash_execution_contracts::process::ProjectionWatermark::NoProjector,
+            )
             .await
             .expect("the process prunes");
         let mut violations = Vec::new();

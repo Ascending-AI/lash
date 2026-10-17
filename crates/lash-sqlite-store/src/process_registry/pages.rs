@@ -4,7 +4,7 @@ const CURSOR_BACKEND: &str = "sqlite";
 
 pub(super) async fn count_non_terminal_processes(
     registry: &SqliteProcessRegistry,
-) -> Result<usize, lash_core_execution::PluginError> {
+) -> Result<usize, lash_execution_contracts::plugin_error::PluginError> {
     registry
         .conn
         .call(|conn| {
@@ -20,7 +20,7 @@ pub(super) async fn count_non_terminal_processes(
                     )
                     .map_err(process_sqlite_error)?;
                 usize::try_from(count).map_err(|_| {
-                    lash_core_execution::PluginError::Session(format!(
+                    lash_execution_contracts::plugin_error::PluginError::Session(format!(
                         "SQLite non-terminal process count {count} does not fit usize"
                     ))
                 })
@@ -32,7 +32,7 @@ pub(super) async fn count_non_terminal_processes(
 
 pub(super) async fn collect_non_terminal_records(
     registry: &SqliteProcessRegistry,
-) -> Result<Vec<ProcessRecord>, lash_core_execution::PluginError> {
+) -> Result<Vec<ProcessRecord>, lash_execution_contracts::plugin_error::PluginError> {
     registry
         .conn
         .call(|conn| {
@@ -58,16 +58,19 @@ pub(super) async fn collect_non_terminal_records(
 pub(super) async fn list_non_terminal_processes_page(
     registry: &SqliteProcessRegistry,
     limit: std::num::NonZeroUsize,
-    continuation: Option<lash_core_execution::ProcessRegistryCursor>,
-) -> Result<lash_core_execution::NonTerminalProcessPage, lash_core_execution::PluginError> {
+    continuation: Option<lash_execution_contracts::process::ProcessRegistryCursor>,
+) -> Result<
+    lash_execution_contracts::process::NonTerminalProcessPage,
+    lash_execution_contracts::plugin_error::PluginError,
+> {
     let page_size = limit
         .get()
-        .min(lash_core_execution::MAX_NON_TERMINAL_PROCESS_PAGE_SIZE);
+        .min(lash_execution_contracts::process::MAX_NON_TERMINAL_PROCESS_PAGE_SIZE);
     if let Some(cursor) = continuation.as_ref()
         && cursor.backend() != CURSOR_BACKEND
     {
         return Err(
-            lash_core_execution::PluginError::ProcessRegistryCursorBackendMismatch {
+            lash_execution_contracts::plugin_error::PluginError::ProcessRegistryCursorBackendMismatch {
                 expected: CURSOR_BACKEND.to_string(),
                 actual: cursor.backend().to_string(),
             },
@@ -96,7 +99,7 @@ pub(super) async fn list_non_terminal_processes_page(
                     {
                         Some(process_id) => process_id,
                         None => {
-                            return Ok(lash_core_execution::NonTerminalProcessPage {
+                            return Ok(lash_execution_contracts::process::NonTerminalProcessPage {
                                 records: Vec::new(),
                                 continuation: None,
                             });
@@ -133,13 +136,13 @@ pub(super) async fn list_non_terminal_processes_page(
                     reason = "`has_more` is only true when `records` held more than `limit` rows, so the truncated page is non-empty"
                 )]
                 let continuation = has_more.then(|| {
-                    lash_core_execution::ProcessRegistryCursor::new(
+                    lash_execution_contracts::process::ProcessRegistryCursor::new(
                         CURSOR_BACKEND,
                         records.last().expect("non-empty bounded page").id.clone(),
                         through_process_id,
                     )
                 });
-                Ok(lash_core_execution::NonTerminalProcessPage {
+                Ok(lash_execution_contracts::process::NonTerminalProcessPage {
                     records,
                     continuation,
                 })

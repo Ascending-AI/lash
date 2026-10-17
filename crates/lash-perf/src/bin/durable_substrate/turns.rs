@@ -529,7 +529,7 @@ pub async fn cell(run: &Run<'_>, case: &Case) -> Result<()> {
 /// occupancy is the FIG-5933 SQLite instrument, not commit wall time (which
 /// includes queueing). Sync calls can be joined to the stderr window markers.
 pub async fn counted(run: &Run<'_>, case: &Case) -> Result<()> {
-    use lash_core::perf_witness::latency::Collector;
+    use lash_core_ids::perf_witness::latency::Collector;
     use lash_core_store::checkpoint_graph::NodeKind;
 
     const LANES: usize = 16;

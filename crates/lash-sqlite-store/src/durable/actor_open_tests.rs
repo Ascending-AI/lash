@@ -133,7 +133,7 @@ async fn actor_begin_reads_one_snapshot_of_cancellation() {
     world.ask(request.clone()).await;
     world.append("law.note").await;
     world.append("law.note").await;
-    let (answer, receipt) = lash_core_execution::facade_support::sql::collect(
+    let (answer, receipt) = lash_core_ids::operational_metrics::sql::collect(
         "actor.begin",
         "sqlite",
         world.store.begin(&world.actor, world.epoch),

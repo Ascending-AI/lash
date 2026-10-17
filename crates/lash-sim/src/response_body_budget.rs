@@ -63,7 +63,11 @@ enum Witness {
     Report,
 }
 
-async fn witness(stores: Arc<dyn lash_core::StoreSet>, lane: &str, witness: Witness) {
+async fn witness(
+    stores: Arc<dyn lash_execution_contracts::backend::StoreSet>,
+    lane: &str,
+    witness: Witness,
+) {
     for streamed in [false, true] {
         for status in [200, 429] {
             for excess in [false, true] {
@@ -177,14 +181,14 @@ async fn witness(stores: Arc<dyn lash_core::StoreSet>, lane: &str, witness: Witn
 
 #[tokio::test]
 async fn response_body_budget_current_turn_path_sqlite_memory_and_file() {
-    let memory: Arc<dyn lash_core::StoreSet> = Arc::new(
+    let memory: Arc<dyn lash_execution_contracts::backend::StoreSet> = Arc::new(
         lash_sqlite_store::SqliteStoreSet::memory()
             .await
             .expect("open a memory store set"),
     );
     witness(memory, "sqlite-memory", Witness::Refusal).await;
     let root = tempfile::tempdir().unwrap();
-    let file: Arc<dyn lash_core::StoreSet> = Arc::new(
+    let file: Arc<dyn lash_execution_contracts::backend::StoreSet> = Arc::new(
         lash_sqlite_store::SqliteStoreSet::open(
             root.path().join("lash.db"),
             lash_sqlite_store::SqliteSynchronous::Normal,
@@ -200,7 +204,7 @@ async fn response_body_budget_current_turn_path_sqlite_memory_and_file() {
 #[tokio::test]
 #[ignore = "FIG-5334: a turn's report through send() carries no errors and no failed model call"]
 async fn a_refused_response_s_report_names_its_typed_code_on_sqlite_memory() {
-    let memory: Arc<dyn lash_core::StoreSet> = Arc::new(
+    let memory: Arc<dyn lash_execution_contracts::backend::StoreSet> = Arc::new(
         lash_sqlite_store::SqliteStoreSet::memory()
             .await
             .expect("open a memory store set"),

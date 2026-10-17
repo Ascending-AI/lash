@@ -3,7 +3,9 @@
 //! production store traits carry none.
 
 use crate::*;
-use lash_core_execution::store::{DecodedRowCounts, GraphRowCorruption, StoreTestSupport};
+use lash_core_store::store::DecodedRowCounts;
+use lash_core_store::store::GraphRowCorruption;
+use lash_core_store::store::StoreTestSupport;
 use std::sync::atomic::Ordering;
 
 #[async_trait::async_trait]
@@ -17,7 +19,7 @@ impl StoreTestSupport for PostgresStore {
 
     async fn corrupt_graph_row_for_testing(
         &self,
-        node_id: &lash_core_execution::NodeId,
+        node_id: &lash_protocol_types::NodeId,
         corruption: GraphRowCorruption,
     ) -> Result<(), StoreError> {
         self.windows.forget_all();
@@ -105,7 +107,7 @@ impl StoreTestSupport for PostgresStore {
     async fn force_fork_lineage_for_testing(
         &self,
         session_id: &SessionId,
-        ancestor_node_id: &lash_core_execution::NodeId,
+        ancestor_node_id: &lash_protocol_types::NodeId,
     ) -> Result<(), StoreError> {
         self.windows.forget_all();
         let result = sqlx::query(
@@ -219,19 +221,19 @@ impl PostgresStore {
     /// Shift transaction admission time independently of record timestamps.
     pub fn with_lease_clock_for_testing(
         mut self,
-        clock: Arc<dyn lash_core_execution::Clock>,
+        clock: Arc<dyn lash_core_ids::clock::Clock>,
     ) -> Self {
         self.lease_clock_for_testing = Some(clock);
         self
     }
 
     /// Stand this store's writers up on `fleet_format` — typically one
-    /// carrying a pin table via [`lash_core_execution::FleetFormat::with_writer_pins`]
+    /// carrying a pin table via [`lash_core_store::store::FleetFormat::with_writer_pins`]
     /// — so a test proves they emit the version `F` assigns rather than the
     /// build constant they would stamp anyway (FIG-3796).
     pub fn with_fleet_format_for_testing(
         mut self,
-        fleet_format: lash_core_execution::FleetFormat,
+        fleet_format: lash_core_store::store::FleetFormat,
     ) -> Self {
         self.fence = self.fence.standing_on(fleet_format);
         self
@@ -240,7 +242,7 @@ impl PostgresStore {
 
 pub(crate) async fn set_transaction_lease_clock_for_testing(
     tx: &mut sqlx::Transaction<'_, sqlx::Postgres>,
-    clock: Option<&Arc<dyn lash_core_execution::Clock>>,
+    clock: Option<&Arc<dyn lash_core_ids::clock::Clock>>,
 ) -> Result<(), StoreError> {
     if let Some(clock) = clock {
         sqlx::query("SELECT set_config('lash.test_lease_epoch_ms', $1, true)")

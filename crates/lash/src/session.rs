@@ -102,7 +102,7 @@ impl SessionCreation {
 
 struct ResolvedSessionStore {
     store: lash_core::store::SessionStore,
-    catalog: Arc<dyn lash_core::DeploymentStore>,
+    catalog: Arc<dyn lash_execution_contracts::deployment::DeploymentStore>,
 }
 
 impl SessionBuilder {
@@ -243,7 +243,11 @@ impl SessionBuilder {
         let mut config = lash_core::PersistedSessionConfig::from_policy(&policy);
         if let Some(plan) = prompt_plan {
             plan.validate()
-                .map_err(|error| lash_core::CoreConfigRefusal::PromptPlanRefused { error })
+                .map_err(|error| {
+                    lash_execution_contracts::config_error::CoreConfigRefusal::PromptPlanRefused {
+                        error,
+                    }
+                })
                 .map_err(lash_core::CoreConfigOwner::creation_refusal)
                 .map_err(lash_core::SessionError::SessionConfigRefused)?;
             config.prompt_plan = plan;
@@ -365,23 +369,23 @@ impl SessionBuilder {
         let policy = spec
             .resolve_root(self.core.env.core.providers.models.as_ref())
             .map_err(|error| match error {
-                lash_core::facade_support::SpecResolveError::Model(error) => {
+                lash_execution_contracts::session_spec::SpecResolveError::Model(error) => {
                     EmbedError::LlmProfileUnknown(error)
                 }
-                lash_core::facade_support::SpecResolveError::ReasoningWithoutLlmProfile
-                | lash_core::facade_support::SpecResolveError::RootWithoutLlmProfile => {
+                lash_execution_contracts::session_spec::SpecResolveError::ReasoningWithoutLlmProfile
+                | lash_execution_contracts::session_spec::SpecResolveError::RootWithoutLlmProfile => {
                     EmbedError::MissingLlmProfile
                 }
-                lash_core::facade_support::SpecResolveError::RootWithoutTurnBudget => {
+                lash_execution_contracts::session_spec::SpecResolveError::RootWithoutTurnBudget => {
                     EmbedError::MissingTurnBudget
                 }
-                lash_core::facade_support::SpecResolveError::RootWithoutMaxToolCalls => {
+                lash_execution_contracts::session_spec::SpecResolveError::RootWithoutMaxToolCalls => {
                     EmbedError::MissingMaxToolCalls
                 }
-                lash_core::facade_support::SpecResolveError::RootWithoutNoProgressBudget => {
+                lash_execution_contracts::session_spec::SpecResolveError::RootWithoutNoProgressBudget => {
                     EmbedError::MissingNoProgressBudget
                 }
-                lash_core::facade_support::SpecResolveError::Reasoning(error) => {
+                lash_execution_contracts::session_spec::SpecResolveError::Reasoning(error) => {
                     EmbedError::ReasoningRefused(error)
                 }
             })?;
@@ -522,7 +526,7 @@ pub(crate) async fn recorded_parent_session_id(
 /// [`StoreError::SessionDeleted`](lash_core::StoreError::SessionDeleted). Every
 /// verb but [`SessionBuilder::create`] reaches a session this way (FIG-4112).
 pub(crate) async fn resolve_existing_session(
-    catalog: &Arc<dyn lash_core::DeploymentStore>,
+    catalog: &Arc<dyn lash_execution_contracts::deployment::DeploymentStore>,
     session_id: &SessionId,
 ) -> Result<lash_core::store::SessionStore> {
     match catalog

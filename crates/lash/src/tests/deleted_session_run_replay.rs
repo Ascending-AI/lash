@@ -50,7 +50,7 @@ impl Held {
 /// ends at its tombstone, the model is never asked again, and a send
 /// after the close is refused as the deleted session's.
 async fn a_run_in_flight_when_its_session_is_deleted_ends_typed(
-    stores: Arc<dyn lash_core::StoreSet>,
+    stores: Arc<dyn lash_execution_contracts::backend::StoreSet>,
 ) -> Result<()> {
     const ID: &str = "deleted-session-run";
     let held = Arc::new(Held::default());

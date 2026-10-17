@@ -49,8 +49,8 @@ impl StandardProtocolConfig {
 pub(crate) fn tool_presentation_refused(
     config: &StandardProtocolConfig,
     refusal: &PresentationRefusal,
-) -> lash_core::plugin::PluginError {
-    lash_core::plugin::PluginError::ToolPresentationRefused {
+) -> lash_execution_contracts::plugin_error::PluginError {
+    lash_execution_contracts::plugin_error::PluginError::ToolPresentationRefused {
         plugin_id: STANDARD_PROTOCOL_PLUGIN_ID.to_string(),
         presenter: config.tool_presenter.presenter().id().to_owned(),
         code: refusal.code().to_owned(),

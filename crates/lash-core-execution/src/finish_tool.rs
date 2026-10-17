@@ -86,7 +86,8 @@ impl ToolProvider for FinishToolProvider {
     fn tool_manifests(
         &self,
         _config: &crate::OwnerConfigView,
-    ) -> std::result::Result<Vec<ToolManifest>, crate::PluginError> {
+    ) -> std::result::Result<Vec<ToolManifest>, lash_execution_contracts::plugin_error::PluginError>
+    {
         Ok(self.tools.iter().map(ToolDefinition::manifest).collect())
     }
 

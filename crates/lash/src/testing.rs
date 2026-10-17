@@ -6,8 +6,14 @@ pub use lash_core::facade_support::frame_node_id;
 /// and reads the typed records the core emitted.
 pub use lash_core::testing::RecordingTraceSink;
 
+/// A held process for host tests: an engine input of [`HeldProcessEngine`]'s
+/// kind, a registration of one under the fixture environment, and the plugin
+/// factory that contributes the engine to a host's core. A held process runs
+/// until it is cancelled.
+pub use lash_core::testing::HeldProcessEngine;
 /// Opt in to implementing runtime service substitutes in tests.
 pub use lash_core::testing::RuntimeService;
+pub use lash_core::testing::process_engine_plugin_fixture;
 /// Prompt composition over a cut a test states, outside any model call: the
 /// runtime builds a call's cut and composes it only at the call's admission
 /// (ADR 0133).
@@ -19,14 +25,6 @@ pub use lash_core::testing::run_tool_granted;
 /// One backend with some of its ports decorated by a test that observes or
 /// faults them: the decorated backend is still one substrate (ADR 0104, B2).
 pub use lash_core::testing::runtime_helpers::LayeredBackend;
-/// A held process for host tests: an engine input of [`HeldProcessEngine`]'s
-/// kind, a registration of one under the fixture environment, and the plugin
-/// factory that contributes the engine to a host's core. A held process runs
-/// until it is cancelled.
-pub use lash_core::testing::{
-    HeldProcessEngine, held_engine_input, held_engine_registration, process_engine_plugin_fixture,
-    process_execution_env_fixture,
-};
 pub use lash_core::testing::{
     MockSessionManager, TestClock, TestProvider, TestProviderBuilder, mock_attempt_context,
     mock_attempt_context_with_execution_binding, test_code_protocol_factories,
@@ -37,6 +35,9 @@ pub use lash_core::testing::{
     single_llm_profile_registry, standard_test_llm_profiles, test_llm_profile_config,
     test_llm_profile_metadata,
 };
+pub use lash_execution_contracts::testing::held_engine_input;
+pub use lash_execution_contracts::testing::held_engine_registration;
+pub use lash_execution_contracts::testing::process_execution_env_fixture;
 
 /// [`RuntimeExecutionContext`](crate::tools::RuntimeExecutionContext)
 /// constructors for host tests that shift context-bound execution —
@@ -245,10 +246,12 @@ impl<T: serde::de::DeserializeOwned> AdminFixtureOutcome
                 })?,
                 events: events
                     .into_iter()
-                    .map(|value| lash_core::facade_support::PluginOwned {
-                        plugin_id: plugin_id.clone(),
-                        value,
-                    })
+                    .map(
+                        |value| lash_execution_contracts::session_types::PluginOwned {
+                            plugin_id: plugin_id.clone(),
+                            value,
+                        },
+                    )
                     .collect(),
                 pending_turn_inputs,
             }),

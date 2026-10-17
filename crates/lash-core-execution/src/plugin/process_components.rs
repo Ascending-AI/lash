@@ -269,7 +269,8 @@ impl ProcessComponentSpec {
     pub fn recipe(
         self,
         owner: &str,
-    ) -> std::result::Result<ProcessRecipe, crate::plugin::PluginError> {
+    ) -> std::result::Result<ProcessRecipe, lash_execution_contracts::plugin_error::PluginError>
+    {
         if let Some(error) = self.errors.first() {
             return Err(error.clone());
         }
@@ -1321,7 +1322,10 @@ impl ProcessComponentFactory for StaticProcessComponent {
             })
     }
 
-    fn recipe(self: Arc<Self>) -> std::result::Result<ProcessRecipe, crate::plugin::PluginError> {
+    fn recipe(
+        self: Arc<Self>,
+    ) -> std::result::Result<ProcessRecipe, lash_execution_contracts::plugin_error::PluginError>
+    {
         self.spec.clone().recipe(self.declaration.id.as_str())
     }
 }

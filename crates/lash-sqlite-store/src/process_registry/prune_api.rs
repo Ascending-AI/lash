@@ -7,12 +7,14 @@ pub(super) async fn prunable_terminal_processes(
     registry: &SqliteProcessRegistry,
     cutoff_epoch_ms: u64,
     filter: Option<ProcessListFilter>,
-    watermark: lash_core_execution::ProjectionWatermark,
-) -> Result<Vec<ProcessId>, lash_core_execution::PluginError> {
+    watermark: lash_execution_contracts::process::ProjectionWatermark,
+) -> Result<Vec<ProcessId>, lash_execution_contracts::plugin_error::PluginError> {
     let cutoff = i64::try_from(cutoff_epoch_ms).unwrap_or(i64::MAX);
     let max_change_seq = match watermark {
-        lash_core_execution::ProjectionWatermark::UpTo(cursor) => Some(cursor.store_sequence()),
-        lash_core_execution::ProjectionWatermark::NoProjector => None,
+        lash_execution_contracts::process::ProjectionWatermark::UpTo(cursor) => {
+            Some(cursor.store_sequence())
+        }
+        lash_execution_contracts::process::ProjectionWatermark::NoProjector => None,
     };
     registry
         .conn
@@ -37,13 +39,15 @@ pub(super) async fn prune_terminal_processes(
     registry: &SqliteProcessRegistry,
     cutoff_epoch_ms: u64,
     filter: Option<ProcessListFilter>,
-    watermark: lash_core_execution::ProjectionWatermark,
-) -> Result<ProcessPruneReport, lash_core_execution::PluginError> {
+    watermark: lash_execution_contracts::process::ProjectionWatermark,
+) -> Result<ProcessPruneReport, lash_execution_contracts::plugin_error::PluginError> {
     let cutoff = i64::try_from(cutoff_epoch_ms).unwrap_or(i64::MAX);
     let pruned_at_ms = registry.clock.timestamp_ms() as i64;
     let max_change_seq = match watermark {
-        lash_core_execution::ProjectionWatermark::UpTo(cursor) => Some(cursor.store_sequence()),
-        lash_core_execution::ProjectionWatermark::NoProjector => None,
+        lash_execution_contracts::process::ProjectionWatermark::UpTo(cursor) => {
+            Some(cursor.store_sequence())
+        }
+        lash_execution_contracts::process::ProjectionWatermark::NoProjector => None,
     };
     registry
         .conn
@@ -63,12 +67,12 @@ pub(super) async fn prune_terminal_processes(
 }
 
 #[async_trait::async_trait]
-impl lash_core_execution::ProcessRetention for SqliteProcessRegistry {
+impl lash_execution_contracts::process::ProcessRetention for SqliteProcessRegistry {
     async fn compact_process_tombstones(
         &self,
         cutoff_epoch_ms: u64,
-        watermark: lash_core_execution::ProjectionWatermark,
-    ) -> Result<usize, lash_core_execution::PluginError> {
+        watermark: lash_execution_contracts::process::ProjectionWatermark,
+    ) -> Result<usize, lash_execution_contracts::plugin_error::PluginError> {
         let max_change_seq = crate::process_registry_change::max_change_sequence(watermark);
         let cutoff_epoch_ms = i64::try_from(cutoff_epoch_ms).unwrap_or(i64::MAX);
         self.conn
@@ -89,7 +93,10 @@ impl lash_core_execution::ProcessRetention for SqliteProcessRegistry {
         &self,
         process_id: &ProcessId,
         through: u64,
-    ) -> Result<lash_core_execution::ProcessEventRelease, lash_core_execution::PluginError> {
+    ) -> Result<
+        lash_execution_contracts::process::ProcessEventRelease,
+        lash_execution_contracts::plugin_error::PluginError,
+    > {
         self.release_process_events_impl(process_id, through).await
     }
 
@@ -97,8 +104,8 @@ impl lash_core_execution::ProcessRetention for SqliteProcessRegistry {
         &self,
         cutoff_epoch_ms: u64,
         filter: Option<ProcessListFilter>,
-        watermark: lash_core_execution::ProjectionWatermark,
-    ) -> Result<ProcessPruneReport, lash_core_execution::PluginError> {
+        watermark: lash_execution_contracts::process::ProjectionWatermark,
+    ) -> Result<ProcessPruneReport, lash_execution_contracts::plugin_error::PluginError> {
         prune_api::prune_terminal_processes(self, cutoff_epoch_ms, filter, watermark).await
     }
 
@@ -106,8 +113,8 @@ impl lash_core_execution::ProcessRetention for SqliteProcessRegistry {
         &self,
         cutoff_epoch_ms: u64,
         filter: Option<ProcessListFilter>,
-        watermark: lash_core_execution::ProjectionWatermark,
-    ) -> Result<Vec<ProcessId>, lash_core_execution::PluginError> {
+        watermark: lash_execution_contracts::process::ProjectionWatermark,
+    ) -> Result<Vec<ProcessId>, lash_execution_contracts::plugin_error::PluginError> {
         prune_api::prunable_terminal_processes(self, cutoff_epoch_ms, filter, watermark).await
     }
 
@@ -115,7 +122,7 @@ impl lash_core_execution::ProcessRetention for SqliteProcessRegistry {
         &self,
         process_id: &ProcessId,
         key: &str,
-    ) -> Result<(), lash_core_execution::PluginError> {
+    ) -> Result<(), lash_execution_contracts::plugin_error::PluginError> {
         let process_id = process_id.to_string();
         let key = key.to_string();
         self.conn
@@ -137,8 +144,8 @@ impl lash_core_execution::ProcessRetention for SqliteProcessRegistry {
     async fn abandon_consumer_hold(
         &self,
         key: &str,
-        owner: &lash_core_execution::ScopeId,
-    ) -> Result<Vec<ProcessId>, lash_core_execution::PluginError> {
+        owner: &lash_core_store::scope_identity::ScopeId,
+    ) -> Result<Vec<ProcessId>, lash_execution_contracts::plugin_error::PluginError> {
         let key = key.to_string();
         let owner = owner.clone();
         let owner_kind = owner.storage_kind();
@@ -151,7 +158,7 @@ impl lash_core_execution::ProcessRetention for SqliteProcessRegistry {
             .write_flow(move |tx| {
                 if matches!(
                     owner.opener(),
-                    Some(lash_core_execution::EffectOpener::Turn { .. })
+                    Some(lash_core_store::effect_opener::EffectOpener::Turn { .. })
                 ) {
                     match super::parent_end::plan_exists_conn(tx, &owner) {
                         Ok(true) => return Ok(tx_outcome(Ok(Vec::new()))),
@@ -183,7 +190,7 @@ impl lash_core_execution::ProcessRetention for SqliteProcessRegistry {
         ids.iter()
             .map(|id| {
                 ProcessId::parse(id).map_err(|error| {
-                    lash_core_execution::PluginError::Session(format!(
+                    lash_execution_contracts::plugin_error::PluginError::Session(format!(
                         "a held process row names an invalid id: {error}"
                     ))
                 })

@@ -24,7 +24,10 @@
 
 use std::sync::Arc;
 
-use lash_core::{EngineState, EngineStateFormat, EngineStateRefusal, ProcessId};
+use lash_core::ProcessId;
+use lash_execution_contracts::process::EngineState;
+use lash_execution_contracts::process::EngineStateFormat;
+use lash_execution_contracts::process::EngineStateRefusal;
 use lash_kernel_doc::{Document, DocumentId, FunctionRegistry, KernelVersion, validate_document};
 use lash_kernel_migrate::{DocumentRefusal, Rewritten, migration_from};
 
@@ -221,7 +224,7 @@ fn retried(message: impl std::fmt::Display) -> EngineStateRefusal {
 }
 
 #[async_trait::async_trait]
-impl lash_core::EngineStateMigration for KernelStateMigration {
+impl lash_execution_contracts::process::EngineStateMigration for KernelStateMigration {
     fn carries(&self) -> Vec<EngineStateFormat> {
         self.engine
             .writes
@@ -465,7 +468,7 @@ pub struct KernelMigrationSurvey {
 #[derive(Debug, thiserror::Error)]
 pub enum KernelMigrationSurveyError {
     #[error(transparent)]
-    Processes(#[from] lash_core::PluginError),
+    Processes(#[from] lash_execution_contracts::plugin_error::PluginError),
     #[error(transparent)]
     State(#[from] lash_core::durable_port::DurableError),
     #[error(transparent)]
@@ -485,18 +488,18 @@ pub enum KernelMigrationSurveyError {
 ///
 /// [`KernelMigrationSurveyError`]: a store did not answer.
 pub async fn survey_kernel_processes(
-    backend: &lash_core::Backend,
+    backend: &lash_execution_contracts::backend::Backend,
     functions: &FunctionRegistry,
 ) -> Result<KernelMigrationSurvey, KernelMigrationSurveyError> {
     const PAGE: std::num::NonZeroUsize = std::num::NonZeroUsize::MIN.saturating_add(99);
     let documents = KernelDocuments::new(backend.module_artifacts());
     let registry = backend.process_registry();
-    let filter = lash_core::ProcessListFilter {
-        status: lash_core::ProcessStatusFilter::any_of([
-            lash_core::ProcessStatus::Running,
-            lash_core::ProcessStatus::Waiting,
+    let filter = lash_execution_contracts::process::ProcessListFilter {
+        status: lash_execution_contracts::process::ProcessStatusFilter::any_of([
+            lash_execution_contracts::process::ProcessStatus::Running,
+            lash_execution_contracts::process::ProcessStatus::Waiting,
         ]),
-        ..lash_core::ProcessListFilter::default()
+        ..lash_execution_contracts::process::ProcessListFilter::default()
     };
     let mut survey = KernelMigrationSurvey::default();
     let mut continuation = None;
@@ -505,7 +508,9 @@ pub async fn survey_kernel_processes(
             .list_processes_page(&filter, PAGE, continuation)
             .await?;
         for record in page.records {
-            let lash_core::ProcessInput::Engine { kind, .. } = record.input.as_ref() else {
+            let lash_execution_contracts::process::ProcessInput::Engine { kind, .. } =
+                record.input.as_ref()
+            else {
                 continue;
             };
             if kind != super::LASH_VM_ENGINE_KIND {

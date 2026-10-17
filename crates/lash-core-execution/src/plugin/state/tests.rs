@@ -5,8 +5,10 @@ use crate::plugin::PluginSessionRequest;
 /// the restriction of the host handed to a plugin, including trait forwards.
 #[test]
 fn plugin_view_cannot_capture_foreign_namespace() {
-    use crate::plugin::{ExecutionState, PluginError, SessionAuthorityContext};
+    use crate::plugin::ExecutionState;
+    use crate::plugin::SessionAuthorityContext;
     use lash_core_store::session_state::SessionPluginStateSource;
+    use lash_execution_contracts::plugin_error::PluginError;
     use lash_protocol_types::sync::MutexExt;
 
     #[derive(Clone)]
@@ -32,7 +34,10 @@ fn plugin_view_cannot_capture_foreign_namespace() {
         }
         fn recipe(
             self: Arc<Self>,
-        ) -> std::result::Result<crate::plugin::PluginRecipe, crate::plugin::PluginError> {
+        ) -> std::result::Result<
+            crate::plugin::PluginRecipe,
+            lash_execution_contracts::plugin_error::PluginError,
+        > {
             let mut reg = crate::plugin::PluginRegistrar::<Probe>::new(
                 crate::plugin::PluginFactory::id(self.as_ref()),
             );
@@ -63,7 +68,7 @@ fn plugin_view_cannot_capture_foreign_namespace() {
     impl Probe {
         fn declare(
             _reg: &mut crate::plugin::PluginRegistrar<Self>,
-        ) -> std::result::Result<(), crate::plugin::PluginError> {
+        ) -> std::result::Result<(), lash_execution_contracts::plugin_error::PluginError> {
             Ok(())
         }
     }
@@ -309,7 +314,10 @@ impl crate::PluginFactory for FormatProbe {
         }
     }
 
-    fn recipe(self: Arc<Self>) -> Result<crate::plugin::PluginRecipe, crate::PluginError> {
+    fn recipe(
+        self: Arc<Self>,
+    ) -> Result<crate::plugin::PluginRecipe, lash_execution_contracts::plugin_error::PluginError>
+    {
         let id = crate::PluginFactory::id(self.as_ref());
         Ok(crate::plugin::PluginRecipe::new(
             id,
@@ -344,7 +352,7 @@ impl crate::SessionPlugin for FormatProbe {
     fn session_ready(
         &self,
         _: crate::plugin::SessionReadyContext,
-    ) -> Result<(), crate::PluginError> {
+    ) -> Result<(), lash_execution_contracts::plugin_error::PluginError> {
         self.0.fetch_add(1, std::sync::atomic::Ordering::SeqCst);
         Ok(())
     }
@@ -375,13 +383,16 @@ fn plugin_formats_refuse_before_callbacks_and_preserve_bytes() {
     );
     assert_eq!(rmp_serde::to_vec_named(&snapshot).unwrap(), bytes);
     let refusal = result.err().unwrap();
-    let crate::PluginError::Format(expected) = refusal else {
+    let lash_execution_contracts::plugin_error::PluginError::Format(expected) = refusal else {
         panic!("typed format refusal");
     };
     assert_eq!(expected.stored.get(), u32::MAX);
     assert_eq!(expected.namespace, crate::FormatNamespace::State);
-    let plugin: crate::PluginError = rmp_serde::from_slice(
-        &rmp_serde::to_vec_named(&crate::PluginError::Format(expected.clone())).unwrap(),
+    let plugin: lash_execution_contracts::plugin_error::PluginError = rmp_serde::from_slice(
+        &rmp_serde::to_vec_named(
+            &lash_execution_contracts::plugin_error::PluginError::Format(expected.clone()),
+        )
+        .unwrap(),
     )
     .unwrap();
     let controller = crate::RuntimeEffectControllerError::from(plugin);
@@ -392,13 +403,13 @@ fn plugin_formats_refuse_before_callbacks_and_preserve_bytes() {
     assert_eq!(runtime.cause, cause);
     assert!(runtime.is_terminal());
     assert_eq!(
-        crate::PluginError::Runtime(runtime)
+        lash_execution_contracts::plugin_error::PluginError::Runtime(runtime)
             .into_turn_failure(crate::RuntimeErrorCode::Plugin)
             .cause,
         cause
     );
     assert_eq!(
-        crate::PluginError::RuntimeEffectController(controller)
+        lash_execution_contracts::plugin_error::PluginError::RuntimeEffectController(controller)
             .into_turn_failure(crate::RuntimeErrorCode::Plugin)
             .cause,
         cause
@@ -419,10 +430,12 @@ fn plugin_formats_refuse_before_callbacks_and_preserve_bytes() {
     ));
     assert!(matches!(
         result,
-        Err(crate::PluginError::Format(crate::FormatRefusal {
-            namespace: crate::FormatNamespace::Config,
-            ..
-        }))
+        Err(lash_execution_contracts::plugin_error::PluginError::Format(
+            crate::FormatRefusal {
+                namespace: crate::FormatNamespace::Config,
+                ..
+            }
+        ))
     ));
     let options = crate::PluginOptions {
         plugins: config.namespaces().clone(),
@@ -455,7 +468,10 @@ impl crate::PluginFactory for DeclaredAs {
         "registered"
     }
 
-    fn recipe(self: Arc<Self>) -> Result<crate::plugin::PluginRecipe, crate::PluginError> {
+    fn recipe(
+        self: Arc<Self>,
+    ) -> Result<crate::plugin::PluginRecipe, lash_execution_contracts::plugin_error::PluginError>
+    {
         let id = crate::PluginFactory::id(self.as_ref());
         Ok(crate::plugin::PluginRecipe::new(
             id,
@@ -482,7 +498,7 @@ impl crate::SessionPlugin for DeclaredAs {
     fn session_ready(
         &self,
         _: crate::plugin::SessionReadyContext,
-    ) -> Result<(), crate::PluginError> {
+    ) -> Result<(), lash_execution_contracts::plugin_error::PluginError> {
         self.calls.fetch_add(1, std::sync::atomic::Ordering::SeqCst);
         Ok(())
     }
@@ -498,7 +514,10 @@ impl crate::PluginFactory for NoMigrateProbe {
         "no-migrate"
     }
 
-    fn recipe(self: Arc<Self>) -> Result<crate::plugin::PluginRecipe, crate::PluginError> {
+    fn recipe(
+        self: Arc<Self>,
+    ) -> Result<crate::plugin::PluginRecipe, lash_execution_contracts::plugin_error::PluginError>
+    {
         let id = crate::PluginFactory::id(self.as_ref());
         Ok(crate::plugin::PluginRecipe::new(
             id,
@@ -533,7 +552,7 @@ impl crate::SessionPlugin for NoMigrateProbe {
     fn session_ready(
         &self,
         _: crate::plugin::SessionReadyContext,
-    ) -> Result<(), crate::PluginError> {
+    ) -> Result<(), lash_execution_contracts::plugin_error::PluginError> {
         self.0.fetch_add(1, std::sync::atomic::Ordering::SeqCst);
         Ok(())
     }
@@ -599,7 +618,12 @@ fn plugin_state_refusals_are_distinct_typed_and_pre_callback() {
                 crate::plugin::SessionAuthorityContext::fixture(),
             ));
             assert!(
-                matches!(result, Err(crate::PluginError::State(_))),
+                matches!(
+                    result,
+                    Err(lash_execution_contracts::plugin_error::PluginError::State(
+                        _
+                    ))
+                ),
                 "a malformed payload at stamp {stamp} refuses typed: {:?}",
                 result.err()
             );
@@ -633,7 +657,7 @@ fn plugin_state_refusals_are_distinct_typed_and_pre_callback() {
         &snapshot,
         crate::plugin::SessionAuthorityContext::fixture(),
     ));
-    let Err(crate::PluginError::Format(refusal)) = result else {
+    let Err(lash_execution_contracts::plugin_error::PluginError::Format(refusal)) = result else {
         panic!("a missing converter is a typed format refusal");
     };
     assert_eq!(refusal.plugin, "no-migrate");
@@ -656,10 +680,12 @@ fn plugin_state_refusals_are_distinct_typed_and_pre_callback() {
     assert!(
         matches!(
             result,
-            Err(crate::PluginError::Format(crate::FormatRefusal {
-                namespace: crate::FormatNamespace::Config,
-                ..
-            }))
+            Err(lash_execution_contracts::plugin_error::PluginError::Format(
+                crate::FormatRefusal {
+                    namespace: crate::FormatNamespace::Config,
+                    ..
+                }
+            ))
         ),
         "config faces the same typed refusal: {:?}",
         result.err()
@@ -700,8 +726,11 @@ fn plugin_state_refusals_are_distinct_typed_and_pre_callback() {
         ),
     ] {
         let result = host.build_session(request);
-        let Err(crate::PluginError::Declaration(
-            crate::plugin::PluginDeclarationError::IdMismatch { factory, declared },
+        let Err(lash_execution_contracts::plugin_error::PluginError::Declaration(
+            lash_execution_contracts::declaration_error::PluginDeclarationError::IdMismatch {
+                factory,
+                declared,
+            },
         )) = result
         else {
             panic!("a wrong plugin owner is a typed declaration refusal");
@@ -1103,7 +1132,10 @@ fn recorded_transition_keeps_typed_refusal_and_publishes_neither_namespace() {
         }
         fn recipe(
             self: Arc<Self>,
-        ) -> std::result::Result<crate::plugin::PluginRecipe, crate::plugin::PluginError> {
+        ) -> std::result::Result<
+            crate::plugin::PluginRecipe,
+            lash_execution_contracts::plugin_error::PluginError,
+        > {
             let id = self.id();
             Ok(crate::plugin::PluginRecipe::empty(
                 id,
@@ -1186,7 +1218,7 @@ fn recorded_transition_keeps_typed_refusal_and_publishes_neither_namespace() {
     let record: crate::plugin::PluginTransitionRecord =
         rmp_serde::from_slice(&rmp_serde::to_vec_named(&record).unwrap()).unwrap();
     assert!(
-        matches!(record.candidate(), Err(crate::PluginError::Format(ref refusal)) if refusal.plugin == "second")
+        matches!(record.candidate(), Err(lash_execution_contracts::plugin_error::PluginError::Format(ref refusal)) if refusal.plugin == "second")
     );
     let session = crate::PluginHost::empty(
         crate::ExecutionBudgets::recommended(),
@@ -1258,11 +1290,15 @@ async fn pure_initialization_precedes_read_only_binding_and_readiness() {
             &self,
             _: &crate::RuntimeOwner,
             _: &crate::PluginConfig,
-        ) -> Result<BTreeMap<String, Value>, crate::PluginError> {
+        ) -> Result<BTreeMap<String, Value>, lash_execution_contracts::plugin_error::PluginError>
+        {
             self.0.fetch_add(1, std::sync::atomic::Ordering::SeqCst);
             Ok(BTreeMap::from([("initial".into(), serde_json::json!(17))]))
         }
-        fn recipe(self: Arc<Self>) -> Result<crate::plugin::PluginRecipe, crate::PluginError> {
+        fn recipe(
+            self: Arc<Self>,
+        ) -> Result<crate::plugin::PluginRecipe, lash_execution_contracts::plugin_error::PluginError>
+        {
             let id = crate::PluginFactory::id(self.as_ref());
             Ok(crate::plugin::PluginRecipe::new(
                 id,
@@ -1295,7 +1331,7 @@ async fn pure_initialization_precedes_read_only_binding_and_readiness() {
         fn session_ready(
             &self,
             ctx: crate::plugin::SessionReadyContext,
-        ) -> Result<(), crate::PluginError> {
+        ) -> Result<(), lash_execution_contracts::plugin_error::PluginError> {
             assert_eq!(ctx.state.get("initial"), Some(serde_json::json!(17)));
             Ok(())
         }

@@ -107,16 +107,19 @@ pub(crate) async fn run_once_store_hardening_hot_paths(
             let sqlite_store: Arc<dyn lash_core::RuntimeStore> = sqlite_factory;
             let postgres_store: Arc<dyn lash_core::RuntimeStore> = Arc::new(postgres_factory);
 
-            lash_core::testing::process_execution_env_fixture(
+            lash_execution_contracts::testing::process_execution_env_fixture(
                 sqlite_stores.process_env_store().as_ref(),
             )
             .await;
-            lash_core::testing::process_execution_env_fixture(&postgres.process_env_store()).await;
-            let memory_registry: Arc<dyn lash_core::ProcessRegistry> =
+            lash_execution_contracts::testing::process_execution_env_fixture(
+                &postgres.process_env_store(),
+            )
+            .await;
+            let memory_registry: Arc<dyn lash_execution_contracts::process::ProcessRegistry> =
                 sqlite_memory_stores.process_registry();
-            let sqlite_registry: Arc<dyn lash_core::ProcessRegistry> =
+            let sqlite_registry: Arc<dyn lash_execution_contracts::process::ProcessRegistry> =
                 sqlite_stores.process_registry();
-            let postgres_registry: Arc<dyn lash_core::ProcessRegistry> =
+            let postgres_registry: Arc<dyn lash_execution_contracts::process::ProcessRegistry> =
                 Arc::new(postgres.process_registry());
             Ok((
                 sqlite_root,
@@ -505,7 +508,7 @@ async fn measure_store_hardening_history_reads(
 }
 
 async fn measure_process_prune(
-    registry: &Arc<dyn lash_core::ProcessRegistry>,
+    registry: &Arc<dyn lash_execution_contracts::process::ProcessRegistry>,
     phase_name: &'static str,
     backend: &str,
     run_id: &str,
@@ -515,22 +518,24 @@ async fn measure_process_prune(
     let prune_scope = format!("perf-prune:{run_id}:{turn_index}");
     for index in 0..HARDENING_PRUNE_BATCH {
         let process_id = registry
-            .register_process(lash_core::testing::held_engine_registration(
+            .register_process(lash_execution_contracts::testing::held_engine_registration(
                 serde_json::json!({"index": index}),
-                lash_core::ProcessProvenance::new(lash_core::ProcessOriginator::host_scoped(
-                    &prune_scope,
-                )),
-                lash_core::Lifetime::Detached,
+                lash_execution_contracts::process::ProcessProvenance::new(
+                    lash_execution_contracts::process::ProcessOriginator::host_scoped(&prune_scope),
+                ),
+                lash_execution_contracts::process::Lifetime::Detached,
             ))
             .await?
             .id;
         registry
             .complete_process(
                 &process_id,
-                lash_core::ProcessAwaitOutput::from_tool_output(
+                lash_execution_contracts::process::ProcessAwaitOutput::from_tool_output(
                     lash_core::ToolCallOutput::success(serde_json::json!({"done": index})),
                 ),
-                lash_core::ProcessCompletionAuthority::workflow_key(&process_id),
+                lash_execution_contracts::process::ProcessCompletionAuthority::workflow_key(
+                    &process_id,
+                ),
             )
             .await?;
     }
@@ -538,14 +543,16 @@ async fn measure_process_prune(
         registry
             .prune_terminal_processes(
                 u64::MAX,
-                Some(lash_core::ProcessListFilter {
-                    status: lash_core::ProcessStatusFilter::Any,
-                    originator: Some(lash_core::ProcessOriginatorFilter::Host {
-                        scope: Some(prune_scope.to_string()),
-                    }),
-                    ..lash_core::ProcessListFilter::default()
+                Some(lash_execution_contracts::process::ProcessListFilter {
+                    status: lash_execution_contracts::process::ProcessStatusFilter::Any,
+                    originator: Some(
+                        lash_execution_contracts::process::ProcessOriginatorFilter::Host {
+                            scope: Some(prune_scope.to_string()),
+                        },
+                    ),
+                    ..lash_execution_contracts::process::ProcessListFilter::default()
                 }),
-                lash_core::ProjectionWatermark::NoProjector,
+                lash_execution_contracts::process::ProjectionWatermark::NoProjector,
             )
             .await
             .map_err(anyhow::Error::from)
@@ -602,7 +609,9 @@ pub(super) fn runtime_perf_session_create_request(
 #[cfg(test)]
 mod store_hardening_tests {
     use super::*;
-    use lash_core::{ProcessLifecycle as _, ProcessQuery as _, ProcessRegistrar as _};
+    use lash_execution_contracts::process::ProcessLifecycle as _;
+    use lash_execution_contracts::process::ProcessQuery as _;
+    use lash_execution_contracts::process::ProcessRegistrar as _;
 
     #[tokio::test]
     async fn process_prune_is_scoped_to_the_hardening_batch() {
@@ -611,12 +620,12 @@ mod store_hardening_tests {
             .expect("open a SQLite memory store set")
             .process_registry();
         let unrelated_process_id = registry
-            .register_process(lash_core::testing::held_engine_registration(
+            .register_process(lash_execution_contracts::testing::held_engine_registration(
                 serde_json::json!({}),
-                lash_core::ProcessProvenance::new(lash_core::ProcessOriginator::host_scoped(
-                    "unrelated",
-                )),
-                lash_core::Lifetime::Detached,
+                lash_execution_contracts::process::ProcessProvenance::new(
+                    lash_execution_contracts::process::ProcessOriginator::host_scoped("unrelated"),
+                ),
+                lash_execution_contracts::process::Lifetime::Detached,
             ))
             .await
             .expect("register unrelated process")
@@ -624,10 +633,12 @@ mod store_hardening_tests {
         registry
             .complete_process(
                 &unrelated_process_id,
-                lash_core::ProcessAwaitOutput::from_tool_output(
+                lash_execution_contracts::process::ProcessAwaitOutput::from_tool_output(
                     lash_core::ToolCallOutput::success(serde_json::json!({})),
                 ),
-                lash_core::ProcessCompletionAuthority::workflow_key(&unrelated_process_id),
+                lash_execution_contracts::process::ProcessCompletionAuthority::workflow_key(
+                    &unrelated_process_id,
+                ),
             )
             .await
             .expect("complete unrelated process");
@@ -635,9 +646,9 @@ mod store_hardening_tests {
         let mut phase_profile = BTreeMap::new();
         let scoped_before = async {
             let registry = &registry;
-            let filter = &lash_core::ProcessListFilter {
-                status: lash_core::ProcessStatusFilter::Any,
-                ..lash_core::ProcessListFilter::default()
+            let filter = &lash_execution_contracts::process::ProcessListFilter {
+                status: lash_execution_contracts::process::ProcessStatusFilter::Any,
+                ..lash_execution_contracts::process::ProcessListFilter::default()
             };
             let mut records = Vec::new();
             let mut continuation = None;
@@ -645,15 +656,16 @@ mod store_hardening_tests {
                 let page = registry
                     .list_processes_page(
                         filter,
-                        std::num::NonZeroUsize::MIN
-                            .saturating_add(lash_core::MAX_PROCESS_ROSTER_PAGE_SIZE - 1),
+                        std::num::NonZeroUsize::MIN.saturating_add(
+                            lash_execution_contracts::process::MAX_PROCESS_ROSTER_PAGE_SIZE - 1,
+                        ),
                         continuation,
                     )
                     .await?;
                 records.extend(page.records);
                 continuation = page.continuation;
                 if continuation.is_none() {
-                    break Ok::<_, lash_core::PluginError>(records);
+                    break Ok::<_, lash_execution_contracts::plugin_error::PluginError>(records);
                 }
             }
         }
@@ -661,7 +673,7 @@ mod store_hardening_tests {
         .expect("list processes before prune");
         assert_eq!(scoped_before.len(), 1);
         measure_process_prune(
-            &(registry.clone() as Arc<dyn lash_core::ProcessRegistry>),
+            &(registry.clone() as Arc<dyn lash_execution_contracts::process::ProcessRegistry>),
             "test.process_prune",
             "test",
             "run",
@@ -673,12 +685,14 @@ mod store_hardening_tests {
 
         let remaining = async {
             let registry = &registry;
-            let filter = &lash_core::ProcessListFilter {
-                status: lash_core::ProcessStatusFilter::Any,
-                originator: Some(lash_core::ProcessOriginatorFilter::Host {
-                    scope: Some("unrelated".to_string()),
-                }),
-                ..lash_core::ProcessListFilter::default()
+            let filter = &lash_execution_contracts::process::ProcessListFilter {
+                status: lash_execution_contracts::process::ProcessStatusFilter::Any,
+                originator: Some(
+                    lash_execution_contracts::process::ProcessOriginatorFilter::Host {
+                        scope: Some("unrelated".to_string()),
+                    },
+                ),
+                ..lash_execution_contracts::process::ProcessListFilter::default()
             };
             let mut records = Vec::new();
             let mut continuation = None;
@@ -686,15 +700,16 @@ mod store_hardening_tests {
                 let page = registry
                     .list_processes_page(
                         filter,
-                        std::num::NonZeroUsize::MIN
-                            .saturating_add(lash_core::MAX_PROCESS_ROSTER_PAGE_SIZE - 1),
+                        std::num::NonZeroUsize::MIN.saturating_add(
+                            lash_execution_contracts::process::MAX_PROCESS_ROSTER_PAGE_SIZE - 1,
+                        ),
                         continuation,
                     )
                     .await?;
                 records.extend(page.records);
                 continuation = page.continuation;
                 if continuation.is_none() {
-                    break Ok::<_, lash_core::PluginError>(records);
+                    break Ok::<_, lash_execution_contracts::plugin_error::PluginError>(records);
                 }
             }
         }

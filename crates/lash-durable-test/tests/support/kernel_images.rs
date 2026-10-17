@@ -3,16 +3,24 @@
 use std::sync::{Arc, Mutex};
 use std::time::Duration;
 
+use lash_core_execution::ProcessId;
+use lash_core_execution::ProcessIdMint;
 use lash_core_execution::runtime::actor::process::ProcessActivation;
 use lash_core_execution::runtime::process::steps::{ProcessSteps, StepAdmission, StepRefusal};
-use lash_core_execution::{
-    Backend, EngineStepRun, EngineSteps as _, LifetimeDecision, ProcessId, ProcessIdMint,
-    ProcessInput, ProcessProvenance, ProcessRecord, ProcessRegistration, StepRequest, StoreSet,
-    WaitKind,
-};
 use lash_durable::runner::{Activation, Stopped};
 use lash_durable::{ActorKey, ActorState, CommitLabel, DurableStore, LeaseConfig, MailTx};
 use lash_durable_test::{Script, SimClock, SimNodes, SimNodesConfig, Tripwire};
+use lash_execution_contracts::backend::Backend;
+use lash_execution_contracts::backend::StoreSet;
+use lash_execution_contracts::process::EngineStepRun;
+use lash_execution_contracts::process::EngineSteps as _;
+use lash_execution_contracts::process::LifetimeDecision;
+use lash_execution_contracts::process::ProcessInput;
+use lash_execution_contracts::process::ProcessProvenance;
+use lash_execution_contracts::process::ProcessRecord;
+use lash_execution_contracts::process::ProcessRegistration;
+use lash_execution_contracts::process::StepRequest;
+use lash_execution_contracts::process::WaitKind;
 use lash_protocol_types::sync::MutexExt as _;
 use lash_protocol_types::{ExecutionLimit, ExecutionPolicy};
 use lash_vm_runtime::{
@@ -173,15 +181,13 @@ impl ProcessSteps for KernelSteps {
                 projection_providers: Some(Arc::clone(self.backend.projection_providers())),
                 kind,
                 input,
-                pages: runtime
-                    .cx()
-                    .pages()
-                    .ok()
-                    .map(|store| lash_core_execution::StepPages {
+                pages: runtime.cx().pages().ok().map(|store| {
+                    lash_execution_contracts::process::StepPages {
                         store,
                         actor: runtime.cx().actor().clone(),
                         epoch: runtime.cx().epoch(),
-                    }),
+                    }
+                }),
             };
             let steps = Arc::clone(&self.steps);
             let entered = Arc::clone(&self.entered);
@@ -275,7 +281,7 @@ async fn seed(backend: &Backend, source: &str) {
         entry: lash::workflow::document::Name::new("worker"),
         args: serde_json::Map::new(),
     };
-    let settings = lash_core::EngineSettings::new(
+    let settings = lash_execution_contracts::process::EngineSettings::new(
         serde_json::to_value(lash_vm_runtime::KernelRecordedSettings::new(
             lash_vm_runtime::TYPESCRIPT_DIALECT,
             bounds(),
@@ -286,8 +292,8 @@ async fn seed(backend: &Backend, source: &str) {
         ProcessInput::Engine {
             kind: LASH_VM_ENGINE_KIND.to_owned(),
             payload: serde_json::to_value(&input).expect("the input encodes"),
-            launch: lash_core::EngineLaunch::new(
-                lash_core_execution::testing::process_execution_env_fixture(
+            launch: lash_execution_contracts::process::EngineLaunch::new(
+                lash_execution_contracts::testing::process_execution_env_fixture(
                     backend.process_env_store().as_ref(),
                 )
                 .await,
@@ -444,14 +450,17 @@ pub async fn resume(image: &images::Image) -> serde_json::Value {
     let terminal = record.terminal().expect("the image reached a terminal");
     assert_eq!(
         terminal.status(),
-        lash_core_execution::TerminalProcessStatus::Completed,
+        lash_execution_contracts::process::TerminalProcessStatus::Completed,
         "{} did not complete: {terminal:?}",
         image.name
     );
     let end = record
         .terminal()
         .map(|terminal| {
-            serde_json::to_value(lash_core::Durable(&terminal.clone().into_await_output())).unwrap()
+            serde_json::to_value(lash_protocol_types::Durable(
+                &terminal.clone().into_await_output(),
+            ))
+            .unwrap()
         })
         .unwrap_or_default();
     assert!(

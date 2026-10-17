@@ -14,20 +14,20 @@ pub(super) async fn terminal_completion_atomically_retains_parent_end_plan(
 ) {
     let originator = SessionScope::new("parent-end-retention-session");
     let parent = registry
-        .register_process(lash_core::testing::held_engine_registration(
+        .register_process(lash_execution_contracts::testing::held_engine_registration(
             serde_json::Value::Null,
             ProcessProvenance::session(originator.clone()),
-            lash_core::Lifetime::Detached,
+            lash_execution_contracts::process::Lifetime::Detached,
         ))
         .await
         .expect("register parent-end-plan process");
     let process_id = parent.id.clone();
     let parent_scope = lash_core::ScopeId::process(parent.id.clone());
     let child = crate::started_until_starter(
-        lash_core::testing::held_engine_registration(
+        lash_execution_contracts::testing::held_engine_registration(
             serde_json::Value::Null,
             ProcessProvenance::session(originator.clone()),
-            lash_core::Lifetime::Detached,
+            lash_execution_contracts::process::Lifetime::Detached,
         ),
         parent_scope.clone(),
     );
@@ -94,10 +94,10 @@ pub(super) async fn terminal_completion_atomically_retains_parent_end_plan(
     );
     // A `Cancel` child registering after the ledger row exists is fenced.
     let late = crate::started_until_starter(
-        lash_core::testing::held_engine_registration(
+        lash_execution_contracts::testing::held_engine_registration(
             serde_json::Value::Null,
             ProcessProvenance::session(originator.clone()),
-            lash_core::Lifetime::Detached,
+            lash_execution_contracts::process::Lifetime::Detached,
         ),
         parent_scope.clone(),
     );
@@ -126,20 +126,20 @@ pub(super) async fn parent_end_plans_are_reclaimed_by_retention(
 ) {
     let originator = SessionScope::new("parent-end-reclaim-session");
     let parent = registry
-        .register_process(lash_core::testing::held_engine_registration(
+        .register_process(lash_execution_contracts::testing::held_engine_registration(
             serde_json::Value::Null,
             ProcessProvenance::session(originator.clone()),
-            lash_core::Lifetime::Detached,
+            lash_execution_contracts::process::Lifetime::Detached,
         ))
         .await
         .expect("register parent-end-reclaim process");
     let parent_scope = lash_core::ScopeId::process(parent.id.clone());
     let child = registry
         .register_process(crate::started_until_starter(
-            lash_core::testing::held_engine_registration(
+            lash_execution_contracts::testing::held_engine_registration(
                 serde_json::Value::Null,
                 ProcessProvenance::session(originator.clone()),
-                lash_core::Lifetime::Detached,
+                lash_execution_contracts::process::Lifetime::Detached,
             ),
             parent_scope.clone(),
         ))
@@ -223,10 +223,10 @@ pub(super) async fn a_session_scope_closes_only_through_its_close_row(
     let turn = lash_core::ScopeId::turn(session.clone(), crate::TurnId::from("session-close-turn"));
     let session_scope = lash_core::ScopeId::session(session.clone());
     let registration = || {
-        lash_core::testing::held_engine_registration(
+        lash_execution_contracts::testing::held_engine_registration(
             serde_json::Value::Null,
             ProcessProvenance::session(originator.clone()),
-            lash_core::Lifetime::Detached,
+            lash_execution_contracts::process::Lifetime::Detached,
         )
     };
     let until_session = registry

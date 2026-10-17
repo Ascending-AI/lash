@@ -84,9 +84,9 @@ rejected because visibility does not own process retention.
 
 ## Implementation
 
-- [Event projection and refolding](../../crates/lash-core-execution/src/runtime/process/validation.rs).
+- [Event projection and refolding](../../crates/lash-execution-contracts/src/process/validation.rs).
 - [SQLite event transaction](../../crates/lash-sqlite-store/src/process_registry/support.rs) and [PostgreSQL event transaction](../../crates/lash-postgres-store/src/postgres/process_helpers.rs).
-- [Registry concerns, visibility and retention](../../crates/lash-core-execution/src/runtime/process/registry_concerns.rs).
+- [Registry concerns, visibility and retention](../../crates/lash-execution-contracts/src/process/registry_concerns.rs).
 - [Record-fold law](../../crates/lash-conformance/src/conformance/process_registry.rs).
 
 [ADR 0137](0137-the-host-owns-events-routing-and-scheduling.md) owns host events, routing and scheduling.

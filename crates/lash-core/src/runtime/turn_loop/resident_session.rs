@@ -540,7 +540,11 @@ impl LashRuntime {
     ) -> Result<(), SessionError> {
         self.reload_invalidated_resident_session_state()
             .await
-            .map_err(|error| SessionError::Plugin(crate::PluginError::Runtime(error)))
+            .map_err(|error| {
+                SessionError::Plugin(
+                    lash_execution_contracts::plugin_error::PluginError::Runtime(error),
+                )
+            })
     }
 }
 

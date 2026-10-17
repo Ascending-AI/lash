@@ -46,12 +46,12 @@ use std::time::Duration;
 
 use lash_core::facade_support::{SessionGraphFacadeOps as _, SessionNodeProjection as _};
 use lash_core::runtime::durable::session::SessionActivation;
-use lash_core_execution::StoreSet;
 use lash_durable::runner::Activation;
 use lash_durable::{ActorKey, ActorState, CommitLabel, DurableError, DurableStore};
 use lash_durable_test::{
     Cut, Fault, Matrix, Scenario, SimClock, SimNodes, SimNodesConfig, Stored, Tripwire, WriteKind,
 };
+use lash_execution_contracts::backend::StoreSet;
 use lash_protocol_types::SessionId;
 use lash_protocol_types::sync::MutexExt as _;
 
@@ -159,7 +159,10 @@ impl lash::plugins::PluginFactory for AfterTurnPlugin {
 
     fn recipe(
         self: Arc<Self>,
-    ) -> std::result::Result<lash_core::plugin::PluginRecipe, lash_core::plugin::PluginError> {
+    ) -> std::result::Result<
+        lash_core::plugin::PluginRecipe,
+        lash_execution_contracts::plugin_error::PluginError,
+    > {
         let mut reg = lash_core::plugin::PluginRegistrar::<AfterTurnPlugin>::new(
             lash_core::plugin::PluginFactory::id(self.as_ref()),
         );
@@ -181,7 +184,7 @@ impl lash::plugins::SessionPlugin for AfterTurnPlugin {
 impl AfterTurnPlugin {
     fn declare(
         reg: &mut lash_core::plugin::PluginRegistrar<Self>,
-    ) -> std::result::Result<(), lash_core::plugin::PluginError> {
+    ) -> std::result::Result<(), lash_execution_contracts::plugin_error::PluginError> {
         reg.turn()
             .after(lash::hook_key!("mark"), move |this, _state| {
                 let world = Arc::clone(&this.world);

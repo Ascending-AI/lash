@@ -45,10 +45,12 @@ impl OwnerConfigView {
         if provider.registry() == expected {
             Ok(())
         } else {
-            Err(super::PluginError::ProviderRegistryMismatch {
-                expected,
-                provider: provider.clone(),
-            })
+            Err(
+                lash_execution_contracts::plugin_error::PluginError::ProviderRegistryMismatch {
+                    expected,
+                    provider: provider.clone(),
+                },
+            )
         }
     }
 

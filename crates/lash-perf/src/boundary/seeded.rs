@@ -129,7 +129,10 @@ impl lash_core::ToolProvider for Tools {
     fn tool_manifests(
         &self,
         _config: &lash_core::OwnerConfigView,
-    ) -> std::result::Result<Vec<lash_core::ToolManifest>, lash_core::PluginError> {
+    ) -> std::result::Result<
+        Vec<lash_core::ToolManifest>,
+        lash_execution_contracts::plugin_error::PluginError,
+    > {
         Ok(self.contracts.values().map(|d| d.manifest()).collect())
     }
     fn resolve_contract(
@@ -169,7 +172,10 @@ pub(super) async fn run(args: &Args) -> Result<Receipt> {
         )
         .await?,
     );
-    lash_core::testing::process_execution_env_fixture(stores.process_env_store().as_ref()).await;
+    lash_execution_contracts::testing::process_execution_env_fixture(
+        stores.process_env_store().as_ref(),
+    )
+    .await;
     let backend = facade::backend(stores)?;
     let source = workload.clone();
     let calls = meter.clone();
@@ -256,7 +262,7 @@ pub(super) async fn run(args: &Args) -> Result<Receipt> {
     let mut plugins = lash::PluginStack::new();
     plugins.push(Arc::new(
         lash_plugin_process_controls::SessionProcessAdminPluginFactory::new(
-            lash_core::lifetime::session_or_starter,
+            lash_execution_contracts::process::lifetime::session_or_starter,
             lash_core::testing::run_policy_naming(&components),
         ),
     ));
@@ -268,7 +274,7 @@ pub(super) async fn run(args: &Args) -> Result<Receipt> {
         )
         .process_component(
             Arc::new(lash_plugin_process_controls::ProcessControlsComponent::new(
-                lash_core::lifetime::session_or_starter,
+                lash_execution_contracts::process::lifetime::session_or_starter,
                 lash_core::testing::run_policy_naming(&components),
             )),
             lash_plugin_process_controls::PROCESS_CONTROLS_CONFIG,

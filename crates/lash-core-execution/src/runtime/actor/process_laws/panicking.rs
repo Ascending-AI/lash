@@ -10,7 +10,9 @@ use super::{
     LOOP_BUDGET, LawBroken, LawOutcome, SETTLE, SHORT, actor_state, eventually, law_backend,
     noted_calls, payload, root, serve, tag, terminal,
 };
-use crate::{Backend, ProcessParkReason, ProcessParkState};
+use lash_execution_contracts::backend::Backend;
+use lash_execution_contracts::park::ProcessParkReason;
+use lash_execution_contracts::process::ProcessParkState;
 
 /// A process whose every activation panics before any advance commits
 /// parks with `ActivationLoop` after exactly the activation-loop budget's
@@ -90,8 +92,11 @@ struct PanickingTurns {
 impl super::super::process::SessionTurns for PanickingTurns {
     async fn mail(
         &self,
-        _: &crate::ProcessRecord,
-    ) -> Result<super::super::process::SessionTurnMail, crate::PluginError> {
+        _: &lash_execution_contracts::process::ProcessRecord,
+    ) -> Result<
+        super::super::process::SessionTurnMail,
+        lash_execution_contracts::plugin_error::PluginError,
+    > {
         self.mails.fetch_add(1, super::Ordering::SeqCst);
         assert!(
             !self.panics.load(super::Ordering::SeqCst),
@@ -102,20 +107,28 @@ impl super::super::process::SessionTurns for PanickingTurns {
 
     async fn cancel(
         &self,
-        _: &crate::ProcessRecord,
-    ) -> Result<super::super::process::SessionTurnCancel, crate::PluginError> {
+        _: &lash_execution_contracts::process::ProcessRecord,
+    ) -> Result<
+        super::super::process::SessionTurnCancel,
+        lash_execution_contracts::plugin_error::PluginError,
+    > {
         self.cancels.fetch_add(1, super::Ordering::SeqCst);
         Ok(super::super::process::SessionTurnCancel::Withdrawn)
     }
 
     async fn outcome(
         &self,
-        _: &crate::ProcessRecord,
-    ) -> Result<crate::ProcessOutcome, crate::PluginError> {
+        _: &lash_execution_contracts::process::ProcessRecord,
+    ) -> Result<
+        lash_execution_contracts::process::ProcessOutcome,
+        lash_execution_contracts::plugin_error::PluginError,
+    > {
         self.outcomes.fetch_add(1, super::Ordering::SeqCst);
-        Ok(crate::ProcessOutcome::from_tool_output(
-            crate::ToolCallOutput::success(json!({"child_answer": "done"})),
-        ))
+        Ok(
+            lash_execution_contracts::process::ProcessOutcome::from_tool_output(
+                crate::ToolCallOutput::success(json!({"child_answer": "done"})),
+            ),
+        )
     }
 }
 
@@ -157,21 +170,21 @@ pub async fn a_panicking_session_turn_process_parks_at_its_budget_and_resumes_or
         for cancel_parked in [false, true] {
             turns.panics.store(true, Ordering::SeqCst);
             let mails_before = turns.mails.load(Ordering::SeqCst);
-            let request = crate::SessionCreateRequest::root(
+            let request = lash_execution_contracts::session_types::SessionCreateRequest::root(
                 crate::SessionStartPoint::Empty,
                 crate::PluginOptions::default(),
             );
             let process = register(
                 &backend,
-                crate::ProcessRegistration::new(
-                    crate::ProcessInput::SessionTurn {
+                lash_execution_contracts::process::ProcessRegistration::new(
+                    lash_execution_contracts::process::ProcessInput::SessionTurn {
                         definition_key: tag("panicking-child-turn"),
                         create_request: Box::new(request),
                         turn_input: Box::new(crate::TurnInput::text("child work")),
-                        result: crate::SessionTurnOutcome::Turn,
+                        result: lash_execution_contracts::process::SessionTurnOutcome::Turn,
                     },
-                    crate::ProcessProvenance::host(),
-                    crate::LifetimeDecision::Detached,
+                    lash_execution_contracts::process::ProcessProvenance::host(),
+                    lash_execution_contracts::process::LifetimeDecision::Detached,
                 ),
             )
             .await?;

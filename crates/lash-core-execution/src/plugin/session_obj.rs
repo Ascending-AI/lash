@@ -1,4 +1,6 @@
 use crate::SessionId;
+use lash_execution_contracts::session_types::PluginOwned;
+use lash_execution_contracts::state_commands::StateCommands;
 
 use crate::plugin::{PluginSessionMaterializationRequest, PluginSessionRequest};
 use std::collections::BTreeMap;
@@ -1199,7 +1201,10 @@ mod presentation_plan_tests {
 
         fn recipe(
             self: Arc<Self>,
-        ) -> std::result::Result<crate::plugin::PluginRecipe, crate::plugin::PluginError> {
+        ) -> std::result::Result<
+            crate::plugin::PluginRecipe,
+            lash_execution_contracts::plugin_error::PluginError,
+        > {
             let mut reg = crate::plugin::PluginRegistrar::<Presenter>::new(
                 crate::plugin::PluginFactory::id(self.as_ref()),
             );
@@ -1236,7 +1241,7 @@ mod presentation_plan_tests {
     impl Presenter {
         fn declare(
             reg: &mut crate::plugin::PluginRegistrar<Self>,
-        ) -> std::result::Result<(), crate::plugin::PluginError> {
+        ) -> std::result::Result<(), lash_execution_contracts::plugin_error::PluginError> {
             reg.tool_results().presenter(move |this, _state| {
                 let calls = Arc::clone(&this.calls);
                 let text = this.text;

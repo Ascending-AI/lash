@@ -111,7 +111,7 @@ pub(crate) struct Committing<'a> {
     pub(crate) now: DurableInstant,
     /// The fleet format the transaction's fence read: registry rows a
     /// domain write touches are encoded under it.
-    pub(crate) fleet: lash_core_execution::FleetFormat,
+    pub(crate) fleet: lash_core_store::store::FleetFormat,
     /// The roots its writes retired, held before it commits.
     pub(crate) retired: Retired,
 }
@@ -215,10 +215,10 @@ static SQL: LazyLock<Sql> = LazyLock::new(|| {
 pub struct PostgresDurableStore {
     pools: Arc<RolePools>,
     fence: WriterFence,
-    observer: lash_core_execution::facade_support::StoreObserver,
+    observer: lash_core_ids::operational_metrics::StoreObserver,
     /// The clock a test stands in for the database's.
     #[cfg(any(test, feature = "testing"))]
-    clock: Option<std::sync::Arc<dyn lash_core_execution::Clock>>,
+    clock: Option<std::sync::Arc<dyn lash_core_ids::clock::Clock>>,
     /// A connection a test loses at the next commit's `COMMIT`.
     #[cfg(any(test, feature = "testing"))]
     commit_fault: Option<Arc<crate::testing::CommitFault>>,
@@ -418,7 +418,7 @@ impl PostgresDurableStore {
     pub(crate) fn new(
         pools: Arc<RolePools>,
         fence: WriterFence,
-        observer: lash_core_execution::facade_support::StoreObserver,
+        observer: lash_core_ids::operational_metrics::StoreObserver,
     ) -> Self {
         Self {
             pools,
@@ -438,7 +438,7 @@ impl PostgresDurableStore {
     #[cfg(any(test, feature = "testing"))]
     pub fn with_clock_for_testing(
         mut self,
-        clock: std::sync::Arc<dyn lash_core_execution::Clock>,
+        clock: std::sync::Arc<dyn lash_core_ids::clock::Clock>,
     ) -> Self {
         self.clock = Some(clock);
         self
@@ -807,7 +807,7 @@ async fn apply_mail_domain(
     tx: &mut GuardedTx<'_>,
     write: &MailDomainWrite,
     now: DurableInstant,
-    fleet: lash_core_execution::FleetFormat,
+    fleet: lash_core_store::store::FleetFormat,
 ) -> Result<(MailAnswer, Vec<Woken>), DurableError> {
     Ok(match write {
         MailDomainWrite::ResolveWait(resolution) => {
@@ -883,7 +883,7 @@ async fn apply_mail(
     tx: &mut GuardedTx<'_>,
     writes: &MailTx,
     now: DurableInstant,
-    fleet: lash_core_execution::FleetFormat,
+    fleet: lash_core_store::store::FleetFormat,
 ) -> Result<MailCommit, DurableError> {
     lock_mail_targets(tx, writes).await?;
     let mut receipt = MailCommit::default();

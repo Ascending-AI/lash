@@ -20,7 +20,7 @@ pub(crate) fn read_prompt_catalog(
     host.prompt_catalog_snapshot()
 }
 pub(crate) async fn read_prompt_snapshot(
-    backend: &lash_core::Backend,
+    backend: &lash_execution_contracts::backend::Backend,
     call: &PromptCallKey,
 ) -> Result<Option<LoadedPromptSnapshot>, crate::prompt::AdmittedCallLoadError> {
     lash_core::plugin::prompt::load_prompt_snapshot(backend.durable().as_ref(), call).await

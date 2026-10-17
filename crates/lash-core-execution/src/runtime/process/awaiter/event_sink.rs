@@ -1,9 +1,9 @@
-use crate::ProcessEvent;
+use lash_execution_contracts::process::ProcessEvent;
 
 /// Host-facing push of each appended process event.
 ///
 /// A sink is a freshness feed, **never a source of truth.** The durable
-/// event log ([`crate::ProcessRegistry::event_page`]) is the only complete
+/// event log ([`lash_execution_contracts::process::ProcessRegistry::event_page`]) is the only complete
 /// record; a sink lets a host observe appends promptly without polling.
 ///
 /// # Contract
@@ -41,7 +41,7 @@ use crate::ProcessEvent;
 /// # Example: offload to a channel
 ///
 /// ```
-/// use lash_core::ProcessEvent;
+/// use lash_execution_contracts::process::ProcessEvent;
 /// use lash_core::runtime::ProcessEventSink;
 /// use tokio::sync::mpsc;
 ///

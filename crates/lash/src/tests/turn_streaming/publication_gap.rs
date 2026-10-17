@@ -513,17 +513,18 @@ async fn process_feed_across_two_publication_windows() -> Result<(Vec<Shown>, us
     // The feed looks at the durable process only when a commit ticks it:
     // nothing but the schedule decides what it reads.
     let stores = sqlite_memory_store_set().await;
-    let seeding: Arc<dyn lash_core::ConformanceProcessRegistry> = stores.process_registry();
+    let seeding: Arc<dyn lash_execution_contracts::process::ConformanceProcessRegistry> =
+        stores.process_registry();
     let core = standard_core_builder_over(lash_conformance::backend_over(stores))
         .process_replay_store(replay.clone())
         .build(crate::tests::host::runtime_lease_owner())?;
     let watched = core.process_watch().clone();
     let registry = core.process_registry.clone();
     let process_id = registry
-        .register_process(lash_core::ProcessRegistration::new(
-            lash_core::testing::held_engine_input(serde_json::Value::Null),
-            lash_core::ProcessProvenance::host(),
-            lash_core::Lifetime::Detached,
+        .register_process(lash_execution_contracts::process::ProcessRegistration::new(
+            lash_execution_contracts::testing::held_engine_input(serde_json::Value::Null),
+            lash_execution_contracts::process::ProcessProvenance::host(),
+            lash_execution_contracts::process::Lifetime::Detached,
         ))
         .await?
         .id;
@@ -539,9 +540,9 @@ async fn process_feed_across_two_publication_windows() -> Result<(Vec<Shown>, us
         .lock()
         .expect("armed sequences")
         .extend([base + 1, base + 2]);
-    let wait = lash_core::WaitState {
+    let wait = lash_execution_contracts::process::WaitState {
         since_ms: 0,
-        kind: lash_core::WaitKind::Call {
+        kind: lash_execution_contracts::process::WaitKind::Call {
             call_id: lash_core::ToolCallId::fixture("two-windows-call"),
             tool_id: lash_core::ToolId::from("two-windows-fixture"),
         },
@@ -549,7 +550,7 @@ async fn process_feed_across_two_publication_windows() -> Result<(Vec<Shown>, us
     };
     // Each commit is the owner's: durable first, then published by its node
     // while the test holds and releases that publication.
-    let commit = async |request: lash_core::ProcessEventAppendRequest| {
+    let commit = async |request: lash_execution_contracts::process::ProcessEventAppendRequest| {
         let event = seeding
             .append_event_for_testing(&process_id, request)
             .await?
@@ -561,22 +562,26 @@ async fn process_feed_across_two_publication_windows() -> Result<(Vec<Shown>, us
                 .publish_committed(&process_id, event.sequence - 1)
                 .await
         });
-        Ok::<_, lash_core::PluginError>(())
+        Ok::<_, lash_execution_contracts::plugin_error::PluginError>(())
     };
-    commit(lash_core::ProcessEventAppendRequest::wait_entered(
-        &process_id,
-        &wait,
-    ))
+    commit(
+        lash_execution_contracts::process::ProcessEventAppendRequest::wait_entered(
+            &process_id,
+            &wait,
+        ),
+    )
     .await?;
     replay.gate.reached.notified().await;
     replay.gate.parked(feed.next()).await;
 
     // The first publication lands; the second commit is durable with its
     // publication held before the feed reads the process again.
-    commit(lash_core::ProcessEventAppendRequest::wait_cleared(
-        &process_id,
-        &wait,
-    ))
+    commit(
+        lash_execution_contracts::process::ProcessEventAppendRequest::wait_cleared(
+            &process_id,
+            &wait,
+        ),
+    )
     .await?;
     replay.gate.release();
     replay.gate.reached.notified().await;

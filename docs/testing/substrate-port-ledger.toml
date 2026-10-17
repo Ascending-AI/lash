@@ -26703,7 +26703,7 @@ lane = "P4"
 laws = [
   "a_subagent_session_replaces_the_inherited_session",
 ]
-disposition = "replaced-by:crates/lash-core-execution/src/runtime/process/model/scope_lifetime.rs::a_child_session_replaces_the_inherited_session"
+disposition = "replaced-by:crates/lash-execution-contracts/src/process/model/scope_lifetime.rs::a_child_session_replaces_the_inherited_session"
 status = "deleted"
 owed = "a child session replaces the inherited session"
 note = "FIG-5296 renamed it: core names no subagent; the file's other tests are not ledger subjects"

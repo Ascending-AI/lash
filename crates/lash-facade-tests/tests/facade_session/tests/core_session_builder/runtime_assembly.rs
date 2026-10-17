@@ -3,7 +3,7 @@ use lash_core::plugin::PluginSessionRequest;
 use lash_core::{RuntimeSessionState, SessionId};
 
 async fn assert_runtime_assembly_refuses_without_writes(
-    backend: lash_core::Backend,
+    backend: lash_execution_contracts::backend::Backend,
     deleted: bool,
 ) {
     let session_id = SessionId::from("runtime-assembly-refusal");
@@ -123,7 +123,7 @@ async fn assert_runtime_assembly_refuses_without_writes(
     }
 }
 
-fn peer_core(backend: lash_core::Backend) -> LashCore {
+fn peer_core(backend: lash_execution_contracts::backend::Backend) -> LashCore {
     LashCore::standard_builder(backend)
         .serve_test_llm_profile(mock_provider(), mock_llm_profile_spec())
         .commit_budget(lash::CommitBudget::bounded(1024 * 1024, 512))

@@ -33,7 +33,7 @@ fn every_rendered_statement_set_renders() {
 
 #[test]
 fn ddl_referrer_kind_checks_match_typed_predicates() {
-    use lash_core_execution::ArtifactReferrerKind;
+    use lash_core_store::artifact_referrer::ArtifactReferrerKind;
     use std::collections::BTreeSet;
     let ddl = crate::PostgresStorage::schema_ddl();
     for (constraint, accepts) in [

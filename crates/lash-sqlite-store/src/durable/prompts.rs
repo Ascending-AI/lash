@@ -562,7 +562,8 @@ pub(super) fn texts(tx: &Connection, hashes: &[String]) -> Answer<Vec<PromptText
 #[cfg(test)]
 mod tests {
     use super::*;
-    use lash_core_execution::{SessionCatalogStore as _, Target};
+    use lash_core_store::store::SessionCatalogStore as _;
+    use lash_core_store::store::Target;
     use lash_durable::{ActorKey, CommitLabel, DomainWrite, DurableReads, DurableStore};
 
     /// PROMPT-AUDIT-RETENTION: revision expiry releases settled audit plans

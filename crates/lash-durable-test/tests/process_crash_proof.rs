@@ -65,17 +65,16 @@ use std::collections::{BTreeMap, BTreeSet};
 use std::sync::{Arc, Mutex};
 use std::time::Duration;
 
+use lash_core_execution::CancelOrigin;
+use lash_core_execution::DurableSettings;
+use lash_core_execution::ProcessId;
+use lash_core_execution::ScopeId;
+use lash_core_execution::ToolCallId;
+use lash_core_execution::ToolCallOutput;
+use lash_core_execution::ToolCancellation;
 use lash_core_execution::runtime::actor::process::ProcessActivation;
 use lash_core_execution::runtime::actor::round::{self, PolicyView, Recovery};
 use lash_core_execution::runtime::process::steps::{ProcessSteps, StepAdmission, StepRefusal};
-use lash_core_execution::{
-    Ancestry, Backend, BackendParts, CancelOrigin, DurableSettings, EngineAction, EngineEvent,
-    EngineState, EngineStateFormat, EngineSuccession, LifetimeDecision, NoProjectionProviders,
-    ProcessEngine, ProcessId, ProcessInfraError, ProcessInput, ProcessLifecycleFact,
-    ProcessOutcome, ProcessProvenance, ProcessRecord, ProcessRegistration, ProcessSuccessorRequest,
-    SUCCESSOR_MAIL, ScopeGrant, ScopeId, StepName, StepRequest, SuccessionError, SuccessorCarry,
-    ToolCallId, ToolCallOutput, ToolCancellation,
-};
 use lash_core_store::tool_run::Material;
 use lash_core_store::tool_run::SettledOutput;
 use lash_core_store::tool_run::{MaterialOwner, MaterialRole};
@@ -85,6 +84,31 @@ use lash_durable::{ActorKey, ActorState, CommitLabel, DurableError, DurableStore
 use lash_durable_test::{
     Cut, Fault, Matrix, Scenario, SimClock, SimNodes, SimNodesConfig, Stored, Tripwire, WriteKind,
 };
+use lash_execution_contracts::backend::Backend;
+use lash_execution_contracts::backend::BackendParts;
+use lash_execution_contracts::process::Ancestry;
+use lash_execution_contracts::process::EngineAction;
+use lash_execution_contracts::process::EngineEvent;
+use lash_execution_contracts::process::EngineState;
+use lash_execution_contracts::process::EngineStateFormat;
+use lash_execution_contracts::process::EngineSuccession;
+use lash_execution_contracts::process::LifetimeDecision;
+use lash_execution_contracts::process::ProcessEngine;
+use lash_execution_contracts::process::ProcessInfraError;
+use lash_execution_contracts::process::ProcessInput;
+use lash_execution_contracts::process::ProcessLifecycleFact;
+use lash_execution_contracts::process::ProcessOutcome;
+use lash_execution_contracts::process::ProcessProvenance;
+use lash_execution_contracts::process::ProcessRecord;
+use lash_execution_contracts::process::ProcessRegistration;
+use lash_execution_contracts::process::ProcessSuccessorRequest;
+use lash_execution_contracts::process::SUCCESSOR_MAIL;
+use lash_execution_contracts::process::ScopeGrant;
+use lash_execution_contracts::process::StepName;
+use lash_execution_contracts::process::StepRequest;
+use lash_execution_contracts::process::SuccessionError;
+use lash_execution_contracts::process::SuccessorCarry;
+use lash_execution_contracts::projection::NoProjectionProviders;
 use lash_protocol_types::sync::MutexExt as _;
 use lash_protocol_types::{ExecutionLimit, ExecutionPolicy, ToolId};
 use serde_json::{Value, json};
@@ -111,7 +135,9 @@ struct ProofEngine {
 }
 
 fn infra(error: impl std::fmt::Display) -> ProcessInfraError {
-    ProcessInfraError::new(lash_core_execution::PluginError::Session(error.to_string()))
+    ProcessInfraError::new(
+        lash_execution_contracts::plugin_error::PluginError::Session(error.to_string()),
+    )
 }
 
 fn step(name: &str, tool: &str) -> StepRequest {
@@ -172,32 +198,35 @@ impl EngineSuccession for ProofSuccession {
 impl ProcessEngine for ProofEngine {
     fn settled_ran(
         &self,
-        _kind: &lash_core_execution::EngineStepKind,
+        _kind: &lash_execution_contracts::process::EngineStepKind,
         _output: &lash_core_store::tool_run::SettledOutput,
     ) -> Vec<(u32, u64)> {
         Vec::new()
     }
 
-    fn trace_class(&self) -> lash_core::ProcessTraceClass {
-        lash_core::ProcessTraceClass::Internal
+    fn trace_class(&self) -> lash_execution_contracts::process::ProcessTraceClass {
+        lash_execution_contracts::process::ProcessTraceClass::Internal
     }
 
     async fn performed_effects(
         &self,
         _payload: &serde_json::Value,
-    ) -> Result<lash_core::PerformedEffects, lash_core::ProcessEnvRefusal> {
-        Ok(lash_core::PerformedEffects::new())
+    ) -> Result<lash_execution_contracts::process::PerformedEffects, lash_core::ProcessEnvRefusal>
+    {
+        Ok(lash_execution_contracts::process::PerformedEffects::new())
     }
 
     async fn check_args(
         &self,
-        _signature: &lash_core_execution::ProcessSignature,
+        _signature: &lash_execution_contracts::process::ProcessSignature,
         _args: &serde_json::Map<String, serde_json::Value>,
-        _mode: lash_core_execution::ArgsMode,
-    ) -> std::result::Result<(), lash_core_execution::ArgsMismatch> {
-        Err(lash_core_execution::ArgsMismatch::UnsupportedSignature {
-            engine_kind: self.kind().into(),
-        })
+        _mode: lash_execution_contracts::process::ArgsMode,
+    ) -> std::result::Result<(), lash_execution_contracts::process::ArgsMismatch> {
+        Err(
+            lash_execution_contracts::process::ArgsMismatch::UnsupportedSignature {
+                engine_kind: self.kind().into(),
+            },
+        )
     }
 
     fn kind(&self) -> &'static str {
@@ -225,14 +254,16 @@ impl ProcessEngine for ProofEngine {
     fn check_settings(
         &self,
         _payload: &serde_json::Value,
-        settings: Option<&lash_core_execution::EngineSettings>,
-    ) -> std::result::Result<(), lash_core_execution::PluginError> {
+        settings: Option<&lash_execution_contracts::process::EngineSettings>,
+    ) -> std::result::Result<(), lash_execution_contracts::plugin_error::PluginError> {
         match settings {
             None => Ok(()),
-            Some(_) => Err(lash_core_execution::PluginError::Registration(format!(
-                "process engine `{}` takes no settings",
-                self.kind()
-            ))),
+            Some(_) => Err(
+                lash_execution_contracts::plugin_error::PluginError::Registration(format!(
+                    "process engine `{}` takes no settings",
+                    self.kind()
+                )),
+            ),
         }
     }
 
@@ -240,8 +271,8 @@ impl ProcessEngine for ProofEngine {
         &self,
         _payload: &serde_json::Value,
     ) -> std::result::Result<
-        Option<lash_core_execution::EngineSettings>,
-        lash_core_execution::PluginError,
+        Option<lash_execution_contracts::process::EngineSettings>,
+        lash_execution_contracts::plugin_error::PluginError,
     > {
         Ok(None)
     }
@@ -334,14 +365,17 @@ impl ProcessEngine for ProofEngine {
     fn start_artifacts(
         &self,
         _payload: &Value,
-    ) -> Result<Vec<lash_core_execution::ArtifactName>, lash_core_execution::PluginError> {
+    ) -> Result<
+        Vec<lash_core_execution::ArtifactName>,
+        lash_execution_contracts::plugin_error::PluginError,
+    > {
         Ok(Vec::new())
     }
 
     async fn end_artifact_referrer(
         &self,
         _cleanup: &lash_core_execution::ResolvedArtifactCleanup,
-    ) -> Result<(), lash_core_execution::ArtifactStoreError> {
+    ) -> Result<(), lash_execution_contracts::module_artifacts::ArtifactStoreError> {
         Ok(())
     }
 
@@ -349,22 +383,26 @@ impl ProcessEngine for ProofEngine {
         &self,
         _claim: &lash_core_execution::ReferrerClaim,
         artifact_ref: &str,
-    ) -> Result<(), lash_core_execution::PluginError> {
-        Err(lash_core_execution::PluginError::Session(format!(
-            "the proof engine stores no artifact `{artifact_ref}`"
-        )))
+    ) -> Result<(), lash_execution_contracts::plugin_error::PluginError> {
+        Err(
+            lash_execution_contracts::plugin_error::PluginError::Session(format!(
+                "the proof engine stores no artifact `{artifact_ref}`"
+            )),
+        )
     }
 
     async fn resolve(
         &self,
-        _reference: &lash_core_execution::ProcessDefinitionRef,
+        _reference: &lash_execution_contracts::process::ProcessDefinitionRef,
     ) -> Result<
-        lash_core_execution::ProcessDefinitionResolution,
-        lash_core_execution::ProcessDefinitionError,
+        lash_execution_contracts::process::ProcessDefinitionResolution,
+        lash_execution_contracts::process::ProcessDefinitionError,
     > {
-        Ok(lash_core_execution::ProcessDefinitionResolution::new(
-            lash_core_execution::ProcessSignature::Unknown,
-        ))
+        Ok(
+            lash_execution_contracts::process::ProcessDefinitionResolution::new(
+                lash_execution_contracts::process::ProcessSignature::Unknown,
+            ),
+        )
     }
 }
 
@@ -564,8 +602,8 @@ fn registration(payload: Value, parent: Option<&ProcessId>) -> ProcessRegistrati
         ProcessInput::Engine {
             kind: KIND.to_owned(),
             payload,
-            launch: lash_core::EngineLaunch::new(
-                lash_core_execution::testing::process_execution_env_fixture_ref(),
+            launch: lash_execution_contracts::process::EngineLaunch::new(
+                lash_execution_contracts::testing::process_execution_env_fixture_ref(),
                 None,
             ),
         },
@@ -677,7 +715,10 @@ impl Proof {
             .await
             .ok()??;
         record.terminal().and_then(|terminal| {
-            serde_json::to_value(lash_core::Durable(&terminal.clone().into_await_output())).ok()
+            serde_json::to_value(lash_protocol_types::Durable(
+                &terminal.clone().into_await_output(),
+            ))
+            .ok()
         })
     }
 }
@@ -805,18 +846,18 @@ impl Scenario for Proof {
                 let backend = self.backend();
                 let envs = backend.process_env_store();
                 let env =
-                    lash_core_execution::testing::process_execution_env_fixture(envs.as_ref())
+                    lash_execution_contracts::testing::process_execution_env_fixture(envs.as_ref())
                         .await;
                 let next = lash_core_execution::testing::publish_process_env_for_testing(
                     envs.as_ref(),
-                    &lash_core_execution::testing::host_pin_claim_for_testing(),
-                    &lash_core_execution::testing::process_env_with_limit(2 * 1024),
+                    &lash_execution_contracts::testing::host_pin_claim_for_testing(),
+                    &lash_execution_contracts::testing::process_env_with_limit(2 * 1024),
                 )
                 .await
                 .map_err(|error| error.to_string())?;
                 assert_eq!(
                     env,
-                    lash_core_execution::testing::process_execution_env_fixture_ref()
+                    lash_execution_contracts::testing::process_execution_env_fixture_ref()
                 );
                 let held = self.register(registration(hold("h"), None)).await?;
                 let started =
@@ -947,7 +988,8 @@ impl Proof {
             .lock_recover()
             .clone()
             .expect("the succession scenario names a successor");
-        let old = lash_core_execution::testing::process_execution_env_fixture_ref().to_string();
+        let old =
+            lash_execution_contracts::testing::process_execution_env_fixture_ref().to_string();
         let new = successor.env.to_string();
         let pairs = self.world.pairs.lock_recover().clone();
         for (step, (doc, record_doc, env)) in &pairs {

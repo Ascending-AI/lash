@@ -72,9 +72,11 @@ fn chain(seen: &Seen) -> StaticPluginFactory {
             calls.lock_recover().push("first".into());
             assert!(!input.previous.parts.is_empty());
             Box::pin(async {
-                Err(lash_core::PluginError::Session(
-                    "presentation fixture failed".into(),
-                ))
+                Err(
+                    lash_execution_contracts::plugin_error::PluginError::Session(
+                        "presentation fixture failed".into(),
+                    ),
+                )
             })
         })
     };
@@ -105,7 +107,11 @@ fn chain(seen: &Seen) -> StaticPluginFactory {
 
 /// A core over `backend` whose model calls [`SLOW`] first and answers
 /// `done` after it, or, when `hold`, never answers after it.
-fn deploy(backend: &lash_core::Backend, seen: &Seen, hold: bool) -> Result<LashCore> {
+fn deploy(
+    backend: &lash_execution_contracts::backend::Backend,
+    seen: &Seen,
+    hold: bool,
+) -> Result<LashCore> {
     let provider = {
         let (requests, asked_after) = (Arc::clone(&seen.requests), Arc::clone(&seen.asked_after));
         lash::testing::TestProvider::builder()

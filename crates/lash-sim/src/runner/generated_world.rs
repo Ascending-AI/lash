@@ -72,7 +72,7 @@ struct GeneratedRuntimeSession {
     /// The session's own engine: its core's node runs every turn of it.
     engine: crate::backend::SimEngine,
     /// The engine's session factory, for reading the session back.
-    reopen: Arc<dyn lash_core::DeploymentStore>,
+    reopen: Arc<dyn lash_execution_contracts::deployment::DeploymentStore>,
     /// The session as the host reaches it durably: its sends, reads and
     /// pending-input cancels.
     durable: lash::DurableSession,
@@ -141,7 +141,7 @@ impl GeneratedRuntimeWorld {
         (
             crate::backend::SimEngine,
             lash::Backend,
-            Arc<dyn lash_core::DeploymentStore>,
+            Arc<dyn lash_execution_contracts::deployment::DeploymentStore>,
         ),
         FixedScriptRunnerError,
     > {
@@ -710,7 +710,7 @@ pub(super) async fn session_content(
     scripts: &[ProviderWireScript],
     emitted_tool_results: Vec<crate::content_oracle::ToolResultContent>,
     durable: &lash::DurableSession,
-    reopen: &dyn lash_core::DeploymentStore,
+    reopen: &dyn lash_execution_contracts::deployment::DeploymentStore,
 ) -> Result<crate::content_oracle::SessionContent, FixedScriptRunnerError> {
     let exchanged = transport.exchanges()?.len();
     let emitted_attempts = scripts

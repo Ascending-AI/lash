@@ -3,12 +3,19 @@
 //! replay rebuilt same-request retries and refuse differing canonical content.
 //! Exercise real SQLite receipt adjudication with an intervening committed head.
 
-use lash_core_execution::store::WindowSelector;
-use lash_core_execution::{
-    ExecutionScope, FleetFormatStore, OperationId, RuntimeCommit, RuntimeSessionState,
-    SessionCatalogStore, SessionCommitStore, SessionHistoryStore, SessionPolicy, StoreError,
-    TurnBudget, TurnInputStore,
-};
+use lash_core_execution::ExecutionScope;
+use lash_core_store::session_policy::SessionPolicy;
+use lash_core_store::session_state::RuntimeSessionState;
+use lash_core_store::store::FleetFormatStore;
+use lash_core_store::store::OperationId;
+use lash_core_store::store::RuntimeCommit;
+use lash_core_store::store::SessionCatalogStore;
+use lash_core_store::store::SessionCommitStore;
+use lash_core_store::store::SessionHistoryStore;
+use lash_core_store::store::StoreError;
+use lash_core_store::store::TurnInputStore;
+use lash_core_store::store::WindowSelector;
+use lash_protocol_types::session_model::TurnBudget;
 use lash_sqlite_store::SqliteStore;
 
 #[tokio::test]
@@ -83,7 +90,7 @@ async fn loaded_state(store: &SqliteStore) -> RuntimeSessionState {
         .await
         .expect("load current window")
         .expect("committed session has a window");
-    lash_core_execution::store::window_state(read, store.fleet_format())
+    lash_core_store::store::window_state(read, store.fleet_format())
         .expect("adopt current window")
         .state
 }
@@ -293,16 +300,18 @@ async fn append_identity_replays_after_head_advance() {
             lash_core::NoProgressBudget::bounded(12),
         ))
     };
-    let nodes = vec![lash_core_execution::SessionAppendNode::plugin(
-        "audit",
-        serde_json::json!({"value": 1}),
-    )];
-    let first = lash_core_execution::store::append_request_commit_with_clock_for_testing(
+    let nodes = vec![
+        lash_protocol_types::session_model::SessionAppendNode::plugin(
+            "audit",
+            serde_json::json!({"value": 1}),
+        ),
+    ];
+    let first = lash_core_store::store::append_request_commit_with_clock_for_testing(
         &mut state,
         "append-audit",
         &nodes,
         None,
-        &lash_core_execution::facade_support::SystemClock,
+        &lash_core_ids::clock::SystemClock,
     )
     .expect("append identity");
     let original = store.commit_runtime_state(first).await.expect("append");
@@ -313,12 +322,12 @@ async fn append_identity_replays_after_head_advance() {
         .await
         .expect("advance head");
     let mut loaded = loaded_state(&store).await;
-    let retry = lash_core_execution::store::append_request_commit_with_clock_for_testing(
+    let retry = lash_core_store::store::append_request_commit_with_clock_for_testing(
         &mut loaded,
         "append-audit",
         &nodes,
         None,
-        &lash_core_execution::facade_support::SystemClock,
+        &lash_core_ids::clock::SystemClock,
     )
     .expect("retry identity");
     let replay = store
@@ -351,7 +360,7 @@ async fn non_append_operations_refuse_append_identity_metadata() {
     for key in ["initial-park", "record-config", "create-session"] {
         let mut attempted = commit("identity-adoption", key, 0);
         attempted.turn_commit.append_request_identity =
-            lash_core_execution::AppendRequestIdentity::Append {
+            lash_core_store::store::AppendRequestIdentity::Append {
                 encoding_version: 1,
                 request_hash: "non-append-semantic-request".into(),
                 requested_node_count: 0,

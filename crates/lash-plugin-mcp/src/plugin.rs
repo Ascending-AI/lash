@@ -4,8 +4,9 @@ use std::collections::BTreeMap;
 use std::sync::Arc;
 
 use async_trait::async_trait;
-use lash_core::plugin::{PluginError, PluginFactory};
+use lash_core::plugin::PluginFactory;
 use lash_core::{ToolCall, ToolContract, ToolId, ToolManifest, ToolOutcome, ToolProvider};
+use lash_execution_contracts::plugin_error::PluginError;
 
 use crate::config::McpServerConfig;
 #[cfg(test)]
@@ -152,11 +153,14 @@ impl PluginFactory for McpPluginFactory {
     /// options under [`MCP_RUN_OPTIONS`] for one run.
     fn recipe(
         self: Arc<Self>,
-    ) -> std::result::Result<lash_core::plugin::PluginRecipe, lash_core::plugin::PluginError> {
+    ) -> std::result::Result<
+        lash_core::plugin::PluginRecipe,
+        lash_execution_contracts::plugin_error::PluginError,
+    > {
         let recipe_factory = Arc::clone(&self);
         let recipe: std::result::Result<
             lash_core::plugin::PluginRecipe,
-            lash_core::plugin::PluginError,
+            lash_execution_contracts::plugin_error::PluginError,
         > = {
             let mut reg = lash_core::plugin::PluginRegistrar::<McpSessionPlugin>::new(
                 lash_core::plugin::PluginFactory::id(self.as_ref()),
@@ -186,7 +190,7 @@ impl McpPluginFactory {
     pub fn declare_configuration(
         &self,
         reg: &mut lash_core::plugin::ConfigRegistrar,
-    ) -> Result<(), lash_core::plugin::ConfigRegistrationError> {
+    ) -> Result<(), lash_execution_contracts::config_error::ConfigRegistrationError> {
         reg.owner_with_run_options(lash_tool_support::ToolSelectionOwner, MCP_RUN_OPTIONS)?;
         reg.command::<lash_tool_support::SetToolSelection>(|_recorded, command| {
             Ok(lash_core::plugin::OwnerChange {
@@ -217,7 +221,7 @@ struct McpSessionPlugin {
 impl McpSessionPlugin {
     fn declare(
         reg: &mut lash_core::plugin::PluginRegistrar<Self>,
-    ) -> std::result::Result<(), lash_core::plugin::PluginError> {
+    ) -> std::result::Result<(), lash_execution_contracts::plugin_error::PluginError> {
         reg.tools().provider(
             lash_core::tool_provider_key!("servers"),
             move |this, _state| {
@@ -229,7 +233,9 @@ impl McpSessionPlugin {
         let family = lash_core::plugin::prompt::PromptSectionKey::new(
             crate::pool::guidance::McpGuidanceSections::FAMILY,
         )
-        .map_err(|error| lash_core::plugin::PluginError::Registration(error.to_string()))?;
+        .map_err(|error| {
+            lash_execution_contracts::plugin_error::PluginError::Registration(error.to_string())
+        })?;
         reg.prompt().family(
             lash_core::plugin::prompt::PromptSectionFamilySpec::new(
                 family,
@@ -342,7 +348,8 @@ impl ToolProvider for McpToolProvider {
     fn tool_manifests(
         &self,
         config: &lash_core::OwnerConfigView,
-    ) -> std::result::Result<Vec<ToolManifest>, lash_core::PluginError> {
+    ) -> std::result::Result<Vec<ToolManifest>, lash_execution_contracts::plugin_error::PluginError>
+    {
         Ok({
             self.offered(config)?
                 .into_iter()
@@ -380,7 +387,8 @@ impl ToolProvider for McpDeferredToolProvider {
     fn tool_manifests(
         &self,
         _config: &lash_core::OwnerConfigView,
-    ) -> std::result::Result<Vec<ToolManifest>, lash_core::PluginError> {
+    ) -> std::result::Result<Vec<ToolManifest>, lash_execution_contracts::plugin_error::PluginError>
+    {
         Ok(Vec::new())
     }
 

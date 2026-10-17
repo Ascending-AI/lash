@@ -12,8 +12,8 @@
 
 use std::collections::{BTreeMap, BTreeSet};
 
-use lash_core::StepName;
 use lash_core_store::checkpoint_graph::NodeId;
+use lash_execution_contracts::process::StepName;
 use lash_kernel_doc::{Datum, DocumentId, EffectIdentity, FunctionId, Name};
 use lash_kernel_state::AdmittedWait;
 use lash_vm_client::wire::OutcomeWire;
@@ -462,7 +462,7 @@ pub(crate) enum KernelRunOutput {
     /// The run ended.
     Ended {
         #[serde(serialize_with = "lash_protocol_types::durable_serde::serialize")]
-        outcome: Box<lash_core::ProcessOutcome>,
+        outcome: Box<lash_execution_contracts::process::ProcessOutcome>,
         /// The segment's statement starts and empty-block entries, by
         /// document site ordinal, at `observe: counts` (FIG-6370).
         #[serde(default, skip_serializing_if = "Vec::is_empty")]

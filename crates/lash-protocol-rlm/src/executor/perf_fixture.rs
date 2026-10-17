@@ -278,7 +278,7 @@ impl CodeModeCheckpointPerfPublisher {
     ///
     /// The store's refusal to create, register or claim.
     pub async fn open(
-        backend: &lash_core::Backend,
+        backend: &lash_execution_contracts::backend::Backend,
         session: &lash_core::SessionId,
     ) -> Result<Self, lash_core::SessionError> {
         let failed = |error: lash_core::durable_port::DurableError| {

@@ -104,7 +104,7 @@ async fn definition_args_checks_partial_and_complete_inputs_without_starting() {
     )
     .unwrap();
     let pin = lash::process::HostArtifactPin::mint();
-    let environment = lash_core::testing::process_env_fixture();
+    let environment = lash_execution_contracts::testing::process_env_fixture();
     let lash::workflow::WorkflowPublish::Published(publication) = core
         .host_artifacts()
         .publish_workflow(
@@ -171,9 +171,11 @@ async fn definition_args_checks_partial_and_complete_inputs_without_starting() {
     assert!(
         matches!(checker.check_args(&definition, &extra, ArgsMode::Partial).await.unwrap(), Err(ArgsMismatch::Argument { path, .. }) if path == "other")
     );
-    let forged = lash_core::ProcessDefinition::new(
+    let forged = lash_execution_contracts::process::ProcessDefinition::new(
         definition.id,
-        lash_core::ProcessSignature::known(serde_json::json!({"forged": true})),
+        lash_execution_contracts::process::ProcessSignature::known(
+            serde_json::json!({"forged": true}),
+        ),
     );
     assert!(matches!(
         checker
@@ -198,18 +200,23 @@ async fn definition_args_checks_partial_and_complete_inputs_without_starting() {
 /// definition resolves through, rather than judging the host's arguments.
 #[cfg(feature = "rlm")]
 struct ScriptedArtifactReads {
-    store: Arc<lash_core::testing::Scripted<dyn lash_core::ModuleArtifactStore>>,
+    store: Arc<
+        lash_core::testing::Scripted<
+            dyn lash_execution_contracts::module_artifacts::ModuleArtifactStore,
+        >,
+    >,
 }
 
 #[cfg(feature = "rlm")]
 #[async_trait]
-impl lash_core::ModuleArtifactStore for ScriptedArtifactReads {
+impl lash_execution_contracts::module_artifacts::ModuleArtifactStore for ScriptedArtifactReads {
     async fn publish_module_artifact(
         &self,
         claim: &lash_core::ReferrerClaim,
         reference: &str,
         bytes: &[u8],
-    ) -> std::result::Result<(), lash_core::ArtifactStoreError> {
+    ) -> std::result::Result<(), lash_execution_contracts::module_artifacts::ArtifactStoreError>
+    {
         self.store
             .inner()
             .publish_module_artifact(claim, reference, bytes)
@@ -220,7 +227,8 @@ impl lash_core::ModuleArtifactStore for ScriptedArtifactReads {
         &self,
         claim: &lash_core::ReferrerClaim,
         reference: &str,
-    ) -> std::result::Result<(), lash_core::ArtifactStoreError> {
+    ) -> std::result::Result<(), lash_execution_contracts::module_artifacts::ArtifactStoreError>
+    {
         self.store
             .inner()
             .acquire_module_artifact(claim, reference)
@@ -230,8 +238,9 @@ impl lash_core::ModuleArtifactStore for ScriptedArtifactReads {
     async fn hold_module_artifacts(
         &self,
         claim: &lash_core::ReferrerClaim,
-        artifacts: &[lash_core::ModuleArtifactHold<'_>],
-    ) -> std::result::Result<(), lash_core::ArtifactStoreError> {
+        artifacts: &[lash_execution_contracts::module_artifacts::ModuleArtifactHold<'_>],
+    ) -> std::result::Result<(), lash_execution_contracts::module_artifacts::ArtifactStoreError>
+    {
         self.store
             .inner()
             .hold_module_artifacts(claim, artifacts)
@@ -241,14 +250,18 @@ impl lash_core::ModuleArtifactStore for ScriptedArtifactReads {
     async fn end_module_referrer(
         &self,
         cleanup: &lash_core::ResolvedArtifactCleanup,
-    ) -> std::result::Result<(), lash_core::ArtifactStoreError> {
+    ) -> std::result::Result<(), lash_execution_contracts::module_artifacts::ArtifactStoreError>
+    {
         self.store.inner().end_module_referrer(cleanup).await
     }
 
     async fn get_module_artifact(
         &self,
         reference: &str,
-    ) -> std::result::Result<Option<Vec<u8>>, lash_core::ArtifactStoreError> {
+    ) -> std::result::Result<
+        Option<Vec<u8>>,
+        lash_execution_contracts::module_artifacts::ArtifactStoreError,
+    > {
         self.store
             .call(
                 lash_core::testing::Op::listed("get_module_artifact"),
@@ -281,7 +294,7 @@ async fn a_saved_definition_start_read_fault_is_an_outer_store_error() {
     )
     .unwrap();
     let pin = lash::process::HostArtifactPin::mint();
-    let environment = lash_core::testing::process_env_fixture();
+    let environment = lash_execution_contracts::testing::process_env_fixture();
     let lash::workflow::WorkflowPublish::Published(publication) = core
         .host_artifacts()
         .publish_workflow(
@@ -318,15 +331,17 @@ async fn a_saved_definition_start_read_fault_is_an_outer_store_error() {
     assert!(
         matches!(
             error,
-            lash::EmbedError::Plugin(lash_core::PluginError::StoreUnavailable {
-                fault: lash_core::store::StoreFault::Contended,
-            })
+            lash::EmbedError::Plugin(
+                lash_execution_contracts::plugin_error::PluginError::StoreUnavailable {
+                    fault: lash_core::store::StoreFault::Contended,
+                }
+            )
         ),
         "the outer error preserves the actual store fault: {error:?}"
     );
     assert!(error.is_retryable());
     assert!(error.artifact_refusal().is_none());
-    let draft = lash_core::ProcessDefinitionDraft::from_store_bytes(
+    let draft = lash_execution_contracts::process::ProcessDefinitionDraft::from_store_bytes(
         &publication.definition.id,
         &core
             .backend()
@@ -370,9 +385,11 @@ async fn a_saved_definition_start_read_fault_is_an_outer_store_error() {
         assert!(
             matches!(
                 error,
-                lash::EmbedError::Plugin(lash_core::PluginError::StoreUnavailable {
-                    fault: lash_core::store::StoreFault::Contended,
-                })
+                lash::EmbedError::Plugin(
+                    lash_execution_contracts::plugin_error::PluginError::StoreUnavailable {
+                        fault: lash_core::store::StoreFault::Contended,
+                    }
+                )
             ),
             "{operation} must preserve the store fault: {error:?}"
         );
@@ -385,14 +402,19 @@ async fn a_saved_definition_start_read_fault_is_an_outer_store_error() {
 /// TEST-PARK-USES-FENCED-AUTHORITY (FIG-6175): quiescent session and process
 /// actors retain typed parks and resume on redrive; no test writer steals a
 /// live claim, changes an unrelated actor, or revives a terminal.
-async fn test_parks_are_typed_fenced_and_redrivable(stores: Arc<dyn lash_core::StoreSet>) {
+async fn test_parks_are_typed_fenced_and_redrivable(
+    stores: Arc<dyn lash_execution_contracts::backend::StoreSet>,
+) {
     use lash::durable::{
         ActorKey, ActorState, CommitLabel, DurableError, MailRefusal, NodeId, NodeSpec, Release,
     };
     let backend = lash::durable::DurableBackendBuilder::new(stores)
         .build()
         .unwrap();
-    lash_core::testing::process_execution_env_fixture(backend.process_env_store().as_ref()).await;
+    lash_execution_contracts::testing::process_execution_env_fixture(
+        backend.process_env_store().as_ref(),
+    )
+    .await;
     let client = standard_core_builder_over(backend.clone())
         .serve_sessions(false)
         .plugin(lash::testing::process_engine_plugin_fixture())
@@ -451,14 +473,14 @@ async fn test_parks_are_typed_fenced_and_redrivable(stores: Arc<dyn lash_core::S
 
     let process_id = backend
         .process_registry()
-        .register_process(lash_core::ProcessRegistration::new(
-            lash_core::ProcessInput::Engine {
+        .register_process(lash_execution_contracts::process::ProcessRegistration::new(
+            lash_execution_contracts::process::ProcessInput::Engine {
                 kind: "testing-fixture".into(),
                 payload: serde_json::Value::Null,
-                launch: lash_core::testing::fixture_engine_launch(),
+                launch: lash_execution_contracts::testing::fixture_engine_launch(),
             },
-            lash_core::ProcessProvenance::host(),
-            lash_core::Lifetime::Detached,
+            lash_execution_contracts::process::ProcessProvenance::host(),
+            lash_execution_contracts::process::Lifetime::Detached,
         ))
         .await
         .unwrap()

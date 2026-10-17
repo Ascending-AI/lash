@@ -891,7 +891,7 @@ impl BoundRegistrar {
         }
     }
 
-    /// Register the pure reducer [`StateCommands::apply`](super::StateCommands::apply)
+    /// Register the pure reducer [`StateCommands::apply`](lash_execution_contracts::state_commands::StateCommands::apply)
     /// names `name` by, for this plugin's namespace.
     pub fn state_reducer(
         &mut self,

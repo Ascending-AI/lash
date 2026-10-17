@@ -14,7 +14,7 @@ use super::*;
 use crate::location::DatabaseLocation;
 #[cfg(any(test, feature = "testing"))]
 use crate::location::validate_file_database_path;
-use lash_core_execution::FleetFormatStore;
+use lash_core_store::store::FleetFormatStore;
 use lash_protocol_types::SessionId;
 
 /// The `synchronous` mode of the stores this crate's test-only constructors
@@ -30,7 +30,7 @@ impl SqliteStore {
         Self::open_file_with_options_and_clock_for_testing(
             path,
             StoreOptions::standard(FIXTURE_SYNCHRONOUS),
-            Arc::new(lash_core_execution::facade_support::SystemClock),
+            Arc::new(lash_core_ids::clock::SystemClock),
         )
         .await
     }
@@ -38,7 +38,7 @@ impl SqliteStore {
     #[cfg(any(test, feature = "testing"))]
     pub async fn open_file_with_clock_for_testing(
         path: &Path,
-        clock: Arc<dyn lash_core_execution::Clock>,
+        clock: Arc<dyn lash_core_ids::clock::Clock>,
     ) -> tokio_rusqlite::Result<Self> {
         Self::open_file_with_options_and_clock_for_testing(
             path,
@@ -56,7 +56,7 @@ impl SqliteStore {
         Self::open_file_with_options_and_clock_for_testing(
             path,
             options,
-            Arc::new(lash_core_execution::facade_support::SystemClock),
+            Arc::new(lash_core_ids::clock::SystemClock),
         )
         .await
     }
@@ -65,14 +65,14 @@ impl SqliteStore {
     pub async fn open_file_with_options_and_clock_for_testing(
         path: &Path,
         options: StoreOptions,
-        clock: Arc<dyn lash_core_execution::Clock>,
+        clock: Arc<dyn lash_core_ids::clock::Clock>,
     ) -> tokio_rusqlite::Result<Self> {
         validate_file_database_path(path, "SqliteStore test fixture")?;
         Self::open_at(
             &DatabaseLocation::standalone_file(path),
             options,
             clock,
-            lash_core_execution::FleetFormat::writable(),
+            lash_core_store::store::FleetFormat::writable(),
             #[cfg(feature = "testing")]
             crate::testing::ConnectionHooks::default(),
         )
@@ -89,7 +89,7 @@ impl SqliteStore {
         Self::open_direct(
             path,
             StoreOptions::standard(synchronous),
-            Arc::new(lash_core_execution::facade_support::SystemClock),
+            Arc::new(lash_core_ids::clock::SystemClock),
             "SqliteStore::open",
         )
         .await
@@ -98,7 +98,7 @@ impl SqliteStore {
     pub async fn open_with_clock(
         path: &Path,
         synchronous: crate::SqliteSynchronous,
-        clock: Arc<dyn lash_core_execution::Clock>,
+        clock: Arc<dyn lash_core_ids::clock::Clock>,
     ) -> tokio_rusqlite::Result<Self> {
         Self::open_direct(
             path,
@@ -116,7 +116,7 @@ impl SqliteStore {
         Self::open_direct(
             path,
             options,
-            Arc::new(lash_core_execution::facade_support::SystemClock),
+            Arc::new(lash_core_ids::clock::SystemClock),
             "SqliteStore::open_with_options",
         )
         .await
@@ -125,7 +125,7 @@ impl SqliteStore {
     pub async fn open_with_options_and_clock(
         path: &Path,
         options: StoreOptions,
-        clock: Arc<dyn lash_core_execution::Clock>,
+        clock: Arc<dyn lash_core_ids::clock::Clock>,
     ) -> tokio_rusqlite::Result<Self> {
         Self::open_direct(
             path,
@@ -139,7 +139,7 @@ impl SqliteStore {
     async fn open_direct(
         path: &Path,
         options: StoreOptions,
-        clock: Arc<dyn lash_core_execution::Clock>,
+        clock: Arc<dyn lash_core_ids::clock::Clock>,
         constructor: &'static str,
     ) -> tokio_rusqlite::Result<Self> {
         let location = crate::location::file_location(path, constructor)?;
@@ -147,7 +147,7 @@ impl SqliteStore {
             &DatabaseLocation::in_backend(&location, None),
             options,
             clock,
-            lash_core_execution::FleetFormat::writable(),
+            lash_core_store::store::FleetFormat::writable(),
             #[cfg(feature = "testing")]
             crate::testing::ConnectionHooks::default(),
         )
@@ -159,20 +159,20 @@ impl SqliteStore {
     ///
     /// Testing seam for FIG-3796's rollout proofs: the recorded row is read
     /// against `writable` rather than this binary's own
-    /// [`lash_core_execution::FleetFormat::writable_range`], so a test can
+    /// [`lash_core_store::store::FleetFormat::writable_range`], so a test can
     /// stand in for a build whose range does — or does not — still write the
     /// generation the fleet recorded. Production opens always pass this
     /// build's range.
     #[cfg(feature = "testing")]
     pub async fn open_with_fleet_writable_range_for_testing(
         path: &Path,
-        writable: lash_core_execution::compat::VersionRange,
-    ) -> Result<Self, lash_core_execution::StoreError> {
+        writable: lash_core_store::compat::VersionRange,
+    ) -> Result<Self, lash_core_store::store::StoreError> {
         validate_file_database_path(path, "Store").map_err(sqlite_async_error)?;
         let store = Self::open_at(
             &DatabaseLocation::standalone_file(path),
             StoreOptions::standard(FIXTURE_SYNCHRONOUS),
-            Arc::new(lash_core_execution::facade_support::SystemClock),
+            Arc::new(lash_core_ids::clock::SystemClock),
             writable,
             crate::testing::ConnectionHooks::default(),
         )
@@ -190,8 +190,8 @@ impl SqliteStore {
     pub(crate) async fn open_at(
         core: &DatabaseLocation,
         options: StoreOptions,
-        clock: Arc<dyn lash_core_execution::Clock>,
-        writable: lash_core_execution::compat::VersionRange,
+        clock: Arc<dyn lash_core_ids::clock::Clock>,
+        writable: lash_core_store::compat::VersionRange,
         #[cfg(feature = "testing")] hooks: crate::testing::ConnectionHooks,
     ) -> tokio_rusqlite::Result<Self> {
         #[cfg(feature = "testing")]
@@ -256,7 +256,7 @@ impl SqliteStore {
             windows: Arc::default(),
             encoded_images: Arc::default(),
             configs,
-            clock: Arc::new(lash_core_execution::facade_support::SystemClock),
+            clock: Arc::new(lash_core_ids::clock::SystemClock),
             options: StoreOptions::standard(FIXTURE_SYNCHRONOUS),
             commit_count: AtomicU64::new(commit_count_entropy_seed()),
             #[cfg(test)]
@@ -300,7 +300,7 @@ impl SqliteStore {
     pub async fn settle_observer_intents(
         &self,
         session_id: &SessionId,
-        remaining: Vec<lash_core_execution::facade_support::SessionObserverIntent>,
+        remaining: Vec<lash_core_store::session_identity::SessionObserverIntent>,
     ) -> Result<(), StoreError> {
         let session_id = session_id.clone();
         self.conn

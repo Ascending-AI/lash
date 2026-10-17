@@ -1,6 +1,7 @@
 //! Publish process workflow projections and kernel carry/park refusals.
 
-use lash_core::{PROCESS_EVENT_VOCABULARY_VERSION, ProcessWorkflowOverlay};
+use lash_core::ProcessWorkflowOverlay;
+use lash_execution_contracts::process::PROCESS_EVENT_VOCABULARY_VERSION;
 use lash_kernel_doc::KERNEL_VERSION;
 use lash_kernel_migrate::{KernelMigrationRefusal, ParkedRefusal};
 use schemars::JsonSchema;

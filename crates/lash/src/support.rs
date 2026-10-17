@@ -1,26 +1,46 @@
 pub(crate) use std::sync::Arc;
 
 pub(crate) use async_trait::async_trait;
+pub(crate) use lash_core::LiveReplayStore;
+pub(crate) use lash_core::ProcessWorkWiring;
+pub(crate) use lash_core::SessionCreationHead;
+pub(crate) use lash_core::SessionListFilter;
+pub(crate) use lash_core::SessionPolicy;
+pub(crate) use lash_core::SessionStoreCreateRequest;
+pub(crate) use lash_core::SessionView;
+pub(crate) use lash_core::facade_support::InMemoryLiveReplayStore;
+pub(crate) use lash_core::facade_support::LashRuntime;
+pub(crate) use lash_core::facade_support::PluginHost;
+pub(crate) use lash_core::facade_support::PluginSpec;
+pub(crate) use lash_core::facade_support::PluginStack;
+pub(crate) use lash_core::facade_support::RuntimeEnvironment;
+pub(crate) use lash_core::facade_support::RuntimeHandle;
+pub(crate) use lash_core::facade_support::RuntimeHostConfig;
+pub(crate) use lash_core::facade_support::RuntimeObservation;
 pub(crate) use lash_core::plugin::StaticPluginFactory;
 pub(crate) use lash_core::runtime::RuntimeSessionState;
-pub(crate) use lash_core::{
-    LiveReplayStore, ProcessHandleView, ProcessWorkWiring, SessionCreationHead, SessionListFilter,
-    SessionPolicy, SessionStoreCreateRequest, SessionView, facade_support::InMemoryLiveReplayStore,
-    facade_support::LashRuntime, facade_support::PluginHost, facade_support::PluginSpec,
-    facade_support::PluginStack, facade_support::RuntimeEnvironment, facade_support::RuntimeHandle,
-    facade_support::RuntimeHostConfig, facade_support::RuntimeObservation,
-    facade_support::SessionSpec,
-};
+pub(crate) use lash_execution_contracts::process::ProcessHandleView;
+pub(crate) use lash_execution_contracts::session_spec::SessionSpec;
 
-pub(crate) use lash_core::InputItem;
+pub(crate) use lash_core::SessionCursor;
+pub(crate) use lash_core::SessionError;
+pub(crate) use lash_core::ToolProvider;
+pub(crate) use lash_core::facade_support::PluginFactory;
+pub(crate) use lash_core::facade_support::SessionObservation;
+pub(crate) use lash_core::facade_support::SessionObservationSubscription;
+pub(crate) use lash_core::facade_support::SessionResume;
+pub(crate) use lash_core::facade_support::TurnActivitySink;
 pub(crate) use lash_core::plugin::runtime_host::SessionStateService;
-pub(crate) use lash_core::{
-    DeploymentStore, PluginMessage, ProcessRegistry, RuntimeErrorCode, SessionCursor, SessionError,
-    SessionReadView, SessionScope, ToolCallRecord, ToolProvider, facade_support::PluginFactory,
-    facade_support::SessionObservation, facade_support::SessionObservationSubscription,
-    facade_support::SessionResume, facade_support::TurnActivitySink, facade_support::TurnOutcome,
-};
 pub(crate) use lash_core::{TurnActivity, TurnInput};
+pub(crate) use lash_core_store::runtime_error::RuntimeErrorCode;
+pub(crate) use lash_core_store::session_read_view::SessionReadView;
+pub(crate) use lash_core_store::turn_input_vocabulary::InputItem;
+pub(crate) use lash_execution_contracts::deployment::DeploymentStore;
+pub(crate) use lash_execution_contracts::process::ProcessRegistry;
+pub(crate) use lash_execution_contracts::process::SessionScope;
+pub(crate) use lash_protocol_types::plugin::PluginMessage;
+pub(crate) use lash_protocol_types::session_model::TurnOutcome;
+pub(crate) use lash_protocol_types::tool_output::ToolCallRecord;
 
 pub(crate) use crate::admin::{PluginOperations, SessionAdmin};
 pub(crate) use crate::core::{LashCore, build_plugin_host};

@@ -61,7 +61,7 @@ fn checkpoint_with_changed_components(depth: usize) -> HydratedSessionCheckpoint
             .map(|index| {
                 (
                     format!("arbitrary/depth-invariance/{index:05}"),
-                    lash_core_execution::HydratedCheckpointComponent::changed(
+                    lash_core_store::store::HydratedCheckpointComponent::changed(
                         format!("depth-invariance-body-{index:05}").into_bytes(),
                     ),
                 )
@@ -80,7 +80,7 @@ fn checkpoint_with_unchanged_components(manifest: &SessionCheckpoint) -> Hydrate
             .map(|(key, descriptor)| {
                 (
                     key.clone(),
-                    lash_core_execution::HydratedCheckpointComponent::unchanged(descriptor),
+                    lash_core_store::store::HydratedCheckpointComponent::unchanged(descriptor),
                 )
             })
             .collect(),
@@ -105,7 +105,7 @@ async fn checkpoint_component_statement_count_is_depth_invariant_when_configured
         let seed_manifest = support::put_checkpoint_tx(
             &mut tx,
             &checkpoint_with_changed_components(depth),
-            lash_core_execution::FleetFormat::current(),
+            lash_core_store::store::FleetFormat::current(),
             crate::host::MaintenancePolicy::default().checkpoint_ref_chunk as usize,
         )
         .await
@@ -118,7 +118,7 @@ async fn checkpoint_component_statement_count_is_depth_invariant_when_configured
             count_checkpoint_data_statements(support::put_checkpoint_tx(
                 &mut tx,
                 &unchanged,
-                lash_core_execution::FleetFormat::current(),
+                lash_core_store::store::FleetFormat::current(),
                 crate::host::MaintenancePolicy::default().checkpoint_ref_chunk as usize,
             ))
             .await;
@@ -132,7 +132,7 @@ async fn checkpoint_component_statement_count_is_depth_invariant_when_configured
             count_checkpoint_data_statements(support::get_checkpoint_tx(
                 &mut tx,
                 &checkpoint_ref,
-                lash_core_execution::FleetFormat::current(),
+                lash_core_store::store::FleetFormat::current(),
                 crate::host::MaintenancePolicy::default().checkpoint_ref_chunk as usize,
             ))
             .await;

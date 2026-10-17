@@ -21,14 +21,14 @@ impl SqliteStore {
     /// report counts every blob those steps and peels deleted, and the roots
     /// and blobs stored once the audit ended: with nothing held and no
     /// orphan left in the DAG, every stored blob is one a root reaches.
-    pub async fn gc_unreachable(&self) -> lash_core_execution::MaintenanceResult<GcReport> {
+    pub async fn gc_unreachable(&self) -> lash_core_store::store::MaintenanceResult<GcReport> {
         let mut report = GcReport::default();
         let outcome = self.collect(&mut report).await;
         outcome.map(|()| report.clone()).map_err(|error| {
             if report.deleted_blob_count == 0 {
-                lash_core_execution::MaintenanceFailure::failed_before_any_work(error)
+                lash_core_store::store::MaintenanceFailure::failed_before_any_work(error)
             } else {
-                lash_core_execution::MaintenanceFailure::failed(error, report)
+                lash_core_store::store::MaintenanceFailure::failed(error, report)
             }
         })
     }

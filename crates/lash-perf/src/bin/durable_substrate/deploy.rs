@@ -12,12 +12,14 @@ use std::time::{Duration, Instant};
 use anyhow::{Context as _, Result, bail};
 use lash_core::runtime::durable::node::{NodeServe, serve};
 use lash_core::runtime::durable::session::SessionActivation;
+use lash_core_execution::DurableSettings;
 use lash_core_execution::runtime::actor::process::ProcessActivation;
-use lash_core_execution::{
-    Backend, BackendParts, DurableSettings, NoProjectionProviders, StoreSet,
-};
 use lash_durable::runner::{Drain, Stopped};
 use lash_durable::{DurableError, NoProbe, NodeId};
+use lash_execution_contracts::backend::Backend;
+use lash_execution_contracts::backend::BackendParts;
+use lash_execution_contracts::backend::StoreSet;
+use lash_execution_contracts::projection::NoProjectionProviders;
 use lash_postgres_store::{
     PostgresEndpoints, PostgresHostConfig, PostgresStorage, PostgresStoreSet,
 };
@@ -163,7 +165,7 @@ impl Deployment {
         let (stores, storage) = self.stores().await?;
         // Registration acquires this content-addressed environment. Publish
         // its bytes before any process measurement or recording begins.
-        lash_core_execution::testing::process_execution_env_fixture(
+        lash_execution_contracts::testing::process_execution_env_fixture(
             stores.process_env_store().as_ref(),
         )
         .await;

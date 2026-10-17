@@ -312,12 +312,17 @@ impl PluginHost {
 
     /// This host's plugins in hook order ([`super::PluginComposition`]): the
     /// builtin factories, then the embedder's, each as it declares itself.
-    pub fn composition(&self) -> Result<super::PluginComposition, super::PluginDeclarationError> {
+    pub fn composition(
+        &self,
+    ) -> Result<
+        super::PluginComposition,
+        lash_execution_contracts::declaration_error::PluginDeclarationError,
+    > {
         let mut declarations = Vec::with_capacity(self.factories().len());
         for factory in self.factories() {
             let declaration = factory.plugin_declaration();
             if declaration.id.as_str() != factory.id() {
-                return Err(super::PluginDeclarationError::IdMismatch {
+                return Err(lash_execution_contracts::declaration_error::PluginDeclarationError::IdMismatch {
                     factory: factory.id().to_owned(),
                     declared: declaration.id.as_str().to_owned(),
                 });
@@ -407,7 +412,7 @@ impl PluginHost {
     }
 
     /// Ask every factory for its process-engine contributions and register them
-    /// on `runtime_host`, enforcing unique [`ProcessEngine::kind`](crate::ProcessEngine::kind)
+    /// on `runtime_host`, enforcing unique [`ProcessEngine::kind`](lash_execution_contracts::process::ProcessEngine::kind)
     /// across all engines (directly wired or plugin-contributed).
     ///
     /// This is the core-owned installation step that replaces facade-level

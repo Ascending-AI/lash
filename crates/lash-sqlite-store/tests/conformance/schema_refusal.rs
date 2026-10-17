@@ -1,6 +1,6 @@
 use super::SqliteProcessRegistry;
-use lash_core_execution::StoreSchemaVerdict;
-use lash_core_execution::compat::CompatRefusal;
+use lash_core_store::compat::CompatRefusal;
+use lash_core_store::store::StoreSchemaVerdict;
 use lash_sqlite_store::{SqliteStore, verify_schema_at};
 
 #[tokio::test]
@@ -14,13 +14,12 @@ async fn sqlite_open_refusal_names_the_writing_release() {
     );
     let conn = rusqlite::Connection::open(&path).expect("open stamp");
     // One above the durable-core versions this build reads, in its tier.
-    let above = lash_core_execution::compat::descriptor(
-        lash_core_execution::compat::ComponentId::SQLITE_CORE,
-    )
-    .expect("the build declares the durable core")
-    .reads
-    .max()
-        + 1;
+    let above =
+        lash_core_store::compat::descriptor(lash_core_store::compat::ComponentId::SQLITE_CORE)
+            .expect("the build declares the durable core")
+            .reads
+            .max()
+            + 1;
     conn.execute(
         "UPDATE lash_compat SET version = ?1, min_reader = ?1",
         [above],

@@ -9,12 +9,12 @@ fn owned_registration(id: &str) -> ProcessRegistration {
             kind: "cancel-conformance".to_string(),
             payload: serde_json::json!({"id": id}),
             launch: crate::EngineLaunch::new(
-                lash_core::testing::process_execution_env_fixture_ref(),
+                lash_execution_contracts::testing::process_execution_env_fixture_ref(),
                 None,
             ),
         },
         ProcessProvenance::host(),
-        lash_core::Lifetime::Detached,
+        lash_execution_contracts::process::Lifetime::Detached,
     )
 }
 

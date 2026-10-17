@@ -99,7 +99,7 @@ const PAUSE: std::time::Duration = std::time::Duration::from_millis(60);
 
 /// An observed RLM core serving `tools`, whose model answers `responses`.
 fn observed_core(
-    backend: lash_core::Backend,
+    backend: lash_execution_contracts::backend::Backend,
     tools: &Tools,
     responses: Vec<LlmResponse>,
 ) -> Result<(Observed, LashCore)> {

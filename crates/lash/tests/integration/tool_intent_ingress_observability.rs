@@ -20,10 +20,10 @@ async fn test_core() -> lash::Result<(lash::LashCore, ProcessId, ProcessId)> {
     for _ in 0..2 {
         let process = registry
             .register_process_with_observers(
-                lash_core::testing::held_engine_registration(
+                lash_execution_contracts::testing::held_engine_registration(
                     serde_json::Value::Null,
                     lash::process::ProcessProvenance::host(),
-                    lash_core::Lifetime::Detached,
+                    lash_execution_contracts::process::Lifetime::Detached,
                 ),
                 &[SessionId::fixture(SESSION.to_string())],
             )

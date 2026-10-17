@@ -108,7 +108,10 @@ impl lash::plugins::PluginFactory for FaultingCatalog {
 
     fn recipe(
         self: Arc<Self>,
-    ) -> std::result::Result<lash_core::plugin::PluginRecipe, lash_core::plugin::PluginError> {
+    ) -> std::result::Result<
+        lash_core::plugin::PluginRecipe,
+        lash_execution_contracts::plugin_error::PluginError,
+    > {
         let mut reg = lash_core::plugin::PluginRegistrar::<FaultingCatalog>::new(
             lash_core::plugin::PluginFactory::id(self.as_ref()),
         );
@@ -130,7 +133,7 @@ impl lash::plugins::SessionPlugin for FaultingCatalog {
 impl FaultingCatalog {
     fn declare(
         reg: &mut lash_core::plugin::PluginRegistrar<Self>,
-    ) -> std::result::Result<(), lash_core::plugin::PluginError> {
+    ) -> std::result::Result<(), lash_execution_contracts::plugin_error::PluginError> {
         reg.tool_catalog().contribute(
             lash::hook_key!("faulting-catalog"),
             move |this, _state| {
@@ -484,7 +487,10 @@ impl lash_core::ToolProvider for Holding {
     fn tool_manifests(
         &self,
         _config: &lash_core::OwnerConfigView,
-    ) -> std::result::Result<Vec<lash_core::ToolManifest>, lash_core::PluginError> {
+    ) -> std::result::Result<
+        Vec<lash_core::ToolManifest>,
+        lash_execution_contracts::plugin_error::PluginError,
+    > {
         Ok(vec![hold_definition().manifest()])
     }
 
@@ -530,7 +536,10 @@ impl lash_core::ToolProvider for Flaky {
     fn tool_manifests(
         &self,
         _config: &lash_core::OwnerConfigView,
-    ) -> std::result::Result<Vec<lash_core::ToolManifest>, lash_core::PluginError> {
+    ) -> std::result::Result<
+        Vec<lash_core::ToolManifest>,
+        lash_execution_contracts::plugin_error::PluginError,
+    > {
         Ok(vec![flaky_definition().manifest()])
     }
 

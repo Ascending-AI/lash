@@ -2,7 +2,9 @@
 //! (ADR 0109 §9), on its `session_meta` row.
 
 use super::*;
-use lash_core_execution::store::{SessionFault, SessionFaultRecord, SessionFaultStore};
+use lash_core_store::store::SessionFault;
+use lash_core_store::store::SessionFaultRecord;
+use lash_core_store::store::SessionFaultStore;
 
 /// The session's standing fault (ADR 0109 §9).
 async fn session_fault_conn(

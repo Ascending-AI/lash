@@ -11,8 +11,8 @@
 
 use std::sync::Arc;
 
-use lash_core::Backend;
 use lash_core::sync::MutexExt as _;
+use lash_execution_contracts::backend::Backend;
 
 use crate::runner::FixedScriptRunnerError;
 use crate::store::{CheckpointWriteCollector, ObservedDeploymentStore};

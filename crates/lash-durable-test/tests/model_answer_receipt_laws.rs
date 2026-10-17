@@ -75,12 +75,15 @@ use lash_core::llm::types::{
 };
 use lash_core::runtime::durable::session::SessionActivation;
 use lash_core::{ExecutionPolicy, LlmOutputPart, LlmUsage, ToolCall, ToolOutcome};
-use lash_core_execution::{Backend, BackendParts, NoProjectionProviders, StoreSet};
 use lash_durable::runner::Activation;
 use lash_durable::{ActorKey, ActorState, CommitLabel};
 use lash_durable_test::{
     Fault, Matrix, Script, SimClock, SimNodes, SimNodesConfig, Stored, Tripwire,
 };
+use lash_execution_contracts::backend::Backend;
+use lash_execution_contracts::backend::BackendParts;
+use lash_execution_contracts::backend::StoreSet;
+use lash_execution_contracts::projection::NoProjectionProviders;
 use lash_protocol_types::SessionId;
 use lash_protocol_types::sync::MutexExt as _;
 use serde_json::{Value, json};
@@ -694,7 +697,7 @@ impl Deployment {
                 Arc::new(lash_core_store::attachments::UnavailableAttachmentStore),
                 clock.clone(),
             );
-            lash_core_execution::testing::process_execution_env_fixture(
+            lash_execution_contracts::testing::process_execution_env_fixture(
                 stores.process_env_store().as_ref(),
             )
             .await;

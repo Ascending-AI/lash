@@ -2,7 +2,7 @@
 
 use std::sync::Arc;
 
-use lash_core_execution::SessionCatalogStore as _;
+use lash_core_store::store::SessionCatalogStore as _;
 
 use super::{reset, storage};
 

@@ -1,14 +1,16 @@
 use crate::ProcessId;
 use crate::SessionId;
-use crate::plugin::PluginError;
+use lash_execution_contracts::plugin_error::PluginError;
 
-use super::events::ProcessAwaitOutput;
-use super::model::{
-    ProcessCancelReceipt, ProcessHandleView, ProcessListMode, ProcessStartOptions,
-    ProcessStartRegistration, ProcessStartRequest,
-};
 use super::op_scope::ProcessOpScope;
 use super::start_staging::StagedProcessStart;
+use lash_execution_contracts::process::ProcessAwaitOutput;
+use lash_execution_contracts::process::ProcessCancelReceipt;
+use lash_execution_contracts::process::ProcessHandleView;
+use lash_execution_contracts::process::ProcessListMode;
+use lash_execution_contracts::process::ProcessStartOptions;
+use lash_execution_contracts::process::ProcessStartRegistration;
+use lash_execution_contracts::process::ProcessStartRequest;
 
 /// Optional factory-scoped filter for the session process tools only.
 ///
@@ -40,7 +42,7 @@ pub trait ProcessService: Send + Sync {
         &self,
         owner: &crate::RuntimeOwner,
         mode: ProcessListMode,
-    ) -> Result<Vec<super::observation::ObservedProcess>, PluginError>;
+    ) -> Result<Vec<lash_execution_contracts::process::ObservedProcess>, PluginError>;
 
     async fn start_from_request(
         &self,
@@ -94,7 +96,7 @@ pub trait ProcessService: Send + Sync {
         registration: ProcessStartRegistration,
         options: ProcessStartOptions,
         scope: ProcessOpScope<'_>,
-    ) -> Result<super::observation::ObservedProcess, PluginError>;
+    ) -> Result<lash_execution_contracts::process::ObservedProcess, PluginError>;
 
     async fn await_process(
         &self,
@@ -138,7 +140,7 @@ pub trait ProcessService: Send + Sync {
         session_id: &SessionId,
         mode: ProcessListMode,
         scope: ProcessOpScope<'_>,
-    ) -> Result<Vec<super::observation::ObservedProcess>, PluginError>;
+    ) -> Result<Vec<lash_execution_contracts::process::ObservedProcess>, PluginError>;
 
     /// A session may address the processes it observes; a process, the ones
     /// whose recorded ancestry names it as their immediate starter.
@@ -154,7 +156,7 @@ pub trait ProcessService: Send + Sync {
         owner: &crate::RuntimeOwner,
         process_id: &ProcessId,
         scope: ProcessOpScope<'_>,
-    ) -> Result<super::observation::ObservedProcess, PluginError>;
+    ) -> Result<lash_execution_contracts::process::ObservedProcess, PluginError>;
 
     /// Journal-first cancellation used only by the recorded intent protocol.
     async fn cancel_recorded_intent(
@@ -163,7 +165,7 @@ pub trait ProcessService: Send + Sync {
         process_id: &ProcessId,
         identity: crate::ToolIntentIdentity,
         scope: ProcessOpScope<'_>,
-    ) -> Result<super::observation::ObservedProcess, PluginError>;
+    ) -> Result<lash_execution_contracts::process::ObservedProcess, PluginError>;
 
     async fn cancel_all_visible(
         &self,

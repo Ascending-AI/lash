@@ -14,7 +14,7 @@
 
 use std::sync::LazyLock;
 
-use lash_core_execution::store_backend_support as vocabulary;
+use lash_core_store::store_backend_support as vocabulary;
 use lash_store_sql::turn_ingress::{
     TurnIngressStatements, cancel_requests::CancelRequestStatements,
     forsaken_inputs::ForsakenInputStatements, pending_inputs::PendingInputStatements,
@@ -36,7 +36,7 @@ pub(crate) use tool_intents::ToolIntentSubmissionSqliteStatements;
 /// The `pending_turn_inputs.state` partitions this family's statements name.
 ///
 /// Every expansion is generated from
-/// [`TurnInputStateKind`](lash_core_execution::runtime::TurnInputStateKind), so adding a state is
+/// [`TurnInputStateKind`](lash_core_store::turn_input_vocabulary::TurnInputStateKind), so adding a state is
 /// one edit in `lash-core-store` rather than one per statement. The term names
 /// are the domain's, and PostgreSQL registers the same ten.
 pub(crate) const TURN_INPUT_LIFECYCLE: Vocabulary = Vocabulary::new(&[

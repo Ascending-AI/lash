@@ -213,7 +213,7 @@ impl RuntimeBoundaryHarness {
                     args,
                     output: ToolCallOutput::success(output.clone()),
                 }),
-                intents: lash_core::ToolIntents::default(),
+                intents: lash_execution_contracts::tool_intent::ToolIntents::default(),
             }),
         };
         let (outcome, execution_count) = self
@@ -232,8 +232,8 @@ impl RuntimeBoundaryHarness {
             "tool_name": tool_name,
             "tool_call_id": event.boundary_id,
             "execution_count": execution_count,
-            "runtime_tool_output": lash_core::Durable(&record.output),
-            "runtime_tool_record": lash_core::Durable(&record),
+            "runtime_tool_output": lash_protocol_types::Durable(&record.output),
+            "runtime_tool_record": lash_protocol_types::Durable(&record),
             "runtime_effect": {
                 "kind": RuntimeEffectKind::ToolAttempt.as_str(),
                 "controller": RUNTIME_EFFECT_CONTROLLER,
@@ -475,7 +475,7 @@ impl RuntimeBoundaryHarness {
                 "provider_call_id": record.provider_call_id,
                 "tool": record.tool,
                 "args": record.args,
-                "output": lash_core::Durable(&record.output),
+                "output": lash_protocol_types::Durable(&record.output),
             },
         }))
     }
@@ -593,7 +593,10 @@ impl lash_core::ToolProvider for OpaqueEffectTool {
     fn tool_manifests(
         &self,
         _config: &lash_core::OwnerConfigView,
-    ) -> std::result::Result<Vec<lash_core::ToolManifest>, lash_core::PluginError> {
+    ) -> std::result::Result<
+        Vec<lash_core::ToolManifest>,
+        lash_execution_contracts::plugin_error::PluginError,
+    > {
         Ok(vec![Self::definition().manifest()])
     }
 

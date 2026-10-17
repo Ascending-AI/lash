@@ -7,7 +7,7 @@ use super::*;
 
 use std::time::Duration;
 
-use lash_core::StoreSet as _;
+use lash_execution_contracts::backend::StoreSet as _;
 
 /// One node of a SQLite database file: a core of its own over a store set
 /// of its own.
@@ -41,7 +41,10 @@ async fn a_commit_on_one_core_ticks_the_process_change_hub_of_another() {
     let dir = tempfile::tempdir().expect("two-core tempdir");
     let database = dir.path().join("lash.db");
     let (stores, core_a) = core_on(&database, "fig-5549-follower").await;
-    lash_core::testing::process_execution_env_fixture(stores.process_env_store().as_ref()).await;
+    lash_execution_contracts::testing::process_execution_env_fixture(
+        stores.process_env_store().as_ref(),
+    )
+    .await;
     let (_stores_b, core_b) = core_on(&database, "fig-5549-committer").await;
     // Both nodes listen before the commit: each holds its boot's liveness
     // lock once its listener is open.
@@ -60,10 +63,10 @@ async fn a_commit_on_one_core_ticks_the_process_change_hub_of_another() {
 
     let committer = core_b.process_registry.clone();
     let process_id = committer
-        .register_process(lash_core::ProcessRegistration::new(
-            lash_core::testing::held_engine_input(serde_json::Value::Null),
-            lash_core::ProcessProvenance::host(),
-            lash_core::Lifetime::Detached,
+        .register_process(lash_execution_contracts::process::ProcessRegistration::new(
+            lash_execution_contracts::testing::held_engine_input(serde_json::Value::Null),
+            lash_execution_contracts::process::ProcessProvenance::host(),
+            lash_execution_contracts::process::Lifetime::Detached,
         ))
         .await
         .expect("register on core B")
@@ -73,10 +76,12 @@ async fn a_commit_on_one_core_ticks_the_process_change_hub_of_another() {
     let terminal = committer
         .complete_process(
             &process_id,
-            lash_core::ProcessAwaitOutput::from_tool_output(lash_core::ToolCallOutput::success(
-                serde_json::Value::Null,
-            )),
-            lash_core::ProcessCompletionAuthority::workflow_key(&process_id),
+            lash_execution_contracts::process::ProcessAwaitOutput::from_tool_output(
+                lash_core::ToolCallOutput::success(serde_json::Value::Null),
+            ),
+            lash_execution_contracts::process::ProcessCompletionAuthority::workflow_key(
+                &process_id,
+            ),
         )
         .await
         .expect("complete on core B");
@@ -114,10 +119,10 @@ async fn a_terminal_wait_wakes_on_the_process_change_hub() {
         .expect("standard core");
     let registry = core.process_registry.clone();
     let process_id = registry
-        .register_process(lash_core::ProcessRegistration::new(
-            lash_core::testing::held_engine_input(serde_json::Value::Null),
-            lash_core::ProcessProvenance::host(),
-            lash_core::Lifetime::Detached,
+        .register_process(lash_execution_contracts::process::ProcessRegistration::new(
+            lash_execution_contracts::testing::held_engine_input(serde_json::Value::Null),
+            lash_execution_contracts::process::ProcessProvenance::host(),
+            lash_execution_contracts::process::Lifetime::Detached,
         ))
         .await
         .expect("register the process")
@@ -138,10 +143,12 @@ async fn a_terminal_wait_wakes_on_the_process_change_hub() {
     registry
         .complete_process(
             &process_id,
-            lash_core::ProcessAwaitOutput::from_tool_output(lash_core::ToolCallOutput::success(
-                serde_json::Value::Null,
-            )),
-            lash_core::ProcessCompletionAuthority::workflow_key(&process_id),
+            lash_execution_contracts::process::ProcessAwaitOutput::from_tool_output(
+                lash_core::ToolCallOutput::success(serde_json::Value::Null),
+            ),
+            lash_execution_contracts::process::ProcessCompletionAuthority::workflow_key(
+                &process_id,
+            ),
         )
         .await
         .expect("complete the process");
@@ -152,6 +159,6 @@ async fn a_terminal_wait_wakes_on_the_process_change_hub() {
         .expect("the terminal is read");
     assert!(matches!(
         output,
-        lash_core::ProcessAwaitOutput::Settled { .. }
+        lash_execution_contracts::process::ProcessAwaitOutput::Settled { .. }
     ));
 }

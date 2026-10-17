@@ -8,7 +8,7 @@ use lash_core::{
     AttachmentCreateMeta, AttachmentRef, AttachmentStore, AttachmentStoreError,
     ToolDefinitionBindingExt as _, ToolProvider,
 };
-use lash_core_execution::StoreSet;
+use lash_execution_contracts::backend::StoreSet;
 use lash_protocol_types::sync::MutexExt as _;
 use lash_protocol_types::{
     llm::attachment_delivery::AttachmentPosition, llm::attachment_delivery::Delivery,
@@ -126,41 +126,51 @@ impl StoreSet for LawStores {
     fn node_wakes(&self) -> Option<Arc<dyn lash_durable::NodeWakes>> {
         self.inner.node_wakes()
     }
-    fn binding_identity(&self) -> &lash_core_execution::StoreBindingId {
+    fn binding_identity(&self) -> &lash_execution_contracts::backend::StoreBindingId {
         self.inner.binding_identity()
     }
     fn clock(&self) -> Arc<dyn lash_core::Clock> {
         self.inner.clock()
     }
-    fn session_store_factory(&self) -> Arc<dyn lash_core::DeploymentStore> {
+    fn session_store_factory(
+        &self,
+    ) -> Arc<dyn lash_execution_contracts::deployment::DeploymentStore> {
         self.inner.session_store_factory()
     }
     fn attachment_referrers(&self) -> Arc<dyn lash_core_execution::store::AttachmentReferrers> {
         self.inner.attachment_referrers()
     }
-    fn process_registry(&self) -> Arc<dyn lash_core::ProcessRegistry> {
+    fn process_registry(&self) -> Arc<dyn lash_execution_contracts::process::ProcessRegistry> {
         self.inner.process_registry()
     }
-    fn process_authority_reads(&self) -> Arc<dyn lash_core::ProcessAuthorityReads> {
+    fn process_authority_reads(
+        &self,
+    ) -> Arc<dyn lash_execution_contracts::backend::ProcessAuthorityReads> {
         self.inner.process_authority_reads()
     }
 
-    fn process_env_store(&self) -> Arc<dyn lash_core::ProcessEnvStore> {
+    fn process_env_store(&self) -> Arc<dyn lash_execution_contracts::process::ProcessEnvStore> {
         self.inner.process_env_store()
     }
-    fn turn_prelude_store(&self) -> Arc<dyn lash_core_execution::TurnPreludeStore> {
+    fn turn_prelude_store(
+        &self,
+    ) -> Arc<dyn lash_execution_contracts::turn_prelude::TurnPreludeStore> {
         self.inner.turn_prelude_store()
     }
     fn tool_material_store(&self) -> Arc<dyn lash_core_execution::store::ToolMaterialStore> {
         self.inner.tool_material_store()
     }
-    fn definition_store(&self) -> Arc<dyn lash_core_execution::ProcessDefinitionStore> {
+    fn definition_store(
+        &self,
+    ) -> Arc<dyn lash_execution_contracts::process::ProcessDefinitionStore> {
         self.inner.definition_store()
     }
     fn attachment_store(&self) -> Arc<dyn lash_core::AttachmentStore> {
         self.attachments.clone()
     }
-    fn module_artifacts(&self) -> Arc<dyn lash_core::ModuleArtifactStore> {
+    fn module_artifacts(
+        &self,
+    ) -> Arc<dyn lash_execution_contracts::module_artifacts::ModuleArtifactStore> {
         self.inner.module_artifacts()
     }
     fn recovery_leader(&self) -> Arc<dyn lash_core_execution::store::RecoveryLeaderStore> {
@@ -195,7 +205,10 @@ impl ToolProvider for NestedMedia {
     fn tool_manifests(
         &self,
         _config: &lash_core::OwnerConfigView,
-    ) -> std::result::Result<Vec<lash_core::ToolManifest>, lash_core::PluginError> {
+    ) -> std::result::Result<
+        Vec<lash_core::ToolManifest>,
+        lash_execution_contracts::plugin_error::PluginError,
+    > {
         Ok(vec![definition().manifest()])
     }
     fn resolve_contract(
@@ -482,7 +495,10 @@ impl ToolProvider for ReceiptTool {
     fn tool_manifests(
         &self,
         _config: &lash_core::OwnerConfigView,
-    ) -> std::result::Result<Vec<lash_core::ToolManifest>, lash_core::PluginError> {
+    ) -> std::result::Result<
+        Vec<lash_core::ToolManifest>,
+        lash_execution_contracts::plugin_error::PluginError,
+    > {
         Ok(vec![definition().manifest()])
     }
 

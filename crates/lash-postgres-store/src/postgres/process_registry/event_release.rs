@@ -28,7 +28,7 @@ pub(super) async fn release_process_events(
     registry: &PostgresProcessRegistry,
     process_id: &ProcessId,
     through: u64,
-) -> Result<lash_core_execution::ProcessEventRelease, PluginError> {
+) -> Result<lash_execution_contracts::process::ProcessEventRelease, PluginError> {
     let mut tx = begin_guarded(&registry.pool, &registry.fence)
         .await
         .map_err(plugin_store_error)?;
@@ -37,7 +37,7 @@ pub(super) async fn release_process_events(
     let target = through.min(record.last_event_sequence);
     if target <= previous {
         tx.rollback().await.map_err(plugin_sqlx_error)?;
-        return Ok(lash_core_execution::ProcessEventRelease {
+        return Ok(lash_execution_contracts::process::ProcessEventRelease {
             released_through: previous,
             released_events: 0,
         });
@@ -63,9 +63,9 @@ pub(super) async fn release_process_events(
             let sequence: i64 = row.get(0);
             let event = ProcessEvent::decode(&row.get::<String, _>(1), registry.fence.fleet())?;
             if let Some(digest) =
-                lash_core_execution::runtime::release_process_event_payload(&event)
+                lash_execution_contracts::process::release_process_event_payload(&event)
             {
-                let released = lash_core_execution::ReleasedProcessEvent {
+                let released = lash_execution_contracts::process::ReleasedProcessEvent {
                     process_id: event.process_id.clone(),
                     sequence: event.sequence,
                     event_type: event.fact.event_type().to_owned(),
@@ -92,7 +92,7 @@ pub(super) async fn release_process_events(
         .await
         .map_err(plugin_sqlx_error)?;
     tx.commit().await.map_err(plugin_sqlx_error)?;
-    Ok(lash_core_execution::ProcessEventRelease {
+    Ok(lash_execution_contracts::process::ProcessEventRelease {
         released_through: target,
         released_events,
     })

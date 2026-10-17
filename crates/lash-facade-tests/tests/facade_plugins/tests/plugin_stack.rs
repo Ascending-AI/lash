@@ -1,7 +1,7 @@
 use super::*;
 
 use lash::{TurnEvent, TurnInput};
-use lash_core::Backend;
+use lash_execution_contracts::backend::Backend;
 
 /// DUPLICATE-PLUGIN-ID-REFUSED: distinct provider and callback keys do not
 /// permit two factories to own one namespace.
@@ -65,7 +65,7 @@ async fn duplicate_plugin_id_refused() -> Result<()> {
     assert!(
         matches!(host.build_session(lash_core::plugin::PluginSessionRequest::creation(
         "duplicate-owner", lash_core::plugin::SessionAuthorityContext::fixture(),
-    )), Err(lash_core::PluginError::Declaration(error)) if error == duplicate)
+    )), Err(lash_execution_contracts::plugin_error::PluginError::Declaration(error)) if error == duplicate)
     );
     let record = host.transition_plugins(
         lash::plugins::PluginTransitionRequest {
@@ -91,7 +91,7 @@ async fn duplicate_plugin_id_refused() -> Result<()> {
         &Default::default(),
     );
     assert!(
-        matches!(record.candidate(), Err(lash_core::PluginError::Declaration(error)) if error == duplicate)
+        matches!(record.candidate(), Err(lash_execution_contracts::plugin_error::PluginError::Declaration(error)) if error == duplicate)
     );
     let mut stack = lash::PluginStack::from_factories([factories[0].clone()]);
     stack.replace(second);

@@ -36,6 +36,6 @@ pub use super::store_contract_state_machine::*;
 pub use super::store_maintenance_outcome::*;
 pub use super::store_recovery::*;
 pub use super::tool_intent_retention::*;
-pub use lash_core::ProcessRegistry;
+pub use lash_execution_contracts::process::ProcessRegistry;
 
 pub use super::trace_provenance::*;

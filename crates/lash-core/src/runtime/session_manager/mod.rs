@@ -195,15 +195,15 @@ impl CurrentOwnerCapability {
     pub(in crate::runtime) fn require_session(
         &self,
         operation: &'static str,
-    ) -> Result<&CurrentSession, crate::PluginError> {
+    ) -> Result<&CurrentSession, lash_execution_contracts::plugin_error::PluginError> {
         match &self.owner {
             CurrentOwner::Session(session) => Ok(session.as_ref()),
-            CurrentOwner::Process { process_id, .. } => {
-                Err(crate::PluginError::NotASessionRuntime {
+            CurrentOwner::Process { process_id, .. } => Err(
+                lash_execution_contracts::plugin_error::PluginError::NotASessionRuntime {
                     operation: operation.to_string(),
                     process_id: process_id.clone(),
-                })
-            }
+                },
+            ),
         }
     }
 
@@ -217,7 +217,7 @@ impl CurrentOwnerCapability {
     /// current agent frame, or the process.
     pub(in crate::runtime) fn execution_owner(
         &self,
-    ) -> Result<crate::ExecutionOwner, crate::PluginError> {
+    ) -> Result<crate::ExecutionOwner, lash_execution_contracts::plugin_error::PluginError> {
         match &self.owner {
             CurrentOwner::Session(session) => {
                 let agent_frame_id = session
@@ -225,7 +225,7 @@ impl CurrentOwnerCapability {
                     .to_runtime_state()
                     .current_frame_node_id
                     .ok_or_else(|| {
-                        crate::PluginError::Session(format!(
+                        lash_execution_contracts::plugin_error::PluginError::Session(format!(
                             "session `{}` has no initialized agent frame",
                             session.session_id
                         ))
@@ -246,47 +246,57 @@ impl CurrentOwnerCapability {
     pub(in crate::runtime) fn session_plugins(
         &self,
         operation: &'static str,
-    ) -> Result<&Arc<crate::PluginSession>, crate::PluginError> {
+    ) -> Result<&Arc<crate::PluginSession>, lash_execution_contracts::plugin_error::PluginError>
+    {
         match (&self.plugins, &self.owner) {
             (OwnerPlugins::Session(plugins), _) => Ok(plugins),
-            (OwnerPlugins::Process { .. }, CurrentOwner::Process { process_id, .. }) => {
-                Err(crate::PluginError::NotASessionRuntime {
+            (OwnerPlugins::Process { .. }, CurrentOwner::Process { process_id, .. }) => Err(
+                lash_execution_contracts::plugin_error::PluginError::NotASessionRuntime {
                     operation: operation.to_string(),
                     process_id: process_id.clone(),
-                })
-            }
-            (OwnerPlugins::Process { .. }, CurrentOwner::Session(session)) => {
-                Err(crate::PluginError::Session(format!(
+                },
+            ),
+            (OwnerPlugins::Process { .. }, CurrentOwner::Session(session)) => Err(
+                lash_execution_contracts::plugin_error::PluginError::Session(format!(
                     "session `{}` runs without its plugin session",
                     session.session_id
-                )))
-            }
+                )),
+            ),
         }
     }
 
     /// The engine process these services run for, with its composition.
     pub(in crate::runtime) fn engine_process(
         &self,
-    ) -> Result<(&crate::ProcessId, &Arc<EngineProcessParts>), crate::PluginError> {
+    ) -> Result<
+        (&crate::ProcessId, &Arc<EngineProcessParts>),
+        lash_execution_contracts::plugin_error::PluginError,
+    > {
         match &self.owner {
             CurrentOwner::Process {
                 process_id,
                 engine: Some(engine),
             } => Ok((process_id, engine)),
-            CurrentOwner::Process { process_id, .. } => Err(crate::PluginError::Session(format!(
-                "process `{process_id}` runs a session turn, which has no composition"
-            ))),
-            CurrentOwner::Session(session) => Err(crate::PluginError::Session(format!(
-                "session `{}` is not a process",
-                session.session_id
-            ))),
+            CurrentOwner::Process { process_id, .. } => Err(
+                lash_execution_contracts::plugin_error::PluginError::Session(format!(
+                    "process `{process_id}` runs a session turn, which has no composition"
+                )),
+            ),
+            CurrentOwner::Session(session) => Err(
+                lash_execution_contracts::plugin_error::PluginError::Session(format!(
+                    "session `{}` is not a process",
+                    session.session_id
+                )),
+            ),
         }
     }
 
     /// The policy direct calls run under.
-    fn direct_policy(&self) -> Result<&SessionPolicy, crate::PluginError> {
+    fn direct_policy(
+        &self,
+    ) -> Result<&SessionPolicy, lash_execution_contracts::plugin_error::PluginError> {
         self.policy.as_ref().ok_or_else(|| {
-            crate::PluginError::Session(format!(
+            lash_execution_contracts::plugin_error::PluginError::Session(format!(
                 "{} makes no model call",
                 match &self.owner {
                     CurrentOwner::Process { process_id, .. } =>
@@ -447,7 +457,9 @@ impl CurrentOwnerCapability {
     /// This runtime's recorded policy bound to the transport that executes
     /// it. A recorded model this worker cannot bind is the typed, retryable
     /// `LlmProfileUnavailable`.
-    fn resolve_policy(&self) -> Result<RuntimeSessionPolicy, crate::PluginError> {
+    fn resolve_policy(
+        &self,
+    ) -> Result<RuntimeSessionPolicy, lash_execution_contracts::plugin_error::PluginError> {
         self.host
             .resolve_owner_policy(&self.runtime_owner(), self.direct_policy()?.clone())
     }
@@ -711,7 +723,7 @@ mod process_visibility_tests {
     ) -> (
         RuntimeSessionProcessService,
         Arc<CountingFilter>,
-        crate::Backend,
+        lash_execution_contracts::backend::Backend,
         crate::ProcessId,
     ) {
         let filter = Arc::new(CountingFilter {
@@ -762,10 +774,10 @@ mod process_visibility_tests {
         for _ in ["visible", "hidden"] {
             let process_id = registry
                 .register_process_with_observers(
-                    crate::testing::held_engine_registration(
+                    lash_execution_contracts::testing::held_engine_registration(
                         serde_json::Value::Null,
-                        crate::ProcessProvenance::host(),
-                        crate::Lifetime::Detached,
+                        lash_execution_contracts::process::ProcessProvenance::host(),
+                        lash_execution_contracts::process::Lifetime::Detached,
                     ),
                     &[SessionId::fixture(SESSION_ID.to_string())],
                 )
@@ -796,7 +808,9 @@ mod process_visibility_tests {
 
     /// One turn's execution context lends each operation its scope, so the
     /// filter observation is identical across operations.
-    fn operation_scope(backend: &crate::Backend) -> crate::ActorContext {
+    fn operation_scope(
+        backend: &lash_execution_contracts::backend::Backend,
+    ) -> crate::ActorContext {
         crate::ActorContext::detached(backend.clone())
             .scoped(crate::AdmittedScope::turn(
                 SessionId::from(SESSION_ID),
@@ -806,7 +820,7 @@ mod process_visibility_tests {
     }
 
     fn contains_hidden(
-        records: &[crate::facade_support::ObservedProcess],
+        records: &[lash_execution_contracts::process::ObservedProcess],
         hidden: &crate::ProcessId,
     ) -> bool {
         records.iter().any(|record| record.process_id == *hidden)
@@ -842,7 +856,7 @@ mod process_visibility_tests {
                         let records = crate::ProcessService::list_visible(
                             &service,
                             &SessionId::from(SESSION_ID),
-                            crate::ProcessListMode::Live,
+                            lash_execution_contracts::process::ProcessListMode::Live,
                             crate::ProcessOpScope::new(scope),
                         )
                         .await
@@ -856,7 +870,7 @@ mod process_visibility_tests {
                         let records = crate::ProcessService::list_visible_for_attempt(
                             &service,
                             &crate::RuntimeOwner::Session(SessionId::from(SESSION_ID)),
-                            crate::ProcessListMode::Live,
+                            lash_execution_contracts::process::ProcessListMode::Live,
                         )
                         .await
                         .expect("list visible process records for attempt");

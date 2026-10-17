@@ -63,7 +63,7 @@ impl PostgresDurableStore {
         let deadline = self.deadline(label.capacity());
         self.within(
             label.capacity(),
-            lash_core_execution::facade_support::sql::with_owner(
+            lash_core_ids::operational_metrics::sql::with_owner(
                 tx.actor().as_str().to_owned(),
                 tx.epoch().0,
                 tx.revision().0,
@@ -299,7 +299,7 @@ pub(super) async fn apply_owner(
     write: &ActorTx,
     fence: Option<FenceRead>,
     now: DurableInstant,
-    fleet: lash_core_execution::FleetFormat,
+    fleet: lash_core_store::store::FleetFormat,
     checkpoint_ref_chunk: usize,
     candidate: Option<&mut CandidatePublication>,
 ) -> Result<ActorCommit, DurableError> {

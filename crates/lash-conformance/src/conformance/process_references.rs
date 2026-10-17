@@ -80,7 +80,7 @@ pub async fn live_reference_summary_tracks_non_terminal_reference_counts(
 
     let definition_a = serde_json::json!({ "module": "alpha", "process": "main" });
     let definition_b = serde_json::json!({ "module": "beta", "process": "main" });
-    let env_a = lash_core::testing::process_execution_env_fixture_ref();
+    let env_a = lash_execution_contracts::testing::process_execution_env_fixture_ref();
     let env_b = super::helpers::process_registry_alternate_environment_ref();
     let mut ids = std::collections::BTreeMap::new();
     for (label, definition, env_ref) in [
@@ -97,13 +97,18 @@ pub async fn live_reference_summary_tracks_non_terminal_reference_counts(
                         launch: crate::EngineLaunch::new(env_ref, None),
                     },
                     ProcessProvenance::host(),
-                    lash_core::Lifetime::Detached,
+                    lash_execution_contracts::process::Lifetime::Detached,
                 )
                 .with_admitted_identity(
-                    lash_core::AdmittedProcessIdentity::for_testing(definition_identity(
-                        lash_core::ProcessDefinitionRef::unclaimed("reference-test", definition),
-                        None::<String>,
-                    )),
+                    lash_execution_contracts::process::AdmittedProcessIdentity::for_testing(
+                        definition_identity(
+                            lash_execution_contracts::process::ProcessDefinitionRef::unclaimed(
+                                "reference-test",
+                                definition,
+                            ),
+                            None::<String>,
+                        ),
+                    ),
                 ),
             )
             .await
@@ -201,10 +206,14 @@ fn reference_counts(summaries: Vec<ProcessLiveReferenceView>) -> BTreeMap<(Strin
     reason = "conformance-law fixture: each result is established by the setup above"
 )]
 fn key(definition: &serde_json::Value) -> String {
-    lash_core::ProcessDefinitionDraft::new("reference-test", definition.clone(), [])
-        .expect("definition descriptor")
-        .id()
-        .to_string()
+    lash_execution_contracts::process::ProcessDefinitionDraft::new(
+        "reference-test",
+        definition.clone(),
+        [],
+    )
+    .expect("definition descriptor")
+    .id()
+    .to_string()
 }
 
 #[expect(
@@ -212,17 +221,18 @@ fn key(definition: &serde_json::Value) -> String {
     reason = "conformance fixture uses a valid descriptor without dependencies"
 )]
 fn definition_identity(
-    reference: lash_core::ProcessDefinitionRef,
+    reference: lash_execution_contracts::process::ProcessDefinitionRef,
     label: Option<impl Into<String>>,
-) -> lash_core::ProcessIdentity {
-    let id = lash_core::ProcessDefinitionDraft::new(
+) -> lash_execution_contracts::process::ProcessIdentity {
+    let id = lash_execution_contracts::process::ProcessDefinitionDraft::new(
         reference.engine_kind.clone(),
         reference.definition.as_json().clone(),
         [],
     )
     .expect("fixture descriptor")
     .id();
-    let mut identity = lash_core::ProcessIdentity::labelled(reference.engine_kind, label);
+    let mut identity =
+        lash_execution_contracts::process::ProcessIdentity::labelled(reference.engine_kind, label);
     identity.definition_id = Some(id);
     identity
 }

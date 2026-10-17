@@ -181,7 +181,7 @@ pub enum SessionError {
     #[error("session config refused: {0}")]
     SessionConfigRefused(crate::ConfigRefusal),
     #[error(transparent)]
-    Plugin(#[from] crate::PluginError),
+    Plugin(#[from] lash_execution_contracts::plugin_error::PluginError),
     /// A protocol refused its saved execution state. The source retains the
     /// protocol's public restore error so hosts can inspect its typed cause.
     #[error("execution state restore failed: {source}")]
@@ -211,9 +211,9 @@ impl From<crate::plugin::CreationConfigError> for SessionError {
                 context: "resolving a session's creation config".to_string(),
                 source: corrupt.into_store_error(),
             },
-            crate::plugin::CreationConfigError::Registration(error) => {
-                Self::Plugin(crate::PluginError::ConfigRegistration(error))
-            }
+            crate::plugin::CreationConfigError::Registration(error) => Self::Plugin(
+                lash_execution_contracts::plugin_error::PluginError::ConfigRegistration(error),
+            ),
         }
     }
 }
@@ -258,7 +258,7 @@ impl ExecutionEnvironmentSyncError {
     /// `kind` names the part of the sync that raised it.
     pub fn of_plugin_error(
         kind: crate::sansio::ExecutionEnvironmentSyncFailureKind,
-        error: crate::PluginError,
+        error: lash_execution_contracts::plugin_error::PluginError,
     ) -> Self {
         use crate::sansio::ExecutionEnvironmentSyncFailureKind as Kind;
         let message = format!("protocol error: {error}");
@@ -407,7 +407,7 @@ impl Session {
     fn build_tool_surface(
         &self,
         config: &crate::plugin::AdmittedPluginConfig,
-    ) -> Result<ToolCatalogHandle, crate::PluginError> {
+    ) -> Result<ToolCatalogHandle, lash_execution_contracts::plugin_error::PluginError> {
         let built = self.plugins().build_tool_surface(config)?;
         Ok(self.handle(built.surface, built.catalog))
     }
@@ -423,7 +423,7 @@ impl Session {
     pub fn install_recorded_tool_surface(
         &self,
         recorded: Arc<crate::RecordedSurface>,
-    ) -> Result<ToolCatalogHandle, crate::PluginError> {
+    ) -> Result<ToolCatalogHandle, lash_execution_contracts::plugin_error::PluginError> {
         let tool_catalog = Arc::new(self.plugins().surface_catalog(&recorded)?);
         let handle = self.handle(recorded, tool_catalog);
         *self.tool_catalog_cache.lock_recover() = Some((None, handle.clone()));
@@ -454,7 +454,8 @@ impl Session {
     pub fn tool_surface_drift(
         &self,
         tool_id: &crate::ToolId,
-    ) -> Result<Option<crate::ToolSurfaceDrift>, crate::PluginError> {
+    ) -> Result<Option<crate::ToolSurfaceDrift>, lash_execution_contracts::plugin_error::PluginError>
+    {
         let config =
             crate::plugin::OwnerConfigView::session(self.plugins().admitted_plugin_config());
         Ok(self
@@ -463,7 +464,9 @@ impl Session {
             .drift(tool_id, &config))
     }
 
-    fn tool_catalog_cache_entry(&self) -> Result<ToolCatalogHandle, crate::PluginError> {
+    fn tool_catalog_cache_entry(
+        &self,
+    ) -> Result<ToolCatalogHandle, lash_execution_contracts::plugin_error::PluginError> {
         let key = ToolCatalogCacheKey {
             plugin_generations: self.plugins().state_generations(),
             config: self.plugins().admitted_plugin_config(),
@@ -479,7 +482,9 @@ impl Session {
         Ok(entry)
     }
 
-    fn active_tool_surface_entry(&self) -> Result<ToolCatalogHandle, crate::PluginError> {
+    fn active_tool_surface_entry(
+        &self,
+    ) -> Result<ToolCatalogHandle, lash_execution_contracts::plugin_error::PluginError> {
         if let Some((_, entry)) = self.tool_catalog_cache.lock_recover().as_ref() {
             return Ok(entry.clone());
         }
@@ -492,18 +497,24 @@ impl Session {
     // `ToolCatalogHandle` is only `pub` under the `testing` feature, so this
     // accessor's visibility tracks it exactly (`private_interfaces`).
     #[cfg(feature = "testing")]
-    pub fn pin_tool_surface(&self) -> Result<ToolCatalogHandle, crate::PluginError> {
+    pub fn pin_tool_surface(
+        &self,
+    ) -> Result<ToolCatalogHandle, lash_execution_contracts::plugin_error::PluginError> {
         self.build_tool_surface(&self.plugins().admitted_plugin_config())
     }
 
     #[cfg(not(feature = "testing"))]
-    pub fn pin_tool_surface(&self) -> Result<ToolCatalogHandle, crate::PluginError> {
+    pub fn pin_tool_surface(
+        &self,
+    ) -> Result<ToolCatalogHandle, lash_execution_contracts::plugin_error::PluginError> {
         self.build_tool_surface(&self.plugins().admitted_plugin_config())
     }
 
     /// Build the surface a sync records (S4) and judge it against the
     /// protocol before anything records it.
-    pub async fn admit_tool_surface(&self) -> Result<ToolCatalogHandle, crate::PluginError> {
+    pub async fn admit_tool_surface(
+        &self,
+    ) -> Result<ToolCatalogHandle, lash_execution_contracts::plugin_error::PluginError> {
         let surface = self.build_tool_surface(&self.plugins().admitted_plugin_config())?;
         self.plugins()
             .protocol_session()
@@ -512,21 +523,30 @@ impl Session {
         Ok(surface)
     }
 
-    pub fn resolved_tool_catalog(&self) -> Result<Arc<crate::ToolCatalog>, crate::PluginError> {
+    pub fn resolved_tool_catalog(
+        &self,
+    ) -> Result<Arc<crate::ToolCatalog>, lash_execution_contracts::plugin_error::PluginError> {
         Ok(self.active_tool_surface_entry()?.tool_catalog())
     }
 
-    pub fn shared_tool_catalog(&self) -> Result<Arc<Vec<serde_json::Value>>, crate::PluginError> {
+    pub fn shared_tool_catalog(
+        &self,
+    ) -> Result<Arc<Vec<serde_json::Value>>, lash_execution_contracts::plugin_error::PluginError>
+    {
         Ok(self.active_tool_surface_entry()?.catalog())
     }
 
-    pub fn tool_catalog(&self) -> Result<Vec<serde_json::Value>, crate::PluginError> {
+    pub fn tool_catalog(
+        &self,
+    ) -> Result<Vec<serde_json::Value>, lash_execution_contracts::plugin_error::PluginError> {
         Ok(self.shared_tool_catalog()?.as_ref().clone())
     }
 
     /// The pinned catalog of the installed surface: the one the turn's latest
     /// execution-environment sync recorded, which its model calls offer.
-    pub fn installed_tool_catalog(&self) -> Result<Arc<crate::ToolCatalog>, crate::PluginError> {
+    pub fn installed_tool_catalog(
+        &self,
+    ) -> Result<Arc<crate::ToolCatalog>, lash_execution_contracts::plugin_error::PluginError> {
         Ok(self.active_tool_surface_entry()?.tool_catalog())
     }
 
@@ -549,7 +569,8 @@ impl Session {
         chronological_projection: Arc<crate::ChronologicalProjection>,
         turn_context: crate::TurnContext,
         facts: crate::plugin::ExecutionFacts,
-    ) -> Result<RuntimeExecutionContext<'run>, crate::PluginError> {
+    ) -> Result<RuntimeExecutionContext<'run>, lash_execution_contracts::plugin_error::PluginError>
+    {
         let tool_surface = self.active_tool_surface_entry()?;
         let dispatch = Arc::new(ToolDispatchContext {
             fleet_format: self

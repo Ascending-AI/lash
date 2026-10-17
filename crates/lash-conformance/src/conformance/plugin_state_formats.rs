@@ -59,7 +59,10 @@ impl PluginFactory for FormatPlugin {
     }
     fn recipe(
         self: Arc<Self>,
-    ) -> std::result::Result<lash_core::plugin::PluginRecipe, lash_core::plugin::PluginError> {
+    ) -> std::result::Result<
+        lash_core::plugin::PluginRecipe,
+        lash_execution_contracts::plugin_error::PluginError,
+    > {
         let id = lash_core::plugin::PluginFactory::id(self.as_ref());
         Ok(lash_core::plugin::PluginRecipe::new(
             id,

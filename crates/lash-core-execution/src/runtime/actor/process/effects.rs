@@ -7,8 +7,8 @@ use lash_durable::{ActorTx, DomainWrite};
 
 use super::driver::{Driver, InFlight};
 use crate::ProcessId;
-use crate::runtime::process::engine_state::StepRequest;
 use lash_core_store::tool_run::SettledOutput;
+use lash_execution_contracts::process::StepRequest;
 
 /// Record `step`'s settled `outcome` on `tx` as an occurrence of the effect
 /// node it runs for, in the transaction that hands it to the engine: once,
@@ -48,7 +48,7 @@ pub(super) fn record_effect(
         .recorded_effects
         .insert(site.site.to_string(), recorded + 1);
     let operation = step.request.operation();
-    let mut occurrence = crate::runtime::process::ProcessEffectOccurrence::new(
+    let mut occurrence = lash_execution_contracts::process::ProcessEffectOccurrence::new(
         site.clone(),
         operation,
         class,
@@ -69,10 +69,10 @@ pub(super) fn record_effect(
 fn effect_class(
     outcome: &SettledOutput,
 ) -> Option<(
-    crate::runtime::process::ProcessEffectOutcomeClass,
+    lash_execution_contracts::process::ProcessEffectOutcomeClass,
     Option<crate::FailureCode>,
 )> {
-    use crate::runtime::process::ProcessEffectOutcomeClass as Class;
+    use lash_execution_contracts::process::ProcessEffectOutcomeClass as Class;
     let output = match outcome {
         SettledOutput::Waiting(_) => return None,
         SettledOutput::Completed(output) => {
@@ -87,7 +87,9 @@ fn effect_class(
         Some(crate::ToolCallOutcome::Success(_)) => (Class::Success, None),
         Some(crate::ToolCallOutcome::Failure(failure)) => (
             Class::Failure,
-            Some(crate::runtime::process::tool_failure_code(&failure)),
+            Some(lash_execution_contracts::process::tool_failure_code(
+                &failure,
+            )),
         ),
         Some(crate::ToolCallOutcome::Cancelled(_)) => (Class::Cancelled, None),
         // A payload that is no tool output still says which way it went.
@@ -102,14 +104,14 @@ fn effect_class(
 pub(super) fn record_ran(
     tx: &mut ActorTx,
     process: &ProcessId,
-    step: &crate::StepName,
+    step: &lash_execution_contracts::process::StepName,
     ran: Vec<(u32, u64)>,
     fleet: crate::FleetFormat,
 ) {
     if ran.is_empty() {
         return;
     }
-    let ran = crate::runtime::process::ProcessRan::new(ran, fleet);
+    let ran = lash_execution_contracts::process::ProcessRan::new(ran, fleet);
     append_event(
         tx,
         process,
@@ -122,7 +124,7 @@ pub(super) fn record_ran(
 pub(super) fn append_event(
     tx: &mut ActorTx,
     process: &ProcessId,
-    request: crate::ProcessEventAppendRequest,
+    request: lash_execution_contracts::process::ProcessEventAppendRequest,
 ) {
     tx.write(DomainWrite::Process(ProcessWrite::AppendEvent {
         process: process.clone(),
@@ -143,7 +145,7 @@ pub(super) fn record_omitted_effects(
     if driver.omitted_effects.is_empty() {
         return;
     }
-    let omissions = crate::runtime::process::ProcessEffectOmissions::new(
+    let omissions = lash_execution_contracts::process::ProcessEffectOmissions::new(
         driver.omitted_effects.clone(),
         driver.effect_occurrence_cap,
         fleet,

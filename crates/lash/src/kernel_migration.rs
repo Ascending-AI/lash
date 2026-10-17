@@ -18,7 +18,7 @@
 use std::sync::Arc;
 
 use lash_core::durable_port::{ActorKey, CommitLabel, DurableError, MailRefusal, MailTx};
-use lash_core::formats::BuildFormats;
+use lash_execution_contracts::formats::BuildFormats;
 use lash_kernel_doc::FunctionRegistry;
 use lash_vm_runtime::{KernelMigrationSurvey, KernelMigrationSurveyError, LASH_VM_ENGINE_KIND};
 
@@ -40,7 +40,7 @@ fn earlier_kernel_formats() -> Option<BuildFormats> {
     let kernel = lash_vm_runtime::previous_kernel_version()
         .or_else(lash_vm_runtime::retired_kernel_version)?;
     Some(BuildFormats::new(
-        &[lash_core::EngineStateFormat {
+        &[lash_execution_contracts::process::EngineStateFormat {
             kind: LASH_VM_ENGINE_KIND.to_owned(),
             version: kernel,
         }],
@@ -216,7 +216,7 @@ pub(crate) fn retired_kernel_version() -> Option<u32> {
 /// `backend`, retiring the format sets of kernel version `kernel`.
 pub(crate) fn retiring(backend: &crate::Backend, kernel: u32) -> crate::Backend {
     backend.retiring(
-        &lash_core::EngineStateFormat {
+        &lash_execution_contracts::process::EngineStateFormat {
             kind: LASH_VM_ENGINE_KIND.to_owned(),
             version: kernel,
         },

@@ -57,8 +57,8 @@ ownership to storage.
 
 ## Code references
 
-- `crates/lash-core-execution/src/runtime/process/registry_concerns.rs:40-994` declares the concern traits.
-- `crates/lash-core-execution/src/runtime/process/registry.rs:703-729` composes the registry and fleet format.
+- `crates/lash-execution-contracts/src/process/registry_concerns.rs:40-994` declares the concern traits.
+- `crates/lash-execution-contracts/src/process/registry.rs:703-729` composes the registry and fleet format.
 - `crates/lash-core-store/src/store/runtime_store_decorator.rs` defines the generated forwarding contract.
 
 [ADR 0137](0137-the-host-owns-events-routing-and-scheduling.md) owns host events, routing and scheduling.

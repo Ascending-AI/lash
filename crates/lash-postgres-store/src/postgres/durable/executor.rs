@@ -370,7 +370,7 @@ pub(super) struct Call {
     pub(super) due: Option<i64>,
     /// The fleet format a head commit was planned under: the call is
     /// refused under any other.
-    pub(super) planned_fleet: Option<lash_core_execution::FleetFormat>,
+    pub(super) planned_fleet: Option<lash_core_store::store::FleetFormat>,
     /// The hint the call's head commit planned on, and what the head is
     /// once the call commits.
     pub(super) hint: Option<((String, i64), Option<head_commit::SessionFacts>)>,
@@ -405,7 +405,7 @@ impl Call {
         tx: &ActorTx,
         held: &HeldTexts,
         hints: &head_commit::SessionHints,
-        fleet: lash_core_execution::FleetFormat,
+        fleet: lash_core_store::store::FleetFormat,
     ) -> Option<Self> {
         // A claim-requirement rewrite takes the explicit-transaction form,
         // which stamps it (FIG-6034 D3).
@@ -443,7 +443,7 @@ impl Call {
                     // over what its open read.
                     if call.hint.is_some()
                         || turns::head_writer(tx.actor(), &write.session)
-                            != lash_core_execution::store::HeadWriter::SessionActor
+                            != lash_core_store::store::HeadWriter::SessionActor
                     {
                         return None;
                     }
@@ -686,7 +686,7 @@ impl PostgresDurableStore {
             self.fence.observe(fleet);
         }
         let installed: i64 = get(&row, 4).map_err(Attempt::Failed)?;
-        if let Some(window) = lash_core_execution::facade_support::sql::Window::current() {
+        if let Some(window) = lash_core_ids::operational_metrics::sql::Window::current() {
             window.installed_graph(u64::try_from(installed).unwrap_or_default());
         }
         let cancel: Vec<Option<String>> = (5..=10)

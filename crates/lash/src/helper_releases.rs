@@ -33,7 +33,7 @@ use std::sync::Arc;
 use lash_core::durable_port::FormatSet;
 use lash_core::durable_port::{DurableError, StoreFailure, StoreFailureKind};
 #[cfg(feature = "rlm")]
-use lash_core::formats::BuildFormats;
+use lash_execution_contracts::formats::BuildFormats;
 use lash_kernel_doc::FunctionRegistry;
 use lash_vm_runtime::{
     HelperDependentProcess, HelperDependentSession, KernelMigrationSurveyError, RetiredHelpers,
@@ -216,11 +216,11 @@ async fn helper_session(
 /// function of the helper release the build no longer retains.
 struct HelperRetirement {
     releases: Vec<lash_vm_runtime::HelperReleaseIndex>,
-    previous: Option<Arc<dyn lash_core::RetirementCheck>>,
+    previous: Option<Arc<dyn lash_execution_contracts::backend::RetirementCheck>>,
 }
 
 #[async_trait::async_trait]
-impl lash_core::RetirementCheck for HelperRetirement {
+impl lash_execution_contracts::backend::RetirementCheck for HelperRetirement {
     fn retired(&self) -> String {
         let mut names = self
             .releases
@@ -240,7 +240,10 @@ impl lash_core::RetirementCheck for HelperRetirement {
         HELPER_DEPENDENTS_LIST.to_owned()
     }
 
-    async fn dependents(&self, backend: &lash_core::Backend) -> Result<u64, DurableError> {
+    async fn dependents(
+        &self,
+        backend: &lash_execution_contracts::backend::Backend,
+    ) -> Result<u64, DurableError> {
         let functions = lash_vm_runtime::helper_survey_functions().map_err(|error| {
             DurableError::Store(StoreFailure {
                 kind: StoreFailureKind::Corrupt,

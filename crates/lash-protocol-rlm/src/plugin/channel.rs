@@ -1,5 +1,5 @@
-use lash_core::PluginError;
 use lash_core::plugin::PluginSessionMaterialization;
+use lash_execution_contracts::plugin_error::PluginError;
 
 use super::RlmRecordedConfig;
 

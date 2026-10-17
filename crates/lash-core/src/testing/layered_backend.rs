@@ -1,6 +1,6 @@
 //! A test backend that decorates the ports of one backend.
 //!
-//! A runtime takes every store port from one [`Backend`](crate::Backend)
+//! A runtime takes every store port from one [`Backend`](lash_execution_contracts::backend::Backend)
 //! (ADR 0104, B2). A test that records or faults a port does not hand the
 //! runtime a second port beside the backend; it layers a decorator over the
 //! backend's own port, and [`LayeredBackend`] builds the backend whose store
@@ -10,10 +10,15 @@
 
 use std::sync::Arc;
 
-use crate::{
-    AttachmentStore, Backend, Clock, DeploymentStore, ModuleArtifactStore, ProcessEnvStore,
-    ProcessRegistry, StoreBindingId, StoreSet,
-};
+use crate::AttachmentStore;
+use crate::Clock;
+use lash_execution_contracts::backend::Backend;
+use lash_execution_contracts::backend::StoreBindingId;
+use lash_execution_contracts::backend::StoreSet;
+use lash_execution_contracts::deployment::DeploymentStore;
+use lash_execution_contracts::module_artifacts::ModuleArtifactStore;
+use lash_execution_contracts::process::ProcessEnvStore;
+use lash_execution_contracts::process::ProcessRegistry;
 
 /// A decorator of one obligation kind's ledger.
 type ObligationLedgerLayer = Arc<
@@ -34,7 +39,7 @@ pub struct LayeredBackend {
     session_store_factory: Arc<dyn DeploymentStore>,
     process_registry: Arc<dyn ProcessRegistry>,
     process_env_store: Arc<dyn ProcessEnvStore>,
-    process_authority_reads: Arc<dyn crate::ProcessAuthorityReads>,
+    process_authority_reads: Arc<dyn lash_execution_contracts::backend::ProcessAuthorityReads>,
     attachment_store: Arc<dyn AttachmentStore>,
     module_artifacts: Arc<dyn ModuleArtifactStore>,
     obligation_ledgers: Option<ObligationLedgerLayer>,
@@ -86,8 +91,8 @@ impl LayeredBackend {
     pub fn map_process_authority_reads(
         mut self,
         layer: impl FnOnce(
-            Arc<dyn crate::ProcessAuthorityReads>,
-        ) -> Arc<dyn crate::ProcessAuthorityReads>,
+            Arc<dyn lash_execution_contracts::backend::ProcessAuthorityReads>,
+        ) -> Arc<dyn lash_execution_contracts::backend::ProcessAuthorityReads>,
     ) -> Self {
         self.process_authority_reads = layer(self.process_authority_reads);
         self
@@ -247,8 +252,8 @@ impl LayeredStores {
     pub fn map_process_authority_reads(
         mut self,
         layer: impl FnOnce(
-            Arc<dyn crate::ProcessAuthorityReads>,
-        ) -> Arc<dyn crate::ProcessAuthorityReads>,
+            Arc<dyn lash_execution_contracts::backend::ProcessAuthorityReads>,
+        ) -> Arc<dyn lash_execution_contracts::backend::ProcessAuthorityReads>,
     ) -> Self {
         self.0.process_authority_reads = layer(self.0.process_authority_reads);
         self
@@ -294,8 +299,9 @@ impl LayeredStores {
     pub fn map_definition_store(
         mut self,
         layer: impl FnOnce(
-            Arc<dyn crate::ProcessDefinitionStore>,
-        ) -> Arc<dyn crate::ProcessDefinitionStore>,
+            Arc<dyn lash_execution_contracts::process::ProcessDefinitionStore>,
+        )
+            -> Arc<dyn lash_execution_contracts::process::ProcessDefinitionStore>,
     ) -> Self {
         self.0.definition_store = layer(self.0.definition_store);
         self
@@ -336,11 +342,11 @@ struct LayeredStoreSet {
     session_store_factory: Arc<dyn DeploymentStore>,
     process_registry: Arc<dyn ProcessRegistry>,
     process_env_store: Arc<dyn ProcessEnvStore>,
-    process_authority_reads: Arc<dyn crate::ProcessAuthorityReads>,
+    process_authority_reads: Arc<dyn lash_execution_contracts::backend::ProcessAuthorityReads>,
     attachment_store: Arc<dyn AttachmentStore>,
     attachment_referrers: Arc<dyn crate::AttachmentReferrers>,
     module_artifacts: Arc<dyn ModuleArtifactStore>,
-    definition_store: Arc<dyn crate::ProcessDefinitionStore>,
+    definition_store: Arc<dyn lash_execution_contracts::process::ProcessDefinitionStore>,
     obligation_ledgers: Option<ObligationLedgerLayer>,
     artifact_cleanup: Arc<dyn crate::store::ArtifactCleanupLedger>,
 }
@@ -387,7 +393,9 @@ impl StoreSet for LayeredStoreSet {
         self.inner.tool_material_store()
     }
 
-    fn process_authority_reads(&self) -> Arc<dyn crate::ProcessAuthorityReads> {
+    fn process_authority_reads(
+        &self,
+    ) -> Arc<dyn lash_execution_contracts::backend::ProcessAuthorityReads> {
         Arc::clone(&self.process_authority_reads)
     }
 
@@ -395,7 +403,9 @@ impl StoreSet for LayeredStoreSet {
         Arc::clone(&self.process_env_store)
     }
 
-    fn turn_prelude_store(&self) -> Arc<dyn crate::TurnPreludeStore> {
+    fn turn_prelude_store(
+        &self,
+    ) -> Arc<dyn lash_execution_contracts::turn_prelude::TurnPreludeStore> {
         self.inner.turn_prelude_store()
     }
 
@@ -407,7 +417,9 @@ impl StoreSet for LayeredStoreSet {
         Arc::clone(&self.module_artifacts)
     }
 
-    fn definition_store(&self) -> Arc<dyn crate::ProcessDefinitionStore> {
+    fn definition_store(
+        &self,
+    ) -> Arc<dyn lash_execution_contracts::process::ProcessDefinitionStore> {
         Arc::clone(&self.definition_store)
     }
 

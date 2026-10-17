@@ -9,10 +9,12 @@ use std::path::PathBuf;
 
 use async_trait::async_trait;
 use lash_conformance::{ReleaseStampDeployment, release_stamp_conformance};
-use lash_core_execution::compat::CompatRefusal;
-use lash_core_execution::{
-    StoreError, StorePreflight, StoreReleaseState, StoreSchemaStatus, StoreSchemaVerdict,
-};
+use lash_core_store::compat::CompatRefusal;
+use lash_core_store::store::StoreError;
+use lash_core_store::store::StorePreflight;
+use lash_core_store::store::StoreReleaseState;
+use lash_core_store::store::StoreSchemaStatus;
+use lash_core_store::store::StoreSchemaVerdict;
 use lash_sqlite_store::{SqliteStore, SqliteStorePreflight};
 
 struct SqliteBackend {

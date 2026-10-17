@@ -39,7 +39,7 @@ pub(super) async fn double_invalidation_preserves_first_decision_id() {
 /// store on `backend`'s session catalog under the recording decorator, for
 /// tests that run no effect.
 pub(super) async fn recording_unbound_store_on(
-    backend: &lash_core::Backend,
+    backend: &lash_execution_contracts::backend::Backend,
 ) -> Arc<RecordingStore> {
     Arc::new(RecordingStore::over(backend.session_store_factory()))
 }

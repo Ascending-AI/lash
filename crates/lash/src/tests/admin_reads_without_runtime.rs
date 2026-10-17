@@ -42,7 +42,7 @@ async fn read_every_admin_surface(session: &crate::LashSession) -> Result<AdminR
     Ok(AdminReads { execution })
 }
 
-fn rlm_core(backend: lash_core::Backend, tools: bool) -> Result<LashCore> {
+fn rlm_core(backend: lash_execution_contracts::backend::Backend, tools: bool) -> Result<LashCore> {
     let builder = explicit_ephemeral_facets(rlm_core_builder_over(backend)).serve_test_llm_profile(
         text_provider(
             "admin-reads",

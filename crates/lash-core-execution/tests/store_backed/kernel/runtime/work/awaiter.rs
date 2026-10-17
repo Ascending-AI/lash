@@ -1,18 +1,22 @@
 mod tests {
     //! Unit tests for the process awaiter, watched registry, and work driver.
 
+    use lash_execution_contracts::{ProcessAwaitOutput, ProcessEvent, ProcessRegistry};
     use std::sync::{Arc, Mutex};
     use std::time::Duration;
 
-    use crate::PluginError;
     use crate::runtime::ProcessRegistryFaults;
     use crate::runtime::process::*;
     use crate::runtime::work::*;
+    use lash_execution_contracts::plugin_error::PluginError;
 
-    use crate::{
-        ProcessEventSink, ProcessExternalRef, ProcessInput, ProcessProvenance, ProcessRegistration,
-        WatchedRegistry, watch_process_registry,
-    };
+    use crate::ProcessEventSink;
+    use crate::WatchedRegistry;
+    use crate::watch_process_registry;
+    use lash_execution_contracts::process::ProcessExternalRef;
+    use lash_execution_contracts::process::ProcessInput;
+    use lash_execution_contracts::process::ProcessProvenance;
+    use lash_execution_contracts::process::ProcessRegistration;
 
     async fn memory_registry() -> Arc<dyn ProcessRegistry> {
         crate::support::sqlite_memory_process_store_set()
@@ -26,10 +30,10 @@ mod tests {
     }
 
     fn registration() -> ProcessRegistration {
-        crate::testing::held_engine_registration(
+        lash_execution_contracts::testing::held_engine_registration(
             serde_json::json!({}),
             ProcessProvenance::host(),
-            crate::Lifetime::Detached,
+            lash_execution_contracts::process::Lifetime::Detached,
         )
     }
 
@@ -76,7 +80,9 @@ mod tests {
             .complete_process(
                 &registered.id,
                 success(serde_json::json!("done")),
-                crate::ProcessCompletionAuthority::workflow_key(&registered.id),
+                lash_execution_contracts::process::ProcessCompletionAuthority::workflow_key(
+                    &registered.id,
+                ),
             )
             .await
             .expect("complete");
@@ -156,7 +162,11 @@ mod tests {
             .expect("append");
 
         let event = ProcessRegistryAwaiter::new(Arc::clone(&registry), hub)
-            .await_event(&proc_record.id, crate::ProcessEventKind::CancelRequested, 0)
+            .await_event(
+                &proc_record.id,
+                lash_execution_contracts::process::ProcessEventKind::CancelRequested,
+                0,
+            )
             .await
             .expect("await event");
         assert_eq!(event.sequence, appended.last_event_sequence);
@@ -199,7 +209,9 @@ mod tests {
             .complete_process(
                 &record.id,
                 success(serde_json::json!("done")),
-                crate::ProcessCompletionAuthority::workflow_key(&record.id),
+                lash_execution_contracts::process::ProcessCompletionAuthority::workflow_key(
+                    &record.id,
+                ),
             )
             .await
             .expect("complete");
@@ -271,8 +283,11 @@ mod tests {
             .await
             .expect("register");
         let awaiter = ProcessRegistryAwaiter::new(registry.clone(), hub.clone());
-        let mut waiting =
-            Box::pin(awaiter.await_event(&record.id, crate::ProcessEventKind::CancelRequested, 0));
+        let mut waiting = Box::pin(awaiter.await_event(
+            &record.id,
+            lash_execution_contracts::process::ProcessEventKind::CancelRequested,
+            0,
+        ));
         tokio::time::timeout(Duration::from_secs(2), async {
             loop {
                 assert!(futures_util::poll!(&mut waiting).is_pending());
@@ -324,7 +339,9 @@ mod tests {
             .complete_process(
                 &proc_record.id,
                 success(serde_json::json!("done")),
-                crate::ProcessCompletionAuthority::workflow_key(&proc_record.id),
+                lash_execution_contracts::process::ProcessCompletionAuthority::workflow_key(
+                    &proc_record.id,
+                ),
             )
             .await
             .expect("complete");
@@ -355,10 +372,10 @@ mod tests {
             ProcessInput::Engine {
                 kind: "test".to_string(),
                 payload: serde_json::json!({}),
-                launch: lash_core_execution::testing::fixture_engine_launch(),
+                launch: lash_execution_contracts::testing::fixture_engine_launch(),
             },
             ProcessProvenance::host(),
-            crate::Lifetime::Detached,
+            lash_execution_contracts::process::Lifetime::Detached,
         );
         let lifecycle_id = registry
             .register_process(lifecycle_registration)
@@ -447,7 +464,9 @@ mod tests {
             .complete_process(
                 &proc_record.id,
                 success(serde_json::json!("ready")),
-                crate::ProcessCompletionAuthority::workflow_key(&proc_record.id),
+                lash_execution_contracts::process::ProcessCompletionAuthority::workflow_key(
+                    &proc_record.id,
+                ),
             )
             .await
             .expect("complete");
@@ -492,7 +511,9 @@ mod tests {
             .complete_process(
                 &proc_record.id,
                 output.clone(),
-                crate::ProcessCompletionAuthority::workflow_key(&proc_record.id),
+                lash_execution_contracts::process::ProcessCompletionAuthority::workflow_key(
+                    &proc_record.id,
+                ),
             )
             .await
             .expect("complete");

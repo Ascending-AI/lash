@@ -17,14 +17,30 @@ use std::sync::Arc;
 use super::obligations::relay::{
     DeliveryFailure, ObligationDelivery, ObligationRelay, RelayPolicy, plugin_delivery_error,
 };
+use crate::ArtifactCarry;
+use crate::ArtifactCleanup;
+use crate::ArtifactName;
+use crate::ArtifactReferrer;
+use crate::ArtifactStoreId;
+use crate::ProcessDefinitionId;
+use crate::ProcessEngineRegistry;
+use crate::ProcessEnvRef;
+use crate::ProcessId;
+use crate::ReferrerClaim;
+use crate::ReferrerGuard;
+use crate::ResolvedArtifactCleanup;
+use crate::RuntimeErrorCode;
+use crate::StartKey;
 use crate::store::{ArtifactCleanupLedger, DeliveryError, ObligationKey, ObligationLedger};
-use crate::{
-    ArtifactCarry, ArtifactCleanup, ArtifactName, ArtifactReferrer, ArtifactStoreError,
-    ArtifactStoreId, ModuleArtifactStore, PluginError, ProcessDefinitionDraft, ProcessDefinitionId,
-    ProcessDefinitionStore, ProcessEngineRegistry, ProcessEnvRef, ProcessEnvStore, ProcessId,
-    ProcessInput, ProcessRegistry, ReferrerClaim, ReferrerGuard, ResolvedArtifactCleanup,
-    RuntimeErrorCode, StartKey, artifact_referrer_ended,
-};
+use lash_execution_contracts::module_artifacts::ArtifactStoreError;
+use lash_execution_contracts::module_artifacts::ModuleArtifactStore;
+use lash_execution_contracts::plugin_error::PluginError;
+use lash_execution_contracts::process::ProcessDefinitionDraft;
+use lash_execution_contracts::process::ProcessDefinitionStore;
+use lash_execution_contracts::process::ProcessEnvStore;
+use lash_execution_contracts::process::ProcessInput;
+use lash_execution_contracts::process::ProcessRegistry;
+use lash_execution_contracts::process::artifact_referrer_ended;
 
 /// The record a start key registered, as a start's guard carries onto it.
 #[derive(Clone, Debug, PartialEq)]
@@ -56,7 +72,7 @@ pub trait ArtifactCleanupAuthorities: Send + Sync {
 
 /// The authorities of one store set.
 pub struct StoreSetAuthorities {
-    pub sessions: Arc<dyn crate::DeploymentStore>,
+    pub sessions: Arc<dyn lash_execution_contracts::deployment::DeploymentStore>,
     pub processes: Arc<dyn ProcessRegistry>,
     /// The durable rows: whether a turn is still unfinished.
     pub durable: Arc<dyn lash_durable::DurableStore>,
@@ -157,7 +173,7 @@ pub struct ArtifactCleanupPorts {
     pub modules: Arc<dyn ModuleArtifactStore>,
     pub definitions: Arc<dyn ProcessDefinitionStore>,
     /// Turns' recorded preludes, held by their turn journals.
-    pub turn_preludes: Arc<dyn crate::TurnPreludeStore>,
+    pub turn_preludes: Arc<dyn lash_execution_contracts::turn_prelude::TurnPreludeStore>,
     /// Every installed engine: a start's engine names, and each engine's own
     /// store.
     pub engines: ProcessEngineRegistry,
@@ -215,7 +231,10 @@ impl ArtifactCleanupRelay {
     /// The relay over `backend`'s store set, its referrers' authorities read
     /// from that same store set, with `engines` for each engine's own store.
     #[must_use]
-    pub fn over_backend(backend: &crate::Backend, engines: ProcessEngineRegistry) -> Self {
+    pub fn over_backend(
+        backend: &lash_execution_contracts::backend::Backend,
+        engines: ProcessEngineRegistry,
+    ) -> Self {
         Self::new(ArtifactCleanupPorts {
             ledger: backend.artifact_cleanup(),
             authorities: Arc::new(StoreSetAuthorities {

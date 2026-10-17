@@ -68,12 +68,12 @@ impl ProcessTrace {
         });
     }
 
-    pub(super) fn finished(&self, outcome: &lash_core::ProcessOutcome) {
+    pub(super) fn finished(&self, outcome: &lash_execution_contracts::process::ProcessOutcome) {
         let status = match outcome.terminal_status() {
-            Some(lash_core::TerminalProcessStatus::Completed) => {
+            Some(lash_execution_contracts::process::TerminalProcessStatus::Completed) => {
                 TraceLanguageExecutionStatus::Completed
             }
-            Some(lash_core::TerminalProcessStatus::Cancelled) => {
+            Some(lash_execution_contracts::process::TerminalProcessStatus::Cancelled) => {
                 TraceLanguageExecutionStatus::Cancelled
             }
             _ => TraceLanguageExecutionStatus::Failed,

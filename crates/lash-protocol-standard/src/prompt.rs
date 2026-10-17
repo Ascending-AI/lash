@@ -4,10 +4,11 @@
 
 use std::sync::Arc;
 
+use lash_core::plugin::PluginRegistrar;
 use lash_core::plugin::prompt::{
     PromptInput, PromptPlacement, PromptSectionKey, PromptSectionSpec, SectionText,
 };
-use lash_core::plugin::{PluginError, PluginRegistrar};
+use lash_execution_contracts::plugin_error::PluginError;
 
 use crate::{BatchSugar, standard_execution_section};
 

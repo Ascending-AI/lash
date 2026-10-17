@@ -33,7 +33,7 @@ fn scripted(responses: Vec<String>, requests: Arc<StdMutex<Vec<LlmRequest>>>) ->
 /// An RLM core serving `provider`, with the session process controls: a
 /// process a cell starts runs under the turn's run with `components`.
 fn scenario_core(
-    backend: lash_core::Backend,
+    backend: lash_execution_contracts::backend::Backend,
     provider: ProviderHandle,
     components: &[lash_core::ProcessConfigKey<()>],
 ) -> lash::LashCoreBuilder {
@@ -41,7 +41,7 @@ fn scenario_core(
         .serve_test_llm_profile(provider, mock_llm_profile_spec())
         .plugin(Arc::new(
             lash_plugin_process_controls::SessionProcessAdminPluginFactory::new(
-                lash_core::lifetime::session_or_starter,
+                lash_execution_contracts::process::lifetime::session_or_starter,
                 lash_core::testing::run_policy_naming(components),
             ),
         ))
@@ -115,9 +115,9 @@ await control.finish(await handle);"#,
     );
     let processes = lash_core::testing::process_roster_records_for_fixture(
         core.backend().process_registry().as_ref(),
-        &lash_core::ProcessListFilter {
-            status: lash_core::ProcessStatusFilter::Any,
-            ..lash_core::ProcessListFilter::default()
+        &lash_execution_contracts::process::ProcessListFilter {
+            status: lash_execution_contracts::process::ProcessStatusFilter::Any,
+            ..lash_execution_contracts::process::ProcessListFilter::default()
         },
     )
     .await?;

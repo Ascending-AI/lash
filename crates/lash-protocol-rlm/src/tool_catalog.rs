@@ -1,5 +1,6 @@
-use lash_core::plugin::{PluginError, ToolCatalogContext};
+use lash_core::plugin::ToolCatalogContext;
 use lash_core::{SessionError, ToolCatalog, facade_support::ToolCatalogContribution};
+use lash_execution_contracts::plugin_error::PluginError;
 use lash_tool_presenter_api::{
     PresentationRefusal, ToolDisclosure, ToolPresentationEntry, ToolPresentationRequest,
 };
@@ -127,12 +128,14 @@ impl ToolListing {
 }
 
 pub(crate) fn section_refused(presenter: &str, refusal: PresentationRefusal) -> SessionError {
-    SessionError::Plugin(lash_core::plugin::PluginError::ToolPresentationRefused {
-        plugin_id: crate::plugin::RLM_PROTOCOL_PLUGIN_ID.to_owned(),
-        presenter: presenter.to_owned(),
-        code: refusal.code().to_owned(),
-        message: refusal.to_string(),
-    })
+    SessionError::Plugin(
+        lash_execution_contracts::plugin_error::PluginError::ToolPresentationRefused {
+            plugin_id: crate::plugin::RLM_PROTOCOL_PLUGIN_ID.to_owned(),
+            presenter: presenter.to_owned(),
+            code: refusal.code().to_owned(),
+            message: refusal.to_string(),
+        },
+    )
 }
 
 /// Which tools a discovery session's prompt lists and which it leaves for

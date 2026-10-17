@@ -7,7 +7,7 @@ pub use lash_core_store::session_read_view::SessionReadView;
 use crate::SessionId;
 use std::sync::Arc;
 
-use super::PluginError;
+use lash_execution_contracts::plugin_error::PluginError;
 
 /// Emits trace events and nothing else.
 ///

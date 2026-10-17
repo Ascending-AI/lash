@@ -39,7 +39,10 @@ impl lash::plugins::PluginFactory for SnapshotInstruction {
 
     fn recipe(
         self: Arc<Self>,
-    ) -> std::result::Result<lash_core::plugin::PluginRecipe, lash_core::plugin::PluginError> {
+    ) -> std::result::Result<
+        lash_core::plugin::PluginRecipe,
+        lash_execution_contracts::plugin_error::PluginError,
+    > {
         let mut reg = lash_core::plugin::PluginRegistrar::<SnapshotInstruction>::new(
             lash_core::plugin::PluginFactory::id(self.as_ref()),
         );
@@ -61,7 +64,7 @@ impl lash::plugins::SessionPlugin for SnapshotInstruction {
 impl SnapshotInstruction {
     fn declare(
         reg: &mut lash_core::plugin::PluginRegistrar<Self>,
-    ) -> std::result::Result<(), lash_core::plugin::PluginError> {
+    ) -> std::result::Result<(), lash_execution_contracts::plugin_error::PluginError> {
         reg.prompt().section(
             lash_core::plugin::prompt::PromptSectionSpec::new(
                 lash_core::prompt_sections::PromptSectionKey::new("intro")

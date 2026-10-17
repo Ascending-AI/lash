@@ -7,7 +7,7 @@ use crate::tests::host::durable::*;
 #[cfg(feature = "rlm")]
 #[tokio::test(flavor = "multi_thread", worker_threads = 2)]
 async fn every_cell_call_beyond_the_prompt_bound_survives_a_reopen() -> Result<()> {
-    fn core(backend: lash_core::Backend) -> Result<LashCore> {
+    fn core(backend: lash_execution_contracts::backend::Backend) -> Result<LashCore> {
         explicit_ephemeral_facets(rlm_core_builder_over(backend))
             .serve_test_llm_profile(
                 text_provider(

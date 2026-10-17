@@ -13,7 +13,10 @@ impl lash_core::facade_support::PluginFactory for EffectControllerTestProtocolFa
 
     fn recipe(
         self: Arc<Self>,
-    ) -> std::result::Result<lash_core::plugin::PluginRecipe, lash_core::plugin::PluginError> {
+    ) -> std::result::Result<
+        lash_core::plugin::PluginRecipe,
+        lash_execution_contracts::plugin_error::PluginError,
+    > {
         let mut reg = lash_core::plugin::PluginRegistrar::<EffectControllerTestProtocolPlugin>::new(
             lash_core::plugin::PluginFactory::id(self.as_ref()),
         );
@@ -21,7 +24,7 @@ impl lash_core::facade_support::PluginFactory for EffectControllerTestProtocolFa
         if self.code_executor.is_some() {
             reg.execution().code_executor(move |this, _state| {
                 this.code_executor.clone().ok_or_else(|| {
-                    lash_core::plugin::PluginError::Registration(
+                    lash_execution_contracts::plugin_error::PluginError::Registration(
                         "declared executor is unavailable".into(),
                     )
                 })
@@ -64,7 +67,7 @@ impl lash_core::facade_support::SessionPlugin for EffectControllerTestProtocolPl
 impl EffectControllerTestProtocolPlugin {
     fn declare(
         reg: &mut lash_core::plugin::PluginRegistrar<Self>,
-    ) -> std::result::Result<(), lash_core::plugin::PluginError> {
+    ) -> std::result::Result<(), lash_execution_contracts::plugin_error::PluginError> {
         reg.protocol()
             .session(move |_this, _state| Ok(Arc::new(EffectControllerTestProtocolSession)))?;
 
@@ -93,7 +96,10 @@ impl lash_core::facade_support::PluginFactory for PromptRefusingProtocolFactory 
 
     fn recipe(
         self: Arc<Self>,
-    ) -> std::result::Result<lash_core::plugin::PluginRecipe, lash_core::plugin::PluginError> {
+    ) -> std::result::Result<
+        lash_core::plugin::PluginRecipe,
+        lash_execution_contracts::plugin_error::PluginError,
+    > {
         let mut reg = lash_core::plugin::PluginRegistrar::<PromptRefusingProtocolPlugin>::new(
             lash_core::plugin::PluginFactory::id(self.as_ref()),
         );
@@ -128,7 +134,7 @@ impl lash_core::facade_support::SessionPlugin for PromptRefusingProtocolPlugin {
 impl PromptRefusingProtocolPlugin {
     fn declare(
         reg: &mut lash_core::plugin::PluginRegistrar<Self>,
-    ) -> std::result::Result<(), lash_core::plugin::PluginError> {
+    ) -> std::result::Result<(), lash_execution_contracts::plugin_error::PluginError> {
         reg.protocol()
             .session(move |_this, _state| Ok(Arc::new(EffectControllerTestProtocolSession)))?;
 
