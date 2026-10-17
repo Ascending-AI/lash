@@ -85,6 +85,12 @@ def read_series(captures: list[Path]) -> tuple[dict, dict]:
                 raise ValueError('replay identity differs from producer receipt')
             stable_identity = {key: value for key, value in replay['identity'].items()
                                if key not in ('started_at', 'load1_at_start')}
+            # Heap geometry is the deliberate off/on difference, not a
+            # workload identity. Validate it before comparing the rest.
+            expected_window = None if observation['mode'] == 'off' else configuration['window']
+            if stable_identity.get('heap_window') != expected_window:
+                raise ValueError('on/off heap window differs from selected window')
+            stable_identity['heap_window'] = None
             if stable_identity != configuration.get('producer'):
                 raise ValueError('on/off producer configurations differ')
             workload = replay['workloads'][0]

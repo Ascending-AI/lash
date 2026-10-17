@@ -248,14 +248,20 @@ impl Meter {
         self.probe.backend()
     }
 
-    pub fn sql_work(
+    pub(super) fn sql_work(
         &self,
-    ) -> Option<(
+        spool: super::sql_work::Spool,
+    ) -> Result<(
         lash_core::perf_witness::sql_shapes::work::Receipt,
         serde_json::Value,
     )> {
         let snapshot = self.witness.snapshot();
-        let work = snapshot.sql_shapes?.work;
+        let work = spool.finish(
+            snapshot
+                .sql_shapes
+                .context("SQL-shape observer was not installed")?
+                .work,
+        )?;
         let affected =
             matches!(self.probe, StoreProbe::Sqlite { .. }).then_some(snapshot.sql_rows_written);
         let conserved = work.statements() == snapshot.sql_statements
@@ -269,7 +275,7 @@ impl Meter {
         let reference = serde_json::json!({"statements": snapshot.sql_statements,
             "rows_returned": snapshot.sql_rows_read, "sqlite_completed_connection_changes": affected,
             "conserved": conserved});
-        Some((work, reference))
+        Ok((work, reference))
     }
 
     pub fn attach_workers(&mut self, workers: Option<lash::vm::WorkerPool>) {

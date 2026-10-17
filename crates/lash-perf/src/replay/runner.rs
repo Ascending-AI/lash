@@ -251,6 +251,11 @@ pub async fn run(workload: &Workload, options: &RunOptions) -> Result<WorkloadRe
         }
     };
     let mut meter = Meter::install(probe, None, options.sql_shapes.is_some(), traffic)?;
+    let mut sql_spool = options
+        .sql_shapes
+        .as_deref()
+        .map(super::sql_work::Spool::new)
+        .transpose()?;
     let backend_name = meter.backend().to_owned();
     lash_core::perf_witness::sql_shapes::work::set_window(None, "session_start");
     let (start_before, start_shapes, _) = meter.read_with_shapes(0).await;
@@ -381,6 +386,9 @@ pub async fn run(workload: &Workload, options: &RunOptions) -> Result<WorkloadRe
     let mut profiled = false;
     for turn in 0..turns {
         lash_core::perf_witness::sql_shapes::work::set_window(Some(turn + 1), "maintenance");
+        if let Some(spool) = &mut sql_spool {
+            spool.flush_completed()?;
+        }
         cleanup
             .settle()
             .await
@@ -544,6 +552,9 @@ pub async fn run(workload: &Workload, options: &RunOptions) -> Result<WorkloadRe
         capture.finish()?;
     }
     lash_core::perf_witness::sql_shapes::work::set_window(None, "shutdown");
+    if let Some(spool) = &mut sql_spool {
+        spool.flush_completed()?;
+    }
     for lane in lanes {
         let _ = lane.session.close().await;
     }
@@ -551,9 +562,11 @@ pub async fn run(workload: &Workload, options: &RunOptions) -> Result<WorkloadRe
         .await
         .map_err(|error| anyhow::anyhow!("shut the replay core down: {error}"))?;
     if let Some(path) = &options.sql_shapes {
-        let (work, reference) = meter
-            .sql_work()
-            .context("SQL-shape observer was not installed")?;
+        let (work, reference) = meter.sql_work(
+            sql_spool
+                .take()
+                .context("SQL-work spool was not installed")?,
+        )?;
         super::sql_work::write(
             path,
             (&options.identity, &experiment, &experiment_id),

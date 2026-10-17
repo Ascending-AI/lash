@@ -11,7 +11,7 @@ import prior_turn_cost as reader
 class PriorTurnCostLaws(unittest.TestCase):
     @classmethod
     def setUpClass(cls):
-        (Path(__file__).resolve().parents[1] / '.kiln/FIG-6623').mkdir(parents=True, exist_ok=True)
+        (Path(__file__).resolve().parents[1] / '.kiln/FIG-6646').mkdir(parents=True, exist_ok=True)
 
     def test_insufficient_distinct_depths_stay_unknown_and_sweep_uncertainty_is_visible(self):
         # Unknown is absent, never a measured flat slope (audit authoring rule 2).
@@ -34,7 +34,7 @@ class PriorTurnCostLaws(unittest.TestCase):
             configuration = dict(observer='off+DHAT', backend='sqlite-file', worker='worker-sha',
                                  window=[depth+1, depth+1], useful_work='same-script', executables='parent-sha',
                                  terminal='all scripted replies consumed; all turns answered; clean shutdown',
-                                 script_digest='script-sha', producer={'build': 'same'})
+                                 script_digest='script-sha', producer={'build': 'same', 'heap_window': None})
             rows = [dict(turn=t, history_depth=t-1, frame_depth=t-1, sessions=1,
                          metrics={'allocated_bytes': 10+7*(t-1)}) for t in range(1, depth+2)]
             compactions = [dict(turn=t, history_depth=t, frame_depth=2, sessions=1,
@@ -43,7 +43,7 @@ class PriorTurnCostLaws(unittest.TestCase):
             for mode in ('off', 'dhat'):
                 directory = capture / mode
                 directory.mkdir()
-                payload = dict(identity={'build': 'same'}, workloads=[dict(
+                payload = dict(identity={'build': 'same', 'heap_window': None if mode == 'off' else [depth+1, depth+1]}, workloads=[dict(
                     backend='sqlite-file', script_digest='script-sha', rounds=rows,
                     compactions=compactions, units={'allocated_bytes': 'bytes'})])
                 (directory / 'replay.json').write_text(json.dumps(payload))
@@ -61,7 +61,7 @@ class PriorTurnCostLaws(unittest.TestCase):
 
     def test_compactions_are_a_separate_population_and_window_live_is_not_retained_history(self):
         # Audit rule 2: distinct observation units cannot pollute each other.
-        with tempfile.TemporaryDirectory(dir=Path(__file__).resolve().parents[1] / '.kiln/FIG-6623') as temp:
+        with tempfile.TemporaryDirectory(dir=Path(__file__).resolve().parents[1] / '.kiln/FIG-6646') as temp:
             paths = self.captures(Path(temp))
             prior, compaction = reader.read_series(paths)
             self.assertEqual(prior['metrics']['allocated_bytes']['history']['theil_sen'], 7)
@@ -71,9 +71,38 @@ class PriorTurnCostLaws(unittest.TestCase):
             self.assertEqual(prior['source_sites'][0]['quantities']['allocated_traffic_bytes']['theil_sen'], 1)
             self.assertEqual(prior['source_sites'][0]['quantities']['window_end_live_bytes']['theil_sen'], 0)
 
+    def test_off_on_heap_windows_admit_only_the_same_workload(self):
+        # PRIOR-PAIR: the producer's off/on heap geometry is expected, while
+        # workload and other producer differences still refuse comparison.
+        with tempfile.TemporaryDirectory(dir=Path(__file__).resolve().parents[1] / '.kiln/FIG-6646') as temp:
+            paths = self.captures(Path(temp))
+            prior, _ = reader.read_series(paths)
+            self.assertEqual(len(prior['samples']), 3)
+            path = paths[-1] / 'dhat/replay.json'
+            receipt_path = paths[-1] / 'receipt.json'
+            original = json.loads(path.read_text())
+            receipt = json.loads(receipt_path.read_text())
+            for field, value in [('build', 'other'), ('heap_window', None), ('heap_window', [1, 1])]:
+                altered = copy.deepcopy(original)
+                altered['identity'][field] = value
+                changed_receipt = copy.deepcopy(receipt)
+                changed_receipt['observations'][1]['identity'] = altered['identity']
+                changed_receipt['experiment'] = reader.experiment_identity(
+                    changed_receipt['experiment']['configuration'], changed_receipt['observations'], changed_receipt['window_receipt'])
+                path.write_text(json.dumps(altered))
+                receipt_path.write_text(json.dumps(changed_receipt))
+                with self.subTest(field=field, value=value), self.assertRaises(ValueError):
+                    reader.read_series(paths)
+            altered = copy.deepcopy(original)
+            altered['workloads'][0]['script_digest'] = 'different-workload'
+            path.write_text(json.dumps(altered))
+            receipt_path.write_text(json.dumps(receipt))
+            with self.assertRaisesRegex(ValueError, 'workload identity'):
+                reader.read_series(paths)
+
     def test_missing_or_mixed_observer_worker_window_and_terminal_refuse_comparison(self):
         # Audit rule 1: identity survives through the final reader.
-        with tempfile.TemporaryDirectory(dir=Path(__file__).resolve().parents[1] / '.kiln/FIG-6623') as temp:
+        with tempfile.TemporaryDirectory(dir=Path(__file__).resolve().parents[1] / '.kiln/FIG-6646') as temp:
             paths = self.captures(Path(temp))
             with self.assertRaisesRegex(ValueError, 'duplicate'):
                 reader.read_series([paths[0], paths[0]])

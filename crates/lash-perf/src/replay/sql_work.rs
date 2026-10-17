@@ -4,7 +4,74 @@ use lash_core::perf_witness::sql_shapes::work::{Backend, Counts, Receipt};
 use serde_json::json;
 use std::collections::BTreeMap;
 use std::fmt::Write as _;
-use std::path::Path;
+use std::fs::File;
+use std::io::{BufRead as _, BufReader, BufWriter, Write as _};
+use std::path::{Path, PathBuf};
+
+/// Completed windows leave the bounded collector immediately. Only exported
+/// keys/counts reach this temporary spool; raw parameters never leave it.
+pub(super) struct Spool {
+    path: PathBuf,
+    writer: BufWriter<File>,
+}
+impl Spool {
+    pub(super) fn new(output: &Path) -> Result<Self> {
+        crate::perf_support::report::ensure_parent_dir(output, "SQL work spool")?;
+        let path = output.with_extension("work.pending.jsonl");
+        let writer = BufWriter::new(File::options().write(true).create_new(true).open(&path)?);
+        Ok(Self { path, writer })
+    }
+    pub(super) fn flush_completed(&mut self) -> Result<()> {
+        let chunk = lash_core::perf_witness::sql_shapes::work::drain_completed()
+            .context("SQL-shape observer was not installed")?;
+        serde_json::to_writer(&mut self.writer, &chunk)?;
+        self.writer.write_all(b"\n")?;
+        Ok(())
+    }
+    pub(super) fn finish(mut self, mut work: Receipt) -> Result<Receipt> {
+        self.writer.flush()?;
+        let mut rows: BTreeMap<_, _> = std::mem::take(&mut work.rows)
+            .into_iter()
+            .map(|row| (row.key, row.counts))
+            .collect();
+        for line in BufReader::new(File::open(&self.path)?).lines() {
+            let chunk: Receipt = serde_json::from_str(&line?)?;
+            ensure!(
+                chunk.epoch == work.epoch && chunk.active.is_empty() && chunk.conserves(),
+                "SQL-work spool lost its collector or population"
+            );
+            work.complete &= chunk.complete;
+            work.repeat_identities_complete &= chunk.repeat_identities_complete;
+            work.admitted_key_bytes = work.admitted_key_bytes.max(chunk.admitted_key_bytes);
+            for (backend, counts) in chunk.totals {
+                add_counts(work.totals.entry(backend).or_default(), &counts);
+            }
+            for row in chunk.rows {
+                add_counts(rows.entry(row.key).or_default(), &row.counts);
+            }
+            work.repeated_reads.extend(chunk.repeated_reads);
+        }
+        work.rows = rows
+            .into_iter()
+            .map(|(key, counts)| lash_core::perf_witness::sql_shapes::work::Row { key, counts })
+            .collect();
+        Ok(work)
+    }
+}
+impl Drop for Spool {
+    fn drop(&mut self) {
+        let _ = std::fs::remove_file(&self.path);
+    }
+}
+fn add_counts(total: &mut Counts, other: &Counts) {
+    total.statements += other.statements;
+    total.rows_returned += other.rows_returned;
+    total.rows_affected += other.rows_affected;
+    total.bound_bytes += other.bound_bytes;
+    total.result_bytes += other.result_bytes;
+    total.unknown_bindings += other.unknown_bindings;
+    total.unqualified_read_identities += other.unqualified_read_identities;
+}
 
 pub(super) fn write(
     path: &Path,
@@ -23,13 +90,7 @@ pub(super) fn write(
     let mut per_backend = BTreeMap::<Backend, Counts>::new();
     for row in receipt.rows.iter().chain(&receipt.active) {
         let total = per_backend.entry(row.key.backend).or_default();
-        total.statements += row.counts.statements;
-        total.rows_returned += row.counts.rows_returned;
-        total.rows_affected += row.counts.rows_affected;
-        total.bound_bytes += row.counts.bound_bytes;
-        total.result_bytes += row.counts.result_bytes;
-        total.unknown_bindings += row.counts.unknown_bindings;
-        total.unqualified_read_identities += row.counts.unqualified_read_identities;
+        add_counts(total, &row.counts);
     }
     let artifact = path.with_file_name("turn-sql-work.json");
     let binary_sha256 = identity

@@ -269,7 +269,8 @@ impl Collector {
         })
     }
 
-    /// Snapshot all work observed since this collector was installed.
+    /// Snapshot work since installation, excluding explicitly drained SQL-work
+    /// chunks. Ordinary shape and independent counters remain cumulative.
     pub fn snapshot(&self) -> Snapshot {
         let shapes = sql_shapes::enabled().then(sql_shapes::lock);
         Snapshot {

@@ -53,6 +53,15 @@ pub struct Counts {
     pub unqualified_read_identities: u64,
 }
 impl Counts {
+    fn subtract(&mut self, other: &Self) {
+        self.statements -= other.statements;
+        self.rows_returned -= other.rows_returned;
+        self.rows_affected -= other.rows_affected;
+        self.bound_bytes -= other.bound_bytes;
+        self.result_bytes -= other.result_bytes;
+        self.unknown_bindings -= other.unknown_bindings;
+        self.unqualified_read_identities -= other.unqualified_read_identities;
+    }
     fn add(&mut self, other: &Self) {
         self.statements += other.statements;
         self.rows_returned += other.rows_returned;
@@ -110,6 +119,7 @@ pub struct Receipt {
     pub active: Vec<Row>,
     pub repeated_reads: Vec<RepeatedRead>,
     pub lost: u64,
+    /// Peak resident key admissions, excluding already exported populations.
     pub admitted_key_bytes: usize,
     pub pending_bindings: usize,
     pub read_bind_classes: BTreeMap<String, u64>,
@@ -138,18 +148,119 @@ impl Receipt {
     }
 }
 
+// Metadata is shared by executions and equality groups, but exact SQL remains
+// the cache key: a digest is never used to establish parameter equality.
+#[derive(Clone, Debug, PartialEq, Eq, PartialOrd, Ord)]
+struct Statement {
+    digest: String,
+    shape: String,
+    relations: Option<Vec<String>>,
+}
+impl Statement {
+    fn bytes(&self) -> usize {
+        std::mem::size_of::<Self>()
+            + 128
+            + self.digest.len()
+            + self.shape.len()
+            + self.relations.as_ref().map_or(0, |r| {
+                r.iter()
+                    .map(|s| std::mem::size_of::<String>() + s.len())
+                    .sum::<usize>()
+            })
+    }
+}
+#[derive(Clone, Debug, PartialEq, Eq, PartialOrd, Ord)]
+struct JoinKey {
+    statement: std::sync::Arc<Statement>,
+    site: std::sync::Arc<str>,
+    backend: Backend,
+    started_in: Cut,
+    finished_in: Option<Cut>,
+    owner: Option<OwnerIdentity>,
+    operation: Option<String>,
+    worker: String,
+}
+impl JoinKey {
+    fn exported(&self) -> Key {
+        Key {
+            statement: self.statement.digest.clone(),
+            shape: self.statement.shape.clone(),
+            site: self.site.to_string(),
+            relations: self.statement.relations.clone(),
+            backend: self.backend,
+            started_in: self.started_in.clone(),
+            finished_in: self.finished_in.clone(),
+            owner: self.owner.clone(),
+            operation: self.operation.clone(),
+            worker: self.worker.clone(),
+        }
+    }
+    fn bytes(&self) -> usize {
+        // Include container slots as well as all execution-owned strings.
+        std::mem::size_of::<(Self, Counts)>()
+            + 128
+            + self.started_in.phase.len()
+            + self.finished_in.as_ref().map_or(0, |c| c.phase.len())
+            + self.owner.as_ref().map_or(0, |o| o.actor.len())
+            + self.operation.as_ref().map_or(0, String::len)
+            + self.worker.len()
+    }
+}
+struct Active {
+    key: JoinKey,
+    counts: Counts,
+}
+impl Active {
+    fn exported(&self) -> Row {
+        Row {
+            key: self.key.exported(),
+            counts: self.counts.clone(),
+        }
+    }
+}
+#[derive(Clone, Debug, PartialEq, Eq, PartialOrd, Ord)]
+struct ReadIdentity {
+    window: Cut,
+    site: std::sync::Arc<str>,
+    statement: std::sync::Arc<Statement>,
+    parameters: usize,
+    bind_class: String,
+}
+impl ReadIdentity {
+    fn exported(&self, executions: u64) -> RepeatedRead {
+        RepeatedRead {
+            key: ReadKey {
+                window: self.window.clone(),
+                site: self.site.to_string(),
+                statement: self.statement.digest.clone(),
+                parameters: self.parameters,
+                bind_class: self.bind_class.clone(),
+            },
+            executions,
+            extra_executions: executions - 1,
+        }
+    }
+    fn bytes(&self) -> usize {
+        std::mem::size_of::<(Self, u64)>() + 128 + self.window.phase.len() + self.bind_class.len()
+    }
+}
+
 pub(super) struct State {
     epoch: u64,
     next: u64,
     cut: Cut,
     totals: BTreeMap<Backend, Counts>,
-    rows: BTreeMap<Key, Counts>,
-    active: BTreeMap<u64, Row>,
+    rows: BTreeMap<JoinKey, Counts>,
+    active: BTreeMap<u64, Active>,
+    statements: BTreeMap<String, Vec<std::sync::Arc<Statement>>>,
+    sites: std::collections::BTreeSet<std::sync::Arc<str>>,
+    next_parameter: usize,
+    peak_key_bytes: usize,
     // Full equality, including SQL and type/null/length-framed parameters.
     // No digest alone can fabricate a repeated read.
     parameters: BTreeMap<Vec<u8>, usize>,
     binding_captures: BTreeMap<u64, Option<Vec<u8>>>,
-    reads: BTreeMap<ReadKey, u64>,
+    reads: BTreeMap<ReadIdentity, u64>,
     key_bytes: usize,
     read_bind_classes: BTreeMap<String, u64>,
     lost: u64,
@@ -166,6 +277,10 @@ impl Default for State {
             totals: BTreeMap::new(),
             rows: BTreeMap::new(),
             active: BTreeMap::new(),
+            statements: BTreeMap::new(),
+            sites: std::collections::BTreeSet::new(),
+            next_parameter: 0,
+            peak_key_bytes: 0,
             parameters: BTreeMap::new(),
             binding_captures: BTreeMap::new(),
             reads: BTreeMap::new(),
@@ -179,23 +294,151 @@ impl State {
     pub(super) fn receipt(&self) -> Receipt {
         Receipt {
             epoch: self.epoch, totals: self.totals.clone(),
-            rows: self.rows.iter().map(|(key, counts)| Row { key: key.clone(), counts: counts.clone() }).collect(),
-            active: self.active.values().cloned().collect(),
-            repeated_reads: self.reads.iter().filter(|(_, n)| **n > 1).map(|(key, n)| RepeatedRead {
-                key: key.clone(), executions: *n, extra_executions: n - 1,
-            }).collect(),
-            lost: self.lost, admitted_key_bytes: self.key_bytes, pending_bindings: self.binding_captures.len(),
+            rows: self.rows.iter().map(|(key, counts)| Row { key: key.exported(), counts: counts.clone() }).collect(),
+            active: self.active.values().map(Active::exported).collect(),
+            repeated_reads: self.reads.iter().filter(|(_, n)| **n > 1).map(|(key, n)| key.exported(*n)).collect(),
+            lost: self.lost, admitted_key_bytes: self.peak_key_bytes, pending_bindings: self.binding_captures.len(),
             read_bind_classes: self.read_bind_classes.clone(),
             repeat_identities_complete: self.lost == 0 && self.totals.values().all(|c| c.unqualified_read_identities == 0),
             repeat_qualification: "exact SQL plus parameters and origin; SQLite TEXT exact modulo embedded NUL; SQLite REAL excluded; unsupported encodings excluded".into(),
             complete: self.lost == 0 && self.active.is_empty() && self.totals.values().all(|c| c.unknown_bindings == 0),
         }
     }
+    fn statement(
+        &mut self,
+        sql: &str,
+        relations: Option<Vec<String>>,
+    ) -> Option<std::sync::Arc<Statement>> {
+        if let Some(found) = self
+            .statements
+            .get(sql)
+            .and_then(|variants| variants.iter().find(|s| s.relations == relations))
+        {
+            return Some(std::sync::Arc::clone(found));
+        }
+        let statement = Statement {
+            digest: format!("{:x}", Sha256::digest(sql.as_bytes())),
+            shape: crate::operational_metrics::sql::normalized_shape(sql).to_string(),
+            relations,
+        };
+        let bytes = statement.bytes()
+            + if self.statements.contains_key(sql) {
+                0
+            } else {
+                sql.len() + 128
+            };
+        if self.statements.len() >= KEY_LIMIT || !self.retain(bytes) {
+            self.lost += 1;
+            return None;
+        }
+        let statement = std::sync::Arc::new(statement);
+        self.statements
+            .entry(sql.into())
+            .or_default()
+            .push(std::sync::Arc::clone(&statement));
+        Some(statement)
+    }
+    fn site(&mut self, site: &str) -> Option<std::sync::Arc<str>> {
+        if let Some(found) = self.sites.get(site) {
+            return Some(std::sync::Arc::clone(found));
+        }
+        if self.sites.len() >= KEY_LIMIT || !self.retain(site.len() + 128) {
+            self.lost += 1;
+            return None;
+        }
+        let site: std::sync::Arc<str> = site.into();
+        self.sites.insert(std::sync::Arc::clone(&site));
+        Some(site)
+    }
+    fn resident_bytes(&self) -> usize {
+        self.statements
+            .iter()
+            .map(|(sql, variants)| {
+                sql.len() + 128 + variants.iter().map(|s| s.bytes()).sum::<usize>()
+            })
+            .sum::<usize>()
+            + self
+                .sites
+                .iter()
+                .map(|site| site.len() + 128)
+                .sum::<usize>()
+            + self.rows.keys().map(JoinKey::bytes).sum::<usize>()
+            + self
+                .active
+                .values()
+                .map(|row| row.key.bytes())
+                .sum::<usize>()
+            + self.reads.keys().map(ReadIdentity::bytes).sum::<usize>()
+            + self
+                .parameters
+                .keys()
+                .map(|key| key.len() + 128)
+                .sum::<usize>()
+            + self
+                .binding_captures
+                .values()
+                .map(|key| 128 + key.as_ref().map_or(0, Vec::len))
+                .sum::<usize>()
+    }
+    fn drain_completed(&mut self) -> Receipt {
+        let mut drained = Receipt {
+            epoch: self.epoch,
+            complete: true,
+            repeat_identities_complete: true,
+            admitted_key_bytes: self.peak_key_bytes,
+            ..Receipt::default()
+        };
+        for (key, counts) in std::mem::take(&mut self.rows) {
+            drained.totals.entry(key.backend).or_default().add(&counts);
+            self.totals
+                .entry(key.backend)
+                .or_default()
+                .subtract(&counts);
+            drained.rows.push(Row {
+                key: key.exported(),
+                counts,
+            });
+        }
+        self.totals.retain(|_, counts| *counts != Counts::default());
+        // An execution can capture its bindings or finish after the window
+        // changes. Retain its entire read population until that tail ends.
+        let mut retained = BTreeMap::new();
+        for (key, executions) in std::mem::take(&mut self.reads) {
+            if key.window == self.cut
+                || self
+                    .active
+                    .values()
+                    .any(|row| row.key.started_in == key.window)
+            {
+                retained.insert(key, executions);
+            } else if executions > 1 {
+                drained.repeated_reads.push(key.exported(executions));
+            }
+        }
+        self.reads = retained;
+        let parameters: std::collections::BTreeSet<_> =
+            self.reads.keys().map(|key| key.parameters).collect();
+        self.parameters.retain(|_, id| parameters.contains(id));
+        self.statements.retain(|_, variants| {
+            variants.retain(|s| std::sync::Arc::strong_count(s) > 1);
+            !variants.is_empty()
+        });
+        self.sites
+            .retain(|site| std::sync::Arc::strong_count(site) > 1);
+        self.key_bytes = self.resident_bytes();
+        drained.complete = drained.unknown_bindings() == 0;
+        drained.repeat_identities_complete = drained
+            .totals
+            .values()
+            .all(|c| c.unqualified_read_identities == 0);
+        drained
+    }
     fn retain(&mut self, bytes: usize) -> bool {
         if self.key_bytes.saturating_add(bytes) > KEY_BYTES_LIMIT {
             false
         } else {
             self.key_bytes += bytes;
+            self.peak_key_bytes = self.peak_key_bytes.max(self.key_bytes);
             true
         }
     }
@@ -213,6 +456,17 @@ pub fn set_window(turn: Option<usize>, phase: &str) {
             phase: phase.chars().take(128).collect(),
         };
     }
+}
+
+/// Export completed executions and closed read windows, releasing their
+/// resident admissions. Active executions, their read windows and pending
+/// bindings survive. Callers must assemble these chunks with the final
+/// snapshot before comparing against cumulative independent witnesses.
+pub fn drain_completed() -> Option<Receipt> {
+    if !enabled() {
+        return None;
+    }
+    Some(lock().as_mut()?.work.drain_completed())
 }
 
 /// A token cannot attach a late completion to a successor collector.
@@ -240,11 +494,11 @@ impl Execution {
             state.lost += 1;
             return None;
         }
-        let key = Key {
-            statement: format!("{:x}", Sha256::digest(sql.as_bytes())),
-            shape: crate::operational_metrics::sql::normalized_shape(sql).to_string(),
-            site: site.into(),
-            relations,
+        let statement = state.statement(sql, relations)?;
+        let site = state.site(site)?;
+        let key = JoinKey {
+            statement,
+            site,
             backend,
             started_in: state.cut.clone(),
             finished_in: None,
@@ -252,9 +506,7 @@ impl Execution {
             operation: window.map(|v| v.1),
             worker: format!("{:?}", std::thread::current().id()),
         };
-        // Include all retained strings (not only parameter values) in the bound.
-        let size = serde_json::to_vec(&key).ok()?.len();
-        if !state.retain(size) {
+        if !state.retain(key.bytes()) {
             state.lost += 1;
             return None;
         }
@@ -262,7 +514,7 @@ impl Execution {
         let id = state.next;
         state.active.insert(
             id,
-            Row {
+            Active {
                 key,
                 counts: Counts {
                     statements: 1,
@@ -346,10 +598,10 @@ impl Execution {
                     .or_default()
                     .unqualified_read_identities += 1;
             }
-            let key = ReadKey {
+            let key = ReadIdentity {
                 window: row.key.started_in.clone(),
-                site: row.key.site.clone(),
-                statement: row.key.statement.clone(),
+                site: std::sync::Arc::clone(&row.key.site),
+                statement: std::sync::Arc::clone(&row.key.statement),
                 parameters: 0,
                 bind_class: bind_class.into(),
             };
@@ -361,22 +613,22 @@ impl Execution {
             } else {
                 if state.parameters.len() == KEY_LIMIT
                     || identity.len() > VALUE_LIMIT
-                    || !state.retain(identity.len())
+                    || !state.retain(identity.len() + 128)
                 {
                     state.lost += 1;
                     return;
                 }
-                let value = state.parameters.len();
+                let value = state.next_parameter;
+                state.next_parameter += 1;
                 state.parameters.insert(identity, value);
                 value
             };
-            let key = ReadKey {
+            let key = ReadIdentity {
                 parameters: parameter,
                 ..key
             };
             if !state.reads.contains_key(&key)
-                && (state.reads.len() == KEY_LIMIT
-                    || !state.retain(serde_json::to_vec(&key).map_or(VALUE_LIMIT, |v| v.len())))
+                && (state.reads.len() == KEY_LIMIT || !state.retain(key.bytes()))
             {
                 state.lost += 1;
                 return;
@@ -400,9 +652,12 @@ impl Execution {
     pub fn finish(self) {
         self.update(|state, id| {
             if let Some(mut row) = state.active.remove(&id) {
+                state.key_bytes -= row.key.bytes();
                 row.key.finished_in = Some(state.cut.clone());
-                if state.rows.contains_key(&row.key) || state.rows.len() < WORK_ROW_LIMIT {
-                    state.rows.entry(row.key).or_default().add(&row.counts);
+                if let Some(counts) = state.rows.get_mut(&row.key) {
+                    counts.add(&row.counts);
+                } else if state.rows.len() < WORK_ROW_LIMIT && state.retain(row.key.bytes()) {
+                    state.rows.insert(row.key, row.counts);
                 } else {
                     state.lost += 1;
                 }
@@ -426,7 +681,7 @@ impl BindingCapture {
         }
         let mut guard = lock();
         let state = &mut guard.as_mut()?.work;
-        if state.binding_captures.len() >= ACTIVE_LIMIT {
+        if state.binding_captures.len() >= ACTIVE_LIMIT || !state.retain(128) {
             return None;
         }
         state.next += 1;
@@ -459,6 +714,7 @@ impl BindingCapture {
                 return;
             }
             state.key_bytes += added;
+            state.peak_key_bytes = state.peak_key_bytes.max(state.key_bytes);
             let Some(Some(key)) = state.binding_captures.get_mut(&id) else {
                 return;
             };
@@ -472,10 +728,10 @@ impl BindingCapture {
     pub fn take(self) -> Option<Vec<u8>> {
         let mut result = None;
         self.token().update(|state, id| {
-            result = state.binding_captures.remove(&id).flatten();
-            state.key_bytes = state
-                .key_bytes
-                .saturating_sub(result.as_ref().map_or(0, Vec::len));
+            if let Some(captured) = state.binding_captures.remove(&id) {
+                state.key_bytes -= 128 + captured.as_ref().map_or(0, Vec::len);
+                result = captured;
+            }
         });
         result
     }
@@ -488,6 +744,106 @@ pub fn origin() -> &'static str {
 #[cfg(test)]
 mod tests {
     use super::*;
+    /// SQL-WORK-RESIDENT: repeated executions admit resident keys once,
+    /// rather than exhausting the budget with invocation-lifetime traffic.
+    #[expect(
+        clippy::disallowed_methods,
+        reason = "isolates the process-global witness"
+    )]
+    #[test]
+    fn repeated_executions_bound_resident_admissions() {
+        const CHILD: &str = "LASH_SQL_RESIDENT_CHILD";
+        if std::env::var_os(CHILD).is_none() {
+            let output = std::process::Command::new(std::env::current_exe().unwrap())
+                .args(["--exact", "perf_witness::sql_shapes::work::tests::repeated_executions_bound_resident_admissions", "--nocapture"])
+                .env(CHILD, "1").output().unwrap();
+            let stdout = String::from_utf8_lossy(&output.stdout);
+            eprint!("{}", String::from_utf8_lossy(&output.stderr));
+            assert!(output.status.success(), "isolated law failed: {stdout}");
+            assert!(
+                stdout.contains("test result: ok. 1 passed; 0 failed;"),
+                "law did not execute: {stdout}"
+            );
+            return;
+        }
+        let collector = crate::perf_witness::Collector::install_with_sql_shapes().unwrap();
+        for _ in 0..100_000 {
+            if let Some(execution) = Execution::start(
+                Backend::Sqlite,
+                "SELECT 1",
+                "resident-law",
+                Some(vec![]),
+                false,
+            ) {
+                execution.finish();
+            }
+        }
+        let work = collector.snapshot().sql_shapes.unwrap().work;
+        assert!(
+            work.complete && work.conserves(),
+            "resident admissions refused repeated work: lost={}",
+            work.lost
+        );
+        assert_eq!(work.statements(), 100_000);
+        assert_eq!(work.rows.len(), 1);
+        assert!(work.admitted_key_bytes < KEY_BYTES_LIMIT);
+        set_window(Some(0), "turn");
+        assert_eq!(drain_completed().unwrap().statements(), 100_000);
+        let mut previous_parameter = None;
+        // More than 16 MiB of distinct identity traffic across closed turns
+        // must fit when no single resident population exceeds the bound.
+        for turn in 1..=4 {
+            set_window(Some(turn), "turn");
+            for parameter in 0_usize..2500 {
+                let mut identity = vec![0; 2048];
+                identity[..8].copy_from_slice(&parameter.to_le_bytes());
+                for _ in 0..2 {
+                    let execution = Execution::start(
+                        Backend::Sqlite,
+                        "SELECT ?",
+                        "resident-law",
+                        Some(vec![]),
+                        true,
+                    )
+                    .unwrap();
+                    execution.bindings(Some(8), Some(identity.clone()), "integer");
+                    execution.finish();
+                }
+            }
+            set_window(Some(turn + 1), "maintenance");
+            let drained = drain_completed().unwrap();
+            assert!(drained.complete && drained.conserves());
+            assert_eq!(drained.statements(), 5000);
+            assert_eq!(drained.repeated_reads.len(), 2500);
+            let first_parameter = drained
+                .repeated_reads
+                .iter()
+                .map(|r| r.key.parameters)
+                .min()
+                .unwrap();
+            if let Some(previous) = previous_parameter {
+                assert!(
+                    first_parameter > previous,
+                    "released equality IDs were reused"
+                );
+            }
+            previous_parameter = drained
+                .repeated_reads
+                .iter()
+                .map(|r| r.key.parameters)
+                .max();
+            let guard = lock();
+            let state = &guard.as_ref().unwrap().work;
+            assert_eq!(state.key_bytes, 0);
+            assert!(
+                state.parameters.is_empty()
+                    && state.statements.is_empty()
+                    && state.sites.is_empty()
+            );
+        }
+        assert!(collector.snapshot().sql_shapes.unwrap().work.complete);
+    }
+
     /// SQL-COST-JOIN: a cut cannot hide an active statement or assign its
     /// tail to a new owner/window, and a successor cannot accept stale tokens.
     #[expect(
@@ -522,14 +878,31 @@ mod tests {
         assert!(!cut.complete);
         assert_eq!(cut.active.len(), 1);
         assert!(cut.active[0].key.owner.is_none());
+        let tail =
+            Execution::start(Backend::Sqlite, "SELECT 1", "law", Some(vec![]), true).unwrap();
         set_window(Some(1), "turn");
+        let drained = drain_completed().unwrap();
+        assert!(drained.conserves());
+        assert_eq!(drained.statements(), 0);
+        tail.bindings(Some(0), Some(b"SELECT 1".to_vec()), "integer_null_or_none");
         execution.finish();
+        tail.finish();
         let done = collector.snapshot().sql_shapes.unwrap().work;
         assert!(done.complete && done.conserves());
         assert_eq!(done.rows[0].key.started_in.phase, "session_start");
         assert_eq!(done.rows[0].key.finished_in.as_ref().unwrap().phase, "turn");
         let capture = BindingCapture::new().unwrap();
         capture.append("TEXT", b"private", false, true);
+        set_window(Some(2), "turn");
+        let drained = drain_completed().unwrap();
+        assert!(drained.complete && drained.conserves());
+        assert_eq!(drained.statements(), 2);
+        assert_eq!(drained.repeated_reads.len(), 1);
+        assert_eq!(drained.repeated_reads[0].executions, 2);
+        assert_eq!(
+            collector.snapshot().sql_shapes.unwrap().work.statements(),
+            0
+        );
         assert_eq!(
             collector
                 .snapshot()
