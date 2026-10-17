@@ -91,6 +91,17 @@ pub(super) async fn resume(image: &'static images::Image, protocol: Protocol) ->
     nodes.start("b");
     let horizon = clock.logical_ms() + 600_000;
     while !resumed.done(&nodes).await {
+        // A refused image parks its session with the typed refusal at once:
+        // that is the image's outcome, not a wait for the horizon.
+        if let Ok(Some(parked)) = database.actor(&actor()).await
+            && parked.state == ActorState::Parked
+        {
+            panic!(
+                "the resumed session parked instead of resuming: {}\n{}",
+                parked.park.as_deref().unwrap_or("no recorded reason"),
+                nodes.script().rendered_trace()
+            );
+        }
         assert!(
             clock.logical_ms() < horizon,
             "the resumed session is not done after 600 s of virtual time:\n{}",
