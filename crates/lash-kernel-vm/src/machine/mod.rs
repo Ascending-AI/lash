@@ -293,6 +293,7 @@ enum Wait {
 }
 
 struct Task {
+    counters: tasks::Occurrences,
     record: lash_kernel_state::paged::TaskRecord,
     frames: frames::Frames,
     /// Non-owning comparison with the last row written (FIG-6586).
@@ -922,6 +923,9 @@ impl KernelMachine {
         while let Some(wait) = self.withdrawn.pop_front().map_err(MachineError::Heap)? {
             withdrawn.push(WaitId(wait));
         }
+        self.tasks
+            .project_occurrences()
+            .map_err(MachineError::Heap)?;
         let (tasks, outstanding) = self.tasks.sealed_root().map_err(MachineError::Heap)?;
         let live = u64::from(self.live_tasks.saturating_sub(1));
         Ok(Step::Parked(Park {

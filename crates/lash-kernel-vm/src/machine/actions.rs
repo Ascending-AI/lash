@@ -68,7 +68,7 @@ impl KernelMachine {
                     | ActionKind::Cancel(_)
             )
         {
-            let occurrence = self.occurrence(task, &action.site)?;
+            let occurrence = self.task(task)?.counters.advance(action.occurrence)?;
             if host.observes_sites() {
                 let identity = self.action_identity(task, &action.site, occurrence)?;
                 host.enter_site(&identity);
@@ -209,7 +209,7 @@ impl KernelMachine {
         match &entry.kind {
             NestedKind::Call(callee) => {
                 if !library {
-                    self.enter(task, host, site)?;
+                    self.enter(task, host, site, entry.occurrence)?;
                 }
                 let (target, at) = self.nested_target(exe, callee, args)?;
                 let count = count - (at - args);
@@ -286,7 +286,7 @@ impl KernelMachine {
             }
             NestedKind::Join => {
                 if !library {
-                    self.enter(task, host, site)?;
+                    self.enter(task, host, site, entry.occurrence)?;
                 }
                 let handle = self.take(args);
                 match self.join_one(task, handle)? {
@@ -303,7 +303,7 @@ impl KernelMachine {
             }
             NestedKind::JoinMany(mode) => {
                 if !library {
-                    self.enter(task, host, site)?;
+                    self.enter(task, host, site, entry.occurrence)?;
                 }
                 let handles = self.take(args);
                 match self.join_list(task, *mode, &handles)? {
@@ -320,7 +320,7 @@ impl KernelMachine {
             }
             NestedKind::Yield => {
                 if !library {
-                    self.enter(task, host, site)?;
+                    self.enter(task, host, site, entry.occurrence)?;
                 }
                 self.capture(task, entry, act, PhaseRecord::Yielded)?;
                 self.task(task)?.wake(Incoming::Value(Value::Null), false);
@@ -331,7 +331,7 @@ impl KernelMachine {
             }
             NestedKind::Cancel => {
                 if !library {
-                    self.enter(task, host, site)?;
+                    self.enter(task, host, site, entry.occurrence)?;
                 }
                 let Value::Task(target) = self.take(args) else {
                     return raise("type_error", "`cancel` takes a task handle");
@@ -479,8 +479,14 @@ impl KernelMachine {
 
     /// Counts the running task's entry into the action at `site` and tells
     /// a host that observes sites.
-    fn enter(&mut self, task: TaskId, host: &mut dyn Host, site: &Site) -> Result<(), Halt> {
-        let occurrence = self.occurrence(task, site)?;
+    fn enter(
+        &mut self,
+        task: TaskId,
+        host: &mut dyn Host,
+        site: &Site,
+        index: usize,
+    ) -> Result<(), Halt> {
+        let occurrence = self.task(task)?.counters.advance(index)?;
         if host.observes_sites() {
             let identity = self.action_identity(task, site, occurrence)?;
             host.enter_site(&identity);
@@ -694,18 +700,6 @@ impl KernelMachine {
         Ok(())
     }
 
-    fn occurrence(&mut self, task: TaskId, site: &Site) -> Result<u64, Halt> {
-        let key = lash_kernel_state::paged::metadata::metadata_key(site);
-        let access = self.heap.pages().clone();
-        let task = self.task(task)?;
-        let occurrence = task.occurrences.get(&key, &access)?.unwrap_or(0);
-        let next = occurrence
-            .checked_add(1)
-            .ok_or_else(|| fault("occurrence counter overflow"))?;
-        task.occurrences.write(key, next, &access)?;
-        Ok(occurrence)
-    }
-
     /// Takes the next wait for a `perform` or a `sleep` of the running
     /// task and gives its identity (`K-EFF-008`).
     fn request(&mut self, task: TaskId, stmt: StmtId, site: &Site) -> Result<WaitId, Halt> {
@@ -713,7 +707,11 @@ impl KernelMachine {
         if self.issued_count()? >= limit {
             return Err(bound(Bound::RequestsPerPark, limit));
         }
-        self.occurrence(task, site)?;
+        let index = self
+            .exe
+            .occurrence_index(site)
+            .ok_or_else(|| fault("request site has no occurrence index"))?;
+        self.task(task)?.counters.advance(index)?;
         let wait = WaitId(self.next_wait);
         self.next_wait = self
             .next_wait
@@ -796,16 +794,12 @@ impl KernelMachine {
             .ok_or_else(|| {
                 lash_kernel_doc::heap::HeapFault::Malformed("issued request has no action".into())
             })?;
-        let occurrence = running
-            .occurrences
-            .get(
-                &lash_kernel_state::paged::metadata::metadata_key(&site),
-                &access,
-            )?
-            .and_then(|next| next.checked_sub(1))
-            .ok_or_else(|| {
-                lash_kernel_doc::heap::HeapFault::Malformed("issued occurrence is missing".into())
-            })?;
+        let index = self.exe.occurrence_index(&site).ok_or_else(|| {
+            lash_kernel_doc::heap::HeapFault::Malformed("issued occurrence site is missing".into())
+        })?;
+        let occurrence = running.counters.issued(index).ok_or_else(|| {
+            lash_kernel_doc::heap::HeapFault::Malformed("issued occurrence is missing".into())
+        })?;
         let identity = EffectIdentity {
             task: running.identity.resolve(&access)?,
             site: site.clone(),
@@ -877,7 +871,10 @@ impl KernelMachine {
         if u64::from(self.live_tasks) >= limit {
             return Err(bound(Bound::LiveTasks, limit).into());
         }
-        let occurrence = self.occurrence(task, site)?;
+        let index = exe
+            .occurrence_index(site)
+            .ok_or_else(|| fault("spawn site has no occurrence index"))?;
+        let occurrence = self.task(task)?.counters.advance(index)?;
         if !matches!(site.unit, lash_kernel_doc::Unit::Library(_)) && host.observes_sites() {
             let at = self.action_identity(task, site, occurrence)?;
             host.enter_site(&at);

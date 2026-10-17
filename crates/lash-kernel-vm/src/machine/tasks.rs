@@ -7,6 +7,7 @@ use lash_kernel_doc::heap::HeapFault;
 use lash_kernel_state::paged::directory::ordinal_key;
 use lash_kernel_state::paged::tree::{Access, Tree, Version};
 use lash_kernel_state::paged::{IncomingRecord, TaskRecord, TaskStateRecord};
+use std::collections::BTreeMap;
 use std::sync::Arc;
 
 const CACHED_TASKS: usize = 64;
@@ -24,6 +25,7 @@ impl Task {
         exe: Arc<Executable>,
     ) -> Self {
         Self {
+            counters: Occurrences::new(&exe),
             record: TaskRecord {
                 identity,
                 state: TaskStateRecord::Ready,
@@ -102,6 +104,83 @@ impl std::ops::DerefMut for Task {
     }
 }
 
+/// Working state is task-wide, never frame-local or a persistent tree.
+pub(super) struct Occurrences {
+    counts: Box<[u64]>,
+    dirty: Vec<usize>,
+    marked: Box<[bool]>,
+}
+impl Occurrences {
+    fn new(exe: &Executable) -> Self {
+        Self {
+            counts: vec![0; exe.occurrence_count()].into_boxed_slice(),
+            dirty: Vec::new(),
+            marked: vec![false; exe.occurrence_count()].into_boxed_slice(),
+        }
+    }
+
+    fn open(
+        rows: &Tree<u64>,
+        exe: &Executable,
+        access: &Access<'static>,
+    ) -> Result<Self, HeapFault> {
+        let mut counters = Self::new(exe);
+        let mut problem = None;
+        rows.visit(access, &mut |key, count| {
+            let index = exe.saved_occurrence_index(key);
+            if let Some(index) = index {
+                counters.counts[index] = *count;
+                true
+            } else {
+                problem = Some(HeapFault::Malformed("unknown occurrence site".into()));
+                false
+            }
+        })?;
+        problem.map_or(Ok(counters), Err)
+    }
+
+    pub(super) fn advance(&mut self, index: usize) -> Result<u64, super::Halt> {
+        let count = self.counts[index];
+        self.counts[index] = count
+            .checked_add(1)
+            .ok_or_else(|| super::fault("occurrence counter overflow"))?;
+        if !self.marked[index] {
+            self.dirty.push(index);
+            self.marked[index] = true;
+        }
+        Ok(count)
+    }
+
+    pub(super) fn issued(&self, index: usize) -> Option<u64> {
+        self.counts[index].checked_sub(1)
+    }
+
+    fn project(
+        &mut self,
+        rows: &mut Tree<u64>,
+        exe: &Executable,
+        access: &Access<'static>,
+    ) -> Result<(), HeapFault> {
+        if self.dirty.is_empty() {
+            return Ok(());
+        }
+        let mut projected = rows.clone();
+        self.dirty.sort_unstable();
+        for &index in &self.dirty {
+            projected.write(
+                exe.occurrence_key(index).to_vec(),
+                self.counts[index],
+                access,
+            )?;
+        }
+        *rows = projected;
+        for index in self.dirty.drain(..) {
+            self.marked[index] = false;
+        }
+        Ok(())
+    }
+}
+
 /// Equality bookkeeping must not retain a second frame tree, which would
 /// keep its binding leaves alive after the real roots are replaced.
 pub(super) struct Publication {
@@ -149,6 +228,8 @@ impl Publication {
 pub(super) struct Tasks {
     rows: Tree<TaskRecord>,
     cache: Vec<Option<(u64, Box<Task>)>>,
+    /// Dirty counters outlive eviction of a task's execution coordinates.
+    unprojected: BTreeMap<u64, Occurrences>,
     protected: Option<TaskId>,
     /// A validated slot of the protected task. Colliding task reads may
     /// replace the other way, but cannot evict this statement's task.
@@ -166,6 +247,7 @@ impl Tasks {
     ) -> Self {
         Self {
             rows,
+            unprojected: BTreeMap::new(),
             protected: None,
             active: None,
             #[cfg(test)]
@@ -257,6 +339,10 @@ impl Tasks {
         };
         let slot = self.replacement(index)?;
         self.evict(slot)?;
+        let counters = match self.unprojected.remove(&index) {
+            Some(counters) => counters,
+            None => Occurrences::open(&record.occurrences, &self.exe, &self.access)?,
+        };
         let frames = Frames::open(
             std::mem::replace(&mut record.frames, Tree::new(true)),
             self.access.clone(),
@@ -268,6 +354,7 @@ impl Tasks {
             Box::new(Task {
                 published: Some(Publication::new(&record, &frames.rows)),
                 record,
+                counters,
                 frames,
             }),
         ));
@@ -366,7 +453,32 @@ impl Tasks {
         let Some((index, mut task)) = self.cache[slot].take() else {
             return Ok(());
         };
-        put(&mut self.rows, index, &mut task, &self.access, true)
+        put(&mut self.rows, index, &mut task, &self.access, true)?;
+        if !task.counters.dirty.is_empty() {
+            self.unprojected.insert(index, task.counters);
+        }
+        Ok(())
+    }
+
+    /// Called only at park, slice return, end and explicit seal. Frame and
+    /// holdings publication during execution deliberately leaves counts alone.
+    pub(super) fn project_occurrences(&mut self) -> Result<(), HeapFault> {
+        let evicted: Vec<_> = self.unprojected.keys().copied().collect();
+        for index in evicted {
+            if let Some(counters) = self.unprojected.get_mut(&index) {
+                self.rows
+                    .update(ordinal_key(index), &self.access, |record| {
+                        counters.project(&mut record.occurrences, &self.exe, &self.access)?;
+                        Ok(true)
+                    })?;
+            }
+            self.unprojected.remove(&index);
+        }
+        for (_, task) in self.cache.iter_mut().flatten() {
+            task.counters
+                .project(&mut task.record.occurrences, &self.exe, &self.access)?;
+        }
+        Ok(())
     }
 }
 
@@ -444,4 +556,81 @@ pub(super) fn source_body(
         return Ok(Some(exe.code(body).site.clone()));
     }
     Ok(None)
+}
+
+#[cfg(test)]
+mod laws {
+    use crate::laws::embedder::Embedder;
+    use crate::{Machine, Step};
+    use lash_kernel_doc::TaskId;
+
+    /// K-EFF-008: counter exhaustion keeps its existing machine-fault
+    /// classification, rather than becoming a malformed-heap refusal.
+    #[test]
+    fn occurrence_overflow_keeps_its_machine_fault() {
+        let mut run = Embedder::new("main { do yield return null }");
+        run.machine
+            .tasks
+            .get_mut(0)
+            .unwrap()
+            .unwrap()
+            .counters
+            .counts
+            .fill(u64::MAX);
+        let result = Machine::run(&mut run.machine, &mut run.world, u64::MAX);
+        assert!(
+            matches!(result,
+                Err(crate::MachineError::Fault { ref problem })
+                    if problem == "occurrence counter overflow"
+            ),
+            "{result:?}"
+        );
+    }
+
+    /// K-MACH-007: executing an action and publishing holdings or frame
+    /// coordinates does not project occurrences before a slice/park/end.
+    #[test]
+    fn occurrences_project_only_at_execution_boundaries() {
+        let mut run = Embedder::new("fn work() { return 1 } main { let a = call work() return a }");
+        loop {
+            assert!(matches!(
+                run.machine.run_slice(&mut run.world, 1).unwrap(),
+                Step::Slice
+            ));
+            let task = run
+                .machine
+                .tasks
+                .get_mut(TaskId::MAIN.0 as usize)
+                .unwrap()
+                .unwrap();
+            if task.frames.len() == 2 {
+                break;
+            }
+        }
+        run.machine.tasks.holdings().unwrap();
+        run.machine.tasks.roots().unwrap();
+        assert_eq!(
+            run.machine
+                .tasks
+                .get_mut(0)
+                .unwrap()
+                .unwrap()
+                .record
+                .occurrences
+                .len(),
+            0
+        );
+        Machine::run(&mut run.machine, &mut run.world, 1).unwrap();
+        assert_eq!(
+            run.machine
+                .tasks
+                .get_mut(0)
+                .unwrap()
+                .unwrap()
+                .record
+                .occurrences
+                .len(),
+            1
+        );
+    }
 }

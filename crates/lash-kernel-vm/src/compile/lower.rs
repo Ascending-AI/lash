@@ -445,6 +445,7 @@ impl Compiler<'_> {
             doc::Action::Cancel { task } => ActionKind::Cancel(self.atom(task)),
         };
         Action {
+            occurrence: usize::MAX,
             site: self.site(),
             kind,
         }
@@ -541,6 +542,7 @@ impl Compiler<'_> {
         let op = Op::Nested { act, args };
         self.stream.nested_at.insert(site.clone(), act);
         self.stream.nested.push(Nested {
+            occurrence: usize::MAX,
             site,
             depth: self.stmt_depth,
             kind,

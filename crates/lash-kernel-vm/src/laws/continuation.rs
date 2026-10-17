@@ -705,6 +705,102 @@ fn each_nested_wait_is_named_by_its_own_site() {
     );
 }
 
+/// K-EFF-008: one task counts a function's effect across sequential and
+/// recursive calls, independent of frames, cold reopens and code layout.
+#[test]
+fn sequential_and_recursive_calls_keep_task_wide_effect_identities() {
+    const SOURCE: &str = "fn work(n) { let v = perform echo(n) as Any\n\
+        if num.lt(0, n) { let r = call work(num.add(n, -1)) return r }\n\
+        return v }\n\
+        main { let a = call work(2) let b = call work(1) return b }\n";
+    let mut warm = Embedder::with(SOURCE, setup(u64::MAX));
+    warm.run_to_end(&[]);
+    let expected: Vec<_> = (0..5)
+        .map(|occurrence| lash_kernel_doc::EffectIdentity {
+            task: lash_kernel_doc::TaskIdentity::Main,
+            site: embedder::function_site("work", [0, 0]),
+            occurrence,
+            loops: Vec::new(),
+        })
+        .collect();
+    let identities = |requests: &[Request]| {
+        requests
+            .iter()
+            .map(|request| {
+                let Request::Effect(effect) = request else {
+                    panic!("{request:?}")
+                };
+                effect.identity.clone()
+            })
+            .collect::<Vec<_>>()
+    };
+    assert_eq!(identities(&warm.requests), expected);
+    let mut cold = Embedder::with(SOURCE, setup(u64::MAX));
+    let mut checkpoints = Vec::new();
+    loop {
+        match cold.run() {
+            Step::Parked(_) => {
+                checkpoints.push(cold.machine.semantic_checkpoint());
+                cold.reopen(Layout(3 + checkpoints.len() as u64 * 17), true);
+                assert_eq!(
+                    cold.machine.semantic_checkpoint(),
+                    *checkpoints.last().unwrap()
+                );
+                cold.deliver_next();
+            }
+            Step::Ended(end) => {
+                assert_eq!(embedder::result(end), int(0));
+                break;
+            }
+            Step::Slice => panic!("unbounded slice"),
+        }
+    }
+    assert_eq!(identities(&cold.requests), expected);
+    assert_eq!(cold.machine.meters().charged, warm.machine.meters().charged);
+    let uninterrupted = drive(SOURCE, &[], Drive::new(u64::MAX, false)).0;
+    let reopened = drive(SOURCE, &[], Drive::new(u64::MAX, true)).0;
+    assert_eq!(uninterrupted, reopened);
+
+    // More suspended tasks than the coordinate cache can retain: their
+    // unprojected counts still belong to each task across eviction and reload.
+    let numbers = (0..70).map(|n| n.to_string()).collect::<Vec<_>>().join(",");
+    let source = format!(
+        "{} main {{ let hs = [] for i in [{numbers}] {{
+        let h = spawn call work(1) set hs[list.len(hs)] = h
+        }} do join all hs return 0 }}",
+        SOURCE.split("main {").next().unwrap()
+    );
+    let mut warm = Embedder::with(&source, setup(u64::MAX));
+    assert_eq!(embedder::result(warm.run_to_end(&[])), int(0));
+    let mut by_task = BTreeMap::<_, Vec<_>>::new();
+    for identity in identities(&warm.requests) {
+        by_task
+            .entry(identity.task)
+            .or_default()
+            .push(identity.occurrence);
+    }
+    assert_eq!(by_task.len(), 70);
+    assert!(by_task.values().all(|counts| counts == &[0, 1]));
+    let mut cold = Embedder::with(&source, setup(u64::MAX));
+    let mut hops = 0;
+    loop {
+        match cold.run() {
+            Step::Parked(_) => {
+                hops += 1;
+                cold.reopen(Layout(3 + hops * 17), true);
+                cold.deliver_next();
+            }
+            Step::Ended(end) => {
+                assert_eq!(embedder::result(end), int(0));
+                break;
+            }
+            Step::Slice => panic!("unbounded slice"),
+        }
+    }
+    assert_eq!(identities(&cold.requests), identities(&warm.requests));
+    assert_eq!(cold.machine.meters().charged, warm.machine.meters().charged);
+}
+
 /// SITE-NESTED, `K-SITE-004`: a wait in a `while` condition is named by
 /// its own site, counted at each evaluation of the condition, and inside
 /// its loop, as the derived execution site names it.

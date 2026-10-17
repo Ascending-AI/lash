@@ -52,6 +52,11 @@ impl Machine for KernelMachine {
         self.observe_phase(GuestPhase::Interpret);
         let result = self.run_slice(host, slice);
         self.regs.clear();
+        if result.is_ok() {
+            self.tasks
+                .project_occurrences()
+                .map_err(MachineError::Heap)?;
+        }
         self.observe_phase(if matches!(result, Ok(Step::Parked(_))) {
             GuestPhase::Park
         } else {
@@ -155,6 +160,7 @@ impl Machine for KernelMachine {
         if self.ended {
             return Err(SealError::Ended);
         }
+        self.tasks.project_occurrences().map_err(SealError::Heap)?;
         self.publish_roots().map_err(|error| SealError::Fault {
             problem: format!("{error:?}"),
         })?;

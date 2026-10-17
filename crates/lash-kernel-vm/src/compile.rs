@@ -41,6 +41,7 @@ use crate::functions::{MachineFunction, machine_function};
 
 mod formula;
 mod lower;
+mod occurrences;
 mod preparation;
 mod reads;
 mod registers;
@@ -120,6 +121,9 @@ struct Tables {
     /// Each function body by its site, and each block by its own: how a
     /// parked run's coordinates find their place in this layout.
     code_at: BTreeMap<Site, CodeId>,
+    /// Canonical action-site order, independent of the executable layout.
+    occurrence_at: BTreeMap<Site, usize>,
+    occurrence_keys: Box<[Vec<u8>]>,
 }
 
 impl Tables {
@@ -220,6 +224,7 @@ impl PreparedLibrary {
                 codes: 0,
                 blocks: 0,
                 stmts: 0,
+                occurrences: 0,
             },
             tables.codes.len(),
             tables.blocks.len(),
@@ -534,6 +539,7 @@ impl Executable {
                 codes: library.codes.len() as u32,
                 blocks: library.blocks.len() as u32,
                 stmts: library.stmts.len() as u32,
+                occurrences: library.occurrence_keys.len(),
             },
             library.codes.len() + self.own.tables.codes.len(),
             library.blocks.len() + self.own.tables.blocks.len(),
@@ -818,6 +824,7 @@ pub(crate) struct Nested {
     /// The action's site: what its waits, its occurrences and its saved
     /// continuation name.
     pub(crate) site: Site,
+    pub(crate) occurrence: usize,
     /// The length of its statement's site path: a saved continuation names
     /// the action and its roles by their path suffix under it.
     pub(crate) depth: u32,
@@ -991,6 +998,7 @@ impl Form {
 
 pub(crate) struct Action {
     pub(crate) site: Site,
+    pub(crate) occurrence: usize,
     pub(crate) kind: ActionKind,
 }
 
@@ -1146,6 +1154,7 @@ struct Base {
     codes: u32,
     blocks: u32,
     stmts: u32,
+    occurrences: usize,
 }
 
 struct Compiler<'a> {
@@ -1223,6 +1232,7 @@ fn compile_document(
             codes: prepared.tables.codes.len() as u32,
             blocks: prepared.tables.blocks.len() as u32,
             stmts: prepared.tables.stmts.len() as u32,
+            occurrences: prepared.tables.occurrence_keys.len(),
         },
     );
     let codes: Vec<CodeId> = units.iter().map(|_| compiler.reserve()).collect();
@@ -1330,6 +1340,7 @@ impl<'a> Compiler<'a> {
             })
             .filter_map(|(at, _)| ReadHint::new(self.layout).map(|hint| (at as u32, hint)))
             .collect();
+        let (occurrence_at, occurrence_keys) = self.index_occurrences();
         let base = self.base;
         let codes: Vec<Code> = self.codes.into_iter().flatten().collect();
         let code_at = codes
@@ -1345,6 +1356,8 @@ impl<'a> Compiler<'a> {
             stream: self.stream,
             edges,
             code_at,
+            occurrence_at,
+            occurrence_keys,
         }
     }
 }
