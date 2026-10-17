@@ -274,9 +274,14 @@ impl RevisionRow {
         &self,
         conn: &Connection,
         fleet: lash_core_execution::FleetFormat,
+        configs: &lash_core_store::store_backend_support::ConfigCache,
     ) -> Result<lash_core_execution::PersistedSessionConfig, StoreError> {
-        let payload =
-            crate::codec::load_config_conn(conn, self.config_ref.as_deref(), fleet, None)?;
+        let payload = crate::codec::load_config_conn(
+            conn,
+            self.config_ref.as_deref(),
+            fleet,
+            Some(crate::codec::ConfigRead::Committed(configs)),
+        )?;
         Ok(payload.config)
     }
 }
@@ -341,11 +346,12 @@ fn retained_revision(
     head_revision: u64,
     pins: &[(Target, Option<u64>)],
     fleet: lash_core_execution::FleetFormat,
+    configs: &lash_core_store::store_backend_support::ConfigCache,
 ) -> Result<RetainedRevision, StoreError> {
     Ok(RetainedRevision {
         session_id: session_id.clone(),
         head_revision: row.head_revision,
-        config: row.config(conn, fleet)?,
+        config: row.config(conn, fleet, configs)?,
         head: row.head_revision == head_revision,
         pinned_by: pins
             .iter()
@@ -364,6 +370,7 @@ pub(crate) fn resolve_target_conn(
     session_id: &SessionId,
     target: &Target,
     fleet: lash_core_execution::FleetFormat,
+    configs: &lash_core_store::store_backend_support::ConfigCache,
 ) -> Result<RetainedRevision, StoreError> {
     require_session_conn(conn, session_id)?;
     let revision = resolve_conn(conn, session_id, target)?.revision(session_id, target)?;
@@ -375,7 +382,7 @@ pub(crate) fn resolve_target_conn(
     })?;
     let head_revision = head_revision_conn(conn, session_id)?;
     let pins = resolved_pins_conn(conn, session_id)?;
-    retained_revision(conn, session_id, row, head_revision, &pins, fleet)
+    retained_revision(conn, session_id, row, head_revision, &pins, fleet, configs)
 }
 
 /// Every retained revision of `session_id`, oldest first.
@@ -383,6 +390,7 @@ pub(crate) fn revisions_conn(
     conn: &Connection,
     session_id: &SessionId,
     fleet: lash_core_execution::FleetFormat,
+    configs: &lash_core_store::store_backend_support::ConfigCache,
 ) -> Result<Vec<RetainedRevision>, StoreError> {
     require_session_conn(conn, session_id)?;
     let rows = {
@@ -408,7 +416,7 @@ pub(crate) fn revisions_conn(
     let head_revision = head_revision_conn(conn, session_id)?;
     let pins = resolved_pins_conn(conn, session_id)?;
     rows.into_iter()
-        .map(|row| retained_revision(conn, session_id, row, head_revision, &pins, fleet))
+        .map(|row| retained_revision(conn, session_id, row, head_revision, &pins, fleet, configs))
         .collect()
 }
 
@@ -455,15 +463,20 @@ impl SqliteStore {
     async fn revision_read<T, F>(&self, f: F) -> Result<T, StoreError>
     where
         T: Send + 'static,
-        F: FnOnce(&Connection, lash_core_execution::FleetFormat) -> Result<T, StoreError>
+        F: FnOnce(
+                &Connection,
+                lash_core_execution::FleetFormat,
+                &lash_core_store::store_backend_support::ConfigCache,
+            ) -> Result<T, StoreError>
             + Send
             + 'static,
     {
+        let configs = Arc::clone(&self.configs);
         self.read_connection()
             .read(move |tx| {
                 let fleet =
                     crate::compat::read_recorded(tx, lash_core_execution::FleetFormat::writable())?;
-                Ok(f(tx, fleet))
+                Ok(f(tx, fleet, &configs))
             })
             .await
             .map_err(sqlite_error)?
@@ -475,8 +488,8 @@ impl SqliteStore {
         target: &Target,
     ) -> Result<RetainedRevision, StoreError> {
         let (session_id, target) = (session_id.clone(), target.clone());
-        self.revision_read(move |conn, fleet| {
-            resolve_target_conn(conn, &session_id, &target, fleet)
+        self.revision_read(move |conn, fleet, configs| {
+            resolve_target_conn(conn, &session_id, &target, fleet, configs)
         })
         .await
     }
@@ -486,8 +499,10 @@ impl SqliteStore {
         session_id: &SessionId,
     ) -> Result<Vec<RetainedRevision>, StoreError> {
         let session_id = session_id.clone();
-        self.revision_read(move |conn, fleet| revisions_conn(conn, &session_id, fleet))
-            .await
+        self.revision_read(move |conn, fleet, configs| {
+            revisions_conn(conn, &session_id, fleet, configs)
+        })
+        .await
     }
 
     pub(crate) async fn pin_in_catalog(
@@ -533,7 +548,7 @@ impl SqliteStore {
         session_id: &SessionId,
     ) -> Result<Retention, StoreError> {
         let session_id = session_id.clone();
-        self.revision_read(move |conn, _| {
+        self.revision_read(move |conn, _, _| {
             require_session_conn(conn, &session_id)?;
             retention_conn(conn, &session_id)?.ok_or_else(|| StoreError::SessionNotFound {
                 session_id: session_id.clone(),

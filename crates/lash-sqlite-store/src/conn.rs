@@ -471,6 +471,7 @@ impl WriterFence {
 /// finalize.
 pub(crate) struct FencedTx<'c> {
     pub(crate) operational: crate::SqliteOperationalSettings,
+    pub(crate) configs: Arc<lash_core_store::store_backend_support::ConfigCache>,
     tx: Transaction<'c>,
     fleet: FleetFormat,
     /// The build's writable range for `F`: the fleet is finalized at this
@@ -539,6 +540,11 @@ pub(crate) struct SqliteConnection {
 }
 
 impl SqliteConnection {
+    /// Committed configuration shared by this writer and its store's readers.
+    pub(crate) fn configs(&self) -> &Arc<lash_core_store::store_backend_support::ConfigCache> {
+        &self.writer.configs
+    }
+
     /// Install this file's transaction-local wake capture after its schema exists.
     pub(crate) async fn install_node_wakes(
         &self,
@@ -697,6 +703,7 @@ impl SqliteConnection {
             #[cfg(feature = "perf-witness")]
             reader: false,
             writer: Arc::new(batch::Writer {
+                configs: Arc::default(),
                 operational: policy.operational,
                 write_gate: Arc::clone(&gate),
                 read_gate: Arc::clone(&reads),
@@ -771,6 +778,7 @@ impl SqliteConnection {
             #[cfg(feature = "perf-witness")]
             reader: true,
             writer: Arc::new(batch::Writer {
+                configs: Arc::default(),
                 operational,
                 write_gate: Arc::clone(&gate),
                 read_gate: Arc::clone(&reads),

@@ -252,6 +252,7 @@ fn terminal_head(
     session: &SessionId,
     run: &lash_core_execution::TurnId,
     fleet: lash_core_execution::FleetFormat,
+    configs: &lash_core_store::store_backend_support::ConfigCache,
 ) -> Result<Option<lash_core_execution::store::SessionHeadMeta>, StoreError> {
     let Some((config_ref, revision, leaf, checkpoint, frame, retained)) = conn
         .prepare_cached(
@@ -285,7 +286,14 @@ fn terminal_head(
     }
     crate::codec::assemble_session_head_meta(
         session,
-        || crate::codec::load_config_conn(conn, config_ref.as_deref(), fleet, None),
+        || {
+            crate::codec::load_config_conn(
+                conn,
+                config_ref.as_deref(),
+                fleet,
+                Some(crate::codec::ConfigRead::Committed(configs)),
+            )
+        },
         revision,
         leaf,
         checkpoint,
@@ -421,20 +429,37 @@ fn window_graph(
     Ok(windows.remember(session, &graph, leaf_generation, bytes))
 }
 
-pub(crate) fn window(
+struct WindowReadContext {
+    decoded: Arc<AtomicU64>,
+    windows: WindowCacheRead,
+    configs: Arc<lash_core_store::store_backend_support::ConfigCache>,
+    chunk_size: usize,
+}
+
+fn window(
     conn: &Connection,
     session: &SessionId,
     selector: WindowSelector,
     fleet: lash_core_execution::FleetFormat,
-    decoded: &AtomicU64,
-    windows: &WindowCacheRead,
-    chunk_size: usize,
+    read: &WindowReadContext,
 ) -> Result<Option<SessionWindowRead>, StoreError> {
+    let WindowReadContext {
+        decoded,
+        windows,
+        configs,
+        chunk_size,
+    } = read;
+    let chunk_size = *chunk_size;
     live(conn, session)?;
     let head = match &selector {
-        WindowSelector::Terminal(run) => terminal_head(conn, session, run, fleet)?,
+        WindowSelector::Terminal(run) => terminal_head(conn, session, run, fleet, configs)?,
         WindowSelector::Current | WindowSelector::Admitted(_) => {
-            try_load_session_head_meta_from_conn(conn, session, fleet, None)?
+            try_load_session_head_meta_from_conn(
+                conn,
+                session,
+                fleet,
+                Some(crate::codec::ConfigRead::Committed(configs)),
+            )?
         }
     };
     let Some(meta) = head else {
@@ -537,15 +562,14 @@ impl SessionHistoryStore for SqliteStore {
     ) -> Result<Option<SessionWindowRead>, StoreError> {
         let session = session_id.clone();
         let fleet = self.conn.fleet();
-        let decoded = Arc::clone(&self.decoded_graph_node_bodies);
-        let read = self.windows.read();
-        let chunk_size = self.conn.operational.checkpoint_ref_chunk.get();
+        let read = WindowReadContext {
+            decoded: Arc::clone(&self.decoded_graph_node_bodies),
+            windows: self.windows.read(),
+            configs: Arc::clone(&self.configs),
+            chunk_size: self.conn.operational.checkpoint_ref_chunk.get(),
+        };
         self.read_connection()
-            .read(move |conn| {
-                Ok(window(
-                    conn, &session, selector, fleet, &decoded, &read, chunk_size,
-                ))
-            })
+            .read(move |conn| Ok(window(conn, &session, selector, fleet, &read)))
             .await
             .map_err(sqlite_error)?
     }
@@ -561,8 +585,13 @@ impl SessionHistoryStore for SqliteStore {
         let session = session_id.clone();
         let fleet = self.conn.fleet();
         let decoded = Arc::clone(&self.decoded_graph_node_bodies);
+        let configs = Arc::clone(&self.configs);
         self.read_connection()
-            .read(move |conn| Ok(ancestors(conn, &session, anchor, budget, fleet, &decoded)))
+            .read(move |conn| {
+                Ok(ancestors(
+                    conn, &session, anchor, budget, fleet, &decoded, &configs,
+                ))
+            })
             .await
             .map_err(sqlite_error)?
     }
@@ -774,6 +803,7 @@ fn ancestors(
     budget: HistoryBudget,
     fleet: lash_core_execution::FleetFormat,
     decoded: &AtomicU64,
+    configs: &lash_core_store::store_backend_support::ConfigCache,
 ) -> Result<HistoryPage, StoreError> {
     live(conn, session)?;
     let stamp = lineage(conn, session)?;
@@ -783,10 +813,15 @@ fn ancestors(
     };
     let (pinned, start, expected) = match anchor {
         HistoryAnchor::Head => {
-            let meta = try_load_session_head_meta_from_conn(conn, session, fleet, None)?
-                .ok_or_else(|| StoreError::SessionNotFound {
-                    session_id: session.clone(),
-                })?;
+            let meta = try_load_session_head_meta_from_conn(
+                conn,
+                session,
+                fleet,
+                Some(crate::codec::ConfigRead::Committed(configs)),
+            )?
+            .ok_or_else(|| StoreError::SessionNotFound {
+                session_id: session.clone(),
+            })?;
             let Some(leaf) = meta.leaf_node_id else {
                 return Ok(HistoryPage {
                     pinned_leaf: None,

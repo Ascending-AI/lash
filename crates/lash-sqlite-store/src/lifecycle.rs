@@ -215,6 +215,7 @@ impl SqliteStore {
             let reader = reader.with_inline_calls(inline_calls);
             readers.push(reader);
         }
+        let configs = Arc::clone(conn.configs());
         Ok(Self {
             conn,
             location: core.clone(),
@@ -224,7 +225,7 @@ impl SqliteStore {
             decoded_turn_receipt_bodies: Arc::new(AtomicU64::new(0)),
             windows: Arc::default(),
             encoded_images: Arc::default(),
-            configs: Arc::default(),
+            configs,
             clock,
             options,
             commit_count: AtomicU64::new(commit_count_entropy_seed()),
@@ -244,6 +245,7 @@ impl SqliteStore {
             .await?;
         conn.observe_fleet_for_testing(fleet_format);
         let readers = vec![conn.clone()];
+        let configs = Arc::clone(conn.configs());
         Ok(Self {
             conn,
             location: core.clone(),
@@ -253,7 +255,7 @@ impl SqliteStore {
             decoded_turn_receipt_bodies: Arc::new(AtomicU64::new(0)),
             windows: Arc::default(),
             encoded_images: Arc::default(),
-            configs: Arc::default(),
+            configs,
             clock: Arc::new(lash_core_execution::facade_support::SystemClock),
             options: StoreOptions::standard(FIXTURE_SYNCHRONOUS),
             commit_count: AtomicU64::new(commit_count_entropy_seed()),
@@ -283,8 +285,13 @@ impl SqliteStore {
         let configs = Arc::clone(&self.configs);
         self.read_connection()
             .call(move |conn| {
-                try_load_session_head_meta_from_conn(conn, &session_id, fleet, Some(&configs))
-                    .map_err(sqlite_conversion_error)
+                try_load_session_head_meta_from_conn(
+                    conn,
+                    &session_id,
+                    fleet,
+                    Some(crate::codec::ConfigRead::Committed(&configs)),
+                )
+                .map_err(sqlite_conversion_error)
             })
             .await
             .map_err(sqlite_error)

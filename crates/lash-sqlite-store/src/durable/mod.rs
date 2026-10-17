@@ -146,8 +146,8 @@ pub(super) const NODE_WAKE_ROLLBACK_MAIL: &str =
 // each domain's own lane adds its tables beside them.
 pub(crate) use graph::TABLES as GRAPH_TABLES;
 pub(crate) use graph::{
-    AUDIT_PAGE, GraphClosure, audit_page, graph_closure, graph_counts, install_staged, peel,
-    retire_roots,
+    AUDIT_PAGE, GraphClosure, audit_page, config_root_visible, graph_closure, graph_counts,
+    install_staged, peel, retire_roots,
 };
 pub(crate) use model_calls::TABLES as MODEL_CALL_TABLES;
 #[cfg(feature = "testing")]

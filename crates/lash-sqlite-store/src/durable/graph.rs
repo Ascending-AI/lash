@@ -173,6 +173,9 @@ lash_store_sql::statements! {
         stored_encodings = "SELECT hash, encoding FROM blobs
              WHERE hash IN (SELECT value FROM json_each(?1))";
 
+        /// A cached configuration's graph root must exist in this snapshot.
+        config_root_visible = "SELECT EXISTS (SELECT 1 FROM blobs WHERE hash = ?1 AND encoding = 1)";
+
         /// The bytes and encoding of every stored blob in JSON `?1`.
         stored_nodes = "SELECT hash, content, encoding FROM blobs
              WHERE hash IN (SELECT value FROM json_each(?1))";
@@ -473,6 +476,12 @@ pub(crate) fn graph_closure(
     let mut opaque = BTreeSet::new();
     Ok(walk_within(tx, &[root], limits, Some(&mut opaque))?
         .map(|nodes| GraphClosure { nodes, opaque }))
+}
+
+/// Prove snapshot membership without hydrating an already validated closure.
+pub(crate) fn config_root_visible(tx: &Connection, root: NodeId) -> rusqlite::Result<bool> {
+    tx.prepare_cached(SQL.sqlite.config_root_visible.sql())?
+        .query_row([root.blob_ref().as_str()], |row| row.get(0))
 }
 
 /// Installs the staged `nodes` in the caller's transaction (the session

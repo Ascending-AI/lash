@@ -82,8 +82,7 @@ impl lash_core_execution::TurnInputStore for SqliteStore {
         let (admission, woken) = self
             .conn
             .write_flow(move |tx| {
-                let fleet = tx.fleet();
-                let outcome = admit_pending_turn_inputs_conn(tx, &batch, now, first_nonce, fleet);
+                let outcome = admit_pending_turn_inputs_conn(tx, &batch, now, first_nonce);
                 match outcome {
                     Ok(value) => Ok(TxOutcome::Commit(Ok(value))),
                     Err(err) => Ok(TxOutcome::Rollback(Err(err))),
@@ -698,11 +697,10 @@ fn turn_address_evidence_conn(
 /// event publishes against. A failure anywhere rolls the whole admission
 /// back, as the separate calls would have.
 fn admit_pending_turn_inputs_conn(
-    tx: &Connection,
+    tx: &crate::conn::FencedTx<'_>,
     batch: &lash_core_execution::PendingTurnInputBatch,
     now: u64,
     first_nonce: u64,
-    fleet: lash_core_execution::FleetFormat,
 ) -> Result<
     (
         lash_core_execution::TurnInputAdmission,
@@ -711,9 +709,15 @@ fn admit_pending_turn_inputs_conn(
     StoreError,
 > {
     let session_id = batch.session_id();
+    let fleet = tx.fleet();
     read_session_state_version_conn(tx, session_id, fleet)?;
     let (rows, woken) = enqueue_pending_turn_inputs_conn(tx, batch, now, first_nonce)?;
-    let committed_head = try_load_session_head_meta_from_conn(tx, session_id, fleet, None)?;
+    let committed_head = try_load_session_head_meta_from_conn(
+        tx,
+        session_id,
+        fleet,
+        Some(crate::codec::ConfigRead::Uncommitted(&tx.configs)),
+    )?;
     Ok((
         lash_core_execution::TurnInputAdmission::Fused {
             rows,

@@ -73,6 +73,7 @@ impl Writes {
 /// Everything a queued write needs on the connection thread, shared by the
 /// connection's clones: writes on one writer may share a transaction.
 pub(super) struct Writer {
+    pub(super) configs: Arc<lash_core_store::store_backend_support::ConfigCache>,
     pub(super) operational: crate::SqliteOperationalSettings,
     pub(super) write_gate: Arc<Mutex<()>>,
     pub(super) read_gate: Arc<RwLock<()>>,
@@ -394,6 +395,7 @@ fn transact(
         pauses.reach_after_fence();
     }
     let tx = FencedTx {
+        configs: Arc::clone(&writer.configs),
         operational: writer.operational,
         tx,
         fleet,

@@ -3,6 +3,23 @@
 use super::*;
 use lash_protocol_types::SessionId;
 
+/// Only committed reads may publish decoded material. A write transaction
+/// can reuse a committed entry but must keep its misses private, including
+/// inside a group-commit member that may roll back independently.
+#[derive(Clone, Copy)]
+pub(crate) enum ConfigRead<'a> {
+    Committed(&'a lash_core_store::store_backend_support::ConfigCache),
+    Uncommitted(&'a lash_core_store::store_backend_support::ConfigCache),
+}
+
+impl<'a> ConfigRead<'a> {
+    fn cache(self) -> &'a lash_core_store::store_backend_support::ConfigCache {
+        match self {
+            Self::Committed(cache) | Self::Uncommitted(cache) => cache,
+        }
+    }
+}
+
 /// The stored SQLite blob envelope's format under the 1.0 freeze.
 ///
 /// version_guard(
@@ -194,7 +211,7 @@ pub(crate) fn try_load_session_head_meta_from_conn(
     conn: &Connection,
     session_id: &SessionId,
     fleet: lash_core_execution::FleetFormat,
-    configs: Option<&lash_core_store::store_backend_support::ConfigCache>,
+    configs: Option<ConfigRead<'_>>,
 ) -> Result<Option<SessionHeadMeta>, StoreError> {
     let row = conn
         .query_row(
@@ -295,7 +312,7 @@ pub(crate) fn load_config_conn(
     conn: &Connection,
     reference: Option<&str>,
     fleet: lash_core_execution::FleetFormat,
-    configs: Option<&lash_core_store::store_backend_support::ConfigCache>,
+    configs: Option<ConfigRead<'_>>,
 ) -> Result<SessionHeadPayload, StoreError> {
     use lash_core_store::checkpoint_graph::{DecodeLimits, GraphDecoder, NodeId, config};
     let corrupt = |message: String| stored_data_corrupt("SessionHeadMeta", message);
@@ -303,7 +320,12 @@ pub(crate) fn load_config_conn(
         .and_then(NodeId::from_hex)
         .ok_or_else(|| corrupt("revision names a missing config reference".to_owned()))?;
     if let Some(configs) = configs
-        && let Some(payload) = configs.get(root, fleet)?
+        // A cache populated by a newer reader cannot lend a root to an
+        // older snapshot. The visible immutable root's edges retain its
+        // closure; this probe reads no body and grants no retention lease.
+        && (conn.is_autocommit()
+            || crate::durable::config_root_visible(conn, root).map_err(sqlite_error)?)
+        && let Some(payload) = configs.cache().get(root, fleet)?
     {
         return Ok(payload);
     }
@@ -314,8 +336,10 @@ pub(crate) fn load_config_conn(
     let value: serde_json::Value =
         config::load(&mut GraphDecoder::new(&graph, limits), root).map_err(corrupt)?;
     match configs {
-        Some(configs) => configs.decode(root, value, fleet),
-        None => SessionHeadPayload::decode_value_for_fleet(value, fleet),
+        Some(ConfigRead::Committed(configs)) => configs.decode(root, value, fleet),
+        Some(ConfigRead::Uncommitted(_)) | None => {
+            SessionHeadPayload::decode_value_for_fleet(value, fleet)
+        }
     }
 }
 

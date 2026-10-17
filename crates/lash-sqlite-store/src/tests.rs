@@ -2222,3 +2222,6 @@ async fn configuration_reuse_preserves_identity_and_cold_corruption_refusals() {
         }
     ));
 }
+
+#[path = "tests/configuration.rs"]
+mod configuration;
