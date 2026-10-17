@@ -153,9 +153,6 @@ impl KernelMachine {
     /// bytes.
     #[inline(always)]
     pub(super) fn pin(&mut self, r: Reg) -> Result<(), Halt> {
-        if !self.charging && super::operation_entry::guard_immediate(&self.regs[r]) {
-            return Ok(());
-        }
         let bytes = self.pins.pin(&self.regs[r])?;
         self.reserve(bytes)
     }
@@ -163,9 +160,6 @@ impl KernelMachine {
     /// The pin anchor on a value the statement holds outside the
     /// registers.
     pub(super) fn pin_value(&mut self, value: &Value) -> Result<(), Halt> {
-        if !self.charging && super::operation_entry::guard_immediate(value) {
-            return Ok(());
-        }
         let bytes = self.pins.pin(value)?;
         self.reserve(bytes)
     }
@@ -492,12 +486,7 @@ impl KernelMachine {
                 body.entry = entry;
                 Ok(Answer::Body(body))
             }
-            other => {
-                if let Some(entry) = entry {
-                    self.release_operation(entry);
-                }
-                other
-            }
+            other => other,
         }
     }
 

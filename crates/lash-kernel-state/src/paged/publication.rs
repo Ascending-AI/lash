@@ -20,14 +20,13 @@ thread_local! {
     pub(super) static RELEASE_DELTA_CALLS: std::cell::Cell<u64> = const { std::cell::Cell::new(0) };
 }
 
-/// Statement roots and the operation register cells they occupy.
+/// The running statement's roots.
 #[derive(Clone, Copy)]
 pub struct StatementRoots<'a> {
     pub registers: &'a [Value],
     pub pinned: &'a [Value],
     pub borrowed: &'a [Value],
     pub pinned_bytes: u64,
-    pub prepaid: u64,
     pub fresh: &'a [EntityId],
 }
 
@@ -39,8 +38,6 @@ pub(super) struct Holdings {
     borrowed: Vec<Value>,
     /// Pinned immediate values need their local cost, but no tracing descriptor.
     scalar_bytes: u64,
-    /// Register cells already owned by an operation frame.
-    pub(super) prepaid: u64,
     fresh: Vec<EntityId>,
     /// What the running statement holds: credit for its writes, released
     /// at the statement's end.
@@ -66,7 +63,6 @@ impl Default for Holdings {
             temporary: Vec::new(),
             borrowed: Vec::new(),
             scalar_bytes: 0,
-            prepaid: 0,
             fresh: Vec::new(),
             reserved: 0,
             held: 0,
@@ -214,17 +210,6 @@ impl PagedHeap {
             .ok_or_else(|| HeapFault::Malformed("outstanding hold overflow".into()))?;
         Ok(true)
     }
-    /// Transfers an admitted frame's cell allocation from persistent holding
-    /// credit to write credit, without changing its already reserved cost.
-    pub fn transfer_held_to_reservation(&mut self, bytes: u64) -> Result<(), HeapFault> {
-        self.holdings.held = self
-            .holdings
-            .held
-            .checked_sub(bytes)
-            .ok_or_else(|| HeapFault::Malformed("operation entry credit underflow".into()))?;
-        self.holdings.reserve(bytes)
-    }
-
     /// Refines exactly over the roots the machine has just published, with
     /// `bytes` pending: after it, a hold or write of `bytes` is granted.
     ///
@@ -307,11 +292,7 @@ impl PagedHeap {
                     .iter()
                     .map(value_cost)
                     .chain([self.holdings.scalar_bytes, self.holdings.reserved]),
-            )?
-            .checked_sub(self.holdings.prepaid)
-            .ok_or_else(|| {
-                HeapFault::Malformed("register credit exceeds statement roots".into())
-            })?;
+            )?;
             census
                 .changed(LogicalBytes(released), LogicalBytes(0))
                 .map_err(census_fault)?;
@@ -319,7 +300,6 @@ impl PagedHeap {
         }
         self.holdings.temporary.clear();
         self.holdings.scalar_bytes = 0;
-        self.holdings.prepaid = 0;
         self.holdings.fresh.clear();
         self.holdings.reserved = 0;
         if before != self.accounting {
@@ -345,7 +325,6 @@ impl PagedHeap {
             registers: values,
             pinned,
             pinned_bytes,
-            prepaid,
             borrowed,
             fresh,
         } = roots;
@@ -353,7 +332,6 @@ impl PagedHeap {
         self.holdings.temporary.extend_from_slice(values);
         self.holdings.temporary.extend_from_slice(pinned);
         self.holdings.scalar_bytes = pinned_bytes;
-        self.holdings.prepaid = prepaid;
         self.holdings.borrowed.clear();
         self.holdings.borrowed.extend_from_slice(borrowed);
         self.holdings.fresh.clear();
@@ -511,7 +489,6 @@ impl PagedHeap {
                 registers,
                 pinned,
                 pinned_bytes,
-                prepaid: 0,
                 borrowed: &[],
                 fresh,
             },
@@ -543,7 +520,6 @@ impl PagedHeap {
             registers,
             pinned,
             pinned_bytes,
-            prepaid,
             ..
         } = roots;
         // The proposed roots are current: a precision check installing them
@@ -554,17 +530,13 @@ impl PagedHeap {
                 .into_iter()
                 .chain(self.statement_roots().iter().map(value_cost))
                 .chain([self.holdings.scalar_bytes]),
-        )?
-        .checked_sub(self.holdings.prepaid)
-        .ok_or_else(|| HeapFault::Malformed("register credit exceeds installed roots".into()))?;
+        )?;
         let after = checked_sum(
             [tasks.cost(), joins.cost()]
                 .into_iter()
                 .chain(registers.iter().chain(pinned).map(value_cost))
                 .chain([pinned_bytes]),
-        )?
-        .checked_sub(prepaid)
-        .ok_or_else(|| HeapFault::Malformed("register credit exceeds proposed roots".into()))?;
+        )?;
         // Republishing the installed trees changes only the statement
         // roots: their task edges are those already counted (FIG-6318).
         if previous.version.matches(&tasks) && joins.same_version(&self.joins) {

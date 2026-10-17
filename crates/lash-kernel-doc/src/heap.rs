@@ -428,9 +428,6 @@ pub enum HeapFault {
     /// The embedder's transport failed.
     #[error("page transport failed: {0}")]
     Transport(String),
-    /// A saved frame's prepaid register file differs from its definition.
-    #[error("frame register count {stored} differs from admitted count {expected}")]
-    FrameRegisters { stored: u32, expected: u32 },
     /// The heap's own state or an admitted certificate is inconsistent.
     #[error("the heap is malformed: {0}")]
     Malformed(String),

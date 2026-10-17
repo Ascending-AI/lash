@@ -42,21 +42,13 @@ impl Roots<'_> {
         #[cfg(any(test, feature = "perf-witness"))]
         crate::perf_witness::publish();
         self.reconcile(heap)?;
-        let mut registers = self.registers.projection();
-        let occupied = registers.len().min(self.registers.prepaid as usize);
-        for value in registers.iter_mut().take(occupied) {
-            if super::operation_entry::guard_immediate(value) {
-                *value = Value::Null;
-            }
-        }
-        let prepaid = occupied as u64 * 16;
+        let registers = self.registers.projection();
         heap.update_execution_roots(
             self.joins.clone(),
             lash_kernel_state::paged::StatementRoots {
                 registers: &registers,
                 pinned: self.pinned,
                 pinned_bytes: self.pinned_bytes,
-                prepaid,
                 borrowed: self.borrowed,
                 fresh: self.fresh,
             },

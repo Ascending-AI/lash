@@ -1738,15 +1738,16 @@ errors "type_error", "RangeError"
 charge sum(128, size(raw), nested(raw))
 native
 body {
-  if same(kind(source), "list") {
+  let k = kind(source)
+  if same(k, "list") {
     if same(raw, ()) { return absent }
     return raw
   }
-  if same(kind(source), "map") {
+  if same(k, "map") {
     let key = invoke ts.map.value(raw)
     return [key, source[raw]]
   }
-  if same(kind(source), "set") {
+  if same(k, "set") {
     let member = invoke ts.map.value(raw)
     return member
   }

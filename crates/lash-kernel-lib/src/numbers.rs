@@ -746,8 +746,8 @@ const _: () = {
 
 /// A kind's name, as `kind` answers it, from the immutable kind table.
 fn kind_name(kind: ValueKind) -> Value {
-    static NAMES: std::sync::OnceLock<[Value; 19]> = std::sync::OnceLock::new();
-    NAMES.get_or_init(|| KIND_NAMES.map(|(_, name)| Value::text(name)))[kind as usize].clone()
+    const NAMES: [(ValueKind, &str); 19] = KIND_NAMES;
+    Value::text(Arc::from(NAMES[kind as usize].1))
 }
 
 /// An integer's digits in `radix`, a text that can be eight times the

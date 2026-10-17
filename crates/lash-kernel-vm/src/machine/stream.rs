@@ -517,28 +517,9 @@ impl KernelMachine {
                 ),
             );
         }
-        let tuple = if items.is_empty() && !self.charging {
-            use lash_kernel_doc::heap::{LogicalBytes, TupleRef, TupleSummary};
-            static EMPTY: std::sync::OnceLock<Arc<TupleRef>> = std::sync::OnceLock::new();
-            Value::Tuple(Arc::clone(EMPTY.get_or_init(|| {
-                Arc::new(TupleRef {
-                    normal: Default::default(),
-                    summary: TupleSummary {
-                        len: 0,
-                        cost: LogicalBytes(0),
-                        task_edges: 0,
-                        has_edges: false,
-                        depth: 1,
-                    },
-                    body: Payload::Resident(Arc::from([])),
-                    family: None,
-                })
-            })))
-        } else {
-            Value::Tuple(
-                self.heap_write(|heap| heap.tuple(items.clone()).map_err(Interrupt::from))?,
-            )
-        };
+        let tuple = Value::Tuple(
+            self.heap_write(|heap| heap.tuple(items.clone()).map_err(Interrupt::from))?,
+        );
         self.put(start, tuple);
         self.pin(start)?;
         Ok(())

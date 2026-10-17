@@ -48,7 +48,6 @@ pub(super) const DATA: &str = r####"{
 "3c54507e1e6a712c6d95116b6cd49f189e6bdbb29db5bf88ef19b6b19cb95e13":["null",{"float":"2.2250738585072014e-308"},{"int":"0"}],
 "3c558f99ade6420979222eeb3f8a58cb20bad1d92df157d6ff209bc2f8dec2b0":[{"float":"9.104023764519861e91"}],
 "3c562a9ae0a890db85fa31382b9f3f3e5604ae5b5f5bdb7bc7585c559080e3ad":[{"float":"5.819569129167889e-232"},{"float":"8.675753937662155e110"}],
-"3c56b33e7d9e2f7c4fdece4f3d57444fae9b30e063badbdd345e4217215c72a5":[{"bool":false},{"text":"򂸇򺖛瀐𩛰"}],
 "3c594454219567faf157121020b85712c1d0e5f1e155ac84c6b12e609bc9984d":{"charge":318,"outcome":"raised \"number_range\" \"expected a nonnegative machine-sized integer\" \"null\"","prepared_difference":null,"reservations":[],"reserved":0,"spent":0},
 "3c5baf680e8a92c00dff877d17c01b0dc36983fc1531152437fb9acea212e8b1":{"charge":5,"outcome":"ok {\"int\":\"-5078376044932521221\"}","prepared_difference":null,"reservations":[],"reserved":0,"spent":0},
 "3c5c56a058967fbc63c027755b044987565e039b71570c907ba16684db4f3d64":[{"int":"-1923540592682490731"},{"int":"1749227152155482780"}],
@@ -134,6 +133,7 @@ pub(super) const DATA: &str = r####"{
 "3cee0d90306121b2943ec5a8a028de5e42d2cd370387b1c8676d7a8a23f7e6ed":[{"map":54}],
 "3cf0835e313872dae3698002365f4d185bf62f14b649fd0154f401259205af87":[{"float":"-5.281750531832117e39"},{"int":"-7897017536297527314"}],
 "3cf3b50c4c318eed11ad5c799cb3684709fb17578cb67a21b03494edb3c429cb":[{"list":[{"int":"-4706971209036228780"}]}],
+"3cf56753aafea2c6dfebeb46b98d4da6aed47706e6686162cdc0a0d92ddbefe8":[{"list":30},{"text":"󓯼𙲋񎝲񴐼󟞴􄅛󴤙򜗋򱪀󧊵唐񵆺񍆙񞙺󨌶򦎰𿵷𱥍󴨿󻅫򘣉񔮘匏󲙩򭱥󂺝"}],
 "3cf57cb018b9bee01048cc4ba4a8b8523c03a5919d9e3e2e25809b1ea043e6b8":{"charge":68,"outcome":"ok {\"float\":\"0.9966433407077949\"}","prepared_difference":null,"reservations":[],"reserved":0,"spent":0},
 "3cf793b257e1b188060cba187accc89fea9eea07c48e657221b7a875f4a1ae75":{"charge":7,"outcome":"ok {\"int\":\"12443729382408383265\"}","prepared_difference":null,"reservations":[],"reserved":0,"spent":0},
 "3cfa87d2c29fc12214c5490c07f2cd9c5e608e30c01ae796a2d9190c737484b8":[{"int":"3113439256955479698"}]

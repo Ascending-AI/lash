@@ -327,11 +327,13 @@ fn a_closure_an_operation_applies_is_charged_as_it_runs() {
     }
 }
 
-/// PLAN-INDEP, memory: a list the operation builds past the memory bound
-/// is refused at the same statement whichever path builds it, with the same
-/// charge and nothing printed after it.
+/// K-BND-003, conservative: a list the operation builds past the memory
+/// bound ends every plan in a typed memory refusal at that bound, never a
+/// completion. Plans may observe the bound one declared slack apart; the
+/// 50000-item list is far past it, so whichever path builds it refuses at
+/// the same statement, with the same charge and nothing printed after it.
 #[test]
-fn an_operation_is_refused_memory_alike_whichever_path_builds() {
+fn an_operation_past_the_memory_bound_is_refused_under_every_plan() {
     let program = r#"
 main {
   let small = op.fill(10)
@@ -347,24 +349,26 @@ main {
     };
     let plans = plans();
     let natural = observe(program, bounds, &plans[0]);
-    assert!(
-        matches!(
-            &natural.0,
-            Err(End::Error(RunError::Bound(BoundExceeded {
-                bound: Bound::Memory,
-                ..
-            })))
-        ),
-        "{:?}",
-        natural.0
-    );
     assert_eq!(natural.1, vec![text("built")], "{:?}", natural.0);
-    for (index, plan) in plans.iter().enumerate().skip(1) {
-        assert_eq!(observe(program, bounds, plan), natural, "plan {index}");
+    for (index, plan) in plans.iter().enumerate() {
+        let observed = observe(program, bounds, plan);
+        assert!(
+            matches!(
+                &observed.0,
+                Err(End::Error(RunError::Bound(BoundExceeded {
+                    bound: Bound::Memory,
+                    limit,
+                    ..
+                }))) if *limit == bounds.memory
+            ),
+            "plan {index}: {:?}",
+            observed.0
+        );
+        assert_eq!(observed, natural, "plan {index}");
     }
 }
 
-/// PLAN-INDEP / K-BND-002: entering an operation reserves one depth unit
+/// PLAN-INDEP / K-BND-002: entering an operation occupies one depth unit
 /// before either implementation runs. Its body represents that same unit.
 #[test]
 fn operation_depth_is_reserved_before_either_implementation_answers() {

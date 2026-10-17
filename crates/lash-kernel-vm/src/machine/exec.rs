@@ -115,11 +115,6 @@ impl KernelMachine {
             .last_mut()?
             .ok_or_else(|| fault("a running task has no frame"))?;
         self.charging = exe.code(frame.code).charged;
-        self.regs.prepaid = if self.charging {
-            0
-        } else {
-            exe.code(frame.code).registers
-        };
         self.scalar_blocks = frame.scalar_blocks;
         let code = frame.code;
         match frame.control.last_mut() {
@@ -691,14 +686,12 @@ impl KernelMachine {
                 ),
             );
         }
-        // An operation reserved this unit before dispatch. Its fallback
-        // frame represents that same active call, not a second one.
+        // An operation checked this unit at admission. Its fallback frame
+        // represents that same active call, not a second one.
         if !library.is_some_and(|lib| exe.lib(lib).operation()) {
             self.check_call_depth(task)?;
         }
-        if admission.is_none() {
-            self.reserve_held(super::FRAME_BYTES)?;
-        }
+        self.reserve_held(super::FRAME_BYTES)?;
         // SiteRef contains page-access-local trees. Prepare each body's
         // immutable entry once here, after the same admission checks as a
         // cold call; sharing it across machines would share their page port.
@@ -742,7 +735,6 @@ impl KernelMachine {
                 })
             }
         };
-        frame.record.registers = if code.charged { 0 } else { code.registers };
         frame.scalar_blocks = code.versions.select(&self.regs[base..base + given]);
         frame.slots.fresh(code.slots_by_at.len());
         frame.control.push(Control::Block {
@@ -796,11 +788,6 @@ impl KernelMachine {
             } else {
                 self.bind(task, param.at, param.shared, value)?;
             }
-        }
-        if let Some(admission) = admission {
-            self.release_operation(admission);
-            self.regs.clear();
-            self.publish_holdings()?;
         }
         if !code.free.is_empty() {
             self.bind_captures(task, code)?;

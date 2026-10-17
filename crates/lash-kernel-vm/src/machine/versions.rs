@@ -36,10 +36,8 @@ impl KernelMachine {
         if given != function.arity {
             return Ok(false);
         }
-        let entry = self.operation_entry(task, exe, lib, args)?;
-        let result = self.record_admitted(task, exe, lib, args, given, hint, marker, units);
-        self.release_operation(entry);
-        result
+        self.operation_entry(task, exe, lib, args)?;
+        self.record_admitted(task, exe, lib, args, given, hint, marker, units)
     }
 
     #[expect(
@@ -107,10 +105,8 @@ impl KernelMachine {
         let Some(scalar) = function.scalar else {
             return Ok(false);
         };
-        let entry = self.operation_entry(task, exe, lib, args)?;
-        let result = self.scalar_admitted(task, exe, lib, args, given, out, scalar);
-        self.release_operation(entry);
-        result
+        self.operation_entry(task, exe, lib, args)?;
+        self.scalar_admitted(task, exe, lib, args, given, out, scalar)
     }
 
     #[expect(

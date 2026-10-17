@@ -44,7 +44,6 @@ mod lower;
 mod occurrences;
 mod preparation;
 mod reads;
-mod registers;
 mod scopes;
 mod versions;
 
@@ -680,8 +679,6 @@ impl Executable {
 /// One function body: `main`, a declared function, a library body or a
 /// closure.
 pub(crate) struct Code {
-    /// Full logical register file, derived from the complete definition.
-    pub(crate) registers: u32,
     /// The site of the body: a unit's, or a closure expression's child.
     pub(crate) site: Site,
     pub(crate) params: Vec<Local>,

@@ -505,72 +505,75 @@ body {
 function py.truth(value: Any) -> Bool
 kernel 1
 charge 4
-native
+native 2
 body {
-  if same(kind(value), "bool") {
+  let k = kind(value)
+  if same(k, "bool") {
     return value
   }
-  if same(kind(value), "null") {
+  if same(k, "null") {
     return false
   }
-  if same(kind(value), "integer") {
+  if same(k, "integer") {
     return bool.not(eq(value, 0))
   }
-  if same(kind(value), "float") {
+  if same(k, "float") {
     return bool.not(eq(value, 0))
   }
-  if same(kind(value), "text") {
+  if same(k, "text") {
     return bool.not(same(value, ""))
   }
-  if same(kind(value), "list") {
+  if same(k, "list") {
     return lt(0, list.len(value))
   }
-  if same(kind(value), "tuple") {
+  if same(k, "tuple") {
     return lt(0, tuple.len(value))
   }
-  if same(kind(value), "map") {
+  if same(k, "map") {
     return lt(0, map.len(value))
   }
-  if same(kind(value), "record") {
+  if same(k, "record") {
     return lt(0, record.len(value))
   }
-  if same(kind(value), "set") {
+  if same(k, "set") {
     return lt(0, set.len(value))
   }
   return true
 }
 
-# Kind guards use pre-held constants. Integer arithmetic calls the numeric
+# Cache each operand's kind once. Integer arithmetic calls the numeric
 # native directly, which also handles promotion beyond the inline range.
 function py.add(left: Any, right: Any) -> Any
 kernel 1
 charge sum(4, size(left), size(right))
-native
+native 2
 body {
-  if same(kind(left), "integer") {
-    if same(kind(right), "integer") {
+  let k = kind(left)
+  let r = kind(right)
+  if same(k, "integer") {
+    if same(r, "integer") {
       return add(left, right)
     }
-    if same(kind(right), "float") {
-      return add(left, right)
-    }
-  }
-  if same(kind(left), "float") {
-    if same(kind(right), "integer") {
-      return add(left, right)
-    }
-    if same(kind(right), "float") {
+    if same(r, "float") {
       return add(left, right)
     }
   }
-  if same(kind(left), kind(right)) {
-    if same(kind(left), "text") {
+  if same(k, "float") {
+    if same(r, "integer") {
+      return add(left, right)
+    }
+    if same(r, "float") {
+      return add(left, right)
+    }
+  }
+  if same(k, r) {
+    if same(k, "text") {
       return text.concat(left, right)
     }
-    if same(kind(left), "list") {
+    if same(k, "list") {
       return list.concat(left, right)
     }
-    if same(kind(left), "tuple") {
+    if same(k, "tuple") {
       return tuple.concat(left, right)
     }
   }

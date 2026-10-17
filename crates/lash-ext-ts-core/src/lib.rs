@@ -50,7 +50,7 @@ pub const OPERATIONS: [&str; 10] = [
 /// Adds its native to each of `helpers` that this crate implements
 /// ([`OPERATIONS`]), each looked up by the name its definition carries.
 /// The registry must hold the kernel library already: the natives call
-/// its `num.add`, `num.sub` and `text.concat`.
+/// its `num.add`, `num.sub`, `num.to_float`, `text.concat` and `text.utf16_compare`.
 ///
 /// # Errors
 ///
@@ -67,17 +67,24 @@ pub fn implement(
     };
     let add = Arc::new(Add {
         add: kernel("num.add")?,
+        to_float: kernel("num.to_float")?,
         concat: kernel("text.concat")?,
     });
     let subtract = Arc::new(Subtract {
         native: kernel("num.sub")?,
     });
+    let compare = kernel("text.utf16_compare")?;
     let mut natives: Vec<(FunctionId, Arc<dyn NativeFunction>)> = Vec::new();
     for function in helpers {
         let registered = registry
             .get(&function)
             .ok_or(RegistryError::NotRegistered { function })?;
-        let relation = |relation| -> Arc<dyn NativeFunction> { Arc::new(Relate { relation }) };
+        let relation = |relation| -> Arc<dyn NativeFunction> {
+            Arc::new(Relate {
+                relation,
+                compare: Arc::clone(&compare),
+            })
+        };
         let native: Arc<dyn NativeFunction> = match registered.definition().name.as_str() {
             "ts.get" => Arc::new(Get),
             "ts.to_boolean" => Arc::new(ToBoolean),
@@ -155,10 +162,11 @@ impl NativeFunction for ToBoolean {
 }
 
 /// `ts.add`, `a + b`, where neither operand needs ToPrimitive: two floats
-/// add and two texts join. Mixed numbers decline: the body holds a
-/// conversion result that the native would not retain.
+/// add, two texts join, and a float and an integer add once the integer is
+/// a float. Every other pair declines.
 struct Add {
     add: Arc<dyn NativeFunction>,
+    to_float: Arc<dyn NativeFunction>,
     concat: Arc<dyn NativeFunction>,
 }
 
@@ -169,6 +177,14 @@ impl NativeFunction for Add {
         match (&left, &right) {
             (Value::Float(_), Value::Float(_)) => delegate(&self.add, &mut call, &[left, right]),
             (Value::Text(_), Value::Text(_)) => delegate(&self.concat, &mut call, &[left, right]),
+            (Value::Float(_), Value::Int(_)) => {
+                let right = delegate(&self.to_float, &mut call, &[right])?;
+                delegate(&self.add, &mut call, &[left, right])
+            }
+            (Value::Int(_), Value::Float(_)) => {
+                let left = delegate(&self.to_float, &mut call, &[left])?;
+                delegate(&self.add, &mut call, &[left, right])
+            }
             _ => Err(NativeError::Decline),
         }
     }
@@ -207,18 +223,36 @@ impl Relation {
     }
 }
 
-/// Float relations have no interior holdings. Text relations decline:
-/// their body holds the integer UTF-16 comparison result before ordering it.
+/// `ts.lt`, `ts.le`, `ts.gt` and `ts.ge` on two floats, or on two texts by
+/// UTF-16 code units, as the body compares them after ToPrimitive leaves
+/// both as they are. Every other pair declines.
 struct Relate {
     relation: Relation,
+    compare: Arc<dyn NativeFunction>,
 }
 
 impl NativeFunction for Relate {
-    fn call(&self, call: NativeCall<'_>) -> Result<Value, NativeError> {
+    fn call(&self, mut call: NativeCall<'_>) -> Result<Value, NativeError> {
         let (left, right) = pair(&call);
-        match (left, right) {
+        let (left, right) = (left.clone(), right.clone());
+        match (&left, &right) {
             (Value::Float(a), Value::Float(b)) => {
                 Ok(Value::Bool(self.relation.floats(a.get(), b.get())))
+            }
+            (Value::Text(_), Value::Text(_)) => {
+                // The body compares in the order each relation states.
+                let (first, second, negated) = match self.relation {
+                    Relation::Lt => (left, right, false),
+                    Relation::Gt => (right, left, false),
+                    Relation::Le => (right, left, true),
+                    Relation::Ge => (left, right, true),
+                };
+                let order = delegate(&self.compare, &mut call, &[first, second])?;
+                let less = match order {
+                    Value::Int(IntRef::Inline(order)) => order.is_negative(),
+                    _ => return Err(NativeError::Decline),
+                };
+                Ok(Value::Bool(less != negated))
             }
             _ => Err(NativeError::Decline),
         }

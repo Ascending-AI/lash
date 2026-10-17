@@ -740,11 +740,6 @@ impl KernelMachine {
                 (exe.code(frame.code).charged, frame.scalar_blocks)
             });
         self.charging = charging;
-        self.regs.prepaid = if charging {
-            0
-        } else {
-            self.frame(task)?.record.registers
-        };
         self.scalar_blocks = scalar_blocks;
         Ok(())
     }

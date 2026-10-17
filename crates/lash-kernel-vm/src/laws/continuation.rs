@@ -13,7 +13,9 @@
 //! - CONT-GRAMMAR: a saved continuation the grammar does not admit is
 //!   refused, naming its site.
 //! - ROOTS-CANON: the memory verdict is the uninterrupted run's at every
-//!   slice and reopen.
+//!   slice and reopen. Plans may observe the bound one declared slack apart
+//!   (`K-BND-003`); each refusing write here holds 1 MiB, far past it, so
+//!   every plan refuses at the same statement.
 //! - SITE-NESTED: a nested action's wait is named by its own site.
 
 use std::collections::BTreeMap;
@@ -893,7 +895,9 @@ fn verdict(text: &str, slice: u64, collect: bool, reopens: bool) -> (String, Vec
 /// the same statement, whatever the slicing, whether garbage is collected
 /// at every boundary and whether the run is opened cold at every slice;
 /// and the wait's verdict is that of the program with the wait hoisted
-/// into a variable.
+/// into a variable. A cold reopen may change plan, which moves where the
+/// bound is observed by at most the declared slack; a 1 MiB write is far
+/// past it, so the refusing statement is the same.
 #[test]
 fn the_memory_verdict_is_the_uninterrupted_runs_at_every_slice() {
     let held = super::verdict::MIB_TEXT;

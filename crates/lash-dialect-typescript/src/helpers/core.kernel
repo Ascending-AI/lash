@@ -255,25 +255,26 @@ kernel 1
 charge 3
 native
 body {
-  if same(kind(value), "bool") {
+  let k = kind(value)
+  if same(k, "bool") {
     return value
   }
-  if same(kind(value), "float") {
+  if same(k, "float") {
     if num.is_nan(value) {
       return false
     }
     return bool.not(eq(value, 0))
   }
-  if same(kind(value), "absent") {
+  if same(k, "absent") {
     return false
   }
-  if same(kind(value), "text") {
+  if same(k, "text") {
     return bool.not(same(value, ""))
   }
-  if same(kind(value), "null") {
+  if same(k, "null") {
     return false
   }
-  if same(kind(value), "integer") {
+  if same(k, "integer") {
     return bool.not(eq(value, 0))
   }
   return true
@@ -541,20 +542,21 @@ function ts.add(left: Any, right: Any) -> Any
 kernel 1
 errors "type_error"
 charge sum(12, deep(left), deep(right))
-native
+native 2
 body {
   # Two numbers add and two texts join, whatever their conversions would
   # say.
-  if same(kind(left), kind(right)) {
-    if same(kind(left), "float") { return num.add(left, right) }
-    if same(kind(left), "text") { return text.concat(left, right) }
+  let left_kind = kind(left)
+  if same(left_kind, kind(right)) {
+    if same(left_kind, "float") { return num.add(left, right) }
+    if same(left_kind, "text") { return text.concat(left, right) }
   }
   # Keep the float-pair exit above these mixed host-number guards.
   # Convert integers just as ToNumber does, including its range errors.
-  if same(kind(left), "float") {
+  if same(left_kind, "float") {
     if same(kind(right), "integer") { return num.add(left, num.to_float(right)) }
   } else {
-    if same(kind(left), "integer") {
+    if same(left_kind, "integer") {
       if same(kind(right), "float") { return num.add(num.to_float(left), right) }
     }
   }
@@ -916,11 +918,15 @@ function ts.lt(left: Any, right: Any) -> Bool
 kernel 1
 errors "type_error"
 charge sum(20, deep(left), deep(right))
-native
+native 2
 body {
-  # The native answers float pairs without a conversion operation.
+  # The native's float and text pairs call no further operation, so the
+  # body answers them without one too: both use the same call depth.
   if same(kind(left), "float") {
     if same(kind(right), "float") { return num.lt(left, right) }
+  }
+  if same(kind(left), "text") {
+    if same(kind(right), "text") { return num.lt(text.utf16_compare(left, right), 0) }
   }
   let operands = invoke ts.relational(left, right)
   if operands[0] {
@@ -933,11 +939,15 @@ function ts.gt(left: Any, right: Any) -> Bool
 kernel 1
 errors "type_error"
 charge sum(20, deep(left), deep(right))
-native
+native 2
 body {
-  # The native answers float pairs without a conversion operation.
+  # The native's float and text pairs call no further operation, so the
+  # body answers them without one too: both use the same call depth.
   if same(kind(left), "float") {
     if same(kind(right), "float") { return num.lt(right, left) }
+  }
+  if same(kind(left), "text") {
+    if same(kind(right), "text") { return num.lt(text.utf16_compare(right, left), 0) }
   }
   let operands = invoke ts.relational(left, right)
   if operands[0] {
@@ -950,11 +960,15 @@ function ts.le(left: Any, right: Any) -> Bool
 kernel 1
 errors "type_error"
 charge sum(20, deep(left), deep(right))
-native
+native 2
 body {
-  # The native answers float pairs without a conversion operation.
+  # The native's float and text pairs call no further operation, so the
+  # body answers them without one too: both use the same call depth.
   if same(kind(left), "float") {
     if same(kind(right), "float") { return num.le(left, right) }
+  }
+  if same(kind(left), "text") {
+    if same(kind(right), "text") { return bool.not(num.lt(text.utf16_compare(right, left), 0)) }
   }
   let operands = invoke ts.relational(left, right)
   if operands[0] {
@@ -967,11 +981,15 @@ function ts.ge(left: Any, right: Any) -> Bool
 kernel 1
 errors "type_error"
 charge sum(20, deep(left), deep(right))
-native
+native 2
 body {
-  # The native answers float pairs without a conversion operation.
+  # The native's float and text pairs call no further operation, so the
+  # body answers them without one too: both use the same call depth.
   if same(kind(left), "float") {
     if same(kind(right), "float") { return num.le(right, left) }
+  }
+  if same(kind(left), "text") {
+    if same(kind(right), "text") { return bool.not(num.lt(text.utf16_compare(left, right), 0)) }
   }
   let operands = invoke ts.relational(left, right)
   if operands[0] {

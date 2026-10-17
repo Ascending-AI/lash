@@ -1004,10 +1004,6 @@ fn heap_fault(fault: lash_kernel_doc::heap::HeapFault) -> PoolError {
     use lash_kernel_doc::heap::{HeapFault as Kernel, HostResource as KernelResource};
     let detail = || Detail::new(&fault);
     let fault = match &fault {
-        Kernel::FrameRegisters { stored, expected } => page::HeapFault::FrameRegisters {
-            stored: *stored,
-            expected: *expected,
-        },
         Kernel::Missing { .. } => page::HeapFault::Missing { detail: detail() },
         Kernel::Corrupt { .. } => page::HeapFault::Corrupt { detail: detail() },
         Kernel::Unauthorized { .. } => page::HeapFault::Unauthorized { detail: detail() },

@@ -240,7 +240,9 @@ fn observe(program: &str, bounds: Bounds, layout: Layout, cold: bool) -> Trace {
 /// PLAN-INDEP: a numeric entry selects scalar blocks; changing its parameter
 /// to a guest closure fails the call guard and executes the complete body.
 /// Errors, guest effects and memory refusal are the generic plan's,
-/// uninterrupted and cold-restored at each safepoint with empty caches.
+/// uninterrupted and cold-restored at each safepoint with empty caches. The
+/// refusing fill is far past `K-BND-003`'s declared slack, so every plan
+/// refuses at the same statement.
 #[test]
 fn numeric_block_versions_fall_back_after_a_parameter_changes_kind() {
     let reference = observe(PROGRAM, ROOMY, Layout(0), false);

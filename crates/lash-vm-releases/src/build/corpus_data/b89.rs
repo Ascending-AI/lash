@@ -80,7 +80,6 @@ pub(super) const DATA: &str = r####"{
 "8986613a3ed8e8e7d7911aae52c9bbb2c86fa49cdb147c0e6ca907a274d4547f":["null",{"map":234},{"text":""}],
 "898703cffc3b52c82e930a6c3e8232f614587c32db45d9df2d24d18d024467b4":{"charge":3,"outcome":"ok {\"float\":\"5.481315993414912e-117\"}","prepared_difference":null,"reservations":[],"reserved":0,"spent":0},
 "8987dee43f5eb227f47b5edc65b0ff5c1af48a5203169523623a8c7fca09427a":[{"float":"1.5229198447056808e277"},{"int":"-3411853480518102184"}],
-"898dcadf4dd3616e6cbc3f7c03e53ad1a44b693cf391a87c1934dd869fd94552":[{"float":"-5.0264217216374195e-99"},{"int":"-3187210930538995505"}],
 "898e42b612db3a75a403ac51eb31df519ad862abfd95fa755fbda5686f2620df":{"charge":3,"outcome":"memory","prepared_difference":null,"reservations":[[0,46]],"reserved":0,"spent":0},
 "8991760423f0a2bcb16cf53f57f8c25d7864c9364e16a1e74fee9f7e734d05b8":{"charge":11,"outcome":"ok {\"float\":\"-3.3106318470347607e-146\"}","prepared_difference":null,"reservations":[],"reserved":0,"spent":0},
 "8996e51040e05df4c530989bcb6bab9f88f30f57f0c56a47960e4097525e7fc3":[{"text":""},{"text":""},{"text":"Infinity"}],
@@ -149,5 +148,6 @@ pub(super) const DATA: &str = r####"{
 "89f91650ab51293b6608766f4567a3de8812037d0cc6fb283988a92292535a7e":[{"text":"􁶦𧐝񐖵򐓾򶍙𴇟񘚜󻊑𗎴𙩓򲎧򋨠󹽔𮵪𛀰𘽐񞡎𳸞󣿢󢼝󃠃𞊳𔶶󊢭󖲼󅥥𲺗󚼊𲻔􄦉񊥚󉲈򱶱񧷊􌆱񯹲򆜎򡙀򿙬򂺀򻫝򼳨󎍱󊃷𝹶鑊󻏢򹸅񨉹򏜽󻖓򑠸􊐈񃭀󏔶𐭜󝁊񾽪󽰴󚢌󗳝𒅤񫰦󴋞𙇛쀸󓞸􇿗񮓨􌼡󅃿񆞞򮋑𳆂񊝡򖱯󠍷𤊱򢱴󱔬򑀆𧆦􁓅𮖬񞕧𬥭掿󦲸򫙡"}],
 "89fbd63a9d5a47fd46ce6938f6b3a3fa99f1ff6480a4f6f593934a54aaffec74":{"charge":6,"outcome":"ok {\"float\":\"-2.2502742566623713e-186\"}","prepared_difference":null,"reservations":[],"reserved":0,"spent":0},
 "89fbe9baa2c41e7797736340b50a6a7dfc3330ee493553328c9cdcee1dead366":[{"bool":true},{"set":2},{"text":"񒷠𽞻񍻔򝙩򠦅𭓖𼃿𚪾𿁫񢵋򯗑򬁺󣕺򨮐񃒇򘤮󵞼󴀓򦑓񚩛񧏏󉣨𶇙ݚ𾟔򿴛񤘡񽳭󾘔𫫘򗖭񾠆񵡖􌅦􈭤󒅲񯆰񰹓􊪏󣰚򵛢𔫏𬖚񨒑󒯘񾦏򜶜󰬇鳑񁮨뎟򔌸𞞾𓯱򶷆𗪝񭤨󴒚𐢓뙂󩶮򵔕󒛿𰍲󛿴񥾋􏇴􂜗򵪙󍙬훀񑅭񆘿񍔳􌡙񍶉󌑲륺񇺈񘩵򳀡򝨁𐿵󶒪򪛣񿝮󇄀⧢􀬱񵅧򶈅򟖁򱨪󹪞񤘫󃩧󘇓󿨐񽧤񶥗􈱅󃘝𺼱񸰯􂫷񕅢򣵀𖬺󟅬򗞎򠋡򩚤𙲉򑧰迃񾘜񇛐󃠽򍴍񟏷񻿐ય󁵺򨷀󣃛"},{"tuple":[{"int":"8844699060604577914"},{"int":"-5483596990079478614"},{"bool":true},{"bool":false}]}],
-"89fdd570bd5483d522608b11c8a2e195f14aad0e2b65ad017e6b127e784d5568":[{"int":"1929916418345769497"},{"float":"-2.6806437855539013e-282"}]
+"89fdd570bd5483d522608b11c8a2e195f14aad0e2b65ad017e6b127e784d5568":[{"int":"1929916418345769497"},{"float":"-2.6806437855539013e-282"}],
+"89ff0409d6f5263da623826772dd188c36a710fda8034f155fa4ba25b3cf5602":["null",{"int":"-4144286420368442874"}]
 }"####;
