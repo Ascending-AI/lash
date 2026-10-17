@@ -273,11 +273,7 @@ impl RuntimeTurnDriver<'_> {
                 .iter()
                 .any(|fact| fact.call_id == call_id)
         {
-            event_tx.publish(RuntimeStreamEvent::Turn(model_call_activity(
-                &self.scoped_effect_controller,
-                &self.turn_id,
-                &call_id,
-            )));
+            self.publish_model_call(event_tx, &call_id);
         }
         let mut result = result;
         if let (Ok(response), Some(record)) = (&mut result, &call_record) {
@@ -364,11 +360,7 @@ impl RuntimeTurnDriver<'_> {
                 .iter()
                 .any(|fact| fact.call_id == call_id)
         {
-            event_tx.publish(RuntimeStreamEvent::Turn(model_call_activity(
-                &self.scoped_effect_controller,
-                &self.turn_id,
-                &call_id,
-            )));
+            self.publish_model_call(event_tx, &call_id);
         }
         let mut result = result;
         if let (Ok(response), Some(record)) = (&mut result, &call_record) {

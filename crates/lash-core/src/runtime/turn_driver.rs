@@ -72,6 +72,10 @@ pub(super) struct RuntimeTurnDriver<'a> {
     /// here after their transaction is staged.
     pub(super) pending_model_calls: Vec<lash_core_store::model_calls::ModelCallFact>,
     pub(super) staged_model_calls: Vec<crate::LlmCallId>,
+    /// Calls this activation has published: each committed fact is
+    /// published once, whichever of its staging commit, its derivation or
+    /// the committed turn's reread reaches it first.
+    pub(super) published_model_calls: std::collections::HashSet<crate::LlmCallId>,
     pub(super) model_call_ordinal: u32,
     pub(super) sealed_attempt_count: usize,
     /// Contained provider panic, deferred until the terminal turn commits.

@@ -271,6 +271,7 @@ pub(super) fn turn_effect_executor(
         .with_trace(driver.trace.clone()),
         pending_model_calls: Vec::new(),
         staged_model_calls: Vec::new(),
+        published_model_calls: std::collections::HashSet::new(),
         model_call_ordinal: driver.model_call_ordinal,
         sealed_attempt_count: 0,
         provider_panic: None,

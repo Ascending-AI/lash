@@ -414,6 +414,7 @@ impl LashRuntime {
             turn_pipeline,
             pending_model_calls: Vec::new(),
             staged_model_calls: Vec::new(),
+            published_model_calls: std::collections::HashSet::new(),
             model_call_ordinal: 0,
             sealed_attempt_count: 0,
             provider_panic: None,

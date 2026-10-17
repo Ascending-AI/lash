@@ -47,7 +47,10 @@ impl RuntimeTurnDriver<'_> {
             .map(|record| record.record))
     }
 
-    pub(super) async fn publish_retained_model_calls(&self, event_tx: &TurnObserver) {
+    /// Publish every call the turn has retained that this activation has
+    /// not: calls committed by its other transactions or by an earlier
+    /// activation.
+    pub(super) async fn publish_retained_model_calls(&mut self, event_tx: &TurnObserver) {
         let read = async {
             self.scoped_effect_controller
                 .durable_reads()?
@@ -61,11 +64,7 @@ impl RuntimeTurnDriver<'_> {
         match read {
             Ok(records) => {
                 for record in records {
-                    event_tx.publish(RuntimeStreamEvent::Turn(model_call_activity(
-                        &self.scoped_effect_controller,
-                        &self.turn_id,
-                        &record.call_id,
-                    )));
+                    self.publish_model_call(event_tx, &record.call_id);
                 }
             }
             Err(error) => {
@@ -76,10 +75,17 @@ impl RuntimeTurnDriver<'_> {
 
     pub(super) fn publish_committed_model_calls(&mut self, event_tx: &TurnObserver) {
         for id in std::mem::take(&mut self.staged_model_calls) {
+            self.publish_model_call(event_tx, &id);
+        }
+    }
+
+    /// Publish committed call `id` unless this activation already has.
+    pub(super) fn publish_model_call(&mut self, event_tx: &TurnObserver, id: &crate::LlmCallId) {
+        if self.published_model_calls.insert(id.clone()) {
             event_tx.publish(RuntimeStreamEvent::Turn(model_call_activity(
                 &self.scoped_effect_controller,
                 &self.turn_id,
-                &id,
+                id,
             )));
         }
     }
