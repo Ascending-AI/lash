@@ -434,27 +434,3 @@ fn inferred_binding_names_reserve_tool_definition_symbols_in_every_dialect() {
         assert!(!text.contains("Field = "), "{text}");
     }
 }
-
-/// S1: public mode shape helpers refuse unbound references and unsupported
-/// literals, including when a host invokes them directly.
-#[test]
-fn mode_shape_helpers_refuse_instead_of_panicking() {
-    let shape = lash_tool_shape::ShapeKind::Ref(lash_tool_shape::DefinitionId(7)).into();
-    for dialect in [CellDialect::typescript(), CellDialect::python()] {
-        assert!(dialect.prompts().schema_type(&shape).is_err());
-        assert!(dialect.prompts().schema_definition("Host", &shape).is_err());
-    }
-    let mut document =
-        lash_tool_shape::SchemaDocument::from_json_schema(&json!(true), 8).expect("graph");
-    document.roots[0] = lash_tool_shape::ShapeKind::Ref(lash_tool_shape::DefinitionId(7)).into();
-    assert!(matches!(
-        lash_tool_presenter_api::listing::DefinitionPool::new(["Host"]).prepare(&document),
-        Err(PresentationRefusal::Shape {
-            cause: lash_tool_shape::ShapeImportRefusal::MissingReference { .. }
-        })
-    ));
-    let shape = lash_tool_shape::ShapeKind::Literals(vec![json!({"unsupported":true})]).into();
-    let python = CellDialect::python();
-    assert!(python.prompts().schema_type(&shape).is_err());
-    assert!(python.prompts().schema_definition("Host", &shape).is_err());
-}

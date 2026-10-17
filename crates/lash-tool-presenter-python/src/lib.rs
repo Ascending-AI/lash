@@ -232,7 +232,7 @@ fn selected_note_rows(
     names: &BTreeMap<DefinitionId, String>,
     introduced: &[DefinitionId],
 ) -> Vec<String> {
-    document
+    let rows = document
         .note_rows()
         .into_iter()
         .filter(|row| {
@@ -286,7 +286,8 @@ fn selected_note_rows(
             }
             line
         })
-        .collect()
+        .collect();
+    scope_union_notes(document, root_label, names, introduced, rows)
 }
 
 /// Render a tool using a listing-local pool. Reserve Python words, host and
@@ -427,6 +428,101 @@ pub fn render_shape(shape: &SchemaShape) -> Result<String, PresentationRefusal> 
 /// Refuses invalid names, unbound references and unsupported shapes.
 pub fn schema_definition(name: &str, shape: &SchemaShape) -> Result<String, PresentationRefusal> {
     emit_definition(name, shape, &BTreeMap::new())
+}
+
+fn scope_union_notes(
+    document: &SchemaDocument,
+    root_label: &str,
+    names: &BTreeMap<DefinitionId, String>,
+    introduced: &[DefinitionId],
+    rows: Vec<String>,
+) -> Vec<String> {
+    fn collect(shape: &SchemaShape, path: &str, scopes: &mut Vec<String>) {
+        match &shape.kind {
+            lash_tool_shape::ShapeKind::Union(members) => {
+                for (member, label) in members.iter().zip(shape.union_arm_labels()) {
+                    let path = format!("{path}|{label}");
+                    scopes.push(types::note_text(&path));
+                    collect(member, &path, scopes);
+                }
+            }
+            lash_tool_shape::ShapeKind::Object(object) => {
+                for field in &object.fields {
+                    collect(&field.shape, &format!("{path}.{}", field.name), scopes);
+                }
+                if let lash_tool_shape::ExtraKeys::Open(extra) = &object.extra_keys {
+                    collect(extra, &format!("{path}.*"), scopes);
+                }
+            }
+            lash_tool_shape::ShapeKind::List(item) => collect(item, &format!("{path}[]"), scopes),
+            lash_tool_shape::ShapeKind::Tuple(items) => {
+                for (index, item) in items.iter().enumerate() {
+                    collect(item, &format!("{path}[{index}]"), scopes);
+                }
+            }
+            lash_tool_shape::ShapeKind::Intersection(items) => {
+                for item in items {
+                    collect(item, path, scopes);
+                }
+            }
+            lash_tool_shape::ShapeKind::Process(Some(process)) => {
+                for param in &process.params {
+                    collect(&param.shape, &format!("{path}({})", param.name), scopes);
+                }
+                collect(&process.output, &format!("{path}.return"), scopes);
+            }
+            _ => {}
+        }
+    }
+    fn scope<'a>(row: &str, scopes: &'a [String]) -> Option<&'a str> {
+        let tail = row.strip_prefix("- `")?;
+        scopes
+            .iter()
+            .filter(|scope| {
+                tail.strip_prefix(scope.as_str())
+                    .is_some_and(|suffix| suffix.starts_with('.'))
+            })
+            .max_by_key(|scope| scope.len())
+            .map(String::as_str)
+    }
+    let mut scopes = Vec::new();
+    for root in &document.roots {
+        collect(root, root_label, &mut scopes);
+    }
+    for id in introduced {
+        if let Some(definition) = document.definition(*id) {
+            collect(
+                &definition.shape,
+                names.get(id).unwrap_or(&definition.pointer),
+                &mut scopes,
+            );
+        }
+    }
+    scopes.sort();
+    scopes.dedup();
+    let mut counts = BTreeMap::<String, usize>::new();
+    for row in &rows {
+        if let Some(scope) = scope(row, &scopes) {
+            *counts.entry(scope.into()).or_default() += 1;
+        }
+    }
+    let mut rendered = Vec::new();
+    let mut active = None::<String>;
+    for row in rows {
+        if let Some(scope) = scope(&row, &scopes)
+            && counts.get(scope).copied().unwrap_or(0) >= 3
+        {
+            if active.as_deref() != Some(scope) {
+                rendered.push(format!("- `{scope}`:"));
+                active = Some(scope.into());
+            }
+            rendered.push(format!("  - `{tail}", tail = &row[scope.len() + 4..]));
+        } else {
+            active = None;
+            rendered.push(row);
+        }
+    }
+    rendered
 }
 
 #[cfg(test)]
@@ -576,30 +672,185 @@ mod tests {
         assert!(notes.contains("`input.value` — Use here"), "{notes}");
         assert!(notes.contains("`Choice` — Shared choice"), "{notes}");
         assert!(
-            notes.contains("`Choice|0` (min length 2) — Text"),
+            notes.contains("`Choice|string` (min length 2) — Text"),
             "{notes}"
         );
-        assert!(notes.contains("`Choice|1` (default 3) — Count"), "{notes}");
-        for type_text in ["Union[", "Literal[", "str", "int"] {
+        assert!(
+            notes.contains("`Choice|integer` (default 3) — Count"),
+            "{notes}"
+        );
+        for type_text in ["Union[", "Literal[", ": str", ": int"] {
             assert!(!notes.contains(type_text), "{notes}");
         }
     }
 
+    fn shape_text(schema: &Value) -> String {
+        let doc = SchemaDocument::from_json_schema(schema, 32).expect("valid schema");
+        document_text(&doc)
+    }
+    fn document_text(doc: &SchemaDocument) -> String {
+        let names = definition_names(doc, &mut ReadableNameAllocator::default());
+        let mut text = doc
+            .reachable_closure(&doc.roots)
+            .into_iter()
+            .map(|id| emit_definition(&names[&id], &doc.definitions[id.0].shape, &names).unwrap())
+            .collect::<Vec<_>>();
+        text.push(render_type(&doc.roots[0], &names).expect("presentable type"));
+        text.extend(note_rows(doc, "input", &names));
+        text.join("\n")
+    }
+
     #[test]
-    fn s1_unbound_references_and_unsupported_literals_refuse() {
-        assert!(matches!(
-            render_shape(&lash_tool_shape::ShapeKind::Ref(DefinitionId(9)).into()),
-            Err(PresentationRefusal::Shape {
-                cause: lash_tool_shape::ShapeImportRefusal::MissingReference { .. }
-            })
-        ));
-        for value in [json!({"key": 1}), json!(1.5)] {
-            assert!(matches!(
-                render_shape(&lash_tool_shape::ShapeKind::Literals(vec![value]).into()),
-                Err(PresentationRefusal::Shape {
-                    cause: lash_tool_shape::ShapeImportRefusal::UnsupportedConstruct { .. }
-                })
-            ));
+    fn catalog_annotations_do_not_refuse_python_tools() {
+        for keyword in [
+            "example",
+            "human_parameter_name",
+            "human_parameter_description",
+            "file_uploadable",
+            "file_downloadable",
+            "discriminator",
+            "inventedKeyword",
+        ] {
+            let text = shape_text(&json!({"type":"string", keyword:"documentation"}));
+            assert_eq!(text, "str", "{keyword}: {text}");
         }
+    }
+
+    #[test]
+    fn factored_composition_and_shared_refinements_present_in_python() {
+        for composition in ["oneOf", "anyOf", "allOf"] {
+            let schema = json!({"type":"object", "properties":{
+                "query":{"type":"string"}, "cursor":{"type":"string"}},
+                composition:[{"required":["query"]},{"required":["cursor"]}], "minProperties":1});
+            let text = shape_text(&schema);
+            assert_eq!(text.matches("\"query\": str").count(), 1, "{text}");
+            assert!(
+                text.contains("requires query") && text.contains("requires cursor"),
+                "{text}"
+            );
+            assert!(text.contains("minProperties 1"), "{text}");
+        }
+    }
+
+    fn conditional_fixture() -> Value {
+        json!({"type":"object", "properties":{"kind":{"type":"string"}, "url":{"type":"string"}},
+        "if":{"properties":{"kind":{"const":"web"}}, "required":["kind"]},
+        "then":{"required":["url"]}, "else":{"not":{"required":["url"]}},
+        "dependentRequired":{"url":["kind"]},
+        "dependentSchemas":{"url":{"required":["kind"]}}})
+    }
+
+    #[test]
+    fn conditional_and_dependent_rules_are_presented_in_words() {
+        let text = shape_text(&conditional_fixture());
+        assert!(
+            text.contains("url: required when kind is \"web\""),
+            "{text}"
+        );
+        assert!(
+            text.contains("kind: required when url is present"),
+            "{text}"
+        );
+    }
+
+    #[test]
+    fn inexpressible_schema_rules_keep_an_honest_type_and_a_note() {
+        for schema in [
+            json!({"$ref":"https://example.com/value.json", "description":"Host description"}),
+            json!({"$ref":"#/missing"}),
+            json!({"$id":"https://example.com/root", "$defs":{
+            "Nested":{"$id":"nested", "$defs":{"Value":{"type":"integer"}},
+                "type":"object", "properties":{"v":{"$ref":"#/$defs/Value"}}},
+            "Value":{"type":"string"}}, "$ref":"#/$defs/Nested"}),
+            json!({"$dynamicRef":"#node"}),
+            json!({"$recursiveRef":"#"}),
+            json!({"type":"object", "unevaluatedProperties":false}),
+            json!({"type":"array", "prefixItems":[{"type":"string"}], "items":{"type":"number"}}),
+            json!({"type":"object", "patternProperties":{"^a":{"type":"string"}}}),
+            json!({"type":"array", "contains":{"type":"integer"}}),
+            json!({"enum":[{"key":1}, 1.5]}),
+        ] {
+            let text = shape_text(&schema);
+            assert!(!text.is_empty(), "{schema}");
+            assert!(
+                text.contains("validated")
+                    || text.contains("patternProperties")
+                    || text.contains("contains")
+                    || text.contains("one of"),
+                "{schema}: {text}"
+            );
+        }
+    }
+
+    #[test]
+    fn presentation_limits_keep_a_note_instead_of_refusing_a_valid_tool() {
+        let mut schema = json!({"type":"string"});
+        for _ in 0..10 {
+            schema = json!({"type":"array", "items":schema});
+        }
+        let doc = lash_tool_shape::SchemaDocument::import(
+            &schema,
+            lash_tool_shape::ImportLimits {
+                max_depth: 2,
+                max_nodes: 2,
+            },
+        )
+        .expect("valid tool");
+        let text = document_text(&doc);
+        assert!(text.contains("validated"), "{text}");
+    }
+
+    #[test]
+    fn original_figments_schemas_print_no_larger_than_source() {
+        for (name, source) in [
+            (
+                "people.lookup",
+                include_str!("fixtures/figments/people.lookup.json"),
+            ),
+            (
+                "information.search",
+                include_str!("fixtures/figments/information.search.json"),
+            ),
+            (
+                "information.read",
+                include_str!("fixtures/figments/information.read.json"),
+            ),
+            (
+                "information.list",
+                include_str!("fixtures/figments/information.list.json"),
+            ),
+        ] {
+            let schemas: Value = serde_json::from_str(source).unwrap();
+            for direction in ["input", "output"] {
+                let schema = &schemas[direction];
+                let text = shape_text(schema);
+                assert!(
+                    text.len() <= schema.to_string().len(),
+                    "{name} {direction}: {} > {}: {text}",
+                    text.len(),
+                    schema.to_string().len()
+                );
+                println!(
+                    "{name} {direction}: {} printed <= {} source bytes",
+                    text.len(),
+                    schema.to_string().len()
+                );
+            }
+        }
+    }
+
+    #[test]
+    fn union_notes_name_the_title_and_discriminant_in_python() {
+        let text = shape_text(&json!({"oneOf":[
+            {"title":"Calendar.v1", "properties":{"date":{"type":"string", "description":"Day"},
+                "from":{"type":"string", "description":"Start"}, "to":{"type":"string", "description":"End"}}},
+            {"properties":{"kind":{"const":"mail"}, "date":{"type":"string", "description":"Sent"}}}
+        ]}));
+        assert!(
+            text.contains("- `input|Calendar.v1`:")
+                && text.contains("  - `date` — Day")
+                && text.contains("input|kind=\"mail\".date"),
+            "{text}"
+        );
     }
 }

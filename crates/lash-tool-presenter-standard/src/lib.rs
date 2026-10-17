@@ -388,7 +388,7 @@ fn reserve_host_names(document: &SchemaDocument, allocator: &mut ReadableNameAll
                 }
             }
             ShapeKind::List(item) => reserve(item, allocator),
-            ShapeKind::Tuple(items) | ShapeKind::Union(items) => {
+            ShapeKind::Tuple(items) | ShapeKind::Union(items) | ShapeKind::Intersection(items) => {
                 for item in items {
                     reserve(item, allocator);
                 }
@@ -465,6 +465,7 @@ fn witnessed_input(output_contract: &ToolOutputContract, input: &SchemaShape) ->
     {
         field.shape = SchemaShape {
             kind: ShapeKind::Named("TypeSpec<T>".to_string()),
+            title: field.shape.title.take(),
             description: field.shape.description.take(),
             default: None,
             constraints: ShapeConstraints::default(),

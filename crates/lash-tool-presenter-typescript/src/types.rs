@@ -46,14 +46,10 @@ pub fn render_type_expression(
     Ok(match &shape.kind {
         ShapeKind::Unknown => "unknown".to_string(),
         ShapeKind::Never => "never".to_string(),
-        ShapeKind::Ref(id) => {
-            names
-                .get(id)
-                .cloned()
-                .ok_or_else(|| ShapeImportRefusal::MissingReference {
-                    reference: format!("definition {}", id.0),
-                })?
-        }
+        ShapeKind::Ref(id) => names
+            .get(id)
+            .cloned()
+            .unwrap_or_else(|| "unknown /* reference validated by the tool */".into()),
         ShapeKind::Null => "null".to_string(),
         ShapeKind::Bool => "boolean".to_string(),
         ShapeKind::Int | ShapeKind::Float => "number".to_string(),
@@ -78,6 +74,28 @@ pub fn render_type_expression(
                 .collect::<Result<Vec<_>, _>>()?
                 .into_iter(),
         ),
+        ShapeKind::Intersection(members) => {
+            let text = members
+                .iter()
+                .filter(|member| !matches!(member.kind, ShapeKind::Unknown))
+                .map(|member| {
+                    let text = render(member)?;
+                    Ok(
+                        if matches!(member.kind, ShapeKind::Union(_) | ShapeKind::Literals(_)) {
+                            format!("({text})")
+                        } else {
+                            text
+                        },
+                    )
+                })
+                .collect::<Result<Vec<_>, ShapeImportRefusal>>()?
+                .join(" & ");
+            if text.is_empty() {
+                "unknown".into()
+            } else {
+                text
+            }
+        }
         ShapeKind::Named(name) => render_type_name(name),
         ShapeKind::Process(None) => "Process".to_string(),
         ShapeKind::Process(Some(signature)) => format!(
@@ -95,7 +113,7 @@ pub fn render_type_expression(
             render(&signature.output)?
         ),
         _ => {
-            return Err(ShapeImportRefusal::UnsupportedConstruct {
+            return Err(ShapeImportRefusal::InvalidSchema {
                 keyword: "TypeScript shape kind".into(),
             });
         }
@@ -126,7 +144,7 @@ fn render_object(
         ExtraKeys::Unstated => None,
         ExtraKeys::Open(extra) => Some(render_type_expression(extra, names)?),
         _ => {
-            return Err(ShapeImportRefusal::UnsupportedConstruct {
+            return Err(ShapeImportRefusal::InvalidSchema {
                 keyword: "TypeScript extra keys".into(),
             });
         }

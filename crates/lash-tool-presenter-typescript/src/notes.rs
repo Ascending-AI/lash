@@ -52,8 +52,13 @@ fn collect(shape: &SchemaShape, path: &str, rows: &mut Vec<String>) {
             }
         }
         ShapeKind::Union(items) => {
-            for (index, item) in items.iter().enumerate() {
-                collect(item, &format!("{path}|{index}"), rows);
+            for (item, label) in items.iter().zip(shape.union_arm_labels()) {
+                collect(item, &format!("{path}|{label}"), rows);
+            }
+        }
+        ShapeKind::Intersection(items) => {
+            for item in items {
+                collect(item, path, rows);
             }
         }
         ShapeKind::Process(Some(process)) => {

@@ -36,7 +36,6 @@ pub use wrap::WrappedToolPresenter;
 /// Import a complete tool schema for graph presentation. Named references stay
 /// edges; anonymous nesting never becomes an unconstrained type or a refusal
 /// merely because it crosses a projection depth. The existing 10,000-node
-/// import budget still refuses excessive work with `shape.node_limit`.
 ///
 /// ```
 /// let document = lash_tool_presenter_api::import_schema(&serde_json::json!({"type":"string"}))?;
@@ -45,7 +44,7 @@ pub use wrap::WrappedToolPresenter;
 /// ```
 ///
 /// # Errors
-/// Returns the importer's typed refusal for unsupported schemas or node exhaustion.
+/// Returns a typed refusal only for non-schema values or malformed schema keywords.
 pub fn import_schema(
     schema: &Value,
 ) -> Result<lash_tool_shape::SchemaDocument, lash_tool_shape::ShapeImportRefusal> {
@@ -227,13 +226,7 @@ impl PresentedToolSection {
 ///
 /// | Code | Cause |
 /// | --- | --- |
-/// | `shape.missing_reference` | A local schema reference has no target. |
-/// | `shape.unsupported_reference` | A reference uses an unsupported location. |
-/// | `shape.unsupported_construct` | A schema keyword cannot be represented. |
 /// | `shape.invalid_schema` | A schema keyword has an invalid value. |
-/// | `shape.recursion_depth` | Schema nesting exceeds the configured depth. |
-/// | `shape.node_limit` | The schema graph exceeds the importer's node limit. |
-/// | `shape.resource_exhausted` | Another schema import resource is exhausted. |
 /// | `config.invalid` | The presenter cannot admit or read its config. |
 /// | `tool.unrepresentable` | The presenter cannot document a tool. |
 /// | `listing.section_limit` | The complete section exceeds its hard byte limit. |
@@ -249,7 +242,7 @@ pub enum PresentationRefusal {
     /// put instance-specific details in `message`.
     #[error("{message}")]
     Custom { code: String, message: String },
-    /// The schema cannot be represented without losing contract information.
+    /// The input is not a valid schema. Valid schemas retain validation notes.
     #[error("tool schema cannot be presented: {cause}")]
     Shape {
         #[from]
@@ -282,17 +275,9 @@ impl PresentationRefusal {
         use lash_tool_shape::ShapeImportRefusal;
         match self {
             Self::Custom { code, .. } => code,
-            Self::Shape { cause } => match cause {
-                ShapeImportRefusal::MissingReference { .. } => "shape.missing_reference",
-                ShapeImportRefusal::UnsupportedReference { .. } => "shape.unsupported_reference",
-                ShapeImportRefusal::UnsupportedConstruct { .. } => "shape.unsupported_construct",
-                ShapeImportRefusal::InvalidSchema { .. } => "shape.invalid_schema",
-                ShapeImportRefusal::ResourceExhausted { resource, .. } => match resource.as_str() {
-                    "depth" => "shape.recursion_depth",
-                    "nodes" => "shape.node_limit",
-                    _ => "shape.resource_exhausted",
-                },
-            },
+            Self::Shape {
+                cause: ShapeImportRefusal::InvalidSchema { .. },
+            } => "shape.invalid_schema",
             Self::Config { .. } => "config.invalid",
             Self::Tool { .. } => "tool.unrepresentable",
             Self::Listing { .. } => "listing.incomplete",
@@ -448,36 +433,4 @@ pub fn read_config<C: serde::de::DeserializeOwned>(
     config: &Value,
 ) -> Result<C, PresentationRefusal> {
     C::deserialize(config).map_err(|error| PresentationRefusal::config(presenter, error))
-}
-
-#[cfg(test)]
-mod tests {
-    /// S1: removing projection depth preserves the existing work bound and
-    /// refuses with the stable resource code instead of an unconstrained type.
-    #[test]
-    fn complete_schema_import_refuses_node_exhaustion_with_its_typed_code() {
-        let properties = (0..10_000)
-            .map(|index| {
-                (
-                    format!("field{index}"),
-                    serde_json::json!({"type": "string"}),
-                )
-            })
-            .collect::<serde_json::Map<_, _>>();
-        let refusal = super::import_schema(&serde_json::json!({
-            "type": "object", "properties": properties
-        }))
-        .expect_err("the root and fields exceed the existing node budget");
-        assert_eq!(
-            refusal,
-            lash_tool_shape::ShapeImportRefusal::ResourceExhausted {
-                resource: "nodes".into(),
-                limit: 10_000,
-            }
-        );
-        assert_eq!(
-            super::PresentationRefusal::from(refusal).code(),
-            "shape.node_limit"
-        );
-    }
 }

@@ -680,7 +680,7 @@ impl SchemaRegistry {
                 self.definitions.push((name, shape.clone()));
             }
             ShapeKind::List(item) => self.register_list_item(item, hint_segments),
-            ShapeKind::Union(items) => {
+            ShapeKind::Union(items) | ShapeKind::Intersection(items) => {
                 for item in items {
                     self.register_shape(item, hint_segments);
                 }
@@ -697,7 +697,7 @@ impl SchemaRegistry {
                 self.register_shape(item, &segments);
             }
             ShapeKind::List(inner) => self.register_list_item(inner, hint_segments),
-            ShapeKind::Union(items) => {
+            ShapeKind::Union(items) | ShapeKind::Intersection(items) => {
                 for item in items {
                     self.register_list_item(item, hint_segments);
                 }
@@ -749,6 +749,9 @@ impl SchemaRegistry {
             ShapeKind::List(item) => ShapeKind::List(Box::new(self.reference(item))),
             ShapeKind::Union(items) => {
                 ShapeKind::Union(items.iter().map(|item| self.reference(item)).collect())
+            }
+            ShapeKind::Intersection(items) => {
+                ShapeKind::Intersection(items.iter().map(|item| self.reference(item)).collect())
             }
             other => other.clone(),
         };

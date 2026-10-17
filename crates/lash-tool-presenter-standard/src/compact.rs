@@ -98,6 +98,11 @@ pub fn compact_type(
             }
         }
         ShapeKind::Union(members) => types(members, names)?.join(" | "),
+        ShapeKind::Intersection(members) => types(members, names)?
+            .into_iter()
+            .map(|text| format!("({text})"))
+            .collect::<Vec<_>>()
+            .join(" & "),
         ShapeKind::Named(name) => name.clone(),
         ShapeKind::Process(None) => "process".to_string(),
         ShapeKind::Process(Some(signature)) => format!(
@@ -255,8 +260,13 @@ pub fn compact_note_rows(shape: &SchemaShape, path: &str) -> Vec<CompactNoteRow>
                 }
             }
             ShapeKind::Union(items) => {
-                for (index, item) in items.iter().enumerate() {
-                    walk(item, &format!("{path}|{index}"), rows);
+                for (item, label) in items.iter().zip(shape.union_arm_labels()) {
+                    walk(item, &format!("{path}|{label}"), rows);
+                }
+            }
+            ShapeKind::Intersection(items) => {
+                for item in items {
+                    walk(item, path, rows);
                 }
             }
             ShapeKind::Process(Some(process)) => {

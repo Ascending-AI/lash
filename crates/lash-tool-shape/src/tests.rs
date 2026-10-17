@@ -129,55 +129,9 @@ fn use_site_annotation_overrides_do_not_mutate_shared_definition_notes() {
     assert_eq!(rows[1].path, "#/$defs/Status");
 }
 
+/// Value refinements retain their own paths without changing the base type.
 #[test]
-fn s1_missing_and_unsupported_references_refuse() {
-    for reference in ["#/missing", "#/$defs/missing"] {
-        assert!(matches!(
-            SchemaDocument::from_json_schema(&json!({"$ref":reference}), 8),
-            Err(ShapeImportRefusal::MissingReference { .. })
-        ));
-    }
-    for reference in [
-        "https://example.com/schema.json",
-        "other.json#/X",
-        "#anchor",
-        "#/bad~2escape",
-    ] {
-        assert!(matches!(
-            SchemaDocument::from_json_schema(&json!({"$ref":reference}), 8),
-            Err(ShapeImportRefusal::UnsupportedReference { .. })
-        ));
-    }
-}
-
-#[test]
-fn s1_resource_exhaustion_refuses_instead_of_erasing_a_subtree() {
-    let mut schema = json!({"type":"string"});
-    for _ in 0..8 {
-        schema = json!({"type":"object", "properties":{"child":schema}});
-    }
-    assert!(matches!(SchemaDocument::from_json_schema(&schema, 8),
-        Err(ShapeImportRefusal::ResourceExhausted { resource, limit:8 }) if resource == "depth"));
-    assert!(
-        matches!(SchemaDocument::import(&json!({"type":"object", "properties":{
-        "a":{},"b":{}
-    }}), ImportLimits { max_depth:8, max_nodes:2 }),
-        Err(ShapeImportRefusal::ResourceExhausted { resource, limit:2 }) if resource == "nodes")
-    );
-    // Reference chains use the node budget, not the anonymous-depth budget.
-    let doc = SchemaDocument::from_json_schema(
-        &json!({"$ref":"#/$defs/A", "$defs":{
-            "A":{"$ref":"#/$defs/B"}, "B":{"$ref":"#/$defs/A"}
-        }}),
-        1,
-    )
-    .expect("a finite cyclic graph fits depth one");
-    assert_eq!(doc.reachable_closure(&doc.roots).len(), 2);
-}
-
-/// S1 permits explicit notes for refinements that do not change a value's type.
-#[test]
-fn s1_value_narrowing_keywords_keep_path_notes_and_unsupported_constructs_refuse() {
+fn value_narrowing_keywords_keep_path_notes() {
     for (kind, keyword, value) in [
         ("object", "minProperties", json!(1)),
         ("object", "maxProperties", json!(3)),
@@ -192,7 +146,6 @@ fn s1_value_narrowing_keywords_keep_path_notes_and_unsupported_constructs_refuse
             "patternProperties",
             json!({"^x":{"type":"string"}}),
         ),
-        ("object", "dependentRequired", json!({"x":["y"]})),
         ("string", "not", json!({"const":"forbidden"})),
     ] {
         let expected = vec![format!("{keyword} {value}")];
@@ -233,46 +186,8 @@ fn s1_value_narrowing_keywords_keep_path_notes_and_unsupported_constructs_refuse
         panic!("pattern properties describe an object")
     };
     assert!(matches!(&object.extra_keys, ExtraKeys::Open(_)));
-    for keyword in [
-        "if",
-        "then",
-        "else",
-        "dependentSchemas",
-        "unevaluatedProperties",
-        "unevaluatedItems",
-        "$dynamicRef",
-        "$anchor",
-        "inventedKeyword",
-    ] {
-        assert_eq!(
-            SchemaDocument::from_json_schema(&json!({keyword: {}}), 8),
-            Err(ShapeImportRefusal::UnsupportedConstruct {
-                keyword: keyword.into()
-            }),
-            "{keyword}"
-        );
-    }
     let doc = document(json!({"type":"string", "x-host":{"anything":true}}));
     assert_eq!(doc.roots[0], SchemaShape::from(ShapeKind::Str));
-}
-
-#[test]
-fn s1_unsupported_constructs_and_assertion_siblings_refuse() {
-    for schema in [
-        json!({"$ref":"#", "type":"string"}),
-        json!({"allOf":[{"type":"string"},{"type":"number"}]}),
-        json!({"anyOf":[{"type":"string"}], "minimum":1}),
-        json!({"type":"array", "prefixItems":[{}]}),
-        json!({"x-lash":{"kind":"proc"}}),
-    ] {
-        assert!(
-            SchemaDocument::from_json_schema(&schema, 8).is_err(),
-            "{schema}"
-        );
-    }
-    assert_eq!(document(json!(false)).roots[0].kind, ShapeKind::Never);
-    assert_eq!(document(json!(true)).roots[0].kind, ShapeKind::Unknown);
-    assert_eq!(document(json!({"enum":[]})).roots[0].kind, ShapeKind::Never);
 }
 
 #[test]
@@ -343,7 +258,10 @@ fn notes_keep_union_branch_meaning_and_stop_at_recursive_edges() {
         rows.iter()
             .map(|row| (row.path.as_str(), row.shape.description.as_deref()))
             .collect::<Vec<_>>(),
-        [("$0|0.v", Some("Count")), ("$0|1.v", Some("Name"))]
+        [
+            ("$0|object.v", Some("Count")),
+            ("$0|object (alternative 2).v", Some("Name"))
+        ]
     );
 }
 

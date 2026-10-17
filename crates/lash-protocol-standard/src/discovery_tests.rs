@@ -187,46 +187,25 @@ fn standard_discovery_filters_provider_specs_and_requires_an_inline_member() {
 /// FIG-6517: a presenter refusal keeps its identity and stable cause through
 /// the plugin boundary and the durable command-failure projection.
 #[test]
-fn a_schema_presentation_refusal_keeps_its_presenter_and_code_when_recorded() {
-    let catalog = lash_core::ToolCatalog::from_tool_definitions(vec![
-        lash_core::ToolDefinition::raw(
-            "tool:lookup",
-            "lookup",
-            "Find a record.",
-            serde_json::json!({"allOf": [{"type": "string"}, {"type": "number"}]}),
-            serde_json::json!({"type": "string"}),
-        )
-        .expect("admitted schemas")
-        .with_execution(std::time::Duration::from_secs(30)),
-    ]);
+fn a_host_presentation_refusal_keeps_its_presenter_and_code_when_recorded() {
     let config = StandardProtocolConfig::default();
-    let refusal = config
-        .tool_docs(&catalog)
-        .expect_err("the presenter cannot represent this assertion");
-    for (refusal, code) in [
-        (refusal, "shape.unsupported_construct"),
-        (
-            PresentationRefusal::Custom {
-                code: "host.policy.denied".to_owned(),
-                message: "This host does not disclose these tools.".to_owned(),
-            },
-            "host.policy.denied",
-        ),
-    ] {
-        let error = tool_presentation_refused(&config, &refusal);
-        let encoded = serde_json::to_value(&error).expect("serialize the plugin refusal");
-        assert_eq!(encoded["type"], "tool_presentation_refused");
-        assert_eq!(encoded["message"]["presenter"], "lash.tools.compact.v1");
-        assert_eq!(encoded["message"]["code"], code);
-        assert_eq!(encoded["message"]["message"], refusal.to_string());
-        let replayed: PluginError =
-            serde_json::from_value(encoded.clone()).expect("decode plugin refusal");
-        assert_eq!(serde_json::to_value(&replayed).unwrap(), encoded);
-        let durable =
-            lash_execution_contracts::plugin_error::ToolIntentCommandFailure::from(&replayed);
-        let durable: lash_execution_contracts::plugin_error::ToolIntentCommandFailure =
-            serde_json::from_slice(&serde_json::to_vec(&durable).unwrap())
-                .expect("decode durable cause");
-        assert_eq!(serde_json::to_value(durable).unwrap(), encoded);
-    }
+    let refusal = PresentationRefusal::Custom {
+        code: "host.policy.denied".to_owned(),
+        message: "This host does not disclose these tools.".to_owned(),
+    };
+    let code = "host.policy.denied";
+    let error = tool_presentation_refused(&config, &refusal);
+    let encoded = serde_json::to_value(&error).expect("serialize the plugin refusal");
+    assert_eq!(encoded["type"], "tool_presentation_refused");
+    assert_eq!(encoded["message"]["presenter"], "lash.tools.compact.v1");
+    assert_eq!(encoded["message"]["code"], code);
+    assert_eq!(encoded["message"]["message"], refusal.to_string());
+    let replayed: PluginError =
+        serde_json::from_value(encoded.clone()).expect("decode plugin refusal");
+    assert_eq!(serde_json::to_value(&replayed).unwrap(), encoded);
+    let durable = lash_execution_contracts::plugin_error::ToolIntentCommandFailure::from(&replayed);
+    let durable: lash_execution_contracts::plugin_error::ToolIntentCommandFailure =
+        serde_json::from_slice(&serde_json::to_vec(&durable).unwrap())
+            .expect("decode durable cause");
+    assert_eq!(serde_json::to_value(durable).unwrap(), encoded);
 }

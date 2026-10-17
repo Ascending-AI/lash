@@ -1,0 +1,1407 @@
+{
+  "input": {
+    "additionalProperties": false,
+    "oneOf": [
+      {
+        "required": [
+          "queries"
+        ]
+      },
+      {
+        "required": [
+          "query"
+        ]
+      }
+    ],
+    "properties": {
+      "queries": {
+        "description": "One clear question per distinct need. Preserve names, identifiers, and filenames verbatim.",
+        "items": {
+          "maxLength": 1000,
+          "minLength": 1,
+          "type": "string"
+        },
+        "maxItems": 5,
+        "minItems": 1,
+        "type": "array"
+      },
+      "query": {
+        "description": "One-question compatibility form; do not supply with `queries`.",
+        "maxLength": 1000,
+        "minLength": 1,
+        "type": "string"
+      },
+      "targets": {
+        "additionalProperties": false,
+        "description": "Sources to search. Omit `targets` or use an empty Sources object to default to 15 results.",
+        "maxProperties": 1,
+        "minProperties": 1,
+        "properties": {
+          "sources": {
+            "oneOf": [
+              {
+                "additionalProperties": false,
+                "properties": {
+                  "date": {
+                    "description": "Relative source-date window; not with `from`/`to`; not historical.",
+                    "enum": [
+                      "any_time",
+                      "past_week",
+                      "past_month",
+                      "past_year"
+                    ],
+                    "type": "string"
+                  },
+                  "from": {
+                    "description": "Inclusive start, UTC YYYY-MM-DD; not with `date`.",
+                    "format": "date",
+                    "type": "string"
+                  },
+                  "limit": {
+                    "description": "Omission returns 15 results. Maximum 20 for this target; limits across all selected targets must total at most 20.",
+                    "maximum": 20,
+                    "minimum": 1,
+                    "type": "integer"
+                  },
+                  "record_types": {
+                    "description": "Provider-neutral source-record types to search.",
+                    "items": {
+                      "enum": [
+                        "file",
+                        "email_thread",
+                        "message_thread",
+                        "calendar_event",
+                        "issue",
+                        "chat_window",
+                        "generated_artifact",
+                        "chat_turn",
+                        "workflow_result"
+                      ],
+                      "type": "string"
+                    },
+                    "minItems": 1,
+                    "type": "array",
+                    "uniqueItems": true
+                  },
+                  "source_systems": {
+                    "description": "Open-ended source-system identifiers such as google_drive, slack, linear, or figments.",
+                    "items": {
+                      "maxLength": 64,
+                      "minLength": 1,
+                      "type": "string"
+                    },
+                    "maxItems": 32,
+                    "minItems": 1,
+                    "type": "array",
+                    "uniqueItems": true
+                  },
+                  "to": {
+                    "description": "Inclusive end, UTC YYYY-MM-DD; not with `date`.",
+                    "format": "date",
+                    "type": "string"
+                  },
+                  "within": {
+                    "description": "Opaque read references from earlier Source results. Search stays within those exact current record revisions.",
+                    "items": {
+                      "maxLength": 4096,
+                      "minLength": 1,
+                      "type": "string"
+                    },
+                    "maxItems": 8,
+                    "minItems": 1,
+                    "type": "array"
+                  }
+                },
+                "required": [],
+                "type": "object"
+              },
+              {
+                "additionalProperties": false,
+                "properties": {
+                  "cursor": {
+                    "description": "Opaque continuation returned by this same target. When set, omit the target's other controls.",
+                    "maxLength": 16384,
+                    "minLength": 1,
+                    "type": "string"
+                  }
+                },
+                "required": [
+                  "cursor"
+                ],
+                "type": "object"
+              }
+            ]
+          }
+        },
+        "type": "object"
+      }
+    },
+    "type": "object"
+  },
+  "output": {
+    "$defs": {
+      "failedQueries": {
+        "items": {
+          "additionalProperties": false,
+          "properties": {
+            "error": {
+              "$ref": "#/$defs/searchError"
+            },
+            "query": {
+              "maxLength": 1000,
+              "type": "string"
+            }
+          },
+          "required": [
+            "query",
+            "error"
+          ],
+          "type": "object"
+        },
+        "maxItems": 5,
+        "minItems": 1,
+        "type": "array"
+      },
+      "searchError": {
+        "additionalProperties": false,
+        "properties": {
+          "code": {
+            "enum": [
+              "deadline_exceeded",
+              "backend_unavailable",
+              "reference_invalidated",
+              "cursor_invalidated",
+              "internal_error"
+            ],
+            "type": "string"
+          },
+          "message": {
+            "maxLength": 500,
+            "type": "string"
+          },
+          "message_truncated": {
+            "type": "boolean"
+          },
+          "retryable": {
+            "type": "boolean"
+          }
+        },
+        "required": [
+          "code",
+          "message",
+          "retryable"
+        ],
+        "type": "object"
+      },
+      "searchPageInfo": {
+        "oneOf": [
+          {
+            "additionalProperties": false,
+            "properties": {
+              "has_more": {
+                "const": false
+              },
+              "next_cursor": {
+                "type": "null"
+              }
+            },
+            "required": [
+              "has_more",
+              "next_cursor"
+            ],
+            "type": "object"
+          },
+          {
+            "additionalProperties": false,
+            "properties": {
+              "has_more": {
+                "const": true
+              },
+              "next_cursor": {
+                "maxLength": 16384,
+                "minLength": 1,
+                "type": "string"
+              }
+            },
+            "required": [
+              "has_more",
+              "next_cursor"
+            ],
+            "type": "object"
+          }
+        ]
+      }
+    },
+    "additionalProperties": false,
+    "properties": {
+      "queries": {
+        "items": {
+          "maxLength": 1000,
+          "type": "string"
+        },
+        "maxItems": 5,
+        "minItems": 1,
+        "type": "array"
+      },
+      "query": {
+        "maxLength": 1000,
+        "type": "string"
+      },
+      "results": {
+        "additionalProperties": false,
+        "maxProperties": 1,
+        "minProperties": 1,
+        "properties": {
+          "sources": {
+            "oneOf": [
+              {
+                "additionalProperties": false,
+                "properties": {
+                  "failed_queries": {
+                    "$ref": "#/$defs/failedQueries"
+                  },
+                  "page_info": {
+                    "$ref": "#/$defs/searchPageInfo"
+                  },
+                  "qualifier": {
+                    "maxLength": 500,
+                    "type": "string"
+                  },
+                  "results": {
+                    "items": {
+                      "additionalProperties": false,
+                      "allOf": [
+                        {
+                          "if": {
+                            "properties": {
+                              "kind": {
+                                "const": "file"
+                              }
+                            },
+                            "required": [
+                              "kind"
+                            ]
+                          },
+                          "then": {
+                            "properties": {
+                              "attributes": {
+                                "additionalProperties": false,
+                                "properties": {
+                                  "activity_date": {
+                                    "type": [
+                                      "string",
+                                      "null"
+                                    ]
+                                  },
+                                  "authors": {
+                                    "items": {
+                                      "additionalProperties": false,
+                                      "properties": {
+                                        "display_name": {
+                                          "maxLength": 200,
+                                          "type": "string"
+                                        },
+                                        "display_name_truncated": {
+                                          "type": "boolean"
+                                        },
+                                        "email": {
+                                          "maxLength": 320,
+                                          "type": [
+                                            "string",
+                                            "null"
+                                          ]
+                                        },
+                                        "email_truncated": {
+                                          "type": "boolean"
+                                        }
+                                      },
+                                      "required": [
+                                        "display_name",
+                                        "email"
+                                      ],
+                                      "type": "object"
+                                    },
+                                    "maxItems": 3,
+                                    "type": "array"
+                                  },
+                                  "authors_omitted": {
+                                    "minimum": 1,
+                                    "type": "integer"
+                                  },
+                                  "created_at": {
+                                    "type": [
+                                      "string",
+                                      "null"
+                                    ]
+                                  },
+                                  "mime_type": {
+                                    "maxLength": 300,
+                                    "type": [
+                                      "string",
+                                      "null"
+                                    ]
+                                  },
+                                  "mime_type_truncated": {
+                                    "type": "boolean"
+                                  },
+                                  "source": {
+                                    "type": "string"
+                                  },
+                                  "summary": {
+                                    "maxLength": 300,
+                                    "type": [
+                                      "string",
+                                      "null"
+                                    ]
+                                  },
+                                  "summary_truncated": {
+                                    "type": "boolean"
+                                  },
+                                  "updated_at": {
+                                    "type": [
+                                      "string",
+                                      "null"
+                                    ]
+                                  }
+                                },
+                                "required": [
+                                  "source",
+                                  "summary",
+                                  "created_at",
+                                  "updated_at",
+                                  "activity_date",
+                                  "mime_type",
+                                  "authors"
+                                ],
+                                "type": "object"
+                              }
+                            }
+                          }
+                        },
+                        {
+                          "if": {
+                            "properties": {
+                              "kind": {
+                                "const": "email_thread"
+                              }
+                            },
+                            "required": [
+                              "kind"
+                            ]
+                          },
+                          "then": {
+                            "properties": {
+                              "attributes": {
+                                "additionalProperties": false,
+                                "properties": {
+                                  "activity_date": {
+                                    "type": [
+                                      "string",
+                                      "null"
+                                    ]
+                                  },
+                                  "created_at": {
+                                    "type": [
+                                      "string",
+                                      "null"
+                                    ]
+                                  },
+                                  "message_count": {
+                                    "type": [
+                                      "integer",
+                                      "null"
+                                    ]
+                                  },
+                                  "participants": {
+                                    "items": {
+                                      "additionalProperties": false,
+                                      "properties": {
+                                        "display_name": {
+                                          "maxLength": 200,
+                                          "type": "string"
+                                        },
+                                        "display_name_truncated": {
+                                          "type": "boolean"
+                                        },
+                                        "email": {
+                                          "maxLength": 320,
+                                          "type": [
+                                            "string",
+                                            "null"
+                                          ]
+                                        },
+                                        "email_truncated": {
+                                          "type": "boolean"
+                                        }
+                                      },
+                                      "required": [
+                                        "display_name",
+                                        "email"
+                                      ],
+                                      "type": "object"
+                                    },
+                                    "maxItems": 3,
+                                    "type": "array"
+                                  },
+                                  "participants_omitted": {
+                                    "minimum": 1,
+                                    "type": "integer"
+                                  },
+                                  "source": {
+                                    "type": "string"
+                                  },
+                                  "summary": {
+                                    "maxLength": 300,
+                                    "type": [
+                                      "string",
+                                      "null"
+                                    ]
+                                  },
+                                  "summary_truncated": {
+                                    "type": "boolean"
+                                  },
+                                  "updated_at": {
+                                    "type": [
+                                      "string",
+                                      "null"
+                                    ]
+                                  }
+                                },
+                                "required": [
+                                  "source",
+                                  "summary",
+                                  "created_at",
+                                  "updated_at",
+                                  "activity_date",
+                                  "participants",
+                                  "message_count"
+                                ],
+                                "type": "object"
+                              }
+                            }
+                          }
+                        },
+                        {
+                          "if": {
+                            "properties": {
+                              "kind": {
+                                "const": "message_thread"
+                              }
+                            },
+                            "required": [
+                              "kind"
+                            ]
+                          },
+                          "then": {
+                            "properties": {
+                              "attributes": {
+                                "additionalProperties": false,
+                                "properties": {
+                                  "activity_date": {
+                                    "type": [
+                                      "string",
+                                      "null"
+                                    ]
+                                  },
+                                  "channel_name": {
+                                    "maxLength": 300,
+                                    "type": [
+                                      "string",
+                                      "null"
+                                    ]
+                                  },
+                                  "channel_name_truncated": {
+                                    "type": "boolean"
+                                  },
+                                  "created_at": {
+                                    "type": [
+                                      "string",
+                                      "null"
+                                    ]
+                                  },
+                                  "message_count": {
+                                    "type": [
+                                      "integer",
+                                      "null"
+                                    ]
+                                  },
+                                  "participants": {
+                                    "items": {
+                                      "additionalProperties": false,
+                                      "properties": {
+                                        "display_name": {
+                                          "maxLength": 200,
+                                          "type": "string"
+                                        },
+                                        "display_name_truncated": {
+                                          "type": "boolean"
+                                        },
+                                        "email": {
+                                          "maxLength": 320,
+                                          "type": [
+                                            "string",
+                                            "null"
+                                          ]
+                                        },
+                                        "email_truncated": {
+                                          "type": "boolean"
+                                        }
+                                      },
+                                      "required": [
+                                        "display_name",
+                                        "email"
+                                      ],
+                                      "type": "object"
+                                    },
+                                    "maxItems": 3,
+                                    "type": "array"
+                                  },
+                                  "participants_omitted": {
+                                    "minimum": 1,
+                                    "type": "integer"
+                                  },
+                                  "source": {
+                                    "type": "string"
+                                  },
+                                  "summary": {
+                                    "maxLength": 300,
+                                    "type": [
+                                      "string",
+                                      "null"
+                                    ]
+                                  },
+                                  "summary_truncated": {
+                                    "type": "boolean"
+                                  },
+                                  "updated_at": {
+                                    "type": [
+                                      "string",
+                                      "null"
+                                    ]
+                                  }
+                                },
+                                "required": [
+                                  "source",
+                                  "summary",
+                                  "created_at",
+                                  "updated_at",
+                                  "activity_date",
+                                  "channel_name",
+                                  "participants",
+                                  "message_count"
+                                ],
+                                "type": "object"
+                              }
+                            }
+                          }
+                        },
+                        {
+                          "if": {
+                            "properties": {
+                              "kind": {
+                                "const": "calendar_event"
+                              }
+                            },
+                            "required": [
+                              "kind"
+                            ]
+                          },
+                          "then": {
+                            "properties": {
+                              "attributes": {
+                                "additionalProperties": false,
+                                "properties": {
+                                  "activity_date": {
+                                    "type": [
+                                      "string",
+                                      "null"
+                                    ]
+                                  },
+                                  "attendees": {
+                                    "items": {
+                                      "additionalProperties": false,
+                                      "properties": {
+                                        "display_name": {
+                                          "maxLength": 200,
+                                          "type": "string"
+                                        },
+                                        "display_name_truncated": {
+                                          "type": "boolean"
+                                        },
+                                        "email": {
+                                          "maxLength": 320,
+                                          "type": [
+                                            "string",
+                                            "null"
+                                          ]
+                                        },
+                                        "email_truncated": {
+                                          "type": "boolean"
+                                        }
+                                      },
+                                      "required": [
+                                        "display_name",
+                                        "email"
+                                      ],
+                                      "type": "object"
+                                    },
+                                    "maxItems": 3,
+                                    "type": "array"
+                                  },
+                                  "attendees_omitted": {
+                                    "minimum": 1,
+                                    "type": "integer"
+                                  },
+                                  "created_at": {
+                                    "type": [
+                                      "string",
+                                      "null"
+                                    ]
+                                  },
+                                  "ends_at": {
+                                    "type": [
+                                      "string",
+                                      "null"
+                                    ]
+                                  },
+                                  "organizer": {
+                                    "oneOf": [
+                                      {
+                                        "additionalProperties": false,
+                                        "properties": {
+                                          "display_name": {
+                                            "maxLength": 200,
+                                            "type": "string"
+                                          },
+                                          "display_name_truncated": {
+                                            "type": "boolean"
+                                          },
+                                          "email": {
+                                            "maxLength": 320,
+                                            "type": [
+                                              "string",
+                                              "null"
+                                            ]
+                                          },
+                                          "email_truncated": {
+                                            "type": "boolean"
+                                          }
+                                        },
+                                        "required": [
+                                          "display_name",
+                                          "email"
+                                        ],
+                                        "type": "object"
+                                      },
+                                      {
+                                        "type": "null"
+                                      }
+                                    ]
+                                  },
+                                  "source": {
+                                    "type": "string"
+                                  },
+                                  "starts_at": {
+                                    "type": [
+                                      "string",
+                                      "null"
+                                    ]
+                                  },
+                                  "summary": {
+                                    "maxLength": 300,
+                                    "type": [
+                                      "string",
+                                      "null"
+                                    ]
+                                  },
+                                  "summary_truncated": {
+                                    "type": "boolean"
+                                  },
+                                  "updated_at": {
+                                    "type": [
+                                      "string",
+                                      "null"
+                                    ]
+                                  }
+                                },
+                                "required": [
+                                  "source",
+                                  "summary",
+                                  "created_at",
+                                  "updated_at",
+                                  "activity_date",
+                                  "starts_at",
+                                  "ends_at",
+                                  "organizer",
+                                  "attendees"
+                                ],
+                                "type": "object"
+                              }
+                            }
+                          }
+                        },
+                        {
+                          "if": {
+                            "properties": {
+                              "kind": {
+                                "const": "issue"
+                              }
+                            },
+                            "required": [
+                              "kind"
+                            ]
+                          },
+                          "then": {
+                            "properties": {
+                              "attributes": {
+                                "additionalProperties": false,
+                                "properties": {
+                                  "activity_date": {
+                                    "type": [
+                                      "string",
+                                      "null"
+                                    ]
+                                  },
+                                  "assignees": {
+                                    "items": {
+                                      "additionalProperties": false,
+                                      "properties": {
+                                        "display_name": {
+                                          "maxLength": 200,
+                                          "type": "string"
+                                        },
+                                        "display_name_truncated": {
+                                          "type": "boolean"
+                                        },
+                                        "email": {
+                                          "maxLength": 320,
+                                          "type": [
+                                            "string",
+                                            "null"
+                                          ]
+                                        },
+                                        "email_truncated": {
+                                          "type": "boolean"
+                                        }
+                                      },
+                                      "required": [
+                                        "display_name",
+                                        "email"
+                                      ],
+                                      "type": "object"
+                                    },
+                                    "maxItems": 3,
+                                    "type": "array"
+                                  },
+                                  "assignees_omitted": {
+                                    "minimum": 1,
+                                    "type": "integer"
+                                  },
+                                  "created_at": {
+                                    "type": [
+                                      "string",
+                                      "null"
+                                    ]
+                                  },
+                                  "source": {
+                                    "type": "string"
+                                  },
+                                  "status": {
+                                    "maxLength": 300,
+                                    "type": [
+                                      "string",
+                                      "null"
+                                    ]
+                                  },
+                                  "status_truncated": {
+                                    "type": "boolean"
+                                  },
+                                  "summary": {
+                                    "maxLength": 300,
+                                    "type": [
+                                      "string",
+                                      "null"
+                                    ]
+                                  },
+                                  "summary_truncated": {
+                                    "type": "boolean"
+                                  },
+                                  "team": {
+                                    "maxLength": 300,
+                                    "type": [
+                                      "string",
+                                      "null"
+                                    ]
+                                  },
+                                  "team_truncated": {
+                                    "type": "boolean"
+                                  },
+                                  "updated_at": {
+                                    "type": [
+                                      "string",
+                                      "null"
+                                    ]
+                                  }
+                                },
+                                "required": [
+                                  "source",
+                                  "summary",
+                                  "created_at",
+                                  "updated_at",
+                                  "activity_date",
+                                  "status",
+                                  "team",
+                                  "assignees"
+                                ],
+                                "type": "object"
+                              }
+                            }
+                          }
+                        },
+                        {
+                          "if": {
+                            "properties": {
+                              "kind": {
+                                "const": "chat_window"
+                              }
+                            },
+                            "required": [
+                              "kind"
+                            ]
+                          },
+                          "then": {
+                            "properties": {
+                              "attributes": {
+                                "additionalProperties": false,
+                                "properties": {
+                                  "activity_date": {
+                                    "type": [
+                                      "string",
+                                      "null"
+                                    ]
+                                  },
+                                  "created_at": {
+                                    "type": [
+                                      "string",
+                                      "null"
+                                    ]
+                                  },
+                                  "ends_at": {
+                                    "type": [
+                                      "string",
+                                      "null"
+                                    ]
+                                  },
+                                  "message_count": {
+                                    "type": [
+                                      "integer",
+                                      "null"
+                                    ]
+                                  },
+                                  "participants": {
+                                    "items": {
+                                      "additionalProperties": false,
+                                      "properties": {
+                                        "display_name": {
+                                          "maxLength": 200,
+                                          "type": "string"
+                                        },
+                                        "display_name_truncated": {
+                                          "type": "boolean"
+                                        },
+                                        "email": {
+                                          "maxLength": 320,
+                                          "type": [
+                                            "string",
+                                            "null"
+                                          ]
+                                        },
+                                        "email_truncated": {
+                                          "type": "boolean"
+                                        }
+                                      },
+                                      "required": [
+                                        "display_name",
+                                        "email"
+                                      ],
+                                      "type": "object"
+                                    },
+                                    "maxItems": 3,
+                                    "type": "array"
+                                  },
+                                  "participants_omitted": {
+                                    "minimum": 1,
+                                    "type": "integer"
+                                  },
+                                  "source": {
+                                    "type": "string"
+                                  },
+                                  "starts_at": {
+                                    "type": [
+                                      "string",
+                                      "null"
+                                    ]
+                                  },
+                                  "summary": {
+                                    "maxLength": 300,
+                                    "type": [
+                                      "string",
+                                      "null"
+                                    ]
+                                  },
+                                  "summary_truncated": {
+                                    "type": "boolean"
+                                  },
+                                  "updated_at": {
+                                    "type": [
+                                      "string",
+                                      "null"
+                                    ]
+                                  }
+                                },
+                                "required": [
+                                  "source",
+                                  "summary",
+                                  "created_at",
+                                  "updated_at",
+                                  "activity_date",
+                                  "participants",
+                                  "message_count",
+                                  "starts_at",
+                                  "ends_at"
+                                ],
+                                "type": "object"
+                              }
+                            }
+                          }
+                        },
+                        {
+                          "if": {
+                            "properties": {
+                              "kind": {
+                                "const": "generated_artifact"
+                              }
+                            },
+                            "required": [
+                              "kind"
+                            ]
+                          },
+                          "then": {
+                            "properties": {
+                              "attributes": {
+                                "additionalProperties": false,
+                                "properties": {
+                                  "activity_date": {
+                                    "type": [
+                                      "string",
+                                      "null"
+                                    ]
+                                  },
+                                  "created_at": {
+                                    "type": [
+                                      "string",
+                                      "null"
+                                    ]
+                                  },
+                                  "format": {
+                                    "maxLength": 300,
+                                    "type": "string"
+                                  },
+                                  "format_truncated": {
+                                    "type": "boolean"
+                                  },
+                                  "producer_kind": {
+                                    "maxLength": 300,
+                                    "type": "string"
+                                  },
+                                  "producer_kind_truncated": {
+                                    "type": "boolean"
+                                  },
+                                  "source": {
+                                    "type": "string"
+                                  },
+                                  "summary": {
+                                    "maxLength": 300,
+                                    "type": [
+                                      "string",
+                                      "null"
+                                    ]
+                                  },
+                                  "summary_truncated": {
+                                    "type": "boolean"
+                                  },
+                                  "title": {
+                                    "maxLength": 300,
+                                    "type": "string"
+                                  },
+                                  "title_truncated": {
+                                    "type": "boolean"
+                                  },
+                                  "updated_at": {
+                                    "type": [
+                                      "string",
+                                      "null"
+                                    ]
+                                  }
+                                },
+                                "required": [
+                                  "source",
+                                  "summary",
+                                  "created_at",
+                                  "updated_at",
+                                  "activity_date",
+                                  "title",
+                                  "format",
+                                  "producer_kind"
+                                ],
+                                "type": "object"
+                              }
+                            }
+                          }
+                        },
+                        {
+                          "if": {
+                            "properties": {
+                              "kind": {
+                                "const": "chat_turn"
+                              }
+                            },
+                            "required": [
+                              "kind"
+                            ]
+                          },
+                          "then": {
+                            "properties": {
+                              "attributes": {
+                                "additionalProperties": false,
+                                "properties": {
+                                  "activity_date": {
+                                    "type": [
+                                      "string",
+                                      "null"
+                                    ]
+                                  },
+                                  "created_at": {
+                                    "type": [
+                                      "string",
+                                      "null"
+                                    ]
+                                  },
+                                  "source": {
+                                    "type": "string"
+                                  },
+                                  "summary": {
+                                    "maxLength": 300,
+                                    "type": [
+                                      "string",
+                                      "null"
+                                    ]
+                                  },
+                                  "summary_truncated": {
+                                    "type": "boolean"
+                                  },
+                                  "thread_id": {
+                                    "type": "string"
+                                  },
+                                  "thread_title": {
+                                    "maxLength": 300,
+                                    "type": [
+                                      "string",
+                                      "null"
+                                    ]
+                                  },
+                                  "thread_title_truncated": {
+                                    "type": "boolean"
+                                  },
+                                  "turn_id": {
+                                    "type": "string"
+                                  },
+                                  "updated_at": {
+                                    "type": [
+                                      "string",
+                                      "null"
+                                    ]
+                                  }
+                                },
+                                "required": [
+                                  "source",
+                                  "summary",
+                                  "created_at",
+                                  "updated_at",
+                                  "activity_date",
+                                  "thread_id",
+                                  "turn_id",
+                                  "thread_title"
+                                ],
+                                "type": "object"
+                              }
+                            }
+                          }
+                        },
+                        {
+                          "if": {
+                            "properties": {
+                              "kind": {
+                                "const": "workflow_result"
+                              }
+                            },
+                            "required": [
+                              "kind"
+                            ]
+                          },
+                          "then": {
+                            "properties": {
+                              "attributes": {
+                                "additionalProperties": false,
+                                "properties": {
+                                  "activity_date": {
+                                    "type": [
+                                      "string",
+                                      "null"
+                                    ]
+                                  },
+                                  "created_at": {
+                                    "type": [
+                                      "string",
+                                      "null"
+                                    ]
+                                  },
+                                  "run_id": {
+                                    "type": "string"
+                                  },
+                                  "source": {
+                                    "type": "string"
+                                  },
+                                  "summary": {
+                                    "maxLength": 300,
+                                    "type": [
+                                      "string",
+                                      "null"
+                                    ]
+                                  },
+                                  "summary_truncated": {
+                                    "type": "boolean"
+                                  },
+                                  "updated_at": {
+                                    "type": [
+                                      "string",
+                                      "null"
+                                    ]
+                                  },
+                                  "workflow_id": {
+                                    "type": "string"
+                                  }
+                                },
+                                "required": [
+                                  "source",
+                                  "summary",
+                                  "created_at",
+                                  "updated_at",
+                                  "activity_date",
+                                  "workflow_id",
+                                  "run_id"
+                                ],
+                                "type": "object"
+                              }
+                            }
+                          }
+                        }
+                      ],
+                      "properties": {
+                        "attributes": {
+                          "type": "object"
+                        },
+                        "display_name": {
+                          "maxLength": 300,
+                          "type": "string"
+                        },
+                        "display_name_truncated": {
+                          "type": "boolean"
+                        },
+                        "id": {
+                          "type": "string"
+                        },
+                        "kind": {
+                          "enum": [
+                            "file",
+                            "email_thread",
+                            "message_thread",
+                            "calendar_event",
+                            "issue",
+                            "chat_window",
+                            "generated_artifact",
+                            "chat_turn",
+                            "workflow_result"
+                          ],
+                          "type": "string"
+                        },
+                        "matches": {
+                          "items": {
+                            "additionalProperties": false,
+                            "properties": {
+                              "source_unit": {
+                                "additionalProperties": false,
+                                "properties": {
+                                  "heading_path": {
+                                    "items": {
+                                      "maxLength": 200,
+                                      "type": "string"
+                                    },
+                                    "maxItems": 8,
+                                    "type": "array"
+                                  },
+                                  "heading_path_omitted": {
+                                    "minimum": 1,
+                                    "type": "integer"
+                                  },
+                                  "heading_path_truncated": {
+                                    "type": "boolean"
+                                  },
+                                  "id": {
+                                    "type": "string"
+                                  },
+                                  "locations": {
+                                    "items": {
+                                      "additionalProperties": false,
+                                      "properties": {
+                                        "character_range": {
+                                          "oneOf": [
+                                            {
+                                              "additionalProperties": false,
+                                              "properties": {
+                                                "end": {
+                                                  "type": "integer"
+                                                },
+                                                "start": {
+                                                  "type": "integer"
+                                                }
+                                              },
+                                              "required": [
+                                                "start",
+                                                "end"
+                                              ],
+                                              "type": "object"
+                                            },
+                                            {
+                                              "type": "null"
+                                            }
+                                          ]
+                                        },
+                                        "page": {
+                                          "type": [
+                                            "integer",
+                                            "null"
+                                          ]
+                                        }
+                                      },
+                                      "required": [
+                                        "page",
+                                        "character_range"
+                                      ],
+                                      "type": "object"
+                                    },
+                                    "maxItems": 8,
+                                    "type": "array"
+                                  },
+                                  "locations_omitted": {
+                                    "minimum": 1,
+                                    "type": "integer"
+                                  },
+                                  "text": {
+                                    "maxLength": 400,
+                                    "type": "string"
+                                  },
+                                  "text_truncated": {
+                                    "type": "boolean"
+                                  }
+                                },
+                                "required": [
+                                  "id",
+                                  "text",
+                                  "heading_path",
+                                  "locations"
+                                ],
+                                "type": "object"
+                              }
+                            },
+                            "required": [
+                              "source_unit"
+                            ],
+                            "type": "object"
+                          },
+                          "maxItems": 2,
+                          "type": "array"
+                        },
+                        "matches_omitted": {
+                          "minimum": 1,
+                          "type": "integer"
+                        },
+                        "open_url": {
+                          "maxLength": 2048,
+                          "type": [
+                            "string",
+                            "null"
+                          ]
+                        },
+                        "open_url_omitted": {
+                          "type": "boolean"
+                        },
+                        "read_ref": {
+                          "maxLength": 4096,
+                          "type": "string"
+                        }
+                      },
+                      "required": [
+                        "kind",
+                        "id",
+                        "display_name",
+                        "open_url",
+                        "attributes",
+                        "matches"
+                      ],
+                      "type": "object"
+                    },
+                    "maxItems": 20,
+                    "type": "array"
+                  },
+                  "status": {
+                    "const": "success"
+                  }
+                },
+                "required": [
+                  "status",
+                  "results",
+                  "page_info"
+                ],
+                "type": "object"
+              },
+              {
+                "additionalProperties": false,
+                "properties": {
+                  "error": {
+                    "$ref": "#/$defs/searchError"
+                  },
+                  "status": {
+                    "const": "error"
+                  }
+                },
+                "required": [
+                  "status",
+                  "error"
+                ],
+                "type": "object"
+              }
+            ]
+          }
+        },
+        "type": "object"
+      }
+    },
+    "required": [
+      "query",
+      "queries",
+      "results"
+    ],
+    "type": "object"
+  }
+}

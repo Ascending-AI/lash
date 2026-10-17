@@ -207,7 +207,7 @@ pub(crate) fn visit(shape: &SchemaShape, f: &mut impl FnMut(&SchemaShape)) {
     f(shape);
     match &shape.kind {
         ShapeKind::List(item) => visit(item, f),
-        ShapeKind::Tuple(items) | ShapeKind::Union(items) => {
+        ShapeKind::Tuple(items) | ShapeKind::Union(items) | ShapeKind::Intersection(items) => {
             for item in items {
                 visit(item, f);
             }
@@ -342,8 +342,13 @@ fn collect_notes(shape: &SchemaShape, path: &str, required: bool, rows: &mut Vec
             }
         }
         ShapeKind::Union(items) => {
-            for (index, item) in items.iter().enumerate() {
-                collect_notes(item, &format!("{path}|{index}"), required, rows);
+            for (item, label) in items.iter().zip(shape.union_arm_labels()) {
+                collect_notes(item, &format!("{path}|{label}"), required, rows);
+            }
+        }
+        ShapeKind::Intersection(items) => {
+            for item in items {
+                collect_notes(item, path, required, rows);
             }
         }
         ShapeKind::Process(Some(process)) => {

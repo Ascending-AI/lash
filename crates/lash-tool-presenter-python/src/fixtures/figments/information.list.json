@@ -1,0 +1,270 @@
+{
+  "input": {
+    "oneOf": [
+      {
+        "additionalProperties": false,
+        "not": {
+          "anyOf": [
+            {
+              "required": [
+                "date",
+                "from"
+              ]
+            },
+            {
+              "required": [
+                "date",
+                "to"
+              ]
+            }
+          ]
+        },
+        "properties": {
+          "date": {
+            "description": "Relative source-date window; not with `from`/`to`; not historical.",
+            "enum": [
+              "any_time",
+              "past_week",
+              "past_month",
+              "past_year"
+            ],
+            "type": "string"
+          },
+          "from": {
+            "description": "Inclusive start, UTC YYYY-MM-DD; not with `date`.",
+            "format": "date",
+            "type": "string"
+          },
+          "limit": {
+            "default": 50,
+            "description": "Omission returns 50 records. Maximum 100.",
+            "maximum": 100,
+            "minimum": 1,
+            "type": "integer"
+          },
+          "record_types": {
+            "description": "Provider-neutral source-record types to list.",
+            "items": {
+              "enum": [
+                "file",
+                "email_thread",
+                "message_thread",
+                "calendar_event",
+                "issue",
+                "chat_window",
+                "generated_artifact",
+                "chat_turn",
+                "workflow_result"
+              ],
+              "type": "string"
+            },
+            "minItems": 1,
+            "type": "array",
+            "uniqueItems": true
+          },
+          "source_systems": {
+            "description": "Open-ended source-system identifiers such as google_drive, slack, linear, or figments.",
+            "items": {
+              "maxLength": 64,
+              "minLength": 1,
+              "type": "string"
+            },
+            "maxItems": 32,
+            "minItems": 1,
+            "type": "array",
+            "uniqueItems": true
+          },
+          "to": {
+            "description": "Inclusive end, UTC YYYY-MM-DD; not with `date`.",
+            "format": "date",
+            "type": "string"
+          }
+        },
+        "type": "object"
+      },
+      {
+        "additionalProperties": false,
+        "properties": {
+          "cursor": {
+            "description": "Opaque continuation returned by this same target. When set, omit the target's other controls.",
+            "maxLength": 16384,
+            "minLength": 1,
+            "type": "string"
+          }
+        },
+        "required": [
+          "cursor"
+        ],
+        "type": "object"
+      }
+    ]
+  },
+  "output": {
+    "additionalProperties": false,
+    "allOf": [
+      {
+        "if": {
+          "properties": {
+            "has_more": {
+              "const": false
+            }
+          },
+          "required": [
+            "has_more"
+          ]
+        },
+        "then": {
+          "properties": {
+            "next_cursor": {
+              "type": "null"
+            }
+          }
+        }
+      },
+      {
+        "if": {
+          "properties": {
+            "has_more": {
+              "const": true
+            }
+          },
+          "required": [
+            "has_more"
+          ]
+        },
+        "then": {
+          "properties": {
+            "next_cursor": {
+              "maxLength": 16384,
+              "minLength": 1,
+              "type": "string"
+            }
+          }
+        }
+      }
+    ],
+    "properties": {
+      "has_more": {
+        "type": "boolean"
+      },
+      "next_cursor": {
+        "maxLength": 16384,
+        "type": [
+          "string",
+          "null"
+        ]
+      },
+      "note": {
+        "const": "exact zero for these filters; widen from/to once if the user's time phrase may not match, do not drop types or sources",
+        "type": "string"
+      },
+      "results": {
+        "items": {
+          "additionalProperties": false,
+          "properties": {
+            "activity_date": {
+              "type": [
+                "string",
+                "null"
+              ]
+            },
+            "display_name": {
+              "maxLength": 300,
+              "type": "string"
+            },
+            "display_name_truncated": {
+              "type": "boolean"
+            },
+            "id": {
+              "type": "string"
+            },
+            "kind": {
+              "enum": [
+                "file",
+                "email_thread",
+                "message_thread",
+                "calendar_event",
+                "issue",
+                "chat_window",
+                "generated_artifact",
+                "chat_turn",
+                "workflow_result"
+              ],
+              "type": "string"
+            },
+            "open_url": {
+              "maxLength": 2048,
+              "type": [
+                "string",
+                "null"
+              ]
+            },
+            "open_url_omitted": {
+              "type": "boolean"
+            },
+            "read_ref": {
+              "maxLength": 4096,
+              "type": "string"
+            },
+            "source": {
+              "type": "string"
+            },
+            "summary": {
+              "maxLength": 300,
+              "type": [
+                "string",
+                "null"
+              ]
+            },
+            "summary_truncated": {
+              "type": "boolean"
+            }
+          },
+          "required": [
+            "id",
+            "kind",
+            "source",
+            "display_name",
+            "activity_date",
+            "summary",
+            "open_url",
+            "read_ref"
+          ],
+          "type": "object"
+        },
+        "maxItems": 100,
+        "type": "array"
+      },
+      "returned": {
+        "maximum": 100,
+        "minimum": 0,
+        "type": "integer"
+      },
+      "total": {
+        "additionalProperties": false,
+        "properties": {
+          "exact": {
+            "type": "boolean"
+          },
+          "value": {
+            "minimum": 0,
+            "type": "integer"
+          }
+        },
+        "required": [
+          "value",
+          "exact"
+        ],
+        "type": "object"
+      }
+    },
+    "required": [
+      "results",
+      "returned",
+      "total",
+      "has_more",
+      "next_cursor"
+    ],
+    "type": "object"
+  }
+}

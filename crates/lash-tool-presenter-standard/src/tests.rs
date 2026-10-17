@@ -302,11 +302,11 @@ fn json_schema_loaded_contract_merges_nullable_anyof_return_fields() {
             .collect::<Result<Vec<_>, _>>()
             .unwrap(),
         vec![
-            serde_json::json!({"path":"output.response|0", "description":"Albums in the user's library."}),
-            serde_json::json!({"path":"output.response|0[].added_at", "description":"When the album was added to the library."}),
-            serde_json::json!({"path":"output.response|0[].genre", "description":"Album genre.", "notes":["min length 1"]}),
-            serde_json::json!({"path":"output.response|0[].title", "notes":["min length 1"]}),
-            serde_json::json!({"path":"output.response|1.message", "description":"Failure or status message."}),
+            serde_json::json!({"path":"output.response|array", "description":"Albums in the user's library."}),
+            serde_json::json!({"path":"output.response|array[].added_at", "description":"When the album was added to the library."}),
+            serde_json::json!({"path":"output.response|array[].genre", "description":"Album genre.", "notes":["min length 1"]}),
+            serde_json::json!({"path":"output.response|array[].title", "notes":["min length 1"]}),
+            serde_json::json!({"path":"output.response|has message.message", "description":"Failure or status message."}),
         ]
     );
     assert!(
@@ -317,11 +317,11 @@ fn json_schema_loaded_contract_merges_nullable_anyof_return_fields() {
     );
     let docs = contract.render_markdown();
     assert!(
-        docs.contains("- `output.response|0[].genre` (min length 1) — Album genre."),
+        docs.contains("- `output.response|array[].genre` (min length 1) — Album genre."),
         "{docs}"
     );
     assert!(
-        !docs.contains("- `output.response|0[].genre: str"),
+        !docs.contains("- `output.response|array[].genre: str"),
         "{docs}"
     );
 }
@@ -426,16 +426,6 @@ fn recursive_filter_has_one_named_body_and_path_only_notes() {
     );
     assert!(!docs.contains("any"), "{docs}");
     assert_eq!(docs.matches("Field to compare").count(), 1, "{docs}");
-}
-
-/// S1: a graph edge without an allocated name cannot become `any`.
-#[test]
-fn s1_compact_helpers_refuse_unbound_references() {
-    let document = SchemaDocument::from_json_schema(&serde_json::json!({"$ref":"#"}), 8).unwrap();
-    let names = BTreeMap::new();
-    assert!(compact_type(&document.roots[0], &names).is_err());
-    assert!(compact_definition(&document, DefinitionId(0), &names).is_err());
-    assert!(compact_signature("query", &document.roots[0], &names).is_err());
 }
 
 /// FIG-6494: sharing, mutual recursion and use-site notes retain their owners.

@@ -299,8 +299,8 @@ impl DefinitionPool {
                 continue;
             }
             let definition = document.definition(id).ok_or_else(|| {
-                lash_tool_shape::ShapeImportRefusal::MissingReference {
-                    reference: format!("definition {}", id.0),
+                lash_tool_shape::ShapeImportRefusal::InvalidSchema {
+                    keyword: format!("definition {}", id.0),
                 }
             })?;
             closure.push(id);
@@ -311,8 +311,8 @@ impl DefinitionPool {
         if let Some((id, _)) = &projection
             && document.definition(*id).is_none()
         {
-            return Err(lash_tool_shape::ShapeImportRefusal::MissingReference {
-                reference: format!("definition {}", id.0),
+            return Err(lash_tool_shape::ShapeImportRefusal::InvalidSchema {
+                keyword: format!("definition {}", id.0),
             }
             .into());
         }

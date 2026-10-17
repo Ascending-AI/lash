@@ -8,14 +8,16 @@
 //! Runtime-value inference constructs the same shape directly.
 //!
 //! Import through [`SchemaDocument::from_json_schema`]. Local references stay
-//! graph edges, including recursive ones. Unsupported schemas and exhausted
-//! resources return [`ShapeImportRefusal`]. Value refinements remain explicit
+//! graph edges, including recursive ones. Every valid schema is presentable;
+//! refinements a type cannot express and resource cuts retain validation notes.
+//! Only malformed schemas return [`ShapeImportRefusal`]. Value refinements remain explicit
 //! notes even when the base type is [`ShapeKind::Unknown`]. Validation remains
 //! the contract's responsibility.
 
 mod document;
 mod import;
 mod names;
+mod rules;
 
 pub use document::{CanonicalIdentity, DefinitionId, SchemaDefinition, SchemaDocument};
 pub use import::{ImportLimits, ShapeImportRefusal};
@@ -87,6 +89,8 @@ pub fn is_named_type_reference(reference: &str) -> bool {
 #[derive(Clone, Debug, PartialEq)]
 pub struct SchemaShape {
     pub kind: ShapeKind,
+    /// A schema title, retained for readable union arm ownership.
+    pub title: Option<String>,
     /// The node's own `description`, trimmed; `None` when absent or blank.
     pub description: Option<String>,
     /// The node's `default`.
@@ -117,6 +121,8 @@ pub enum ShapeKind {
     Object(ObjectShape),
     /// Two or more alternatives, flattened and without duplicates.
     Union(Vec<SchemaShape>),
+    /// All members apply at once, without distributing over unions.
+    Intersection(Vec<SchemaShape>),
     /// A host data type referenced by name.
     Named(String),
     /// A process value; `None` when the host only says it is callable.
@@ -164,7 +170,6 @@ const VALUE_NOTE_KEYWORDS: &[&str] = &[
     "maxContains",
     "propertyNames",
     "patternProperties",
-    "dependentRequired",
     "not",
 ];
 
@@ -184,6 +189,8 @@ pub struct ShapeConstraints {
     /// Value-narrowing JSON Schema keywords, rendered as compact JSON notes.
     /// These constrain the node at its own path, including reference overlays.
     pub value_notes: Vec<(String, Value)>,
+    /// Rules no language type can show, stated at this node's path.
+    pub rules: Vec<String>,
 }
 
 /// A process call signature.
@@ -249,6 +256,7 @@ impl ShapeConstraints {
         if let Some(value) = &self.format {
             notes.push(format!("format {value}"));
         }
+        notes.extend(self.rules.clone());
         notes.extend(
             self.value_notes
                 .iter()
@@ -272,11 +280,13 @@ impl ShapeConstraints {
             max_items: count("maxItems"),
             pattern: text("pattern"),
             format: text("format"),
+            rules: rules::notes(schema),
             value_notes: VALUE_NOTE_KEYWORDS
                 .iter()
                 .filter_map(|keyword| {
                     schema
                         .get(*keyword)
+                        .filter(|value| *keyword != "not" || rules::simple_not(value).is_none())
                         .map(|value| ((*keyword).into(), value.clone()))
                 })
                 .collect(),
@@ -299,7 +309,14 @@ impl ShapeConstraints {
                 value_notes.push(note);
             }
         }
+        let mut rules = self.rules;
+        for rule in inner.rules {
+            if !rules.contains(&rule) {
+                rules.push(rule);
+            }
+        }
         Self {
+            rules,
             minimum: self.minimum.or(inner.minimum),
             exclusive_minimum: self.exclusive_minimum.or(inner.exclusive_minimum),
             maximum: self.maximum.or(inner.maximum),
@@ -319,6 +336,7 @@ impl From<ShapeKind> for SchemaShape {
     fn from(kind: ShapeKind) -> Self {
         Self {
             kind,
+            title: None,
             description: None,
             default: None,
             constraints: ShapeConstraints::default(),
@@ -339,10 +357,80 @@ impl SchemaShape {
         }
     }
 
+    /// Readable, distinct labels for a union's alternatives. Titles win,
+    /// followed by a literal discriminant and then a type description.
+    pub fn union_arm_labels(&self) -> Vec<String> {
+        let ShapeKind::Union(members) = &self.kind else {
+            return Vec::new();
+        };
+        let mut used = Vec::<String>::new();
+        members
+            .iter()
+            .map(|member| {
+                let base = member.arm_label();
+                let mut label = base.clone();
+                let mut alternative = 2;
+                while used.contains(&label) {
+                    label = format!("{base} (alternative {alternative})");
+                    alternative += 1;
+                }
+                used.push(label.clone());
+                label
+            })
+            .collect()
+    }
+
+    fn arm_label(&self) -> String {
+        if let Some(title) = &self.title {
+            return title.clone();
+        }
+        if let ShapeKind::Object(object) = &self.kind {
+            for field in &object.fields {
+                if let ShapeKind::Literals(values) = &field.shape.kind
+                    && let [value] = values.as_slice()
+                {
+                    return format!("{}={value}", field.name);
+                }
+            }
+            let required = object
+                .fields
+                .iter()
+                .filter(|field| field.required)
+                .map(|field| field.name.as_str())
+                .collect::<Vec<_>>();
+            if !required.is_empty() {
+                return format!("has {}", required.join(", "));
+            }
+        }
+        match &self.kind {
+            ShapeKind::Unknown => "any value".into(),
+            ShapeKind::Never => "no value".into(),
+            ShapeKind::Ref(_) => "referenced type".into(),
+            ShapeKind::Null => "null".into(),
+            ShapeKind::Bool => "boolean".into(),
+            ShapeKind::Int => "integer".into(),
+            ShapeKind::Float => "number".into(),
+            ShapeKind::Str => "string".into(),
+            ShapeKind::Literals(values) => values
+                .iter()
+                .map(Value::to_string)
+                .collect::<Vec<_>>()
+                .join(" or "),
+            ShapeKind::List(_) => "array".into(),
+            ShapeKind::Tuple(_) => "tuple".into(),
+            ShapeKind::Object(_) => "object".into(),
+            ShapeKind::Union(_) => "union".into(),
+            ShapeKind::Intersection(_) => "intersection".into(),
+            ShapeKind::Named(name) => name.clone(),
+            ShapeKind::Process(_) => "process".into(),
+        }
+    }
+
     pub fn is_nullable(&self) -> bool {
         match &self.kind {
             ShapeKind::Null => true,
             ShapeKind::Union(members) => members.iter().any(Self::is_nullable),
+            ShapeKind::Intersection(members) => members.iter().all(Self::is_nullable),
             _ => false,
         }
     }
@@ -380,7 +468,7 @@ impl SchemaShape {
             }
         };
         match &self.kind {
-            ShapeKind::Union(members) => {
+            ShapeKind::Union(members) | ShapeKind::Intersection(members) => {
                 if self.has_notes() {
                     push(rows);
                 }
@@ -415,7 +503,9 @@ impl SchemaShape {
         match &self.kind {
             ShapeKind::Object(object) => !object.fields.is_empty(),
             ShapeKind::List(item) => item.has_nested_fields(),
-            ShapeKind::Union(members) => members.iter().any(Self::has_nested_fields),
+            ShapeKind::Union(members) | ShapeKind::Intersection(members) => {
+                members.iter().any(Self::has_nested_fields)
+            }
             _ => false,
         }
     }
@@ -433,10 +523,14 @@ impl SchemaShape {
             ShapeKind::Union(members) => {
                 union_kind(members.iter().map(Self::without_nested_fields).collect())
             }
+            ShapeKind::Intersection(members) => {
+                ShapeKind::Intersection(members.iter().map(Self::without_nested_fields).collect())
+            }
             other => other.clone(),
         };
         Self {
             kind,
+            title: self.title.clone(),
             description: self.description.clone(),
             default: self.default.clone(),
             constraints: self.constraints.clone(),
@@ -458,6 +552,7 @@ impl ShapeRow {
         let bare = |shape: &SchemaShape| SchemaShape::from(shape.kind.clone());
         self.shape = SchemaShape {
             kind: union_kind(vec![bare(&self.shape), bare(&other.shape)]),
+            title: self.shape.title.clone().or(other.shape.title.clone()),
             description,
             default,
             constraints,
@@ -477,7 +572,7 @@ fn union_kind(members: Vec<SchemaShape>) -> ShapeKind {
     for member in members {
         // A nested union with notes of its own stays one member, so the
         // notes keep the alternatives they describe.
-        let noted = member.has_notes();
+        let noted = member.has_notes() || member.title.is_some();
         match member.kind {
             ShapeKind::Union(inner) if !noted => {
                 for inner in inner {
@@ -487,6 +582,7 @@ fn union_kind(members: Vec<SchemaShape>) -> ShapeKind {
             kind => add(
                 SchemaShape {
                     kind,
+                    title: member.title,
                     description: member.description,
                     default: member.default,
                     constraints: member.constraints,

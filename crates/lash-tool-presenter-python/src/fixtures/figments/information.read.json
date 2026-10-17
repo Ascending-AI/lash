@@ -1,0 +1,138 @@
+{
+  "input": {
+    "additionalProperties": false,
+    "properties": {
+      "read_ref": {
+        "description": "Opaque reference returned by information.search, information.list, or information.read.",
+        "maxLength": 4096,
+        "minLength": 1,
+        "type": "string"
+      }
+    },
+    "required": [
+      "read_ref"
+    ],
+    "type": "object"
+  },
+  "output": {
+    "additionalProperties": false,
+    "properties": {
+      "next_read_ref": {
+        "maxLength": 4096,
+        "type": "string"
+      },
+      "previous_read_ref": {
+        "maxLength": 4096,
+        "type": "string"
+      },
+      "record": {
+        "additionalProperties": false,
+        "properties": {
+          "display_name": {
+            "maxLength": 512,
+            "type": "string"
+          },
+          "id": {
+            "type": "string"
+          },
+          "kind": {
+            "enum": [
+              "file",
+              "email_thread",
+              "message_thread",
+              "calendar_event",
+              "issue",
+              "chat_window",
+              "generated_artifact",
+              "chat_turn",
+              "workflow_result"
+            ],
+            "type": "string"
+          },
+          "open_url": {
+            "maxLength": 4096,
+            "type": "string"
+          },
+          "source": {
+            "type": "string"
+          }
+        },
+        "required": [
+          "id",
+          "kind",
+          "display_name"
+        ],
+        "type": "object"
+      },
+      "units": {
+        "items": {
+          "additionalProperties": false,
+          "properties": {
+            "attributes": {
+              "additionalProperties": false,
+              "type": "object"
+            },
+            "location": {
+              "additionalProperties": false,
+              "properties": {
+                "character_range": {
+                  "additionalProperties": false,
+                  "properties": {
+                    "end": {
+                      "minimum": 0,
+                      "type": "integer"
+                    },
+                    "start": {
+                      "minimum": 0,
+                      "type": "integer"
+                    }
+                  },
+                  "required": [
+                    "start",
+                    "end"
+                  ],
+                  "type": "object"
+                },
+                "heading_path": {
+                  "items": {
+                    "maxLength": 256,
+                    "type": "string"
+                  },
+                  "maxItems": 16,
+                  "type": "array"
+                },
+                "page": {
+                  "minimum": 0,
+                  "type": "integer"
+                }
+              },
+              "type": "object"
+            },
+            "source_unit_id": {
+              "type": "string"
+            },
+            "text": {
+              "type": "string"
+            },
+            "text_truncated": {
+              "const": true
+            }
+          },
+          "required": [
+            "source_unit_id",
+            "text"
+          ],
+          "type": "object"
+        },
+        "maxItems": 5,
+        "minItems": 1,
+        "type": "array"
+      }
+    },
+    "required": [
+      "record",
+      "units"
+    ],
+    "type": "object"
+  }
+}

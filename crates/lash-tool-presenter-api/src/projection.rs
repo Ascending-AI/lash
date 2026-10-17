@@ -6,9 +6,9 @@ use lash_tool_shape::{
 };
 use serde_json::Value;
 
-/// Import a graph strictly, then project its root for an inline presenter.
+/// Import a graph, then project its root for an inline presenter.
 /// Only the presentation projection cuts recursive edges to unknown; import
-/// errors, including exhausted resources, are returned without widening.
+/// malformed schema values return an error; resource cuts retain validation notes.
 /// Named-definition presenters should consume [`SchemaDocument`] directly.
 ///
 /// ```
@@ -57,11 +57,21 @@ fn expand(
     active: &mut Vec<DefinitionId>,
 ) -> SchemaShape {
     if remaining == 0 {
-        return SchemaShape::unknown();
+        let mut shape = SchemaShape::unknown();
+        shape
+            .constraints
+            .rules
+            .push("Further structure is validated by the tool.".into());
+        return shape;
     }
     if let ShapeKind::Ref(id) = shape.kind {
         let mut inner = if active.contains(&id) {
-            SchemaShape::unknown()
+            let mut shape = SchemaShape::unknown();
+            shape
+                .constraints
+                .rules
+                .push("Recursive reference is validated by the tool.".into());
+            shape
         } else {
             active.push(id);
             let result = expand(
@@ -73,6 +83,7 @@ fn expand(
             active.pop();
             result
         };
+        inner.title = shape.title.clone().or(inner.title);
         inner.description = shape.description.clone().or(inner.description);
         inner.default = shape.default.clone().or(inner.default);
         inner.constraints = shape.constraints.clone().overlay(inner.constraints);
@@ -83,6 +94,9 @@ fn expand(
     result.kind = match &shape.kind {
         ShapeKind::List(item) => ShapeKind::List(Box::new(child(item))),
         ShapeKind::Tuple(items) => ShapeKind::Tuple(items.iter().map(&mut child).collect()),
+        ShapeKind::Intersection(items) => {
+            ShapeKind::Intersection(items.iter().map(&mut child).collect())
+        }
         ShapeKind::Union(items) => ShapeKind::Union(items.iter().map(&mut child).collect()),
         ShapeKind::Object(object) => {
             let mut object = object.clone();

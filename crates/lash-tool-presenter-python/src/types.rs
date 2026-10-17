@@ -16,6 +16,7 @@ pub(crate) const KEYWORDS: &[&str] = &[
 
 pub(crate) const RESERVED_NAMES: &[&str] = &[
     "Any",
+    "Annotated",
     "Never",
     "Literal",
     "Union",
@@ -34,7 +35,7 @@ pub(crate) const RESERVED_NAMES: &[&str] = &[
 ];
 
 fn unsupported(keyword: &str) -> PresentationRefusal {
-    ShapeImportRefusal::UnsupportedConstruct {
+    ShapeImportRefusal::InvalidSchema {
         keyword: keyword.to_owned(),
     }
     .into()
@@ -70,7 +71,7 @@ pub fn reserve_host_names(shape: &SchemaShape, allocator: &mut ReadableNameAlloc
             allocator.reserve(&host_name(name));
         }
         ShapeKind::List(item) => reserve_host_names(item, allocator),
-        ShapeKind::Tuple(items) | ShapeKind::Union(items) => {
+        ShapeKind::Tuple(items) | ShapeKind::Union(items) | ShapeKind::Intersection(items) => {
             for item in items {
                 reserve_host_names(item, allocator);
             }
@@ -102,7 +103,7 @@ pub fn reserve_host_names(shape: &SchemaShape, allocator: &mut ReadableNameAlloc
 /// ```
 ///
 /// # Errors
-/// Unbound references and unsupported constructs refuse rather than become `Any`.
+/// Unbound references retain a validation note on `Any`.
 pub fn render_type(
     shape: &SchemaShape,
     names: &BTreeMap<DefinitionId, String>,
@@ -111,36 +112,38 @@ pub fn render_type(
     Ok(match &shape.kind {
         ShapeKind::Unknown => "Any".to_owned(),
         ShapeKind::Never => "Never".to_owned(),
-        ShapeKind::Ref(id) => {
-            let name = names
-                .get(id)
-                .ok_or_else(|| ShapeImportRefusal::MissingReference {
-                    reference: format!("definition {}", id.0),
-                })?;
-            if !identifier(name) {
-                return Err(unsupported("Python definition name"));
-            }
-            quoted(name)
-        }
+        ShapeKind::Ref(id) => match names.get(id) {
+            Some(name) => quoted(name),
+            None => "Annotated[Any, \"reference validated by the tool\"]".into(),
+        },
         ShapeKind::Null => "None".to_owned(),
         ShapeKind::Bool => "bool".to_owned(),
         ShapeKind::Int => "int".to_owned(),
         ShapeKind::Float => "float".to_owned(),
         ShapeKind::Str => "str".to_owned(),
         ShapeKind::Literals(values) => {
-            let values = values
-                .iter()
-                .map(|value| match value {
-                    Value::String(value) => Ok(quoted(value)),
-                    Value::Bool(true) => Ok("True".to_owned()),
-                    Value::Bool(false) => Ok("False".to_owned()),
-                    Value::Number(number) if number.is_i64() || number.is_u64() => {
-                        Ok(number.to_string())
-                    }
-                    _ => Err(unsupported("Python Literal value")),
-                })
-                .collect::<Result<Vec<_>, _>>()?;
-            format!("Literal[{}]", values.join(", "))
+            if values.iter().any(|value| {
+                !(value.is_string()
+                    || value.is_boolean()
+                    || value.as_i64().is_some()
+                    || value.as_u64().is_some())
+            }) {
+                format!(
+                    "Annotated[Any, {}]",
+                    quoted(&format!("one of {}", Value::Array(values.clone())))
+                )
+            } else {
+                let values = values
+                    .iter()
+                    .map(|value| match value {
+                        Value::String(value) => quoted(value),
+                        Value::Bool(true) => "True".into(),
+                        Value::Bool(false) => "False".into(),
+                        _ => value.to_string(),
+                    })
+                    .collect::<Vec<_>>();
+                format!("Literal[{}]", values.join(", "))
+            }
         }
         ShapeKind::List(item) => format!("list[{}]", render(item)?),
         ShapeKind::Tuple(items) => {
@@ -157,15 +160,39 @@ pub fn render_type(
                 )
             }
         }
-        ShapeKind::Object(object) => render_object("Record", object, names)?,
+        ShapeKind::Object(object) => render_object("Record", object, names, false)?,
         ShapeKind::Union(members) => format!(
             "Union[{}]",
             members
                 .iter()
-                .map(render)
+                .map(|member| match &member.kind {
+                    ShapeKind::Object(object) => render_object("Record", object, names, true),
+                    _ => render(member),
+                })
                 .collect::<Result<Vec<_>, _>>()?
                 .join(", ")
         ),
+        ShapeKind::Intersection(members) => {
+            let mut members = members
+                .iter()
+                .filter(|member| !matches!(member.kind, ShapeKind::Unknown));
+            let base = match members.next() {
+                Some(SchemaShape {
+                    kind: ShapeKind::Object(object),
+                    ..
+                }) => render_object("Record", object, names, true)?,
+                Some(member) => render(member)?,
+                None => "Any".into(),
+            };
+            let rules = members
+                .map(|member| intersection_rule(member, names))
+                .collect::<Result<Vec<_>, _>>()?;
+            if rules.is_empty() {
+                base
+            } else {
+                format!("Annotated[{base}, {}]", quoted(&rules.join(" and ")))
+            }
+        }
         ShapeKind::Named(name) => host_name(name),
         ShapeKind::Process(None) => "Callable[..., Any]".to_owned(),
         ShapeKind::Process(Some(process)) => format!(
@@ -191,7 +218,7 @@ pub fn render_type(
 /// ```
 ///
 /// # Errors
-/// Invalid names, unbound references and unsupported expressions refuse.
+/// Invalid generated names or malformed shape graphs refuse.
 pub fn emit_definition(
     name: &str,
     shape: &SchemaShape,
@@ -201,7 +228,7 @@ pub fn emit_definition(
         return Err(unsupported("Python definition name"));
     }
     let expression = match &shape.kind {
-        ShapeKind::Object(object) => render_object(name, object, names)?,
+        ShapeKind::Object(object) => render_object(name, object, names, false)?,
         _ => render_type(shape, names)?,
     };
     Ok(format!("{name} = {expression}"))
@@ -216,7 +243,7 @@ pub fn emit_definition(
 /// ```
 ///
 /// # Errors
-/// Invalid callable names, unbound references and unsupported expressions refuse.
+/// Invalid callable names or malformed shape graphs refuse.
 pub fn emit_tool_signature(
     call_path: &str,
     input: &SchemaShape,
@@ -240,7 +267,9 @@ fn render_object(
     name: &str,
     object: &ObjectShape,
     names: &BTreeMap<DefinitionId, String>,
+    compact_optional: bool,
 ) -> Result<String, PresentationRefusal> {
+    let total_false = compact_optional && object.fields.iter().all(|field| !field.required);
     if object.fields.is_empty() {
         let extra = match &object.extra_keys {
             ExtraKeys::Closed => "Never".to_owned(),
@@ -255,7 +284,7 @@ fn render_object(
         .iter()
         .map(|field| {
             let mut expression = render_type(&field.shape, names)?;
-            if !field.required {
+            if !field.required && !total_false {
                 expression = format!("NotRequired[{expression}]");
             }
             Ok(format!("{}: {expression}", quoted(&field.name)))
@@ -267,8 +296,9 @@ fn render_object(
         ExtraKeys::Open(extra) => format!(", extra_items={}", render_type(extra, names)?),
         _ => return Err(unsupported("Python extra keys")),
     };
+    let total = if total_false { ", total=False" } else { "" };
     Ok(format!(
-        "TypedDict({}, {{{}}}{extra})",
+        "TypedDict({}, {{{}}}{total}{extra})",
         quoted(name),
         fields.join(", ")
     ))
@@ -280,4 +310,38 @@ fn quoted(value: &str) -> String {
 
 pub(crate) fn note_text(value: &str) -> String {
     value.replace('`', "\\`").replace(['\n', '\r'], " ")
+}
+
+fn intersection_rule(
+    shape: &SchemaShape,
+    names: &BTreeMap<DefinitionId, String>,
+) -> Result<String, PresentationRefusal> {
+    match &shape.kind {
+        ShapeKind::Object(object)
+            if object
+                .fields
+                .iter()
+                .all(|field| matches!(field.shape.kind, ShapeKind::Unknown)) =>
+        {
+            Ok(format!(
+                "requires {}",
+                object
+                    .fields
+                    .iter()
+                    .filter(|field| field.required)
+                    .map(|field| field.name.as_str())
+                    .collect::<Vec<_>>()
+                    .join(", ")
+            ))
+        }
+        ShapeKind::Union(members) => Ok(format!(
+            "one of ({})",
+            members
+                .iter()
+                .map(|member| intersection_rule(member, names))
+                .collect::<Result<Vec<_>, _>>()?
+                .join(" | ")
+        )),
+        _ => Ok(format!("also {}", render_type(shape, names)?)),
+    }
 }

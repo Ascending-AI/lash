@@ -163,11 +163,11 @@ fn path_only_notes_preserve_constraints_defaults_nullability_and_use_site_owners
         "{text}"
     );
     assert!(
-        text.contains("- `input.nullable|0` — Text branch."),
+        text.contains("- `input.nullable|string` — Text branch."),
         "{text}"
     );
     assert!(
-        text.contains("- `input.nullable|1` — Null branch."),
+        text.contains("- `input.nullable|null` — Null branch."),
         "{text}"
     );
     for row in text.lines().filter(|line| line.starts_with("- ")) {
@@ -237,12 +237,6 @@ fn readable_names_reserve_keywords_host_names_and_later_distinct_closures() {
             .declarations,
         ["type HistoryItem_2 = string;"]
     );
-    assert!(
-        render_schema_shape(
-            &lash_tool_shape::ShapeKind::Ref(lash_tool_shape::DefinitionId(1)).into()
-        )
-        .is_err()
-    );
 }
 
 #[test]
@@ -307,4 +301,230 @@ fn catalogue_budget_charges_a_shared_closure_once() {
         .expect("budget listing");
     assert_eq!(limited.listed.len(), 2, "{}", limited.text);
     assert_eq!(limited.text, full.text);
+}
+
+// FIG-6697: the catalog's annotations do not change its accepted value type.
+#[test]
+fn catalog_annotation_keywords_do_not_refuse_tools() {
+    for (keyword, value) in [
+        ("example", json!("hello")),
+        ("human_parameter_name", json!("Message")),
+        ("human_parameter_description", json!("Shown to people")),
+        ("file_uploadable", json!(true)),
+        ("file_downloadable", json!(true)),
+        ("discriminator", json!({"propertyName":"kind"})),
+        ("inventedKeyword", json!({"if":false})),
+    ] {
+        let schema = json!({"type":"object", "properties":{
+            "message":{"type":"string", keyword:value}
+        }});
+        let doc = SchemaDocument::from_json_schema(&schema, 16).expect(keyword);
+        assert_eq!(
+            render_schema_shape(&doc.roots[0]).unwrap(),
+            "{ message?: string }"
+        );
+    }
+}
+
+fn schema_text(schema: &Value) -> String {
+    let doc = SchemaDocument::from_json_schema(schema, 32).expect("presentable schema");
+    let mut pool = TypescriptDefinitions::new([] as [&str; 0]);
+    pool.reserve_document(&doc);
+    let prepared = pool.prepare(&doc).unwrap();
+    let mut text = prepared.declarations;
+    text.push(definitions::root_expression(&doc, &prepared.names).unwrap());
+    text.extend(note_rows(&doc.roots[0], "input"));
+    text.join("\n")
+}
+
+#[test]
+fn one_of_sibling_properties_and_required_apply_to_every_arm_without_expansion() {
+    let schema = json!({"type":"object", "properties":{
+        "query":{"type":"string"}, "cursor":{"type":"string"},
+        "limit":{"type":"integer", "minimum":1}
+    }, "required":["limit"], "additionalProperties":false,
+    "oneOf":[{"required":["query"]},{"required":["cursor"]}]});
+    let text = schema_text(&schema);
+    assert!(text.contains("limit: number"), "{text}");
+    assert!(text.contains("query: unknown"), "{text}");
+    assert!(text.contains("cursor: unknown"), "{text}");
+    assert_eq!(text.matches("limit: number").count(), 1, "{text}");
+    assert!(text.contains(" & ("), "{text}");
+    assert!(text.contains("input.limit` (>= 1)"), "{text}");
+    assert!(text.len() <= schema.to_string().len(), "{text}");
+}
+
+#[test]
+fn all_of_sibling_properties_and_required_stay_conjunctive() {
+    let schema = json!({"properties":{"query":{"type":"string"}},
+        "required":["query"], "allOf":[{"properties":{"limit":{"type":"integer"}}},
+        {"required":["limit"]}]});
+    let text = schema_text(&schema);
+    assert!(text.contains("query: string"), "{text}");
+    assert!(text.contains("limit?: number"), "{text}");
+    assert!(text.contains("limit: unknown"), "{text}");
+    assert_eq!(text.matches("query: string").count(), 1, "{text}");
+    assert!(text.contains(" & "), "{text}");
+}
+
+#[test]
+fn composition_sibling_narrowing_is_a_shared_note() {
+    for composition in ["oneOf", "allOf"] {
+        let schema = json!({composition:[{"type":"string"}], "minLength":3,
+            "pattern":"^abc", "not":{"const":"abcdef"}});
+        let text = schema_text(&schema);
+        assert!(text.starts_with("string\n"), "{text}");
+        assert!(
+            text.contains("input` (min length 3, pattern ^abc, not {\"const\":\"abcdef\"})"),
+            "{text}"
+        );
+        let text =
+            schema_text(&json!({composition:[{"type":"string", "minLength":5}], "minLength":3}));
+        assert!(
+            text.contains("min length 3") && text.contains("min length 5"),
+            "{text}"
+        );
+    }
+}
+
+#[test]
+fn union_notes_name_titles_discriminants_types_and_readable_unnamed_arms() {
+    let schema = json!({"oneOf":[
+        {"title":"Calendar", "properties":{"date":{"type":"string", "description":"Day"}}},
+        {"properties":{"kind":{"const":"mail"}, "date":{"type":"string", "description":"Sent"}}},
+        {"type":"string", "description":"Text"},
+        {"properties":{"date":{"type":"string", "description":"Other"}}},
+        {"properties":{"date":{"type":"string", "description":"Last"}}}
+    ]});
+    let text = schema_text(&schema);
+    for path in [
+        "input|Calendar.date",
+        "input|kind=\"mail\".date",
+        "input|string",
+        "input|object.date",
+        "input|object (alternative 2).date",
+    ] {
+        assert!(text.contains(path), "missing {path}: {text}");
+    }
+    assert!(!text.contains("|0") && !text.contains("|1"), "{text}");
+}
+
+fn shape_text(schema: &Value) -> String {
+    schema_text(schema)
+}
+fn document_text(doc: &SchemaDocument) -> String {
+    let mut pool = TypescriptDefinitions::default();
+    pool.reserve_document(doc);
+    let prepared = pool.prepare(doc).unwrap();
+    let mut text = prepared.declarations;
+    text.push(definitions::root_expression(doc, &prepared.names).unwrap());
+    text.extend(note_rows(&doc.roots[0], "input"));
+    text.join("\n")
+}
+
+fn conditional_fixture() -> Value {
+    json!({"type":"object", "properties":{"kind":{"type":"string"}, "url":{"type":"string"}},
+        "if":{"properties":{"kind":{"const":"web"}}, "required":["kind"]},
+        "then":{"required":["url"]}, "else":{"not":{"required":["url"]}},
+        "dependentRequired":{"url":["kind"]},
+        "dependentSchemas":{"url":{"required":["kind"]}}})
+}
+
+#[test]
+fn conditional_and_dependent_rules_are_presented_in_words() {
+    let text = shape_text(&conditional_fixture());
+    assert!(
+        text.contains("url: required when kind is \"web\""),
+        "{text}"
+    );
+    assert!(
+        text.contains("kind: required when url is present"),
+        "{text}"
+    );
+}
+
+#[test]
+fn inexpressible_schema_rules_keep_an_honest_type_and_a_note() {
+    for schema in [
+        json!({"$ref":"https://example.com/value.json", "description":"Host description"}),
+        json!({"$ref":"#/missing"}),
+        json!({"$id":"https://example.com/root", "$defs":{
+            "Nested":{"$id":"nested", "$defs":{"Value":{"type":"integer"}},
+                "type":"object", "properties":{"v":{"$ref":"#/$defs/Value"}}},
+            "Value":{"type":"string"}}, "$ref":"#/$defs/Nested"}),
+        json!({"$dynamicRef":"#node"}),
+        json!({"$recursiveRef":"#"}),
+        json!({"type":"object", "unevaluatedProperties":false}),
+        json!({"type":"array", "prefixItems":[{"type":"string"}], "items":{"type":"number"}}),
+        json!({"type":"object", "patternProperties":{"^a":{"type":"string"}}}),
+        json!({"type":"array", "contains":{"type":"integer"}}),
+        json!({"enum":[{"key":1}, 1.5]}),
+    ] {
+        let text = shape_text(&schema);
+        assert!(!text.is_empty(), "{schema}");
+        assert!(
+            text.contains("validated")
+                || text.contains("patternProperties")
+                || text.contains("contains")
+                || text.contains("one of"),
+            "{schema}: {text}"
+        );
+    }
+}
+
+#[test]
+fn presentation_limits_keep_a_note_instead_of_refusing_a_valid_tool() {
+    let mut schema = json!({"type":"string"});
+    for _ in 0..10 {
+        schema = json!({"type":"array", "items":schema});
+    }
+    let doc = lash_tool_shape::SchemaDocument::import(
+        &schema,
+        lash_tool_shape::ImportLimits {
+            max_depth: 2,
+            max_nodes: 2,
+        },
+    )
+    .expect("valid tool");
+    let text = document_text(&doc);
+    assert!(text.contains("validated"), "{text}");
+}
+
+#[test]
+fn original_figments_schemas_print_no_larger_than_source() {
+    for (name, source) in [
+        (
+            "people.lookup",
+            include_str!("fixtures/figments/people.lookup.json"),
+        ),
+        (
+            "information.search",
+            include_str!("fixtures/figments/information.search.json"),
+        ),
+        (
+            "information.read",
+            include_str!("fixtures/figments/information.read.json"),
+        ),
+        (
+            "information.list",
+            include_str!("fixtures/figments/information.list.json"),
+        ),
+    ] {
+        let schemas: Value = serde_json::from_str(source).unwrap();
+        for direction in ["input", "output"] {
+            let schema = &schemas[direction];
+            let text = schema_text(schema);
+            assert!(
+                text.len() <= schema.to_string().len(),
+                "{name} {direction}: {} > {}: {text}",
+                text.len(),
+                schema.to_string().len()
+            );
+            println!(
+                "{name} {direction}: {} printed <= {} source bytes",
+                text.len(),
+                schema.to_string().len()
+            );
+        }
+    }
 }

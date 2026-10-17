@@ -133,8 +133,8 @@ pub fn emit_definition(
     id: DefinitionId,
     names: &DefinitionNames,
 ) -> Result<String, ShapeImportRefusal> {
-    let missing = || ShapeImportRefusal::MissingReference {
-        reference: format!("definition {}", id.0),
+    let missing = || ShapeImportRefusal::InvalidSchema {
+        keyword: format!("definition {}", id.0),
     };
     let definition = document.definition(id).ok_or_else(missing)?;
     let name = names.get(&id).ok_or_else(missing)?;
@@ -164,7 +164,7 @@ fn reserve_shape(names: &mut ReadableNameAllocator, shape: &SchemaShape) {
             names.reserve(&render_type_name(name));
         }
         ShapeKind::List(item) => reserve_shape(names, item),
-        ShapeKind::Tuple(items) | ShapeKind::Union(items) => {
+        ShapeKind::Tuple(items) | ShapeKind::Union(items) | ShapeKind::Intersection(items) => {
             for item in items {
                 reserve_shape(names, item);
             }
@@ -205,8 +205,8 @@ fn definition_order(document: &SchemaDocument) -> Result<Vec<DefinitionId>, Shap
         let definition =
             document
                 .definition(id)
-                .ok_or_else(|| ShapeImportRefusal::MissingReference {
-                    reference: format!("definition {}", id.0),
+                .ok_or_else(|| ShapeImportRefusal::InvalidSchema {
+                    keyword: format!("definition {}", id.0),
                 })?;
         let references = SchemaDocument::references(&definition.shape);
         pending.extend(references.iter().rev());

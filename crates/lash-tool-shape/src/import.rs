@@ -5,12 +5,13 @@ use serde_json::{Map, Value};
 
 use crate::{
     DefinitionId, ExtraKeys, ObjectShape, ProcessParamShape, ProcessShape, SchemaDefinition,
-    SchemaDocument, SchemaShape, ShapeConstraints, ShapeField, ShapeKind, VALUE_NOTE_KEYWORDS,
-    X_LASH_KEYWORD, XLashType, is_named_type_reference, union_kind,
+    SchemaDocument, SchemaShape, ShapeConstraints, ShapeField, ShapeKind, X_LASH_KEYWORD,
+    XLashType, is_named_type_reference, union_kind,
 };
 
-/// Hard limits on anonymous nesting and total imported nodes, not repeated
-/// walks around a reference cycle. Reference targets are imported separately.
+/// Presentation limits on anonymous nesting and total imported nodes, not repeated
+/// walks around a reference cycle. Beyond them the type is unknown with a note.
+/// Reference targets are imported separately.
 ///
 /// ```
 /// # use lash_tool_shape::ImportLimits;
@@ -23,38 +24,17 @@ pub struct ImportLimits {
     pub max_nodes: usize,
 }
 
-/// S1: a shape importer refuses information loss, with a typed cause.
-///
-/// ```
-/// # use lash_tool_shape::{SchemaDocument, ShapeImportRefusal};
-/// let result = SchemaDocument::from_json_schema(&serde_json::json!({"$ref":"#/missing"}), 8);
-/// assert!(matches!(result, Err(ShapeImportRefusal::MissingReference { .. })));
-/// ```
+/// A non-schema value or a malformed JSON Schema keyword.
+/// Valid schemas are projected with notes when a type cannot express a rule.
 #[derive(Clone, Debug, PartialEq, Eq)]
 pub enum ShapeImportRefusal {
-    MissingReference { reference: String },
-    UnsupportedReference { reference: String },
-    UnsupportedConstruct { keyword: String },
     InvalidSchema { keyword: String },
-    ResourceExhausted { resource: String, limit: usize },
 }
 
 impl fmt::Display for ShapeImportRefusal {
     fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
         match self {
-            Self::MissingReference { reference } => {
-                write!(f, "missing schema reference {reference}")
-            }
-            Self::UnsupportedReference { reference } => {
-                write!(f, "unsupported schema reference {reference}")
-            }
-            Self::UnsupportedConstruct { keyword } => {
-                write!(f, "unsupported schema construct {keyword}")
-            }
             Self::InvalidSchema { keyword } => write!(f, "invalid schema keyword {keyword}"),
-            Self::ResourceExhausted { resource, limit } => {
-                write!(f, "schema {resource} limit {limit} exhausted")
-            }
         }
     }
 }
@@ -74,7 +54,7 @@ impl SchemaDocument {
     /// ```
     ///
     /// # Errors
-    /// Refuses unsupported constructs, missing references and exhausted limits.
+    /// Refuses non-schema values and malformed schema keywords. Presentation limits keep an honest type with a validation note.
     pub fn from_json_schema(
         schema: &Value,
         max_depth: usize,
@@ -100,7 +80,7 @@ impl SchemaDocument {
     /// ```
     ///
     /// # Errors
-    /// Refuses unsupported constructs, missing references and exhausted limits.
+    /// Refuses non-schema values and malformed schema keywords. Presentation limits keep an honest type with a validation note.
     #[expect(
         clippy::expect_used,
         reason = "every queued pointer was resolved against the same immutable document before reservation"
@@ -111,12 +91,13 @@ impl SchemaDocument {
     ) -> std::result::Result<Self, ShapeImportRefusal> {
         let mut importer = Importer {
             root: schema,
+            scoped_references: has_nested_ids(schema),
             limits,
             nodes: 0,
             pointers: BTreeMap::new(),
             definitions: Vec::new(),
         };
-        importer.reserve("#")?;
+        importer.reserve("#");
         let mut index = 0;
         while index < importer.definitions.len() {
             let pointer = importer.definitions[index].pointer.clone();
@@ -133,10 +114,17 @@ impl SchemaDocument {
 
 struct Importer<'a> {
     root: &'a Value,
+    scoped_references: bool,
     limits: ImportLimits,
     nodes: usize,
     pointers: BTreeMap<String, DefinitionId>,
     definitions: Vec<SchemaDefinition>,
+}
+
+fn projection_note(note: &str) -> SchemaShape {
+    let mut shape = SchemaShape::unknown();
+    shape.constraints.rules.push(note.into());
+    shape
 }
 
 fn invalid(keyword: &str) -> ShapeImportRefusal {
@@ -144,46 +132,17 @@ fn invalid(keyword: &str) -> ShapeImportRefusal {
         keyword: keyword.to_string(),
     }
 }
-fn unsupported(keyword: &str) -> ShapeImportRefusal {
-    ShapeImportRefusal::UnsupportedConstruct {
-        keyword: keyword.to_string(),
-    }
-}
-
 impl<'a> Importer<'a> {
-    fn reserve(&mut self, reference: &str) -> Result<DefinitionId> {
+    fn reserve(&mut self, reference: &str) -> Option<DefinitionId> {
         if let Some(id) = self.pointers.get(reference) {
-            return Ok(*id);
+            return Some(*id);
         }
         let pointer = reference
             .strip_prefix('#')
-            .filter(|pointer| pointer.is_empty() || pointer.starts_with('/'))
-            .ok_or_else(|| ShapeImportRefusal::UnsupportedReference {
-                reference: reference.to_string(),
-            })?;
-        // JSON Pointer has only these two escapes. Reject malformed spellings
-        // instead of letting a permissive pointer parser silently accept them.
-        for segment in pointer.split('/') {
-            let mut chars = segment.chars();
-            while let Some(c) = chars.next() {
-                if c == '~' && !matches!(chars.next(), Some('0' | '1')) {
-                    return Err(ShapeImportRefusal::UnsupportedReference {
-                        reference: reference.to_string(),
-                    });
-                }
-            }
-        }
-        let source =
-            self.root
-                .pointer(pointer)
-                .ok_or_else(|| ShapeImportRefusal::MissingReference {
-                    reference: reference.to_string(),
-                })?;
-        if self.definitions.len() >= self.limits.max_nodes {
-            return Err(ShapeImportRefusal::ResourceExhausted {
-                resource: "nodes".into(),
-                limit: self.limits.max_nodes,
-            });
+            .filter(|pointer| pointer.is_empty() || pointer.starts_with('/'))?;
+        let source = self.root.pointer(pointer)?;
+        if self.definitions.len() >= self.limits.max_nodes.max(1) {
+            return None;
         }
         let suggested_name = pointer
             .rsplit('/')
@@ -206,23 +165,16 @@ impl<'a> Importer<'a> {
             shape: SchemaShape::unknown(),
             source: source.clone(),
         });
-        Ok(id)
+        Some(id)
     }
 
     fn shape(&mut self, schema: &'a Value, depth: usize) -> Result<SchemaShape> {
-        if depth >= self.limits.max_depth {
-            return Err(ShapeImportRefusal::ResourceExhausted {
-                resource: "depth".into(),
-                limit: self.limits.max_depth,
-            });
+        if depth >= self.limits.max_depth || self.nodes >= self.limits.max_nodes {
+            return Ok(projection_note(
+                "Further structure is validated by the tool.",
+            ));
         }
         self.nodes += 1;
-        if self.nodes > self.limits.max_nodes {
-            return Err(ShapeImportRefusal::ResourceExhausted {
-                resource: "nodes".into(),
-                limit: self.limits.max_nodes,
-            });
-        }
         if let Value::Bool(value) = schema {
             return Ok(if *value {
                 ShapeKind::Unknown
@@ -232,14 +184,53 @@ impl<'a> Importer<'a> {
             .into());
         }
         let map = schema.as_object().ok_or_else(|| invalid("schema"))?;
-        self.check_keywords(map)?;
-        let inner = self.kind(map, depth)?;
-        let mut constraints = ShapeConstraints::from_schema(map).overlay(inner.constraints);
+        let remaining = self.limits.max_nodes.saturating_sub(self.nodes);
+        if [
+            "properties",
+            "required",
+            "prefixItems",
+            "allOf",
+            "anyOf",
+            "oneOf",
+        ]
+        .iter()
+        .filter_map(|key| map.get(*key))
+        .any(|value| {
+            value
+                .as_object()
+                .map(Map::len)
+                .or_else(|| value.as_array().map(Vec::len))
+                .unwrap_or(0)
+                > remaining
+        }) {
+            return Ok(projection_note(
+                "Further structure is validated by the tool.",
+            ));
+        }
+        let mut inner = self.kind(map, depth)?;
+        let local = ShapeConstraints::from_schema(map);
+        let mut local_type_notes = local.clone();
+        local_type_notes.value_notes.clear();
+        let mut inherited_type_notes = inner.constraints.clone();
+        inherited_type_notes.value_notes.clear();
+        // A singleton composition can carry refinements too. Keep its notes
+        // under the same path rather than overriding them with sibling bounds.
+        if !local_type_notes.is_empty() && !inherited_type_notes.is_empty() {
+            inner = ShapeKind::Intersection(vec![inner]).into();
+        }
+        let mut constraints = local.overlay(inner.constraints);
         if matches!(inner.kind, ShapeKind::Int | ShapeKind::Float) {
             constraints.format = None;
         }
         Ok(SchemaShape {
             kind: inner.kind,
+            title: map
+                .get("title")
+                .and_then(Value::as_str)
+                .map(str::trim)
+                .filter(|title| !title.is_empty())
+                .map(str::to_string)
+                .or(inner.title),
             description: map
                 .get("description")
                 .and_then(Value::as_str)
@@ -252,131 +243,64 @@ impl<'a> Importer<'a> {
         })
     }
 
-    fn check_keywords(&self, map: &Map<String, Value>) -> Result<()> {
-        for keyword in map.keys() {
-            if !keyword.starts_with("x-")
-                && !VALUE_NOTE_KEYWORDS.contains(&keyword.as_str())
-                && !matches!(
-                    keyword.as_str(),
-                    "$schema"
-                        | "$comment"
-                        | "$defs"
-                        | "definitions"
-                        | "title"
-                        | "description"
-                        | "default"
-                        | "examples"
-                        | "deprecated"
-                        | "readOnly"
-                        | "writeOnly"
-                        | "$ref"
-                        | "x-lash"
-                        | "allOf"
-                        | "anyOf"
-                        | "oneOf"
-                        | "enum"
-                        | "const"
-                        | "type"
-                        | "properties"
-                        | "required"
-                        | "additionalProperties"
-                        | "items"
-                        | "prefixItems"
-                        | "additionalItems"
-                        | "minimum"
-                        | "maximum"
-                        | "exclusiveMinimum"
-                        | "exclusiveMaximum"
-                        | "minLength"
-                        | "maxLength"
-                        | "minItems"
-                        | "maxItems"
-                        | "pattern"
-                        | "format"
-                )
-            {
-                return Err(unsupported(keyword));
-            }
-        }
-        // Structural assertion siblings form an intersection that the shape
-        // cannot spell. Value refinements remain explicit use-site notes.
-        let composition = ["$ref", "allOf", "anyOf", "oneOf", "x-lash"]
-            .iter()
-            .filter(|key| map.contains_key(**key))
-            .copied()
-            .collect::<Vec<_>>();
-        if composition.len() > 1 {
-            return Err(unsupported("composition siblings"));
-        }
-        if let Some(primary) = composition.first() {
-            for key in map.keys() {
-                if key != primary
-                    && matches!(
-                        key.as_str(),
-                        "type"
-                            | "properties"
-                            | "required"
-                            | "additionalProperties"
-                            | "items"
-                            | "prefixItems"
-                            | "enum"
-                            | "const"
-                            | "minimum"
-                            | "maximum"
-                            | "exclusiveMinimum"
-                            | "exclusiveMaximum"
-                            | "minLength"
-                            | "maxLength"
-                            | "minItems"
-                            | "maxItems"
-                            | "pattern"
-                            | "format"
-                    )
-                {
-                    return Err(unsupported("assertion siblings"));
-                }
-            }
-        }
-        Ok(())
-    }
-
     fn kind(&mut self, map: &'a Map<String, Value>, depth: usize) -> Result<SchemaShape> {
+        // Keep conjunctions factored: the shared object is imported once,
+        // never copied into each alternative. References stay graph edges.
+        let mut conjuncts = Vec::new();
         if let Some(reference) = map.get("$ref") {
             let reference = reference.as_str().ok_or_else(|| invalid("$ref"))?;
-            return Ok(if reference.starts_with('#') {
-                ShapeKind::Ref(self.reserve(reference)?)
+            conjuncts.push(if reference.starts_with('#') && self.scoped_references {
+                projection_note(&format!("Reference {reference} has a nested identifier scope and is validated by the tool."))
+            } else if reference.starts_with('#') {
+                self.reserve(reference).map(|id| ShapeKind::Ref(id).into())
+                    .unwrap_or_else(|| projection_note(&format!("Reference {reference} is validated by the tool; type details are unavailable.")))
             } else if is_named_type_reference(reference) {
-                ShapeKind::Named(reference.into())
+                ShapeKind::Named(reference.into()).into()
             } else {
-                return Err(ShapeImportRefusal::UnsupportedReference {
-                    reference: reference.into(),
-                });
-            }
-            .into());
-        }
-        if let Some(declaration) = map.get(X_LASH_KEYWORD) {
-            return self.lash_type(declaration, depth).map(Into::into);
-        }
-        if let Some(branches) = map.get("allOf") {
-            let branches = branches.as_array().ok_or_else(|| invalid("allOf"))?;
-            return match branches.as_slice() {
-                [branch] => self.shape(branch, depth + 1),
-                _ => Err(unsupported("allOf")),
-            };
-        }
-        if let Some(branches) = map.get("anyOf").or_else(|| map.get("oneOf")) {
-            let mut members = branches
-                .as_array()
-                .ok_or_else(|| invalid("union"))?
-                .iter()
-                .map(|branch| self.shape(branch, depth + 1))
-                .collect::<Result<Vec<_>>>()?;
-            return Ok(if members.len() == 1 {
-                members.remove(0)
-            } else {
-                union_kind(members).into()
+                projection_note(&format!("Reference {reference} is validated by the tool; type details are unavailable."))
             });
         }
+        if let Some(declaration) = map.get(X_LASH_KEYWORD) {
+            conjuncts.push(
+                self.lash_type(declaration, depth)
+                    .map(Into::into)
+                    .unwrap_or_else(|_| {
+                        projection_note("The x-lash declaration is validated by the tool.")
+                    }),
+            );
+        }
+        if let Some(branches) = map.get("allOf") {
+            for branch in branches.as_array().ok_or_else(|| invalid("allOf"))? {
+                conjuncts.push(self.shape(branch, depth + 1)?);
+            }
+        }
+        for keyword in ["anyOf", "oneOf"] {
+            if let Some(branches) = map.get(keyword) {
+                let mut members = branches
+                    .as_array()
+                    .ok_or_else(|| invalid(keyword))?
+                    .iter()
+                    .map(|branch| self.shape(branch, depth + 1))
+                    .collect::<Result<Vec<_>>>()?;
+                conjuncts.push(if members.len() == 1 {
+                    members.remove(0)
+                } else {
+                    union_kind(members).into()
+                });
+            }
+        }
+        let base = self.base_kind(map, depth)?;
+        if !matches!(base.kind, ShapeKind::Unknown) {
+            conjuncts.insert(0, base);
+        }
+        Ok(match conjuncts.len() {
+            0 => ShapeKind::Unknown.into(),
+            1 => conjuncts.remove(0),
+            _ => ShapeKind::Intersection(conjuncts).into(),
+        })
+    }
+
+    fn base_kind(&mut self, map: &'a Map<String, Value>, depth: usize) -> Result<SchemaShape> {
         if let Some(values) = map.get("enum") {
             let values = values.as_array().ok_or_else(|| invalid("enum"))?;
             return Ok(literals_kind(values, map).into());
@@ -397,14 +321,13 @@ impl<'a> Importer<'a> {
                 union_kind(members)
             }
             Some(_) => return Err(invalid("type")),
-            None if [
-                "properties",
-                "required",
-                "additionalProperties",
-                "patternProperties",
-            ]
-            .iter()
-            .any(|key| map.contains_key(*key)) =>
+            None if ["properties", "required", "additionalProperties"]
+                .iter()
+                .any(|key| map.contains_key(*key))
+                || (map.contains_key("patternProperties")
+                    && !["$ref", "allOf", "anyOf", "oneOf", X_LASH_KEYWORD]
+                        .iter()
+                        .any(|key| map.contains_key(*key))) =>
             {
                 self.object(map, depth)?
             }
@@ -469,7 +392,7 @@ impl<'a> Importer<'a> {
             "null" => ShapeKind::Null,
             "object" => self.object(map, depth)?,
             "array" => self.array(map, depth)?,
-            _ => return Err(unsupported("type")),
+            _ => return Err(invalid("type")),
         })
     }
 
@@ -496,11 +419,15 @@ impl<'a> Importer<'a> {
                 });
             }
         }
-        if required
-            .iter()
-            .any(|name| !fields.iter().any(|field| field.name == *name))
-        {
-            return Err(unsupported("required without property"));
+        // A required-only arm refines fields declared by a sibling schema.
+        for name in &required {
+            if !fields.iter().any(|field| field.name == *name) {
+                fields.push(ShapeField {
+                    name: (*name).into(),
+                    required: true,
+                    shape: SchemaShape::unknown(),
+                });
+            }
         }
         fields.sort_by_key(|field| {
             required
@@ -535,7 +462,7 @@ impl<'a> Importer<'a> {
             if tail != Some(&Value::Bool(false))
                 || map.get("minItems").and_then(Value::as_u64) != Some(positions.len() as u64)
             {
-                return Err(unsupported("variable-length tuple"));
+                return Ok(ShapeKind::List(Box::new(SchemaShape::unknown())));
             }
             return Ok(ShapeKind::Tuple(
                 positions
@@ -593,4 +520,26 @@ fn literal_has_type(value: &Value, name: &str) -> bool {
         "array" => value.is_array(),
         _ => false,
     }
+}
+
+// Embedded identifiers change the resolution base. Without a URI resolver,
+// keep reference validation explicit rather than binding to the wrong root.
+fn has_nested_ids(schema: &Value) -> bool {
+    let mut pending = Vec::new();
+    if let Some(map) = schema.as_object() {
+        pending.extend(map.values());
+    }
+    while let Some(value) = pending.pop() {
+        match value {
+            Value::Object(map) => {
+                if map.contains_key("$id") {
+                    return true;
+                }
+                pending.extend(map.values());
+            }
+            Value::Array(items) => pending.extend(items),
+            _ => {}
+        }
+    }
+    false
 }

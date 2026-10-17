@@ -1,0 +1,193 @@
+{
+  "input": {
+    "additionalProperties": false,
+    "not": {
+      "anyOf": [
+        {
+          "required": [
+            "cursor",
+            "principal_id"
+          ]
+        },
+        {
+          "required": [
+            "cursor",
+            "me"
+          ]
+        }
+      ]
+    },
+    "oneOf": [
+      {
+        "required": [
+          "query"
+        ]
+      },
+      {
+        "not": {
+          "required": [
+            "cursor"
+          ]
+        },
+        "required": [
+          "principal_id"
+        ]
+      },
+      {
+        "not": {
+          "required": [
+            "cursor"
+          ]
+        },
+        "required": [
+          "me"
+        ]
+      },
+      {
+        "not": {
+          "required": [
+            "query"
+          ]
+        },
+        "required": [
+          "cursor"
+        ]
+      }
+    ],
+    "properties": {
+      "cursor": {
+        "maxLength": 16384,
+        "minLength": 1,
+        "type": "string"
+      },
+      "limit": {
+        "default": 10,
+        "maximum": 20,
+        "minimum": 1,
+        "type": "integer"
+      },
+      "me": {
+        "const": true
+      },
+      "principal_id": {
+        "format": "uuid",
+        "pattern": "^[0-9a-fA-F]{8}(-[0-9a-fA-F]{4}){3}-[0-9a-fA-F]{12}$",
+        "type": "string"
+      },
+      "query": {
+        "description": "Name, email or prefix.",
+        "maxLength": 1000,
+        "minLength": 1,
+        "type": "string"
+      }
+    },
+    "type": "object"
+  },
+  "output": {
+    "additionalProperties": false,
+    "properties": {
+      "has_more": {
+        "type": "boolean"
+      },
+      "next_cursor": {
+        "minLength": 1,
+        "type": "string"
+      },
+      "note": {
+        "type": "string"
+      },
+      "results": {
+        "items": {
+          "additionalProperties": false,
+          "properties": {
+            "department": {
+              "type": "string"
+            },
+            "display_name": {
+              "type": "string"
+            },
+            "email": {
+              "type": "string"
+            },
+            "job_title": {
+              "type": "string"
+            },
+            "linked_accounts": {
+              "items": {
+                "additionalProperties": false,
+                "properties": {
+                  "display_name": {
+                    "type": "string"
+                  },
+                  "established_via": {
+                    "type": "string"
+                  },
+                  "key_type": {
+                    "type": "string"
+                  },
+                  "linked_at": {
+                    "format": "date-time",
+                    "type": "string"
+                  },
+                  "provider": {
+                    "type": "string"
+                  },
+                  "provider_instance": {
+                    "type": "string"
+                  },
+                  "source": {
+                    "type": "string"
+                  },
+                  "value": {
+                    "type": "string"
+                  }
+                },
+                "required": [
+                  "key_type",
+                  "provider",
+                  "provider_instance",
+                  "value",
+                  "established_via"
+                ],
+                "type": "object"
+              },
+              "type": "array"
+            },
+            "principal_id": {
+              "format": "uuid",
+              "type": "string"
+            },
+            "status": {
+              "enum": [
+                "active",
+                "inactive"
+              ]
+            }
+          },
+          "required": [
+            "principal_id",
+            "display_name",
+            "status"
+          ],
+          "type": "object"
+        },
+        "maxItems": 20,
+        "type": "array"
+      },
+      "status": {
+        "const": "success"
+      },
+      "total": {
+        "minimum": 0,
+        "type": "integer"
+      }
+    },
+    "required": [
+      "status",
+      "results",
+      "total",
+      "has_more"
+    ],
+    "type": "object"
+  }
+}
