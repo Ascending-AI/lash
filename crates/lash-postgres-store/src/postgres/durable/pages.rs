@@ -330,12 +330,12 @@ pub(super) async fn install_candidate(
     while let Some(batch) = install.next_batch()? {
         install_nodes(tx, &batch, &mut installed).await?;
     }
-    install.restart();
-    while let Some(batch) = install.next_batch()? {
-        install_edges(tx, &batch, &mut installed).await?;
+    let mut edges = install.edges()?;
+    while let Some(pairs) = edges.next_batch()? {
+        install_edges(tx, &pairs, &mut installed).await?;
     }
     #[cfg(any(test, feature = "testing"))]
-    CANDIDATE_PEAK_BUFFERED.store(install.peak_buffered(), std::sync::atomic::Ordering::SeqCst);
+    CANDIDATE_PEAK_BUFFERED.store(edges.peak_buffered(), std::sync::atomic::Ordering::SeqCst);
     if let Some(window) = lash_core_execution::facade_support::sql::Window::current() {
         window.installed_graph(installed.newly_installed_canonical_bytes);
     }
@@ -405,20 +405,14 @@ async fn install_nodes(
     Ok(())
 }
 
-/// One batch's edges: every child a supplied node's envelope names is
-/// key-share locked and must be stored by now, then each `(parent, child)`
-/// row not yet stored is inserted.
+/// One batch of supplied nodes' edges: every child is key-share locked and
+/// must be stored by now, then each `(parent, child)` row not yet stored is
+/// inserted.
 async fn install_edges(
     tx: &mut PgConnection,
-    batch: &[InstallEntry],
+    pairs: &[(NodeId, NodeId)],
     installed: &mut InstalledGraphMeasurement,
 ) -> Result<(), GraphRefusal> {
-    let mut pairs: Vec<(NodeId, NodeId)> = Vec::new();
-    for entry in batch {
-        if let InstallEntry::Supplied(node) = entry {
-            pairs.extend(node.children.iter().map(|child| (node.id, *child)));
-        }
-    }
     for chunk in pairs.chunks(EDGE_BATCH) {
         let children: BTreeSet<NodeId> = chunk.iter().map(|(_, child)| *child).collect();
         let wanted: Vec<String> = children.iter().map(NodeId::to_hex).collect();

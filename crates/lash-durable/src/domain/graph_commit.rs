@@ -11,11 +11,14 @@
 //! graph in global digest order, a bounded batch at a time. The inductive
 //! rule is the same: every supplied envelope and its exact child table is
 //! checked, and only immediate references to stored nodes are, never their
-//! closures.
+//! closures. Each supplied body is read and checked once: the edges follow
+//! from an authenticated log of the checked nodes (FIG-6596).
 
 use std::collections::{BTreeMap, BTreeSet};
 
-use lash_core_store::checkpoint_graph::stage::{CandidateManifest, ManifestSummary, StageFault};
+use lash_core_store::checkpoint_graph::stage::{
+    CandidateManifest, EdgeLog, ManifestSummary, StageFault,
+};
 use lash_core_store::checkpoint_graph::{
     EncodedCommitMeasurement, GraphRefusal, NodeId, TokenWriter,
 };
@@ -456,19 +459,23 @@ pub struct CandidateBuffers {
     pub entries: usize,
     /// or this many supplied node bytes.
     pub bytes: u64,
+    /// An edge batch holds at most this many `(parent, child)` pairs.
+    pub edges: usize,
 }
 
 impl CandidateBuffers {
     /// The stores' batches: 64-entry manifest reads, batches of at most 256
-    /// entries or 4 MiB of node bytes.
+    /// entries or 4 MiB of node bytes, and edge batches of 4096 pairs.
     pub const DEFAULT: Self = Self {
         page: 64,
         entries: 256,
         bytes: 4 << 20,
+        edges: 4096,
     };
 
     /// The most manifest bytes a batch holds at once: its byte bound plus
-    /// one manifest read of maximal nodes.
+    /// one manifest read of maximal nodes. An edge batch holds one child
+    /// table, within one maximal node.
     #[must_use]
     pub const fn bound(self) -> u64 {
         self.bytes + self.page as u64 * lash_core_store::checkpoint_graph::MAX_NODE_BYTES
@@ -641,11 +648,17 @@ fn reaches(checked: &CheckedGraph, from: NodeId, to: NodeId) -> bool {
 /// order, the blob lock order, read a bounded batch at a time.
 ///
 /// The store reads it once to lock what the commit names and insert what it
-/// supplies, then [`restart`](Self::restart)s it to insert every supplied
+/// supplies, then takes its [`edges`](Self::edges) to insert every supplied
 /// node's edges once all node rows exist. Each supplied manifest node's
 /// envelope is checked against its digest; content addressing makes a
 /// storage cycle unbuildable from checked digests, so the stream needs no
 /// cycle check. Nothing a named node reaches is read.
+///
+/// Each body is read and checked once (FIG-6596): as it checks a manifest
+/// node with children, the install appends a record of it to the
+/// manifest's [`EdgeLog`], authenticated under a key this install alone
+/// holds, and its edge pass reads back only those records and the child
+/// tables they name.
 pub struct CandidateInstall<'a> {
     own: Vec<InstallEntry>,
     manifest: &'a mut dyn CandidateManifest,
@@ -656,6 +669,7 @@ pub struct CandidateInstall<'a> {
     page: std::collections::VecDeque<lash_core_store::checkpoint_graph::stage::ManifestEntry>,
     exhausted: bool,
     peak: u64,
+    log: EdgeRecords,
 }
 
 impl<'a> CandidateInstall<'a> {
@@ -696,6 +710,7 @@ impl<'a> CandidateInstall<'a> {
             page: std::collections::VecDeque::new(),
             exhausted: false,
             peak: 0,
+            log: EdgeRecords::new(),
         }
     }
 
@@ -705,13 +720,37 @@ impl<'a> CandidateInstall<'a> {
         self.summary
     }
 
-    /// Starts the stream again from its first entry: the edge pass, or a
-    /// retried transaction.
-    pub fn restart(&mut self) {
-        self.own_next = 0;
-        self.after = None;
-        self.page.clear();
-        self.exhausted = false;
+    /// The edge pass, once [`next_batch`](Self::next_batch) has answered
+    /// none: every supplied node's edges, the commit's own from memory and
+    /// the manifest's from the install's edge log.
+    ///
+    /// # Errors
+    ///
+    /// A node stream not yet spent, or the log's last records failing to
+    /// reach it.
+    pub fn edges(mut self) -> Result<CandidateEdges<'a>, GraphRefusal> {
+        if !(self.exhausted && self.page.is_empty() && self.own_next == self.own.len()) {
+            return Err(corrupt(
+                "the edge pass began before every node was installed",
+            ));
+        }
+        self.log.flush(&mut *self.manifest)?;
+        self.own.retain(
+            |entry| matches!(entry, InstallEntry::Supplied(node) if !node.children.is_empty()),
+        );
+        Ok(CandidateEdges {
+            own: self.own,
+            own_next: 0,
+            manifest: self.manifest,
+            log: self.log,
+            read: 0,
+            ahead: std::collections::VecDeque::new(),
+            last: None,
+            parent: None,
+            pending: Vec::new(),
+            pairs: self.buffers.edges,
+            peak: self.peak,
+        })
     }
 
     /// The most manifest bytes the install held at once.
@@ -740,12 +779,9 @@ impl<'a> CandidateInstall<'a> {
             };
             // The stream must ascend strictly: the blob lock order.
             if self.after.is_some_and(|after| id <= after) {
-                return Err(GraphRefusal::Backend(
-                    lash_core_store::store_failure::StoreFailure {
-                        kind: lash_core_store::store_failure::StoreFailureKind::Corrupt,
-                        message: format!("the candidate's manifest does not ascend at {id}"),
-                    },
-                ));
+                return Err(corrupt(&format!(
+                    "the candidate's manifest does not ascend at {id}"
+                )));
             }
             self.after = Some(id);
         }
@@ -764,12 +800,13 @@ impl<'a> CandidateInstall<'a> {
             .sum()
     }
 
-    /// The manifest's next entry, checked.
-    fn take_manifest(&mut self) -> Result<InstallEntry, GraphRefusal> {
+    /// The manifest's next entry, checked, and where a supplied node's
+    /// child table starts.
+    fn take_manifest(&mut self) -> Result<(InstallEntry, u8), GraphRefusal> {
         use lash_core_store::checkpoint_graph::stage::ManifestEntry;
         use lash_core_store::checkpoint_graph::{DecodeLimits, SizeBound, check_envelope};
         match self.page.pop_front() {
-            Some(ManifestEntry::External(id)) => Ok(InstallEntry::Named { id, root: false }),
+            Some(ManifestEntry::External(id)) => Ok((InstallEntry::Named { id, root: false }, 0)),
             Some(ManifestEntry::Fresh(node)) => {
                 let limits = DecodeLimits::within_total(u64::MAX);
                 let envelope = check_envelope(&node.bytes, node.id, &limits)?;
@@ -783,12 +820,19 @@ impl<'a> CandidateInstall<'a> {
                         limit: SizeBound::Root.bytes(),
                     });
                 }
+                let table = lash_core_store::checkpoint_graph::node::child_table_offset(
+                    envelope.kind,
+                    envelope.children.len(),
+                );
                 let children = envelope.children.iter().collect();
-                Ok(InstallEntry::Supplied(CheckedNode {
-                    id: node.id,
-                    bytes: node.bytes,
-                    children,
-                }))
+                Ok((
+                    InstallEntry::Supplied(CheckedNode {
+                        id: node.id,
+                        bytes: node.bytes,
+                        children,
+                    }),
+                    u8::try_from(table).map_err(|_| GraphRefusal::LengthOverflow)?,
+                ))
             }
             None => Err(GraphRefusal::Truncated),
         }
@@ -800,7 +844,8 @@ impl<'a> CandidateInstall<'a> {
     /// # Errors
     ///
     /// A manifest failure or disorder, a refused envelope, two different
-    /// bodies supplied under one digest, or a root over its bound.
+    /// bodies supplied under one digest, a root over its bound, or an edge
+    /// log that refuses its records.
     pub fn next_batch(&mut self) -> Result<Option<Vec<InstallEntry>>, GraphRefusal> {
         let mut batch: Vec<InstallEntry> = Vec::new();
         let mut bytes = 0_u64;
@@ -815,19 +860,34 @@ impl<'a> CandidateInstall<'a> {
             let entry = match (own, manifest) {
                 (None, None) => break,
                 (Some(_), None) => self.take_own(),
-                (None, Some(_)) => self.take_manifest()?,
                 (Some(own), Some(manifest)) if own < manifest => self.take_own(),
-                (Some(own), Some(manifest)) if manifest < own => self.take_manifest()?,
+                (None, Some(_)) => {
+                    let (entry, table) = self.take_manifest()?;
+                    self.log.record(&entry, table);
+                    entry
+                }
+                (Some(own), Some(manifest)) if manifest < own => {
+                    let (entry, table) = self.take_manifest()?;
+                    self.log.record(&entry, table);
+                    entry
+                }
                 (Some(_), Some(_)) => {
                     let own = self.take_own();
-                    let manifest = self.take_manifest()?;
-                    merge(own, manifest)?
+                    let own_supplies = matches!(own, InstallEntry::Supplied(_));
+                    let (manifest, table) = self.take_manifest()?;
+                    let entry = merge(own, manifest)?;
+                    // The commit's own node keeps its edges in memory.
+                    if !own_supplies {
+                        self.log.record(&entry, table);
+                    }
+                    entry
                 }
             };
             bytes += entry.bytes();
             batch.push(entry);
         }
         self.peak = self.peak.max(bytes + self.page_bytes());
+        self.log.flush(&mut *self.manifest)?;
         Ok((!batch.is_empty()).then_some(batch))
     }
 
@@ -835,6 +895,263 @@ impl<'a> CandidateInstall<'a> {
         let entry = self.own[self.own_next].clone();
         self.own_next += 1;
         entry
+    }
+}
+
+fn corrupt(message: &str) -> GraphRefusal {
+    GraphRefusal::Backend(lash_core_store::store_failure::StoreFailure {
+        kind: lash_core_store::store_failure::StoreFailureKind::Corrupt,
+        message: message.to_owned(),
+    })
+}
+
+/// One edge-log record: a checked manifest node's digest, where its child
+/// table starts and how many children it has, and the record's tag.
+const EDGE_RECORD: usize = 32 + 1 + 4 + EDGE_TAG;
+/// A record's tag: the leading bytes of its keyed BLAKE3 hash.
+const EDGE_TAG: usize = 16;
+const _: () =
+    assert!(EDGE_RECORD as u64 == lash_core_store::checkpoint_graph::stage::EDGE_RECORD_BYTES);
+/// The records the edge pass reads from its log at once.
+const EDGE_READ_AHEAD: usize = 64;
+
+/// The install's edge log and what authenticates it: a key fresh for this
+/// install, and how many records it wrote. Each record's tag covers its
+/// place in the log, its fields and the child table they name, so a record
+/// another install wrote, reordered, altered or naming a changed table is
+/// refused, and a log that lost records ends before the count.
+struct EdgeRecords {
+    key: [u8; 32],
+    log: Option<Box<dyn EdgeLog>>,
+    /// Records not yet appended: at most one batch's.
+    staged: Vec<u8>,
+    written: u64,
+}
+
+impl EdgeRecords {
+    fn new() -> Self {
+        Self {
+            // 256 fresh random bits.
+            key: lash_core_store::checkpoint_graph::CommitId::mint().0,
+            log: None,
+            staged: Vec::new(),
+            written: 0,
+        }
+    }
+
+    fn tag(&self, at: u64, head: &[u8], table: &[u8]) -> [u8; EDGE_TAG] {
+        let mut hasher = blake3::Hasher::new_keyed(&self.key);
+        hasher.update(&at.to_le_bytes());
+        hasher.update(head);
+        hasher.update(table);
+        let mut tag = [0; EDGE_TAG];
+        tag.copy_from_slice(&hasher.finalize().as_bytes()[..EDGE_TAG]);
+        tag
+    }
+
+    /// Stages the record of `entry`, a node the manifest supplies, if it
+    /// has children; its child table starts at `table`.
+    fn record(&mut self, entry: &InstallEntry, table: u8) {
+        let InstallEntry::Supplied(node) = entry else {
+            return;
+        };
+        if node.children.is_empty() {
+            return;
+        }
+        let at = self.written + (self.staged.len() / EDGE_RECORD) as u64;
+        let mut head = [0; 37];
+        head[..32].copy_from_slice(&node.id.0);
+        head[32] = table;
+        head[33..].copy_from_slice(&(node.children.len() as u32).to_le_bytes());
+        let start = usize::from(table);
+        let tag = self.tag(
+            at,
+            &head,
+            &node.bytes[start..start + 32 * node.children.len()],
+        );
+        self.staged.extend_from_slice(&head);
+        self.staged.extend_from_slice(&tag);
+    }
+
+    /// Appends the staged records to the log, opening it at the first.
+    fn flush(&mut self, manifest: &mut dyn CandidateManifest) -> Result<(), GraphRefusal> {
+        if self.staged.is_empty() {
+            return Ok(());
+        }
+        let log = match &mut self.log {
+            Some(log) => log,
+            None => self
+                .log
+                .insert(manifest.edge_log().map_err(|fault| stage_refusal(&fault))?),
+        };
+        log.append(&self.staged)
+            .map_err(|fault| stage_refusal(&fault))?;
+        self.written += (self.staged.len() / EDGE_RECORD) as u64;
+        self.staged.clear();
+        Ok(())
+    }
+}
+
+/// A logged record, its fields not yet authenticated.
+struct EdgeRecord {
+    at: u64,
+    id: NodeId,
+    head: [u8; 37],
+    tag: [u8; EDGE_TAG],
+}
+
+impl EdgeRecord {
+    fn parse(at: u64, bytes: &[u8; EDGE_RECORD]) -> Self {
+        let mut head = [0; 37];
+        head.copy_from_slice(&bytes[..37]);
+        let mut id = [0; 32];
+        id.copy_from_slice(&head[..32]);
+        let mut tag = [0; EDGE_TAG];
+        tag.copy_from_slice(&bytes[37..EDGE_RECORD]);
+        Self {
+            at,
+            id: NodeId(id),
+            head,
+            tag,
+        }
+    }
+
+    fn table(&self) -> (u64, usize) {
+        let mut count = [0; 4];
+        count.copy_from_slice(&self.head[33..37]);
+        (
+            u64::from(self.head[32]),
+            32 * u32::from_le_bytes(count) as usize,
+        )
+    }
+}
+
+/// A candidate's edge pass (FIG-6596): every supplied node's
+/// `(parent, child)` pairs in ascending parent order, a bounded batch at a
+/// time, the commit's own nodes' from memory and the manifest's from the
+/// install's authenticated edge log, each child table read once and never
+/// a body.
+pub struct CandidateEdges<'a> {
+    /// The commit's own supplied nodes with children, ascending.
+    own: Vec<InstallEntry>,
+    own_next: usize,
+    manifest: &'a mut dyn CandidateManifest,
+    log: EdgeRecords,
+    /// Records read from the log.
+    read: u64,
+    ahead: std::collections::VecDeque<EdgeRecord>,
+    last: Option<NodeId>,
+    /// The parent whose remaining children are `pending`, reversed.
+    parent: Option<NodeId>,
+    pending: Vec<NodeId>,
+    pairs: usize,
+    peak: u64,
+}
+
+impl CandidateEdges<'_> {
+    /// The next batch of at most [`CandidateBuffers::edges`] pairs; none
+    /// once every supplied node's edges were answered.
+    ///
+    /// # Errors
+    ///
+    /// The edge log or a child table failing to read, or a record that does
+    /// not authenticate.
+    pub fn next_batch(&mut self) -> Result<Option<Vec<(NodeId, NodeId)>>, GraphRefusal> {
+        let mut batch = Vec::new();
+        while batch.len() < self.pairs {
+            if let (Some(parent), Some(child)) = (self.parent, self.pending.pop()) {
+                batch.push((parent, child));
+                continue;
+            }
+            let Some((parent, mut children)) = self.next_parent()? else {
+                break;
+            };
+            children.reverse();
+            self.parent = Some(parent);
+            self.pending = children;
+        }
+        Ok((!batch.is_empty()).then_some(batch))
+    }
+
+    /// The most manifest bytes the install held at once, its edge pass
+    /// included.
+    #[must_use]
+    pub fn peak_buffered(&self) -> u64 {
+        self.peak
+    }
+
+    /// The next supplied node with children and its children, ascending by
+    /// digest across the commit's own nodes and the log.
+    fn next_parent(&mut self) -> Result<Option<(NodeId, Vec<NodeId>)>, GraphRefusal> {
+        let own = self.own.get(self.own_next).map(InstallEntry::id);
+        let logged = self.peek()?.map(|record| record.id);
+        let parent = match (own, logged) {
+            (None, None) => return Ok(None),
+            (Some(own), Some(logged)) if logged < own => self.take_logged()?,
+            (Some(_), _) => {
+                let InstallEntry::Supplied(node) = &self.own[self.own_next] else {
+                    unreachable!("only supplied nodes are kept");
+                };
+                self.own_next += 1;
+                (node.id, node.children.clone())
+            }
+            (None, Some(_)) => self.take_logged()?,
+        };
+        if self.last.is_some_and(|last| parent.0 <= last) {
+            return Err(corrupt(&format!(
+                "the install's edge log does not ascend at {}",
+                parent.0
+            )));
+        }
+        self.last = Some(parent.0);
+        Ok(Some(parent))
+    }
+
+    fn peek(&mut self) -> Result<Option<&EdgeRecord>, GraphRefusal> {
+        if self.ahead.is_empty() && self.read < self.log.written {
+            let count = (self.log.written - self.read).min(EDGE_READ_AHEAD as u64);
+            let mut bytes = vec![0; count as usize * EDGE_RECORD];
+            let log = self
+                .log
+                .log
+                .as_mut()
+                .ok_or_else(|| corrupt("the install's edge log is missing"))?;
+            log.read_at(self.read * EDGE_RECORD as u64, &mut bytes)
+                .map_err(|fault| stage_refusal(&fault))?;
+            for (offset, record) in bytes.as_chunks::<EDGE_RECORD>().0.iter().enumerate() {
+                self.ahead
+                    .push_back(EdgeRecord::parse(self.read + offset as u64, record));
+            }
+            self.read += count;
+        }
+        Ok(self.ahead.front())
+    }
+
+    /// The front record's node and children, read and authenticated.
+    fn take_logged(&mut self) -> Result<(NodeId, Vec<NodeId>), GraphRefusal> {
+        let record = self
+            .ahead
+            .pop_front()
+            .ok_or_else(|| corrupt("the install's edge log ended early"))?;
+        let (offset, len) = record.table();
+        let table = self
+            .manifest
+            .fresh_range(&record.id, offset, len)
+            .map_err(|fault| stage_refusal(&fault))?;
+        self.peak = self.peak.max(table.len() as u64);
+        if table.len() != len || self.log.tag(record.at, &record.head, &table) != record.tag {
+            return Err(corrupt(&format!(
+                "the install's edge record for {} does not authenticate",
+                record.id
+            )));
+        }
+        let children = table
+            .as_chunks::<32>()
+            .0
+            .iter()
+            .map(|digest| NodeId(*digest))
+            .collect();
+        Ok((record.id, children))
     }
 }
 

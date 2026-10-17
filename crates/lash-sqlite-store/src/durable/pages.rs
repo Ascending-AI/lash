@@ -189,12 +189,12 @@ pub(super) fn install_candidate(
     while let Some(batch) = answer!(install.next_batch()) {
         answer!(install_nodes(tx, &batch, &mut installed)?);
     }
-    install.restart();
-    while let Some(batch) = answer!(install.next_batch()) {
-        answer!(install_edges(tx, &batch, &mut installed)?);
+    let mut edges = answer!(install.edges());
+    while let Some(pairs) = answer!(edges.next_batch()) {
+        answer!(install_edges(tx, &pairs, &mut installed)?);
     }
     #[cfg(any(test, feature = "testing"))]
-    CANDIDATE_PEAK_BUFFERED.store(install.peak_buffered(), std::sync::atomic::Ordering::SeqCst);
+    CANDIDATE_PEAK_BUFFERED.store(edges.peak_buffered(), std::sync::atomic::Ordering::SeqCst);
     if let Some(window) = lash_core_execution::facade_support::sql::Window::current() {
         window.installed_graph(installed.newly_installed_canonical_bytes);
     }
@@ -267,20 +267,13 @@ fn install_nodes(
     Ok(Ok(()))
 }
 
-/// One batch's edges: every child a supplied node's envelope names must be
-/// stored by now, then each `(parent, child)` row not yet stored is
-/// inserted.
+/// One batch of supplied nodes' edges: every child must be stored by now,
+/// then each `(parent, child)` row not yet stored is inserted.
 fn install_edges(
     tx: &Connection,
-    batch: &[InstallEntry],
+    pairs: &[(NodeId, NodeId)],
     installed: &mut InstalledGraphMeasurement,
 ) -> GraphAnswer<()> {
-    let mut pairs: Vec<(NodeId, NodeId)> = Vec::new();
-    for entry in batch {
-        if let InstallEntry::Supplied(node) = entry {
-            pairs.extend(node.children.iter().map(|child| (node.id, *child)));
-        }
-    }
     for chunk in pairs.chunks(EDGE_BATCH) {
         let children: BTreeSet<NodeId> = chunk.iter().map(|(_, child)| *child).collect();
         let present: BTreeSet<String> = tx

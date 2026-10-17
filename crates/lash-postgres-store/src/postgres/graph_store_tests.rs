@@ -421,6 +421,21 @@ impl PageTier for Tier {
             .collect()
     }
 
+    async fn edge_rows(&self) -> BTreeSet<(NodeId, NodeId)> {
+        sqlx::query_as::<_, (String, String)>("SELECT parent_hash, child_hash FROM lash_blob_edges")
+            .fetch_all(&self.pool)
+            .await
+            .expect("a raw read")
+            .iter()
+            .map(|(parent, child)| {
+                (
+                    NodeId::from_hex(parent).expect("a stored parent"),
+                    NodeId::from_hex(child).expect("a stored child"),
+                )
+            })
+            .collect()
+    }
+
     /// Runs past the schema's foreign keys: foreign damage does not ask
     /// them.
     async fn drop_blob(&self, node: &NodeId) {
@@ -509,6 +524,7 @@ page_law!(publication_keeps_global_digest_lock_order);
 page_law!(an_ownership_transfer_fences_the_old_activation);
 page_law!(a_node_retires_sealed_pages_on_its_own);
 page_law!(backpressure_holds_claims_until_retirement_catches_up);
+page_law!(candidate_edge_pass_does_not_reread_fresh_bodies);
 
 /// D-RET: a node killed in a retirement batch, before and after its commit.
 #[tokio::test(flavor = "multi_thread", worker_threads = 4)]

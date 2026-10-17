@@ -7,7 +7,8 @@
 //! through a rename, so a buffer holds at most the page being written. A
 //! quota bounds the spool's file contents: each staged page's bytes, plus
 //! [`ENTRY_BYTES`] of manifest scratch for each staged page and each
-//! distinct external reference (FIG-6512).
+//! distinct external reference (FIG-6512). A publication's install writes
+//! its edge log within that scratch, beside the sorted manifest (FIG-6596).
 //!
 //! A candidate is built at a park: a walk of the candidate root's staged
 //! DAG that stops at committed references, marking each page it reaches in
@@ -42,8 +43,8 @@ use std::sync::Arc;
 use std::sync::atomic::{AtomicU64, Ordering};
 
 use lash_core_store::checkpoint_graph::stage::{
-    CandidateManifest, ManifestEntry, ManifestSummary, StageFault, StageLeaseId, StageSpool,
-    StageUsage,
+    CandidateManifest, EDGE_RECORD_BYTES, EdgeLog, ManifestEntry, ManifestSummary, StageFault,
+    StageLeaseId, StageSpool, StageUsage,
 };
 use lash_core_store::checkpoint_graph::{
     CommitId, DecodeLimits, EncodedNode, NodeId, check_envelope, parse_envelope,
@@ -80,6 +81,9 @@ type Record = [u8; RECORD];
 /// beside its page bytes: the manifest scratch its record can occupy at
 /// once, in the walk's queue, a sorted run and a merge's output.
 pub(crate) const ENTRY_BYTES: u64 = 3 * RECORD as u64;
+// An install's edge log record for a fresh page fits, with the page's
+// manifest record, in the page's entry charge (FIG-6596).
+const _: () = assert!(RECORD as u64 + EDGE_RECORD_BYTES <= ENTRY_BYTES);
 /// The records one sorted run holds in memory: the sort's one buffer that
 /// grows with its input, up to this bound.
 const RUN_RECORDS: usize = 4096;
@@ -821,5 +825,62 @@ impl CandidateManifest for DiskManifest {
             self.cursor = Some((last, start + count));
         }
         Ok(entries)
+    }
+
+    fn fresh_range(&mut self, id: &NodeId, offset: u64, len: usize) -> Result<Vec<u8>, StageFault> {
+        let file = match File::open(self.pages.join(id.to_hex())) {
+            Ok(file) => file,
+            Err(error) if error.kind() == ErrorKind::NotFound => {
+                return Err(StageFault::Missing(*id));
+            }
+            Err(error) => return Err(io(&error)),
+        };
+        let mut range = vec![0; len];
+        file.read_exact_at(&mut range, offset)
+            .map_err(|error| io(&error))?;
+        Ok(range)
+    }
+
+    fn edge_log(&mut self) -> Result<Box<dyn EdgeLog>, StageFault> {
+        let file = match File::options()
+            .read(true)
+            .write(true)
+            .create(true)
+            .truncate(true)
+            .open(self.manifest.with_file_name("edges"))
+        {
+            Ok(file) => file,
+            // Settled or discarded under the reader.
+            Err(error) if error.kind() == ErrorKind::NotFound => return Err(StageFault::Ended),
+            Err(error) => return Err(io(&error)),
+        };
+        Ok(Box::new(DiskEdgeLog { file, len: 0 }))
+    }
+}
+
+/// An install's edge log beside its candidate's manifest: at most
+/// [`EDGE_RECORD_BYTES`] for each fresh page with children, which the
+/// two records of scratch each entry's charge keeps free once the manifest
+/// is sorted cover. A later install truncates it; settlement and withdrawal
+/// delete it with the candidate.
+#[derive(Debug)]
+struct DiskEdgeLog {
+    file: File,
+    len: u64,
+}
+
+impl EdgeLog for DiskEdgeLog {
+    fn append(&mut self, bytes: &[u8]) -> Result<(), StageFault> {
+        self.file
+            .write_all_at(bytes, self.len)
+            .map_err(|error| io(&error))?;
+        self.len += bytes.len() as u64;
+        Ok(())
+    }
+
+    fn read_at(&mut self, offset: u64, out: &mut [u8]) -> Result<(), StageFault> {
+        self.file
+            .read_exact_at(out, offset)
+            .map_err(|error| io(&error))
     }
 }

@@ -26,6 +26,7 @@ workspace = true
 
 [dependencies]
 async-trait = { workspace = true }
+blake3 = { workspace = true }
 chrono = { workspace = true, optional = true }
 futures-util = { workspace = true, optional = true }
 lash-core-ids = { workspace = true }

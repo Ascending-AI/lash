@@ -14,7 +14,8 @@ use std::collections::{BTreeMap, BTreeSet};
 use std::sync::{Arc, Mutex};
 
 use lash_core_store::checkpoint_graph::stage::{
-    CandidateManifest, ManifestEntry, ManifestSummary, StageFault,
+    CandidateManifest, EdgeLog, ManifestEntry, ManifestSummary, MemoryEdgeLog, StageFault,
+    node_range,
 };
 use lash_core_store::checkpoint_graph::{
     CommitId, EncodeBudget, EncodedNode, ExplicitLimit, GraphRefusal, GraphStaging, NodeId,
@@ -35,6 +36,8 @@ use crate::{ActorKey, DomainWrite, DurableError, Epoch, NodeLease};
 mod driver;
 #[path = "pages_generated.rs"]
 mod generated;
+#[path = "pages_install.rs"]
+mod install;
 #[path = "pages_owners.rs"]
 mod owners;
 #[path = "pages_races.rs"]
@@ -45,6 +48,7 @@ pub use driver::{
 };
 pub use generated::GeneratedManifest;
 use generated::Recipe;
+pub use install::candidate_edge_pass_does_not_reread_fresh_bodies;
 pub use owners::{
     a_host_read_never_descends_into_a_heap_page,
     a_pruned_step_outcome_frees_exactly_its_unshared_pages, a_step_outcome_owns_its_candidate,
@@ -65,6 +69,8 @@ pub trait PageTier: Send + Sync {
     async fn stored(&self) -> BTreeSet<NodeId>;
     /// Every root the catalog names, one per row.
     async fn catalog(&self) -> Vec<NodeId>;
+    /// Every stored edge row, as `(parent, child)`.
+    async fn edge_rows(&self) -> BTreeSet<(NodeId, NodeId)>;
     /// Deletes a stored node and its edges past the schema's keys: foreign
     /// damage to a node the store must never read.
     async fn drop_blob(&self, node: &NodeId);
@@ -158,9 +164,11 @@ pub struct ManifestRead {
 pub enum Cut {
     /// None.
     Never,
-    /// The stream fails when a store starts reading it for the `n`th time
-    /// (0: the node pass, 1: the edge pass once every node row exists).
-    AtSweep(usize),
+    /// The stream fails when a store first starts reading it.
+    Nodes,
+    /// The stream fails at the edge pass's first child-table read, once
+    /// every node row exists.
+    Edges,
 }
 
 /// A candidate's manifest from a list, ascending by digest, that records
@@ -234,7 +242,7 @@ impl CandidateManifest for ScriptedManifest {
         limit: usize,
     ) -> Result<Vec<ManifestEntry>, StageFault> {
         if after.is_none() {
-            if self.cut == Cut::AtSweep(self.sweeps) {
+            if self.cut == Cut::Nodes && self.sweeps == 0 {
                 return Err(StageFault::Io("the law cut the publication here".into()));
             }
             self.sweeps += 1;
@@ -254,6 +262,24 @@ impl CandidateManifest for ScriptedManifest {
                 answered: answered.iter().map(entry_id).collect(),
             });
         Ok(answered)
+    }
+
+    fn fresh_range(&mut self, id: &NodeId, offset: u64, len: usize) -> Result<Vec<u8>, StageFault> {
+        if self.cut == Cut::Edges {
+            return Err(StageFault::Io("the law cut the publication here".into()));
+        }
+        match self
+            .entries
+            .binary_search_by_key(id, entry_id)
+            .map(|at| &self.entries[at])
+        {
+            Ok(ManifestEntry::Fresh(node)) => node_range(node, offset, len),
+            _ => Err(StageFault::Missing(*id)),
+        }
+    }
+
+    fn edge_log(&mut self) -> Result<Box<dyn EdgeLog>, StageFault> {
+        Ok(Box::new(MemoryEdgeLog::default()))
     }
 }
 
@@ -542,14 +568,6 @@ pub async fn a_candidate_installs_only_new_nodes_and_direct_references(
         fresh,
     };
     let manifest = second.manifest(Some(exec_root(first_root).id), CommitId::mint());
-    let reads = manifest.reads();
-    let mut all: Vec<NodeId> = second
-        .fresh
-        .keys()
-        .copied()
-        .chain(second.external())
-        .collect();
-    all.sort();
     publish(
         tier,
         &owner,
@@ -572,15 +590,6 @@ pub async fn a_candidate_installs_only_new_nodes_and_direct_references(
     ensure!(
         before.difference(&after).next().is_none(),
         "the candidate's commit deleted a node"
-    );
-    let reads = reads
-        .lock()
-        .unwrap_or_else(std::sync::PoisonError::into_inner)
-        .clone();
-    let (sweeps, complete) = sweeps_ascend(&reads, &all)?;
-    ensure!(
-        sweeps == 2 && complete == 2,
-        "the store swept the manifest {sweeps} times, not once for nodes and once for edges"
     );
     // A direct reference that is missing refuses the whole commit.
     tier.drop_blob(&direct).await;
@@ -684,7 +693,7 @@ pub async fn publication_is_atomic_with_its_effect_admissions(tier: &dyn PageTie
         Box::new(
             second
                 .manifest(Some(exec_root(first_root).id), second_commit)
-                .cut(Cut::AtSweep(1)),
+                .cut(Cut::Edges),
         ),
     )
     .await;
@@ -1218,7 +1227,7 @@ pub async fn the_lost_receipt_resolves_by_commit_identity(tier: &dyn PageTier) -
         Box::new(
             third
                 .manifest(Some(exec_root(second_root).id), third_commit)
-                .cut(Cut::AtSweep(0)),
+                .cut(Cut::Nodes),
         ),
     )
     .await;
@@ -1325,7 +1334,7 @@ pub async fn publication_keeps_global_digest_lock_order(tier: &dyn PageTier) -> 
         // A transaction retried for contention sweeps again from the start.
         let (sweeps, complete) = sweeps_ascend(&reads, &all)?;
         ensure!(
-            complete >= 2 && sweeps >= complete,
+            complete >= 1 && sweeps >= complete,
             "a candidate was swept {sweeps} times, {complete} of them whole"
         );
     }

@@ -4,7 +4,8 @@
 use std::collections::BTreeSet;
 
 use lash_core_store::checkpoint_graph::stage::{
-    CandidateManifest, ManifestEntry, ManifestSummary, StageFault,
+    CandidateManifest, EdgeLog, ManifestEntry, ManifestSummary, MemoryEdgeLog, StageFault,
+    node_range,
 };
 use lash_core_store::checkpoint_graph::{CommitId, EncodedNode, NodeId, NodeKind};
 
@@ -130,5 +131,17 @@ impl CandidateManifest for GeneratedManifest {
             .take(limit)
             .map(|(_, recipe)| ManifestEntry::Fresh(self.build(*recipe)))
             .collect())
+    }
+
+    fn fresh_range(&mut self, id: &NodeId, offset: u64, len: usize) -> Result<Vec<u8>, StageFault> {
+        let at = self
+            .order
+            .binary_search_by_key(id, |(id, _)| *id)
+            .map_err(|_| StageFault::Missing(*id))?;
+        node_range(&self.build(self.order[at].1), offset, len)
+    }
+
+    fn edge_log(&mut self) -> Result<Box<dyn EdgeLog>, StageFault> {
+        Ok(Box::new(MemoryEdgeLog::default()))
     }
 }

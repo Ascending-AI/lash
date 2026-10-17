@@ -74588,6 +74588,7 @@
       ],
       "dependencies": [
         "async-trait",
+        "blake3",
         "chrono",
         "futures-util",
         "lash-internal-core-ids",

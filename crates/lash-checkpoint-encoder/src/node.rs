@@ -245,12 +245,15 @@ pub fn write_envelope(kind: NodeKind, children: &[[u8; 32]], body: &[u8]) -> Vec
 /// The length [`write_envelope`] produces.
 pub fn envelope_len(kind: NodeKind, children: usize, body: usize) -> usize {
     use lash_kernel_doc::graph_tokens::varint_len;
-    MAGIC.len()
-        + varint_len(u64::from(kind.0))
-        + varint_len(children as u64)
-        + 32 * children
-        + varint_len(body as u64)
-        + body
+    child_table_offset(kind, children) + 32 * children + varint_len(body as u64) + body
+}
+
+/// Where the child table of an envelope of `kind` with `children` children
+/// starts: after its magic, its kind and its child count.
+#[must_use]
+pub fn child_table_offset(kind: NodeKind, children: usize) -> usize {
+    use lash_kernel_doc::graph_tokens::varint_len;
+    MAGIC.len() + varint_len(u64::from(kind.0)) + varint_len(children as u64)
 }
 
 /// The envelope kinds of semantic heap pages (FIG-6187): direct-bodied,

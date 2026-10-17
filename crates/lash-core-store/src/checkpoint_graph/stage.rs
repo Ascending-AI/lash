@@ -84,8 +84,9 @@ pub struct ManifestSummary {
 }
 
 /// A candidate's bounded-memory stream, restartable by cursor: the store
-/// reads it once to lock and insert nodes and again to insert edges, and
-/// again on a retried transaction.
+/// reads it once to lock and insert nodes, and again on a retried
+/// transaction. Its edges come back from the install's own [`EdgeLog`]
+/// (FIG-6596): the store never reads a body twice.
 pub trait CandidateManifest: Send {
     fn summary(&self) -> ManifestSummary;
     /// Up to `limit` entries after `after`, ascending by digest.
@@ -99,6 +100,77 @@ pub trait CandidateManifest: Send {
         after: Option<NodeId>,
         limit: usize,
     ) -> Result<Vec<ManifestEntry>, StageFault>;
+    /// `len` bytes from `offset` of the node `id` it supplies: how an
+    /// install reads a checked node's child table again for its edges,
+    /// never the node's body.
+    ///
+    /// # Errors
+    ///
+    /// [`StageFault`], as for [`CandidateManifest::entries`].
+    fn fresh_range(&mut self, id: &NodeId, offset: u64, len: usize) -> Result<Vec<u8>, StageFault>;
+    /// An empty edge log for one install of this candidate, in place of
+    /// any earlier install's.
+    ///
+    /// # Errors
+    ///
+    /// [`StageFault`], as for [`CandidateManifest::entries`].
+    fn edge_log(&mut self) -> Result<Box<dyn EdgeLog>, StageFault>;
+}
+
+/// An install's private scratch (FIG-6596): the store writes it while it
+/// checks a candidate's nodes and reads it back for their edges. The
+/// install authenticates every record it reads back under a key only it
+/// holds, so a log is never trusted on its own, nor by another install.
+pub trait EdgeLog: Send {
+    /// Appends `bytes` at the log's end.
+    ///
+    /// # Errors
+    ///
+    /// [`StageFault`]: the publication fails as infrastructure.
+    fn append(&mut self, bytes: &[u8]) -> Result<(), StageFault>;
+    /// Fills `out` from the log at `offset`.
+    ///
+    /// # Errors
+    ///
+    /// [`StageFault`], also when the log ends first.
+    fn read_at(&mut self, offset: u64, out: &mut [u8]) -> Result<(), StageFault>;
+}
+
+/// What an install's edge log holds for one fresh page with children: one
+/// fixed-size record (FIG-6596), which a spool's scratch reserves.
+pub const EDGE_RECORD_BYTES: u64 = 53;
+
+/// The edge log of a manifest that holds its candidate in memory.
+#[derive(Debug, Default)]
+pub struct MemoryEdgeLog(pub Vec<u8>);
+
+impl EdgeLog for MemoryEdgeLog {
+    fn append(&mut self, bytes: &[u8]) -> Result<(), StageFault> {
+        self.0.extend_from_slice(bytes);
+        Ok(())
+    }
+
+    fn read_at(&mut self, offset: u64, out: &mut [u8]) -> Result<(), StageFault> {
+        let bytes = usize::try_from(offset)
+            .ok()
+            .and_then(|start| self.0.get(start..start.checked_add(out.len())?))
+            .ok_or_else(|| StageFault::Io("the edge log ended early".to_owned()))?;
+        out.copy_from_slice(bytes);
+        Ok(())
+    }
+}
+
+/// [`CandidateManifest::fresh_range`] of `node`, held in memory.
+///
+/// # Errors
+///
+/// [`StageFault::Io`] when the range runs past the node.
+pub fn node_range(node: &EncodedNode, offset: u64, len: usize) -> Result<Vec<u8>, StageFault> {
+    usize::try_from(offset)
+        .ok()
+        .and_then(|start| node.bytes.get(start..start.checked_add(len)?))
+        .map(<[u8]>::to_vec)
+        .ok_or_else(|| StageFault::Io(format!("page {} has no such range", node.id)))
 }
 
 /// One activation's spool.

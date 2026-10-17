@@ -331,6 +331,28 @@ impl PageTier for Tier {
             .collect()
     }
 
+    async fn edge_rows(&self) -> BTreeSet<(NodeId, NodeId)> {
+        self.store
+            .connection_for_testing()
+            .call(|conn| {
+                conn.prepare("SELECT parent_hash, child_hash FROM blob_edges")?
+                    .query_map([], |row| {
+                        Ok((row.get::<_, String>(0)?, row.get::<_, String>(1)?))
+                    })?
+                    .collect::<rusqlite::Result<Vec<_>>>()
+            })
+            .await
+            .expect("a raw read")
+            .iter()
+            .map(|(parent, child)| {
+                (
+                    NodeId::from_hex(parent).expect("a stored parent"),
+                    NodeId::from_hex(child).expect("a stored child"),
+                )
+            })
+            .collect()
+    }
+
     async fn drop_blob(&self, node: &NodeId) {
         for sql in [
             "DELETE FROM blob_edges WHERE parent_hash = ?1 OR child_hash = ?1",
@@ -418,6 +440,7 @@ page_law!(publication_keeps_global_digest_lock_order);
 page_law!(an_ownership_transfer_fences_the_old_activation);
 page_law!(a_node_retires_sealed_pages_on_its_own);
 page_law!(backpressure_holds_claims_until_retirement_catches_up);
+page_law!(candidate_edge_pass_does_not_reread_fresh_bodies);
 
 /// D-RET: a node killed in a retirement batch, before and after its commit.
 mod a_crash_in_a_retirement_batch_resumes_without_leak_or_double_free {
@@ -949,7 +972,8 @@ async fn absent_graph_bodies_install_in_bounded_batches() {
 #[tokio::test(flavor = "multi_thread", worker_threads = 4)]
 async fn a_park_publication_writes_a_counted_number_of_statements() {
     use lash_core_store::checkpoint_graph::stage::{
-        CandidateManifest, ManifestEntry, ManifestSummary, StageFault,
+        CandidateManifest, EdgeLog, ManifestEntry, ManifestSummary, MemoryEdgeLog, StageFault,
+        node_range,
     };
     use lash_core_store::checkpoint_graph::{
         CommitId, EncodeBudget, EncodedNode, ExplicitLimit, GraphStaging, NodeKind, TokenWriter,
@@ -1026,6 +1050,29 @@ async fn a_park_publication_writes_a_counted_number_of_statements() {
                 .take(limit)
                 .cloned()
                 .collect())
+        }
+
+        fn fresh_range(
+            &mut self,
+            id: &NodeId,
+            offset: u64,
+            len: usize,
+        ) -> Result<Vec<u8>, StageFault> {
+            match self
+                .entries
+                .binary_search_by_key(id, |entry| match entry {
+                    ManifestEntry::External(id) => *id,
+                    ManifestEntry::Fresh(node) => node.id,
+                })
+                .map(|at| &self.entries[at])
+            {
+                Ok(ManifestEntry::Fresh(node)) => node_range(node, offset, len),
+                _ => Err(StageFault::Missing(*id)),
+            }
+        }
+
+        fn edge_log(&mut self) -> Result<Box<dyn EdgeLog>, StageFault> {
+            Ok(Box::new(MemoryEdgeLog::default()))
         }
     }
 

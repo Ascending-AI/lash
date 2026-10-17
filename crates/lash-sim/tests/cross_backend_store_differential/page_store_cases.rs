@@ -9,7 +9,8 @@
 //! the pages' digests and the steps' counts compare as they are.
 
 use lash_core_store::checkpoint_graph::stage::{
-    CandidateManifest, ManifestEntry, ManifestSummary, StageFault,
+    CandidateManifest, EdgeLog, ManifestEntry, ManifestSummary, MemoryEdgeLog, StageFault,
+    node_range,
 };
 use lash_core_store::checkpoint_graph::{
     CommitId, EncodeBudget, EncodedNode, ExplicitLimit, GraphRefusal, GraphStaging, NodeId,
@@ -106,6 +107,21 @@ impl CandidateManifest for Scripted {
             .take(limit)
             .cloned()
             .collect())
+    }
+
+    fn fresh_range(&mut self, id: &NodeId, offset: u64, len: usize) -> Result<Vec<u8>, StageFault> {
+        match self
+            .entries
+            .binary_search_by_key(id, entry_id)
+            .map(|at| &self.entries[at])
+        {
+            Ok(ManifestEntry::Fresh(node)) => node_range(node, offset, len),
+            _ => Err(StageFault::Missing(*id)),
+        }
+    }
+
+    fn edge_log(&mut self) -> Result<Box<dyn EdgeLog>, StageFault> {
+        Ok(Box::new(MemoryEdgeLog::default()))
     }
 }
 
