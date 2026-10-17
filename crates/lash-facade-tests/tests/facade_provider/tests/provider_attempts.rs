@@ -1208,6 +1208,7 @@ async fn a_live_model_deadline_reports_the_interrupted_attempt_and_its_typed_fai
     });
     let clock = Arc::new(PausedClock(tokio::time::Instant::now()));
     let output_started = Arc::new(tokio::sync::Notify::new());
+    let draining = Arc::new(tokio::sync::Notify::new());
     let committed = Arc::new(tokio::sync::Notify::new());
     let replay = lash::observe::InMemoryLiveReplayStore::with_clock(
         lash::observe::InMemoryLiveReplayStoreConfig::standard(),
@@ -1244,16 +1245,25 @@ async fn a_live_model_deadline_reports_the_interrupted_attempt_and_its_typed_fai
     let model = lash::testing::TestProvider::builder()
         .kind("mock")
         .requires_streaming(true)
-        .complete(|request| async move {
-            request
-                .stream_events
-                .expect("streaming sender")
-                .send(LlmStreamEvent::Block(StreamBlockEvent::Delta {
-                    kind: StreamBlockKind::AssistantText,
-                    block: StreamBlockIdentity::new("text:0", 0),
-                    text: PARTIAL.to_string(),
-                }));
-            std::future::pending::<std::result::Result<LlmResponse, LlmTransportError>>().await
+        .answer({
+            let draining = Arc::clone(&draining);
+            move |context, _body| {
+                let draining = Arc::clone(&draining);
+                async move {
+                    context
+                        .stream_events
+                        .expect("streaming sender")
+                        .send(LlmStreamEvent::Block(StreamBlockEvent::Delta {
+                            kind: StreamBlockKind::AssistantText,
+                            block: StreamBlockIdentity::new("text:0", 0),
+                            text: PARTIAL.to_string(),
+                        }));
+                    context.attempt_control.cancelled().await;
+                    draining.notify_one();
+                    std::future::pending::<std::result::Result<LlmResponse, LlmTransportError>>()
+                        .await
+                }
+            }
         })
         .build()
         .into_handle();
@@ -1296,8 +1306,16 @@ async fn a_live_model_deadline_reports_the_interrupted_attempt_and_its_typed_fai
     // consumed it and published the partial to the turn's live stream.
     output_started.notified().await;
     // Cross the unchanged two-second deadline by one timer-resolution tick.
-    // Keep time frozen again while SQLite commits the resulting terminal.
     tokio::time::advance(std::time::Duration::from_millis(2_001)).await;
+    // The cancelled send is polled inside the registered drain timeout. Wait
+    // for that poll before advancing through the default drain interval, then
+    // keep time frozen while SQLite commits the resulting terminal.
+    draining.notified().await;
+    tokio::time::advance(
+        lash::provider::ProviderTerminalPolicy::default().drain_timeout
+            + std::time::Duration::from_millis(1),
+    )
+    .await;
     committed.notified().await;
     let output = held.output().await.expect("the deadline settles the turn");
     let output_model_calls =
