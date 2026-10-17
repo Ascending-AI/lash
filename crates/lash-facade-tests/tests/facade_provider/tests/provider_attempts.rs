@@ -1479,3 +1479,176 @@ async fn a_default_response_answers_the_call_and_completes_its_attempt() {
     );
     core.shutdown().await.expect("shutdown");
 }
+
+/// ADR 0031 / FIG-6714: evidence belongs to a call's attempt, including a failed retry
+/// and a genuinely cancelled second call served by a different model.
+#[tokio::test(flavor = "multi_thread", worker_threads = 2)]
+async fn retried_and_cancelled_calls_keep_each_attempts_provider_evidence() {
+    const PARTIAL: &str = "beta response is in flight";
+    let requests = Arc::new(StdMutex::new(Vec::new()));
+    let model = lash::testing::TestProvider::builder()
+        .kind("attempt-evidence")
+        .requires_streaming(true)
+        .generation_retry_guarantee(lash_core::provider::GenerationRetryGuarantee::Idempotent)
+        .options(reliability(2))
+        .complete({
+            let requests = Arc::clone(&requests);
+            move |request: LlmRequest| {
+                let send = {
+                    let mut requests = requests.lock_recover();
+                    requests.push(request.scope.clone());
+                    requests.len()
+                };
+                async move {
+                    let evidence = lash_core::ExecutionEvidence {
+                        served_model: Some(
+                            if send <= 2 {
+                                "served-alpha"
+                            } else {
+                                "served-beta"
+                            }
+                            .into(),
+                        ),
+                        provider_request_id: Some(format!("request-{send}")),
+                        provider_response_id: Some(format!("response-{send}")),
+                        ..Default::default()
+                    };
+                    match send {
+                        1 => Err(
+                            LlmTransportError::new("transport rejected the first attempt")
+                                .with_kind(lash_core::ProviderFailureKind::Transport)
+                                .with_retry_verdict(TransportRetryVerdict::RetryableTransient)
+                                .with_partial_response(LlmResponse {
+                                    execution_evidence: Some(evidence),
+                                    ..Default::default()
+                                }),
+                        ),
+                        2 => Ok(LlmResponse {
+                            parts: vec![LlmOutputPart::ToolCall {
+                                call_id: "evidence-lookup".into(),
+                                tool_name: "app_lookup".into(),
+                                input_json: "{}".into(),
+                                replay: None,
+                            }],
+                            terminal_reason: lash_core::LlmTerminalReason::ToolUse,
+                            execution_evidence: Some(evidence),
+                            ..Default::default()
+                        }),
+                        3 => {
+                            let stream = request.stream_events.expect("stream events");
+                            stream.send(LlmStreamEvent::Evidence(lash_core::LlmStreamEvidence {
+                                response_started: true,
+                                ..Default::default()
+                            }));
+                            stream.send(LlmStreamEvent::Evidence(lash_core::LlmStreamEvidence {
+                                execution_evidence: Some(evidence.clone()),
+                                ..Default::default()
+                            }));
+                            stream.send(LlmStreamEvent::Block(StreamBlockEvent::Delta {
+                                kind: StreamBlockKind::AssistantText,
+                                block: StreamBlockIdentity::new("beta-text", 0),
+                                text: PARTIAL.into(),
+                            }));
+                            request.attempt_control.cancelled().await;
+                            Err(LlmTransportError::new("transport cancelled by its caller")
+                                .with_terminal_reason(lash_core::LlmTerminalReason::Cancelled)
+                                .with_retry_verdict(TransportRetryVerdict::NotRetryable)
+                                .with_partial_response(LlmResponse {
+                                    execution_evidence: Some(evidence),
+                                    ..Default::default()
+                                }))
+                        }
+                        _ => panic!("only two calls and one retry are admitted"),
+                    }
+                }
+            }
+        })
+        .build()
+        .into_handle();
+    let core = explicit_ephemeral_facets(LashCore::standard_builder(
+        sqlite_memory_store_backend().await,
+    ))
+    .serve_test_llm_profile(model, mock_llm_profile_spec())
+    .tools(lash::tool_provider_key!("tools"), Arc::new(AppTools))
+    .build(lash_facade_tests::runtime_lease_owner())
+    .expect("core");
+    let session = created(&core, "attempt-evidence").await;
+    let turn_id = lash::TurnId::from("attempt-evidence-turn");
+    let held = session
+        .send(TurnInput::text("lookup then answer"))
+        .id(turn_id.clone())
+        .await
+        .expect("accepted");
+    let mut events = held.events();
+    loop {
+        let activity = events
+            .next_activity()
+            .await
+            .expect("the second call stays pending until cancelled")
+            .expect("activity read");
+        if matches!(&activity.event,
+            TurnEvent::StreamBlock(StreamBlockEvent::Delta { text, .. }) if text == PARTIAL)
+        {
+            break;
+        }
+    }
+    held.cancel().await.expect("cancel the active second call");
+    let output = held.output().await.expect("cancelled turn settles");
+    assert_eq!(output.status(), lash::TurnStatus::Cancelled);
+    let calls = session
+        .read_turn_model_calls(&turn_id)
+        .await
+        .expect("read retained calls");
+    let [first, second] = calls.as_slice() else {
+        panic!("two logical calls: {calls:?}");
+    };
+    assert_ne!(first.call_id, second.call_id);
+    assert_eq!(first.call_id, first.record.call_id);
+    assert_eq!(second.call_id, second.record.call_id);
+    assert_eq!(first.end, lash::turn::ModelCallEnd::Answered);
+    assert!(matches!(
+        second.end,
+        lash::turn::ModelCallEnd::Unanswered { .. }
+    ));
+    let [failed, completed] = first.record.attempts.as_slice() else {
+        panic!("the first call retries once");
+    };
+    let [aborted] = second.record.attempts.as_slice() else {
+        panic!("the second call has one cancelled attempt");
+    };
+    assert_eq!(failed.outcome, lash_core::AttemptOutcome::Failed);
+    assert!(
+        failed
+            .retry_decision
+            .as_ref()
+            .expect("retry decision")
+            .is_scheduled()
+    );
+    assert_eq!(completed.outcome, lash_core::AttemptOutcome::Completed);
+    assert_eq!(aborted.outcome, lash_core::AttemptOutcome::Aborted);
+    let requests = requests.lock_recover().clone();
+    assert_eq!(requests.len(), 3);
+    for ((call, attempt, send, ordinal, model), scope) in [
+        (first, failed, 1, 1, "served-alpha"),
+        (first, completed, 2, 2, "served-alpha"),
+        (second, aborted, 3, 1, "served-beta"),
+    ]
+    .into_iter()
+    .zip(requests)
+    {
+        assert_eq!(call.call_id.0, scope.request_id);
+        assert_eq!(scope.attempt, Some(ordinal));
+        assert_eq!(attempt.ordinal, ordinal);
+        let evidence = attempt.evidence.as_ref().expect("this attempt's evidence");
+        assert_eq!(evidence.served_model.as_deref(), Some(model));
+        assert_eq!(
+            evidence.provider_request_id,
+            Some(format!("request-{send}"))
+        );
+        assert_eq!(
+            evidence.provider_response_id,
+            Some(format!("response-{send}"))
+        );
+    }
+    core.shutdown().await.expect("shutdown");
+}

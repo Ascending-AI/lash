@@ -1410,7 +1410,6 @@
     "tests::absent_session_delete::sqlite_memory::a_delete_racing_a_create_cleans_up_nothing_without_an_accepted_close": 127,
     "tests::admin_reads_without_runtime::a_plugin_query_on_a_never_run_session_is_refused_as_not_published": 63,
     "tests::admin_reads_without_runtime::every_admin_read_answers_from_durable_state_without_an_activated_runtime": 393,
-    "tests::adr_claims::multi_model_turn_keeps_per_call_evidence": 202,
     "tests::adr_claims::resumed_session_observe_wait_cancel_shift_keep_original_owners": 257,
     "tests::adr_claims::root_and_child_materialization_install_the_same_plugin_owned_engines": 82,
     "tests::agent_scenarios::agent_scenario_direct_completion_attempt_retry_reinvokes_provider_once": 1443,
