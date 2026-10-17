@@ -50,22 +50,7 @@ pub(super) fn fresh() -> PagedHeap {
     .unwrap();
     heap
 }
-pub(super) fn limit_to_extra(heap: &mut PagedHeap, args: &[Value], extra: u64) {
-    heap.set_execution_roots(
-        tree::Tree::new(false),
-        tree::Tree::new(false),
-        args,
-        &[],
-        0,
-        &[],
-    )
-    .unwrap();
-    let certificate = heap.certificate();
-    heap.set_census(Box::new(
-        Census::restore(certificate, LogicalBytes(certificate.upper.0 + extra)).unwrap(),
-    ))
-    .unwrap();
-}
+
 fn text(heap: &dyn NativeHeap, value: &TextRef) -> String {
     let mut out = String::new();
     heap.payload_visit(

@@ -330,23 +330,14 @@ fn thrown_name(value: &Datum) -> Option<String> {
 /// it, so the test's code lowers as it is written, with no top-level
 /// `await`.
 fn completed(finished: &lash_kernel_vm::Finished, source: &pages::Source) -> Result<bool, String> {
-    use lash_kernel_state::paged::{BindingRecord, BoundRecord, EditEpoch, PagedHeap, tree::Tree};
-    let Some(session) = finished.carry else {
-        return Ok(false);
-    };
-    let heap = PagedHeap::open_header(session.heap, Box::new(source.clone()), EditEpoch(1))
-        .map_err(|e| e.to_string())?;
-    let bindings = Tree::<BindingRecord>::of_keyed(&session.bindings);
-    let key =
-        lash_kernel_state::paged::metadata::metadata_key(&Name::new(super::ingest::COMPLETED));
+    let mut session =
+        lash_kernel_vm::SessionEditor::open(finished.carry.as_ref(), Box::new(source.clone()))
+            .map_err(|e| e.to_string())?;
     Ok(matches!(
-        bindings
-            .get(&key, heap.pages())
+        session
+            .get(&Name::new(super::ingest::COMPLETED))
             .map_err(|e| e.to_string())?,
-        Some(BindingRecord {
-            value: BoundRecord::Value(lash_kernel_doc::Value::Bool(true)),
-            ..
-        })
+        Some(lash_kernel_vm::SessionValue::Data(Datum::Bool(true)))
     ))
 }
 

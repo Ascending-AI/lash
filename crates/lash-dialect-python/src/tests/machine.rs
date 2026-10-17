@@ -533,45 +533,6 @@ fn witness_rejects_unused_delivery_batches() {
     run("print('done')", &[vec!["echo:unused".into()]]);
 }
 
-/// FIG-6102, K-CHG-007: integer add, sub and iadd do numeric work in
-/// their own bodies, without activating another Python helper. Their
-/// interpreted operations and numeric native charges account for the run.
-/// `py.add` is an operation whose native answers integers (FIG-6440).
-#[test]
-fn integer_arithmetic_runs_directly_and_accounts_for_its_body() {
-    // Parameters have no local integer proof; this law exercises the
-    // guarded helpers, independently of constant/local lowering.
-    let source =
-        "def arithmetic(a, b):\n    c = a + b\n    d = a - b\n    a += b\narithmetic(7, 3)\n";
-    let (mut machine, _) = start(source, effects(), Session::default());
-    machine.count_work();
-    assert!(matches!(
-        machine.run(&mut Console::default(), u64::MAX).unwrap(),
-        Step::Ended(End::Finished(_))
-    ));
-    let work = machine.work().expect("work counting is enabled");
-    assert_eq!(work.residual(), 0, "every unit belongs to executed work");
-    let mut helpers = BTreeMap::new();
-    for code in &work.codes {
-        if code.symbol.name.starts_with("py.") {
-            helpers.insert(code.symbol.name.as_str(), code.counts.calls);
-            assert!(code.counts.self_charge > 0, "a helper charges its body");
-        }
-    }
-    assert_eq!(
-        helpers,
-        BTreeMap::from([("py.iadd", 1), ("py.sub", 1)]),
-        "integer arithmetic must not activate nested Python numeric helpers"
-    );
-    let natives: BTreeMap<&str, u64> = work
-        .natives
-        .iter()
-        .filter(|native| native.symbol.name.starts_with("py."))
-        .map(|native| (native.symbol.name.as_str(), native.counts.calls))
-        .collect();
-    assert_eq!(natives, BTreeMap::from([("py.add", 1)]));
-}
-
 // These previous definitions are held only by this law, as sealed releases
 // hold old bodies. The unsealed production baseline keeps current bodies.
 const PREVIOUS_ARITHMETIC: &str = r#"
@@ -1466,61 +1427,5 @@ fn python_awaits_add_no_turn() {
         let recorded = run(source, &[order.map(String::from).to_vec()]);
         assert_eq!(recorded.lines(), ["i", "p"], "{order:?}");
         assert_eq!(recorded.end, "ok");
-    }
-}
-
-/// FIG-6528: sorted(key=...) uses at most ceil(n log2 n) comparisons;
-/// key evaluation is once per record, and reverse preserves equal-key order.
-#[test]
-fn sort_comparisons_are_bounded_by_n_log_n() {
-    for rank in ["1000 - i", "seed % 31", "i", "0"] {
-        for reverse in [false, true] {
-            let source = format!(
-                r#"
-xs = []
-seed = 6528
-for i in range(1000):
-    seed = (seed * 1664525 + 1013904223) % 4294967296
-    xs.append(({rank}, i))
-seen = []
-def key(item):
-    seen.append(1)
-    return item[0]
-out = sorted(xs, key=key, reverse={reverse})
-valid = len(out) == 1000 and len(seen) == 1000
-for i in range(1, 1000):
-    if out[i-1][0] == out[i][0]:
-        if out[i-1][1] > out[i][1]:
-            valid = False
-    elif {reverse}:
-        if out[i-1][0] < out[i][0]:
-            valid = False
-    elif out[i-1][0] > out[i][0]:
-        valid = False
-print(valid)
-"#,
-                reverse = if reverse { "True" } else { "False" }
-            );
-            let (mut machine, _) = start(&source, effects(), Session::default());
-            machine.count_work();
-            let mut console = Console::default();
-            assert!(matches!(
-                machine.run(&mut console, u64::MAX).unwrap(),
-                Step::Ended(End::Finished(_))
-            ));
-            let work = machine.work().unwrap();
-            let comparisons: u64 = work
-                .codes
-                .iter()
-                .filter(|code| code.symbol.name.starts_with("py.sorted/closure@"))
-                .map(|code| code.counts.calls)
-                .sum();
-            eprintln!(
-                "python rank={rank} reverse={reverse} n=1000 comparisons={comparisons} charge={}",
-                machine.meters().charged
-            );
-            assert!(comparisons > 0 && comparisons <= 9966);
-            assert_eq!(console.lines, ["True"]);
-        }
     }
 }

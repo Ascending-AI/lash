@@ -602,7 +602,6 @@
         "tests/vertical_crash_proof.rs",
         "tests/vertical_crash_proof/corpus.rs",
         "tests/vertical_crash_proof/images.rs",
-        "tests/vertical_crash_proof/large_values.rs",
         "tests/vertical_crash_proof/run_config.rs",
         "tests/vertical_crash_proof/session_capture.rs"
       ],

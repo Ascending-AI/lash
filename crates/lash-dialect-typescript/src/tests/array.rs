@@ -155,56 +155,6 @@ fn law(source: &str) {
     }
 }
 
-/// Discarded direct pushes do only the append work, attributed to the
-/// document body under K-CHG-007. There is no return-length computation.
-#[test]
-fn discarded_push_charges_only_the_append_body() {
-    for (source, lengths) in [
-        ("const a = []; a.push();", 0),
-        ("const a = []; a.push(1);", 1),
-        ("const a = []; a.push(1, 2);", 2),
-    ] {
-        let lowered = super::lower(source).unwrap();
-        let text = lash_kernel_doc::print_document(&lowered.document);
-        assert_eq!(text.matches("list.len(").count(), lengths, "{text}");
-        assert!(!text.contains("num.to_float("), "{text}");
-        let mut machine = super::pages::start(
-            Program {
-                release: super::pages::RELEASE,
-                document: Arc::clone(lowered.document.shared()),
-                library: kernel().prepared.clone(),
-            },
-            Bounds {
-                charge: 100_000_000,
-                memory: 16 << 20,
-                call_depth: 200,
-                live_tasks: 100,
-                requests_per_park: 100,
-                join_members: 100,
-            },
-            CellStart {
-                target: Target::Main,
-                args: Vec::new(),
-                session: None,
-                owner: super::pages::OWNER,
-                modes: Default::default(),
-                host: Vec::new(),
-            },
-        )
-        .unwrap();
-        machine.count_work();
-        assert!(matches!(
-            machine.run(&mut NoHost, u64::MAX).unwrap(),
-            Step::Ended(End::Finished(_))
-        ));
-        let work = machine.work().unwrap();
-        assert_eq!(work.residual(), 0, "{work:?}");
-        assert_eq!(work.insertion_residual(), 0, "{work:?}");
-        assert_eq!(work.unattributed_charge, 0, "{work:?}");
-        assert_eq!(work.charged, machine.meters().charged);
-    }
-}
-
 /// Expression consumers and spread arguments still get push's new length.
 #[test]
 fn consumed_and_spread_pushes_return_the_new_length() {

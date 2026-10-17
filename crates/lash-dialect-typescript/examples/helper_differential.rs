@@ -26,7 +26,7 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
         };
         let answer = match engine.run(&case) {
             Ok(observed) => {
-                json!({"id":case.id, "result":observed.result, "reached":observed.reached, "matches": input.get("reference").map(|expected| comparison::matches(&observed.result, expected, comparison::implementation_approximated(&observed.reached)))})
+                json!({"id":case.id, "result":observed.result, "helpers":observed.helpers, "matches": input.get("reference").map(|expected| comparison::matches(&observed.result, expected, comparison::implementation_approximated(&observed.helpers)))})
             }
             Err(error) => json!({"id":case.id, "error":error}),
         };

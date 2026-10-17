@@ -253,15 +253,6 @@
     "peak_bytes": 64204800,
     "samples": 58
   },
-  "//crates/lash-dialect-typescript:document_preparation__test": {
-    "cpu_count": 1,
-    "mean_cores": 1.01,
-    "memory_kb": 262144,
-    "p95_cores": 1.03,
-    "p99_peak_bytes": 64847872,
-    "peak_bytes": 64847872,
-    "samples": 11
-  },
   "//crates/lash-dialect-typescript:helper_differential__test": {
     "cpu_count": 1,
     "mean_cores": 1.05,
@@ -270,15 +261,6 @@
     "p99_peak_bytes": 103792640,
     "peak_bytes": 103792640,
     "samples": 7
-  },
-  "//crates/lash-dialect-typescript:helper_plan_independence__test": {
-    "cpu_count": 2,
-    "mean_cores": 1.34,
-    "memory_kb": 262144,
-    "p95_cores": 2.08,
-    "p99_peak_bytes": 180772864,
-    "peak_bytes": 180772864,
-    "samples": 12
   },
   "//crates/lash-dialect-typescript:lash-dialect-typescript__unit_test": {
     "cpu_count": 1,
@@ -297,15 +279,6 @@
     "p99_peak_bytes": 271306752,
     "peak_bytes": 373002240,
     "samples": 1046
-  },
-  "//crates/lash-dialect-typescript:test_batch": {
-    "cpu_count": 2,
-    "mean_cores": 1.99,
-    "memory_kb": 524288,
-    "p95_cores": 2.67,
-    "p99_peak_bytes": 274685952,
-    "peak_bytes": 274685952,
-    "samples": 18
   },
   "//crates/lash-durable-test:after_turn_crash_laws__test": {
     "cpu_count": 2,

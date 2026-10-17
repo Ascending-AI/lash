@@ -1,5 +1,4 @@
 //! The live fuzzer and the hermetic laws share exactly this machine adapter.
-use std::cell::RefCell;
 use std::collections::{BTreeMap, BTreeSet};
 use std::sync::Arc;
 
@@ -9,8 +8,8 @@ use lash_kernel_doc::{
     Timestamp, Type,
 };
 use lash_kernel_vm::{
-    Bounds, CellStart, End, Host, Layout, Machine, Outcome, PreparedLibrary, Program, Request,
-    RunError, Step, Target,
+    Bounds, CellStart, End, Host, Machine, Outcome, PreparedLibrary, Program, Request, RunError,
+    Step, Target,
 };
 use serde::{Deserialize, Serialize};
 use serde_json::{Value, json};
@@ -31,7 +30,8 @@ pub struct Case {
 #[derive(Debug, Serialize)]
 pub struct Observed {
     pub result: Value,
-    pub reached: BTreeSet<String>,
+    /// Helpers named by the admitted document, independent of its execution plan.
+    pub helpers: BTreeSet<String>,
     /// What the run was charged.
     pub charged: u64,
 }
@@ -45,7 +45,6 @@ pub enum Lowered {
 pub struct Runner {
     library: NamedLibrary,
     prepared: PreparedLibrary,
-    layouts: RefCell<BTreeMap<u64, PreparedLibrary>>,
 }
 
 impl Runner {
@@ -90,34 +89,12 @@ impl Runner {
         Ok(Self {
             library,
             prepared: PreparedLibrary::new(Arc::new(registry)),
-            layouts: RefCell::new(BTreeMap::new()),
         })
-    }
-
-    /// Preparation belongs to the runner, like its default library. A cold
-    /// machine still opens fresh heap access at every park; only immutable
-    /// compiled code is shared between cases and continuations in a layout.
-    fn program_in_layout(&self, program: &Program, layout: Layout) -> Program {
-        let library = if layout == Layout::default() {
-            self.prepared.clone()
-        } else {
-            self.layouts
-                .borrow_mut()
-                .entry(layout.0)
-                .or_insert_with(|| {
-                    PreparedLibrary::with_layout(Arc::clone(self.prepared.registry()), layout)
-                })
-                .clone()
-        };
-        Program {
-            library,
-            ..program.clone()
-        }
     }
 
     pub fn run(&self, case: &Case) -> Result<Observed, String> {
         match self.lower(case)? {
-            Lowered::Program(program) => self.execute(case, &program, &[Layout::default()]),
+            Lowered::Program(program) => self.execute(case, &program),
             Lowered::Refused(observed) => Ok(observed),
         }
     }
@@ -161,7 +138,7 @@ impl Runner {
             Err(message) => {
                 return Ok(Lowered::Refused(Observed {
                     result: json!({"type":"refusal", "value":message.split(':').next().unwrap_or(&message)}),
-                    reached: BTreeSet::new(),
+                    helpers: BTreeSet::new(),
                     charged: 0,
                 }));
             }
@@ -176,19 +153,8 @@ impl Runner {
         }))
     }
 
-    /// Runs `program`, lowered from `case`, built in the first of
-    /// `layouts`. Given more than one, the run is sealed at each park and
-    /// opened cold in the next of them, by turns, before the park's
-    /// requests are answered.
-    pub fn execute(
-        &self,
-        case: &Case,
-        program: &Program,
-        layouts: &[Layout],
-    ) -> Result<Observed, String> {
-        let reopen = layouts.len() > 1;
-        let mut layouts = layouts.iter().copied().cycle();
-        let first = layouts.next().ok_or("a plan names a layout")?;
+    /// Runs one admitted program through the embedding API.
+    pub fn execute(&self, case: &Case, program: &Program) -> Result<Observed, String> {
         let bounds = Bounds {
             charge: 50_000_000,
             memory: 64 << 20,
@@ -197,9 +163,8 @@ impl Runner {
             requests_per_park: 100,
             join_members: 100,
         };
-        let source = crate::pages::Source::default();
-        let mut machine = crate::pages::with_source(
-            self.program_in_layout(program, first),
+        let mut machine = crate::pages::start(
+            program.clone(),
             bounds,
             CellStart {
                 target: Target::Main,
@@ -209,12 +174,15 @@ impl Runner {
                 modes: Default::default(),
                 host: Vec::new(),
             },
-            first,
-            &source,
         )
         .map_err(|e| e.to_string())?;
-        machine.count_work();
-        let mut reached = BTreeSet::new();
+        let helpers = program
+            .document
+            .manifest
+            .functions
+            .values()
+            .map(ToString::to_string)
+            .collect();
         let mut host = ScriptHost {
             bits: case.bits,
             stride: case.stride,
@@ -228,22 +196,6 @@ impl Runner {
             {
                 Step::Slice => return Err("unbounded slice yielded".into()),
                 Step::Parked(park) => {
-                    if reopen {
-                        reached.extend(Self::reached(&machine)?);
-                        let charged = machine.meters().charged;
-                        let layout = layouts.next().ok_or("a plan names a layout")?;
-                        crate::pages::reopen(
-                            &mut machine,
-                            &self.program_in_layout(program, layout),
-                            bounds,
-                            &source,
-                            layout,
-                        );
-                        machine.count_work();
-                        if machine.meters().charged != charged {
-                            return Err("reopening changed the charge".into());
-                        }
-                    }
                     for request in park.requests {
                         let effect = match request {
                             Request::Effect(effect) => effect,
@@ -276,30 +228,11 @@ impl Runner {
                 Step::Ended(other) => return Err(format!("unexpected end: {other:?}")),
             }
         };
-        reached.extend(Self::reached(&machine)?);
         Ok(Observed {
             result,
-            reached,
+            helpers,
             charged: machine.meters().charged,
         })
-    }
-
-    /// The library functions whose code or native ran in `machine`.
-    fn reached(machine: &lash_kernel_vm::KernelMachine) -> Result<BTreeSet<String>, String> {
-        let work = machine.work().ok_or("work counting is enabled")?;
-        let mut reached: BTreeSet<String> = work
-            .codes
-            .into_iter()
-            .filter(|row| row.counts.calls > 0 && row.symbol.function.is_some())
-            .map(|row| row.symbol.name)
-            .collect();
-        reached.extend(
-            work.natives
-                .into_iter()
-                .filter(|row| row.counts.calls > 0)
-                .map(|row| row.symbol.name),
-        );
-        Ok(reached)
     }
 }
 
@@ -382,35 +315,4 @@ pub fn tag(value: &Datum) -> Value {
         }
         other => json!({"type":"unsupported", "value":format!("{other:?}")}),
     }
-}
-
-/// The one census seam: the generated closed helper set, checked against
-/// the current release writes (which also carry kernel/extension natives).
-#[cfg(test)]
-pub fn helper_writes(dialect: &str) -> Result<BTreeSet<String>, String> {
-    use lash_vm_releases::{PythonHelper, TypeScriptHelper};
-    let helpers: BTreeSet<String> = match dialect {
-        "typescript" => TypeScriptHelper::ALL
-            .iter()
-            .map(|helper| helper.name().to_owned())
-            .collect(),
-        "python" => PythonHelper::ALL
-            .iter()
-            .map(|helper| helper.name().to_owned())
-            .collect(),
-        _ => return Err(format!("unknown dialect {dialect}")),
-    };
-    let built = lash_vm_releases::dialect(dialect).ok_or("missing dialect release")?;
-    let held = built.held_releases()?;
-    let release = held.retained.last().ok_or("missing current release")?;
-    let writes: BTreeSet<String> = release
-        .functions
-        .iter()
-        .filter(|function| release.writes.contains(&function.function))
-        .map(|function| function.definition.name.to_string())
-        .collect();
-    if !helpers.is_subset(&writes) {
-        return Err("generated helpers are missing from current release writes".into());
-    }
-    Ok(helpers)
 }

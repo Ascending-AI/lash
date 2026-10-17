@@ -4,13 +4,13 @@
 use serde_json::Value;
 use std::collections::BTreeSet;
 
-/// Function classes, not per-case tolerances. The class follows actual calls.
-pub fn implementation_approximated(reached: &BTreeSet<String>) -> bool {
+/// Function classes, not per-case tolerances. The class follows the helpers named by the document.
+pub fn implementation_approximated(helpers: &BTreeSet<String>) -> bool {
     const NAMES: &[&str] = &[
         "acos", "acosh", "asin", "asinh", "atan", "atan2", "atanh", "cbrt", "cos", "cosh", "exp",
         "expm1", "hypot", "log", "log10", "log1p", "log2", "pow", "sin", "sinh", "tan", "tanh",
     ];
-    reached.iter().any(|name| {
+    helpers.iter().any(|name| {
         name.strip_prefix("ts.math.")
             .or_else(|| name.strip_prefix("py.math."))
             .is_some_and(|name| NAMES.contains(&name))

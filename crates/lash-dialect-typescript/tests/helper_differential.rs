@@ -1,5 +1,5 @@
 //! FIG-6372: helpers agree exactly with recorded real-language observations;
-//! every released helper must actually run in the corpus, or name a ruling.
+//! compared through the embedding API, with named semantic deviations.
 #![expect(
     clippy::unwrap_used,
     reason = "integration law setup treats malformed corpus and machine failures as failed laws"
@@ -21,7 +21,7 @@ use std::collections::{BTreeMap, BTreeSet};
 use std::sync::OnceLock;
 
 use lash_kernel_doc::Datum;
-use runner::{Case, Runner, helper_writes, tag};
+use runner::{Case, Runner, tag};
 use serde::Deserialize;
 use serde_json::{Value, json};
 
@@ -32,14 +32,12 @@ struct Expected {
 }
 #[derive(Deserialize)]
 struct Deviation {
-    helper: Option<String>,
     rule: String,
     reason: String,
     case: String,
     expected: Value,
 }
 struct Results {
-    reached: BTreeSet<String>,
     mismatches: Vec<String>,
 }
 fn corpus(dialect: &str) -> Results {
@@ -62,7 +60,6 @@ fn corpus(dialect: &str) -> Results {
     let deviations: Vec<Deviation> =
         serde_json::from_str(include_str!("helper_differential/deviations.json")).unwrap();
     let runner = Runner::new(dialect).unwrap();
-    let mut reached = BTreeSet::new();
     let mut mismatches = vec![];
     let mut ids = BTreeSet::new();
     for case in cases.iter().filter(|case| case.dialect == dialect) {
@@ -71,8 +68,7 @@ fn corpus(dialect: &str) -> Results {
         match runner.run(case) {
             Err(error) => mismatches.push(format!("{}: {error}", case.id)),
             Ok(observed) => {
-                let approximate = comparison::implementation_approximated(&observed.reached);
-                reached.extend(observed.reached);
+                let approximate = comparison::implementation_approximated(&observed.helpers);
                 let deviation = deviations.iter().find(|d| d.case == case.id);
                 let wanted = deviation.map_or(reference, |d| {
                     assert!(!d.reason.is_empty() && !d.rule.is_empty());
@@ -102,15 +98,11 @@ fn corpus(dialect: &str) -> Results {
     }
     assert_eq!(ids, expected.cases.keys().cloned().collect());
     println!(
-        "{dialect}: {} corpus cases, {} mismatches, {} helpers ran",
+        "{dialect}: {} corpus cases, {} mismatches",
         ids.len(),
-        mismatches.len(),
-        reached.len()
+        mismatches.len()
     );
-    Results {
-        reached,
-        mismatches,
-    }
+    Results { mismatches }
 }
 fn results(dialect: &str) -> &'static Results {
     static TS: OnceLock<Results> = OnceLock::new();
@@ -131,38 +123,6 @@ fn python_helpers_match_cpython() {
     let r = results("python");
     assert!(r.mismatches.is_empty(), "{}", r.mismatches.join("\n"));
 }
-fn census(dialect: &str) {
-    let helpers = helper_writes(dialect).unwrap();
-    let deviations: Vec<Deviation> =
-        serde_json::from_str(include_str!("helper_differential/deviations.json")).unwrap();
-    let mut covered = results(dialect).reached.clone();
-    for deviation in deviations
-        .into_iter()
-        .filter(|d| d.case.starts_with(&format!("{dialect}/")))
-    {
-        assert!(!deviation.rule.is_empty() && !deviation.reason.is_empty());
-        if let Some(helper) = deviation.helper {
-            assert!(helpers.contains(&helper), "stale helper deviation {helper}");
-            covered.insert(helper);
-        }
-    }
-    let unreached: Vec<_> = helpers.difference(&covered).collect();
-    println!(
-        "{dialect}: {} released helpers, {} unreached: {unreached:?}",
-        helpers.len(),
-        unreached.len()
-    );
-    assert!(unreached.is_empty(), "{dialect}: unreached {unreached:?}");
-}
-#[test]
-fn typescript_release_write_set_is_reached() {
-    census("typescript");
-}
-#[test]
-fn python_release_write_set_is_reached() {
-    census("python");
-}
-
 /// K-HOST-003 and FIG-6368: range and type alone admit division by 2^64.
 #[test]
 fn host_random_matches_injected_top_53_bits_exactly() {

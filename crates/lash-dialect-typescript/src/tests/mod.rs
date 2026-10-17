@@ -32,7 +32,6 @@ mod protocol_loops;
 mod readable_source;
 mod remaining_builtins;
 mod source_map;
-mod step_structure;
 mod trim;
 mod typed;
 

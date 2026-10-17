@@ -120,26 +120,6 @@ lash_rust_binary(
 )
 
 lash_rust_integration_test(
-    name = "document_preparation__test",
-    crate_features = [],
-    crate_name = "document_preparation",
-    crate_root = "tests/document_preparation.rs",
-    declared_features = [],
-    data_exclude = [
-        "tests/test262/test/**/*.js",
-    ],
-    exec_properties = sized_exec_properties("lash-dialect-typescript", "document_preparation", "//crates/lash-dialect-typescript:document_preparation__test"),
-    extra_compile_data = [],
-    library = ":lash-dialect-typescript",
-    library_crate_name = "lash_dialect_typescript",
-    manifest_dir = "crates/lash-dialect-typescript",
-    package_name = "lash-dialect-typescript",
-    rustc_env = {},
-    tags = [],
-    version = "0.0.0-dev",
-)
-
-lash_rust_integration_test(
     name = "helper_differential__test",
     crate_features = [],
     crate_name = "helper_differential",
@@ -149,26 +129,6 @@ lash_rust_integration_test(
         "tests/test262/test/**/*.js",
     ],
     exec_properties = sized_exec_properties("lash-dialect-typescript", "helper_differential", "//crates/lash-dialect-typescript:helper_differential__test"),
-    extra_compile_data = [],
-    library = ":lash-dialect-typescript",
-    library_crate_name = "lash_dialect_typescript",
-    manifest_dir = "crates/lash-dialect-typescript",
-    package_name = "lash-dialect-typescript",
-    rustc_env = {},
-    tags = [],
-    version = "0.0.0-dev",
-)
-
-lash_rust_integration_test(
-    name = "helper_plan_independence__test",
-    crate_features = [],
-    crate_name = "helper_plan_independence",
-    crate_root = "tests/helper_plan_independence.rs",
-    declared_features = [],
-    data_exclude = [
-        "tests/test262/test/**/*.js",
-    ],
-    exec_properties = sized_exec_properties("lash-dialect-typescript", "helper_plan_independence", "//crates/lash-dialect-typescript:helper_plan_independence__test"),
     extra_compile_data = [],
     library = ":lash-dialect-typescript",
     library_crate_name = "lash_dialect_typescript",
@@ -210,19 +170,6 @@ filegroup(
     ]),
     copy = False,
     visibility = ["PUBLIC"],
-)
-
-load("//tools/buck2:test_batch.bzl", "lash_batch_test")
-
-lash_batch_test(
-    name = "test_batch",
-    budget = test_batch_budget("//crates/lash-dialect-typescript:test_batch"),
-    jobs = 2,
-    tests = [
-        ":document_preparation__test",
-        ":helper_differential__test",
-        ":helper_plan_independence__test",
-    ],
 )
 
 filegroup(

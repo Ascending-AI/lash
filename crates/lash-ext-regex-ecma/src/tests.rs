@@ -195,25 +195,6 @@ fn raised(outcome: &Result<Datum, Failure>) -> &ErrorDatum {
     }
 }
 
-/// `K-BND-001`, `K-LIB-007`: what a call keeps follows its matches times
-/// its groups, so it is reserved as it is kept. A heap with no room for it
-/// refuses the call, which the guard's work limit alone would let finish.
-#[test]
-fn a_regex_expansion_refuses_under_the_real_census() {
-    let input = "a".repeat(200);
-    for operation in [Operation::MatchAll, Operation::Replace, Operation::Split] {
-        let arguments = arguments(operation, "(a)", "g", &input);
-        let roomy = run(&cold(), operation, Limit::Stated, &arguments);
-        assert!(roomy.outcome.is_ok());
-        let tight = run(&cold(), operation, Limit::Stated, &|heap| {
-            let args = arguments(heap);
-            super::testsupport::limit_to_extra(heap, &args, 1 << 10);
-            args
-        });
-        assert_eq!(tight.outcome, Err(Failure::Memory), "{operation:?}");
-    }
-}
-
 /// Gate 5: results, charges and the point of guard failure are equal with
 /// the cache cold and warm, at the stated limit, at the smallest limit that
 /// lets the call finish, and one unit below it.

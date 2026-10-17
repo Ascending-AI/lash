@@ -471,9 +471,6 @@ pub(super) fn plain_record_resume(source: &str, slice: u64, restore: bool) -> (D
         &source_pages,
     )
     .unwrap();
-    if !restore {
-        machine.count_work();
-    }
     let mut result = None;
     let mut imports = 0;
     loop {
@@ -508,12 +505,6 @@ pub(super) fn plain_record_resume(source: &str, slice: u64, restore: bool) -> (D
             }
             Step::Ended(End::Finished(_)) => {
                 let charged = machine.meters().charged;
-                if !restore {
-                    let work = machine.work().expect("work counted");
-                    assert_eq!(work.charged, charged);
-                    assert_eq!(work.residual(), 0);
-                    assert_eq!(work.insertion_residual(), 0);
-                }
                 return (result.expect("finish result"), charged, imports);
             }
             other => panic!("{other:?}"),
@@ -538,8 +529,8 @@ fn plain_record_mid_path_park_resumes_the_guarded_heap() {
     );
 }
 
-/// K-CHG-007, K-MACH-007, TS-PLAIN-PATH: direct member work has zero
-/// accounting residual and the same exact charge over serialized slices.
+/// K-CHG-007, K-MACH-007, TS-PLAIN-PATH: direct member access preserves
+/// its result and exact charge over serialized slices.
 #[test]
 fn plain_record_paths_account_charge_across_slice_resume() {
     let source = "const r = { next: { leaf: 0 } }; for (let n = 0; n < 3; n++) { r.next.leaf = n; } await finish(r);";

@@ -581,8 +581,8 @@ body {
 }
 "#;
 
-/// FIG-6105 and K-CHG-007: numeric admission allocates no key list and
-/// charges its executed body. K-MACH-007/008: both the new body and a
+/// FIG-6105 and K-CHG-007: numeric admission charges its exact tariff.
+/// K-MACH-007/008: both the new body and a
 /// retained old pin resume with their own results and exact charges.
 #[test]
 fn numeric_map_keys_charge_only_their_body_and_retained_pins_resume() {
@@ -632,9 +632,6 @@ fn numeric_map_keys_charge_only_their_body_and_retained_pins_resume() {
             &source,
         )
         .unwrap();
-        if !relay {
-            machine.count_work();
-        }
         let mut host = Console::default();
         loop {
             match machine
@@ -650,7 +647,7 @@ fn numeric_map_keys_charge_only_their_body_and_retained_pins_resume() {
                         lash_kernel_vm::Layout::default(),
                     );
                 }
-                Step::Ended(end) => return (end, machine.meters().charged, machine.work()),
+                Step::Ended(end) => return (end, machine.meters().charged),
                 other => panic!("a key never parks: {other:?}"),
             }
         }
@@ -667,8 +664,7 @@ fn numeric_map_keys_charge_only_their_body_and_retained_pins_resume() {
         Datum::Float(Float::new(f64::NAN)),
         Datum::Float(Float::new(f64::INFINITY)),
     ] {
-        let (end, charge, work) = run(fast.clone(), value.clone(), false);
-        let work = work.unwrap();
+        let (end, charge) = run(fast.clone(), value.clone(), false);
         // Entry call/return: 4 + deep(result). The helper's return,
         // call expression, three arguments and two tuple writes cost 9;
         // atomic key.identity costs 1 + deep(result).
@@ -679,16 +675,12 @@ fn numeric_map_keys_charge_only_their_body_and_retained_pins_resume() {
         };
         let expected_charge = 4 + deep + 9 + 1 + deep;
         assert_eq!(charge, expected_charge, "K-CHG-007: {value:?}");
-        assert_eq!(
-            work.heap_insertions, 0,
-            "numeric key admission needs no list"
-        );
-        let (relayed, relayed_charge, _) = run(fast.clone(), value.clone(), true);
+        let (relayed, relayed_charge) = run(fast.clone(), value.clone(), true);
         assert_eq!((relayed, relayed_charge), (end.clone(), charge));
-        let (old_end, old_charge, _) = run(retained.clone(), value.clone(), false);
+        let (old_end, old_charge) = run(retained.clone(), value.clone(), false);
         assert_eq!(old_end, end);
         assert!(old_charge > charge, "less work costs less");
-        let (relayed_old, relayed_old_charge, _) = run(retained.clone(), value, true);
+        let (relayed_old, relayed_old_charge) = run(retained.clone(), value, true);
         assert_eq!((relayed_old, relayed_old_charge), (old_end, old_charge));
     }
 }

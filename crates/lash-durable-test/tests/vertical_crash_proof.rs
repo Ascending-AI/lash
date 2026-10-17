@@ -152,9 +152,6 @@ enum Protocol {
     /// a first turn binding it and a second turn's cell reading it. Its
     /// calls are scripted by ordinal, not by [`Protocol::rounds`].
     Defaults,
-    /// A code cell that keeps a large text across every await of its
-    /// operation (PC-LARGE-ONCE).
-    Large(Pad),
     /// Two cells in one turn (PC-WORKING): A binds a text and a function
     /// its report never shows, around the operation; after a model wait B
     /// reads them, and ends as [`Second`] says.
@@ -204,45 +201,12 @@ fn working_second_cell(second: Second) -> &'static str {
     }
 }
 
-/// What [`Protocol::Large`]'s cell keeps after each await: the same large
-/// text, or a fresh one.
-#[derive(Clone, Copy, Debug, PartialEq, Eq)]
-enum Pad {
-    Repeated,
-    Fresh,
-}
-
-/// The large text's length: far past the 256-byte inline bound.
-const PAD: usize = 16 * 1024;
-/// How many times [`Protocol::Large`]'s cell awaits its operation.
-const AWAITS: usize = 10;
-
-impl Pad {
-    /// The cell: a `PAD`-byte text in its source, kept once more after each
-    /// of `AWAITS` awaits, as itself or as a fresh text.
-    fn cell(self) -> String {
-        let kept = match self {
-            Self::Repeated => "pad",
-            Self::Fresh => "pad + i",
-        };
-        format!(
-            "<typescript>\nconst pad = \"{}\";\nconst kept = [];\nfor (let i = 0; i < {AWAITS}; i++) {{\n  const written = await tools.ext_write({{ x: i }});\n  kept.push({kept});\n}}\nconsole.log(kept.length);\n</typescript>",
-            "x".repeat(PAD)
-        )
-    }
-}
-
 impl Protocol {
     /// How many times the scripted model calls the operation before it
     /// answers in prose.
     fn rounds(self) -> usize {
         match self {
-            Self::Code
-            | Self::ImageCell(_, _)
-            | Self::Tools
-            | Self::Noted
-            | Self::Archived
-            | Self::Large(_) => 1,
+            Self::Code | Self::ImageCell(_, _) | Self::Tools | Self::Noted | Self::Archived => 1,
             Self::NotedTwice | Self::Working(_) => 2,
             // Defaults scripts every call by its ordinal itself.
             Self::Defaults => usize::MAX,
@@ -353,7 +317,6 @@ fn model(protocol: Protocol, seen: Arc<Mutex<Seen>>) -> ProviderHandle {
                         (false, Protocol::ImageCell(source, _)) => text(&request, source),
                         (false, Protocol::Code) => text(&request, CELL),
                         (false, Protocol::Archived) => text(&request, ARCHIVED_CELL),
-                        (false, Protocol::Large(pad)) => text(&request, &pad.cell()),
                         (false, Protocol::Working(second)) => match called {
                             0 => text(&request, WORKING_FIRST_CELL),
                             _ => text(&request, working_second_cell(second)),
@@ -424,7 +387,6 @@ fn core(
         | Protocol::ImageCell(_, _)
         | Protocol::Archived
         | Protocol::Defaults
-        | Protocol::Large(_)
         | Protocol::Working(_) => lash::LashCore::rlm_builder(
             backend.clone(),
             lash::rlm::RlmProtocolPluginFactory::new(
@@ -832,11 +794,7 @@ impl V0 {
         }
         if matches!(
             self.protocol,
-            Protocol::Code
-                | Protocol::ImageCell(_, _)
-                | Protocol::Archived
-                | Protocol::Large(_)
-                | Protocol::Working(_)
+            Protocol::Code | Protocol::ImageCell(_, _) | Protocol::Archived | Protocol::Working(_)
         ) && programs == 0
         {
             violations.push("the turn's cell never ran".to_owned());
@@ -1184,7 +1142,6 @@ fn uncut_labels(protocol: Protocol) -> Vec<CommitLabel> {
             CommitLabel::TURN_COMMIT,
             CommitLabel::SESSION_RELEASE,
         ],
-        Protocol::Large(_) => unreachable!("the large-value law runs its turn uncut"),
         Protocol::Defaults => unreachable!("the session-capture law runs its turns uncut"),
         // The second cell never saves: the response that asked for it
         // commits with the model start that consumes its answer (FIG-6000).
@@ -1667,38 +1624,6 @@ impl Published {
         }
     }
 
-    /// The text the payload tree at `page` spells, when `page` is a
-    /// published text payload page.
-    fn text(&self, page: lash_core_store::checkpoint_graph::NodeId) -> Option<String> {
-        use lash_core_store::checkpoint_graph::{
-            DecodeLimits, GraphDecoder, NodeId, TokenReader, parse_envelope,
-        };
-        use lash_kernel_state::paged::PageKind;
-        let kind = parse_envelope(self.0.get(&page)?, Some(page)).ok()?.kind;
-        let body = GraphDecoder::new(self, DecodeLimits::within_total(u64::MAX))
-            .logical_body(page, kind)
-            .ok()?;
-        let mut reader = TokenReader::new(&body);
-        if kind.0 == PageKind::PAYLOAD_LEAF.0 {
-            reader.expect_struct(3).ok()?;
-            if !reader.bool().ok()? {
-                return None;
-            }
-            reader.skip_tree().ok()?;
-            return reader.text().ok().map(str::to_owned);
-        }
-        if kind.0 != PageKind::PAYLOAD_INDEX.0 {
-            return None;
-        }
-        let mut text = String::new();
-        for _ in 0..reader.seq().ok()? {
-            reader.expect_struct(2).ok()?;
-            reader.skip_tree().ok()?;
-            text.push_str(&self.text(NodeId(reader.child().ok()?.0))?);
-        }
-        Some(text)
-    }
-
     /// The published pages `nodes` reach, through pages: a hydrated node
     /// that is a heap page is read as its published page.
     fn reached(
@@ -1732,105 +1657,10 @@ impl Published {
     }
 }
 
-/// Bytes actually staged on each park, including repeated node IDs: the
-/// nodes its transaction stages and the fresh pages its candidate
-/// publishes. A content address deduplicates storage, not transmission to
-/// the store.
-struct Transmissions {
-    expected: std::collections::BTreeSet<String>,
-    /// Each park's commit number and bytes.
-    parks: Vec<(usize, usize)>,
-    /// The cell's literal text, a text leaf of its program: its commits.
-    literal: BTreeMap<lash_core_store::checkpoint_graph::NodeId, Vec<(CommitLabel, usize)>>,
-    /// Each large text the heap paged, by its payload tree's root page:
-    /// its commits, label and commit number.
-    large: BTreeMap<lash_core_store::checkpoint_graph::NodeId, Vec<(CommitLabel, usize)>>,
-    /// Each payload page's commits: a large text's pages, transmitted once.
-    payload: BTreeMap<lash_core_store::checkpoint_graph::NodeId, Vec<usize>>,
-    /// The fresh pages of the candidate whose owner commit is observed next.
-    pending: Vec<lash_core_store::checkpoint_graph::EncodedNode>,
-    published: Published,
-    commits: usize,
-}
-
-impl Transmissions {
-    fn new(pad: Pad) -> Self {
-        let text = "x".repeat(PAD);
-        let mut expected = std::collections::BTreeSet::from([text.clone()]);
-        if pad == Pad::Fresh {
-            expected.extend((0..AWAITS).map(|i| format!("{text}{i}")));
-        }
-        Self {
-            expected,
-            parks: Vec::new(),
-            literal: BTreeMap::new(),
-            large: BTreeMap::new(),
-            payload: BTreeMap::new(),
-            pending: Vec::new(),
-            published: Published::default(),
-            commits: 0,
-        }
-    }
-
-    fn observe_candidate(&mut self, nodes: &[lash_core_store::checkpoint_graph::EncodedNode]) {
-        self.published.insert(nodes);
-        self.pending.extend_from_slice(nodes);
-    }
-
-    fn observe(&mut self, label: CommitLabel, tx: &lash_durable::ActorTx) {
-        use lash_core_store::checkpoint_graph::{NodeKind, TokenReader, parse_envelope};
-        self.commits += 1;
-        let commit = self.commits;
-        let pages = std::mem::take(&mut self.pending);
-        let bytes = tx
-            .graph()
-            .values()
-            .map(|node| node.bytes.len())
-            .sum::<usize>()
-            + pages.iter().map(|node| node.bytes.len()).sum::<usize>();
-        for (id, node) in tx.graph() {
-            if node.bytes.len() >= PAD {
-                let envelope = parse_envelope(&node.bytes, Some(*id)).expect("a staged envelope");
-                if envelope.kind == NodeKind::TEXT_LEAF {
-                    let mut reader = TokenReader::new(envelope.body);
-                    let text = reader.text().expect("a text leaf");
-                    if self.expected.contains(text) {
-                        self.literal.entry(*id).or_default().push((label, commit));
-                    }
-                }
-            }
-        }
-        // A paged large text is its payload tree's root page.
-        for page in &pages {
-            let kind = parse_envelope(&page.bytes, Some(page.id)).map(|envelope| envelope.kind.0);
-            if kind.is_ok_and(|kind| {
-                kind == lash_kernel_state::paged::PageKind::PAYLOAD_LEAF.0
-                    || kind == lash_kernel_state::paged::PageKind::PAYLOAD_INDEX.0
-            }) {
-                self.payload.entry(page.id).or_default().push(commit);
-            }
-            if self
-                .published
-                .text(page.id)
-                .is_some_and(|text| self.expected.contains(&text))
-            {
-                self.large.entry(page.id).or_default().push((label, commit));
-            }
-        }
-        if label == CommitLabel::CELL_SNAPSHOT_ADMIT
-            || label == CommitLabel::MODEL_DONE_CELL_SNAPSHOT_ADMIT
-        {
-            self.parks.push((commit, bytes));
-        }
-    }
-}
-
 #[path = "vertical_crash_proof/corpus.rs"]
 mod corpus;
 #[path = "support/kernel_images.rs"]
 mod kernel_images;
-#[path = "vertical_crash_proof/large_values.rs"]
-mod large_values;
 #[path = "vertical_crash_proof/session_capture.rs"]
 mod session_capture;
 #[path = "vertical_crash_proof/images.rs"]

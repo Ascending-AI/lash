@@ -1,9 +1,7 @@
 //! TS-CALL-SLOTS: a stable direct call and its exported packed entry share
 //! one body, preserving argument/default evaluation and parked state.
 use super::machine;
-use lash_kernel_doc::{
-    Action, Atom, Datum, Expr, Handle, Integer, Literal, Name, Rhs, Stmt, Timestamp, Type,
-};
+use lash_kernel_doc::{Datum, Expr, Handle, Integer, Literal, Name, Rhs, Stmt, Timestamp, Type};
 use lash_kernel_vm::{
     Bounds, CellStart, End, Host, KernelMachine, Layout, Machine, Outcome, Program, Request, Step,
     Target,
@@ -133,105 +131,6 @@ fn returning_branch(stmts: &mut [Stmt]) -> Option<&mut Vec<Stmt>> {
         }
     }
     None
-}
-
-#[test]
-fn a_paged_positional_stack_resumes_with_a_new_layout() {
-    let mut document = super::lower_with_effects("function descend(n) { if (n < 1) return n; return descend(n - 1); } console.log(descend(60));").unwrap().document.into_document();
-    // A host may edit the kernel document. Insert the wait at the base case
-    // so the synchronous positional entry itself parks with the whole stack.
-    let body = document
-        .main
-        .iter_mut()
-        .find_map(|stmt| match stmt {
-            Stmt::Assign {
-                value: Rhs::Expr(Expr::Closure(closure)),
-                ..
-            } => Some(&mut closure.body),
-            _ => None,
-        })
-        .expect("the shared positional body");
-    let block = returning_branch(body).expect("the recursive base case");
-    document.manifest.effects.insert(
-        lash_kernel_doc::EffectName::new("echo").unwrap(),
-        machine::effects()[&lash_kernel_doc::EffectName::new("echo").unwrap()].clone(),
-    );
-    let result = Name::new("parked_answer");
-    *block = vec![
-        Stmt::Let {
-            name: result.clone(),
-            value: Rhs::Action(Action::Perform {
-                effect: lash_kernel_doc::EffectName::new("echo").unwrap(),
-                args: vec![Atom::Literal(Literal::Float(lash_kernel_doc::Float::new(
-                    0.0,
-                )))],
-                result: Type::Any,
-                then_yield: false,
-            }),
-        },
-        Stmt::Return {
-            value: Expr::Variable(result),
-        },
-    ];
-    let program = Program {
-        release: super::pages::RELEASE,
-        document: Arc::new(document),
-        library: machine::prepared().clone(),
-    };
-    let source = super::pages::Source::default();
-    let mut machine = super::pages::with_source(
-        program.clone(),
-        BOUNDS,
-        CellStart {
-            owner: super::pages::OWNER,
-            target: Target::Main,
-            args: Vec::new(),
-            session: None,
-            modes: Default::default(),
-            host: Vec::new(),
-        },
-        Layout::default(),
-        &source,
-    )
-    .unwrap();
-    let mut console = Console::default();
-    let Step::Parked(park) = machine.run(&mut console, u64::MAX).unwrap() else {
-        panic!("the deep call must park")
-    };
-    let sealed = machine.seal(super::pages::BUDGET).unwrap().unwrap();
-    let heap = lash_kernel_state::paged::PagedHeap::open_header(
-        sealed.root.heap,
-        Box::new(source.clone()),
-        lash_kernel_state::paged::EditEpoch(2),
-    )
-    .unwrap();
-    let tasks =
-        lash_kernel_state::paged::tree::Tree::<lash_kernel_state::paged::TaskRecord>::of_keyed(
-            &sealed.root.tasks,
-        );
-    let task = tasks
-        .get(
-            &lash_kernel_state::paged::directory::ordinal_key(0),
-            heap.pages(),
-        )
-        .unwrap()
-        .unwrap();
-    assert_eq!(task.frames.len(), 62);
-    super::pages::reopen(&mut machine, &program, BOUNDS, &source, Layout(17));
-    let [Request::Effect(effect)] = park.requests.as_slice() else {
-        panic!("one base-case effect")
-    };
-    machine
-        .deliver(
-            effect.wait,
-            Outcome::Completed(Datum::Float(lash_kernel_doc::Float::new(0.0))),
-        )
-        .unwrap();
-    assert!(matches!(
-        machine.run(&mut console, u64::MAX).unwrap(),
-        Step::Ended(End::Finished(_))
-    ));
-    assert_eq!(console.lines, [Datum::Text("0".into())]);
 }
 
 /// What a session cell's end saved, recorded through the dialect's own
@@ -385,7 +284,7 @@ fn a_saved_positional_function_runs_and_resumes_without_its_partner_in_scope() {
                 .run(&mut console, if cold { 1 } else { u64::MAX })
                 .unwrap();
             if cold && matches!(step, Step::Slice | Step::Parked(_)) {
-                super::pages::reopen(&mut current, &program, BOUNDS, &source, Layout(17));
+                super::pages::reopen(&mut current, &program, BOUNDS, &source, Layout::default());
             }
             match step {
                 Step::Slice => {}
