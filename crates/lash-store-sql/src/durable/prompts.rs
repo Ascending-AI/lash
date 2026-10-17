@@ -53,8 +53,47 @@ crate::statements! {
 
         /// Call `?3` of owner `?2` in session `?1`: its snapshot, its
         /// request and the epoch that wrote it.
-        read_snapshot = "SELECT snapshot, request, written_epoch FROM prompt_snapshots
+        read_snapshot = "SELECT snapshot, request, written_epoch,
+                 request IS NULL AND (snapshot IS NULL OR EXISTS (
+                     SELECT 1 FROM session_runs AS ended
+                     WHERE ended.session_id = audit.session_id
+                       AND 'turn:' || ended.run = audit.owner
+                       AND ended.terminal_kind IS NOT NULL
+                       AND ended.terminal_window_revision IS NOT NULL
+                       AND NOT EXISTS (
+                           SELECT 1 FROM session_revisions AS revision
+                           WHERE revision.session_id = ended.session_id
+                             AND revision.head_revision = ended.terminal_window_revision
+                       )
+                 )) AS expired
+             FROM prompt_snapshots AS audit
              WHERE session_id = ?1 AND owner = ?2 AND call = ?3";
+
+        /// One bounded page of settled audit roots whose revision was released.
+        /// Pending requests retain both parts regardless of revision membership.
+        expired_calls = "SELECT audit.session_id, audit.owner, audit.call
+             FROM prompt_snapshots AS audit
+             JOIN session_runs AS ended ON ended.session_id = audit.session_id
+               AND audit.owner = 'turn:' || ended.run
+             WHERE (?1 IS NULL OR audit.session_id = ?1)
+               AND audit.request IS NULL AND audit.snapshot IS NOT NULL
+               AND ended.terminal_kind IS NOT NULL
+               AND ended.terminal_window_revision IS NOT NULL
+               AND NOT EXISTS (
+                   SELECT 1 FROM session_revisions AS revision
+                   WHERE revision.session_id = ended.session_id
+                     AND revision.head_revision = ended.terminal_window_revision
+               )
+             ORDER BY audit.session_id, audit.owner, audit.call LIMIT ?2";
+
+        /// Sever only a settled call's audit edges; the compact identity stays.
+        release_audit_edges = "DELETE FROM prompt_snapshot_texts
+             WHERE session_id = ?1 AND owner = ?2 AND call = ?3 AND part = 'snapshot'
+             RETURNING hash";
+
+        /// Expire an audit without forgetting that the call was already admitted.
+        expire_audit = "UPDATE prompt_snapshots SET snapshot = NULL
+             WHERE session_id = ?1 AND owner = ?2 AND call = ?3 AND request IS NULL";
 
         /// The texts call `?3` of owner `?2` in session `?1` references,
         /// each with the part that references it.

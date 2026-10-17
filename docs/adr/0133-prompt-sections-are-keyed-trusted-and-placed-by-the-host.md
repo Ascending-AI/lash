@@ -28,8 +28,8 @@ before-turn decisions (§6). Request templates with live attachment slots
 (§6, WIRE-SLOTS) are on main under ADR 0135: admission records literals,
 attachment refs, acceptance and codecs, and the response contract. Each
 attempt fills slots afresh; resolved delivery values are never admitted.
-A call's request lives only until the call settles, its snapshot until the
-explicit retention, and a record binds only the text bodies the store does
+A turn call's request lives until settlement; its settled snapshot follows
+its terminal revision's recorded session retention. A record binds only the text bodies the store does
 not hold (§5).
 
 ## Context
@@ -230,11 +230,19 @@ still unsettled, which keeps the new call's request. Settling a request
 removes its edges and every text no other edge names, under the same sorted
 text locks a release takes; a root that held only its request goes with it.
 The snapshot part, the audit record the host reads through
-`SessionPromptAdmin::snapshot`, outlives its call and its turn. Only the
-explicit retention, `PromptWrite::Release` for a turn or a whole session,
-removes roots, and a text goes with the last edge that names it. Deleting a
-session is that retention: the delete releases every root of the session in
-its own transaction (FIG-5272). On PostgreSQL a record, a settlement and a
+`SessionPromptAdmin::snapshot`, follows its turn's terminal revision under
+its session's recorded `Retention`: `HeadOnly`, `LastTurns(n)`, or `UntilGc`.
+The head and pins retain the exact audit with their revision. Releasing that
+revision makes a settled audit read return typed `PromptAuditExpired` immediately,
+including while physical cleanup drains. Pending requests retain both parts;
+the reusable lowering prefix retains its own text closure. Cleanup releases
+at most `MATERIAL_RELEASE_BATCH` (128) audit roots per transaction, and GC drains
+remaining pages without requiring another session commit. Each release removes
+its text edges and reclaims only last-reference texts, leaving the compact call
+identity so an expired call still cannot be recorded twice. Explicit
+`PromptWrite::Release` also releases a turn or a whole session; deleting a
+session releases all its roots in its own transaction (FIG-5272).
+On PostgreSQL a record, a settlement and a
 release that share a text serialize on that text's advisory lock, shared for
 the record and exclusive for the others, so none fails the text's foreign key
 and no recorded call loses its text. An owned call's (§8) request stays until

@@ -981,10 +981,14 @@ CREATE TABLE IF NOT EXISTS lash_prompt_snapshots (
     snapshot TEXT,
     request TEXT,
     written_epoch BIGINT NOT NULL,
-    PRIMARY KEY (session_id, owner, call),
-    CONSTRAINT ck_lash_prompt_snapshots_held
-        CHECK (snapshot IS NOT NULL OR request IS NOT NULL)
+    -- Both parts NULL is a compact expired-call identity.
+    PRIMARY KEY (session_id, owner, call)
 );
+
+-- Reclaimed call identities stay out of the release scan.
+CREATE INDEX IF NOT EXISTS idx_lash_prompt_snapshots_settled
+    ON lash_prompt_snapshots (session_id, owner, call)
+    WHERE request IS NULL AND snapshot IS NOT NULL;
 
 CREATE TABLE IF NOT EXISTS lash_prompt_texts (
     hash TEXT PRIMARY KEY,
@@ -1311,9 +1315,9 @@ DECLARE
     v_answer JSONB;
     v_frame TEXT;
 BEGIN
-    -- Generated from this build's statements (registry 0307903439597152); a call
+    -- Generated from this build's statements (registry 3ef43a73c4547a73); a call
     -- built from others is refused, as is any isolation but read committed.
-    IF p_registry IS DISTINCT FROM '0307903439597152'
+    IF p_registry IS DISTINCT FROM '3ef43a73c4547a73'
         OR current_setting('transaction_isolation') <> 'read committed' THEN
         RAISE EXCEPTION 'lash_owner_commit: registry or isolation refused' USING ERRCODE = 'LX000';
     END IF;
@@ -1989,7 +1993,7 @@ BEGIN
                  RETURNING hash
              ), bare AS (
                  DELETE FROM lash_prompt_snapshots
-                  WHERE session_id = (v_p->>0) AND owner = (v_p->>1) AND snapshot IS NULL
+                  WHERE session_id = (v_p->>0) AND owner = (v_p->>1) AND snapshot IS NULL AND request IS NOT NULL
                     AND ((v_p->>2)::TEXT IS NULL OR call <> (v_p->>2)::TEXT)
              ), kept AS (
                  UPDATE lash_prompt_snapshots SET request = NULL
@@ -1998,6 +2002,41 @@ BEGIN
                     AND ((v_p->>2)::TEXT IS NULL OR call <> (v_p->>2)::TEXT)
              )
              SELECT DISTINCT hash FROM released LOOP
+                IF v_step ? 'c' AND v_first IS NULL THEN
+                    v_first := to_jsonb(v_row);
+                END IF;
+                v_rows := v_rows + 1;
+                IF v_row."hash" IS NOT NULL THEN v_texts := v_texts || v_row."hash"::TEXT; END IF;
+            END LOOP;
+        WHEN 'durable_prompt_postgres.expire_audits' THEN
+            v_rows := 0;
+            FOR v_row IN WITH candidates AS MATERIALIZED (
+                 SELECT audit.session_id, audit.owner, audit.call
+                 FROM lash_prompt_snapshots AS audit
+                 JOIN lash_session_runs AS ended ON ended.session_id = audit.session_id
+                   AND audit.owner = 'turn:' || ended.run
+                 WHERE ((v_p->>0)::TEXT IS NULL OR audit.session_id = (v_p->>0))
+                   AND audit.request IS NULL AND audit.snapshot IS NOT NULL
+                   AND ended.terminal_kind IS NOT NULL
+                   AND ended.terminal_window_revision IS NOT NULL
+                   AND NOT EXISTS (
+                       SELECT 1 FROM lash_session_revisions AS revision
+                       WHERE revision.session_id = ended.session_id
+                         AND revision.head_revision = ended.terminal_window_revision
+                   )
+                 ORDER BY audit.session_id, audit.owner, audit.call LIMIT ((v_p->>1)::BIGINT)
+                 FOR UPDATE OF audit
+             ), released AS (
+                 DELETE FROM lash_prompt_snapshot_texts
+                 WHERE (session_id, owner, call) IN (SELECT * FROM candidates)
+                   AND part = 'snapshot'
+                 RETURNING hash
+             ), expired AS (
+                 UPDATE lash_prompt_snapshots SET snapshot = NULL
+                 WHERE (session_id, owner, call) IN (SELECT * FROM candidates)
+                 RETURNING call
+             ) SELECT (SELECT COUNT(*) FROM expired) AS released_count, released.hash
+               FROM (SELECT 1) AS singleton LEFT JOIN released ON TRUE LOOP
                 IF v_step ? 'c' AND v_first IS NULL THEN
                     v_first := to_jsonb(v_row);
                 END IF;

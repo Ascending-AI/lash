@@ -7,9 +7,11 @@
 //! The two parts live apart (FIG-5946). The request is read only to send the
 //! call, so the commit that settles the call releases it
 //! ([`PromptWrite::Settle`]): its edges go, and so does every text no other
-//! edge names. The snapshot outlives the turn: only [`PromptWrite::Release`],
-//! the explicit retention, removes it, and a text goes with the last edge
-//! that references it.
+//! edge names. A settled turn's snapshot follows its terminal revision's
+//! retention. Release severs its audit edges and keeps a compact call identity;
+//! reads of the released audit return typed expired even before physical
+//! reclamation finishes. A text goes with the last edge that references it.
+//! [`PromptWrite::Release`] also supports explicit root and session deletion.
 
 use lash_sansio::{SessionId, TurnId};
 

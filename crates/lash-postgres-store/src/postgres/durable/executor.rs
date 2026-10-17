@@ -222,6 +222,7 @@ pub(super) fn entries() -> Vec<&'static Entry> {
         &processes::FORGET_HOLDS,
         &session_close::SCOPE_ENDING,
         &prompts::SETTLE,
+        &prompts::EXPIRE_AUDITS,
         &prompts::HOLD_PREFIX,
         &prompts::RELEASE_PREFIX,
         &prompts::RECLAIM,

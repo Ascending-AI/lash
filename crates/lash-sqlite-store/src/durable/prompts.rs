@@ -83,7 +83,7 @@ lash_store_sql::statements! {
         /// Release the root of every such call that holds no snapshot: its
         /// request was all it held.
         settle_bare_roots = "DELETE FROM prompt_snapshots
-             WHERE session_id = ?1 AND owner = ?2 AND snapshot IS NULL
+             WHERE session_id = ?1 AND owner = ?2 AND snapshot IS NULL AND request IS NOT NULL
                AND (?3 IS NULL OR call <> ?3)";
 
         /// Release the request of every other such call, keeping its
@@ -137,9 +137,14 @@ CREATE TABLE IF NOT EXISTS prompt_snapshots (
     snapshot TEXT,
     request TEXT,
     written_epoch INTEGER NOT NULL,
-    PRIMARY KEY (session_id, owner, call),
-    CONSTRAINT ck_prompt_snapshots_held CHECK (snapshot IS NOT NULL OR request IS NOT NULL)
+    -- Both parts NULL is a compact expired-call identity.
+    PRIMARY KEY (session_id, owner, call)
 );
+
+-- Reclaimed call identities stay out of the release scan.
+CREATE INDEX IF NOT EXISTS idx_prompt_snapshots_settled
+    ON prompt_snapshots (session_id, owner, call)
+    WHERE request IS NULL AND snapshot IS NOT NULL;
 
 CREATE TABLE IF NOT EXISTS prompt_texts (
     hash TEXT PRIMARY KEY,
@@ -357,6 +362,46 @@ pub(crate) fn release(
     reclaim(tx, &released)
 }
 
+/// Release one bounded page of settled audit roots. Call identities survive,
+/// so a repeated admission remains refused after physical reclamation.
+pub(crate) fn release_unretained(
+    tx: &Connection,
+    session: Option<&SessionId>,
+) -> rusqlite::Result<usize> {
+    let calls = {
+        let mut statement = tx.prepare_cached(SQL.expired_calls.sql())?;
+        let rows = statement.query_map(
+            rusqlite::params![
+                session.map(SessionId::as_str),
+                i64::from(lash_store_sql::session::revisions::MATERIAL_RELEASE_BATCH)
+            ],
+            |row| {
+                Ok((
+                    row.get::<_, String>(0)?,
+                    row.get::<_, String>(1)?,
+                    row.get::<_, String>(2)?,
+                ))
+            },
+        )?;
+        rows.collect::<rusqlite::Result<Vec<_>>>()?
+    };
+    let mut released = BTreeSet::new();
+    for (session, owner, call) in &calls {
+        released.extend(hash_set(
+            tx,
+            SQL.release_audit_edges.sql(),
+            rusqlite::params![session, owner, call],
+        )?);
+        cached_execute(
+            tx,
+            SQL.expire_audit.sql(),
+            rusqlite::params![session, owner, call],
+        )?;
+    }
+    reclaim(tx, &released)?;
+    Ok(calls.len())
+}
+
 /// Each distinct `(part, hash)` edge of a root over `snapshot_texts` and
 /// `request_texts`.
 fn edges<'a>(
@@ -438,19 +483,25 @@ fn hash_set(
 
 pub(super) fn snapshot(tx: &Connection, call: &PromptCallKey) -> Answer<Option<PromptSnapshotRow>> {
     let (session, owner, ordinal) = call_params(call);
-    let Some((snapshot, request, written_epoch)) = tx
+    let Some((snapshot, request, written_epoch, expired)) = tx
         .prepare_cached(SQL.read_snapshot.sql())?
         .query_row(rusqlite::params![session, owner, ordinal], |row| {
             Ok((
                 row.get::<_, Option<String>>(0)?,
                 row.get::<_, Option<String>>(1)?,
                 row.get::<_, i64>(2)?,
+                row.get::<_, bool>(3)?,
             ))
         })
         .optional()?
     else {
         return Ok(Ok(None));
     };
+    if expired {
+        return Ok(Err(DurableError::Domain(
+            DomainRefusal::PromptAuditExpired { call: call.clone() },
+        )));
+    }
     let mut snapshot_texts = Vec::new();
     let mut request_texts = Vec::new();
     let mut statement = tx.prepare_cached(SQL.read_edges.sql())?;
@@ -506,4 +557,161 @@ pub(super) fn texts(tx: &Connection, hashes: &[String]) -> Answer<Vec<PromptText
         }
     }
     Ok(Ok(texts))
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use lash_core_execution::{SessionCatalogStore as _, Target};
+    use lash_durable::{ActorKey, CommitLabel, DomainWrite, DurableReads, DurableStore};
+
+    /// PROMPT-AUDIT-RETENTION: revision expiry releases settled audit plans
+    /// and last-reference texts, retaining pending requests and the prefix.
+    #[tokio::test]
+    async fn settled_prompt_audits_follow_revision_retention() {
+        let set = crate::SqliteStoreSet::memory().await.unwrap();
+        let identity = lash_core_execution::testing::sql_work::owner_commit(&set).await;
+        let store = set.durable_store();
+        let session = SessionId::from("sql-work-owner");
+        let actor = ActorKey::session(session.as_str()).unwrap();
+        let call = |ordinal| PromptCallKey {
+            session: session.clone(),
+            call: ModelCallId::Turn {
+                run: TurnId::from("settled"),
+                ordinal,
+            },
+        };
+        let text = |hash: &str| PromptText {
+            hash: hash.to_owned(),
+            text: hash.to_owned().into(),
+            children: Vec::new(),
+        };
+        let mut tx = store.begin(&actor, Epoch(identity.epoch)).await.unwrap();
+        for ordinal in 1..=131 {
+            tx.write(DomainWrite::Prompt(PromptWrite::Record {
+                call: call(ordinal),
+                snapshot: Some(format!("audit-{ordinal}")),
+                request: format!("exact-request-{ordinal}"),
+                snapshot_texts: vec![text("shared"), text(&format!("unique-{ordinal}"))],
+                request_texts: vec![text("request"), text("prefix")],
+                prefix: Some("prefix".to_owned()),
+            }));
+        }
+        tx.write(DomainWrite::Prompt(PromptWrite::Settle {
+            session: session.clone(),
+            run: TurnId::from("settled"),
+            open: Some(131),
+        }));
+        store
+            .commit(tx, CommitLabel::new("model.start"))
+            .await
+            .unwrap();
+        // Seed two published revisions and the settled run's exact revision.
+        // The last call deliberately remains unconsumed even past revision
+        // release: recovery owns its request and snapshot until settlement.
+        store.conn.write(|tx| {
+            tx.execute("INSERT INTO blobs (hash, content, encoding) VALUES ('config', X'00', 0)", [])?;
+            tx.execute("INSERT INTO session_meta (session_id, relation_kind, retention_kind)
+                VALUES ('sql-work-owner', 'root', 'head_only')", [])?;
+            for revision in [1, 2] {
+                tx.execute("INSERT INTO session_revisions (session_id, head_revision, config_ref)
+                    VALUES ('sql-work-owner', ?1, 'config')", [revision])?;
+            }
+            tx.execute("INSERT INTO session_head (session_id, head_revision) VALUES ('sql-work-owner', 2)", [])?;
+            tx.execute("INSERT INTO session_runs (session_id, run, terminal_kind, terminal_cause_json,
+                terminal_at_ms, terminal_head_revision, terminal_window_revision, terminal_window_config_ref)
+                VALUES ('sql-work-owner', 'settled', 'answered', '{\"cause\":\"commands_applied\"}', 0, 1, 1, 'config')", [])?;
+            tx.execute("INSERT INTO pins (session_id, target_kind, target_id)
+                VALUES ('sql-work-owner', 'revision', '1')", [])?;
+            crate::revisions::record_terminal_conn(tx, &SessionId::from("sql-work-owner"), 2, lash_durable::DurableInstant(0))
+                .map_err(|error| rusqlite::Error::ToSqlConversionFailure(error.into()))
+        }).await.unwrap();
+        assert_eq!(
+            store
+                .prompt_snapshot(&call(1))
+                .await
+                .unwrap()
+                .unwrap()
+                .snapshot
+                .as_deref(),
+            Some("audit-1"),
+            "the revision pin keeps its settled audits exact"
+        );
+        let catalog = set.session_store_factory();
+        catalog.unpin(&session, &Target::Revision(1)).await.unwrap();
+        // Logical expiry never waits for a physical page: even the two roots
+        // beyond the first batch already answer the same typed refusal.
+        for ordinal in 1..=130 {
+            assert!(matches!(store.prompt_snapshot(&call(ordinal)).await,
+                Err(DurableError::Domain(DomainRefusal::PromptAuditExpired { call: expired }))
+                    if expired == call(ordinal)));
+        }
+        let remaining = store.conn.read(|tx| tx.query_row(
+            "SELECT COUNT(*) FROM prompt_snapshots WHERE snapshot IS NOT NULL AND request IS NULL", [],
+            |row| row.get::<_, i64>(0))).await.unwrap();
+        assert_eq!(
+            remaining, 2,
+            "one invocation releases exactly one internal batch"
+        );
+        catalog.gc_unreachable().await.unwrap();
+        let remaining = store.conn.read(|tx| tx.query_row(
+            "SELECT COUNT(*) FROM prompt_snapshots WHERE snapshot IS NOT NULL AND request IS NULL", [],
+            |row| row.get::<_, i64>(0))).await.unwrap();
+        assert_eq!(
+            remaining, 0,
+            "GC drains a quiet session without another commit"
+        );
+        let pending = store.prompt_snapshot(&call(131)).await.unwrap().unwrap();
+        assert_eq!(pending.request.as_deref(), Some("exact-request-131"));
+        assert_eq!(pending.snapshot.as_deref(), Some("audit-131"));
+        let hashes = [
+            "shared",
+            "unique-1",
+            "unique-2",
+            "unique-131",
+            "request",
+            "prefix",
+        ]
+        .map(str::to_owned);
+        let found = store.prompt_texts(&hashes).await.unwrap();
+        assert_eq!(
+            found
+                .iter()
+                .map(|text| text.hash.as_str())
+                .collect::<Vec<_>>(),
+            ["shared", "unique-131", "request", "prefix"]
+        );
+        // Settling the last request does not erase previously expired identities.
+        let mut tx = store.begin(&actor, Epoch(identity.epoch)).await.unwrap();
+        tx.write(DomainWrite::Prompt(PromptWrite::Settle {
+            session: session.clone(),
+            run: TurnId::from("settled"),
+            open: None,
+        }));
+        store
+            .commit(tx, CommitLabel::new("model.done"))
+            .await
+            .unwrap();
+        catalog.gc_unreachable().await.unwrap();
+        assert_eq!(
+            store.prompt_texts(&hashes).await.unwrap(),
+            [text("prefix")],
+            "the current lowering prefix keeps its own independent reference"
+        );
+        let mut tx = store.begin(&actor, Epoch(identity.epoch)).await.unwrap();
+        tx.write(DomainWrite::Prompt(PromptWrite::Record {
+            call: call(1),
+            snapshot: None,
+            request: "changed".to_owned(),
+            snapshot_texts: Vec::new(),
+            request_texts: Vec::new(),
+            prefix: None,
+        }));
+        assert!(matches!(
+            store.commit(tx, CommitLabel::new("model.start")).await,
+            Err(DurableError::Domain(
+                DomainRefusal::PromptCallRecorded { .. }
+            ))
+        ));
+    }
 }

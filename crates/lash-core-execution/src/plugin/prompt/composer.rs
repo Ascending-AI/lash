@@ -520,8 +520,10 @@ pub async fn load_admitted_call(
 
 /// Read `call`'s prompt snapshot back from `reads` with every text it
 /// references, each verified against its content address. No renderer or
-/// wrapper runs. It outlives the call's settlement. `None` when the call
-/// has no retained root or composed no sections.
+/// wrapper runs. It outlives the call's settlement while its revision is
+/// retained. `None` when no call is recorded or it composed no sections.
+/// A released settled audit returns [`lash_durable::domain::DomainRefusal::PromptAuditExpired`]
+/// through [`AdmittedCallLoadError::Store`], including during physical reclamation.
 ///
 /// # Errors
 ///

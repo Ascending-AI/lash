@@ -790,6 +790,12 @@ pub(super) fn program(
             .when_flag(RETENTION, "releases", true),
         Refusal::Backstop,
     );
+    for step in super::retention::release_material_steps(session) {
+        program.push(
+            step.when_flag(RETENTION, "releases", true),
+            Refusal::Backstop,
+        );
+    }
     program.push(
         Step::any(&WORK_REMAINING, vec![text(session)]).capturing(WORK),
         Refusal::Backstop,

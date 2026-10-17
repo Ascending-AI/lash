@@ -114,6 +114,18 @@ impl PostgresStore {
                 .await?;
             tx.commit().await.map_err(store_sqlx_error)?;
         }
+        // Finish expired material even when this session never commits again.
+        loop {
+            let connection = acquire_runtime_connection(&self.pool, &self.observer).await?;
+            let mut tx = begin_guarded(connection, &self.fence).await?;
+            let released = crate::durable::retention::release_material_batch(&mut tx, None)
+                .await
+                .map_err(store_sqlx_error)?;
+            tx.commit().await.map_err(store_sqlx_error)?;
+            if released == 0 {
+                break;
+            }
+        }
         // Then what that release and every earlier delete, prune and commit
         // held, through the node's own bounded retirement steps.
         let pages = crate::PostgresDurableStore::new(

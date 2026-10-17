@@ -122,6 +122,7 @@ pub(crate) async fn release_unretained_tx(
         .fetch_all(crate::observed_sql::executor(&mut *tx))
         .await
         .map_err(store_sqlx_error)?;
+    release_revision_material_tx(tx, session_id, now).await?;
     // Retirement takes node locks in id order across the whole release, the
     // order every other multi-node writer uses.
     let mut leaves = released
@@ -139,6 +140,18 @@ pub(crate) async fn release_unretained_tx(
         .flatten()
         .collect();
     crate::durable::retire_roots(tx, &roots, now)
+        .await
+        .map(drop)
+        .map_err(store_sqlx_error)
+}
+
+/// Release one page of per-revision material in the prune's transaction.
+pub(crate) async fn release_revision_material_tx(
+    tx: &mut PgConnection,
+    session_id: Option<&SessionId>,
+    _now: lash_durable::DurableInstant,
+) -> Result<(), StoreError> {
+    crate::durable::retention::release_material_batch(tx, session_id)
         .await
         .map(drop)
         .map_err(store_sqlx_error)

@@ -331,6 +331,11 @@ fn terminal_steps(
             )
             .when_flag(TERMINAL_RETENTION, "releases", true),
         );
+        program.extend(
+            super::retention::release_material_steps(session.as_str())
+                .into_iter()
+                .map(|step| step.when_flag(TERMINAL_RETENTION, "releases", true)),
+        );
     }
     // What the run still holds as it ends is settled: a turn whose commit
     // settled its rows holds none, and a turn that ends with no commit (a

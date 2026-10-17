@@ -132,6 +132,7 @@ pub(crate) fn release_unretained_conn(
             .map_err(sqlite_error)?;
         rows.collect::<Result<Vec<_>, _>>().map_err(sqlite_error)?
     };
+    release_revision_material_conn(tx, session_id, now)?;
     let mut roots = std::collections::BTreeSet::new();
     for (leaf_node_id, checkpoint_ref, config_ref) in released {
         if let Some(leaf_node_id) = leaf_node_id {
@@ -141,6 +142,17 @@ pub(crate) fn release_unretained_conn(
         roots.extend(config_ref);
     }
     crate::durable::retire_roots(tx, &roots, now)
+        .map(drop)
+        .map_err(sqlite_error)
+}
+
+/// Release one page of per-revision material in the revision prune's transaction.
+pub(crate) fn release_revision_material_conn(
+    tx: &Connection,
+    session_id: Option<&SessionId>,
+    _now: lash_durable::DurableInstant,
+) -> Result<(), StoreError> {
+    crate::durable::release_material_batch(tx, session_id)
         .map(drop)
         .map_err(sqlite_error)
 }

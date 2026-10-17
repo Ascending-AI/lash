@@ -361,6 +361,12 @@ pub enum DomainRefusal {
     /// A referenced prompt fragment has no supplied or stored body.
     #[error("prompt fragment {hash} has no body")]
     PromptFragmentMissing { hash: String },
+    /// The call settled and its audit's revision is no longer retained.
+    #[error("{} in session {} has an expired prompt audit", call.call, call.session)]
+    PromptAuditExpired {
+        /// The call whose audit was released.
+        call: PromptCallKey,
+    },
     /// A prompt record named a call that already has its snapshot.
     #[error("{} in session {} is already admitted", call.call, call.session)]
     PromptCallRecorded {
@@ -573,7 +579,9 @@ pub trait DurableReads: Send + Sync {
     async fn session_mailbox(&self, session: &SessionId) -> Result<SessionMailbox, DurableError>;
 
     /// P2: `call`'s root, while it is retained: its snapshot, and its
-    /// request until the call settles.
+    /// request until the call settles. A settled audit whose revision was
+    /// released returns [`DomainRefusal::PromptAuditExpired`], including
+    /// while physical reclamation is still draining.
     async fn prompt_snapshot(
         &self,
         call: &PromptCallKey,

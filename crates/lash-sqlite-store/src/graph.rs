@@ -50,6 +50,17 @@ impl SqliteStore {
             })
             .await
             .map_err(sqlite_error)?;
+        // A quiet session needs no future commit to finish audit reclamation.
+        loop {
+            let released = self
+                .conn
+                .write(|tx| crate::durable::release_material_batch(tx, None))
+                .await
+                .map_err(sqlite_error)?;
+            if released == 0 {
+                break;
+            }
+        }
         // The most nodes one of the collection's retirement steps deletes:
         // the standard node's step.
         let step = lash_durable::domain::pages::RetirementBudget {

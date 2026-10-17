@@ -111,7 +111,7 @@ lash_store_sql::statements! {
                  RETURNING hash
              ), bare AS (
                  DELETE FROM prompt_snapshots
-                  WHERE session_id = ?1 AND owner = ?2 AND snapshot IS NULL
+                  WHERE session_id = ?1 AND owner = ?2 AND snapshot IS NULL AND request IS NOT NULL
                     AND (?3::TEXT IS NULL OR call <> ?3::TEXT)
              ), kept AS (
                  UPDATE prompt_snapshots SET request = NULL
@@ -120,6 +120,36 @@ lash_store_sql::statements! {
                     AND (?3::TEXT IS NULL OR call <> ?3::TEXT)
              )
              SELECT DISTINCT hash FROM released";
+
+        /// Release one bounded page of expired settled audits atomically, retaining
+        /// compose-once identities and returning their former text roots.
+        expire_audits = "WITH candidates AS MATERIALIZED (
+                 SELECT audit.session_id, audit.owner, audit.call
+                 FROM prompt_snapshots AS audit
+                 JOIN session_runs AS ended ON ended.session_id = audit.session_id
+                   AND audit.owner = 'turn:' || ended.run
+                 WHERE (?1::TEXT IS NULL OR audit.session_id = ?1)
+                   AND audit.request IS NULL AND audit.snapshot IS NOT NULL
+                   AND ended.terminal_kind IS NOT NULL
+                   AND ended.terminal_window_revision IS NOT NULL
+                   AND NOT EXISTS (
+                       SELECT 1 FROM session_revisions AS revision
+                       WHERE revision.session_id = ended.session_id
+                         AND revision.head_revision = ended.terminal_window_revision
+                   )
+                 ORDER BY audit.session_id, audit.owner, audit.call LIMIT ?2
+                 FOR UPDATE OF audit
+             ), released AS (
+                 DELETE FROM prompt_snapshot_texts
+                 WHERE (session_id, owner, call) IN (SELECT * FROM candidates)
+                   AND part = 'snapshot'
+                 RETURNING hash
+             ), expired AS (
+                 UPDATE prompt_snapshots SET snapshot = NULL
+                 WHERE (session_id, owner, call) IN (SELECT * FROM candidates)
+                 RETURNING call
+             ) SELECT (SELECT COUNT(*) FROM expired) AS released_count, released.hash
+               FROM (SELECT 1) AS singleton LEFT JOIN released ON TRUE";
 
         /// Reclaim every text in `?1` no root references any more.
         reclaim_texts = "DELETE FROM prompt_texts AS stored
@@ -209,6 +239,42 @@ pub(super) static RELEASE_PREFIX: Entry =
         .collecting(Collect::Text("hash"));
 pub(super) static RECLAIM: Entry =
     Entry::new(|| &POSTGRES_SQL.reclaim_texts, &[], Shape::TextReclaim);
+
+/// The shared revision-material program collects former audit roots before
+/// reclaiming their last-reference texts in the same transaction.
+pub(super) static EXPIRE_AUDITS: Entry = Entry::new(
+    || &POSTGRES_SQL.expire_audits,
+    &[Ty::Text, Ty::Int],
+    Shape::Select,
+)
+.collecting(Collect::Text("hash"));
+
+/// Release one bounded page, answering its audit count for GC's drain loop.
+pub(crate) async fn release_unretained(
+    tx: &mut PgConnection,
+    session: Option<&SessionId>,
+) -> Result<usize, sqlx::Error> {
+    use sqlx::Row as _;
+    let rows = crate::observed_sql::query(POSTGRES_SQL.expire_audits.sql())
+        .bind(session.map(SessionId::as_str))
+        .bind(i64::from(
+            lash_store_sql::session::revisions::MATERIAL_RELEASE_BATCH,
+        ))
+        .fetch_all(crate::observed_sql::executor(&mut *tx))
+        .await?;
+    let count = rows
+        .first()
+        .map_or(Ok(0), |row| row.try_get::<i64, _>("released_count"))?;
+    let roots = rows
+        .iter()
+        .map(|row| row.try_get::<Option<String>, _>("hash"))
+        .collect::<Result<Vec<_>, _>>()?
+        .into_iter()
+        .flatten()
+        .collect();
+    reclaim(tx, roots).await?;
+    Ok(usize::try_from(count).unwrap_or(usize::MAX))
+}
 
 /// The capture slot of a settlement's released texts.
 const SETTLED: u8 = 4;
@@ -621,6 +687,11 @@ pub(super) async fn snapshot(
     else {
         return Ok(None);
     };
+    if get::<bool>(&row, 3)? {
+        return Err(DurableError::Domain(DomainRefusal::PromptAuditExpired {
+            call: call.clone(),
+        }));
+    }
     let edges: Vec<(String, String)> = crate::observed_sql::query_as(SQL.read_edges.sql())
         .bind(call.session.as_str())
         .bind(call.call.owner_column())
@@ -666,4 +737,194 @@ pub(super) async fn texts(
         }
     }
     Ok(found)
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use lash_core_execution::{SessionCatalogStore as _, StoreMaintenance as _, Target};
+    use lash_durable::{ActorKey, CommitLabel, DomainWrite, DurableReads, DurableStore};
+
+    /// PROMPT-AUDIT-RETENTION: revision expiry releases settled audit plans
+    /// and last-reference texts, retaining pending requests and the prefix.
+    #[tokio::test]
+    async fn settled_prompt_audits_follow_revision_retention() {
+        let database_url = crate::testing::required_database_url();
+        let database = crate::testing::IsolatedDatabase::create(&database_url).await;
+        let storage = crate::testing::connect(database.url()).await.unwrap();
+        let stores = crate::PostgresStoreSet::new(
+            &storage,
+            std::sync::Arc::new(lash_core_execution::attachments::UnavailableAttachmentStore),
+        );
+        let identity = lash_core_execution::testing::sql_work::owner_commit(&stores).await;
+        let store = storage.durable_store();
+        let session = SessionId::from("sql-work-owner");
+        let actor = ActorKey::session(session.as_str()).unwrap();
+        let call = |ordinal| PromptCallKey {
+            session: session.clone(),
+            call: ModelCallId::Turn {
+                run: TurnId::from("settled"),
+                ordinal,
+            },
+        };
+        let text = |hash: &str| PromptText {
+            hash: hash.to_owned(),
+            text: hash.to_owned().into(),
+            children: Vec::new(),
+        };
+        let mut tx = store.begin(&actor, Epoch(identity.epoch)).await.unwrap();
+        for ordinal in 1..=131 {
+            tx.write(DomainWrite::Prompt(PromptWrite::Record {
+                call: call(ordinal),
+                snapshot: Some(format!("audit-{ordinal}")),
+                request: format!("exact-request-{ordinal}"),
+                snapshot_texts: vec![text("shared"), text(&format!("unique-{ordinal}"))],
+                request_texts: vec![text("request"), text("prefix")],
+                prefix: Some("prefix".to_owned()),
+            }));
+        }
+        tx.write(DomainWrite::Prompt(PromptWrite::Settle {
+            session: session.clone(),
+            run: TurnId::from("settled"),
+            open: Some(131),
+        }));
+        store
+            .commit(tx, CommitLabel::new("model.start"))
+            .await
+            .unwrap();
+        // Seed two published revisions and the settled run's exact revision.
+        // The last call deliberately remains unconsumed even past revision
+        // release: recovery owns its request and snapshot until settlement.
+        let mut tx = storage.pool().begin().await.unwrap();
+        for sql in [
+            "INSERT INTO lash_blobs (hash, content, encoding) VALUES ('config', decode('00', 'hex'), 0)",
+            "INSERT INTO lash_session_meta (session_id, relation_kind, retention_kind) VALUES ('sql-work-owner', 'root', 'head_only')",
+            "INSERT INTO lash_session_revisions (session_id, head_revision, config_ref) VALUES ('sql-work-owner', 1, 'config'), ('sql-work-owner', 2, 'config')",
+            "INSERT INTO lash_session_head (session_id, head_revision) VALUES ('sql-work-owner', 2)",
+            "INSERT INTO lash_session_runs (session_id, run, terminal_kind, terminal_cause_json,
+                terminal_at_ms, terminal_head_revision, terminal_window_revision, terminal_window_config_ref)
+                VALUES ('sql-work-owner', 'settled', 'answered', '{\"cause\":\"commands_applied\"}', 0, 1, 1, 'config')",
+            "INSERT INTO lash_pins (session_id, target_kind, target_id) VALUES ('sql-work-owner', 'revision', '1')",
+        ] {
+            sqlx::query(sql).execute(&mut *tx).await.unwrap();
+        }
+        crate::revisions::record_terminal_conn(
+            &mut tx,
+            &session,
+            2,
+            lash_durable::DurableInstant(0),
+        )
+        .await
+        .unwrap();
+        let admission = lash_core_execution::store::RunAdmissionRecord::Command {
+            batch: lash_core_execution::BatchId::from("finish"),
+        }
+        .to_stored()
+        .unwrap();
+        sqlx::query(
+            "INSERT INTO lash_session_runs (session_id, run, admission_json)
+            VALUES ('sql-work-owner', 'finish', $1)",
+        )
+        .bind(admission)
+        .execute(&mut *tx)
+        .await
+        .unwrap();
+        tx.commit().await.unwrap();
+        assert_eq!(
+            store
+                .prompt_snapshot(&call(1))
+                .await
+                .unwrap()
+                .unwrap()
+                .snapshot
+                .as_deref(),
+            Some("audit-1"),
+            "the revision pin keeps its settled audits exact"
+        );
+        let catalog = storage.session_store_factory();
+        catalog.unpin(&session, &Target::Revision(1)).await.unwrap();
+        // Logical expiry never waits for a physical page: even the two roots
+        // beyond the first batch already answer the same typed refusal.
+        for ordinal in 1..=130 {
+            assert!(matches!(store.prompt_snapshot(&call(ordinal)).await,
+                Err(DurableError::Domain(DomainRefusal::PromptAuditExpired { call: expired }))
+                    if expired == call(ordinal)));
+        }
+        let remaining = sqlx::query_scalar::<_, i64>(
+            "SELECT COUNT(*) FROM lash_prompt_snapshots WHERE snapshot IS NOT NULL AND request IS NULL")
+            .fetch_one(storage.pool()).await.unwrap();
+        assert_eq!(
+            remaining, 2,
+            "one invocation releases exactly one internal batch"
+        );
+        catalog.gc_unreachable().await.unwrap();
+        let remaining = sqlx::query_scalar::<_, i64>(
+            "SELECT COUNT(*) FROM lash_prompt_snapshots WHERE snapshot IS NOT NULL AND request IS NULL")
+            .fetch_one(storage.pool()).await.unwrap();
+        assert_eq!(
+            remaining, 0,
+            "GC drains a quiet session without another commit"
+        );
+        let pending = store.prompt_snapshot(&call(131)).await.unwrap().unwrap();
+        assert_eq!(pending.request.as_deref(), Some("exact-request-131"));
+        assert_eq!(pending.snapshot.as_deref(), Some("audit-131"));
+        let hashes = [
+            "shared",
+            "unique-1",
+            "unique-2",
+            "unique-131",
+            "request",
+            "prefix",
+        ]
+        .map(str::to_owned);
+        let found = store.prompt_texts(&hashes).await.unwrap();
+        assert_eq!(
+            found
+                .iter()
+                .map(|text| text.hash.as_str())
+                .collect::<Vec<_>>(),
+            ["shared", "unique-131", "request", "prefix"]
+        );
+        // Settling the last request does not erase previously expired identities.
+        let mut tx = store.begin(&actor, Epoch(identity.epoch)).await.unwrap();
+        tx.write(DomainWrite::Prompt(PromptWrite::Settle {
+            session: session.clone(),
+            run: TurnId::from("settled"),
+            open: None,
+        }));
+        // Exercise the owner-commit program's release hook as well as the
+        // catalogue/unpin and GC forms above. No further GC is needed.
+        tx.write(DomainWrite::Turn(
+            lash_durable::domain::TurnWrite::Terminal {
+                session: session.clone(),
+                run: TurnId::from("finish"),
+                cause: Box::new(lash_core_execution::store::RunTerminalCause::CommandsApplied),
+                head_revision: Some(2),
+            },
+        ));
+        store
+            .commit(tx, CommitLabel::new("model.done"))
+            .await
+            .unwrap();
+        assert_eq!(
+            store.prompt_texts(&hashes).await.unwrap(),
+            [text("prefix")],
+            "the current lowering prefix keeps its own independent reference"
+        );
+        let mut tx = store.begin(&actor, Epoch(identity.epoch)).await.unwrap();
+        tx.write(DomainWrite::Prompt(PromptWrite::Record {
+            call: call(1),
+            snapshot: None,
+            request: "changed".to_owned(),
+            snapshot_texts: Vec::new(),
+            request_texts: Vec::new(),
+            prefix: None,
+        }));
+        assert!(matches!(
+            store.commit(tx, CommitLabel::new("model.start")).await,
+            Err(DurableError::Domain(
+                DomainRefusal::PromptCallRecorded { .. }
+            ))
+        ));
+    }
 }

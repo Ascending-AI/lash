@@ -78,6 +78,7 @@ pub(crate) use pages::retire_roots;
 mod park;
 pub(crate) mod processes;
 mod prompts;
+pub(crate) mod retention;
 pub(crate) use prompts::release as release_prompt_snapshots;
 #[path = "../durable_reads.rs"]
 mod reads;

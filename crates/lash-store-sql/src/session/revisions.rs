@@ -16,6 +16,10 @@
 //! [`SessionRevisionStatements::prune_unretained`], which is the single
 //! statement that says which revisions a session keeps.
 
+/// Maximum settled material roots released by one revision-retention transaction.
+/// This internal batch size limits cleanup work, never admission or retained data.
+pub const MATERIAL_RELEASE_BATCH: u32 = 128;
+
 /// The table's unprefixed name.
 pub const TABLE: &str = "session_revisions";
 
