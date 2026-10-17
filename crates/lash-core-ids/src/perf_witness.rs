@@ -44,7 +44,6 @@ static SQL_ROWS_READ: AtomicU64 = AtomicU64::new(0);
 static SQL_ROWS_WRITTEN: AtomicU64 = AtomicU64::new(0);
 static SQL_BYTES_WRITTEN: AtomicU64 = AtomicU64::new(0);
 static STORE_PAGES_WRITTEN: AtomicU64 = AtomicU64::new(0);
-static RETIREMENT_BATCHES: AtomicU64 = AtomicU64::new(0);
 
 /// Statement text and expanded byte length, without retaining bound values.
 #[derive(Clone, Debug, PartialEq, Eq)]
@@ -180,13 +179,15 @@ pub struct Snapshot {
     /// Heap page bytes written since this collector attached its runtime's
     /// spool counter. Zero when no spool counter is attached.
     pub spool_bytes: u64,
-    /// Retirement steps the store ran, each one bounded transaction.
+    /// Retirement attempts through the attached store, including empty steps.
+    /// Zero when no store counter is attached.
     pub retirement_batches: u64,
 }
 
 /// Exclusive process-global runtime-work witness.
 pub struct Collector {
     spool_bytes: Option<Box<dyn Fn() -> u64 + Send + Sync>>,
+    retirement_batches: Option<Box<dyn Fn() -> u64 + Send + Sync>>,
 }
 
 /// Another process-global collector is already active.
@@ -209,6 +210,18 @@ impl Collector {
     pub fn with_spool_bytes(mut self, read: impl Fn() -> u64 + Send + Sync + 'static) -> Self {
         let before = read();
         self.spool_bytes = Some(Box::new(move || read() - before));
+        self
+    }
+
+    /// Attach the measured store's cumulative retirement attempts, excluding
+    /// other stores and work before attachment.
+    #[must_use]
+    pub fn with_retirement_batches(
+        mut self,
+        read: impl Fn() -> u64 + Send + Sync + 'static,
+    ) -> Self {
+        let before = read();
+        self.retirement_batches = Some(Box::new(move || read() - before));
         self
     }
 
@@ -235,7 +248,6 @@ impl Collector {
         SQL_ROWS_WRITTEN.store(0, Ordering::Relaxed);
         SQL_BYTES_WRITTEN.store(0, Ordering::Relaxed);
         STORE_PAGES_WRITTEN.store(0, Ordering::Relaxed);
-        RETIREMENT_BATCHES.store(0, Ordering::Relaxed);
         SQL_RECEIPTS
             .lock()
             .unwrap_or_else(std::sync::PoisonError::into_inner)
@@ -251,7 +263,10 @@ impl Collector {
             sql_shapes::disable();
         }
         COLLECTOR_STATE.store(ACTIVE, Ordering::Release);
-        Ok(Self { spool_bytes: None })
+        Ok(Self {
+            spool_bytes: None,
+            retirement_batches: None,
+        })
     }
 
     /// Snapshot all work observed since this collector was installed.
@@ -283,7 +298,7 @@ impl Collector {
             sql_bytes_written: SQL_BYTES_WRITTEN.load(Ordering::Relaxed),
             store_pages_written: STORE_PAGES_WRITTEN.load(Ordering::Relaxed),
             spool_bytes: self.spool_bytes.as_ref().map_or(0, |read| read()),
-            retirement_batches: RETIREMENT_BATCHES.load(Ordering::Relaxed),
+            retirement_batches: self.retirement_batches.as_ref().map_or(0, |read| read()),
             sql_statements_by_verb: SqlVerb::ALL
                 .iter()
                 .map(|verb| {
@@ -380,14 +395,6 @@ pub fn record_sql_bytes_written(bytes: u64) {
         return;
     }
     SQL_BYTES_WRITTEN.fetch_add(bytes, Ordering::Relaxed);
-}
-
-/// Record one retirement step, one bounded transaction.
-#[inline]
-pub fn record_retirement_batch() {
-    if COLLECTOR_STATE.load(Ordering::Relaxed) == ACTIVE {
-        RETIREMENT_BATCHES.fetch_add(1, Ordering::Relaxed);
-    }
 }
 
 pub fn sql_receipts_enabled() -> bool {

@@ -356,12 +356,14 @@ async fn sample_with_stores(
     h: usize,
 ) -> Result<Vec<Row>> {
     let recorder = Arc::new(super::recorder::Recorder::default());
-    let stores: Arc<dyn StoreSet> = Arc::new(super::recorder::RecordingStores::new(
+    let stores = Arc::new(super::recorder::RecordingStores::new(
         stores,
         "heap-meter",
         Arc::clone(&recorder),
         store,
     ));
+    let retirement_stores = Arc::clone(&stores);
+    let stores: Arc<dyn StoreSet> = stores;
     // No background sweep during a sample: the driver still sweeps once at
     // boot, then waits; each mark drains retirement itself, so an interval
     // counts the steps its own park left.
@@ -381,7 +383,8 @@ async fn sample_with_stores(
         actor: super::turn::session_actor(&session_id)?.to_string(),
         recorder,
         collector: Collector::install_with_sql_receipts()?
-            .with_spool_bytes(move || spools.spooled_bytes()),
+            .with_spool_bytes(move || spools.spooled_bytes())
+            .with_retirement_batches(move || retirement_stores.retirement_batches()),
         pool,
         scenario: scenario.to_owned(),
         store,
@@ -824,12 +827,62 @@ mod tests {
             })
         );
     }
+
+    static HEAP_SAMPLES: tokio::sync::Mutex<()> = tokio::sync::Mutex::const_new(());
+    /// HEAP-RETIREMENT-ISOLATION: a second active store cannot change the
+    /// measured store's retirement count, even while its collector is active.
+    #[tokio::test]
+    async fn another_stores_retirement_is_not_counted() {
+        use super::super::recorder::{Recorder, RecordingStores};
+        use lash_core_execution::StoreSet;
+        use lash_durable::domain::pages::RetirementBudget;
+        use std::sync::Arc;
+        let _sample = HEAP_SAMPLES.lock().await;
+        // Even stores reporting transactions to the same recorder keep
+        // independent retirement counts.
+        let recorder = Arc::new(Recorder::default());
+        let a = Arc::new(RecordingStores::new(
+            Arc::new(lash_sqlite_store::SqliteStoreSet::memory().await.unwrap()),
+            "a",
+            Arc::clone(&recorder),
+            "sqlite",
+        ));
+        let b = RecordingStores::new(
+            Arc::new(lash_sqlite_store::SqliteStoreSet::memory().await.unwrap()),
+            "b",
+            recorder,
+            "sqlite",
+        );
+        let read = Arc::clone(&a);
+        let collector = super::Collector::install()
+            .unwrap()
+            .with_retirement_batches(move || read.retirement_batches());
+        let a = a.durable_store().pages().unwrap();
+        let b_pages = b.durable_store().pages().unwrap();
+        a.retire_step(RetirementBudget { nodes: 1 }).await.unwrap();
+        let before = collector.snapshot().retirement_batches;
+        assert_eq!(before, 1);
+        b_pages
+            .retire_step(RetirementBudget { nodes: 1 })
+            .await
+            .unwrap();
+        assert_eq!(b.retirement_batches(), 1, "the other store did real work");
+        assert_eq!(
+            collector.snapshot().retirement_batches,
+            before,
+            "another active store contaminated the measured store"
+        );
+        a.retire_step(RetirementBudget { nodes: 1 }).await.unwrap();
+        assert_eq!(collector.snapshot().retirement_batches, before + 1);
+    }
+
     /// HEAP-METER: every released-worker park/resume seam is measured for all
     /// six retained-state scenarios, at H 100 and 2,000 and objects-update at
     /// 1,000 and 10,000 (whose park once stalled past the sample limit), and
     /// the paged heap's counted laws hold over them.
     #[tokio::test(flavor = "multi_thread", worker_threads = 2)]
     async fn six_scenarios_obey_the_paged_heaps_counted_laws() {
+        let _sample = HEAP_SAMPLES.lock().await;
         let worker = std::env::var_os("LASH_VM_WORKER").expect("worker runfile");
         let started = std::time::Instant::now();
         // The laws count work at released-worker seams, independently of

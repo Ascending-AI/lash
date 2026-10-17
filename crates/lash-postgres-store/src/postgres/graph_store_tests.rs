@@ -592,9 +592,94 @@ async fn a_large_candidate_installs_within_bounded_buffers() {
         eprintln!("skipping the bounded install: database URL is not set");
         return;
     };
-    pages::a_large_candidate_installs_within_bounded_buffers(&tier, 20_000)
-        .await
-        .unwrap_or_else(|broken| panic!("{broken}"));
+    // Observe server waits without borrowing the measured work pool's
+    // capacity. This task never retries or extends the candidate operation.
+    type BackendWait = (i32, Option<String>, Option<String>, Option<String>);
+    let waits = Arc::new(std::sync::Mutex::new(Vec::new()));
+    let observed_waits = Arc::clone(&waits);
+    let diagnostics_pool = tier.store.pools.session.clone();
+    let observer = tokio::spawn(async move {
+        let started = std::time::Instant::now();
+        let mut interval = tokio::time::interval(std::time::Duration::from_millis(500));
+        interval.set_missed_tick_behavior(tokio::time::MissedTickBehavior::Skip);
+        for _ in 0..24 {
+            interval.tick().await;
+            let sample: Result<Vec<BackendWait>, _> = crate::observed_sql::query_as(
+                "SELECT pid, state, wait_event_type, wait_event FROM pg_stat_activity \
+                     WHERE datname = current_database() AND pid <> pg_backend_pid() ORDER BY pid",
+            )
+            .fetch_all(crate::observed_sql::executor(&diagnostics_pool))
+            .await;
+            observed_waits
+                .lock()
+                .unwrap_or_else(std::sync::PoisonError::into_inner)
+                .push((
+                    started.elapsed().as_millis(),
+                    sample.map_err(|error| error.to_string()),
+                ));
+        }
+    });
+    let resources_before = bounded_install_resources(&tier);
+    let (result, sql) = lash_core_execution::facade_support::sql::collect(
+        "bounded-candidate-install",
+        "postgres",
+        pages::a_large_candidate_installs_within_bounded_buffers(&tier, 20_000),
+    )
+    .await;
+    observer.abort();
+    let _ = observer.await;
+    let resources_after = bounded_install_resources(&tier);
+    let evidence = format!(
+        "resources_before={resources_before:?} resources_after={resources_after:?} server_waits={:?} \
+         sql_elapsed_ns={} sql_statements={} sql_rows_returned={} sql_rows_affected={} installed_graph_bytes={}",
+        waits
+            .lock()
+            .unwrap_or_else(std::sync::PoisonError::into_inner),
+        sql.elapsed_nanos,
+        sql.statements,
+        sql.rows_returned,
+        sql.rows_affected,
+        sql.newly_installed_graph_bytes,
+    );
+    eprintln!("{evidence}");
+    result.unwrap_or_else(|broken| panic!("{broken}; {evidence}"));
+}
+
+/// Keep unavailable observations explicit; these are the action worker's
+/// resources, rather than the machine that invoked the build.
+fn bounded_install_resources(tier: &Tier) -> std::collections::BTreeMap<String, String> {
+    let mut observations = std::collections::BTreeMap::new();
+    for path in [
+        "/proc/sys/kernel/hostname",
+        "/proc/loadavg",
+        "/proc/self/stat",
+        "/proc/self/schedstat",
+        "/proc/self/cgroup",
+        "/proc/pressure/cpu",
+        "/proc/pressure/memory",
+        "/proc/pressure/io",
+        "/sys/fs/cgroup/cpu.max",
+        "/sys/fs/cgroup/cpu.stat",
+        "/sys/fs/cgroup/memory.current",
+        "/sys/fs/cgroup/memory.peak",
+        "/sys/fs/cgroup/memory.events",
+        "/sys/fs/cgroup/cpu.pressure",
+        "/sys/fs/cgroup/memory.pressure",
+    ] {
+        let value =
+            std::fs::read_to_string(path).unwrap_or_else(|error| format!("unavailable: {error}"));
+        observations.insert(path.to_owned(), value);
+    }
+    observations.insert(
+        "work_pool".to_owned(),
+        format!(
+            "size={} idle={} admission_available={}",
+            tier.store.pools.work.size(),
+            tier.store.pools.work.num_idle(),
+            tier.store.pools.admission.available_permits(),
+        ),
+    );
+    observations
 }
 
 macro_rules! server_law {

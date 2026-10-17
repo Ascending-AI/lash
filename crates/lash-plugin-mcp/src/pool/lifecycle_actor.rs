@@ -1330,10 +1330,13 @@ mod tests {
             3,
         )
         .await;
-        assert!(matches!(
-            error.observation.exit,
-            McpExitObservation::DuringCleanup { forced: true, .. }
-        ));
+        assert!(
+            matches!(
+                error.observation.exit,
+                McpExitObservation::DuringCleanup { forced: true, .. }
+            ),
+            "the TERM-ignoring peer must require forced cleanup: {error:?}"
+        );
     }
 
     #[tokio::test]

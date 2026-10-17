@@ -1476,24 +1476,104 @@ pub async fn a_large_candidate_installs_within_bounded_buffers(
     tier: &dyn PageTier,
     leaves: u32,
 ) -> LawOutcome {
+    #[derive(Debug, Default)]
+    struct Work {
+        passes: u64,
+        calls: u64,
+        entries: u64,
+        bytes: u64,
+        range_calls: u64,
+        range_bytes: u64,
+        generation_nanos: u128,
+    }
+    struct MeasuredManifest {
+        inner: GeneratedManifest,
+        work: Arc<Mutex<Work>>,
+    }
+    impl CandidateManifest for MeasuredManifest {
+        fn summary(&self) -> ManifestSummary {
+            self.inner.summary()
+        }
+        fn entries(
+            &mut self,
+            after: Option<NodeId>,
+            limit: usize,
+        ) -> Result<Vec<ManifestEntry>, StageFault> {
+            let started = std::time::Instant::now();
+            let result = self.inner.entries(after, limit);
+            let mut work = self
+                .work
+                .lock()
+                .unwrap_or_else(std::sync::PoisonError::into_inner);
+            work.calls += 1;
+            work.passes += u64::from(after.is_none());
+            work.generation_nanos += started.elapsed().as_nanos();
+            if let Ok(entries) = &result {
+                work.entries += entries.len() as u64;
+                work.bytes += entries
+                    .iter()
+                    .map(|entry| match entry {
+                        ManifestEntry::Fresh(node) => node.bytes.len() as u64,
+                        ManifestEntry::External(_) => 0,
+                    })
+                    .sum::<u64>();
+            }
+            result
+        }
+        fn fresh_range(
+            &mut self,
+            id: &NodeId,
+            offset: u64,
+            len: usize,
+        ) -> Result<Vec<u8>, StageFault> {
+            let started = std::time::Instant::now();
+            let result = self.inner.fresh_range(id, offset, len);
+            let mut work = self
+                .work
+                .lock()
+                .unwrap_or_else(std::sync::PoisonError::into_inner);
+            work.range_calls += 1;
+            work.generation_nanos += started.elapsed().as_nanos();
+            if let Ok(bytes) = &result {
+                work.range_bytes += bytes.len() as u64;
+            }
+            result
+        }
+        fn edge_log(&mut self) -> Result<Box<dyn EdgeLog>, StageFault> {
+            self.inner.edge_log()
+        }
+    }
     let owner = owned(tier, "pages-bounded").await?;
     let exec = owner.exec("bounded");
+    let generating = std::time::Instant::now();
     let big = GeneratedManifest::new("bounded", leaves, 1_000, CommitId::mint());
+    let setup_ms = generating.elapsed().as_millis();
+    let summary = big.summary();
+    let work = Arc::new(Mutex::new(Work::default()));
+    let manifest = MeasuredManifest {
+        inner: big,
+        work: Arc::clone(&work),
+    };
     let resident_before = tier.resident_high_water();
     let started = std::time::Instant::now();
-    publish(tier, &owner, &simple(&exec, None), Box::new(big)).await?;
+    let result = publish(tier, &owner, &simple(&exec, None), Box::new(manifest)).await;
     let elapsed = started.elapsed();
     let resident_after = tier.resident_high_water();
-    // The oracle lists the pages only once the install is measured.
-    let nodes = GeneratedManifest::new("bounded", leaves, 1_000, CommitId::mint()).nodes();
     let peak = tier.peak_buffered();
     let bound = CandidateBuffers::DEFAULT.bound();
-    eprintln!(
-        "bounded install: nodes={} peak_buffered_bytes={peak} bound_bytes={bound} \
-         vm_hwm_before_kib={resident_before:?} vm_hwm_after_kib={resident_after:?} elapsed_ms={}",
-        nodes.len(),
+    let evidence = format!(
+        "bounded install: expected_nodes={} expected_edges={} work={:?} peak_buffered_bytes={peak} bound_bytes={bound} \
+         vm_hwm_before_kib={resident_before:?} vm_hwm_after_kib={resident_after:?} setup_ms={setup_ms} elapsed_ms={}",
+        summary.fresh_nodes,
+        summary.fresh_edges,
+        work.lock()
+            .unwrap_or_else(std::sync::PoisonError::into_inner),
         elapsed.as_millis()
     );
+    eprintln!("{evidence}");
+    result.map_err(|broken| LawBroken(format!("{broken}; {evidence}")))?;
+    // The oracle lists the pages only once the install is measured.
+    let nodes = GeneratedManifest::new("bounded", leaves, 1_000, CommitId::mint()).nodes();
     ensure!(
         peak > 0 && peak <= bound,
         "the install buffered {peak} bytes against a bound of {bound}"

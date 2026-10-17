@@ -849,8 +849,6 @@ impl PageStore for PostgresDurableStore {
         &self,
         budget: RetirementBudget,
     ) -> Result<RetirementProgress, DurableError> {
-        #[cfg(feature = "perf-witness")]
-        lash_core_execution::perf_witness::record_retirement_batch();
         self.page_write(PAGES_RETIRE, move |tx, now| {
             Box::pin(async move { retire_step_in(tx, budget, now).await.map_err(sqlx_failure) })
         })

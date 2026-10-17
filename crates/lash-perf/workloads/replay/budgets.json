@@ -236,34 +236,5 @@
       "why": "a parked cell's 1 MB global is not resent per turn"
     }
   ],
-  "known_breaches": [
-    {
-      "workload": "ts-codemode",
-      "metric": "sql_bytes_written",
-      "check": "history_slope",
-      "owner": "FIG-5946",
-      "why": "each model call stores its prompt's open transcript chunk in prompt_texts, and until that chunk seals it grows by every turn's items (about 550 bytes per prior turn over these 12 turns); bodies the store already holds are not resent and settled calls release theirs (FIG-5946)"
-    },
-    {
-      "workload": "py-codemode",
-      "metric": "sql_bytes_written",
-      "check": "history_slope",
-      "owner": "FIG-5946",
-      "why": "each model call stores its prompt's open transcript chunk in prompt_texts, and until that chunk seals it grows by every turn's items (about 550 bytes per prior turn over these 12 turns); bodies the store already holds are not resent and settled calls release theirs (FIG-5946)"
-    },
-    {
-      "workload": "chat-short",
-      "metric": "allocated_bytes",
-      "check": "history_slope",
-      "owner": "FIG-5930",
-      "why": "each send hydrates the whole window several times (FIG-5506 rank, F-T3)"
-    },
-    {
-      "workload": "chat-long-compacting",
-      "metric": "allocated_bytes",
-      "check": "frame_slope",
-      "owner": "FIG-5930",
-      "why": "each send hydrates the whole window several times (FIG-5506 rank, F-T3)"
-    }
-  ]
+  "known_breaches": []
 }

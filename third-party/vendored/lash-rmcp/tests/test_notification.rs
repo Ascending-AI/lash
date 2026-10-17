@@ -75,13 +75,7 @@ impl ClientHandler for Client {
 
 #[tokio::test]
 async fn test_server_notification() -> anyhow::Result<()> {
-    let _ = tracing_subscriber::registry()
-        .with(
-            tracing_subscriber::EnvFilter::try_from_default_env()
-                .unwrap_or_else(|_| "debug".to_string().into()),
-        )
-        .with(tracing_subscriber::fmt::layer())
-        .try_init();
+    init_tracing();
     let (server_transport, client_transport) = tokio::io::duplex(4096);
     tokio::spawn(async move {
         let server = Server {}.serve(server_transport).await?;
@@ -123,13 +117,7 @@ impl ServerHandler for CustomServer {
 
 #[tokio::test]
 async fn test_custom_client_notification_reaches_server() -> anyhow::Result<()> {
-    let _ = tracing_subscriber::registry()
-        .with(
-            tracing_subscriber::EnvFilter::try_from_default_env()
-                .unwrap_or_else(|_| "debug".to_string().into()),
-        )
-        .with(tracing_subscriber::fmt::layer())
-        .try_init();
+    init_tracing();
 
     let (server_transport, client_transport) = tokio::io::duplex(4096);
     let receive_signal = Arc::new(Notify::new());
@@ -205,13 +193,7 @@ impl ClientHandler for CustomClient {
 
 #[tokio::test]
 async fn test_custom_server_notification_reaches_client() -> anyhow::Result<()> {
-    let _ = tracing_subscriber::registry()
-        .with(
-            tracing_subscriber::EnvFilter::try_from_default_env()
-                .unwrap_or_else(|_| "debug".to_string().into()),
-        )
-        .with(tracing_subscriber::fmt::layer())
-        .try_init();
+    init_tracing();
 
     let (server_transport, client_transport) = tokio::io::duplex(4096);
     tokio::spawn(async move {
@@ -238,4 +220,43 @@ async fn test_custom_server_notification_reaches_client() -> anyhow::Result<()> 
 
     client.cancel().await?;
     Ok(())
+}
+
+fn init_tracing() {
+    let _ = tracing_subscriber::registry()
+        .with(
+            tracing_subscriber::EnvFilter::try_from_default_env()
+                .unwrap_or_else(|_| "debug".to_string().into()),
+        )
+        .with(tracing_subscriber::fmt::layer().with_writer(std::io::stderr))
+        .try_init();
+    tracing::info!("notification census interleave witness");
+}
+
+/// Notification diagnostics cannot split the runner's libtest result lines.
+#[test]
+fn notification_logs_preserve_the_complete_case_census() {
+    let cases = [
+        "test_server_notification",
+        "test_custom_client_notification_reaches_server",
+        "test_custom_server_notification_reaches_client",
+    ];
+    let output = std::process::Command::new(std::env::current_exe().unwrap())
+        .env("RUST_LOG", "debug")
+        .args(cases)
+        .args(["--exact", "--nocapture", "--test-threads=1"])
+        .output()
+        .unwrap();
+    let stdout = String::from_utf8(output.stdout).unwrap();
+    let stderr = String::from_utf8(output.stderr).unwrap();
+    assert!(output.status.success(), "{stdout}\n{stderr}");
+    let counted = cases
+        .iter()
+        .filter(|case| stdout.lines().any(|line| line == format!("test {case} ... ok")))
+        .count();
+    assert_eq!(counted, cases.len(), "stdout={stdout}\nstderr={stderr}");
+    assert!(
+        stderr.contains("notification census interleave witness"),
+        "{stderr}"
+    );
 }

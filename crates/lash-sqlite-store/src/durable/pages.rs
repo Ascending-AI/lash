@@ -683,8 +683,6 @@ impl PageStore for SqliteDurableStore {
         &self,
         budget: RetirementBudget,
     ) -> Result<RetirementProgress, DurableError> {
-        #[cfg(feature = "perf-witness")]
-        lash_core_execution::perf_witness::record_retirement_batch();
         self.write(PAGES_RETIRE, move |tx, now| {
             Ok(TxOutcome::Commit(Ok(retire_step_in(tx, budget, now)?)))
         })

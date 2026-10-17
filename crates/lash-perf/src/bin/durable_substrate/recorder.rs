@@ -8,6 +8,7 @@
 //! decorator only watches. Its own cost is one mutex push per transaction.
 
 use std::collections::{BTreeMap, HashMap};
+use std::sync::atomic::{AtomicU64, Ordering};
 use std::sync::{Arc, Mutex};
 use std::time::Instant;
 
@@ -298,6 +299,7 @@ impl Recorder {
 /// page publication included.
 #[derive(Clone)]
 pub struct RecordingStore {
+    retirement_batches: Arc<AtomicU64>,
     inner: Arc<dyn DurableStore>,
     node: String,
     recorder: Arc<Recorder>,
@@ -685,7 +687,9 @@ impl PageStore for RecordingStore {
         &self,
         budget: RetirementBudget,
     ) -> Result<RetirementProgress, DurableError> {
-        self.page_store()?.retire_step(budget).await
+        let pages = self.page_store()?;
+        self.retirement_batches.fetch_add(1, Ordering::Relaxed);
+        pages.retire_step(budget).await
     }
 
     async fn retirement_backlog(&self) -> Result<RetirementBacklog, DurableError> {
@@ -701,6 +705,11 @@ pub struct RecordingStores {
 }
 
 impl RecordingStores {
+    /// Retirement attempts through this store, including empty steps.
+    pub fn retirement_batches(&self) -> u64 {
+        self.store.retirement_batches.load(Ordering::Relaxed)
+    }
+
     /// Record `inner`'s durable writes as `node`'s into `recorder`.
     pub fn new(
         inner: Arc<dyn StoreSet>,
@@ -709,6 +718,7 @@ impl RecordingStores {
         dialect: &'static str,
     ) -> Self {
         let store = Arc::new(RecordingStore {
+            retirement_batches: Arc::new(AtomicU64::new(0)),
             inner: inner.durable_store(),
             node: node.to_owned(),
             recorder,
