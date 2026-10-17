@@ -6,6 +6,10 @@ use std::cell::RefCell;
 use std::collections::HashMap;
 use std::ffi::{CStr, c_int, c_uint, c_void};
 
+#[cfg(feature = "perf-witness")]
+#[path = "observed_sql_work.rs"]
+mod joined;
+
 thread_local! {
     static BEFORE: RefCell<HashMap<usize, (SqliteWork, i64)>> = RefCell::new(HashMap::new());
 }
@@ -64,6 +68,7 @@ impl WriteWitness {
     /// Record the rows changed since the witness started or last recorded:
     /// a batch member's own rows (FIG-5968).
     pub(crate) fn member(&mut self, connection: &rusqlite::Connection) {
+        joined::flush(connection);
         let changes = connection.total_changes();
         lash_core_execution::perf_witness::record_sql_writes(
             changes.saturating_sub(self.changes),
@@ -73,6 +78,7 @@ impl WriteWitness {
     }
 
     pub(crate) fn finish(self, connection: &rusqlite::Connection) {
+        joined::flush(connection);
         lash_core_execution::perf_witness::record_sql_writes(
             connection.total_changes().saturating_sub(self.changes),
             pages_written(connection),
@@ -140,6 +146,8 @@ unsafe extern "C" fn trace(
                         return;
                     }
                 }
+                #[cfg(feature = "perf-witness")]
+                joined::start(statement, &sql);
                 if let Some(window) = &window {
                     window.statement(&sql);
                     let expanded = ffi::sqlite3_expanded_sql(statement);
@@ -167,6 +175,8 @@ unsafe extern "C" fn trace(
                 }
             }
             ffi::SQLITE_TRACE_ROW => {
+                #[cfg(feature = "perf-witness")]
+                joined::row(statement);
                 if let Some(window) = &window {
                     window.row(&sql);
                     let bytes = (0..ffi::sqlite3_column_count(statement))
@@ -184,6 +194,8 @@ unsafe extern "C" fn trace(
                 lash_core_execution::perf_witness::record_sql_row_read(&sql);
             }
             ffi::SQLITE_TRACE_PROFILE => {
+                #[cfg(feature = "perf-witness")]
+                joined::profile(statement);
                 if let Some((before, changes)) =
                     BEFORE.with(|before| before.borrow_mut().remove(&ptr.addr()))
                     && let Some(window) = &window
@@ -400,6 +412,135 @@ pub(crate) fn open_connection(
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    /// SQL-COST-JOIN (FIG-6621): one join is one statement, with its
+    /// complete row/byte cost; exact repeats exclude changed parameters.
+    #[expect(
+        clippy::disallowed_methods,
+        reason = "isolates the exclusive process-global witness from parallel store laws"
+    )]
+    #[cfg(feature = "perf-witness")]
+    #[test]
+    fn turn_sql_work_joins_payload_and_exact_reads_without_table_fanout() {
+        const CHILD: &str = "LASH_SQL_WORK_SQLITE_CHILD";
+        if std::env::var_os(CHILD).is_none() {
+            let output = std::process::Command::new(std::env::current_exe().unwrap())
+                .args(["--exact", "observed_sql::tests::turn_sql_work_joins_payload_and_exact_reads_without_table_fanout", "--nocapture"])
+                .env(CHILD, "1").output().unwrap();
+            let stdout = String::from_utf8_lossy(&output.stdout);
+            eprint!("{}", String::from_utf8_lossy(&output.stderr));
+            assert!(output.status.success(), "isolated law failed: {stdout}");
+            assert!(
+                stdout.contains("test result: ok. 1 passed; 0 failed;"),
+                "law did not execute: {stdout}"
+            );
+            return;
+        }
+
+        use lash_core_execution::perf_witness::{Collector, sql_shapes};
+        let connection = rusqlite::Connection::open_in_memory().unwrap();
+        connection.execute_batch("CREATE TABLE a(id INTEGER); CREATE TABLE b(id INTEGER); INSERT INTO a VALUES(1); INSERT INTO b VALUES(1)").unwrap();
+        connection.execute_batch("PRAGMA foreign_keys=ON; CREATE TABLE parent(id INTEGER PRIMARY KEY); CREATE TABLE child(parent INTEGER REFERENCES parent(id) ON DELETE CASCADE); INSERT INTO parent VALUES(1); INSERT INTO child VALUES(1),(1)").unwrap();
+        enable(&connection);
+        let collector = Collector::install_with_sql_shapes().unwrap();
+        sql_shapes::work::set_window(Some(1), "turn");
+        sql_shapes::with_origin("join-law", || {
+            for value in [1_i64, 1, 2] {
+                let rows = connection
+                    .prepare_cached("SELECT a.id FROM a JOIN b ON a.id=b.id WHERE a.id=?1")
+                    .unwrap()
+                    .query_map([value], |r| r.get::<_, i64>(0))
+                    .unwrap()
+                    .collect::<rusqlite::Result<Vec<_>>>()
+                    .unwrap();
+                assert_eq!(rows.len(), usize::from(value == 1));
+            }
+        });
+        joined::flush(&connection);
+        let receipt = serde_json::to_value(collector.snapshot().sql_shapes.unwrap()).unwrap();
+        assert_eq!(receipt["work"]["totals"]["sqlite"]["statements"], 3);
+        assert_eq!(receipt["work"]["totals"]["sqlite"]["rows_returned"], 2);
+        assert_eq!(receipt["work"]["totals"]["sqlite"]["result_bytes"], 16);
+        assert_eq!(receipt["work"]["totals"]["sqlite"]["bound_bytes"], 3);
+        assert_eq!(
+            receipt["work"]["repeated_reads"].as_array().unwrap().len(),
+            1
+        );
+        assert_eq!(receipt["work"]["repeated_reads"][0]["executions"], 2);
+        assert_eq!(receipt["work"]["rows"].as_array().unwrap().len(), 1);
+        assert_eq!(
+            receipt["work"]["rows"][0]["relations"],
+            serde_json::json!(["a", "b"])
+        );
+        // PROFILE precedes the truncate optimization's final total_changes.
+        connection.execute("DELETE FROM a", []).unwrap();
+        joined::flush(&connection);
+        let work = collector.snapshot().sql_shapes.unwrap().work;
+        assert!(work.complete && work.conserves());
+        assert_eq!(
+            work.totals[&lash_core_execution::perf_witness::sql_shapes::work::Backend::Sqlite]
+                .rows_affected,
+            1
+        );
+        assert_eq!(
+            work.totals[&lash_core_execution::perf_witness::sql_shapes::work::Backend::Sqlite]
+                .statements,
+            4
+        );
+        // REAL's 15-digit expanded spelling cannot prove parameter equality.
+        for value in [1.234567890123456_f64, 1.234567890123457] {
+            connection
+                .query_row("SELECT ?1", [value], |_| Ok(()))
+                .unwrap();
+        }
+        // TEXT is retained under the explicitly named embedded-NUL qualifier.
+        for _ in 0..2 {
+            connection
+                .query_row("SELECT ?1", ["é'a"], |_| Ok(()))
+                .unwrap();
+        }
+        joined::flush(&connection);
+        let work = collector.snapshot().sql_shapes.unwrap().work;
+        assert_eq!(
+            work.totals[&lash_core_execution::perf_witness::sql_shapes::work::Backend::Sqlite]
+                .unqualified_read_identities,
+            2
+        );
+        assert_eq!(work.read_bind_classes["real_unqualified"], 2);
+        assert!(
+            work.repeated_reads
+                .iter()
+                .any(|r| r.key.bind_class == "text_modulo_embedded_nul" && r.executions == 2)
+        );
+        assert!(
+            !work
+                .repeated_reads
+                .iter()
+                .any(|r| r.key.bind_class.contains("real"))
+        );
+        // FK subprograms emit STMT again on the same live handle. Their
+        // starts are not new invocations; one PROFILE completes the delete.
+        let before = work.statements();
+        let rows = connection
+            .prepare("DELETE FROM parent WHERE id=1 RETURNING id")
+            .unwrap()
+            .query_map([], |r| r.get::<_, i64>(0))
+            .unwrap()
+            .collect::<rusqlite::Result<Vec<_>>>()
+            .unwrap();
+        assert_eq!(rows, vec![1]);
+        joined::flush(&connection);
+        let work = collector.snapshot().sql_shapes.unwrap().work;
+        assert!(
+            work.complete && work.conserves(),
+            "FK trace subprogram invented active work"
+        );
+        assert_eq!(work.statements() - before, 1);
+        assert_eq!(
+            work.totals[&sql_shapes::work::Backend::Sqlite].rows_affected,
+            4
+        );
+    }
 
     /// REPLAY-SQL-SHAPES: an extra physical SELECT is conserved in the
     /// turn counters and exactly one named store-origin row, on either executor.

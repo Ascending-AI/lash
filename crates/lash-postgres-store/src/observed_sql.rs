@@ -168,6 +168,10 @@ pub(crate) fn transaction_started() {
 /// dropped. Writes, explicit row/table locks and advisory locks contribute
 /// their complete elapsed time to the documented lock-wait upper bound.
 struct Statement {
+    #[cfg(feature = "perf-witness")]
+    work: Option<lash_core_execution::perf_witness::sql_shapes::work::Execution>,
+    #[cfg(feature = "perf-witness")]
+    repeat_qualified: bool,
     state: Option<Shared>,
     window: Option<sql::Window>,
     sql: String,
@@ -178,7 +182,7 @@ struct Statement {
 }
 
 impl Statement {
-    fn new(sql: &str) -> Option<Self> {
+    fn new(sql: &str, site: &impl std::fmt::Display) -> Option<Self> {
         #[cfg(test)]
         round_trip();
         let state = CURRENT.try_with(Arc::clone).ok();
@@ -187,7 +191,39 @@ impl Statement {
         let recording = lash_core_execution::perf_witness::queues::is_recording();
         #[cfg(not(feature = "perf-witness"))]
         let recording = false;
-        if state.is_none() && window.is_none() && !recording {
+        #[cfg(feature = "perf-witness")]
+        let work = {
+            use lash_core_execution::perf_witness::{self, sql_shapes};
+            if perf_witness::collecting() {
+                perf_witness::record_sql_statement(sql);
+            }
+            if sql_shapes::enabled() {
+                let relations = lash_store_sql::relation_set(sql);
+                let read = perf_witness::SqlVerb::classify(sql) == perf_witness::SqlVerb::Select;
+                sql_shapes::work::Execution::start(
+                    sql_shapes::work::Backend::Postgres,
+                    sql,
+                    &site.to_string(),
+                    relations,
+                    read,
+                )
+            } else {
+                None
+            }
+        };
+        #[cfg(not(feature = "perf-witness"))]
+        let _ = site;
+        let joined = {
+            #[cfg(feature = "perf-witness")]
+            {
+                work.is_some() || lash_core_execution::perf_witness::collecting()
+            }
+            #[cfg(not(feature = "perf-witness"))]
+            {
+                false
+            }
+        };
+        if state.is_none() && window.is_none() && !joined && !recording {
             return None;
         }
         if let Some(window) = &window {
@@ -219,6 +255,12 @@ impl Statement {
                 .sql_statements += 1;
         }
         Some(Self {
+            #[cfg(feature = "perf-witness")]
+            work,
+            #[cfg(feature = "perf-witness")]
+            repeat_qualified: work.is_some()
+                && lash_store_sql::read_statement(&text) == Some(true)
+                && lash_store_sql::relation_set(&text).is_some(),
             state,
             window,
             sql: text,
@@ -249,6 +291,13 @@ impl Statement {
             .filter_map(|index| row.try_get_raw(index).ok())
             .filter_map(|value| value.as_bytes().ok().map(|bytes| bytes.len() as u64))
             .sum::<u64>();
+        #[cfg(feature = "perf-witness")]
+        {
+            lash_core_execution::perf_witness::record_sql_row_read(&self.sql);
+            if let Some(work) = self.work {
+                work.row(bytes);
+            }
+        }
         if let Some(window) = &self.window {
             window.row(&self.sql);
             window.payload(&self.sql, 0, 0, bytes);
@@ -278,19 +327,29 @@ impl Drop for Statement {
 }
 
 pub(crate) async fn control<T>(sql: &str, future: impl Future<Output = T>) -> T {
-    let mut statement = Statement::new(sql);
+    let mut statement = Statement::new(sql, &"postgres.transaction-control");
+    #[cfg(feature = "perf-witness")]
+    if let Some(work) = statement.as_ref().and_then(|s| s.work) {
+        work.bindings(Some(0), Some(sql.as_bytes().to_vec()), "pg_encoded");
+    }
     let result = future.await;
+    #[cfg(feature = "perf-witness")]
+    if let Some(work) = statement.as_ref().and_then(|s| s.work) {
+        work.finish();
+    }
     if let Some(statement) = &mut statement {
         statement.finish();
     }
+    drop(statement);
     result
 }
 
 #[derive(Debug)]
-pub(crate) struct Observed<E>(E);
+pub(crate) struct Observed<E>(E, &'static std::panic::Location<'static>);
 
+#[track_caller]
 pub(crate) fn executor<E>(executor: E) -> Observed<E> {
-    Observed(executor)
+    Observed(executor, std::panic::Location::caller())
 }
 
 impl<'c, E: Executor<'c, Database = Postgres>> Executor<'c> for Observed<E> {
@@ -304,23 +363,46 @@ impl<'c, E: Executor<'c, Database = Postgres>> Executor<'c> for Observed<E> {
         'c: 'e,
         Q: 'q + Execute<'q, Postgres>,
     {
-        let statement = Statement::new(query.sql());
+        let statement = Statement::new(query.sql(), self.1);
+        #[cfg(feature = "perf-witness")]
+        let query = JoinedQuery {
+            inner: query,
+            work: statement.as_ref().and_then(|s| s.work),
+            repeat_qualified: statement.as_ref().is_some_and(|s| s.repeat_qualified),
+        };
         let stream = self.0.fetch_many(query);
         let Some(mut statement) = statement else {
             return stream;
         };
-        Box::pin(stream.map(move |result| {
+        let mut stream = stream;
+        Box::pin(futures_util::stream::poll_fn(move |cx| {
+            use std::task::Poll;
+            let result = match stream.as_mut().poll_next(cx) {
+                Poll::Pending => return Poll::Pending,
+                Poll::Ready(None) => {
+                    #[cfg(feature = "perf-witness")]
+                    if let Some(work) = statement.work {
+                        work.finish();
+                    }
+                    return Poll::Ready(None);
+                }
+                Poll::Ready(Some(result)) => result,
+            };
             match &result {
                 Ok(Either::Right(row)) => statement.row(row),
                 Ok(Either::Left(done)) => {
                     statement.finish();
+                    #[cfg(feature = "perf-witness")]
+                    if let Some(work) = statement.work {
+                        work.affected(done.rows_affected());
+                    }
                     if let Some(window) = &statement.window {
                         window.payload(&statement.sql, done.rows_affected(), 0, 0);
                     }
                 }
                 Err(_) => statement.finish(),
             }
-            result
+            Poll::Ready(Some(result))
         }))
     }
 
@@ -332,8 +414,18 @@ impl<'c, E: Executor<'c, Database = Postgres>> Executor<'c> for Observed<E> {
         'c: 'e,
         Q: 'q + Execute<'q, Postgres>,
     {
-        if sql::Window::current().is_none() {
-            let mut statement = Statement::new(query.sql());
+        let joined = {
+            #[cfg(feature = "perf-witness")]
+            {
+                lash_core_execution::perf_witness::sql_shapes::enabled()
+            }
+            #[cfg(not(feature = "perf-witness"))]
+            {
+                false
+            }
+        };
+        if sql::Window::current().is_none() && !joined {
+            let mut statement = Statement::new(query.sql(), self.1);
             let future = self.0.fetch_optional(query);
             return Box::pin(async move {
                 let result = future.await;
@@ -443,6 +535,92 @@ mod tests {
         drop(collector);
         drop(connection);
         pool.close().await;
+    }
+
+    /// SQL-COST-JOIN: PostgreSQL retains one join invocation, binary bind
+    /// bytes and command rows, while exact parameter changes split repeats.
+    #[cfg(feature = "perf-witness")]
+    #[expect(
+        clippy::disallowed_methods,
+        reason = "isolates the exclusive process-global witness from parallel store laws"
+    )]
+    #[tokio::test]
+    async fn turn_sql_work_joins_encoded_payloads_and_exact_reads() {
+        const CHILD: &str = "LASH_SQL_WORK_PG_CHILD";
+        if std::env::var_os(CHILD).is_none() {
+            let output = std::process::Command::new(std::env::current_exe().unwrap())
+                .args([
+                    "--exact",
+                    "observed_sql::tests::turn_sql_work_joins_encoded_payloads_and_exact_reads",
+                    "--nocapture",
+                ])
+                .env(CHILD, "1")
+                .output()
+                .unwrap();
+            let stdout = String::from_utf8_lossy(&output.stdout);
+            eprint!("{}", String::from_utf8_lossy(&output.stderr));
+            assert!(output.status.success(), "isolated law failed: {stdout}");
+            assert!(
+                stdout.contains("test result: ok. 1 passed; 0 failed;"),
+                "law did not execute: {stdout}"
+            );
+            return;
+        }
+
+        use lash_core_execution::perf_witness::{Collector, sql_shapes};
+        let database =
+            crate::testing::IsolatedDatabase::create(&crate::testing::required_database_url())
+                .await;
+        let storage = crate::testing::connect(database.url()).await.unwrap();
+        let mut connection = storage.pool().acquire().await.unwrap();
+        sqlx::raw_sql("CREATE TEMP TABLE join_a(id bigint); CREATE TEMP TABLE join_b(id bigint); INSERT INTO join_a VALUES(1); INSERT INTO join_b VALUES(1)")
+            .execute(&mut *connection).await.unwrap();
+        let collector = Collector::install_with_sql_shapes().unwrap();
+        sql_shapes::work::set_window(Some(1), "turn");
+        for value in [1_i64, 1, 2] {
+            let rows = query("SELECT join_a.id FROM join_a JOIN join_b ON join_a.id=join_b.id WHERE join_a.id=$1")
+                .bind(value).fetch_all(executor(&mut *connection)).await.unwrap();
+            assert_eq!(rows.len(), usize::from(value == 1));
+        }
+        let work = collector.snapshot().sql_shapes.unwrap().work;
+        assert!(work.complete && work.conserves());
+        assert_eq!(
+            work.totals[&lash_core_execution::perf_witness::sql_shapes::work::Backend::Postgres]
+                .statements,
+            3
+        );
+        assert_eq!(
+            work.totals[&lash_core_execution::perf_witness::sql_shapes::work::Backend::Postgres]
+                .rows_returned,
+            2
+        );
+        assert_eq!(
+            work.totals[&lash_core_execution::perf_witness::sql_shapes::work::Backend::Postgres]
+                .rows_affected,
+            2
+        ); // PostgreSQL SELECT completion
+        assert_eq!(
+            work.totals[&lash_core_execution::perf_witness::sql_shapes::work::Backend::Postgres]
+                .bound_bytes,
+            24
+        ); // binary int8, not literal spelling
+        assert_eq!(
+            work.totals[&lash_core_execution::perf_witness::sql_shapes::work::Backend::Postgres]
+                .result_bytes,
+            16
+        );
+        assert_eq!(work.repeated_reads.len(), 1);
+        assert_eq!(work.repeated_reads[0].executions, 2);
+        assert_eq!(
+            work.rows.iter().map(|r| r.counts.statements).sum::<u64>(),
+            3
+        );
+        assert!(
+            work.rows
+                .iter()
+                .all(|r| r.key.relations.as_deref() == Some(&["join_a".into(), "join_b".into()]))
+        );
+        eprintln!("TURN_SQL_WORK {}", serde_json::to_string(&work).unwrap());
     }
 
     /// SQL-WORK: one known operation has exactly one call and one shape;
@@ -580,3 +758,57 @@ mod tests {
 #[path = "observed_sql/bindings.rs"]
 mod bindings;
 pub(crate) use bindings::{Query, query, query_as, query_scalar};
+
+/// Carry the execution token to SQLx's argument extraction, wherever its
+/// future is polled. No task/thread identity guess joins binds to a statement.
+#[cfg(feature = "perf-witness")]
+struct JoinedQuery<Q> {
+    inner: Q,
+    work: Option<lash_core_execution::perf_witness::sql_shapes::work::Execution>,
+    repeat_qualified: bool,
+}
+#[cfg(feature = "perf-witness")]
+impl<'q, Q: Execute<'q, Postgres>> Execute<'q, Postgres> for JoinedQuery<Q> {
+    fn sql(&self) -> &'q str {
+        self.inner.sql()
+    }
+    fn statement(&self) -> Option<&PgStatement<'q>> {
+        self.inner.statement()
+    }
+    fn persistent(&self) -> bool {
+        self.inner.persistent()
+    }
+    fn take_arguments(
+        &mut self,
+    ) -> Result<Option<sqlx::postgres::PgArguments>, sqlx::error::BoxDynError> {
+        let Some(work) = self.work else {
+            return self.inner.take_arguments();
+        };
+        let sql = self.inner.sql();
+        let (arguments, captured) = bindings::capture(|| self.inner.take_arguments());
+        let (bytes, key) = match captured {
+            Some(value) => value,
+            None if arguments.as_ref().is_ok_and(|v| v.is_none()) => (Some(0), Some(Vec::new())),
+            None => (None, None),
+        };
+        let key = key.filter(|_| self.repeat_qualified).and_then(|key| {
+            (key.len() + sql.len() + 8
+                <= lash_core_execution::perf_witness::sql_shapes::work::VALUE_LIMIT)
+                .then(|| {
+                    let mut identity = (sql.len() as u64).to_le_bytes().to_vec();
+                    identity.extend_from_slice(sql.as_bytes());
+                    identity.extend_from_slice(&key);
+                    identity
+                })
+        });
+        let class = if !self.repeat_qualified {
+            "pg_read_syntax_unqualified"
+        } else if key.is_some() {
+            "pg_encoded_exact"
+        } else {
+            "pg_encoding_unqualified"
+        };
+        work.bindings(bytes, key, class);
+        arguments
+    }
+}

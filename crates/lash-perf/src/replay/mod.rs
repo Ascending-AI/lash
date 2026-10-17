@@ -14,6 +14,7 @@ pub mod receipt;
 pub mod recorder;
 pub mod runner;
 pub mod script;
+mod sql_work;
 pub mod traffic;
 mod workers;
 
@@ -59,7 +60,7 @@ pub struct ReplayArgs {
     /// duration history (main's trend).
     #[arg(long)]
     pub history: Option<PathBuf>,
-    /// SQLite shape × store-origin sidecar (one selected workload).
+    /// SQL execution joins plus shape × store-origin sidecar (one workload).
     #[arg(long)]
     pub sql_shapes: Option<PathBuf>,
     /// Attribute physical SQLite writes and VM transport kinds in the receipt.
@@ -184,9 +185,8 @@ pub async fn run(args: &ReplayArgs) -> Result<()> {
         );
     }
     anyhow::ensure!(
-        (args.sql_shapes.is_none() && !args.traffic && args.effect_phases.is_none())
-            || args.store == StoreKind::Sqlite,
-        "--sql-shapes and --traffic are SQLite only"
+        (!args.traffic && args.effect_phases.is_none()) || args.store == StoreKind::Sqlite,
+        "--traffic and --effect-phases are SQLite only"
     );
     if let Some(first) = args.heap.profile_turn {
         let end = args.heap.profile_through_turn.unwrap_or(first);

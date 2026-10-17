@@ -70,7 +70,9 @@
 //!
 //! `docs/store-sql-authoring.md` is the long form.
 
+mod relations;
 mod render;
+pub use relations::{read_statement, relation_set};
 
 pub mod artifact;
 pub mod attachment;
@@ -290,6 +292,12 @@ pub struct Rendered {
 }
 
 impl Rendered {
+    /// On-demand SQL-visible participation; ordinary rendering retains no map.
+    /// Unknown server internals stay absent.
+    pub fn relations(&self) -> Option<Vec<String>> {
+        relation_set(&self.sql)
+    }
+
     /// The statement's reported name.
     #[must_use]
     pub fn name(&self) -> &'static str {

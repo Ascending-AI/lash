@@ -37,7 +37,7 @@ A turn must make exactly its scripted model calls. A cell that fails, a tool
 that is refused or a turn that ends early stops the run and quotes the
 request that left the script, so a broken script never measures silently.
 
-### SQL shape attribution (SQLite)
+### SQL shape attribution and execution joins
 
 ```sh
 . ./env.sh
@@ -47,7 +47,7 @@ just perf-replay crates/lash-perf/workloads/replay/scenarios/coding-typical.json
 
 The underlying command is `lash-perf replay <scenario> --store-dir <stores>
 --out <replay.json> --sql-shapes <shapes.json>`. Select exactly one workload.
-The sidecar contains one `rounds` entry per turn, with normalized SQL
+The sidecar tags `rounds` entries with `phase`: session start (turn zero), each ordinary turn, and compactions, with normalized SQL
 `shape` × `store_origin` rows, `statements`, `selects` and `rows_returned`.
 Each turn’s sums are checked against the existing replay metrics using the
 same locked SQL snapshot; export refuses a mismatch. The receipt records
@@ -64,6 +64,8 @@ including overlapping engine/background tasks; it does not partition higher
 async callers of the same method. Statements count at PROFILE and rows at ROW,
 so an execution spanning a snapshot cut can contribute rows and completion to
 different turns, exactly as the existing totals do.
+
+The [joined execution receipt](sql-operation-windows.md#turn-sql-work-joined-execution-receipts-fig-6621) also supports PostgreSQL, session start, compaction, maintenance and shutdown.
 
 The observer retains at most 4096 shape/origin pairs per workload and refuses
 an incomplete export on overflow. Aggregation happens in memory; there is no

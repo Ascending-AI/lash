@@ -37,7 +37,17 @@ impl StoreObserver {
     }
 
     pub fn is_observed(&self) -> bool {
-        self.metrics.is_some() || self.sql_sink.is_some()
+        let joined = {
+            #[cfg(feature = "perf-witness")]
+            {
+                crate::perf_witness::sql_shapes::enabled()
+            }
+            #[cfg(not(feature = "perf-witness"))]
+            {
+                false
+            }
+        };
+        self.metrics.is_some() || self.sql_sink.is_some() || joined
     }
 
     /// Host-owned physical SQL summaries. Operation identities are carried in

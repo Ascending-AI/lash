@@ -1,0 +1,184 @@
+//! First SQL-work artifact and its maintained text reader, on the replay route.
+use anyhow::{Context, Result, ensure};
+use lash_core::perf_witness::sql_shapes::work::{Backend, Counts, Receipt};
+use serde_json::json;
+use std::collections::BTreeMap;
+use std::fmt::Write as _;
+use std::path::Path;
+
+pub(super) fn write(
+    path: &Path,
+    identities: (
+        &super::receipt::Identity,
+        &crate::runtime_perf::ExperimentIdentity,
+        &str,
+    ),
+    workload: &super::script::Workload,
+    backend: &str,
+    turns: usize,
+    proof: (&Receipt, &serde_json::Value),
+) -> Result<()> {
+    let (receipt, reference) = proof;
+    let (identity, experiment, experiment_id) = identities;
+    let mut per_backend = BTreeMap::<Backend, Counts>::new();
+    for row in receipt.rows.iter().chain(&receipt.active) {
+        let total = per_backend.entry(row.key.backend).or_default();
+        total.statements += row.counts.statements;
+        total.rows_returned += row.counts.rows_returned;
+        total.rows_affected += row.counts.rows_affected;
+        total.bound_bytes += row.counts.bound_bytes;
+        total.result_bytes += row.counts.result_bytes;
+        total.unknown_bindings += row.counts.unknown_bindings;
+        total.unqualified_read_identities += row.counts.unqualified_read_identities;
+    }
+    let artifact = path.with_file_name("turn-sql-work.json");
+    let binary_sha256 = identity
+        .executable_sha256
+        .as_deref()
+        .context("SQL-work export requires the producer's executable identity")?;
+    let value = json!({
+        "kind": "lash.turn-sql-work", "experiment_id": experiment_id,
+        "identity": identity, "experiment": experiment, "binary_sha256": binary_sha256, "pid": std::process::id(),
+        "observer": "sql-shapes/execution-join", "backend": backend,
+        "worker_scope": "host SQL executor task/connection threads; worker field identifies the starting thread",
+        "terminal": "all scripted outcomes successful; session closes attempted; core shutdown completed",
+        "workload": workload.name, "script_digest": workload.digest(),
+        "turns": turns, "sessions": workload.sessions, "compact_every": workload.compact_every,
+        "observation_unit": "one SQL invocation; phase/turn labels are replay round windows, not exclusive async ownership",
+        "aggregation": "sum; join statements count once with a relation set; no per-table physical allocation",
+        "same_turn_qualification": if workload.sessions == 1 { "single-session replay turn window" } else { "refused: concurrent sessions share a round window" },
+        "units": {
+            "sqlite": { "bound_bytes": "expanded bound literal UTF-8 bytes, repeated uses included", "result_bytes": "text/blob payload plus eight bytes per numeric scalar", "rows_affected": "sqlite3_total_changes64 delta; includes trigger/FK changes" },
+            "postgres": { "bound_bytes": "binary parameter encoder payload, framing excluded", "result_bytes": "returned column-format payload, framing excluded", "rows_affected": "server command completion; SELECT included; hidden trigger/CTE writes unknown" }
+        },
+        "limits": {"rows": lash_core::perf_witness::sql_shapes::work::WORK_ROW_LIMIT,
+            "keys": lash_core::perf_witness::sql_shapes::work::KEY_LIMIT,
+            "key_bytes": lash_core::perf_witness::sql_shapes::work::KEY_BYTES_LIMIT,
+            "active_executions": lash_core::perf_witness::sql_shapes::work::ACTIVE_LIMIT,
+            "pending_bindings": lash_core::perf_witness::sql_shapes::work::ACTIVE_LIMIT},
+        "relation_qualification": "only rows with a known relation set qualify; server routine internals are unknown",
+        "owner_qualification": "missing owners are unowned work, never assigned to another owner",
+        "same_turn_repeated_reads": if workload.sessions == 1 { Some(receipt.repeated_reads.iter().filter(|r| r.key.window.phase == "turn").collect::<Vec<_>>()) } else { None },
+        "conserved": receipt.conserves() && reference["conserved"] == true, "reference": reference,
+        "read_identity_coverage": coverage(receipt), "per_backend": per_backend, "work": receipt,
+    });
+    std::fs::write(&artifact, serde_json::to_vec_pretty(&value)?)
+        .with_context(|| format!("write {}", artifact.display()))?;
+    let text = format!(
+        "Experiment {experiment_id} backend={backend} workload={} script={} observer=sql-shapes/execution-join binary_sha256={binary_sha256} terminal=scripted-success witness_conserved={}\n{}",
+        workload.name,
+        workload.digest(),
+        reference["conserved"],
+        table(receipt)
+    );
+    std::fs::write(artifact.with_extension("txt"), &text)?;
+    print!("{text}");
+    println!("SQL work: {}", artifact.display());
+    ensure!(
+        reference["conserved"] == true,
+        "execution joins differ from independent statement/returned-row/completed-connection witnesses; retained refused artifact"
+    );
+    ensure!(
+        receipt.conserves(),
+        "SQL-work counters do not conserve; retained the refused artifact"
+    );
+    ensure!(
+        receipt.complete,
+        "SQL-work attribution incomplete (active={}, lost={}, unknown binds={}); retained the refused artifact",
+        receipt.active.len(),
+        receipt.lost,
+        receipt.unknown_bindings()
+    );
+    Ok(())
+}
+
+fn table(receipt: &Receipt) -> String {
+    let mut out = format!(
+        "SQL work: joins_conserved={} complete={} statements={} active={} lost={} repeat_identities_complete={}\nTop 10 execution joins by statement count (per backend payload units; sum):\n",
+        receipt.conserves(),
+        receipt.complete,
+        receipt.statements(),
+        receipt.active.len(),
+        receipt.lost,
+        receipt.repeat_identities_complete
+    );
+    let mut rows: Vec<_> = receipt.rows.iter().collect();
+    rows.sort_by_key(|row| std::cmp::Reverse(row.counts.statements));
+    for row in rows.iter().take(10) {
+        let k = &row.key;
+        let c = &row.counts;
+        let _ = writeln!(
+            out,
+            "{} turn={:?} phase={} stmt={} site={} relations={:?} owner={:?} worker={} calls={} returned={} affected={} bind_B={} result_B={} finished={:?}",
+            k.backend,
+            k.started_in.turn,
+            k.started_in.phase,
+            &k.statement[..12],
+            k.site,
+            k.relations,
+            k.owner,
+            k.worker,
+            c.statements,
+            c.rows_returned,
+            c.rows_affected,
+            c.bound_bytes,
+            c.result_bytes,
+            k.finished_in
+        );
+    }
+    let _ = writeln!(
+        out,
+        "Read identity coverage over all windows: {}",
+        coverage(receipt)
+    );
+    out.push_str("Exact same-turn repeated reads (phase=turn): exact SQL + params + origin; SQLite TEXT exact modulo embedded NUL; SQLite REAL/unknown encodings excluded; no cache-validity claim\n");
+    let _ = writeln!(
+        out,
+        "Read bind classes (invocations, including excluded): {:?}",
+        receipt.read_bind_classes
+    );
+    let mut repeat_classes = BTreeMap::<String, (u64, u64)>::new();
+    for r in &receipt.repeated_reads {
+        let count = repeat_classes.entry(r.key.bind_class.clone()).or_default();
+        count.0 += 1;
+        count.1 += r.executions;
+    }
+    let _ = writeln!(
+        out,
+        "Repeated bind classes (groups, executions): {repeat_classes:?}"
+    );
+    let mut reads: Vec<_> = receipt.repeated_reads.iter().collect();
+    reads.sort_by_key(|r| std::cmp::Reverse(r.extra_executions));
+    for r in reads
+        .iter()
+        .filter(|r| r.key.window.phase == "turn")
+        .take(10)
+    {
+        let _ = writeln!(
+            out,
+            "turn={:?} phase={} stmt={} site={} parameters={} executions={} extra={}",
+            r.key.window.turn,
+            r.key.window.phase,
+            &r.key.statement[..12],
+            r.key.site,
+            r.key.parameters,
+            r.executions,
+            r.extra_executions
+        );
+    }
+    out
+}
+
+fn coverage(receipt: &Receipt) -> serde_json::Value {
+    let reads: u64 = receipt.read_bind_classes.values().sum();
+    let repeated: u64 = receipt.repeated_reads.iter().map(|r| r.executions).sum();
+    let rows: Vec<_> = receipt.read_bind_classes.iter().map(|(class, n)| {
+        let groups: Vec<_> = receipt.repeated_reads.iter().filter(|r| &r.key.bind_class == class).collect();
+        let executions: u64 = groups.iter().map(|r| r.executions).sum();
+        json!({"bind_class": class, "read_candidates": n,
+            "share_of_read_candidates": (reads > 0).then(|| *n as f64 / reads as f64),
+            "reported_repeated_groups": groups.len(), "reported_repeated_executions": executions,
+            "share_of_reported_repeated_executions": (repeated > 0).then(|| executions as f64 / repeated as f64)})
+    }).collect();
+    json!({"scope": "all observed windows; SELECT/WITH candidates on PostgreSQL; excluded identities remain in the denominator", "classes": rows})
+}

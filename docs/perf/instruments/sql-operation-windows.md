@@ -137,3 +137,75 @@ SQL window nor VM charge. The counted released-worker harness that reads them
 (`pages_loaded`, `pages_sealed`, `spool_bytes`, `retirement_batches`), its
 scenarios and its committed baseline are in
 [the durable substrate README](../../../crates/lash-perf/src/bin/durable_substrate/README.md#retained-heap-baseline-fig-6196).
+
+
+## Turn SQL work: joined execution receipts (FIG-6621)
+
+The maintained replay route extends `--sql-shapes` on SQLite and PostgreSQL:
+
+```sh
+. ./env.sh
+just perf-replay chat-short --turns 2 \
+  --sql-shapes .kiln/sql-work/shapes.json
+# Private PostgreSQL, using the same replay arguments:
+# kiln gate lash <fork> -- scripts/ci/with-service.sh pg -- just perf-replay \
+#   chat-short --turns 2 --store postgres --sql-shapes .kiln/sql-work/shapes.json
+```
+
+Select one workload. Use `chat-long-compacting --turns 51` to include a committed corpus compaction, or a workload file with a shorter `compact_every` interval. Beside the shape sidecar this writes `turn-sql-work.json`
+and `turn-sql-work.txt`, and prints a top ten by statement count and an exact
+same-turn repeated-read section. The JSON retains the complete bounded rows;
+the text is a summary, not an automatic performance gate. The artifact carries
+one producer experiment ID, start/build identity, binary digest, process ID,
+backend, actual SQL worker thread, workload digest and successful terminal
+population. A replay turn label names a round window: concurrent sessions are
+not an exclusive per-session attribution, and their same-turn claim is refused.
+
+Each invocation has an exact-SQL SHA-256 statement ID, normalized shape,
+executing origin, SQL-visible relation **set**, operation/retained actor fence
+when present, and start/finish phase and turn. SQLite origins are the store
+closures on its connection worker; PostgreSQL origins are the executor's source
+file and line. Missing owners remain unowned; missing relation sets remain
+unknown (including tables hidden inside server routines). Neither is borrowed
+from a neighboring operation. Relation participation is not physical table or
+index work: a join counts once, with its whole returned/affected rows and byte
+cost. `work.totals` and `per_backend` keep the existing backend-specific units above. Never sum
+SQLite literal bytes with PostgreSQL encoded bytes, or treat SELECT command
+rows on PostgreSQL as mutations.
+
+The meter installs before session creation, retains session-start and compaction
+shape cuts, and keeps the joined observer through maintenance and shutdown.
+`work.active` contains executions that have not observed completion. Completed
+rows retain both cuts, so cross-window work is visible. `conserved` checks the
+sum over completed and active rows against independently maintained totals;
+replay also checks the old statement/returned-row witness and SQLite's completed
+connection change counts. In SQLite the joined affected-row delta is finalized
+at the next statement or connection-call boundary, because PROFILE can precede
+`total_changes` updates (e.g. DELETE's truncate path). FK/trigger subprogram start notifications on a live handle count as part of its one invocation. Dropped PostgreSQL streams
+stay active. Active work, unknown bind-byte counts or overflow refuses a complete
+export; the JSON/text is written before that refusal. A known empty relation set
+and a measured zero payload remain different from unknown.
+
+Repeated reads use full SQL plus full parameter equality and origin within the
+same window; a digest alone never proves equality. Keys are private and are
+not serialized. SQLite INTEGER, BLOB, NULL and no-bind keys are exact. SQLite
+TEXT keys are **exact modulo embedded NUL**, because expanded SQL truncates at
+NUL; Lash's session/turn/input identifiers cannot contain NUL. REAL binds refuse
+repeat qualification because SQLite expands them with only 15 significant
+digits. PostgreSQL SELECT/WITH candidates with data-modifying CTEs, hidden Lash server routines or unsupported syntax stay unqualified; row locks do not imply cache validity. Primitive keys include encoded type, NULL marker, lengths
+and actual binary payload; custom encodings that can carry deferred patches
+stay unqualified. Oversized keys also stay unqualified. `repeat_identities_complete` refuses a whole-population exact-repeat claim when any candidate is excluded. `read_bind_classes`
+counts invocations in each class (including excluded ones); the repeated rows
+carry their class, allowing shares of the **reported** repeat population to be
+computed without pretending the excluded population is zero. A repeated query
+can return changed state: these counts never certify caching validity.
+
+Only `--sql-shapes` enables the extra joins/keys and existing operation scopes.
+Production builds compile them out without `perf-witness`. The existing shape
+limit is 4096 pairs; joined rows are bounded at 32768, exact parameter/read keys
+at 65536, individual keys at 65536 bytes and key admissions at 16 MiB. Active executions and pending PostgreSQL binding captures are each bounded at 1024. Query objects retain only epoch tokens, so pending equality values disappear with the collector. Overflow
+is explicit and refuses a complete claim. No values leave the observer, and all
+private equality keys disappear when its exclusive collector drops. Enabled
+allocation and CPU results include observer work; compare useful work using an
+on/off pair from the same executable with `perf stat -e instructions:u`, record
+load1 and `/usr/bin/time -v` peak RSS, and keep host wall time unqualified.

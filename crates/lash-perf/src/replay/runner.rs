@@ -227,6 +227,7 @@ pub async fn run(workload: &Workload, options: &RunOptions) -> Result<WorkloadRe
         "sql_shapes": options.identity.sql_shapes, "traffic": options.identity.traffic,
         "heap_window": options.identity.heap_window, "heap_frames": options.heap.dhat_frames,
         "window": "round first send through last successful outcome; counters at settled cuts",
+        "sql_work_window": options.sql_shapes.as_ref().map(|_| "session creation through core shutdown; start/finish phase cuts; includes unowned and cross-window SQL"),
         "terminal": "all scripted replies validated; successful outcomes",
     }));
     experiment.backend = probe.backend().to_owned();
@@ -249,6 +250,10 @@ pub async fn run(workload: &Workload, options: &RunOptions) -> Result<WorkloadRe
             )
         }
     };
+    let mut meter = Meter::install(probe, None, options.sql_shapes.is_some(), traffic)?;
+    let backend_name = meter.backend().to_owned();
+    lash_core::perf_witness::sql_shapes::work::set_window(None, "session_start");
+    let (start_before, start_shapes, _) = meter.read_with_shapes(0).await;
     let pages = stores.durable_store().pages();
     let backend = lash::durable::DurableBackendBuilder::new(stores)
         .config(replay_settings())
@@ -296,6 +301,15 @@ pub async fn run(workload: &Workload, options: &RunOptions) -> Result<WorkloadRe
         });
     }
     experiment.configured_geometry = geometry.to_string();
+    // The history run label can be "local". Fingerprint the actual captured
+    // producer/experiment metadata once for this run's artifact join key.
+    use sha2::{Digest, Sha256};
+    let experiment_id = format!(
+        "{:x}",
+        Sha256::digest(serde_json::to_vec(&serde_json::json!({
+            "identity": options.identity, "experiment": experiment,
+        }))?)
+    );
     let core = build_core(
         workload,
         &backend,
@@ -309,6 +323,7 @@ pub async fn run(workload: &Workload, options: &RunOptions) -> Result<WorkloadRe
         .map(lash::vm::WorkerService::pool)
         .transpose()
         .map_err(|error| anyhow::anyhow!("start the worker pool: {error}"))?;
+    meter.attach_workers(pool);
     let mut lanes = Vec::with_capacity(workload.sessions);
     for (index, inputs) in scripted.into_iter().enumerate() {
         let id = lash::SessionId::try_from(format!("replay-{}-{index}", workload.name))
@@ -336,8 +351,6 @@ pub async fn run(workload: &Workload, options: &RunOptions) -> Result<WorkloadRe
         });
     }
     let turns = lanes.first().map_or(0, |lane| lane.inputs.len());
-    let meter = Meter::install(probe, pool, options.sql_shapes.is_some(), traffic)?;
-    let backend_name = meter.backend().to_owned();
     if let Some(capture) = &mut phase_capture {
         capture.attach(
             workers
@@ -354,6 +367,12 @@ pub async fn run(workload: &Workload, options: &RunOptions) -> Result<WorkloadRe
     let mut frame_depth = 0;
     let mut model_calls = 0_u64;
     let mut shape_rounds = Vec::new();
+    let (start_after, end_shapes, _) = meter.read_with_shapes(0).await;
+    if let (Some(before), Some(after)) = (start_shapes, end_shapes) {
+        let mut row = sql_shape_round(0, before, after, &difference(&start_before, &start_after))?;
+        row["phase"] = serde_json::json!("session_start");
+        shape_rounds.push(row);
+    }
     let mut heap_window = None;
     let profile_end = options
         .heap
@@ -361,6 +380,7 @@ pub async fn run(workload: &Workload, options: &RunOptions) -> Result<WorkloadRe
         .or(options.heap.profile_turn);
     let mut profiled = false;
     for turn in 0..turns {
+        lash_core::perf_witness::sql_shapes::work::set_window(Some(turn + 1), "maintenance");
         cleanup
             .settle()
             .await
@@ -379,6 +399,7 @@ pub async fn run(workload: &Workload, options: &RunOptions) -> Result<WorkloadRe
                 },
             )?);
         }
+        lash_core::perf_witness::sql_shapes::work::set_window(Some(turn + 1), "turn");
         let (before, shapes_before, traffic_before) = meter.read_with_shapes(model_calls).await;
         let phase_first = phase_capture
             .as_ref()
@@ -446,7 +467,9 @@ pub async fn run(workload: &Workload, options: &RunOptions) -> Result<WorkloadRe
         }
         let mut metrics = difference(&before, &after);
         if let (Some(before), Some(after)) = (shapes_before, shapes_after) {
-            shape_rounds.push(sql_shape_round(turn + 1, before, after, &metrics)?);
+            let mut row = sql_shape_round(turn + 1, before, after, &metrics)?;
+            row["phase"] = serde_json::json!("turn");
+            shape_rounds.push(row);
         }
         metrics.insert("wall_ms".to_owned(), wall_ms);
         rounds.push(RoundRecord {
@@ -466,13 +489,19 @@ pub async fn run(workload: &Workload, options: &RunOptions) -> Result<WorkloadRe
             .compact_every
             .is_some_and(|every| (turn + 1) % every == 0 && turn + 1 < turns)
         {
-            let (before, _, traffic_before) = meter.read_with_shapes(model_calls).await;
+            lash_core::perf_witness::sql_shapes::work::set_window(Some(turn + 1), "compaction");
+            let (before, shapes_before, traffic_before) = meter.read_with_shapes(model_calls).await;
             let started = Instant::now();
             for lane in &lanes {
                 compact(lane, turn + 1).await?;
             }
-            let (after, _, traffic_after) = meter.read_with_shapes(model_calls).await;
+            let (after, shapes_after, traffic_after) = meter.read_with_shapes(model_calls).await;
             let mut metrics = difference(&before, &after);
+            if let (Some(before), Some(after)) = (shapes_before, shapes_after) {
+                let mut row = sql_shape_round(turn + 1, before, after, &metrics)?;
+                row["phase"] = serde_json::json!("compaction");
+                shape_rounds.push(row);
+            }
             metrics.insert(
                 "wall_ms".to_owned(),
                 started.elapsed().as_secs_f64() * 1_000.0,
@@ -503,9 +532,9 @@ pub async fn run(workload: &Workload, options: &RunOptions) -> Result<WorkloadRe
         std::fs::write(
             path,
             serde_json::to_vec_pretty(&serde_json::json!({
-                "kind": "lash.replay-sql-shapes", "identity": options.identity, "experiment": experiment,
+                "kind": "lash.replay-sql-shapes", "identity": options.identity, "experiment": experiment, "experiment_id": experiment_id,
                 "workload": workload.name, "script_digest": workload.digest(),
-                "backend": backend_name, "scope": "all observed SQLite connections in this host process; same counter cuts as replay rounds",
+                "backend": backend_name, "scope": "all observed store executions in this host process; same counter cuts as replay rounds",
                 "row_limit": lash_core::perf_witness::sql_shapes::ROW_LIMIT,
                 "conserved": true, "rounds": shape_rounds,
             }))?,
@@ -514,13 +543,27 @@ pub async fn run(workload: &Workload, options: &RunOptions) -> Result<WorkloadRe
     if let Some(capture) = phase_capture {
         capture.finish()?;
     }
-    drop(meter);
+    lash_core::perf_witness::sql_shapes::work::set_window(None, "shutdown");
     for lane in lanes {
         let _ = lane.session.close().await;
     }
     core.shutdown()
         .await
         .map_err(|error| anyhow::anyhow!("shut the replay core down: {error}"))?;
+    if let Some(path) = &options.sql_shapes {
+        let (work, reference) = meter
+            .sql_work()
+            .context("SQL-shape observer was not installed")?;
+        super::sql_work::write(
+            path,
+            (&options.identity, &experiment, &experiment_id),
+            workload,
+            &backend_name,
+            turns,
+            (&work, &reference),
+        )?;
+    }
+    drop(meter);
     drop(keep);
     Ok(WorkloadReceipt {
         experiment,

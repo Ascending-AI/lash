@@ -6,7 +6,7 @@ use std::collections::{BTreeMap, HashMap};
 use std::future::Future;
 use std::sync::{Arc, LazyLock, Mutex, PoisonError, RwLock};
 
-use serde::Serialize;
+use serde::{Deserialize, Serialize};
 
 /// Configured limits, not measured cardinalities.
 pub const SHAPE_LIMIT: usize = 64;
@@ -91,7 +91,7 @@ pub struct Receipt {
 
 /// Retained durable actor fence: a physical summary joins the owner commit
 /// without putting session/process identifiers in metric attributes.
-#[derive(Clone, Debug, Serialize, PartialEq, Eq)]
+#[derive(Clone, Debug, Serialize, Deserialize, PartialEq, Eq, PartialOrd, Ord)]
 pub struct OwnerIdentity {
     pub actor: String,
     pub epoch: i64,
@@ -180,6 +180,12 @@ impl Window {
             .ok()
             .or_else(|| WORKER.with(|slot| slot.borrow().clone()))
     }
+    /// Correlation fields without cloning the operation's shape map.
+    pub fn identity(&self) -> (Option<OwnerIdentity>, String) {
+        let receipt = self.receipt.lock().unwrap_or_else(PoisonError::into_inner);
+        (receipt.owner.clone(), receipt.operation.clone())
+    }
+
     pub fn snapshot(&self) -> Receipt {
         let mut receipt = self
             .receipt

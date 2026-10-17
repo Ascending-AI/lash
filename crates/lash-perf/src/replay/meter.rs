@@ -248,6 +248,34 @@ impl Meter {
         self.probe.backend()
     }
 
+    pub fn sql_work(
+        &self,
+    ) -> Option<(
+        lash_core::perf_witness::sql_shapes::work::Receipt,
+        serde_json::Value,
+    )> {
+        let snapshot = self.witness.snapshot();
+        let work = snapshot.sql_shapes?.work;
+        let affected =
+            matches!(self.probe, StoreProbe::Sqlite { .. }).then_some(snapshot.sql_rows_written);
+        let conserved = work.statements() == snapshot.sql_statements
+            && work.rows_returned() == snapshot.sql_rows_read
+            && affected.is_none_or(|rows| {
+                rows == work
+                    .totals
+                    .get(&lash_core::perf_witness::sql_shapes::work::Backend::Sqlite)
+                    .map_or(0, |c| c.rows_affected)
+            });
+        let reference = serde_json::json!({"statements": snapshot.sql_statements,
+            "rows_returned": snapshot.sql_rows_read, "sqlite_completed_connection_changes": affected,
+            "conserved": conserved});
+        Some((work, reference))
+    }
+
+    pub fn attach_workers(&mut self, workers: Option<lash::vm::WorkerPool>) {
+        self.workers = workers;
+    }
+
     /// Read every available counter now.
     pub async fn read(&self, model_calls: u64) -> Reading {
         self.read_with_shapes(model_calls).await.0
@@ -262,7 +290,7 @@ impl Meter {
         Option<lash_core::perf_witness::sql_shapes::Receipt>,
         Option<super::traffic::Reading>,
     ) {
-        let mut shapes = None;
+        let shapes;
         let mut traffic = self
             .traffic
             .as_ref()
@@ -281,9 +309,6 @@ impl Meter {
         if let Some(nodes) = self.probe.graph_nodes().await {
             reading.insert("graph_nodes_written", nodes);
         }
-        if let StoreProbe::Sqlite {
-            page_size, store, ..
-        } = &self.probe
         {
             let work = if let Some(observer) = &self.traffic {
                 let (work, physical) =
@@ -310,16 +335,21 @@ impl Meter {
             );
             reading.insert("sql_transactions", verb("begin"));
             reading.insert("sql_rows_read", work.sql_rows_read as f64);
-            reading.insert("sql_rows_written", work.sql_rows_written as f64);
-            reading.insert("sql_bytes_written", work.sql_bytes_written as f64);
-            reading.insert(
-                "store_bytes_written",
-                (work.store_pages_written * page_size) as f64,
-            );
-            reading.insert(
-                "graph_nodes_decoded",
-                store.decoded_row_counts_for_testing().graph_node_bodies as f64,
-            );
+            if let StoreProbe::Sqlite {
+                page_size, store, ..
+            } = &self.probe
+            {
+                reading.insert("sql_rows_written", work.sql_rows_written as f64);
+                reading.insert("sql_bytes_written", work.sql_bytes_written as f64);
+                reading.insert(
+                    "store_bytes_written",
+                    (work.store_pages_written * page_size) as f64,
+                );
+                reading.insert(
+                    "graph_nodes_decoded",
+                    store.decoded_row_counts_for_testing().graph_node_bodies as f64,
+                );
+            }
         }
         if let Some(pool) = &self.workers {
             let counters = pool.measurements().counters;

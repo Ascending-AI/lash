@@ -1,4 +1,6 @@
-//! Opt-in process-wide SQLite shape attribution, sharing the witness snapshot cut.
+//! Opt-in process-wide SQL shape attribution, sharing the witness snapshot cut.
+pub mod work;
+
 use serde::{Deserialize, Serialize};
 use std::cell::Cell;
 use std::collections::BTreeMap;
@@ -24,18 +26,21 @@ pub struct Row {
 /// Missing attribution is explicit; a replay refuses an incomplete sidecar.
 #[derive(Clone, Debug, Default, PartialEq, Eq, Serialize, Deserialize)]
 pub struct Receipt {
+    pub work: work::Receipt,
     pub rows: Vec<Row>,
     pub overflow: Counts,
 }
 
 #[derive(Default)]
 pub(super) struct State {
+    work: work::State,
     rows: BTreeMap<(Arc<str>, &'static str), Counts>,
     overflow: Counts,
 }
 impl State {
     pub(super) fn receipt(&self) -> Receipt {
         Receipt {
+            work: self.work.receipt(),
             rows: self
                 .rows
                 .iter()

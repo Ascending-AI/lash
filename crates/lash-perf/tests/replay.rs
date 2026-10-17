@@ -209,7 +209,13 @@ fn a_coding_turn_reads_its_fenced_facts_once_per_scope() {
         "select request_id, origin, reason, disposition, mode from",
         "select checkpoint_ref, answer_ref from",
     ];
-    let rows = shapes["rounds"][0]["rows"].as_array().unwrap();
+    let turn = shapes["rounds"]
+        .as_array()
+        .unwrap()
+        .iter()
+        .find(|round| round["phase"] == "turn" && round["turn"] == 1)
+        .expect("SQL shapes retain the measured turn separately from session start");
+    let rows = turn["rows"].as_array().unwrap();
     let mut counted = std::collections::BTreeMap::new();
     for row in rows {
         let shape = row["shape"].as_str().unwrap();
@@ -285,7 +291,13 @@ fn a_coding_turn_loads_its_window_only_where_it_holds_none() {
         "select revision.config_ref, head.head_revision, revision.leaf_node_id",
         "select session_state_version from session_meta",
     ];
-    let rows = shapes["rounds"][0]["rows"].as_array().unwrap();
+    let turn = shapes["rounds"]
+        .as_array()
+        .unwrap()
+        .iter()
+        .find(|round| round["phase"] == "turn" && round["turn"] == 1)
+        .expect("SQL shapes retain the measured turn separately from session start");
+    let rows = turn["rows"].as_array().unwrap();
     let mut counted = std::collections::BTreeMap::new();
     for row in rows {
         let shape = row["shape"].as_str().unwrap();
