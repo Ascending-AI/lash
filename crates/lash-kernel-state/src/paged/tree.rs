@@ -1494,15 +1494,7 @@ thread_local! {
     static KEY_COPIES: std::cell::Cell<u64> = const { std::cell::Cell::new(0) };
     static HEAD_LOOKUPS: std::cell::Cell<u64> = const { std::cell::Cell::new(0) };
 }
-#[cfg(test)]
-pub(crate) fn take_key_copies() -> u64 {
-    KEY_COPIES.replace(0)
-}
-/// The descents into an object-head tree since the last call (FIG-6465).
-#[cfg(test)]
-pub(crate) fn take_head_lookups() -> u64 {
-    HEAD_LOOKUPS.replace(0)
-}
+
 #[cfg(test)]
 fn note_lookup<T: 'static>() {
     if std::any::TypeId::of::<T>() == std::any::TypeId::of::<super::directory::ObjectHead>() {

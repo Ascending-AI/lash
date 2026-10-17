@@ -4,7 +4,6 @@
 
 mod await_phase;
 mod bounds;
-mod census;
 mod continuation;
 pub(crate) mod embedder;
 mod forms;
@@ -13,9 +12,7 @@ mod layout;
 mod observe;
 mod operations;
 mod paged;
-mod publish;
 mod stream;
 mod tasks;
-pub(crate) mod text_projection;
 mod verdict;
 mod versions;

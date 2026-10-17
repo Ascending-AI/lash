@@ -209,10 +209,6 @@ impl Access<'_> {
             name.clone(),
         );
     }
-    #[cfg(test)]
-    pub(crate) fn clean_bytes(&self) -> usize {
-        *self.bytes.borrow() + self.decoded.borrow().bytes
-    }
 }
 /// Conservative physical allowance for cell allocations and their bounded
 /// runtime caches. Nested trees retain links; their pages account separately.

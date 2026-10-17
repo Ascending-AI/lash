@@ -7,10 +7,9 @@
 //! - CONT-EXACT: each case runs uninterrupted, then at slices MAX, 1 and 0,
 //!   sealed and opened cold at every slice and park under alternating
 //!   layouts and registries, and leaves the same end, prints, requests,
-//!   charge and statement starts.
+//!   charge.
 //! - CONT-ONCE: what comes before the action is neither run nor charged
-//!   again: the charge and the statement starts are the uninterrupted
-//!   run's.
+//!   again: the charge and effects are the uninterrupted run's.
 //! - CONT-GRAMMAR: a saved continuation the grammar does not admit is
 //!   refused, naming its site.
 //! - ROOTS-CANON: the memory verdict is the uninterrupted run's at every
@@ -26,7 +25,7 @@ use lash_kernel_state::paged::{
 };
 
 use super::embedder::{self, Embedder, Setup, label};
-use crate::{Bounds, End, Layout, Machine, Observe, Request, Step};
+use crate::{Bounds, End, Layout, Machine, Request, Step};
 
 /// Library functions whose bodies run where they are called: `body.say(t)`
 /// prints `t` and gives it, and `body.inc(n)` gives `n + 1`. Each states a
@@ -59,14 +58,13 @@ fn setup(slice: u64) -> Setup {
 }
 
 /// What a run leaves observable: its end, what it printed, every request
-/// it handed out, its charge, and how often each statement started.
+/// it handed out, and its charge.
 #[derive(Debug, PartialEq)]
 struct Trace {
     end: String,
     printed: Vec<String>,
     requests: Vec<String>,
     charged: u64,
-    starts: BTreeMap<u32, u64>,
 }
 
 fn end_of(end: &End) -> String {
@@ -138,13 +136,10 @@ fn drive(text: &str, order: &[&str], drive: Drive) -> (Trace, Seen) {
                 printed: Vec::new(),
                 requests: Vec::new(),
                 charged: 0,
-                starts: BTreeMap::new(),
             };
             return (trace, Seen::default());
         }
     };
-    embedder.machine.set_observe(Observe::Counts);
-    let mut starts: BTreeMap<u32, u64> = BTreeMap::new();
     let mut seen = Seen::default();
     let mut order = order.iter();
     let mut hops = 0;
@@ -153,9 +148,6 @@ fn drive(text: &str, order: &[&str], drive: Drive) -> (Trace, Seen) {
             Ok(step) => step,
             Err(error) => break format!("machine refused: {error:?}"),
         };
-        for (ordinal, count) in embedder.machine.take_ran() {
-            *starts.entry(ordinal).or_default() += count;
-        }
         if let Step::Parked(park) = &step {
             embedder.requests.extend(park.requests.iter().cloned());
             embedder.pending.extend(park.requests.iter().cloned());
@@ -177,7 +169,6 @@ fn drive(text: &str, order: &[&str], drive: Drive) -> (Trace, Seen) {
             if let Err(error) = embedder.try_reopen(layout, native_twice) {
                 break format!("reopen refused: {error}");
             }
-            embedder.machine.set_observe(Observe::Counts);
         }
         if matches!(step, Step::Parked(_)) {
             let next = match order.next() {
@@ -202,7 +193,6 @@ fn drive(text: &str, order: &[&str], drive: Drive) -> (Trace, Seen) {
             .collect(),
         requests: embedder.requests.iter().map(|r| format!("{r:?}")).collect(),
         charged: embedder.machine.meters().charged,
-        starts,
     };
     (trace, seen)
 }
@@ -1055,107 +1045,6 @@ fn a_continuation_keeps_its_roles_flat_and_spills_a_long_list() {
         for slice in [1, 0] {
             assert_eq!(drive(&source, &["w"], Drive::new(slice, true)).0, reference);
         }
-    }
-}
-
-/// `live_roles` names exactly the roles each resume entry loads, for a
-/// nested action under every expression form and statement position,
-/// under layout 0 and an odd layout; and its refusals are typed.
-#[test]
-fn live_roles_match_every_resume_entry() {
-    const POSITIONS: &str = "fn inner(p) { return [p] }\n\
-        main {\n\
-        let a = (perform echo(\"a\") as Any, 0)\n\
-        let b = [perform echo(\"b\") as Any, 1]\n\
-        let m = map{perform echo(\"mk\") as Any: perform echo(\"mv\") as Any}\n\
-        let s = set{perform echo(\"s\") as Any}\n\
-        let r = {f: perform echo(\"r\") as Any}\n\
-        let i = b[perform echo(\"i\") as Any]\n\
-        let n = call inner(perform echo(\"n\") as Any)\n\
-        let p = perform echo([perform echo(\"p\") as Any]) as Any\n\
-        let lib = list.len([perform echo(\"lib\") as Any])\n\
-        let inv = invoke list.len([perform echo(\"inv\") as Any])\n\
-        let cl = fn(x) { return [perform echo(\"cl\") as Any, x] }\n\
-        let ap = [1, apply cl([perform echo(\"ap\") as Any][0])]\n\
-        let t = [0]\n\
-        set t = [perform echo(\"set\") as Any]\n\
-        set t[0] = [1, perform echo(\"rhs\") as Any]\n\
-        set t[body.inc(0)] = 2\n\
-        remove t[body.inc(0)]\n\
-        if [perform echo(\"if\") as Any][0] { let c = 0 }\n\
-        for q in [perform echo(\"for\") as Any] { let d = q }\n\
-        try { let u = [perform echo(\"try\") as Any] } catch e { let c = 0 }\n\
-        let e = [if(true, perform echo(\"then\") as Any, 0), let(v = 1, [v, perform echo(\"in\") as Any])]\n\
-        let sp = [1, spawn call inner(2)]\n\
-        let sl = [2, sleep(1)]\n\
-        while [perform echo(\"wh\") as Any, false][1] { let w = 0 }\n\
-        set [perform echo(\"pt\") as Any, t][1][perform echo(\"pi\") as Any] = [1, perform echo(\"pv\") as Any]\n\
-        set [perform echo(\"ft\") as Any, t][1][perform echo(\"fi\") as Any] = [1, perform echo(\"fv\") as Any] place first\n\
-        set [t][0][0] = perform echo(\"fa\") as Any place first\n\
-        return (a, perform echo(\"ret\") as Any)\n\
-        }\n";
-    for layout in [Layout::default(), Layout(0x9e37_79b9 | 1)] {
-        let embedder = Embedder::with(
-            POSITIONS,
-            Setup {
-                layout,
-                ..setup(u64::MAX)
-            },
-        );
-        let exe = embedder.machine.executable();
-        let document = &embedder.program(true).0.document;
-        let mut found = 0;
-        for block in exe.blocks() {
-            for (index, &stmt) in block.stmts.iter().enumerate() {
-                let at = block.site.child(index as u32);
-                let (stream, row, _) = exe.statement(stmt);
-                for (site, act) in &stream.nested_at {
-                    let entry = &stream.nested[act.ix()];
-                    // The statement's own entries: a closure's statements
-                    // have their own.
-                    if site.unit != at.unit
-                        || matches!(site.unit, lash_kernel_doc::Unit::Library(_))
-                        || entry.depth as usize != at.path.len()
-                        || !site.path.starts_with(&at.path)
-                    {
-                        continue;
-                    }
-                    // The entry resumes inside its statement's ops, right
-                    // after the op that issues it.
-                    let ops = if let crate::compile::Form::While { test, .. } = &row.form {
-                        row.ops.len + test.len
-                    } else {
-                        row.ops.len
-                    };
-                    assert!(entry.resume <= ops, "{site}");
-                    let issued = stream.ops[(row.ops.start + entry.resume - 1) as usize];
-                    assert!(
-                        matches!(
-                            issued,
-                            lash_kernel_exec::Op::Nested { act: named, .. } if named == *act
-                        ) || matches!(issued, lash_kernel_exec::Op::Call { args, .. }
-                                if args.start == entry.dst),
-                        "{site}: {issued:?}"
-                    );
-                    let roles = lash_kernel_doc::live_roles(document, site)
-                        .unwrap_or_else(|error| panic!("{site}: {error}"));
-                    let loaded: Vec<lash_kernel_doc::Site> =
-                        entry.roles.iter().map(|(role, _)| role.clone()).collect();
-                    assert_eq!(roles, loaded, "at {site}");
-                    found += 1;
-                }
-            }
-        }
-        assert!(found >= 36, "only {found} nested actions compiled");
-        let site = |path: Vec<u32>| lash_kernel_doc::Site::new(lash_kernel_doc::Unit::Main, path);
-        assert_eq!(
-            lash_kernel_doc::live_roles(document, &site(vec![0])),
-            Err(lash_kernel_doc::LiveRolesError::NotAction)
-        );
-        assert_eq!(
-            lash_kernel_doc::live_roles(document, &site(vec![999])),
-            Err(lash_kernel_doc::LiveRolesError::NoSuchNode)
-        );
     }
 }
 

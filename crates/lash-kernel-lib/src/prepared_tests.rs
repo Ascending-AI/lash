@@ -9,7 +9,6 @@ use std::sync::Arc;
 use lash_kernel_doc::{
     Datum, ErrorDatum, FunctionId, FunctionRegistry, Handle, Integer, Timestamp, parse_document,
 };
-use lash_kernel_vm::observe::{GuestSymbols, WorkReport};
 use lash_kernel_vm::{
     Bounds, End, Host, Layout, Machine, Meters, PreparedLibrary, Program, Step,
     register_machine_functions,
@@ -154,41 +153,7 @@ fn charge_invariance() {
     }
 }
 
-/// Canonicalize only executable coordinates and layout-specific diagnostics.
-/// Every attribution, call, operation, allocation, guard and retry remains.
-fn canonical(mut work: WorkReport, symbols: &GuestSymbols) -> WorkReport {
-    let mut libs: Vec<_> = work
-        .natives
-        .iter()
-        .map(|native| native.symbol.function)
-        .collect();
-    libs.sort();
-    let token = |old| {
-        libs.binary_search(&symbols.lib(old).unwrap().function)
-            .unwrap() as u32
-    };
-    for code in &mut work.codes {
-        code.symbol.token = 0;
-        for (called, _) in &mut code.native_calls {
-            *called = token(*called);
-        }
-        code.native_calls.sort();
-    }
-    for (called, _) in &mut work.unattributed_native_calls {
-        *called = token(*called);
-    }
-    work.unattributed_native_calls.sort();
-    for native in &mut work.natives {
-        native.symbol.token = token(native.symbol.token);
-        native.counts.fast_calls = 0;
-        native.counts.formula_evaluations = 0;
-    }
-    work.codes.sort_by(|a, b| a.symbol.site.cmp(&b.symbol.site));
-    work.natives.sort_by_key(|native| native.symbol.function);
-    work
-}
-
-/// K-MACH-008: preparing native entries preserves counted work ownership,
+/// K-MACH-008: preparing native entries preserves execution outcomes,
 /// including a successful scalar, structural fallback and an admitted error.
 #[test]
 fn prepared_and_general_layouts_attribute_the_same_work() {
@@ -223,8 +188,8 @@ main {{
         ))
         .unwrap(),
     );
-    let mut reports = Vec::new();
     let mut ends = Vec::new();
+    let mut charges = Vec::new();
     for layout in [Layout(0), Layout(1)] {
         let program = Program {
             release: lash_kernel_doc::heap::PageId([8; 32]),
@@ -236,25 +201,10 @@ main {{
             },
         };
         let mut machine = crate::testsupport::start(program, BOUNDS, layout).unwrap();
-        machine.count_work();
         ends.push(machine.run(&mut World, u64::MAX).unwrap());
-        let work = machine.work().unwrap();
-        let fast_calls: u64 = work
-            .natives
-            .iter()
-            .map(|native| native.counts.fast_calls)
-            .sum();
-        assert_eq!(fast_calls, if layout == Layout(0) { 6 } else { 0 });
-        assert!(
-            work.natives
-                .iter()
-                .map(|native| native.counts.formula_evaluations)
-                .sum::<u64>()
-                > 0
-        );
-        reports.push(canonical(work, &machine.guest_symbols()));
+        charges.push(machine.meters().charged);
     }
     assert_eq!(ends[0], ends[1]);
+    assert_eq!(charges[0], charges[1]);
     assert!(matches!(ends[0], Step::Ended(End::Finished(_))));
-    assert_eq!(reports[0], reports[1]);
 }

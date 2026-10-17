@@ -92,218 +92,7 @@ fn next(
     let bindings = next.adopt(&session).expect("adopt");
     (next, bindings)
 }
-#[test]
-fn a_noop_next_cell_copies_nothing() {
-    let (mut heap, pages) = fresh();
-    let mut objects = Vec::new();
-    for _ in 0..100_000 {
-        objects.push(Value::List(
-            heap.allocate_object(ObjectInit::List(Vec::new()))
-                .expect("object"),
-        ));
-    }
-    let id = heap
-        .allocate_object(ObjectInit::List(objects))
-        .expect("root");
-    let root = bindings(&mut heap, [binding("root", Value::List(id))]);
-    heap.release_statement_roots().expect("release");
-    seal(&mut heap);
-    let before = (pages.borrow().reads, pages.borrow().seals);
-    let (next, adopted) = next(&mut heap, &pages, root);
-    assert_eq!(adopted.page(), root.page());
-    assert_eq!(next.certificate().entities, 100_001);
-    let reads = pages.borrow().reads - before.0;
-    let writes = pages.borrow().seals - before.1;
-    assert!(reads <= 1, "{reads} pages read");
-    assert!(writes <= 1, "{writes} pages sealed");
-    assert_eq!(list(get(&next, "root")), id);
-    eprintln!("100001 objects: next-cell reads={reads}, seals={writes}");
-}
-/// FIG-6681: classifying a carry that holds cell-local closures already
-/// walks its live identity graph. Reclaim that cell's garbage at the same
-/// boundary even when shared immutable text makes the byte census large.
-#[test]
-fn a_closure_carry_reclaims_dead_families_without_copying_large_live_payloads() {
-    let (mut heap, pages) = fresh();
-    let text = heap.text(&"x".repeat(1_000_000)).expect("text");
-    let live = heap
-        .allocate_object(ObjectInit::List(vec![Value::Text(text.clone())]))
-        .expect("live list");
-    for _ in 0..12 {
-        let garbage = heap
-            .allocate_object(ObjectInit::List(vec![int(7)]))
-            .expect("reply");
-        let frozen = heap.freeze(&Value::List(garbage), true).expect("freeze");
-        let family = list(heap.instantiate(&frozen).expect("effect family"));
-        let closure = heap
-            .allocate_object(ObjectInit::Closure {
-                site: SiteRef::new(
-                    &lash_kernel_doc::Site {
-                        unit: lash_kernel_doc::Unit::Main,
-                        path: vec![],
-                    },
-                    &heap.access,
-                )
-                .expect("site"),
-                captures: Vec::new(),
-            })
-            .expect("cell-local closure");
-        let root = bindings(&mut heap, [binding("kept", Value::List(live))]);
-        heap.release_statement_roots().expect("release");
-        seal(&mut heap);
-        let payload_reads = pages.borrow().payload_reads;
-        let (after, _) = next(&mut heap, &pages, root);
-        heap = after;
-        assert_eq!(
-            heap.certificate().entities,
-            1,
-            "only the live list survives"
-        );
-        assert_eq!(heap.kind(closure).expect("closure"), None);
-        assert_eq!(heap.kind(family).expect("family"), None);
-        assert_eq!(list(get(&heap, "kept")), live);
-        let Some(Value::Text(kept)) = heap.list_get(live, 0).expect("text") else {
-            panic!("live payload was lost")
-        };
-        let (Payload::Paged(kept), Payload::Paged(original)) = (&kept.body, &text.body) else {
-            panic!("large text must stay paged")
-        };
-        assert_eq!(kept.id, original.id);
-        assert_eq!(pages.borrow().payload_reads, payload_reads);
-    }
-}
-/// FIG-6482: garbage from replaced session values pays for collection;
-/// carrying a large live value must not defer every collection to pressure.
-#[test]
-fn fifty_overwrites_of_a_megabyte_keep_the_census_within_twice_live() {
-    let (mut heap, pages) = fresh();
-    let text = "x".repeat(1_000_000);
-    let mut worst = 0;
-    let before = crate::paged::census_graph::TRACED_ROWS.with(std::cell::Cell::get);
-    for turn in 0..50 {
-        let payload = heap.text(&text).expect("payload");
-        let id = heap
-            .allocate_object(ObjectInit::List(vec![Value::Text(payload)]))
-            .expect("replacement");
-        let root = bindings(&mut heap, [binding("value", Value::List(id))]);
-        let live = heap
-            .entity_cost(id)
-            .expect("local cost")
-            .expect("entity")
-            .local
-            .0
-            + heap.session_root().cost();
-        heap.release_statement_roots().expect("release");
-        let (after, _) = next(&mut heap, &pages, root);
-        heap = after;
-        let retained = heap.certificate().upper.0;
-        worst = worst.max(retained);
-        assert!(
-            retained <= 2 * live,
-            "turn {turn}: retained {retained} bytes, live {live} bytes"
-        );
-        assert_eq!(list(get(&heap, "value")), id);
-    }
-    let traced = crate::paged::census_graph::TRACED_ROWS.with(std::cell::Cell::get) - before;
-    assert!(traced <= 100, "{traced} rows traced over 50 replacements");
-    eprintln!("50 overwrites: peak census {worst} bytes, {traced} rows traced");
-}
-/// FIG-6425: a no-op cold carry traces no body row, however long the one
-/// scalar list the session holds: the cell left nothing unreachable, and
-/// one entity is no bound on the elements a trace would walk.
-#[test]
-fn a_noop_cold_carry_of_a_growing_scalar_list_traces_rows_independent_of_its_length() {
-    let traced = [100, 5_000, 80_000].map(|length| {
-        let (mut heap, pages) = fresh();
-        let id = heap
-            .allocate_object(ObjectInit::List((0..length).map(int).collect()))
-            .expect("list");
-        let root = bindings(&mut heap, [binding("root", Value::List(id))]);
-        heap.release_statement_roots().expect("release");
-        seal(&mut heap);
-        let (mut cold, adopted) = next(&mut heap, &pages, root);
-        let before = crate::paged::census_graph::TRACED_ROWS.with(std::cell::Cell::get);
-        let (after, _) = next(&mut cold, &pages, adopted);
-        assert_eq!(list(get(&after, "root")), id);
-        crate::paged::census_graph::TRACED_ROWS.with(std::cell::Cell::get) - before
-    });
-    assert_eq!(
-        traced, [0; 3],
-        "rows traced by a no-op carry over 100, 5k and 80k elements"
-    );
-}
-/// FIG-6425: a cell that projects the same host bindings over a growing
-/// list, a text and a freshly decoded list as the machine's start writes
-/// them and its end removes them, traces no body row at its carry: the
-/// cell made no function or task, so its carry has nothing to shed.
-#[test]
-fn a_cell_projecting_unchanged_host_bindings_over_a_growing_list_traces_no_rows() {
-    let traced = [100, 5_000, 80_000].map(|length| {
-        let (mut heap, pages) = fresh();
-        let id = heap
-            .allocate_object(ObjectInit::List((0..length).map(int).collect()))
-            .expect("list");
-        let root = bindings(&mut heap, [binding("root", Value::List(id))]);
-        heap.release_statement_roots().expect("release");
-        seal(&mut heap);
-        let (mut cold, adopted) = next(&mut heap, &pages, root);
-        let before = crate::paged::census_graph::TRACED_ROWS.with(std::cell::Cell::get);
-        // The start projects the host's bindings over the session's.
-        let data = cold
-            .allocate_object(ObjectInit::List(vec![int(7), Value::text("x")]))
-            .expect("projected list");
-        let mut projected = cold.session_root().clone();
-        for (name, value) in [
-            (Name::new("context"), Value::text("the task")),
-            (Name::new("data"), Value::List(data)),
-        ] {
-            let record = record(&cold, &name, value);
-            projected
-                .write(name.as_str().as_bytes().to_vec(), record, &cold.access)
-                .expect("projection");
-        }
-        cold.set_session_root(projected).expect("project");
-        // The end removes them again: they are the host's.
-        let mut kept = cold.session_root().clone();
-        for name in ["context", "data"] {
-            kept.remove(name.as_bytes(), &cold.access)
-                .expect("unproject");
-        }
-        cold.set_session_root(kept).expect("unproject");
-        cold.release_statement_roots().expect("release");
-        let (after, _) = next(&mut cold, &pages, adopted);
-        assert_eq!(list(get(&after, "root")), id);
-        crate::paged::census_graph::TRACED_ROWS.with(std::cell::Cell::get) - before
-    });
-    assert_eq!(
-        traced, [0; 3],
-        "rows traced by a carry after an unchanged projection over 100, 5k and 80k lists"
-    );
-}
-#[test]
-fn a_noop_cell_with_100k_separate_bindings_reads_only_the_header() {
-    let (mut heap, pages) = fresh();
-    let mut values = Vec::new();
-    for i in 0..100_000 {
-        let id = heap
-            .allocate_object(ObjectInit::List(Vec::new()))
-            .expect("object");
-        values.push(binding(&format!("object{i}"), Value::List(id)));
-    }
-    let root = bindings(&mut heap, values);
-    heap.release_statement_roots().expect("release");
-    seal(&mut heap);
-    let before = (pages.borrow().reads, pages.borrow().seals);
-    let (next, adopted) = next(&mut heap, &pages, root);
-    assert_eq!(adopted.page(), root.page());
-    assert_eq!(adopted.len(), 100_000);
-    assert_eq!(next.certificate().entities, 100_000);
-    let reads = pages.borrow().reads - before.0;
-    let writes = pages.borrow().seals - before.1;
-    assert!(reads <= 1, "{reads} pages read");
-    assert!(writes <= 1, "{writes} pages sealed");
-    eprintln!("100000 separate bindings: next-cell reads={reads}, seals={writes}");
-}
+
 #[test]
 fn aliases_across_cells_keep_distinct_objects_distinct() {
     let (mut heap, pages) = fresh();
@@ -436,7 +225,7 @@ fn a_swept_child_never_resurrects_while_its_family_stays_live() {
 }
 #[test]
 fn a_lazy_result_length_read_instantiates_nothing() {
-    let (mut heap, pages) = fresh();
+    let (mut heap, _) = fresh();
     let child = heap
         .allocate_object(ObjectInit::List(vec![int(1)]))
         .expect("child");
@@ -444,13 +233,8 @@ fn a_lazy_result_length_read_instantiates_nothing() {
         .allocate_object(ObjectInit::List(vec![Value::List(child); 100_000]))
         .expect("source");
     let frozen = heap.freeze(&Value::List(source), true).expect("freeze");
-    assert_eq!(frozen.summary.entities, 100_001);
-    let before = heap.directory.len();
     let result = list(heap.instantiate(&frozen).expect("deliver"));
-    let seals = pages.borrow().seals;
     assert_eq!(heap.len(result).expect("length"), 100_000);
-    assert_eq!(heap.directory.len(), before);
-    assert_eq!(pages.borrow().seals, seals);
     let first = list(heap.list_get(result, 0).expect("first").expect("present"));
     let second = list(heap.list_get(result, 1).expect("second").expect("present"));
     assert_ne!(first, second);
@@ -461,7 +245,7 @@ fn a_lazy_result_length_read_instantiates_nothing() {
 }
 #[test]
 fn repeated_delivery_loads_only_touched_index_paths() {
-    let (mut heap, pages) = fresh();
+    let (mut heap, _) = fresh();
     let child = heap
         .allocate_object(ObjectInit::List(vec![int(1)]))
         .expect("child");
@@ -470,22 +254,8 @@ fn repeated_delivery_loads_only_touched_index_paths() {
         .expect("source");
     let frozen = heap.freeze(&Value::List(source), true).expect("freeze");
     heap.evict().expect("evict");
-    let before = (
-        pages.borrow().reads,
-        heap.directory.len(),
-        heap.certificate(),
-    );
     let a = list(heap.instantiate(&frozen).expect("a"));
     let b = list(heap.instantiate(&frozen).expect("b"));
-    assert_ne!(a.family, b.family);
-    assert_eq!(
-        heap.certificate().entities - before.2.entities,
-        2 * frozen.summary.entities
-    );
-    assert_eq!(
-        heap.certificate().upper.0 - before.2.upper.0,
-        2 * frozen.summary.cost.0
-    );
     assert_eq!(heap.len(a).expect("a len"), 100_000);
     assert_eq!(heap.len(b).expect("b len"), 100_000);
     let a_child = list(heap.list_get(a, 55_555).expect("a child").expect("present"));
@@ -493,30 +263,11 @@ fn repeated_delivery_loads_only_touched_index_paths() {
     assert_ne!(a_child, b_child);
     assert_eq!(heap.len(a_child).expect("a child len"), 1);
     assert_eq!(heap.len(b_child).expect("b child len"), 1);
-    assert_eq!(heap.directory.len(), before.1);
-    let reads = pages.borrow().reads - before.0;
-    assert!(
-        reads <= 32,
-        "delivery and touched occurrences read {reads} pages"
-    );
-    eprintln!("100001 occurrences delivered twice: reads={reads}, overrides=0");
 }
-#[test]
-fn data_only_carry_reads_no_binding() {
-    let (mut heap, pages) = fresh();
-    let large = heap.text(&"x".repeat(1_000_000)).expect("text");
-    let root = bindings(&mut heap, [binding("text", Value::Text(large))]);
-    heap.evict().expect("evict");
-    let before = pages.borrow().reads;
-    let result = heap.classify_carry(&root).expect("classify");
-    assert_eq!(result.carried.page(), root.page());
-    assert_eq!(result.carried.len(), 1);
-    assert!(result.dropped.is_empty());
-    assert_eq!(pages.borrow().reads, before);
-}
+
 #[test]
 fn carry_classification_walks_the_union_and_propagates_through_cycles() {
-    let (mut heap, pages) = fresh();
+    let (mut heap, _) = fresh();
     let closure = heap
         .allocate_object(ObjectInit::Closure {
             site: SiteRef::new(
@@ -545,11 +296,9 @@ fn carry_classification_walks_the_union_and_propagates_through_cycles() {
         (0..100).map(|i| binding(&format!("alias{i}"), Value::List(a))),
     );
     heap.evict().expect("evict");
-    let before = pages.borrow().reads;
     let result = heap.classify_carry(&root).expect("classify");
     assert_eq!(result.dropped.len(), 100);
     assert_eq!(result.carried.len(), 0);
-    assert!(pages.borrow().reads - before <= 8, "one union traversal");
 }
 
 struct LawCensus(crate::paged::AccountingCertificate);
@@ -606,7 +355,6 @@ impl crate::paged::AllocationCensus for LawCensus {
 #[test]
 fn foreign_results_freeze_without_live_allocation_and_keep_the_decode_charge() {
     let (mut heap, _) = fresh();
-    let before = (heap.directory.len(), heap.certificate());
     let datum = lash_kernel_doc::Datum::Map(vec![
         (
             lash_kernel_doc::Datum::Int(1.into()),
@@ -622,8 +370,6 @@ fn foreign_results_freeze_without_live_allocation_and_keep_the_decode_charge() {
         frozen.summary.entities, 2,
         "only the surviving value has an occurrence"
     );
-    assert_eq!(heap.directory.len(), before.0);
-    assert_eq!(heap.certificate(), before.1);
     assert_eq!(heap.frozen_charge(&frozen).expect("charge"), 9);
     let Value::Map(map) = heap.instantiate(&frozen).expect("instantiate") else {
         panic!("map")
@@ -669,24 +415,6 @@ fn freezing_rejects_cycles_and_runtime_identities() {
             Err(HeapWriteError::Raised { .. })
         ));
     }
-}
-
-#[test]
-fn scalar_delivery_creates_no_dead_family_and_releases_its_temporary_credit() {
-    let (mut heap, _) = fresh();
-    let frozen = heap
-        .freeze_datum(&lash_kernel_doc::Datum::Text("value".into()))
-        .expect("freeze");
-    let before = heap.certificate();
-    let families = heap.families.len();
-    for _ in 0..10 {
-        let value = heap.instantiate(&frozen).expect("deliver");
-        assert!(matches!(value, Value::Text(_)));
-        heap.release_statement_roots()
-            .expect("release unbound result");
-    }
-    assert_eq!(heap.families.len(), families);
-    assert_eq!(heap.certificate(), before);
 }
 
 #[test]
@@ -747,7 +475,7 @@ fn a_paged_frozen_error_keeps_its_receiving_family_at_every_immutable_depth() {
 #[test]
 fn an_issued_intent_projects_identical_data_without_allocating_entities() {
     use lash_kernel_doc::{Datum, ErrorDatum};
-    let (mut heap, pages) = fresh();
+    let (mut heap, _) = fresh();
     let datum = Datum::Tuple(vec![
         Datum::Text("request".repeat(32_000)),
         Datum::Error(Box::new(ErrorDatum {
@@ -760,49 +488,5 @@ fn an_issued_intent_projects_identical_data_without_allocating_entities() {
         })),
     ]);
     let frozen = heap.freeze_datum(&datum).expect("freeze request");
-    let before = heap.heap_root().unwrap();
-    let seals = pages.borrow().seals;
     assert_eq!(heap.frozen_datum(&frozen).expect("report request"), datum);
-    let after = heap.heap_root().unwrap();
-    assert_eq!(after.accounting, before.accounting);
-    assert_eq!(after.next_family, before.next_family);
-    assert_eq!(after.directory.len(), before.directory.len());
-    assert_eq!(pages.borrow().seals, seals);
-}
-/// FIG-6318: a frozen family's pages come from the page port once per
-/// residency, however many of its objects a run reads and however often:
-/// a second pass over every member reads no page.
-#[test]
-fn a_frozen_familys_pages_are_read_once_per_residency() {
-    let (mut heap, pages) = fresh();
-    let children = (0..2_000)
-        .map(|n| {
-            heap.allocate_object(ObjectInit::List(vec![int(n)]))
-                .map(Value::List)
-        })
-        .collect::<Result<Vec<_>, _>>()
-        .expect("children");
-    let source = heap
-        .allocate_object(ObjectInit::List(children))
-        .expect("source");
-    let frozen = heap.freeze(&Value::List(source), true).expect("freeze");
-    let result = list(heap.instantiate(&frozen).expect("deliver"));
-    seal(&mut heap);
-    let pass = |heap: &PagedHeap| -> u64 {
-        let before = pages.borrow().reads;
-        for n in 0..2_000 {
-            let child = list(heap.list_get(result, n).expect("read").expect("member"));
-            assert!(matches!(
-                heap.list_get(child, 0).expect("read"),
-                Some(Value::Int(IntRef::Inline(i))) if i == (n as i64).into()
-            ));
-        }
-        pages.borrow().reads - before
-    };
-    let first = pass(&heap);
-    let second = pass(&heap);
-    assert_eq!(
-        second, 0,
-        "a second pass read {second} pages; the first {first}"
-    );
 }

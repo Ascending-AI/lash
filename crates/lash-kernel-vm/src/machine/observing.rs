@@ -15,24 +15,6 @@ use crate::observe::{
 use crate::{Observe, RanDelta, StatementPath};
 
 impl KernelMachine {
-    /// The occurrence counter each live task holds for the action at
-    /// `site`, summed: what an identity-bearing start there has advanced.
-    #[cfg(test)]
-    pub(crate) fn occurrences_at(
-        &mut self,
-        site: &lash_kernel_doc::Site,
-    ) -> Result<u64, lash_kernel_doc::heap::HeapFault> {
-        let key = lash_kernel_state::paged::metadata::metadata_key(site);
-        let access = self.heap.pages().clone();
-        let mut total = 0;
-        for index in 0..self.tasks.len() {
-            if let Some(task) = self.tasks.get_mut(index)? {
-                total += task.record.occurrences.get(&key, &access)?.unwrap_or(0);
-            }
-        }
-        Ok(total)
-    }
-
     /// Selects observation for this machine. A resumed machine starts Off
     /// with zero counts; the caller chooses the new run segment's option.
     pub fn set_observe(&mut self, observe: Observe) {

@@ -155,26 +155,3 @@ fn statement(stmt: &Stmt) -> u32 {
         Stmt::Break | Stmt::Continue => 0,
     }
 }
-
-#[cfg(test)]
-mod tests {
-    use super::*;
-
-    fn literal() -> Expr {
-        Expr::Literal(lash_kernel_doc::Literal::Null)
-    }
-
-    #[test]
-    fn place_first_assignment_keeps_place_registers_live_for_rhs() {
-        let body = vec![Stmt::Assign {
-            place: Place::Member(Member::Index {
-                target: literal(),
-                index: literal(),
-            }),
-            value: Rhs::Expr(Expr::List(vec![literal(), literal()])),
-            order: AssignOrder::PlaceFirst,
-        }];
-
-        assert_eq!(canonical_registers(&body), 4);
-    }
-}

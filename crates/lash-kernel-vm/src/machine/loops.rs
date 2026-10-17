@@ -484,10 +484,6 @@ impl KernelMachine {
             *header = Header::Item(Box::new(raw.clone()));
             self.put(0, Value::List(list));
             self.put(1, raw);
-            #[cfg(test)]
-            {
-                self.storage.fused_list_items += 1;
-            }
             // Same held item and argument roots as the general hook. Only
             // the cursor-to-hook argument vector and repeated cursor dispatch
             // disappear; decline still enters the exact body at Item.

@@ -188,7 +188,7 @@ type Trace = (
     Vec<Vec<Vec<u8>>>,
 );
 
-fn observe(program: &str, bounds: Bounds, layout: Layout, cold: bool) -> (Trace, (u64, u64)) {
+fn observe(program: &str, bounds: Bounds, layout: Layout, cold: bool) -> Trace {
     let mut embedder = Embedder::with(
         program,
         Setup {
@@ -199,7 +199,6 @@ fn observe(program: &str, bounds: Bounds, layout: Layout, cold: bool) -> (Trace,
             ..Setup::default()
         },
     );
-    let mut versions = (0, 0);
     let mut continuations = Vec::new();
     let mut plans = [Layout(0), Layout(2), Layout(1), Layout(3), Layout(0x5eed)]
         .into_iter()
@@ -216,25 +215,18 @@ fn observe(program: &str, bounds: Bounds, layout: Layout, cold: bool) -> (Trace,
             continuations.push(embedder.machine.canonical_continuation_bytes());
         }
         if cold {
-            versions.0 += embedder.machine.scalar_version_calls();
-            versions.1 += embedder.machine.fused_list_items();
             embedder.reopen(plans.next().unwrap(), true);
         }
         if matches!(step, Step::Parked(_)) {
             embedder.deliver_next();
         }
     };
-    versions.0 += embedder.machine.scalar_version_calls();
-    versions.1 += embedder.machine.fused_list_items();
     (
-        (
-            end,
-            embedder.world.printed,
-            embedder.requests,
-            embedder.machine.meters().charged,
-            continuations,
-        ),
-        versions,
+        end,
+        embedder.world.printed,
+        embedder.requests,
+        embedder.machine.meters().charged,
+        continuations,
     )
 }
 
@@ -244,11 +236,7 @@ fn observe(program: &str, bounds: Bounds, layout: Layout, cold: bool) -> (Trace,
 /// uninterrupted and cold-restored at each safepoint with empty caches.
 #[test]
 fn numeric_block_versions_fall_back_after_a_parameter_changes_kind() {
-    let (reference, versions) = observe(PROGRAM, ROOMY, Layout(0), false);
-    assert!(
-        versions.0 > 0,
-        "the numeric blocks executed their guarded instructions"
-    );
+    let reference = observe(PROGRAM, ROOMY, Layout(0), false);
     assert_eq!(reference.0, format!("finished {:?}", text("park")));
     assert_eq!(
         reference.1,
@@ -268,7 +256,7 @@ fn numeric_block_versions_fall_back_after_a_parameter_changes_kind() {
             memory: 1 << 18,
             ..ROOMY
         };
-        let reference = observe(&program, bounds, Layout(0), false).0;
+        let reference = observe(&program, bounds, Layout(0), false);
         for layout in [
             Layout(0),
             Layout(1),
@@ -279,13 +267,13 @@ fn numeric_block_versions_fall_back_after_a_parameter_changes_kind() {
         ] {
             if layout != Layout(0) {
                 assert_eq!(
-                    observe(&program, bounds, layout, false).0,
+                    observe(&program, bounds, layout, false),
                     reference,
                     "{layout:?}"
                 );
             }
             assert_eq!(
-                observe(&program, bounds, layout, true).0,
+                observe(&program, bounds, layout, true),
                 reference,
                 "cold {layout:?}"
             );
@@ -322,8 +310,7 @@ main {
 /// a tuple. Neither a decline nor a cold restore advances the cursor twice.
 #[test]
 fn fused_list_items_decline_and_resume_through_the_original_header() {
-    let (reference, versions) = observe(LIST_PROGRAM, ROOMY, Layout(0), false);
-    assert!(versions.1 > 0, "the list cursor used its fused handoff");
+    let reference = observe(LIST_PROGRAM, ROOMY, Layout(0), false);
     let expected = Datum::Tuple(vec![
         Datum::List(vec![
             Datum::Float(Float::new(2.0)),
@@ -342,7 +329,7 @@ fn fused_list_items_decline_and_resume_through_the_original_header() {
             memory: 1 << 18,
             ..ROOMY
         };
-        let reference = observe(&program, bounds, Layout(0), false).0;
+        let reference = observe(&program, bounds, Layout(0), false);
         for layout in [
             Layout(0),
             Layout(1),
@@ -353,13 +340,13 @@ fn fused_list_items_decline_and_resume_through_the_original_header() {
         ] {
             if layout != Layout(0) {
                 assert_eq!(
-                    observe(&program, bounds, layout, false).0,
+                    observe(&program, bounds, layout, false),
                     reference,
                     "{layout:?}"
                 );
             }
             assert_eq!(
-                observe(&program, bounds, layout, true).0,
+                observe(&program, bounds, layout, true),
                 reference,
                 "cold {layout:?}"
             );

@@ -147,19 +147,6 @@ impl KernelMachine {
         self.charge_call(exe, lib, units)?;
         self.observe(Event::NativeExit);
         self.put(out, value);
-        #[cfg(test)]
-        {
-            self.storage.scalar_calls += 1;
-        }
         Ok(true)
-    }
-
-    #[cfg(test)]
-    pub(crate) fn scalar_version_calls(&self) -> u64 {
-        self.storage.scalar_calls
-    }
-    #[cfg(test)]
-    pub(crate) fn fused_list_items(&self) -> u64 {
-        self.storage.fused_list_items
     }
 }

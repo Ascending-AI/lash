@@ -19,6 +19,8 @@ mod native_heap;
 mod observing;
 mod operation_entry;
 mod ops;
+#[cfg(test)]
+mod park_laws;
 mod queue;
 mod registers;
 mod session;
@@ -253,10 +255,6 @@ struct Storage {
     #[cfg(test)]
     value_moves: usize,
     #[cfg(test)]
-    scalar_calls: u64,
-    #[cfg(test)]
-    fused_list_items: u64,
-    #[cfg(test)]
     activation_records: Vec<CodeId>,
     #[cfg(test)]
     activation_sites: Vec<CodeId>,
@@ -375,13 +373,8 @@ pub struct KernelMachine {
 #[cfg(test)]
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 pub(crate) enum Boundary {
-    Go,
     /// A collection through the machine's collection point.
     Collect,
-    /// A collection asked of the heap directly, with nothing published.
-    Unpublished,
-    /// The node dies here, mid-slice: the run ends with a host fault.
-    Kill,
 }
 
 impl KernelMachine {
@@ -628,8 +621,7 @@ impl KernelMachine {
         .map_err(|error| self.heap_halt(error))
     }
 
-    /// The law's hook at a statement boundary: a forced collection, one
-    /// asked of the heap behind the machine's back, or the node's death.
+    /// The law's forced collection hook at a statement boundary.
     #[cfg(test)]
     fn at_boundary(&mut self) -> Result<(), MachineError> {
         let at = self.boundaries;
@@ -637,28 +629,10 @@ impl KernelMachine {
         let Some(hook) = &mut self.boundary else {
             return Ok(());
         };
-        match hook(at) {
-            Boundary::Go => Ok(()),
-            Boundary::Collect => {
-                self.publish_holdings().map_err(machine_error)?;
-                self.heap.collect().map_err(MachineError::Heap)?;
-                self.reconcile_sweep().map_err(machine_error)
-            }
-            // The heap refuses to trace roots the run moved past; one it
-            // grants traced current roots.
-            Boundary::Unpublished => {
-                if self.heap.collect().is_ok() {
-                    self.reconcile_sweep().map_err(machine_error)?;
-                }
-                Ok(())
-            }
-            Boundary::Kill => {
-                self.ended = true;
-                Err(MachineError::Fault {
-                    problem: "the node died mid-slice".to_owned(),
-                })
-            }
-        }
+        let Boundary::Collect = hook(at);
+        self.publish_holdings().map_err(machine_error)?;
+        self.heap.collect().map_err(MachineError::Heap)?;
+        self.reconcile_sweep().map_err(machine_error)
     }
 
     /// The collection point: under pressure, publishes what the run holds
@@ -1079,12 +1053,6 @@ fn machine_error(halt: Halt) -> MachineError {
 
 #[cfg(test)]
 impl KernelMachine {
-    /// The executable the run compiled, under its layout: what a
-    /// continuation law reads resume entries from.
-    pub(crate) fn executable(&self) -> &Executable {
-        &self.exe
-    }
-
     /// Sets `task`'s state as its next publication writes it: what a
     /// continuation law plants for a state the grammar refuses.
     pub(crate) fn tamper_task_state(&mut self, task: TaskId, state: TaskState) -> Result<(), Halt> {
@@ -1217,6 +1185,3 @@ impl KernelMachine {
         }
     }
 }
-
-#[cfg(test)]
-mod park_laws;

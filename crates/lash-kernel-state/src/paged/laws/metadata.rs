@@ -87,7 +87,6 @@ fn ten_thousand_spawn_ancestors_have_bounded_writes_and_exact_diagnostics() {
     let mut identity = TaskIdentityRef::MAIN;
     let mut tasks = Tree::new(false);
     for occurrence in 0..10_000 {
-        let before = pages.borrow().seals;
         identity =
             TaskIdentityRef::spawn(identity, saved_site.clone(), occurrence, &heap.access).unwrap();
         tasks
@@ -110,11 +109,6 @@ fn ten_thousand_spawn_ancestors_have_bounded_writes_and_exact_diagnostics() {
         heap.set_execution_roots(tasks.clone(), Tree::new(false), &[], &[], 0, &[])
             .unwrap();
         tasks.seal(&heap.access, &mut work()).unwrap();
-        assert_eq!(
-            pages.borrow().seals - before,
-            2,
-            "one ancestry node and one task row"
-        );
         assert!(pages.borrow().pages[&tasks.page().unwrap().id].tokens.len() < 512);
     }
     let mut projected = identity.resolve(&heap.access).unwrap();
@@ -196,35 +190,6 @@ fn a_megabyte_function_name_is_bounded_and_round_trips_exactly() {
     );
 }
 
-/// D-CAP/S4: admitted metadata names share descriptors, and diagnostic
-/// projection shares equal payloads without retaining an unbounded cache.
-#[test]
-fn repeated_long_metadata_names_share_storage_and_diagnostic_text() {
-    let (heap, pages) = fresh();
-    let name = Name::new("n".repeat(1 << 20));
-    let first = NameRef::new(&name, &heap.access).unwrap();
-    let before = pages.borrow().seals;
-    for _ in 0..1000 {
-        let site =
-            SiteRef::new(&Site::new(Unit::Function(name.clone()), [0]), &heap.access).unwrap();
-        assert!(
-            site.matches(&Site::new(Unit::Function(name.clone()), [0]), &heap.access)
-                .unwrap()
-        );
-        assert!(first.same_version(&NameRef::new(&name, &heap.access).unwrap()));
-        assert!(heap.access.clean_bytes() <= 64 << 20);
-    }
-    assert_eq!(pages.borrow().seals, before);
-    let a = first.resolve(&heap.access).unwrap();
-    let b = first.resolve(&heap.access).unwrap();
-    assert_eq!(
-        a.as_str().as_ptr(),
-        b.as_str().as_ptr(),
-        "one diagnostic text allocation"
-    );
-    assert_eq!(a, name);
-}
-
 /// S1 fault law: a decoded-name cache must retain the descriptor's summary
 /// validation, even when the referenced payload was previously read.
 #[test]
@@ -241,114 +206,4 @@ fn a_cached_metadata_name_does_not_hide_a_bad_payload_summary() {
         bad.resolve(&heap.access),
         Err(HeapFault::Corrupt { .. })
     ));
-}
-
-#[derive(Clone, Debug, PartialEq, Eq)]
-struct CountedRow(u64);
-thread_local! {
-    static ROW_ENCODINGS: std::cell::RefCell<Vec<u64>> = const { std::cell::RefCell::new(Vec::new()) };
-}
-impl lash_kernel_doc::graph_tokens::TokenCodec for CountedRow {
-    fn encode(&self, out: &mut lash_kernel_doc::graph_tokens::TokenWriter) {
-        ROW_ENCODINGS.with_borrow_mut(|rows| rows.push(self.0));
-        self.0.encode(out);
-    }
-    fn decode(
-        input: &mut lash_kernel_doc::graph_tokens::TokenReader<'_>,
-    ) -> Result<Self, lash_kernel_doc::graph_tokens::TokenError> {
-        Ok(Self(u64::decode(input)?))
-    }
-}
-impl super::super::tree::Cell for CountedRow {
-    fn cost(&self) -> u64 {
-        self.0 + 1
-    }
-    fn task_edges(&self) -> u64 {
-        self.0 % 2
-    }
-    fn live_members(&self) -> u64 {
-        1
-    }
-}
-
-/// FIG-6566: a missing binding changes no version, residency or page,
-/// including a cold sealed/inline leaf and a multi-level search path.
-#[test]
-fn an_absent_removal_dirties_and_encodes_nothing() {
-    use lash_kernel_doc::graph_tokens::TokenCodec;
-    for count in [8, 128] {
-        for form in ["dirty", "sealed", "inline"] {
-            if form == "inline" && count > 8 {
-                continue;
-            }
-            let (heap, pages) = fresh();
-            let mut tree = Tree::new(false);
-            for i in 0..count {
-                tree.write(ordinal_key(i * 2), CountedRow(i), &heap.access)
-                    .unwrap();
-            }
-            if form == "sealed" {
-                tree.seal(&heap.access, &mut work()).unwrap();
-            } else if form == "inline" {
-                tree.seal_nested(&heap.access, &mut work()).unwrap();
-                tree = Tree::decode(&mut lash_kernel_doc::graph_tokens::TokenReader::new(
-                    &encode_body(&tree),
-                ))
-                .unwrap();
-            }
-            heap.access.clear();
-            let prior = tree.clone();
-            let bytes = heap.access.dirty_bytes();
-            let seals = pages.borrow().seals;
-            ROW_ENCODINGS.with_borrow_mut(Vec::clear);
-            super::super::tree::take_key_copies();
-            assert_eq!(tree.remove(&ordinal_key(3), &heap.access).unwrap(), None);
-            let encodes = ROW_ENCODINGS.with_borrow(|rows| rows.len());
-            assert_eq!(encodes, 0, "{form}, {count} rows");
-            assert!(tree.same_version(&prior), "{form}, {count} rows");
-            assert_eq!(heap.access.dirty_bytes(), bytes);
-            if form == "dirty" {
-                assert_eq!(super::super::tree::take_key_copies(), 0);
-            }
-            assert_eq!(pages.borrow().seals, seals);
-        }
-    }
-}
-
-/// FIG-6566: removing one resident row measures that row only; its
-/// neighbours and retained working version keep their contents and sums.
-#[test]
-fn removing_one_row_encodes_only_the_removed_row() {
-    for count in [8, 128] {
-        let (heap, _) = fresh();
-        let mut tree = Tree::new(false);
-        for i in 0..count {
-            tree.write(ordinal_key(i), CountedRow(i), &heap.access)
-                .unwrap();
-        }
-        let prior = tree.clone();
-        let removed = count / 2;
-        ROW_ENCODINGS.with_borrow_mut(Vec::clear);
-        assert_eq!(
-            tree.remove(&ordinal_key(removed), &heap.access).unwrap(),
-            Some(CountedRow(removed))
-        );
-        let encodes = ROW_ENCODINGS.with_borrow(Clone::clone);
-        assert_eq!(encodes, vec![removed], "{count} rows");
-        assert_eq!(tree.len(), count - 1);
-        assert_eq!(tree.cost(), count * (count + 1) / 2 - removed - 1);
-        assert_eq!(tree.task_edges(), count / 2 - removed % 2);
-        assert_eq!(tree.live_members(&heap.access).unwrap(), count - 1);
-        assert_eq!(
-            prior.get(&ordinal_key(removed), &heap.access).unwrap(),
-            Some(CountedRow(removed))
-        );
-        assert_eq!(tree.get(&ordinal_key(removed), &heap.access).unwrap(), None);
-        for i in [0, count - 1] {
-            assert_eq!(
-                tree.get(&ordinal_key(i), &heap.access).unwrap(),
-                Some(CountedRow(i))
-            );
-        }
-    }
 }

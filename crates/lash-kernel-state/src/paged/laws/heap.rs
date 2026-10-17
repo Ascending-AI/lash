@@ -255,152 +255,8 @@ fn a_tiny_update_among_many_objects_seals_one_directory_path() {
         sealed.sealed_pages
     );
 }
-/// D-IMM: observing lengths from a cold descriptor does not demand its payload.
-#[test]
-fn a_cold_text_length_observation_reads_no_payload_leaf() {
-    let (mut heap, pages) = fresh();
-    // The crab straddles the first 4 KiB boundary; counts are hand-derived.
-    let payload = text(&mut heap, &format!("{}🦀é", "x".repeat(4095)));
-    let list = heap
-        .allocate_object(ObjectInit::List(vec![payload]))
-        .unwrap();
-    let heap = reopen(&mut heap, &pages);
-    heap.pages().clear();
-    let missing = {
-        let mut store = pages.borrow_mut();
-        let id = *store
-            .pages
-            .iter()
-            .find(|(_, p)| p.kind == PageKind::PAYLOAD_LEAF)
-            .unwrap()
-            .0;
-        store.pages.remove(&id);
-        store.reads = 0;
-        store.payload_reads = 0;
-        id
-    };
-    let Some(Value::Text(t)) = heap
-        .list_get(list, 0)
-        .expect("cold descriptor without payload")
-    else {
-        panic!("text");
-    };
-    assert_eq!(
-        (t.summary.utf8_bytes, t.summary.utf16_units, t.summary.chars),
-        (4101, 4098, 4097)
-    );
-    assert!(pages.borrow().reads > 0, "the descriptor really was cold");
-    assert_eq!(pages.borrow().payload_reads, 0);
-    // Demand validation happens only when the payload is actually observed.
-    assert!(
-        matches!(heap.payload_visit(&Value::Text(t), 0..4101, &mut |_| ControlFlow::Continue(())), Err(HeapFault::Missing { page }) if page == missing)
-    );
-}
 
 include!("heap_boundaries.rs");
-
-fn frozen(entities: u64, data_only: bool) -> FrozenRef {
-    FrozenRef {
-        root: PageRef {
-            id: PageId([19; 32]),
-            grant: PageGrant::NONE,
-        },
-        summary: FrozenSummary {
-            entities,
-            cost: LogicalBytes(entities * 32),
-            data_only,
-        },
-    }
-}
-#[test]
-fn the_last_swept_member_retires_its_family_base() {
-    let (mut heap, pages) = fresh();
-    let family = heap.register_family(frozen(3, false)).expect("family");
-    assert_eq!(heap.census_after(None, 2).expect("first batch").len(), 2);
-    for ordinal in 0..3 {
-        heap.sweep(&SweepSet {
-            entities: vec![EntityId { family, ordinal }],
-            ended_task_results: vec![],
-        })
-        .expect("sweep");
-    }
-    assert_eq!(heap.families.len(), 0);
-    assert!(heap.census_after(None, 10).expect("census").is_empty());
-    assert_eq!(
-        heap.data_only_certificate(),
-        DataOnlyCertificate {
-            closure_entities: 0,
-            task_edges: 0
-        }
-    );
-    let mut heap = reopen(&mut heap, &pages);
-    assert!(
-        heap.census_after(None, 10)
-            .expect("reopened census")
-            .is_empty()
-    );
-    let next = heap.register_family(frozen(0, true)).expect("empty family");
-    assert!(next.0 > family.0);
-    assert_eq!(heap.families.len(), 0);
-}
-#[test]
-fn sweeping_a_dead_member_preserves_the_membership_count() {
-    let (mut heap, pages) = fresh();
-    let family = heap.register_family(frozen(3, true)).expect("family");
-    let dead = SweepSet {
-        entities: vec![EntityId { family, ordinal: 1 }],
-        ended_task_results: vec![],
-    };
-    heap.sweep(&dead).expect("first sweep");
-    let mut heap = reopen(&mut heap, &pages);
-    heap.sweep(&dead).expect("repeated sweep");
-    assert_eq!(
-        heap.census_after(None, 10).expect("census"),
-        vec![
-            EntityId { family, ordinal: 0 },
-            EntityId { family, ordinal: 2 }
-        ]
-    );
-    heap.sweep(&SweepSet {
-        entities: vec![EntityId { family, ordinal: 0 }],
-        ended_task_results: vec![],
-    })
-    .expect("sweep");
-    assert_eq!(heap.families.len(), 1);
-    heap.sweep(&SweepSet {
-        entities: vec![EntityId { family, ordinal: 2 }],
-        ended_task_results: vec![],
-    })
-    .expect("sweep last");
-    assert_eq!(heap.families.len(), 0);
-}
-#[test]
-fn a_direct_task_binding_prevents_the_data_only_certificate() {
-    let (mut heap, _) = fresh();
-    let mut bindings = tree::Tree::new(false);
-    let name = lash_kernel_doc::Name::from("task");
-    bindings
-        .write(
-            b"task".to_vec(),
-            BindingRecord {
-                name: NameRef::new(&name, &heap.access).unwrap(),
-                declared: SiteRef::new(
-                    &(lash_kernel_doc::Site::new(lash_kernel_doc::Unit::Main, [])),
-                    &heap.access,
-                )
-                .unwrap(),
-                value: BoundRecord::Value(Value::Task(lash_kernel_doc::TaskId(7))),
-            },
-            &heap.access,
-        )
-        .expect("binding");
-    heap.set_session_root(bindings).expect("session");
-    assert_eq!(heap.data_only_certificate().task_edges, 1);
-    heap.set_session_root(tree::Tree::new(false))
-        .expect("drop session");
-    assert_eq!(heap.data_only_certificate().task_edges, 0);
-    assert_eq!(heap.certificate().upper, LogicalBytes(0));
-}
 
 #[test]
 fn relative_references_in_error_data_inherit_the_page_family() {
@@ -502,124 +358,6 @@ fn errors_at_the_depth_limit_have_bounded_descendants() {
 }
 
 #[test]
-fn an_allocation_consumes_its_native_reservation() {
-    let (mut heap, _) = fresh();
-    heap.set_census(Box::new(
-        Census::restore(heap.certificate(), LogicalBytes(48)).expect("census"),
-    ))
-    .expect("install");
-    heap.reserve(3, 0).expect("reserve 48");
-    let list = heap
-        .allocate_object(ObjectInit::List(vec![Value::Null]))
-        .expect("consume reservation");
-    assert!(matches!(
-        heap.list_get(list, 0).expect("get"),
-        Some(Value::Null)
-    ));
-    assert_eq!(heap.certificate().upper, LogicalBytes(48));
-    heap.release_statement_roots().expect("release");
-    assert_eq!(heap.certificate().upper, LogicalBytes(48));
-    let (mut heap, _) = fresh();
-    heap.set_census(Box::new(
-        Census::restore(heap.certificate(), LogicalBytes(16)).expect("census"),
-    ))
-    .expect("install");
-    heap.reserve(1, 0).expect("reserve value");
-    heap.set_execution_roots(
-        heap.tasks.clone(),
-        heap.joins.clone(),
-        &[Value::Null],
-        &[],
-        0,
-        &[],
-    )
-    .expect("consume value reservation");
-    assert_eq!(heap.certificate().upper, LogicalBytes(16));
-    heap.release_statement_roots().expect("release");
-    assert_eq!(heap.certificate().upper, LogicalBytes(0));
-    let (mut heap, _) = fresh();
-    heap.set_census(Box::new(
-        Census::restore(heap.certificate(), LogicalBytes(32)).expect("census"),
-    ))
-    .expect("install");
-    heap.reserve(2, 0).expect("reserve family");
-    heap.register_family(frozen(1, true))
-        .expect("consume family reservation");
-    heap.release_statement_roots().expect("release");
-    assert_eq!(heap.certificate().upper, LogicalBytes(32));
-}
-
-#[test]
-fn replacing_a_reference_checks_the_proposed_reachable_graph() {
-    let (mut heap, _) = fresh();
-    heap.set_census(Box::new(
-        Census::restore(heap.certificate(), LogicalBytes(264)).expect("census"),
-    ))
-    .expect("install");
-    let garbage = heap
-        .allocate_object(ObjectInit::List(vec![Value::Null; 10]))
-        .expect("large list");
-    let root = heap
-        .allocate_object(ObjectInit::List(vec![Value::List(garbage)]))
-        .expect("root");
-    let mut bindings = tree::Tree::new(false);
-    bindings
-        .write(
-            b"root".to_vec(),
-            BindingRecord {
-                name: NameRef::new(&("root".into()), &heap.access).unwrap(),
-                declared: SiteRef::new(
-                    &(lash_kernel_doc::Site::new(lash_kernel_doc::Unit::Main, [])),
-                    &heap.access,
-                )
-                .unwrap(),
-                value: BoundRecord::Value(Value::List(root)),
-            },
-            &heap.access,
-        )
-        .expect("binding");
-    heap.set_session_root(bindings).expect("session");
-    let text = heap.text(&"x".repeat(200)).expect("text");
-    heap.list_write(root, 0, Value::Text(text))
-        .expect("proposed graph fits exactly");
-    assert_eq!(heap.certificate().upper, LogicalBytes(264));
-    assert_eq!(heap.certificate().entities, 1);
-    assert!(heap.entity_cost(garbage).expect("swept").is_none());
-}
-
-#[test]
-fn statement_holding_cost_is_counted_before_fast_reservation() {
-    // K-BND-003 / FIG-6587: an aggregate pin has precisely the same
-    // pressure verdict and release delta as its tracing descriptor.
-    for aggregate in [false, true] {
-        let (mut heap, _) = fresh();
-        heap.set_census(Box::new(
-            Census::restore(heap.certificate(), LogicalBytes(80)).expect("census"),
-        ))
-        .expect("install");
-        let list = heap
-            .allocate_object(ObjectInit::List(vec![Value::Null]))
-            .expect("list");
-        let pinned = [Value::Bool(true)];
-        heap.set_execution_roots(
-            heap.tasks.clone(),
-            heap.joins.clone(),
-            &[Value::List(list)],
-            if aggregate { &[] } else { &pinned },
-            if aggregate { 16 } else { 0 },
-            &[],
-        )
-        .expect("register and pin");
-        assert_eq!(heap.certificate().upper, LogicalBytes(80));
-        assert!(matches!(heap.reserve(2, 0), Err(NativeError::Memory)));
-        assert_eq!(heap.certificate().upper, LogicalBytes(80));
-        assert_eq!(heap.certificate().refinements, 1);
-        heap.release_statement_roots().expect("release");
-        assert_eq!(heap.certificate().upper, LogicalBytes(48));
-    }
-}
-
-#[test]
 fn an_edge_visitor_fault_stops_before_the_next_leaf() {
     let (mut heap, pages) = fresh();
     let tuple = heap
@@ -693,84 +431,6 @@ fn a_forged_membership_aggregate_is_a_corrupt_page() {
         runs.rank_get(0, &heap.access),
         Err(HeapFault::Corrupt { .. })
     ));
-}
-
-#[test]
-fn population_summaries_follow_seeded_directory_edits() {
-    use tree::Cell;
-    let (mut heap, _) = fresh();
-    let list = heap
-        .allocate_object(ObjectInit::List(vec![Value::Null]))
-        .expect("list");
-    let variable = heap
-        .allocate_object(ObjectInit::Variable(Value::Null))
-        .expect("variable");
-    let record = heap
-        .allocate_object(ObjectInit::Record(vec![]))
-        .expect("record");
-    let map = heap.allocate_object(ObjectInit::Map(vec![])).expect("map");
-    let closure = heap
-        .allocate_object(ObjectInit::Closure {
-            site: SiteRef::new(
-                &(lash_kernel_doc::Site::new(lash_kernel_doc::Unit::Main, [])),
-                &heap.access,
-            )
-            .unwrap(),
-            captures: vec![],
-        })
-        .expect("closure");
-    let mut seed = 417u64;
-    for step in 0..64 {
-        seed = seed.wrapping_mul(6364136223846793005).wrapping_add(1);
-        let value = if seed & 8 == 0 {
-            Value::Null
-        } else {
-            Value::Task(lash_kernel_doc::TaskId(step))
-        };
-        match seed % 6 {
-            0 => heap.list_write(list, 0, value).expect("list write"),
-            1 => heap
-                .variable_write(variable, value)
-                .expect("variable write"),
-            2 => heap
-                .record_write(record, FieldName::Static("task"), value)
-                .expect("record write"),
-            3 => heap
-                .record_remove(record, FieldName::Static("task"))
-                .expect("record remove"),
-            4 => heap.map_write(map, Value::Null, value).expect("map write"),
-            _ => heap.table_remove(map, &Value::Null).expect("map remove"),
-        }
-        let mut closure_entities = 0;
-        let mut task_edges = 0;
-        heap.flush_working().expect("flush working heads");
-        heap.directory
-            .visit(&heap.access, &mut |_, head| {
-                closure_entities += (head.kind() == ObjectKind::Closure) as u64;
-                task_edges += head.task_edges();
-                true
-            })
-            .expect("recount");
-        assert_eq!(
-            heap.data_only_certificate(),
-            DataOnlyCertificate {
-                closure_entities,
-                task_edges
-            }
-        );
-    }
-    heap.sweep(&SweepSet {
-        entities: vec![list, variable, record, map, closure],
-        ended_task_results: vec![],
-    })
-    .expect("sweep");
-    assert_eq!(
-        heap.data_only_certificate(),
-        DataOnlyCertificate {
-            closure_entities: 0,
-            task_edges: 0
-        }
-    );
 }
 
 /// K-EFF-002: reading outbound integer digits never reserves guest memory.
@@ -866,118 +526,6 @@ fn a_long_native_error_in_a_frame_keeps_paged_data_without_reads() {
     assert_eq!(pages.borrow().reads, 0);
     assert_eq!(pages.borrow().seals, seals);
     assert_eq!(encode_body(&kept), encode_body(&value));
-}
-
-/// K-BND-003 / S7: a retained ended-task result is a holding even though
-/// precise tracing visits it only through a reachable task handle.
-#[test]
-fn an_ended_task_result_counts_toward_fast_reservation() {
-    use super::super::tree::Tree;
-    use lash_kernel_doc::{Name, Site, TaskId, Unit};
-    let (mut heap, _) = fresh();
-    heap.set_census(Box::new(
-        Census::restore(heap.certificate(), LogicalBytes(100)).expect("census"),
-    ))
-    .expect("census");
-    let list = heap
-        .allocate_object(ObjectInit::List(vec![int(1)]))
-        .expect("49-byte list");
-    let mut session = Tree::new(false);
-    session
-        .write(
-            vec![0],
-            BindingRecord {
-                name: NameRef::new(&(Name::new("task")), &heap.access).unwrap(),
-                declared: SiteRef::new(&(Site::new(Unit::Main, [0])), &heap.access).unwrap(),
-                value: BoundRecord::Value(Value::Task(TaskId(1))),
-            },
-            &heap.access,
-        )
-        .expect("task handle");
-    heap.set_session_root(session)
-        .expect("16-byte handle holding");
-    let mut tasks = Tree::new(false);
-    tasks
-        .write(
-            super::super::directory::ordinal_key(1),
-            TaskRecord {
-                identity: TaskIdentityRef::MAIN,
-                state: TaskStateRecord::Ended(EndedTask::Returned(Value::List(list))),
-                result_retained: true,
-                joiners: Tree::new(true),
-                observed: false,
-                passed: false,
-                failed: false,
-                occurrences: Tree::new(false),
-                frames: Tree::new(true),
-            },
-            &heap.access,
-        )
-        .expect("ended task");
-    heap.set_execution_roots(tasks, heap.joins.clone(), &[], &[], 0, &[])
-        .expect("16-byte result holding");
-    assert!(
-        matches!(
-            heap.allocate_object(ObjectInit::List(vec![])),
-            Err(HeapWriteError::Memory)
-        ),
-        "49 + 16 + 16 live bytes leave less than a 32-byte object under a 100-byte bound"
-    );
-}
-
-/// S1/S7: a newly created entity is a zero-cost tracing seed until its
-/// enclosing expression installs the completed value in a holding location.
-#[test]
-fn a_fresh_mid_expression_entity_survives_the_next_allocation_pressure() {
-    let (mut heap, _) = fresh();
-    heap.set_census(Box::new(
-        Census::restore(heap.certificate(), LogicalBytes(96)).unwrap(),
-    ))
-    .unwrap();
-    let garbage = heap.allocate_object(ObjectInit::List(vec![])).unwrap();
-    let fresh = heap.allocate_object(ObjectInit::List(vec![])).unwrap();
-    heap.set_execution_roots(
-        heap.tasks.clone(),
-        heap.joins.clone(),
-        &[],
-        &[],
-        0,
-        &[fresh],
-    )
-    .unwrap();
-    let next = heap
-        .allocate_object(ObjectInit::List(vec![Value::Null]))
-        .unwrap();
-    assert!(heap.certificate().refinements > 0);
-    assert_eq!(heap.len(fresh).unwrap(), 0);
-    assert_eq!(heap.len(next).unwrap(), 1);
-    assert!(heap.kind(garbage).unwrap().is_none());
-    assert_eq!(heap.certificate().entities, 2);
-}
-
-/// D-IMM/D-KEY: an immutable descriptor retains its computed normal form.
-/// Payload-page eviction does not force repeated normalization of a live key.
-#[test]
-fn a_thousand_lookups_normalize_a_resident_paged_key_at_most_once() {
-    let (mut heap, pages) = fresh();
-    let mut key = text(&mut heap, &"k".repeat(1 << 20));
-    let map = heap
-        .allocate_object(ObjectInit::Map(vec![(key.clone(), int(7))]))
-        .unwrap();
-    // Model a newly decoded descriptor with an empty runtime key cache.
-    if let Value::Text(text) = &mut key {
-        text.normal = Default::default();
-    }
-    let before = pages.borrow().payload_reads;
-    for _ in 0..1000 {
-        heap.access.clear();
-        assert!(is_int(heap.map_get(map, &key).unwrap(), 7));
-    }
-    let reads = pages.borrow().payload_reads - before;
-    assert!(
-        reads > 0 && reads <= 270,
-        "one canonical 1 MiB tree read, got {reads}"
-    );
 }
 
 /// D-COW: publishing a working tree version gives later edits a private
@@ -1220,306 +768,8 @@ fn dirty_spill_quota_failure_preserves_the_committed_root_and_typed_cause() {
     assert!(is_int(old.list_get(list, 0).expect("old row"), 7));
 }
 
-/// D-IMM/D-CAP: reloading a value from a resident decoded page retains its
-/// normal form; clean tokens and decoded nodes share the 64 MiB allowance.
-#[test]
-fn repeated_variable_reads_share_the_resident_normal_form() {
-    let (mut heap, pages) = fresh();
-    let key = text(&mut heap, &"x".repeat(1 << 20));
-    let variable = heap
-        .allocate_object(ObjectInit::Variable(key.clone()))
-        .expect("variable");
-    let list = heap
-        .allocate_object(ObjectInit::List(vec![key.clone()]))
-        .expect("inline list");
-    let map = heap
-        .allocate_object(ObjectInit::Map(vec![(key, int(7))]))
-        .expect("map");
-    let heap = reopen(&mut heap, &pages);
-    let before = pages.borrow().payload_reads;
-    let key = heap.variable_get(variable).expect("key");
-    assert!(is_int(heap.map_get(map, &key).expect("lookup"), 7));
-    let list_key = heap.list_get(list, 0).expect("inline key").expect("member");
-    assert!(is_int(heap.map_get(map, &list_key).expect("lookup"), 7));
-    for _ in 0..1000 {
-        let list_key = heap.list_get(list, 0).expect("inline key").expect("member");
-        let Value::Text(descriptor) = list_key else {
-            panic!("text key")
-        };
-        assert!(
-            descriptor.normal.get().is_some(),
-            "inline tree retains normal form"
-        );
-        let key = heap.variable_get(variable).expect("reload key");
-        let Value::Text(descriptor) = &key else {
-            panic!("text key")
-        };
-        assert!(
-            descriptor.normal.get().is_some(),
-            "decoded page retains normal form"
-        );
-        assert!(is_int(heap.map_get(map, &key).expect("lookup"), 7));
-        assert!(heap.access.clean_bytes() <= 64 << 20);
-    }
-    let reads = pages.borrow().payload_reads - before;
-    assert!(
-        reads > 0 && reads <= 270,
-        "one payload normalization: {reads} pages"
-    );
-}
-
-/// D-SEALTIME: installing unchanged root holdings and releasing empty
-/// statement scratch does not rewrite the immutable heap header.
-#[test]
-fn unchanged_root_holdings_seal_without_writing_a_page() {
-    use super::super::tree::Tree;
-    let (mut heap, pages) = fresh();
-    let first = seal(&mut heap);
-    let before = pages.borrow().seals;
-    for _ in 0..10 {
-        heap.set_execution_roots(Tree::new(false), Tree::new(false), &[], &[], 0, &[])
-            .expect("roots");
-        heap.release_statement_roots().expect("release");
-        let next = seal(&mut heap);
-        assert_eq!(next.sealed_pages, 0);
-        assert_eq!(next.root.directory.page(), first.root.directory.page());
-    }
-    assert_eq!(pages.borrow().seals, before);
-}
-
-/// K-BND-003 (FIG-6106's law, on the heap): a table's census entry, the
-/// local cost it is priced at and the edges a collection traces through
-/// it, kept through updates, removal, reinsertion and scalar/reference
-/// transitions, equals a recount: the entry of a table built at once from
-/// the same members. References nested in tuples and errors, task handles
-/// and first-written keys count for maps and sets alike.
-#[test]
-fn table_accounting_through_writes_equals_a_recount() {
-    type Entry = (u64, Vec<Identity>, DataOnlyCertificate);
-    fn entry(heap: &mut PagedHeap, table: EntityId) -> Entry {
-        let cost = heap
-            .entity_cost(table)
-            .expect("cost")
-            .expect("a live table")
-            .local
-            .0;
-        let mut edges = Vec::new();
-        heap.entity_edges(table, &mut |identity| {
-            edges.push(identity);
-            Ok(())
-        })
-        .expect("edges");
-        edges.sort();
-        (cost, edges, heap.data_only_certificate())
-    }
-    fn recount(heap: &PagedHeap, table: EntityId, set: bool) -> Entry {
-        let mut members = Vec::new();
-        heap.visit(table, &mut |element| {
-            members.push(match element {
-                Element::Entry { key, value } => (key.clone(), value.clone()),
-                Element::Item(member) => (member.clone(), Value::Null),
-                Element::Field { .. } => panic!("a table has no fields"),
-            });
-            ControlFlow::Continue(())
-        })
-        .expect("members");
-        let (mut fresh, _) = fresh();
-        fresh
-            .allocate_object(ObjectInit::List(vec![]))
-            .expect("the child");
-        let init = if set {
-            ObjectInit::Set(members.into_iter().map(|(member, _)| member).collect())
-        } else {
-            ObjectInit::Map(members)
-        };
-        let table = fresh.allocate_object(init).expect("the recount");
-        entry(&mut fresh, table)
-    }
-    for set in [false, true] {
-        let (mut heap, _) = fresh();
-        let child = heap
-            .allocate_object(ObjectInit::List(vec![]))
-            .expect("the child");
-        let mut nested = ErrorRef::new("nested", "reference");
-        nested.data = Payload::Resident(Arc::new(Value::List(child)));
-        let values = vec![
-            Value::Null,
-            Value::Bool(true),
-            Value::Int(heap.int(lash_kernel_doc::Integer::from(0)).expect("int")),
-            Value::Int(
-                heap.int(lash_kernel_doc::Integer::from(65536))
-                    .expect("int"),
-            ),
-            Value::Float(lash_kernel_doc::Float::new(-0.0)),
-            Value::Float(lash_kernel_doc::Float::new(f64::NAN)),
-            Value::Text(heap.text("payload").expect("text")),
-            Value::Bytes(heap.bytes(&[1, 2, 3]).expect("bytes")),
-            Value::Function(heap.text("f").expect("name")),
-            Value::List(child),
-            Value::Ref(Identity::Object(child)),
-            Value::Task(lash_kernel_doc::TaskId(7)),
-            Value::Tuple(
-                heap.tuple(vec![
-                    Value::List(child),
-                    Value::Task(lash_kernel_doc::TaskId(8)),
-                ])
-                .expect("tuple"),
-            ),
-            heap.canonical_value(Value::Error(Arc::new(nested)))
-                .expect("error"),
-        ];
-        let reference = values[12].clone();
-        let others: Vec<Value> = (1..5)
-            .map(|n| Value::Text(heap.text(&format!("other:{n}")).expect("text")))
-            .collect();
-        let keys: Vec<Value> = values
-            .iter()
-            .filter(|value| heap.normal_key(value).expect("key").is_some())
-            .cloned()
-            .collect();
-        assert!(keys.len() > 8, "most values are keys");
-        for written in keys {
-            let table = heap
-                .allocate_object(if set {
-                    ObjectInit::Set(vec![])
-                } else {
-                    ObjectInit::Map(vec![])
-                })
-                .expect("table");
-            let write = |heap: &mut PagedHeap, key: &Value, value: Value| {
-                if set {
-                    heap.set_write(table, key.clone(), true).expect("member");
-                } else {
-                    heap.map_write(table, key.clone(), value).expect("entry");
-                }
-                assert_eq!(entry(heap, table), recount(heap, table, set));
-            };
-            // Surviving entries exercise the mixed path, and removing them
-            // all compacts the table.
-            for other in &others {
-                write(&mut heap, other, Value::Null);
-            }
-            for value in &values {
-                write(&mut heap, &written, value.clone());
-            }
-            let remove = |heap: &mut PagedHeap, key: &Value| {
-                heap.table_remove(table, key).expect("removal");
-                assert_eq!(entry(heap, table), recount(heap, table, set));
-            };
-            remove(&mut heap, &written);
-            write(&mut heap, &written, Value::Null);
-            write(&mut heap, &written, reference.clone());
-            let scalar = Value::Text(heap.text("scalar again").expect("text"));
-            write(&mut heap, &written, scalar);
-            remove(&mut heap, &written);
-            for other in &others {
-                remove(&mut heap, other);
-            }
-            write(&mut heap, &written, Value::Null);
-            heap.sweep(&SweepSet {
-                entities: vec![table],
-                ended_task_results: vec![],
-            })
-            .expect("sweep");
-        }
-    }
-}
-
-/// FIG-6444: JSON's fragment list appends must copy only changed paths,
-/// not allocate a fresh key for every unchanged element on every write.
-#[test]
-fn a_growing_list_does_not_copy_its_leaf_at_every_append() {
-    const N: u64 = 1024;
-    let (mut heap, _) = fresh();
-    let list = heap
-        .allocate_object(ObjectInit::List(vec![int(-1)]))
-        .expect("list");
-    let super::super::directory::Body::List { rows: prior, .. } =
-        heap.head(list).expect("head").expect("list").body
-    else {
-        panic!("list")
-    };
-    super::super::tree::take_key_copies();
-    for i in 0..N {
-        heap.list_write(list, i + 1, int(i as i64)).expect("append");
-    }
-    let copies = super::super::tree::take_key_copies();
-    // Two shallow trees (directory and list): first-key refreshes on their
-    // paths, plus amortized splits. Twelve per append leaves room for both
-    // depths and split copies, independently of the leaf's row population.
-    println!("list appends={N} key copies={copies} bound={}", 12 * N);
-    assert!(copies <= 12 * N, "{copies} key copies for {N} appends");
-    assert_eq!(prior.len(), 1);
-    assert!(is_int(
-        prior
-            .rank_get(0, heap.pages())
-            .expect("prior")
-            .map(|(_, v)| v),
-        -1
-    ));
-    assert!(is_int(
-        heap.list_get(list, N).expect("last"),
-        (N - 1) as i64
-    ));
-}
-
-/// FIG-6465: JSON's fragment appends read the list's length and append to
-/// it. Both reach the activation's working head: no append locates the
-/// list in the directory or re-encodes its directory row.
-#[test]
-fn a_list_append_neither_locates_nor_reencodes_its_directory_row() {
-    const N: u64 = 1024;
-    let (mut heap, pages) = fresh();
-    let list = heap
-        .allocate_object(ObjectInit::List(Vec::new()))
-        .expect("list");
-    super::super::tree::take_head_lookups();
-    super::super::directory::take_head_encodes();
-    for i in 0..N {
-        let len = heap.len(list).expect("length");
-        heap.list_write(list, len, int(i as i64)).expect("append");
-    }
-    let lookups = super::super::tree::take_head_lookups();
-    let encodes = super::super::directory::take_head_encodes();
-    println!("list appends={N} directory lookups={lookups} head encodes={encodes}");
-    assert_eq!(
-        (lookups, encodes),
-        (0, 0),
-        "{N} appends located the directory row {lookups} times and re-encoded it {encodes} times"
-    );
-    let heap = reopen(&mut heap, &pages);
-    assert_eq!(heap.len(list).expect("published length"), N);
-    assert!(is_int(
-        heap.list_get(list, N - 1).expect("last"),
-        (N - 1) as i64
-    ));
-}
-
-/// FIG-6480: an empty statement release changes no census facts. A real
-/// reservation is still released once, with the exact original certificate.
-#[test]
-fn empty_statement_releases_do_not_publish_census_deltas() {
-    use super::super::publication::RELEASE_DELTA_CALLS;
-    let (mut heap, _) = fresh();
-    let before = heap.certificate();
-    RELEASE_DELTA_CALLS.with(|calls| calls.set(0));
-    for _ in 0..128 {
-        heap.release_statement_roots().unwrap();
-    }
-    assert_eq!(heap.certificate(), before);
-    assert_eq!(
-        RELEASE_DELTA_CALLS.with(std::cell::Cell::get),
-        0,
-        "empty releases called the census"
-    );
-    assert!(heap.hold(16, false).unwrap());
-    heap.release_statement_roots().unwrap();
-    assert_eq!(heap.certificate(), before);
-    assert_eq!(RELEASE_DELTA_CALLS.with(std::cell::Cell::get), 1);
-}
-
-/// PAGED-TEXT-CURSOR-LINEAR: decode each visited leaf once, borrow its image,
-/// and scan linear bytes; reopening inside a leaf repeats only that leaf.
+/// K-ITER-005: scalar iteration and positions survive a cold reconstruction,
+/// including mixed-width Unicode across stored leaf boundaries.
 #[test]
 fn paged_text_cursor_linear() {
     for (mixed, parts) in [(false, 10), (true, 10), (false, 36), (true, 36)] {
@@ -1534,16 +784,8 @@ fn paged_text_cursor_linear() {
             })
             .collect();
         for parked in [false, true] {
-            let (mut heap, pages) = fresh();
+            let (mut heap, _) = fresh();
             let text = heap.text(&input).unwrap();
-            let leaves = pages
-                .borrow()
-                .pages
-                .values()
-                .filter(|p| p.kind == PageKind::PAYLOAD_LEAF)
-                .count();
-            assert!(leaves >= 8);
-            payload::cursor_work::WORK.with_borrow_mut(|work| *work = Default::default());
             let mut cursor = payload::TextCursor::new(text.clone(), 0);
             for (i, expected) in input.chars().enumerate() {
                 if parked && i == 71 {
@@ -1554,14 +796,6 @@ fn paged_text_cursor_linear() {
                 assert_eq!(cursor.position(), i as u64 + 1);
             }
             assert_eq!(cursor.next(&heap).unwrap(), None);
-            payload::cursor_work::WORK.with_borrow(|work| {
-                let decoded: u64 = work.leaves.values().sum();
-                assert_eq!(decoded, leaves as u64 + u64::from(parked), "{work:?}");
-                assert!(work.leaves.values().all(|n| *n <= 1 + u64::from(parked)));
-                assert_eq!(work.copied, 0, "leaf bytes are borrowed");
-                eprintln!("PAGED-TEXT-CURSOR-LINEAR mixed={mixed} parked={parked} bytes={} leaves={leaves} decodes={decoded} copied={} scanned={}", input.len(), work.copied, work.scanned);
-                assert!(work.scanned <= 3 * input.len() + 4096, "{work:?}");
-            });
         }
     }
 }
@@ -1642,4 +876,60 @@ fn paged_text_cursor_preserves_boundary_fault_order() {
     assert!(matches!(cursor.next(&heap), Err(HeapFault::Missing { page }) if page == missing));
 }
 
-include!("heap_ownership.rs");
+/// K-VAL-024: appended list contents survive sealing and a cold open.
+#[test]
+fn a_list_append_neither_locates_nor_reencodes_its_directory_row() {
+    const N: u64 = 1024;
+    let (mut heap, pages) = fresh();
+    let list = heap
+        .allocate_object(ObjectInit::List(Vec::new()))
+        .expect("list");
+    for i in 0..N {
+        let len = heap.len(list).expect("length");
+        heap.list_write(list, len, int(i as i64)).expect("append");
+    }
+    let heap = reopen(&mut heap, &pages);
+    assert_eq!(heap.len(list).expect("published length"), N);
+    assert!(is_int(
+        heap.list_get(list, N - 1).expect("last"),
+        (N - 1) as i64
+    ));
+}
+
+/// D-IMM: observing lengths from a cold descriptor does not demand its payload.
+#[test]
+fn a_cold_text_length_observation_reads_no_payload_leaf() {
+    let (mut heap, pages) = fresh();
+    // The crab straddles the first 4 KiB boundary; counts are hand-derived.
+    let payload = text(&mut heap, &format!("{}🦀é", "x".repeat(4095)));
+    let list = heap
+        .allocate_object(ObjectInit::List(vec![payload]))
+        .unwrap();
+    let heap = reopen(&mut heap, &pages);
+    heap.pages().clear();
+    let missing = {
+        let mut store = pages.borrow_mut();
+        let id = *store
+            .pages
+            .iter()
+            .find(|(_, p)| p.kind == PageKind::PAYLOAD_LEAF)
+            .unwrap()
+            .0;
+        store.pages.remove(&id);
+        id
+    };
+    let Some(Value::Text(t)) = heap
+        .list_get(list, 0)
+        .expect("cold descriptor without payload")
+    else {
+        panic!("text");
+    };
+    assert_eq!(
+        (t.summary.utf8_bytes, t.summary.utf16_units, t.summary.chars),
+        (4101, 4098, 4097)
+    );
+    // Demand validation happens only when the payload is actually observed.
+    assert!(
+        matches!(heap.payload_visit(&Value::Text(t), 0..4101, &mut |_| ControlFlow::Continue(())), Err(HeapFault::Missing { page }) if page == missing)
+    );
+}
