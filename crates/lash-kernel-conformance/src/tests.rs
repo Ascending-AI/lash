@@ -334,8 +334,8 @@ fn kernel_json_refuses_unknown_nested_forms() {
     ));
 }
 
-/// K-ID-004: the corpus's expected identities point to the actual action in
-/// the typed document, independently of the machine's executable layout.
+/// K-ID-004: the corpus's expected identities point to the actual action,
+/// including a do expression, independently of the machine's executable layout.
 #[test]
 fn expected_effect_sites_address_document_actions() {
     let shards = load_corpus(CORPUS_FILES.iter().copied()).expect("decode corpus");
@@ -350,12 +350,18 @@ fn expected_effect_sites_address_document_actions() {
             } = trace
             {
                 let document = document.as_ref().expect("identity case parses");
-                let Some(lash_kernel_doc::Node::Action(lash_kernel_doc::Action::Perform {
-                    effect: actual,
-                    ..
-                })) = document.node(&identity.site)
-                else {
-                    panic!("{}: expected effect site is not a perform", case.name);
+                let actual = match document.node(&identity.site) {
+                    Some(lash_kernel_doc::Node::Action(lash_kernel_doc::Action::Perform {
+                        effect,
+                        ..
+                    })) => effect,
+                    Some(lash_kernel_doc::Node::Expr(lash_kernel_doc::Expr::Act(act))) => {
+                        let lash_kernel_doc::ActKind::Perform { effect, .. } = &act.kind else {
+                            panic!("{}: expected effect site is not a perform", case.name);
+                        };
+                        effect
+                    }
+                    _ => panic!("{}: expected effect site is not a perform", case.name),
                 };
                 assert_eq!(actual.as_str(), effect);
                 if let lash_kernel_doc::TaskIdentity::Spawned(spawn) = &identity.task {

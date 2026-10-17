@@ -78,6 +78,9 @@ fn formula(case: &Case) {
     // arbitrary value is not that result and contributes zero. The probe
     // states a native implementation, so its formula is its whole charge
     // whichever implementation runs (`K-CHG-007`); here its body runs.
+    // K-CHG-002 adds 6 outside that body: try, do and finish statements,
+    // the do action expression, the null expression and its copy-out.
+    // Thus the totals are 6 + (9 + 2) = 17 on return and 6 + 9 = 15 on raise.
     let body = if case.name.starts_with("return") {
         "return 7"
     } else {
@@ -329,10 +332,12 @@ fn sites(rule: &str, case: &Case) {
                     statement,
                     *frame(&child, 0).statement.resolve(heap.pages()).unwrap()
                 );
-                assert!(matches!(
-                    at.program.document.node(&identity.site),
-                    Some(lash_kernel_doc::Node::Action(_))
-                ));
+                let Some(lash_kernel_doc::Node::Expr(lash_kernel_doc::Expr::Act(act))) =
+                    at.program.document.node(&identity.site)
+                else {
+                    panic!("wait site is not an action expression")
+                };
+                assert!(matches!(act.kind, lash_kernel_doc::ActKind::Perform { .. }));
             }
             "K-SITE-003" => {
                 let call = frame(&task(0), 0);
