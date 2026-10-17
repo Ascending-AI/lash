@@ -58,3 +58,7 @@ results; their old launchers have been retired.
 - [sql-operation-windows](instruments/sql-operation-windows.md): what physical SQL work one operation window performed.
 - [startup-provider-http](instruments/startup-provider-http.md): what startup phases and loopback provider HTTP exchanges cost.
 - [trace-records-spans-metrics](instruments/trace-records-spans-metrics.md): which records, spans and counters the instrumentation contract defines and who produces them.
+
+## Recorded measurements
+
+- [Persistent-heap statement cost, 2026-10-17](kernel-statement-cost-2026-10-17.md): Sam's accepted FIG-6318 verdict, paired instruction ratios, TypeScript member durations, and routing to FIG-6675, FIG-3843 and `triage-7c5c`.
