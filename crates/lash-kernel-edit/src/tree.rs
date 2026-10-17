@@ -91,6 +91,7 @@ impl<'a> NodeMut<'a> {
                     condition,
                     body,
                     else_block,
+                    ..
                 } => {
                     out.push(NodeMut::Expr(condition));
                     out.push(NodeMut::Block(body));

@@ -583,8 +583,10 @@ impl Parser {
                 } else {
                     None
                 };
+                let metered = self.loop_meter()?;
                 let body = self.block()?;
                 Stmt::For {
+                    metered,
                     binding,
                     iterable,
                     via,
@@ -592,11 +594,16 @@ impl Parser {
                     else_block: self.loop_else()?,
                 }
             }
-            "while" => Stmt::While {
-                condition: self.expr()?,
-                body: self.block()?,
-                else_block: self.loop_else()?,
-            },
+            "while" => {
+                let condition = self.expr()?;
+                let metered = self.loop_meter()?;
+                Stmt::While {
+                    metered,
+                    condition,
+                    body: self.block()?,
+                    else_block: self.loop_else()?,
+                }
+            }
             "break" => Stmt::Break,
             "continue" => Stmt::Continue,
             "return" => {
@@ -1410,6 +1417,21 @@ impl Parser {
                 _ => return Err(parser.unexpected_previous("a type")),
             })
         })
+    }
+
+    fn loop_meter(&mut self) -> Parsed<u64> {
+        if !self.eat_word("metered") {
+            return Ok(0);
+        }
+        let Token::Int(amount) = self.peek() else {
+            return Err(self.unexpected("a positive loop charge that fits 64 bits"));
+        };
+        let amount = amount
+            .to_u64()
+            .filter(|amount| *amount > 0)
+            .ok_or_else(|| self.unexpected("a positive loop charge that fits 64 bits"))?;
+        self.position += 1;
+        Ok(amount)
     }
 
     fn formula(&mut self) -> Parsed<Formula> {

@@ -135,11 +135,7 @@ impl KernelMachine {
         if !function.existing_result {
             self.pin_value(&value)?;
         }
-        let units = if self.charging && function.native {
-            scalar.units
-        } else {
-            0
-        };
+        let units = if self.charging { scalar.units } else { 0 };
         self.charge_call(exe, lib, units)?;
         self.observe(Event::NativeExit);
         self.put(out, value);

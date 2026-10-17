@@ -536,6 +536,7 @@ impl Scope<'_> {
                 via,
                 body,
                 else_block,
+                ..
             } => {
                 check_name(binding, Some(site))?;
                 if let Some(via) = via {
@@ -549,6 +550,7 @@ impl Scope<'_> {
                 condition,
                 body,
                 else_block,
+                ..
             } => {
                 self.check_expr(condition, &child())?;
                 self.check_block(body, &child(), true)?;

@@ -281,6 +281,7 @@ impl<'a> Printer<'a> {
                 }
             }
             Stmt::For {
+                metered,
                 binding,
                 iterable,
                 via,
@@ -309,10 +310,14 @@ impl<'a> Printer<'a> {
                     self.out.push(')');
                 }
                 self.out.push(' ');
+                if *metered != 0 {
+                    self.out.push_str(&format!("metered {metered} "));
+                }
                 self.block(body);
                 self.loop_else(else_block);
             }
             Stmt::While {
+                metered,
                 condition,
                 body,
                 else_block,
@@ -320,6 +325,9 @@ impl<'a> Printer<'a> {
                 self.out.push_str("while ");
                 self.expr(condition);
                 self.out.push(' ');
+                if *metered != 0 {
+                    self.out.push_str(&format!("metered {metered} "));
+                }
                 self.block(body);
                 self.loop_else(else_block);
             }

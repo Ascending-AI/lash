@@ -55,6 +55,10 @@ pub enum Stmt {
     /// `via`, a dialect's protocol opens the iterated value and steps it
     /// (`K-ITER-005`).
     For {
+        /// Declared units at every continuation test, even in library code.
+        /// Zero leaves the loop covered by the call's completion formula.
+        #[serde(default, skip_serializing_if = "is_zero")]
+        metered: u64,
         binding: Name,
         iterable: Expr,
         #[serde(default, skip_serializing_if = "Option::is_none")]
@@ -66,6 +70,9 @@ pub enum Stmt {
     /// Runs `body` while `condition` holds, then `else_block` unless a
     /// `break` left the loop.
     While {
+        /// As the declared loop charge of [`Stmt::For`].
+        #[serde(default, skip_serializing_if = "is_zero")]
+        metered: u64,
         condition: Expr,
         body: Block,
         #[serde(default, skip_serializing_if = "Vec::is_empty")]
@@ -614,6 +621,7 @@ impl<'a> Node<'a> {
                     condition,
                     body,
                     else_block,
+                    ..
                 } => {
                     out.push(Node::Expr(condition));
                     out.push(Node::Block(body));
@@ -732,6 +740,7 @@ fn stmt_closures(stmt: &mut Stmt, visit: &mut dyn FnMut(&mut Closure)) {
             condition,
             body,
             else_block,
+            ..
         } => {
             expr_closures(condition, visit);
             each_closure_mut(body, visit);
@@ -855,4 +864,8 @@ impl From<Action> for Expr {
             args: args.into_iter().map(expr).collect::<Vec<_>>(),
         }))
     }
+}
+
+fn is_zero(units: &u64) -> bool {
+    *units == 0
 }

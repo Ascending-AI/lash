@@ -894,6 +894,9 @@ impl KernelMachine {
         ))?;
         self.live_tasks += 1;
         let handle = Value::Task(child);
+        // A task root is outside its spawner's synchronous library call.
+        // A native answer bills the same root formula as a body frame.
+        self.refresh_charging(child, exe)?;
         let started = match target {
             Target::Code(code, captures) => self
                 .push_frame(child, exe, Call::new(code, args, count).sharing(&captures))
@@ -907,12 +910,14 @@ impl KernelMachine {
                 let value = self.take(args);
                 self.end_task(child, Ok(value))?;
                 self.put(args, handle);
+                self.refresh_charging(task, exe)?;
                 return Ok(Flow::Done);
             }
             // What the new task raises before it has a frame is its error.
             Err(Interrupt::Raise(value)) => {
                 self.end_task(child, Err(*value))?;
                 self.put(args, handle);
+                self.refresh_charging(task, exe)?;
                 return Ok(Flow::Done);
             }
             Err(halt) => return Err(halt),

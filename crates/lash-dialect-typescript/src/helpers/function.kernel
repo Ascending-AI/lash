@@ -23,7 +23,7 @@ use ts.to_number
 function ts.function.call(this: Any, args: List(Any)) -> Any
 kernel 1
 errors "type_error", "RangeError"
-charge sum(8, deep(result))
+charge sum(8, deep(this), deep(args), deep(result))
 body {
   let args = invoke ts.pad(args, 1)
   let receiver = args[0]
@@ -36,7 +36,7 @@ body {
 function ts.function.apply(this: Any, args: List(Any)) -> Any
 kernel 1
 errors "type_error", "RangeError"
-charge sum(8, deep(result))
+charge sum(8, deep(this), deep(args), deep(result))
 body {
   let args = invoke ts.pad(args, 2)
   let receiver = args[0]
@@ -48,7 +48,7 @@ body {
       let length = invoke ts.get(values, "length")
       let length = invoke ts.to_number(length)
       let i = 0
-      while num.lt(i, length) {
+      while num.lt(i, length) metered 2 {
         let value = invoke ts.get(values, i)
         set passed[list.len(passed)] = value
         set i = num.add(i, 1)
@@ -63,7 +63,7 @@ body {
 function ts.function.bind(this: Any, args: List(Any)) -> Any
 kernel 1
 errors "type_error", "RangeError"
-charge sum(8, deep(result))
+charge sum(8, deep(this), deep(args), deep(result))
 body {
   let original = invoke ts.callable(this)
   if same(kind(original), "closure") {} else { throw error.new("type_error", "Bind target must be callable", null) }
@@ -90,7 +90,7 @@ let passed = invoke ts.spread(builtin_arg_0)
 function ts.function.toString(this: Any, args: List(Any)) -> Any
 kernel 1
 errors "type_error", "RangeError"
-charge sum(8, deep(result))
+charge sum(8, deep(this), deep(result))
 body {
   let target = invoke ts.callable(this)
   if same(kind(target), "closure") {} else { throw error.new("type_error", "Function receiver required", null) }

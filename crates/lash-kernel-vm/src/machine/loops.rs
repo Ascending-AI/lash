@@ -302,6 +302,17 @@ impl KernelMachine {
                 ..
             }) => {
                 let stmt = *stmt;
+                let Form::For { metered, .. } = &exe.stmt(stmt).form else {
+                    return Err(fault("a `for` loop is not at a `for`").into());
+                };
+                super::ops::charge_scheduled(
+                    &mut self.charged,
+                    self.bounds.charge,
+                    *metered,
+                    self.observer
+                        .as_deref()
+                        .and_then(|observer| observer.charges.as_ref()),
+                )?;
                 let raw = match cursor {
                     Cursor::List(list, position) => {
                         let element = self.heap.list_get(*list, *position as u64)?;
@@ -352,9 +363,17 @@ impl KernelMachine {
                 {
                     self.ran[*ordinal as usize] += 1;
                 }
-                let Form::While { test, .. } = &running.stmt.form else {
+                let Form::While { test, metered, .. } = &running.stmt.form else {
                     return Err(fault("a `while` loop is not at a `while`").into());
                 };
+                super::ops::charge_scheduled(
+                    &mut self.charged,
+                    self.bounds.charge,
+                    *metered,
+                    self.observer
+                        .as_deref()
+                        .and_then(|observer| observer.charges.as_ref()),
+                )?;
                 match self.run(host, &running, test.start as usize)? {
                     Ran::Tested(value) => self.tested(task, value),
                     // The condition stands at a call made inside it.

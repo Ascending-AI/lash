@@ -483,7 +483,7 @@ body {
 function ts.to_string(value: Any) -> Text
 kernel 1
 errors "type_error"
-charge 8
+charge sum(8, deep(value), size(result))
 native
 body {
   if same(kind(value), "text") { return value }
@@ -525,7 +525,7 @@ body {
 function ts.to_property_key(key: Any) -> Text
 kernel 1
 errors "type_error"
-charge 8
+charge sum(8, deep(key), size(result))
 native
 body {
   if same(kind(key), "text") { return key }
@@ -1071,7 +1071,7 @@ body {
   if same(k, "brand:ts.arguments") {
     let items = []
     let index = 0.0
-    while true {
+    while true metered 2 {
       let property = target.properties.length
       let numeric = invoke ts.to_number(property)
       if num.is_nan(numeric) { break }
@@ -1104,7 +1104,7 @@ body {
       let iterator_items = []
       let next = target.next
       set next = invoke ts.callable(next)
-      while true {
+      while true metered 2 {
         let array_arg_1 = []
         let step = apply next(target, array_arg_1)
         if step.done { break }
@@ -1324,8 +1324,8 @@ body {
       if eq(num.floor(length), length) {} else { throw error.new("RangeError", "Invalid array length", null) }
       if num.lt(length, 0) { throw error.new("RangeError", "Invalid array length", null) }
       if num.lt(4294967295.0, length) { throw error.new("RangeError", "Invalid array length", null) }
-      while num.lt(length, list.len(target)) { remove target[num.sub(list.len(target), 1)] }
-      while num.lt(list.len(target), length) { set target[list.len(target)] = () }
+      while num.lt(length, list.len(target)) metered 2 { remove target[num.sub(list.len(target), 1)] }
+      while num.lt(list.len(target), length) metered 2 { set target[list.len(target)] = () }
       return value
     }
     set position = invoke ts.list_index(name, 4294967295.0)
@@ -1333,7 +1333,7 @@ body {
     if num.lt(position, 0) {
       throw error.new("TS_ARRAY_NON_INDEX_PROPERTY_UNSUPPORTED", "arrays do not carry named properties", null)
     }
-    while num.lt(list.len(target), position) { set target[list.len(target)] = () }
+    while num.lt(list.len(target), position) metered 2 { set target[list.len(target)] = () }
     set target[position] = value
     return value
   }
@@ -1573,7 +1573,7 @@ body {
 # The keys `for...in` visits, as a new list.
 function ts.keys(target: Any) -> List(Text)
 kernel 1
-charge sum(4, size(target))
+charge sum(4, product(size(target), size(target)))
 body {
   let k = kind(target)
   let hidden_fields = set{}
@@ -1652,7 +1652,7 @@ body {
 # Copies the own properties of `source` onto `target`: an object spread.
 function ts.assign(target: Any, source: Any) -> Any
 kernel 1
-charge sum(4, size(source))
+charge sum(4, product(size(source), size(source)))
 body {
   let keys = invoke ts.keys(source)
   for key in keys {
@@ -1667,7 +1667,7 @@ body {
 function ts.object_rest(source: Any, taken: List(Text)) -> Any
 kernel 1
 errors "type_error"
-charge sum(4, size(source), size(taken))
+charge sum(4, product(size(source), size(source)), size(taken))
 body {
   do invoke ts.require_object_coercible(source)
   let skip = set{}
@@ -1723,7 +1723,7 @@ body {
     }
   }
   let pending = [copied]
-  while num.lt(0, list.len(pending)) {
+  while num.lt(0, list.len(pending)) metered 2 {
     let last = num.sub(list.len(pending), 1)
     let item = pending[last]
     remove pending[last]

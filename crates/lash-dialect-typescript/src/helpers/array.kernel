@@ -160,7 +160,7 @@ body {
 function ts.array.integer(value: Any) -> Number
 kernel 1
 errors "type_error", "RangeError"
-charge 8
+charge sum(8, deep(value))
 body {
   let number = invoke ts.to_number(value)
   if num.is_nan(number) { return 0.0 }
@@ -271,13 +271,13 @@ body {
 function ts.array.dense(this: Any) -> List(Any)
 kernel 1
 errors "type_error", "RangeError"
-charge 8
+charge sum(8, size(this), size(result))
 body {
   let length = invoke ts.array.length(this)
   if num.lt(4294967295.0, length) { throw error.new("RangeError", "Invalid array length", null) }
   let output = []
   let index = 0.0
-  while num.lt(index, length) {
+  while num.lt(index, length) metered 2 {
     let value = invoke ts.get(this, index)
     set output[list.len(output)] = value
     set index = num.add(index, 1)
@@ -288,7 +288,7 @@ body {
 function ts.array.spread(this: Any) -> List(Any)
 kernel 1
 errors "type_error", "RangeError"
-charge 8
+charge sum(8, size(this), size(result))
 body {
   let items = invoke ts.iterate(this)
   let output = invoke ts.array.dense(items)
@@ -298,7 +298,7 @@ body {
 function ts.array.construct(this: Any, args: List(Any)) -> Any
 kernel 1
 errors "type_error", "RangeError"
-charge 8
+charge sum(8, deep(args), size(result))
 body {
   if same(list.len(args), 1) {
     let value = args[0]
@@ -317,7 +317,7 @@ body {
 function ts.array.of(this: Any, args: List(Any)) -> Any
 kernel 1
 errors "type_error", "RangeError"
-charge 8
+charge sum(8, deep(args), size(result))
 body {
   return list.copy(args)
 }
@@ -349,7 +349,7 @@ body {
 function ts.array.push(this: Any, args: List(Any)) -> Any
 kernel 1
 errors "type_error", "RangeError"
-charge 8
+charge sum(8, size(this), deep(args), size(result))
 body {
   let length = invoke ts.array.length(this)
   if num.lt(9007199254740991.0, num.add(length, list.len(args))) {
@@ -383,7 +383,7 @@ body {
 function ts.array.slice_generic(this: Any, args: List(Any)) -> Any
 kernel 1
 errors "type_error", "RangeError"
-charge 8
+charge sum(8, size(this), deep(args), size(result))
 body {
   let length = invoke ts.array.length(this)
   let input = invoke ts.array.argument(args, 0)
@@ -396,11 +396,11 @@ body {
     # Bound coercion can shrink the source after its length was captured.
     # The removed positions still contribute holes to the result's length.
     let count = num.max(num.sub(end, start), 0)
-    while num.lt(list.len(output), count) { set output[list.len(output)] = () }
+    while num.lt(list.len(output), count) metered 2 { set output[list.len(output)] = () }
     return output
   }
   let output = []
-  while num.lt(start, end) {
+  while num.lt(start, end) metered 2 {
     let present = invoke ts.has_own(this, start)
     let value = ()
     if present { set value = invoke ts.get(this, start) }
@@ -414,7 +414,7 @@ body {
 function ts.array.slice(this: Any, args: List(Any)) -> Any
 kernel 1
 errors "type_error", "RangeError"
-charge 8
+charge sum(8, size(this), deep(args), size(result))
 body {
   if same(kind(this), "list") {
     let lower = absent
@@ -451,7 +451,7 @@ body {
 function ts.array.concat(this: Any, args: List(Any)) -> Any
 kernel 1
 errors "type_error", "RangeError"
-charge 8
+charge sum(8, deep(this), deep(args), size(result))
 body {
   do invoke ts.require_object_coercible(this)
   let sources = [this]
@@ -477,7 +477,7 @@ body {
 function ts.array.fill(this: Any, args: List(Any)) -> Any
 kernel 1
 errors "type_error", "RangeError"
-charge 8
+charge sum(8, size(this), deep(args), size(result))
 body {
   let length = invoke ts.array.length(this)
   let value = invoke ts.array.argument(args, 0)
@@ -485,7 +485,7 @@ body {
   let start = invoke ts.array.bound(input, length, 0.0)
   let stop = invoke ts.array.argument(args, 2)
   let end = invoke ts.array.bound(stop, length, length)
-  while num.lt(start, end) {
+  while num.lt(start, end) metered 2 {
     do invoke ts.array.set(this, start, value)
     set start = num.add(start, 1)
   }
@@ -495,7 +495,7 @@ body {
 function ts.array.copyWithin(this: Any, args: List(Any)) -> Any
 kernel 1
 errors "type_error", "RangeError"
-charge 8
+charge sum(8, size(this), deep(args), size(result))
 body {
   let length = invoke ts.array.length(this)
   let target_arg = invoke ts.array.argument(args, 0)
@@ -513,7 +513,7 @@ body {
       set target = num.sub(num.add(target, count), 1)
     }
   }
-  while num.lt(0, count) {
+  while num.lt(0, count) metered 2 {
     let present = invoke ts.has_own(this, start)
     if present {
       let value = invoke ts.get(this, start)
@@ -542,7 +542,7 @@ body {
 
 function ts.array.searchable(this: Any, args: List(Any)) -> Bool
 kernel 1
-charge 1
+charge sum(1, size(this))
 body {
   if same(kind(this), "list") {} else { return false }
   let search = invoke ts.array.argument(args, 0)
@@ -568,7 +568,7 @@ body {
 # the native only searches a range with kernel equality.
 function ts.array.search(this: List(Any), args: List(Any), reverse: Bool, includes: Bool) -> Any
 kernel 1
-charge 1
+charge sum(1, size(this), deep(args))
 body {
   let length = num.to_float(list.len(this))
   let search = invoke ts.array.argument(args, 0)
@@ -599,7 +599,7 @@ body {
 function ts.array.generic_indexOf(this: Any, args: List(Any)) -> Any
 kernel 1
 errors "type_error", "RangeError"
-charge 8
+charge sum(8, size(this), deep(args), size(result))
 body {
   let length = invoke ts.array.length(this)
   if eq(length, 0) { return -1.0 }
@@ -609,7 +609,7 @@ body {
   let index = num.max(from, 0)
   if num.lt(from, 0) { set index = num.max(num.add(length, from), 0) }
   let dense = same(kind(this), "list")
-  while num.lt(index, length) {
+  while num.lt(index, length) metered 2 {
     if num.lt(index, 0) { break }
     let present = false
     let value = absent
@@ -637,7 +637,7 @@ body {
 function ts.array.indexOf(this: Any, args: List(Any)) -> Any
 kernel 1
 errors "type_error", "RangeError"
-charge 8
+charge sum(8, size(this), deep(args), size(result))
 body {
   let admitted = invoke ts.array.searchable(this, args)
   if admitted {
@@ -651,7 +651,7 @@ body {
 function ts.array.generic_lastIndexOf(this: Any, args: List(Any)) -> Any
 kernel 1
 errors "type_error", "RangeError"
-charge 8
+charge sum(8, size(this), deep(args), size(result))
 body {
   let length = invoke ts.array.length(this)
   if eq(length, 0) { return -1.0 }
@@ -661,7 +661,7 @@ body {
   set from = invoke ts.array.integer(array_arg_1) }
   let index = num.min(from, num.sub(length, 1))
   if num.lt(from, 0) { set index = num.add(length, from) }
-  while num.lt(index, length) {
+  while num.lt(index, length) metered 2 {
     if num.lt(index, 0) { break }
     let present = invoke ts.has_own(this, index)
     if present {
@@ -677,7 +677,7 @@ body {
 function ts.array.lastIndexOf(this: Any, args: List(Any)) -> Any
 kernel 1
 errors "type_error", "RangeError"
-charge 8
+charge sum(8, size(this), deep(args), size(result))
 body {
   let admitted = invoke ts.array.searchable(this, args)
   if admitted {
@@ -691,7 +691,7 @@ body {
 function ts.array.generic_includes(this: Any, args: List(Any)) -> Any
 kernel 1
 errors "type_error", "RangeError"
-charge 8
+charge sum(8, size(this), deep(args), size(result))
 body {
   let length = invoke ts.array.length(this)
   if eq(length, 0) { return false }
@@ -700,7 +700,7 @@ body {
   let from = invoke ts.array.integer(input)
   let index = num.max(from, 0)
   if num.lt(from, 0) { set index = num.max(num.add(length, from), 0) }
-  while num.lt(index, length) {
+  while num.lt(index, length) metered 2 {
     if num.lt(index, 0) { break }
     let present = invoke ts.has_own(this, index)
     set present = true
@@ -724,7 +724,7 @@ body {
 function ts.array.includes(this: Any, args: List(Any)) -> Any
 kernel 1
 errors "type_error", "RangeError"
-charge 8
+charge sum(8, size(this), deep(args), size(result))
 body {
   let admitted = invoke ts.array.searchable(this, args)
   if admitted {
@@ -738,7 +738,7 @@ body {
 function ts.array.map(this: Any, args: List(Any)) -> Any
 kernel 1
 errors "type_error", "RangeError"
-charge 8
+charge sum(8, size(this), deep(args), size(result))
 body {
   let length = invoke ts.array.length(this)
   let input = invoke ts.array.argument(args, 0)
@@ -752,7 +752,7 @@ body {
     # callback's answer, or a hole where a callback deleted the element.
     # The loop reads the source live and stops at the length taken first.
     let output = list.copy(this)
-    for value in this {
+    for value in this metered 2 {
       if same(index, length) { break }
       if same(value, ()) { set output[index] = () } else {
         set passed[0] = value
@@ -762,7 +762,7 @@ body {
       set index = num.add(index, 1.0)
     }
     # A callback shortened the source: the slots past its end are holes.
-    while num.lt(index, length) {
+    while num.lt(index, length) metered 2 {
       set output[index] = ()
       set index = num.add(index, 1.0)
     }
@@ -770,7 +770,7 @@ body {
   }
   let output = []
   do invoke ts.set(output, "length", length)
-  while num.lt(index, length) {
+  while num.lt(index, length) metered 2 {
     let present = invoke ts.has_own(this, index)
     if present {
       let value = invoke ts.get(this, index)
@@ -791,7 +791,7 @@ body {
 function ts.array.filter(this: Any, args: List(Any)) -> Any
 kernel 1
 errors "type_error", "RangeError"
-charge 8
+charge sum(8, size(this), deep(args), size(result))
 body {
   let length = invoke ts.array.length(this)
   let input = invoke ts.array.argument(args, 0)
@@ -801,7 +801,7 @@ body {
   let output = []
   let index = 0.0
   if same(kind(this), "list") {
-    for value in this {
+    for value in this metered 2 {
       if same(index, length) { break }
       if same(value, ()) {} else {
         set passed[0] = value
@@ -817,7 +817,7 @@ body {
       set index = num.add(index, 1.0)
     }
   }
-  while num.lt(index, length) {
+  while num.lt(index, length) metered 2 {
     let present = invoke ts.has_own(this, index)
     if present {
       let value = invoke ts.get(this, index)
@@ -835,7 +835,7 @@ body {
 function ts.array.forEach(this: Any, args: List(Any)) -> Any
 kernel 1
 errors "type_error", "RangeError"
-charge 8
+charge sum(8, size(this), deep(args), size(result))
 body {
   let length = invoke ts.array.length(this)
   let input = invoke ts.array.argument(args, 0)
@@ -844,7 +844,7 @@ body {
   let passed = [absent, 0.0, this]
   let index = 0.0
   if same(kind(this), "list") {
-    for value in this {
+    for value in this metered 2 {
       if same(index, length) { break }
       if same(value, ()) {} else {
         set passed[0] = value
@@ -854,7 +854,7 @@ body {
       set index = num.add(index, 1.0)
     }
   }
-  while num.lt(index, length) {
+  while num.lt(index, length) metered 2 {
     let present = invoke ts.has_own(this, index)
     if present {
       let value = invoke ts.get(this, index)
@@ -870,7 +870,7 @@ body {
 function ts.array.every(this: Any, args: List(Any)) -> Any
 kernel 1
 errors "type_error", "RangeError"
-charge 8
+charge sum(8, size(this), deep(args), size(result))
 body {
   let length = invoke ts.array.length(this)
   let input = invoke ts.array.argument(args, 0)
@@ -879,7 +879,7 @@ body {
   let passed = [absent, 0.0, this]
   let index = 0.0
   if same(kind(this), "list") {
-    for value in this {
+    for value in this metered 2 {
       if same(index, length) { break }
       if same(value, ()) {} else {
         set passed[0] = value
@@ -894,7 +894,7 @@ body {
       set index = num.add(index, 1.0)
     }
   }
-  while num.lt(index, length) {
+  while num.lt(index, length) metered 2 {
     let present = invoke ts.has_own(this, index)
     if present {
       let value = invoke ts.get(this, index)
@@ -912,7 +912,7 @@ body {
 function ts.array.some(this: Any, args: List(Any)) -> Any
 kernel 1
 errors "type_error", "RangeError"
-charge 8
+charge sum(8, size(this), deep(args), size(result))
 body {
   let length = invoke ts.array.length(this)
   let input = invoke ts.array.argument(args, 0)
@@ -921,7 +921,7 @@ body {
   let passed = [absent, 0.0, this]
   let index = 0.0
   if same(kind(this), "list") {
-    for value in this {
+    for value in this metered 2 {
       if same(index, length) { break }
       if same(value, ()) {} else {
         set passed[0] = value
@@ -936,7 +936,7 @@ body {
       set index = num.add(index, 1.0)
     }
   }
-  while num.lt(index, length) {
+  while num.lt(index, length) metered 2 {
     let present = invoke ts.has_own(this, index)
     if present {
       let value = invoke ts.get(this, index)
@@ -958,7 +958,7 @@ body {
 function ts.array.find(this: Any, args: List(Any)) -> Any
 kernel 1
 errors "type_error", "RangeError"
-charge 8
+charge sum(8, size(this), deep(args), size(result))
 body {
   let length = invoke ts.array.length(this)
   let input = invoke ts.array.argument(args, 0)
@@ -967,7 +967,7 @@ body {
   let passed = [absent, 0.0, this]
   let index = 0.0
   if same(kind(this), "list") {
-    for value in this {
+    for value in this metered 2 {
       if same(index, length) { break }
       if same(value, ()) { set value = absent }
       set passed[0] = value
@@ -981,7 +981,7 @@ body {
       set index = num.add(index, 1.0)
     }
   }
-  while num.lt(index, length) {
+  while num.lt(index, length) metered 2 {
     do invoke ts.has_own(this, index)
     let value = invoke ts.get(this, index)
     set passed[0] = value
@@ -997,7 +997,7 @@ body {
 function ts.array.findIndex(this: Any, args: List(Any)) -> Any
 kernel 1
 errors "type_error", "RangeError"
-charge 8
+charge sum(8, size(this), deep(args), size(result))
 body {
   let length = invoke ts.array.length(this)
   let input = invoke ts.array.argument(args, 0)
@@ -1006,7 +1006,7 @@ body {
   let passed = [absent, 0.0, this]
   let index = 0.0
   if same(kind(this), "list") {
-    for value in this {
+    for value in this metered 2 {
       if same(index, length) { break }
       if same(value, ()) { set value = absent }
       set passed[0] = value
@@ -1020,7 +1020,7 @@ body {
       set index = num.add(index, 1.0)
     }
   }
-  while num.lt(index, length) {
+  while num.lt(index, length) metered 2 {
     do invoke ts.has_own(this, index)
     let value = invoke ts.get(this, index)
     set passed[0] = value
@@ -1040,7 +1040,7 @@ body {
 function ts.array.findLast(this: Any, args: List(Any)) -> Any
 kernel 1
 errors "type_error", "RangeError"
-charge 8
+charge sum(8, size(this), deep(args), size(result))
 body {
   let length = invoke ts.array.length(this)
   let input = invoke ts.array.argument(args, 0)
@@ -1049,7 +1049,7 @@ body {
   let passed = [absent, 0.0, this]
   let index = num.sub(length, 1.0)
   let actual_list = same(kind(this), "list")
-  while num.le(0, index) {
+  while num.le(0, index) metered 2 {
     let value = absent
     if actual_list {
       if num.lt(index, list.len(this)) {
@@ -1076,7 +1076,7 @@ body {
 function ts.array.findLastIndex(this: Any, args: List(Any)) -> Any
 kernel 1
 errors "type_error", "RangeError"
-charge 8
+charge sum(8, size(this), deep(args), size(result))
 body {
   let length = invoke ts.array.length(this)
   let input = invoke ts.array.argument(args, 0)
@@ -1085,7 +1085,7 @@ body {
   let passed = [absent, 0.0, this]
   let index = num.sub(length, 1.0)
   let actual_list = same(kind(this), "list")
-  while num.le(0, index) {
+  while num.le(0, index) metered 2 {
     let value = absent
     if actual_list {
       if num.lt(index, list.len(this)) {
@@ -1112,7 +1112,7 @@ body {
 function ts.array.reduce(this: Any, args: List(Any)) -> Any
 kernel 1
 errors "type_error", "RangeError"
-charge 8
+charge sum(8, size(this), deep(args), size(result))
 body {
   let length = invoke ts.array.length(this)
   let input = invoke ts.array.argument(args, 0)
@@ -1122,7 +1122,7 @@ body {
   let initialised = num.lt(1, list.len(args))
   let index = 0.0
   if same(kind(this), "list") {
-    for value in this {
+    for value in this metered 2 {
       if same(index, length) { break }
       if same(value, ()) {} else {
         if initialised {
@@ -1138,7 +1138,7 @@ body {
       set index = num.add(index, 1.0)
     }
   }
-  while num.lt(index, length) {
+  while num.lt(index, length) metered 2 {
     let present = invoke ts.has_own(this, index)
     if present {
       let value = invoke ts.get(this, index)
@@ -1161,7 +1161,7 @@ body {
 function ts.array.reduceRight(this: Any, args: List(Any)) -> Any
 kernel 1
 errors "type_error", "RangeError"
-charge 8
+charge sum(8, size(this), deep(args), size(result))
 body {
   let length = invoke ts.array.length(this)
   let input = invoke ts.array.argument(args, 0)
@@ -1171,7 +1171,7 @@ body {
   let initialised = num.lt(1, list.len(args))
   let index = num.sub(length, 1.0)
   let actual_list = same(kind(this), "list")
-  while num.le(0, index) {
+  while num.le(0, index) metered 2 {
     let present = false
     let value = absent
     if actual_list {
@@ -1203,7 +1203,7 @@ body {
 function ts.array.generic_join(this: Any, args: List(Any)) -> Any
 kernel 1
 errors "type_error", "RangeError"
-charge 8
+charge sum(8, size(this), deep(args), size(result))
 body {
   let length = invoke ts.array.length(this)
   let input = invoke ts.array.argument(args, 0)
@@ -1211,7 +1211,7 @@ body {
   if same(input, absent) {} else { set separator = invoke ts.to_string(input) }
   let pieces = []
   let index = 0.0
-  while num.lt(index, length) {
+  while num.lt(index, length) metered 2 {
     let value = invoke ts.get(this, index)
     let piece = ""
     let nullish = invoke ts.is_nullish(value)
@@ -1225,7 +1225,7 @@ body {
 function ts.array.join(this: Any, args: List(Any)) -> Any
 kernel 1
 errors "type_error", "RangeError"
-charge 8
+charge sum(8, size(this), deep(args), size(result))
 body {
   if same(kind(this), "list") {
     let input = invoke ts.array.argument(args, 0)
@@ -1247,7 +1247,7 @@ body {
 function ts.array.toString(this: Any, args: List(Any)) -> Any
 kernel 1
 errors "type_error"
-charge 8
+charge sum(8, size(this), size(result))
 body {
   do invoke ts.require_object_coercible(this)
   let receiver = invoke ts.receiver(this)
@@ -1287,11 +1287,11 @@ body {
 function ts.array.reverse(this: Any, args: List(Any)) -> Any
 kernel 1
 errors "type_error", "RangeError"
-charge 8
+charge sum(8, size(this), size(result))
 body {
   let length = invoke ts.array.length(this)
   let lower = 0.0
-  while num.lt(lower, num.floor(num.div(length, 2))) {
+  while num.lt(lower, num.floor(num.div(length, 2))) metered 2 {
     let upper = num.sub(num.sub(length, lower), 1)
     let a_present = invoke ts.has_own(this, lower)
     let b_present = invoke ts.has_own(this, upper)
@@ -1307,7 +1307,7 @@ body {
 function ts.array.toReversed(this: Any, args: List(Any)) -> Any
 kernel 1
 errors "type_error", "RangeError"
-charge 8
+charge sum(8, size(this), size(result))
 body {
   let output = invoke ts.array.dense(this)
   let array_arg_4 = []
@@ -1318,7 +1318,7 @@ body {
 function ts.array.splice(this: Any, args: List(Any)) -> Any
 kernel 1
 errors "type_error", "RangeError"
-charge 8
+charge sum(8, size(this), deep(args), size(result))
 body {
   let length = invoke ts.array.length(this)
   let input = invoke ts.array.argument(args, 0)
@@ -1338,7 +1338,7 @@ body {
   let deleted = invoke ts.array.slice(this, array_arg_6)
   if num.lt(inserted_count, removed_count) {
     let index = start
-    while num.lt(index, num.sub(length, removed_count)) {
+    while num.lt(index, num.sub(length, removed_count)) metered 2 {
       let from = num.add(index, removed_count)
       let to = num.add(index, inserted_count)
       let present = invoke ts.has_own(this, from)
@@ -1349,14 +1349,14 @@ body {
       set index = num.add(index, 1)
     }
     let tail = length
-    while num.lt(new_length, tail) {
+    while num.lt(new_length, tail) metered 2 {
       set tail = num.sub(tail, 1)
       do invoke ts.array.remove(this, tail)
     }
   } else {
     if num.lt(removed_count, inserted_count) {
     let index = num.sub(length, removed_count)
-    while num.lt(start, index) {
+    while num.lt(start, index) metered 2 {
       set index = num.sub(index, 1)
       let from = num.add(index, removed_count)
       let to = num.add(index, inserted_count)
@@ -1369,7 +1369,7 @@ body {
     }
   }
   let index = 0.0
-  while num.lt(index, inserted_count) {
+  while num.lt(index, inserted_count) metered 2 {
     let value = args[num.add(index, 2)]
     let array_arg_7 = num.add(start, index)
     do invoke ts.array.set(this, array_arg_7, value)
@@ -1382,7 +1382,7 @@ body {
 function ts.array.shift(this: Any, args: List(Any)) -> Any
 kernel 1
 errors "type_error", "RangeError"
-charge 8
+charge sum(8, size(this), size(result))
 body {
   let length = invoke ts.array.length(this)
   if eq(length, 0) {
@@ -1398,10 +1398,10 @@ body {
 function ts.array.unshift(this: Any, args: List(Any)) -> Any
 kernel 1
 errors "type_error", "RangeError"
-charge 8
+charge sum(8, size(this), deep(args), size(result))
 body {
   let passed = [0.0, 0.0]
-  for value in args { set passed[list.len(passed)] = value }
+  for value in args metered 2 { set passed[list.len(passed)] = value }
   do invoke ts.array.splice(this, passed)
   let length = invoke ts.array.length(this)
   return length
@@ -1410,7 +1410,7 @@ body {
 function ts.array.toSpliced(this: Any, args: List(Any)) -> Any
 kernel 1
 errors "type_error", "RangeError"
-charge 8
+charge sum(8, size(this), deep(args), size(result))
 body {
   let length = invoke ts.array.length(this)
   let input = invoke ts.array.argument(args, 0)
@@ -1429,18 +1429,18 @@ body {
   if num.lt(4294967295.0, new_length) { throw error.new("RangeError", "Invalid array length", null) }
   let output = []
   let index = 0.0
-  while num.lt(index, start) {
+  while num.lt(index, start) metered 2 {
     let value = invoke ts.get(this, index)
     set output[list.len(output)] = value
     set index = num.add(index, 1)
   }
   let position = 2
-  while num.lt(position, list.len(args)) {
+  while num.lt(position, list.len(args)) metered 2 {
     set output[list.len(output)] = args[position]
     set position = num.add(position, 1)
   }
   let from = num.add(start, skipped)
-  while num.lt(from, length) {
+  while num.lt(from, length) metered 2 {
     let value = invoke ts.get(this, from)
     set output[list.len(output)] = value
     set from = num.add(from, 1)
@@ -1451,7 +1451,7 @@ body {
 function ts.array.with(this: Any, args: List(Any)) -> Any
 kernel 1
 errors "type_error", "RangeError"
-charge 8
+charge sum(8, size(this), deep(args), size(result))
 body {
   let length = invoke ts.array.length(this)
   let input = invoke ts.array.argument(args, 0)
@@ -1463,7 +1463,7 @@ body {
   let value = invoke ts.array.argument(args, 1)
   let output = []
   let position = 0.0
-  while num.lt(position, length) {
+  while num.lt(position, length) metered 2 {
     let item = value
     if eq(position, index) {} else { set item = invoke ts.get(this, position) }
     set output[list.len(output)] = item
@@ -1475,7 +1475,7 @@ body {
 function ts.array.sort(this: Any, args: List(Any)) -> Any
 kernel 1
 errors "type_error", "RangeError"
-charge 8
+charge sum(8, size(this), deep(args), size(result))
 body {
   let length = invoke ts.array.length(this)
   let callback = invoke ts.array.argument(args, 0)
@@ -1483,7 +1483,7 @@ body {
   let values = []
   let undefined_count = 0
   let index = 0.0
-  while num.lt(index, length) {
+  while num.lt(index, length) metered 2 {
     let present = invoke ts.has_own(this, index)
     if present {
       let value = invoke ts.get(this, index)
@@ -1506,16 +1506,16 @@ body {
   }
   do invoke list.sort(values, compare)
   set index = 0.0
-  for value in values {
+  for value in values metered 2 {
     do invoke ts.array.set(this, index, value)
     set index = num.add(index, 1)
   }
-  while num.lt(0, undefined_count) {
+  while num.lt(0, undefined_count) metered 2 {
     do invoke ts.array.set(this, index, absent)
     set index = num.add(index, 1)
     set undefined_count = num.sub(undefined_count, 1)
   }
-  while num.lt(index, length) {
+  while num.lt(index, length) metered 2 {
     do invoke ts.array.remove(this, index)
     set index = num.add(index, 1)
   }
@@ -1525,7 +1525,7 @@ body {
 function ts.array.toSorted(this: Any, args: List(Any)) -> Any
 kernel 1
 errors "type_error", "RangeError"
-charge 8
+charge sum(8, size(this), deep(args), size(result))
 body {
   let output = invoke ts.array.dense(this)
   do invoke ts.array.sort(output, args)
@@ -1535,7 +1535,7 @@ body {
 function ts.array.flatten(source: Any, depth: Number, output: List(Any)) -> List(Any)
 kernel 1
 errors "type_error", "RangeError"
-charge 8
+charge sum(8, size(source), size(depth), size(output), size(result))
 body {
   let flatten = absent
   set flatten = fn(source, depth) {
@@ -1562,7 +1562,7 @@ body {
 function ts.array.flat(this: Any, args: List(Any)) -> Any
 kernel 1
 errors "type_error", "RangeError"
-charge 8
+charge sum(8, size(this), deep(args), size(result))
 body {
   do invoke ts.require_object_coercible(this)
   let input = invoke ts.array.argument(args, 0)
@@ -1576,7 +1576,7 @@ body {
 function ts.array.flatMap(this: Any, args: List(Any)) -> Any
 kernel 1
 errors "type_error", "RangeError"
-charge 8
+charge sum(8, size(this), deep(args), size(result))
 body {
   let length = invoke ts.array.length(this)
   let input = invoke ts.array.argument(args, 0)
@@ -1584,7 +1584,7 @@ body {
   let context = invoke ts.array.argument(args, 1)
   let output = []
   let index = 0.0
-  while num.lt(index, length) {
+  while num.lt(index, length) metered 2 {
     let present = invoke ts.has_own(this, index)
     if present {
       let value = invoke ts.get(this, index)
@@ -1698,7 +1698,7 @@ body {
 function ts.for_of.open(subject: Any) -> Any
 kernel 1
 errors "type_error"
-charge 8
+charge sum(8, size(subject), size(result))
 body {
   let k = invoke ts.receiver(subject)
   for walked in ["list", "map", "set", "text"] {
@@ -1716,7 +1716,7 @@ body {
 function ts.for_of.next(driver: Any) -> Any
 kernel 1
 errors "type_error"
-charge 8
+charge sum(8, size(driver), size(result))
 body {
   let iterator = driver.iterator
   let next = driver.next
@@ -1757,7 +1757,7 @@ body {
 function ts.array.from(this: Any, args: List(Any)) -> Any
 kernel 1
 errors "type_error", "RangeError"
-charge 8
+charge sum(8, deep(args), size(result))
 body {
   let source = invoke ts.array.argument(args, 0)
   do invoke ts.require_object_coercible(source)
@@ -1775,7 +1775,7 @@ body {
   let keyed = same(k, "map")
   if same(k, "set") { set keyed = true }
   if keyed {
-    for key in source {
+    for key in source metered 2 {
       let value = invoke ts.map.value(key)
       if same(k, "map") { set value = [value, source[key]] }
       if mapped {
@@ -1792,7 +1792,7 @@ body {
     let next = iterator.next
     set next = invoke ts.callable(next)
     let none = []
-    while true {
+    while true metered 2 {
       let step = apply next(iterator, none)
       if step.done { break }
       let value = step.value
@@ -1805,7 +1805,7 @@ body {
     }
   } else {
     let length = invoke ts.array.length(source)
-    while num.lt(index, length) {
+    while num.lt(index, length) metered 2 {
       let value = invoke ts.get(source, index)
       if mapped {
         let passed = [value, num.to_float(index)]

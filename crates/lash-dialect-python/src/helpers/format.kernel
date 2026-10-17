@@ -36,11 +36,11 @@ use py.format.exponent
 # Separators between radix groups of `digits`, from the right.
 function py.format.group(digits: Text, separator: Text, width: Int) -> Text
 kernel 1
-charge sum(4, size(digits))
+charge sum(4, product(size(digits), size(digits)))
 body {
   let grouped = ""
   let rest = digits
-  while lt(width, text.len(rest)) {
+  while lt(width, text.len(rest)) metered 2 {
     let cut = sub(text.len(rest), width)
     set grouped = text.join([separator, text.slice(rest, cut, text.len(rest)), grouped], "")
     set rest = text.slice(rest, 0, cut)

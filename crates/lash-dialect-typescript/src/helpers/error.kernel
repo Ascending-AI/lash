@@ -33,7 +33,7 @@ use ts.to_string
 function ts.error.name(value: Any) -> Text
 kernel 1
 errors "type_error", "RangeError"
-charge sum(8, deep(result))
+charge sum(8, deep(value), deep(result))
 body {
   if same(kind(value), "record") {
     let name = invoke ts.get(value, "name")
@@ -51,7 +51,7 @@ body {
 function ts.error.construct(name: Text, args: List(Any), aggregate: Bool) -> Any
 kernel 1
 errors "type_error", "RangeError"
-charge sum(8, deep(result))
+charge sum(8, size(name), deep(args), size(aggregate), deep(result))
 body {
   let args = invoke ts.pad(args, 3)
   let message = args[0]
@@ -82,7 +82,7 @@ set error_items = invoke ts.iterate(builtin_arg_0)
 function ts.error.new_Error(this: Any, args: List(Any)) -> Any
 kernel 1
 errors "type_error", "RangeError"
-charge sum(8, deep(result))
+charge sum(8, deep(args), deep(result))
 body {
   let output = invoke ts.error.construct("Error", args, false)
   return output
@@ -100,7 +100,7 @@ body {
 function ts.error.new_TypeError(this: Any, args: List(Any)) -> Any
 kernel 1
 errors "type_error", "RangeError"
-charge sum(8, deep(result))
+charge sum(8, deep(args), deep(result))
 body {
   let output = invoke ts.error.construct("TypeError", args, false)
   return output
@@ -109,7 +109,7 @@ body {
 function ts.error.is_TypeError(value: Any) -> Bool
 kernel 1
 errors "type_error", "RangeError"
-charge sum(8, deep(result))
+charge sum(8, deep(value), deep(result))
 body {
   if same(kind(value), "error") {} else { return false }
   if same(kind(value.data), "record") {
@@ -122,7 +122,7 @@ body {
 function ts.error.new_RangeError(this: Any, args: List(Any)) -> Any
 kernel 1
 errors "type_error", "RangeError"
-charge sum(8, deep(result))
+charge sum(8, deep(args), deep(result))
 body {
   let output = invoke ts.error.construct("RangeError", args, false)
   return output
@@ -131,7 +131,7 @@ body {
 function ts.error.is_RangeError(value: Any) -> Bool
 kernel 1
 errors "type_error", "RangeError"
-charge sum(8, deep(result))
+charge sum(8, deep(value), deep(result))
 body {
   if same(kind(value), "error") {} else { return false }
   if same(kind(value.data), "record") {
@@ -144,7 +144,7 @@ body {
 function ts.error.new_SyntaxError(this: Any, args: List(Any)) -> Any
 kernel 1
 errors "type_error", "RangeError"
-charge sum(8, deep(result))
+charge sum(8, deep(args), deep(result))
 body {
   let output = invoke ts.error.construct("SyntaxError", args, false)
   return output
@@ -153,7 +153,7 @@ body {
 function ts.error.is_SyntaxError(value: Any) -> Bool
 kernel 1
 errors "type_error", "RangeError"
-charge sum(8, deep(result))
+charge sum(8, deep(value), deep(result))
 body {
   if same(kind(value), "error") {} else { return false }
   if same(kind(value.data), "record") {
@@ -166,7 +166,7 @@ body {
 function ts.error.new_ReferenceError(this: Any, args: List(Any)) -> Any
 kernel 1
 errors "type_error", "RangeError"
-charge sum(8, deep(result))
+charge sum(8, deep(args), deep(result))
 body {
   let output = invoke ts.error.construct("ReferenceError", args, false)
   return output
@@ -175,7 +175,7 @@ body {
 function ts.error.is_ReferenceError(value: Any) -> Bool
 kernel 1
 errors "type_error", "RangeError"
-charge sum(8, deep(result))
+charge sum(8, deep(value), deep(result))
 body {
   if same(kind(value), "error") {} else { return false }
   if same(kind(value.data), "record") {
@@ -188,7 +188,7 @@ body {
 function ts.error.new_URIError(this: Any, args: List(Any)) -> Any
 kernel 1
 errors "type_error", "RangeError"
-charge sum(8, deep(result))
+charge sum(8, deep(args), deep(result))
 body {
   let output = invoke ts.error.construct("URIError", args, false)
   return output
@@ -197,7 +197,7 @@ body {
 function ts.error.is_URIError(value: Any) -> Bool
 kernel 1
 errors "type_error", "RangeError"
-charge sum(8, deep(result))
+charge sum(8, deep(value), deep(result))
 body {
   if same(kind(value), "error") {} else { return false }
   if same(kind(value.data), "record") {
@@ -210,7 +210,7 @@ body {
 function ts.error.new_EvalError(this: Any, args: List(Any)) -> Any
 kernel 1
 errors "type_error", "RangeError"
-charge sum(8, deep(result))
+charge sum(8, deep(args), deep(result))
 body {
   let output = invoke ts.error.construct("EvalError", args, false)
   return output
@@ -219,7 +219,7 @@ body {
 function ts.error.is_EvalError(value: Any) -> Bool
 kernel 1
 errors "type_error", "RangeError"
-charge sum(8, deep(result))
+charge sum(8, deep(value), deep(result))
 body {
   if same(kind(value), "error") {} else { return false }
   if same(kind(value.data), "record") {
@@ -232,7 +232,7 @@ body {
 function ts.error.new_AggregateError(this: Any, args: List(Any)) -> Any
 kernel 1
 errors "type_error", "RangeError"
-charge sum(8, deep(result))
+charge sum(8, deep(args), deep(result))
 body {
   let output = invoke ts.error.construct("AggregateError", args, true)
   return output
@@ -241,7 +241,7 @@ body {
 function ts.error.is_AggregateError(value: Any) -> Bool
 kernel 1
 errors "type_error", "RangeError"
-charge sum(8, deep(result))
+charge sum(8, deep(value), deep(result))
 body {
   if same(kind(value), "error") {} else { return false }
   if same(kind(value.data), "record") {
@@ -254,7 +254,7 @@ body {
 function ts.error.toString(this: Any, args: List(Any)) -> Any
 kernel 1
 errors "type_error", "RangeError"
-charge sum(8, deep(result))
+charge sum(8, deep(this), deep(result))
 body {
   let name = invoke ts.error.name(this)
   let message = invoke ts.get(this, "message")

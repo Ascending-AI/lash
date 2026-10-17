@@ -117,7 +117,35 @@ fn register(
             .implement(fill, Arc::new(Fill1 { fill: work }))
             .unwrap();
     }
-    vec![is_int, is_text, ("op.step", step), ("op.fill", fill)]
+    let scheduled = parse_definition(&format!(
+        "function op.scheduled(x: Any) -> Any\nkernel 1\ncharge sum(31, size(x), size(result))\nuse op.step = @{step}\nbody {{ let y = invoke op.step(x) return y }}\n"
+    ))
+    .unwrap();
+    let scheduled = registry.register(scheduled, None).unwrap();
+    let dynamic = parse_definition(&format!(
+        "function op.dynamic(n: Any) -> Any\nkernel 1\ncharge 17\nuse num.lt = @{}\nuse num.add = @{}\nbody {{ let i = 0 while num.lt(i, n) metered 7 {{ set i = num.add(i, 1) }} return i }}\n",
+        ids["num.lt"], ids["num.add"]
+    )).unwrap();
+    let canonical = lash_kernel_doc::print_definition(&dynamic);
+    assert_eq!(parse_definition(&canonical).unwrap(), dynamic);
+    let dynamic = registry.register(dynamic, None).unwrap();
+    let wrapper = parse_definition(&format!("function op.meter_wrapper(n: Any) -> Any\nkernel 1\ncharge 23\nuse op.dynamic = @{dynamic}\nbody {{ let out = invoke op.dynamic(n) return out }}\n")).unwrap();
+    let wrapper = registry.register(wrapper, None).unwrap();
+    let launch = parse_definition(&format!("function op.launch(x: Any) -> Any\nkernel 1\ncharge 0\nuse op.scheduled = @{scheduled}\nbody {{ let task = spawn invoke op.scheduled(x) let value = join task return value }}\n")).unwrap();
+    let launch = registry.register(launch, None).unwrap();
+    let launch_native = parse_definition(&format!("function op.launch_native(x: Any) -> Any\nkernel 1\ncharge 0\nuse op.step = @{step}\nbody {{ let task = spawn invoke op.step(x) let value = join task return value }}\n")).unwrap();
+    let launch_native = registry.register(launch_native, None).unwrap();
+    vec![
+        ("op.launch_native", launch_native),
+        ("op.launch", launch),
+        ("op.meter_wrapper", wrapper),
+        ("op.dynamic", dynamic),
+        is_int,
+        is_text,
+        ("op.step", step),
+        ("op.fill", fill),
+        ("op.scheduled", scheduled),
+    ]
 }
 
 fn with_native(
@@ -388,6 +416,101 @@ fn operation_depth_is_reserved_before_either_implementation_answers() {
                     observe(&program, bounds, plan),
                     reference,
                     "{expression}, depth={depth}, plan {index}"
+                );
+            }
+        }
+    }
+}
+
+/// K-CHG-003/007: a body-only helper bills its formula at completion,
+/// including a zero-sized result on raise. Its nested calls add no charge;
+/// guest callbacks still do, also after cold reopen under a different plan.
+#[test]
+fn every_helper_bills_its_formula_including_callbacks_and_raises() {
+    for (argument, difference) in [
+        ("41", 30),
+        ("\"ab\"", 33),
+        ("fn() { print 7 return 7 }", 30),
+        ("null", 28),
+    ] {
+        let program = |name| format!("main {{ let r = invoke {name}({argument}) return r }}");
+        for plan in plans() {
+            let direct = observe(&program("op.step"), ROOMY, &plan);
+            let helper = observe(&program("op.scheduled"), ROOMY, &plan);
+            assert_eq!(helper.0, direct.0, "{argument}");
+            assert_eq!(helper.1, direct.1, "{argument}");
+            assert_eq!(helper.3, direct.3 + difference, "{argument}");
+        }
+    }
+}
+
+/// K-CHG-003/007/008: a declared dynamic-loop schedule charges every test,
+/// even within a nested library body. Every threshold, including immediately
+/// below, at and above each test and completion, stops at the same event
+/// under native, body and cold plans.
+#[test]
+fn metered_tests_and_completion_have_plan_independent_bound_events() {
+    let plans = plans();
+    for name in ["op.dynamic", "op.meter_wrapper"] {
+        let program =
+            |n| format!("main {{ let r = invoke {name}({n}) print \"completed\" return r }}");
+        let empty = observe(&program(0), ROOMY, &plans[0]);
+        let full = observe(&program(3), ROOMY, &plans[0]);
+        assert_eq!(full.3 - empty.3, 3 * 7 + 1); // result 3 has one integer word; zero has none
+        for limit in 0..=full.3 + 1 {
+            let bounds = Bounds {
+                charge: limit,
+                ..ROOMY
+            };
+            let reference = observe(&program(3), bounds, &plans[0]);
+            for plan in plans.iter().skip(1) {
+                assert_eq!(
+                    observe(&program(3), bounds, plan),
+                    reference,
+                    "charge={limit}"
+                );
+            }
+        }
+        let bounded = observe(
+            &program(1000000000),
+            Bounds {
+                charge: 40,
+                ..ROOMY
+            },
+            &plans[0],
+        );
+        assert!(matches!(
+            bounded.0,
+            Err(End::Error(RunError::Bound(BoundExceeded {
+                bound: Bound::Charge,
+                ..
+            })))
+        ));
+        assert!(bounded.1.is_empty());
+    }
+}
+
+/// K-CHG-003/007: a spawned library root bills its own formula, even
+/// from a library caller, with equal bound events under native/body/cold plans.
+#[test]
+fn spawned_library_roots_keep_their_formula_arguments() {
+    let plans = plans();
+    for (helper, difference) in [("op.launch", 3 + 6 + 6), ("op.launch_native", 3 + 6)] {
+        let program = |arg| format!("main {{ let r = invoke {helper}(\"{arg}\") return r }}");
+        let short = observe(&program("a"), ROOMY, &plans[0]);
+        let long = observe(&program("abcd"), ROOMY, &plans[0]);
+        assert_eq!(long.3 - short.3, difference, "{helper}");
+        for limit in 0..=long.3 + 1 {
+            let bounds = Bounds {
+                charge: limit,
+                ..ROOMY
+            };
+            let reference = observe(&program("abcd"), bounds, &plans[0]);
+            for plan in &plans[1..] {
+                assert_eq!(
+                    observe(&program("abcd"), bounds, plan),
+                    reference,
+                    "{helper}, charge={limit}"
                 );
             }
         }

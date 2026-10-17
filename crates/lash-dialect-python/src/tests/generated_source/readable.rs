@@ -44,6 +44,7 @@ fn protocol_loop(hooks: [Option<&str>; 4], else_block: k::Block) -> k::Document 
     id(Some("py.for_in.open"));
     id(Some("py.for_in.check"));
     doc.main = vec![k::Stmt::For {
+        metered: 0,
         binding: "item".into(),
         iterable: variable("ready"),
         via: Some(k::Protocol {
@@ -170,6 +171,7 @@ fn paired_readable_rules_pin_positive_and_near_miss_spellings() {
         // the kernel's own loop.
         spelling(
             k::Stmt::For {
+                metered: 0,
                 binding: "item".into(),
                 iterable: expr.clone(),
                 via: None,
@@ -184,6 +186,7 @@ fn paired_readable_rules_pin_positive_and_near_miss_spellings() {
         );
         spelling(
             k::Stmt::While {
+                metered: 0,
                 condition: expr.clone(),
                 body: vec![],
                 else_block: vec![],
@@ -404,6 +407,7 @@ fn bounded_readable_interactions_preserve_exact_bytes_and_maps() {
                             }],
                         },
                         2 => k::Stmt::For {
+                            metered: 0,
                             binding: name.into(),
                             iterable: value,
                             via: None,
@@ -411,6 +415,7 @@ fn bounded_readable_interactions_preserve_exact_bytes_and_maps() {
                             else_block: vec![],
                         },
                         3 => k::Stmt::While {
+                            metered: 0,
                             condition: value,
                             body,
                             else_block: vec![],

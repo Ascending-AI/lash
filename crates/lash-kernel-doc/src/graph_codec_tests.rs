@@ -286,3 +286,15 @@ fn a_function_value_at_its_bound_round_trips_and_one_past_it_is_refused() {
         })
     );
 }
+
+/// K-CHG-007/K-ID-002: declared loop events are semantic definition data,
+/// preserved by both canonical graph tokens and the kernel text notation.
+#[test]
+fn declared_loop_charges_round_trip_in_text_and_graph_tokens() {
+    let document = parse_document("kernel 1\nnumbers by_spelling\nmain { for x in [1] metered 2 { while false metered 3 { continue } } }").unwrap();
+    round_trip(&document);
+    let text = crate::print_document(&document);
+    assert_eq!(parse_document(&text).unwrap(), document);
+    assert!(text.contains("metered 2"));
+    assert!(text.contains("metered 3"));
+}

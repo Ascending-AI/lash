@@ -682,6 +682,7 @@ impl<'a> Reader<'a> {
                 };
                 c.end(true)?;
                 k::Stmt::For {
+                    metered: 0,
                     binding,
                     iterable: self.expr(i, d)?,
                     via,
@@ -692,6 +693,7 @@ impl<'a> Reader<'a> {
             "while_" => {
                 c.end(true)?;
                 k::Stmt::While {
+                    metered: 0,
                     condition: self.expr(i, d)?,
                     body: self.block(i, d)?,
                     else_block: self.generic_else(i, d)?,
@@ -951,6 +953,7 @@ impl<'a> Reader<'a> {
                 return Err(invalid("expected :"));
             }
             k::Stmt::For {
+                metered: 0,
                 binding,
                 iterable,
                 via,
@@ -962,6 +965,7 @@ impl<'a> Reader<'a> {
             c.expect(":")?;
             c.finish()?;
             k::Stmt::While {
+                metered: 0,
                 condition,
                 body: self.readable_block(indent + 1, depth + 1)?,
                 else_block: self.readable_else(indent, depth + 1)?,

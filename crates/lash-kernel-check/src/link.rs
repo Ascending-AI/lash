@@ -231,6 +231,7 @@ impl Linker {
                 via,
                 body,
                 else_block,
+                ..
             } => {
                 let iterable = self.expr(iterable, slots.take(), id, scope);
                 self.loops.push(id);
@@ -260,6 +261,7 @@ impl Linker {
                 condition,
                 body,
                 else_block,
+                ..
             } => {
                 let condition = self.expr(condition, slots.take(), id, scope);
                 self.loops.push(id);

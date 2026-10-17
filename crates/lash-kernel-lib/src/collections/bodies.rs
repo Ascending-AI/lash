@@ -39,7 +39,7 @@ pub(super) fn functions() -> Vec<(&'static str, &'static str, &'static str, &'st
         ),
         (
             "list.clear(xs: List(Any)) -> List(Any)",
-            "do invoke list.check(xs) while num.lt(0, list.len(xs)) { remove xs[num.sub(list.len(xs), 1)] } return xs",
+            "do invoke list.check(xs) while num.lt(0, list.len(xs)) metered 2 { remove xs[num.sub(list.len(xs), 1)] } return xs",
             "sum(1, size(xs))",
             "",
         ),
@@ -57,7 +57,7 @@ pub(super) fn functions() -> Vec<(&'static str, &'static str, &'static str, &'st
         ),
         (
             "map.clear(xs: Map(Any, Any)) -> Map(Any, Any)",
-            "let keys = map.keys(xs) for key in keys { remove xs[key] } return xs",
+            "let keys = map.keys(xs) for key in keys metered 2 { remove xs[key] } return xs",
             "sum(1, size(xs))",
             "",
         ),
@@ -75,7 +75,7 @@ pub(super) fn functions() -> Vec<(&'static str, &'static str, &'static str, &'st
         ),
         (
             "set.clear(xs: Set(Any)) -> Set(Any)",
-            "let keys = set.keys(xs) for key in keys { remove xs[key] } return xs",
+            "let keys = set.keys(xs) for key in keys metered 2 { remove xs[key] } return xs",
             "sum(1, size(xs))",
             "",
         ),
@@ -93,7 +93,7 @@ pub(super) fn functions() -> Vec<(&'static str, &'static str, &'static str, &'st
         ),
         (
             "record.clear(xs: Record{..Any}) -> Record{..Any}",
-            "let keys = record.keys(xs) for key in keys { remove xs[key] } return xs",
+            "let keys = record.keys(xs) for key in keys metered 2 { remove xs[key] } return xs",
             "sum(1, size(xs))",
             "",
         ),
@@ -146,21 +146,21 @@ pub(super) fn functions() -> Vec<(&'static str, &'static str, &'static str, &'st
             // and callbacks always receive (left, right), even after a wait.
             "do invoke collection.function_check(compare) let sorted = list.copy(xs) let out = [] \
              let n = list.len(sorted) let width = 1 \
-             while num.lt(width, n) { let start = 0 \
-             while num.lt(start, n) { let mid = num.add(start, width) \
+             while num.lt(width, n) metered 2 { let start = 0 \
+             while num.lt(start, n) metered 2 { let mid = num.add(start, width) \
              if num.lt(n, mid) { set mid = n } let end = num.add(mid, width) \
              if num.lt(n, end) { set end = n } let left = start let right = mid let dest = start \
-             while num.lt(left, mid) { if num.lt(right, end) { } else { break } \
+             while num.lt(left, mid) metered 2 { if num.lt(right, end) { } else { break } \
              let before = sorted[left] let after = sorted[right] let order = apply compare(before, after) \
              if eq(order, order) { } else { do invoke collection.unordered(order) } \
              if num.lt(0, order) { set out[dest] = after set right = num.add(right, 1) } \
              else { set out[dest] = before set left = num.add(left, 1) } set dest = num.add(dest, 1) } \
-             while num.lt(left, mid) { set out[dest] = sorted[left] \
+             while num.lt(left, mid) metered 2 { set out[dest] = sorted[left] \
              set left = num.add(left, 1) set dest = num.add(dest, 1) } \
-             while num.lt(right, end) { set out[dest] = sorted[right] \
+             while num.lt(right, end) metered 2 { set out[dest] = sorted[right] \
              set right = num.add(right, 1) set dest = num.add(dest, 1) } set start = end } \
              let previous = sorted set sorted = out set out = previous set width = num.add(width, width) } \
-             do invoke list.clear(xs) for value in sorted { set xs[list.len(xs)] = value } return xs",
+             do invoke list.clear(xs) for value in sorted metered 2 { set xs[list.len(xs)] = value } return xs",
             // size(xs) = n + 1. At most ceil(log2 n) merge passes, with
             // fewer than 256 units of body work per element per pass; the
             // extra pass covers copying, validation and final publication.
@@ -208,14 +208,14 @@ pub(super) fn functions() -> Vec<(&'static str, &'static str, &'static str, &'st
         ),
         (
             "tasks.wait_all() -> List(Any)",
-            "let out = [] while true { let handles = tasks.unfinished() if eq(list.len(handles), 0) { break } \
+            "let out = [] while true metered 2 { let handles = tasks.unfinished() if eq(list.len(handles), 0) { break } \
              let values = join all handles for value in values { set out[list.len(out)] = value } } return out",
             "sum(1, size(result))",
             "",
         ),
         (
             "tasks.cancel_all() -> List(Any)",
-            "let out = [] while true { let handles = tasks.unfinished() if eq(list.len(handles), 0) { break } \
+            "let out = [] while true metered 2 { let handles = tasks.unfinished() if eq(list.len(handles), 0) { break } \
              for handle in handles { do cancel handle } let outcomes = join settled handles \
              for outcome in outcomes { set out[list.len(out)] = outcome } } return out",
             "sum(1, size(result))",

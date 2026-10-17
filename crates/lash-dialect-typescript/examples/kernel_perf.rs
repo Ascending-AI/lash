@@ -15,11 +15,9 @@
 //! after every unit of charge and reads the pending statement's site from the
 //! sealed records (sealing changes no charge, `K-MACH-007`): the charge and
 //! the diagnostic wall time of each charge-sliced step go to TypeScript helper bodies, kernel library bodies
-//! or the document's own code. A helper's body is charged as it runs and
-//! its formula is not (`K-CHG-007`), so a step is a statement of the body
-//! that does the work;
-//! the body of a library function with a native implementation is covered
-//! by its formula and runs within one step. `KERNEL_PERF_SPLIT=0` skips the
+//! or the document's own code. Each helper's completion formula covers its
+//! body; declared dynamic-loop tests remain separate charge events
+//! (`K-CHG-007`). `KERNEL_PERF_SPLIT=0` skips the
 //! second run, for a profiler. Split shares describe this altered dispatch
 //! geometry, perturbed by sealing changed pages between steps; they are neither exact
 //! inclusive CPU shares nor shares of the ordinary unsplit run.

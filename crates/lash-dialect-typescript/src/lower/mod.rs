@@ -895,6 +895,7 @@ impl Lowerer<'_> {
     fn emit_while(&mut self, condition: Expr, body: Buf) {
         self.push(
             Stmt::While {
+                metered: 0,
                 condition,
                 body: body.stmts,
                 else_block: Vec::new(),
@@ -912,6 +913,7 @@ impl Lowerer<'_> {
     ) {
         self.push(
             Stmt::For {
+                metered: 0,
                 binding,
                 iterable,
                 via,

@@ -59,7 +59,7 @@ use ts.to_string
 function ts.number.convert(this: Any, args: List(Any)) -> Any
 kernel 1
 errors "type_error", "RangeError"
-charge sum(8, deep(result))
+charge sum(8, deep(args), deep(result))
 body {
   if eq(list.len(args), 0) { return 0.0 }
   let args = invoke ts.pad(args, 1)
@@ -71,7 +71,7 @@ let value = invoke ts.to_number(builtin_arg_0)
 function ts.number.isFinite(this: Any, args: List(Any)) -> Any
 kernel 1
 errors "type_error", "RangeError"
-charge sum(8, deep(result))
+charge sum(8, deep(args), deep(result))
 body {
   let args = invoke ts.pad(args, 1)
   let value = args[0]
@@ -83,7 +83,7 @@ body {
 function ts.number.isNaN(this: Any, args: List(Any)) -> Any
 kernel 1
 errors "type_error", "RangeError"
-charge sum(8, deep(result))
+charge sum(8, deep(args), deep(result))
 body {
   let args = invoke ts.pad(args, 1)
   let value = args[0]
@@ -95,7 +95,7 @@ body {
 function ts.number.isInteger(this: Any, args: List(Any)) -> Any
 kernel 1
 errors "type_error", "RangeError"
-charge sum(8, deep(result))
+charge sum(8, deep(args), deep(result))
 body {
   let args = invoke ts.pad(args, 1)
   let value = args[0]
@@ -107,7 +107,7 @@ body {
 function ts.number.isSafeInteger(this: Any, args: List(Any)) -> Any
 kernel 1
 errors "type_error", "RangeError"
-charge sum(8, deep(result))
+charge sum(8, deep(args), deep(result))
 body {
   let args = invoke ts.pad(args, 1)
   let value = args[0]
@@ -120,7 +120,7 @@ body {
 function ts.number.parseFloat(this: Any, args: List(Any)) -> Any
 kernel 1
 errors "type_error", "RangeError"
-charge sum(8, deep(result))
+charge sum(8, deep(args), deep(result))
 body {
   let args = invoke ts.pad(args, 2)
   let builtin_arg_1 = args[0]
@@ -132,7 +132,7 @@ let text = invoke ts.to_string(builtin_arg_1)
 function ts.number.parseInt(this: Any, args: List(Any)) -> Any
 kernel 1
 errors "type_error", "RangeError"
-charge sum(8, deep(result))
+charge sum(8, deep(args), deep(result))
 body {
   let args = invoke ts.pad(args, 2)
   let builtin_arg_2 = args[0]
@@ -157,7 +157,7 @@ body {
 function ts.number.valueOf(this: Any, args: List(Any)) -> Any
 kernel 1
 errors "type_error", "RangeError"
-charge sum(8, deep(result))
+charge sum(8, deep(this), deep(result))
 body {
   let this = invoke ts.number.receiver(this)
   return this
@@ -166,7 +166,7 @@ body {
 function ts.number.toString(this: Any, args: List(Any)) -> Any
 kernel 1
 errors "type_error", "RangeError"
-charge sum(8, deep(result))
+charge sum(8, deep(this), deep(args), deep(result))
 body {
   let this = invoke ts.number.receiver(this)
   let args = invoke ts.pad(args, 1)
@@ -205,7 +205,7 @@ let base = invoke ts.to_number(builtin_arg_4)
 function ts.number.toFixed(this: Any, args: List(Any)) -> Any
 kernel 1
 errors "type_error", "RangeError"
-charge sum(8, deep(result))
+charge sum(8, deep(this), deep(args), deep(result))
 body {
   let this = invoke ts.number.receiver(this)
   let args = invoke ts.pad(args, 1)
@@ -232,7 +232,7 @@ let output = invoke ts.number.layout(digits, builtin_arg_6, false)
 function ts.number.toExponential(this: Any, args: List(Any)) -> Any
 kernel 1
 errors "type_error", "RangeError"
-charge sum(8, deep(result))
+charge sum(8, deep(this), deep(args), deep(result))
 body {
   let this = invoke ts.number.receiver(this)
   let args = invoke ts.pad(args, 1)
@@ -271,7 +271,7 @@ let digits = invoke ts.number.round_decimal(this, builtin_arg_9)
 function ts.number.toPrecision(this: Any, args: List(Any)) -> Any
 kernel 1
 errors "type_error", "RangeError"
-charge sum(8, deep(result))
+charge sum(8, deep(this), deep(args), deep(result))
 body {
   let this = invoke ts.number.receiver(this)
   let args = invoke ts.pad(args, 1)
@@ -371,7 +371,7 @@ body {
 function ts.number.global_isFinite(this: Any, args: List(Any)) -> Any
 kernel 1
 errors "type_error", "RangeError"
-charge sum(8, deep(result))
+charge sum(8, deep(args), deep(result))
 body {
   let args = invoke ts.pad(args, 1)
   let builtin_arg_12 = args[0]
@@ -382,7 +382,7 @@ let value = invoke ts.to_number(builtin_arg_12)
 function ts.number.global_isNaN(this: Any, args: List(Any)) -> Any
 kernel 1
 errors "type_error", "RangeError"
-charge sum(8, deep(result))
+charge sum(8, deep(args), deep(result))
 body {
   let args = invoke ts.pad(args, 1)
   let builtin_arg_13 = args[0]

@@ -203,6 +203,7 @@ fn readable_controls_names_and_implicit_else_preserve_statement_boundaries() {
                 value: k::Rhs::Expr(integer(1)),
             },
             k::Stmt::For {
+                metered: 0,
                 binding: "item".into(),
                 iterable: k::Expr::List(vec![variable("λ")]),
                 via: None,
@@ -216,6 +217,7 @@ fn readable_controls_names_and_implicit_else_preserve_statement_boundaries() {
                 else_block: vec![],
             },
             k::Stmt::While {
+                metered: 0,
                 condition: literal(k::Literal::Bool(false)),
                 body: vec![k::Stmt::Break],
                 else_block: vec![],

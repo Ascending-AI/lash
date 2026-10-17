@@ -89,6 +89,7 @@ impl CodeReads {
                 condition,
                 body,
                 else_block,
+                ..
             } => {
                 self.expr(condition, bound);
                 self.block(body, bound);

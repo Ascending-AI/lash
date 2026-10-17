@@ -566,6 +566,7 @@ impl Renderer<'_> {
                 via,
                 body,
                 else_block,
+                ..
             } if self.inline.contains(iterable)
                 && self.operators.native_loop(via.as_ref()).is_some() =>
             {
@@ -587,6 +588,7 @@ impl Renderer<'_> {
                 condition,
                 body,
                 else_block,
+                ..
             } if self.inline.contains(condition) => {
                 self.out.write("while ");
                 self.inline_expr(condition);

@@ -496,11 +496,7 @@ impl Frame {
         truncate(&mut self.record.iterated, iterated, &self.access)?;
         truncate(&mut self.record.departing, departing, &self.access)?;
         if let Some(call) = &self.library {
-            if self.exe.lib(call.lib).native {
-                self.record.arguments = Some(call.args.clone());
-            } else {
-                self.record.arguments = None;
-            }
+            self.record.arguments = Some(call.args.clone());
         } else {
             self.record.arguments = None;
         }
@@ -1076,11 +1072,10 @@ fn restore(
             let lib = exe
                 .lib_of(function)
                 .ok_or_else(|| malformed("a frame's library is not admitted"))?;
-            let args = match (exe.lib(lib).native, &record.arguments) {
-                (true, Some(args)) => args.clone(),
-                (false, None) => Tree::new(true),
-                _ => return Err(malformed("a library frame has the wrong held arguments")),
-            };
+            let args = record
+                .arguments
+                .clone()
+                .ok_or_else(|| malformed("a library frame has no held formula arguments"))?;
             Some(LibraryCall { lib, args })
         }
         _ if record.arguments.is_none() => None,

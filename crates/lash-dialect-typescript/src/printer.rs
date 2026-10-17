@@ -308,6 +308,11 @@ impl Renderer<'_> {
             }
             // The front end writes no loop `else`, so its source has no
             // spelling for one.
+            k::Stmt::For { metered, .. } | k::Stmt::While { metered, .. } if *metered != 0 => {
+                self.out.refuse(PrintError::Invalid(
+                    "a metered library loop requires kernel text".into(),
+                ));
+            }
             k::Stmt::For { else_block, .. } | k::Stmt::While { else_block, .. }
                 if !else_block.is_empty() =>
             {

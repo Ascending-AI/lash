@@ -1,33 +1,9 @@
 {
-  "rule": "K-CHG-007",
   "cases": [
     {
-      "name": "a library function with only a kernel-code body is charged its forms as they run, not its formula",
-      "document": "kernel 1\nnumbers by_spelling\nuse list.len = @70d92c79f9c69cfe8cda0752cf30f5f0db0499a1bbffeeed9e2abddad9cf302b\nuse list.push = @d8d471be15d3c9a20f78cd917b30c6f86614855de571ce46d44ac2585be23e57\nmain { let xs = [1] do invoke list.push(xs, 2) finish xs }\n",
-      "expected": {
-        "prints": [],
-        "trace": [],
-        "end": {
-          "finished": {
-            "list": [
-              {
-                "int": "1"
-              },
-              {
-                "int": "2"
-              }
-            ]
-          }
-        },
-        "charged": 27
-      }
-    },
-    {
-      "name": "callback code is charged within a library body",
       "document": "kernel 1\nnumbers by_spelling\nuse list.len = @70d92c79f9c69cfe8cda0752cf30f5f0db0499a1bbffeeed9e2abddad9cf302b\nuse collection.map = @e53667241c9bc18ec09e9d87a62b8b454107ba20a05623719dd7ee2f662862f9\nuse collection.function_check = @a76697deec5c174c74ed173a04b4207532f093c3fa95ae478cdebc9c38466e0c\nmain { let xs = [1] let cb = fn(x) { return x } let ys = invoke collection.map(xs, cb) finish ys }\n",
       "expected": {
-        "prints": [],
-        "trace": [],
+        "charged": 22,
         "end": {
           "finished": {
             "list": [
@@ -37,8 +13,11 @@
             ]
           }
         },
-        "charged": 37
-      }
+        "prints": [],
+        "trace": []
+      },
+      "name": "callback code is charged within a library body"
     }
-  ]
+  ],
+  "rule": "K-CHG-007"
 }

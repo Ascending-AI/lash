@@ -418,6 +418,7 @@ impl Graph {
                     condition,
                     body,
                     else_block,
+                    ..
                 } => {
                     self.expr(condition, &scope, owner);
                     self.block(body, &scope, owner);
@@ -429,6 +430,7 @@ impl Graph {
                     via,
                     body,
                     else_block,
+                    ..
                 } => {
                     let iterable = self.expr(iterable, &scope, owner);
                     let item = self.slot();

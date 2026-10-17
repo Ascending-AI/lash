@@ -97,13 +97,14 @@ impl KernelMachine {
     /// code is not charged (`K-CHG-007`), ending the run past its bound.
     pub(super) fn charge(&mut self, units: u64) -> Result<(), Halt> {
         if self.charging {
-            if self.observer.is_some() {
-                self.observe_atomic(units);
-            }
-            self.charged = self.charged.saturating_add(units);
-            if self.charged > self.bounds.charge {
-                return Err(bound(Bound::Charge, self.bounds.charge));
-            }
+            charge_scheduled(
+                &mut self.charged,
+                self.bounds.charge,
+                units,
+                self.observer
+                    .as_deref()
+                    .and_then(|observer| observer.charges.as_ref()),
+            )?;
         }
         Ok(())
     }
@@ -538,7 +539,7 @@ impl KernelMachine {
                         if !function.existing_result {
                             self.pin_value(&value)?;
                         }
-                        let units = if self.charging && function.native {
+                        let units = if self.charging {
                             match fast.charge(&function.charge, &self.regs[args..end], &value) {
                                 Charge::Units(units) => units,
                                 Charge::Plan(plan) => self.in_formula(lib, true, |machine| {
@@ -629,7 +630,7 @@ impl KernelMachine {
                 }
             }
         };
-        let evaluates = self.charging && function.native;
+        let evaluates = self.charging;
         let units = self.in_formula(lib, evaluates, |machine| {
             machine.call_units(exe, lib, &machine.regs[args..end], result.as_ref().ok())
         })?;
@@ -651,4 +652,24 @@ pub(super) enum Answer {
     Done,
     /// The kernel body runs the call.
     Body(AdmittedBody),
+}
+
+/// A declared schedule event is independent of ordinary body-form charging.
+pub(super) fn charge_scheduled(
+    charged: &mut u64,
+    limit: u64,
+    units: u64,
+    tape: Option<&crate::observe::ChargeTape>,
+) -> Result<(), Halt> {
+    if units == 0 {
+        return Ok(());
+    }
+    if let Some(tape) = tape {
+        tape.push(lash_kernel_exec::Weight::Atomic(units));
+    }
+    *charged = charged.saturating_add(units);
+    if *charged > limit {
+        return Err(bound(Bound::Charge, limit));
+    }
+    Ok(())
 }

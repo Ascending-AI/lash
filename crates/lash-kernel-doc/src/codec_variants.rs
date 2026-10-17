@@ -93,6 +93,8 @@ impl CodecVariant for Stmt {
             Self::Remove { .. } => 2,
             Self::Do { .. } => 3,
             Self::If { .. } => 4,
+            Self::For { metered, .. } if *metered != 0 => 19,
+            Self::While { metered, .. } if *metered != 0 => 20,
             // A loop with a protocol or an `else` takes a number of its own,
             // so that every loop without either keeps its encoding.
             Self::For {

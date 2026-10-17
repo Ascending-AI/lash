@@ -145,6 +145,7 @@ impl Reader {
                     (self.expression(&statement.right)?, None)
                 };
                 k::Stmt::For {
+                    metered: 0,
                     binding,
                     iterable,
                     via,
@@ -153,6 +154,7 @@ impl Reader {
                 }
             }
             s::Stmt::While(statement) => k::Stmt::While {
+                metered: 0,
                 condition: self.expression(&statement.test)?,
                 body: self.body(&statement.body)?,
                 else_block: Vec::new(),

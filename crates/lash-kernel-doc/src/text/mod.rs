@@ -88,6 +88,7 @@ pub(crate) const KEYWORDS: &[&str] = &[
     "for",
     "function",
     "guard",
+    "metered",
     "if",
     "in",
     "inf",

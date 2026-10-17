@@ -322,6 +322,7 @@ impl Working {
                 else_block: vec![],
             },
             Wrapper::For { binding, iterable } => Stmt::For {
+                metered: 0,
                 binding: binding.clone(),
                 iterable: iterable.clone(),
                 via: None,

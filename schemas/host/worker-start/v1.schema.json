@@ -2105,6 +2105,12 @@
                 "iterable": {
                   "$ref": "#/$defs/Expr"
                 },
+                "metered": {
+                  "description": "Declared units at every continuation test, even in library code.\nZero leaves the loop covered by the call's completion formula.",
+                  "format": "uint64",
+                  "minimum": 0,
+                  "type": "integer"
+                },
                 "via": {
                   "anyOf": [
                     {
@@ -2150,6 +2156,12 @@
                     "$ref": "#/$defs/Stmt"
                   },
                   "type": "array"
+                },
+                "metered": {
+                  "description": "As the declared loop charge of [`Stmt::For`].",
+                  "format": "uint64",
+                  "minimum": 0,
+                  "type": "integer"
                 }
               },
               "required": [

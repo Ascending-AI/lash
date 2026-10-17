@@ -30,6 +30,7 @@ pub(super) const DATA: &str = r####"{
 "7d2bb9d68b2a53e5df718710f2742365b474d20cd7b31353cda7561795ba6f04":[{"float":"-1.3378065249012815e-14"},{"float":"1.665172685854075e57"}],
 "7d2c86acc3aad7143bb78b4425a223d6241577168899b4151b84959001b9c2d4":[{"int":"1787891139302511043"},{"int":"-8406754919637081440"}],
 "7d2e7029ca55370afff6d731971b74dd321ff7b02350254a65692b2c56a5216f":{"charge":33,"outcome":"raised \"number_range\" \"expected a nonnegative machine-sized integer\" \"null\"","prepared_difference":null,"reservations":[],"reserved":0,"spent":0},
+"7d31e92ec5aa8d12dada51600da7d195d3c998d0d20b6a14d9ea2aa78b0af76c":{"charge":473,"outcome":"declined","prepared_difference":null,"reservations":[],"reserved":0,"spent":0},
 "7d32c7ac063e4e4075b8f9236e4865d4c0b76dcef172d80ebb197ed1616766c1":[{"text":"12.5"},{"int":"0"},{"text":"a"}],
 "7d33921071996928a197c493bb26df887d6b2b35e4d3171b5e4c88a6f69e48dc":[{"text":"𴯕񣨂ᓶ򊝟򏧑񡡢񢓒񫨛􇖯򮲄񢹝򠍁񙤇񑏵񛺒󵥯𧀝񥎽񱑚񝃲󣯓𷕤𞚎􂳃񨉚󂯞񃰉󵰱󨃉󏮈𞁿󗱿󰅇𮚅𺈈򑥌򆱾񹄦󈖄񷾏𼒰񪬹񡸯𡷓𚬨󯡾񍰎򓠶󻇆񜴥񱯿򪀈񘝈򇙆򰌪򔦬𭘿򪁓򨏓􏠔񃫤򓞑򍞾𢞑𧾞󩫡򬾔󈄋􁻉񓪴񦟁𕽎񣙰􉈜򡀸󤘘򭒔򹈽򫹙񄍥󩒣񊝊𑪄󒞱𣶾󶱅񁇝򧪾򗏋򩟬񘿃򌈜񺢘𲇉󔏊𴧍򙈞􇚺󓓗򆕾򷨴򥗀򥥫񤴙𳏃򔵤򵻾򭧃󄪰􈨥􏱱񖟉򓵆𫂼􄻝"},{"text":""}],
 "7d35108d925bb7d438cf6d5efef1d68d2c4e1291608ecc1abd683c585c523538":{"charge":7,"outcome":"ok {\"int\":\"9223372036854775808\"}","prepared_difference":null,"reservations":[],"reserved":0,"spent":0},
@@ -56,7 +57,6 @@ pub(super) const DATA: &str = r####"{
 "7d571df53b75471dd313263acdbb15174a8cff9b31dc40df6015507b979ecc05":[{"int":"5960860930538383298"}],
 "7d5b3d732cf6922c76d96019e93a837eea1a8651d533da35244ede0cddeb4b57":[{"int":"-8454602866528210895"}],
 "7d5d0beb17beb1b32e5d8ce8ede0fb9688b76514d2388f49de4b772503949d53":[{"bool":true},{"set":2},{"text":"a"},{"tuple":[{"int":"0"},{"int":"0"},{"bool":false},{"bool":false}]}],
-"7d5e04c30dedda5eca1d52ddc24f2288442fffe4365e868f0e370c19f86d81d5":[{"list":[]},{"map":[]},{"set":[]},{"record":[]},{"list":[]},{"map":[]},{"set":[]},{"record":[]},{"list":[{"int":"9223372036854775807"},{"text":""}]},{"list":[]},{"map":[]},{"set":[]},{"record":[]},{"list":[]},{"map":[]},{"set":[]},{"record":[]},{"list":[]},{"map":[]},{"set":[]},{"record":[]},{"list":[]},{"map":[]},{"set":[]},{"record":[]},{"list":[]},{"map":[]},{"set":[]},{"record":[]},{"list":[]},{"map":[]},{"set":[]},{"record":[]},{"list":[{"float":"-0.0"},{"float":"0.0"},{"int":"63"},{"float":"1.0"},{"int":"32"},{"text":"🦀𝄞"}]},{"list":[{"bool":true},{"int":"-8765181450439042303"},{"list":8},"null",{"list":33},{"int":"-7964527328485490399"}]}],
 "7d5fc8cf725153061c49436771e830de6d8994ba5f05c353a202aba30ba3b59d":{"charge":6,"outcome":"ok {\"record\":[[\"corpus\",{\"int\":\"31\"}]]}","prepared_difference":null,"reservations":[],"reserved":0,"spent":0},
 "7d5fd342a862df5a4a53c8254345def134bb014c98d6c3b1e8a253c9122c9db3":[{"bytes":"39217319298fdc35372113c3d8a1cc1921e762d84779313711d9001ed8bb7888c1d4fb2c480890b56696d3ae719d"},{"bytes":"d51adc9ba481d4c36010c2c1c4234b5f535f7595cec76ab8c7aaed4e60b48374f46513c7b6d38ce7"}],
 "7d6079543e1cd30dfa0fe62e82e5e9225af8636ebee257cb2156bf29d30c9fea":[{"int":"6938563582430507365"}],
@@ -129,7 +129,6 @@ pub(super) const DATA: &str = r####"{
 "7dd91504635ba7dde8ad60979d94fb85513854c8efee39359b46e2119d46f65d":[{"float":"-6.0858374099354755e141"},{"float":"2.6593197672580314e-79"}],
 "7dd9fdbb0b5c0a3b6b2927be8cb0e9e0557ce7b04195b374e358087150bdb8d2":{"charge":3,"outcome":"ok {\"float\":\"-3.078267071365272e280\"}","prepared_difference":null,"reservations":[],"reserved":0,"spent":0},
 "7ddb67d947dd6d6873af4957f573c3b0d20d83aff364e2f56881ea9457c1cddc":{"charge":340,"outcome":"ok \"absent\"","prepared_difference":null,"reservations":[],"reserved":0,"spent":0},
-"7de0824aa53d7a5af493ec98b40cd9bfd4ae4cb0d4330cd7948fe4e41ee49396":{"charge":388,"outcome":"declined","prepared_difference":null,"reservations":[],"reserved":0,"spent":0},
 "7de10dcad5d8a73cc52c3592e34fb3c14ac499e4cefd87525155c7e125eb25a5":[{"int":"-6593929623842237798"}],
 "7de20717f08202181bda747c38094682bd1ebc7f202855b6b9060465c2214254":[{"list":[{"int":"5995101577150411524"},{"text":"򏜝򯶳梈󙑙𙤱󟱃񠽻񲎥񍪢򰖗󞩜񥊈񡀭퍍񸖫򧹠򏒜񃡵򪭅񒥓凁󈜢򑢬֝𚓖񍐟󜹷񦀫󖈫񶘯񦤣󂤱񜔣󍱩򞞑𓸞񲟢󿤭󌮟񯇈󢰫󍒳󤯚𖗍򉹆򯣺򩖋𧁠𐚀󊂍󲚌𑿁㶾򆩅𣧑񊯢󍨵𮋁"},"null",{"int":"8593119592954029839"},{"float":"-1.3874837975664821e280"},{"float":"3.1778007106111354e-292"},{"float":"-1.9262967314916203e-158"}]}],
 "7de386d8845d6ae6d3a9dfe19caa7c010e6ad19e9d88ab7e56c181ec70ad5f24":[{"int":"4224060867890351725"},{"int":"-8255439056941366735"}],
@@ -151,6 +150,5 @@ pub(super) const DATA: &str = r####"{
 "7dfa2fe713ebff77b35e1ef94d7a1f86222fa5af51ffe5c1bbe471a25ac231f6":[{"list":[{"text":"򨥉񸀛񄯛􇆌񛁯򏣏󰒗󪝞䎐𩤗񏯥𿕒𼈸󸶼󊾧𷔸󼗒񧳙󯁠񵖀񔬫򚍽𑅻񧆙񶤺𾝨𲺦񞝻󀁵񱄵󛹗󩓫񌼂񃠜𲥬򑈾𼆚𔪙򛁌񣨬򟽘񠪦򶬳񋜥񂄋󠶉𩯒􄡥󟦵򱬆󪲰"}]}],
 "7dfb10ea4a8e394c0ddb591107cc942a5eb4f7c17fa8cdb114a1ca174611e77c":[{"text":"𾌱󇒷𧶞񚛥񷓨􅈁񷳥𢭜𻠊󢯺笭󾂛󽾚󩚥󺃈򸞉򁳆󔭿񇠩𳪙󢚬𭧡򁐒󸂺愻򹌹񖑟񭕗󃄽󈘟ⓓ􂹚򒲆楟󼹍򧲑򨈨􅤬沞󾗇򀏌򠓋󮀂᥂񩇰񔛓򶺞󷏃򱯤󣛓򁉾𗿚񗾥򳨚񦛮񞞣󌂬򁨭󠅙𬼛򾙅򏳉񐽰􄕮󋁤񿠄񏃴􉠕􋉥񢑁󐱉򠨑󄁅񴦅𝩖"}],
 "7dfbfb43b970ae451ccf57fc68bee6fba4da1e29841d46a53c8002ca24951701":{"charge":69,"outcome":"ok {\"bytes\":\"\"}","prepared_difference":null,"reservations":[],"reserved":0,"spent":0},
-"7dfcaa4dc85ad717eda8255b69664f2c5faac07cbb4a1c19ca11f406262abe2d":[{"list":0},{"float":"1.387694240590884e300"}],
 "7dfccba4fd4bae89e1c3de1c29df363ae004968b17fef8de65b2c7f3ce300242":[{"text":""},{"text":"g"},{"int":"0"}]
 }"####;

@@ -305,11 +305,10 @@ impl PreparedLibrary {
                     .iter()
                     .map(|param| param.name.clone())
                     .collect();
-                // A helper's body is ordinary code; the body of a function
-                // with a native implementation is covered by its formula.
+                // Every library body is covered by its completion formula.
+                // Closures it makes compile as ordinary charged code.
                 let unit = Unit::Library(*function);
-                let charged = !definition.has_native();
-                compiler.unit_code(code, unit, &params, &body.block, charged);
+                compiler.unit_code(code, unit, &params, &body.block, false);
             }
         }
         let mut tables = compiler.finish();
@@ -380,7 +379,6 @@ impl PreparedLibrary {
                     record_read,
                     id: *function,
                     arity: params.len(),
-                    native: definition.has_native(),
                     charge,
                     limit,
                     scalar,
@@ -693,10 +691,8 @@ pub(crate) struct Code {
     /// to a fresh instance of its frozen capture (`K-SES-004`). A variable
     /// no call binds reads as unbound.
     pub(crate) free: Vec<(Name, Local)>,
-    /// Whether the code's forms are charged: those of the body of a library
-    /// function with a native implementation are not (`K-CHG-007`). That
-    /// body calls only functions with a native implementation (`K-LIB-004`),
-    /// so no charged frame runs above it, and a closure it makes is charged.
+    /// Library body forms are covered by the completion formula
+    /// (`K-CHG-007`); guest code and closures remain charged.
     pub(crate) charged: bool,
 }
 
@@ -735,10 +731,8 @@ pub(crate) struct Lib {
     pub(crate) id: FunctionId,
     pub(crate) definition: Arc<FunctionDefinition>,
     pub(crate) run: LibRun,
-    /// How many parameters the definition has, and whether it states a
-    /// native implementation.
+    /// How many parameters the definition has.
     pub(crate) arity: usize,
-    pub(crate) native: bool,
     /// The definition's charge formula, and its guard's limit.
     pub(crate) charge: Plan,
     pub(crate) limit: Option<Plan>,
@@ -749,10 +743,11 @@ pub(crate) struct Lib {
 }
 
 impl Lib {
-    /// Native-stating functions with a complete body have a semantic call
-    /// depth unit even when their native answers (K-BND-002).
+    /// A function that may answer without its body reserves that body's
+    /// depth unit before offering its native the call (K-BND-002).
+    /// Body-only calls reserve their ordinary frame at entry.
     pub(crate) fn operation(&self) -> bool {
-        self.native && self.definition.body().is_some()
+        self.definition.has_native() && self.definition.body().is_some()
     }
 }
 
@@ -917,6 +912,7 @@ pub(crate) enum Form {
         else_block: BlockId,
     },
     For {
+        metered: u64,
         site: Site,
         binding: Local,
         /// The protocol hooks the loop opens and steps its value with
@@ -927,6 +923,7 @@ pub(crate) enum Form {
         else_block: Option<BlockId>,
     },
     While {
+        metered: u64,
         site: Site,
         /// The condition's ops, which every iteration step runs.
         test: OpRange,

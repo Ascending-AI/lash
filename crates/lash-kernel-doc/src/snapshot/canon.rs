@@ -216,6 +216,7 @@ impl Renamer<'_, '_> {
                 condition,
                 body,
                 else_block,
+                ..
             } => {
                 self.expr(condition);
                 self.block(body);

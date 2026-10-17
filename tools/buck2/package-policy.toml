@@ -654,7 +654,7 @@ data = ["//:workspace_rust_sources"]
 [[rule]]
 packages = ["lash-kernel-conformance"]
 kinds = ["unit-test"]
-compile_data = ["//docs/kernel:package_files", "//crates/lash-kernel-conformance:package_files", "//crates/lash-kernel-lib:package_files"]
+compile_data = ["//docs/kernel:package_files", "//crates/lash-kernel-conformance:package_files", "//crates/lash-kernel-lib:package_files", "//crates/lash-dialect-typescript:package_files"]
 
 [[rule]]
 packages = ["kernel-embedder"]

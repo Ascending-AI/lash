@@ -103,7 +103,6 @@ pub(super) const DATA: &str = r####"{
 "16a1708075e0edcf54fe542da13c5378511ad6a5706e358d54a077129f78e03a":[{"map":40},{"text":"𓎣񯼄ﷺ񏪁򦬴􇻢𺚟󶐒葚"}],
 "16a188744b17b8878811d9c278ed54d85536b35188e409c07824bf80b80c27cc":[{"int":"4329454668028403679"},{"int":"2985235171178754720"}],
 "16a18a82800e14eb98592655d072780100a6a5f7a8d3814bb5430477fca9480e":[{"int":"1735704732358185685"},{"int":"-4402762920333877584"}],
-"16a1a6f3c5f117f2cb635115ecfeea30d68885e2e95d663ad802f9290ccbe46a":[{"int":"-3783463327623890110"},{"text":"𭶜󺴧󡾽ꋂ򑤇󟳵򪙌򕈀􄱽󑆥򂋆󳄃􈖡񊳪󴌳쭵𹖣򮩈񠮜񮢋𹖚򹸱񸍍􄴋񣥑񇍣򬥅𨦗񁝄𪑪𿮢򺫕󘻀򞇝񲥞򤚌񏼁𤲿釦򬥅󷖗񬊼􈘹򎭵󝯣񄪔󷔁򦦫𞆸򈩻񿞯򘆀򯊃󴞦򸚩𫧤򈶗𡥌󶑾𮔶񅝼𺫒𝔇󆭭󝋻񭾞򯾡󎠞󼑎򊉆󘂂𾤃􁠑𗁡񴣁򙰐󧤨󋗚󇀱񧺑񠘬񕴠򈆚񋐙􌌱񨓷򘨾򐒪󓀣󡚃򲑮񰖦򊈭𕨩󔋝󍜘񷚶𘧛󹸈󋼴񄕊򣥀򞌲ੴ"}],
 "16a2bce4b17b2443c9ae30aed06a2fe1ee5c6141c58a57bb81bb09eaabff2415":["null",{"text":"{}"}],
 "16a717931dfa16c5cfc40da3d4086507d17520d057a6b3aa9f0d0c39c6a7ac6d":{"charge":329,"outcome":"raised \"regex.syntax\" \"invalid regular expression flags: `a` is not a flag\" \"null\"","prepared_difference":null,"reservations":[],"reserved":0,"spent":0},
 "16add8e614bfd311af9ad7ddb5cac1dd02f09e5667f067dff2560dda5cfa954e":[{"float":"4.8833482308030305e-42"}],
@@ -141,7 +140,7 @@ pub(super) const DATA: &str = r####"{
 "16ecf992ed38c0dc92135865424c56b63bea719e5aa50dcd0e87c497f97d6202":[{"float":"0.0"},{"int":"-7"},{"tuple":[{"text":"g"},{"text":"g"}]},{"text":"g"},{"text":"g"}],
 "16edfd13874c27b66e4ab820055ff62bcdf390b180ae0b8555abee17f159532c":{"charge":770,"outcome":"raised \"regex.syntax\" \"invalid regular expression flags: `h` is not a flag\" \"null\"","prepared_difference":null,"reservations":[],"reserved":0,"spent":0},
 "16ef58f42c629e4942b64afb52732bc9c4fc6e7cb2d0e9a569266b981a62d3ca":{"charge":5,"outcome":"ok {\"int\":\"5394162010220765282\"}","prepared_difference":null,"reservations":[],"reserved":0,"spent":0},
-"16f8181da295e4a6a049f39e46c524632a19db676300dc9b76d94c209dd8e5d7":[{"int":"1587078825102526421"}],
+"16f538ee8e2cb160cc1e5eed745a10756e88f508ef82b4bba9c90798de15295f":["null",{"list":29}],
 "16f98ea95e0e696edbd1c3d03aa392a173e072594c3cd3bfeba856edf05e35d2":[{"float":"2.5244583781667716e205"}],
 "16fb36b9b1e79665db2ffe1769ea31599245cdd99a6b970516adc272d8030c31":{"charge":736,"outcome":"memory","prepared_difference":null,"reservations":[[0,18446744073709551615]],"reserved":0,"spent":0},
 "16fc8347e1f63385865d9a8c1b2122efad383d0c7dcaabd3fa00934b025df11c":{"charge":3,"outcome":"ok {\"float\":\"-6.250454116863171e209\"}","prepared_difference":null,"reservations":[],"reserved":0,"spent":0}

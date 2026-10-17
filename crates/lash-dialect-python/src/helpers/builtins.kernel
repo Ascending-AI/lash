@@ -93,7 +93,7 @@ body {
 # separator immediately after an integer base prefix is consumed earlier.
 function py.number_underscores(digits: Text, base: Int) -> Text
 kernel 1
-charge sum(8, size(digits))
+charge sum(8, product(size(digits), size(digits)))
 body {
   let alphabet = text.slice("0123456789abcdefghijklmnopqrstuvwxyz", 0, base)
   let previous = false

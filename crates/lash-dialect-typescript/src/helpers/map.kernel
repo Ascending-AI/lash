@@ -74,7 +74,7 @@ body {
 function ts.map.construct(this: Any, args: List(Any)) -> Any
 kernel 1
 errors "type_error", "RangeError"
-charge sum(8, deep(result))
+charge sum(8, deep(args), deep(result))
 body {
   let args = invoke ts.pad(args, 1)
   let output = map{}
@@ -160,17 +160,17 @@ body {
 function ts.map.clear(this: Any, args: List(Any)) -> Any
 kernel 1
 errors "type_error", "RangeError"
-charge sum(8, deep(result))
+charge sum(8, deep(this), deep(result))
 body {
   if same(kind(this), "map") {} else { throw error.new("type_error", "Map receiver required", null) }
-  for key in map.keys(this) { remove this[key] }
+  for key in map.keys(this) metered 2 { remove this[key] }
   return absent
 }
 
 function ts.map.keys(this: Any, args: List(Any)) -> Any
 kernel 1
 errors "type_error", "RangeError"
-charge sum(8, deep(result))
+charge sum(8, deep(this), deep(result))
 body {
   if same(kind(this), "map") {} else { throw error.new("type_error", "Map receiver required", null) }
   let output = []
@@ -185,7 +185,7 @@ let key = invoke ts.map.value(builtin_arg_4)
 function ts.map.values(this: Any, args: List(Any)) -> Any
 kernel 1
 errors "type_error", "RangeError"
-charge sum(8, deep(result))
+charge sum(8, deep(this), deep(result))
 body {
   if same(kind(this), "map") {} else { throw error.new("type_error", "Map receiver required", null) }
   let output = []
@@ -200,7 +200,7 @@ let key = invoke ts.map.value(builtin_arg_5)
 function ts.map.entries(this: Any, args: List(Any)) -> Any
 kernel 1
 errors "type_error", "RangeError"
-charge sum(8, deep(result))
+charge sum(8, deep(this), deep(result))
 body {
   if same(kind(this), "map") {} else { throw error.new("type_error", "Map receiver required", null) }
   let output = []
@@ -215,14 +215,14 @@ let key = invoke ts.map.value(builtin_arg_6)
 function ts.map.forEach(this: Any, args: List(Any)) -> Any
 kernel 1
 errors "type_error", "RangeError"
-charge sum(8, deep(result))
+charge sum(8, deep(this), deep(args), deep(result))
 body {
   if same(kind(this), "map") {} else { throw error.new("type_error", "Map receiver required", null) }
   let args = invoke ts.pad(args, 2)
   let callback = args[0]
   set callback = invoke ts.callable(callback)
   let receiver = args[1]
-  for map_key in this {
+  for map_key in this metered 2 {
     let builtin_arg_7 = map_key
 let key = invoke ts.map.value(builtin_arg_7)
     let passed = [this[map_key], key, this]
@@ -234,7 +234,7 @@ let key = invoke ts.map.value(builtin_arg_7)
 function ts.map.groupBy(this: Any, args: List(Any)) -> Any
 kernel 1
 errors "type_error", "RangeError"
-charge sum(8, deep(result))
+charge sum(8, deep(args), deep(result))
 body {
   let args = invoke ts.pad(args, 2)
   let callback = args[1]

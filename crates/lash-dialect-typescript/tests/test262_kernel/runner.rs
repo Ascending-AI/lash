@@ -47,11 +47,9 @@ const EARLY_ERROR_CODES: [DiagnosticCode; 5] = [
 /// a failure with the kernel's typed bound error, never a conformance exemption.
 /// These cases test semantics, not billion-element materialization. 8 MiB of
 /// guest memory bounds dense representations of JavaScript's huge sparse
-/// arrays. The charge bound is measured, in units where a helper's body is
-/// charged as it runs (`K-CHG-007`): with the bound lifted to 400,000,000,
-/// the costliest recorded pass the register does not exclude,
-/// `decodeURI/S15.1.3.1_A1.13_T1.js`, charged 22,018,500; twice that, rounded
-/// up to a million, is 45,000,000.
+/// arrays. Library calls use completion formulas and declared dynamic-loop
+/// tests (K-CHG-003/007); guest callbacks and closures use the ordinary cost
+/// table. The uniform charge budget is 45,000,000 units.
 const BOUNDS: Bounds = Bounds {
     charge: 45_000_000,
     memory: 8 << 20,

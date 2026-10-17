@@ -713,6 +713,7 @@ fn inventory_document() -> k::Document {
             else_block: vec![],
         },
         S::For {
+            metered: 0,
             binding: "item".into(),
             iterable: E::List(vec![]),
             via: None,
@@ -722,6 +723,7 @@ fn inventory_document() -> k::Document {
             }],
         },
         S::For {
+            metered: 0,
             binding: "item".into(),
             iterable: E::List(vec![]),
             via: Some(k::Protocol {
@@ -736,6 +738,7 @@ fn inventory_document() -> k::Document {
             else_block: vec![],
         },
         S::While {
+            metered: 0,
             condition: E::Literal(L::Bool(false)),
             body: vec![S::Break],
             else_block: vec![S::Print {
@@ -939,16 +942,18 @@ fn inventory_node(node: k::Node<'_>, forms: &mut BTreeSet<&'static str>) {
                 via,
                 body,
                 else_block,
+                metered,
             } => {
-                let _ = (binding, iterable, via, body, else_block);
+                let _ = (binding, iterable, via, body, else_block, metered);
                 "for"
             }
             k::Stmt::While {
                 condition,
                 body,
                 else_block,
+                metered,
             } => {
-                let _ = (condition, body, else_block);
+                let _ = (condition, body, else_block, metered);
                 "while"
             }
             k::Stmt::Break => "break",

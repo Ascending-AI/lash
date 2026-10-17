@@ -94,7 +94,7 @@ use ts.wrap_int32
 function ts.math.abs(this: Any, args: List(Any)) -> Any
 kernel 1
 errors "type_error", "RangeError"
-charge sum(8, deep(result))
+charge sum(8, deep(args), deep(result))
 body {
   let args = invoke ts.pad(args, 1)
   let builtin_arg_0 = args[0]
@@ -105,7 +105,7 @@ let value = invoke ts.to_number(builtin_arg_0)
 function ts.math.floor(this: Any, args: List(Any)) -> Any
 kernel 1
 errors "type_error", "RangeError"
-charge sum(8, deep(result))
+charge sum(8, deep(args), deep(result))
 body {
   let args = invoke ts.pad(args, 1)
   let builtin_arg_1 = args[0]
@@ -116,7 +116,7 @@ let value = invoke ts.to_number(builtin_arg_1)
 function ts.math.ceil(this: Any, args: List(Any)) -> Any
 kernel 1
 errors "type_error", "RangeError"
-charge sum(8, deep(result))
+charge sum(8, deep(args), deep(result))
 body {
   let args = invoke ts.pad(args, 1)
   let builtin_arg_2 = args[0]
@@ -127,7 +127,7 @@ let value = invoke ts.to_number(builtin_arg_2)
 function ts.math.trunc(this: Any, args: List(Any)) -> Any
 kernel 1
 errors "type_error", "RangeError"
-charge sum(8, deep(result))
+charge sum(8, deep(args), deep(result))
 body {
   let args = invoke ts.pad(args, 1)
   let builtin_arg_3 = args[0]
@@ -138,7 +138,7 @@ let value = invoke ts.to_number(builtin_arg_3)
 function ts.math.sign(this: Any, args: List(Any)) -> Any
 kernel 1
 errors "type_error", "RangeError"
-charge sum(8, deep(result))
+charge sum(8, deep(args), deep(result))
 body {
   let args = invoke ts.pad(args, 1)
   let builtin_arg_4 = args[0]
@@ -149,7 +149,7 @@ let value = invoke ts.to_number(builtin_arg_4)
 function ts.math.acos(this: Any, args: List(Any)) -> Any
 kernel 1
 errors "type_error", "RangeError"
-charge sum(8, deep(result))
+charge sum(8, deep(args), deep(result))
 body {
   let args = invoke ts.pad(args, 1)
   let builtin_arg_5 = args[0]
@@ -160,7 +160,7 @@ let value = invoke ts.to_number(builtin_arg_5)
 function ts.math.asin(this: Any, args: List(Any)) -> Any
 kernel 1
 errors "type_error", "RangeError"
-charge sum(8, deep(result))
+charge sum(8, deep(args), deep(result))
 body {
   let args = invoke ts.pad(args, 1)
   let builtin_arg_6 = args[0]
@@ -171,7 +171,7 @@ let value = invoke ts.to_number(builtin_arg_6)
 function ts.math.acosh(this: Any, args: List(Any)) -> Any
 kernel 1
 errors "type_error", "RangeError"
-charge sum(8, deep(result))
+charge sum(8, deep(args), deep(result))
 body {
   let args = invoke ts.pad(args, 1)
   let builtin_arg_7 = args[0]
@@ -182,7 +182,7 @@ let value = invoke ts.to_number(builtin_arg_7)
 function ts.math.asinh(this: Any, args: List(Any)) -> Any
 kernel 1
 errors "type_error", "RangeError"
-charge sum(8, deep(result))
+charge sum(8, deep(args), deep(result))
 body {
   let args = invoke ts.pad(args, 1)
   let builtin_arg_8 = args[0]
@@ -193,7 +193,7 @@ let value = invoke ts.to_number(builtin_arg_8)
 function ts.math.atan(this: Any, args: List(Any)) -> Any
 kernel 1
 errors "type_error", "RangeError"
-charge sum(8, deep(result))
+charge sum(8, deep(args), deep(result))
 body {
   let args = invoke ts.pad(args, 1)
   let builtin_arg_9 = args[0]
@@ -204,7 +204,7 @@ let value = invoke ts.to_number(builtin_arg_9)
 function ts.math.atanh(this: Any, args: List(Any)) -> Any
 kernel 1
 errors "type_error", "RangeError"
-charge sum(8, deep(result))
+charge sum(8, deep(args), deep(result))
 body {
   let args = invoke ts.pad(args, 1)
   let builtin_arg_10 = args[0]
@@ -215,7 +215,7 @@ let value = invoke ts.to_number(builtin_arg_10)
 function ts.math.cbrt(this: Any, args: List(Any)) -> Any
 kernel 1
 errors "type_error", "RangeError"
-charge sum(8, deep(result))
+charge sum(8, deep(args), deep(result))
 body {
   let args = invoke ts.pad(args, 1)
   let builtin_arg_11 = args[0]
@@ -226,7 +226,7 @@ let value = invoke ts.to_number(builtin_arg_11)
 function ts.math.cos(this: Any, args: List(Any)) -> Any
 kernel 1
 errors "type_error", "RangeError"
-charge sum(8, deep(result))
+charge sum(8, deep(args), deep(result))
 body {
   let args = invoke ts.pad(args, 1)
   let builtin_arg_12 = args[0]
@@ -237,7 +237,7 @@ let value = invoke ts.to_number(builtin_arg_12)
 function ts.math.cosh(this: Any, args: List(Any)) -> Any
 kernel 1
 errors "type_error", "RangeError"
-charge sum(8, deep(result))
+charge sum(8, deep(args), deep(result))
 body {
   let args = invoke ts.pad(args, 1)
   let builtin_arg_13 = args[0]
@@ -248,7 +248,7 @@ let value = invoke ts.to_number(builtin_arg_13)
 function ts.math.exp(this: Any, args: List(Any)) -> Any
 kernel 1
 errors "type_error", "RangeError"
-charge sum(8, deep(result))
+charge sum(8, deep(args), deep(result))
 body {
   let args = invoke ts.pad(args, 1)
   let builtin_arg_14 = args[0]
@@ -259,7 +259,7 @@ let value = invoke ts.to_number(builtin_arg_14)
 function ts.math.expm1(this: Any, args: List(Any)) -> Any
 kernel 1
 errors "type_error", "RangeError"
-charge sum(8, deep(result))
+charge sum(8, deep(args), deep(result))
 body {
   let args = invoke ts.pad(args, 1)
   let builtin_arg_15 = args[0]
@@ -270,7 +270,7 @@ let value = invoke ts.to_number(builtin_arg_15)
 function ts.math.log(this: Any, args: List(Any)) -> Any
 kernel 1
 errors "type_error", "RangeError"
-charge sum(8, deep(result))
+charge sum(8, deep(args), deep(result))
 body {
   let args = invoke ts.pad(args, 1)
   let builtin_arg_16 = args[0]
@@ -281,7 +281,7 @@ let value = invoke ts.to_number(builtin_arg_16)
 function ts.math.log1p(this: Any, args: List(Any)) -> Any
 kernel 1
 errors "type_error", "RangeError"
-charge sum(8, deep(result))
+charge sum(8, deep(args), deep(result))
 body {
   let args = invoke ts.pad(args, 1)
   let builtin_arg_17 = args[0]
@@ -292,7 +292,7 @@ let value = invoke ts.to_number(builtin_arg_17)
 function ts.math.log10(this: Any, args: List(Any)) -> Any
 kernel 1
 errors "type_error", "RangeError"
-charge sum(8, deep(result))
+charge sum(8, deep(args), deep(result))
 body {
   let args = invoke ts.pad(args, 1)
   let builtin_arg_18 = args[0]
@@ -303,7 +303,7 @@ let value = invoke ts.to_number(builtin_arg_18)
 function ts.math.log2(this: Any, args: List(Any)) -> Any
 kernel 1
 errors "type_error", "RangeError"
-charge sum(8, deep(result))
+charge sum(8, deep(args), deep(result))
 body {
   let args = invoke ts.pad(args, 1)
   let builtin_arg_19 = args[0]
@@ -314,7 +314,7 @@ let value = invoke ts.to_number(builtin_arg_19)
 function ts.math.sin(this: Any, args: List(Any)) -> Any
 kernel 1
 errors "type_error", "RangeError"
-charge sum(8, deep(result))
+charge sum(8, deep(args), deep(result))
 body {
   let args = invoke ts.pad(args, 1)
   let builtin_arg_20 = args[0]
@@ -325,7 +325,7 @@ let value = invoke ts.to_number(builtin_arg_20)
 function ts.math.sinh(this: Any, args: List(Any)) -> Any
 kernel 1
 errors "type_error", "RangeError"
-charge sum(8, deep(result))
+charge sum(8, deep(args), deep(result))
 body {
   let args = invoke ts.pad(args, 1)
   let builtin_arg_21 = args[0]
@@ -336,7 +336,7 @@ let value = invoke ts.to_number(builtin_arg_21)
 function ts.math.tan(this: Any, args: List(Any)) -> Any
 kernel 1
 errors "type_error", "RangeError"
-charge sum(8, deep(result))
+charge sum(8, deep(args), deep(result))
 body {
   let args = invoke ts.pad(args, 1)
   let builtin_arg_22 = args[0]
@@ -347,7 +347,7 @@ let value = invoke ts.to_number(builtin_arg_22)
 function ts.math.tanh(this: Any, args: List(Any)) -> Any
 kernel 1
 errors "type_error", "RangeError"
-charge sum(8, deep(result))
+charge sum(8, deep(args), deep(result))
 body {
   let args = invoke ts.pad(args, 1)
   let builtin_arg_23 = args[0]
@@ -358,7 +358,7 @@ let value = invoke ts.to_number(builtin_arg_23)
 function ts.math.sqrt(this: Any, args: List(Any)) -> Any
 kernel 1
 errors "type_error", "RangeError"
-charge sum(8, deep(result))
+charge sum(8, deep(args), deep(result))
 body {
   let args = invoke ts.pad(args, 1)
   let builtin_arg_24 = args[0]
@@ -369,7 +369,7 @@ let value = invoke ts.to_number(builtin_arg_24)
 function ts.math.round(this: Any, args: List(Any)) -> Any
 kernel 1
 errors "type_error", "RangeError"
-charge sum(8, deep(result))
+charge sum(8, deep(args), deep(result))
 body {
   let args = invoke ts.pad(args, 1)
   let builtin_arg_25 = args[0]
@@ -380,7 +380,7 @@ let value = invoke ts.to_number(builtin_arg_25)
 function ts.math.atan2(this: Any, args: List(Any)) -> Any
 kernel 1
 errors "type_error", "RangeError"
-charge sum(8, deep(result))
+charge sum(8, deep(args), deep(result))
 body {
   let args = invoke ts.pad(args, 2)
   let builtin_arg_26 = args[0]
@@ -393,7 +393,7 @@ let b = invoke ts.to_number(builtin_arg_27)
 function ts.math.pow(this: Any, args: List(Any)) -> Any
 kernel 1
 errors "type_error", "RangeError"
-charge sum(8, deep(result))
+charge sum(8, deep(args), deep(result))
 body {
   let args = invoke ts.pad(args, 2)
   let builtin_arg_28 = args[0]
@@ -405,7 +405,7 @@ let output = invoke ts.pow(builtin_arg_28, builtin_arg_29)
 function ts.math.max(this: Any, args: List(Any)) -> Any
 kernel 1
 errors "type_error", "RangeError"
-charge sum(8, deep(result))
+charge sum(8, deep(args), deep(result))
 body {
   let output = -inf
   for arg in args {
@@ -418,7 +418,7 @@ body {
 function ts.math.min(this: Any, args: List(Any)) -> Any
 kernel 1
 errors "type_error", "RangeError"
-charge sum(8, deep(result))
+charge sum(8, deep(args), deep(result))
 body {
   let output = inf
   for arg in args {
@@ -431,7 +431,7 @@ body {
 function ts.math.hypot(this: Any, args: List(Any)) -> Any
 kernel 1
 errors "type_error", "RangeError"
-charge sum(8, deep(result))
+charge sum(8, deep(args), deep(result))
 body {
   let values = []
   let infinite = false
@@ -459,7 +459,7 @@ body {
 function ts.math.imul(this: Any, args: List(Any)) -> Any
 kernel 1
 errors "type_error", "RangeError"
-charge sum(8, deep(result))
+charge sum(8, deep(args), deep(result))
 body {
   let args = invoke ts.pad(args, 2)
   let builtin_arg_30 = args[0]
@@ -474,7 +474,7 @@ let output = invoke ts.wrap_int32(builtin_arg_32)
 function ts.math.clz32(this: Any, args: List(Any)) -> Any
 kernel 1
 errors "type_error", "RangeError"
-charge sum(8, deep(result))
+charge sum(8, deep(args), deep(result))
 body {
   let args = invoke ts.pad(args, 1)
   let builtin_arg_33 = args[0]
@@ -491,7 +491,7 @@ let value = invoke ts.to_int32(builtin_arg_33)
 function ts.math.fround(this: Any, args: List(Any)) -> Any
 kernel 1
 errors "type_error", "RangeError"
-charge sum(8, deep(result))
+charge sum(8, deep(args), deep(result))
 body {
   let args = invoke ts.pad(args, 1)
   let builtin_arg_34 = args[0]

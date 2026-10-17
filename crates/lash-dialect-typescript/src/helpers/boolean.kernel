@@ -11,7 +11,7 @@ use ts.to_boolean
 function ts.boolean.convert(this: Any, args: List(Any)) -> Any
 kernel 1
 errors "type_error", "RangeError"
-charge sum(8, deep(result))
+charge sum(8, deep(args), deep(result))
 body {
   let args = invoke ts.pad(args, 1)
   let builtin_arg_0 = args[0]

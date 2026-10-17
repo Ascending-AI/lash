@@ -78,8 +78,11 @@ the catalog exposes every body. The bodies are written in kernel text.
   Reads charge the index/key and lookup sizes; copies and traversal charge
   argument/result sizes; equality scans charge deep contents and each candidate
   comparison; sort declares `1 + 256 * size(xs) * (1 + ceil_log2(size(xs)))`,
-  bounding copying, merging and publication. Callback work and ordinary
-  body forms are charged by the VM as well. Charges do not depend on caches.
+  bounding copying, merging and publication. Completion formulas cover body
+  forms and nested library calls. Dynamic or shrinking traversals declare
+  metered loop tests, including sort's captured copy when a comparator mutates
+  the input. Guest callbacks and closures keep ordinary charges (K-CHG-007).
+  Charges do not depend on caches.
 
 This completes the collection definitions of the 1.0 baseline. Native functions
 read and allocate only. A callback-taking definition never has a native path.

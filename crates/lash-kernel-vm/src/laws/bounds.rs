@@ -279,57 +279,6 @@ fn a_shared_object_is_charged_once_in_a_wide_graph() {
     );
 }
 
-/// `K-CHG-007`: a helper, a function with only a kernel-code body, is
-/// ordinary code: its forms are charged as they run, so a helper that runs
-/// away ends at the charge bound like any other code. (A function with a native
-/// implementation is still charged its formula alone, whichever of its
-/// implementations runs: `laws::layout::a_native_implementation_and_a_kernel_body_run_the_same`.)
-#[test]
-fn a_helper_that_runs_away_ends_at_the_charge_bound() {
-    let library = library(true);
-    let mut registry = (*library.registry).clone();
-    let id = |name: &str| library.ids[name];
-    let uses = format!(
-        "use num.lt = @{}\nuse num.add = @{}\n",
-        id("num.lt"),
-        id("num.add")
-    );
-    let spin = parse_definition(&format!(
-        "function probe.spin(n: Any) -> Any\nkernel 1\ncharge 1\n{uses}\
-         body {{ let i = 0 while num.lt(i, n) {{ set i = num.add(i, 1) }} return i }}\n"
-    ))
-    .unwrap();
-    let spin = registry.register(spin, None).unwrap();
-    let text = format!(
-        "numbers by_spelling\nkernel 1\nuse probe.spin = @{spin}\n\
-         main {{ let n = invoke probe.spin(200000) return n }}\n"
-    );
-    let program = Program {
-        release: lash_kernel_doc::heap::PageId([8; 32]),
-        document: Arc::new(parse_document(&text).unwrap()),
-        library: crate::PreparedLibrary::new(Arc::new(registry)),
-    };
-    let start = CellStart {
-        target: Target::Main,
-        args: Vec::new(),
-        session: None,
-        owner: lash_kernel_doc::heap::PageId([9; 32]),
-        modes: crate::EffectModes::recorded(),
-        host: Vec::new(),
-    };
-    let bounds = Bounds {
-        charge: 10_000,
-        ..ROOMY
-    };
-    let mut machine = super::embedder::start_machine(program, bounds, start).unwrap();
-    match machine.run(&mut World::default(), u64::MAX).unwrap() {
-        Step::Ended(End::Error(RunError::Bound(exceeded))) => {
-            assert_eq!((exceeded.bound, exceeded.limit), (Bound::Charge, 10_000));
-        }
-        other => panic!("the helper's loop was not charged: {other:?}"),
-    }
-}
-
 /// `K-CHG-007`, `K-LIB-004`: a closure made in the body of a function with a
 /// native implementation runs only where it is applied, which that body
 /// cannot do, so it is ordinary code: one that escapes the body and runs
@@ -379,47 +328,6 @@ fn a_closure_a_native_backed_body_makes_is_charged_where_it_runs() {
         }
         other => panic!("the escaped closure's loop was not charged: {other:?}"),
     }
-}
-
-/// `K-CHG-007`: a helper's charge is its body's work; its formula is not
-/// charged on top. Two helpers with one body and different formulas cost
-/// the same.
-#[test]
-fn a_helper_is_charged_its_body_and_not_its_formula() {
-    let charged = |formula: &str| {
-        let library = library(true);
-        let mut registry = (*library.registry).clone();
-        let uses = format!("use num.add = @{}\n", library.ids["num.add"]);
-        let step = parse_definition(&format!(
-            "function probe.step(n: Any) -> Any\nkernel 1\ncharge {formula}\n{uses}\
-             body {{ return num.add(n, 1) }}\n"
-        ))
-        .unwrap();
-        let step = registry.register(step, None).unwrap();
-        let text = format!(
-            "numbers by_spelling\nkernel 1\nuse probe.step = @{step}\n\
-             main {{ let n = invoke probe.step(1) return n }}\n"
-        );
-        let program = Program {
-            release: lash_kernel_doc::heap::PageId([8; 32]),
-            document: Arc::new(parse_document(&text).unwrap()),
-            library: crate::PreparedLibrary::new(Arc::new(registry)),
-        };
-        let start = CellStart {
-            target: Target::Main,
-            args: Vec::new(),
-            session: None,
-            owner: lash_kernel_doc::heap::PageId([9; 32]),
-            modes: crate::EffectModes::recorded(),
-            host: Vec::new(),
-        };
-        let mut machine = super::embedder::start_machine(program, ROOMY, start).unwrap();
-        match machine.run(&mut World::default(), u64::MAX).unwrap() {
-            Step::Ended(End::Finished(_)) => machine.meters().charged,
-            other => panic!("the helper did not finish: {other:?}"),
-        }
-    };
-    assert_eq!(charged("1"), charged("100000"));
 }
 
 /// A run exactly at each bound passes none of them, and

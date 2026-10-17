@@ -61,7 +61,7 @@ body {
 function ts.set.construct(this: Any, args: List(Any)) -> Any
 kernel 1
 errors "type_error", "RangeError"
-charge sum(8, deep(result))
+charge sum(8, deep(args), deep(result))
 body {
   let args = invoke ts.pad(args, 1)
   let output = set{}
@@ -97,7 +97,7 @@ body {
 function ts.set.add(this: Any, args: List(Any)) -> Any
 kernel 1
 errors "type_error", "RangeError"
-charge sum(8, deep(result))
+charge sum(8, deep(this), deep(args), deep(result))
 body {
   if same(kind(this), "set") {} else { throw error.new("type_error", "Set receiver required", null) }
   let args = invoke ts.pad(args, 1)
@@ -110,7 +110,7 @@ let key = invoke ts.map.key(builtin_arg_0)
 function ts.set.has(this: Any, args: List(Any)) -> Any
 kernel 1
 errors "type_error", "RangeError"
-charge sum(8, deep(result))
+charge sum(8, deep(this), deep(args), deep(result))
 body {
   if same(kind(this), "set") {} else { throw error.new("type_error", "Set receiver required", null) }
   let args = invoke ts.pad(args, 1)
@@ -122,7 +122,7 @@ let key = invoke ts.map.key(builtin_arg_1)
 function ts.set.delete(this: Any, args: List(Any)) -> Any
 kernel 1
 errors "type_error", "RangeError"
-charge sum(8, deep(result))
+charge sum(8, deep(this), deep(args), deep(result))
 body {
   if same(kind(this), "set") {} else { throw error.new("type_error", "Set receiver required", null) }
   let args = invoke ts.pad(args, 1)
@@ -136,17 +136,17 @@ let key = invoke ts.map.key(builtin_arg_2)
 function ts.set.clear(this: Any, args: List(Any)) -> Any
 kernel 1
 errors "type_error", "RangeError"
-charge sum(8, deep(result))
+charge sum(8, deep(this), deep(result))
 body {
   if same(kind(this), "set") {} else { throw error.new("type_error", "Set receiver required", null) }
-  for key in set.values(this) { set this[key] = false }
+  for key in set.values(this) metered 2 { set this[key] = false }
   return absent
 }
 
 function ts.set.values(this: Any, args: List(Any)) -> Any
 kernel 1
 errors "type_error", "RangeError"
-charge sum(8, deep(result))
+charge sum(8, deep(this), deep(result))
 body {
   if same(kind(this), "set") {} else { throw error.new("type_error", "Set receiver required", null) }
   let output = []
@@ -160,7 +160,7 @@ body {
 function ts.set.entries(this: Any, args: List(Any)) -> Any
 kernel 1
 errors "type_error", "RangeError"
-charge sum(8, deep(result))
+charge sum(8, deep(this), deep(result))
 body {
   if same(kind(this), "set") {} else { throw error.new("type_error", "Set receiver required", null) }
   let output = []
@@ -174,14 +174,14 @@ body {
 function ts.set.forEach(this: Any, args: List(Any)) -> Any
 kernel 1
 errors "type_error", "RangeError"
-charge sum(8, deep(result))
+charge sum(8, deep(this), deep(args), deep(result))
 body {
   if same(kind(this), "set") {} else { throw error.new("type_error", "Set receiver required", null) }
   let args = invoke ts.pad(args, 2)
   let callback = args[0]
   set callback = invoke ts.callable(callback)
   let receiver = args[1]
-  for key in this {
+  for key in this metered 2 {
     let value = invoke ts.map.value(key)
     let passed = [value, value, this]
     do apply callback(receiver, passed)
@@ -228,17 +228,17 @@ body {
 function ts.set.union(this: Any, args: List(Any)) -> Any
 kernel 1
 errors "type_error", "RangeError"
-charge sum(8, deep(result))
+charge sum(8, deep(this), deep(args), deep(result))
 body {
   if same(kind(this), "set") {} else { throw error.new("type_error", "Set receiver required", null) }
   let args = invoke ts.pad(args, 1)
   let other = args[0]
   let other = invoke ts.set.other(other)
   let output = set{}
-  for key in this {
+  for key in this metered 2 {
     set output[key] = true
   }
-  for key in other {
+  for key in other metered 2 {
     set output[key] = true
   }
   return output
@@ -247,7 +247,7 @@ body {
 function ts.set.intersection(this: Any, args: List(Any)) -> Any
 kernel 1
 errors "type_error", "TS_METHOD_UNSUPPORTED"
-charge sum(8, deep(result))
+charge sum(8, deep(this), deep(args), deep(result))
 body {
   if same(kind(this), "set") {} else { throw error.new("type_error", "Set receiver required", null) }
   let args = invoke ts.pad(args, 1)
@@ -256,12 +256,12 @@ body {
   let output = set{}
   let size = invoke ts.set.other_size(other)
   if num.le(set.len(this), size) {
-    for key in this {
+    for key in this metered 2 {
       let present = invoke ts.set.contains_other(other, key)
       if present { set output[key] = true }
     }
   } else {
-    for key in other {
+    for key in other metered 2 {
       if set.contains(this, key) { set output[key] = true }
     }
   }
@@ -271,14 +271,14 @@ body {
 function ts.set.difference(this: Any, args: List(Any)) -> Any
 kernel 1
 errors "type_error", "RangeError"
-charge sum(8, deep(result))
+charge sum(8, deep(this), deep(args), deep(result))
 body {
   if same(kind(this), "set") {} else { throw error.new("type_error", "Set receiver required", null) }
   let args = invoke ts.pad(args, 1)
   let other = args[0]
   let other = invoke ts.set.other(other)
   let output = set{}
-  for key in this {
+  for key in this metered 2 {
     let present = invoke ts.set.contains_other(other, key)
     if present {} else { set output[key] = true }
   }
@@ -288,18 +288,18 @@ body {
 function ts.set.symmetricDifference(this: Any, args: List(Any)) -> Any
 kernel 1
 errors "type_error", "RangeError"
-charge sum(8, deep(result))
+charge sum(8, deep(this), deep(args), deep(result))
 body {
   if same(kind(this), "set") {} else { throw error.new("type_error", "Set receiver required", null) }
   let args = invoke ts.pad(args, 1)
   let other = args[0]
   let other = invoke ts.set.other(other)
   let output = set{}
-  for key in this {
+  for key in this metered 2 {
     let present = invoke ts.set.contains_other(other, key)
     if present {} else { set output[key] = true }
   }
-  for key in other {
+  for key in other metered 2 {
     if set.contains(this, key) {} else { set output[key] = true }
   }
   return output
@@ -308,14 +308,14 @@ body {
 function ts.set.isSubsetOf(this: Any, args: List(Any)) -> Any
 kernel 1
 errors "type_error", "RangeError"
-charge sum(8, deep(result))
+charge sum(8, deep(this), deep(args), deep(result))
 body {
   if same(kind(this), "set") {} else { throw error.new("type_error", "Set receiver required", null) }
   let args = invoke ts.pad(args, 1)
   let other = args[0]
   let other = invoke ts.set.other(other)
   let output = set{}
-  for key in this {
+  for key in this metered 2 {
     let present = invoke ts.set.contains_other(other, key)
     if present {} else { return false }
   }
@@ -325,14 +325,14 @@ body {
 function ts.set.isSupersetOf(this: Any, args: List(Any)) -> Any
 kernel 1
 errors "type_error", "RangeError"
-charge sum(8, deep(result))
+charge sum(8, deep(this), deep(args), deep(result))
 body {
   if same(kind(this), "set") {} else { throw error.new("type_error", "Set receiver required", null) }
   let args = invoke ts.pad(args, 1)
   let other = args[0]
   let other = invoke ts.set.other(other)
   let output = set{}
-  for key in other {
+  for key in other metered 2 {
     if set.contains(this, key) {} else { return false }
   }
   return true
@@ -341,14 +341,14 @@ body {
 function ts.set.isDisjointFrom(this: Any, args: List(Any)) -> Any
 kernel 1
 errors "type_error", "RangeError"
-charge sum(8, deep(result))
+charge sum(8, deep(this), deep(args), deep(result))
 body {
   if same(kind(this), "set") {} else { throw error.new("type_error", "Set receiver required", null) }
   let args = invoke ts.pad(args, 1)
   let other = args[0]
   let other = invoke ts.set.other(other)
   let output = set{}
-  for key in this {
+  for key in this metered 2 {
     let present = invoke ts.set.contains_other(other, key)
     if present { return false }
   }

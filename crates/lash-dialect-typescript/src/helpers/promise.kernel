@@ -266,7 +266,7 @@ body {
 # already fulfilled with it.
 function ts.promise.members(items: Any) -> Any
 kernel 1
-charge sum(8, size(items))
+charge sum(8, size(items), size(result))
 body {
   let elements = invoke ts.iterate(items)
   let tasks = []
@@ -328,7 +328,7 @@ body {
 # `Promise.all(items)`: `join all` (`K-TASK-011`).
 function ts.promise.all(this: Any, args: List(Any)) -> Any
 kernel 1
-charge 48
+charge sum(48, deep(args))
 body {
   let padded = invoke ts.pad(args, 1.0)
   let items = padded[0]
@@ -351,7 +351,7 @@ body {
 # under the names JavaScript gives it.
 function ts.promise.all_settled(this: Any, args: List(Any)) -> Any
 kernel 1
-charge 48
+charge sum(48, deep(args))
 body {
   let padded = invoke ts.pad(args, 1.0)
   let items = padded[0]
@@ -382,7 +382,7 @@ body {
 # its reaction now; a pending member queues it when that member settles.
 function ts.promise.reactions(items: Any) -> Any
 kernel 1
-charge sum(8, size(items))
+charge sum(8, size(items), size(result))
 body {
   let elements = invoke ts.iterate(items)
   let tasks = []
@@ -405,7 +405,7 @@ body {
 # `Promise.race(items)`: `join race` (`K-TASK-013`).
 function ts.promise.race(this: Any, args: List(Any)) -> Any
 kernel 1
-charge 48
+charge sum(48, deep(args))
 body {
   let padded = invoke ts.pad(args, 1.0)
   let items = padded[0]
@@ -431,7 +431,7 @@ body {
 # whose data holds the members' reasons under `errors`.
 function ts.promise.any(this: Any, args: List(Any)) -> Any
 kernel 1
-charge 48
+charge sum(48, deep(args))
 body {
   let padded = invoke ts.pad(args, 1.0)
   let items = padded[0]

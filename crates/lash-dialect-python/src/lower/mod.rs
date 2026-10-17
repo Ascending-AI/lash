@@ -979,6 +979,7 @@ impl Lowerer<'_> {
         let blocks = loop_blocks(body.notes, &orelse);
         self.push(
             Stmt::While {
+                metered: 0,
                 condition,
                 body: body.stmts,
                 else_block: orelse.stmts,
@@ -998,6 +999,7 @@ impl Lowerer<'_> {
         let blocks = loop_blocks(body.notes, &orelse);
         self.push(
             Stmt::For {
+                metered: 0,
                 binding,
                 iterable,
                 via,

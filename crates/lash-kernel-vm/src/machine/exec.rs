@@ -438,7 +438,7 @@ impl KernelMachine {
         };
         self.refresh_charging(task, exe)?;
         if let Some(call) = &frame.library {
-            let evaluates = self.charging && exe.lib(call.lib).native;
+            let evaluates = self.charging;
             let units = self.in_formula(call.lib, evaluates, |machine| {
                 machine.call_units_tree(exe, call.lib, &call.args, result.as_ref().ok())
             })?;
@@ -500,9 +500,8 @@ impl KernelMachine {
     }
 
     /// What a library call is charged by its definition's formula
-    /// (`K-CHG-003`). A call that raised has a result of size 0. A function
-    /// with only a kernel-code body is charged nothing here: its body was
-    /// charged as it ran (`K-CHG-007`).
+    /// (`K-CHG-003`). A call that raised has a result of size 0.
+    /// Calls within library bodies add no formula charge (`K-CHG-007`).
     pub(super) fn call_units(
         &self,
         exe: &Executable,
@@ -510,16 +509,13 @@ impl KernelMachine {
         args: &[Value],
         result: Option<&Value>,
     ) -> Result<u64, Halt> {
-        // Inside the body of a function with a native implementation
-        // nothing is charged (`K-CHG-007`), so the formula, whose deep sizes
+        // Inside a library body, nested calls are covered by the caller's
+        // formula (`K-CHG-007`), so this formula, whose deep sizes
         // walk whole graphs, is not evaluated.
         if !self.charging {
             return Ok(0);
         }
         let function = exe.lib(lib);
-        if !function.native {
-            return Ok(0);
-        }
         self.formula(&function.charge, args, result)
     }
 
@@ -560,7 +556,7 @@ impl KernelMachine {
         args: &super::Tree<Value>,
         result: Option<&Value>,
     ) -> Result<u64, Halt> {
-        if !self.charging || !exe.lib(lib).native {
+        if !self.charging {
             return Ok(0);
         }
         self.formula_source(
@@ -743,19 +739,31 @@ impl KernelMachine {
         });
         if let Some(lib) = library {
             let mut args = super::Tree::new(true);
-            if exe.lib(lib).native {
-                for at in 0..given {
-                    let given = self.regs[base + at].clone();
-                    let value = self.heap_write(|heap| {
+            // Nested calls are covered by their caller's schedule. A new
+            // task has no enclosing library frame, so its root bills its own
+            // formula even when an uncharged library body spawned it.
+            let keep_arguments = self.charging || self.task(task)?.frames.is_empty();
+            for at in 0..if keep_arguments { given } else { 0 } {
+                let given = self.regs[base + at].clone();
+                // Immediate arguments are already canonical. Keep the
+                // original value without entering the heap retry path.
+                let immediate = matches!(
+                    &given,
+                    Value::Null | Value::Absent | Value::Bool(_) | Value::Float(_)
+                ) || matches!(&given, Value::Int(lash_kernel_doc::heap::IntRef::Inline(n)) if n.bits() <= 64);
+                let value = if immediate {
+                    given
+                } else {
+                    self.heap_write(|heap| {
                         heap.canonical_value(given.clone())
                             .map_err(super::write_halt)
-                    })?;
-                    args.write(
-                        lash_kernel_state::kernel_internals::directory::ordinal_key(at as u64),
-                        value,
-                        self.heap.pages(),
-                    )?;
-                }
+                    })?
+                };
+                args.write(
+                    lash_kernel_state::kernel_internals::directory::ordinal_key(at as u64),
+                    value,
+                    self.heap.pages(),
+                )?;
             }
             frame.library = Some(LibraryCall { lib, args });
         }

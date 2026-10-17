@@ -94,7 +94,7 @@ body {
 function ts.object.convert(this: Any, args: List(Any)) -> Any
 kernel 1
 errors "type_error", "RangeError"
-charge sum(8, deep(result))
+charge sum(8, deep(args), deep(result))
 body {
   let args = invoke ts.pad(args, 1)
   let value = args[0]
@@ -108,7 +108,7 @@ body {
 function ts.object.keys(this: Any, args: List(Any)) -> Any
 kernel 1
 errors "type_error", "RangeError"
-charge sum(8, deep(result))
+charge sum(8, deep(args), deep(result))
 body {
   let args = invoke ts.pad(args, 1)
   let builtin_arg_1 = args[0]
@@ -121,7 +121,7 @@ let output = invoke ts.object.own_keys(builtin_arg_2)
 function ts.object.values(this: Any, args: List(Any)) -> Any
 kernel 1
 errors "type_error", "RangeError"
-charge sum(8, deep(result))
+charge sum(8, deep(args), deep(result))
 body {
   let args = invoke ts.pad(args, 1)
   let target = args[0]
@@ -138,7 +138,7 @@ body {
 function ts.object.entries(this: Any, args: List(Any)) -> Any
 kernel 1
 errors "type_error", "RangeError"
-charge sum(8, deep(result))
+charge sum(8, deep(args), deep(result))
 body {
   let args = invoke ts.pad(args, 1)
   let target = args[0]
@@ -155,7 +155,7 @@ body {
 function ts.object.fromEntries(this: Any, args: List(Any)) -> Any
 kernel 1
 errors "type_error", "RangeError"
-charge sum(8, deep(result))
+charge sum(8, deep(args), deep(result))
 body {
   let args = invoke ts.pad(args, 1)
   let builtin_arg_3 = args[0]
@@ -177,7 +177,7 @@ let source = invoke ts.iterate(builtin_arg_3)
 function ts.object.assign(this: Any, args: List(Any)) -> Any
 kernel 1
 errors "type_error", "RangeError"
-charge sum(8, deep(result))
+charge sum(8, deep(args), deep(result))
 body {
   let args = invoke ts.pad(args, 1)
   let target = args[0]
@@ -200,7 +200,7 @@ body {
 function ts.object.hasOwn(this: Any, args: List(Any)) -> Any
 kernel 1
 errors "type_error", "RangeError"
-charge sum(8, deep(result))
+charge sum(8, deep(args), deep(result))
 body {
   let args = invoke ts.pad(args, 2)
   let builtin_arg_4 = args[0]
@@ -214,7 +214,7 @@ let output = invoke ts.has_own(builtin_arg_5, builtin_arg_6)
 function ts.object.is(this: Any, args: List(Any)) -> Any
 kernel 1
 errors "type_error", "RangeError"
-charge sum(8, deep(result))
+charge sum(8, deep(args), deep(result))
 body {
   let args = invoke ts.pad(args, 2)
   let a = args[0]
@@ -234,7 +234,7 @@ body {
 function ts.object.groupBy(this: Any, args: List(Any)) -> Any
 kernel 1
 errors "type_error", "RangeError"
-charge sum(8, deep(result))
+charge sum(8, deep(args), deep(result))
 body {
   let args = invoke ts.pad(args, 2)
   let callback = args[1]

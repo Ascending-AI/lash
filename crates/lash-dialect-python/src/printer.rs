@@ -187,6 +187,13 @@ impl Renderer<'_> {
         self.scope.types.statement(stmt, self.operators.functions());
     }
     fn render_statement(&mut self, stmt: &k::Stmt) {
+        if matches!(stmt, k::Stmt::For { metered, .. } | k::Stmt::While { metered, .. } if *metered != 0)
+        {
+            self.out.refuse(PrintError::Invalid(
+                "a metered library loop requires kernel text".into(),
+            ));
+            return;
+        }
         if self.readable_statement(stmt) {
             return;
         }
@@ -250,6 +257,7 @@ impl Renderer<'_> {
                 via,
                 body,
                 else_block,
+                ..
             } => {
                 self.out.write("with k.for_(");
                 self.name(binding);
@@ -276,6 +284,7 @@ impl Renderer<'_> {
                 condition,
                 body,
                 else_block,
+                ..
             } => {
                 self.out.write("with k.while_(");
                 self.suite();

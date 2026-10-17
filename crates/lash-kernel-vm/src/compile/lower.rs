@@ -214,6 +214,7 @@ impl Compiler<'_> {
                 }
             }
             doc::Stmt::For {
+                metered,
                 binding,
                 iterable,
                 via,
@@ -233,6 +234,7 @@ impl Compiler<'_> {
                 }
                 ops.push(Op::ForIn { iterable: Reg(0) });
                 Form::For {
+                    metered: *metered,
                     site: self.site(),
                     binding: Local::unplaced(bound.first().copied().unwrap_or(0)),
                     via: via.and_then(Result::ok),
@@ -241,6 +243,7 @@ impl Compiler<'_> {
                 }
             }
             doc::Stmt::While {
+                metered,
                 condition,
                 body,
                 else_block,
@@ -251,6 +254,7 @@ impl Compiler<'_> {
                 self.child(0, |c| c.expr(&mut ops, condition, Reg(0)));
                 ops.push(Op::Test { cond: Reg(0) });
                 Form::While {
+                    metered: *metered,
                     site: self.site(),
                     test: OpRange { start: 1, len: 0 },
                     body: self.child(1, |c| c.block(body, &[]).0),

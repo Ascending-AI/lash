@@ -174,6 +174,7 @@ pub(crate) fn replace_in_block(block: &mut Block, functions: &BTreeMap<FunctionI
                 condition,
                 body,
                 else_block,
+                ..
             } => {
                 replace_in_expr(condition, functions);
                 replace_in_block(body, functions);

@@ -918,14 +918,27 @@ impl TokenCodec for Stmt {
                 else_block.encode(out);
             }
             Self::For {
+                metered,
                 binding,
                 iterable,
                 via,
                 body,
                 else_block,
             } => {
-                let extended = number == 15;
-                out.sum(number, if extended { 5 } else { 3 });
+                let extended = number != 5;
+                out.sum(
+                    number,
+                    if number == 19 {
+                        6
+                    } else if extended {
+                        5
+                    } else {
+                        3
+                    },
+                );
+                if number == 19 {
+                    metered.encode(out);
+                }
                 binding.encode(out);
                 iterable.encode(out);
                 if extended {
@@ -937,12 +950,25 @@ impl TokenCodec for Stmt {
                 }
             }
             Self::While {
+                metered,
                 condition,
                 body,
                 else_block,
             } => {
-                let extended = number == 16;
-                out.sum(number, if extended { 3 } else { 2 });
+                let extended = number != 6;
+                out.sum(
+                    number,
+                    if number == 20 {
+                        4
+                    } else if extended {
+                        3
+                    } else {
+                        2
+                    },
+                );
+                if number == 20 {
+                    metered.encode(out);
+                }
                 condition.encode(out);
                 body.encode(out);
                 if extended {
@@ -977,6 +1003,8 @@ impl TokenCodec for Stmt {
                 2 | 3 | 9..=14 => Some(1),
                 4 | 5 | 16 => Some(3),
                 15 => Some(5),
+                19 => Some(6),
+                20 => Some(4),
                 7 | 8 => Some(0),
                 _ => None,
             })?;
@@ -1007,6 +1035,7 @@ impl TokenCodec for Stmt {
                     else_block: Vec::decode(input)?,
                 },
                 5 => Self::For {
+                    metered: 0,
                     binding: Name::decode(input)?,
                     iterable: Expr::decode(input)?,
                     via: None,
@@ -1014,12 +1043,14 @@ impl TokenCodec for Stmt {
                     else_block: Vec::new(),
                 },
                 6 => Self::While {
+                    metered: 0,
                     condition: Expr::decode(input)?,
                     body: Vec::decode(input)?,
                     else_block: Vec::new(),
                 },
-                15 => {
+                15 | 19 => {
                     let stmt = Self::For {
+                        metered: if number == 19 { u64::decode(input)? } else { 0 },
                         binding: Name::decode(input)?,
                         iterable: Expr::decode(input)?,
                         via: Option::decode(input)?,
@@ -1027,19 +1058,20 @@ impl TokenCodec for Stmt {
                         else_block: Vec::decode(input)?,
                     };
                     // A loop with neither has the one encoding, number 5.
-                    if stmt.codec_variant() != 15 {
-                        return Err(unsupported(15));
+                    if stmt.codec_variant() != number {
+                        return Err(unsupported(number));
                     }
                     stmt
                 }
-                16 => {
+                16 | 20 => {
                     let stmt = Self::While {
+                        metered: if number == 20 { u64::decode(input)? } else { 0 },
                         condition: Expr::decode(input)?,
                         body: Vec::decode(input)?,
                         else_block: Vec::decode(input)?,
                     };
-                    if stmt.codec_variant() != 16 {
-                        return Err(unsupported(16));
+                    if stmt.codec_variant() != number {
+                        return Err(unsupported(number));
                     }
                     stmt
                 }

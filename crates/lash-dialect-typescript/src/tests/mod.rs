@@ -20,7 +20,6 @@ mod json;
 mod language;
 mod machine;
 mod module;
-mod numeric_helpers;
 mod operands;
 mod package;
 mod pages;

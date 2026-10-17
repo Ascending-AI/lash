@@ -45,7 +45,7 @@ body {
 function ts.uri.escape(octet: Int) -> Text
 kernel 1
 errors "type_error", "RangeError", "TS_LONE_SURROGATE_UNSUPPORTED"
-charge sum(8, deep(result))
+charge sum(8, size(octet), deep(result))
 body {
   let high = int.div_floor(octet, 16)
   let low = int.rem_floor(octet, 16)
@@ -57,7 +57,7 @@ body {
 function ts.uri.encode(input: Text, preserve: Bool) -> Text
 kernel 1
 errors "type_error", "RangeError", "TS_LONE_SURROGATE_UNSUPPORTED"
-charge sum(8, deep(result))
+charge sum(8, size(input), size(preserve), deep(result))
 body {
   let pieces = []
   let index = 0
@@ -117,7 +117,7 @@ body {
 function ts.uri.decode(input: Text, preserve: Bool) -> Text
 kernel 1
 errors "URIError"
-charge sum(8, deep(result))
+charge sum(8, size(input), size(preserve), deep(result))
 body {
   let pieces = []
   let octets = []
@@ -164,7 +164,7 @@ body {
 function ts.uri.encodeURI(this: Any, args: List(Any)) -> Text
 kernel 1
 errors "type_error", "URIError"
-charge sum(8, deep(result))
+charge sum(8, deep(args), deep(result))
 body {
   let padded = invoke ts.pad(args, 1)
   let arg_1 = padded[0]
@@ -176,7 +176,7 @@ body {
 function ts.uri.decodeURI(this: Any, args: List(Any)) -> Text
 kernel 1
 errors "type_error", "URIError"
-charge sum(8, deep(result))
+charge sum(8, deep(args), deep(result))
 body {
   let padded = invoke ts.pad(args, 1)
   let arg_2 = padded[0]
@@ -188,7 +188,7 @@ body {
 function ts.uri.encodeURIComponent(this: Any, args: List(Any)) -> Text
 kernel 1
 errors "type_error", "URIError"
-charge sum(8, deep(result))
+charge sum(8, deep(args), deep(result))
 body {
   let padded = invoke ts.pad(args, 1)
   let arg_3 = padded[0]
@@ -200,7 +200,7 @@ body {
 function ts.uri.decodeURIComponent(this: Any, args: List(Any)) -> Text
 kernel 1
 errors "type_error", "URIError"
-charge sum(8, deep(result))
+charge sum(8, deep(args), deep(result))
 body {
   let padded = invoke ts.pad(args, 1)
   let arg_4 = padded[0]

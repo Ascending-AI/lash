@@ -87,7 +87,7 @@ use ts.to_string
 function ts.string.integer(value: Any) -> Number
 kernel 1
 errors "type_error", "RangeError", "TS_LONE_SURROGATE_UNSUPPORTED"
-charge sum(8, deep(result))
+charge sum(8, deep(value), deep(result))
 body {
   let number = invoke ts.to_number(value)
   if num.is_nan(number) { return 0 }
@@ -110,7 +110,7 @@ body {
 function ts.string.relative(value: Any, length: Int) -> Int
 kernel 1
 errors "type_error", "RangeError", "TS_LONE_SURROGATE_UNSUPPORTED"
-charge sum(8, deep(result))
+charge sum(8, deep(value), size(length), deep(result))
 body {
   let index = invoke ts.string.integer(value)
   if num.lt(index, 0) { set index = num.add(length, index) }
@@ -121,7 +121,7 @@ body {
 function ts.string.length_value(value: Any) -> Int
 kernel 1
 errors "type_error", "RangeError", "TS_LONE_SURROGATE_UNSUPPORTED"
-charge sum(8, deep(result))
+charge sum(8, deep(value), deep(result))
 body {
   let n = invoke ts.string.integer(value)
   let output_value = invoke ts.string.clamp(n, 9007199254740991)
@@ -131,7 +131,7 @@ body {
 function ts.string.uint32(value: Any) -> Int
 kernel 1
 errors "type_error", "RangeError", "TS_LONE_SURROGATE_UNSUPPORTED"
-charge sum(8, deep(result))
+charge sum(8, deep(value), deep(result))
 body {
   let n = invoke ts.string.integer(value)
   if num.is_finite(n) {} else { return 0 }
@@ -141,7 +141,7 @@ body {
 function ts.string.receiver(this: Any) -> Text
 kernel 1
 errors "type_error", "RangeError", "TS_LONE_SURROGATE_UNSUPPORTED"
-charge sum(8, deep(result))
+charge sum(8, deep(this), deep(result))
 body {
   do invoke ts.require_object_coercible(this)
   let text = invoke ts.to_string(this)
@@ -151,7 +151,7 @@ body {
 function ts.string.slice_units(text: Text, start: Int, end: Int) -> Text
 kernel 1
 errors "type_error", "RangeError", "TS_LONE_SURROGATE_UNSUPPORTED"
-charge sum(8, deep(result))
+charge sum(8, size(text), size(start), size(end), deep(result))
 body {
   try { return text.utf16_slice(text, start, end) } catch boundary {
     if same(boundary.kind, "text_boundary") {
@@ -164,7 +164,7 @@ body {
 function ts.string.create(this: Any, args: List(Any)) -> Text
 kernel 1
 errors "type_error", "RangeError", "TS_LONE_SURROGATE_UNSUPPORTED"
-charge sum(8, deep(result))
+charge sum(8, deep(args), deep(result))
 body {
   if eq(list.len(args), 0) { return "" }
   let arg_1 = args[0]
@@ -175,7 +175,7 @@ body {
 function ts.string.length(this: Any) -> Float
 kernel 1
 errors "type_error", "RangeError", "TS_LONE_SURROGATE_UNSUPPORTED"
-charge sum(8, deep(result))
+charge sum(8, deep(this), deep(result))
 body {
   let text = invoke ts.string.receiver(this)
   return num.to_float(text.utf16_len(text))
@@ -202,7 +202,7 @@ body {
 function ts.string.at_generic(this: Any, args: List(Any)) -> Any
 kernel 1
 errors "type_error", "RangeError", "TS_LONE_SURROGATE_UNSUPPORTED"
-charge sum(8, deep(result))
+charge sum(8, deep(this), deep(args), deep(result))
 body {
   let text = invoke ts.string.receiver(this)
   let padded = invoke ts.pad(args, 1)
@@ -222,7 +222,7 @@ body {
 function ts.string.at(this: Any, args: List(Any)) -> Any
 kernel 1
 errors "type_error", "RangeError", "TS_LONE_SURROGATE_UNSUPPORTED"
-charge sum(8, deep(result))
+charge sum(8, deep(this), deep(args), deep(result))
 body {
   if same(kind(this), "text") {
     let input = absent
@@ -252,7 +252,7 @@ body {
 function ts.string.charAt(this: Any, args: List(Any)) -> Any
 kernel 1
 errors "type_error", "RangeError", "TS_LONE_SURROGATE_UNSUPPORTED"
-charge sum(8, deep(result))
+charge sum(8, deep(this), deep(args), deep(result))
 body {
   let text = invoke ts.string.receiver(this)
   let padded = invoke ts.pad(args, 1)
@@ -270,7 +270,7 @@ body {
 function ts.string.charCodeAt(this: Any, args: List(Any)) -> Any
 kernel 1
 errors "type_error", "RangeError", "TS_LONE_SURROGATE_UNSUPPORTED"
-charge sum(8, deep(result))
+charge sum(8, deep(this), deep(args), deep(result))
 body {
   let text = invoke ts.string.receiver(this)
   let padded = invoke ts.pad(args, 1)
@@ -287,7 +287,7 @@ body {
 function ts.string.codePointAt(this: Any, args: List(Any)) -> Any
 kernel 1
 errors "type_error", "RangeError", "TS_LONE_SURROGATE_UNSUPPORTED"
-charge sum(8, deep(result))
+charge sum(8, deep(this), deep(args), deep(result))
 body {
   let text = invoke ts.string.receiver(this)
   let padded = invoke ts.pad(args, 1)
@@ -317,7 +317,7 @@ body {
 function ts.string.slice_generic(this: Any, args: List(Any)) -> Text
 kernel 1
 errors "type_error", "RangeError", "TS_LONE_SURROGATE_UNSUPPORTED"
-charge sum(8, deep(result))
+charge sum(8, deep(this), deep(args), deep(result))
 body {
   let text = invoke ts.string.receiver(this)
   let padded = invoke ts.pad(args, 2)
@@ -337,7 +337,7 @@ body {
 function ts.string.slice(this: Any, args: List(Any)) -> Text
 kernel 1
 errors "type_error", "RangeError", "TS_LONE_SURROGATE_UNSUPPORTED"
-charge sum(8, deep(result))
+charge sum(8, deep(this), deep(args), deep(result))
 body {
   if same(kind(this), "text") {
     let lower = absent
@@ -376,7 +376,7 @@ body {
 function ts.string.substring_generic(this: Any, args: List(Any)) -> Text
 kernel 1
 errors "type_error", "RangeError", "TS_LONE_SURROGATE_UNSUPPORTED"
-charge sum(8, deep(result))
+charge sum(8, deep(this), deep(args), deep(result))
 body {
   let text = invoke ts.string.receiver(this)
   let padded = invoke ts.pad(args, 2)
@@ -402,7 +402,7 @@ body {
 function ts.string.substring(this: Any, args: List(Any)) -> Text
 kernel 1
 errors "type_error", "RangeError", "TS_LONE_SURROGATE_UNSUPPORTED"
-charge sum(8, deep(result))
+charge sum(8, deep(this), deep(args), deep(result))
 body {
   if same(kind(this), "text") {
     let lower = absent
@@ -442,7 +442,7 @@ body {
 function ts.string.indexOf_generic(this: Any, args: List(Any)) -> Any
 kernel 1
 errors "type_error", "RangeError", "TS_LONE_SURROGATE_UNSUPPORTED"
-charge sum(8, deep(result))
+charge sum(8, deep(this), deep(args), deep(result))
 body {
   let text = invoke ts.string.receiver(this)
   let padded = invoke ts.pad(args, 2)
@@ -462,7 +462,7 @@ body {
 function ts.string.indexOf(this: Any, args: List(Any)) -> Any
 kernel 1
 errors "type_error", "RangeError", "TS_LONE_SURROGATE_UNSUPPORTED"
-charge sum(8, deep(result))
+charge sum(8, deep(this), deep(args), deep(result))
 body {
   if same(kind(this), "text") {
     if num.lt(0, list.len(args)) {
@@ -490,7 +490,7 @@ body {
 function ts.string.lastIndexOf(this: Any, args: List(Any)) -> Any
 kernel 1
 errors "type_error", "RangeError", "TS_LONE_SURROGATE_UNSUPPORTED"
-charge sum(8, deep(result))
+charge sum(8, deep(this), deep(args), deep(result))
 body {
   let text = invoke ts.string.receiver(this)
   let padded = invoke ts.pad(args, 2)
@@ -517,7 +517,7 @@ body {
 function ts.string.includes_generic(this: Any, args: List(Any)) -> Any
 kernel 1
 errors "type_error", "RangeError", "TS_LONE_SURROGATE_UNSUPPORTED"
-charge sum(8, deep(result))
+charge sum(8, deep(this), deep(args), deep(result))
 body {
   let text = invoke ts.string.receiver(this)
   let padded = invoke ts.pad(args, 2)
@@ -542,7 +542,7 @@ body {
 function ts.string.startsWith_generic(this: Any, args: List(Any)) -> Any
 kernel 1
 errors "type_error", "RangeError", "TS_LONE_SURROGATE_UNSUPPORTED"
-charge sum(8, deep(result))
+charge sum(8, deep(this), deep(args), deep(result))
 body {
   let text = invoke ts.string.receiver(this)
   let padded = invoke ts.pad(args, 2)
@@ -567,7 +567,7 @@ body {
 function ts.string.endsWith_generic(this: Any, args: List(Any)) -> Any
 kernel 1
 errors "type_error", "RangeError", "TS_LONE_SURROGATE_UNSUPPORTED"
-charge sum(8, deep(result))
+charge sum(8, deep(this), deep(args), deep(result))
 body {
   let text = invoke ts.string.receiver(this)
   let padded = invoke ts.pad(args, 2)
@@ -596,7 +596,7 @@ body {
 function ts.string.includes(this: Any, args: List(Any)) -> Any
 kernel 1
 errors "type_error", "RangeError", "TS_LONE_SURROGATE_UNSUPPORTED"
-charge sum(8, deep(result))
+charge sum(8, deep(this), deep(args), deep(result))
 body {
   if same(kind(this), "text") {
     if num.lt(0, list.len(args)) {
@@ -624,7 +624,7 @@ body {
 function ts.string.startsWith(this: Any, args: List(Any)) -> Any
 kernel 1
 errors "type_error", "RangeError", "TS_LONE_SURROGATE_UNSUPPORTED"
-charge sum(8, deep(result))
+charge sum(8, deep(this), deep(args), deep(result))
 body {
   if same(kind(this), "text") {
     if num.lt(0, list.len(args)) {
@@ -652,7 +652,7 @@ body {
 function ts.string.endsWith(this: Any, args: List(Any)) -> Any
 kernel 1
 errors "type_error", "RangeError", "TS_LONE_SURROGATE_UNSUPPORTED"
-charge sum(8, deep(result))
+charge sum(8, deep(this), deep(args), deep(result))
 body {
   if same(kind(this), "text") {
     if num.lt(0, list.len(args)) {
@@ -683,7 +683,7 @@ body {
 function ts.string.concat(this: Any, args: List(Any)) -> Text
 kernel 1
 errors "type_error", "RangeError", "TS_LONE_SURROGATE_UNSUPPORTED"
-charge sum(8, deep(result))
+charge sum(8, deep(this), deep(args), deep(result))
 body {
   let text = invoke ts.string.receiver(this)
   let pieces = [text]
@@ -697,7 +697,7 @@ body {
 function ts.string.normalize(this: Any, args: List(Any)) -> Text
 kernel 1
 errors "type_error", "RangeError", "normalization_form"
-charge sum(8, deep(result))
+charge sum(8, deep(this), deep(args), deep(result))
 body {
   do invoke ts.require_object_coercible(this)
   let text = invoke ts.to_string(this)
@@ -718,7 +718,7 @@ body {
 function ts.string.toLowerCase(this: Any, args: List(Any)) -> Text
 kernel 1
 errors "type_error", "RangeError", "TS_LONE_SURROGATE_UNSUPPORTED"
-charge sum(8, deep(result))
+charge sum(8, deep(this), deep(result))
 body {
   let text = invoke ts.string.receiver(this)
   return text.lower_u17_0_0(text)
@@ -727,7 +727,7 @@ body {
 function ts.string.toUpperCase(this: Any, args: List(Any)) -> Text
 kernel 1
 errors "type_error", "RangeError", "TS_LONE_SURROGATE_UNSUPPORTED"
-charge sum(8, deep(result))
+charge sum(8, deep(this), deep(result))
 body {
   let text = invoke ts.string.receiver(this)
   return text.upper_u17_0_0(text)
@@ -736,7 +736,7 @@ body {
 function ts.string.trim(this: Any, args: List(Any)) -> Text
 kernel 1
 errors "type_error", "RangeError", "TS_LONE_SURROGATE_UNSUPPORTED"
-charge sum(8, deep(result))
+charge sum(8, deep(this), deep(result))
 body {
   if same(kind(this), "text") {
     let output = invoke ts.string.trim_value(this, true, true)
@@ -750,7 +750,7 @@ body {
 function ts.string.trimStart(this: Any, args: List(Any)) -> Text
 kernel 1
 errors "type_error", "RangeError", "TS_LONE_SURROGATE_UNSUPPORTED"
-charge sum(8, deep(result))
+charge sum(8, deep(this), deep(result))
 body {
   if same(kind(this), "text") {
     let output = invoke ts.string.trim_value(this, true, false)
@@ -764,7 +764,7 @@ body {
 function ts.string.trimEnd(this: Any, args: List(Any)) -> Text
 kernel 1
 errors "type_error", "RangeError", "TS_LONE_SURROGATE_UNSUPPORTED"
-charge sum(8, deep(result))
+charge sum(8, deep(this), deep(result))
 body {
   if same(kind(this), "text") {
     let output = invoke ts.string.trim_value(this, false, true)
@@ -778,7 +778,7 @@ body {
 function ts.string.repeat(this: Any, args: List(Any)) -> Text
 kernel 1
 errors "type_error", "RangeError", "TS_LONE_SURROGATE_UNSUPPORTED"
-charge sum(8, deep(result))
+charge sum(8, deep(this), deep(args), deep(result))
 body {
   let text = invoke ts.string.receiver(this)
   let padded = invoke ts.pad(args, 1)
@@ -792,7 +792,7 @@ body {
 function ts.string.padStart(this: Any, args: List(Any)) -> Text
 kernel 1
 errors "type_error", "RangeError", "TS_LONE_SURROGATE_UNSUPPORTED"
-charge sum(8, deep(result))
+charge sum(8, deep(this), deep(args), deep(result))
 body {
   let text = invoke ts.string.receiver(this)
   let padded = invoke ts.pad(args, 2)
@@ -816,7 +816,7 @@ body {
 function ts.string.padEnd(this: Any, args: List(Any)) -> Text
 kernel 1
 errors "type_error", "RangeError", "TS_LONE_SURROGATE_UNSUPPORTED"
-charge sum(8, deep(result))
+charge sum(8, deep(this), deep(args), deep(result))
 body {
   let text = invoke ts.string.receiver(this)
   let padded = invoke ts.pad(args, 2)
@@ -840,7 +840,7 @@ body {
 function ts.string.fromCharCode(this: Any, args: List(Any)) -> Text
 kernel 1
 errors "type_error", "RangeError", "TS_LONE_SURROGATE_UNSUPPORTED"
-charge sum(8, deep(result))
+charge sum(8, deep(args), deep(result))
 body {
   let units = []
   for value in args {
@@ -855,7 +855,7 @@ body {
 function ts.string.fromCodePoint(this: Any, args: List(Any)) -> Text
 kernel 1
 errors "type_error", "RangeError", "TS_LONE_SURROGATE_UNSUPPORTED"
-charge sum(8, deep(result))
+charge sum(8, deep(args), deep(result))
 body {
   let units = []
   for value in args {
@@ -874,7 +874,7 @@ body {
 function ts.string.raw(this: Any, args: List(Any)) -> Text
 kernel 1
 errors "type_error", "RangeError", "TS_LONE_SURROGATE_UNSUPPORTED"
-charge sum(8, deep(result))
+charge sum(8, deep(args), deep(result))
 body {
   let padded = invoke ts.pad(args, 1)
   let arg_28 = padded[0]
@@ -884,7 +884,7 @@ body {
   let length = invoke ts.string.length_value(count)
   let pieces = []
   let index = 0
-  while num.lt(index, length) {
+  while num.lt(index, length) metered 2 {
     let value = invoke ts.get(raw, index)
     let text = invoke ts.to_string(value)
     set pieces[list.len(pieces)] = text
@@ -904,7 +904,7 @@ body {
 function ts.string.apply_arguments(value: Any) -> List(Any)
 kernel 1
 errors "type_error"
-charge sum(8, deep(result))
+charge sum(8, deep(value), deep(result))
 body {
   let nullish = invoke ts.is_nullish(value)
   if nullish { return [] }
@@ -914,7 +914,7 @@ body {
   let length = invoke ts.string.length_value(count)
   let output_value = []
   let position = 0
-  while num.lt(position, length) {
+  while num.lt(position, length) metered 2 {
     let item = invoke ts.get(value, position)
     set output_value[list.len(output_value)] = item
     set position = num.add(position, 1)

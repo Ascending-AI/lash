@@ -721,7 +721,7 @@ body {
     if same(k, "list") {
       let out = []
       let round = 0
-      while lt(round, count) {
+      while lt(round, count) metered 2 {
         for item in sequence {
           set out[list.len(out)] = item
         }
@@ -732,7 +732,7 @@ body {
     if same(k, "tuple") {
       let out = ()
       let round = 0
-      while lt(round, count) {
+      while lt(round, count) metered 2 {
         set out = tuple.concat(out, sequence)
         set round = add(round, 1)
       }

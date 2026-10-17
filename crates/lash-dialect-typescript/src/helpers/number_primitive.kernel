@@ -55,7 +55,7 @@ body {
 function ts.number.digit(character: Text, radix: Int) -> Int
 kernel 1
 errors "type_error", "RangeError"
-charge sum(8, deep(result))
+charge sum(8, size(character), size(radix), deep(result))
 native
 body {
   if eq(text.utf16_len(character), 1) {} else { return -1 }
@@ -208,7 +208,7 @@ body {
 function ts.number.parts(value: Number) -> Any
 kernel 1
 errors "type_error", "RangeError"
-charge sum(8, deep(result))
+charge sum(8, size(value), deep(result))
 native
 body {
   # Exact kernel integers have exact decimal digits, without binary64
@@ -234,7 +234,7 @@ body {
 function ts.number.layout(digits: Text, point: Int, scientific: Bool) -> Text
 kernel 1
 errors "type_error", "RangeError"
-charge sum(8, deep(result))
+charge sum(8, size(digits), size(point), size(scientific), deep(result))
 native
 body {
   if scientific {
@@ -258,7 +258,7 @@ body {
 function ts.number.to_string(value: Number) -> Text
 kernel 1
 errors "type_error", "RangeError"
-charge sum(8, deep(result))
+charge sum(8, size(value), deep(result))
 native
 body {
   # Every integer below 2^53 is a float exactly, so its shortest digits

@@ -47,7 +47,7 @@ use ts.to_string
 function ts.json.parse(this: Any, args: List(Any)) -> Any
 kernel 1
 errors "type_error", "RangeError"
-charge sum(8, deep(result))
+charge sum(8, deep(args), deep(result))
 body {
   let args = invoke ts.pad(args, 2)
   let builtin_arg_0 = args[0]
@@ -88,7 +88,7 @@ let text = invoke ts.to_string(builtin_arg_0)
 function ts.json.stringify_generic(this: Any, args: List(Any)) -> Any
 kernel 1
 errors "type_error", "RangeError"
-charge sum(8, deep(result))
+charge sum(8, deep(args), deep(result))
 body {
   let args = invoke ts.pad(args, 3)
   let replacer = args[1]
@@ -243,7 +243,7 @@ body {
 function ts.json.stringify(this: Any, args: List(Any)) -> Any
 kernel 1
 errors "type_error", "RangeError"
-charge sum(8, deep(result))
+charge sum(8, deep(this), deep(args), deep(result))
 body {
   let value = absent
   let bare = same(list.len(args), 1)

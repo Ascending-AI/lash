@@ -86,7 +86,7 @@ body {
 function ts.date.utc(args: List(Any)) -> Number
 kernel 1
 errors "type_error", "RangeError"
-charge sum(8, deep(result))
+charge sum(8, deep(args), deep(result))
 body {
   let defaults = [absent, 0.0, 1.0, 0.0, 0.0, 0.0, 0.0]
   let components = []
@@ -120,7 +120,7 @@ let first = invoke ts.date.day_from_year(builtin_arg_0)
 function ts.date.construct(this: Any, args: List(Any)) -> Any
 kernel 1
 errors "type_error", "RangeError"
-charge sum(8, deep(result))
+charge sum(8, deep(args), deep(result))
 body {
   let time = absent
   if eq(list.len(args), 0) { set time = date.ecma.milliseconds(clock) } else {
@@ -181,7 +181,7 @@ body {
 function ts.date.parse(this: Any, args: List(Any)) -> Any
 kernel 1
 errors "type_error", "RangeError"
-charge sum(8, deep(result))
+charge sum(8, deep(args), deep(result))
 body {
   let args = invoke ts.pad(args, 1)
   let builtin_arg_1 = args[0]
@@ -192,7 +192,7 @@ let text = invoke ts.to_string(builtin_arg_1)
 function ts.date.UTC(this: Any, args: List(Any)) -> Any
 kernel 1
 errors "type_error", "RangeError"
-charge sum(8, deep(result))
+charge sum(8, deep(args), deep(result))
 body {
   let output = invoke ts.date.utc(args)
   return output
@@ -201,7 +201,7 @@ body {
 function ts.date.parts(date: Any) -> Any
 kernel 1
 errors "type_error", "RangeError"
-charge sum(8, deep(result))
+charge sum(8, deep(date), deep(result))
 body {
   do invoke ts.date.require(date)
   let time = date.ecma.milliseconds(date)
@@ -225,7 +225,7 @@ body {
 function ts.date.getTime(this: Any, args: List(Any)) -> Any
 kernel 1
 errors "type_error", "RangeError"
-charge sum(8, deep(result))
+charge sum(8, deep(this), deep(result))
 body {
   do invoke ts.date.require(this)
   return date.ecma.milliseconds(this)
@@ -234,7 +234,7 @@ body {
 function ts.date.valueOf(this: Any, args: List(Any)) -> Any
 kernel 1
 errors "type_error", "RangeError"
-charge sum(8, deep(result))
+charge sum(8, deep(this), deep(result))
 body {
   do invoke ts.date.require(this)
   return date.ecma.milliseconds(this)
@@ -243,7 +243,7 @@ body {
 function ts.date.getUTCFullYear(this: Any, args: List(Any)) -> Any
 kernel 1
 errors "type_error", "RangeError"
-charge sum(8, deep(result))
+charge sum(8, deep(this), deep(result))
 body {
   let parts = invoke ts.date.parts(this)
   return parts[0]
@@ -252,7 +252,7 @@ body {
 function ts.date.getUTCMonth(this: Any, args: List(Any)) -> Any
 kernel 1
 errors "type_error", "RangeError"
-charge sum(8, deep(result))
+charge sum(8, deep(this), deep(result))
 body {
   let parts = invoke ts.date.parts(this)
   return parts[1]
@@ -261,7 +261,7 @@ body {
 function ts.date.getUTCDate(this: Any, args: List(Any)) -> Any
 kernel 1
 errors "type_error", "RangeError"
-charge sum(8, deep(result))
+charge sum(8, deep(this), deep(result))
 body {
   let parts = invoke ts.date.parts(this)
   return parts[2]
@@ -270,7 +270,7 @@ body {
 function ts.date.getUTCDay(this: Any, args: List(Any)) -> Any
 kernel 1
 errors "type_error", "RangeError"
-charge sum(8, deep(result))
+charge sum(8, deep(this), deep(result))
 body {
   let parts = invoke ts.date.parts(this)
   return parts[3]
@@ -279,7 +279,7 @@ body {
 function ts.date.getUTCHours(this: Any, args: List(Any)) -> Any
 kernel 1
 errors "type_error", "RangeError"
-charge sum(8, deep(result))
+charge sum(8, deep(this), deep(result))
 body {
   let parts = invoke ts.date.parts(this)
   return parts[4]
@@ -288,7 +288,7 @@ body {
 function ts.date.getUTCMinutes(this: Any, args: List(Any)) -> Any
 kernel 1
 errors "type_error", "RangeError"
-charge sum(8, deep(result))
+charge sum(8, deep(this), deep(result))
 body {
   let parts = invoke ts.date.parts(this)
   return parts[5]
@@ -297,7 +297,7 @@ body {
 function ts.date.getUTCSeconds(this: Any, args: List(Any)) -> Any
 kernel 1
 errors "type_error", "RangeError"
-charge sum(8, deep(result))
+charge sum(8, deep(this), deep(result))
 body {
   let parts = invoke ts.date.parts(this)
   return parts[6]
@@ -306,7 +306,7 @@ body {
 function ts.date.getUTCMilliseconds(this: Any, args: List(Any)) -> Any
 kernel 1
 errors "type_error", "RangeError"
-charge sum(8, deep(result))
+charge sum(8, deep(this), deep(result))
 body {
   let parts = invoke ts.date.parts(this)
   return parts[7]
@@ -315,7 +315,7 @@ body {
 function ts.date.toISOString(this: Any, args: List(Any)) -> Any
 kernel 1
 errors "type_error", "RangeError"
-charge sum(8, deep(result))
+charge sum(8, deep(this), deep(result))
 body {
   do invoke ts.date.require(this)
   return date.ecma.format(this, "iso")
@@ -324,7 +324,7 @@ body {
 function ts.date.toUTCString(this: Any, args: List(Any)) -> Any
 kernel 1
 errors "type_error", "RangeError"
-charge sum(8, deep(result))
+charge sum(8, deep(this), deep(result))
 body {
   do invoke ts.date.require(this)
   return date.ecma.format(this, "utc")
@@ -333,7 +333,7 @@ body {
 function ts.date.toString(this: Any, args: List(Any)) -> Any
 kernel 1
 errors "type_error", "RangeError"
-charge sum(8, deep(result))
+charge sum(8, deep(this), deep(result))
 body {
   do invoke ts.date.require(this)
   return date.ecma.format(this, "string")
@@ -342,7 +342,7 @@ body {
 function ts.date.toJSON(this: Any, args: List(Any)) -> Any
 kernel 1
 errors "type_error", "RangeError"
-charge sum(8, deep(result))
+charge sum(8, deep(this), deep(result))
 body {
   do invoke ts.require_object_coercible(this)
   let primitive = invoke ts.to_primitive(this, "number")
@@ -360,7 +360,7 @@ body {
 function ts.date.getFullYear(this: Any, args: List(Any)) -> Any
 kernel 1
 errors "type_error", "RangeError"
-charge sum(8, deep(result))
+charge sum(8, deep(this), deep(result))
 body {
   let date = invoke ts.date.is(this)
   if date {} else { throw error.new("type_error", "Date receiver required", null) }
@@ -370,7 +370,7 @@ body {
 function ts.date.getMonth(this: Any, args: List(Any)) -> Any
 kernel 1
 errors "type_error", "RangeError"
-charge sum(8, deep(result))
+charge sum(8, deep(this), deep(result))
 body {
   let date = invoke ts.date.is(this)
   if date {} else { throw error.new("type_error", "Date receiver required", null) }
@@ -380,7 +380,7 @@ body {
 function ts.date.getDate(this: Any, args: List(Any)) -> Any
 kernel 1
 errors "type_error", "RangeError"
-charge sum(8, deep(result))
+charge sum(8, deep(this), deep(result))
 body {
   let date = invoke ts.date.is(this)
   if date {} else { throw error.new("type_error", "Date receiver required", null) }
@@ -390,7 +390,7 @@ body {
 function ts.date.getDay(this: Any, args: List(Any)) -> Any
 kernel 1
 errors "type_error", "RangeError"
-charge sum(8, deep(result))
+charge sum(8, deep(this), deep(result))
 body {
   let date = invoke ts.date.is(this)
   if date {} else { throw error.new("type_error", "Date receiver required", null) }
@@ -400,7 +400,7 @@ body {
 function ts.date.getHours(this: Any, args: List(Any)) -> Any
 kernel 1
 errors "type_error", "RangeError"
-charge sum(8, deep(result))
+charge sum(8, deep(this), deep(result))
 body {
   let date = invoke ts.date.is(this)
   if date {} else { throw error.new("type_error", "Date receiver required", null) }
@@ -410,7 +410,7 @@ body {
 function ts.date.getMinutes(this: Any, args: List(Any)) -> Any
 kernel 1
 errors "type_error", "RangeError"
-charge sum(8, deep(result))
+charge sum(8, deep(this), deep(result))
 body {
   let date = invoke ts.date.is(this)
   if date {} else { throw error.new("type_error", "Date receiver required", null) }
@@ -420,7 +420,7 @@ body {
 function ts.date.getSeconds(this: Any, args: List(Any)) -> Any
 kernel 1
 errors "type_error", "RangeError"
-charge sum(8, deep(result))
+charge sum(8, deep(this), deep(result))
 body {
   let date = invoke ts.date.is(this)
   if date {} else { throw error.new("type_error", "Date receiver required", null) }
@@ -430,7 +430,7 @@ body {
 function ts.date.getMilliseconds(this: Any, args: List(Any)) -> Any
 kernel 1
 errors "type_error", "RangeError"
-charge sum(8, deep(result))
+charge sum(8, deep(this), deep(result))
 body {
   let date = invoke ts.date.is(this)
   if date {} else { throw error.new("type_error", "Date receiver required", null) }
@@ -440,7 +440,7 @@ body {
 function ts.date.setTime(this: Any, args: List(Any)) -> Any
 kernel 1
 errors "type_error", "RangeError"
-charge sum(8, deep(result))
+charge sum(8, deep(this), deep(result))
 body {
   let date = invoke ts.date.is(this)
   if date {} else { throw error.new("type_error", "Date receiver required", null) }
@@ -450,7 +450,7 @@ body {
 function ts.date.setFullYear(this: Any, args: List(Any)) -> Any
 kernel 1
 errors "type_error", "RangeError"
-charge sum(8, deep(result))
+charge sum(8, deep(this), deep(result))
 body {
   let date = invoke ts.date.is(this)
   if date {} else { throw error.new("type_error", "Date receiver required", null) }
@@ -460,7 +460,7 @@ body {
 function ts.date.setMonth(this: Any, args: List(Any)) -> Any
 kernel 1
 errors "type_error", "RangeError"
-charge sum(8, deep(result))
+charge sum(8, deep(this), deep(result))
 body {
   let date = invoke ts.date.is(this)
   if date {} else { throw error.new("type_error", "Date receiver required", null) }
@@ -470,7 +470,7 @@ body {
 function ts.date.setDate(this: Any, args: List(Any)) -> Any
 kernel 1
 errors "type_error", "RangeError"
-charge sum(8, deep(result))
+charge sum(8, deep(this), deep(result))
 body {
   let date = invoke ts.date.is(this)
   if date {} else { throw error.new("type_error", "Date receiver required", null) }
@@ -480,7 +480,7 @@ body {
 function ts.date.setHours(this: Any, args: List(Any)) -> Any
 kernel 1
 errors "type_error", "RangeError"
-charge sum(8, deep(result))
+charge sum(8, deep(this), deep(result))
 body {
   let date = invoke ts.date.is(this)
   if date {} else { throw error.new("type_error", "Date receiver required", null) }
@@ -490,7 +490,7 @@ body {
 function ts.date.setMinutes(this: Any, args: List(Any)) -> Any
 kernel 1
 errors "type_error", "RangeError"
-charge sum(8, deep(result))
+charge sum(8, deep(this), deep(result))
 body {
   let date = invoke ts.date.is(this)
   if date {} else { throw error.new("type_error", "Date receiver required", null) }
@@ -500,7 +500,7 @@ body {
 function ts.date.setSeconds(this: Any, args: List(Any)) -> Any
 kernel 1
 errors "type_error", "RangeError"
-charge sum(8, deep(result))
+charge sum(8, deep(this), deep(result))
 body {
   let date = invoke ts.date.is(this)
   if date {} else { throw error.new("type_error", "Date receiver required", null) }
@@ -510,7 +510,7 @@ body {
 function ts.date.setMilliseconds(this: Any, args: List(Any)) -> Any
 kernel 1
 errors "type_error", "RangeError"
-charge sum(8, deep(result))
+charge sum(8, deep(this), deep(result))
 body {
   let date = invoke ts.date.is(this)
   if date {} else { throw error.new("type_error", "Date receiver required", null) }

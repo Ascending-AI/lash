@@ -299,7 +299,7 @@ body {
   if same(kind(self), "list") {
     let ordered = invoke py.sorted(self, key, reverse)
     do invoke list.clear(self)
-    for item in ordered {
+    for item in ordered metered 2 {
       set self[list.len(self)] = item
     }
     return null

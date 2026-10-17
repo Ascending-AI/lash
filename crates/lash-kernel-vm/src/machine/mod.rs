@@ -975,7 +975,12 @@ impl KernelMachine {
                         .task(task)
                         .ok()
                         .and_then(|task| task.frames.operation().ok().flatten());
-                    if let Some(lib) = operation {
+                    // A completion charge already names its owning call.
+                    // In particular, a native spawned root can halt while
+                    // the spawner's library frame is still the running one.
+                    if let Some(lib) = operation
+                        && (exceeded.bound != Bound::Charge || exceeded.function.is_none())
+                    {
                         exceeded.function = Some(self.exe.lib(lib).definition.name.clone());
                     } else if exceeded.function.is_none()
                         && let Some(lib) = self
