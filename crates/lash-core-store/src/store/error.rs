@@ -607,6 +607,19 @@ pub enum StoreError {
          admitted on"
     )]
     TurnBaseNotRetained { revision: u64 },
+    /// The window run `run` ended on, revision `revision`, was released
+    /// with that revision under the session's retention (FIG-6606). The
+    /// run's terminal outcome still reads; no other state is substituted.
+    /// Pin the run or its revision to keep its window.
+    #[error(
+        "run `{run}` of session `{session_id}` ended on revision {revision}, which the \
+         session's retention released; pin a target to keep it"
+    )]
+    RunWindowReleased {
+        session_id: SessionId,
+        run: crate::TurnId,
+        revision: u64,
+    },
     #[error("fork target session `{session_id}` already exists")]
     ForkSessionAlreadyExists { session_id: SessionId },
     #[error(
@@ -1027,6 +1040,7 @@ impl StoreError {
             | Self::ForkTargetUnavailable { .. }
             | Self::ForkTargetPruned { .. }
             | Self::TurnBaseNotRetained { .. }
+            | Self::RunWindowReleased { .. }
             | Self::ForkSessionAlreadyExists { .. }
             | Self::InvalidGraphParent { .. }
             | Self::MissingFrameOpenAncestor { .. }
@@ -1166,6 +1180,7 @@ impl StoreError {
             | Self::ForkTargetUnavailable { .. }
             | Self::ForkTargetPruned { .. }
             | Self::TurnBaseNotRetained { .. }
+            | Self::RunWindowReleased { .. }
             | Self::ForkSessionAlreadyExists { .. }
             | Self::InvalidGraphParent { .. }
             | Self::MissingFrameOpenAncestor { .. }
@@ -1296,6 +1311,7 @@ impl StoreError {
             | Self::ForkTargetUnavailable { .. }
             | Self::ForkTargetPruned { .. }
             | Self::TurnBaseNotRetained { .. }
+            | Self::RunWindowReleased { .. }
             | Self::RunAlreadyTerminal { .. }
             | Self::RunInputWithdrawn { .. }
             | Self::RunSpecMissing { .. }
@@ -1442,6 +1458,7 @@ impl StoreError {
             Self::ForkTargetUnavailable { .. } => "ForkTargetUnavailable",
             Self::ForkTargetPruned { .. } => "ForkTargetPruned",
             Self::TurnBaseNotRetained { .. } => "TurnBaseNotRetained",
+            Self::RunWindowReleased { .. } => "RunWindowReleased",
             Self::ForkSessionAlreadyExists { .. } => "ForkSessionAlreadyExists",
             Self::InvalidGraphParent { .. } => "InvalidGraphParent",
             Self::MissingFrameOpenAncestor { .. } => "MissingFrameOpenAncestor",

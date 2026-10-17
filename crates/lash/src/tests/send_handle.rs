@@ -5,6 +5,7 @@ use futures_util::StreamExt;
 use tokio::sync::Notify;
 mod pins;
 mod replay_lag;
+mod terminal_windows;
 
 /// D-RUNREPORT: reading an unchanged graph-less session invents no timestamp.
 async fn graphless_session_reads_are_identical() -> Result<()> {

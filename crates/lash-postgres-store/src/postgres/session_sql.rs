@@ -315,8 +315,7 @@ lash_store_sql::statements! {
              FOR UPDATE";
 
         /// Whether node `?1` is still reachable: a live child, a head pointing
-        /// at it, a retained revision publishing it, or a terminal window
-        /// naming it.
+        /// at it or a retained revision publishing it.
         exists_reachable = "SELECT
                 EXISTS(
                     SELECT 1 FROM graph_nodes
@@ -324,9 +323,6 @@ lash_store_sql::statements! {
                 )
                 OR EXISTS(
                     SELECT 1 FROM session_revisions WHERE leaf_node_id = ?1
-                )
-                OR EXISTS(
-                    SELECT 1 FROM session_runs WHERE terminal_window_leaf_node_id = ?1
                 )";
 
         retire = "UPDATE graph_nodes SET tombstoned = TRUE WHERE node_id = ?1";
@@ -364,10 +360,6 @@ lash_store_sql::statements! {
                SELECT 1 FROM session_revisions AS revision
                WHERE revision.leaf_node_id = node.node_id
            )
-           AND NOT EXISTS (
-               SELECT 1 FROM session_runs AS ended
-               WHERE ended.terminal_window_leaf_node_id = node.node_id
-           )
          ORDER BY node.generation DESC";
 
         /// Every unreachable live leaf the session_head in `?1` still own, ordered
@@ -387,10 +379,6 @@ lash_store_sql::statements! {
                AND NOT EXISTS (
                    SELECT 1 FROM session_revisions AS revision
                    WHERE revision.leaf_node_id = node.node_id
-               )
-               AND NOT EXISTS (
-                   SELECT 1 FROM session_runs AS ended
-                   WHERE ended.terminal_window_leaf_node_id = node.node_id
                )
              ORDER BY node.session_id, node.generation DESC";
 

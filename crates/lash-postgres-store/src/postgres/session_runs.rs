@@ -18,9 +18,8 @@ use lash_core_execution::store_backend_support::turn_cancel::EndedRunInputReleas
 use lash_sansio::{InputId, SessionId, TurnId};
 use lash_store_sql::Dialect;
 use lash_store_sql::session_runs::{
-    control_intents::ControlIntentStatements,
-    run_inputs::SessionRunInputStatements,
-    runs::{SessionRunStatements, TerminalWindowRef},
+    control_intents::ControlIntentStatements, run_inputs::SessionRunInputStatements,
+    runs::SessionRunStatements,
 };
 use sqlx::{PgConnection, Row};
 
@@ -116,31 +115,19 @@ pub(crate) async fn run_terminal_conn(
     Ok(Some(terminal))
 }
 
-/// Name the session's published head as the terminal's window, in the
-/// terminal writer's transaction, recording its head document unless a
-/// terminal of the session already did. Nothing is read beyond the head's
+/// Name the session's published head revision as the terminal's window,
+/// in the terminal writer's transaction. Nothing is read beyond the head's
 /// revision row: the window is decoded only when a report reads it. A
 /// session with no head names no window.
-pub(crate) async fn terminal_window_ref(
+pub(crate) async fn terminal_window_revision(
     conn: &mut PgConnection,
     session: &SessionId,
-) -> Result<Option<TerminalWindowRef>, StoreError> {
-    let sql = &session_runs_sql().runs;
-    let head: Option<(i64, Option<String>, Option<String>, String)> =
-        crate::observed_sql::query_as(sql.select_window_head.sql())
-            .bind(session.as_str())
-            .fetch_optional(crate::observed_sql::executor(&mut *conn))
-            .await
-            .map_err(store_sqlx_error)?;
-    let Some((revision, leaf, checkpoint, config_ref)) = head else {
-        return Ok(None);
-    };
-    Ok(Some(TerminalWindowRef {
-        revision,
-        leaf,
-        checkpoint,
-        config_ref,
-    }))
+) -> Result<Option<i64>, StoreError> {
+    crate::observed_sql::query_scalar(session_runs_sql().runs.select_window_head.sql())
+        .bind(session.as_str())
+        .fetch_optional(crate::observed_sql::executor(&mut *conn))
+        .await
+        .map_err(store_sqlx_error)
 }
 
 /// Write `terminal` in the caller's transaction, deciding it against the
@@ -173,13 +160,11 @@ pub(crate) async fn write_run_terminal_conn(
         .execute(crate::observed_sql::executor(&mut *conn))
         .await
         .map_err(store_sqlx_error)?;
-    let window = if matches!(terminal.cause, RunTerminalCause::SessionDeleted { .. }) {
+    let window_revision = if matches!(terminal.cause, RunTerminalCause::SessionDeleted { .. }) {
         None
     } else {
-        terminal_window_ref(conn, &terminal.session_id).await?
+        terminal_window_revision(conn, &terminal.session_id).await?
     };
-    let (window_revision, window_leaf, window_checkpoint, window_head) =
-        TerminalWindowRef::columns(window.as_ref());
     let columns = terminal.to_stored()?;
     let written = crate::observed_sql::query(sql.runs.write_terminal.sql())
         .bind(terminal.session_id.as_str())
@@ -194,9 +179,6 @@ pub(crate) async fn write_run_terminal_conn(
         )
         .bind(sql_i64("terminal instant", columns.at_ms)?)
         .bind(window_revision)
-        .bind(window_leaf)
-        .bind(window_checkpoint)
-        .bind(window_head)
         .execute(crate::observed_sql::executor(&mut *conn))
         .await
         .map_err(store_sqlx_error)?

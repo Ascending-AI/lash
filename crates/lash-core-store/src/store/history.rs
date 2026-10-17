@@ -22,10 +22,11 @@ pub enum WindowSelector {
     Current,
     /// The head a turn was admitted on (FIG-3682).
     Admitted(SessionHeadRef),
-    /// The window this run's terminal names, recorded atomically with it by
-    /// reference to the head it ended on and kept readable through later
-    /// commits and collections while the run's row lives (D-RUNREPORT,
-    /// FIG-5931).
+    /// The window this run's terminal names, recorded atomically with it as
+    /// the head revision it ended on (D-RUNREPORT, FIG-5931). It reads
+    /// exactly while that revision is retained and is refused with
+    /// [`StoreError::RunWindowReleased`] once the session's retention
+    /// releases it (FIG-6606).
     Terminal(TurnId),
 }
 

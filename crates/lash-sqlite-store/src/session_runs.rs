@@ -17,9 +17,8 @@ use lash_core_execution::store::{
 use lash_core_execution::store_backend_support::turn_cancel::EndedRunInputRelease;
 use lash_sansio::{InputId, SessionId, TurnId};
 use lash_store_sql::session_runs::{
-    control_intents::ControlIntentStatements,
-    run_inputs::SessionRunInputStatements,
-    runs::{SessionRunStatements, TerminalWindowRef},
+    control_intents::ControlIntentStatements, run_inputs::SessionRunInputStatements,
+    runs::SessionRunStatements,
 };
 use rusqlite::{Connection, OptionalExtension, params};
 
@@ -123,38 +122,19 @@ pub(crate) fn run_terminal_conn(
     Ok(Some(terminal))
 }
 
-/// Name the session's published head as the terminal's window, in the
-/// terminal writer's transaction, recording its head document unless a
-/// terminal of the session already did. Nothing is read beyond the head's
+/// Name the session's published head revision as the terminal's window,
+/// in the terminal writer's transaction. Nothing is read beyond the head's
 /// revision row: the window is decoded only when a report reads it. A
 /// session with no head names no window.
-pub(crate) fn terminal_window_ref(
+pub(crate) fn terminal_window_revision(
     tx: &Connection,
     session: &SessionId,
-) -> Result<Option<TerminalWindowRef>, StoreError> {
-    let sql = &session_runs_sql().runs;
-    let head = tx
-        .prepare_cached(sql.select_window_head.sql())
+) -> Result<Option<i64>, StoreError> {
+    tx.prepare_cached(session_runs_sql().runs.select_window_head.sql())
         .map_err(sqlite_error)?
-        .query_row(params![session.as_str()], |row| {
-            Ok((
-                row.get::<_, i64>(0)?,
-                row.get::<_, Option<String>>(1)?,
-                row.get::<_, Option<String>>(2)?,
-                row.get::<_, String>(3)?,
-            ))
-        })
+        .query_row(params![session.as_str()], |row| row.get::<_, i64>(0))
         .optional()
-        .map_err(sqlite_error)?;
-    let Some((revision, leaf, checkpoint, config_ref)) = head else {
-        return Ok(None);
-    };
-    Ok(Some(TerminalWindowRef {
-        revision,
-        leaf,
-        checkpoint,
-        config_ref,
-    }))
+        .map_err(sqlite_error)
 }
 
 /// Write `terminal` in the caller's transaction, deciding it against the
@@ -186,13 +166,11 @@ pub(crate) fn write_run_terminal_conn(
         params![terminal.session_id.as_str(), terminal.run.as_str()],
     )
     .map_err(sqlite_error)?;
-    let window = if matches!(terminal.cause, RunTerminalCause::SessionDeleted { .. }) {
+    let window_revision = if matches!(terminal.cause, RunTerminalCause::SessionDeleted { .. }) {
         None
     } else {
-        terminal_window_ref(tx, &terminal.session_id)?
+        terminal_window_revision(tx, &terminal.session_id)?
     };
-    let (window_revision, window_leaf, window_checkpoint, window_head) =
-        TerminalWindowRef::columns(window.as_ref());
     let columns = terminal.to_stored()?;
     let written = crate::conn::cached_execute(
         tx,
@@ -208,9 +186,6 @@ pub(crate) fn write_run_terminal_conn(
                 .transpose()?,
             sql_i64("terminal instant", columns.at_ms)?,
             window_revision,
-            window_leaf,
-            window_checkpoint,
-            window_head,
         ],
     )
     .map_err(sqlite_error)?;
@@ -890,7 +865,7 @@ pub(crate) fn begin_session_close_conn(
     Ok((Some(intent), woken))
 }
 
-/// Forget the session's run records and their owned window references in its
+/// Forget the session's run records in its
 /// deletion transaction. A `close_session` intent stays: it is the tombstone
 /// the factory answers the deleted session's runs from.
 pub(crate) fn delete_session_runs_conn(

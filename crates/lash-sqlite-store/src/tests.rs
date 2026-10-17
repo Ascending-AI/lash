@@ -1424,21 +1424,14 @@ fn partial_run_terminals_are_corruption_at_decode() {
 }
 
 /// The bytes the store holds for every terminal's window: each terminal
-/// row's window columns (its revision an 8-byte integer) and each head
-/// document they name.
+/// row's window revision, an 8-byte integer.
 async fn terminal_window_bytes(store: &SqliteStore) -> i64 {
     store
         .conn
         .call(|conn| {
             conn.query_row(
-                "SELECT
-                     (SELECT coalesce(sum(CASE WHEN terminal_window_revision IS NULL THEN 0 ELSE 8 END
-                         + coalesce(length(terminal_window_leaf_node_id), 0)
-                         + coalesce(length(terminal_window_checkpoint_ref), 0)
-                         + coalesce(length(terminal_window_config_ref), 0)), 0)
-                      FROM session_runs)
-                   + (SELECT coalesce(sum(length(hash) + length(content)), 0)
-                      FROM blobs WHERE hash IN (SELECT terminal_window_config_ref FROM session_runs))",
+                "SELECT coalesce(sum(CASE WHEN terminal_window_revision IS NULL THEN 0 ELSE 8 END), 0)
+                 FROM session_runs",
                 [],
                 |row| row.get(0),
             )
@@ -1447,12 +1440,14 @@ async fn terminal_window_bytes(store: &SqliteStore) -> i64 {
         .expect("count terminal window bytes")
 }
 
-/// FIG-5931: a terminal records the window it ended on by reference, so the
-/// bytes it writes for its window do not grow with the session's history:
-/// every terminal writes at most 1 KiB (the first also records the session's
-/// head document, once), every later one the same count, while the window
-/// each names is the one it ended on, through later commits and a host
-/// collection. Before, each terminal wrote its whole hydrated window.
+/// FIG-5931, FIG-6606: a terminal records the window it ended on by its
+/// revision, so the bytes it writes for its window do not grow with the
+/// session's history: every terminal writes the same 8 bytes, while the
+/// window each names is the one it ended on through later commits. A host
+/// collection under `until_gc` releases every revision but the head, and
+/// with them their windows: those reads are refused as released, the
+/// head's window reads unchanged. Before FIG-5931 each terminal wrote its
+/// whole hydrated window.
 #[tokio::test]
 async fn a_terminal_writes_its_window_in_constant_bytes_at_every_history_position() {
     let store = crate::test_support::sqlite_memory_store()
@@ -1495,32 +1490,32 @@ async fn a_terminal_writes_its_window_in_constant_bytes_at_every_history_positio
         runs.push(run);
     }
     assert!(
-        written.iter().all(|bytes| *bytes <= 1_024),
-        "a terminal wrote more than 1 KiB for its window: {written:?}"
+        written.iter().all(|bytes| *bytes == 8),
+        "a terminal's window bytes are not its 8-byte revision: {written:?}"
     );
-    assert!(
-        written[1..].iter().all(|bytes| *bytes == written[1]),
-        "a terminal's window bytes grew with history: {written:?}"
-    );
-    let windows = |store: Arc<SqliteStore>, runs: Vec<lash_sansio::TurnId>| {
+    let window = |store: Arc<SqliteStore>, run: lash_sansio::TurnId| {
         let session = session.clone();
         async move {
-            let mut lengths = Vec::new();
-            for run in runs {
-                let window = store
-                    .load_session_window(
-                        &session,
-                        lash_core_execution::store::WindowSelector::Terminal(run),
-                    )
-                    .await
-                    .expect("read a terminal window")
-                    .expect("a terminal names its window");
-                lengths.push((window.head_revision, window.window.nodes.len()));
-            }
-            lengths
+            store
+                .load_session_window(
+                    &session,
+                    lash_core_execution::store::WindowSelector::Terminal(run),
+                )
+                .await
+                .map(|window| {
+                    let window = window.expect("a terminal names its window");
+                    (window.head_revision, window.window.nodes.len())
+                })
         }
     };
-    let ended = windows(Arc::clone(&store), runs.clone()).await;
+    let mut ended = Vec::new();
+    for run in &runs {
+        ended.push(
+            window(Arc::clone(&store), run.clone())
+                .await
+                .expect("an unreleased window reads"),
+        );
+    }
     assert!(
         ended.windows(2).all(|pair| pair[0].1 < pair[1].1),
         "each terminal names the window it ended on: {ended:?}"
@@ -1529,11 +1524,25 @@ async fn a_terminal_writes_its_window_in_constant_bytes_at_every_history_positio
         .gc_unreachable()
         .await
         .expect("the host collection completes");
+    let (last, earlier) = runs.split_last().expect("24 runs");
     assert_eq!(
-        windows(Arc::clone(&store), runs).await,
-        ended,
-        "a host collection changed a terminal's window"
+        window(Arc::clone(&store), last.clone())
+            .await
+            .expect("the head's window is retained"),
+        ended[23],
+        "a host collection changed the head's window"
     );
+    for (run, (revision, _)) in earlier.iter().zip(&ended) {
+        let read = window(Arc::clone(&store), run.clone()).await;
+        assert!(
+            matches!(
+                &read,
+                Err(StoreError::RunWindowReleased { run: released, revision: at, .. })
+                    if released == run && at == revision
+            ),
+            "a collected window is refused as released, never another state: {read:?}"
+        );
+    }
 }
 
 /// FIG-5948: unchanged configuration has one content-addressed body even

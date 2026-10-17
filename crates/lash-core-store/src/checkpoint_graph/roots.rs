@@ -29,7 +29,7 @@ pub enum RootSource {
     /// `turn_namespaces.graph_root_ref`: run namespace values.
     TurnNamespace = 5,
     /// `session_revisions.checkpoint_ref`: every retained revision, not
-    /// only the head.
+    /// only the head, and with it the window a run's terminal names.
     SessionRevision = 6,
     /// `session_meta.admission_base_checkpoint_ref`: the base pinned for
     /// admission, fork and creation ownership included.
@@ -39,13 +39,9 @@ pub enum RootSource {
     ArtifactBridge = 9,
     /// `graph_release_pins.root_ref`: installed runnable manifests.
     ReleasePin = 10,
-    /// `session_runs.terminal_window_checkpoint_ref`: the checkpoint of the
-    /// window a run's terminal names, while the run's row lives (FIG-5931).
-    RunTerminalWindow = 11,
-    /// Configuration named by a retained revision.
+    /// Configuration named by a retained revision, the windows run
+    /// terminals name among them (FIG-6606).
     RevisionConfig = 12,
-    /// Configuration named by a retained terminal window.
-    TerminalConfig = 13,
     /// `turn_phases.answer_ref`: the receipt of the model call a model
     /// phase pins, from its `model.answer` commit until the turn's next
     /// phase or its end consumes it.
@@ -70,7 +66,7 @@ pub struct RootField {
 
 impl RootSource {
     /// Every source, in catalog order.
-    pub const ALL: [Self; 16] = [
+    pub const ALL: [Self; 14] = [
         Self::Exec,
         Self::RunFact,
         Self::EffectAdmission,
@@ -81,9 +77,7 @@ impl RootSource {
         Self::SessionAdmissionBase,
         Self::ArtifactBridge,
         Self::ReleasePin,
-        Self::RunTerminalWindow,
         Self::RevisionConfig,
-        Self::TerminalConfig,
         Self::ModelAnswer,
         Self::ReadLease,
         Self::RetirementHold,
@@ -103,9 +97,7 @@ impl RootSource {
             Self::SessionAdmissionBase => "admission_base",
             Self::ArtifactBridge => "artifact",
             Self::ReleasePin => "release",
-            Self::RunTerminalWindow => "terminal_window",
             Self::RevisionConfig => "revision_config",
-            Self::TerminalConfig => "terminal_config",
             Self::ModelAnswer => "answer",
             Self::ReadLease => "lease",
             Self::RetirementHold => "retirement",
@@ -132,9 +124,6 @@ impl RootSource {
     pub const fn postgres_field(self) -> RootField {
         match self {
             Self::RevisionConfig => RootField::of("lash_session_revisions", "config_ref", None),
-            Self::TerminalConfig => {
-                RootField::of("lash_session_runs", "terminal_window_config_ref", None)
-            }
             Self::Exec => RootField::of("lash_exec_snapshots", "root_ref", None),
             Self::RunFact => RootField::of("lash_run_records", "record_ref", None),
             Self::EffectAdmission => RootField::of("lash_effect_admissions", "admission_ref", None),
@@ -155,9 +144,6 @@ impl RootSource {
                 Some("storage_kind = 1"),
             ),
             Self::ReleasePin => RootField::of("lash_graph_release_pins", "root_ref", None),
-            Self::RunTerminalWindow => {
-                RootField::of("lash_session_runs", "terminal_window_checkpoint_ref", None)
-            }
             Self::ModelAnswer => RootField::of("lash_turn_phases", "answer_ref", None),
             Self::ReadLease => RootField::of("lash_root_leases", "root_ref", None),
             Self::RetirementHold => RootField::of("lash_retirement_holds", "root_ref", None),
@@ -167,7 +153,6 @@ impl RootSource {
     const fn unprefixed(self) -> (&'static str, &'static str, Option<&'static str>) {
         match self {
             Self::RevisionConfig => ("session_revisions", "config_ref", None),
-            Self::TerminalConfig => ("session_runs", "terminal_window_config_ref", None),
             Self::Exec => ("exec_snapshots", "root_ref", None),
             Self::RunFact => ("run_records", "record_ref", None),
             Self::EffectAdmission => ("effect_admissions", "admission_ref", None),
@@ -178,7 +163,6 @@ impl RootSource {
             Self::SessionAdmissionBase => ("session_meta", "admission_base_checkpoint_ref", None),
             Self::ArtifactBridge => ("artifact_refs", "blob_ref", None),
             Self::ReleasePin => ("graph_release_pins", "root_ref", None),
-            Self::RunTerminalWindow => ("session_runs", "terminal_window_checkpoint_ref", None),
             Self::ModelAnswer => ("turn_phases", "answer_ref", None),
             Self::ReadLease => ("root_leases", "root_ref", None),
             Self::RetirementHold => ("retirement_holds", "root_ref", None),

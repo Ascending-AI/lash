@@ -974,11 +974,10 @@ pub(crate) async fn delete_session_tx(
     .await
     .map_err(store_sqlx_error)?;
     let (leaf_node_id, checkpoint_ref) = head.unwrap_or((None, None));
-    // What the session roots: its head, every revision it still retains,
-    // every window its terminals name and its admission base. Its pins,
+    // What the session roots: its head, every revision it still retains
+    // (the windows its terminals name among them) and its admission base. Its pins,
     // revisions, runs and metadata go with it, so each root they held is
     // retired here and held below.
-    let runs = &crate::session_runs::session_runs_sql().runs;
     let mut checkpoint_refs: std::collections::BTreeSet<String> = session_texts(
         tx,
         session_sql().revisions.select_session_checkpoints.sql(),
@@ -986,7 +985,6 @@ pub(crate) async fn delete_session_tx(
     )
     .await?
     .into_iter()
-    .chain(session_texts(tx, runs.select_session_window_checkpoints.sql(), session_id).await?)
     .collect();
     let mut retained_leaves: std::collections::BTreeSet<String> = session_texts(
         tx,
@@ -995,7 +993,6 @@ pub(crate) async fn delete_session_tx(
     )
     .await?
     .into_iter()
-    .chain(session_texts(tx, runs.select_session_window_leaves.sql(), session_id).await?)
     .collect();
     checkpoint_refs.extend(checkpoint_ref);
     checkpoint_refs.extend(
@@ -1020,9 +1017,8 @@ pub(crate) async fn delete_session_tx(
             .await
             .map_err(store_sqlx_error)?;
     }
-    // The session's logical runs and their input bindings go with it, before
-    // its ancestry retires: a terminal window roots its leaf while its row
-    // lives. A `close_session` intent stays as its deletion tombstone.
+    // The session's logical runs and their input bindings go with it. A
+    // `close_session` intent stays as its deletion tombstone.
     crate::session_runs::delete_session_runs_conn(tx, session_id).await?;
     // Its engine rows go too, every turn's ledger and every cell's working
     // state, and each root they held is retired with them.

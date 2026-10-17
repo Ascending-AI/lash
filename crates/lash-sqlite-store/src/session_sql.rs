@@ -294,8 +294,7 @@ lash_store_sql::statements! {
                 ORDER BY low.generation LIMIT 1";
 
         /// The parent of `?1` when `?1` itself is unreachable: no live child,
-        /// no head pointing at it, no retained revision publishing it, no
-        /// terminal window naming it.
+        /// no head pointing at it, no retained revision publishing it.
         select_retirable_parent = "SELECT node.parent_node_id
                  FROM graph_nodes AS node
                  WHERE node.node_id = ?1 AND node.tombstoned = 0
@@ -307,10 +306,6 @@ lash_store_sql::statements! {
                    AND NOT EXISTS (
                        SELECT 1 FROM session_revisions AS revision
                        WHERE revision.leaf_node_id = node.node_id
-                   )
-                   AND NOT EXISTS (
-                       SELECT 1 FROM session_runs AS ended
-                       WHERE ended.terminal_window_leaf_node_id = node.node_id
                    )";
 
         /// Every unreachable live leaf session `?1` still owns, newest first.
@@ -324,10 +319,6 @@ lash_store_sql::statements! {
                            AND NOT EXISTS (
                                SELECT 1 FROM session_revisions AS revision
                                WHERE revision.leaf_node_id = node.node_id
-                           )
-                           AND NOT EXISTS (
-                               SELECT 1 FROM session_runs AS ended
-                               WHERE ended.terminal_window_leaf_node_id = node.node_id
                            )
                          ORDER BY node.generation DESC";
 

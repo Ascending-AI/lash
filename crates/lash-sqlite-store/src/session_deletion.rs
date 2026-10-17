@@ -88,8 +88,8 @@ pub(super) async fn delete_session_from_catalog(
                 )?;
             }
             // What the session roots: its head, every revision it still
-            // retains, every window its terminals name and its admission
-            // base. Its pins, revisions, runs and metadata go with it, so
+            // retains (the windows its terminals name among them) and its
+            // admission base. Its pins, revisions, runs and metadata go with it, so
             // each root they held is retired here and held below.
             let text_column = |sql: &str| -> Result<Vec<String>, lash_core_execution::StoreError> {
                 let mut stmt = tx.prepare(sql).map_err(sqlite_error)?;
@@ -98,11 +98,9 @@ pub(super) async fn delete_session_from_catalog(
                     .map_err(sqlite_error)?;
                 rows.collect::<Result<Vec<_>, _>>().map_err(sqlite_error)
             };
-            let runs = &crate::session_runs::session_runs_sql().runs;
             let mut roots: std::collections::BTreeSet<String> =
                 text_column(session_sql().revisions.select_session_checkpoints.sql())?
                     .into_iter()
-                    .chain(text_column(runs.select_session_window_checkpoints.sql())?)
                     .collect();
             roots.extend(checkpoint_ref);
             roots.extend(
@@ -118,7 +116,6 @@ pub(super) async fn delete_session_from_catalog(
             let mut retained_leaves: std::collections::BTreeSet<String> =
                 text_column(session_sql().revisions.select_session_leaves.sql())?
                     .into_iter()
-                    .chain(text_column(runs.select_session_window_leaves.sql())?)
                     .collect();
             retained_leaves.extend(leaf_node_id);
             for statement in [
@@ -130,9 +127,7 @@ pub(super) async fn delete_session_from_catalog(
                     .map_err(sqlite_error)?;
             }
             // The session's logical runs and their input bindings go with
-            // it, before its ancestry retires: a terminal window roots its
-            // leaf while its row lives. A `close_session` intent stays as
-            // its deletion tombstone.
+            // it. A `close_session` intent stays as its deletion tombstone.
             crate::session_runs::delete_session_runs_conn(tx, &session_id)?;
             // Its engine rows go too, every turn's ledger and every cell's
             // working state, and each root they held is retired with them.

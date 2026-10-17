@@ -216,6 +216,11 @@ store_error_samples! {
         target: crate::session_store_factory_types::Target::Revision(1),
     },
     TurnBaseNotRetained { .. } => StoreError::TurnBaseNotRetained { revision: 1 },
+    RunWindowReleased { .. } => StoreError::RunWindowReleased {
+        session_id: session(),
+        run: turn(),
+        revision: 1,
+    },
     ForkSessionAlreadyExists { .. } => StoreError::ForkSessionAlreadyExists {
         session_id: session(),
     },

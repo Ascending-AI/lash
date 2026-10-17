@@ -242,46 +242,57 @@ fn lineage(conn: &Connection, session: &SessionId) -> Result<LineageStamp, Store
 }
 
 /// The head that run `run`'s terminal named as its window (FIG-5931), read
-/// like the live head: its head document, revision, leaf and checkpoint, and
-/// the frame its leaf row names. The terminal's row roots the leaf and the
-/// checkpoint, so later commits and collections leave them readable. `None`
-/// when the run has no terminal or its terminal names no window.
+/// like the live head: its revision's head document, revision, leaf and
+/// checkpoint, and the frame its leaf row names. `None` when the run has no
+/// terminal or its terminal names no window;
+/// [`StoreError::RunWindowReleased`] once the session's retention released
+/// the revision (FIG-6606), never the head in its place.
 fn terminal_head(
     conn: &Connection,
     session: &SessionId,
     run: &lash_core_execution::TurnId,
     fleet: lash_core_execution::FleetFormat,
 ) -> Result<Option<lash_core_execution::store::SessionHeadMeta>, StoreError> {
-    conn.prepare_cached(
-        crate::session_runs::session_runs_sql()
-            .runs
-            .select_terminal_window
-            .sql(),
-    )
-    .map_err(sqlite_error)?
-    .query_row(params![session.as_str(), run.as_str()], |row| {
-        Ok((
-            row.get::<_, Option<String>>(0)?,
-            row.get::<_, i64>(1)?,
-            row.get::<_, Option<String>>(2)?,
-            row.get::<_, Option<String>>(3)?,
-            row.get::<_, Option<String>>(4)?,
-        ))
-    })
-    .optional()
-    .map_err(sqlite_error)?
-    .map(|(head_json, revision, leaf, checkpoint, frame)| {
-        crate::codec::assemble_session_head_meta(
-            session,
-            crate::codec::load_config_conn(conn, head_json.as_deref(), fleet)?,
-            revision,
-            leaf,
-            checkpoint,
-            frame,
-            fleet,
+    let Some((config_ref, revision, leaf, checkpoint, frame, retained)) = conn
+        .prepare_cached(
+            crate::session_runs::session_runs_sql()
+                .runs
+                .select_terminal_window
+                .sql(),
         )
-    })
-    .transpose()
+        .map_err(sqlite_error)?
+        .query_row(params![session.as_str(), run.as_str()], |row| {
+            Ok((
+                row.get::<_, Option<String>>(0)?,
+                row.get::<_, i64>(1)?,
+                row.get::<_, Option<String>>(2)?,
+                row.get::<_, Option<String>>(3)?,
+                row.get::<_, Option<String>>(4)?,
+                row.get::<_, Option<i64>>(5)?,
+            ))
+        })
+        .optional()
+        .map_err(sqlite_error)?
+    else {
+        return Ok(None);
+    };
+    if retained.is_none() {
+        return Err(StoreError::RunWindowReleased {
+            session_id: session.clone(),
+            run: run.clone(),
+            revision: nonnegative("SessionRun", "terminal_window_revision", revision)?,
+        });
+    }
+    crate::codec::assemble_session_head_meta(
+        session,
+        crate::codec::load_config_conn(conn, config_ref.as_deref(), fleet)?,
+        revision,
+        leaf,
+        checkpoint,
+        frame,
+        fleet,
+    )
+    .map(Some)
 }
 
 /// The rows of `frame`'s window from `from` to `to` generation, decoded,

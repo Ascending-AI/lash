@@ -671,9 +671,15 @@ impl DurableSession {
     /// after later runs advance the head. This loads state only on explicit
     /// request; the run's outcome never loads it.
     ///
-    /// `Ok(None)` means no terminal window is retained for this run. A run
-    /// still executing or parked has no terminal window; use [`read`](Self::read)
-    /// for the current committed head.
+    /// The window is the revision the run ended on, so the session's
+    /// [`retention`](Self::retention) releases it with that revision; pin
+    /// the run or its revision to keep it. A released window is refused
+    /// with [`StoreError::RunWindowReleased`](lash_core::StoreError::RunWindowReleased),
+    /// never answered with another state; the run's outcome still reads.
+    ///
+    /// `Ok(None)` means the run has no terminal window. A run still
+    /// executing or parked has none; use [`read`](Self::read) for the
+    /// current committed head.
     pub async fn read_run(
         &self,
         run: &crate::RunId,

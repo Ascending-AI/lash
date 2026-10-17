@@ -802,8 +802,8 @@ mod tests {
             "INSERT INTO lash_session_revisions (session_id, head_revision, config_ref) VALUES ('sql-work-owner', 1, 'config'), ('sql-work-owner', 2, 'config')",
             "INSERT INTO lash_session_head (session_id, head_revision) VALUES ('sql-work-owner', 2)",
             "INSERT INTO lash_session_runs (session_id, run, terminal_kind, terminal_cause_json,
-                terminal_at_ms, terminal_head_revision, terminal_window_revision, terminal_window_config_ref)
-                VALUES ('sql-work-owner', 'settled', 'answered', '{\"cause\":\"commands_applied\"}', 0, 1, 1, 'config')",
+                terminal_at_ms, terminal_head_revision, terminal_window_revision)
+                VALUES ('sql-work-owner', 'settled', 'answered', '{\"cause\":\"commands_applied\"}', 0, 1, 1)",
             "INSERT INTO lash_pins (session_id, target_kind, target_id) VALUES ('sql-work-owner', 'revision', '1')",
         ] {
             sqlx::query(sql).execute(&mut *tx).await.unwrap();

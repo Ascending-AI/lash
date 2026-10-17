@@ -248,34 +248,6 @@ impl GraphTier for Tier {
                 "DELETE FROM artifact_refs WHERE namespace = ?1 AND artifact_ref = ?2",
                 vec![text(namespace), text(artifact)],
             ),
-            ForeignWrite::TerminalWindow {
-                config,
-                session,
-                run,
-                root: Some(root),
-            } => (
-                "INSERT INTO session_runs
-                     (session_id, run, terminal_kind, terminal_cause_json, terminal_at_ms,
-                      terminal_window_revision, terminal_window_checkpoint_ref,
-                      terminal_window_config_ref)
-                 VALUES (?1, ?2, 'cancelled', '{\"cause\":\"operator_cancelled\"}', 1,
-                         1, ?3, ?4)",
-                vec![
-                    text(session.as_str()),
-                    text(run.as_str()),
-                    if config { Value::Null } else { hex(&root) },
-                    hex(&root),
-                ],
-            ),
-            ForeignWrite::TerminalWindow {
-                config: _,
-                session,
-                run,
-                root: None,
-            } => (
-                "DELETE FROM session_runs WHERE session_id = ?1 AND run = ?2",
-                vec![text(session.as_str()), text(run.as_str())],
-            ),
         };
         self.raw(sql.to_owned(), params).await;
     }

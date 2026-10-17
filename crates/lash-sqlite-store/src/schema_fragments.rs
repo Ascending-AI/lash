@@ -22,10 +22,9 @@ CREATE TABLE IF NOT EXISTS session_ingress_sequence (
 /// it has one: all four `terminal_*` columns are set together, exactly once, and
 /// `terminal_kind` is the kind its cause derives (`RunTerminalCause::kind`),
 /// kept beside it only for the indexes and checked against it. A terminal
-/// names the window it ended on by reference (FIG-5931): the head's revision,
-/// leaf and checkpoint, and its head document in `blobs`,
-/// stored once per distinct document of the session. The leaf and the
-/// checkpoint are roots while the row lives. Each input row retains the run
+/// names the window it ended on by the head revision it ended on (FIG-5931,
+/// FIG-6606): the window is that revision's row, retained and released with
+/// it, and the terminal roots nothing of its own. Each input row retains the run
 /// that executes it. `control_intents` records a session's close; a
 /// `close_session` row outlives its session as the deletion tombstone.
 pub(crate) const SESSION_RUNS_TABLES: &str = "
@@ -39,11 +38,8 @@ CREATE TABLE IF NOT EXISTS session_runs (
     terminal_head_revision  INTEGER,
     terminal_at_ms          INTEGER,
     terminal_window_revision       INTEGER,
-    terminal_window_leaf_node_id   TEXT,
-    terminal_window_checkpoint_ref TEXT REFERENCES blobs(hash) ON DELETE RESTRICT,
-    terminal_window_config_ref TEXT REFERENCES blobs(hash) ON DELETE RESTRICT,
     PRIMARY KEY (session_id, run),
-    CONSTRAINT ck_session_runs_terminal_window CHECK ((terminal_window_revision IS NULL AND terminal_window_leaf_node_id IS NULL AND terminal_window_checkpoint_ref IS NULL AND terminal_window_config_ref IS NULL) OR (terminal_kind IS NOT NULL AND terminal_window_revision IS NOT NULL AND terminal_window_config_ref IS NOT NULL)),
+    CONSTRAINT ck_session_runs_terminal_window CHECK (terminal_window_revision IS NULL OR terminal_kind IS NOT NULL),
     CONSTRAINT ck_session_runs_terminal CHECK (((terminal_kind IS NULL AND terminal_cause_json IS NULL AND terminal_head_revision IS NULL AND terminal_at_ms IS NULL) OR (terminal_kind IS NOT NULL AND terminal_kind IN ('answered', 'failed', 'cancelled') AND terminal_cause_json IS NOT NULL AND terminal_at_ms IS NOT NULL)) IS TRUE),
     CONSTRAINT ck_session_runs_terminal_kind CHECK (terminal_kind IS NULL OR terminal_kind = CASE json_extract(terminal_cause_json, '$.cause')
         WHEN 'committed' THEN CASE
@@ -66,15 +62,9 @@ CREATE UNIQUE INDEX IF NOT EXISTS ux_session_runs_unfinished
 CREATE INDEX IF NOT EXISTS idx_session_runs_open
     ON session_runs(session_id, run)
     WHERE terminal_kind IS NULL;
-CREATE INDEX IF NOT EXISTS idx_session_runs_window_leaf
-    ON session_runs(terminal_window_leaf_node_id);
-CREATE INDEX IF NOT EXISTS idx_session_runs_window_checkpoint_ref
-    ON session_runs(terminal_window_checkpoint_ref);
 
 CREATE INDEX IF NOT EXISTS idx_session_runs_terminal_head_revision
     ON session_runs(session_id, terminal_head_revision);
-CREATE INDEX IF NOT EXISTS idx_session_runs_terminal_window_config_ref
-    ON session_runs(terminal_window_config_ref);
 CREATE TABLE IF NOT EXISTS control_intents (
     intent_id      INTEGER PRIMARY KEY AUTOINCREMENT,
     session_id     TEXT NOT NULL,

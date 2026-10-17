@@ -62,14 +62,6 @@ pub enum ForeignWrite {
         artifact: String,
         root: Option<NodeId>,
     },
-    /// Point run `run`'s terminal window's checkpoint at `root`, or drop
-    /// the run's row.
-    TerminalWindow {
-        config: bool,
-        session: SessionId,
-        run: TurnId,
-        root: Option<NodeId>,
-    },
 }
 
 /// One dialect's store, its orphan audit and the raw access the laws need.
@@ -740,9 +732,7 @@ pub async fn every_root_source_retains_its_graph_and_shared_leaves_outlive_one_o
             RootSource::SessionRevision
             | RootSource::RevisionConfig
             | RootSource::SessionAdmissionBase
-            | RootSource::ArtifactBridge
-            | RootSource::RunTerminalWindow
-            | RootSource::TerminalConfig => (None, None),
+            | RootSource::ArtifactBridge => (None, None),
             RootSource::ReadLease | RootSource::RetirementHold => continue,
         };
         let mut writes: Vec<DomainWrite> = publish.into_iter().collect();
@@ -760,10 +750,7 @@ pub async fn every_root_source_retains_its_graph_and_shared_leaves_outlive_one_o
         match source {
             RootSource::SessionRevision | RootSource::RevisionConfig => {
                 tier.foreign(ForeignWrite::RevisionRoot {
-                    config: matches!(
-                        source,
-                        RootSource::RevisionConfig | RootSource::TerminalConfig
-                    ),
+                    config: source == RootSource::RevisionConfig,
                     session: owner.session.clone(),
                     revision: 1,
                     root: Some(root),
@@ -785,18 +772,6 @@ pub async fn every_root_source_retains_its_graph_and_shared_leaves_outlive_one_o
                 })
                 .await;
             }
-            RootSource::RunTerminalWindow | RootSource::TerminalConfig => {
-                tier.foreign(ForeignWrite::TerminalWindow {
-                    config: matches!(
-                        source,
-                        RootSource::RevisionConfig | RootSource::TerminalConfig
-                    ),
-                    session: owner.session.clone(),
-                    run: turn("ended"),
-                    root: Some(root),
-                })
-                .await;
-            }
             _ => {}
         }
         if matches!(
@@ -805,8 +780,6 @@ pub async fn every_root_source_retains_its_graph_and_shared_leaves_outlive_one_o
                 | RootSource::RevisionConfig
                 | RootSource::SessionAdmissionBase
                 | RootSource::ArtifactBridge
-                | RootSource::RunTerminalWindow
-                | RootSource::TerminalConfig
         ) {
             owner_commit(
                 tier,
@@ -842,10 +815,7 @@ pub async fn every_root_source_retains_its_graph_and_shared_leaves_outlive_one_o
             }
             (RootSource::SessionRevision | RootSource::RevisionConfig, ..) => {
                 tier.foreign(ForeignWrite::RevisionRoot {
-                    config: matches!(
-                        source,
-                        RootSource::RevisionConfig | RootSource::TerminalConfig
-                    ),
+                    config: source == RootSource::RevisionConfig,
                     session: owner.session.clone(),
                     revision: 1,
                     root: None,
@@ -863,18 +833,6 @@ pub async fn every_root_source_retains_its_graph_and_shared_leaves_outlive_one_o
                 tier.foreign(ForeignWrite::ArtifactBridge {
                     namespace: "kernel_document".into(),
                     artifact: "bridge".into(),
-                    root: None,
-                })
-                .await;
-            }
-            (RootSource::RunTerminalWindow | RootSource::TerminalConfig, ..) => {
-                tier.foreign(ForeignWrite::TerminalWindow {
-                    config: matches!(
-                        source,
-                        RootSource::RevisionConfig | RootSource::TerminalConfig
-                    ),
-                    session: owner.session.clone(),
-                    run: turn("ended"),
                     root: None,
                 })
                 .await;

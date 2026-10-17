@@ -2,40 +2,15 @@
 //! holding the run's terminal evidence once it has one. The row lives until
 //! its session is deleted.
 //!
-//! A terminal names the session window it ended on by reference: the head
-//! revision, leaf and checkpoint the head published, and the head document
-//! in `blobs`, stored once per distinct document of a
-//! session (FIG-5931). The leaf and the checkpoint are roots while the row
-//! lives, so the window reads the same after any collection.
+//! A terminal names the session window it ended on by the head revision it
+//! ended on, nothing more (FIG-5931, FIG-6606). The window is that
+//! revision's row in `session_revisions`: its leaf, checkpoint and head
+//! document. The session's retention releases it with the revision, a pin
+//! on the revision keeps it exact, and once it is released a read of it is
+//! refused as released; the compact terminal evidence stays readable.
 
 /// The table's unprefixed name.
 pub const TABLE: &str = "session_runs";
-
-/// The published head a terminal window retains: revision, leaf, checkpoint
-/// and head-document digest. Its leaf and checkpoint remain roots for the
-/// lifetime of the terminal row, even after later commits or collection.
-pub struct TerminalWindowRef {
-    pub revision: i64,
-    pub leaf: Option<String>,
-    pub checkpoint: Option<String>,
-    pub config_ref: String,
-}
-
-impl TerminalWindowRef {
-    /// The `write_terminal` parameters ?7 to ?10; an absent head names no window.
-    pub fn columns(
-        window: Option<&Self>,
-    ) -> (Option<i64>, Option<&str>, Option<&str>, Option<&str>) {
-        window.map_or((None, None, None, None), |window| {
-            (
-                Some(window.revision),
-                window.leaf.as_deref(),
-                window.checkpoint.as_deref(),
-                Some(window.config_ref.as_str()),
-            )
-        })
-    }
-}
 
 crate::statements! {
     /// `session_runs` statements both backends issue verbatim.
@@ -63,22 +38,19 @@ crate::statements! {
              WHERE session_id = ?1 AND run = ?2";
 
         /// Write run `?2`'s terminal evidence (kind `?3`, cause `?4`, head
-        /// revision `?5`, instant `?6`, window revision `?7`, leaf `?8`,
-        /// checkpoint `?9` and head document digest `?10`) unless it already
-        /// has one: the caller decided the write against the stored evidence
-        /// in the same transaction, and a zero row count means another
-        /// writer won.
+        /// revision `?5`, instant `?6` and window revision `?7`) unless it
+        /// already has one: the caller decided the write against the stored
+        /// evidence in the same transaction, and a zero row count means
+        /// another writer won.
         write_terminal = "UPDATE session_runs
              SET terminal_kind = ?3, terminal_cause_json = ?4,
                  terminal_head_revision = ?5, terminal_at_ms = ?6,
-                 terminal_window_revision = ?7, terminal_window_leaf_node_id = ?8,
-                 terminal_window_checkpoint_ref = ?9, terminal_window_config_ref = ?10
+                 terminal_window_revision = ?7
              WHERE session_id = ?1 AND run = ?2 AND terminal_kind IS NULL";
 
-        /// Session `?1`'s published head: its revision, leaf, checkpoint and
-        /// head document, what a terminal's window names.
-        select_window_head = "SELECT revision.head_revision, revision.leaf_node_id,
-                    revision.checkpoint_ref, revision.config_ref
+        /// Session `?1`'s published head revision, when its revision row
+        /// stands: what a terminal's window names.
+        select_window_head = "SELECT revision.head_revision
              FROM session_head AS head
              JOIN session_revisions AS revision
                ON revision.session_id = head.session_id
@@ -86,34 +58,21 @@ crate::statements! {
              WHERE head.session_id = ?1";
 
         /// The window run `?2` of session `?1` ended on, in the columns
-        /// order of the head's own read (`select_meta`): its
-        /// head document, revision, leaf, checkpoint and the frame its leaf
-        /// row names. No row when the run has no terminal or its terminal
-        /// names no window.
-        select_terminal_window = "SELECT ended.terminal_window_config_ref, ended.terminal_window_revision,
-                    ended.terminal_window_leaf_node_id,
-                    ended.terminal_window_checkpoint_ref, leaf.frame_node_id
+        /// order of the head's own read (`select_meta`): its config graph
+        /// root, revision, leaf, checkpoint and the frame its leaf row names,
+        /// then the revision row's own revision, NULL once the session's
+        /// retention released it. No row when the run has no terminal or its
+        /// terminal names no window.
+        select_terminal_window = "SELECT revision.config_ref, ended.terminal_window_revision,
+                    revision.leaf_node_id, revision.checkpoint_ref, leaf.frame_node_id,
+                    revision.head_revision
              FROM session_runs AS ended
-             LEFT JOIN graph_nodes AS leaf
-               ON leaf.node_id = ended.terminal_window_leaf_node_id
+             LEFT JOIN session_revisions AS revision
+               ON revision.session_id = ended.session_id
+              AND revision.head_revision = ended.terminal_window_revision
+             LEFT JOIN graph_nodes AS leaf ON leaf.node_id = revision.leaf_node_id
              WHERE ended.session_id = ?1 AND ended.run = ?2
                AND ended.terminal_kind IS NOT NULL AND ended.terminal_window_revision IS NOT NULL";
-
-        /// The distinct checkpoints session `?1`'s terminal windows root,
-        /// in hash order: what its deletion may reclaim.
-        select_session_window_checkpoints = "SELECT DISTINCT terminal_window_checkpoint_ref
-             FROM session_runs
-             WHERE session_id = ?1 AND terminal_window_checkpoint_ref IS NOT NULL
-             UNION SELECT terminal_window_config_ref FROM session_runs
-                 WHERE session_id = ?1 AND terminal_window_config_ref IS NOT NULL
-             ORDER BY terminal_window_checkpoint_ref";
-
-        /// The distinct leaves session `?1`'s terminal windows retain: where
-        /// its deletion starts their ancestry's retirement.
-        select_session_window_leaves = "SELECT DISTINCT terminal_window_leaf_node_id
-             FROM session_runs
-             WHERE session_id = ?1 AND terminal_window_leaf_node_id IS NOT NULL
-             ORDER BY terminal_window_leaf_node_id";
 
         /// The runs of session `?1` without terminal evidence, in run
         /// order: what its close ends.

@@ -808,7 +808,12 @@ async fn malformed_durable_rows_surface_typed_corruption() {
         ),
         "a dangling checkpoint manifest must refuse the window read, got {dangling:?}"
     );
-    raw.execute("INSERT INTO session_runs (session_id, run, terminal_kind, terminal_cause_json, terminal_at_ms, terminal_window_revision, terminal_window_config_ref) VALUES ('corrupt', 'missing-config-window', 'answered', '{\"cause\":\"commands_applied\"}', 0, 0, 'missing-config')", []).expect("dangling terminal config");
+    raw.execute("INSERT INTO session_runs (session_id, run, terminal_kind, terminal_cause_json, terminal_at_ms, terminal_window_revision) VALUES ('corrupt', 'missing-config-window', 'answered', '{\"cause\":\"commands_applied\"}', 0, 0)", []).expect("terminal on revision 0");
+    raw.execute(
+        "UPDATE session_revisions SET config_ref = 'missing-config' WHERE session_id = 'corrupt'",
+        [],
+    )
+    .expect("dangling revision config");
     assert_corrupt(
         store
             .load_session_window(
@@ -820,11 +825,6 @@ async fn malformed_durable_rows_surface_typed_corruption() {
             .await,
         "SessionHeadMeta",
     );
-    raw.execute(
-        "UPDATE session_revisions SET config_ref = 'missing-config' WHERE session_id = 'corrupt'",
-        [],
-    )
-    .expect("dangling revision config");
     assert_corrupt(store.revisions(&session_id).await, "SessionHeadMeta");
 }
 

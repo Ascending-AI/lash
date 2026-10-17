@@ -151,11 +151,7 @@ CREATE VIEW IF NOT EXISTS graph_root_catalog AS
         WHERE admission_base_checkpoint_ref IS NOT NULL
     UNION ALL SELECT 'artifact', blob_ref FROM artifact_refs
     UNION ALL SELECT 'release', root_ref FROM graph_release_pins
-    UNION ALL SELECT 'terminal_window', terminal_window_checkpoint_ref FROM session_runs
-        WHERE terminal_window_checkpoint_ref IS NOT NULL
     UNION ALL SELECT 'revision_config', config_ref FROM session_revisions
-    UNION ALL SELECT 'terminal_config', terminal_window_config_ref FROM session_runs
-        WHERE terminal_window_config_ref IS NOT NULL
     UNION ALL SELECT 'answer', answer_ref FROM turn_phases WHERE answer_ref IS NOT NULL
     UNION ALL SELECT 'lease', root_ref FROM root_leases
     UNION ALL SELECT 'retirement', root_ref FROM retirement_holds;

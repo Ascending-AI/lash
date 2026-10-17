@@ -231,31 +231,6 @@ impl GraphTier for Tier {
             )
             .bind(namespace.clone())
             .bind(artifact.clone()),
-            ForeignWrite::TerminalWindow {
-                config,
-                session,
-                run,
-                root: Some(root),
-            } => sqlx::query(
-                "                 INSERT INTO lash_session_runs
-                     (session_id, run, terminal_kind, terminal_cause_json, terminal_at_ms,
-                      terminal_window_revision, terminal_window_checkpoint_ref,
-                      terminal_window_config_ref)
-                 VALUES ($1, $2, 'cancelled', '{\"cause\":\"operator_cancelled\"}', 1,
-                         1, $3, $4)",
-            )
-            .bind(session.as_str().to_owned())
-            .bind(run.as_str().to_owned())
-            .bind(if *config { None } else { Some(hex(root)) })
-            .bind(hex(root)),
-            ForeignWrite::TerminalWindow {
-                config: _,
-                session,
-                run,
-                root: None,
-            } => sqlx::query("DELETE FROM lash_session_runs WHERE session_id = $1 AND run = $2")
-                .bind(session.as_str().to_owned())
-                .bind(run.as_str().to_owned()),
         };
         query
             .execute(&mut *tx)

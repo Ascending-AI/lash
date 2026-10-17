@@ -619,8 +619,8 @@ mod tests {
             }
             tx.execute("INSERT INTO session_head (session_id, head_revision) VALUES ('sql-work-owner', 2)", [])?;
             tx.execute("INSERT INTO session_runs (session_id, run, terminal_kind, terminal_cause_json,
-                terminal_at_ms, terminal_head_revision, terminal_window_revision, terminal_window_config_ref)
-                VALUES ('sql-work-owner', 'settled', 'answered', '{\"cause\":\"commands_applied\"}', 0, 1, 1, 'config')", [])?;
+                terminal_at_ms, terminal_head_revision, terminal_window_revision)
+                VALUES ('sql-work-owner', 'settled', 'answered', '{\"cause\":\"commands_applied\"}', 0, 1, 1)", [])?;
             tx.execute("INSERT INTO pins (session_id, target_kind, target_id)
                 VALUES ('sql-work-owner', 'revision', '1')", [])?;
             crate::revisions::record_terminal_conn(tx, &SessionId::from("sql-work-owner"), 2, lash_durable::DurableInstant(0))

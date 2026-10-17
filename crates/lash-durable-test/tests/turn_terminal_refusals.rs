@@ -21,8 +21,7 @@ use std::sync::atomic::{AtomicUsize, Ordering};
 use served::{Tier, World};
 
 /// V07: a run is wholly open or wholly terminal on every SQL substrate.
-/// Its optional window reference needs a revision and head document; its
-/// leaf and checkpoint may be absent, as on a session's initial head.
+/// Its optional window revision needs terminal evidence.
 async fn run_terminal_columns_have_one_presence_state(tier: Tier) {
     let dir = tempfile::tempdir().unwrap();
     let sqlite = match tier {
@@ -42,25 +41,10 @@ async fn run_terminal_columns_have_one_presence_state(tier: Tier) {
         for statements in lash_sqlite_store::testing::database_provisioning_statements() {
             conn.execute_batch(statements).unwrap();
         }
-        conn.execute_batch(
-            "INSERT INTO blobs (hash, content, encoding) VALUES ('checkpoint', X'', 0);
-             INSERT INTO blobs (hash, content, encoding)
-             VALUES ('head', CAST('{}' AS BLOB), 0);",
-        )
-        .unwrap();
-    } else {
-        sqlx::raw_sql(
-            "INSERT INTO lash_blobs (hash, content, encoding) VALUES ('checkpoint', ''::bytea, 0);
-             INSERT INTO lash_blobs (hash, content, encoding)
-             VALUES ('head', '{}'::bytea, 0);",
-        )
-        .execute(&postgres.as_ref().unwrap().1)
-        .await
-        .unwrap();
     }
     // The first three bits are the required terminal evidence; the rest
-    // select the optional terminal revision and four window columns.
-    for bits in 0..256 {
+    // select the optional terminal revision and window revision.
+    for bits in 0..32 {
         let kind = if bits & 4 != 0 { "'answered'" } else { "NULL" };
         let cause = if bits & 2 != 0 {
             "'{\"cause\":\"commands_applied\"}'"
@@ -70,13 +54,6 @@ async fn run_terminal_columns_have_one_presence_state(tier: Tier) {
         let time = if bits & 1 != 0 { "1" } else { "NULL" };
         let head_revision = if bits & 8 != 0 { "1" } else { "NULL" };
         let window_revision = if bits & 16 != 0 { "1" } else { "NULL" };
-        let leaf = if bits & 32 != 0 { "'leaf'" } else { "NULL" };
-        let checkpoint = if bits & 64 != 0 {
-            "'checkpoint'"
-        } else {
-            "NULL"
-        };
-        let head = if bits & 128 != 0 { "'head'" } else { "NULL" };
         let table = if sqlite.is_some() {
             "session_runs"
         } else {
@@ -84,11 +61,9 @@ async fn run_terminal_columns_have_one_presence_state(tier: Tier) {
         };
         let sql = format!(
             "INSERT INTO {table} (session_id, run, terminal_kind, terminal_cause_json,
-                 terminal_at_ms, terminal_head_revision, terminal_window_revision,
-                 terminal_window_leaf_node_id, terminal_window_checkpoint_ref,
-                 terminal_window_config_ref)
+                 terminal_at_ms, terminal_head_revision, terminal_window_revision)
              VALUES ('s', '{bits}', {kind}, {cause}, {time}, {head_revision},
-                 {window_revision}, {leaf}, {checkpoint}, {head})"
+                 {window_revision})"
         );
         let inserted = if let Some(conn) = &sqlite {
             conn.execute(&sql, [])
@@ -101,13 +76,10 @@ async fn run_terminal_columns_have_one_presence_state(tier: Tier) {
                 .map(|_| ())
                 .map_err(|error| error.to_string())
         };
-        let terminal = bits & 7 == 7;
-        let no_window = bits & 240 == 0;
-        let window = bits & 144 == 144;
         assert_eq!(
             inserted.is_ok(),
-            bits == 0 || (terminal && (no_window || window)),
-            "{tier:?} presence bits {bits:08b}: {inserted:?}"
+            bits == 0 || bits & 7 == 7,
+            "{tier:?} presence bits {bits:05b}: {inserted:?}"
         );
     }
     if let Some((database, pool)) = postgres {

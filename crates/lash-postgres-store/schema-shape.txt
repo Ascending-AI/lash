@@ -530,14 +530,9 @@ table lash_session_runs
   column terminal_cause_json text nullable
   column terminal_head_revision bigint nullable
   column terminal_kind text nullable
-  column terminal_window_checkpoint_ref text nullable
-  column terminal_window_config_ref text nullable
-  column terminal_window_leaf_node_id text nullable
   column terminal_window_revision bigint nullable
   unique (session_id) where (admission_json is not null) and (terminal_kind is null)
   primary-key (session_id, run)
-  foreign-key (terminal_window_checkpoint_ref) references lash_blobs (hash) on delete restrict
-  foreign-key (terminal_window_config_ref) references lash_blobs (hash) on delete restrict
 table lash_session_scope_ends
   column begun_at_ms bigint not-null
   column scope_key text not-null
