@@ -90,7 +90,7 @@ async fn discovery_hidden_tool_executes_through_rlm_and_standard_batch_but_not_n
             first,
             text_response("done"),
         ])));
-        let requests = Arc::new(StdMutex::new(Vec::<String>::new()));
+        let requests = Arc::new(StdMutex::new(Vec::new()));
         let captured = requests.clone();
         let provider = lash::testing::TestProvider::builder()
             .kind("discovery-execution")
@@ -99,9 +99,7 @@ async fn discovery_hidden_tool_executes_through_rlm_and_standard_batch_but_not_n
                 let captured = captured.clone();
                 async move {
                     assert!(request.tools.iter().all(|tool| tool.name != "hidden"));
-                    captured
-                        .lock_recover()
-                        .push(serde_json::to_string(&request.messages).unwrap());
+                    captured.lock_recover().push(request.messages);
                     Ok(responses
                         .lock()
                         .await
@@ -166,10 +164,38 @@ async fn discovery_hidden_tool_executes_through_rlm_and_standard_batch_but_not_n
                 calls.lock_recover().is_empty(),
                 "hidden native tool dispatched"
             );
-            let encoded = requests.lock_recover().join("\n");
-            assert!(
-                encoded.contains("unknown_tool"),
-                "typed unknown-tool refusal: {encoded}"
+            let [call] = output.result.tool_calls.as_slice() else {
+                panic!("one refused native call: {:?}", output.result.tool_calls);
+            };
+            let lash_core::ToolCallOutcome::Failure(failure) = &call.output.outcome else {
+                panic!("the unlisted tool is refused: {call:?}");
+            };
+            assert_eq!(call.tool, "hidden");
+            assert_eq!(failure.code, "unknown_tool");
+            assert_eq!(failure.class, lash_core::ToolFailureClass::Unavailable);
+            assert_eq!(failure.source, lash_sansio::ToolFailureSource::Runtime);
+            let requests = requests.lock_recover();
+            assert_eq!(requests.len(), 2, "the model receives the refusal once");
+            let results = requests[1]
+                .iter()
+                .flat_map(|message| message.blocks.iter())
+                .filter_map(|block| match block {
+                    lash_core::llm::types::LlmContentBlock::ToolResult {
+                        call_id,
+                        tool_name,
+                        status,
+                        ..
+                    } => Some((call_id.as_str(), tool_name.as_deref(), *status)),
+                    _ => None,
+                })
+                .collect::<Vec<_>>();
+            assert_eq!(
+                results,
+                vec![(
+                    "discovery-call",
+                    Some("hidden"),
+                    lash_sansio::ToolCallStatus::Failure
+                )]
             );
         } else {
             assert_eq!(*calls.lock_recover(), ["hidden"], "{mode}");

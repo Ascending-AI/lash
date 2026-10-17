@@ -24,6 +24,7 @@ expression: "serde_json::to_string_pretty(&request.messages).unwrap()"
     "blocks": [
       {
         "ToolResult": {
+          "status": "success",
           "call_id": "provider-id",
           "content": [
             {

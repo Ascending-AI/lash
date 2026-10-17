@@ -543,6 +543,7 @@
         "tests/support/telemetry.rs",
         "tests/support/turn_commit_bound.rs",
         "tests/tool_crash_laws.rs",
+        "tests/tool_crash_laws/limits.rs",
         "tests/tool_crash_laws/obligation_settlement.rs",
         "tests/tool_crash_laws/plugin_sections.rs",
         "tests/tool_crash_laws/presentation_obligations.rs",

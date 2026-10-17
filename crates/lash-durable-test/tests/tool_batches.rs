@@ -833,44 +833,106 @@ enum Scope {
     Step,
 }
 
-/// The refusal sentence in `text`: from its opening words through the count
-/// of the calls it refused.
-fn refusal_in(text: &str) -> Option<String> {
-    let start = text.find("tool call limit exceeded")?;
-    let refusal = &text[start..];
-    let end = refusal.find(" more")? + " more".len();
-    Some(refusal[..end].to_owned())
+/// Full refusal causes are recorded independently of the provider's compact
+/// error status and the mode's words (FIG-6518).
+fn refusals(output: &lash::TurnOutput) -> Vec<&lash_core::ToolFailure> {
+    output
+        .result
+        .tool_calls
+        .iter()
+        .filter_map(|call| match &call.output.outcome {
+            lash_core::ToolCallOutcome::Failure(failure) => Some(failure),
+            _ => None,
+        })
+        .collect()
 }
 
-/// The sentence a surface is refused with after `counted` calls, asking for
-/// `requested` more. A step of a protocol without cells counts as a cell
-/// does.
-fn expected_refusal(counted: usize, requested: usize) -> String {
-    let exceeded = lash::ToolCallLimitExceeded {
-        scope: lash::ToolCallLimitScope::Cell,
-        limit: lash::MaxToolCalls::new(LIMIT),
-        counted,
-        requested,
-    };
-    let sentence = refusal_in(&exceeded.to_string()).expect("the refusal words its sentence");
-    assert!(sentence.contains(&format!("max_tool_calls = {LIMIT}")));
-    sentence
-}
-
-/// Every refusal the model was shown in scenario `name`, in the order it
-/// was first shown.
-fn refusals(world: &World, name: &str) -> Vec<String> {
-    let mut shown = Vec::new();
-    for request in world.requests(name) {
-        // The request is JSON: its strings are escaped once.
-        let request = request.replace("\\\"", "\"");
-        if let Some(refusal) = refusal_in(&request)
-            && !shown.contains(&refusal)
-        {
-            shown.push(refusal);
-        }
+fn assert_step_limit_refusal(world: &World, name: &str, output: &lash::TurnOutput) {
+    let refused = refusals(output);
+    assert!(!refused.is_empty(), "{name}: the round has typed refusals");
+    for failure in &refused {
+        assert_eq!(failure.code, lash::ToolCallLimitExceeded::CODE, "{name}");
+        assert_eq!(
+            failure.class,
+            lash_core::ToolFailureClass::ResourceLimit,
+            "{name}"
+        );
+        assert_eq!(
+            failure.source,
+            lash_sansio::ToolFailureSource::Runtime,
+            "{name}"
+        );
     }
-    shown
+    let requests = world.requests(name);
+    let messages: Vec<lash_core::llm::types::LlmMessage> = serde_json::from_str(
+        requests
+            .last()
+            .expect("the model was asked after the refused round"),
+    )
+    .expect("typed provider messages");
+    let errors = messages
+        .iter()
+        .flat_map(|message| message.blocks.iter())
+        .map(|block| match block {
+            lash_core::llm::types::LlmContentBlock::ToolResult {
+                status,
+                content,
+                tool_name,
+                ..
+            } if tool_name.as_deref() == Some("batch") => {
+                // The wrapper completes; each member keeps its own success flag.
+                assert_eq!(*status, lash_sansio::ToolCallStatus::Success);
+                let text = content
+                    .iter()
+                    .filter_map(|part| part.visible_text())
+                    .collect::<String>();
+                let value: serde_json::Value = serde_json::from_str(&text).expect("batch result");
+                let rows: Vec<lash_sansio::BatchResultRow> =
+                    serde_json::from_value(value["results"].clone())
+                        .expect("typed member outcomes");
+                rows.iter().filter(|row| !row.success).count()
+            }
+            lash_core::llm::types::LlmContentBlock::ToolResult {
+                status: lash_sansio::ToolCallStatus::Failure,
+                ..
+            } => 1,
+            _ => 0,
+        })
+        .sum::<usize>();
+    assert_eq!(
+        errors,
+        refused.len(),
+        "{name}: the model receives every refusal as an error"
+    );
+}
+
+fn assert_cell_limit_refusal(
+    view: &lash::persistence::SessionReadView,
+    counted: usize,
+    requested: usize,
+) {
+    let transcript = view.transcript().expect("typed cell transcript");
+    let limits = transcript
+        .entries()
+        .iter()
+        .filter_map(|entry| {
+            let lash::transcript::TranscriptItem::Cell(cell) = &entry.item else {
+                return None;
+            };
+            cell.result
+                .failure()
+                .and_then(|failure| failure.tool_call_limit)
+        })
+        .collect::<Vec<_>>();
+    assert_eq!(
+        limits,
+        vec![lash::ToolCallLimitExceeded {
+            scope: lash::ToolCallLimitScope::Cell,
+            limit: lash::MaxToolCalls::new(LIMIT),
+            counted,
+            requested,
+        }]
+    );
 }
 
 /// A protocol round of exactly `max_tool_calls` calls runs, and a round
@@ -901,8 +963,8 @@ async fn tool_call_limit_admits_the_limit_and_refuses_the_group_past_it(tier: Ti
             &producers.world.read(&at).await,
         );
         assert_eq!(
-            refusals(&producers.world, &at),
-            Vec::<String>::new(),
+            refusals(&output),
+            Vec::<&lash_core::ToolFailure>::new(),
             "{at}: a round of exactly max_tool_calls calls is not refused"
         );
 
@@ -911,7 +973,7 @@ async fn tool_call_limit_admits_the_limit_and_refuses_the_group_past_it(tier: Ti
         let scenario = producers
             .rendezvous
             .open(&past, Scenario::new(LIMIT + 1, false, BTreeMap::new()));
-        producers
+        let output = producers
             .world
             .run(&past, served::spec(LIMIT), producer.script(&past, &plan))
             .await;
@@ -920,11 +982,7 @@ async fn tool_call_limit_admits_the_limit_and_refuses_the_group_past_it(tier: Ti
             Vec::<usize>::new(),
             "{past}: no call of a refused round runs"
         );
-        assert_eq!(
-            refusals(&producers.world, &past).first(),
-            Some(&expected_refusal(0, LIMIT + 1)),
-            "{past}: the model is shown the refusal, naming the limit"
-        );
+        assert_step_limit_refusal(&producers.world, &past, &output);
     }
     producers.world.shutdown().await;
 }
@@ -970,8 +1028,8 @@ async fn tool_call_limit_staged_calls(tier: Tier) {
                     "{twice}: both groups of max_tool_calls calls run"
                 );
                 assert_eq!(
-                    refusals(&producers.world, &twice),
-                    Vec::<String>::new(),
+                    refusals(&output),
+                    Vec::<&lash_core::ToolFailure>::new(),
                     "{twice}: two groups of max_tool_calls calls in sequence are not refused"
                 );
             }
@@ -989,7 +1047,7 @@ async fn tool_call_limit_staged_calls(tier: Tier) {
             let script = producer
                 .staged(&past, &plan, LIMIT)
                 .expect("a staged script");
-            producers
+            let output = producers
                 .world
                 .run(&past, served::spec(LIMIT), script)
                 .await;
@@ -1005,11 +1063,12 @@ async fn tool_call_limit_staged_calls(tier: Tier) {
                 LIMIT,
                 "{past}: no refused call starts"
             );
-            assert_eq!(
-                refusals(&producers.world, &past).first(),
-                Some(&expected_refusal(counted, rest)),
-                "{past}: the model is shown the refusal at the call past the limit"
-            );
+            match scope {
+                Scope::Step => assert_step_limit_refusal(&producers.world, &past, &output),
+                Scope::Cell => {
+                    assert_cell_limit_refusal(&producers.world.read(&past).await, counted, rest)
+                }
+            }
         }
         producers.world.shutdown().await;
     }

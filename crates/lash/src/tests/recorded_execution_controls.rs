@@ -372,8 +372,19 @@ async fn set_charge_safety_above_the_retry_ceiling_is_refused() -> Result<()> {
 /// How many times a `max_tool_calls` refusal appears in what the model is
 /// shown.
 fn refusals_shown(request: &LlmRequest) -> usize {
-    format!("{:?}", request.messages)
-        .matches("tool call limit exceeded")
+    request
+        .messages
+        .iter()
+        .flat_map(|message| message.blocks.iter())
+        .filter(|block| {
+            matches!(
+                block,
+                LlmContentBlock::ToolResult {
+                    status: lash_sansio::ToolCallStatus::Failure,
+                    ..
+                }
+            )
+        })
         .count()
 }
 
@@ -411,6 +422,32 @@ fn fanning_provider(shown: &Arc<std::sync::Mutex<Vec<usize>>>) -> ProviderHandle
         .into_handle()
 }
 
+/// The commanded-limit law counts body entries independently of refusals.
+struct CountedAppTools(Arc<AtomicUsize>);
+
+#[async_trait]
+impl ToolProvider for CountedAppTools {
+    fn tool_manifests(
+        &self,
+        config: &lash_core::OwnerConfigView,
+    ) -> std::result::Result<Vec<lash_core::ToolManifest>, crate::plugins::PluginError> {
+        AppTools.tool_manifests(config)
+    }
+
+    fn resolve_contract(
+        &self,
+        name: &str,
+        config: &lash_core::OwnerConfigView,
+    ) -> Option<Arc<lash_core::ToolContract>> {
+        AppTools.resolve_contract(name, config)
+    }
+
+    async fn execute(&self, call: lash_core::ToolCall<'_>) -> lash_core::ToolAttemptOutcome {
+        self.0.fetch_add(1, Ordering::SeqCst);
+        AppTools.execute(call).await
+    }
+}
+
 /// `SetMaxToolCalls` reaches the next run and no earlier one (FIG-4546): a
 /// step of two calls runs under the limit the session was created with, and
 /// after the command the same step is refused, on the open runtime and on the
@@ -419,10 +456,16 @@ fn fanning_provider(shown: &Arc<std::sync::Mutex<Vec<usize>>>) -> ProviderHandle
 async fn a_commanded_max_tool_calls_binds_the_next_run() -> Result<()> {
     const ID: &str = "commanded-max-tool-calls";
     let shown = Arc::new(std::sync::Mutex::new(Vec::new()));
-    let core = core_over(
+    let executed = Arc::new(AtomicUsize::new(0));
+    let core = explicit_ephemeral_facets(LashCore::standard_builder(
         sqlite_memory_store_backend().await,
-        fanning_provider(&shown),
-    )?;
+    ))
+    .serve_test_llm_profile(fanning_provider(&shown), mock_llm_profile_spec())
+    .tools(
+        crate::tool_provider_key!("tools"),
+        Arc::new(CountedAppTools(Arc::clone(&executed))),
+    )
+    .build(runtime_lease_owner())?;
     create_with_budget(&core, ID, crate::TurnBudget::Unbounded).await?;
     assert_eq!(
         recorded_config(&core, ID).await?.max_tool_calls,
@@ -433,10 +476,18 @@ async fn a_commanded_max_tool_calls_binds_the_next_run() -> Result<()> {
         .session(crate::SessionId::parse(ID).expect("nonblank host identity"))
         .open()
         .await?;
-    session
+    let admitted = session
         .send(TurnInput::text("look two things up"))
         .output()
         .await?;
+    assert_eq!(admitted.result.tool_calls.len(), 2);
+    assert!(
+        admitted
+            .result
+            .tool_calls
+            .iter()
+            .all(|call| matches!(call.output.outcome, lash_core::ToolCallOutcome::Success(_)))
+    );
 
     let revision = session.admin().config().revision().await?;
     let outcome = apply(
@@ -455,12 +506,28 @@ async fn a_commanded_max_tool_calls_binds_the_next_run() -> Result<()> {
         ),
         "{outcome:?}"
     );
-    session
+    let refused = session
         .send(TurnInput::text("look two things up again"))
         .output()
         .await?;
     drop(session);
-    engine_executed_turn(&core, ID, "and once more").await?;
+    let reopened = engine_executed_turn(&core, ID, "and once more").await?;
+    assert_eq!(
+        executed.load(Ordering::SeqCst),
+        2,
+        "only the initially admitted bodies run"
+    );
+    for output in [&refused, &reopened] {
+        assert_eq!(output.result.tool_calls.len(), 2);
+        for call in &output.result.tool_calls {
+            let lash_core::ToolCallOutcome::Failure(failure) = &call.output.outcome else {
+                panic!("the commanded limit refuses every call: {call:?}");
+            };
+            assert_eq!(failure.code, crate::ToolCallLimitExceeded::CODE);
+            assert_eq!(failure.class, lash_core::ToolFailureClass::ResourceLimit);
+            assert_eq!(failure.source, lash_sansio::ToolFailureSource::Runtime);
+        }
+    }
 
     assert_eq!(
         *shown

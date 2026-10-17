@@ -350,33 +350,6 @@ impl Turn {
         matches!(self, Self::State | Self::StateCell)
     }
 
-    /// The refusal the model must be shown: after `counted` calls, `rest`
-    /// more refused.
-    fn refusal(self) -> Option<String> {
-        let (counted, requested) = match self {
-            Self::LimitStep => (0, LIMIT + 1),
-            Self::LimitCell => (LIMIT, 1),
-            Self::Plain
-            | Self::CellIdentity
-            | Self::Activity
-            | Self::Put
-            | Self::State
-            | Self::StatePair
-            | Self::StateCell
-            | Self::StatePairCell
-            | Self::Trace
-            | Self::CellTrace
-            | Self::Finish => return None,
-        };
-        let exceeded = lash::ToolCallLimitExceeded {
-            scope: lash::ToolCallLimitScope::Cell,
-            limit: lash::MaxToolCalls::new(LIMIT),
-            counted,
-            requested,
-        };
-        refusal_in(&exceeded.to_string())
-    }
-
     /// The session's spec: a [`Turn::Put`] session accepts its text
     /// attachment.
     fn spec(self) -> lash::SessionSpec {
@@ -387,31 +360,6 @@ impl Turn {
             spec
         }
     }
-
-    fn max_tool_calls(self) -> usize {
-        match self {
-            Self::LimitStep | Self::LimitCell => LIMIT,
-            Self::Plain
-            | Self::CellIdentity
-            | Self::Activity
-            | Self::Put
-            | Self::State
-            | Self::StatePair
-            | Self::StateCell
-            | Self::StatePairCell
-            | Self::Trace
-            | Self::CellTrace
-            | Self::Finish => 64,
-        }
-    }
-}
-
-/// The refusal sentence in `text`, through the count it refused.
-fn refusal_in(text: &str) -> Option<String> {
-    let start = text.find("tool call limit exceeded")?;
-    let refusal = &text[start..];
-    let end = refusal.find(" more")? + " more".len();
-    Some(refusal[..end].to_owned())
 }
 
 /// Every body entry of every probe call, across every node: the outside
@@ -1084,20 +1032,7 @@ impl Crash {
                 violations.push(format!("refused call `{label}` ran {} times", seen.len()));
             }
         }
-        // The model was shown the refusal, counting the first group once.
-        if let Some(expected) = self.turn.refusal() {
-            let shown = self
-                .scripts
-                .requests(INPUT)
-                .iter()
-                .filter_map(|request| refusal_in(&request.replace("\\\"", "\"")))
-                .collect::<BTreeSet<_>>();
-            if shown != BTreeSet::from([expected.clone()]) {
-                violations.push(format!(
-                    "the model was shown {shown:?}, not only `{expected}`"
-                ));
-            }
-        }
+        violations.extend(self.limit_laws().await);
 
         if self.turn == Turn::Activity {
             violations.extend(self.activity_laws(cut).await);
@@ -2281,21 +2216,6 @@ async fn a_finish_settles_under_its_admitted_declaration_across_a_crash(tier: Ti
     prove(Turn::Finish, tier).await;
 }
 
-/// A turn that is cut anywhere refuses the same call the same way: the
-/// first group's calls are counted once, however many executions formed
-/// the group, and the refused calls run in no execution. A step of native
-/// calls counts its own group.
-async fn tool_call_limit_refuses_the_same_call_across_a_crash(tier: Tier) {
-    prove(Turn::LimitStep, tier).await;
-}
-
-/// The same law in a cell, which counts its total: after a cut anywhere the
-/// cell's next call past the limit is refused with the first aggregate's
-/// calls counted once.
-async fn tool_call_limit_refuses_the_same_call_across_a_crash_in_a_cell(tier: Tier) {
-    prove(Turn::LimitCell, tier).await;
-}
-
 /// Code cells cut anywhere keep each call's identity, and a fresh call is
 /// a different call: every body entry of one call sees one call id, and the
 /// turn's three calls are three ids.
@@ -2563,3 +2483,10 @@ mod obligations {
         a_settled_call_leaves_its_provider_unrequired_on_a_later_claim,
     );
 }
+
+#[path = "tool_crash_laws/limits.rs"]
+mod limits;
+use limits::{
+    tool_call_limit_refuses_the_same_call_across_a_crash,
+    tool_call_limit_refuses_the_same_call_across_a_crash_in_a_cell,
+};

@@ -404,6 +404,13 @@ fn push_part_kind(identity: &mut crate::stable_identity::IdentityEncoder, kind: 
 fn push_part(identity: &mut crate::stable_identity::IdentityEncoder, part: &crate::Part) {
     identity.string(part.id());
     push_part_kind(identity, part.kind());
+    if let Some(status) = part.tool_result_status() {
+        identity.tag(match status {
+            lash_sansio::ToolCallStatus::Success => 0,
+            lash_sansio::ToolCallStatus::Failure => 1,
+            lash_sansio::ToolCallStatus::Cancelled => 2,
+        });
+    }
     // A tool result's content is its ordered blocks; every other kind's is
     // its text.
     match part.tool_result_content() {
@@ -675,10 +682,40 @@ mod append_request_identity_tests {
         );
     }
 
+    /// FIG-6518: a retry changing only the terminal fact is changed content.
+    #[test]
+    fn append_request_identity_distinguishes_tool_result_status() {
+        let operation = operation("tool-result-status");
+        let hashes = [
+            lash_sansio::ToolCallStatus::Success,
+            lash_sansio::ToolCallStatus::Failure,
+            lash_sansio::ToolCallStatus::Cancelled,
+        ]
+        .map(|status| {
+            let node = crate::SessionAppendNode::message(crate::PluginMessage {
+                id: None,
+                role: crate::MessageRole::User,
+                origin: None,
+                parts: vec![crate::Part::tool_result(
+                    "result".into(),
+                    vec![lash_sansio::ModelToolReturnPart::text("same body")],
+                    lash_sansio::ToolCallId::fixture("call"),
+                    "tool".into(),
+                    status,
+                )],
+            });
+            append_request_identity_hash(&operation, None, &[node]).expect("request identity")
+        });
+        for (index, hash) in hashes.iter().enumerate() {
+            for other in &hashes[index + 1..] {
+                assert_ne!(hash, other, "different terminal facts must not deduplicate");
+            }
+        }
+    }
+
     fn append_request_golden_rows() -> String {
-        // Versioned durability corpus. These are the exact v5 bytes, not merely
-        // relational hashes. Any projection change requires an explicit
-        // APPEND_REQUEST_IDENTITY_ENCODING_VERSION bump and corpus replacement.
+        // The 1.0 baseline pins exact request bytes, including FIG-6518's
+        // tool-result status. Pre-1.0 corrections replace this corpus in place.
         let numeric_payload: serde_json::Value = serde_json::from_str(
             r#"{
                 "null": null,
@@ -734,7 +771,7 @@ mod append_request_identity_tests {
                             {"id": "p5", "kind": "Error", "content": "error"},
                             {"id": "p6", "kind": "Prose", "content": "prose"},
                             {
-                                "id": "p7", "kind": "ToolResult",
+                                "id": "p7", "kind": "ToolResult", "status": "success",
                                 "blocks": [
                                     {"type": "text", "text": "tool-result"},
                                     {"type": "attachment",

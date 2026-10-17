@@ -227,18 +227,38 @@ async fn malformed_tool_arguments_are_refused_not_dispatched() {
         2,
         "the refusal loops back to the model once"
     );
-    let projected = format!("{:?}", requests[1].messages);
-    for expected in [
-        "invalid_tool_call_json",
-        "not valid JSON",
-        "line 1 column",
-        "not executed",
-    ] {
-        assert!(
-            projected.contains(expected),
-            "the model-visible refusal must state `{expected}`: {projected}"
-        );
-    }
+    let [call] = output.result.tool_calls.as_slice() else {
+        panic!("one refused malformed call: {:?}", output.result.tool_calls);
+    };
+    let lash_core::ToolCallOutcome::Failure(failure) = &call.output.outcome else {
+        panic!("malformed arguments are a typed refusal: {call:?}");
+    };
+    assert_eq!(call.tool, "status");
+    assert_eq!(failure.code, "invalid_tool_call_json");
+    assert_eq!(failure.class, lash_core::ToolFailureClass::InvalidRequest);
+    assert_eq!(failure.source, lash_sansio::ToolFailureSource::Runtime);
+    let results = requests[1]
+        .messages
+        .iter()
+        .flat_map(|message| message.blocks.iter())
+        .filter_map(|block| match block {
+            lash_core::llm::types::LlmContentBlock::ToolResult {
+                call_id,
+                tool_name,
+                status,
+                ..
+            } => Some((call_id.as_str(), tool_name.as_deref(), *status)),
+            _ => None,
+        })
+        .collect::<Vec<_>>();
+    assert_eq!(
+        results,
+        vec![(
+            "malformed-call",
+            Some("status"),
+            lash_sansio::ToolCallStatus::Failure
+        )]
+    );
 
     let read_view = session.read().await.expect("committed read").expect("head");
     let tool_call_contents = read_view
