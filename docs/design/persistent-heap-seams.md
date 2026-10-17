@@ -1235,14 +1235,16 @@ large heap to memory pressure. This is an estimate: new live allocations may
 also contribute to growth. It changes neither the memory metric nor its exact
 refusal rule.
 
-Small heaps still collect when the population certificate counts a closure
-entity or task edge and U is at most 128 KiB (`CARRY_COLLECTION_BYTES`), so
-later carry classification need not reread bindings for dead functions and
-tasks. Every decision input is the heap header's, preserving FIG-6453's
-checkpoint-cut independence. A no-op carry adds no debt and traces nothing;
-parks never collect. The ratio trigger supersedes FIG-6425/FIG-6453's
-pressure-only deferral above 128 KiB and keeps carry work amortized in
-allocation, without restoring the old entity-count guard.
+Carries whose population certificate counts a closure entity or task edge
+also collect (FIG-6681). Carry classification already walks their live
+identity graph, so that boundary also reclaims dead cell identities and
+families while sharing immutable payload pages. A byte-size cutoff would let
+a large scalar keep a growing family reference table alive and rewritten at
+every park. Data-only carries retain the allocation pacing above.
+
+Every decision input is the heap header's, preserving FIG-6453's checkpoint-cut
+independence. A no-op data-only carry adds no debt and traces nothing; parks
+never collect.
 
 Replay measurement: `lash-perf replay` settles page retirement between
 rounds, outside each round's window, as it settles artifact cleanup; the

@@ -629,8 +629,9 @@ impl HeapLifecycle for PagedHeap {
                     other => invalid(format!("session root transfer failed: {other}")),
                 })?;
         }
-        // A small session sheds forbidden identities; a large one pays
-        // for collection with its allocation since the last live estimate.
+        // A session already classifying forbidden identities sheds its
+        // garbage too; data-only sessions pay for collection with allocation
+        // since the last live estimate.
         if self.collects_at_carry() {
             self.collect()?;
         }

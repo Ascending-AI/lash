@@ -119,6 +119,59 @@ fn a_noop_next_cell_copies_nothing() {
     assert_eq!(list(get(&next, "root")), id);
     eprintln!("100001 objects: next-cell reads={reads}, seals={writes}");
 }
+/// FIG-6681: classifying a carry that holds cell-local closures already
+/// walks its live identity graph. Reclaim that cell's garbage at the same
+/// boundary even when shared immutable text makes the byte census large.
+#[test]
+fn a_closure_carry_reclaims_dead_families_without_copying_large_live_payloads() {
+    let (mut heap, pages) = fresh();
+    let text = heap.text(&"x".repeat(1_000_000)).expect("text");
+    let live = heap
+        .allocate_object(ObjectInit::List(vec![Value::Text(text.clone())]))
+        .expect("live list");
+    for _ in 0..12 {
+        let garbage = heap
+            .allocate_object(ObjectInit::List(vec![int(7)]))
+            .expect("reply");
+        let frozen = heap.freeze(&Value::List(garbage), true).expect("freeze");
+        let family = list(heap.instantiate(&frozen).expect("effect family"));
+        let closure = heap
+            .allocate_object(ObjectInit::Closure {
+                site: SiteRef::new(
+                    &lash_kernel_doc::Site {
+                        unit: lash_kernel_doc::Unit::Main,
+                        path: vec![],
+                    },
+                    &heap.access,
+                )
+                .expect("site"),
+                captures: Vec::new(),
+            })
+            .expect("cell-local closure");
+        let root = bindings(&mut heap, [binding("kept", Value::List(live))]);
+        heap.release_statement_roots().expect("release");
+        seal(&mut heap);
+        let payload_reads = pages.borrow().payload_reads;
+        let (after, _) = next(&mut heap, &pages, root);
+        heap = after;
+        assert_eq!(
+            heap.certificate().entities,
+            1,
+            "only the live list survives"
+        );
+        assert_eq!(heap.kind(closure).expect("closure"), None);
+        assert_eq!(heap.kind(family).expect("family"), None);
+        assert_eq!(list(get(&heap, "kept")), live);
+        let Some(Value::Text(kept)) = heap.list_get(live, 0).expect("text") else {
+            panic!("live payload was lost")
+        };
+        let (Payload::Paged(kept), Payload::Paged(original)) = (&kept.body, &text.body) else {
+            panic!("large text must stay paged")
+        };
+        assert_eq!(kept.id, original.id);
+        assert_eq!(pages.borrow().payload_reads, payload_reads);
+    }
+}
 /// FIG-6482: garbage from replaced session values pays for collection;
 /// carrying a large live value must not defer every collection to pressure.
 #[test]

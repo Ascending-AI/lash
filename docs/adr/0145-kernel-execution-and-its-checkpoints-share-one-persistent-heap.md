@@ -256,14 +256,19 @@ large value is repeatedly replaced. Every successful exact refinement resets
 the estimate to its reachable cost. Growth can include new live values, so
 the trigger is an estimate, never an exact liveness claim or memory verdict.
 
-Small heaps still shed forbidden closure entities and task edges when U is
-at most 128 KiB (`CARRY_COLLECTION_BYTES`), bounding that cleanup by a constant
-and keeping later carry classification from rereading bindings. All decision
-inputs are persisted in the heap header, preserving FIG-6453's independence
-from checkpoint cuts. A no-op cell creates no pacing debt and traces nothing;
-a park still never collects. This replaces FIG-6425/FIG-6453's rule that a
-larger session's garbage always waits for pressure, without restoring the
-unbounded entity-count guard.
+A carry whose census still contains a closure entity or task edge also
+collects (FIG-6681). Its required carry classification already walks the live
+identity graph; collection reuses the immutable payload pages and adds a
+sweep of the cell's garbage. A large scalar payload is not a reason to defer
+that cleanup: otherwise dead effect families accumulate, and every park
+rewrites their growing reference table. This adds no live-graph traversal to
+a data-only carry; those retain the allocation pacing above.
+
+All decision inputs are persisted in the heap header, preserving FIG-6453's
+independence from checkpoint cuts. A no-op data-only cell creates no pacing
+debt and traces nothing; a park still never collects. The law is
+`paged::laws::lifecycle::a_closure_carry_reclaims_dead_families_without_copying_large_live_payloads`
+in `lash-kernel-state`.
 
 The machine keeps live slots and call stacks mutable between publication
 points (FIG-6435). Slot edits coalesce until a reader needs their declaring-site

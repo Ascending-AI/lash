@@ -10,9 +10,9 @@ use super::tree::{Cell, SealWork, Tree, checked_sum};
 use super::*;
 use lash_kernel_doc::heap::*;
 
-/// Small-heap cleanup ceiling and the minimum garbage allowance for
-/// ratio-paced collection. A large heap collects after growth of at least
-/// its last live estimate, amortizing tracing against intervening allocation.
+/// Minimum garbage allowance for ratio-paced collection of data-only heaps.
+/// Such a heap collects after growth of at least its last live estimate,
+/// amortizing tracing against intervening allocation.
 pub(super) const CARRY_COLLECTION_BYTES: u64 = 4096 * MIN_ENTITY_COST.0;
 
 #[cfg(test)]
@@ -392,16 +392,20 @@ impl PagedHeap {
             Err(error) => Err(census_fault(error).into()),
         }
     }
-    /// Whether a carry collects: when the census still counts a closure
-    /// entity or task edge in a small heap, or the census has grown by at
-    /// least max(last live estimate, 128 KiB). Scalar payloads count toward
-    /// the pacing allowance; a no-op carry spends none of it. Every input
-    /// is persisted in the heap header, independent of checkpoint cuts.
+    /// A carry that must classify closures or task edges already walks its
+    /// live graph. Reclaim its cell-local garbage too, even when immutable
+    /// scalar payloads make the byte census large: keeping those payloads
+    /// shares their pages, while keeping dead families rewrites their growing
+    /// reference table at each park (FIG-6681).
+    ///
+    /// Data-only carries collect after growth of at least max(last live
+    /// estimate, 128 KiB). A no-op carry spends none of that allowance. Every
+    /// input is persisted in the heap header, independent of checkpoint cuts.
     pub(super) fn collects_at_carry(&self) -> bool {
         self.census.as_ref().is_some_and(|census| {
             let upper = census.certificate().upper.0;
-            ((self.population.closure_entities > 0 || self.population.task_edges > 0)
-                && upper <= CARRY_COLLECTION_BYTES)
+            self.population.closure_entities > 0
+                || self.population.task_edges > 0
                 || self.collection_live.is_some_and(|live| {
                     upper.saturating_sub(live.0) >= live.0.max(CARRY_COLLECTION_BYTES)
                 })
