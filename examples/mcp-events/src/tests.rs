@@ -87,7 +87,7 @@ async fn a_lost_admission_ack_retries_one_committed_occurrence_as_one_turn() {
         cursor: None,
     };
     let batch = McpEventPoll {
-        events: vec![occurrence],
+        events: vec![occurrence.clone()],
         cursor: Some("after-1".to_owned()),
         truncated: false,
         has_more: false,
@@ -106,6 +106,29 @@ async fn a_lost_admission_ack_retries_one_committed_occurrence_as_one_turn() {
     );
     assert_eq!(host.pending(10).unwrap()[0].turn, delivery.turn);
     host.dispatch_pending(&core, 10).await.unwrap();
+    // Equal payloads are two occurrences when their source ids differ.
+    let mut second = occurrence;
+    second.event_id = "t-2".to_owned();
+    let mut second_batch = batch.clone();
+    second_batch.events = vec![second];
+    second_batch.cursor = Some("after-2".to_owned());
+    host.accept(&subscription.id, 1, &second_batch).unwrap();
+    let second_delivery = host.pending(10).unwrap().pop().unwrap();
+    assert_ne!(second_delivery.turn, delivery.turn);
+    admit(&core, &second_delivery).await.unwrap();
+    drop(host); // Lose the second acknowledgement as well.
+    let mut host = HostStore::open(&path).unwrap();
+    assert_eq!(host.pending(10).unwrap()[0].turn, second_delivery.turn);
+    host.dispatch_pending(&core, 10).await.unwrap();
+    // Cursor changes are delivery progress, not new occurrence identities.
+    let mut redelivery = second_batch;
+    redelivery.events[0].cursor = Some("source-redelivery".to_owned());
+    redelivery.cursor = Some("after-redelivery".to_owned());
+    host.accept(&subscription.id, 1, &redelivery).unwrap();
+    assert_eq!(
+        host.read(&subscription.id, 1).unwrap().1.as_deref(),
+        Some("after-redelivery")
+    );
     host.accept(&subscription.id, 1, &batch).unwrap(); // source redelivery
     assert!(host.pending(10).unwrap().is_empty());
     let durable = core.session(session).durable().await.unwrap();
@@ -120,8 +143,8 @@ async fn a_lost_admission_ack_retries_one_committed_occurrence_as_one_turn() {
                     .collect::<Vec<_>>()
                     .join("\n");
                 let occurrences = transcript.matches("printer on fire").count();
-                assert!(occurrences <= 1, "a retry admitted a second turn");
-                if occurrences == 1 && transcript.contains("triaged") {
+                assert!(occurrences <= 2, "a retry admitted a second turn");
+                if occurrences == 2 && transcript.matches("triaged").count() == 2 {
                     break;
                 }
             }
@@ -134,6 +157,15 @@ async fn a_lost_admission_ack_retries_one_committed_occurrence_as_one_turn() {
         .committed_turns(None, std::num::NonZeroU32::new(10).unwrap())
         .await
         .unwrap();
-    assert_eq!(turns.turns.len(), 1, "exactly one turn was recorded");
+    assert_eq!(turns.turns.len(), 2, "one turn per occurrence was recorded");
+    let mut ids = turns
+        .turns
+        .iter()
+        .map(|turn| turn.turn_id.as_str())
+        .collect::<Vec<_>>();
+    ids.sort_unstable();
+    let mut expected = [delivery.turn.as_str(), second_delivery.turn.as_str()];
+    expected.sort_unstable();
+    assert_eq!(ids, expected);
     core.shutdown().await.unwrap();
 }

@@ -3,6 +3,7 @@
 
 use super::*;
 use lash::TurnInput;
+use lash_core::durable_port::DurableReads as _;
 
 /// FIG-6546: an observer receives the committed identity and outcome kind.
 /// Its failure cannot undo the commit, and another node reads the exact
@@ -10,6 +11,7 @@ use lash::TurnInput;
 #[tokio::test(flavor = "multi_thread", worker_threads = 4)]
 async fn finalization_identifies_a_committed_turn_readable_on_another_node() -> Result<()> {
     let (observed, mut observations) = tokio::sync::mpsc::unbounded_channel();
+    let (config_sent, mut config_seen) = tokio::sync::mpsc::unbounded_channel();
     let release_observer = Arc::new(tokio::sync::Semaphore::new(0));
     let observer_gate = Arc::clone(&release_observer);
     let observer = Arc::new(StaticPluginFactory::new(
@@ -18,8 +20,13 @@ async fn finalization_identifies_a_committed_turn_readable_on_another_node() -> 
             lash::hook_key!("turn-finalized"),
             Arc::new(move |event| {
                 let observed = observed.clone();
+                let config_sent = config_sent.clone();
                 let release = Arc::clone(&observer_gate);
                 Box::pin(async move {
+                    if let lash::plugins::PluginLifecycleEvent::SessionConfigChanged(ctx) = event {
+                        config_sent.send(ctx).expect("config address retained");
+                        return Ok(());
+                    }
                     if let lash::plugins::PluginLifecycleEvent::TurnFinalized(turn) = event {
                         release
                             .acquire()
@@ -106,17 +113,27 @@ async fn finalization_identifies_a_committed_turn_readable_on_another_node() -> 
     };
     let core = deploy(true)?;
     let session_id = lash::SessionId::from("finalized-identity");
-    let session = core
-        .session(session_id.clone())
+    core.session(session_id.clone())
         .create(lash::SessionCreation::root(mock_session_spec()))
         .await?;
-    // The host awaits the outcome only; it does not follow its own send.
+    let session = core.session(session_id.clone()).open().await?;
+    session.set_retention(lash::Retention::HeadOnly).await?;
+    // Capture the real published call ids, rather than reconstructing them.
     let answer = session
         .send(TurnInput::text("look up app state"))
         .await?
-        .outcome()
+        .output()
         .await?;
     assert_eq!(answer.status(), lash::TurnStatus::Answered);
+    let call_ids = answer
+        .activities
+        .iter()
+        .filter_map(|activity| match &activity.event {
+            lash::TurnEvent::ModelCallRecorded { call_id, .. } => Some(call_id.clone()),
+            _ => None,
+        })
+        .collect::<Vec<_>>();
+    assert_eq!(call_ids.len(), 2);
     release_observer.add_permits(1);
     let first = observations
         .recv()
@@ -127,6 +144,96 @@ async fn finalization_identifies_a_committed_turn_readable_on_another_node() -> 
         first.outcome,
         lash::persistence::TurnCommitOutcome::Completed
     );
+    let retained = session
+        .durable()
+        .committed_turn(&first.turn_id)
+        .await?
+        .expect("retained turn");
+    let model_facts = session
+        .durable()
+        .read_turn_model_calls(&first.turn_id)
+        .await?;
+    assert_eq!(
+        model_facts
+            .iter()
+            .map(|call| call.call_id.clone())
+            .collect::<Vec<_>>(),
+        call_ids
+    );
+    let run = lash::RunId::parse(first.turn_id.as_str()).expect("the event names a nonblank run");
+    let window = serde_json::to_value(
+        session
+            .durable()
+            .read_run(&run)
+            .await?
+            .expect("window")
+            .to_snapshot(),
+    )?;
+    let target = lash::Target::Turn(first.turn_id.clone());
+    session.pin(target.clone()).await?;
+    let prompt = lash::prompt::PromptCallKey {
+        session: session_id.clone(),
+        call: lash::prompt::ModelCallId::Turn {
+            run: first.turn_id.clone(),
+            ordinal: 1,
+        },
+    };
+    let admin = session.admin().config();
+    let mut applied_revisions = Vec::new();
+    for limit in [7, 6] {
+        let revision = admin.revision().await?;
+        let outcome = admin
+            .apply(
+                lash::config::ConfigWrite::new(format!("limit-{limit}"), revision),
+                lash::config::ConfigTransaction::of(lash::config::SetMaxToolCalls {
+                    max_tool_calls: lash::MaxToolCalls::new(limit),
+                }),
+            )
+            .await?
+            .await_outcome(&admin)
+            .await?;
+        let lash::config::ConfigTransactionOutcome::Applied { revision, .. } = outcome else {
+            panic!("the config applied: {outcome:?}");
+        };
+        applied_revisions.push(revision);
+    }
+    let config = config_seen.recv().await.expect("first config notification");
+    let config_revision = config.revision;
+    let config_fields = config.changed.clone();
+    let current_config = config_seen
+        .recv()
+        .await
+        .expect("second config notification");
+    assert_eq!(
+        [config_revision, current_config.revision],
+        applied_revisions.as_slice()
+    );
+    assert_eq!(
+        config_fields,
+        [lash::plugins::SessionConfigField::MaxToolCalls].into()
+    );
+    assert_eq!(
+        current_config
+            .sessions
+            .snapshot_current()
+            .await?
+            .policy
+            .max_tool_calls
+            .get(),
+        6
+    );
+    assert_eq!(
+        config
+            .sessions
+            .snapshot_current()
+            .await?
+            .policy
+            .max_tool_calls
+            .get(),
+        7
+    );
+    let audit = stores.durable_store().prompt_snapshot(&prompt).await?;
+    assert!(audit.is_some());
     session
         .send(TurnInput::text("a later turn"))
         .await?
@@ -135,6 +242,58 @@ async fn finalization_identifies_a_committed_turn_readable_on_another_node() -> 
     release_observer.add_permits(1);
     let later = observations.recv().await.expect("the later observer ran");
     assert_ne!(first.turn_id, later.turn_id);
+    let later_run = lash::RunId::parse(later.turn_id.as_str()).expect("a finalization names a run");
+    session
+        .pin(lash::Target::Turn(later.turn_id.clone()))
+        .await?;
+    let later_window = serde_json::to_value(
+        session
+            .durable()
+            .read_run(&later_run)
+            .await?
+            .expect("later window")
+            .to_snapshot(),
+    )?;
+    let later_prompt = lash::prompt::PromptCallKey {
+        session: first.session_id.clone(),
+        call: lash::prompt::ModelCallId::Turn {
+            run: later.turn_id.clone(),
+            ordinal: 1,
+        },
+    };
+    let later_audit = stores
+        .durable_store()
+        .prompt_snapshot(&later_prompt)
+        .await?;
+    assert!(later_audit.is_some());
+    assert_eq!(
+        serde_json::to_value(
+            session
+                .durable()
+                .read_run(&run)
+                .await?
+                .expect("pinned window")
+                .to_snapshot()
+        )?,
+        window
+    );
+    assert_eq!(
+        stores.durable_store().prompt_snapshot(&prompt).await?,
+        audit
+    );
+    session.unpin(target).await?;
+    // A newer revision releases only the old window/audit; compact facts survive.
+    session
+        .send(TurnInput::text("advance after unpin"))
+        .output()
+        .await?;
+    release_observer.add_permits(1);
+    observations.recv().await.expect("third finalization");
+    stores
+        .session_store_factory()
+        .gc_unreachable()
+        .await
+        .expect("collection completes");
     core.shutdown().await?;
 
     let other = deploy(true)?;
@@ -143,6 +302,63 @@ async fn finalization_identifies_a_committed_turn_readable_on_another_node() -> 
         .committed_turn(&first.turn_id)
         .await?
         .expect("the turn committed");
+    assert_eq!(
+        read, retained,
+        "the captured address still resolves exact transcript and tools"
+    );
+    assert_eq!(
+        durable.read_turn_model_calls(&first.turn_id).await?,
+        model_facts
+    );
+    let addresses = call_ids
+        .iter()
+        .map(|call_id| lash::turn::TurnModelCallRef {
+            turn_id: first.turn_id.clone(),
+            call_id: call_id.clone(),
+        })
+        .collect::<Vec<_>>();
+    let expected_calls = model_facts
+        .iter()
+        .cloned()
+        .map(|record| lash::turn::ModelCallRead::Settled {
+            record: Box::new(record),
+        })
+        .collect::<Vec<_>>();
+    assert_eq!(durable.read_model_calls(&addresses).await?, expected_calls);
+    let terminal = durable.run(run.clone()).outcome().await?;
+    assert_eq!(
+        terminal.output().map(|output| &output.outcome),
+        Some(&answer.outcome)
+    );
+    assert_eq!(
+        serde_json::to_value(
+            durable
+                .read_run(&later_run)
+                .await?
+                .expect("the other pin keeps only its own window")
+                .to_snapshot()
+        )?,
+        later_window
+    );
+    assert_eq!(
+        stores
+            .durable_store()
+            .prompt_snapshot(&later_prompt)
+            .await?,
+        later_audit
+    );
+    assert!(matches!(
+        durable.read_run(&run).await,
+        Err(EmbedError::Store(
+            lash_core::StoreError::RunWindowReleased { session_id, run: released, .. }
+        )) if session_id == first.session_id && released == first.turn_id
+    ));
+    assert!(matches!(
+        stores.durable_store().prompt_snapshot(&prompt).await,
+        Err(lash_core::durable_port::DurableError::Domain(
+            lash_core::durable_port::domain::DomainRefusal::PromptAuditExpired { call }
+        )) if call == prompt
+    ));
     assert_eq!(&read.turn.turn_id, &first.turn_id);
     assert_eq!(read.turn.outcome, first.outcome);
     let texts = read
@@ -169,7 +385,7 @@ async fn finalization_identifies_a_committed_turn_readable_on_another_node() -> 
     assert!(call.output.is_success());
     assert_eq!(
         sends.load(Ordering::SeqCst),
-        3,
+        4,
         "the read invokes no provider"
     );
     assert!(
@@ -177,6 +393,23 @@ async fn finalization_identifies_a_committed_turn_readable_on_another_node() -> 
             .committed_turn(&lash::TurnId::fixture("unknown-turn"))
             .await?
             .is_none()
+    );
+    assert_eq!(config.revision, config_revision);
+    assert_eq!(config.changed, config_fields);
+    assert!(
+        config
+            .changed
+            .contains(&lash::plugins::SessionConfigField::MaxToolCalls)
+    );
+    assert_eq!(
+        config
+            .sessions
+            .snapshot_current()
+            .await?
+            .policy
+            .max_tool_calls
+            .get(),
+        7
     );
     *prior.lock_recover() = Some(first);
     durable

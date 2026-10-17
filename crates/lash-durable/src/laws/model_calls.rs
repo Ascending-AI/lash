@@ -299,7 +299,128 @@ pub async fn a_receipt_stands_beside_its_model_phase_until_the_next_phase(
         Some(next_node),
     )
     .await?;
-    commit(answer(third), Some(third_node)).await?;
+    // FIG-6617: one fenced transaction must observe its own root writes.
+    // Answer invalidates the cached roots; each Advance consumes its cache.
+    let (transient, transient_node) = super::tagged_node("receipt-transient");
+    let (final_root, final_node) = super::tagged_node("receipt-final");
+    let mut tx = store.begin(actor, epoch).await?;
+    tx.stage([third_node.clone(), transient_node]);
+    tx.write(DomainWrite::Turn(answer(third)));
+    tx.write(DomainWrite::Turn(TurnWrite::AddToolCalls {
+        session: id.clone(),
+        run: run.clone(),
+        calls: 3,
+    }));
+    tx.write(DomainWrite::Turn(advance(PhaseAdvance::Tools {
+        run: RunSeq(2),
+        checkpoint: transient,
+    })));
+    store.commit(tx, LABEL).await?;
+    // A new transaction begins with populated fenced roots. The first
+    // Advance must consume those roots before the second Advance runs.
+    let (middle, middle_node) = super::tagged_node("receipt-middle");
+    let mut tx = store.begin(actor, epoch).await?;
+    tx.stage([middle_node, final_node]);
+    tx.write(DomainWrite::Turn(advance(PhaseAdvance::Tools {
+        run: RunSeq(3),
+        checkpoint: middle,
+    })));
+    tx.write(DomainWrite::Turn(TurnWrite::AddToolCalls {
+        session: id.clone(),
+        run: run.clone(),
+        calls: 2,
+    }));
+    tx.write(DomainWrite::Turn(advance(PhaseAdvance::Tools {
+        run: RunSeq(4),
+        checkpoint: final_root,
+    })));
+    store.commit(tx, LABEL).await?;
+    let final_row = row().await?;
+    ensure!(
+        final_row.phase.checkpoint() == Some(final_root) && final_row.tool_calls == 5,
+        "the ordered batch lost its final phase or tool admissions: {final_row:?}"
+    );
+    ensure!(
+        retired(receipt().await),
+        "the batched advance left its receipt readable"
+    );
+    let pages = store
+        .pages()
+        .ok_or_else(|| LawBroken("the store has no page retirement".into()))?;
+    while pages
+        .retire_step(crate::domain::pages::RetirementBudget { nodes: 128 })
+        .await?
+        != crate::domain::pages::RetirementProgress::default()
+    {}
+    // No orphan audit: retirement itself must release every superseded root.
+    // Republish without supplying a body: a freed root must be refused.
+    for freed in [first, checkpoint, round, next, third, transient, middle] {
+        ensure!(
+            matches!(commit(advance(PhaseAdvance::Tools { run: RunSeq(4), checkpoint: freed }), None).await,
+            Err(crate::DurableError::Graph(lash_core_store::checkpoint_graph::GraphRefusal::MissingNode(found))) if found == freed),
+            "a batched write leaked the retired root {freed:?}"
+        );
+    }
+    // A refusal after an increment and an advance rolls back both the phase
+    // and the retirements; the final closure must remain readable.
+    let (rolled_back, rolled_back_node) = super::tagged_node("receipt-rolled-back");
+    let mut tx = store.begin(actor, epoch).await?;
+    tx.stage([rolled_back_node, third_node]);
+    tx.write(DomainWrite::Turn(TurnWrite::AddToolCalls {
+        session: id.clone(),
+        run: run.clone(),
+        calls: 9,
+    }));
+    tx.write(DomainWrite::Turn(advance(PhaseAdvance::Tools {
+        run: RunSeq(5),
+        checkpoint: rolled_back,
+    })));
+    tx.write(DomainWrite::Turn(answer(third)));
+    ensure!(
+        refused(store.commit(tx, LABEL).await.map(|_| ())),
+        "a refused batch committed"
+    );
+    ensure!(
+        row().await? == final_row,
+        "a refusal changed the committed phase or count"
+    );
+    let live = store
+        .hydrate(
+            crate::domain::RootOwner::TurnPhase {
+                session: id.clone(),
+                run: run.clone(),
+            },
+            None,
+            lash_core_store::checkpoint_graph::DecodeLimits::within_total(1 << 20),
+        )
+        .await?;
+    ensure!(
+        live.root == final_root,
+        "a refusal retired the final closure"
+    );
+    // Keep the original terminal case too: end an answered model phase,
+    // so the terminal itself must take an unconsumed receipt with it.
+    let (terminal_phase, terminal_phase_node) = super::tagged_node("receipt-terminal-phase");
+    commit(
+        advance(PhaseAdvance::Model {
+            pin: ModelPin {
+                call: 3,
+                attempt: 1,
+                request_ref: "request-3".to_owned(),
+                deadline: DurableInstant(1_000),
+                stream_from: "stream-3".to_owned(),
+            },
+            checkpoint: terminal_phase,
+        }),
+        Some(terminal_phase_node),
+    )
+    .await?;
+    let (terminal_answer, terminal_answer_node) = super::tagged_node("receipt-terminal-answer");
+    commit(answer(terminal_answer), Some(terminal_answer_node)).await?;
+    ensure!(
+        receipt().await? == terminal_answer,
+        "the terminal control has no live receipt"
+    );
     commit(
         TurnWrite::Terminal {
             session: id.clone(),

@@ -19,6 +19,8 @@
 //! - `list_pages`: return this many finite catalog pages;
 //! - `orphan_notifications`: send this many unregistered push notifications
 //!   on each listing, to exercise host-selected routing admission.
+//! - `pause_stream`: install a stream without sending notifications; laws
+//!   release explicit batches with `fixture/notifications` after opening routes.
 //!
 //! `requests.jsonl` logs every request and notification the server read,
 //! once it is handled: a logged poll or stream has fixed where it starts.
@@ -139,6 +141,12 @@ for line in sys.stdin:
             'serverInfo': {'name': 'events-fixture', 'version': '1.0.0'}}})
     elif method == 'tools/list':
         send({'jsonrpc': '2.0', 'id': request_id, 'result': {'tools': []}})
+    elif method == 'fixture/notifications':
+        # A request/ack barrier: the host opens routes before releasing this
+        # batch and does not read them until every notification is routed.
+        for notification in params['notifications']:
+            send(dict(jsonrpc='2.0', **notification))
+        send({'jsonrpc': '2.0', 'id': request_id, 'result': {}})
     elif method == 'events/list':
         for n in range(control().get('orphan_notifications', 0)):
             send({'jsonrpc': '2.0', 'method': 'notifications/events/heartbeat', 'params': {
@@ -174,6 +182,9 @@ for line in sys.stdin:
         else:
             streams[request_id] = True
             position, truncated = start_at(params.get('cursor'))
+            if c.get('pause_stream'):
+                log(line)
+                continue
             send({'jsonrpc': '2.0', 'method': 'notifications/events/active', 'params': {
                 'cursor': str(position), 'truncated': truncated,
                 '_meta': {'io.modelcontextprotocol/subscriptionId': request_id}}})

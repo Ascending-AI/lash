@@ -678,4 +678,192 @@ mod tests {
         ));
         pool.shutdown_all().await;
     }
+
+    /// H6: a malformed push never publishes an apparently complete partial window.
+    #[tokio::test]
+    async fn a_malformed_notification_refuses_the_whole_window() {
+        let world = tempfile::tempdir().unwrap();
+        let fixture = McpEventsFixture::new(world.path());
+        fixture.control(serde_json::json!({"pause_stream": true}));
+        let pool = McpConnectionPool::connect(BTreeMap::from([(
+            "tickets".to_owned(),
+            fixture.server(McpEventTransportPolicy {
+                orphan_notifications: 8,
+                reorder_settle_ms: 10,
+            }),
+        )]))
+        .await
+        .unwrap();
+        let mut stream = McpEventClient::new(Arc::clone(&pool))
+            .open("tickets", &window_request())
+            .await
+            .unwrap();
+        let id = stream.handle.as_ref().unwrap().id.clone().into_json_value();
+        release_notifications(
+            &pool,
+            vec![
+                notification(
+                    &id,
+                    wire::EVENT_NOTIFICATION,
+                    serde_json::json!({
+                        "eventId":"valid", "name":"ticket.created", "timestamp":"now",
+                        "data":{}, "cursor":"paid-position",
+                    }),
+                ),
+                notification(
+                    &id,
+                    wire::EVENT_NOTIFICATION,
+                    serde_json::json!({"cursor":"bad"}),
+                ),
+                notification(
+                    &id,
+                    wire::TERMINATED_NOTIFICATION,
+                    serde_json::json!({
+                        "error":{"code":-32000, "message":"closed"},
+                    }),
+                ),
+            ],
+        )
+        .await;
+        tokio::time::timeout(Duration::from_secs(5), async {
+            while stream.notifications.len() != 3 {
+                tokio::task::yield_now().await;
+            }
+        })
+        .await
+        .unwrap();
+        assert_eq!(
+            stream.notifications.len(),
+            3,
+            "the route received the entire batch"
+        );
+        let mut host_cursor = None;
+        let result = stream.read_window(Duration::from_secs(1), 10).await;
+        if let Ok(window) = &result {
+            host_cursor.clone_from(&window.cursor);
+        }
+        assert!(
+            matches!(result, Err(McpEventsCallError::Decode { server, method, .. })
+            if server == "tickets" && method == wire::EVENT_NOTIFICATION)
+        );
+        assert_eq!(host_cursor, None);
+        stream.close().await.unwrap();
+        pool.shutdown_all().await;
+    }
+
+    /// H6: overflow after route installation poisons every reader, including
+    /// a reader whose closing timer is already armed.
+    #[tokio::test]
+    async fn installed_route_overflow_refuses_a_closing_window_and_its_neighbor() {
+        let world = tempfile::tempdir().unwrap();
+        let fixture = McpEventsFixture::new(world.path());
+        fixture.control(serde_json::json!({"pause_stream": true}));
+        let pool = McpConnectionPool::connect(BTreeMap::from([(
+            "tickets".to_owned(),
+            fixture.server(McpEventTransportPolicy {
+                orphan_notifications: 2,
+                reorder_settle_ms: 100,
+            }),
+        )]))
+        .await
+        .unwrap();
+        let client = McpEventClient::new(Arc::clone(&pool));
+        let mut closing = client.open("tickets", &window_request()).await.unwrap();
+        let mut neighbor = client.open("tickets", &window_request()).await.unwrap();
+        let closing_id = closing
+            .handle
+            .as_ref()
+            .unwrap()
+            .id
+            .clone()
+            .into_json_value();
+        let neighbor_id = neighbor
+            .handle
+            .as_ref()
+            .unwrap()
+            .id
+            .clone()
+            .into_json_value();
+        assert_eq!(closing.streams.inner.lock_recover().routes.len(), 2);
+        release_notifications(
+            &pool,
+            vec![notification(
+                &closing_id,
+                wire::TERMINATED_NOTIFICATION,
+                serde_json::json!({
+                    "error":{"code":-32000,"message":"closed"},
+                }),
+            )],
+        )
+        .await;
+        tokio::time::timeout(Duration::from_secs(5), async {
+            while closing.notifications.len() != 1 {
+                tokio::task::yield_now().await;
+            }
+        })
+        .await
+        .unwrap();
+        tokio::time::pause();
+        let mut closing_read = Box::pin(closing.read_window(Duration::from_secs(10), 10));
+        assert!(matches!(
+            futures_util::poll!(&mut closing_read),
+            std::task::Poll::Pending
+        ));
+        // The notification was consumed and the settle timer is now armed.
+        for n in 0..3 {
+            neighbor.streams.deliver(
+                &neighbor_id,
+                wire::HEARTBEAT_NOTIFICATION.to_owned(),
+                serde_json::json!({"cursor":n.to_string()}),
+            );
+        }
+        let mut host_cursor = None;
+        for result in [
+            closing_read.await,
+            neighbor.read_window(Duration::from_secs(10), 10).await,
+        ] {
+            if let Ok(window) = &result {
+                host_cursor.clone_from(&window.cursor);
+            }
+            assert!(matches!(
+                result,
+                Err(McpEventsCallError::ContinuityLost {
+                    loss: McpEventContinuityLoss::NotificationOverflow { capacity: 2 },
+                    ..
+                })
+            ));
+        }
+        assert_eq!(host_cursor, None);
+        tokio::time::resume();
+        closing.close().await.unwrap();
+        neighbor.close().await.unwrap();
+        pool.shutdown_all().await;
+    }
+
+    fn window_request() -> McpEventRequest {
+        McpEventRequest {
+            name: "ticket.created".to_owned(),
+            arguments: Default::default(),
+            cursor: None,
+            max_events: 10,
+            max_age_ms: None,
+        }
+    }
+
+    fn notification(id: &Value, method: &str, mut params: Value) -> Value {
+        params["_meta"] = serde_json::json!({"io.modelcontextprotocol/subscriptionId": id});
+        serde_json::json!({"method":method,"params":params})
+    }
+
+    async fn release_notifications(pool: &McpConnectionPool, notifications: Vec<Value>) {
+        call(
+            pool,
+            "tickets",
+            "fixture/notifications",
+            serde_json::json!({"notifications":notifications}),
+            Duration::from_secs(5),
+        )
+        .await
+        .unwrap();
+    }
 }
