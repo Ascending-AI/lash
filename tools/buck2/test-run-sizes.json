@@ -469,15 +469,6 @@
     "peak_bytes": 201854976,
     "samples": 27
   },
-  "//crates/lash-durable-test:format_fixtures__test": {
-    "cpu_count": 1,
-    "mean_cores": 1.15,
-    "memory_kb": 262144,
-    "p95_cores": 1.53,
-    "p99_peak_bytes": 133951488,
-    "peak_bytes": 133951488,
-    "samples": 97
-  },
   "//crates/lash-durable-test:frame_switch_crash_proof__test": {
     "cpu_count": 3,
     "mean_cores": 2.35,

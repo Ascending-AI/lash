@@ -112,7 +112,8 @@ def discover(repo: Path) -> list[dict]:
 
         block(0, len(tokens), modules, module_dir, path.parent)
 
-    for manifest in sorted((repo / "crates").glob("*/Cargo.toml")):
+    for manifest in sorted([*(repo / "crates").glob("*/Cargo.toml"),
+                            *(repo / "examples").glob("*/Cargo.toml")]):
         package = manifest.parent
         if not any(re.search(r'#\[ignore\s*=\s*"regenerates ', path.read_text())
                    for path in package.rglob("*.rs")):

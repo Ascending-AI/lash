@@ -589,8 +589,6 @@ def check_per_test_inputs() -> None:
         for path in (ROOT / directory).glob(pattern)
     }
     assert "tests/attachment_ref_laws.rs" not in files, "vertical owns an unrelated sibling"
-    assert "tests/support/images.rs" in files
-    assert "tests/vertical_crash_proof/corpus.rs" in files
 
     # Evaluate the actual macro with inert rule declarations, so the law
     # observes both compiler inputs and runfiles without invoking rustc.
@@ -628,13 +626,12 @@ def check_per_test_inputs() -> None:
     arguments.update(
         name="vertical", crate_name="vertical", crate_root="tests/vertical_crash_proof.rs",
         manifest_dir=directory, package_name="lash-durable-test", srcs_patterns=sources,
-        data_exclude=["tests/fixtures/formats/**"], data_patterns=generate_model.SOURCE_OWNERSHIP[directory]["test_data"]["vertical_crash_proof"],
+        data_exclude=[], data_patterns=[],
         extra_compile_data=[], extra_data=[], named_deps={}, tags=[],
     )
     macro(**arguments)
     for kind in ("srcs", "resources"):
         assert "tests/attachment_ref_laws.rs" not in declarations[0][kind], f"sibling leaked into {kind}"
-        assert "tests/fixtures/formats/session/db.gz" in declarations[0][kind], f"fixture lost from {kind}"
 
 
 def check_module_input_closure() -> None:

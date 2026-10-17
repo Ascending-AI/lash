@@ -9,11 +9,11 @@ fn design_8_corpus_pins_readable_per_dialect_outputs() -> anyhow::Result<()> {
     for (relative, expected) in outputs {
         let path = root.join(&relative);
         let actual = std::fs::read_to_string(&path).map_err(|error| {
-            anyhow::anyhow!("{relative}: {error}; run the corpus bless command")
+            anyhow::anyhow!("{relative}: {error}; run the declared corpus regenerator")
         })?;
         anyhow::ensure!(
             actual == expected,
-            "{relative} differs; run the corpus bless command and review the diff"
+            "{relative} differs; run the declared corpus regenerator and review the diff"
         );
     }
     Ok(())
@@ -506,4 +506,29 @@ fn every_typescript_corpus_case_has_source_shaped_statements_and_one_body_per_lo
         }
     }
     assert!(failures.is_empty(), "SHAPE: {}", failures.join("\n"));
+}
+
+#[test]
+#[ignore = "regenerates examples/workflows"]
+#[expect(
+    clippy::disallowed_methods,
+    reason = "the opt-in recorder writes readable outputs in its supplied workspace"
+)]
+fn regenerate_readable_workflow_outputs() -> anyhow::Result<()> {
+    anyhow::ensure!(
+        std::env::var("LASH_REGENERATE").as_deref() == Ok("1"),
+        "set LASH_REGENERATE=1 to regenerate readable workflow outputs"
+    );
+    let workspace = std::env::var_os("BUILD_WORKSPACE_DIRECTORY")
+        .ok_or_else(|| anyhow::anyhow!("regeneration requires BUILD_WORKSPACE_DIRECTORY"))?;
+    let root = std::path::PathBuf::from(workspace).join("examples/workflows");
+    for (relative, text) in workflow_corpus::render(&root)? {
+        let path = root.join(relative);
+        std::fs::create_dir_all(
+            path.parent()
+                .ok_or_else(|| anyhow::anyhow!("output parent"))?,
+        )?;
+        std::fs::write(path, text)?;
+    }
+    Ok(())
 }

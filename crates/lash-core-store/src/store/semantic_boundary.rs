@@ -167,7 +167,6 @@ pub(super) fn semantic_boundary_request_identity(
 #[allow(clippy::disallowed_methods)] // FIG-2971: test module is a host; ambient fs/env/process access is sanctioned
 mod semantic_boundary_request_identity_tests {
     use super::*;
-    use crate::store::SemanticBoundaryOperation;
 
     fn boundary_commit(boundary: &str, key: &str) -> RuntimeCommit {
         let state = crate::RuntimeSessionState {
@@ -195,64 +194,6 @@ mod semantic_boundary_request_identity_tests {
             .stamp_semantic_boundary()
             .expect("stamp record-config commit");
         commit
-    }
-
-    #[test]
-    fn semantic_boundary_request_identity_v1_golden_corpus() {
-        let rows = semantic_boundary_golden_rows();
-        assert_eq!(
-            rows,
-            include_str!("testdata/semantic_boundary_request_v1.golden"),
-            "v1 canonical request bytes moved; use the documented refresh command only for an \
-             intentional grammar change with a version bump"
-        );
-    }
-
-    fn semantic_boundary_golden_rows() -> String {
-        [
-            (
-                "record-config",
-                "protocol-materialization",
-                RECORD_CONFIG_REQUEST_IDENTITY_ENCODING_VERSION,
-            ),
-            (
-                "create-session",
-                "child-1",
-                CREATE_SESSION_REQUEST_IDENTITY_ENCODING_VERSION,
-            ),
-        ]
-        .into_iter()
-        .map(|(key, boundary, expected_version)| {
-            let commit = boundary_commit(boundary, key);
-            let operation =
-                SemanticBoundaryOperation::from_operation_key(key).expect("adopted operation key");
-            let preimage = semantic_boundary_request_intent_encoding(&commit)
-                .expect("encode canonical request");
-            let (encoding_version, hash) = semantic_boundary_request_identity(&commit, operation)
-                .expect("hash canonical request");
-            assert_eq!(
-                encoding_version, expected_version,
-                "{key} request identity encoding version"
-            );
-            format!("{key}={preimage}|{hash}")
-        })
-        .collect::<Vec<_>>()
-        .join("\n")
-            + "\n"
-    }
-
-    #[test]
-    #[ignore = "regenerates crates/lash-core-store/src/store/testdata/semantic_boundary_request_v1.golden"]
-    fn regenerate_semantic_boundary_request_identity_v1_golden_corpus() {
-        assert_eq!(std::env::var("LASH_REGENERATE").as_deref(), Ok("1"));
-        let root = std::env::var_os("BUILD_WORKSPACE_DIRECTORY").expect("regeneration workspace");
-        std::fs::write(
-            std::path::PathBuf::from(root).join(
-                "crates/lash-core-store/src/store/testdata/semantic_boundary_request_v1.golden",
-            ),
-            semantic_boundary_golden_rows(),
-        )
-        .expect("write golden corpus");
     }
 
     #[test]

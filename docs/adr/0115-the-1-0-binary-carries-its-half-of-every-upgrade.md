@@ -410,10 +410,9 @@ inputs to compatibility checks, not execution evidence for two-build rollback.
 
 Current actor-format laws live in
 `crates/lash-durable/src/laws/formats.rs`,
-`crates/lash-durable-test/tests/drain_by_release.rs` and
-`crates/lash-durable-test/tests/format_fixtures.rs`. Their registrations define
-which stores and assertions they exercise. Decode/resume fixtures for the
-build's format sets and a drain law do not certify expanded-store rollback,
+`crates/lash-durable-test/tests/drain_by_release.rs`. Their registrations define
+which stores and assertions they exercise. Same-build crash/resume laws
+and a drain law do not certify expanded-store rollback,
 writer/finalize races, plugin writer-range rollback, history after finalize,
 or a rolling cluster under load.
 

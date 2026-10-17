@@ -509,7 +509,6 @@ PACKAGE_DEPS = {
         "dev": {
             "base64": "//third-party/rust:p0027",
             "delegation": "//examples/delegation:delegation",
-            "flate2": "//third-party/rust:p0108",
             "lash": "//crates/lash:lash",
             "lash_core": "//crates/lash-core:lash-core",
             "lash_core_execution": "//crates/lash-core-execution:lash-core-execution",

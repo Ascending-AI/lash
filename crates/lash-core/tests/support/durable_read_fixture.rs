@@ -31,31 +31,6 @@
 //! `integration_boundary` lint forbids naming in this crate's `Cargo.toml`, `src/`,
 //! and `tests/`.
 //!
-//! ## Generators
-//!
-//! The release fixtures are captured at the cut by
-//! `python3 scripts/capture_release_fixtures.py --regenerate`, which runs the two
-//! ignored generators below and freezes their output under `fixtures/release/`.
-//! Generation is deterministic: the generators fix the clock, signing secret,
-//! operation ids, and other identity inputs,
-//! and normalize the few values a store mints itself, so two runs produce
-//! byte-identical artifacts.
-//!
-//! ```text
-//! . ./env.sh
-//! LASH_REGENERATE=1 \
-//!   cargo test -p lash-internal-sqlite-store --locked \
-//!   --test durable_read_fixture regenerate_sqlite_durable_fixture -- --ignored --exact
-//! LASH_POSTGRES_DATABASE_URL=postgres://lash:lash@127.0.0.1:55487/lash \
-//! LASH_REGENERATE=1 \
-//!   cargo test -p lash-internal-postgres-store --locked \
-//!   --test durable_read_fixture regenerate_postgres_durable_fixture -- --ignored --exact
-//! ```
-//!
-//! The PostgreSQL generator writes only the dedicated `lash_durable_read_fixture`
-//! schema of a caller-owned throwaway database, and uses Docker only for the
-//! pinned `postgres:18-alpine` `pg_dump` client.
-
 // FIG-2971: this file is test/tooling/host code; ambient fs/env/process
 // access is sanctioned here (the workspace clippy ban targets production
 // library code).
@@ -118,8 +93,7 @@ use serde::{Deserialize, Serialize};
 
 pub const SESSION_ID: &str = "durable-read-fixture";
 /// The fixture format's declaration, carried in every [`ExpectedFixture`] and
-/// checked by [`assert_semantics`], so a captured release fixture names the
-/// format it was written in. Move it when [`ExpectedFixture`]'s shape changes.
+/// checked by [`assert_semantics`] when the fresh store is reopened.
 ///
 /// version_guard(
 ///     roots(ExpectedFixture),
@@ -131,29 +105,7 @@ pub const DURABLE_READ_FIXTURE_SCHEMA_VERSION: u32 = 131;
 pub const FIXTURE_WRITE_MS: u64 = 1_700_000_000_000;
 pub const FIXTURE_READ_MS: u64 = FIXTURE_WRITE_MS + 1_000;
 
-/// Fixed stand-in for the await-event signing secret each store mints from
-/// system randomness when it first creates its schema.
-///
-/// The fixture also pins a minted attachment write token and parent-end
-/// obligation id. Left alone, they make regeneration nondeterministic and
-/// defeat the no-diff double-regeneration proof. The generators replace only
-/// their fixture copies; production continues minting fresh values.
-#[allow(
-    dead_code,
-    reason = "only a store whose engine journals await-event promises pins their signing secret"
-)]
-pub const FIXTURE_AWAIT_EVENT_SIGNING_SECRET: [u8; 32] = [0x88; 32];
-
-/// Fixed stand-in for the attachment write token minted by
-/// `begin_attachment_write` while seeding the fixture.
-///
-/// Spelled as the 32-character lowercase hexadecimal encoding the durable
-/// stores persist, and shaped like the v4 UUID the production token is drawn
-/// from so a reader cannot mistake the column's domain. See
-/// [`FIXTURE_AWAIT_EVENT_SIGNING_SECRET`] for why it is pinned.
-pub const FIXTURE_ATTACHMENT_WRITE_ID: &str = "88888888888848888888888888888888";
-
-/// The attachment whose pending write carries [`FIXTURE_ATTACHMENT_WRITE_ID`].
+/// The attachment whose pending write is seeded for the round trip.
 pub fn fixture_attachment_id() -> AttachmentId {
     lash_core::attachments::content_id(b"durable-read-attachment")
 }

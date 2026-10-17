@@ -125,9 +125,8 @@ A root of a retired format is refused, never read. The whole-image kinds
 graph reader that meets one refuses it with a typed `GraphRefusal` and
 decodes nothing under it, and the heap refuses a page of any kind but the one it expects, a
 checkpoint root that is not kind 1000 included, as `HeapFault::Corrupt`
-(`paged::laws::root::a_kernel_whole_root_is_refused`). Stored 1.0 images
-are recorded once in this format
-(`//crates/lash-durable-test:format_fixtures__test`).
+(`paged::laws::root::a_kernel_whole_root_is_refused`). The first release images are recorded fresh at the 1.0 cut; pre-1.0
+crash/resume laws record and resume within one run.
 
 ### 3. Pages are read on demand and validated when read
 
@@ -481,8 +480,7 @@ retirement after 1.0, and FIG-6233 must land before either ships.
   and resumes never do.
 - Reclamation lags publication by the retirement backlog, which host
   backpressure bounds.
-- Pre-heap images are unreadable; the 1.0 images are recorded once in the
-  paged format.
+- The first release images are recorded fresh in the paged format at the 1.0 cut.
 
 ## Rejected alternatives
 

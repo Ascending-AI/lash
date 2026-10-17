@@ -55,8 +55,6 @@
 
 #[path = "support/dialect.rs"]
 mod dialect;
-#[path = "support/images.rs"]
-mod images;
 #[path = "support/noted.rs"]
 mod noted;
 #[path = "support/sim.rs"]
@@ -136,7 +134,6 @@ fn actor() -> ActorKey {
 enum Protocol {
     /// The RLM protocol: the operation runs inside a code cell.
     Code,
-    ImageCell(&'static str, bool),
     /// The standard protocol: the operation runs in a tool round.
     Tools,
     /// A tool round whose protocol appends a record of its own while the
@@ -206,7 +203,7 @@ impl Protocol {
     /// answers in prose.
     fn rounds(self) -> usize {
         match self {
-            Self::Code | Self::ImageCell(_, _) | Self::Tools | Self::Noted | Self::Archived => 1,
+            Self::Code | Self::Tools | Self::Noted | Self::Archived => 1,
             Self::NotedTwice | Self::Working(_) => 2,
             // Defaults scripts every call by its ordinal itself.
             Self::Defaults => usize::MAX,
@@ -219,7 +216,6 @@ impl Protocol {
 #[derive(Debug, Default)]
 struct ExternalWorld {
     writes: Mutex<BTreeMap<ToolCallId, Vec<serde_json::Value>>>,
-    reads: Mutex<usize>,
 }
 
 impl ExternalWorld {
@@ -314,7 +310,6 @@ fn model(protocol: Protocol, seen: Arc<Mutex<Seen>>) -> ProviderHandle {
                             };
                             text(&request, &format!("{FINAL}{told}"))
                         }
-                        (false, Protocol::ImageCell(source, _)) => text(&request, source),
                         (false, Protocol::Code) => text(&request, CELL),
                         (false, Protocol::Archived) => text(&request, ARCHIVED_CELL),
                         (false, Protocol::Working(second)) => match called {
@@ -383,35 +378,23 @@ fn core(
     seen: &Arc<Mutex<Seen>>,
 ) -> lash::LashCore {
     let builder = match protocol {
-        Protocol::Code
-        | Protocol::ImageCell(_, _)
-        | Protocol::Archived
-        | Protocol::Defaults
-        | Protocol::Working(_) => lash::LashCore::rlm_builder(
-            backend.clone(),
-            lash::rlm::RlmProtocolPluginFactory::new(
-                lash::rlm::RlmProtocolPluginConfig::builder()
-                    .channel(lash::rlm::RlmChannel::Cell)
-                    .instruction_limit(lash::rlm::InstructionBound::instructions(1_000_000))
-                    .memory_limit(lash::rlm::MemoryBound::mebibytes(64))
-                    .build(),
-                if matches!(protocol, Protocol::ImageCell(_, true)) {
-                    lash::rlm::CellDialect::python()
-                } else {
-                    lash::rlm::CellDialect::typescript()
-                },
+        Protocol::Code | Protocol::Archived | Protocol::Defaults | Protocol::Working(_) => {
+            lash::LashCore::rlm_builder(
+                backend.clone(),
+                lash::rlm::RlmProtocolPluginFactory::new(
+                    lash::rlm::RlmProtocolPluginConfig::builder()
+                        .channel(lash::rlm::RlmChannel::Cell)
+                        .instruction_limit(lash::rlm::InstructionBound::instructions(1_000_000))
+                        .memory_limit(lash::rlm::MemoryBound::mebibytes(64))
+                        .build(),
+                    lash::rlm::CellDialect::typescript(),
+                )
+                .with_worker_service(sim::workers(clock)),
             )
-            .with_worker_service(sim::workers(clock)),
-        ),
+        }
         Protocol::Tools => lash::LashCore::standard_builder(backend.clone()),
         Protocol::Noted | Protocol::NotedTwice => lash::LashCore::builder(backend.clone())
             .protocol_plugin(Arc::new(noted::NotedProtocolFactory)),
-    };
-    let builder = if matches!(protocol, Protocol::ImageCell(source, _) if source.contains("ext_read"))
-    {
-        builder.plugin(corpus::reader_plugin(world))
-    } else {
-        builder
     };
     builder
         .serve_sessions(false)
@@ -460,12 +443,6 @@ struct V0 {
     protocol: Protocol,
     dialect: Dialect,
     postgres_url: Option<String>,
-    /// A committed store image the scenario opens instead of a fresh
-    /// database: a decode-and-resume fixture.
-    image: Option<&'static images::Image>,
-    /// The SQLite file a fixture is recorded from, instead of a fresh
-    /// database.
-    record_at: Option<std::path::PathBuf>,
     world: Arc<ExternalWorld>,
     seen: Arc<Mutex<Seen>>,
     tripwire: Arc<Tripwire>,
@@ -487,8 +464,6 @@ impl V0 {
             protocol,
             dialect,
             postgres_url,
-            image: None,
-            record_at: None,
             world: Arc::default(),
             seen: Arc::default(),
             tripwire: Arc::default(),
@@ -527,29 +502,13 @@ impl V0 {
 impl Scenario for V0 {
     async fn database(&self, clock: Arc<SimClock>) -> Arc<dyn DurableStore> {
         *self.clock.lock_recover() = Some(Arc::clone(&clock));
-        let (stores, database): (Arc<dyn StoreSet>, Arc<dyn DurableStore>) =
-            match (self.image, &self.record_at) {
-                (Some(image), _) => {
-                    let (stores, dir) = images::open(image, clock).await;
-                    self.keep.lock_recover().push(Box::new(dir));
-                    let database = Arc::new(stores.durable_store());
-                    (Arc::new(stores), database)
-                }
-                (None, Some(path)) => {
-                    let stores = sim::file(path, clock).await;
-                    let database = Arc::new(stores.durable_store());
-                    (Arc::new(stores), database)
-                }
-                (None, None) => {
-                    dialect::open(
-                        self.dialect,
-                        self.postgres_url.as_deref(),
-                        clock,
-                        &self.keep,
-                    )
-                    .await
-                }
-            };
+        let (stores, database) = dialect::open(
+            self.dialect,
+            self.postgres_url.as_deref(),
+            clock,
+            &self.keep,
+        )
+        .await;
         *self.backend.lock_recover() = Some(shipped_backend(stores));
         database
     }
@@ -617,8 +576,6 @@ impl V0 {
             protocol: self.protocol,
             dialect: self.dialect,
             postgres_url,
-            image: None,
-            record_at: None,
             world: Arc::clone(&self.world),
             seen: Arc::clone(&self.seen),
             tripwire: Arc::clone(&self.tripwire),
@@ -794,7 +751,7 @@ impl V0 {
         }
         if matches!(
             self.protocol,
-            Protocol::Code | Protocol::ImageCell(_, _) | Protocol::Archived | Protocol::Working(_)
+            Protocol::Code | Protocol::Archived | Protocol::Working(_)
         ) && programs == 0
         {
             violations.push("the turn's cell never ran".to_owned());
@@ -1111,7 +1068,7 @@ async fn prove(protocol: Protocol, dialect: Dialect, postgres_url: Option<String
 /// The owner commits of the uncut turn, in order.
 fn uncut_labels(protocol: Protocol) -> Vec<CommitLabel> {
     match protocol {
-        Protocol::Code | Protocol::ImageCell(_, _) | Protocol::Archived => vec![
+        Protocol::Code | Protocol::Archived => vec![
             CommitLabel::TURN_ADMIT,
             CommitLabel::MODEL_START,
             CommitLabel::MODEL_ANSWER,
@@ -1657,577 +1614,5 @@ impl Published {
     }
 }
 
-#[path = "vertical_crash_proof/corpus.rs"]
-mod corpus;
-#[path = "support/kernel_images.rs"]
-mod kernel_images;
 #[path = "vertical_crash_proof/session_capture.rs"]
 mod session_capture;
-#[path = "vertical_crash_proof/images.rs"]
-mod session_images;
-
-#[tokio::test]
-#[ignore = "regenerates crates/lash-durable-test/tests/fixtures/formats/session"]
-async fn regenerate_session_format_fixture() {
-    let (_dir, path) = session_images::record(Protocol::Code).await;
-    images::regenerate(&path, images::SESSION.name.as_ref());
-}
-
-#[tokio::test]
-async fn a_session_decodes_and_resumes_from_its_1_0_image() {
-    session_images::resume(&images::SESSION, Protocol::Code).await;
-}
-
-/// A session activation whose first claim rewrites the unfinished turn's
-/// phase root as another build left it, its checkpoint text made `stale`
-/// of it.
-struct StaleCheckpoint {
-    rewritten: std::sync::atomic::AtomicBool,
-    database: Arc<dyn DurableStore>,
-    session: Arc<dyn Activation>,
-    stale: fn(&str) -> String,
-}
-
-/// Add an unknown field to the first parked driver state under `value`.
-fn stale_driver_state(value: &mut serde_json::Value) -> bool {
-    match value {
-        serde_json::Value::Object(map) => {
-            if let Some(state) = map
-                .get_mut("driver_state")
-                .and_then(|state| state.pointer_mut("/payload/state"))
-                .and_then(serde_json::Value::as_object_mut)
-            {
-                state.insert("left_by_another_build".to_owned(), true.into());
-                return true;
-            }
-            map.values_mut().any(stale_driver_state)
-        }
-        serde_json::Value::Array(values) => values.iter_mut().any(stale_driver_state),
-        _ => false,
-    }
-}
-
-/// `checkpoint` with the driver state its protocol parked while the cell ran
-/// carrying a field this build does not know.
-fn with_a_stale_driver_state(checkpoint: &str) -> String {
-    let mut stale: serde_json::Value =
-        serde_json::from_str(checkpoint).expect("the image's checkpoint text is JSON");
-    assert!(
-        stale_driver_state(&mut stale),
-        "the image's checkpoint parks no driver state"
-    );
-    stale.to_string()
-}
-
-#[async_trait::async_trait]
-impl Activation for StaleCheckpoint {
-    async fn activate(&self, owned: lash_durable::runner::Owned) -> lash_durable::runner::Exit {
-        use lash_durable::DomainWrite;
-        use lash_durable::domain::{TurnWrite, UnfinishedPhase};
-        if !self
-            .rewritten
-            .swap(true, std::sync::atomic::Ordering::SeqCst)
-        {
-            let row = self
-                .database
-                .turn(&session())
-                .await
-                .expect("the turn reads")
-                .expect("the image holds an unfinished turn");
-            let UnfinishedPhase::Tools { run, checkpoint } = &row.phase else {
-                panic!(
-                    "the image's turn is not parked on its cell: {:?}",
-                    row.phase
-                );
-            };
-            let graph = self
-                .database
-                .hydrate(
-                    lash_durable::domain::graph::RootOwner::TurnPhase {
-                        session: session(),
-                        run: row.run.clone(),
-                    },
-                    Some(*checkpoint),
-                    lash_durable::domain::graph::OWNER_READ_LIMITS,
-                )
-                .await
-                .expect("the image's phase root reads");
-            let mut tx = owned
-                .begin()
-                .await
-                .expect("the first claim reads its actor");
-            let checkpoint =
-                lash_core::runtime::durable::session::PhaseCheckpoint::restage_text_for_test(
-                    &graph,
-                    *checkpoint,
-                    self.stale,
-                    &mut tx,
-                )
-                .expect("the stale phase root stages");
-            tx.write(DomainWrite::Turn(TurnWrite::Advance {
-                session: session(),
-                run: row.run.clone(),
-                phase: lash_durable::domain::PhaseAdvance::Tools {
-                    run: *run,
-                    checkpoint,
-                },
-                iteration: row.iteration,
-            }));
-            owned
-                .commit(tx, CommitLabel::MODEL_DONE)
-                .await
-                .expect("the stale checkpoint commits");
-        }
-        self.session.activate(owned).await
-    }
-}
-
-/// The 1.0 session image, its turn's checkpoint rewritten with `stale` on
-/// the first claim, resumed on one node until its session parks or goes
-/// idle: the scenario, its store, its nodes and its clock.
-async fn resumed_with_a_stale_checkpoint(
-    stale: fn(&str) -> String,
-) -> (V0, Arc<dyn DurableStore>, SimNodes, Arc<SimClock>) {
-    resumed_with_stale_state(|database, session| {
-        Arc::new(StaleCheckpoint {
-            rewritten: std::sync::atomic::AtomicBool::new(false),
-            database,
-            session,
-            stale,
-        })
-    })
-    .await
-}
-
-/// The 1.0 session image resumed on one node until its session parks or
-/// goes idle, under the activation `stale` builds over its store and its
-/// session's own activation: the scenario, its store, its nodes and its
-/// clock.
-async fn resumed_with_stale_state(
-    stale: impl FnOnce(Arc<dyn DurableStore>, Arc<dyn Activation>) -> Arc<dyn Activation>,
-) -> (V0, Arc<dyn DurableStore>, SimNodes, Arc<SimClock>) {
-    let mut resumed = V0::new(Protocol::Code, Dialect::SqliteFile, None);
-    resumed.image = Some(&images::SESSION);
-    let clock = SimClock::new();
-    let database = resumed.database(Arc::clone(&clock)).await;
-    let nodes = SimNodes::new(
-        Arc::clone(&database),
-        Arc::clone(&clock),
-        Script::new(),
-        resumed.config(),
-        stale(Arc::clone(&database), resumed.activation()),
-    );
-    nodes.start("b");
-    let horizon = clock.logical_ms() + 600_000;
-    loop {
-        let snapshot = database
-            .actor(&actor())
-            .await
-            .expect("the actor reads")
-            .expect("the image holds the session");
-        if matches!(snapshot.state, ActorState::Parked | ActorState::Idle) {
-            break;
-        }
-        assert!(
-            clock.logical_ms() < horizon,
-            "the resumed session neither parked nor ended in 600 s of virtual time:\n{}",
-            nodes.script().rendered_trace()
-        );
-        assert!(
-            nodes.step().await.is_some(),
-            "the resumed session stalled:\n{}",
-            nodes.script().rendered_trace()
-        );
-    }
-    (resumed, database, nodes, clock)
-}
-
-/// The session's park, as a host reads it through the facade.
-async fn facade_park(resumed: &V0) -> Option<lash::SessionParkReason> {
-    resumed
-        .core()
-        .session(session())
-        .durable()
-        .await
-        .expect("the durable session resolves")
-        .park_reason()
-        .await
-        .expect("the session's park reads")
-}
-
-/// D-PARKREFUSE (FIG-5592, FIG-5601): a session resumed from an image whose
-/// parked driver state this build does not decode (it carries an unknown
-/// field) is refused when its turn is restored, before anything of the turn
-/// is re-delivered: the cell does not run again, the model is not called,
-/// and nothing of the turn commits. The session parks with the typed
-/// refusal, which a host reads through the facade, the turn stays open and
-/// the run has no end.
-#[tokio::test]
-async fn a_parked_driver_state_this_build_cannot_decode_is_refused_at_restore_before_any_redelivery()
- {
-    let (resumed, database, nodes, _clock) =
-        resumed_with_a_stale_checkpoint(with_a_stale_driver_state).await;
-    nodes.quiesce().await;
-
-    let mut violations = Vec::new();
-    let labels: Vec<CommitLabel> = nodes
-        .script()
-        .trace()
-        .iter()
-        .filter(|write| write.kind == WriteKind::Actor && write.committed())
-        .map(|write| write.point.label)
-        .collect();
-    // The first claim's rewrite of the checkpoint, then the park.
-    if labels != [CommitLabel::MODEL_DONE, CommitLabel::SESSION_RELEASE] {
-        violations.push(format!(
-            "the refused session committed {labels:?}, not its park alone: its cell ran again or its turn committed"
-        ));
-    }
-    let programs: usize = resumed.tripwire.counts().vm_programs.values().sum();
-    if programs != 0 {
-        violations.push(format!("the cell's program was entered {programs} times"));
-    }
-    let writes = resumed.world.writes();
-    if !writes.is_empty() {
-        violations.push(format!("the cell's operation ran again: {writes:?}"));
-    }
-    let requests = resumed.seen.lock_recover().requests.len();
-    if requests != 0 {
-        violations.push(format!("the model was called {requests} times"));
-    }
-    match database.actor(&actor()).await {
-        Ok(Some(snapshot)) if snapshot.state == ActorState::Parked => {}
-        other => violations.push(format!("the session is not parked: {other:?}")),
-    }
-    match facade_park(&resumed).await {
-        Some(lash::SessionParkReason::UndecodableState {
-            state: lash::ParkedTurnState::DriverState { driver },
-            message,
-        }) if driver == lash::rlm::RLM_PROTOCOL_PLUGIN_ID
-            && message.contains("left_by_another_build") => {}
-        other => violations.push(format!(
-            "the facade reads the park {other:?}, not the refused driver state"
-        )),
-    }
-    if !matches!(database.turn(&session()).await, Ok(Some(row)) if row.run == run()) {
-        violations.push("the refused turn is no longer open".to_owned());
-    }
-    match database.turn_end(&session(), &run()).await {
-        Ok(None) => {}
-        other => violations.push(format!("the run ended: {other:?}")),
-    }
-    assert!(
-        violations.is_empty(),
-        "the stale driver state's resume:\n  {}\n{}",
-        violations.join("\n  "),
-        nodes.script().rendered_trace()
-    );
-}
-
-/// A session activation whose first claim rewrites the root its unfinished
-/// turn's cell resumes from, leaving the parked kernel run inside it as a
-/// build of another kernel version wrote it.
-struct StaleCellContinuation {
-    rewritten: std::sync::atomic::AtomicBool,
-    /// What the first claim makes of the cell's stored root: it edits the
-    /// root's body and may stage what the edit names.
-    stale: StaleRoot,
-    database: Arc<dyn DurableStore>,
-    session: Arc<dyn Activation>,
-}
-
-/// An edit of a cell's stored ExecRoot over its graph.
-type StaleRoot = fn(
-    &lash_durable::domain::HydratedGraph,
-    &mut lash_core_store::checkpoint_graph::bodies::ExecRoot,
-    &mut lash_core_store::checkpoint_graph::GraphStaging,
-);
-
-/// The execution of the cell the 1.0 session image stopped in.
-fn image_cell() -> lash_durable::domain::ExecKey {
-    lash_durable::domain::ExecKey::Cell(
-        session(),
-        run(),
-        lash_durable::domain::CellId::new("v0-session:v0-turn:1:0:exec_code:3"),
-    )
-}
-
-/// The cell's root recording its parked kernel run under a kernel version
-/// no build interprets, as a build past this one's window would have
-/// written it. Everything else the parent checks still holds: the owner,
-/// the envelope and the document are the image's.
-fn with_a_stale_continuation(
-    _graph: &lash_durable::domain::HydratedGraph,
-    root: &mut lash_core_store::checkpoint_graph::bodies::ExecRoot,
-    _staging: &mut lash_core_store::checkpoint_graph::GraphStaging,
-) {
-    assert_eq!(
-        root.status,
-        lash_core_store::checkpoint_graph::bodies::ExecStatus::Parked,
-        "the image's cell stopped on a parked kernel run"
-    );
-    root.format = u32::MAX;
-}
-
-/// The cell's root over a parked checkpoint root that states another kernel
-/// version than the one the execution root records: the root, its owner and
-/// its document are the image's, and its pages are the image's own.
-fn with_bytes_of_another_kernel_version(
-    graph: &lash_durable::domain::HydratedGraph,
-    root: &mut lash_core_store::checkpoint_graph::bodies::ExecRoot,
-    staging: &mut lash_core_store::checkpoint_graph::GraphStaging,
-) {
-    use lash_core_store::checkpoint_graph::node::{direct_logical, frame_direct};
-    use lash_core_store::checkpoint_graph::{
-        DecodeLimits, MAX_ROOT_BYTES, NodeKind, check_envelope,
-    };
-    let page = graph
-        .nodes
-        .get(&root.state)
-        .expect("the image's cell stopped on a parked kernel run");
-    let envelope = check_envelope(
-        &page.bytes,
-        root.state,
-        &DecodeLimits::within_total(u64::MAX),
-    )
-    .expect("the parked checkpoint root frames");
-    let logical = direct_logical(&envelope, root.state).expect("its body is canonical");
-    let body = lash_kernel_state::testkit::checkpoint_with_kernel(&logical, root.format + 1)
-        .expect("the image's checkpoint root decodes");
-    let stale = frame_direct(NodeKind::CHECKPOINT_ROOT, &body, MAX_ROOT_BYTES)
-        .expect("the stale checkpoint root frames");
-    root.state = stale.id;
-    staging
-        .adopt(stale)
-        .expect("the stale checkpoint root stages");
-}
-
-#[async_trait::async_trait]
-impl Activation for StaleCellContinuation {
-    async fn activate(&self, owned: lash_durable::runner::Owned) -> lash_durable::runner::Exit {
-        use lash_core_store::checkpoint_graph::{
-            EncodeBudget, ExplicitLimit, GraphDecoder, GraphStaging, NodeKind, bodies::ExecRoot,
-        };
-        use lash_durable::DomainWrite;
-        use lash_durable::domain::graph::{ExecRootWrite, OWNER_READ_LIMITS, RootOwner};
-        if !self
-            .rewritten
-            .swap(true, std::sync::atomic::Ordering::SeqCst)
-        {
-            let row = self
-                .database
-                .exec_root(&image_cell())
-                .await
-                .expect("the cell's root reads")
-                .expect("the image holds its cell's root");
-            let graph = self
-                .database
-                .hydrate(
-                    RootOwner::Exec(image_cell()),
-                    Some(row.root),
-                    OWNER_READ_LIMITS,
-                )
-                .await
-                .expect("the cell's graph reads");
-            let mut body: ExecRoot = GraphDecoder::new(&graph, OWNER_READ_LIMITS)
-                .decode(row.root, NodeKind::EXEC_ROOT)
-                .expect("the image's cell root decodes");
-            let mut staging = GraphStaging::new(EncodeBudget::new(ExplicitLimit::new(u64::MAX)));
-            (self.stale)(&graph, &mut body, &mut staging);
-            let root = staging
-                .encode_value(NodeKind::EXEC_ROOT, &body)
-                .expect("the stale root encodes");
-            let mut tx = owned
-                .begin()
-                .await
-                .expect("the first claim reads its actor");
-            for child in graph.nodes.keys() {
-                tx.require(*child);
-            }
-            tx.stage_all(staging);
-            tx.write(DomainWrite::ExecRoot(ExecRootWrite::Put {
-                exec: row.exec.clone(),
-                expected: Some(row.rev),
-                expected_root: Some(row.root),
-                root,
-                commit_id: lash_core_store::checkpoint_graph::CommitId::mint(),
-            }));
-            owned
-                .commit(tx, CommitLabel::CELL_SNAPSHOT)
-                .await
-                .expect("the stale cell root commits");
-        }
-        self.session.activate(owned).await
-    }
-}
-
-/// D-PARKREFUSE (FIG-5613): a session whose stopped cell holds a parked
-/// kernel run recorded under a kernel version this build does not read is
-/// refused when its turn is restored, by the check of its root, before the
-/// cell is re-delivered.
-/// The cell's refusal never reaches the model as a failed cell: no model
-/// call is made, nothing of the turn commits, and the session parks with the
-/// typed refusal of its cell snapshot, its turn open.
-#[tokio::test]
-async fn a_parked_cell_continuation_this_build_cannot_decode_is_refused_at_restore_before_any_model_call()
- {
-    a_stale_cell_snapshot_is_refused(with_a_stale_continuation, "outside read range").await;
-}
-
-/// FIG-5716: the root is where the parent reads a parked run's kernel
-/// version from, so a state that states another version under it would be
-/// resumed as a version it was not parked under. The restore reads the
-/// state's own version and refuses the mismatch as it refuses a stale root:
-/// typed, before the cell is re-delivered, and never as a failed cell.
-#[tokio::test]
-async fn a_parked_run_whose_bytes_state_another_kernel_version_than_its_seal_is_refused_at_restore()
-{
-    a_stale_cell_snapshot_is_refused(
-        with_bytes_of_another_kernel_version,
-        "its checkpoint root states kernel version",
-    )
-    .await;
-}
-
-/// The 1.0 session image resumed with `stale` made of its cell's root:
-/// no model call is made, nothing of the turn commits, and the session
-/// parks with the typed refusal of its cell snapshot, which says `account`.
-async fn a_stale_cell_snapshot_is_refused(stale: StaleRoot, account: &str) {
-    let (resumed, database, nodes, _clock) = resumed_with_stale_state(move |database, session| {
-        Arc::new(StaleCellContinuation {
-            rewritten: std::sync::atomic::AtomicBool::new(false),
-            stale,
-            database,
-            session,
-        })
-    })
-    .await;
-    nodes.quiesce().await;
-
-    let mut violations = Vec::new();
-    let labels: Vec<CommitLabel> = nodes
-        .script()
-        .trace()
-        .iter()
-        .filter(|write| write.kind == WriteKind::Actor && write.committed())
-        .map(|write| write.point.label)
-        .collect();
-    // The first claim's rewrite of the cell's snapshot, then the park.
-    if labels != [CommitLabel::CELL_SNAPSHOT, CommitLabel::SESSION_RELEASE] {
-        violations.push(format!(
-            "the refused session committed {labels:?}, not its park alone: its model was called or its turn committed"
-        ));
-    }
-    let requests = resumed.seen.lock_recover().requests.len();
-    if requests != 0 {
-        violations.push(format!("the model was called {requests} times"));
-    }
-    let programs: usize = resumed.tripwire.counts().vm_programs.values().sum();
-    if programs != 0 {
-        violations.push(format!("the cell's program was entered {programs} times"));
-    }
-    let writes = resumed.world.writes();
-    if !writes.is_empty() {
-        violations.push(format!("the cell's operation ran again: {writes:?}"));
-    }
-    match database.actor(&actor()).await {
-        Ok(Some(snapshot)) if snapshot.state == ActorState::Parked => {}
-        other => violations.push(format!("the session is not parked: {other:?}")),
-    }
-    match facade_park(&resumed).await {
-        Some(lash::SessionParkReason::UndecodableState {
-            state: lash::ParkedTurnState::CellSnapshot,
-            message,
-        }) if message.contains(account) => {}
-        other => violations.push(format!(
-            "the facade reads the park {other:?}, not the refused cell snapshot"
-        )),
-    }
-    if !matches!(database.turn(&session()).await, Ok(Some(row)) if row.run == run()) {
-        violations.push("the refused turn is no longer open".to_owned());
-    }
-    match database.turn_end(&session(), &run()).await {
-        Ok(None) => {}
-        other => violations.push(format!("the run ended: {other:?}")),
-    }
-    assert!(
-        violations.is_empty(),
-        "the stale cell continuation's resume:\n  {}\n{}",
-        violations.join("\n  "),
-        nodes.script().rendered_trace()
-    );
-}
-
-/// D-PARKREFUSE (FIG-5601): a turn whose phase checkpoint this build does
-/// not decode parks its session, and a cancel of that turn still ends it.
-/// The cancel reads none of the refused state: the turn ends `Cancelled`,
-/// the session leaves its park, and neither the cell nor the model runs.
-#[tokio::test]
-async fn cancelling_a_turn_whose_checkpoint_this_build_cannot_decode_ends_the_turn() {
-    let (resumed, database, nodes, clock) =
-        resumed_with_a_stale_checkpoint(|_| "another build's checkpoint".to_owned()).await;
-    let parked = facade_park(&resumed).await;
-    assert!(
-        matches!(
-            parked,
-            Some(lash::SessionParkReason::UndecodableState {
-                state: lash::ParkedTurnState::Checkpoint,
-                ..
-            })
-        ),
-        "the session did not park on its undecodable checkpoint: {parked:?}\n{}",
-        nodes.script().rendered_trace()
-    );
-
-    let answer = lash_core::runtime::durable::session::request_turn_cancel(
-        &resumed.backend(),
-        lash_durable::domain::TurnCancelRequest {
-            session: session(),
-            run: run(),
-            request_id: "stop-the-refused-turn".to_owned(),
-            origin: None,
-            reason: None,
-            undelivered: lash_core::TurnCancelUndeliveredInputPolicy::Defer,
-            mode: lash_core::TurnCancelMode::Immediate,
-        },
-    )
-    .await
-    .expect("the request commits");
-    assert_eq!(answer, lash_durable::domain::TurnCancelAnswer::Requested);
-    let horizon = clock.logical_ms() + 600_000;
-    while !matches!(database.turn_end(&session(), &run()).await, Ok(Some(_)))
-        && clock.logical_ms() < horizon
-    {
-        if nodes.step().await.is_none() {
-            break;
-        }
-    }
-    nodes.quiesce().await;
-
-    let mut violations = Vec::new();
-    match database.turn_end(&session(), &run()).await {
-        Ok(Some(end)) if end.kind() == lash_core_store::store::RunTerminalKind::Cancelled => {}
-        other => violations.push(format!("the cancelled turn's end is {other:?}")),
-    }
-    if !matches!(database.turn(&session()).await, Ok(None)) {
-        violations.push("the cancelled turn is still open".to_owned());
-    }
-    match database.actor(&actor()).await {
-        Ok(Some(snapshot)) if snapshot.state != ActorState::Parked => {}
-        other => violations.push(format!("the session is still parked: {other:?}")),
-    }
-    let programs: usize = resumed.tripwire.counts().vm_programs.values().sum();
-    if programs != 0 {
-        violations.push(format!("the cell's program was entered {programs} times"));
-    }
-    let requests = resumed.seen.lock_recover().requests.len();
-    if requests != 0 {
-        violations.push(format!("the model was called {requests} times"));
-    }
-    assert!(
-        violations.is_empty(),
-        "the refused turn's cancel:\n  {}\n{}",
-        violations.join("\n  "),
-        nodes.script().rendered_trace()
-    );
-}

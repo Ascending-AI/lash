@@ -197,24 +197,6 @@ fn legacy_hash_reproduces_random_committed_message_id_conflict() {
 }
 
 #[test]
-#[ignore = "regenerates crates/lash-core-store/src/store/testdata/runtime_commit_intent.hex"]
-#[expect(
-    clippy::disallowed_methods,
-    reason = "the opt-in test generator writes the corpus in the supplied workspace"
-)]
-fn regenerate_intent_hash_golden_vector() {
-    assert_eq!(std::env::var("LASH_REGENERATE").as_deref(), Ok("1"));
-    let root = std::env::var_os("BUILD_WORKSPACE_DIRECTORY").expect("regeneration workspace");
-    let hash = intent_fixture().turn_commit_hash().expect("golden intent");
-    std::fs::write(
-        std::path::PathBuf::from(root)
-            .join("crates/lash-core-store/src/store/testdata/runtime_commit_intent.hex"),
-        format!("{hash}\n"),
-    )
-    .expect("write intent golden");
-}
-
-#[test]
 fn failure_evidence_changes_intent_hash_from_current_shape() {
     // Checkpoint manifest v3 and the config revision are pinned in intent
     // bytes.
@@ -229,10 +211,6 @@ fn failure_evidence_changes_intent_hash_from_current_shape() {
     // are its recorded surface.
     let baseline = intent_fixture();
     let baseline_hash = baseline.turn_commit_hash().expect("baseline intent");
-    assert_eq!(
-        baseline_hash,
-        include_str!("testdata/runtime_commit_intent.hex").trim()
-    );
 
     let mut with_evidence = baseline;
     with_evidence.failure_evidence = vec![crate::TurnFailureEvidence {
@@ -313,24 +291,6 @@ fn session_head_payload_excludes_the_leaf_derived_frame() {
             "{column} is not head payload"
         );
     }
-}
-
-#[test]
-fn node_id_golden_vector() {
-    let operation = OperationId::turn("golden-session", "turn-42", "final");
-    assert_eq!(
-        derive_history_node_id(&SessionId::from("golden-session"), &operation, 3)
-            .expect("golden node"),
-        "n_f49e2d5bb98b94bf5530b52f34bf226d1742ed60a999302b542abf50a8d030c6"
-    );
-}
-
-#[test]
-fn frame_node_id_golden_vector() {
-    assert_eq!(
-        crate::frame_node_id(&SessionId::from("golden-session"), "frame-42").as_str(),
-        "frame-node/v3/591a075378ab921fd73a0a4d1825ab1ebf32830427f41c332a3ae6807305c128"
-    );
 }
 
 #[test]

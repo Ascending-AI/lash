@@ -31,7 +31,6 @@ tokio = { workspace = true, features = ["macros", "rt", "sync", "time"] }
 [dev-dependencies]
 lash-transport-failure = { workspace = true }
 base64 = { workspace = true }
-flate2 = "1"
 delegation = { workspace = true }
 # The certification selection includes both in-process codecs: a dialect
 # feature selects helper releases only, and the workspace build's exact-source

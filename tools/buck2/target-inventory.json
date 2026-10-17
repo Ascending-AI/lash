@@ -1,7 +1,7 @@
 {
   "cargo_only_target_count": 6,
   "cargo_package_count": 90,
-  "cargo_target_count": 357,
+  "cargo_target_count": 355,
   "facade_production_check_targets": [
     "//crates/lash-checkpoint-encoder:lash-checkpoint-encoder__fv_57546a29__metadata[check]",
     "//crates/lash-core-effect:lash-core-effect__fv_4d5e8d06__metadata[check]",
@@ -85640,7 +85640,7 @@
       "//third-party/vendored/lash-rmcp:lash-rmcp__fv_e2e7b48c"
     ]
   },
-  "generated_label_count": 456,
+  "generated_label_count": 453,
   "main_test_exclusions": {
     "//crates/lash-s3-store:lash-s3-store__unit_test": "requires an external service or credentials"
   },
@@ -85740,7 +85740,6 @@
     "//crates/lash-durable-test:deleted_session_crash_laws__test",
     "//crates/lash-durable-test:drain_by_release__test",
     "//crates/lash-durable-test:first_party_tools__test",
-    "//crates/lash-durable-test:format_fixtures__test",
     "//crates/lash-durable-test:frame_switch_crash_proof__test",
     "//crates/lash-durable-test:frame_switch_laws__test",
     "//crates/lash-durable-test:kernel_step_crash_laws__test",
@@ -86257,7 +86256,6 @@
     "//examples/workflow-graph-roundtrip:workflow-graph-roundtrip__bin__unit_test",
     "//examples/workflow-graph-roundtrip:workflow-graph-roundtrip__unit_test",
     "//examples/workflows:corpus__test",
-    "//examples/workflows:workflow-corpus__bin__unit_test",
     "//examples/workflows:workflows__unit_test",
     "//runbooks/lash-facade-failover:failover__test",
     "//runbooks/lash-facade-failover:lash-facade-failover__unit_test",
@@ -86424,7 +86422,6 @@
     "//crates/lash-durable-test:deleted_session_crash_laws__test",
     "//crates/lash-durable-test:drain_by_release__test",
     "//crates/lash-durable-test:first_party_tools__test",
-    "//crates/lash-durable-test:format_fixtures__test",
     "//crates/lash-durable-test:frame_switch_crash_proof__test",
     "//crates/lash-durable-test:frame_switch_laws__test",
     "//crates/lash-durable-test:kernel_step_crash_laws__test",
@@ -86957,7 +86954,6 @@
     "//examples/workflow-graph-roundtrip:workflow-graph-roundtrip__bin__unit_test",
     "//examples/workflow-graph-roundtrip:workflow-graph-roundtrip__unit_test",
     "//examples/workflows:corpus__test",
-    "//examples/workflows:workflow-corpus__bin__unit_test",
     "//examples/workflows:workflows__unit_test",
     "//runbooks/lash-facade-failover:failover__test",
     "//runbooks/lash-facade-failover:lash-facade-failover__unit_test",
@@ -87042,7 +87038,7 @@
     "//third-party/vendored/lash-rmcp:test_tool_routers__test",
     "//third-party/vendored/lash-rmcp:test_trace_context__test"
   ],
-  "metadata_target_count": 1505,
+  "metadata_target_count": 1502,
   "packages": [
     {
       "declared_features": [
@@ -87869,7 +87865,6 @@
         "base64",
         "chrono",
         "delegation",
-        "flate2",
         "lash-internal-core",
         "lash-internal-core-execution",
         "lash-internal-core-ids",
@@ -88143,15 +88138,6 @@
           "tags": [
             "hermetic-postgres"
           ]
-        },
-        {
-          "build_label": "//crates/lash-durable-test:format_fixtures__test",
-          "cargo": "format_fixtures",
-          "check_label": "//crates/lash-durable-test:format_fixtures__test__rust_test__metadata[check]",
-          "clippy_label": "//crates/lash-durable-test:format_fixtures__test__clippy[clippy.txt]",
-          "kind": "test",
-          "label": "//crates/lash-durable-test:format_fixtures__test",
-          "tags": []
         },
         {
           "build_label": "//crates/lash-durable-test:frame_switch_crash_proof__test",
@@ -93344,24 +93330,6 @@
           "tags": []
         },
         {
-          "build_label": "//examples/workflows:workflow-corpus__bin",
-          "cargo": "workflow-corpus",
-          "check_label": "//examples/workflows:workflow-corpus__bin__metadata[check]",
-          "clippy_label": "//examples/workflows:workflow-corpus__bin__clippy[clippy.txt]",
-          "kind": "bin",
-          "label": "//examples/workflows:workflow-corpus__bin",
-          "tags": []
-        },
-        {
-          "build_label": "//examples/workflows:workflow-corpus__bin__unit_test",
-          "cargo": "workflow-corpus",
-          "check_label": "//examples/workflows:workflow-corpus__bin__unit_test__rust_test__metadata[check]",
-          "clippy_label": "//examples/workflows:workflow-corpus__bin__unit_test__clippy[clippy.txt]",
-          "kind": "bin-unit-test",
-          "label": "//examples/workflows:workflow-corpus__bin__unit_test",
-          "tags": []
-        },
-        {
           "build_label": "//examples/workflows:corpus__test",
           "cargo": "corpus",
           "check_label": "//examples/workflows:corpus__test__rust_test__metadata[check]",
@@ -94795,7 +94763,6 @@
     "//crates/lash-durable-test:deleted_session_crash_laws__test": 300,
     "//crates/lash-durable-test:drain_by_release__test": 300,
     "//crates/lash-durable-test:first_party_tools__test": 300,
-    "//crates/lash-durable-test:format_fixtures__test": 300,
     "//crates/lash-durable-test:frame_switch_crash_proof__test": 300,
     "//crates/lash-durable-test:frame_switch_laws__test": 300,
     "//crates/lash-durable-test:kernel_step_crash_laws__test": 300,
@@ -95339,7 +95306,6 @@
     "//examples/workflow-graph-roundtrip:workflow-graph-roundtrip__bin__unit_test": 300,
     "//examples/workflow-graph-roundtrip:workflow-graph-roundtrip__unit_test": 300,
     "//examples/workflows:corpus__test": 300,
-    "//examples/workflows:workflow-corpus__bin__unit_test": 300,
     "//examples/workflows:workflows__unit_test": 300,
     "//runbooks/lash-facade-failover:failover__test": 300,
     "//runbooks/lash-facade-failover:lash-facade-failover__unit_test": 300,
@@ -95488,7 +95454,6 @@
     "//crates/lash-durable-test:deleted_session_crash_laws__test",
     "//crates/lash-durable-test:drain_by_release__test",
     "//crates/lash-durable-test:first_party_tools__test",
-    "//crates/lash-durable-test:format_fixtures__test",
     "//crates/lash-durable-test:frame_switch_crash_proof__test",
     "//crates/lash-durable-test:frame_switch_laws__test",
     "//crates/lash-durable-test:kernel_step_crash_laws__test",
@@ -95792,8 +95757,6 @@
     "//examples/workflow-graph-roundtrip:workflow-graph-roundtrip__bin__unit_test",
     "//examples/workflow-graph-roundtrip:workflow-graph-roundtrip__unit_test",
     "//examples/workflows:corpus__test",
-    "//examples/workflows:workflow-corpus__bin",
-    "//examples/workflows:workflow-corpus__bin__unit_test",
     "//examples/workflows:workflows[static]",
     "//examples/workflows:workflows__unit_test",
     "//runbooks/lash-facade-failover:failover__test",
@@ -95962,7 +95925,6 @@
     "//crates/lash-durable-test:deleted_session_crash_laws__test__rust_test__metadata[check]",
     "//crates/lash-durable-test:drain_by_release__test__rust_test__metadata[check]",
     "//crates/lash-durable-test:first_party_tools__test__rust_test__metadata[check]",
-    "//crates/lash-durable-test:format_fixtures__test__rust_test__metadata[check]",
     "//crates/lash-durable-test:frame_switch_crash_proof__test__rust_test__metadata[check]",
     "//crates/lash-durable-test:frame_switch_laws__test__rust_test__metadata[check]",
     "//crates/lash-durable-test:kernel_step_crash_laws__test__rust_test__metadata[check]",
@@ -96310,8 +96272,6 @@
     "//examples/workflow-graph-roundtrip:workflow-graph-roundtrip__metadata[check]",
     "//examples/workflow-graph-roundtrip:workflow-graph-roundtrip__unit_test__rust_test__metadata[check]",
     "//examples/workflows:corpus__test__rust_test__metadata[check]",
-    "//examples/workflows:workflow-corpus__bin__metadata[check]",
-    "//examples/workflows:workflow-corpus__bin__unit_test__rust_test__metadata[check]",
     "//examples/workflows:workflows__metadata[check]",
     "//examples/workflows:workflows__unit_test__rust_test__metadata[check]",
     "//runbooks/lash-facade-failover:failover__test__rust_test__metadata[check]",
@@ -96464,7 +96424,6 @@
     "//crates/lash-durable-test:deleted_session_crash_laws__test__clippy[clippy.txt]",
     "//crates/lash-durable-test:drain_by_release__test__clippy[clippy.txt]",
     "//crates/lash-durable-test:first_party_tools__test__clippy[clippy.txt]",
-    "//crates/lash-durable-test:format_fixtures__test__clippy[clippy.txt]",
     "//crates/lash-durable-test:frame_switch_crash_proof__test__clippy[clippy.txt]",
     "//crates/lash-durable-test:frame_switch_laws__test__clippy[clippy.txt]",
     "//crates/lash-durable-test:kernel_step_crash_laws__test__clippy[clippy.txt]",
@@ -96766,8 +96725,6 @@
     "//examples/workflow-graph-roundtrip:workflow-graph-roundtrip__bin__unit_test__clippy[clippy.txt]",
     "//examples/workflow-graph-roundtrip:workflow-graph-roundtrip__unit_test__clippy[clippy.txt]",
     "//examples/workflows:corpus__test__clippy[clippy.txt]",
-    "//examples/workflows:workflow-corpus__bin__clippy[clippy.txt]",
-    "//examples/workflows:workflow-corpus__bin__unit_test__clippy[clippy.txt]",
     "//examples/workflows:workflows__clippy[clippy.txt]",
     "//examples/workflows:workflows__unit_test__clippy[clippy.txt]",
     "//runbooks/lash-facade-failover:failover__test__clippy[clippy.txt]",
@@ -96839,7 +96796,6 @@
     "//crates/lash-durable-test:deleted_session_crash_laws__test",
     "//crates/lash-durable-test:drain_by_release__test",
     "//crates/lash-durable-test:first_party_tools__test",
-    "//crates/lash-durable-test:format_fixtures__test",
     "//crates/lash-durable-test:frame_switch_crash_proof__test",
     "//crates/lash-durable-test:frame_switch_laws__test",
     "//crates/lash-durable-test:kernel_step_crash_laws__test",
@@ -97141,8 +97097,6 @@
     "//examples/workflow-graph-roundtrip:workflow-graph-roundtrip__bin__unit_test",
     "//examples/workflow-graph-roundtrip:workflow-graph-roundtrip__unit_test",
     "//examples/workflows:corpus__test",
-    "//examples/workflows:workflow-corpus__bin",
-    "//examples/workflows:workflow-corpus__bin__unit_test",
     "//examples/workflows:workflows",
     "//examples/workflows:workflows__unit_test",
     "//runbooks/lash-facade-failover:failover__test",
@@ -97215,7 +97169,6 @@
     "//crates/lash-durable-test:deleted_session_crash_laws__test",
     "//crates/lash-durable-test:drain_by_release__test",
     "//crates/lash-durable-test:first_party_tools__test",
-    "//crates/lash-durable-test:format_fixtures__test",
     "//crates/lash-durable-test:frame_switch_crash_proof__test",
     "//crates/lash-durable-test:frame_switch_laws__test",
     "//crates/lash-durable-test:kernel_step_crash_laws__test",
@@ -97519,8 +97472,6 @@
     "//examples/workflow-graph-roundtrip:workflow-graph-roundtrip__bin__unit_test",
     "//examples/workflow-graph-roundtrip:workflow-graph-roundtrip__unit_test",
     "//examples/workflows:corpus__test",
-    "//examples/workflows:workflow-corpus__bin",
-    "//examples/workflows:workflow-corpus__bin__unit_test",
     "//examples/workflows:workflows",
     "//examples/workflows:workflows__unit_test",
     "//runbooks/lash-facade-failover:failover__test",
@@ -97649,7 +97600,6 @@
     "//crates/lash-durable-test:deleted_session_crash_laws__test",
     "//crates/lash-durable-test:drain_by_release__test",
     "//crates/lash-durable-test:first_party_tools__test",
-    "//crates/lash-durable-test:format_fixtures__test",
     "//crates/lash-durable-test:frame_switch_crash_proof__test",
     "//crates/lash-durable-test:frame_switch_laws__test",
     "//crates/lash-durable-test:kernel_step_crash_laws__test",
@@ -97859,7 +97809,6 @@
     "//crates/lash-durable-test:deleted_session_crash_laws__test",
     "//crates/lash-durable-test:drain_by_release__test",
     "//crates/lash-durable-test:first_party_tools__test",
-    "//crates/lash-durable-test:format_fixtures__test",
     "//crates/lash-durable-test:frame_switch_crash_proof__test",
     "//crates/lash-durable-test:frame_switch_laws__test",
     "//crates/lash-durable-test:kernel_step_crash_laws__test",
@@ -98039,7 +97988,6 @@
     "//examples/workflow-graph-roundtrip:workflow-graph-roundtrip__bin__unit_test",
     "//examples/workflow-graph-roundtrip:workflow-graph-roundtrip__unit_test",
     "//examples/workflows:corpus__test",
-    "//examples/workflows:workflow-corpus__bin__unit_test",
     "//examples/workflows:workflows__unit_test",
     "//runbooks/lash-facade-failover:lash-facade-failover__unit_test",
     "//runbooks/rlm-smoke:rlm-smoke__unit_test"
@@ -98090,7 +98038,6 @@
     "//crates/lash-durable-test:deleted_session_crash_laws__test",
     "//crates/lash-durable-test:drain_by_release__test",
     "//crates/lash-durable-test:first_party_tools__test",
-    "//crates/lash-durable-test:format_fixtures__test",
     "//crates/lash-durable-test:frame_switch_crash_proof__test",
     "//crates/lash-durable-test:frame_switch_laws__test",
     "//crates/lash-durable-test:kernel_step_crash_laws__test",
@@ -98286,7 +98233,6 @@
     "//examples/workflow-graph-roundtrip:workflow-graph-roundtrip__bin__unit_test",
     "//examples/workflow-graph-roundtrip:workflow-graph-roundtrip__unit_test",
     "//examples/workflows:corpus__test",
-    "//examples/workflows:workflow-corpus__bin__unit_test",
     "//examples/workflows:workflows__unit_test",
     "//runbooks/lash-facade-failover:lash-facade-failover__unit_test",
     "//runbooks/rlm-smoke:rlm-smoke__unit_test"
@@ -98488,7 +98434,6 @@
     "//examples/workflow-graph-roundtrip:workflow-graph-roundtrip__bin__unit_test",
     "//examples/workflow-graph-roundtrip:workflow-graph-roundtrip__unit_test",
     "//examples/workflows:corpus__test",
-    "//examples/workflows:workflow-corpus__bin__unit_test",
     "//examples/workflows:workflows__unit_test",
     "//runbooks/lash-facade-failover:failover__test"
   ],
@@ -98601,7 +98546,6 @@
     "//crates/lash-durable-test:deleted_session_crash_laws__test",
     "//crates/lash-durable-test:drain_by_release__test",
     "//crates/lash-durable-test:first_party_tools__test",
-    "//crates/lash-durable-test:format_fixtures__test",
     "//crates/lash-durable-test:frame_switch_crash_proof__test",
     "//crates/lash-durable-test:frame_switch_laws__test",
     "//crates/lash-durable-test:kernel_step_crash_laws__test",
@@ -98783,7 +98727,6 @@
     "//examples/workflow-graph-roundtrip:workflow-graph-roundtrip__bin__unit_test",
     "//examples/workflow-graph-roundtrip:workflow-graph-roundtrip__unit_test",
     "//examples/workflows:corpus__test",
-    "//examples/workflows:workflow-corpus__bin__unit_test",
     "//examples/workflows:workflows__unit_test",
     "//runbooks/lash-facade-failover:failover__test",
     "//runbooks/lash-facade-failover:lash-facade-failover__unit_test",
@@ -98835,7 +98778,6 @@
     "//crates/lash-durable-test:deleted_session_crash_laws__test",
     "//crates/lash-durable-test:drain_by_release__test",
     "//crates/lash-durable-test:first_party_tools__test",
-    "//crates/lash-durable-test:format_fixtures__test",
     "//crates/lash-durable-test:frame_switch_crash_proof__test",
     "//crates/lash-durable-test:frame_switch_laws__test",
     "//crates/lash-durable-test:kernel_step_crash_laws__test",
@@ -99037,7 +98979,6 @@
     "//examples/workflow-graph-roundtrip:workflow-graph-roundtrip__bin__unit_test",
     "//examples/workflow-graph-roundtrip:workflow-graph-roundtrip__unit_test",
     "//examples/workflows:corpus__test",
-    "//examples/workflows:workflow-corpus__bin__unit_test",
     "//examples/workflows:workflows__unit_test",
     "//runbooks/lash-facade-failover:failover__test",
     "//runbooks/lash-facade-failover:lash-facade-failover__unit_test",

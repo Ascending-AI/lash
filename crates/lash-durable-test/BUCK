@@ -57,9 +57,6 @@ lash_rust_unit_test(
         "src/tripwire.rs",
     ],
     data_patterns = [],
-    data_exclude = [
-        "tests/fixtures/formats/**",
-    ],
     extra_compile_data = [],
     extra_data = [
         "//crates/lash-vm-worker:lash-vm-worker__bin",
@@ -83,9 +80,6 @@ lash_rust_integration_test(
         "tests/support/matrix.rs",
         "tests/support/served.rs",
         "tests/support/sim.rs",
-    ],
-    data_exclude = [
-        "tests/fixtures/formats/**",
     ],
     data_patterns = [],
     exec_properties = sized_exec_properties("lash-internal-durable-test", "after_turn_crash_laws", "//crates/lash-durable-test:after_turn_crash_laws__test"),
@@ -116,9 +110,6 @@ lash_rust_integration_test(
         "tests/support/served.rs",
         "tests/support/sim.rs",
     ],
-    data_exclude = [
-        "tests/fixtures/formats/**",
-    ],
     data_patterns = [],
     exec_properties = sized_exec_properties("lash-internal-durable-test", "attachment_delivery_secret", "//crates/lash-durable-test:attachment_delivery_secret__test"),
     extra_compile_data = [],
@@ -143,9 +134,6 @@ lash_rust_integration_test(
     declared_features = [],
     srcs_patterns = [
         "tests/attachment_ref_laws.rs",
-    ],
-    data_exclude = [
-        "tests/fixtures/formats/**",
     ],
     data_patterns = [],
     exec_properties = sized_exec_properties("lash-internal-durable-test", "attachment_ref_laws", "//crates/lash-durable-test:attachment_ref_laws__test"),
@@ -173,9 +161,6 @@ lash_rust_integration_test(
         "tests/attachment_referrer_laws.rs",
         "tests/support/served.rs",
         "tests/support/sim.rs",
-    ],
-    data_exclude = [
-        "tests/fixtures/formats/**",
     ],
     data_patterns = [],
     exec_properties = sized_exec_properties("lash-internal-durable-test", "attachment_referrer_laws", "//crates/lash-durable-test:attachment_referrer_laws__test"),
@@ -208,9 +193,6 @@ lash_rust_integration_test(
         "tests/support/served.rs",
         "tests/support/sim.rs",
     ],
-    data_exclude = [
-        "tests/fixtures/formats/**",
-    ],
     data_patterns = [],
     exec_properties = sized_exec_properties("lash-internal-durable-test", "cell_declaration_crash_laws", "//crates/lash-durable-test:cell_declaration_crash_laws__test"),
     extra_compile_data = [],
@@ -240,9 +222,6 @@ lash_rust_integration_test(
         "tests/support/served.rs",
         "tests/support/sim.rs",
     ],
-    data_exclude = [
-        "tests/fixtures/formats/**",
-    ],
     data_patterns = [],
     exec_properties = sized_exec_properties("lash-internal-durable-test", "cell_dialect_releases", "//crates/lash-durable-test:cell_dialect_releases__test"),
     extra_compile_data = [],
@@ -269,9 +248,6 @@ lash_rust_integration_test(
         "tests/cell_process_handles.rs",
         "tests/support/served.rs",
         "tests/support/sim.rs",
-    ],
-    data_exclude = [
-        "tests/fixtures/formats/**",
     ],
     data_patterns = [],
     exec_properties = sized_exec_properties("lash-internal-durable-test", "cell_process_handles", "//crates/lash-durable-test:cell_process_handles__test"),
@@ -302,9 +278,6 @@ lash_rust_integration_test(
         "tests/support/matrix.rs",
         "tests/support/sim.rs",
     ],
-    data_exclude = [
-        "tests/fixtures/formats/**",
-    ],
     data_patterns = [],
     exec_properties = sized_exec_properties("lash-internal-durable-test", "cell_read_laws", "//crates/lash-durable-test:cell_read_laws__test"),
     extra_compile_data = [],
@@ -332,9 +305,6 @@ lash_rust_integration_test(
         "tests/support/dialect.rs",
         "tests/support/matrix.rs",
         "tests/support/sim.rs",
-    ],
-    data_exclude = [
-        "tests/fixtures/formats/**",
     ],
     data_patterns = [],
     exec_properties = sized_exec_properties("lash-internal-durable-test", "cell_restore_laws", "//crates/lash-durable-test:cell_restore_laws__test"),
@@ -366,9 +336,6 @@ lash_rust_integration_test(
         "tests/support/matrix.rs",
         "tests/support/sim.rs",
     ],
-    data_exclude = [
-        "tests/fixtures/formats/**",
-    ],
     data_patterns = [],
     exec_properties = sized_exec_properties("lash-internal-durable-test", "child_turn_crash_proof", "//crates/lash-durable-test:child_turn_crash_proof__test"),
     extra_compile_data = [],
@@ -396,9 +363,6 @@ lash_rust_integration_test(
         "tests/support/served.rs",
         "tests/support/sim.rs",
         "tests/support/web_fetch.rs",
-    ],
-    data_exclude = [
-        "tests/fixtures/formats/**",
     ],
     data_patterns = [],
     exec_properties = sized_exec_properties("lash-internal-durable-test", "codemode_execution_documents", "//crates/lash-durable-test:codemode_execution_documents__test"),
@@ -428,9 +392,6 @@ lash_rust_integration_test(
         "tests/committed_turns.rs",
         "tests/support/served.rs",
         "tests/support/sim.rs",
-    ],
-    data_exclude = [
-        "tests/fixtures/formats/**",
     ],
     data_patterns = [],
     exec_properties = sized_exec_properties("lash-internal-durable-test", "committed_turns", "//crates/lash-durable-test:committed_turns__test"),
@@ -463,9 +424,6 @@ lash_rust_integration_test(
         "tests/support/served.rs",
         "tests/support/sim.rs",
     ],
-    data_exclude = [
-        "tests/fixtures/formats/**",
-    ],
     data_patterns = [],
     exec_properties = sized_exec_properties("lash-internal-durable-test", "config_change_observer_laws", "//crates/lash-durable-test:config_change_observer_laws__test"),
     extra_compile_data = [],
@@ -493,9 +451,6 @@ lash_rust_integration_test(
     srcs_patterns = [
         "tests/context_budget_warning.rs",
         "tests/support/served.rs",
-    ],
-    data_exclude = [
-        "tests/fixtures/formats/**",
     ],
     data_patterns = [],
     exec_properties = sized_exec_properties("lash-internal-durable-test", "context_budget_warning", "//crates/lash-durable-test:context_budget_warning__test"),
@@ -525,9 +480,6 @@ lash_rust_integration_test(
         "tests/control_phase_expiry.rs",
         "tests/support/served.rs",
         "tests/support/sim.rs",
-    ],
-    data_exclude = [
-        "tests/fixtures/formats/**",
     ],
     data_patterns = [],
     exec_properties = sized_exec_properties("lash-internal-durable-test", "control_phase_expiry", "//crates/lash-durable-test:control_phase_expiry__test"),
@@ -561,9 +513,6 @@ lash_rust_integration_test(
         "tests/core_node_processes/session_and_isolated_envs.rs",
         "tests/support/kernel_process.rs",
     ],
-    data_exclude = [
-        "tests/fixtures/formats/**",
-    ],
     data_patterns = [],
     exec_properties = sized_exec_properties("lash-internal-durable-test", "core_node_processes", "//crates/lash-durable-test:core_node_processes__test"),
     extra_compile_data = [],
@@ -593,9 +542,6 @@ lash_rust_integration_test(
         "tests/declared_start/process_own_env.rs",
         "tests/support/served.rs",
         "tests/support/sim.rs",
-    ],
-    data_exclude = [
-        "tests/fixtures/formats/**",
     ],
     data_patterns = [],
     exec_properties = sized_exec_properties("lash-internal-durable-test", "declared_start", "//crates/lash-durable-test:declared_start__test"),
@@ -630,9 +576,6 @@ lash_rust_integration_test(
         "tests/support/served.rs",
         "tests/support/sim.rs",
     ],
-    data_exclude = [
-        "tests/fixtures/formats/**",
-    ],
     data_patterns = [],
     exec_properties = sized_exec_properties("lash-internal-durable-test", "declared_start_crash_laws", "//crates/lash-durable-test:declared_start_crash_laws__test"),
     extra_compile_data = [],
@@ -665,9 +608,6 @@ lash_rust_integration_test(
         "tests/support/matrix.rs",
         "tests/support/sim.rs",
     ],
-    data_exclude = [
-        "tests/fixtures/formats/**",
-    ],
     data_patterns = [],
     exec_properties = sized_exec_properties("lash-internal-durable-test", "deleted_session_crash_laws", "//crates/lash-durable-test:deleted_session_crash_laws__test"),
     extra_compile_data = [],
@@ -698,9 +638,6 @@ lash_rust_integration_test(
         "tests/support/matrix.rs",
         "tests/support/sim.rs",
     ],
-    data_exclude = [
-        "tests/fixtures/formats/**",
-    ],
     data_patterns = [],
     exec_properties = sized_exec_properties("lash-internal-durable-test", "drain_by_release", "//crates/lash-durable-test:drain_by_release__test"),
     extra_compile_data = [],
@@ -730,9 +667,6 @@ lash_rust_integration_test(
         "tests/support/served.rs",
         "tests/support/sim.rs",
     ],
-    data_exclude = [
-        "tests/fixtures/formats/**",
-    ],
     data_patterns = [],
     exec_properties = sized_exec_properties("lash-internal-durable-test", "first_party_tools", "//crates/lash-durable-test:first_party_tools__test"),
     extra_compile_data = [],
@@ -752,44 +686,6 @@ lash_rust_integration_test(
 )
 
 lash_rust_integration_test(
-    name = "format_fixtures__test",
-    crate_features = [],
-    crate_name = "format_fixtures",
-    crate_root = "tests/format_fixtures.rs",
-    declared_features = [],
-    srcs_patterns = [
-        "tests/format_fixtures.rs",
-        "tests/support/images.rs",
-        "tests/support/kernel_images.rs",
-        "tests/support/sim.rs",
-    ],
-    data_patterns = [
-        "tests/fixtures/formats/**",
-        "tests/fixtures/formats/lashvm/db-wal.gz",
-        "tests/fixtures/formats/lashvm/db.gz",
-        "tests/fixtures/formats/pre-heap-lashvm/db-wal.gz",
-        "tests/fixtures/formats/pre-heap-lashvm/db.gz",
-        "tests/fixtures/formats/pre-heap-session/db-wal.gz",
-        "tests/fixtures/formats/pre-heap-session/db.gz",
-        "tests/fixtures/formats/session/db-wal.gz",
-        "tests/fixtures/formats/session/db.gz",
-    ],
-    exec_properties = sized_exec_properties("lash-internal-durable-test", "format_fixtures", "//crates/lash-durable-test:format_fixtures__test"),
-    extra_compile_data = [],
-    extra_data = [
-        "//crates/lash-vm-worker:lash-vm-worker__bin",
-    ],
-    library = ":lash-durable-test",
-    library_crate_name = "lash_durable_test",
-    manifest_dir = "crates/lash-durable-test",
-    package_name = "lash-internal-durable-test",
-    rustc_env = {},
-    test_env = {"LASH_VM_WORKER": "$(location //crates/lash-vm-worker:lash-vm-worker__bin)"},
-    tags = [],
-    version = "0.0.0-dev",
-)
-
-lash_rust_integration_test(
     name = "frame_switch_crash_proof__test",
     crate_features = [],
     crate_name = "frame_switch_crash_proof",
@@ -800,9 +696,6 @@ lash_rust_integration_test(
         "tests/support/dialect.rs",
         "tests/support/matrix.rs",
         "tests/support/sim.rs",
-    ],
-    data_exclude = [
-        "tests/fixtures/formats/**",
     ],
     data_patterns = [],
     exec_properties = sized_exec_properties("lash-internal-durable-test", "frame_switch_crash_proof", "//crates/lash-durable-test:frame_switch_crash_proof__test"),
@@ -832,9 +725,6 @@ lash_rust_integration_test(
     srcs_patterns = [
         "tests/frame_switch_laws.rs",
         "tests/support/served.rs",
-    ],
-    data_exclude = [
-        "tests/fixtures/formats/**",
     ],
     data_patterns = [],
     exec_properties = sized_exec_properties("lash-internal-durable-test", "frame_switch_laws", "//crates/lash-durable-test:frame_switch_laws__test"),
@@ -866,9 +756,6 @@ lash_rust_integration_test(
         "tests/support/served.rs",
         "tests/support/sim.rs",
     ],
-    data_exclude = [
-        "tests/fixtures/formats/**",
-    ],
     data_patterns = [],
     exec_properties = sized_exec_properties("lash-internal-durable-test", "kernel_step_crash_laws", "//crates/lash-durable-test:kernel_step_crash_laws__test"),
     extra_compile_data = [],
@@ -895,9 +782,6 @@ lash_rust_integration_test(
         "tests/live_fault_park.rs",
         "tests/support/served.rs",
         "tests/support/sim.rs",
-    ],
-    data_exclude = [
-        "tests/fixtures/formats/**",
     ],
     data_patterns = [],
     exec_properties = sized_exec_properties("lash-internal-durable-test", "live_fault_park", "//crates/lash-durable-test:live_fault_park__test"),
@@ -929,9 +813,6 @@ lash_rust_integration_test(
         "tests/support/served.rs",
         "tests/support/sim.rs",
     ],
-    data_exclude = [
-        "tests/fixtures/formats/**",
-    ],
     data_patterns = [],
     exec_properties = sized_exec_properties("lash-internal-durable-test", "live_stream_takeover", "//crates/lash-durable-test:live_stream_takeover__test"),
     extra_compile_data = [],
@@ -960,9 +841,6 @@ lash_rust_integration_test(
         "tests/model_answer_receipt_laws.rs",
         "tests/support/sim.rs",
     ],
-    data_exclude = [
-        "tests/fixtures/formats/**",
-    ],
     data_patterns = [],
     exec_properties = sized_exec_properties("lash-internal-durable-test", "model_answer_receipt_laws", "//crates/lash-durable-test:model_answer_receipt_laws__test"),
     extra_compile_data = [],
@@ -989,9 +867,6 @@ lash_rust_integration_test(
         "tests/one_slot_process_await.rs",
         "tests/support/served.rs",
         "tests/support/sim.rs",
-    ],
-    data_exclude = [
-        "tests/fixtures/formats/**",
     ],
     data_patterns = [],
     exec_properties = sized_exec_properties("lash-internal-durable-test", "one_slot_process_await", "//crates/lash-durable-test:one_slot_process_await__test"),
@@ -1023,9 +898,6 @@ lash_rust_integration_test(
         "tests/support/served.rs",
         "tests/support/sim.rs",
     ],
-    data_exclude = [
-        "tests/fixtures/formats/**",
-    ],
     data_patterns = [],
     exec_properties = sized_exec_properties("lash-internal-durable-test", "open_session_commands", "//crates/lash-durable-test:open_session_commands__test"),
     extra_compile_data = [],
@@ -1056,9 +928,6 @@ lash_rust_integration_test(
         "tests/support/matrix.rs",
         "tests/support/served.rs",
         "tests/support/sim.rs",
-    ],
-    data_exclude = [
-        "tests/fixtures/formats/**",
     ],
     data_patterns = [],
     exec_properties = sized_exec_properties("lash-internal-durable-test", "plugin_state_storage_laws", "//crates/lash-durable-test:plugin_state_storage_laws__test"),
@@ -1092,9 +961,6 @@ lash_rust_integration_test(
         "tests/support/served.rs",
         "tests/support/sim.rs",
     ],
-    data_exclude = [
-        "tests/fixtures/formats/**",
-    ],
     data_patterns = [],
     exec_properties = sized_exec_properties("lash-internal-durable-test", "pressure_frame_crash_proof", "//crates/lash-durable-test:pressure_frame_crash_proof__test"),
     extra_compile_data = [],
@@ -1124,9 +990,6 @@ lash_rust_integration_test(
         "tests/process_actor_laws.rs",
         "tests/support/sim.rs",
     ],
-    data_exclude = [
-        "tests/fixtures/formats/**",
-    ],
     data_patterns = [],
     exec_properties = sized_exec_properties("lash-internal-durable-test", "process_actor_laws", "//crates/lash-durable-test:process_actor_laws__test"),
     extra_compile_data = [],
@@ -1154,9 +1017,6 @@ lash_rust_integration_test(
         "tests/support/matrix.rs",
         "tests/support/sim.rs",
     ],
-    data_exclude = [
-        "tests/fixtures/formats/**",
-    ],
     data_patterns = [],
     exec_properties = sized_exec_properties("lash-internal-durable-test", "process_crash_proof", "//crates/lash-durable-test:process_crash_proof__test"),
     extra_compile_data = [],
@@ -1182,9 +1042,6 @@ lash_rust_integration_test(
     srcs_patterns = [
         "tests/process_lifecycle_events.rs",
         "tests/support/sim.rs",
-    ],
-    data_exclude = [
-        "tests/fixtures/formats/**",
     ],
     data_patterns = [],
     exec_properties = sized_exec_properties("lash-internal-durable-test", "process_lifecycle_events", "//crates/lash-durable-test:process_lifecycle_events__test"),
@@ -1217,9 +1074,6 @@ lash_rust_integration_test(
         "tests/support/served.rs",
         "tests/support/sim.rs",
     ],
-    data_exclude = [
-        "tests/fixtures/formats/**",
-    ],
     data_patterns = [],
     exec_properties = sized_exec_properties("lash-internal-durable-test", "process_ran_laws", "//crates/lash-durable-test:process_ran_laws__test"),
     extra_compile_data = [],
@@ -1249,9 +1103,6 @@ lash_rust_integration_test(
         "tests/support/matrix.rs",
         "tests/support/sim.rs",
     ],
-    data_exclude = [
-        "tests/fixtures/formats/**",
-    ],
     data_patterns = [],
     exec_properties = sized_exec_properties("lash-internal-durable-test", "process_step_crash_proof", "//crates/lash-durable-test:process_step_crash_proof__test"),
     extra_compile_data = [],
@@ -1280,9 +1131,6 @@ lash_rust_integration_test(
         "tests/support/matrix.rs",
         "tests/support/served.rs",
         "tests/support/sim.rs",
-    ],
-    data_exclude = [
-        "tests/fixtures/formats/**",
     ],
     data_patterns = [],
     exec_properties = sized_exec_properties("lash-internal-durable-test", "process_tool_call_crash_laws", "//crates/lash-durable-test:process_tool_call_crash_laws__test"),
@@ -1315,9 +1163,6 @@ lash_rust_integration_test(
         "tests/support/served.rs",
         "tests/support/sim.rs",
     ],
-    data_exclude = [
-        "tests/fixtures/formats/**",
-    ],
     data_patterns = [],
     exec_properties = sized_exec_properties("lash-internal-durable-test", "process_tool_calls", "//crates/lash-durable-test:process_tool_calls__test"),
     extra_compile_data = [],
@@ -1348,9 +1193,6 @@ lash_rust_integration_test(
         "tests/support/served.rs",
         "tests/support/sim.rs",
     ],
-    data_exclude = [
-        "tests/fixtures/formats/**",
-    ],
     data_patterns = [],
     exec_properties = sized_exec_properties("lash-internal-durable-test", "recorded_behaviour_laws", "//crates/lash-durable-test:recorded_behaviour_laws__test"),
     extra_compile_data = [],
@@ -1380,9 +1222,6 @@ lash_rust_integration_test(
         "tests/support/served.rs",
         "tests/support/sim.rs",
     ],
-    data_exclude = [
-        "tests/fixtures/formats/**",
-    ],
     data_patterns = [],
     exec_properties = sized_exec_properties("lash-internal-durable-test", "render_cache_laws", "//crates/lash-durable-test:render_cache_laws__test"),
     extra_compile_data = [],
@@ -1407,9 +1246,6 @@ lash_rust_integration_test(
     declared_features = [],
     srcs_patterns = [
         "tests/resource_capacity.rs",
-    ],
-    data_exclude = [
-        "tests/fixtures/formats/**",
     ],
     data_patterns = [],
     exec_properties = sized_exec_properties("lash-internal-durable-test", "resource_capacity", "//crates/lash-durable-test:resource_capacity__test"),
@@ -1438,9 +1274,6 @@ lash_rust_integration_test(
         "tests/support/served.rs",
         "tests/support/sim.rs",
         "tests/support/web_fetch.rs",
-    ],
-    data_exclude = [
-        "tests/fixtures/formats/**",
     ],
     data_patterns = [],
     exec_properties = sized_exec_properties("lash-internal-durable-test", "rlm_session_globals", "//crates/lash-durable-test:rlm_session_globals__test"),
@@ -1471,9 +1304,6 @@ lash_rust_integration_test(
         "tests/support/matrix.rs",
         "tests/support/sim.rs",
     ],
-    data_exclude = [
-        "tests/fixtures/formats/**",
-    ],
     data_patterns = [],
     exec_properties = sized_exec_properties("lash-internal-durable-test", "round_crash_matrix", "//crates/lash-durable-test:round_crash_matrix__test"),
     extra_compile_data = [],
@@ -1499,9 +1329,6 @@ lash_rust_integration_test(
     srcs_patterns = [
         "tests/session_send.rs",
         "tests/support/served.rs",
-    ],
-    data_exclude = [
-        "tests/fixtures/formats/**",
     ],
     data_patterns = [],
     exec_properties = sized_exec_properties("lash-internal-durable-test", "session_send", "//crates/lash-durable-test:session_send__test"),
@@ -1530,9 +1357,6 @@ lash_rust_integration_test(
     srcs_patterns = [
         "tests/standard_turn_outcomes.rs",
         "tests/support/served.rs",
-    ],
-    data_exclude = [
-        "tests/fixtures/formats/**",
     ],
     data_patterns = [],
     exec_properties = sized_exec_properties("lash-internal-durable-test", "standard_turn_outcomes", "//crates/lash-durable-test:standard_turn_outcomes__test"),
@@ -1563,9 +1387,6 @@ lash_rust_integration_test(
         "tests/support/dialect.rs",
         "tests/support/sim.rs",
     ],
-    data_exclude = [
-        "tests/fixtures/formats/**",
-    ],
     data_patterns = [],
     exec_properties = sized_exec_properties("lash-internal-durable-test", "steering_crash_laws", "//crates/lash-durable-test:steering_crash_laws__test"),
     extra_compile_data = [],
@@ -1594,9 +1415,6 @@ lash_rust_integration_test(
     srcs_patterns = [
         "tests/support/served.rs",
         "tests/tool_activity.rs",
-    ],
-    data_exclude = [
-        "tests/fixtures/formats/**",
     ],
     data_patterns = [],
     exec_properties = sized_exec_properties("lash-internal-durable-test", "tool_activity", "//crates/lash-durable-test:tool_activity__test"),
@@ -1627,9 +1445,6 @@ lash_rust_integration_test(
         "tests/support/sim.rs",
         "tests/tool_batches.rs",
     ],
-    data_exclude = [
-        "tests/fixtures/formats/**",
-    ],
     data_patterns = [],
     exec_properties = sized_exec_properties("lash-internal-durable-test", "tool_batches", "//crates/lash-durable-test:tool_batches__test"),
     extra_compile_data = [],
@@ -1658,9 +1473,6 @@ lash_rust_integration_test(
     srcs_patterns = [
         "tests/support/served.rs",
         "tests/tool_call_identity.rs",
-    ],
-    data_exclude = [
-        "tests/fixtures/formats/**",
     ],
     data_patterns = [],
     exec_properties = sized_exec_properties("lash-internal-durable-test", "tool_call_identity", "//crates/lash-durable-test:tool_call_identity__test"),
@@ -1700,9 +1512,6 @@ lash_rust_integration_test(
         "tests/tool_crash_laws/presentation_obligations.rs",
         "tests/tool_crash_laws/publication_loss.rs",
     ],
-    data_exclude = [
-        "tests/fixtures/formats/**",
-    ],
     data_patterns = [],
     exec_properties = sized_exec_properties("lash-internal-durable-test", "tool_crash_laws", "//crates/lash-durable-test:tool_crash_laws__test"),
     extra_compile_data = [],
@@ -1731,9 +1540,6 @@ lash_rust_integration_test(
     srcs_patterns = [
         "tests/tool_group_pool_width.rs",
     ],
-    data_exclude = [
-        "tests/fixtures/formats/**",
-    ],
     data_patterns = [],
     exec_properties = sized_exec_properties("lash-internal-durable-test", "tool_group_pool_width", "//crates/lash-durable-test:tool_group_pool_width__test"),
     extra_compile_data = [],
@@ -1761,9 +1567,6 @@ lash_rust_integration_test(
     srcs_patterns = [
         "tests/support/served.rs",
         "tests/tool_surface_laws.rs",
-    ],
-    data_exclude = [
-        "tests/fixtures/formats/**",
     ],
     data_patterns = [],
     exec_properties = sized_exec_properties("lash-internal-durable-test", "tool_surface_laws", "//crates/lash-durable-test:tool_surface_laws__test"),
@@ -1797,9 +1600,6 @@ lash_rust_integration_test(
         "tests/support/sim.rs",
         "tests/turn_callback_crash_laws.rs",
     ],
-    data_exclude = [
-        "tests/fixtures/formats/**",
-    ],
     data_patterns = [],
     exec_properties = sized_exec_properties("lash-internal-durable-test", "turn_callback_crash_laws", "//crates/lash-durable-test:turn_callback_crash_laws__test"),
     extra_compile_data = [],
@@ -1827,9 +1627,6 @@ lash_rust_integration_test(
     srcs_patterns = [
         "tests/support/served.rs",
         "tests/turn_execution_state.rs",
-    ],
-    data_exclude = [
-        "tests/fixtures/formats/**",
     ],
     data_patterns = [],
     exec_properties = sized_exec_properties("lash-internal-durable-test", "turn_execution_state", "//crates/lash-durable-test:turn_execution_state__test"),
@@ -1866,9 +1663,6 @@ lash_rust_integration_test(
         "tests/turn_phases/parks.rs",
         "tests/turn_phases/slots.rs",
     ],
-    data_exclude = [
-        "tests/fixtures/formats/**",
-    ],
     data_patterns = [],
     exec_properties = sized_exec_properties("lash-internal-durable-test", "turn_phases", "//crates/lash-durable-test:turn_phases__test"),
     extra_compile_data = [],
@@ -1900,9 +1694,6 @@ lash_rust_integration_test(
         "tests/support/sim.rs",
         "tests/turn_round_crash_matrix.rs",
     ],
-    data_exclude = [
-        "tests/fixtures/formats/**",
-    ],
     data_patterns = [],
     exec_properties = sized_exec_properties("lash-internal-durable-test", "turn_round_crash_matrix", "//crates/lash-durable-test:turn_round_crash_matrix__test"),
     extra_compile_data = [],
@@ -1928,9 +1719,6 @@ lash_rust_integration_test(
     srcs_patterns = [
         "tests/support/served.rs",
         "tests/turn_terminal_refusals.rs",
-    ],
-    data_exclude = [
-        "tests/fixtures/formats/**",
     ],
     data_patterns = [],
     exec_properties = sized_exec_properties("lash-internal-durable-test", "turn_terminal_refusals", "//crates/lash-durable-test:turn_terminal_refusals__test"),
@@ -1962,9 +1750,6 @@ lash_rust_integration_test(
         "tests/support/telemetry.rs",
         "tests/turn_trace_scope_laws.rs",
     ],
-    data_exclude = [
-        "tests/fixtures/formats/**",
-    ],
     data_patterns = [],
     exec_properties = sized_exec_properties("lash-internal-durable-test", "turn_trace_scope_laws", "//crates/lash-durable-test:turn_trace_scope_laws__test"),
     extra_compile_data = [],
@@ -1991,29 +1776,14 @@ lash_rust_integration_test(
     declared_features = [],
     srcs_patterns = [
         "tests/support/dialect.rs",
-        "tests/support/images.rs",
-        "tests/support/kernel_images.rs",
         "tests/support/matrix.rs",
         "tests/support/noted.rs",
         "tests/support/sim.rs",
         "tests/vertical_crash_proof.rs",
-        "tests/vertical_crash_proof/corpus.rs",
-        "tests/vertical_crash_proof/images.rs",
         "tests/vertical_crash_proof/run_config.rs",
         "tests/vertical_crash_proof/session_capture.rs",
     ],
-    data_patterns = [
-        "tests/fixtures/formats/**",
-        "tests/fixtures/formats/lashvm/db-wal.gz",
-        "tests/fixtures/formats/lashvm/db.gz",
-        "tests/fixtures/formats/pre-heap-lashvm/db-wal.gz",
-        "tests/fixtures/formats/pre-heap-lashvm/db.gz",
-        "tests/fixtures/formats/pre-heap-session/db-wal.gz",
-        "tests/fixtures/formats/pre-heap-session/db.gz",
-        "tests/fixtures/formats/session/db-wal.gz",
-        "tests/fixtures/formats/session/db.gz",
-        "tests/vertical_crash_proof/corpus.rs",
-    ],
+    data_patterns = [],
     exec_properties = sized_exec_properties("lash-internal-durable-test", "vertical_crash_proof", "//crates/lash-durable-test:vertical_crash_proof__test"),
     extra_compile_data = [],
     extra_data = [
@@ -2041,9 +1811,6 @@ lash_rust_integration_test(
     srcs_patterns = [
         "tests/support/served.rs",
         "tests/worker_crashes.rs",
-    ],
-    data_exclude = [
-        "tests/fixtures/formats/**",
     ],
     data_patterns = [],
     exec_properties = sized_exec_properties("lash-internal-durable-test", "worker_crashes", "//crates/lash-durable-test:worker_crashes__test"),

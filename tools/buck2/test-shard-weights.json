@@ -429,7 +429,6 @@
     "a_once_tool_call_killed_after_its_work_resumes_without_replay_on_postgres": 13151,
     "a_once_tool_call_killed_after_its_work_resumes_without_replay_on_sqlite_file": 13634,
     "a_once_tool_call_killed_after_its_work_resumes_without_replay_on_sqlite_memory": 2232,
-    "a_session_decodes_and_resumes_from_its_1_0_image": 94,
     "a_turn_resumed_after_a_progress_boundary_commits_the_uncut_history_on_postgres": 3027,
     "a_turn_resumed_after_a_progress_boundary_commits_the_uncut_history_on_sqlite_file": 2287,
     "a_turn_resumed_after_a_progress_boundary_commits_the_uncut_history_on_sqlite_memory": 363

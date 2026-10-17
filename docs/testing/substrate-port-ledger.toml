@@ -20517,10 +20517,10 @@ lane = "L11"
 laws = [
   "a_drain_format_version_move_changes_the_generation",
 ]
-disposition = "replaced-by:crates/lash-durable-test/tests/format_fixtures.rs::every_drain_format_is_in_an_actor_format_set"
+disposition = "subject-deleted"
 status = "deleted"
 owed = "a node never runs work in a format it cannot decode"
-note = "FIG-5200 deleted the test: the format set covers every drain-policy durable format the build decodes"
+note = "Before 1.0, cross-build compatibility fixtures are not retained (FIG-6724)"
 
 [[row]]
 path = "crates/lash/src/formats.rs"

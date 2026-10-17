@@ -279,14 +279,7 @@
   },
   "crates/lash-durable-test": {
     "derive_tests": true,
-    "test_data": {
-      "vertical_crash_proof": [
-        "tests/fixtures/formats/**"
-      ],
-      "format_fixtures": [
-        "tests/fixtures/formats/**"
-      ]
-    },
+    "test_data": {},
     "tests": {
       "after_turn_crash_laws": [
         "tests/after_turn_crash_laws.rs",
@@ -407,12 +400,6 @@
       "first_party_tools": [
         "tests/first_party_tools.rs",
         "tests/support/served.rs",
-        "tests/support/sim.rs"
-      ],
-      "format_fixtures": [
-        "tests/format_fixtures.rs",
-        "tests/support/images.rs",
-        "tests/support/kernel_images.rs",
         "tests/support/sim.rs"
       ],
       "frame_switch_crash_proof": [
@@ -621,14 +608,10 @@
       ],
       "vertical_crash_proof": [
         "tests/support/dialect.rs",
-        "tests/support/images.rs",
-        "tests/support/kernel_images.rs",
         "tests/support/matrix.rs",
         "tests/support/noted.rs",
         "tests/support/sim.rs",
         "tests/vertical_crash_proof.rs",
-        "tests/vertical_crash_proof/corpus.rs",
-        "tests/vertical_crash_proof/images.rs",
         "tests/vertical_crash_proof/run_config.rs",
         "tests/vertical_crash_proof/session_capture.rs"
       ],
@@ -637,29 +620,7 @@
         "tests/worker_crashes.rs"
       ]
     },
-    "test_includes": {
-      "format_fixtures": [
-        "tests/fixtures/formats/lashvm/db-wal.gz",
-        "tests/fixtures/formats/lashvm/db.gz",
-        "tests/fixtures/formats/pre-heap-lashvm/db-wal.gz",
-        "tests/fixtures/formats/pre-heap-lashvm/db.gz",
-        "tests/fixtures/formats/pre-heap-session/db-wal.gz",
-        "tests/fixtures/formats/pre-heap-session/db.gz",
-        "tests/fixtures/formats/session/db-wal.gz",
-        "tests/fixtures/formats/session/db.gz"
-      ],
-      "vertical_crash_proof": [
-        "tests/fixtures/formats/lashvm/db-wal.gz",
-        "tests/fixtures/formats/lashvm/db.gz",
-        "tests/fixtures/formats/pre-heap-lashvm/db-wal.gz",
-        "tests/fixtures/formats/pre-heap-lashvm/db.gz",
-        "tests/fixtures/formats/pre-heap-session/db-wal.gz",
-        "tests/fixtures/formats/pre-heap-session/db.gz",
-        "tests/fixtures/formats/session/db-wal.gz",
-        "tests/fixtures/formats/session/db.gz",
-        "tests/vertical_crash_proof/corpus.rs"
-      ]
-    },
+    "test_includes": {},
     "test_input_fallbacks": {},
     "unit_test_sources": [
       "src/clock.rs",

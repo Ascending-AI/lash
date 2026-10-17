@@ -86,7 +86,8 @@ const RAW: &str = r#"/* a literal */"#;
         generators = reset.discover(ROOT)
         discovered = {row["source"] for row in generators}
         undiscovered = []
-        for path in sorted((ROOT / "crates").rglob("*.rs")):
+        for path in sorted([*(ROOT / "crates").rglob("*.rs"),
+                            *(ROOT / "examples").rglob("*.rs")]):
             source = without_comments(path.read_text())
             variables = re.findall(r'"((?:UPDATE_|LASH_UPDATE_|LASH_REGENERATE_)[A-Z0-9_]+)"', source)
             if variables:
@@ -97,6 +98,7 @@ const RAW: &str = r#"/* a literal */"#;
             if '"LASH_REGENERATE"' in source and str(path.relative_to(ROOT)) not in discovered:
                 undiscovered.append(f"{path.relative_to(ROOT)}: LASH_REGENERATE")
         self.assertEqual(undiscovered, [], "fixture writers missing from discovery")
+        self.assertIn("examples/workflows", {row["output"] for row in generators})
         self.assertIn("crates/lash-postgres-store/schema-shape.txt",
                       {row["output"] for row in generators})
 

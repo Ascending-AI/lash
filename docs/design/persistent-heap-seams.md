@@ -506,9 +506,8 @@ Laws:
   - `a_frame_resumes_at_its_semantic_site_in_every_layout`
   - `every_step_seals_the_same_root_in_every_layout`, the KIR image law
     carried over to roots
-- Integrator, SQLite: `//crates/lash-durable-test:format_fixtures__test` and
-  `//crates/lash-durable-test:vertical_crash_proof__test`, re-recorded once
-  on the integrated tree.
+- Integrator, SQLite: the affected same-build crash/resume laws in
+  `//crates/lash-durable-test:vertical_crash_proof__test`.
 
 ### S5 Staging: the spool and the candidate manifest
 
@@ -806,8 +805,8 @@ by that lane. Seam declaration files (§3) are read-only for every lane.
    `SESSION_EXECUTION`.
 8. **`message.rs`.** Only hp-paging edits it. The integrator deletes
    `ExportGraph`/`ExportedGraph` and `SealedGraphState` with their callers.
-9. **Fixtures and committed images.** Only the integrator re-records them,
-   once, on the integrated tree rebased on current main.
+9. **Readable fixtures.** Regenerate reviewed expected outputs through their
+   declared generators; crash/resume laws record and resume within one run.
 10. **Kernel rules and ADRs.** The integrator edits them. Each lane's report
     names the rule text its change needs: the `K-MACH-001` clarification,
     `K-BND-003`'s upper-bound wording, demand-validation timing and the
@@ -848,7 +847,7 @@ symbol together with every caller in its own files.
 | `lash-kernel-migrate/src/carry.rs::carry` (31) over `ParkedRun`: deleted; the paged parked-run migrator is FIG-6233 (§7) | I |
 | `lash-core-store/src/checkpoint_graph/registry.rs`: `KERNEL_WHOLE` (16), `TERMINAL_WHOLE` (27), `SESSION_EXECUTION` (29) rows. `WHOLE_STREAM`, `STRUCTURE_BLOCK` and `STREAM_INDEX` stay: other enveloped kinds use them. | I |
 | `lash-core-store/src/checkpoint_graph/encode.rs`: the FIG-6157 encoding cache stays (it is generic, used by other domains); only the kernel's whole-input encode path through it goes | I |
-| Tests, fixtures and docs whose subject is the removed shapes: `lash-kernel-state/src/tests.rs`; `lash-kernel-vm/src/laws/{parked,whole}.rs`; `lash-vm-worker/src/graph_laws.rs`; `lash-vm-protocol/src/graph_state_tests.rs`; `lash-vm-broker/src/kernel/graph_tests.rs`; `lash-durable-test` format fixtures; `docs/kernel/parked-state.md`. Each deleted test is listed in the commit with the law that now covers its property. | I |
+| Tests, fixtures and docs whose subject is the removed shapes: `lash-kernel-state/src/tests.rs`; `lash-kernel-vm/src/laws/{parked,whole}.rs`; `lash-vm-worker/src/graph_laws.rs`; `lash-vm-protocol/src/graph_state_tests.rs`; `lash-vm-broker/src/kernel/graph_tests.rs`; `docs/kernel/parked-state.md`. Each deleted test is listed in the commit with the law that now covers its property. | I |
 
 ## 6. Risks to independent building
 

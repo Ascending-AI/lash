@@ -1,7 +1,7 @@
 //! PC-CODEC (FIG-5887 §11), graph half: one canonical encoding with exact
 //! round trips, the 256 B inline boundary, UTF-8 chunk boundaries, the
 //! 64 KiB envelope and 4 KiB root bounds, child edges equal to the encoded
-//! table, and every refusal; plus the shared grammar-vector fixture.
+//! table, and every refusal.
 
 use std::collections::{BTreeMap, BTreeSet};
 
@@ -22,17 +22,6 @@ fn staging() -> GraphStaging {
 
 fn limits() -> DecodeLimits {
     DecodeLimits::within_total(1 << 34)
-}
-
-fn hex(bytes: &[u8]) -> String {
-    bytes.iter().map(|byte| format!("{byte:02x}")).collect()
-}
-
-fn unhex(text: &str) -> Vec<u8> {
-    (0..text.len())
-        .step_by(2)
-        .map(|index| u8::from_str_radix(&text[index..index + 2], 16).unwrap())
-        .collect()
 }
 
 fn text_body(text: &str) -> Vec<u8> {
@@ -909,214 +898,6 @@ fn a_commit_is_admitted_up_to_its_explicit_budget() {
     assert!(budget.admit_reserved_failure(&measured(1_001, 10)).is_err());
 }
 
-/// The shared fixture: what the vectors pin, recomputed.
-fn grammar_vectors() -> serde_json::Value {
-    use serde_json::json;
-    let registry: Vec<_> = REGISTRY
-        .iter()
-        .chain(SEMANTIC_REGISTRY)
-        .map(|spec| {
-            json!({
-                "kind": spec.kind.0,
-                "name": spec.name,
-                "shape": format!("{:?}", spec.shape),
-                "bound": spec.bound.bytes(),
-                "owner": format!("{:?}", spec.owner),
-            })
-        })
-        .collect();
-    let roots: Vec<_> = RootSource::ALL
-        .iter()
-        .map(|source| {
-            let sqlite = source.sqlite_field();
-            let postgres = source.postgres_field();
-            json!({
-                "source": source.catalog_name(),
-                "number": *source as u8,
-                "sqlite": format!("{}.{}", sqlite.table, sqlite.column),
-                "postgres": format!("{}.{}{}", postgres.table, postgres.column,
-                    postgres.filter.map(|filter| format!(" where {filter}")).unwrap_or_default()),
-            })
-        })
-        .collect();
-
-    let mut staging = staging();
-    let (exec, _) = exec_root(&mut staging, "exe");
-    let mut values = Vec::new();
-    for (name, kind, body) in [
-        ("unit value", NodeKind::FROZEN_VALUE, vec![0x00]),
-        (
-            "text at the inline bound",
-            NodeKind::FROZEN_VALUE,
-            text_body(&"t".repeat(253)),
-        ),
-        (
-            "text over the inline bound",
-            NodeKind::FROZEN_VALUE,
-            text_body(&"t".repeat(254)),
-        ),
-        ("bytes over the inline bound", NodeKind::FROZEN_VALUE, {
-            let mut out = TokenWriter::new();
-            out.bytes(&[0xab; 254]);
-            out.into_bytes()
-        }),
-        (
-            "owner binding",
-            NodeKind::OWNER_BINDING,
-            encode_body(&OwnerBinding::Cell {
-                session: "s".into(),
-                turn: "t".into(),
-                cell: "c".into(),
-            }),
-        ),
-    ] {
-        let mut one = self::staging();
-        let id = one.encode(kind, TypedBody::logical(&body)).unwrap();
-        let nodes: Vec<_> = one
-            .nodes()
-            .values()
-            .map(|node| json!({"id": node.id.to_hex(), "envelope": hex(&node.bytes)}))
-            .collect();
-        values.push(json!({
-            "name": name,
-            "kind": kind.0,
-            "logical": hex(&body),
-            "root": id.to_hex(),
-            "nodes": nodes,
-        }));
-    }
-    let large: Vec<_> = [
-        ("text of 65,520 x", "x".repeat(LEAF_PAYLOAD_MAX)),
-        ("text of 65,521 x", "x".repeat(LEAF_PAYLOAD_MAX + 1)),
-        (
-            "65,519 x then é",
-            format!("{}é", "x".repeat(LEAF_PAYLOAD_MAX - 1)),
-        ),
-        ("33 chunks of x", "x".repeat(33 * LEAF_PAYLOAD_MAX)),
-    ]
-    .into_iter()
-    .map(|(name, text)| {
-        let mut one = self::staging();
-        let id = one
-            .encode(
-                NodeKind::FROZEN_VALUE,
-                TypedBody::logical(&text_body(&text)),
-            )
-            .unwrap();
-        json!({
-            "name": name,
-            "kind": NodeKind::FROZEN_VALUE.0,
-            "root": id.to_hex(),
-            "node_count": one.nodes().len(),
-            "staged_bytes": one.staged_bytes(),
-        })
-    })
-    .collect();
-    let refusals: Vec<_> = envelope_refusals()
-        .into_iter()
-        .map(|(name, node, refusal)| {
-            json!({
-                "name": name,
-                "envelope": hex(&node.bytes),
-                "expected": node.id.to_hex(),
-                "refusal": format!("{refusal:?}"),
-            })
-        })
-        .collect();
-    json!({
-        "about": "FIG-5887 §2 grammar vectors; regenerate with checkpoint_graph::tests::regenerate_grammar_vectors",
-        "constants": {
-            "magic": hex(&MAGIC),
-            "max_node_bytes": MAX_NODE_BYTES,
-            "max_root_bytes": MAX_ROOT_BYTES,
-            "inline_token_max": INLINE_TOKEN_MAX,
-            "leaf_payload_max": LEAF_PAYLOAD_MAX,
-            "index_fanout": INDEX_FANOUT,
-            "semantic_kinds": [*NodeKind::SEMANTIC.start(), *NodeKind::SEMANTIC.end()],
-        },
-        "registry": registry,
-        "root_sources": roots,
-        "exec_root": {"root": exec.to_hex(), "node_count": staging.nodes().len()},
-        "nodes": values,
-        "large": large,
-        "envelope_refusals": refusals,
-    })
-}
-
-fn vectors_source(json: &str) -> String {
-    format!(
-        "//! The shared grammar-vector fixture (FIG-5887 §2): the registry, root\n\
-         //! sources, pinned node envelopes and identities, large-value recipes and\n\
-         //! envelope refusals every lane's codec is checked against. Generated by\n\
-         //! `checkpoint_graph::tests::regenerate_grammar_vectors`; pinned by\n\
-         //! `checkpoint_graph::tests::the_grammar_vectors_are_pinned`. Do not edit.\n\
-         \n\
-         /// The fixture's JSON text.\n\
-         pub const GRAMMAR_VECTORS: &str = r##\"{json}\"##;\n"
-    )
-}
-
-/// The committed fixture is exactly what this build encodes: every lane's
-/// codec reads the same bytes, identities and refusals.
-#[test]
-fn the_grammar_vectors_are_pinned() {
-    let expected = serde_json::to_string_pretty(&grammar_vectors()).unwrap();
-    assert_eq!(
-        vectors::GRAMMAR_VECTORS,
-        expected,
-        "regenerate with checkpoint_graph::tests::regenerate_grammar_vectors"
-    );
-    let pinned: serde_json::Value = serde_json::from_str(vectors::GRAMMAR_VECTORS).unwrap();
-    for case in pinned["envelope_refusals"].as_array().unwrap() {
-        let bytes = unhex(case["envelope"].as_str().unwrap());
-        let expected = NodeId::from_hex(case["expected"].as_str().unwrap()).unwrap();
-        let refusal = check_envelope(&bytes, expected, &limits()).unwrap_err();
-        assert_eq!(format!("{refusal:?}"), case["refusal"].as_str().unwrap());
-    }
-    for case in pinned["nodes"].as_array().unwrap() {
-        let nodes: BTreeMap<NodeId, EncodedNode> = case["nodes"]
-            .as_array()
-            .unwrap()
-            .iter()
-            .map(|node| {
-                let id = NodeId::from_hex(node["id"].as_str().unwrap()).unwrap();
-                let bytes = unhex(node["envelope"].as_str().unwrap());
-                (
-                    id,
-                    EncodedNode {
-                        id,
-                        bytes: bytes.into(),
-                    },
-                )
-            })
-            .collect();
-        let root = NodeId::from_hex(case["root"].as_str().unwrap()).unwrap();
-        let kind = NodeKind(u32::try_from(case["kind"].as_u64().unwrap()).unwrap());
-        assert_eq!(
-            hex(&logical(&nodes, root, kind).unwrap()),
-            case["logical"].as_str().unwrap()
-        );
-    }
-}
-
-#[test]
-#[ignore = "regenerates crates/lash-core-store/src/checkpoint_graph/vectors.rs"]
-#[expect(
-    clippy::disallowed_methods,
-    reason = "the opt-in test generator writes the fixture in the supplied workspace"
-)]
-fn regenerate_grammar_vectors() {
-    assert_eq!(std::env::var("LASH_REGENERATE").as_deref(), Ok("1"));
-    let root = std::env::var_os("BUILD_WORKSPACE_DIRECTORY").expect("regeneration workspace");
-    let json = serde_json::to_string_pretty(&grammar_vectors()).unwrap();
-    std::fs::write(
-        std::path::PathBuf::from(root)
-            .join("crates/lash-core-store/src/checkpoint_graph/vectors.rs"),
-        vectors_source(&json),
-    )
-    .expect("write grammar vectors");
-}
-
 #[test]
 fn node_ids_spell_their_blob_ref() {
     let node = raw(8, &[], &[0x0c, 0x00, 0x01, 0x00]);
@@ -1223,11 +1004,6 @@ fn repeated_captures_share_unchanged_graph_materialization() {
     assert_eq!(
         logical(&changed, changed_root, NodeKind::FROZEN_VALUE).unwrap(),
         changed_body
-    );
-    // Sharing cannot change the committed baseline's bytes or identities.
-    assert_eq!(
-        serde_json::to_string_pretty(&grammar_vectors()).unwrap(),
-        vectors::GRAMMAR_VECTORS
     );
     assert_eq!(changed.budget().spent(), changed.staged_bytes());
     // Changing a large value's tail keeps its earlier chunks too.
@@ -1337,10 +1113,6 @@ fn checked_unplaced_bodies_are_borrowed_by_typed_decoders() {
         );
         assert_eq!(decoder.read(), (1, nodes.get(&root).unwrap().len()));
     }
-    assert_eq!(
-        serde_json::to_string_pretty(&grammar_vectors()).unwrap(),
-        vectors::GRAMMAR_VECTORS
-    );
 }
 
 /// K-ID-001, K-ID-002: a document's or a definition's identity is the

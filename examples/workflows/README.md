@@ -4,14 +4,14 @@ both dialects' inputs, entry/refusal contracts and source-map exceptions.
 Each dialect pins its own values and signatures. Only entry names and shared
 refusal codes are compared between dialects.
 
-From the repository root, after sourcing `env.sh`, bless all readable outputs
+From the repository root, after sourcing `env.sh`, regenerate all readable outputs
 with one command:
 
 ```sh
-kiln run //examples/workflows:workflow-corpus__bin -- --bless "$PWD/examples/workflows"
+kiln test //examples/workflows:corpus__test --local-test-execution --no-test-cache --test_arg=regenerate_readable_workflow_outputs --test_arg=--ignored --test_arg=--exact --test_env=LASH_REGENERATE=1 --test_env=BUILD_WORKSPACE_DIRECTORY="$PWD"
 ```
 
-Review the resulting diffs. Blessing checks reproducible lowering, canonical
+Review the resulting diffs. Regeneration checks reproducible lowering, canonical
 print/read equality, SM-ORDER, SM-COVER, declaration-only view derivation,
 expanded Transaction replay and real VM function crossing before writing.
 The corpus law compares all generated outputs with the committed files:

@@ -122,7 +122,7 @@ manifests. Engine-state formats are declared by their process engines.
 | Immutable, hash-addressed history | Decode the admitted range and lift in memory without rewriting the stored bytes or identity preimage. |
 | Derived workflow graph and type facets | Their declared read ranges and projection policy. |
 | Content addresses and idempotency families | Preserve stored identity preimages; admit the declared family rather than re-derive an old identity with a new family. |
-| Turn checkpoints, VM snapshots, Run records, wait rows, outcome materials and engine state | The actor's format set, the claim filter and drain by release (§1); 1.0 decode-and-resume fixtures. |
+| Turn checkpoints, VM snapshots, Run records, wait rows, outcome materials and engine state | The actor's format set, the claim filter and drain by release (§1); same-build crash/resume laws. |
 | Release fixtures | Tagged capture is a release requirement; the capture workflow is currently unavailable (ADR 0115 §6). |
 
 Session-state admission validates the session actor's epoch in the store
@@ -212,15 +212,12 @@ released actor to finish on a node of the newer build with no `Once` body
 started twice. The claim-filter law requires that a node lacking a format set
 never claims an actor stored in it, that the actor stays visible, and that a
 pending cancel ends it engine-free; the fleet-format law requires that a newer
-set is not written while an older node is live. The 1.0 decode-and-resume
-fixtures commit encoded state in every format of the build's sets, and a
-check requires a fixture for every format id. Format-registry checks validate
+set is not written while an older node is live. Before 1.0, crash/resume laws record and resume within one run. Format-registry checks validate
 policy declarations. Tagged-release capture is unavailable; see the
 [release-fixture evidence gap](../agents/release-fixtures.md).
 
 Evidence: `crates/lash-durable/src/laws/formats.rs`,
 `crates/lash-durable-test/tests/drain_by_release.rs`,
-`crates/lash-durable-test/tests/format_fixtures.rs`,
 `crates/lash-core-execution/src/runtime/actor/process_laws.rs`,
 `scripts/check_format_registry.py`.
 

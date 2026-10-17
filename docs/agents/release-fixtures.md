@@ -12,8 +12,4 @@ capture module. Do not regenerate a corpus under another build or claim a
 successful tagged read-back. A tagged writer, provenance verification and
 store read-back need implementation before the release workflow can be used.
 
-Current encoded-format fixtures and their decode/resume laws live in
-`crates/lash-durable-test/tests/format_fixtures.rs`. They exercise the build's
-actor formats; they do not replace tagged-release capture or a two-build
-rolling-upgrade proof. See [ADR 0115](../adr/0115-the-1-0-binary-carries-its-half-of-every-upgrade.md#6-current-format-evidence-and-release-proof-gaps)
-for that distinction.
+Before 1.0, durable laws record and resume within one run; the first release images are recorded fresh at the cut. Readable expected outputs use ignored `regenerates <repository-relative path>` tests gated on `LASH_REGENERATE=1`, discovered by `scripts/fixture_regenerators.py`.

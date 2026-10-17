@@ -32,7 +32,7 @@ The append projection is a type-tagged binary grammar that distinguishes
 `i64`, `u64`, and `f64`. It cannot share `identity_json`'s normalized JSON leaf
 without changing minted digests. Intent and history-node projections serialize
 typed projections through `stable_json_string` and declared field order.
-Golden corpora freeze the bytes.
+Same-build laws check semantic identity distinctions.
 
 Evidence: `crates/lash-sansio/src/core_support.rs:23`,
 `crates/lash-core-ids/src/stable_identity.rs:21`, `:70`, `:237`, and
@@ -42,7 +42,7 @@ Evidence: `crates/lash-sansio/src/core_support.rs:23`,
 
 `APPEND_REQUEST_IDENTITY_ENCODING_VERSION` is 7. The discriminator sits beside
 the digest in the receipt, separately from the unframed envelope and hash label.
-`append_request_identity_v7.hex` pins the grammar. Plugin messages encode id,
+Plugin messages encode id,
 role, origin, and ordered parts; attachment parts encode the durable ref's
 id, media type, byte length, optional type metadata and optional label, never
 a delivery URL or provider-file id. Replay routes and response metadata have explicit projections.

@@ -52,11 +52,9 @@ operation memory reservation and `FrameRecord.registers` deleted).
   supersedes is deleted in that swap, and so are the tests written for it (a
   property no current law covers is ported as a new law against the new code).
 - **Stored shapes are one 1.0 baseline.** A swap that changes a stored or
-  parked shape changes it in place, rebases onto current main, re-records the
-  committed images with their recorders, and runs
-  `//crates/lash-durable-test:vertical_crash_proof` and
-  `//crates/lash-durable-test:format_fixtures` once. No version constant is
-  bumped and no migration is added.
+  parked shape changes it in place and checks the affected same-build
+  crash/resume laws. The first release images are recorded fresh at the 1.0
+  cut; no version constant is bumped and no migration is added.
 - **Error taxonomy** (unchanged from `persistent-heap-seams.md` §1): a guest
   error is a raised value; a guest bound is `Bound::*`; an infrastructure
   failure (`HeapFault`, a page refusal, a durable error) is never catchable and
@@ -636,8 +634,7 @@ A point edit re-encodes at most a bounded number of leaves plus the index path.
 The equality domain's laws stay stated over graph equivalence (§1).
 
 **Format.** Page shapes change: this is a dev-phase format change. The lane
-rebases onto current main, re-records the 1.0 images with their recorders, and
-runs `vertical_crash_proof` and `format_fixtures` once.
+checks the affected same-build crash/resume laws.
 
 **Built by** swap 2.4(b). **Deletes** the overflow split and the
 removal rebalancing in `tree.rs`.

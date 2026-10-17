@@ -7,14 +7,11 @@
 // library code).
 #![allow(clippy::disallowed_methods)]
 
-use std::path::{Path, PathBuf};
-use std::process::Command;
 use std::sync::Arc;
 
 use lash_execution_contracts::deployment::DeploymentStore;
 use lash_execution_contracts::process::ProcessEnvStore;
 use lash_postgres_store::PostgresStorage;
-use serde::{Deserialize, Serialize};
 use sqlx::postgres::PgPoolOptions;
 
 mod support;
@@ -22,13 +19,7 @@ mod support;
 #[path = "../../lash-core/tests/support/durable_read_fixture.rs"]
 mod fixture;
 
-const REGENERATE_ENV: &str = "LASH_REGENERATE";
 const FIXTURE_SCHEMA: &str = "lash_durable_read_fixture";
-
-#[derive(Debug, PartialEq, Eq, Serialize, Deserialize)]
-struct PostgresVersion {
-    schema: i32,
-}
 
 /// What this build writes, it reads back with the same meaning: seed a fresh
 /// schema, reopen every handle at the read instant, and assert the semantics of
@@ -58,96 +49,6 @@ async fn postgres_seed_round_trips_through_a_fresh_store_when_configured() {
     drop(handles);
     storage.pool().close().await;
     drop_fixture_schema(&database_url).await;
-}
-
-#[tokio::test(flavor = "multi_thread", worker_threads = 2)]
-#[ignore = "regenerates fixtures/durable-read/v1/postgres"]
-async fn regenerate_postgres_durable_fixture() {
-    assert_eq!(
-        std::env::var(REGENERATE_ENV).as_deref(),
-        Ok("1"),
-        "set {REGENERATE_ENV}=1 to acknowledge writing the Postgres fixture tree"
-    );
-    let database_url = support::database_url()
-        .expect("set LASH_POSTGRES_DATABASE_URL to an owned throwaway database");
-    let _database_lock = support::SharedDatabaseLock::acquire(&database_url).await;
-    recreate_fixture_schema(&database_url).await;
-    let fixture_database_url = fixture_database_url(&database_url);
-    let storage = lash_postgres_store::testing::connect(&fixture_database_url)
-        .await
-        .expect("provision Postgres durable-fixture schema");
-    install_fixed_catalog_identity(&storage).await;
-    let handles = open_handles(&storage, fixture::FIXTURE_WRITE_MS);
-    let expected = Box::pin(fixture::seed(&handles)).await;
-    normalize_fixture_rows(&storage).await;
-    drop(handles);
-    storage.pool().close().await;
-
-    let destination = fixture_dir();
-    std::fs::create_dir_all(&destination).expect("create Postgres fixture directory");
-    std::fs::write(
-        destination.join("expected.json"),
-        json_with_newline(&expected),
-    )
-    .expect("write Postgres fixture expectations");
-    std::fs::write(
-        destination.join("version.json"),
-        json_with_newline(&PostgresVersion {
-            schema: PostgresStorage::schema_version(),
-        }),
-    )
-    .expect("write Postgres fixture version");
-    std::fs::write(destination.join("fixture.sql"), pg_dump(&database_url))
-        .expect("write Postgres fixture dump");
-    drop_fixture_schema(&database_url).await;
-}
-
-#[tokio::test(flavor = "multi_thread", worker_threads = 2)]
-#[ignore = "FIG-4495 release cut: requires an explicit tagged LASH_RELEASE_FIXTURES_DIR and owned PostgreSQL"]
-async fn release_postgres_fixture_reads_retained_semantics() {
-    let source =
-        PathBuf::from(std::env::var_os("LASH_RELEASE_FIXTURES_DIR").expect(
-            "release read-back requires LASH_RELEASE_FIXTURES_DIR; no source-tree fallback",
-        ))
-        .join("postgres-store");
-    let expected: fixture::ExpectedFixture = serde_json::from_slice(
-        &std::fs::read(source.join("expected.json"))
-            .expect("read retained PostgreSQL expectations"),
-    )
-    .expect("decode retained PostgreSQL expectations");
-    let version: PostgresVersion = serde_json::from_slice(
-        &std::fs::read(source.join("version.json")).expect("read retained PostgreSQL version"),
-    )
-    .expect("decode retained PostgreSQL version");
-    assert!(
-        version.schema > 0,
-        "retained schema version must be nonzero"
-    );
-    let dump = std::fs::read_to_string(source.join("fixture.sql"))
-        .expect("read the retained PostgreSQL dump");
-    let database_url =
-        support::database_url().expect("release read-back requires owned PostgreSQL");
-    let _database_lock = support::SharedDatabaseLock::acquire(&database_url).await;
-    drop_fixture_schema(&database_url).await;
-    let pool = PgPoolOptions::new()
-        .max_connections(1)
-        .connect(&database_url)
-        .await
-        .expect("connect to restore the release fixture");
-    sqlx::raw_sql(&dump)
-        .execute(&pool)
-        .await
-        .expect("restore the retained PostgreSQL dump without reseeding");
-    pool.close().await;
-    let storage = lash_postgres_store::testing::connect(&fixture_database_url(&database_url))
-        .await
-        .expect("open the restored release catalog");
-    let handles = open_handles(&storage, fixture::FIXTURE_READ_MS);
-    Box::pin(fixture::assert_semantics(&handles, &expected)).await;
-    drop(handles);
-    storage.pool().close().await;
-    drop_fixture_schema(&database_url).await;
-    println!("release PostgreSQL read-back: 1 dump fixture, retained semantics matched");
 }
 
 fn open_handles(storage: &PostgresStorage, timestamp_ms: u64) -> fixture::FixtureHandles {
@@ -219,128 +120,7 @@ async fn drop_fixture_schema(database_url: &str) {
     pool.close().await;
 }
 
-/// The committed dump's catalog identity: the seed draws a random one per
-/// install, so a regeneration would otherwise differ on every run.
-const FIXTURE_CATALOG_ID: &str = "00000000-0000-4000-8000-000000000887";
-
-async fn install_fixed_catalog_identity(storage: &PostgresStorage) {
-    sqlx::query("UPDATE lash_catalog_identity SET catalog_id = $1 WHERE singleton = TRUE")
-        .bind(FIXTURE_CATALOG_ID)
-        .execute(storage.pool())
-        .await
-        .expect("install the fixed fixture catalog identity");
-}
-
-async fn normalize_fixture_rows(storage: &PostgresStorage) {
-    // The release stamp records `clock_timestamp()` on the server, so it is
-    // server-authoritative in exactly the sense this function exists for:
-    // without the rewrite every regeneration would emit a different dump.
-    let stamped = sqlx::query("UPDATE lash_release_stamp SET written_at_epoch_ms = $1")
-        .bind(fixture::FIXTURE_WRITE_MS as i64)
-        .execute(storage.pool())
-        .await
-        .expect("normalize the server-authoritative fixture release stamp instant");
-    assert_eq!(
-        stamped.rows_affected(),
-        1,
-        "opening the fixture database must have stamped exactly one release row"
-    );
-    pin_attachment_write_token(storage).await;
-}
-
-/// Replace the random write token `begin_attachment_write` minted while seeding
-/// with the fixture's fixed one.
-///
-/// The token is minted inside the store, so it cannot be handed in; it is
-/// rewritten afterwards instead. The row must exist and must be the only one,
-/// or the fixture no longer matches what this generator believes it wrote.
-async fn pin_attachment_write_token(storage: &PostgresStorage) {
-    let rewritten = sqlx::query(
-        "UPDATE lash_attachment_pending_writes SET write_id = $1 WHERE attachment_id = $2",
-    )
-    .bind(fixture::FIXTURE_ATTACHMENT_WRITE_ID)
-    .bind(fixture::fixture_attachment_id().as_str())
-    .execute(storage.pool())
-    .await
-    .expect("pin the Postgres fixture attachment write token")
-    .rows_affected();
-    assert_eq!(
-        rewritten, 1,
-        "the fixture seeds exactly one pending attachment write to pin; {rewritten} were rewritten"
-    );
-}
-
 fn fixture_database_url(database_url: &str) -> String {
     let separator = if database_url.contains('?') { '&' } else { '?' };
     format!("{database_url}{separator}options=-csearch_path%3D{FIXTURE_SCHEMA}")
-}
-
-fn pg_dump(database_url: &str) -> Vec<u8> {
-    let output = Command::new("docker")
-        .args([
-            "run",
-            "--rm",
-            "--network",
-            "host",
-            "--env",
-            "PGCLIENTENCODING=UTF8",
-            "postgres:18-alpine",
-            "pg_dump",
-            "--format=plain",
-            "--no-owner",
-            "--no-privileges",
-            "--no-comments",
-            "--inserts",
-            "--schema=lash_durable_read_fixture",
-            database_url,
-        ])
-        .output()
-        .expect("run postgres:18 pg_dump fixture generator");
-    assert!(
-        output.status.success(),
-        "postgres:18 pg_dump failed: {}",
-        String::from_utf8_lossy(&output.stderr)
-    );
-    let dump = String::from_utf8(output.stdout).expect("pg_dump output is UTF-8");
-    let mut lines = dump
-        .lines()
-        .filter(|line| {
-            !line.starts_with("\\restrict ")
-                && !line.starts_with("\\unrestrict ")
-                && *line != "SET transaction_timeout = 0;"
-        })
-        .collect::<Vec<_>>();
-    while lines.last().is_some_and(|line| line.is_empty()) {
-        lines.pop();
-    }
-    let normalized = lines.join("\n");
-    format!("{normalized}\n").into_bytes()
-}
-
-fn fixture_dir() -> PathBuf {
-    source_manifest_dir().join("../../fixtures/durable-read/v1/postgres")
-}
-
-fn source_manifest_dir() -> PathBuf {
-    let workspace = std::env::var_os("BUILD_WORKSPACE_DIRECTORY");
-    if workspace.is_none()
-        && std::env::var(REGENERATE_ENV).as_deref() == Ok("1")
-        && Path::new(env!("CARGO_MANIFEST_DIR")).is_relative()
-    {
-        panic!("Buck2 fixture regeneration requires BUILD_WORKSPACE_DIRECTORY");
-    }
-    source_manifest_dir_for(workspace)
-}
-
-fn source_manifest_dir_for(workspace: Option<std::ffi::OsString>) -> PathBuf {
-    workspace.map_or_else(
-        || PathBuf::from(env!("CARGO_MANIFEST_DIR")),
-        |root| PathBuf::from(root).join("crates/lash-postgres-store"),
-    )
-}
-
-fn json_with_newline(value: &impl Serialize) -> Vec<u8> {
-    let mut bytes = serde_json::to_vec_pretty(value).expect("encode Postgres fixture JSON");
-    bytes.push(b'\n');
-    bytes
 }
