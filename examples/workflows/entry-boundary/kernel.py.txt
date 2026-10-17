@@ -12,11 +12,9 @@ fn declared() {
 }
 
 main {
-  let arrow = absent
-  let declared = absent
   let local = absent
-  set arrow = &arrow
-  set declared = &declared
+  let arrow = &arrow
+  let declared = &declared
   if true {
     set local = fn() start() -> Any bare direct {
       return "block"
@@ -24,6 +22,6 @@ main {
   }
 }
 
-unit Function(Name("arrow")): statements=1 scopes=1 sites=10
+unit Function(Name("arrow")): statements=1 scopes=1 sites=8
 
-unit Function(Name("declared")): statements=1 scopes=1 sites=10
+unit Function(Name("declared")): statements=1 scopes=1 sites=8

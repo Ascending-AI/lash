@@ -671,7 +671,24 @@
         "tests/corpus.rs"
       ]
     },
-    "test_includes": {},
+    "test_includes": {
+      "corpus": [
+        "branch/source.py",
+        "capturing-cell/source.py",
+        "catalog.json",
+        "closures-helpers/source.py",
+        "early-finish/source.py",
+        "early-return/source.py",
+        "entry-boundary/source.py",
+        "fan-out/source.py",
+        "iteration-typed/source.py",
+        "iteration-untyped/source.py",
+        "non-ascii/source.py",
+        "sleep/source.py",
+        "straight-tool/source.py",
+        "try-finally/source.py"
+      ]
+    },
     "test_input_fallbacks": {},
     "unit_test_sources": [
       "src/cell.rs",

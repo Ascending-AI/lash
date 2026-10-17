@@ -7,13 +7,10 @@ use list.len = @70d92c79f9c69cfe8cda0752cf30f5f0db0499a1bbffeeed9e2abddad9cf302b
 use py.reply = @09159bbbadc0f6eda5aa8761653ad9fc2f463b362941fe756a2cf7e9aa2006cd
 use record.keys = @3048431a57b64b680843cd96770d99536bab12b83c3c7788856614e555b4985c
 use same = @1465a1a642da52eba1664711a12c594f155ba2c6cd744344079f5b5018db1578
-private t1, t2
 
 main {
-  let t1 = perform finish("done") as Any
-  finish null
-  let t2 = perform corpus.echo("unreachable") as Any
-  do invoke py.reply(t2)
+  finish let(t1 = perform finish("done") as Any, null)
+  do invoke py.reply(perform corpus.echo("unreachable") as Any)
 }
 
-unit Main: statements=4 scopes=1 sites=7
+unit Main: statements=2 scopes=1 sites=5

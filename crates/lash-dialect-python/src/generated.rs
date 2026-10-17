@@ -390,7 +390,7 @@ impl<'a> Reader<'a> {
         if c.text.trim_start().starts_with("k.") && Self::action_form(c.text) {
             return self.action_cursor(c).map(k::Rhs::Action);
         }
-        if let Some(action) = self.authored_call(c)? {
+        if let Ok(Some(action)) = self.authored_call(c) {
             return Ok(k::Rhs::Action(action));
         }
         self.inline(c, depth).map(|expr| match expr {
@@ -1044,7 +1044,7 @@ impl<'a> Reader<'a> {
             k::Stmt::Do {
                 value: k::Expr::Act(act),
             }
-        } else if let Some(action) = self.authored_call(&mut c)? {
+        } else if let Ok(Some(action)) = self.authored_call(&mut c) {
             self.depth(depth + 1)?;
             c.finish()?;
             k::Stmt::Do {

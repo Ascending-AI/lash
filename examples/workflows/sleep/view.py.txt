@@ -1,5 +1,5 @@
 unit Function(Name("demo"))
-statement fn demo/0 ordinal=4 depth=0 block=fn demo Do { value: Act(ActExpr { kind: Sleep { then_yield: false }, args: [Literal(Float(Float(5.0)))] }) }
-statement fn demo/1 ordinal=5 depth=0 block=fn demo Return { value: Literal(Text("awake")) }
-scope fn demo ordinal=3 depth=0 Entry
+statement fn demo/0 ordinal=3 depth=0 block=fn demo Do { value: Act(ActExpr { kind: Sleep { then_yield: false }, args: [Literal(Float(Float(5.0)))] }) }
+statement fn demo/1 ordinal=4 depth=0 block=fn demo Return { value: Literal(Text("awake")) }
+scope fn demo ordinal=2 depth=0 Entry
 action fn demo/0/0 None

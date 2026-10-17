@@ -24,23 +24,15 @@ use text.join = @79aad37e7cebc78b176b7458ed56e625112872a7faf900143e331db02c601a0
 entry demo(items: Any) -> Any
 
 fn demo(items) {
-  let item = absent
-  let out = absent
-  set out = []
-  for t2 in items via (open py.for_in.open, check py.for_in.check) {
-    set item = t2
-    let t6 = out
-    let t3 = item
-    let t4 = perform corpus.echo(t3) as Any
-    let t5 = invoke py.reply(t4)
-    do invoke py.method.append(t6, t5)
+  let out = []
+  for item in items via (open py.for_in.open, check py.for_in.check) {
+    do invoke py.method.append(out, invoke py.reply(perform corpus.echo(item) as Any))
   }
   return out
 }
 
 main {
-  let demo = absent
-  set demo = &demo
+  let demo = &demo
 }
 
-unit Function(Name("demo")): statements=11 scopes=2 sites=16
+unit Function(Name("demo")): statements=4 scopes=2 sites=8

@@ -27,3 +27,7 @@ lash-kernel-view.workspace = true
 lash-kernel-state.workspace = true
 lash-kernel-vm.workspace = true
 lash-vm-worker = { workspace = true, features = ["dialect-typescript", "dialect-python"] }
+
+[dev-dependencies]
+ruff_python_ast.workspace = true
+ruff_python_parser.workspace = true

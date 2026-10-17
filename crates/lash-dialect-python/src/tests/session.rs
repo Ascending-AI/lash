@@ -74,19 +74,6 @@ fn top_level_names_are_session_bindings() {
         "print(total + len(items))\n",
     ]);
     assert_eq!(lines, ["2 [1, 2]", "4"]);
-
-    let lowered = machine::lower("total = 1\nprint(total + 1)\n").expect("a plain cell");
-    let private: Vec<&str> = lowered
-        .document
-        .private_bindings
-        .iter()
-        .map(lash_kernel_doc::Name::as_str)
-        .collect();
-    assert!(!private.contains(&"total"), "{private:?}");
-    assert!(
-        !private.is_empty(),
-        "the temporaries of `print` are private"
-    );
 }
 
 /// A name an earlier cell declared and never assigned is still unbound.

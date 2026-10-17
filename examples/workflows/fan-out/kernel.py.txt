@@ -25,39 +25,21 @@ entry demo() -> Any
 
 fn demo() {
   try {
-    let work = absent
-    set work = fn(value) start(value: Text) -> Any bare direct {
-      if same(value, absent) {
-        do invoke py.arg_missing("work")
-      }
-      let t1 = value
-      let t2 = perform corpus.echo(t1) as Any
-      let t3 = invoke py.reply(t2)
-      return t3
+    let work = fn(value) start(value: Text) -> Any bare direct {
+      return let(t1 = if(same(value, absent), invoke py.arg_missing("work"), null), invoke py.reply(perform corpus.echo(value) as Any))
     }
-    let t4 = work
-    let t6 = fn() {
-      let t5 = apply t4("a")
-      return t5
-    }
-    let t7 = spawn invoke py.task.run(t6)
-    let t8 = work
-    let t10 = fn() {
-      let t9 = apply t8("b")
-      return t9
-    }
-    let t11 = spawn invoke py.task.run(t10)
-    let t12 = [t7, t11]
-    let t13 = invoke py.gather(t12)
-    return t13
+    return let(t2 = work, let(t3 = "a", let(t4 = t3, let(t5 = work, let(t6 = "b", let(t7 = t6, let(t8 = [spawn invoke py.task.run(fn() {
+      return apply t2(t4)
+    }), spawn invoke py.task.run(fn() {
+      return apply t5(t7)
+    })], invoke py.gather(t8))))))))
   } finally {
     do invoke tasks.cancel_all()
   }
 }
 
 main {
-  let demo = absent
-  set demo = &demo
+  let demo = &demo
 }
 
-unit Function(Name("demo")): statements=23 scopes=8 sites=34
+unit Function(Name("demo")): statements=7 scopes=6 sites=17

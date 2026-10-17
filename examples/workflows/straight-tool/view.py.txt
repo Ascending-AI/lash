@@ -1,7 +1,5 @@
 unit Function(Name("demo"))
-statement fn demo/0 ordinal=4 depth=0 block=fn demo Let { name: Name("t1"), value: Action(Perform { effect: QualifiedName("corpus.echo"), args: [Literal(Text("hello"))], result: Any, then_yield: false }) }
-statement fn demo/1 ordinal=5 depth=0 block=fn demo Let { name: Name("t2"), value: Action(Call { callee: Library(FunctionId(09159bbbadc0f6eda5aa8761653ad9fc2f463b362941fe756a2cf7e9aa2006cd)), args: [Variable(Name("t1"))] }) }
-statement fn demo/2 ordinal=6 depth=0 block=fn demo Return { value: Variable(Name("t2")) }
-scope fn demo ordinal=3 depth=0 Entry
-action fn demo/0/0 Some(Effect(QualifiedName("corpus.echo")))
-action fn demo/1/0 library id=09159bbbadc0f6eda5aa8761653ad9fc2f463b362941fe756a2cf7e9aa2006cd name=py.reply label="Python reply"
+statement fn demo/0 ordinal=3 depth=0 block=fn demo Return { value: Act(ActExpr { kind: Call(Library(FunctionId(09159bbbadc0f6eda5aa8761653ad9fc2f463b362941fe756a2cf7e9aa2006cd))), args: [Act(ActExpr { kind: Perform { effect: QualifiedName("corpus.echo"), result: Any, then_yield: false }, args: [Literal(Text("hello"))] })] }) }
+scope fn demo ordinal=2 depth=0 Entry
+action fn demo/0/0 library id=09159bbbadc0f6eda5aa8761653ad9fc2f463b362941fe756a2cf7e9aa2006cd name=py.reply label="Python reply"
+action fn demo/0/0/0 Some(Effect(QualifiedName("corpus.echo")))

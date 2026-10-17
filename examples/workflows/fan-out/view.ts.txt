@@ -20,7 +20,7 @@ statement fn demo/6 ordinal=24 depth=0 block=fn demo Let { name: Name("t13"), va
 statement fn demo/7 ordinal=25 depth=0 block=fn demo Let { name: Name("t14"), value: Expr(Call { function: FunctionId(2c0ae8a7768df5037a9df976731713c14477549f94ea2c0b8bfa7aebe6659b0d), args: [Variable(Name("work"))] }) }
 statement fn demo/8 ordinal=26 depth=0 block=fn demo Let { name: Name("t15"), value: Action(Call { callee: Value(Name("t14")), args: [Literal(Absent), Variable(Name("t13"))] }) }
 statement fn demo/9 ordinal=27 depth=0 block=fn demo Let { name: Name("t16"), value: Expr(List([List([Variable(Name("t12")), Variable(Name("t15"))])])) }
-statement fn demo/10 ordinal=28 depth=0 block=fn demo Let { name: Name("t17"), value: Action(Call { callee: Library(FunctionId(6edd6833d792ecf9704b1e49c66b464f2c8a92fd2a35f3cd4fab529aada20db6)), args: [Literal(Absent), Variable(Name("t16"))] }) }
+statement fn demo/10 ordinal=28 depth=0 block=fn demo Let { name: Name("t17"), value: Action(Call { callee: Library(FunctionId(0c45ad69e5360599efa1ea9eea86c6fa042a764c55e4810eaa5dd88b934e1d70)), args: [Literal(Absent), Variable(Name("t16"))] }) }
 statement fn demo/11 ordinal=29 depth=0 block=fn demo Let { name: Name("t18"), value: Action(Await { policy: FunctionId(1463b538a6614aa09a001e6db86e6d54cd2b0fb6826493c23043a41273c0860a), value: Variable(Name("t17")) }) }
 statement fn demo/12 ordinal=30 depth=0 block=fn demo ReturnVia { value: Variable(Name("t18")), policy: FunctionId(beb668fcff1d4b6a800ce55e84378e510311221bf756dfa360b0ecfe47714e65) }
 scope fn demo ordinal=2 depth=0 Entry
@@ -35,5 +35,5 @@ action fn demo/1/0/0/1/0 library id=656aeb7c2f80aaa8c1a1f930bf330144f4d2b86e156f
 action fn demo/1/0/0/2/1 library id=1f532a178ec4dc76b622a2ce6f487cbb91ea1fe40f9a11911124c4316a761178 name=ts.promise.run label="TypeScript promise run"
 action fn demo/5/0 None
 action fn demo/8/0 None
-action fn demo/10/0 library id=6edd6833d792ecf9704b1e49c66b464f2c8a92fd2a35f3cd4fab529aada20db6 name=ts.promise.all label="TypeScript promise all"
+action fn demo/10/0 library id=0c45ad69e5360599efa1ea9eea86c6fa042a764c55e4810eaa5dd88b934e1d70 name=ts.promise.all label="TypeScript promise all"
 action fn demo/11/0 library id=1463b538a6614aa09a001e6db86e6d54cd2b0fb6826493c23043a41273c0860a name=ts.await label="TypeScript await"

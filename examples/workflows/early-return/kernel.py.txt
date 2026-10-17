@@ -13,15 +13,12 @@ fn demo(value) {
   if lt(value, 0) {
     return "negative"
   }
-  let t1 = value
-  let t2 = perform corpus.echo(t1) as Any
-  do invoke py.reply(t2)
+  do invoke py.reply(perform corpus.echo(value) as Any)
   return "done"
 }
 
 main {
-  let demo = absent
-  set demo = &demo
+  let demo = &demo
 }
 
-unit Function(Name("demo")): statements=6 scopes=3 sites=10
+unit Function(Name("demo")): statements=4 scopes=3 sites=7

@@ -14,29 +14,23 @@ use tuple.contains = @865719b4040dc09e2521e6be6ed41d8429fd68789553b5c55be60f7662
 entry demo() -> Any
 
 fn demo() {
-  let `result` = absent
-  set `result` = "start"
+  let `result` = "start"
   try {
-    let t4 = perform corpus.echo("try") as Any
-    set `result` = invoke py.reply(t4)
+    set `result` = invoke py.reply(perform corpus.echo("try") as Any)
   } catch t1 {
-    let t6 = ()
-    let t7 = invoke py.exc.is_exception(t1, t6)
-    if t7 {
+    if invoke py.exc.is_exception(t1, ()) {
       set `result` = "caught"
     } else {
       throw t1
     }
   } finally {
-    let t2 = perform corpus.echo("finally") as Any
-    do invoke py.reply(t2)
+    do invoke py.reply(perform corpus.echo("finally") as Any)
   }
   return `result`
 }
 
 main {
-  let demo = absent
-  set demo = &demo
+  let demo = &demo
 }
 
-unit Function(Name("demo")): statements=13 scopes=6 sites=20
+unit Function(Name("demo")): statements=8 scopes=6 sites=14

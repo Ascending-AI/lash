@@ -47,3 +47,21 @@ With no `--rule`, it runs all named test laws. `--rule FEATURE-CUT` invokes the
 existing feature witness through `kiln gate`. The runner groups selectors by
 target, refuses a zero-test receipt, records exact commands and receipts under
 `.kiln/FIG-6384/`, and never blesses a failure. It uses SQLite for durable laws.
+
+SHAPE (FIG-6402 rev2) counts statements in the selected entry units (or Main
+for a cell), including source closure bodies. Author structure counts source
+statements and each Python `except` / TypeScript `catch` clause. A comprehension
+adds one loop per `for` clause, one statement per `if` clause, and one collect /
+result binding. A loop target needed after its loop permits one operand pin;
+otherwise its binding belongs to the header. An inline closure whose only
+statement returns the author's deferred call represents that call and adds no
+statement; named thunks and other closure bodies count normally. These are the
+same rules for both dialects wherever the construct exists (owner rulings
+437657 and 437803).
+
+The Python corpus law pins every case's statement and loop counts. It records
+run-root task cleanup separately as `entry_cleanup`, pending its move into the
+entry convention, and kernel-required while-test / assignment-place action
+hoists separately as `kernel_hoist`, pending FIG-6657. Neither is an operand
+pin allowance. The inequality remains statements ≤ author statements + operand
+pins, with exactly one body per author loop, including comprehension loops.

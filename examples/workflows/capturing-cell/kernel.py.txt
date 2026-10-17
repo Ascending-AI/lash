@@ -48,29 +48,15 @@ use text.slice = @649f38eba0f5c8ce04da0c9ad8cf52c7fd5189fd9301d6ee3a7c65026bad5e
 use text.to_code_points = @f8e1c771241bcf79d4e804e35177d17075d8bafa331fd4d14446f4aa4538c2dc
 use tuple.concat = @cb471f6847d41251a688fd3703cc1461b95db6cae5f54601979e8c6947953be9
 use tuple.len = @2eced051afe955ac8dbeed3762acd4b8ce74b7a4ed15763ea47dfd01e5cc5f71
-private t5, t6, t7, t8
 
 main {
-  let add = absent
-  let limit = absent
-  let shared = absent
-  set limit = 3
-  set shared = [1]
-  set add = fn(x) start(x: Int) -> Any bare direct {
-    if same(x, absent) {
-      do invoke py.arg_missing("add")
-    }
-    let t2 = invoke py.add(x, limit)
-    let t3 = invoke py.getitem(shared, 0)
-    let t4 = invoke py.add(t2, t3)
-    return t4
+  let limit = 3
+  let shared = [1]
+  let add = fn(x) start(x: Int) -> Any bare direct {
+    return let(t1 = if(same(x, absent), invoke py.arg_missing("add"), null), invoke py.add(invoke py.add(x, limit), invoke py.getitem(shared, 0)))
   }
-  let t5 = [1, add]
-  let t6 = map{"list": t5}
-  let t7 = map{"nested": t6}
-  let t8 = perform corpus.echo(t7) as Any
-  do invoke py.reply(t8)
+  do invoke py.reply(perform corpus.echo(map{"nested": map{"list": [1, add]}}) as Any)
   do invoke py.setitem(shared, 0, 9)
 }
 
-unit Main: statements=18 scopes=4 sites=25
+unit Main: statements=6 scopes=2 sites=13

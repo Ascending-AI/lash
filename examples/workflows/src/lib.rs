@@ -320,11 +320,12 @@ fn edit(
     use lash_kernel_edit::authoring::{DataValue, Operation, ValueTarget};
     let action = code_sites(document)
         .into_iter()
-        .find(|site| {
-            matches!(
-                document.node(site),
-                Some(Node::Action(k::Action::Perform { .. }))
-            )
+        .find(|site| match document.node(site) {
+            Some(Node::Action(k::Action::Perform { .. })) => true,
+            Some(Node::Expr(Expr::Act(action))) => {
+                matches!(&action.kind, k::ActKind::Perform { .. })
+            }
+            _ => false,
         })
         .context("edit fixture needs a perform")?;
     let base = document.identity();

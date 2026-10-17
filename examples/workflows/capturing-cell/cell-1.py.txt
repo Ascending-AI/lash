@@ -58,13 +58,7 @@ entry run(x: Int) -> Any
 fn f0(v0) start(x: Int) -> Any bare direct {
   let v1 = 3
   let v2 = [1]
-  if same(v0, absent) {
-    do invoke py.arg_missing("add")
-  }
-  let v3 = invoke py.add(v0, v1)
-  let v4 = invoke py.getitem(v2, 0)
-  let v5 = invoke py.add(v3, v4)
-  return v5
+  return let(v3 = if(same(v0, absent), invoke py.arg_missing("add"), null), invoke py.add(invoke py.add(v0, v1), invoke py.getitem(v2, 0)))
 }
 
 fn run(x) {

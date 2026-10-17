@@ -1,12 +1,10 @@
 unit Function(Name("demo"))
-statement fn demo/0 ordinal=4 depth=0 block=fn demo If { condition: Call { function: FunctionId(a9e0784f1de47d5d04963535be1cd88bdd1a23bf1313aad8ef0f3af874d5e9d0), args: [Variable(Name("value")), Literal(Int(Integer(0)))] }, then_block: [Return { value: Literal(Text("negative")) }], else_block: [] }
-statement fn demo/0/1/0 ordinal=6 depth=1 block=fn demo/0/1 Return { value: Literal(Text("negative")) }
-statement fn demo/1 ordinal=8 depth=0 block=fn demo Let { name: Name("t1"), value: Expr(Variable(Name("value"))) }
-statement fn demo/2 ordinal=9 depth=0 block=fn demo Let { name: Name("t2"), value: Action(Perform { effect: QualifiedName("corpus.echo"), args: [Variable(Name("t1"))], result: Any, then_yield: false }) }
-statement fn demo/3 ordinal=10 depth=0 block=fn demo Do { value: Act(ActExpr { kind: Call(Library(FunctionId(09159bbbadc0f6eda5aa8761653ad9fc2f463b362941fe756a2cf7e9aa2006cd))), args: [Variable(Name("t2"))] }) }
-statement fn demo/4 ordinal=11 depth=0 block=fn demo Return { value: Literal(Text("done")) }
-scope fn demo ordinal=3 depth=0 Entry
-scope fn demo/0/1 ordinal=5 depth=1 Then
-scope fn demo/0/2 ordinal=7 depth=1 Else
-action fn demo/2/0 Some(Effect(QualifiedName("corpus.echo")))
-action fn demo/3/0 library id=09159bbbadc0f6eda5aa8761653ad9fc2f463b362941fe756a2cf7e9aa2006cd name=py.reply label="Python reply"
+statement fn demo/0 ordinal=3 depth=0 block=fn demo If { condition: Call { function: FunctionId(a9e0784f1de47d5d04963535be1cd88bdd1a23bf1313aad8ef0f3af874d5e9d0), args: [Variable(Name("value")), Literal(Int(Integer(0)))] }, then_block: [Return { value: Literal(Text("negative")) }], else_block: [] }
+statement fn demo/0/1/0 ordinal=5 depth=1 block=fn demo/0/1 Return { value: Literal(Text("negative")) }
+statement fn demo/1 ordinal=7 depth=0 block=fn demo Do { value: Act(ActExpr { kind: Call(Library(FunctionId(09159bbbadc0f6eda5aa8761653ad9fc2f463b362941fe756a2cf7e9aa2006cd))), args: [Act(ActExpr { kind: Perform { effect: QualifiedName("corpus.echo"), result: Any, then_yield: false }, args: [Variable(Name("value"))] })] }) }
+statement fn demo/2 ordinal=8 depth=0 block=fn demo Return { value: Literal(Text("done")) }
+scope fn demo ordinal=2 depth=0 Entry
+scope fn demo/0/1 ordinal=4 depth=1 Then
+scope fn demo/0/2 ordinal=6 depth=1 Else
+action fn demo/1/0 library id=09159bbbadc0f6eda5aa8761653ad9fc2f463b362941fe756a2cf7e9aa2006cd name=py.reply label="Python reply"
+action fn demo/1/0/0 Some(Effect(QualifiedName("corpus.echo")))

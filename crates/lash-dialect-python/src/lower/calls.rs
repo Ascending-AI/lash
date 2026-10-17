@@ -1,8 +1,8 @@
 //! Calls: functions, tools, built-ins, methods and asyncio.
 
 use lash_kernel_doc::{
-    Action, Atom, Callee, EffectName, Expr, Literal, Name, RecordEntry, RecordType, Rhs, Signature,
-    Stmt, Type,
+    ActExpr, ActKind, Action, Atom, Callee, EffectName, Expr, Literal, Name, RecordEntry,
+    RecordType, Rhs, Signature, Stmt, Type,
 };
 use ruff_python_ast::{self as ast, Expr as PyExpr};
 use ruff_text_size::{Ranged, TextRange};
@@ -176,7 +176,7 @@ fn absent() -> Operand {
 /// the callee and the arguments, all evaluated.
 struct Prepared {
     callee: Name,
-    args: Vec<Atom>,
+    args: Vec<Expr>,
 }
 
 impl Lowerer<'_> {
@@ -382,15 +382,21 @@ impl Lowerer<'_> {
             return Err(self.control_placement(effect, call));
         }
         let action = self.perform(effect, signature, call)?;
-        let result = self.let_rhs(Rhs::Action(action), Ty::Unknown);
+        let result = Operand::inline(Expr::Act(Box::new(action)), Ty::Unknown);
+
         if control {
             // The call settled, so the turn is over: nothing after it runs
             // (`K-FORM-019`). The host reads the control from the settled
             // call, never from this value.
+            let ignored = self.temp();
             self.emit(Stmt::Finish {
-                value: Expr::Literal(Literal::Null),
+                value: Expr::Let {
+                    name: ignored,
+                    value: Box::new(result.expr),
+                    body: Box::new(Expr::Literal(Literal::Null)),
+                },
             });
-            return Ok(result);
+            return Ok(Operand::none());
         }
         // The reply reads as `json.loads` gives it: an object is a dict.
         self.invoke("py.reply", &[result], Ty::Unknown)
@@ -433,6 +439,9 @@ impl Lowerer<'_> {
         exprs.extend(call.arguments.args.iter());
         exprs.extend(call.arguments.keywords.iter().map(|keyword| &keyword.value));
         let mut operands = self.operands(&exprs)?;
+        if !call.arguments.keywords.is_empty() {
+            operands = operands.into_iter().map(|value| self.pin(value)).collect();
+        }
         let keyword_values = operands.split_off(1 + positional);
         let mut slots: Vec<Option<Operand>> = operands.drain(1..).map(Some).collect();
         let callee = operands.pop().unwrap_or_else(Operand::none);
@@ -522,7 +531,7 @@ impl Lowerer<'_> {
                 _ => self.temp(),
             },
         };
-        let args = self.atoms(&slots);
+        let args = slots.into_iter().map(|slot| slot.expr).collect();
         Ok(Ok(Prepared { callee, args }))
     }
 
@@ -537,11 +546,11 @@ impl Lowerer<'_> {
                 return Ok(Operand::none());
             }
         };
-        Ok(self.let_rhs(
-            Rhs::Action(Action::Call {
-                callee: Callee::Value(prepared.callee),
+        Ok(Operand::inline(
+            Expr::Act(Box::new(ActExpr {
+                kind: ActKind::Call(Callee::Value(prepared.callee)),
                 args: prepared.args,
-            }),
+            })),
             Ty::Unknown,
         ))
     }
@@ -553,23 +562,25 @@ impl Lowerer<'_> {
         effect: &EffectName,
         signature: &Signature,
         call: &ast::ExprCall,
-    ) -> Lowering<Action> {
+    ) -> Lowering<ActExpr> {
         self.no_stars(&call.arguments)?;
         let args = if let [param] = signature.params.as_slice()
             && let Type::Record(input) = &param.ty
             && !call.arguments.keywords.is_empty()
         {
             let input = self.tool_keyword_input(effect, input, call)?;
-            self.atoms(&[input])
+            vec![input.expr]
         } else {
             self.tool_arguments(effect, signature, call)?
         };
         self.performed.insert(effect.clone(), signature.clone());
-        Ok(Action::Perform {
-            effect: effect.clone(),
+        Ok(ActExpr {
+            kind: ActKind::Perform {
+                effect: effect.clone(),
+                result: signature.result.clone(),
+                then_yield: false,
+            },
             args,
-            result: signature.result.clone(),
-            then_yield: false,
         })
     }
 
@@ -628,7 +639,7 @@ impl Lowerer<'_> {
         effect: &EffectName,
         signature: &Signature,
         call: &ast::ExprCall,
-    ) -> Lowering<Vec<Atom>> {
+    ) -> Lowering<Vec<Expr>> {
         let positional = call.arguments.args.len();
         if positional > signature.params.len() {
             return Err(arguments_error(
@@ -641,10 +652,9 @@ impl Lowerer<'_> {
         }
         let mut exprs: Vec<&PyExpr> = call.arguments.args.iter().collect();
         exprs.extend(call.arguments.keywords.iter().map(|keyword| &keyword.value));
-        let mut operands = Vec::with_capacity(exprs.len());
-        for expr in exprs {
-            let value = self.expr(expr)?;
-            operands.push(self.pin(value));
+        let mut operands = self.operands(&exprs)?;
+        if !call.arguments.keywords.is_empty() {
+            operands = operands.into_iter().map(|value| self.pin(value)).collect();
         }
         let keyword_values = operands.split_off(positional);
         let mut slots: Vec<Option<Operand>> = operands.into_iter().map(Some).collect();
@@ -688,11 +698,11 @@ impl Lowerer<'_> {
         let slots: Vec<Operand> = slots
             .into_iter()
             .map(|slot| match slot {
-                Some(operand) => self.pin(operand),
+                Some(operand) => operand,
                 None => absent(),
             })
             .collect();
-        Ok(self.atoms(&slots))
+        Ok(slots.into_iter().map(|slot| slot.expr).collect())
     }
 
     pub(super) fn await_expr(&mut self, await_expr: &ast::ExprAwait) -> Lowering<Operand> {
@@ -747,8 +757,13 @@ impl Lowerer<'_> {
     /// `await value via policy`.
     fn await_via(&mut self, policy: &str, value: Operand) -> Lowering<Operand> {
         let policy = self.function(policy)?;
-        let value = self.atom(value);
-        Ok(self.let_rhs(Rhs::Action(Action::Await { policy, value }), Ty::Unknown))
+        Ok(Operand::inline(
+            Expr::Act(Box::new(ActExpr {
+                kind: ActKind::Await(policy),
+                args: vec![value.expr],
+            })),
+            Ty::Unknown,
+        ))
     }
 
     fn asyncio(
@@ -786,14 +801,10 @@ impl Lowerer<'_> {
                     },
                     None => {
                         let seconds = self.expr(seconds)?;
-                        self.invoke_do("py.sleep", &[seconds])?;
-                        return Ok(Operand::none());
+                        return self.invoke("py.sleep", &[seconds], Ty::None);
                     }
                 };
-                self.emit(Stmt::Do {
-                    value: action.into(),
-                });
-                Ok(Operand::none())
+                Ok(Operand::inline(action.into(), Ty::None))
             }
             "gather" => {
                 if !awaited {
@@ -922,16 +933,16 @@ impl Lowerer<'_> {
                 };
                 let seconds = self.expr(seconds)?;
                 let seconds = self.pin(seconds);
-                Action::Call {
-                    callee: Callee::Library(self.function("py.sleep")?),
-                    args: self.atoms(&[seconds]),
+                ActExpr {
+                    kind: ActKind::Call(Callee::Library(self.function("py.sleep")?)),
+                    args: vec![seconds.expr],
                 }
             }
             Some("gather") => {
                 let tasks = self.gather_members(call)?;
-                Action::Call {
-                    callee: Callee::Library(self.function("py.gather")?),
-                    args: self.atoms(&[tasks]),
+                ActExpr {
+                    kind: ActKind::Call(Callee::Library(self.function("py.gather")?)),
+                    args: vec![tasks.expr],
                 }
             }
             Some(_) => return Err(refusal(call.range())),
@@ -974,41 +985,49 @@ impl Lowerer<'_> {
                         .args
                         .into_iter()
                         .map(|arg| match arg {
-                            Atom::Variable(name) => {
+                            Expr::Variable(name) => {
                                 let pinned =
                                     self.pin(Operand::inline(Expr::Variable(name), Ty::Unknown));
-                                match pinned.expr {
-                                    Expr::Variable(name) => Atom::Variable(name),
-                                    _ => Atom::Literal(Literal::Null),
-                                }
+                                pinned.expr
                             }
-                            literal @ Atom::Literal(_) => literal,
+                            expr => self.pin(Operand::inline(expr, Ty::Unknown)).expr,
                         })
                         .collect();
-                    Action::Call {
-                        callee: Callee::Value(callee),
+                    ActExpr {
+                        kind: ActKind::Call(Callee::Value(callee)),
                         args,
                     }
                 }
             }
         };
-        let reply = matches!(action, Action::Perform { .. });
+        let mut action = action;
+        action.args = action
+            .args
+            .into_iter()
+            .map(|expr| self.pin(Operand::inline(expr, Ty::Unknown)).expr)
+            .collect();
+        let reply = matches!(action.kind, ActKind::Perform { .. });
         let body = self.block(|this| {
-            let mut result = this.let_rhs(Rhs::Action(action), Ty::Unknown);
+            let mut result = Operand::inline(Expr::Act(Box::new(action)), Ty::Unknown);
             if reply {
                 result = this.invoke("py.reply", &[result], Ty::Unknown)?;
             }
             this.emit(Stmt::Return { value: result.expr });
             Ok(())
         })?;
-        let work = self.emit_closure(Vec::new(), body, None);
+        let closure = lash_kernel_doc::Closure {
+            params: Vec::new(),
+            body: body.stmts,
+            start: None,
+        };
+        self.inline_closures.push((closure.clone(), body.notes));
+        let work = Operand::inline(Expr::Closure(Box::new(closure)), Ty::Unknown);
         let run = self.function("py.task.run")?;
-        let args = self.atoms(&[work]);
-        Ok(self.let_rhs(
-            Rhs::Action(Action::Spawn {
-                callee: Callee::Library(run),
-                args,
-            }),
+        Ok(Operand::inline(
+            Expr::Act(Box::new(ActExpr {
+                kind: ActKind::Spawn(Callee::Library(run)),
+                args: vec![work.expr],
+            })),
             Ty::Unknown,
         ))
     }
@@ -1044,6 +1063,9 @@ impl Lowerer<'_> {
         exprs.extend(call.arguments.args.iter());
         exprs.extend(call.arguments.keywords.iter().map(|keyword| &keyword.value));
         let mut operands = self.operands(&exprs)?;
+        if !call.arguments.keywords.is_empty() {
+            operands = operands.into_iter().map(|value| self.pin(value)).collect();
+        }
         let keyword_values = operands.split_off(1 + positional);
         let mut slots: Vec<Option<Operand>> = operands.drain(1..).map(Some).collect();
         let receiver = operands.pop().unwrap_or_else(Operand::none);

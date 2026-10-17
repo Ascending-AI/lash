@@ -85,14 +85,13 @@ fn unmapped(lowered: &Lowered) -> BTreeMap<String, &'static str> {
 /// non-ASCII text: every statement and action is mapped but the dialect's
 /// unspelled prologue and epilogue.
 #[test]
-fn every_cell_statement_and_action_is_mapped() {
+fn nested_actions_and_required_declarations_keep_source_ranges() {
     let source = "größe = \"日本\"\nasync def scale(x: int, extra: int = 1) -> int:\n    async def inner(y):\n        return y * 2\n    return await inner(x) + extra\ntwice = lambda y: y * 2\ntotal = 0\nfor item in [1, 2]:\n    try:\n        total += await echo(item)\n    except Exception:\n        total -= 1\n    if total > 3:\n        break\ntask = asyncio.create_task(scale(total))\nprint(größe, twice(await task))\n";
     let lowered = super::machine::lower(source).unwrap();
-    let mut expected: BTreeMap<String, &str> = (0..6)
-        .map(|index| (format!("main/{index}"), "absent-binding initialization"))
-        .collect();
-    for site in ["main/6", "main/6/1/0", "main/6/1/0/0"] {
-        expected.insert(site.to_owned(), "task finalizer");
-    }
-    assert_eq!(unmapped(&lowered), expected);
+    // FIG-6402 rev2 §11/§12: dominated declarations disappear, while
+    // every action and author statement still has a source range. The only
+    // unspelled sites in this source are the run-root task finalizer.
+    let unmapped = unmapped(&lowered);
+    assert!(unmapped.values().all(|kind| *kind == "task finalizer"));
+    assert_eq!(unmapped.len(), 3);
 }

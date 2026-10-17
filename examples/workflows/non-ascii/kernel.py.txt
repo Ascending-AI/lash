@@ -22,17 +22,12 @@ use tuple.concat = @cb471f6847d41251a688fd3703cc1461b95db6cae5f54601979e8c694795
 entry demo(name: Text) -> Any
 
 fn demo(name) {
-  let `größe` = absent
-  set `größe` = "日本 🦀"
-  let t1 = invoke py.add(`größe`, name)
-  let t2 = perform corpus.echo(t1) as Any
-  let t3 = invoke py.reply(t2)
-  return t3
+  let `größe` = "日本 🦀"
+  return invoke py.reply(perform corpus.echo(invoke py.add(`größe`, name)) as Any)
 }
 
 main {
-  let demo = absent
-  set demo = &demo
+  let demo = &demo
 }
 
-unit Function(Name("demo")): statements=6 scopes=1 sites=11
+unit Function(Name("demo")): statements=2 scopes=1 sites=6

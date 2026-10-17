@@ -1,18 +1,15 @@
 async def demo(items):
-    size = k.absent
     async def size(item):
-        if item is k.absent:
-            await helper_py_arg_missing("size")
-        else:
-            pass
-        t1 = len(item)
-        return t1
+        with k.return_():
+            with k.bind("t1"):
+                with k.choose():
+                    item is k.absent
+                    (await helper_py_arg_missing("size"))
+                    None
+                (len(item))
     t2 = []
-    item_1 = k.absent
-    for t3 in items:
-        item_1 = t3
+    for item_1 in items:
         t2[helper_list_len(t2)] = await size(item_1)
     return t2
 def main():
-    demo = k.absent
     demo = declared.demo

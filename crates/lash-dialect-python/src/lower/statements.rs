@@ -116,7 +116,7 @@ impl Lowerer<'_> {
                     Some(value) => self.expr(value)?,
                     None => Operand::none(),
                 };
-                self.emit(Stmt::Return { value: value.expr });
+                self.return_value(value);
                 Ok(())
             }
             PyStmt::Pass(_) => Ok(()),
@@ -242,12 +242,22 @@ impl Lowerer<'_> {
                 }
                 Err(class_refusal(class.range, class.name.id.as_str()))
             }
-            PyStmt::With(with) => Err(diagnostics::with_repair(
-                Code::WithUnsupported,
-                "`with` is not in the dialect",
-                with.range,
-                "write `try:` and `finally:` around the block",
-            )),
+            PyStmt::With(with) => {
+                for item in &with.items {
+                    if let PyExpr::Call(call) = &item.context_expr
+                        && let PyExpr::Attribute(attribute) = call.func.as_ref()
+                        && let Some(refusal) = self.printed_receiver(&attribute.value)
+                    {
+                        return Err(refusal);
+                    }
+                }
+                Err(diagnostics::with_repair(
+                    Code::WithUnsupported,
+                    "`with` is not in the dialect",
+                    with.range,
+                    "write `try:` and `finally:` around the block",
+                ))
+            }
             PyStmt::Match(node) => Err(diagnostics::with_repair(
                 Code::MatchUnsupported,
                 "`match` is not in the dialect",
@@ -320,7 +330,14 @@ impl Lowerer<'_> {
         let mut simple = None;
         let mut going = None;
         let block = self.block(|this| {
-            let condition = test(this)?;
+            let mut condition = test(this)?;
+            fn acts(node: lash_kernel_doc::Node<'_>) -> bool {
+                matches!(node, lash_kernel_doc::Node::Expr(Expr::Act(_)))
+                    || node.children().into_iter().any(acts)
+            }
+            if acts(lash_kernel_doc::Node::Expr(&condition)) {
+                condition = this.let_rhs(Rhs::Expr(condition), Ty::Bool).expr;
+            }
             if this.buf.is_empty() {
                 simple = Some(condition);
                 return this.loop_body(body);
@@ -449,6 +466,27 @@ impl Lowerer<'_> {
             PyExpr::Name(name) => {
                 let id = name.id.as_str();
                 let variable = self.written(id, name.range)?;
+                let annotated = self
+                    .variable(id)
+                    .and_then(|found| found.scope)
+                    .and_then(|scope| self.scopes[scope].bindings.types.get(id).copied());
+                let value = if annotated.is_some_and(|ty| {
+                    ty != Ty::Unknown && value.ty != Ty::Unknown && ty != value.ty
+                }) {
+                    // A trusted annotation chooses an operation, but does not
+                    // make the actual value satisfy its type before execution.
+                    self.invoke(
+                        "py.name_check",
+                        &[
+                            value,
+                            Operand::text(id),
+                            Operand::literal(Literal::Bool(!self.in_module()), Ty::Bool),
+                        ],
+                        Ty::Unknown,
+                    )?
+                } else {
+                    value
+                };
                 self.store(Place::Variable(variable), value);
                 self.mark_bound(id);
                 Ok(())
@@ -489,6 +527,7 @@ impl Lowerer<'_> {
                     Ty::Int,
                 );
                 let items = self.invoke("py.unpack", &[value, count], Ty::Unknown)?;
+                let items = self.pin(items);
                 for (index, elt) in elts.iter().enumerate() {
                     let item = Expr::Member(Box::new(Member::Index {
                         target: items.expr.clone(),
@@ -529,7 +568,13 @@ impl Lowerer<'_> {
                     &[container.clone(), index.clone()],
                     Ty::Unknown,
                 )?;
-                let operand = self.expr(&assign.value)?;
+                let (aside, operand) = self.aside(|this| this.expr(&assign.value))?;
+                let current = if aside.is_empty() {
+                    current
+                } else {
+                    self.pin(current)
+                };
+                self.append(aside);
                 let result = self.in_place(assign, current, operand)?;
                 self.invoke_do("py.setitem", &[container, index, result])
             }
@@ -1103,12 +1148,18 @@ impl Lowerer<'_> {
                 .iter()
                 .zip(defaults)
                 .rfind(|(_, default)| default.is_none());
-            if let Some((param, _)) = required {
+            let argument_check = if let Some((param, _)) = required {
                 let missing = this.omitted(param)?;
-                let then_block =
-                    this.block(|this| this.invoke_do("py.arg_missing", &[Operand::text(name)]))?;
-                this.emit_if(missing, then_block, Buf::default());
-            }
+                let failure = this.invoke("py.arg_missing", &[Operand::text(name)], Ty::Unknown)?;
+                Some(Expr::If {
+                    cond: Box::new(missing),
+                    then: Box::new(failure.expr),
+                    r#else: Box::new(Expr::Literal(Literal::Null)),
+                })
+            } else {
+                None
+            };
+            let prologue_end = this.buf.stmts.len();
             for (param, default) in params.iter().zip(defaults) {
                 let Some(default) = default else {
                     continue;
@@ -1124,10 +1175,77 @@ impl Lowerer<'_> {
                 Body::Suite(suite) => this.statements(suite),
                 Body::Value(value) => {
                     let value = this.expr(value)?;
-                    this.emit(Stmt::Return { value: value.expr });
+                    this.return_value(value);
                     Ok(())
                 }
+            }?;
+            if let Some(check) = argument_check {
+                let binding = this.temp();
+                if let Some(stmt) = this.buf.stmts.get_mut(prologue_end) {
+                    let expr = match stmt {
+                        Stmt::Let {
+                            value: Rhs::Expr(expr),
+                            ..
+                        }
+                        | Stmt::Assign {
+                            value: Rhs::Expr(expr),
+                            ..
+                        }
+                        | Stmt::Return { value: expr }
+                        | Stmt::Do { value: expr }
+                        | Stmt::Print { value: expr }
+                        | Stmt::Throw { value: expr }
+                        | Stmt::If {
+                            condition: expr, ..
+                        }
+                        | Stmt::While {
+                            condition: expr, ..
+                        }
+                        | Stmt::For { iterable: expr, .. } => Some(expr),
+                        _ => None,
+                    };
+                    if let Some(expr) = expr {
+                        *expr = Expr::Let {
+                            name: binding,
+                            value: Box::new(check),
+                            body: Box::new(expr.clone()),
+                        };
+                        for (path, _) in &mut this.buf.notes[prologue_end].nested_written {
+                            if !path.is_empty() {
+                                path.insert(1, 1);
+                            }
+                        }
+                        return Ok(());
+                    }
+                }
+                let Expr::If { cond, then, .. } = check else {
+                    unreachable!("a parameter check is conditional")
+                };
+                this.buf.stmts.insert(
+                    prologue_end,
+                    Stmt::If {
+                        condition: *cond,
+                        then_block: vec![Stmt::Do { value: *then }],
+                        else_block: Vec::new(),
+                    },
+                );
+                this.buf.notes.insert(
+                    prologue_end,
+                    Note {
+                        span,
+                        blocks: vec![
+                            vec![Note {
+                                span,
+                                ..Note::default()
+                            }],
+                            Vec::new(),
+                        ],
+                        written: None,
+                        nested_written: Vec::new(),
+                    },
+                );
             }
+            Ok(())
         });
         self.span = span;
         self.scopes.pop();
@@ -1137,7 +1255,7 @@ impl Lowerer<'_> {
             .map(|param| Name::new(param.as_str()))
             .chain(active)
             .collect();
-        Ok((params, block?))
+        Ok((params, self.finish_declarations(block?)))
     }
 
     /// Whether the call gave no argument for `param`.

@@ -164,7 +164,7 @@ impl Operators {
     }
     /// The authored spelling of a library action, if it has one: a label
     /// the document holds once, and for a method a variable receiver.
-    pub(crate) fn authored(&self, id: &k::FunctionId, args: &[k::Atom]) -> Option<Authored> {
+    pub(crate) fn authored(&self, id: &k::FunctionId, args: &[k::Expr]) -> Option<Authored> {
         let label = self.functions.get(id)?.as_str();
         if args.is_empty() || self.unique(label) != Some(*id) {
             return None;
@@ -172,17 +172,12 @@ impl Operators {
         if let Some((name, _)) = BUILTINS.iter().find(|(_, helper)| *helper == label) {
             return Some(Authored::Builtin(name));
         }
-        let receiver = matches!(
-            args[0],
-            k::Atom::Variable(_) | k::Atom::Literal(k::Literal::Text(_))
-        );
         match label {
-            "py.slice" => (args.len() == 4 && matches!(args[0], k::Atom::Variable(_)))
-                .then_some(Authored::Slice),
+            "py.slice" => (args.len() == 4).then_some(Authored::Slice),
             "py.type" => (args.len() == 1).then_some(Authored::TypeName),
             _ => {
                 let method = label.strip_prefix("py.method.")?;
-                (receiver && crate::printer::attribute_identifier(method))
+                crate::printer::attribute_identifier(method)
                     .then(|| Authored::Method(method.to_owned()))
             }
         }

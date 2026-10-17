@@ -18,7 +18,9 @@ enum Collect<'a> {
 
 impl Lowerer<'_> {
     pub(crate) fn expr(&mut self, expr: &PyExpr) -> Lowering<Operand> {
-        self.nested(expr.range(), |this| this.expr_inner(expr))
+        self.nested(expr.range(), |this| {
+            this.expression_block(|this| this.expr_inner(expr))
+        })
     }
 
     fn expr_inner(&mut self, expr: &PyExpr) -> Lowering<Operand> {
@@ -131,17 +133,17 @@ impl Lowerer<'_> {
                         value: pair[1].expr.clone(),
                     })
                     .collect();
-                // A display makes one object; it is bound where it is
-                // written so that the object is made once, there.
-                Ok(self.let_rhs(Rhs::Expr(Expr::Map(entries)), Ty::Dict))
+                // A display is evaluated once at its position in the
+                // enclosing expression, including across nested waits.
+                Ok(Operand::inline(Expr::Map(entries), Ty::Dict))
             }
             PyExpr::Set(set) => {
                 let items = self.elements(&set.elts)?;
-                Ok(self.let_rhs(Rhs::Expr(Expr::Set(items)), Ty::Set))
+                Ok(Operand::inline(Expr::Set(items), Ty::Set))
             }
             PyExpr::List(list) => {
                 let items = self.elements(&list.elts)?;
-                Ok(self.let_rhs(Rhs::Expr(Expr::List(items)), Ty::List))
+                Ok(Operand::inline(Expr::List(items), Ty::List))
             }
             PyExpr::Tuple(tuple) => {
                 let items = self.elements(&tuple.elts)?;
@@ -411,6 +413,10 @@ impl Lowerer<'_> {
             CmpOp::Is => ("same", false),
             CmpOp::IsNot => ("same", true),
             CmpOp::In | CmpOp::NotIn => {
+                // The helper takes (container, member), while Python reads
+                // the member first. Expression lets preserve that order.
+                let left = self.pin(left);
+                let right = self.pin(right);
                 let found = self.invoke("py.contains", &[right, left], Ty::Bool)?;
                 if op == CmpOp::In {
                     return Ok(found);
@@ -632,6 +638,7 @@ impl Lowerer<'_> {
             }
             Collect::Set(element) => {
                 let value = self.expr(element)?;
+                let value = self.pin(value);
                 self.emit(Stmt::Assign {
                     place: Place::Member(Member::Index {
                         target,

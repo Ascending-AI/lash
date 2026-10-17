@@ -472,77 +472,94 @@ impl Renderer<'_> {
     pub(super) fn authored_call(
         &mut self,
         id: &k::FunctionId,
-        args: &[k::Atom],
-        expressions: Option<&[k::Expr]>,
+        args: &[k::Expr],
+        mapped: bool,
     ) -> bool {
+        use crate::generated_operators::Authored;
         match self.operators.authored(id, args) {
-            Some(crate::generated_operators::Authored::Builtin(name)) => {
+            Some(Authored::Builtin(name)) => {
                 self.out.write(name);
                 self.out.write("(");
-                self.authored_args(args, expressions);
+                self.authored_args(args, mapped);
                 self.out.write(")");
-                return true;
             }
-            Some(crate::generated_operators::Authored::Slice) => {
-                self.authored_arg(&args[0], expressions.map(|args| &args[0]));
+            Some(Authored::Slice) => {
+                self.authored_arg(&args[0], mapped);
                 self.out.write("[");
                 for (i, bound) in args[1..].iter().enumerate() {
-                    if i == 2
-                        && matches!(bound, k::Atom::Literal(k::Literal::Absent))
-                        && expressions.is_none()
-                    {
+                    if i == 2 && matches!(bound, k::Expr::Literal(k::Literal::Absent)) {
                         break;
                     }
                     if i > 0 {
                         self.out.write(":");
                     }
-                    if !matches!(bound, k::Atom::Literal(k::Literal::Absent))
-                        || expressions.is_some()
-                    {
-                        self.authored_arg(bound, expressions.map(|args| &args[i + 1]));
+                    if !matches!(bound, k::Expr::Literal(k::Literal::Absent)) {
+                        self.authored_arg(bound, mapped);
                     }
                 }
                 self.out.write("]");
-                return true;
             }
-            Some(crate::generated_operators::Authored::TypeName) => {
+            Some(Authored::TypeName) => {
                 self.out.write("type(");
-                self.authored_arg(&args[0], expressions.map(|args| &args[0]));
+                self.authored_arg(&args[0], mapped);
                 self.out.write(").__name__");
-                return true;
             }
-            Some(crate::generated_operators::Authored::Method(method)) => {
-                self.authored_arg(&args[0], expressions.map(|args| &args[0]));
+            Some(Authored::Method(method)) => {
+                let numeric = matches!(
+                    args[0],
+                    k::Expr::Literal(k::Literal::Int(_) | k::Literal::Float(_))
+                );
+                if numeric {
+                    self.out.write("(");
+                }
+                self.authored_arg(&args[0], mapped);
+                if numeric {
+                    self.out.write(")");
+                }
                 self.out.write(".");
                 self.out.write(&method);
                 self.out.write("(");
-                self.authored_args(&args[1..], expressions.map(|args| &args[1..]));
+                self.authored_args(&args[1..], mapped);
                 self.out.write(")");
-                return true;
             }
-            None => {}
+            None => return false,
         }
-        false
+        true
     }
-    fn authored_arg(&mut self, atom: &k::Atom, expression: Option<&k::Expr>) {
-        match expression {
-            Some(expr) => self.inline_expr(expr),
-            None => self.atom(atom),
-        }
-    }
-    fn authored_args(&mut self, atoms: &[k::Atom], expressions: Option<&[k::Expr]>) {
-        for (index, atom) in atoms.iter().enumerate() {
+    fn authored_args(&mut self, args: &[k::Expr], mapped: bool) {
+        for (index, expr) in args.iter().enumerate() {
             if index > 0 {
                 self.out.write(", ");
             }
-            self.authored_arg(atom, expressions.map(|args| &args[index]));
+            self.authored_arg(expr, mapped);
+        }
+    }
+    fn authored_arg(&mut self, expr: &k::Expr, mapped: bool) {
+        if mapped {
+            self.inline_expr(expr);
+        } else {
+            match expr {
+                k::Expr::Variable(name) => self.atom(&k::Atom::Variable(name.clone())),
+                k::Expr::Literal(value) => self.atom(&k::Atom::Literal(value.clone())),
+                _ => unreachable!("a statement action has atom operands"),
+            }
         }
     }
     fn action(&mut self, action: &k::Action) {
         match action {
             k::Action::Call { callee, args } => {
                 if let k::Callee::Library(id) = callee
-                    && self.authored_call(id, args, None)
+                    && self.authored_call(
+                        id,
+                        &args
+                            .iter()
+                            .map(|arg| match arg {
+                                k::Atom::Variable(name) => k::Expr::Variable(name.clone()),
+                                k::Atom::Literal(value) => k::Expr::Literal(value.clone()),
+                            })
+                            .collect::<Vec<_>>(),
+                        false,
+                    )
                 {
                     return;
                 }

@@ -2,9 +2,9 @@
 //!
 //! Python decides a name's scope from the whole body: a name the body
 //! assigns anywhere is local to it throughout, unless a `global` or
-//! `nonlocal` statement says otherwise. The lowerer declares every local at
-//! the top of the kernel block it lowers the body to, so these facts are
-//! gathered before any statement is lowered.
+//! `nonlocal` statement says otherwise. These facts are gathered before
+//! lowering; declaration dominance then keeps only the absent slots needed
+//! before their first assignment or by an earlier capture.
 
 use std::collections::{BTreeMap, BTreeSet};
 

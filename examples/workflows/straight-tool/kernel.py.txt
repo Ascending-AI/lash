@@ -9,14 +9,11 @@ use same = @1465a1a642da52eba1664711a12c594f155ba2c6cd744344079f5b5018db1578
 entry demo() -> Any
 
 fn demo() {
-  let t1 = perform corpus.echo("hello") as Any
-  let t2 = invoke py.reply(t1)
-  return t2
+  return invoke py.reply(perform corpus.echo("hello") as Any)
 }
 
 main {
-  let demo = absent
-  set demo = &demo
+  let demo = &demo
 }
 
-unit Function(Name("demo")): statements=3 scopes=1 sites=7
+unit Function(Name("demo")): statements=1 scopes=1 sites=4

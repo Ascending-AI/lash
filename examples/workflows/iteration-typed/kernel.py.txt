@@ -31,19 +31,15 @@ use tuple.values = @5273a8716ecc76558fb60aa870684b3dc9068f466d745fa7ec00b80ac693
 entry demo(items: List(Int)) -> Any
 
 fn demo(items) {
-  let item = absent
-  let total = absent
-  set total = 0
-  for t1 in items via (open py.for_in.open, check py.for_in.check) {
-    set item = t1
+  let total = 0
+  for item in items via (open py.for_in.open, check py.for_in.check) {
     set total = invoke py.iadd(total, item)
   }
   return total
 }
 
 main {
-  let demo = absent
-  set demo = &demo
+  let demo = &demo
 }
 
-unit Function(Name("demo")): statements=7 scopes=2 sites=10
+unit Function(Name("demo")): statements=4 scopes=2 sites=6

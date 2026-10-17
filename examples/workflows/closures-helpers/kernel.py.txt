@@ -26,26 +26,18 @@ use tuple.len = @2eced051afe955ac8dbeed3762acd4b8ce74b7a4ed15763ea47dfd01e5cc5f7
 entry demo(items: List(Text)) -> Any
 
 fn demo(items) {
-  let size = absent
-  set size = fn(item) start(item: Any) -> Any bare direct {
-    if same(item, absent) {
-      do invoke py.arg_missing("size")
-    }
-    let t1 = invoke py.length(item)
-    return t1
+  let size = fn(item) start(item: Any) -> Any bare direct {
+    return let(t1 = if(same(item, absent), invoke py.arg_missing("size"), null), invoke py.length(item))
   }
   let t2 = []
-  let item_1 = absent
-  for t3 in items via (open py.for_in.open, check py.for_in.check) {
-    set item_1 = t3
+  for item_1 in items via (open py.for_in.open, check py.for_in.check) {
     set t2[list.len(t2)] = apply size(item_1)
   }
   return t2
 }
 
 main {
-  let demo = absent
-  set demo = &demo
+  let demo = &demo
 }
 
-unit Function(Name("demo")): statements=12 scopes=5 sites=17
+unit Function(Name("demo")): statements=6 scopes=3 sites=10

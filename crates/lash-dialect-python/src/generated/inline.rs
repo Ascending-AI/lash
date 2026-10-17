@@ -112,6 +112,8 @@ impl Reader<'_> {
         let (mut expr, mut height) = if c.take("await ") {
             let (act, height) = self.awaited_expr(c, nesting + 1)?;
             (k::Expr::Act(Box::new(act)), height)
+        } else if let Some(call) = self.authored_expression(c, nesting)? {
+            call
         } else if c.take("spawn(") {
             let callee = self.nested_callee(c)?;
             c.expect(",")?;
@@ -271,15 +273,65 @@ impl Reader<'_> {
                 if !crate::printer::attribute_identifier(field) {
                     return Err(invalid("reserved attribute spelling"));
                 }
+                if let Some(function) = self.operators.unique(&format!("py.method.{field}"))
+                    && c.take("(")
+                {
+                    let (rest, h) = self.inline_items(c, ")", nesting + 1)?;
+                    let mut args = vec![expr];
+                    args.extend(rest);
+                    expr = k::Expr::Act(Box::new(k::ActExpr {
+                        kind: k::ActKind::Call(k::Callee::Library(function)),
+                        args,
+                    }));
+                    height = height.max(h) + 1;
+                    self.depth(height)?;
+                    continue;
+                }
                 self.depth(height)?;
                 k::Member::Field {
                     target: expr,
                     field: field.into(),
                 }
             } else if c.take("[") {
-                let (index, h) = self.inline_value(c, nesting + 1)?;
-                c.expect("]")?;
+                let absent = || k::Expr::Literal(k::Literal::Absent);
+                let (index, h) = if c.text.trim_start().starts_with(':') {
+                    (absent(), 1)
+                } else {
+                    self.inline_value(c, nesting + 1)?
+                };
                 height = height.max(h);
+                if c.take(":") {
+                    let (upper, h) = if c.text.trim_start().starts_with([':', ']']) {
+                        (absent(), 1)
+                    } else {
+                        self.inline_value(c, nesting + 1)?
+                    };
+                    height = height.max(h);
+                    let step = if c.take(":") {
+                        let (step, h) = if c.text.trim_start().starts_with(']') {
+                            (absent(), 1)
+                        } else {
+                            self.inline_value(c, nesting + 1)?
+                        };
+                        height = height.max(h);
+                        step
+                    } else {
+                        absent()
+                    };
+                    c.expect("]")?;
+                    let function = self
+                        .operators
+                        .unique("py.slice")
+                        .ok_or_else(|| invalid("slice has no unique helper in the base"))?;
+                    expr = k::Expr::Act(Box::new(k::ActExpr {
+                        kind: k::ActKind::Call(k::Callee::Library(function)),
+                        args: vec![expr, index, upper, step],
+                    }));
+                    height += 1;
+                    self.depth(height)?;
+                    continue;
+                }
+                c.expect("]")?;
                 self.depth(height)?;
                 k::Member::Index {
                     target: expr,
@@ -293,6 +345,66 @@ impl Reader<'_> {
         }
         Ok((expr, height))
     }
+    /// Builtins and methods retain their nested expression operands.
+    fn authored_expression(
+        &self,
+        c: &mut Cursor<'_>,
+        nesting: usize,
+    ) -> Result<Option<(k::Expr, usize)>> {
+        let mut probe = Cursor::new(c.text);
+        if let Ok(Some(action)) = self.authored_call(&mut probe) {
+            c.text = probe.text;
+            return Ok(Some((action.into(), 2)));
+        }
+        let mut probe = Cursor::new(c.text);
+        let (label, mut args) = if probe.text.trim_start().starts_with('"') {
+            let receiver = k::Expr::Literal(k::Literal::Text(probe.string()?));
+            if !probe.take(".") {
+                return Ok(None);
+            }
+            let method = probe.word()?;
+            (format!("py.method.{method}"), vec![receiver])
+        } else {
+            let Ok(word) = probe.word() else {
+                return Ok(None);
+            };
+            if let Some(label) = crate::generated_operators::builtin_label(word) {
+                (label.to_owned(), Vec::new())
+            } else if word == "type" && probe.text.trim_start().starts_with('(') {
+                ("py.type".to_owned(), Vec::new())
+            } else {
+                if !probe.take(".") {
+                    return Ok(None);
+                }
+                let method = probe.word()?;
+                let label = format!("py.method.{method}");
+                if self.operators.unique(&label).is_none() {
+                    return Ok(None);
+                }
+                (label, vec![k::Expr::Variable(self.named(word)?)])
+            }
+        };
+        let Some(function) = self.operators.unique(&label) else {
+            return Ok(None);
+        };
+        if !probe.take("(") {
+            return Ok(None);
+        }
+        let (more, height) = self.inline_items(&mut probe, ")", nesting + 1)?;
+        args.extend(more);
+        if label == "py.type" {
+            probe.expect(".__name__")?;
+        }
+        c.text = probe.text;
+        Ok(Some((
+            k::Expr::Act(Box::new(k::ActExpr {
+                kind: k::ActKind::Call(k::Callee::Library(function)),
+                args,
+            })),
+            height + 1,
+        )))
+    }
+
     pub(super) fn inline_items(
         &self,
         c: &mut Cursor<'_>,

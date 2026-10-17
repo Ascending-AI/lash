@@ -10,14 +10,11 @@
 -entry demo() -> Any
 -
 -fn demo() {
--  let t1 = perform corpus.echo("hello") as Any
--  let t2 = invoke py.reply(t1)
--  return t2
+-  return invoke py.reply(perform corpus.echo("hello") as Any)
 -}
 -
 -main {
--  let demo = absent
--  set demo = &demo
+-  let demo = &demo
 -}
 +++ after
 +kernel 1
@@ -31,20 +28,17 @@
 +entry demo() -> Any
 +
 +fn demo() {
-+  let t1 = perform corpus.echo("edited λ") as Any
-+  let t2 = invoke py.reply(t1)
-+  return t2
++  return invoke py.reply(perform corpus.echo("edited λ") as Any)
 +}
 +
 +main {
-+  let demo = absent
-+  set demo = &demo
++  let demo = &demo
 +}
 
 Correspondence:
 {
-  "base": "c198a488e190871a26e8630e7faefdd1bd793fe5ddef4a9ae32d6e49e7db9489",
-  "result": "46bc0be504857bb807feee1af080c42248156714c50ed3578fbebfc3eba125eb",
+  "base": "d1bf3fba068b7dc214582ab1c4b9a71b4cb7090610334d85caa847ded026038a",
+  "result": "bbc828560e62589e9d610b5061a15ff16d074e4e71017ba234aee1e48aba441b",
   "entries": [
     {
       "from": {
@@ -86,36 +80,6 @@ Correspondence:
     },
     {
       "from": {
-        "unit": "main",
-        "path": [
-          1
-        ]
-      },
-      "to": {
-        "unit": "main",
-        "path": [
-          1
-        ]
-      }
-    },
-    {
-      "from": {
-        "unit": "main",
-        "path": [
-          1,
-          0
-        ]
-      },
-      "to": {
-        "unit": "main",
-        "path": [
-          1,
-          0
-        ]
-      }
-    },
-    {
-      "from": {
         "unit": {
           "function": "demo"
         }
@@ -159,96 +123,39 @@ Correspondence:
           "function": "demo"
         },
         "path": [
+          0,
+          0
+        ]
+      }
+    },
+    {
+      "from": {
+        "unit": {
+          "function": "demo"
+        },
+        "path": [
+          0,
+          0,
+          0
+        ]
+      },
+      "to": {
+        "unit": {
+          "function": "demo"
+        },
+        "path": [
+          0,
           0,
           0
         ]
       },
       "edited": true
-    },
-    {
-      "from": {
-        "unit": {
-          "function": "demo"
-        },
-        "path": [
-          1
-        ]
-      },
-      "to": {
-        "unit": {
-          "function": "demo"
-        },
-        "path": [
-          1
-        ]
-      }
-    },
-    {
-      "from": {
-        "unit": {
-          "function": "demo"
-        },
-        "path": [
-          1,
-          0
-        ]
-      },
-      "to": {
-        "unit": {
-          "function": "demo"
-        },
-        "path": [
-          1,
-          0
-        ]
-      }
-    },
-    {
-      "from": {
-        "unit": {
-          "function": "demo"
-        },
-        "path": [
-          2
-        ]
-      },
-      "to": {
-        "unit": {
-          "function": "demo"
-        },
-        "path": [
-          2
-        ]
-      }
-    },
-    {
-      "from": {
-        "unit": {
-          "function": "demo"
-        },
-        "path": [
-          2,
-          0
-        ]
-      },
-      "to": {
-        "unit": {
-          "function": "demo"
-        },
-        "path": [
-          2,
-          0
-        ]
-      }
     }
   ]
 }
 
 Reprinted source:
 async def demo():
-    t1 = await tools.corpus.echo("edited λ")
-    t2 = await helper_py_reply(t1)
-    return t2
+    return (await helper_py_reply((await tools.corpus.echo("edited λ"))))
 def main():
-    demo = k.absent
     demo = declared.demo

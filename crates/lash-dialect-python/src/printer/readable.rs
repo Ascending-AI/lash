@@ -285,13 +285,12 @@ impl Renderer<'_> {
         if grouped {
             self.out.write("(");
         }
-        if !grouped
-            && let Some(k::Action::Call {
-                callee: k::Callee::Library(id),
-                args,
-            }) = act.as_action()
-            && self.authored_call(&id, &args, Some(&act.args))
+        if let k::ActKind::Call(k::Callee::Library(id)) = &act.kind
+            && self.authored_call(id, &act.args, true)
         {
+            if grouped {
+                self.out.write(")");
+            }
             return;
         }
         match &act.kind {

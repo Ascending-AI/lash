@@ -1,30 +1,38 @@
 async def demo():
     try:
-        work = k.absent
         async def work(value):
-            if value is k.absent:
-                await helper_py_arg_missing("work")
-            else:
-                pass
-            t1 = value
-            t2 = await tools.corpus.echo(t1)
-            t3 = await helper_py_reply(t2)
-            return t3
-        t4 = work
-        async def t6():
-            t5 = await t4("a")
-            return t5
-        t7 = spawn(helper_py_task_run, [t6])
-        t8 = work
-        async def t10():
-            t9 = await t8("b")
-            return t9
-        t11 = spawn(helper_py_task_run, [t10])
-        t12 = [t7, t11]
-        t13 = await helper_py_gather(t12)
-        return t13
+            with k.return_():
+                with k.bind("t1"):
+                    with k.choose():
+                        value is k.absent
+                        (await helper_py_arg_missing("work"))
+                        None
+                    (await helper_py_reply((await tools.corpus.echo(value))))
+        with k.return_():
+            with k.bind("t2"):
+                work
+                with k.bind("t3"):
+                    "a"
+                    with k.bind("t4"):
+                        t3
+                        with k.bind("t5"):
+                            work
+                            with k.bind("t6"):
+                                "b"
+                                with k.bind("t7"):
+                                    t6
+                                    with k.bind("t8"):
+                                        with k.list():
+                                            with k.spawn(helper_py_task_run):
+                                                with k.closure([]):
+                                                    with k.block():
+                                                        return (await t2(t4))
+                                            with k.spawn(helper_py_task_run):
+                                                with k.closure([]):
+                                                    with k.block():
+                                                        return (await t5(t7))
+                                        (await helper_py_gather(t8))
     finally:
         await helper_tasks_cancel_all()
 def main():
-    demo = k.absent
     demo = declared.demo

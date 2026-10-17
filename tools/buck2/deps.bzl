@@ -1770,7 +1770,10 @@ PACKAGE_DEPS = {
     },
     "workflow-corpus": {
         "build": {},
-        "dev": {},
+        "dev": {
+            "ruff_python_ast": "//third-party/rust:p0288",
+            "ruff_python_parser": "//third-party/rust:p0289"
+        },
         "normal": {
             "anyhow": "//third-party/rust:p0010",
             "lash": "//crates/lash:lash",

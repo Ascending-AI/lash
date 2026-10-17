@@ -1,16 +1,10 @@
 //! Lowers a parsed Python module to a kernel document.
 //!
-//! The lowerer emits three-address statements: every call of a function, a
-//! closure or a helper, and every wait, is its own statement with atoms for
-//! arguments, in Python's evaluation order (`K-EVAL-001`). It nests no
-//! action (`K-EVAL-008`). An operand read before a later operand's
-//! statements run is pinned to a temporary first.
-//!
-//! A Python function is a kernel closure over the variables of the scopes
-//! around it. Every name a body binds is declared at the top of the kernel
-//! block the body lowers to, holding absent until it is assigned, because
-//! Python scopes a name to the whole function and a closure may name it
-//! before its assignment runs.
+//! Calls, waits and helper operations nest in their author expressions. An
+//! operand is pinned only when a later operand emits statements (§12 of
+//! FIG-6402 rev2). Python locals are declared where their first binding
+//! dominates every use and capture; forward captures and recursion retain
+//! their absent slot at the scope root.
 
 mod calls;
 mod entries;
@@ -29,8 +23,8 @@ use lash_kernel_dialect::{
     CellEnvironment, Diagnostic, Environment, Library, Lowered, Mode, workflow,
 };
 use lash_kernel_doc::{
-    Action, Atom, Callee, Catch, Closure, Document, EffectName, Expr, FunctionCatalog, FunctionId,
-    FunctionName, Literal, Name, NumberPolicy, Place, Rhs, Signature, Stmt, TryStmt,
+    ActExpr, ActKind, Callee, Catch, Closure, Document, EffectName, Expr, FunctionCatalog,
+    FunctionId, FunctionName, Literal, Name, NumberPolicy, Place, Rhs, Signature, Stmt, TryStmt,
     validate_document,
 };
 use ruff_python_ast::{self as ast};
@@ -57,8 +51,7 @@ impl Buf {
     }
 }
 
-/// A lowered Python expression: a kernel expression that calls nothing but
-/// native library functions, what is known of its type, and whether later
+/// A lowered Python expression, what is known of its type, and whether later
 /// statements can change what it evaluates to.
 #[derive(Clone, Debug)]
 pub(crate) struct Operand {
@@ -199,6 +192,8 @@ pub(crate) struct Lowerer<'a> {
     /// module resolves.
     in_entry: bool,
     creates_tasks: bool,
+    /// Inline deferred calls retain their body notes without a statement binding.
+    inline_closures: Vec<(Closure, Vec<Note>)>,
     /// The first module name an entry's body named, with where, which the
     /// entry is refused for.
     captured: std::cell::RefCell<Option<(String, Option<Span>)>>,
@@ -334,6 +329,7 @@ pub(crate) fn lower_with_calls(
         entry_defs,
         in_entry: false,
         creates_tasks: false,
+        inline_closures: Vec::new(),
         captured: std::cell::RefCell::new(None),
     };
     lowerer.declare_classes(&module.body)?;
@@ -344,6 +340,27 @@ pub(crate) fn lower_with_calls(
         });
     }
     let body = lowerer.block(|this| this.statements(&module.body))?;
+    let mut body = body;
+    body.stmts
+        .splice(0..0, std::mem::take(&mut lowerer.buf.stmts));
+    body.notes
+        .splice(0..0, std::mem::take(&mut lowerer.buf.notes));
+    let mut body = lowerer.finish_declarations(body);
+    let declarations = body
+        .stmts
+        .iter()
+        .take_while(|stmt| {
+            matches!(
+                stmt,
+                Stmt::Let {
+                    value: Rhs::Expr(Expr::Literal(Literal::Absent)),
+                    ..
+                }
+            )
+        })
+        .count();
+    lowerer.buf.stmts.extend(body.stmts.drain(..declarations));
+    lowerer.buf.notes.extend(body.notes.drain(..declarations));
     let body = lowerer.task_cleanup(body)?;
     lowerer.append(body);
     let main = std::mem::take(&mut lowerer.buf);
@@ -384,7 +401,7 @@ pub(crate) fn lower_with_calls(
         )
     })?;
     let document = lash_kernel_doc::IdentifiedDocument::new(document);
-    let (source_map, written) = lash_kernel_dialect::site_layers(
+    let (mut source_map, written) = lash_kernel_dialect::site_layers(
         &document,
         source,
         lash_kernel_doc::SourceLanguage::Python,
@@ -392,6 +409,44 @@ pub(crate) fn lower_with_calls(
         &lowerer.declared_notes,
     )
     .map_err(|refused| diagnostics::unplaced(Code::InvalidDocument, refused.to_string()))?;
+    let mut mapped: BTreeSet<_> = source_map
+        .sites
+        .iter()
+        .map(|located| located.site.clone())
+        .collect();
+    let mut additional = Vec::new();
+    for located in &source_map.sites {
+        if !matches!(
+            document.node(&located.site),
+            Some(lash_kernel_doc::Node::Stmt(_))
+        ) {
+            continue;
+        }
+        let Some(node) = document.node(&located.site) else {
+            continue;
+        };
+        let mut pending = vec![(node, located.site.clone())];
+        while let Some((node, site)) = pending.pop() {
+            for (index, child) in (0u32..).zip(node.children()) {
+                if matches!(child, lash_kernel_doc::Node::Block(_)) {
+                    continue;
+                }
+                let site = site.child(index);
+                if matches!(child, lash_kernel_doc::Node::Expr(Expr::Act(_)))
+                    && mapped.insert(site.clone())
+                {
+                    let mut nested = located.clone();
+                    nested.site = site.clone();
+                    additional.push(nested);
+                }
+                pending.push((child, site));
+            }
+        }
+    }
+    source_map.sites.extend(additional);
+    source_map
+        .sites
+        .sort_by(|left, right| left.site.cmp(&right.site));
     Ok(Lowered {
         document,
         source_map: Some(source_map),
@@ -427,6 +482,142 @@ fn reachable(
 }
 
 impl Lowerer<'_> {
+    /// Declaration dominance (FIG-6402 rev2 §11): a straight-line first
+    /// assignment may declare the slot, unless its RHS or an earlier node
+    /// reads or captures it. Nested assignments cannot declare an outer slot.
+    fn finish_declarations(&self, mut body: Buf) -> Buf {
+        fn mentions(node: lash_kernel_doc::Node<'_>, name: &Name) -> bool {
+            match node {
+                lash_kernel_doc::Node::Expr(Expr::Variable(read)) if read == name => true,
+                lash_kernel_doc::Node::Expr(Expr::Act(act)) if matches!(&act.kind, ActKind::Call(Callee::Value(read)) | ActKind::Spawn(Callee::Value(read)) if read == name) => {
+                    true
+                }
+                lash_kernel_doc::Node::Stmt(Stmt::Assign {
+                    place: Place::Variable(write),
+                    ..
+                }) if write == name => true,
+                lash_kernel_doc::Node::Action(action) => {
+                    let expr: Expr = action.clone().into();
+                    mentions(lash_kernel_doc::Node::Expr(&expr), name)
+                }
+                _ => node
+                    .children()
+                    .into_iter()
+                    .any(|child| mentions(child, name)),
+            }
+        }
+        let mut remove = BTreeSet::new();
+        for index in 0..body.stmts.len() {
+            let Stmt::Let {
+                name,
+                value: Rhs::Expr(Expr::Literal(Literal::Absent)),
+            } = &body.stmts[index]
+            else {
+                continue;
+            };
+            let name = name.clone();
+            for next in index + 1..body.stmts.len() {
+                if let Stmt::Assign {
+                    place: Place::Variable(write),
+                    value,
+                } = &body.stmts[next]
+                    && write == &name
+                {
+                    if !mentions(
+                        lash_kernel_doc::Node::Expr(&match value {
+                            Rhs::Expr(value) => value.clone(),
+                            Rhs::Action(action) => action.clone().into(),
+                        }),
+                        &name,
+                    ) {
+                        body.stmts[next] = Stmt::Let {
+                            name: name.clone(),
+                            value: value.clone(),
+                        };
+                        remove.insert(index);
+                    }
+                    break;
+                }
+                if let Stmt::For {
+                    binding,
+                    iterable,
+                    body: pass,
+                    else_block,
+                    ..
+                } = &body.stmts[next]
+                    && !mentions(lash_kernel_doc::Node::Expr(iterable), &name)
+                    && !mentions(lash_kernel_doc::Node::Block(else_block), &name)
+                    && matches!(pass.first(), Some(Stmt::Assign {
+                        place: Place::Variable(write), value: Rhs::Expr(Expr::Variable(read)),
+                    }) if write == &name && read == binding)
+                    && !body.stmts[next + 1..]
+                        .iter()
+                        .any(|stmt| mentions(lash_kernel_doc::Node::Stmt(stmt), &name))
+                {
+                    fn captured(node: lash_kernel_doc::Node<'_>, name: &Name) -> bool {
+                        match node {
+                            lash_kernel_doc::Node::Expr(Expr::Closure(_)) => mentions(node, name),
+                            _ => node
+                                .children()
+                                .into_iter()
+                                .any(|child| captured(child, name)),
+                        }
+                    }
+                    if !captured(lash_kernel_doc::Node::Block(pass), &name) {
+                        if let Stmt::For {
+                            binding,
+                            body: pass,
+                            ..
+                        } = &mut body.stmts[next]
+                        {
+                            *binding = name.clone();
+                            pass.remove(0);
+                        }
+                        // Skip any closure blocks in the iterable to locate
+                        // the loop body's notes. Leave the else suite untouched.
+                        let mut expression_blocks = 0;
+                        let mut pending = match &body.stmts[next] {
+                            Stmt::For { iterable, .. } => {
+                                vec![lash_kernel_doc::Node::Expr(iterable)]
+                            }
+                            _ => Vec::new(),
+                        };
+                        while let Some(node) = pending.pop() {
+                            for child in node.children() {
+                                if matches!(child, lash_kernel_doc::Node::Block(_)) {
+                                    expression_blocks += 1;
+                                } else {
+                                    pending.push(child);
+                                }
+                            }
+                        }
+                        if let Some(notes) = body.notes[next].blocks.get_mut(expression_blocks) {
+                            notes.remove(0);
+                        }
+                        remove.insert(index);
+                    }
+                    break;
+                }
+                if mentions(lash_kernel_doc::Node::Stmt(&body.stmts[next]), &name) {
+                    break;
+                }
+            }
+        }
+        let mut index = 0;
+        body.stmts.retain(|_| {
+            let keep = !remove.contains(&index);
+            index += 1;
+            keep
+        });
+        let mut index = 0;
+        body.notes.retain(|_| {
+            let keep = !remove.contains(&index);
+            index += 1;
+            keep
+        });
+        body
+    }
+
     // Names.
 
     /// A name the source does not spell and nothing has taken.
@@ -602,15 +793,16 @@ impl Lowerer<'_> {
         {
             let local = Operand::literal(Literal::Bool(scope != 0), Ty::Bool);
             let value = Operand::temp(found.name.clone(), ty);
-            self.invoke_do("py.name_check", &[value, Operand::text(id), local])?;
+            let checked = self.invoke("py.name_check", &[value, Operand::text(id), local], ty)?;
             self.mark_bound(id);
+            return Ok(checked);
         }
         // A comprehension's variable read in a clause before the one that
         // binds it.
         if found.scope.is_none() && self.unbound_renames.contains(&found.name) {
             let local = Operand::literal(Literal::Bool(true), Ty::Bool);
             let value = Operand::temp(found.name.clone(), ty);
-            self.invoke_do("py.name_check", &[value, Operand::text(id), local])?;
+            return self.invoke("py.name_check", &[value, Operand::text(id), local], ty);
         }
         // A name that one `def` binds holds that function from then on.
         if self.known_def(id).is_some() {
@@ -686,12 +878,52 @@ impl Lowerer<'_> {
 
     // Emission.
 
-    fn push(&mut self, stmt: Stmt, blocks: Vec<Vec<Note>>) {
+    fn push(&mut self, mut stmt: Stmt, mut blocks: Vec<Vec<Note>>) {
+        if let Stmt::Let { value, .. } | Stmt::Assign { value, .. } = &mut stmt
+            && let Rhs::Expr(Expr::Act(action)) = value
+            && let Some(action) = action.as_action()
+        {
+            *value = Rhs::Action(action);
+        }
         if let Stmt::Let { name, .. } = &stmt
             && self.kernel_depth == 0
             && !self.scopes[0].bindings.locals.contains(name.as_str())
         {
             self.private.insert(name.clone());
+        }
+        fn nested<'a>(
+            node: lash_kernel_doc::Node<'a>,
+            out: &mut Vec<(&'a [Stmt], Option<&'a Closure>)>,
+        ) {
+            if let lash_kernel_doc::Node::Expr(Expr::Closure(closure)) = node {
+                out.push((&closure.body, Some(closure)));
+                return;
+            }
+            for child in node.children() {
+                if let lash_kernel_doc::Node::Block(body) = child {
+                    out.push((body, None));
+                } else {
+                    nested(child, out);
+                }
+            }
+        }
+        let mut nested_blocks = Vec::new();
+        nested(lash_kernel_doc::Node::Stmt(&stmt), &mut nested_blocks);
+        if nested_blocks.len() > blocks.len() {
+            let mut supplied = blocks.into_iter();
+            blocks = nested_blocks
+                .into_iter()
+                .map(|(_, closure)| {
+                    closure
+                        .and_then(|closure| {
+                            self.inline_closures
+                                .iter()
+                                .find(|(known, _)| known == closure)
+                                .map(|(_, notes)| notes.clone())
+                        })
+                        .unwrap_or_else(|| supplied.next().unwrap_or_default())
+                })
+                .collect();
         }
         self.buf.stmts.push(stmt);
         self.buf.notes.push(Note {
@@ -849,29 +1081,6 @@ impl Lowerer<'_> {
         self.let_rhs(Rhs::Expr(operand.expr), ty)
     }
 
-    /// An operand as an action's argument.
-    fn atom(&mut self, operand: Operand) -> Atom {
-        match operand.expr {
-            Expr::Literal(literal) => Atom::Literal(literal),
-            Expr::Variable(name) => Atom::Variable(name),
-            expr => {
-                let name = self.temp();
-                self.emit(Stmt::Let {
-                    name: name.clone(),
-                    value: Rhs::Expr(expr),
-                });
-                Atom::Variable(name)
-            }
-        }
-    }
-
-    fn atoms(&mut self, operands: &[Operand]) -> Vec<Atom> {
-        operands
-            .iter()
-            .map(|operand| self.atom(operand.clone()))
-            .collect()
-    }
-
     /// The identity of a library function, listed in the manifest.
     pub(crate) fn function(&mut self, name: &str) -> Lowering<FunctionId> {
         let Some(function) = self.library.resolve(name) else {
@@ -887,21 +1096,22 @@ impl Lowerer<'_> {
         Ok(function)
     }
 
-    /// A call of a helper or of another function with a kernel body, as
-    /// its own statement.
+    /// A helper call stays inside the expression that uses its result.
     pub(crate) fn invoke(&mut self, function: &str, args: &[Operand], ty: Ty) -> Lowering<Operand> {
         let callee = Callee::Library(self.function(function)?);
-        let args = self.atoms(args);
-        Ok(self.let_rhs(Rhs::Action(Action::Call { callee, args }), ty))
+        Ok(Operand::inline(
+            Expr::Act(Box::new(ActExpr {
+                kind: ActKind::Call(callee),
+                args: args.iter().map(|arg| arg.expr.clone()).collect(),
+            })),
+            ty,
+        ))
     }
 
     /// A helper call whose result nothing reads.
     pub(crate) fn invoke_do(&mut self, function: &str, args: &[Operand]) -> Lowering<()> {
-        let callee = Callee::Library(self.function(function)?);
-        let args = self.atoms(args);
-        self.emit(Stmt::Do {
-            value: (Action::Call { callee, args }).into(),
-        });
+        let value = self.invoke(function, args, Ty::Unknown)?;
+        self.discard(value);
         Ok(())
     }
 
@@ -932,6 +1142,23 @@ impl Lowerer<'_> {
         let note = self.buf.notes.pop()?;
         self.private.remove(&name);
         Some((value, note))
+    }
+
+    /// A return owns the expression and notes of its final temporary.
+    fn return_value(&mut self, value: Operand) {
+        if let Some((rhs, note)) = self.take_binding(&value) {
+            let expr = match rhs {
+                Rhs::Expr(expr) => expr,
+                Rhs::Action(action) => action.into(),
+            };
+            self.push(Stmt::Return { value: expr }, note.blocks);
+            if let Some(placed) = self.buf.notes.last_mut() {
+                placed.written = note.written;
+                placed.nested_written = note.nested_written;
+            }
+        } else {
+            self.emit(Stmt::Return { value: value.expr });
+        }
     }
 
     /// Writes `value` to a place.

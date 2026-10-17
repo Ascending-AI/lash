@@ -190,3 +190,36 @@ fn conditional_functions_keep_their_written_signatures() {
         );
     }
 }
+
+/// FIG-6402 rev2 §12/§15 SHAPE: calls and awaits stay in their author's statement.
+#[test]
+fn nested_actions_keep_the_authors_statement_shape() {
+    let source = "def observe(value):\n    return value\nasync def work(value):\n    return await echo(value)\nresult = observe(await work(1))\nprint(result)\n";
+    let lowered = machine::lower(source).expect("the admitted program");
+    let mut statements = 0;
+    let mut pending = vec![lash_kernel_doc::Node::Block(&lowered.document.main)];
+    while let Some(node) = pending.pop() {
+        statements += usize::from(matches!(node, lash_kernel_doc::Node::Stmt(_)));
+        pending.extend(node.children());
+    }
+    assert!(
+        statements <= 6,
+        "SHAPE: {statements} statements for 6 author statements\n{}",
+        machine::kernel_text(source)
+    );
+}
+
+/// FIG-6402 rev2 §11: capture needs a slot even when its first binding comes later.
+#[test]
+fn a_closure_captures_a_slot_first_bound_later() {
+    let source = "def outer():\n    def read():\n        return later\n    later = 42\n    return read()\nprint(outer())\n";
+    let run = machine::run(source, &[]);
+    assert_eq!(
+        run.epochs
+            .iter()
+            .flat_map(|epoch| &epoch.logged)
+            .collect::<Vec<_>>(),
+        [&"42".to_owned()]
+    );
+    assert_eq!(run.end, "ok");
+}

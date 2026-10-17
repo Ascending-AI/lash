@@ -8,8 +8,7 @@ fn demo() {
 }
 
 main {
-  let demo = absent
-  set demo = &demo
+  let demo = &demo
 }
 
-unit Function(Name("demo")): statements=2 scopes=1 sites=5
+unit Function(Name("demo")): statements=2 scopes=1 sites=4

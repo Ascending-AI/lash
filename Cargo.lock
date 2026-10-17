@@ -6839,6 +6839,8 @@ dependencies = [
  "lash-kernel-view",
  "lash-kernel-vm",
  "lash-runtime",
+ "ruff_python_ast",
+ "ruff_python_parser",
  "serde",
  "serde_json",
 ]
