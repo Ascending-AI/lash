@@ -1,43 +1,3 @@
-//! FIG-5020 / ADR 0051: a host constructs facade records using facade paths.
-use crate::tracing::{TraceContext, TraceEvent, TraceRecord};
-
-#[test]
-fn host_owned_trace_records_supply_fresh_identity_and_timestamp() {
-    let context = TraceContext {
-        session_id: Some("host-session".into()),
-        ..Default::default()
-    };
-    let event = TraceEvent::TurnStarted {
-        metadata: Default::default(),
-    };
-    let before = std::time::SystemTime::now();
-    let first = TraceRecord::host_owned(context.clone(), event.clone()).unwrap();
-    let second = TraceRecord::host_owned(context.clone(), event.clone()).unwrap();
-    assert_ne!(first.id, second.id);
-    assert_eq!(first.id.len(), 32);
-    assert_eq!(first.context, context);
-    assert_eq!(first.event, event);
-    assert!(first.timestamp >= crate::tracing::TraceTimestamp::from_system_time(before).unwrap());
-    assert_eq!(
-        serde_json::from_value::<TraceRecord>(serde_json::to_value(&first).unwrap()).unwrap(),
-        first
-    );
-}
-
-#[test]
-fn process_tool_definition_selects_each_capability_contract() {
-    use crate::process_controls::{ProcessControlTool as Tool, process_tool_definition};
-    for (tool, name) in [
-        (Tool::Start, "start_process"),
-        (Tool::List, "list_process_handles"),
-        (Tool::Await, "await_process"),
-        (Tool::Get, "get_process_definition"),
-        (Tool::Cancel, "cancel_process"),
-    ] {
-        assert_eq!(process_tool_definition(tool).name(), name);
-    }
-}
-
 /// FIG-5020: every durable facade feed has a bounded page and an explicit
 /// continuation, including an empty page; time cutoffs are validated instants.
 #[tokio::test(flavor = "multi_thread", worker_threads = 2)]
@@ -46,7 +6,7 @@ async fn facade_change_feeds_share_bounded_pages_and_typed_cutoffs() -> crate::R
         super::sqlite_memory_store_backend().await,
     ))
     .serve_test_llm_profile(super::mock_provider(), super::mock_llm_profile_spec())
-    .build(crate::testing::runtime_lease_owner())?;
+    .build(crate::tests::host::runtime_lease_owner())?;
     let limit = std::num::NonZeroUsize::new(1).unwrap();
     let turns: crate::ChangePage<
         crate::persistence::TurnChange,

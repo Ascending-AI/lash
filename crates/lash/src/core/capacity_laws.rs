@@ -176,7 +176,7 @@ async fn facade_observation_publisher_yields_at_the_host_batch() {
 /// The facade resolves fetch slack before admission; cold reads require that choice.
 #[tokio::test]
 async fn facade_fetch_horizon_is_recorded_for_cold_resends() {
-    use crate::tests::CreatedSession;
+    use crate::tests::host::created_session;
     let backend = crate::tests::sqlite_memory_store_backend().await;
     let turn = crate::TurnId::parse("fetch-turn").unwrap();
     // The call's request, read while the call is open: its settlement
@@ -217,11 +217,9 @@ async fn facade_fetch_horizon_is_recorded_for_cold_resends() {
     let core = crate::tests::explicit_ephemeral_facets(LashCore::standard_builder(backend))
         .delivery_fetch_horizon(crate::attachments::DeliveryFetchHorizon { millis: 17 })
         .serve_test_llm_profile(provider, crate::tests::mock_llm_profile_spec())
-        .build(crate::testing::runtime_lease_owner())
+        .build(crate::tests::host::runtime_lease_owner())
         .unwrap();
-    let session = core
-        .session("fetch-horizon".into())
-        .created()
+    let session = created_session(&core, "fetch-horizon".into())
         .await
         .open()
         .await

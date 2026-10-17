@@ -719,3 +719,13 @@ data = [
   "//crates/lash-http-transport:rust_sources",
   "//crates/lash-trace:rust_sources",
 ]
+
+# The private facade laws compile the shared fixture source against their own
+# facade identity. Public domain test sources do not enter this closure.
+[[rule]]
+packages = ["lash-runtime"]
+kinds = ["unit-test"]
+compile_data = ["//crates/lash-facade-tests:unit_fixture_sources"]
+
+[filegroups.lash-internal-facade-tests]
+unit_fixture_sources = { srcs = ["src/controls.rs", "src/durable.rs", "src/fixtures.rs", "src/harness.rs", "src/history.rs", "src/ingress.rs", "src/lib.rs", "src/observations.rs", "src/send.rs", "src/session_process.rs", "src/streaming.rs", "src/turn.rs"] }

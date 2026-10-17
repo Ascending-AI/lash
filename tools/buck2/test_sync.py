@@ -1673,6 +1673,57 @@ def check_feature_lane_executable_selection() -> None:
     )
 
 
+def check_feature_lane_integration_floors() -> None:
+    """Each domain binary keeps its own floor, even beside a sibling binary."""
+    from types import SimpleNamespace
+
+    sys.path.insert(0, str(HERE))
+    import generate_model as generator
+
+    package = "fixture-facade-laws"
+    provider = "//fixtures:facade_provider__test__fv_12345678"
+    send = "//fixtures:facade_send__test__fv_12345678"
+    runtime_off = "//fixtures:runtime_off"
+    units = [
+        dict(package=package, features=["rlm"], kind="test", label=label)
+        for label in [provider, send]
+    ]
+    graph = SimpleNamespace(
+        chunks={},
+        units=units,
+        service_tests=set(),
+        test_args={},
+        workspace=object(),
+        lanes={"domains": {"compile": [runtime_off, provider, send], "test": [provider, send]}},
+        build=lambda: None,
+        library_label=lambda *_args: runtime_off,
+    )
+    floors = {
+        (package, ("rlm",), "test:facade_provider"): 3,
+        (package, ("rlm",), "test:facade_send"): 5,
+    }
+    resolution = SimpleNamespace(sorted_features=lambda: {})
+    with (
+        patch.object(generator, "FeatureLaneGraph", return_value=graph),
+        patch.object(generator, "feature_coverage_plan", return_value={}),
+        patch.object(generator.feature_variants, "resolve_request", return_value=resolution),
+        patch.object(generator, "FEATURE_LANE_TEST_FLOORS", floors),
+    ):
+        _chunks, table, _units, _service = generator.feature_lane_outputs({}, {})
+        assert bzl_value(table, "FEATURE_LANE_TEST_FLOORS") == {provider: 3, send: 5}
+        # A runnable sibling must not hide a vanished binary or one whose
+        # command stopped executing it.
+        for missing_unit in [True, False]:
+            graph.units = units[:1] if missing_unit else units
+            graph.lanes["domains"]["test"] = [provider]
+            try:
+                generator.feature_lane_outputs({}, {})
+            except SystemExit as error:
+                assert "test:facade_send" in str(error), error
+            else:
+                raise AssertionError("a missing domain binary escaped its test floor")
+
+
 def check_documentation_targets_are_not_tests() -> None:
     """Cargo runs no doctests here, so a doc label must not carry the prelude's."""
     rules = (HERE / "lash_rust.bzl").read_text(encoding="utf-8")
@@ -2044,6 +2095,7 @@ def main() -> int:
         check_schema_source_inputs,
         check_binary_unit_test_compile_inputs,
         check_feature_lane_executable_selection,
+        check_feature_lane_integration_floors,
         check_documentation_targets_are_not_tests,
         check_feature_lane_dependency_edges,
         check_feature_lane_test_policy,

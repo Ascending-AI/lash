@@ -809,9 +809,9 @@ mod cancellation_law {
                 .into_handle(),
             mock_llm_profile_spec(),
         )
-        .build(crate::testing::runtime_lease_owner())?;
+        .build(crate::tests::host::runtime_lease_owner())?;
         let id = SessionId::from("tool-live-divergence");
-        let session = core.session(id.clone()).created().await.open().await?;
+        let session = created_session(&core, id.clone()).await.open().await?;
         let snapshot = session.observe().snapshot().await?;
         let mut feed = session
             .observe()

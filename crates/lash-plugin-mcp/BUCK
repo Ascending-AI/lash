@@ -187,6 +187,32 @@ lash_rust_feature_library(
 )
 
 lash_rust_feature_library(
+    name = "lash-plugin-mcp__fv_85fb28cf",
+    build_script = None,
+    crate_features = [
+        "default",
+        "lash-vm",
+        "testing",
+    ],
+    crate_name = "lash_plugin_mcp",
+    declared_features = [
+        "default",
+        "lash-vm",
+        "testing",
+    ],
+    exec_properties = sized_exec_properties("lash-internal-plugin-mcp", "lash_plugin_mcp"),
+    extra_compile_data = [],
+    manifest_dir = "crates/lash-plugin-mcp",
+    package_name = "lash-internal-plugin-mcp",
+    tags = [
+        "feature-lane",
+        "manual",
+    ],
+    variant_deps = {"//crates/lash-conformance:lash-conformance": "//crates/lash-conformance:lash-conformance__fv_2ed944a6", "//crates/lash-core-worker:lash-core-worker": "//crates/lash-core-worker:lash-core-worker__fv_3c75360b", "//crates/lash-core:lash-core": "//crates/lash-core:lash-core__fv_a8adb42a", "//crates/lash-facade-tests:lash-facade-tests": "//crates/lash-facade-tests:lash-facade-tests__fv_63740945", "//crates/lash-llm-tools:lash-llm-tools": "//crates/lash-llm-tools:lash-llm-tools__fv_eb433fd3", "//crates/lash-llm-transport:lash-llm-transport": "//crates/lash-llm-transport:lash-llm-transport__fv_921e92ea", "//crates/lash-plugin-process-controls:lash-plugin-process-controls": "//crates/lash-plugin-process-controls:lash-plugin-process-controls__fv_3bbfbcf6", "//crates/lash-plugin-standard-compaction:lash-plugin-standard-compaction": "//crates/lash-plugin-standard-compaction:lash-plugin-standard-compaction__fv_f707f280", "//crates/lash-postgres-store:lash-postgres-store": "//crates/lash-postgres-store:lash-postgres-store__fv_0ad92111", "//crates/lash-protocol-rlm:lash-protocol-rlm": "//crates/lash-protocol-rlm:lash-protocol-rlm__fv_ff1f933b", "//crates/lash-protocol-standard:lash-protocol-standard": "//crates/lash-protocol-standard:lash-protocol-standard__fv_3d9e6b09", "//crates/lash-provider-anthropic:lash-provider-anthropic": "//crates/lash-provider-anthropic:lash-provider-anthropic__fv_5db42bec", "//crates/lash-provider-openai:lash-provider-openai": "//crates/lash-provider-openai:lash-provider-openai__fv_0d8d8cf9", "//crates/lash-sqlite-store:lash-sqlite-store": "//crates/lash-sqlite-store:lash-sqlite-store__fv_b1cfb3e0", "//crates/lash-tool-support:lash-tool-support": "//crates/lash-tool-support:lash-tool-support__fv_dc778f70", "//crates/lash-vm-broker:lash-vm-broker": "//crates/lash-vm-broker:lash-vm-broker__fv_fc9dd342", "//crates/lash-vm-client:lash-vm-client": "//crates/lash-vm-client:lash-vm-client__fv_d18cca7b", "//crates/lash-vm-runtime:lash-vm-runtime": "//crates/lash-vm-runtime:lash-vm-runtime__fv_489f6417", "//crates/lash-vm-worker:lash-vm-worker": "//crates/lash-vm-worker:lash-vm-worker__fv_20c70af4", "//crates/lash:lash": "//crates/lash:lash__fv_b9f916ed", "//third-party/vendored/lash-rmcp:lash-rmcp": "//third-party/vendored/lash-rmcp:lash-rmcp__fv_e2e7b48c"},
+    version = "0.0.0-dev",
+)
+
+lash_rust_feature_library(
     name = "lash-plugin-mcp__fv_9dc4d451",
     build_script = None,
     crate_features = [

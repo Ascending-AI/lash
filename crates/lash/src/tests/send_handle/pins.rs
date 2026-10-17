@@ -154,13 +154,13 @@ async fn assert_no_session(fixture: &Fixture, branch: &str) -> Result<()> {
 #[tokio::test(flavor = "multi_thread", worker_threads = 4)]
 async fn a_send_pinned_at_acceptance_keeps_its_turn_through_collection() -> Result<()> {
     let fixture = fixture(1).await?;
-    let session = fixture
-        .core
-        .session(crate::SessionId::parse("pin-at-send").expect("nonblank host identity"))
-        .created()
-        .await
-        .open()
-        .await?;
+    let session = created_session(
+        &fixture.core,
+        crate::SessionId::parse("pin-at-send").expect("nonblank host identity"),
+    )
+    .await
+    .open()
+    .await?;
     session.send(TurnInput::text("one")).output().await?;
     let first = published(&fixture, "pin-at-send").await?;
 
@@ -243,13 +243,13 @@ async fn a_send_pinned_at_acceptance_keeps_its_turn_through_collection() -> Resu
 #[tokio::test(flavor = "multi_thread", worker_threads = 4)]
 async fn current_turn_pins_the_running_turn_out_of_band() -> Result<()> {
     let fixture = fixture(1).await?;
-    let session = fixture
-        .core
-        .session(crate::SessionId::parse("pin-running").expect("nonblank host identity"))
-        .created()
-        .await
-        .open()
-        .await?;
+    let session = created_session(
+        &fixture.core,
+        crate::SessionId::parse("pin-running").expect("nonblank host identity"),
+    )
+    .await
+    .open()
+    .await?;
     assert_eq!(session.current_turn().await?, None, "nothing runs yet");
     session.send(TurnInput::text("one")).output().await?;
     let before = published(&fixture, "pin-running").await?;
@@ -314,13 +314,13 @@ async fn current_turn_pins_the_running_turn_out_of_band() -> Result<()> {
 #[tokio::test(flavor = "multi_thread", worker_threads = 4)]
 async fn a_merged_inputs_pin_resolves_to_the_run_that_applied_it() -> Result<()> {
     let fixture = composing_fixture().await?;
-    let session = fixture
-        .core
-        .session(crate::SessionId::parse("pin-merged").expect("nonblank host identity"))
-        .created()
-        .await
-        .open()
-        .await?;
+    let session = created_session(
+        &fixture.core,
+        crate::SessionId::parse("pin-merged").expect("nonblank host identity"),
+    )
+    .await
+    .open()
+    .await?;
 
     let running = session
         .send(TurnInput::text(HELD))
@@ -381,13 +381,13 @@ async fn a_merged_inputs_pin_resolves_to_the_run_that_applied_it() -> Result<()>
 #[tokio::test(flavor = "multi_thread", worker_threads = 4)]
 async fn an_empty_session_forks_before_and_after_a_config_command() -> Result<()> {
     let fixture = fixture(1).await?;
-    let session = fixture
-        .core
-        .session(crate::SessionId::parse("fork-empty").expect("nonblank host identity"))
-        .created()
-        .await
-        .open()
-        .await?;
+    let session = created_session(
+        &fixture.core,
+        crate::SessionId::parse("fork-empty").expect("nonblank host identity"),
+    )
+    .await
+    .open()
+    .await?;
     let created = published(&fixture, "fork-empty").await?;
     assert_eq!(created.leaf, None, "nothing has run");
     assert_eq!(
@@ -486,13 +486,13 @@ async fn an_empty_session_forks_before_and_after_a_config_command() -> Result<()
 #[tokio::test(flavor = "multi_thread", worker_threads = 4)]
 async fn a_withdrawn_or_waiting_input_refuses_typed() -> Result<()> {
     let fixture = fixture(1).await?;
-    let session = fixture
-        .core
-        .session(crate::SessionId::parse("fork-refused").expect("nonblank host identity"))
-        .created()
-        .await
-        .open()
-        .await?;
+    let session = created_session(
+        &fixture.core,
+        crate::SessionId::parse("fork-refused").expect("nonblank host identity"),
+    )
+    .await
+    .open()
+    .await?;
     let running = session
         .send(TurnInput::text(HELD))
         .id(crate::TurnId::parse("held-run").expect("nonblank host identity"))
@@ -588,11 +588,9 @@ async fn a_held_turn_pinned_both_ways_forks_after_collection(
             scripted_provider(Arc::clone(&release), Arc::clone(&calls)),
             mock_llm_profile_spec(),
         )
-        .build(crate::testing::runtime_lease_owner())?;
+        .build(crate::tests::host::runtime_lease_owner())?;
     let source = format!("{prefix}-source");
-    let session = core
-        .session(SessionId::fixture(source.clone()))
-        .created()
+    let session = created_session(&core, SessionId::fixture(source.clone()))
         .await
         .open()
         .await?;

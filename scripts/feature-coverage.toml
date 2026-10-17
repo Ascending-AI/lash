@@ -33,6 +33,7 @@ features = [
   "lash-perf/default",
   "lash-regress/default",
   "lash-runtime/default",
+  "lash-internal-facade-tests/default",
 ]
 
 [[lane]]
@@ -663,4 +664,32 @@ commands = [
   ["cargo", "check", "-p", "provider-signatures", "--lib", "--no-default-features", "--features", "openai", "--locked"],
   ["cargo", "check", "-p", "provider-signatures", "--lib", "--no-default-features", "--features", "anthropic", "--locked"],
   ["cargo", "check", "-p", "provider-signatures", "--lib", "--no-default-features", "--features", "google", "--locked"],
+]
+
+[[lane]]
+name = "facade-law-features"
+features = [
+  "lash-internal-facade-tests/codemode:on",
+  "lash-internal-facade-tests/codemode:off",
+  "lash-internal-facade-tests/rlm:on",
+  "lash-internal-facade-tests/rlm:off",
+  "lash-internal-facade-tests/otel-trace:on",
+  "lash-internal-facade-tests/otel-trace:off",
+  "lash-internal-facade-tests/openai:on",
+  "lash-internal-facade-tests/openai:off",
+  "lash-internal-facade-tests/http-transport:on",
+  "lash-internal-facade-tests/http-transport:off",
+]
+commands = [
+  ["cargo", "check", "-p", "lash-internal-facade-tests", "--lib", "--no-default-features", "--locked"],
+  ["cargo", "check", "-p", "lash-internal-facade-tests", "--lib", "--no-default-features", "--features", "rlm,otel-trace,openai,http-transport", "--locked"],
+  ["cargo", "test", "-p", "lash-internal-facade-tests", "--test", "facade_plugins", "--no-default-features", "--locked"],
+  ["cargo", "test", "-p", "lash-internal-facade-tests", "--test", "facade_process", "--no-default-features", "--locked"],
+  ["cargo", "test", "-p", "lash-internal-facade-tests", "--test", "facade_provider", "--no-default-features", "--locked"],
+  ["cargo", "test", "-p", "lash-internal-facade-tests", "--test", "facade_send", "--no-default-features", "--locked"],
+  ["cargo", "test", "-p", "lash-internal-facade-tests", "--test", "facade_session", "--no-default-features", "--locked"],
+  ["cargo", "test", "-p", "lash-internal-facade-tests", "--test", "facade_streaming", "--no-default-features", "--locked"],
+  ["cargo", "test", "-p", "lash-internal-facade-tests", "--test", "facade_tracing", "--no-default-features", "--locked"],
+  ["cargo", "test", "-p", "lash-internal-facade-tests", "--test", "facade_turns", "--no-default-features", "--locked"],
+  ["cargo", "test", "-p", "lash-internal-facade-tests", "--test", "facade_warm_admission", "--no-default-features", "--locked"],
 ]

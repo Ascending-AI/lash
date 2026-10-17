@@ -46,7 +46,7 @@ async fn rlm_core_at(path: &std::path::Path, budgets: crate::ExecutionBudgets) -
             queued_text_provider(vec![typescript_block(r#"await control.finish("done");"#)]),
             mock_llm_profile_spec(),
         )
-        .build(crate::testing::runtime_lease_owner())
+        .build(crate::tests::host::runtime_lease_owner())
         .expect("RLM core")
 }
 

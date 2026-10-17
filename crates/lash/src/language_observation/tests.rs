@@ -94,7 +94,7 @@ async fn a_process_cancelled_while_blocked_has_a_committed_cancelled_graph() {
         .build()
         .expect("durable engine");
     let core = crate::tests::explicit_ephemeral_facets(crate::LashCore::standard_builder(backend))
-        .build(crate::testing::runtime_lease_owner())
+        .build(crate::tests::host::runtime_lease_owner())
         .expect("build a durable core");
     let started = core
         .processes()
@@ -287,7 +287,7 @@ async fn a_process_cancelled_while_blocked_has_a_committed_cancelled_graph() {
 /// every retained subject, and the feed resumes with typed language facts.
 #[tokio::test]
 async fn language_ingress_overflow_resnapshots_every_session_and_continues() {
-    use crate::tests::CreatedSession as _;
+    use crate::tests::host::created_session;
     for by_bytes in [false, true] {
         let replay = Arc::new(lash_core::facade_support::InMemoryLiveReplayStore::new(
             lash_core::facade_support::InMemoryLiveReplayStoreConfig::standard(),
@@ -302,16 +302,14 @@ async fn language_ingress_overflow_resnapshots_every_session_and_continues() {
         ))
         .serve_test_llm_profile(provider, crate::tests::mock_llm_profile_spec())
         .live_replay_store(replay.clone())
-        .build(crate::testing::runtime_lease_owner())
+        .build(crate::tests::host::runtime_lease_owner())
         .expect("core");
         let mut feeds = Vec::new();
         for (index, name) in ["overflow-first", "overflow-second"]
             .into_iter()
             .enumerate()
         {
-            let session = core
-                .session(SessionId::from(name))
-                .created()
+            let session = created_session(&core, SessionId::from(name))
                 .await
                 .open()
                 .await

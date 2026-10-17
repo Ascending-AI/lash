@@ -24,7 +24,7 @@ async fn a_cold_open_refuses_a_head_without_identity_even_for_root() {
         explicit_ephemeral_facets(LashCore::standard_builder(backend.clone()))
             .serve_test_llm_profile(mock_provider(), mock_llm_profile_spec())
             .serve_sessions(false)
-            .build(crate::testing::runtime_lease_owner())
+            .build(crate::tests::host::runtime_lease_owner())
             .expect("core")
     };
     let creating = build();
@@ -103,7 +103,7 @@ impl StateHook {
         explicit_ephemeral_facets(LashCore::standard_builder(backend))
             .serve_test_llm_profile(mock_provider(), mock_llm_profile_spec())
             .plugin(Arc::new(self.clone()))
-            .build(crate::testing::runtime_lease_owner())
+            .build(crate::tests::host::runtime_lease_owner())
             .expect("core")
     }
 }
@@ -277,13 +277,13 @@ async fn a_core_without_its_budgets_or_coalescing_choice_is_refused() {
     assert!(matches!(
         stated_commit_and_retention(sqlite_memory_store_backend().await)
             .delta_coalescing(crate::DeltaCoalescing::recommended())
-            .build(crate::testing::runtime_lease_owner()),
+            .build(crate::tests::host::runtime_lease_owner()),
         Err(EmbedError::MissingExecutionBudgets)
     ));
     assert!(matches!(
         stated_commit_and_retention(sqlite_memory_store_backend().await)
             .execution_budgets(crate::ExecutionBudgets::recommended())
-            .build(crate::testing::runtime_lease_owner()),
+            .build(crate::tests::host::runtime_lease_owner()),
         Err(EmbedError::MissingDeltaCoalescing)
     ));
 }
@@ -312,7 +312,7 @@ async fn a_core_runs_under_the_budgets_and_coalescing_its_host_states() {
         .execution_budgets(budgets.clone())
         .delta_coalescing(crate::DeltaCoalescing::off())
         .serve_test_llm_profile(mock_provider(), mock_llm_profile_spec())
-        .build(crate::testing::runtime_lease_owner())
+        .build(crate::tests::host::runtime_lease_owner())
         .expect("core");
     assert_eq!(core.env.core.control.execution_budgets, budgets);
     assert_eq!(
@@ -332,7 +332,7 @@ async fn a_core_without_a_data_retention_statement_is_refused() {
         .execution_budgets(crate::ExecutionBudgets::recommended())
         .delta_coalescing(crate::DeltaCoalescing::recommended());
     assert!(matches!(
-        builder.build(crate::testing::runtime_lease_owner()),
+        builder.build(crate::tests::host::runtime_lease_owner()),
         Err(EmbedError::MissingDataRetention)
     ));
 }
@@ -355,7 +355,7 @@ async fn a_created_session_records_the_revision_retention_its_host_states() {
             ..crate::DataRetention::standard()
         })
         .serve_test_llm_profile(mock_provider(), mock_llm_profile_spec())
-        .build(crate::testing::runtime_lease_owner())
+        .build(crate::tests::host::runtime_lease_owner())
         .expect("a core under a stated retention");
         let id = crate::SessionId::from("stated-retention");
         core.session(id.clone())

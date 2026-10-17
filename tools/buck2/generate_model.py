@@ -8,6 +8,7 @@ import fnmatch
 import json
 import os
 import pathlib
+import re
 import subprocess
 import sys
 import tomllib
@@ -1918,9 +1919,55 @@ SERVICE_JOB_TAGS = frozenset({"cargo-service-gate", "hermetic-postgres"})
 # build's coverage with it: compiling the default-off test binary proves it
 # still builds, only counting its cases proves it still tests anything. Keyed
 # by (package, resolved features, kind) so the generator can name the label
-# whose hash it alone knows.
+# whose hash it alone knows. Integration kinds include the Cargo target name,
+# so a sibling domain binary cannot satisfy a missing binary's floor.
 FEATURE_LANE_TEST_FLOORS = {
-    ("lash-runtime", (), "unit-test"): 130,
+    (
+        "lash-internal-facade-tests",
+        ("codemode", "default", "http-transport", "openai", "otel-trace", "rlm"),
+        "test:facade_plugins",
+    ): 42,
+    (
+        "lash-internal-facade-tests",
+        ("codemode", "default", "http-transport", "openai", "otel-trace", "rlm"),
+        "test:facade_process",
+    ): 26,
+    (
+        "lash-internal-facade-tests",
+        ("codemode", "default", "http-transport", "openai", "otel-trace", "rlm"),
+        "test:facade_provider",
+    ): 39,
+    (
+        "lash-internal-facade-tests",
+        ("codemode", "default", "http-transport", "openai", "otel-trace", "rlm"),
+        "test:facade_send",
+    ): 26,
+    (
+        "lash-internal-facade-tests",
+        ("codemode", "default", "http-transport", "openai", "otel-trace", "rlm"),
+        "test:facade_session",
+    ): 67,
+    (
+        "lash-internal-facade-tests",
+        ("codemode", "default", "http-transport", "openai", "otel-trace", "rlm"),
+        "test:facade_streaming",
+    ): 55,
+    (
+        "lash-internal-facade-tests",
+        ("codemode", "default", "http-transport", "openai", "otel-trace", "rlm"),
+        "test:facade_tracing",
+    ): 50,
+    (
+        "lash-internal-facade-tests",
+        ("codemode", "default", "http-transport", "openai", "otel-trace", "rlm"),
+        "test:facade_turns",
+    ): 101,
+    (
+        "lash-internal-facade-tests",
+        ("codemode", "default", "http-transport", "openai", "otel-trace", "rlm"),
+        "test:facade_warm_admission",
+    ): 2,
+    ("lash-runtime", (), "unit-test"): 149,
     ("lash-internal-llm-transport", ("proptest-support", "testing"), "unit-test"): 1,
     ("lash-internal-provider-anthropic", ("default", "testing"), "unit-test"): 1,
     ("lash-internal-provider-google", ("default", "testing"), "unit-test"): 1,
@@ -2900,7 +2947,13 @@ def feature_lane_outputs(
     })
     floors = {}
     for unit in graph.units:
-        key = (unit["package"], tuple(unit["features"]), unit["kind"])
+        kind = unit["kind"]
+        if kind == "test":
+            target = re.sub(
+                r"__fv_[0-9a-f]+$", "", unit["label"].split(":", 1)[1]
+            ).removesuffix("__test")
+            kind = f"test:{target}"
+        key = (unit["package"], tuple(unit["features"]), kind)
         if key in FEATURE_LANE_TEST_FLOORS and unit["label"] in test_targets:
             floors[unit["label"]] = FEATURE_LANE_TEST_FLOORS[key]
     if len(floors) != len(FEATURE_LANE_TEST_FLOORS):

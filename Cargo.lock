@@ -2458,6 +2458,46 @@ dependencies = [
 ]
 
 [[package]]
+name = "lash-internal-facade-tests"
+version = "0.0.0-dev"
+dependencies = [
+ "async-trait",
+ "chrono",
+ "futures-util",
+ "lash-internal-conformance",
+ "lash-internal-core",
+ "lash-internal-core-store",
+ "lash-internal-facade-tests",
+ "lash-internal-llm-tools",
+ "lash-internal-llm-transport",
+ "lash-internal-plugin-process-controls",
+ "lash-internal-plugin-standard-compaction",
+ "lash-internal-postgres-store",
+ "lash-internal-protocol-rlm",
+ "lash-internal-protocol-standard",
+ "lash-internal-provider-anthropic",
+ "lash-internal-provider-openai",
+ "lash-internal-rlm-types",
+ "lash-internal-sansio",
+ "lash-internal-sqlite-store",
+ "lash-internal-trace",
+ "lash-internal-vm-client",
+ "lash-internal-vm-runtime",
+ "lash-internal-vm-worker",
+ "lash-runtime",
+ "opentelemetry_sdk",
+ "rusqlite",
+ "serde",
+ "serde_json",
+ "tempfile",
+ "thiserror 2.0.18",
+ "tokio",
+ "tracing",
+ "tracing-subscriber",
+ "uuid",
+]
+
+[[package]]
 name = "lash-internal-http-transport"
 version = "0.0.0-dev"
 dependencies = [
@@ -3339,7 +3379,6 @@ name = "lash-runtime"
 version = "0.0.0-dev"
 dependencies = [
  "async-trait",
- "chrono",
  "futures-util",
  "lash-dialect-python",
  "lash-dialect-typescript",

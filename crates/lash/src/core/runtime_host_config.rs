@@ -375,7 +375,7 @@ mod pacing_laws {
                 poll_initial: Duration::from_secs(2),
                 poll_max: Duration::from_secs(3),
             })
-            .build(crate::testing::runtime_lease_owner())
+            .build(crate::tests::host::runtime_lease_owner())
             .expect("configured core");
         core.shutdown().await.expect("stop background tasks");
         tokio::time::pause();
@@ -539,7 +539,7 @@ mod pacing_laws {
                 crate::tests::mock_llm_profile_spec(),
             )
             .observer_pacing(pacing)
-            .build(crate::testing::runtime_lease_owner())
+            .build(crate::tests::host::runtime_lease_owner())
             .expect("core");
         let id = lash_core::SessionId::from("pacing-binding");
         let durable = core
@@ -622,7 +622,7 @@ mod pacing_laws {
                 crate::tests::mock_llm_profile_spec(),
             )
             .attachment_reclamation_retry(retry)
-            .build(crate::testing::runtime_lease_owner())
+            .build(crate::tests::host::runtime_lease_owner())
             .expect("core");
         let id = lash_core::SessionId::from("retry-fence");
         core.session(id.clone())
@@ -769,7 +769,7 @@ mod pacing_laws {
                 claim_ttl_ms: 70_000,
                 ..crate::RelayPolicy::standard()
             })
-            .build(crate::testing::runtime_lease_owner())
+            .build(crate::tests::host::runtime_lease_owner())
             .expect("core");
         assert_eq!(
             tokio::time::timeout(Duration::from_secs(1), received.recv())

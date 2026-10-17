@@ -19,7 +19,7 @@ async fn root_and_child_materialization_install_the_same_plugin_owned_engines() 
     let build = || {
         explicit_ephemeral_facets(rlm_core_builder_over(backend.clone()))
             .serve_test_llm_profile(mock_provider(), mock_llm_profile_spec())
-            .build(crate::testing::runtime_lease_owner())
+            .build(crate::tests::host::runtime_lease_owner())
     };
     let core = build()?;
     core.session(crate::SessionId::parse("materialize-run").expect("nonblank host identity"))
@@ -81,7 +81,7 @@ async fn root_and_child_materialization_install_the_same_plugin_owned_engines() 
             crate::vm::TYPESCRIPT_DIALECT,
             bounds,
         )))
-        .build(crate::testing::runtime_lease_owner());
+        .build(crate::tests::host::runtime_lease_owner());
     assert!(
         matches!(duplicate, Err(EmbedError::Plugin(lash_core::PluginError::Registration(message)))
             if message == "duplicate process engine kind `lashvm`; each engine kind may be registered once"),
@@ -168,13 +168,14 @@ async fn multi_model_turn_keeps_per_call_evidence() -> Result<()> {
     ))
     .serve_test_llm_profile(provider, mock_llm_profile_spec())
     .tools(crate::tool_provider_key!("tools"), Arc::new(AppTools))
-    .build(crate::testing::runtime_lease_owner())?;
-    let session = core
-        .session(crate::SessionId::parse("per-call-evidence").expect("nonblank host identity"))
-        .created()
-        .await
-        .open()
-        .await?;
+    .build(crate::tests::host::runtime_lease_owner())?;
+    let session = created_session(
+        &core,
+        crate::SessionId::parse("per-call-evidence").expect("nonblank host identity"),
+    )
+    .await
+    .open()
+    .await?;
     let output = session
         .send(TurnInput::text("use both served models"))
         .id(crate::TurnId::parse("evidence-run").expect("nonblank host identity"))
@@ -239,7 +240,7 @@ async fn resumed_session_observe_wait_cancel_shift_keep_original_owners() -> Res
                 text_provider("owner-matrix", answer),
                 mock_llm_profile_spec(),
             )
-            .build(crate::testing::runtime_lease_owner())
+            .build(crate::tests::host::runtime_lease_owner())
     };
     let source = build(source_backend.clone(), "source-answer")?;
     let receiving = build(receiving_backend.clone(), "receiving-answer")?;

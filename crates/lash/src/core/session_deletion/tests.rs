@@ -293,7 +293,7 @@ async fn an_accepted_close_stays_pending_when_its_mail_is_acknowledged_between_r
         crate::tests::mock_llm_profile_spec(),
     )
     .serve_sessions(false)
-    .build(crate::testing::runtime_lease_owner())
+    .build(crate::tests::host::runtime_lease_owner())
     .expect("the non-serving core builds");
     core.session(session.clone())
         .create(crate::SessionCreation::root(
@@ -349,7 +349,7 @@ async fn an_accepted_close_stays_pending_when_its_mail_is_acknowledged_between_r
         crate::tests::mock_llm_profile_spec(),
     )
     .serve_sessions(false)
-    .build(crate::testing::runtime_lease_owner())
+    .build(crate::tests::host::runtime_lease_owner())
     .expect("the observing core builds");
     assert_eq!(
         observer.deletion_completion(&session).await.unwrap(),

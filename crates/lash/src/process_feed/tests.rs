@@ -299,7 +299,7 @@ async fn an_unknown_engine_park_is_shared_by_get_list_snapshot_and_gap() {
         .expect("commit the park");
 
     let core = crate::tests::explicit_ephemeral_facets(crate::LashCore::standard_builder(backend))
-        .build(crate::testing::runtime_lease_owner())
+        .build(crate::tests::host::runtime_lease_owner())
         .expect("build core");
     let processes = core.processes();
     let get = processes

@@ -213,7 +213,7 @@ async fn cancelled_sibling(answer: Answer) -> Result<CancelledRound> {
     ))
     .serve_test_llm_profile(provider, mock_llm_profile_spec())
     .plugin(Arc::new(plugin.clone()))
-    .build(crate::testing::runtime_lease_owner())?;
+    .build(crate::tests::host::runtime_lease_owner())?;
     let session = core
         .session(crate::SessionId::parse(&id).expect("nonblank host identity"))
         .create(crate::SessionCreation::root(mock_session_spec()))

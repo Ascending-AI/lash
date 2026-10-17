@@ -245,7 +245,7 @@ async fn probe_core(backend: lash_core::Backend, probe: &Arc<ProbeFactory>) -> R
     explicit_ephemeral_facets(LashCore::standard_builder(backend))
         .plugin(probe.clone())
         .serve_test_llm_profile(mock_provider(), mock_llm_profile_spec())
-        .build(crate::testing::runtime_lease_owner())
+        .build(crate::tests::host::runtime_lease_owner())
 }
 
 fn stating(cap: u64) -> Result<lash_core::PluginOptions> {

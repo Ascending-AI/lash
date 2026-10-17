@@ -113,7 +113,7 @@ fn core_over(stores: &Arc<dyn lash_core::StoreSet>, nodes: usize) -> Result<Lash
         crate::CommitBudget::bounded(1024 * 1024, nodes),
     )
     .serve_test_llm_profile(mock_provider(), mock_llm_profile_spec())
-    .build(crate::testing::runtime_lease_owner())
+    .build(crate::tests::host::runtime_lease_owner())
 }
 
 /// A law's deployment over its stores, played as ADR 0132 §3 asks of a host.
@@ -221,9 +221,7 @@ async fn head_of(
 /// written. A twin create of the same request without the nodes finishes,
 /// and records what the creation resolved.
 async fn crashed_create(core: &LashCore, session: &str) -> Result<CrashedCreate> {
-    let creator = core
-        .session(SessionId::fixture(format!("{session}-creator")))
-        .created()
+    let creator = created_session(core, SessionId::fixture(format!("{session}-creator")))
         .await
         .open()
         .await?;

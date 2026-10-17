@@ -1,0 +1,101 @@
+[package]
+name = "lash-internal-facade-tests"
+version.workspace = true
+edition.workspace = true
+license.workspace = true
+publish = false
+description = "Shared host fixtures and independent domain laws for the Lash facade"
+
+[lib]
+name = "lash_facade_tests"
+doctest = false
+test = false
+
+[lints]
+workspace = true
+
+[features]
+default = []
+codemode = ["lash/codemode"]
+rlm = ["codemode", "lash/rlm"]
+otel-trace = ["lash/otel-trace"]
+openai = ["http-transport", "lash/openai"]
+http-transport = ["lash/http-transport"]
+
+[dependencies]
+lash = { path = "../lash", package = "lash-runtime", default-features = false, features = ["testing"] }
+lash-core = { workspace = true, features = ["testing"] }
+lash-sansio.workspace = true
+lash-conformance.workspace = true
+lash-sqlite-store = { workspace = true, features = ["testing"] }
+lash-postgres-store = { workspace = true, features = ["testing"] }
+lash-protocol-rlm = { workspace = true, features = ["testing"] }
+lash-vm-client.workspace = true
+async-trait.workspace = true
+serde_json.workspace = true
+tokio = { workspace = true, features = ["macros", "rt-multi-thread", "sync", "test-util"] }
+tempfile.workspace = true
+uuid.workspace = true
+
+[dev-dependencies]
+futures-util.workspace = true
+serde.workspace = true
+thiserror.workspace = true
+tracing.workspace = true
+lash-rlm-types.workspace = true
+lash-llm-tools.workspace = true
+lash-plugin-process-controls.workspace = true
+lash-plugin-standard-compaction.workspace = true
+lash-protocol-standard.workspace = true
+lash-core-store.workspace = true
+lash-trace.workspace = true
+lash-facade-tests = { path = ".", package = "lash-internal-facade-tests", features = ["rlm", "otel-trace", "openai", "http-transport"] }
+lash = { path = "../lash", package = "lash-runtime", default-features = false, features = ["worker", "dialect-typescript", "dialect-python", "typescript", "python", "sqlite", "postgres", "openai", "anthropic", "mcp", "workflow-authoring"] }
+lash-llm-transport = { workspace = true }
+chrono.workspace = true
+# The dev-dependencies' testing client is paired with a testing worker when
+# the `worker` feature links one (FIG-4409).
+lash-vm-worker = { workspace = true, features = ["testing", "dialect-typescript", "dialect-python"] }
+# The facade's laws run TypeScript and Python sessions and processes.
+lash-vm-runtime = { workspace = true, features = ["dialect-typescript", "dialect-python"] }
+lash-provider-anthropic = { workspace = true, features = ["testing"] }
+lash-provider-openai = { workspace = true, features = ["testing"] }
+rusqlite = { version = "0.37", features = ["bundled"] }
+tracing-subscriber = { workspace = true }
+opentelemetry_sdk = { version = "0.33", features = ["metrics", "testing"] }
+
+[[test]]
+name = "facade_warm_admission"
+path = "tests/facade_warm_admission.rs"
+
+[[test]]
+name = "facade_provider"
+path = "tests/facade_provider.rs"
+
+[[test]]
+name = "facade_session"
+path = "tests/facade_session.rs"
+
+[[test]]
+name = "facade_plugins"
+path = "tests/facade_plugins.rs"
+
+[[test]]
+name = "facade_process"
+path = "tests/facade_process.rs"
+
+[[test]]
+name = "facade_streaming"
+path = "tests/facade_streaming.rs"
+
+[[test]]
+name = "facade_turns"
+path = "tests/facade_turns.rs"
+
+[[test]]
+name = "facade_tracing"
+path = "tests/facade_tracing.rs"
+
+[[test]]
+name = "facade_send"
+path = "tests/facade_send.rs"

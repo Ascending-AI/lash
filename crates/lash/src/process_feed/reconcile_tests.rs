@@ -288,7 +288,7 @@ async fn a_local_commit_is_published_once_however_many_feeds_are_open() {
     lash_core::testing::process_execution_env_fixture(stores.process_env_store().as_ref()).await;
     let core = crate::tests::standard_core_builder_over(lash_conformance::backend_over(stores))
         .process_replay_store(replay.clone())
-        .build(crate::testing::runtime_lease_owner())
+        .build(crate::tests::host::runtime_lease_owner())
         .expect("standard core");
     let registry = core.process_registry.clone();
     let process_id = registry

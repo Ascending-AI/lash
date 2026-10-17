@@ -58,7 +58,7 @@ async fn a_run_in_flight_when_its_session_is_deleted_ends_typed(
         lash_conformance::backend_over(stores),
     ))
     .serve_test_llm_profile(held.provider(), mock_llm_profile_spec())
-    .build(crate::testing::runtime_lease_owner())?;
+    .build(crate::tests::host::runtime_lease_owner())?;
     let session_id = SessionId::fixture(ID);
     let session = core
         .session(session_id.clone())

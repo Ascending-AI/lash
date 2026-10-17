@@ -32,13 +32,13 @@ async fn retained(
 #[tokio::test(flavor = "multi_thread", worker_threads = 4)]
 async fn a_follower_past_a_restarted_stream_reads_what_the_restart_published() -> Result<()> {
     let fixture = fixture(1).await?;
-    let session = fixture
-        .core
-        .session(crate::SessionId::parse("send-restarted-stream").expect("nonblank host identity"))
-        .created()
-        .await
-        .open()
-        .await?;
+    let session = created_session(
+        &fixture.core,
+        crate::SessionId::parse("send-restarted-stream").expect("nonblank host identity"),
+    )
+    .await
+    .open()
+    .await?;
     let handle = session
         .send(TurnInput::text(HELD))
         .id(crate::TurnId::parse("restarted-run").expect("nonblank host identity"))
@@ -238,7 +238,7 @@ fn core_publishing_to(backend: lash_core::Backend, replay: Arc<FaultyReplay>) ->
             mock_llm_profile_spec(),
         )
         .live_replay_store(replay)
-        .build(crate::testing::runtime_lease_owner())
+        .build(crate::tests::host::runtime_lease_owner())
 }
 
 /// The answer of a follower that watched its run: the run's model call
@@ -266,14 +266,13 @@ fn assert_whole(watched: &crate::SendOutcome) {
 async fn a_follower_answers_a_run_whose_node_died_after_its_commit_at_once() -> Result<()> {
     let replay = FaultyReplay::new(false, true);
     let core = core_publishing_to(sqlite_memory_store_backend().await, replay.clone())?;
-    let session = core
-        .session(
-            crate::SessionId::parse("send-unpublished-commit").expect("nonblank host identity"),
-        )
-        .created()
-        .await
-        .open()
-        .await?;
+    let session = created_session(
+        &core,
+        crate::SessionId::parse("send-unpublished-commit").expect("nonblank host identity"),
+    )
+    .await
+    .open()
+    .await?;
     let handle = session
         .send(TurnInput::text("watch me"))
         .id(crate::TurnId::parse("unpublished-commit-run").expect("nonblank host identity"))
@@ -298,12 +297,13 @@ async fn a_follower_answers_a_run_whose_node_died_after_its_commit_at_once() -> 
 async fn a_runs_terminal_is_durable_only_once_its_activity_is_published() -> Result<()> {
     let replay = FaultyReplay::new(true, false);
     let core = core_publishing_to(sqlite_memory_store_backend().await, replay.clone())?;
-    let session = core
-        .session(crate::SessionId::parse("send-lagging-replay").expect("nonblank host identity"))
-        .created()
-        .await
-        .open()
-        .await?;
+    let session = created_session(
+        &core,
+        crate::SessionId::parse("send-lagging-replay").expect("nonblank host identity"),
+    )
+    .await
+    .open()
+    .await?;
     let handle = session
         .send(TurnInput::text("watch me"))
         .id(crate::TurnId::parse("lagging-run").expect("nonblank host identity"))

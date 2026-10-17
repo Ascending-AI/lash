@@ -307,7 +307,7 @@ mod tests {
     /// delivered by the core's own background pass, with no host call.
     #[tokio::test(flavor = "multi_thread", worker_threads = 2)]
     async fn a_core_delivers_a_cleanup_its_producer_left_armed() {
-        let backend = crate::tests::harness::sqlite_memory_store_backend().await;
+        let backend = crate::tests::host::sqlite_memory_store_backend().await;
         let id = backend
             .artifact_cleanup()
             .arm_cleanup(

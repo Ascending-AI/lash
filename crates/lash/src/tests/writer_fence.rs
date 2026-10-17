@@ -36,7 +36,7 @@ async fn a_send_to_a_finalized_store_is_refused_typed_and_writes_nothing(
         .into_handle();
     let core = explicit_ephemeral_facets(LashCore::standard_builder(backend))
         .serve_test_llm_profile(provider, mock_llm_profile_spec())
-        .build(crate::testing::runtime_lease_owner())
+        .build(crate::tests::host::runtime_lease_owner())
         .expect("the core");
     let session = core
         .session(crate::SessionId::parse(ID).expect("nonblank host identity"))

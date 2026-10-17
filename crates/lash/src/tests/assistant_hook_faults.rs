@@ -50,7 +50,7 @@ fn hooked_core(
     explicit_ephemeral_facets(LashCore::standard_builder(backend))
         .serve_test_llm_profile(provider, mock_llm_profile_spec())
         .plugin(Arc::new(hook))
-        .build(crate::testing::runtime_lease_owner())
+        .build(crate::tests::host::runtime_lease_owner())
 }
 
 /// The committed transcript of `id`'s session: role and text per message.
@@ -252,7 +252,7 @@ async fn a_retained_model_answer_requires_its_response_hook_until_it_is_derived(
     let core = explicit_ephemeral_facets(LashCore::standard_builder(backend.clone()))
         .serve_test_llm_profile(provider, mock_llm_profile_spec())
         .plugin(Arc::new(hook))
-        .build(crate::testing::runtime_lease_owner())?;
+        .build(crate::tests::host::runtime_lease_owner())?;
     let session = core
         .session(crate::SessionId::parse(ID).expect("nonblank host identity"))
         .create(crate::SessionCreation::root(mock_session_spec()))

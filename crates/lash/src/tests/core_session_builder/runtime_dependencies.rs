@@ -1,5 +1,5 @@
 use super::*;
-use crate::tests::harness::llm_profile_spec;
+use crate::tests::host::llm_profile_spec;
 use lash_core::{
     ProcessEventLogTestSupport as _, ProcessLifecycle as _, ProcessObserverRegistry as _,
     ProcessRegistrar as _, ProcessRetention as _,
@@ -23,7 +23,7 @@ async fn the_backend_process_registry_stamps_from_the_backend_clock() {
         .queued_work_batching(lash_core::QueuedWorkBatchingConfig::new(1))
         .execution_budgets(crate::ExecutionBudgets::recommended())
         .delta_coalescing(crate::DeltaCoalescing::recommended())
-        .build(crate::testing::runtime_lease_owner())
+        .build(crate::tests::host::runtime_lease_owner())
         .expect("build core over a clocked memory backend");
     let registry = core.process_registry.clone();
     let builder_clock_process_id = registry
@@ -62,7 +62,7 @@ async fn fork_distinguishes_collected_revision_from_unknown_and_deleted_sources(
     let factory = backend.session_store_factory();
     let core = explicit_ephemeral_facets(LashCore::standard_builder(backend.clone()))
         .serve_test_llm_profile(mock_provider(), mock_llm_profile_spec())
-        .build(crate::testing::runtime_lease_owner())?;
+        .build(crate::tests::host::runtime_lease_owner())?;
 
     let unknown_error = core
         .fork_at(
@@ -233,7 +233,7 @@ async fn fork_observer_selection_is_recoverable_and_selective() -> Result<()> {
     let factory = backend.session_store_factory();
     let core = explicit_ephemeral_facets(LashCore::standard_builder(backend))
         .serve_test_llm_profile(mock_provider(), mock_llm_profile_spec())
-        .build(crate::testing::runtime_lease_owner())?;
+        .build(crate::tests::host::runtime_lease_owner())?;
     let source_profile = Some(recorded_llm_profile(llm_profile_spec(
         "fork-source-model",
         None,
@@ -467,21 +467,23 @@ async fn fork_observer_selection_is_recoverable_and_selective() -> Result<()> {
         )
         .await
         .expect("remove the partially published observer");
-    core.session(crate::SessionId::parse("fork-observer-branch").expect("nonblank host identity"))
-        .created()
-        .await
-        .open_with_state(lash_core::RuntimeSessionState {
-            session_id: SessionId::from("fork-observer-branch"),
-            ..lash_core::RuntimeSessionState::fixture(lash_core::SessionPolicy {
-                model: branch_read.config.model.clone(),
-                ..lash_core::SessionPolicy::new(
-                    lash_core::TurnBudget::Unbounded,
-                    lash_core::MaxToolCalls::new(1024),
-                    crate::NoProgressBudget::bounded(12),
-                )
-            })
+    created_session(
+        &core,
+        crate::SessionId::parse("fork-observer-branch").expect("nonblank host identity"),
+    )
+    .await
+    .open_with_state(lash_core::RuntimeSessionState {
+        session_id: SessionId::from("fork-observer-branch"),
+        ..lash_core::RuntimeSessionState::fixture(lash_core::SessionPolicy {
+            model: branch_read.config.model.clone(),
+            ..lash_core::SessionPolicy::new(
+                lash_core::TurnBudget::Unbounded,
+                lash_core::MaxToolCalls::new(1024),
+                crate::NoProgressBudget::bounded(12),
+            )
         })
-        .await?;
+    })
+    .await?;
     assert_eq!(
         registry
             .list_observed_by(
@@ -514,11 +516,13 @@ async fn fork_observer_selection_is_recoverable_and_selective() -> Result<()> {
         )
         .await
         .expect("deliberately remove the recovered observer");
-    core.session(crate::SessionId::parse("fork-observer-branch").expect("nonblank host identity"))
-        .created()
-        .await
-        .open()
-        .await?;
+    created_session(
+        &core,
+        crate::SessionId::parse("fork-observer-branch").expect("nonblank host identity"),
+    )
+    .await
+    .open()
+    .await?;
     assert!(
         registry
             .list_observed_by(
@@ -637,7 +641,7 @@ async fn duplicate_only_fork_intents_are_canonical(
     let registry = backend.process_registry();
     let core = explicit_ephemeral_facets(LashCore::standard_builder(backend))
         .serve_test_llm_profile(mock_provider(), mock_llm_profile_spec())
-        .build(crate::testing::runtime_lease_owner())?;
+        .build(crate::tests::host::runtime_lease_owner())?;
     let policy = lash_core::SessionPolicy {
         ..lash_core::SessionPolicy::new(
             lash_core::TurnBudget::Unbounded,
@@ -770,7 +774,7 @@ async fn session_create_observer_intent_replays_idempotently_on_open() -> Result
     .await?;
     let core = explicit_ephemeral_facets(LashCore::standard_builder(backend.clone()))
         .serve_test_llm_profile(mock_provider(), mock_llm_profile_spec())
-        .build(crate::testing::runtime_lease_owner())?;
+        .build(crate::tests::host::runtime_lease_owner())?;
 
     assert!(
         !registry
@@ -778,11 +782,13 @@ async fn session_create_observer_intent_replays_idempotently_on_open() -> Result
             .await?,
         "the fixture must preserve the real crash gap before publication"
     );
-    core.session(crate::SessionId::parse(session_id).expect("nonblank host identity"))
-        .created()
-        .await
-        .open()
-        .await?;
+    created_session(
+        &core,
+        crate::SessionId::parse(session_id).expect("nonblank host identity"),
+    )
+    .await
+    .open()
+    .await?;
     assert!(
         registry
             .is_observer(&SessionId::from(session_id), &process_id)
@@ -799,11 +805,13 @@ async fn session_create_observer_intent_replays_idempotently_on_open() -> Result
         observer_event_count, 1,
         "recovery must publish the missing observer edge exactly once"
     );
-    core.session(crate::SessionId::parse(session_id).expect("nonblank host identity"))
-        .created()
-        .await
-        .open()
-        .await?;
+    created_session(
+        &core,
+        crate::SessionId::parse(session_id).expect("nonblank host identity"),
+    )
+    .await
+    .open()
+    .await?;
     assert_eq!(
         registry
             .full_event_window(&process_id, 0)
@@ -830,11 +838,13 @@ async fn session_create_observer_intent_replays_idempotently_on_open() -> Result
             lash_core::ProcessObserverBy::host("post-recovery-removal"),
         )
         .await?;
-    core.session(crate::SessionId::parse(session_id).expect("nonblank host identity"))
-        .created()
-        .await
-        .open()
-        .await?;
+    created_session(
+        &core,
+        crate::SessionId::parse(session_id).expect("nonblank host identity"),
+    )
+    .await
+    .open()
+    .await?;
     assert!(
         !registry
             .is_observer(&SessionId::from(session_id), &process_id)
@@ -851,7 +861,7 @@ async fn session_observer_intents_settle_in_one_pass_before_open_returns() -> Re
     let factory = backend.session_store_factory();
     let core = explicit_ephemeral_facets(LashCore::standard_builder(backend.clone()))
         .serve_test_llm_profile(mock_provider(), mock_llm_profile_spec())
-        .build(crate::testing::runtime_lease_owner())?;
+        .build(crate::tests::host::runtime_lease_owner())?;
 
     for (case, simulate_crash_between_layers) in [("fresh", false), ("crash-resume", true)] {
         let session_id = SessionId::fixture(format!("nested-observer-intent-{case}"));
@@ -917,8 +927,7 @@ async fn session_observer_intents_settle_in_one_pass_before_open_returns() -> Re
             );
         }
 
-        core.session(session_id.clone())
-            .created()
+        created_session(&core, session_id.clone())
             .await
             .open()
             .await?;
@@ -991,7 +1000,7 @@ async fn a_fork_runs_under_its_branch_points_generation_not_what_the_host_passes
     let factory = backend.session_store_factory();
     let core = explicit_ephemeral_facets(LashCore::standard_builder(backend.clone()))
         .serve_test_llm_profile(mock_provider(), mock_llm_profile_spec())
-        .build(crate::testing::runtime_lease_owner())?;
+        .build(crate::tests::host::runtime_lease_owner())?;
     core.session(
         crate::SessionId::parse("generation-fork-host-default").expect("nonblank host identity"),
     )

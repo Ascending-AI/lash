@@ -5,7 +5,7 @@
 //! The runs happen on the core's node over SQLite memory stores (FIG-5307).
 
 use super::*;
-use crate::support::TurnInput;
+use crate::TurnInput;
 use lash_sansio::SessionId;
 
 /// What the durable admin reads answered.
@@ -55,7 +55,7 @@ fn rlm_core(backend: lash_core::Backend, tools: bool) -> Result<LashCore> {
     } else {
         builder
     };
-    builder.build(crate::testing::runtime_lease_owner())
+    builder.build(crate::tests::host::runtime_lease_owner())
 }
 
 #[tokio::test(flavor = "multi_thread", worker_threads = 2)]
@@ -65,9 +65,7 @@ async fn every_admin_read_answers_from_durable_state_without_an_activated_runtim
 
         // A session that never ran: its head records nothing yet.
         let core = rlm_core(backend.clone(), true)?;
-        let never_ran = core
-            .session(SessionId::from("admin-reads-never-ran"))
-            .created()
+        let never_ran = created_session(&core, SessionId::from("admin-reads-never-ran"))
             .await
             .open()
             .await?;
@@ -77,9 +75,7 @@ async fn every_admin_read_answers_from_durable_state_without_an_activated_runtim
         // A run records execution state; a cold reopen on a core without
         // the run's tool source builds no capabilities.
         let session_id = SessionId::from("admin-reads-cold-reopen");
-        let ran = core
-            .session(session_id.clone())
-            .created()
+        let ran = created_session(&core, session_id.clone())
             .await
             .open()
             .await?;
@@ -104,9 +100,7 @@ async fn a_plugin_query_on_a_never_run_session_is_refused_as_not_published() -> 
     {
         let core = rlm_core(sqlite_memory_store_backend().await, true)?;
         let session_id = SessionId::from("query-not-published");
-        let session = core
-            .session(session_id.clone())
-            .created()
+        let session = created_session(&core, session_id.clone())
             .await
             .open()
             .await?;

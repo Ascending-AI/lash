@@ -126,7 +126,7 @@ impl World {
                 crate::tool_provider_key!("tools"),
                 Arc::new(ApprovalTools { keys }),
             )
-            .build(crate::testing::runtime_lease_owner())?;
+            .build(crate::tests::host::runtime_lease_owner())?;
         Ok(Self {
             stores,
             core,
@@ -135,9 +135,7 @@ impl World {
     }
 
     async fn session(&self, name: &str) -> Result<crate::DurableSession> {
-        self.core
-            .session(crate::SessionId::fixture(name))
-            .created()
+        created_session(&self.core, crate::SessionId::fixture(name))
             .await
             .durable()
             .await
@@ -527,7 +525,7 @@ async fn a_recorded_run_using_a_retired_session_plugins_effect_parks_typed() -> 
             text_provider("turn-retirement", cell(true)),
             mock_llm_profile_spec(),
         )
-        .build(crate::testing::runtime_lease_owner())?;
+        .build(crate::tests::host::runtime_lease_owner())?;
     second
         .completions()
         .resolve(&key, lash_core::Resolution::Ok(serde_json::json!({})))
@@ -606,10 +604,8 @@ async fn recorded_session_with_retired_plugin(retain_state: bool) -> Result<()> 
     let first = explicit_ephemeral_facets(rlm_core_builder_over(backend.clone()))
         .plugin(Arc::new(plugin))
         .serve_test_llm_profile(provider, mock_llm_profile_spec())
-        .build(crate::testing::runtime_lease_owner())?;
-    let session = first
-        .session(crate::SessionId::fixture("retired-session-unused"))
-        .created()
+        .build(crate::tests::host::runtime_lease_owner())?;
+    let session = created_session(&first, crate::SessionId::fixture("retired-session-unused"))
         .await
         .durable()
         .await?;
@@ -628,7 +624,7 @@ async fn recorded_session_with_retired_plugin(retain_state: bool) -> Result<()> 
             ),
             mock_llm_profile_spec(),
         )
-        .build(crate::testing::runtime_lease_owner())?;
+        .build(crate::tests::host::runtime_lease_owner())?;
     if retain_state {
         let durable = second
             .session(crate::SessionId::fixture("retired-session-unused"))
@@ -682,7 +678,7 @@ async fn a_new_session_naming_a_retired_plugin_is_refused_typed() -> Result<()> 
     assert!(
         builder()
             .retire_session_plugin(crate::plugins::PluginId::new("retired-spare"))
-            .build(crate::testing::runtime_lease_owner())
+            .build(crate::tests::host::runtime_lease_owner())
             .is_err(),
         "duplicate retirement refuses the build"
     );
@@ -692,11 +688,11 @@ async fn a_new_session_naming_a_retired_plugin_is_refused_typed() -> Result<()> 
                 crate::plugins::PluginDeclaration::initial("retired-spare"),
                 crate::plugins::PluginSpec::new(),
             )))
-            .build(crate::testing::runtime_lease_owner())
+            .build(crate::tests::host::runtime_lease_owner())
             .is_err(),
         "an installed retirement refuses the build"
     );
-    let core = builder().build(crate::testing::runtime_lease_owner())?;
+    let core = builder().build(crate::tests::host::runtime_lease_owner())?;
     let mut spec = mock_session_spec();
     spec.plugin_options
         .insert_typed("retired-spare", serde_json::json!({}))

@@ -191,13 +191,14 @@ pub(super) async fn publication_failure_preserves_committed_turn_and_exposes_gap
         mock_llm_profile_spec(),
     )
     .live_replay_store(replay.clone())
-    .build(crate::testing::runtime_lease_owner())?;
-    let session = core
-        .session(crate::SessionId::parse("publication-failure").expect("nonblank host identity"))
-        .created()
-        .await
-        .open()
-        .await?;
+    .build(crate::tests::host::runtime_lease_owner())?;
+    let session = created_session(
+        &core,
+        crate::SessionId::parse("publication-failure").expect("nonblank host identity"),
+    )
+    .await
+    .open()
+    .await?;
     let cursor = session.observe().snapshot().await?.cursor;
     replay.arm();
 
@@ -251,13 +252,14 @@ pub(super) async fn a_reader_inside_a_commits_publication_window_replays_the_com
         mock_llm_profile_spec(),
     )
     .live_replay_store(replay.clone())
-    .build(crate::testing::runtime_lease_owner())?;
-    let session = core
-        .session(crate::SessionId::parse("publication-window").expect("nonblank host identity"))
-        .created()
-        .await
-        .open()
-        .await?;
+    .build(crate::tests::host::runtime_lease_owner())?;
+    let session = created_session(
+        &core,
+        crate::SessionId::parse("publication-window").expect("nonblank host identity"),
+    )
+    .await
+    .open()
+    .await?;
     let cursor = session.observe().snapshot().await?.cursor;
     replay.arm();
 
@@ -307,13 +309,14 @@ async fn two_commit_session(
         mock_llm_profile_spec(),
     )
     .live_replay_store(replay.clone())
-    .build(crate::testing::runtime_lease_owner())?;
-    let session = core
-        .session(crate::SessionId::parse(name).expect("nonblank host identity"))
-        .created()
-        .await
-        .open()
-        .await?;
+    .build(crate::tests::host::runtime_lease_owner())?;
+    let session = created_session(
+        &core,
+        crate::SessionId::parse(name).expect("nonblank host identity"),
+    )
+    .await
+    .open()
+    .await?;
     let cursor = session.observe().snapshot().await?.cursor;
     Ok((replay, core, session, cursor))
 }
@@ -513,7 +516,7 @@ async fn process_feed_across_two_publication_windows() -> Result<(Vec<Shown>, us
     let seeding: Arc<dyn lash_core::ConformanceProcessRegistry> = stores.process_registry();
     let core = standard_core_builder_over(lash_conformance::backend_over(stores))
         .process_replay_store(replay.clone())
-        .build(crate::testing::runtime_lease_owner())?;
+        .build(crate::tests::host::runtime_lease_owner())?;
     let watched = core.process_watch().clone();
     let registry = core.process_registry.clone();
     let process_id = registry

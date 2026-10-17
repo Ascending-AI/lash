@@ -34,6 +34,7 @@ members = [
     "crates/lash-e2e",
     "crates/lash-postgres-workers",
     "crates/lash",
+    "crates/lash-facade-tests",
     "crates/lash-protocol-rlm",
     "crates/lash-protocol-standard",
     "crates/lash-plugin-mcp",
