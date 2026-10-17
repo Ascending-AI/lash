@@ -938,13 +938,13 @@ impl Lowerer<'_> {
     }
 
     /// Binds a closure to a new temporary.
-    fn emit_closure(&mut self, params: Vec<Name>, body: Buf) -> Operand {
+    fn emit_closure(
+        &mut self,
+        params: Vec<Name>,
+        body: Buf,
+        start: Option<lash_kernel_doc::StartAdapter>,
+    ) -> Operand {
         let name = self.temp();
-        let start = self
-            .written
-            .as_ref()
-            .and_then(|written| written.start.clone())
-            .and_then(|signature| self.start_adapter(signature));
         self.push(
             Stmt::Let {
                 name: name.clone(),
@@ -963,7 +963,8 @@ impl Lowerer<'_> {
     /// How a function value of this signature is started when it crosses
     /// to a tool (`K-CLO-004`). The token keeps the internal packed call ABI;
     /// extraction exposes a host entry under the source body's convention.
-    fn start_adapter(&mut self, signature: Signature) -> Option<lash_kernel_doc::StartAdapter> {
+    fn start_adapter(&mut self, function: &ast::Function) -> Option<lash_kernel_doc::StartAdapter> {
+        let signature = self.start_signature(function).ok()?;
         let await_fn = self.function("ts.await").ok()?;
         Some(lash_kernel_doc::StartAdapter {
             signature,

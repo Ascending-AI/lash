@@ -50,13 +50,6 @@
   },
   {
     "target": "//crates/lash-protocol-rlm:lash-protocol-rlm__unit_test",
-    "selector": "executor::tests::written::a_resumed_cells_function_keeps_its_start_signature_with_or_without_a_map",
-    "rules": [
-      "WR-START"
-    ]
-  },
-  {
-    "target": "//crates/lash-protocol-rlm:lash-protocol-rlm__unit_test",
     "selector": "executor::tests::source_map::a_resumed_cells_failure_is_located_by_its_stored_map",
     "rules": [
       "WR-REPLAY"

@@ -87,7 +87,8 @@ impl Lowerer<'_> {
             Ok(())
         })?;
         self.written = Some(written);
-        let closure = self.emit_closure(params, block);
+        let start = self.start_adapter(function);
+        let closure = self.emit_closure(params, block, start);
         if let Some(Stmt::Let {
             value: Rhs::Expr(Expr::Closure(closure)),
             ..
@@ -150,7 +151,7 @@ impl Lowerer<'_> {
             });
             Ok(())
         })?;
-        let body = self.emit_closure(vec![this, ignored], block);
+        let body = self.emit_closure(vec![this, ignored], block, None);
         self.start_promise(
             &body,
             Atom::Literal(Literal::Absent),

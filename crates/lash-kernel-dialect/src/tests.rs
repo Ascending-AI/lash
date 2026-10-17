@@ -3,6 +3,35 @@ use lash_kernel_doc::{Implementation, parse_definition};
 
 use crate::{Library, NamedLibrary, SourceError, define_functions};
 
+/// FIG-6671: authored metadata cannot carry a second executable start
+/// signature, through either the worker JSON or stored token boundary.
+#[test]
+fn written_refuses_a_second_start_signature() {
+    use lash_kernel_doc::graph_tokens::{TokenCodec as _, TokenWriter, decode_body};
+    use lash_kernel_doc::{Signature, SourceLanguage, Type};
+
+    let signature = Signature {
+        params: Vec::new(),
+        result: Type::Int,
+    };
+    let data = serde_json::json!({
+        "language": SourceLanguage::Python,
+        "signature": "() -> str",
+        "start": signature,
+    });
+    let refused = serde_json::from_value::<crate::Written>(data)
+        .expect_err("authored metadata cannot claim an executable start");
+    assert!(refused.to_string().contains("unknown field `start`"));
+
+    let mut out = TokenWriter::new();
+    out.seq(4);
+    SourceLanguage::Python.encode(&mut out);
+    out.text("() -> str");
+    Some(signature).encode(&mut out);
+    None::<crate::CallShape>.encode(&mut out);
+    assert!(decode_body::<crate::Written>(&out.into_bytes()).is_err());
+}
+
 fn kernel_library() -> NamedLibrary {
     let mut library = NamedLibrary::new();
     for name in ["num.add", "num.neg"] {

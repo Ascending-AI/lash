@@ -116,14 +116,6 @@ fn as_data(functions: &[(String, lash_vm_client::service::LowerFunction)]) -> se
     serde_json::to_value(functions).expect("saved functions encode")
 }
 
-/// The kernel signature `state`'s function `name` is started under.
-fn start_of(state: &CodeModeExecutionState, name: &str) -> Option<lash_kernel_doc::Signature> {
-    state.lowering_functions()[&lash_kernel_doc::Name::new(name)]
-        .written
-        .as_ref()
-        .and_then(|written| written.start.clone())
-}
-
 /// WR-PARK: a cell parked on a call, killed with its node and resumed on
 /// another saves the same functions, each with what its source wrote of
 /// it, as the same cell run without interruption; a later cell calls them
@@ -216,32 +208,4 @@ async fn a_later_cell_calls_a_resumed_cells_function_alike_with_or_without_a_map
     }
     assert_eq!(outcomes[0].0, serde_json::json!([10, 15, 4]));
     assert_eq!(outcomes[0], outcomes[1]);
-}
-
-/// WR-START: a function saved by a parked and resumed cell has the start
-/// signature its source wrote, the same with the cell's source map as
-/// without it.
-#[tokio::test(flavor = "multi_thread")]
-async fn a_resumed_cells_function_keeps_its_start_signature_with_or_without_a_map() {
-    for lang in [Lang::TypeScript, Lang::Python] {
-        let mut starts = Vec::new();
-        for mapped in [true, false] {
-            let services = lang.services(mapped);
-            let tools = Arc::new(CellTools::default());
-            let mut host = open_host().await;
-            let state = parked_and_resumed(&mut host, lang, &services, &tools).await;
-            starts.push(start_of(&state, "scale"));
-        }
-        let start = starts[0].clone().expect("scale has a start signature");
-        assert_eq!(
-            start
-                .params
-                .iter()
-                .map(|param| param.name.as_str())
-                .collect::<Vec<_>>(),
-            ["x", "extra"],
-            "{lang:?}"
-        );
-        assert_eq!(starts[0], starts[1], "{lang:?}");
-    }
 }

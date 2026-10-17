@@ -52,32 +52,37 @@ impl Lowerer<'_> {
             text.push_str(" -> ");
             text.push_str(self.text(returns.range()));
         }
-        let start = Signature {
-            params: params
-                .iter()
-                .map(|param| Param {
-                    name: Name::new(param.parameter.name.id.as_str()),
-                    ty: parameter_type(param.parameter.annotation.as_deref()),
-                    optional: param.default.is_some(),
-                })
-                .collect(),
-            result: parameter_type(returns),
-        };
         Written {
             language: SourceLanguage::Python,
             signature: text,
-            start: Some(start),
             call: Some(call),
         }
     }
 }
 
-/// How a function `written` describes is started when it crosses to a
-/// tool: called directly with the start's arguments (`K-CLO-004`). None
-/// for a closure that takes more parameters than its signature names.
-pub(super) fn start_adapter(written: &Written, params: usize) -> Option<StartAdapter> {
-    let signature = written.start.clone()?;
-    (signature.params.len() == params).then_some(StartAdapter {
+/// How a source function is started when it crosses to a tool: called
+/// directly with the start's arguments (`K-CLO-004`). None for a closure
+/// that takes more parameters than its source signature names.
+pub(super) fn start_adapter(
+    parameters: Option<&ast::Parameters>,
+    returns: Option<&PyExpr>,
+    callable_params: usize,
+) -> Option<StartAdapter> {
+    let params = parameters
+        .map(|parameters| parameters.args.as_slice())
+        .unwrap_or_default();
+    let signature = Signature {
+        params: params
+            .iter()
+            .map(|param| Param {
+                name: Name::new(param.parameter.name.id.as_str()),
+                ty: parameter_type(param.parameter.annotation.as_deref()),
+                optional: param.default.is_some(),
+            })
+            .collect(),
+        result: parameter_type(returns),
+    };
+    (signature.params.len() == callable_params).then_some(StartAdapter {
         signature,
         representation: FunctionRepresentation::Bare,
         convention: StartConvention::Direct,

@@ -5,14 +5,14 @@
 //! lambdas alike. The record is typed and travels with the document that
 //! holds the site ([`crate::Lowered::written`]) and with every function a
 //! session saves from it ([`crate::SavedFunction::written`]). No source
-//! map is needed to read it: a host starts a function under
-//! [`Written::start`], and a later cell of the same dialect calls it by
-//! [`Written::call`], with or without the source the cell came from.
+//! map is needed to read it: a later cell of the same dialect calls it by
+//! [`Written::call`], with or without the source the cell came from. The
+//! executable document owns the function's start adapter and signature.
 
 use std::collections::BTreeMap;
 
 use lash_kernel_doc::graph_tokens::{TokenCodec, TokenError, TokenReader, TokenWriter};
-use lash_kernel_doc::{Expr, Name, Node, Signature, Site, SourceLanguage, Stmt};
+use lash_kernel_doc::{Expr, Name, Node, Site, SourceLanguage, Stmt};
 use serde::{Deserialize, Serialize};
 
 /// A function as its dialect's source wrote it.
@@ -24,10 +24,6 @@ pub struct Written {
     /// Its signature in the dialect's own syntax, for display: Python's
     /// `async (x, k=1)`, TypeScript's `(x: number) => Promise<number>`.
     pub signature: String,
-    /// The kernel signature a host starts it under, where every parameter
-    /// is one a start can name and type.
-    #[serde(default, skip_serializing_if = "Option::is_none")]
-    pub start: Option<Signature>,
     /// How a later cell of the same dialect calls it, where the dialect
     /// places arguments by its parameters: Python writes one, TypeScript
     /// none.
@@ -105,19 +101,17 @@ pub mod written_table {
 
 impl TokenCodec for Written {
     fn encode(&self, out: &mut TokenWriter) {
-        out.seq(4);
+        out.seq(3);
         self.language.encode(out);
         out.text(&self.signature);
-        self.start.encode(out);
         self.call.encode(out);
     }
 
     fn decode(input: &mut TokenReader<'_>) -> Result<Self, TokenError> {
-        input.expect_struct(4)?;
+        input.expect_struct(3)?;
         Ok(Self {
             language: SourceLanguage::decode(input)?,
             signature: String::decode(input)?,
-            start: Option::decode(input)?,
             call: Option::decode(input)?,
         })
     }

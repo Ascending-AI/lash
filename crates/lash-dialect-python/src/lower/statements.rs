@@ -1024,7 +1024,11 @@ impl Lowerer<'_> {
         )?;
         let written =
             self.function_written(Some(&def.parameters), def.is_async, def.returns.as_deref());
-        let start = super::saved::start_adapter(&written, params.len());
+        let start = super::saved::start_adapter(
+            Some(&def.parameters),
+            def.returns.as_deref(),
+            params.len(),
+        );
         let variable = self.written(name, def.name.range)?;
         self.span_of(def);
         self.push(

@@ -9,10 +9,8 @@ use super::{BindingKind, Buf, FunctionFrame, Lowerer, Lowering, Operand, Ty};
 use crate::adapter as ast;
 
 impl Lowerer<'_> {
-    /// What the source wrote of `function`: its signature as text, and the
-    /// signature a host starts it under when every parameter is a plain
-    /// name of a durable type. A call places its arguments by position, so
-    /// it states no call shape.
+    /// What the source wrote of `function`: its signature as text. A call
+    /// places its arguments by position, so it states no call shape.
     pub(super) fn written(&self, function: &ast::Function) -> Written {
         let text = |span: crate::SourceSpan| self.source.get(span.start..span.end).unwrap_or("");
         let mut params = Vec::with_capacity(function.params.len());
@@ -34,7 +32,6 @@ impl Lowerer<'_> {
         Written {
             language: SourceLanguage::TypeScript,
             signature,
-            start: self.start_signature(function).ok(),
             call: None,
         }
     }
@@ -166,7 +163,8 @@ impl Lowerer<'_> {
         };
         let body = body?;
         self.written = Some(self.written(function));
-        let closure = self.emit_closure(vec![this, args], body);
+        let start = self.start_adapter(function);
+        let closure = self.emit_closure(vec![this, args], body, start);
         self.set_start_convention(frame.context_used || frame.arguments_used)?;
         Ok(Operand {
             plain: None,
@@ -358,7 +356,7 @@ impl Lowerer<'_> {
             unreachable!("positional function frame is active");
         };
         let body = body?;
-        let made = self.emit_closure(params, body);
+        let made = self.emit_closure(params, body, None);
         self.store(Place::Variable(entry.name.clone()), made);
 
         let this = self.fresh("this");
@@ -383,7 +381,8 @@ impl Lowerer<'_> {
             Ok(())
         })?;
         self.written = Some(self.written(function));
-        let closure = self.emit_closure(vec![this, args], body);
+        let start = self.start_adapter(function);
+        let closure = self.emit_closure(vec![this, args], body, start);
         self.set_start_convention(frame.context_used || frame.arguments_used)?;
         let closure = Operand {
             ty: self.facts.function(function.return_ty.as_ref()),

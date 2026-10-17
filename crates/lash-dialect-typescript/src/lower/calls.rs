@@ -700,7 +700,7 @@ impl Lowerer<'_> {
                     });
                     Ok(())
                 })?;
-                let call = self.emit_closure(vec![this, args], body);
+                let call = self.emit_closure(vec![this, args], body, None);
                 vec![
                     text(crate::FUNCTION_TAG),
                     text(path),
