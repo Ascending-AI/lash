@@ -15,6 +15,8 @@ pub(super) struct Pages {
     pub reads: u64,
     pub payload_reads: u64,
     pub seals: u64,
+    /// Seals by page kind, re-encodings of an existing page included.
+    pub kinds: BTreeMap<PageKind, u64>,
     pub bytes: u64,
     pub seal_fault: Option<HeapFault>,
 }
@@ -57,6 +59,7 @@ impl PageSource for Source {
         };
         let mut store = self.0.borrow_mut();
         store.seals += 1;
+        *store.kinds.entry(body.kind).or_default() += 1;
         store.bytes += body.tokens.len() as u64 + 32 * body.children.len() as u64;
         store.pages.insert(
             page.id,
@@ -266,6 +269,7 @@ fn a_tiny_update_among_many_objects_seals_one_directory_path() {
 }
 
 include!("heap_boundaries.rs");
+include!("canonical_pages.rs");
 
 #[test]
 fn relative_references_in_error_data_inherit_the_page_family() {

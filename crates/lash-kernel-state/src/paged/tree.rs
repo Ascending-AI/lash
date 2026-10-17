@@ -12,6 +12,9 @@ use std::collections::BTreeMap;
 use std::rc::{Rc, Weak};
 use std::sync::Arc;
 
+mod canonical;
+#[cfg(test)]
+pub(crate) use canonical::boundary_hash;
 mod decoded;
 mod diff;
 pub use diff::Change;
@@ -592,7 +595,7 @@ impl<T: Cell> Tree<T> {
                     {
                         let mut input = TokenReader::new(&answer.tokens);
                         let count = input.seq().map_err(|e| corrupt(*p, e))?;
-                        if count > KEYED_LEAF_ROWS {
+                        if count > canonical::leaf_cap(sequence) as u64 {
                             return Err(corrupt(*p, "too many leaf rows"));
                         }
                         let mut rows = Vec::with_capacity(count as usize);
@@ -611,7 +614,7 @@ impl<T: Cell> Tree<T> {
                         &answer.tokens,
                     )
                     .map_err(|e| corrupt(*p, e))?;
-                    if rows.is_empty() || rows.len() > INDEX_FANOUT as usize {
+                    if rows.is_empty() || rows.len() > canonical::index_cap(sequence) {
                         return Err(corrupt(*p, "invalid index fanout"));
                     }
                     Node::Index(
@@ -634,7 +637,7 @@ impl<T: Cell> Tree<T> {
                 let (len, cost) = match &mut node {
                     Node::Staged(..) => unreachable!("loaded staged node"),
                     Node::Leaf(rows) => {
-                        if rows.is_empty() || rows.len() > KEYED_LEAF_ROWS as usize {
+                        if rows.is_empty() || rows.len() > canonical::leaf_cap(sequence) {
                             return Err(corrupt(*p, "invalid leaf size"));
                         }
                         check_keys(rows.iter().map(|(key, _)| key.as_slice()))
@@ -908,7 +911,7 @@ impl<T: Cell> Tree<T> {
             seq: bool,
             patch: &mut Option<F>,
             preserve: bool,
-        ) -> Result<(bool, Option<Branch<T>>), E>
+        ) -> Result<(bool, Vec<Branch<T>>), E>
         where
             F: FnOnce(&mut Vec<(Key, T)>, Result<usize, usize>, Cow<'_, [u8]>) -> Result<bool, E>,
         {
@@ -943,20 +946,26 @@ impl<T: Cell> Tree<T> {
                         } else {
                             page.revision.set(revision);
                         }
-                        return Ok((false, None));
+                        return Ok((false, Vec::new()));
                     }
                     let encoded = access.encoded_len(&rows[at].1);
                     let added = Aggregate::of(&rows[at].1);
                     let after = decoded::RowSize::of(&rows[at].0, encoded);
                     let bytes = access.track_row(&page, rows, seq, before, Some(after));
-                    if rows.len() > KEYED_LEAF_ROWS as usize || bytes > PAGE_TARGET_BYTES as usize {
-                        if rows.len() == 1 {
-                            return Err(HeapFault::Malformed("unbounded tree cell".into()).into());
+                    // A working leaf past its cap is cut where the canonical
+                    // rule would cut it from its own start; the seal places
+                    // every boundary canonically.
+                    if rows.len() > canonical::leaf_cap(seq) || bytes > PAGE_TARGET_BYTES as usize {
+                        let right = canonical::cut_leaf(rows, seq, access);
+                        if !right.is_empty() {
+                            refresh(branch, &node)?;
+                            access.track(&page, &node, seq);
+                            let right = right
+                                .into_iter()
+                                .map(|rows| dirty(Node::Leaf(rows), access, seq))
+                                .collect::<Result<_, _>>()?;
+                            return Ok((true, right));
                         }
-                        let right = rows.split_off(rows.len() / 2);
-                        refresh(branch, &node)?;
-                        access.track(&page, &node, seq);
-                        return Ok((true, Some(dirty(Node::Leaf(right), access, seq)?)));
                     }
                     // One row changed: adjust the leaf's aggregates by it
                     // instead of summing every row again (FIG-6465).
@@ -970,7 +979,7 @@ impl<T: Cell> Tree<T> {
                     } else {
                         refresh(branch, &node)?;
                     }
-                    return Ok((true, None));
+                    return Ok((true, Vec::new()));
                 }
                 Node::Index(rows) => {
                     let i = rows
@@ -985,10 +994,10 @@ impl<T: Cell> Tree<T> {
                         } else {
                             page.revision.set(revision);
                         }
-                        return Ok((false, None));
+                        return Ok((false, Vec::new()));
                     }
-                    if let Some(right) = right {
-                        rows.insert(i + 1, right);
+                    if !right.is_empty() {
+                        rows.splice(i + 1..i + 1, right);
                     } else if branch.tasks_known && branch.members_known {
                         // One child changed: adjust by its delta (FIG-6465).
                         branch.encoded_bytes = None;
@@ -998,19 +1007,23 @@ impl<T: Cell> Tree<T> {
                             branch.first = rows[0].first.clone();
                         }
                         access.track(&page, &node, seq);
-                        return Ok((true, None));
+                        return Ok((true, Vec::new()));
                     }
-                    if rows.len() > INDEX_FANOUT as usize {
-                        let right = rows.split_off(rows.len() / 2);
+                    if rows.len() > canonical::index_cap(seq) {
+                        let right = canonical::cut_index(rows, seq);
                         refresh(branch, &node)?;
                         access.track(&page, &node, seq);
-                        return Ok((true, Some(dirty(Node::Index(right), access, seq)?)));
+                        let right = right
+                            .into_iter()
+                            .map(|rows| dirty(Node::Index(rows), access, seq))
+                            .collect::<Result<_, _>>()?;
+                        return Ok((true, right));
                     }
                 }
             }
             refresh(branch, &node)?;
             access.track(&page, &node, seq);
-            Ok((true, None))
+            Ok((true, Vec::new()))
         }
         let mut patch = Some(patch);
         let changed = match &mut self.root {
@@ -1031,12 +1044,10 @@ impl<T: Cell> Tree<T> {
             Some(root) => {
                 let (changed, right) =
                     edit(root, key, access, self.sequence, &mut patch, preserve)?;
-                if let Some(right) = right {
-                    self.root = Some(dirty(
-                        Node::Index(vec![root.clone(), right]),
-                        access,
-                        self.sequence,
-                    )?);
+                if !right.is_empty() {
+                    let mut level = vec![root.clone()];
+                    level.extend(right);
+                    self.root = Some(grow(level, access, self.sequence)?);
                 }
                 changed
             }
@@ -1149,90 +1160,6 @@ impl<T: Cell> Tree<T> {
         }
         Ok(())
     }
-    pub fn seal(&mut self, access: &Access<'_>, work: &mut SealWork) -> Result<bool, HeapFault> {
-        fn walk<T: Cell>(
-            branch: &mut Branch<T>,
-            access: &Access<'_>,
-            work: &mut SealWork,
-            seq: bool,
-        ) -> Result<bool, HeapFault> {
-            if matches!(branch.link, Link::Inline { .. }) {
-                make_dirty(branch, access, seq)?;
-            }
-            let Link::Dirty(page) = &branch.link else {
-                return Ok(true);
-            };
-            let staged = match &*page.borrow() {
-                Node::Staged(p, bytes, leaf) => Some((*p, *bytes, *leaf)),
-                _ => None,
-            };
-            if let Some((p, bytes, leaf)) = staged {
-                branch.link = Link::Sealed(p);
-                branch.encoded_bytes = Some(bytes);
-                branch.is_leaf = Some(leaf);
-                return Ok(true);
-            }
-            let mut node = page.borrow_mut();
-            let mut children = Vec::new();
-            let (kind, tokens) = match &mut *node {
-                Node::Staged(..) => unreachable!("loaded staged node"),
-                Node::Leaf(rows) => {
-                    access.forget_rows(page);
-                    for (_, cell) in rows.iter_mut() {
-                        if !cell.prepare(access, work)? {
-                            return Ok(false);
-                        }
-                        cell.children(&mut children);
-                    }
-                    (
-                        if seq {
-                            PageKind::SEQUENCE_LEAF
-                        } else {
-                            PageKind::KEYED_LEAF
-                        },
-                        encode_body(rows),
-                    )
-                }
-                Node::Index(rows) => {
-                    for child in rows.iter_mut() {
-                        if !walk(child, access, work, seq)? {
-                            return Ok(false);
-                        }
-                    }
-                    let mut data = Vec::new();
-                    for child in rows.iter() {
-                        let Link::Sealed(p) = child.link else {
-                            return Err(HeapFault::Malformed("unsealed index child".into()));
-                        };
-                        children.push(p);
-                        data.push((child.first.clone(), (child.summary, (child.family, p))));
-                    }
-                    (
-                        if seq {
-                            PageKind::SEQUENCE_INDEX
-                        } else {
-                            PageKind::KEYED_INDEX
-                        },
-                        encode_body(&data),
-                    )
-                }
-            };
-            if !work.take(tokens.len() as u64 + children.len() as u64 * 32 + 32) {
-                return Ok(false);
-            }
-            let is_leaf = matches!(&*node, Node::Leaf(_));
-            let encoded_bytes = tokens.len() as u64;
-            let sealed = access.seal(kind, tokens, children)?;
-            drop(node);
-            branch.link = Link::Sealed(sealed);
-            branch.encoded_bytes = Some(encoded_bytes);
-            branch.is_leaf = Some(is_leaf);
-            Ok(true)
-        }
-        self.root
-            .as_mut()
-            .map_or(Ok(true), |r| walk(r, access, work, self.sequence))
-    }
 }
 /// A node a read holds: a working node it borrows, or a decoded one it
 /// shares.
@@ -1337,6 +1264,26 @@ fn dirty<T: Cell>(node: Node<T>, access: &Access<'_>, seq: bool) -> Result<Branc
     refresh(&mut branch, &page.borrow())?;
     access.track(&page, &page.borrow(), seq);
     Ok(branch)
+}
+/// A working root over `level`, adding index levels of at most the
+/// fanout cap; the seal places their boundaries canonically.
+fn grow<T: Cell>(
+    mut level: Vec<Branch<T>>,
+    access: &Access<'_>,
+    seq: bool,
+) -> Result<Branch<T>, HeapFault> {
+    while level.len() > 1 {
+        let mut next = Vec::new();
+        while !level.is_empty() {
+            let rest = level.split_off(level.len().min(canonical::index_cap(seq)));
+            next.push(dirty(Node::Index(level), access, seq)?);
+            level = rest;
+        }
+        level = next;
+    }
+    level
+        .pop()
+        .ok_or_else(|| HeapFault::Malformed("empty working root".into()))
 }
 fn refresh<T: Cell>(branch: &mut Branch<T>, node: &Node<T>) -> Result<(), HeapFault> {
     branch.encoded_bytes = None;

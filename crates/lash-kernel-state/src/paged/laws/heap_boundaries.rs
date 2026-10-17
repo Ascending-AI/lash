@@ -1,140 +1,151 @@
 // Independent canonical page-boundary vectors, included in heap laws.
-/// ADR 0145 D-CAP: literal 63/64/65-cell vectors, independent of packing constants.
-#[test]
-fn list_leaf_boundaries_follow_the_frozen_64_cell_rule() {
+/// The leaves of `kind` in a store, in key order of their first rows, with
+/// each row's key and boolean cell.
+/// Sealed leaves, each as its rows' keys and boolean cells.
+type Leaves = Vec<Vec<(Vec<u8>, bool)>>;
+
+fn sealed_leaves(pages: &Pages, kind: PageKind) -> Leaves {
     use lash_kernel_doc::graph_tokens::{TokenCodec, TokenReader};
-    use tree::{SealWork, Tree};
-    for (count, sizes) in [(63, vec![63]), (64, vec![64]), (65, vec![32, 33])] {
-        let (heap, pages) = fresh();
-        let access = heap.pages();
-        let mut rows = Tree::<PageValue>::new(true);
-        for n in 0..count {
-            rows.write(directory::ordinal_key(n), PageValue::Bool(n % 2 == 0), access)
-                .unwrap();
+    let mut leaves = Vec::new();
+    for leaf in pages.pages.values().filter(|p| p.kind == kind) {
+        let mut input = TokenReader::new(&leaf.tokens);
+        let len = input.seq().unwrap();
+        let mut rows = Vec::new();
+        for _ in 0..len {
+            input.expect_struct(2).unwrap();
+            let key = input.bytes().unwrap().to_vec();
+            let PageValue::Bool(cell) = PageValue::decode(&mut input).unwrap() else {
+                panic!("bool cell");
+            };
+            rows.push((key, cell));
         }
-        assert!(
-            rows.seal(
-                access,
-                &mut SealWork::new(SealBudget {
-                    pages: u64::MAX,
-                    bytes: u64::MAX
-                })
-            )
-            .unwrap()
-        );
-        let root = rows.sequence_root().unwrap();
-        let store = pages.borrow();
-        let top = &store.pages[&root.page().unwrap().id];
+        input.finish().unwrap();
+        leaves.push(rows);
+    }
+    leaves.sort();
+    leaves
+}
+
+fn seal_bools(keys: &[Vec<u8>], sequence: bool) -> (Leaves, PageKind) {
+    let (heap, pages) = fresh();
+    let access = heap.pages();
+    let mut rows = tree::Tree::<PageValue>::new(sequence);
+    for (n, key) in keys.iter().enumerate() {
+        rows.write(key.clone(), PageValue::Bool(n % 2 == 0), access)
+            .unwrap();
+    }
+    assert!(rows.seal(access, &mut full_work()).unwrap());
+    let store = pages.borrow();
+    let top = store.pages[&rows.page().unwrap().id].kind;
+    let leaf = if sequence {
+        PageKind::SEQUENCE_LEAF
+    } else {
+        PageKind::KEYED_LEAF
+    };
+    let leaves = sealed_leaves(&store, leaf);
+    drop(store);
+    access.clear();
+    for (n, key) in keys.iter().enumerate() {
+        assert!(matches!(rows.get(key, access).unwrap(), Some(PageValue::Bool(b)) if b == (n % 2 == 0)));
+    }
+    (leaves, top)
+}
+
+/// Seam H: a sequence leaf `k` holds cells `64k ..< 64(k+1)`; literal
+/// vectors, independent of the packing constants.
+#[test]
+fn sequence_leaves_hold_64_cells_by_position() {
+    for (count, sizes) in [
+        (63, vec![63]),
+        (64, vec![64]),
+        (65, vec![64, 1]),
+        (129, vec![64, 64, 1]),
+    ] {
+        let keys: Vec<_> = (0..count).map(directory::ordinal_key).collect();
+        let (leaves, top) = seal_bools(&keys, true);
         assert_eq!(
-            top.kind,
+            top,
             if count <= 64 {
                 PageKind::SEQUENCE_LEAF
             } else {
                 PageKind::SEQUENCE_INDEX
             }
         );
-        let mut actual = Vec::new();
-        for leaf in store
-            .pages
-            .values()
-            .filter(|p| p.kind == PageKind::SEQUENCE_LEAF)
-        {
-            let mut input = TokenReader::new(&leaf.tokens);
-            let len = input.seq().unwrap();
-            actual.push(len);
-            for _ in 0..len {
-                input.expect_struct(2).unwrap();
-                let key = input.bytes().unwrap();
-                let n = u64::from_be_bytes(key.try_into().unwrap());
-                assert!(
-                    matches!(PageValue::decode(&mut input).unwrap(), PageValue::Bool(b) if b == (n % 2 == 0))
-                );
-            }
-            input.finish().unwrap();
-        }
-        actual.sort();
+        let mut actual: Vec<_> = leaves.iter().map(Vec::len).collect();
+        actual.sort_by(|a, b| b.cmp(a));
         assert_eq!(actual, sizes, "{count} cells");
-        drop(store);
-        access.clear();
-        let opened = Tree::<PageValue>::of_sequence(&root);
-        for n in 0..count {
-            assert!(
-                matches!(opened.rank_get(n, access).unwrap().unwrap().1, PageValue::Bool(b) if b == (n % 2 == 0))
-            );
+        // Leaf k starts at cell 64k.
+        for leaf in &leaves {
+            let first = u64::from_be_bytes(leaf[0].0.clone().try_into().unwrap());
+            assert_eq!(first % 64, 0, "{count} cells");
         }
     }
 }
 
-/// D-CAP's keyed packing estimate is key bytes + encoded cell bytes + 8 per row.
-/// Two rows below/at/above 8192 must stay one leaf/one leaf/split.
+/// Seam H: `H` is fixed and seedless (literal vectors).
 #[test]
-fn keyed_leaf_boundaries_follow_the_frozen_8192_byte_rule() {
-    use lash_kernel_doc::graph_tokens::{TokenCodec, TokenReader};
-    use tree::{SealWork, Tree};
-    for (budget, second_key_len, split) in
-        [(8191, 8166, false), (8192, 8167, false), (8193, 8168, true)]
-    {
-        let (heap, pages) = fresh();
-        let access = heap.pages();
-        let mut rows = Tree::<PageValue>::new(false);
-        let keys = [vec![0], vec![1; second_key_len]];
-        // PageValue::Bool is sum(2, 1) + bool: four bytes.
-        // (1 + 4 + 8) + (key_len + 4 + 8).
-        assert_eq!(13 + second_key_len + 12, budget);
-        for (key, value) in keys.iter().zip([false, true]) {
-            rows.write(key.clone(), PageValue::Bool(value), access).unwrap();
-        }
-        assert!(
-            rows.seal(
-                access,
-                &mut SealWork::new(SealBudget {
-                    pages: u64::MAX,
-                    bytes: u64::MAX
-                })
-            )
-            .unwrap()
-        );
-        let root = rows.keyed_root().unwrap();
-        let store = pages.borrow();
-        assert_eq!(
-            store.pages[&root.page().unwrap().id].kind,
-            if split {
-                PageKind::KEYED_INDEX
-            } else {
-                PageKind::KEYED_LEAF
-            },
-            "{budget} packing bytes"
-        );
-        let mut decoded = Vec::new();
-        for leaf in store
-            .pages
-            .values()
-            .filter(|p| p.kind == PageKind::KEYED_LEAF)
-        {
-            let mut input = TokenReader::new(&leaf.tokens);
-            let count = input.seq().unwrap();
-            assert_eq!(count, if split { 1 } else { 2 });
-            for _ in 0..count {
-                input.expect_struct(2).unwrap();
-                let key = input.bytes().unwrap().to_vec();
-                let PageValue::Bool(value) = PageValue::decode(&mut input).unwrap() else {
-                    panic!("bool cell");
-                };
-                decoded.push((key, value));
+fn the_boundary_hash_is_fixed() {
+    assert_eq!(tree::boundary_hash(0, b""), 0x813f_0174_a236_7c13);
+    assert_eq!(tree::boundary_hash(1, b"abc"), 0xd05d_b19d_7771_29f7);
+    assert_eq!(tree::boundary_hash(0, b"lash"), 0x1d92_f986_4f93_e9b7);
+}
+
+/// `prefix` extended by the first byte that makes a key whose leaf
+/// boundary hash is not natural.
+fn plain(prefix: &[u8]) -> Vec<u8> {
+    (0..=255u8)
+        .map(|b| [prefix, &[b]].concat())
+        .find(|key| tree::boundary_hash(0, key) & 63 != 0)
+        .unwrap()
+}
+
+/// Seam H: a keyed leaf ends after a row whose `H(0, key)` has its low
+/// six bits zero, after its 128th row, or after the row that brings its
+/// encoded rows to 8192 bytes, each counted from its own start.
+#[test]
+fn keyed_leaves_end_at_natural_rows_and_their_caps() {
+    use lash_kernel_doc::graph_tokens::{TokenCodec, TokenWriter};
+    // The count cap: 129 rows with no natural key.
+    let keys: Vec<_> = (0..129u16).map(|i| plain(&i.to_be_bytes())).collect();
+    let (leaves, top) = seal_bools(&keys, false);
+    assert_eq!(top, PageKind::KEYED_INDEX);
+    let sizes: Vec<_> = leaves.iter().map(Vec::len).collect();
+    assert_eq!(sizes, [128, 1]);
+
+    // A natural key ends its leaf.
+    let natural = (0..=u16::MAX)
+        .map(|i| [&[5u8][..], &i.to_be_bytes()].concat())
+        .find(|key| tree::boundary_hash(0, key) & 63 == 0)
+        .unwrap();
+    let keys = [plain(&[1]), plain(&[2]), natural.clone(), plain(&[6]), plain(&[7])];
+    let (leaves, _) = seal_bools(&keys, false);
+    let firsts: Vec<_> = leaves.iter().map(|leaf| (leaf[0].0.clone(), leaf.len())).collect();
+    assert_eq!(firsts, [(keys[0].clone(), 3), (keys[3].clone(), 2)]);
+
+    // The byte cap: the leaf ends after the row that reaches 8192 bytes.
+    let row = |key: &[u8]| {
+        let mut out = TokenWriter::new();
+        out.seq(2);
+        out.bytes(key);
+        PageValue::Bool(true).encode(&mut out);
+        out.len()
+    };
+    for (total, split) in [(8191, false), (8192, true)] {
+        let first = plain(&[0]);
+        let mut big = vec![1; 8_000];
+        big.extend(plain(&[1]));
+        while row(&first) + row(&big) < total {
+            big.insert(0, 1);
+            if tree::boundary_hash(0, &big) & 63 == 0 {
+                *big.last_mut().unwrap() ^= 0x80;
             }
-            input.finish().unwrap();
         }
-        decoded.sort_by(|a, b| a.0.cmp(&b.0));
-        assert_eq!(
-            decoded,
-            vec![(keys[0].clone(), false), (keys[1].clone(), true)]
-        );
-        drop(store);
-        access.clear();
-        let opened = Tree::<PageValue>::of_keyed(&root);
-        for (key, value) in keys.iter().zip([false, true]) {
-            assert!(matches!(opened.get(key, access).unwrap(), Some(PageValue::Bool(b)) if b == value));
-        }
+        assert_eq!(row(&first) + row(&big), total);
+        assert!(tree::boundary_hash(0, &big) & 63 != 0);
+        let keys = [first, big, plain(&[2])];
+        let (leaves, _) = seal_bools(&keys, false);
+        let sizes: Vec<_> = leaves.iter().map(Vec::len).collect();
+        assert_eq!(sizes, if split { vec![2, 1] } else { vec![3] }, "{total} bytes");
     }
 }
 

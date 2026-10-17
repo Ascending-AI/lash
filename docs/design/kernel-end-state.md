@@ -599,9 +599,9 @@ laws run in 2.4. **Deletes** per-statement root and holdings publication
 ### H. The canonical page constructor
 
 **Contract.** Equal semantic state seals to the same pages, whatever history
-built it. Today's trees split a full leaf in half where a mutation overflows it
-(`tree.rs`, `split_off(rows.len() / 2)`), so the same map built in two orders
-can seal to different pages.
+built it. Before FIG-6717 the trees split a full leaf in half where a mutation
+overflowed it, so the same map built in two orders could seal to different
+pages.
 
 - **Sequences** (lists, tuples, a sequence tree) chunk by position: leaf `k`
   holds indexes `64k ..< 64(k+1)` (`SEQUENCE_LEAF_CELLS`). This is
@@ -638,6 +638,24 @@ checks the affected same-build crash/resume laws.
 
 **Built by** swap 2.4(b). **Deletes** the overflow split and the
 removal rebalancing in `tree.rs`.
+
+**As built** (FIG-6717, `tree/canonical.rs`). Every cap closes a chunk
+*after* the item that reaches it (the 128th row, or the row that brings the
+chunk's encoded rows to 8,192 bytes), so a boundary depends only on the items
+since the previous one; closing before an overflowing item would make it
+depend on the next chunk's first row. Index caps are twice the mean fanout
+(64) for keyed trees and the fanout (32) for sequences, and an index entry
+counts its first key plus 96 bytes. Sequence chunks also close at the byte
+cap, which a run of large cells (role chunks) needs to stay within the node
+bound; small cells never reach it, so lists keep the positional 64. `H` is
+FNV-1a over the level's little-endian bytes and the key, then the SplitMix64
+finalizer. Edits keep working nodes bounded by cutting an overflowing node
+with the same rule from its own start, and a seal streams the dirty regions
+bottom-up through one chunker per level, taking a sealed subtree whole once
+every level below it is at a boundary. A budget-exhausted seal keeps the
+chunks it sealed as pages and the rest as working nodes, and the next seal
+continues. Only leaves stage under dirty pressure, sealed as they are; the
+seal reads a staged leaf back and places its rows canonically.
 
 ### I. The memory counter rebase at seal
 

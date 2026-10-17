@@ -90,8 +90,9 @@ impl<T: Cell> Tree<T> {
         Ok(node)
     }
 
-    /// Nested records always inline a small leaf. External root descriptors
-    /// use `seal`, which always publishes a page.
+    /// A nested tree is inline exactly when all its rows encode as one leaf
+    /// within [`INLINE_TREE_BYTES`], and otherwise canonical pages. External
+    /// root descriptors use `seal`, which always publishes pages.
     pub fn seal_nested(
         &mut self,
         access: &Access<'_>,
@@ -115,9 +116,7 @@ impl<T: Cell> Tree<T> {
             }
             let node = Self::load(root, access, self.sequence)?;
             match node {
-                Node::Index(mut rows) if rows.len() == 1 => {
-                    self.root = rows.pop();
-                }
+                // More rows than this never fit an inline body.
                 Node::Index(_) if self.len() <= KEYED_LEAF_ROWS => {
                     let mut rows = Vec::new();
                     self.visit(access, &mut |key, cell| {

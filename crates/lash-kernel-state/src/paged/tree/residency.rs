@@ -9,42 +9,42 @@ trait Stage {
     fn can_spill(&self) -> bool;
     fn spill(&self, access: &Access<'_>, sequence: bool) -> Result<(), HeapFault>;
 }
+/// Only leaves stage: a staged leaf keeps its slot in its working tree,
+/// whose seal reads it back and places its rows canonically. Index nodes
+/// are small beside the leaves they name.
 impl<T: Cell> Stage for DirtyNode<T> {
     fn can_spill(&self) -> bool {
-        self.try_borrow_mut().is_ok()
+        self.try_borrow_mut()
+            .is_ok_and(|node| matches!(&*node, Node::Leaf(_)))
     }
     fn spill(&self, access: &Access<'_>, sequence: bool) -> Result<(), HeapFault> {
-        let node = self.borrow().clone();
-        if matches!(node, Node::Staged(..)) {
+        let Node::Leaf(mut rows) = self.borrow().clone() else {
             return Ok(());
-        }
+        };
         // Preparing and sealing may change storage links, never guest content.
         // All working versions sharing this node see the same immutable stage.
-        let mut branch = dirty(node, access, sequence)?;
-        let mut tree = Tree {
-            root: Some(branch.clone()),
-            sequence,
-        };
         let mut work = SealWork::new(SealBudget {
             pages: u64::MAX,
             bytes: u64::MAX,
         });
-        tree.seal(access, &mut work)?;
-        branch = tree
-            .root
-            .ok_or_else(|| HeapFault::Malformed("nonempty staged tree lost its root".into()))?;
-        let Link::Sealed(page) = branch.link else {
-            unreachable!()
+        let mut children = Vec::new();
+        for (_, cell) in &mut rows {
+            if !cell.prepare(access, &mut work)? {
+                return Err(HeapFault::Malformed(
+                    "unbounded stage ran out of budget".into(),
+                ));
+            }
+            cell.children(&mut children);
+        }
+        let tokens = encode_body(&rows);
+        let bytes = tokens.len() as u64;
+        let kind = if sequence {
+            PageKind::SEQUENCE_LEAF
+        } else {
+            PageKind::KEYED_LEAF
         };
-        *self.borrow_mut() = Node::Staged(
-            page,
-            branch
-                .encoded_bytes
-                .ok_or_else(|| HeapFault::Malformed("staged tree has no byte summary".into()))?,
-            branch
-                .is_leaf
-                .ok_or_else(|| HeapFault::Malformed("staged tree has no node kind".into()))?,
-        );
+        let page = access.seal(kind, tokens, children)?;
+        *self.borrow_mut() = Node::Staged(page, bytes, true);
         Ok(())
     }
 }
