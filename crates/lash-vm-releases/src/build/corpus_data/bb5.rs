@@ -142,6 +142,7 @@ pub(super) const DATA: &str = r####"{
 "b5e73c3a51cb25e15befb609505be77cce37b27fd0810cc0242ad97ec2e2d68f":{"charge":585,"outcome":"ok {\"int\":\"-1\"}","prepared_difference":null,"reservations":[],"reserved":0,"spent":0},
 "b5e8bdcf1c50e8cd6521aacbb98a201d9fa17dfe4ea31f536e8f40d2a09c03b1":{"charge":110,"outcome":"raised \"regex.syntax\" \"invalid regular expression flags: `(` is not a flag\" \"null\"","prepared_difference":null,"reservations":[],"reserved":0,"spent":0},
 "b5eb38c5106fee04a71b938fe0e786e8287b7c937517184a5027d397cc2e7615":{"charge":4,"outcome":"ok {\"float\":\"2.1112627824357564e-228\"}","prepared_difference":null,"reservations":[],"reserved":0,"spent":0},
+"b5eba62ad01f565293ac67de15cfc2dac6e9c442e16a6c8e919800b88d012466":[{"int":"4777813860536718025"}],
 "b5ec16fe5e3a126c38af3d03433b9bd8e0ece14486a657e52ab5423d317b46fd":{"charge":4,"outcome":"ok {\"float\":\"-1.5611307548163313e-18\"}","prepared_difference":null,"reservations":[],"reserved":0,"spent":0},
 "b5edb14e71dbfc9fedc994c6cb070d1ec54bbb8b405af90428556a3c25a2b30a":[{"record":14},{"text":"񵾃򊟼񔖳􏟸򏠗񴀧񩵧󇶝𛸦򧣚􈢫󘅺𨃸󜇹񼰺񇬢򡍔󫹲􍦎򠾽􅋢񴫇𠎒򡌕"},{"int":"5792671311491039015"}],
 "b5edb99f6dfbcdb2c3bbc836998a36beb6a58beb44b511baef0cd3cb694e99fa":{"charge":56,"outcome":"ok {\"int\":\"0\"}","prepared_difference":null,"reservations":[],"reserved":0,"spent":0},

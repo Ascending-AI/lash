@@ -5,7 +5,7 @@
 use lash_kernel_doc::Datum;
 
 use super::embedder::{Embedder, Setup, int, result, text};
-use crate::{End, Layout, Machine, Request};
+use crate::{Bounds, End, Layout, Machine, Request, Step};
 
 /// A program that uses closures over loop variables, shared variables,
 /// tasks, effects in loops, cleanup blocks, maps and library calls of
@@ -109,6 +109,130 @@ fn a_native_implementation_and_a_kernel_body_run_the_same() {
     assert_eq!(body, native);
 }
 
+/// PLAN-INDEP for field caches: warm a read site, fail its position guard
+/// on a different record, then delete, reinsert and mutate its field.
+/// Errors, effects and the memory refusal retain their order and charge,
+/// also with every safepoint reopened under a different, cold plan.
+#[test]
+fn field_hints_are_exact_across_guard_failures_and_cold_plans() {
+    const READS: &str = r#"
+fn fetch(obj) { return obj.value }
+fn fetch_key(obj, key) { return obj[key] }
+fn sibling() { let reply = perform echo("peer") as Any return reply }
+main {
+  let peer = spawn call sibling()
+  let a = {value: 10, other: 90}
+  let b = {other: 80, value: 20}
+  print call fetch(a)
+  print call fetch(b)
+  print call fetch_key(a, "other")
+  print call fetch_key(b, "other")
+  print call fetch_key(b, "value")
+  print call fetch_key([40, 50], 0)
+  let held = (num.add(call fetch(a), 1), perform echo("read") as Any)
+  print held[0]
+  let reply = held[1]
+  remove a.value
+  print call fetch(a)
+  set a.value = reply
+  print call fetch(a)
+  set a.value = 30
+  print call fetch(a)
+  try { do call fetch(null) } catch err { print err.kind }
+  let joined = join peer
+  return call fetch(b)
+}
+"#;
+    let observe = |program: &str, bounds: Bounds, layout: Layout, cold: bool| {
+        let mut embedder = Embedder::with(
+            program,
+            Setup {
+                bounds,
+                layout,
+                slice: if cold { 1 } else { u64::MAX },
+                ..Setup::default()
+            },
+        );
+        let mut plans = [Layout(0), Layout(2), Layout(1), Layout(0x5eed)]
+            .into_iter()
+            .cycle();
+        let mut continuations = Vec::new();
+        let end = loop {
+            let step = embedder.run();
+            if let Step::Ended(end) = step {
+                break match end {
+                    End::Finished(finished) => format!("finished {:?}", finished.result),
+                    other => format!("{other:?}"),
+                };
+            }
+            if matches!(step, Step::Parked(_)) {
+                continuations.push(embedder.machine.canonical_continuation_bytes());
+            }
+            if cold {
+                embedder.reopen(plans.next().unwrap(), true);
+            }
+            if matches!(step, Step::Parked(_)) {
+                embedder.deliver_next();
+            }
+        };
+        (
+            end,
+            embedder.world.printed,
+            embedder.requests,
+            embedder.machine.meters().charged,
+            continuations,
+        )
+    };
+    let natural = observe(READS, super::embedder::ROOMY, Layout(0), false);
+    assert_eq!(natural.0, format!("finished {:?}", int(20)));
+    assert_eq!(
+        natural.1,
+        vec![
+            int(10),
+            int(20),
+            int(90),
+            int(80),
+            int(20),
+            int(40),
+            int(11),
+            Datum::Absent,
+            text("read"),
+            int(30),
+            text("type_error")
+        ]
+    );
+    for program in [
+        READS.to_owned(),
+        READS.replace("return call fetch(b)", "return work.fill(50000)"),
+    ] {
+        let bounds = Bounds {
+            memory: 1 << 18,
+            ..super::embedder::ROOMY
+        };
+        let reference = observe(&program, bounds, Layout(0), false);
+        for layout in [
+            Layout(0),
+            Layout(1),
+            Layout(2),
+            Layout(0x5eed),
+            Layout(u64::MAX),
+        ] {
+            if layout != Layout(0) {
+                assert_eq!(
+                    observe(&program, bounds, layout, false),
+                    reference,
+                    "layout {layout:?}"
+                );
+            }
+            assert_eq!(
+                observe(&program, bounds, layout, true),
+                reference,
+                "cold layout {layout:?}"
+            );
+        }
+    }
+}
+
 /// `K-CHG-003`: the executable computes a charge formula as the formula
 /// states it, in saturating unsigned arithmetic with an empty sum 0 and an
 /// empty product 1, however it groups the terms, folds the constants or
@@ -178,6 +302,17 @@ fn a_compiled_formula_charges_what_the_formula_states() {
     let amounts: [(u64, u64, u64); 4] = [(0, 0, 0), (2, 5, 9), (u64::MAX, 1, 3), (1, u64::MAX, 0)];
     for formula in &formulas {
         let plan = Plan::new(formula, &params);
+        let entry = lash_kernel_doc::PreparedNative {
+            entry: |_| Some(lash_kernel_doc::Value::Bool(true)),
+            operation: "law.scalar_formula",
+        };
+        if let Some(scalar) = crate::compile::ScalarCall::new(&entry, formula, &plan) {
+            let stated = formula.evaluate(&mut |operand, measure| {
+                if matches!(operand, Operand::Param(name) if !params.iter().any(|param| param.name == *name)) { return 0; }
+                match measure { Measure::Size | Measure::DeepSize => 1, Measure::NestedSize => 0, Measure::Magnitude => unreachable!("value-dependent formulas stay generic") }
+            });
+            assert_eq!(scalar.units, stated, "scalar version of {formula:?}");
+        }
         for (a, b, returned) in amounts {
             // Each operand and measure gives its own amount.
             let amount = |index: usize, measure: Measure| {

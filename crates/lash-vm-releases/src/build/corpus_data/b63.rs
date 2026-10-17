@@ -138,6 +138,7 @@ pub(super) const DATA: &str = r####"{
 "63d743aaf82e4a894793114c6921a6cff2c21a4b58b1c0969bb62339d875afc6":[{"int":"3391086915607906726"}],
 "63d96ffb5ee630723ccb20a409ffd697d49af6e21c848165d960667af8f5625b":{"charge":435,"outcome":"ok {\"record\":[[\"matched\",{\"bool\":true}],[\"lastIndex\",{\"int\":\"0\"}]]}","prepared_difference":null,"reservations":[],"reserved":0,"spent":1},
 "63da8107c92ecf9470d84e278950879df7c3745d7ed58085dad6cb2ac70d7f4f":{"charge":19,"outcome":"ok {\"int\":\"493257361851005822\"}","prepared_difference":null,"reservations":[],"reserved":0,"spent":0},
+"63daf522740939ced96e8de0075b440c2c56f5ea412f02986ba6ef74d47e0b46":[{"text":"󮋪񓎯𫨈񜽼򧗢󚮉𴲞󇾇󓪸񳋍򉿨𶣗񞷆񳞝񚪲򐝧񷲩򧀐󥣰񳉁󥉥▁𰾊򓔕􌀿񊩿𗋫򰃎񡵏󹂵񜣔󈉅򝠁𙇱𲢒򒑃􎃋󶯊𞎝𕜚󁔴搞靖􆇸񤬻󩝭𺴃񋊙󝦼𴌏򰡉񵀙🦀𙬈񏰾󧡆񽔶󞬜􅯊𫷽򍇆򝟥𑼊󘖴󟾿򷖀󈵫𗂱򟰐񜷨󟩳򪕇򋇍񡗮𹁅񀸥񺵹𕑣󈨋󐇟񽈜򈪸񕾭񻁒𮾲򧓭𤥄􋛖ꀻ𸖻󛹰𯔌󨷦𵵽󓚇𼔪󖀠ム񒚁蒌󡒅򓇬󘂏"},"null"],
 "63dd90798b6bc69b3a841d068c1f4dd5dd77d44e307042a3d996d95cbbb0156d":{"charge":765,"outcome":"raised \"regex.syntax\" \"invalid regular expression flags: `t` is not a flag\" \"null\"","prepared_difference":null,"reservations":[],"reserved":0,"spent":0},
 "63e15726a058754aef63c788933b694b2326187efc9c89ba46130110ba340718":{"charge":5,"outcome":"ok {\"float\":\"-2.36596485623694e154\"}","prepared_difference":null,"reservations":[],"reserved":0,"spent":0},
 "63e1c9161ba5e10342e7af332cfc76f88254d589868b974fdbdca4df0266fa03":[{"float":"2.074562965248825e52"},{"float":"-1.4819857697498733e-241"}],

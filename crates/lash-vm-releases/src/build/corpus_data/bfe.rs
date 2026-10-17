@@ -142,6 +142,7 @@ pub(super) const DATA: &str = r####"{
 "fef380dc043270bedc7e90ba906f8602fcd5ab57bb08df18f7ffb0f0e0aa44dc":[{"set":87},"null"],
 "fef39ac86229de14cca0b5656198edec2afa4034999c377c5c3f6040aee72623":[{"float":"2.8892937879953593e-154"}],
 "fef39c6c4c40a4719b1a46b776a69c0868cee4d26e44afb5bce37c8c07c85bdc":{"charge":20,"outcome":"ok {\"error\":{\"data\":{\"float\":\"2.2250738585072014e-308\"},\"kind\":\"12.5\",\"message\":\"12.5\"}}","prepared_difference":null,"reservations":[],"reserved":0,"spent":0},
+"fef75e47eee7b0f11b93ddc8e43c1171ec5d9c710d2619e53d11a08843cfb5ad":[{"float":"1.691962509585863e-225"},{"bool":true}],
 "fef9414129358602438cb7144f14abc84163e8941b3ec8ac472770484e6fe87d":[{"text":"򑚾󘜓𱣝򬞬񪔣𜢩򯵸󪲂󤝛񥜕񩣻􇜊󕅤󃣆򍤷𷥅뛷㹚󔢦󟆷𳞔󩻻缆񑙸𸩔󖡀򸒐򵞙䭶𖡠򓒰񊛙󿇔뤷𤆅󐙆񿧊𱲹𛋀񨞥󶇪󰆩쇪򯓩󊍀𥸆􃌺𓿜򅪣񥓖󁇿󩀜򲀼񮝼"}],
 "fefbaf4a25d870201a29f0c81b18f61ec9e3740e7b46c2bc5b691e71655070a5":[{"int":"5817775870630368753"},{"int":"-491662643721678950"}],
 "fefbd47d16e53a9b307c7e7eb27d9c8e6076c0b6b702ea724499cd3ed8ed736c":[{"bytes":""},{"int":"0"},{"int":"32"}],

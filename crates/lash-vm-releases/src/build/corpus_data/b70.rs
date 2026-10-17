@@ -122,6 +122,7 @@ pub(super) const DATA: &str = r####"{
 "70c68732f260e6d337676db0e60c5d2c446f43e9b122e8866ebc479d2711929f":[{"int":"-6511614812619397048"},{"int":"-3773480000872614376"}],
 "70c87becb36d87c004cacad9b3204fbb7024f40fefda3cdd7fb4481135afe128":{"charge":157,"outcome":"raised \"json_syntax\" \"invalid JSON, including unpaired surrogates\" \"null\"","prepared_difference":null,"reservations":[],"reserved":0,"spent":0},
 "70c9357e06344d8274a0f5017020dc6882b851c54d8bf5ead5152d3619938292":[{"list":0},{"float":"9.061134202556018e286"}],
+"70cd93f9f16ccc8e019dff4fe717ae905bb4210515520efa602381e5f8d4e198":{"charge":478,"outcome":"declined","prepared_difference":null,"reservations":[],"reserved":0,"spent":0},
 "70cedca432f622956b1ed31f6f5468995a221218d14993f0394d7fafd39efd24":{"charge":67,"outcome":"ok {\"float\":\"-6.266095755210066e-277\"}","prepared_difference":null,"reservations":[],"reserved":0,"spent":0},
 "70d144f145354b1dd7363abeb5330a3e3a49185778c950f68908163fadf1bd22":[{"text":"򾫈󱌝󵹻󼘇򡁋񹢫򕕚񙽰񤉎񤭊򭍜񗷺񵖁⍪􎞬󊵣򞓹񾭰񣢦񖝗𪩙𽗏󛞤𙟋􎰤󮣼񄈭񙗩񒚂񨡏񶚟񧾒􈷭񇶶򺫍񆋘思𭞝󱥲󷇀񨔣񳓩򃓀񝒩󁝀򲭮򅺸🦀󀳽󶶤򋹿󔃃󞒂򱇋𴼨󁦶󸠅򄱕򋦍𿆾𽟝󙌲򑊔𰶱嗪򍗁󷸪"},{"text":"􌌂񖸄𢯘Ə񛙌󪐠񐽨񣭶󚪀񝧕𯔦󶕌􆺆򄏛򱦜򱲯󲅖󱺔񵆩񴭊򬍜󈏚󓉝򏕹򲓓񻑚񮦲񧃡񢁀򛘀򅵬􆫖򕶃󑷸򹏃󗈤뗀󔂫⳪񞰳񠴫񧿱􋵎򀶴񷒯򓎆򹉡󶌅󑢃󡙲򤳞򑏇𐘠󞐬񴫤𢅱򏍳򎁕򫋕񳳰󑲉󟣰𾤁𸪓𪅆𧦄􉡷󱒇񲭮󢂸򤋹򤰼򅦤򮠗􀠇򬧗󣎄񴓣𧊪񡛏񄴢񤤸􌖪󬪡򎅴񓦶"}],
 "70d1f0cb3ab37bbe024c49215e3824bf5409d79b9fb2773798d939db567ebaf7":[{"list":[{"float":"-2.5985073439943752e-24"},{"int":"4812528054383796036"},{"text":"𧩴񴆀񚤃񌺑󴽌򚃒󞤓󣐁󲀩𞐩𩶡󛓚򡼳񤿍🨒񀽦惸񙠹󢵉򥭓􈄥򪥧򍇵󰜖󞚘󄵕񡺏񭭲≄󤤀񥆒񹆱򑛒𔉿񀄻򭟹񗨖󋽢󏊜񮑹󜷱񟀪򢍊𭦌򤼿񽡡𭶑򌱪󻥲󇢀񽡱𬮁󂉖񖶒򓿉񢧶𷘥놉𶊪񡓯􌄆𮴄⟞𱨑򊁥󉹥򓘙򻈵␑񘠙𺥉񥩛񑐯𢿇񓩘񁨬򢔘򵝒򌵼򴗦򃳭򯇔󀴷򗓭퍄񯟢򴒍󾵄񶦞񛣍󽓼򭑕񏲽󑐄򭬬󧮚񘿭𛆲𐱑󪠉򜴙򌛃𕶎撵񎤼񡇮󕉍򕞩🦀􂽸줦󖜴𺃺"}]}],

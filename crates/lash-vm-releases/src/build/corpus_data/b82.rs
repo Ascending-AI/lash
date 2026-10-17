@@ -62,6 +62,7 @@ pub(super) const DATA: &str = r####"{
 "8254542f5974cc858b1b02332808821d399597f0ee370d70bfa99d975052df25":[{"float":"9.117910397412659e272"},{"int":"-4228509376335766693"}],
 "825a58e43b5bcdcf9b59cba2e3684808bf306345c23ea3fb89f7f8cfade3783a":[{"set":2},{"list":24}],
 "825a8f7e267cbd5d99f544d8df20cbfaf887bc2759cd8b947678958fa9a9dca7":[{"text":"Hello, Wörld"},{"text":"Hello, Wörld"}],
+"825c858576ccee8542584177dcbfca030afff5261c11cf56bd49e1925d160f77":[{"int":"8929684999999072926"},{"bool":true}],
 "825cb6725afb433c7bbf7648fb38e1a67c965a3d6e8a57fa44589711e7cea09e":{"charge":68,"outcome":"ok {\"float\":\"4.158638853279167\"}","prepared_difference":null,"reservations":[],"reserved":0,"spent":0},
 "825d3fc7efbe9268089ea33cd7df539ce24e3cdeb0a42c9d195ad3097d125f91":{"charge":18,"outcome":"ok {\"float\":\"-0.5002892486435053\"}","prepared_difference":null,"reservations":[],"reserved":0,"spent":0},
 "825d71bb45dfd5106c6ac24c0900986a8b9b666bbb99e490851c7b7328d7392f":[{"float":"-4.947691573697025e74"}],

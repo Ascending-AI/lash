@@ -477,6 +477,28 @@ impl KernelMachine {
         let Some(item) = via_of(exe, stmt).and_then(|via| via.item) else {
             return self.bind_pass(task, exe, raw);
         };
+        if let Cursor::List(list, _) = cursor
+            && via_of(exe, stmt).is_some_and(|via| via.fuse_list)
+        {
+            let list = *list;
+            *header = Header::Item(Box::new(raw.clone()));
+            self.put(0, Value::List(list));
+            self.put(1, raw);
+            #[cfg(test)]
+            {
+                self.storage.fused_list_items += 1;
+            }
+            // Same held item and argument roots as the general hook. Only
+            // the cursor-to-hook argument vector and repeated cursor dispatch
+            // disappear; decline still enters the exact body at Item.
+            return match self.call_lib(task, exe, item, 0, 2, Some(stmt))? {
+                Flow::Done => {
+                    let element = self.take(0);
+                    self.bind_pass(task, exe, element)
+                }
+                Flow::Step => Ok(Flow::Step),
+            };
+        }
         let walked = cursor
             .walked()
             .ok_or_else(|| fault("an opened loop walks nothing"))?;

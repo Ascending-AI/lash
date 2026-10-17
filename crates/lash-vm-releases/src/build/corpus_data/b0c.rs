@@ -82,6 +82,7 @@ pub(super) const DATA: &str = r####"{
 "0c7b946931eae09264671b918af7cb7c715c4e84932bfefdf0d484f58891070a":[{"bytes":"c94414589e37abc01fad1e9051571d91b001ff3c8e6d859e17d14a26f6cfa0ef04703498b796795ff700f427eba0718198d550e445c102dc1bb754d42705e9281e6c06e2d754fe03b306e6a94e2c"}],
 "0c7cc9c66b3bc4f34674c472b82aa9452fd864dd838773e7dfc4100148a62704":[{"list":0},{"bool":false},{"int":"9106335563043545417"},{"float":"-3.716803462158344e-144"},{"bool":false},{"bool":true}],
 "0c7d5031aa8e7f5254d325907d5e51669b68276a62b1075b9ec54a55ebadad5d":[{"int":"-6541200462629317524"},{"int":"5448494022528334020"}],
+"0c7dbaa7758dce2c2a7a20c9db0778651257b6e5f79b344291c17292ee76feb6":{"charge":136,"outcome":"declined","prepared_difference":null,"reservations":[],"reserved":0,"spent":0},
 "0c81cd038c05dd6b1d96ebde92bcbf8d7b0787a927badb2cfd5402155ab7a62b":{"charge":4,"outcome":"ok {\"float\":\"8.724221284321879e266\"}","prepared_difference":null,"reservations":[],"reserved":0,"spent":0},
 "0c8771fc04aa8a615017a24b118e2fb41a3da60a33d5beeb9a3f16371a425143":[{"int":"4834796058771086897"}],
 "0c87bceda01f7db9219c2a3784d56e1679291043832c39dd1504962fea1815c9":{"charge":8,"outcome":"ok {\"text\":\"é\"}","prepared_difference":null,"reservations":[],"reserved":0,"spent":0},

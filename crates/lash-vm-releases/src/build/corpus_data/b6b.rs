@@ -125,6 +125,7 @@ pub(super) const DATA: &str = r####"{
 "6bd9e8306fb1df2254836d64ad6eed31d1b3ccc77bf82f29aefb49efb373649a":{"charge":5,"outcome":"ok {\"int\":\"2848474421927572805\"}","prepared_difference":null,"reservations":[],"reserved":0,"spent":0},
 "6bd9f78565cefe0b4d8a4f98fba04810a8509e5fcdc6d8daa8c25801af0c9c61":[{"float":"1.4682993032072706e255"}],
 "6bdba23eb822369481e037734f44b8466eeb10cc8bf276d8ca32029b6c4fa310":{"charge":17,"outcome":"ok {\"text\":\"\"}","prepared_difference":null,"reservations":[[0,0]],"reserved":0,"spent":0},
+"6bdc0655452ca414cf6bfb4a989905ccd3ec6bd923cb2773095fc2492be4c97f":[{"text":"񺅾򘮼𩎫󶁌򑞌􏪣򐶖񅐍࿥񲚺񒉷򞯳񍋤呁򗲩󜸐󛦌􅧿񇲌򨝵􏤻𘀉𨭉򴐟񚅗񔯕񾸂ཞ󁣀𜛱󓤼⁎年󦟽󫱲𣦊􅝹󄆗𓳔򽶭򙅖𤿴򕱫󙈓𪯷󠭠򪵶徬򶨓񼈇鱃򷞻"}],
 "6bdcdf4cbd98a4c683145794c9924498c781b75fb90310ce22c4dead4a80868c":{"charge":6,"outcome":"ok {\"float\":\"-1.7221153157896673e-51\"}","prepared_difference":null,"reservations":[],"reserved":0,"spent":0},
 "6be1d635fbce19b1c22bcd02b03a3a50d0ca59d59c5272446ced6bb9139ee074":{"charge":407,"outcome":"declined","prepared_difference":null,"reservations":[],"reserved":0,"spent":0},
 "6be23ab05d636233ed330020378480df7ed0e41c5916bfb331f8a70a4562bcb6":{"charge":16,"outcome":"raised \"number_range\" \"decimal layout bounds must be in -324..309\" \"null\"","prepared_difference":null,"reservations":[],"reserved":0,"spent":0},

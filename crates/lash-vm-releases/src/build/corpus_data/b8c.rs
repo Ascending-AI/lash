@@ -120,6 +120,7 @@ pub(super) const DATA: &str = r####"{
 "8cad1fd5588404ab7e964a2418a5189f86b4659e93f5018b4ca09c40c9e1bbe0":[{"int":"-4534261914987241611"},{"int":"6763763789089740427"}],
 "8cafb4d27171f812d1cfcf64f055bf2b7fc5f02893e6df8928d7bf3a7f59eba4":{"charge":369,"outcome":"raised \"number_range\" \"radix must be between 2 and 36\" \"null\"","prepared_difference":null,"reservations":[],"reserved":0,"spent":0},
 "8cb0d91f2be522b59f3204289e85d5b32c687d8ee89aa71e33817702c9c7843e":{"charge":210,"outcome":"ok {\"list\":[{\"text\":\"򞾏嶐󻤫🦀򪕠\"}]}","prepared_difference":null,"reservations":[[1,19]],"reserved":35,"spent":0},
+"8cb40cb0c993f741ff46b27ca3f114ccd0ebe53e9e8a0670012387e2ce7ae700":[{"float":"-1.2101916111737821e-175"},{"int":"-6734307912702918747"}],
 "8cb49e55099d7b36e7c6566e2a88424bc2814271e9b2b3f365a93a16f722f0f5":{"charge":984,"outcome":"raised \"type_error\" \"Invalid URL\" \"null\"","prepared_difference":null,"reservations":[],"reserved":0,"spent":0},
 "8cb752fcb9df4d3f296a5bdb989258e4e67d62740d8c153e93bf6e9c89b66ff3":[{"text":"12.5"},{"int":"1180591620717411303424"},{"int":"1180591620717411303424"}],
 "8cba36974b8b37dd3c3c1f90b993bc4fe0de4eba8f25fd2eaafa296aecf42641":[{"text":"򏋎񶪫𵪾񦞋􆞄򀹋𕚗񅏺򂏝򖻚񜢇𓋖򊄳󇚱񜀜򅺜񃤡򘤓򺣁񕿐򱅯񪲍󵪔𼜡񼛯𼚢󨦯񊵼򠴦񶊼񧅹󇯛𶿬𔐳󕙻򜐗􈩟򫪋򥔾󼛌򚱁񕽙򫾧񲌘񊭞𪆈񸋋񰄎񟺌񨉱𻬵󄄃򕭁񕮷񱻀󻋽񀓘哑񗀸󮻘𢄅󟨇񐸳񃣯󸥞񺇌󮆏𦖌𯑇󩑯񨢇깖񊂊񄕋󅼁𽿿𴞀󮼏󋌑𪘷񳚻򰐖򸮞󇼉򱞷􄁘뻘􋆥󈞆􈔉􈑃𬾋󇻔𬔩"},{"float":"5.6203823096601864e-207"}],

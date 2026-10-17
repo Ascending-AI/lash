@@ -74,3 +74,51 @@ fn typescript_odd_cases_run_alike_whichever_path_answers() {
 fn python_cases_run_alike_whichever_path_answers() {
     runs_alike_whichever_path_answers("python", None);
 }
+
+/// PLAN-INDEP for FIG-6640: numeric native guards decline coercions, a list
+/// cursor maps holes and hands arbitrary values through unchanged, while
+/// text, Map and Set cursors keep the complete item body and machine deref.
+#[test]
+fn numeric_and_list_operations_run_alike_after_guard_misses() {
+    let runner = Runner::new("typescript").unwrap();
+    let sources = [
+        "const marks = []; const box = {valueOf() { marks.push('valueOf'); return 7; }}; await observe([10 - 3, 10 - box, Number(box), marks.join(',')]);",
+        "const out = []; for (const x of [1, , 3]) { out.push(x === undefined ? 'hole' : x); await observe(x); } const xs: number[] = 'ab' as any; for (const x of xs) { out.push(x); } await observe(out);",
+        "const key = {value: 1}; const entriesMap = new Map([[key, 'entry']]); for (const [entryKey, v] of entriesMap) { await observe(v); await observe(entryKey === key); } const membersSet = new Set([key]); for (const entryKey of membersSet) { await observe(entryKey === key); }",
+    ];
+    for (index, source) in sources.into_iter().enumerate() {
+        let case = Case {
+            id: format!("FIG-6640-{index}"),
+            dialect: "typescript".into(),
+            source: source.into(),
+            bits: 0,
+            stride: 0,
+            nanoseconds: 0,
+        };
+        let program = match runner.lower(&case).unwrap() {
+            Lowered::Program(program) => program,
+            Lowered::Refused(observed) => panic!("{} must lower: {:?}", case.id, observed.result),
+        };
+        let reference = runner.execute(&case, &program, &[Layout(0)]).unwrap();
+        assert_eq!(
+            reference.result["type"], "observations",
+            "{}: {:?}",
+            case.id, reference.result
+        );
+        for plan in [
+            &[Layout(1)][..],
+            &[Layout(2)],
+            &[Layout(3)],
+            &[Layout(0x5eed)],
+            &[Layout(0), Layout(2), Layout(3), Layout(1), Layout(0x5eed)],
+        ] {
+            let observed = runner.execute(&case, &program, plan).unwrap();
+            assert_eq!(
+                (&observed.result, observed.charged),
+                (&reference.result, reference.charged),
+                "{}: {plan:?}",
+                case.id
+            );
+        }
+    }
+}

@@ -76,3 +76,30 @@ fn a_declared_array_is_walked_as_what_it_holds() {
         await finish(n);";
     assert_eq!(finished(source), Datum::Float(Float::new(2.0)));
 }
+
+/// K-CHG-007 and PLAN-INDEP: binding a list element charges only its own
+/// size and immutable key material. Growing a graph behind its identities
+/// cannot turn an item handoff into a deep graph walk; text key work grows
+/// by its bytes instead. The operation's declared formula pins this rule.
+#[test]
+fn list_item_charge_does_not_walk_graphs_behind_the_element() {
+    let added_charge = |bindings: &str| {
+        let base = format!("{bindings}\nawait finish(0);");
+        let walked = format!("{bindings}\nfor (const item of [raw]) {{}}\nawait finish(0);");
+        let plain = plain_record_resume(&base, u64::MAX, false);
+        let looped = plain_record_resume(&walked, u64::MAX, false);
+        assert_eq!(plain.0, looped.0);
+        looped.1.checked_sub(plain.1).unwrap()
+    };
+    let small = added_charge("const inner = {value: 'x'.repeat(1)}; const raw = [inner, inner];");
+    let large =
+        added_charge("const inner = {value: 'x'.repeat(4096)}; const raw = [inner, inner];");
+    assert_eq!(large, small, "only the element's own list size is measured");
+    let short_key = added_charge("const raw = 'x'.repeat(16);");
+    let long_key = added_charge("const raw = 'x'.repeat(32);");
+    assert_eq!(
+        long_key - short_key,
+        16,
+        "immutable key bytes bound key work"
+    );
+}

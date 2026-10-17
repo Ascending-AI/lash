@@ -24,6 +24,7 @@ mod session;
 mod steps;
 mod stream;
 mod tasks;
+mod versions;
 
 use std::sync::Arc;
 
@@ -251,6 +252,10 @@ struct Storage {
     #[cfg(test)]
     value_moves: usize,
     #[cfg(test)]
+    scalar_calls: u64,
+    #[cfg(test)]
+    fused_list_items: u64,
+    #[cfg(test)]
     activation_records: Vec<CodeId>,
     #[cfg(test)]
     activation_sites: Vec<CodeId>,
@@ -258,6 +263,8 @@ struct Storage {
 
 struct Frame {
     code: CodeId,
+    /// The selected Kir version; cold frames start with empty caches.
+    scalar_blocks: bool,
     slots: frames::Slots,
     record: FrameRecord,
     access: Access<'static>,
@@ -337,6 +344,7 @@ pub struct KernelMachine {
     pins: Pins,
     fresh: Vec<EntityId>,
     charging: bool,
+    scalar_blocks: bool,
     charged: u64,
     /// The cost table of the kernel version the document states.
     costs: crate::costs::Costs,
@@ -733,11 +741,15 @@ impl KernelMachine {
     }
 
     fn refresh_charging(&mut self, task: TaskId, exe: &Executable) -> Result<(), Halt> {
-        self.charging = self
+        let (charging, scalar_blocks) = self
             .task(task)?
             .frames
             .last_mut()?
-            .is_none_or(|frame| exe.code(frame.code).charged);
+            .map_or((true, false), |frame| {
+                (exe.code(frame.code).charged, frame.scalar_blocks)
+            });
+        self.charging = charging;
+        self.scalar_blocks = scalar_blocks;
         Ok(())
     }
 
@@ -1076,6 +1088,45 @@ impl KernelMachine {
             })
             .expect("the task rows read");
         delivered
+    }
+
+    /// Canonical continuation payloads at a public park. Semantic sites are
+    /// resolved before encoding; no compiled table or register index enters it.
+    pub(crate) fn canonical_continuation_bytes(&mut self) -> Vec<Vec<u8>> {
+        let mut rows = Vec::new();
+        let access = self.heap.pages().clone();
+        self.publish(true).expect("the run publishes");
+        self.tasks
+            .visit(&mut |id, task| {
+                for index in 0..task.frames.len() {
+                    let (_, frame) = task
+                        .frames
+                        .rank_get(index, &access)
+                        .expect("frame reads")
+                        .expect("frame exists");
+                    let site = frame.statement.resolve(&access).expect("semantic site");
+                    let pending = frame
+                        .pending
+                        .as_ref()
+                        .map(lash_kernel_doc::graph_tokens::encode_body);
+                    let mut loops = Vec::new();
+                    for at in 0..frame.loops.len() {
+                        let (_, row) = frame
+                            .loops
+                            .rank_get(at, &access)
+                            .expect("loop reads")
+                            .expect("loop exists");
+                        loops.push(lash_kernel_doc::graph_tokens::encode_body(&row));
+                    }
+                    rows.push(
+                        serde_json::to_vec(&(id.0, index, site.as_ref(), pending, loops))
+                            .expect("continuation tokens serialize"),
+                    );
+                }
+                true
+            })
+            .expect("task rows read");
+        rows
     }
 
     /// The phase of every published frame row that stands at a nested

@@ -76,6 +76,7 @@ pub(super) const DATA: &str = r####"{
 "34794bc3d6c7b43e85151e316754f655eebebbe291d3ef680adbc3fbb1bdb1a2":[{"text":"𰥩򧬻󨔍񁭇򕺱򰉌󑥈􅕺󃭐򱼦𴺘𕸅񗯹𪅎뎌󑿫󳤔󦹦򅴺􍌀򏲦󸳟򅘆𥄪贈񺠒󫇂󁈡󰁅󂜅򬨋󊝟񞷑󔁊򛑊񮖢🃩򩵈񞙲񁼾󜚀󍜍򶧣򵗰􄽛􎄅񉦇񼕴𽯾柳󨉺𴇾𢓽􄿴򟹫󺽗񏧉幺񐁆􈏆𕕁𻎫󹠌򰰼󷴤񻻞򌈣񏵧񻝝򚽳򲃭󧷬򷠗󆼧񕈹񵻝󺬠񿹶𜸊񯴖󝕬򁟆񽉩򩎍򪯪𒸽🼡􎲟񪒆󒉏򋟋򸁤𵩤򝏐򘹷񡊫𢙎򤆂򟆁󖐢񔱪偲󜩒䥆"}],
 "347a679d01d3bed1dc3237473632441414a12cf96f551551bb00954f2f35fb39":{"charge":441,"outcome":"ok \"absent\"","prepared_difference":null,"reservations":[],"reserved":0,"spent":0},
 "347b2ec0324f464d4f6d134326092d0574a45f3cc0ad0134d936f6a32408a3cc":[{"text":""},{"int":"0"},{"text":"g"},{"text":"start"}],
+"347bf37c9946f56bbeff8ef44b1b09af8b19e208969bab3a30222c71464b71f5":{"charge":130,"outcome":"ok {\"int\":\"-2139371144495553078\"}","prepared_difference":null,"reservations":[],"reserved":0,"spent":0},
 "347c4a3fafe8f6eb463834802d054f9af653fc6229142a8da0804212b2b4ef88":[{"list":85},{"error":{"data":"null","kind":"type_error","message":"corpus"}}],
 "347df8ec158ab44e76b8f466648494e520312090028019e8ddb67046682d4857":{"charge":59,"outcome":"ok {\"text\":\"https://example.org/?x=🦀\"}","prepared_difference":null,"reservations":[[0,54]],"reserved":54,"spent":0},
 "347e5711cecc57c258aa6f045b483b421ef6c02fce0b96dc1fe29a39539b459e":[{"float":"-1.1519757895803881e-229"},{"int":"-6486158786814850470"}],

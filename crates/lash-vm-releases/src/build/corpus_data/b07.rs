@@ -25,6 +25,7 @@ pub(super) const DATA: &str = r####"{
 "071b8dc700b46f8938f5ce9c46656db6ea96f019de9080eceb34b6819fc39cb5":[{"float":"2.0403869523731433e272"}],
 "071cc65bc9b24dfe645392ea80a5d54c1ec406fd5cf0c83ba1225ec57049a899":{"charge":68,"outcome":"ok {\"float\":\"1.8446744073709552e19\"}","prepared_difference":null,"reservations":[],"reserved":0,"spent":0},
 "071dc780ab07ce7a2e8ddb890eb243ec89271501e847b929d6387dda9972eabd":{"charge":3,"outcome":"ok {\"int\":\"31\"}","prepared_difference":null,"reservations":[],"reserved":0,"spent":0},
+"071deeaeae06bb758ebd0b31486822b1dc548b29f5bcb9e4926a084efc954505":{"charge":137,"outcome":"declined","prepared_difference":null,"reservations":[],"reserved":0,"spent":0},
 "07202af2ebea454271c27d257d71e430121258fca5b065b6fd0a37addcaf49f6":{"charge":145,"outcome":"raised \"number_range\" \"radix must be between 2 and 36\" \"null\"","prepared_difference":null,"reservations":[],"reserved":0,"spent":0},
 "072090eb7364cab0bfae08e8b7ec2fb7d5400eda89d695c3b49b1cbf92426f7e":{"charge":20,"outcome":"ok {\"int\":\"24356987992541932875935556060137277624\"}","prepared_difference":null,"reservations":[],"reserved":0,"spent":0},
 "07216625388586234e0c17e34cef0be413d29afa9535aef382bd52d8c4458052":[{"float":"-8.721268602404246e-240"},{"int":"7348946734601919848"}],

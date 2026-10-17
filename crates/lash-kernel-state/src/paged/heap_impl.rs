@@ -1102,6 +1102,65 @@ fn table_cost(kind: ObjectKind, rows: u64, len: u64) -> u64 {
     })
 }
 impl PagedHeap {
+    /// Reads a record field using an optional insertion-position hint.
+    ///
+    /// The position is only a hint: it may have come from another record,
+    /// an earlier edit, or another activation. The current row must still
+    /// name the requested field. A missing or mismatched row takes the
+    /// ordinary lookup, returning its position for the next read. No value,
+    /// head or page is retained by the hint.
+    ///
+    /// # Errors
+    ///
+    /// The same heap faults as [`NativeHeap::record_get`].
+    pub fn record_get_hinted(
+        &self,
+        record: EntityId,
+        field: FieldName<'_>,
+        hint: Option<TableCursor>,
+    ) -> Result<(Option<Value>, Option<TableCursor>), HeapFault> {
+        self.read_head(record, |head| {
+            let Some(Body::Table {
+                kind: ObjectKind::Record,
+                lookup,
+                rows,
+                ..
+            }) = head.map(|head| &head.body)
+            else {
+                return Ok((None, None));
+            };
+            if let Some(TableCursor(position)) = hint
+                && let Some(entry) = rows.get(&position.to_be_bytes(), &self.access)?
+                && let Value::Text(name) = &entry.key
+            {
+                let matches = match field {
+                    FieldName::Static(field) => match &name.body {
+                        Payload::Resident(name) => name.as_ref() == field,
+                        Payload::Paged(_) => self.copy_text(name)?.as_ref() == field,
+                    },
+                    FieldName::Text(field) => text_same(self, name, field)?,
+                };
+                if matches {
+                    return Ok((Some(entry.value), hint));
+                }
+            }
+            let key = match field {
+                FieldName::Static(field) => Value::text(field),
+                FieldName::Text(field) => Value::Text(field.clone()),
+            };
+            let Some(normal) = self.normal_key(&key)? else {
+                return Ok((None, None));
+            };
+            let Some(Ordinal(position)) = lookup.get(&normal_bytes(normal), &self.access)? else {
+                return Ok((None, None));
+            };
+            let entry = rows
+                .get(&position.to_be_bytes(), &self.access)?
+                .ok_or_else(|| HeapFault::Malformed("lookup points at no entry".into()))?;
+            Ok((Some(entry.value), Some(TableCursor(position))))
+        })
+    }
+
     pub(super) fn table_get(
         &self,
         table: EntityId,

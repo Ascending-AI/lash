@@ -73,5 +73,6 @@ mod laws {
     #[path = "../family_impl/laws.rs"]
     mod lifecycle;
     mod metadata;
+    mod record_hints;
     pub mod root;
 }

@@ -45,6 +45,7 @@ pub(super) const DATA: &str = r####"{
 "8b4d3d4a3a960334dd6594c3910457a5bfa7a4118cdc5b36eef92ac70542b289":[{"text":"a+"},{"text":"a+"},{"int":"-1"}],
 "8b4d447f03ac626380d238c8bd766019b6a23798d1a34c0e12e9894f0b8f00f2":[{"int":"-5307844515356828735"},{"int":"-4266908403123485002"}],
 "8b4de7b3e257eba88de666233c901f32b32c479ce922bb3eeb6cc2eca048ac2d":{"charge":4,"outcome":"ok {\"float\":\"2.640274259290153e-49\"}","prepared_difference":null,"reservations":[],"reserved":0,"spent":0},
+"8b53529f664a194b448f14b9253501374f598e1b329f07c22568d3ab703fdce9":[{"float":"4.6560638711274916e-272"},{"text":"𿍳󠩕񼌁򪳇򂉞𧆚񊗹󈻲𗝯𩙁򦼭🦀񕏆񉣡񾆐𝱓𓤫󕎙󮵾眤򏻊"}],
 "8b55ede49e51e0743e832c2770deb57c5d8ac96ba26c3f3bb2b267bf3d8612d9":[{"text":"2024-02-29"},{"int":"32"}],
 "8b5af588d0eb0445e31244d6cb4ba075accc45ef5056503b0e77743514b9fb63":{"charge":6,"outcome":"ok {\"int\":\"2572259784633514930\"}","prepared_difference":null,"reservations":[],"reserved":0,"spent":0},
 "8b5b21750e689c355131d0fa2a753616ce2c6044be66713179135cbac010cc56":{"charge":67,"outcome":"memory","prepared_difference":null,"reservations":[[0,1249]],"reserved":0,"spent":0},

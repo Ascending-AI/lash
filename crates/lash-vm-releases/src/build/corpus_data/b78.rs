@@ -138,6 +138,7 @@ pub(super) const DATA: &str = r####"{
 "78afffd4596818af485448cb8183da52047d086aaaa093245e7e948b42523274":{"charge":7,"outcome":"ok {\"int\":\"-2445478268019771025\"}","prepared_difference":null,"reservations":[],"reserved":0,"spent":0},
 "78b182eaf39b72db7b81b6c0807564b443e22c89f02233094e258c1427c23117":[{"float":"-1.0080168152085792e36"},{"float":"7.011054474880657e86"}],
 "78b2cacecf79322ec8768412755fc3ca8c03ed7fdea80409f6d28013d31f9e8a":[{"int":"-3848204656628340664"},{"int":"7150936442576808344"}],
+"78b4570a2c5e9786bb0850686ccfc5dc5322457004655079bd66cc8c3247404f":[{"list":["null",{"text":"𰙷򠎻񺽼󼴢򌠸򼆨򿠫􉄛𞳹蕠򹉪􊇎󼄍"},{"bool":false},{"text":"򬠙𩇉򛢪𵍛𾜽񙞳𧑜򂎴򹣳󾴂􊡘𹤈􄐺𕰲񞠊󵵚񧵠򉎚󙐽򷑕󺗽񡇶򳉕򉅱񖠓򏨃񥴷𢁍𻭍󌍻𛐽𡰕𨥭򭼿񓅁򫭣򾃕𷡔𩞤󾎋𮂌򯑍𠻥𦖸򨭳䲥󼭼𴷪𪯱񨓦𞩯쉻񃔿󫒕򵒼󿜕񑶻񉥀󲹲򿺮󆃓򟓒𸆻󾩸񺖬򃇧󠩄󎍐󪺖򦱋󍑓𔌻򚵽𶍧󐩡򚨵񿸡򷖝򉰶􋲎󺹷򸫫󋵤􋤞뿬𕾓򽿬񨹙񇴅򿒿󪚖𽩛򂄯𾪭󉨸򠴌򮰖𔑎򘭆񽗐𿡻󔝋𽤅򰷷񥀬򋶌ﯷ񷯀"}]}],
 "78b576fb05d398505711b21b80cac518d3c851b06e11e1e4f999add77a46e4c7":{"charge":261,"outcome":"ok {\"record\":[[\"text\",{\"text\":\"a\"}],[\"lastIndex\",{\"int\":\"0\"}]]}","prepared_difference":null,"reservations":[[0,0],[0,2],[0,0],[0,2]],"reserved":4,"spent":2},
 "78b5d13fd517015cca01fb227ad9bcef832b1053001d978934f6efa2cfaf0fd5":[{"float":"3.9564910862454663e267"},{"float":"3.374899583340398e151"}],
 "78bb0dcfad06b700e5e74809c4ec199c9a1a53bd45cb6b5b55285986460fbce2":[{"float":"-4.501062155808376e-74"}],

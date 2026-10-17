@@ -130,6 +130,7 @@ pub(super) const DATA: &str = r####"{
 "0bc31b8ff7986d4a65ef437cb885451c8ca329c71284fee16187b428769cd569":[{"text":"󼩒񟽆󻜸񨱖򻛎񪸣󪾿󟬠𜛖𙓛𿴲󅱈"},{"text":"𥤁􃷳󡅈ݪ𹷤񩯟󅻦񠯛𣤌񞡾򕸮򴔒󸄘򲐚󋋒𘤷򮗥𲥮򳪼󴗉򬌂󺈄񑙀󹉬񸹈𫽔򴜪􉌤򌤂󆐐䋘󳩝񤕩򥮣򀷔񨻏󧰒驪򔟞񦛑󷹜񪮠󩣷󵰆񁄾𬂜󞈝墙󄩨򒓼󲮵𑺢񜀟񦁟񬥟񧌍𪢫􋼺򛛄󑊩𮃌򩀍𦉭𻟩󑓆􄥯򎠽񇸬񷿐󖤯󊸽򽨡􋧕􉯦􍍑𭢷󎣆󲊗󶬒󦍄𮢂󼏓𩒔񚺽񚺠񁷽󍚆򝂫󋯊􏀽󪺝𐢀󃄜𐉾󛿺񁨅􉅱𠠓𩣃򚼲󹓬򯣅򰁴祴𙲆񘘿󺫳󍍦򢵀"}],
 "0bc5ecfa2e92e450c86e7ab0717511b450422993e5a2e40a6d764f61e6d8e830":{"charge":6,"outcome":"ok {\"float\":\"-1.1553895736226697e-127\"}","prepared_difference":null,"reservations":[],"reserved":0,"spent":0},
 "0bc6758687fb7b7f6a0826c67f111cea43759bb6b1ba2b7705bf15ce3fa9d467":{"charge":6,"outcome":"ok {\"float\":\"-1.1349398175375454e127\"}","prepared_difference":null,"reservations":[],"reserved":0,"spent":0},
+"0bc851adc68e58682b427638112152cc188b3d27bc47222563c129470e7fb4d9":{"charge":9,"outcome":"ok {\"float\":\"1.1891968827938593e-218\"}","prepared_difference":null,"reservations":[],"reserved":0,"spent":0},
 "0bcb918d4d1e96b7872c1c2193df113613d8433966ecddeb02e6c9c8bdaf0a71":[{"float":"4.0191627424792435e-181"},{"float":"-7.822502448801267e151"}],
 "0bccbde079a3495472ad8f82cbf5fcd95160c770e01f811a8a52f5c20870320c":[{"float":"nan"},{"float":"nan"},{"float":"nan"}],
 "0bcd3ed83c6891f51bcf6c2b66e8acc918e4facb8d1f78241e2cbf7c19f9a3d3":[{"float":"5.174385037709163e223"}],
@@ -160,6 +161,7 @@ pub(super) const DATA: &str = r####"{
 "0bea0b3ab7ccf1ac9fc98b132694e6442f3b4c5bdb5533a3df81f53e637eb07c":[{"int":"-4168856964072978694"}],
 "0beaa16cab771a8f6c5976fca86ee16aedb3f8cc4d6597330020685181dc1f1b":[{"record":120},{"text":""}],
 "0bebd923429f9481ab89ba611dd749e0a4f34b874524ef7c7f87d04fc707b542":{"charge":67,"outcome":"ok {\"float\":\"0.4636476090008061\"}","prepared_difference":null,"reservations":[],"reserved":0,"spent":0},
+"0bebf65ed0401f1d0410ee94fe55800f2f4a4520518335ee20854d995345ec86":{"charge":130,"outcome":"ok {\"list\":[{\"list\":[{\"list\":[{\"list\":[{\"list\":[{\"list\":[{\"list\":[{\"list\":[{\"list\":[{\"list\":[{\"list\":[{\"list\":[{\"list\":[{\"list\":[{\"list\":[{\"list\":[{\"list\":[{\"list\":[{\"list\":[{\"list\":[{\"list\":[{\"list\":[{\"list\":[{\"list\":[{\"list\":[{\"list\":[{\"list\":[{\"list\":[{\"list\":[{\"list\":[{\"list\":[{\"list\":[{\"list\":[{\"list\":[{\"list\":[{\"list\":[{\"list\":[{\"list\":[{\"list\":[{\"list\":[{\"list\":[{\"list\":[{\"list\":[{\"list\":[{\"list\":[{\"list\":[{\"list\":[{\"list\":[{\"list\":[{\"list\":[{\"list\":[{\"list\":[{\"list\":[{\"list\":[{\"list\":[{\"list\":[{\"list\":[{\"list\":[{\"list\":[{\"list\":[{\"list\":[{\"list\":[{\"list\":[{\"list\":[{\"list\":[{\"int\":\"1\"}]}]}]}]}]}]}]}]}]}]}]}]}]}]}]}]}]}]}]}]}]}]}]}]}]}]}]}]}]}]}]}]}]}]}]}]}]}]}]}]}]}]}]}]}]}]}]}]}]}]}]}]}]}]}]}]}]}]}]}]}]}]}]}]}]}","prepared_difference":null,"reservations":[],"reserved":0,"spent":0},
 "0bee0a718d2e7a2d1385df3e0ea6a4e7d9aa792fbc052f1d09fa62ff2acd7a0d":[{"float":"-2.4520010360713776e-127"}],
 "0bee8267ece2c41d33b9b2608526abc8fcfc63dd8cb197ff36b666fbe76437cf":[{"float":"-5.627731327822898e-166"},{"float":"-4.868411613398208e296"}],
 "0befca465d99f3d49089382556fade499fba88ce4d828a417f2b3e337dc7bfaa":{"charge":16390,"outcome":"ok {\"text\":\"\"}","prepared_difference":null,"reservations":[[0,0]],"reserved":0,"spent":0},
@@ -170,6 +172,7 @@ pub(super) const DATA: &str = r####"{
 "0bf8c9c79785cf0af8f3725d611b1e792afda5408ae0fedcdf44e5cc46075fab":{"charge":450,"outcome":"raised \"regex.syntax\" \"invalid regular expression flags: `n` is not a flag\" \"null\"","prepared_difference":null,"reservations":[],"reserved":0,"spent":0},
 "0bfb53468de31719382028893295e3fcab30384f28ccb77e48658fc72c7002cd":[{"text":""},{"text":"-0"},{"int":"0"}],
 "0bfba225406cf8dfec5af1eb4435223017b291ff4b9ae55bac52c213e147f77b":[{"float":"-1.5"},{"text":"ab"},{"text":"a"}],
+"0bfd467c66c7bd086ca48807594c2a115c42fcce5b0bd1a0819ea139e8430cfa":{"charge":9,"outcome":"ok {\"float\":\"5e-324\"}","prepared_difference":null,"reservations":[],"reserved":0,"spent":0},
 "0bfd64c30c3144cc02821c89bb3642692075458a397755ab2e634f6dfe0bd635":[{"int":"3367437055371560266"}],
 "0bff60498966ca2bdab6193cf52047beadbe4d667cf50553a0e04844804cc252":[{"float":"9.901257279469369e152"}]
 }"####;

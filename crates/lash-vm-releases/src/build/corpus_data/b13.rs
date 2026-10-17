@@ -147,6 +147,7 @@ pub(super) const DATA: &str = r####"{
 "13ef793902d50ced3384344632aadbd7002faeee233092522fb9978fbebc1078":[{"float":"1.4604549479342133e-77"}],
 "13f382ea288f2d4c9aca4e6bf7a354e651dd8dbe2b2dedf2778dd45faf0c8339":[{"int":"6458892884335814224"},{"int":"6660776425599612657"}],
 "13f39cf7d530a8e310914cc79dd946df84ff583978623ec6fb79c486c5daa6d4":{"charge":760,"outcome":"raised \"normalization_form\" \"expected NFC, NFD, NFKC or NFKD\" \"null\"","prepared_difference":null,"reservations":[],"reserved":0,"spent":0},
+"13f58d984b0de46ae2ac7b16e6ed58234895b3c56076a87a30862eb6653406bc":[{"int":"7082352331758976949"},{"int":"2472047614815877235"}],
 "13f78284034e3033f9354a44315ea2d3ee5565579c2563a42363e17785602fca":{"charge":5,"outcome":"ok {\"int\":\"3197839190423168553\"}","prepared_difference":null,"reservations":[],"reserved":0,"spent":0},
 "13f798c4ab200d0c6acb1f9b95329c6fdc43cbe109fc1a7e423e9297ff1d012b":[{"float":"-1.1482630096830038e150"},{"float":"-9.067784638397094e96"}],
 "13f9e07eafae85631ac914e72cad64e3c7ac2451b42a82247ab3a85c364dbbc8":{"charge":154,"outcome":"raised \"regex.syntax\" \"invalid regular expression flags: `H` is not a flag\" \"null\"","prepared_difference":null,"reservations":[],"reserved":0,"spent":0},

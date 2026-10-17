@@ -20,6 +20,7 @@ pub(super) const DATA: &str = r####"{
 "8116e7f30da697661bf031faef7c3e459b063fcc7ad6f321b7ddf96b59280495":[{"text":"񸉃𸾇󽅘𑣺󴱋񭘓񎅿󲝽񣱳𗓋򸫢ί񯒉𛌠󩩆򾣲󞶣򐢸󳚩񃺄󃿹򐏆𢡁򂩑𿩅󡛱𤒜񈴕񬅏􌄍񽗏󃆤򗻇󳟺󯌕"},{"int":"-69197253761522765"}],
 "811735fb6ebb2ef2ad8e0a9ec8169e43f87fff3650b352ebaca225d4d39bcc5b":{"charge":15,"outcome":"ok {\"record\":[[\"not a date\",{\"float\":\"inf\"}]]}","prepared_difference":null,"reservations":[],"reserved":0,"spent":0},
 "811742d513a670678ce58fd3489b0017c80160c97d8f47a15383ee7887623c81":[{"text":"12.5"},{"text":"12.5"},{"int":"0"}],
+"81191966e167795bbb0c2678d8eacee87a73267c4ffbdb60e04e4cfd163ec15a":[{"bool":true},{"text":"󶄣򎜡󤺯񉲕󫋬󉪉񅇼򣡟𱿯丐󝂌򾀭򁂭򂯌񬪛򔇎󤛍񖴀񫧚񕀩򹛉򓎤񗻃񊻾񮈣󑤧򋫕ᓠ󻫉󆟼񏰳񹄋򟣩򬅘񣻚򐐧񺿯󭍰𻋖򡘳󈣟򃨎󖗺򪆱򘚲𣴿񧪅񁬰􊄆􃏄򲪣𛘶򒫚󱰏􊏷󯽰񪒎𝁇񸈧򙣣򉔒񸒸󣦱񕮂񏶵񛔎󰏤𔳣𸒺"}],
 "811c562c338099b3ebced19a50cd7b26efe187b52e9b437f5b8529935307f1a6":{"charge":684,"outcome":"raised \"type_error\" \"Invalid URL\" \"null\"","prepared_difference":null,"reservations":[],"reserved":0,"spent":0},
 "811dca1476ab338112677676d0b2bb8954b3c9e7a4d7ddd8007c3d93d5f57b39":{"charge":248006,"outcome":"raised \"type_error\" \"values have no shared ordering\" \"null\"","prepared_difference":null,"reservations":[],"reserved":0,"spent":0},
 "811e1d660475cc10fbddb9d4299e363f6176c3d863efa8e13ba7b9b140112309":[{"float":"7.858071120256061e-121"}],

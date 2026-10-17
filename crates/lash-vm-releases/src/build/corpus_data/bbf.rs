@@ -142,6 +142,7 @@ pub(super) const DATA: &str = r####"{
 "bfc5776a942eb306cf2c92d53d03619cd0a060937970bcb9049bcc8b6ec9731a":[{"float":"2.7204876316049168e-174"},{"float":"4.217714601795521e-97"}],
 "bfc64b6a2addca22d52eca71291cacbb40a7f0c7e3c0e9309317f5fc357dd8e5":{"charge":4,"outcome":"ok {\"float\":\"-1.4485004629738755e-203\"}","prepared_difference":null,"reservations":[],"reserved":0,"spent":0},
 "bfc660efc2c1d5018a8fe68de51d9a98c17e35bf6ad05e9ab2f92c68cfbfecbe":{"charge":68,"outcome":"ok {\"float\":\"1.1071487177940904\"}","prepared_difference":null,"reservations":[],"reserved":0,"spent":0},
+"bfc71014eb61588dab0db9a172bcdd26ccdd0d244d2536a4df43497f4edd48a4":{"charge":129,"outcome":"ok \"null\"","prepared_difference":null,"reservations":[],"reserved":0,"spent":0},
 "bfcf16628569ac0d0012f0ffbeee3062bf5a5f1b2250a04da3fc0cec0cdbe111":[{"float":"-1.2695458850731753e51"}],
 "bfd0314acb3b5a689d78aae8f383ebad3828c8f68954060e38605b92906eeeed":[{"text":"a"},{"text":""},{"text":"Hello, Wörld"}],
 "bfd1b9b01b5f2f82c27bd4e1511d91f72aed163f4bb5c3e575e8ae6f1216b4eb":[{"int":"-4782831305079991232"}],

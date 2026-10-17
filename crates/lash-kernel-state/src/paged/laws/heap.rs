@@ -87,7 +87,7 @@ pub(super) fn seal(heap: &mut PagedHeap) -> SealedHeap {
     .expect("seal")
     .expect("complete")
 }
-fn reopen(heap: &mut PagedHeap, pages: &Rc<RefCell<Pages>>) -> PagedHeap {
+pub(super) fn reopen(heap: &mut PagedHeap, pages: &Rc<RefCell<Pages>>) -> PagedHeap {
     heap.release_statement_roots().expect("release temporaries");
     seal(heap);
     let mut heap = PagedHeap::open_header(
@@ -102,6 +102,7 @@ fn reopen(heap: &mut PagedHeap, pages: &Rc<RefCell<Pages>>) -> PagedHeap {
     .expect("install census");
     heap
 }
+
 fn int(v: i64) -> Value {
     Value::Int(IntRef::Inline(v.into()))
 }

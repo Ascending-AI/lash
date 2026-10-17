@@ -7,6 +7,7 @@ pub(super) const DATA: &str = r####"{
 "cf03bddd91644ca35a3dcac1636d2c4fdd9e8e2a36d43f421c0c63d24cb8d18f":{"charge":502,"outcome":"raised \"index_out_of_range\" \"text index is out of range\" \"null\"","prepared_difference":null,"reservations":[],"reserved":0,"spent":0},
 "cf043dbb8cd0a650a9757b3fbdfa4fa6410908aad5918b63ee1c347d3ea17bb1":[{"list":[{"int":"-1109928346974283241"},{"float":"3.3308468879413965e-73"},{"int":"8990296038418732180"},{"float":"-2.0797584455847064e-278"}]}],
 "cf0607e63f134a631f02bacebdbff1f22bc912df6f776574d6b7d82df6e5d790":{"charge":326,"outcome":"raised \"json_syntax\" \"invalid JSON, including unpaired surrogates\" \"null\"","prepared_difference":null,"reservations":[],"reserved":0,"spent":0},
+"cf061c6025607d69eccb0910db51fa465bf6ce97e6dada60aab83b3ff4ee07a0":[{"float":"4.781581314041399e-147"}],
 "cf065ec499847b239d20f0d2201e6d2ee062742de90da4cf0837b7131a6ba727":[{"int":"-5479726997964272413"},{"text":"򄲈󏘑󐶽񲓦󋜯񨮁񳃖򥴷񩹍񇨱򀒅򱏌􉻫􂤖𛳄򟂽򾸜񗫀󬰵󒃭񄷬󫑷𡫟匪񂤌𩡞󋻮󜸓󷍏򂉩󇡭𖿝񗑂󊐪󘏢𜹥󮪹𺌬􎵪𡨰󆐄󨿌󆗓񆷘񾔃􌨉򲗝󱓖򇥿𯉍󣳩󦛐򝰝򁳥󀶜񁲇𔽾𧩠뺔򛓩񓯀񅞷򪋘򹞝󄯲󣟥𚣊󼔛򩙑􉼽𓍃򗷥񧉞񾤺𶩨񊂼𓋽񖟘񪬗󩞁𡓮񼭇򕌑믷🽀񷂾󯟟򷟰񀄟󳋝򶗸񻼳󄊍䵈􎗒󎊙󑜜𔰲󤐪𱈢󶺆🦀󧒬𐥅񶈗􄴓񛥉𴙻򆨷𭔣򑁉񍰩󌏑"}],
 "cf07019aa6ce128128c340d46ec441f2db8a9d6d83bd70548ff32a6e1002870f":["null",{"float":"-1.0421991118659658e-66"}],
 "cf075d937940d2992bab5a8444e5f804c6eec08e20cc587d86285aebc4852080":[{"int":"4168926430384720872"},{"int":"8943686690362610431"}],

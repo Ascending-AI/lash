@@ -24,6 +24,7 @@ pub(super) const DATA: &str = r####"{
 "d521603ee3b077c1e4f95309cc8b769145e0357ec39ce691023b91e9379c28a2":[{"record":0},{"text":"NaN"},{"text":""}],
 "d5219a0125a006390b71c0ce43b7a014dd7a44f58e950c4a6e0b193ef15c3e67":{"charge":8,"outcome":"raised \"unordered\" \"a sort comparator returned NaN\" \"null\"","prepared_difference":null,"reservations":[],"reserved":0,"spent":0},
 "d521a0366a43d07437f0729d38b5be1d7216c91e4ac0f305ec94d409b1feba63":[{"int":"3380085749840450467"}],
+"d524cd2b21e1d6ec47bb3b511b8a13826d59dd9d0d652bc41ff38ca5b982c1ed":{"charge":9,"outcome":"ok {\"float\":\"nan\"}","prepared_difference":null,"reservations":[],"reserved":0,"spent":0},
 "d525e070002c59869587879b54c71360cf1d13723f00d7e027e4a5d1e2fdfd61":{"charge":257,"outcome":"memory","prepared_difference":null,"reservations":[[1,0]],"reserved":0,"spent":1},
 "d525faef2303fb789c4fb42286246791aa056b1322f3a9bd0875813d00a5f555":{"charge":67,"outcome":"ok {\"float\":\"710.4758600739439\"}","prepared_difference":null,"reservations":[],"reserved":0,"spent":0},
 "d5295ddb210ae24d24a102b719f610425ef5a32589f471060b2295b8e54054a4":[{"record":19},{"text":"󯞶񊗙򇛒򻢿鈎򦊪򡓯򔄆󋘄𪡨򂌸㽾碀񥉱񣊕􏆰򒙓򺻟䩂񔙖󦍚󙼜󫤢񾓐󯬙򨪯􊱺󈎢𢰥󮴽󿆧򽞄񰬫򭧽񝄎򻌬𦭊񖜜"},{"int":"-1491563816241228925"}],
@@ -135,6 +136,7 @@ pub(super) const DATA: &str = r####"{
 "d5f8267bd0a0523fac3c36781580488d1a9603e0f4252b068978bffff12741a9":[{"list":85},{"float":"-inf"},"null"],
 "d5fa04934f9b259831017698f6dfba67851c3bb927fb8533e5adb59e35a35b0c":[{"record":98},{"text":""},"null"],
 "d5fe485da46c92b755b9c5df475fb9c166fb8d26be074786fb77e1c696008717":{"charge":782,"outcome":"ok {\"int\":\"-1\"}","prepared_difference":null,"reservations":[],"reserved":0,"spent":0},
+"d5ff3243313f2a3b078d3d3c18f728315df4ec5b57447a593c48dcc90576a53c":{"charge":292,"outcome":"declined","prepared_difference":null,"reservations":[],"reserved":0,"spent":0},
 "d5ff380720590d341519ee7c9fbc1479b38cea2d5839ab3ad69e859ba7849af2":{"charge":5,"outcome":"ok {\"int\":\"-7892882290662693852\"}","prepared_difference":null,"reservations":[],"reserved":0,"spent":0},
 "d5ff492fbae9b3fd6367e8e47555da1470c3232d340c14b53b98bc04908a8f08":["null",{"float":"-9.000033269917432e251"}]
 }"####;

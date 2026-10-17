@@ -64,6 +64,8 @@ pub(super) const DATA: &str = r####"{
 "d260404352465b29ada33a15b1084e1a0a7655a2df6f2dd1702bb4634556d108":[{"map":42},{"text":"񩜵땛񨋱񮞴򒝻񉟵􅦚򼮩񄉾󥥺񠝈󴭆婐蓤𪳭𘃴󚓵񖓼󰔵􀁿􄞿󟓰񉤙󓹫𶣗󑇆򹹥񬈙󔗝󤘖󙴚𶢠򮩱򞟥楪𧴸󛿂𳈽󙤙𕡫񰰛󇛃򦓮􏞧󐖈󅮃󯗴줟𾽍𻯓󞙤㒨򏃁䥠􌇲𭛱򽤜񬦮򚶽񛞦񪭉󿩟򼁫򘄫"}],
 "d26169b69f2cd1fcde72f28501b72e06b717a764da38a801c4100e21c3f2c7ec":[{"int":"7054261895249215056"},{"int":"5199854287456265260"}],
 "d262332a2481aebb2424318631837a531c78dd17064ae2343be15a9a144b7bd2":{"charge":482,"outcome":"raised \"index_out_of_range\" \"text index is out of range\" \"null\"","prepared_difference":null,"reservations":[],"reserved":0,"spent":0},
+"d2632b70665d626ddd5bb626042c36e9ee5da86145490f04caa6436db25a0db7":{"charge":545,"outcome":"declined","prepared_difference":null,"reservations":[],"reserved":0,"spent":0},
+"d26500119ffec8cbc10ca5ae816ac1b7ef995886104eeefdd8966fb6b6ea0d81":[{"list":0},{"int":"5447369147610603367"}],
 "d2651e5f91ec06cad68946318ef476819465d2dbf116891c7be898f9d4738002":[{"text":"𧨂𲩶􋎢򵉅񇮡̖񥺐󽠭񴓝󧜔񐃺򶩻񡙯񘆃񯡀󉖰񙢛󼅪𾡨𴎸󕼿񈁁􄬁輪󵇤񕉇𪼣󈪽󠋨򽛭󘀀𛤀󬹲񰝮񏳠󑜙󨵷𘞭󻟢򽠍񆓽󭅴𰇖񉁕񡠵󭕅𭖯󉟄诫񟘼򄻐򣩍򜵹񁢣󉙒񼟾򌷱񒈪𭣮󃋟񒕺򏎰򹉗󈢳򿭢􄨔󞦀𑱓򄺫򯛶񄺛񕣆𥷷򸺌񽺑򪽬򵔲򸬘񳘎򇗢󬞉񵩆񋅲󂪐񥓅񨄬𿤮񘵜􁕆񫳬𬺕򰩈ꡜ󈘌񻈀󤝤򰃪"}],
 "d2653b31e9d618e7fcaa0098b4d9d488a3e3432407ccf0af573b6a07f9891352":[{"set":86},{"int":"2"}],
 "d26542e875ef75ca1b6c628c65d5b4edeebf4e5d6c06485376b3360176c6df98":{"charge":5,"outcome":"ok {\"int\":\"-211635904222912827\"}","prepared_difference":null,"reservations":[],"reserved":0,"spent":0},

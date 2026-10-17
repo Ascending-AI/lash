@@ -88,6 +88,7 @@ pub(super) const DATA: &str = r####"{
 "c8859eb8992d459d4ca93600c39ac22cae0f4a9574665a2d891dafea1065a64d":[{"float":"-6.492878331949366e-218"}],
 "c8860fc937b5f9e2ff9507516c4e45fabf0a3e1f8fb29ad24c5d9c3cca1aa816":{"charge":5,"outcome":"ok {\"int\":\"8957553916472430639\"}","prepared_difference":null,"reservations":[],"reserved":0,"spent":0},
 "c886bda98aa7bda62335ee1a2f80ee9d2f9a2f1648fb86d7e2730dde02d76658":[{"text":"󚣈񘆙𙣚􍥫󹈙򢝽򤱳󘈫򂇯𙁬򣙌𘔠🦀򥌖񓨰񖹄񐮘󂆏򪈌񁡈򩉸􏅜𰟭󍊢󦎇󼂀󨼁𓉟򷇻𰟘𽏗𠮰󁦼󰂏뭎񥖸􌌓񫙕񰱹򶰡銹󑗜򼓷򞪾󂣫󸁺񫗺𰘑󦑝󖗕􊁞񒚞󨅓򠢑􂃀𬚁򊝌󙄂𳊠򍣅򆰴𪇬񼮯񧷸󔴃𱝙񉔷򔯝𞘊𱅆򋻤󺺙򄶄򂨟򖎋򕶌󲸷񎎫񅚬񚄁𖰃򜸛򱕇늭誈󅶝񌱦􋉾񻊚񼝿򕄱󀧓漀矞򟲱󦄈𪯊𯈝񱺹񖓄𳴍񋨷󳢃󎀲􃍲񖮔🡃񣥳򮗁񳁊򂢪򧁻񌩛𚔏򌶅񫅞򻾼𦧃󨿐񟋏𥳪𳻓􅹮򆅒򤜐"},{"int":"8919689194191053214"}],
+"c8874b7e0d9c141e3d1cba38f395b5c167bea0d2a31893b8edd54e257da75392":[{"bool":true},{"text":"񶸭򮎱񘠶󨢦񬘷򫁻凛򶞸򠵷𢲭𻾴򯷋񞫰񛄥􎄇􌄅𯗇󡷬𢛗򩥚𥳨񭁑󷞱朞𧁐􆢰󅩡碕󲌤򇡢񱈒𨊶򓠳򂂃򰘂󨒎񧀇󩄧𠇅񇂆򱷧򛠜񙉬񽹈񃏴󮂓妒򎎡󪀦󳻦𒄛󅶙󿭢򻨔󲙠𾸬󁫰󫋅򦃠򝀡证񀚖嬛𽥭򖖟񨚔􃒙򦚰𒑽𲅵񰹷"}],
 "c888a9c224355384d058ba3e5458431033be45108eac8316578eaf64368dc9a0":[{"float":"-5.029884178613204e272"},{"float":"-8.427357128961114e275"}],
 "c88cf93493d0e1c7d29a7715bad8f4d9093902898e79fec74e10a95e4b59b873":{"charge":24,"outcome":"ok {\"error\":{\"data\":\"null\",\"kind\":\"\",\"message\":\"not a date\"}}","prepared_difference":null,"reservations":[],"reserved":0,"spent":0},
 "c88e5b39dc60df205d4a92634854ce5e6e1c4fec252f53d00a6d88fa64232ffa":{"charge":68,"outcome":"ok {\"float\":\"2835444258.7990537\"}","prepared_difference":null,"reservations":[],"reserved":0,"spent":0},

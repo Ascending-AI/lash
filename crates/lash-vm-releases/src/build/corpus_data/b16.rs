@@ -141,6 +141,7 @@ pub(super) const DATA: &str = r####"{
 "16ecf992ed38c0dc92135865424c56b63bea719e5aa50dcd0e87c497f97d6202":[{"float":"0.0"},{"int":"-7"},{"tuple":[{"text":"g"},{"text":"g"}]},{"text":"g"},{"text":"g"}],
 "16edfd13874c27b66e4ab820055ff62bcdf390b180ae0b8555abee17f159532c":{"charge":770,"outcome":"raised \"regex.syntax\" \"invalid regular expression flags: `h` is not a flag\" \"null\"","prepared_difference":null,"reservations":[],"reserved":0,"spent":0},
 "16ef58f42c629e4942b64afb52732bc9c4fc6e7cb2d0e9a569266b981a62d3ca":{"charge":5,"outcome":"ok {\"int\":\"5394162010220765282\"}","prepared_difference":null,"reservations":[],"reserved":0,"spent":0},
+"16f8181da295e4a6a049f39e46c524632a19db676300dc9b76d94c209dd8e5d7":[{"int":"1587078825102526421"}],
 "16f98ea95e0e696edbd1c3d03aa392a173e072594c3cd3bfeba856edf05e35d2":[{"float":"2.5244583781667716e205"}],
 "16fb36b9b1e79665db2ffe1769ea31599245cdd99a6b970516adc272d8030c31":{"charge":736,"outcome":"memory","prepared_difference":null,"reservations":[[0,18446744073709551615]],"reserved":0,"spent":0},
 "16fc8347e1f63385865d9a8c1b2122efad383d0c7dcaabd3fa00934b025df11c":{"charge":3,"outcome":"ok {\"float\":\"-6.250454116863171e209\"}","prepared_difference":null,"reservations":[],"reserved":0,"spent":0},

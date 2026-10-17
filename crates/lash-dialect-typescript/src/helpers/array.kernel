@@ -1735,7 +1735,8 @@ body {
 function ts.for_of.item(source: Any, raw: Any) -> Any
 kernel 1
 errors "type_error", "RangeError"
-charge 8
+charge sum(128, size(raw), nested(raw))
+native
 body {
   let k = kind(source)
   if same(k, "list") {

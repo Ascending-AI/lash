@@ -162,13 +162,15 @@ impl KernelMachine {
 
     /// Reads field `field` of the record or the error in `target` into
     /// `out` (`K-FORM-009`).
-    pub(super) fn read_field(&mut self, target: Reg, field: &str, out: Reg) -> Eval<()> {
+    pub(super) fn read_field(
+        &mut self,
+        target: Reg,
+        field: &crate::compile::Field,
+        out: Reg,
+    ) -> Eval<()> {
         let value = match &self.regs[target] {
-            Value::Record(id) => self
-                .heap
-                .record_get(*id, FieldName::Static(field))?
-                .unwrap_or(Value::Absent),
-            Value::Error(error) => match field {
+            Value::Record(id) => field.read(&self.heap, *id)?.unwrap_or(Value::Absent),
+            Value::Error(error) => match field.name.as_str() {
                 "kind" => Value::Text(error.kind.clone()),
                 "message" => Value::Text(error.message.clone()),
                 "data" => self.heap.error_data(error)?,
@@ -180,7 +182,13 @@ impl KernelMachine {
         Ok(())
     }
 
-    pub(super) fn read_index(&mut self, target: Reg, index: Reg, out: Reg) -> Eval<()> {
+    pub(super) fn read_index(
+        &mut self,
+        target: Reg,
+        index: Reg,
+        out: Reg,
+        hint: Option<&crate::compile::ReadHint>,
+    ) -> Eval<()> {
         let index = &self.regs[index];
         let value = match &self.regs[target] {
             Value::Tuple(tuple) => {
@@ -217,9 +225,11 @@ impl KernelMachine {
                 let Value::Text(field) = index else {
                     return raise("type_error", "a record index must be text");
                 };
-                self.heap
-                    .record_get(*id, FieldName::Text(field))?
-                    .unwrap_or(Value::Absent)
+                let value = match hint {
+                    Some(hint) => hint.read(&self.heap, *id, FieldName::Text(field))?,
+                    None => self.heap.record_get(*id, FieldName::Text(field))?,
+                };
+                value.unwrap_or(Value::Absent)
             }
             Value::Map(id) => {
                 self.key(index)?;

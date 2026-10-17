@@ -1043,6 +1043,7 @@ fn restore(
     Ok(Box::new(Frame {
         slots: Slots::unloaded(code.slots_by_at.len()),
         code: code_id,
+        scalar_blocks: false,
         published: Some(Publication::new(&record)),
         record,
         access,

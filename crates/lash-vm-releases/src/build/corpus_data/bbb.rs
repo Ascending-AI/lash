@@ -153,6 +153,7 @@ pub(super) const DATA: &str = r####"{
 "bbf6a101fdc29b6a180ef94cdf3d9fda526759c6b70bc96056290df0527e2bcc":["null",{"set":1},{"text":"a"},{"tuple":[{"int":"0"},{"int":"0"},{"bool":false},{"bool":false}]}],
 "bbf6f2faee44770909169e8e53ec2359927377378ecd02dbdc5b276d61370d79":[{"text":"["},"null"],
 "bbf81ee53af1a64979b36c2bcc0a3a8822ecce767198c96157d3d5888ac373d7":[{"int":"-1347617400708603714"}],
+"bbf82c53ab001c3b351e61b207ebd7bcab71fe46be04982e5d75f41b829e3bdc":[{"int":"-2662509874721291797"},{"text":"󻔈􂹢񠲾򏔧󴼍󍣓򍖢񫺉񽖴򶜟󫸑񇔭"}],
 "bbf9e18b9e352ebf89f73a522cc9643c9ef27effa0092731662ccff8100efcd4":[{"bool":false},{"int":"-5048352848001639684"}],
 "bbfa52a4db0ddfd283f7e1e1f0066081ace8e58d2302077f6344866b66e9147f":{"charge":447,"outcome":"ok {\"text\":\"񘰲򼶪󔲱𔹨󃣴􊮅񥾒󚶭𣶶󕁍𓆭򩚎񣀣󷺃󵪾󭞋𔛤񣥩񑥛▩󣦢򞍑񠋗񹼒󩂬𲒍󮎄󽽃򅘽񵷑􁜪򔆄󎨇󛈓𖦷𶒤񩕭򡤇񫓵񫋜󾒹따򋡚򷾪𦇕󋱖􌊮􋺫󈌖𣮐𡿧𬈘򜾜𰴃񨟙񒪖\"}","prepared_difference":null,"reservations":[],"reserved":0,"spent":0},
 "bbfaf9f6e16964ff8d02cc6d76ceab327ea7a2b90c295c7b744c0b062c71b46c":[{"int":"-3102435250998049143"}],

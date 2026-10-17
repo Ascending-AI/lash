@@ -165,6 +165,7 @@ pub(super) const DATA: &str = r####"{
 "a9f70f2a3b4368184a35e80f8867fd9a61471a09934e94465ad1b40f817710d2":{"charge":504,"outcome":"raised \"number_range\" \"`limit` is negative: give the most pieces to return\" \"null\"","prepared_difference":null,"reservations":[],"reserved":0,"spent":0},
 "a9fad92d31d205f106a297fb4e6967e09406c7810b629ccdafff2dab388f3927":{"charge":84,"outcome":"ok {\"bool\":false}","prepared_difference":null,"reservations":[],"reserved":0,"spent":0},
 "a9fb33a5643ae2dc69fc24a7e7a216e83a5d28918590e20fdf4f925b3ccde51d":{"charge":919,"outcome":"ok {\"text\":\"𳹻򺫇򼡒𚍂󽺄񨨹轭񇄳򎄑󤒓󎫚𚦏󊤜󦽎񍠐􃮠򑿗􋀨򶝈񍖆񊞭󊶢񀑹𢰱񓸩𜸕񆻉𳡔󳜤􋱊𚎲򹁵񧸕򹾩񞣖򑂇񰵦򘳼𪫥򓫰🂅󒰤󿭼𡶊㔱𰤛򐷉ྒ󸤍􆥟𷑍񷏥򈹂񱗞򚙵񰙹񑈵𿅑񉓳󱜚󄦴񠈧񄇣󛖠񏣋􋯺򪐍񲘅򉔉򈙣󖾯򡢰𣒁񢺨򝓵񲈜򪵘򓕎򸢤򏊵󣀐𺉰𑜴򾠚򯍊򹰬􍘔񼊸󝤽򬯏񋶘𲋣򃹦𺎚󃉝󃕹􎅓󰱑𨰉𶭑𢟇򏡈𩮸􌊏񐻊虗񰒛󻤢򶻐𿰍􈲵󐛬񹧡񾺒\"}","prepared_difference":null,"reservations":[],"reserved":0,"spent":0},
+"a9fdd167bdb292e02ebd16ca13c716a89d82256ec9f671e98718e872ff0fdc4c":[{"float":"2.5357671562753754e121"}],
 "a9fe1124e2c5c4a2559a662fc0a2f8f1cae91c49b7aa7570159842e743adba9a":{"charge":359,"outcome":"ok {\"text\":\"򇕐򝎺𜪝򨡈򛍘𷠾򽥎䍼󎃺ⶻ񂜠񟅮򚬌󊅚򔂘𺐙񿼑򫲯􌈖𻈒򬧶򺏥󩯢򽉕򃺱򐺌󧖑򹔺񗲐񻑩𓝁򗽯󧩑񯳥񢉜􎔘􀋒򚁗􍋗󼢲􁖣񔥈𲟚򈜕򪽛\"}","prepared_difference":null,"reservations":[],"reserved":0,"spent":0},
 "a9ffadc40d8a5a257a1c2e118b6b06945ee01fb3d8ab2592205ea2e01ea0da3a":[{"record":12},{"text":"򟱨𮶐򚩋󁷟򬐤󬊬򝰩񉧑𙊢ᄇ񚓥𕻬𿝑򣋿񋭚񀺬󌮱𭡦󨑖񷋞􇖻񄎐􅴗𠹭񒔱𰼻ꧥ󾗶򚾽𱾢󺌝񥔛􊅱򸹳𤶯𝋴񨑑񊜙𷸗򬼫𳩵򝵁󊪻򧼮𺱐񭔈𐚢󇠯򏄟𮔽򤾷񓣨񈂙򕧘潫񳝵󎱛񧽃򽍽𬶛򔋀򚙅򾩉󺇝񨆍󍏎󮏩򃡮񧾞򪓡񟿨􃨗򷶣󶞘魗󩦡񡃒񿉳齗𢞩󇮦𓳑𦫨񮀽񎺽򔐠񁚨𛪅󘚰🾽񇴂󪝸􃰶򩗎𐝥𬐫􈝣🪭㐘穰񰊄񏦁󽈲񆬖򌁀򹷀񝳻򿾂󈣽"}]
 }"####;

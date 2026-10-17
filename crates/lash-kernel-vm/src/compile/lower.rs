@@ -323,6 +323,7 @@ impl Compiler<'_> {
         let lib = |function: &FunctionId| self.resolve.lib(function).ok_or(*function);
         let hook = |function: &Option<FunctionId>| function.as_ref().map(lib).transpose();
         Ok(Via {
+            fuse_list: self.layout.0.is_multiple_of(4),
             open: lib(&via.open)?,
             next: hook(&via.next)?,
             item: hook(&via.item)?,
@@ -759,12 +760,10 @@ impl Compiler<'_> {
     }
 
     fn field(&mut self, field: &str) -> FieldIx {
-        if let Some(at) = self.fields.get(field) {
-            return FieldIx(*at);
-        }
         let at = self.stream.fields.len() as u32;
-        self.stream.fields.push(field.to_owned());
-        self.fields.insert(field.to_owned(), at);
+        self.stream
+            .fields
+            .push(super::Field::new(field, self.layout));
         FieldIx(at)
     }
 }

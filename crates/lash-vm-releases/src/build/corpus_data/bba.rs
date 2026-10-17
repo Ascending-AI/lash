@@ -6,6 +6,7 @@ pub(super) const DATA: &str = r####"{
 "ba123260c020ceff3cc7f587e409101884cde5aa53afee16fc5c553837b54f5b":[{"record":0},{"text":"􂿫򐅴񓹶򳆊񙕩񉔗𣧽񮳎򤚗򨇚𘑙񝔑📻緒񴞩𯍦񻄀򽹢𓕞񣲴򽯍􌔺򧈰񰳔񻯍寺񞧍񢭞󠲈􌒑򜝘􋛖򠈻󼻿񞺢񕗿󭂔򴐵򻏽󴇚𠷙񥮂󆆵󰠶󴎦𵪡񟱔􏲬񛉕񫑱𗭙󪗯򤭤񞛲㾿򸐀󰼈􁤖򔊤􌬡󍣷򠂆򴄇򬙅񊲉􈦐񚒃𡜊󲶤𚻿󿉢񁼆񢺸򖻥󪽸򓰦񩧞󸥭򎤿􀄭󎡯񪑿󕓷񷆞󈣽򶂬󪵭򩵷㎍򂢪򗡻򉁋"}],
 "ba136a7988eb890cc8167ad7c0b4331f1a9c9dba26e3067c276e9ef9d495cd80":[{"map":9},{"int":"-5645023788100417987"}],
 "ba13b2170797df406eb3c49ee4f46226447a606b55cef9e3c0600ed2250b2184":{"charge":20,"outcome":"ok {\"int\":\"12193702445626161186254814802974490261\"}","prepared_difference":null,"reservations":[],"reserved":0,"spent":0},
+"ba14f860b01bb8efd88cc6757e2aa930e31cee7c2213968764c1b62e1c4e4a17":{"charge":129,"outcome":"declined","prepared_difference":null,"reservations":[],"reserved":0,"spent":0},
 "ba17edf14d7aa8fad9717a6c8bd81003db949c271daa4e4cb1b952e2c2d6969e":[{"text":"("},{"text":""},{"int":"0"}],
 "ba18037d09d87d0d1777c56fb1ffec6756a89f071b43494ed5f1b3131d6ec33e":[{"list":0},{"int":"-3025683099612867242"}],
 "ba191613e5b04c9cdebdf895de590b201cb0a85256091db31069af3daa179176":[{"text":"Infinity"},{"set":86},{"text":"["},{"tuple":[{"int":"1"},{"int":"1"},{"bool":true},{"bool":true}]}],

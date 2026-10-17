@@ -52,7 +52,8 @@ body {
 function ts.map.value(key: Any) -> Any
 kernel 1
 errors "type_error", "RangeError"
-charge sum(8, deep(result))
+charge sum(128, size(key), nested(key))
+native
 body {
   if same(kind(key), "ref") { return deref(key) }
   if same(kind(key), "tuple") {

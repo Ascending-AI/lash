@@ -110,6 +110,7 @@ impl KernelMachine {
             .last_mut()?
             .ok_or_else(|| fault("a running task has no frame"))?;
         self.charging = exe.code(frame.code).charged;
+        self.scalar_blocks = frame.scalar_blocks;
         let code = frame.code;
         match frame.control.last_mut() {
             Some(Control::Block { block, next }) => {
@@ -630,6 +631,7 @@ impl KernelMachine {
                 self.storage.activation_records.push(code_id);
                 Box::new(Frame {
                     code: code_id,
+                    scalar_blocks: false,
                     slots: super::frames::Slots::default(),
                     record: FrameRecord::fresh(entry),
                     access: self.heap.pages().clone(),
@@ -642,6 +644,7 @@ impl KernelMachine {
                 })
             }
         };
+        frame.scalar_blocks = code.versions.select(&self.regs[base..base + given]);
         frame.slots.fresh(code.slots_by_at.len());
         frame.control.push(Control::Block {
             block: code.body,

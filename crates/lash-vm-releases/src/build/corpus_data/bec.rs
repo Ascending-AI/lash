@@ -54,6 +54,7 @@ pub(super) const DATA: &str = r####"{
 "ec546f37aa4d9757b8aa61d46c0b839ad29563cffb3d75aa6fecc59a66fc8f8d":{"charge":6,"outcome":"ok {\"float\":\"-4.8287615784026206e-145\"}","prepared_difference":null,"reservations":[],"reserved":0,"spent":0},
 "ec54f5a9137c4dbde607c56d697b62c58dff154450418c6b82cb88c81a34af11":{"charge":70758,"outcome":"raised \"type_error\" \"values have no shared ordering\" \"null\"","prepared_difference":null,"reservations":[],"reserved":0,"spent":0},
 "ec562030d5420dcbc9f4888dfa66c1268f612014f2819f67707d848c23f20b6b":[{"int":"-8751153156145513488"}],
+"ec565e6915d2b31d8ed8521443d77cee5b4cabeb6535fb67151e37857bd4830d":[{"list":[{"float":"-4.6660682555203374e144"},{"float":"-5.530314330693531e-70"},{"int":"1410910339207047954"}]}],
 "ec5698a6a8de9a5f6de18dc549328d0ba74b1a769788763b6a1771560d51ba05":{"charge":652,"outcome":"raised \"regex.syntax\" \"invalid regular expression flags: `[` is not a flag\" \"null\"","prepared_difference":null,"reservations":[],"reserved":0,"spent":0},
 "ec56cdf55f9dcd7e6242ee1f58da7f97979e1076caf6b5099ce8b13d3f093886":{"charge":5,"outcome":"ok {\"float\":\"1.741380175588766e-217\"}","prepared_difference":null,"reservations":[],"reserved":0,"spent":0},
 "ec58100e519325cc7257323d0526979badac40df9098323ff6fb32419d49373f":[{"float":"1.0147500418430479e-184"}],

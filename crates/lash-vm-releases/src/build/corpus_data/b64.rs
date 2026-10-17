@@ -47,6 +47,7 @@ pub(super) const DATA: &str = r####"{
 "64462363f381d462b962fe714e58d88a31f3daed9cba026956c967da5e2ab613":{"charge":327,"outcome":"raised \"number_range\" \"radix must be between 2 and 36\" \"null\"","prepared_difference":null,"reservations":[],"reserved":0,"spent":0},
 "64477b56669895f1b3c171951f2e501f0da8db3055946e93068e527073c2cec2":[{"int":"-1572267748423062938"},{"int":"-6413056962621696489"}],
 "6447df153e4c2ee4e3c4da957901dfd3a52c85e2005d6afa77cf2124f7dec69b":{"charge":75,"outcome":"raised \"normalization_form\" \"expected NFC, NFD, NFKC or NFKD\" \"null\"","prepared_difference":null,"reservations":[],"reserved":0,"spent":0},
+"6448ec032b1d7b61b9e25d547b24d1612d106e64c782bbd14f67d1e1b5b4eb26":{"charge":487,"outcome":"declined","prepared_difference":null,"reservations":[],"reserved":0,"spent":0},
 "6448f942ec99c1e29476a74455662790ba3a106119ebce154bdb8717c219c4f4":{"charge":127,"outcome":"raised \"regex.syntax\" \"invalid regular expression flags: `é` is not a flag\" \"null\"","prepared_difference":null,"reservations":[],"reserved":0,"spent":0},
 "644a1adcdc3f9ffb5444dd62f3867107ad2df76e22b676578f834689db506f85":[{"float":"1.4642378065606175e-288"},{"float":"2.0209666204117236e136"}],
 "644a66b8fe1d6cd764108c41e39a4f5384dba25e480e2bea7c93051dc42351c4":{"charge":464,"outcome":"ok {\"int\":\"1\"}","prepared_difference":null,"reservations":[],"reserved":0,"spent":0},

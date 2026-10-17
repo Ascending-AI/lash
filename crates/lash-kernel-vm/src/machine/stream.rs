@@ -119,6 +119,28 @@ impl KernelMachine {
                     let value = self.read_local(task, running.exe, local)?;
                     self.put(at(dst), value);
                 }
+                Op::Nested { act, args } if self.scalar_blocks => {
+                    if let crate::compile::NestedKind::Body(lib) =
+                        running.stream.nested[act.ix()].kind
+                        && self
+                            .scalar_answer(
+                                task,
+                                running.exe,
+                                lib,
+                                at(args.start),
+                                args.len as usize,
+                                at(args.start),
+                            )
+                            .map_err(|interrupt| {
+                                interrupt.in_function(&running.exe.lib(lib).definition.name)
+                            })?
+                    {
+                        continue;
+                    }
+                    if let Some(ran) = self.run_rare(host, running, op, pc as u32 - 1)? {
+                        return Ok(ran);
+                    }
+                }
                 Op::Call { lib, args } => {
                     let (lib, count) = (LibId(lib.0), args.len as usize);
                     self.call_answered(task, running.exe, lib, at(args.start), count)?;
@@ -191,7 +213,7 @@ impl KernelMachine {
                 }
                 Op::End => return Ok(Ran::Done),
                 op => {
-                    if let Some(ran) = self.run_rare(host, running, op)? {
+                    if let Some(ran) = self.run_rare(host, running, op, pc as u32 - 1)? {
                         return Ok(ran);
                     }
                 }
@@ -206,6 +228,7 @@ impl KernelMachine {
         host: &mut dyn Host,
         running: &Running<'_>,
         op: Op,
+        op_at: u32,
     ) -> Eval<Option<Ran>> {
         let (task, exe, stream) = (running.task, running.exe, running.stream);
         let ran = match op {
@@ -217,7 +240,12 @@ impl KernelMachine {
             }
             Op::Index { at: r } => {
                 let r = at(r);
-                self.read_index(r, r + 1, r)?;
+                let hint = if matches!(self.regs[r], Value::Record(_)) {
+                    stream.index_hints.get(&op_at)
+                } else {
+                    None
+                };
+                self.read_index(r, r + 1, r, hint)?;
                 return Ok(None);
             }
             Op::MakeTuple { items } => {
@@ -328,7 +356,7 @@ impl KernelMachine {
                 return unbound(&stream.names[name.ix()]);
             }
             Op::SetField { target, field, src } => {
-                self.write_field(at(target), &stream.fields[field.ix()], at(src))?;
+                self.write_field(at(target), &stream.fields[field.ix()].name, at(src))?;
                 Ran::Done
             }
             Op::SetIndex { target, src } => {
@@ -337,7 +365,7 @@ impl KernelMachine {
                 Ran::Done
             }
             Op::RemoveField { target, field } => {
-                self.remove_field(at(target), &stream.fields[field.ix()])?;
+                self.remove_field(at(target), &stream.fields[field.ix()].name)?;
                 Ran::Done
             }
             Op::RemoveIndex { target } => {

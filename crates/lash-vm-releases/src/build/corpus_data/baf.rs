@@ -23,6 +23,7 @@ pub(super) const DATA: &str = r####"{
 "af1ee0b05bbe58135863a1755b417b1d3ca5885d7dc38305b6b42dccbfd54b01":[{"int":"4428959735539671580"}],
 "af1fe20d56c9974405f4f2c485e88b008cb5c19d160bd7ac6a43d06383c5be14":{"charge":2,"outcome":"ok {\"bool\":false}","prepared_difference":null,"reservations":[],"reserved":0,"spent":1},
 "af22ec59d299dbf656ee561524b68512355f19c7e785e3292500e492ab3f05fe":[{"float":"-1.1506095385895235e254"}],
+"af23ea32a216062dd638c38b9f085f2f73d07d99bb8e171b4c3ab1ce6705a88f":[{"list":0},{"int":"-8216914318964728319"}],
 "af24337e1fce916c5f710497c4565e2c58fdd0d4005f778d8218b62e936d0f2e":{"charge":7,"outcome":"ok {\"int\":\"-1425905345884829245\"}","prepared_difference":null,"reservations":[],"reserved":0,"spent":0},
 "af24b363868174653fb3da7bd29a25b83a383871e5a50ced1f3fbbdee493b9f3":[{"text":"񹃁򝆠𲘃𙒏򠱦𼟾򖇱򯅲򵰐󚲨򎷱򼩪󥅾򣡜𸜬򽤢󚸐腌󥅎򘱬򹡴􅡄񽯴𧭃򵽵񠺋񔱖򢅎󰚌񛐪񲷂򮴙󁒃򗁪򎘊ॆ𞋔󏘑𫆽𖎞򛫙򳧬򕊟𠧺񲅩񥭫ԝ󈩗񡒃󲙪󐂦񍴧񊵝򳅇𽛥󃰈󸁰󚅰𨘲󕖾󾺕򻨈򊭼󣄪㇈񯶫򐪐᪅󲏰򇖷𛲜񻳥"}],
 "af25c27940178bfd366bd30766af528ea981baaf6c5ddeb8ba68140065d25fcd":{"charge":21,"outcome":"memory","prepared_difference":null,"reservations":[[0,1]],"reserved":0,"spent":0},

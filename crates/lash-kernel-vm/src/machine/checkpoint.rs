@@ -433,6 +433,7 @@ impl KernelMachine {
             pins: Pins::default(),
             fresh: Vec::new(),
             charging: true,
+            scalar_blocks: false,
             charged: root.meters.charged,
             live_tasks: root.meters.live_tasks,
             census_refinements,

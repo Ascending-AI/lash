@@ -135,5 +135,6 @@ pub(super) const DATA: &str = r####"{
 "26eb5ec303f18ab0d4f0ff10d35d9458643a517dc91777650c16b8a73855d26a":{"charge":263,"outcome":"ok {\"bool\":false}","prepared_difference":null,"reservations":[],"reserved":0,"spent":0},
 "26ecc036651a0a8533606f17e7343b388e07e05ff72c084cc24e2770b26a5ed3":[{"list":0},{"int":"6003931660528456441"}],
 "26f8c41cd0f36c6b5e5a9ccd706914f1e47fd7189dc50fe3065b96ff90827c11":[{"float":"-8.23573572592225e-221"},{"float":"-3.0168197495687732e144"}],
-"26fd459568ed9153c3202d31e9cd61ef1922636bbcded1f8dba3bceff541db2f":[{"float":"2.3216695413115885e89"}]
+"26fd459568ed9153c3202d31e9cd61ef1922636bbcded1f8dba3bceff541db2f":[{"float":"2.3216695413115885e89"}],
+"26fee267e1efa6aba17449daaac727459b17d6867c5368e16f9923fb3906628e":[{"float":"6.194867087122705e119"},{"bool":true}]
 }"####;

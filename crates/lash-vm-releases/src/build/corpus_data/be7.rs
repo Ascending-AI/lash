@@ -24,6 +24,7 @@ pub(super) const DATA: &str = r####"{
 "e7215510b58b9ca024f7b656706ffa1ae07060e492141b37a630f22cd87c0b99":[{"bytes":"dd042846"}],
 "e7242f58db454b7bc46d1a3c94748e8aacf270b0107fc7dfae35e9940ccc14b1":{"charge":114,"outcome":"raised \"index_out_of_range\" \"text index is out of range\" \"null\"","prepared_difference":null,"reservations":[],"reserved":0,"spent":0},
 "e7263505161d15a755fb0cbcc83216b54d07b60350f6c84b123f50145863346a":{"charge":4,"outcome":"ok {\"float\":\"-8.607157919212093e108\"}","prepared_difference":null,"reservations":[],"reserved":0,"spent":0},
+"e7272f1dc01dc9d14bf1580c903d723ad01f13a7bdfb4b924b32bbe0b68421da":[{"text":"񦆷񤺴𷬩񩎟󔍸󔇾򔳽"},"null"],
 "e72f39d3168cc59e13333813e58bbe841ec10e6b9d2080541aa10dcc31b31726":{"charge":1012,"outcome":"ok {\"error\":{\"data\":{\"float\":\"-94332799466268.08\"},\"kind\":\"񔰻􄑣򏘫񷴇񳸽󐼁򺅟矝𹡲񐧂򆍑󫏗󔍰󢯶񾘡񝆭󜵎񑝔𕱺񱁂𨣢󷥳򑽁񼬿򛥩򴁛򀐛𫳓𙽪󽛔𶁹򎳹􂽠􌄾񋤼򋵎񰦴񵢧񎏖񘖑󉓚򚅳򢳱񬫨񎍽𸷻񻸠򈝜󌥒񹩀򬅴𞇶񅦵񚱆񣢞󍽯𐤑򢭃𸯕𱞂򣌭󅸋𲉷󕏳󖎔򵡓𛸣􀾜􉚃Ὦ󑓐򱫹򫒌𲃥񐯤僳𨢒𼤃􈉑󩴕򃽯񜃑򺤐𽱂𰵺󰗠􈷫򑘰󱀜񣬼󺱊򲎒􍅕񎮷𸦠􋪳𰴆񘢜𤺍򪕐\",\"message\":\"󻎖𾕱򹳻𱌂򻖤򬧏𙦜󂶯󔠴򍖤󄤏񰑝󶬕󮚃􌆎񒾍񱪒񧨧𜜓𪹝򊡁󃥑𡅣񣆁򢦢󙭱\"}}","prepared_difference":null,"reservations":[],"reserved":0,"spent":0},
 "e72fd2144dab522786ea83314ce1da52c3714c3b72032aafee61b24694f85bae":[{"record":0},{"text":"򢢋𐸚􍊆򹢣𻝒񯺼󡉁󸈥򦙡󯳭􏙔𤒸񊠱椡򽎳񎃔򻠕󗨥𝮑򢙦񝎪𖪍𬌘𱺞񦄣򝄡򙣃񷄲񚵐񉀊羪􋗕򦟾󕚱򈑜򣡔𮴤񘇾佽򹢣򲵒󪶈򸣓񾄂𬙀𼗌򱕇񀪭鯸𷃏񉯮𽅙󬂻𑿺󯝅񷏫𺗌򊶇򶄜񇛞򑆳󣍐󓤶򾋄度񗆵򛸖򘣪񾽻񚙥򨉩񂄭򻐯񹊇𤉢񝹦򽙚퍶򵝐󣟾򾈑񷖕񵨾񅔊󥴠𖾚𾏅񎵂𩸘󬬤񟦲𭛁򹼬𽌒"}],
 "e7310011d4cd7929d07e88ea0959eb8002726fa4528c5152bdbffe2eadaa85c1":{"charge":3,"outcome":"ok {\"float\":\"7.44098903891479e100\"}","prepared_difference":null,"reservations":[],"reserved":0,"spent":0},

@@ -74,6 +74,7 @@ pub(super) fn start(
         pins: Pins::default(),
         fresh: Vec::new(),
         charging: true,
+        scalar_blocks: false,
         charged: 0,
         live_tasks: 1,
         regs: registers::Registers::default(),

@@ -19,6 +19,7 @@ pub(super) const DATA: &str = r####"{
 "91232873eea6dd2b9d3a3372831caa84faf777f32b5ae947f35a40d1783bbc74":{"charge":8,"outcome":"ok {\"error\":{\"data\":{\"text\":\"Infinity\"},\"kind\":\"(\",\"message\":\"(\"}}","prepared_difference":null,"reservations":[],"reserved":0,"spent":0},
 "912374a01041b4299d91314a960245271144850a8667cc6efc94ff389258c656":[{"record":119},{"text":"é"}],
 "912510fee6cbc8545454e1e698771f921a9738f46c6c5a29128774277f031d69":{"charge":68,"outcome":"ok {\"float\":\"41.03037021611031\"}","prepared_difference":null,"reservations":[],"reserved":0,"spent":0},
+"9126a96ca6934817ac1a2a778402088223993ec1c06f5c3996d351dd7630ab83":[{"text":"񹕗񣆽񒂞񙥟񡮭𬻚򪧇󋝔񔴺􆼠򣗾󖸕󬾉󽩖򻉢򯖆󰧭򵪾𪆋󣀈򸁨𝅨󺣊𰄛򮗙򝩒񹝦򁿈𱷷𼀌򾢌񅩝󵦩󮽚󽐄󏒬󻑅򫙭􊑁򝽉򘲷񉩮𵻚"},{"bool":false}],
 "9126ec220bb1f5e693cbb32cfd2b3c83e075f117eade441775a7b7208e3775f5":[{"int":"557310511964426168"}],
 "91271eddd81b854602eefbd2e35eb06a996fd13e7b93dc7c5b4039bb2e6fa676":{"charge":884,"outcome":"raised \"type_error\" \"Invalid URL\" \"null\"","prepared_difference":null,"reservations":[],"reserved":0,"spent":0},
 "91297d8aa1aab493b9d6236180861fb414900ff03f27bb16fedbcca0e240c99a":[{"record":21},{"text":"񿋤󐐁񁁉󩠩󝕙򠺳𒁮򐮮󎐹񤖱󸥺􇻨򆠕򡾅󣻺񃘇򾮫􇂼𻭝𢕫󙯡󙒖򸈿𴓻򞢲𛇣񻉀򿜤򭷊컱🌬󇯊񻾽𓦂򗵱𕧋򯖸졓夃򏅱󹛓񂤾󧛬䤁𻧓𕉠𷳄򁜽𷉓򬱷򑨯򡯛􋤬󖥞󷘌🦀"},{"int":"5206476226828068379"}],

@@ -34,9 +34,12 @@ pub enum ImplementError {
 }
 
 /// The helpers this crate has a native for, by name.
-pub const OPERATIONS: [&str; 6] = [
+pub const OPERATIONS: [&str; 9] = [
     "ts.to_boolean",
     "ts.add",
+    "ts.sub",
+    "ts.to_number",
+    "ts.for_of.item",
     "ts.lt",
     "ts.le",
     "ts.gt",
@@ -46,7 +49,7 @@ pub const OPERATIONS: [&str; 6] = [
 /// Adds its native to each of `helpers` that this crate implements
 /// ([`OPERATIONS`]), each looked up by the name its definition carries.
 /// The registry must hold the kernel library already: the natives call
-/// its `num.add`, `num.to_float`, `text.concat` and `text.utf16_compare`.
+/// its `num.add`, `num.sub`, `num.to_float`, `text.concat` and `text.utf16_compare`.
 ///
 /// # Errors
 ///
@@ -66,6 +69,9 @@ pub fn implement(
         to_float: kernel("num.to_float")?,
         concat: kernel("text.concat")?,
     });
+    let subtract = Arc::new(Subtract {
+        native: kernel("num.sub")?,
+    });
     let compare = kernel("text.utf16_compare")?;
     let mut natives: Vec<(FunctionId, Arc<dyn NativeFunction>)> = Vec::new();
     for function in helpers {
@@ -81,6 +87,9 @@ pub fn implement(
         let native: Arc<dyn NativeFunction> = match registered.definition().name.as_str() {
             "ts.to_boolean" => Arc::new(ToBoolean),
             "ts.add" => add.clone(),
+            "ts.sub" => subtract.clone(),
+            "ts.to_number" => Arc::new(ToNumber),
+            "ts.for_of.item" => Arc::new(ListItem),
             "ts.lt" => relation(Relation::Lt),
             "ts.le" => relation(Relation::Le),
             "ts.gt" => relation(Relation::Gt),
@@ -267,5 +276,79 @@ fn floats(args: &[Value], relation: Relation) -> Option<Value> {
             Some(Value::Bool(relation.floats(left.get(), right.get())))
         }
         _ => None,
+    }
+}
+
+/// Float operands already are ECMA Numbers. Every conversion case, including
+/// guest valueOf, is declined to the complete operation body.
+struct ToNumber;
+impl NativeFunction for ToNumber {
+    fn call(&self, call: NativeCall<'_>) -> Result<Value, NativeError> {
+        match call.args {
+            [value @ Value::Float(_)] => Ok(value.clone()),
+            _ => Err(NativeError::Decline),
+        }
+    }
+    fn prepare(&self) -> Option<PreparedNative> {
+        Some(PreparedNative {
+            entry: |args| match args {
+                [value @ Value::Float(_)] => Some(value.clone()),
+                _ => None,
+            },
+            operation: "ts.to_number / Float",
+        })
+    }
+}
+
+struct Subtract {
+    native: Arc<dyn NativeFunction>,
+}
+impl NativeFunction for Subtract {
+    fn call(&self, mut call: NativeCall<'_>) -> Result<Value, NativeError> {
+        match call.args {
+            [left @ Value::Float(_), right @ Value::Float(_)] => {
+                let args = [left.clone(), right.clone()];
+                delegate(&self.native, &mut call, &args)
+            }
+            _ => Err(NativeError::Decline),
+        }
+    }
+    fn prepare(&self) -> Option<PreparedNative> {
+        Some(PreparedNative {
+            entry: |args| match args {
+                [Value::Float(left), Value::Float(right)] => {
+                    Some(Value::Float(Float::new(left.get() - right.get())))
+                }
+                _ => None,
+            },
+            operation: "ts.sub / Float",
+        })
+    }
+}
+
+/// The list cursor already read the element. Its item operation only maps the
+/// empty-tuple hole to undefined. Other cursor kinds keep the complete body,
+/// including machine-only key dereferencing for maps and sets.
+struct ListItem;
+impl ListItem {
+    fn answer(args: &[Value]) -> Option<Value> {
+        let [Value::List(_), raw] = args else {
+            return None;
+        };
+        Some(match raw {
+            Value::Tuple(tuple) if tuple.summary.len == 0 => Value::Absent,
+            value => value.clone(),
+        })
+    }
+}
+impl NativeFunction for ListItem {
+    fn call(&self, call: NativeCall<'_>) -> Result<Value, NativeError> {
+        Self::answer(call.args).ok_or(NativeError::Decline)
+    }
+    fn prepare(&self) -> Option<PreparedNative> {
+        Some(PreparedNative {
+            entry: Self::answer,
+            operation: "ts.for_of.item / List",
+        })
     }
 }

@@ -115,6 +115,7 @@ pub(super) const DATA: &str = r####"{
 "18a6f1d836263f16589bc9463426dae12239737bbed58a78f130c455eba2b1ea":{"charge":14,"outcome":"ok {\"int\":\"-1\"}","prepared_difference":null,"reservations":[],"reserved":0,"spent":0},
 "18a8c5afadfb710054e377d3bd1d5b0952f86dfaa085d42f1f99561fb37512e4":[{"list":1},{"text":"[]"}],
 "18a8f918b52cd1a7fff0de677509fffc97b3c2f6d45f6a7e0e531b6b6dbccbf2":[{"text":"򀐹񌉱􎶵𵼮󃈐񥱴𳧌󤢿󘯮񏽹탇􃲦󁝟䲱񷩨𛪜󝋩󱔌򊐦򈋮񑙫󃊇򽴢񦘘񁳔񖇭𶁮􄔮􈰤㰼򣝄􀨪􆪾򬧫𖪸𸙭񧰡⚙򌲔󜠍󿻝🉠񶞄򔑋񐸃񴓟񙖖𪄽񯔿񪴕󑜏󑃡񕢀򟰱򚶉􀲒񴨋񢉟󡇛􁄸񳼚Ꮴ򲫃𸁖񊣖񄰇𗥟􃉭絉򶇳󿟰󤘟򋝓񰓽󳾴󏓋󅧢򩧑񊺢󇝿󨉑򵜕󝓻򸖒򶠙򖲉􌠐🦀򯡳𾭃𖩕񈏁􃺆򌭻␭񼄥󏇧𵏄򞉣񭍧񝌁𘃧󢐦𱷮񶱕񞏍􊥊񽪘󦔭􋺧󞠚󅵊򜝰􌛾󗣳񭫂􆯷򔳠񮱹𳇡"}],
+"18aa6feb0b34528238b368681e28d11a16f2fc5b2992fb59039041c3b5173057":{"charge":9,"outcome":"ok {\"float\":\"5.899651756671119e-45\"}","prepared_difference":null,"reservations":[],"reserved":0,"spent":0},
 "18ac5e49d8e797231906b9f067fc2ce5e398ceb6d642ab38cb87695f4342fd4b":{"charge":4,"outcome":"ok {\"float\":\"3.8776497955118754e-197\"}","prepared_difference":null,"reservations":[],"reserved":0,"spent":0},
 "18ad6e8aa7d876bf815a3e321a336b136ac3b7a6b6b2308048c75dfd5e64c891":[{"record":1},{"text":"񵡟ꄯ󢮭񷢺񦓋򕃂􎳣񥟺򣟕𶣺񨒫񄍢򪍤򒔢񍧨񰹛񗺇󬎺񽪽󤙈컄񍱙񅖡񣽊򄦴򎨧򸨳𵷧򚪜𠻉󕺔ԩ򯍣񐩅񁼑򮵯􉭵򩜃򓃭𧏌󺘫ㆧ怄񵗄񪉯񨃫򤡨򄃸􋑹񚝑񐩟󧎋󌞬򡄣񍇁򼈢󿼦潘𗞆񾓩򧽠񩖞񞄵򨦷񨝤󶽪􊌴񗕲𑔘򸔲񢚸񯣵󎱄𡚜󉶱󯫊󤖿𾃴𔐵񟏽𲵚󖦀򿵓񴩩􆒽𐔴򞀾򕩾𽭊򷁼򣾜󀋣𤠦𷔶򜱜􋳄񕺽𴵀񝏚𫫽񽴝񝗧񈎌󮮋󡊜񬶹𸡢𷧲򏞁∮ﯪ󤒝𵝔񈃺񅍻󧤝𴊯󄿪򱗵󐒞򎌗񐜑"}],
 "18aef30fb9e111f4b21981e15c5c213fcb97fb7cab371bdcedded52d8d6a51a2":[{"int":"-4977271342044495281"},{"bool":true}],

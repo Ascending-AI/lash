@@ -508,6 +508,7 @@ function ts.to_number(value: Any) -> Number
 kernel 1
 errors "type_error"
 charge sum(8, deep(value))
+native
 body {
   if same(kind(value), "float") {
     return value
@@ -573,6 +574,7 @@ function ts.sub(left: Any, right: Any) -> Number
 kernel 1
 errors "type_error"
 charge sum(12, deep(left), deep(right))
+native
 body {
   # Float pairs already have ECMA Number semantics, including NaN and zero.
   if same(kind(left), "float") {
