@@ -1,0 +1,17 @@
+{
+  "format": "lash-perf-replay/1",
+  "name": "prior-turn-probe",
+  "description": "Equal literal lookup-and-answer useful work at several history depths; routing ordinals remain replay metadata. Compaction is measured separately every three turns.",
+  "protocol": "standard",
+  "compact_every": 3,
+  "turns": [
+    {
+      "repeat": 9,
+      "user": "Look up the fixed record and summarize its status.",
+      "replies": [
+        {"tool_calls": [{"tool": "fixture_lookup", "args": {"key": "fixed-record"}}]},
+        {"text": "The record remains active with the same owner."}
+      ]
+    }
+  ]
+}

@@ -102,3 +102,78 @@ window; they are not live-instance counts. Ties are deterministic and omitted
 kinds are counted. Recording is compiled out without `perf-witness`, and is
 inactive without an open window. The wrapper's separate `future-sizes` mode
 writes this receipt without DHAT so its overhead is distinguishable.
+
+## Prior-turn and compaction cost
+
+One maintained command builds the existing optimized, symbolized replay host
+and worker, then runs fresh SQLite stores with stats_alloc and inactive/active
+DHAT at each selected prior depth:
+
+```sh
+. ./env.sh
+python3 scripts/profile_heap.py --population replay \
+  --workload crates/lash-perf/workloads/replay/prior-turn-probe.json \
+  --prior-depths 2 5 8 --out-dir .kiln/FIG-6623/prior-turn
+```
+
+The supplied workload repeats exactly the same lookup and answer. Custom
+scripts must select one session's non-setup turns with identical literal user
+and reply data; turn/session substitutions refuse comparison. Replay adds its
+ordinal routing marker to the input; that metadata is disclosed separately.
+Each depth profiles only its next turn after building history with profiling
+inactive. Both modes use the same DHAT-capable executable; `off` retains the
+existing stats allocator. Native workers use the separately fingerprinted
+unprofiled executable. Each run has an 8 GiB virtual-memory cap.
+
+`prior-turn-cost.json` contains the raw selected ordinary rounds from the
+inactive-profiler pass and their per-session metrics, plus DHAT source stacks
+from the active pass. Full stacks are keys, with ASLR addresses removed;
+`source_sites[*].stack` indexes the shared `frame_table`. The text reader prints
+the ten largest absolute robust traffic slopes with their populations and
+uncertainty (long symbols are abbreviated only in text). `tb`
+is source-site allocated traffic; `eb` is the bytes allocated **in this window**
+still live at its end; `gb` is those allocations live at the simultaneous heap
+peak. Neither live quantity includes preexisting history. Retained history,
+worker and native heaps are unavailable (`null`), never inferred from traffic.
+A site absent from a complete DHAT capture allocated zero bytes in that window.
+
+`compaction-cost.json` reads the raw `compactions` records excluded by replay's
+ordinary summary and duration-history reader. It uses every compaction from the
+deepest inactive-profiler capture once. Shorter fresh histories repeat its early
+depths; selecting one complete history avoids weighting those depths by extra
+prefix runs.
+Compaction after the final turn is not executed by replay. The sample command
+therefore observes compactions at history depths 3 and 6. These are per-session
+round averages, with separate history and frame coordinates; neither series is
+an individual-session latency-tail estimate. FIG-6570's committed call-ledger
+join remains unavailable until that dependency lands; scripted model-call
+counts are retained in their existing units.
+
+Both files preserve producer experiment identities, exact executable hashes,
+backend/settings, useful-work digest, observer modes, selected window and
+successful terminal population. An experiment ID includes observed run identities
+and the heap window's process identity; repeated executions at the same depth
+remain distinct. The offline reader refuses duplicate captures and missing or
+mixed identities. The standard probe starts no native worker; its worker
+fingerprint identifies the configured artifact. Re-read archived captures without executing the runtime:
+
+```sh
+python3 scripts/prior_turn_cost.py .kiln/FIG-6623/prior-turn/depth-* \
+  --out-dir .kiln/FIG-6623/prior-turn
+```
+
+The text table and JSON retain `n` and distinct-depth count for every metric.
+OLS and Theil–Sen slopes are in metric units per prior turn (and separately per
+frame turn). Fewer than two distinct depths yield unknown slopes. OLS residual
+standard error requires more than two observations. The min/max pairwise slope
+range describes dispersion, **not** a confidence interval; this small population
+cannot establish a zero-growth promise. Raw samples remain available for a
+larger experiment. There is no threshold, automatic budget or regression gate.
+
+Every depth also retains one ordered local `perf stat -e instructions:u`
+inactive/active pair, counter runtime/running fraction in `perf_counter_fields`,
+load1, `/usr/bin/time -v` peak RSS and raw counter/resource files. Its instruction
+difference covers whole process startup, prior-history creation, selected turn,
+shutdown and profile flush, with identical useful work. DHAT overhead is
+**diagnostic**, not calibrated or subtracted from turn slopes. Shared-host wall
+time remains unqualified. The offline reader adds no runtime observer work.

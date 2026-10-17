@@ -18,6 +18,7 @@ import time
 from pathlib import Path
 
 from perf_artifacts import artifacts
+from prior_turn_cost import digest, experiment_identity, write_series
 
 
 def feature_binary(root: Path, package: str, binary: str, features: set[str]) -> str:
@@ -355,6 +356,8 @@ def profile_replay(args: argparse.Namespace) -> None:
                       report=build_report, optimized=True, symbolized=True)
     observations = []
     last = args.profile_turn if args.profile_through_turn is None else args.profile_through_turn
+    executables = {key: {"path": str(path), "sha256": hashlib.sha256(path.read_bytes()).hexdigest()}
+                   for key, path in paths.items()}
 
     def cap_memory() -> None:
         limit = 8 * 1024**3
@@ -373,8 +376,13 @@ def profile_replay(args: argparse.Namespace) -> None:
                         "--profile-through-turn", str(last)]
         with (directory / "run.log").open("w") as log:
             started = time.monotonic_ns()
+            load1 = os.getloadavg()[0]
+            measured = command
+            if args.instructions:
+                measured = ["perf", "stat", "-x", ";", "-e", "instructions:u", "-o",
+                            str(directory / "perf.csv"), "--", *command]
             result = subprocess.run(["/usr/bin/time", "-v", "-o", str(directory / "resources.txt"),
-                                     *command], cwd=root, stdout=log, stderr=subprocess.STDOUT,
+                                     *measured], cwd=root, stdout=log, stderr=subprocess.STDOUT,
                                     env=dict(os.environ, LASH_VM_WORKER=str(paths[worker])),
                                     preexec_fn=cap_memory)
             elapsed = time.monotonic_ns() - started
@@ -391,7 +399,20 @@ def profile_replay(args: argparse.Namespace) -> None:
         if len(workload["rounds"]) < last:
             raise RuntimeError("replay did not reach the selected turn range")
         selected = [row for row in workload["rounds"] if args.profile_turn <= row["turn"] <= last]
+        instructions = None
+        if args.instructions:
+            counters = [line.split(';') for line in (directory / "perf.csv").read_text().splitlines()
+                        if ';instructions:u;' in line]
+            if len(counters) != 1:
+                raise RuntimeError("missing instructions:u counter")
+            counter = counters[0]
+            instructions = int(counter[0].strip())
+        resources = (directory / "resources.txt").read_text()
+        rss = re.search(r"Maximum resident set size \(kbytes\):\s*(\d+)", resources)
         observations.append({"mode": mode, "command": command, "exit_code": result.returncode,
+                             "load1": load1, "peak_rss_kib": int(rss[1]) if rss else None,
+                             "instructions_u": instructions,
+                             "perf_counter_fields": counter if args.instructions else None,
                              "elapsed_ns": elapsed, "identity": replay["identity"],
                              "script_digest": workload["script_digest"],
                              "completed_turns": len(workload["rounds"]),
@@ -415,12 +436,68 @@ def profile_replay(args: argparse.Namespace) -> None:
                "window_receipt": window, "profile": str(profile), "build_report": str(build_report),
                "platform": "//tools/buck2:profiling", "allocator": "dhat-heap+stats_alloc",
                "statistic": "single ordered same-executable profiler inactive/active pair; shared-host diagnostic",
-               "executables": {key: {"path": str(path), "sha256": hashlib.sha256(path.read_bytes()).hexdigest()}
-                               for key, path in paths.items()},
+               "executables": executables,
                "observations": observations,
                "on_minus_off_ns": observations[1]["elapsed_ns"] - observations[0]["elapsed_ns"]}
+    if getattr(args, 'useful_work', None):
+        configuration = {"observer": {"off": "stats_alloc; DHAT inactive", "on": "stats_alloc+DHAT; 64 frames"},
+                         "backend": workload["backend"], "protocol": workload["protocol"],
+                         "worker": {"artifact": executables[worker],
+                                    "reach": "not started by standard protocol; configured native helper for code mode"},
+                         "executables": executables,
+                         "window": [args.profile_turn, last],
+                         "terminal": "all scripted replies consumed; all turns answered; clean shutdown",
+                         "useful_work": args.useful_work,
+                         "script_digest": workload["script_digest"],
+                         "producer": observations[0]["identity"],
+                         "settings": {"store": "fresh SQLite file; synchronous=NORMAL", "sql_shapes": False,
+                                      "traffic": False, "compact_every": workload["compact_every"], "sessions": 1}}
+        # Timestamp/load describe a capture, not a comparable configuration.
+        configuration['producer'] = {key: value for key, value in configuration['producer'].items()
+                                     if key not in ('started_at', 'load1_at_start')}
+        receipt['experiment'] = experiment_identity(configuration, observations, window)
     (out / "receipt.json").write_text(json.dumps(receipt, indent=2) + "\n")
     print(f"Replay heap receipt: {out / 'receipt.json'}")
+
+
+def profile_prior_depths(args: argparse.Namespace) -> None:
+    """Repeat one literal next-turn script at several depths using existing passes."""
+    source = Path(args.workload).resolve()
+    source_text = source.read_text()
+    script = json.loads(source_text)
+    if script.get('sessions', 1) != 1:
+        raise ValueError('prior-depth captures require one session')
+    depths = sorted(set(args.prior_depths))
+    if len(depths) < 2 or depths[0] < 0:
+        raise ValueError('select at least two distinct nonnegative prior depths')
+    turns = [group for group in script['turns'] for _ in range(group.get('repeat', 1))]
+    if depths[-1] >= len(turns):
+        raise ValueError('prior depths must lie within the script')
+    selected = [turns[depth] for depth in depths]
+    work = [{key: turn[key] for key in ('user', 'replies')} for turn in selected]
+    if (any(turn.get('setup') for turn in selected) or any(w != work[0] for w in work)
+            or '{turn}' in json.dumps(work) or '{session}' in json.dumps(work)):
+        raise ValueError('selected depths must do the same literal non-setup useful work')
+    out = args.out_dir.resolve()
+    out.mkdir(parents=True, exist_ok=False)
+    snapshot = out / 'workload.json'
+    snapshot.write_text(source_text)
+    captures = []
+    for index, depth in enumerate(depths):
+        capture_args = argparse.Namespace(**vars(args))
+        capture_args.out_dir = out / f'depth-{depth}'
+        capture_args.workload = str(snapshot)
+        capture_args.profile_turn = depth + 1
+        capture_args.profile_through_turn = depth + 1
+        capture_args.turns = depth + 1
+        capture_args.instructions = True
+        capture_args.useful_work = {"sha256": digest(work[0]), "script": work[0],
+                                    "routing": "replay adds its session/ordinal marker; not useful work"}
+        capture_args.no_build = args.no_build or index > 0
+        capture_args.build_report = args.build_report or out / 'build.json'
+        profile_replay(capture_args)
+        captures.append(capture_args.out_dir)
+    write_series(captures, out)
 
 
 def main() -> None:
@@ -430,6 +507,9 @@ def main() -> None:
     parser.add_argument("--turns", type=int, help="Replay prefix length")
     parser.add_argument("--profile-turn", type=int, help="Replay: one-based turn to profile")
     parser.add_argument("--profile-through-turn", type=int, help="Replay: inclusive last turn")
+    parser.add_argument("--prior-depths", type=int, nargs='+',
+                        help="Replay: compare equal literal next-turn work at these prior depths; includes perf instructions:u pairs")
+    parser.add_argument("--instructions", action="store_true", help="Replay: retain paired perf instructions:u counters")
     parser.add_argument("--case", default="root-redrive")
     parser.add_argument("--operations", type=int, default=1)
     parser.add_argument("--payload-bytes", type=int, default=1024)
@@ -446,11 +526,18 @@ def main() -> None:
     parser.add_argument("--worker-threads", type=int, default=2,
                         help="Tokio worker threads in heaptrack mode (default: 2)")
     args = parser.parse_args()
+    if args.prior_depths is not None and args.population != 'replay':
+        parser.error('--prior-depths requires --population replay')
     if args.population == "latency" and args.case not in ("cross-worker", "poll", "grace"):
         parser.error("latency heap pairs select one child-node case: cross-worker, poll or grace")
     if args.operations < 1 or args.callers < 1 or args.worker_threads < 1:
         parser.error("operations, callers and worker threads must be positive")
     if args.population == "replay":
+        if args.prior_depths is not None:
+            if args.heaptrack or not args.workload:
+                parser.error('--prior-depths needs --workload script.json and DHAT')
+            profile_prior_depths(args)
+            return
         if (args.heaptrack or not args.workload or not args.turns or args.turns < 1
                 or args.profile_turn is None
                 or not 1 <= args.profile_turn <= ((args.profile_turn if args.profile_through_turn is None else args.profile_through_turn)) <= args.turns):
