@@ -26,8 +26,8 @@ pub struct WorkflowCatalogEntry {
     pub scopes: usize,
     pub python: Option<LoweringSize>,
     pub refusal: Option<String>,
-    pub typescript_source: &'static str,
-    pub python_source: &'static str,
+    pub typescript_source: Option<&'static str>,
+    pub python_source: Option<&'static str>,
     pub typescript_witness: Option<&'static str>,
     pub python_witness: Option<&'static str>,
 }
@@ -47,6 +47,7 @@ pub struct SelectWorkflowRequest {
 struct Case {
     name: String,
     mode: String,
+    dialects: Vec<String>,
     #[serde(default)]
     entries: Vec<String>,
     refusal: Option<String>,
@@ -85,10 +86,21 @@ impl Catalog {
         let cases: Vec<Case> = serde_json::from_str(workflow_corpus::CATALOG_JSON)?;
         let mut workflows = Vec::new();
         for case in cases {
-            let &(_, ts, py, ts_witness, py_witness) = SOURCES
+            let sources = SOURCES
                 .iter()
-                .find(|row| row.0 == case.name)
+                .find(|row| row.name == case.name)
                 .ok_or_else(|| RunError::Invalid(format!("missing corpus source {}", case.name)))?;
+            let declared = |extension: &str| case.dialects.iter().any(|name| name == extension);
+            if case.dialects.len()
+                != usize::from(sources.typescript.is_some()) + usize::from(sources.python.is_some())
+                || declared("ts") != sources.typescript.is_some()
+                || declared("py") != sources.python.is_some()
+            {
+                return Err(RunError::Invalid(format!(
+                    "{}: corpus source dialects differ from the manifest",
+                    case.name
+                )));
+            }
             let group = if case.mode == "cell" {
                 CatalogGroup::Cell
             } else if case.refusal.is_some() {
@@ -97,7 +109,14 @@ impl Catalog {
                 CatalogGroup::Module
             };
             let mut twins = Vec::new();
-            for (dialect, source) in [(Dialect::TypeScript, ts), (Dialect::Python, py)] {
+            for (dialect, source) in [
+                (Dialect::TypeScript, sources.typescript),
+                (Dialect::Python, sources.python),
+            ] {
+                let Some(source) = source else {
+                    twins.push(None);
+                    continue;
+                };
                 if group == CatalogGroup::Cell {
                     twins.push(None);
                     continue;
@@ -169,10 +188,10 @@ impl Catalog {
                     scopes: ts_size.scopes,
                     python: py_size,
                     refusal: case.refusal,
-                    typescript_source: ts,
-                    python_source: py,
-                    typescript_witness: ts_witness,
-                    python_witness: py_witness,
+                    typescript_source: sources.typescript,
+                    python_source: sources.python,
+                    typescript_witness: sources.typescript_witness,
+                    python_witness: sources.python_witness,
                 },
                 typescript,
                 python,
@@ -191,6 +210,15 @@ impl Catalog {
             .workflows
             .iter()
             .find(|workflow| workflow.listing.id == id)?;
+        let source = match dialect {
+            Dialect::TypeScript => workflow.listing.typescript_source,
+            Dialect::Python => workflow.listing.python_source,
+        };
+        if source.is_none() {
+            return Some(Err(
+                "This corpus case has no source in the selected dialect",
+            ));
+        }
         Some(
             match dialect {
                 Dialect::TypeScript => &workflow.typescript,

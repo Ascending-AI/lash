@@ -48,7 +48,7 @@ const approvals = approvalControl(
 const key = (site) => JSON.stringify([site.unit, site.path ?? []]);
 let workflow,
   examples = [],
-  // The dialect examples open in: each has a TypeScript and a Python twin.
+  // The dialect used to open examples that declare a source in that language.
   dialect = "typescript",
   codeView = "kernel",
   codeLinking,
@@ -205,7 +205,7 @@ $("import").onclick = () =>
   });
 async function loadExample(id) {
   const example = examples.find((entry) => entry.id === id);
-  if (!example) return;
+  if (!example || !(dialect === "python" ? example.pythonSource : example.typescriptSource)) return;
   await action(async () => {
     if (example.group !== "module") {
       $("corpus-title").textContent = example.name;
@@ -232,8 +232,7 @@ function setDialect(next) {
   renderExamples();
   renderDialect();
 }
-// The toggle shows the dialect examples open in. An example whose Python
-// twin lash refuses keeps Python off, with lash's refusal as its title.
+// The toggle chooses the dialect for the next example opened.
 function renderDialect() {
   for (const name of ["typescript", "python"]) {
     $(`dialect-${name}`).setAttribute("aria-pressed", String(dialect === name));
@@ -263,6 +262,7 @@ function renderExamples() {
         ...examples
           .filter((example) => example.group === group)
           .map((example) => {
+            const available = Boolean(dialect === "python" ? example.pythonSource : example.typescriptSource);
             const size = dialect === "python" && example.python ? example.python : example;
             const option = el(
               "option",
@@ -270,14 +270,18 @@ function renderExamples() {
               example.group === "module" ? `${example.name} · ${size.statements} statements · ${size.scopes} scopes` : example.name,
             );
             option.value = example.id;
-            option.title = example.description;
+            option.disabled = !available;
+            if (!available) option.textContent = `${example.name} · no ${dialectName(dialect)} source`;
+            option.title = available ? example.description : `This example has no ${dialectName(dialect)} source.`;
             return option;
           }),
       );
       return optgroup;
     }),
   );
-  $("example").value = selected;
+  const selectedExample = examples.find((example) => example.id === selected);
+  const selectedSource = dialect === "python" ? selectedExample?.pythonSource : selectedExample?.typescriptSource;
+  $("example").value = selectedSource ? selected : "";
 }
 // The run on the canvas and in the trace panel. What it shows comes from
 // the run's events: lash's overlay statuses, coverage and replayed path.

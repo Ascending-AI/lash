@@ -765,6 +765,13 @@
       "iteration-untyped/source.ts",
       "non-ascii/source.py",
       "non-ascii/source.ts",
+      "probe-digest/source.ts",
+      "probe-flat/source.ts",
+      "probe-helper/source.ts",
+      "probe-inbox/source.ts",
+      "probe-nested/source.ts",
+      "probe-retry/source.ts",
+      "probe-typed/source.ts",
       "refusal-annotation/source.py",
       "refusal-annotation/source.ts",
       "refusal-capture/source.py",
@@ -823,7 +830,14 @@
       "early-finish/cell-1.ts.txt",
       "early-finish/cell-1.py.txt",
       "capturing-cell/cell-1.ts.txt",
-      "capturing-cell/cell-1.py.txt"
+      "capturing-cell/cell-1.py.txt",
+      "probe-digest/source.ts",
+      "probe-typed/source.ts",
+      "probe-inbox/source.ts",
+      "probe-flat/source.ts",
+      "probe-nested/source.ts",
+      "probe-retry/source.ts",
+      "probe-helper/source.ts"
     ]
   },
   "crates/lash-provider-fixtures": {

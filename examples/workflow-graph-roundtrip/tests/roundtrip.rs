@@ -349,6 +349,32 @@ async fn corpus_catalog_imports_both_dialects_and_draws_the_stored_read() {
         for dialect in ["typescript", "python"] {
             let source = &case[format!("{dialect}Source")];
             let before = answer(client.get(format!("{base}/workflow")).send().await.unwrap()).await;
+            let extension = if dialect == "python" { "py" } else { "ts" };
+            let declared_dialect = declared["dialects"]
+                .as_array()
+                .unwrap()
+                .iter()
+                .any(|value| value == extension);
+            assert_eq!(
+                source.is_string(),
+                declared_dialect,
+                "{}: {dialect}",
+                case["id"]
+            );
+            if !declared_dialect {
+                let response = client
+                    .post(format!("{base}/workflow/select"))
+                    .json(&json!({"id": case["id"], "dialect": dialect}))
+                    .send()
+                    .await
+                    .unwrap();
+                assert_eq!(response.status(), reqwest::StatusCode::UNPROCESSABLE_ENTITY);
+                let after =
+                    answer(client.get(format!("{base}/workflow")).send().await.unwrap()).await;
+                assert_eq!(after["identity"], before["identity"]);
+                assert_eq!(after["version"], before["version"]);
+                continue;
+            }
             match case["group"].as_str().unwrap() {
                 "cell" => {
                     assert!(

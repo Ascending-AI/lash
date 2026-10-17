@@ -31,7 +31,9 @@ cell witnesses from the same corpus. `group` is `module`, `cell` or `refusal`.
 count the first entry's derived view in that dialect; non-modules have no view.
 `refusal` names an expected module-contract diagnostic. `typescriptSource`,
 `pythonSource`, `typescriptWitness` and `pythonWitness` support inspection of
-cell/refusal cases without changing the saved workflow.
+cell/refusal cases without changing the saved workflow. A source is null when
+that dialect is not declared by the manifest; the picker disables that choice.
+Selecting an undeclared dialect returns 422 without changing the saved workflow.
 
 `POST /workflow/select` takes `{ id, dialect?, entry? }`; the default is
 TypeScript and the case's first entry. Cell/refusal selections return 422.
