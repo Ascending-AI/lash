@@ -403,6 +403,7 @@ impl KernelMachine {
         {
             Answer::Done => return Ok(Flow::Done),
             Answer::Body(code) => code,
+            Answer::Yielded => return self.stand_segments(task, exe, awaiting),
         };
         self.enter_body(task, exe, lib, code, args, awaiting)
     }
@@ -444,7 +445,7 @@ impl KernelMachine {
             .map_err(|interrupt| interrupt.answering(function))?
         {
             Answer::Done => Ok(()),
-            Answer::Body(_) => {
+            Answer::Body(_) | Answer::Yielded => {
                 Err(fault("a call that runs its body was lowered as one that answers").into())
             }
         }
@@ -515,7 +516,10 @@ impl KernelMachine {
         }
         let result = match &function.run {
             LibRun::Body(code) => return Ok(Answer::Body((*code).into())),
-            LibRun::Plan { plan, .. } => self.run_plan(task, exe, lib, plan, args, entry)?,
+            LibRun::Plan { plan, .. } => match self.run_plan(task, exe, lib, plan, args, entry)? {
+                Some(result) => result,
+                None => return Ok(Answer::Yielded),
+            },
             LibRun::Machine(MachineFunction::Deref) => match self.regs.get(args) {
                 Some(Value::Ref(Identity::Task(task))) => Ok(Value::Task(*task)),
                 Some(Value::Ref(Identity::Object(object))) => self
@@ -636,7 +640,10 @@ impl KernelMachine {
                             return Err(fault("a native with no kernel body declined").into());
                         };
                         if let Some(plan) = fallback {
-                            self.run_plan(task, exe, lib, plan, args, entry)?
+                            match self.run_plan(task, exe, lib, plan, args, entry)? {
+                                Some(result) => result,
+                                None => return Ok(Answer::Yielded),
+                            }
                         } else {
                             self.observe(Event::NativeExit);
                             return Ok(Answer::Body((*body).into()));
@@ -667,6 +674,10 @@ pub(super) enum Answer {
     Done,
     /// The kernel body runs the call.
     Body(AdmittedBody),
+    /// The function's segment yielded at a callback site: its frames
+    /// stand there once the caller has saved where it stands
+    /// ([`KernelMachine::stand_segments`]).
+    Yielded,
 }
 
 /// A declared schedule event is independent of ordinary body-form charging.

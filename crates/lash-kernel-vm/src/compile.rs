@@ -45,6 +45,7 @@ mod occurrences;
 mod preparation;
 mod reads;
 mod scopes;
+pub(crate) mod segments;
 mod versions;
 
 pub(crate) use versions::{BlockVersions, ScalarCall};
@@ -195,6 +196,9 @@ struct Prepared {
     /// Each function whose body reaches, through the bodies the machine
     /// runs, a function the registry does not hold: that function.
     missing: BTreeMap<FunctionId, FunctionId>,
+    /// Each installed segment whose sites its body does not state, and
+    /// why: its body runs instead.
+    unresolved: Vec<String>,
     documents: std::sync::Mutex<preparation::Documents>,
 }
 
@@ -211,6 +215,26 @@ impl PreparedLibrary {
     /// Compiles every library body in `registry`.
     pub fn new(registry: Arc<FunctionRegistry>) -> Self {
         Self::with_layout(registry, Layout::default())
+    }
+
+    /// How many segments the library runs, as plans or as their natives'
+    /// fallbacks, and each installed one whose sites its body does not
+    /// state.
+    pub(crate) fn segments(&self) -> (usize, Vec<String>) {
+        let running = self
+            .0
+            .libs
+            .iter()
+            .filter(|lib| match &lib.run {
+                LibRun::Plan { plan, .. }
+                | LibRun::Native {
+                    fallback: Some(plan),
+                    ..
+                } => plan.segment.is_some(),
+                _ => false,
+            })
+            .count();
+        (running, self.0.unresolved.clone())
     }
 
     /// Checks the ops of every statement of the library's bodies
@@ -317,6 +341,7 @@ impl PreparedLibrary {
         tables.blocks.shrink_to_fit();
         tables.stmts.shrink_to_fit();
         tables.stream.ops.shrink_to_fit();
+        let mut unresolved = Vec::new();
         let libs = library
             .iter()
             .map(|(function, registered)| {
@@ -325,19 +350,31 @@ impl PreparedLibrary {
                 let run = match (machine_function(&definition), registered.native(), body) {
                     (Some(machine), _, _) => LibRun::Machine(machine),
                     (None, Some(_), Some(body)) if layout.declines() => LibRun::Body(body),
-                    (None, None, Some(body)) if !layout.declines() => match registered.plan() {
-                        Some(plan) => LibRun::Plan {
-                            plan: Arc::new(PreparedPlan::new(plan, &lib_of, layout, body, &tables)),
+                    (None, None, Some(body)) if !layout.declines() => match registered
+                        .plan()
+                        .map(|plan| PreparedPlan::new(plan, &lib_of, layout, body, &tables))
+                    {
+                        Some(Ok(plan)) => LibRun::Plan {
+                            plan: Arc::new(plan),
                             body,
                         },
+                        Some(Err(problem)) => {
+                            unresolved.push(format!("{}: {problem}", definition.name));
+                            LibRun::Body(body)
+                        }
                         None => LibRun::Body(body),
                     },
                     (None, Some(native), body) => LibRun::Native {
                         native: Arc::clone(native),
                         fallback: body.and_then(|body| {
-                            registered.plan().map(|plan| {
-                                Arc::new(PreparedPlan::new(plan, &lib_of, layout, body, &tables))
-                            })
+                            let plan = registered.plan()?;
+                            match PreparedPlan::new(plan, &lib_of, layout, body, &tables) {
+                                Ok(plan) => Some(Arc::new(plan)),
+                                Err(problem) => {
+                                    unresolved.push(format!("{}: {problem}", definition.name));
+                                    None
+                                }
+                            }
                         }),
                         body,
                     },
@@ -409,6 +446,7 @@ impl PreparedLibrary {
             libs,
             lib_of,
             missing,
+            unresolved,
             documents: Default::default(),
         }))
     }
@@ -794,6 +832,8 @@ pub(crate) struct PreparedPlan {
     pub(crate) fields: Vec<Field>,
     pub(crate) locals: Vec<Option<Local>>,
     pub(crate) closures: Vec<CodeId>,
+    /// A segment's sites where its body's frame stands at them (FIG-6709).
+    pub(crate) segment: Option<segments::Segment>,
 }
 
 impl PreparedPlan {
@@ -803,7 +843,7 @@ impl PreparedPlan {
         layout: Layout,
         body: CodeId,
         tables: &Tables,
-    ) -> Self {
+    ) -> Result<Self, String> {
         use doc::plan::PlanLiteral;
         let callees = plan
             .callees
@@ -837,7 +877,7 @@ impl PreparedPlan {
             .map(|name| Field::new(name, layout))
             .collect();
         let code = &tables.codes[body.0 as usize];
-        let locals = plan
+        let locals: Vec<Option<Local>> = plan
             .slots
             .iter()
             .map(|local| {
@@ -871,14 +911,18 @@ impl PreparedPlan {
                     .unwrap_or(CodeId(u32::MAX))
             })
             .collect();
-        Self {
+        let segment = (!plan.sites.is_empty())
+            .then(|| segments::Segment::resolve(plan, &locals, body, tables))
+            .transpose()?;
+        Ok(Self {
             plan,
             callees,
             literals,
             fields,
             locals,
             closures,
-        }
+            segment,
+        })
     }
 }
 

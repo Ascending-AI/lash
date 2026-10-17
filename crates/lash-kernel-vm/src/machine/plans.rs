@@ -9,6 +9,9 @@
 //! held while it runs, so a call it makes is checked one deeper, as one the
 //! body's frame makes is (`K-BND-002`). Its own forms are not charged; the
 //! formula is, when the call returns (`K-CHG-003`, `K-CHG-007`).
+//!
+//! A segment's callback sites yield where the body would stand in a frame
+//! (`super::segments`, FIG-6709).
 
 use std::sync::Arc;
 
@@ -26,7 +29,7 @@ use crate::heap::value_bytes;
 /// What a statement the plan performs started from: what it pins and
 /// holds from then on is its own, released when it ends.
 #[derive(Clone, Copy)]
-struct Mark {
+pub(super) struct Mark {
     pins: usize,
     borrowed: usize,
     bytes: u64,
@@ -34,25 +37,41 @@ struct Mark {
     reserved: u64,
 }
 
+/// A `for` a plan walks: its cursor, the variable that holds what it
+/// walks, and how many passes it has started, as the body's frame counts
+/// them.
+pub(super) struct Walk {
+    pub(super) cursor: Cursor,
+    pub(super) held: Reg,
+    pub(super) started: u64,
+}
+
 /// One running plan: the machine, the caller's arguments and the plan's
 /// registers.
-struct PlanRun<'m> {
-    machine: &'m mut KernelMachine,
-    task: TaskId,
-    exe: &'m Executable,
-    prepared: &'m PreparedPlan,
+pub(super) struct PlanRun<'m> {
+    pub(super) machine: &'m mut KernelMachine,
+    pub(super) task: TaskId,
+    pub(super) exe: &'m Executable,
+    pub(super) prepared: &'m Arc<PreparedPlan>,
+    pub(super) lib: LibId,
     /// The caller's argument registers: the plan's parameters, which a
     /// plan reads where the native path reads them.
-    args: Reg,
-    entry: Option<&'m super::operation_entry::OperationEntry>,
+    pub(super) args: Reg,
+    pub(super) entry: Option<&'m super::operation_entry::OperationEntry>,
     /// The first of the plan's operand registers.
-    base: Reg,
+    pub(super) base: Reg,
     /// The first of its variables' registers.
-    slots: Reg,
+    pub(super) slots: Reg,
+    /// The first register it holds: the window released when it ends.
+    pub(super) window: Reg,
     /// Each open loop's cursor, and the variable that holds what it walks.
-    cursors: Vec<(Cursor, Reg)>,
-    statement: Option<Mark>,
-    halt: Option<Box<Halt>>,
+    pub(super) cursors: Vec<Walk>,
+    /// How many passes each counted `while` has started, outermost first.
+    pub(super) whiles: Vec<u64>,
+    /// What the body's frame keeps of the call's arguments.
+    pub(super) kept: super::segments::Kept,
+    pub(super) statement: Option<Mark>,
+    pub(super) halt: Option<Box<Halt>>,
 }
 
 impl PlanRun<'_> {
@@ -82,7 +101,7 @@ impl PlanRun<'_> {
         Ok(value)
     }
 
-    fn exit(&mut self, interrupt: Interrupt) -> PlanExit {
+    pub(super) fn exit(&mut self, interrupt: Interrupt) -> PlanExit {
         match interrupt {
             Interrupt::Raise(value) => PlanExit::Raise(*value),
             Interrupt::Halt(halt) => {
@@ -92,11 +111,11 @@ impl PlanRun<'_> {
         }
     }
 
-    fn check<T>(&mut self, result: Eval<T>) -> Result<T, PlanExit> {
+    pub(super) fn check<T>(&mut self, result: Eval<T>) -> Result<T, PlanExit> {
         result.map_err(|interrupt| self.exit(interrupt))
     }
 
-    fn held<T>(&mut self, result: Result<T, Halt>) -> Result<T, PlanExit> {
+    pub(super) fn held<T>(&mut self, result: Result<T, Halt>) -> Result<T, PlanExit> {
         self.check(result.map_err(Interrupt::from))
     }
 
@@ -126,8 +145,9 @@ impl PlanRun<'_> {
     }
 }
 
-impl PlanContext for PlanRun<'_> {
-    fn begin(&mut self) -> Result<(), PlanExit> {
+impl PlanRun<'_> {
+    /// Opens the next statement, ending the one open.
+    pub(super) fn open_statement(&mut self) -> Result<(), PlanExit> {
         let ended = self.end_statement();
         self.held(ended)?;
         let machine = &*self.machine;
@@ -139,6 +159,12 @@ impl PlanContext for PlanRun<'_> {
             reserved: machine.heap.statement_reserved(),
         });
         Ok(())
+    }
+}
+
+impl PlanContext for PlanRun<'_> {
+    fn begin(&mut self) -> Result<(), PlanExit> {
+        self.open_statement()
     }
 
     fn param(&mut self, index: u32, dst: u32) -> Result<(), PlanExit> {
@@ -387,16 +413,23 @@ impl PlanContext for PlanRun<'_> {
             self.machine.put(held, walked);
         }
         let at = self.cursors.len();
-        self.cursors.push((cursor, held));
+        self.cursors.push(Walk {
+            cursor,
+            held,
+            started: 0,
+        });
         Ok(PlanCursor(at as u32))
     }
 
     fn next(&mut self, cursor: PlanCursor, dst: u32) -> Result<bool, PlanExit> {
-        let Some((walking, _)) = self.cursors.get_mut(cursor.0 as usize) else {
+        let Some(walk) = self.cursors.get_mut(cursor.0 as usize) else {
             let missing = Err(fault("a plan stepped a loop it has not opened"));
             return self.held(missing);
         };
-        let stepped = walking.step(&self.machine.heap);
+        let stepped = walk.cursor.step(&self.machine.heap);
+        let stepped = stepped.inspect(|element| {
+            walk.started += u64::from(element.is_some());
+        });
         match self.held(stepped.map_err(Halt::from))? {
             Some(element) => {
                 self.machine.put(self.base + dst as usize, element);
@@ -407,10 +440,41 @@ impl PlanContext for PlanRun<'_> {
     }
 
     fn close(&mut self, cursor: PlanCursor) {
-        let at = cursor.0 as usize;
-        for (_, held) in self.cursors.drain(at..) {
-            self.machine.regs.clear_range(held..held + 1);
+        let at = (cursor.0 as usize).min(self.cursors.len());
+        for walk in self.cursors.drain(at..) {
+            self.machine.regs.clear_range(walk.held..walk.held + 1);
         }
+    }
+
+    fn enter_while(&mut self) {
+        self.whiles.push(0);
+    }
+
+    fn pass_while(&mut self) {
+        if let Some(started) = self.whiles.last_mut() {
+            *started += 1;
+        }
+    }
+
+    fn leave_while(&mut self, depth: u32) {
+        self.whiles.truncate(depth as usize);
+    }
+
+    fn invoke(&mut self, site: u32, callee: u32, args: u32, count: u32) -> Result<(), PlanExit> {
+        let lib = self.prepared.callees[callee as usize];
+        let at = self.base + args as usize;
+        self.offer(site, lib, at, count as usize)
+    }
+
+    fn apply(&mut self, site: u32, at: u32, count: u32) -> Result<(), PlanExit> {
+        self.apply_at(site, self.base + at as usize, count as usize)
+    }
+
+    fn lost(&mut self, entry: u32) -> PlanExit {
+        self.halt = Some(Box::new(fault(&format!(
+            "a segment resumed at entry {entry}, which it has no site for"
+        ))));
+        PlanExit::Halt
     }
 
     fn meter(&mut self, units: u64) -> Result<(), PlanExit> {
@@ -447,7 +511,9 @@ impl KernelMachine {
     }
 
     /// Runs `plan`, library function `lib`'s, with the arguments from
-    /// `args`: its result, or the value it raises.
+    /// `args`: its result, or the value it raises; `None` when it yielded
+    /// at a callback site, its frames to stand there once the caller has
+    /// saved where it stands ([`KernelMachine::stand_segments`]).
     pub(super) fn run_plan(
         &mut self,
         task: TaskId,
@@ -456,7 +522,7 @@ impl KernelMachine {
         plan: &Arc<PreparedPlan>,
         args: Reg,
         entry: Option<&super::operation_entry::OperationEntry>,
-    ) -> Eval<Result<Value, Value>> {
+    ) -> Eval<Option<Result<Value, Value>>> {
         // The call's depth unit (`K-BND-002`): an operation's admission
         // checked it; any other plan's is checked as its body's frame is at
         // its push, and a refusal here names no function.
@@ -470,36 +536,64 @@ impl KernelMachine {
         let end = slots + plan.plan.slots.len();
         self.regs.window(end);
         let charging = std::mem::replace(&mut self.charging, false);
+        // A body's frame keeps its call's arguments for its formula when
+        // the call is charged, or roots a task (`push_operation_frame`).
+        let keep = charging || self.task(task)?.frames.is_empty();
         self.plans += 1;
         let mut run = PlanRun {
             machine: self,
             task,
             exe,
             prepared: plan,
+            lib,
             args,
             entry,
             base,
             slots,
+            window: base,
             cursors: Vec::new(),
+            whiles: Vec::new(),
+            kept: super::segments::Kept::Window { keep },
             statement: None,
             halt: None,
         };
-        let outcome = (plan.plan.run)(&mut run);
+        let outcome = (plan.plan.run)(&mut run, 0);
         // The statement the body leaves by stays open: the caller's goes on
         // in its step, as it does when the body's frame returns.
         let halt = run.halt.take();
         self.plans -= 1;
         self.charging = charging;
+        if matches!(outcome, Err(PlanExit::Yield)) && halt.is_none() {
+            // Its registers hold what its frame will: they are released
+            // once the frames stand.
+            return Ok(None);
+        }
         self.regs.release(base);
         self.heap.execution_roots_moved();
+        // A frame's return is held as it leaves the frame and again as it
+        // arrives in the caller's statement.
+        self.plan_outcome(exe, lib, outcome, halt, charging, 2)
+            .map(Some)
+    }
+
+    /// What a plan of `lib` that ended with `outcome` and `halt` gives its
+    /// caller, which charges code when `charging`; a value it returns is
+    /// held `returned` times.
+    pub(super) fn plan_outcome(
+        &mut self,
+        exe: &Executable,
+        lib: LibId,
+        outcome: Result<Value, PlanExit>,
+        halt: Option<Box<Halt>>,
+        charging: bool,
+        returned: usize,
+    ) -> Eval<Result<Value, Value>> {
         let outcome = match outcome {
             // A value on its way out is in no variable: the caller holds it
             // as it holds what a frame returns or raises to it.
-            // A frame's return is held as it leaves the frame and again as
-            // it arrives in the caller's statement.
-            Ok(value) => Ok(self.departing(value, 2)?),
+            Ok(value) => Ok(self.departing(value, returned)?),
             Err(PlanExit::Raise(value)) => Err(PlanExit::Raise(self.departing(value, 1)?)),
-            Err(PlanExit::Halt) => Err(PlanExit::Halt),
+            Err(exit) => Err(exit),
         };
         match (outcome, halt) {
             (_, Some(mut halt)) => {
@@ -513,7 +607,7 @@ impl KernelMachine {
             }
             (Ok(value), None) => Ok(Ok(value)),
             (Err(PlanExit::Raise(value)), None) => Ok(Err(value)),
-            (Err(PlanExit::Halt), None) => Err(fault("a plan halted without a cause").into()),
+            (Err(_), None) => Err(fault("a plan halted without a cause").into()),
         }
     }
 }

@@ -1,8 +1,8 @@
-//! Generated execution plans for library bodies (FIG-6678).
+//! Generated execution plans for library bodies (FIG-6678, FIG-6709).
 //!
 //! A helper's kernel body stays its definition and the one source of its
-//! meaning. A build compiles a closed body (one that reaches no guest code,
-//! task action or host read) to Rust ahead of time: a [`HelperPlan`]. The
+//! meaning. A build compiles a body to Rust ahead of time: a
+//! [`HelperPlan`]. The
 //! plan performs the body's forms in the body's order through the machine's
 //! own primitives ([`PlanContext`]), so values, raises, halts, call depth
 //! and memory are the body's. It never reimplements arithmetic, text or
@@ -12,8 +12,16 @@
 //! A plan runs where a native would answer and is charged as every library
 //! call is, by its formula at completion (`K-CHG-003`). A plan answers every
 //! call it is offered: it never declines. The body remains what runs under
-//! layouts that force the fallback, and what a frame saved inside the body
-//! resumes in; saved state names the body's coordinates only.
+//! layouts that force the fallback.
+//!
+//! A body that can reach guest code compiles to a resumable segment: at each
+//! callback site ([`PlanSite`]) the plan may yield ([`PlanExit::Yield`]).
+//! The machine then holds the body's frame standing at that site, exactly
+//! as the interpreted body would stand there, and runs the callee as
+//! ordinary code. When the callee returns, the machine runs the frame on in
+//! the body or re-enters the plan after that site (`run`'s entry), as its
+//! layout chooses: the saved state is the body's coordinate, never a Rust
+//! stack, so a frame parked by one restores into the other.
 //!
 //! Registers are the plan's own operand file, numbered from 0, laid out as
 //! a body's operands are: operands evaluate left to right into successive
@@ -50,9 +58,59 @@ pub struct HelperPlan {
     pub slots: &'static [PlanLocal],
     /// Canonical paths of the closure expressions this plan evaluates.
     pub closures: &'static [&'static [u32]],
-    /// The code: it reads its parameters through the context and returns
-    /// the body's result.
-    pub run: fn(&mut dyn PlanContext) -> Result<Value, PlanExit>,
+    /// The callback sites a segment yields at, by index; empty for a body
+    /// that reaches no guest code.
+    pub sites: &'static [PlanSite],
+    /// The code: from the call's start (entry 0), or after the callee of
+    /// site `entry - 1` returned, with the frame's state restored into the
+    /// plan's variables and registers. It reads its parameters through the
+    /// context and returns the body's result.
+    pub run: fn(&mut dyn PlanContext, u32) -> Result<Value, PlanExit>,
+}
+
+/// A callback site: an action of the body where the plan may yield, and
+/// what the body's frame holds standing there (`K-EVAL-008`).
+#[derive(Clone, Copy, Debug)]
+pub struct PlanSite {
+    /// The action's site, as a path under the body's unit.
+    pub path: &'static [u32],
+    /// What the action calls.
+    pub call: SiteCall,
+    /// The register the action's value goes to.
+    pub dst: u32,
+    /// The operands the action's statement has evaluated when the action
+    /// is reached: each by its site's path and the register holding it.
+    pub roles: &'static [PlanRole],
+    /// The plan variables in scope there.
+    pub bound: &'static [u32],
+    /// The loops the site stands in, outermost first.
+    pub loops: &'static [PlanLoop],
+}
+
+/// What a callback site calls.
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub enum SiteCall {
+    /// The value in the action's register, its arguments after it.
+    Apply,
+    /// Callee `index` of the plan, which may run its body in a frame.
+    Invoke(u32),
+}
+
+/// An operand an action's statement holds when the action is reached.
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub struct PlanRole {
+    pub path: &'static [u32],
+    pub reg: u32,
+}
+
+/// A loop a callback site stands in.
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub enum PlanLoop {
+    /// A `for`, what it walks held in this plan variable.
+    For {
+        walked: u32,
+    },
+    While,
 }
 
 /// A variable's semantic declaration, resolved to the body's own slot and
@@ -87,6 +145,10 @@ pub enum PlanExit {
     /// The run ends (a bound, the heap): the context holds why. Nothing in
     /// the plan catches it.
     Halt,
+    /// The plan stopped at a callback site: the machine holds the body's
+    /// frame standing there and runs the callee. Nothing in the plan
+    /// catches it, and no plan state survives it outside the machine.
+    Yield,
 }
 
 /// What a test of a condition is for: it names the error a value that is
@@ -163,8 +225,15 @@ pub trait PlanContext {
     fn unwind(&mut self, scope: u32);
 
     /// Calls `callee` with the `count` arguments from `args`, its value
-    /// into `args`.
+    /// into `args`. The callee answers at once.
     fn call(&mut self, callee: u32, args: u32, count: u32) -> Result<(), PlanExit>;
+    /// Callback site `site`: calls `callee`, which may run its body in a
+    /// frame, with the `count` arguments from `args`, its value into
+    /// `args`, or yields there.
+    fn invoke(&mut self, site: u32, callee: u32, args: u32, count: u32) -> Result<(), PlanExit>;
+    /// Callback site `site`: applies the value in `at` to the `count`
+    /// arguments after it, its value into `at`, or yields there.
+    fn apply(&mut self, site: u32, at: u32, count: u32) -> Result<(), PlanExit>;
     /// Field `field` of the record or error in `at`, into `at`.
     fn field(&mut self, at: u32, field: u32) -> Result<(), PlanExit>;
     /// What `at` holds at the index in the register after, into `at`.
@@ -195,11 +264,22 @@ pub trait PlanContext {
     fn next(&mut self, cursor: Cursor, dst: u32) -> Result<bool, PlanExit>;
     /// Leaves the loop of `cursor` and every loop opened after it.
     fn close(&mut self, cursor: Cursor);
+    /// Starts a `while` a callback site stands in: its passes are counted,
+    /// as the body's frame counts them.
+    fn enter_while(&mut self);
+    /// The innermost counted `while` starts another pass.
+    fn pass_while(&mut self);
+    /// Leaves every counted `while` but the outermost `depth`.
+    fn leave_while(&mut self, depth: u32);
 
     /// Charges a metered loop's declared units for one test of its
     /// continuation, as the body's loop is charged at each test, even
     /// where the plan's own forms are not (`K-CHG-007`).
     fn meter(&mut self, units: u64) -> Result<(), PlanExit>;
+
+    /// A resume that reached the body's end without finding the site of
+    /// `entry`: a malformed plan, which ends the run.
+    fn lost(&mut self, entry: u32) -> PlanExit;
 
     /// The value in `src`, for `return` or `throw`.
     fn take(&mut self, src: u32) -> Value;

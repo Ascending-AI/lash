@@ -785,6 +785,21 @@ lane (after hgen and this lane) for the 284 callback-capable helpers. Until
 then callback helpers stay interpreted. **Deletes** the hand twins as plans
 replace them, and hand opcodes except for the hottest inline operators.
 
+**As landed (FIG-6709).** A segment is a generated plan whose `run` takes an
+entry: 0 from the call's start, `k + 1` after callback site `k`'s callee
+returned. Each `PlanSite` states the site's path in the body, its callee, the
+register the value goes to, its roles, the plan variables in scope and the
+loops it stands in; preparation resolves every site against the body's tables
+under each layout and runs the body of any plan that does not resolve. At a
+yield every standing plan becomes its body's frame at once, outermost first,
+and the callee runs as ordinary code; the coordinate is that frame's, so
+projection and restore are the frame's own. A callee that returns to a frame
+standing at a site of a segment the layout runs resumes the plan there; a
+raise unwinds the frame as the body's. A segment stands in a `try`'s body or
+handler, never in its `finally`. Helpers that reach the host or a task, print,
+or act other than by a call stay interpreted, as the manifests beside each
+dialect's plans list.
+
 ## 4. Stage-2 and stage-3 briefs
 
 Each brief can be started from this document alone. Every lane works in its

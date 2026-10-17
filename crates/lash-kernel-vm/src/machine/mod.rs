@@ -24,6 +24,7 @@ mod park_laws;
 mod plans;
 mod queue;
 mod registers;
+mod segments;
 mod session;
 mod steps;
 mod stream;
@@ -373,6 +374,8 @@ pub struct KernelMachine {
     /// How many generated plans are running: each holds its call's depth
     /// unit as the body's frame would (`K-BND-002`).
     plans: u32,
+    /// The segments standing at callback sites of a call being offered.
+    segments: segments::Yielding,
     charged: u64,
     /// The cost table of the kernel version the document states.
     costs: crate::costs::Costs,

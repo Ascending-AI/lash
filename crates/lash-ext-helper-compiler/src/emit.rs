@@ -1,7 +1,20 @@
-//! A closed body as Rust over the machine's plan context: each form the
-//! body evaluates becomes the context call of the same name, in the
-//! body's order, into the registers the body's own evaluation would use.
+//! A body as Rust over the machine's plan context: each form the body
+//! evaluates becomes the context call of the same name, in the body's
+//! order, into the registers the body's own evaluation would use.
 //! Control flow is Rust's; every value stays in the machine.
+//!
+//! A body that can reach guest code compiles to a resumable segment
+//! (FIG-6709). Each action of the body that may run guest code or a body in
+//! a frame is a callback site: the plan calls through the context there,
+//! which may yield. The code takes an entry: 0 runs from the start, and
+//! `k + 1` runs on after site `k`, its frame's state restored into the
+//! plan's variables and registers. Resuming, every form before the site is
+//! skipped (`r` is the entry still sought; it is 0 once the site is
+//! reached), and each branch and loop goes the way that leads to the site.
+//! What a site records is the body frame's coordinate there: the action's
+//! site path, the operands its statement holds by their site paths, the
+//! variables in scope and the loops it stands in. Paths are numbered as the
+//! machine's lowering numbers them, so they name the body's own nodes.
 
 use std::collections::{BTreeMap, BTreeSet};
 use std::fmt::Write as _;
@@ -22,6 +35,8 @@ pub struct Unsupported(pub String);
 pub struct Plan {
     pub item: String,
     pub code: String,
+    /// How many callback sites it has: 0 for a closed body.
+    pub sites: usize,
 }
 
 #[derive(Clone, Copy)]
@@ -38,9 +53,19 @@ struct Loop {
     continues: bool,
 }
 
+/// A loop a callback site may stand in.
+#[derive(Clone, Copy)]
+enum Enclosing {
+    For { walked: u32 },
+    While,
+}
+
 struct Emitter<'a> {
     library: &'a Library,
-    planned: &'a BTreeSet<FunctionId>,
+    /// The bodies whose plans answer at once: they reach no guest code.
+    answering: &'a BTreeSet<FunctionId>,
+    /// Whether the body compiles to a resumable segment.
+    segment: bool,
     callees: Vec<FunctionId>,
     literals: Vec<String>,
     fields: Vec<String>,
@@ -59,6 +84,28 @@ struct Emitter<'a> {
     out: String,
     indent: usize,
     used: u32,
+    /// The path of the node being emitted, as the machine's lowering
+    /// numbers it: a statement's under its block's, a child's under its
+    /// parent's.
+    path: Vec<u32>,
+    /// The operands evaluated so far that an action reached now would
+    /// hold: each by the depth of its parent, its child index and its
+    /// register, as the lowering keeps them.
+    live: Vec<(usize, u32, u32)>,
+    /// The path length of the statement being emitted.
+    stmt_depth: usize,
+    /// Whether the forms being emitted are skipped while resuming: they
+    /// stand in a statement that holds a callback site.
+    guard: bool,
+    /// Each callback site's `PlanSite`, as Rust.
+    sites: Vec<String>,
+    /// The loops the node being emitted stands in, outermost first.
+    enclosing: Vec<Enclosing>,
+    /// How many `for` loops and counted `while` loops enclose it.
+    fors: u32,
+    whiles: u32,
+    /// How many branch tests have been named.
+    tests: u32,
 }
 
 /// A loop's label, which its departures name: a kernel `break` or
@@ -68,6 +115,43 @@ fn label(level: usize) -> String {
     format!("'l{level}")
 }
 
+/// Whether `block` leaves by its end only never: a statement in it always
+/// departs. What follows that statement never runs and is not emitted.
+fn departs_block(block: &[Stmt]) -> bool {
+    block.iter().any(departs)
+}
+
+/// Whether control always leaves by `stmt` (not as a tail).
+fn departs(stmt: &Stmt) -> bool {
+    match stmt {
+        Stmt::Return { .. } | Stmt::Throw { .. } | Stmt::Break | Stmt::Continue => true,
+        Stmt::If {
+            then_block,
+            else_block,
+            ..
+        } => !else_block.is_empty() && departs_block(then_block) && departs_block(else_block),
+        _ => false,
+    }
+}
+
+/// The statements of `block` that can run: up to its first departing one.
+fn live_stmts(block: &[Stmt]) -> &[Stmt] {
+    let end = block
+        .iter()
+        .position(departs)
+        .map_or(block.len(), |at| at + 1);
+    &block[..end]
+}
+
+/// `entries` as a Rust pattern of resume entries, or `None` when empty.
+fn entries(first: usize, count: u32) -> Option<String> {
+    match count {
+        0 => None,
+        1 => Some(format!("{}", first + 1)),
+        _ => Some(format!("{}..={}", first + 1, first + count as usize)),
+    }
+}
+
 impl Emitter<'_> {
     fn line(&mut self, text: &str) {
         for _ in 0..self.indent {
@@ -75,6 +159,16 @@ impl Emitter<'_> {
         }
         self.out.push_str(text);
         self.out.push('\n');
+    }
+
+    /// A form the body performs: skipped while resuming inside a
+    /// statement that holds a callback site.
+    fn op(&mut self, text: &str) {
+        if self.guard {
+            self.line(&format!("if r == 0 {{ {text} }}"));
+        } else {
+            self.line(text);
+        }
     }
 
     fn reg(&mut self, at: u32) -> u32 {
@@ -94,12 +188,28 @@ impl Emitter<'_> {
         slot
     }
 
+    fn child<T>(&mut self, index: u32, emit: impl FnOnce(&mut Self) -> T) -> T {
+        self.path.push(index);
+        let emitted = emit(self);
+        self.path.pop();
+        emitted
+    }
+
+    /// Whether a call of `function` answers at once: it has no body, or a
+    /// plan that reaches no guest code.
+    fn answers(&self, function: &FunctionId) -> bool {
+        self.library
+            .definition(function)
+            .is_some_and(|definition| definition.body().is_none())
+            || self.answering.contains(function)
+    }
+
     fn callee(&mut self, function: &FunctionId) -> Result<u32, Unsupported> {
         let definition = self
             .library
             .definition(function)
             .ok_or_else(|| Unsupported(format!("calls {function}, which is not registered")))?;
-        if definition.body().is_some() && !self.planned.contains(function) {
+        if !self.segment && !self.answers(function) {
             return Err(Unsupported(format!(
                 "calls {}, which no plan answers",
                 definition.name
@@ -173,7 +283,7 @@ impl Emitter<'_> {
             })
             .collect();
         for slot in slots {
-            self.line(&format!("ctx.unbind({slot});"));
+            self.op(&format!("ctx.unbind({slot});"));
         }
     }
 
@@ -181,67 +291,315 @@ impl Emitter<'_> {
         let dst = self.reg(dst);
         match self.resolve(name)? {
             Var::Param(index) => match self.adopted.get(&index) {
-                Some(slot) => self.line(&format!("ctx.local({slot}, {dst})?;")),
-                None => self.line(&format!("ctx.param({index}, {dst})?;")),
+                Some(slot) => self.op(&format!("ctx.local({slot}, {dst})?;")),
+                None => self.op(&format!("ctx.param({index}, {dst})?;")),
             },
-            Var::Slot(slot) => self.line(&format!("ctx.local({slot}, {dst})?;")),
+            Var::Slot(slot) => self.op(&format!("ctx.local({slot}, {dst})?;")),
         }
         Ok(())
     }
 
+    // Callback sites.
+
+    /// How many callback sites evaluating `expr` can reach.
+    fn count_expr(&self, expr: &Expr) -> u32 {
+        let all = |exprs: &[Expr]| exprs.iter().map(|expr| self.count_expr(expr)).sum::<u32>();
+        match expr {
+            Expr::Literal(_)
+            | Expr::Variable(_)
+            | Expr::Closure(_)
+            | Expr::Clock
+            | Expr::Random => 0,
+            Expr::Tuple(items) | Expr::List(items) | Expr::Set(items) => all(items),
+            Expr::Map(entries) => entries
+                .iter()
+                .map(|entry| self.count_expr(&entry.key) + self.count_expr(&entry.value))
+                .sum(),
+            Expr::Record(entries) => entries
+                .iter()
+                .map(|entry| self.count_expr(&entry.value))
+                .sum(),
+            Expr::Member(member) => match member.as_ref() {
+                Member::Field { target, .. } => self.count_expr(target),
+                Member::Index { target, index } => self.count_expr(target) + self.count_expr(index),
+            },
+            Expr::Call { function, args } => u32::from(!self.answers(function)) + all(args),
+            Expr::Act(act) => {
+                let own = match &act.kind {
+                    ActKind::Call(Callee::Library(function)) => !self.answers(function),
+                    ActKind::Call(_) => true,
+                    _ => false,
+                };
+                u32::from(own) + all(&act.args)
+            }
+            Expr::If { cond, then, r#else } => {
+                self.count_expr(cond) + self.count_expr(then) + self.count_expr(r#else)
+            }
+            Expr::Let { value, body, .. } => self.count_expr(value) + self.count_expr(body),
+            Expr::Read(read) => self.count_expr(&read.handle) + self.count_expr(&read.request),
+        }
+    }
+
+    fn count_rhs(&self, rhs: &Rhs) -> u32 {
+        match rhs {
+            Rhs::Expr(expr) => self.count_expr(expr),
+            Rhs::Action(Action::Call {
+                callee: Callee::Library(function),
+                ..
+            }) => u32::from(!self.answers(function)),
+            Rhs::Action(Action::Call { .. }) => 1,
+            Rhs::Action(_) => 0,
+        }
+    }
+
+    fn count_member(&self, member: &Member) -> u32 {
+        match member {
+            Member::Field { target, .. } => self.count_expr(target),
+            Member::Index { target, index } => self.count_expr(target) + self.count_expr(index),
+        }
+    }
+
+    /// How many callback sites `block` holds where it can run.
+    fn count_block(&self, block: &[Stmt]) -> u32 {
+        live_stmts(block)
+            .iter()
+            .map(|stmt| self.count_stmt(stmt))
+            .sum()
+    }
+
+    fn count_stmt(&self, stmt: &Stmt) -> u32 {
+        match stmt {
+            Stmt::Let { value, .. } => self.count_rhs(value),
+            Stmt::Assign { place, value, .. } => {
+                let place = match place {
+                    Place::Variable(_) => 0,
+                    Place::Member(member) => self.count_member(member),
+                };
+                place + self.count_rhs(value)
+            }
+            Stmt::Remove { member } => self.count_member(member),
+            Stmt::Do { value } | Stmt::Return { value } | Stmt::Throw { value } => {
+                self.count_expr(value)
+            }
+            Stmt::If {
+                condition,
+                then_block,
+                else_block,
+            } => {
+                self.count_expr(condition)
+                    + self.count_block(then_block)
+                    + self.count_block(else_block)
+            }
+            Stmt::While {
+                condition,
+                body,
+                else_block,
+                ..
+            } => self.count_expr(condition) + self.count_block(body) + self.count_block(else_block),
+            Stmt::For {
+                iterable,
+                body,
+                else_block,
+                ..
+            } => self.count_expr(iterable) + self.count_block(body) + self.count_block(else_block),
+            Stmt::Try(scope) => {
+                self.count_block(&scope.body)
+                    + scope
+                        .catch
+                        .as_ref()
+                        .map_or(0, |catch| self.count_block(&catch.body))
+                    + scope
+                        .finally
+                        .as_ref()
+                        .map_or(0, |finally| self.count_block(finally))
+            }
+            _ => 0,
+        }
+    }
+
+    /// The operands an action reached now holds, by their site paths.
+    fn roles(&self) -> Vec<(Vec<u32>, u32)> {
+        self.live
+            .iter()
+            .map(|&(depth, index, reg)| {
+                let mut path = self.path[..depth].to_vec();
+                path.push(index);
+                (path, reg)
+            })
+            .collect()
+    }
+
+    /// Records a callback site at the node being emitted: an action that
+    /// `call`s, its value to `dst`, holding `roles`. Gives its index.
+    fn site(&mut self, call: String, roles: &[(Vec<u32>, u32)], dst: u32) -> usize {
+        let mut bound: Vec<u32> = self
+            .scopes
+            .iter()
+            .flatten()
+            .filter_map(|(_, var)| match var {
+                Var::Slot(slot) => Some(*slot),
+                Var::Param(_) => None,
+            })
+            .chain(self.adopted.values().copied())
+            .collect();
+        bound.sort_unstable();
+        bound.dedup();
+        let roles: Vec<String> = roles
+            .iter()
+            .map(|(path, reg)| format!("p::PlanRole {{ path: &{path:?}, reg: {reg} }}"))
+            .collect();
+        let loops: Vec<String> = self
+            .enclosing
+            .iter()
+            .map(|enclosing| match enclosing {
+                Enclosing::For { walked } => format!("p::PlanLoop::For {{ walked: {walked} }}"),
+                Enclosing::While => "p::PlanLoop::While".to_string(),
+            })
+            .collect();
+        self.sites.push(format!(
+            "p::PlanSite {{\n            path: &{:?},\n            call: {call},\n            dst: {dst},\n            roles: &[{}],\n            bound: &{bound:?},\n            loops: &[{}],\n        }}",
+            self.path,
+            roles.join(", "),
+            loops.join(", "),
+        ));
+        self.sites.len() - 1
+    }
+
+    /// The call of a callback site: done where the run reaches it, the
+    /// site itself where the run resumes after it.
+    fn site_call(&mut self, site: usize, call: &str) {
+        let entry = site + 1;
+        self.line(&format!(
+            "if r == {entry} {{ r = 0; }} else if r == 0 {{ {call} }}"
+        ));
+    }
+
+    /// A call of library `function` with the `count` arguments from `at`,
+    /// its value to `at`, holding `roles` when it is a callback site.
+    fn library_call(
+        &mut self,
+        function: &FunctionId,
+        roles: &[(Vec<u32>, u32)],
+        at: u32,
+        count: usize,
+    ) -> Result<(), Unsupported> {
+        let callee = self.callee(function)?;
+        if self.answers(function) {
+            self.op(&format!("ctx.call({callee}, {at}, {count})?;"));
+        } else {
+            let site = self.site(format!("p::SiteCall::Invoke({callee})"), roles, at);
+            self.site_call(
+                site,
+                &format!("ctx.invoke({site}, {callee}, {at}, {count})?;"),
+            );
+        }
+        Ok(())
+    }
+
+    /// A branch test into a fresh Rust variable: the condition's value
+    /// where the run reaches it, and resuming, whether the branch holds
+    /// the sought site (its entries `then`).
+    fn branch(&mut self, cond: u32, then: Option<String>) -> String {
+        let test = format!("t{}", self.tests);
+        self.tests += 1;
+        let resumed = then.map_or("false".to_string(), |then| format!("matches!(r, {then})"));
+        self.line(&format!(
+            "let {test} = if r == 0 {{ ctx.test({cond}, p::Test::If)? }} else {{ {resumed} }};"
+        ));
+        test
+    }
+
+    // Expressions.
+
+    /// Each expression into the registers from `dst` on, in order, as
+    /// children 0, 1, ... of the node being emitted.
     fn exprs(&mut self, exprs: &[Expr], dst: u32) -> Result<u32, Unsupported> {
         for (index, expr) in exprs.iter().enumerate() {
-            self.expr(expr, dst + index as u32)?;
+            self.expr_at(index as u32, expr, dst + index as u32)?;
         }
         Ok(exprs.len() as u32)
     }
 
-    fn member(&mut self, member: &Member, at: u32) -> Result<Option<u32>, Unsupported> {
+    /// Child `index` of the node being emitted, into `reg`: from then on
+    /// held by any action reached before its parent ends.
+    fn expr_at(&mut self, index: u32, expr: &Expr, reg: u32) -> Result<(), Unsupported> {
+        let depth = self.path.len();
+        self.child(index, |emitter| emitter.expr(expr, reg))?;
+        self.live.push((depth, index, reg));
+        Ok(())
+    }
+
+    /// A member's target into `at` and its index into the register after,
+    /// its first child having index `first`; gives its field and the index
+    /// after its last child.
+    fn member(
+        &mut self,
+        member: &Member,
+        first: u32,
+        at: u32,
+    ) -> Result<(Option<u32>, u32), Unsupported> {
         match member {
             Member::Field { target, field } => {
-                self.expr(target, at)?;
-                Ok(Some(self.field(field)))
+                self.expr_at(first, target, at)?;
+                Ok((Some(self.field(field)), first + 1))
             }
             Member::Index { target, index } => {
-                self.expr(target, at)?;
-                self.expr(index, at + 1)?;
-                Ok(None)
+                self.expr_at(first, target, at)?;
+                self.expr_at(first + 1, index, at + 1)?;
+                Ok((None, first + 2))
             }
         }
     }
 
     fn expr(&mut self, expr: &Expr, dst: u32) -> Result<(), Unsupported> {
+        // A part of a resuming statement that holds no callback site runs
+        // whole or not at all.
+        if self.guard && self.count_expr(expr) == 0 {
+            self.line("if r == 0 {");
+            self.indent += 1;
+            self.guard = false;
+            let emitted = self.expr_inner(expr, dst);
+            self.guard = true;
+            self.indent -= 1;
+            self.line("}");
+            return emitted;
+        }
+        self.expr_inner(expr, dst)
+    }
+
+    fn expr_inner(&mut self, expr: &Expr, dst: u32) -> Result<(), Unsupported> {
         let dst = self.reg(dst);
+        let live = self.live.len();
         match expr {
             Expr::Literal(literal) => {
                 let literal = self.literal(literal)?;
-                self.line(&format!("ctx.literal({literal}, {dst})?;"));
+                self.op(&format!("ctx.literal({literal}, {dst})?;"));
             }
             Expr::Variable(name) => self.read(name, dst)?,
             Expr::Tuple(items) => {
                 let len = self.exprs(items, dst)?;
-                self.line(&format!("ctx.tuple({dst}, {len})?;"));
+                self.op(&format!("ctx.tuple({dst}, {len})?;"));
             }
             Expr::List(items) => {
                 let len = self.exprs(items, dst)?;
-                self.line(&format!("ctx.list({dst}, {len})?;"));
+                self.op(&format!("ctx.list({dst}, {len})?;"));
             }
             Expr::Set(items) => {
                 let len = self.exprs(items, dst)?;
-                self.line(&format!("ctx.set({dst}, {len})?;"));
+                self.op(&format!("ctx.set({dst}, {len})?;"));
             }
             Expr::Map(entries) => {
                 for (index, entry) in entries.iter().enumerate() {
-                    let at = dst + 2 * index as u32;
-                    self.expr(&entry.key, at)?;
-                    self.expr(&entry.value, at + 1)?;
+                    let at = 2 * index as u32;
+                    self.expr_at(at, &entry.key, dst + at)?;
+                    self.expr_at(at + 1, &entry.value, dst + at + 1)?;
                 }
                 let len = 2 * entries.len();
-                self.line(&format!("ctx.map({dst}, {len})?;"));
+                self.op(&format!("ctx.map({dst}, {len})?;"));
             }
             Expr::Record(entries) => {
                 for (index, entry) in entries.iter().enumerate() {
-                    self.expr(&entry.value, dst + index as u32)?;
+                    self.expr_at(index as u32, &entry.value, dst + index as u32)?;
                 }
                 let fields: Vec<u32> = entries
                     .iter()
@@ -254,22 +612,35 @@ impl Emitter<'_> {
                         self.records.len() - 1
                     }
                 };
-                self.line(&format!("ctx.record({record}, {dst})?;"));
+                self.op(&format!("ctx.record({record}, {dst})?;"));
             }
-            Expr::Member(member) => match self.member(member, dst)? {
-                Some(field) => self.line(&format!("ctx.field({dst}, {field})?;")),
-                None => self.line(&format!("ctx.index({dst})?;")),
+            Expr::Member(member) => match self.member(member, 0, dst)?.0 {
+                Some(field) => self.op(&format!("ctx.field({dst}, {field})?;")),
+                None => self.op(&format!("ctx.index({dst})?;")),
             },
             Expr::Call { function, args } => {
-                let callee = self.callee(function)?;
+                let roles = self.roles();
                 let len = self.exprs(args, dst)?;
-                self.line(&format!("ctx.call({callee}, {dst}, {len})?;"));
+                self.library_call(function, &roles, dst, len as usize)?;
             }
             Expr::Act(act) => match &act.kind {
                 ActKind::Call(Callee::Library(function)) => {
-                    let callee = self.callee(function)?;
+                    let roles = self.roles();
                     let len = self.exprs(&act.args, dst)?;
-                    self.line(&format!("ctx.call({callee}, {dst}, {len})?;"));
+                    self.library_call(function, &roles, dst, len as usize)?;
+                }
+                ActKind::Call(Callee::Value(name)) if self.segment => {
+                    let roles = self.roles();
+                    // The callee comes before the arguments (`K-EVAL-004`),
+                    // held by the actions in them under the action's site.
+                    self.read(name, dst)?;
+                    let held = self.live.len();
+                    let depth = self.path.len() - 1;
+                    self.live.push((depth, self.path[depth], dst));
+                    let len = self.exprs(&act.args, dst + 1)?;
+                    self.live.truncate(held);
+                    let site = self.site("p::SiteCall::Apply".into(), &roles, dst);
+                    self.site_call(site, &format!("ctx.apply({site}, {dst}, {len})?;"));
                 }
                 _ => {
                     return Err(Unsupported(
@@ -278,37 +649,44 @@ impl Emitter<'_> {
                 }
             },
             Expr::If { cond, then, r#else } => {
-                self.expr(cond, dst)?;
-                self.line(&format!("if ctx.test({dst}, p::Test::If)? {{"));
+                self.child(0, |emitter| emitter.expr(cond, dst))?;
+                if self.guard {
+                    let first = self.sites.len();
+                    let test = self.branch(dst, entries(first, self.count_expr(then)));
+                    self.line(&format!("if {test} {{"));
+                } else {
+                    self.line(&format!("if ctx.test({dst}, p::Test::If)? {{"));
+                }
                 self.indent += 1;
-                self.expr(then, dst)?;
+                self.child(1, |emitter| emitter.expr(then, dst))?;
                 self.indent -= 1;
                 self.line("} else {");
                 self.indent += 1;
-                self.expr(r#else, dst)?;
+                self.child(2, |emitter| emitter.expr(r#else, dst))?;
                 self.indent -= 1;
                 self.line("}");
             }
             Expr::Let { name, value, body } => {
-                self.expr(value, dst)?;
+                self.child(0, |emitter| emitter.expr(value, dst))?;
                 let slot =
                     self.named_slot(name, self.expr_paths[&std::ptr::from_ref(expr)].clone());
-                self.line(&format!("ctx.bind({slot}, {dst})?;"));
+                self.op(&format!("ctx.bind({slot}, {dst})?;"));
                 self.scopes.push(vec![(name.clone(), Var::Slot(slot))]);
-                self.expr(body, dst)?;
+                self.child(1, |emitter| emitter.expr(body, dst))?;
                 self.scopes.pop();
-                self.line(&format!("ctx.unbind({slot});"));
+                self.op(&format!("ctx.unbind({slot});"));
             }
             Expr::Closure(_) => {
                 let at = self.closures.len();
                 self.closures
                     .push(self.expr_paths[&std::ptr::from_ref(expr)].clone());
-                self.line(&format!("ctx.closure({at}, {dst})?;"));
+                self.op(&format!("ctx.closure({at}, {dst})?;"));
             }
             Expr::Clock | Expr::Random | Expr::Read(_) => {
                 return Err(Unsupported("reads the host".into()));
             }
         }
+        self.live.truncate(live);
         Ok(())
     }
 
@@ -318,13 +696,13 @@ impl Emitter<'_> {
             Atom::Literal(literal) => {
                 let dst = self.reg(dst);
                 let literal = self.literal(literal)?;
-                self.line(&format!("ctx.literal({literal}, {dst})?;"));
+                self.op(&format!("ctx.literal({literal}, {dst})?;"));
                 Ok(())
             }
         }
     }
 
-    /// A right-hand side into register 0.
+    /// A right-hand side into register 0, as child 0 of its statement.
     fn rhs(&mut self, rhs: &Rhs) -> Result<(), Unsupported> {
         match rhs {
             Rhs::Expr(expr) => self.expr(expr, 0),
@@ -332,18 +710,30 @@ impl Emitter<'_> {
                 callee: Callee::Library(function),
                 args,
             }) => {
-                let callee = self.callee(function)?;
                 self.reg(0);
                 for (index, atom) in args.iter().enumerate() {
                     self.atom(atom, index as u32)?;
                 }
+                self.library_call(function, &[], 0, args.len())
+            }
+            Rhs::Action(Action::Call {
+                callee: Callee::Value(name),
+                args,
+            }) if self.segment => {
+                self.read(name, 0)?;
+                for (index, atom) in args.iter().enumerate() {
+                    self.atom(atom, index as u32 + 1)?;
+                }
                 let len = args.len();
-                self.line(&format!("ctx.call({callee}, 0, {len})?;"));
+                let site = self.site("p::SiteCall::Apply".into(), &[], 0);
+                self.site_call(site, &format!("ctx.apply({site}, 0, {len})?;"));
                 Ok(())
             }
             Rhs::Action(_) => Err(Unsupported("acts other than by a library call".into())),
         }
     }
+
+    // Statements.
 
     /// Emits `block`, with `bound` declared first. A tail block's
     /// fallthrough is the function's end. Gives whether control leaves
@@ -356,19 +746,13 @@ impl Emitter<'_> {
     ) -> Result<bool, Unsupported> {
         self.scopes.push(bound);
         // What follows a statement that always departs never runs.
-        let end = block
-            .iter()
-            .position(|stmt| {
-                matches!(
-                    stmt,
-                    Stmt::Return { .. } | Stmt::Throw { .. } | Stmt::Break | Stmt::Continue
-                )
-            })
-            .map_or(block.len(), |at| at + 1);
-        let block = &block[..end];
+        let block = live_stmts(block);
         for (index, stmt) in block.iter().enumerate() {
             let last = index + 1 == block.len();
-            if self.stmt(stmt, tail && last)? {
+            let departed = self.child(index as u32, |emitter| {
+                emitter.guarded_stmt(stmt, tail && last)
+            })?;
+            if departed {
                 self.scopes.pop();
                 return Ok(true);
             }
@@ -386,16 +770,50 @@ impl Emitter<'_> {
         Ok(false)
     }
 
-    /// Emits one statement; gives whether control leaves by it.
+    /// One statement of a block. Resuming, a statement that holds no
+    /// callback site is skipped whole; one that holds one runs only when
+    /// the sought site is in it.
+    fn guarded_stmt(&mut self, stmt: &Stmt, tail: bool) -> Result<bool, Unsupported> {
+        if !self.guard {
+            return self.stmt(stmt, tail);
+        }
+        let first = self.sites.len();
+        let wrapper = match entries(first, self.count_stmt(stmt)) {
+            None => {
+                self.guard = false;
+                "if r == 0 {".to_string()
+            }
+            Some(sought) => format!("if r == 0 || matches!(r, {sought}) {{"),
+        };
+        self.line(&wrapper);
+        self.indent += 1;
+        let departed = self.stmt(stmt, tail);
+        self.indent -= 1;
+        self.line("}");
+        self.guard = true;
+        departed
+    }
+
+    /// Emits one statement, at the path of the node being emitted; gives
+    /// whether control leaves by it.
     fn stmt(&mut self, stmt: &Stmt, tail: bool) -> Result<bool, Unsupported> {
-        self.line("ctx.begin()?;");
+        let outer = std::mem::replace(&mut self.stmt_depth, self.path.len());
+        let live = self.live.len();
+        let departed = self.stmt_inner(stmt, tail);
+        self.live.truncate(live);
+        self.stmt_depth = outer;
+        departed
+    }
+
+    fn stmt_inner(&mut self, stmt: &Stmt, tail: bool) -> Result<bool, Unsupported> {
+        self.op("ctx.begin()?;");
         match stmt {
             Stmt::Let { name, value } => {
                 // The right-hand side does not see the variable it binds.
-                self.rhs(value)?;
+                self.child(0, |emitter| emitter.rhs(value))?;
                 let slot =
                     self.named_slot(name, self.stmt_paths[&std::ptr::from_ref(stmt)].clone());
-                self.line(&format!("ctx.bind({slot}, 0)?;"));
+                self.op(&format!("ctx.bind({slot}, 0)?;"));
                 self.declare(name, Var::Slot(slot));
             }
             Stmt::Assign {
@@ -403,7 +821,7 @@ impl Emitter<'_> {
                 value,
                 ..
             } => {
-                self.rhs(value)?;
+                self.child(0, |emitter| emitter.rhs(value))?;
                 let slot = match self.resolve(name)? {
                     Var::Slot(slot) => slot,
                     Var::Param(index) => *self
@@ -411,7 +829,7 @@ impl Emitter<'_> {
                         .get(&index)
                         .ok_or_else(|| Unsupported(format!("assigns `{name}` unadopted")))?,
                 };
-                self.line(&format!("ctx.assign({slot}, 0)?;"));
+                self.op(&format!("ctx.assign({slot}, 0)?;"));
             }
             Stmt::Assign {
                 place: Place::Member(member),
@@ -421,48 +839,69 @@ impl Emitter<'_> {
                 // The right-hand side first, held while the place is
                 // evaluated after it (`K-EVAL-003`).
                 AssignOrder::ValueFirst => {
-                    self.expr(value, 0)?;
-                    self.line("ctx.pin(0)?;");
-                    match self.member(member, 1)? {
-                        Some(field) => self.line(&format!("ctx.set_field(1, {field}, 0)?;")),
-                        None => self.line("ctx.set_index(1, 0)?;"),
+                    let value_index = match member {
+                        Member::Field { .. } => 1,
+                        Member::Index { .. } => 2,
+                    };
+                    self.child(value_index, |emitter| emitter.expr(value, 0))?;
+                    self.op("ctx.pin(0)?;");
+                    self.live.push((self.stmt_depth, value_index, 0));
+                    match self.member(member, 0, 1)?.0 {
+                        Some(field) => self.op(&format!("ctx.set_field(1, {field}, 0)?;")),
+                        None => self.op("ctx.set_index(1, 0)?;"),
                     }
                 }
                 AssignOrder::PlaceFirst => {
-                    let field = self.member(member, 0)?;
-                    let src = if field.is_some() { 1 } else { 2 };
-                    self.expr(value, src)?;
+                    let (field, next) = self.member(member, 0, 0)?;
+                    let src = next;
+                    self.child(next, |emitter| emitter.expr(value, src))?;
                     match field {
-                        Some(field) => self.line(&format!("ctx.set_field(0, {field}, {src})?;")),
-                        None => self.line(&format!("ctx.set_index(0, {src})?;")),
+                        Some(field) => self.op(&format!("ctx.set_field(0, {field}, {src})?;")),
+                        None => self.op(&format!("ctx.set_index(0, {src})?;")),
                     }
                 }
             },
-            Stmt::Assign { .. } => {
-                return Err(Unsupported("assigns a member by an action".into()));
+            // An action's value comes first, held while the place is
+            // evaluated after it (`K-FORM-005`, `K-FORM-006`).
+            Stmt::Assign {
+                place: Place::Member(member),
+                value: value @ Rhs::Action(_),
+                ..
+            } => {
+                let value_index = match member {
+                    Member::Field { .. } => 1,
+                    Member::Index { .. } => 2,
+                };
+                self.child(value_index, |emitter| emitter.rhs(value))?;
+                self.op("ctx.pin(0)?;");
+                self.live.push((self.stmt_depth, value_index, 0));
+                match self.member(member, 0, 1)?.0 {
+                    Some(field) => self.op(&format!("ctx.set_field(1, {field}, 0)?;")),
+                    None => self.op("ctx.set_index(1, 0)?;"),
+                }
             }
-            Stmt::Remove { member } => match self.member(member, 0)? {
-                Some(field) => self.line(&format!("ctx.remove_field(0, {field})?;")),
-                None => self.line("ctx.remove_index(0)?;"),
+            Stmt::Remove { member } => match self.member(member, 0, 0)?.0 {
+                Some(field) => self.op(&format!("ctx.remove_field(0, {field})?;")),
+                None => self.op("ctx.remove_index(0)?;"),
             },
-            Stmt::Do { value } => self.expr(value, 0)?,
+            Stmt::Do { value } => self.child(0, |emitter| emitter.expr(value, 0))?,
             Stmt::Return { value } => {
-                self.expr(value, 0)?;
+                self.child(0, |emitter| emitter.expr(value, 0))?;
                 if !self.protected.is_empty() {
-                    self.line("return Ok(Departure::Return(ctx.take(0)));");
+                    self.op("return Ok(Departure::Return(ctx.take(0)));");
                 } else if tail {
                     self.line("Ok(ctx.take(0))");
                 } else {
-                    self.line("return Ok(ctx.take(0));");
+                    self.op("return Ok(ctx.take(0));");
                 }
                 return Ok(true);
             }
             Stmt::Throw { value } => {
-                self.expr(value, 0)?;
+                self.child(0, |emitter| emitter.expr(value, 0))?;
                 if tail {
                     self.line("Err(p::PlanExit::Raise(ctx.take(0)))");
                 } else {
-                    self.line("return Err(p::PlanExit::Raise(ctx.take(0)));");
+                    self.op("return Err(p::PlanExit::Raise(ctx.take(0)));");
                 }
                 return Ok(true);
             }
@@ -471,15 +910,22 @@ impl Emitter<'_> {
                 then_block,
                 else_block,
             } => {
-                self.expr(condition, 0)?;
-                self.line("if ctx.test(0, p::Test::If)? {");
+                self.child(0, |emitter| emitter.expr(condition, 0))?;
+                if self.guard {
+                    let first = self.sites.len();
+                    let test = self.branch(0, entries(first, self.count_block(then_block)));
+                    self.line(&format!("if {test} {{"));
+                } else {
+                    self.line("if ctx.test(0, p::Test::If)? {");
+                }
                 self.indent += 1;
-                let then = self.block(then_block, Vec::new(), tail)?;
+                let then = self.child(1, |emitter| emitter.block(then_block, Vec::new(), tail))?;
                 self.indent -= 1;
                 if tail || !else_block.is_empty() {
                     self.line("} else {");
                     self.indent += 1;
-                    let otherwise = self.block(else_block, Vec::new(), tail)?;
+                    let otherwise =
+                        self.child(2, |emitter| emitter.block(else_block, Vec::new(), tail))?;
                     self.indent -= 1;
                     self.line("}");
                     return Ok(then && otherwise);
@@ -492,8 +938,11 @@ impl Emitter<'_> {
                 body,
                 else_block,
             } => {
+                if self.guard {
+                    return self.resumable_while(*metered, condition, body, else_block);
+                }
                 return self.looped(*metered, None, body, else_block, |emitter| {
-                    emitter.expr(condition, 0)?;
+                    emitter.child(0, |emitter| emitter.expr(condition, 0))?;
                     Ok("ctx.test(0, p::Test::While)?".to_string())
                 });
             }
@@ -505,13 +954,16 @@ impl Emitter<'_> {
                 body,
                 else_block,
             } => {
-                self.expr(iterable, 0)?;
+                self.child(0, |emitter| emitter.expr(iterable, 0))?;
+                if self.guard {
+                    return self.resumable_for(*metered, binding, body, else_block);
+                }
                 let walked = self.slot();
                 let level = self.loops.len();
                 self.line(&format!("let c{level} = ctx.open(0, {walked})?;"));
-                let mut path = self.stmt_paths[&std::ptr::from_ref(stmt)].clone();
-                path.push(1);
-                let bound = self.named_slot(binding, path);
+                let mut declared = self.stmt_paths[&std::ptr::from_ref(stmt)].clone();
+                declared.push(1);
+                let bound = self.named_slot(binding, declared);
                 return self.looped(*metered, Some((binding, bound)), body, else_block, |_| {
                     Ok(format!("ctx.next(c{level}, 0)?"))
                 });
@@ -532,35 +984,58 @@ impl Emitter<'_> {
                 let label = label(level);
                 if crossing.is_some() {
                     let departure = if continues { "Continue" } else { "Break" };
-                    self.line(&format!("return Ok(Departure::{departure});"));
+                    self.op(&format!("return Ok(Departure::{departure});"));
                 } else if continues {
-                    self.line(&format!("continue {label};"));
+                    self.op(&format!("continue {label};"));
                 } else {
-                    self.line(&format!("break {label};"));
+                    self.op(&format!("break {label};"));
                 }
                 return Ok(true);
             }
             Stmt::For { .. } => return Err(Unsupported("iterates through a protocol".into())),
             Stmt::Try(scope) => {
+                // A segment stands in a `try`'s body or its handler as the
+                // body's frame does; a `finally` it does not enter.
+                if self.guard
+                    && scope
+                        .finally
+                        .as_ref()
+                        .is_some_and(|finally| self.count_block(finally) != 0)
+                {
+                    return Err(Unsupported("has a callback site in a `finally`".into()));
+                }
                 let path = self.stmt_paths[&std::ptr::from_ref(stmt)].clone();
                 self.line("{");
                 self.indent += 1;
                 let held = self.slot();
-                self.protected_block(&scope.body, Vec::new(), held)?;
+                self.child(0, |emitter| {
+                    emitter.protected_block(&scope.body, Vec::new(), held)
+                })?;
                 if let Some(catch) = &scope.catch {
-                    self.line("if let Err(p::PlanExit::Raise(value)) = outcome {");
+                    // Resuming in the handler, the body raised before.
+                    let first = self.sites.len();
+                    match entries(first, self.count_block(&catch.body)) {
+                        Some(sought) if self.guard => self.line(&format!(
+                            "if matches!(r, {sought}) || matches!(outcome, Err(p::PlanExit::Raise(_))) {{"
+                        )),
+                        _ => self.line("if matches!(outcome, Err(p::PlanExit::Raise(_))) {"),
+                    }
                     self.indent += 1;
                     let mut declared = path.clone();
                     declared.push(1);
                     let slot = self.named_slot(&catch.binding, declared);
-                    self.line(&format!("ctx.retain(value, {slot})?;"));
+                    self.line("if let Err(p::PlanExit::Raise(value)) = outcome {");
+                    self.line(&format!("    ctx.retain(value, {slot})?;"));
+                    self.line("}");
                     self.line("outcome = {");
                     self.indent += 1;
-                    self.protected_block(
-                        &catch.body,
-                        vec![(catch.binding.clone(), Var::Slot(slot))],
-                        held,
-                    )?;
+                    self.child(1, |emitter| {
+                        emitter.protected_block(
+                            &catch.body,
+                            vec![(catch.binding.clone(), Var::Slot(slot))],
+                            held,
+                        )
+                    })?;
                     self.line("outcome");
                     self.indent -= 1;
                     self.line("};");
@@ -574,7 +1049,10 @@ impl Emitter<'_> {
                     let cleanup_held = self.slot();
                     self.line("let cleanup = {");
                     self.indent += 1;
-                    self.protected_block(finally, Vec::new(), cleanup_held)?;
+                    let at = 1 + u32::from(scope.catch.is_some());
+                    self.child(at, |emitter| {
+                        emitter.protected_block(finally, Vec::new(), cleanup_held)
+                    })?;
                     self.line("outcome");
                     self.indent -= 1;
                     self.line("};");
@@ -642,7 +1120,13 @@ impl Emitter<'_> {
         bound: Vec<(Name, Var)>,
         held: u32,
     ) -> Result<(), Unsupported> {
-        self.line("let cursor_scope = ctx.scope();");
+        // Resumed inside, the loops the block opened are open again: its
+        // scope is the loops around it.
+        if self.guard {
+            self.line(&format!("let cursor_scope = {};", self.fors));
+        } else {
+            self.line("let cursor_scope = ctx.scope();");
+        }
         self.line(
             "let mut outcome = (|ctx: &mut dyn p::PlanContext| -> Result<Departure, p::PlanExit> {",
         );
@@ -661,11 +1145,19 @@ impl Emitter<'_> {
         self.protected.push((self.loops.len(), self.scopes.len()));
         let departs = self.block(body, bound, false)?;
         self.protected.pop();
-        if !departs {
+        // A segment's statements run only from their entry: past a
+        // departure, a resume elsewhere falls through.
+        if !departs || self.guard {
             self.line("Ok(Departure::Next)");
         }
         self.indent -= 1;
         self.line("})(ctx);");
+        if self.guard {
+            // A yield leaves the plan; the frame keeps the block's state.
+            self.line(
+                "if matches!(outcome, Err(p::PlanExit::Yield)) { return Err(p::PlanExit::Yield); }",
+            );
+        }
         self.line("outcome = match outcome {");
         self.indent += 1;
         self.line(&format!(
@@ -723,7 +1215,7 @@ impl Emitter<'_> {
             level,
             continues: false,
         });
-        let departs = self.block(body, bound, false)?;
+        let departs = self.child(1, |emitter| emitter.block(body, bound, false))?;
         let continues = self
             .loops
             .pop()
@@ -758,26 +1250,193 @@ impl Emitter<'_> {
         if !else_block.is_empty() {
             self.line(&format!("if {exhausted} {{"));
             self.indent += 1;
-            self.block(else_block, Vec::new(), false)?;
+            self.child(2, |emitter| emitter.block(else_block, Vec::new(), false))?;
             self.indent -= 1;
             self.line("}");
         }
         Ok(false)
     }
+
+    /// The head of a resumable loop: its declared charge where the run
+    /// reaches it, or, resuming, leaving it when the sought site is not
+    /// in it (its entries `inner`).
+    fn resumable_head(&mut self, metered: u64, label: &str, inner: Option<String>) {
+        let leave = match inner {
+            Some(inner) => format!("!matches!(r, {inner})"),
+            None => "true".to_string(),
+        };
+        if metered != 0 {
+            self.line(&format!(
+                "if r == 0 {{ ctx.meter({metered})?; }} else if {leave} {{ break {label}; }}"
+            ));
+        } else {
+            self.line(&format!("if r != 0 && {leave} {{ break {label}; }}"));
+        }
+    }
+
+    /// A loop's body and `else` once its head is emitted, closed by
+    /// `close` after the loop.
+    fn resumable_rest(
+        &mut self,
+        level: usize,
+        bound: Vec<(Name, Var)>,
+        body: &[Stmt],
+        else_block: &[Stmt],
+        close: &str,
+    ) -> Result<bool, Unsupported> {
+        self.loops.push(Loop {
+            scopes: self.scopes.len(),
+            level,
+            continues: false,
+        });
+        self.child(1, |emitter| emitter.block(body, bound, false))?;
+        self.loops.pop();
+        // The next test runs in a step of its own.
+        self.op("ctx.begin()?;");
+        self.indent -= 1;
+        self.line("}");
+        self.line(close);
+        if !else_block.is_empty() {
+            let first = self.sites.len();
+            let resumed = entries(first, self.count_block(else_block))
+                .map_or(String::new(), |sought| format!(" || matches!(r, {sought})"));
+            self.line(&format!("if ended{level}{resumed} {{"));
+            self.indent += 1;
+            self.child(2, |emitter| emitter.block(else_block, Vec::new(), false))?;
+            self.indent -= 1;
+            self.line("}");
+        }
+        Ok(false)
+    }
+
+    /// A `while` that holds a callback site: its passes are counted, as
+    /// the body's frame counts them.
+    fn resumable_while(
+        &mut self,
+        metered: u64,
+        condition: &Expr,
+        body: &[Stmt],
+        else_block: &[Stmt],
+    ) -> Result<bool, Unsupported> {
+        let level = self.loops.len();
+        let label = label(level);
+        let first = self.sites.len();
+        let inner = entries(first, self.count_expr(condition) + self.count_block(body));
+        if !else_block.is_empty() {
+            self.line(&format!("let mut ended{level} = false;"));
+        }
+        self.op("ctx.enter_while();");
+        let depth = self.whiles;
+        self.whiles += 1;
+        self.enclosing.push(Enclosing::While);
+        self.line(&format!("{label}: loop {{"));
+        self.indent += 1;
+        self.resumable_head(metered, &label, inner);
+        self.child(0, |emitter| emitter.expr(condition, 0))?;
+        let ended = if else_block.is_empty() {
+            String::new()
+        } else {
+            format!("ended{level} = true; ")
+        };
+        self.line(&format!(
+            "if r == 0 {{ if !ctx.test(0, p::Test::While)? {{ {ended}break {label}; }} ctx.pass_while(); }}"
+        ));
+        let rest = self.resumable_rest(
+            level,
+            Vec::new(),
+            body,
+            &[],
+            &format!("ctx.leave_while({depth});"),
+        );
+        self.enclosing.pop();
+        self.whiles = depth;
+        rest?;
+        if !else_block.is_empty() {
+            let first = self.sites.len();
+            let resumed = entries(first, self.count_block(else_block))
+                .map_or(String::new(), |sought| format!(" || matches!(r, {sought})"));
+            self.line(&format!("if ended{level}{resumed} {{"));
+            self.indent += 1;
+            self.child(2, |emitter| emitter.block(else_block, Vec::new(), false))?;
+            self.indent -= 1;
+            self.line("}");
+        }
+        Ok(false)
+    }
+
+    /// A `for` that holds a callback site, its iterable in register 0.
+    fn resumable_for(
+        &mut self,
+        metered: u64,
+        binding: &Name,
+        body: &[Stmt],
+        else_block: &[Stmt],
+    ) -> Result<bool, Unsupported> {
+        let level = self.loops.len();
+        let label = label(level);
+        let walked = self.slot();
+        let mut declared = self.path.clone();
+        declared.push(1);
+        let bound = self.named_slot(binding, declared);
+        // Resuming inside it, the loop's cursor is the frame's.
+        let open = self.fors;
+        self.line(&format!(
+            "let c{level} = if r == 0 {{ ctx.open(0, {walked})? }} else {{ p::Cursor({open}) }};"
+        ));
+        if !else_block.is_empty() {
+            self.line(&format!("let mut ended{level} = false;"));
+        }
+        let first = self.sites.len();
+        let inner = entries(first, self.count_block(body));
+        self.fors += 1;
+        self.enclosing.push(Enclosing::For { walked });
+        self.line(&format!("{label}: loop {{"));
+        self.indent += 1;
+        let leave = match inner {
+            Some(inner) => format!("!matches!(r, {inner})"),
+            None => "true".to_string(),
+        };
+        let meter = if metered == 0 {
+            String::new()
+        } else {
+            format!("ctx.meter({metered})?; ")
+        };
+        let ended = if else_block.is_empty() {
+            String::new()
+        } else {
+            format!("ended{level} = true; ")
+        };
+        self.line(&format!(
+            "if r == 0 {{ {meter}if !ctx.next(c{level}, 0)? {{ {ended}break {label}; }} ctx.bind({bound}, 0)?; }} else if {leave} {{ break {label}; }}"
+        ));
+        let rest = self.resumable_rest(
+            level,
+            vec![(binding.clone(), Var::Slot(bound))],
+            body,
+            else_block,
+            &format!("ctx.close(c{level});"),
+        );
+        self.enclosing.pop();
+        self.fors -= 1;
+        rest
+    }
 }
 
 /// Compiles `definition`'s body, whose identity is `function`, to the
-/// plan named `ident`. Every body it calls must be in `planned`.
+/// plan named `ident`: a closed body when `segment` is false, whose every
+/// callee must be in `answering` or have no body, and a resumable segment
+/// otherwise.
 ///
 /// # Errors
 ///
 /// The first form the compiler does not perform as the body does.
 pub fn emit(
     library: &Library,
-    planned: &BTreeSet<FunctionId>,
+    answering: &BTreeSet<FunctionId>,
     function: FunctionId,
     definition: &FunctionDefinition,
     ident: &str,
+    segment: bool,
 ) -> Result<Plan, Unsupported> {
     let body = definition
         .body()
@@ -790,7 +1449,8 @@ pub fn emit(
         .collect();
     let mut emitter = Emitter {
         library,
-        planned,
+        answering,
+        segment,
         callees: Vec::new(),
         literals: Vec::new(),
         fields: Vec::new(),
@@ -806,6 +1466,15 @@ pub fn emit(
         out: String::new(),
         indent: 1,
         used: 0,
+        path: Vec::new(),
+        live: Vec::new(),
+        stmt_depth: 0,
+        guard: segment,
+        sites: Vec::new(),
+        enclosing: Vec::new(),
+        fors: 0,
+        whiles: 0,
+        tests: 0,
     };
     let mut pending = vec![(Node::Block(&body.block), Vec::new())];
     while let Some((node, path)) = pending.pop() {
@@ -828,14 +1497,30 @@ pub fn emit(
             pending.push((child, child_path));
         }
     }
+    if segment {
+        emitter.line("let mut r = entry;");
+    }
     let mut bound = Vec::new();
     for (index, name) in params.iter().enumerate() {
+        // A parameter is declared at the body.
         let slot = emitter.named_slot(name, Vec::new());
         emitter.adopted.insert(index, slot);
-        emitter.line(&format!("ctx.adopt({index}, {slot})?;"));
+        emitter.op(&format!("ctx.adopt({index}, {slot})?;"));
         bound.push((name.clone(), Var::Param(index)));
     }
-    emitter.block(&body.block, bound, true)?;
+    emitter.block(&body.block, bound, !segment)?;
+    if segment {
+        if emitter.sites.is_empty() {
+            return Err(Unsupported("has no callback site".into()));
+        }
+        // The body's end returns null (`K-FN-003`); a resume that found
+        // no site ends here too.
+        emitter.line("if r != 0 {");
+        emitter.line("    return Err(ctx.lost(r));");
+        emitter.line("}");
+        emitter.line("ctx.begin()?;");
+        emitter.line("Ok(Value::Null)");
+    }
     let registers = emitter.used.max(1);
     let upper = ident.to_uppercase();
     let mut item = String::new();
@@ -888,15 +1573,29 @@ pub fn emit(
         let _ = writeln!(item, "        &{path:?},");
     }
     item.push_str("    ],\n");
+    item.push_str("    sites: &[");
+    for site in &emitter.sites {
+        let _ = write!(item, "\n        {site},");
+    }
+    item.push_str(if emitter.sites.is_empty() {
+        "],\n"
+    } else {
+        "\n    ],\n"
+    });
     let _ = writeln!(item, "    run: {ident},");
     item.push_str("};\n");
     let mut code = String::new();
     let _ = writeln!(code, "/// `{}`.", definition.name);
+    let entry = if segment { "entry" } else { "_entry" };
     let _ = writeln!(
         code,
-        "fn {ident}(ctx: &mut dyn p::PlanContext) -> Result<Value, p::PlanExit> {{"
+        "fn {ident}(ctx: &mut dyn p::PlanContext, {entry}: u32) -> Result<Value, p::PlanExit> {{"
     );
     code.push_str(&emitter.out);
     code.push_str("}\n");
-    Ok(Plan { item, code })
+    Ok(Plan {
+        item,
+        code,
+        sites: emitter.sites.len(),
+    })
 }

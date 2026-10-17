@@ -437,6 +437,20 @@ impl KernelMachine {
         let Some(frame) = self.task(task)?.frames.pop()? else {
             return Err(fault("a task with no frame returned"));
         };
+        self.left(task, host, exe, frame, result)
+    }
+
+    /// The task's top frame `frame`, taken off its stack, has ended with
+    /// a result or a raise, which its caller takes. Returns the departure
+    /// the caller is left with.
+    pub(super) fn left(
+        &mut self,
+        task: TaskId,
+        host: &mut dyn Host,
+        exe: &Executable,
+        frame: Box<Frame>,
+        result: Result<Value, Value>,
+    ) -> Result<Option<Completion>, Halt> {
         self.refresh_charging(task, exe)?;
         if let Some(call) = &frame.library {
             let evaluates = self.charging;
@@ -488,11 +502,21 @@ impl KernelMachine {
         }
         Ok(match result {
             Ok(value) => match self
-                .finish_action(task, host, exe, value, ResultOrigin::Returned)
-                .and_then(|ran| self.resumed(task, exe, ran))
-            {
-                Ok(Completion::Normal) => None,
-                Ok(completion) => Some(completion),
+                .segment_returned(task, host, exe, value)
+                .map_err(Interrupt::from)
+                .and_then(|returned| match returned {
+                    // A segment the caller stands in ran on (FIG-6709).
+                    Ok(departure) => Ok(Err(departure)),
+                    Err(value) => self
+                        .finish_action(task, host, exe, value, ResultOrigin::Returned)
+                        .map(Ok),
+                })
+                .and_then(|ran| match ran {
+                    Ok(ran) => self.resumed(task, exe, ran).map(Some),
+                    Err(departure) => Ok(departure),
+                }) {
+                Ok(Some(Completion::Normal) | None) => None,
+                Ok(Some(completion)) => Some(completion),
                 Err(Interrupt::Raise(value)) => Some(Completion::Throw(value)),
                 Err(Interrupt::Halt(halt)) => return Err(*halt),
             },
@@ -532,7 +556,7 @@ impl KernelMachine {
     }
 
     /// Drop all guest holdings before retaining the activation's storage.
-    fn recycle(&mut self, mut frame: Box<Frame>) {
+    pub(super) fn recycle(&mut self, mut frame: Box<Frame>) {
         frame.control.clear();
         frame.slots.clear();
         frame.pending.clear();
@@ -630,6 +654,56 @@ impl KernelMachine {
         self.push_operation_frame(task, exe, call, None)
     }
 
+    /// A frame of code `code_id` standing at its body's entry, its storage
+    /// reused when an earlier frame left it.
+    pub(super) fn fresh_frame(
+        &mut self,
+        exe: &Executable,
+        code_id: CodeId,
+    ) -> Result<Box<Frame>, Halt> {
+        let code = exe.code(code_id);
+        let at = code_id.0 as usize;
+        if self.storage.entry_sites.len() <= at {
+            self.storage.entry_sites.resize_with(at + 1, || None);
+        }
+        if self.storage.entry_sites[at].is_none() {
+            let entry =
+                lash_kernel_state::paged::SiteRef::new(&code.site.child(0), self.heap.pages())?;
+            #[cfg(test)]
+            self.storage.activation_sites.push(code_id);
+            self.storage.entry_sites[at] = Some(entry);
+        }
+        let entry = self.storage.entry_sites[at]
+            .as_ref()
+            .ok_or_else(|| fault("a prepared body has no entry site"))?
+            .clone();
+        Ok(match self.storage.frames.pop() {
+            Some(mut frame) => {
+                frame.code = code_id;
+                frame.statement = entry;
+                frame
+            }
+            None => {
+                #[cfg(test)]
+                self.storage.activation_records.push(code_id);
+                Box::new(Frame {
+                    code: code_id,
+                    scalar_blocks: false,
+                    slots: super::frames::Slots::default(),
+                    statement: entry,
+                    pending: super::frames::Continuation::default(),
+                    control: Vec::new(),
+                    awaiting: None,
+                    nested: None,
+                    library: None,
+                    cleaning: None,
+                    held: Vec::new(),
+                    owned: false,
+                })
+            }
+        })
+    }
+
     pub(super) fn push_operation_frame(
         &mut self,
         task: TaskId,
@@ -665,46 +739,7 @@ impl KernelMachine {
         // SiteRef contains page-access-local trees. Prepare each body's
         // immutable entry once here, after the same admission checks as a
         // cold call; sharing it across machines would share their page port.
-        let at = code_id.0 as usize;
-        if self.storage.entry_sites.len() <= at {
-            self.storage.entry_sites.resize_with(at + 1, || None);
-        }
-        if self.storage.entry_sites[at].is_none() {
-            let entry =
-                lash_kernel_state::paged::SiteRef::new(&code.site.child(0), self.heap.pages())?;
-            #[cfg(test)]
-            self.storage.activation_sites.push(code_id);
-            self.storage.entry_sites[at] = Some(entry);
-        }
-        let entry = self.storage.entry_sites[at]
-            .as_ref()
-            .ok_or_else(|| fault("a prepared body has no entry site"))?
-            .clone();
-        let mut frame = match self.storage.frames.pop() {
-            Some(mut frame) => {
-                frame.code = code_id;
-                frame.statement = entry;
-                frame
-            }
-            None => {
-                #[cfg(test)]
-                self.storage.activation_records.push(code_id);
-                Box::new(Frame {
-                    code: code_id,
-                    scalar_blocks: false,
-                    slots: super::frames::Slots::default(),
-                    statement: entry,
-                    pending: super::frames::Continuation::default(),
-                    control: Vec::new(),
-                    awaiting: None,
-                    nested: None,
-                    library: None,
-                    cleaning: None,
-                    held: Vec::new(),
-                    owned: false,
-                })
-            }
-        };
+        let mut frame = self.fresh_frame(exe, code_id)?;
         frame.scalar_blocks = code.versions.select(&self.regs[base..base + given]);
         frame.slots.fresh(code.slots_by_at.len());
         frame.control.push(Control::Block {

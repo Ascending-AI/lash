@@ -82,6 +82,7 @@ pub(crate) fn start(
         charging: true,
         scalar_blocks: false,
         plans: 0,
+        segments: Default::default(),
         charged: 0,
         live_tasks: 1,
         regs: registers::Registers::default(),

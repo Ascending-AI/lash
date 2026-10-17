@@ -101,3 +101,10 @@ pub fn task_identity(
 ) -> Result<lash_kernel_doc::kernel_internals::TaskIdentity, lash_kernel_doc::heap::HeapFault> {
     machine.task_identity(identity)
 }
+
+/// How many installed segments `library` runs, and each one whose callback
+/// sites its body does not state, with why: that function runs its body
+/// (FIG-6709).
+pub fn segments(library: &PreparedLibrary) -> (usize, Vec<String>) {
+    library.segments()
+}

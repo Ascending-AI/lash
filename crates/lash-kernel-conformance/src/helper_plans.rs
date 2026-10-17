@@ -16,13 +16,13 @@ use lash_kernel_vm::{Bounds, CellStart, Host, Machine, Outcome, Program, Request
     reason = "the plan law shares lowering, not the differential's standalone runner"
 )]
 #[path = "../../lash-dialect-typescript/shared/helper_differential/runner.rs"]
-mod runner;
+pub(crate) mod runner;
 
-struct World {
-    bits: u64,
-    stride: u64,
-    nanoseconds: i64,
-    prints: Vec<Datum>,
+pub(crate) struct World {
+    pub(crate) bits: u64,
+    pub(crate) stride: u64,
+    pub(crate) nanoseconds: i64,
+    pub(crate) prints: Vec<Datum>,
 }
 impl Host for World {
     fn clock(&mut self) -> Timestamp {

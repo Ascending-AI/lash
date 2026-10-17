@@ -407,6 +407,7 @@ impl KernelMachine {
             charging: true,
             scalar_blocks: false,
             plans: 0,
+            segments: Default::default(),
             charged: root.meters.charged,
             live_tasks: root.meters.live_tasks,
             census_refinements,

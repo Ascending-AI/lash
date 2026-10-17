@@ -204,6 +204,11 @@ impl Continuation {
         }
     }
 
+    /// The continuation the frame saved, if any.
+    pub(super) fn peek(&self) -> Option<&Pending> {
+        self.pending.as_ref()
+    }
+
     pub(super) fn take(&mut self) -> Option<Pending> {
         let pending = self.pending.take();
         if self.saved == Saved::This {

@@ -32,7 +32,7 @@ use lash_kernel_state::paged::{
 };
 
 /// What a call or a `spawn` runs, once its callee is read.
-enum Target {
+pub(super) enum Target {
     Code(CodeId, Vec<EntityId>),
     Library(LibId),
 }
@@ -222,6 +222,10 @@ impl KernelMachine {
                                 self.capture(task, entry, act, PhaseRecord::Called)?;
                                 self.enter_body(task, exe, lib, code, at, Some(stmt))?
                             }
+                            super::ops::Answer::Yielded => {
+                                self.capture(task, entry, act, PhaseRecord::Called)?;
+                                self.stand_segments(task, exe, Some(stmt))?
+                            }
                         }
                     }
                     target @ Target::Code(..) => {
@@ -242,6 +246,10 @@ impl KernelMachine {
                     super::ops::Answer::Body(code) => {
                         self.capture(task, entry, act, PhaseRecord::Called)?;
                         self.enter_body(task, exe, *lib, code, args, Some(stmt))
+                    }
+                    super::ops::Answer::Yielded => {
+                        self.capture(task, entry, act, PhaseRecord::Called)?;
+                        self.stand_segments(task, exe, Some(stmt))
                     }
                 }
             }
@@ -596,7 +604,7 @@ impl KernelMachine {
     }
 
     /// The function a closure or a function reference names (`K-FN-005`).
-    fn target(&mut self, exe: &Executable, value: Value) -> Eval<Target> {
+    pub(super) fn target(&mut self, exe: &Executable, value: Value) -> Eval<Target> {
         match value {
             Value::Closure(id) => {
                 let closure = self.heap.closure(id)?;

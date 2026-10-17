@@ -48,3 +48,5 @@ mod tests;
 
 #[cfg(test)]
 mod helper_plans;
+#[cfg(test)]
+mod helper_segments;

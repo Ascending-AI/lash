@@ -276,7 +276,7 @@ pub enum RegistryError {
         function: FunctionId,
     },
     /// A plan calls a function the registry does not hold, or one that
-    /// would run its body in a frame: a plan answers at once.
+    /// would run its body in a frame, outside a callback site.
     #[error("the plan of `{name}` calls {callee}, which neither a plan nor a native answers")]
     PlanCalleeUnanswered {
         name: FunctionName,
@@ -467,10 +467,11 @@ impl FunctionRegistry {
     /// Installs the plans a build generated, each beside the definition
     /// it was generated from, by identity. A plan whose function is not
     /// registered is skipped: the registry holds another dialect's or
-    /// another release's helpers. Every callee must answer at once: a native
-    /// without a body, a machine function, or an installed plan. When a
-    /// native beside a plan declines, that plan executes the callee's body
-    /// without offering the native the call again.
+    /// another release's helpers. Every callee a plan calls outside its
+    /// callback sites must answer at once: a native without a body, a
+    /// machine function, or an installed plan that has no callback site.
+    /// When a native beside a plan declines, that plan executes the
+    /// callee's body without offering the native the call again.
     ///
     /// # Errors
     ///
@@ -495,12 +496,23 @@ impl FunctionRegistry {
             }
         }
         for plan in installing.values() {
-            for callee in plan.callees {
+            for (index, callee) in plan.callees.iter().enumerate() {
+                // A callback site's callee may run its body in a frame.
+                let invoked = plan
+                    .sites
+                    .iter()
+                    .any(|site| site.call == crate::plan::SiteCall::Invoke(index as u32));
+                if invoked {
+                    continue;
+                }
                 // A native beside a body may decline: that body needs its
-                // own plan too, before it can answer a closed caller.
-                let answers = installing.contains_key(callee)
+                // own plan too, before it can answer a closed caller; a
+                // segment may yield.
+                let closed = |plan: &HelperPlan| plan.sites.is_empty();
+                let answers = installing.get(callee).is_some_and(|plan| closed(plan))
                     || self.functions.get(callee).is_some_and(|registered| {
-                        registered.plan.is_some() || registered.definition.body().is_none()
+                        registered.plan.is_some_and(closed)
+                            || registered.definition.body().is_none()
                     });
                 if !answers {
                     return Err(RegistryError::PlanCalleeUnanswered {

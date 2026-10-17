@@ -31,7 +31,7 @@ pub(crate) fn admissions(requests: &[Request]) -> Vec<AdmittedWait> {
 pub(crate) struct Image {
     pub(crate) root: CheckpointRoot,
     pub(crate) source: pages::Source,
-    admissions: Vec<AdmittedWait>,
+    pub(crate) admissions: Vec<AdmittedWait>,
 }
 
 #[derive(Default)]
