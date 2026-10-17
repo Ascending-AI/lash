@@ -152,6 +152,18 @@ struct DirectReplayPosition<'a> {
     replay: Option<&'a crate::RuntimeReplay>,
     caused_by: Option<&'a crate::CausalRef>,
     ordinal: u64,
+    request_name: DirectRequestName,
+}
+
+/// What names a direct call's request, and so the call id its pins and
+/// record are keyed by in the owner's run.
+#[derive(Clone, Copy, PartialEq, Eq)]
+enum DirectRequestName {
+    /// The caller's request id, one per logical call by its contract.
+    Caller,
+    /// The call's key: a [`crate::DirectRequest`] carries only its owner's
+    /// transport id, which every direct completion of that owner shares.
+    Key,
 }
 
 impl CurrentOwnerCapability {
@@ -222,7 +234,7 @@ impl DirectCompletionCapability {
         &self,
         context: &DirectInvocationContext<'_>,
         binding: crate::LlmProfileBinding,
-        request: crate::LlmRequest,
+        mut request: crate::LlmRequest,
         prompt: DirectPromptInput,
         usage_source: &str,
         replay_position: DirectReplayPosition<'_>,
@@ -234,6 +246,7 @@ impl DirectCompletionCapability {
             replay,
             caused_by,
             ordinal,
+            request_name,
         } = replay_position;
         let discriminator =
             crate::runtime::causal::direct_request_discriminator(replay, caused_by, ordinal);
@@ -250,6 +263,9 @@ impl DirectCompletionCapability {
             context.effect_controller.execution_scope(),
             invocation.effect_replay_key(),
         );
+        if request_name == DirectRequestName::Key {
+            request.scope.request_id = crate::runtime::owned_call::owned_call_id(&key).0;
+        }
         let admit = crate::runtime::owned_call::OwnedCall {
             cx: &context.effect_controller,
             enclosing: context
@@ -313,12 +329,7 @@ impl DirectCompletionCapability {
                     .find(|pin| pin.key == key);
                 let mut fact = pin.map_or_else(
                     || {
-                        let call_id = crate::LlmCallId(format!(
-                            "{}:{}:{}",
-                            key.session,
-                            key.call.owner_column(),
-                            key.call.call_column()
-                        ));
+                        let call_id = crate::runtime::owned_call::owned_call_id(&key);
                         ModelCallFact {
                             call: 0,
                             call_id: call_id.clone(),
@@ -476,6 +487,7 @@ impl DirectCompletionCapability {
                     replay: replay.as_ref(),
                     caused_by: caused_by.as_ref(),
                     ordinal: replay_ordinal,
+                    request_name: DirectRequestName::Key,
                 },
             )
             .await?;
@@ -522,6 +534,7 @@ impl DirectCompletionCapability {
                     replay: Some(&replay),
                     caused_by: caused_by.as_ref(),
                     ordinal: 0,
+                    request_name: DirectRequestName::Caller,
                 },
             )
             .await?;

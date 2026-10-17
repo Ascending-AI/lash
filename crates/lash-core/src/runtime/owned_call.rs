@@ -102,6 +102,18 @@ pub(in crate::runtime) fn owned_call_key(
     }
 }
 
+/// The call id of the owned call `key`, for a caller whose request names no
+/// call of its own: the key is the call's one identity in its owner's run,
+/// so every call the owner makes has its own id there.
+pub(in crate::runtime) fn owned_call_id(key: &PromptCallKey) -> crate::LlmCallId {
+    crate::LlmCallId(format!(
+        "{}:{}:{}",
+        key.session,
+        key.call.owner_column(),
+        key.call.call_column()
+    ))
+}
+
 impl OwnedCall<'_> {
     /// Admit the call, or find its admission.
     ///

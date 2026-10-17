@@ -464,7 +464,8 @@ pub fn build_llm_request(
     }
 
     // This request id is transport metadata for the DirectRequest path; its
-    // durable position was selected from replay/ordinal before normalization.
+    // durable position was selected from replay/ordinal before normalization,
+    // and a durable completion replaces it with its owned call's key.
     // Callers of direct_llm_completion must instead supply their own
     // per-logical-call request id.
     let scope = match owner {
