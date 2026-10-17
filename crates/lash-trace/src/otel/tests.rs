@@ -534,6 +534,10 @@ fn emitted_domain_shape_matches_registry() {
     adapter
         .metrics
         .runtime_tuning
+        .record_provider_terminal_delivery_timeout("vendor-x");
+    adapter
+        .metrics
+        .runtime_tuning
         .record_provider_throttle_wait("vendor-x", Duration::from_millis(4));
     adapter
         .metrics
