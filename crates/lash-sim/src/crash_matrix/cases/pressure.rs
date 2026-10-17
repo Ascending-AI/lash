@@ -9,8 +9,9 @@
 //!
 //! Laws:
 //! - Settlement: the first turn ended, and the second answered.
-//! - Once: exactly one `pressure.frame` and one `completion.start` commit
-//!   land, however the run is cut: a redrive after the frame opened
+//! - Once: exactly one `pressure.frame` and one logical completion admission
+//!   land; later `completion.start` commits reserve attempts of that call
+//!   (FIG-6570). A redrive after the frame opened
 //!   prepares over the head it moved and opens nothing.
 //! - WIRE: every send of the summary carries the one body its admission
 //!   stored.
@@ -25,6 +26,7 @@ use lash_durable::{ActorState, CommitLabel};
 use lash_durable_test::{Cut, SimNodes};
 use lash_protocol_types::{SessionId, TurnId};
 
+use super::compaction::CompletionAdmissions;
 use super::{run_of, session_actor, state};
 use crate::crash_matrix::compactions::{RECOVERED, SENT};
 use crate::crash_matrix::deployment::Workload;
@@ -40,6 +42,7 @@ fn recovered_run(session: &SessionId) -> TurnId {
 pub struct PressureCase {
     tag: String,
     session: Mutex<Option<SessionId>>,
+    completion: CompletionAdmissions,
 }
 
 impl PressureCase {
@@ -49,6 +52,7 @@ impl PressureCase {
         Self {
             tag: tag.to_owned(),
             session: Mutex::default(),
+            completion: CompletionAdmissions::default(),
         }
     }
 
@@ -59,7 +63,8 @@ impl PressureCase {
 
 #[async_trait::async_trait]
 impl Workload for PressureCase {
-    async fn seed(&self, world: &Arc<World>, _nodes: &Arc<SimNodes>) -> Result<(), String> {
+    async fn seed(&self, world: &Arc<World>, nodes: &Arc<SimNodes>) -> Result<(), String> {
+        self.completion.observe(nodes);
         let session = TurnScript::Pressure.session(&format!("pressure{}", self.tag));
         let core = crate::crash_matrix::compactions::compaction_core(world)?;
         crate::crash_matrix::compactions::send_pressure(
@@ -105,14 +110,17 @@ impl Workload for PressureCase {
             other => violations.push(format!("the recovered turn ended {other:?}")),
         }
         let trace = nodes.script().trace();
-        for label in [CommitLabel::PRESSURE_FRAME, CommitLabel::COMPLETION_START] {
-            let landed = trace
-                .iter()
-                .filter(|write| write.point.label == label && write.committed())
-                .count();
-            if landed != 1 {
-                violations.push(format!("once: {landed} {label} commits landed, not one"));
-            }
+        let landed = trace
+            .iter()
+            .filter(|write| write.point.label == CommitLabel::PRESSURE_FRAME && write.committed())
+            .count();
+        if landed != 1 {
+            violations.push(format!(
+                "once: {landed} pressure.frame commits landed, not one"
+            ));
+        }
+        if let Err(error) = self.completion.check(world, nodes, &session).await {
+            violations.push(error);
         }
         let notes = world.notes();
         let of = |prefix: &str| {

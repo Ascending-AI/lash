@@ -35,6 +35,8 @@ const MODEL: &str = "lash-sim-compaction-model";
 pub const LOWERED: &str = "compaction.lowered";
 /// What a summary send notes: `{SENT} {session} :: {body}`.
 pub const SENT: &str = "compaction.sent";
+/// The scope and body observed at each summary dispatch, as a JSON pair.
+pub(super) const ATTEMPT: &str = "compaction.attempt";
 /// The summary the model answers.
 pub const SUMMARY: &str = "the turn was answered";
 /// A pressure session's first input, whose turn overflows.
@@ -204,6 +206,10 @@ fn model(world: Weak<World>) -> ProviderHandle {
                 let summary = sent["summary"] == true;
                 if summary && let Some(world) = world.upgrade() {
                     world.note(format!("{SENT} {named} :: {body}"));
+                    world.note(format!(
+                        "{ATTEMPT} {named} :: {}",
+                        serde_json::json!([context.scope, body])
+                    ));
                 }
                 let answer = |text: &str| LlmResponse {
                     parts: vec![LlmOutputPart::Text {
