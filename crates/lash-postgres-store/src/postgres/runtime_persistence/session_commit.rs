@@ -280,8 +280,14 @@ impl SessionCommitStore for PostgresStore {
         )
         .await
         .map_err(store_sqlx_error)?;
-        let meta =
-            load_session_head_meta_tx(&mut tx, session_id, false, self.fence.fleet()).await?;
+        let meta = load_session_head_meta_tx(
+            &mut tx,
+            session_id,
+            false,
+            self.fence.fleet(),
+            Some(&self.configs),
+        )
+        .await?;
         crate::observed_sql::control("COMMIT", tx.commit())
             .await
             .map_err(store_sqlx_error)?;

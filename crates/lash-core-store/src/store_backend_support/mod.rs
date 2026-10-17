@@ -3,6 +3,7 @@
 use lash_protocol_types::SessionId;
 
 mod append_identity;
+mod config_cache;
 mod fork_target;
 mod head_path;
 mod process_lifecycle_sql;
@@ -15,6 +16,7 @@ mod turn_input_lifecycle_sql;
 pub(crate) mod window_cache;
 
 pub use append_identity::decode_append_request_identity;
+pub use config_cache::ConfigCache;
 pub use fork_target::TargetResolution;
 pub use head_path::{HeadPathProbe, OwnerExit, OwnerExitParent, OwnerLowestNode, PathNode};
 pub use process_lifecycle_sql::{

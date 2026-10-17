@@ -194,6 +194,7 @@ pub(crate) fn try_load_session_head_meta_from_conn(
     conn: &Connection,
     session_id: &SessionId,
     fleet: lash_core_execution::FleetFormat,
+    configs: Option<&lash_core_store::store_backend_support::ConfigCache>,
 ) -> Result<Option<SessionHeadMeta>, StoreError> {
     let row = conn
         .query_row(
@@ -217,7 +218,7 @@ pub(crate) fn try_load_session_head_meta_from_conn(
     };
     assemble_session_head_meta(
         session_id,
-        || load_config_conn(conn, head_json.as_deref(), fleet),
+        || load_config_conn(conn, head_json.as_deref(), fleet, configs),
         head_revision,
         leaf_node_id,
         checkpoint_ref,
@@ -294,19 +295,28 @@ pub(crate) fn load_config_conn(
     conn: &Connection,
     reference: Option<&str>,
     fleet: lash_core_execution::FleetFormat,
+    configs: Option<&lash_core_store::store_backend_support::ConfigCache>,
 ) -> Result<SessionHeadPayload, StoreError> {
     use lash_core_store::checkpoint_graph::{DecodeLimits, GraphDecoder, NodeId, config};
     let corrupt = |message: String| stored_data_corrupt("SessionHeadMeta", message);
     let root = reference
         .and_then(NodeId::from_hex)
         .ok_or_else(|| corrupt("revision names a missing config reference".to_owned()))?;
+    if let Some(configs) = configs
+        && let Some(payload) = configs.get(root, fleet)?
+    {
+        return Ok(payload);
+    }
     let limits = DecodeLimits::within_total(1 << 32);
     let graph = crate::durable::graph_closure(conn, root, &limits)
         .map_err(sqlite_error)?
         .map_err(|error| corrupt(error.to_string()))?;
     let value: serde_json::Value =
         config::load(&mut GraphDecoder::new(&graph, limits), root).map_err(corrupt)?;
-    SessionHeadPayload::decode_for_fleet(&value.to_string(), fleet)
+    match configs {
+        Some(configs) => configs.decode(root, value, fleet),
+        None => SessionHeadPayload::decode_value_for_fleet(value, fleet),
+    }
 }
 
 #[cfg(test)]

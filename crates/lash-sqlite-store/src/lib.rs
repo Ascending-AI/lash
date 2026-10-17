@@ -196,6 +196,7 @@ pub struct SqliteStore {
     windows: Arc<lash_core_execution::store_backend_support::WindowCache>,
     /// The module-artifact envelopes this store encoded (FIG-6457).
     encoded_images: Arc<std::sync::Mutex<blobs::EncodedImages>>,
+    configs: Arc<lash_core_store::store_backend_support::ConfigCache>,
     clock: Arc<dyn lash_core_execution::Clock>,
     options: StoreOptions,
     commit_count: AtomicU64,

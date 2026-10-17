@@ -224,6 +224,7 @@ impl SqliteStore {
             decoded_turn_receipt_bodies: Arc::new(AtomicU64::new(0)),
             windows: Arc::default(),
             encoded_images: Arc::default(),
+            configs: Arc::default(),
             clock,
             options,
             commit_count: AtomicU64::new(commit_count_entropy_seed()),
@@ -252,6 +253,7 @@ impl SqliteStore {
             decoded_turn_receipt_bodies: Arc::new(AtomicU64::new(0)),
             windows: Arc::default(),
             encoded_images: Arc::default(),
+            configs: Arc::default(),
             clock: Arc::new(lash_core_execution::facade_support::SystemClock),
             options: StoreOptions::standard(FIXTURE_SYNCHRONOUS),
             commit_count: AtomicU64::new(commit_count_entropy_seed()),
@@ -278,9 +280,10 @@ impl SqliteStore {
     ) -> Result<Option<SessionHeadMeta>, StoreError> {
         let session_id = session_id.clone();
         let fleet = self.fleet_format();
+        let configs = Arc::clone(&self.configs);
         self.read_connection()
             .call(move |conn| {
-                try_load_session_head_meta_from_conn(conn, &session_id, fleet)
+                try_load_session_head_meta_from_conn(conn, &session_id, fleet, Some(&configs))
                     .map_err(sqlite_conversion_error)
             })
             .await

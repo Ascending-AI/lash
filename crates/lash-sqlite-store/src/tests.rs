@@ -2087,3 +2087,138 @@ fn settled_payload_release_is_bounded_and_takes_only_released_runs_payloads() {
         assert_eq!(payloads(key), 1, "`{key}` still keeps its payload");
     }
 }
+
+async fn measured_configuration_head(
+    store: &SqliteStore,
+    session: &SessionId,
+) -> (SessionHeadMeta, u64) {
+    let window =
+        lash_core_execution::facade_support::sql::Window::new("configuration-reuse-law", "sqlite");
+    let head = window
+        .within(store.load_session_head_meta(session))
+        .await
+        .expect("metadata read")
+        .expect("head");
+    let reads = window
+        .snapshot()
+        .shapes
+        .iter()
+        .filter(|(shape, _)| {
+            shape.starts_with("select stored.hash,") && shape.contains("blobs as stored")
+        })
+        .map(|(_, shape)| shape.statements)
+        .sum();
+    (head, reads)
+}
+
+/// IMMUTABLE-CONFIG-REUSE: the root, rather than a session or head revision,
+/// identifies reusable configuration. Every metadata read still observes the
+/// head another handle published, including a head with an unchanged root.
+#[tokio::test]
+async fn validated_configuration_is_reused_only_for_its_immutable_root() {
+    let dir = tempfile::tempdir().expect("tempdir");
+    let path = dir.path().join("config-reuse.db");
+    let store = SqliteStore::open_file_for_testing(&path)
+        .await
+        .expect("reader");
+    let writer = SqliteStore::open_file_for_testing(&path)
+        .await
+        .expect("independent writer");
+    let session = SessionId::from("config-reuse");
+    let mut state = durable_state(&store, &session).await;
+    let (first, cold_reads) = measured_configuration_head(&store, &session).await;
+    assert!(cold_reads > 0, "cold root is validated");
+    let (reused, reused_reads) = measured_configuration_head(&store, &session).await;
+    assert_eq!(reused.config, first.config);
+    assert_eq!(
+        reused_reads, 0,
+        "a validated immutable root needs no body SELECTs"
+    );
+
+    state.policy.max_tool_calls = lash_core_execution::MaxToolCalls::new(7);
+    state.config_revision = 1;
+    let receipt = writer
+        .commit_runtime_state(RuntimeCommit::persisted_state_for_test(&state))
+        .await
+        .expect("publish changed config");
+    let (changed, changed_reads) = measured_configuration_head(&store, &session).await;
+    assert_eq!(changed.head_revision, receipt.head_revision);
+    assert_eq!(changed.config.config_revision, 1);
+    assert_eq!(
+        changed.config.max_tool_calls,
+        lash_core_execution::MaxToolCalls::new(7)
+    );
+    assert!(changed_reads > 0, "new root is validated");
+
+    state.head_revision = receipt.head_revision;
+    let receipt = writer
+        .commit_runtime_state(RuntimeCommit::persisted_state_for_test(&state))
+        .await
+        .expect("publish same config on a new head");
+    let (advanced, advanced_reads) = measured_configuration_head(&store, &session).await;
+    assert_eq!(advanced.head_revision, receipt.head_revision);
+    assert_eq!(advanced.config, changed.config);
+    assert_eq!(
+        advanced_reads, 0,
+        "new head with the same root reuses validated config"
+    );
+}
+
+/// CONFIG-CORRUPTION-REFUSAL: cached payloads still prove their session
+/// identity against fresh rows; a cold reader validates the graph material.
+#[tokio::test]
+async fn configuration_reuse_preserves_identity_and_cold_corruption_refusals() {
+    let dir = tempfile::tempdir().expect("tempdir");
+    let path = dir.path().join("config-corruption.db");
+    let store = SqliteStore::open_file_for_testing(&path)
+        .await
+        .expect("store");
+    let owner = SessionId::from("config-owner");
+    let foreign = SessionId::from("config-foreign");
+    durable_state(&store, &owner).await;
+    durable_state(&store, &foreign).await;
+    store
+        .load_session_head_meta(&owner)
+        .await
+        .expect("validate and cache owner")
+        .expect("head");
+    let raw = Connection::open(&path).expect("corruption connection");
+    let root: String = raw
+        .query_row(
+            "SELECT config_ref FROM session_revisions WHERE session_id = ?1",
+            [owner.as_str()],
+            |row| row.get(0),
+        )
+        .expect("owner root");
+    raw.execute(
+        "UPDATE session_revisions SET config_ref = ?1 WHERE session_id = ?2",
+        params![root, foreign.as_str()],
+    )
+    .expect("mis-key the cached root");
+    let error = store
+        .load_session_head_meta(&foreign)
+        .await
+        .expect_err("cached config cannot change the row identity");
+    assert!(
+        matches!(error, StoreError::StoredDataCorrupt { record_kind: "SessionHeadMeta", message } if message.contains("row is keyed on session `config-foreign`"))
+    );
+    raw.execute(
+        "UPDATE blobs SET content = CAST('{' AS BLOB) WHERE hash = ?1",
+        [root],
+    )
+    .expect("corrupt configuration graph body");
+    let cold = SqliteStore::open_file_for_testing(&path)
+        .await
+        .expect("cold reader");
+    let error = cold
+        .load_session_head_meta(&owner)
+        .await
+        .expect_err("cold root must validate its material");
+    assert!(matches!(
+        error,
+        StoreError::StoredDataCorrupt {
+            record_kind: "SessionHeadMeta",
+            ..
+        }
+    ));
+}

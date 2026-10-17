@@ -713,7 +713,7 @@ fn admit_pending_turn_inputs_conn(
     let session_id = batch.session_id();
     read_session_state_version_conn(tx, session_id, fleet)?;
     let (rows, woken) = enqueue_pending_turn_inputs_conn(tx, batch, now, first_nonce)?;
-    let committed_head = try_load_session_head_meta_from_conn(tx, session_id, fleet)?;
+    let committed_head = try_load_session_head_meta_from_conn(tx, session_id, fleet, None)?;
     Ok((
         lash_core_execution::TurnInputAdmission::Fused {
             rows,

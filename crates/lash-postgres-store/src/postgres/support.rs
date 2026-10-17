@@ -636,6 +636,7 @@ pub(crate) async fn load_session_head_meta_tx(
     session_id: &SessionId,
     for_update: bool,
     fleet: lash_core_execution::FleetFormat,
+    configs: Option<&lash_core_store::store_backend_support::ConfigCache>,
 ) -> Result<Option<SessionHeadMeta>, StoreError> {
     let sql = if for_update {
         session_sql().head_postgres.select_meta_for_update.sql()
@@ -647,7 +648,7 @@ pub(crate) async fn load_session_head_meta_tx(
         .fetch_optional(crate::observed_sql::executor(&mut *tx))
         .await
         .map_err(store_sqlx_error)?;
-    decode_session_head_meta_row(tx, session_id, row, fleet).await
+    decode_session_head_meta_row(tx, session_id, row, fleet, configs).await
 }
 
 /// The head that run `run`'s terminal named as its window (FIG-5931), read
@@ -685,7 +686,7 @@ pub(crate) async fn load_terminal_head_meta_tx(
             revision: u64_from_sql("SessionRun", "terminal_window_revision", row.get(1))?,
         });
     }
-    decode_session_head_meta_row(tx, session_id, row, fleet).await
+    decode_session_head_meta_row(tx, session_id, row, fleet, None).await
 }
 
 async fn decode_session_head_meta_row(
@@ -693,13 +694,14 @@ async fn decode_session_head_meta_row(
     session_id: &SessionId,
     row: Option<sqlx::postgres::PgRow>,
     fleet: lash_core_execution::FleetFormat,
+    configs: Option<&lash_core_store::store_backend_support::ConfigCache>,
 ) -> Result<Option<SessionHeadMeta>, StoreError> {
     let Some(row) = row else {
         return Ok(None);
     };
     let head_revision = u64_from_sql("SessionHeadMeta", "head_revision", row.get(1))?;
     let config_ref: Option<String> = row.get(0);
-    let payload = load_config_tx(tx, config_ref.as_deref(), fleet).await?;
+    let payload = load_config_tx(tx, config_ref.as_deref(), fleet, configs).await?;
     let current_frame_node_id = row
         .try_get::<Option<String>, _>(4)
         .map_err(store_sqlx_error)?;
@@ -739,6 +741,7 @@ pub(crate) async fn load_config_tx(
     tx: &mut sqlx::PgConnection,
     reference: Option<&str>,
     fleet: lash_core_execution::FleetFormat,
+    configs: Option<&lash_core_store::store_backend_support::ConfigCache>,
 ) -> Result<SessionHeadPayload, StoreError> {
     use lash_core_store::checkpoint_graph::{DecodeLimits, GraphDecoder, NodeId, config};
     let corrupt = |message: String| StoreError::StoredDataCorrupt {
@@ -748,13 +751,21 @@ pub(crate) async fn load_config_tx(
     let root = reference
         .and_then(NodeId::from_hex)
         .ok_or_else(|| corrupt("revision names a missing config reference".to_owned()))?;
+    if let Some(configs) = configs
+        && let Some(payload) = configs.get(root, fleet)?
+    {
+        return Ok(payload);
+    }
     let limits = DecodeLimits::within_total(1 << 32);
     let graph = crate::durable::graph_closure(tx, root, &limits)
         .await
         .map_err(config_store_error)?;
     let value: serde_json::Value =
         config::load(&mut GraphDecoder::new(&graph, limits), root).map_err(corrupt)?;
-    SessionHeadPayload::decode_for_fleet(&value.to_string(), fleet)
+    match configs {
+        Some(configs) => configs.decode(root, value, fleet),
+        None => SessionHeadPayload::decode_value_for_fleet(value, fleet),
+    }
 }
 
 /// Configuration admission and reads preserve database failures as store failures.

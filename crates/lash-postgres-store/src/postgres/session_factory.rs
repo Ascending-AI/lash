@@ -872,7 +872,8 @@ async fn fence_deleted_session_frames_tx(
             session_id.clone(),
         ));
         if let Some(head) =
-            crate::support::load_session_head_meta_tx(tx, session_id, false, fleet_format).await?
+            crate::support::load_session_head_meta_tx(tx, session_id, false, fleet_format, None)
+                .await?
             && let Some(frame) = head.current_frame_node_id
         {
             referrers.push(lash_core_execution::ArtifactReferrer::FrameEnvironment(

@@ -285,7 +285,7 @@ fn terminal_head(
     }
     crate::codec::assemble_session_head_meta(
         session,
-        || crate::codec::load_config_conn(conn, config_ref.as_deref(), fleet),
+        || crate::codec::load_config_conn(conn, config_ref.as_deref(), fleet, None),
         revision,
         leaf,
         checkpoint,
@@ -434,7 +434,7 @@ pub(crate) fn window(
     let head = match &selector {
         WindowSelector::Terminal(run) => terminal_head(conn, session, run, fleet)?,
         WindowSelector::Current | WindowSelector::Admitted(_) => {
-            try_load_session_head_meta_from_conn(conn, session, fleet)?
+            try_load_session_head_meta_from_conn(conn, session, fleet, None)?
         }
     };
     let Some(meta) = head else {
@@ -783,11 +783,9 @@ fn ancestors(
     };
     let (pinned, start, expected) = match anchor {
         HistoryAnchor::Head => {
-            let meta =
-                try_load_session_head_meta_from_conn(conn, session, fleet)?.ok_or_else(|| {
-                    StoreError::SessionNotFound {
-                        session_id: session.clone(),
-                    }
+            let meta = try_load_session_head_meta_from_conn(conn, session, fleet, None)?
+                .ok_or_else(|| StoreError::SessionNotFound {
+                    session_id: session.clone(),
                 })?;
             let Some(leaf) = meta.leaf_node_id else {
                 return Ok(HistoryPage {

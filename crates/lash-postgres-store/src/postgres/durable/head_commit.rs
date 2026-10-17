@@ -1132,7 +1132,7 @@ pub(super) async fn read_facts(
         });
     }
     let existing =
-        crate::support::load_session_head_meta_tx(&mut *tx, &commit.session_id, false, fleet)
+        crate::support::load_session_head_meta_tx(&mut *tx, &commit.session_id, false, fleet, None)
             .await?;
     planner.validate_node_derivation()?;
     if let Some(prior) =

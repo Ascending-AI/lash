@@ -283,7 +283,7 @@ impl RevisionRow {
         fleet: lash_core_execution::FleetFormat,
     ) -> Result<lash_core_execution::PersistedSessionConfig, StoreError> {
         let payload =
-            crate::support::load_config_tx(conn, self.config_ref.as_deref(), fleet).await?;
+            crate::support::load_config_tx(conn, self.config_ref.as_deref(), fleet, None).await?;
         Ok(payload.config)
     }
 }

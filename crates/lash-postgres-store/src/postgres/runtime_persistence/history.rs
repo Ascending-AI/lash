@@ -432,7 +432,7 @@ pub(crate) async fn window_conn(
             load_terminal_head_meta_tx(conn, session_id, run, fleet).await?
         }
         WindowSelector::Current | WindowSelector::Admitted(_) => {
-            load_session_head_meta_tx(conn, session_id, false, fleet).await?
+            load_session_head_meta_tx(conn, session_id, false, fleet, None).await?
         }
     };
     let Some(meta) = head else {
@@ -608,7 +608,7 @@ impl SessionHistoryStore for PostgresStore {
         let (pinned_leaf, start, expected_generation) = match anchor {
             HistoryAnchor::Head => {
                 let meta =
-                    load_session_head_meta_tx(&mut tx, session_id, false, self.fence.fleet())
+                    load_session_head_meta_tx(&mut tx, session_id, false, self.fence.fleet(), None)
                         .await?
                         .ok_or_else(|| StoreError::SessionNotFound {
                             session_id: session_id.clone(),

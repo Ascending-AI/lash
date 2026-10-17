@@ -365,7 +365,7 @@ pub(crate) fn apply_runtime_commit_conn(
             session_id: commit.session_id.clone(),
         });
     }
-    let existing = try_load_session_head_meta_from_conn(tx, &commit.session_id, fleet)?;
+    let existing = try_load_session_head_meta_from_conn(tx, &commit.session_id, fleet, None)?;
     planner.validate_node_derivation()?;
     {
         let prior: Option<PriorReceiptRow> = tx

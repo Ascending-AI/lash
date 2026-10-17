@@ -72,6 +72,21 @@ impl SessionHeadPayload {
             message: error.to_string(),
         };
         let value: serde_json::Value = serde_json::from_str(json).map_err(corrupt)?;
+        Self::decode_value_for_fleet(value, fleet)
+    }
+
+    /// Decode a canonical graph value directly, preserving the fleet and
+    /// corruption refusals of the JSON reader without serializing it again.
+    ///
+    /// Integrator class (ADR 0051): **store and durable-substrate implementors**.
+    pub fn decode_value_for_fleet(
+        value: serde_json::Value,
+        fleet: FleetFormat,
+    ) -> Result<Self, StoreError> {
+        let corrupt = |error: serde_json::Error| StoreError::StoredDataCorrupt {
+            record_kind: "SessionHeadMeta",
+            message: error.to_string(),
+        };
         ensure_supported_record_schema_version_for_fleet(
             "SessionHeadMeta",
             &value,

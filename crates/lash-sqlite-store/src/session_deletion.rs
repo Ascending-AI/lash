@@ -67,6 +67,7 @@ pub(super) async fn delete_session_from_catalog(
                 tx,
                 &session_id,
                 FleetFormat::current(),
+                None,
             )? && let Some(frame_node_id) = meta.current_frame_node_id
             {
                 let referrer = lash_core_execution::ArtifactReferrer::FrameEnvironment(
