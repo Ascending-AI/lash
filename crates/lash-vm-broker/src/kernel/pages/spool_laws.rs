@@ -934,6 +934,17 @@ async fn a_held_activation_renews_its_lease_through_a_tool_twice_its_ttl() {
             .await
             .unwrap_or_else(|_| panic!("the renewal due at {due} ms never ran"));
     }
+    // The renewal due with the tool's own is armed beside it before the
+    // clock moves there: the held loop is then parked on both, and the
+    // tool, armed first and polled first, wins the tie. Moving earlier
+    // lets the loop, still returning from the last renewal, find the
+    // renewal already due and renew a sixth time (FIG-6683).
+    tokio::time::timeout(
+        Duration::from_secs(10),
+        clock.wait_for_sleepers(tool_due, 2),
+    )
+    .await
+    .expect("the held loop arms its renewal beside the tool");
     clock.advance_to(tool_due).await;
     held.await.expect("the held task ran");
     // A 1 s renewal schedule through a 6 s tool: renewals at each second's

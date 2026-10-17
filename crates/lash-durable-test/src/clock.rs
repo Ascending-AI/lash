@@ -224,6 +224,26 @@ impl SimClock {
         }
     }
 
+    /// Wait until `count` live sleepers wait for exactly `deadline_ms`, so a
+    /// move to that deadline wakes them together. A sleep whose future was
+    /// dropped is not counted.
+    pub async fn wait_for_sleepers(&self, deadline_ms: u64, count: usize) {
+        loop {
+            let registered = self.sleep_registered.notified();
+            let live = self
+                .sleepers
+                .lock_recover()
+                .get(&deadline_ms)
+                .map_or(0, |waiters| {
+                    waiters.iter().filter(|waiter| !waiter.is_closed()).count()
+                });
+            if live >= count {
+                return;
+            }
+            registered.await;
+        }
+    }
+
     pub(crate) async fn wait_until_ms(&self, deadline_ms: u64) {
         let receiver = {
             let (sender, receiver) = tokio::sync::oneshot::channel();
