@@ -123,11 +123,7 @@ fn node_failure_requires_typed_provenance() {
     let legacy = json!({
         "kind": "node",
         "subject": { "type": "process", "process_id": lash_protocol_types::ProcessId::fixture("p1") },
-        "at": {
-            "task": "main",
-            "site": { "unit": { "function": "node-1" }, "path": [] },
-            "occurrence": 1
-        },
+        "at": lash_protocol_types::effect_identity_fixture("node-1", 1),
         "fact": { "kind": "failed", "error": "permission denied" }
     });
     let refusal = serde_json::from_value::<TraceLanguageExecutionPayload>(legacy)
@@ -1007,7 +1003,7 @@ fn published_overlay_schema_accepts_a_folded_overlay_and_enforces_its_row() {
             document: lash_kernel_doc::DocumentId::from_bytes([2; 32]),
             entry: lash_trace::WorkflowDocumentEntry::Main,
         },
-        [lash_protocol_types::effect_identity_fixture("then", 1).site],
+        [lash_protocol_types::effect_identity_fixture("then", 1).position()],
     );
     let overlay = lash_trace::fold_workflow_overlay(None, Some(&document), &records, 1)
         .expect("fold one process execution");

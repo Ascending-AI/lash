@@ -32,7 +32,11 @@ pub(crate) fn start(
             function: missing.0,
         })?;
     let mut heap = match &start.session {
-        Some(session) => PagedHeap::open_header(session.heap, source, EditEpoch(0))?,
+        Some(session) => PagedHeap::open_header(
+            lash_kernel_state::kernel_internals::session_heap(session),
+            source,
+            EditEpoch(0),
+        )?,
         None => PagedHeap::fresh(source, EditEpoch(0)),
     };
     heap.set_data_limits(limits);
@@ -40,10 +44,9 @@ pub(crate) fn start(
     heap.set_family_base(Box::new(
         lash_kernel_state::kernel_internals::family_impl::FrozenBase::default(),
     ));
-    let functions = start
-        .session
-        .as_ref()
-        .map_or_else(empty_root, |session| session.functions);
+    let functions = start.session.as_ref().map_or_else(empty_root, |session| {
+        lash_kernel_state::kernel_internals::session_functions(session)
+    });
     if let Some(session) = &start.session {
         heap.adopt(session)?;
     }
@@ -544,7 +547,10 @@ pub(crate) fn start_census(
 ) -> Result<Box<dyn AllocationCensus>, AccountingFault> {
     restored_census(
         source,
-        start.session.as_ref().map(|session| session.heap),
+        start
+            .session
+            .as_ref()
+            .map(lash_kernel_state::kernel_internals::session_heap),
         memory,
     )
 }

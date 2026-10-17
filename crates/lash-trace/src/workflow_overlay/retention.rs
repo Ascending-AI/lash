@@ -4,7 +4,7 @@ use super::*;
 
 /// The occurrences of one site at or below its watermark.
 pub(super) struct SiteRetention {
-    watermark: u64,
+    watermark: lash_protocol_types::VisitId,
     /// What the occurrences below the watermark folded to.
     archived: WorkflowOverlaySiteState,
     archived_children: SiteChildren,
@@ -15,7 +15,11 @@ pub(super) struct SiteRetention {
 impl SiteRetention {
     /// Evict `occurrence`, the earliest the site retained, as the new
     /// watermark. The occurrence that was the watermark joins the archive.
-    pub(super) fn evict(prior: Option<Self>, occurrence: u64, history: OccurrenceHistory) -> Self {
+    pub(super) fn evict(
+        prior: Option<Self>,
+        occurrence: lash_protocol_types::VisitId,
+        history: OccurrenceHistory,
+    ) -> Self {
         let (archived, archived_children) = match prior {
             Some(mut prior) => {
                 prior.archived.fold(
@@ -65,7 +69,7 @@ impl SiteRetention {
     }
 
     /// Whether `occurrence` has left the site's history.
-    pub(super) fn holds(&self, occurrence: u64) -> bool {
+    pub(super) fn holds(&self, occurrence: lash_protocol_types::VisitId) -> bool {
         occurrence <= self.watermark
     }
 
@@ -75,7 +79,7 @@ impl SiteRetention {
     /// is of an occurrence whose history is gone, and is dropped.
     pub(super) fn observe_late(
         &mut self,
-        occurrence: u64,
+        occurrence: lash_protocol_types::VisitId,
         transition: Transition,
         observation: Observation,
     ) {
@@ -117,7 +121,7 @@ impl WorkflowOverlaySiteState {
     /// moves its start, and a terminal or a branch selection ends it while
     /// it is in flight. Waits and resumes cannot be ordered against what is
     /// gone and change nothing.
-    fn refine(&mut self, occurrence: u64, observation: &Observation) {
+    fn refine(&mut self, occurrence: lash_protocol_types::VisitId, observation: &Observation) {
         use WorkflowOverlayOccurrence as Shown;
         let timestamp = observation.timestamp;
         let started = self.occurrence.start();

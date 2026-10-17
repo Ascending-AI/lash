@@ -68,11 +68,9 @@ pub fn process_language_observation(
 
 /// The label a fixture site was built from
 /// ([`lash_protocol_types::effect_identity_fixture`]).
-fn fixture_label(site: &lash_protocol_types::Site) -> String {
-    match &site.unit {
-        lash_protocol_types::Unit::Function(name) => name.to_string(),
-        _ => site.to_string(),
-    }
+fn fixture_label(site: &lash_protocol_types::PositionLabel) -> String {
+    site.callee_label()
+        .map_or_else(|| site.to_string(), str::to_owned)
 }
 
 /// The label [`process_language_observation`] gave a process observation
@@ -85,14 +83,14 @@ pub fn process_observation_label(event: &crate::ProcessObservationEvent) -> Stri
                     at,
                     fact: lash_trace::TraceNodeFact::Started { .. },
                     ..
-                } => fixture_label(&at.site),
+                } => fixture_label(&at.position()),
                 other => format!("language:{other:?}"),
             }
         }
         crate::ProcessObservationEventPayload::StepBodyStarted(observation) => {
             format!(
                 "step body {} attempt {}",
-                fixture_label(&observation.step.at.site),
+                fixture_label(&observation.step.at.position()),
                 observation.step.attempt
             )
         }

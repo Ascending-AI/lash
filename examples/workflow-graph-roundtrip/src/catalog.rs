@@ -260,7 +260,7 @@ mod tests {
     use std::collections::BTreeMap;
     use std::sync::Arc;
 
-    use lash::workflow::document::{Site, SpawnIdentity, TaskIdentity, Unit};
+    use lash::workflow::document::{Site, Unit};
     use lash::workflow::view::{
         PathSite, PathStep, RanCounts, ReplayPath, RunObservation, ScopeCoverage,
         StatementCoverage, TaskPath, WorkflowCoverage, WorkflowView,
@@ -296,7 +296,7 @@ mod tests {
             .iter()
             .map(|action| StatementCoverage {
                 site: action.site.clone(),
-                runs: count(view.action_node(&action.site).unwrap().ordinal),
+                runs: count(view.action_node(&action.site.position()).unwrap().ordinal),
             })
             .collect();
         actions.sort_by_key(|action| action.site.clone());
@@ -433,15 +433,15 @@ mod tests {
             let replay = ReplayPath {
                 tasks: vec![
                     TaskPath {
-                        task: TaskIdentity::Main,
+                        task: lash::workflow::document::testkit::root_task(),
                         starts: (0..n).rev().chain(0..n).collect(),
                     },
                     TaskPath {
-                        task: TaskIdentity::Spawned(SpawnIdentity {
-                            parent: Arc::new(TaskIdentity::Main),
-                            site: Site::new(unit.clone(), [0]),
-                            occurrence: 0,
-                        }),
+                        task: lash::workflow::document::testkit::spawned_task(
+                            lash::workflow::document::testkit::root_task(),
+                            Site::new(unit.clone(), [0]),
+                            0,
+                        ),
                         starts: (0..n + 1).collect(),
                     },
                 ],

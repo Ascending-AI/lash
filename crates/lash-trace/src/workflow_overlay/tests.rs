@@ -1,12 +1,16 @@
 use chrono::{TimeZone, Utc};
 use lash_kernel_doc::{DocumentId, Name};
-use lash_protocol_types::{ProcessId, SessionId, Site, TaskIdentity, TurnId, Unit};
+use lash_protocol_types::{ProcessId, SessionId, Site, TurnId, Unit};
 
 use super::*;
 use crate::{
     StepBodyStarted, TraceBranchSelection, TraceContext, TraceLanguageExecution,
     WorkflowDocumentEntry,
 };
+
+const VISIT_0: lash_kernel_doc::VisitId = lash_kernel_doc::testkit::visit(0);
+const VISIT_1: lash_kernel_doc::VisitId = lash_kernel_doc::testkit::visit(1);
+const VISIT_2: lash_kernel_doc::VisitId = lash_kernel_doc::testkit::visit(2);
 
 fn subject() -> TraceRuntimeSubject {
     TraceRuntimeSubject::Effect {
@@ -52,19 +56,14 @@ fn reference() -> WorkflowDocumentRef {
 /// The body of the function `node`, as `main` runs it.
 fn site(node: &str) -> WorkflowTaskSite {
     WorkflowTaskSite {
-        site: Site::new(Unit::Function(Name::new(node)), Vec::new()),
-        task: TaskIdentity::Main,
+        site: Site::new(Unit::Function(Name::new(node)), Vec::new()).position(),
+        task: lash_kernel_doc::testkit::root_task(),
     }
 }
 
 /// Occurrence `occurrence` of `site`, outside every loop.
-fn occurrence_at(site: &WorkflowTaskSite, occurrence: u64) -> lash_protocol_types::EffectIdentity {
-    lash_protocol_types::EffectIdentity {
-        task: site.task.clone(),
-        site: site.site.clone(),
-        occurrence,
-        loops: Vec::new(),
-    }
+fn occurrence_at(site: &WorkflowTaskSite, occurrence: u64) -> lash_protocol_types::EffectId {
+    lash_kernel_doc::testkit::effect(site.task.clone(), site.site.clone(), occurrence, Vec::new())
 }
 
 /// A fact about occurrence `occurrence` of the node `node`'s own site.
@@ -93,8 +92,8 @@ fn document() -> WorkflowOverlayDocument {
 
 fn arg_site(node: &str, arg: u32) -> WorkflowTaskSite {
     WorkflowTaskSite {
-        site: Site::new(Unit::Function(Name::new(node)), vec![arg]),
-        task: TaskIdentity::Main,
+        site: Site::new(Unit::Function(Name::new(node)), vec![arg]).position(),
+        task: lash_kernel_doc::testkit::root_task(),
     }
 }
 
@@ -491,11 +490,17 @@ fn two_sites_of_one_node_keep_separate_occurrence_states() {
     let overlay = assert_fold_law(Some(&document()), &records, 8);
     assert!(matches!(
         state(&overlay, &first).occurrence,
-        WorkflowOverlayOccurrence::Completed { occurrence: 1, .. }
+        WorkflowOverlayOccurrence::Completed {
+            occurrence: VISIT_1,
+            ..
+        }
     ));
     assert!(matches!(
         state(&overlay, &second).occurrence,
-        WorkflowOverlayOccurrence::Running { occurrence: 1, .. }
+        WorkflowOverlayOccurrence::Running {
+            occurrence: VISIT_1,
+            ..
+        }
     ));
     assert!(overlay.conflicts.is_empty());
 }
@@ -518,7 +523,7 @@ fn a_branch_selection_records_the_typed_arm_at_its_site() {
     assert!(matches!(
         branch.occurrence,
         WorkflowOverlayOccurrence::Completed {
-            occurrence: 1,
+            occurrence: VISIT_1,
             start: None,
             ..
         }
@@ -594,7 +599,7 @@ fn a_step_body_start_binds_its_occurrence_to_the_call_and_a_retry_keeps_both() {
     assert_eq!(
         bound.call,
         Some(WorkflowOverlayCall {
-            occurrence: 1,
+            occurrence: VISIT_1,
             call_id: lash_protocol_types::ToolCallId::fixture("call-1"),
             attempt: Some(2),
         })
@@ -603,7 +608,10 @@ fn a_step_body_start_binds_its_occurrence_to_the_call_and_a_retry_keeps_both() {
     assert_eq!(bound.summary.started_count, 1);
     assert!(matches!(
         bound.occurrence,
-        WorkflowOverlayOccurrence::Completed { occurrence: 1, .. }
+        WorkflowOverlayOccurrence::Completed {
+            occurrence: VISIT_1,
+            ..
+        }
     ));
     assert_eq!(bound.occurrence.duration_ms(), Some(2_000));
     assert!(overlay.conflicts.is_empty(), "two attempts are two facts");
@@ -611,7 +619,10 @@ fn a_step_body_start_binds_its_occurrence_to_the_call_and_a_retry_keeps_both() {
     let only_started = fold(None, std::slice::from_ref(&first)).expect("body start alone");
     assert!(matches!(
         state(&only_started, &then).occurrence,
-        WorkflowOverlayOccurrence::Running { occurrence: 1, .. }
+        WorkflowOverlayOccurrence::Running {
+            occurrence: VISIT_1,
+            ..
+        }
     ));
 
     let refused = fold(
@@ -690,7 +701,7 @@ fn a_committed_terminal_settles_without_a_finish_and_is_never_reopened() {
     assert!(matches!(
         state(&snapshot_only, &site("branch")).occurrence,
         WorkflowOverlayOccurrence::Incomplete {
-            occurrence: 1,
+            occurrence: VISIT_1,
             settled_at: None,
             terminal: WorkflowOverlayTerminal::Cancelled,
             ..
@@ -711,7 +722,10 @@ fn a_committed_terminal_settles_without_a_finish_and_is_never_reopened() {
     );
     assert!(matches!(
         state(&settled, &site("branch")).occurrence,
-        WorkflowOverlayOccurrence::Cancelled { occurrence: 1, .. }
+        WorkflowOverlayOccurrence::Cancelled {
+            occurrence: VISIT_1,
+            ..
+        }
     ));
     assert_eq!(
         state(&settled, &site("then")).occurrence,
@@ -759,7 +773,7 @@ fn a_committed_terminal_settles_without_a_finish_and_is_never_reopened() {
         assert_eq!(overlay.status, terminal.execution_status());
         assert!(matches!(
             state(&overlay, &site("branch")).occurrence,
-            WorkflowOverlayOccurrence::Incomplete { occurrence: 1, terminal: category, .. }
+            WorkflowOverlayOccurrence::Incomplete { occurrence: VISIT_1, terminal: category, .. }
                 if category == terminal
         ));
     }
@@ -840,7 +854,10 @@ fn a_terminal_never_downgrades_and_the_next_occurrence_is_visible() {
     let branch = state(&overlay, &site("branch"));
     assert!(matches!(
         branch.occurrence,
-        WorkflowOverlayOccurrence::Running { occurrence: 2, .. }
+        WorkflowOverlayOccurrence::Running {
+            occurrence: VISIT_2,
+            ..
+        }
     ));
     assert_eq!(branch.summary.retained_occurrences, 2);
     assert_eq!(branch.summary.terminal_count, 1);
@@ -898,7 +915,10 @@ fn per_site_history_is_bounded_with_a_canonical_watermark() {
     assert_eq!(state_a.summary.retained_occurrences, 2);
     assert!(matches!(
         state_a.occurrence,
-        WorkflowOverlayOccurrence::Running { occurrence: 2, .. }
+        WorkflowOverlayOccurrence::Running {
+            occurrence: VISIT_2,
+            ..
+        }
     ));
     for site in [&a, &z] {
         let retained = overlay
@@ -906,9 +926,9 @@ fn per_site_history_is_bounded_with_a_canonical_watermark() {
             .iter()
             .filter_map(|item| item.identity.at())
             .filter(|at| WorkflowTaskSite::of(at) == *site)
-            .map(|at| at.occurrence)
+            .map(|at| at.visit())
             .collect::<BTreeSet<_>>();
-        assert_eq!(retained, BTreeSet::from([2]));
+        assert_eq!(retained, BTreeSet::from([VISIT_2]));
     }
     assert_eq!(
         overlay
@@ -916,7 +936,7 @@ fn per_site_history_is_bounded_with_a_canonical_watermark() {
             .iter()
             .map(|retention| (&retention.site, retention.truncation_watermark))
             .collect::<Vec<_>>(),
-        vec![(&z, 1), (&a, 1)]
+        vec![(&z, VISIT_1), (&a, VISIT_1)]
     );
     let evicted = &overlay.retention[1];
     assert_eq!(evicted.archived, WorkflowOverlaySiteState::default());
@@ -943,9 +963,9 @@ fn the_default_limit_retains_the_latest_occurrence_and_summary() {
     assert_eq!(branch.summary.retained_occurrences, limit + 1);
     assert!(matches!(
         branch.occurrence,
-        WorkflowOverlayOccurrence::Running { occurrence, .. } if occurrence == limit + 1
+        WorkflowOverlayOccurrence::Running { occurrence, .. } if occurrence == lash_kernel_doc::testkit::visit(limit + 1)
     ));
-    assert_eq!(overlay.retention[0].truncation_watermark, 1);
+    assert_eq!(overlay.retention[0].truncation_watermark, VISIT_1);
 }
 
 /// A wait is dated by its record, names what it awaits, and is resolved only
@@ -968,7 +988,7 @@ fn a_wait_keeps_its_awaited_identity_and_resolves_only_its_own_occurrence() {
     assert_eq!(
         state(&parked, &site("branch")).occurrence,
         WorkflowOverlayOccurrence::Waiting {
-            occurrence: 1,
+            occurrence: VISIT_1,
             start: Some(at(1_000)),
             since: at(2_000),
             awaited: sleep.clone(),
@@ -995,7 +1015,7 @@ fn a_wait_keeps_its_awaited_identity_and_resolves_only_its_own_occurrence() {
     assert_eq!(
         state(&two, &site("branch")).occurrence,
         WorkflowOverlayOccurrence::Waiting {
-            occurrence: 2,
+            occurrence: VISIT_2,
             start: None,
             since: at(2_500),
             awaited: signal,
@@ -1037,7 +1057,7 @@ fn a_cancellation_changes_only_an_observed_in_flight_occurrence() {
     assert_eq!(
         state(&overlay, &site("branch")).occurrence,
         WorkflowOverlayOccurrence::Cancelled {
-            occurrence: 1,
+            occurrence: VISIT_1,
             start: Some(at(1_000)),
             end: at(2_000),
         }
@@ -1201,7 +1221,7 @@ fn a_second_wait_of_one_occurrence_is_its_own_observation() {
     assert_eq!(
         state(&parked, &site("branch")).occurrence,
         WorkflowOverlayOccurrence::Waiting {
-            occurrence: 1,
+            occurrence: VISIT_1,
             start: Some(at(1_000)),
             since: at(4_000),
             awaited: signal,
@@ -1233,7 +1253,10 @@ fn a_second_wait_of_one_occurrence_is_its_own_observation() {
     .expect("second resume");
     assert!(matches!(
         state(&resumed, &site("branch")).occurrence,
-        WorkflowOverlayOccurrence::Running { occurrence: 1, .. }
+        WorkflowOverlayOccurrence::Running {
+            occurrence: VISIT_1,
+            ..
+        }
     ));
 }
 
@@ -1352,11 +1375,11 @@ fn a_snapshot_costs_what_it_retains_and_an_append_one_occurrence() {
 /// reaches it.
 fn element_site(element: u64) -> WorkflowTaskSite {
     WorkflowTaskSite {
-        task: TaskIdentity::Spawned(lash_protocol_types::SpawnIdentity {
-            parent: std::sync::Arc::new(TaskIdentity::Main),
-            site: site("branch").site,
-            occurrence: element,
-        }),
+        task: lash_kernel_doc::testkit::spawned_task(
+            lash_kernel_doc::testkit::root_task(),
+            site("branch").site,
+            element,
+        ),
         ..site("then")
     }
 }
@@ -1402,15 +1425,24 @@ fn a_fan_out_keeps_one_row_for_each_elements_run_of_a_site() {
     assert_eq!(rows, vec![&done.task, &failed.task, &running.task]);
     assert!(matches!(
         state(&overlay, &done).occurrence,
-        WorkflowOverlayOccurrence::Completed { occurrence: 0, .. }
+        WorkflowOverlayOccurrence::Completed {
+            occurrence: VISIT_0,
+            ..
+        }
     ));
     assert!(matches!(
         state(&overlay, &failed).occurrence,
-        WorkflowOverlayOccurrence::Failed { occurrence: 0, .. }
+        WorkflowOverlayOccurrence::Failed {
+            occurrence: VISIT_0,
+            ..
+        }
     ));
     assert!(matches!(
         state(&overlay, &running).occurrence,
-        WorkflowOverlayOccurrence::Running { occurrence: 0, .. }
+        WorkflowOverlayOccurrence::Running {
+            occurrence: VISIT_0,
+            ..
+        }
     ));
 }
 

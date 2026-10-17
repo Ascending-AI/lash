@@ -161,7 +161,7 @@ pub struct KernelRecordedSettings {
         with = "observe_level",
         skip_serializing_if = "observe_level::is_off"
     )]
-    pub observe: lash_kernel_vm::Observe,
+    pub observe: lash_kernel_vm::ObservationMode,
 }
 
 /// Engine settings that cannot decode as kernel recorded settings.
@@ -185,13 +185,13 @@ impl KernelRecordedSettings {
             live_tasks: bounds.live_tasks,
             requests_per_park: bounds.requests_per_park,
             join_members: bounds.join_members,
-            observe: lash_kernel_vm::Observe::Off,
+            observe: lash_kernel_vm::ObservationMode::Off,
         }
     }
 
     /// These settings observed at `observe`.
     #[must_use]
-    pub fn observing(mut self, observe: lash_kernel_vm::Observe) -> Self {
+    pub fn observing(mut self, observe: lash_kernel_vm::ObservationMode) -> Self {
         self.observe = observe;
         self
     }
@@ -219,24 +219,26 @@ impl KernelRecordedSettings {
     #[must_use]
     pub fn observed(
         settings: Option<&lash_execution_contracts::process::EngineSettings>,
-    ) -> lash_kernel_vm::Observe {
+    ) -> lash_kernel_vm::ObservationMode {
         settings
             .and_then(|settings| serde_json::from_value::<Self>(settings.value().clone()).ok())
-            .map_or(lash_kernel_vm::Observe::Off, |settings| settings.observe)
+            .map_or(lash_kernel_vm::ObservationMode::Off, |settings| {
+                settings.observe
+            })
     }
 }
 
 /// The recorded spelling of an observation level: `"off"` or `"counts"`.
 mod observe_level {
-    use lash_kernel_vm::Observe;
+    use lash_kernel_vm::ObservationMode;
     use serde::{Deserialize, Deserializer, Serializer};
 
     #[expect(
         clippy::trivially_copy_pass_by_ref,
         reason = "serde's skip_serializing_if passes a reference"
     )]
-    pub(super) fn is_off(observe: &Observe) -> bool {
-        *observe == Observe::Off
+    pub(super) fn is_off(observe: &ObservationMode) -> bool {
+        *observe == ObservationMode::Off
     }
 
     #[expect(
@@ -244,21 +246,21 @@ mod observe_level {
         reason = "serde's serialize_with passes a reference"
     )]
     pub(super) fn serialize<S: Serializer>(
-        observe: &Observe,
+        observe: &ObservationMode,
         serializer: S,
     ) -> Result<S::Ok, S::Error> {
         serializer.serialize_str(match observe {
-            Observe::Off => "off",
-            Observe::Counts => "counts",
+            ObservationMode::Off => "off",
+            ObservationMode::Counts => "counts",
         })
     }
 
     pub(super) fn deserialize<'de, D: Deserializer<'de>>(
         deserializer: D,
-    ) -> Result<Observe, D::Error> {
+    ) -> Result<ObservationMode, D::Error> {
         match String::deserialize(deserializer)?.as_str() {
-            "off" => Ok(Observe::Off),
-            "counts" => Ok(Observe::Counts),
+            "off" => Ok(ObservationMode::Off),
+            "counts" => Ok(ObservationMode::Counts),
             other => Err(serde::de::Error::unknown_variant(other, &["off", "counts"])),
         }
     }
@@ -655,7 +657,7 @@ impl lash_execution_contracts::process::ProcessEngine for KernelProcessEngine {
                 if kind.0 == KERNEL_RUN_STEP =>
             {
                 serde_json::from_str::<state::KernelRunOutput>(material.payload())
-                    .map(|output| output.observed().ran.clone())
+                    .map(|output| output.observed().ran.iter().copied().collect())
                     .unwrap_or_default()
             }
             _ => Vec::new(),

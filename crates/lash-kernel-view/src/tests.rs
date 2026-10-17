@@ -577,14 +577,14 @@ fn coverage_keeps_off_and_missing_observation_distinct_from_zero() {
 #[test]
 fn a_replayed_path_maps_statement_and_scope_steps_in_task_order() {
     use crate::{PathSite, ReplayPath, TaskPath, path};
-    use lash_kernel_doc::{SpawnIdentity, TaskIdentity};
+
     let document = parse_document("kernel 1\nnumbers float\nentry demo() -> Any\nfn demo() { if true {} return null }\nmain { finish null }\n").unwrap();
     let unit = Unit::Function(Name::new("demo"));
-    let spawned = TaskIdentity::Spawned(SpawnIdentity {
-        parent: std::sync::Arc::new(TaskIdentity::Main),
-        site: site("demo", &[0]),
-        occurrence: 0,
-    });
+    let spawned = lash_kernel_doc::testkit::spawned_task(
+        lash_kernel_doc::testkit::root_task(),
+        site("demo", &[0]),
+        0,
+    );
     let steps = path(
         &document,
         &unit,
@@ -595,7 +595,7 @@ fn a_replayed_path_maps_statement_and_scope_steps_in_task_order() {
                     starts: vec![3, 4, 5, 6],
                 },
                 TaskPath {
-                    task: TaskIdentity::Main,
+                    task: lash_kernel_doc::testkit::root_task(),
                     starts: vec![3, 4, 4, 6],
                 },
             ],
@@ -642,7 +642,7 @@ fn a_replayed_path_maps_statement_and_scope_steps_in_task_order() {
     assert!(
         steps[5..]
             .iter()
-            .all(|step| step.task == TaskIdentity::Main)
+            .all(|step| step.task == lash_kernel_doc::testkit::root_task())
     );
 }
 
@@ -739,7 +739,7 @@ fn the_view_lists_nested_actions_in_issue_order_and_their_arguments_edit_in_plac
         listed(&view, &[1]),
         [at(&[1, 0, 0, 0]), at(&[1, 0, 0]), at(&[1, 0, 1])]
     );
-    assert_eq!(listed(&view, &[2]), []);
+    assert_eq!(listed(&view, &[2]), Vec::<Site>::new());
     assert_eq!(listed(&view, &[2, 0, 0, 0]), [at(&[2, 0, 0, 0, 0])]);
     let issued: Vec<Site> = view
         .statements

@@ -303,7 +303,7 @@ async fn approve(case: &mut Case, node: &str, delivery: &Value) -> Result<()> {
 
 /// A site as the overlay and the feed spell it.
 fn spelled(site: &Site) -> Result<Value> {
-    Ok(serde_json::to_value(site)?)
+    Ok(serde_json::to_value(site.position())?)
 }
 
 /// What one site of the document must show to a follower that attached
@@ -428,21 +428,30 @@ fn check_followed(observed: &Value, shape: &Shape, run: &Followed<'_>) -> Result
     // one task of the run, and never one of the catch clause, which no run
     // entered.
     let listed = overlay["sites"].as_array().cloned().unwrap_or_default();
-    let known: BTreeSet<String> = document_sites
+    let known: BTreeMap<_, Site> = document_sites
         .as_array()
         .into_iter()
         .flatten()
-        .map(|site| site["site"].to_string())
-        .collect();
+        .map(|row| {
+            serde_json::from_value::<Site>(row["site"].clone()).map(|site| (site.position(), site))
+        })
+        .collect::<std::result::Result<_, _>>()?;
     for entry in &listed {
+        let position: lash::workflow::document::PositionLabel =
+            serde_json::from_value(entry["site"]["site"].clone())?;
+        let task: lash::workflow::document::TaskLabel =
+            serde_json::from_value(entry["site"]["task"].clone())?;
         ensure!(
-            known.contains(&entry["site"]["site"].to_string()) && entry["site"]["task"] == "main",
+            known.contains_key(&position)
+                && lash::workflow::document::ObservationReader::task_is_root(&task),
             "the overlay lists a site the document lacks: {}",
             entry["site"]
         );
-        let site: Site = serde_json::from_value(entry["site"]["site"].clone())?;
+        let site = known
+            .get(&position)
+            .context("the overlay names a document site")?;
         ensure!(
-            !within(&site, &shape.catch_body),
+            !within(site, &shape.catch_body),
             "the overlay invents no execution of the catch clause: {entry}"
         );
     }
@@ -451,7 +460,7 @@ fn check_followed(observed: &Value, shape: &Shape, run: &Followed<'_>) -> Result
         "the overlay lists the sites the run reached after the attach: {listed:?}"
     );
 
-    let (outer, inner) = (spelled(&shape.outer)?, spelled(&shape.inner)?);
+    let (outer, inner) = (shape.outer.position(), shape.inner.position());
     for site in &expected {
         // Per-site occurrences, counted from 0: the latest is the last the
         // order causes, and the counts are the ones that ended, and
@@ -465,7 +474,8 @@ fn check_followed(observed: &Value, shape: &Shape, run: &Followed<'_>) -> Result
         let started = if site.start_seen { seen } else { seen - 1 };
         ensure!(
             entry["status"] == "completed"
-                && entry["occurrence"] == site.total - 1
+                && entry["occurrence"]
+                    == json!(lash::workflow::document::testkit::visit(site.total - 1))
                 && entry["summary"]["terminal_count"] == seen
                 && entry["summary"]["started_count"] == started,
             "the {} site ends at occurrence {} with {seen} ended and {started} started: {entry}",
@@ -481,26 +491,31 @@ fn check_followed(observed: &Value, shape: &Shape, run: &Followed<'_>) -> Result
                 Some("step_body_started") => &item["step"]["at"],
                 _ => continue,
             };
-            if fact["site"] != at_site {
+            let at: lash::workflow::document::EffectId = serde_json::from_value(fact.clone())?;
+            if at.position() != site.site {
                 continue;
             }
-            ensure!(fact["task"] == "main", "the run has one task: {fact}");
-            let run = fact["occurrence"].as_u64().context("an occurrence")? + 1;
+            ensure!(
+                lash::workflow::document::ObservationReader::is_root_task(&at),
+                "the run has one task: {fact}"
+            );
+            let counts = lash::workflow::document::ObservationReader::counts(&at);
+            let run = counts.starts;
             ensure!(
                 (site.first_seen..=site.total).contains(&run),
                 "the {} site reports run {run} after the attach: {fact}",
                 site.name
             );
-            let loops = fact["loops"].as_array().cloned().unwrap_or_default();
+            let loops = counts.loops;
             match (site.line)(run) {
                 Some(line) => {
                     let line = &lines[line];
                     ensure!(
                         loops
-                            == [
-                                json!({"site": outer, "iteration": line.outer - 1}),
-                                json!({"site": inner, "iteration": line.inner - 1}),
-                            ],
+                            .iter()
+                            .map(|entry| (&entry.position, entry.entries))
+                            .collect::<Vec<_>>()
+                            == [(&outer, line.outer), (&inner, line.inner)],
                         "run {run} of the {} site is on outer iteration {} and inner iteration {}: {fact}",
                         site.name,
                         line.outer - 1,
@@ -522,7 +537,10 @@ fn check_followed(observed: &Value, shape: &Shape, run: &Followed<'_>) -> Result
         .context("the review site")?;
     ensure!(
         review["call"]["call_id"] == last_review["call_id"]
-            && review["call"]["occurrence"] == expected[0].total - 1,
+            && review["call"]["occurrence"]
+                == json!(lash::workflow::document::testkit::visit(
+                    expected[0].total - 1
+                )),
         "the review site is bound to the call that ran: {review}"
     );
     Ok(())
@@ -818,7 +836,7 @@ async fn s38(case: &mut Case) -> Result<()> {
             // wait, which the run's row answers), bound to its call, and
             // still says it missed the start.
             let shape = if edited { &new_shape } else { &old_shape };
-            let review = json!({"site": spelled(&shape.review)?, "task": "main"});
+            let review = json!({"site": spelled(&shape.review)?, "task": lash::workflow::document::testkit::root_task()});
             let host = case.node("node-b")?;
             let observer = &observers[name];
             let waiting = case
@@ -831,7 +849,8 @@ async fn s38(case: &mut Case) -> Result<()> {
                         .any(|entry| {
                             entry["site"] == review
                                 && entry["status"] == "running"
-                                && entry["occurrence"] == nth as u64
+                                && entry["occurrence"]
+                                    == json!(lash::workflow::document::testkit::visit(nth as u64))
                                 && entry["call"]["call_id"] == delivery["call_id"]
                         });
                     Ok(shown.then_some(observed))

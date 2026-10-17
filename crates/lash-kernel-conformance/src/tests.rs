@@ -365,7 +365,9 @@ fn expected_effect_sites_address_document_actions() {
                     _ => panic!("{}: expected effect site is not a perform", case.name),
                 };
                 assert_eq!(actual.as_str(), effect);
-                if let lash_kernel_doc::TaskIdentity::Spawned(spawn) = &identity.task {
+                if let lash_kernel_doc::kernel_internals::TaskIdentity::Spawned(spawn) =
+                    &identity.task
+                {
                     assert!(matches!(
                         document.node(&spawn.site),
                         Some(lash_kernel_doc::Node::Action(

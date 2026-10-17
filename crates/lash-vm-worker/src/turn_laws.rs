@@ -309,7 +309,7 @@ fn turn(parent: &mut Parent, bounds: RunBounds) {
                         panic!("the cell performs effects")
                     };
                     deliveries.push(Delivery {
-                        wait: effect.wait.0,
+                        wait: effect.wait,
                         outcome: wire::encode(
                             PayloadKind::Outcome,
                             &OutcomeWire::from(Outcome::Completed(Datum::Null)),

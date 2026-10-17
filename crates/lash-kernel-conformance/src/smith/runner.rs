@@ -12,7 +12,7 @@ use super::{Smith, library};
 use crate::HarnessError;
 
 use crate::projection::Projector;
-use lash_kernel_vm::conformance::Checkpoint;
+use lash_kernel_vm::kernel_internals::conformance::Checkpoint;
 
 /// Full observation at one return, including the canonical state at slices
 /// and parks. Code caches and host cancellation probes are not observations.

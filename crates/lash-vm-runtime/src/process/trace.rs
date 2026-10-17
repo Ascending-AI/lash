@@ -8,7 +8,7 @@
 //! function of the process and the identity: a repeat is the same fact.
 
 use lash_core::plugin::PluginExecutionTrace;
-use lash_kernel_doc::EffectIdentity;
+use lash_kernel_doc::EffectId;
 use lash_trace::{
     TraceContext, TraceEvent, TraceLanguageExecution, TraceLanguageExecutionFailure,
     TraceLanguageExecutionIdentity, TraceLanguageExecutionPayload, TraceLanguageExecutionStatus,
@@ -85,7 +85,7 @@ impl ProcessTrace {
         });
     }
 
-    pub(super) fn node(&self, at: &EffectIdentity, fact: TraceNodeFact) {
+    pub(super) fn node(&self, at: &EffectId, fact: TraceNodeFact) {
         self.emit(TraceLanguageExecutionPayload::Node {
             subject: self.subject(),
             at: at.clone(),
@@ -152,13 +152,13 @@ impl ProcessTrace {
 
     /// One live delta of the segment that started at `segment`, its
     /// `frame`th: a recomputed segment reports the same facts.
-    pub(super) fn ran(&self, segment: &str, frame: u64, delta: &lash_kernel_vm::RanDelta) {
+    pub(super) fn ran(&self, segment: &str, frame: u64, delta: &lash_kernel_vm::SiteCounts) {
         self.emit(TraceLanguageExecutionPayload::Counts {
             counts: lash_trace::TraceCountObservation::Process(lash_trace::TraceProcessCounts {
                 process_id: self.process_id.clone(),
                 segment: segment.to_owned(),
                 frame,
-                delta: delta.clone(),
+                delta: delta.iter().copied().collect(),
             }),
         });
     }
@@ -194,7 +194,7 @@ impl ProcessTrace {
                 };
                 (
                     format!("node:{occurrence}:{transition}"),
-                    Some(at.site.to_string()),
+                    Some(at.position().to_string()),
                 )
             }
         };

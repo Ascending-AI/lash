@@ -60,8 +60,8 @@ use lash_execution_contracts::backend::Backend;
 use lash_kernel_doc::graph_tokens::encode_body;
 use lash_kernel_doc::heap::PageId;
 use lash_kernel_doc::{
-    Datum, EffectIdentity, ErrorDatum, FunctionRegistry, Handle, Integer, Name, NumberPolicy,
-    NumberToken, Site, SpawnIdentity, TaskIdentity, Timestamp, Unit, parse_document,
+    Datum, EffectId, ErrorDatum, FunctionRegistry, Handle, Integer, Name, NumberPolicy,
+    NumberToken, Site, Timestamp, Unit, parse_document,
 };
 use lash_kernel_state::paged::{PageBody, PageKind, PageSource as _, SessionRoot};
 use lash_kernel_vm::{Bounds, EffectRequest, End, Host, Outcome, Program, Request, Target};
@@ -191,26 +191,26 @@ fn page_plan() -> PagePlan {
 
 /// The identity of worker `index`'s `perform`: the task the `index`th run
 /// of `main`'s spawn started, at the one `perform` of its function.
-fn worker_identity(index: u64) -> EffectIdentity {
-    EffectIdentity {
-        task: TaskIdentity::Spawned(SpawnIdentity {
-            parent: Arc::new(TaskIdentity::Main),
-            site: Site::new(Unit::Main, [1, 1, 0, 0]),
-            occurrence: index,
-        }),
-        site: Site::new(Unit::Function(Name::new("worker")), [0, 0, 0, 0]),
-        occurrence: 0,
-        loops: Vec::new(),
-    }
+fn worker_identity(index: u64) -> EffectId {
+    lash_kernel_doc::testkit::effect(
+        lash_kernel_doc::testkit::spawned_task(
+            lash_kernel_doc::testkit::root_task(),
+            Site::new(Unit::Main, [1, 1, 0, 0]),
+            index,
+        ),
+        Site::new(Unit::Function(Name::new("worker")), [0, 0, 0, 0]),
+        0,
+        Vec::new(),
+    )
 }
 
-fn sum_identity() -> EffectIdentity {
-    EffectIdentity {
-        task: TaskIdentity::Main,
-        site: Site::new(Unit::Main, [5, 0, 0, 0]),
-        occurrence: 0,
-        loops: Vec::new(),
-    }
+fn sum_identity() -> EffectId {
+    lash_kernel_doc::testkit::effect(
+        lash_kernel_doc::testkit::root_task(),
+        Site::new(Unit::Main, [5, 0, 0, 0]),
+        0,
+        Vec::new(),
+    )
 }
 
 /// The law's one argument projection: a perform's arguments as the JSON
@@ -319,7 +319,7 @@ struct Shared {
     tokens: AtomicUsize,
     /// Every admission the parent drafted: the effect's identity, its call
     /// and the request it was admitted over.
-    admissions: Mutex<Vec<(EffectIdentity, ToolCallId, String)>>,
+    admissions: Mutex<Vec<(EffectId, ToolCallId, String)>>,
     ends: Mutex<Vec<Datum>>,
     /// Law violations an activation found itself.
     violations: Mutex<Vec<String>>,
@@ -452,7 +452,7 @@ impl Scenario for ParkScenario {
             }
         }
         let admissions = self.shared.admissions.lock().expect("admissions").clone();
-        let mut calls: BTreeMap<EffectIdentity, ToolCallId> = BTreeMap::new();
+        let mut calls: BTreeMap<EffectId, ToolCallId> = BTreeMap::new();
         for (identity, call, _) in &admissions {
             let first = calls
                 .entry(identity.clone())
@@ -481,7 +481,7 @@ impl Scenario for ParkScenario {
                 Vec::new()
             }
         };
-        let identities: Vec<EffectIdentity> = (0..WORKERS)
+        let identities: Vec<EffectId> = (0..WORKERS)
             .map(worker_identity)
             .chain([sum_identity()])
             .collect();
@@ -763,7 +763,7 @@ async fn two_orders(
         if written.as_ref() != Some(expected) {
             shared.violation(format!(
                 "numbers: wait {} arrived as {written:?}, not as written: {expected:?}",
-                outcome.wait.0
+                outcome.wait
             ));
         }
     }

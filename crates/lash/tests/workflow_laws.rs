@@ -889,8 +889,11 @@ async fn stored_sleep_waits_name_the_sleep_site_and_each_loop_occurrence() {
             .site
             .as_ref()
             .expect("a sleeping workflow names its site");
-        assert_eq!(at.site, sleep.site);
-        assert_eq!(at.occurrence, occurrence as u64);
+        assert_eq!(at.position(), sleep.site);
+        assert_eq!(
+            at.visit(),
+            lash::workflow::document::testkit::visit(occurrence as u64)
+        );
     }
     let mut overlay = lash::workflow::ProcessWorkflowOverlayAccumulator::new(process.clone());
     for event in &events {
@@ -903,7 +906,10 @@ async fn stored_sleep_waits_name_the_sleep_site_and_each_loop_occurrence() {
                 .iter()
                 .find(|row| row.at == *at)
                 .expect("waiting row");
-            assert_eq!(row.occurrences, at.occurrence + 1);
+            assert_eq!(
+                row.occurrences,
+                lash_protocol_types::ObservationReader::counts(at).starts
+            );
             assert_eq!(
                 row.state,
                 lash::workflow::ProcessWorkflowSiteState::Waiting {
@@ -918,7 +924,7 @@ async fn stored_sleep_waits_name_the_sleep_site_and_each_loop_occurrence() {
         let row = overlay
             .sites
             .iter()
-            .find(|row| &row.at.site == site)
+            .find(|row| &row.at.position() == site)
             .expect("site in stored fold");
         assert_eq!(row.occurrences, 2);
         let entered = events
@@ -926,10 +932,10 @@ async fn stored_sleep_waits_name_the_sleep_site_and_each_loop_occurrence() {
             .find(|event| match &event.fact {
                 lash::process::ProcessLifecycleFact::Waiting { wait }
                 | lash::process::ProcessLifecycleFact::Resumed { wait } => {
-                    wait.execution_site().is_ok_and(|at| &at.site == site)
+                    wait.execution_site().is_ok_and(|at| &at.position() == site)
                 }
                 lash::process::ProcessLifecycleFact::EffectOutcome(outcome) => {
-                    &outcome.at.site == site
+                    &outcome.at.position() == site
                 }
                 _ => false,
             })
@@ -940,10 +946,10 @@ async fn stored_sleep_waits_name_the_sleep_site_and_each_loop_occurrence() {
             .find(|event| match &event.fact {
                 lash::process::ProcessLifecycleFact::Resumed { wait } => {
                     matches!(wait.kind, lash::process::WaitKind::Sleep { .. })
-                        && wait.execution_site().is_ok_and(|at| &at.site == site)
+                        && wait.execution_site().is_ok_and(|at| &at.position() == site)
                 }
                 lash::process::ProcessLifecycleFact::EffectOutcome(outcome) => {
-                    &outcome.at.site == site
+                    &outcome.at.position() == site
                 }
                 _ => false,
             })
@@ -1056,9 +1062,9 @@ main { finish null }
                 fact: lash_trace::TraceNodeFact::Started { .. },
                 ..
             } = &observation.execution.payload
-                && at.site == call.site
+                && at.position() == call.site
             {
-                entries.insert(at.occurrence);
+                entries.insert(at.visit());
                 let state = overlay.snapshot();
                 assert!(
                     state.current_sites.contains(at),
@@ -1067,15 +1073,22 @@ main { finish null }
                 let [row] = state.sites.as_slice() else {
                     panic!("one site");
                 };
-                assert_eq!(row.occurrences, at.occurrence + 1);
+                assert_eq!(
+                    row.occurrences,
+                    lash_protocol_types::ObservationReader::counts(at).starts
+                );
                 assert_eq!(row.state, ProcessWorkflowSiteState::Running);
             }
-            if entries.contains(&1) {
+            if entries.contains(&lash::workflow::document::testkit::visit(1)) {
                 break;
             }
         }
     }
-    assert_eq!(entries.last(), Some(&1), "the last entry is named");
+    assert_eq!(
+        entries.last(),
+        Some(&lash::workflow::document::testkit::visit(1)),
+        "the last entry is named"
+    );
     core.shutdown().await.expect("shutdown");
 }
 
@@ -1206,15 +1219,12 @@ async fn a_fan_out_overlay_holds_one_row_for_each_elements_effect() {
         assert!(
             matches!(
                 row.state.occurrence,
-                WorkflowOverlayOccurrence::Completed { occurrence: 0, .. }
+                WorkflowOverlayOccurrence::Completed { occurrence, .. } if occurrence == lash::workflow::document::testkit::visit(0)
             ),
             "each element ran the site once, as its occurrence 0: {row:#?}"
         );
         assert!(
-            matches!(
-                row.site.task,
-                lash::workflow::document::TaskIdentity::Spawned(_)
-            ),
+            !lash::workflow::document::ObservationReader::task_is_root(&row.site.task),
             "an element's effect belongs to its spawned task: {row:#?}"
         );
     }

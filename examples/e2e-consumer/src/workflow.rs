@@ -1295,17 +1295,21 @@ mod tests {
             // document's threshold reviews.
             let ran: Document = serde_json::from_value(publication["workflow"]["document"].clone())
                 .expect("the published document");
-            let review =
-                serde_json::to_value(one(&ran, "review", |node| performs(node, "review.request")))
-                    .expect("a site");
+            let review = serde_json::to_value(
+                one(&ran, "review", |node| performs(node, "review.request")).position(),
+            )
+            .expect("a site");
             let listed = overlay["sites"].as_array().expect("the overlay's sites");
             let known = publication["workflow"]["execution_sites"]
                 .as_array()
                 .expect("the document's execution sites");
             assert!(
-                listed
-                    .iter()
-                    .all(|row| known.iter().any(|site| site["site"] == row["site"]["site"])),
+                listed.iter().all(|row| known.iter().any(|site| {
+                    let site: lash::workflow::document::Site =
+                        serde_json::from_value(site["site"].clone()).expect("document site");
+                    serde_json::to_value(site.position()).expect("position token")
+                        == row["site"]["site"]
+                })),
                 "the {key} overlay lists only its document's sites: {listed:?}"
             );
             let reviews = approved.as_array().map_or(0, Vec::len);
@@ -1315,7 +1319,10 @@ mod tests {
                 .expect("the overlay lists the review site");
             assert!(
                 row["status"] == "completed"
-                    && row["occurrence"] == reviews - 1
+                    && row["occurrence"]
+                        == json!(lash::workflow::document::testkit::visit(
+                            (reviews - 1) as u64
+                        ))
                     && row["summary"]["terminal_count"] == reviews,
                 "the {key} review site ran once for each reviewed line: {row}"
             );

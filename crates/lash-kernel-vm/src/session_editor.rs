@@ -56,7 +56,11 @@ impl SessionEditor {
         source: Box<dyn PageSource>,
     ) -> Result<Self, HeapFault> {
         let mut heap = match session {
-            Some(session) => PagedHeap::open_header(session.heap, source, EditEpoch(0))?,
+            Some(session) => PagedHeap::open_header(
+                lash_kernel_state::kernel_internals::session_heap(session),
+                source,
+                EditEpoch(0),
+            )?,
             None => PagedHeap::fresh(source, EditEpoch(0)),
         };
         let census = Census::restore(heap.certificate(), EDIT_BOUND)
@@ -64,7 +68,10 @@ impl SessionEditor {
         heap.set_census(Box::new(census))?;
         heap.set_family_base(Box::new(FrozenBase::default()));
         let (bindings, functions) = match session {
-            Some(session) => (Tree::of_keyed(&heap.adopt(session)?), session.functions),
+            Some(session) => (
+                Tree::of_keyed(&heap.adopt(session)?),
+                lash_kernel_state::kernel_internals::session_functions(session),
+            ),
             None => (Tree::new(false), KeyedRoot::Empty),
         };
         Ok(Self {
@@ -106,10 +113,12 @@ impl SessionEditor {
         older: Option<&SessionRoot>,
         newer: &SessionRoot,
     ) -> Result<BTreeMap<Name, (bool, bool)>, HeapFault> {
-        let older = Tree::<BindingRecord>::of_keyed(
-            &older.map_or(KeyedRoot::Empty, |older| older.bindings),
+        let older = Tree::<BindingRecord>::of_keyed(&older.map_or(KeyedRoot::Empty, |older| {
+            lash_kernel_state::kernel_internals::session_bindings(older)
+        }));
+        let newer = Tree::<BindingRecord>::of_keyed(
+            &lash_kernel_state::kernel_internals::session_bindings(newer),
         );
-        let newer = Tree::<BindingRecord>::of_keyed(&newer.bindings);
         let mut changed = Vec::new();
         older.diff(&newer, self.heap.pages(), &mut |(_, old, new)| {
             if let Some(record) = new.or(old) {
@@ -136,10 +145,12 @@ impl SessionEditor {
         older: Option<&SessionRoot>,
         newer: &SessionRoot,
     ) -> Result<BTreeMap<Name, Option<Vec<u8>>>, HeapFault> {
-        let older = Tree::<FunctionRecord>::of_keyed(
-            &older.map_or(KeyedRoot::Empty, |older| older.functions),
+        let older = Tree::<FunctionRecord>::of_keyed(&older.map_or(KeyedRoot::Empty, |older| {
+            lash_kernel_state::kernel_internals::session_functions(older)
+        }));
+        let newer = Tree::<FunctionRecord>::of_keyed(
+            &lash_kernel_state::kernel_internals::session_functions(newer),
         );
-        let newer = Tree::<FunctionRecord>::of_keyed(&newer.functions);
         let mut changed = Vec::new();
         older.diff(&newer, self.heap.pages(), &mut |(_, old, new)| {
             if let Some(record) = new.or(old) {

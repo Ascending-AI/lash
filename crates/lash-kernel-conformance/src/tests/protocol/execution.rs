@@ -121,7 +121,8 @@ fn session(rule: &str, case: &Case) {
     session.root = first.carry;
     let aliases = |session: &Session| {
         let heap = session.heap();
-        let root = session.root.as_ref().unwrap().bindings;
+        let root =
+            lash_kernel_state::kernel_internals::session_bindings(session.root.as_ref().unwrap());
         let table = Tree::<BindingRecord>::of_keyed(&root);
         let a = table
             .get(
@@ -201,14 +202,16 @@ fn sites(rule: &str, case: &Case) {
         inspected += 1;
         let saved = at.machine.seal(crate::pages::BUDGET).unwrap().unwrap();
         let heap = lash_kernel_state::kernel_internals::PagedHeap::open_header(
-            saved.root.heap,
+            lash_kernel_vm::kernel_internals::sealed_root(&saved).heap,
             Box::new(at.source.clone()),
             lash_kernel_state::paged::EditEpoch(2),
         )
         .unwrap();
         let tasks = lash_kernel_state::kernel_internals::tree::Tree::<
             lash_kernel_state::paged::TaskRecord,
-        >::of_keyed(&saved.root.tasks);
+        >::of_keyed(
+            &lash_kernel_vm::kernel_internals::sealed_root(&saved).tasks
+        );
         let task = |n| {
             tasks
                 .get(
@@ -294,8 +297,9 @@ fn sites(rule: &str, case: &Case) {
             }
             "K-SITE-002" => {
                 let child = task(1);
-                let lash_kernel_doc::TaskIdentity::Spawned(spawn) =
-                    at.machine.task_identity(child.identity).unwrap()
+                let lash_kernel_doc::kernel_internals::TaskIdentity::Spawned(spawn) =
+                    lash_kernel_vm::kernel_internals::task_identity(&at.machine, child.identity)
+                        .unwrap()
                 else {
                     panic!("child identity")
                 };
@@ -316,7 +320,7 @@ fn sites(rule: &str, case: &Case) {
                     child.state,
                     lash_kernel_state::paged::TaskStateRecord::Waiting(_)
                 ));
-                let identity = &effect().identity;
+                let identity = lash_kernel_doc::kernel_internals::effect_parts(&effect().identity);
                 assert_eq!(identity.site.path, [0, 1, 0, 0]);
                 assert_eq!(
                     child
@@ -357,7 +361,11 @@ fn sites(rule: &str, case: &Case) {
                     .resolve(heap.pages())
                     .unwrap();
                 assert_eq!(site.as_ref(), &main(&[0]));
-                assert_eq!(effect().identity.loops[0].site, main(&[0]));
+                assert_eq!(
+                    lash_kernel_doc::kernel_internals::effect_parts(&effect().identity).loops[0]
+                        .site,
+                    main(&[0])
+                );
                 assert!(matches!(
                     at.program.document.node(&site),
                     Some(lash_kernel_doc::Node::Stmt(
@@ -370,7 +378,7 @@ fn sites(rule: &str, case: &Case) {
         Ok(crate::pages::open::<KernelMachine>(
             at.program.clone(),
             at.bounds,
-            &saved.root,
+            lash_kernel_vm::kernel_internals::sealed_root(&saved),
             at.source,
             at.admissions,
         )
@@ -404,18 +412,20 @@ fn committed(case: &Case) {
     machine.deliver(request.wait, outcome.clone()).unwrap();
     let committed = machine.seal(crate::pages::BUDGET).unwrap().unwrap();
     let heap = lash_kernel_state::kernel_internals::PagedHeap::open_header(
-        committed.root.heap,
+        lash_kernel_vm::kernel_internals::sealed_root(&committed).heap,
         Box::new(session.source.clone()),
         lash_kernel_state::paged::EditEpoch(2),
     )
     .unwrap();
     let waits = lash_kernel_state::kernel_internals::tree::Tree::<
         lash_kernel_state::paged::WaitRecord,
-    >::of_keyed(&committed.root.waits);
+    >::of_keyed(&lash_kernel_vm::kernel_internals::sealed_root(&committed).waits);
     assert!(matches!(
         waits
             .get(
-                &lash_kernel_state::kernel_internals::directory::ordinal_key(request.wait.0),
+                &lash_kernel_state::kernel_internals::directory::ordinal_key(
+                    lash_kernel_doc::kernel_internals::wait_number(request.wait)
+                ),
                 heap.pages()
             )
             .unwrap()
@@ -428,7 +438,7 @@ fn committed(case: &Case) {
     let mut restored = crate::pages::open::<KernelMachine>(
         written.clone(),
         case.environment.bounds.into(),
-        &committed.root,
+        lash_kernel_vm::kernel_internals::sealed_root(&committed),
         &session.source,
         Vec::new(),
     )
@@ -441,7 +451,7 @@ fn committed(case: &Case) {
     let mut restored = crate::pages::open::<KernelMachine>(
         written,
         case.environment.bounds.into(),
-        &admitted.root,
+        lash_kernel_vm::kernel_internals::sealed_root(&admitted),
         &session.source,
         crate::projection::admissions(&[lash_kernel_vm::Request::Effect(request.clone())]),
     )

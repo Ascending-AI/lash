@@ -1979,8 +1979,7 @@ fn with_bytes_of_another_kernel_version(
 ) {
     use lash_core_store::checkpoint_graph::node::{direct_logical, frame_direct};
     use lash_core_store::checkpoint_graph::{
-        DecodeLimits, MAX_ROOT_BYTES, NodeKind, TokenCodec as _, TokenReader, TokenWriter,
-        check_envelope,
+        DecodeLimits, MAX_ROOT_BYTES, NodeKind, check_envelope,
     };
     let page = graph
         .nodes
@@ -1993,18 +1992,10 @@ fn with_bytes_of_another_kernel_version(
     )
     .expect("the parked checkpoint root frames");
     let logical = direct_logical(&envelope, root.state).expect("its body is canonical");
-    let mut reader = TokenReader::new(&logical);
-    let mut header = lash_kernel_state::paged::CheckpointRoot::decode(&mut reader)
+    let body = lash_kernel_state::testkit::checkpoint_with_kernel(&logical, root.format + 1)
         .expect("the image's checkpoint root decodes");
-    header.kernel = root.format + 1;
-    let mut body = TokenWriter::new();
-    header.encode(&mut body);
-    let stale = frame_direct(
-        NodeKind::CHECKPOINT_ROOT,
-        &body.into_bytes(),
-        MAX_ROOT_BYTES,
-    )
-    .expect("the stale checkpoint root frames");
+    let stale = frame_direct(NodeKind::CHECKPOINT_ROOT, &body, MAX_ROOT_BYTES)
+        .expect("the stale checkpoint root frames");
     root.state = stale.id;
     staging
         .adopt(stale)

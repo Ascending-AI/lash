@@ -29,7 +29,7 @@ use lash_core::facade_support::ToolInvocation;
 use lash_core::tool_dispatch::{CellCall, CellMember, CellMembers};
 use lash_core::{RuntimeExecutionContext, ToolExecutionGrant};
 use lash_core_store::checkpoint_graph::{GraphStaging, NodeId};
-use lash_kernel_doc::{Datum, EffectIdentity, EffectName, ErrorDatum};
+use lash_kernel_doc::{Datum, EffectId, EffectName, ErrorDatum};
 use lash_kernel_vm::{EffectRequest, Outcome};
 use lash_protocol_types::sync::MutexExt;
 use lash_vm_broker::kernel::graph::{FrozenRequest, Projections};
@@ -66,7 +66,7 @@ pub(super) struct LedgerCall {
     /// The effect the cell performed, as its source names it.
     pub operation: EffectName,
     /// Where the cell performed it.
-    pub effect: EffectIdentity,
+    pub effect: EffectId,
     pub state: LedgerCallState,
 }
 
@@ -203,7 +203,7 @@ pub(super) struct CellHost<'run> {
     pub trace: Option<super::trace::CellTrace>,
     /// The effect identity each open call was performed at: where its
     /// terminal fact is published.
-    pub sites: Mutex<BTreeMap<lash_core::ToolCallId, lash_kernel_doc::EffectIdentity>>,
+    pub sites: Mutex<BTreeMap<lash_core::ToolCallId, lash_kernel_doc::EffectId>>,
     /// What every park commits of the cell beside the ledgers and prints.
     pub envelope: CellEnvelope,
     /// The cell's host state as graph nodes, as its last park left it.
@@ -315,7 +315,7 @@ impl CellHost<'_> {
         args: serde_json::Value,
     ) -> ToolInvocation {
         let mut invocation = ToolInvocation::new(call, tool, args)
-            .with_issuing_language_node_id(request.identity.site.to_string());
+            .with_issuing_language_node_id(request.identity.position().to_string());
         if self
             .ctx
             .callable_tool_manifest_by_id(&invocation.tool_id)
@@ -399,23 +399,6 @@ impl lash_vm_broker::kernel::graph::ArgumentProjection for CellArgs {
     }
 }
 
-/// A site as the label a trace and a tool call carry: its unit and its
-/// path in the document (`K-SITE-001`).
-pub(crate) fn site_label(site: &lash_kernel_doc::Site) -> String {
-    let unit = match &site.unit {
-        lash_kernel_doc::Unit::Main => "main".to_owned(),
-        lash_kernel_doc::Unit::Function(name) => format!("fn:{name}"),
-        lash_kernel_doc::Unit::Library(function) => format!("lib:{function}"),
-    };
-    let path = site
-        .path
-        .iter()
-        .map(u32::to_string)
-        .collect::<Vec<_>>()
-        .join(".");
-    format!("{unit}/{path}")
-}
-
 #[async_trait::async_trait]
 impl KernelEffects for CellHost<'_> {
     async fn admit(
@@ -450,7 +433,7 @@ impl KernelEffects for CellHost<'_> {
             )));
         }
         if control {
-            let cause = if request.identity.task != lash_kernel_doc::TaskIdentity::Main {
+            let cause = if !lash_kernel_doc::ObservationReader::is_root_task(&request.identity) {
                 Some(lash_core::ToolFailureCause::ControlFromSpawnedTask)
             } else if outstanding > 0 || live > 0 {
                 Some(lash_core::ToolFailureCause::ControlWithOutstandingTasks)

@@ -9,7 +9,7 @@ use std::sync::Arc;
 use lash_core_store::checkpoint_graph::NodeId;
 use lash_core_store::checkpoint_graph::stage::{StageFault, StageSpool};
 use lash_kernel_doc::heap::{HeapFault, HostResource, PageGrant, PageId, PageRef};
-use lash_kernel_state::paged::{PageAnswer, PageBody, PageSource, source::READ_BATCH_PAGES};
+use lash_kernel_state::paged::{PageAnswer, PageBody, PagePortLimits, PageSource};
 
 use super::{answer_page, frame_page, staging};
 
@@ -40,7 +40,7 @@ impl<C: CommittedPages> LocalPages<C> {
 
 impl<C: CommittedPages> PageSource for LocalPages<C> {
     fn read(&mut self, pages: &[PageRef]) -> Result<Vec<Result<PageAnswer, HeapFault>>, HeapFault> {
-        if pages.len() > READ_BATCH_PAGES {
+        if pages.len() > PagePortLimits::STANDARD.pages {
             return Err(HeapFault::Exhausted {
                 resource: HostResource::ReadBatch,
             });

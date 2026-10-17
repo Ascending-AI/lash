@@ -18,73 +18,8 @@
   },
   "properties": {
     "at": {
-      "additionalProperties": false,
-      "properties": {
-        "loops": {
-          "items": {
-            "additionalProperties": false,
-            "properties": {
-              "iteration": {
-                "maximum": 18446744073709551615,
-                "minimum": 0,
-                "type": "integer"
-              },
-              "site": {
-                "additionalProperties": false,
-                "properties": {
-                  "path": {
-                    "items": {
-                      "minimum": 0,
-                      "type": "integer"
-                    },
-                    "type": "array"
-                  },
-                  "unit": {}
-                },
-                "required": [
-                  "unit"
-                ],
-                "type": "object"
-              }
-            },
-            "required": [
-              "site",
-              "iteration"
-            ],
-            "type": "object"
-          },
-          "type": "array"
-        },
-        "occurrence": {
-          "maximum": 18446744073709551615,
-          "minimum": 0,
-          "type": "integer"
-        },
-        "site": {
-          "additionalProperties": false,
-          "properties": {
-            "path": {
-              "items": {
-                "minimum": 0,
-                "type": "integer"
-              },
-              "type": "array"
-            },
-            "unit": {}
-          },
-          "required": [
-            "unit"
-          ],
-          "type": "object"
-        },
-        "task": {}
-      },
-      "required": [
-        "task",
-        "site",
-        "occurrence"
-      ],
-      "type": "object"
+      "pattern": "^e:([0-9a-f]{2})+$",
+      "type": "string"
     },
     "call_id": {
       "pattern": "^tc_[0-9a-f]{64}$",

@@ -446,14 +446,30 @@ its occurrence-history limit. Cells offer counts only, with no replay or path
 trace. Hosts persisting cell overlays retain `ran_segments` with the totals
 so folding can continue after reopen.
 
-An occurrence is identified by an `EffectIdentity`: the task (`Main`, or a
-spawned task), the site, its zero-based occurrence in that task, and the
-iteration of each enclosing loop. The process overlay lists observed task
-sites, one row per `(site, task)`, with their latest occurrence state and
-occurrence count. `terminal_unobserved` means the process ended without an
-observed terminal for that action. Its first committed entry and latest
-settlement name event sequences; hosts read times from those events. Tasks
-spawned at one site remain separate rows.
+An occurrence has an opaque `EffectId`. Its `task()`, `position()` and
+`visit()` readers return `TaskLabel`, `PositionLabel` and `VisitId` handles.
+Store and compare these handles; their ordering and encoding belong to the
+engine. JSON carries opaque string tokens. Display a typed handle with
+`Display`, or use the process row's `label`; never parse either display labels
+or tokens. `ObservationReader::counts(&at)` supplies exact semantic starts and
+loop-entry counts, and `ObservationReader::fold` folds duplicate or reordered
+live frames inside the kernel.
+
+The process overlay lists observed task sites, one row per `(position, task)`,
+with their latest occurrence state and occurrence count. `terminal_unobserved`
+means the process ended without an observed terminal for that action. Its first
+committed entry and latest settlement name event sequences; hosts read times
+from those events. Tasks spawned at one site remain separate rows.
+
+Direct kernel embeddings select `MachineOptions` with `Machine::set_options`
+for each run segment. `ObservationMode::Counts` records semantic `SiteCounts`;
+a host supplies `RunObserver::counts` through `Host::observer` for live deltas,
+and `Machine::take_counts` drains the remaining counts. Recorded paths travel as
+opaque `ExecutionPath` values and are interpreted by the kernel's replay reader.
+Checkpoint handles expose only their control header; the broker uses
+`inspect_checkpoint` on an authenticated page and `AdmittedWait::encode` /
+`AdmittedWait::decode` for admissions. Session bindings come from the session
+readers, and page-port bounds from `PagePortLimits::STANDARD`.
 
 Draw an action's state from its site's row, statement and scope counts from
 `view::coverage`, and wording and nesting from the document. A missing action

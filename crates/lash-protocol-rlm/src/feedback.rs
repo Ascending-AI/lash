@@ -23,7 +23,7 @@
 use std::collections::BTreeMap;
 
 use lash_core::{CellDefect, CellFailure, CellFailureKind};
-use lash_kernel_doc::{Datum, Name, Site, SourceMap, TaskIdentity};
+use lash_kernel_doc::{Datum, Name, SourceMap, TaskLabel};
 use lash_kernel_vm::{Bound, BoundExceeded, RunError};
 use lash_vm_client::service::DialectRefusal;
 
@@ -134,12 +134,12 @@ pub(crate) enum CellObservation {
     /// The cell ended with tasks unfinished, or failed unobserved
     /// (`K-TASK-018`).
     TasksOutstanding {
-        unfinished: Vec<TaskIdentity>,
-        unobserved: Vec<TaskIdentity>,
-        sources: Vec<(TaskIdentity, Site)>,
+        unfinished: Vec<TaskLabel>,
+        unobserved: Vec<TaskLabel>,
+        sources: Vec<(TaskLabel, lash_kernel_doc::PositionLabel)>,
     },
     /// No task is ready and none waits on anything the host can answer.
-    Deadlock { waiting: Vec<TaskIdentity> },
+    Deadlock { waiting: Vec<TaskLabel> },
     /// The cell passed an execution bound; a bound error is not catchable.
     Bound(BoundExceeded),
 }
@@ -209,7 +209,9 @@ impl CellObservation {
         prompts: &dyn DialectPrompts,
     ) -> CellFailure {
         let vocabulary = prompts.prompt_vocabulary();
-        let place = |tasks: &[TaskIdentity], sources: &[(TaskIdentity, Site)]| -> String {
+        let place = |tasks: &[TaskLabel],
+                     sources: &[(TaskLabel, lash_kernel_doc::PositionLabel)]|
+         -> String {
             tasks
                 .iter()
                 .map(|task| {
@@ -367,32 +369,23 @@ fn line_column(source: &str, offset: usize) -> (usize, usize) {
 
 /// A task as a typed label: the site that spawned it and which run of
 /// that site it is.
-pub(crate) fn task_label(task: &TaskIdentity) -> String {
-    match task {
-        TaskIdentity::Main => "main".to_owned(),
-        TaskIdentity::Spawned(spawn) => format!(
-            "{}#{}",
-            crate::executor::site_label(&spawn.site),
-            spawn.occurrence
-        ),
-    }
+pub(crate) fn task_label(task: &TaskLabel) -> String {
+    lash_kernel_doc::ObservationReader::task_label(task)
 }
 
 /// Which task, for the model: the source line of the async code it runs
 /// when the document's source map places its spawn or its source body
 /// through a library adapter, else its typed label.
 fn task_place(
-    task: &TaskIdentity,
+    task: &TaskLabel,
     source: &str,
     map: Option<&SourceMap>,
-    body: Option<&Site>,
+    body: Option<&lash_kernel_doc::PositionLabel>,
 ) -> String {
-    let TaskIdentity::Spawned(spawn) = task else {
+    if lash_kernel_doc::ObservationReader::task_is_root(task) {
         return "the program itself".to_owned();
-    };
-    match map.and_then(|map| {
-        site_start(map, &spawn.site).or_else(|| body.and_then(|site| site_start(map, site)))
-    }) {
+    }
+    match map.and_then(|map| lash_kernel_doc::ObservationReader::task_source(task, map, body)) {
         Some(start) => {
             let (line, _) = line_column(source, start);
             let text = source.lines().nth(line - 1).unwrap_or_default().trim();
@@ -400,26 +393,6 @@ fn task_place(
         }
         None => format!("the task {}", task_label(task)),
     }
-}
-
-/// Where the source the map locates at `site`, or at the nearest located
-/// node that encloses it, starts.
-fn site_start(map: &SourceMap, site: &Site) -> Option<usize> {
-    map.sites
-        .iter()
-        .filter(|located| {
-            located.site.unit == site.unit && site.path.starts_with(&located.site.path)
-        })
-        .filter_map(|located| {
-            let start = located
-                .ranges
-                .first()
-                .map(|range| range.start)
-                .or(located.implicit)?;
-            Some((located.site.path.len(), start))
-        })
-        .max_by_key(|(depth, _)| *depth)
-        .map(|(_, start)| start)
 }
 
 /// A value copied out of a run, as the text a failure message carries: an

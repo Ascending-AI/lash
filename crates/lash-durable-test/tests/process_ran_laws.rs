@@ -247,8 +247,8 @@ impl Counted {
             .kernel_engine_defaults()
             .map_err(|error| format!("the kernel's settings: {error}"))?;
         let observe = match self.plan {
-            Plan::Unobserved => lash::process::Observe::Off,
-            Plan::Counted | Plan::Carried => lash::process::Observe::Counts,
+            Plan::Unobserved => lash::process::ObservationMode::Off,
+            Plan::Counted | Plan::Carried => lash::process::ObservationMode::Counts,
         };
         let settings = recorded.observing(observe).into_engine_settings();
         core.processes()

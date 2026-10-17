@@ -93,7 +93,7 @@ pub enum SpanKey<'a> {
     /// site, occurrence and enclosing loop iterations), since a site alone
     /// does not name an execution.
     Node {
-        at: &'a lash_protocol_types::EffectIdentity,
+        at: &'a lash_protocol_types::EffectId,
     },
 }
 

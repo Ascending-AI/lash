@@ -4,62 +4,9 @@
       "pattern": "^[0-9a-f]{64}$",
       "type": "string"
     },
-    "EffectIdentity": {
-      "additionalProperties": false,
-      "description": "Which wait of a run: one execution of a `perform` or a `sleep`.",
-      "properties": {
-        "loops": {
-          "description": "The loops the task was inside when it ran the site, outermost first,\nacross its active calls.",
-          "items": {
-            "$ref": "#/$defs/LoopIteration"
-          },
-          "type": "array"
-        },
-        "occurrence": {
-          "description": "How many times the task had run that site before, from 0.",
-          "format": "uint64",
-          "minimum": 0,
-          "type": "integer"
-        },
-        "site": {
-          "$ref": "#/$defs/Site",
-          "description": "The site of the `perform` or the `sleep`."
-        },
-        "task": {
-          "$ref": "#/$defs/TaskIdentity"
-        }
-      },
-      "required": [
-        "task",
-        "site",
-        "occurrence"
-      ],
-      "type": "object"
-    },
-    "FunctionId": {
-      "pattern": "^[0-9a-f]{64}$",
+    "EffectId": {
+      "pattern": "^e:([0-9a-f]{2})+$",
       "type": "string"
-    },
-    "LoopIteration": {
-      "additionalProperties": false,
-      "description": "One enclosing loop and the iteration it was on.",
-      "properties": {
-        "iteration": {
-          "description": "The iteration, from 0.",
-          "format": "uint64",
-          "minimum": 0,
-          "type": "integer"
-        },
-        "site": {
-          "$ref": "#/$defs/Site",
-          "description": "The site of the `for` or the `while`."
-        }
-      },
-      "required": [
-        "site",
-        "iteration"
-      ],
-      "type": "object"
     },
     "Name": {
       "description": "A variable, parameter or declared-function name.\n\nAny text is a name; the kernel gives none of them meaning. Structural\nvalidation refuses the empty name.",
@@ -155,7 +102,7 @@
       "description": "One task's latest visit to a document site. The VM's zero-based occurrence\nindex counts entries, including sleeps and calls, independently of effects.",
       "properties": {
         "at": {
-          "$ref": "#/$defs/EffectIdentity"
+          "$ref": "#/$defs/EffectId"
         },
         "first_entered": {
           "description": "Sequence of the first committed event naming an entry at this site,\nacross occurrences. Live-only evidence has no sequence and leaves this\n`None`. Lash stores no wall time here: hosts map the sequence to the\n`occurred_at_ms` of the event they already hold.",
@@ -165,6 +112,10 @@
             "integer",
             "null"
           ]
+        },
+        "label": {
+          "description": "A display label supplied by the engine, independent of the opaque token.",
+          "type": "string"
         },
         "last_settled": {
           "description": "Sequence of the latest committed sleep resumption or effect outcome\nsettling an occurrence at this site. Retained through later entries;\nlive-only completion and `TerminalUnobserved` supply no settlement.\nAlways `None` until `first_entered` is present. Lash stores no wall time\nhere: hosts map the sequence to their event's `occurred_at_ms`.",
@@ -186,6 +137,7 @@
       },
       "required": [
         "at",
+        "label",
         "occurrences",
         "state"
       ],
@@ -291,111 +243,6 @@
       ],
       "type": "string"
     },
-    "Site": {
-      "additionalProperties": false,
-      "description": "A node's address: the code it belongs to and the chain of\n[`Node::children`] indexes that reaches it from that code's body.\n\nA site is derived from the document and is never written by a host\n(`K-ID-004`). An empty chain addresses the body itself.",
-      "properties": {
-        "path": {
-          "items": {
-            "format": "uint32",
-            "minimum": 0,
-            "type": "integer"
-          },
-          "type": "array"
-        },
-        "unit": {
-          "$ref": "#/$defs/Unit"
-        }
-      },
-      "required": [
-        "unit"
-      ],
-      "type": "object"
-    },
-    "SpawnIdentity": {
-      "additionalProperties": false,
-      "properties": {
-        "occurrence": {
-          "description": "How many times the parent had run that site before, from 0.",
-          "format": "uint64",
-          "minimum": 0,
-          "type": "integer"
-        },
-        "parent": {
-          "$ref": "#/$defs/TaskIdentity",
-          "description": "The task that ran the `spawn`."
-        },
-        "site": {
-          "$ref": "#/$defs/Site",
-          "description": "The site of the `spawn`."
-        }
-      },
-      "required": [
-        "parent",
-        "site",
-        "occurrence"
-      ],
-      "type": "object"
-    },
-    "TaskIdentity": {
-      "description": "Which task of a run: `main`, or the task one execution of a `spawn`\nstarted.",
-      "oneOf": [
-        {
-          "enum": [
-            "main"
-          ],
-          "type": "string"
-        },
-        {
-          "additionalProperties": false,
-          "properties": {
-            "spawned": {
-              "$ref": "#/$defs/SpawnIdentity"
-            }
-          },
-          "required": [
-            "spawned"
-          ],
-          "type": "object"
-        }
-      ]
-    },
-    "Unit": {
-      "description": "The code a node belongs to.",
-      "oneOf": [
-        {
-          "const": "main",
-          "description": "The document's `main`.",
-          "type": "string"
-        },
-        {
-          "additionalProperties": false,
-          "description": "A declared function of the document.",
-          "properties": {
-            "function": {
-              "$ref": "#/$defs/Name"
-            }
-          },
-          "required": [
-            "function"
-          ],
-          "type": "object"
-        },
-        {
-          "additionalProperties": false,
-          "description": "The kernel-code body of a library function.",
-          "properties": {
-            "library": {
-              "$ref": "#/$defs/FunctionId"
-            }
-          },
-          "required": [
-            "library"
-          ],
-          "type": "object"
-        }
-      ]
-    },
     "WorkflowDocumentEntry": {
       "description": "The entry of a [`WorkflowDocumentRef`].",
       "oneOf": [
@@ -457,7 +304,7 @@
   "properties": {
     "current_sites": {
       "items": {
-        "$ref": "#/$defs/EffectIdentity"
+        "$ref": "#/$defs/EffectId"
       },
       "type": "array"
     },

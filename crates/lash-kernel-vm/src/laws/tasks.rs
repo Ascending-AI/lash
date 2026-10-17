@@ -2,13 +2,19 @@
 //! scripted delivery order. Each asserts values, errors, effect identities
 //! and the order of side effects.
 
+const WAIT_0: lash_kernel_doc::WaitId = lash_kernel_doc::kernel_internals::wait_id(0);
+const WAIT_7: lash_kernel_doc::WaitId = lash_kernel_doc::kernel_internals::wait_id(7);
+
+use lash_kernel_doc::kernel_internals::{
+    EffectIdentity, LoopIteration, SpawnIdentity, TaskIdentity,
+};
 use std::sync::Arc;
 
-use lash_kernel_doc::{Datum, EffectIdentity, LoopIteration, SpawnIdentity, TaskIdentity};
+use lash_kernel_doc::Datum;
 
 use super::embedder::{Embedder, Setup, function_site, int, main_site, record, result, run, text};
 use crate::{
-    DeliverError, Delivered, End, Machine, MachineError, Outcome, Request, RunError, Step, WaitId,
+    DeliverError, Delivered, End, Machine, MachineError, Outcome, Request, RunError, Step,
 };
 
 const WORKER: &str = r#"
@@ -34,8 +40,10 @@ fn spawned(parent: TaskIdentity, site: lash_kernel_doc::Site, occurrence: u64) -
 
 fn identity(request: &Request) -> &EffectIdentity {
     match request {
-        Request::Effect(effect) => &effect.identity,
-        Request::Sleep(sleep) => &sleep.identity,
+        Request::Effect(effect) => {
+            lash_kernel_doc::kernel_internals::effect_parts(&effect.identity)
+        }
+        Request::Sleep(sleep) => lash_kernel_doc::kernel_internals::effect_parts(&sleep.identity),
     }
 }
 
@@ -45,7 +53,16 @@ fn outstanding(end: End) -> (Vec<TaskIdentity>, Vec<TaskIdentity>) {
             unfinished,
             unobserved,
             ..
-        }) => (unfinished, unobserved),
+        }) => (
+            unfinished
+                .iter()
+                .map(|id| lash_kernel_doc::kernel_internals::task_parts(id).clone())
+                .collect(),
+            unobserved
+                .iter()
+                .map(|id| lash_kernel_doc::kernel_internals::task_parts(id).clone())
+                .collect(),
+        ),
         other => panic!("the run did not end with tasks outstanding: {other:?}"),
     }
 }
@@ -108,9 +125,12 @@ main {{
         let Request::Effect(effect) = request else {
             panic!("a perform asks for an effect");
         };
-        assert_eq!(effect.wait, WaitId(wait));
         assert_eq!(
-            effect.identity,
+            effect.wait,
+            lash_kernel_doc::kernel_internals::wait_id(wait)
+        );
+        assert_eq!(
+            *lash_kernel_doc::kernel_internals::effect_parts(&effect.identity),
             EffectIdentity {
                 task: spawned(TaskIdentity::Main, main_site([spawn, 0]), 0),
                 site: function_site("worker", [1, 0]),
@@ -675,7 +695,7 @@ main {{
     let Step::Parked(park) = embedder.run() else {
         panic!("the cleanup waits");
     };
-    assert_eq!(park.withdrawn, [WaitId(0)]);
+    assert_eq!(park.withdrawn, [WAIT_0]);
     assert_eq!(park.requests.len(), 1);
     assert_eq!(embedder.deliver("slow"), Delivered::Dropped);
     assert_eq!(result(embedder.run_to_end(&["cleanup"])), text("cancelled"));
@@ -770,7 +790,7 @@ fn the_run_ends_with_its_tasks_accounted_for() {
     assert_eq!(
         unfinished
             .machine
-            .deliver(WaitId(0), Outcome::Completed(Datum::Null)),
+            .deliver(WAIT_0, Outcome::Completed(Datum::Null)),
         Err(DeliverError::Ended)
     );
 
@@ -884,7 +904,7 @@ main { let b = spawn call branch() do join b }"#,
     };
     assert_eq!(sleep.duration, std::time::Duration::from_millis(5));
     assert_eq!(
-        sleep.identity.task,
+        lash_kernel_doc::kernel_internals::effect_parts(&sleep.identity).task,
         spawned(branch, function_site("branch", [0, 0]), 0)
     );
 }
@@ -944,6 +964,9 @@ main {
         end,
         End::Error(RunError::Deadlock {
             waiting: vec![TaskIdentity::Main, a, b]
+                .into_iter()
+                .map(lash_kernel_doc::kernel_internals::task_label)
+                .collect()
         })
     );
 }
@@ -956,22 +979,22 @@ fn deliver_refuses_what_no_wait_can_take() {
         Embedder::new("main { let a = perform echo(\"a\") as Any do sleep 0 return a }");
     let done = || Outcome::Completed(text("other"));
     assert_eq!(
-        embedder.machine.deliver(WaitId(0), done()),
-        Err(DeliverError::UnknownWait { wait: WaitId(0) })
+        embedder.machine.deliver(WAIT_0, done()),
+        Err(DeliverError::UnknownWait { wait: WAIT_0 })
     );
     embedder.run();
     assert_eq!(
-        embedder.machine.deliver(WaitId(0), Outcome::Elapsed),
-        Err(DeliverError::WrongOutcome { wait: WaitId(0) })
+        embedder.machine.deliver(WAIT_0, Outcome::Elapsed),
+        Err(DeliverError::WrongOutcome { wait: WAIT_0 })
     );
     assert_eq!(
-        embedder.machine.deliver(WaitId(7), done()),
-        Err(DeliverError::UnknownWait { wait: WaitId(7) })
+        embedder.machine.deliver(WAIT_7, done()),
+        Err(DeliverError::UnknownWait { wait: WAIT_7 })
     );
     embedder.deliver("a");
     assert_eq!(
-        embedder.machine.deliver(WaitId(0), done()),
-        Err(DeliverError::AlreadyDelivered { wait: WaitId(0) })
+        embedder.machine.deliver(WAIT_0, done()),
+        Err(DeliverError::AlreadyDelivered { wait: WAIT_0 })
     );
     // A sleep of zero is still a wait (`K-EFF-010`).
     assert_eq!(result(embedder.run_to_end(&[])), text("a"));
@@ -998,8 +1021,8 @@ main {
     }
     assert!(early.requests.is_empty(), "no park has handed out the wait");
     assert_eq!(
-        early.machine.deliver(WaitId(0), done()),
-        Err(DeliverError::UnknownWait { wait: WaitId(0) })
+        early.machine.deliver(WAIT_0, done()),
+        Err(DeliverError::UnknownWait { wait: WAIT_0 })
     );
     // Refusal leaves the actual reply available after the park.
     assert_eq!(result(early.run_to_end(&["w"])), text("w"));

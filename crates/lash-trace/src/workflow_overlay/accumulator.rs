@@ -18,14 +18,14 @@ pub struct WorkflowExecutionOverlayAccumulator {
 /// what it keeps of those at or below it.
 #[derive(Default)]
 struct SiteHistory {
-    occurrences: BTreeMap<u64, OccurrenceHistory>,
+    occurrences: BTreeMap<lash_protocol_types::VisitId, OccurrenceHistory>,
     retention: Option<SiteRetention>,
 }
 
 impl SiteHistory {
     fn observe(
         &mut self,
-        occurrence: u64,
+        occurrence: lash_protocol_types::VisitId,
         transition: Transition,
         observation: Observation,
         history_limit: usize,
@@ -162,7 +162,7 @@ impl WorkflowExecutionOverlayAccumulator {
                 | WorkflowOverlayEventIdentity::StepBody { at, .. } => {
                     if let Some(history) = sites
                         .get_mut(&WorkflowTaskSite::of(at))
-                        .and_then(|site| site.occurrences.get_mut(&at.occurrence))
+                        .and_then(|site| site.occurrences.get_mut(&at.visit()))
                     {
                         history.restore_conflict(&conflict.identity, &conflict.variants);
                     }

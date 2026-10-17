@@ -165,7 +165,7 @@ fn transition(
             let Some(due) = next_timer(state) else {
                 return Ok(standing(state));
             };
-            let fired: Vec<u64> = state
+            let fired: Vec<lash_protocol_types::WaitId> = state
                 .waits
                 .iter()
                 .filter(
@@ -409,7 +409,7 @@ fn run_settled(
             }
             // The run consumed every outcome it was handed: a wait the
             // parked run still holds is open, or settled since.
-            let held: std::collections::BTreeSet<u64> = state
+            let held: std::collections::BTreeSet<lash_protocol_types::WaitId> = state
                 .waits
                 .keys()
                 .copied()

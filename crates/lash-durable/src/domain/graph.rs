@@ -75,8 +75,8 @@ impl LockStep {
     ];
 }
 
-/// A canonical binary `EffectIdentity`: the token encoding of
-/// [`lash_kernel_doc::EffectIdentity`], the `effect_admissions` key.
+/// A canonical binary `EffectId`: the token encoding of
+/// [`lash_kernel_doc::EffectId`], the `effect_admissions` key.
 #[derive(Clone, Debug, PartialEq, Eq, Hash, PartialOrd, Ord)]
 pub struct EffectKey(pub Arc<[u8]>);
 

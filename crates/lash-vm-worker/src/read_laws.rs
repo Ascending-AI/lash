@@ -52,7 +52,7 @@ impl Host for Answering {
         &mut self,
         _effect: &EffectName,
         _args: &[Datum],
-        _site: &lash_kernel_doc::Site,
+        _site: &lash_kernel_doc::PositionLabel,
     ) -> Result<Result<Datum, ErrorDatum>, HostFault> {
         Ok(self.answer.take().expect("the cell reads once"))
     }

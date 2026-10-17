@@ -15,7 +15,7 @@ fn occurrence(node: &str, occurrence: u64) -> ProcessEffectOccurrence {
 /// The report's key for the fixture site `label`: the site's own spelling.
 fn node_key(label: &str) -> String {
     lash_protocol_types::effect_identity_fixture(label, 0)
-        .site
+        .position()
         .to_string()
 }
 
@@ -130,8 +130,8 @@ fn decode_refuses_other_versions_and_unknown_fields() {
         )
         .unwrap()
         .at
-        .occurrence,
-        beyond
+        .visit(),
+        lash_protocol_types::workflow_testkit::visit(beyond)
     );
 }
 
@@ -219,9 +219,12 @@ fn the_fold_reads_the_written_bound_in_any_page_order() {
     assert_eq!(
         node.occurrences
             .iter()
-            .map(|outcome| outcome.at.occurrence)
+            .map(|outcome| outcome.at.visit())
             .collect::<Vec<_>>(),
-        vec![1, 2]
+        vec![
+            lash_protocol_types::workflow_testkit::visit(1),
+            lash_protocol_types::workflow_testkit::visit(2)
+        ]
     );
     assert_eq!(
         node.omitted.failure, 2,

@@ -23,7 +23,7 @@
 use std::collections::BTreeMap;
 
 use lash_durable::DurableInstant;
-use lash_kernel_doc::{EffectIdentity, EffectName, ErrorDatum};
+use lash_kernel_doc::{EffectId, EffectName, ErrorDatum};
 use lash_kernel_vm::WaitId;
 
 use crate::snapshot::OperationId;
@@ -54,7 +54,7 @@ pub enum Standing {
 pub struct PendingEffect {
     /// The machine's number for the wait, which its outcome is delivered
     /// to.
-    pub wait: u64,
+    pub wait: lash_protocol_types::WaitId,
     /// The effect performed; none for a sleep.
     pub effect: Option<EffectName>,
     pub standing: Standing,
@@ -62,7 +62,7 @@ pub struct PendingEffect {
 
 impl PendingEffect {
     pub fn wait(&self) -> WaitId {
-        WaitId(self.wait)
+        self.wait
     }
 }
 
@@ -70,7 +70,7 @@ impl PendingEffect {
 #[derive(Clone, Debug, Default, PartialEq)]
 pub struct EffectLedger {
     /// The waits the state stands on, by effect identity.
-    pending: BTreeMap<EffectIdentity, PendingEffect>,
+    pending: BTreeMap<EffectId, PendingEffect>,
     /// Admitted executions the run no longer waits on (their task was
     /// cancelled) that are not known to have settled. They stay live under
     /// the run, as a join's losers do (ADR 0065), and the run's end settles
@@ -86,7 +86,7 @@ pub enum LedgerRefusal {
     #[error("the ledger names an execution of park {park}, and its run has admitted {parks}")]
     UnissuedPark { park: u64, parks: u64 },
     #[error("two of the ledger's waits share wait {wait}")]
-    SharedWait { wait: u64 },
+    SharedWait { wait: lash_protocol_types::WaitId },
     #[error("two of the ledger's entries share execution {operation:?}")]
     SharedExecution { operation: OperationId },
 }
@@ -105,7 +105,7 @@ impl EffectLedger {
     ///
     /// [`LedgerRefusal`].
     pub fn restored(
-        pending: BTreeMap<EffectIdentity, PendingEffect>,
+        pending: BTreeMap<EffectId, PendingEffect>,
         released: Vec<AdmittedEffect>,
         next_park: u64,
     ) -> Result<Self, LedgerRefusal> {
@@ -114,7 +114,7 @@ impl EffectLedger {
             released,
             next_park,
         };
-        let mut waits: Vec<u64> = ledger.pending.values().map(|entry| entry.wait).collect();
+        let mut waits: Vec<WaitId> = ledger.pending.values().map(|entry| entry.wait).collect();
         waits.sort_unstable();
         if let Some(pair) = waits.windows(2).find(|pair| pair[0] == pair[1]) {
             return Err(LedgerRefusal::SharedWait { wait: pair[0] });
@@ -142,7 +142,7 @@ impl EffectLedger {
     /// `identify`'s, for the first wait it refuses.
     pub fn identified<E>(
         &self,
-        mut identify: impl FnMut(&EffectIdentity) -> Result<EffectIdentity, E>,
+        mut identify: impl FnMut(&EffectId) -> Result<EffectId, E>,
     ) -> Result<Self, E> {
         let mut pending = BTreeMap::new();
         for (identity, entry) in &self.pending {
@@ -156,11 +156,11 @@ impl EffectLedger {
     }
 
     /// The waits the state stands on, in identity order.
-    pub fn pending(&self) -> impl Iterator<Item = (&EffectIdentity, &PendingEffect)> {
+    pub fn pending(&self) -> impl Iterator<Item = (&EffectId, &PendingEffect)> {
         self.pending.iter()
     }
 
-    pub fn get(&self, identity: &EffectIdentity) -> Option<&PendingEffect> {
+    pub fn get(&self, identity: &EffectId) -> Option<&PendingEffect> {
         self.pending.get(identity)
     }
 
@@ -224,7 +224,7 @@ impl EffectLedger {
     /// Stands the state on `identity` as `entry`. `false`, and nothing
     /// changes, when the ledger already names that identity: a machine
     /// never requests one effect twice.
-    pub(crate) fn stand(&mut self, identity: EffectIdentity, entry: PendingEffect) -> bool {
+    pub(crate) fn stand(&mut self, identity: EffectId, entry: PendingEffect) -> bool {
         match self.pending.entry(identity) {
             std::collections::btree_map::Entry::Occupied(_) => false,
             std::collections::btree_map::Entry::Vacant(vacant) => {
@@ -236,7 +236,7 @@ impl EffectLedger {
 
     /// The outcome of `identity` was delivered: the live state no longer
     /// stands on it.
-    pub fn consume(&mut self, identity: &EffectIdentity) -> Option<PendingEffect> {
+    pub fn consume(&mut self, identity: &EffectId) -> Option<PendingEffect> {
         self.pending.remove(identity)
     }
 
@@ -248,7 +248,7 @@ impl EffectLedger {
         let Some(identity) = self
             .pending
             .iter()
-            .find(|(_, entry)| entry.wait == wait.0)
+            .find(|(_, entry)| entry.wait == wait)
             .map(|(identity, _)| identity.clone())
         else {
             return false;
@@ -281,20 +281,20 @@ impl EffectLedger {
 mod tests {
     #![allow(clippy::expect_used)]
 
-    use lash_kernel_doc::{Site, TaskIdentity, Unit};
+    use lash_kernel_doc::{Site, Unit};
 
     use super::*;
 
-    fn identity(occurrence: u64) -> EffectIdentity {
-        EffectIdentity {
-            task: TaskIdentity::Main,
-            site: Site {
+    fn identity(occurrence: u64) -> EffectId {
+        lash_kernel_doc::testkit::effect(
+            lash_kernel_doc::testkit::root_task(),
+            Site {
                 unit: Unit::Main,
                 path: vec![0],
             },
             occurrence,
-            loops: Vec::new(),
-        }
+            Vec::new(),
+        )
     }
 
     fn admitted(run: u64, ordinal: u64) -> AdmittedEffect {
@@ -310,7 +310,7 @@ mod tests {
 
     fn standing(wait: u64, standing: Standing) -> PendingEffect {
         PendingEffect {
-            wait,
+            wait: lash_kernel_doc::testkit::wait_id(wait),
             effect: None,
             standing,
         }
@@ -341,14 +341,17 @@ mod tests {
         assert!(ledger.consume(&identity(0)).is_some());
         assert_eq!(ledger.oldest_reachable(), 0);
         // Withdrawn: the execution is released, live, and still reachable.
-        assert!(ledger.withdraw(WaitId(1)));
-        assert!(!ledger.withdraw(WaitId(1)));
+        assert!(ledger.withdraw(lash_kernel_doc::testkit::wait_id(1)));
+        assert!(!ledger.withdraw(lash_kernel_doc::testkit::wait_id(1)));
         assert_eq!(ledger.released(), [admitted(0, 1)]);
         assert_eq!(ledger.oldest_reachable(), 0);
         // Settled: nothing names park 0.
         ledger.drop_released(|_| true);
         assert_eq!(ledger.oldest_reachable(), 1);
-        assert!(ledger.withdraw(WaitId(3)), "a withdrawn sleep is gone");
+        assert!(
+            ledger.withdraw(lash_kernel_doc::testkit::wait_id(3)),
+            "a withdrawn sleep is gone"
+        );
         assert!(ledger.consume(&identity(2)).is_some());
         assert_eq!(ledger.oldest_reachable(), 2);
         assert_eq!(ledger.next_wake(), None);
@@ -390,7 +393,9 @@ mod tests {
                 Vec::new(),
                 1,
             ),
-            Err(LedgerRefusal::SharedWait { wait: 0 })
+            Err(LedgerRefusal::SharedWait {
+                wait: lash_kernel_doc::testkit::wait_id(0)
+            })
         );
         assert_eq!(
             EffectLedger::restored(

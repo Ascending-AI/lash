@@ -924,7 +924,9 @@ impl KernelMachine {
         _exe: &Executable,
         wait: crate::interface::WaitId,
     ) -> Eval<Value> {
-        let key = lash_kernel_state::kernel_internals::directory::ordinal_key(wait.0);
+        let key = lash_kernel_state::kernel_internals::directory::ordinal_key(
+            lash_kernel_doc::kernel_internals::wait_number(wait),
+        );
         let pending = self
             .waits
             .get(&key, self.heap.pages())?

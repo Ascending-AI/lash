@@ -697,12 +697,12 @@ fn domain_subject_owns_the_span_and_intent_kind_attribute() {
             name: Some("example".into()),
         },
         TraceDomainSubject::WorkflowNode {
-            at: lash_protocol_types::EffectIdentity {
-                task: lash_protocol_types::TaskIdentity::Main,
-                site: lash_protocol_types::Site::new(lash_protocol_types::Unit::Main, [2, 0]),
-                occurrence: 1,
-                loops: Vec::new(),
-            },
+            at: lash_protocol_types::workflow_testkit::effect(
+                lash_protocol_types::workflow_testkit::root_task(),
+                lash_protocol_types::Site::new(lash_protocol_types::Unit::Main, [2, 0]),
+                1,
+                Vec::new(),
+            ),
         },
     ]
     .into_iter()
@@ -756,11 +756,14 @@ fn domain_subject_owns_the_span_and_intent_kind_attribute() {
             TraceDomainSubject::WorkflowNode { at } => {
                 // A node is named by its site and keyed by its whole
                 // occurrence.
-                assert_eq!(emitted.name, format!("lash.workflow.node {}", at.site));
+                assert_eq!(
+                    emitted.name,
+                    format!("lash.workflow.node {}", at.position())
+                );
                 assert!(
                     emitted
                         .attributes
-                        .contains(&A::WorkflowNodeSite.value(at.site.to_string()))
+                        .contains(&A::WorkflowNodeSite.value(at.position().to_string()))
                 );
                 assert!(emitted.attributes.contains(
                     &A::WorkflowNodeOccurrence.value(serde_json::to_string(&at).unwrap())

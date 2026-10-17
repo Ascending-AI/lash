@@ -115,7 +115,10 @@ fn main_and_entry_keep_their_distinct_checkpoint_roots() {
         if entry {
             assert!(finished.carry.is_none());
         } else {
-            assert_eq!(finished.carry.unwrap().functions, functions);
+            assert_eq!(
+                lash_kernel_state::kernel_internals::session_functions(&finished.carry.unwrap()),
+                functions
+            );
         }
     }
 }
@@ -368,56 +371,6 @@ fn argument_freezing_preserves_a_page_ports_typed_failure() {
     ));
 }
 
-/// S5 bounded diagnostics / K-TASK-018: counts are immediate and a query
-/// bounds examined rows even when its first row does not match its filter.
-#[test]
-fn task_diagnostics_count_and_enumerate_only_the_requested_prefix() {
-    use super::embedder::main_site;
-    use crate::TaskFilter;
-    use lash_kernel_doc::{TaskId, TaskIdentity};
-    let mut embedder = Embedder::new(
-        "fn waits() { do perform echo(1) as Any } fn fails() { throw 2 } main { do spawn call waits() do spawn call fails() do perform echo(3) as Any }",
-    );
-    let Step::Parked(park) = embedder.run() else {
-        panic!("tasks wait");
-    };
-    assert_eq!((park.live, park.outstanding), (1, 2));
-    let first = embedder
-        .machine
-        .tasks(park.tasks, TaskFilter::Outstanding, None, 1)
-        .unwrap();
-    assert!(first.tasks.is_empty(), "main is examined but excluded");
-    assert_eq!(first.after, Some(TaskId::MAIN));
-    assert!(!first.finished);
-    let worker = embedder
-        .machine
-        .tasks(park.tasks, TaskFilter::Live, first.after, 1)
-        .unwrap();
-    assert_eq!(worker.tasks.len(), 1);
-    assert_eq!(worker.tasks[0].0, TaskId(1));
-    let projected = embedder.machine.task_identity(worker.tasks[0].1).unwrap();
-    assert_eq!(
-        projected,
-        TaskIdentity::Spawned(lash_kernel_doc::SpawnIdentity {
-            parent: std::sync::Arc::new(TaskIdentity::Main),
-            site: main_site([0, 0]),
-            occurrence: 0,
-        })
-    );
-    let failed = embedder
-        .machine
-        .tasks(park.tasks, TaskFilter::Outstanding, worker.after, 1)
-        .unwrap();
-    assert_eq!(failed.tasks[0].0, TaskId(2));
-    assert!(failed.finished);
-    let none = embedder
-        .machine
-        .tasks(park.tasks, TaskFilter::Live, worker.after, 1)
-        .unwrap();
-    assert!(none.tasks.is_empty());
-    assert!(none.finished);
-}
-
 /// D-IMM/S4: a native error remains a bounded descriptor while finally
 /// parks, then resumes with its exact kind, message and data.
 #[test]
@@ -468,7 +421,11 @@ fn a_session_carried_under_one_release_is_adopted_under_another() {
     assert_eq!(dropped, ["f"], "a closure ends with its cell");
     let session = finished.carry.expect("a main cell carries its session");
     let mut source = first.source.clone();
-    let certificate = heap_accounting(&mut source, session.heap).unwrap();
+    let certificate = heap_accounting(
+        &mut source,
+        lash_kernel_state::kernel_internals::session_heap(&session),
+    )
+    .unwrap();
     for release in [
         lash_kernel_doc::heap::PageId([8; 32]),
         lash_kernel_doc::heap::PageId([7; 32]),

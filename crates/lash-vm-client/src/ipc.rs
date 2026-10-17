@@ -708,7 +708,7 @@ mod traffic_tests {
         // sends Deliver and Run separately. Count the actual wire envelopes.
         use lash_vm_protocol::{BorrowedParentFrame, BorrowedParentMessage, Delivery};
         let deliveries = [Delivery {
-            wait: 1,
+            wait: lash_kernel_doc::testkit::wait_id(1),
             outcome: EncodedPayload(vec![7; 8]),
         }];
         let bundled = codec
@@ -731,7 +731,7 @@ mod traffic_tests {
         let mut split_bytes = 0;
         for message in [
             ParentMessage::Deliver {
-                wait: 1,
+                wait: lash_kernel_doc::testkit::wait_id(1),
                 outcome: deliveries[0].outcome.clone(),
             },
             ParentMessage::Run {

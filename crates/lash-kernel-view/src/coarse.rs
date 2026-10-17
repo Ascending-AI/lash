@@ -170,7 +170,7 @@ impl WorkflowView {
             .or_else(|| self.nodes.iter().find(|node| node.members.contains(site)))
     }
 
-    pub fn action_node(&self, site: &Site) -> Option<&WorkflowNode> {
+    pub fn action_node(&self, site: &lash_kernel_doc::PositionLabel) -> Option<&WorkflowNode> {
         self.nodes
             .iter()
             .find(|node| node.kind == WorkflowNodeKind::Action && node.site == *site)

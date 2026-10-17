@@ -1,7 +1,7 @@
 //! Exact occurrence attribution. The observer owns evidence; the view owns its
 //! placement and the live badge's precedence across concurrent tasks.
 
-use lash_kernel_doc::{DocumentId, EffectIdentity, Site};
+use lash_kernel_doc::{DocumentId, EffectId, Site};
 use schemars::JsonSchema;
 use serde::{Deserialize, Serialize};
 
@@ -23,7 +23,7 @@ pub enum ActionState {
 #[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize, JsonSchema)]
 #[serde(deny_unknown_fields)]
 pub struct ActionObservation<T> {
-    pub identity: EffectIdentity,
+    pub identity: EffectId,
     pub state: ActionState,
     pub outcome: Option<T>,
 }
@@ -41,7 +41,9 @@ pub enum ActivityRefusal {
     #[error("the observations name another document")]
     Document,
     #[error("the observation names no action at {site}")]
-    Action { site: Site },
+    Action {
+        site: lash_kernel_doc::PositionLabel,
+    },
 }
 
 impl WorkflowView {
@@ -60,10 +62,10 @@ impl WorkflowView {
             if !self
                 .execution_sites
                 .iter()
-                .any(|site| site.site == observation.identity.site)
+                .any(|site| site.site == observation.identity.position())
             {
                 return Err(ActivityRefusal::Action {
-                    site: observation.identity.site.clone(),
+                    site: observation.identity.position(),
                 });
             }
         }
@@ -74,7 +76,7 @@ impl WorkflowView {
             .map(|node| {
                 let occurrences: Vec<_> = observations
                     .iter()
-                    .filter(|observation| observation.identity.site == node.site)
+                    .filter(|observation| observation.identity.position() == node.site)
                     .cloned()
                     .collect();
                 let state = occurrences

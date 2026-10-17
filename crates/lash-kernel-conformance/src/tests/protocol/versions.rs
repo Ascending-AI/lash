@@ -21,8 +21,11 @@ pub(super) fn check(rule: &str, case: &Case) {
         let actual = crate::machine::run_case::<KernelMachine>(&library, case, &mut |mut at| {
             seen += 1;
             let saved = at.machine.seal(crate::pages::BUDGET).unwrap().unwrap();
-            assert_eq!(saved.root.kernel, KernelVersion::One.number());
-            let mut unsupported = saved.root.clone();
+            assert_eq!(
+                lash_kernel_vm::kernel_internals::sealed_root(&saved).kernel,
+                KernelVersion::One.number()
+            );
+            let mut unsupported = lash_kernel_vm::kernel_internals::sealed_root(&saved).clone();
             unsupported.kernel = u32::MAX;
             assert!(matches!(
                 crate::pages::open::<KernelMachine>(
@@ -34,7 +37,9 @@ pub(super) fn check(rule: &str, case: &Case) {
                 ),
                 Err(lash_kernel_vm::OpenError::KernelVersion { .. })
             ));
-            let encoded = lash_kernel_doc::graph_tokens::encode_body(&saved.root);
+            let encoded = lash_kernel_doc::graph_tokens::encode_body(
+                lash_kernel_vm::kernel_internals::sealed_root(&saved),
+            );
             let decoded = lash_kernel_doc::graph_tokens::decode_body::<
                 lash_kernel_state::paged::CheckpointRoot,
             >(&encoded)

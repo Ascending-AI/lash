@@ -14,9 +14,7 @@ use lash_execution_contracts::process::WaitKind;
 use lash_execution_contracts::process::WaitState;
 
 /// What the engine itself waits for, beside its steps.
-fn engine_blocker(
-    driver: &Driver,
-) -> Option<(WaitKind, Option<lash_protocol_types::EffectIdentity>)> {
+fn engine_blocker(driver: &Driver) -> Option<(WaitKind, Option<lash_protocol_types::EffectId>)> {
     match driver.blocked.as_ref()? {
         Blocked::External { name, site, .. } => {
             Some((WaitKind::Key { name: name.clone() }, site.clone()))
@@ -44,7 +42,7 @@ pub(super) fn project(
     fold: &RunFold,
     since_ms: i64,
 ) {
-    let mut blockers: Vec<(WaitKind, Option<lash_protocol_types::EffectIdentity>)> = fold
+    let mut blockers: Vec<(WaitKind, Option<lash_protocol_types::EffectId>)> = fold
         .rounds()
         .flat_map(|round| round.members())
         .filter(|member| matches!(member.state(), MemberState::Waiting { .. }))

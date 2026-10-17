@@ -9,7 +9,7 @@
 
 use lash_core::RuntimeExecutionContext;
 use lash_core::plugin::PluginExecutionTrace;
-use lash_kernel_doc::{DocumentId, EffectIdentity};
+use lash_kernel_doc::{DocumentId, EffectId};
 use lash_protocol_types::sync::MutexExt as _;
 use lash_trace::{
     TraceEvent, TraceLanguageExecution, TraceLanguageExecutionFailure,
@@ -98,7 +98,7 @@ impl CellTrace {
 
     /// A cell reports cumulative counts within its stable activation segment.
     /// The fold uses maxima, so recovery, duplicates and reordering add nothing.
-    pub(super) fn ran(&self, delta: &lash_kernel_vm::RanDelta) {
+    pub(super) fn ran(&self, delta: &lash_kernel_vm::SiteCounts) {
         let mut counts = self.counts.lock_recover();
         for (ordinal, count) in delta {
             let total = counts.ran.entry(*ordinal).or_default();
@@ -132,7 +132,7 @@ impl CellTrace {
     }
 
     /// The cell's `perform` at `at` was admitted as the tool call `call`.
-    pub(super) fn call_started(&self, at: &EffectIdentity, call: &lash_core::ToolCallId) {
+    pub(super) fn call_started(&self, at: &EffectId, call: &lash_core::ToolCallId) {
         self.node(
             at,
             TraceNodeFact::Started {
@@ -145,7 +145,7 @@ impl CellTrace {
     /// `outcome`.
     pub(super) fn call_ended(
         &self,
-        at: &EffectIdentity,
+        at: &EffectId,
         call: &lash_core::ToolCallId,
         outcome: &lash_core::ToolCallOutcome,
     ) {
@@ -169,7 +169,7 @@ impl CellTrace {
         self.node(at, fact);
     }
 
-    fn node(&self, at: &EffectIdentity, fact: TraceNodeFact) {
+    fn node(&self, at: &EffectId, fact: TraceNodeFact) {
         self.emit(TraceLanguageExecutionPayload::Node {
             subject: self.subject(),
             at: at.clone(),
@@ -221,7 +221,7 @@ impl CellTrace {
                 };
                 (
                     format!("node:{occurrence}:{transition}"),
-                    Some(at.site.to_string()),
+                    Some(at.position().to_string()),
                 )
             }
         };

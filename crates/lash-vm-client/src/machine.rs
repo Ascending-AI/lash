@@ -13,7 +13,7 @@ use std::sync::Arc;
 use lash_core_store::checkpoint_graph::NodeId;
 use lash_kernel_doc::heap::PageGrant;
 use lash_kernel_doc::{
-    Datum, DocumentId, EffectName, ErrorDatum, Handle, IdentifiedDocument, Site, Timestamp,
+    Datum, DocumentId, EffectName, ErrorDatum, Handle, IdentifiedDocument, Timestamp,
 };
 use lash_kernel_state::paged::SessionRoot;
 use lash_kernel_vm::{Bounds, EffectModes, End, Outcome, Target, WaitId};
@@ -62,12 +62,12 @@ pub struct RunStart {
 #[async_trait::async_trait]
 pub trait RunHost: Send + Sync {
     /// The run segment's observation option, independent of live delivery.
-    fn observe(&self) -> lash_kernel_vm::Observe {
-        lash_kernel_vm::Observe::Off
+    fn observe(&self) -> lash_kernel_vm::ObservationMode {
+        lash_kernel_vm::ObservationMode::Off
     }
 
     /// Exact provisional counts since the worker's previous frame.
-    fn ran(&self, _delta: &lash_kernel_vm::RanDelta) {}
+    fn ran(&self, _delta: &lash_kernel_vm::SiteCounts) {}
 
     /// Whether the run records its statement path, for a replay: the run
     /// frames carry it and [`RemoteMachine::take_path`] answers it.
@@ -85,7 +85,7 @@ pub trait RunHost: Send + Sync {
     /// A provisional site entry: each task's last since the run's previous
     /// frame, taken from the next one. It neither yields a task nor admits
     /// work.
-    fn enter_site(&self, _at: &lash_kernel_doc::EffectIdentity) {}
+    fn enter_site(&self, _at: &lash_kernel_doc::EffectId) {}
 
     /// The time, read once for each `clock` call the run makes.
     async fn clock(&self) -> Result<Timestamp, ParentFault>;
@@ -109,7 +109,7 @@ pub trait RunHost: Send + Sync {
         &self,
         effect: &EffectName,
         args: &[Datum],
-        site: &Site,
+        site: &lash_kernel_doc::PositionLabel,
     ) -> Result<Result<Datum, ErrorDatum>, ParentFault>;
 
     /// One `print` call's value, in the order the run printed.
@@ -219,7 +219,7 @@ impl RemoteMachines {
                 .map_err(worker)?,
             warm,
             observe_sites: self.host.observes_sites(),
-            observe_counts: self.host.observe() == lash_kernel_vm::Observe::Counts,
+            observe_counts: self.host.observe() == lash_kernel_vm::ObservationMode::Counts,
             observe_path: self.host.traces_path(),
         };
         let reservation = start_reservation(
@@ -274,7 +274,7 @@ impl RemoteMachines {
             pages,
             candidate: None,
             ran: Default::default(),
-            path: Vec::new(),
+            path: lash_kernel_vm::ExecutionPath::default(),
         })
     }
 }
@@ -328,9 +328,9 @@ impl Machines for RemoteMachines {
             .session
             .as_ref()
             .map(|session| {
-                std::iter::once(session.heap)
-                    .chain(session.bindings.page())
-                    .chain(session.functions.page())
+                session
+                    .pages()
+                    .into_iter()
                     .map(|page| NodeId(page.id.0))
                     .collect()
             })
@@ -382,7 +382,7 @@ pub struct RemoteMachine {
     /// the run on.
     candidate: Option<NodeId>,
     ran: std::collections::BTreeMap<u32, u64>,
-    path: wire::OrdinalPath,
+    path: lash_kernel_vm::ExecutionPath,
 }
 
 /// Where a worker's exchange stopped once its host reads and page
@@ -403,13 +403,13 @@ enum Stop {
 
 impl RemoteMachine {
     /// Takes and resets the total received in this run segment's frames.
-    pub fn take_ran(&mut self) -> lash_kernel_vm::RanDelta {
+    pub fn take_ran(&mut self) -> lash_kernel_vm::SiteCounts {
         std::mem::take(&mut self.ran).into_iter().collect()
     }
 
     /// Takes and resets the statement path received in this run segment's
     /// frames, in order, when the host traces it.
-    pub fn take_path(&mut self) -> wire::OrdinalPath {
+    pub fn take_path(&mut self) -> lash_kernel_vm::ExecutionPath {
         std::mem::take(&mut self.path)
     }
 
@@ -583,12 +583,7 @@ impl RemoteMachine {
             if !sites.ran.is_empty() {
                 self.host.ran(&sites.ran);
             }
-            for (task, starts) in sites.path {
-                match self.path.last_mut() {
-                    Some((last, held)) if *last == task => held.extend(starts),
-                    _ => self.path.push((task, starts)),
-                }
-            }
+            self.path.append(sites.path);
         }
         Ok(())
     }
@@ -653,7 +648,7 @@ impl DrivenMachine for RemoteMachine {
         self.candidate = None;
         let outcome =
             wire::encode(PayloadKind::Outcome, &OutcomeWire::from(outcome)).map_err(worker)?;
-        self.with(move |checkout| checkout.deliver(wait.0, outcome))
+        self.with(move |checkout| checkout.deliver(wait, outcome))
             .await
     }
 

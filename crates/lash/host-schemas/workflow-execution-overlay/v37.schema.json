@@ -20,37 +20,9 @@
       ],
       "type": "object"
     },
-    "EffectIdentity": {
-      "additionalProperties": false,
-      "description": "Which wait of a run: one execution of a `perform` or a `sleep`.",
-      "properties": {
-        "loops": {
-          "description": "The loops the task was inside when it ran the site, outermost first,\nacross its active calls.",
-          "items": {
-            "$ref": "#/$defs/LoopIteration"
-          },
-          "type": "array"
-        },
-        "occurrence": {
-          "description": "How many times the task had run that site before, from 0.",
-          "format": "uint64",
-          "minimum": 0,
-          "type": "integer"
-        },
-        "site": {
-          "$ref": "#/$defs/Site",
-          "description": "The site of the `perform` or the `sleep`."
-        },
-        "task": {
-          "$ref": "#/$defs/TaskIdentity"
-        }
-      },
-      "required": [
-        "task",
-        "site",
-        "occurrence"
-      ],
-      "type": "object"
+    "EffectId": {
+      "pattern": "^e:([0-9a-f]{2})+$",
+      "type": "string"
     },
     "ExecutionScope": {
       "description": "Stable semantic identity for one effectful runtime operation.\n\nThis is the scope admitted by the host boundary before nondeterministic\nwork begins. Its journal encoding is an existing durable contract; effect\naddresses compose it with a replay key without changing those bytes.",
@@ -150,33 +122,12 @@
         }
       ]
     },
-    "FunctionId": {
-      "pattern": "^[0-9a-f]{64}$",
-      "type": "string"
-    },
-    "LoopIteration": {
-      "additionalProperties": false,
-      "description": "One enclosing loop and the iteration it was on.",
-      "properties": {
-        "iteration": {
-          "description": "The iteration, from 0.",
-          "format": "uint64",
-          "minimum": 0,
-          "type": "integer"
-        },
-        "site": {
-          "$ref": "#/$defs/Site",
-          "description": "The site of the `for` or the `while`."
-        }
-      },
-      "required": [
-        "site",
-        "iteration"
-      ],
-      "type": "object"
-    },
     "Name": {
       "description": "A variable, parameter or declared-function name.\n\nAny text is a name; the kernel gives none of them meaning. Structural\nvalidation refuses the empty name.",
+      "type": "string"
+    },
+    "PositionLabel": {
+      "pattern": "^p:([0-9a-f]{2})+$",
       "type": "string"
     },
     "RunAggregateWakePolicy": {
@@ -207,58 +158,12 @@
       ],
       "type": "string"
     },
-    "Site": {
-      "additionalProperties": false,
-      "description": "A node's address: the code it belongs to and the chain of\n[`Node::children`] indexes that reaches it from that code's body.\n\nA site is derived from the document and is never written by a host\n(`K-ID-004`). An empty chain addresses the body itself.",
-      "properties": {
-        "path": {
-          "items": {
-            "format": "uint32",
-            "minimum": 0,
-            "type": "integer"
-          },
-          "type": "array"
-        },
-        "unit": {
-          "$ref": "#/$defs/Unit"
-        }
-      },
-      "required": [
-        "unit"
-      ],
-      "type": "object"
-    },
-    "SpawnIdentity": {
-      "additionalProperties": false,
-      "properties": {
-        "occurrence": {
-          "description": "How many times the parent had run that site before, from 0.",
-          "format": "uint64",
-          "minimum": 0,
-          "type": "integer"
-        },
-        "parent": {
-          "$ref": "#/$defs/TaskIdentity",
-          "description": "The task that ran the `spawn`."
-        },
-        "site": {
-          "$ref": "#/$defs/Site",
-          "description": "The site of the `spawn`."
-        }
-      },
-      "required": [
-        "parent",
-        "site",
-        "occurrence"
-      ],
-      "type": "object"
-    },
     "StepBodyStarted": {
       "additionalProperties": false,
       "description": "The admitted body of a process step started: the step's actor committed\nits admission, bound it to a call, and is about to run it. A step that is\nrefused never produces one, and a retried body produces one more with the\nsame site, occurrence and call and the next attempt.\n\nIt names no language and no document: the process's own definition scopes\nthe site.",
       "properties": {
         "at": {
-          "$ref": "#/$defs/EffectIdentity",
+          "$ref": "#/$defs/EffectId",
           "description": "The occurrence of the site in the process's workflow document the\nstep runs for."
         },
         "attempt": {
@@ -283,28 +188,9 @@
       ],
       "type": "object"
     },
-    "TaskIdentity": {
-      "description": "Which task of a run: `main`, or the task one execution of a `spawn`\nstarted.",
-      "oneOf": [
-        {
-          "enum": [
-            "main"
-          ],
-          "type": "string"
-        },
-        {
-          "additionalProperties": false,
-          "properties": {
-            "spawned": {
-              "$ref": "#/$defs/SpawnIdentity"
-            }
-          },
-          "required": [
-            "spawned"
-          ],
-          "type": "object"
-        }
-      ]
+    "TaskLabel": {
+      "pattern": "^t:([0-9a-f]{2})+$",
+      "type": "string"
     },
     "ToolFailureClass": {
       "enum": [
@@ -600,7 +486,7 @@
           "description": "One fact about one occurrence of one execution site.",
           "properties": {
             "at": {
-              "$ref": "#/$defs/EffectIdentity"
+              "$ref": "#/$defs/EffectId"
             },
             "fact": {
               "$ref": "#/$defs/TraceNodeFact"
@@ -988,41 +874,9 @@
         }
       ]
     },
-    "Unit": {
-      "description": "The code a node belongs to.",
-      "oneOf": [
-        {
-          "const": "main",
-          "description": "The document's `main`.",
-          "type": "string"
-        },
-        {
-          "additionalProperties": false,
-          "description": "A declared function of the document.",
-          "properties": {
-            "function": {
-              "$ref": "#/$defs/Name"
-            }
-          },
-          "required": [
-            "function"
-          ],
-          "type": "object"
-        },
-        {
-          "additionalProperties": false,
-          "description": "The kernel-code body of a library function.",
-          "properties": {
-            "library": {
-              "$ref": "#/$defs/FunctionId"
-            }
-          },
-          "required": [
-            "library"
-          ],
-          "type": "object"
-        }
-      ]
+    "VisitId": {
+      "pattern": "^v:([0-9a-f]{2})+$",
+      "type": "string"
     },
     "WorkflowDocumentEntry": {
       "description": "The entry of a [`WorkflowDocumentRef`].",
@@ -1094,9 +948,7 @@
           "type": "string"
         },
         "occurrence": {
-          "format": "uint64",
-          "minimum": 0,
-          "type": "integer"
+          "$ref": "#/$defs/VisitId"
         }
       },
       "required": [
@@ -1238,7 +1090,7 @@
         {
           "properties": {
             "at": {
-              "$ref": "#/$defs/EffectIdentity"
+              "$ref": "#/$defs/EffectId"
             },
             "of": {
               "const": "node",
@@ -1258,7 +1110,7 @@
         {
           "properties": {
             "at": {
-              "$ref": "#/$defs/EffectIdentity"
+              "$ref": "#/$defs/EffectId"
             },
             "attempt": {
               "format": "uint32",
@@ -1511,9 +1363,7 @@
         {
           "properties": {
             "occurrence": {
-              "format": "uint64",
-              "minimum": 0,
-              "type": "integer"
+              "$ref": "#/$defs/VisitId"
             },
             "start": {
               "format": "date-time",
@@ -1537,9 +1387,7 @@
               "$ref": "#/$defs/TraceNodeAwaited"
             },
             "occurrence": {
-              "format": "uint64",
-              "minimum": 0,
-              "type": "integer"
+              "$ref": "#/$defs/VisitId"
             },
             "since": {
               "format": "date-time",
@@ -1572,9 +1420,7 @@
               "type": "string"
             },
             "occurrence": {
-              "format": "uint64",
-              "minimum": 0,
-              "type": "integer"
+              "$ref": "#/$defs/VisitId"
             },
             "start": {
               "format": "date-time",
@@ -1605,9 +1451,7 @@
               "$ref": "#/$defs/TraceLanguageExecutionFailure"
             },
             "occurrence": {
-              "format": "uint64",
-              "minimum": 0,
-              "type": "integer"
+              "$ref": "#/$defs/VisitId"
             },
             "start": {
               "format": "date-time",
@@ -1636,9 +1480,7 @@
               "type": "string"
             },
             "occurrence": {
-              "format": "uint64",
-              "minimum": 0,
-              "type": "integer"
+              "$ref": "#/$defs/VisitId"
             },
             "start": {
               "format": "date-time",
@@ -1663,9 +1505,7 @@
           "description": "The process settled without complete terminal evidence for this\nobserved occurrence. The category is authoritative; success, failure\nand timing are not inferred from it.",
           "properties": {
             "occurrence": {
-              "format": "uint64",
-              "minimum": 0,
-              "type": "integer"
+              "$ref": "#/$defs/VisitId"
             },
             "settled_at": {
               "format": "date-time",
@@ -1796,9 +1636,7 @@
           "$ref": "#/$defs/WorkflowTaskSite"
         },
         "truncation_watermark": {
-          "format": "uint64",
-          "minimum": 0,
-          "type": "integer"
+          "$ref": "#/$defs/VisitId"
         },
         "watermark_history": {
           "description": "The observations of the watermark occurrence.",
@@ -1835,9 +1673,7 @@
         {
           "properties": {
             "occurrence": {
-              "format": "uint64",
-              "minimum": 0,
-              "type": "integer"
+              "$ref": "#/$defs/VisitId"
             },
             "start": {
               "format": "date-time",
@@ -1861,9 +1697,7 @@
               "$ref": "#/$defs/TraceNodeAwaited"
             },
             "occurrence": {
-              "format": "uint64",
-              "minimum": 0,
-              "type": "integer"
+              "$ref": "#/$defs/VisitId"
             },
             "since": {
               "format": "date-time",
@@ -1896,9 +1730,7 @@
               "type": "string"
             },
             "occurrence": {
-              "format": "uint64",
-              "minimum": 0,
-              "type": "integer"
+              "$ref": "#/$defs/VisitId"
             },
             "start": {
               "format": "date-time",
@@ -1929,9 +1761,7 @@
               "$ref": "#/$defs/TraceLanguageExecutionFailure"
             },
             "occurrence": {
-              "format": "uint64",
-              "minimum": 0,
-              "type": "integer"
+              "$ref": "#/$defs/VisitId"
             },
             "start": {
               "format": "date-time",
@@ -1960,9 +1790,7 @@
               "type": "string"
             },
             "occurrence": {
-              "format": "uint64",
-              "minimum": 0,
-              "type": "integer"
+              "$ref": "#/$defs/VisitId"
             },
             "start": {
               "format": "date-time",
@@ -1987,9 +1815,7 @@
           "description": "The process settled without complete terminal evidence for this\nobserved occurrence. The category is authoritative; success, failure\nand timing are not inferred from it.",
           "properties": {
             "occurrence": {
-              "format": "uint64",
-              "minimum": 0,
-              "type": "integer"
+              "$ref": "#/$defs/VisitId"
             },
             "settled_at": {
               "format": "date-time",
@@ -2070,9 +1896,7 @@
           "type": "string"
         },
         "occurrence": {
-          "format": "uint64",
-          "minimum": 0,
-          "type": "integer"
+          "$ref": "#/$defs/VisitId"
         },
         "status": {
           "$ref": "#/$defs/WorkflowOverlayTerminalStatus"
@@ -2098,11 +1922,11 @@
       "description": "One execution site as one task of the run reaches it. The machine counts\na site's occurrences per task (`K-EFF-008`), so the overlay keeps one\nrow for each task that ran the site: every element of a fan-out has its\nown.",
       "properties": {
         "site": {
-          "$ref": "#/$defs/Site",
+          "$ref": "#/$defs/PositionLabel",
           "description": "The site in the document."
         },
         "task": {
-          "$ref": "#/$defs/TaskIdentity",
+          "$ref": "#/$defs/TaskLabel",
           "description": "The task that ran it."
         }
       },

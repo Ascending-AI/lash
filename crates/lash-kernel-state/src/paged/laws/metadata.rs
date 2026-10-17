@@ -5,7 +5,8 @@ use super::super::*;
 use super::heap::{fresh, seal};
 use lash_kernel_doc::graph_tokens::{decode_body, encode_body};
 use lash_kernel_doc::heap::*;
-use lash_kernel_doc::{Datum, Name, Site, TaskIdentity, Unit};
+use lash_kernel_doc::kernel_internals::TaskIdentity;
+use lash_kernel_doc::{Datum, Name, Site, Unit};
 
 fn work() -> SealWork {
     SealWork::new(SealBudget {

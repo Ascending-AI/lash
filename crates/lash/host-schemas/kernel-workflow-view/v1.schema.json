@@ -402,7 +402,7 @@
       "description": "Outcome data stays on the exact occurrence the observer supplies, never on\nevery action of its statement. `T` can retain the host's typed result/cause.",
       "properties": {
         "identity": {
-          "$ref": "#/$defs/EffectIdentity"
+          "$ref": "#/$defs/EffectId"
         },
         "outcome": true,
         "state": {
@@ -961,37 +961,9 @@
       "pattern": "^[0-9a-f]{64}$",
       "type": "string"
     },
-    "EffectIdentity": {
-      "additionalProperties": false,
-      "description": "Which wait of a run: one execution of a `perform` or a `sleep`.",
-      "properties": {
-        "loops": {
-          "description": "The loops the task was inside when it ran the site, outermost first,\nacross its active calls.",
-          "items": {
-            "$ref": "#/$defs/LoopIteration"
-          },
-          "type": "array"
-        },
-        "occurrence": {
-          "description": "How many times the task had run that site before, from 0.",
-          "format": "uint64",
-          "minimum": 0,
-          "type": "integer"
-        },
-        "site": {
-          "$ref": "#/$defs/Site",
-          "description": "The site of the `perform` or the `sleep`."
-        },
-        "task": {
-          "$ref": "#/$defs/TaskIdentity"
-        }
-      },
-      "required": [
-        "task",
-        "site",
-        "occurrence"
-      ],
-      "type": "object"
+    "EffectId": {
+      "pattern": "^e:([0-9a-f]{2})+$",
+      "type": "string"
     },
     "ExecutionSiteView": {
       "additionalProperties": false,
@@ -1607,27 +1579,6 @@
           "type": "object"
         }
       ]
-    },
-    "LoopIteration": {
-      "additionalProperties": false,
-      "description": "One enclosing loop and the iteration it was on.",
-      "properties": {
-        "iteration": {
-          "description": "The iteration, from 0.",
-          "format": "uint64",
-          "minimum": 0,
-          "type": "integer"
-        },
-        "site": {
-          "$ref": "#/$defs/Site",
-          "description": "The site of the `for` or the `while`."
-        }
-      },
-      "required": [
-        "site",
-        "iteration"
-      ],
-      "type": "object"
     },
     "MapEntry": {
       "additionalProperties": false,
@@ -2312,31 +2263,6 @@
         }
       ]
     },
-    "SpawnIdentity": {
-      "additionalProperties": false,
-      "properties": {
-        "occurrence": {
-          "description": "How many times the parent had run that site before, from 0.",
-          "format": "uint64",
-          "minimum": 0,
-          "type": "integer"
-        },
-        "parent": {
-          "$ref": "#/$defs/TaskIdentity",
-          "description": "The task that ran the `spawn`."
-        },
-        "site": {
-          "$ref": "#/$defs/Site",
-          "description": "The site of the `spawn`."
-        }
-      },
-      "required": [
-        "parent",
-        "site",
-        "occurrence"
-      ],
-      "type": "object"
-    },
     "StartAdapter": {
       "additionalProperties": false,
       "description": "How a function a closure makes is started from outside its run: the\nsignature it is started under, how the dialect holds the function as a\nvalue, and how the entry calls it.",
@@ -2885,29 +2811,6 @@
           },
           "required": [
             "fail"
-          ],
-          "type": "object"
-        }
-      ]
-    },
-    "TaskIdentity": {
-      "description": "Which task of a run: `main`, or the task one execution of a `spawn`\nstarted.",
-      "oneOf": [
-        {
-          "enum": [
-            "main"
-          ],
-          "type": "string"
-        },
-        {
-          "additionalProperties": false,
-          "properties": {
-            "spawned": {
-              "$ref": "#/$defs/SpawnIdentity"
-            }
-          },
-          "required": [
-            "spawned"
           ],
           "type": "object"
         }

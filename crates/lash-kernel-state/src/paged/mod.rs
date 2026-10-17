@@ -14,6 +14,8 @@
 //!   refinement.
 //! - [`family`] (S8): frozen values, lazy identity families and cell carry.
 
+pub(crate) mod checkpoint;
+pub use checkpoint::{Checkpoint, CheckpointHeader, inspect_checkpoint};
 pub mod census;
 pub(crate) mod census_impl;
 pub mod family;
@@ -49,7 +51,7 @@ pub use root::{
     LoopRecord, RootStatus, SavedMeters, SequenceRoot, TaskStateRecord, WaitKindRecord, WaitPhase,
     WaitRecord,
 };
-pub use source::{PageAnswer, PageBody, PageKind, PageSource};
+pub use source::{PageAnswer, PageBody, PageKind, PagePortLimits, PageSource};
 
 mod census_graph;
 mod codec;

@@ -475,7 +475,7 @@ impl Fixture {
             }
             omitted.insert(
                 lash_protocol_types::effect_identity_fixture(&node_name, 0)
-                    .site
+                    .position()
                     .to_string(),
                 lash_execution_contracts::process::ProcessEffectOmittedCounts {
                     success: count - count.min(cap),

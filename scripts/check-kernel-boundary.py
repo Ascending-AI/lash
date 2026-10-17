@@ -3,7 +3,7 @@
 
 Three rules over the workspace members' manifests, each a dependency edge
 given by `path`, in the member's manifest or in the `[workspace.dependencies]`
-entry it inherits, and one over their Rust sources:
+entry it inherits, and two over their Rust sources:
 
 1. One direction. `lash-kernel-*`, `lash-dialect-*` and `lash-ext-*` crates
    depend only on each other and on third-party crates, so the set can move to
@@ -26,6 +26,10 @@ entry it inherits, and one over their Rust sources:
    outside `crates/lash-kernel-*` names that module, and no kernel crate
    re-exports from it beyond the diagnostic seam that names its own engine's
    counters (`lash_kernel_vm::perf_witness`).
+
+5. Host surfaces stay opaque (FIG-6711). Engine identities, checkpoint roots
+   and raw observation records are named only in kernel crates. Hosts use
+   opaque handles and semantic readers, including through facade re-exports.
 
 Crates are named by their directory, which is their package name for the
 kernel set; lash's own crates publish as `lash-internal-*`.
@@ -52,18 +56,31 @@ DIALECT = re.compile(r"^lash-dialect-")
 MACHINE = frozenset({"lash-kernel-vm", "lash-kernel-state"})
 DEPENDENCY_TABLES = ("dependencies", "dev-dependencies", "build-dependencies")
 KERNEL_CRATE = re.compile(r"^lash-kernel-")
-# A path into a kernel crate's `kernel_internals`, written out or through a
-# use group (`lash_kernel_vm::{kernel_internals, ..}`), directly or through
-# the facade's re-export of the dialect seam (`lash::dialect`).
-INTERNALS = re.compile(
-    r"\b(?:lash_kernel_\w+|lash\s*::\s*dialect)\s*::\s*"
-    r"(?:kernel_internals\b|\{[^;]*?\bkernel_internals\b)"
-)
 REEXPORT = re.compile(r"\bpub(?:\([^)]*\))?\s+use\b[^;]*\bkernel_internals\b", re.S)
 # The machine's diagnostic seam names the heap's share of its work counts.
 REEXPORT_HOMES = frozenset({"crates/lash-kernel-vm/src/perf_witness.rs"})
-LINE_COMMENT = re.compile(r"//[^\n]*")
 LINKED_TABLES = ("dependencies", "build-dependencies")
+
+# Opaque handles own the host surface. Match tokens rather than only qualified
+# paths so import aliases and facade re-exports cannot reopen the boundary.
+ENGINE_RECORD = re.compile(r"\b(?:CheckpointRoot|KeyedRoot|SequenceRoot|EffectIdentity|TaskIdentity|TaskIdentityRef|SpawnIdentity|LoopIteration|TaskFilter|TaskPage|StatementPath|RanDelta)\b")
+RUST_NONCODE = re.compile(r'//[^\n]*|/\*.*?\*/|r(?P<hash>\#*)".*?"(?P=hash)|"(?:\\.|[^"\\])*"', re.S)
+
+def host_surface_stays_opaque(workspace: Workspace) -> list[str]:
+    found = []
+    for directory in sorted(workspace.names):
+        if KERNEL_CRATE.match(directory.name):
+            continue
+        for path in rust_sources(directory):
+            source = path.read_text(encoding="utf-8")
+            code = RUST_NONCODE.sub(lambda match: "\n" * match[0].count("\n"), source)
+            for match in [*ENGINE_RECORD.finditer(code), *kernel_paths(code, "Observe|conformance")]:
+                line = code.count("\n", 0, match.start()) + 1
+                found.append(
+                    f"{path.relative_to(workspace.root)}:{line}: names engine record `{match[0]}`; "
+                    "hosts use opaque identities, checkpoint control headers and semantic observations"
+                )
+    return found
 
 
 def in_kernel_set(package: str, directory: str) -> bool:
@@ -191,15 +208,42 @@ def rust_sources(directory: Path):
             yield path
 
 
+def kernel_paths(text: str, members: str):
+    """Resolve crate aliases before looking for engine-owned path members."""
+    tail = rf"(?:{members})\b|\{{[^;]*?\b(?:{members})\b"
+    direct = re.compile(rf"\b(?:lash_kernel_\w+|lash\s*::\s*dialect)\s*::\s*(?:{tail})")
+    yield from direct.finditer(text)
+    namespaces = set(re.findall(r"\blash_kernel_\w+\b", text)) | {"lash::dialect"}
+    original = namespaces.copy()
+    path = r"[A-Za-z_]\w*(?:\s*::\s*[A-Za-z_]\w*)*"
+    edges = re.findall(rf"\b({path})\s+as\s+([A-Za-z_]\w*)", text)
+    for group in re.finditer(rf"\buse\s+({path})\s*::\s*\{{([^;]+)\}}", text):
+        prefix, body = group.groups()
+        edges.extend((prefix, alias) for alias in re.findall(r"\bself\s+as\s+(\w+)", body))
+        if prefix == "lash":
+            edges.extend(("lash::dialect", alias) for alias in re.findall(r"\bdialect\s+as\s+(\w+)", body))
+    while True:
+        resolved = {alias for namespace, alias in edges
+                    if re.sub(r"\s*::\s*", "::", namespace) in namespaces}
+        if resolved <= namespaces:
+            break
+        namespaces.update(resolved)
+    aliases = namespaces - original
+    if aliases:
+        prefix = "|".join(re.escape(alias) for alias in sorted(aliases))
+        pattern = re.compile(rf"\b(?:{prefix})\s*::\s*(?:{tail})")
+        yield from pattern.finditer(text)
+
+
 def kernel_internals_stay_inside(workspace: Workspace) -> list[str]:
     found = []
     for directory in sorted(workspace.names):
         kernel = bool(KERNEL_CRATE.match(directory.name))
         for path in rust_sources(directory):
             relative = path.relative_to(workspace.root).as_posix()
-            text = LINE_COMMENT.sub("", path.read_text(encoding="utf-8"))
+            text = RUST_NONCODE.sub(lambda match: "\n" * match[0].count("\n"), path.read_text(encoding="utf-8"))
             if not kernel:
-                for match in INTERNALS.finditer(text):
+                for match in kernel_paths(text, "kernel_internals"):
                     line = text.count("\n", 0, match.start()) + 1
                     found.append(
                         f"{relative}:{line}: names a kernel crate's `kernel_internals`; code outside "
@@ -223,6 +267,7 @@ def violations(root: Path) -> list[str]:
         + crate_roles(workspace)
         + dialects_off_the_machine(workspace)
         + kernel_internals_stay_inside(workspace)
+        + host_surface_stays_opaque(workspace)
     )
 
 

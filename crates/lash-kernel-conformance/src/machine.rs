@@ -43,7 +43,7 @@ impl<M: Machine> DocumentRunner for MachineRunner<M> {
             crate::pages::open::<M>(
                 at.program.clone(),
                 at.bounds,
-                &sealed.root,
+                lash_kernel_vm::kernel_internals::sealed_root(&sealed),
                 at.source,
                 at.admissions,
             )
@@ -248,7 +248,12 @@ pub(crate) fn run_case_in<M: Machine>(
                         Request::Effect(effect) => {
                             waits.push(effect.wait);
                             trace.push(Trace::Effect {
-                                identity: Some(effect.identity.clone()),
+                                identity: Some(
+                                    lash_kernel_doc::kernel_internals::effect_parts(
+                                        &effect.identity,
+                                    )
+                                    .clone(),
+                                ),
                                 effect: effect.effect.to_string(),
                                 args: effect.args.clone(),
                                 result: effect.result.clone(),
@@ -257,7 +262,12 @@ pub(crate) fn run_case_in<M: Machine>(
                         Request::Sleep(sleep) => {
                             waits.push(sleep.wait);
                             trace.push(Trace::Sleep {
-                                identity: Some(sleep.identity.clone()),
+                                identity: Some(
+                                    lash_kernel_doc::kernel_internals::effect_parts(
+                                        &sleep.identity,
+                                    )
+                                    .clone(),
+                                ),
                                 nanoseconds: sleep.duration.as_nanos(),
                             });
                         }
@@ -376,7 +386,7 @@ impl Host for ScriptHost<'_> {
         &mut self,
         effect: &lash_kernel_doc::EffectName,
         args: &[Datum],
-        _site: &lash_kernel_doc::Site,
+        _site: &lash_kernel_doc::PositionLabel,
     ) -> Result<Result<Datum, ErrorDatum>, HostFault> {
         match self.answers.pop_front() {
             Some(HostAnswer::Perform(perform))

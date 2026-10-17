@@ -1,13 +1,12 @@
 //! Actions: calls, waits and tasks (`K-TASK`), as a statement's own action
 //! or nested in its expression (`K-EVAL-008`).
 
+use lash_kernel_doc::kernel_internals::EffectIdentity;
 use std::collections::BTreeSet;
 use std::sync::Arc;
 use std::time::Duration;
 
-use lash_kernel_doc::{
-    Datum, EffectIdentity, EffectName, EntityId, JoinMode, Site, TaskId, Type, Value,
-};
+use lash_kernel_doc::{Datum, EffectName, EntityId, JoinMode, Site, TaskId, Type, Value};
 use num_traits::ToPrimitive;
 
 use super::exec::Call;
@@ -678,7 +677,7 @@ impl KernelMachine {
         result: &Type,
     ) -> Eval<Value> {
         self.report_ran(host);
-        match host.perform(effect, args, site) {
+        match host.perform(effect, args, &site.position()) {
             Ok(Ok(answer)) => self.decode_result(exe, &answer, result, effect),
             Ok(Err(error)) => {
                 let datum = Datum::Error(Box::new(error));
@@ -708,7 +707,7 @@ impl KernelMachine {
             .occurrence_index(site)
             .ok_or_else(|| fault("request site has no occurrence index"))?;
         self.task(task)?.counters.advance(index)?;
-        let wait = WaitId(self.next_wait);
+        let wait = lash_kernel_doc::kernel_internals::wait_id(self.next_wait);
         self.next_wait = self
             .next_wait
             .checked_add(1)
@@ -724,16 +723,18 @@ impl KernelMachine {
         task: TaskId,
         site: &Site,
         occurrence: u64,
-    ) -> Result<EffectIdentity, Halt> {
+    ) -> Result<lash_kernel_doc::EffectId, Halt> {
         let access = self.heap.pages().clone();
         let running = self.task(task)?;
         let loops = running.frames.loop_coordinates()?;
-        Ok(EffectIdentity {
-            task: running.identity.resolve(&access)?,
-            site: site.clone(),
-            occurrence,
-            loops,
-        })
+        Ok(lash_kernel_doc::kernel_internals::effect_id(
+            EffectIdentity {
+                task: running.identity.resolve(&access)?,
+                site: site.clone(),
+                occurrence,
+                loops,
+            },
+        ))
     }
 
     /// The intent records request data. Identity is projected at its host
@@ -754,7 +755,7 @@ impl KernelMachine {
             .freeze_datum(&datum)
             .map_err(|error| self.heap_halt(error))?;
         self.waits.write(
-            ordinal_key(wait.0),
+            ordinal_key(lash_kernel_doc::kernel_internals::wait_number(wait)),
             WaitRecord {
                 task,
                 kind,
@@ -796,12 +797,12 @@ impl KernelMachine {
         let occurrence = running.counters.issued(index).ok_or_else(|| {
             lash_kernel_doc::heap::HeapFault::Malformed("issued occurrence is missing".into())
         })?;
-        let identity = EffectIdentity {
+        let identity = lash_kernel_doc::kernel_internals::effect_id(EffectIdentity {
             task: running.identity.resolve(&access)?,
             site: site.clone(),
             occurrence,
             loops,
-        };
+        });
         Ok(match intent {
             lash_kernel_state::AdmittedRequest::Sleep { duration } => {
                 Request::Sleep(SleepRequest {
@@ -1089,15 +1090,19 @@ impl KernelMachine {
         };
         match wait {
             Wait::Request(wait) => {
-                match self.waits.remove(&ordinal_key(wait.0), self.heap.pages())? {
+                match self.waits.remove(
+                    &ordinal_key(lash_kernel_doc::kernel_internals::wait_number(wait)),
+                    self.heap.pages(),
+                )? {
                     Some(pending) if matches!(pending.phase, WaitPhase::Issued { .. }) => {
                         self.uncount_issued()?;
                     }
                     Some(_) => {
-                        self.withdrawn.push_back(wait.0)?;
+                        self.withdrawn
+                            .push_back(lash_kernel_doc::kernel_internals::wait_number(wait))?;
                         self.withdrawn_ever.write(
-                            ordinal_key(wait.0),
-                            wait.0,
+                            ordinal_key(lash_kernel_doc::kernel_internals::wait_number(wait)),
+                            lash_kernel_doc::kernel_internals::wait_number(wait),
                             self.heap.pages(),
                         )?;
                     }

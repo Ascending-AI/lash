@@ -9,6 +9,23 @@ pub(crate) mod perf_witness;
 /// FIG-6688); hosts use [`paged`]'s records, page port and session readers.
 #[doc(hidden)]
 pub mod kernel_internals {
+    pub fn session_heap(session: &crate::paged::SessionRoot) -> lash_kernel_doc::heap::PageRef {
+        session.heap
+    }
+    pub fn session_bindings(session: &crate::paged::SessionRoot) -> crate::paged::KeyedRoot {
+        session.bindings
+    }
+    pub fn session_functions(session: &crate::paged::SessionRoot) -> crate::paged::KeyedRoot {
+        session.functions
+    }
+
+    pub fn checkpoint(root: crate::paged::CheckpointRoot) -> crate::paged::Checkpoint {
+        crate::paged::checkpoint::Checkpoint(root)
+    }
+    pub fn checkpoint_root(checkpoint: &crate::paged::Checkpoint) -> &crate::paged::CheckpointRoot {
+        &checkpoint.0
+    }
+
     pub mod census_impl {
         pub use crate::paged::census_impl::*;
     }
@@ -36,18 +53,14 @@ pub mod kernel_internals {
     }
     pub use crate::paged::heap_impl::PagedHeap;
 }
+use lash_kernel_doc::EffectId;
 use lash_kernel_doc::graph_tokens::{TokenCodec, TokenError, TokenReader, TokenWriter};
-use lash_kernel_doc::{Datum, EffectIdentity, EffectName};
+use lash_kernel_doc::{Datum, EffectName};
 use schemars::JsonSchema;
 use serde::{Deserialize, Serialize};
 use std::time::Duration;
 
-/// One wait a machine hands out, numbered in request order.
-#[derive(
-    Clone, Copy, Debug, PartialEq, Eq, PartialOrd, Ord, Hash, Serialize, Deserialize, JsonSchema,
-)]
-#[serde(transparent)]
-pub struct WaitId(pub u64);
+pub use lash_kernel_doc::WaitId;
 /// A sleep's length.
 #[derive(Clone, Copy, Debug, PartialEq, Eq, Serialize, Deserialize, JsonSchema)]
 #[serde(deny_unknown_fields)]
@@ -88,8 +101,17 @@ pub enum AdmittedRequest {
 /// worker beside a checkpoint root to resume it.
 #[derive(Clone, Debug, PartialEq)]
 pub struct AdmittedWait {
-    pub identity: EffectIdentity,
+    pub identity: EffectId,
     pub request: AdmittedRequest,
+}
+
+impl AdmittedWait {
+    pub fn encode(&self) -> Vec<u8> {
+        lash_kernel_doc::graph_tokens::encode_body(self)
+    }
+    pub fn decode(bytes: &[u8]) -> Result<Self, TokenError> {
+        lash_kernel_doc::graph_tokens::decode_body(bytes)
+    }
 }
 
 fn unsupported(variant: u32) -> TokenError {
@@ -109,16 +131,6 @@ pub(crate) fn variant(
     let expected = arity(variant).ok_or_else(|| unsupported(variant))?;
     TokenReader::expect_fields(fields, expected)?;
     Ok(variant)
-}
-
-impl TokenCodec for WaitId {
-    fn encode(&self, out: &mut TokenWriter) {
-        out.unsigned(self.0);
-    }
-
-    fn decode(input: &mut TokenReader<'_>) -> Result<Self, TokenError> {
-        input.unsigned().map(Self)
-    }
 }
 
 impl TokenCodec for Pause {
@@ -185,8 +197,23 @@ impl TokenCodec for AdmittedWait {
     fn decode(input: &mut TokenReader<'_>) -> Result<Self, TokenError> {
         input.expect_struct(2)?;
         Ok(Self {
-            identity: EffectIdentity::decode(input)?,
+            identity: EffectId::decode(input)?,
             request: AdmittedRequest::decode(input)?,
         })
+    }
+}
+
+/// Deliberately invalid inputs for end-to-end persistence refusal laws.
+pub mod testkit {
+    /// Changes only the kernel version in a checkpoint's token body. Used by
+    /// the retained-image stale-state refusal law; no execution records escape.
+    pub fn checkpoint_with_kernel(
+        bytes: &[u8],
+        kernel: u32,
+    ) -> Result<Vec<u8>, lash_kernel_doc::graph_tokens::TokenError> {
+        let mut root: crate::paged::CheckpointRoot =
+            lash_kernel_doc::graph_tokens::decode_body(bytes)?;
+        root.kernel = kernel;
+        Ok(lash_kernel_doc::graph_tokens::encode_body(&root))
     }
 }

@@ -17,7 +17,7 @@ use lash::tracing::{
     TraceLanguageExecutionIdentity, TraceLanguageExecutionStatus, TraceRuntimeScope,
     TraceRuntimeSubject,
 };
-use lash::workflow::document::{JoinMode, Site};
+use lash::workflow::document::JoinMode;
 use lash::workflow::graph::{
     ActionNode, CalleeNode, EdgeKind, ExecutionSite, Graph, NodeId, NodeKind, Reference, SiteKind,
     Target,
@@ -293,9 +293,13 @@ pub(crate) fn draw(
     overlay: &WorkflowExecutionOverlay,
     document: Option<&WorkflowDocument>,
 ) -> ExecutionGraph {
-    let mut observed = BTreeMap::<&Site, Vec<&WorkflowOverlaySite>>::new();
+    let mut observed =
+        BTreeMap::<lash::workflow::document::PositionLabel, Vec<&WorkflowOverlaySite>>::new();
     for site in &overlay.sites {
-        observed.entry(&site.site.site).or_default().push(site);
+        observed
+            .entry(site.site.site.clone())
+            .or_default()
+            .push(site);
     }
     let (nodes, edges) = match document.map(WorkflowDocument::graph) {
         Some(graph) => (
@@ -308,7 +312,9 @@ pub(crate) fn draw(
                         site.kind.into(),
                         site_label(graph, site),
                         site.loops.len(),
-                        observed.get(&site.site).map_or(&[], Vec::as_slice),
+                        observed
+                            .get(&site.site.position())
+                            .map_or(&[], Vec::as_slice),
                     )
                 })
                 .collect(),

@@ -698,6 +698,7 @@ fn each_nested_wait_is_named_by_its_own_site() {
                 Request::Effect(effect) => &effect.identity,
                 Request::Sleep(sleep) => &sleep.identity,
             };
+            let identity = lash_kernel_doc::kernel_internals::effect_parts(identity);
             let iteration = identity.loops.first().map_or(99, |at| at.iteration);
             (identity.site.to_string(), identity.occurrence, iteration)
         })
@@ -726,12 +727,14 @@ fn sequential_and_recursive_calls_keep_task_wide_effect_identities() {
     let mut warm = Embedder::with(SOURCE, setup(u64::MAX));
     warm.run_to_end(&[]);
     let expected: Vec<_> = (0..5)
-        .map(|occurrence| lash_kernel_doc::EffectIdentity {
-            task: lash_kernel_doc::TaskIdentity::Main,
-            site: embedder::function_site("work", [0, 0]),
-            occurrence,
-            loops: Vec::new(),
-        })
+        .map(
+            |occurrence| lash_kernel_doc::kernel_internals::EffectIdentity {
+                task: lash_kernel_doc::kernel_internals::TaskIdentity::Main,
+                site: embedder::function_site("work", [0, 0]),
+                occurrence,
+                loops: Vec::new(),
+            },
+        )
         .collect();
     let identities = |requests: &[Request]| {
         requests
@@ -740,7 +743,7 @@ fn sequential_and_recursive_calls_keep_task_wide_effect_identities() {
                 let Request::Effect(effect) = request else {
                     panic!("{request:?}")
                 };
-                effect.identity.clone()
+                lash_kernel_doc::kernel_internals::effect_parts(&effect.identity).clone()
             })
             .collect::<Vec<_>>()
     };
@@ -828,7 +831,7 @@ fn a_wait_in_a_while_condition_is_named_inside_its_loop() {
             let Request::Effect(effect) = request else {
                 panic!("{request:?}");
             };
-            let identity = &effect.identity;
+            let identity = lash_kernel_doc::kernel_internals::effect_parts(&effect.identity);
             let loops = identity
                 .loops
                 .iter()

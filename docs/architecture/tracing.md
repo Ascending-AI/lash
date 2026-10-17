@@ -139,7 +139,7 @@ timer keeps the receiving scope's parent. A substrate attempt is a link.
 
 Containers derive ids with `derive_span(parent, key)` from retained identities:
 `TraceScopeId` for turns, calls, processes and intents; graph key for cells;
-the whole `EffectIdentity` for workflow occurrences. Loops, recursion and
+the opaque `EffectId` for workflow occurrences. Loops, recursion and
 concurrent occurrences stay distinct. Leaves (model calls and attempts,
 extensions and points) draw random ids at open; every real re-execution is a
 new leaf. Restoring a scope reads its retained position without minting one.

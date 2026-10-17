@@ -115,15 +115,8 @@ pub enum Unreplayable {
 
 pub use lash_kernel_doc::{ReplayPath, TaskPath};
 
-fn replay_path(path: lash_vm_client::wire::OrdinalPath) -> ReplayPath {
-    let mut tasks: Vec<TaskPath> = Vec::new();
-    for (task, starts) in path {
-        match tasks.iter_mut().find(|held| held.task == task) {
-            Some(held) => held.starts.extend(starts),
-            None => tasks.push(TaskPath { task, starts }),
-        }
-    }
-    ReplayPath { tasks }
+fn replay_path(path: lash_kernel_vm::ExecutionPath) -> ReplayPath {
+    path.replay()
 }
 
 /// Why a replay answered nothing: the worker or the store failed it, not
@@ -171,8 +164,8 @@ impl ReplayHost {
 
 #[async_trait::async_trait]
 impl RunHost for ReplayHost {
-    fn observe(&self) -> lash_kernel_vm::Observe {
-        lash_kernel_vm::Observe::Counts
+    fn observe(&self) -> lash_kernel_vm::ObservationMode {
+        lash_kernel_vm::ObservationMode::Counts
     }
 
     fn traces_path(&self) -> bool {
@@ -209,7 +202,7 @@ impl RunHost for ReplayHost {
         &self,
         effect: &lash_kernel_doc::EffectName,
         _args: &[Datum],
-        _site: &lash_kernel_doc::Site,
+        _site: &lash_kernel_doc::PositionLabel,
     ) -> Result<Result<Datum, ErrorDatum>, ParentFault> {
         Err(self.diverge(&format!(
             "a kernel process binds no read, and the segment performed `{effect}` as one"
@@ -226,7 +219,7 @@ impl RunHost for ReplayHost {
 struct Start_ {
     parked: Option<(ParkedPage, StepFact)>,
     admissions: Vec<Admission>,
-    deliver: Vec<(u64, OutcomeWire)>,
+    deliver: Vec<(lash_protocol_types::WaitId, OutcomeWire)>,
 }
 
 /// What the journal retains of a process, as a replay reads it.
@@ -250,7 +243,7 @@ impl Journal<'_> {
         }
     }
 
-    fn issued(&self, run: u64, wait: u64) -> Option<&Issued> {
+    fn issued(&self, run: u64, wait: lash_protocol_types::WaitId) -> Option<&Issued> {
         self.parked(run)?
             .1
             .iter()
@@ -261,7 +254,7 @@ impl Journal<'_> {
     /// from the record that holds it, and bound by its digest.
     fn delivered(
         &self,
-        wait: u64,
+        wait: lash_protocol_types::WaitId,
         source: &DeliverySource,
         digest: &str,
     ) -> Result<OutcomeWire, Unreplayable> {
@@ -439,7 +432,7 @@ impl KernelProcessEngine {
             .and_then(|settings| {
                 serde_json::from_value::<KernelRecordedSettings>(settings.value().clone()).ok()
             })
-            .filter(|settings| settings.observe == lash_kernel_vm::Observe::Counts);
+            .filter(|settings| settings.observe == lash_kernel_vm::ObservationMode::Counts);
         let mut answers = Vec::with_capacity(chosen.len());
         for segment in chosen {
             let answer = match &settings {
@@ -607,14 +600,14 @@ impl KernelProcessEngine {
                     ..
                 },
             ) => {
-                let replayed: Vec<u64> = park.withdrawn.iter().map(|wait| wait.0).collect();
-                let asked: Vec<(u64, Admission)> = park
+                let replayed: Vec<lash_protocol_types::WaitId> = park.withdrawn.clone();
+                let asked: Vec<(lash_protocol_types::WaitId, Admission)> = park
                     .requests
                     .iter()
                     .map(admission_of)
                     .filter(|(wait, _)| !replayed.contains(wait))
                     .collect();
-                let recorded_asks: Vec<(u64, Admission)> = issued
+                let recorded_asks: Vec<(lash_protocol_types::WaitId, Admission)> = issued
                     .iter()
                     .map(|issued| (issued.wait(), issued.admission().clone()))
                     .collect();

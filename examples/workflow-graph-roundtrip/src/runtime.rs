@@ -5,7 +5,7 @@ use lash::LashCore;
 use lash::persistence::ProcessStartReceipt;
 use lash::process::*;
 use lash::tracing::{TraceLanguageExecutionPayload, TraceNodeFact};
-use lash::workflow::document::{Document, EffectIdentity, Name, Site, TaskIdentity};
+use lash::workflow::document::{Document, EffectId, Name, Site, TaskLabel};
 use lash::workflow::edit::Draft;
 use lash::workflow::view::{ActionObservation, ActionState, WorkflowCoverage, WorkflowView};
 use lash::workflow::{
@@ -134,7 +134,7 @@ pub(crate) async fn publish(
     let settings = Some(
         core.processes()
             .kernel_engine_defaults()?
-            .observing(lash::process::Observe::Counts)
+            .observing(lash::process::ObservationMode::Counts)
             .into_engine_settings(),
     );
     let result = async {
@@ -236,7 +236,7 @@ pub(crate) async fn observe(
                     output: record.output.value_for_projection(),
                 });
                 if let Some(identity) = event.occurrence.clone()
-                    && overlay.view.action_node(&identity.site).is_some()
+                    && overlay.view.action_node(&identity.position()).is_some()
                 {
                     let evidence = ActionObservation {
                         identity: identity.clone(),
@@ -251,7 +251,7 @@ pub(crate) async fn observe(
                         .view
                         .activity(overlay.view.document, &[evidence])?
                         .into_iter()
-                        .find(|activity| activity.site == identity.site);
+                        .find(|activity| activity.site == identity.position());
                 }
             }
             if event.coverage.is_some()
@@ -415,7 +415,7 @@ fn settlement(
 struct Overlay {
     view: WorkflowView,
     accumulator: WorkflowExecutionOverlayAccumulator,
-    identities: BTreeMap<(Site, TaskIdentity), EffectIdentity>,
+    identities: BTreeMap<(lash::workflow::document::PositionLabel, TaskLabel), EffectId>,
     process: lash::ProcessId,
     workflow_version: u64,
     definition: String,
@@ -424,7 +424,7 @@ struct Overlay {
     shown: BTreeMap<Site, (RunStatus, u64, u64)>,
     sequence: u64,
     display: DisplayState,
-    completed_calls: BTreeMap<String, Site>,
+    completed_calls: BTreeMap<String, lash::workflow::document::PositionLabel>,
     delivered: BTreeSet<String>,
     host: Arc<crate::display::HostTools>,
     /// The coverage last sent.
@@ -462,7 +462,7 @@ impl Overlay {
     /// An event at `site`, or about the run as a whole when there is none.
     fn event(
         &mut self,
-        site: Option<Site>,
+        site: Option<lash::workflow::document::PositionLabel>,
         status: RunStatus,
         display_delta: DisplayDelta,
         error: Option<String>,
@@ -475,7 +475,11 @@ impl Overlay {
             sequence: self.sequence,
             reset: false,
             call_only: false,
-            site,
+            site: site.and_then(|position| {
+                self.view
+                    .action_node(&position)
+                    .map(|node| node.site.clone())
+            }),
             status,
             display_delta,
             display: self.display.clone(),
@@ -530,15 +534,15 @@ impl Overlay {
         vec![event]
     }
 
-    fn remember(&mut self, at: &EffectIdentity) {
-        if self.view.action_node(&at.site).is_none() {
+    fn remember(&mut self, at: &EffectId) {
+        if self.view.action_node(&at.position()).is_none() {
             return;
         }
-        let key = (at.site.clone(), at.task.clone());
+        let key = (at.position(), at.task());
         if self
             .identities
             .get(&key)
-            .is_none_or(|held| held.occurrence <= at.occurrence)
+            .is_none_or(|held| held.visit() <= at.visit())
         {
             self.identities.insert(key, at.clone());
         }
@@ -589,7 +593,7 @@ impl Overlay {
                         .identities
                         .get(&(site.site.site.clone(), site.site.task.clone()))
                         .filter(|identity| {
-                            Some(identity.occurrence) == site.state.occurrence.occurrence()
+                            Some(identity.visit()) == site.state.occurrence.occurrence()
                         })?
                         .clone(),
                     state,
@@ -632,7 +636,7 @@ impl Overlay {
             }
             self.shown.insert(node.site.clone(), shown);
             let mut event = self.event(
-                Some(node.site.clone()),
+                Some(node.site.position()),
                 status,
                 DisplayDelta::default(),
                 error,
@@ -690,7 +694,7 @@ impl Overlay {
             ProcessEffectOutcomeClass::Success => {
                 if let Some(call) = &occurrence.call_id {
                     self.completed_calls
-                        .insert(call.to_string(), occurrence.at.site.clone());
+                        .insert(call.to_string(), occurrence.at.position());
                 }
                 RunStatus::Succeeded
             }
@@ -699,7 +703,7 @@ impl Overlay {
             }
         };
         let mut event = self.event(
-            Some(occurrence.at.site.clone()),
+            Some(occurrence.at.position()),
             status,
             DisplayDelta::default(),
             occurrence.code.as_ref().map(ToString::to_string),
@@ -711,12 +715,12 @@ impl Overlay {
             overlay
                 .sites
                 .iter()
-                .any(|site| site.site.site == occurrence.at.site)
+                .any(|site| site.site.site == occurrence.at.position())
         });
         let mut events = vec![event];
         if !observed {
             let mut event = self.event(
-                Some(occurrence.at.site.clone()),
+                Some(occurrence.at.position()),
                 status,
                 DisplayDelta::default(),
                 occurrence.code.as_ref().map(ToString::to_string),
@@ -729,7 +733,7 @@ impl Overlay {
 
     fn waiting(&mut self, wait: &WaitState) -> RunEvent {
         let mut event = self.event(
-            wait.site.as_ref().map(|at| at.site.clone()),
+            wait.site.as_ref().map(|at| at.position()),
             RunStatus::Waiting,
             DisplayDelta::default(),
             None,
@@ -825,7 +829,7 @@ impl Overlay {
         Ok((events, terminal))
     }
 
-    fn observed_call(&self, at: &EffectIdentity) -> Option<lash::ToolCallId> {
+    fn observed_call(&self, at: &EffectId) -> Option<lash::ToolCallId> {
         self.accumulator
             .snapshot()?
             .history
@@ -856,8 +860,7 @@ impl Overlay {
                     .clone()
                     .or_else(|| self.observed_call(at))
                     .map(|call| {
-                        self.completed_calls
-                            .insert(call.to_string(), at.site.clone());
+                        self.completed_calls.insert(call.to_string(), at.position());
                         (call, RunStatus::Succeeded, None)
                     }),
                 TraceNodeFact::Failed { call_id, failure } => call_id
@@ -867,12 +870,8 @@ impl Overlay {
                 _ => None,
             };
             if let Some((call, status, error)) = call {
-                let mut event = self.event(
-                    Some(at.site.clone()),
-                    status,
-                    DisplayDelta::default(),
-                    error,
-                );
+                let mut event =
+                    self.event(Some(at.position()), status, DisplayDelta::default(), error);
                 event.call_id = Some(call);
                 event.occurrence = Some(at.clone());
                 event.call_only = true;
@@ -964,7 +963,7 @@ mod tests {
         TraceLanguageExecution, TraceLanguageExecutionIdentity, TraceRuntimeScope,
         TraceRuntimeSubject,
     };
-    use lash::workflow::document::{DocumentId, EffectIdentity, TaskIdentity, Unit};
+    use lash::workflow::document::{DocumentId, Unit};
     use lash::workflow::{WorkflowDocumentEntry, WorkflowDocumentRef};
 
     fn overlay() -> Overlay {
@@ -1018,12 +1017,12 @@ mod tests {
                     subject: TraceRuntimeSubject::Process {
                         process_id: lash::ProcessId::fixture("adapter"),
                     },
-                    at: EffectIdentity {
-                        task: TaskIdentity::Main,
-                        site: Site::new(Unit::Main, [0, 0]),
+                    at: lash::workflow::document::testkit::effect(
+                        lash::workflow::document::testkit::root_task(),
+                        Site::new(Unit::Main, [0, 0]),
                         occurrence,
-                        loops: Vec::new(),
-                    },
+                        Vec::new(),
+                    ),
                     fact,
                 },
             },
@@ -1035,12 +1034,12 @@ mod tests {
             observed_at_ms: occurrence * 10,
             step: lash::tracing::StepBodyStarted {
                 process_id: lash::ProcessId::fixture("adapter"),
-                at: EffectIdentity {
-                    task: TaskIdentity::Main,
-                    site: Site::new(Unit::Main, [0, 0]),
+                at: lash::workflow::document::testkit::effect(
+                    lash::workflow::document::testkit::root_task(),
+                    Site::new(Unit::Main, [0, 0]),
                     occurrence,
-                    loops: Vec::new(),
-                },
+                    Vec::new(),
+                ),
                 call_id,
                 attempt: 1,
             },
@@ -1054,9 +1053,12 @@ mod tests {
         let mut overlay = overlay();
         let mut callee = observation(0, TraceNodeFact::Started { call_id: None });
         if let TraceLanguageExecutionPayload::Node { at, .. } = &mut callee.execution.payload {
-            at.site = Site::new(
-                Unit::Function(lash::workflow::document::Name::new("callee")),
-                [0, 0],
+            *at = lash::workflow::document::testkit::with_position(
+                at,
+                Site::new(
+                    Unit::Function(lash::workflow::document::Name::new("callee")),
+                    [0, 0],
+                ),
             );
         }
         assert!(overlay.language_observation(&callee).unwrap().is_empty());
@@ -1071,11 +1073,14 @@ mod tests {
         let TraceLanguageExecutionPayload::Node { at, .. } = &mut running.execution.payload else {
             panic!("node fixture");
         };
-        at.site = Site::new(Unit::Main, [0, 1, 0, 0]);
-        at.loops = vec![lash::workflow::document::LoopIteration {
-            site: Site::new(Unit::Main, [0]),
-            iteration: 3,
-        }];
+        *at = lash::workflow::document::testkit::with_position(
+            at,
+            Site::new(Unit::Main, [0, 1, 0, 0]),
+        );
+        *at = lash::workflow::document::testkit::with_loops(
+            at,
+            vec![(Site::new(Unit::Main, [0]), 3)],
+        );
         let identity = at.clone();
         let events = overlay.language_observation(&running).unwrap();
         assert_eq!(
@@ -1127,11 +1132,14 @@ mod tests {
         let mut overlay = overlay();
         let mut running = observation(0, TraceNodeFact::Started { call_id: None });
         if let TraceLanguageExecutionPayload::Node { at, .. } = &mut running.execution.payload {
-            at.task = TaskIdentity::Spawned(lash::workflow::document::SpawnIdentity {
-                parent: Arc::new(TaskIdentity::Main),
-                site: Site::new(Unit::Main, [1]),
-                occurrence: 0,
-            });
+            *at = lash::workflow::document::testkit::with_task(
+                at,
+                lash::workflow::document::testkit::spawned_task(
+                    lash::workflow::document::testkit::root_task(),
+                    Site::new(Unit::Main, [1]),
+                    0,
+                ),
+            );
         }
         overlay.language_observation(&running).unwrap();
         let mut last_durable = None;
@@ -1144,7 +1152,8 @@ mod tests {
             let other_call = lash::ToolCallId::fixture(&format!("other-task-{occurrence}"));
             let mut concurrent = body_start(occurrence, other_call);
             if let TraceLanguageExecutionPayload::Node { at, .. } = &running.execution.payload {
-                concurrent.step.at.task = at.task.clone();
+                concurrent.step.at =
+                    lash::workflow::document::testkit::with_task(&concurrent.step.at, at.task());
             }
             overlay.step_body_started(&concurrent).unwrap();
             let events = overlay
@@ -1169,12 +1178,12 @@ mod tests {
             );
             let durable = ProcessEffectOccurrence {
                 vocabulary_version: 1,
-                at: EffectIdentity {
-                    task: TaskIdentity::Main,
-                    site: Site::new(Unit::Main, [0, 0]),
+                at: lash::workflow::document::testkit::effect(
+                    lash::workflow::document::testkit::root_task(),
+                    Site::new(Unit::Main, [0, 0]),
                     occurrence,
-                    loops: Vec::new(),
-                },
+                    Vec::new(),
+                ),
                 operation: "fixture".into(),
                 outcome_class: ProcessEffectOutcomeClass::Success,
                 code: None,

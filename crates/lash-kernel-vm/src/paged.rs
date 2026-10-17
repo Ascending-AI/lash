@@ -13,7 +13,7 @@ use lash_kernel_doc::heap::{HeapFault, PageRef};
 use lash_kernel_doc::{Datum, DocumentId, Invalid, Name, Value};
 use lash_kernel_state::AdmittedWait;
 use lash_kernel_state::paged::{
-    CheckpointRoot, FunctionRecord, PageSource, SealBudget, SessionRoot,
+    Checkpoint, CheckpointRoot, FunctionRecord, PageSource, SealBudget, SessionRoot,
 };
 use std::collections::{BTreeMap, BTreeSet};
 
@@ -109,7 +109,14 @@ pub struct SealedRoot {
     pub page: PageRef,
     /// Its decoded header, which the embedder's control record copies
     /// (kernel, document, release, owner, waits summary, meters).
-    pub root: CheckpointRoot,
+    pub(crate) root: CheckpointRoot,
+}
+
+impl SealedRoot {
+    /// Opaque state for reopening this checkpoint.
+    pub fn checkpoint(&self) -> Checkpoint {
+        lash_kernel_state::kernel_internals::checkpoint(self.root.clone())
+    }
 }
 
 /// A successful run's end after the cutover.
@@ -205,10 +212,16 @@ pub trait Machine: Sized {
     fn open(
         program: Program,
         bounds: Bounds,
-        root: &CheckpointRoot,
+        root: &Checkpoint,
         admissions: Vec<AdmittedWait>,
         source: Box<dyn PageSource>,
     ) -> Result<Self, OpenError>;
+
+    /// Selects the embedding policy before the segment runs.
+    fn set_options(&mut self, options: crate::MachineOptions);
+    /// Takes exact counts since the previous take or live observer delivery.
+    fn take_counts(&mut self) -> crate::SiteCounts;
+    fn take_path(&mut self) -> Result<crate::ExecutionPath, HeapFault>;
 
     fn run(&mut self, host: &mut dyn Host, slice: u64) -> Result<Step, MachineError>;
 
@@ -237,34 +250,4 @@ pub trait Machine: Sized {
     }
 
     fn meters(&self) -> Meters;
-    fn task_identity(
-        &self,
-        identity: lash_kernel_state::paged::TaskIdentityRef,
-    ) -> Result<lash_kernel_doc::TaskIdentity, HeapFault>;
-    fn tasks(
-        &self,
-        root: lash_kernel_state::paged::KeyedRoot,
-        filter: TaskFilter,
-        after: Option<lash_kernel_doc::TaskId>,
-        limit: u32,
-    ) -> Result<TaskPage, HeapFault>;
-}
-
-/// A filter for explicit task-table diagnostics.
-#[derive(Clone, Copy, Debug, PartialEq, Eq)]
-pub enum TaskFilter {
-    All,
-    Live,
-    Outstanding,
-}
-
-/// At most `limit` rows are examined; a filter may return fewer members.
-#[derive(Clone, Debug)]
-pub struct TaskPage {
-    pub tasks: Vec<(
-        lash_kernel_doc::TaskId,
-        lash_kernel_state::paged::TaskIdentityRef,
-    )>,
-    pub after: Option<lash_kernel_doc::TaskId>,
-    pub finished: bool,
 }

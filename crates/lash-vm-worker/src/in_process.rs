@@ -10,7 +10,7 @@ use std::sync::{Arc, OnceLock};
 use lash_core_store::checkpoint_graph::NodeId;
 use lash_kernel_doc::heap::{PageId, PageRef};
 use lash_kernel_doc::{DocumentId, ErrorDatum};
-use lash_kernel_state::paged::{CheckpointRoot, PageSource};
+use lash_kernel_state::paged::{Checkpoint, PageSource};
 use lash_kernel_vm::{
     Bounds, CellStart, Host, KernelMachine, Machine, Outcome, Program, Step, WaitId,
 };
@@ -135,7 +135,7 @@ impl<H: Host> Host for Cancelling<'_, H> {
         &mut self,
         effect: &lash_kernel_doc::EffectName,
         args: &[lash_kernel_doc::Datum],
-        site: &lash_kernel_doc::Site,
+        site: &lash_kernel_doc::PositionLabel,
     ) -> Result<Result<lash_kernel_doc::Datum, ErrorDatum>, lash_kernel_vm::HostFault> {
         self.host.perform(effect, args, site)
     }
@@ -411,7 +411,7 @@ where
             self.host.clone(),
             move |mut source| {
                 let answers = source.read(&[root]).map_err(fault)?;
-                let header = CheckpointRoot::of_answer(
+                let header = Checkpoint::of_answer(
                     answers
                         .first()
                         .ok_or_else(|| fault("the checkpoint root was not read"))?

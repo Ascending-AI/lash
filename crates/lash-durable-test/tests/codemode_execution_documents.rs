@@ -20,7 +20,7 @@ use std::collections::BTreeSet;
 use std::sync::{Arc, Mutex};
 
 use lash::tracing::{TraceLanguageExecution, TraceLanguageExecutionPayload};
-use lash::workflow::document::Site;
+
 use lash::workflow::{
     WorkflowDocument, WorkflowDocumentEntry, WorkflowDocumentRead, WorkflowDocumentRef,
 };
@@ -115,12 +115,12 @@ fn execution_starts<'r>(
 fn emitted_sites(
     events: &[&TraceLanguageExecution],
     started: &TraceLanguageExecution,
-) -> BTreeSet<Site> {
+) -> BTreeSet<lash::workflow::document::PositionLabel> {
     events
         .iter()
         .filter(|event| event.identity == started.identity && event.subject() == started.subject())
         .filter_map(|event| event.payload.at())
-        .map(|at| at.site.clone())
+        .map(|at| at.position())
         .collect()
 }
 
@@ -301,7 +301,7 @@ await control.finish(fetched.url);
                     && event.subject() == started.subject()
                     && call_id == &call.call_id =>
                 {
-                    Some(at.site.clone())
+                    Some(at.position())
                 }
                 _ => None,
             })

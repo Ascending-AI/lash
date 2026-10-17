@@ -90,7 +90,7 @@ pub struct ProcessEffectOccurrence {
     pub vocabulary_version: u32,
     /// The occurrence of the execution site the effect ran at: two calls of
     /// one node stay apart after the live window.
-    pub at: lash_protocol_types::EffectIdentity,
+    pub at: lash_protocol_types::EffectId,
     pub operation: String,
     pub outcome_class: ProcessEffectOutcomeClass,
     #[serde(default, skip_serializing_if = "Option::is_none")]
@@ -104,7 +104,7 @@ pub struct ProcessEffectOccurrence {
 #[serde(deny_unknown_fields)]
 struct ProcessEffectOccurrenceFields {
     vocabulary_version: u32,
-    at: lash_protocol_types::EffectIdentity,
+    at: lash_protocol_types::EffectId,
     operation: String,
     outcome_class: ProcessEffectOutcomeClass,
     #[serde(default, deserialize_with = "nonempty_failure_code")]
@@ -158,7 +158,7 @@ fn nonempty_identifier(
 
 impl ProcessEffectOccurrence {
     pub fn new(
-        at: lash_protocol_types::EffectIdentity,
+        at: lash_protocol_types::EffectId,
         operation: impl Into<String>,
         outcome_class: ProcessEffectOutcomeClass,
         code: Option<lash_protocol_types::FailureCode>,
@@ -464,11 +464,11 @@ impl ProcessEffectReport {
         match fact {
             super::ProcessLifecycleFact::EffectOutcome(outcome) => {
                 outcome.admit(fleet_format)?;
-                let node = self.node_entry(&outcome.at.site.to_string());
+                let node = self.node_entry(&outcome.at.position().to_string());
                 // Task order, then occurrence: one order whatever page the
                 // facts arrived in.
                 let key = |occurrence: &ProcessEffectOccurrence| {
-                    (occurrence.at.task.clone(), occurrence.at.occurrence)
+                    (occurrence.at.task(), occurrence.at.visit())
                 };
                 let position = node
                     .occurrences
@@ -539,41 +539,9 @@ pub(super) fn vocabulary_version_schema() -> serde_json::Value {
     }
 }
 
-/// The shape of an occurrence: the machine's effect identity. The typed
-/// decode is strict about its task and sites; admission only bounds the
-/// envelope.
+/// The engine owns the occurrence token; admission only bounds its envelope.
 fn occurrence_schema() -> serde_json::Value {
-    let site = serde_json::json!({
-        "type": "object",
-        "additionalProperties": false,
-        "required": ["unit"],
-        "properties": {
-            "unit": {},
-            "path": { "type": "array", "items": { "type": "integer", "minimum": 0 } }
-        }
-    });
-    serde_json::json!({
-        "type": "object",
-        "additionalProperties": false,
-        "required": ["task", "site", "occurrence"],
-        "properties": {
-            "task": {},
-            "site": site,
-            "occurrence": { "type": "integer", "minimum": 0, "maximum": u64::MAX },
-            "loops": {
-                "type": "array",
-                "items": {
-                    "type": "object",
-                    "additionalProperties": false,
-                    "required": ["site", "iteration"],
-                    "properties": {
-                        "site": site,
-                        "iteration": { "type": "integer", "minimum": 0, "maximum": u64::MAX }
-                    }
-                }
-            }
-        }
-    })
+    serde_json::json!({ "type": "string", "pattern": "^e:([0-9a-f]{2})+$" })
 }
 
 #[expect(

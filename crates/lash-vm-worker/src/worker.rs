@@ -8,11 +8,11 @@ use std::time::Instant;
 use crate::PoolError;
 use crate::embedding::Embedding;
 use crate::host::{PagePort, Wire, WireHost, WirePageSource, grant_of, link_grant};
-use lash_kernel_doc::graph_tokens::{ChildRef, decode_body};
+use lash_kernel_doc::graph_tokens::ChildRef;
 use lash_kernel_doc::heap::{PageId, PageRef};
 use lash_kernel_doc::{Datum, IdentifiedDocument};
 use lash_kernel_state::AdmittedWait;
-use lash_kernel_state::paged::{CheckpointRoot, PageSource};
+use lash_kernel_state::paged::{Checkpoint, PageSource};
 use lash_kernel_vm::{Bounds, CellStart, KernelMachine, Machine, OpenError, Program, Step};
 #[cfg(test)]
 use lash_vm_client::ipc::read_frame;
@@ -407,7 +407,7 @@ impl<'embedding> Server<'embedding> {
         hosted.sealed = None;
         hosted
             .machine
-            .deliver(lash_kernel_vm::WaitId(delivery.wait), outcome.into())
+            .deliver(delivery.wait, outcome.into())
             .map_err(machine_breach)?;
         Ok(())
     }
@@ -581,33 +581,36 @@ impl<'embedding> Server<'embedding> {
                     .first()
                     .ok_or_else(|| undecodable(RunInput::Checkpoint, &"the root was not read"))?;
                 let answer = answer.as_ref().map_err(|error| heap_fault(error.clone()))?;
-                let root = CheckpointRoot::of_answer(answer).map_err(|fault| {
+                let root = Checkpoint::of_answer(answer).map_err(|fault| {
                     PoolError::refused(RunRefusal::Checkpoint {
                         refusal: CheckpointRefusal::Malformed {
                             problem: fault.to_string(),
                         },
                     })
                 })?;
-                if root.owner != owner {
+                if root.header().owner != owner {
                     return Err(PoolError::refused(RunRefusal::Checkpoint {
                         refusal: CheckpointRefusal::WrongOwner {
                             expected: hex(&owner.0),
-                            found: hex(&root.owner.0),
+                            found: hex(&root.header().owner.0),
                         },
                     }));
                 }
-                if manifests.dialect_of(&ChildRef(root.release.0)).is_none() {
+                if manifests
+                    .dialect_of(&ChildRef(root.header().release.0))
+                    .is_none()
+                {
                     return Err(PoolError::refused(RunRefusal::Restore {
                         refusal: KernelRestoreRefusal::ReleaseMismatch {
-                            pinned: hex(&root.release.0),
+                            pinned: hex(&root.header().release.0),
                         },
                     }));
                 }
-                program.release = root.release;
+                program.release = root.header().release;
                 let admissions = checkpoint
                     .admissions
                     .iter()
-                    .map(|admission| decode_body::<AdmittedWait>(&admission.0))
+                    .map(|admission| AdmittedWait::decode(&admission.0))
                     .collect::<Result<Vec<_>, _>>()
                     .map_err(|error| undecodable(RunInput::Checkpoint, &error))?;
                 KernelMachine::open(program, bounds, &root, admissions, Box::new(source)).map_err(
@@ -621,17 +624,15 @@ impl<'embedding> Server<'embedding> {
                 )?
             }
         };
-        machine.set_observe(if start.observe_counts {
-            lash_kernel_vm::Observe::Counts
-        } else {
-            lash_kernel_vm::Observe::Off
+        machine.set_options(lash_kernel_vm::MachineOptions {
+            observation: if start.observe_counts {
+                lash_kernel_vm::ObservationMode::Counts
+            } else {
+                lash_kernel_vm::ObservationMode::Off
+            },
+            trace_path: path.is_some(),
+            cell_save: save.map(|save| Box::new(save) as Box<dyn lash_kernel_vm::CellSave>),
         });
-        if let Some(save) = save {
-            machine.set_cell_save(Box::new(save));
-        }
-        if path.is_some() {
-            machine.trace_path();
-        }
         Ok(Hosted {
             machine,
             memory: start.bounds.memory,
@@ -704,8 +705,8 @@ impl<'embedding> Server<'embedding> {
             wire,
             cancel,
             printed: Vec::new(),
-            ran: Vec::new(),
-            path: Vec::new(),
+            ran: lash_kernel_vm::SiteCounts::new(),
+            path: lash_kernel_vm::ExecutionPath::default(),
             sites: hosted
                 .observe_sites
                 .then(crate::host::EnteredSites::default),
@@ -720,26 +721,11 @@ impl<'embedding> Server<'embedding> {
                 other => machine_breach(other),
             })?;
         if hosted.observe_sites || !matches!(step, Step::Slice) {
-            host.ran.extend(hosted.machine.take_ran());
+            host.ran.extend(hosted.machine.take_counts());
         }
-        if let Some(ordinals) = &hosted.path {
-            host.path = hosted
-                .machine
-                .take_path()
-                .map_err(|fault| machine_breach(format!("the path lost a task: {fault}")))?
-                .into_iter()
-                .map(|(task, sites)| {
-                    let starts = sites
-                        .iter()
-                        .map(|site| {
-                            ordinals.get(site).copied().ok_or_else(|| {
-                                machine_breach(format!("the path names no document site {site}"))
-                            })
-                        })
-                        .collect::<Result<Vec<u32>, PoolError>>()?;
-                    Ok((task, starts))
-                })
-                .collect::<Result<_, PoolError>>()?;
+        if hosted.path.is_some() {
+            host.path = lash_kernel_vm::Machine::take_path(&mut hosted.machine)
+                .map_err(|fault| machine_breach(format!("the path lost a task: {fault}")))?;
         }
         let meters = hosted.machine.meters();
         let memory = hosted.memory;

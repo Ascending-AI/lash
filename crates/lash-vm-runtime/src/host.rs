@@ -2,7 +2,7 @@
 
 use std::sync::Arc;
 
-use lash_kernel_doc::{Datum, EffectName, ErrorDatum, Handle, Integer, Site, Timestamp};
+use lash_kernel_doc::{Datum, EffectName, ErrorDatum, Handle, Integer, Timestamp};
 use lash_vm_broker::{DurableSnapshotStore, ParentFault};
 use lash_vm_client::RunHost;
 
@@ -19,7 +19,7 @@ pub trait EffectReads: Send + Sync {
         &self,
         effect: &EffectName,
         args: &[Datum],
-        site: &Site,
+        site: &lash_kernel_doc::PositionLabel,
     ) -> Result<Result<Datum, ErrorDatum>, ParentFault>;
 }
 
@@ -29,7 +29,7 @@ pub trait EffectReads: Send + Sync {
 pub struct ParentHost {
     pub observation: lash_kernel_doc::RunObservation,
     /// Takes exact deltas from worker frames, outside checkpoint state.
-    pub ran: Arc<dyn Fn(&lash_kernel_vm::RanDelta) + Send + Sync>,
+    pub ran: Arc<dyn Fn(&lash_kernel_vm::SiteCounts) + Send + Sync>,
     /// The run's store, whose clock is the run's clock.
     pub store: Arc<DurableSnapshotStore>,
     pub random: Arc<dyn Fn() -> u64 + Send + Sync>,
@@ -42,11 +42,11 @@ pub struct ParentHost {
 
 #[async_trait::async_trait]
 impl RunHost for ParentHost {
-    fn observe(&self) -> lash_kernel_vm::Observe {
+    fn observe(&self) -> lash_kernel_vm::ObservationMode {
         self.observation
     }
 
-    fn ran(&self, delta: &lash_kernel_vm::RanDelta) {
+    fn ran(&self, delta: &lash_kernel_vm::SiteCounts) {
         (self.ran)(delta);
     }
 
@@ -78,7 +78,7 @@ impl RunHost for ParentHost {
         &self,
         effect: &EffectName,
         args: &[Datum],
-        site: &Site,
+        site: &lash_kernel_doc::PositionLabel,
     ) -> Result<Result<Datum, ErrorDatum>, ParentFault> {
         self.reads.perform(effect, args, site).await
     }

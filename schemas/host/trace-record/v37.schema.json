@@ -581,37 +581,9 @@
       ],
       "type": "object"
     },
-    "EffectIdentity": {
-      "additionalProperties": false,
-      "description": "Which wait of a run: one execution of a `perform` or a `sleep`.",
-      "properties": {
-        "loops": {
-          "description": "The loops the task was inside when it ran the site, outermost first,\nacross its active calls.",
-          "items": {
-            "$ref": "#/$defs/LoopIteration"
-          },
-          "type": "array"
-        },
-        "occurrence": {
-          "description": "How many times the task had run that site before, from 0.",
-          "format": "uint64",
-          "minimum": 0,
-          "type": "integer"
-        },
-        "site": {
-          "$ref": "#/$defs/Site",
-          "description": "The site of the `perform` or the `sleep`."
-        },
-        "task": {
-          "$ref": "#/$defs/TaskIdentity"
-        }
-      },
-      "required": [
-        "task",
-        "site",
-        "occurrence"
-      ],
-      "type": "object"
+    "EffectId": {
+      "pattern": "^e:([0-9a-f]{2})+$",
+      "type": "string"
     },
     "ExecCodeFailureReason": {
       "description": "Why an `exec_code` effect failed before the executor produced a response.\n\nThis is the closed classification offline trace analysis keys on; the human\ndetail lives in [`ExecCodeFailure::message`]. Serialized snake_case on the\ndurable journal and trace surfaces.",
@@ -1035,10 +1007,6 @@
     "FailureCode": {
       "type": "string"
     },
-    "FunctionId": {
-      "pattern": "^[0-9a-f]{64}$",
-      "type": "string"
-    },
     "GenerationOptionOutcome": {
       "description": "What became of one host-set generation setting on one request.\n\nA setting a host sets is sent, or the call is refused before any I/O with a\ntyped failure; nothing is silently dropped. The receipt therefore names only\nthe two deliberate non-send dispositions besides `Applied`: a cap reduced to\nthe model's capacity, and stop sequences a protocol owns. `Applied` means\nlash put the value on the wire, never that the provider complied.",
       "oneOf": [
@@ -1381,27 +1349,6 @@
         "cache_read_input_tokens",
         "cache_write_input_tokens",
         "reasoning_output_tokens"
-      ],
-      "type": "object"
-    },
-    "LoopIteration": {
-      "additionalProperties": false,
-      "description": "One enclosing loop and the iteration it was on.",
-      "properties": {
-        "iteration": {
-          "description": "The iteration, from 0.",
-          "format": "uint64",
-          "minimum": 0,
-          "type": "integer"
-        },
-        "site": {
-          "$ref": "#/$defs/Site",
-          "description": "The site of the `for` or the `while`."
-        }
-      },
-      "required": [
-        "site",
-        "iteration"
       ],
       "type": "object"
     },
@@ -2036,27 +1983,6 @@
         }
       ]
     },
-    "Site": {
-      "additionalProperties": false,
-      "description": "A node's address: the code it belongs to and the chain of\n[`Node::children`] indexes that reaches it from that code's body.\n\nA site is derived from the document and is never written by a host\n(`K-ID-004`). An empty chain addresses the body itself.",
-      "properties": {
-        "path": {
-          "items": {
-            "format": "uint32",
-            "minimum": 0,
-            "type": "integer"
-          },
-          "type": "array"
-        },
-        "unit": {
-          "$ref": "#/$defs/Unit"
-        }
-      },
-      "required": [
-        "unit"
-      ],
-      "type": "object"
-    },
     "SpanRole": {
       "description": "What a record is to the span it names.",
       "oneOf": [
@@ -2082,37 +2008,12 @@
         }
       ]
     },
-    "SpawnIdentity": {
-      "additionalProperties": false,
-      "properties": {
-        "occurrence": {
-          "description": "How many times the parent had run that site before, from 0.",
-          "format": "uint64",
-          "minimum": 0,
-          "type": "integer"
-        },
-        "parent": {
-          "$ref": "#/$defs/TaskIdentity",
-          "description": "The task that ran the `spawn`."
-        },
-        "site": {
-          "$ref": "#/$defs/Site",
-          "description": "The site of the `spawn`."
-        }
-      },
-      "required": [
-        "parent",
-        "site",
-        "occurrence"
-      ],
-      "type": "object"
-    },
     "StepBodyStarted": {
       "additionalProperties": false,
       "description": "The admitted body of a process step started: the step's actor committed\nits admission, bound it to a call, and is about to run it. A step that is\nrefused never produces one, and a retried body produces one more with the\nsame site, occurrence and call and the next attempt.\n\nIt names no language and no document: the process's own definition scopes\nthe site.",
       "properties": {
         "at": {
-          "$ref": "#/$defs/EffectIdentity",
+          "$ref": "#/$defs/EffectId",
           "description": "The occurrence of the site in the process's workflow document the\nstep runs for."
         },
         "attempt": {
@@ -2252,29 +2153,6 @@
           "const": "reasoning",
           "description": "Reasoning summary (\"thinking\") text, kept separate from assistant\nresponse text.",
           "type": "string"
-        }
-      ]
-    },
-    "TaskIdentity": {
-      "description": "Which task of a run: `main`, or the task one execution of a `spawn`\nstarted.",
-      "oneOf": [
-        {
-          "enum": [
-            "main"
-          ],
-          "type": "string"
-        },
-        {
-          "additionalProperties": false,
-          "properties": {
-            "spawned": {
-              "$ref": "#/$defs/SpawnIdentity"
-            }
-          },
-          "required": [
-            "spawned"
-          ],
-          "type": "object"
         }
       ]
     },
@@ -3103,7 +2981,7 @@
           "description": "One occurrence of a workflow node, by its whole effect identity.",
           "properties": {
             "at": {
-              "$ref": "#/$defs/EffectIdentity"
+              "$ref": "#/$defs/EffectId"
             },
             "type": {
               "const": "workflow_node",
@@ -3357,7 +3235,7 @@
           "description": "One fact about one occurrence of one execution site.",
           "properties": {
             "at": {
-              "$ref": "#/$defs/EffectIdentity"
+              "$ref": "#/$defs/EffectId"
             },
             "fact": {
               "$ref": "#/$defs/TraceNodeFact"
@@ -5657,42 +5535,6 @@
           "required": [
             "type",
             "value"
-          ],
-          "type": "object"
-        }
-      ]
-    },
-    "Unit": {
-      "description": "The code a node belongs to.",
-      "oneOf": [
-        {
-          "const": "main",
-          "description": "The document's `main`.",
-          "type": "string"
-        },
-        {
-          "additionalProperties": false,
-          "description": "A declared function of the document.",
-          "properties": {
-            "function": {
-              "$ref": "#/$defs/Name"
-            }
-          },
-          "required": [
-            "function"
-          ],
-          "type": "object"
-        },
-        {
-          "additionalProperties": false,
-          "description": "The kernel-code body of a library function.",
-          "properties": {
-            "library": {
-              "$ref": "#/$defs/FunctionId"
-            }
-          },
-          "required": [
-            "library"
           ],
           "type": "object"
         }

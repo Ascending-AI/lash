@@ -7,7 +7,7 @@ use lash_core_store::checkpoint_graph::{
     DecodeLimits, EncodeBudget, EncodedNode, ExplicitLimit, GraphDecoder, GraphRefusal,
     GraphStaging, NodeId, NodeKind, parse_envelope,
 };
-use lash_kernel_doc::{EffectIdentity, Site, TaskIdentity, Unit};
+use lash_kernel_doc::{EffectId, Site, Unit};
 use lash_vm_broker::round_graph::CallOutcome;
 
 use super::*;
@@ -43,16 +43,16 @@ fn collected(
     kept
 }
 
-fn identity(occurrence: u64) -> EffectIdentity {
-    EffectIdentity {
-        task: TaskIdentity::Main,
-        site: Site {
+fn identity(occurrence: u64) -> EffectId {
+    lash_kernel_doc::testkit::effect(
+        lash_kernel_doc::testkit::root_task(),
+        Site {
             unit: Unit::Main,
             path: vec![0],
         },
         occurrence,
-        loops: Vec::new(),
-    }
+        Vec::new(),
+    )
 }
 
 fn call_id(ordinal: u64) -> ToolCallId {

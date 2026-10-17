@@ -143,7 +143,10 @@ pub use tool_output::{
 pub use value_shape::{FieldShape, ValueShape, ValueShapeLimits};
 #[cfg(any(test, feature = "testing"))]
 pub use workflow_site::effect_identity_fixture;
-pub use workflow_site::{EffectIdentity, LoopIteration, Site, SpawnIdentity, TaskIdentity, Unit};
+pub use workflow_site::workflow_testkit;
+pub use workflow_site::{
+    EffectId, LoopCounts, ObservationReader, PositionLabel, Site, TaskLabel, Unit, VisitId, WaitId,
+};
 mod execution_node_kind;
 pub use execution_node_kind::ExecutionNodeKind;
 

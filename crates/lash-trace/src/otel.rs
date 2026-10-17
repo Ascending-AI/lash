@@ -769,7 +769,7 @@ impl<'a> Projection<'a> {
                     return None;
                 };
                 projection.span = DomainSpan::WorkflowNode;
-                projection.site = Some(at.site.to_string());
+                projection.site = Some(at.position().to_string());
             }
             (TraceSpanKind::ToolIntent, TraceEvent::DomainCompleted { completion }) => {
                 projection.span = DomainSpan::Intent;
@@ -940,7 +940,7 @@ impl<'a> Projection<'a> {
                         }
                     }
                     TraceDomainSubject::WorkflowNode { at } => {
-                        out.push(A::WorkflowNodeSite.value(at.site.to_string()));
+                        out.push(A::WorkflowNodeSite.value(at.position().to_string()));
                         // The canonical JSON of the whole identity, as the
                         // kernel's node facts key the occurrence.
                         out.push(

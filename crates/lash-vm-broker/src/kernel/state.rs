@@ -23,9 +23,9 @@ use lash_core_store::checkpoint_graph::{
 };
 use lash_kernel_doc::graph_tokens::{ChildRef, TokenCodec, TokenError, TokenReader, TokenWriter};
 use lash_kernel_doc::heap::{PageGrant, PageId, PageRef};
-use lash_kernel_doc::{Datum, FrozenDatum, FunctionId, FunctionName, Name, TaskIdentity};
+use lash_kernel_doc::{Datum, FrozenDatum, FunctionId, FunctionName, Name, TaskLabel};
 use lash_kernel_state::AdmittedWait;
-use lash_kernel_state::paged::{CheckpointRoot, PageKind};
+use lash_kernel_state::paged::{CheckpointHeader, inspect_checkpoint};
 use lash_kernel_vm::{Bound, BoundExceeded, End, Finished, RunError};
 use lash_vm_protocol::{EncodedPayload, KernelRestoreRefusal};
 use lash_vm_releases::HeldManifests;
@@ -242,7 +242,7 @@ fn malformed(problem: impl ToString) -> KernelRestoreRefusal {
 /// An admitted wait in the encoding a checkpoint start's admissions carry.
 #[must_use]
 pub fn admission(wait: &AdmittedWait) -> EncodedPayload {
-    EncodedPayload(lash_kernel_doc::graph_tokens::encode_body(wait))
+    EncodedPayload(wait.encode())
 }
 
 /// The header of checkpoint root `id`, from its page's bytes: checked to
@@ -252,22 +252,14 @@ pub fn admission(wait: &AdmittedWait) -> EncodedPayload {
 /// # Errors
 ///
 /// [`GraphStateFailure::Restore`] for bytes that are not such a root.
-pub fn checkpoint_header(id: NodeId, bytes: &[u8]) -> Result<CheckpointRoot, GraphStateFailure> {
+pub fn checkpoint_header(id: NodeId, bytes: &[u8]) -> Result<CheckpointHeader, GraphStateFailure> {
     let page = PageRef {
         id: PageId(id.0),
         grant: PageGrant::NONE,
     };
     let answer =
         super::pages::answer_page(page, bytes, |_| Ok(PageGrant::NONE)).map_err(malformed)?;
-    if answer.kind != PageKind::CHECKPOINT_ROOT {
-        return Err(malformed(format!(
-            "page {id} is kind {}, not a checkpoint root",
-            answer.kind.0
-        ))
-        .into());
-    }
-    lash_kernel_doc::graph_tokens::decode_body(&answer.tokens)
-        .map_err(|error| malformed(error).into())
+    inspect_checkpoint(&answer).map_err(|error| malformed(error).into())
 }
 
 /// How a run that parked ended, as its CellEnd records it: every detail
@@ -284,12 +276,12 @@ pub enum EndRecord {
     Failed(ChildRef),
     Uncaught(ChildRef),
     TasksOutstanding {
-        unfinished: Vec<TaskIdentity>,
-        unobserved: Vec<TaskIdentity>,
-        sources: Vec<(TaskIdentity, lash_kernel_doc::Site)>,
+        unfinished: Vec<TaskLabel>,
+        unobserved: Vec<TaskLabel>,
+        sources: Vec<(TaskLabel, lash_kernel_doc::PositionLabel)>,
     },
     Deadlock {
-        waiting: Vec<TaskIdentity>,
+        waiting: Vec<TaskLabel>,
     },
     Bound {
         bound: Bound,
@@ -548,20 +540,20 @@ mod tests {
     /// provenance beside its actual library spawn identity and occurrence.
     #[test]
     fn a_recorded_task_failure_keeps_its_source_body_separate_from_its_spawn() {
-        let task = TaskIdentity::Spawned(lash_kernel_doc::SpawnIdentity {
-            parent: Arc::new(TaskIdentity::Main),
-            site: lash_kernel_doc::Site::new(
+        let task = lash_kernel_doc::testkit::spawned_task(
+            lash_kernel_doc::testkit::root_task(),
+            lash_kernel_doc::Site::new(
                 lash_kernel_doc::Unit::Library(FunctionId::from_bytes([7; 32])),
                 vec![1, 1],
             ),
-            occurrence: 3,
-        });
+            3,
+        );
         let end = End::Error(RunError::TasksOutstanding {
             unfinished: vec![task.clone()],
             unobserved: Vec::new(),
             sources: vec![(
                 task,
-                lash_kernel_doc::Site::new(lash_kernel_doc::Unit::Main, vec![0, 0, 0]),
+                lash_kernel_doc::Site::new(lash_kernel_doc::Unit::Main, vec![0, 0, 0]).position(),
             )],
         });
         let mut staging = staging(u64::MAX);

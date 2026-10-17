@@ -35,7 +35,6 @@ pub use carry::{cell_migration_refusal, cell_snapshot_functions};
 pub(crate) use envelope::{
     check_cell_snapshot, recorded_call, recorded_cell_ledger, snapshot_tool_calls,
 };
-pub(crate) use host::site_label;
 pub use host::{CONTROL_REFUSED, TOOL_ARGUMENTS, TOOL_CALL_LIMIT, TOOL_FAILED, UNKNOWN_EFFECT};
 pub use session::{CodeModeExecutionState, saved_function_pins};
 pub(crate) use session::{stored_binding_roots, stored_session_descriptor};
@@ -235,7 +234,7 @@ struct LinkedCell {
     graph: host::HostGraph,
     /// The effect identity each call a resumed cell holds open was
     /// performed at.
-    open_sites: BTreeMap<lash_core::ToolCallId, lash_kernel_doc::EffectIdentity>,
+    open_sites: BTreeMap<lash_core::ToolCallId, lash_kernel_doc::EffectId>,
     resumed: bool,
 }
 

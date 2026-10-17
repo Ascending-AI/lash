@@ -33,20 +33,20 @@ pub(super) fn record_effect(
     // ran at: a site's own occurrence number says nothing about it.
     let recorded = driver
         .recorded_effects
-        .get(site.site.to_string().as_str())
+        .get(site.position().to_string().as_str())
         .copied()
         .unwrap_or_default();
     if recorded >= driver.effect_occurrence_cap {
         driver
             .omitted_effects
-            .entry(site.site.to_string())
+            .entry(site.position().to_string())
             .or_default()
             .record(class);
         return;
     }
     driver
         .recorded_effects
-        .insert(site.site.to_string(), recorded + 1);
+        .insert(site.position().to_string(), recorded + 1);
     let operation = step.request.operation();
     let mut occurrence = lash_execution_contracts::process::ProcessEffectOccurrence::new(
         site.clone(),

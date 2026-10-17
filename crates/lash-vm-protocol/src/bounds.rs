@@ -5,11 +5,11 @@ use std::time::Duration;
 use crate::codec::DecodeLimits;
 
 /// The most pages one page exchange names, read or sealed (start value of
-/// `D-CAP`, the kernel's `READ_BATCH_PAGES`).
+/// `D-CAP`, the kernel's `PagePortLimits::STANDARD.pages`).
 pub const PAGE_BATCH_PAGES: usize = 64;
 
 /// The most envelope bytes one page exchange carries, read or sealed (start
-/// value of `D-CAP`, the kernel's `READ_BATCH_BYTES`). A frame's own bound
+/// value of `D-CAP`, the kernel's `PagePortLimits::STANDARD.bytes`). A frame's own bound
 /// may cut a reply shorter: the parent then answers a prefix and the worker
 /// asks again for the rest.
 pub const PAGE_BATCH_BYTES: u64 = 4 << 20;

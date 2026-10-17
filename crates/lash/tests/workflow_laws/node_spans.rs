@@ -175,16 +175,16 @@ fn assert_five_occurrences(nodes: &[SpanData], every: &[SpanData]) {
         .map(|span| {
             let occurrence = attribute(span, "lash.workflow.node.occurrence")
                 .expect("a node names its occurrence");
-            serde_json::from_str::<lash::workflow::document::EffectIdentity>(&occurrence)
+            serde_json::from_str::<lash::workflow::document::EffectId>(&occurrence)
                 .expect("the occurrence is an effect identity")
         })
         .collect();
     assert_eq!(occurrences.len(), 5, "each node is another occurrence");
-    let sites: BTreeSet<_> = occurrences.iter().map(|at| at.site.clone()).collect();
+    let sites: BTreeSet<_> = occurrences.iter().map(|at| at.position()).collect();
     assert_eq!(sites.len(), 1, "every occurrence is of the one site");
     let spawned = occurrences
         .iter()
-        .filter(|at| matches!(at.task, lash::workflow::document::TaskIdentity::Spawned(_)))
+        .filter(|at| !lash::workflow::document::ObservationReader::is_root_task(at))
         .count();
     assert_eq!(spawned, 2, "two occurrences belong to spawned tasks");
     let workflow: Vec<_> = every

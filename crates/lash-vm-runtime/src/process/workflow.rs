@@ -308,7 +308,7 @@ impl lash_execution_contracts::process::ProcessDocumentProvider for KernelDocume
         &self,
         settings: Option<&lash_execution_contracts::process::EngineSettings>,
     ) -> bool {
-        super::KernelRecordedSettings::observed(settings) == lash_kernel_vm::Observe::Counts
+        super::KernelRecordedSettings::observed(settings) == lash_kernel_vm::ObservationMode::Counts
     }
 
     async fn admit(

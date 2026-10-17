@@ -221,7 +221,7 @@ pub struct RunEvent {
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub activity: Option<lash::workflow::view::ActionActivity<Value>>,
     #[serde(default, skip_serializing_if = "Option::is_none")]
-    pub occurrence: Option<lash::workflow::document::EffectIdentity>,
+    pub occurrence: Option<lash::workflow::document::EffectId>,
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub node_coverage: Option<Vec<lash::workflow::view::NodeCoverage>>,
 }

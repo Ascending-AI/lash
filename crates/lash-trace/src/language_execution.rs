@@ -44,7 +44,7 @@ pub struct StepBodyStarted {
     pub process_id: lash_protocol_types::ProcessId,
     /// The occurrence of the site in the process's workflow document the
     /// step runs for.
-    pub at: lash_protocol_types::EffectIdentity,
+    pub at: lash_protocol_types::EffectId,
     /// The call the admission bound the step to.
     pub call_id: lash_protocol_types::ToolCallId,
     /// The one-based attempt of the admitted body.
@@ -92,7 +92,7 @@ pub enum TraceLanguageExecutionPayload {
     /// One fact about one occurrence of one execution site.
     Node {
         subject: crate::TraceRuntimeSubject,
-        at: lash_protocol_types::EffectIdentity,
+        at: lash_protocol_types::EffectId,
         fact: TraceNodeFact,
     },
     /// Statement starts and empty-block entries, with their accumulation law.
@@ -170,7 +170,7 @@ impl TraceLanguageExecutionPayload {
 
     /// The occurrence this fact is about; `None` for a fact about the whole
     /// execution.
-    pub fn at(&self) -> Option<&lash_protocol_types::EffectIdentity> {
+    pub fn at(&self) -> Option<&lash_protocol_types::EffectId> {
         match self {
             Self::ExecutionStarted { .. }
             | Self::ExecutionFinished { .. }

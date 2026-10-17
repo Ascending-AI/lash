@@ -20,7 +20,7 @@ pub struct WaitState {
     pub since_ms: i64,
     /// The node that blocked, and which occurrence of it.
     #[serde(default, skip_serializing_if = "Option::is_none")]
-    pub site: Option<lash_protocol_types::EffectIdentity>,
+    pub site: Option<lash_protocol_types::EffectId>,
 }
 
 /// Why a process wait has no workflow coordinate.
@@ -33,9 +33,7 @@ pub enum WaitSiteUnavailable {
 impl WaitState {
     /// Workflow waits name their task's occurrence. A document-free engine
     /// may wait without one; callers receive a typed explanation for that case.
-    pub fn execution_site(
-        &self,
-    ) -> Result<&lash_protocol_types::EffectIdentity, WaitSiteUnavailable> {
+    pub fn execution_site(&self) -> Result<&lash_protocol_types::EffectId, WaitSiteUnavailable> {
         self.site
             .as_ref()
             .ok_or(WaitSiteUnavailable::EngineDidNotNameSite)

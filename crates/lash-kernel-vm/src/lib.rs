@@ -27,7 +27,7 @@
 //! `docs/kernel/semantics.md`.
 
 mod compile;
-pub mod conformance;
+pub(crate) mod conformance;
 mod costs;
 mod crossing;
 mod data;
@@ -51,9 +51,10 @@ mod laws;
 pub(crate) use compile::Layout;
 pub use compile::PreparedLibrary;
 pub use functions::{MachineFunctions, register_machine_functions};
+pub use lash_kernel_doc::ExecutionPath;
 pub use machine::KernelMachine;
-pub use observe::{ChargeTape, Observe, RanDelta, StatementPath};
-pub use paged::{SealedRoot, TaskFilter, TaskPage};
+pub use observe::{ChargeTape, ObservationMode, SiteCounts};
+pub use paged::SealedRoot;
 pub use save::CellSaveContext;
 pub use session_editor::{SessionEditor, SessionValue};
 
@@ -66,7 +67,7 @@ pub mod kernel_internals;
 
 pub use interface::{
     Bound, BoundExceeded, Bounds, CellSave, CellStart, DeliverError, Delivered, EffectMode,
-    EffectModes, EffectRequest, End, Finished, Host, HostFault, Machine, MachineError, Meters,
-    OpenError, Outcome, Park, Program, Request, RunError, SaveCell, SavedCell, SealError,
-    SleepRequest, StartError, Step, Target, WaitId,
+    EffectModes, EffectRequest, End, Finished, Host, HostFault, Machine, MachineError,
+    MachineOptions, Meters, OpenError, Outcome, Park, Program, Request, RunError, RunObserver,
+    SaveCell, SavedCell, SealError, SleepRequest, StartError, Step, Target, WaitId,
 };

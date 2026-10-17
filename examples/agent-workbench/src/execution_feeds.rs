@@ -693,12 +693,12 @@ mod tests {
                 subject: TraceRuntimeSubject::Process {
                     process_id: process_id.clone(),
                 },
-                at: lash::workflow::document::EffectIdentity {
-                    task: lash::workflow::document::TaskIdentity::Main,
-                    site: document(0).graph().execution_sites()[0].site.clone(),
-                    occurrence: 0,
-                    loops: Vec::new(),
-                },
+                at: lash::workflow::document::testkit::effect(
+                    lash::workflow::document::testkit::root_task(),
+                    document(0).graph().execution_sites()[0].site.clone(),
+                    0,
+                    Vec::new(),
+                ),
                 fact: lash::tracing::TraceNodeFact::Started { call_id: None },
             },
         )

@@ -8,7 +8,8 @@ use lash_kernel_doc::graph_tokens::{
 };
 use lash_kernel_doc::heap::*;
 use lash_kernel_doc::heap_values::{key_digest, text_summary};
-use lash_kernel_doc::{FunctionId, Name, Site, SpawnIdentity, TaskIdentity, Unit};
+use lash_kernel_doc::kernel_internals::{SpawnIdentity, TaskIdentity};
+use lash_kernel_doc::{FunctionId, Name, Site, Unit};
 use std::collections::BTreeSet;
 use std::ops::ControlFlow;
 use std::sync::{Arc, OnceLock};

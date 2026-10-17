@@ -316,7 +316,7 @@ pub struct Start {
 #[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize)]
 #[serde(deny_unknown_fields)]
 pub struct Delivery {
-    pub wait: u64,
+    pub wait: lash_protocol_types::WaitId,
     pub outcome: EncodedPayload,
 }
 
@@ -387,7 +387,7 @@ pub enum ParentMessage {
     /// One committed outcome, for the wait the machine named: a delivery
     /// that does not fit one frame with the slice it precedes.
     Deliver {
-        wait: u64,
+        wait: lash_protocol_types::WaitId,
         outcome: EncodedPayload,
     },
     /// The answer to the worker's pending [`WorkerMessage::HostRead`].

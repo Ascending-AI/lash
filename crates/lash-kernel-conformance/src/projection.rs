@@ -1,7 +1,7 @@
 //! Save/open exchange shared by the corpus and smith laws.
 use lash_kernel_state::paged::CheckpointRoot;
 use lash_kernel_state::{AdmittedRequest, AdmittedWait};
-use lash_kernel_vm::conformance::{Checkpoint, checkpoint};
+use lash_kernel_vm::kernel_internals::conformance::{Checkpoint, checkpoint};
 use lash_kernel_vm::{Bounds, Machine, PreparedLibrary, Program, Request};
 
 use crate::{HarnessError, pages};
@@ -61,10 +61,14 @@ impl Projector<'_> {
             .seal(pages::BUDGET)
             .map_err(fault)?
             .ok_or_else(|| fault("unbounded seal incomplete"))?;
-        let state = checkpoint(&sealed.root, Box::new(source.clone())).map_err(fault)?;
+        let state = checkpoint(
+            lash_kernel_vm::kernel_internals::sealed_root(&sealed),
+            Box::new(source.clone()),
+        )
+        .map_err(fault)?;
         let warm_memory = machine.meters().memory;
         let image = Image {
-            root: sealed.root,
+            root: lash_kernel_vm::kernel_internals::sealed_root(&sealed).clone(),
             source: source.clone(),
             admissions,
         };
@@ -112,8 +116,11 @@ impl Projector<'_> {
                 .seal(pages::BUDGET)
                 .map_err(fault)?
                 .ok_or_else(|| fault("reopen seal incomplete"))?;
-            let reopened =
-                checkpoint(&reopened.root, Box::new(imported.source.clone())).map_err(fault)?;
+            let reopened = checkpoint(
+                lash_kernel_vm::kernel_internals::sealed_root(&reopened),
+                Box::new(imported.source.clone()),
+            )
+            .map_err(fault)?;
             let expected =
                 checkpoint(&imported.root, Box::new(imported.source.clone())).map_err(fault)?;
             if reopened != expected {
@@ -134,7 +141,12 @@ impl Projector<'_> {
             self.terminal = finished
                 .carry
                 .as_ref()
-                .map(|carry| lash_kernel_vm::conformance::session(carry, Box::new(source.clone())))
+                .map(|carry| {
+                    lash_kernel_vm::kernel_internals::conformance::session(
+                        carry,
+                        Box::new(source.clone()),
+                    )
+                })
                 .transpose()
                 .map_err(fault)?;
         }
@@ -178,19 +190,30 @@ impl<const L: u64> Machine for Plan<L> {
     fn open(
         program: Program,
         bounds: Bounds,
-        root: &CheckpointRoot,
+        root: &lash_kernel_state::paged::Checkpoint,
         admissions: Vec<AdmittedWait>,
         source: Box<dyn lash_kernel_state::paged::PageSource>,
     ) -> Result<Self, lash_kernel_vm::OpenError> {
         lash_kernel_vm::kernel_internals::open_with_layout(
             program,
             bounds,
-            root,
+            lash_kernel_state::kernel_internals::checkpoint_root(root),
             admissions,
             source,
             lash_kernel_vm::kernel_internals::Layout(L),
         )
         .map(Self)
+    }
+    fn set_options(&mut self, options: lash_kernel_vm::MachineOptions) {
+        self.0.set_options(options);
+    }
+    fn take_counts(&mut self) -> lash_kernel_vm::SiteCounts {
+        self.0.take_counts()
+    }
+    fn take_path(
+        &mut self,
+    ) -> Result<lash_kernel_vm::ExecutionPath, lash_kernel_doc::heap::HeapFault> {
+        self.0.take_path()
     }
     fn run(
         &mut self,
@@ -214,21 +237,6 @@ impl<const L: u64> Machine for Plan<L> {
     }
     fn meters(&self) -> lash_kernel_vm::Meters {
         self.0.meters()
-    }
-    fn task_identity(
-        &self,
-        identity: lash_kernel_state::paged::TaskIdentityRef,
-    ) -> Result<lash_kernel_doc::TaskIdentity, lash_kernel_doc::heap::HeapFault> {
-        self.0.task_identity(identity)
-    }
-    fn tasks(
-        &self,
-        root: lash_kernel_state::paged::KeyedRoot,
-        filter: lash_kernel_vm::TaskFilter,
-        after: Option<lash_kernel_doc::TaskId>,
-        limit: u32,
-    ) -> Result<lash_kernel_vm::TaskPage, lash_kernel_doc::heap::HeapFault> {
-        self.0.tasks(root, filter, after, limit)
     }
 }
 

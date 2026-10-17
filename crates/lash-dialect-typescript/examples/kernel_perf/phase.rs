@@ -68,7 +68,7 @@ pub(super) fn identity(
     artifact: &str,
     result: &Datum,
     charge: u64,
-    path: &lash_kernel_vm::StatementPath,
+    path: &lash_kernel_vm::ExecutionPath,
 ) -> Json {
     let mut result = serde_json::to_value(result).expect("Datum JSON");
     result.sort_all_objects();
@@ -137,7 +137,10 @@ pub(super) fn measure(
     // Capture the statement path in a separate pass; never charge trace
     // recording to the fixed-counter observer. Validate its useful result too.
     let mut reference = start(program);
-    reference.trace_path();
+    reference.set_options(lash_kernel_vm::MachineOptions {
+        trace_path: true,
+        ..Default::default()
+    });
     assert_eq!(to_end(&mut reference, name), plain);
     let path = reference.take_path().map_err(|error| error.to_string())?;
     Ok(json!({

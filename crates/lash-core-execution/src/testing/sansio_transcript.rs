@@ -110,7 +110,7 @@ fn record_stream_event(transcript: &mut Transcript, actor: &str, event: &Session
         SessionStreamEvent::Message { text, kind } => {
             transcript.record(
                 Entry::new(
-                    Kind::Observe,
+                    Kind::ObservationMode,
                     session(),
                     format!("message.{}", kind.as_str()),
                 )

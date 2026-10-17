@@ -100,7 +100,7 @@ pub fn embed<M: Machine>(
                 machine = M::open(
                     program.clone(),
                     bounds,
-                    &sealed.root,
+                    &sealed.checkpoint(),
                     Vec::new(),
                     Box::new(source.clone()),
                 )

@@ -116,10 +116,18 @@ pub const PAGE_TARGET_BYTES: u64 = 8_192;
 /// An object body of at most this many token bytes lives inline in its
 /// directory row; a larger one is paged under the same schema.
 pub const INLINE_BODY_MAX: u64 = 256;
-/// The most pages one read request names (start value, `D-CAP`).
-pub const READ_BATCH_PAGES: usize = 64;
-/// The most answer bytes one read request returns (start value, `D-CAP`).
-pub const READ_BATCH_BYTES: u64 = 4 << 20;
+/// Bounds of a page-port read exchange, independent of the execution engine.
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub struct PagePortLimits {
+    pub pages: usize,
+    pub bytes: u64,
+}
+impl PagePortLimits {
+    pub const STANDARD: Self = Self {
+        pages: 64,
+        bytes: 4 << 20,
+    };
+}
 
 /// A page the heap seals: its kind, its logical body and the pages it
 /// references with the grants that authorize them.
@@ -151,7 +159,7 @@ pub struct PageAnswer {
 /// Implemented by the worker over its host exchange and the parent's page
 /// service, and in process over a local store (layer hp-paging, FIG-6190).
 pub trait PageSource {
-    /// Reads `pages`, at most [`READ_BATCH_PAGES`], answering in request
+    /// Reads `pages`, at most [`PagePortLimits::STANDARD`], answering in request
     /// order. Every successful answer was authenticated against its digest
     /// and kind. Page-specific faults occupy their own slot: they never
     /// discard successful answers or faults earlier in traversal order.

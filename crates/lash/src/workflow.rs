@@ -45,7 +45,7 @@
 //!
 //! A place in a document is a [`document::Site`]: the unit (`main`, a
 //! declared function or a library function) and the path of child indexes
-//! to the node. What runs is named by an [`document::EffectIdentity`]: the
+//! to the node. What runs is named by an [`document::EffectId`]: the
 //! task that ran it, the site, its occurrence in that task and the loop
 //! iterations around it. A fan-out spawns one task for each element, so
 //! each element's run of one site has its own identity.
@@ -201,27 +201,28 @@ pub mod document {
         ActExpr, ActKind, Action, AssignOrder, Atom, Block, Bytes, Callee, Catch,
         CheckedDeclarations, Closure, Correspondence, DOCUMENT_GRAMMAR_VERSION, Datum,
         DeclarationRefusal as DocumentDeclarationRefusal, DecodeError, DecodeMismatch, Decoder,
-        Document, DocumentBytes, DocumentBytesRefusal, DocumentId, EffectIdentity, EffectName,
-        Element, EncodeError, Entry, ErrorDatum, Expr, FIRST_NATIVE_VERSION, FROZEN_DATUM,
-        FROZEN_JSON, FROZEN_TOOL_VALUE, FUNCTION_VALUE_ENTRY, FUNCTION_VALUE_TAG, Float, Formula,
-        FrozenDatum, Function, FunctionBody, FunctionCatalog, FunctionDeclarations,
-        FunctionDefinition, FunctionId, FunctionName, FunctionRegistry, FunctionRepresentation,
-        FunctionValue, FunctionValueLimits, FunctionValueRefusal, Guard, GuardExceeded, Handle,
+        Document, DocumentBytes, DocumentBytesRefusal, DocumentId, EffectId, EffectName, Element,
+        EncodeError, Entry, ErrorDatum, Expr, FIRST_NATIVE_VERSION, FROZEN_DATUM, FROZEN_JSON,
+        FROZEN_TOOL_VALUE, FUNCTION_VALUE_ENTRY, FUNCTION_VALUE_TAG, Float, Formula, FrozenDatum,
+        Function, FunctionBody, FunctionCatalog, FunctionDeclarations, FunctionDefinition,
+        FunctionId, FunctionName, FunctionRegistry, FunctionRepresentation, FunctionValue,
+        FunctionValueLimits, FunctionValueRefusal, Guard, GuardExceeded, Handle,
         IdentifiedDocument, Identity, Implementation, Integer, Invalid, InvalidBytes, InvalidFloat,
         InvalidIdentity, InvalidInteger, InvalidNumberToken, InvalidQualifiedName, InvalidReason,
-        JoinMode, KERNEL_VERSION, KernelVersion, Label, Literal, LoopIteration, MAX_DECODE_DEPTH,
+        JoinMode, KERNEL_VERSION, KernelVersion, Label, Literal, LoopCounts, MAX_DECODE_DEPTH,
         MAX_NESTING_DEPTH, Manifest, MapEntry, MapType, Measure, Member, Name, NativeCall,
-        NativeError, NativeFunction, NativeHeap, Node, NumberPolicy, NumberToken, Object, Operand,
-        Param, ParseError, ParseErrorReason, Place, PreparedNative, ProjectionRead, Protocol,
-        QualifiedName, RecordEntry, RecordType, RecordTypeField, RegisteredFunction, RegistryError,
-        Rhs, Signature, Site, SourceLanguage, SourceMap, SourceMapId, SourceMapRefusal, SourceSite,
-        Span, SpawnIdentity, StartAdapter, StartConvention, StatementForm, StatementRuleViolation,
-        Stmt, Survivor, TaskId, TaskIdentity, Timestamp, TryStmt, Type, Unit, ValidatedFunctions,
-        Value, ValueKind, WorkCounter, check_declarations, check_statement, core_support,
-        document_work, graph_tokens, heap, parse_definition, parse_definition_with_limits,
-        parse_document, parse_document_with_limits, plan, print_definition, print_document,
-        required_declarations, validate_definition, validate_definition_with_limits,
-        validate_document, validate_document_with_limits,
+        NativeError, NativeFunction, NativeHeap, Node, NumberPolicy, NumberToken, Object,
+        ObservationReader, Operand, Param, ParseError, ParseErrorReason, Place, PositionCounts,
+        PositionLabel, PreparedNative, ProjectionRead, Protocol, QualifiedName, RecordEntry,
+        RecordType, RecordTypeField, RegisteredFunction, RegistryError, Rhs, Signature, Site,
+        SourceLanguage, SourceMap, SourceMapId, SourceMapRefusal, SourceSite, Span, StartAdapter,
+        StartConvention, StatementForm, StatementRuleViolation, Stmt, Survivor, TaskId, TaskLabel,
+        Timestamp, TryStmt, Type, Unit, ValidatedFunctions, Value, ValueKind, VisitId, WaitId,
+        WorkCounter, check_declarations, check_statement, core_support, document_work,
+        graph_tokens, heap, parse_definition, parse_definition_with_limits, parse_document,
+        parse_document_with_limits, plan, print_definition, print_document, required_declarations,
+        testkit, validate_definition, validate_definition_with_limits, validate_document,
+        validate_document_with_limits,
     };
 }
 

@@ -241,7 +241,7 @@ fn boundary_kind(kind: BoundaryKind) -> Kind {
         BoundaryKind::Tool => Kind::Tool,
         BoundaryKind::ExecCode => Kind::Exec,
         BoundaryKind::DurableEffect => Kind::Effect,
-        BoundaryKind::Observer => Kind::Observe,
+        BoundaryKind::Observer => Kind::ObservationMode,
         BoundaryKind::Cancellation => Kind::Cancel,
         BoundaryKind::BackendFailure | BoundaryKind::ProviderMutation => Kind::Fault,
     }

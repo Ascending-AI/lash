@@ -6,7 +6,7 @@ pub(crate) struct LanguageCallAttribution {
     pub identity: lash_trace::TraceLanguageExecutionIdentity,
     pub subject: lash_trace::TraceRuntimeSubject,
     /// The occurrence of the call's site.
-    pub at: lash_protocol_types::EffectIdentity,
+    pub at: lash_protocol_types::EffectId,
 }
 
 pub(crate) type LanguageCallAttributions = std::sync::Arc<
@@ -80,15 +80,15 @@ impl<'scope> ProcessOpScope<'scope> {
                     }
                     _ => None,
                 },
-                graph_node_id: Some(call.at.site.to_string()),
+                graph_node_id: Some(call.at.position().to_string()),
                 ..Default::default()
             };
             let event = lash_trace::TraceLanguageExecution {
                 event_key: format!(
                     "lash_vm_execution:{}:child:{}:{}:process:{process_id}",
                     identity.graph_key(&call.subject),
-                    call.at.site,
-                    call.at.occurrence,
+                    call.at.position(),
+                    call.at.visit(),
                 ),
                 identity: identity.clone(),
                 payload: lash_trace::TraceLanguageExecutionPayload::Node {

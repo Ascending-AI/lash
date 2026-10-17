@@ -128,7 +128,7 @@ struct StepHost {
     now_ms: i64,
     random: Arc<dyn Fn() -> u64 + Send + Sync>,
     providers: ProjectionCatalog,
-    observe: lash_kernel_vm::Observe,
+    observe: lash_kernel_vm::ObservationMode,
     reads: std::sync::Mutex<HostReads>,
     /// The live deltas this segment reported, which name their trace facts.
     deltas: std::sync::atomic::AtomicU64,
@@ -145,20 +145,20 @@ impl StepHost {
 
     /// The segment's tape, at `observe: counts`.
     fn tape(&self) -> Option<HostReads> {
-        (self.observe == lash_kernel_vm::Observe::Counts)
+        (self.observe == lash_kernel_vm::ObservationMode::Counts)
             .then(|| std::mem::take(&mut *self.taped()))
     }
 }
 
 #[async_trait::async_trait]
 impl RunHost for StepHost {
-    fn observe(&self) -> lash_kernel_vm::Observe {
+    fn observe(&self) -> lash_kernel_vm::ObservationMode {
         self.observe
     }
 
     /// A live delta is provisional: the segment's commit makes its total
     /// exact, as `process.ran`.
-    fn ran(&self, delta: &lash_kernel_vm::RanDelta) {
+    fn ran(&self, delta: &lash_kernel_vm::SiteCounts) {
         if let Some(trace) = &self.trace {
             let frame = self
                 .deltas
@@ -171,14 +171,14 @@ impl RunHost for StepHost {
         self.trace.is_some()
     }
 
-    fn enter_site(&self, at: &lash_kernel_doc::EffectIdentity) {
+    fn enter_site(&self, at: &lash_kernel_doc::EffectId) {
         if let Some(trace) = &self.trace {
             trace.node(at, lash_trace::TraceNodeFact::Started { call_id: None });
         }
     }
 
     async fn clock(&self) -> Result<Timestamp, ParentFault> {
-        if self.observe == lash_kernel_vm::Observe::Counts {
+        if self.observe == lash_kernel_vm::ObservationMode::Counts {
             self.taped().now_ms = Some(self.now_ms);
         }
         Ok(Timestamp {
@@ -188,7 +188,7 @@ impl RunHost for StepHost {
 
     async fn random(&self) -> Result<u64, ParentFault> {
         let bits = (self.random)();
-        if self.observe == lash_kernel_vm::Observe::Counts {
+        if self.observe == lash_kernel_vm::ObservationMode::Counts {
             self.taped().random.push(bits);
         }
         Ok(bits)
@@ -207,7 +207,7 @@ impl RunHost for StepHost {
         &self,
         effect: &lash_kernel_doc::EffectName,
         _args: &[Datum],
-        _site: &lash_kernel_doc::Site,
+        _site: &lash_kernel_doc::PositionLabel,
     ) -> Result<Result<Datum, ErrorDatum>, ParentFault> {
         Err(ParentFault(format!(
             "a kernel process binds no read, and its run performed `{effect}` as one"
@@ -228,7 +228,7 @@ fn ended(
     Ok((
         KernelRunOutput::Ended {
             outcome: Box::new(outcome),
-            ran: Vec::new(),
+            ran: lash_kernel_vm::SiteCounts::new(),
             reads: None,
             start: None,
         },
@@ -319,7 +319,7 @@ async fn kernel_run(
             trace.delivered(delivery);
         }
     }
-    let start = (settings.observe == lash_kernel_vm::Observe::Counts)
+    let start = (settings.observe == lash_kernel_vm::ObservationMode::Counts)
         .then(|| recorded_start(process_input.document, &input))
         .flatten();
     let host = Arc::new(StepHost {
@@ -399,14 +399,14 @@ async fn kernel_run(
             let Some((state, candidate)) = state else {
                 return Err(RunFault("the run parked without a state".to_owned()).into());
             };
-            let withdrawn: Vec<u64> = park.withdrawn.iter().map(|wait| wait.0).collect();
+            let withdrawn: Vec<lash_protocol_types::WaitId> = park.withdrawn.clone();
             let issued = park
                 .requests
                 .into_iter()
                 .filter(|request| {
                     !withdrawn.contains(&match request {
-                        Request::Effect(effect) => effect.wait.0,
-                        Request::Sleep(sleep) => sleep.wait.0,
+                        Request::Effect(effect) => effect.wait,
+                        Request::Sleep(sleep) => sleep.wait,
                     })
                 })
                 .map(|request| issue(&boundary, run.now.0, request))
@@ -484,8 +484,8 @@ fn recorded_start(
 pub(super) struct Driven {
     pub(super) step: MachineStep,
     pub(super) parked: Option<(ParkedPage, RunCandidate)>,
-    pub(super) ran: lash_kernel_vm::RanDelta,
-    pub(super) path: lash_vm_client::wire::OrdinalPath,
+    pub(super) ran: lash_kernel_vm::SiteCounts,
+    pub(super) path: lash_kernel_vm::ExecutionPath,
 }
 
 /// Starts or resumes the machine over a page activation of the process's
@@ -550,7 +550,10 @@ pub(super) async fn run_machine(
     machines: &lash_vm_client::RemoteMachines,
     activation: &mut StepActivation,
     binding: lash_core_store::checkpoint_graph::NodeId,
-    deliver: Vec<(u64, lash_vm_client::wire::OutcomeWire)>,
+    deliver: Vec<(
+        lash_protocol_types::WaitId,
+        lash_vm_client::wire::OutcomeWire,
+    )>,
     slice: u64,
     stop: &CancellationToken,
 ) -> Result<Driven, KernelFailure> {
@@ -560,9 +563,7 @@ pub(super) async fn run_machine(
         None => machines.start(binding, pages).await?,
     };
     for (wait, outcome) in deliver {
-        machine
-            .deliver(lash_kernel_vm::WaitId(wait), outcome.into())
-            .await?;
+        machine.deliver(wait, outcome.into()).await?;
     }
     loop {
         let step = machine.run(slice, false).await?;
@@ -713,10 +714,10 @@ pub(super) fn entry_args(
 }
 
 /// The wait a request names and its admission.
-pub(super) fn admission_of(request: &Request) -> (u64, Admission) {
+pub(super) fn admission_of(request: &Request) -> (lash_protocol_types::WaitId, Admission) {
     match request {
         Request::Sleep(sleep) => (
-            sleep.wait.0,
+            sleep.wait,
             Admission(lash_kernel_state::AdmittedWait {
                 identity: sleep.identity.clone(),
                 request: lash_kernel_state::AdmittedRequest::Sleep {
@@ -725,7 +726,7 @@ pub(super) fn admission_of(request: &Request) -> (u64, Admission) {
             }),
         ),
         Request::Effect(request) => (
-            request.wait.0,
+            request.wait,
             Admission(lash_kernel_state::AdmittedWait {
                 identity: request.identity.clone(),
                 request: lash_kernel_state::AdmittedRequest::Effect {

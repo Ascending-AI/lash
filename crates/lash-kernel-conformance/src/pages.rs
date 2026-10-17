@@ -68,7 +68,9 @@ impl Session {
         let mut names = std::collections::BTreeSet::new();
         if let Some(root) = &self.root {
             let heap = self.heap();
-            let tree = Tree::<BindingRecord>::of_keyed(&root.bindings);
+            let tree = Tree::<BindingRecord>::of_keyed(
+                &lash_kernel_state::kernel_internals::session_bindings(root),
+            );
             tree.visit(heap.pages(), &mut |_, binding| {
                 names.insert(binding.name.resolve(heap.pages()).unwrap());
                 true
@@ -79,10 +81,12 @@ impl Session {
     }
     pub(crate) fn heap(&self) -> PagedHeap {
         match &self.root {
-            Some(root) => {
-                PagedHeap::open_header(root.heap, Box::new(self.source.clone()), EditEpoch(1))
-                    .unwrap()
-            }
+            Some(root) => PagedHeap::open_header(
+                lash_kernel_state::kernel_internals::session_heap(root),
+                Box::new(self.source.clone()),
+                EditEpoch(1),
+            )
+            .unwrap(),
             None => PagedHeap::fresh(Box::new(self.source.clone()), EditEpoch(1)),
         }
     }
@@ -237,5 +241,11 @@ pub(crate) fn open<M: lash_kernel_vm::Machine>(
     source: &Source,
     admissions: Vec<lash_kernel_state::AdmittedWait>,
 ) -> Result<M, lash_kernel_vm::OpenError> {
-    M::open(program, bounds, root, admissions, Box::new(source.clone()))
+    M::open(
+        program,
+        bounds,
+        &lash_kernel_state::kernel_internals::checkpoint(root.clone()),
+        admissions,
+        Box::new(source.clone()),
+    )
 }

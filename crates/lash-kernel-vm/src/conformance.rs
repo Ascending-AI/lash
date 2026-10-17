@@ -214,7 +214,11 @@ pub fn checkpoint(
 /// # Errors
 /// Any fault reading a reachable page.
 pub fn session(root: &SessionRoot, source: Box<dyn PageSource>) -> Result<Checkpoint, HeapFault> {
-    let mut heap = PagedHeap::open_header(root.heap, source, EditEpoch(0))?;
+    let mut heap = PagedHeap::open_header(
+        lash_kernel_state::kernel_internals::session_heap(root),
+        source,
+        EditEpoch(0),
+    )?;
     heap.set_family_base(Box::new(
         lash_kernel_state::kernel_internals::family_impl::FrozenBase::default(),
     ));
@@ -223,8 +227,12 @@ pub fn session(root: &SessionRoot, source: Box<dyn PageSource>) -> Result<Checkp
         graph: Vec::new(),
         seen: BTreeMap::new(),
     };
-    reader.bindings(&Tree::of_keyed(&root.bindings))?;
-    reader.functions(&Tree::of_keyed(&root.functions))?;
+    reader.bindings(&Tree::of_keyed(
+        &lash_kernel_state::kernel_internals::session_bindings(root),
+    ))?;
+    reader.functions(&Tree::of_keyed(
+        &lash_kernel_state::kernel_internals::session_functions(root),
+    ))?;
     Ok(Checkpoint {
         continuation: Vec::new(),
         graph: reader.graph,

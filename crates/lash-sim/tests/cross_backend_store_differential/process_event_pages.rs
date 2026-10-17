@@ -378,7 +378,7 @@ pub(super) async fn compare_bounded_process_event_pages(
     // class, in one omission record.
     // Occurrences and omissions name the same structural site (ADR 0100 R4).
     let effect_node_id = lash_protocol_types::effect_identity_fixture("repeated-node", 1)
-        .site
+        .position()
         .to_string();
     let mut omitted = lash_execution_contracts::process::ProcessEffectOmittedCounts::default();
     let mut recorded = Vec::new();

@@ -73,7 +73,9 @@ impl Task {
     }
     pub(super) fn wait(&self) -> Option<Wait> {
         match self.record.state {
-            TaskStateRecord::Waiting(id) => Some(Wait::Request(lash_kernel_state::WaitId(id))),
+            TaskStateRecord::Waiting(id) => Some(Wait::Request(
+                lash_kernel_doc::kernel_internals::wait_id(id),
+            )),
             TaskStateRecord::Joining(id) => Some(Wait::Join(id)),
             TaskStateRecord::JoiningMany(id) => Some(Wait::JoinMany(id)),
             _ => None,
@@ -81,7 +83,9 @@ impl Task {
     }
     pub(super) fn suspend(&mut self, wait: Wait) {
         self.record.state = match wait {
-            Wait::Request(id) => TaskStateRecord::Waiting(id.0),
+            Wait::Request(id) => {
+                TaskStateRecord::Waiting(lash_kernel_doc::kernel_internals::wait_number(id))
+            }
             Wait::Join(id) => TaskStateRecord::Joining(id),
             Wait::JoinMany(id) => TaskStateRecord::JoiningMany(id),
         };

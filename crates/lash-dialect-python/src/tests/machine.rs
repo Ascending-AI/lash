@@ -685,7 +685,7 @@ pub(super) fn execution_observation(
             machine = KernelMachine::open(
                 program.clone(),
                 bounds,
-                &sealed.root,
+                &sealed.checkpoint(),
                 Vec::new(),
                 Box::new(session.source.clone()),
             )

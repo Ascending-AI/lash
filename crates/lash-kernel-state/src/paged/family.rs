@@ -67,12 +67,12 @@ pub struct FamilyRecord {
 /// on (kind [`PageKind::SESSION_ROOT`](super::PageKind::SESSION_ROOT)).
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 pub struct SessionRoot {
-    pub heap: PageRef,
+    pub(crate) heap: PageRef,
     /// Carried bindings: name to value.
-    pub bindings: KeyedRoot,
+    pub(crate) bindings: KeyedRoot,
     /// Saved functions: name to its function bundle node.
-    pub functions: KeyedRoot,
-    pub certificate: DataOnlyCertificate,
+    pub(crate) functions: KeyedRoot,
+    pub(crate) certificate: DataOnlyCertificate,
 }
 
 /// A summary of the whole census's population, maintained with directory

@@ -6,7 +6,7 @@ use lash_execution_contracts::process::EngineEvent;
 use lash_execution_contracts::process::EngineState;
 use lash_execution_contracts::process::StepName;
 use lash_execution_contracts::process::StepRequest;
-use lash_kernel_doc::{DocumentId, EffectIdentity, Site, TaskIdentity, Unit};
+use lash_kernel_doc::{DocumentId, EffectId, Site, Unit};
 use lash_vm_client::wire::OutcomeWire;
 
 use super::advance::{advance, decode, state_format};
@@ -55,7 +55,7 @@ fn every_engine_state_holding_a_run_names_its_page_to_the_process_root() {
             vec![
                 effect(1, element(0)),
                 Issued::Sleep {
-                    wait: 2,
+                    wait: lash_kernel_doc::testkit::wait_id(2),
                     admission: admitted(element(1)),
                     until_ms: 5_000,
                 },
@@ -92,7 +92,7 @@ fn every_engine_state_holding_a_run_names_its_page_to_the_process_root() {
         completed(
             serde_json::to_string(&KernelRunOutput::Ended {
                 outcome: Box::new(outcome),
-                ran: Vec::new(),
+                ran: Default::default(),
                 reads: None,
                 start: None,
             })
@@ -113,7 +113,7 @@ fn every_engine_state_holding_a_run_names_its_page_to_the_process_root() {
 }
 
 /// The admission of a `perform` of `fetch` at `identity`.
-fn admitted(identity: EffectIdentity) -> Admission {
+fn admitted(identity: EffectId) -> Admission {
     Admission(AdmittedWait {
         identity,
         request: AdmittedRequest::Effect {
@@ -123,13 +123,13 @@ fn admitted(identity: EffectIdentity) -> Admission {
     })
 }
 
-fn parked(issued: Vec<Issued>, withdrawn: Vec<u64>) -> SettledOutput {
+fn parked(issued: Vec<Issued>, withdrawn: Vec<lash_protocol_types::WaitId>) -> SettledOutput {
     completed(
         serde_json::to_string(&KernelRunOutput::Parked {
             state: sealed(),
             issued,
             withdrawn,
-            ran: Vec::new(),
+            ran: Default::default(),
             reads: None,
             start: None,
         })
@@ -139,25 +139,25 @@ fn parked(issued: Vec<Issued>, withdrawn: Vec<u64>) -> SettledOutput {
 
 /// The effect a fan-out element performs: the one site, run by the task
 /// the `element`-th execution of the spawn started.
-fn element(element: u64) -> EffectIdentity {
-    EffectIdentity {
-        task: TaskIdentity::Spawned(lash_kernel_doc::SpawnIdentity {
-            parent: std::sync::Arc::new(TaskIdentity::Main),
-            site: Site::new(Unit::Main, vec![0]),
-            occurrence: element,
-        }),
-        site: Site::new(
+fn element(element: u64) -> EffectId {
+    lash_kernel_doc::testkit::effect(
+        lash_kernel_doc::testkit::spawned_task(
+            lash_kernel_doc::testkit::root_task(),
+            Site::new(Unit::Main, vec![0]),
+            element,
+        ),
+        Site::new(
             Unit::Function(lash_kernel_doc::Name::new("worker")),
             vec![0],
         ),
-        occurrence: 0,
-        loops: Vec::new(),
-    }
+        0,
+        Vec::new(),
+    )
 }
 
-fn effect(wait: u64, identity: EffectIdentity) -> Issued {
+fn effect(wait: u64, identity: EffectId) -> Issued {
     Issued::Effect {
-        wait,
+        wait: lash_kernel_doc::testkit::wait_id(wait),
         admission: admitted(identity),
         effect: lash_kernel_doc::EffectName::new("tools.fetch").expect("an effect name"),
         input: serde_json::json!({ "wait": wait }),
@@ -249,7 +249,7 @@ fn a_fan_out_waits_on_every_element_and_delivers_each_outcome_once_in_any_order(
         })
         .collect();
     assert_eq!(sites, vec![element(0), element(1)]);
-    assert_ne!(sites[0].task, sites[1].task);
+    assert_ne!(sites[0].task(), sites[1].task());
     let (first, second) = (steps[0].step().clone(), steps[1].step().clone());
 
     // The second element settles first: the machine runs with it alone.
@@ -258,7 +258,7 @@ fn a_fan_out_waits_on_every_element_and_delivers_each_outcome_once_in_any_order(
     assert!(effects.is_empty());
     assert_eq!(
         input.deliver.iter().map(|d| d.wait).collect::<Vec<_>>(),
-        vec![11]
+        vec![lash_kernel_doc::testkit::wait_id(11)]
     );
     assert!(input.parked.is_some());
     let held = |input: &KernelRunInput| {
@@ -280,7 +280,7 @@ fn a_fan_out_waits_on_every_element_and_delivers_each_outcome_once_in_any_order(
     let (run2, input, _) = run_of(&action);
     assert_eq!(
         input.deliver.iter().map(|d| d.wait).collect::<Vec<_>>(),
-        vec![10]
+        vec![lash_kernel_doc::testkit::wait_id(10)]
     );
     assert_eq!(
         held(&input),
@@ -301,7 +301,7 @@ fn a_fan_out_waits_on_every_element_and_delivers_each_outcome_once_in_any_order(
         completed(
             serde_json::to_string(&KernelRunOutput::Ended {
                 outcome: Box::new(outcome.clone()),
-                ran: Vec::new(),
+                ran: Default::default(),
                 reads: None,
                 start: None,
             })
@@ -332,13 +332,13 @@ fn a_refused_effect_is_raised_without_a_step_and_a_withdrawn_wait_is_never_deliv
             vec![
                 effect(1, element(0)),
                 Issued::Refused {
-                    wait: 2,
+                    wait: lash_kernel_doc::testkit::wait_id(2),
                     admission: admitted(element(1)),
                     kind: super::EFFECT_UNKNOWN.to_owned(),
                     message: "no such effect".to_owned(),
                 },
                 Issued::Sleep {
-                    wait: 3,
+                    wait: lash_kernel_doc::testkit::wait_id(3),
                     admission: admitted(element(2)),
                     until_ms: 5_000,
                 },
@@ -356,7 +356,7 @@ fn a_refused_effect_is_raised_without_a_step_and_a_withdrawn_wait_is_never_deliv
             .map(|d| (d.wait, d.outcome.clone()))
             .collect::<Vec<_>>(),
         vec![(
-            2,
+            lash_kernel_doc::testkit::wait_id(2),
             refused(super::EFFECT_UNKNOWN, "no such effect".to_owned())
         )]
     );
@@ -372,7 +372,11 @@ fn a_refused_effect_is_raised_without_a_step_and_a_withdrawn_wait_is_never_deliv
     );
 
     // The machine caught the refusal and withdrew its wait on the effect.
-    let (state, action) = settle(state, &run1, parked(vec![], vec![1]));
+    let (state, action) = settle(
+        state,
+        &run1,
+        parked(vec![], vec![lash_kernel_doc::testkit::wait_id(1)]),
+    );
     assert_eq!(
         action,
         EngineAction::Sleep {
@@ -392,7 +396,7 @@ fn a_refused_effect_is_raised_without_a_step_and_a_withdrawn_wait_is_never_deliv
             .iter()
             .map(|d| (d.wait, d.outcome.clone()))
             .collect::<Vec<_>>(),
-        vec![(3, OutcomeWire::Elapsed)]
+        vec![(lash_kernel_doc::testkit::wait_id(3), OutcomeWire::Elapsed)]
     );
 }
 
@@ -484,7 +488,7 @@ fn engine_settings_decode_strictly_to_recorded_settings() {
             join_members: 16,
         },
     )
-    .observing(lash_kernel_vm::Observe::Counts);
+    .observing(lash_kernel_vm::ObservationMode::Counts);
     let engine = recorded.clone().into_engine_settings();
     assert_eq!(
         KernelRecordedSettings::from_engine_settings(&engine).unwrap(),

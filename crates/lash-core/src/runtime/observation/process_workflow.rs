@@ -3,7 +3,7 @@
 //! Session cells still use the trace overlay: they have no process event log.
 use std::collections::{BTreeMap, BTreeSet};
 
-use lash_protocol_types::EffectIdentity;
+use lash_protocol_types::EffectId;
 use lash_trace::{
     TraceLanguageExecutionPayload, TraceNodeFact, TraceRuntimeSubject, WorkflowDocumentRef,
 };
@@ -56,7 +56,9 @@ impl From<&WaitKind> for ProcessWorkflowWaitKind {
 /// index counts entries, including sleeps and calls, independently of effects.
 #[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize, JsonSchema)]
 pub struct ProcessWorkflowSite {
-    pub at: EffectIdentity,
+    pub at: EffectId,
+    /// A display label supplied by the engine, independent of the opaque token.
+    pub label: String,
     pub occurrences: u64,
     pub state: ProcessWorkflowSiteState,
     /// Sequence of the first committed event naming an entry at this site,
@@ -112,7 +114,7 @@ pub struct ProcessWorkflowOverlay {
     /// Supplied by an accepted live observation, absent in a committed-only fold.
     #[serde(skip_serializing_if = "Option::is_none")]
     pub document: Option<WorkflowDocumentRef>,
-    pub current_sites: Vec<EffectIdentity>,
+    pub current_sites: Vec<EffectId>,
     pub live_coverage: ProcessWorkflowLiveCoverage,
     pub sites: Vec<ProcessWorkflowSite>,
     pub observation: ProcessWorkflowObservation,
@@ -156,9 +158,9 @@ pub struct ProcessWorkflowOverlayAccumulator {
     process_id: ProcessId,
     document: Option<WorkflowDocumentRef>,
     sites: BTreeMap<lash_trace::WorkflowTaskSite, Site>,
-    current: BTreeMap<lash_kernel_doc::TaskIdentity, EffectIdentity>,
-    live_tasks: BTreeSet<lash_kernel_doc::TaskIdentity>,
-    live_entries: BTreeMap<lash_trace::WorkflowTaskSite, u64>,
+    current: BTreeMap<lash_kernel_doc::TaskLabel, EffectId>,
+    live_tasks: BTreeSet<lash_kernel_doc::TaskLabel>,
+    live_entries: lash_protocol_types::ObservationReader,
     through: u64,
     ended: bool,
     live_coverage: ProcessWorkflowLiveCoverage,
@@ -177,7 +179,7 @@ impl ProcessWorkflowOverlayAccumulator {
             sites: BTreeMap::new(),
             current: BTreeMap::new(),
             live_tasks: BTreeSet::new(),
-            live_entries: BTreeMap::new(),
+            live_entries: lash_protocol_types::ObservationReader::default(),
             through: 0,
             ended: false,
             live_coverage: ProcessWorkflowLiveCoverage::NotObserved,
@@ -222,48 +224,42 @@ impl ProcessWorkflowOverlayAccumulator {
         self.live_coverage = ProcessWorkflowLiveCoverage::Gap { reason };
     }
 
-    fn enter_committed(&mut self, at: &EffectIdentity) {
+    fn enter_committed(&mut self, at: &EffectId) {
         // Live entries are ordered by the process feed, not by wall clocks
         // on successive owners. Durable facts supply the fallback when no
         // live entry for this task survived retention.
-        if !self.ended && !self.live_tasks.contains(&at.task) {
-            self.current.insert(at.task.clone(), at.clone());
+        if !self.ended && !self.live_tasks.contains(&at.task()) {
+            self.current.insert(at.task(), at.clone());
         }
     }
 
-    fn enter_live(&mut self, at: &EffectIdentity) {
+    fn enter_live(&mut self, at: &EffectId) {
         if self.ended {
             return;
         }
-        let key = lash_trace::WorkflowTaskSite::of(at);
-        if self
-            .live_entries
-            .get(&key)
-            .is_some_and(|held| *held >= at.occurrence)
-        {
-            return;
+        for at in self.live_entries.fold([at.clone()]) {
+            self.live_tasks.insert(at.task());
+            self.current.insert(at.task(), at);
         }
-        self.live_entries.insert(key, at.occurrence);
-        self.live_tasks.insert(at.task.clone());
-        self.current.insert(at.task.clone(), at.clone());
     }
 
     fn site(
         &mut self,
-        at: &EffectIdentity,
+        at: &EffectId,
         timestamp: u64,
         state: ProcessWorkflowSiteState,
         durable_terminal: bool,
         sequence: Option<u64>,
     ) {
         let key = lash_trace::WorkflowTaskSite {
-            task: at.task.clone(),
-            site: at.site.clone(),
+            task: at.task(),
+            site: at.position(),
         };
         let held = self.sites.entry(key).or_insert_with(|| Site {
             value: ProcessWorkflowSite {
                 at: at.clone(),
-                occurrences: at.occurrence.saturating_add(1),
+                label: at.to_string(),
+                occurrences: lash_protocol_types::ObservationReader::counts(at).starts,
                 state: state.clone(),
                 first_entered: None,
                 last_settled: None,
@@ -271,12 +267,13 @@ impl ProcessWorkflowOverlayAccumulator {
             durable_terminal,
             timestamp,
         });
-        if at.occurrence > held.value.at.occurrence
-            || (at.occurrence == held.value.at.occurrence
+        if at.visit() > held.value.at.visit()
+            || (at.visit() == held.value.at.visit()
                 && (durable_terminal || (!held.durable_terminal && timestamp >= held.timestamp)))
         {
             held.value.at = at.clone();
-            held.value.occurrences = at.occurrence.saturating_add(1);
+            held.value.label = at.to_string();
+            held.value.occurrences = lash_protocol_types::ObservationReader::counts(at).starts;
             held.value.state = state;
             held.durable_terminal = durable_terminal;
             held.timestamp = timestamp;
@@ -534,7 +531,7 @@ mod tests {
             (19, 1, false, 7, Some(19)),
             (19, 1, false, 7, Some(19)),
         ] {
-            at.occurrence = occurrence;
+            at = lash_protocol_types::workflow_testkit::with_visit(&at, occurrence);
             let wait = lash_execution_contracts::process::WaitState {
                 kind: WaitKind::Sleep { until_ms: 100 },
                 since_ms: 1,
@@ -558,8 +555,7 @@ mod tests {
 
     /// FIG-6358: provisional evidence has no committed sequence, including
     /// a live completion; a later commit supplies both sequence coordinates.
-    #[test]
-    fn live_only_sites_have_no_committed_sequences() {
+    fn live_only_site_fixture() -> serde_json::Value {
         let process = ProcessId::fixture("live-site-sequences");
         let document = WorkflowDocumentRef {
             document: lash_kernel_doc::DocumentId::from_bytes([7; 32]),
@@ -632,7 +628,7 @@ mod tests {
         // A later live occurrence owns the displayed state before the prior
         // occurrence's next committed settlement reaches this consumer.
         let mut next = at.clone();
-        next.occurrence = 1;
+        next = lash_protocol_types::workflow_testkit::with_visit(&next, 1);
         observation.execution.payload = TraceLanguageExecutionPayload::Node {
             subject: observation.execution.subject(),
             at: next,
@@ -662,19 +658,46 @@ mod tests {
         });
         let snapshot = overlay.snapshot();
         let site = &snapshot.sites[0];
-        assert_eq!(site.at.occurrence, 1);
+        assert_eq!(
+            site.at.visit(),
+            lash_protocol_types::workflow_testkit::visit(1)
+        );
         assert_eq!(site.state, ProcessWorkflowSiteState::Running);
         assert_eq!(site.first_entered, Some(7));
         assert_eq!(site.last_settled, Some(9));
         let wire = serde_json::to_value(site).expect("site wire shape");
+        assert_eq!(
+            serde_json::from_value::<ProcessWorkflowSite>(wire.clone()).expect("site round trip"),
+            *site
+        );
+        wire
+    }
+
+    #[test]
+    fn live_only_sites_have_no_committed_sequences() {
         let fixture: serde_json::Value =
             serde_json::from_str(include_str!("process_workflow_site.fixture.json"))
                 .expect("site fixture");
-        assert_eq!(wire, fixture);
-        assert_eq!(
-            serde_json::from_value::<ProcessWorkflowSite>(wire).expect("site round trip"),
-            *site
-        );
+        assert_eq!(live_only_site_fixture(), fixture);
+    }
+
+    #[test]
+    #[ignore = "regenerates crates/lash-core/src/runtime/observation/process_workflow_site.fixture.json"]
+    #[expect(
+        clippy::disallowed_methods,
+        reason = "the explicitly invoked test-only fixture recorder owns its destination and regeneration flag"
+    )]
+    fn regenerate_process_workflow_site_fixture() {
+        assert_eq!(std::env::var("LASH_REGENERATE").as_deref(), Ok("1"));
+        let root =
+            std::env::var("BUILD_WORKSPACE_DIRECTORY").expect("the recorder names its workspace");
+        let path = std::path::Path::new(&root)
+            .join("crates/lash-core/src/runtime/observation/process_workflow_site.fixture.json");
+        std::fs::write(
+            path,
+            serde_json::to_string_pretty(&live_only_site_fixture()).unwrap() + "\n",
+        )
+        .unwrap();
     }
 
     /// FIG-6370: live counts are provisional until their segment's

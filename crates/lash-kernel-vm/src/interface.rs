@@ -39,14 +39,15 @@
 //! `a_result_the_heap_has_no_room_for_is_refused_at_its_reservation` in
 //! `lash-ext-regex-ecma`.
 
+use lash_kernel_doc::{EffectId, TaskLabel};
 use std::collections::BTreeSet;
 use std::sync::Arc;
 use std::time::Duration;
 
 use crate::PreparedLibrary;
 use lash_kernel_doc::{
-    Datum, Document, EffectIdentity, EffectName, ErrorDatum, FunctionId, FunctionName, Handle,
-    Invalid, Name, Site, TaskIdentity, Timestamp, Type,
+    Datum, Document, EffectName, ErrorDatum, FunctionId, FunctionName, Handle, Invalid, Name,
+    Timestamp, Type,
 };
 
 /// What a machine runs: an admitted document and the library functions the
@@ -192,6 +193,20 @@ impl HostFault {
     }
 }
 
+/// Passive semantic observations of a running segment. Counts are additive;
+/// a host read sees every start before that read, never the same start twice.
+pub trait RunObserver {
+    fn counts(&mut self, counts: &crate::SiteCounts);
+}
+
+/// Per-segment embedding policy. These options are derived, never checkpointed.
+#[derive(Default)]
+pub struct MachineOptions {
+    pub observation: crate::ObservationMode,
+    pub trace_path: bool,
+    pub cell_save: Option<Box<dyn CellSave>>,
+}
+
 /// The synchronous interface a machine reads its host through while it
 /// runs. Every call is answered at once: none is a wait, none yields the
 /// running task's turn, and none is saved, so a read in a stretch that was
@@ -214,7 +229,7 @@ pub trait Host {
         &mut self,
         effect: &EffectName,
         args: &[Datum],
-        site: &Site,
+        site: &lash_kernel_doc::PositionLabel,
     ) -> Result<Result<Datum, ErrorDatum>, HostFault> {
         let _ = (args, site);
         Err(HostFault::new(format!(
@@ -228,15 +243,12 @@ pub trait Host {
     }
     /// Passive entry into a document action. Library implementation sites
     /// are private; the document's call remains visible while they compute.
-    fn enter_site(&mut self, _at: &EffectIdentity) {}
-    /// Whether the host accepts exact live deltas through [`Host::ran`].
-    /// Position hints alone never consume the machine's counts.
-    fn observes_ran(&self) -> bool {
-        false
+    fn enter_site(&mut self, _at: &EffectId) {}
+    /// The passive semantic observer, when the host accepts live deltas.
+    /// Reading this port never consumes counts unless an observer is present.
+    fn observer(&mut self) -> Option<&mut dyn RunObserver> {
+        None
     }
-    /// A provisional delta before a synchronous host read, when
-    /// [`Host::observes_ran`] is true. The next frame carries it.
-    fn ran(&mut self, _delta: &crate::RanDelta) {}
     /// Takes the output of one `print`.
     fn print(&mut self, value: &Datum);
     /// Whether the embedder wants the run cancelled. The machine asks at
@@ -256,7 +268,7 @@ pub enum Request {
 #[derive(Clone, Debug, PartialEq)]
 pub struct EffectRequest {
     pub wait: WaitId,
-    pub identity: EffectIdentity,
+    pub identity: EffectId,
     pub effect: EffectName,
     /// The arguments, copied out of the run (`K-EFF-002`).
     pub args: Vec<Datum>,
@@ -267,7 +279,7 @@ pub struct EffectRequest {
 #[derive(Clone, Debug, PartialEq)]
 pub struct SleepRequest {
     pub wait: WaitId,
-    pub identity: EffectIdentity,
+    pub identity: EffectId,
     pub duration: Duration,
 }
 
@@ -295,12 +307,12 @@ pub enum Delivered {
 
 #[derive(Clone, Debug, PartialEq, Eq, thiserror::Error)]
 pub enum DeliverError {
-    #[error("the machine handed out no wait {}", .wait.0)]
+    #[error("the machine handed out no wait {}", .wait)]
     UnknownWait { wait: WaitId },
-    #[error("wait {} already has its outcome", .wait.0)]
+    #[error("wait {} already has its outcome", .wait)]
     AlreadyDelivered { wait: WaitId },
     /// `Elapsed` for an effect, or an effect outcome for a sleep.
-    #[error("the outcome is not one wait {} can have", .wait.0)]
+    #[error("the outcome is not one wait {} can have", .wait)]
     WrongOutcome { wait: WaitId },
     #[error("the run has ended")]
     Ended,
@@ -321,7 +333,7 @@ pub enum Step {
     Ended(End),
 }
 
-#[derive(Clone, Debug, PartialEq)]
+#[derive(Clone, Debug, Default, PartialEq)]
 pub struct Park {
     /// Every effect and sleep requested since the last park, in request
     /// order.
@@ -339,19 +351,6 @@ pub struct Park {
     /// list-join members (`K-TASK-018` exempts those from `outstanding`).
     /// A turn control must wait for these tasks to settle too.
     pub live: u64,
-    pub tasks: lash_kernel_state::paged::KeyedRoot,
-}
-
-impl Default for Park {
-    fn default() -> Self {
-        Self {
-            requests: Vec::new(),
-            withdrawn: Vec::new(),
-            outstanding: 0,
-            live: 0,
-            tasks: lash_kernel_state::paged::KeyedRoot::Empty,
-        }
-    }
 }
 
 /// How a run ended.
@@ -373,17 +372,17 @@ pub enum RunError {
     /// ended in an error no `join` observed.
     #[error("the run ended with {} unfinished task(s) and {} unobserved task error(s)", .unfinished.len(), .unobserved.len())]
     TasksOutstanding {
-        unfinished: Vec<TaskIdentity>,
-        unobserved: Vec<TaskIdentity>,
+        unfinished: Vec<TaskLabel>,
+        unobserved: Vec<TaskLabel>,
         /// The outermost document body still running in each unfinished task.
         /// Derived from semantic frames, separate from the actual spawn identity.
         /// An embedder resolves these sites through its validated source map.
-        sources: Vec<(TaskIdentity, lash_kernel_doc::Site)>,
+        sources: Vec<(TaskLabel, lash_kernel_doc::PositionLabel)>,
     },
     /// No task is ready and none waits on anything the embedder can
     /// answer.
     #[error("{} task(s) wait on each other and nothing can wake them", .waiting.len())]
-    Deadlock { waiting: Vec<TaskIdentity> },
+    Deadlock { waiting: Vec<TaskLabel> },
     #[error(transparent)]
     Bound(#[from] BoundExceeded),
 }

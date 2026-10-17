@@ -1,11 +1,10 @@
 {
-  "at": {
-    "task": "main",
-    "site": { "unit": { "function": "effect" } },
-    "occurrence": 1
-  },
-  "occurrences": 2,
-  "state": { "state": "running" },
+  "at": "e:09040c000009020c01010706656666656374090003010900",
   "first_entered": 7,
-  "last_settled": 9
+  "label": "fn effect#1 in main",
+  "last_settled": 9,
+  "occurrences": 2,
+  "state": {
+    "state": "running"
+  }
 }

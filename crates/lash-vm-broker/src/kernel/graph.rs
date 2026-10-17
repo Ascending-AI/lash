@@ -36,7 +36,7 @@ use lash_durable::DomainWrite;
 use lash_durable::domain::ExecKey;
 use lash_durable::domain::graph::{AdmissionMember, EffectAdmissionWrite, EffectKey};
 use lash_kernel_doc::graph_tokens::{check_ascending, encode_body};
-use lash_kernel_doc::{Datum, EffectIdentity, EffectName, ErrorDatum};
+use lash_kernel_doc::{Datum, EffectId, EffectName, ErrorDatum};
 
 use crate::snapshot::OperationId;
 
@@ -58,7 +58,7 @@ fn body(kind: NodeKind, reason: &str) -> GraphRefusal {
 /// The canonical binary key of `effect`: its token encoding, the
 /// `effect_admissions` key.
 #[must_use]
-pub fn effect_key(effect: &EffectIdentity) -> EffectKey {
+pub fn effect_key(effect: &EffectId) -> EffectKey {
     EffectKey(encode_body(effect).into())
 }
 
@@ -323,9 +323,9 @@ pub enum Disposition {
 #[derive(Clone, Debug, PartialEq, Eq)]
 pub struct Admission {
     pub exec: ExecKey,
-    pub effect: EffectIdentity,
+    pub effect: EffectId,
     /// The machine's number for the wait its outcome is delivered to.
-    pub wait: u64,
+    pub wait: lash_protocol_types::WaitId,
     /// The effect performed; none for a sleep.
     pub effect_name: Option<EffectName>,
     /// Its FrozenRequest.
@@ -338,7 +338,7 @@ impl TokenCodec for Admission {
         out.seq(6);
         out.text(&self.exec.stored());
         self.effect.encode(out);
-        out.unsigned(self.wait);
+        self.wait.encode(out);
         self.effect_name.encode(out);
         self.request.encode(out);
         match &self.disposition {
@@ -356,8 +356,8 @@ impl TokenCodec for Admission {
     fn decode(input: &mut TokenReader<'_>) -> Result<Self, TokenError> {
         input.expect_struct(6)?;
         let exec = ExecKey::parse(input.text()?).map_err(|error| invalid(error.to_string()))?;
-        let effect = EffectIdentity::decode(input)?;
-        let wait = input.unsigned()?;
+        let effect = EffectId::decode(input)?;
+        let wait = lash_protocol_types::WaitId::decode(input)?;
         let effect_name = Option::decode(input)?;
         let request = NodeId::decode(input)?;
         let (variant, fields) = input.sum()?;
@@ -484,8 +484,8 @@ pub enum MemberStatus {
 /// One effect the membership names.
 #[derive(Clone, Debug, PartialEq, Eq)]
 pub struct MemberEntry {
-    pub effect: EffectIdentity,
-    pub wait: u64,
+    pub effect: EffectId,
+    pub wait: lash_protocol_types::WaitId,
     /// Its Admission.
     pub admission: NodeId,
     pub status: MemberStatus,
@@ -507,7 +507,7 @@ impl TokenCodec for EffectMembership {
         for entry in &self.entries {
             out.seq(4);
             entry.effect.encode(out);
-            out.unsigned(entry.wait);
+            entry.wait.encode(out);
             entry.admission.encode(out);
             out.sum(
                 match entry.status {
@@ -526,8 +526,8 @@ impl TokenCodec for EffectMembership {
         let mut entries = Vec::new();
         for _ in 0..count {
             input.expect_struct(4)?;
-            let effect = EffectIdentity::decode(input)?;
-            let wait = input.unsigned()?;
+            let effect = EffectId::decode(input)?;
+            let wait = lash_protocol_types::WaitId::decode(input)?;
             let admission = NodeId::decode(input)?;
             let (variant, fields) = input.sum()?;
             TokenReader::expect_fields(fields, 0)?;
@@ -543,7 +543,7 @@ impl TokenCodec for EffectMembership {
                 status,
             });
         }
-        let effects: Vec<&EffectIdentity> = entries.iter().map(|entry| &entry.effect).collect();
+        let effects: Vec<&EffectId> = entries.iter().map(|entry| &entry.effect).collect();
         check_ascending(&effects)?;
         Ok(Self { next_park, entries })
     }
@@ -591,7 +591,7 @@ impl EffectMembership {
         id: NodeId,
         exec: &ExecKey,
         projections: &dyn Projections,
-    ) -> Result<(Self, BTreeMap<EffectIdentity, ResolvedAdmission>), GraphRefusal> {
+    ) -> Result<(Self, BTreeMap<EffectId, ResolvedAdmission>), GraphRefusal> {
         let membership: Self = decoder.decode(id, NodeKind::EFFECT_MEMBERSHIP)?;
         let mut resolved = BTreeMap::new();
         let mut waits = std::collections::BTreeSet::new();
@@ -629,7 +629,7 @@ pub fn resolve_admission(
     decoder: &mut GraphDecoder<'_>,
     membership: NodeId,
     exec: &ExecKey,
-    effect: &EffectIdentity,
+    effect: &EffectId,
     projections: &dyn Projections,
 ) -> Result<ResolvedAdmission, GraphRefusal> {
     let (_, mut resolved) = EffectMembership::load(decoder, membership, exec, projections)?;
@@ -645,7 +645,7 @@ pub fn resolve_admission(
 /// copy beyond the frozen request each admission was staged from.
 #[derive(Clone, Debug, Default)]
 pub struct AdmissionBook {
-    admitted: BTreeMap<EffectIdentity, Admitted>,
+    admitted: BTreeMap<EffectId, Admitted>,
 }
 
 /// One admission the book holds: its node, its body and its request.
@@ -659,8 +659,8 @@ struct Admitted {
 /// One wait a park admits, frozen before its commit opens.
 #[derive(Clone, Debug, PartialEq)]
 pub struct FrozenAdmission {
-    pub effect: EffectIdentity,
-    pub wait: u64,
+    pub effect: EffectId,
+    pub wait: lash_protocol_types::WaitId,
     /// The effect performed; none for a sleep.
     pub effect_name: Option<EffectName>,
     pub request: FrozenRequest,
@@ -672,7 +672,7 @@ pub struct FrozenAdmission {
 impl AdmissionBook {
     /// The book of the admissions a restore resolved.
     #[must_use]
-    pub fn restored(resolved: BTreeMap<EffectIdentity, ResolvedAdmission>) -> Self {
+    pub fn restored(resolved: BTreeMap<EffectId, ResolvedAdmission>) -> Self {
         Self {
             admitted: resolved
                 .into_iter()
@@ -692,13 +692,13 @@ impl AdmissionBook {
 
     /// The admission node of `effect`.
     #[must_use]
-    pub fn get(&self, effect: &EffectIdentity) -> Option<NodeId> {
+    pub fn get(&self, effect: &EffectId) -> Option<NodeId> {
         self.admitted.get(effect).map(|admitted| admitted.node)
     }
 
     /// The frozen request of `effect`'s admission.
     #[must_use]
-    pub fn request(&self, effect: &EffectIdentity) -> Option<&FrozenRequest> {
+    pub fn request(&self, effect: &EffectId) -> Option<&FrozenRequest> {
         self.admitted.get(effect).map(|admitted| &admitted.request)
     }
 
@@ -855,12 +855,12 @@ impl AdmissionBook {
         exec: &ExecKey,
         membership: &EffectMembership,
     ) -> Vec<DomainWrite> {
-        let named: std::collections::BTreeSet<&EffectIdentity> = membership
+        let named: std::collections::BTreeSet<&EffectId> = membership
             .entries
             .iter()
             .map(|entry| &entry.effect)
             .collect();
-        let retired: Vec<EffectIdentity> = self
+        let retired: Vec<EffectId> = self
             .admitted
             .keys()
             .filter(|effect| !named.contains(effect))

@@ -681,13 +681,18 @@ fn a_cell_carries_unsealed_bindings_at_its_end() {
         panic!("cell finishes")
     };
     let carry = finished.carry.unwrap();
-    assert_eq!(carry.bindings.len(), 1);
+    assert_eq!(
+        lash_kernel_state::kernel_internals::session_bindings(&carry).len(),
+        1
+    );
     assert!(
-        carry.bindings.page().is_some(),
+        lash_kernel_state::kernel_internals::session_bindings(&carry)
+            .page()
+            .is_some(),
         "a nonempty carry must name its sealed tree"
     );
     let mut heap = lash_kernel_state::kernel_internals::PagedHeap::open_header(
-        carry.heap,
+        lash_kernel_state::kernel_internals::session_heap(&carry),
         Box::new(embedder.source.clone()),
         lash_kernel_state::paged::EditEpoch(2),
     )

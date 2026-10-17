@@ -7,7 +7,7 @@ use lash_core_store::checkpoint_graph::{
     GraphStaging, NodeId, parse_envelope,
 };
 use lash_core_store::effect_opener::EffectOpener;
-use lash_kernel_doc::{Site, TaskIdentity, Unit};
+use lash_kernel_doc::{Site, Unit};
 use lash_protocol_types::{ExecutionPolicy, ToolCallId, ToolId};
 
 use super::*;
@@ -66,16 +66,16 @@ impl Projections for OneRecord {
     }
 }
 
-fn identity(occurrence: u64) -> EffectIdentity {
-    EffectIdentity {
-        task: TaskIdentity::Main,
-        site: Site {
+fn identity(occurrence: u64) -> EffectId {
+    lash_kernel_doc::testkit::effect(
+        lash_kernel_doc::testkit::root_task(),
+        Site {
             unit: Unit::Main,
             path: vec![1, 2],
         },
         occurrence,
-        loops: Vec::new(),
-    }
+        Vec::new(),
+    )
 }
 
 fn exec() -> ExecKey {
@@ -187,7 +187,7 @@ fn every_saved_effect_resolves_to_its_one_frozen_admission() {
             let admission = Admission {
                 exec: exec(),
                 effect: identity(occurrence),
-                wait: occurrence,
+                wait: lash_kernel_doc::testkit::wait_id(occurrence),
                 effect_name: Some(EffectName::new("read").unwrap()),
                 request: node,
                 disposition,
@@ -196,7 +196,7 @@ fn every_saved_effect_resolves_to_its_one_frozen_admission() {
             admissions.push((admission, request));
             entries.push(MemberEntry {
                 effect: identity(occurrence),
-                wait: occurrence,
+                wait: lash_kernel_doc::testkit::wait_id(occurrence),
                 admission: admitted,
                 status,
             });
@@ -308,14 +308,14 @@ fn a_parks_membership_follows_its_ledger_by_admission() {
     for frozen in [
         FrozenAdmission {
             effect: identity(0),
-            wait: 0,
+            wait: lash_kernel_doc::testkit::wait_id(0),
             effect_name: Some(EffectName::new("read").unwrap()),
             request,
             execution: Some((operation, pinned)),
         },
         FrozenAdmission {
             effect: identity(1),
-            wait: 1,
+            wait: lash_kernel_doc::testkit::wait_id(1),
             effect_name: None,
             request: FrozenRequest::Sleep {
                 duration: std::time::Duration::from_millis(5),
@@ -329,7 +329,7 @@ fn a_parks_membership_follows_its_ledger_by_admission() {
     assert!(ledger.stand(
         identity(0),
         PendingEffect {
-            wait: 0,
+            wait: lash_kernel_doc::testkit::wait_id(0),
             effect: None,
             standing: Standing::Admitted(AdmittedEffect {
                 operation,
@@ -340,7 +340,7 @@ fn a_parks_membership_follows_its_ledger_by_admission() {
     assert!(ledger.stand(
         identity(1),
         PendingEffect {
-            wait: 1,
+            wait: lash_kernel_doc::testkit::wait_id(1),
             effect: None,
             standing: Standing::Sleeping { until_ms: 105 },
         }
@@ -349,7 +349,7 @@ fn a_parks_membership_follows_its_ledger_by_admission() {
     assert_eq!(membership.entries.len(), 2);
     assert!(book.retire_unnamed(&exec(), &membership).is_empty());
 
-    assert!(ledger.withdraw(lash_kernel_vm::WaitId(0)));
+    assert!(ledger.withdraw(lash_kernel_doc::testkit::wait_id(0)));
     ledger.consume(&identity(1));
     let membership = book.membership(&ledger).unwrap();
     assert_eq!(

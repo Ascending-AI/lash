@@ -14,10 +14,8 @@ use crate::worker::{Fences, cpu_nanos};
 use lash_kernel_doc::heap::{
     HeapFault, HostResource, PAGE_GRANT_BYTES, PageGrant, PageId, PageRef,
 };
-use lash_kernel_doc::{
-    Datum, EffectIdentity, EffectName, ErrorDatum, Handle, Site, TaskIdentity, Timestamp,
-};
-use lash_kernel_state::paged::source::{READ_BATCH_BYTES, READ_BATCH_PAGES};
+use lash_kernel_doc::{Datum, EffectId, EffectName, ErrorDatum, Handle, TaskLabel, Timestamp};
+use lash_kernel_state::paged::PagePortLimits;
 use lash_kernel_state::paged::{PageAnswer, PageBody, PageSource};
 use lash_vm_broker::kernel::pages::{answer_page, frame_page};
 use lash_vm_client::wire::{self, EffectAnswer, EffectRead, ProjectionAnswer, ProjectionRead};
@@ -237,10 +235,10 @@ pub(crate) struct WireHost {
     /// The sites entered since the run's previous frame, when the parent
     /// observes them.
     pub sites: Option<EnteredSites>,
-    pub ran: lash_kernel_vm::RanDelta,
+    pub ran: lash_kernel_vm::SiteCounts,
     /// The statement path since the run's previous frame, as document
     /// ordinals, when the parent records it.
-    pub path: wire::OrdinalPath,
+    pub path: lash_kernel_vm::ExecutionPath,
 }
 
 /// Each task's last entered document site since the run's previous frame.
@@ -248,24 +246,23 @@ pub(crate) struct WireHost {
 /// a stretch of pure compute names the last site each task entered.
 #[derive(Default)]
 pub(crate) struct EnteredSites {
-    last: BTreeMap<TaskIdentity, (u64, EffectIdentity)>,
+    last: BTreeMap<TaskLabel, (u64, EffectId)>,
     entries: u64,
 }
 
 impl EnteredSites {
-    fn enter(&mut self, at: &EffectIdentity) {
+    fn enter(&mut self, at: &EffectId) {
         self.entries += 1;
-        match self.last.get_mut(&at.task) {
+        match self.last.get_mut(&at.task()) {
             Some(last) => *last = (self.entries, at.clone()),
             None => {
-                self.last
-                    .insert(at.task.clone(), (self.entries, at.clone()));
+                self.last.insert(at.task(), (self.entries, at.clone()));
             }
         }
     }
 
     /// The entries the next frame carries, in the order they were entered.
-    fn take(&mut self) -> Vec<EffectIdentity> {
+    fn take(&mut self) -> Vec<EffectId> {
         let mut entered: Vec<_> = std::mem::take(&mut self.last).into_values().collect();
         entered.sort_unstable_by_key(|(order, _)| *order);
         entered.into_iter().map(|(_, at)| at).collect()
@@ -312,18 +309,14 @@ impl lash_kernel_vm::Host for WireHost {
         self.sites.is_some()
     }
 
-    fn enter_site(&mut self, at: &EffectIdentity) {
+    fn enter_site(&mut self, at: &EffectId) {
         if let Some(sites) = self.sites.as_mut() {
             sites.enter(at);
         }
     }
 
-    fn observes_ran(&self) -> bool {
-        self.sites.is_some()
-    }
-
-    fn ran(&mut self, delta: &lash_kernel_vm::RanDelta) {
-        self.ran.extend_from_slice(delta);
+    fn observer(&mut self) -> Option<&mut dyn lash_kernel_vm::RunObserver> {
+        self.sites.is_some().then_some(self)
     }
 
     fn clock(&mut self) -> Timestamp {
@@ -352,7 +345,7 @@ impl lash_kernel_vm::Host for WireHost {
         &mut self,
         effect: &EffectName,
         args: &[Datum],
-        site: &Site,
+        site: &lash_kernel_doc::PositionLabel,
     ) -> Result<Result<Datum, ErrorDatum>, lash_kernel_vm::HostFault> {
         let answer: EffectAnswer = self.exchange(
             HostReadKind::Effect,
@@ -374,7 +367,10 @@ impl lash_kernel_vm::Host for WireHost {
     }
 }
 
-const _: () = assert!(READ_BATCH_PAGES == PAGE_BATCH_PAGES && READ_BATCH_BYTES == PAGE_BATCH_BYTES);
+const _: () = assert!(
+    PagePortLimits::STANDARD.pages == PAGE_BATCH_PAGES
+        && PagePortLimits::STANDARD.bytes == PAGE_BATCH_BYTES
+);
 
 /// The authority word of a grant: a stage lease's id with its top bit set,
 /// a root lease's without. Lease ids stay below 2^63.
@@ -835,7 +831,7 @@ impl Port {
                     }
                 }
             }
-            for batch in unread.chunks(READ_BATCH_PAGES) {
+            for batch in unread.chunks(PagePortLimits::STANDARD.pages) {
                 for answer in self.fetch(batch.to_vec()) {
                     children.extend(answer?.children);
                 }
@@ -1005,7 +1001,7 @@ impl Port {
 
 impl PageSource for WirePageSource {
     fn read(&mut self, pages: &[PageRef]) -> Result<Vec<Result<PageAnswer, HeapFault>>, HeapFault> {
-        if pages.len() > READ_BATCH_PAGES {
+        if pages.len() > PagePortLimits::STANDARD.pages {
             return Err(HeapFault::Exhausted {
                 resource: HostResource::ReadBatch,
             });
@@ -1096,5 +1092,11 @@ impl PageSource for WirePageSource {
             id,
             grant: PageGrant::NONE,
         })
+    }
+}
+
+impl lash_kernel_vm::RunObserver for WireHost {
+    fn counts(&mut self, counts: &lash_kernel_vm::SiteCounts) {
+        self.ran.extend_from_slice(counts);
     }
 }

@@ -837,7 +837,11 @@ impl Checkout {
     /// Hands the machine one committed outcome, with the run's next slice:
     /// the machine takes it before it runs on, or drops it when its wait
     /// had been withdrawn.
-    pub fn deliver(&mut self, wait: u64, outcome: EncodedPayload) -> Result<(), PoolError> {
+    pub fn deliver(
+        &mut self,
+        wait: lash_kernel_doc::WaitId,
+        outcome: EncodedPayload,
+    ) -> Result<(), PoolError> {
         if self.pending.is_some() || !self.started {
             return Err(PoolError::breach(SequenceFault::NoRun));
         }

@@ -414,8 +414,8 @@ admissions). `Parked` carries the candidate root and its header in place of a
 
 Invariants:
 
-- A request names at most `READ_BATCH_PAGES` pages and `READ_BATCH_BYTES`
-  bytes.
+- A request names at most `PagePortLimits::STANDARD.pages` pages and
+  `PagePortLimits::STANDARD.bytes` bytes.
 - A read returns each page or its own typed fault in request order.
   Successful prefixes remain available, and consumers surface faults in
   traversal order. Request-wide lease and deadline refusals still end the

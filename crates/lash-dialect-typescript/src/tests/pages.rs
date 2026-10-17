@@ -105,7 +105,7 @@ pub(crate) fn reopen(
     *machine = lash_kernel_vm::KernelMachine::open(
         program.clone(),
         bounds,
-        &sealed.root,
+        &sealed.checkpoint(),
         Vec::new(),
         Box::new(source.clone()),
     )

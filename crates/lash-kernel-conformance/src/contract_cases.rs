@@ -16,7 +16,7 @@ use lash_kernel_doc::{
 use lash_kernel_vm::kernel_internals::Layout;
 use lash_kernel_vm::{
     CellStart, DeliverError, Delivered, End, KernelMachine, Machine, Outcome, PreparedLibrary,
-    Program, Request, Step, WaitId,
+    Program, Request, Step,
 };
 
 use crate::{Case, ExpectedEnd, MachineRunner, Shard, check_case};
@@ -554,18 +554,26 @@ fn delivery_errors(shard: &Shard, registry: &FunctionRegistry) {
         panic!("effect request")
     };
     let before = lash_kernel_doc::graph_tokens::encode_body(
-        &machine.seal(crate::pages::BUDGET).unwrap().unwrap().root,
+        &machine
+            .seal(crate::pages::BUDGET)
+            .unwrap()
+            .unwrap()
+            .checkpoint(),
     );
     assert!(matches!(
         machine.deliver(
-            WaitId(u64::MAX),
+            lash_kernel_doc::kernel_internals::wait_id(u64::MAX),
             Outcome::Completed(lash_kernel_doc::Datum::Null)
         ),
         Err(DeliverError::UnknownWait { .. })
     ));
     assert_eq!(
         lash_kernel_doc::graph_tokens::encode_body(
-            &machine.seal(crate::pages::BUDGET).unwrap().unwrap().root
+            &machine
+                .seal(crate::pages::BUDGET)
+                .unwrap()
+                .unwrap()
+                .checkpoint()
         ),
         before
     );
@@ -579,7 +587,11 @@ fn delivery_errors(shard: &Shard, registry: &FunctionRegistry) {
         Delivered::Accepted
     );
     let accepted = lash_kernel_doc::graph_tokens::encode_body(
-        &machine.seal(crate::pages::BUDGET).unwrap().unwrap().root,
+        &machine
+            .seal(crate::pages::BUDGET)
+            .unwrap()
+            .unwrap()
+            .checkpoint(),
     );
     assert!(matches!(
         machine.deliver(
@@ -590,7 +602,11 @@ fn delivery_errors(shard: &Shard, registry: &FunctionRegistry) {
     ));
     assert_eq!(
         lash_kernel_doc::graph_tokens::encode_body(
-            &machine.seal(crate::pages::BUDGET).unwrap().unwrap().root
+            &machine
+                .seal(crate::pages::BUDGET)
+                .unwrap()
+                .unwrap()
+                .checkpoint()
         ),
         accepted
     );

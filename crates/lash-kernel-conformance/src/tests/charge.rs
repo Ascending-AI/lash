@@ -59,7 +59,7 @@ fn probe(
             let mut opened = crate::pages::open_in(
                 at.program.clone(),
                 at.bounds,
-                &sealed.root,
+                lash_kernel_vm::kernel_internals::sealed_root(&sealed),
                 at.source,
                 at.admissions,
                 layout,

@@ -5,7 +5,7 @@
 //! name: a wrong release digest is not repaired by finding a release of the
 //! same name, and a missing node is never accepted as a dangling reference.
 
-use lash_kernel_doc::EffectIdentity;
+use lash_kernel_doc::EffectId;
 use lash_kernel_doc::graph_tokens::{CanonicalFault, DecodeDimension, TokenError};
 use lash_protocol_types::ToolCallId;
 
@@ -85,11 +85,11 @@ pub enum GraphRefusal {
     #[error("a native implementation's fingerprint is not the pinned one")]
     NativeFingerprintMismatch,
     #[error("no admission holds effect {0:?}")]
-    AdmissionMissing(Box<EffectIdentity>),
+    AdmissionMissing(Box<EffectId>),
     #[error("the admission of effect {0:?} is not the one the state names")]
-    AdmissionMismatch(Box<EffectIdentity>),
+    AdmissionMismatch(Box<EffectId>),
     #[error("effect {0:?} is admitted twice")]
-    DuplicateEffect(Box<EffectIdentity>),
+    DuplicateEffect(Box<EffectId>),
     #[error("call {0} already has an outcome")]
     DuplicateOutcome(ToolCallId),
     #[error("an owner revision is not the expected one")]

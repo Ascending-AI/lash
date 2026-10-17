@@ -161,7 +161,7 @@ pub enum Kind {
     Lease,
     /// Observer-visible activity crossed the observation boundary: a message the
     /// protocol made visible to the session, a replay gap, a visibility change.
-    Observe,
+    ObservationMode,
     /// A runtime-checkpoint commit.
     Commit,
     /// A durable effect reached the journal.
@@ -187,7 +187,7 @@ impl Kind {
             | Self::Await
             | Self::Wake
             | Self::Lease
-            | Self::Observe => Family::Step,
+            | Self::ObservationMode => Family::Step,
             Self::Commit | Self::Effect => Family::DurableWrite,
             Self::Outcome => Family::Terminal,
         }
@@ -209,7 +209,7 @@ impl Kind {
             Self::Await => "await",
             Self::Wake => "wake",
             Self::Lease => "lease",
-            Self::Observe => "observe",
+            Self::ObservationMode => "observe",
             Self::Commit => "commit",
             Self::Effect => "effect",
             Self::Outcome => "outcome",

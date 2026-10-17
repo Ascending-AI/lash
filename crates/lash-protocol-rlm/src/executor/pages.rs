@@ -435,7 +435,7 @@ impl ParentPages {
 
 impl PageSource for ParentPages {
     fn read(&mut self, pages: &[PageRef]) -> Result<Vec<Result<PageAnswer, HeapFault>>, HeapFault> {
-        if pages.len() > lash_kernel_state::paged::source::READ_BATCH_PAGES {
+        if pages.len() > lash_kernel_state::paged::PagePortLimits::STANDARD.pages {
             return Err(HeapFault::Exhausted {
                 resource: lash_kernel_doc::heap::HostResource::ReadBatch,
             });

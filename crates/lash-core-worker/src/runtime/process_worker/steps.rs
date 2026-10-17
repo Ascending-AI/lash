@@ -234,7 +234,7 @@ impl DurableProcessWorker {
             attempt: execution.attempt(),
         };
         let mut context = lash_trace::TraceContext::default().for_process(process.id.clone());
-        context.graph_node_id = Some(site.site.to_string());
+        context.graph_node_id = Some(site.position().to_string());
         tracing.observe_language(&started.event_key(), || {
             (
                 context.clone(),

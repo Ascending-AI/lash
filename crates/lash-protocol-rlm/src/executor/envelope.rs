@@ -185,7 +185,7 @@ pub(super) struct ResumedCell {
     pub started_process_ids: Vec<lash_core::ProcessId>,
     pub graph: HostGraph,
     /// The effect identity each open call was performed at.
-    pub open_sites: BTreeMap<lash_core::ToolCallId, lash_kernel_doc::EffectIdentity>,
+    pub open_sites: BTreeMap<lash_core::ToolCallId, lash_kernel_doc::EffectId>,
     /// The session an ended root's end names, as the activation that
     /// recorded the end left it: its descriptor page, which the session
     /// adopts (FIG-6315). None for a parked root.

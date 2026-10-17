@@ -218,7 +218,7 @@ async fn a_process_cancelled_while_blocked_has_a_committed_cancelled_graph() {
         .expect("the step's site");
     assert!(matches!(
         stepped.state.occurrence,
-        WorkflowOverlayOccurrence::Running { occurrence: 1, .. }
+        WorkflowOverlayOccurrence::Running { occurrence, .. } if occurrence == lash_kernel_doc::testkit::visit(1)
     ));
     assert_eq!(
         stepped.state.call.as_ref().map(|call| &call.call_id),

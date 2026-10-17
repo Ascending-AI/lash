@@ -130,7 +130,7 @@ impl<'a> Access<'a> {
     /// stay in request order, including faults; decoding consumes them in
     /// traversal order rather than letting a later I/O fault skip a prefix.
     pub(super) fn read_batch(&self, pages: &[PageRef]) -> Vec<Result<PageAnswer, HeapFault>> {
-        if pages.len() > super::source::READ_BATCH_PAGES {
+        if pages.len() > super::PagePortLimits::STANDARD.pages {
             return vec![
                 Err(HeapFault::Exhausted {
                     resource: lash_kernel_doc::heap::HostResource::ReadBatch,

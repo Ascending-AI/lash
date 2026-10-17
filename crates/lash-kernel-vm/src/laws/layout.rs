@@ -308,7 +308,7 @@ fn session_binding_images_are_identical_across_layouts_and_cold_caches() {
         assert_eq!(finished.result, int(7));
         let carry = finished.carry.expect("a session cell carries bindings");
         let mut heap = lash_kernel_state::kernel_internals::PagedHeap::open_header(
-            carry.heap,
+            lash_kernel_state::kernel_internals::session_heap(&carry),
             Box::new(embedder.source.clone()),
             lash_kernel_state::paged::EditEpoch(2),
         )

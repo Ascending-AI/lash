@@ -8,7 +8,7 @@ use serde::{Deserialize, Serialize};
 
 /// Implements `JsonSchema` for a type stored as a string of one pattern.
 macro_rules! string_schema {
-    ($type:ty, $name:literal, $pattern:literal) => {
+    ($type:ty, $name:expr, $pattern:literal) => {
         impl schemars::JsonSchema for $type {
             fn schema_name() -> std::borrow::Cow<'static, str> {
                 $name.into()

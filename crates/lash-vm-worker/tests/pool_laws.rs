@@ -16,9 +16,7 @@ use lash_core_store::checkpoint_graph::stage::{StageLeaseId, StageSpool as _};
 use lash_durable::DurableError;
 use lash_durable::domain::pages::{RootLease, StoredPage};
 use lash_kernel_doc::heap::{PageGrant, PageRef};
-use lash_kernel_doc::{
-    Datum, EffectIdentity, Float, Handle, Integer, Name, Timestamp, parse_document,
-};
+use lash_kernel_doc::{Datum, EffectId, Float, Handle, Integer, Name, Timestamp, parse_document};
 use lash_kernel_state::paged::{PageAnswer, PageBody, PageSource};
 use lash_kernel_vm::{Bound, End, Outcome, Request, RunError, Target};
 use lash_vm_broker::kernel::MachinePark;
@@ -379,14 +377,14 @@ impl PageSource for Staged {
 }
 
 /// The one effect the park requests: its wait and its argument.
-fn requested(step: RunStep) -> (u64, Datum) {
+fn requested(step: RunStep) -> (lash_kernel_doc::WaitId, Datum) {
     let (wait, argument, _, _) = admitted(step);
     (wait, argument)
 }
 
 /// The one effect the park requests, as the parent's admission freezes it,
 /// and the checkpoint root the park sealed.
-fn admitted(step: RunStep) -> (u64, Datum, EncodedPayload, [u8; 32]) {
+fn admitted(step: RunStep) -> (lash_kernel_doc::WaitId, Datum, EncodedPayload, [u8; 32]) {
     let RunStep::Parked {
         park, candidate, ..
     } = step
@@ -407,7 +405,7 @@ fn admitted(step: RunStep) -> (u64, Datum, EncodedPayload, [u8; 32]) {
         },
     });
     (
-        request.wait.0,
+        request.wait,
         request.args[0].clone(),
         admission,
         candidate.expect("the park seals its checkpoint root"),
@@ -818,7 +816,7 @@ main { }"#,
         .expect("start");
     let mut parent = Parent::new(DIALECT);
     let (wait, argument) = requested(parent.run(&mut worker, SLICE, false).expect("run"));
-    let entered: Vec<Vec<EffectIdentity>> = worker
+    let entered: Vec<Vec<EffectId>> = worker
         .take_sites()
         .iter()
         .map(|payload| {
@@ -833,13 +831,18 @@ main { }"#,
     let [call] = &entered[..] else {
         panic!("the task's last entry alone: {entered:?}")
     };
-    assert_eq!(call.occurrence, 1, "the second call is the last entry");
     assert_eq!(
-        call.loops
+        call.visit(),
+        lash_protocol_types::workflow_testkit::visit(1),
+        "the second call is the last entry"
+    );
+    assert_eq!(
+        lash_kernel_doc::ObservationReader::counts(call)
+            .loops
             .iter()
-            .map(|iteration| iteration.iteration)
+            .map(|iteration| iteration.entries)
             .collect::<Vec<_>>(),
-        [1]
+        [2]
     );
     worker.deliver(wait, completed(argument)).expect("deliver");
     let end = ended(parent.run(&mut worker, SLICE, false).expect("run"));

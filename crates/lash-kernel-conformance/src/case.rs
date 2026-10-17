@@ -1,11 +1,10 @@
 //! The portable corpus envelope. Documents remain kernel text.
 
+// Corpus coordinates are kernel-owned rule oracles, not host identity tokens.
+use lash_kernel_doc::kernel_internals::{EffectIdentity, TaskIdentity};
 use std::collections::BTreeMap;
 
-use lash_kernel_doc::{
-    Datum, EffectIdentity, EffectName, ErrorDatum, Handle, Name, Signature, TaskIdentity,
-    Timestamp, Type,
-};
+use lash_kernel_doc::{Datum, EffectName, ErrorDatum, Handle, Name, Signature, Timestamp, Type};
 use lash_kernel_vm::{Bound, Bounds, End, Outcome, RunError};
 use serde::{Deserialize, Serialize};
 
@@ -214,10 +213,21 @@ impl ExpectedEnd {
                 unobserved,
                 ..
             }) => Self::TasksOutstanding {
-                unfinished,
-                unobserved,
+                unfinished: unfinished
+                    .into_iter()
+                    .map(|task| lash_kernel_doc::kernel_internals::task_parts(&task).clone())
+                    .collect(),
+                unobserved: unobserved
+                    .into_iter()
+                    .map(|task| lash_kernel_doc::kernel_internals::task_parts(&task).clone())
+                    .collect(),
             },
-            End::Error(RunError::Deadlock { waiting }) => Self::Deadlock { waiting },
+            End::Error(RunError::Deadlock { waiting }) => Self::Deadlock {
+                waiting: waiting
+                    .into_iter()
+                    .map(|task| lash_kernel_doc::kernel_internals::task_parts(&task).clone())
+                    .collect(),
+            },
             End::Error(RunError::Bound(error)) => Self::Bound {
                 name: match error.bound {
                     Bound::Charge => "charge".into(),

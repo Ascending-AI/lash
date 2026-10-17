@@ -5,8 +5,8 @@ use crate::paged::{OpenError, SealError, SealedRoot};
 use lash_kernel_doc::graph_tokens::encode_body;
 use lash_kernel_state::kernel_internals::tree::SealWork;
 use lash_kernel_state::paged::{
-    AllocationCensus, CheckpointRoot, EditEpoch, KeyedRoot, PageKind, PageSource, RootStatus,
-    SavedMeters, SealBudget, SequenceRoot,
+    AllocationCensus, CheckpointRoot, EditEpoch, PageKind, PageSource, RootStatus, SavedMeters,
+    SealBudget, SequenceRoot,
 };
 
 impl Machine for KernelMachine {
@@ -21,11 +21,33 @@ impl Machine for KernelMachine {
     fn open(
         program: Program,
         bounds: Bounds,
-        root: &CheckpointRoot,
+        root: &lash_kernel_state::paged::Checkpoint,
         admissions: Vec<lash_kernel_state::AdmittedWait>,
         source: Box<dyn PageSource>,
     ) -> Result<Self, OpenError> {
-        Self::open_with_layout(program, bounds, root, admissions, source, Layout::default())
+        Self::open_with_layout(
+            program,
+            bounds,
+            lash_kernel_state::kernel_internals::checkpoint_root(root),
+            admissions,
+            source,
+            Layout::default(),
+        )
+    }
+    fn set_options(&mut self, options: crate::MachineOptions) {
+        self.set_observe(options.observation);
+        if options.trace_path {
+            self.trace_path();
+        } else if let Some(observer) = self.observer.as_deref_mut() {
+            observer.path = None;
+        }
+        self.save = options.cell_save;
+    }
+    fn take_counts(&mut self) -> crate::SiteCounts {
+        self.take_ran()
+    }
+    fn take_path(&mut self) -> Result<crate::ExecutionPath, HeapFault> {
+        KernelMachine::take_execution_path(self)
     }
     fn run(&mut self, host: &mut dyn Host, slice: u64) -> Result<Step, MachineError> {
         if self.ended {
@@ -50,11 +72,11 @@ impl Machine for KernelMachine {
         if self.ended {
             return Err(DeliverError::Ended);
         }
-        let key = ordinal_key(wait.0);
+        let key = ordinal_key(lash_kernel_doc::kernel_internals::wait_number(wait));
         let Some(mut pending) = self.waits.get(&key, self.heap.pages())? else {
             return if self.withdrawn_ever.get(&key, self.heap.pages())?.is_some() {
                 Ok(Delivered::Dropped)
-            } else if wait.0 < self.next_wait {
+            } else if lash_kernel_doc::kernel_internals::wait_number(wait) < self.next_wait {
                 Err(DeliverError::AlreadyDelivered { wait })
             } else {
                 Err(DeliverError::UnknownWait { wait })
@@ -268,58 +290,6 @@ impl Machine for KernelMachine {
             tasks::Tasks::open(self.heap.task_root().clone(), access, Arc::clone(&self.exe));
         Ok(Some(SealedRoot { page, root }))
     }
-    fn task_identity(
-        &self,
-        identity: lash_kernel_state::paged::TaskIdentityRef,
-    ) -> Result<lash_kernel_doc::TaskIdentity, lash_kernel_doc::heap::HeapFault> {
-        identity.resolve(self.heap.pages())
-    }
-    fn tasks(
-        &self,
-        root: KeyedRoot,
-        filter: crate::paged::TaskFilter,
-        after: Option<lash_kernel_doc::TaskId>,
-        limit: u32,
-    ) -> Result<crate::paged::TaskPage, lash_kernel_doc::heap::HeapFault> {
-        use crate::paged::{TaskFilter, TaskPage};
-        if limit == 0 || limit > 64 {
-            return Err(lash_kernel_doc::heap::HeapFault::Malformed(
-                "a task query examines 1 to 64 rows".into(),
-            ));
-        }
-        let rows = Tree::<lash_kernel_state::paged::TaskRecord>::of_keyed(&root);
-        let mut cursor = after;
-        let mut tasks = Vec::new();
-        let mut finished = after.is_some_and(|id| id.0 >= root.len().saturating_sub(1));
-        for _ in 0..limit {
-            let key = cursor.map(|id| ordinal_key(id.0));
-            let Some((key, task)) = rows.after(key.as_deref(), self.heap.pages())? else {
-                finished = true;
-                break;
-            };
-            let id = lash_kernel_doc::TaskId(u64::from_be_bytes(key.try_into().map_err(|_| {
-                lash_kernel_doc::heap::HeapFault::Malformed("task key is not an ordinal".into())
-            })?));
-            cursor = Some(id);
-            let include = match filter {
-                TaskFilter::All => true,
-                TaskFilter::Live => !task.identity.is_main() && task.is_live(),
-                TaskFilter::Outstanding => task.is_outstanding(),
-            };
-            if include {
-                tasks.push((id, task.identity));
-            }
-            if id.0 + 1 >= root.len() {
-                finished = true;
-                break;
-            }
-        }
-        Ok(TaskPage {
-            tasks,
-            after: cursor,
-            finished,
-        })
-    }
     fn meters(&self) -> Meters {
         Meters {
             charged: self.charged,
@@ -453,5 +423,15 @@ impl KernelMachine {
             boundaries: 0,
             save: None,
         })
+    }
+}
+
+impl KernelMachine {
+    pub(crate) fn task_identity(
+        &self,
+        identity: lash_kernel_state::paged::TaskIdentityRef,
+    ) -> Result<lash_kernel_doc::kernel_internals::TaskIdentity, lash_kernel_doc::heap::HeapFault>
+    {
+        identity.resolve(self.heap.pages())
     }
 }

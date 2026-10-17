@@ -1,7 +1,7 @@
 //! The host's one interpretation of run counts and verified paths.
 
 use lash_kernel_doc::{
-    Document, Node, RanCounts, ReplayPath, RunObservation, Site, TaskIdentity, Unit,
+    Document, Node, RanCounts, ReplayPath, RunObservation, Site, TaskLabel, Unit,
 };
 use schemars::JsonSchema;
 use serde::{Deserialize, Serialize};
@@ -133,7 +133,7 @@ fn entry_nodes(document: &Document, entry: &Unit) -> EntryNodes {
 
 #[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize)]
 pub struct PathStep {
-    pub task: TaskIdentity,
+    pub task: TaskLabel,
     #[serde(flatten)]
     pub site: PathSite,
 }

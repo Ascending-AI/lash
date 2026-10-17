@@ -69,8 +69,8 @@ use lash_durable::domain::graph::{HydratedGraph, RootOwner};
 use lash_durable::domain::pages::{CandidateOwner, CandidatePublication};
 use lash_durable::domain::{ExecKey, RunFactWrite, RunSeq, SnapshotRev};
 use lash_durable::{CommitLabel, DomainWrite, DurableError, DurableInstant};
-use lash_kernel_doc::{Datum, DocumentId, EffectIdentity, EffectName, ErrorDatum, KERNEL_VERSION};
-use lash_kernel_state::paged::CheckpointRoot;
+use lash_kernel_doc::{Datum, DocumentId, EffectId, EffectName, ErrorDatum, KERNEL_VERSION};
+use lash_kernel_state::paged::CheckpointHeader;
 use lash_kernel_vm::{End, Outcome, WaitId};
 use tokio_util::sync::CancellationToken;
 
@@ -121,7 +121,7 @@ pub enum AdmitAs {
 /// One wait a park admits.
 #[derive(Clone, Debug, PartialEq)]
 pub struct EffectAdmission {
-    pub identity: EffectIdentity,
+    pub identity: EffectId,
     pub wait: WaitId,
     /// The effect performed; none for a sleep.
     pub effect: Option<EffectName>,
@@ -131,7 +131,7 @@ pub struct EffectAdmission {
 /// One call a save admitted, as the host records it in its own state.
 #[derive(Clone, Debug, PartialEq, Eq)]
 pub struct AdmittedCall {
-    pub effect: EffectIdentity,
+    pub effect: EffectId,
     pub operation: EffectName,
     pub call: lash_protocol_types::ToolCallId,
     /// Its Admission.
@@ -156,7 +156,7 @@ pub struct HostParts {
 #[derive(Clone, Debug)]
 pub struct SealedPark {
     pub root: NodeId,
-    pub header: CheckpointRoot,
+    pub header: CheckpointHeader,
 }
 
 /// What one park commits.
@@ -222,7 +222,7 @@ pub struct ParkedState {
     pub exec_root: NodeId,
     /// Its CheckpointRoot page and header.
     pub root: NodeId,
-    pub header: CheckpointRoot,
+    pub header: CheckpointHeader,
     /// Each wait's request, taken from the one admission that holds it.
     pub admissions: Vec<lash_kernel_state::AdmittedWait>,
 }
@@ -239,10 +239,6 @@ pub struct RootRead {
 
 /// What a run's latest root holds.
 #[derive(Clone, Debug)]
-#[expect(
-    clippy::large_enum_variant,
-    reason = "read once per claim and matched at once; a parked state is the common case"
-)]
 pub enum Checkpoint {
     /// A parked state and the ledger its membership names.
     Parked {
@@ -261,7 +257,7 @@ pub enum Checkpoint {
 /// A wait whose outcome is committed and can be delivered.
 #[derive(Clone, Debug, PartialEq)]
 pub struct Settled {
-    pub identity: EffectIdentity,
+    pub identity: EffectId,
     pub wait: WaitId,
     pub outcome: Outcome,
 }
@@ -333,21 +329,12 @@ fn settled_in(
                     {
                         let name = entry.effect.as_ref().map_or("effect", EffectName::as_str);
                         error.message = format!(
-                            "effect `{name}` at site {:?}, occurrence {} started and never settled; outside work may already have happened, so check outside state before calling again",
-                            identity.site, identity.occurrence,
+                            "effect `{name}` at {identity} started and never settled; outside work may already have happened, so check outside state before calling again",
                         );
                         error.data = Datum::Record(vec![
                             ("effect".to_owned(), Datum::Text(name.to_owned())),
-                            ("site".to_owned(), Datum::Record(vec![
-                                ("unit".to_owned(), Datum::Text(match &identity.site.unit {
-                                    lash_kernel_doc::Unit::Main => "main".to_owned(),
-                                    lash_kernel_doc::Unit::Function(name) => format!("fn:{name}"),
-                                    lash_kernel_doc::Unit::Library(function) => format!("lib:{function}"),
-                                })),
-                                ("path".to_owned(), Datum::List(identity.site.path.iter()
-                                    .map(|part| Datum::Int(i64::from(*part).into())).collect())),
-                            ])),
-                            ("occurrence".to_owned(), Datum::Int(lash_kernel_doc::Integer::new(identity.occurrence))),
+                            ("position".to_owned(), Datum::Text(identity.position().to_string())),
+                            ("identity".to_owned(), Datum::Text(identity.to_string())),
                             ("cause".to_owned(), error.data.clone()),
                         ]);
                     }
@@ -378,10 +365,6 @@ fn final_output<'a>(
     }
 }
 
-#[expect(
-    clippy::large_enum_variant,
-    reason = "one per park transaction, consumed by its commit"
-)]
 enum SavePhase<'a> {
     Parked {
         state: SealedPark,
@@ -398,7 +381,7 @@ enum SavePhase<'a> {
 /// The ledger a stored membership names, from the admissions it resolved.
 fn ledger_of(
     membership: &EffectMembership,
-    resolved: &BTreeMap<EffectIdentity, ResolvedAdmission>,
+    resolved: &BTreeMap<EffectId, ResolvedAdmission>,
 ) -> Result<EffectLedger, QuietPointRefusal> {
     let mut pending = BTreeMap::new();
     let mut released = Vec::new();
@@ -628,7 +611,7 @@ impl DurableSnapshotStore {
             ledger.drop_released(|admitted| final_output(&folded, &self.exec, admitted).is_some());
         }
         struct Requested {
-            identity: EffectIdentity,
+            identity: EffectId,
             wait: WaitId,
             effect: Option<EffectName>,
             standing: Option<Standing>,
@@ -737,7 +720,7 @@ impl DurableSnapshotStore {
                         &self.exec,
                         FrozenAdmission {
                             effect: entry.identity.clone(),
-                            wait: entry.wait.0,
+                            wait: entry.wait,
                             effect_name: entry.effect.clone(),
                             request,
                             execution: Some((operation, pin)),
@@ -773,7 +756,7 @@ impl DurableSnapshotStore {
                         &self.exec,
                         FrozenAdmission {
                             effect: entry.identity.clone(),
-                            wait: entry.wait.0,
+                            wait: entry.wait,
                             effect_name: entry.effect.clone(),
                             request,
                             execution: None,
@@ -783,7 +766,7 @@ impl DurableSnapshotStore {
                 tx.write(write);
             }
             let pending = PendingEffect {
-                wait: entry.wait.0,
+                wait: entry.wait,
                 effect: entry.effect,
                 standing,
             };

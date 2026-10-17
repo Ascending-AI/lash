@@ -133,7 +133,7 @@ export type ActionActivity = {
  * every action of its statement. `T` can retain the host's typed result/cause.
  */
 export type ActionObservation = {
-  "identity": EffectIdentity;
+  "identity": EffectId;
   "outcome"?: unknown;
   "state": ActionState;
 };
@@ -375,25 +375,7 @@ export type Dataflow = {
 
 export type DocumentId = string;
 
-/**
- * Which wait of a run: one execution of a `perform` or a `sleep`.
- */
-export type EffectIdentity = {
-  /**
-   * The loops the task was inside when it ran the site, outermost first,
-   * across its active calls.
-   */
-  "loops"?: Array<LoopIteration>;
-  /**
-   * How many times the task had run that site before, from 0.
-   */
-  "occurrence": number;
-  /**
-   * The site of the `perform` or the `sleep`.
-   */
-  "site": Site;
-  "task": TaskIdentity;
-};
+export type EffectId = string;
 
 /**
  * One action and the coordinates it runs under.
@@ -558,20 +540,6 @@ export type Literal = (("null" | "absent") | {
 } | {
   "function": Name;
 });
-
-/**
- * One enclosing loop and the iteration it was on.
- */
-export type LoopIteration = {
-  /**
-   * The iteration, from 0.
-   */
-  "iteration": number;
-  /**
-   * The site of the `for` or the `while`.
-   */
-  "site": Site;
-};
 
 export type MapEntry = {
   "key": Expr;
@@ -828,21 +796,6 @@ export type Site = {
  */
 export type SiteKind = (("call" | "perform" | "sleep" | "join" | "join_many" | "yield" | "spawn" | "cancel") | "await");
 
-export type SpawnIdentity = {
-  /**
-   * How many times the parent had run that site before, from 0.
-   */
-  "occurrence": number;
-  /**
-   * The task that ran the `spawn`.
-   */
-  "parent": TaskIdentity;
-  /**
-   * The site of the `spawn`.
-   */
-  "site": Site;
-};
-
 /**
  * How a function a closure makes is started from outside its run: the
  * signature it is started under, how the dialect holds the function as a
@@ -989,14 +942,6 @@ export type Stmt = (("break" | "continue") | {
   "fail": {
     "value": Expr;
   };
-});
-
-/**
- * Which task of a run: `main`, or the task one execution of a `spawn`
- * started.
- */
-export type TaskIdentity = (("main") | {
-  "spawned": SpawnIdentity;
 });
 
 export type TryStmt = {

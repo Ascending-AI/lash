@@ -12,22 +12,22 @@ use crate::observe::{
     ChargeTape, Counting, Event, GuestContext, GuestFrame, GuestPhase, GuestSymbols, NO_STATEMENT,
     Observer, PathRecorder, WorkReport,
 };
-use crate::{Observe, RanDelta, StatementPath};
+use crate::{ObservationMode, SiteCounts};
 use lash_kernel_exec::Weight;
 
 impl KernelMachine {
     /// Selects observation for this machine. A resumed machine starts Off
     /// with zero counts; the caller chooses the new run segment's option.
-    pub fn set_observe(&mut self, observe: Observe) {
+    pub(crate) fn set_observe(&mut self, observe: ObservationMode) {
         match observe {
-            Observe::Counts => self.ran.resize(self.exe.site_count, 0),
-            Observe::Off => self.ran.clear(),
+            ObservationMode::Counts => self.ran.resize(self.exe.site_count, 0),
+            ObservationMode::Off => self.ran.clear(),
         }
     }
 
     /// Takes and resets starts since the previous take. Completed pure
     /// code and a waiting action's start are never counted again on resume.
-    pub fn take_ran(&mut self) -> RanDelta {
+    pub(crate) fn take_ran(&mut self) -> SiteCounts {
         self.ran
             .iter_mut()
             .enumerate()
@@ -41,8 +41,10 @@ impl KernelMachine {
     /// Flushes before a synchronous host read only when the host wants live
     /// frames. Otherwise the counts remain for the park or end frame.
     pub(super) fn report_ran(&mut self, host: &mut dyn crate::Host) {
-        if !self.ran.is_empty() && host.observes_ran() {
-            host.ran(&self.take_ran());
+        if !self.ran.is_empty()
+            && let Some(observer) = host.observer()
+        {
+            observer.counts(&self.take_ran());
         }
     }
 
@@ -92,8 +94,8 @@ impl KernelMachine {
     /// Records every document statement start and empty-block entry from
     /// here on, in order, by task: the path a replay answers. Recording
     /// changes no result, charge, park or export, and it is never captured.
-    pub fn trace_path(&mut self) {
-        self.observer_mut().path = Some(PathRecorder::default());
+    pub(crate) fn trace_path(&mut self) {
+        self.observer_mut().path = Some(PathRecorder::new(self.program.document.site_ordinals()));
     }
 
     /// Takes and resets the path recorded since the previous take. Its
@@ -103,11 +105,13 @@ impl KernelMachine {
     /// # Errors
     ///
     /// The heap fault that kept a task's identity off the path.
-    pub fn take_path(&mut self) -> Result<StatementPath, lash_kernel_doc::heap::HeapFault> {
+    pub(crate) fn take_execution_path(
+        &mut self,
+    ) -> Result<crate::ExecutionPath, lash_kernel_doc::heap::HeapFault> {
         self.observer
             .as_mut()
             .and_then(|o| o.path.as_mut())
-            .map_or_else(|| Ok(StatementPath::new()), PathRecorder::take)
+            .map_or_else(|| Ok(crate::ExecutionPath::default()), PathRecorder::take)
     }
 
     /// Counts the run's work by the function that does it, from here on:

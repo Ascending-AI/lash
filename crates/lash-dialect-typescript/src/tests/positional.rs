@@ -227,10 +227,13 @@ fn a_saved_positional_function_runs_and_resumes_without_its_partner_in_scope() {
         document: Arc::new(document),
         library: machine::prepared().clone(),
     });
-    original.set_cell_save(Box::new(Saving {
-        written,
-        saved: std::rc::Rc::clone(&saved),
-    }));
+    original.set_options(lash_kernel_vm::MachineOptions {
+        cell_save: Some(Box::new(Saving {
+            written,
+            saved: std::rc::Rc::clone(&saved),
+        })),
+        ..Default::default()
+    });
     assert!(matches!(
         original.run(&mut Console::default(), u64::MAX).unwrap(),
         Step::Ended(End::Finished(_))

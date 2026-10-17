@@ -2,9 +2,7 @@
 //! SQLite supplies action issues independently of statement starts.
 
 use super::*;
-use lash::workflow::document::{
-    AssignOrder, EffectIdentity, FunctionRegistry, Site, TaskIdentity, parse_document,
-};
+use lash::workflow::document::{AssignOrder, FunctionRegistry, Site, parse_document};
 use lash::workflow::view::{
     self, ActionObservation, ActionState, FlowKind, FlowTarget, ReadableLens, ReadableRefusal,
     WorkflowNodeKind as Kind,
@@ -253,7 +251,9 @@ fn coarse_eval() {
             .collect::<Vec<_>>()
     };
     assert_eq!(names(0), ["one", "two", "send"]);
-    let first = view.action_node(&view.statements[0].actions[0]).unwrap();
+    let first = view
+        .action_node(&view.statements[0].actions[0].position())
+        .unwrap();
     assert_eq!(first.within, Some(view.statements[0].actions[2].clone()));
     let lazy: Vec<_> = view
         .nodes
@@ -494,7 +494,7 @@ async fn launch(
         .processes()
         .kernel_engine_defaults()
         .unwrap()
-        .observing(lash::process::Observe::Counts)
+        .observing(lash::process::ObservationMode::Counts)
         .into_engine_settings();
     let document = super::publication_document(core, &publication).await;
     let process = core
@@ -705,11 +705,11 @@ async fn coarse_resume() {
         .unwrap()
         .sites
         .into_iter()
-        .filter(|site| site.at.site == actions[0])
+        .filter(|site| site.at.position() == actions[0])
         .map(|site| site.at)
         .collect();
     assert_eq!(sleeping_tasks.len(), 2);
-    assert_ne!(sleeping_tasks[0].task, sleeping_tasks[1].task);
+    assert_ne!(sleeping_tasks[0].task(), sleeping_tasks[1].task());
     first.shutdown().await.unwrap();
     drop(first);
     files.clock.set(due);
@@ -719,11 +719,8 @@ async fn coarse_resume() {
     for site in actions {
         assert_eq!(runs(&resumed, site), Some(2));
     }
-    let identity = |site: Site, task, occurrence| EffectIdentity {
-        site,
-        task,
-        occurrence,
-        loops: Vec::new(),
+    let identity = |site: Site, task, occurrence| {
+        lash::workflow::document::testkit::effect(task, site, occurrence, Vec::new())
     };
     let observations = [
         ActionObservation {
@@ -737,7 +734,11 @@ async fn coarse_resume() {
             outcome: None,
         },
         ActionObservation {
-            identity: identity(actions[1].clone(), TaskIdentity::Main, 0),
+            identity: identity(
+                actions[1].clone(),
+                lash::workflow::document::testkit::root_task(),
+                0,
+            ),
             state: ActionState::Failed,
             outcome: Some("child failure"),
         },

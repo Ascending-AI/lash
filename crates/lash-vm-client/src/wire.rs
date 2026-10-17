@@ -14,8 +14,8 @@ use std::time::Duration;
 use lash_kernel_doc::graph_tokens::{decode_body, encode_body};
 use lash_kernel_doc::heap::{PageGrant, PageId, PageRef};
 use lash_kernel_doc::{
-    Datum, EffectIdentity, EffectName, ErrorDatum, FunctionId, FunctionName, Handle, Name,
-    TaskIdentity, Type,
+    Datum, EffectId, EffectName, ErrorDatum, FunctionId, FunctionName, Handle, Name, TaskLabel,
+    Type,
 };
 use lash_kernel_state::paged::SessionRoot;
 use lash_kernel_vm::{
@@ -96,17 +96,16 @@ pub fn from_json<T: DeserializeOwned>(kind: PayloadKind, json: &[u8]) -> Result<
 #[derive(Clone, Debug, Default, PartialEq, Serialize, Deserialize)]
 #[serde(deny_unknown_fields)]
 pub struct Sites {
-    pub entered: Vec<EffectIdentity>,
-    pub ran: lash_kernel_vm::RanDelta,
+    pub entered: Vec<EffectId>,
+    pub ran: lash_kernel_vm::SiteCounts,
     /// The statement path since the previous frame, when the start asked
     /// for it: each task's consecutive starts, as document ordinals.
-    #[serde(default, skip_serializing_if = "Vec::is_empty")]
-    pub path: OrdinalPath,
+    #[serde(
+        default,
+        skip_serializing_if = "lash_kernel_vm::ExecutionPath::is_empty"
+    )]
+    pub path: lash_kernel_vm::ExecutionPath,
 }
-
-/// A statement path ([`lash_kernel_vm::StatementPath`]) whose sites are
-/// [`lash_kernel_doc::Document::site_ordinals`] ordinals.
-pub type OrdinalPath = Vec<(lash_kernel_doc::TaskIdentity, Vec<u32>)>;
 
 /// How a carried session names one of its pages: under a capability the
 /// receiver verifies, or as a page of the seal batch the same frame
@@ -267,7 +266,7 @@ impl StartWire {
 pub struct EffectRead {
     pub effect: EffectName,
     pub args: Vec<Datum>,
-    pub site: lash_kernel_doc::Site,
+    pub site: lash_kernel_doc::PositionLabel,
 }
 
 /// The parent's answer to an [`EffectRead`]: the effect's result, or the
@@ -303,14 +302,14 @@ impl From<SubsecondNanos> for u32 {
 pub enum RequestWire {
     Effect {
         wait: WaitId,
-        identity: EffectIdentity,
+        identity: EffectId,
         effect: EffectName,
         args: Vec<Datum>,
         result: Type,
     },
     Sleep {
         wait: WaitId,
-        identity: EffectIdentity,
+        identity: EffectId,
         seconds: u64,
         nanoseconds: SubsecondNanos,
     },
@@ -457,12 +456,12 @@ pub enum EndWire {
     Failed(Datum),
     Uncaught(Datum),
     TasksOutstanding {
-        unfinished: Vec<TaskIdentity>,
-        unobserved: Vec<TaskIdentity>,
-        sources: Vec<(TaskIdentity, lash_kernel_doc::Site)>,
+        unfinished: Vec<TaskLabel>,
+        unobserved: Vec<TaskLabel>,
+        sources: Vec<(TaskLabel, lash_kernel_doc::PositionLabel)>,
     },
     Deadlock {
-        waiting: Vec<TaskIdentity>,
+        waiting: Vec<TaskLabel>,
     },
     Bound {
         bound: BoundWire,
@@ -601,10 +600,15 @@ mod tests {
     /// V11: decoding refuses normalization and overflow before park conversion.
     #[test]
     fn park_payloads_refuse_noncanonical_sleep_durations() {
-        let identity = serde_json::json!({"task": "main", "site": {"unit": "main", "path": [0, 0]}, "occurrence": 0, "loops": []});
+        let identity = lash_kernel_doc::testkit::effect(
+            lash_kernel_doc::testkit::root_task(),
+            lash_kernel_doc::Site::new(lash_kernel_doc::Unit::Main, [0, 0]),
+            0,
+            vec![],
+        );
         for seconds in [0, u64::MAX] {
             for nanoseconds in [0, 999_999_999, 1_000_000_000, u32::MAX] {
-                let json = serde_json::json!({"requests": [{"sleep": {"wait": 0, "identity": identity, "seconds": seconds, "nanoseconds": nanoseconds}}], "withdrawn": [], "outstanding": 0, "live": 0});
+                let json = serde_json::json!({"requests": [{"sleep": {"wait": lash_kernel_doc::testkit::wait_id(0), "identity": identity, "seconds": seconds, "nanoseconds": nanoseconds}}], "withdrawn": [], "outstanding": 0, "live": 0});
                 let payload = encode(PayloadKind::Park, &json).unwrap();
                 let decoded = decode::<ParkWire>(PayloadKind::Park, &payload);
                 if nanoseconds < 1_000_000_000 {

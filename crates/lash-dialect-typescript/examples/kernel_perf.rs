@@ -286,9 +286,12 @@ fn split(program: &Program, registry: &FunctionRegistry, name: &str) -> Split {
 /// The site unit of the statement the next ready task runs next.
 fn pending_unit(machine: &mut KernelMachine, source: &pages::Source) -> Option<Unit> {
     let sealed = machine.checkpoint().ok()?;
-    lash_kernel_vm::perf_witness::next_ready_statement(&sealed.root, Box::new(source.clone()))
-        .ok()?
-        .map(|site| site.unit)
+    lash_kernel_vm::perf_witness::next_ready_statement(
+        &sealed.checkpoint(),
+        Box::new(source.clone()),
+    )
+    .ok()?
+    .map(|site| site.unit)
 }
 
 /// What one invocation does.
@@ -305,7 +308,7 @@ enum Mode {
 /// What `KERNEL_PERF_OBSERVE` turns on in the timed runs.
 #[derive(Clone, Copy, PartialEq, Eq, Serialize)]
 #[serde(rename_all = "snake_case")]
-enum Observe {
+enum ObservationMode {
     Nothing,
     Counts,
     Work,
@@ -315,15 +318,18 @@ enum Observe {
 /// Starts a run with what `observe` asks for on.
 fn start_observed(
     program: &Program,
-    observe: Observe,
+    observe: ObservationMode,
     context: &Arc<GuestContext>,
 ) -> KernelMachine {
     let mut machine = start(program);
     match observe {
-        Observe::Nothing => {}
-        Observe::Counts => machine.set_observe(lash_kernel_vm::Observe::Counts),
-        Observe::Work => machine.count_work(),
-        Observe::Context => machine.publish_context(Arc::clone(context)),
+        ObservationMode::Nothing => {}
+        ObservationMode::Counts => machine.set_options(lash_kernel_vm::MachineOptions {
+            observation: lash_kernel_vm::ObservationMode::Counts,
+            ..Default::default()
+        }),
+        ObservationMode::Work => machine.count_work(),
+        ObservationMode::Context => machine.publish_context(Arc::clone(context)),
     }
     machine
 }
@@ -380,10 +386,10 @@ fn main() -> Result<(), String> {
         return Err("iteration count must be positive".to_string());
     }
     let observe = match std::env::var("KERNEL_PERF_OBSERVE").as_deref() {
-        Ok("counts") => Observe::Counts,
-        Ok("work") => Observe::Work,
-        Ok("context") => Observe::Context,
-        Ok("") | Err(_) => Observe::Nothing,
+        Ok("counts") => ObservationMode::Counts,
+        Ok("work") => ObservationMode::Work,
+        Ok("context") => ObservationMode::Context,
+        Ok("") | Err(_) => ObservationMode::Nothing,
         Ok(other) => {
             return Err(format!(
                 "KERNEL_PERF_OBSERVE is counts, work or context, not {other}"
@@ -687,7 +693,10 @@ fn count(name: &str, program: &Program, source: &str, artifact: &str) -> Result<
     let counts = lash_kernel_vm::perf_witness::take_work().ok_or("missing enabled phase counts")?;
     lash_kernel_vm::perf_witness::disable_work();
     let mut traced = start(program);
-    traced.trace_path();
+    traced.set_options(lash_kernel_vm::MachineOptions {
+        trace_path: true,
+        ..Default::default()
+    });
     assert_eq!(
         to_end(&mut traced, name),
         plain,

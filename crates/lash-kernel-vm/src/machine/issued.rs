@@ -36,7 +36,7 @@ impl KernelMachine {
                         break;
                     }
                     found = Issued {
-                        from: wait_id(&key)?.0,
+                        from: lash_kernel_doc::kernel_internals::wait_number(wait_id(&key)?),
                         count: found.count + 1,
                     };
                     rank = below;
@@ -115,5 +115,7 @@ fn wait_id(key: &[u8]) -> Result<WaitId, HeapFault> {
     let raw: [u8; 8] = key
         .try_into()
         .map_err(|_| HeapFault::Malformed("wait key width".into()))?;
-    Ok(WaitId(u64::from_be_bytes(raw)))
+    Ok(lash_kernel_doc::kernel_internals::wait_id(
+        u64::from_be_bytes(raw),
+    ))
 }

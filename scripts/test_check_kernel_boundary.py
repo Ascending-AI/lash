@@ -179,6 +179,39 @@ class KernelBoundary(unittest.TestCase):
                 self.assertIn(f"{path}:", result.stderr)
                 self.assertIn(says, result.stderr)
 
+    def test_engine_records_never_cross_the_embedding_boundary(self) -> None:
+        """FIG-6711: aliases and grouped imports cannot expose engine records."""
+        for item in ("CheckpointRoot", "KeyedRoot", "SequenceRoot", "EffectIdentity", "TaskIdentity", "TaskIdentityRef", "SpawnIdentity", "LoopIteration", "TaskFilter", "TaskPage", "StatementPath", "RanDelta", "Observe"):
+            for source in (
+                f"use lash_kernel_vm::{item};\n",
+                f"use lash_kernel_vm::{{Machine, {item}}};\n",
+                f"use lash_kernel_vm as vm; use vm::{item};\n",
+            ):
+                with self.subTest(item=item, source=source):
+                    result = self.run_check({"crates/lash-core/src/lib.rs": source})
+                    self.assertEqual(result.returncode, 1, result.stdout)
+                    self.assertIn("names engine record", result.stderr)
+        # An inferred return must not expose coordinates through a crate alias.
+        for namespace in (
+            "use lash_kernel_doc as engine;",
+            "use lash_kernel_doc::{self as engine};",
+            "use lash_kernel_doc as doc; use doc as engine;",
+            "extern crate lash_kernel_doc as engine;",
+            "use lash::dialect as engine;",
+        ):
+            with self.subTest(namespace=namespace):
+                source = namespace + "\nfn inspect(at: &EffectId) { let _ = engine::kernel_internals::effect_parts(at); }\n"
+                result = self.run_check({"crates/lash-core/src/lib.rs": source})
+                self.assertEqual(result.returncode, 1, result.stdout)
+                self.assertIn("kernel_internals", result.stderr)
+        allowed = self.run_check({"crates/lash-core/src/lib.rs":
+            "use lash_kernel_vm::{MachineOptions, ObservationMode, SiteCounts};\n"
+            "use lash_kernel_doc::{Datum, EffectId, TaskLabel, PositionLabel};\n"
+            "enum WorkbenchAuthorizationAction { Observe { session_id: String } }\n"
+            "// CheckpointRoot stays in the kernel.\n"
+            'const LABEL: &str = "TaskIdentity";\n'})
+        self.assertEqual(allowed.returncode, 0, allowed.stderr)
+
     def test_this_repository_passes(self) -> None:
         result = subprocess.run(["python3", str(SCRIPT)], capture_output=True, text=True, check=False)
         self.assertEqual(result.returncode, 0, result.stderr)

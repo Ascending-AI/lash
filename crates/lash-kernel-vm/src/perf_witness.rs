@@ -125,9 +125,10 @@ impl Profiling for crate::KernelMachine {
 ///
 /// The heap's faults reading the root's tables.
 pub fn next_ready_statement(
-    root: &lash_kernel_state::paged::CheckpointRoot,
+    checkpoint: &lash_kernel_state::paged::Checkpoint,
     source: Box<dyn lash_kernel_state::paged::PageSource>,
 ) -> Result<Option<lash_kernel_doc::Site>, lash_kernel_doc::heap::HeapFault> {
+    let root = lash_kernel_state::kernel_internals::checkpoint_root(checkpoint);
     use lash_kernel_state::kernel_internals::PagedHeap;
     use lash_kernel_state::kernel_internals::directory::ordinal_key;
     use lash_kernel_state::kernel_internals::tree::Tree;

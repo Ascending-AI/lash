@@ -406,14 +406,6 @@ pub(crate) enum Boundary {
     Collect,
 }
 
-impl KernelMachine {
-    /// Saves the functions the cell's end would drop through `save`
-    /// (`K-SES-004`).
-    pub fn set_cell_save(&mut self, save: Box<dyn crate::interface::CellSave>) {
-        self.save = Some(save);
-    }
-}
-
 impl std::fmt::Debug for KernelMachine {
     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
         f.debug_struct("KernelMachine")
@@ -887,16 +879,20 @@ impl KernelMachine {
             let unfinished = unfinished
                 .into_iter()
                 .map(|(id, frames)| {
-                    let identity = id.resolve(&access)?;
+                    let identity =
+                        lash_kernel_doc::kernel_internals::task_label(id.resolve(&access)?);
                     if let Some(site) = tasks::source_body(&frames, &self.exe, &access)? {
-                        sources.push((identity.clone(), site));
+                        sources.push((identity.clone(), site.position()));
                     }
                     Ok(identity)
                 })
                 .collect::<Result<Vec<_>, lash_kernel_doc::heap::HeapFault>>()?;
             let unobserved = unobserved
                 .into_iter()
-                .map(|id| id.resolve(&access))
+                .map(|id| {
+                    id.resolve(&access)
+                        .map(lash_kernel_doc::kernel_internals::task_label)
+                })
                 .collect::<Result<Vec<_>, _>>()?;
             return Ok(End::Error(RunError::TasksOutstanding {
                 unfinished,
@@ -933,7 +929,10 @@ impl KernelMachine {
                 .map_err(MachineError::Heap)?;
             let waiting = waiting
                 .into_iter()
-                .map(|id| id.resolve(self.heap.pages()))
+                .map(|id| {
+                    id.resolve(self.heap.pages())
+                        .map(lash_kernel_doc::kernel_internals::task_label)
+                })
                 .collect::<Result<Vec<_>, _>>()
                 .map_err(MachineError::Heap)?;
             return Ok(self.finish_with(End::Error(RunError::Deadlock { waiting })));
@@ -941,19 +940,18 @@ impl KernelMachine {
         let requests = self.report_issued()?;
         let mut withdrawn = Vec::new();
         while let Some(wait) = self.withdrawn.pop_front().map_err(MachineError::Heap)? {
-            withdrawn.push(WaitId(wait));
+            withdrawn.push(lash_kernel_doc::kernel_internals::wait_id(wait));
         }
         self.tasks
             .project_occurrences()
             .map_err(MachineError::Heap)?;
-        let (tasks, outstanding) = self.tasks.sealed_root().map_err(MachineError::Heap)?;
+        let (_, outstanding) = self.tasks.sealed_root().map_err(MachineError::Heap)?;
         let live = u64::from(self.live_tasks.saturating_sub(1));
         Ok(Step::Parked(Park {
             requests,
             withdrawn,
             outstanding,
             live,
-            tasks,
         }))
     }
 

@@ -64,14 +64,14 @@ pub(super) fn step_trace_scope(
 fn node_site<'a>(
     record: &ProcessRecord,
     request: &StepRequest,
-    site: Option<&'a lash_protocol_types::EffectIdentity>,
-) -> Option<&'a lash_protocol_types::EffectIdentity> {
+    site: Option<&'a lash_protocol_types::EffectId>,
+) -> Option<&'a lash_protocol_types::EffectId> {
     site.filter(|_| record.trace_nodes && !request.resolves())
 }
 
 /// One node span a commit closes.
 struct NodeClose {
-    at: lash_protocol_types::EffectIdentity,
+    at: lash_protocol_types::EffectId,
     started_at_ms: u64,
     status: TraceDomainStatus,
 }
@@ -139,7 +139,7 @@ impl NodeCloses {
                 continue;
             };
             let mut context = TraceContext::default().for_process(record.id.clone());
-            context.graph_node_id = Some(node.at.site.to_string());
+            context.graph_node_id = Some(node.at.position().to_string());
             standing.close_scope(ended_at_ms.max(node.started_at_ms), || {
                 (
                     context,
@@ -257,7 +257,7 @@ impl StepToolSpans {
             let context = TraceContext::default()
                 .for_process(step.process.clone())
                 .for_call(call.clone());
-            let issuing_node = site.as_ref().map(|at| at.site.to_string());
+            let issuing_node = site.as_ref().map(|at| at.position().to_string());
             let standing = tracing
                 .unreplayed(Some(scope.clone()))
                 .selected(TraceSpanKind::Tool, &context.ids());

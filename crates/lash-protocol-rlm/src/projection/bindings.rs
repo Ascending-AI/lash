@@ -98,14 +98,14 @@ impl CodeModeProjectedBindings {
         }
         // Reserve the built-in even when this cell does not mention it:
         // an admitted session can bind history in any later cell.
-        let actual = lash_kernel_state::paged::CheckpointRoot::host_metadata_bytes(
-            self.bindings
-                .keys()
-                .map(String::as_str)
-                .chain([name.as_str(), super::HISTORY_PROJECTION]),
-        );
-        let limit = lash_kernel_state::paged::CheckpointRoot::HOST_METADATA_LIMIT;
-        if actual > limit {
+        if let Err(lash_kernel_vm::StartError::HostMetadataTooLarge { limit, actual }) =
+            lash_kernel_vm::CellStart::admit_host_metadata(
+                self.bindings
+                    .keys()
+                    .map(String::as_str)
+                    .chain([name.as_str(), super::HISTORY_PROJECTION]),
+            )
+        {
             return Err(ProjectedBindingError::HostMetadataTooLarge {
                 name,
                 limit,

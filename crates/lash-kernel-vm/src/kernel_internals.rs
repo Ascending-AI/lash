@@ -83,3 +83,21 @@ pub fn verify_library_stream(
 ) -> Result<usize, lash_kernel_exec::KirError> {
     library.verify_stream()
 }
+
+/// Exact semantic equality for the kernel conformance laws.
+pub mod conformance {
+    pub use crate::conformance::*;
+}
+
+/// The projected records inspected by kernel-owned format laws.
+pub fn sealed_root(sealed: &crate::SealedRoot) -> &CheckpointRoot {
+    &sealed.root
+}
+
+/// Task identity resolution for the kernel's persisted-state laws.
+pub fn task_identity(
+    machine: &KernelMachine,
+    identity: lash_kernel_state::paged::TaskIdentityRef,
+) -> Result<lash_kernel_doc::kernel_internals::TaskIdentity, lash_kernel_doc::heap::HeapFault> {
+    machine.task_identity(identity)
+}

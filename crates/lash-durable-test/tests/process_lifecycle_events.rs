@@ -565,7 +565,7 @@ static EFFECT_LAW_GUARD: tokio::sync::Mutex<()> = tokio::sync::Mutex::const_new(
 
 /// The identity of the `n`-th write of [`NODE`], from 0: the one site of
 /// the node, at its `n`-th occurrence.
-fn node_site(n: u64) -> lash_protocol_types::EffectIdentity {
+fn node_site(n: u64) -> lash_protocol_types::EffectId {
     lash_protocol_types::effect_identity_fixture(NODE, n)
 }
 
@@ -644,7 +644,7 @@ async fn each_committed_effect_is_one_effect_outcome_event(tier: Tier) {
         .expect("an effect outcome decodes")
     })
     .collect();
-    let recorded: Vec<lash_protocol_types::EffectIdentity> =
+    let recorded: Vec<lash_protocol_types::EffectId> =
         outcomes.iter().map(|outcome| outcome.at.clone()).collect();
     let first_cap: Vec<_> = (0..64).map(node_site).collect();
     assert_eq!(
@@ -673,7 +673,7 @@ async fn each_committed_effect_is_one_effect_outcome_event(tier: Tier) {
         fleet,
     )
     .expect("the omissions decode");
-    let node = node_site(0).site.to_string();
+    let node = node_site(0).position().to_string();
     assert_eq!(omitted.occurrence_cap, 64);
     assert_eq!(omitted.nodes[&node].success, 36);
     assert_eq!(omitted.nodes[&node].total(), 36);
@@ -939,11 +939,11 @@ fn assert_effect_cut(events: &[lash::process::ProcessEvent], cap: u64) {
         .unwrap();
         assert_eq!(omitted.occurrence_cap, cap);
         assert_eq!(
-            omitted.nodes[&node_site(0).site.to_string()].success,
+            omitted.nodes[&node_site(0).position().to_string()].success,
             NODE_WRITES - retained
         );
         assert_eq!(
-            omitted.nodes[&node_site(0).site.to_string()].total(),
+            omitted.nodes[&node_site(0).position().to_string()].total(),
             NODE_WRITES - retained
         );
     }

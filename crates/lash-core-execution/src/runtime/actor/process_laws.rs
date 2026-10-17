@@ -323,7 +323,7 @@ const SLEEP_NODE: &str = "sleep-node";
 
 /// The first occurrence of `node`, as the law engine's document
 /// would name it.
-fn law_site(node: &str) -> lash_protocol_types::EffectIdentity {
+fn law_site(node: &str) -> lash_protocol_types::EffectId {
     lash_protocol_types::effect_identity_fixture(node, 1)
 }
 

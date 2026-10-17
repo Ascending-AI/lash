@@ -198,7 +198,7 @@ pub enum StepRequest {
         /// site's `process.effect_outcome`, and the start of its admitted
         /// body is observed there ([`lash_trace::StepBodyStarted`]).
         #[serde(default, skip_serializing_if = "Option::is_none")]
-        site: Option<lash_protocol_types::EffectIdentity>,
+        site: Option<lash_protocol_types::EffectId>,
         /// The recorded match a `call_dynamic` call runs on (P6): set only
         /// by lash, on the step it issues once the call's resolution
         /// committed, which runs the matched tool with the call's `args`
@@ -263,7 +263,7 @@ impl StepRequest {
 
     /// The effect node the step runs for, if its engine named one.
     #[must_use]
-    pub fn site(&self) -> Option<&lash_protocol_types::EffectIdentity> {
+    pub fn site(&self) -> Option<&lash_protocol_types::EffectId> {
         match self {
             Self::Tool { site, .. } => site.as_ref(),
             Self::Engine { .. } => None,
@@ -584,7 +584,7 @@ pub enum EngineStepRefusal {
 #[derive(Clone, Debug, PartialEq)]
 pub struct EngineWake {
     pub until: DurableInstant,
-    pub site: Option<lash_protocol_types::EffectIdentity>,
+    pub site: Option<lash_protocol_types::EffectId>,
 }
 
 /// What an engine asks lash to do next.
@@ -614,7 +614,7 @@ pub enum EngineAction {
         /// The wait's name.
         name: KeyName,
         /// The node that waits, when the engine's workflow document names one.
-        site: Option<lash_protocol_types::EffectIdentity>,
+        site: Option<lash_protocol_types::EffectId>,
     },
     /// Wait for another process's terminal.
     AwaitProcess {
@@ -624,14 +624,14 @@ pub enum EngineAction {
         /// lash default or ceiling.
         bound: crate::ParkBound,
         /// The node that waits, when the engine's workflow document names one.
-        site: Option<lash_protocol_types::EffectIdentity>,
+        site: Option<lash_protocol_types::EffectId>,
     },
     /// Sleep until a durable instant.
     Sleep {
         /// When the process wakes.
         until: DurableInstant,
         /// The node that sleeps, when the engine's workflow document names one.
-        site: Option<lash_protocol_types::EffectIdentity>,
+        site: Option<lash_protocol_types::EffectId>,
     },
     /// Nothing to do and no deadline: the process waits until the next
     /// mailbox event (`Cancelled`, a resolved wait or a settled step)

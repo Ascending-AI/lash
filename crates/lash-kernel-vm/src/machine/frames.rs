@@ -857,7 +857,7 @@ impl Frames {
     /// resident frame's from its control, a cold one's from its row.
     pub(super) fn loop_coordinates(
         &self,
-    ) -> Result<Vec<lash_kernel_doc::LoopIteration>, HeapFault> {
+    ) -> Result<Vec<lash_kernel_doc::kernel_internals::LoopIteration>, HeapFault> {
         let mut loops = Vec::new();
         let mut resident = self.cache.iter().peekable();
         for index in 0..self.len {
@@ -874,7 +874,7 @@ impl Frames {
                     else {
                         return Err(malformed("a loop stands at another form"));
                     };
-                    loops.push(lash_kernel_doc::LoopIteration {
+                    loops.push(lash_kernel_doc::kernel_internals::LoopIteration {
                         site: site.clone(),
                         iteration: started.saturating_sub(1),
                     });
@@ -884,7 +884,7 @@ impl Frames {
             let frame = row(&self.rows, index, &self.access)?;
             for at in 0..frame.loops.len() {
                 let record = row(&frame.loops, at, &self.access)?;
-                loops.push(lash_kernel_doc::LoopIteration {
+                loops.push(lash_kernel_doc::kernel_internals::LoopIteration {
                     site: record.site.resolve(&self.access)?.as_ref().clone(),
                     iteration: record.started.saturating_sub(1),
                 });

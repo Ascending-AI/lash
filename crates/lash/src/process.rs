@@ -1,6 +1,6 @@
 /// Statement observation requested by a kernel-engine start.
 #[cfg(feature = "codemode")]
-pub use lash_vm_runtime::Observe;
+pub use lash_vm_runtime::ObservationMode;
 /// Typed settings for a kernel-engine start.
 #[cfg(feature = "codemode")]
 pub use lash_vm_runtime::{KernelBounds, KernelRecordedSettings, KernelSettingsError};

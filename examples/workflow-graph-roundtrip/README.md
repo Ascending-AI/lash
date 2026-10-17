@@ -75,7 +75,7 @@ adds a halo and the inspector panel.
 ## Runs on the canvas
 
 **Run workflow** starts the saved version observed at statement counts
-(`kernel_engine_defaults()?.observing(lash::process::Observe::Counts)` in the
+(`kernel_engine_defaults()?.observing(lash::process::ObservationMode::Counts)` in the
 settings it publishes). The run streams lash's overlay: per-site statuses from
 the execution overlay, and the coverage `lash::workflow::view::coverage` computes
 from the process overlay's counts, re-read whenever a segment's counts change.

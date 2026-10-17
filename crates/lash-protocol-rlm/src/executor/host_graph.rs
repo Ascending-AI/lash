@@ -34,7 +34,7 @@ use lash_core_store::checkpoint_graph::{
     GraphDecoder, GraphRefusal, GraphStaging, NodeId, NodeKind, TokenCodec, TokenError,
     TokenReader, TokenWriter,
 };
-use lash_kernel_doc::{Datum, EffectIdentity, EffectName};
+use lash_kernel_doc::{Datum, EffectId, EffectName};
 
 /// Items per page and children per index.
 pub const FANOUT: u64 = 32;
@@ -436,7 +436,7 @@ pub enum CallStatus {
 pub struct CallSummary {
     pub ordinal: u64,
     /// Where the cell performed it.
-    pub effect: EffectIdentity,
+    pub effect: EffectId,
     /// The effect, as the cell's source names it.
     pub operation: EffectName,
     pub call_id: ToolCallId,
@@ -502,7 +502,7 @@ impl TokenCodec for CallSummary {
     fn decode(input: &mut TokenReader<'_>) -> Result<Self, TokenError> {
         input.expect_struct(6)?;
         let ordinal = input.unsigned()?;
-        let effect = EffectIdentity::decode(input)?;
+        let effect = EffectId::decode(input)?;
         let operation = EffectName::decode(input)?;
         let call_id =
             ToolCallId::parse(input.text()?).map_err(|error| invalid(error.to_string()))?;
@@ -832,7 +832,7 @@ impl HostState {
     /// ordinal, and whether it is the cell's control call.
     pub fn admit(
         &mut self,
-        effect: EffectIdentity,
+        effect: EffectId,
         operation: EffectName,
         call_id: ToolCallId,
         admission: NodeId,
