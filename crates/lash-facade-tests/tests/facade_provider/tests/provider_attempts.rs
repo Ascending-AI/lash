@@ -7,6 +7,7 @@ use lash::provider::{LlmTransportError, TransportRetryVerdict};
 use lash_core::llm::types::{LlmUsage, StreamBlockIdentity};
 use lash_core::{MessageRole, TurnEvent};
 use lash_protocol_types::ReportedFailure;
+use lash_protocol_types::core_support::RunIdCoreSupport;
 use lash_protocol_types::{llm::types::StreamBlockEvent, llm::types::StreamBlockKind};
 
 /// Every committed part's content in an explicitly read session view.
@@ -1092,43 +1093,84 @@ impl lash_core::provider::Provider for RefusedLower {
     }
 }
 
-/// A refused preparation is still a failed logical model call; its record
-/// says no response was received and no send consumed the retry budget.
+/// FIG-6570 / S1: preparation refusal is the turn's typed failure, not a
+/// transport attempt. The retained call says unsent and charges no usage;
+/// the terminal classifies the refusal and the observed issue keeps its code.
 #[tokio::test(flavor = "multi_thread", worker_threads = 2)]
-async fn an_unsent_model_call_reports_its_failure_without_a_dispatched_attempt() {
+async fn a_preparation_refusal_keeps_its_typed_cause_and_an_empty_call_ledger() {
     let model = ProviderHandle::new(lash_core::provider::ProviderComponents::new(Box::new(
         RefusedLower::default(),
     )));
     let core = core_over(sqlite_memory_store_backend().await, model);
     let session = created(&core, "unsent-call-report").await;
-    let output = session
+    let lash::SendOutcome::Settled {
+        run, output, gaps, ..
+    } = session
         .send(TurnInput::text("prepare the call"))
-        .output()
         .await
-        .expect("the refused preparation settles the turn");
-    let [call] = output.result.llm_calls.as_slice() else {
-        panic!("the unsent call is recorded: {:?}", output.result.llm_calls);
+        .expect("accepted")
+        .outcome()
+        .await
+        .expect("the refused preparation settles the turn")
+    else {
+        panic!("a preparation refusal commits a failed turn");
     };
-    let [attempt] = call.attempts.as_slice() else {
-        panic!("one unsent attempt");
-    };
-    assert_eq!(attempt.outcome, lash_core::AttemptOutcome::Failed);
+    assert!(gaps.is_empty(), "the refusal's activity is available");
     assert_eq!(
-        attempt.protocol_position,
-        lash_core::ProtocolPosition::NoResponse
+        output.result.outcome,
+        lash::TurnOutcome::Stopped(lash::TurnStop::ProviderError {
+            cause: lash::TurnErrorCause::new(lash::TurnErrorCode::RequestRejected),
+        })
     );
-    assert!(!attempt.retry_budget_consumed);
+    let [issue] = output.result.errors.as_slice() else {
+        panic!("one preparation failure: {:?}", output.result.errors);
+    };
+    assert_eq!(issue.kind, lash_core::TurnFailureKind::LlmProvider);
     assert_eq!(
-        attempt.error.as_ref().expect("lower refusal").code,
+        issue.code,
         Some(lash_core::FailureCode::provider("lower_refused"))
     );
-    assert!(
-        output
-            .result
-            .errors
-            .iter()
-            .any(|issue| issue.code == Some(lash_core::FailureCode::provider("lower_refused")))
+    assert_eq!(
+        issue.provider_failure_kind,
+        Some(lash_core::ProviderFailureKind::Validation)
     );
+    assert_eq!(issue.retryable, Some(false));
+    assert_eq!(
+        issue.terminal_reason,
+        Some(lash_core::LlmTerminalReason::ProviderError)
+    );
+
+    let committed = session
+        .committed_turn(run.turn_id())
+        .await
+        .expect("read the committed turn")
+        .expect("the refused preparation committed");
+    let [call] = committed.model_calls.as_slice() else {
+        panic!("one retained unsent call: {:?}", committed.model_calls);
+    };
+    assert_eq!(
+        call.end,
+        lash::turn::ModelCallEnd::Unanswered {
+            reason: lash::turn::ModelCallEndReason::Unsent,
+        }
+    );
+    assert!(
+        call.record.attempts.is_empty(),
+        "no dispatched attempt or retry charge"
+    );
+    assert_eq!(output.result.llm_calls, vec![call.record.clone()]);
+    assert_eq!(committed.usage().expect("call usage"), LlmUsage::default());
+    assert_eq!(output.result.usage, LlmUsage::default());
+    assert_eq!(
+        session
+            .read()
+            .await
+            .expect("read head")
+            .expect("head")
+            .token_usage(),
+        &LlmUsage::default()
+    );
+    core.shutdown().await.expect("shutdown");
 }
 
 /// Expiring a dispatched call preserves its interrupted attempt and observed

@@ -40,6 +40,10 @@ impl RuntimeDrive {
         };
         self.driver
             .queue_model_call(call, ModelCallEnd::Unanswered { reason }, record);
+        // Preparation is not a transport attempt. The machine records its
+        // typed stop cause in the turn terminal and emits the original typed
+        // failure code for the host's TurnIssue; the call ledger retains only
+        // attempts that were actually dispatched (FIG-6570, S1).
         self.machine.handle_response(Response::LlmComplete {
             id,
             result: Err(error),
