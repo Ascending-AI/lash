@@ -293,7 +293,8 @@ serde_path_to_error = "0.1.20"
 # effect outcome carrying a float replays as a *different* float (FIG-3079).
 serde_json = { version = "1", features = ["float_roundtrip"] }
 sha2 = "0.10"
-sqlx = { version = "0.8.6", default-features = false }
+# Share reqwest's TLS provider; runtime-tokio-rustls selects ring.
+sqlx = { version = "0.8.6", default-features = false, features = ["tls-rustls-aws-lc-rs"] }
 tempfile = "3"
 thiserror = "2"
 tokio = "1"

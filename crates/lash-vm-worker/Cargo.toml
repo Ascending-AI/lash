@@ -105,7 +105,7 @@ lash-durable = { workspace = true }
 lash-durable-test = { workspace = true }
 lash-postgres-store = { workspace = true, features = ["testing"] }
 lash-sqlite-store = { workspace = true, features = ["testing"] }
-sqlx = { workspace = true, features = ["postgres", "runtime-tokio-rustls"] }
+sqlx = { workspace = true, features = ["postgres", "runtime-tokio"] }
 tokio = { workspace = true, features = ["rt-multi-thread", "macros", "test-util"] }
 lash-core-execution = { workspace = true, features = ["testing"] }
 lash-vm-worker = { package = "lash-internal-vm-worker", path = ".", features = ["testing", "dialect-typescript", "dialect-python"] }

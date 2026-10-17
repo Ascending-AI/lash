@@ -65,7 +65,7 @@ uuid = { workspace = true }
 serde = { workspace = true, features = ["derive"] }
 serde_json = { workspace = true }
 # The PostgreSQL live replay store (`postgres` feature).
-sqlx = { workspace = true, optional = true, default-features = false, features = ["runtime-tokio-rustls", "postgres"] }
+sqlx = { workspace = true, optional = true, default-features = false, features = ["runtime-tokio", "postgres"] }
 thiserror = { workspace = true }
 tokio = { workspace = true, features = ["sync"] }
 tokio-util = { workspace = true }
