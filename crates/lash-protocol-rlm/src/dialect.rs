@@ -194,13 +194,14 @@ pub struct DialectRefusal {
 }
 
 /// What a [`DialectRefusal`] refuses.
-#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+#[derive(Clone, Debug, PartialEq, Eq)]
 #[non_exhaustive]
 pub enum DialectRefusalKind {
     /// No cell in the dialect can call the tool binding's path as a tool.
     UnaddressableToolPath,
-    /// The dialect's tool presenter refused to present the tool.
-    PresentationRefused,
+    /// The dialect's tool presenter refused to present the tool. The cause
+    /// retains its typed fields and stable `PresentationRefusal::code()`.
+    PresentationRefused(lash_tool_presenter_api::PresentationRefusal),
 }
 
 impl std::fmt::Display for DialectRefusal {
@@ -209,7 +210,14 @@ impl std::fmt::Display for DialectRefusal {
     }
 }
 
-impl std::error::Error for DialectRefusal {}
+impl std::error::Error for DialectRefusal {
+    fn source(&self) -> Option<&(dyn std::error::Error + 'static)> {
+        match &self.kind {
+            DialectRefusalKind::PresentationRefused(cause) => Some(cause),
+            DialectRefusalKind::UnaddressableToolPath => None,
+        }
+    }
+}
 
 /// The lines that open and close one cell on the cell channel.
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
@@ -500,8 +508,13 @@ impl SessionDialect {
         channel: crate::plugin::RlmChannel,
         discovery: Option<&crate::plugin::RlmDiscovery>,
     ) -> Result<ExecutionSection, SessionError> {
-        let listing =
-            crate::tool_catalog::ToolListing::of(tool_catalog, self, features, discovery)?;
+        let listing = crate::tool_catalog::ToolListing::of(tool_catalog, self, features, discovery)
+            .map_err(|refusal| {
+                crate::tool_catalog::section_refused(
+                    self.tool_presenter().presenter().id(),
+                    refusal,
+                )
+            })?;
         Ok(self
             .language()
             .render_execution_section(ExecutionSectionRequest {

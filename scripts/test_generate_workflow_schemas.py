@@ -19,6 +19,15 @@ SPEC.loader.exec_module(MODULE)
 
 
 class GenerateWorkflowSchemasTests(unittest.TestCase):
+    def setUp(self) -> None:
+        # Generation also writes crate-local host contracts. Keep every
+        # generated fixture, including those copies, inside the test root.
+        directory = tempfile.TemporaryDirectory()
+        self.addCleanup(directory.cleanup)
+        root = unittest.mock.patch.object(MODULE, "ROOT", Path(directory.name))
+        root.start()
+        self.addCleanup(root.stop)
+
     def test_rendered_documents_use_shape_and_version(self) -> None:
         documents = MODULE.rendered_documents(
             [{"shape": "workflow", "version": 7, "schema": {"type": "object"}}]
@@ -112,6 +121,11 @@ class GenerateWorkflowSchemasTests(unittest.TestCase):
                         self.assertEqual(
                             MODULE.generate(False, generated=generated, output=output), 0
                         )
+                        for relative, contents in expected.items():
+                            self.assertEqual(
+                                (root / "crates/lash/host-schemas" / relative).read_text(),
+                                contents,
+                            )
                     self.assertEqual(MODULE.generate(True, generated=generated, output=output), 0)
                     (output / declaration).write_text("export type WorkflowView = unknown;\n")
                     with unittest.mock.patch("sys.stderr", new=io.StringIO()) as errors:

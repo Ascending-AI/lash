@@ -63,7 +63,7 @@ impl ToolListing {
         dialect: &crate::dialect::SessionDialect,
         features: crate::protocol::RlmPromptFeatures,
         discovery: Option<&crate::plugin::RlmDiscovery>,
-    ) -> Result<Self, SessionError> {
+    ) -> Result<Self, PresentationRefusal> {
         let offered = tool_catalog
             .tools
             .iter()
@@ -98,16 +98,11 @@ impl ToolListing {
             },
         };
         let presenter = dialect.tool_presenter().presenter();
-        let section = presenter
-            .present(request)
-            .map_err(|refusal| section_refused(presenter.id(), refusal))?;
+        let section = presenter.present(request)?;
         if !section.accounts_for(&request) {
-            return Err(section_refused(
-                presenter.id(),
-                PresentationRefusal::Listing {
-                    presenter: presenter.id().to_owned(),
-                },
-            ));
+            return Err(PresentationRefusal::Listing {
+                presenter: presenter.id().to_owned(),
+            });
         }
         let names = |ids: &[lash_core::ToolId]| {
             entries
@@ -164,10 +159,10 @@ impl ToolCatalogueDisclosure {
     }
 }
 
-fn presentation_refused(refusal: impl std::fmt::Display) -> crate::dialect::DialectRefusal {
+fn presentation_refused(refusal: PresentationRefusal) -> crate::dialect::DialectRefusal {
     crate::dialect::DialectRefusal {
-        kind: crate::dialect::DialectRefusalKind::PresentationRefused,
         message: refusal.to_string(),
+        kind: crate::dialect::DialectRefusalKind::PresentationRefused(refusal),
     }
 }
 

@@ -1,0 +1,123 @@
+{
+  "$defs": {
+    "DocumentId": {
+      "pattern": "^[0-9a-f]{64}$",
+      "type": "string"
+    },
+    "FunctionId": {
+      "pattern": "^[0-9a-f]{64}$",
+      "type": "string"
+    },
+    "Name": {
+      "description": "A variable, parameter or declared-function name.\n\nAny text is a name; the kernel gives none of them meaning. Structural\nvalidation refuses the empty name.",
+      "type": "string"
+    },
+    "Site": {
+      "additionalProperties": false,
+      "description": "A node's address: the code it belongs to and the chain of\n[`Node::children`] indexes that reaches it from that code's body.\n\nA site is derived from the document and is never written by a host\n(`K-ID-004`). An empty chain addresses the body itself.",
+      "properties": {
+        "path": {
+          "items": {
+            "format": "uint32",
+            "minimum": 0,
+            "type": "integer"
+          },
+          "type": "array"
+        },
+        "unit": {
+          "$ref": "#/$defs/Unit"
+        }
+      },
+      "required": [
+        "unit"
+      ],
+      "type": "object"
+    },
+    "Survivor": {
+      "additionalProperties": false,
+      "description": "One surviving node.",
+      "properties": {
+        "edited": {
+          "description": "An edit wrote the node itself: its statement, expression, action or\na name it holds. A node only moved, or changed only beneath, is not\nedited.",
+          "type": "boolean"
+        },
+        "from": {
+          "$ref": "#/$defs/Site",
+          "description": "Its site in the base document."
+        },
+        "to": {
+          "$ref": "#/$defs/Site",
+          "description": "Its site in the result."
+        }
+      },
+      "required": [
+        "from",
+        "to"
+      ],
+      "type": "object"
+    },
+    "Unit": {
+      "description": "The code a node belongs to.",
+      "oneOf": [
+        {
+          "const": "main",
+          "description": "The document's `main`.",
+          "type": "string"
+        },
+        {
+          "additionalProperties": false,
+          "description": "A declared function of the document.",
+          "properties": {
+            "function": {
+              "$ref": "#/$defs/Name"
+            }
+          },
+          "required": [
+            "function"
+          ],
+          "type": "object"
+        },
+        {
+          "additionalProperties": false,
+          "description": "The kernel-code body of a library function.",
+          "properties": {
+            "library": {
+              "$ref": "#/$defs/FunctionId"
+            }
+          },
+          "required": [
+            "library"
+          ],
+          "type": "object"
+        }
+      ]
+    }
+  },
+  "$id": "https://lash.dev/schemas/kernel-correspondence/v1",
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "additionalProperties": false,
+  "description": "The nodes of one document that survive into another, each with the site\nit has there (`K-EDIT-004`).\n\nA node of `base` that is not listed did not survive. A node of `result`\nthat no entry leads to is new.",
+  "properties": {
+    "base": {
+      "$ref": "#/$defs/DocumentId"
+    },
+    "entries": {
+      "description": "Ordered by `from`; no two share a `from` or a `to`.",
+      "items": {
+        "$ref": "#/$defs/Survivor"
+      },
+      "type": "array"
+    },
+    "result": {
+      "$ref": "#/$defs/DocumentId"
+    }
+  },
+  "required": [
+    "base",
+    "result"
+  ],
+  "title": "Correspondence",
+  "type": "object",
+  "x-lash-schema-version": 1,
+  "x-lash-version-constant": "KERNEL_VERSION"
+}

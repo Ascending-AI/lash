@@ -1,0 +1,123 @@
+{
+  "$defs": {
+    "PageAuthority": {
+      "description": "What authorizes a capability: the activation's lease on its committed\nroot, or its private staging.",
+      "oneOf": [
+        {
+          "additionalProperties": false,
+          "description": "A store root lease (S6), by its id.",
+          "properties": {
+            "root": {
+              "format": "uint64",
+              "minimum": 0,
+              "type": "integer"
+            }
+          },
+          "required": [
+            "root"
+          ],
+          "type": "object"
+        },
+        {
+          "additionalProperties": false,
+          "description": "The activation's stage lease (S5), by its id.",
+          "properties": {
+            "stage": {
+              "format": "uint64",
+              "minimum": 0,
+              "type": "integer"
+            }
+          },
+          "required": [
+            "stage"
+          ],
+          "type": "object"
+        }
+      ]
+    },
+    "PageCapability": {
+      "pattern": "^[0-9a-fA-F]{162}$",
+      "type": "string",
+      "x-lash-binary-bytes": 81,
+      "x-lash-binary-encoding": "page[32], authority-kind[1] (root=0, stage=1), authority-id[u64-le], epoch[u64-le], mac[32]",
+      "x-lash-packed-fields": {
+        "description": "A parent-issued capability to read one page: bound to its digest, its\nauthority and the activation epoch, under a MAC whose key never leaves\nthe parent. It is transport authority, never saved state: a fresh\nactivation derives new ones from its leased root. On the worker it is\nthe kernel's opaque 48-byte `PageGrant` (authority 8, epoch 8, MAC 32).\n\nIt crosses as its [`PAGE_CAPABILITY_BYTES`] fixed bytes, a page's\nworth of them per page every exchange names (FIG-6321): the digest, the\nauthority's kind and id, the epoch and the MAC; in a human-readable\npayload, as those bytes in hex.",
+        "properties": {
+          "authority": {
+            "$ref": "#/$defs/PageAuthority"
+          },
+          "epoch": {
+            "format": "uint64",
+            "minimum": 0,
+            "type": "integer"
+          },
+          "mac": {
+            "items": {
+              "format": "uint8",
+              "maximum": 255,
+              "minimum": 0,
+              "type": "integer"
+            },
+            "maxItems": 32,
+            "minItems": 32,
+            "type": "array"
+          },
+          "page": {
+            "items": {
+              "format": "uint8",
+              "maximum": 255,
+              "minimum": 0,
+              "type": "integer"
+            },
+            "maxItems": 32,
+            "minItems": 32,
+            "type": "array"
+          }
+        },
+        "required": [
+          "page",
+          "authority",
+          "epoch",
+          "mac"
+        ],
+        "type": "object"
+      }
+    },
+    "PageEnvelope": {
+      "description": "One page as it crosses: its complete envelope, with its digest.\n\nOnly the envelope crosses (FIG-6321): a page is named by the digest of\nits envelope, so the receiver derives the digest as it decodes, and a\ndecoded page's `id` is its envelope's digest by construction.",
+      "items": {
+        "format": "uint8",
+        "maximum": 255,
+        "minimum": 0,
+        "type": "integer"
+      },
+      "type": "array"
+    }
+  },
+  "$id": "https://lash.dev/schemas/worker-seal-batch/v1",
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "additionalProperties": false,
+  "description": "Pages a worker sealed that cross with the frame that hands its run to\nthe parent (a `Parked`, `Sealed` or `Ended`) instead of in a page\nexchange of their own (FIG-6288). The parent admits them exactly as a\n[`PageRequest::Seal`] of the same pages and children, and returns their\nstage capabilities on the run's next `Run`.",
+  "properties": {
+    "children": {
+      "items": {
+        "$ref": "#/$defs/PageCapability"
+      },
+      "type": "array"
+    },
+    "pages": {
+      "items": {
+        "$ref": "#/$defs/PageEnvelope"
+      },
+      "type": "array"
+    }
+  },
+  "required": [
+    "pages",
+    "children"
+  ],
+  "title": "SealBatch",
+  "type": "object",
+  "x-lash-schema-version": 1,
+  "x-lash-version-constant": "WORKER_PROTOCOL_VERSION"
+}

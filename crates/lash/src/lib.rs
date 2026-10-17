@@ -1017,6 +1017,8 @@ pub mod testing;
 /// share: [`SchemaContract`] declares what a schema promises, and
 /// [`project_for_dialect`] renders it for one provider dialect.
 pub mod schema {
+    /// Shipped JSON Schema and TypeScript text for every host contract.
+    pub mod host;
     pub use lash_protocol_types::schema_contract::*;
 }
 

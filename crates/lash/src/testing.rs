@@ -396,7 +396,6 @@ pub async fn model_calls_for_activity(
     session: &crate::DurableSession,
     activities: &[crate::TurnActivity],
 ) -> Vec<crate::LlmCallRecord> {
-    use lash_protocol_types::core_support::RunIdCoreSupport as _;
     let turn_id = activities
         .iter()
         .find_map(|activity| match &activity.event {
@@ -422,7 +421,6 @@ pub async fn tool_calls_for_activity(
     session: &crate::DurableSession,
     activities: &[crate::TurnActivity],
 ) -> Vec<crate::tools::ToolCallRecord> {
-    use lash_protocol_types::core_support::RunIdCoreSupport as _;
     let turn_id = activities
         .iter()
         .find_map(|activity| match &activity.event {

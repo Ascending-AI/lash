@@ -545,6 +545,15 @@ impl RunId {
     pub fn parse(value: impl Into<String>) -> Result<Self, BlankIdentity> {
         TurnId::parse(value).map(Self)
     }
+    /// The retained turn key for this logical Run.
+    ///
+    /// Use this key with turn-scoped reads such as
+    /// `DurableSession::read_turn_model_calls`. It identifies the Run, not
+    /// necessarily the input that joined it or a physical turn segment.
+    pub fn turn_id(&self) -> &TurnId {
+        &self.0
+    }
+
     /// The retained spelling used to reattach after a restart.
     pub fn as_str(&self) -> &str {
         self.0.as_str()
@@ -554,9 +563,6 @@ impl RunId {
 impl crate::core_support::RunIdCoreSupport for RunId {
     fn from_turn_id(value: TurnId) -> Self {
         Self(value)
-    }
-    fn turn_id(&self) -> &TurnId {
-        &self.0
     }
 }
 /// The input that opened a Run is addressed by the Run's id.

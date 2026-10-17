@@ -1,0 +1,41 @@
+{
+  "$id": "https://lash.dev/schemas/process-ran/v1",
+  "$schema": "http://json-schema.org/draft-07/schema#",
+  "additionalProperties": false,
+  "properties": {
+    "ran": {
+      "items": {
+        "additionalItems": false,
+        "items": [
+          {
+            "maximum": 4294967295,
+            "minimum": 0,
+            "type": "integer"
+          },
+          {
+            "maximum": 18446744073709551615,
+            "minimum": 1,
+            "type": "integer"
+          }
+        ],
+        "maxItems": 2,
+        "minItems": 2,
+        "type": "array"
+      },
+      "minItems": 1,
+      "type": "array"
+    },
+    "vocabulary_version": {
+      "const": 1
+    }
+  },
+  "required": [
+    "vocabulary_version",
+    "ran"
+  ],
+  "title": "ProcessRan",
+  "type": "object",
+  "x-lash-event-type": "process.ran",
+  "x-lash-schema-version": 1,
+  "x-lash-version-constant": "PROCESS_EVENT_VOCABULARY_VERSION"
+}

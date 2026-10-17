@@ -8,7 +8,6 @@ use lash::plugins::{
     PluginCommand, PluginOperation, PluginOperationFailure, PluginOperationOutcome,
     PluginRuntimeEvent, PluginTask, SessionParam,
 };
-use lash_protocol_types::core_support::RunIdCoreSupport;
 
 use std::time::Duration;
 

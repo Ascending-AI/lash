@@ -7,7 +7,6 @@ use lash::provider::{LlmTransportError, TransportRetryVerdict};
 use lash_core::llm::types::{LlmUsage, StreamBlockIdentity};
 use lash_core::{MessageRole, TurnEvent};
 use lash_protocol_types::ReportedFailure;
-use lash_protocol_types::core_support::RunIdCoreSupport;
 use lash_protocol_types::{llm::types::StreamBlockEvent, llm::types::StreamBlockKind};
 
 /// Every committed part's content in an explicitly read session view.

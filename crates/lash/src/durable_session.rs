@@ -75,7 +75,6 @@ use lash_core::runtime::{
     PendingTurnInputSuffixCancelOutcome, QueuedWorkBatch,
 };
 use lash_protocol_types::SessionId;
-use lash_protocol_types::core_support::RunIdCoreSupport;
 use tokio::sync::OnceCell;
 
 /// How this handle obtains the session's store.
@@ -854,7 +853,6 @@ impl DurableSession {
         &self,
         run: &crate::RunId,
     ) -> Result<Option<crate::persistence::RunTerminal>> {
-        use lash_protocol_types::core_support::RunIdCoreSupport;
         Ok(self.store().await?.run_terminal(run.turn_id()).await?)
     }
 

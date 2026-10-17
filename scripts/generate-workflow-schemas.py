@@ -15,10 +15,10 @@ import sys
 ROOT = Path(__file__).resolve().parent.parent
 OUTPUT = ROOT / "schemas" / "host"
 
-# The workflow view contracts are also committed inside the crate that owns
-# the view, where TYPESCRIPT_DECLARATION and JSON_SCHEMA ship them via
-# include_str!, so a host that vendors lash can check its copies hermetically.
-# The crate's drift law checks both copies against the repository schemas.
+# Every host contract is also committed inside the facade. The workflow
+# view and PostgreSQL config additionally ship from their owning crates.
+# Constants use include_str! so Cargo consumers need no repository-root
+# schemas/ tree. The owning crates' drift laws compare the shipped bytes.
 CRATE_DECLARATIONS = {
     Path("postgres-host-config") / "v1.schema.json": Path("crates")
     / "lash-postgres-store"
@@ -30,7 +30,6 @@ CRATE_DECLARATIONS = {
     / "lash-kernel-view"
     / "kernel-workflow-view-v1.schema.json",
 }
-
 
 def typescript_declarations(schema: dict[str, object]) -> str:
     """Render the host schema graph, with JSON constraints kept in the schema.
@@ -197,11 +196,13 @@ def generate(
         else:
             path.parent.mkdir(parents=True, exist_ok=True)
             path.write_text(expected, encoding="utf-8")
-            crate_relative = CRATE_DECLARATIONS.get(relative)
-            if crate_relative is not None:
-                crate_path = ROOT / crate_relative
-                crate_path.parent.mkdir(parents=True, exist_ok=True)
-                crate_path.write_text(expected, encoding="utf-8")
+            for crate_relative in (
+                CRATE_DECLARATIONS.get(relative), Path("crates/lash/host-schemas") / relative
+            ):
+                if crate_relative is not None:
+                    crate_path = ROOT / crate_relative
+                    crate_path.parent.mkdir(parents=True, exist_ok=True)
+                    crate_path.write_text(expected, encoding="utf-8")
 
     expected_paths = {output / relative for relative in documents}
     if output.exists():

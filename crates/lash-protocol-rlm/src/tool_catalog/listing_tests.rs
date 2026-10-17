@@ -453,3 +453,31 @@ fn discovered_signatures_preserve_ten_level_select_options_in_every_dialect() {
         assert!(!signature.contains("any"), "{signature}");
     }
 }
+
+/// FIG-6699: discovery preserves the presenter's typed refusal and stable code.
+#[test]
+fn discovered_signature_refusals_retain_the_presenter_cause() {
+    use lash_tool_presenter_api::{PresentationRefusal, ToolPresenter};
+    use std::error::Error;
+
+    let config = json!({"unsupported_host_option": true});
+    let schema = lash_core::JsonSchema::admit(json!({"type": "string"})).unwrap();
+    let dialect = crate::dialect::CellDialect::typescript();
+    let expected = lash_tool_presenter_typescript::TypescriptToolPresenter
+        .admit_config(&config)
+        .expect_err("the presenter refuses an unknown config option");
+    let refused = discovered_tool_signature(
+        &dialect,
+        &config,
+        &ToolBinding::from_path("tools.search"),
+        &schema,
+        &schema,
+    )
+    .expect_err("discovery carries the config refusal");
+    let cause = refused
+        .source()
+        .and_then(|cause| cause.downcast_ref::<PresentationRefusal>())
+        .expect("discovery must retain the typed presenter cause");
+    assert_eq!(cause, &expected);
+    assert_eq!(cause.code(), "config.invalid");
+}

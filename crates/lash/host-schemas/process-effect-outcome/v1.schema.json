@@ -1,0 +1,133 @@
+{
+  "$id": "https://lash.dev/schemas/process-effect-outcome/v1",
+  "$schema": "http://json-schema.org/draft-07/schema#",
+  "additionalProperties": false,
+  "else": {
+    "not": {
+      "required": [
+        "code"
+      ]
+    }
+  },
+  "if": {
+    "properties": {
+      "outcome_class": {
+        "const": "failure"
+      }
+    }
+  },
+  "properties": {
+    "at": {
+      "additionalProperties": false,
+      "properties": {
+        "loops": {
+          "items": {
+            "additionalProperties": false,
+            "properties": {
+              "iteration": {
+                "maximum": 18446744073709551615,
+                "minimum": 0,
+                "type": "integer"
+              },
+              "site": {
+                "additionalProperties": false,
+                "properties": {
+                  "path": {
+                    "items": {
+                      "minimum": 0,
+                      "type": "integer"
+                    },
+                    "type": "array"
+                  },
+                  "unit": {}
+                },
+                "required": [
+                  "unit"
+                ],
+                "type": "object"
+              }
+            },
+            "required": [
+              "site",
+              "iteration"
+            ],
+            "type": "object"
+          },
+          "type": "array"
+        },
+        "occurrence": {
+          "maximum": 18446744073709551615,
+          "minimum": 0,
+          "type": "integer"
+        },
+        "site": {
+          "additionalProperties": false,
+          "properties": {
+            "path": {
+              "items": {
+                "minimum": 0,
+                "type": "integer"
+              },
+              "type": "array"
+            },
+            "unit": {}
+          },
+          "required": [
+            "unit"
+          ],
+          "type": "object"
+        },
+        "task": {}
+      },
+      "required": [
+        "task",
+        "site",
+        "occurrence"
+      ],
+      "type": "object"
+    },
+    "call_id": {
+      "pattern": "^tc_[0-9a-f]{64}$",
+      "type": [
+        "string",
+        "null"
+      ]
+    },
+    "code": {
+      "minLength": 1,
+      "type": "string"
+    },
+    "operation": {
+      "minLength": 1,
+      "type": "string"
+    },
+    "outcome_class": {
+      "enum": [
+        "success",
+        "failure",
+        "cancelled"
+      ],
+      "type": "string"
+    },
+    "replay_key": {
+      "minLength": 1,
+      "type": "string"
+    },
+    "vocabulary_version": {
+      "const": 1
+    }
+  },
+  "required": [
+    "vocabulary_version",
+    "at",
+    "operation",
+    "outcome_class",
+    "call_id",
+    "replay_key"
+  ],
+  "title": "ProcessEffectOccurrence",
+  "type": "object",
+  "x-lash-event-type": "process.effect_outcome",
+  "x-lash-schema-version": 1,
+  "x-lash-version-constant": "PROCESS_EVENT_VOCABULARY_VERSION"
+}

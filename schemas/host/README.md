@@ -11,6 +11,14 @@ references and `prefixItems` for tuples. The runtime-owned process-event
 documents retain Draft 7. Before 1.0, the version freeze permits refreshing
 these documents and their generated TypeScript in place without version bumps.
 
+Every document here ships through `lash::schema::host`: directory names become
+snake_case module names, each with `JSON_SCHEMA` and, where shipped,
+`TYPESCRIPT_DECLARATION`. For example,
+`lash::schema::host::kernel_migration_refusal::JSON_SCHEMA` and
+`lash::schema::host::kernel_parked_refusal::TYPESCRIPT_DECLARATION` are available
+without optional runtime features or a host-side Schemars dependency. The
+facade's drift law compares every constant with its document here.
+
 Run `python3 scripts/generate-workflow-schemas.py` after a schema owner changes.
 Run the same command with `--check` to detect drift. The check also rejects an
 obsolete versioned document left beside the current one.

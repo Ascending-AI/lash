@@ -33,6 +33,19 @@ use lash::{
     RecordedLlmProfile, RegisteredLlmProfile, RegistrationError, RunResolveError, SpecResolveError,
 };
 
+// FIG-6699: a host can use a Run's retained turn key without support traits.
+fn run_model_calls_use_the_public_turn_key(run: &lash::RunId) -> &lash::TurnId {
+    run.turn_id()
+}
+
+// Host schema text ships independently of optional runtime features.
+fn shipped_host_contracts_are_public() -> (&'static str, &'static str) {
+    (
+        lash::schema::host::kernel_migration_refusal::JSON_SCHEMA,
+        lash::schema::host::kernel_parked_refusal::TYPESCRIPT_DECLARATION,
+    )
+}
+
 fn persistence_types_are_nameable(graph: GraphAppend) -> RuntimeCommit {
     let operation = OperationId::turn("facade", "turn", "final");
     RuntimeCommit {
@@ -338,6 +351,8 @@ fn schema_dialect_types_are_nameable() {
 }
 
 fn main() {
+    let _ = run_model_calls_use_the_public_turn_key;
+    let _ = shipped_host_contracts_are_public;
     fn local_serde<T: serde::Serialize + serde::de::DeserializeOwned>() {}
     local_serde::<lash::CancelReceipt>();
     local_serde::<lash::SessionDeleteCompletion>();

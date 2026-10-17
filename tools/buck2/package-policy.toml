@@ -265,6 +265,8 @@ shards = 8
 packages = ["lash-runtime"]
 kinds = ["unit-test"]
 shards = 4
+# The host contract law compares all 27 shipped schema/declaration documents.
+compile_data = ["//:host_schemas"]
 
 [[rule]]
 packages = ["lash-runtime"]

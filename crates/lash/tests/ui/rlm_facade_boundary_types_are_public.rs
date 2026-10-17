@@ -8,7 +8,15 @@ fn rlm_core_type_is_nameable(core: lash::LashCore) {
     let _ = core;
 }
 
+fn presenter_refusal_code(refusal: &lash::rlm::DialectPromptRefusal) -> Option<&str> {
+    match &refusal.kind {
+        lash::rlm::DialectRefusalKind::PresentationRefused(cause) => Some(cause.code()),
+        _ => None,
+    }
+}
+
 fn main() {
+    let _ = presenter_refusal_code;
     fn local_serde<T: serde::Serialize + serde::de::DeserializeOwned>() {}
     local_serde::<lash::workflow::WorkflowUnavailable>();
     local_serde::<lash::tools::DeferredMatch>();
