@@ -6,10 +6,9 @@ upstream QuickJS, and Lash Python with Pydantic Monty. Node and CPython provide
 reference rows. It changes no interpreter, helper, charge formula or kernel
 library definition.
 
-The recorded table is **provisional: pre-FIG-6672**. FIG-6672 restores native
-fast paths narrowed by FIG-6648; authoritative numbers and gap ranking belong
-to the follow-up run on that base. This lane certifies the harness and equality
-checks, and does not rank performance gaps.
+The [recorded comparison](../kernel-vs-embedded.md) measures the morning baseline
+and the cutover head on the same basis (FIG-6719). Cold counts and differential
+warm estimates are separate; neither is a durable-engine or park measurement.
 
 From a Kiln fork, run:
 
@@ -24,7 +23,7 @@ export KILN_RE_PRIORITY=100
 Use a fresh output directory on every invocation. This one command resolves
 checksum-pinned release executables, builds `kernel_perf` through
 `kiln build --config=optimized`, runs the entire corpus, checks every result,
-and produces the provisional report table. It never installs workspace
+and produces a cold report table. It never installs workspace
 dependencies or invokes Cargo. Downloads require the explicit `--fetch-engines`
 opt-in; subsequent runs can omit it. Third-party executables and archives live
 in ignored `target/kernel-embedded-tools/`, outside evidence and source control.
@@ -42,6 +41,51 @@ python3 scripts/perf/kernel/embedded.py --out .kiln/FIG-6675/comparison \
   --render .kiln/FIG-6675/comparison/receipt.json \
   --report docs/perf/kernel-vs-embedded.md
 ```
+
+## Differential warm execution
+
+Add `--differential-warm` with a fresh output directory to measure repeated
+executions in each cold process. This is the FIG-6719 measurement method:
+
+```sh
+(ulimit -v 8388608; /usr/bin/time -v python3 scripts/perf/kernel/embedded.py \
+  --differential-warm --out .kiln/FIG-6719/current-warm \
+  --report .kiln/FIG-6719/current-warm.md)
+```
+
+The adapter wraps the unchanged body in a zero-argument function returning
+`result`, then calls it N or 2N times, printing only the final result. Each
+engine parses and prepares that source once per process; Lash shares one
+`PreparedLibrary` and document across all calls. N is 2 for sum1m, branch1m and
+fib25, and 100 for the shorter programs. Both counts have the same two reversed
+engine-order pairs, resource cap, load sampling, counter checks and result
+checks as cold runs. The complete warm receipt contains 264 processes. All
+results must also agree across N and 2N; the committed comparison checks them
+against the original cold results.
+
+For each pair, the incremental cost of N body executions is
+`instructions(2N) - instructions(N)`; the table divides that by N to report one
+body execution. Ratios divide the two-pair mean Lash delta by the corresponding
+peer mean delta. Fixed process startup, parsing, library preparation, the final
+finish/print and teardown cancel to first order. No nonpositive delta is
+accepted as a run cost. A Node reference pair with a nonpositive delta is
+reported as unavailable with its raw signed difference; adaptive JIT and
+startup variance can defeat that estimate. Such a reference refusal does not
+block the primary peer ratios. Other nonpositive deltas still refuse the
+report. The receipts retain both complete counts rather than hiding the
+subtraction. No sample is retried.
+
+This is an estimate of warm execution, not an acknowledged run-only hardware
+window. It includes the repetition loop, function calls, result replacement,
+and their allocations and cleanup. Wrapping also makes the body's bindings
+function-local instead of top-level session bindings, and nested function
+definitions execute on each call. Compilation of the different repetition
+literal and any nonlinear GC/allocator effects need not cancel exactly.
+Node's adaptive JIT behavior is an additional reason it remains a reference.
+The unchanged cold measurements preserve the original program geometry.
+RSS is the maximum of the N/2N whole-process peaks, not a phase-specific peak.
+Lash's differential `run_ns` uses the same subtraction; lower, library compile
+and document compile/start timings remain available for each input process.
 
 ## Release identities
 
@@ -110,7 +154,7 @@ one execution and no warmups. Instructions count the complete cold invocation,
 including loader, registry, compilation, output, teardown and GNU time wrapper.
 That is a reproducible cold workload metric, not steady-state execution speed.
 A large fixed registry cost can explain a large cold-process gap for a small
-program; this provisional report makes no ranking claim.
+program. Compare these counts separately from the differential warm estimates.
 
 Wall time measures the complete process; cold start to first result measures
 spawn to the first complete stdout line. The line can be delayed by CLI stdout
@@ -130,7 +174,8 @@ it from cell initialization. Both dialect helper sets are present, matching the
 existing kernel instrument. Run includes the finish host boundary. Its allocator
 is `system+stats_alloc`; run allocation/reallocation calls and metered charge are
 recorded without the tracing/work observers. Charge is not a VM statement count.
-No before/after optimization claim or pre-heap baseline is made.
+The FIG-6719 report compares the two named cutover revisions, with source and
+artifact identities retained separately. It makes no pre-heap comparison.
 
 `receipt.json` holds every sample and result, executable/source digests and
 release identities. `samples.jsonl` retains completed samples even if a later
