@@ -14,11 +14,6 @@ publish = false
 [lib]
 doctest = false
 
-# `examples/native_corpus.rs` pulls in `../lash-vm-releases/src/build/corpus.rs`
-# with `#[path]`; cargo-shear cannot see that file, the only user of `blake3` here.
-[package.metadata.cargo-shear]
-ignored = ["blake3"]
-
 [lints]
 workspace = true
 
@@ -39,15 +34,10 @@ kernel-embedder = { path = "../../examples/kernel-embedder" }
 lash-kernel-exec.workspace = true
 lash-ext-regex-ecma = { path = "../lash-ext-regex-ecma" }
 
-# Records native answers without building the release gate it is bootstrapping.
-blake3.workspace = true
+# Helper conformance uses the shared dialect runner.
 lash-ext-date-ecma.workspace = true
 lash-ext-url-whatwg.workspace = true
 lash-dialect-python.workspace = true
 lash-dialect-typescript.workspace = true
 lash-ext-py-core.workspace = true
 lash-ext-ts-core.workspace = true
-
-[[example]]
-name = "native_corpus"
-path = "examples/native_corpus.rs"

@@ -44,11 +44,7 @@ fn earlier_kernel_formats() -> Option<BuildFormats> {
             kind: LASH_VM_ENGINE_KIND.to_owned(),
             version: kernel,
         }],
-        &crate::formats::kernel_actor_state_surfaces(
-            kernel,
-            crate::formats::previous_helper_release()
-                .unwrap_or(crate::formats::KERNEL_HELPER_RELEASE),
-        ),
+        &crate::formats::kernel_actor_state_surfaces(kernel, crate::formats::KERNEL_HELPER_RELEASE),
     ))
 }
 
@@ -130,25 +126,6 @@ pub async fn survey_kernel_migration(
                 .push(UnmigratedKernelSession { session, refused });
         }
     }
-    // What still pins a helper release before this build's own, which a
-    // later build may stop retaining (FIG-5799).
-    for release in surveyed_helper_releases()? {
-        let retired = crate::helper_releases::retired_helpers(release)?;
-        let functions = lash_vm_runtime::helper_survey_functions().map_err(|error| {
-            KernelMigrationSurveyError::State(DurableError::Store(
-                lash_core::durable_port::StoreFailure {
-                    kind: lash_core::durable_port::StoreFailureKind::Corrupt,
-                    message: error.to_string(),
-                },
-            ))
-        })?;
-        let (processes, sessions) = crate::helper_releases::survey_helper_dependents(
-            backend, &functions, release, &retired,
-        )
-        .await?;
-        survey.helper_processes.extend(processes);
-        survey.helper_sessions.extend(sessions);
-    }
     Ok(survey)
 }
 
@@ -220,37 +197,9 @@ pub(crate) fn retiring(backend: &crate::Backend, kernel: u32) -> crate::Backend 
             kind: LASH_VM_ENGINE_KIND.to_owned(),
             version: kernel,
         },
-        &crate::formats::kernel_actor_state_surfaces(
-            kernel,
-            crate::formats::previous_helper_release()
-                .unwrap_or(crate::formats::KERNEL_HELPER_RELEASE),
-        ),
+        &crate::formats::kernel_actor_state_surfaces(kernel, crate::formats::KERNEL_HELPER_RELEASE),
         KERNEL_MIGRATION_SWEEP,
     )
-}
-
-/// Retained and removed releases participate in the same operator sweep.
-fn surveyed_helper_releases() -> Result<Vec<u32>, KernelMigrationSurveyError> {
-    let mut releases = crate::formats::earlier_helper_releases().map_err(|error| {
-        KernelMigrationSurveyError::State(DurableError::Store(
-            lash_core::durable_port::StoreFailure {
-                kind: lash_core::durable_port::StoreFailureKind::Corrupt,
-                message: error.to_string(),
-            },
-        ))
-    })?;
-    let retiring = lash_vm_runtime::retiring_helper_releases().map_err(|error| {
-        KernelMigrationSurveyError::State(DurableError::Store(
-            lash_core::durable_port::StoreFailure {
-                kind: lash_core::durable_port::StoreFailureKind::Corrupt,
-                message: error.to_string(),
-            },
-        ))
-    })?;
-    releases.extend(retiring.into_iter().map(|release| release.ordinal));
-    releases.sort_unstable();
-    releases.dedup();
-    Ok(releases)
 }
 
 /// The root of each cell of `session`'s `run`, each read whole under one

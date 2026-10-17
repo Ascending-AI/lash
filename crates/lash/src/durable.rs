@@ -41,21 +41,6 @@ pub struct DurableBackendBuilder {
     previous_build: bool,
     #[cfg(feature = "synthetic-next")]
     closing_window: bool,
-    #[cfg(all(feature = "synthetic-next", feature = "codemode"))]
-    helpers: SyntheticHelpers,
-}
-
-/// Which helper-release build the synthetic two-build laws run (FIG-5799).
-#[cfg(all(feature = "synthetic-next", feature = "codemode"))]
-#[derive(Clone, Copy, Debug, PartialEq, Eq)]
-enum SyntheticHelpers {
-    /// The build's own.
-    Own,
-    /// The build that changes a helper over the previous build's kernel.
-    Successor,
-    /// [`SyntheticHelpers::Successor`], no longer retaining the release
-    /// before its own.
-    Closing,
 }
 
 impl DurableBackendBuilder {
@@ -74,8 +59,6 @@ impl DurableBackendBuilder {
             previous_build: false,
             #[cfg(feature = "synthetic-next")]
             closing_window: false,
-            #[cfg(all(feature = "synthetic-next", feature = "codemode"))]
-            helpers: SyntheticHelpers::Own,
         }
     }
 
@@ -131,30 +114,6 @@ impl DurableBackendBuilder {
         self
     }
 
-    /// This backend as the build after [`previous_build`](Self::previous_build)
-    /// that changes a helper and keeps its kernel version (FIG-5799): its
-    /// actors hold that build's kernel formats and the synthetic
-    /// successor's helper release, and it reads what the previous build
-    /// wrote as written, holding every function that build's helper
-    /// release ships. The two-build laws of a helper change run it.
-    #[cfg(all(feature = "synthetic-next", feature = "codemode"))]
-    #[must_use]
-    pub fn helper_successor(mut self) -> Self {
-        self.helpers = SyntheticHelpers::Successor;
-        self
-    }
-
-    /// [`helper_successor`](Self::helper_successor), as the build that no
-    /// longer retains the previous build's helper release (FIG-5799): it
-    /// neither decodes what that build wrote nor starts while an unfinished
-    /// actor still depends on that release. The two-build laws run it.
-    #[cfg(all(feature = "synthetic-next", feature = "codemode"))]
-    #[must_use]
-    pub fn closing_helpers(mut self) -> Self {
-        self.helpers = SyntheticHelpers::Closing;
-        self
-    }
-
     /// A host process engine; one per kind.
     #[must_use]
     pub fn process_engine(mut self, engine: Arc<dyn ProcessEngine>) -> Self {
@@ -180,10 +139,6 @@ impl DurableBackendBuilder {
         }
         #[cfg(feature = "codemode")]
         let retired = self.retired_kernel_version();
-        #[cfg(feature = "codemode")]
-        let retired_helpers = self
-            .retired_helper_releases()
-            .map_err(helper_catalog_error)?;
         let surfaces = self.surfaces();
         let backend = Backend::assemble(BackendParts {
             #[cfg(feature = "codemode")]
@@ -195,36 +150,6 @@ impl DurableBackendBuilder {
             engines: self.engines,
             formats: surfaces.clone(),
         })?;
-        // A build that retains earlier helper releases reads what a build
-        // of one wrote as written; one that retires a release does not start
-        // while an actor still depends on it (FIG-5799).
-        #[cfg(feature = "codemode")]
-        let backend = {
-            let mut backend = backend;
-            let own = crate::formats::helper_release_of(&surfaces);
-            let kernel = surfaces
-                .iter()
-                .find(|surface| surface.id == "kernel-parked-state")
-                .map_or(crate::formats::KERNEL_PARKED_STATE_VERSION, |surface| {
-                    surface.version
-                });
-            for release in crate::formats::earlier_helper_releases()
-                .map_err(helper_catalog_error)?
-                .into_iter()
-                .rev()
-            {
-                if release < own
-                    && !retired_helpers
-                        .iter()
-                        .any(|retired| retired.ordinal == release)
-                {
-                    backend = backend.decoding(&crate::formats::kernel_actor_state_surfaces(
-                        kernel, release,
-                    ));
-                }
-            }
-            backend
-        };
         // A build that retires the kernel version before its own does not
         // decode what that version's build wrote, and its node does not
         // start while a process or session is still in it.
@@ -232,12 +157,6 @@ impl DurableBackendBuilder {
         let backend = match retired {
             Some(kernel) => crate::kernel_migration::retiring(&backend, kernel),
             None => backend,
-        };
-        #[cfg(feature = "codemode")]
-        let backend = if retired_helpers.is_empty() {
-            backend
-        } else {
-            crate::helper_releases::retiring(&backend, retired_helpers)
         };
         Ok(backend)
     }
@@ -248,37 +167,7 @@ impl DurableBackendBuilder {
         if self.previous_build {
             return crate::formats::previous_actor_state_surfaces();
         }
-        #[cfg(all(feature = "synthetic-next", feature = "codemode"))]
-        if self.helpers != SyntheticHelpers::Own
-            && let Some(kernel) = lash_vm_runtime::previous_kernel_version()
-        {
-            return crate::formats::kernel_actor_state_surfaces(
-                kernel,
-                crate::formats::KERNEL_HELPER_RELEASE,
-            );
-        }
         crate::formats::actor_state_surfaces()
-    }
-
-    /// The helper release this build no longer retains, whose dependents
-    /// its node does not start over.
-    #[cfg(feature = "codemode")]
-    fn retired_helper_releases(
-        &self,
-    ) -> Result<Vec<lash_vm_runtime::HelperReleaseIndex>, crate::vm::LibraryError> {
-        let mut retired = lash_vm_runtime::retiring_helper_releases()?;
-        #[cfg(feature = "synthetic-next")]
-        if self.helpers == SyntheticHelpers::Closing {
-            let previous = crate::formats::previous_helper_release();
-            retired.extend(
-                lash_vm_runtime::standard_helper_releases()?
-                    .into_iter()
-                    .filter(|release| Some(release.ordinal) == previous),
-            );
-        }
-        retired.sort_by_key(|release| release.ordinal);
-        retired.dedup_by_key(|release| release.ordinal);
-        Ok(retired)
     }
 
     /// The kernel version this build no longer interprets, whose window is
@@ -290,13 +179,6 @@ impl DurableBackendBuilder {
             return lash_vm_runtime::previous_kernel_version();
         }
         crate::kernel_migration::retired_kernel_version()
-    }
-}
-
-#[cfg(feature = "codemode")]
-fn helper_catalog_error(error: crate::vm::LibraryError) -> DurableBuildError {
-    DurableBuildError::HelperReleaseCatalog {
-        message: error.to_string(),
     }
 }
 

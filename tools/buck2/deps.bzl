@@ -1248,7 +1248,6 @@ PACKAGE_DEPS = {
     },
     "lash-internal-vm-releases": {
         "build": {
-            "blake3": "//third-party/rust:p0032",
             "lash_checkpoint_encoder": "//crates/lash-checkpoint-encoder:lash-checkpoint-encoder",
             "lash_dialect_python": "//crates/lash-dialect-python:lash-dialect-python",
             "lash_dialect_typescript": "//crates/lash-dialect-typescript:lash-dialect-typescript",
@@ -1261,20 +1260,17 @@ PACKAGE_DEPS = {
             "lash_kernel_dialect": "//crates/lash-kernel-dialect:lash-kernel-dialect",
             "lash_kernel_doc": "//crates/lash-kernel-doc:lash-kernel-doc",
             "lash_kernel_lib": "//crates/lash-kernel-lib:lash-kernel-lib",
-            "lash_kernel_state": "//crates/lash-kernel-state:lash-kernel-state",
             "lash_kernel_vm": "//crates/lash-kernel-vm:lash-kernel-vm",
             "serde": "//third-party/rust:p0317",
             "serde_json": "//third-party/rust:p0322",
             "thiserror": "//third-party/rust:p0375"
         },
         "dev": {
-            "blake3": "//third-party/rust:p0032",
             "lash_ext_date_ecma": "//crates/lash-ext-date-ecma:lash-ext-date-ecma",
             "lash_ext_regex_ecma": "//crates/lash-ext-regex-ecma:lash-ext-regex-ecma",
             "lash_ext_url_whatwg": "//crates/lash-ext-url-whatwg:lash-ext-url-whatwg",
             "lash_helper_labels": "//crates/lash-helper-labels:lash-helper-labels",
-            "lash_kernel_lib": "//crates/lash-kernel-lib:lash-kernel-lib",
-            "lash_kernel_state": "//crates/lash-kernel-state:lash-kernel-state"
+            "lash_kernel_lib": "//crates/lash-kernel-lib:lash-kernel-lib"
         },
         "normal": {
             "lash_kernel_doc": "//crates/lash-kernel-doc:lash-kernel-doc",
@@ -1385,7 +1381,6 @@ PACKAGE_DEPS = {
     "lash-kernel-conformance": {
         "build": {},
         "dev": {
-            "blake3": "//third-party/rust:p0032",
             "kernel_embedder": "//examples/kernel-embedder:kernel-embedder",
             "lash_dialect_python": "//crates/lash-dialect-python:lash-dialect-python",
             "lash_dialect_typescript": "//crates/lash-dialect-typescript:lash-dialect-typescript",

@@ -8,7 +8,7 @@ repository.workspace = true
 homepage.workspace = true
 readme.workspace = true
 rust-version.workspace = true
-description = "Each dialect's helper releases, as data: the sealed ones as the repository keeps them, and the one the tree builds as its build defines it."
+description = "Each built dialect's current helper release, as build-generated data."
 
 [lib]
 name = "lash_vm_releases"
@@ -41,10 +41,8 @@ thiserror = { workspace = true }
 
 [build-dependencies]
 lash-helper-labels = { workspace = true }
-lash-kernel-state = { workspace = true }
 lash-checkpoint-encoder = { workspace = true }
 thiserror = { workspace = true }
-blake3 = { workspace = true }
 lash-kernel-doc = { workspace = true }
 lash-kernel-dialect = { workspace = true }
 lash-kernel-lib = { workspace = true }
@@ -64,6 +62,4 @@ lash-helper-labels = { workspace = true }
 lash-ext-regex-ecma = { workspace = true }
 lash-ext-date-ecma = { workspace = true }
 lash-ext-url-whatwg = { workspace = true }
-lash-kernel-state = { workspace = true }
 lash-kernel-lib = { workspace = true }
-blake3 = { workspace = true }

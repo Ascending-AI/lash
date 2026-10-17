@@ -1,5 +1,5 @@
 //! FIG-6041: fresh registration uses the build's function tokens, with the
-//! same identities, manifests and recorded native answers.
+//! same identities and current manifests.
 #![cfg(target_os = "linux")]
 
 use std::alloc::{GlobalAlloc, Layout, System};
@@ -9,21 +9,6 @@ use std::time::Instant;
 
 use lash_kernel_doc::document_work;
 use lash_vm_client::WorkerTuning;
-
-#[expect(
-    dead_code,
-    reason = "the worker replays the corpus, but never records it"
-)]
-#[expect(
-    clippy::expect_used,
-    reason = "the shared corpus serializes typed recorded JSON fixtures infallibly"
-)]
-#[path = "../../lash-vm-releases/src/build/corpus.rs"]
-mod corpus;
-#[path = "../../lash-vm-releases/src/build/probe.rs"]
-mod probe;
-#[path = "../../lash-vm-releases/src/build/corpus_data/mod.rs"]
-mod recorded;
 
 #[test]
 fn a_fresh_embedding_parses_no_kernel_text_and_preserves_the_release() {
@@ -49,32 +34,6 @@ fn a_fresh_embedding_parses_no_kernel_text_and_preserves_the_release() {
     );
 
     let registry = embedding.registry().expect("the worker registry");
-    let mut corpus = corpus::Corpus {
-        releases: serde_json::from_str(recorded::RELEASES).expect("recorded releases"),
-        ..Default::default()
-    };
-    for shard in recorded::BLOBS {
-        let mut decoder = serde_json::Deserializer::from_str(shard);
-        decoder.disable_recursion_limit();
-        let blobs: BTreeMap<String, serde_json::Value> =
-            serde::Deserialize::deserialize(&mut decoder).expect("recorded inputs");
-        decoder.end().expect("one shard");
-        corpus.blobs.extend(blobs);
-    }
-    for dialect in lash_vm_releases::DIALECTS {
-        let held = dialect.held_releases().expect("built releases");
-        for release in held.retained {
-            let fingerprints = corpus
-                .verify_release(registry, dialect.dialect, &release.release)
-                .expect("the worker returns every recorded native answer");
-            for function in release.functions {
-                assert_eq!(
-                    function.fingerprint.as_ref(),
-                    fingerprints.get(&function.function)
-                );
-            }
-        }
-    }
     // The parent catalog holds retained releases plus changed helpers and
     // every successor kernel declaration this feature resolution interprets.
     let expected = lash_vm_library::standard_functions()
@@ -95,17 +54,16 @@ fn a_fresh_embedding_parses_no_kernel_text_and_preserves_the_release() {
                 .find(|(_, manifest)| manifest.ordinal == release.ordinal)
                 .expect("a retained manifest");
             assert_eq!(manifest.release, release.release);
-            assert_eq!(manifest.sealed, release.sealed);
             assert_eq!(manifest.writes, release.writes);
             let manifest_functions: BTreeMap<_, _> = manifest
                 .functions
                 .iter()
-                .map(|f| (f.function, f.fingerprint.clone()))
+                .map(|f| (f.function, f.native))
                 .collect();
             let released_functions: BTreeMap<_, _> = release
                 .functions
                 .iter()
-                .map(|f| (f.function, f.fingerprint.clone()))
+                .map(|f| (f.function, f.definition.has_native()))
                 .collect();
             assert_eq!(manifest_functions, released_functions);
             let index = release.index();

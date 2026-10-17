@@ -3122,7 +3122,6 @@ dependencies = [
 name = "lash-internal-vm-releases"
 version = "0.0.0-dev"
 dependencies = [
- "blake3",
  "lash-dialect-python",
  "lash-dialect-typescript",
  "lash-ext-date-ecma",
@@ -3135,7 +3134,6 @@ dependencies = [
  "lash-kernel-dialect",
  "lash-kernel-doc",
  "lash-kernel-lib",
- "lash-kernel-state",
  "lash-kernel-vm",
  "serde",
  "serde_json",
@@ -3238,7 +3236,6 @@ name = "lash-kernel-conformance"
 version = "0.0.0-dev"
 dependencies = [
  "arbitrary",
- "blake3",
  "kernel-embedder",
  "lash-dialect-python",
  "lash-dialect-typescript",

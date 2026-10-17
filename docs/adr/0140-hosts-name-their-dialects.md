@@ -69,19 +69,7 @@ the document or the parked state:
 
 ### One helper release line per dialect
 
-A release's name and ordinal are lash's (`RETAINED_HELPER_RELEASES`, one line
-for every dialect). What it holds is each dialect's own: the kernel library,
-the library the dialect ships with, and its helpers. `lash-vm-releases`
-defines, checks and stages one release set per built dialect, and
-`src/sealed.rs` keeps sealed releases by dialect. A build that cannot hold a
-dialect's sealed release exactly fails, for that dialect.
-
-A new run pins the release its dialect's line builds. A migrated or adopted
-run stays in the line of the release it pinned. The parent holds the union of
-its built dialects' functions and every line's manifests.
-
-The 1.0 cut seals each shipped dialect's 1.0 with the one generator run
-(`lash_vm_releases::SEAL`), in a build with every dialect.
+Each built dialect has one current helper release defined by the build from its sources. A new run pins that dialect's exact manifest; a build holding a different manifest refuses resume with a typed release mismatch. Parents and workers read the same generated definitions.
 
 ## Consequences
 

@@ -546,8 +546,7 @@ that makes every chunk cold).
 (`lash-kernel-lib` numbers, text and JSON, collections; the `lash-ext-*`
 regex, URL, date, py-core and ts-core; the machine's `RunByTheMachine`).
 **Deletes** `heap::NativeHeap`, `heap::NativeCall`, `heap::NativeFunction`,
-`heap::NativeError`, the machine's call heap (`machine/native_heap.rs`) and
-the release probe's recording heap. The hand twins (`py.truth`, `py.add`, ten
+`heap::NativeError`, the machine's call heap (`machine/native_heap.rs`). The hand twins (`py.truth`, `py.add`, ten
 `ts.*`) are deleted by hgen as generated plans replace them (§J). Hand natives
 remain only for external algorithms: regex, date, URL and JSON parse.
 
@@ -899,7 +898,7 @@ Three lanes, in order.
   differential and PLAN-INDEP pass; a law forcing `Retry::Cold` at every chunk
   passes.
 - **Deletes:** `heap::{Value, NativeHeap, NativeCall, NativeFunction, NativeError}`,
-  `machine/native_heap.rs`, the release probe's recording heap, and the
+  `machine/native_heap.rs` and the
   machine's `SemanticHeap` object reads and writes.
 - **Gate:** lean, plus the helper differential and plan-independence targets,
   and the durable image targets (shapes are unchanged; images must still
@@ -1005,3 +1004,5 @@ Three lanes, in order.
 - **The record representation** (hash-indexed dense ordered, or small vectors)
   stays a stage-3 measurement. The pinned `Table` (entries in insertion order,
   index behind `Semantics::lookup`) fits both.
+
+The 1.0 cut records and seals the first helper release fresh.

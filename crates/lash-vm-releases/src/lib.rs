@@ -1,43 +1,22 @@
-//! Each dialect's helper releases, as data (FIG-5799, FIG-5990).
-//!
-//! A host names the dialects it builds with (`dialect-typescript`,
-//! `dialect-python`; none is a default), and the build holds a helper
-//! release line for each of them and for no other: a TypeScript-only host
-//! carries none of Python's helpers. A release's name and ordinal are
-//! lash's, one line for every dialect ([`RETAINED_HELPER_RELEASES`]); what
-//! it holds is each dialect's own, sealed on its own.
-//!
-//! A sealed release has shipped: the repository keeps it as it was sealed
-//! (`src/sealed.rs`), and a build that cannot hold it exactly fails. The
-//! release the tree builds is the build's own until the cut that ships it
-//! seals it: the build script defines it from the current helper sources,
-//! so changing a helper changes no checked-in file (FIG-5839). Sealing is
-//! one generator run at the cut ([`SEAL`]), which keeps each dialect's
-//! release the tree builds as it stands and so makes it sealed.
-//!
-//! This crate holds data alone. A parent reads the releases from it
-//! (`lash-vm-library`) and a worker its helpers and retained functions
-//! (`lash-vm-worker`), both from the one build of it; the dialects and the
-//! extensions are dependencies of its build script, so a host that only
-//! edits workflows links neither (FIG-5812).
+//! Each built dialect's current helper release, defined by the build.
+//! A checkpoint pins its exact manifest and refuses a different release.
+//! Parents read definitions as data without linking dialect compilers.
 
-mod declared;
 mod manifest;
 mod releases;
 
-pub use declared::{
-    PYTHON, RETAINED_HELPER_RELEASES, RETIRING_HELPER_RELEASES, SHIPPED_DIALECTS, TYPESCRIPT,
-};
+/// The TypeScript dialect name recorded by sessions and runs.
+pub const TYPESCRIPT: &str = "typescript";
+/// The Python dialect name recorded by sessions and runs.
+pub const PYTHON: &str = "python";
+/// Dialects whose helpers the build may include.
+pub const SHIPPED_DIALECTS: &[&str] = &[TYPESCRIPT, PYTHON];
+
 pub use manifest::{
     HELPER_DEFINITION_KIND, HeldManifests, ManifestFunction, RELEASE_MANIFEST_KIND,
     ReleaseManifest, ReleaseRefusal, stage_release,
 };
 pub use releases::{HeldReleases, HelperRelease, HelperReleaseIndex, ReleasedFunction};
-
-/// The generator that seals each built dialect's release the tree builds,
-/// and keeps every sealed release, in `src/sealed.rs`. The 1.0 cut runs it
-/// once, in a build with every shipped dialect.
-pub const SEAL: &str = "kiln test //crates/lash-vm-releases:lash-vm-releases__unit_test --local-test-execution --no-test-cache --test_arg=--ignored --test_arg=--exact --test_arg=tests::seal_helper_release --test_env=LASH_REGENERATE=1 --test_env=BUILD_WORKSPACE_DIRECTORY=$PWD";
 
 /// One dialect's helpers and helper releases, as the build defined and
 /// resolved them (`build.rs`).
@@ -48,10 +27,6 @@ pub struct DialectReleases {
     /// The dialect's helpers as the build defined them against the library
     /// it ships with, validated in a registry holding exactly that.
     pub helpers: &'static [u8],
-    /// The functions of the helper releases the build retains for the
-    /// dialect that it does not define itself, validated in a registry
-    /// holding exactly the dialect's library and helpers.
-    pub retained_functions: &'static [u8],
     /// The index of each helper release the build retains for the dialect,
     /// oldest first.
     pub helper_release_index: &'static [u8],
@@ -67,9 +42,7 @@ pub struct DialectReleases {
 }
 
 impl DialectReleases {
-    /// The helper releases the build holds for the dialect: the ones it
-    /// retains, oldest first, the last being the release the tree builds,
-    /// and the ones it retires.
+    /// The single current helper release for this dialect.
     ///
     /// # Errors
     ///
@@ -85,12 +58,6 @@ macro_rules! built {
         DialectReleases {
             dialect: $dialect,
             helpers: include_bytes!(concat!(env!("OUT_DIR"), "/", $dialect, "_helpers.bin")),
-            retained_functions: include_bytes!(concat!(
-                env!("OUT_DIR"),
-                "/",
-                $dialect,
-                "_retained_functions.bin"
-            )),
             helper_release_index: include_bytes!(concat!(
                 env!("OUT_DIR"),
                 "/",

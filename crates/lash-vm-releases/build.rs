@@ -1,27 +1,5 @@
-//! Defines each built dialect's helpers once, when the crate is built
-//! (FIG-5796), defines the helper release the tree builds from them until
-//! the cut seals it (FIG-5839), and checks the sealed releases the build
-//! holds against what it builds (FIG-5799), dialect by dialect (FIG-5990).
-//!
-//! Every worker is a process of its own, and defining the helpers (reading
-//! their kernel text, validating and identifying each) took most of a
-//! worker's startup. The script defines a dialect's helpers against the
-//! library that dialect ships with, validates them in a registry holding
-//! it, and writes the result to `OUT_DIR`. A worker registers them without
-//! defining them again.
-//!
-//! A run pins the identities it was written against, so a build also holds
-//! every function of the helper releases it retains that it does not
-//! define itself. For each dialect the build's features name, the script
-//! resolves the declared releases (`src/declared.rs`): each sealed one as
-//! the repository keeps it for that dialect (`src/sealed.rs`), and the
-//! release the tree builds, while it is unsealed, as the build defines it,
-//! with the digest of what each native answers (`src/build/probe.rs`). It
-//! checks every release against the build (`src/build/release.rs`),
-//! validates the functions it retains in the registry the worker holds, and
-//! writes them, the releases, and their index. A parent and a worker read
-//! all of it from this one build. A build with no dialect feature holds no
-//! release.
+//! Defines and validates each built dialect's current helpers once.
+//! Workers and parents read the same build artifacts.
 
 #![cfg_attr(
     not(any(feature = "dialect-typescript", feature = "dialect-python")),
@@ -32,24 +10,16 @@
     )
 )]
 
-#[path = "src/build/corpus.rs"]
-mod corpus;
-#[path = "src/declared.rs"]
-mod declared;
 #[path = "src/library.rs"]
 mod library;
-#[path = "src/build/probe.rs"]
-mod probe;
 #[path = "src/build/release.rs"]
 mod release;
 #[expect(
     dead_code,
-    reason = "the build writes releases; sealing and decoding the held set are the library's"
+    reason = "the build writes releases; decoding the held set are the library's"
 )]
 #[path = "src/releases.rs"]
 mod releases;
-#[path = "src/sealed.rs"]
-mod sealed;
 #[path = "src/build/sets.rs"]
 mod sets;
 
@@ -73,13 +43,6 @@ type BuildError = Box<dyn std::error::Error>;
 )]
 fn main() -> Result<(), BuildError> {
     let out = std::path::PathBuf::from(std::env::var_os("OUT_DIR").ok_or("OUT_DIR is unset")?);
-    for (dialect, _) in sealed::SEALED {
-        if !declared::SHIPPED_DIALECTS.contains(dialect) {
-            return Err(
-                format!("sealed releases are kept for `{dialect}`, which is no dialect").into(),
-            );
-        }
-    }
     let mut kernel = FunctionRegistry::new();
     library::register_kernel_base(&mut kernel)?;
     let basis = kernel.clone();
@@ -96,7 +59,7 @@ fn main() -> Result<(), BuildError> {
         write_functions(&out.join("typescript_extensions.bin"), &basis, &registry)?;
         dialect(
             &out,
-            declared::TYPESCRIPT,
+            "typescript",
             registry,
             |library| Ok(lash_dialect_typescript::define_helpers(library)?),
             library::implement_typescript,
@@ -106,14 +69,14 @@ fn main() -> Result<(), BuildError> {
     {
         dialect(
             &out,
-            declared::PYTHON,
+            "python",
             kernel,
             |library| Ok(lash_dialect_python::define_helpers(library)?),
             library::implement_python,
         )?;
     }
     #[cfg(not(any(feature = "dialect-typescript", feature = "dialect-python")))]
-    let _ = (&out, declared::TYPESCRIPT, declared::PYTHON);
+    let _ = (&out, "typescript", "python");
     println!("cargo:rerun-if-changed=build.rs");
     println!("cargo:rerun-if-changed=src");
     Ok(())
@@ -154,37 +117,9 @@ fn dialect(
     sets::validate(&registry, &helper_names, dialect == "typescript")?;
     write("helpers.bin", &validated.to_tokens())?;
 
-    let corpus = corpus::Corpus::recorded()?;
-    let building = declared::RETAINED_HELPER_RELEASES
-        .last()
-        .ok_or("no retained release")?
-        .0;
-    for (release, _) in declared::RETAINED_HELPER_RELEASES {
-        if *release != building {
-            corpus.verify_release(&registry, dialect, release)?;
-        }
-    }
-    let fingerprints = corpus.certify(&registry, dialect, building)?;
-    let sealed = sealed::SEALED
-        .iter()
-        .find(|(kept, _)| *kept == dialect)
-        .map_or(&[][..], |(_, releases)| releases);
-    let held = release::resolve(
-        declared::RETAINED_HELPER_RELEASES,
-        declared::RETIRING_HELPER_RELEASES,
-        sealed,
-        |name, ordinal, previous| {
-            release::freeze(name, ordinal, previous, &registry, &fingerprints)
-        },
-    )
-    .and_then(|held| {
-        let retained = release::keep(&held.retained, &registry, &fingerprints)?;
-        Ok((held, retained))
-    })
-    .map_err(|error| format!("dialect `{dialect}`: {error}"))?;
-    let (held, retained) = held;
-    let retained = registry.validate_functions(retained)?;
-    write("retained_functions.bin", &retained.to_tokens())?;
+    let held = releases::HeldReleases {
+        retained: vec![release::current(&registry)],
+    };
     let index: Vec<HelperReleaseIndex> = held.retained.iter().map(HelperRelease::index).collect();
     write("helper_releases.json", &serde_json::to_vec(&index)?)?;
     write("held_releases.json", &serde_json::to_vec(&held)?)?;
@@ -246,7 +181,7 @@ fn write_functions(
     basis: &FunctionRegistry,
     registry: &FunctionRegistry,
 ) -> Result<(), BuildError> {
-    let ordered = release::freeze("build", 0, None, registry, &Default::default());
+    let ordered = release::current(registry);
     let (base, definitions): (Vec<_>, Vec<_>) = ordered
         .functions
         .into_iter()

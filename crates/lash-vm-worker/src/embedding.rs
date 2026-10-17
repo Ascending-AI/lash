@@ -24,7 +24,9 @@
 //! alone, or, for a writer the fleet holds to an earlier release, against
 //! that release's.
 
-use std::collections::{BTreeMap, BTreeSet};
+use std::collections::BTreeMap;
+#[cfg(test)]
+use std::collections::BTreeSet;
 use std::sync::{Arc, OnceLock};
 
 use lash_kernel_dialect::{Diagnostic, Environment, Lowered, Mode, NamedLibrary, Package};
@@ -291,9 +293,7 @@ impl Dialect {
 pub struct Embedder {
     registry: FunctionRegistry,
     dialects: BTreeMap<String, Package>,
-    /// The functions registered as an earlier release's, which no name
-    /// resolves to.
-    retained: BTreeSet<FunctionId>,
+    /// The current build's helper release ordinal.
     writes: u32,
     /// Each retained release, by ordinal, as the dialects installed so far
     /// hold it.
@@ -320,7 +320,6 @@ impl Embedder {
         Ok(Self {
             registry,
             dialects: BTreeMap::new(),
-            retained: BTreeSet::new(),
             writes: HELPER_RELEASE,
             releases: BTreeMap::new(),
         })
@@ -337,7 +336,7 @@ impl Embedder {
     ///
     /// [`EmbedError::Registry`] when two functions share a name.
     pub fn library(&self) -> Result<NamedLibrary, EmbedError> {
-        NamedLibrary::resolving(&self.registry, |function| !self.retained.contains(function))
+        NamedLibrary::from_registry(&self.registry)
             .map_err(|error| EmbedError::Registry(error.to_string()))
     }
 
@@ -379,16 +378,6 @@ impl Embedder {
             .register_validated(helpers)
             .map_err(|error| registry(&error))?;
         natives(&mut self.registry, &operations).map_err(EmbedError::Registry)?;
-        // The functions of the releases the dialect retains, validated
-        // against exactly what it holds now, under no name: they are found
-        // by identity alone (FIG-5799).
-        let retained = ValidatedFunctions::from_tokens(built.retained_functions)
-            .map_err(|error| registry(&error))?;
-        self.retained
-            .extend(retained.iter().map(|(function, _)| *function));
-        self.registry
-            .register_validated(retained)
-            .map_err(|error| registry(&error))?;
         let releases: Vec<HelperReleaseIndex> =
             serde_json::from_slice(built.helper_release_index).map_err(|error| registry(&error))?;
         for release in releases {
@@ -407,43 +396,16 @@ impl Embedder {
         Ok(self)
     }
 
-    /// Registers the helpers this build changes over the release it
-    /// retains under their names, keeping the functions they replace under
-    /// none: the change its parent makes too
-    /// ([`lash_vm_library::changed_helpers`]).
-    ///
-    /// # Errors
-    ///
-    /// [`EmbedError::Registry`]: a defect of the build.
-    fn change_helpers(&mut self) -> Result<(), EmbedError> {
-        let named = self
-            .registry
-            .iter()
-            .map(|(function, _)| *function)
-            .filter(|function| !self.retained.contains(function))
-            .collect();
-        let changed = lash_vm_library::changed_helpers(named, &self.registry)
-            .map_err(|error| EmbedError::Registry(error.to_string()))?;
-        for function in changed {
-            self.registry
-                .register(function.definition, None)
-                .map_err(|error| EmbedError::Registry(error.to_string()))?;
-            self.retained.insert(function.from);
-        }
-        Ok(())
-    }
-
     /// The finished embedding.
     ///
     /// # Errors
     ///
     /// [`EmbedError::NoDialect`] when the host installed none, and
     /// [`EmbedError::Registry`].
-    pub fn finish(mut self) -> Result<Embedding, EmbedError> {
+    pub fn finish(self) -> Result<Embedding, EmbedError> {
         if self.dialects.is_empty() {
             return Err(EmbedError::NoDialect);
         }
-        self.change_helpers()?;
         // The names a front end resolves are those of the version it
         // writes. A successor's functions are redeclared when a document
         // of it first runs (`Embedding::registry`).

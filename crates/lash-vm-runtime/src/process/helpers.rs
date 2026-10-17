@@ -37,7 +37,7 @@ use super::{KernelDocuments, KernelMigrationSurveyError, advance};
 
 /// The functions a build stops holding when it stops retaining a helper
 /// release, each with the build's function of the same name and kernel
-/// version, when it has one (`lash_vm_library::standard_retired_helpers`).
+/// version, when the host supplies one.
 pub type RetiredHelpers = BTreeMap<FunctionId, Option<FunctionId>>;
 
 /// Why a run is not carried onto other library functions: the build's own

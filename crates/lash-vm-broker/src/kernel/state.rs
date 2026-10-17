@@ -583,10 +583,7 @@ mod tests {
             }
             let reference = built.manifests.current(dialect).expect("current release");
             let manifest = built.manifests.get(&reference).expect("manifest");
-            assert_eq!(
-                (manifest.release.as_str(), manifest.ordinal, manifest.sealed),
-                ("1.0", 1, false)
-            );
+            assert_eq!((manifest.release.as_str(), manifest.ordinal), ("1.0", 1));
             assert_eq!(
                 built.manifests.pin_key(&reference),
                 Some(format!("{dialect}/1.0"))

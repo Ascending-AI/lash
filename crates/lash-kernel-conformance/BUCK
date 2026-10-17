@@ -59,26 +59,6 @@ lash_rust_unit_test(
 )
 
 lash_rust_binary(
-    name = "native_corpus__example",
-    crate_features = [],
-    crate_name = "native_corpus",
-    crate_root = "examples/native_corpus.rs",
-    declared_features = [],
-    exec_properties = sized_exec_properties("lash-kernel-conformance", "native_corpus"),
-    extra_compile_data = [
-        "//crates/lash-vm-releases:rust_sources",
-    ],
-    include_dev_deps = True,
-    library = ":lash-kernel-conformance",
-    library_crate_name = "lash_kernel_conformance",
-    manifest_dir = "crates/lash-kernel-conformance",
-    package_name = "lash-kernel-conformance",
-    rustc_env = {},
-    tags = [],
-    version = "0.0.0-dev",
-)
-
-lash_rust_binary(
     name = "sort_corpus__example",
     crate_features = [],
     crate_name = "sort_corpus",

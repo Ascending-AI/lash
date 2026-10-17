@@ -26,14 +26,12 @@ pub const RELEASE_MANIFEST_KIND: u32 = 13;
 /// The node kind of one helper definition.
 pub const HELPER_DEFINITION_KIND: u32 = 14;
 
-/// Kind 13's body: a release's name, ordinal and sealed flag, the functions
-/// a build of it resolves names against, and every function it holds, by
-/// identity, with its definition node and its native fingerprint.
+/// Kind 13's body: the current release's name, ordinal and functions,
+/// with each definition's identity and native implementation requirement.
 #[derive(Clone, Debug, PartialEq, Eq)]
 pub struct ReleaseManifest {
     pub release: String,
     pub ordinal: u32,
-    pub sealed: bool,
     pub writes: BTreeSet<FunctionId>,
     /// Ascending by function.
     pub functions: Vec<ManifestFunction>,
@@ -45,9 +43,8 @@ pub struct ManifestFunction {
     pub function: FunctionId,
     /// Its HelperDefinition node.
     pub definition: ChildRef,
-    /// The digest of what its native implementation answers, when it has
-    /// one.
-    pub fingerprint: Option<String>,
+    /// Whether this function requires a native implementation.
+    pub native: bool,
 }
 
 impl TokenCodec for ManifestFunction {
@@ -55,7 +52,7 @@ impl TokenCodec for ManifestFunction {
         out.seq(3);
         self.function.encode(out);
         self.definition.encode(out);
-        self.fingerprint.encode(out);
+        self.native.encode(out);
     }
 
     fn decode(input: &mut TokenReader<'_>) -> Result<Self, TokenError> {
@@ -63,27 +60,25 @@ impl TokenCodec for ManifestFunction {
         Ok(Self {
             function: FunctionId::decode(input)?,
             definition: ChildRef::decode(input)?,
-            fingerprint: Option::decode(input)?,
+            native: bool::decode(input)?,
         })
     }
 }
 
 impl TokenCodec for ReleaseManifest {
     fn encode(&self, out: &mut TokenWriter) {
-        out.seq(5);
+        out.seq(4);
         out.text(&self.release);
         out.unsigned(u64::from(self.ordinal));
-        out.bool(self.sealed);
         self.writes.encode(out);
         self.functions.encode(out);
     }
 
     fn decode(input: &mut TokenReader<'_>) -> Result<Self, TokenError> {
-        input.expect_struct(5)?;
+        input.expect_struct(4)?;
         let manifest = Self {
             release: String::decode(input)?,
             ordinal: input.unsigned_u32()?,
-            sealed: input.bool()?,
             writes: BTreeSet::decode(input)?,
             functions: Vec::decode(input)?,
         };
@@ -136,14 +131,13 @@ pub fn stage_release<E>(
             ManifestFunction {
                 function: held.function,
                 definition,
-                fingerprint: held.fingerprint.clone(),
+                native: held.definition.has_native(),
             },
         );
     }
     let manifest = ReleaseManifest {
         release: release.release.clone(),
         ordinal: release.ordinal,
-        sealed: release.sealed,
         writes: release.writes.clone(),
         functions: functions.into_values().collect(),
     };
@@ -310,7 +304,7 @@ impl HeldManifests {
                         function: *function,
                     });
                 }
-                Some(false) if held.fingerprint.is_some() => {
+                Some(false) if held.native => {
                     return Err(ReleaseRefusal::MissingNative {
                         function: *function,
                     });

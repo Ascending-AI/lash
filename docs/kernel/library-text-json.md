@@ -50,7 +50,7 @@ the baseline needs a new definition identity (`K-VER-002`).
   `text.trim_end_u…` remove Unicode White_Space at the named ends, from those
   same versioned data; U+FEFF is not whitespace. The data version is in each
   function name and hence its content identity. No normalization or locale
-  selection occurs. The exact version is recorded in the native corpus.
+  selection occurs.
 - **K-LTXT-007.** `text.repeat(text, count)` requires a nonnegative integer count.
   `text.pad_start(text, width, fill)` and `text.pad_end(text, width, fill)` pad
   to a nonnegative scalar width by repeating fill and truncating it at scalar
@@ -210,5 +210,4 @@ the baseline needs a new definition identity (`K-VER-002`).
   its kind/digit bytes and exponent magnitude are reserved before allocation.
 
 The named laws are in `crates/lash-kernel-lib/src/text_json/tests.rs`.
-Direct native corpus shards supplement kernel-document cases; they do not
-stand in for machine execution or document charge proofs.
+Native conformance cases supplement kernel-document execution and charge proofs.

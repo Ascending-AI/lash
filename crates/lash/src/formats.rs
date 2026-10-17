@@ -532,12 +532,7 @@ pub fn previous_actor_state_surfaces() -> Vec<lash_core::durable_port::FormatSur
     #[cfg(feature = "codemode")]
     {
         lash_vm_runtime::previous_kernel_version()
-            .map(|kernel| {
-                kernel_actor_state_surfaces(
-                    kernel,
-                    previous_helper_release().unwrap_or(KERNEL_HELPER_RELEASE),
-                )
-            })
+            .map(|kernel| kernel_actor_state_surfaces(kernel, KERNEL_HELPER_RELEASE))
             .unwrap_or_default()
     }
     #[cfg(not(feature = "codemode"))]
@@ -571,31 +566,6 @@ pub fn kernel_actor_state_surfaces(
         surfaces.push(FormatSurface::new(KERNEL_HELPERS_SURFACE, helpers));
     }
     surfaces
-}
-
-/// The newest helper release before this build's own that it retains:
-/// what the build before it wrote against, when that build wrote another.
-#[cfg(feature = "codemode")]
-pub fn previous_helper_release() -> Option<u32> {
-    lash_vm_runtime::RETAINED_HELPER_RELEASES
-        .iter()
-        .map(|(_, ordinal)| *ordinal)
-        .rfind(|ordinal| *ordinal < KERNEL_HELPER_RELEASE)
-}
-
-/// Every helper release before this build's own that it retains, oldest
-/// first: a node of this build reads what a build of one wrote as written
-/// (FIG-5799).
-///
-/// # Errors
-/// The shipped helper release declarations or artifacts do not validate.
-#[cfg(feature = "codemode")]
-pub fn earlier_helper_releases() -> Result<Vec<u32>, crate::vm::LibraryError> {
-    Ok(lash_vm_runtime::standard_helper_releases()?
-        .into_iter()
-        .map(|release| release.ordinal)
-        .filter(|ordinal| *ordinal < KERNEL_HELPER_RELEASE)
-        .collect())
 }
 
 /// The helper release a set holding `surfaces` was written against.

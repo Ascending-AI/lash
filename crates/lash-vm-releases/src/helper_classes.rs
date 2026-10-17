@@ -640,25 +640,7 @@ fn diff(expected: &str, actual: &str) -> String {
 #[test]
 #[cfg(all(feature = "dialect-python", feature = "dialect-typescript"))]
 fn helper_release_census_matches_checked_call_graph() {
-    let mut actual = String::new();
-    let mut dialects: Vec<_> = crate::DIALECTS.iter().collect();
-    dialects.sort_by_key(|built| built.dialect);
-    assert_eq!(dialects.len(), 2, "the census checks both shipped dialects");
-    for built in dialects {
-        let helpers = lash_kernel_doc::ValidatedFunctions::from_tokens(built.helpers)
-            .expect("helpers decode");
-        let exports = helpers.iter().map(|(id, _)| *id).collect();
-        let held = built.held_releases().expect("releases decode");
-        let definitions: BTreeMap<_, _> = held
-            .retained
-            .last()
-            .expect("the building release")
-            .functions
-            .iter()
-            .map(|held| (held.function, held.definition.clone()))
-            .collect();
-        actual.push_str(&census(&definitions, &exports));
-    }
+    let actual = current_census();
     let expected = include_str!("helper-classes.tsv");
 
     assert!(
@@ -734,4 +716,28 @@ body {
         census(&BTreeMap::from([(id, conditional)]), &BTreeSet::from([id])),
         "helper\toperation\n"
     );
+}
+
+#[cfg(all(feature = "dialect-python", feature = "dialect-typescript"))]
+pub(super) fn current_census() -> String {
+    let mut actual = String::new();
+    let mut dialects: Vec<_> = crate::DIALECTS.iter().collect();
+    dialects.sort_by_key(|built| built.dialect);
+    assert_eq!(dialects.len(), 2, "the census checks both shipped dialects");
+    for built in dialects {
+        let helpers = lash_kernel_doc::ValidatedFunctions::from_tokens(built.helpers)
+            .expect("helpers decode");
+        let exports = helpers.iter().map(|(id, _)| *id).collect();
+        let held = built.held_releases().expect("releases decode");
+        let definitions: BTreeMap<_, _> = held
+            .retained
+            .last()
+            .expect("the building release")
+            .functions
+            .iter()
+            .map(|held| (held.function, held.definition.clone()))
+            .collect();
+        actual.push_str(&census(&definitions, &exports));
+    }
+    actual
 }
