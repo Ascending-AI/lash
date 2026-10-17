@@ -1,6 +1,7 @@
 //! Optional future scheduling and physical queue diagnostics for existing
-//! populations. `LASH_PERF_ASYNC_RECEIPT` selects a sidecar; setting
-//! `LASH_PERF_ASYNC_TIMING=off` runs the same population without these probes.
+//! populations. `LASH_PERF_ASYNC_RECEIPT` selects a command sidecar; setting
+//! `LASH_PERF_ASYNC_TIMING=off` disables probes in those command captures.
+//! Offered load instead embeds required captures for each measured step.
 use std::collections::BTreeMap;
 use std::future::Future;
 use std::path::PathBuf;
@@ -88,22 +89,29 @@ pub struct Receipt {
     pub window_elapsed_ns_sample: u128,
     pub timing_semantics: &'static str,
     pub configured_queue_record_limit: usize,
+    pub configured_queue_site_limit: usize,
     pub configured_operation_kind_limit: usize,
     pub unmonitored_operations_count: u64,
     pub tasks: Vec<TaskReceipt>,
     pub queues: queues::Snapshot,
 }
 
-/// One command's process window. Each child starts its own window and writes
-/// its own sidecar; async task totals do not imply child-thread CPU coverage.
+/// An exclusive diagnostic window in this process. Commands use sidecars;
+/// offered load embeds one capture per measured step. Async task totals do
+/// not imply child-thread CPU coverage.
 pub struct Capture {
     path: PathBuf,
     started: Instant,
+    window: &'static str,
     state: Option<SharedMonitors>,
     queues: Option<queues::Collector>,
 }
 impl Capture {
     pub fn from_env() -> anyhow::Result<Option<Self>> {
+        // Offered load embeds an independent capture per measured step.
+        if std::env::args().any(|arg| arg == "offered-load") {
+            return Ok(None);
+        }
         let Some(path) = std::env::var_os("LASH_PERF_ASYNC_RECEIPT") else {
             return Ok(None);
         };
@@ -141,12 +149,31 @@ impl Capture {
         Ok(Self {
             path,
             started,
+            window: "command invocation in this process, excluding receipt serialization",
             state,
             queues,
         })
     }
 
+    /// Always enabled: offered-load receipts carry their own evidence.
+    pub fn step() -> anyhow::Result<Self> {
+        let mut capture = Self::open(PathBuf::new(), true)?;
+        capture.window = "one offered-load step, after population setup and before shutdown";
+        Ok(capture)
+    }
+
     pub fn finish(self) -> anyhow::Result<()> {
+        let path = self.path.clone();
+        let receipt = self.finish_receipt();
+        std::fs::write(
+            path,
+            format!("{}\n", serde_json::to_string_pretty(&receipt)?),
+        )?;
+        Ok(())
+    }
+
+    /// Close the capture before setup or shutdown can enter its window.
+    pub fn finish_receipt(self) -> Receipt {
         let mut tasks = Vec::new();
         let mut unmonitored = 0;
         if let Some(state) = &self.state {
@@ -160,14 +187,15 @@ impl Capture {
                 .collect();
             unmonitored = state.unmonitored_operations;
         }
-        let receipt = Receipt {
+        Receipt {
             kind: "lash.async-operations",
             enabled: self.state.is_some(),
             process_id: std::process::id(),
-            window: "command invocation in this process, excluding receipt serialization",
+            window: self.window,
             window_elapsed_ns_sample: self.started.elapsed().as_nanos(),
-            timing_semantics: "task durations are per-kind sums over instrumented futures, not CPU; queue durations are physical-operation samples; gate children overlap their parent; worker service excludes measured gate waits; postgres service includes pool checkout and SQL; incomplete records include cancelled waits",
+            timing_semantics: "queue histograms use direct waits at each site, excluding child gate waits; raw worker queue_wait_ns includes child gate waits; queue histogram percentiles are power-of-two upper bounds clamped to max; timestamps are ns since capture opened; occupancy is enqueued work waiting plus in service; task durations are per-kind sums over instrumented futures, not CPU; queue durations are physical-operation samples; gate children overlap their parent; worker service excludes measured gate waits; postgres service includes pool checkout and SQL; incomplete records include cancelled waits",
             configured_queue_record_limit: queues::RECORD_LIMIT,
+            configured_queue_site_limit: queues::SITE_LIMIT + 1, // includes the overflow bin
             configured_operation_kind_limit: KIND_LIMIT,
             unmonitored_operations_count: unmonitored,
             tasks,
@@ -175,12 +203,7 @@ impl Capture {
                 .queues
                 .as_ref()
                 .map_or_else(Default::default, queues::Collector::snapshot),
-        };
-        std::fs::write(
-            &self.path,
-            format!("{}\n", serde_json::to_string_pretty(&receipt)?),
-        )?;
-        Ok(())
+        }
     }
 }
 impl Drop for Capture {

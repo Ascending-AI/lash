@@ -163,13 +163,20 @@ where
         let service = Arc::clone(&service);
         let slots = Arc::clone(&slots);
         tasks.spawn(async move {
+            let mut queue = lash_core::perf_witness::queues::Timer::enqueue("generator.in_flight");
             let Ok(_slot) = slots.acquire_owned().await else {
                 return;
             };
+            if let Some(queue) = &mut queue {
+                queue.start_service();
+            }
             let sent = Instant::now();
             let sent_us = micros(sent - opened);
             records.lock_recover()[ordinal].sent_us = Some(sent_us);
             let result = service(Arrival { ordinal, key }).await;
+            if let Some(queue) = &mut queue {
+                queue.complete();
+            }
             let returned_us = micros(Instant::now() - opened);
             let mut records = records.lock_recover();
             let record = &mut records[ordinal];
@@ -267,6 +274,7 @@ pub struct IntervalReport {
     pub min: f64,
     pub p50: f64,
     pub p90: f64,
+    pub p95: f64,
     pub p99: f64,
     pub p99_9: f64,
     pub max: f64,
@@ -305,6 +313,7 @@ impl IntervalReport {
             min: ms(samples_us[0]),
             p50: ms(nearest_rank(&samples_us, 0.50)),
             p90: ms(nearest_rank(&samples_us, 0.90)),
+            p95: ms(nearest_rank(&samples_us, 0.95)),
             p99: ms(nearest_rank(&samples_us, 0.99)),
             p99_9: ms(nearest_rank(&samples_us, 0.999)),
             max: ms(samples_us[samples_us.len() - 1]),

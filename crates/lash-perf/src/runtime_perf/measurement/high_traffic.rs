@@ -44,6 +44,24 @@ impl HighTrafficPopulation {
         Ok((Self { runtime }, sessions))
     }
 
+    /// Same served core, provider, mix and sessions over one PostgreSQL pool set.
+    pub(crate) async fn open_postgres(
+        postgres: &lash_postgres_store::PostgresStorage,
+        population: usize,
+    ) -> anyhow::Result<(Self, Vec<lash::LashSession>)> {
+        let stores = lash_postgres_store::PostgresStoreSet::new(
+            postgres,
+            Arc::new(lash_core::attachments::UnavailableAttachmentStore),
+        );
+        let mut runtime = crate::runtime_perf::harness::build_runtime_with_stores(
+            Self::SCENARIO,
+            Arc::new(stores),
+        )
+        .await?;
+        let sessions = take_population_sessions(&mut runtime, Self::SCENARIO, population).await?;
+        Ok((Self { runtime }, sessions))
+    }
+
     /// The serving core, for keyed reads beside its own writes.
     pub(crate) fn core(&self) -> lash::LashCore {
         self.runtime.core()

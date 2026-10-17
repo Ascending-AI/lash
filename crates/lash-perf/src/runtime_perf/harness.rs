@@ -1140,9 +1140,6 @@ pub(crate) async fn build_runtime_with_sqlite_store(
     scenario: RuntimePerfScenario,
     root: PathBuf,
 ) -> anyhow::Result<BenchmarkRuntime> {
-    let wiring = scenario.wiring();
-    let mode_id = scenario.execution_mode();
-    let provider = benchmark_provider(scenario).into_handle();
     let stores: Arc<dyn lash_core::StoreSet> = Arc::new(
         lash_sqlite_store::SqliteStoreSet::open(
             root.join("lash.db"),
@@ -1151,6 +1148,17 @@ pub(crate) async fn build_runtime_with_sqlite_store(
         .await
         .map_err(|err| anyhow::anyhow!(err.to_string()))?,
     );
+    build_runtime_with_stores(scenario, stores).await
+}
+
+/// Identical runtime, provider and plugin geometry on either durable store.
+pub(crate) async fn build_runtime_with_stores(
+    scenario: RuntimePerfScenario,
+    stores: Arc<dyn lash_core::StoreSet>,
+) -> anyhow::Result<BenchmarkRuntime> {
+    let wiring = scenario.wiring();
+    let mode_id = scenario.execution_mode();
+    let provider = benchmark_provider(scenario).into_handle();
     let (store_factory, store_metrics): (
         Arc<dyn lash_core::DeploymentStore>,
         Arc<RuntimePerfStoreMetrics>,

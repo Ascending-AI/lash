@@ -14,7 +14,7 @@ use futures_util::future::BoxFuture;
 use lash_sansio::SessionId;
 
 use super::ledger::{Arrival, ServiceMarks};
-use super::{Marks, Population};
+use super::{Backend, Marks, Population};
 use crate::latency::FollowerMode;
 use crate::latency::runner::{
     CaseTopology, LaneSession, PollMarks, STORE_POLL_CEILING, Topology, create_lane_session,
@@ -54,6 +54,8 @@ pub(super) struct Opened {
     owner: Owner,
     targets: Arc<Vec<Target>>,
     mix: Option<HighTrafficMix>,
+    postgres: Option<lash_postgres_store::PostgresStorage>,
+    database: Option<lash_postgres_store::testing::IsolatedDatabase>,
 }
 
 impl Opened {
@@ -62,14 +64,42 @@ impl Opened {
         store_dir: &Path,
         sessions: usize,
         mix: &HighTrafficMix,
+        backend: Backend,
+        postgres_url: Option<&str>,
     ) -> Result<Self> {
         std::fs::create_dir(store_dir)
             .with_context(|| format!("create fresh {}", store_dir.display()))?;
+        let database = match backend {
+            Backend::Sqlite => None,
+            Backend::Postgres => Some(
+                lash_postgres_store::testing::IsolatedDatabase::create(postgres_url.ok_or_else(
+                    || anyhow::anyhow!("--backend postgres requires --postgres-url"),
+                )?)
+                .await,
+            ),
+        };
+        let postgres = if let Some(database) = &database {
+            let endpoints = lash_postgres_store::PostgresEndpoints::from_url(database.url())?;
+            let storage = lash_postgres_store::PostgresStorage::connect(
+                &endpoints,
+                &Default::default(),
+                Default::default(),
+            )
+            .await?;
+            crate::perf_support::require_durable_postgres(storage.pool()).await?;
+            Some(storage)
+        } else {
+            None
+        };
         let mut targets = Vec::with_capacity(sessions);
         match population {
             Population::HighTraffic => {
-                let (population, live) =
-                    HighTrafficPopulation::open(store_dir.to_path_buf(), sessions).await?;
+                let (population, live) = match &postgres {
+                    Some(postgres) => {
+                        HighTrafficPopulation::open_postgres(postgres, sessions).await?
+                    }
+                    None => HighTrafficPopulation::open(store_dir.to_path_buf(), sessions).await?,
+                };
                 // The poller reads through the serving core's own store.
                 let observer = population.core();
                 for session in live {
@@ -84,6 +114,8 @@ impl Opened {
                     owner: Owner::HighTraffic(Box::new(population)),
                     targets: Arc::new(targets),
                     mix: Some(mix.clone()),
+                    postgres,
+                    database,
                 })
             }
             Population::CrossWorker => {
@@ -103,6 +135,8 @@ impl Opened {
                     owner: Owner::CrossWorker(Box::new(topology)),
                     targets: Arc::new(targets),
                     mix: None,
+                    postgres,
+                    database,
                 })
             }
         }
@@ -127,7 +161,11 @@ impl Opened {
                     ),
                     None => format!("offered-load {}", arrival.key),
                 };
-                send_and_follow(target, text).await
+                crate::perf_support::async_operations::observe(
+                    "offered-load.send",
+                    send_and_follow(target, text),
+                )
+                .await
             })
         }
     }
@@ -140,10 +178,16 @@ impl Opened {
                 let _ = tokio::time::timeout(CLOSE_TIMEOUT, target.session.close()).await;
             }
         }
-        match self.owner {
+        let result = match self.owner {
             Owner::HighTraffic(population) => population.close().await,
             Owner::CrossWorker(topology) => topology.shutdown().await,
+        };
+        if let Some(postgres) = self.postgres {
+            postgres.pool().close().await;
+            drop(postgres);
         }
+        drop(self.database);
+        result
     }
 }
 

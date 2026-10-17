@@ -58,7 +58,14 @@ pub(crate) async fn checkout(
         round_trip();
     }
     let started = Instant::now();
+    #[cfg(feature = "perf-witness")]
+    let mut timing =
+        lash_core_execution::perf_witness::queues::Timer::enqueue("postgres.pool_checkout");
     let connection = pool.acquire().await;
+    #[cfg(feature = "perf-witness")]
+    if let Some(timing) = &mut timing {
+        timing.complete();
+    }
     acquired(started.elapsed());
     connection
 }
@@ -166,6 +173,8 @@ struct Statement {
     sql: String,
     started: Instant,
     locking: bool,
+    #[cfg(feature = "perf-witness")]
+    timing: Option<lash_core_execution::perf_witness::queues::Timer>,
 }
 
 impl Statement {
@@ -174,7 +183,11 @@ impl Statement {
         round_trip();
         let state = CURRENT.try_with(Arc::clone).ok();
         let window = sql::Window::current();
-        if state.is_none() && window.is_none() {
+        #[cfg(feature = "perf-witness")]
+        let recording = lash_core_execution::perf_witness::queues::is_recording();
+        #[cfg(not(feature = "perf-witness"))]
+        let recording = false;
+        if state.is_none() && window.is_none() && !recording {
             return None;
         }
         if let Some(window) = &window {
@@ -211,7 +224,24 @@ impl Statement {
             sql: text,
             started: Instant::now(),
             locking,
+            #[cfg(feature = "perf-witness")]
+            timing: if locking {
+                // Complete SQL elapsed time is an upper bound on lock wait,
+                // never an exact server wait; checkout is measured separately.
+                lash_core_execution::perf_witness::queues::Timer::enqueue(
+                    "postgres.lock_statement_upper_bound",
+                )
+            } else {
+                None
+            },
         })
+    }
+
+    fn finish(&mut self) {
+        #[cfg(feature = "perf-witness")]
+        if let Some(timing) = &mut self.timing {
+            timing.complete();
+        }
     }
 
     fn row(&self, row: &PgRow) {
@@ -248,8 +278,12 @@ impl Drop for Statement {
 }
 
 pub(crate) async fn control<T>(sql: &str, future: impl Future<Output = T>) -> T {
-    let _statement = Statement::new(sql);
-    future.await
+    let mut statement = Statement::new(sql);
+    let result = future.await;
+    if let Some(statement) = &mut statement {
+        statement.finish();
+    }
+    result
 }
 
 #[derive(Debug)]
@@ -272,18 +306,19 @@ impl<'c, E: Executor<'c, Database = Postgres>> Executor<'c> for Observed<E> {
     {
         let statement = Statement::new(query.sql());
         let stream = self.0.fetch_many(query);
-        let Some(statement) = statement else {
+        let Some(mut statement) = statement else {
             return stream;
         };
         Box::pin(stream.map(move |result| {
             match &result {
                 Ok(Either::Right(row)) => statement.row(row),
                 Ok(Either::Left(done)) => {
+                    statement.finish();
                     if let Some(window) = &statement.window {
                         window.payload(&statement.sql, done.rows_affected(), 0, 0);
                     }
                 }
-                _ => {}
+                Err(_) => statement.finish(),
             }
             result
         }))
@@ -298,10 +333,13 @@ impl<'c, E: Executor<'c, Database = Postgres>> Executor<'c> for Observed<E> {
         Q: 'q + Execute<'q, Postgres>,
     {
         if sql::Window::current().is_none() {
-            let statement = Statement::new(query.sql());
+            let mut statement = Statement::new(query.sql());
             let future = self.0.fetch_optional(query);
             return Box::pin(async move {
                 let result = future.await;
+                if let Some(statement) = &mut statement {
+                    statement.finish();
+                }
                 if let (Some(statement), Ok(Some(row))) = (&statement, &result) {
                     statement.row(row);
                 }
@@ -351,6 +389,62 @@ impl<'c, E: Executor<'c, Database = Postgres>> Executor<'c> for Observed<E> {
 #[cfg(test)]
 mod tests {
     use super::*;
+    /// PG-QUEUE-SEPARATION: checkout backlog and lock-containing SQL retain
+    /// distinct physical populations, including work beyond the raw cap.
+    #[cfg(feature = "perf-witness")]
+    #[tokio::test]
+    async fn checkout_and_lock_statement_windows_are_separate() {
+        use lash_core_execution::perf_witness::queues::Collector;
+        use std::future::Future;
+        let database =
+            crate::testing::IsolatedDatabase::create(&crate::testing::required_database_url())
+                .await;
+        let pool = sqlx::postgres::PgPoolOptions::new()
+            .max_connections(1)
+            .connect(database.url())
+            .await
+            .expect("one-connection pool");
+        let held = pool.acquire().await.expect("hold pool");
+        let collector = Collector::install().expect("capture");
+        let mut waiting = Box::pin(checkout(&pool));
+        std::future::poll_fn(|cx| {
+            assert!(waiting.as_mut().poll(cx).is_pending());
+            std::task::Poll::Ready(())
+        })
+        .await;
+        assert_eq!(
+            collector.snapshot().sites["postgres.pool_checkout"].waiting,
+            1
+        );
+        drop(held);
+        let mut connection = waiting.await.expect("checkout");
+        control("SELECT pg_advisory_xact_lock(1)", async {
+            sqlx::query("SELECT pg_advisory_xact_lock(1)")
+                .execute(&mut *connection)
+                .await
+                .expect("lock")
+        })
+        .await;
+        let receipt = collector.snapshot();
+        let checkout = &receipt.sites["postgres.pool_checkout"];
+        let lock = &receipt.sites["postgres.lock_statement_upper_bound"];
+        assert_eq!(
+            (
+                checkout.enqueued,
+                checkout.finished,
+                checkout.completed,
+                checkout.waiting
+            ),
+            (1, 1, 1, 0)
+        );
+        assert_eq!((lock.enqueued, lock.finished, lock.completed), (1, 1, 1));
+        assert_eq!((checkout.service.max, lock.service.max), (0, 0));
+        assert!(checkout.last_finished_ns <= lock.first_enqueued_ns);
+        drop(collector);
+        drop(connection);
+        pool.close().await;
+    }
+
     /// SQL-WORK: one known operation has exactly one call and one shape;
     /// returned rows count stream rows, and server work remains unknown.
     #[tokio::test]
