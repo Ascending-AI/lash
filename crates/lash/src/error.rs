@@ -273,10 +273,10 @@ impl From<SendError> for EmbedError {
 impl EmbedError {
     /// The exhausted host resource, through runtime, plugin, session or
     /// source-service errors. Unrelated errors return `None`.
-    /// [`HostResource::is_retryable`](crate::HostResource::is_retryable)
+    /// [`HostResource::is_retryable`](crate::runtime::HostResource::is_retryable)
     /// describes whether the engine can redrive when capacity is available.
     #[must_use]
-    pub fn host_resource_exhausted(&self) -> Option<crate::HostResource> {
+    pub fn host_resource_exhausted(&self) -> Option<crate::runtime::HostResource> {
         use lash_core::facade_support::PluginOperationInvokeError;
 
         match self {
@@ -736,9 +736,9 @@ mod tests {
     #[cfg(feature = "codemode")]
     #[test]
     fn host_resource_exhaustion_survives_embed_wrappers() {
+        use crate::runtime::HostResource;
         use crate::vm::{
-            HeapFault, HostResource, InfrastructureOutcome, PageRefusal, PoolError,
-            SourceServiceError,
+            HeapFault, InfrastructureOutcome, PageRefusal, PoolError, SourceServiceError,
         };
         use lash_core::facade_support::PluginOperationInvokeError;
 

@@ -4,6 +4,7 @@ use crate::support::{
     Arc, LlmCallRecord, LlmUsage, ToolCallRecord, TurnActivity, TurnActivitySink,
     TurnExecutionMetrics, TurnOutcome, async_trait,
 };
+use crate::transcript::CommittedTurnWithToolCalls;
 
 pub use lash_core::facade_support::{TurnIssue, TurnIssueSeverity};
 /// Typed turn-failure vocabulary carried on [`TurnIssue`] and on session error
@@ -19,8 +20,6 @@ pub struct TurnToolCallRef {
     pub turn_id: TurnId,
     pub call_id: crate::ToolCallId,
 }
-
-pub use lash_core::transcript::CommittedTurnWithToolCalls;
 
 /// A committed-turn page that opted into decoding each returned turn's calls.
 #[derive(Clone, Debug, PartialEq, serde::Serialize, serde::Deserialize)]

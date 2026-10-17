@@ -459,6 +459,19 @@ fn settled_outcome_status_is_public(outcome: &lash::TurnOutcome) -> lash::TurnSt
     lash::TurnStatus::of_outcome(outcome)
 }
 
+fn host_resource_exhaustion_is_public(
+    error: &lash::EmbedError,
+    runtime_error: &lash::runtime::RuntimeError,
+) -> (
+    Option<lash::runtime::HostResource>,
+    Option<lash::runtime::HostResource>,
+) {
+    (
+        error.host_resource_exhausted(),
+        runtime_error.host_resource(),
+    )
+}
+
 #[cfg(feature = "openai")]
 fn attachment_provider_kinds_are_nameable() {
     let _acceptor = lash::provider::AttachmentAcceptor {

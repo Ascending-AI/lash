@@ -102,8 +102,6 @@ mod data_retention;
 pub use change_page::ChangePage;
 pub use lash_core::facade_support::RuntimeDataLimits;
 pub use lash_core_store::plugin_state::NameByteLimit;
-/// An exhausted host resource and whether its execution can be redriven.
-pub use lash_core_store::runtime_error::HostResource;
 /// The durable substrate's backend builder (ADR 0132 §1).
 pub mod durable;
 mod durable_session;
@@ -312,9 +310,9 @@ pub use lash_core::{
     RegisteredLlmProfile, RegistrationError, Resolution, ResolveOutcome, RuntimeOwner,
     SessionCreateRequest, SessionEntry, SessionError, SessionId, SessionListFilter,
     SessionRelationKind, SessionStartPoint, SessionView, ToolCallLimitExceeded, ToolCallLimitScope,
-    ToolIntentActivityOutcome, ToolIntentRealizedRef, TurnActivity, TurnActivityId, TurnBudget,
-    TurnEvent, TurnFailureEvidence, TurnFailurePartialOutput, TurnFailureSettlement, TurnId,
-    TurnInput, TurnInputApplication, UnstatedSessionConfig, facade_support::GenerationOverlay,
+    TurnActivity, TurnActivityId, TurnBudget, TurnEvent, TurnFailureEvidence,
+    TurnFailurePartialOutput, TurnFailureSettlement, TurnId, TurnInput, TurnInputApplication,
+    UnstatedSessionConfig, facade_support::GenerationOverlay,
     facade_support::OperationCancelOutcome, facade_support::PluginStack,
     facade_support::PluginStage, facade_support::QueueWithdrawalPublisher,
     facade_support::SessionCommand, facade_support::SessionCommandReceipt,
@@ -412,10 +410,9 @@ pub mod prelude {
         SendHandle, SendOutcome, SessionBuilder, SessionCommand, SessionCommandAdmin,
         SessionCommandReceipt, SessionCreateRequest, SessionCreation, SessionDeletion,
         SessionEntry, SessionListFilter, SessionParkRefused, SessionRelationKind, SessionSpec,
-        SessionStartPoint, SessionView, ToolIntentActivityOutcome, ToolIntentRealizedRef,
-        TurnActivity, TurnActivityFanout, TurnActivityId, TurnActivitySink, TurnBudget, TurnEvent,
-        TurnExecutionMetrics, TurnFinish, TurnInput, TurnInputAcceptanceReceipt, TurnOutcome,
-        TurnOutput, TurnReport, TurnStatus, TurnStop,
+        SessionStartPoint, SessionView, TurnActivity, TurnActivityFanout, TurnActivityId,
+        TurnActivitySink, TurnBudget, TurnEvent, TurnExecutionMetrics, TurnFinish, TurnInput,
+        TurnInputAcceptanceReceipt, TurnOutcome, TurnOutput, TurnReport, TurnStatus, TurnStop,
     };
 }
 
@@ -1276,7 +1273,9 @@ pub mod runtime {
 
     pub use lash_core::ServedOnly;
     pub use lash_core::{ConfigResolution, ConfigResolutionDecision};
-    pub use lash_core_store::runtime_error::{EffectErrorJournalPolicy, HostResource};
+    pub use lash_core_store::runtime_error::EffectErrorJournalPolicy;
+    /// An exhausted host resource and whether its execution can be redriven.
+    pub use lash_core_store::runtime_error::HostResource;
     pub use lash_core_store::turn_input_vocabulary::RunDefinitions;
     pub use lash_sansio::sansio::{
         ExecutionEnvironmentSync, ExecutionEnvironmentSyncFailure,
@@ -1571,11 +1570,11 @@ pub use lash_core::{RetainedRevision, Retention, Target};
 /// The typed, decoded committed history of a session (ADR 0129): facts a
 /// host renders however it likes.
 pub mod transcript {
-    pub use crate::turn::{CommittedTurnWithToolCalls, CommittedTurnsWithToolCallsPage};
+    pub use crate::turn::CommittedTurnsWithToolCallsPage;
     pub use lash_core::transcript::{
-        CommittedTurn, CommittedTurnsPage, EntryId, EntryProvenance, SessionTranscript,
-        SuppressionReason, ToolResultBlock, TranscriptBlock, TranscriptDecoders, TranscriptEntry,
-        TranscriptItem, TranscriptMessage, TranscriptRole,
+        CommittedTurn, CommittedTurnWithToolCalls, CommittedTurnsPage, EntryId, EntryProvenance,
+        SessionTranscript, SuppressionReason, ToolResultBlock, TranscriptBlock, TranscriptDecoders,
+        TranscriptEntry, TranscriptItem, TranscriptMessage, TranscriptRole,
     };
     /// One executed code cell: the record its protocol committed, which a
     /// [`TranscriptItem::Cell`] returns, a code executor's response reports
