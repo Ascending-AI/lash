@@ -50,6 +50,7 @@ pub struct PagedHeap {
     pub(super) census: Option<Box<dyn AllocationCensus>>,
     /// The execution roots, installed only through publication.
     pub(super) session: Tree<BindingRecord>,
+    pub(super) session_slots: super::session::SessionSlots,
     pub(super) tasks: Tree<super::directory::execution::TaskRecord>,
     pub(super) joins: Tree<ListJoinRecord>,
     /// What the machine holds outside these trees.
@@ -133,6 +134,7 @@ impl PagedHeap {
             family_base: RefCell::new(None),
             census: None,
             session: Tree::new(false),
+            session_slots: Default::default(),
             tasks: Tree::new(false),
             joins: Tree::new(false),
             holdings: super::publication::Holdings::default(),
@@ -609,6 +611,7 @@ impl SemanticHeap for PagedHeap {
             family_base: RefCell::new(None),
             census: None,
             session: Tree::new(false),
+            session_slots: Default::default(),
             tasks: Tree::new(false),
             joins: Tree::new(false),
             holdings: super::publication::Holdings::default(),
@@ -636,6 +639,7 @@ impl SemanticHeap for PagedHeap {
             family_base: RefCell::new(None),
             census: None,
             session: Tree::new(false),
+            session_slots: Default::default(),
             tasks: Tree::new(false),
             joins: Tree::new(false),
             holdings: super::publication::Holdings::default(),

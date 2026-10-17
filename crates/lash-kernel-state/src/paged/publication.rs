@@ -133,6 +133,7 @@ impl PagedHeap {
     /// charged.
     pub fn restore_execution_roots(&mut self, root: &CheckpointRoot) {
         self.session = Tree::of_keyed(&root.session);
+        self.session_slots = Default::default();
         self.tasks = Tree::of_keyed(&root.tasks);
         self.joins = Tree::of_keyed(&root.joins);
     }
@@ -164,6 +165,7 @@ impl PagedHeap {
     ///
     /// The faults of the pages.
     pub fn seal_session_root(&mut self, work: &mut SealWork) -> Result<bool, HeapFault> {
+        self.project_session()?;
         self.session.seal(&self.access, work)
     }
     /// The execution state moved past the roots last installed with
@@ -481,30 +483,12 @@ impl PagedHeap {
         &mut self,
         bindings: Tree<BindingRecord>,
     ) -> Result<(), HeapWriteError> {
+        self.project_session()?;
         let before = self.session.cost();
         let old_tasks = self.session.read_task_edges(&self.access)?;
         self.replace_execution_root(before, old_tasks, bindings, |heap, root| {
             heap.session = root
         })
-    }
-    /// Prepares a replacement only after looking up the binding. Returning
-    /// `None` leaves a missing assignment untouched. The proposed tree is
-    /// moved into the accounting installation without another root clone.
-    pub fn write_session_binding(
-        &mut self,
-        key: &[u8],
-        write: impl FnOnce(
-            &mut Self,
-            Option<&BindingRecord>,
-        ) -> Result<Option<BindingRecord>, HeapWriteError>,
-    ) -> Result<bool, HeapWriteError> {
-        let mut bindings = self.session.clone();
-        let access = self.access.clone();
-        if !bindings.write_with(key, &access, |previous| write(self, previous))? {
-            return Ok(false);
-        }
-        self.set_session_root(bindings)?;
-        Ok(true)
     }
     /// Installs execution and statement roots together. `pinned_bytes`
     /// prices immediate pins omitted from `pinned`: it remains a holding
@@ -639,7 +623,7 @@ impl PagedHeap {
             install(heap, root)
         })
     }
-    fn replace_holding(
+    pub(super) fn replace_holding(
         &mut self,
         before: u64,
         after: u64,

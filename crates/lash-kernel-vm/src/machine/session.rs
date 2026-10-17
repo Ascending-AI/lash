@@ -306,8 +306,11 @@ impl KernelMachine {
         .map_err(|error| self.heap_halt(error))
     }
 
-    pub(super) fn session_get(&self, name: &BindingName) -> Result<Option<Value>, HeapFault> {
-        self.heap.session_binding_at(&name.key)
+    pub(super) fn session_get(&mut self, name: &BindingName) -> Result<Option<Value>, Halt> {
+        self.heap_write(|heap| {
+            heap.load_session_binding_at(&name.key)
+                .map_err(super::write_halt)
+        })
     }
     pub(super) fn session_write(
         &mut self,
@@ -356,6 +359,13 @@ impl KernelMachine {
         // The host's bindings are the host's: what the cell made of its
         // copy is not the session's.
         if !self.host.is_empty() {
+            self.heap
+                .seal_session_root(&mut lash_kernel_state::paged::tree::SealWork::new(
+                    lash_kernel_state::paged::SealBudget {
+                        pages: u64::MAX,
+                        bytes: u64::MAX,
+                    },
+                ))?;
             let mut bindings = self.heap.session_root().clone();
             for name in std::mem::take(&mut self.host) {
                 bindings.remove(

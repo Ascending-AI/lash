@@ -29,7 +29,7 @@ impl CensusGraph for PagedHeap {
             HeapFault::Malformed("retained task results exceed the task root cost".into())
         })?;
         Ok(LogicalBytes(
-            checked_sum([self.session.cost(), tasks, self.joins.cost()].into_iter())?
+            checked_sum([self.session_cost(), tasks, self.joins.cost()].into_iter())?
                 .checked_sub(self.holdings.prepaid)
                 .ok_or_else(|| {
                     HeapFault::Malformed("register credit exceeds persistent frame holdings".into())
@@ -57,7 +57,7 @@ impl CensusGraph for PagedHeap {
                     BoundRecord::Shared(id) => visit(&Value::Ref(Identity::Object(*id))),
                 }
             };
-        visit_tree(&self.session, &self.access, &mut |b| binding(b, visit))?;
+        self.visit_session_bindings(&mut |b| binding(b, visit))?;
         visit_tree(&self.joins, &self.access, &mut |join| {
             visit_tree(&join.members, &self.access, &mut |member| {
                 visit(&Value::Task(*member))

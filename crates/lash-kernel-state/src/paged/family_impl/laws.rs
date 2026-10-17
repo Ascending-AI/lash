@@ -490,3 +490,130 @@ fn an_issued_intent_projects_identical_data_without_allocating_entities() {
     let frozen = heap.freeze_datum(&datum).expect("freeze request");
     assert_eq!(heap.frozen_datum(&frozen).expect("report request"), datum);
 }
+
+/// §D incremental binding work: execution edits slots, and only a
+/// projection writes the session tree. Repeated reads and writes stay hot.
+#[test]
+fn session_slots_project_only_their_final_values() {
+    let (mut heap, pages) = fresh();
+    let name = Name::new("counter");
+    let key = crate::paged::metadata::metadata_key(&name);
+    let initial = heap.session_root().version();
+    for value in 0..100 {
+        let record = record(&heap, &name, int(value));
+        heap.write_session_binding(&key, |_, _| Ok(Some(record)))
+            .unwrap();
+        assert!(
+            heap.equal(&heap.session_binding(&name).unwrap().unwrap(), &int(value))
+                .unwrap()
+        );
+    }
+    assert!(
+        initial.matches(heap.session_root()),
+        "execution must not edit the projected tree"
+    );
+    assert_eq!(pages.borrow().seals, 0, "no pages before projection");
+    heap.seal_session_root(&mut crate::paged::tree::SealWork::new(SealBudget {
+        pages: u64::MAX,
+        bytes: u64::MAX,
+    }))
+    .unwrap();
+    let projected = heap
+        .session_root()
+        .get(&key, heap.pages())
+        .unwrap()
+        .unwrap();
+    let BoundRecord::Value(value) = projected.value else {
+        panic!("value binding")
+    };
+    assert!(heap.equal(&value, &int(99)).unwrap());
+    assert_eq!(heap.session_root().len(), 1);
+}
+
+/// §D incremental carry: even a million untouched names remain cold.
+#[test]
+fn a_no_op_carry_over_a_million_names_reads_no_pages() {
+    let (mut heap, pages) = fresh();
+    let root = bindings(
+        &mut heap,
+        (0..1_000_000).map(|i| binding(&format!("name{i:07}"), int(i))),
+    );
+    let session = heap
+        .carry(CarryRoots {
+            bindings: root,
+            functions: empty(),
+        })
+        .unwrap();
+    let mut cold = PagedHeap::open_header(
+        session.heap,
+        Box::new(Source(Rc::clone(&pages))),
+        EditEpoch(2),
+    )
+    .unwrap();
+    cold.set_census(Box::new(LawCensus(cold.certificate())))
+        .unwrap();
+    cold.adopt(&session).unwrap();
+    let before = pages.borrow().reads;
+    let carried = cold
+        .carry(CarryRoots {
+            bindings: session.bindings,
+            functions: session.functions,
+        })
+        .unwrap();
+    assert_eq!(pages.borrow().reads, before);
+    assert_eq!(carried, session);
+    assert_eq!(carried.bindings.len(), 1_000_000);
+}
+
+/// K-SES-003 / K-MACH-008: the census sees current slot values, including
+/// replacements, before any session tree has been projected.
+#[test]
+fn session_slot_roots_and_task_edges_follow_replacements() {
+    let (mut heap, _) = fresh();
+    let name = Name::new("live");
+    let key = crate::paged::metadata::metadata_key(&name);
+    let id = heap
+        .allocate_object(ObjectInit::List(vec![int(7)]))
+        .unwrap();
+    let value = record(&heap, &name, Value::List(id));
+    heap.write_session_binding(&key, |_, _| Ok(Some(value)))
+        .unwrap();
+    heap.collect().unwrap();
+    assert_eq!(heap.kind(id).unwrap(), Some(ObjectKind::List));
+    assert!(heap.session_root().is_empty());
+    let value = record(&heap, &name, Value::Task(lash_kernel_doc::TaskId::MAIN));
+    heap.write_session_binding(&key, |_, _| Ok(Some(value)))
+        .unwrap();
+    assert_eq!(heap.data_only_certificate().task_edges, 1);
+    let site = SiteRef::new(
+        &lash_kernel_doc::Site::new(lash_kernel_doc::Unit::Main, [0]),
+        heap.pages(),
+    )
+    .unwrap();
+    let closure = heap
+        .allocate_object(ObjectInit::Closure {
+            site,
+            captures: Vec::new(),
+        })
+        .unwrap();
+    let value = record(&heap, &name, Value::Closure(closure));
+    heap.write_session_binding(&key, |_, _| Ok(Some(value)))
+        .unwrap();
+    assert_eq!(heap.data_only_certificate().task_edges, 0);
+    heap.collect().unwrap();
+    assert_eq!(heap.kind(id).unwrap(), None);
+    assert_eq!(heap.kind(closure).unwrap(), Some(ObjectKind::Closure));
+    let value = record(&heap, &name, int(9));
+    heap.write_session_binding(&key, |_, _| Ok(Some(value)))
+        .unwrap();
+    heap.collect().unwrap();
+    assert_eq!(heap.data_only_certificate().closure_entities, 0);
+    heap.seal_session_root(&mut crate::paged::tree::SealWork::new(SealBudget {
+        pages: u64::MAX,
+        bytes: u64::MAX,
+    }))
+    .unwrap();
+    assert_eq!(heap.certificate().upper.0, heap.session_root().cost());
+    let root = heap.session_root().keyed_root().unwrap();
+    assert!(heap.classify_carry(&root).unwrap().dropped.is_empty());
+}

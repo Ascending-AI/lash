@@ -1064,32 +1064,6 @@ impl PagedHeap {
     }
 }
 
-impl PagedHeap {
-    /// The value the session binds `name` to, if it binds it.
-    ///
-    /// # Errors
-    ///
-    /// The heap's faults.
-    pub fn session_binding(
-        &self,
-        name: &lash_kernel_doc::Name,
-    ) -> Result<Option<Value>, HeapFault> {
-        self.session_binding_at(&super::metadata::metadata_key(name))
-    }
-    /// Reads a session binding by its prepared canonical metadata key.
-    pub fn session_binding_at(&self, key: &[u8]) -> Result<Option<Value>, HeapFault> {
-        self.session
-            .get_with(key, &self.access, |binding| {
-                binding.map(|b| b.value.clone())
-            })?
-            .map(|binding| match binding {
-                BoundRecord::Value(value) => Ok(value),
-                BoundRecord::Shared(id) => self.variable_get(id),
-            })
-            .transpose()
-    }
-}
-
 pub(super) fn tuple_tree(tuple: &TupleRef, page: PageRef) -> Tree<Value> {
     let tree = Tree::<Value>::open(Some(page), tuple.summary.len, tuple.summary.cost, true)
         .with_task_edges(tuple.summary.task_edges);
