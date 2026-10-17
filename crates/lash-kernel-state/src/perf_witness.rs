@@ -18,6 +18,11 @@ pub struct Work {
     pub trace_bitmap_peak_bytes: u64,
     pub trace_work_list_peak_bytes: u64,
     pub trace_budget_peak_bytes: u64,
+    /// Arena objects a projection examined: walked to assign ids, or
+    /// written back (seam D, invariant 4).
+    pub projection_visits: u64,
+    /// Arena objects a collection marked.
+    pub arena_marks: u64,
 }
 
 thread_local! {

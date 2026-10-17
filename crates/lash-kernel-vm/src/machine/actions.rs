@@ -27,7 +27,7 @@ use lash_kernel_doc::graph_tokens::{decode_body, encode_body};
 use lash_kernel_doc::heap::ErrorRef;
 use lash_kernel_state::kernel_internals::directory::ordinal_key;
 use lash_kernel_state::kernel_internals::tree::{Access, Cell, Tree};
-use lash_kernel_state::paged::{PhaseRecord, RoleRecord, WaitKindRecord, WaitPhase, WaitRecord};
+use lash_kernel_state::paged::{PhaseRecord, WaitKindRecord, WaitPhase, WaitRecord};
 
 /// What a call or a `spawn` runs, once its callee is read.
 pub(super) enum Target {
@@ -524,10 +524,9 @@ impl KernelMachine {
         // value is until the frames are next published: a refinement while
         // the frame stands here counts it once, as the frame's.
         for (site, reg) in &entry.roles {
-            let held = self.take(reg.0 as usize);
-            let value = self.page_form(&held)?;
-            self.reserve_growth(self.cost_of(&held))?;
-            roles.push(RoleRecord {
+            let value = self.take(reg.0 as usize);
+            self.reserve_growth(self.cost_of(&value))?;
+            roles.push(super::frames::Role {
                 site: site.path[depth..].to_vec(),
                 value,
             });

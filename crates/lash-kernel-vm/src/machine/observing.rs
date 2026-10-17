@@ -123,7 +123,7 @@ impl KernelMachine {
             self.exe.code_count(),
             self.exe.lib_count(),
             self.charged,
-            self.heap.next_ordinal(),
+            self.arena.borrow().allocations(),
         );
         self.observer_mut().work = Some(counting);
     }
@@ -136,7 +136,7 @@ impl KernelMachine {
             counting,
             &GuestSymbols::of(&self.exe),
             self.charged,
-            self.heap.next_ordinal(),
+            self.arena.borrow().allocations(),
         ))
     }
 
@@ -195,7 +195,7 @@ impl KernelMachine {
                     path.push(task, || identity.resolve(access), site);
                 }
             }
-            observer.on(event, self.charged, self.heap.next_ordinal());
+            observer.on(event, self.charged, self.arena.borrow().allocations());
         }
     }
 
@@ -289,7 +289,7 @@ impl KernelMachine {
         };
         let frames = self.tasks.cached_frames(task);
         if let Some(work) = &mut observer.work {
-            work.flush(self.charged, self.heap.next_ordinal());
+            work.flush(self.charged, self.arena.borrow().allocations());
             work.step(
                 task.0 as usize,
                 frames.as_ref().map(|(len, known)| {

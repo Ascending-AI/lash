@@ -222,6 +222,12 @@ fn compare(dialect: &str, shard: Option<usize>) {
             case.id
         );
         assert_eq!(
+            crate::projection::ids(&warm.states),
+            crate::projection::ids(&reference.states),
+            "{} native ids",
+            case.id
+        );
+        assert_eq!(
             warm.terminal, reference.terminal,
             "{} native carry",
             case.id
@@ -246,6 +252,12 @@ fn compare(dialect: &str, shard: Option<usize>) {
         assert_eq!(
             cold.states, reference.states,
             "{} fallback checkpoints",
+            case.id
+        );
+        assert_eq!(
+            crate::projection::ids(&cold.states),
+            crate::projection::ids(&reference.states),
+            "{} fallback ids",
             case.id
         );
         assert_eq!(

@@ -35,7 +35,7 @@ use std::sync::Arc;
 
 use lash_kernel_doc::arena::ArenaHandle;
 use lash_kernel_doc::heap::PageValue;
-use lash_kernel_doc::{Datum, DocumentId, EntityId, Name, TaskId, Value};
+use lash_kernel_doc::{Datum, DocumentId, Name, TaskId, Value};
 
 use crate::compile::Layout;
 use crate::compile::{BlockId, CodeId, Executable, LibId, StmtId};
@@ -387,7 +387,9 @@ pub struct KernelMachine {
     session_cell: bool,
     /// What the statement being run holds outside any variable.
     pins: Pins,
-    fresh: Vec<EntityId>,
+    /// A seal ran out of budget mid-projection: the run refuses to run
+    /// until a seal completes it (seam G).
+    projecting: bool,
     charging: bool,
     scalar_blocks: bool,
     /// How many generated plans are running: each holds its call's depth
@@ -614,15 +616,16 @@ impl KernelMachine {
     fn publish(&mut self, coordinates: bool) -> Result<(), Halt> {
         #[cfg(any(test, feature = "perf-witness"))]
         crate::perf_witness::publish();
+        self.identify(coordinates)?;
         self.flush_arena()?;
         self.reconcile_sweep()?;
         let pages = self.heap.pages().clone();
         let (registers, pinned, borrowed) = {
-            let arena = self.arena.borrow();
-            let projected = |values: &[Value]| {
+            let mut arena = self.arena.borrow_mut();
+            let mut projected = |values: &[Value]| {
                 values
                     .iter()
-                    .map(|value| project::project(&arena, &pages, value))
+                    .map(|value| project::project(&mut arena, &pages, value))
                     .collect::<Result<Vec<PageValue>, HeapFault>>()
             };
             (
@@ -640,7 +643,6 @@ impl KernelMachine {
                     pinned: &pinned,
                     pinned_bytes: self.pins.bytes,
                     borrowed: &borrowed,
-                    fresh: &self.fresh,
                 },
                 || {
                     if coordinates {
@@ -655,6 +657,41 @@ impl KernelMachine {
                 other => write_halt(other),
             })?;
         self.reconcile_sweep()
+    }
+
+    /// Gives the new objects the projection is about to save their
+    /// durable ids, in the canonical walk's order (seam C): from the
+    /// frames it writes, task by task, then from every changed object
+    /// with an id, in id order. Between statements nothing else holds a
+    /// value; an exact refinement mid-statement walks the statement's
+    /// registers and pins last.
+    fn identify(&mut self, coordinates: bool) -> Result<(), Halt> {
+        let mut roots = Vec::new();
+        self.tasks.walk_roots(coordinates, &mut roots);
+        let mut arena = self.arena.borrow_mut();
+        let walked = arena.walk(&roots).and_then(|()| arena.walk_dirty());
+        let transient: Vec<ArenaHandle> = self
+            .regs
+            .projection()
+            .iter()
+            .chain(&self.pins.values)
+            .chain(&self.pins.borrowed)
+            .filter_map(Value::handle)
+            .collect();
+        walked
+            .and_then(|()| arena.walk(&transient))
+            .map_err(|error| fault(&error.to_string()))
+    }
+
+    /// Gives what `values` reach their durable ids, as a projection point
+    /// would, before a copy-out reads them through the heap.
+    pub(super) fn identify_values(&mut self, values: &[Value]) -> Result<(), Halt> {
+        let roots: Vec<ArenaHandle> = values.iter().filter_map(Value::handle).collect();
+        let mut arena = self.arena.borrow_mut();
+        arena
+            .walk(&roots)
+            .and_then(|()| arena.walk_dirty())
+            .map_err(|error| fault(&error.to_string()))
     }
 
     /// Writes every object the arena changed to the heap: what a
@@ -692,9 +729,9 @@ impl KernelMachine {
         project::admit(&mut self.arena.borrow_mut(), self.heap.pages(), page).map_err(Halt::from)
     }
 
-    /// The page form of `value`.
+    /// The page form of `value`: an object without an id takes one now.
     pub(super) fn page_form(&self, value: &Value) -> Result<PageValue, Halt> {
-        project::project(&self.arena.borrow(), self.heap.pages(), value).map_err(Halt::from)
+        project::project(&mut self.arena.borrow_mut(), self.heap.pages(), value).map_err(Halt::from)
     }
 
     /// Decodes the cold object `handle` from the heap or its pages.
@@ -721,6 +758,7 @@ impl KernelMachine {
     /// back on its pages.
     #[cfg(test)]
     pub(super) fn chill_args(&mut self, args: &[Value]) -> Result<(), Halt> {
+        self.identify_values(args)?;
         self.flush_arena()?;
         let mut pending = Vec::new();
         for value in args {
@@ -783,16 +821,30 @@ impl KernelMachine {
         crate::data::copy_out(&self.arena.borrow(), self.limits.value_depth(), value)
     }
 
-    /// Releases the arena objects nothing the run holds reaches, once
-    /// enough have accumulated: at a statement boundary, where every value
-    /// the run holds is in a frame.
+    /// Frees the arena objects nothing the run holds, once enough wait:
+    /// at a statement boundary, where every value the run holds outside
+    /// the arena's members is in a frame. Garbage cycles are collected
+    /// only under pressure, and only when a count fell without reaching
+    /// zero since the last collection (seam D).
     fn collect_arena(&mut self) -> Result<(), Halt> {
-        if !self.arena.borrow().collection_due() {
+        let (release, cycles) = {
+            let arena = self.arena.borrow();
+            (arena.release_due(), arena.cycles_due())
+        };
+        if !release && !cycles {
             return Ok(());
         }
         let tasks = &self.tasks;
         let mut arena = self.arena.borrow_mut();
-        arena.collect(&mut |visit| tasks.each_value(visit));
+        if cycles {
+            arena.collect_cycles(&mut |visit| tasks.each_value(visit));
+        }
+        arena.release(&mut |visit| tasks.each_value(visit));
+        let young = arena.take_released_young();
+        drop(arena);
+        if young > 0 {
+            self.heap.release_young(young)?;
+        }
         Ok(())
     }
 
@@ -807,6 +859,7 @@ impl KernelMachine {
         let Boundary::Collect = hook(at);
         self.publish_holdings().map_err(machine_error)?;
         self.heap.collect().map_err(MachineError::Heap)?;
+        self.arena.borrow_mut().rebased();
         self.reconcile_sweep().map_err(machine_error)
     }
 
@@ -815,7 +868,18 @@ impl KernelMachine {
     /// here, over current roots (FIG-6318).
     pub(super) fn refine_for(&mut self, bytes: u64) -> Result<(), Halt> {
         self.publish_holdings()?;
-        self.heap.refine(bytes).map_err(|e| self.heap_halt(e))
+        // What the statement built and no root holds yet, a native's
+        // result on its way to a register, is live: the refinement prices
+        // it as pending and holds it again.
+        let unrooted = self.arena.borrow().unprojected();
+        self.heap
+            .refine(bytes.saturating_add(unrooted))
+            .map_err(|e| self.heap_halt(e))?;
+        self.arena.borrow_mut().rebased();
+        if unrooted > 0 && !self.heap.hold_growth(unrooted)? {
+            return Err(fault("a refinement left no room for what it priced"));
+        }
+        Ok(())
     }
 
     /// Makes a heap write. One that needs an exact refinement while the
@@ -861,7 +925,7 @@ impl KernelMachine {
         // raise and halt exits. Clean up before the driver sees the result.
         self.regs.kill_statement();
         self.pins.clear();
-        self.fresh.clear();
+        self.arena.borrow_mut().statement_ended();
         self.tasks.protect(None);
         result
     }
@@ -884,7 +948,6 @@ impl KernelMachine {
             self.observe_step(task, exe);
         }
         self.pins.clear();
-        self.fresh.clear();
         if self.task(task)?.take_requeue() {
             // The one more turn a `then yield` wait takes once its outcome
             // is in, as `yield` takes it (`K-TASK-005`, `K-TASK-006`): it
@@ -941,10 +1004,10 @@ impl KernelMachine {
     fn end_task(&mut self, task: TaskId, outcome: Result<Value, Value>) -> Result<(), Halt> {
         let pages = self.heap.pages().clone();
         let result = {
-            let arena = self.arena.borrow();
+            let mut arena = self.arena.borrow_mut();
             match &outcome {
-                Ok(value) => Ok(project::project(&arena, &pages, value)?),
-                Err(value) => Err(project::project(&arena, &pages, value)?),
+                Ok(value) => Ok(project::project(&mut arena, &pages, value)?),
+                Err(value) => Err(project::project(&mut arena, &pages, value)?),
             }
         };
         self.observe(Event::TaskEnded(task));
@@ -1203,9 +1266,8 @@ impl KernelMachine {
             }
             let more = self.current.is_some() || !self.ready.is_empty();
             if more && self.charged.saturating_sub(before) >= slice {
-                if let Err(halt) = self.publish_holdings() {
-                    return self.ended_by(halt);
-                }
+                // A slice return projects only when the host seals: ids
+                // never depend on where slices fall.
                 if host.cancel_requested() {
                     return Ok(self.finish_with(End::Cancelled));
                 }

@@ -176,7 +176,11 @@ impl super::Arena {
         let (table, index) = self.table_parts(handle)?;
         let values = pairs_mut(table)?;
         match index.find(&normal) {
-            Some(at) => values[at * 2 + 1] = value,
+            Some(at) => {
+                let old = std::mem::replace(&mut values[at * 2 + 1], value);
+                self.hold(&value);
+                self.unhold(&old);
+            }
             None => {
                 let seq = index.next;
                 index.next = seq
@@ -187,6 +191,8 @@ impl super::Arena {
                 values.push(key);
                 values.push(value);
                 table.len += 1;
+                self.hold(&key);
+                self.hold(&value);
             }
         }
         Ok(())
@@ -208,8 +214,10 @@ impl super::Arena {
         index.seqs.remove(at);
         let values = pairs_mut(table)?;
         let value = values.remove(at * 2 + 1);
-        values.remove(at * 2);
+        let key = values.remove(at * 2);
         table.len -= 1;
+        self.unhold(&key);
+        self.unhold(&value);
         Ok(Some(value))
     }
 

@@ -27,7 +27,6 @@ pub struct StatementRoots<'a> {
     pub pinned: &'a [PageValue],
     pub borrowed: &'a [PageValue],
     pub pinned_bytes: u64,
-    pub fresh: &'a [EntityId],
 }
 
 /// What the machine holds outside the heap's trees: the running
@@ -38,7 +37,6 @@ pub(super) struct Holdings {
     borrowed: Vec<PageValue>,
     /// Pinned immediate values need their local cost, but no tracing descriptor.
     scalar_bytes: u64,
-    fresh: Vec<EntityId>,
     /// What the running statement holds: credit for its writes, released
     /// at the statement's end.
     reserved: u64,
@@ -63,7 +61,6 @@ impl Default for Holdings {
             temporary: Vec::new(),
             borrowed: Vec::new(),
             scalar_bytes: 0,
-            fresh: Vec::new(),
             reserved: 0,
             held: 0,
             roots_current: true,
@@ -356,7 +353,6 @@ impl PagedHeap {
             && self.holdings.scalar_bytes == 0
             && self.holdings.reserved == 0
         {
-            self.holdings.fresh.clear();
             return Ok(());
         }
         let before = self.accounting;
@@ -377,7 +373,6 @@ impl PagedHeap {
         }
         self.holdings.temporary.clear();
         self.holdings.scalar_bytes = 0;
-        self.holdings.fresh.clear();
         self.holdings.reserved = 0;
         if before != self.accounting {
             self.header = None;
@@ -386,9 +381,6 @@ impl PagedHeap {
     }
     pub(super) fn statement_roots(&self) -> &[PageValue] {
         &self.holdings.temporary
-    }
-    pub(super) fn fresh_roots(&self) -> &[EntityId] {
-        &self.holdings.fresh
     }
     pub(super) fn outstanding_reserved(&self) -> u64 {
         // Precision runs only over current, projected roots. Their growth
@@ -406,7 +398,6 @@ impl PagedHeap {
             pinned,
             pinned_bytes,
             borrowed,
-            fresh,
         } = roots;
         self.holdings.temporary.clear();
         self.holdings.temporary.extend_from_slice(values);
@@ -414,8 +405,6 @@ impl PagedHeap {
         self.holdings.scalar_bytes = pinned_bytes;
         self.holdings.borrowed.clear();
         self.holdings.borrowed.extend_from_slice(borrowed);
-        self.holdings.fresh.clear();
-        self.holdings.fresh.extend_from_slice(fresh);
     }
     pub(super) fn refine_installed(
         &mut self,
@@ -426,8 +415,6 @@ impl PagedHeap {
         let registers = self.holdings.temporary.clone();
         let borrowed = self.holdings.borrowed.clone();
         let reserved = self.transient_reserved()?;
-        let mut seeds = self.holdings.fresh.clone();
-        seeds.extend_from_slice(fresh);
         let decision = census.refine(
             self,
             &TransientRoots {
@@ -435,7 +422,7 @@ impl PagedHeap {
                 registers: &registers,
                 pinned: &[],
                 native_args: &[],
-                fresh: &seeds,
+                fresh,
                 reserved,
             },
             PendingReservation {
@@ -521,7 +508,6 @@ impl PagedHeap {
         if let Some(refusal) = self.refuses_precision(bytes) {
             return Err(refusal);
         }
-        let fresh = self.holdings.fresh.clone();
         let mut values = self.holdings.temporary.clone();
         let borrowed = self.holdings.borrowed.clone();
         values.extend_from_slice(extra);
@@ -532,7 +518,7 @@ impl PagedHeap {
                 registers: &values,
                 pinned: &[],
                 native_args: &[],
-                fresh: &fresh,
+                fresh: &[],
                 reserved: self.transient_reserved()?,
             },
         )
@@ -561,7 +547,6 @@ impl PagedHeap {
         registers: &[PageValue],
         pinned: &[PageValue],
         pinned_bytes: u64,
-        fresh: &[EntityId],
     ) -> Result<(), HeapWriteError> {
         let previous = PreviousTasks::new(self.tasks.clone());
         self.install_execution_roots(
@@ -572,7 +557,6 @@ impl PagedHeap {
                 pinned,
                 pinned_bytes,
                 borrowed: &[],
-                fresh,
             },
         )
     }
@@ -725,7 +709,6 @@ impl PagedHeap {
                 ReservationDecision::NeedsPrecision(_) => {
                     let registers = self.statement_roots().to_vec();
                     let borrowed = self.holdings.borrowed.clone();
-                    let fresh = self.fresh_roots().to_vec();
                     let reserved = self.transient_reserved()?;
                     self.holdings.held = 0;
                     match census.refine(
@@ -735,7 +718,7 @@ impl PagedHeap {
                             registers: &registers,
                             pinned: &[],
                             native_args: &[],
-                            fresh: &fresh,
+                            fresh: &[],
                             reserved,
                         },
                         PendingReservation {

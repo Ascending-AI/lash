@@ -340,10 +340,11 @@ walk first reaches it. Objects of frozen or lazy families keep their
 family-relative ids (`family_impl/mod.rs`); a fresh result family and session
 adoption follow today's identity rules.
 
-A ref used as a map key is keyed by its referent's durable id. Until a
-projection gives a fresh referent one, the arena keys it by a process-local
-token, and the projection re-keys the (necessarily dirty) table. No page ever
-holds a handle or a token.
+A ref used as a map key is keyed in the arena by its referent's
+process-local token, whether or not the referent has an id yet. A page keys
+it by the referent's durable id, which the projection that writes the table
+computes from the entries' page forms, so the arena never re-keys a table.
+No page ever holds a handle or a token.
 
 **Invariant.** PLAN-INDEP over ids: layout 3, where every native beside a body
 declines and the body allocates other temporaries, produces equal canonical

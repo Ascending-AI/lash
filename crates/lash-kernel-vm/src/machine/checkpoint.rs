@@ -53,6 +53,11 @@ impl Machine for KernelMachine {
         if self.ended {
             return Err(MachineError::Ended);
         }
+        // The ids a projection gives must not depend on when its budget
+        // ran out: nothing runs until it completes (seam G).
+        if self.projecting {
+            return Err(MachineError::Projecting);
+        }
         self.observe_phase(GuestPhase::Interpret);
         let result = self.run_slice(host, slice);
         self.regs.clear();
@@ -161,6 +166,173 @@ impl Machine for KernelMachine {
         Ok(Delivered::Accepted)
     }
     fn seal(&mut self, budget: SealBudget) -> Result<Option<SealedRoot>, SealError> {
+        let sealed = self.seal_projection(budget)?;
+        self.projecting = sealed.is_none();
+        if sealed.is_some() {
+            self.arena.borrow_mut().rebased();
+        }
+        Ok(sealed)
+    }
+    fn meters(&self) -> Meters {
+        Meters {
+            charged: self.charged,
+            memory: self.heap.certificate().upper.0,
+            live_tasks: self.live_tasks,
+        }
+    }
+}
+fn sequence<T: lash_kernel_state::kernel_internals::tree::Cell>(root: SequenceRoot) -> Tree<T> {
+    Tree::of_sequence(&root)
+}
+fn sequence_root<T: lash_kernel_state::kernel_internals::tree::Cell>(
+    tree: &Tree<T>,
+) -> Result<SequenceRoot, HeapFault> {
+    tree.sequence_root()
+}
+fn delivery_error(error: HeapWriteError) -> DeliverError {
+    match error {
+        HeapWriteError::Fault(error) => DeliverError::Heap(error),
+        other => DeliverError::Heap(HeapFault::Malformed(format!("frozen delivery: {other}"))),
+    }
+}
+
+impl KernelMachine {
+    pub(crate) fn open_with_layout(
+        program: Program,
+        bounds: Bounds,
+        root: &CheckpointRoot,
+        admissions: Vec<lash_kernel_state::AdmittedWait>,
+        mut source: Box<dyn PageSource>,
+        layout: Layout,
+    ) -> Result<Self, OpenError> {
+        let census = session::restored_census(&mut *source, Some(root.heap), bounds.memory)?;
+        Self::open_with_census(program, bounds, root, admissions, source, census, layout)
+    }
+
+    /// Opens `root` with `census` for its accounting: the laws that hold a
+    /// run to a census of their own.
+    pub(crate) fn open_with_census(
+        program: Program,
+        bounds: Bounds,
+        root: &CheckpointRoot,
+        _admissions: Vec<lash_kernel_state::AdmittedWait>,
+        source: Box<dyn PageSource>,
+        census: Box<dyn AllocationCensus>,
+        layout: Layout,
+    ) -> Result<Self, OpenError> {
+        let limits = lash_kernel_doc::KernelDataLimits::standard();
+        let library = program.library.in_layout(layout);
+        let admitted = library.admit(&program.document, limits)?;
+        let exe = admitted
+            .executable(&program.document, &library)
+            .map_err(|missing| OpenError::MissingFunction {
+                function: missing.0,
+            })?;
+        let given = exe.identity();
+        if root.document != given {
+            return Err(OpenError::DocumentMismatch {
+                parked: root.document,
+                given,
+            });
+        }
+        if root.kernel != program.document.manifest.kernel {
+            return Err(OpenError::KernelVersion {
+                parked: root.kernel,
+                supported: program.document.manifest.kernel,
+            });
+        }
+        if root.release != program.release {
+            return Err(OpenError::Malformed {
+                problem: "helper release differs from the checkpoint".into(),
+            });
+        }
+        if !matches!(root.status, RootStatus::Parked) {
+            return Err(OpenError::Malformed {
+                problem: "an ended root cannot execute".into(),
+            });
+        }
+        let mut heap =
+            PagedHeap::open_header(root.heap, source, EditEpoch(0)).map_err(OpenError::Heap)?;
+        heap.set_data_limits(limits);
+        heap.set_census(census).map_err(OpenError::Heap)?;
+        heap.set_family_base(Box::new(
+            lash_kernel_state::kernel_internals::family_impl::FrozenBase::default(),
+        ));
+        heap.restore_execution_roots(root);
+        let access = heap.pages().clone();
+        let census_refinements = heap.certificate().refinements;
+        let arena: super::SharedArena = std::rc::Rc::new(std::cell::RefCell::new(
+            lash_kernel_state::arena::Arena::from_ordinal(heap.next_ordinal()),
+        ));
+        Ok(Self {
+            release: root.release,
+            owner: root.owner,
+            document: Some(root.document),
+            costs: crate::costs::Costs::of_document(&program.document),
+            session_cell: matches!(root.target, lash_kernel_state::paged::CellTargetKind::Main),
+            program,
+            exe: Arc::clone(&exe),
+            bounds,
+            limits,
+            tasks: tasks::Tasks::open(
+                heap.task_root().clone(),
+                access.clone(),
+                std::rc::Rc::clone(&arena),
+                exe,
+            ),
+            arena,
+            ready: queue::Queue::open(sequence(root.ready), access.clone()),
+            current: None,
+            joins: heap.join_root().clone(),
+            waits: open_tree(root.waits),
+            next_wait: root.meters.waits_issued,
+            issued: None,
+            next_join: root.meters.next_join,
+            withdrawn: queue::Queue::open(sequence(root.unreported), access),
+            withdrawn_ever: open_tree(root.withdrawn),
+            modes: open_tree(root.reads),
+            functions: root.functions,
+            host: root.host.clone(),
+            heap,
+            pins: Pins::default(),
+            projecting: false,
+            charging: true,
+            scalar_blocks: false,
+            plans: 0,
+            segments: Default::default(),
+            charged: root.meters.charged,
+            live_tasks: root.meters.live_tasks,
+            census_refinements,
+            regs: registers::Registers::default(),
+            storage: Storage::default(),
+            steps: Default::default(),
+            end: None,
+            ended: false,
+            observer: None,
+            ran: Vec::new(),
+            #[cfg(test)]
+            boundary: None,
+            #[cfg(test)]
+            boundaries: 0,
+            save: None,
+        })
+    }
+}
+
+impl KernelMachine {
+    pub(crate) fn task_identity(
+        &self,
+        identity: lash_kernel_state::paged::TaskIdentityRef,
+    ) -> Result<lash_kernel_doc::kernel_internals::TaskIdentity, lash_kernel_doc::heap::HeapFault>
+    {
+        identity.resolve(self.heap.pages())
+    }
+}
+
+impl KernelMachine {
+    /// Projects what changed and seals it within `budget`: `None` when the
+    /// budget ran out first, every dirty mark kept for the next seal.
+    fn seal_projection(&mut self, budget: SealBudget) -> Result<Option<SealedRoot>, SealError> {
         if self.ended {
             return Err(SealError::Ended);
         }
@@ -293,159 +465,5 @@ impl Machine for KernelMachine {
             Arc::clone(&self.exe),
         );
         Ok(Some(SealedRoot { page, root }))
-    }
-    fn meters(&self) -> Meters {
-        Meters {
-            charged: self.charged,
-            memory: self.heap.certificate().upper.0,
-            live_tasks: self.live_tasks,
-        }
-    }
-}
-fn sequence<T: lash_kernel_state::kernel_internals::tree::Cell>(root: SequenceRoot) -> Tree<T> {
-    Tree::of_sequence(&root)
-}
-fn sequence_root<T: lash_kernel_state::kernel_internals::tree::Cell>(
-    tree: &Tree<T>,
-) -> Result<SequenceRoot, HeapFault> {
-    tree.sequence_root()
-}
-fn delivery_error(error: HeapWriteError) -> DeliverError {
-    match error {
-        HeapWriteError::Fault(error) => DeliverError::Heap(error),
-        other => DeliverError::Heap(HeapFault::Malformed(format!("frozen delivery: {other}"))),
-    }
-}
-
-impl KernelMachine {
-    pub(crate) fn open_with_layout(
-        program: Program,
-        bounds: Bounds,
-        root: &CheckpointRoot,
-        admissions: Vec<lash_kernel_state::AdmittedWait>,
-        mut source: Box<dyn PageSource>,
-        layout: Layout,
-    ) -> Result<Self, OpenError> {
-        let census = session::restored_census(&mut *source, Some(root.heap), bounds.memory)?;
-        Self::open_with_census(program, bounds, root, admissions, source, census, layout)
-    }
-
-    /// Opens `root` with `census` for its accounting: the laws that hold a
-    /// run to a census of their own.
-    pub(crate) fn open_with_census(
-        program: Program,
-        bounds: Bounds,
-        root: &CheckpointRoot,
-        _admissions: Vec<lash_kernel_state::AdmittedWait>,
-        source: Box<dyn PageSource>,
-        census: Box<dyn AllocationCensus>,
-        layout: Layout,
-    ) -> Result<Self, OpenError> {
-        let limits = lash_kernel_doc::KernelDataLimits::standard();
-        let library = program.library.in_layout(layout);
-        let admitted = library.admit(&program.document, limits)?;
-        let exe = admitted
-            .executable(&program.document, &library)
-            .map_err(|missing| OpenError::MissingFunction {
-                function: missing.0,
-            })?;
-        let given = exe.identity();
-        if root.document != given {
-            return Err(OpenError::DocumentMismatch {
-                parked: root.document,
-                given,
-            });
-        }
-        if root.kernel != program.document.manifest.kernel {
-            return Err(OpenError::KernelVersion {
-                parked: root.kernel,
-                supported: program.document.manifest.kernel,
-            });
-        }
-        if root.release != program.release {
-            return Err(OpenError::Malformed {
-                problem: "helper release differs from the checkpoint".into(),
-            });
-        }
-        if !matches!(root.status, RootStatus::Parked) {
-            return Err(OpenError::Malformed {
-                problem: "an ended root cannot execute".into(),
-            });
-        }
-        let mut heap =
-            PagedHeap::open_header(root.heap, source, EditEpoch(0)).map_err(OpenError::Heap)?;
-        heap.set_data_limits(limits);
-        heap.set_census(census).map_err(OpenError::Heap)?;
-        heap.set_family_base(Box::new(
-            lash_kernel_state::kernel_internals::family_impl::FrozenBase::default(),
-        ));
-        heap.restore_execution_roots(root);
-        let access = heap.pages().clone();
-        let census_refinements = heap.certificate().refinements;
-        let arena: super::SharedArena = std::rc::Rc::new(std::cell::RefCell::new(
-            lash_kernel_state::arena::Arena::new(),
-        ));
-        Ok(Self {
-            release: root.release,
-            owner: root.owner,
-            document: Some(root.document),
-            costs: crate::costs::Costs::of_document(&program.document),
-            session_cell: matches!(root.target, lash_kernel_state::paged::CellTargetKind::Main),
-            program,
-            exe: Arc::clone(&exe),
-            bounds,
-            limits,
-            tasks: tasks::Tasks::open(
-                heap.task_root().clone(),
-                access.clone(),
-                std::rc::Rc::clone(&arena),
-                exe,
-            ),
-            arena,
-            ready: queue::Queue::open(sequence(root.ready), access.clone()),
-            current: None,
-            joins: heap.join_root().clone(),
-            waits: open_tree(root.waits),
-            next_wait: root.meters.waits_issued,
-            issued: None,
-            next_join: root.meters.next_join,
-            withdrawn: queue::Queue::open(sequence(root.unreported), access),
-            withdrawn_ever: open_tree(root.withdrawn),
-            modes: open_tree(root.reads),
-            functions: root.functions,
-            host: root.host.clone(),
-            heap,
-            pins: Pins::default(),
-            fresh: Vec::new(),
-            charging: true,
-            scalar_blocks: false,
-            plans: 0,
-            segments: Default::default(),
-            charged: root.meters.charged,
-            live_tasks: root.meters.live_tasks,
-            census_refinements,
-            regs: registers::Registers::default(),
-            storage: Storage::default(),
-            steps: Default::default(),
-            end: None,
-            ended: false,
-            observer: None,
-            ran: Vec::new(),
-            #[cfg(test)]
-            boundary: None,
-            #[cfg(test)]
-            boundaries: 0,
-            save: None,
-        })
-    }
-}
-
-impl KernelMachine {
-    pub(crate) fn task_identity(
-        &self,
-        identity: lash_kernel_state::paged::TaskIdentityRef,
-    ) -> Result<lash_kernel_doc::kernel_internals::TaskIdentity, lash_kernel_doc::heap::HeapFault>
-    {
-        identity.resolve(self.heap.pages())
     }
 }

@@ -19,6 +19,19 @@ use lash_kernel_state::paged::*;
 pub struct Checkpoint {
     continuation: Vec<Vec<u8>>,
     graph: Vec<Vec<u8>>,
+    /// The durable ids of the objects the graph reaches, in the order the
+    /// graph first reaches them. Outside the equality domain: the graph
+    /// numbers objects by that order instead.
+    ids: Vec<EntityId>,
+}
+
+impl Checkpoint {
+    /// The durable ids of the objects the checkpoint reaches, in the order
+    /// its graph first reaches them: what PLAN-INDEP over ids compares
+    /// (seam C of `docs/design/kernel-end-state.md`).
+    pub fn ids(&self) -> &[EntityId] {
+        &self.ids
+    }
 }
 
 impl PartialEq for Checkpoint {
@@ -48,6 +61,7 @@ pub fn checkpoint(
         heap,
         graph: Vec::new(),
         seen: BTreeMap::new(),
+        ids: Vec::new(),
     };
     reader.put(&root.kernel);
     reader.put(&root.document);
@@ -206,6 +220,7 @@ pub fn checkpoint(
     Ok(Checkpoint {
         continuation,
         graph: reader.graph,
+        ids: reader.ids,
     })
 }
 
@@ -226,6 +241,7 @@ pub fn session(root: &SessionRoot, source: Box<dyn PageSource>) -> Result<Checkp
         heap,
         graph: Vec::new(),
         seen: BTreeMap::new(),
+        ids: Vec::new(),
     };
     reader.bindings(&Tree::of_keyed(
         &lash_kernel_state::kernel_internals::session_bindings(root),
@@ -236,6 +252,7 @@ pub fn session(root: &SessionRoot, source: Box<dyn PageSource>) -> Result<Checkp
     Ok(Checkpoint {
         continuation: Vec::new(),
         graph: reader.graph,
+        ids: reader.ids,
     })
 }
 
@@ -243,6 +260,7 @@ struct Reader {
     heap: PagedHeap,
     graph: Vec<Vec<u8>>,
     seen: BTreeMap<EntityId, u64>,
+    ids: Vec<EntityId>,
 }
 
 fn rows<T: Cell>(
@@ -391,6 +409,7 @@ impl Reader {
             return Ok(());
         }
         self.seen.insert(id, next);
+        self.ids.push(id);
         let kind = self
             .heap
             .kind(id)?

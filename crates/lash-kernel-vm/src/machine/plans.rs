@@ -32,7 +32,6 @@ pub(super) struct Mark {
     pins: usize,
     borrowed: usize,
     bytes: u64,
-    fresh: usize,
     reserved: u64,
 }
 
@@ -125,7 +124,7 @@ impl PlanRun<'_> {
     }
 
     /// Ends the open statement, if any: its operands are emptied, and its
-    /// pins, fresh objects and write credit released.
+    /// pins and write credit released.
     fn end_statement(&mut self) -> Result<(), Halt> {
         let Some(mark) = self.statement.take() else {
             return Ok(());
@@ -134,7 +133,6 @@ impl PlanRun<'_> {
         machine.pins.values.truncate(mark.pins);
         machine.pins.borrowed.truncate(mark.borrowed);
         machine.pins.bytes = machine.pins.bytes.min(mark.bytes);
-        machine.fresh.truncate(mark.fresh);
         machine.heap.release_reserved_to(mark.reserved)?;
         let registers = self.prepared.plan.registers as usize;
         machine.regs.clear_range(self.base..self.base + registers);
@@ -153,7 +151,6 @@ impl PlanRun<'_> {
             pins: machine.pins.values.len(),
             borrowed: machine.pins.borrowed.len(),
             bytes: machine.pins.bytes,
-            fresh: machine.fresh.len(),
             reserved: machine.heap.statement_reserved(),
         });
         Ok(())

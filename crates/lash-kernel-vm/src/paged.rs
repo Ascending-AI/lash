@@ -139,6 +139,10 @@ pub struct Finished {
 pub enum MachineError {
     #[error("the run has ended")]
     Ended,
+    /// A seal ran out of budget mid-projection: the run runs again once a
+    /// seal completes the projection (seam G).
+    #[error("a projection is incomplete; seal again before running")]
+    Projecting,
     #[error("the machine is in a state it cannot run from: {problem}")]
     Fault { problem: String },
     #[error("the host failed a read: {0}")]

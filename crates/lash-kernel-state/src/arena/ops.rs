@@ -120,7 +120,7 @@ impl Arena {
             .cost
             .saturating_sub(before)
             .saturating_add(after);
-        facts.dirty = true;
+        self.changed(handle);
         Ok(after.saturating_sub(before))
     }
 
@@ -147,14 +147,19 @@ impl Arena {
         };
         let held = values_mut(handle, &mut sequence.chunks)?;
         let len = held.len();
-        match held.get_mut(index as usize) {
-            Some(slot) => *slot = value,
+        let old = match held.get_mut(index as usize) {
+            Some(slot) => Some(std::mem::replace(slot, value)),
             None if index as usize == len => {
                 held.push(value);
                 sequence.len += 1;
                 self.resident = self.resident.saturating_add(1);
+                None
             }
             None => return Err(malformed("a list write past its length")),
+        };
+        self.hold(&value);
+        if let Some(old) = old {
+            self.unhold(&old);
         }
         self.moved(handle, before.unwrap_or(0), after)
     }
@@ -173,6 +178,7 @@ impl Arena {
         sequence.len -= 1;
         let before = local_cost(&self.objects, &self.facts, &old);
         self.moved(handle, before, 0)?;
+        self.unhold(&old);
         Ok(())
     }
 
@@ -269,21 +275,12 @@ impl Arena {
     }
 
     /// Allocates a closure of `site` over `captures`, a fresh mutable
-    /// object known as `entity`; gives its handle and logical cost.
-    pub fn new_closure(
-        &mut self,
-        entity: lash_kernel_doc::EntityId,
-        site: Site,
-        captures: Vec<ArenaHandle>,
-    ) -> (ArenaHandle, u64) {
-        let handle = self.insert_object(
-            entity,
-            Body::Closure {
-                site,
-                captures: captures.into_boxed_slice(),
-            },
-            true,
-        );
+    /// object; gives its handle and logical cost.
+    pub fn new_closure(&mut self, site: Site, captures: Vec<ArenaHandle>) -> (ArenaHandle, u64) {
+        let handle = self.insert_created(Body::Closure {
+            site,
+            captures: captures.into_boxed_slice(),
+        });
         let cost = self
             .facts
             .get(handle.index() as usize)
@@ -291,14 +288,10 @@ impl Arena {
         (handle, cost)
     }
 
-    /// Allocates a shared variable holding `value`, a fresh mutable object
-    /// known as `entity`; gives its handle and logical cost.
-    pub fn new_cell(
-        &mut self,
-        entity: lash_kernel_doc::EntityId,
-        value: Value,
-    ) -> (ArenaHandle, u64) {
-        let handle = self.insert_object(entity, Body::Cell(value), true);
+    /// Allocates a shared variable holding `value`, a fresh mutable object;
+    /// gives its handle and logical cost.
+    pub fn new_cell(&mut self, value: Value) -> (ArenaHandle, u64) {
+        let handle = self.insert_created(Body::Cell(value));
         let cost = self
             .facts
             .get(handle.index() as usize)
@@ -324,6 +317,8 @@ impl Arena {
         };
         let old = std::mem::replace(held, value);
         let before = local_cost(&self.objects, &self.facts, &old);
+        self.hold(&value);
+        self.unhold(&old);
         self.moved(handle, before, after)
     }
 

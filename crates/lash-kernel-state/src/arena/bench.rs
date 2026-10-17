@@ -3,7 +3,7 @@
 //! its answer back as data.
 
 use lash_kernel_doc::arena::{ArenaHandle, Body};
-use lash_kernel_doc::heap::{EntityId, FamilyId, LogicalBytes};
+use lash_kernel_doc::heap::LogicalBytes;
 use lash_kernel_doc::{
     Args, Bytes, Datum, ErrorDatum, KernelDataLimits, Name, NativeCall, NativeError,
     NativeFunction, NewObject, Nursery, Reservation, Retry, Timestamp, Value, WorkCounter,
@@ -11,12 +11,11 @@ use lash_kernel_doc::{
 
 use super::Arena;
 
-/// An arena and the identities its mutable objects take.
+/// An arena natives are called on, under data limits.
 #[derive(Debug)]
 pub struct Bench {
     arena: Arena,
     limits: KernelDataLimits,
-    next: u64,
 }
 
 /// What one call answered, and what it asked of the run's memory.
@@ -69,7 +68,6 @@ impl Bench {
         Self {
             arena: Arena::new(),
             limits,
-            next: 0,
         }
     }
 
@@ -81,7 +79,7 @@ impl Bench {
         &mut self.arena
     }
 
-    /// Builds `datum`, each mutable object a fresh identity.
+    /// Builds `datum`, each mutable object a fresh one.
     ///
     /// # Errors
     ///
@@ -153,14 +151,7 @@ impl Bench {
     }
 
     fn install(&mut self, new: Vec<(ArenaHandle, NewObject)>) -> Result<u64, NativeError> {
-        let next = &mut self.next;
-        self.arena.install(new, &mut || {
-            *next += 1;
-            Ok(EntityId {
-                family: FamilyId::PRIMARY,
-                ordinal: *next,
-            })
-        })
+        self.arena.install(new)
     }
 
     /// Calls `native` on `args` with `room` to reserve and `counter` as its

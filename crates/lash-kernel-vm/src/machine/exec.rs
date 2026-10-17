@@ -920,7 +920,9 @@ impl KernelMachine {
         let size = self.deep_size(value)?;
         self.charge(size)?;
         // The crossing gathers functions from the page form: the heap
-        // holds what the arena does first.
+        // holds what the arena does first, each new object the argument
+        // reaches with its id.
+        self.identify_values(std::slice::from_ref(value))?;
         self.flush_arena()?;
         let value = &self.page_form(value)?;
         let document = Arc::clone(&self.program.document);
@@ -1131,11 +1133,6 @@ impl KernelMachine {
                 _ => Err(fault("an action's statement did not complete").into()),
             };
         };
-        // The roles leave the frame priced exactly before they are back in
-        // registers, as the uninterrupted run holds them: a memory decision
-        // inside the rest of the statement is the same whether the run
-        // parked here or not (ROOTS-CANON, K-BND-003).
-        self.publish_holdings()?;
         let entry = running
             .stream
             .nested
@@ -1144,7 +1141,7 @@ impl KernelMachine {
         let depth = entry.depth as usize;
         let mut saved: std::collections::BTreeMap<Vec<u32>, Value> = Default::default();
         for role in pending.roles {
-            saved.insert(role.site, self.admit_page(&role.value)?);
+            saved.insert(role.site, role.value);
         }
         for (site, reg) in &entry.roles {
             let role = saved

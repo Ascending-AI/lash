@@ -35,25 +35,6 @@ pub enum StoredObject {
 }
 
 impl PagedHeap {
-    /// Takes the next primary identity: what an object the arena allocates
-    /// is known by (swap 2.4(a); ids move to projection in 2.4(c)).
-    ///
-    /// # Errors
-    ///
-    /// [`HeapFault::Malformed`] when ordinals overflow.
-    pub fn take_ordinal(&mut self) -> Result<EntityId, HeapFault> {
-        let ordinal = self.next_ordinal();
-        self.set_next_ordinal(
-            ordinal
-                .checked_add(1)
-                .ok_or_else(|| HeapFault::Malformed("identity ordinal overflow".into()))?,
-        );
-        Ok(EntityId {
-            family: FamilyId::PRIMARY,
-            ordinal,
-        })
-    }
-
     /// The whole contents of `entity`, or `None` when the heap holds no
     /// such entity.
     ///

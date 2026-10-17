@@ -19,6 +19,7 @@ use super::loops::{Guard, Header, TextCursor};
 use super::project::{SharedArena, admit, admit_cell, project, project_cell};
 use super::{Completion, Control, Cursor, Frame, LibraryCall, SlotState, TryPhase};
 use crate::compile::{Executable, Form, LibId, NestedKind, StmtId};
+use lash_kernel_doc::arena::ArenaHandle;
 use lash_kernel_doc::heap::{HeapFault, PageValue};
 use lash_kernel_doc::{Site, Unit, Value};
 use lash_kernel_exec::ActIx;
@@ -173,7 +174,16 @@ impl Slots {
 pub(super) struct Pending {
     pub(super) site: Vec<u32>,
     pub(super) phase: PhaseRecord,
-    pub(super) roles: Vec<RoleRecord>,
+    pub(super) roles: Vec<Role>,
+}
+
+/// An operand the statement evaluated before the action it stands at, by
+/// its site: an arena value until a projection writes the frame, so a
+/// continuation left before the next projection point gives no id.
+#[derive(Clone, Debug)]
+pub(super) struct Role {
+    pub(super) site: Vec<u32>,
+    pub(super) value: Value,
 }
 
 /// What a frame's row holds of its continuation.
@@ -296,6 +306,9 @@ impl Frame {
                 SlotState::Empty => {}
             }
         }
+        if let Some(pending) = &self.pending.pending {
+            pending.roles.iter().for_each(|role| visit(&role.value));
+        }
         self.visit_held(&mut |value| {
             visit(value);
             true
@@ -322,6 +335,31 @@ impl Frame {
         same && at == self.held.len()
     }
 
+    /// What the canonical walk starts from in this frame (seam C), in
+    /// order: its bindings by name, its retained arguments by position,
+    /// then what each loop walks and holds and each cleanup's departing
+    /// payload, in control order, with the roles of the continuation it
+    /// saved after its arguments.
+    fn walk_roots(&self, exe: &Executable, out: &mut Vec<ArenaHandle>) {
+        for &at in &exe.code(self.code).ats_by_name {
+            match &self.slots.values[at as usize] {
+                SlotState::Value(value) => out.extend(value.handle()),
+                SlotState::Cell(cell) => out.push(*cell),
+                SlotState::Empty => {}
+            }
+        }
+        if let Some(call) = &self.library {
+            out.extend(call.args.iter().filter_map(Value::handle));
+        }
+        if let Some(pending) = &self.pending.pending {
+            out.extend(pending.roles.iter().filter_map(|role| role.value.handle()));
+        }
+        self.visit_held(&mut |value| {
+            out.extend(value.handle());
+            true
+        });
+    }
+
     /// Projects this frame into `stored`, its row as last written, or a
     /// fresh record when the row is not its own: its variables and held
     /// values always, and where it stands when `coordinates`. Whether the
@@ -332,7 +370,7 @@ impl Frame {
         coordinates: bool,
         exe: &Executable,
         access: &Access<'_>,
-        arena: &Arena,
+        arena: &mut Arena,
     ) -> Result<bool, HeapFault> {
         let code = exe.code(self.code);
         let mut changed = !self.owned;
@@ -525,7 +563,7 @@ impl Frame {
                 Some(pending) => Some(PendingRecord::new(
                     pending.site.clone(),
                     pending.phase,
-                    pending.roles.clone(),
+                    role_records(arena, access, &pending.roles)?,
                     access,
                 )?),
                 None => None,
@@ -728,13 +766,25 @@ impl Frames {
             .iter()
             .any(|(index, frame)| *index >= from && frame.has_edits())
     }
+    /// What the canonical walk starts from in the frames the next
+    /// projection writes, from the bottom up (seam C).
+    pub(super) fn walk_roots(&self, coordinates: bool, out: &mut Vec<ArenaHandle>) {
+        let from = if coordinates { self.placed } else { self.held };
+        for (index, frame) in &self.cache {
+            if *index < from || (frame.owned && !coordinates && frame.holds_as_projected()) {
+                continue;
+            }
+            frame.walk_roots(&self.exe, out);
+        }
+    }
+
     /// Projects the resident frames that may have changed since the last
     /// projection, and the top, into their rows: what they hold, and where
     /// they stand when `coordinates`. Cold frames' rows are as they stand.
     pub(super) fn project(&mut self, coordinates: bool) -> Result<(), HeapFault> {
         truncate(&mut self.rows, self.len, &self.access)?;
         let from = if coordinates { self.placed } else { self.held };
-        let arena = self.arena.borrow();
+        let mut arena = self.arena.borrow_mut();
         #[cfg(test)]
         let mut visited = 0;
         for (index, frame) in &mut self.cache {
@@ -753,11 +803,17 @@ impl Frames {
                 }
                 self.rows
                     .update(ordinal_key(*index), &self.access, |stored| {
-                        frame.project(stored, coordinates, &self.exe, &self.access, &arena)
+                        frame.project(stored, coordinates, &self.exe, &self.access, &mut arena)
                     })?;
             } else {
                 let mut record = FrameRecord::fresh(frame.statement.clone());
-                frame.project(&mut record, coordinates, &self.exe, &self.access, &arena)?;
+                frame.project(
+                    &mut record,
+                    coordinates,
+                    &self.exe,
+                    &self.access,
+                    &mut arena,
+                )?;
                 self.rows.write(ordinal_key(*index), record, &self.access)?;
             }
         }
@@ -812,11 +868,12 @@ impl Frames {
     ) -> Result<bool, HeapFault> {
         let access = self.access.clone();
         if let Some((_, frame)) = self.cache.iter_mut().find(|(at, _)| *at == index) {
+            let mut arena = self.arena.borrow_mut();
             let mut record = match frame.pending.take() {
                 Some(pending) => Some(PendingRecord::new(
                     pending.site,
                     pending.phase,
-                    pending.roles,
+                    role_records(&mut arena, &access, &pending.roles)?,
                     &access,
                 )?),
                 None => None,
@@ -824,7 +881,7 @@ impl Frames {
             edit(&mut record, &access);
             if let Some(record) = record {
                 frame.pending.set(Pending {
-                    roles: record.roles(&access)?,
+                    roles: admit_roles(&mut arena, &access, record.roles(&access)?)?,
                     site: record.site,
                     phase: record.phase,
                 });
@@ -1049,6 +1106,40 @@ fn action_kind(kind: &NestedKind) -> Option<ActionKind> {
     })
 }
 
+/// The page forms of `roles`, in their order: what a projection writes.
+fn role_records(
+    arena: &mut Arena,
+    access: &Access<'_>,
+    roles: &[Role],
+) -> Result<Vec<RoleRecord>, HeapFault> {
+    roles
+        .iter()
+        .map(|role| {
+            Ok(RoleRecord {
+                site: role.site.clone(),
+                value: project(arena, access, &role.value)?,
+            })
+        })
+        .collect()
+}
+
+/// The arena values of the saved `roles`, in their order.
+fn admit_roles(
+    arena: &mut Arena,
+    access: &Access<'_>,
+    roles: Vec<RoleRecord>,
+) -> Result<Vec<Role>, HeapFault> {
+    roles
+        .into_iter()
+        .map(|role| {
+            Ok(Role {
+                value: admit(arena, access, &role.value)?,
+                site: role.site,
+            })
+        })
+        .collect()
+}
+
 fn action_phase(phase: PhaseRecord) -> ActionPhase {
     match phase {
         PhaseRecord::Yielded => ActionPhase::Yielded,
@@ -1144,7 +1235,7 @@ fn restore(
         Some(pending) => Some(Pending {
             site: pending.site.clone(),
             phase: pending.phase,
-            roles: pending.roles(access)?,
+            roles: admit_roles(arena, access, pending.roles(access)?)?,
         }),
         None => None,
     };

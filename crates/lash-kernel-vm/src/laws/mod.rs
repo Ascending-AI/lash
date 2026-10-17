@@ -9,6 +9,7 @@ mod continuation;
 pub(crate) mod embedder;
 mod forms;
 mod frames;
+mod identity;
 mod layout;
 mod observe;
 mod operations;

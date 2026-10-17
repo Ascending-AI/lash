@@ -270,6 +270,20 @@ impl Tasks {
         Self::open(Tree::new(false), access, arena, exe)
     }
     /// Visits every arena value the cached tasks' frames hold.
+    /// What the canonical walk starts from in the tasks the next
+    /// projection writes, by task number (seam C). A task's incoming
+    /// outcome or ended result was projected when it came.
+    pub(super) fn walk_roots(
+        &self,
+        coordinates: bool,
+        out: &mut Vec<lash_kernel_doc::arena::ArenaHandle>,
+    ) {
+        let mut cached: Vec<_> = self.cache.iter().flatten().collect();
+        cached.sort_unstable_by_key(|(index, _)| *index);
+        for (_, task) in cached {
+            task.frames.walk_roots(coordinates, out);
+        }
+    }
     pub(super) fn each_value(&self, visit: &mut dyn FnMut(&lash_kernel_doc::Value)) {
         for (_, task) in self.cache.iter().flatten() {
             task.frames.each_value(visit);

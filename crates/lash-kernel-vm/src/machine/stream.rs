@@ -560,12 +560,7 @@ impl KernelMachine {
     ) -> Eval<ArenaHandle> {
         let mut site = exe.code(code).site.clone();
         site.path.pop();
-        let entity = self.heap.take_ordinal()?;
-        self.fresh.push(entity);
-        let (closure, cost) = self
-            .arena
-            .borrow_mut()
-            .new_closure(entity, site, cells.to_vec());
+        let (closure, cost) = self.arena.borrow_mut().new_closure(site, cells.to_vec());
         self.grow(cost)?;
         Ok(closure)
     }

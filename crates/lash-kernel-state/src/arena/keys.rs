@@ -202,13 +202,17 @@ fn tokens(
             out.sum(7, 1);
             Identity::Task(*task).encode(out);
         }
+        // A ref is keyed by its referent's process-local token, whether or
+        // not a projection has given it a durable id: an arena key never
+        // reaches a page, and a ref keeps its referent resident.
         Value::ObjectRef(handle) => {
-            let entity = facts
+            let token = facts
                 .get(handle.index() as usize)
-                .and_then(|facts| facts.entity)
-                .ok_or(NativeError::Malformed("a ref names no durable object"))?;
-            out.sum(7, 1);
-            Identity::Object(entity).encode(out);
+                .filter(|_| objects.get(*handle).is_some())
+                .map(|facts| facts.token)
+                .ok_or(NativeError::Malformed("a ref names no object of the run"))?;
+            out.sum(10, 1);
+            out.unsigned(token);
         }
         Value::Function(_) | Value::LongFunction(_) => {
             out.sum(8, 1);

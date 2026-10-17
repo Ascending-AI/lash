@@ -93,6 +93,14 @@ impl Compiler<'_> {
         for (slot, at) in positions.iter().enumerate() {
             slots_by_at[*at as usize] = slot as u32;
         }
+        let mut by_name: Vec<usize> = (0..scopes.slots.len()).collect();
+        by_name.sort_by(|a, b| {
+            scopes.slots[*a]
+                .key
+                .cmp(&scopes.slots[*b].key)
+                .then(a.cmp(b))
+        });
+        let ats_by_name = by_name.into_iter().map(|slot| positions[slot]).collect();
         Code {
             versions: BlockVersions::new(params.len(), self.layout),
             site,
@@ -100,6 +108,7 @@ impl Compiler<'_> {
             body,
             slots: scopes.slots,
             slots_by_at,
+            ats_by_name,
             captures,
             free,
             charged,

@@ -10,6 +10,12 @@
 //! and [`flush`]'s (every dirty object, written back at a projection point
 //! or before an exact refinement).
 //!
+//! A mutable object takes its durable id where it is first projected
+//! (seam C). A projection point walks its roots in the canonical order
+//! first (`KernelMachine::identify`), so every id it gives follows that
+//! walk; a value saved outside one (a task's result, a session binding, a
+//! continuation's role) gives its objects their ids as it is saved.
+//!
 //! [`ArenaHandle`]: lash_kernel_doc::arena::ArenaHandle
 
 use std::cell::RefCell;
@@ -40,18 +46,19 @@ fn arena_fault(error: lash_kernel_doc::NativeError) -> HeapFault {
     HeapFault::Malformed(error.to_string())
 }
 
-fn entity(arena: &Arena, handle: ArenaHandle) -> Result<EntityId, HeapFault> {
-    arena.entity_of(handle).map_err(arena_fault)
+fn entity(arena: &mut Arena, handle: ArenaHandle) -> Result<EntityId, HeapFault> {
+    arena.identify(handle).map_err(arena_fault)
 }
 
 /// The page form of `value`, built through `pages`. An immutable's is
-/// built once and kept with it; a mutable object's is its identity.
+/// built once and kept with it; a mutable object's is its identity, given
+/// now if it has none.
 ///
 /// # Errors
 ///
 /// The page port's faults, and a value the arena does not hold.
 pub(crate) fn project(
-    arena: &Arena,
+    arena: &mut Arena,
     pages: &Access<'_>,
     value: &Value,
 ) -> Result<PageValue, HeapFault> {
@@ -110,7 +117,7 @@ fn whole_text(text: &LongText) -> Result<&str, HeapFault> {
     }
 }
 
-fn text_of(arena: &Arena, pages: &Access<'_>, value: &Value) -> Result<TextRef, HeapFault> {
+fn text_of(arena: &mut Arena, pages: &Access<'_>, value: &Value) -> Result<TextRef, HeapFault> {
     match project(arena, pages, value)? {
         PageValue::Text(text) => Ok(text),
         _ => Err(malformed("an error's kind or message is not a text")),
@@ -118,10 +125,48 @@ fn text_of(arena: &Arena, pages: &Access<'_>, value: &Value) -> Result<TextRef, 
 }
 
 fn immutable(
-    arena: &Arena,
+    arena: &mut Arena,
     pages: &Access<'_>,
     handle: ArenaHandle,
 ) -> Result<PageValue, HeapFault> {
+    // A tuple's members and an error's parts are projected through the
+    // arena, which may give an object among them its id.
+    let members = match arena.body(handle).map_err(arena_fault)? {
+        Body::Tuple(sequence) => {
+            let mut members = Vec::with_capacity(sequence.len as usize);
+            for chunk in &sequence.chunks {
+                let Chunk::Resident(values) = chunk else {
+                    return Err(malformed("a tuple with no page form is not resident"));
+                };
+                members.extend_from_slice(values);
+            }
+            Some(Ok(members))
+        }
+        Body::Error(ErrorBody {
+            kind,
+            message,
+            data,
+        }) => Some(Err((*kind, *message, *data))),
+        _ => None,
+    };
+    match members {
+        Some(Ok(members)) => {
+            let members = members
+                .iter()
+                .map(|value| project(arena, pages, value))
+                .collect::<Result<Vec<_>, _>>()?;
+            return Ok(PageValue::Tuple(stored_pages::tuple(pages, members)?));
+        }
+        Some(Err((kind, message, data))) => {
+            let kind = text_of(arena, pages, &kind)?;
+            let message = text_of(arena, pages, &message)?;
+            let data = project(arena, pages, &data)?;
+            return Ok(PageValue::Error(stored_pages::error(
+                pages, kind, message, data,
+            )?));
+        }
+        None => {}
+    }
     Ok(match arena.body(handle).map_err(arena_fault)? {
         Body::BigInt(int) => PageValue::Int(stored_pages::int(pages, int.clone())?),
         Body::Timestamp(nanoseconds) => PageValue::Timestamp(Timestamp {
@@ -136,28 +181,6 @@ fn immutable(
             [] => PageValue::Bytes(stored_pages::bytes(pages, &[])?),
             _ => return Err(malformed("bytes with no page form are not resident")),
         },
-        Body::Tuple(sequence) => {
-            let mut members = Vec::with_capacity(sequence.len as usize);
-            for chunk in &sequence.chunks {
-                let Chunk::Resident(values) = chunk else {
-                    return Err(malformed("a tuple with no page form is not resident"));
-                };
-                for value in values {
-                    members.push(project(arena, pages, value)?);
-                }
-            }
-            PageValue::Tuple(stored_pages::tuple(pages, members)?)
-        }
-        Body::Error(ErrorBody {
-            kind,
-            message,
-            data,
-        }) => PageValue::Error(stored_pages::error(
-            pages,
-            text_of(arena, pages, kind)?,
-            text_of(arena, pages, message)?,
-            project(arena, pages, data)?,
-        )?),
         Body::Handle(handle) => PageValue::Handle(Arc::new(handle.clone())),
         _ => return Err(malformed("an immutable handle names a mutable body")),
     })
@@ -334,7 +357,7 @@ pub(crate) fn admit_cell(arena: &mut Arena, cell: EntityId) -> ArenaHandle {
 /// # Errors
 ///
 /// A handle that names no durable object.
-pub(crate) fn project_cell(arena: &Arena, cell: ArenaHandle) -> Result<EntityId, HeapFault> {
+pub(crate) fn project_cell(arena: &mut Arena, cell: ArenaHandle) -> Result<EntityId, HeapFault> {
     entity(arena, cell)
 }
 
@@ -492,7 +515,8 @@ fn warm_immutable(
 
 /// Writes every dirty object of the arena to the heap, in identity order,
 /// and marks it clean: what a projection point and an exact refinement
-/// read.
+/// read. An object a stored one names that had no id takes one as it is
+/// projected, and is written in the next round.
 ///
 /// # Errors
 ///
@@ -502,16 +526,21 @@ pub(crate) fn flush(
     heap: &mut PagedHeap,
     exe: &Executable,
 ) -> Result<(), HeapWriteError> {
-    for (entity, handle) in arena.dirty_objects() {
-        let object = stored(arena, heap.pages(), exe, handle)?;
-        heap.store_object(entity, object)?;
-        arena.clean(handle).map_err(arena_fault)?;
+    loop {
+        let dirty = arena.take_dirty();
+        if dirty.is_empty() {
+            return Ok(());
+        }
+        for (entity, handle) in dirty {
+            let object = stored(arena, heap.pages(), exe, handle)?;
+            heap.store_object(entity, object)?;
+            arena.clean(handle).map_err(arena_fault)?;
+        }
     }
-    Ok(())
 }
 
 fn stored(
-    arena: &Arena,
+    arena: &mut Arena,
     pages: &Access<'_>,
     exe: &Executable,
     handle: ArenaHandle,
@@ -526,13 +555,14 @@ fn stored(
         }
         Ok(values)
     };
-    Ok(match arena.body(handle).map_err(arena_fault)? {
-        Body::List(sequence) => StoredObject::List(
-            resident(&sequence.chunks)?
-                .iter()
-                .map(|value| project(arena, pages, value))
-                .collect::<Result<_, _>>()?,
-        ),
+    enum Held {
+        List(Vec<Value>),
+        Table(ObjectKind, Vec<Value>, Vec<u64>, u64),
+        Closure(Site, Vec<ArenaHandle>),
+        Cell(Value),
+    }
+    let held = match arena.body(handle).map_err(arena_fault)? {
+        Body::List(sequence) => Held::List(resident(&sequence.chunks)?),
         body @ (Body::Map(table) | Body::Set(table) | Body::Record(table)) => {
             let kind = match body {
                 Body::Map(_) => ObjectKind::Map,
@@ -545,34 +575,51 @@ fn stored(
                 .index
                 .as_deref()
                 .ok_or_else(|| malformed("a resident table has no index"))?;
-            let pairs = resident(&table.chunks)?;
+            Held::Table(
+                kind,
+                resident(&table.chunks)?,
+                index.sequences().to_vec(),
+                index.next(),
+            )
+        }
+        Body::Closure { site, captures } => Held::Closure(site.clone(), captures.to_vec()),
+        Body::Cell(value) => Held::Cell(*value),
+        _ => return Err(malformed("a dirty handle names an immutable")),
+    };
+    Ok(match held {
+        Held::List(values) => StoredObject::List(
+            values
+                .iter()
+                .map(|value| project(arena, pages, value))
+                .collect::<Result<_, _>>()?,
+        ),
+        Held::Table(kind, pairs, seqs, next) => {
             let mut entries = Vec::with_capacity(pairs.len() / 2);
-            for (pair, seq) in pairs.as_chunks::<2>().0.iter().zip(index.sequences()) {
+            for (pair, seq) in pairs.as_chunks::<2>().0.iter().zip(seqs) {
                 let value = match kind {
                     ObjectKind::Set => PageValue::Null,
                     _ => project(arena, pages, &pair[1])?,
                 };
-                entries.push((*seq, project(arena, pages, &pair[0])?, value));
+                entries.push((seq, project(arena, pages, &pair[0])?, value));
             }
             StoredObject::Table {
                 kind,
                 entries,
-                next: index.next(),
+                next,
             }
         }
-        Body::Closure { site, captures } => {
-            let code = exe.code(closure_code(exe, site)?);
+        Held::Closure(site, captures) => {
+            let code = exe.code(closure_code(exe, &site)?);
             let mut held = Vec::with_capacity(captures.len());
-            for (capture, cell) in code.captures.iter().zip(captures.iter()) {
+            for (capture, cell) in code.captures.iter().zip(captures) {
                 let name = &code.slots[capture.inner as usize].name;
-                held.push((NameRef::new(name, pages)?, project_cell(arena, *cell)?));
+                held.push((NameRef::new(name, pages)?, project_cell(arena, cell)?));
             }
             StoredObject::Closure {
-                site: Box::new(SiteRef::new(site, pages)?),
+                site: Box::new(SiteRef::new(&site, pages)?),
                 captures: held,
             }
         }
-        Body::Cell(value) => StoredObject::Variable(project(arena, pages, value)?),
-        _ => return Err(malformed("a dirty handle names an immutable")),
+        Held::Cell(value) => StoredObject::Variable(project(arena, pages, &value)?),
     })
 }

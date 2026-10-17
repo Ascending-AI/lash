@@ -735,6 +735,10 @@ pub(crate) struct Code {
     pub(crate) body: BlockId,
     pub(crate) slots: Vec<SlotInfo>,
     pub(crate) slots_by_at: Vec<u32>,
+    /// Where each variable sits, in the order of its name's key: the order
+    /// a projection walks a frame's bindings in, whatever the layout
+    /// (seam C).
+    pub(crate) ats_by_name: Vec<u32>,
     /// The enclosing code's variables this closure shares.
     pub(crate) captures: Vec<Capture>,
     /// The names a document function reads that no scope of it declares,

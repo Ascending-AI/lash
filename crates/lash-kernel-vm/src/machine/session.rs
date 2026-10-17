@@ -51,7 +51,7 @@ pub(crate) fn start(
     }
     let access = heap.pages().clone();
     let arena: SharedArena = std::rc::Rc::new(std::cell::RefCell::new(
-        lash_kernel_state::arena::Arena::new(),
+        lash_kernel_state::arena::Arena::from_ordinal(heap.next_ordinal()),
     ));
     let mut machine = KernelMachine {
         release: program.release,
@@ -81,7 +81,7 @@ pub(crate) fn start(
         save: None,
         session_cell: matches!(start.target, Target::Main),
         pins: Pins::default(),
-        fresh: Vec::new(),
+        projecting: false,
         charging: true,
         scalar_blocks: false,
         plans: 0,

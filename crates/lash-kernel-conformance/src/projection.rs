@@ -240,6 +240,14 @@ impl<const L: u64> Machine for Plan<L> {
     }
 }
 
+/// The durable ids each checkpoint reaches, in graph order: PLAN-INDEP
+/// over ids holds when two plans' lists are equal (seam C of
+/// `docs/design/kernel-end-state.md`).
+#[cfg(test)]
+pub(crate) fn ids(states: &[Checkpoint]) -> Vec<Vec<lash_kernel_doc::heap::EntityId>> {
+    states.iter().map(|state| state.ids().to_vec()).collect()
+}
+
 /// Compare semantics through the earlier memory refusal; memory verdict and
 /// seal counters are checked independently, never as exact refusal locations.
 #[cfg(test)]
@@ -253,10 +261,12 @@ pub(crate) fn corpus_agrees(
     if !memory(&a.end) && !memory(&b.end) {
         return a == b
             && reference.states == imported.states
+            && ids(&reference.states) == ids(&imported.states)
             && reference.terminal == imported.terminal;
     }
     let prefix = reference.states.len().min(imported.states.len());
     reference.states[..prefix] == imported.states[..prefix]
+        && ids(&reference.states[..prefix]) == ids(&imported.states[..prefix])
         && a.prints.iter().zip(&b.prints).all(|(a, b)| a == b)
         && a.trace.iter().zip(&b.trace).all(|(a, b)| a == b)
 }

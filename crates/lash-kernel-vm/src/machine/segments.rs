@@ -26,11 +26,11 @@ use std::sync::Arc;
 use lash_kernel_doc::arena::ArenaHandle;
 use lash_kernel_doc::plan::PlanExit;
 use lash_kernel_doc::{TaskId, Value};
-use lash_kernel_state::paged::{PhaseRecord, RoleRecord};
+use lash_kernel_state::paged::PhaseRecord;
 
 use super::actions::Target;
 use super::exec::Call;
-use super::frames::Pending;
+use super::frames::{Pending, Role};
 use super::loops::Header;
 use super::operation_entry::AdmittedBody;
 use super::ops::{Answer, Flow, Reg, Status};
@@ -351,9 +351,9 @@ impl KernelMachine {
         if site.act.is_some() {
             let mut roles = Vec::with_capacity(site.roles.len());
             for (path, reg) in &site.roles {
-                roles.push(RoleRecord {
+                roles.push(Role {
                     site: path.clone(),
-                    value: self.page_form(&self.regs[base + *reg as usize])?,
+                    value: self.regs[base + *reg as usize],
                 });
             }
             frame.pending.set(Pending {
@@ -574,10 +574,9 @@ impl KernelMachine {
                         .iter()
                         .flatten()
                         .find(|role| role.site == *path)
-                        .map(|role| run.machine.admit_page(&role.value));
+                        .map(|role| role.value);
                     match role {
-                        Some(Ok(role)) => run.machine.put(base + *reg as usize, role),
-                        Some(Err(halt)) => run.halt = Some(Box::new(halt)),
+                        Some(role) => run.machine.put(base + *reg as usize, role),
                         None => {
                             run.halt =
                                 Some(Box::new(fault("a saved continuation role is missing")));

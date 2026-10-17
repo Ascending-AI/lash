@@ -2,24 +2,36 @@
 //! keeps beside each one (seam D of `docs/design/kernel-end-state.md`).
 //!
 //! Bodies are [`Objects`], what a native call borrows. Beside them, by slot
-//! index, each object's [`Facts`]: its durable identity when it is a
-//! mutable object, whether it changed since it was last projected (one
-//! dirty bit: every object is one resident chunk, swap 2.4(a)), the page
-//! form it was admitted from or last projected to when it is immutable,
-//! its logical cost, and a table's key index.
+//! index, each object's [`Facts`]: its durable identity once a projection
+//! has saved it, whether it changed since it was last projected (one dirty
+//! bit: every object is one resident chunk, swap 2.4(a)), the page form it
+//! was admitted from or last projected to when it is immutable, its logical
+//! cost, a table's key index, and how many members of other objects hold
+//! it.
 //!
 //! The paged heap is the arena's projection. A mutable object read from a
 //! page is a proxy, interned by its [`EntityId`] so the run sees one handle
 //! for it, whose one chunk stays cold until a read reaches it. The machine
 //! decodes it then, outside any native call, and writes every dirty object
-//! back at a projection point or before an exact refinement
-//! (`lash-kernel-vm`'s `machine/project.rs` owns those conversions).
+//! back at a projection point (`lash-kernel-vm`'s `machine/project.rs` owns
+//! those conversions).
 //!
-//! Memory is a conservative bound: [`Arena::young`] counts the logical
-//! growth not yet written to the heap, which the machine adds to the
-//! census's upper bound before every growth. Process memory is reclaimed by
-//! [`Arena::collect`], a mark from what the machine holds plus every dirty
-//! object (a dirty object is the only holder of its contents).
+//! **Ids at projection** (seam C). A new mutable object has no durable id.
+//! A projection gives one to each it saves, in the canonical walk's order
+//! ([`Arena::walk`], then [`Arena::walk_dirty`]), so what dies before a
+//! projection point never takes one, and temporaries a body allocates where
+//! a native allocates none shift no id. A ref used as a map key is keyed
+//! by its referent's process-local token, whatever its id: arena keys never
+//! reach a page.
+//!
+//! **Reachability** (seam D). Every member write counts the object it
+//! names. An object no member holds waits on the zero-count list, and a
+//! release at a statement boundary frees each one the machine's frames do
+//! not hold, with what it alone held ([`Arena::release`]). Cycles are freed
+//! by [`Arena::collect_cycles`], a mark from what the machine holds, which
+//! the machine runs only under pressure and only when a count fell without
+//! reaching zero since the last one. A projection marks nothing: it walks
+//! the new objects its roots reach and the dirty ones only.
 
 mod bench;
 mod keys;
@@ -57,8 +69,8 @@ pub struct Summary {
 /// What the arena knows of one slot beside its body.
 #[derive(Debug, Default)]
 pub struct Facts {
-    /// A mutable object's durable identity: assigned at allocation until
-    /// ids move to projection (swap 2.4(c)).
+    /// A mutable object's durable identity: given by the first projection
+    /// that saves it, or the one its page names, and kept from then on.
     pub entity: Option<EntityId>,
     /// The object changed since it was last projected, or was never
     /// projected: the heap does not hold what the arena does.
@@ -74,6 +86,19 @@ pub struct Facts {
     /// A proxy whose contents the machine has not decoded from the heap:
     /// its body is a cold placeholder of its kind.
     pub cold: bool,
+    /// How many members of arena objects hold it. Frames, registers and
+    /// pins are not counted: a release scans them.
+    count: u32,
+    /// It waits on the zero-count list.
+    zero: bool,
+    /// It waits on the dirty list.
+    listed: bool,
+    /// What a ref to it is keyed by while it is resident: process-local,
+    /// never persisted, independent of where the arena put it.
+    token: u64,
+    /// The seal it was created after, when it was created by the run:
+    /// an object created since the last seal is young (seam I).
+    born: Option<u64>,
     mark: bool,
 }
 
@@ -148,8 +173,29 @@ pub struct Arena {
     facts: Vec<Facts>,
     /// The one handle of each durable object the run has seen.
     entities: HashMap<EntityId, ArenaHandle>,
-    /// Logical growth since the heap last received the arena's objects.
-    young: u64,
+    /// The primary ordinal the next object a projection saves takes.
+    next_ordinal: u64,
+    /// The objects with ids that changed since they were last projected.
+    dirty: Vec<ArenaHandle>,
+    /// The objects no member holds, which a release examines.
+    zero: Vec<ArenaHandle>,
+    /// How long the zero-count list grows before a release is due.
+    release_at: usize,
+    /// Counts that fell without reaching zero since the last cycle
+    /// collection: none means no garbage cycle formed.
+    candidates: u64,
+    tokens: u64,
+    /// Seals and exact refinements since the run began: what tells a
+    /// young object.
+    seals: u64,
+    /// Mutable objects the run created.
+    allocations: u64,
+    /// The mutable objects created since the statement began: until a
+    /// root holds one, only the arena knows it is live.
+    statement: Vec<ArenaHandle>,
+    /// The cost of the young mutable objects released since it was last
+    /// taken (seam I).
+    released_young: u64,
     /// Values held by resident bodies, roughly: what triggers a collection.
     resident: u64,
     /// Objects with a cold chunk, at most: none means nothing needs decoding.
@@ -160,9 +206,13 @@ pub struct Arena {
 /// What a collection's roots are visited with: each value they hold.
 pub type Visit<'a> = dyn FnMut(&Value) + 'a;
 
-/// A collection is due once resident values pass this, and then each time
-/// they double.
+/// A cycle collection is due once resident values pass this, and then each
+/// time they double.
 const FIRST_COLLECTION: u64 = 1 << 16;
+
+/// A release is due once this many objects wait on the zero-count list,
+/// or as many as the last release kept there, if more.
+const FIRST_RELEASE: usize = 1 << 10;
 
 fn malformed(problem: &'static str) -> NativeError {
     NativeError::Malformed(problem)
@@ -172,7 +222,17 @@ impl Arena {
     pub fn new() -> Self {
         Self {
             collect_at: FIRST_COLLECTION,
+            release_at: FIRST_RELEASE,
             ..Self::default()
+        }
+    }
+
+    /// An arena whose projections give primary ordinals from `next`: the
+    /// heap's next ordinal.
+    pub fn from_ordinal(next: u64) -> Self {
+        Self {
+            next_ordinal: next,
+            ..Self::new()
         }
     }
 
@@ -232,33 +292,43 @@ impl Arena {
         Ok((body, facts))
     }
 
-    /// The handle of durable object `entity`, if the run has seen it.
-    #[inline]
-    pub fn handle_of(&self, entity: EntityId) -> Option<ArenaHandle> {
-        self.entities.get(&entity).copied()
+    /// The primary ordinal the next object a projection saves takes.
+    pub fn next_ordinal(&self) -> u64 {
+        self.next_ordinal
     }
 
-    /// The durable identity of the mutable object `handle` names.
-    #[inline]
-    pub fn entity_of(&self, handle: ArenaHandle) -> Result<EntityId, NativeError> {
-        self.facts(handle)?
-            .entity
-            .ok_or_else(|| malformed("an object has no durable identity"))
+    /// How many mutable objects the run has created.
+    pub fn allocations(&self) -> u64 {
+        self.allocations
     }
 
-    /// Logical growth the heap has not received.
-    pub fn young(&self) -> u64 {
-        self.young
+    /// A seal or an exact refinement priced what is live: every object
+    /// created before it is old, and releasing it refunds nothing.
+    pub fn rebased(&mut self) {
+        self.seals += 1;
     }
 
-    /// Counts `bytes` more logical growth.
-    pub fn grow(&mut self, bytes: u64) {
-        self.young = self.young.saturating_add(bytes);
+    /// The statement ended: what it created is held by a root or garbage.
+    pub fn statement_ended(&mut self) {
+        self.statement.clear();
     }
 
-    /// The heap received every object: their growth is the census's now.
-    pub fn flushed(&mut self) {
-        self.young = 0;
+    /// The cost of what the running statement created and no projection
+    /// saved: live, though no root a refinement traces holds it yet.
+    pub fn unprojected(&self) -> u64 {
+        self.statement
+            .iter()
+            .filter(|handle| self.objects.get(**handle).is_some())
+            .filter_map(|handle| self.facts.get(handle.index() as usize))
+            .filter(|facts| facts.entity.is_none())
+            .map(|facts| facts.summary.cost)
+            .fold(0, u64::saturating_add)
+    }
+
+    /// The cost of the young mutable objects released since the last call:
+    /// what the memory counter's young part refunds (seam I).
+    pub fn take_released_young(&mut self) -> u64 {
+        std::mem::take(&mut self.released_young)
     }
 
     /// Whether an object of the arena may have a cold chunk.
@@ -272,18 +342,20 @@ impl Arena {
         Ok(self.facts(handle)?.cold || has_cold(self.body(handle)?))
     }
 
-    /// Installs `body` with `facts`.
-    pub fn insert(&mut self, body: Body, facts: Facts) -> ArenaHandle {
+    /// Installs `body` with `facts`: its members are held, and it waits on
+    /// the zero-count list until a member holds it.
+    fn insert(&mut self, body: Body, facts: Facts) -> ArenaHandle {
         self.resident = self.resident.saturating_add(body_values(&body));
         if facts.cold || has_cold(&body) {
             self.colds = self.colds.saturating_add(1);
         }
+        self.hold_members(&body);
         let handle = self.objects.insert(body);
         self.place(handle, facts);
         handle
     }
 
-    fn place(&mut self, handle: ArenaHandle, facts: Facts) {
+    fn place(&mut self, handle: ArenaHandle, mut facts: Facts) {
         let index = handle.index() as usize;
         if index >= self.facts.len() {
             self.facts.resize_with(index + 1, Facts::default);
@@ -291,7 +363,11 @@ impl Arena {
         if let Some(entity) = facts.entity {
             self.entities.insert(entity, handle);
         }
+        self.tokens += 1;
+        facts.token = self.tokens;
+        facts.zero = true;
         self.facts[index] = facts;
+        self.zero.push(handle);
     }
 
     /// Installs an immutable `body` with its composite `summary`, and the
@@ -312,22 +388,29 @@ impl Arena {
         self.insert(body, facts)
     }
 
-    /// Installs a mutable object `entity` with `body`, dirty: it is fresh,
-    /// or a proxy's contents the caller has just decoded.
-    pub fn insert_object(&mut self, entity: EntityId, body: Body, dirty: bool) -> ArenaHandle {
-        let cost = object_cost(&self.objects, &self.facts, &body);
-        self.insert(
-            body,
-            Facts {
-                entity: Some(entity),
-                dirty,
-                summary: Summary {
-                    cost,
-                    ..Summary::default()
-                },
-                ..Facts::default()
+    /// The facts of a mutable object the run creates: dirty, young, and
+    /// without a durable id until a projection saves it.
+    fn created(&mut self, cost: u64, index: Option<Box<Index>>) -> Facts {
+        self.allocations += 1;
+        Facts {
+            dirty: true,
+            born: Some(self.seals),
+            summary: Summary {
+                cost,
+                ..Summary::default()
             },
-        )
+            index,
+            ..Facts::default()
+        }
+    }
+
+    /// Creates the mutable object `body`.
+    fn insert_created(&mut self, body: Body) -> ArenaHandle {
+        let cost = object_cost(&self.objects, &self.facts, &body);
+        let facts = self.created(cost, None);
+        let handle = self.insert(body, facts);
+        self.statement.push(handle);
+        handle
     }
 
     /// The one handle of durable object `entity`: the one the run already
@@ -356,15 +439,84 @@ impl Arena {
         )
     }
 
-    /// Recomputes a resident mutable object's cost after an edit, marks it
-    /// dirty, and gives its growth.
-    pub fn touched(&mut self, handle: ArenaHandle) -> Result<u64, NativeError> {
-        let cost = object_cost(&self.objects, &self.facts, self.body(handle)?);
-        let facts = self.facts_mut(handle)?;
-        let before = facts.summary.cost;
-        facts.summary.cost = cost;
+    /// Counts a member holding `value`.
+    #[inline]
+    fn hold(&mut self, value: &Value) {
+        if let Some(handle) = value.handle() {
+            self.hold_handle(handle);
+        }
+    }
+
+    #[inline]
+    fn hold_handle(&mut self, handle: ArenaHandle) {
+        if let Some(facts) = self.facts.get_mut(handle.index() as usize) {
+            facts.count = facts.count.saturating_add(1);
+        }
+    }
+
+    /// Uncounts a member that held `value`: an object no member holds any
+    /// more waits on the zero-count list.
+    #[inline]
+    fn unhold(&mut self, value: &Value) {
+        if let Some(handle) = value.handle() {
+            self.unhold_handle(handle);
+        }
+    }
+
+    fn unhold_handle(&mut self, handle: ArenaHandle) {
+        let Some(facts) = self.facts.get_mut(handle.index() as usize) else {
+            return;
+        };
+        // A saturated count stays: the object is freed by a cycle
+        // collection, if ever.
+        if facts.count == u32::MAX {
+            return;
+        }
+        facts.count = facts.count.saturating_sub(1);
+        if facts.count > 0 {
+            self.candidates += 1;
+        } else if !facts.zero {
+            facts.zero = true;
+            self.zero.push(handle);
+        }
+    }
+
+    fn hold_members(&mut self, body: &Body) {
+        each_member(body, &mut |value| {
+            if let Some(handle) = value.handle()
+                && let Some(facts) = self.facts.get_mut(handle.index() as usize)
+            {
+                facts.count = facts.count.saturating_add(1);
+            }
+        });
+        if let Body::Closure { captures, .. } = body {
+            for cell in captures {
+                self.hold_handle(*cell);
+            }
+        }
+    }
+
+    fn unhold_members(&mut self, body: &Body) {
+        let mut members = Vec::new();
+        each_member(body, &mut |value| members.extend(value.handle()));
+        if let Body::Closure { captures, .. } = body {
+            members.extend(captures.iter().copied());
+        }
+        for handle in members {
+            self.unhold_handle(handle);
+        }
+    }
+
+    /// Marks the resident object `handle` changed since it was last
+    /// projected.
+    #[inline]
+    fn changed(&mut self, handle: ArenaHandle) {
+        let facts = &mut self.facts[handle.index() as usize];
         facts.dirty = true;
-        Ok(cost.saturating_sub(before))
+        if facts.entity.is_some() && !facts.listed {
+            facts.listed = true;
+            self.dirty.push(handle);
+        }
     }
 
     /// The logical cost of `value` where it is held: the heap's local
@@ -480,14 +632,11 @@ impl Arena {
     }
 
     /// Installs what a native call built, in reservation order, and gives
-    /// the logical cost of its mutable objects. Each mutable object takes
-    /// its identity from `entity` (swap 2.4(a): at allocation).
-    pub fn install(
-        &mut self,
-        new: Vec<(ArenaHandle, NewObject)>,
-        entity: &mut dyn FnMut() -> Result<EntityId, NativeError>,
-    ) -> Result<u64, NativeError> {
+    /// the logical cost of its mutable objects. None takes a durable id:
+    /// a projection that saves one gives it.
+    pub fn install(&mut self, new: Vec<(ArenaHandle, NewObject)>) -> Result<u64, NativeError> {
         let mut grown = 0u64;
+        let installed: Vec<ArenaHandle> = new.iter().map(|(handle, _)| *handle).collect();
         for (handle, object) in new {
             let (body, facts) = match object {
                 NewObject::List(values) => (
@@ -596,21 +745,20 @@ impl Arena {
             };
             let cost = object_cost(&self.objects, &self.facts, &body);
             grown = grown.saturating_add(cost);
-            let entity = entity()?;
-            self.install_one(
-                handle,
-                body,
-                Facts {
-                    entity: Some(entity),
-                    dirty: true,
-                    summary: Summary {
-                        cost,
-                        ..Summary::default()
-                    },
-                    index: index.map(Box::new),
-                    ..Facts::default()
-                },
-            );
+            let facts = self.created(cost, index.map(Box::new));
+            self.install_one(handle, body, facts);
+            self.statement.push(handle);
+        }
+        // Members are counted once the whole batch is placed: an object
+        // may hold one built after it in the same call.
+        let mut members = Vec::new();
+        for handle in installed {
+            if let Some(body) = self.objects.get(handle) {
+                each_member(body, &mut |value| members.extend(value.handle()));
+            }
+        }
+        for member in members {
+            self.hold_handle(member);
         }
         Ok(grown)
     }
@@ -637,10 +785,14 @@ impl Arena {
         let mutable = self.facts(handle)?.entity.is_some();
         let cost = mutable.then(|| object_cost(&self.objects, &self.facts, &body));
         self.facts_mut(handle)?.cold = false;
-        *self
-            .objects
-            .get_mut(handle)
-            .ok_or_else(|| malformed("a stale handle reached the machine"))? = body;
+        self.hold_members(&body);
+        let placeholder = std::mem::replace(
+            self.objects
+                .get_mut(handle)
+                .ok_or_else(|| malformed("a stale handle reached the machine"))?,
+            body,
+        );
+        self.unhold_members(&placeholder);
         let facts = self.facts_mut(handle)?;
         if let Some(cost) = cost {
             facts.summary.cost = cost;
@@ -663,7 +815,15 @@ impl Arena {
             Some(_) => !facts.dirty,
             None => facts.page.get().is_some(),
         };
-        Ok(paged && self.chill(handle)?.is_some())
+        if !paged {
+            return Ok(false);
+        }
+        // The body is dropped: what it held is held no longer.
+        let Some(chilled) = self.chill(handle)? else {
+            return Ok(false);
+        };
+        self.unhold_members(&chilled.body);
+        Ok(true)
     }
 
     /// Sets the resident body of the list, table, tuple, long text or bytes
@@ -716,7 +876,8 @@ impl Arena {
         Ok(Some(Chilled { body, index }))
     }
 
-    /// Gives `handle` back the body [`Self::chill`] set aside.
+    /// Gives `handle` back the body [`Self::chill`] set aside: what it
+    /// holds stayed counted while it was set aside.
     pub fn thaw(&mut self, handle: ArenaHandle, chilled: Chilled) -> Result<(), NativeError> {
         let Chilled { body, index } = chilled;
         self.resident = self.resident.saturating_add(body_values(&body));
@@ -750,19 +911,25 @@ impl Arena {
         index.resequence(seqs, next)
     }
 
-    /// Every dirty mutable object, in identity order: what projection
-    /// writes to the heap.
-    pub fn dirty_objects(&self) -> Vec<(EntityId, ArenaHandle)> {
-        let mut dirty: Vec<_> = self
-            .entities
-            .iter()
-            .filter(|(_, handle)| {
-                self.facts
-                    .get(handle.index() as usize)
-                    .is_some_and(|facts| facts.dirty)
-            })
-            .map(|(entity, handle)| (*entity, *handle))
-            .collect();
+    /// Takes the dirty list: every object with an id that changed since it
+    /// was last projected, in id order, each still dirty. What a
+    /// projection writes back.
+    pub fn take_dirty(&mut self) -> Vec<(EntityId, ArenaHandle)> {
+        let listed = std::mem::take(&mut self.dirty);
+        let mut dirty = Vec::with_capacity(listed.len());
+        for handle in listed {
+            crate::perf_witness::record(|work| work.projection_visits += 1);
+            if self.objects.get(handle).is_none() {
+                continue;
+            }
+            let facts = &mut self.facts[handle.index() as usize];
+            facts.listed = false;
+            if facts.dirty
+                && let Some(entity) = facts.entity
+            {
+                dirty.push((entity, handle));
+            }
+        }
         dirty.sort_unstable_by_key(|(entity, _)| *entity);
         dirty
     }
@@ -780,29 +947,245 @@ impl Arena {
         Ok(())
     }
 
-    /// Whether a collection is due.
-    pub fn collection_due(&self) -> bool {
-        self.resident >= self.collect_at
+    /// The durable id of the mutable object `handle`, given now if it has
+    /// none: the next primary ordinal. It is dirty already, as every object
+    /// the run creates is until it is projected.
+    pub fn identify(&mut self, handle: ArenaHandle) -> Result<EntityId, NativeError> {
+        if let Some(entity) = self.facts(handle)?.entity {
+            return Ok(entity);
+        }
+        if !is_mutable(self.body(handle)?) {
+            return Err(malformed("an immutable has no durable identity"));
+        }
+        let entity = EntityId {
+            family: lash_kernel_doc::heap::FamilyId::PRIMARY,
+            ordinal: self.next_ordinal,
+        };
+        self.next_ordinal = self
+            .next_ordinal
+            .checked_add(1)
+            .ok_or_else(|| malformed("identity ordinals overflow"))?;
+        self.entities.insert(entity, handle);
+        let facts = &mut self.facts[handle.index() as usize];
+        facts.entity = Some(entity);
+        facts.dirty = true;
+        facts.listed = true;
+        self.dirty.push(handle);
+        Ok(entity)
     }
 
-    /// Releases every object neither reachable from what `roots` visits
-    /// nor dirty: a clean proxy is decoded again from the heap if a page
-    /// names it later. Call only where every value the machine holds is
-    /// visited.
-    pub fn collect(&mut self, roots: &mut dyn FnMut(&mut Visit<'_>)) {
-        let mut pending: Vec<ArenaHandle> = Vec::new();
-        roots(&mut |value| {
-            if let Some(handle) = value.handle() {
-                pending.push(handle);
+    /// The canonical walk from `roots`, in order (seam C): depth first and
+    /// pre-order, it gives each mutable object without an id the next
+    /// ordinal when it first reaches it, descending only into those and
+    /// into immutables that have no page form. An object with an id is
+    /// not descended: what it reaches that is new, it reaches as a dirty
+    /// object, which [`Self::walk_dirty`] walks.
+    pub fn walk(&mut self, roots: &[ArenaHandle]) -> Result<(), NativeError> {
+        let mut pending: Vec<ArenaHandle> = roots.iter().rev().copied().collect();
+        let mut marked = Vec::new();
+        let result = self.walk_from(&mut pending, &mut marked);
+        for handle in marked {
+            self.facts[handle.index() as usize].mark = false;
+        }
+        result
+    }
+
+    /// Walks what every dirty object with an id holds, in id order: the
+    /// new objects only a changed object reaches take their ids after
+    /// those the roots reach.
+    pub fn walk_dirty(&mut self) -> Result<(), NativeError> {
+        let mut dirty: Vec<(EntityId, ArenaHandle)> = self
+            .dirty
+            .iter()
+            .filter(|handle| self.objects.get(**handle).is_some())
+            .filter_map(|handle| {
+                let facts = &self.facts[handle.index() as usize];
+                facts.dirty.then_some((facts.entity?, *handle))
+            })
+            .collect();
+        dirty.sort_unstable_by_key(|(entity, _)| *entity);
+        dirty.dedup_by_key(|(entity, _)| *entity);
+        let mut marked = Vec::new();
+        let mut result = Ok(());
+        for (_, handle) in dirty {
+            crate::perf_witness::record(|work| work.projection_visits += 1);
+            let mut pending = Vec::new();
+            self.push_members(handle, &mut pending)?;
+            result = self.walk_from(&mut pending, &mut marked);
+            if result.is_err() {
+                break;
             }
-        });
+        }
+        for handle in marked {
+            self.facts[handle.index() as usize].mark = false;
+        }
+        result
+    }
+
+    fn walk_from(
+        &mut self,
+        pending: &mut Vec<ArenaHandle>,
+        marked: &mut Vec<ArenaHandle>,
+    ) -> Result<(), NativeError> {
+        while let Some(handle) = pending.pop() {
+            crate::perf_witness::record(|work| work.projection_visits += 1);
+            let Some(body) = self.objects.get(handle) else {
+                return Err(malformed("a stale handle reached the machine"));
+            };
+            let facts = &self.facts[handle.index() as usize];
+            if facts.mark || facts.entity.is_some() {
+                continue;
+            }
+            if is_mutable(body) {
+                self.identify(handle)?;
+            } else if facts.page.get().is_some() {
+                continue;
+            } else {
+                self.facts[handle.index() as usize].mark = true;
+                marked.push(handle);
+            }
+            self.push_members(handle, pending)?;
+        }
+        Ok(())
+    }
+
+    /// Pushes what `handle` holds so that its first member is popped first.
+    fn push_members(
+        &self,
+        handle: ArenaHandle,
+        pending: &mut Vec<ArenaHandle>,
+    ) -> Result<(), NativeError> {
+        let start = pending.len();
+        let body = self.body(handle)?;
+        each_member(body, &mut |value| pending.extend(value.handle()));
+        if let Body::Closure { captures, .. } = body {
+            pending.extend(captures.iter().copied());
+        }
+        pending[start..].reverse();
+        Ok(())
+    }
+
+    /// Whether a release is due: enough objects wait on the zero-count
+    /// list.
+    pub fn release_due(&self) -> bool {
+        self.zero.len() >= self.release_at
+    }
+
+    /// Frees every object on the zero-count list that nothing `roots`
+    /// visits holds, and with it what it alone held. An object with an id
+    /// that changed since it was projected is kept until a projection
+    /// writes it back: a page may name it, and only the arena holds what
+    /// it is. Call only where every value the machine holds outside the
+    /// arena's members is visited: at a statement boundary.
+    pub fn release(&mut self, roots: &mut dyn FnMut(&mut Visit<'_>)) {
+        if self.zero.is_empty() {
+            return;
+        }
+        let rooted = self.mark_roots(roots);
+        let mut pending = std::mem::take(&mut self.zero);
+        let mut kept = Vec::new();
+        while let Some(handle) = pending.pop() {
+            if self.objects.get(handle).is_none() {
+                continue;
+            }
+            let facts = &mut self.facts[handle.index() as usize];
+            if facts.count > 0 {
+                facts.zero = false;
+                continue;
+            }
+            if facts.mark || (facts.entity.is_some() && facts.dirty) {
+                kept.push(handle);
+                continue;
+            }
+            let freed = self.free(handle);
+            for member in freed {
+                let Some(facts) = self.facts.get_mut(member.index() as usize) else {
+                    continue;
+                };
+                if facts.count == u32::MAX {
+                    continue;
+                }
+                facts.count = facts.count.saturating_sub(1);
+                if facts.count == 0 && !facts.zero {
+                    facts.zero = true;
+                    pending.push(member);
+                }
+            }
+        }
+        for handle in rooted {
+            self.facts[handle.index() as usize].mark = false;
+        }
+        self.release_at = kept.len().saturating_mul(2).max(FIRST_RELEASE);
+        self.zero = kept;
+    }
+
+    /// Marks the objects `roots` visits, each once, and gives them.
+    fn mark_roots(&mut self, roots: &mut dyn FnMut(&mut Visit<'_>)) -> Vec<ArenaHandle> {
+        let mut visited = Vec::new();
+        roots(&mut |value| visited.extend(value.handle()));
+        let mut rooted = Vec::with_capacity(visited.len());
+        for handle in visited {
+            if self.objects.get(handle).is_none() {
+                continue;
+            }
+            let facts = &mut self.facts[handle.index() as usize];
+            if !facts.mark {
+                facts.mark = true;
+                rooted.push(handle);
+            }
+        }
+        rooted
+    }
+
+    /// Frees `handle`: gives what its body held, uncounted by the caller.
+    fn free(&mut self, handle: ArenaHandle) -> Vec<ArenaHandle> {
+        let index = handle.index() as usize;
+        let facts = std::mem::take(&mut self.facts[index]);
+        if let Some(entity) = facts.entity {
+            self.entities.remove(&entity);
+        }
+        let mut members = Vec::new();
+        if let Some(body) = self.objects.get(handle) {
+            self.resident = self.resident.saturating_sub(body_values(body));
+            if facts.cold || has_cold(body) {
+                self.colds = self.colds.saturating_sub(1);
+            }
+            // Only an object no projection saved is known dead here: a
+            // page may still name one with an id.
+            if facts.born == Some(self.seals) && facts.entity.is_none() {
+                self.released_young = self.released_young.saturating_add(facts.summary.cost);
+            }
+            each_member(body, &mut |value| members.extend(value.handle()));
+            if let Body::Closure { captures, .. } = body {
+                members.extend(captures.iter().copied());
+            }
+        }
+        self.objects.release(handle);
+        members
+    }
+
+    /// Whether a cycle collection is due: resident values grew past the
+    /// trigger, and some count fell without reaching zero since the last
+    /// collection. Without such a fall no garbage cycle can have formed,
+    /// and the collection exits at once.
+    pub fn cycles_due(&self) -> bool {
+        self.resident >= self.collect_at && self.candidates > 0
+    }
+
+    /// Frees every object neither reachable from what `roots` visits nor
+    /// from an object with an id that changed since it was projected: the
+    /// garbage cycles counts cannot free. A clean proxy is decoded again
+    /// from the heap if a page names it later. Call only where every value
+    /// the machine holds outside the arena's members is visited.
+    pub fn collect_cycles(&mut self, roots: &mut dyn FnMut(&mut Visit<'_>)) {
+        let mut pending: Vec<ArenaHandle> = Vec::new();
+        roots(&mut |value| pending.extend(value.handle()));
         for (index, facts) in self.facts.iter().enumerate() {
             if facts.dirty
-                && let Some(entity) = facts.entity
-                && let Some(handle) = self.entities.get(&entity)
-                && handle.index() as usize == index
+                && facts.entity.is_some()
+                && let Some(handle) = self.objects.handle_at(index as u32)
             {
-                pending.push(*handle);
+                pending.push(handle);
             }
         }
         while let Some(handle) = pending.pop() {
@@ -814,45 +1197,48 @@ impl Arena {
                 continue;
             }
             facts.mark = true;
-            each_member(body, &mut |value| {
-                if let Some(handle) = value.handle() {
-                    pending.push(handle);
-                }
-            });
+            crate::perf_witness::record(|work| work.arena_marks += 1);
+            each_member(body, &mut |value| pending.extend(value.handle()));
             if let Body::Closure { captures, .. } = body {
                 pending.extend(captures.iter().copied());
             }
         }
-        let mut resident = 0u64;
+        let mut survivors = Vec::new();
         for index in 0..self.facts.len() {
-            let facts = &mut self.facts[index];
-            if std::mem::take(&mut facts.mark) {
+            if std::mem::take(&mut self.facts[index].mark) {
                 continue;
             }
             let Some(handle) = self.objects.handle_at(index as u32) else {
                 continue;
             };
-            if let Some(entity) = facts.entity.take() {
-                self.entities.remove(&entity);
-            }
-            *facts = Facts::default();
-            self.objects.release(handle);
+            survivors.extend(self.free(handle));
         }
-        let mut colds = 0u64;
-        for index in 0..self.facts.len() {
-            if let Some(handle) = self.objects.handle_at(index as u32)
-                && let Some(body) = self.objects.get(handle)
-            {
-                resident = resident.saturating_add(body_values(body));
-                if self.facts[index].cold || has_cold(body) {
-                    colds += 1;
-                }
+        // What a freed object held and survives is held one member less.
+        for member in survivors {
+            if self.objects.get(member).is_some() {
+                self.unhold_handle(member);
             }
         }
-        self.resident = resident;
-        self.colds = colds;
-        self.collect_at = resident.saturating_mul(2).max(FIRST_COLLECTION);
+        self.zero
+            .retain(|handle| self.objects.get(*handle).is_some());
+        self.dirty
+            .retain(|handle| self.objects.get(*handle).is_some());
+        self.candidates = 0;
+        self.collect_at = self.resident.saturating_mul(2).max(FIRST_COLLECTION);
     }
+}
+
+/// Whether `body` is a mutable object's: one a durable id names.
+fn is_mutable(body: &Body) -> bool {
+    matches!(
+        body,
+        Body::List(_)
+            | Body::Map(_)
+            | Body::Set(_)
+            | Body::Record(_)
+            | Body::Closure { .. }
+            | Body::Cell(_)
+    )
 }
 
 /// A guest error the arena's own constructors raise.

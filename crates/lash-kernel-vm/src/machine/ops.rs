@@ -203,31 +203,16 @@ impl KernelMachine {
             .saturating_sub(self.heap.certificate().upper.0)
     }
 
-    /// Installs what `new` built, each mutable object a fresh identity of
-    /// the heap's, and gives their logical cost.
+    /// Installs what `new` built, and gives their logical cost. Its mutable
+    /// objects take durable ids when a projection saves them.
     fn install(&mut self, new: Vec<(ArenaHandle, NewObject)>) -> Result<u64, Halt> {
         if new.is_empty() {
             return Ok(0);
         }
-        let heap = &mut self.heap;
-        let fresh = &mut self.fresh;
-        let mut overflowed = None;
-        let mut arena = self.arena.borrow_mut();
-        let grown = arena.install(new, &mut || match heap.take_ordinal() {
-            Ok(entity) => {
-                fresh.push(entity);
-                Ok(entity)
-            }
-            Err(error) => {
-                overflowed = Some(error);
-                Err(NativeError::Malformed("identity ordinals overflow"))
-            }
-        });
-        drop(arena);
-        if let Some(error) = overflowed {
-            return Err(error.into());
-        }
-        grown.map_err(|error| fault(&error.to_string()))
+        self.arena
+            .borrow_mut()
+            .install(new)
+            .map_err(|error| fault(&error.to_string()))
     }
 
     /// Allocates `object` outside a native call, and holds its growth.
@@ -245,9 +230,7 @@ impl KernelMachine {
 
     /// A fresh shared variable holding `value`, its growth held.
     pub(super) fn new_cell(&mut self, value: Value) -> Result<ArenaHandle, Halt> {
-        let entity = self.heap.take_ordinal()?;
-        self.fresh.push(entity);
-        let (cell, cost) = self.arena.borrow_mut().new_cell(entity, value);
+        let (cell, cost) = self.arena.borrow_mut().new_cell(value);
         self.grow(cost)?;
         Ok(cell)
     }
