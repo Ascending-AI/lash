@@ -426,7 +426,9 @@ CREATE TABLE IF NOT EXISTS lash_session_ingress_sequence (
 -- kept for the indexes and checked against it. A terminal names the window it
 -- ended on by the head revision it ended on (FIG-5931, FIG-6606): the window
 -- is that revision's row, retained and released with it, and the terminal
--- roots nothing of its own. Each input row retains the run that executes it.
+-- roots nothing of its own but the transcript a turn's terminal publishes,
+-- the calls it answered (FIG-6601). Each input row retains the run that
+-- executes it.
 -- `lash_control_intents` records a session's close; a
 -- `close_session` row outlives its session as the deletion tombstone.
 CREATE TABLE IF NOT EXISTS lash_session_runs (
@@ -439,7 +441,9 @@ CREATE TABLE IF NOT EXISTS lash_session_runs (
     terminal_head_revision BIGINT,
     terminal_at_ms BIGINT,
     terminal_window_revision BIGINT,
+    terminal_transcript_ref TEXT REFERENCES lash_blobs(hash) ON DELETE RESTRICT,
     PRIMARY KEY (session_id, run),
+    CONSTRAINT ck_session_runs_transcript CHECK (terminal_transcript_ref IS NULL OR terminal_kind IS NOT NULL),
     CONSTRAINT ck_session_runs_terminal_window CHECK (terminal_window_revision IS NULL OR terminal_kind IS NOT NULL),
     CONSTRAINT ck_session_runs_terminal CHECK (((terminal_kind IS NULL AND terminal_cause_json IS NULL AND terminal_head_revision IS NULL AND terminal_at_ms IS NULL) OR (terminal_kind IS NOT NULL AND terminal_kind IN ('answered', 'failed', 'cancelled') AND terminal_cause_json IS NOT NULL AND terminal_at_ms IS NOT NULL)) IS TRUE),
     CONSTRAINT ck_session_runs_terminal_kind CHECK (terminal_kind IS NULL OR terminal_kind = CASE (terminal_cause_json::jsonb ->> 'cause')
@@ -466,6 +470,8 @@ CREATE INDEX IF NOT EXISTS idx_lash_session_runs_open
 
 CREATE INDEX IF NOT EXISTS idx_lash_session_runs_terminal_head_revision
     ON lash_session_runs(session_id, terminal_head_revision);
+CREATE INDEX IF NOT EXISTS idx_lash_session_runs_terminal_transcript_ref
+    ON lash_session_runs(terminal_transcript_ref);
 CREATE TABLE IF NOT EXISTS lash_control_intents (
     intent_id BIGSERIAL PRIMARY KEY,
     session_id TEXT NOT NULL,
@@ -1291,7 +1297,9 @@ CREATE OR REPLACE VIEW lash_graph_root_catalog AS
     UNION ALL SELECT 'revision_config', config_ref FROM lash_session_revisions
     UNION ALL SELECT 'answer', answer_ref FROM lash_turn_phases WHERE answer_ref IS NOT NULL
     UNION ALL SELECT 'lease', root_ref FROM lash_root_leases
-    UNION ALL SELECT 'retirement', root_ref FROM lash_retirement_holds;
+    UNION ALL SELECT 'retirement', root_ref FROM lash_retirement_holds
+    UNION ALL SELECT 'terminal_transcript', terminal_transcript_ref FROM lash_session_runs
+        WHERE terminal_transcript_ref IS NOT NULL;
 
 -- One-call owner commits (FIG-5936): each call's answer, recorded under its
 -- token as the call's last write. A call whose answer was lost is reconciled
@@ -1367,9 +1375,9 @@ DECLARE
     v_answer JSONB;
     v_frame TEXT;
 BEGIN
-    -- Generated from this build's statements (registry 0ed1198eedc989bd); a call
+    -- Generated from this build's statements (registry fdb8580dd131dfd2); a call
     -- built from others is refused, as is any isolation but read committed.
-    IF p_registry IS DISTINCT FROM '0ed1198eedc989bd'
+    IF p_registry IS DISTINCT FROM 'fdb8580dd131dfd2'
         OR current_setting('transaction_isolation') <> 'read committed' THEN
         RAISE EXCEPTION 'lash_owner_commit: registry or isolation refused' USING ERRCODE = 'LX000';
     END IF;
@@ -1791,6 +1799,7 @@ BEGIN
             FOR v_row IN UPDATE lash_session_runs
              SET terminal_kind = (v_p->>2), terminal_cause_json = (v_p->>3),
                  terminal_head_revision = ((v_p->>4)::BIGINT), terminal_at_ms = (v_now),
+                 terminal_transcript_ref = (v_p->>6),
                  terminal_window_revision = (
                      SELECT revision.head_revision FROM lash_session_head AS head
                      JOIN lash_session_revisions AS revision

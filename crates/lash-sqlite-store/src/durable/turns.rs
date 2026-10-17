@@ -355,6 +355,7 @@ pub(super) fn apply(
             run,
             cause,
             head_revision,
+            transcript,
         } => {
             #[cfg(feature = "perf-witness")]
             lash_core_execution::perf_witness::latency::stage(|| {
@@ -392,6 +393,7 @@ pub(super) fn apply(
                         stored,
                         head_revision.map(integer::<i64>).transpose()?,
                         commit.now.0,
+                        transcript.map(|transcript| transcript.to_hex()),
                     ],
                     |_| Ok(()),
                 )
@@ -446,9 +448,14 @@ pub(super) fn apply(
             .map_err(crate::sqlite_conversion_error)?;
             // The cells the turn stopped in are never resumed, and the
             // turn's cancel request is answered by its terminal: neither has
-            // a reader left. The turn's own facts stay as its ledger.
+            // a reader left. Nor has the turn's own ledger: its transcript
+            // names the material its answered calls are read from.
             for root in super::snapshots::retire_under(tx, &ExecKey::turn_cells(session, run))? {
                 commit.retired.stored(root);
+            }
+            let owner = lash_durable::domain::OwnerKey::Turn(session.clone(), run.clone());
+            for record in super::run_records::delete_owner(tx, &owner.stored())? {
+                commit.retired.stored(record);
             }
             cached_execute(
                 tx,

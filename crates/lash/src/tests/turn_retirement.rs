@@ -1,16 +1,18 @@
 //! What a turn's end and its session's delete leave behind (FIG-5939; ADR
 //! 0067 §3, ADR 0132 §4, §6).
 //!
-//! A turn's run facts are its one tool-call ledger: they live as long as its
-//! run row, and its report reads them alone. Everything else a turn wrote per
+//! A turn's run facts are its recovery ledger until its terminal, which
+//! publishes its transcript, the calls it answered, and retires the ledger
+//! in the same commit (FIG-6601): the transcript lives as long as its
+//! run row, and its report reads it alone. Everything else a turn wrote per
 //! call is working state that dies with its last reader: a consumed cell's
 //! own facts and admissions with its root, the root, admissions and facts of
 //! a cell the turn stopped in, and the turn's cancel request at its end; its
 //! waits compact to the tombstones a late resolution is answered from. A
 //! session's delete removes every engine row it owns but its terminal actor.
 //!
-//! Every law runs RLM turns on the core's own node over a SQLite memory
-//! store set, whose engine rows it reads back raw.
+//! Every law runs turns on the core's own node over a SQLite memory store
+//! set, whose engine rows it reads back raw.
 
 use super::*;
 use crate::{TurnCancelMode, TurnInput};
@@ -200,9 +202,13 @@ impl World {
 }
 
 /// The engine rows `run` of `session` left at its end: none of its cells'
-/// and no cancel request, only wait tombstones, and its ledger. Answers the
-/// ledger's RoundFact nodes.
-fn assert_retired(world: &World, session: &str, run: &str) -> Vec<String> {
+/// and no cancel request, only wait tombstones, and no ledger; its
+/// transcript instead. Answers the transcript's nodes.
+async fn assert_retired(
+    world: &World,
+    session: &str,
+    run: &str,
+) -> std::collections::BTreeSet<String> {
     let journal = lash_core::ExecutionScope::turn(
         crate::SessionId::fixture(session),
         crate::TurnId::fixture(run),
@@ -236,12 +242,23 @@ fn assert_retired(world: &World, session: &str, run: &str) -> Vec<String> {
         waits.iter().all(|wait| wait.ends_with(" tombstone")),
         "the turn's end left a wait whole: {waits:#?}"
     );
-    let ledger = world.rows(&format!("run_records t/{session}/{run} "));
-    assert!(!ledger.is_empty(), "the turn's end kept its ledger");
-    ledger
-        .iter()
-        .filter_map(|row| row.rsplit(' ').next().map(str::to_owned))
-        .collect()
+    let ledger = ledger(&world.stores, session, run);
+    assert!(
+        ledger.is_empty(),
+        "the turn's end left its ledger: {ledger:#?}"
+    );
+    let transcript = lash_core::testing::turn_transcript(
+        world
+            .core
+            .effect_host()
+            .durable_reads()
+            .expect("the durable reads"),
+        &crate::SessionId::fixture(session),
+        &crate::TurnId::fixture(run),
+    )
+    .await
+    .expect("the turn's end published its transcript");
+    transcript.nodes.keys().map(|id| id.to_hex()).collect()
 }
 
 /// The tool names a report lists, in its order.
@@ -255,12 +272,12 @@ fn tools(report: &crate::TurnReport) -> Vec<String> {
 
 /// A turn cancelled while its cell parks on an approval retires, in its
 /// cancel, the cell it stopped in (root, admissions, the cell's own facts),
-/// its cancel request and its waits' payloads, and keeps its ledger. The
-/// report a follower reads after that cleanup, and after a collection, is
+/// its cancel request and its waits' payloads, and its ledger, keeping its
+/// transcript. The report a follower reads after that cleanup, and after a collection, is
 /// the live one, the stopped cell's lookup included; a late resolution of
 /// the approval answers `Revoked`.
 #[tokio::test(flavor = "multi_thread", worker_threads = 4)]
-async fn a_cancelled_turn_retires_the_cell_it_stopped_in_and_keeps_its_ledger() -> Result<()> {
+async fn a_cancelled_turn_retires_the_cell_it_stopped_in_and_keeps_its_transcript() -> Result<()> {
     let (session_name, run) = ("retire-cancelled", "retire-cancelled-run");
     let mut world = World::new(false).await?;
     let session = world.session(session_name).await?;
@@ -326,7 +343,7 @@ async fn a_cancelled_turn_retires_the_cell_it_stopped_in_and_keeps_its_ledger() 
         "the stopped cell's settled lookup is reported"
     );
 
-    assert_retired(&world, session_name, run);
+    assert_retired(&world, session_name, run).await;
     assert_eq!(
         world.resolve(&key, serde_json::json!("late")).await,
         lash_core::ResolveAnswer::Revoked,
@@ -337,7 +354,7 @@ async fn a_cancelled_turn_retires_the_cell_it_stopped_in_and_keeps_its_ledger() 
     assert_eq!(durable.source, crate::ReportSource::Durable);
     assert_eq!(
         durable.tool_calls, live.tool_calls,
-        "the ledger reports what the live report did"
+        "the transcript reports what the live report did"
     );
     drop(session);
     world.core.shutdown().await?;
@@ -346,7 +363,7 @@ async fn a_cancelled_turn_retires_the_cell_it_stopped_in_and_keeps_its_ledger() 
 
 /// A turn whose cell parks on an approval the host grants, and then
 /// finishes, consumes the cell at its end: its root, admissions and own
-/// facts go, its waits compact, and its ledger stays. The compacted
+/// facts go, its waits compact, and its transcript replaces its ledger. The compacted
 /// approval still answers its host as ADR 0132 §6 says: the granted
 /// answer's retry is `AlreadyResolved`, another answer a `Conflict`. A
 /// follower's report after a collection is the live one.
@@ -375,16 +392,14 @@ async fn a_committed_turn_retires_its_consumed_cell_and_compacts_its_waits() -> 
         tools(&live)
     );
 
-    let facts = world
-        .core
-        .effect_host()
-        .durable_reads()?
-        .run_facts(&lash_core::durable_port::domain::OwnerKey::Turn(
-            session.session_id().clone(),
-            crate::TurnId::fixture(run),
-        ))
-        .await?;
-    let sizes = lash_core::testing::cell_ledger_bytes(&facts, &live.tool_calls)
+    assert_retired(&world, session_name, run).await;
+    let transcript = lash_core::testing::turn_transcript(
+        world.core.effect_host().durable_reads()?,
+        session.session_id(),
+        &crate::TurnId::fixture(run),
+    )
+    .await?;
+    let sizes = lash_core::testing::cell_ledger_bytes(&transcript, &live.tool_calls)
         .expect("the stored ledger sizes read");
     eprintln!(
         "FIG-6171 3 calls: report={} held={} previous_copy={}",
@@ -394,7 +409,6 @@ async fn a_committed_turn_retires_its_consumed_cell_and_compacts_its_waits() -> 
         sizes.1 < sizes.2,
         "the full retained call ledger shrinks: {sizes:?}"
     );
-    assert_retired(&world, session_name, run);
     assert_eq!(
         world.resolve(&key, granted).await,
         lash_core::ResolveAnswer::AlreadyResolved,
@@ -427,14 +441,14 @@ async fn a_committed_turn_retires_its_consumed_cell_and_compacts_its_waits() -> 
 }
 
 /// A session's delete removes every engine row that names it but its
-/// terminal actor: its turns' ledgers and wait tombstones go in the same
-/// transaction, and its delete and a collection reclaim the nodes only its
-/// ledgers held. Another session's ledger, and its report, stay whole.
+/// terminal actor: its runs, with their transcripts, and its wait
+/// tombstones go in the same transaction, and its delete and a collection
+/// reclaim the nodes only its transcripts held. Another session's
+/// transcript, and its report, stay whole.
 #[tokio::test(flavor = "multi_thread", worker_threads = 4)]
 async fn a_deleted_session_leaves_no_engine_row_and_only_its_own_nodes_go() -> Result<()> {
     let mut world = World::new(true).await?;
-    let mut ledgers = Vec::new();
-    let mut call_nodes = Vec::new();
+    let mut transcripts = Vec::new();
     let mut kept = None;
     for name in ["retire-deleted", "retire-kept"] {
         let run = format!("{name}-run");
@@ -450,28 +464,12 @@ async fn a_deleted_session_leaves_no_engine_row_and_only_its_own_nodes_go() -> R
             .await;
         let live = handle.output().await?.result;
         assert_eq!(live.status(), crate::TurnStatus::Answered);
-        ledgers.push(assert_retired(&world, name, &run));
-        let facts = world
-            .core
-            .effect_host()
-            .durable_reads()?
-            .run_facts(&lash_core::durable_port::domain::OwnerKey::Turn(
-                session.session_id().clone(),
-                crate::TurnId::fixture(&run),
-            ))
-            .await?;
-        call_nodes.push(
-            facts
-                .nodes
-                .keys()
-                .map(|id| id.to_hex())
-                .collect::<std::collections::BTreeSet<_>>(),
-        );
+        transcripts.push(assert_retired(&world, name, &run).await);
         if name == "retire-kept" {
             kept = Some((session, input, live));
         }
     }
-    let (deleted, others) = (&ledgers[0], &ledgers[1]);
+    let (deleted, others) = (&transcripts[0], &transcripts[1]);
 
     delete_session_and_await(&world.core, "retire-deleted").await?;
     world.collect().await;
@@ -481,25 +479,15 @@ async fn a_deleted_session_leaves_no_engine_row_and_only_its_own_nodes_go() -> R
         "the deleted session left engine rows: {left:#?}"
     );
     let blobs = world.blobs();
-    let reclaimed = deleted.iter().filter(|node| !blobs.contains(*node)).count();
-    assert_eq!(
-        reclaimed,
-        deleted.len(),
-        "the deleted session's ledger nodes are reclaimed"
-    );
-    assert!(
-        others.iter().all(|node| blobs.contains(node)),
-        "another session's ledger nodes survive"
-    );
-    for node in call_nodes[0].difference(&call_nodes[1]) {
+    for node in deleted.difference(others) {
         assert!(
             !blobs.contains(node),
-            "the deleted call ledger retained node {node}"
+            "the deleted session's transcript retained node {node}"
         );
     }
     assert!(
-        call_nodes[1].iter().all(|node| blobs.contains(node)),
-        "the other call ledger stays reachable"
+        others.iter().all(|node| blobs.contains(node)),
+        "another session's transcript stays reachable"
     );
     let (session, input, live) = kept.expect("the kept session ran");
     let durable = session.attach(input).output().await?.result;
@@ -717,5 +705,298 @@ async fn a_new_session_naming_a_retired_plugin_is_refused_typed() -> Result<()> 
         if *refusal == crate::plugins::RetirementRefusal::Admission { registry: crate::plugins::RegistryKind::Session, id: "retired-spare".into() })
     );
     core.shutdown().await?;
+    Ok(())
+}
+
+/// A settled turn's tool calls as each read path answers them on `core`:
+/// the durable report a follower attaches to, the committed-turn read, and
+/// each call's turn-addressed read.
+async fn settled_reads(
+    core: &LashCore,
+    session: &str,
+    run: &str,
+    input: &crate::InputId,
+) -> Result<Vec<lash_core::ToolCallRecord>> {
+    let session = core
+        .session(crate::SessionId::fixture(session))
+        .durable()
+        .await?;
+    let report = session.attach(input.clone()).output().await?.result;
+    assert_eq!(report.source, crate::ReportSource::Durable);
+    let committed = session
+        .committed_turn(&crate::TurnId::fixture(run))
+        .await?
+        .expect("the turn committed");
+    assert_eq!(committed.tool_calls, report.tool_calls);
+    for call in &report.tool_calls {
+        assert_eq!(
+            session
+                .read_tool_call(&crate::TurnToolCallRef {
+                    turn_id: crate::TurnId::fixture(run),
+                    call_id: call.call_id.clone()
+                })
+                .await?,
+            crate::ToolCallRead::Settled {
+                record: Box::new(call.clone())
+            }
+        );
+    }
+    Ok(report.tool_calls)
+}
+
+/// The turn's operational ledger rows.
+fn ledger(stores: &lash_sqlite_store::SqliteStoreSet, session: &str, run: &str) -> Vec<String> {
+    lash_sqlite_store::testing::engine_rows_for_testing(stores)
+        .expect("the engine rows read")
+        .into_iter()
+        .filter(|row| row.starts_with(&format!("run_records t/{session}/{run} ")))
+        .collect()
+}
+
+/// The transcript root the turn's terminal published.
+fn transcript(
+    stores: &lash_sqlite_store::SqliteStoreSet,
+    session: &str,
+    run: &str,
+) -> Option<String> {
+    lash_sqlite_store::testing::read_rows_for_testing(
+        stores,
+        &format!(
+            "SELECT terminal_transcript_ref FROM session_runs \
+             WHERE session_id = '{session}' AND run = '{run}'"
+        ),
+    )
+    .expect("the run row reads")
+    .into_iter()
+    .next()
+    .and_then(|row| {
+        row.first()
+            .and_then(|(_, hash)| hash.as_str().map(str::to_owned))
+    })
+}
+
+/// TERMINAL-TRANSCRIPT-WITHOUT-RECOVERY-LOG (FIG-6601), its cell leg: a
+/// turn whose cell parks on an approval loses its node before its terminal.
+/// A successor recovers the turn from its ledger, the cell answers, and the
+/// terminal publishes the turn's transcript and retires the ledger in the
+/// same commit. Every read of the settled calls answers the cell's lookup
+/// and approval from the transcript alone, and a reopened core reads the
+/// same records after a collection.
+#[tokio::test(flavor = "multi_thread", worker_threads = 4)]
+async fn a_recovered_cell_turn_reads_its_calls_from_its_transcript_without_its_ledger() -> Result<()>
+{
+    let (session_name, run) = ("transcript-cell", "transcript-cell-run");
+    let mut world = World::new(true).await?;
+    let session = world.session(session_name).await?;
+    let handle = session
+        .send(TurnInput::text("look up, then ask"))
+        .id(crate::TurnId::fixture(run))
+        .await?;
+    let input = handle.input_id().clone();
+    let key = world.parked().await;
+    assert!(
+        !world
+            .rows(&format!("exec_snapshots c/{session_name}/{run}/"))
+            .is_empty(),
+        "the parked cell's recovery state is saved before the terminal"
+    );
+    world.core.node.stop().await;
+    drop((handle, session));
+
+    let backend = lash_conformance::backend_over(Arc::clone(&world.stores) as Arc<_>);
+    let successor = || {
+        let (keys, _) = tokio::sync::mpsc::unbounded_channel();
+        explicit_ephemeral_facets(rlm_core_builder_over(backend.clone()))
+            .serve_test_llm_profile(
+                text_provider("turn-retirement", cell(true)),
+                mock_llm_profile_spec(),
+            )
+            .tools(
+                crate::tool_provider_key!("tools"),
+                Arc::new(ApprovalTools { keys }),
+            )
+            .build(crate::tests::host::runtime_lease_owner())
+    };
+    let second = successor()?;
+    assert_eq!(
+        second
+            .completions()
+            .resolve(
+                &key,
+                lash_core::Resolution::Ok(serde_json::json!({ "approved": true }))
+            )
+            .await?,
+        lash_core::ResolveAnswer::Resolved
+    );
+    let recovered = settled_reads(&second, session_name, run, &input).await?;
+    assert_eq!(
+        recovered
+            .iter()
+            .map(|call| call.output.outcome.clone())
+            .collect::<Vec<_>>(),
+        [
+            serde_json::json!({ "found": true }),
+            serde_json::json!({ "approved": true }),
+            serde_json::Value::Null,
+        ]
+        .map(|value| lash_core::ToolCallOutcome::Success(value.into())),
+        "the recovered turn reports the cell's lookup, approval and finish in order"
+    );
+    let left = ledger(&world.stores, session_name, run);
+    assert!(
+        left.is_empty(),
+        "the settled turn retired its recovery ledger: {left:#?}"
+    );
+    assert!(
+        transcript(&world.stores, session_name, run).is_some(),
+        "the terminal published its transcript"
+    );
+    second.shutdown().await?;
+
+    world.collect().await;
+    let reopened = successor()?;
+    assert_eq!(
+        settled_reads(&reopened, session_name, run, &input).await?,
+        recovered,
+        "a reopened core reads the same calls after a collection"
+    );
+    reopened.shutdown().await?;
+    Ok(())
+}
+
+/// The native tool of the retry leg: its first attempt fails transiently,
+/// its second answers.
+struct FlakyLookup {
+    attempts: Arc<AtomicUsize>,
+}
+
+const FLAKY: &str = "flaky_lookup";
+
+fn flaky_definition() -> lash_core::ToolDefinition {
+    tool(FLAKY, false).with_execution_policy(lash_core::ExecutionPolicy::repeatable(
+        std::num::NonZeroU32::new(2).expect("nonzero attempt bound"),
+        0,
+        0,
+    ))
+}
+
+#[async_trait]
+impl ToolProvider for FlakyLookup {
+    fn tool_manifests(
+        &self,
+        _config: &lash_core::OwnerConfigView,
+    ) -> std::result::Result<Vec<lash_core::ToolManifest>, crate::plugins::PluginError> {
+        Ok(vec![flaky_definition().manifest()])
+    }
+
+    fn resolve_contract(
+        &self,
+        name: &str,
+        _config: &lash_core::OwnerConfigView,
+    ) -> Option<Arc<lash_core::ToolContract>> {
+        (name == FLAKY).then(|| Arc::new(flaky_definition().contract()))
+    }
+
+    async fn execute(&self, _call: lash_core::ToolCall<'_>) -> lash_core::ToolAttemptOutcome {
+        if self.attempts.fetch_add(1, Ordering::SeqCst) == 0 {
+            return lash_core::ToolOutcome::failure_with_delay(
+                lash_core::ToolFailureClass::External,
+                "transient",
+                "transient failure",
+                Some(0),
+            )
+            .into();
+        }
+        lash_core::ToolOutcome::ok(serde_json::json!({ "found": "after a retry" })).into()
+    }
+}
+
+/// TERMINAL-TRANSCRIPT-WITHOUT-RECOVERY-LOG (FIG-6601), its native leg: a
+/// standard turn's native call fails once and answers on its retry. Its
+/// terminal retires the admission, starts, retry, outcome and presentation
+/// facts, and the live report's call is what every read answers from the
+/// transcript, on the core that ran it and on a reopened one.
+#[tokio::test(flavor = "multi_thread", worker_threads = 4)]
+async fn a_retried_native_call_reads_from_its_transcript_without_its_ledger() -> Result<()> {
+    let (session_name, run) = ("transcript-native", "transcript-native-run");
+    let stores = sqlite_memory_store_set().await;
+    let backend = lash_conformance::backend_over(Arc::clone(&stores) as Arc<_>);
+    let attempts = Arc::new(AtomicUsize::new(0));
+    let core = || {
+        let model = crate::testing::TestProvider::builder()
+            .kind("transcript-native")
+            .complete(move |request| async move {
+                let answered = request.messages.iter().any(|message| {
+                    message
+                        .blocks
+                        .iter()
+                        .any(|block| matches!(block, LlmContentBlock::ToolResult { .. }))
+                });
+                if answered {
+                    return Ok(text_response("looked up"));
+                }
+                Ok(LlmResponse {
+                    parts: vec![LlmOutputPart::ToolCall {
+                        call_id: "flaky-call".to_string(),
+                        tool_name: FLAKY.to_string(),
+                        input_json: "{}".to_string(),
+                        replay: None,
+                    }],
+                    ..LlmResponse::default()
+                })
+            })
+            .build()
+            .into_handle();
+        explicit_ephemeral_facets(LashCore::standard_builder(backend.clone()))
+            .serve_test_llm_profile(model, mock_llm_profile_spec())
+            .tools(
+                crate::tool_provider_key!("tools"),
+                Arc::new(FlakyLookup {
+                    attempts: Arc::clone(&attempts),
+                }),
+            )
+            .build(crate::tests::host::runtime_lease_owner())
+    };
+    let first = core()?;
+    let session = first
+        .session(crate::SessionId::fixture(session_name))
+        .create(crate::SessionCreation::root(mock_session_spec()))
+        .await?;
+    let handle = session
+        .send(TurnInput::text("look it up"))
+        .id(crate::TurnId::fixture(run))
+        .await?;
+    let input = handle.input_id().clone();
+    let live = handle.output().await?.result;
+    assert_eq!(live.status(), crate::TurnStatus::Answered);
+    assert_eq!(
+        attempts.load(Ordering::SeqCst),
+        2,
+        "the call was retried once"
+    );
+    assert_eq!(tools(&live), vec![FLAKY.to_owned()]);
+    let left = ledger(&stores, session_name, run);
+    assert!(
+        left.is_empty(),
+        "the settled turn retired its recovery ledger: {left:#?}"
+    );
+    assert!(
+        transcript(&stores, session_name, run).is_some(),
+        "the terminal published its transcript"
+    );
+    assert_eq!(
+        settled_reads(&first, session_name, run, &input).await?,
+        live.tool_calls
+    );
+    drop(session);
+    first.shutdown().await?;
+
+    let reopened = core()?;
+    assert_eq!(
+        settled_reads(&reopened, session_name, run, &input).await?,
+        live.tool_calls,
+        "a reopened core reads the live report's call"
+    );
+    reopened.shutdown().await?;
     Ok(())
 }

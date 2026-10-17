@@ -494,6 +494,7 @@ async fn turn_commit_round_trips(holds_artifacts: bool) {
                 },
             }),
             head_revision: Some(expected_head.saturating_add(1)),
+            transcript: None,
         }));
         tx.write(DomainWrite::Wait(
             lash_durable::domain::WaitWrite::RevokeScope(scope.clone()),

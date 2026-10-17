@@ -158,7 +158,13 @@ async fn once(
         .flat_map(|write| &write.starts)
         .collect();
     for owner in owners {
-        let rows = match nodes.database().run_facts(&owner).await {
+        // A turn's terminal retires its stored ledger (FIG-6601): its
+        // ledger is what its commits appended.
+        let stored = match &owner {
+            OwnerKey::Turn(..) => Ok(nodes.script().ledger(&owner)),
+            OwnerKey::Process(_) | OwnerKey::Cell(..) => nodes.database().run_facts(&owner).await,
+        };
+        let rows = match stored {
             Ok(rows) => rows,
             Err(error) => {
                 violations.push(format!("fold: {owner:?}'s records do not read: {error}"));
@@ -386,6 +392,7 @@ mod tests {
             cut: Some(Fault::Zombie),
             stored: Stored::NotEntered,
             starts: Vec::new(),
+            facts: std::sync::Arc::default(),
         };
         let committed = Write {
             point: Point {

@@ -102,6 +102,8 @@ pub enum RootOwner {
     WorkingExecution { session: SessionId, run: TurnId },
     /// `turn_phases.answer_ref`.
     ModelAnswer { session: SessionId, run: TurnId },
+    /// `session_runs.terminal_transcript_ref`.
+    RunTranscript { session: SessionId, run: TurnId },
     /// `turn_namespaces`.
     TurnNamespace {
         session: SessionId,
@@ -134,6 +136,7 @@ impl RootOwner {
             Self::TurnPhase { .. } => RootSource::TurnPhase,
             Self::WorkingExecution { .. } => RootSource::WorkingExecution,
             Self::ModelAnswer { .. } => RootSource::ModelAnswer,
+            Self::RunTranscript { .. } => RootSource::RunTranscript,
             Self::TurnNamespace { .. } => RootSource::TurnNamespace,
             Self::SessionRevision { .. } => RootSource::SessionRevision,
             Self::SessionAdmissionBase { .. } => RootSource::SessionAdmissionBase,
@@ -600,6 +603,19 @@ impl DomainWrite {
                     StoredValues::Base | StoredValues::Held => None,
                 })
                 .collect(),
+            Self::Turn(TurnWrite::Terminal {
+                session,
+                run,
+                transcript,
+                ..
+            }) => one(change(
+                RootOwner::RunTranscript {
+                    session: session.clone(),
+                    run: run.clone(),
+                },
+                None,
+                *transcript,
+            )),
             Self::ReleasePin(ReleasePinWrite::Install { release, root }) => one(change(
                 RootOwner::ReleasePin {
                     release: release.clone(),

@@ -26,6 +26,8 @@ use lash_core_store::tool_run::SettledOutput;
 ///         cover(RoundFact, AdmitMember, PinnedMember, SettledFact, MaterialNode, StoredOutcome, CallOutcome, ReportView),
 ///         path = "crates/lash-core-execution/src/runtime/actor/round/call_body.rs",
 ///         cover(StoredBody, CallBody),
+///         path = "crates/lash-core-execution/src/runtime/actor/round/transcript.rs",
+///         cover(TurnTranscript, TranscriptEntry),
 ///     ),
 /// )
 /// version_surface = "drain"

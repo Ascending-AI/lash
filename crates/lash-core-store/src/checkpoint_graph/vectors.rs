@@ -526,6 +526,20 @@ pub const GRAMMAR_VECTORS: &str = r##"{
       "shape": "Enveloped"
     },
     {
+      "bound": 65536,
+      "kind": 44,
+      "name": "ModelCallFact",
+      "owner": "Host",
+      "shape": "Enveloped"
+    },
+    {
+      "bound": 65536,
+      "kind": 45,
+      "name": "TurnTranscript",
+      "owner": "Integrator",
+      "shape": "Enveloped"
+    },
+    {
       "bound": 4096,
       "kind": 1000,
       "name": "CheckpointRoot",
@@ -673,6 +687,18 @@ pub const GRAMMAR_VECTORS: &str = r##"{
       "postgres": "lash_retirement_holds.root_ref",
       "source": "retirement",
       "sqlite": "retirement_holds.root_ref"
+    },
+    {
+      "number": 17,
+      "postgres": "lash_model_call_records.record_ref",
+      "source": "model_call",
+      "sqlite": "model_call_records.record_ref"
+    },
+    {
+      "number": 18,
+      "postgres": "lash_session_runs.terminal_transcript_ref",
+      "source": "terminal_transcript",
+      "sqlite": "session_runs.terminal_transcript_ref"
     }
   ]
 }"##;

@@ -975,9 +975,10 @@ pub(crate) async fn delete_session_tx(
     .map_err(store_sqlx_error)?;
     let (leaf_node_id, checkpoint_ref) = head.unwrap_or((None, None));
     // What the session roots: its head, every revision it still retains
-    // (the windows its terminals name among them) and its admission base. Its pins,
-    // revisions, runs and metadata go with it, so each root they held is
-    // retired here and held below.
+    // (the windows its terminals name among them), its turns' transcripts and
+    // its admission base. Its pins, revisions, runs and metadata go with it, so
+    // each root they held is retired here and held below.
+    let runs = &crate::session_runs::session_runs_sql().runs;
     let mut checkpoint_refs: std::collections::BTreeSet<String> = session_texts(
         tx,
         session_sql().revisions.select_session_checkpoints.sql(),
@@ -985,6 +986,7 @@ pub(crate) async fn delete_session_tx(
     )
     .await?
     .into_iter()
+    .chain(session_texts(tx, runs.select_session_transcripts.sql(), session_id).await?)
     .collect();
     let mut retained_leaves: std::collections::BTreeSet<String> = session_texts(
         tx,

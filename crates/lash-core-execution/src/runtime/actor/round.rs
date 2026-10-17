@@ -98,6 +98,7 @@ mod rounds;
 mod runner;
 mod store_local;
 mod tools;
+mod transcript;
 
 #[doc(hidden)]
 pub use fold::RunRecords;
@@ -120,6 +121,7 @@ pub use tools::{
     completed_material, decode_completed, request_material, require_admitted, settle_cancelled,
     unsettled,
 };
+pub use transcript::{TranscriptEntry, TurnTranscript};
 
 use records::{OutcomeBody, Record, append, first_start};
 

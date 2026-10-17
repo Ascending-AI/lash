@@ -88,9 +88,10 @@ pub(super) async fn delete_session_from_catalog(
                 )?;
             }
             // What the session roots: its head, every revision it still
-            // retains (the windows its terminals name among them) and its
-            // admission base. Its pins, revisions, runs and metadata go with it, so
-            // each root they held is retired here and held below.
+            // retains (the windows its terminals name among them), its turns'
+            // transcripts and its admission base. Its pins, revisions, runs and
+            // metadata go with it, so each root they held is retired here and
+            // held below.
             let text_column = |sql: &str| -> Result<Vec<String>, lash_core_execution::StoreError> {
                 let mut stmt = tx.prepare(sql).map_err(sqlite_error)?;
                 let rows = stmt
@@ -101,6 +102,12 @@ pub(super) async fn delete_session_from_catalog(
             let mut roots: std::collections::BTreeSet<String> =
                 text_column(session_sql().revisions.select_session_checkpoints.sql())?
                     .into_iter()
+                    .chain(text_column(
+                        crate::session_runs::session_runs_sql()
+                            .runs
+                            .select_session_transcripts
+                            .sql(),
+                    )?)
                     .collect();
             roots.extend(checkpoint_ref);
             roots.extend(

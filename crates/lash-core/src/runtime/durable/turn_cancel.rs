@@ -58,7 +58,7 @@
 use std::future::Future;
 
 pub(super) use lash_core_execution::runtime::turn_control::{close_requested_in, immediate_in};
-use lash_durable::domain::{DomainWrite, OwnerKey, RunSeq, TurnWrite};
+use lash_durable::domain::{OwnerKey, RunSeq};
 use lash_durable::runner::{Exit, Owned};
 use lash_durable::{CommitLabel, DurableError, Release};
 
@@ -504,12 +504,8 @@ async fn end(
         );
         drive = Some(stopped);
     }
-    tx.write(DomainWrite::Turn(TurnWrite::Terminal {
-        session: row.session.clone(),
-        run: row.run.clone(),
-        cause: Box::new(cause),
-        head_revision,
-    }));
+    super::turn_terminal::write_terminal(cx, &mut tx, &row.session, &row.run, cause, head_revision)
+        .await?;
     // The turn's scope ends with its cancel (L6b): its waits are revoked and
     // its first batch of `Until` children marked; the next pass marks the rest.
     super::turn_scope::end_turn_scope(cx, &mut tx, &row.session, &row.run).await?;

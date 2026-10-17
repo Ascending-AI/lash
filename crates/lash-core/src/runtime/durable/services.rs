@@ -76,7 +76,7 @@ impl RuntimeTurnServices {
     /// Read the committed turn named by its durable identity on any node.
     /// Its terminal supplies the commit revision; one existing committed-turn
     /// page reads precisely that receipt and its retained transcript, then the
-    /// turn's original tool-call ledger supplies its call bodies.
+    /// turn's call transcript supplies its call bodies.
     ///
     /// # Errors
     ///
@@ -129,7 +129,7 @@ impl RuntimeTurnServices {
         if read.turn_id != *turn {
             return Err(corrupt("the commit revision names another turn").into());
         }
-        let tool_calls = Self::recorded_tool_calls(cx, session, turn, decoders).await?;
+        let tool_calls = Self::settled_tool_calls(cx, session, turn, decoders).await?;
         Ok(Some(crate::transcript::CommittedTurnWithCalls {
             model_calls: cx
                 .durable_reads()?
@@ -143,16 +143,21 @@ impl RuntimeTurnServices {
         }))
     }
 
-    /// Materialize a turn's original call ledger in admission order. Cell
-    /// reports retain references to the existing admission/outcome nodes;
-    /// the offline protocol decoder reconstructs their exact typed arguments.
-    /// Waits and consumed cell rows are unnecessary. A call with no completed
-    /// material has no body and is skipped, never summarized as omitted.
+    /// The calls an open turn answered so far, in the order its runs
+    /// answered them: the derivation its terminal's transcript records
+    /// ([`TurnTranscript::of`]), over its ledger as it stands. Cell reports
+    /// retain references to the existing admission/outcome nodes; the
+    /// offline protocol decoder reconstructs their exact typed arguments. A
+    /// call with no completed material has no body and is skipped, never
+    /// summarized as omitted.
     ///
     /// # Errors
     ///
-    /// A durable read, fold or decoding refusal, preserving its typed cause.
-    pub async fn recorded_tool_calls(
+    /// A durable read, ledger or decoding refusal, preserving its typed
+    /// cause.
+    ///
+    /// [`TurnTranscript::of`]: lash_core_execution::runtime::actor::round::TurnTranscript::of
+    pub async fn ledger_tool_calls(
         cx: &ActorContext,
         session: &SessionId,
         run: &TurnId,
@@ -162,13 +167,75 @@ impl RuntimeTurnServices {
 
         let owner = OwnerKey::Turn(session.clone(), run.clone());
         let facts = cx.durable_reads()?.run_facts(&owner).await?;
-        let fold = Self::ledger_fold(&facts)?;
-        Self::decode_recorded_tool_calls(&facts, &fold, decoders)
+        Self::answered_calls(&facts, decoders)
     }
 
-    /// The tool-call ledger `facts` hold, folded once for every read of it.
-    /// Reporting folds only settled facts and never consults live policies
-    /// to run a recovery: the empty policy view executes nothing.
+    /// The calls a settled turn answered, read from the transcript its
+    /// terminal published (FIG-6601): none when it answered none, or has
+    /// no terminal. Its ledger is never read; the terminal retired it.
+    ///
+    /// # Errors
+    ///
+    /// A durable read or decoding refusal, preserving its typed cause.
+    pub async fn settled_tool_calls(
+        cx: &ActorContext,
+        session: &SessionId,
+        run: &TurnId,
+        decoders: &crate::transcript::TranscriptDecoders,
+    ) -> Result<Vec<crate::ToolCallRecord>, lash_durable::DurableError> {
+        use lash_core_execution::runtime::actor::round::TurnTranscript;
+        use lash_core_store::checkpoint_graph::{GraphDecoder, GraphRefusal};
+        use lash_durable::domain::RootOwner;
+
+        let graph = match cx
+            .durable_reads()?
+            .hydrate(
+                RootOwner::RunTranscript {
+                    session: session.clone(),
+                    run: run.clone(),
+                },
+                None,
+                cx.backend().config().settings().graph_reads.owner(),
+            )
+            .await
+        {
+            Ok(graph) => graph,
+            Err(lash_durable::DurableError::Graph(GraphRefusal::RootRetired)) => {
+                return Ok(Vec::new());
+            }
+            Err(error) => return Err(error),
+        };
+        let mut decoder = GraphDecoder::new(
+            &graph,
+            cx.backend().config().settings().graph_reads.execution(),
+        );
+        TurnTranscript::load(&mut decoder, graph.root)
+            .and_then(|transcript| transcript.records(&mut decoder, decoders))
+            .map_err(lash_durable::DurableError::Graph)
+    }
+
+    /// The calls `facts`, one owner's ledger, answered.
+    fn answered_calls(
+        facts: &lash_durable::domain::RunFacts,
+        decoders: &crate::transcript::TranscriptDecoders,
+    ) -> Result<Vec<crate::ToolCallRecord>, lash_durable::DurableError> {
+        use lash_core_execution::runtime::actor::round::TurnTranscript;
+        use lash_core_store::checkpoint_graph::GraphDecoder;
+
+        let Some(transcript) =
+            TurnTranscript::of(facts).map_err(lash_durable::DurableError::Graph)?
+        else {
+            return Ok(Vec::new());
+        };
+        transcript
+            .records(&mut GraphDecoder::new(facts, facts.read_limits), decoders)
+            .map_err(lash_durable::DurableError::Graph)
+    }
+
+    /// The tool-call ledger `facts` hold, folded: what a read of an open
+    /// turn's pending calls reads. Reporting folds only settled facts and
+    /// never consults live policies to run a recovery: the empty policy view
+    /// executes nothing.
     fn ledger_fold(
         facts: &lash_durable::domain::RunFacts,
     ) -> Result<lash_core_execution::runtime::actor::round::RunFold, lash_durable::DurableError>
@@ -180,74 +247,6 @@ impl RuntimeTurnServices {
                 message: format!("the turn's tool records: {error}"),
             })
         })
-    }
-
-    fn decode_recorded_tool_calls(
-        facts: &lash_durable::domain::RunFacts,
-        fold: &lash_core_execution::runtime::actor::round::RunFold,
-        decoders: &crate::transcript::TranscriptDecoders,
-    ) -> Result<Vec<crate::ToolCallRecord>, lash_durable::DurableError> {
-        use lash_core_execution::runtime::actor::round;
-
-        let corrupt = |message| {
-            lash_durable::DurableError::Store(lash_durable::StoreFailure {
-                kind: lash_durable::StoreFailureKind::Corrupt,
-                message,
-            })
-        };
-        let mut calls = Vec::new();
-        // Rounds and cell reports, in the order of the effects they answer.
-        let mut runs: std::collections::BTreeMap<_, Result<_, _>> = fold
-            .rounds()
-            .map(|round| (round.run(), Ok(round)))
-            .collect();
-        runs.extend(
-            fold.reports()
-                .iter()
-                .map(|(run, report)| (*run, Err(*report))),
-        );
-        for entry in runs.into_values() {
-            let round = match entry {
-                Ok(round) => round,
-                Err(report) => {
-                    let report = round::cell_report(facts, report, decoders)
-                        .map_err(lash_durable::DurableError::Graph)?;
-                    calls.extend(report);
-                    continue;
-                }
-            };
-            for member in round.members() {
-                if member.draft().tool().as_str().starts_with("cell-host:") {
-                    continue;
-                }
-                let Some(payload) = member
-                    .outcome()
-                    .and_then(lash_core_store::tool_run::SettledOutput::payload)
-                else {
-                    continue;
-                };
-                let completed = round::decode_completed(payload).ok_or_else(|| {
-                    corrupt(format!(
-                        "call {} has no readable tool answer",
-                        member.call()
-                    ))
-                })?;
-                if completed.call_id != *member.call() {
-                    return Err(corrupt(format!(
-                        "call {} has another call's recorded answer",
-                        member.call(),
-                    )));
-                }
-                calls.push(crate::ToolCallRecord {
-                    call_id: completed.call_id,
-                    provider_call_id: completed.provider_call_id,
-                    tool: completed.tool_name,
-                    args: completed.args,
-                    output: completed.output,
-                });
-            }
-        }
-        Ok(calls)
     }
 
     /// The run of `session`'s unfinished turn, if it has one: what a batch
@@ -270,8 +269,8 @@ impl RuntimeTurnServices {
     /// Read a named turn's settled bodies, plus its pending identities if it
     /// is `unfinished`, the session's unfinished turn's run
     /// ([`unfinished_run`](Self::unfinished_run)), through its reports,
-    /// current round outcomes and saved cell ledgers. Each owner's facts are
-    /// folded once.
+    /// current round outcomes and saved cell ledgers; an ended turn's through
+    /// its transcript. Each owner's facts are read once.
     pub async fn tool_call_bodies(
         cx: &ActorContext,
         session: &SessionId,
@@ -288,7 +287,7 @@ impl RuntimeTurnServices {
         use lash_core_store::checkpoint_graph::GraphDecoder;
         use lash_durable::domain::{OwnerKey, RootOwner};
         if unfinished != Some(run) {
-            return Self::recorded_tool_calls(cx, session, run, decoders)
+            return Self::settled_tool_calls(cx, session, run, decoders)
                 .await
                 .map(|records| (records, Default::default()));
         }
@@ -319,7 +318,7 @@ impl RuntimeTurnServices {
         for owner in owners {
             let facts = reads.run_facts(&owner).await?;
             let fold = Self::ledger_fold(&facts)?;
-            records.extend(Self::decode_recorded_tool_calls(&facts, &fold, decoders)?);
+            records.extend(Self::answered_calls(&facts, decoders)?);
             for member in fold.rounds().flat_map(|round| round.members()) {
                 if member.draft().tool().as_str().starts_with("cell-host:") {
                     continue;

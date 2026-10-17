@@ -72,13 +72,14 @@ crate::statements! {
              RETURNING run";
 
         /// End unfinished run `?2` of session `?1` with cause `?4`, whose kind
-        /// is `?3`, and head revision `?5` at `?6`, on the session's
-        /// published head as its window (FIG-5931, FIG-6606): the head's
-        /// revision, read by the statement itself. No window when the
+        /// is `?3`, head revision `?5` at `?6` and transcript `?7`, on the
+        /// session's published head as its window (FIG-5931, FIG-6606): the
+        /// head's revision, read by the statement itself. No window when the
         /// session has no head. No row when the run is not unfinished.
         end_run = "UPDATE session_runs
              SET terminal_kind = ?3, terminal_cause_json = ?4,
                  terminal_head_revision = ?5, terminal_at_ms = ?6,
+                 terminal_transcript_ref = ?7,
                  terminal_window_revision = (
                      SELECT revision.head_revision FROM session_head AS head
                      JOIN session_revisions AS revision
@@ -113,6 +114,11 @@ crate::statements! {
         /// Plugin `?3`'s namespace root for run `?2` of session `?1`.
         namespace_root = "SELECT graph_root_ref FROM turn_namespaces
              WHERE session_id = ?1 AND run = ?2 AND plugin = ?3";
+
+        /// Run `?2` of session `?1`'s transcript: the TurnTranscript its
+        /// terminal published (FIG-6601).
+        transcript_root = "SELECT terminal_transcript_ref FROM session_runs
+             WHERE session_id = ?1 AND run = ?2";
 
         /// Run `?2` of session `?1`'s phase root.
         phase_root = "SELECT checkpoint_ref FROM turn_phases WHERE session_id = ?1 AND run = ?2";

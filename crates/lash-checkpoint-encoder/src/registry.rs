@@ -144,6 +144,7 @@ registry! {
     SOURCE_MAP = 42, "SourceMap", Enveloped, Node, Kernel;
     CONFIG_VALUE = 43, "ConfigValue", Enveloped, Node, Stores;
     MODEL_CALL_FACT = 44, "ModelCallFact", Enveloped, Node, Host;
+    TURN_TRANSCRIPT = 45, "TurnTranscript", Enveloped, Node, Integrator;
 }
 
 registry! {

@@ -151,7 +151,8 @@ impl Workload for CancelCase {
 }
 
 /// Whether the hanging tool's call settled `Interrupted` in its turn's
-/// records.
+/// records, as its commits appended them: its terminal retires the stored
+/// ledger (FIG-6601).
 async fn interrupted_hang(
     nodes: &SimNodes,
     session: &SessionId,
@@ -160,9 +161,7 @@ async fn interrupted_hang(
     use lash_core_execution::runtime::actor::round::{PinnedWaits, PolicyView, Recovery, fold};
     use lash_core_store::tool_run::SettledOutput;
     let owner = lash_durable::domain::OwnerKey::Turn(session.clone(), run.clone());
-    let Ok(rows) = nodes.database().run_facts(&owner).await else {
-        return false;
-    };
+    let rows = nodes.script().ledger(&owner);
     let Ok(folded) = fold(&rows, &PolicyView::new([]), &PinnedWaits::ledger()) else {
         return false;
     };

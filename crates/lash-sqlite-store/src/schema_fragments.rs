@@ -24,7 +24,8 @@ CREATE TABLE IF NOT EXISTS session_ingress_sequence (
 /// kept beside it only for the indexes and checked against it. A terminal
 /// names the window it ended on by the head revision it ended on (FIG-5931,
 /// FIG-6606): the window is that revision's row, retained and released with
-/// it, and the terminal roots nothing of its own. Each input row retains the run
+/// it, and the terminal roots nothing of its own but the transcript a turn's
+/// terminal publishes, the calls it answered (FIG-6601). Each input row retains the run
 /// that executes it. `control_intents` records a session's close; a
 /// `close_session` row outlives its session as the deletion tombstone.
 pub(crate) const SESSION_RUNS_TABLES: &str = "
@@ -38,7 +39,9 @@ CREATE TABLE IF NOT EXISTS session_runs (
     terminal_head_revision  INTEGER,
     terminal_at_ms          INTEGER,
     terminal_window_revision       INTEGER,
+    terminal_transcript_ref TEXT REFERENCES blobs(hash) ON DELETE RESTRICT,
     PRIMARY KEY (session_id, run),
+    CONSTRAINT ck_session_runs_transcript CHECK (terminal_transcript_ref IS NULL OR terminal_kind IS NOT NULL),
     CONSTRAINT ck_session_runs_terminal_window CHECK (terminal_window_revision IS NULL OR terminal_kind IS NOT NULL),
     CONSTRAINT ck_session_runs_terminal CHECK (((terminal_kind IS NULL AND terminal_cause_json IS NULL AND terminal_head_revision IS NULL AND terminal_at_ms IS NULL) OR (terminal_kind IS NOT NULL AND terminal_kind IN ('answered', 'failed', 'cancelled') AND terminal_cause_json IS NOT NULL AND terminal_at_ms IS NOT NULL)) IS TRUE),
     CONSTRAINT ck_session_runs_terminal_kind CHECK (terminal_kind IS NULL OR terminal_kind = CASE json_extract(terminal_cause_json, '$.cause')
@@ -65,6 +68,8 @@ CREATE INDEX IF NOT EXISTS idx_session_runs_open
 
 CREATE INDEX IF NOT EXISTS idx_session_runs_terminal_head_revision
     ON session_runs(session_id, terminal_head_revision);
+CREATE INDEX IF NOT EXISTS idx_session_runs_terminal_transcript_ref
+    ON session_runs(terminal_transcript_ref);
 CREATE TABLE IF NOT EXISTS control_intents (
     intent_id      INTEGER PRIMARY KEY AUTOINCREMENT,
     session_id     TEXT NOT NULL,

@@ -149,7 +149,8 @@ impl DurableSession {
 
     /// Read turn-addressed calls in input order, including duplicates. Each
     /// distinct named turn is decoded once; missing ids never scan other turns.
-    /// The retained ledgers remain the only source of call bodies. Consume
+    /// A settled turn's transcript, or an open turn's ledger, is the only
+    /// source of call bodies. Consume
     /// call bodies with the committed-turn page, or keep each call's turn
     /// address ([`TurnToolCallRef`](crate::TurnToolCallRef)) for these reads;
     /// a bare call id cannot be resolved without scanning.

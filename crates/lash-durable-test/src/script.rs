@@ -10,7 +10,7 @@
 //! cut, and a rule that never fired fails the law when its script drops.
 //! A read rule fails one read of an actor's row the same way.
 
-use lash_durable::domain::AdmittedId;
+use lash_durable::domain::{AdmittedId, OwnerKey, RunFacts};
 use lash_durable::{ActorKey, CommitLabel, DurableError};
 use lash_sansio::sync::MutexExt as _;
 use std::sync::{Arc, Mutex};
@@ -140,6 +140,10 @@ pub struct Write {
     /// executions it authorizes once committed. A later commit may prune
     /// the records, but never this.
     pub starts: Vec<AdmittedId>,
+    /// The run facts an owner commit appends, with the nodes it stages: once
+    /// committed, what its owners' ledgers hold. A turn's terminal retires
+    /// its stored ledger (FIG-6601), never this.
+    pub facts: Arc<RunFacts>,
 }
 
 impl Write {
@@ -286,9 +290,12 @@ pub(crate) struct Entry {
 }
 
 impl Entry {
-    /// Record the `x_start` records the write appends.
-    pub(crate) fn carrying(&self, starts: Vec<AdmittedId>) {
-        self.shared.state.lock_recover().trace[self.index].starts = starts;
+    /// Record the `x_start` records and the run facts the write appends.
+    pub(crate) fn carrying(&self, starts: Vec<AdmittedId>, facts: Arc<RunFacts>) {
+        let mut state = self.shared.state.lock_recover();
+        let write = &mut state.trace[self.index];
+        write.starts = starts;
+        write.facts = facts;
     }
 
     /// Record what the store did with the write.
@@ -405,6 +412,7 @@ impl Shared {
                 cut: fault,
                 stored: Stored::Pending,
                 starts: Vec::new(),
+                facts: Arc::default(),
             });
             (state.trace.len() - 1, fault)
         };
@@ -557,6 +565,25 @@ impl Script {
     /// Every write so far, in the order the writes entered.
     pub fn trace(&self) -> Vec<Write> {
         self.shared.state.lock_recover().trace.clone()
+    }
+
+    /// `owner`'s ledger as the committed writes appended it, with every node
+    /// they staged: what an ended turn's oracle folds once its terminal
+    /// retired the stored ledger (FIG-6601).
+    pub fn ledger(&self, owner: &OwnerKey) -> RunFacts {
+        let mut ledger = RunFacts::default();
+        for write in self
+            .shared
+            .state
+            .lock_recover()
+            .trace
+            .iter()
+            .filter(|write| write.committed())
+        {
+            ledger.extend(RunFacts::clone(&write.facts));
+        }
+        ledger.rows.retain(|row| &row.owner == owner);
+        ledger
     }
 
     /// Every write a rule cut so far, in firing order.

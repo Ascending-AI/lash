@@ -238,6 +238,26 @@ impl GraphTier for Tier {
             )
             .bind(namespace.clone())
             .bind(artifact.clone()),
+            ForeignWrite::TerminalTranscript {
+                session,
+                run,
+                root: Some(root),
+            } => sqlx::query(
+                "INSERT INTO lash_session_runs
+                     (session_id, run, terminal_kind, terminal_cause_json, terminal_at_ms,
+                      terminal_transcript_ref)
+                 VALUES ($1, $2, 'cancelled', '{\"cause\":\"operator_cancelled\"}', 1, $3)",
+            )
+            .bind(session.as_str().to_owned())
+            .bind(run.as_str().to_owned())
+            .bind(hex(root)),
+            ForeignWrite::TerminalTranscript {
+                session,
+                run,
+                root: None,
+            } => sqlx::query("DELETE FROM lash_session_runs WHERE session_id = $1 AND run = $2")
+                .bind(session.as_str().to_owned())
+                .bind(run.as_str().to_owned()),
         };
         query
             .execute(&mut *tx)

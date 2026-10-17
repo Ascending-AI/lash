@@ -93,6 +93,7 @@ pub async fn prompt_snapshot_roots_survive_phase_pruning_until_released(
                 intent: ControlIntentId::from_sequence(1),
             }),
             head_revision: None,
+            transcript: None,
         })
     };
     let commit = |writes: Vec<DomainWrite>, epoch: Epoch| async move {

@@ -928,12 +928,15 @@ pub async fn run_phases(
                     commit.expected_head,
                     commit.commit,
                 );
-                tx.write(DomainWrite::Turn(TurnWrite::Terminal {
-                    session: session.clone(),
-                    run: run.clone(),
-                    cause: Box::new(cause),
-                    head_revision: Some(commit.expected_head.saturating_add(1)),
-                }));
+                super::turn_terminal::write_terminal(
+                    cx,
+                    &mut tx,
+                    &session,
+                    &run,
+                    cause,
+                    Some(commit.expected_head.saturating_add(1)),
+                )
+                .await?;
                 if let Some(follow_on) = follow_on {
                     tx.write(DomainWrite::Prompt(PromptWrite::ResetPrefix {
                         session: session.clone(),
@@ -1143,12 +1146,7 @@ pub(super) async fn refuse(
         refusal: refusal.into(),
     };
     let traced = turn_trace::outcome(tracing, &cause);
-    tx.write(DomainWrite::Turn(TurnWrite::Terminal {
-        session: row.session.clone(),
-        run: row.run.clone(),
-        cause: Box::new(cause),
-        head_revision: None,
-    }));
+    super::turn_terminal::write_terminal(cx, &mut tx, &row.session, &row.run, cause, None).await?;
     end_turn_scope(cx, &mut tx, &row.session, &row.run).await?;
     let input = turn_trace::input(cx, tracing, row, &[]).await;
     cx.commit(tx, CommitLabel::TURN_COMMIT).await?;

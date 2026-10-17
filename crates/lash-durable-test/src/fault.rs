@@ -305,17 +305,31 @@ impl FaultStore {
         write: Call<T>,
         lose_wake: impl FnOnce(&mut T),
     ) -> Result<T, DurableError> {
-        self.write_carrying(kind, label, actor, Vec::new(), write, lose_wake)
-            .await
+        self.write_carrying(
+            kind,
+            label,
+            actor,
+            Vec::new(),
+            Arc::default(),
+            write,
+            lose_wake,
+        )
+        .await
     }
 
-    /// [`Self::write`], recording the `x_start` records it appends.
+    /// [`Self::write`], recording the `x_start` records and the run facts it
+    /// appends.
+    #[expect(
+        clippy::too_many_arguments,
+        reason = "a write carries what its commit appends beside its call"
+    )]
     async fn write_carrying<T: Effect + Send + 'static>(
         &self,
         kind: WriteKind,
         label: CommitLabel,
         actor: Option<&ActorKey>,
         starts: Vec<AdmittedId>,
+        facts: Arc<RunFacts>,
         write: Call<T>,
         lose_wake: impl FnOnce(&mut T),
     ) -> Result<T, DurableError> {
@@ -323,7 +337,7 @@ impl FaultStore {
         let entry = self
             .script
             .enter(&self.node, kind, label, actor, self.clock.logical_ms());
-        entry.carrying(starts);
+        entry.carrying(starts, facts);
         let Some(fault) = entry.fault else {
             return self.store(entry, write).await;
         };
@@ -467,6 +481,7 @@ impl FaultStore {
                 _ => None,
             })
             .collect();
+        let facts = Arc::new(RunFacts::appended(tx.domain(), tx.graph(), tx.epoch()));
         let observer = self.script.actor_receipt.lock_recover().clone();
         let observed = observer.as_ref().map(|_| tx.clone());
         let answer = self
@@ -475,6 +490,7 @@ impl FaultStore {
                 label,
                 Some(&actor),
                 starts,
+                facts,
                 self.call(|store| async move {
                     if let Some(refusal) = refusal {
                         Err(DurableError::Domain(refusal))

@@ -41,7 +41,7 @@ impl FinishedTurn {
         unrecorded: Option<crate::runtime::durable::session::CellToolCalls>,
         decoders: &crate::transcript::TranscriptDecoders,
     ) -> Result<Self, TurnError> {
-        let mut tool_calls = RuntimeTurnServices::recorded_tool_calls(cx, session, run, decoders)
+        let mut tool_calls = RuntimeTurnServices::ledger_tool_calls(cx, session, run, decoders)
             .await
             .map_err(TurnError::Durable)?;
         if let Some(cell) = unrecorded {

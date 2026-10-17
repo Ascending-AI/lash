@@ -900,6 +900,7 @@ mod tests {
                 run: TurnId::from("finish"),
                 cause: Box::new(lash_core_execution::store::RunTerminalCause::CommandsApplied),
                 head_revision: Some(2),
+                transcript: None,
             },
         ));
         store

@@ -875,6 +875,7 @@ pub async fn a_turn_cancel_is_a_first_winner_row_with_a_wake(
             intent: lash_core_store::store::ControlIntentId::from_sequence(1),
         }),
         head_revision: None,
+        transcript: None,
     }))
     .ack_seen()
     .give_up(Release::Idle);

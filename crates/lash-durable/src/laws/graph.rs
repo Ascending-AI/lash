@@ -64,6 +64,12 @@ pub enum ForeignWrite {
         artifact: String,
         root: Option<NodeId>,
     },
+    /// Point ended run `run`'s transcript at `root`, or drop the run's row.
+    TerminalTranscript {
+        session: SessionId,
+        run: TurnId,
+        root: Option<NodeId>,
+    },
 }
 
 /// One dialect's store, its orphan audit and the raw access the laws need.
@@ -748,7 +754,8 @@ pub async fn every_root_source_retains_its_graph_and_shared_leaves_outlive_one_o
             RootSource::SessionRevision
             | RootSource::RevisionConfig
             | RootSource::SessionAdmissionBase
-            | RootSource::ArtifactBridge => (None, None),
+            | RootSource::ArtifactBridge
+            | RootSource::RunTranscript => (None, None),
             RootSource::ReadLease | RootSource::RetirementHold => continue,
         };
         let mut writes: Vec<DomainWrite> = publish.into_iter().collect();
@@ -804,6 +811,14 @@ pub async fn every_root_source_retains_its_graph_and_shared_leaves_outlive_one_o
                 })
                 .await;
             }
+            RootSource::RunTranscript => {
+                tier.foreign(ForeignWrite::TerminalTranscript {
+                    session: owner.session.clone(),
+                    run: turn("ended"),
+                    root: Some(root),
+                })
+                .await;
+            }
             _ => {}
         }
         if matches!(
@@ -812,6 +827,7 @@ pub async fn every_root_source_retains_its_graph_and_shared_leaves_outlive_one_o
                 | RootSource::RevisionConfig
                 | RootSource::SessionAdmissionBase
                 | RootSource::ArtifactBridge
+                | RootSource::RunTranscript
         ) {
             owner_commit(
                 tier,
@@ -890,6 +906,14 @@ pub async fn every_root_source_retains_its_graph_and_shared_leaves_outlive_one_o
                 })
                 .await;
             }
+            (RootSource::RunTranscript, ..) => {
+                tier.foreign(ForeignWrite::TerminalTranscript {
+                    session: owner.session.clone(),
+                    run: turn("ended"),
+                    root: None,
+                })
+                .await;
+            }
             (RootSource::TurnPhase, ..) => {
                 // The next phase root replaces this one.
                 let mut next = staging();
@@ -944,6 +968,7 @@ pub async fn every_root_source_retains_its_graph_and_shared_leaves_outlive_one_o
                 },
             ),
             head_revision: None,
+            transcript: None,
         })],
     )
     .await

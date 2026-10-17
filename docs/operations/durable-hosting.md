@@ -1242,7 +1242,8 @@ whole message and typed cause. A cancelled call is failed with code
 To read those full details, take `call_id` from `ExecutedCall` and `turn_id` from the
 enclosing transcript entry's provenance. `read_cell_tool_calls(turn_id,
 &cell.calls)` reads all of that cell's host call records in order. These
-reads use the retained call ledger and work through a cold durable handle;
+reads use the turn's retained call transcript (an open turn's ledger) and
+work through a cold durable handle;
 the failure details have one source in `ToolCallRecord.output`.
 
 A host projector can consume ordinary committed pages without decoding call

@@ -310,6 +310,7 @@ pub async fn a_receipt_stands_beside_its_model_phase_until_the_next_phase(
                 },
             ),
             head_revision: None,
+            transcript: None,
         },
         None,
     )

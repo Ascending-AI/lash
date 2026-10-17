@@ -200,4 +200,4 @@ pub use lash_core_execution::runtime::actor::round::graph::{
 };
 
 mod cell_ledger;
-pub use cell_ledger::cell_ledger_bytes;
+pub use cell_ledger::{cell_ledger_bytes, turn_transcript};

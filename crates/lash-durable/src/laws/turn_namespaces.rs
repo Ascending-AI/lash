@@ -149,6 +149,7 @@ pub async fn a_runs_namespace_write_modes_keep_only_current_values_and_end_with_
             intent: ControlIntentId::from_sequence(1),
         }),
         head_revision: None,
+        transcript: None,
     })
     .await?;
     let read = rows().await?;

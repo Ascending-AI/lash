@@ -37,6 +37,7 @@ pub(crate) mod session_publication;
 mod tool_round;
 mod turn_cancel;
 pub mod turn_scope;
+mod turn_terminal;
 mod turn_trace;
 
 pub use lash_core_execution::runtime::actor::process::{

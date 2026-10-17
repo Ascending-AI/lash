@@ -326,6 +326,7 @@ async fn cancelling_a_settled_operation_answers_unknown_or_revoked() {
             .into(),
         }),
         head_revision: None,
+        transcript: None,
     }));
     database
         .commit(tx, CommitLabel::TURN_COMMIT)

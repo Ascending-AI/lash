@@ -28,7 +28,10 @@ mod tool_call_reads {
 
     struct ReadProbe {
         inner: Arc<dyn DurableStore>,
+        /// Ledger reads, by owner.
         owners: Mutex<Vec<OwnerKey>>,
+        /// Transcript hydrates, by run (FIG-6601).
+        transcripts: Mutex<Vec<crate::TurnId>>,
         /// Reads of the session's unfinished turn.
         turns: Mutex<usize>,
     }
@@ -43,6 +46,7 @@ mod tool_call_reads {
         let probe = Arc::new(ReadProbe {
             inner: Arc::new(stores.durable_store()),
             owners: Mutex::new(Vec::new()),
+            transcripts: Mutex::new(Vec::new()),
             turns: Mutex::new(0),
         });
         let counted = probe.clone();
@@ -71,6 +75,7 @@ mod tool_call_reads {
         drop(session);
         core.node.stop().await;
         probe.owners.lock().expect("read probe").clear();
+        probe.transcripts.lock().expect("read probe").clear();
         *probe.turns.lock().expect("read probe") = 0;
         Ok((core, durable, probe, turns))
     }
@@ -110,20 +115,14 @@ mod tool_call_reads {
                 },
             ]
         );
-        let owners = probe.owners.lock().expect("read probe").clone();
+        assert!(
+            probe.owners.lock().expect("read probe").is_empty(),
+            "a settled turn's calls read no ledger"
+        );
         assert_eq!(
-            owners,
-            vec![
-                OwnerKey::Turn(
-                    crate::SessionId::fixture("tool-read-cost"),
-                    turns[1].0.clone()
-                ),
-                OwnerKey::Turn(
-                    crate::SessionId::fixture("tool-read-cost"),
-                    turns[3].0.clone()
-                )
-            ],
-            "one decode per named turn, even for duplicate and missing ids"
+            *probe.transcripts.lock().expect("read probe"),
+            vec![turns[1].0.clone(), turns[3].0.clone()],
+            "one transcript decode per named turn, even for duplicate and missing ids"
         );
         assert_eq!(
             *probe.turns.lock().expect("read probe"),
@@ -132,15 +131,17 @@ mod tool_call_reads {
         );
         Ok(())
     }
-    /// FIG-6231: opting in reads exactly one ledger for each returned page turn;
-    /// plain pages and empty pages do not decode any call ledger. A committed
-    /// turn is never the unfinished one, which the page never reads.
+    /// FIG-6231: opting in decodes exactly one transcript for each returned
+    /// page turn and no ledger (FIG-6601); plain pages and empty pages decode
+    /// no calls. A committed turn is never the unfinished one, which the page
+    /// never reads.
     #[tokio::test(flavor = "multi_thread", worker_threads = 2)]
     async fn a_committed_page_decodes_only_its_turns_tool_calls() -> crate::Result<()> {
         let (_core, durable, probe, turns) = fixture().await?;
         let limit = std::num::NonZeroU32::MIN.saturating_add(1);
         let first = durable.committed_turns(None, limit).await?;
         assert!(probe.owners.lock().expect("read probe").is_empty());
+        assert!(probe.transcripts.lock().expect("read probe").is_empty());
         let page = durable
             .committed_turns_with_calls(Some(&first.next), limit)
             .await?;
@@ -155,27 +156,20 @@ mod tool_call_reads {
                     .any(|entry| matches!(entry.item, crate::transcript::TranscriptItem::Cell(_)))
             );
         }
+        assert!(probe.owners.lock().expect("read probe").is_empty());
         assert_eq!(
-            *probe.owners.lock().expect("read probe"),
-            vec![
-                OwnerKey::Turn(
-                    crate::SessionId::fixture("tool-read-cost"),
-                    turns[2].0.clone()
-                ),
-                OwnerKey::Turn(
-                    crate::SessionId::fixture("tool-read-cost"),
-                    turns[3].0.clone()
-                )
-            ]
+            *probe.transcripts.lock().expect("read probe"),
+            vec![turns[2].0.clone(), turns[3].0.clone()]
         );
         assert_eq!(*probe.turns.lock().expect("read probe"), 0);
         let tail = durable.committed_turns(Some(&page.next), limit).await?;
-        probe.owners.lock().expect("read probe").clear();
+        probe.transcripts.lock().expect("read probe").clear();
         let empty = durable
             .committed_turns_with_calls(Some(&tail.next), limit)
             .await?;
         assert!(empty.turns.is_empty());
         assert!(probe.owners.lock().expect("read probe").is_empty());
+        assert!(probe.transcripts.lock().expect("read probe").is_empty());
         Ok(())
     }
 
@@ -268,6 +262,12 @@ mod tool_call_reads {
             expected: Option<lash_durable::domain::checkpoint_graph::NodeId>,
             limits: lash_durable::domain::checkpoint_graph::DecodeLimits,
         ) -> Result<HydratedGraph, DurableError> {
+            if let RootOwner::RunTranscript { run, .. } = &owner {
+                self.transcripts
+                    .lock()
+                    .expect("read probe")
+                    .push(run.clone());
+            }
             self.inner.hydrate(owner, expected, limits).await
         }
 

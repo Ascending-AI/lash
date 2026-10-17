@@ -2258,6 +2258,7 @@ async fn each_turn_terminal_reads_back(dialect: Dialect, postgres_url: Option<St
             run: run(),
             cause: Box::new(cause.clone()),
             head_revision: None,
+            transcript: None,
         }));
         database
             .commit(tx, CommitLabel::TURN_COMMIT)

@@ -857,7 +857,7 @@ pub(super) async fn durable_report(
             ))
         })?;
     let tool_calls =
-        lash_core::runtime::durable::services::RuntimeTurnServices::recorded_tool_calls(
+        lash_core::runtime::durable::services::RuntimeTurnServices::settled_tool_calls(
             &ctx.parts.effect_host,
             &ctx.parts.session_id,
             run,

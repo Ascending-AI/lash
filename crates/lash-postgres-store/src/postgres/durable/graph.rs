@@ -293,6 +293,13 @@ lash_store_sql::statements! {
                  WHERE NOT (reach.hash = ANY(?1::text[])) AND NOT (edge.child_hash = ANY(?1::text[])))
              SELECT root.hash, blob.hash, blob.encoding, blob.content
              FROM root LEFT JOIN (reach JOIN blobs AS blob ON blob.hash = reach.hash) ON TRUE";
+        /// Run `?3` of session `?2`'s transcript, as [`Self::hydrate_exec`] reads an execution's.
+        hydrate_transcript = "WITH RECURSIVE root AS (SELECT terminal_transcript_ref AS hash FROM session_runs WHERE session_id = ?2 AND run = ?3),
+             reach AS (SELECT root.hash FROM root WHERE root.hash IS NOT NULL UNION
+                 SELECT edge.child_hash FROM blob_edges AS edge JOIN reach ON edge.parent_hash = reach.hash
+                 WHERE NOT (reach.hash = ANY(?1::text[])) AND NOT (edge.child_hash = ANY(?1::text[])))
+             SELECT root.hash, blob.hash, blob.encoding, blob.content
+             FROM root LEFT JOIN (reach JOIN blobs AS blob ON blob.hash = reach.hash) ON TRUE";
         /// Plugin `?4`'s namespace values for run `?3` of session `?2`, as [`Self::hydrate_exec`] reads an execution's.
         hydrate_namespace = "WITH RECURSIVE root AS (SELECT graph_root_ref AS hash FROM turn_namespaces WHERE session_id = ?2 AND run = ?3 AND plugin = ?4),
              reach AS (SELECT root.hash FROM root WHERE root.hash IS NOT NULL UNION
@@ -769,6 +776,9 @@ async fn hydrate_rows(connection: &mut PgConnection, owner: &RootOwner) -> Answe
         RootOwner::ModelAnswer { session, run } => query(sql.hydrate_answer.sql())
             .bind(session.as_str())
             .bind(run.as_str()),
+        RootOwner::RunTranscript { session, run } => query(sql.hydrate_transcript.sql())
+            .bind(session.as_str())
+            .bind(run.as_str()),
         RootOwner::TurnNamespace {
             session,
             run,
@@ -844,6 +854,9 @@ pub(super) async fn root_of(
             .bind(session.as_str())
             .bind(run.as_str()),
         RootOwner::ModelAnswer { session, run } => query(sql.turns.answer_root.sql())
+            .bind(session.as_str())
+            .bind(run.as_str()),
+        RootOwner::RunTranscript { session, run } => query(sql.turns.transcript_root.sql())
             .bind(session.as_str())
             .bind(run.as_str()),
         RootOwner::TurnNamespace {

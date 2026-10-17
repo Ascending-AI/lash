@@ -101,12 +101,9 @@ async fn outcomes(
     session: &SessionId,
 ) -> Result<Vec<(Tool, ToolCallId, bool)>, String> {
     let owner = OwnerKey::Turn(session.clone(), run_of(session));
-    let rows = nodes
-        .database()
-        .run_facts(&owner)
-        .await
-        .map_err(|error| format!("the round's records do not read: {error}"))?;
-    // The turn ended: its waits are tombstones, and its ledger folds alone.
+    // The turn ended: its terminal retired its stored ledger (FIG-6601), its
+    // waits are tombstones, and the ledger its commits appended folds alone.
+    let rows = nodes.script().ledger(&owner);
     let folded = fold(&rows, &PolicyView::new([]), &PinnedWaits::ledger())
         .map_err(|refusal| format!("the round's records do not fold: {refusal:?}"))?;
     let mut settled = Vec::new();

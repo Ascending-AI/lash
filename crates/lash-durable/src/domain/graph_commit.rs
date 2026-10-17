@@ -220,6 +220,11 @@ pub fn encode_owner(out: &mut TokenWriter, owner: &RootOwner) {
             out.text(session.as_str());
             out.text(run.as_str());
         }
+        RootOwner::RunTranscript { session, run } => {
+            out.sum(18, 2);
+            out.text(session.as_str());
+            out.text(run.as_str());
+        }
         RootOwner::TurnNamespace {
             session,
             run,

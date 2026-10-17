@@ -1365,12 +1365,15 @@ pub async fn cancel_open_turn(
     let Some(row) = cx.durable_reads()?.turn(&session_of(cx)).await? else {
         return Ok(None);
     };
-    tx.write(DomainWrite::Turn(TurnWrite::Terminal {
-        session: row.session.clone(),
-        run: row.run.clone(),
-        cause: Box::new(cancelled_cause(cause.clone())),
-        head_revision: None,
-    }));
+    super::turn_terminal::write_terminal(
+        cx,
+        tx,
+        &row.session,
+        &row.run,
+        cancelled_cause(cause.clone()),
+        None,
+    )
+    .await?;
     Ok(Some(row))
 }
 

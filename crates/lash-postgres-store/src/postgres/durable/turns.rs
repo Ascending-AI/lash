@@ -12,10 +12,11 @@ use lash_core_execution::store_backend_support::turn_cancel::{
     turn_cancel_mode_from_wire, turn_cancel_mode_wire, turn_cancel_undelivered_from_wire,
     turn_cancel_undelivered_wire,
 };
+use lash_core_store::checkpoint_graph::NodeId;
 use lash_durable::domain::namespace_value::NamespaceValue;
 use lash_durable::domain::{
-    DomainRefusal, ExecKey, SessionCommitWrite, StoredValues, TurnCancelAnswer, TurnCancelRequest,
-    TurnEnd, TurnNamespace, TurnRow, TurnWrite, UnfinishedPhase,
+    DomainRefusal, ExecKey, OwnerKey, SessionCommitWrite, StoredValues, TurnCancelAnswer,
+    TurnCancelRequest, TurnEnd, TurnNamespace, TurnRow, TurnWrite, UnfinishedPhase,
 };
 use lash_durable::{ActorKey, DurableError, DurableInstant, Epoch, Woken};
 use lash_sansio::{SessionId, TurnId};
@@ -200,7 +201,15 @@ pub(super) static NAMESPACE_ROOTS: Entry = Entry::new(
 /// cells, phase and namespaces go, their roots retired.
 pub(super) static END_RUN: Entry = Entry::new(
     || &SQL.end_run,
-    &[Ty::Text, Ty::Text, Ty::Text, Ty::Text, Ty::Int, Ty::Now],
+    &[
+        Ty::Text,
+        Ty::Text,
+        Ty::Text,
+        Ty::Text,
+        Ty::Int,
+        Ty::Now,
+        Ty::Text,
+    ],
     Shape::Returning,
 );
 pub(super) static MARK_TERMINAL: Entry = Entry::new(
@@ -300,6 +309,7 @@ fn terminal_steps(
     run: &TurnId,
     cause: &RunTerminalCause,
     head_revision: Option<u64>,
+    transcript: Option<NodeId>,
 ) -> Result<Vec<Step>, DurableError> {
     let turn = || vec![Value::text(session.as_str()), Value::text(run.as_str())];
     let mut ended = turn();
@@ -308,6 +318,7 @@ fn terminal_steps(
         Value::text(cause.to_stored().map_err(|error| encoding(&error))?),
         Value::Int(head_revision.map(integer::<i64>).transpose()?),
         Value::Now,
+        Value::Text(transcript.map(|transcript| transcript.to_hex())),
     ]);
     let mut program = vec![Step::one(&END_RUN, ended)];
     if let Some(revision) = head_revision {
@@ -361,7 +372,8 @@ fn terminal_steps(
     );
     // The cells the turn stopped in are never resumed, and the turn's
     // cancel request is answered by its terminal: neither has a reader
-    // left. The turn's own facts stay as its ledger.
+    // left. Nor has the turn's own ledger: its transcript names the
+    // material its answered calls are read from.
     let cells = ExecKey::turn_cells(session, run);
     for entry in [
         &super::snapshots::CLEAR_UNDER,
@@ -370,6 +382,12 @@ fn terminal_steps(
     ] {
         program.push(Step::any(entry, vec![Value::text(cells.as_str())]));
     }
+    program.push(Step::any(
+        &super::run_records::DELETE_OWNER,
+        vec![Value::text(
+            OwnerKey::Turn(session.clone(), run.clone()).stored(),
+        )],
+    ));
     // The turn's phase row and namespaces go with it, and their roots with
     // them: its working execution, receipt and namespace values whole, its
     // PhaseRoot alone (the TurnContent ordering constraint,
@@ -538,11 +556,12 @@ pub(super) fn steps(epoch: Epoch, write: &TurnWrite) -> Result<Option<Vec<Step>>
             session,
             run,
             head_revision,
+            transcript,
         } => {
             if matches!(cause.as_ref(), RunTerminalCause::Cancelled { .. }) {
                 return Ok(None);
             }
-            terminal_steps(session, run, cause, *head_revision)?
+            terminal_steps(session, run, cause, *head_revision, *transcript)?
         }
     }))
 }
@@ -585,6 +604,7 @@ pub(super) async fn apply(
             run,
             cause,
             head_revision,
+            transcript,
         } => {
             let mut cause = cause.as_ref().clone();
             if let RunTerminalCause::Cancelled {
@@ -601,7 +621,7 @@ pub(super) async fn apply(
                 )
                 .await?;
             }
-            let program = terminal_steps(session, run, &cause, *head_revision)?;
+            let program = terminal_steps(session, run, &cause, *head_revision, *transcript)?;
             match steps::run(tx, &program, &commit.steps()).await? {
                 None => Ok(()),
                 Some(refused) if std::ptr::eq(program[refused.index].entry, &END_RUN) => {

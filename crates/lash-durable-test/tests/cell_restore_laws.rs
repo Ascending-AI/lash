@@ -1100,31 +1100,44 @@ impl CellTurn {
     }
 
     /// The calls the ended turn's report holds of its cell, in order: the
-    /// cell reports of its run's own facts.
+    /// cell reports its transcript names (FIG-6601).
     async fn reported_calls(&self, nodes: &SimNodes) -> Result<Vec<ToolCallId>, String> {
         use lash_core_execution::runtime::actor::round;
+        use lash_core_store::checkpoint_graph::{DecodeLimits, GraphDecoder, GraphRefusal};
 
         let run = self
             .run
             .lock_recover()
             .clone()
             .ok_or("the host's send opened no run")?;
-        let facts = nodes
+        let transcript = match nodes
             .database()
-            .run_facts(&lash_durable::domain::OwnerKey::Turn(session(), run))
+            .hydrate(
+                lash_durable::domain::RootOwner::RunTranscript {
+                    session: session(),
+                    run,
+                },
+                None,
+                DecodeLimits::within_total(u64::MAX),
+            )
             .await
-            .map_err(|error| format!("the turn's facts: {error}"))?;
-        let fold = round::fold(
-            &facts,
-            &round::PolicyView::new([]),
-            &round::PinnedWaits::ledger(),
-        )
-        .map_err(|error| format!("the turn's facts do not fold: {error}"))?;
+        {
+            Ok(transcript) => transcript,
+            Err(lash_durable::DurableError::Graph(GraphRefusal::RootRetired)) => {
+                return Ok(Vec::new());
+            }
+            Err(error) => return Err(format!("the turn's transcript: {error}")),
+        };
+        let mut decoder = GraphDecoder::new(&transcript, DecodeLimits::within_total(u64::MAX));
         let mut calls = Vec::new();
-        let mut decoder =
-            lash_core_store::checkpoint_graph::GraphDecoder::new(&facts, facts.read_limits);
-        for report in fold.reports().values() {
-            let report = round::graph::ReportView::load(&mut decoder, *report)
+        let entries = round::TurnTranscript::load(&mut decoder, transcript.root)
+            .map_err(|error| format!("the turn's transcript: {error}"))?
+            .entries;
+        for entry in entries {
+            let round::TranscriptEntry::Report(report) = entry else {
+                continue;
+            };
+            let report = round::graph::ReportView::load(&mut decoder, report)
                 .map_err(|error| format!("the cell's report: {error}"))?;
             for body in report.entries {
                 let body = round::graph::CallBody::load(&mut decoder, body)

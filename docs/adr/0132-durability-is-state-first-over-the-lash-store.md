@@ -161,11 +161,13 @@ effect the checkpoint names.
   head compare-and-set makes it idempotent. The turn's commit and its cancel
   retire the same state: the exec root, effect admissions and run records of
   every cell the turn stopped in, the turn's cancel request, and the turn's
-  waits, compacted to tombstones (§6). The turn's own run records stay. They
-  are its one tool-call ledger: its report folds them alone and reads no wait
-  after the turn ended, so a report read after a crash and a redrive is the
-  report the live turn gave (FIG-5939). Recovery of a live turn still reads
-  its full waits.
+  waits, compacted to tombstones (§6). The turn's own run records are its
+  recovery ledger until then: the same commit publishes its transcript, the
+  calls it answered by reference to the material its ledger named, and
+  deletes the records (FIG-6601). Its report reads the transcript alone and
+  no wait, so a report read after a crash and a redrive is the report the
+  live turn gave (FIG-5939). Recovery of a live turn still reads its ledger
+  and its full waits.
 - A preparation hook recomputes from committed state when its phase did not
   commit, so hooks are repeat-safe. An at-most-once external mutation is an
   admitted `Once` execution, not a hook.
@@ -176,7 +178,8 @@ a repackaged copy of committed state.
 `TurnCommitOutcome` kind. Hosts read that exact turn through
 `DurableSession::committed_turn`; plugins use
 `SessionReadService::committed_turn`. Both read the existing terminal,
-transcript, tool-call ledger and retained model-call records on any node.
+transcript, the turn's call transcript and retained model-call records on any
+node.
 `read_model_calls` addresses each call by turn and call id, and
 `committed_turns_with_calls` pages both kinds of call. Model-call billing belongs at
 the provider seam (FIG-6547). `TurnHookReport` likewise exposes only the

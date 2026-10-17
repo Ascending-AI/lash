@@ -1,12 +1,12 @@
 //! FIG-6171's byte audit against the pre-change committed report fixture.
 //! Only the test oracle encodes the removed copy; production stores references.
 
-use lash_core_execution::runtime::actor::round::graph::RoundFact;
+use lash_core_execution::runtime::actor::round::{TranscriptEntry, TurnTranscript};
 use lash_core_store::checkpoint_graph::{
-    EncodeBudget, ExplicitLimit, GraphDecoder, GraphRefusal, GraphStaging, NodeId, NodeKind,
-    TokenCodec, TokenError, TokenReader, TokenWriter, closure,
+    DecodeLimits, EncodeBudget, ExplicitLimit, GraphDecoder, GraphRefusal, GraphStaging, NodeId,
+    NodeKind, TokenCodec, TokenError, TokenReader, TokenWriter, closure,
 };
-use lash_durable::domain::{RunFactKind, RunFacts};
+use lash_durable::domain::HydratedGraph;
 
 struct PreviousReport {
     entries: Vec<(NodeId, NodeId, serde_json::Value)>,
@@ -70,26 +70,48 @@ impl TokenCodec for PreviousOutcome<'_> {
     }
 }
 
-/// The reference report's own bytes, its entire retained closure's bytes,
-/// and the previous copied report's closure bytes for the same cell.
+/// Run `run` of `session`'s transcript, hydrated whole: what its terminal
+/// published (FIG-6601).
+///
+/// # Errors
+///
+/// The read's refusal; [`GraphRefusal::RootRetired`] when the run has no
+/// transcript.
+pub async fn turn_transcript(
+    reads: &dyn lash_durable::DurableReads,
+    session: &crate::SessionId,
+    run: &crate::TurnId,
+) -> Result<HydratedGraph, lash_durable::DurableError> {
+    reads
+        .hydrate(
+            lash_durable::domain::RootOwner::RunTranscript {
+                session: session.clone(),
+                run: run.clone(),
+            },
+            None,
+            DecodeLimits::within_total(u64::MAX),
+        )
+        .await
+}
+
+/// The reference reports' own bytes, their entire retained closure's bytes,
+/// and the previous copied report's closure bytes for the same cell, read
+/// from `transcript`, a settled turn's hydrated transcript (FIG-6601).
 ///
 /// # Errors
 ///
 /// Any refusal of the graph read or the audit fixture's staging.
 pub fn cell_ledger_bytes(
-    facts: &RunFacts,
+    transcript: &HydratedGraph,
     records: &[crate::ToolCallRecord],
 ) -> Result<(u64, u64, u64), GraphRefusal> {
-    let mut decoder = GraphDecoder::new(facts, facts.read_limits);
+    let limits = DecodeLimits::within_total(u64::MAX);
+    let mut decoder = GraphDecoder::new(transcript, limits);
     let mut report_bytes = 0;
     let mut held = std::collections::BTreeMap::new();
-    for row in facts
-        .rows
-        .iter()
-        .filter(|row| row.kind == RunFactKind::CellReport)
-    {
-        if let RoundFact::CellReport { report } = RoundFact::load(&mut decoder, row.record)? {
-            let nodes = closure(facts, report, &facts.read_limits)?;
+    for entry in TurnTranscript::load(&mut decoder, transcript.root)?.entries {
+        if let TranscriptEntry::Report(report) = entry {
+            let nodes = closure(transcript, report, &limits)?;
             if let Some(root) = nodes.get(&report) {
                 report_bytes += root.bytes.len() as u64;
             }
@@ -130,7 +152,7 @@ pub fn cell_ledger_bytes(
     });
     let previous =
         staging.encode_value(NodeKind::REPORT_VIEW, &PreviousReport { entries, omitted })?;
-    let previous_bytes = closure(&staging, previous, &facts.read_limits)?
+    let previous_bytes = closure(&staging, previous, &limits)?
         .values()
         .map(|node| node.bytes.len() as u64)
         .sum();

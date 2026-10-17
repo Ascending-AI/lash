@@ -55,6 +55,9 @@ pub enum RootSource {
     RetirementHold = 16,
     /// Sealed calls retained with their owning session.
     ModelCall = 17,
+    /// `session_runs.terminal_transcript_ref`: the calls a turn answered,
+    /// published by its terminal, while the run's row lives (FIG-6601).
+    RunTranscript = 18,
 }
 
 /// Where one source's roots live in a backend's schema.
@@ -68,7 +71,7 @@ pub struct RootField {
 
 impl RootSource {
     /// Every source, in catalog order.
-    pub const ALL: [Self; 15] = [
+    pub const ALL: [Self; 16] = [
         Self::Exec,
         Self::RunFact,
         Self::EffectAdmission,
@@ -84,6 +87,7 @@ impl RootSource {
         Self::ReadLease,
         Self::RetirementHold,
         Self::ModelCall,
+        Self::RunTranscript,
     ];
 
     /// The `source` column of the root catalog view.
@@ -105,6 +109,7 @@ impl RootSource {
             Self::ReadLease => "lease",
             Self::RetirementHold => "retirement",
             Self::ModelCall => "model_call",
+            Self::RunTranscript => "terminal_transcript",
         }
     }
 
@@ -152,6 +157,9 @@ impl RootSource {
             Self::ReadLease => RootField::of("lash_root_leases", "root_ref", None),
             Self::ModelCall => RootField::of("lash_model_call_records", "record_ref", None),
             Self::RetirementHold => RootField::of("lash_retirement_holds", "root_ref", None),
+            Self::RunTranscript => {
+                RootField::of("lash_session_runs", "terminal_transcript_ref", None)
+            }
         }
     }
 
@@ -172,6 +180,7 @@ impl RootSource {
             Self::ReadLease => ("root_leases", "root_ref", None),
             Self::ModelCall => ("model_call_records", "record_ref", None),
             Self::RetirementHold => ("retirement_holds", "root_ref", None),
+            Self::RunTranscript => ("session_runs", "terminal_transcript_ref", None),
         }
     }
 }

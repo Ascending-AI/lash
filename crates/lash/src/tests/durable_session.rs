@@ -36,15 +36,13 @@ async fn every_cell_call_beyond_the_prompt_bound_survives_a_reopen() -> Result<(
         .id(run.clone())
         .output_into(&events)
         .await?;
-    let facts = running
-        .effect_host()
-        .durable_reads()?
-        .run_facts(&lash_core::durable_port::domain::OwnerKey::Turn(
-            session_id.clone(),
-            run,
-        ))
-        .await?;
-    let sizes = lash_core::testing::cell_ledger_bytes(&facts, &output.tool_calls)
+    let transcript = lash_core::testing::turn_transcript(
+        running.effect_host().durable_reads()?,
+        &session_id,
+        &run,
+    )
+    .await?;
+    let sizes = lash_core::testing::cell_ledger_bytes(&transcript, &output.tool_calls)
         .expect("the stored ledger sizes read");
     eprintln!(
         "FIG-6171 130 calls: report={} held={} previous_copy={}",

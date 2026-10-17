@@ -231,6 +231,7 @@ async fn a_refused_unstarted_turn_on_an_unreadable_head_keeps_the_heads_requirem
                 .into(),
             }),
             head_revision: None,
+            transcript: None,
         },
     ));
     let refused = ledger

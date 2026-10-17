@@ -1162,13 +1162,15 @@ impl Scenario for L4 {
             violations.push(format!("NR-4: the turn was restored {restores} times"));
         }
 
-        let rows = match database.run_facts(&owner()).await {
-            Ok(rows) => rows,
-            Err(error) => return vec![format!("the run facts do not read: {error}")],
-        };
-        // The turn ended, so its run facts are its whole ledger: they fold
-        // alone, and every wait its members pinned is a tombstone no full
-        // read accepts (FIG-5939).
+        // The turn ended: its terminal retired its stored ledger in its own
+        // commit (FIG-6601), so the ledger is what its commits appended.
+        match database.run_facts(&owner()).await {
+            Ok(stored) if stored.rows.is_empty() => {}
+            other => violations.push(format!("the ended turn kept its ledger: {other:?}")),
+        }
+        // It folds alone, and every wait its members pinned is a tombstone no
+        // full read accepts (FIG-5939).
+        let rows = nodes.script().ledger(&owner());
         let fold = match round::fold(&rows, &PolicyView::default(), &round::PinnedWaits::ledger()) {
             Ok(fold) => fold,
             Err(refusal) => return vec![format!("the run records do not fold: {refusal}")],
@@ -1972,16 +1974,21 @@ fn approval(scenario: &L4) -> (ToolCallId, String) {
         .expect("the approval handed out its key")
 }
 
-/// The run records' one round's only member, folded: over its waits while
-/// the turn runs, over its ledger alone once it ended.
+/// The run records' one round's only member, folded: over its stored
+/// records and their waits while the turn runs, over the ledger its commits
+/// appended alone once its terminal retired it (FIG-6601).
 async fn only_member(nodes: &SimNodes) -> round::RoundMember {
-    let rows = nodes.database().run_facts(&owner()).await.unwrap();
-    let waits = if nodes.database().turn(&session()).await.unwrap().is_some() {
-        round::PinnedWaits::read(nodes.database().as_ref(), &rows)
+    let (rows, waits) = if nodes.database().turn(&session()).await.unwrap().is_some() {
+        let rows = nodes.database().run_facts(&owner()).await.unwrap();
+        let waits = round::PinnedWaits::read(nodes.database().as_ref(), &rows)
             .await
-            .unwrap()
+            .unwrap();
+        (rows, waits)
     } else {
-        round::PinnedWaits::ledger()
+        (
+            nodes.script().ledger(&owner()),
+            round::PinnedWaits::ledger(),
+        )
     };
     let fold = round::fold(&rows, &PolicyView::default(), &waits).unwrap();
     let (run, _) = declared(&fold).expect("the round was admitted");
@@ -2173,7 +2180,17 @@ async fn a_turns_tool_count_equals_its_ledger_after_takeover() {
         resumed.epoch > parked.epoch,
         "the successor claimed the turn"
     );
-    let facts = nodes.database().run_facts(&owner()).await.unwrap();
+    assert!(
+        nodes
+            .database()
+            .run_facts(&owner())
+            .await
+            .unwrap()
+            .rows
+            .is_empty(),
+        "the turn's terminal retired its stored ledger"
+    );
+    let facts = nodes.script().ledger(&owner());
     let fold = round::fold(
         &facts,
         &PolicyView::default(),
