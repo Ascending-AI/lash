@@ -35,6 +35,20 @@ fn validate_postgres_durability(fsync: &str, commit: &str) -> anyhow::Result<()>
     Ok(())
 }
 
+/// Read the selected backend's actual policy before starting any timer.
+///
+/// # Errors
+/// Returns the selected connection's query error; no settings are invented.
+pub async fn postgres_settings(pool: &sqlx::PgPool) -> anyhow::Result<String> {
+    let rows: Vec<(String, String)> = sqlx::query_as("SELECT name, setting FROM pg_settings WHERE name IN ('fsync', 'synchronous_commit', 'full_page_writes', 'wal_level', 'server_version') ORDER BY name")
+        .fetch_all(pool).await?;
+    Ok(serde_json::to_string(
+        &rows
+            .into_iter()
+            .collect::<std::collections::BTreeMap<_, _>>(),
+    )?)
+}
+
 #[cfg(test)]
 mod durability_tests {
     /// PERFORMANCE-DURABILITY: counts and latency must measure the promised

@@ -73,7 +73,7 @@ pub struct Row {
     store: &'static str,
     h: usize,
     park: usize,
-    counts: [u64; 21],
+    counts: [Option<u64>; 21],
     wall_ns: u128,
     /// Building the retained state and committing its first park, up to
     /// gate 0: diagnostic wall time, never an oracle.
@@ -87,6 +87,22 @@ pub struct Row {
     tail_host_checks: u64,
     tail_ns: u128,
 }
+/// SQLite perf-witness SQL counters are not measured on PostgreSQL. Keep
+/// accepted publication statements/rows and all common page counters.
+fn available_counts(store: &str, counts: [u64; 21]) -> [Option<u64>; 21] {
+    let mut counts = counts.map(Some);
+    if store != "sqlite" {
+        for index in [7, 8, 9, PUBLISH_VM_STEPS] {
+            counts[index] = None;
+        }
+    }
+    counts
+}
+
+fn counter_text(value: &Option<u64>) -> String {
+    value.map_or_else(|| "unknown".to_owned(), |value| value.to_string())
+}
+
 struct Mark {
     at_us: u64,
     store: Snapshot,
@@ -174,8 +190,13 @@ impl Meter {
                 store.retirement_batches - mark.store.retirement_batches,
                 published(|sql| sql.statements),
                 published(|sql| sql.rows_returned),
-                published(|sql| sql.sqlite_work.map_or(0, |work| work.vm_steps)),
+                0, // populated below from typed optional SQLite receipts
             ];
+            let mut counts = available_counts(self.store, counts);
+            counts[PUBLISH_VM_STEPS] = parks
+                .iter()
+                .map(|tx| tx.sql.as_ref()?.sqlite_work.map(|work| work.vm_steps))
+                .sum();
             let committed_parks = parks.len();
             let row = Row {
                 scenario: self.scenario.clone(),
@@ -515,7 +536,7 @@ async fn sample_with_stores(
                 .position(|counter| *counter == name)
                 .unwrap_or(0);
             ensure!(
-                row.counts[index] > 0,
+                row.counts[index].is_some_and(|value| value > 0),
                 "{scenario}/{h}/{} has no {name}",
                 row.park
             );
@@ -543,7 +564,7 @@ fn laws(rows: &[Row]) -> Result<()> {
     };
     // Every law is checked, and every one broken is named.
     let broken = std::cell::RefCell::new(Vec::new());
-    let flat = |scenario: &str, what: &str, counter: &dyn Fn(&Row) -> u64| {
+    let flat = |scenario: &str, what: &str, counter: &dyn Fn(&Row) -> Option<u64>| {
         if let Err(error) = flat_law(&interval(scenario), scenario, what, counter) {
             broken.borrow_mut().push(error.to_string());
         }
@@ -581,7 +602,9 @@ fn laws(rows: &[Row]) -> Result<()> {
     });
     // A cell that touches nothing loads and seals O(1) pages.
     flat("next-cell", "pages a no-op cell moves", &|row| {
-        row.counts[PAGES_LOADED] + row.counts[PAGES_SEALED]
+        row.counts[PAGES_LOADED]
+            .zip(row.counts[PAGES_SEALED])
+            .map(|(loaded, sealed)| loaded + sealed)
     });
     // Publication follows the candidate's changed pages: the SQL engine
     // work of the park's fenced owner transaction, which a walk of the
@@ -599,11 +622,14 @@ fn laws(rows: &[Row]) -> Result<()> {
     // publication also stays within a fixed budget at every H.
     for row in rows
         .iter()
-        .filter(|row| row.counts[PUBLISH_VM_STEPS] > PUBLISH_STEPS)
+        .filter(|row| row.counts[PUBLISH_VM_STEPS].is_some_and(|value| value > PUBLISH_STEPS))
     {
         broken.borrow_mut().push(format!(
             "{}/{}/{}: publication ran {} SQL steps, over its budget of {PUBLISH_STEPS}",
-            row.scenario, row.h, row.park, row.counts[PUBLISH_VM_STEPS]
+            row.scenario,
+            row.h,
+            row.park,
+            counter_text(&row.counts[PUBLISH_VM_STEPS])
         ));
     }
     // The next prompt reads what the cell left a bounded number of times:
@@ -620,7 +646,7 @@ fn laws(rows: &[Row]) -> Result<()> {
             scenario,
             "host page checks after the last gate",
             LINEAR,
-            &|row| row.tail_host_checks,
+            &|row| Some(row.tail_host_checks),
         ) {
             broken.borrow_mut().push(error.to_string());
         }
@@ -644,7 +670,7 @@ fn flat_law(
     rows: &[&Row],
     scenario: &str,
     what: &str,
-    counter: &dyn Fn(&Row) -> u64,
+    counter: &dyn Fn(&Row) -> Option<u64>,
 ) -> Result<()> {
     bounded_law(rows, scenario, what, FLAT, counter)
 }
@@ -656,7 +682,7 @@ fn bounded_law(
     scenario: &str,
     what: &str,
     limit: f64,
-    counter: &dyn Fn(&Row) -> u64,
+    counter: &dyn Fn(&Row) -> Option<u64>,
 ) -> Result<()> {
     if rows.is_empty() {
         return Ok(());
@@ -682,27 +708,18 @@ fn bounded_law(
 }
 /// Least-squares exponent of log count against log H; zero/absent counts
 /// have no exponent. Wall time is never an oracle.
-fn exponent(rows: &[&Row], counter: impl Fn(&Row) -> u64) -> Option<f64> {
-    if rows.len() < 2 || rows.iter().any(|row| counter(row) == 0) {
-        return None;
-    }
-    let n = rows.len() as f64;
-    let x = rows.iter().map(|row| (row.h as f64).ln()).sum::<f64>() / n;
-    let y = rows
+fn exponent(rows: &[&Row], counter: impl Fn(&Row) -> Option<u64>) -> Option<f64> {
+    let points: Vec<_> = rows
         .iter()
-        .map(|row| (counter(row) as f64).ln())
-        .sum::<f64>()
-        / n;
-    let covariance = rows
-        .iter()
-        .map(|row| ((row.h as f64).ln() - x) * ((counter(row) as f64).ln() - y))
-        .sum::<f64>();
-    let variance = rows
-        .iter()
-        .map(|row| ((row.h as f64).ln() - x).powi(2))
-        .sum::<f64>();
-    (variance > 0.0).then_some(covariance / variance)
+        .map(|row| {
+            counter(row)
+                .filter(|value| *value > 0)
+                .map(|value| ((row.h as f64).ln(), (value as f64).ln()))
+        })
+        .collect::<Option<_>>()?;
+    lash_perf::replay::receipt::least_squares_slope(&points)
 }
+
 pub async fn run(run: &super::Run<'_>, sizes: &[usize], only: &[String]) -> Result<()> {
     ensure!(
         sizes.len() >= 2 && sizes.iter().all(|h| *h > 0) && sizes.windows(2).all(|h| h[0] < h[1]),
@@ -749,7 +766,7 @@ pub async fn run(run: &super::Run<'_>, sizes: &[usize], only: &[String]) -> Resu
             row.park,
             row.counts
                 .iter()
-                .map(u64::to_string)
+                .map(counter_text)
                 .collect::<Vec<_>>()
                 .join(" "),
             row.wall_ns as f64 / 1e6,
@@ -777,7 +794,7 @@ pub async fn run(run: &super::Run<'_>, sizes: &[usize], only: &[String]) -> Resu
         println!(
             "{scenario} exponent - {} - - - {} -",
             slopes.join(" "),
-            exponent(&tail, |row| row.tail_host_checks)
+            exponent(&tail, |row| Some(row.tail_host_checks))
                 .map_or_else(|| "n/a".to_owned(), |slope| format!("{slope:.3}"))
         );
     }
@@ -786,6 +803,27 @@ pub async fn run(run: &super::Run<'_>, sizes: &[usize], only: &[String]) -> Resu
 
 #[cfg(test)]
 mod tests {
+    /// FIG-6620: unavailable SQLite work stays absent on PostgreSQL; genuine
+    /// measured zero and accepted publication/page counts stay available.
+    #[test]
+    fn backend_availability_preserves_unknown_and_measured_zero() {
+        let sqlite = super::available_counts("sqlite", [0; 21]);
+        let postgres = super::available_counts("postgres", [0; 21]);
+        for index in [7, 8, 9, super::PUBLISH_VM_STEPS] {
+            assert_eq!(sqlite[index], Some(0));
+            assert_eq!(postgres[index], None);
+            assert_eq!(super::counter_text(&postgres[index]), "unknown");
+        }
+        for index in [super::PAGES_LOADED, super::PAGES_SEALED, 18, 19] {
+            assert_eq!(postgres[index], Some(0));
+        }
+        println!(
+            "backend-availability.json={}",
+            serde_json::json!({
+                "counters": super::COUNTERS, "sqlite": sqlite, "postgres": postgres
+            })
+        );
+    }
     /// HEAP-METER: every released-worker park/resume seam is measured for all
     /// six retained-state scenarios, at H 100 and 2,000 and objects-update at
     /// 1,000 and 10,000 (whose park once stalled past the sample limit), and
@@ -827,7 +865,7 @@ mod tests {
                 row.scenario,
                 row.h,
                 row.park,
-                row.counts[super::SPOOL_BYTES],
+                super::counter_text(&row.counts[super::SPOOL_BYTES]),
                 row.seed_ns as f64 / 1e6,
                 row.wall_ns as f64 / 1e6
             );

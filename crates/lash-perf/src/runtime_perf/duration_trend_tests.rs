@@ -803,7 +803,7 @@ fn an_unacknowledged_shift_survives_many_runs_and_compaction() {
 
 fn fixture_identity() -> ExperimentIdentity {
     let mut identity =
-        ExperimentIdentity::capture(serde_json::json!({"fixture": true})).for_scenario("standard");
+        ExperimentIdentity::capture(serde_json::json!({"fixture": true, "phase_observation_mode": "clock_alloc_rss", "dhat_enabled": false, "worker": "fixture-worker", "window": "fixture-window", "terminal": "success"})).for_scenario("standard");
     identity.host = "fixture-host".to_string();
     identity.compiler = "fixture-compiler".to_string();
     identity.build_profile = "fixture-build".to_string();
@@ -851,6 +851,11 @@ fn unlike_experiment_identities_are_refused_by_dimension() {
             _ => &mut other.configured_geometry,
         };
         field.push_str("different");
+        if dimension == D::Geometry {
+            other.configured_geometry = baseline
+                .configured_geometry
+                .replace("\"fixture\":true", "\"fixture\":false");
+        }
         assert_eq!(
             baseline.compare(&other),
             Err(ComparisonRefusal::IdentityMismatch(dimension))

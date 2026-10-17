@@ -153,6 +153,7 @@ fn source(python: bool, variant: Variant, payload: usize) -> String {
 type ReadStores = (
     Arc<dyn StoreSet>,
     Option<lash_postgres_store::PostgresStorage>,
+    bool, // selected SQLite memory policy
 );
 
 async fn stores(run: &Run<'_>) -> Result<ReadStores> {
@@ -166,6 +167,7 @@ async fn stores(run: &Run<'_>) -> Result<ReadStores> {
                 .await?,
             ),
             None,
+            false,
         )),
         Database::Postgres(url) => {
             let endpoints = lash_postgres_store::PostgresEndpoints::from_url(url)?;
@@ -180,7 +182,7 @@ async fn stores(run: &Run<'_>) -> Result<ReadStores> {
                 &storage,
                 Arc::new(lash_core_execution::attachments::UnavailableAttachmentStore),
             );
-            Ok((Arc::new(stores), Some(storage)))
+            Ok((Arc::new(stores), Some(storage), false))
         }
     }
 }
@@ -321,10 +323,47 @@ async fn measure_with_stores(
     payload: usize,
     variant: Variant,
     workers: lash::vm::WorkerService,
-    (inner, storage): ReadStores,
+    (inner, storage, sqlite_memory): ReadStores,
 ) -> Result<()> {
     let dialect = if python { "python" } else { "typescript" };
     let id = format!("{dialect}-{}-{payload}-{traced}", variant.name());
+    let store = if storage.is_some() {
+        "postgres"
+    } else if sqlite_memory {
+        "sqlite-memory"
+    } else {
+        "sqlite-file"
+    };
+    let producer = lash_perf::replay::receipt::Identity::current();
+    let configured_durability = if let Some(storage) = &storage {
+        lash_perf::perf_support::postgres_settings(storage.pool()).await?
+    } else {
+        // The selected policy distinguishes the SQLite memory law from the
+        // command's SQLite file population before the stores are erased.
+        format!(
+            "{:?}",
+            if sqlite_memory {
+                lash_sqlite_store::SqliteStoreSetOptions::memory()
+            } else {
+                lash_sqlite_store::SqliteStoreSetOptions::standard(
+                    lash_sqlite_store::SqliteSynchronous::Full,
+                )
+            }
+        )
+    };
+    let identity = json!({
+        "source": producer.commit, "dirty": producer.dirty,
+        "compiler": producer.compiler, "build_profile": producer.build_profile,
+        "allocator": producer.allocator, "host": producer.host,
+        "executable": producer.executable_sha256,
+        "worker": lash_perf::perf_support::git::artifact_sha256(&workers.config().entry.executable),
+        "backend": store,
+        "configured_durability": configured_durability,
+        "observer": if traced { "store-recorder+otel" } else { "store-recorder" },
+        "window": "fresh-session send through successful outcome; excludes validation",
+        "terminal": "successful output; read/write chain and commit/fact geometry validated",
+    });
+
     eprintln!(
         "read population {id}, {} fresh-session samples",
         run.samples
@@ -478,19 +517,6 @@ async fn measure_with_stores(
         } else {
             None
         };
-        run.report.write("read_sample", &json!({
-            "store":run.database.dialect(), "dialect":dialect, "traced":traced,
-            "payload_bytes":payload, "variant":variant.name(), "sample":sample,
-            "reads":variant.count(), "elapsed_us":elapsed_us, "owner_commits":labels,
-            "run_facts":facts, "transactions":transactions, "plan_commit_us":plan.map(|tx| tx.micros),
-            "staged_graph_bytes":transactions.iter().map(|tx| tx.graph_bytes).sum::<usize>(),
-            "installed_graph_bytes":transactions.iter().map(|tx| tx.installed_bytes).sum::<usize>(),
-            "ipc_sent_frames":ipc_after.ipc_sent_messages - ipc_before.ipc_sent_messages,
-            "ipc_received_frames":ipc_after.ipc_received_messages - ipc_before.ipc_received_messages,
-            "ipc_sent_bytes":ipc_after.ipc_sent_bytes - ipc_before.ipc_sent_bytes,
-            "ipc_received_bytes":ipc_after.ipc_received_bytes - ipc_before.ipc_received_bytes,
-            "host_load":std::fs::read_to_string("/proc/loadavg").ok(),
-        }))?;
         let output = outcome
             .output()
             .with_context(|| format!("{id}: turn has no output: {:?}", outcome.status()))?;
@@ -509,6 +535,20 @@ async fn measure_with_stores(
             "{id}: mixed write count"
         );
         assert_geometry(variant, &transactions)?;
+        run.report.write("read_sample", &json!({
+            "identity": identity, "validation": "passed",
+            "store":store, "dialect":dialect, "traced":traced,
+            "payload_bytes":payload, "variant":variant.name(), "sample":sample,
+            "reads":variant.count(), "elapsed_us":elapsed_us, "owner_commits":labels,
+            "run_facts":facts, "transactions":transactions, "plan_commit_us":plan.map(|tx| tx.micros),
+            "staged_graph_bytes":transactions.iter().map(|tx| tx.graph_bytes).sum::<usize>(),
+            "installed_graph_bytes":transactions.iter().map(|tx| tx.installed_bytes).sum::<usize>(),
+            "ipc_sent_frames":ipc_after.ipc_sent_messages - ipc_before.ipc_sent_messages,
+            "ipc_received_frames":ipc_after.ipc_received_messages - ipc_before.ipc_received_messages,
+            "ipc_sent_bytes":ipc_after.ipc_sent_bytes - ipc_before.ipc_sent_bytes,
+            "ipc_received_bytes":ipc_after.ipc_received_bytes - ipc_before.ipc_received_bytes,
+            "host_load":std::fs::read_to_string("/proc/loadavg").ok(),
+        }))?;
         eprintln!("READ_COUNTS {id}: commits={labels:?}; facts={facts:?}");
         latencies.push(elapsed_us);
         if let Some(plan) = plan {
@@ -524,7 +564,7 @@ async fn measure_with_stores(
     }
     run.report.write(
         "read_distribution",
-        &json!({"store":run.database.dialect(),
+        &json!({"identity": identity, "validation": "passed", "store":store,
             "dialect":dialect,"traced":traced,"payload_bytes":payload,"variant":variant.name(),
             "samples_us":latencies,"latency":Distribution::of(&latencies)?,
             "plan_commit_samples_us":plans,
@@ -543,6 +583,80 @@ async fn measure_with_stores(
 
 #[cfg(test)]
 mod tests {
+    /// FIG-6620: the real producer admits a validated sample with the same
+    /// identity as its distribution, after executing the declared read chain.
+    #[tokio::test(flavor = "multi_thread", worker_threads = 2)]
+    async fn validated_read_samples_preserve_the_producer_identity() {
+        let fixture = tempfile::tempdir().unwrap();
+        let path = fixture.path().join("reads.jsonl");
+        let report = crate::support::Report::open(&path).unwrap();
+        let worker = std::path::PathBuf::from(std::env::var_os("LASH_VM_WORKER").unwrap());
+        let benchmark =
+            std::path::PathBuf::from(std::env::var_os("LASH_READ_BENCH_WORKER").unwrap());
+        let run = crate::Run {
+            report: &report,
+            database: crate::deploy::Database::Sqlite(fixture.path().join("unused.db")),
+            nodes: 1,
+            samples: 1,
+            pool: crate::deploy::PoolSize { min: 1, max: 4 },
+            worker: &worker,
+            prior_turns: 0,
+            cell_parks: 0,
+            value_bytes: 0,
+        };
+        super::measure_with_stores(
+            &run,
+            false,
+            false,
+            32,
+            super::Variant::Read,
+            lash::vm::WorkerService::subprocess(&benchmark),
+            (
+                std::sync::Arc::new(lash_sqlite_store::SqliteStoreSet::memory().await.unwrap()),
+                None,
+                true,
+            ),
+        )
+        .await
+        .unwrap();
+        let rows: Vec<serde_json::Value> = std::fs::read_to_string(path)
+            .unwrap()
+            .lines()
+            .map(|line| serde_json::from_str(line).unwrap())
+            .collect();
+        let sample = rows
+            .iter()
+            .find(|row| row["kind"] == "read_sample")
+            .unwrap();
+        let distribution = rows
+            .iter()
+            .find(|row| row["kind"] == "read_distribution")
+            .unwrap();
+        assert_eq!(sample["validation"], "passed");
+        assert_eq!(sample["reads"], 50);
+        assert_eq!(sample["store"], "sqlite-memory");
+        assert_eq!(sample["store"], sample["identity"]["backend"]);
+        assert_eq!(sample["identity"], distribution["identity"]);
+        for field in [
+            "compiler",
+            "build_profile",
+            "allocator",
+            "executable",
+            "worker",
+            "observer",
+            "configured_durability",
+            "window",
+            "terminal",
+        ] {
+            assert!(
+                sample["identity"][field]
+                    .as_str()
+                    .is_some_and(|value| !value.is_empty()),
+                "{field}: {sample}"
+            );
+        }
+    }
+
     /// READ-COST-MODEL: the maintained production-facade matrix asserts the
     /// exact per-call commit/fact counts on SQLite memory in both dialects.
     /// Worker preparation is shared, as in the command-line matrix; every
@@ -585,6 +699,7 @@ mod tests {
                                     lash_sqlite_store::SqliteStoreSet::memory().await.unwrap(),
                                 ),
                                 None,
+                                true,
                             ),
                         )
                         .await

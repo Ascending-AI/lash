@@ -81,8 +81,8 @@ pub struct SlopeTolerance {
 pub enum Check {
     /// The per-session-turn median.
     PerTurnMedian,
-    /// The per-session-turn maximum.
-    PerTurnMax,
+    /// The maximum round total divided by sessions, never a session tail.
+    RoundAverageMax,
     /// The robust (Theil-Sen) slope against history depth.
     HistorySlope,
     /// The robust (Theil-Sen) slope against the frame's depth: the depth
@@ -91,10 +91,10 @@ pub enum Check {
 }
 
 impl Check {
-    fn of(self, summary: &MetricSummary) -> f64 {
+    fn of(self, summary: &MetricSummary) -> Option<f64> {
         match self {
-            Self::PerTurnMedian => summary.per_turn_median,
-            Self::PerTurnMax => summary.per_turn_max,
+            Self::PerTurnMedian => Some(summary.per_turn_median),
+            Self::RoundAverageMax => Some(summary.round_average_max),
             Self::HistorySlope => summary.robust_slope_per_history_turn,
             Self::FrameSlope => summary.robust_slope_per_frame_turn,
         }
@@ -193,6 +193,12 @@ impl Baseline {
             missing_identity(&receipt.identity).is_none(),
             "cannot bless a receipt with missing counted identity"
         );
+        ensure!(
+            !receipt.identity.sql_shapes
+                && !receipt.identity.traffic
+                && receipt.identity.heap_window.is_none(),
+            "counted baselines require ordinary replay observation"
+        );
         Ok(Self {
             format: BASELINE_FORMAT.to_owned(),
             blessed_from: receipt.identity.commit.clone(),
@@ -209,7 +215,9 @@ impl Baseline {
                             script_digest: workload.script_digest.clone(),
                             backend: workload.backend.clone(),
                             turns: workload.turns,
-                            per_turn_median: counted(workload, |summary| summary.per_turn_median),
+                            per_turn_median: counted(workload, |summary| {
+                                Some(summary.per_turn_median)
+                            }),
                             depth_slope: counted(workload, |summary| {
                                 summary.robust_slope_per_frame_turn
                             }),
@@ -223,13 +231,13 @@ impl Baseline {
 
 fn counted(
     workload: &WorkloadReceipt,
-    statistic: impl Fn(&MetricSummary) -> f64,
+    statistic: impl Fn(&MetricSummary) -> Option<f64>,
 ) -> BTreeMap<String, f64> {
     workload
         .summary
         .iter()
         .filter(|(_, summary)| summary.kind == MetricKind::Counted)
-        .map(|(name, summary)| (name.clone(), statistic(summary)))
+        .filter_map(|(name, summary)| statistic(summary).map(|value| (name.clone(), value)))
         .collect()
 }
 
@@ -263,6 +271,7 @@ pub enum CountedIdentityDimension {
     Build,
     BuildProfile,
     Allocator,
+    Observer,
 }
 
 /// Why counted metrics cannot be compared or blessed.
@@ -296,6 +305,16 @@ fn counted_identity_refusal(
     identity: &super::receipt::Identity,
     baseline: &Baseline,
 ) -> Option<CountedIdentityRefusal> {
+    if identity.sql_shapes || identity.traffic || identity.heap_window.is_some() {
+        return Some(CountedIdentityRefusal::Mismatch {
+            dimension: CountedIdentityDimension::Observer,
+            baseline: "ordinary replay observation".to_owned(),
+            candidate: format!(
+                "sql_shapes={};traffic={};heap_window={:?}",
+                identity.sql_shapes, identity.traffic, identity.heap_window
+            ),
+        });
+    }
     for (dimension, candidate, blessed) in [
         (
             CountedIdentityDimension::Build,
@@ -386,7 +405,13 @@ fn check_budgets(
             ));
             continue;
         };
-        let observed = budget.check.of(summary);
+        let Some(observed) = budget.check.of(summary) else {
+            verdict.violations.push(format!(
+                "{}: {:?} of `{}` is unknown; insufficient distinct depths",
+                workload.workload, budget.check, budget.metric
+            ));
+            continue;
+        };
         if observed <= budget.max {
             continue;
         }
@@ -485,7 +510,13 @@ fn check_baseline(
             continue;
         };
         let slack = tolerance.relative * base.abs() + tolerance.absolute;
-        let observed = summary.robust_slope_per_frame_turn;
+        let Some(observed) = summary.robust_slope_per_frame_turn else {
+            verdict.violations.push(format!(
+                "{}: the depth slope of `{name}` is unknown; insufficient distinct depths",
+                workload.workload
+            ));
+            continue;
+        };
         if observed > base + slack {
             verdict.violations.push(format!(
                 "{}: the depth slope of `{name}` rose to {observed} {} per prior turn from its \
@@ -527,6 +558,7 @@ mod tests {
             format: RECEIPT_FORMAT.to_owned(),
             identity: Identity::current(),
             workloads: vec![WorkloadReceipt {
+                experiment: Identity::current().experiment(serde_json::json!({"fixture": true})),
                 workload: "chat-short".to_owned(),
                 script_digest: "digest".to_owned(),
                 protocol: "standard".to_owned(),
@@ -582,6 +614,45 @@ mod tests {
         }
     }
 
+    /// FIG-6620: an unknown slope cannot satisfy a counted ceiling or baseline.
+    #[test]
+    fn insufficient_depth_cannot_pass_a_slope_budget() {
+        let mut candidate = receipt(0.0);
+        let baseline = Baseline::bless(&candidate).unwrap();
+        let workload = &mut candidate.workloads[0];
+        workload.rounds.truncate(1);
+        workload.summary = summarize(&workload.rounds);
+        let verdict = evaluate(&candidate, &budgets(false), &baseline);
+        assert!(!verdict.passed());
+        assert!(
+            verdict
+                .violations
+                .iter()
+                .any(|finding| finding.contains("unknown"))
+        );
+    }
+
+    /// FIG-6620: optional observers cannot share an ordinary counted baseline.
+    #[test]
+    fn counted_baselines_refuse_mixed_observer_modes() {
+        let candidate = receipt(0.0);
+        let baseline = Baseline::bless(&candidate).unwrap();
+        for mode in 0..3 {
+            let mut observed = candidate.clone();
+            observed.identity.sql_shapes = mode == 0;
+            observed.identity.traffic = mode == 1;
+            observed.identity.heap_window = (mode == 2).then_some([1, 2]);
+            assert!(Baseline::bless(&observed).is_err());
+            assert!(matches!(
+                evaluate(&observed, &budgets(false), &baseline).identity_refusal,
+                Some(CountedIdentityRefusal::Mismatch {
+                    dimension: CountedIdentityDimension::Observer,
+                    ..
+                })
+            ));
+        }
+    }
+
     /// REPLAY-IDENTITY: counted medians belong to their build and allocator,
     /// including SQL-only populations; a debug baseline cannot certify release.
     #[test]
@@ -597,6 +668,7 @@ mod tests {
             cpus: 1,
             load1_at_start: None,
             started_at: "2026-10-13T00:00:00Z".to_owned(),
+            ..Identity::current()
         };
         let baseline = Baseline::bless(&candidate).unwrap();
         assert!(evaluate(&candidate, &budgets(false), &baseline).passed());
@@ -642,6 +714,7 @@ mod tests {
                 CountedIdentityDimension::Build => missing.identity.build.clear(),
                 CountedIdentityDimension::BuildProfile => missing.identity.build_profile.clear(),
                 CountedIdentityDimension::Allocator => missing.identity.allocator.clear(),
+                CountedIdentityDimension::Observer => unreachable!("observer uses typed flags"),
             }
             assert!(!evaluate(&missing, &budgets(false), &baseline).passed());
             assert!(Baseline::bless(&missing).is_err());

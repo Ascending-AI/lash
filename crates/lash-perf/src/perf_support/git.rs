@@ -19,3 +19,13 @@ pub fn git_dirty() -> bool {
         .map(|status| !status.success())
         .unwrap_or(true)
 }
+
+/// Digest an actual executable outside measurement windows. Unreadable artifacts
+/// remain unknown and cannot qualify a comparison.
+pub fn artifact_sha256(path: &std::path::Path) -> Option<String> {
+    use sha2::Digest as _;
+    let mut file = std::fs::File::open(path).ok()?;
+    let mut hash = sha2::Sha256::new();
+    std::io::copy(&mut file, &mut hash).ok()?;
+    Some(format!("{:x}", hash.finalize()))
+}

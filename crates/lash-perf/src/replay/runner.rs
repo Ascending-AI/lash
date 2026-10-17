@@ -27,6 +27,7 @@ pub enum StoreChoice {
 /// One run's settings.
 #[derive(Clone, Debug)]
 pub struct RunOptions {
+    pub identity: super::receipt::Identity,
     pub store: StoreChoice,
     /// Run only the first this many turns of each session.
     pub turns: Option<usize>,
@@ -190,12 +191,50 @@ async fn retire(pages: Option<&dyn lash_durable::domain::pages::PageStore>) -> R
 
 /// Run `workload` once and return its receipt.
 pub async fn run(workload: &Workload, options: &RunOptions) -> Result<WorkloadReceipt> {
+    ensure!(
+        options.identity.sql_shapes == options.sql_shapes.is_some()
+            && options.identity.traffic == options.traffic
+            && options.identity.heap_window
+                == options
+                    .heap
+                    .profile_turn
+                    .map(|first| [first, options.heap.profile_through_turn.unwrap_or(first)]),
+        "replay observer identity differs from selected instruments"
+    );
     let traffic = options
         .traffic
         .then(lash_sqlite_store::write_observer::Collector::install)
         .transpose()
         .map_err(|e| anyhow::anyhow!(e))?;
     let (stores, probe, keep) = open_stores(&options.store, &workload.name).await?;
+    let mut experiment = options.identity.experiment(serde_json::json!({
+        "turns": options.turns.unwrap_or(workload.turn_count()).min(workload.turn_count()),
+        "sessions": workload.sessions, "compact_every": workload.compact_every,
+        "sql_shapes": options.identity.sql_shapes, "traffic": options.identity.traffic,
+        "heap_window": options.identity.heap_window, "heap_frames": options.heap.dhat_frames,
+        "window": "round first send through last successful outcome; counters at settled cuts",
+        "terminal": "all scripted replies validated; successful outcomes",
+    }));
+    experiment.backend = probe.backend().to_owned();
+    experiment.workload = format!("replay/{}:{}", workload.name, workload.digest());
+    experiment.configured_durability = match &probe {
+        StoreProbe::Sqlite { .. } => format!(
+            "{:?}",
+            lash_sqlite_store::SqliteStoreSetOptions::standard(
+                lash_sqlite_store::SqliteSynchronous::Normal
+            )
+        ),
+        StoreProbe::Postgres { pool } => {
+            let settings = crate::perf_support::postgres_settings(pool).await?;
+            experiment.postgres_settings = Some(settings.clone());
+            format!(
+                "postgres={settings};attachments={:?}",
+                lash_sqlite_store::SqliteStoreSetOptions::standard(
+                    lash_sqlite_store::SqliteSynchronous::Normal
+                )
+            )
+        }
+    };
     let pages = stores.durable_store().pages();
     let backend = lash::durable::DurableBackendBuilder::new(stores)
         .config(replay_settings())
@@ -223,6 +262,12 @@ pub async fn run(workload: &Workload, options: &RunOptions) -> Result<WorkloadRe
             )
         })
         .transpose()?;
+    let mut geometry: serde_json::Value = serde_json::from_str(&experiment.configured_geometry)?;
+    geometry["worker"] = serde_json::json!(workers.as_ref().map_or_else(
+        || Some("none (standard protocol)".to_owned()),
+        |service| crate::perf_support::git::artifact_sha256(&service.config().entry.executable)
+    ));
+    experiment.configured_geometry = geometry.to_string();
     let core = build_core(
         workload,
         &backend,
@@ -341,7 +386,8 @@ pub async fn run(workload: &Workload, options: &RunOptions) -> Result<WorkloadRe
             receipt["script_digest"] = serde_json::json!(workload.digest());
             receipt["first_turn"] = serde_json::json!(options.heap.profile_turn);
             receipt["last_turn"] = serde_json::json!(turn + 1);
-            receipt["identity"] = serde_json::to_value(super::receipt::Identity::current())?;
+            receipt["identity"] = serde_json::to_value(&options.identity)?;
+            receipt["experiment"] = serde_json::to_value(&experiment)?;
             std::fs::write(path, serde_json::to_vec_pretty(&receipt)?)?;
             profiled = true;
         }
@@ -404,7 +450,7 @@ pub async fn run(workload: &Workload, options: &RunOptions) -> Result<WorkloadRe
         std::fs::write(
             path,
             serde_json::to_vec_pretty(&serde_json::json!({
-                "kind": "lash.replay-sql-shapes", "identity": super::receipt::Identity::current(),
+                "kind": "lash.replay-sql-shapes", "identity": options.identity, "experiment": experiment,
                 "workload": workload.name, "script_digest": workload.digest(),
                 "backend": backend_name, "scope": "all observed SQLite connections in this host process; same counter cuts as replay rounds",
                 "row_limit": lash_core::perf_witness::sql_shapes::ROW_LIMIT,
@@ -421,6 +467,7 @@ pub async fn run(workload: &Workload, options: &RunOptions) -> Result<WorkloadRe
         .map_err(|error| anyhow::anyhow!("shut the replay core down: {error}"))?;
     drop(keep);
     Ok(WorkloadReceipt {
+        experiment,
         workload: workload.name.clone(),
         script_digest: workload.digest(),
         protocol: serde_json::to_value(workload.protocol)?

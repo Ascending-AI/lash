@@ -16,6 +16,35 @@ use lash_core::runtime::RuntimeTurnPhaseProbe;
 use lash_core::store::QueuedWorkStore as _;
 use lash_core::{SessionCatalogStore as _, SessionListFilter};
 
+/// FIG-6620: changing phase observation or losing its identity refuses history.
+#[test]
+fn runtime_history_refuses_mixed_or_missing_phase_observers() {
+    let identity = |clock_only| {
+        let mut identity = super::runtime_experiment(serde_json::json!({}), clock_only, false)
+            .for_scenario("standard");
+        identity.host = "control-host".to_owned();
+        let mut geometry: serde_json::Value =
+            serde_json::from_str(&identity.configured_geometry).unwrap();
+        geometry["worker"] = serde_json::json!("control-worker");
+        identity.configured_geometry = geometry.to_string();
+        identity
+    };
+    let observed = identity(false);
+    let clock = identity(true);
+    assert!(observed.compare(&observed).is_ok());
+    assert!(observed.compare(&clock).is_err());
+    let mut missing = observed.clone();
+    missing.configured_geometry = "{}".to_owned();
+    assert!(missing.compare(&missing).is_err());
+    println!(
+        "history-observer-identity.json={}",
+        serde_json::json!({
+            "runtime": {"observed": observed, "clock": clock,
+                "mixed_refused": true, "missing_refused": true}
+        })
+    );
+}
+
 /// GRAPH-WORK: a reused canonical image materializes no envelope, while
 /// every cache-key hash and every adoption hash remains measured work.
 #[test]

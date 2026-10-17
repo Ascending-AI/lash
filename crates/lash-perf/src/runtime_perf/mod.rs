@@ -1,4 +1,5 @@
 mod duration_trend;
+pub(crate) use duration_trend::{ExperimentIdentity, history_run_id};
 mod kernel_history;
 pub use kernel_history::record_kernel_receipt;
 mod replay_history;

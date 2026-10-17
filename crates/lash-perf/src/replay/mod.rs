@@ -108,13 +108,20 @@ async fn run_workloads(
     heap: &ReplayHeapArgs,
     traffic: bool,
 ) -> Result<ReplayReceipt> {
+    let mut identity = Identity::current();
+    identity.sql_shapes = sql_shapes.is_some();
+    identity.traffic = traffic;
+    identity.heap_window = heap
+        .profile_turn
+        .map(|first| [first, heap.profile_through_turn.unwrap_or(first)]);
     let mut receipt = ReplayReceipt {
         format: RECEIPT_FORMAT.to_owned(),
-        identity: Identity::current(),
+        identity,
         workloads: Vec::with_capacity(workloads.len()),
     };
     for (workload, turns) in workloads {
         let options = RunOptions {
+            identity: receipt.identity.clone(),
             store: store.clone(),
             turns: *turns,
             worker_profile_dir: out.with_extension("worker-heaps").join(&workload.name),

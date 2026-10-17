@@ -168,7 +168,7 @@
     {
       "workload": "*",
       "metric": "graph_nodes_written",
-      "check": "per_turn_max",
+      "check": "round_average_max",
       "max": 8,
       "why": "a scripted turn adds at most its user input, replies and tool results"
     },

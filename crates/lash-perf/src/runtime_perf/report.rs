@@ -100,6 +100,31 @@ pub struct RuntimePerfRun {
     pub version: String,
 }
 
+fn phase_observation_mode(clock_only: bool) -> &'static str {
+    if clock_only {
+        "clock_only"
+    } else {
+        "clock_alloc_rss"
+    }
+}
+
+fn runtime_experiment(
+    mut geometry: serde_json::Value,
+    clock_only: bool,
+    dhat: bool,
+) -> duration_trend::ExperimentIdentity {
+    geometry["phase_observation_mode"] = serde_json::json!(phase_observation_mode(clock_only));
+    geometry["dhat_enabled"] = serde_json::json!(dhat);
+    geometry["worker"] = serde_json::json!(crate::perf_support::git::artifact_sha256(
+        &lash::vm::WorkerService::default().config().entry.executable
+    ));
+    geometry["window"] = serde_json::json!(
+        "runtime scenario with separately retained operation and validation phases"
+    );
+    geometry["terminal"] = serde_json::json!("scenario completed");
+    duration_trend::ExperimentIdentity::capture(geometry)
+}
+
 pub async fn run_cli(run: RuntimePerfRun) -> anyhow::Result<()> {
     let RuntimePerfRun {
         out,
@@ -150,17 +175,22 @@ pub async fn run_cli(run: RuntimePerfRun) -> anyhow::Result<()> {
         &high_traffic_knee_populations,
         high_traffic_knee_threshold,
     )?;
-    let mut experiment = duration_trend::ExperimentIdentity::capture(serde_json::json!({
-        "runs": runs, "warmups": warmups, "turns": chat_turns,
-        "worker_stack_bytes": worker_stack_bytes,
-        "checkpoint_transcript_bytes": checkpoint_transcript_bytes,
-        "checkpoint_messages": checkpoint_messages, "checkpoint_graph_rows": checkpoint_graph_rows,
-        "checkpoint_components": checkpoint_components,
-        "load_population": high_traffic_population,
-        "mix": high_traffic_mix, "knee_populations": high_traffic_knee_populations,
-        "knee_threshold": high_traffic_knee_threshold, "smoke": smoke,
-        "dhat_frames": dhat_frames,
-    }));
+    let mut experiment = runtime_experiment(
+        serde_json::json!({
+            "runs": runs, "warmups": warmups, "turns": chat_turns,
+            "worker_stack_bytes": worker_stack_bytes,
+            "checkpoint_transcript_bytes": checkpoint_transcript_bytes,
+            "checkpoint_messages": checkpoint_messages, "checkpoint_graph_rows": checkpoint_graph_rows,
+            "checkpoint_components": checkpoint_components,
+            "load_population": high_traffic_population,
+            "mix": high_traffic_mix, "knee_populations": high_traffic_knee_populations,
+            "knee_threshold": high_traffic_knee_threshold, "smoke": smoke,
+            "dhat_frames": dhat_frames,
+
+        }),
+        clock_only_phases,
+        enable_dhat,
+    );
     experiment.read_postgres_settings(&scenarios).await;
     let stack_profile = stack_profile(worker_stack_bytes);
 
@@ -256,11 +286,7 @@ pub async fn run_cli(run: RuntimePerfRun) -> anyhow::Result<()> {
             .collect(),
         scenario_harnesses: selected_scenario_harnesses(&scenarios),
         allocation_mode: crate::ALLOCATION_MODE,
-        phase_observation_mode: if clock_only_phases {
-            "clock_only"
-        } else {
-            "clock_alloc_rss"
-        },
+        phase_observation_mode: phase_observation_mode(clock_only_phases),
         dhat_out: dhat_out_path.clone(),
         summary,
         scenario_harness_summary,
@@ -322,6 +348,8 @@ fn runtime_perf_output_json(out_path: &Path, report: &RuntimePerfReport) -> serd
         "worker_stack_bytes": report.worker_stack_bytes,
         "stack_profile": report.stack_profile,
         "allocation_mode": report.allocation_mode,
+        "phase_observation_mode": report.phase_observation_mode,
+        "experiments": report.experiments,
         "load_model": report.load_model,
         "scenario_harnesses": report.scenario_harnesses,
         "summary": report.summary,
@@ -862,7 +890,11 @@ mod tests {
         let scenario_harness_summary = summarize_scenario_harnesses(&results, &scenarios);
         let report = RuntimePerfReport {
             kind: "runtime-perf",
-            experiments: BTreeMap::new(),
+            experiments: BTreeMap::from([(
+                "turn_checkpoint".to_owned(),
+                runtime_experiment(serde_json::json!({"fixture": true}), false, false)
+                    .for_scenario("turn_checkpoint"),
+            )]),
             load_model: crate::offered_load::LoadModel::ServiceDiagnostic,
             created_at: "test".to_string(),
             version: "test".to_string(),
@@ -943,6 +975,11 @@ mod tests {
             report_json["scenario_harness_summary"]
         );
         assert_eq!(output_json["allocation_mode"], crate::ALLOCATION_MODE);
+        assert_eq!(
+            output_json["phase_observation_mode"],
+            report_json["phase_observation_mode"]
+        );
+        assert_eq!(output_json["experiments"], report_json["experiments"]);
         assert!(output_json.get("kind").is_none());
 
         let output_golden = serde_json::json!({

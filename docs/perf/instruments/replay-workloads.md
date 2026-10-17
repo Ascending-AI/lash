@@ -197,7 +197,8 @@ boundary and drains due cleanup through the real relay between rounds. These
 maintenance passes are outside the turn window; immediate producer cleanup
 still belongs to its turn. This gives each round the same settled artifact
 referrers, independent of the recovery worker's ten-second cadence. Summaries
-divide by sessions, so every statistic is per session turn:
+divide each round total by sessions. These round-average observations are
+not individual session-turn latency samples:
 
 | Metric | Unit | Counted by |
 |---|---|---|
@@ -227,7 +228,8 @@ carry no SQL, WAL or decode counts (its stores count none of them per
 process); they keep allocation, CPU, IPC, node and wall metrics.
 
 Per metric, the summary gives the total over every round and, over the
-steady (non-setup) rounds, the per-turn median, p95 and max, and four
+steady (non-setup) rounds, the per-turn median and explicitly named `round_average_p95` and
+`round_average_max` diagnostics, and four
 slopes in the metric's unit per prior turn: least squares and Theil-Sen
 (median pairwise) against history depth, and the same two against the
 frame's depth (turns since the last compaction; equal to history depth for a
@@ -447,3 +449,27 @@ and hashing totals across their send/settlement windows. These counters exclude
 construction, seeding and validation; they include all store connections and
 concurrent maintenance in the window. The existing `runtime_work.*` counters
 retain their broader whole-scenario scope.
+
+
+Replay summaries report `steady_rounds`, `distinct_history_depths` and
+`distinct_frame_depths`. Fewer than two distinct depths give null slopes
+(`unknown` in the text table), while measured flat work retains a numeric zero.
+A slope budget refuses an unknown slope; its existing limit is unchanged.
+The maximum budget is named `round_average_max` and keeps the same predicate.
+
+```sh
+kiln test //crates/lash-perf:lash-perf__unit_test \
+  --test_arg=replay::receipt::tests::insufficient_depths_are_unknown_not_flat --test_arg=--exact
+```
+
+Receipt identity carries `sql_shapes`, `traffic` and `heap_window`; each workload's
+`experiment` retains the actual backend settings, heap frame depth and worker artifact before
+timing. The same identity accompanies SQL-shape and heap sidecars and history.
+
+The counted baseline is the ordinary replay population. SQL-shape, traffic or
+heap observers receive a typed observer-identity refusal instead of entering
+that population; blessing also refuses those modes. No budget is relaxed.
+
+The text reader prints full producer/workload identities and each metric's
+steady-round and distinct-depth populations alongside round-average median,
+p95 and maximum diagnostics.

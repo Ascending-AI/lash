@@ -76,3 +76,31 @@ Kernel execution receipts also enter this history through `lash-perf kernel-hist
 The maintained [kernel gate 6 caller](kernel-gate6.md) retains raw iterations,
 keeps allocation/charge counts in integer units and feeds the same advisory
 shift detector. The Performance workflow publishes its reader output.
+
+
+Runtime geometry includes the actual phase observer (`clock_only` or
+`clock_alloc_rss`) and DHAT enablement. Replay history preserves the producer's
+host/build/allocator, selected backend policy, worker artifact, SQL-shape and
+traffic modes, heap turn window and successful terminal window. It does not
+recapture the reader's host or insert a fixed storage-policy label. Missing
+observer, worker, policy, window or terminal identity refuses comparison.
+Replay series end in `/round_average`: their percentiles are diagnostics over
+round totals divided by sessions, not individual session tails.
+
+Offline controls, with no database or worker service:
+
+```sh
+kiln test //crates/lash-perf:lash-perf__unit_test \
+  --test_arg=runtime_perf::report::phase_tests::runtime_history_refuses_mixed_or_missing_phase_observers --test_arg=--exact --test_arg=--nocapture
+kiln test //crates/lash-perf:lash-perf__unit_test \
+  --test_arg=runtime_perf::replay_history::tests::replay_history_preserves_actual_observer_backend_and_window_identity --test_arg=--exact --test_arg=--nocapture
+```
+
+The controls print `history-observer-identity.json` and
+`replay-observer-identity.json` records with captured identities and refusals.
+
+The runtime stdout reader retains the same experiment map and phase mode as
+its receipt. Replay text includes producer identity, actual per-workload policy
+and observer geometry, with explicit timing-comparison refusals for incomplete
+identity. Replay history keeps the producer's run ID as well as its commit and
+timestamp.

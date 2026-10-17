@@ -123,6 +123,14 @@ impl ExperimentIdentity {
                     | RuntimePerfScenario::DirectLlmClient
             )
         });
+        // Standard protocol scenarios do not start a VM worker.
+        if scenario.is_some_and(|scenario| scenario.execution_mode().is_standard())
+            && let Ok(mut geometry) =
+                serde_json::from_str::<serde_json::Value>(&identity.configured_geometry)
+        {
+            geometry["worker"] = serde_json::json!("none (standard execution mode)");
+            identity.configured_geometry = geometry.to_string();
+        }
         identity.backend = if no_store {
             "none (standalone client/parser)"
         } else if scenario
@@ -179,6 +187,42 @@ impl ExperimentIdentity {
 
     pub(crate) fn compare(&self, other: &Self) -> Result<(), ComparisonRefusal> {
         use IdentityDimension as D;
+        // Historical geometry without actual observer/window identity cannot
+        // certify current runtime or replay observations.
+        for identity in [self, other] {
+            let replay = identity.workload.starts_with("replay/");
+            let runtime = RuntimePerfScenario::KNOWN
+                .iter()
+                .any(|scenario| scenario.name() == identity.workload);
+            if replay || runtime {
+                let geometry =
+                    serde_json::from_str::<serde_json::Value>(&identity.configured_geometry).ok();
+                let complete = geometry.as_ref().is_some_and(|geometry| {
+                    let common = ["worker", "window", "terminal"].iter().all(|key| {
+                        geometry[*key]
+                            .as_str()
+                            .is_some_and(|value| !value.trim().is_empty())
+                    });
+                    common
+                        && if replay {
+                            geometry["sql_shapes"].is_boolean()
+                                && geometry["traffic"].is_boolean()
+                                && geometry.get("heap_window").is_some()
+                                && geometry.get("heap_frames").is_some()
+                        } else {
+                            geometry["phase_observation_mode"]
+                                .as_str()
+                                .is_some_and(|mode| {
+                                    matches!(mode, "clock_only" | "clock_alloc_rss")
+                                })
+                                && geometry["dhat_enabled"].is_boolean()
+                        }
+                });
+                if !complete {
+                    return Err(ComparisonRefusal::MissingIdentity(D::Geometry));
+                }
+            }
+        }
         for (dimension, left, right) in [
             (D::Host, &self.host, &other.host),
             (D::Compiler, &self.compiler, &other.compiler),
