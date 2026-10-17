@@ -726,7 +726,47 @@ pub(super) fn every_abandoned_attempt_reaches_the_provider_with_its_partial_rece
             }
             let output = handle.output().await;
             if case != "provider-panic" {
-                output?;
+                let output = output?;
+                let report = &output.result;
+                assert_eq!(report.llm_calls.len(), 1, "{case}: one retained call");
+                let turn = output
+                    .activities
+                    .iter()
+                    .find_map(|activity| match &activity.event {
+                        TurnEvent::TurnStarted { turn_id, .. } => Some(turn_id.clone()),
+                        _ => None,
+                    })
+                    .expect("turn started");
+                let records = session
+                    .durable()
+                    .read_model_calls(&[lash::turn::TurnModelCallRef {
+                        turn_id: turn,
+                        call_id: report.llm_calls[0].call_id.clone(),
+                    }])
+                    .await?;
+                let lash::turn::ModelCallRead::Settled { record } = &records[0] else {
+                    panic!("{case}: the record settled");
+                };
+                if case.ends_with("tail") {
+                    assert_eq!(record.end, lash::turn::ModelCallEnd::Answered);
+                } else {
+                    assert!(
+                        matches!(record.end, lash::turn::ModelCallEnd::Unanswered { .. }),
+                        "{case}: {record:?}"
+                    );
+                }
+
+                assert_eq!(
+                    report.llm_calls[0].usage().expect("call usage"),
+                    usage,
+                    "{case}"
+                );
+                let head = session.durable().read().await?.expect("head");
+                assert_eq!(
+                    head.token_usage(),
+                    &usage,
+                    "{case}: committed lifetime usage"
+                );
             }
             assert!(
                 returned.lock_recover().is_empty(),
@@ -881,6 +921,23 @@ pub(super) fn returned_provider_attempts_settle_once_without_an_abandoned_termin
                 terminals.lock_recover().is_empty(),
                 "{case}: returned attempts have no callback"
             );
+            let usage = output
+                .result
+                .llm_calls
+                .iter()
+                .try_fold(lash_core::LlmUsage::default(), |sum, record| {
+                    sum.checked_add(&record.usage()?)
+                })
+                .expect("retained usage");
+            let head = session.durable().read().await?.expect("head");
+            assert_eq!(
+                head.token_usage(),
+                &usage,
+                "{case}: the head equals retained call usage"
+            );
+            assert_eq!(usage.input_tokens, if case == "retry" { 19 } else { 17 });
+            assert_eq!(usage.output_tokens, if case == "retry" { 6 } else { 5 });
+
             let observed = returned.lock_recover();
             let outcomes: Vec<_> = observed
                 .iter()
@@ -978,7 +1035,29 @@ pub(super) fn cancelling_a_tool_settles_its_nested_direct_provider_attempt() -> 
             .cancel()
             .mode(lash::TurnCancelMode::Immediate)
             .await?;
-        handle.output().await?;
+        let output = handle.output().await?;
+        assert_eq!(
+            output.result.llm_calls.len(),
+            2,
+            "turn and nested calls retain distinct keys"
+        );
+        assert_ne!(
+            output.result.llm_calls[0].call_id,
+            output.result.llm_calls[1].call_id
+        );
+        let usage = output
+            .result
+            .llm_calls
+            .iter()
+            .try_fold(lash_core::LlmUsage::default(), |sum, record| {
+                sum.checked_add(&record.usage()?)
+            })
+            .expect("retained usage");
+        assert_eq!((usage.input_tokens, usage.output_tokens), (2, 1));
+        assert_eq!(
+            session.durable().read().await?.expect("head").token_usage(),
+            &usage
+        );
         tokio::time::timeout(
             std::time::Duration::from_secs(5),
             terminal_delivered.notified(),
@@ -1089,6 +1168,8 @@ pub(super) fn rlm_turn_without_interruption_or_usage_preserves_absent_usage() ->
             .and_then(|record| record.attempts.first())
             .expect("completed attempt");
         assert_eq!(attempt.outcome, lash_core::AttemptOutcome::Completed);
+        assert_eq!(attempt.usage, None);
+        assert_eq!(result.result.usage.unknown_calls, 1);
         assert_eq!(
             attempt.usage_disposition(),
             lash_core::AttemptUsageOutcome::UnreportedByProvider

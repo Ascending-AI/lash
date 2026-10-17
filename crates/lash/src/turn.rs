@@ -4,7 +4,7 @@ use crate::support::{
     Arc, LlmCallRecord, LlmUsage, ToolCallRecord, TurnActivity, TurnActivitySink,
     TurnExecutionMetrics, TurnOutcome, async_trait,
 };
-use crate::transcript::CommittedTurnWithToolCalls;
+use crate::transcript::CommittedTurnWithCalls;
 
 pub use lash_core::facade_support::{TurnIssue, TurnIssueSeverity};
 /// Typed turn-failure vocabulary carried on [`TurnIssue`] and on session error
@@ -21,10 +21,28 @@ pub struct TurnToolCallRef {
     pub call_id: crate::ToolCallId,
 }
 
+pub use lash_core::model_calls::{ModelCallEnd, ModelCallEndReason, ModelCallRecord};
+
+/// A model call addressed through the turn that owns its record.
+#[derive(Clone, Debug, PartialEq, Eq, serde::Serialize, serde::Deserialize)]
+pub struct TurnModelCallRef {
+    pub turn_id: TurnId,
+    pub call_id: crate::LlmCallId,
+}
+
+/// An unsettled call is known to its open turn but has no sealed record yet.
+#[derive(Clone, Debug, PartialEq, Eq, serde::Serialize, serde::Deserialize)]
+#[serde(tag = "status", rename_all = "snake_case")]
+pub enum ModelCallRead {
+    Settled { record: Box<ModelCallRecord> },
+    NotYetSettled { call_id: crate::LlmCallId },
+    NotFound { call_id: crate::LlmCallId },
+}
+
 /// A committed-turn page that opted into decoding each returned turn's calls.
 #[derive(Clone, Debug, PartialEq, serde::Serialize, serde::Deserialize)]
-pub struct CommittedTurnsWithToolCallsPage {
-    pub turns: Vec<CommittedTurnWithToolCalls>,
+pub struct CommittedTurnsWithCallsPage {
+    pub turns: Vec<CommittedTurnWithCalls>,
     /// Persist after applying every turn; continues the same committed feed.
     pub next: crate::persistence::CommittedTurnCursor,
 }

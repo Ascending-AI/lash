@@ -553,19 +553,7 @@ fn reported_usage(output: &lash::TurnOutput) -> Vec<(i64, i64, i64)> {
             usage.cache_read_input_tokens,
         )
     };
-    let cumulative = output
-        .activities
-        .iter()
-        .rev()
-        .find_map(|activity| match &activity.event {
-            TurnEvent::Usage { cumulative, .. } => Some((
-                cumulative.input_tokens,
-                cumulative.output_tokens,
-                cumulative.cache_read_input_tokens,
-            )),
-            _ => None,
-        })
-        .expect("the turn reported its usage");
+    let cumulative = triple(&output.result.usage);
     let attempts = output
         .result
         .llm_calls

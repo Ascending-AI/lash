@@ -142,7 +142,7 @@ mod tool_call_reads {
         let first = durable.committed_turns(None, limit).await?;
         assert!(probe.owners.lock().expect("read probe").is_empty());
         let page = durable
-            .committed_turns_with_tool_calls(Some(&first.next), limit)
+            .committed_turns_with_calls(Some(&first.next), limit)
             .await?;
         assert_eq!(page.turns.len(), 2);
         for (read, expected) in page.turns.iter().zip(&turns[2..4]) {
@@ -172,7 +172,7 @@ mod tool_call_reads {
         let tail = durable.committed_turns(Some(&page.next), limit).await?;
         probe.owners.lock().expect("read probe").clear();
         let empty = durable
-            .committed_turns_with_tool_calls(Some(&tail.next), limit)
+            .committed_turns_with_calls(Some(&tail.next), limit)
             .await?;
         assert!(empty.turns.is_empty());
         assert!(probe.owners.lock().expect("read probe").is_empty());
@@ -181,6 +181,22 @@ mod tool_call_reads {
 
     #[async_trait::async_trait]
     impl DurableReads for ReadProbe {
+        async fn model_call_pins(
+            &self,
+            session: &lash_sansio::SessionId,
+            owner: &str,
+        ) -> Result<Vec<lash_durable::domain::ModelCallPinRow>, DurableError> {
+            self.inner.model_call_pins(session, owner).await
+        }
+
+        async fn model_calls(
+            &self,
+            session: &lash_sansio::SessionId,
+            owner: &str,
+        ) -> Result<Vec<lash_core_store::model_calls::ModelCallRecord>, DurableError> {
+            self.inner.model_calls(session, owner).await
+        }
+
         async fn turn(&self, session: &SessionId) -> Result<Option<TurnRow>, DurableError> {
             *self.turns.lock().expect("read probe") += 1;
             self.inner.turn(session).await
@@ -326,7 +342,7 @@ mod tool_call_reads {
             self.inner.now().await
         }
 
-        fn pages(&self) -> Option<Arc<dyn lash_core::durable_port::domain::pages::PageStore>> {
+        fn pages(&self) -> Option<Arc<dyn lash_durable::domain::pages::PageStore>> {
             self.inner.pages()
         }
 

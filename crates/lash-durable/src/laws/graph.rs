@@ -40,6 +40,8 @@ pub use races::*;
 /// root source whose writer is not a graph commit yet.
 #[derive(Clone, Debug)]
 pub enum ForeignWrite {
+    /// Retire a session's call rows through physical deletion.
+    ModelCallsDelete { session: SessionId },
     /// An opaque blob (encoding 0) at `hash`.
     OpaqueBlob { hash: String, bytes: Vec<u8> },
     /// Replace a stored blob's bytes.
@@ -639,6 +641,20 @@ pub async fn every_root_source_retains_its_graph_and_shared_leaves_outlive_one_o
                     expected: root,
                 })),
             ),
+            RootSource::ModelCall => (
+                Some(DomainWrite::ModelCall(crate::domain::ModelCallWrite {
+                    key: crate::domain::PromptCallKey {
+                        session: owner.session.clone(),
+                        call: crate::domain::ModelCallId::Turn {
+                            run: run.clone(),
+                            ordinal: 1,
+                        },
+                    },
+                    call_id: lash_sansio::llm::types::LlmCallId("root-law-call".into()),
+                    record: root,
+                })),
+                None,
+            ),
             RootSource::RunFact => (
                 Some(DomainWrite::RunFact(RunFactWrite::Append {
                     owner: facts.clone(),
@@ -736,6 +752,22 @@ pub async fn every_root_source_retains_its_graph_and_shared_leaves_outlive_one_o
             RootSource::ReadLease | RootSource::RetirementHold => continue,
         };
         let mut writes: Vec<DomainWrite> = publish.into_iter().collect();
+        if source == RootSource::ModelCall {
+            writes.push(DomainWrite::ModelCallPin(
+                crate::domain::ModelCallPinWrite::Reserve {
+                    key: crate::domain::PromptCallKey {
+                        session: owner.session.clone(),
+                        call: crate::domain::ModelCallId::Turn {
+                            run: run.clone(),
+                            ordinal: 2,
+                        },
+                    },
+                    call_id: lash_sansio::llm::types::LlmCallId("pending-deletion".into()),
+                    attempt: 1,
+                    enclosing: None,
+                },
+            ));
+        }
         if writes.is_empty() {
             // Root the nodes through the anchor-free release pin for the
             // install, then hand them to the source and retire the pin.
@@ -821,6 +853,27 @@ pub async fn every_root_source_retains_its_graph_and_shared_leaves_outlive_one_o
                     root: None,
                 })
                 .await;
+            }
+            (RootSource::ModelCall, ..) => {
+                tier.foreign(ForeignWrite::ModelCallsDelete {
+                    session: owner.session.clone(),
+                })
+                .await;
+                let address = crate::domain::ModelCallId::turn_owner(&run);
+                ensure!(
+                    tier.store()
+                        .model_calls(&owner.session, &address)
+                        .await?
+                        .is_empty(),
+                    "physical session deletion retained a sealed call"
+                );
+                ensure!(
+                    tier.store()
+                        .model_call_pins(&owner.session, &address)
+                        .await?
+                        .is_empty(),
+                    "physical session deletion retained a pending dispatch"
+                );
             }
             (RootSource::SessionAdmissionBase, ..) => {
                 tier.foreign(ForeignWrite::AdmissionBase {
@@ -1128,4 +1181,78 @@ pub async fn an_owner_commit_is_admitted_on_its_whole_encoding(tier: &dyn GraphT
         }
     }
     Ok(())
+}
+
+/// Turn-model ordinals and nested owner keys remain distinct, including a
+/// replay of the enclosing outcome transaction.
+pub async fn turn_and_owned_model_calls_survive_an_idempotent_outcome_commit(
+    tier: &dyn GraphTier,
+) -> LawOutcome {
+    use crate::domain::{ModelCallId, ModelCallWrite, PromptCallKey};
+    use lash_core_store::model_calls::{ModelCallEnd, ModelCallFact};
+    use lash_sansio::llm::types::{LlmCallId, LlmCallRecord};
+    let owner = owned(tier, "model-call-keys").await?;
+    let run = turn("call-key-run");
+    let mut nodes = staging();
+    let mut writes = Vec::new();
+    for (address, id) in [
+        (
+            ModelCallId::Turn {
+                run: run.clone(),
+                ordinal: 1,
+            },
+            "turn-model",
+        ),
+        (
+            ModelCallId::Owned {
+                owner: run.to_string(),
+                key: "tool-attempt:1/direct:1".into(),
+            },
+            "nested-model",
+        ),
+    ] {
+        let call_id = LlmCallId(id.into());
+        let fact = ModelCallFact {
+            call: if id == "turn-model" { 1 } else { 0 },
+            call_id: call_id.clone(),
+            end: ModelCallEnd::Answered,
+            record: LlmCallRecord {
+                call_id: call_id.clone(),
+                label: None,
+                attempts: Vec::new(),
+                replay_drops: Vec::new(),
+            },
+        };
+        let record = fact
+            .stage(&mut nodes)
+            .map_err(|error| refused("model fact", error))?;
+        writes.push(DomainWrite::ModelCall(ModelCallWrite {
+            key: PromptCallKey {
+                session: owner.session.clone(),
+                call: address,
+            },
+            call_id,
+            record,
+        }));
+    }
+    let nodes = nodes.into_nodes();
+    owner_commit(tier, &owner, nodes.clone(), writes.clone()).await?;
+    let first = tier
+        .store()
+        .model_calls(&owner.session, &ModelCallId::turn_owner(&run))
+        .await?;
+    ensure!(
+        first.len() == 2 && first[0].call_id != first[1].call_id,
+        "a nested model call collided with the turn ordinal: {first:?}"
+    );
+    owner_commit(tier, &owner, nodes, writes).await?;
+    let replayed = tier
+        .store()
+        .model_calls(&owner.session, &ModelCallId::turn_owner(&run))
+        .await?;
+    ensure!(
+        first == replayed,
+        "replaying the owner changed its sealed model calls"
+    );
+    exact(tier, "replayed model-call outcome").await
 }

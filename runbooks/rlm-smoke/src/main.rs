@@ -568,12 +568,9 @@ async fn main() -> Result<()> {
     );
 
     let served_models = output
-        .activities
+        .result
+        .llm_calls
         .iter()
-        .filter_map(|activity| match &activity.event {
-            TurnEvent::ModelCallRecorded { record } => Some(record),
-            _ => None,
-        })
         .flat_map(|record| record.attempts.iter())
         .filter_map(|attempt| attempt.evidence.as_ref())
         .filter_map(|evidence| evidence.served_model.clone())

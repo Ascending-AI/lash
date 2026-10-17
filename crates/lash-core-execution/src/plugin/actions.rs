@@ -299,10 +299,7 @@ pub trait SessionReadService: crate::core_internal::RuntimeService + Send + Sync
         &self,
         session_id: &SessionId,
         turn_id: &crate::TurnId,
-    ) -> Result<
-        Option<lash_core_store::transcript::CommittedTurnWithToolCalls>,
-        CommittedTurnReadError,
-    >;
+    ) -> Result<Option<lash_core_store::transcript::CommittedTurnWithCalls>, CommittedTurnReadError>;
 
     async fn snapshot_current(&self) -> Result<SessionSnapshot, PluginError>;
 

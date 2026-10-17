@@ -3,23 +3,6 @@ use crate::runtime::durable::session::CellExit;
 use lash_core_llm::stream_assembly::ReasoningPublicationState;
 
 impl RuntimeTurnDriver<'_> {
-    pub(super) fn record_model_call(
-        &mut self,
-        observer: &TurnObserver,
-        record: crate::LlmCallRecord,
-    ) {
-        self.turn_observations.observe(
-            observer,
-            crate::engine::ObservedEvent::Activity {
-                correlation_id: Some(TurnActivityId::new(record.call_id.0.clone())),
-                event: TurnEvent::ModelCallRecorded {
-                    record: record.clone(),
-                },
-            },
-        );
-        self.llm_calls.push(record);
-    }
-
     fn handle_machine_response(
         &self,
         machine: &mut TurnMachine,
@@ -57,12 +40,20 @@ impl RuntimeTurnDriver<'_> {
     pub(super) async fn settle_call_drains(
         &mut self,
         machine: &mut TurnMachine,
-        event_tx: &TurnObserver,
+        _event_tx: &TurnObserver,
         wait: bool,
     ) -> Result<(), RuntimeError> {
         for (drained, newest) in self.call_drains.settle(wait).await {
-            self.publish_call_record(drained.record, event_tx);
-            if let Some(usage) = drained.usage {
+            let usage = drained
+                .record
+                .usage()
+                .map_err(|overflow| self.usage_overflow(overflow))?;
+            self.queue_model_call(
+                drained.call,
+                lash_core_store::model_calls::ModelCallEnd::Answered,
+                drained.record,
+            );
+            {
                 machine
                     .settle_unknown_call_usage(&usage, newest)
                     .map_err(|overflow| self.usage_overflow(overflow))?;
@@ -80,9 +71,14 @@ impl RuntimeTurnDriver<'_> {
         result: &Result<LlmResponse, crate::LlmCallError>,
         record: Option<&crate::LlmCallRecord>,
     ) -> Result<(), RuntimeError> {
-        if result.is_err() && record.is_some_and(crate::LlmCallRecord::usage_unknown) {
+        if result.is_err()
+            && let Some(record) = record
+        {
+            let usage = record
+                .usage()
+                .map_err(|overflow| self.usage_overflow(overflow))?;
             machine
-                .record_unknown_call_usage()
+                .record_unanswered_call_usage(&usage)
                 .map_err(|overflow| self.usage_overflow(overflow))?;
         }
         Ok(())
@@ -194,11 +190,48 @@ impl RuntimeTurnDriver<'_> {
                 return Ok(None);
             }
         };
+        let call_id = call_record
+            .as_ref()
+            .map(|record| record.call_id.clone())
+            .unwrap_or_else(|| crate::provider::call_id_for_scope(&admitted.response.scope));
+        if let Some(record) = call_record {
+            let reason = result.as_ref().err().and_then(|error| {
+                [
+                    (
+                        crate::TurnFailureCode::ModelTotalExceeded,
+                        crate::provider::AttemptEndReason::ModelDeadline,
+                    ),
+                    (
+                        crate::TurnFailureCode::ProviderPanicked,
+                        crate::provider::AttemptEndReason::ProviderPanicked,
+                    ),
+                    (
+                        crate::TurnFailureCode::PluginAssistantStream,
+                        crate::provider::AttemptEndReason::StreamConsumerFailed,
+                    ),
+                    (
+                        crate::TurnFailureCode::Cancelled,
+                        crate::provider::AttemptEndReason::ImmediateCancel,
+                    ),
+                ]
+                .into_iter()
+                .find_map(|(code, reason)| {
+                    (error.code == Some(crate::FailureCode::lash(code))).then_some(reason)
+                })
+            });
+            let end = reason.map_or(
+                lash_core_store::model_calls::ModelCallEnd::Answered,
+                |reason| lash_core_store::model_calls::ModelCallEnd::Unanswered {
+                    reason: lash_core_store::model_calls::ModelCallEndReason::Attempt(reason),
+                },
+            );
+            self.queue_model_call(self.model_call_ordinal, end, record);
+        }
         Ok(Some(crate::runtime::durable::session::ModelAnswer {
             attempt,
             result,
             text_streamed,
-            call_record,
+            call_id,
             stream,
         }))
     }
@@ -223,26 +256,43 @@ impl RuntimeTurnDriver<'_> {
             attempt,
             result,
             text_streamed,
-            call_record,
+            call_id,
             stream:
                 crate::runtime::LlmStreamRecord {
+                    attempt: observed_attempt,
                     reasoning_published,
                     capsule,
                     response_plan,
                 },
         } = answer;
         self.model_attempt = attempt;
-        self.model_call_address =
-            call_record
-                .as_ref()
-                .map(|record| crate::plugin::ModelCallAddress {
-                    session_id: self.session_id.clone(),
-                    turn_id: self.turn_id.clone(),
-                    call_id: record.call_id.clone(),
-                    attempt: record.attempts.last().map(|attempt| attempt.ordinal),
-                });
+        let call_record = self.recorded_model_call(&call_id).await?;
+        if call_record.is_some()
+            && !self
+                .pending_model_calls
+                .iter()
+                .any(|fact| fact.call_id == call_id)
+        {
+            event_tx.publish(RuntimeStreamEvent::Turn(model_call_activity(
+                &self.scoped_effect_controller,
+                &self.turn_id,
+                &call_id,
+            )));
+        }
+        let mut result = result;
+        if let (Ok(response), Some(record)) = (&mut result, &call_record) {
+            response.usage = record
+                .usage()
+                .map_err(|overflow| self.usage_overflow(overflow))?;
+        }
+        self.model_call_address = Some(crate::plugin::ModelCallAddress {
+            session_id: self.session_id.clone(),
+            turn_id: self.turn_id.clone(),
+            call_id: call_id.clone(),
+            attempt: observed_attempt,
+        });
         self.record_unknown_failed_call(machine, &result, call_record.as_ref())?;
-        self.record_llm_outcome(&result, call_record, event_tx);
+        self.record_llm_outcome(&result, call_record.as_ref());
         // Whether the hooks run at all is the plan recorded with the
         // completion (ADR 0105 §1), never the response hooks installed now:
         // a restore after a hook was added or removed derives as its first
@@ -303,30 +353,44 @@ impl RuntimeTurnDriver<'_> {
             attempt,
             result,
             text_streamed,
-            call_record,
+            call_id,
             stream,
         } = answer;
         self.model_attempt = attempt;
-        self.model_call_address =
-            call_record
-                .as_ref()
-                .map(|record| crate::plugin::ModelCallAddress {
-                    session_id: self.session_id.clone(),
-                    turn_id: self.turn_id.clone(),
-                    call_id: record.call_id.clone(),
-                    attempt: record.attempts.last().map(|attempt| attempt.ordinal),
-                });
+        let call_record = self.recorded_model_call(&call_id).await?;
+        if call_record.is_some()
+            && !self
+                .pending_model_calls
+                .iter()
+                .any(|fact| fact.call_id == call_id)
+        {
+            event_tx.publish(RuntimeStreamEvent::Turn(model_call_activity(
+                &self.scoped_effect_controller,
+                &self.turn_id,
+                &call_id,
+            )));
+        }
+        let mut result = result;
+        if let (Ok(response), Some(record)) = (&mut result, &call_record) {
+            response.usage = record
+                .usage()
+                .map_err(|overflow| self.usage_overflow(overflow))?;
+        }
+        self.model_call_address = Some(crate::plugin::ModelCallAddress {
+            session_id: self.session_id.clone(),
+            turn_id: self.turn_id.clone(),
+            call_id: call_id.clone(),
+            attempt: stream.attempt,
+        });
         self.record_unknown_failed_call(machine, &result, call_record.as_ref())?;
         // A completion the stop drops still owes the usage of a tail that
         // drains: the turn counts it unknown until the drain settles it.
-        if let Ok(response) = &result
-            && response.usage.unknown_calls > 0
-        {
+        if let Ok(response) = &result {
             machine
-                .record_unknown_call_usage()
+                .record_unanswered_call_usage(&response.usage)
                 .map_err(|overflow| self.usage_overflow(overflow))?;
         }
-        self.record_llm_outcome(&result, call_record, event_tx);
+        self.record_llm_outcome(&result, call_record.as_ref());
         if let Err(error) = self.finish_recorded_stream(&stream.capsule).await {
             tracing::warn!(
                 session_id = %self.session_id,
@@ -353,17 +417,14 @@ impl RuntimeTurnDriver<'_> {
     fn record_llm_outcome(
         &mut self,
         result: &Result<LlmResponse, crate::LlmCallError>,
-        call_record: Option<crate::LlmCallRecord>,
-        event_tx: &TurnObserver,
+        call_record: Option<&crate::LlmCallRecord>,
     ) {
-        if let (Err(error), Some(record)) = (result, call_record.as_ref()) {
-            let sealed_attempt_count = self
-                .llm_calls
-                .iter()
-                .fold(record.attempts.len(), |count, call| {
-                    count.saturating_add(call.attempts.len())
-                });
-            if self.failure_evidence.len() < sealed_attempt_count
+        if let Some(record) = call_record {
+            self.sealed_attempt_count = self
+                .sealed_attempt_count
+                .saturating_add(record.attempts.len());
+            if let Err(error) = result
+                && self.failure_evidence.len() < self.sealed_attempt_count
                 && let Some(evidence) = crate::TurnFailureEvidence::from_llm_failure(
                     error,
                     record,
@@ -376,20 +437,6 @@ impl RuntimeTurnDriver<'_> {
                 self.failure_evidence.push(evidence);
             }
         }
-        if let Some(call_record) = call_record {
-            self.publish_call_record(call_record, event_tx);
-        }
-    }
-
-    /// Publish a model call's sealed record on the call's own lane
-    /// ([`model_call_activity`]) and keep it on the turn.
-    fn publish_call_record(&mut self, call_record: crate::LlmCallRecord, event_tx: &TurnObserver) {
-        event_tx.publish(RuntimeStreamEvent::Turn(model_call_activity(
-            &self.scoped_effect_controller,
-            &self.turn_id,
-            &call_record,
-        )));
-        self.llm_calls.push(call_record);
     }
 
     /// Answer the machine's model call `id` with `result`, the response it
@@ -1187,18 +1234,18 @@ pub(super) fn foreground_exec_graph_key(invocation: &RuntimeInvocation) -> Optio
 pub(in crate::runtime) fn model_call_activity(
     controller: &ActorContext,
     turn: &crate::TurnId,
-    record: &crate::LlmCallRecord,
+    call_id: &crate::LlmCallId,
 ) -> crate::TurnActivity {
     let lane = crate::runtime::turn_loop::turn_observation_cursor(
         controller,
         turn,
-        &format!("model-call:{}", record.call_id.0),
+        &format!("model-call:{}", call_id.0),
     );
     crate::TurnActivity {
         id: TurnActivityId::observed(lane.key(), 0),
-        correlation_id: TurnActivityId::new(record.call_id.0.clone()),
+        correlation_id: TurnActivityId::new(call_id.0.clone()),
         event: TurnEvent::ModelCallRecorded {
-            record: record.clone(),
+            call_id: call_id.clone(),
         },
     }
 }

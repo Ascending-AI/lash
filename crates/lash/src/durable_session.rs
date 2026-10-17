@@ -110,7 +110,6 @@ pub struct DurableSession {
     /// The host's models a [`send`](Self::send) checks a per-run model key
     /// against before the input is accepted (FIG-3877).
     models: Arc<dyn lash_core::LlmProfiles>,
-    /// The deployment's usage ledger, read by [`usage`](Self::usage).
     /// The core's trace runtime: what a [`send`](Self::send) captures the
     /// caller's trace context through and opens its producer on.
     tracing: lash_core::facade_support::TraceRuntime,
@@ -197,6 +196,81 @@ impl DurableSession {
             .iter()
             .map(|call| turns[&call.turn_id][&call.call_id].clone())
             .collect())
+    }
+
+    /// Read retained model calls in input order, including duplicates. Each
+    /// turn is loaded once; no activity history is needed.
+    pub async fn read_model_calls(
+        &self,
+        calls: &[crate::turn::TurnModelCallRef],
+    ) -> Result<Vec<crate::turn::ModelCallRead>> {
+        use std::collections::BTreeMap;
+        self.store().await?;
+        let mut turns = BTreeMap::new();
+        for call in calls {
+            if !turns.contains_key(&call.turn_id) {
+                let records = self.turn_model_calls(&call.turn_id).await?;
+                turns.insert(call.turn_id.clone(), records);
+            }
+        }
+        let open = self
+            .effect_host
+            .durable_reads()?
+            .turn(&self.session_id)
+            .await
+            .map_err(EmbedError::Durable)?;
+        let mut pending = BTreeMap::new();
+        for turn in turns.keys() {
+            let pins = self
+                .effect_host
+                .durable_reads()?
+                .model_call_pins(
+                    &self.session_id,
+                    &lash_core::durable_port::domain::ModelCallId::turn_owner(turn),
+                )
+                .await
+                .map_err(EmbedError::Durable)?;
+            pending.insert(turn.clone(), pins);
+        }
+        Ok(calls
+            .iter()
+            .map(|call| {
+                if let Some(record) = turns[&call.turn_id]
+                    .iter()
+                    .find(|record| record.call_id == call.call_id)
+                {
+                    crate::turn::ModelCallRead::Settled {
+                        record: Box::new(record.clone()),
+                    }
+                } else if open.as_ref().is_some_and(|row| row.run == call.turn_id)
+                    && pending[&call.turn_id]
+                        .iter()
+                        .any(|pin| pin.call_id == call.call_id)
+                {
+                    crate::turn::ModelCallRead::NotYetSettled {
+                        call_id: call.call_id.clone(),
+                    }
+                } else {
+                    crate::turn::ModelCallRead::NotFound {
+                        call_id: call.call_id.clone(),
+                    }
+                }
+            })
+            .collect())
+    }
+
+    async fn turn_model_calls(
+        &self,
+        turn: &crate::TurnId,
+    ) -> Result<Vec<crate::turn::ModelCallRecord>> {
+        self.effect_host
+            .durable_reads()?
+            .model_calls(
+                &self.session_id,
+                &lash_core::durable_port::domain::ModelCallId::turn_owner(turn),
+            )
+            .await
+            .map_err(EmbedError::Durable)
     }
 
     async fn open_turn(&self) -> Result<Option<crate::TurnId>> {
@@ -742,7 +816,7 @@ impl DurableSession {
     pub async fn committed_turn(
         &self,
         turn: &crate::TurnId,
-    ) -> Result<Option<crate::transcript::CommittedTurnWithToolCalls>> {
+    ) -> Result<Option<crate::transcript::CommittedTurnWithCalls>> {
         let store = self.store().await?;
         lash_core::runtime::durable::services::RuntimeTurnServices::committed_turn(
             &self.effect_host,
@@ -795,19 +869,24 @@ impl DurableSession {
     /// ([`TurnToolCallRef`](crate::TurnToolCallRef)) for later
     /// [`read_tool_calls`](Self::read_tool_calls); a bare call id cannot be
     /// resolved without scanning.
-    pub async fn committed_turns_with_tool_calls(
+    pub async fn committed_turns_with_calls(
         &self,
         after: Option<&lash_core::store::CommittedTurnCursor>,
         limit: std::num::NonZeroU32,
-    ) -> Result<crate::transcript::CommittedTurnsWithToolCallsPage> {
+    ) -> Result<crate::transcript::CommittedTurnsWithCallsPage> {
         let page = self.committed_turns(after, limit).await?;
         let mut turns = Vec::with_capacity(page.turns.len());
         // A committed turn is never the unfinished one.
         for turn in page.turns {
             let (tool_calls, _) = self.turn_tool_call_bodies(&turn.turn_id, None).await?;
-            turns.push(crate::transcript::CommittedTurnWithToolCalls { turn, tool_calls });
+            let model_calls = self.turn_model_calls(&turn.turn_id).await?;
+            turns.push(crate::transcript::CommittedTurnWithCalls {
+                turn,
+                tool_calls,
+                model_calls,
+            });
         }
-        Ok(crate::transcript::CommittedTurnsWithToolCallsPage {
+        Ok(crate::transcript::CommittedTurnsWithCallsPage {
             turns,
             next: page.next,
         })

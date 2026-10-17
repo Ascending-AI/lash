@@ -548,21 +548,20 @@ pub fn runtime_agent_frame_invariant_facts(
 
 pub fn runtime_usage_invariant_facts(
     result: &lash::TurnReport,
-    activities: &[lash::TurnActivity],
+    _activities: &[lash::TurnActivity],
 ) -> RuntimeUsageInvariantFacts {
     let turn_usage = RuntimeUsageTotals::from_usage(&result.usage);
     let total_usage = turn_usage.clone();
-    let usage_event_cumulative_totals = activities
+    let mut cumulative = lash::LlmUsage::default();
+    let usage_event_cumulative_totals = result
+        .llm_calls
         .iter()
-        .filter_map(|activity| match &activity.event {
-            lash::TurnEvent::Usage { cumulative, .. } => {
-                Some(RuntimeUsageTotals::from_usage(cumulative))
-            }
-            _ => None,
+        .filter_map(|call| {
+            cumulative = cumulative.checked_add(&call.usage().ok()?).ok()?;
+            Some(RuntimeUsageTotals::from_usage(&cumulative))
         })
         .collect::<Vec<_>>();
-    // Cumulative usage events carry lifetime totals, so `total_tokens` must never
-    // regress from one event to the next.
+    // Retained calls, in logical order, determine the usage progression.
     let usage_events_monotonic = usage_event_cumulative_totals
         .windows(2)
         .all(|window| window[1].total_tokens >= window[0].total_tokens);

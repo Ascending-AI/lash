@@ -138,6 +138,27 @@ impl DurableStore for ObservedStore {
 
 #[async_trait::async_trait]
 impl DurableReads for ObservedStore {
+    async fn model_call_pins(
+        &self,
+        session: &lash_sansio::SessionId,
+        owner: &str,
+    ) -> Result<Vec<lash_durable::domain::ModelCallPinRow>, DurableError> {
+        self.observe(
+            "model_call_pins",
+            self.inner.model_call_pins(session, owner),
+        )
+        .await
+    }
+
+    async fn model_calls(
+        &self,
+        session: &lash_sansio::SessionId,
+        owner: &str,
+    ) -> Result<Vec<lash_core_store::model_calls::ModelCallRecord>, DurableError> {
+        self.observe("model_calls", self.inner.model_calls(session, owner))
+            .await
+    }
+
     async fn turn(&self, session: &SessionId) -> Result<Option<TurnRow>, DurableError> {
         self.observe("turn", self.inner.turn(session)).await
     }

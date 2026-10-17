@@ -633,12 +633,18 @@ impl TurnDrive for L4Drive {
         Ok(())
     }
 
-    fn model_unsent(&mut self, id: EffectId, error: lash_core::LlmCallError) {
+    async fn model_unsent(
+        &mut self,
+        _cx: &ActorContext,
+        id: EffectId,
+        error: lash_core::LlmCallError,
+    ) -> Result<(), TurnError> {
         self.machine.handle_response(Response::LlmComplete {
             id,
             result: Err(error),
             text_streamed: false,
         });
+        Ok(())
     }
 
     async fn local(&mut self, _cx: &ActorContext, effect: Effect) -> Result<(), TurnError> {

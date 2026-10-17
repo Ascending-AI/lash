@@ -289,14 +289,13 @@ impl GeneratedRuntimeWorld {
     ) -> Result<Vec<crate::content_oracle::SessionContent>, FixedScriptRunnerError> {
         let mut sessions = Vec::new();
         for (alias, session) in &self.sessions {
-            let activities = session.activities.lock_recover().clone();
             sessions.push(
                 session_content(
                     alias,
                     session.transport.as_ref(),
                     &session.provider_scripts,
                     Vec::new(),
-                    &activities,
+                    &session.durable,
                     session.reopen.as_ref(),
                 )
                 .await?,
@@ -710,7 +709,7 @@ pub(super) async fn session_content(
     transport: &ScriptedLlmHttpTransport,
     scripts: &[ProviderWireScript],
     emitted_tool_results: Vec<crate::content_oracle::ToolResultContent>,
-    activities: &[lash::TurnActivity],
+    durable: &lash::DurableSession,
     reopen: &dyn lash_core::DeploymentStore,
 ) -> Result<crate::content_oracle::SessionContent, FixedScriptRunnerError> {
     let exchanged = transport.exchanges()?.len();
@@ -726,11 +725,28 @@ pub(super) async fn session_content(
         .map(crate::content_oracle::emitted_attempt)
         .collect::<Result<Vec<_>, _>>()
         .map_err(FixedScriptRunnerError::Assertion)?;
+    let mut records = Vec::new();
+    let mut after = None;
+    loop {
+        let page = durable
+            .committed_turns_with_calls(after.as_ref(), std::num::NonZeroU32::MAX)
+            .await
+            .map_err(|error| FixedScriptRunnerError::Runtime(error.to_string()))?;
+        if page.turns.is_empty() {
+            break;
+        }
+        records.extend(
+            page.turns
+                .into_iter()
+                .flat_map(|turn| turn.model_calls.into_iter().map(|call| call.record)),
+        );
+        after = Some(page.next);
+    }
     Ok(crate::content_oracle::SessionContent {
         session: session.to_string(),
         emitted_attempts,
         emitted_tool_results,
-        recorded_usage: crate::content_oracle::recorded_usage(activities)
+        recorded_usage: crate::content_oracle::recorded_usage(&records)
             .map_err(FixedScriptRunnerError::Assertion)?,
         reopened: crate::content_oracle::reopen_session(reopen, session)
             .await

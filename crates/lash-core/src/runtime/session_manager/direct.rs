@@ -24,8 +24,6 @@ impl RuntimeSessionServices {
     }
 }
 
-impl RuntimeSessionServices {}
-
 #[async_trait::async_trait]
 impl DirectCompletionService for RuntimeSessionServices {
     async fn complete(
@@ -254,7 +252,11 @@ impl DirectCompletionCapability {
         );
         let admit = crate::runtime::owned_call::OwnedCall {
             cx: &context.effect_controller,
-            key,
+            enclosing: context
+                .effect_attempt
+                .as_ref()
+                .and_then(|attempt| attempt.model_call_owner().cloned()),
+            key: key.clone(),
             purpose,
             prompt: current.owned_prompt(facts)?,
             request,
@@ -283,6 +285,74 @@ impl DirectCompletionCapability {
                 (*request, admitted)
             }
             crate::runtime::owned_call::OwnedAdmission::Unsent(error) => {
+                use lash_core_store::model_calls::{
+                    ModelCallEnd, ModelCallEndReason, ModelCallFact,
+                };
+                let pin = context
+                    .effect_controller
+                    .durable_reads()
+                    .map_err(|error| {
+                        crate::PluginError::RuntimeEffectController(
+                            crate::RuntimeEffectControllerError::new(
+                                crate::RuntimeErrorCode::StoreCommitFailed,
+                                error.to_string(),
+                            ),
+                        )
+                    })?
+                    .model_call_pins(&key.session, &key.call.owner_column())
+                    .await
+                    .map_err(|error| {
+                        crate::PluginError::RuntimeEffectController(
+                            crate::RuntimeEffectControllerError::new(
+                                crate::RuntimeErrorCode::StoreCommitFailed,
+                                error.to_string(),
+                            ),
+                        )
+                    })?
+                    .into_iter()
+                    .find(|pin| pin.key == key);
+                let mut fact = pin.map_or_else(
+                    || {
+                        let call_id = crate::LlmCallId(format!(
+                            "{}:{}:{}",
+                            key.session,
+                            key.call.owner_column(),
+                            key.call.call_column()
+                        ));
+                        ModelCallFact {
+                            call: 0,
+                            call_id: call_id.clone(),
+                            end: ModelCallEnd::Unanswered {
+                                reason: ModelCallEndReason::Unsent,
+                            },
+                            record: crate::LlmCallRecord {
+                                call_id,
+                                label: None,
+                                attempts: Vec::new(),
+                                replay_drops: Vec::new(),
+                            },
+                        }
+                    },
+                    |pin| pin.unobserved(),
+                );
+                fact.end = ModelCallEnd::Unanswered {
+                    reason: if error.code
+                        == Some(crate::FailureCode::lash(
+                            crate::TurnFailureCode::ModelTotalExceeded,
+                        )) {
+                        ModelCallEndReason::Attempt(
+                            crate::provider::AttemptEndReason::ModelDeadline,
+                        )
+                    } else {
+                        ModelCallEndReason::Unsent
+                    },
+                };
+                let call = lash_durable::domain::model_calls::OwnedModelCall { key, fact };
+                if let Some(attempt) = &context.effect_attempt {
+                    attempt.record_model_call(call);
+                } else {
+                    context.effect_controller.record_owned_model_call(call);
+                }
                 return super::direct_outcome::apply_direct_outcome(
                     crate::RuntimeEffectOutcome::Direct {
                         result: Box::new(Err(error)),
@@ -306,13 +376,13 @@ impl DirectCompletionCapability {
             crate::trace::trace_context_from_effect_invocation(&envelope.invocation),
         );
         let local_executor = crate::RuntimeEffectLocalExecutor::direct(
+            (context.effect_controller.clone(), key.clone(), admitted),
             binding,
             match current.execution_facts() {
                 Some(facts) => facts.charge_safety,
                 None => current.direct_policy()?.charge_safety.clone(),
             },
             current.host.core.control.execution_budgets.clone(),
-            admitted,
             current.runtime_owner(),
             tracing.clone(),
             replay_trace,
@@ -334,6 +404,24 @@ impl DirectCompletionCapability {
                     .await?
             }
         };
+        if let crate::RuntimeEffectOutcome::Direct {
+            call_record: Some(record),
+            ..
+        } = &outcome
+        {
+            let call = lash_durable::domain::model_calls::OwnedModelCall {
+                key,
+                fact: lash_core_store::model_calls::ModelCallFact {
+                    call: 0,
+                    call_id: record.call_id.clone(),
+                    end: lash_core_store::model_calls::ModelCallEnd::Answered,
+                    record: record.clone(),
+                },
+            };
+            if context.effect_attempt.is_none() {
+                context.effect_controller.record_owned_model_call(call);
+            }
+        }
         super::direct_outcome::apply_direct_outcome(outcome)
     }
 

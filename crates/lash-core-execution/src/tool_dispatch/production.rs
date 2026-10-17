@@ -28,6 +28,7 @@ pub(crate) struct ProductionToolHandlers<'run> {
     calls: Mutex<BTreeMap<crate::ToolCallId, CallInput>>,
     prepared: Mutex<BTreeMap<crate::ToolCallId, Prepared>>,
     inline_stops: Mutex<BTreeMap<crate::ToolCallId, InlineStop>>,
+    model_call_owner: Option<lash_durable::domain::ModelCallOwner>,
     expiry_evidence: Mutex<BTreeMap<crate::ToolCallId, crate::ToolValue>>,
     contributions: Mutex<BTreeMap<crate::ToolCallId, Vec<CheckContribution>>>,
     declarations: Mutex<BTreeMap<crate::ToolCallId, Vec<crate::ToolIntentExecutionOutcome>>>,
@@ -186,6 +187,7 @@ impl<'run> ProductionToolHandlers<'run> {
             prepared: Mutex::default(),
             inline_stops: Mutex::default(),
             expiry_evidence: Mutex::default(),
+            model_call_owner: None,
             contributions: Mutex::default(),
             declarations: Mutex::default(),
             isolated: Mutex::default(),
@@ -659,7 +661,12 @@ impl SingletonToolHandlers for ProductionToolHandlers<'_> {
                 .into();
         dispatch.parent_invocation = Some(invocation.clone());
         dispatch.observation_call_key = None;
-        let effect_attempt = crate::EffectAttempt::default();
+        let effect_attempt =
+            crate::EffectAttempt::default().with_model_call_owner(self.model_call_owner.clone());
+        self.context
+            .dispatch()
+            .effect_controller
+            .retain_model_attempt(effect_attempt.clone());
         dispatch.direct_completions = dispatch
             .direct_completions
             .with_tool_attempt_parent_invocation(invocation.clone())

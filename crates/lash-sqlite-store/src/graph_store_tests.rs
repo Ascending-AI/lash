@@ -180,6 +180,18 @@ impl GraphTier for Tier {
     async fn foreign(&self, write: ForeignWrite) {
         use rusqlite::types::Value;
         let (sql, params): (&str, Vec<Value>) = match write {
+            ForeignWrite::ModelCallsDelete { session } => {
+                self.store
+                    .connection_for_testing()
+                    .call(move |conn| {
+                        crate::durable::retire_session_rows(conn, &session)?;
+                        Ok(())
+                    })
+                    .await
+                    .expect("physical session row retirement");
+                return;
+            }
+
             ForeignWrite::OpaqueBlob { hash, bytes } => (
                 "INSERT INTO blobs (hash, content, encoding) VALUES (?1, ?2, 0)",
                 vec![text(hash), Value::Blob(bytes)],
@@ -1115,3 +1127,5 @@ async fn a_park_publication_writes_a_counted_number_of_statements() {
     const EXPECTED: u64 = 5;
     assert_eq!(writes, EXPECTED, "the park's write count: {receipt:?}");
 }
+
+law!(turn_and_owned_model_calls_survive_an_idempotent_outcome_commit);

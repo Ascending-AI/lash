@@ -18,7 +18,7 @@ pub(crate) fn apply_direct_outcome(
     let (result, call_record) = outcome
         .into_direct_response()
         .map_err(|err| PluginError::Session(err.to_string()))?;
-    let (response, usage) = match result {
+    let (mut response, _) = match result {
         Ok(response) => {
             let usage = response.usage.clone();
             (response, usage)
@@ -38,6 +38,16 @@ pub(crate) fn apply_direct_outcome(
             "direct LLM effect completed without a provider call record".to_string(),
         )
     })?;
+    let usage = call_record.usage().map_err(|error| {
+        PluginError::Runtime(crate::runtime::runtime_error_from_store_commit(
+            crate::StoreError::TokenUsageAccountingOverflow {
+                usage_source: "direct completion".to_owned(),
+                model: "direct completion".to_owned(),
+                counter: error.counter(),
+            },
+        ))
+    })?;
+    response.usage = usage.clone();
     Ok((response, usage, call_record))
 }
 

@@ -149,7 +149,6 @@ fn record_stream_event(transcript: &mut Transcript, actor: &str, event: &Session
         | SessionStreamEvent::ToolCallStart { .. }
         | SessionStreamEvent::LlmRequest { .. }
         | SessionStreamEvent::LlmResponse { .. }
-        | SessionStreamEvent::LlmUsage { .. }
         | SessionStreamEvent::PluginEvent { .. }
         | SessionStreamEvent::Done => {}
     }

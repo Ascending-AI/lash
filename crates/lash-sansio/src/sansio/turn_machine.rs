@@ -279,6 +279,15 @@ impl<M: TurnProtocol> TurnMachine<M> {
         self.last_call_usage.as_ref()
     }
 
+    /// Account reported and unknown work when no response was admitted.
+    pub fn record_unanswered_call_usage(
+        &mut self,
+        usage: &LlmUsage,
+    ) -> Result<(), TokenUsageOverflow> {
+        self.cumulative_usage = self.cumulative_usage.checked_add(usage)?;
+        Ok(())
+    }
+
     /// Count one model call whose provider usage never arrived and that no
     /// response admitted: a call that ended unsuccessfully after its request
     /// was sent. The turn's total says the call's usage is unknown.
@@ -1271,11 +1280,6 @@ impl<M: TurnProtocol> TurnMachine<M> {
     ) -> Result<(), TokenUsageOverflow> {
         self.cumulative_usage = self.cumulative_usage.checked_add(&usage)?;
         self.last_call_usage = Some(usage.clone());
-        self.emit(SessionStreamEvent::LlmUsage {
-            protocol_iteration: self.protocol_iteration,
-            usage: usage.clone(),
-            cumulative: self.cumulative_usage.clone(),
-        });
         if self.config.emit_llm_trace {
             let response_parts = self.llm_response_debug_parts(llm_response);
             self.side_effect_outbox.push_back(Effect::Log {

@@ -23,6 +23,15 @@ type AttemptObserver = Arc<
         + Sync,
 >;
 
+type AttemptReservation = Arc<
+    dyn Fn(
+            u32,
+        ) -> std::pin::Pin<
+            Box<dyn std::future::Future<Output = Result<(), LlmTransportError>> + Send>,
+        > + Send
+        + Sync,
+>;
+
 /// Replay safety and sealed attempt facts shared with the runtime independently
 /// of the spawned LLM Provider task's terminal return. This is in-process
 /// retention; it does not make uncommitted attempts survive a crash.
@@ -31,6 +40,7 @@ pub struct ProviderCompletionSideband {
     state: Arc<Mutex<ProviderCompletionSidebandState>>,
     pub(super) cancellation: super::super::traits::ProviderAttemptControl,
     attempt_observer: Option<AttemptObserver>,
+    attempt_reservation: Option<(u32, AttemptReservation)>,
     attempt_clock: Option<Arc<dyn crate::Clock>>,
     attempt_identity: Option<Arc<dyn lash_trace::TraceIdentity>>,
 }
@@ -67,6 +77,23 @@ impl Drop for ProviderCancellationGuard {
 }
 
 impl ProviderCompletionSideband {
+    /// The first dispatch is reserved by admission; further retries reserve
+    /// their identity under the same owner fence before sending.
+    #[must_use]
+    pub fn with_attempt_reservation(mut self, first: u32, reserve: AttemptReservation) -> Self {
+        self.attempt_reservation = Some((first, reserve));
+        self
+    }
+
+    pub(super) async fn reserve_attempt(&self, ordinal: u32) -> Result<(), LlmTransportError> {
+        if let Some((first, reserve)) = &self.attempt_reservation
+            && ordinal > *first
+        {
+            reserve(ordinal).await?;
+        }
+        Ok(())
+    }
+
     pub fn cancel_on_drop(
         &self,
         reason: super::super::traits::AttemptEndReason,
@@ -99,6 +126,7 @@ impl ProviderCompletionSideband {
         Self {
             cancellation: Default::default(),
             attempt_observer: None,
+            attempt_reservation: None,
             attempt_clock: None,
             attempt_identity: None,
             state: Arc::new(Mutex::new(ProviderCompletionSidebandState {
@@ -114,6 +142,28 @@ impl ProviderCompletionSideband {
 
     /// Request cooperative cancellation; the provider task owns draining it
     /// and delivering its terminal before it ends.
+    /// Restore reservations whose observer died with the previous owner.
+    /// They remain unknown even when this owner's attempt completes.
+    #[must_use]
+    pub fn with_unobserved_attempts(self, count: u32) -> Self {
+        self.with_state(|state| {
+            for ordinal in 1..=count {
+                state.attempts.push(AttemptRecord {
+                    ordinal,
+                    outcome: AttemptOutcome::Interrupted,
+                    protocol_position: ProtocolPosition::Unobserved,
+                    retry_budget_consumed: false,
+                    retry_decision: None,
+                    error: None,
+                    evidence: None,
+                    generation_disposition: None,
+                    usage: None,
+                });
+            }
+        });
+        self
+    }
+
     pub fn cancel(&self, reason: super::super::traits::AttemptEndReason) {
         self.cancellation.cancel(reason);
     }

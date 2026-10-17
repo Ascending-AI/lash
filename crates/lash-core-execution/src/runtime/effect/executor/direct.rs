@@ -4,6 +4,7 @@ use super::super::outcome::llm_call_error_from_transport;
 use super::*;
 use crate::LlmRequest as CoreLlmRequest;
 use crate::provider::ProviderHandle;
+use lash_sansio::sync::MutexExt as _;
 
 impl LocalDirectEffectRunner {
     pub(super) async fn run_direct(
@@ -11,10 +12,11 @@ impl LocalDirectEffectRunner {
         invocation: &crate::RuntimeEffectInvocation,
         provider: crate::ProviderHandle,
         mut request: crate::LlmRequest,
+        effect_attempt: Option<crate::EffectAttempt>,
     ) -> Result<RuntimeEffectOutcome, RuntimeEffectControllerError> {
         // The call's id names it on every attempt's request scope and on its
         // trace records alike, whether or not anything observes it.
-        let llm_call_id = uuid::Uuid::new_v4().to_string();
+        let llm_call_id = lash_core_llm::core_internal::call_id_for_scope(&self.response.scope).0;
         request.scope.llm_call_id = Some(llm_call_id.clone());
         // The request is this body's own work: its records are made here,
         // under the body's live step. Made from an extension body, the call
@@ -47,8 +49,8 @@ impl LocalDirectEffectRunner {
             .as_ref()
             .and_then(|(call, _, _)| call.carrier().cloned().map(Arc::new));
         let (result, call_record) = self
-            .run_direct_llm_request(provider, request, traced.as_ref())
-            .await;
+            .run_direct_llm_request(provider, request, traced.as_ref(), effect_attempt)
+            .await?;
         if let Some((call, context, request_model)) = traced {
             match &result {
                 Ok(response) => super::super::emit_llm_trace_completed(
@@ -140,12 +142,58 @@ impl LocalDirectEffectRunner {
         mut provider: ProviderHandle,
         request: CoreLlmRequest,
         traced: Option<&(crate::trace::OpenSpan, lash_trace::TraceContext, String)>,
-    ) -> RuntimeDirectLlmOutcome {
+        effect_attempt: Option<crate::EffectAttempt>,
+    ) -> Result<RuntimeDirectLlmOutcome, RuntimeEffectControllerError> {
         // The request is the effect's own input: it attributes the call and
         // carries this send's senders. What is sent is the admitted
         // template, and its response is read under the admitted context.
         let mut request = request;
-        let sideband = lash_core_llm::core_internal::prepare_completion(&provider, &mut request);
+        let first = self.response.scope.attempt.unwrap_or(1);
+        let reservation_fault = Arc::new(std::sync::Mutex::new(None));
+        let fault = Arc::clone(&reservation_fault);
+        let enclosing = effect_attempt
+            .as_ref()
+            .and_then(|attempt| attempt.model_call_owner().cloned());
+        let cx = self.reservation.0.clone();
+        let key = self.reservation.1.clone();
+        let call_id = lash_core_llm::core_internal::call_id_for_scope(&self.response.scope);
+        let sideband = lash_core_llm::core_internal::prepare_completion(&provider, &mut request)
+            .with_unobserved_attempts(first.saturating_sub(1))
+            .with_attempt_reservation(
+                first,
+                Arc::new(move |attempt| {
+                    let cx = cx.clone();
+                    let key = key.clone();
+                    let call_id = call_id.clone();
+                    let fault = Arc::clone(&fault);
+                    let enclosing = enclosing.clone();
+                    Box::pin(async move {
+                        let result = async {
+                            let mut tx = cx.begin().await?;
+                            tx.write(lash_durable::DomainWrite::ModelCallPin(
+                                lash_durable::domain::ModelCallPinWrite::Reserve {
+                                    key,
+                                    call_id,
+                                    attempt,
+                                    enclosing,
+                                },
+                            ));
+                            cx.commit(tx, lash_durable::CommitLabel::new("completion.attempt"))
+                                .await?;
+                            Ok::<_, lash_durable::DurableError>(())
+                        }
+                        .await;
+                        result.map_err(|error| {
+                            let message = error.to_string();
+                            *fault.lock_recover() = Some(error);
+                            lash_transport_failure::LlmTransportError::new(message)
+                                .with_retry_verdict(
+                                    lash_transport_failure::TransportRetryVerdict::Forbidden,
+                                )
+                        })
+                    })
+                }),
+            );
         let mut context = self
             .response
             .clone()
@@ -167,6 +215,10 @@ impl LocalDirectEffectRunner {
         let bounds = self.bounds.clone();
         // A cancelled cell may drop this await. The task keeps the same
         // provider alive through cooperative drain and terminal delivery.
+        let (send, receive) = tokio::sync::oneshot::channel();
+        let attempt = effect_attempt.clone();
+        let key = self.reservation.1.clone();
+        let owner = self.reservation.0.clone();
         let task = crate::task::spawn(async move {
             let completion = lash_core_llm::core_internal::complete_prepared(
                 &mut provider,
@@ -179,15 +231,57 @@ impl LocalDirectEffectRunner {
                 ambient.as_ref().and_then(|standing| standing.body_permit()),
                 bounds,
             );
-            match &ambient {
+            let completed = match &ambient {
                 Some(ambient) => ambient.ambient(completion).await,
                 None => completion.await,
+            };
+            use lash_core_store::model_calls::{ModelCallEnd, ModelCallEndReason, ModelCallFact};
+            let (record, end) = match &completed {
+                Ok(completion) => (&completion.call_record, ModelCallEnd::Answered),
+                Err(failure) => {
+                    let reason = if failure.error.code
+                        == Some(crate::FailureCode::lash(
+                            crate::TurnFailureCode::ModelTotalExceeded,
+                        )) {
+                        Some(crate::provider::AttemptEndReason::ModelDeadline)
+                    } else if failure.error.terminal_reason == crate::LlmTerminalReason::Cancelled {
+                        Some(crate::provider::AttemptEndReason::ImmediateCancel)
+                    } else {
+                        None
+                    };
+                    (
+                        failure.call_record.as_ref(),
+                        reason.map_or(ModelCallEnd::Answered, |reason| ModelCallEnd::Unanswered {
+                            reason: ModelCallEndReason::Attempt(reason),
+                        }),
+                    )
+                }
+            };
+            let call = lash_durable::domain::model_calls::OwnedModelCall {
+                key,
+                fact: ModelCallFact {
+                    call: 0,
+                    call_id: record.call_id.clone(),
+                    end,
+                    record: record.clone(),
+                },
+            };
+            if let Some(attempt) = attempt {
+                attempt.record_model_call(call);
+            } else {
+                owner.record_owned_model_call(call);
             }
+            let _ = send.send(completed);
         });
-        let completed = match task.await {
+        if let Some(attempt) = effect_attempt {
+            attempt.retain_model_task(task);
+        } else {
+            self.reservation.0.retain_owned_model_task(task);
+        }
+        let completed = match receive.await {
             Ok(completed) => completed,
             Err(error) => {
-                return (
+                return Ok((
                     Err(llm_call_error_from_transport(
                         lash_transport_failure::LlmTransportError::new(format!(
                             "direct provider task failed: {error}"
@@ -198,16 +292,23 @@ impl LocalDirectEffectRunner {
                         ),
                     )),
                     None,
-                );
+                ));
             }
         };
+        if let Some(error) = reservation_fault.lock_recover().take() {
+            return Err(RuntimeEffectControllerError::new(
+                crate::RuntimeErrorCode::StoreCommitFailed,
+                error.to_string(),
+            )
+            .retryable_uncommitted_derivation());
+        }
         cancellation.disarm();
-        match completed {
+        Ok(match completed {
             Ok(completion) => (Ok(completion.response), Some(completion.call_record)),
             Err(failure) => (
                 Err(llm_call_error_from_transport(failure.error)),
                 Some(*failure.call_record),
             ),
-        }
+        })
     }
 }

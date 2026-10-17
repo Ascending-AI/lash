@@ -23,9 +23,10 @@ and would freeze unnecessary storage and host APIs at 1.0.
 
 ## Decision
 
-Usage is provider-reported data. Each model call's committed result carries
-its response and `LlmCallRecord`, including the observed usage and failure of
-each attempt
+Usage is provider-reported data. Each model call's existing settling transaction retains a
+`model_call_records` row naming its `ModelCallFact` and sealed `LlmCallRecord`,
+including observed usage and failures of every attempt. An answer receipt
+names the logical call id and may be consumed without discarding that record
 ([ADR 0132](0132-durability-is-state-first-over-the-lash-store.md) §4).
 Resume loads that result. Absence stays absent and
 explicit zero stays zero, as ADRs 0031 and 0032 require. Lash uses this data
@@ -132,14 +133,20 @@ and drops a borrowed `ProviderHandle::complete`, `Provider::complete` or
 `Provider::send` future owns that call's cancellation and terminal itself.
 
 `TurnEvent::ModelCallRecorded` and `TurnFinalized` are observation only.
-Neither is a billing delivery channel. Committed turn records remain model
-execution state and usage summaries, without host receipts or settle reads.
+Neither is a billing delivery channel. Committed call records retain execution facts without host receipts.
+Followers read them by turn and call id on any node. A turn's usage is
+computed from its rows; the head's usage remains the lifetime projection.
 
 ### What Lash provides
 
-Lash provides no usage ledger, usage-fact store, accounting delivery,
-reconciliation, unknown-liability tracking or deletion drain. SQL stores
-retain runtime state and execution evidence for their existing purposes.
+Lash retains one committed record per logical model call, written beside its
+answer or in its existing cancellation, deadline or tail-settling commit.
+Pending dispatch identities survive early receipt consumption. On recovery,
+lost observations become `Interrupted`/`Unobserved` attempts, never zero usage.
+`ModelCallRecorded` carries only `call_id`; hosts read rows or the head
+instead of `TurnEvent::Usage` or `SessionStreamEvent::LlmUsage`.
+This is no accounting ledger: it has no admission policy, delivery,
+reconciliation, money, host receipts or deletion drain.
 Session deletion and process pruning have no accounting dependency.
 
 The pre-1.0 cutover removes accounting shapes in place, without a version
@@ -147,7 +154,8 @@ bump, migration or compatibility reader. ADR 0106 owns the version freeze.
 
 ## Consequences
 
-A model call needs only its ordinary recorded result. Billing cannot delay
+A model call's sealed record outlives its consumed answer receipt. Its row
+and graph node share the session's ledger lifetime, with no separate host setting. Billing cannot delay
 Lash deletion or impose accounting transactions on runtime execution. Hosts
 choose how to retain and meter their provider receipts, and can enforce caps
 before dispatch. Usage summaries and traces describe reported tokens; a host

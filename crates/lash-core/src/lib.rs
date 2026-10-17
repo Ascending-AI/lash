@@ -860,3 +860,5 @@ pub use lash_core_execution::Durable;
 
 /// Common statement counts supplied to the workflow coverage helper.
 pub use lash_kernel_doc::RanCounts;
+
+pub use lash_core_store::model_calls;

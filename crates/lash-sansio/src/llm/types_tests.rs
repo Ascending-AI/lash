@@ -414,3 +414,39 @@ fn attempt_usage_disposition_follows_outcome_when_usage_is_absent() {
     assert!(AttemptUsageOutcome::UnreportedAfterAbort.is_unreported_after_interruption());
     assert!(!AttemptUsageOutcome::UnreportedByProvider.is_unreported_after_interruption());
 }
+
+/// FIG-6570: a completed retry cannot erase unreported earlier work.
+#[test]
+fn a_completed_retry_keeps_interrupted_usage_unknown() {
+    let mut call: LlmCallRecord = serde_json::from_value(serde_json::json!({
+        "call_id": "retry-after-interruption",
+        "attempts": [
+            {"ordinal": 1, "outcome": "interrupted", "protocol_position": "output_started", "retry_budget_consumed": false},
+            {"ordinal": 2, "outcome": "completed", "protocol_position": "terminal_observed", "retry_budget_consumed": false, "usage": LlmUsage { input_tokens: 3, output_tokens: 2, ..Default::default() }}
+        ]
+    })).expect("call");
+    let usage = call.usage().expect("usage");
+    assert_eq!(
+        usage.unknown_calls, 1,
+        "earlier interrupted work is not free"
+    );
+    assert_eq!(usage.input_tokens, 3);
+    call.attempts[0].usage = Some(LlmUsage::default());
+    assert_eq!(call.usage().expect("reported zero").unknown_calls, 0);
+}
+
+#[test]
+fn a_completed_call_with_absent_usage_is_unknown_and_explicit_zero_is_known() {
+    let mut call: LlmCallRecord = serde_json::from_value(serde_json::json!({
+        "call_id": "provider-omitted-usage", "attempts": [
+            {"ordinal":1,"outcome":"completed","protocol_position":"terminal_observed","retry_budget_consumed":true}
+        ]
+    })).expect("completed call");
+    assert_eq!(
+        call.attempts[0].usage_disposition(),
+        AttemptUsageOutcome::UnreportedByProvider
+    );
+    assert_eq!(call.usage().expect("usage").unknown_calls, 1);
+    call.attempts[0].usage = Some(LlmUsage::default());
+    assert_eq!(call.usage().expect("explicit zero").unknown_calls, 0);
+}

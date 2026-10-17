@@ -148,17 +148,21 @@ async fn run_task_with_shutdown_witness(
     };
     let (mut completed, mut completion_error, finish_value, decisions, turn_outcome) = match result
     {
-        Ok(Ok((output, decisions))) => (
-            output.is_success(),
-            (!output.is_success()).then(|| format!("turn outcome: {:?}", output.result.outcome)),
-            if channel == crate::ChannelSelection::Standard {
-                world.submissions().first().cloned()
-            } else {
-                output.finished().map(|(_, value)| value).cloned()
-            },
-            decisions,
-            Some(format!("{:?}", output.result.outcome)),
-        ),
+        Ok(Ok((output, decisions))) => {
+            telemetry.record_calls(output.result.llm_calls.clone());
+            (
+                output.is_success(),
+                (!output.is_success())
+                    .then(|| format!("turn outcome: {:?}", output.result.outcome)),
+                if channel == crate::ChannelSelection::Standard {
+                    world.submissions().first().cloned()
+                } else {
+                    output.finished().map(|(_, value)| value).cloned()
+                },
+                decisions,
+                Some(format!("{:?}", output.result.outcome)),
+            )
+        }
         Ok(Err(error)) => (
             false,
             Some(format!("{error:#}")),

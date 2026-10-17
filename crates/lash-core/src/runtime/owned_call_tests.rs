@@ -135,6 +135,7 @@ async fn admit(world: &World) -> OwnedAdmission {
         ))
         .expect("the plugin session builds");
     OwnedCall {
+        enclosing: None,
         cx: &world.cx,
         key: PromptCallKey {
             session: crate::SessionId::from(SESSION),

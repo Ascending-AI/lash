@@ -39,6 +39,8 @@ pub(super) enum SurfaceMethod {
     EnvironmentBytes,
     LoadSession,
     RunFactsOf,
+    ModelCalls,
+    ModelCallPins,
     ClaimFacts,
     /// Test authority refuses an absent actor without changing durable state.
     AcquireIdleForTesting,
@@ -188,6 +190,8 @@ impl SurfaceMethod {
             Self::EnvironmentBytes => "surface:environment_bytes",
             Self::LoadSession => "surface:load_session",
             Self::RunFactsOf => "surface:run_facts_of",
+            Self::ModelCalls => "surface:model_calls",
+            Self::ModelCallPins => "surface:model_call_pins",
             Self::ClaimFacts => "surface:claim_facts",
             Self::AcquireIdleForTesting => "surface:acquire_idle_for_testing",
             Self::ListPendingTurnInputs => "surface:list_pending_turn_inputs",
@@ -374,6 +378,8 @@ pub(super) fn surface_sweep_case() -> GeneratedCase {
             surface(SurfaceMethod::ProcessAuthority),
             surface(SurfaceMethod::EnvironmentBytes),
             surface(SurfaceMethod::RunFactsOf),
+            surface(SurfaceMethod::ModelCalls),
+            surface(SurfaceMethod::ModelCallPins),
             surface(SurfaceMethod::ClaimFacts),
             surface(SurfaceMethod::AcquireIdleForTesting),
             surface(SurfaceMethod::ReadSessionStateVersion),
@@ -656,6 +662,30 @@ impl BackendRunner {
                     facts.actor.is_some(),
                     roots.len()
                 )
+            }
+            SurfaceMethod::ModelCalls => {
+                let owner = lash_core::durable_port::domain::ModelCallId::turn_owner(
+                    &SURFACE_RUN_ID.into(),
+                );
+                let rows = self
+                    .lifecycle_backend
+                    .durable()
+                    .model_calls(&session_id, &owner)
+                    .await
+                    .map_err(|error| StoreError::Backend(error.to_string()))?;
+                format!("rows={}", rows.len())
+            }
+            SurfaceMethod::ModelCallPins => {
+                let owner = lash_core::durable_port::domain::ModelCallId::turn_owner(
+                    &SURFACE_RUN_ID.into(),
+                );
+                let rows = self
+                    .lifecycle_backend
+                    .durable()
+                    .model_call_pins(&session_id, &owner)
+                    .await
+                    .map_err(|error| StoreError::Backend(error.to_string()))?;
+                format!("rows={}", rows.len())
             }
             SurfaceMethod::RunFactsOf => {
                 let owner = lash_core::durable_port::domain::OwnerKey::Turn(

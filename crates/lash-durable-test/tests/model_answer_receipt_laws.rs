@@ -77,7 +77,7 @@ use lash_core::runtime::durable::session::SessionActivation;
 use lash_core::{ExecutionPolicy, LlmOutputPart, LlmUsage, ToolCall, ToolOutcome};
 use lash_core_execution::{Backend, BackendParts, NoProjectionProviders, StoreSet};
 use lash_durable::runner::Activation;
-use lash_durable::{ActorKey, ActorState, CommitLabel, DurableStore};
+use lash_durable::{ActorKey, ActorState, CommitLabel};
 use lash_durable_test::{
     Fault, Matrix, Script, SimClock, SimNodes, SimNodesConfig, Stored, Tripwire,
 };
@@ -96,7 +96,7 @@ const ANSWERS: [&str; 3] = [
 ];
 /// What the response hook appends.
 const HOOKED: &str = " [hooked]";
-/// The usage every send reports.
+/// The usage the first call reports; the final scripted call omits usage.
 const USAGE: LlmUsage = LlmUsage {
     input_tokens: 11,
     output_tokens: 7,
@@ -150,6 +150,7 @@ struct World {
     held: AtomicUsize,
     /// Receipt acknowledgements their owners received.
     acknowledged: AtomicUsize,
+    hold_tail: AtomicUsize,
     /// Commits that entered the store after a receipt and before its
     /// acknowledgement reached its owner.
     early: Mutex<Vec<String>>,
@@ -203,9 +204,8 @@ impl World {
 enum Answer {
     /// Text, streamed in three deltas: [`ANSWERS`] by send.
     Text,
-    /// Text answered whole, never streamed: [`ANSWERS`] by send. Its
-    /// derivation publishes its parts from the receipt.
-    Unstreamed,
+    RetriedText,
+    MixedCalls,
     /// A call to [`WRITE`] beside text, then `done`.
     Tool,
     /// A TypeScript cell that calls [`WRITE`] with its send's marker, then
@@ -225,7 +225,10 @@ enum Answer {
 
 impl Answer {
     fn code(self) -> bool {
-        matches!(self, Self::Cell | Self::PrintingCell | Self::AbortedCell)
+        matches!(
+            self,
+            Self::Cell | Self::PrintingCell | Self::AbortedCell | Self::MixedCalls
+        )
     }
 }
 
@@ -234,15 +237,30 @@ fn model(world: Arc<World>, answer: Answer) -> ProviderHandle {
     lash_core::testing::TestProvider::builder()
         .kind("model-answer-receipt")
         .requires_streaming(true)
-        .generation_retry_guarantee(if matches!(answer, Answer::RetryTool) {
-            lash_core::provider::GenerationRetryGuarantee::Idempotent
-        } else {
-            lash_core::provider::GenerationRetryGuarantee::None
+        .options(lash_core::provider::ProviderOptions {
+            reliability: lash_core::provider::ProviderReliability::default()
+                .max_attempts(Some(2))
+                .base_delay_ms(0)
+                .max_delay_ms(0),
+            ..Default::default()
         })
+        .generation_retry_guarantee(
+            if matches!(
+                answer,
+                Answer::RetryTool | Answer::RetriedText | Answer::MixedCalls
+            ) {
+                lash_core::provider::GenerationRetryGuarantee::Idempotent
+            } else {
+                lash_core::provider::GenerationRetryGuarantee::None
+            },
+        )
         .complete(move |request: LlmRequest| {
             let world = Arc::clone(&world);
             async move {
                 let send_index = world.all_sends.fetch_add(1, Ordering::SeqCst);
+                if answer == Answer::MixedCalls {
+                    return mixed_call(&request, send_index).await;
+                }
                 let answered = request
                     .messages
                     .iter()
@@ -256,6 +274,11 @@ fn model(world: Arc<World>, answer: Answer) -> ProviderHandle {
                     return Ok(streamed(&request, &["do", "ne"]));
                 }
                 let send = world.sends.fetch_add(1, Ordering::SeqCst);
+                if answer == Answer::RetriedText && request.scope.attempt == Some(1) {
+                    return Err(LlmTransportError::new("retry before response")
+                        .with_kind(lash_core::ProviderFailureKind::Transport)
+                        .with_retry_verdict(TransportRetryVerdict::RetryableTransient));
+                }
                 let marker = ANSWERS[send.min(ANSWERS.len() - 1)];
                 let mut response = match answer {
                     Answer::Failed => {
@@ -265,14 +288,8 @@ fn model(world: Arc<World>, answer: Answer) -> ProviderHandle {
                                 .with_retry_verdict(TransportRetryVerdict::NotRetryable),
                         );
                     }
-                    Answer::Unstreamed => LlmResponse {
-                        parts: vec![LlmOutputPart::Text {
-                            text: marker.to_owned(),
-                            response_meta: None,
-                        }],
-                        ..LlmResponse::default()
-                    },
-                    Answer::Text => {
+                    Answer::MixedCalls => unreachable!("the mixed history is handled above"),
+                    Answer::Text | Answer::RetriedText => {
                         let (head, tail) = marker.split_at(4);
                         let (middle, tail) = tail.split_at(6);
                         streamed(&request, &[head, middle, tail])
@@ -303,6 +320,9 @@ fn model(world: Arc<World>, answer: Answer) -> ProviderHandle {
                         // cell runs from what streamed; the provider's tail
                         // drains off the turn's path (FIG-6433).
                         world.written.notified().await;
+                        if world.hold_tail.load(Ordering::SeqCst) > 0 {
+                            std::future::pending::<()>().await;
+                        }
                         let tail = "\nTrailing prose the mask cuts.".to_owned();
                         stream(&request, std::slice::from_ref(&tail));
                         pieces.push(tail);
@@ -316,6 +336,7 @@ fn model(world: Arc<World>, answer: Answer) -> ProviderHandle {
                     }
                 };
                 response.usage = USAGE;
+                response.terminal_reason = lash_core::LlmTerminalReason::Stop;
                 // Provider detail a durable record never keeps (FIG-4087):
                 // a derivation is handed the receipt's response, never it.
                 response.terminal_diagnostic = Some("provider detail".to_owned());
@@ -570,7 +591,18 @@ fn core(
         .commit_budget(lash::CommitBudget::bounded(1024 * 1024, 512))
         .data_retention(lash::DataRetention::standard())
         .queued_work_batching(lash::QueuedWorkBatchingConfig::new(1))
-        .execution_budgets(lash::ExecutionBudgets::recommended())
+        .execution_budgets(if answer == Answer::MixedCalls {
+            let total = Duration::from_secs(10);
+            lash::ExecutionBudgets::new(lash_core::ExecutionBudgetsConfig {
+                model_total: total,
+                stop_grace: Duration::from_millis(50),
+                provider: lash_core::ProviderAttemptLimits::new(total, total, total, 2).unwrap(),
+                ..lash_core::ExecutionBudgetsConfig::recommended()
+            })
+            .unwrap()
+        } else {
+            lash::ExecutionBudgets::recommended()
+        })
         .delta_coalescing(lash::DeltaCoalescing::recommended())
         .serve_test_llm_profile(
             model(Arc::clone(world), answer),
@@ -611,6 +643,7 @@ struct Setup {
     /// when it is not that one.
     hooks: Hooks,
     b_hooks: Option<Hooks>,
+    postgres: bool,
 }
 
 impl Setup {
@@ -619,6 +652,7 @@ impl Setup {
             answer,
             hooks,
             b_hooks: None,
+            postgres: false,
         }
     }
 
@@ -632,6 +666,7 @@ impl Setup {
 
 /// One session served by sim nodes over SQLite in memory.
 struct Deployment {
+    backend: Backend,
     clock: Arc<SimClock>,
     nodes: SimNodes,
     world: Arc<World>,
@@ -640,16 +675,36 @@ struct Deployment {
     core: lash::LashCore,
     _b_core: Option<lash::LashCore>,
     durable: lash::DurableSession,
+    _database: Option<lash_postgres_store::testing::IsolatedDatabase>,
 }
 
 impl Deployment {
     /// The deployment of `setup`, its fault rules armed by `arm`.
     async fn new(setup: Setup, arm: impl FnOnce(&Script)) -> Self {
         let clock = SimClock::new();
-        let stores = sim::memory(Arc::clone(&clock)).await;
-        let database: Arc<dyn DurableStore> = Arc::new(stores.durable_store());
+        let (stores, isolated): (Arc<dyn StoreSet>, _) = if setup.postgres {
+            sim::wait_out_renders(&clock);
+            let url = lash_postgres_store::testing::required_database_url();
+            let isolated = lash_postgres_store::testing::IsolatedDatabase::create(&url).await;
+            let storage = lash_postgres_store::testing::connect(isolated.url())
+                .await
+                .expect("PostgreSQL store");
+            let stores = lash_postgres_store::PostgresStoreSet::with_clock_for_testing(
+                &storage,
+                Arc::new(lash_core_store::attachments::UnavailableAttachmentStore),
+                clock.clone(),
+            );
+            lash_core_execution::testing::process_execution_env_fixture(
+                stores.process_env_store().as_ref(),
+            )
+            .await;
+            (Arc::new(stores), Some(isolated))
+        } else {
+            (Arc::new(sim::memory(Arc::clone(&clock)).await), None)
+        };
+        let database = stores.durable_store();
         let backend = Backend::assemble(BackendParts {
-            stores: Arc::new(stores) as Arc<dyn StoreSet>,
+            stores,
             settings: sim::settings(),
             engines: Vec::new(),
             providers: Arc::new(NoProjectionProviders),
@@ -725,12 +780,14 @@ impl Deployment {
             .await
             .expect("the session is created");
         Self {
+            backend,
             clock,
             nodes,
             world,
             live_replay,
             core,
             _b_core: b_core,
+            _database: isolated,
             durable,
         }
     }
@@ -1295,7 +1352,12 @@ async fn uncut_run(answer: Answer) -> (Vec<Value>, LlmUsage) {
 /// counted unknown, never zero (FIG-6433).
 async fn a_stream_finish_killed_on_a_resumes_from_the_receipt_on_b(answer: Answer) {
     let (uncut, uncut_usage) = uncut_run(answer).await;
-    assert_eq!(uncut_usage, USAGE, "the uncut run charges the paid answer");
+    let final_omission = LlmUsage::unknown_call();
+    assert_eq!(
+        uncut_usage,
+        USAGE.checked_add(&final_omission).unwrap(),
+        "the uncut run charges the paid answer and retains its final call's absent usage"
+    );
     let deployment = Deployment::new(
         Setup::new(answer, Hooks::All).b_on_its_own_core(Hooks::All),
         |_| {},
@@ -1335,7 +1397,10 @@ async fn a_stream_finish_killed_on_a_resumes_from_the_receipt_on_b(answer: Answe
         Answer::AbortedCell => LlmUsage::unknown_call(),
         _ => USAGE,
     };
-    assert_eq!(deployment.usage().await, resumed_usage);
+    assert_eq!(
+        deployment.usage().await,
+        resumed_usage.checked_add(&final_omission).unwrap()
+    );
     deployment.end();
 }
 
@@ -1796,56 +1861,373 @@ async fn a_cancel_only_node_ending_an_answered_phase_publishes_the_record_once()
     deployment.end();
 }
 
-/// The usage and response-part observations the session's live feed
-/// published for a turn whose answer was never streamed: uncut, or with A
-/// killed as its receipt commits and B deriving it.
-async fn derived_observations(cut: bool) -> Vec<String> {
-    let deployment = Deployment::new(Setup::new(Answer::Unstreamed, Hooks::All), |script| {
-        if cut {
-            script.cut_on("a", CommitLabel::MODEL_ANSWER, 1, Fault::CommitThenAbort);
-        }
-    })
-    .await;
-    let handle = deployment.send().await;
-    if cut {
-        deployment
-            .until("A dies with its receipt", |deployment| {
-                deployment.cut(CommitLabel::MODEL_ANSWER)
-            })
-            .await;
-        deployment.take_over().await;
-    }
-    deployment.settle().await;
-    let cursor = handle.cursor().clone();
-    handle.output().await.expect("the turn settles");
-    let observed = deployment
-        .published(&cursor)
+/// Read only the committed-turn surface, so the missing retained record is
+/// observable on the unfixed implementation as well as after this change.
+async fn retained_model_rows(durable: &lash::DurableSession) -> (lash::TurnId, Vec<Value>) {
+    let page = durable
+        .committed_turns(None, std::num::NonZeroU32::MIN)
         .await
-        .into_iter()
-        .filter_map(|event| match event {
-            lash_core::TurnEvent::Usage { usage, .. } => Some(format!("usage {usage:?}")),
-            lash_core::TurnEvent::StreamBlock(block) => Some(format!("part {block:?}")),
-            _ => None,
-        })
-        .collect();
-    deployment.end();
-    observed
+        .expect("committed turns");
+    let turn = page
+        .turns
+        .first()
+        .expect("one committed turn")
+        .turn_id
+        .clone();
+    let read = durable
+        .committed_turn(&turn)
+        .await
+        .expect("read turn")
+        .expect("retained turn");
+    let json = serde_json::to_value(read).expect("encode read");
+    let rows = json
+        .get("model_calls")
+        .and_then(Value::as_array)
+        .expect("every committed turn retains its model calls")
+        .clone();
+    assert!(
+        !rows.is_empty(),
+        "a completed provider call has one committed record"
+    );
+    (turn, rows)
 }
 
-/// FIG-6274: a successor's derivation publishes every observation it makes.
-/// A dies as the receipt of an answer it never streamed commits, after it
-/// published its own activity; B restores the turn and derives the receipt.
-/// The feed holds the answer's parts and its usage as the uncut run's does:
-/// none is dropped as a repeat of an id A published.
 #[tokio::test]
-async fn a_successors_usage_and_parts_all_reach_the_feed() {
-    let uncut = derived_observations(false).await;
-    assert!(
-        uncut.iter().any(|observed| observed.starts_with("usage"))
-            && uncut.iter().any(|observed| observed.starts_with("part")),
-        "the uncut run publishes the answer's usage and parts: {uncut:#?}"
+async fn a_late_follower_reads_the_same_committed_model_calls() {
+    let deployment = Deployment::new(Setup::new(Answer::Text, Hooks::All), |_| {}).await;
+    let _handle = deployment.send().await;
+    deployment.settle().await;
+    let (turn, rows) = retained_model_rows(&deployment.durable).await;
+    let follower_core = self::core(
+        &deployment.backend,
+        &deployment.clock,
+        &deployment.world,
+        &deployment.live_replay,
+        Answer::Text,
+        Hooks::All,
+        "late-follower",
     );
-    assert_eq!(derived_observations(true).await, uncut);
+    let follower = follower_core
+        .session(session())
+        .durable()
+        .await
+        .expect("late follower on a fresh core");
+    let (_, followed) = retained_model_rows(&follower).await;
+    assert_eq!(rows, followed);
+    assert_eq!(rows.len(), 1);
+    assert_eq!(rows[0]["call"], 1);
+    assert_eq!(rows[0]["end"], "answered");
+    assert_eq!(deployment.world.sends(), 1);
+    assert!(follower.committed_turn(&turn).await.unwrap().is_some());
+    deployment.end();
+}
+
+#[tokio::test]
+async fn a_model_record_commits_with_its_receipt_and_outlives_consumption() {
+    retained_receipt(false).await;
+}
+
+#[tokio::test]
+#[ignore = "requires PostgreSQL"]
+async fn postgres_a_model_record_commits_with_its_receipt_and_outlives_consumption() {
+    retained_receipt(true).await;
+}
+
+async fn retained_receipt(postgres: bool) {
+    let mut setup = Setup::new(Answer::Text, Hooks::All);
+    setup.postgres = postgres;
+    let deployment = Deployment::new(setup, |_| {}).await;
+    *deployment.world.hold.lock_recover() = Some(Hold::Derivation);
+    let _handle = deployment.send().await;
+    deployment.until("paid receipt", |d| d.world.held()).await;
+    assert_eq!(deployment.committed(CommitLabel::MODEL_ANSWER), 1);
+    let open = deployment
+        .nodes
+        .database()
+        .turn(&session())
+        .await
+        .unwrap()
+        .unwrap();
+    let early = deployment
+        .nodes
+        .database()
+        .model_calls(
+            &session(),
+            &lash_durable::domain::ModelCallId::turn_owner(&open.run),
+        )
+        .await
+        .unwrap();
+    assert_eq!(
+        early.len(),
+        1,
+        "the call row is readable with the acknowledged receipt"
+    );
+    let reads = deployment
+        .durable
+        .read_model_calls(&[lash::turn::TurnModelCallRef {
+            turn_id: open.run,
+            call_id: early[0].call_id.clone(),
+        }])
+        .await
+        .unwrap();
+    assert!(matches!(
+        reads[0],
+        lash::turn::ModelCallRead::Settled { .. }
+    ));
+    deployment.take_over().await;
+    deployment.settle().await;
+    let (_, rows) = retained_model_rows(&deployment.durable).await;
+    assert_eq!(rows.len(), 1);
+    assert_eq!(deployment.world.sends(), 1);
+    assert_eq!(deployment.usage().await, USAGE);
+    deployment.end();
+}
+
+#[tokio::test]
+async fn a_resent_model_call_counts_the_attempt_its_process_lost() {
+    let deployment = Deployment::new(Setup::new(Answer::Text, Hooks::All), |script| {
+        script.cut_on("a", CommitLabel::MODEL_ANSWER, 1, Fault::Zombie);
+    })
+    .await;
+    let _handle = deployment.send().await;
+    deployment
+        .until("uncommitted provider answer", |d| {
+            d.nodes.paused().contains(&"a".to_owned())
+        })
+        .await;
+    deployment.nodes.start("b");
+    deployment.settle().await;
+    let (_, rows) = retained_model_rows(&deployment.durable).await;
+    assert_eq!(rows.len(), 1);
+    let record: lash::LlmCallRecord =
+        serde_json::from_value(rows[0]["record"].clone()).expect("sealed record");
+    assert_eq!(record.attempts.len(), 2);
+    assert_eq!(record.attempts[0].ordinal, 1);
+    assert_eq!(
+        record.attempts[0].outcome,
+        lash::provider::AttemptOutcome::Interrupted
+    );
+    assert_eq!(
+        serde_json::to_value(record.attempts[0].protocol_position).unwrap(),
+        "unobserved"
+    );
+    assert_eq!(record.attempts[0].usage, None);
+    assert_eq!(record.attempts[1].ordinal, 2);
+    assert_eq!(
+        record.attempts[1].outcome,
+        lash::provider::AttemptOutcome::Completed,
+        "{rows:#?}\n{}",
+        deployment.nodes.script().rendered_trace()
+    );
+    let usage = record.usage().expect("usage");
+    assert_eq!(usage.unknown_calls, 1);
+    assert_eq!(usage, USAGE.checked_add(&LlmUsage::unknown_call()).unwrap());
+    assert_eq!(deployment.usage().await, usage);
+    assert_eq!(deployment.world.sends(), 2);
+    deployment.end();
+}
+
+#[tokio::test]
+async fn a_consumed_receipts_lost_tail_commits_one_unobserved_record() {
+    let deployment = Deployment::new(Setup::new(Answer::AbortedCell, Hooks::All), |script| {
+        script.cut_on(
+            "a",
+            CommitLabel::MODEL_DONE_CELL_SNAPSHOT_ADMIT,
+            1,
+            Fault::CommitThenAbort,
+        );
+    })
+    .await;
+    deployment.world.hold_tail.store(1, Ordering::SeqCst);
+    let _handle = deployment.send().await;
+    deployment
+        .until("receipt consumed before tail settlement", |d| {
+            d.cut(CommitLabel::MODEL_DONE_CELL_SNAPSHOT_ADMIT)
+        })
+        .await;
+    let open = deployment
+        .nodes
+        .database()
+        .turn(&session())
+        .await
+        .unwrap()
+        .unwrap();
+    let pins = deployment
+        .nodes
+        .database()
+        .model_call_pins(
+            &session(),
+            &lash_durable::domain::ModelCallId::turn_owner(&open.run),
+        )
+        .await
+        .unwrap();
+    assert_eq!(pins.len(), 1);
+    let reads = deployment
+        .durable
+        .read_model_calls(&[lash::turn::TurnModelCallRef {
+            turn_id: open.run,
+            call_id: pins[0].call_id.clone(),
+        }])
+        .await
+        .unwrap();
+    assert!(matches!(
+        reads[0],
+        lash::turn::ModelCallRead::NotYetSettled { .. }
+    ));
+    deployment.take_over().await;
+    deployment.settle().await;
+    let (_, rows) = retained_model_rows(&deployment.durable).await;
+    let first: lash::turn::ModelCallRecord =
+        serde_json::from_value(rows[0].clone()).expect("retained call");
+    assert_eq!(first.end, lash::turn::ModelCallEnd::Answered);
+    assert_eq!(first.record.attempts.len(), 1);
+    assert_eq!(
+        first.record.attempts[0].protocol_position,
+        lash::provider::ProtocolPosition::Unobserved
+    );
+    assert_eq!(first.usage().unwrap().unknown_calls, 1);
+    assert_eq!(deployment.world.sends(), 1);
+    assert_eq!(
+        rows.iter()
+            .filter(|row| row["call_id"] == rows[0]["call_id"])
+            .count(),
+        1
+    );
+    deployment.end();
+}
+
+#[tokio::test]
+async fn a_reserved_retry_lost_with_its_process_never_reuses_its_ordinal() {
+    let label = CommitLabel::new("model.attempt");
+    let deployment = Deployment::new(Setup::new(Answer::RetriedText, Hooks::All), |script| {
+        script.cut_on("a", label, 1, Fault::CommitThenAbort);
+    })
+    .await;
+    let _handle = deployment.send().await;
+    deployment
+        .until("retry ordinal committed", |d| d.cut(label))
+        .await;
+    deployment.take_over().await;
+    deployment.settle().await;
+    let (_, rows) = retained_model_rows(&deployment.durable).await;
+    assert_eq!(rows.len(), 1);
+    let call: lash::turn::ModelCallRecord = serde_json::from_value(rows[0].clone()).unwrap();
+    assert_eq!(
+        call.record
+            .attempts
+            .iter()
+            .map(|attempt| attempt.ordinal)
+            .collect::<Vec<_>>(),
+        [1, 2, 3],
+        "{call:#?}\n{}",
+        deployment.nodes.script().rendered_trace()
+    );
+    assert!(
+        call.record.attempts[..2].iter().all(
+            |attempt| attempt.protocol_position == lash::provider::ProtocolPosition::Unobserved
+        )
+    );
+    assert_eq!(
+        call.record.attempts[2].outcome,
+        lash::provider::AttemptOutcome::Completed
+    );
+    assert_eq!(call.usage().unwrap(), deployment.usage().await);
+    deployment.end();
+}
+
+/// One turn with a returned retry, an accepted cell whose tail is cancelled
+/// at its deadline, and a final completed call.
+async fn mixed_call(request: &LlmRequest, sent: usize) -> Result<LlmResponse, LlmTransportError> {
+    let usage = LlmUsage {
+        input_tokens: 2,
+        output_tokens: 1,
+        ..Default::default()
+    };
+    if sent == 0 {
+        return Err(LlmTransportError::new("retry with partial usage")
+            .with_kind(lash_core::ProviderFailureKind::Stream)
+            .with_retry_verdict(TransportRetryVerdict::RetryableTransient)
+            .with_partial_response(LlmResponse {
+                usage,
+                provider_usage: Some(json!({"input_tokens":2,"output_tokens":1})),
+                ..Default::default()
+            }));
+    }
+    if sent == 2 {
+        request
+            .stream_events
+            .as_ref()
+            .unwrap()
+            .send(LlmStreamEvent::Usage(usage));
+        stream(
+            request,
+            &["<typescript>\nconsole.log(\"second cell\");\n</typescript>"],
+        );
+        return std::future::pending().await;
+    }
+    let text = if sent == 1 {
+        "<typescript>\nconsole.log(\"retried cell\");\n</typescript>"
+    } else {
+        "<typescript>\nawait control.finish(\"done\");\n</typescript>"
+    };
+    Ok(LlmResponse {
+        parts: vec![LlmOutputPart::Text {
+            text: text.to_owned(),
+            response_meta: None,
+        }],
+        usage: USAGE,
+        terminal_reason: lash_core::LlmTerminalReason::Stop,
+        ..Default::default()
+    })
+}
+
+async fn retained_usage_matches_head(postgres: bool) {
+    let mut setup = Setup::new(Answer::MixedCalls, Hooks::All);
+    setup.postgres = postgres;
+    let deployment = Deployment::new(setup, |_| {}).await;
+    let handle = deployment.send().await;
+    deployment.settle().await;
+    handle.output().await.expect("the mixed turn completes");
+    let (_, rows) = retained_model_rows(&deployment.durable).await;
+    assert_eq!(rows.len(), 3, "one row per logical call: {rows:#?}");
+    let calls = rows
+        .into_iter()
+        .map(|row| serde_json::from_value::<lash::turn::ModelCallRecord>(row).unwrap())
+        .collect::<Vec<_>>();
+    assert_eq!(
+        calls.iter().map(|call| call.call).collect::<Vec<_>>(),
+        [1, 2, 3]
+    );
+    assert_eq!(calls[0].record.attempts.len(), 2, "the first call retried");
+    assert_eq!(
+        calls[1].record.attempts.last().unwrap().outcome,
+        lash::provider::AttemptOutcome::Interrupted
+    );
+    assert_eq!(
+        calls[2].record.attempts.last().unwrap().outcome,
+        lash::provider::AttemptOutcome::Completed
+    );
+    let usage = calls
+        .iter()
+        .try_fold(LlmUsage::default(), |sum, call| {
+            sum.checked_add(&call.usage()?)
+        })
+        .unwrap();
+    assert_eq!(usage, deployment.usage().await);
+    assert_eq!(usage.input_tokens, 26);
+    assert_eq!(usage.output_tokens, 16);
+    deployment.end();
+}
+
+#[tokio::test]
+async fn the_heads_usage_delta_equals_its_retried_cancelled_and_completed_calls() {
+    retained_usage_matches_head(false).await;
+}
+
+#[tokio::test]
+#[ignore = "requires PostgreSQL"]
+async fn postgres_the_heads_usage_delta_equals_its_retried_cancelled_and_completed_calls() {
+    retained_usage_matches_head(true).await;
 }
 
 /// MODEL-HOOK-ADDRESS: live attempts are distinct; another node derives the

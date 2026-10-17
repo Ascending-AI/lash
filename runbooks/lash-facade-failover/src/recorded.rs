@@ -280,6 +280,21 @@ impl DurableStore for RecordedStore {
 
 #[async_trait::async_trait]
 impl DurableReads for RecordedStore {
+    async fn model_calls(
+        &self,
+        session: &lash::SessionId,
+        owner: &str,
+    ) -> Result<Vec<lash::turn::ModelCallRecord>, DurableError> {
+        self.inner.model_calls(session, owner).await
+    }
+    async fn model_call_pins(
+        &self,
+        session: &lash::SessionId,
+        owner: &str,
+    ) -> Result<Vec<lash::durable::domain::ModelCallPinRow>, DurableError> {
+        self.inner.model_call_pins(session, owner).await
+    }
+
     async fn turn(&self, session: &SessionId) -> Result<Option<TurnRow>, DurableError> {
         self.inner.turn(session).await
     }

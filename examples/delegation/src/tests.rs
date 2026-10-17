@@ -31,7 +31,7 @@ impl lash::plugins::SessionReadService for NoSnapshots {
         session_id: &SessionId,
         _turn_id: &lash::TurnId,
     ) -> Result<
-        Option<lash::transcript::CommittedTurnWithToolCalls>,
+        Option<lash::transcript::CommittedTurnWithCalls>,
         lash::plugins::CommittedTurnReadError,
     > {
         self.read

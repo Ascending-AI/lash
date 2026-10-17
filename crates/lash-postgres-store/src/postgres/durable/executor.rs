@@ -292,7 +292,9 @@ pub(super) fn program(
         DomainWrite::Process(write) => Ok(processes::steps(write, actor, epoch)),
         DomainWrite::SessionCommit(_)
         | DomainWrite::ReleasePin(_)
-        | DomainWrite::SessionClose(_) => Ok(None),
+        | DomainWrite::SessionClose(_)
+        | DomainWrite::ModelCall(_)
+        | DomainWrite::ModelCallPin(_) => Ok(None),
     }
 }
 

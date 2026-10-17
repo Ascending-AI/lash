@@ -18,6 +18,7 @@ use lash_trace::{
 };
 
 use super::*;
+use lash_sansio::sync::MutexExt as _;
 
 mod drain;
 mod host_forwarder;
@@ -231,7 +232,7 @@ impl RuntimeTurnDriver<'_> {
         event_tx: &TurnObserver,
         cancel: &CancellationToken,
         dispatch: LlmCallDispatch,
-    ) -> RuntimeLlmCallOutcome {
+    ) -> Result<RuntimeLlmCallOutcome, RuntimeEffectControllerError> {
         let response_plan = self.session.plugins().assistant_response_plan();
         let (stream_callbacks, finished_callbacks) =
             self.session.plugins().assistant_stream_callbacks();
@@ -290,6 +291,54 @@ impl RuntimeTurnDriver<'_> {
         // call as the live pass.
         let mut call_provider = provider;
         let prepared = crate::provider::prepare_completion(&call_provider, &mut llm_request);
+        let reservation_fault = Arc::new(std::sync::Mutex::new(None));
+        let fault = Arc::clone(&reservation_fault);
+        let reserve_cx = self.scoped_effect_controller.clone();
+        let key = lash_durable::domain::PromptCallKey {
+            session: self.session_id.clone(),
+            call: lash_durable::domain::ModelCallId::Turn {
+                run: self.turn_id.clone(),
+                ordinal: self.model_call_ordinal,
+            },
+        };
+        let reserved_id = crate::provider::call_id_for_scope(&llm_request.scope);
+        let prepared = prepared
+            .with_unobserved_attempts(self.model_attempt.saturating_sub(1))
+            .with_attempt_reservation(
+                self.model_attempt,
+                Arc::new(move |ordinal| {
+                    let cx = reserve_cx.clone();
+                    let key = key.clone();
+                    let call_id = reserved_id.clone();
+                    let fault = Arc::clone(&fault);
+                    Box::pin(async move {
+                        let reserve = async {
+                            let mut tx = cx.begin().await?;
+                            tx.write(lash_durable::DomainWrite::ModelCallPin(
+                                lash_durable::domain::ModelCallPinWrite::Reserve {
+                                    key,
+                                    call_id,
+                                    attempt: ordinal,
+                                    enclosing: None,
+                                },
+                            ));
+                            cx.commit(tx, lash_durable::CommitLabel::new("model.attempt"))
+                                .await?;
+                            Ok::<_, lash_durable::DurableError>(())
+                        }
+                        .await;
+                        reserve.map_err(|error| {
+                            let message = error.to_string();
+                            *fault.lock_recover() = Some(error);
+                            lash_transport_failure::LlmTransportError::new(message)
+                                .with_kind(crate::ProviderFailureKind::Unknown)
+                                .with_retry_verdict(
+                                    lash_transport_failure::TransportRetryVerdict::Forbidden,
+                                )
+                        })
+                    })
+                }),
+            );
         let completion_sideband = match &call {
             Some(call) => call.provider_attempts(
                 prepared,
@@ -653,9 +702,10 @@ impl RuntimeTurnDriver<'_> {
                             } = completion;
                             call_record = Some(completed_call_record);
                             if response_usage_is_empty(&resp.usage) {
-                                resp.usage = streamed_usage.clone();
+                                resp.usage = stream_state.streamed_usage.clone();
                             }
-                            resp.parts = stream_accumulator
+                            resp.parts = stream_state
+                                .stream_accumulator
                                 .response_parts(std::mem::take(&mut resp.parts), &call_id.0);
                             break Ok(resp);
                         }
@@ -681,6 +731,11 @@ impl RuntimeTurnDriver<'_> {
                 }
             }
         };
+
+        let observed_attempt = call_record
+            .as_ref()
+            .and_then(|record| record.attempts.last().map(|attempt| attempt.ordinal))
+            .or(stream_state.address.attempt);
 
         // The provider's total timer cannot see the stream the runtime
         // consumed. Whichever timer won, retain that attempt's observed
@@ -808,6 +863,7 @@ impl RuntimeTurnDriver<'_> {
             };
             self.call_drains.start(
                 drain::CallTail {
+                    call: self.model_call_ordinal,
                     task: llm_task,
                     stream: llm_stream_rx,
                     streamed_usage,
@@ -849,16 +905,24 @@ impl RuntimeTurnDriver<'_> {
                 }
             }
         }
-        RuntimeLlmCallOutcome {
+        if let Some(error) = reservation_fault.lock_recover().take() {
+            return Err(RuntimeEffectControllerError::new(
+                RuntimeErrorCode::StoreCommitFailed,
+                error.to_string(),
+            )
+            .retryable_uncommitted_derivation());
+        }
+        Ok(RuntimeLlmCallOutcome {
             result,
             text_streamed,
             call_record,
             stream: crate::runtime::LlmStreamRecord {
+                attempt: observed_attempt,
                 reasoning_published: reasoning_publication.into_published_blocks(),
                 capsule,
                 response_plan,
             },
-        }
+        })
     }
 
     /// Discard what the stream-finished hooks hold: before a stream starts,

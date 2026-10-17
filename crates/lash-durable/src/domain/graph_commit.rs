@@ -180,6 +180,12 @@ fn encode_graph_write(out: &mut TokenWriter, write: &DomainWrite) -> Result<(), 
 /// key.
 pub fn encode_owner(out: &mut TokenWriter, owner: &RootOwner) {
     match owner {
+        RootOwner::ModelCall(key) => {
+            out.sum(17, 3);
+            out.text(key.session.as_str());
+            out.text(&key.call.owner_column());
+            out.text(&key.call.call_column());
+        }
         RootOwner::Exec(exec) => {
             out.sum(0, 1);
             out.text(&exec.stored());

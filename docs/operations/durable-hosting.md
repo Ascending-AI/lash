@@ -1213,7 +1213,7 @@ move that run's starting point. Fork ceilings constrain inherited ancestry,
 and each `HistoryNode::owner_session_id` identifies the stored row's owner.
 Product projection and cursor delivery to clients belong to the host.
 
-`committed_turns_with_tool_calls(after, limit)` pages the same committed turns
+`committed_turns_with_calls(after, limit)` pages the same committed turns
 with each returned turn's tool-call bodies decoded. Consume call bodies with
 the committed-turn page, or keep each call's turn address (`TurnToolCallRef`)
 for later `read_tool_call`/`read_tool_calls` reads; a bare call id cannot be
@@ -1305,7 +1305,7 @@ and render each turn with its decoded calls instead:
 
 ```rust,ignore
 let page = session
-    .committed_turns_with_tool_calls(after.as_ref(), NonZeroU32::MIN)
+    .committed_turns_with_calls(after.as_ref(), NonZeroU32::MIN)
     .await?;
 for committed in &page.turns {
     render_turn(&committed.turn, &committed.tool_calls);

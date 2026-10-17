@@ -52,13 +52,12 @@
 //! escalates it to `Immediate`.
 //!
 //! Every cancel that stops a turn at a paid answer, live, restored or from
-//! the rows alone, ends its answered model phase through [`settle_answer`],
+//! the rows alone, ends its answered model phase through [`settle_cancelled_answer`],
 //! which publishes the call's sealed record once (FIG-6274).
 
 use std::future::Future;
 
 pub(super) use lash_core_execution::runtime::turn_control::{close_requested_in, immediate_in};
-use lash_durable::domain::checkpoint_graph::NodeId;
 use lash_durable::domain::{DomainWrite, OwnerKey, RunSeq, TurnWrite};
 use lash_durable::runner::{Exit, Owned};
 use lash_durable::{CommitLabel, DurableError, Release};
@@ -66,13 +65,13 @@ use lash_durable::{CommitLabel, DurableError, Release};
 use super::head::HeadCache;
 use super::session::{
     ModelCall, OpenTurn, Pass, TurnCancelRequest, TurnCommit, TurnDone, TurnDrive, TurnError,
-    TurnRestore, TurnRestoreError, TurnRow, TurnServices, UnfinishedPhase, await_stop,
-    cancel_evidence, cancelled_cause, paid_answer, resume_refusal,
+    TurnRestore, TurnRow, TurnServices, UnfinishedPhase, await_stop, cancel_evidence,
+    cancelled_cause, resume_refusal,
 };
 use super::session_close::{Closing, close_pass};
 use super::tool_round::AnsweredCell;
 use super::turn_scope::continue_scope_ends;
-use crate::{ActorContext, Effect, EffectId, SessionId, TurnCancelMode};
+use crate::{ActorContext, Effect, SessionId, TurnCancelMode};
 
 /// Whether the session's unfinished turn must stop now, as of a fenced
 /// read: it accepted an `Immediate` cancel request, or the session's close
@@ -217,13 +216,6 @@ async fn unserved_passes(
             && stops_at_once(&request)
         {
             drop(tx);
-            if let UnfinishedPhase::Model {
-                call: ModelCall::Answered { receipt },
-                ..
-            } = &row.phase
-            {
-                settle_answer(cx, services, AnsweredPhase::Unserved(&row, *receipt)).await?;
-            }
             finalize(cx, services, &row, &request, None, &mut heads).await?;
             await_stop(cx, services, session, &row.run).await?;
             continue;
@@ -306,7 +298,7 @@ pub(super) async fn restore(
             call: ModelCall::Answered { .. },
             ..
         } => {
-            settle_restored_answer(cx, services, drive.as_mut(), pending).await?;
+            settle_restored_answer(cx, drive.as_mut(), pending).await?;
             (None, false)
         }
         UnfinishedPhase::Tools { .. } => {
@@ -325,7 +317,6 @@ pub(super) async fn restore(
 /// machine re-delivers the model call the receipt answers.
 async fn settle_restored_answer(
     cx: &ActorContext,
-    services: &dyn TurnServices,
     drive: &mut dyn TurnDrive,
     pending: Option<Effect>,
 ) -> Result<(), TurnError> {
@@ -334,66 +325,7 @@ async fn settle_restored_answer(
             "the restored receipt answers no model call the turn waits on".to_owned(),
         ));
     };
-    settle_answer(cx, services, AnsweredPhase::Driven(drive, id)).await
-}
-
-/// The answered model phase a cancel stops: what [`settle_answer`] ends it
-/// from.
-pub(super) enum AnsweredPhase<'a> {
-    /// The turn's drive, whose machine waits on model call `id`, which the
-    /// receipt answers: the owner's live drive, or one restored from the
-    /// rows.
-    Driven(&'a mut dyn TurnDrive, EffectId),
-    /// The rows alone, on a node that serves the session's cancel and
-    /// nothing else ([`end_unserved`]): the turn's row and the receipt its
-    /// model phase holds.
-    Unserved(&'a TurnRow, NodeId),
-}
-
-/// End the answered model phase a cancel stops, without deriving it: the one
-/// way a cancel ends a paid answer, so the call's sealed record is published
-/// once whichever node ends it (FIG-6263, FIG-6274).
-///
-/// - A drive records the record and publishes it, finishes the call's
-///   recorded stream and answers the machine with an unsuccessful outcome
-///   ([`TurnDrive::settle_cancelled_answer`]).
-/// - Without one, the receipt's record is published from the rows
-///   ([`TurnServices::publish_model_call`]). The stream's finish is owed to
-///   a node that serves the session, and the cancel ends the turn without
-///   it, as it ends a call in flight there. A receipt this build does not
-///   decode publishes nothing, so it never holds the cancel back
-///   (FIG-5601).
-///
-/// # Errors
-///
-/// [`TurnError`] when the outcome cannot be recorded or the receipt read.
-pub(super) async fn settle_answer(
-    cx: &ActorContext,
-    services: &dyn TurnServices,
-    phase: AnsweredPhase<'_>,
-) -> Result<(), TurnError> {
-    match phase {
-        AnsweredPhase::Driven(drive, id) => drive.settle_cancelled_answer(cx, id).await,
-        AnsweredPhase::Unserved(row, receipt) => match paid_answer(cx, row, receipt).await {
-            Ok(answer) => {
-                if let Some(record) = &answer.call_record {
-                    services.publish_model_call(cx, row, record).await?;
-                }
-                Ok(())
-            }
-            Err(TurnRestoreError::Undecodable { reason, .. }) => {
-                tracing::warn!(
-                    session_id = %row.session,
-                    run_id = %row.run,
-                    %reason,
-                    "the cancelled turn ends without publishing its receipt, which this build \
-                     does not decode"
-                );
-                Ok(())
-            }
-            Err(error) => Err(error.into()),
-        },
-    }
+    drive.settle_cancelled_answer(cx, id).await
 }
 
 /// The tool calls the cell `row`'s turn stopped on completed, when the turn's
@@ -544,6 +476,7 @@ async fn end(
         }
         let commit =
             stop_commit(cx, stopped.as_mut(), evidence.clone(), heads, &row.session).await?;
+        stopped.stage_model_calls(&mut tx)?;
         if let Some(present) = present {
             present.write(&mut tx);
         }
@@ -608,6 +541,18 @@ async fn end(
         };
         refusal.map_or(TurnError::Durable(error), TurnError::Runtime)
     })?;
+    for record in cx
+        .durable_reads()?
+        .model_calls(
+            &row.session,
+            &lash_durable::domain::ModelCallId::turn_owner(&row.run),
+        )
+        .await?
+    {
+        services
+            .publish_model_call(cx, row, &record.call_id)
+            .await?;
+    }
     super::turn_trace::members_ended(
         services.tracing(),
         row,

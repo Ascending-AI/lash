@@ -9,6 +9,7 @@ use lash_core_execution::core_internal::RuntimeExecutionContextRuntimeOps as _;
 use lash_core_execution::runtime::actor::round::RoundTools;
 
 use super::*;
+mod model_calls;
 use crate::runtime::durable::commit_publication::{CommitBase, PublicationMark, PublishedHeads};
 use crate::runtime::durable::head::SessionHead;
 use crate::runtime::durable::session::{
@@ -202,6 +203,22 @@ impl RuntimeDrive {
         );
         drive.working = row.working;
         drive.owed = answered;
+        // A paid tail may outlive consumption of its answer receipt. Its
+        // durable reservation is all a restoring owner can honestly retain.
+        for pin in cx
+            .durable_reads()?
+            .model_call_pins(
+                &row.session,
+                &lash_durable::domain::ModelCallId::turn_owner(&row.run),
+            )
+            .await?
+        {
+            if pin.answered
+                && matches!(pin.key.call, lash_durable::domain::ModelCallId::Turn { .. })
+            {
+                drive.driver.pending_model_calls.push(pin.unobserved());
+            }
+        }
         Ok(OpenTurn {
             drive: Box::new(drive),
             pending,
@@ -652,33 +669,13 @@ impl TurnDrive for RuntimeDrive {
         &mut self.machine
     }
 
-    fn model_unsent(&mut self, id: crate::EffectId, error: crate::LlmCallError) {
-        let mut failure = lash_transport_failure::LlmTransportError::new(error.message.clone())
-            .with_kind(error.kind)
-            .with_terminal_reason(error.terminal_reason)
-            .with_retry_verdict(lash_transport_failure::TransportRetryVerdict::NotRetryable);
-        failure.code = error.code.clone();
-        failure.partial_response = error.partial_response.clone();
-        let call_id = crate::LlmCallId(format!(
-            "{}:turn:{}:llm:{}",
-            self.driver.session_id,
-            self.driver.turn_id,
-            self.machine.protocol_iteration(),
-        ));
-        let record = crate::provider::synthetic_terminal_call_record(
-            call_id,
-            crate::AttemptOutcome::Failed,
-            &failure,
-            false,
-            crate::ProtocolPosition::NoResponse,
-            Vec::new(),
-        );
-        self.driver.record_model_call(&self.observer, record);
-        self.machine.handle_response(Response::LlmComplete {
-            id,
-            result: Err(error),
-            text_streamed: false,
-        });
+    async fn model_unsent(
+        &mut self,
+        cx: &ActorContext,
+        id: crate::EffectId,
+        error: crate::LlmCallError,
+    ) -> Result<(), TurnError> {
+        self.record_unsent_model_call(cx, id, error).await
     }
 
     async fn local(&mut self, _cx: &ActorContext, effect: Effect) -> Result<(), TurnError> {
@@ -735,7 +732,7 @@ impl TurnDrive for RuntimeDrive {
 
     async fn model_call(
         &mut self,
-        _cx: &ActorContext,
+        cx: &ActorContext,
         id: crate::EffectId,
         request: Arc<LlmRequest>,
         admitted: &lash_sansio::llm::types::AdmittedSend,
@@ -747,6 +744,10 @@ impl TurnDrive for RuntimeDrive {
             cancel,
             stop_error,
         } = attempt;
+        if let Some(row) = cx.durable_reads()?.turn(&self.driver.session_id).await? {
+            self.driver.model_call_ordinal =
+                row.phase.model().map_or(row.model_calls, |pin| pin.call);
+        }
         self.driver.model_stop_error = Arc::clone(&stop_error);
         self.driver.model_limit = Some(limit);
         self.driver
@@ -791,6 +792,10 @@ impl TurnDrive for RuntimeDrive {
         Ok(())
     }
 
+    fn stage_model_calls(&mut self, tx: &mut lash_durable::ActorTx) -> Result<(), TurnError> {
+        self.stage_sealed_model_calls(tx)
+    }
+
     fn owed_answer(&mut self) -> &mut Option<ModelAnswer> {
         &mut self.owed
     }
@@ -825,6 +830,18 @@ impl TurnDrive for RuntimeDrive {
         let Some(answer) = self.owed.take() else {
             return Ok(());
         };
+        if let Some(fact) = self
+            .driver
+            .pending_model_calls
+            .iter_mut()
+            .find(|fact| fact.call_id == answer.call_id)
+        {
+            fact.end = lash_core_store::model_calls::ModelCallEnd::Unanswered {
+                reason: lash_core_store::model_calls::ModelCallEndReason::Attempt(
+                    crate::provider::AttemptEndReason::ImmediateCancel,
+                ),
+            };
+        }
         Box::pin(self.driver.settle_cancelled_llm_answer(
             &mut self.machine,
             id,
@@ -842,6 +859,7 @@ impl TurnDrive for RuntimeDrive {
         call: u32,
         request: Arc<LlmRequest>,
     ) -> Result<PreparedCall, TurnError> {
+        self.driver.model_call_ordinal = call;
         // Tails that already drained commit with this call's admission; the
         // next call never waits for one that is still being read.
         Box::pin(
@@ -994,6 +1012,7 @@ impl TurnDrive for RuntimeDrive {
     }
 
     async fn phase_committed(&mut self) {
+        self.driver.publish_committed_model_calls(&self.observer);
         let Some(staged) = self.staged_working.take() else {
             return;
         };
@@ -1202,7 +1221,7 @@ impl TurnDrive for RuntimeDrive {
         &mut self,
         cx: &ActorContext,
         done: TurnDone,
-        _head: &SessionHead,
+        head: &SessionHead,
     ) -> Result<TurnCommit, TurnError> {
         self.effect_phase.take();
         self.commit_phase = Some(TurnPhaseSpan::begin(
@@ -1250,24 +1269,7 @@ impl TurnDrive for RuntimeDrive {
             None => None,
         };
         let failure_evidence = driver.failure_evidence.clone();
-        // The checkpoint owns usage, including calls a previous owner
-        // completed. Project it once at the commit, preserving the head's
-        // usage when this turn made no call and its last prompt when the
-        // last call reported zero usage.
-        if self.machine.last_call_usage().is_some()
-            || self.machine.cumulative_usage().unknown_calls > 0
-        {
-            let state = driver.turn_pipeline.state_mut();
-            state.token_usage = self.machine.cumulative_usage().clone();
-            if let Some(prompt) = self
-                .machine
-                .last_call_usage()
-                .cloned()
-                .and_then(nonzero_usage)
-            {
-                state.last_prompt_usage = Some(prompt);
-            }
-        }
+        model_calls::project_usage(cx, driver, &self.machine, head).await?;
         let mut commit = driver
             .turn_pipeline
             .durable_commit(
@@ -1333,6 +1335,10 @@ impl TurnDrive for RuntimeDrive {
     /// commit itself, which settles the turn's provisional activity; then
     /// the lifecycle observers see the finalized turn.
     async fn committed(&mut self) {
+        self.driver
+            .publish_retained_model_calls(&self.observer)
+            .await;
+        self.driver.publish_committed_model_calls(&self.observer);
         self.commit_phase.take();
         let _delivery = TurnPhaseSpan::begin(
             self.driver.turn_phase_probe.clone(),

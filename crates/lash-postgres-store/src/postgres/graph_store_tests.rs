@@ -161,6 +161,13 @@ impl GraphTier for Tier {
             .await
             .expect("foreign data skips the foreign keys");
         let query = match &write {
+            ForeignWrite::ModelCallsDelete { session } => {
+                crate::durable::retire_session_rows(&mut tx, session)
+                    .await
+                    .expect("physical session row retirement");
+                tx.commit().await.expect("physical deletion commits");
+                return;
+            }
             ForeignWrite::OpaqueBlob { hash, bytes } => {
                 sqlx::query("INSERT INTO lash_blobs (hash, content, encoding) VALUES ($1, $2, 0)")
                     .bind(hash.clone())
@@ -880,3 +887,5 @@ async fn a_build_catalog_closure_hydrates_whole_without_reading_it_back() {
         );
     }
 }
+
+law!(turn_and_owned_model_calls_survive_an_idempotent_outcome_commit);

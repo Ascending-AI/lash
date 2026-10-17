@@ -947,6 +947,26 @@ CREATE TABLE IF NOT EXISTS lash_actor_mail (
 -- Run records (I0, FIG-5194; statements: V0, then L4): the RunLedger
 -- records as rows, keyed by (owner, run, ordinal), the second fence. An
 -- execution's start commits before its body runs; one outcome per call.
+
+CREATE TABLE IF NOT EXISTS lash_model_call_pins (
+    session_id TEXT NOT NULL, run TEXT NOT NULL, call TEXT NOT NULL, call_id TEXT NOT NULL,
+    attempt BIGINT NOT NULL CHECK (attempt > 0), answered BOOLEAN NOT NULL,
+    enclosing_owner TEXT, enclosing_run BIGINT, enclosing_call TEXT,
+    PRIMARY KEY (session_id, run, call), UNIQUE (session_id, run, call_id)
+);
+CREATE TABLE IF NOT EXISTS lash_model_call_records (
+    session_id TEXT NOT NULL,
+    run TEXT NOT NULL,
+    call TEXT NOT NULL,
+    call_id TEXT NOT NULL,
+    record_ref TEXT NOT NULL REFERENCES lash_blobs(hash) ON DELETE RESTRICT,
+    ended_at_ms BIGINT NOT NULL,
+    written_epoch BIGINT NOT NULL,
+    PRIMARY KEY (session_id, run, call),
+    UNIQUE (session_id, run, call_id)
+);
+CREATE INDEX IF NOT EXISTS idx_model_call_records_record_ref ON lash_model_call_records(record_ref);
+
 CREATE TABLE IF NOT EXISTS lash_run_records (
     owner_key TEXT COLLATE "C" NOT NULL,
     run_seq BIGINT NOT NULL,
@@ -1255,6 +1275,7 @@ CREATE INDEX IF NOT EXISTS idx_lash_retirement_frontier_queue
 CREATE OR REPLACE VIEW lash_graph_root_catalog AS
     SELECT 'exec' AS source, root_ref FROM lash_exec_snapshots WHERE root_ref IS NOT NULL
     UNION ALL SELECT 'run_fact', record_ref FROM lash_run_records WHERE record_ref IS NOT NULL
+    UNION ALL SELECT 'model_call', record_ref FROM lash_model_call_records
     UNION ALL SELECT 'admission', admission_ref FROM lash_effect_admissions
     UNION ALL SELECT 'phase', checkpoint_ref FROM lash_turn_phases WHERE checkpoint_ref IS NOT NULL
     UNION ALL SELECT 'working', working_execution_ref FROM lash_turn_phases

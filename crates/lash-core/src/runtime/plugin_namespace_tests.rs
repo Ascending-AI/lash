@@ -140,7 +140,7 @@ async fn plugin_context_host_exports_cannot_escape_namespaces() {
             _session_id: &crate::SessionId,
             _turn_id: &crate::TurnId,
         ) -> Result<
-            Option<crate::transcript::CommittedTurnWithToolCalls>,
+            Option<crate::transcript::CommittedTurnWithCalls>,
             crate::plugin::CommittedTurnReadError,
         > {
             Err(crate::PluginError::Session("operation is absent from this fixture".into()).into())

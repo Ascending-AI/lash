@@ -56,7 +56,6 @@ pub(super) struct FinishedSuspend {
     transport: Arc<ScriptedLlmHttpTransport>,
     scripts: Vec<ProviderWireScript>,
     tool_result: crate::content_oracle::ToolResultContent,
-    activities: Vec<lash::TurnActivity>,
     reopen: Arc<dyn lash_core::DeploymentStore>,
 }
 
@@ -68,12 +67,18 @@ impl FinishedSuspend {
     pub(super) async fn content(
         &self,
     ) -> Result<crate::content_oracle::SessionContent, FixedScriptRunnerError> {
+        let durable = self
+            .core
+            .session(lash_core::SessionId::fixture(self.session.clone()))
+            .durable()
+            .await
+            .map_err(|error| FixedScriptRunnerError::Runtime(error.to_string()))?;
         session_content(
             &self.session,
             self.transport.as_ref(),
             &self.scripts,
             vec![self.tool_result.clone()],
-            &self.activities,
+            &durable,
             self.reopen.as_ref(),
         )
         .await
@@ -383,7 +388,6 @@ impl GeneratedRuntimeWorld {
                 &turn.tool_name,
                 &resolution,
             ),
-            activities,
             reopen: turn.reopen,
         });
         Ok(observed)

@@ -557,7 +557,7 @@ mod tests {
             _session_id: &lash_core::SessionId,
             _turn_id: &lash_core::TurnId,
         ) -> Result<
-            Option<lash_core::transcript::CommittedTurnWithToolCalls>,
+            Option<lash_core::transcript::CommittedTurnWithCalls>,
             lash_core::plugin::CommittedTurnReadError,
         > {
             Err(

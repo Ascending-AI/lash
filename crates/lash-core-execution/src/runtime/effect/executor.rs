@@ -132,6 +132,7 @@ impl std::fmt::Debug for AdmittedDirectSend {
 }
 
 pub(super) struct LocalDirectEffectRunner {
+    reservation: (crate::ActorContext, lash_durable::domain::PromptCallKey),
     /// Bound only when this body runs, never on a replay (FIG-4404).
     binding: crate::LlmProfileBinding,
     charge_safety: crate::ChargeSafetyPolicy,
@@ -684,17 +685,24 @@ impl<'run> RuntimeEffectLocalExecutor<'run> {
     /// The body of an admitted direct call: it sends `admitted`'s template,
     /// its slots filled afresh, within the limit its pinned deadline leaves.
     pub fn direct(
+        admission: (
+            crate::ActorContext,
+            lash_durable::domain::PromptCallKey,
+            AdmittedDirectSend,
+        ),
         binding: crate::LlmProfileBinding,
         charge_safety: crate::ChargeSafetyPolicy,
         budgets: crate::ExecutionBudgets,
-        admitted: AdmittedDirectSend,
         owner: crate::RuntimeOwner,
         tracing: crate::trace::TraceRuntime,
         replay_trace: Option<super::RuntimeEffectReplayTrace>,
     ) -> Self {
+        let (cx, key, admitted) = admission;
+        let reservation = (cx, key);
         Self {
             state: RuntimeEffectLocalExecutorState::Target(LocalTarget::OwnedRunner(Box::new(
                 LocalDirectEffectRunner {
+                    reservation,
                     binding,
                     charge_safety,
                     bounds: lash_core_llm::core_internal::ModelCallBounds {
@@ -974,7 +982,7 @@ impl RuntimeEffectLocalRunner for LocalDirectEffectRunner {
     async fn execute(
         mut self: Box<Self>,
         envelope: RuntimeEffectEnvelope,
-        _effect_attempt: Option<crate::EffectAttempt>,
+        effect_attempt: Option<crate::EffectAttempt>,
     ) -> Result<RuntimeEffectOutcome, RuntimeEffectControllerError> {
         match envelope.command {
             RuntimeEffectCommand::Direct {
@@ -988,7 +996,7 @@ impl RuntimeEffectLocalRunner for LocalDirectEffectRunner {
                     crate::session_model::transport_stream_events(&provider, None),
                     None,
                 );
-                self.run_direct(&envelope.invocation, provider, request)
+                self.run_direct(&envelope.invocation, provider, request, effect_attempt)
                     .await
             }
             RuntimeEffectCommand::Sleep { spec } => {

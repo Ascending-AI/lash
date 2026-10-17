@@ -93,11 +93,16 @@ fn encode_phase(
 /// yet, written into `tx` beside the phase (FIG-5301): what the phase's
 /// commit records once it is acknowledged ([`TurnDrive::run_changes_committed`]).
 pub(super) fn write_run_changes(
-    drive: &dyn TurnDrive,
+    drive: &mut dyn TurnDrive,
     tx: &mut lash_durable::ActorTx,
     session: &SessionId,
     run: &TurnId,
 ) -> Vec<lash_durable::domain::TurnNamespaceWrite> {
+    #[expect(
+        clippy::expect_used,
+        reason = "a reference-free sealed call always encodes with an unbounded staging budget"
+    )]
+    drive.stage_model_calls(tx).expect("sealed calls stage");
     let changes = drive.run_changes();
     if !changes.is_empty() {
         #[expect(
@@ -162,6 +167,7 @@ async fn record_answer(
         .owed_answer()
         .take()
         .ok_or_else(|| TurnError::Exec("the model call answered no receipt".to_owned()))?;
+    let call_id = answer.call_id.clone();
     let owed = answer.owed_callbacks();
     let mut staging = lash_core_store::checkpoint_graph::GraphStaging::new(
         lash_core_store::checkpoint_graph::EncodeBudget::new(
@@ -176,6 +182,18 @@ async fn record_answer(
     .map_err(TurnError::Exec)?;
     *drive.owed_answer() = Some(receipt.answer);
     let mut tx = cx.begin().await?;
+    if let Some(pin) = cx
+        .durable_reads()?
+        .model_call_pins(session, &ModelCallId::turn_owner(run))
+        .await?
+        .into_iter()
+        .find(|pin| pin.call_id == call_id)
+    {
+        tx.write(DomainWrite::ModelCallPin(
+            lash_durable::domain::ModelCallPinWrite::Answered { key: pin.key },
+        ));
+    }
+    drive.stage_model_calls(&mut tx)?;
     tx.stage_all(staging);
     tx.owe(root, owed);
     tx.write(DomainWrite::Turn(TurnWrite::Answer {
@@ -183,7 +201,9 @@ async fn record_answer(
         run: run.clone(),
         answer: root,
     }));
-    Ok(cx.commit(tx, CommitLabel::MODEL_ANSWER).await?)
+    let committed = cx.commit(tx, CommitLabel::MODEL_ANSWER).await?;
+    drive.phase_committed().await;
+    Ok(committed)
 }
 
 fn iteration(machine: &TurnMachine) -> u32 {
@@ -345,7 +365,7 @@ pub async fn run_phases(
                         match admitted_send(cx, &session, &run, pin.call).await? {
                             Ok(admitted) => (Some(pin), request, admitted, None),
                             Err(unavailable) => {
-                                drive.model_unsent(id, unavailable);
+                                drive.model_unsent(cx, id, unavailable).await?;
                                 continue;
                             }
                         }
@@ -378,7 +398,7 @@ pub async fn run_phases(
                                             TurnError::Runtime(error.into_runtime_error())
                                         })?
                                 {
-                                    drive.model_unsent(id, refused);
+                                    drive.model_unsent(cx, id, refused).await?;
                                     continue;
                                 }
                                 if !drive.machine().admit_request(id, Arc::clone(&request)) {
@@ -403,7 +423,7 @@ pub async fn run_phases(
                                 (None, request, admitted, Some(record))
                             }
                             PreparedCall::Unsent(refused) => {
-                                drive.model_unsent(id, refused);
+                                drive.model_unsent(cx, id, refused).await?;
                                 continue;
                             }
                             PreparedCall::Ended => continue,
@@ -413,6 +433,17 @@ pub async fn run_phases(
                 // The checkpoint `model.start` commits names the request by
                 // content digest; its pin reuses that digest, beside where
                 // the live replay stands before the call streams.
+                let mut pinned = pinned;
+                if let Some(pin) = &mut pinned
+                    && let Some(reservation) = cx
+                        .durable_reads()?
+                        .model_call_pins(&session, &ModelCallId::turn_owner(&run))
+                        .await?
+                        .iter()
+                        .find(|reserved| reserved.key.call.call_column() == pin.call.to_string())
+                {
+                    pin.attempt = pin.attempt.max(reservation.attempt);
+                }
                 let delta = drive.machine().checkpoint_delta();
                 let start = model_call::start(
                     &services.execution_budgets(&session),
@@ -436,6 +467,14 @@ pub async fn run_phases(
                     } else {
                         tool_round::model_start_label(&carry)
                     };
+                    tx.write(DomainWrite::ModelCallPin(
+                        lash_durable::domain::ModelCallPinWrite::Reserve {
+                            key: call_key(&session, &run, pin.call),
+                            call_id: crate::provider::call_id_for_scope(&request.scope),
+                            attempt: pin.attempt,
+                            enclosing: None,
+                        },
+                    ));
                     boundary.append_to(&mut tx);
                     if let Some(present) = carry.take() {
                         present.write(&mut tx);
@@ -460,7 +499,7 @@ pub async fn run_phases(
                     if let Some(bind) = bind_delivered(drive.as_ref(), &session, &run) {
                         tx.write(bind);
                     }
-                    let written = write_run_changes(drive.as_ref(), &mut tx, &session, &run);
+                    let written = write_run_changes(drive.as_mut(), &mut tx, &session, &run);
                     let (checkpoint, stored) =
                         encode_phase(drive.as_mut(), delta)?.staged_in(&mut tx);
                     tx.write(DomainWrite::Turn(TurnWrite::Advance {
@@ -523,12 +562,7 @@ pub async fn run_phases(
                         .turn_cancel
                         .filter(|request| request.mode == crate::TurnCancelMode::Immediate)
                     {
-                        turn_cancel::settle_answer(
-                            cx,
-                            services,
-                            turn_cancel::AnsweredPhase::Driven(drive.as_mut(), id),
-                        )
-                        .await?;
+                        drive.settle_cancelled_answer(cx, id).await?;
                         let stopped = stopped(drive, &mut carry, &mut answered_cell);
                         return stop(cx, services, &row, Some(request), stopped, heads).await;
                     }
@@ -578,7 +612,7 @@ pub async fn run_phases(
                     if let Some(bind) = bind_delivered(drive.as_ref(), &session, &run) {
                         tx.write(bind);
                     }
-                    let written = write_run_changes(drive.as_ref(), &mut tx, &session, &run);
+                    let written = write_run_changes(drive.as_mut(), &mut tx, &session, &run);
                     let (checkpoint, stored) =
                         encode_checkpoint(drive.as_mut())?.staged_in(&mut tx);
                     tx.write(DomainWrite::Turn(TurnWrite::Advance {
@@ -770,7 +804,7 @@ pub async fn run_phases(
                 if let Some(bind) = bind_delivered(drive.as_ref(), &session, &run) {
                     tx.write(bind);
                 }
-                let written = write_run_changes(drive.as_ref(), &mut tx, &session, &run);
+                let written = write_run_changes(drive.as_mut(), &mut tx, &session, &run);
                 let (checkpoint, stored) = encode_checkpoint(drive.as_mut())?.staged_in(&mut tx);
                 tx.write(DomainWrite::Turn(TurnWrite::Advance {
                     session: session.clone(),
@@ -870,6 +904,7 @@ pub async fn run_phases(
                 let commit = drive
                     .finish(cx, done, heads.head(cx, &session).await?)
                     .await?;
+                drive.stage_model_calls(&mut tx)?;
                 if let Some(present) = carry.take() {
                     present.write(&mut tx);
                 }

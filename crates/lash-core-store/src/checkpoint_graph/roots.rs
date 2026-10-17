@@ -53,6 +53,8 @@ pub enum RootSource {
     /// `retirement_holds.root_ref`: a retired root, or the frontier of one,
     /// that a bounded retirement step has not peeled yet (FIG-6191).
     RetirementHold = 16,
+    /// Sealed calls retained with their owning session.
+    ModelCall = 17,
 }
 
 /// Where one source's roots live in a backend's schema.
@@ -66,7 +68,7 @@ pub struct RootField {
 
 impl RootSource {
     /// Every source, in catalog order.
-    pub const ALL: [Self; 14] = [
+    pub const ALL: [Self; 15] = [
         Self::Exec,
         Self::RunFact,
         Self::EffectAdmission,
@@ -81,6 +83,7 @@ impl RootSource {
         Self::ModelAnswer,
         Self::ReadLease,
         Self::RetirementHold,
+        Self::ModelCall,
     ];
 
     /// The `source` column of the root catalog view.
@@ -101,6 +104,7 @@ impl RootSource {
             Self::ModelAnswer => "answer",
             Self::ReadLease => "lease",
             Self::RetirementHold => "retirement",
+            Self::ModelCall => "model_call",
         }
     }
 
@@ -146,6 +150,7 @@ impl RootSource {
             Self::ReleasePin => RootField::of("lash_graph_release_pins", "root_ref", None),
             Self::ModelAnswer => RootField::of("lash_turn_phases", "answer_ref", None),
             Self::ReadLease => RootField::of("lash_root_leases", "root_ref", None),
+            Self::ModelCall => RootField::of("lash_model_call_records", "record_ref", None),
             Self::RetirementHold => RootField::of("lash_retirement_holds", "root_ref", None),
         }
     }
@@ -165,6 +170,7 @@ impl RootSource {
             Self::ReleasePin => ("graph_release_pins", "root_ref", None),
             Self::ModelAnswer => ("turn_phases", "answer_ref", None),
             Self::ReadLease => ("root_leases", "root_ref", None),
+            Self::ModelCall => ("model_call_records", "record_ref", None),
             Self::RetirementHold => ("retirement_holds", "root_ref", None),
         }
     }

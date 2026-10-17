@@ -1204,12 +1204,6 @@ fn provider_prompt_subtotal_overflow_fails_the_turn_at_ingress() {
             outcome: TurnOutcome::Stopped(TurnStop::RuntimeError { cause })
         }) if cause.code == crate::TurnErrorCode::TokenUsageOverflow
     )));
-    // Nothing about the rejected response reaches a usage consumer.
-    assert!(
-        !effects
-            .iter()
-            .any(|effect| matches!(effect, Effect::Emit(SessionStreamEvent::LlmUsage { .. })))
-    );
 }
 
 /// FIG-1272: a mid-turn context overflow stops as its own outcome, so a host

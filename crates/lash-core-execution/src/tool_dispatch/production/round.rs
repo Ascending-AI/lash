@@ -446,6 +446,11 @@ pub(super) fn member_body(
                 .with_completion_key(key.clone())
                 .with_admitted_declaration(execution.draft().declaration().cloned())
                 .with_stops(closing.clone(), stop.clone());
+                handlers.model_call_owner = Some(lash_durable::domain::ModelCallOwner {
+                    owner: execution.id().owner.clone(),
+                    run: execution.id().run,
+                    call: call.call_id.clone(),
+                });
                 handlers.traced_scope = traced_scope.clone();
                 let handlers = Arc::new(handlers);
                 match handlers

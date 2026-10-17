@@ -369,10 +369,24 @@ pub struct CommittedTurn {
 
 /// One committed turn with its original tool-call bodies in admission order.
 #[derive(Clone, Debug, PartialEq, serde::Serialize, serde::Deserialize)]
-pub struct CommittedTurnWithToolCalls {
+pub struct CommittedTurnWithCalls {
     pub turn: CommittedTurn,
+    pub model_calls: Vec<crate::model_calls::ModelCallRecord>,
     #[serde(serialize_with = "lash_sansio::durable_serde::serialize")]
     pub tool_calls: Vec<lash_sansio::tool_output::ToolCallRecord>,
+}
+
+impl CommittedTurnWithCalls {
+    /// Sum the retained calls; no summary is stored beside them.
+    pub fn usage(
+        &self,
+    ) -> Result<lash_sansio::llm::types::LlmUsage, lash_sansio::llm::types::TokenUsageOverflow>
+    {
+        self.model_calls.iter().try_fold(
+            Default::default(),
+            |total: lash_sansio::llm::types::LlmUsage, call| total.checked_add(&call.usage()?),
+        )
+    }
 }
 
 /// One page of a session's committed turns, oldest first by commit, read

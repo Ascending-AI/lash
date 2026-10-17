@@ -263,7 +263,7 @@ pub enum TurnEvent {
     /// (ADR 0127). A call whose cell was accepted mid-stream is recorded
     /// when its tail drains.
     ModelCallRecorded {
-        record: crate::LlmCallRecord,
+        call_id: crate::LlmCallId,
     },
     CodeBlockStarted {
         language: String,
@@ -336,11 +336,7 @@ pub enum TurnEvent {
         tool_name: String,
         value: serde_json::Value,
     },
-    Usage {
-        protocol_iteration: usize,
-        usage: LlmUsage,
-        cumulative: LlmUsage,
-    },
+
     /// A retry that is about to wait, with the failure being retried: the
     /// session stream's `RetryStatus` payload.
     RetryStatus(crate::RetryProgress),

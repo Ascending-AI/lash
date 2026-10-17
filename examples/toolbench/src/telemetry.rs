@@ -5,6 +5,7 @@ use std::sync::{Arc, Mutex};
 #[derive(Default)]
 pub(crate) struct Telemetry {
     activities: Mutex<Vec<TurnActivity>>,
+    model_calls: Mutex<Vec<lash::LlmCallRecord>>,
     pub(crate) capture: crate::provider_log::Capture,
     submit_values: Mutex<Vec<Option<Value>>>,
     submit_calls: std::sync::atomic::AtomicUsize,
@@ -25,6 +26,13 @@ impl TurnActivitySink for Telemetry {
     }
 }
 impl Telemetry {
+    pub(crate) fn record_calls(&self, calls: Vec<lash::LlmCallRecord>) {
+        *self
+            .model_calls
+            .lock()
+            .unwrap_or_else(|error| error.into_inner()) = calls;
+    }
+
     pub(crate) fn submit_count(&self) -> usize {
         self.submit_calls.load(std::sync::atomic::Ordering::Relaxed)
     }
@@ -115,11 +123,18 @@ impl Telemetry {
     pub(crate) fn rows(&self, decisions: &[String], standard: bool) -> Vec<Value> {
         let captured = self.capture.rows();
         let activities = self.activities();
+        let records = self
+            .model_calls
+            .lock()
+            .unwrap_or_else(|error| error.into_inner());
         let calls = activities
             .iter()
             .enumerate()
             .filter_map(|(offset, activity)| match &activity.event {
-                TurnEvent::ModelCallRecorded { record } => Some((offset, record)),
+                TurnEvent::ModelCallRecorded { call_id } => records
+                    .iter()
+                    .find(|record| &record.call_id == call_id)
+                    .map(|record| (offset, record)),
                 _ => None,
             })
             .collect::<Vec<_>>();

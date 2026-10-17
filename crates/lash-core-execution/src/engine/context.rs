@@ -45,15 +45,6 @@ pub enum ObservedEvent {
 /// semantic twin stay tied to one observation identity.
 pub fn activity_projection(event: &SessionStreamEvent) -> Option<TurnEvent> {
     match event {
-        SessionStreamEvent::LlmUsage {
-            protocol_iteration,
-            usage,
-            cumulative,
-        } => Some(TurnEvent::Usage {
-            protocol_iteration: *protocol_iteration,
-            usage: usage.clone(),
-            cumulative: cumulative.clone(),
-        }),
         SessionStreamEvent::LlmRequest {
             protocol_iteration, ..
         } => Some(TurnEvent::ModelRequestStarted {

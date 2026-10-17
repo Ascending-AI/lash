@@ -20,6 +20,7 @@ type ProviderTask =
 /// it reports through, and what the call observed before its cell was
 /// accepted.
 pub(super) struct CallTail {
+    pub(super) call: u32,
     pub(super) task: ProviderTask,
     pub(super) stream: ScopedStreamRx,
     pub(super) streamed_usage: LlmUsage,
@@ -46,8 +47,8 @@ pub(super) struct TailTrace {
 /// A drained call: its sealed record, and its provider usage, `None` when
 /// that never arrived.
 pub(in crate::runtime::turn_driver) struct DrainedCall {
+    pub(in crate::runtime::turn_driver) call: u32,
     pub(in crate::runtime::turn_driver) record: crate::LlmCallRecord,
-    pub(in crate::runtime::turn_driver) usage: Option<LlmUsage>,
 }
 
 /// The model calls of one turn whose tails are still being read, shared by
@@ -63,6 +64,7 @@ struct DrainSet {
 }
 
 struct CallDrain {
+    call: u32,
     ordinal: u64,
     call_id: crate::LlmCallId,
     stop: CancellationToken,
@@ -92,6 +94,7 @@ impl CallDrains {
 
     /// Read `tail` to its end off the turn's path, until `stop` fires.
     pub(super) fn start(&self, tail: CallTail, stop: CancellationToken) {
+        let call = tail.call;
         let call_id = tail.call_id.clone();
         let sideband = tail.sideband.clone();
         let task = crate::task::spawn(tail.drain(stop.clone()));
@@ -99,6 +102,7 @@ impl CallDrains {
         set.started = set.started.saturating_add(1);
         let ordinal = set.started;
         set.pending.push(CallDrain {
+            call,
             ordinal,
             call_id,
             stop,
@@ -137,6 +141,7 @@ impl CallDrains {
                         lash_transport_failure::TransportRetryVerdict::NotRetryable,
                     );
                     DrainedCall {
+                        call: drain.call,
                         record: crate::provider::synthetic_terminal_call_record(
                             drain.call_id.clone(),
                             crate::AttemptOutcome::Interrupted,
@@ -145,7 +150,6 @@ impl CallDrains {
                             crate::ProtocolPosition::OutputStarted,
                             Vec::new(),
                         ),
-                        usage: None,
                     }
                 }
             };
@@ -282,7 +286,16 @@ impl CallTail {
                 Some(&record),
             );
         }
-        DrainedCall { record, usage }
+        if let Some(usage) = usage
+            && let Some(attempt) = record.attempts.last_mut()
+            && attempt.usage.is_none()
+        {
+            attempt.usage = Some(usage);
+        }
+        DrainedCall {
+            call: self.call,
+            record,
+        }
     }
 }
 

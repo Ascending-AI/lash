@@ -466,6 +466,9 @@ impl ProviderHandle {
                     None,
                 ));
             };
+            if let Err(error) = sideband.reserve_attempt(attempt_ordinal).await {
+                return Err(unsent(&context.scope, &sideband, error));
+            }
             sideband.begin_attempt(self.kind(), context.model().wire_model());
             context.scope.attempt = Some(attempt_ordinal);
             context.stream_events = context
@@ -632,10 +635,8 @@ impl ProviderHandle {
             match result {
                 Ok(response) => {
                     let outcome = success_outcome(response.terminal_reason);
-                    let usage = response
-                        .provider_usage
-                        .as_ref()
-                        .map(|_| response.usage.clone());
+                    let usage = (response.provider_usage.is_some() || !response.usage.is_zero())
+                        .then(|| response.usage.clone());
                     sideband.seal_attempt(
                         AttemptRecord {
                             ordinal: attempt_ordinal,
@@ -1149,7 +1150,8 @@ pub(super) fn automatic_retry_class(
         }
         ProtocolPosition::ResponseObserved
         | ProtocolPosition::OutputStarted
-        | ProtocolPosition::TerminalObserved => None,
+        | ProtocolPosition::TerminalObserved
+        | ProtocolPosition::Unobserved => None,
     }
 }
 
@@ -1201,6 +1203,7 @@ fn retry_refusal_reason(position: ProtocolPosition) -> &'static str {
         ProtocolPosition::ResponseObserved => "response_observed_without_safe_retry_class",
         ProtocolPosition::NoResponse => "no_response_without_safe_retry_class",
         ProtocolPosition::TerminalObserved => "terminal_observed_without_retry_guarantee",
+        ProtocolPosition::Unobserved => "unobserved_without_retry_guarantee",
     }
 }
 
@@ -1219,6 +1222,9 @@ fn unsafe_retry_refusal(
         ProtocolPosition::NoResponse => format!(
             "the provider failure is not in a charge-safe retry class and cannot be safely regenerated: {original_message}"
         ),
+        ProtocolPosition::Unobserved => {
+            format!("the attempt observer was lost: {original_message}")
+        }
         ProtocolPosition::TerminalObserved => format!(
             "the provider attempt already reached a terminal response and cannot be safely regenerated: {original_message}"
         ),

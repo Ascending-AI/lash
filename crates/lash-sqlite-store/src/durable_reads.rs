@@ -3,6 +3,28 @@ use super::*;
 
 #[async_trait::async_trait]
 impl DurableReads for SqliteDurableStore {
+    async fn model_call_pins(
+        &self,
+        session: &lash_sansio::SessionId,
+        owner: &str,
+    ) -> Result<Vec<lash_durable::domain::ModelCallPinRow>, DurableError> {
+        let (session, owner) = (session.clone(), owner.to_owned());
+
+        self.read(move |tx| model_calls::pins(tx, &session, &owner))
+            .await
+    }
+
+    async fn model_calls(
+        &self,
+        session: &lash_sansio::SessionId,
+        owner: &str,
+    ) -> Result<Vec<lash_core_store::model_calls::ModelCallRecord>, DurableError> {
+        let (session, owner) = (session.clone(), owner.to_owned());
+        let limits = self.graph_reads.owner();
+        self.read(move |tx| model_calls::read(tx, &session, &owner, limits))
+            .await
+    }
+
     async fn turn(
         &self,
         session: &lash_sansio::SessionId,

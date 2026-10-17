@@ -28,6 +28,7 @@
 //!   claim's mark ([`ActorStatements::unadvanced`]).
 
 pub mod graph;
+pub mod model_calls;
 pub mod pages;
 pub mod processes;
 pub mod prompts;

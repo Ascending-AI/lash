@@ -80,6 +80,7 @@ pub(crate) mod processes;
 mod prompts;
 pub(crate) mod retention;
 pub(crate) use prompts::release as release_prompt_snapshots;
+mod model_calls;
 #[path = "../durable_reads.rs"]
 mod reads;
 #[path = "../durable_replay.rs"]
@@ -249,6 +250,7 @@ pub(crate) async fn retire_session_rows(
 
     let cells = ExecKey::session_cells(session);
     let mut roots = run_records::delete_under(&mut *tx, &OwnerKey::session_turns(session)).await?;
+    roots.extend(model_calls::delete_session(&mut *tx, session).await?);
     roots.extend(snapshots::retire_under(&mut *tx, &cells).await?);
     if let Ok(actor) = ActorKey::session(session.as_str()) {
         waits::delete_owned(&mut *tx, &actor).await?;
@@ -264,11 +266,18 @@ pub(crate) async fn retire_process_rows(
     tx: &mut PgConnection,
     process: &lash_sansio::ProcessId,
 ) -> Result<Vec<String>, sqlx::Error> {
-    let facts = run_records::delete_owner(
+    let mut facts = run_records::delete_owner(
         &mut *tx,
         &lash_durable::domain::OwnerKey::Process(process.clone()).stored(),
     )
     .await?;
+    facts.extend(
+        model_calls::delete_session(
+            tx,
+            &lash_sansio::SessionId::prefixed("process:", process.as_str()),
+        )
+        .await?,
+    );
     if let Ok(actor) = ActorKey::process(process.as_str()) {
         waits::delete_owned(tx, &actor).await?;
     }
@@ -787,6 +796,8 @@ async fn apply_domain(
         }
         DomainWrite::SessionMail(write) => session_mail::apply(tx, committing, write).await,
         DomainWrite::Prompt(write) => prompts::apply(tx, committing, write).await,
+        DomainWrite::ModelCallPin(write) => model_calls::apply_pin(tx, write).await,
+        DomainWrite::ModelCall(write) => model_calls::apply(tx, committing, write).await,
     }
 }
 

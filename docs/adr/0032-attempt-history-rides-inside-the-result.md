@@ -12,8 +12,9 @@ persistence protocol beside the effect result.
 
 The retry-owning provider boundary seals one immutable `AttemptRecord` per
 transport invocation. `ProviderCompletion` and `ProviderCompletionError` both
-carry the complete `LlmCallRecord`. The model call's committed phase record
-carries that record with its outcome; there is no separate attempt log.
+carry the complete `LlmCallRecord`. One `model_call_records` row retains the call's reference-free `ModelCallFact`
+past consumption of its answer receipt. The row and fact are written in the
+call's existing settling commit; there is no separately delivered attempt log.
 
 An attempt is a transport invocation, not a retry-budget unit or an admission
 wait. A courtesy retry can produce another attempt without consuming retry
@@ -37,11 +38,14 @@ uses `from_wire`; foreign input uses `from_foreign_wire` and cannot acquire a
 reserved namespace by spelling one. Host and plugin namespaces are validated.
 These are vocabulary ownership rules, not an authentication policy.
 
-The turn report aggregates calls from that session. Child-session calls remain
-on child results. Lash exposes no final-output provenance selector (ADR 0033).
+`DurableSession::read_model_calls` addresses a call by turn and call id;
+`committed_turns_with_calls` reads each turn's calls in ordinal order.
+Child-session calls remain on their child sessions. Lash exposes no final-output provenance selector (ADR 0033).
 Durable attempt history belongs to the execution that produces the recorded
-outcome. A crash before that outcome commits can lose its attempt history;
-the call is re-sent under [ADR 0132](0132-durability-is-state-first-over-the-lash-store.md) §4.
+outcome. A crash before settlement can lose observations. Durable dispatch
+reservations retain every allocated ordinal: recovery records each lost
+attempt as `Interrupted` with `ProtocolPosition::Unobserved` and absent usage.
+Retry ordinals are reserved before dispatch and never reused. The call is re-sent under [ADR 0132](0132-durability-is-state-first-over-the-lash-store.md) §4.
 
 The full Prompt View remains authoritative on every call. A provider may reuse
 a disposable cached response id only after validating the current request's
@@ -50,10 +54,14 @@ reuse. Provider cache state is not durable session authority.
 
 ## Consequences
 
-Resume loads the recorded ledger with the call's result without rebuilding
-it from telemetry. A separate append-only attempt log is rejected because
-it needs its own redelivery deduplication, retention and reconciliation with
-the committed result. The accepted trade is that an unrecorded crash-era attempt is not
+Resume and followers read the same retained call facts without rebuilding
+them from telemetry. `ModelCallRecorded` carries only the committed call id.
+A tail accepted before its terminal keeps a pending identity through receipt
+consumption, cleared atomically with its sealed row. Per-turn usage is the
+sum of the rows; the session head retains the projected lifetime total. An accounting log with admission, delivery, reconciliation or money is
+rejected. The call records share their session's ledger lifetime and are
+removed by physical session deletion, with their graph nodes reclaimed
+through the root catalog. The accepted trade is that an unrecorded crash-era attempt is not
 durable billing evidence. Hosts own any supplementary live telemetry archive.
 
 ## Implementation

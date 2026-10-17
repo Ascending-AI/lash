@@ -165,7 +165,12 @@ async fn request_shape_errors_are_not_retried_and_failed_rows_keep_rich_errors()
         record(
             &telemetry,
             TurnEvent::ModelCallRecorded {
-                record: *failure.call_record,
+                call_id: {
+                    let record = *failure.call_record;
+                    let id = record.call_id.clone();
+                    telemetry.record_calls(vec![record]);
+                    id
+                },
             },
         )
         .await;
@@ -230,7 +235,12 @@ async fn partial_costs_survive_retries_and_charge_safety_refusal_is_visible() {
     record(
         &telemetry,
         TurnEvent::ModelCallRecorded {
-            record: *failure.call_record,
+            call_id: {
+                let record = *failure.call_record;
+                let id = record.call_id.clone();
+                telemetry.record_calls(vec![record]);
+                id
+            },
         },
     )
     .await;
@@ -268,7 +278,12 @@ async fn partial_costs_survive_retries_and_charge_safety_refusal_is_visible() {
     record(
         &telemetry,
         TurnEvent::ModelCallRecorded {
-            record: completion.call_record,
+            call_id: {
+                let record = completion.call_record;
+                let id = record.call_id.clone();
+                telemetry.record_calls(vec![record]);
+                id
+            },
         },
     )
     .await;
@@ -341,7 +356,12 @@ async fn empty_response_keeps_cost_from_raw_usage_even_without_partial_response(
     record(
         &telemetry,
         TurnEvent::ModelCallRecorded {
-            record: *failure.call_record,
+            call_id: {
+                let record = *failure.call_record;
+                let id = record.call_id.clone();
+                telemetry.record_calls(vec![record]);
+                id
+            },
         },
     )
     .await;

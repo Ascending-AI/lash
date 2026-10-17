@@ -778,12 +778,13 @@ pub(crate) fn expected_version() -> i64 {
 
 /// The shared table sets provisioning applies after the schema bodies, in
 /// order; see [`crate::schema_fragments`].
-pub(crate) const FRAGMENTS: [&str; 11] = [
+pub(crate) const FRAGMENTS: [&str; 12] = [
     crate::schema_fragments::SESSION_INGRESS_TABLE,
     crate::schema_fragments::SESSION_RUNS_TABLES,
     crate::durable::DURABLE_TABLES,
     crate::durable::NODE_WAKES_TABLES,
     crate::durable::RUN_RECORDS_TABLES,
+    crate::durable::MODEL_CALL_TABLES,
     crate::durable::EXEC_SNAPSHOTS_TABLES,
     crate::durable::TURN_PHASES_TABLES,
     crate::durable::WAITS_TABLES,

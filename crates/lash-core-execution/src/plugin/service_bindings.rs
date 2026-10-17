@@ -22,10 +22,7 @@ pub trait CommittedTurnReadPort: Send + Sync {
         &self,
         session_id: &SessionId,
         turn_id: &TurnId,
-    ) -> Result<
-        Option<lash_core_store::transcript::CommittedTurnWithToolCalls>,
-        CommittedTurnReadError,
-    >;
+    ) -> Result<Option<lash_core_store::transcript::CommittedTurnWithCalls>, CommittedTurnReadError>;
 }
 
 #[async_trait::async_trait]
@@ -238,10 +235,8 @@ impl ServiceBindings {
         &self,
         session_id: &SessionId,
         turn_id: &TurnId,
-    ) -> Result<
-        Option<lash_core_store::transcript::CommittedTurnWithToolCalls>,
-        CommittedTurnReadError,
-    > {
+    ) -> Result<Option<lash_core_store::transcript::CommittedTurnWithCalls>, CommittedTurnReadError>
+    {
         let service = self.committed_turn.as_ref().ok_or_else(|| {
             PluginError::Preflight(PreflightIssue::MissingService {
                 owner: "invocation".into(),
@@ -723,10 +718,8 @@ impl CommittedTurnReadPort for SessionReadServiceBindings {
         &self,
         session_id: &SessionId,
         turn_id: &TurnId,
-    ) -> Result<
-        Option<lash_core_store::transcript::CommittedTurnWithToolCalls>,
-        CommittedTurnReadError,
-    > {
+    ) -> Result<Option<lash_core_store::transcript::CommittedTurnWithCalls>, CommittedTurnReadError>
+    {
         self.0.committed_turn(session_id, turn_id).await
     }
 }
@@ -760,10 +753,8 @@ impl SessionReadService for ServiceBindings {
         &self,
         session_id: &SessionId,
         turn_id: &TurnId,
-    ) -> Result<
-        Option<lash_core_store::transcript::CommittedTurnWithToolCalls>,
-        CommittedTurnReadError,
-    > {
+    ) -> Result<Option<lash_core_store::transcript::CommittedTurnWithCalls>, CommittedTurnReadError>
+    {
         let service = self.committed_turn.as_ref().ok_or_else(|| {
             PluginError::Preflight(PreflightIssue::MissingService {
                 owner: "invocation".into(),

@@ -804,12 +804,18 @@ pub(super) async fn durable_report(
     acceptance: Option<TurnInputAcceptanceReceipt>,
     activities: &[TurnActivity],
 ) -> Result<TurnReport> {
-    let llm_calls: Vec<LlmCallRecord> = activities
-        .iter()
-        .filter_map(|activity| match &activity.event {
-            TurnEvent::ModelCallRecorded { record } => Some(record.clone()),
-            _ => None,
-        })
+    let llm_calls: Vec<LlmCallRecord> = ctx
+        .parts
+        .effect_host
+        .durable_reads()?
+        .model_calls(
+            &ctx.parts.session_id,
+            &lash_core::durable_port::domain::ModelCallId::turn_owner(run),
+        )
+        .await
+        .map_err(EmbedError::Durable)?
+        .into_iter()
+        .map(|call| call.record)
         .collect();
     let errors = activities
         .iter()

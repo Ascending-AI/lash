@@ -1498,13 +1498,22 @@
       ]
     },
     "ProtocolPosition": {
-      "enum": [
-        "no_response",
-        "response_observed",
-        "output_started",
-        "terminal_observed"
-      ],
-      "type": "string"
+      "oneOf": [
+        {
+          "enum": [
+            "no_response",
+            "response_observed",
+            "output_started",
+            "terminal_observed"
+          ],
+          "type": "string"
+        },
+        {
+          "const": "unobserved",
+          "description": "The observing process was lost; no observations survived.",
+          "type": "string"
+        }
+      ]
     },
     "ProviderFailureKind": {
       "description": "Classification of a provider/transport failure.\n\nThis is the single canonical failure-kind vocabulary: provider transports\nclassify failures into it (`lash-core` re-exports it from\n`llm::transport`), the turn machine carries it on\n[`ErrorEnvelope`](crate::session_model::ErrorEnvelope), and hosts read it\nback from `TurnIssue`s without scraping traces.\n\n`Unknown` is an explicit classification, never a decoder fallback.\nPersisted failure records reject unrecognized kind literals.",

@@ -225,6 +225,29 @@ table lash_migrations
   column state text not-null
   column to_version integer not-null
   primary-key (phase, migration)
+table lash_model_call_pins
+  column answered boolean not-null
+  column attempt bigint not-null
+  column call text not-null
+  column call_id text not-null
+  column enclosing_call text nullable
+  column enclosing_owner text nullable
+  column enclosing_run bigint nullable
+  column run text not-null
+  column session_id text not-null
+  unique (session_id, run, call_id)
+  primary-key (session_id, run, call)
+table lash_model_call_records
+  column call text not-null
+  column call_id text not-null
+  column ended_at_ms bigint not-null
+  column record_ref text not-null
+  column run text not-null
+  column session_id text not-null
+  column written_epoch bigint not-null
+  unique (session_id, run, call_id)
+  primary-key (session_id, run, call)
+  foreign-key (record_ref) references lash_blobs (hash) on delete restrict
 table lash_nodes
   column boot_id text not-null
   column draining boolean not-null default

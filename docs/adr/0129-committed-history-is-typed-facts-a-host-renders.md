@@ -92,8 +92,8 @@ turn's commit appended, every admitted input's user message among them
 even before the turn's first message. A host persists `next` only after
 applying the page.
 
-A host hydrating tool cards opts into `committed_turns_with_tool_calls(after,
-limit)`. Its `CommittedTurnsWithToolCallsPage` carries each `CommittedTurn`
+A host hydrating tool cards opts into `committed_turns_with_calls(after,
+limit)`. Its `CommittedTurnsWithCallsPage` carries each `CommittedTurn`
 with its original tool-call records in admission order, and the same cursor.
 Only the returned turns' ledgers are decoded, once each. A separate by-id
 read supplies `TurnToolCallRef { turn_id, call_id }`, so a missing call id

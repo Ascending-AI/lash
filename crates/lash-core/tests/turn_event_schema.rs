@@ -21,8 +21,7 @@ use lash_sansio::{
 use std::collections::BTreeSet;
 
 use lash_core::{
-    AttemptOutcome, AttemptRecord, CheckpointKind, LlmCallId, LlmCallRecord, LlmUsage,
-    PluginRuntimeEvent, ProtocolPosition, ToolCallOutput, ToolFailure, ToolFailureClass,
+    CheckpointKind, LlmCallId, PluginRuntimeEvent, ToolCallOutput, ToolFailure, ToolFailureClass,
     ToolIntentActivityOutcome, ToolIntentKind, TurnActivity, TurnActivityId, TurnEvent,
     TurnInputApplication,
 };
@@ -59,7 +58,6 @@ turn_event_tags! {
     ToolCallCompleted => "tool_call_completed",
     ToolIntentOutcome => "tool_intent_outcome",
     Finished => "finished",
-    Usage => "usage",
     RetryStatus => "retry_status",
     PluginRuntime => "plugin_runtime",
     QueuedInputAccepted => "queued_input_accepted",
@@ -75,30 +73,6 @@ fn block_identity(
         .with_item_id(item_id.map(str::to_string))
 }
 
-fn token_usage_sample() -> LlmUsage {
-    LlmUsage {
-        input_tokens: 10,
-        output_tokens: 5,
-        cache_read_input_tokens: 1,
-        cache_write_input_tokens: 2,
-        reasoning_output_tokens: 3,
-        unknown_calls: 0,
-    }
-}
-
-fn token_usage_json() -> serde_json::Value {
-    json!({
-        "input_tokens": 10,
-        "output_tokens": 5,
-        "cache_read_input_tokens": 1,
-        "cache_write_input_tokens": 2,
-        "reasoning_output_tokens": 3,
-    })
-}
-
-/// Representative construction of every variant paired with its exact expected
-/// JSON. Optional fields appear as both `Some` and `None` where meaningful, so
-/// the pins cover both the present and absent-when-`None` encodings.
 fn sample_events() -> Vec<(&'static str, TurnEvent, serde_json::Value)> {
     vec![
         (
@@ -157,36 +131,9 @@ fn sample_events() -> Vec<(&'static str, TurnEvent, serde_json::Value)> {
         (
             "model_call_recorded",
             TurnEvent::ModelCallRecorded {
-                record: LlmCallRecord {
-                    call_id: LlmCallId("llm-call-1".to_string()),
-                    label: Some("primary".to_string()),
-                    replay_drops: Vec::new(),
-                    attempts: vec![AttemptRecord {
-                        ordinal: 1,
-                        outcome: AttemptOutcome::Completed,
-                        protocol_position: ProtocolPosition::TerminalObserved,
-                        retry_budget_consumed: true,
-                        retry_decision: None,
-                        error: None,
-                        evidence: None,
-                        generation_disposition: None,
-                        usage: None,
-                    }],
-                },
+                call_id: LlmCallId("llm-call-1".to_string()),
             },
-            json!({
-                "type": "model_call_recorded",
-                "record": {
-                    "call_id": "llm-call-1",
-                    "label": "primary",
-                    "attempts": [{
-                        "ordinal": 1,
-                        "outcome": "completed",
-                        "protocol_position": "terminal_observed",
-                        "retry_budget_consumed": true,
-                    }],
-                },
-            }),
+            json!({ "type": "model_call_recorded", "call_id": "llm-call-1" }),
         ),
         (
             "code_block_started (graph_key present)",
@@ -451,20 +398,6 @@ fn sample_events() -> Vec<(&'static str, TurnEvent, serde_json::Value)> {
                 value: json!(3),
             },
             json!({ "type": "finished", "tool_name": "calc", "value": 3 }),
-        ),
-        (
-            "usage",
-            TurnEvent::Usage {
-                protocol_iteration: 1,
-                usage: token_usage_sample(),
-                cumulative: token_usage_sample(),
-            },
-            json!({
-                "type": "usage",
-                "protocol_iteration": 1,
-                "usage": token_usage_json(),
-                "cumulative": token_usage_json(),
-            }),
         ),
         (
             "retry_status",

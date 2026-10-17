@@ -32,12 +32,14 @@ pub mod graph;
 /// A graph commit's canonical encoding: digest, measurement and receipt.
 pub mod graph_commit;
 mod keys;
+pub mod model_calls;
 pub mod namespace_value;
 /// Persistent-heap page publication, leases and retirement (FIG-6195):
 /// declared ahead of the cutover, implemented by nothing yet.
 pub mod pages;
 pub mod processes;
 pub mod prompts;
+pub use model_calls::{ModelCallOwner, ModelCallPinRow, ModelCallPinWrite, ModelCallWrite};
 pub mod run_records;
 pub mod session_close;
 pub mod session_mail;
@@ -125,6 +127,10 @@ pub enum DomainWrite {
     /// settlement that releases its request, and the explicit retention
     /// that releases the rest.
     Prompt(PromptWrite),
+    /// A call's retained sealed record.
+    ModelCall(ModelCallWrite),
+    /// Outstanding dispatch reservations and accepted tails.
+    ModelCallPin(ModelCallPinWrite),
 }
 
 /// One conditional non-owner write inside a [`MailTx`](crate::MailTx).
@@ -462,6 +468,21 @@ impl DurableError {
 /// body.
 #[async_trait::async_trait]
 pub trait DurableReads: Send + Sync {
+    /// Sealed calls for a prompt owner, in logical call order, decoded under
+    /// one protected graph read. The owner uses ModelCallId::owner_column.
+    async fn model_calls(
+        &self,
+        session: &SessionId,
+        owner: &str,
+    ) -> Result<Vec<lash_core_store::model_calls::ModelCallRecord>, DurableError>;
+
+    /// Outstanding call reservations for an owner, in call-key order.
+    async fn model_call_pins(
+        &self,
+        session: &SessionId,
+        owner: &str,
+    ) -> Result<Vec<ModelCallPinRow>, DurableError>;
+
     /// V0, then L3: the session's unfinished turn, if any.
     async fn turn(&self, session: &SessionId) -> Result<Option<TurnRow>, DurableError>;
 

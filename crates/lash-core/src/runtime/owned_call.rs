@@ -57,6 +57,7 @@ pub(in crate::runtime) struct OwnedPrompt {
 pub(in crate::runtime) struct OwnedCall<'a> {
     /// The owner: its fence commits the admission.
     pub(in crate::runtime) cx: &'a ActorContext,
+    pub(in crate::runtime) enclosing: Option<lash_durable::domain::ModelCallOwner>,
     pub(in crate::runtime) key: PromptCallKey,
     pub(in crate::runtime) purpose: PromptPurpose,
     pub(in crate::runtime) prompt: OwnedPrompt,
@@ -127,10 +128,12 @@ impl OwnedCall<'_> {
                 if now_ms >= deadline_ms {
                     return Ok(OwnedAdmission::Unsent(expired(&self.key, deadline_ms)));
                 }
+                let mut response = admitted.response();
+                response.scope.attempt = Some(self.reserve_resend(&response.scope).await?);
                 Ok(OwnedAdmission::Send {
                     request: Box::new(self.request),
                     admitted: AdmittedDirectSend {
-                        response: admitted.response(),
+                        response,
                         template: admitted.template,
                         deliveries: self.attachment_store,
                         limit: ExecutionLimit::starting_at(
@@ -150,11 +153,59 @@ impl OwnedCall<'_> {
         }
     }
 
+    async fn reserve_resend(
+        &self,
+        scope: &crate::llm::types::LlmRequestScope,
+    ) -> Result<u32, PluginError> {
+        if let Some(record) = self
+            .cx
+            .durable_reads()
+            .map_err(live)?
+            .model_calls(&self.key.session, &self.key.call.owner_column())
+            .await
+            .map_err(live)?
+            .into_iter()
+            .find(|record| record.call_id == crate::provider::call_id_for_scope(scope))
+        {
+            return Ok(record
+                .record
+                .attempts
+                .last()
+                .map_or(1, |attempt| attempt.ordinal));
+        }
+        let previous = self
+            .cx
+            .durable_reads()
+            .map_err(live)?
+            .model_call_pins(&self.key.session, &self.key.call.owner_column())
+            .await
+            .map_err(live)?
+            .into_iter()
+            .find(|pin| pin.key == self.key)
+            .map_or(0, |pin| pin.attempt);
+        let attempt = previous.saturating_add(1);
+        let mut tx = self.cx.begin().await.map_err(live)?;
+        tx.write(lash_durable::DomainWrite::ModelCallPin(
+            lash_durable::domain::ModelCallPinWrite::Reserve {
+                key: self.key.clone(),
+                call_id: crate::provider::call_id_for_scope(scope),
+                attempt,
+                enclosing: self.enclosing.clone(),
+            },
+        ));
+        self.cx
+            .commit(tx, CommitLabel::COMPLETION_START)
+            .await
+            .map_err(live)?;
+        Ok(attempt)
+    }
+
     async fn admit_new(self, now_ms: u64) -> Result<OwnedAdmission, PluginError> {
         let Self {
             cx,
             key,
             purpose,
+            enclosing,
             prompt,
             request,
             binding,
@@ -216,12 +267,26 @@ impl OwnedCall<'_> {
         // request the template was lowered from, and recorded with it.
         let response =
             lash_sansio::llm::types::ResponseContext::of_request(&lowered).with_senders(None, None);
-        let record = admission_record(key, composed.as_ref(), &template, &response, Some(deadline))
-            .map_err(|error| {
-                PluginError::Session(format!("the call's admission does not encode: {error}"))
-            })?;
+        let record = admission_record(
+            key.clone(),
+            composed.as_ref(),
+            &template,
+            &response,
+            Some(deadline),
+        )
+        .map_err(|error| {
+            PluginError::Session(format!("the call's admission does not encode: {error}"))
+        })?;
         let mut tx = cx.begin().await.map_err(live)?;
         tx.write(record);
+        tx.write(lash_durable::DomainWrite::ModelCallPin(
+            lash_durable::domain::ModelCallPinWrite::Reserve {
+                key,
+                call_id: crate::provider::call_id_for_scope(&response.scope),
+                attempt: 1,
+                enclosing,
+            },
+        ));
         cx.commit(tx, CommitLabel::COMPLETION_START)
             .await
             .map_err(live)?;

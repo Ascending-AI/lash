@@ -365,18 +365,11 @@ fn google_usage(usage: &Value) -> UsageBuckets {
     }
 }
 
-/// The provider attempts of every model call the engine recorded for a
-/// session, read from the `ModelCallRecorded` activity it delivered with the
-/// session's turns, once per call. No turn result or emitted wire script is
-/// used to manufacture this evidence: the durable engine keeps no per-attempt
-/// usage row, so its delivered call record is the engine's own record.
-pub fn recorded_usage(activities: &[lash::TurnActivity]) -> Result<Vec<UsageBuckets>, String> {
+/// Provider usage read from the engine's retained call records.
+pub fn recorded_usage(records: &[lash::LlmCallRecord]) -> Result<Vec<UsageBuckets>, String> {
     let mut seen = std::collections::BTreeSet::new();
     let mut usages = Vec::new();
-    for activity in activities {
-        let lash::TurnEvent::ModelCallRecorded { record } = &activity.event else {
-            continue;
-        };
+    for record in records {
         let record = serde_json::to_value(record)
             .map_err(|error| format!("a model call record does not encode: {error}"))?;
         let call = record

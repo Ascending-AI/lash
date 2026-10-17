@@ -504,12 +504,7 @@ pub enum SessionStreamEvent {
         protocol_iteration: usize,
         content: String,
     },
-    #[serde(rename = "token_usage")]
-    LlmUsage {
-        protocol_iteration: usize,
-        usage: LlmUsage,
-        cumulative: LlmUsage,
-    },
+
     #[serde(rename = "retry_status")]
     RetryStatus(RetryProgress),
     #[serde(rename = "injected_turn_input_accepted")]

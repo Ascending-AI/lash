@@ -13,7 +13,12 @@ pub trait TurnDrive: Send {
 
     /// Settle a logical model call with no response from a send on this
     /// activation. Record its unsent failure before answering the machine.
-    fn model_unsent(&mut self, id: EffectId, error: crate::LlmCallError);
+    async fn model_unsent(
+        &mut self,
+        cx: &ActorContext,
+        id: EffectId,
+        error: crate::LlmCallError,
+    ) -> Result<(), TurnError>;
 
     /// Answer an effect that commits nothing of its own: an emit, progress,
     /// a log, a plugin checkpoint, an environment sync or a tool report.
@@ -31,6 +36,11 @@ pub trait TurnDrive: Send {
     /// derivation reads the committed receipt, never what only the live
     /// outcome held. `None` once a derivation or a cancel settled it.
     fn owed_answer(&mut self) -> &mut Option<ModelAnswer>;
+
+    /// Stage sealed calls in the commit that settles them.
+    fn stage_model_calls(&mut self, _tx: &mut lash_durable::ActorTx) -> Result<(), TurnError> {
+        Ok(())
+    }
 
     /// Derive the machine's model call `id` from
     /// [`owed_answer`](Self::owed_answer), a committed receipt: finish its

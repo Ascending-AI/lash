@@ -61,8 +61,7 @@ const MODEL_REQUEST_PIN_DOMAIN: &str = "lash-model-request-pin/v1";
 /// acknowledged before anything derives from it. It holds everything a
 /// derivation reads: the response (parts, correlations, opaque replay
 /// metadata and usage) or the call's typed unsuccessful end, the attempt
-/// that answered and the call's sealed record (its winning attempt and
-/// evidence), whether the response streamed and which reasoning it
+/// that answered and the call's stable identity, whether the response streamed and which reasoning it
 /// published, the response callbacks the call was admitted under and the
 /// stream capsule its stream hooks are finished from. A restore that finds
 /// it derives from it on any worker and never sends the call again: a
@@ -82,9 +81,9 @@ pub struct ModelAnswer {
     /// unsuccessful end.
     pub(crate) result: Result<crate::llm::types::LlmResponse, LlmCallError>,
     pub(crate) text_streamed: bool,
-    /// The paid call's record, which its derivation records: nothing
-    /// recorded it before the receipt committed.
-    pub(crate) call_record: Option<crate::LlmCallRecord>,
+    /// The call's stable identity. Its sealed record is retained separately;
+    /// a cell accepted mid-stream resolves it after tail settlement.
+    pub(crate) call_id: crate::LlmCallId,
     /// The hooks' plan, the stream capsule and the published reasoning.
     pub(crate) stream: crate::runtime::LlmStreamRecord,
 }
@@ -102,8 +101,9 @@ impl ModelAnswer {
             attempt,
             result,
             text_streamed: false,
-            call_record: None,
+            call_id: crate::LlmCallId(format!("test-attempt:{attempt}")),
             stream: crate::runtime::LlmStreamRecord {
+                attempt: Some(1),
                 reasoning_published: Vec::new(),
                 capsule: crate::runtime::AssistantStreamCapsule::new(Vec::new(), Vec::new()),
                 response_plan: Default::default(),
@@ -282,7 +282,7 @@ pub(super) async fn send(
 ) -> Result<bool, TurnError> {
     let (pin, limit, resent) = match start {
         ModelStart::Expired { pin } => {
-            drive.model_unsent(id, timed_out(pin));
+            drive.model_unsent(cx, id, timed_out(pin)).await?;
             return Ok(true);
         }
         ModelStart::Send { pin, limit, resent } => (pin, *limit, *resent),

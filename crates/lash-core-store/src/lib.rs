@@ -267,3 +267,6 @@ pub(crate) use runtime_error::RuntimeErrorCause;
 pub mod transcript;
 
 pub mod plugin_registrations;
+
+/// Retained model-call facts and read vocabulary.
+pub mod model_calls;

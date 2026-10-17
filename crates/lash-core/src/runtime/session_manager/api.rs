@@ -10,7 +10,7 @@ impl crate::plugin::SessionReadService for RuntimeSessionStateService {
         session_id: &SessionId,
         turn_id: &TurnId,
     ) -> Result<
-        Option<crate::transcript::CommittedTurnWithToolCalls>,
+        Option<crate::transcript::CommittedTurnWithCalls>,
         crate::plugin::CommittedTurnReadError,
     > {
         let current = &self.services.current;

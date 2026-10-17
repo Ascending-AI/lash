@@ -605,12 +605,18 @@ impl TurnDrive for SimDrive {
         Ok(())
     }
 
-    fn model_unsent(&mut self, id: EffectId, error: lash_core::LlmCallError) {
+    async fn model_unsent(
+        &mut self,
+        _cx: &ActorContext,
+        id: EffectId,
+        error: lash_core::LlmCallError,
+    ) -> Result<(), TurnError> {
         self.machine.handle_response(Response::LlmComplete {
             id,
             result: Err(error),
             text_streamed: false,
         });
+        Ok(())
     }
 
     fn tools(&mut self) -> Result<Arc<dyn RoundTools>, TurnError> {

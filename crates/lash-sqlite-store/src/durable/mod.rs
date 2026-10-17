@@ -52,6 +52,7 @@ use crate::liveness_locks::{LivenessLocks, Probed};
 mod access;
 mod claim_facts;
 mod graph;
+mod model_calls;
 mod pages;
 mod park;
 pub(crate) mod processes;
@@ -148,6 +149,7 @@ pub(crate) use graph::{
     AUDIT_PAGE, GraphClosure, audit_page, graph_closure, graph_counts, install_staged, peel,
     retire_roots,
 };
+pub(crate) use model_calls::TABLES as MODEL_CALL_TABLES;
 #[cfg(feature = "testing")]
 pub(crate) use pages::cut_retirement_holds;
 pub(crate) use pages::retire_step_in as retire_step;
@@ -172,6 +174,7 @@ pub(crate) fn retire_session_rows(
     use lash_durable::domain::{ExecKey, OwnerKey, ScopeKey};
 
     let mut roots = run_records::delete_under(tx, &OwnerKey::session_turns(session))?;
+    roots.extend(model_calls::delete_session(tx, session)?);
     roots.extend(snapshots::retire_under(
         tx,
         &ExecKey::session_cells(session),
@@ -190,10 +193,14 @@ pub(crate) fn retire_process_rows(
     tx: &Connection,
     process: &lash_sansio::ProcessId,
 ) -> rusqlite::Result<()> {
-    let facts = run_records::delete_owner(
+    let mut facts = run_records::delete_owner(
         tx,
         &lash_durable::domain::OwnerKey::Process(process.clone()).stored(),
     )?;
+    facts.extend(model_calls::delete_session(
+        tx,
+        &lash_sansio::SessionId::prefixed("process:", process.as_str()),
+    )?);
     if let Ok(actor) = ActorKey::process(process.as_str()) {
         waits::delete_owned(tx, &actor)?;
     }
@@ -1034,6 +1041,8 @@ fn apply_domain(tx: &FencedTx<'_>, committing: &Committing<'_>, write: &DomainWr
         }
         DomainWrite::SessionMail(write) => session_mail::apply(tx, committing, write),
         DomainWrite::Prompt(write) => prompts::apply(tx, committing, write),
+        DomainWrite::ModelCallPin(write) => model_calls::apply_pin(tx, write),
+        DomainWrite::ModelCall(write) => model_calls::apply(tx, committing, write),
     }
 }
 

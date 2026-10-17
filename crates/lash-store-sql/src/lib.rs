@@ -126,6 +126,8 @@ pub const TABLES: &[&str] = &[
     durable::prompts::TABLE,
     durable::prompts::TEXTS_TABLE,
     durable::run_records::TABLE,
+    durable::model_calls::TABLE,
+    durable::model_calls::PINS_TABLE,
     durable::turns::NAMESPACES_TABLE,
     durable::turns::TABLE,
     durable::session_close::ENDING_TABLE,
@@ -222,6 +224,7 @@ pub fn all_statements() -> Vec<Statement> {
     statements.extend_from_slice(durable::graph::GraphStatements::NEUTRAL);
     statements.extend_from_slice(durable::turns::TurnStatements::NEUTRAL);
     statements.extend_from_slice(durable::run_records::RunRecordStatements::NEUTRAL);
+    statements.extend_from_slice(durable::model_calls::ModelCallStatements::NEUTRAL);
     statements.extend_from_slice(durable::snapshots::SnapshotStatements::NEUTRAL);
     statements.extend_from_slice(durable::waits::WaitStatements::NEUTRAL);
     statements.extend_from_slice(durable::processes::ProcessActorStatements::NEUTRAL);

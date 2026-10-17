@@ -14,6 +14,7 @@ pub(crate) mod issue;
 mod lease;
 mod local_effects;
 mod machine;
+mod model_calls;
 mod prepare;
 mod prompt;
 mod streaming;
@@ -67,8 +68,12 @@ pub(super) struct RuntimeTurnDriver<'a> {
     /// gives them: what every recorded prelude of that window restores over.
     pub(super) prelude_base_messages: crate::MessageSequence,
     pub(super) prepared_context: crate::session_model::context::PreparedContext,
-    /// Parent-session calls only. Child runtimes assemble their own ledgers.
-    pub(super) llm_calls: Vec<crate::LlmCallRecord>,
+    /// Facts awaiting the existing commit that settles them. Never retained
+    /// here after their transaction is staged.
+    pub(super) pending_model_calls: Vec<lash_core_store::model_calls::ModelCallFact>,
+    pub(super) staged_model_calls: Vec<crate::LlmCallId>,
+    pub(super) model_call_ordinal: u32,
+    pub(super) sealed_attempt_count: usize,
     /// Contained provider panic, deferred until the terminal turn commits.
     pub(super) provider_panic: Option<String>,
     /// Non-transcript evidence from charge-safety-refused generations, with

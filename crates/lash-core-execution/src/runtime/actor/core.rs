@@ -101,6 +101,9 @@ pub(super) struct Inner {
     /// [`ActorContext::next_drive`] numbers.
     drives: AtomicU32,
     tool_call_admissions: AtomicU64,
+    model_tasks: std::sync::Mutex<Vec<crate::task::JoinHandle<()>>>,
+    model_attempts: std::sync::Mutex<Vec<crate::EffectAttempt>>,
+    model_calls: std::sync::Mutex<Vec<lash_durable::domain::model_calls::OwnedModelCall>>,
 }
 
 impl std::fmt::Debug for ActorContext {
@@ -147,6 +150,9 @@ impl ActorContext {
                 obligations: None,
                 drives: AtomicU32::new(0),
                 tool_call_admissions: AtomicU64::new(0),
+                model_calls: std::sync::Mutex::default(),
+                model_attempts: std::sync::Mutex::default(),
+                model_tasks: std::sync::Mutex::default(),
             }),
             scope: Scope::new(admitted),
         }
@@ -188,6 +194,9 @@ impl ActorContext {
                     }),
                 drives: AtomicU32::new(0),
                 tool_call_admissions: AtomicU64::new(0),
+                model_calls: std::sync::Mutex::default(),
+                model_attempts: std::sync::Mutex::default(),
+                model_tasks: std::sync::Mutex::default(),
             }),
             scope: Scope::new(admitted),
         }
@@ -219,6 +228,9 @@ impl ActorContext {
                 obligations: None,
                 drives: AtomicU32::new(0),
                 tool_call_admissions: AtomicU64::new(0),
+                model_calls: std::sync::Mutex::default(),
+                model_attempts: std::sync::Mutex::default(),
+                model_tasks: std::sync::Mutex::default(),
             }),
             scope: Scope::new(AdmittedScope::runtime_operation("unavailable")),
         }
@@ -435,7 +447,7 @@ impl ActorContext {
 
     async fn with_obligations<F, Fut>(
         &self,
-        tx: ActorTx,
+        mut tx: ActorTx,
         owing: Option<&super::claim_obligations::ExecutionDebts>,
         commit: F,
     ) -> Result<ActorCommit, DurableError>
@@ -443,6 +455,8 @@ impl ActorContext {
         F: FnOnce(ActorTx) -> Fut,
         Fut: std::future::Future<Output = Result<ActorCommit, DurableError>>,
     {
+        let model_debts = self.stage_model_calls(&mut tx).await?;
+
         let calls = tx
             .domain()
             .iter()
@@ -454,6 +468,7 @@ impl ActorContext {
             })
             .sum::<u64>();
         let committed = self.commit_with_obligations(tx, owing, commit).await?;
+        self.ack_model_calls(model_debts);
         self.inner
             .tool_call_admissions
             .fetch_add(calls, Ordering::Relaxed);
@@ -543,6 +558,25 @@ impl ActorContext {
     #[must_use]
     pub fn probe(&self) -> &dyn DurableProbe {
         &*self.inner.probe
+    }
+
+    pub(crate) fn retain_model_attempt(&self, attempt: crate::EffectAttempt) {
+        use lash_sansio::sync::MutexExt as _;
+        self.inner.model_attempts.lock_recover().push(attempt);
+    }
+
+    pub(crate) fn retain_owned_model_task(&self, task: crate::task::JoinHandle<()>) {
+        use lash_sansio::sync::MutexExt as _;
+        self.inner.model_tasks.lock_recover().push(task);
+    }
+
+    /// Retain a command's sealed call until the command's existing commit.
+    pub fn record_owned_model_call(&self, call: lash_durable::domain::model_calls::OwnedModelCall) {
+        use lash_sansio::sync::MutexExt as _;
+        let mut calls = self.inner.model_calls.lock_recover();
+        if !calls.iter().any(|stored| stored.key == call.key) {
+            calls.push(call);
+        }
     }
 
     /// Open a fenced owner transaction over the actor.
@@ -916,3 +950,6 @@ impl ActorContext {
             })
     }
 }
+
+#[path = "model_calls.rs"]
+mod model_calls;

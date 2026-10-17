@@ -143,6 +143,7 @@ registry! {
     WRITTEN_TABLE = 41, "WrittenTable", Enveloped, Node, Kernel;
     SOURCE_MAP = 42, "SourceMap", Enveloped, Node, Kernel;
     CONFIG_VALUE = 43, "ConfigValue", Enveloped, Node, Stores;
+    MODEL_CALL_FACT = 44, "ModelCallFact", Enveloped, Node, Host;
 }
 
 registry! {

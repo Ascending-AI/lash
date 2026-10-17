@@ -11,6 +11,8 @@ use lash::provider::{AttemptOutcome, ProtocolPosition, ProviderFailureKind};
 /// The next model-call record the local observation stream delivers.
 async fn next_model_call(
     observations: &mut lash::persistence::LiveReplaySubscription,
+    durable: &lash::DurableSession,
+    turn: &lash::TurnId,
 ) -> LlmCallRecord {
     tokio::time::timeout(Duration::from_secs(30), async {
         loop {
@@ -21,9 +23,19 @@ async fn next_model_call(
                 .expect("a local observation update");
             if let lash::observe::SessionObservationEventPayload::TurnActivity(activity) =
                 &event.payload
-                && let lash::TurnEvent::ModelCallRecorded { record } = &activity.event
+                && let lash::TurnEvent::ModelCallRecorded { call_id } = &activity.event
             {
-                return record.clone();
+                let reads = durable
+                    .read_model_calls(&[lash::turn::TurnModelCallRef {
+                        turn_id: turn.clone(),
+                        call_id: call_id.clone(),
+                    }])
+                    .await
+                    .expect("read committed call");
+                let lash::turn::ModelCallRead::Settled { record } = &reads[0] else {
+                    panic!("the record is readable when its event arrives");
+                };
+                return record.record.clone();
             }
         }
     })
@@ -165,6 +177,7 @@ async fn provider_execution_evidence_reaches_the_record_surfaces() {
         else {
             panic!("a live provider observation must not gap");
         };
+        let durable = session.durable();
         drop(session);
 
         let mut observed = Vec::new();
@@ -181,7 +194,7 @@ async fn provider_execution_evidence_reaches_the_record_surfaces() {
             .expect("the send is admitted")
             .0;
             let turn_id = started_turn_id(&accepted);
-            observed.push(next_model_call(&mut observations).await);
+            observed.push(next_model_call(&mut observations, &durable, &turn_id).await);
             wait_for_turn_released(state, &session_id, &turn_id).await;
         }
 

@@ -227,7 +227,8 @@ pub(super) async fn run(
                 present.write(&mut tx);
             }
             let held = consume_answered_cell(cx, drive, &mut tx, row, answered_cell, true).await?;
-            let written = super::phases::write_run_changes(&*drive, &mut tx, &session, &row.run);
+            let written =
+                super::phases::write_run_changes(&mut *drive, &mut tx, &session, &row.run);
             let (checkpoint, stored) = checkpoint.staged_in(&mut tx);
             tx.write(DomainWrite::Turn(TurnWrite::Advance {
                 session: session.clone(),

@@ -185,6 +185,8 @@ pub enum AttemptOutcome {
 #[derive(Clone, Copy, Debug, PartialEq, Eq, serde::Serialize, serde::Deserialize, JsonSchema)]
 #[serde(rename_all = "snake_case")]
 pub enum ProtocolPosition {
+    /// The observing process was lost; no observations survived.
+    Unobserved,
     NoResponse,
     ResponseObserved,
     OutputStarted,
@@ -242,7 +244,7 @@ impl ChargeSafetyDenialReason {
                     TurnFailureCode::UnsafeRetryAfterResponseObserved
                 }
                 ProtocolPosition::OutputStarted => TurnFailureCode::UnsafeRetryAfterOutputStarted,
-                ProtocolPosition::TerminalObserved => {
+                ProtocolPosition::Unobserved | ProtocolPosition::TerminalObserved => {
                     TurnFailureCode::UnsafeRetryAfterTerminalObserved
                 }
             },
@@ -380,17 +382,11 @@ pub struct LlmCallRecord {
 }
 
 impl LlmCallRecord {
-    /// Whether the call's usage is unknown: the attempt that ended it was
-    /// cut short after a response was observed, before the provider's usage
-    /// arrived. The provider may bill it, so a usage sum counts it unknown,
-    /// never as zero (ADR 0031).
+    /// Whether any attempt ended without reported usage. The typed
+    /// disposition still distinguishes provider omission from interruption;
+    /// either leaves the total unknown, including after a completed retry.
     pub fn usage_unknown(&self) -> bool {
-        self.attempts.last().is_some_and(|attempt| {
-            attempt
-                .usage_disposition()
-                .is_unreported_after_interruption()
-                && attempt.protocol_position != ProtocolPosition::NoResponse
-        })
+        self.attempts.iter().any(|attempt| attempt.usage.is_none())
     }
 
     /// The call's usage, what a host meters it by: the sum its attempts'

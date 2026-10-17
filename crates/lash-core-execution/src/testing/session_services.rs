@@ -9,7 +9,7 @@ impl crate::plugin::SessionReadService for MockSessionManager {
         _session_id: &crate::SessionId,
         _turn_id: &crate::TurnId,
     ) -> Result<
-        Option<lash_core_store::transcript::CommittedTurnWithToolCalls>,
+        Option<lash_core_store::transcript::CommittedTurnWithCalls>,
         crate::plugin::CommittedTurnReadError,
     > {
         Err(crate::PluginError::Session("operation is absent from this fixture".into()).into())

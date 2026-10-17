@@ -7,7 +7,8 @@ use std::task::{Poll, Waker};
 use super::types::{LlmResponse, LlmStreamEvent};
 
 /// Why Lash asks an attempt to stop, or it ended without returning.
-#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+#[derive(Clone, Copy, Debug, PartialEq, Eq, serde::Serialize, serde::Deserialize)]
+#[serde(rename_all = "snake_case")]
 pub enum AttemptEndReason {
     ModelDeadline,
     ImmediateCancel,

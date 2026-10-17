@@ -87,7 +87,7 @@ impl RuntimeTurnServices {
         turn: &TurnId,
         decoders: &crate::transcript::TranscriptDecoders,
     ) -> Result<
-        Option<crate::transcript::CommittedTurnWithToolCalls>,
+        Option<crate::transcript::CommittedTurnWithCalls>,
         crate::plugin::CommittedTurnReadError,
     > {
         let session = store.session_id();
@@ -130,7 +130,14 @@ impl RuntimeTurnServices {
             return Err(corrupt("the commit revision names another turn").into());
         }
         let tool_calls = Self::recorded_tool_calls(cx, session, turn, decoders).await?;
-        Ok(Some(crate::transcript::CommittedTurnWithToolCalls {
+        Ok(Some(crate::transcript::CommittedTurnWithCalls {
+            model_calls: cx
+                .durable_reads()?
+                .model_calls(
+                    session,
+                    &lash_durable::domain::ModelCallId::turn_owner(turn),
+                )
+                .await?,
             turn: read,
             tool_calls,
         }))
@@ -550,11 +557,11 @@ impl TurnServices for RuntimeTurnServices {
         &self,
         cx: &ActorContext,
         row: &TurnRow,
-        record: &crate::LlmCallRecord,
+        call_id: &crate::LlmCallId,
     ) -> Result<(), TurnError> {
         let controller = cx.scoped(AdmittedScope::turn(row.session.clone(), row.run.clone()))?;
         let activity =
-            crate::runtime::turn_driver::model_call_activity(&controller, &row.run, record);
+            crate::runtime::turn_driver::model_call_activity(&controller, &row.run, call_id);
         let factory = cx.backend().session_store_factory();
         let revision = match crate::SessionCommitStore::load_session_head_meta(
             factory.as_ref(),
@@ -562,10 +569,8 @@ impl TurnServices for RuntimeTurnServices {
         )
         .await
         {
-            Ok(head) => head.as_ref().map_or(
-                crate::SessionRevision::new(0),
-                crate::SessionRevision::of_durable_head,
-            ),
+            Ok(Some(head)) => crate::SessionRevision::of_durable_head(&head),
+            Ok(None) => return Ok(()),
             // The live stream is best effort: a reader that misses the
             // record reads the store.
             Err(error) => {

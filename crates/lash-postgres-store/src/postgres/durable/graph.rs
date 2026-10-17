@@ -227,6 +227,20 @@ lash_store_sql::statements! {
                    END)
              SELECT root.hash, blob.hash, blob.encoding, blob.content
              FROM root LEFT JOIN (reach JOIN blobs AS blob ON blob.hash = reach.hash) ON TRUE";
+        hydrate_model_call = "WITH RECURSIVE root AS (SELECT record_ref AS hash FROM model_call_records WHERE session_id = ?2 AND run = ?3 AND call = ?4),
+             reach AS (SELECT root.hash FROM root WHERE root.hash IS NOT NULL UNION
+                 SELECT edge.child_hash FROM blob_edges AS edge JOIN reach ON edge.parent_hash = reach.hash
+                 JOIN blobs AS parent ON parent.hash = reach.hash
+                 WHERE NOT (reach.hash = ANY(?1::text[])) AND NOT (edge.child_hash = ANY(?1::text[]))
+                   AND CASE
+                       WHEN parent.encoding <> 1 OR octet_length(parent.content) < 6 THEN TRUE
+                       WHEN get_byte(parent.content, 4) < 128
+                            OR get_byte(parent.content, 5) >= 128 THEN TRUE
+                       ELSE (get_byte(parent.content, 4) - 128) + get_byte(parent.content, 5) * 128
+                            NOT BETWEEN 1000 AND 1999
+                   END)
+             SELECT root.hash, blob.hash, blob.encoding, blob.content
+             FROM root LEFT JOIN (reach JOIN blobs AS blob ON blob.hash = reach.hash) ON TRUE";
         /// Effect `?3` of execution `?2`'s Admission node, as [`Self::hydrate_exec`] reads an execution's.
         hydrate_admission = "WITH RECURSIVE root AS (SELECT admission_ref AS hash FROM effect_admissions WHERE exec_key = ?2 AND effect_id = ?3),
              reach AS (SELECT root.hash FROM root WHERE root.hash IS NOT NULL UNION
@@ -497,7 +511,7 @@ pub(crate) async fn graph_closure(
     Ok(GraphClosure { nodes, opaque })
 }
 
-async fn walk_within(
+pub(super) async fn walk_within(
     tx: &mut PgConnection,
     roots: &[NodeId],
     limits: &DecodeLimits,
@@ -739,6 +753,10 @@ async fn hydrate_rows(connection: &mut PgConnection, owner: &RootOwner) -> Answe
             .bind(owner.stored())
             .bind(number::<i64>(run.0)?)
             .bind(number::<i64>(ordinal.0)?),
+        RootOwner::ModelCall(key) => query(sql.hydrate_model_call.sql())
+            .bind(key.session.as_str())
+            .bind(key.call.owner_column())
+            .bind(key.call.call_column()),
         RootOwner::EffectAdmission { exec, effect } => query(sql.hydrate_admission.sql())
             .bind(exec.stored())
             .bind(effect.0.to_vec()),
@@ -812,6 +830,10 @@ pub(super) async fn root_of(
             .bind(owner.stored())
             .bind(number::<i64>(run.0)?)
             .bind(number::<i64>(ordinal.0)?),
+        RootOwner::ModelCall(key) => query(super::model_calls::SQL.root.sql())
+            .bind(key.session.as_str())
+            .bind(key.call.owner_column())
+            .bind(key.call.call_column()),
         RootOwner::EffectAdmission { exec, effect } => query(sql.graph.admission_root.sql())
             .bind(exec.stored())
             .bind(effect.0.to_vec()),

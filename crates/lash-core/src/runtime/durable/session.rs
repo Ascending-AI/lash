@@ -164,7 +164,7 @@ pub trait TurnServices: Send + Sync {
         &self,
         _cx: &ActorContext,
         _row: &TurnRow,
-        _record: &crate::LlmCallRecord,
+        _call_id: &crate::LlmCallId,
     ) -> Result<(), TurnError> {
         Ok(())
     }

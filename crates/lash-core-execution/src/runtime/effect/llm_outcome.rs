@@ -18,6 +18,9 @@ pub struct RuntimeLlmCallOutcome {
 #[derive(Clone, Debug, PartialEq, Serialize, Deserialize)]
 #[serde(deny_unknown_fields)]
 pub struct LlmStreamRecord {
+    /// Actual provider attempt whose stream the receipt derives, even when
+    /// its accepted tail has not sealed a call record yet.
+    pub attempt: Option<u32>,
     /// The reasoning blocks the live stream already published, so the driver
     /// publishes the completed response's remaining reasoning the same way on
     /// every derivation.

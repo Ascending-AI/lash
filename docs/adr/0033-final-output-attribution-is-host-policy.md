@@ -11,7 +11,8 @@ discard facts or select an arbitrary call.
 
 Lash exposes execution facts at call granularity: provider-reported
 `ExecutionEvidence` and the attempt ledger, aggregated as `LlmCallRecord`
-entries on the turn report (ADRs 0031 and 0032). Lash computes no turn-level or
+records read through `DurableSession::read_model_calls` or
+`committed_turns_with_calls` (ADRs 0031 and 0032). Lash computes no turn-level or
 session-level model attribution and no final-output provenance tag.
 
 Hosts compose any higher-level attribution from those records and their
@@ -40,5 +41,5 @@ host policy over the outcome and its issues.
 ## Implementation
 
 [Turn report vocabulary](../../crates/lash-core-execution/src/runtime/vocabulary.rs)
-carries `llm_calls` and the outcome; [call records](../../crates/lash-sansio/src/llm/types.rs)
+describes turn outcomes; retained per-call reads and [call records](../../crates/lash-sansio/src/llm/types.rs)
 carry provider evidence and attempt identity.

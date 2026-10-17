@@ -86,6 +86,8 @@ pub struct EffectKey(pub Arc<[u8]>);
 pub enum RootOwner {
     /// `exec_snapshots`.
     Exec(ExecKey),
+    /// A retained model call, addressed exactly as its prompt.
+    ModelCall(super::PromptCallKey),
     /// `run_records`.
     RunFact {
         owner: OwnerKey,
@@ -126,6 +128,7 @@ impl RootOwner {
     pub fn source(&self) -> RootSource {
         match self {
             Self::Exec(_) => RootSource::Exec,
+            Self::ModelCall(_) => RootSource::ModelCall,
             Self::RunFact { .. } => RootSource::RunFact,
             Self::EffectAdmission { .. } => RootSource::EffectAdmission,
             Self::TurnPhase { .. } => RootSource::TurnPhase,
@@ -481,6 +484,11 @@ impl DomainWrite {
     pub fn publications(&self) -> Vec<RootChange> {
         let one = |change: Option<RootChange>| change.into_iter().collect();
         match self {
+            Self::ModelCall(write) => one(change(
+                RootOwner::ModelCall(write.key.clone()),
+                None,
+                Some(write.record),
+            )),
             Self::ExecRoot(ExecRootWrite::Put {
                 exec,
                 expected_root,
@@ -614,7 +622,8 @@ impl DomainWrite {
             | Self::SessionClose(_)
             | Self::ActorPark { .. }
             | Self::SessionMail(_)
-            | Self::Prompt(_) => Vec::new(),
+            | Self::Prompt(_)
+            | Self::ModelCallPin(_) => Vec::new(),
         }
     }
 }

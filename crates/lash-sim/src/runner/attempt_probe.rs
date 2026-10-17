@@ -157,7 +157,7 @@ async fn probe_session(
         transport.as_ref(),
         &scripts,
         Vec::new(),
-        &events.snapshot().await,
+        &session.durable(),
         reopen.as_ref(),
     )
     .await

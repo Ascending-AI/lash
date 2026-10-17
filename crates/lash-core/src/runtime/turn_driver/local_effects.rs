@@ -107,7 +107,7 @@ impl RuntimeEffectLocalRunner for LocalTurnEffectRunner {
                     &stop,
                     super::streaming::LlmCallDispatch { provider },
                 ))
-                .await;
+                .await?;
                 Ok(RuntimeEffectOutcome::LlmCall {
                     result: Box::new(result),
                     text_streamed,
@@ -269,7 +269,10 @@ pub(super) fn turn_effect_executor(
         .with_definition_engines(driver.host.core.process_engines.clone())
         .with_metrics(driver.host.core.tracing.metrics().clone())
         .with_trace(driver.trace.clone()),
-        llm_calls: Vec::new(),
+        pending_model_calls: Vec::new(),
+        staged_model_calls: Vec::new(),
+        model_call_ordinal: driver.model_call_ordinal,
+        sealed_attempt_count: 0,
         provider_panic: None,
         failure_evidence: Vec::new(),
         session_services: Arc::clone(&driver.session_services),

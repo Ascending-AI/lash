@@ -139,6 +139,13 @@ effect the checkpoint names.
   provider already answered and charged for it. A cell may hold the derived
   response until its first save
   ([ADR 0142](0142-a-cells-first-save-carries-its-turns-model-response.md)).
+  The call's sealed fact and `model_call_records` row commit beside a sealed
+  receipt, or in the existing commit that settles an accepted cell's tail.
+  The receipt carries `call_id`; consuming it retains the call record.
+  Dispatch reservations retain every attempt ordinal before sending. A
+  restoring owner records lost observations as `Interrupted`/`Unobserved`,
+  with unknown usage. An accepted tail's pending identity survives receipt
+  consumption until its settlement commits.
 - Streaming is not durable. Deltas go to the live replay store; a re-sent call
   retracts what its earlier attempts streamed with one `ModelAttemptReset`
   read back from the live replay, then streams under ids of its own
@@ -168,8 +175,10 @@ a repackaged copy of committed state.
 `TurnFinalized` carries only `session_id`, `turn_id` and the committed
 `TurnCommitOutcome` kind. Hosts read that exact turn through
 `DurableSession::committed_turn`; plugins use
-`SessionReadService::committed_turn`. Both read the existing terminal, receipt,
-transcript and tool-call ledger on any node; model-call billing belongs at
+`SessionReadService::committed_turn`. Both read the existing terminal,
+transcript, tool-call ledger and retained model-call records on any node.
+`read_model_calls` addresses each call by turn and call id, and
+`committed_turns_with_calls` pages both kinds of call. Model-call billing belongs at
 the provider seam (FIG-6547). `TurnHookReport` likewise exposes only the
 pre-commit facts the callback actually has: the outcome and the tool-call
 records, without invented usage, execution metrics or issues.

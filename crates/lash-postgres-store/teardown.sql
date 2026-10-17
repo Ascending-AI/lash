@@ -118,6 +118,10 @@ DROP TABLE IF EXISTS lash_actors CASCADE;
 
 DROP TABLE IF EXISTS lash_actor_mail CASCADE;
 
+DROP TABLE IF EXISTS lash_model_call_pins CASCADE;
+
+DROP TABLE IF EXISTS lash_model_call_records CASCADE;
+
 DROP TABLE IF EXISTS lash_run_records CASCADE;
 
 DROP TABLE IF EXISTS lash_session_close CASCADE;

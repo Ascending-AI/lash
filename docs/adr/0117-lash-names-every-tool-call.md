@@ -187,7 +187,7 @@ references by turn and decodes each named turn once, including for missing
 ids; no read scans session history to locate an opaque call id. The enclosing
 transcript entry's turn provenance supplies a cell's turn. Live observation
 envelopes carry the turn, and collected activity announces it in `TurnStarted`.
-`committed_turns_with_tool_calls` opts into the same ledger decoder for only
+`committed_turns_with_calls` opts into the same ledger decoder for only
 the returned page's turns; `committed_turns` reads no call bodies. Execution pins retire independently of the archival body.
 
 Only the model-facing calls block is bounded, by `prompt_max_tool_calls` and the

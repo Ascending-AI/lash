@@ -139,6 +139,7 @@ CREATE INDEX IF NOT EXISTS idx_retirement_frontier_queue
 CREATE VIEW IF NOT EXISTS graph_root_catalog AS
     SELECT 'exec' AS source, root_ref FROM exec_snapshots WHERE root_ref IS NOT NULL
     UNION ALL SELECT 'run_fact', record_ref FROM run_records WHERE record_ref IS NOT NULL
+    UNION ALL SELECT 'model_call', record_ref FROM model_call_records
     UNION ALL SELECT 'admission', admission_ref FROM effect_admissions
     UNION ALL SELECT 'phase', checkpoint_ref FROM turn_phases WHERE checkpoint_ref IS NOT NULL
     UNION ALL SELECT 'working', working_execution_ref FROM turn_phases
@@ -348,6 +349,15 @@ pub(super) fn root_of(tx: &Connection, owner: &RootOwner) -> GraphAnswer<Option<
                 owner.stored(),
                 integer::<i64>(run.0)?,
                 integer::<i64>(ordinal.0)?
+            ],
+        )?,
+        RootOwner::ModelCall(key) => one(
+            tx,
+            super::model_calls::SQL.root.sql(),
+            [
+                key.session.as_str(),
+                &key.call.owner_column(),
+                &key.call.call_column(),
             ],
         )?,
         RootOwner::EffectAdmission { exec, effect } => one(

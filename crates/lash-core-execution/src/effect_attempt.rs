@@ -7,8 +7,11 @@ use std::sync::{Arc, Mutex};
 #[derive(Clone)]
 pub struct EffectAttempt {
     trace_id: lash_trace::TraceAttemptId,
+    model_call_owner: Option<lash_durable::domain::ModelCallOwner>,
     fault: Arc<Mutex<Option<RuntimeEffectControllerError>>>,
     changed: Arc<tokio::sync::Notify>,
+    model_tasks: Arc<Mutex<Vec<crate::task::JoinHandle<()>>>>,
+    model_calls: Arc<Mutex<Vec<lash_durable::domain::model_calls::OwnedModelCall>>>,
 }
 
 impl Default for EffectAttempt {
@@ -18,13 +21,43 @@ impl Default for EffectAttempt {
                 "attempt:{}",
                 uuid::Uuid::new_v4().simple()
             )),
+            model_call_owner: None,
             fault: Arc::default(),
             changed: Arc::default(),
+            model_calls: Arc::default(),
+            model_tasks: Arc::default(),
         }
     }
 }
 
 impl EffectAttempt {
+    pub(crate) fn with_model_call_owner(
+        mut self,
+        owner: Option<lash_durable::domain::ModelCallOwner>,
+    ) -> Self {
+        self.model_call_owner = owner;
+        self
+    }
+    pub fn model_call_owner(&self) -> Option<&lash_durable::domain::ModelCallOwner> {
+        self.model_call_owner.as_ref()
+    }
+    pub fn record_model_call(&self, call: lash_durable::domain::model_calls::OwnedModelCall) {
+        self.model_calls.lock_recover().push(call);
+    }
+    pub(crate) fn model_calls(&self) -> Vec<lash_durable::domain::model_calls::OwnedModelCall> {
+        self.model_calls.lock_recover().clone()
+    }
+
+    pub(crate) fn retain_model_task(&self, task: crate::task::JoinHandle<()>) {
+        self.model_tasks.lock_recover().push(task);
+    }
+    pub(crate) async fn settle_model_tasks(&self) {
+        let tasks = std::mem::take(&mut *self.model_tasks.lock_recover());
+        for task in tasks {
+            let _ = task.await;
+        }
+    }
+
     pub(crate) fn trace_id(&self) -> lash_trace::TraceAttemptId {
         self.trace_id.clone()
     }
