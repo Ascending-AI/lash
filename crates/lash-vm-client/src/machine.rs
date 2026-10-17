@@ -475,7 +475,13 @@ impl RemoteMachine {
             match step {
                 RunStep::HostRead { id, kind, request } => {
                     let host = Arc::clone(&self.host);
-                    let answer = answer(host.as_ref(), kind, &request).await?;
+                    let scope = self.checkout.as_ref().and_then(Checkout::phase_scope);
+                    let started = scope.as_ref().map(|scope| scope.recorder.now());
+                    let answer = answer(host.as_ref(), kind, &request).await;
+                    if let (Some(scope), Some(start)) = (scope, started) {
+                        scope.record("host_body", start);
+                    }
+                    let answer = answer?;
                     step = self
                         .with(move |checkout| checkout.host_answer(id, answer))
                         .await?;

@@ -290,6 +290,7 @@ pub struct Service {
     #[cfg(feature = "testing")]
     call_hold: Option<CallHold>,
     config: Arc<PoolConfig>,
+    phases: Option<crate::phases::Recorder>,
     pool: Arc<Mutex<Option<WorkerPool>>>,
     /// The parent's staging directory, opened on first use.
     spools: Arc<std::sync::OnceLock<Result<Arc<SpoolRoot>, StageFault>>>,
@@ -317,6 +318,7 @@ impl Service {
             #[cfg(feature = "testing")]
             call_hold: None,
             config: Arc::new(config),
+            phases: None,
             pool: Arc::new(Mutex::new(None)),
             spools: Arc::default(),
             budget: None,
@@ -329,6 +331,13 @@ impl Service {
     #[cfg(feature = "testing")]
     pub fn with_worker_receipts(mut self) -> Self {
         self.receipts = Some(Arc::new(Mutex::new(Vec::new())));
+        self
+    }
+
+    /// Observe bounded effect phases, including pre-Ready startup. Select before
+    /// starting or cloning the service; overflow remains explicit in the report.
+    pub fn with_effect_phases(mut self, capacity: usize) -> Self {
+        self.phases = Some(crate::phases::Recorder::new(capacity));
         self
     }
 
@@ -362,7 +371,7 @@ impl Service {
                     detail: lash_vm_protocol::Detail::new(error),
                 })
             })?;
-        let pool = WorkerPool::new(self.config.as_ref().clone())?;
+        let pool = WorkerPool::new_observed(self.config.as_ref().clone(), self.phases.clone())?;
         *slot = Some(pool.clone());
         Ok(pool)
     }

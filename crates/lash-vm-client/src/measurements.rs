@@ -189,8 +189,11 @@ impl IpcTraffic {
         message: Option<&lash_vm_protocol::WorkerMessage>,
         bytes: usize,
     ) {
+        self.received[Self::worker_kind(message)].record(bytes);
+    }
+    pub(crate) fn worker_kind(message: Option<&lash_vm_protocol::WorkerMessage>) -> usize {
         use lash_vm_protocol::WorkerMessage as M;
-        let kind = match message {
+        match message {
             Some(M::Refused { .. }) => 0,
             Some(M::Progress { .. }) => 1,
             Some(M::LimitExceeded { .. }) => 2,
@@ -208,8 +211,7 @@ impl IpcTraffic {
             Some(M::ResetDone { .. }) => 14,
             Some(M::Prepared { .. }) => 15,
             None => 16,
-        };
-        self.received[kind].record(bytes);
+        }
     }
     /// Refuse counter resets, missing frames, or a decode failure.
     pub fn difference(&self, before: &Self) -> Option<Self> {

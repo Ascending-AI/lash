@@ -10,7 +10,9 @@ pub use lash_vm_broker::kernel::state as graph;
 pub mod ipc;
 mod machine;
 mod measurements;
+mod phases;
 mod pool;
+pub use phases::{EffectPhase, EffectPhases};
 pub mod service;
 #[cfg(any(test, feature = "testing"))]
 mod testing;

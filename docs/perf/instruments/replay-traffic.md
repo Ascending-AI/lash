@@ -85,3 +85,91 @@ interval cannot be exported.
 The named **TRAFFIC-CONSERVATION** laws exercise socket bundling and frame
 splitting, two updates to one SQLite page, a checkpoint, overflow and active
 boundaries, report refusal, and a real TypeScript replay's existing totals.
+
+## Effect phases and the first document on a worker
+
+Run the maintained local SQLite experiment (three alternating on/off pairs):
+
+```sh
+. ./env.sh
+python3 scripts/effect_phases.py capture --out .kiln/FIG-6625/effect-phases \
+  --build-report .kiln/FIG-6625/effect-phases-build.json
+```
+
+It builds one optimized parent/worker group through Kiln, then sends two equal
+TypeScript documents through `send()` on each fresh SQLite session. Each reads
+the clock and finishes with its type. Successful replay validates every terminal
+and scripted call. The `--effect-phases-off` control retains the same identity, terminal and
+worker execution receipts while omitting phase timestamps. Off/on useful-work
+comparisons require equal terminal result digests, model calls,
+worker executions and wire frame counts. Physical byte counts remain separate: Parked/Ended envelopes carry data-dependent
+checkpoint/seal identities and runtime meters. Their encoded size is not the
+terminal result's identity.
+Every observed population still requires exact byte conservation against its own
+frame totals. The observer changes neither
+billing nor dispatch. Preparation of the helper catalog and kernel library
+still precedes Ready; the observer measures the spawn-to-Ready envelope without
+moving that work into a turn.
+
+Each observed process writes `turn-effect-phases.jsonl` and `critical-path.txt`.
+To read a retained file again:
+
+```sh
+python3 scripts/effect_phases.py read <run>/turn-effect-phases.jsonl
+python3 scripts/effect_phases.py overhead <capture>/observer-overhead.json
+```
+
+For another single code-mode workload, use `lash-perf replay <workload>
+--effect-phases <path>/turn-effect-phases.jsonl --store-dir <dir> --out
+<receipt.json>`. The generic reader requires two document invocations on
+the same PID/start epoch and at least one complete host read. Missing evidence
+refuses that comparison. This mode refuses duration-history admission; its
+observer identity belongs to the phase sidecar, not ordinary replay cohorts.
+The service opt-in is `WorkerService::with_effect_phases(capacity)`, selected
+before its pool starts; `WorkerPool::effect_phases()` returns bounded events
+and an explicit dropped count. Replay retains at most 32,768 events. Ordinary
+services retain no phase recorder and take no additional phase timestamps.
+Events contain identities, endpoints and encoded frame sizes, never payloads,
+arguments, results or copies of committed state.
+
+All timestamps are host `Instant` nanoseconds since observer creation. Worker
+progress is observed when decoded by the host, including socket/scheduling
+and decode delay: it is neither a worker timestamp nor CPU time. A host-read
+ID is scoped by pool, lease, owner/frame epoch and worker PID/start epoch;
+the turn comes from explicit event cuts, and document/owner from the lease.
+The header preserves the replay producer's identity and experiment, including
+configured backend policy, worker geometry and observer settings, plus host and
+worker artifact SHA-256 and terminal evidence. The replay experiment's round
+window stays distinct from the phase recorder's startup/lease window. PID reuse never joins effects.
+No deployed exporter, tracefs or eBPF is needed or claimed.
+
+The text prints one host-read critical path from decoded request to observed
+Computing acknowledgement. Its host-body interval includes request value
+decoding, the host callback and answer value encoding. Answer frame encoding
+and socket send remain separate. Dispatch, codec and resume residual includes
+the other host work and worker/socket/scheduling delay. The request frame's
+receive wait precedes this critical path and can include earlier guest work.
+Every frame's bytes include the header; all recorded frame events reconcile
+against cumulative pool frame totals, including Ready and resets. Effect
+frames are a subset of those totals, never an added traffic charge.
+
+First/second document rows compare each turn/owner/document's first activation,
+from document start to first park/end, on the same worker. They retain checkout,
+preceding prepare/dispatch time, frame totals and encode/send/receive/host-body
+phase totals separately. Re-executing the same document in a later turn is a
+second invocation even though the owner still names the same session frame. They do not claim whole-turn
+latency, isolated compiler time or preparation subphases within pre-Ready
+startup. Startup, checkout, document and receive intervals can nest or overlap;
+never add these envelopes. Missing endpoints, worker loss, dropped events,
+undecodable frames or a frame residual refuse a qualified report.
+
+`observer-overhead.json` retains experiment identity, raw paired
+`perf stat -e instructions:u` counts, perf running fields, load1 and command
+peak RSS. Instructions include the host and inherited workers, startup and
+export. The observer cost includes bounded event allocation and sidecar
+serialization. Each population runs under an 8 GiB address-space cap and
+`/usr/bin/time -v`; retained stores are fresh per sample. Temporary files and host staging live
+under that sample's own directory. The text reports raw
+fractional instruction deltas and their median, with no threshold. Wall time
+on this shared host remains unqualified. Build once and reuse its exact
+report with `--no-build --build-report <report>` for subsequent captures.

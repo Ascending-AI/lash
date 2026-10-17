@@ -83,6 +83,7 @@ struct State {
     failed: bool,
 }
 struct Pool {
+    phases: Option<crate::phases::Recorder>,
     epoch: u64,
     measurements: SharedMeasurements,
     config: PoolConfig,
@@ -96,9 +97,16 @@ struct Pool {
 pub struct WorkerPool(Arc<Pool>);
 impl WorkerPool {
     pub fn new(config: PoolConfig) -> Result<Self, PoolError> {
+        Self::new_observed(config, None)
+    }
+    pub(crate) fn new_observed(
+        config: PoolConfig,
+        phases: Option<crate::phases::Recorder>,
+    ) -> Result<Self, PoolError> {
         config.validate()?;
         static NEXT_EPOCH: AtomicU64 = AtomicU64::new(1);
         let pool = Self(Arc::new(Pool {
+            phases,
             epoch: NEXT_EPOCH.fetch_add(1, Ordering::Relaxed),
             measurements: Arc::new(Mutex::new(Measurements::default())),
             config,
@@ -122,6 +130,13 @@ impl WorkerPool {
             state.idle.push(worker);
         }
         Ok(pool)
+    }
+    /// Bounded diagnostic events, separate from billing and worker deadlines.
+    pub fn effect_phases(&self) -> Option<crate::EffectPhases> {
+        self.0
+            .phases
+            .as_ref()
+            .map(crate::phases::Recorder::snapshot)
     }
     pub fn config(&self) -> &PoolConfig {
         &self.0.config
@@ -223,9 +238,21 @@ impl Pool {
         self.spawn_ready_until(Instant::now() + self.startup_watchdog())
     }
     fn spawn_ready_until(&self, deadline: Instant) -> Result<Worker, PoolError> {
+        let phase_start = self.phases.as_ref().map(crate::phases::Recorder::now);
         let started = Instant::now();
         let mut worker = Worker::spawn(&self.config)?;
         worker.measurements = Some(self.measurements.clone());
+        worker.phases = self.phases.as_ref().map(|recorder| crate::phases::Scope {
+            recorder: recorder.clone(),
+            pid: worker.pid(),
+            process_epoch: worker.process_epoch.clone(),
+            lease: 0,
+            owner_epoch: 0,
+            frame_epoch: 0,
+            owner: None,
+            document: None,
+            effect: None,
+        });
         let deadline = deadline.min(Instant::now() + self.startup_watchdog());
         // Bootstrap silence starts before exec, not at the first socket read.
         let frame = worker
@@ -238,6 +265,9 @@ impl Pool {
                 protocol_version,
                 crate_version,
             } => {
+                if let (Some(scope), Some(start)) = (&worker.phases, phase_start) {
+                    scope.record("spawn_to_ready", start);
+                }
                 check_worker_protocol_version(
                     protocol_version,
                     env!("CARGO_PKG_VERSION"),
@@ -446,6 +476,21 @@ enum SplitThen {
 }
 
 impl Checkout {
+    pub(crate) fn phase_scope(&self) -> Option<crate::phases::Scope> {
+        self.worker
+            .as_ref()
+            .and_then(|worker| worker.phases.clone())
+    }
+    fn phase_identity(&mut self) {
+        if let Some(scope) = self
+            .worker
+            .as_mut()
+            .and_then(|worker| worker.phases.as_mut())
+        {
+            scope.owner = self.owner.as_ref().map(|owner| owner.as_str().to_owned());
+            scope.document = self.document.clone();
+        }
+    }
     fn charge_cpu(&self, cpu_nanos: u64) -> Result<(), PoolError> {
         #[cfg(feature = "testing")]
         {
@@ -555,6 +600,10 @@ impl Checkout {
         self.execution_recorded = false;
         self.owner = Some(start.owner.clone());
         self.document = Some(document.to_owned());
+        self.phase_identity();
+        if let Some(scope) = self.phase_scope() {
+            scope.point("document_start");
+        }
         self.print_budget = start.bounds.memory;
         self.started = true;
         self.unsent_start = Some(Box::new(start));
@@ -589,6 +638,8 @@ impl Checkout {
         let timeout = self.pool.config.protocol.no_response_watchdog;
         let start = self.unsent_start.take();
         let deliveries = std::mem::take(&mut self.deliveries);
+        let scope = self.phase_scope();
+        let encode_start = scope.as_ref().map(|scope| scope.recorder.now());
         let together = self.worker.as_ref().and_then(|worker| {
             worker
                 .codec
@@ -605,6 +656,9 @@ impl Checkout {
                 .ok()
                 .filter(|bytes| worker.codec.check_frame(bytes).is_ok())
         });
+        if let (Some(scope), Some(start)) = (&scope, encode_start) {
+            scope.record("encode_run", start);
+        }
         if let Some(bytes) = together {
             self.grants.clear();
             let message = self.exchange_encoded(&bytes, timeout)?;
@@ -699,6 +753,9 @@ impl Checkout {
         if let Err(error) = self.effect_bound(answer.0.len()) {
             self.discard();
             return Err(error);
+        }
+        if let Some(scope) = self.phase_scope() {
+            scope.point("answer");
         }
         self.pending = None;
         let message = self.exchange(
@@ -840,6 +897,7 @@ impl Checkout {
             return Err(PoolError::breach(SequenceFault::CheckoutAlreadyStarted));
         }
         self.owner = Some(owner.clone());
+        self.phase_identity();
         self.prepared = true;
         match self.exchange(
             ParentMessage::Prepare { owner, request },
@@ -920,10 +978,14 @@ impl Checkout {
             message,
         };
         let worker = self.worker.as_mut().ok_or_else(PoolError::eof)?;
+        let encode_start = worker.phases.as_ref().map(|scope| scope.recorder.now());
         let bytes = worker
             .codec
             .encode_parent(&frame)
             .map_err(PoolError::from)?;
+        if let (Some(scope), Some(start)) = (&worker.phases, encode_start) {
+            scope.record("encode", start);
+        }
         if matches!(
             frame.message,
             ParentMessage::Start(_) | ParentMessage::Prepare { .. }
@@ -1115,6 +1177,19 @@ impl Checkout {
                         }
                         self.execution_recorded = true;
                     }
+                    if next == WorkerPhase::Computing
+                        && let Some(scope) = self
+                            .worker
+                            .as_mut()
+                            .and_then(|worker| worker.phases.as_mut())
+                    {
+                        scope.point(if scope.effect.is_some() {
+                            "resume_observed"
+                        } else {
+                            "compute_observed"
+                        });
+                        scope.effect = None;
+                    }
                     phase = Some(next);
                     #[cfg(feature = "testing")]
                     {
@@ -1176,6 +1251,13 @@ impl Checkout {
                 | WorkerMessage::Delivered
                 | WorkerMessage::Sealed { .. }
                 | WorkerMessage::Prepared { .. }) => {
+                    if let Some(scope) = self.phase_scope() {
+                        scope.point(match &message {
+                            WorkerMessage::Ended { .. } => "document_end",
+                            WorkerMessage::Parked { .. } => "document_park",
+                            _ => "step_observed",
+                        });
+                    }
                     self.resettable = true;
                     return Ok(message);
                 }
@@ -1198,6 +1280,9 @@ impl Checkout {
     }
     fn discard_for(&mut self, failed: bool) {
         if let Some(worker) = self.worker.take() {
+            if let Some(scope) = &worker.phases {
+                scope.point("loss");
+            }
             let cpu = self.pool.discard(worker, failed);
             let _ = self.charge_cpu(cpu);
             self.credited_cpu = cpu;
@@ -1248,6 +1333,7 @@ pub mod runtime_ops {
         ) -> Result<Checkout, PoolError> {
             #[cfg(feature = "testing")]
             let checkout_started = Instant::now();
+            let phase_start = self.0.phases.as_ref().map(crate::phases::Recorder::now);
             let queue_started = Instant::now();
             let deadline = Instant::now() + self.0.config.deadlines.checkout;
             let mut state = lock(&self.0.state);
@@ -1348,6 +1434,17 @@ pub mod runtime_ops {
                         measurements.counters.checkouts += 1;
                         if worker.used {
                             measurements.counters.reuses += 1;
+                        }
+                    }
+                    if let Some(scope) = &mut worker.phases {
+                        scope.lease = lease.0;
+                        scope.owner_epoch = owner_epoch.0;
+                        scope.frame_epoch = frame_epoch.0;
+                        scope.owner = None;
+                        scope.document = None;
+                        scope.effect = None;
+                        if let Some(start) = phase_start {
+                            scope.record("checkout", start);
                         }
                     }
                     worker.used = true;

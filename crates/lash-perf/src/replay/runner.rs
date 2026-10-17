@@ -35,6 +35,8 @@ pub struct RunOptions {
     pub worker_profile_dir: std::path::PathBuf,
     pub sql_shapes: Option<std::path::PathBuf>,
     pub traffic: bool,
+    pub effect_phases: Option<std::path::PathBuf>,
+    pub effect_phases_off: bool,
     pub heap: super::ReplayHeapArgs,
 }
 
@@ -206,6 +208,18 @@ pub async fn run(workload: &Workload, options: &RunOptions) -> Result<WorkloadRe
         .then(lash_sqlite_store::write_observer::Collector::install)
         .transpose()
         .map_err(|e| anyhow::anyhow!(e))?;
+    let mut phase_capture = options
+        .effect_phases
+        .as_ref()
+        .map(|path| {
+            super::effect_phases::Capture::new(
+                path,
+                options.effect_phases_off,
+                workload,
+                &options.identity,
+            )
+        })
+        .transpose()?;
     let (stores, probe, keep) = open_stores(&options.store, &workload.name).await?;
     let mut experiment = options.identity.experiment(serde_json::json!({
         "turns": options.turns.unwrap_or(workload.turn_count()).min(workload.turn_count()),
@@ -262,11 +276,25 @@ pub async fn run(workload: &Workload, options: &RunOptions) -> Result<WorkloadRe
             )
         })
         .transpose()?;
+    let workers = workers.map(|service| {
+        if options.effect_phases.is_some() && !options.effect_phases_off {
+            service.with_effect_phases(32_768)
+        } else {
+            service
+        }
+    });
     let mut geometry: serde_json::Value = serde_json::from_str(&experiment.configured_geometry)?;
     geometry["worker"] = serde_json::json!(workers.as_ref().map_or_else(
         || Some("none (standard protocol)".to_owned()),
         |service| crate::perf_support::git::artifact_sha256(&service.config().entry.executable)
     ));
+    if options.effect_phases.is_some() {
+        geometry["effect_phases"] = serde_json::json!(if options.effect_phases_off {
+            "off; identity receipts only"
+        } else {
+            "bounded host-clock effect phases"
+        });
+    }
     experiment.configured_geometry = geometry.to_string();
     let core = build_core(
         workload,
@@ -310,6 +338,17 @@ pub async fn run(workload: &Workload, options: &RunOptions) -> Result<WorkloadRe
     let turns = lanes.first().map_or(0, |lane| lane.inputs.len());
     let meter = Meter::install(probe, pool, options.sql_shapes.is_some(), traffic)?;
     let backend_name = meter.backend().to_owned();
+    if let Some(capture) = &mut phase_capture {
+        capture.attach(
+            workers
+                .as_ref()
+                .map(lash::vm::WorkerService::pool)
+                .transpose()?
+                .as_ref(),
+            &backend_name,
+            &experiment,
+        )?;
+    }
     let mut rounds = Vec::with_capacity(turns);
     let mut compactions = Vec::new();
     let mut frame_depth = 0;
@@ -341,18 +380,29 @@ pub async fn run(workload: &Workload, options: &RunOptions) -> Result<WorkloadRe
             )?);
         }
         let (before, shapes_before, traffic_before) = meter.read_with_shapes(model_calls).await;
+        let phase_first = phase_capture
+            .as_ref()
+            .and_then(super::effect_phases::Capture::cut);
         let started = Instant::now();
         let outcomes = tokio::time::timeout(
             ROUND_WATCHDOG,
-            futures_util::future::join_all(lanes.iter().map(|lane| send(lane, turn))),
+            futures_util::future::join_all(
+                lanes
+                    .iter()
+                    .map(|lane| send(lane, turn, phase_capture.is_some())),
+            ),
         )
         .await
         .with_context(|| format!("{} turn {} never settled", workload.name, turn + 1))?;
         let wall_ms = started.elapsed().as_secs_f64() * 1_000.0;
+        let mut result_digests = Vec::new();
         for (lane, outcome) in lanes.iter().zip(outcomes) {
-            outcome.with_context(|| {
+            let digest = outcome.with_context(|| {
                 format!("{} session {} turn {}", workload.name, lane.index, turn + 1)
             })?;
+            if let Some(digest) = digest {
+                result_digests.push(digest);
+            }
             let (scripted, _) = &lane.inputs[turn];
             let calls = book.take_calls(lane.index, scripted.ordinal);
             ensure!(
@@ -371,6 +421,9 @@ pub async fn run(workload: &Workload, options: &RunOptions) -> Result<WorkloadRe
             model_calls += calls.scripted as u64;
         }
         let (after, shapes_after, traffic_after) = meter.read_with_shapes(model_calls).await;
+        if let Some(capture) = &mut phase_capture {
+            capture.turn(turn + 1, phase_first, workload.sessions, result_digests);
+        }
         if profile_end == Some(turn + 1)
             && let Some(window) = heap_window.take()
         {
@@ -458,6 +511,9 @@ pub async fn run(workload: &Workload, options: &RunOptions) -> Result<WorkloadRe
             }))?,
         )?;
     }
+    if let Some(capture) = phase_capture {
+        capture.finish()?;
+    }
     drop(meter);
     for lane in lanes {
         let _ = lane.session.close().await;
@@ -488,7 +544,7 @@ pub async fn run(workload: &Workload, options: &RunOptions) -> Result<WorkloadRe
 
 /// Send `lane`'s turn `turn` and follow it to its outcome; refuse anything
 /// but an answer.
-async fn send(lane: &Lane, turn: usize) -> Result<()> {
+async fn send(lane: &Lane, turn: usize, observe_result: bool) -> Result<Option<String>> {
     let (_, input) = &lane.inputs[turn];
     let handle = lane
         .session
@@ -501,7 +557,17 @@ async fn send(lane: &Lane, turn: usize) -> Result<()> {
         .await
         .map_err(|error| anyhow::anyhow!("outcome: {error}"))?;
     match outcome.output() {
-        Some(output) if output.is_success() => Ok(()),
+        Some(output) if output.is_success() => {
+            if observe_result {
+                use sha2::{Digest as _, Sha256};
+                Ok(Some(format!(
+                    "{:x}",
+                    Sha256::digest(serde_json::to_vec(&output.result.outcome)?)
+                )))
+            } else {
+                Ok(None)
+            }
+        }
         Some(output) => bail!(
             "the turn did not answer: {:?}; issues: {:?}",
             output.status(),

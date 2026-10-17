@@ -20,6 +20,7 @@ pub struct Worker {
     pub(crate) measurements: Option<crate::measurements::SharedMeasurements>,
     pub(crate) process_epoch: Option<String>,
     pub(crate) used: bool,
+    pub(crate) phases: Option<crate::phases::Scope>,
     inbound: FrameSource,
     pub pipe: UnixStream,
     pub codec: FrameCodec,
@@ -95,6 +96,7 @@ impl Worker {
             measurements: None,
             process_epoch,
             used: false,
+            phases: None,
             inbound: FrameSource::with_capacity(config.tuning.inbound_buffer_bytes),
             pipe,
             codec: FrameCodec::new(config.protocol.decode)
@@ -126,9 +128,19 @@ impl Worker {
         kind: usize,
         timeout: Duration,
     ) -> Result<(), PoolError> {
+        let observed = self.phases.as_ref().map(|scope| scope.recorder.now());
         let started = Instant::now();
         write_frame(&mut self.pipe, bytes, started + timeout)
             .map_err(|error| error.with_silence(started.elapsed()))?;
+        if let (Some(scope), Some(start)) = (&self.phases, observed) {
+            scope.frame(
+                "send",
+                start,
+                Some("sent"),
+                Some(crate::IpcTraffic::SENT_KINDS[kind]),
+                Some(bytes.len()),
+            );
+        }
         if let Some(measurements) = &self.measurements {
             let mut measurements = measurements
                 .lock()
@@ -145,6 +157,7 @@ impl Worker {
     }
 
     pub fn receive(&mut self, deadline: Instant) -> Result<WorkerFrame, PoolError> {
+        let observed = self.phases.as_ref().map(|scope| scope.recorder.now());
         let started = Instant::now();
         let bytes = match self
             .inbound
@@ -162,12 +175,31 @@ impl Worker {
             }
             result => result.map_err(|error| error.with_silence(started.elapsed()))?,
         };
-        decode_measured(
+        let frame = decode_measured(
             &self.codec,
             &bytes,
             bytes.capacity() + self.inbound.buffer_capacity(),
             self.measurements.as_ref(),
-        )
+        );
+        if let (Some(scope), Some(start)) = (&mut self.phases, observed) {
+            if let Ok(WorkerFrame {
+                message: lash_vm_protocol::WorkerMessage::HostRead { id, .. },
+                ..
+            }) = &frame
+            {
+                scope.effect = Some(id.0);
+            }
+            let kind =
+                crate::IpcTraffic::worker_kind(frame.as_ref().ok().map(|frame| &frame.message));
+            scope.frame(
+                "receive",
+                start,
+                Some("received"),
+                Some(crate::IpcTraffic::RECEIVED_KINDS[kind]),
+                Some(bytes.len()),
+            );
+        }
+        frame
     }
 
     /// What the end of this worker's stream is to its run. The worker sets

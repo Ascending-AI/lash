@@ -6,6 +6,7 @@
 //! See `docs/perf/instruments/replay-workloads.md`.
 
 pub mod control;
+mod effect_phases;
 pub mod gate;
 pub mod meter;
 pub mod provider;
@@ -64,6 +65,12 @@ pub struct ReplayArgs {
     /// Attribute physical SQLite writes and VM transport kinds in the receipt.
     #[arg(long)]
     pub traffic: bool,
+    /// Bounded host-clock effect/worker phase JSONL (one SQLite workload).
+    #[arg(long, conflicts_with = "history")]
+    pub effect_phases: Option<PathBuf>,
+    /// Keep worker identity/terminal receipts but omit phase timestamps for calibration.
+    #[arg(long, requires = "effect_phases")]
+    pub effect_phases_off: bool,
     #[command(flatten)]
     pub heap: ReplayHeapArgs,
 }
@@ -107,6 +114,7 @@ async fn run_workloads(
     sql_shapes: Option<&std::path::Path>,
     heap: &ReplayHeapArgs,
     traffic: bool,
+    effect_phases: Option<(&std::path::Path, bool)>,
 ) -> Result<ReplayReceipt> {
     let mut identity = Identity::current();
     identity.sql_shapes = sql_shapes.is_some();
@@ -128,6 +136,8 @@ async fn run_workloads(
             sql_shapes: sql_shapes.map(std::path::Path::to_path_buf),
             heap: heap.clone(),
             traffic,
+            effect_phases: effect_phases.map(|(path, _)| path.to_path_buf()),
+            effect_phases_off: effect_phases.is_some_and(|(_, off)| off),
         };
         eprintln!(
             "replay: {} ({} turns x {} session(s))",
@@ -167,14 +177,15 @@ pub async fn run(args: &ReplayArgs) -> Result<()> {
         .iter()
         .map(|name| Ok((script::resolve(name)?, args.turns)))
         .collect::<Result<Vec<_>>>()?;
-    if args.sql_shapes.is_some() || args.heap.dhat_out.is_some() {
+    if args.sql_shapes.is_some() || args.heap.dhat_out.is_some() || args.effect_phases.is_some() {
         anyhow::ensure!(
             workloads.len() == 1,
             "attribution selects exactly one workload"
         );
     }
     anyhow::ensure!(
-        (args.sql_shapes.is_none() && !args.traffic) || args.store == StoreKind::Sqlite,
+        (args.sql_shapes.is_none() && !args.traffic && args.effect_phases.is_none())
+            || args.store == StoreKind::Sqlite,
         "--sql-shapes and --traffic are SQLite only"
     );
     if let Some(first) = args.heap.profile_turn {
@@ -213,6 +224,9 @@ pub async fn run(args: &ReplayArgs) -> Result<()> {
         args.sql_shapes.as_deref(),
         &args.heap,
         args.traffic,
+        args.effect_phases
+            .as_deref()
+            .map(|path| (path, args.effect_phases_off)),
     )
     .await?;
     print!("{}", receipt::table(&receipt));
@@ -245,6 +259,7 @@ pub async fn run_gate(args: &GateArgs) -> Result<i32> {
         None,
         &ReplayHeapArgs::default(),
         false,
+        None,
     )
     .await?;
     print!("{}", receipt::table(&receipt));
