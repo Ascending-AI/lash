@@ -20,7 +20,7 @@ use lash_kernel_doc::plan as p;
 enum Departure { Next, Return(Value), Break, Continue }
 
 /// Every plan, in the order the helpers are registered.
-pub static PLANS: &[&p::HelperPlan] = &[
+pub const PLANS: &[&p::HelperPlan] = &[
     &TS_STRING_TRIM_VALUE,
     &TS_NUMBER_DIGIT,
     &TS_NUMBER_PARSE_INT,
@@ -754,7 +754,7 @@ pub static PLANS: &[&p::HelperPlan] = &[
     &TS_GET_COMPUTED,
 ];
 
-static TS_STRING_TRIM_VALUE: p::HelperPlan = p::HelperPlan {
+const TS_STRING_TRIM_VALUE: p::HelperPlan = p::HelperPlan {
     name: "ts.string.trim_value",
     function: p::function("1e2c4cd075b48eb80bd85b68d25c9996afee079c00ea334fe52549825adc623c"),
     callees: &[
@@ -791,7 +791,7 @@ fn ts_string_trim_value(ctx: &mut dyn p::PlanContext, _entry: u32) -> Result<Val
     Ok(ctx.take(0))
 }
 
-static TS_NUMBER_DIGIT: p::HelperPlan = p::HelperPlan {
+const TS_NUMBER_DIGIT: p::HelperPlan = p::HelperPlan {
     name: "ts.number.digit",
     function: p::function("aedd9f190f9e219c66029bffa1788d46d06ada839133bed50283d05cd101998b"),
     callees: &[
@@ -918,7 +918,7 @@ fn ts_number_digit(ctx: &mut dyn p::PlanContext, _entry: u32) -> Result<Value, p
     Ok(ctx.take(0))
 }
 
-static TS_NUMBER_PARSE_INT: p::HelperPlan = p::HelperPlan {
+const TS_NUMBER_PARSE_INT: p::HelperPlan = p::HelperPlan {
     name: "ts.number.parse_int",
     function: p::function("9934402af51e4d44c2de42d6e1e8d13d411ea73be2f291946c74b28f4f28e44e"),
     callees: &[
@@ -1291,7 +1291,7 @@ fn ts_number_parse_int(ctx: &mut dyn p::PlanContext, _entry: u32) -> Result<Valu
     Ok(Value::Null)
 }
 
-static TS_NUMBER_PARSE_DECIMAL: p::HelperPlan = p::HelperPlan {
+const TS_NUMBER_PARSE_DECIMAL: p::HelperPlan = p::HelperPlan {
     name: "ts.number.parse_decimal",
     function: p::function("014ac38bc58b512103455fde371b71f4fd791c462816f788a77b1cc4925198b9"),
     callees: &[
@@ -1747,7 +1747,7 @@ fn ts_number_parse_decimal(ctx: &mut dyn p::PlanContext, _entry: u32) -> Result<
     Ok(Value::Null)
 }
 
-static TS_NUMBER_PARSE: p::HelperPlan = p::HelperPlan {
+const TS_NUMBER_PARSE: p::HelperPlan = p::HelperPlan {
     name: "ts.number.parse",
     function: p::function("d029f2e329c1a2e7fe6ff173343d97243e648bcd09d17e3e7c99706cfc22bf8a"),
     callees: &[
@@ -1934,7 +1934,7 @@ fn ts_number_parse(ctx: &mut dyn p::PlanContext, _entry: u32) -> Result<Value, p
     Ok(ctx.take(0))
 }
 
-static TS_NUMBER_PARTS: p::HelperPlan = p::HelperPlan {
+const TS_NUMBER_PARTS: p::HelperPlan = p::HelperPlan {
     name: "ts.number.parts",
     function: p::function("24c955237fca0c662d24fa9d8fd64b8121d36e21bcb5454bf347277b3085e3a4"),
     callees: &[
@@ -2055,7 +2055,7 @@ fn ts_number_parts(ctx: &mut dyn p::PlanContext, _entry: u32) -> Result<Value, p
     Ok(ctx.take(0))
 }
 
-static TS_NUMBER_LAYOUT: p::HelperPlan = p::HelperPlan {
+const TS_NUMBER_LAYOUT: p::HelperPlan = p::HelperPlan {
     name: "ts.number.layout",
     function: p::function("8f5aa21f1c7585faa3a9b1a45103b6cee210627c60bd3b1b08c5b1e3ca1e42dd"),
     callees: &[
@@ -2211,7 +2211,7 @@ fn ts_number_layout(ctx: &mut dyn p::PlanContext, _entry: u32) -> Result<Value, 
     Ok(ctx.take(0))
 }
 
-static TS_NUMBER_TO_STRING: p::HelperPlan = p::HelperPlan {
+const TS_NUMBER_TO_STRING: p::HelperPlan = p::HelperPlan {
     name: "ts.number.to_string",
     function: p::function("ce386288907700a8135d1a3f7f380692a6b0a7cfe07255797f0da39f7ef2c705"),
     callees: &[
@@ -2362,7 +2362,7 @@ fn ts_number_to_string(ctx: &mut dyn p::PlanContext, _entry: u32) -> Result<Valu
     Ok(ctx.take(0))
 }
 
-static TS_NUMBER_RATIO: p::HelperPlan = p::HelperPlan {
+const TS_NUMBER_RATIO: p::HelperPlan = p::HelperPlan {
     name: "ts.number.ratio",
     function: p::function("a943eadffe4f8b3795731cdbbf21c288bdb67898d4de7c154b63e0e697b710b2"),
     callees: &[
@@ -2432,7 +2432,7 @@ fn ts_number_ratio(ctx: &mut dyn p::PlanContext, _entry: u32) -> Result<Value, p
     Ok(ctx.take(0))
 }
 
-static TS_NUMBER_ROUND_DECIMAL: p::HelperPlan = p::HelperPlan {
+const TS_NUMBER_ROUND_DECIMAL: p::HelperPlan = p::HelperPlan {
     name: "ts.number.round_decimal",
     function: p::function("9e10f443db0367bb3a87aaed2ed6b6ee1c81f1791582898e2756e887d3eae0d5"),
     callees: &[
@@ -2540,7 +2540,7 @@ fn ts_number_round_decimal(ctx: &mut dyn p::PlanContext, _entry: u32) -> Result<
     Ok(ctx.take(0))
 }
 
-static TS_REGEXP_ESCAPED_SOURCE: p::HelperPlan = p::HelperPlan {
+const TS_REGEXP_ESCAPED_SOURCE: p::HelperPlan = p::HelperPlan {
     name: "ts.regexp.escaped_source",
     function: p::function("326719b934273dad2daaaeffe5d1dc15319a85ae0f7a72b1bf62d8062524ac95"),
     callees: &[
@@ -2771,7 +2771,7 @@ fn ts_regexp_escaped_source(ctx: &mut dyn p::PlanContext, _entry: u32) -> Result
     Ok(ctx.take(0))
 }
 
-static TS_REGEXP_SPELL: p::HelperPlan = p::HelperPlan {
+const TS_REGEXP_SPELL: p::HelperPlan = p::HelperPlan {
     name: "ts.regexp.spell",
     function: p::function("96cffb14c2793a02e2fa2b46e50a627e8cebeb324b751ed9a5335725b3164046"),
     callees: &[
@@ -2814,7 +2814,7 @@ fn ts_regexp_spell(ctx: &mut dyn p::PlanContext, _entry: u32) -> Result<Value, p
     Ok(ctx.take(0))
 }
 
-static TS_EXOTIC_ERROR_NAME: p::HelperPlan = p::HelperPlan {
+const TS_EXOTIC_ERROR_NAME: p::HelperPlan = p::HelperPlan {
     name: "ts.exotic.error_name",
     function: p::function("799893f49074236205ea6b36ca9e69ced9e260b62f15900f596c47d66d5a747b"),
     callees: &[
@@ -2926,7 +2926,7 @@ fn ts_exotic_error_name(ctx: &mut dyn p::PlanContext, _entry: u32) -> Result<Val
     Ok(ctx.take(0))
 }
 
-static TS_EXOTIC_TO_PRIMITIVE: p::HelperPlan = p::HelperPlan {
+const TS_EXOTIC_TO_PRIMITIVE: p::HelperPlan = p::HelperPlan {
     name: "ts.exotic.to_primitive",
     function: p::function("37255f2d52deb065c526f82140fd43f3887f233445a271784d28fd50d93da987"),
     callees: &[
@@ -3096,7 +3096,7 @@ fn ts_exotic_to_primitive(ctx: &mut dyn p::PlanContext, _entry: u32) -> Result<V
     Ok(ctx.take(0))
 }
 
-static TS_EXOTIC_GET: p::HelperPlan = p::HelperPlan {
+const TS_EXOTIC_GET: p::HelperPlan = p::HelperPlan {
     name: "ts.exotic.get",
     function: p::function("61ed18c01b2e6a6fdf2724666770667f847bb65ad8d80fc1f1f77376a8f884fa"),
     callees: &[
@@ -3277,7 +3277,7 @@ fn ts_exotic_get(ctx: &mut dyn p::PlanContext, _entry: u32) -> Result<Value, p::
     Ok(ctx.take(0))
 }
 
-static TS_EXOTIC_SET: p::HelperPlan = p::HelperPlan {
+const TS_EXOTIC_SET: p::HelperPlan = p::HelperPlan {
     name: "ts.exotic.set",
     function: p::function("9fd5a9300839d2a8dc4c9d9ce2b573ef3ba7113216e53d2681f4f6d3ddeff59d"),
     callees: &[
@@ -3462,7 +3462,7 @@ fn ts_exotic_set(ctx: &mut dyn p::PlanContext, _entry: u32) -> Result<Value, p::
     Err(p::PlanExit::Raise(ctx.take(0)))
 }
 
-static TS_EXOTIC_ITERATE: p::HelperPlan = p::HelperPlan {
+const TS_EXOTIC_ITERATE: p::HelperPlan = p::HelperPlan {
     name: "ts.exotic.iterate",
     function: p::function("2c74401017d3794e407f06ff4ad46a4107116d8035a3d4a5dd1bfbc53ffb0c87"),
     callees: &[
@@ -3715,7 +3715,7 @@ fn ts_exotic_iterate(ctx: &mut dyn p::PlanContext, _entry: u32) -> Result<Value,
     Err(p::PlanExit::Raise(ctx.take(0)))
 }
 
-static TS_RECEIVER: p::HelperPlan = p::HelperPlan {
+const TS_RECEIVER: p::HelperPlan = p::HelperPlan {
     name: "ts.receiver",
     function: p::function("c596cde0e665d942e11935ad08c3788c2b14e1028bc49c6859de5414fff86fa6"),
     callees: &[
@@ -3862,7 +3862,7 @@ fn ts_receiver(ctx: &mut dyn p::PlanContext, _entry: u32) -> Result<Value, p::Pl
     Ok(ctx.take(0))
 }
 
-static TS_CALLABLE: p::HelperPlan = p::HelperPlan {
+const TS_CALLABLE: p::HelperPlan = p::HelperPlan {
     name: "ts.callable",
     function: p::function("2c0ae8a7768df5037a9df976731713c14477549f94ea2c0b8bfa7aebe6659b0d"),
     callees: &[
@@ -3928,7 +3928,7 @@ fn ts_callable(ctx: &mut dyn p::PlanContext, _entry: u32) -> Result<Value, p::Pl
     Ok(ctx.take(0))
 }
 
-static TS_IDENTITY: p::HelperPlan = p::HelperPlan {
+const TS_IDENTITY: p::HelperPlan = p::HelperPlan {
     name: "ts.identity",
     function: p::function("6c8beaf6807ed305f72518026d8305a5f7f4bf2ffe76c22d79551192fe513e44"),
     callees: &[
@@ -4011,7 +4011,7 @@ fn ts_identity(ctx: &mut dyn p::PlanContext, _entry: u32) -> Result<Value, p::Pl
     Ok(ctx.take(0))
 }
 
-static TS_REQUIRES_NEW: p::HelperPlan = p::HelperPlan {
+const TS_REQUIRES_NEW: p::HelperPlan = p::HelperPlan {
     name: "ts.requires_new",
     function: p::function("d7b91dbbab95fdf6da679c4fd82421140c7eb02cd30ae8c76f938642c16d1e67"),
     callees: &[
@@ -4051,7 +4051,7 @@ fn ts_requires_new(ctx: &mut dyn p::PlanContext, _entry: u32) -> Result<Value, p
     Err(p::PlanExit::Raise(ctx.take(0)))
 }
 
-static TS_FUNCTION_FROM_TEXT: p::HelperPlan = p::HelperPlan {
+const TS_FUNCTION_FROM_TEXT: p::HelperPlan = p::HelperPlan {
     name: "ts.function_from_text",
     function: p::function("9c660050714aa4d91ad85cfa8d3cbfb71f1764085c893a03aa4c848d3c86f82d"),
     callees: &[
@@ -4087,7 +4087,7 @@ fn ts_function_from_text(ctx: &mut dyn p::PlanContext, _entry: u32) -> Result<Va
     Err(p::PlanExit::Raise(ctx.take(0)))
 }
 
-static TS_NOTHING: p::HelperPlan = p::HelperPlan {
+const TS_NOTHING: p::HelperPlan = p::HelperPlan {
     name: "ts.nothing",
     function: p::function("e846f9b73935485a9d909d82370d619ffe0c5593345418650eb975c33e9dfcb8"),
     callees: &[],
@@ -4116,7 +4116,7 @@ fn ts_nothing(ctx: &mut dyn p::PlanContext, _entry: u32) -> Result<Value, p::Pla
     Ok(ctx.take(0))
 }
 
-static TS_IS_PRIMITIVE: p::HelperPlan = p::HelperPlan {
+const TS_IS_PRIMITIVE: p::HelperPlan = p::HelperPlan {
     name: "ts.is_primitive",
     function: p::function("1ab4b07450b50e2eb1d8d8b7f23faa96fdf308b5d2bb32beb7938ac217a8a4e4"),
     callees: &[
@@ -4204,7 +4204,7 @@ fn ts_is_primitive(ctx: &mut dyn p::PlanContext, _entry: u32) -> Result<Value, p
     Ok(ctx.take(0))
 }
 
-static TS_IS_NULLISH: p::HelperPlan = p::HelperPlan {
+const TS_IS_NULLISH: p::HelperPlan = p::HelperPlan {
     name: "ts.is_nullish",
     function: p::function("cf60a1db735461d78476e0e746903789152c640f5a92730cde4f3b3e796297d5"),
     callees: &[
@@ -4246,7 +4246,7 @@ fn ts_is_nullish(ctx: &mut dyn p::PlanContext, _entry: u32) -> Result<Value, p::
     Ok(ctx.take(0))
 }
 
-static TS_TDZ: p::HelperPlan = p::HelperPlan {
+const TS_TDZ: p::HelperPlan = p::HelperPlan {
     name: "ts.tdz",
     function: p::function("97d4895925e4f254391871aa9fff3b69b184825d421989d9dca678bebe1aefd9"),
     callees: &[
@@ -4298,7 +4298,7 @@ fn ts_tdz(ctx: &mut dyn p::PlanContext, _entry: u32) -> Result<Value, p::PlanExi
     Ok(ctx.take(0))
 }
 
-static TS_REQUIRE_OBJECT_COERCIBLE: p::HelperPlan = p::HelperPlan {
+const TS_REQUIRE_OBJECT_COERCIBLE: p::HelperPlan = p::HelperPlan {
     name: "ts.require_object_coercible",
     function: p::function("115a04ae31620995a232e6e2f6bb17dd5a421945f58a30baee4033694c22d016"),
     callees: &[
@@ -4345,7 +4345,7 @@ fn ts_require_object_coercible(ctx: &mut dyn p::PlanContext, _entry: u32) -> Res
     Ok(ctx.take(0))
 }
 
-static TS_TO_BOOLEAN: p::HelperPlan = p::HelperPlan {
+const TS_TO_BOOLEAN: p::HelperPlan = p::HelperPlan {
     name: "ts.to_boolean",
     function: p::function("5edeb540d455fd9c48e93ed6a4b43826c7a066402eb401357f5e081b7d242b94"),
     callees: &[
@@ -4463,7 +4463,7 @@ fn ts_to_boolean(ctx: &mut dyn p::PlanContext, _entry: u32) -> Result<Value, p::
     Ok(ctx.take(0))
 }
 
-static TS_NOT: p::HelperPlan = p::HelperPlan {
+const TS_NOT: p::HelperPlan = p::HelperPlan {
     name: "ts.not",
     function: p::function("49af3364018a66b535054bb948af7caf664cc9a8e4ecad50ad75b180f360c7bd"),
     callees: &[
@@ -4497,7 +4497,7 @@ fn ts_not(ctx: &mut dyn p::PlanContext, _entry: u32) -> Result<Value, p::PlanExi
     Ok(ctx.take(0))
 }
 
-static TS_TYPEOF: p::HelperPlan = p::HelperPlan {
+const TS_TYPEOF: p::HelperPlan = p::HelperPlan {
     name: "ts.typeof",
     function: p::function("089b3df6c9d0016c83ee3ffc5272a1b14aa66c738e9b0e6e2d94e89a29781e3c"),
     callees: &[
@@ -4586,7 +4586,7 @@ fn ts_typeof(ctx: &mut dyn p::PlanContext, _entry: u32) -> Result<Value, p::Plan
     Ok(ctx.take(0))
 }
 
-static TS_PRIMITIVE_TO_STRING: p::HelperPlan = p::HelperPlan {
+const TS_PRIMITIVE_TO_STRING: p::HelperPlan = p::HelperPlan {
     name: "ts.primitive_to_string",
     function: p::function("694cfeb762e5031fbed1d8550ab0741103949c7a2199561c108498a319bd9402"),
     callees: &[
@@ -4708,7 +4708,7 @@ fn ts_primitive_to_string(ctx: &mut dyn p::PlanContext, _entry: u32) -> Result<V
     Err(p::PlanExit::Raise(ctx.take(0)))
 }
 
-static TS_PRIMITIVE_TO_NUMBER: p::HelperPlan = p::HelperPlan {
+const TS_PRIMITIVE_TO_NUMBER: p::HelperPlan = p::HelperPlan {
     name: "ts.primitive_to_number",
     function: p::function("2bb8d44c8c8202cd2bd9e04a66981602abf93823862177808308ca5294860f5f"),
     callees: &[
@@ -4827,7 +4827,7 @@ fn ts_primitive_to_number(ctx: &mut dyn p::PlanContext, _entry: u32) -> Result<V
     Err(p::PlanExit::Raise(ctx.take(0)))
 }
 
-static TS_TO_PRIMITIVE: p::HelperPlan = p::HelperPlan {
+const TS_TO_PRIMITIVE: p::HelperPlan = p::HelperPlan {
     name: "ts.to_primitive",
     function: p::function("c423caab531bfa59c25a9283d39a6b7314424699b664f668f322abff2a2225ea"),
     callees: &[
@@ -4912,7 +4912,7 @@ fn ts_to_primitive(ctx: &mut dyn p::PlanContext, entry: u32) -> Result<Value, p:
     Ok(Value::Null)
 }
 
-static TS_TO_STRING: p::HelperPlan = p::HelperPlan {
+const TS_TO_STRING: p::HelperPlan = p::HelperPlan {
     name: "ts.to_string",
     function: p::function("7ef61ff38cabc9fdc92a83b361bf65239a085fa781fec667be59c01225bce54c"),
     callees: &[
@@ -4986,7 +4986,7 @@ fn ts_to_string(ctx: &mut dyn p::PlanContext, entry: u32) -> Result<Value, p::Pl
     Ok(Value::Null)
 }
 
-static TS_TO_NUMBER: p::HelperPlan = p::HelperPlan {
+const TS_TO_NUMBER: p::HelperPlan = p::HelperPlan {
     name: "ts.to_number",
     function: p::function("0c2f652b119c3110982d8904c9b83189a81f433ced3b922abd34cea385f08a1f"),
     callees: &[
@@ -5063,7 +5063,7 @@ fn ts_to_number(ctx: &mut dyn p::PlanContext, entry: u32) -> Result<Value, p::Pl
     Ok(Value::Null)
 }
 
-static TS_TO_PROPERTY_KEY: p::HelperPlan = p::HelperPlan {
+const TS_TO_PROPERTY_KEY: p::HelperPlan = p::HelperPlan {
     name: "ts.to_property_key",
     function: p::function("4ed8ea718f3a67c67865081b08f3e32256b93a22a29f93728098735aa8790e61"),
     callees: &[
@@ -5137,7 +5137,7 @@ fn ts_to_property_key(ctx: &mut dyn p::PlanContext, entry: u32) -> Result<Value,
     Ok(Value::Null)
 }
 
-static TS_ADD: p::HelperPlan = p::HelperPlan {
+const TS_ADD: p::HelperPlan = p::HelperPlan {
     name: "ts.add",
     function: p::function("2de589d21d69ab8d0d38d7cbf9ee93ebcf5337384f2ea446009e14267f349252"),
     callees: &[
@@ -5357,7 +5357,7 @@ fn ts_add(ctx: &mut dyn p::PlanContext, entry: u32) -> Result<Value, p::PlanExit
     Ok(Value::Null)
 }
 
-static TS_SUB: p::HelperPlan = p::HelperPlan {
+const TS_SUB: p::HelperPlan = p::HelperPlan {
     name: "ts.sub",
     function: p::function("ce1fda475fe1af716e37eeaf9c81f546d15c898c90cba6e0387e845f2e5b1688"),
     callees: &[
@@ -5453,7 +5453,7 @@ fn ts_sub(ctx: &mut dyn p::PlanContext, entry: u32) -> Result<Value, p::PlanExit
     Ok(Value::Null)
 }
 
-static TS_MUL: p::HelperPlan = p::HelperPlan {
+const TS_MUL: p::HelperPlan = p::HelperPlan {
     name: "ts.mul",
     function: p::function("ee040ed1c5f50727fca4ecd5a69240da8eb6d4b984d68c6177a79cd4f2afd631"),
     callees: &[
@@ -5524,7 +5524,7 @@ fn ts_mul(ctx: &mut dyn p::PlanContext, entry: u32) -> Result<Value, p::PlanExit
     Ok(Value::Null)
 }
 
-static TS_DIV: p::HelperPlan = p::HelperPlan {
+const TS_DIV: p::HelperPlan = p::HelperPlan {
     name: "ts.div",
     function: p::function("c0ad6a1fcd85ddef49ceb6293354ba8dd6da8d672a4d52f1ecaddfed960694ac"),
     callees: &[
@@ -5595,7 +5595,7 @@ fn ts_div(ctx: &mut dyn p::PlanContext, entry: u32) -> Result<Value, p::PlanExit
     Ok(Value::Null)
 }
 
-static TS_REM: p::HelperPlan = p::HelperPlan {
+const TS_REM: p::HelperPlan = p::HelperPlan {
     name: "ts.rem",
     function: p::function("cd796520fea32e1023d2ae5584f28bc7f3b7751c00aa3ab1918896ff6801dcce"),
     callees: &[
@@ -5666,7 +5666,7 @@ fn ts_rem(ctx: &mut dyn p::PlanContext, entry: u32) -> Result<Value, p::PlanExit
     Ok(Value::Null)
 }
 
-static TS_POW: p::HelperPlan = p::HelperPlan {
+const TS_POW: p::HelperPlan = p::HelperPlan {
     name: "ts.pow",
     function: p::function("6cc06cc90ba04fca8d92a88af4058fb2c65c576bc3b640b9263aa18995d097c1"),
     callees: &[
@@ -5775,7 +5775,7 @@ fn ts_pow(ctx: &mut dyn p::PlanContext, entry: u32) -> Result<Value, p::PlanExit
     Ok(Value::Null)
 }
 
-static TS_NEG: p::HelperPlan = p::HelperPlan {
+const TS_NEG: p::HelperPlan = p::HelperPlan {
     name: "ts.neg",
     function: p::function("f9c23a0737659924e387782ff1d1b25c6fa9c9cb1376941e79943e9e38d0a319"),
     callees: &[
@@ -5828,7 +5828,7 @@ fn ts_neg(ctx: &mut dyn p::PlanContext, entry: u32) -> Result<Value, p::PlanExit
     Ok(Value::Null)
 }
 
-static TS_TO_INT32: p::HelperPlan = p::HelperPlan {
+const TS_TO_INT32: p::HelperPlan = p::HelperPlan {
     name: "ts.to_int32",
     function: p::function("20538f3b90f9c18a565d3cb4a470b0d0feee07ce7ec77bb57e085d03b9a225ca"),
     callees: &[
@@ -5923,7 +5923,7 @@ fn ts_to_int32(ctx: &mut dyn p::PlanContext, entry: u32) -> Result<Value, p::Pla
     Ok(Value::Null)
 }
 
-static TS_WRAP_INT32: p::HelperPlan = p::HelperPlan {
+const TS_WRAP_INT32: p::HelperPlan = p::HelperPlan {
     name: "ts.wrap_int32",
     function: p::function("c3cbd093133b37a7a08546f5c49a456f668b70dca1b2c2ff7c2e492b15d55ff0"),
     callees: &[
@@ -5972,7 +5972,7 @@ fn ts_wrap_int32(ctx: &mut dyn p::PlanContext, _entry: u32) -> Result<Value, p::
     Ok(ctx.take(0))
 }
 
-static TS_SHIFT_COUNT: p::HelperPlan = p::HelperPlan {
+const TS_SHIFT_COUNT: p::HelperPlan = p::HelperPlan {
     name: "ts.shift_count",
     function: p::function("c036ee377befa3ec49a9289a859135baee6917af835aa48c3df8ebe1cc5a498d"),
     callees: &[
@@ -6028,7 +6028,7 @@ fn ts_shift_count(ctx: &mut dyn p::PlanContext, entry: u32) -> Result<Value, p::
     Ok(Value::Null)
 }
 
-static TS_BITWISE32: p::HelperPlan = p::HelperPlan {
+const TS_BITWISE32: p::HelperPlan = p::HelperPlan {
     name: "ts.bitwise32",
     function: p::function("6dced5f8b5c80c6e6c3bd517b3cb2c063436e05526ad4c9ca59499d033517912"),
     callees: &[
@@ -6215,7 +6215,7 @@ fn ts_bitwise32(ctx: &mut dyn p::PlanContext, _entry: u32) -> Result<Value, p::P
     Ok(ctx.take(0))
 }
 
-static TS_BIT_AND: p::HelperPlan = p::HelperPlan {
+const TS_BIT_AND: p::HelperPlan = p::HelperPlan {
     name: "ts.bit_and",
     function: p::function("189d721ac1911f89ad2bb212c186e57204f49303a4e0eb51bedc877083a27312"),
     callees: &[
@@ -6297,7 +6297,7 @@ fn ts_bit_and(ctx: &mut dyn p::PlanContext, entry: u32) -> Result<Value, p::Plan
     Ok(Value::Null)
 }
 
-static TS_BIT_OR: p::HelperPlan = p::HelperPlan {
+const TS_BIT_OR: p::HelperPlan = p::HelperPlan {
     name: "ts.bit_or",
     function: p::function("fb473b45ea2e5696459e56b36b953e74f70e051310333dc56149eaf11719d682"),
     callees: &[
@@ -6379,7 +6379,7 @@ fn ts_bit_or(ctx: &mut dyn p::PlanContext, entry: u32) -> Result<Value, p::PlanE
     Ok(Value::Null)
 }
 
-static TS_BIT_XOR: p::HelperPlan = p::HelperPlan {
+const TS_BIT_XOR: p::HelperPlan = p::HelperPlan {
     name: "ts.bit_xor",
     function: p::function("967deb973a61c31b6820ce20dc60354f929c0bf1b539d8fefaa241cee8d81328"),
     callees: &[
@@ -6461,7 +6461,7 @@ fn ts_bit_xor(ctx: &mut dyn p::PlanContext, entry: u32) -> Result<Value, p::Plan
     Ok(Value::Null)
 }
 
-static TS_BIT_NOT: p::HelperPlan = p::HelperPlan {
+const TS_BIT_NOT: p::HelperPlan = p::HelperPlan {
     name: "ts.bit_not",
     function: p::function("b074b3878eb04eadd5eb2dff12efc3b73e9233dc7675a337166b169550e1ff02"),
     callees: &[
@@ -6521,7 +6521,7 @@ fn ts_bit_not(ctx: &mut dyn p::PlanContext, entry: u32) -> Result<Value, p::Plan
     Ok(Value::Null)
 }
 
-static TS_SHL: p::HelperPlan = p::HelperPlan {
+const TS_SHL: p::HelperPlan = p::HelperPlan {
     name: "ts.shl",
     function: p::function("65d2375f8331561a2927a26cdbeb21f19e7ba70a0b5b679cc33778aed82c68e9"),
     callees: &[
@@ -6614,7 +6614,7 @@ fn ts_shl(ctx: &mut dyn p::PlanContext, entry: u32) -> Result<Value, p::PlanExit
     Ok(Value::Null)
 }
 
-static TS_SHR: p::HelperPlan = p::HelperPlan {
+const TS_SHR: p::HelperPlan = p::HelperPlan {
     name: "ts.shr",
     function: p::function("59c4b282fe91a2c93ec7ab7d7fb5bd044dfacb61010afaecbff44752fe39b7b3"),
     callees: &[
@@ -6693,7 +6693,7 @@ fn ts_shr(ctx: &mut dyn p::PlanContext, entry: u32) -> Result<Value, p::PlanExit
     Ok(Value::Null)
 }
 
-static TS_USHR: p::HelperPlan = p::HelperPlan {
+const TS_USHR: p::HelperPlan = p::HelperPlan {
     name: "ts.ushr",
     function: p::function("86f719d09eaa2a1977e3bd74f3bbf1f2521abd90d8f2e47a5df1e1bd632d3827"),
     callees: &[
@@ -6776,7 +6776,7 @@ fn ts_ushr(ctx: &mut dyn p::PlanContext, entry: u32) -> Result<Value, p::PlanExi
     Ok(Value::Null)
 }
 
-static TS_STRICT_EQUALS: p::HelperPlan = p::HelperPlan {
+const TS_STRICT_EQUALS: p::HelperPlan = p::HelperPlan {
     name: "ts.strict_equals",
     function: p::function("c0e11f449f01cd4630f681408f6aec2f3b8e016c9189b1f881360283108da561"),
     callees: &[
@@ -6854,7 +6854,7 @@ fn ts_strict_equals(ctx: &mut dyn p::PlanContext, _entry: u32) -> Result<Value, 
     Ok(ctx.take(0))
 }
 
-static TS_STRICT_NOT_EQUALS: p::HelperPlan = p::HelperPlan {
+const TS_STRICT_NOT_EQUALS: p::HelperPlan = p::HelperPlan {
     name: "ts.strict_not_equals",
     function: p::function("ae7ff759fed5825628690b74e7d4e80ceb43514a02f40a81ca36abb1917a0b1b"),
     callees: &[
@@ -6891,7 +6891,7 @@ fn ts_strict_not_equals(ctx: &mut dyn p::PlanContext, _entry: u32) -> Result<Val
     Ok(ctx.take(0))
 }
 
-static TS_LOOSE_EQUALS: p::HelperPlan = p::HelperPlan {
+const TS_LOOSE_EQUALS: p::HelperPlan = p::HelperPlan {
     name: "ts.loose_equals",
     function: p::function("a61a0b4fb653a2a93b38a0a8e4d8130aa44c26eb7a4dbd09e34dc1ab83f568eb"),
     callees: &[],
@@ -6958,7 +6958,7 @@ fn ts_loose_equals(ctx: &mut dyn p::PlanContext, entry: u32) -> Result<Value, p:
     Ok(Value::Null)
 }
 
-static TS_LOOSE_NOT_EQUALS: p::HelperPlan = p::HelperPlan {
+const TS_LOOSE_NOT_EQUALS: p::HelperPlan = p::HelperPlan {
     name: "ts.loose_not_equals",
     function: p::function("642ac1ea188abe61924e4c6329195d3bb0f56fcdbed9b4d8bfe3bd04586f87bf"),
     callees: &[
@@ -7014,7 +7014,7 @@ fn ts_loose_not_equals(ctx: &mut dyn p::PlanContext, entry: u32) -> Result<Value
     Ok(Value::Null)
 }
 
-static TS_RELATIONAL: p::HelperPlan = p::HelperPlan {
+const TS_RELATIONAL: p::HelperPlan = p::HelperPlan {
     name: "ts.relational",
     function: p::function("77c73839d6f43415f0e9f44ccb1de2412d48107d9c580032b441b532d84b7ed3"),
     callees: &[
@@ -7131,7 +7131,7 @@ fn ts_relational(ctx: &mut dyn p::PlanContext, entry: u32) -> Result<Value, p::P
     Ok(Value::Null)
 }
 
-static TS_LT: p::HelperPlan = p::HelperPlan {
+const TS_LT: p::HelperPlan = p::HelperPlan {
     name: "ts.lt",
     function: p::function("453b407dcf9403be427b60dc14c8ad9dc0d1e7437536f30db562ba6023e443a0"),
     callees: &[
@@ -7264,7 +7264,7 @@ fn ts_lt(ctx: &mut dyn p::PlanContext, entry: u32) -> Result<Value, p::PlanExit>
     Ok(Value::Null)
 }
 
-static TS_GT: p::HelperPlan = p::HelperPlan {
+const TS_GT: p::HelperPlan = p::HelperPlan {
     name: "ts.gt",
     function: p::function("18e1b1ae7a8788a58320c556e9b822e5b8f710522e68f8914920cf4fb59f9ffa"),
     callees: &[
@@ -7397,7 +7397,7 @@ fn ts_gt(ctx: &mut dyn p::PlanContext, entry: u32) -> Result<Value, p::PlanExit>
     Ok(Value::Null)
 }
 
-static TS_LE: p::HelperPlan = p::HelperPlan {
+const TS_LE: p::HelperPlan = p::HelperPlan {
     name: "ts.le",
     function: p::function("94f006be1d90b7375c7848e76928d629b034a8c5c8cb45c80fd37792add78c91"),
     callees: &[
@@ -7534,7 +7534,7 @@ fn ts_le(ctx: &mut dyn p::PlanContext, entry: u32) -> Result<Value, p::PlanExit>
     Ok(Value::Null)
 }
 
-static TS_GE: p::HelperPlan = p::HelperPlan {
+const TS_GE: p::HelperPlan = p::HelperPlan {
     name: "ts.ge",
     function: p::function("a554e50472f636e0961a9681589c941cef65f26544e6b5e4d7ec08467aabacb8"),
     callees: &[
@@ -7671,7 +7671,7 @@ fn ts_ge(ctx: &mut dyn p::PlanContext, entry: u32) -> Result<Value, p::PlanExit>
     Ok(Value::Null)
 }
 
-static TS_PAD: p::HelperPlan = p::HelperPlan {
+const TS_PAD: p::HelperPlan = p::HelperPlan {
     name: "ts.pad",
     function: p::function("c28af511a9ebc14d71b94562038cc56639bd3dfcfc05b0efcbc2f747a52795dd"),
     callees: &[
@@ -7757,7 +7757,7 @@ fn ts_pad(ctx: &mut dyn p::PlanContext, _entry: u32) -> Result<Value, p::PlanExi
     Ok(ctx.take(0))
 }
 
-static TS_HOLE_VALUE: p::HelperPlan = p::HelperPlan {
+const TS_HOLE_VALUE: p::HelperPlan = p::HelperPlan {
     name: "ts.hole_value",
     function: p::function("af83febeaaab28e57a26e91735c22e5d58be3852ea16e377a1242e498b82e0f7"),
     callees: &[
@@ -7795,7 +7795,7 @@ fn ts_hole_value(ctx: &mut dyn p::PlanContext, _entry: u32) -> Result<Value, p::
     Ok(ctx.take(0))
 }
 
-static TS_REST: p::HelperPlan = p::HelperPlan {
+const TS_REST: p::HelperPlan = p::HelperPlan {
     name: "ts.rest",
     function: p::function("4c7bba5c6842d0a7a0ad35f55522e148535835b1e304bf826569ae3a088ebaf2"),
     callees: &[
@@ -7873,7 +7873,7 @@ fn ts_rest(ctx: &mut dyn p::PlanContext, _entry: u32) -> Result<Value, p::PlanEx
     Ok(ctx.take(0))
 }
 
-static TS_SPREAD: p::HelperPlan = p::HelperPlan {
+const TS_SPREAD: p::HelperPlan = p::HelperPlan {
     name: "ts.spread",
     function: p::function("2830528e1782310aad4f345df701f110f5597f2ba930a17b1f676400b0c1c8d3"),
     callees: &[
@@ -7939,7 +7939,7 @@ fn ts_spread(ctx: &mut dyn p::PlanContext, _entry: u32) -> Result<Value, p::Plan
     Ok(ctx.take(0))
 }
 
-static TS_ITERATE: p::HelperPlan = p::HelperPlan {
+const TS_ITERATE: p::HelperPlan = p::HelperPlan {
     name: "ts.iterate",
     function: p::function("8ac71a212c4d3569c1e9e87c8057c5ebb91a7144f34e04da6eddd2ee4cb4fefb"),
     callees: &[
@@ -8340,7 +8340,7 @@ fn ts_iterate(ctx: &mut dyn p::PlanContext, entry: u32) -> Result<Value, p::Plan
     Ok(Value::Null)
 }
 
-static TS_NUMBER_INDEX: p::HelperPlan = p::HelperPlan {
+const TS_NUMBER_INDEX: p::HelperPlan = p::HelperPlan {
     name: "ts.number_index",
     function: p::function("49da85f074e7f331b8a7e6d15995d9a0598677328804c8ba6a84e9c7207eb3c5"),
     callees: &[],
@@ -8400,7 +8400,7 @@ fn ts_number_index(ctx: &mut dyn p::PlanContext, entry: u32) -> Result<Value, p:
     Ok(Value::Null)
 }
 
-static TS_LIST_INDEX: p::HelperPlan = p::HelperPlan {
+const TS_LIST_INDEX: p::HelperPlan = p::HelperPlan {
     name: "ts.list_index",
     function: p::function("a105ede719322fb21a00f932fbc80917f17acacbe6ea3d3dab8f16fbf40959c2"),
     callees: &[],
@@ -8460,7 +8460,7 @@ fn ts_list_index(ctx: &mut dyn p::PlanContext, entry: u32) -> Result<Value, p::P
     Ok(Value::Null)
 }
 
-static TS_GET: p::HelperPlan = p::HelperPlan {
+const TS_GET: p::HelperPlan = p::HelperPlan {
     name: "ts.get",
     function: p::function("f462d4804207d1256bef8d6a992d4d119df6cccfab01931a740b3bef9f4074af"),
     callees: &[
@@ -8556,7 +8556,7 @@ fn ts_get(ctx: &mut dyn p::PlanContext, entry: u32) -> Result<Value, p::PlanExit
     Ok(Value::Null)
 }
 
-static TS_SET: p::HelperPlan = p::HelperPlan {
+const TS_SET: p::HelperPlan = p::HelperPlan {
     name: "ts.set",
     function: p::function("f6069ec878efda1868ef819ae7ddaf288115adac288f93653e011ca7380d39d9"),
     callees: &[
@@ -9299,7 +9299,7 @@ fn ts_set(ctx: &mut dyn p::PlanContext, entry: u32) -> Result<Value, p::PlanExit
     Ok(Value::Null)
 }
 
-static TS_DELETE: p::HelperPlan = p::HelperPlan {
+const TS_DELETE: p::HelperPlan = p::HelperPlan {
     name: "ts.delete",
     function: p::function("80a2078a1d0ca5299129446b2555f53a8be7fa0c31339f6c79f7c7763da25d6d"),
     callees: &[
@@ -9806,7 +9806,7 @@ fn ts_delete(ctx: &mut dyn p::PlanContext, entry: u32) -> Result<Value, p::PlanE
     Ok(Value::Null)
 }
 
-static TS_HAS_OWN: p::HelperPlan = p::HelperPlan {
+const TS_HAS_OWN: p::HelperPlan = p::HelperPlan {
     name: "ts.has_own",
     function: p::function("2f4800c974170b40e12e3e3907ed0cc0bdfa8eaae45bff1312be56751acccb3d"),
     callees: &[
@@ -10582,7 +10582,7 @@ fn ts_has_own(ctx: &mut dyn p::PlanContext, entry: u32) -> Result<Value, p::Plan
     Ok(Value::Null)
 }
 
-static TS_HAS: p::HelperPlan = p::HelperPlan {
+const TS_HAS: p::HelperPlan = p::HelperPlan {
     name: "ts.has",
     function: p::function("8aa58c333f9639a6f620032d7f437728db261de69eab77f0c36fe7087af30bc1"),
     callees: &[
@@ -10821,7 +10821,7 @@ fn ts_has(ctx: &mut dyn p::PlanContext, entry: u32) -> Result<Value, p::PlanExit
     Ok(Value::Null)
 }
 
-static TS_KEYS: p::HelperPlan = p::HelperPlan {
+const TS_KEYS: p::HelperPlan = p::HelperPlan {
     name: "ts.keys",
     function: p::function("54eff778bcf179b3768d29651a9799e5ae83e3f74c2b62002b096543f391a400"),
     callees: &[
@@ -11355,7 +11355,7 @@ fn ts_keys(ctx: &mut dyn p::PlanContext, entry: u32) -> Result<Value, p::PlanExi
     Ok(Value::Null)
 }
 
-static TS_ASSIGN: p::HelperPlan = p::HelperPlan {
+const TS_ASSIGN: p::HelperPlan = p::HelperPlan {
     name: "ts.assign",
     function: p::function("f99180edf8cf142d4749b6b44407e63c9f0f969c90995bf7b620cb06a9d355de"),
     callees: &[
@@ -11449,7 +11449,7 @@ fn ts_assign(ctx: &mut dyn p::PlanContext, entry: u32) -> Result<Value, p::PlanE
     Ok(Value::Null)
 }
 
-static TS_OBJECT_REST: p::HelperPlan = p::HelperPlan {
+const TS_OBJECT_REST: p::HelperPlan = p::HelperPlan {
     name: "ts.object_rest",
     function: p::function("8c997b0cba101a9de036f228ead0953caf818312f219467748cc0868a2fe1d47"),
     callees: &[
@@ -11597,7 +11597,7 @@ fn ts_object_rest(ctx: &mut dyn p::PlanContext, entry: u32) -> Result<Value, p::
     Ok(Value::Null)
 }
 
-static TS_BOUNDARY: p::HelperPlan = p::HelperPlan {
+const TS_BOUNDARY: p::HelperPlan = p::HelperPlan {
     name: "ts.boundary",
     function: p::function("1bb13712699eae0f5e094209dcb4efd91a8d8afc4b3f276c7ee45183e48d153d"),
     callees: &[
@@ -12037,7 +12037,7 @@ fn ts_boundary(ctx: &mut dyn p::PlanContext, _entry: u32) -> Result<Value, p::Pl
     Ok(ctx.take(0))
 }
 
-static TS_ARGUMENTS: p::HelperPlan = p::HelperPlan {
+const TS_ARGUMENTS: p::HelperPlan = p::HelperPlan {
     name: "ts.arguments",
     function: p::function("eeeb1599eac6541ae37a4d0f679622a80c805f8f90497e0a88924dbbbd4ba2c1"),
     callees: &[
@@ -12119,7 +12119,7 @@ fn ts_arguments(ctx: &mut dyn p::PlanContext, _entry: u32) -> Result<Value, p::P
     Ok(ctx.take(0))
 }
 
-static TS_FUNCTION_CALL: p::HelperPlan = p::HelperPlan {
+const TS_FUNCTION_CALL: p::HelperPlan = p::HelperPlan {
     name: "ts.function.call",
     function: p::function("5000ea16e6b081e923b052d6abe896c9be21f182115c786bc6effc665e4c0696"),
     callees: &[
@@ -12210,7 +12210,7 @@ fn ts_function_call(ctx: &mut dyn p::PlanContext, entry: u32) -> Result<Value, p
     Ok(Value::Null)
 }
 
-static TS_FUNCTION_APPLY: p::HelperPlan = p::HelperPlan {
+const TS_FUNCTION_APPLY: p::HelperPlan = p::HelperPlan {
     name: "ts.function.apply",
     function: p::function("92769320c71fa5350d51833f90b24da6c44a78f04cb233b5a0e4c074670a499a"),
     callees: &[
@@ -12440,7 +12440,7 @@ fn ts_function_apply(ctx: &mut dyn p::PlanContext, entry: u32) -> Result<Value, 
     Ok(Value::Null)
 }
 
-static TS_FUNCTION_BIND: p::HelperPlan = p::HelperPlan {
+const TS_FUNCTION_BIND: p::HelperPlan = p::HelperPlan {
     name: "ts.function.bind",
     function: p::function("73c82095e424bdc69aa2e6bf95dc13a944d36a1e38a48684ae649f23fef2a241"),
     callees: &[
@@ -12644,7 +12644,7 @@ fn ts_function_bind(ctx: &mut dyn p::PlanContext, entry: u32) -> Result<Value, p
     Ok(Value::Null)
 }
 
-static TS_FUNCTION_TOSTRING: p::HelperPlan = p::HelperPlan {
+const TS_FUNCTION_TOSTRING: p::HelperPlan = p::HelperPlan {
     name: "ts.function.toString",
     function: p::function("29e6863f9fdf1759df36b498be1b76303f8d7f5fccd5890f4c084b09a4d17226"),
     callees: &[
@@ -12737,7 +12737,7 @@ fn ts_function_tostring(ctx: &mut dyn p::PlanContext, _entry: u32) -> Result<Val
     Err(p::PlanExit::Raise(ctx.take(0)))
 }
 
-static TS_FUNCTION_EVAL: p::HelperPlan = p::HelperPlan {
+const TS_FUNCTION_EVAL: p::HelperPlan = p::HelperPlan {
     name: "ts.function.eval",
     function: p::function("2c7146df5ccb624397befc323e2329214efd00c2cba3539c85352d3e46777a27"),
     callees: &[
@@ -12773,7 +12773,7 @@ fn ts_function_eval(ctx: &mut dyn p::PlanContext, _entry: u32) -> Result<Value, 
     Err(p::PlanExit::Raise(ctx.take(0)))
 }
 
-static TS_MAP_CALL: p::HelperPlan = p::HelperPlan {
+const TS_MAP_CALL: p::HelperPlan = p::HelperPlan {
     name: "ts.map.call",
     function: p::function("0a02f4b735e473823e61a13b62684e256c87d89bdc29a7c18a4b420df2c328aa"),
     callees: &[
@@ -12809,7 +12809,7 @@ fn ts_map_call(ctx: &mut dyn p::PlanContext, _entry: u32) -> Result<Value, p::Pl
     Err(p::PlanExit::Raise(ctx.take(0)))
 }
 
-static TS_MAP_KEY: p::HelperPlan = p::HelperPlan {
+const TS_MAP_KEY: p::HelperPlan = p::HelperPlan {
     name: "ts.map.key",
     function: p::function("a6d995ed3949fc88c5d907ec1fc9b9eceac0acab3f335af90e0698d9111aa059"),
     callees: &[
@@ -12845,7 +12845,7 @@ fn ts_map_key(ctx: &mut dyn p::PlanContext, _entry: u32) -> Result<Value, p::Pla
     Ok(ctx.take(0))
 }
 
-static TS_MAP_VALUE: p::HelperPlan = p::HelperPlan {
+const TS_MAP_VALUE: p::HelperPlan = p::HelperPlan {
     name: "ts.map.value",
     function: p::function("3fb9e43ef811b5bf9101ac77219851b073447a74463783645121f1061a32a454"),
     callees: &[
@@ -13005,7 +13005,7 @@ fn ts_map_value(ctx: &mut dyn p::PlanContext, _entry: u32) -> Result<Value, p::P
     Ok(ctx.take(0))
 }
 
-static TS_MAP_CONSTRUCT: p::HelperPlan = p::HelperPlan {
+const TS_MAP_CONSTRUCT: p::HelperPlan = p::HelperPlan {
     name: "ts.map.construct",
     function: p::function("0d6ab0f779d974a3ed3278a7d969bd4c7da6dc4b7c895ba5423e8b5443976791"),
     callees: &[
@@ -13208,7 +13208,7 @@ fn ts_map_construct(ctx: &mut dyn p::PlanContext, entry: u32) -> Result<Value, p
     Ok(Value::Null)
 }
 
-static TS_MAP_IS: p::HelperPlan = p::HelperPlan {
+const TS_MAP_IS: p::HelperPlan = p::HelperPlan {
     name: "ts.map.is",
     function: p::function("ae924d8d2ffb0acb9bc10bc0681eec5fd2c36b03a4980ebb7b468494b2970f8d"),
     callees: &[
@@ -13241,7 +13241,7 @@ fn ts_map_is(ctx: &mut dyn p::PlanContext, _entry: u32) -> Result<Value, p::Plan
     Ok(ctx.take(0))
 }
 
-static TS_MAP_SIZE: p::HelperPlan = p::HelperPlan {
+const TS_MAP_SIZE: p::HelperPlan = p::HelperPlan {
     name: "ts.map.size",
     function: p::function("594956abdf9d901e9435672367d601bac5b07fe4e58349c50aab8ce1f52d0e62"),
     callees: &[
@@ -13293,7 +13293,7 @@ fn ts_map_size(ctx: &mut dyn p::PlanContext, _entry: u32) -> Result<Value, p::Pl
     Ok(ctx.take(0))
 }
 
-static TS_MAP_SET: p::HelperPlan = p::HelperPlan {
+const TS_MAP_SET: p::HelperPlan = p::HelperPlan {
     name: "ts.map.set",
     function: p::function("b54eb7692cc3171da7887f009b79905308e9d7269a404a298405da210694af0f"),
     callees: &[
@@ -13369,7 +13369,7 @@ fn ts_map_set(ctx: &mut dyn p::PlanContext, _entry: u32) -> Result<Value, p::Pla
     Ok(ctx.take(0))
 }
 
-static TS_MAP_GET: p::HelperPlan = p::HelperPlan {
+const TS_MAP_GET: p::HelperPlan = p::HelperPlan {
     name: "ts.map.get",
     function: p::function("07f1c0f7abd2b8e775fbac05a13c878c118f1578c4b5030accb098b1603d969a"),
     callees: &[
@@ -13449,7 +13449,7 @@ fn ts_map_get(ctx: &mut dyn p::PlanContext, _entry: u32) -> Result<Value, p::Pla
     Ok(ctx.take(0))
 }
 
-static TS_MAP_HAS: p::HelperPlan = p::HelperPlan {
+const TS_MAP_HAS: p::HelperPlan = p::HelperPlan {
     name: "ts.map.has",
     function: p::function("261596d71d17ef60f8f54122f7fe4b45270d5800e842726ee8be0a349b30b12d"),
     callees: &[
@@ -13519,7 +13519,7 @@ fn ts_map_has(ctx: &mut dyn p::PlanContext, _entry: u32) -> Result<Value, p::Pla
     Ok(ctx.take(0))
 }
 
-static TS_MAP_DELETE: p::HelperPlan = p::HelperPlan {
+const TS_MAP_DELETE: p::HelperPlan = p::HelperPlan {
     name: "ts.map.delete",
     function: p::function("228c715508bc5beee9cc38602cfabb706d4a78bf99c5beac14bda8d6c41d423b"),
     callees: &[
@@ -13597,7 +13597,7 @@ fn ts_map_delete(ctx: &mut dyn p::PlanContext, _entry: u32) -> Result<Value, p::
     Ok(ctx.take(0))
 }
 
-static TS_MAP_CLEAR: p::HelperPlan = p::HelperPlan {
+const TS_MAP_CLEAR: p::HelperPlan = p::HelperPlan {
     name: "ts.map.clear",
     function: p::function("bd8123c8e3272922d5104232986d4446ef6f51941d7ee1f9fc421075331975df"),
     callees: &[
@@ -13669,7 +13669,7 @@ fn ts_map_clear(ctx: &mut dyn p::PlanContext, _entry: u32) -> Result<Value, p::P
     Ok(ctx.take(0))
 }
 
-static TS_MAP_KEYS: p::HelperPlan = p::HelperPlan {
+const TS_MAP_KEYS: p::HelperPlan = p::HelperPlan {
     name: "ts.map.keys",
     function: p::function("a73e622a1a70b21f37db0615fac46f162a76b023c1f47dc55aa08fb87851edb5"),
     callees: &[
@@ -13757,7 +13757,7 @@ fn ts_map_keys(ctx: &mut dyn p::PlanContext, _entry: u32) -> Result<Value, p::Pl
     Ok(ctx.take(0))
 }
 
-static TS_MAP_VALUES: p::HelperPlan = p::HelperPlan {
+const TS_MAP_VALUES: p::HelperPlan = p::HelperPlan {
     name: "ts.map.values",
     function: p::function("bc7500570279d3adfdfc1b08b2882118dc0abadea96cdc33a2467e21d9422f2b"),
     callees: &[
@@ -13847,7 +13847,7 @@ fn ts_map_values(ctx: &mut dyn p::PlanContext, _entry: u32) -> Result<Value, p::
     Ok(ctx.take(0))
 }
 
-static TS_MAP_ENTRIES: p::HelperPlan = p::HelperPlan {
+const TS_MAP_ENTRIES: p::HelperPlan = p::HelperPlan {
     name: "ts.map.entries",
     function: p::function("df6de7986ef1d8714884a3ff660df7f073244a83257c9469d00647b40512dad5"),
     callees: &[
@@ -13939,7 +13939,7 @@ fn ts_map_entries(ctx: &mut dyn p::PlanContext, _entry: u32) -> Result<Value, p:
     Ok(ctx.take(0))
 }
 
-static TS_MAP_FOREACH: p::HelperPlan = p::HelperPlan {
+const TS_MAP_FOREACH: p::HelperPlan = p::HelperPlan {
     name: "ts.map.forEach",
     function: p::function("c914a28aabb2dffa089be7c645ca5b07c93c58e6e8144ca0fd3fadb9263d95c7"),
     callees: &[
@@ -14098,7 +14098,7 @@ fn ts_map_foreach(ctx: &mut dyn p::PlanContext, entry: u32) -> Result<Value, p::
     Ok(Value::Null)
 }
 
-static TS_MAP_GROUPBY: p::HelperPlan = p::HelperPlan {
+const TS_MAP_GROUPBY: p::HelperPlan = p::HelperPlan {
     name: "ts.map.groupBy",
     function: p::function("fbd3766fd805eb672ab949af333c09de7887424fa8bf807796abb3b7fe8555d5"),
     callees: &[
@@ -14319,7 +14319,7 @@ fn ts_map_groupby(ctx: &mut dyn p::PlanContext, entry: u32) -> Result<Value, p::
     Ok(Value::Null)
 }
 
-static TS_SET_CALL: p::HelperPlan = p::HelperPlan {
+const TS_SET_CALL: p::HelperPlan = p::HelperPlan {
     name: "ts.set.call",
     function: p::function("8c1260cb3533d9892943908414fad7a9abe110fcde77e841ea8e3ccf11837aa5"),
     callees: &[
@@ -14355,7 +14355,7 @@ fn ts_set_call(ctx: &mut dyn p::PlanContext, _entry: u32) -> Result<Value, p::Pl
     Err(p::PlanExit::Raise(ctx.take(0)))
 }
 
-static TS_SET_CONSTRUCT: p::HelperPlan = p::HelperPlan {
+const TS_SET_CONSTRUCT: p::HelperPlan = p::HelperPlan {
     name: "ts.set.construct",
     function: p::function("22135350717922c7bd969b7a281569b6248a450a08da7a5f37f7cc1a0307c7aa"),
     callees: &[
@@ -14483,7 +14483,7 @@ fn ts_set_construct(ctx: &mut dyn p::PlanContext, entry: u32) -> Result<Value, p
     Ok(Value::Null)
 }
 
-static TS_SET_IS: p::HelperPlan = p::HelperPlan {
+const TS_SET_IS: p::HelperPlan = p::HelperPlan {
     name: "ts.set.is",
     function: p::function("950dfb8ce5ee206c518183175e1dcc7de87c89f0a67e110a7986d70ecdf00342"),
     callees: &[
@@ -14516,7 +14516,7 @@ fn ts_set_is(ctx: &mut dyn p::PlanContext, _entry: u32) -> Result<Value, p::Plan
     Ok(ctx.take(0))
 }
 
-static TS_SET_SIZE: p::HelperPlan = p::HelperPlan {
+const TS_SET_SIZE: p::HelperPlan = p::HelperPlan {
     name: "ts.set.size",
     function: p::function("382bc5f2d65d25977fc76abbb6a5be3f4a8c1acf4dda231f9de29d5ea56d28ea"),
     callees: &[
@@ -14568,7 +14568,7 @@ fn ts_set_size(ctx: &mut dyn p::PlanContext, _entry: u32) -> Result<Value, p::Pl
     Ok(ctx.take(0))
 }
 
-static TS_SET_ADD: p::HelperPlan = p::HelperPlan {
+const TS_SET_ADD: p::HelperPlan = p::HelperPlan {
     name: "ts.set.add",
     function: p::function("5f0672da35ca1420ec9d873b343512291275808951794049088c0452d6368ac3"),
     callees: &[
@@ -14646,7 +14646,7 @@ fn ts_set_add(ctx: &mut dyn p::PlanContext, _entry: u32) -> Result<Value, p::Pla
     Ok(ctx.take(0))
 }
 
-static TS_SET_HAS: p::HelperPlan = p::HelperPlan {
+const TS_SET_HAS: p::HelperPlan = p::HelperPlan {
     name: "ts.set.has",
     function: p::function("de7cb1d418c08687ead16bd409da339ab458287bfe11e6e6b1ef54d51828de55"),
     callees: &[
@@ -14720,7 +14720,7 @@ fn ts_set_has(ctx: &mut dyn p::PlanContext, _entry: u32) -> Result<Value, p::Pla
     Ok(ctx.take(0))
 }
 
-static TS_SET_DELETE: p::HelperPlan = p::HelperPlan {
+const TS_SET_DELETE: p::HelperPlan = p::HelperPlan {
     name: "ts.set.delete",
     function: p::function("621f45572460bf9b3bcb2e95f88dfdfb0a6f4243762f77ff5aaeb9812e40de05"),
     callees: &[
@@ -14805,7 +14805,7 @@ fn ts_set_delete(ctx: &mut dyn p::PlanContext, _entry: u32) -> Result<Value, p::
     Ok(ctx.take(0))
 }
 
-static TS_SET_CLEAR: p::HelperPlan = p::HelperPlan {
+const TS_SET_CLEAR: p::HelperPlan = p::HelperPlan {
     name: "ts.set.clear",
     function: p::function("688123971634587a2f8ab34541cefa3098246363cb62174deee50d4ecd364fef"),
     callees: &[
@@ -14880,7 +14880,7 @@ fn ts_set_clear(ctx: &mut dyn p::PlanContext, _entry: u32) -> Result<Value, p::P
     Ok(ctx.take(0))
 }
 
-static TS_SET_VALUES: p::HelperPlan = p::HelperPlan {
+const TS_SET_VALUES: p::HelperPlan = p::HelperPlan {
     name: "ts.set.values",
     function: p::function("6f40b47796bac57aac543e9c693b969f1dfa525ef64cf4da5f5e5ed79d070f0c"),
     callees: &[
@@ -14963,7 +14963,7 @@ fn ts_set_values(ctx: &mut dyn p::PlanContext, _entry: u32) -> Result<Value, p::
     Ok(ctx.take(0))
 }
 
-static TS_SET_ENTRIES: p::HelperPlan = p::HelperPlan {
+const TS_SET_ENTRIES: p::HelperPlan = p::HelperPlan {
     name: "ts.set.entries",
     function: p::function("addf4d1875886d7fd2b1fbc4fc0cb3cceb54fba5486c31a11aef71c6be709258"),
     callees: &[
@@ -15048,7 +15048,7 @@ fn ts_set_entries(ctx: &mut dyn p::PlanContext, _entry: u32) -> Result<Value, p:
     Ok(ctx.take(0))
 }
 
-static TS_SET_FOREACH: p::HelperPlan = p::HelperPlan {
+const TS_SET_FOREACH: p::HelperPlan = p::HelperPlan {
     name: "ts.set.forEach",
     function: p::function("7d3189b04fb5f25c152a23c1275079a8ff63cffdcc05527c252abdfb0e801d2a"),
     callees: &[
@@ -15198,7 +15198,7 @@ fn ts_set_foreach(ctx: &mut dyn p::PlanContext, entry: u32) -> Result<Value, p::
     Ok(Value::Null)
 }
 
-static TS_SET_OTHER: p::HelperPlan = p::HelperPlan {
+const TS_SET_OTHER: p::HelperPlan = p::HelperPlan {
     name: "ts.set.other",
     function: p::function("3d58779f3bc88b5a42b9d24f331643ebb46447c9467fa8c38207f774d941f49a"),
     callees: &[
@@ -15406,7 +15406,7 @@ fn ts_set_other(ctx: &mut dyn p::PlanContext, entry: u32) -> Result<Value, p::Pl
     Ok(Value::Null)
 }
 
-static TS_SET_CONTAINS_OTHER: p::HelperPlan = p::HelperPlan {
+const TS_SET_CONTAINS_OTHER: p::HelperPlan = p::HelperPlan {
     name: "ts.set.contains_other",
     function: p::function("0ebb20222631828784822db9a2e50521b288173f51aac0a2937f287dfe9121ee"),
     callees: &[
@@ -15454,7 +15454,7 @@ fn ts_set_contains_other(ctx: &mut dyn p::PlanContext, _entry: u32) -> Result<Va
     Ok(ctx.take(0))
 }
 
-static TS_SET_OTHER_SIZE: p::HelperPlan = p::HelperPlan {
+const TS_SET_OTHER_SIZE: p::HelperPlan = p::HelperPlan {
     name: "ts.set.other_size",
     function: p::function("13de3ba0bc7c4ed5a60bbae93bc1cb76b0d907519d00c4d38d8a7c3ce27b4488"),
     callees: &[
@@ -15501,7 +15501,7 @@ fn ts_set_other_size(ctx: &mut dyn p::PlanContext, _entry: u32) -> Result<Value,
     Ok(ctx.take(0))
 }
 
-static TS_SET_UNION: p::HelperPlan = p::HelperPlan {
+const TS_SET_UNION: p::HelperPlan = p::HelperPlan {
     name: "ts.set.union",
     function: p::function("f46a1ab75b7a0742a7f98a404cef5cc5da89d731bb44cd013ec959fa39fbb722"),
     callees: &[
@@ -15650,7 +15650,7 @@ fn ts_set_union(ctx: &mut dyn p::PlanContext, entry: u32) -> Result<Value, p::Pl
     Ok(Value::Null)
 }
 
-static TS_SET_INTERSECTION: p::HelperPlan = p::HelperPlan {
+const TS_SET_INTERSECTION: p::HelperPlan = p::HelperPlan {
     name: "ts.set.intersection",
     function: p::function("87144210e7d55644aa4616d31be9be2ec939308ff49b310f586c23a08461a881"),
     callees: &[
@@ -15834,7 +15834,7 @@ fn ts_set_intersection(ctx: &mut dyn p::PlanContext, entry: u32) -> Result<Value
     Ok(Value::Null)
 }
 
-static TS_SET_DIFFERENCE: p::HelperPlan = p::HelperPlan {
+const TS_SET_DIFFERENCE: p::HelperPlan = p::HelperPlan {
     name: "ts.set.difference",
     function: p::function("d0f69696319e3ab991489a472d4424100e03f0fb65e5df8f8329abba47465435"),
     callees: &[
@@ -15973,7 +15973,7 @@ fn ts_set_difference(ctx: &mut dyn p::PlanContext, entry: u32) -> Result<Value, 
     Ok(Value::Null)
 }
 
-static TS_SET_SYMMETRICDIFFERENCE: p::HelperPlan = p::HelperPlan {
+const TS_SET_SYMMETRICDIFFERENCE: p::HelperPlan = p::HelperPlan {
     name: "ts.set.symmetricDifference",
     function: p::function("23684ec47bdf4d189647b90f6f362ec95048b044bba5fc15fc8ed560f68c940f"),
     callees: &[
@@ -16143,7 +16143,7 @@ fn ts_set_symmetricdifference(ctx: &mut dyn p::PlanContext, entry: u32) -> Resul
     Ok(Value::Null)
 }
 
-static TS_SET_ISSUBSETOF: p::HelperPlan = p::HelperPlan {
+const TS_SET_ISSUBSETOF: p::HelperPlan = p::HelperPlan {
     name: "ts.set.isSubsetOf",
     function: p::function("7f49762e5b893d5fbc85abea7f46645ec76eba8eadb9178df0fdb65326b893bc"),
     callees: &[
@@ -16280,7 +16280,7 @@ fn ts_set_issubsetof(ctx: &mut dyn p::PlanContext, entry: u32) -> Result<Value, 
     Ok(Value::Null)
 }
 
-static TS_SET_ISSUPERSETOF: p::HelperPlan = p::HelperPlan {
+const TS_SET_ISSUPERSETOF: p::HelperPlan = p::HelperPlan {
     name: "ts.set.isSupersetOf",
     function: p::function("e55f595fd4c0ec4de4a472fdcc197df056396f90289a81d7353184ab84c0619d"),
     callees: &[
@@ -16412,7 +16412,7 @@ fn ts_set_issupersetof(ctx: &mut dyn p::PlanContext, entry: u32) -> Result<Value
     Ok(Value::Null)
 }
 
-static TS_SET_ISDISJOINTFROM: p::HelperPlan = p::HelperPlan {
+const TS_SET_ISDISJOINTFROM: p::HelperPlan = p::HelperPlan {
     name: "ts.set.isDisjointFrom",
     function: p::function("0477b9700803b69f10c60fb7ffa1815850d7a83557c9f6a04098b89774377eea"),
     callees: &[
@@ -16548,7 +16548,7 @@ fn ts_set_isdisjointfrom(ctx: &mut dyn p::PlanContext, entry: u32) -> Result<Val
     Ok(Value::Null)
 }
 
-static TS_BOOLEAN_CONVERT: p::HelperPlan = p::HelperPlan {
+const TS_BOOLEAN_CONVERT: p::HelperPlan = p::HelperPlan {
     name: "ts.boolean.convert",
     function: p::function("29add65727041e782774e4e87a070dae156e85377b4548d73dba14e479920efe"),
     callees: &[
@@ -16598,7 +16598,7 @@ fn ts_boolean_convert(ctx: &mut dyn p::PlanContext, _entry: u32) -> Result<Value
     Ok(ctx.take(0))
 }
 
-static TS_BOOLEAN_VALUEOF: p::HelperPlan = p::HelperPlan {
+const TS_BOOLEAN_VALUEOF: p::HelperPlan = p::HelperPlan {
     name: "ts.boolean.valueOf",
     function: p::function("22136ac8b7e84fedd24dfce5dbe44cbc3d8272c46c8cafe859352379a165abee"),
     callees: &[
@@ -16647,7 +16647,7 @@ fn ts_boolean_valueof(ctx: &mut dyn p::PlanContext, _entry: u32) -> Result<Value
     Err(p::PlanExit::Raise(ctx.take(0)))
 }
 
-static TS_BOOLEAN_TOSTRING: p::HelperPlan = p::HelperPlan {
+const TS_BOOLEAN_TOSTRING: p::HelperPlan = p::HelperPlan {
     name: "ts.boolean.toString",
     function: p::function("694da20ed0f18e1d554046ed6abc60dc671d8f0481b6f13070630a789b8e021d"),
     callees: &[],
@@ -16684,7 +16684,7 @@ fn ts_boolean_tostring(ctx: &mut dyn p::PlanContext, _entry: u32) -> Result<Valu
     Ok(ctx.take(0))
 }
 
-static TS_OBJECT_OWN_KEYS: p::HelperPlan = p::HelperPlan {
+const TS_OBJECT_OWN_KEYS: p::HelperPlan = p::HelperPlan {
     name: "ts.object.own_keys",
     function: p::function("7abf2949f3b82fc3eb0141aec095507b35f09c4131a1f45763a4e4123640e2d8"),
     callees: &[
@@ -16926,7 +16926,7 @@ fn ts_object_own_keys(ctx: &mut dyn p::PlanContext, entry: u32) -> Result<Value,
     Ok(Value::Null)
 }
 
-static TS_OBJECT_CONVERT: p::HelperPlan = p::HelperPlan {
+const TS_OBJECT_CONVERT: p::HelperPlan = p::HelperPlan {
     name: "ts.object.convert",
     function: p::function("ed55eda6718824fdb59e23154b812028b0c638bd835af6193cc99e9f38e9bd96"),
     callees: &[
@@ -17003,7 +17003,7 @@ fn ts_object_convert(ctx: &mut dyn p::PlanContext, _entry: u32) -> Result<Value,
     Ok(ctx.take(0))
 }
 
-static TS_OBJECT_KEYS: p::HelperPlan = p::HelperPlan {
+const TS_OBJECT_KEYS: p::HelperPlan = p::HelperPlan {
     name: "ts.object.keys",
     function: p::function("51642006422abf57047178fbd28eb5449a77dd054e4df7d903b3418cb348e6f1"),
     callees: &[
@@ -17090,7 +17090,7 @@ fn ts_object_keys(ctx: &mut dyn p::PlanContext, entry: u32) -> Result<Value, p::
     Ok(Value::Null)
 }
 
-static TS_OBJECT_VALUES: p::HelperPlan = p::HelperPlan {
+const TS_OBJECT_VALUES: p::HelperPlan = p::HelperPlan {
     name: "ts.object.values",
     function: p::function("ff788fef520aef54467f501af1e569328738946aa782bcefdb6345266272440c"),
     callees: &[
@@ -17218,7 +17218,7 @@ fn ts_object_values(ctx: &mut dyn p::PlanContext, entry: u32) -> Result<Value, p
     Ok(Value::Null)
 }
 
-static TS_OBJECT_ENTRIES: p::HelperPlan = p::HelperPlan {
+const TS_OBJECT_ENTRIES: p::HelperPlan = p::HelperPlan {
     name: "ts.object.entries",
     function: p::function("9183dc98a2d356cb2670220993e6735044197e10541acffc1a23546e6677ca6a"),
     callees: &[
@@ -17348,7 +17348,7 @@ fn ts_object_entries(ctx: &mut dyn p::PlanContext, entry: u32) -> Result<Value, 
     Ok(Value::Null)
 }
 
-static TS_OBJECT_FROMENTRIES: p::HelperPlan = p::HelperPlan {
+const TS_OBJECT_FROMENTRIES: p::HelperPlan = p::HelperPlan {
     name: "ts.object.fromEntries",
     function: p::function("4e8ddac5ae42d6f520680c3d5ba84ac5efe13af8ab2b598ce646fc30c3ccb4e0"),
     callees: &[
@@ -17540,7 +17540,7 @@ fn ts_object_fromentries(ctx: &mut dyn p::PlanContext, entry: u32) -> Result<Val
     Ok(Value::Null)
 }
 
-static TS_OBJECT_ASSIGN: p::HelperPlan = p::HelperPlan {
+const TS_OBJECT_ASSIGN: p::HelperPlan = p::HelperPlan {
     name: "ts.object.assign",
     function: p::function("2cbeac2b181325787a5d9881e45c6e67fe83a8086a826ef460469939379fcb2b"),
     callees: &[
@@ -17736,7 +17736,7 @@ fn ts_object_assign(ctx: &mut dyn p::PlanContext, entry: u32) -> Result<Value, p
     Ok(Value::Null)
 }
 
-static TS_OBJECT_HASOWN: p::HelperPlan = p::HelperPlan {
+const TS_OBJECT_HASOWN: p::HelperPlan = p::HelperPlan {
     name: "ts.object.hasOwn",
     function: p::function("958af1c276c9ffefae1618af75bbd7ea7717dd9bb8a56b078985c0f9af8d0793"),
     callees: &[
@@ -17833,7 +17833,7 @@ fn ts_object_hasown(ctx: &mut dyn p::PlanContext, entry: u32) -> Result<Value, p
     Ok(Value::Null)
 }
 
-static TS_OBJECT_IS: p::HelperPlan = p::HelperPlan {
+const TS_OBJECT_IS: p::HelperPlan = p::HelperPlan {
     name: "ts.object.is",
     function: p::function("c58db653fe8d91b03e3d3caa5ebc00693ef863ea39ace8949b8c8d670663a296"),
     callees: &[
@@ -17950,7 +17950,7 @@ fn ts_object_is(ctx: &mut dyn p::PlanContext, _entry: u32) -> Result<Value, p::P
     Ok(ctx.take(0))
 }
 
-static TS_OBJECT_GROUPBY: p::HelperPlan = p::HelperPlan {
+const TS_OBJECT_GROUPBY: p::HelperPlan = p::HelperPlan {
     name: "ts.object.groupBy",
     function: p::function("ce2292cfa2617fe144666171937635072ed28411b6c8f5eb6b25755b42280097"),
     callees: &[
@@ -18179,7 +18179,7 @@ fn ts_object_groupby(ctx: &mut dyn p::PlanContext, entry: u32) -> Result<Value, 
     Ok(Value::Null)
 }
 
-static TS_OBJECT_DEFINEPROPERTY: p::HelperPlan = p::HelperPlan {
+const TS_OBJECT_DEFINEPROPERTY: p::HelperPlan = p::HelperPlan {
     name: "ts.object.defineProperty",
     function: p::function("5193c2c37db639c6135018efada0daf131e5e992b11e2ca0f14feced88df717c"),
     callees: &[
@@ -18215,7 +18215,7 @@ fn ts_object_defineproperty(ctx: &mut dyn p::PlanContext, _entry: u32) -> Result
     Err(p::PlanExit::Raise(ctx.take(0)))
 }
 
-static TS_OBJECT_DEFINEPROPERTIES: p::HelperPlan = p::HelperPlan {
+const TS_OBJECT_DEFINEPROPERTIES: p::HelperPlan = p::HelperPlan {
     name: "ts.object.defineProperties",
     function: p::function("9497605f2a11bcb428f007f7dcb5b8fd18bb0df9874fc6528a3915ff7ab7f4d4"),
     callees: &[
@@ -18251,7 +18251,7 @@ fn ts_object_defineproperties(ctx: &mut dyn p::PlanContext, _entry: u32) -> Resu
     Err(p::PlanExit::Raise(ctx.take(0)))
 }
 
-static TS_OBJECT_GETOWNPROPERTYDESCRIPTOR: p::HelperPlan = p::HelperPlan {
+const TS_OBJECT_GETOWNPROPERTYDESCRIPTOR: p::HelperPlan = p::HelperPlan {
     name: "ts.object.getOwnPropertyDescriptor",
     function: p::function("97edcdb7098b87b717505e43bdbd25a007b9ffed07e9fad7b35fbda87942e5b9"),
     callees: &[
@@ -18287,7 +18287,7 @@ fn ts_object_getownpropertydescriptor(ctx: &mut dyn p::PlanContext, _entry: u32)
     Err(p::PlanExit::Raise(ctx.take(0)))
 }
 
-static TS_OBJECT_GETOWNPROPERTYDESCRIPTORS: p::HelperPlan = p::HelperPlan {
+const TS_OBJECT_GETOWNPROPERTYDESCRIPTORS: p::HelperPlan = p::HelperPlan {
     name: "ts.object.getOwnPropertyDescriptors",
     function: p::function("53ac47b1642ea1f1b7cf435e74574bd21c858667cee1484fac2a96ac0d94c9cd"),
     callees: &[
@@ -18323,7 +18323,7 @@ fn ts_object_getownpropertydescriptors(ctx: &mut dyn p::PlanContext, _entry: u32
     Err(p::PlanExit::Raise(ctx.take(0)))
 }
 
-static TS_OBJECT_GETOWNPROPERTYNAMES: p::HelperPlan = p::HelperPlan {
+const TS_OBJECT_GETOWNPROPERTYNAMES: p::HelperPlan = p::HelperPlan {
     name: "ts.object.getOwnPropertyNames",
     function: p::function("b146b8514d124012f355b8b2fe85d136498205ed3a8ff47c4669da1918a12f59"),
     callees: &[
@@ -18359,7 +18359,7 @@ fn ts_object_getownpropertynames(ctx: &mut dyn p::PlanContext, _entry: u32) -> R
     Err(p::PlanExit::Raise(ctx.take(0)))
 }
 
-static TS_OBJECT_GETOWNPROPERTYSYMBOLS: p::HelperPlan = p::HelperPlan {
+const TS_OBJECT_GETOWNPROPERTYSYMBOLS: p::HelperPlan = p::HelperPlan {
     name: "ts.object.getOwnPropertySymbols",
     function: p::function("8b64856d155e8b734189f8de57f67ff483279405a6d99947aec6c65c78a82b29"),
     callees: &[
@@ -18395,7 +18395,7 @@ fn ts_object_getownpropertysymbols(ctx: &mut dyn p::PlanContext, _entry: u32) ->
     Err(p::PlanExit::Raise(ctx.take(0)))
 }
 
-static TS_OBJECT_CREATE: p::HelperPlan = p::HelperPlan {
+const TS_OBJECT_CREATE: p::HelperPlan = p::HelperPlan {
     name: "ts.object.create",
     function: p::function("3abad50e31d6c071eddebbabf04ca4d2cc2cf7aacb1f3d6560a5f2f9ebd89783"),
     callees: &[
@@ -18431,7 +18431,7 @@ fn ts_object_create(ctx: &mut dyn p::PlanContext, _entry: u32) -> Result<Value, 
     Err(p::PlanExit::Raise(ctx.take(0)))
 }
 
-static TS_OBJECT_GETPROTOTYPEOF: p::HelperPlan = p::HelperPlan {
+const TS_OBJECT_GETPROTOTYPEOF: p::HelperPlan = p::HelperPlan {
     name: "ts.object.getPrototypeOf",
     function: p::function("f833e34bc898b51e60124140b673a3c39562b415590ae16924e9e56f45bd79a8"),
     callees: &[
@@ -18467,7 +18467,7 @@ fn ts_object_getprototypeof(ctx: &mut dyn p::PlanContext, _entry: u32) -> Result
     Err(p::PlanExit::Raise(ctx.take(0)))
 }
 
-static TS_OBJECT_SETPROTOTYPEOF: p::HelperPlan = p::HelperPlan {
+const TS_OBJECT_SETPROTOTYPEOF: p::HelperPlan = p::HelperPlan {
     name: "ts.object.setPrototypeOf",
     function: p::function("e016c5337d49c7df101e2cf3d6b3a2d6b6364c71fea245cab633fec1947fbfe6"),
     callees: &[
@@ -18503,7 +18503,7 @@ fn ts_object_setprototypeof(ctx: &mut dyn p::PlanContext, _entry: u32) -> Result
     Err(p::PlanExit::Raise(ctx.take(0)))
 }
 
-static TS_OBJECT_FREEZE: p::HelperPlan = p::HelperPlan {
+const TS_OBJECT_FREEZE: p::HelperPlan = p::HelperPlan {
     name: "ts.object.freeze",
     function: p::function("97a048243a71eaecad0483759e46106e5e1e257faafb25b38f814a7490c7b0ba"),
     callees: &[
@@ -18539,7 +18539,7 @@ fn ts_object_freeze(ctx: &mut dyn p::PlanContext, _entry: u32) -> Result<Value, 
     Err(p::PlanExit::Raise(ctx.take(0)))
 }
 
-static TS_OBJECT_SEAL: p::HelperPlan = p::HelperPlan {
+const TS_OBJECT_SEAL: p::HelperPlan = p::HelperPlan {
     name: "ts.object.seal",
     function: p::function("73c13581ce9ccede49a5b7e77f0fa9fc676d5f6daf28dcbea6219bae6de3f5e3"),
     callees: &[
@@ -18575,7 +18575,7 @@ fn ts_object_seal(ctx: &mut dyn p::PlanContext, _entry: u32) -> Result<Value, p:
     Err(p::PlanExit::Raise(ctx.take(0)))
 }
 
-static TS_OBJECT_PREVENTEXTENSIONS: p::HelperPlan = p::HelperPlan {
+const TS_OBJECT_PREVENTEXTENSIONS: p::HelperPlan = p::HelperPlan {
     name: "ts.object.preventExtensions",
     function: p::function("425604114de842c38116503dce5ed61797d9552af28e2bb10667ed5c6cc7b04d"),
     callees: &[
@@ -18611,7 +18611,7 @@ fn ts_object_preventextensions(ctx: &mut dyn p::PlanContext, _entry: u32) -> Res
     Err(p::PlanExit::Raise(ctx.take(0)))
 }
 
-static TS_OBJECT_ISFROZEN: p::HelperPlan = p::HelperPlan {
+const TS_OBJECT_ISFROZEN: p::HelperPlan = p::HelperPlan {
     name: "ts.object.isFrozen",
     function: p::function("8161b6a23f4b40f75e86c109c092d17bc19bf2ead9d970f2ccb04f602a4f8161"),
     callees: &[
@@ -18647,7 +18647,7 @@ fn ts_object_isfrozen(ctx: &mut dyn p::PlanContext, _entry: u32) -> Result<Value
     Err(p::PlanExit::Raise(ctx.take(0)))
 }
 
-static TS_OBJECT_ISSEALED: p::HelperPlan = p::HelperPlan {
+const TS_OBJECT_ISSEALED: p::HelperPlan = p::HelperPlan {
     name: "ts.object.isSealed",
     function: p::function("f900725e3520abf3cb3bca8c70b21b4ec54d44a49bfd2a32d1decb1c69f3e7ed"),
     callees: &[
@@ -18683,7 +18683,7 @@ fn ts_object_issealed(ctx: &mut dyn p::PlanContext, _entry: u32) -> Result<Value
     Err(p::PlanExit::Raise(ctx.take(0)))
 }
 
-static TS_OBJECT_ISEXTENSIBLE: p::HelperPlan = p::HelperPlan {
+const TS_OBJECT_ISEXTENSIBLE: p::HelperPlan = p::HelperPlan {
     name: "ts.object.isExtensible",
     function: p::function("fecb553d91e8e0ba2bd634a30a9fe5fc88e611ae85efd24624e009bc64b9ae7d"),
     callees: &[
@@ -18719,7 +18719,7 @@ fn ts_object_isextensible(ctx: &mut dyn p::PlanContext, _entry: u32) -> Result<V
     Err(p::PlanExit::Raise(ctx.take(0)))
 }
 
-static TS_OBJECT_HASOWNPROPERTY: p::HelperPlan = p::HelperPlan {
+const TS_OBJECT_HASOWNPROPERTY: p::HelperPlan = p::HelperPlan {
     name: "ts.object.hasOwnProperty",
     function: p::function("62e52a860388a46ed57fbc22fc14da897678fb379d93766272c1103b5f2a7c43"),
     callees: &[
@@ -18815,7 +18815,7 @@ fn ts_object_hasownproperty(ctx: &mut dyn p::PlanContext, entry: u32) -> Result<
     Ok(Value::Null)
 }
 
-static TS_OBJECT_TOSTRING: p::HelperPlan = p::HelperPlan {
+const TS_OBJECT_TOSTRING: p::HelperPlan = p::HelperPlan {
     name: "ts.object.toString",
     function: p::function("9113cb207a84accb01ec3980b311f387b7b76a738d622ebe8350151240eef316"),
     callees: &[
@@ -19029,7 +19029,7 @@ fn ts_object_tostring(ctx: &mut dyn p::PlanContext, _entry: u32) -> Result<Value
     Ok(ctx.take(0))
 }
 
-static TS_OBJECT_PROPERTYISENUMERABLE: p::HelperPlan = p::HelperPlan {
+const TS_OBJECT_PROPERTYISENUMERABLE: p::HelperPlan = p::HelperPlan {
     name: "ts.object.propertyIsEnumerable",
     function: p::function("c688cf82d79c37333106a28e3e544dbfba094d1dc06f4112ea2019bfbbff7341"),
     callees: &[
@@ -19152,7 +19152,7 @@ fn ts_object_propertyisenumerable(ctx: &mut dyn p::PlanContext, entry: u32) -> R
     Ok(Value::Null)
 }
 
-static TS_OBJECT_TOLOCALESTRING: p::HelperPlan = p::HelperPlan {
+const TS_OBJECT_TOLOCALESTRING: p::HelperPlan = p::HelperPlan {
     name: "ts.object.toLocaleString",
     function: p::function("20dd01f2d786d1262aa50e22cead925143945b43bba2befcf22e25f7ae449e47"),
     callees: &[
@@ -19300,7 +19300,7 @@ fn ts_object_tolocalestring(ctx: &mut dyn p::PlanContext, entry: u32) -> Result<
     Ok(Value::Null)
 }
 
-static TS_OBJECT_ISPROTOTYPEOF: p::HelperPlan = p::HelperPlan {
+const TS_OBJECT_ISPROTOTYPEOF: p::HelperPlan = p::HelperPlan {
     name: "ts.object.isPrototypeOf",
     function: p::function("ba3ec0b26187f36a592266737794024f2460a982c415c58575b54ced8a9abb64"),
     callees: &[
@@ -19431,7 +19431,7 @@ fn ts_object_isprototypeof(ctx: &mut dyn p::PlanContext, _entry: u32) -> Result<
     Err(p::PlanExit::Raise(ctx.take(0)))
 }
 
-static TS_OBJECT_VALUEOF: p::HelperPlan = p::HelperPlan {
+const TS_OBJECT_VALUEOF: p::HelperPlan = p::HelperPlan {
     name: "ts.object.valueOf",
     function: p::function("c414bc7971f923d4a6b1acd07a6fa6a9a35d798de21590aa4dd401b741c6bf5c"),
     callees: &[
@@ -19484,7 +19484,7 @@ fn ts_object_valueof(ctx: &mut dyn p::PlanContext, _entry: u32) -> Result<Value,
     Ok(ctx.take(0))
 }
 
-static TS_OBJECT_IS_INSTANCE: p::HelperPlan = p::HelperPlan {
+const TS_OBJECT_IS_INSTANCE: p::HelperPlan = p::HelperPlan {
     name: "ts.object.is_instance",
     function: p::function("802d873017f5134658fbc308bcd1137183ce5af53574ed946d9fcbfecd247a72"),
     callees: &[
@@ -19553,7 +19553,7 @@ fn ts_object_is_instance(ctx: &mut dyn p::PlanContext, _entry: u32) -> Result<Va
     Ok(ctx.take(0))
 }
 
-static TS_MATH_ABS: p::HelperPlan = p::HelperPlan {
+const TS_MATH_ABS: p::HelperPlan = p::HelperPlan {
     name: "ts.math.abs",
     function: p::function("065b6effb2b7400e0269b29460a68a076c4d6fdfdb9348990d0292bcde219288"),
     callees: &[
@@ -19628,7 +19628,7 @@ fn ts_math_abs(ctx: &mut dyn p::PlanContext, entry: u32) -> Result<Value, p::Pla
     Ok(Value::Null)
 }
 
-static TS_MATH_FLOOR: p::HelperPlan = p::HelperPlan {
+const TS_MATH_FLOOR: p::HelperPlan = p::HelperPlan {
     name: "ts.math.floor",
     function: p::function("9c943d73d66b85768170cd6aca1e4a1ddfe843d29d8d6976ab13bbcb033935b2"),
     callees: &[
@@ -19703,7 +19703,7 @@ fn ts_math_floor(ctx: &mut dyn p::PlanContext, entry: u32) -> Result<Value, p::P
     Ok(Value::Null)
 }
 
-static TS_MATH_CEIL: p::HelperPlan = p::HelperPlan {
+const TS_MATH_CEIL: p::HelperPlan = p::HelperPlan {
     name: "ts.math.ceil",
     function: p::function("c9a8514a55e540f3fcecdba4523214e5173ad8104d678b69c32ba1f1aaab195e"),
     callees: &[
@@ -19778,7 +19778,7 @@ fn ts_math_ceil(ctx: &mut dyn p::PlanContext, entry: u32) -> Result<Value, p::Pl
     Ok(Value::Null)
 }
 
-static TS_MATH_TRUNC: p::HelperPlan = p::HelperPlan {
+const TS_MATH_TRUNC: p::HelperPlan = p::HelperPlan {
     name: "ts.math.trunc",
     function: p::function("e14a15081d74a897d7ceeadc670be3b9906436d4643fe400e4349dc849d024b4"),
     callees: &[
@@ -19853,7 +19853,7 @@ fn ts_math_trunc(ctx: &mut dyn p::PlanContext, entry: u32) -> Result<Value, p::P
     Ok(Value::Null)
 }
 
-static TS_MATH_SIGN: p::HelperPlan = p::HelperPlan {
+const TS_MATH_SIGN: p::HelperPlan = p::HelperPlan {
     name: "ts.math.sign",
     function: p::function("5efe1468781034a8feca538710e240dad9ec54cadc5f8cdf86dc0a2d19b857de"),
     callees: &[
@@ -19928,7 +19928,7 @@ fn ts_math_sign(ctx: &mut dyn p::PlanContext, entry: u32) -> Result<Value, p::Pl
     Ok(Value::Null)
 }
 
-static TS_MATH_ACOS: p::HelperPlan = p::HelperPlan {
+const TS_MATH_ACOS: p::HelperPlan = p::HelperPlan {
     name: "ts.math.acos",
     function: p::function("85d8b96801e34544a4bc57750e29991d518ff40bb85a2158bf9c211ef20e4718"),
     callees: &[
@@ -20003,7 +20003,7 @@ fn ts_math_acos(ctx: &mut dyn p::PlanContext, entry: u32) -> Result<Value, p::Pl
     Ok(Value::Null)
 }
 
-static TS_MATH_ASIN: p::HelperPlan = p::HelperPlan {
+const TS_MATH_ASIN: p::HelperPlan = p::HelperPlan {
     name: "ts.math.asin",
     function: p::function("6b1977fc91ab9a280d272c6b4c4f6bde3d26fb9ec5711447214137d623d97bdc"),
     callees: &[
@@ -20078,7 +20078,7 @@ fn ts_math_asin(ctx: &mut dyn p::PlanContext, entry: u32) -> Result<Value, p::Pl
     Ok(Value::Null)
 }
 
-static TS_MATH_ACOSH: p::HelperPlan = p::HelperPlan {
+const TS_MATH_ACOSH: p::HelperPlan = p::HelperPlan {
     name: "ts.math.acosh",
     function: p::function("43eb4cf68d63f9a22347748f1521981468d477b1cfaf4ca4692c288dfc7604cc"),
     callees: &[
@@ -20153,7 +20153,7 @@ fn ts_math_acosh(ctx: &mut dyn p::PlanContext, entry: u32) -> Result<Value, p::P
     Ok(Value::Null)
 }
 
-static TS_MATH_ASINH: p::HelperPlan = p::HelperPlan {
+const TS_MATH_ASINH: p::HelperPlan = p::HelperPlan {
     name: "ts.math.asinh",
     function: p::function("49535785364003043c992b5fa6306ba2daecaf600f376eda1c3689aa71f5db45"),
     callees: &[
@@ -20228,7 +20228,7 @@ fn ts_math_asinh(ctx: &mut dyn p::PlanContext, entry: u32) -> Result<Value, p::P
     Ok(Value::Null)
 }
 
-static TS_MATH_ATAN: p::HelperPlan = p::HelperPlan {
+const TS_MATH_ATAN: p::HelperPlan = p::HelperPlan {
     name: "ts.math.atan",
     function: p::function("47ea0e6c1816317521868df7df93a4e4d5dd05eaae70b6199e35e891f009f24e"),
     callees: &[
@@ -20303,7 +20303,7 @@ fn ts_math_atan(ctx: &mut dyn p::PlanContext, entry: u32) -> Result<Value, p::Pl
     Ok(Value::Null)
 }
 
-static TS_MATH_ATANH: p::HelperPlan = p::HelperPlan {
+const TS_MATH_ATANH: p::HelperPlan = p::HelperPlan {
     name: "ts.math.atanh",
     function: p::function("5271ea45e083b0d396104e537871580d2e040765c5b8b89c406f845e5189844b"),
     callees: &[
@@ -20378,7 +20378,7 @@ fn ts_math_atanh(ctx: &mut dyn p::PlanContext, entry: u32) -> Result<Value, p::P
     Ok(Value::Null)
 }
 
-static TS_MATH_CBRT: p::HelperPlan = p::HelperPlan {
+const TS_MATH_CBRT: p::HelperPlan = p::HelperPlan {
     name: "ts.math.cbrt",
     function: p::function("bb2f8da830a5cdcb9bf7057d92873e0455d4138cce2de58a26a89e93f7fef18b"),
     callees: &[
@@ -20453,7 +20453,7 @@ fn ts_math_cbrt(ctx: &mut dyn p::PlanContext, entry: u32) -> Result<Value, p::Pl
     Ok(Value::Null)
 }
 
-static TS_MATH_COS: p::HelperPlan = p::HelperPlan {
+const TS_MATH_COS: p::HelperPlan = p::HelperPlan {
     name: "ts.math.cos",
     function: p::function("ed466775be13e6e918557ee5532bb9b99d6e5abeb568176ec4f4844596db08e9"),
     callees: &[
@@ -20528,7 +20528,7 @@ fn ts_math_cos(ctx: &mut dyn p::PlanContext, entry: u32) -> Result<Value, p::Pla
     Ok(Value::Null)
 }
 
-static TS_MATH_COSH: p::HelperPlan = p::HelperPlan {
+const TS_MATH_COSH: p::HelperPlan = p::HelperPlan {
     name: "ts.math.cosh",
     function: p::function("da1b6ad4cc3553a82b48b1f4216be3168d5811975645178a5ccfe08f51818096"),
     callees: &[
@@ -20603,7 +20603,7 @@ fn ts_math_cosh(ctx: &mut dyn p::PlanContext, entry: u32) -> Result<Value, p::Pl
     Ok(Value::Null)
 }
 
-static TS_MATH_EXP: p::HelperPlan = p::HelperPlan {
+const TS_MATH_EXP: p::HelperPlan = p::HelperPlan {
     name: "ts.math.exp",
     function: p::function("d0839752fb3e8623e129e3e7e9a289506890f2383660c89979474641c273f03c"),
     callees: &[
@@ -20678,7 +20678,7 @@ fn ts_math_exp(ctx: &mut dyn p::PlanContext, entry: u32) -> Result<Value, p::Pla
     Ok(Value::Null)
 }
 
-static TS_MATH_EXPM1: p::HelperPlan = p::HelperPlan {
+const TS_MATH_EXPM1: p::HelperPlan = p::HelperPlan {
     name: "ts.math.expm1",
     function: p::function("6a5f1d90271a3cd8a80e7eb4a598cde230c2e9e9ce0823bbcb496c51d0ec4055"),
     callees: &[
@@ -20753,7 +20753,7 @@ fn ts_math_expm1(ctx: &mut dyn p::PlanContext, entry: u32) -> Result<Value, p::P
     Ok(Value::Null)
 }
 
-static TS_MATH_LOG: p::HelperPlan = p::HelperPlan {
+const TS_MATH_LOG: p::HelperPlan = p::HelperPlan {
     name: "ts.math.log",
     function: p::function("b1d1ea763ae72a7f721eed7afc5890921779b0b19f3b739722930c875e1067b7"),
     callees: &[
@@ -20828,7 +20828,7 @@ fn ts_math_log(ctx: &mut dyn p::PlanContext, entry: u32) -> Result<Value, p::Pla
     Ok(Value::Null)
 }
 
-static TS_MATH_LOG1P: p::HelperPlan = p::HelperPlan {
+const TS_MATH_LOG1P: p::HelperPlan = p::HelperPlan {
     name: "ts.math.log1p",
     function: p::function("b0c1eb30dd07ef038eef85fa3ee5ded7464685f1333d0c08adfbc054570f4fc3"),
     callees: &[
@@ -20903,7 +20903,7 @@ fn ts_math_log1p(ctx: &mut dyn p::PlanContext, entry: u32) -> Result<Value, p::P
     Ok(Value::Null)
 }
 
-static TS_MATH_LOG10: p::HelperPlan = p::HelperPlan {
+const TS_MATH_LOG10: p::HelperPlan = p::HelperPlan {
     name: "ts.math.log10",
     function: p::function("150bc66bf6c184aa3f3fe3789c11b3c05bd55f64c3da103e9068f786e358d96c"),
     callees: &[
@@ -20978,7 +20978,7 @@ fn ts_math_log10(ctx: &mut dyn p::PlanContext, entry: u32) -> Result<Value, p::P
     Ok(Value::Null)
 }
 
-static TS_MATH_LOG2: p::HelperPlan = p::HelperPlan {
+const TS_MATH_LOG2: p::HelperPlan = p::HelperPlan {
     name: "ts.math.log2",
     function: p::function("fe5fe02cc92bd86da572cc1c3278bc08622fa69d34c0cc3dd28047351addca95"),
     callees: &[
@@ -21053,7 +21053,7 @@ fn ts_math_log2(ctx: &mut dyn p::PlanContext, entry: u32) -> Result<Value, p::Pl
     Ok(Value::Null)
 }
 
-static TS_MATH_SIN: p::HelperPlan = p::HelperPlan {
+const TS_MATH_SIN: p::HelperPlan = p::HelperPlan {
     name: "ts.math.sin",
     function: p::function("ede56dda42adfa547f247011342a927d252c4f59e6b8a99695a5ee71245ea2fd"),
     callees: &[
@@ -21128,7 +21128,7 @@ fn ts_math_sin(ctx: &mut dyn p::PlanContext, entry: u32) -> Result<Value, p::Pla
     Ok(Value::Null)
 }
 
-static TS_MATH_SINH: p::HelperPlan = p::HelperPlan {
+const TS_MATH_SINH: p::HelperPlan = p::HelperPlan {
     name: "ts.math.sinh",
     function: p::function("efbcf493d1f02b66627ada098729e4c45e9e2090b056d0d53c60fc55a396922a"),
     callees: &[
@@ -21203,7 +21203,7 @@ fn ts_math_sinh(ctx: &mut dyn p::PlanContext, entry: u32) -> Result<Value, p::Pl
     Ok(Value::Null)
 }
 
-static TS_MATH_TAN: p::HelperPlan = p::HelperPlan {
+const TS_MATH_TAN: p::HelperPlan = p::HelperPlan {
     name: "ts.math.tan",
     function: p::function("269571e794f8b9752137ec918e15c748676a764f07ad98a2af0c33982176e22e"),
     callees: &[
@@ -21278,7 +21278,7 @@ fn ts_math_tan(ctx: &mut dyn p::PlanContext, entry: u32) -> Result<Value, p::Pla
     Ok(Value::Null)
 }
 
-static TS_MATH_TANH: p::HelperPlan = p::HelperPlan {
+const TS_MATH_TANH: p::HelperPlan = p::HelperPlan {
     name: "ts.math.tanh",
     function: p::function("244e727131962333ecda0c0cd499f67d2abbb349036f0d0ab0f807d2d7f8de7c"),
     callees: &[
@@ -21353,7 +21353,7 @@ fn ts_math_tanh(ctx: &mut dyn p::PlanContext, entry: u32) -> Result<Value, p::Pl
     Ok(Value::Null)
 }
 
-static TS_MATH_SQRT: p::HelperPlan = p::HelperPlan {
+const TS_MATH_SQRT: p::HelperPlan = p::HelperPlan {
     name: "ts.math.sqrt",
     function: p::function("24cf99a94337af362b24a935f659b49c6a0e2f4091c62e3c8f8d9af5139c8fe4"),
     callees: &[
@@ -21428,7 +21428,7 @@ fn ts_math_sqrt(ctx: &mut dyn p::PlanContext, entry: u32) -> Result<Value, p::Pl
     Ok(Value::Null)
 }
 
-static TS_MATH_ROUND: p::HelperPlan = p::HelperPlan {
+const TS_MATH_ROUND: p::HelperPlan = p::HelperPlan {
     name: "ts.math.round",
     function: p::function("b0d92390c28e53665e3af71a2c8d5d5b8398cbe69d65ecab9dd433eeedba1b53"),
     callees: &[
@@ -21503,7 +21503,7 @@ fn ts_math_round(ctx: &mut dyn p::PlanContext, entry: u32) -> Result<Value, p::P
     Ok(Value::Null)
 }
 
-static TS_MATH_ATAN2: p::HelperPlan = p::HelperPlan {
+const TS_MATH_ATAN2: p::HelperPlan = p::HelperPlan {
     name: "ts.math.atan2",
     function: p::function("0f0b1b47ef7e68c97babeff77a976a4f87fe0489b05fdc2f088a3e9df0541316"),
     callees: &[
@@ -21603,7 +21603,7 @@ fn ts_math_atan2(ctx: &mut dyn p::PlanContext, entry: u32) -> Result<Value, p::P
     Ok(Value::Null)
 }
 
-static TS_MATH_POW: p::HelperPlan = p::HelperPlan {
+const TS_MATH_POW: p::HelperPlan = p::HelperPlan {
     name: "ts.math.pow",
     function: p::function("4db20b9293c7e45ba9953aaf959adfcdea36be87982a9cf710aa4d6419b4ced3"),
     callees: &[
@@ -21686,7 +21686,7 @@ fn ts_math_pow(ctx: &mut dyn p::PlanContext, entry: u32) -> Result<Value, p::Pla
     Ok(Value::Null)
 }
 
-static TS_MATH_MAX: p::HelperPlan = p::HelperPlan {
+const TS_MATH_MAX: p::HelperPlan = p::HelperPlan {
     name: "ts.math.max",
     function: p::function("3055f218ee14707a032b2ed924c4c2412d6fddb04d316c962c5277c2698f76d0"),
     callees: &[
@@ -21771,7 +21771,7 @@ fn ts_math_max(ctx: &mut dyn p::PlanContext, entry: u32) -> Result<Value, p::Pla
     Ok(Value::Null)
 }
 
-static TS_MATH_MIN: p::HelperPlan = p::HelperPlan {
+const TS_MATH_MIN: p::HelperPlan = p::HelperPlan {
     name: "ts.math.min",
     function: p::function("037814644f69d6af485d83acda8c8ba0abb28e7a8b120f590faef808a24b7aa2"),
     callees: &[
@@ -21856,7 +21856,7 @@ fn ts_math_min(ctx: &mut dyn p::PlanContext, entry: u32) -> Result<Value, p::Pla
     Ok(Value::Null)
 }
 
-static TS_MATH_HYPOT: p::HelperPlan = p::HelperPlan {
+const TS_MATH_HYPOT: p::HelperPlan = p::HelperPlan {
     name: "ts.math.hypot",
     function: p::function("7547e9463ab9a654bb347a6e532e1e4b7a3f483b7dcd1af5ae3d1a18241e7777"),
     callees: &[
@@ -22076,7 +22076,7 @@ fn ts_math_hypot(ctx: &mut dyn p::PlanContext, entry: u32) -> Result<Value, p::P
     Ok(Value::Null)
 }
 
-static TS_MATH_IMUL: p::HelperPlan = p::HelperPlan {
+const TS_MATH_IMUL: p::HelperPlan = p::HelperPlan {
     name: "ts.math.imul",
     function: p::function("b75a9be2d8e10939f3a0f81f97da412f9087d5eebe51630e1925cd24c3c016b4"),
     callees: &[
@@ -22192,7 +22192,7 @@ fn ts_math_imul(ctx: &mut dyn p::PlanContext, entry: u32) -> Result<Value, p::Pl
     Ok(Value::Null)
 }
 
-static TS_MATH_CLZ32: p::HelperPlan = p::HelperPlan {
+const TS_MATH_CLZ32: p::HelperPlan = p::HelperPlan {
     name: "ts.math.clz32",
     function: p::function("ce0d8601d41fa2e0ccb0b05fdf9de363701fe339176845ca3ee74f8e3332402f"),
     callees: &[
@@ -22308,7 +22308,7 @@ fn ts_math_clz32(ctx: &mut dyn p::PlanContext, entry: u32) -> Result<Value, p::P
     Ok(Value::Null)
 }
 
-static TS_MATH_FROUND: p::HelperPlan = p::HelperPlan {
+const TS_MATH_FROUND: p::HelperPlan = p::HelperPlan {
     name: "ts.math.fround",
     function: p::function("865ce4eb8a2bdda9d4e741409c183d36aba78802045f5ab0b68ed96dc0367ace"),
     callees: &[
@@ -22504,7 +22504,7 @@ fn ts_math_fround(ctx: &mut dyn p::PlanContext, entry: u32) -> Result<Value, p::
     Ok(Value::Null)
 }
 
-static TS_MATH_E: p::HelperPlan = p::HelperPlan {
+const TS_MATH_E: p::HelperPlan = p::HelperPlan {
     name: "ts.math.E",
     function: p::function("add6ef2dcf56df03389428e45fb7185c21fd634a2d6b9cf0b02c0a14c5e67b98"),
     callees: &[],
@@ -22529,7 +22529,7 @@ fn ts_math_e(ctx: &mut dyn p::PlanContext, _entry: u32) -> Result<Value, p::Plan
     Ok(ctx.take(0))
 }
 
-static TS_MATH_LN10: p::HelperPlan = p::HelperPlan {
+const TS_MATH_LN10: p::HelperPlan = p::HelperPlan {
     name: "ts.math.LN10",
     function: p::function("b13389e4fdc42f62219b114136669f757abd016307c66839bc880e5933a085c3"),
     callees: &[],
@@ -22554,7 +22554,7 @@ fn ts_math_ln10(ctx: &mut dyn p::PlanContext, _entry: u32) -> Result<Value, p::P
     Ok(ctx.take(0))
 }
 
-static TS_MATH_LN2: p::HelperPlan = p::HelperPlan {
+const TS_MATH_LN2: p::HelperPlan = p::HelperPlan {
     name: "ts.math.LN2",
     function: p::function("46402e4541fad7d3b4a4e1799d714224c5fd84c733643fa204e1ff3a2d95f82e"),
     callees: &[],
@@ -22579,7 +22579,7 @@ fn ts_math_ln2(ctx: &mut dyn p::PlanContext, _entry: u32) -> Result<Value, p::Pl
     Ok(ctx.take(0))
 }
 
-static TS_MATH_LOG10E: p::HelperPlan = p::HelperPlan {
+const TS_MATH_LOG10E: p::HelperPlan = p::HelperPlan {
     name: "ts.math.LOG10E",
     function: p::function("64424d73375eaf22f1e89642abeced42237cd68d612afa271c6f150241ce4d72"),
     callees: &[],
@@ -22604,7 +22604,7 @@ fn ts_math_log10e(ctx: &mut dyn p::PlanContext, _entry: u32) -> Result<Value, p:
     Ok(ctx.take(0))
 }
 
-static TS_MATH_LOG2E: p::HelperPlan = p::HelperPlan {
+const TS_MATH_LOG2E: p::HelperPlan = p::HelperPlan {
     name: "ts.math.LOG2E",
     function: p::function("75bef48f57f21663c9dde40a5be9d0e2a7eeef595ef569656ec2c2f62830fea0"),
     callees: &[],
@@ -22629,7 +22629,7 @@ fn ts_math_log2e(ctx: &mut dyn p::PlanContext, _entry: u32) -> Result<Value, p::
     Ok(ctx.take(0))
 }
 
-static TS_MATH_PI: p::HelperPlan = p::HelperPlan {
+const TS_MATH_PI: p::HelperPlan = p::HelperPlan {
     name: "ts.math.PI",
     function: p::function("36b911516cbcd71d45511a471de7a23e596f17e21f077620ff95f306db6feac9"),
     callees: &[],
@@ -22654,7 +22654,7 @@ fn ts_math_pi(ctx: &mut dyn p::PlanContext, _entry: u32) -> Result<Value, p::Pla
     Ok(ctx.take(0))
 }
 
-static TS_MATH_SQRT1_2: p::HelperPlan = p::HelperPlan {
+const TS_MATH_SQRT1_2: p::HelperPlan = p::HelperPlan {
     name: "ts.math.SQRT1_2",
     function: p::function("e14ad815f73a28da1f3e93451d7d5168e38eb3d601c31930575f8c246ea5dfd0"),
     callees: &[],
@@ -22679,7 +22679,7 @@ fn ts_math_sqrt1_2(ctx: &mut dyn p::PlanContext, _entry: u32) -> Result<Value, p
     Ok(ctx.take(0))
 }
 
-static TS_MATH_SQRT2: p::HelperPlan = p::HelperPlan {
+const TS_MATH_SQRT2: p::HelperPlan = p::HelperPlan {
     name: "ts.math.SQRT2",
     function: p::function("0ea8acf97f1243f1ac0e6f84ca04ddda72a757667fc0b5bb32ebc8d6a64ee4a8"),
     callees: &[],
@@ -22704,7 +22704,7 @@ fn ts_math_sqrt2(ctx: &mut dyn p::PlanContext, _entry: u32) -> Result<Value, p::
     Ok(ctx.take(0))
 }
 
-static TS_NUMBER_CONVERT: p::HelperPlan = p::HelperPlan {
+const TS_NUMBER_CONVERT: p::HelperPlan = p::HelperPlan {
     name: "ts.number.convert",
     function: p::function("652a9123dad9e37e79596b6887e428f17e5a203ef04305a318fa8625a0000747"),
     callees: &[
@@ -22792,7 +22792,7 @@ fn ts_number_convert(ctx: &mut dyn p::PlanContext, entry: u32) -> Result<Value, 
     Ok(Value::Null)
 }
 
-static TS_NUMBER_ISFINITE: p::HelperPlan = p::HelperPlan {
+const TS_NUMBER_ISFINITE: p::HelperPlan = p::HelperPlan {
     name: "ts.number.isFinite",
     function: p::function("e4c296208e5cb92993052ad379cf615ab783c23cd189828c5ad8d0de84c3adc7"),
     callees: &[
@@ -22857,7 +22857,7 @@ fn ts_number_isfinite(ctx: &mut dyn p::PlanContext, _entry: u32) -> Result<Value
     Ok(ctx.take(0))
 }
 
-static TS_NUMBER_ISNAN: p::HelperPlan = p::HelperPlan {
+const TS_NUMBER_ISNAN: p::HelperPlan = p::HelperPlan {
     name: "ts.number.isNaN",
     function: p::function("a5892b80ec95d0d89bfcbbb6a509ce3ea5e80daf4c88de5d80448b393bd2a99a"),
     callees: &[
@@ -22922,7 +22922,7 @@ fn ts_number_isnan(ctx: &mut dyn p::PlanContext, _entry: u32) -> Result<Value, p
     Ok(ctx.take(0))
 }
 
-static TS_NUMBER_ISINTEGER: p::HelperPlan = p::HelperPlan {
+const TS_NUMBER_ISINTEGER: p::HelperPlan = p::HelperPlan {
     name: "ts.number.isInteger",
     function: p::function("69431a23f98d2fc5378762469fdd78fa6c0319b7f4211e7568371cb1b6721e43"),
     callees: &[
@@ -22987,7 +22987,7 @@ fn ts_number_isinteger(ctx: &mut dyn p::PlanContext, _entry: u32) -> Result<Valu
     Ok(ctx.take(0))
 }
 
-static TS_NUMBER_ISSAFEINTEGER: p::HelperPlan = p::HelperPlan {
+const TS_NUMBER_ISSAFEINTEGER: p::HelperPlan = p::HelperPlan {
     name: "ts.number.isSafeInteger",
     function: p::function("eb19a363797818f8529de4b83d433cdbfc05a4a87184209d2dc6cbcc77e8dfcf"),
     callees: &[
@@ -23065,7 +23065,7 @@ fn ts_number_issafeinteger(ctx: &mut dyn p::PlanContext, _entry: u32) -> Result<
     Ok(ctx.take(0))
 }
 
-static TS_NUMBER_PARSEFLOAT: p::HelperPlan = p::HelperPlan {
+const TS_NUMBER_PARSEFLOAT: p::HelperPlan = p::HelperPlan {
     name: "ts.number.parseFloat",
     function: p::function("b49c9373c1f52904f56f1869116ca5bf923348bdc15a901790229179ed2f589f"),
     callees: &[
@@ -23148,7 +23148,7 @@ fn ts_number_parsefloat(ctx: &mut dyn p::PlanContext, entry: u32) -> Result<Valu
     Ok(Value::Null)
 }
 
-static TS_NUMBER_PARSEINT: p::HelperPlan = p::HelperPlan {
+const TS_NUMBER_PARSEINT: p::HelperPlan = p::HelperPlan {
     name: "ts.number.parseInt",
     function: p::function("97dd1e76ba9a38729668a3eb6360c6627d8e11144c9d81c3a5679a6d431d5978"),
     callees: &[
@@ -23257,7 +23257,7 @@ fn ts_number_parseint(ctx: &mut dyn p::PlanContext, entry: u32) -> Result<Value,
     Ok(Value::Null)
 }
 
-static TS_NUMBER_RECEIVER: p::HelperPlan = p::HelperPlan {
+const TS_NUMBER_RECEIVER: p::HelperPlan = p::HelperPlan {
     name: "ts.number.receiver",
     function: p::function("fd51df0f6fb4e3163d3bc2e17ae3e5bd5a2861cd21f4253e8a4fd3bd6909e506"),
     callees: &[
@@ -23308,7 +23308,7 @@ fn ts_number_receiver(ctx: &mut dyn p::PlanContext, _entry: u32) -> Result<Value
     Err(p::PlanExit::Raise(ctx.take(0)))
 }
 
-static TS_NUMBER_VALUEOF: p::HelperPlan = p::HelperPlan {
+const TS_NUMBER_VALUEOF: p::HelperPlan = p::HelperPlan {
     name: "ts.number.valueOf",
     function: p::function("d9e1b9dc599f67f0838673738cd92b6d4564266606a8e1268aeb8c9a390d6bad"),
     callees: &[
@@ -23342,7 +23342,7 @@ fn ts_number_valueof(ctx: &mut dyn p::PlanContext, _entry: u32) -> Result<Value,
     Ok(ctx.take(0))
 }
 
-static TS_NUMBER_TOSTRING: p::HelperPlan = p::HelperPlan {
+const TS_NUMBER_TOSTRING: p::HelperPlan = p::HelperPlan {
     name: "ts.number.toString",
     function: p::function("9dd7caea52b2c572644672155c9280609c9125632d5c16903d1f62bf193d2d40"),
     callees: &[
@@ -23663,7 +23663,7 @@ fn ts_number_tostring(ctx: &mut dyn p::PlanContext, entry: u32) -> Result<Value,
     Ok(Value::Null)
 }
 
-static TS_NUMBER_TOFIXED: p::HelperPlan = p::HelperPlan {
+const TS_NUMBER_TOFIXED: p::HelperPlan = p::HelperPlan {
     name: "ts.number.toFixed",
     function: p::function("8ae6adce49d30cd066f69f81758d7d53a26e0982f1f923dca5a4eac4b899adbf"),
     callees: &[
@@ -23947,7 +23947,7 @@ fn ts_number_tofixed(ctx: &mut dyn p::PlanContext, entry: u32) -> Result<Value, 
     Ok(Value::Null)
 }
 
-static TS_NUMBER_TOEXPONENTIAL: p::HelperPlan = p::HelperPlan {
+const TS_NUMBER_TOEXPONENTIAL: p::HelperPlan = p::HelperPlan {
     name: "ts.number.toExponential",
     function: p::function("3878eb40684b53ac9b7e5f2c9782fcf089d6678cd015a92955a6f1180becb831"),
     callees: &[
@@ -24302,7 +24302,7 @@ fn ts_number_toexponential(ctx: &mut dyn p::PlanContext, entry: u32) -> Result<V
     Ok(Value::Null)
 }
 
-static TS_NUMBER_TOPRECISION: p::HelperPlan = p::HelperPlan {
+const TS_NUMBER_TOPRECISION: p::HelperPlan = p::HelperPlan {
     name: "ts.number.toPrecision",
     function: p::function("f64bc4ec1b7137fba56650ca6614b9c067304c4fa76e80940397f6e6099242c6"),
     callees: &[
@@ -24659,7 +24659,7 @@ fn ts_number_toprecision(ctx: &mut dyn p::PlanContext, entry: u32) -> Result<Val
     Ok(Value::Null)
 }
 
-static TS_NUMBER_EPSILON: p::HelperPlan = p::HelperPlan {
+const TS_NUMBER_EPSILON: p::HelperPlan = p::HelperPlan {
     name: "ts.number.EPSILON",
     function: p::function("3a104f2a5a1474c59bced80b658563421bdcc1537d485270e5eee8d22d909d10"),
     callees: &[],
@@ -24684,7 +24684,7 @@ fn ts_number_epsilon(ctx: &mut dyn p::PlanContext, _entry: u32) -> Result<Value,
     Ok(ctx.take(0))
 }
 
-static TS_NUMBER_MAX_SAFE_INTEGER: p::HelperPlan = p::HelperPlan {
+const TS_NUMBER_MAX_SAFE_INTEGER: p::HelperPlan = p::HelperPlan {
     name: "ts.number.MAX_SAFE_INTEGER",
     function: p::function("f7e33515f44181f1b31e947d456c802891e5f3241d23a493d8ef80150a9ebda8"),
     callees: &[],
@@ -24709,7 +24709,7 @@ fn ts_number_max_safe_integer(ctx: &mut dyn p::PlanContext, _entry: u32) -> Resu
     Ok(ctx.take(0))
 }
 
-static TS_NUMBER_MIN_SAFE_INTEGER: p::HelperPlan = p::HelperPlan {
+const TS_NUMBER_MIN_SAFE_INTEGER: p::HelperPlan = p::HelperPlan {
     name: "ts.number.MIN_SAFE_INTEGER",
     function: p::function("3c186b17f52fd06bf83c4ba15813ff9b4b0829a4982f82a89e35de440c0896a5"),
     callees: &[],
@@ -24734,7 +24734,7 @@ fn ts_number_min_safe_integer(ctx: &mut dyn p::PlanContext, _entry: u32) -> Resu
     Ok(ctx.take(0))
 }
 
-static TS_NUMBER_MAX_VALUE: p::HelperPlan = p::HelperPlan {
+const TS_NUMBER_MAX_VALUE: p::HelperPlan = p::HelperPlan {
     name: "ts.number.MAX_VALUE",
     function: p::function("92ddce6abb65bffdd470ad8ddb5cf96b3645cdc0d028208594759ad87ff1715f"),
     callees: &[],
@@ -24759,7 +24759,7 @@ fn ts_number_max_value(ctx: &mut dyn p::PlanContext, _entry: u32) -> Result<Valu
     Ok(ctx.take(0))
 }
 
-static TS_NUMBER_MIN_VALUE: p::HelperPlan = p::HelperPlan {
+const TS_NUMBER_MIN_VALUE: p::HelperPlan = p::HelperPlan {
     name: "ts.number.MIN_VALUE",
     function: p::function("11eda0bdc26fd16f027c4ab4ee89efe4aa463bed0a13127e7e59807a882be856"),
     callees: &[],
@@ -24784,7 +24784,7 @@ fn ts_number_min_value(ctx: &mut dyn p::PlanContext, _entry: u32) -> Result<Valu
     Ok(ctx.take(0))
 }
 
-static TS_NUMBER_NAN: p::HelperPlan = p::HelperPlan {
+const TS_NUMBER_NAN: p::HelperPlan = p::HelperPlan {
     name: "ts.number.NaN",
     function: p::function("5a1df784f44a4bf4b2018067390c71f6cfe43e3ba97d4f62937ccd67661a20fb"),
     callees: &[],
@@ -24809,7 +24809,7 @@ fn ts_number_nan(ctx: &mut dyn p::PlanContext, _entry: u32) -> Result<Value, p::
     Ok(ctx.take(0))
 }
 
-static TS_NUMBER_POSITIVE_INFINITY: p::HelperPlan = p::HelperPlan {
+const TS_NUMBER_POSITIVE_INFINITY: p::HelperPlan = p::HelperPlan {
     name: "ts.number.POSITIVE_INFINITY",
     function: p::function("caaa1a55fa8a1bc65a964e4d800d809007680519f6c08102d9f05aeeffd8140a"),
     callees: &[],
@@ -24834,7 +24834,7 @@ fn ts_number_positive_infinity(ctx: &mut dyn p::PlanContext, _entry: u32) -> Res
     Ok(ctx.take(0))
 }
 
-static TS_NUMBER_NEGATIVE_INFINITY: p::HelperPlan = p::HelperPlan {
+const TS_NUMBER_NEGATIVE_INFINITY: p::HelperPlan = p::HelperPlan {
     name: "ts.number.NEGATIVE_INFINITY",
     function: p::function("3eb5218bc958b80a457056cbeb62376201f4b2aa146397c30a061224dba12147"),
     callees: &[],
@@ -24859,7 +24859,7 @@ fn ts_number_negative_infinity(ctx: &mut dyn p::PlanContext, _entry: u32) -> Res
     Ok(ctx.take(0))
 }
 
-static TS_NUMBER_GLOBAL_ISFINITE: p::HelperPlan = p::HelperPlan {
+const TS_NUMBER_GLOBAL_ISFINITE: p::HelperPlan = p::HelperPlan {
     name: "ts.number.global_isFinite",
     function: p::function("b4a1be4d172a47ffe1f89323a817ebb6707d2f86a99deca0534ce1b984dbc6d8"),
     callees: &[
@@ -24934,7 +24934,7 @@ fn ts_number_global_isfinite(ctx: &mut dyn p::PlanContext, entry: u32) -> Result
     Ok(Value::Null)
 }
 
-static TS_NUMBER_GLOBAL_ISNAN: p::HelperPlan = p::HelperPlan {
+const TS_NUMBER_GLOBAL_ISNAN: p::HelperPlan = p::HelperPlan {
     name: "ts.number.global_isNaN",
     function: p::function("487f6a622a7ed2893322dab542c4c4ac1453ee0f8997bd5c5524d21dd819e9fe"),
     callees: &[
@@ -25009,7 +25009,7 @@ fn ts_number_global_isnan(ctx: &mut dyn p::PlanContext, entry: u32) -> Result<Va
     Ok(Value::Null)
 }
 
-static TS_DATE_DAY_FROM_YEAR: p::HelperPlan = p::HelperPlan {
+const TS_DATE_DAY_FROM_YEAR: p::HelperPlan = p::HelperPlan {
     name: "ts.date.day_from_year",
     function: p::function("f5271e396ce95ef568b3a10cd7bd7c7cc6d674164748942cb30ebcc5fc8c561c"),
     callees: &[
@@ -25074,7 +25074,7 @@ fn ts_date_day_from_year(ctx: &mut dyn p::PlanContext, _entry: u32) -> Result<Va
     Ok(ctx.take(0))
 }
 
-static TS_DATE_UTC: p::HelperPlan = p::HelperPlan {
+const TS_DATE_UTC: p::HelperPlan = p::HelperPlan {
     name: "ts.date.utc",
     function: p::function("d248c14818545385be2722202d8e1ad8542cff24cb4cc61e7c2d8b864c26e084"),
     callees: &[
@@ -25440,7 +25440,7 @@ fn ts_date_utc(ctx: &mut dyn p::PlanContext, entry: u32) -> Result<Value, p::Pla
     Ok(Value::Null)
 }
 
-static TS_DATE_IS: p::HelperPlan = p::HelperPlan {
+const TS_DATE_IS: p::HelperPlan = p::HelperPlan {
     name: "ts.date.is",
     function: p::function("d424d8df473e32188d605aa01275b447970b3cc3f7e7b1549249d517d984e1c8"),
     callees: &[
@@ -25502,7 +25502,7 @@ fn ts_date_is(ctx: &mut dyn p::PlanContext, _entry: u32) -> Result<Value, p::Pla
     Ok(ctx.take(0))
 }
 
-static TS_DATE_REQUIRE: p::HelperPlan = p::HelperPlan {
+const TS_DATE_REQUIRE: p::HelperPlan = p::HelperPlan {
     name: "ts.date.require",
     function: p::function("1a864df17b8e2f7e489e010e7c5a5efc5d85a96e12e83b68d11b3638d823cb5c"),
     callees: &[
@@ -25549,7 +25549,7 @@ fn ts_date_require(ctx: &mut dyn p::PlanContext, _entry: u32) -> Result<Value, p
     Err(p::PlanExit::Raise(ctx.take(0)))
 }
 
-static TS_DATE_PARSE: p::HelperPlan = p::HelperPlan {
+const TS_DATE_PARSE: p::HelperPlan = p::HelperPlan {
     name: "ts.date.parse",
     function: p::function("3f0f6dfe62a2596fdfc60453527d281298fa1a3b4c0c97280bee669ed4e84674"),
     callees: &[
@@ -25624,7 +25624,7 @@ fn ts_date_parse(ctx: &mut dyn p::PlanContext, entry: u32) -> Result<Value, p::P
     Ok(Value::Null)
 }
 
-static TS_DATE_UTC_2: p::HelperPlan = p::HelperPlan {
+const TS_DATE_UTC_2: p::HelperPlan = p::HelperPlan {
     name: "ts.date.UTC",
     function: p::function("ab792c4cedd39c19a5a9a74b451f95b3294091a041bdf73d8b93036a676105fd"),
     callees: &[
@@ -25677,7 +25677,7 @@ fn ts_date_utc_2(ctx: &mut dyn p::PlanContext, entry: u32) -> Result<Value, p::P
     Ok(Value::Null)
 }
 
-static TS_DATE_PARTS: p::HelperPlan = p::HelperPlan {
+const TS_DATE_PARTS: p::HelperPlan = p::HelperPlan {
     name: "ts.date.parts",
     function: p::function("cdac3b50b687940622a219541c3b32b82cdde2743ba3da4f1404ff9c3786e6f6"),
     callees: &[
@@ -25927,7 +25927,7 @@ fn ts_date_parts(ctx: &mut dyn p::PlanContext, _entry: u32) -> Result<Value, p::
     Ok(ctx.take(0))
 }
 
-static TS_DATE_GETTIME: p::HelperPlan = p::HelperPlan {
+const TS_DATE_GETTIME: p::HelperPlan = p::HelperPlan {
     name: "ts.date.getTime",
     function: p::function("39f8204c354b0bd088339116f0305ed344b151f0a0a683ab1f57e8e2ca5a9305"),
     callees: &[
@@ -25961,7 +25961,7 @@ fn ts_date_gettime(ctx: &mut dyn p::PlanContext, _entry: u32) -> Result<Value, p
     Ok(ctx.take(0))
 }
 
-static TS_DATE_VALUEOF: p::HelperPlan = p::HelperPlan {
+const TS_DATE_VALUEOF: p::HelperPlan = p::HelperPlan {
     name: "ts.date.valueOf",
     function: p::function("4f83fe5e7a0c7b8ba43a8515f3655002efca54c4932a6affed528bdbbab65bef"),
     callees: &[
@@ -25995,7 +25995,7 @@ fn ts_date_valueof(ctx: &mut dyn p::PlanContext, _entry: u32) -> Result<Value, p
     Ok(ctx.take(0))
 }
 
-static TS_DATE_GETUTCFULLYEAR: p::HelperPlan = p::HelperPlan {
+const TS_DATE_GETUTCFULLYEAR: p::HelperPlan = p::HelperPlan {
     name: "ts.date.getUTCFullYear",
     function: p::function("d1ccf9fc231d0c1be69f5eacc77239d3b7643675d8b4e797a3c8244e49206482"),
     callees: &[
@@ -26033,7 +26033,7 @@ fn ts_date_getutcfullyear(ctx: &mut dyn p::PlanContext, _entry: u32) -> Result<V
     Ok(ctx.take(0))
 }
 
-static TS_DATE_GETUTCMONTH: p::HelperPlan = p::HelperPlan {
+const TS_DATE_GETUTCMONTH: p::HelperPlan = p::HelperPlan {
     name: "ts.date.getUTCMonth",
     function: p::function("ddc4a0097ca42b91531a151eaa833f897590d71abc636f295f002210942eb7f3"),
     callees: &[
@@ -26071,7 +26071,7 @@ fn ts_date_getutcmonth(ctx: &mut dyn p::PlanContext, _entry: u32) -> Result<Valu
     Ok(ctx.take(0))
 }
 
-static TS_DATE_GETUTCDATE: p::HelperPlan = p::HelperPlan {
+const TS_DATE_GETUTCDATE: p::HelperPlan = p::HelperPlan {
     name: "ts.date.getUTCDate",
     function: p::function("8debf5becf93909d22e22bfa747ddc69b0abd270bab67a71ce188da9334dbb66"),
     callees: &[
@@ -26109,7 +26109,7 @@ fn ts_date_getutcdate(ctx: &mut dyn p::PlanContext, _entry: u32) -> Result<Value
     Ok(ctx.take(0))
 }
 
-static TS_DATE_GETUTCDAY: p::HelperPlan = p::HelperPlan {
+const TS_DATE_GETUTCDAY: p::HelperPlan = p::HelperPlan {
     name: "ts.date.getUTCDay",
     function: p::function("f384fec9179e9727c925a8cbef542a0fc957a48de73b684d7b123a7ecc1844e5"),
     callees: &[
@@ -26147,7 +26147,7 @@ fn ts_date_getutcday(ctx: &mut dyn p::PlanContext, _entry: u32) -> Result<Value,
     Ok(ctx.take(0))
 }
 
-static TS_DATE_GETUTCHOURS: p::HelperPlan = p::HelperPlan {
+const TS_DATE_GETUTCHOURS: p::HelperPlan = p::HelperPlan {
     name: "ts.date.getUTCHours",
     function: p::function("05d4447fc67d4d3b1afabcfb355e38f8026c3b39f871bc590cb0cac9705e74b2"),
     callees: &[
@@ -26185,7 +26185,7 @@ fn ts_date_getutchours(ctx: &mut dyn p::PlanContext, _entry: u32) -> Result<Valu
     Ok(ctx.take(0))
 }
 
-static TS_DATE_GETUTCMINUTES: p::HelperPlan = p::HelperPlan {
+const TS_DATE_GETUTCMINUTES: p::HelperPlan = p::HelperPlan {
     name: "ts.date.getUTCMinutes",
     function: p::function("b1f707933cc711862740c81de20ef67b56c2ba7f68edb5fda86dd80c1ac5f0c2"),
     callees: &[
@@ -26223,7 +26223,7 @@ fn ts_date_getutcminutes(ctx: &mut dyn p::PlanContext, _entry: u32) -> Result<Va
     Ok(ctx.take(0))
 }
 
-static TS_DATE_GETUTCSECONDS: p::HelperPlan = p::HelperPlan {
+const TS_DATE_GETUTCSECONDS: p::HelperPlan = p::HelperPlan {
     name: "ts.date.getUTCSeconds",
     function: p::function("35367b4297580f6884f559c438512d83de09ccb8493898eec79eac4f2afdace0"),
     callees: &[
@@ -26261,7 +26261,7 @@ fn ts_date_getutcseconds(ctx: &mut dyn p::PlanContext, _entry: u32) -> Result<Va
     Ok(ctx.take(0))
 }
 
-static TS_DATE_GETUTCMILLISECONDS: p::HelperPlan = p::HelperPlan {
+const TS_DATE_GETUTCMILLISECONDS: p::HelperPlan = p::HelperPlan {
     name: "ts.date.getUTCMilliseconds",
     function: p::function("7b1abfbd9c5dab5f071634979904da2352edfbe043352fa770584b9eafbb73a8"),
     callees: &[
@@ -26299,7 +26299,7 @@ fn ts_date_getutcmilliseconds(ctx: &mut dyn p::PlanContext, _entry: u32) -> Resu
     Ok(ctx.take(0))
 }
 
-static TS_DATE_TOISOSTRING: p::HelperPlan = p::HelperPlan {
+const TS_DATE_TOISOSTRING: p::HelperPlan = p::HelperPlan {
     name: "ts.date.toISOString",
     function: p::function("4762e568294b652823cf0d7671e7730e1868f02c093ebccdb546d22282dfff4e"),
     callees: &[
@@ -26336,7 +26336,7 @@ fn ts_date_toisostring(ctx: &mut dyn p::PlanContext, _entry: u32) -> Result<Valu
     Ok(ctx.take(0))
 }
 
-static TS_DATE_TOUTCSTRING: p::HelperPlan = p::HelperPlan {
+const TS_DATE_TOUTCSTRING: p::HelperPlan = p::HelperPlan {
     name: "ts.date.toUTCString",
     function: p::function("78393cfc193c64c54d8faab4afe24474e30f9d65bc2c6a5e6d5e41fae533bd6d"),
     callees: &[
@@ -26373,7 +26373,7 @@ fn ts_date_toutcstring(ctx: &mut dyn p::PlanContext, _entry: u32) -> Result<Valu
     Ok(ctx.take(0))
 }
 
-static TS_DATE_TOSTRING: p::HelperPlan = p::HelperPlan {
+const TS_DATE_TOSTRING: p::HelperPlan = p::HelperPlan {
     name: "ts.date.toString",
     function: p::function("f15b2986fa621f3bf80f92fbe1a790945009c083c0276850887ee14f7b9bb197"),
     callees: &[
@@ -26410,7 +26410,7 @@ fn ts_date_tostring(ctx: &mut dyn p::PlanContext, _entry: u32) -> Result<Value, 
     Ok(ctx.take(0))
 }
 
-static TS_DATE_TOJSON: p::HelperPlan = p::HelperPlan {
+const TS_DATE_TOJSON: p::HelperPlan = p::HelperPlan {
     name: "ts.date.toJSON",
     function: p::function("b780bca5fa0d58a24177ce1d685ddc4cd0556b71854f1d03f623dc2cf2403337"),
     callees: &[
@@ -26584,7 +26584,7 @@ fn ts_date_tojson(ctx: &mut dyn p::PlanContext, entry: u32) -> Result<Value, p::
     Ok(Value::Null)
 }
 
-static TS_DATE_GETFULLYEAR: p::HelperPlan = p::HelperPlan {
+const TS_DATE_GETFULLYEAR: p::HelperPlan = p::HelperPlan {
     name: "ts.date.getFullYear",
     function: p::function("46f82383a27748be3b2a34dcf44798820a1854dfb9f21045cddca047d507f81f"),
     callees: &[
@@ -26639,7 +26639,7 @@ fn ts_date_getfullyear(ctx: &mut dyn p::PlanContext, _entry: u32) -> Result<Valu
     Err(p::PlanExit::Raise(ctx.take(0)))
 }
 
-static TS_DATE_GETMONTH: p::HelperPlan = p::HelperPlan {
+const TS_DATE_GETMONTH: p::HelperPlan = p::HelperPlan {
     name: "ts.date.getMonth",
     function: p::function("c76840cca5e6ee2048e8b9e283c12bb16a20db4595546f9e3923b1c333bae8d1"),
     callees: &[
@@ -26694,7 +26694,7 @@ fn ts_date_getmonth(ctx: &mut dyn p::PlanContext, _entry: u32) -> Result<Value, 
     Err(p::PlanExit::Raise(ctx.take(0)))
 }
 
-static TS_DATE_GETDATE: p::HelperPlan = p::HelperPlan {
+const TS_DATE_GETDATE: p::HelperPlan = p::HelperPlan {
     name: "ts.date.getDate",
     function: p::function("6d3d7be85fd61ed34fba8698997a86cb6ca4509ba5c6e47acfb3413046c3c4e2"),
     callees: &[
@@ -26749,7 +26749,7 @@ fn ts_date_getdate(ctx: &mut dyn p::PlanContext, _entry: u32) -> Result<Value, p
     Err(p::PlanExit::Raise(ctx.take(0)))
 }
 
-static TS_DATE_GETDAY: p::HelperPlan = p::HelperPlan {
+const TS_DATE_GETDAY: p::HelperPlan = p::HelperPlan {
     name: "ts.date.getDay",
     function: p::function("ca93b28fce5c38ceb598a8502014c2387a363fe38097b0e800f1e5eba7a7ff86"),
     callees: &[
@@ -26804,7 +26804,7 @@ fn ts_date_getday(ctx: &mut dyn p::PlanContext, _entry: u32) -> Result<Value, p:
     Err(p::PlanExit::Raise(ctx.take(0)))
 }
 
-static TS_DATE_GETHOURS: p::HelperPlan = p::HelperPlan {
+const TS_DATE_GETHOURS: p::HelperPlan = p::HelperPlan {
     name: "ts.date.getHours",
     function: p::function("ab325a26cb3a5fab9f5d2576b620c3960220eee9bf28812fe2350b34aebfbff0"),
     callees: &[
@@ -26859,7 +26859,7 @@ fn ts_date_gethours(ctx: &mut dyn p::PlanContext, _entry: u32) -> Result<Value, 
     Err(p::PlanExit::Raise(ctx.take(0)))
 }
 
-static TS_DATE_GETMINUTES: p::HelperPlan = p::HelperPlan {
+const TS_DATE_GETMINUTES: p::HelperPlan = p::HelperPlan {
     name: "ts.date.getMinutes",
     function: p::function("e2b60154b3f10a3f178c129e32dde55a30f58811b55932be02c96de74651ca88"),
     callees: &[
@@ -26914,7 +26914,7 @@ fn ts_date_getminutes(ctx: &mut dyn p::PlanContext, _entry: u32) -> Result<Value
     Err(p::PlanExit::Raise(ctx.take(0)))
 }
 
-static TS_DATE_GETSECONDS: p::HelperPlan = p::HelperPlan {
+const TS_DATE_GETSECONDS: p::HelperPlan = p::HelperPlan {
     name: "ts.date.getSeconds",
     function: p::function("7fcb494930f0f4a358ecdafcbc197c23b66f98c9c1e80395a4d4a0bdc29ca2e4"),
     callees: &[
@@ -26969,7 +26969,7 @@ fn ts_date_getseconds(ctx: &mut dyn p::PlanContext, _entry: u32) -> Result<Value
     Err(p::PlanExit::Raise(ctx.take(0)))
 }
 
-static TS_DATE_GETMILLISECONDS: p::HelperPlan = p::HelperPlan {
+const TS_DATE_GETMILLISECONDS: p::HelperPlan = p::HelperPlan {
     name: "ts.date.getMilliseconds",
     function: p::function("422cb3eaf8ea5ad8cc65bf62c7530f81a429600fecebe62c827678ed8631e611"),
     callees: &[
@@ -27024,7 +27024,7 @@ fn ts_date_getmilliseconds(ctx: &mut dyn p::PlanContext, _entry: u32) -> Result<
     Err(p::PlanExit::Raise(ctx.take(0)))
 }
 
-static TS_DATE_SETTIME: p::HelperPlan = p::HelperPlan {
+const TS_DATE_SETTIME: p::HelperPlan = p::HelperPlan {
     name: "ts.date.setTime",
     function: p::function("76c9dd1138780a02637be94958e282109fbc3f831189661030ea08c64c76bbba"),
     callees: &[
@@ -27079,7 +27079,7 @@ fn ts_date_settime(ctx: &mut dyn p::PlanContext, _entry: u32) -> Result<Value, p
     Err(p::PlanExit::Raise(ctx.take(0)))
 }
 
-static TS_DATE_SETFULLYEAR: p::HelperPlan = p::HelperPlan {
+const TS_DATE_SETFULLYEAR: p::HelperPlan = p::HelperPlan {
     name: "ts.date.setFullYear",
     function: p::function("d8a8466bf8e499266f6b3c66a5ec194c3f493d70330ec1dcf368480f8f50f8d9"),
     callees: &[
@@ -27134,7 +27134,7 @@ fn ts_date_setfullyear(ctx: &mut dyn p::PlanContext, _entry: u32) -> Result<Valu
     Err(p::PlanExit::Raise(ctx.take(0)))
 }
 
-static TS_DATE_SETMONTH: p::HelperPlan = p::HelperPlan {
+const TS_DATE_SETMONTH: p::HelperPlan = p::HelperPlan {
     name: "ts.date.setMonth",
     function: p::function("db4e3090d874c3bb55ae05688a356d152e960ee4f90c0e2a5c005c42591cd1db"),
     callees: &[
@@ -27189,7 +27189,7 @@ fn ts_date_setmonth(ctx: &mut dyn p::PlanContext, _entry: u32) -> Result<Value, 
     Err(p::PlanExit::Raise(ctx.take(0)))
 }
 
-static TS_DATE_SETDATE: p::HelperPlan = p::HelperPlan {
+const TS_DATE_SETDATE: p::HelperPlan = p::HelperPlan {
     name: "ts.date.setDate",
     function: p::function("f107da50342d0331bd5fe7447ee507edd8c551700ae62f71b7500a6cdd519d11"),
     callees: &[
@@ -27244,7 +27244,7 @@ fn ts_date_setdate(ctx: &mut dyn p::PlanContext, _entry: u32) -> Result<Value, p
     Err(p::PlanExit::Raise(ctx.take(0)))
 }
 
-static TS_DATE_SETHOURS: p::HelperPlan = p::HelperPlan {
+const TS_DATE_SETHOURS: p::HelperPlan = p::HelperPlan {
     name: "ts.date.setHours",
     function: p::function("fb5dfaf168ea693abd4fd055f3d626e1425d346bb4cf5be0aefb30d7814543e7"),
     callees: &[
@@ -27299,7 +27299,7 @@ fn ts_date_sethours(ctx: &mut dyn p::PlanContext, _entry: u32) -> Result<Value, 
     Err(p::PlanExit::Raise(ctx.take(0)))
 }
 
-static TS_DATE_SETMINUTES: p::HelperPlan = p::HelperPlan {
+const TS_DATE_SETMINUTES: p::HelperPlan = p::HelperPlan {
     name: "ts.date.setMinutes",
     function: p::function("3c01e7c5cff978723940b6ab953f7d14ba4e5f33a6d1b509e86457a4a502cee3"),
     callees: &[
@@ -27354,7 +27354,7 @@ fn ts_date_setminutes(ctx: &mut dyn p::PlanContext, _entry: u32) -> Result<Value
     Err(p::PlanExit::Raise(ctx.take(0)))
 }
 
-static TS_DATE_SETSECONDS: p::HelperPlan = p::HelperPlan {
+const TS_DATE_SETSECONDS: p::HelperPlan = p::HelperPlan {
     name: "ts.date.setSeconds",
     function: p::function("59c6061922bcaca2ee6e814ceb566e1cfbe41972c5cf34cb33d5a5afe1796d98"),
     callees: &[
@@ -27409,7 +27409,7 @@ fn ts_date_setseconds(ctx: &mut dyn p::PlanContext, _entry: u32) -> Result<Value
     Err(p::PlanExit::Raise(ctx.take(0)))
 }
 
-static TS_DATE_SETMILLISECONDS: p::HelperPlan = p::HelperPlan {
+const TS_DATE_SETMILLISECONDS: p::HelperPlan = p::HelperPlan {
     name: "ts.date.setMilliseconds",
     function: p::function("94196dd2aeee7bd29aec6837766884279bcddb5fd16c764f742ad7a83f3677b7"),
     callees: &[
@@ -27464,7 +27464,7 @@ fn ts_date_setmilliseconds(ctx: &mut dyn p::PlanContext, _entry: u32) -> Result<
     Err(p::PlanExit::Raise(ctx.take(0)))
 }
 
-static TS_DATE_SETUTCFULLYEAR: p::HelperPlan = p::HelperPlan {
+const TS_DATE_SETUTCFULLYEAR: p::HelperPlan = p::HelperPlan {
     name: "ts.date.setUTCFullYear",
     function: p::function("94ad051669e9fe3c9c182aee4eb4791fd95bc176198dc893abade2ece1c6a628"),
     callees: &[
@@ -27500,7 +27500,7 @@ fn ts_date_setutcfullyear(ctx: &mut dyn p::PlanContext, _entry: u32) -> Result<V
     Err(p::PlanExit::Raise(ctx.take(0)))
 }
 
-static TS_DATE_SETUTCMONTH: p::HelperPlan = p::HelperPlan {
+const TS_DATE_SETUTCMONTH: p::HelperPlan = p::HelperPlan {
     name: "ts.date.setUTCMonth",
     function: p::function("83ec7aa7a6356da176fcb10f8c27c532a72139efd780b7b9e62dd824501566cc"),
     callees: &[
@@ -27536,7 +27536,7 @@ fn ts_date_setutcmonth(ctx: &mut dyn p::PlanContext, _entry: u32) -> Result<Valu
     Err(p::PlanExit::Raise(ctx.take(0)))
 }
 
-static TS_DATE_SETUTCDATE: p::HelperPlan = p::HelperPlan {
+const TS_DATE_SETUTCDATE: p::HelperPlan = p::HelperPlan {
     name: "ts.date.setUTCDate",
     function: p::function("2ed8ca987c5ddd41d450682c6a8fa4bdd888d6c1dc7038335036d12b83a52b13"),
     callees: &[
@@ -27572,7 +27572,7 @@ fn ts_date_setutcdate(ctx: &mut dyn p::PlanContext, _entry: u32) -> Result<Value
     Err(p::PlanExit::Raise(ctx.take(0)))
 }
 
-static TS_DATE_SETUTCHOURS: p::HelperPlan = p::HelperPlan {
+const TS_DATE_SETUTCHOURS: p::HelperPlan = p::HelperPlan {
     name: "ts.date.setUTCHours",
     function: p::function("77ff7d3b080bc713b44faa114f7f9796427f878be0e82487e4c4d5e818e56710"),
     callees: &[
@@ -27608,7 +27608,7 @@ fn ts_date_setutchours(ctx: &mut dyn p::PlanContext, _entry: u32) -> Result<Valu
     Err(p::PlanExit::Raise(ctx.take(0)))
 }
 
-static TS_DATE_SETUTCMINUTES: p::HelperPlan = p::HelperPlan {
+const TS_DATE_SETUTCMINUTES: p::HelperPlan = p::HelperPlan {
     name: "ts.date.setUTCMinutes",
     function: p::function("ac9296baebfd828022a8990d04a964d25a6cc22c6e1b8854a64fea61818cc5dc"),
     callees: &[
@@ -27644,7 +27644,7 @@ fn ts_date_setutcminutes(ctx: &mut dyn p::PlanContext, _entry: u32) -> Result<Va
     Err(p::PlanExit::Raise(ctx.take(0)))
 }
 
-static TS_DATE_SETUTCSECONDS: p::HelperPlan = p::HelperPlan {
+const TS_DATE_SETUTCSECONDS: p::HelperPlan = p::HelperPlan {
     name: "ts.date.setUTCSeconds",
     function: p::function("5acebe9be3ee147bbd67ae10788d104da87a6deec165e92d9ce954982afebe71"),
     callees: &[
@@ -27680,7 +27680,7 @@ fn ts_date_setutcseconds(ctx: &mut dyn p::PlanContext, _entry: u32) -> Result<Va
     Err(p::PlanExit::Raise(ctx.take(0)))
 }
 
-static TS_DATE_SETUTCMILLISECONDS: p::HelperPlan = p::HelperPlan {
+const TS_DATE_SETUTCMILLISECONDS: p::HelperPlan = p::HelperPlan {
     name: "ts.date.setUTCMilliseconds",
     function: p::function("163ee9bc27efdabadfd13a1f25c5fb06bfff4f3488726ce2fd3c585d2f617a92"),
     callees: &[
@@ -27716,7 +27716,7 @@ fn ts_date_setutcmilliseconds(ctx: &mut dyn p::PlanContext, _entry: u32) -> Resu
     Err(p::PlanExit::Raise(ctx.take(0)))
 }
 
-static TS_DATE_LOCAL_UNSUPPORTED: p::HelperPlan = p::HelperPlan {
+const TS_DATE_LOCAL_UNSUPPORTED: p::HelperPlan = p::HelperPlan {
     name: "ts.date.local_unsupported",
     function: p::function("196dc61ce92a0bcf18600c4bce998ce680197647c91de9ad235676c2e10819cf"),
     callees: &[
@@ -27771,7 +27771,7 @@ fn ts_date_local_unsupported(ctx: &mut dyn p::PlanContext, _entry: u32) -> Resul
     Err(p::PlanExit::Raise(ctx.take(0)))
 }
 
-static TS_ERROR_NAME: p::HelperPlan = p::HelperPlan {
+const TS_ERROR_NAME: p::HelperPlan = p::HelperPlan {
     name: "ts.error.name",
     function: p::function("6e48eb8710555a998bf427716ad49e10af3e58c6db719671ae37bd8818eb18ce"),
     callees: &[
@@ -27939,7 +27939,7 @@ fn ts_error_name(ctx: &mut dyn p::PlanContext, entry: u32) -> Result<Value, p::P
     Ok(Value::Null)
 }
 
-static TS_ERROR_CONSTRUCT: p::HelperPlan = p::HelperPlan {
+const TS_ERROR_CONSTRUCT: p::HelperPlan = p::HelperPlan {
     name: "ts.error.construct",
     function: p::function("82d6de544e289b230d973ef278c960dbd38017d1bb7d3e6cfe21fcbb6219cfff"),
     callees: &[
@@ -28233,7 +28233,7 @@ fn ts_error_construct(ctx: &mut dyn p::PlanContext, entry: u32) -> Result<Value,
     Ok(Value::Null)
 }
 
-static TS_ERROR_NEW_ERROR: p::HelperPlan = p::HelperPlan {
+const TS_ERROR_NEW_ERROR: p::HelperPlan = p::HelperPlan {
     name: "ts.error.new_Error",
     function: p::function("836ee8c490cbf9fe9ef4021f547df9445467ada8c61dfbec3226ad07a9dfc856"),
     callees: &[
@@ -28291,7 +28291,7 @@ fn ts_error_new_error(ctx: &mut dyn p::PlanContext, entry: u32) -> Result<Value,
     Ok(Value::Null)
 }
 
-static TS_ERROR_IS_ERROR: p::HelperPlan = p::HelperPlan {
+const TS_ERROR_IS_ERROR: p::HelperPlan = p::HelperPlan {
     name: "ts.error.is_Error",
     function: p::function("d81af784ec37835df2ce18dec6706df3f7fa3bcfe786d3e247dcacc1d345cea4"),
     callees: &[
@@ -28334,7 +28334,7 @@ fn ts_error_is_error(ctx: &mut dyn p::PlanContext, _entry: u32) -> Result<Value,
     Ok(ctx.take(0))
 }
 
-static TS_ERROR_NEW_TYPEERROR: p::HelperPlan = p::HelperPlan {
+const TS_ERROR_NEW_TYPEERROR: p::HelperPlan = p::HelperPlan {
     name: "ts.error.new_TypeError",
     function: p::function("cb316b01b37a4a667568aaca5a44b8d5c20e52e860e109bf93bfa26e63709e07"),
     callees: &[
@@ -28392,7 +28392,7 @@ fn ts_error_new_typeerror(ctx: &mut dyn p::PlanContext, entry: u32) -> Result<Va
     Ok(Value::Null)
 }
 
-static TS_ERROR_IS_TYPEERROR: p::HelperPlan = p::HelperPlan {
+const TS_ERROR_IS_TYPEERROR: p::HelperPlan = p::HelperPlan {
     name: "ts.error.is_TypeError",
     function: p::function("7fef110de92cf72310ed1751f3572dfc9e84f3eced84c5319ff3a64d6c6a45ef"),
     callees: &[
@@ -28492,7 +28492,7 @@ fn ts_error_is_typeerror(ctx: &mut dyn p::PlanContext, entry: u32) -> Result<Val
     Ok(Value::Null)
 }
 
-static TS_ERROR_NEW_RANGEERROR: p::HelperPlan = p::HelperPlan {
+const TS_ERROR_NEW_RANGEERROR: p::HelperPlan = p::HelperPlan {
     name: "ts.error.new_RangeError",
     function: p::function("58e57274f9af7eeb096a9e03582be3f22780d1e594ab6066ec82eb2e55d2bf17"),
     callees: &[
@@ -28550,7 +28550,7 @@ fn ts_error_new_rangeerror(ctx: &mut dyn p::PlanContext, entry: u32) -> Result<V
     Ok(Value::Null)
 }
 
-static TS_ERROR_IS_RANGEERROR: p::HelperPlan = p::HelperPlan {
+const TS_ERROR_IS_RANGEERROR: p::HelperPlan = p::HelperPlan {
     name: "ts.error.is_RangeError",
     function: p::function("1fddd5992a5c3a560f44ec712a46b0fe1d74729be921fa122b3cda8624bb479b"),
     callees: &[
@@ -28650,7 +28650,7 @@ fn ts_error_is_rangeerror(ctx: &mut dyn p::PlanContext, entry: u32) -> Result<Va
     Ok(Value::Null)
 }
 
-static TS_ERROR_NEW_SYNTAXERROR: p::HelperPlan = p::HelperPlan {
+const TS_ERROR_NEW_SYNTAXERROR: p::HelperPlan = p::HelperPlan {
     name: "ts.error.new_SyntaxError",
     function: p::function("07927d8bf6b73828c238bee64c51c01aa5f33da66fb0d05dd1e97e1f361c04ce"),
     callees: &[
@@ -28708,7 +28708,7 @@ fn ts_error_new_syntaxerror(ctx: &mut dyn p::PlanContext, entry: u32) -> Result<
     Ok(Value::Null)
 }
 
-static TS_ERROR_IS_SYNTAXERROR: p::HelperPlan = p::HelperPlan {
+const TS_ERROR_IS_SYNTAXERROR: p::HelperPlan = p::HelperPlan {
     name: "ts.error.is_SyntaxError",
     function: p::function("9fa2908e9d39210402e28aa1e7531c591b74dcf76d33457e21962f12faf891c2"),
     callees: &[
@@ -28808,7 +28808,7 @@ fn ts_error_is_syntaxerror(ctx: &mut dyn p::PlanContext, entry: u32) -> Result<V
     Ok(Value::Null)
 }
 
-static TS_ERROR_NEW_REFERENCEERROR: p::HelperPlan = p::HelperPlan {
+const TS_ERROR_NEW_REFERENCEERROR: p::HelperPlan = p::HelperPlan {
     name: "ts.error.new_ReferenceError",
     function: p::function("cee5dd40c96a39521ba6fcb0a00bffe2aaee765fa168c2fa74484c15ecc753dd"),
     callees: &[
@@ -28866,7 +28866,7 @@ fn ts_error_new_referenceerror(ctx: &mut dyn p::PlanContext, entry: u32) -> Resu
     Ok(Value::Null)
 }
 
-static TS_ERROR_IS_REFERENCEERROR: p::HelperPlan = p::HelperPlan {
+const TS_ERROR_IS_REFERENCEERROR: p::HelperPlan = p::HelperPlan {
     name: "ts.error.is_ReferenceError",
     function: p::function("65a5154d61552a5d96aabb739e05886d9665459956d3a6f7ef33919104dae5e6"),
     callees: &[
@@ -28966,7 +28966,7 @@ fn ts_error_is_referenceerror(ctx: &mut dyn p::PlanContext, entry: u32) -> Resul
     Ok(Value::Null)
 }
 
-static TS_ERROR_NEW_URIERROR: p::HelperPlan = p::HelperPlan {
+const TS_ERROR_NEW_URIERROR: p::HelperPlan = p::HelperPlan {
     name: "ts.error.new_URIError",
     function: p::function("695de8a4594d38080138077c43e18f0cf75cca438b05078b1d1b212f83bd018e"),
     callees: &[
@@ -29024,7 +29024,7 @@ fn ts_error_new_urierror(ctx: &mut dyn p::PlanContext, entry: u32) -> Result<Val
     Ok(Value::Null)
 }
 
-static TS_ERROR_IS_URIERROR: p::HelperPlan = p::HelperPlan {
+const TS_ERROR_IS_URIERROR: p::HelperPlan = p::HelperPlan {
     name: "ts.error.is_URIError",
     function: p::function("9061b46ba06d39fb7a44d8b0025373576ec0aaa149448b88507d773c14d2f032"),
     callees: &[
@@ -29124,7 +29124,7 @@ fn ts_error_is_urierror(ctx: &mut dyn p::PlanContext, entry: u32) -> Result<Valu
     Ok(Value::Null)
 }
 
-static TS_ERROR_NEW_EVALERROR: p::HelperPlan = p::HelperPlan {
+const TS_ERROR_NEW_EVALERROR: p::HelperPlan = p::HelperPlan {
     name: "ts.error.new_EvalError",
     function: p::function("82c37043098857d24f5c8df6cdfc8dfc07f1abf39eba30acc224ce9c4355103e"),
     callees: &[
@@ -29182,7 +29182,7 @@ fn ts_error_new_evalerror(ctx: &mut dyn p::PlanContext, entry: u32) -> Result<Va
     Ok(Value::Null)
 }
 
-static TS_ERROR_IS_EVALERROR: p::HelperPlan = p::HelperPlan {
+const TS_ERROR_IS_EVALERROR: p::HelperPlan = p::HelperPlan {
     name: "ts.error.is_EvalError",
     function: p::function("8d558fc3c200fc48cf4a332b0016f368da3074028124f2d9476e25fc16b6be12"),
     callees: &[
@@ -29282,7 +29282,7 @@ fn ts_error_is_evalerror(ctx: &mut dyn p::PlanContext, entry: u32) -> Result<Val
     Ok(Value::Null)
 }
 
-static TS_ERROR_NEW_AGGREGATEERROR: p::HelperPlan = p::HelperPlan {
+const TS_ERROR_NEW_AGGREGATEERROR: p::HelperPlan = p::HelperPlan {
     name: "ts.error.new_AggregateError",
     function: p::function("28b1fc8c919a6ad87dad846bd8695045865d1e35922cfde7dda7119c98377949"),
     callees: &[
@@ -29340,7 +29340,7 @@ fn ts_error_new_aggregateerror(ctx: &mut dyn p::PlanContext, entry: u32) -> Resu
     Ok(Value::Null)
 }
 
-static TS_ERROR_IS_AGGREGATEERROR: p::HelperPlan = p::HelperPlan {
+const TS_ERROR_IS_AGGREGATEERROR: p::HelperPlan = p::HelperPlan {
     name: "ts.error.is_AggregateError",
     function: p::function("c7ec4332694347cde8ff4c548cd02af4d1424a32d195d20b9d78eae8a54b9f3d"),
     callees: &[
@@ -29440,7 +29440,7 @@ fn ts_error_is_aggregateerror(ctx: &mut dyn p::PlanContext, entry: u32) -> Resul
     Ok(Value::Null)
 }
 
-static TS_ERROR_TOSTRING: p::HelperPlan = p::HelperPlan {
+const TS_ERROR_TOSTRING: p::HelperPlan = p::HelperPlan {
     name: "ts.error.toString",
     function: p::function("0eaf2e534e7b919be2265a6df250fd08ce6f0e14424d3600759abe9bfb527fb9"),
     callees: &[
@@ -29577,7 +29577,7 @@ fn ts_error_tostring(ctx: &mut dyn p::PlanContext, entry: u32) -> Result<Value, 
     Ok(Value::Null)
 }
 
-static TS_URL_CONSTRUCT: p::HelperPlan = p::HelperPlan {
+const TS_URL_CONSTRUCT: p::HelperPlan = p::HelperPlan {
     name: "ts.url.construct",
     function: p::function("494e71e965eb8fddc41bf4ffafe9bbe8f62c78f62086fc010f9d589d9972eb79"),
     callees: &[
@@ -29730,7 +29730,7 @@ fn ts_url_construct(ctx: &mut dyn p::PlanContext, entry: u32) -> Result<Value, p
     Ok(Value::Null)
 }
 
-static TS_URL_IS: p::HelperPlan = p::HelperPlan {
+const TS_URL_IS: p::HelperPlan = p::HelperPlan {
     name: "ts.url.is",
     function: p::function("b90d41bd8597ca3907cc33fc57d145de0f543594a2425269b6d707a04bede4ed"),
     callees: &[
@@ -29780,7 +29780,7 @@ fn ts_url_is(ctx: &mut dyn p::PlanContext, _entry: u32) -> Result<Value, p::Plan
     Ok(ctx.take(0))
 }
 
-static TS_URL_CANPARSE: p::HelperPlan = p::HelperPlan {
+const TS_URL_CANPARSE: p::HelperPlan = p::HelperPlan {
     name: "ts.url.canParse",
     function: p::function("4388fc5a51fa97e184583dcb89f2c26b0a6d9a0b37ba6ae6ea36fd5813315f94"),
     callees: &[
@@ -29953,7 +29953,7 @@ fn ts_url_canparse(ctx: &mut dyn p::PlanContext, entry: u32) -> Result<Value, p:
     Ok(Value::Null)
 }
 
-static TS_URL_TOSTRING: p::HelperPlan = p::HelperPlan {
+const TS_URL_TOSTRING: p::HelperPlan = p::HelperPlan {
     name: "ts.url.toString",
     function: p::function("e6c2bc8f60ee6c2a8e4976ee0edbbbaa9695bbefd767d44efe32e98ac2e92cde"),
     callees: &[],
@@ -29982,7 +29982,7 @@ fn ts_url_tostring(ctx: &mut dyn p::PlanContext, _entry: u32) -> Result<Value, p
     Ok(ctx.take(0))
 }
 
-static TS_URL_TOJSON: p::HelperPlan = p::HelperPlan {
+const TS_URL_TOJSON: p::HelperPlan = p::HelperPlan {
     name: "ts.url.toJSON",
     function: p::function("96634a1698de25ad1fc5cbe88f11dd7d4b97f7d20a1c6b26745a6538ad7f8554"),
     callees: &[],
@@ -30011,7 +30011,7 @@ fn ts_url_tojson(ctx: &mut dyn p::PlanContext, _entry: u32) -> Result<Value, p::
     Ok(ctx.take(0))
 }
 
-static TS_URL_VALUEOF: p::HelperPlan = p::HelperPlan {
+const TS_URL_VALUEOF: p::HelperPlan = p::HelperPlan {
     name: "ts.url.valueOf",
     function: p::function("4b1779cf367f5b0c184c8a4ede9aea014437c803acc37a40dcfb660e7275e3d8"),
     callees: &[],
@@ -30038,7 +30038,7 @@ fn ts_url_valueof(ctx: &mut dyn p::PlanContext, _entry: u32) -> Result<Value, p:
     Ok(ctx.take(0))
 }
 
-static TS_URL_SEARCH_PARAMS_REFRESH: p::HelperPlan = p::HelperPlan {
+const TS_URL_SEARCH_PARAMS_REFRESH: p::HelperPlan = p::HelperPlan {
     name: "ts.url_search_params.refresh",
     function: p::function("c9bd5e5bf8c1fbd252ccff4033947b0ae9bd81d8f912bdda66e9133a45de5a13"),
     callees: &[
@@ -30124,7 +30124,7 @@ fn ts_url_search_params_refresh(ctx: &mut dyn p::PlanContext, _entry: u32) -> Re
     Ok(ctx.take(0))
 }
 
-static TS_URL_SEARCH_PARAMS_CONSTRUCT: p::HelperPlan = p::HelperPlan {
+const TS_URL_SEARCH_PARAMS_CONSTRUCT: p::HelperPlan = p::HelperPlan {
     name: "ts.url_search_params.construct",
     function: p::function("4404a8701e702d5618a1e269f57522e7644b047c6b62ad85944c557749ab1b8f"),
     callees: &[
@@ -30478,7 +30478,7 @@ fn ts_url_search_params_construct(ctx: &mut dyn p::PlanContext, entry: u32) -> R
     Ok(Value::Null)
 }
 
-static TS_URL_SEARCH_PARAMS_IS: p::HelperPlan = p::HelperPlan {
+const TS_URL_SEARCH_PARAMS_IS: p::HelperPlan = p::HelperPlan {
     name: "ts.url_search_params.is",
     function: p::function("d6b3103d9daab15f6ea0721f5e07091201ac7330ff9681110e9dcf1ca2516ea7"),
     callees: &[
@@ -30528,7 +30528,7 @@ fn ts_url_search_params_is(ctx: &mut dyn p::PlanContext, _entry: u32) -> Result<
     Ok(ctx.take(0))
 }
 
-static TS_URL_SEARCH_PARAMS_SIZE: p::HelperPlan = p::HelperPlan {
+const TS_URL_SEARCH_PARAMS_SIZE: p::HelperPlan = p::HelperPlan {
     name: "ts.url_search_params.size",
     function: p::function("a67e3161868296d128d946dd0b48cb6aedf780b03950f2e6f8754266721adafc"),
     callees: &[
@@ -30559,7 +30559,7 @@ fn ts_url_search_params_size(ctx: &mut dyn p::PlanContext, _entry: u32) -> Resul
     Ok(ctx.take(0))
 }
 
-static TS_URL_SEARCH_PARAMS_TOSTRING: p::HelperPlan = p::HelperPlan {
+const TS_URL_SEARCH_PARAMS_TOSTRING: p::HelperPlan = p::HelperPlan {
     name: "ts.url_search_params.toString",
     function: p::function("f6786763e48fb352b269b21920d823f629acd3765d9ddc5478e81a2d982cfcd3"),
     callees: &[
@@ -30590,7 +30590,7 @@ fn ts_url_search_params_tostring(ctx: &mut dyn p::PlanContext, _entry: u32) -> R
     Ok(ctx.take(0))
 }
 
-static TS_URL_SEARCH_PARAMS_VALUEOF: p::HelperPlan = p::HelperPlan {
+const TS_URL_SEARCH_PARAMS_VALUEOF: p::HelperPlan = p::HelperPlan {
     name: "ts.url_search_params.valueOf",
     function: p::function("2eec2be6e04a40427c72ddcac358483f5c19444a929aa79c57a2517b66e97355"),
     callees: &[],
@@ -30617,7 +30617,7 @@ fn ts_url_search_params_valueof(ctx: &mut dyn p::PlanContext, _entry: u32) -> Re
     Ok(ctx.take(0))
 }
 
-static TS_URL_SEARCH_PARAMS_GET: p::HelperPlan = p::HelperPlan {
+const TS_URL_SEARCH_PARAMS_GET: p::HelperPlan = p::HelperPlan {
     name: "ts.url_search_params.get",
     function: p::function("d03b034cf322219e91018f3bbd840027e6a0d3dcc0b805e909462bd1ca1972a4"),
     callees: &[
@@ -30766,7 +30766,7 @@ fn ts_url_search_params_get(ctx: &mut dyn p::PlanContext, entry: u32) -> Result<
     Ok(Value::Null)
 }
 
-static TS_URL_SEARCH_PARAMS_GETALL: p::HelperPlan = p::HelperPlan {
+const TS_URL_SEARCH_PARAMS_GETALL: p::HelperPlan = p::HelperPlan {
     name: "ts.url_search_params.getAll",
     function: p::function("e43629f2320bd1fba6d3eefe6b740c0ed09b963ca2721d571267b0daddc79571"),
     callees: &[
@@ -30919,7 +30919,7 @@ fn ts_url_search_params_getall(ctx: &mut dyn p::PlanContext, entry: u32) -> Resu
     Ok(Value::Null)
 }
 
-static TS_URL_SEARCH_PARAMS_HAS: p::HelperPlan = p::HelperPlan {
+const TS_URL_SEARCH_PARAMS_HAS: p::HelperPlan = p::HelperPlan {
     name: "ts.url_search_params.has",
     function: p::function("40be4f44e6ecc88f40f35e91603d5edc842e3c0bcc750e9a56641e1f003e1751"),
     callees: &[
@@ -31085,7 +31085,7 @@ fn ts_url_search_params_has(ctx: &mut dyn p::PlanContext, entry: u32) -> Result<
     Ok(Value::Null)
 }
 
-static TS_URL_SEARCH_PARAMS_APPEND: p::HelperPlan = p::HelperPlan {
+const TS_URL_SEARCH_PARAMS_APPEND: p::HelperPlan = p::HelperPlan {
     name: "ts.url_search_params.append",
     function: p::function("bcfc6c9db83dd2f5675716df11330c008b6f018e4525f93e0ae58cf9f6bc598e"),
     callees: &[
@@ -31203,7 +31203,7 @@ fn ts_url_search_params_append(ctx: &mut dyn p::PlanContext, entry: u32) -> Resu
     Ok(Value::Null)
 }
 
-static TS_URL_SEARCH_PARAMS_SET: p::HelperPlan = p::HelperPlan {
+const TS_URL_SEARCH_PARAMS_SET: p::HelperPlan = p::HelperPlan {
     name: "ts.url_search_params.set",
     function: p::function("08bb4da11284e5d8c8179f2361da013425cc39594e1245f8ff6761dd03515537"),
     callees: &[
@@ -31396,7 +31396,7 @@ fn ts_url_search_params_set(ctx: &mut dyn p::PlanContext, entry: u32) -> Result<
     Ok(Value::Null)
 }
 
-static TS_URL_SEARCH_PARAMS_DELETE: p::HelperPlan = p::HelperPlan {
+const TS_URL_SEARCH_PARAMS_DELETE: p::HelperPlan = p::HelperPlan {
     name: "ts.url_search_params.delete",
     function: p::function("cce71bd3bfcdf548e04c0d691f781d74f6165fbbaae0f46dfa619b7c3790cb92"),
     callees: &[
@@ -31594,7 +31594,7 @@ fn ts_url_search_params_delete(ctx: &mut dyn p::PlanContext, entry: u32) -> Resu
     Ok(Value::Null)
 }
 
-static TS_URL_SEARCH_PARAMS_SORT: p::HelperPlan = p::HelperPlan {
+const TS_URL_SEARCH_PARAMS_SORT: p::HelperPlan = p::HelperPlan {
     name: "ts.url_search_params.sort",
     function: p::function("751ee5b024c41a1748eedcc4b0a58de846979555a40206993a5602119663f46e"),
     callees: &[
@@ -31725,7 +31725,7 @@ fn ts_url_search_params_sort(ctx: &mut dyn p::PlanContext, _entry: u32) -> Resul
     Ok(ctx.take(0))
 }
 
-static TS_URL_SEARCH_PARAMS_KEYS: p::HelperPlan = p::HelperPlan {
+const TS_URL_SEARCH_PARAMS_KEYS: p::HelperPlan = p::HelperPlan {
     name: "ts.url_search_params.keys",
     function: p::function("43c6f4bb20e039fb9d47235dc410a7c3fc520cded798ee0bc469d337b82ae307"),
     callees: &[
@@ -31784,7 +31784,7 @@ fn ts_url_search_params_keys(ctx: &mut dyn p::PlanContext, _entry: u32) -> Resul
     Ok(ctx.take(0))
 }
 
-static TS_URL_SEARCH_PARAMS_VALUES: p::HelperPlan = p::HelperPlan {
+const TS_URL_SEARCH_PARAMS_VALUES: p::HelperPlan = p::HelperPlan {
     name: "ts.url_search_params.values",
     function: p::function("eec3c7cc9346a462d0ee5bcca344e458bbf902a6015e9ddd83c5613a37b5d25e"),
     callees: &[
@@ -31843,7 +31843,7 @@ fn ts_url_search_params_values(ctx: &mut dyn p::PlanContext, _entry: u32) -> Res
     Ok(ctx.take(0))
 }
 
-static TS_URL_SEARCH_PARAMS_ENTRIES: p::HelperPlan = p::HelperPlan {
+const TS_URL_SEARCH_PARAMS_ENTRIES: p::HelperPlan = p::HelperPlan {
     name: "ts.url_search_params.entries",
     function: p::function("fb3a4700bddebdb66b5964de5ad617bc0cdfaa90bb7d2d129a4ed149b0d512af"),
     callees: &[
@@ -31907,7 +31907,7 @@ fn ts_url_search_params_entries(ctx: &mut dyn p::PlanContext, _entry: u32) -> Re
     Ok(ctx.take(0))
 }
 
-static TS_URL_SEARCH_PARAMS_FOREACH: p::HelperPlan = p::HelperPlan {
+const TS_URL_SEARCH_PARAMS_FOREACH: p::HelperPlan = p::HelperPlan {
     name: "ts.url_search_params.forEach",
     function: p::function("1dffb786933ce781d73ae04da96f5248527062cf31da5cb584ac3b58a3e3c7ed"),
     callees: &[
@@ -32057,7 +32057,7 @@ fn ts_url_search_params_foreach(ctx: &mut dyn p::PlanContext, entry: u32) -> Res
     Ok(Value::Null)
 }
 
-static TS_CONSOLE_JSON: p::HelperPlan = p::HelperPlan {
+const TS_CONSOLE_JSON: p::HelperPlan = p::HelperPlan {
     name: "ts.console.json",
     function: p::function("3a48f964f40e2a97c3a437a9c2b80eb947320a755e6f63340bfdbe3677d3cf0e"),
     callees: &[
@@ -32106,7 +32106,7 @@ fn ts_console_json(ctx: &mut dyn p::PlanContext, _entry: u32) -> Result<Value, p
     Ok(ctx.take(0))
 }
 
-static TS_JSON_PARSE: p::HelperPlan = p::HelperPlan {
+const TS_JSON_PARSE: p::HelperPlan = p::HelperPlan {
     name: "ts.json.parse",
     function: p::function("983681fd52d7ed0f5cf502d4c59dc4a61e541120a70be400432e0c47ecd22d72"),
     callees: &[
@@ -32324,7 +32324,7 @@ fn ts_json_parse(ctx: &mut dyn p::PlanContext, entry: u32) -> Result<Value, p::P
     Ok(Value::Null)
 }
 
-static TS_JSON_STRINGIFY_GENERIC: p::HelperPlan = p::HelperPlan {
+const TS_JSON_STRINGIFY_GENERIC: p::HelperPlan = p::HelperPlan {
     name: "ts.json.stringify_generic",
     function: p::function("3942f53f2efd23d649f137f1bd6db0e9873926f7d295810392e7afa49a2f1531"),
     callees: &[
@@ -32657,7 +32657,7 @@ fn ts_json_stringify_generic(ctx: &mut dyn p::PlanContext, entry: u32) -> Result
     Ok(Value::Null)
 }
 
-static TS_JSON_PLAIN: p::HelperPlan = p::HelperPlan {
+const TS_JSON_PLAIN: p::HelperPlan = p::HelperPlan {
     name: "ts.json.plain",
     function: p::function("272917e9dd90b8fe7e18618c2f32ad1015c1baaeb5c274a10bbd7366eabb0c96"),
     callees: &[
@@ -32709,7 +32709,7 @@ fn ts_json_plain(ctx: &mut dyn p::PlanContext, _entry: u32) -> Result<Value, p::
     Ok(ctx.take(0))
 }
 
-static TS_JSON_STRINGIFY: p::HelperPlan = p::HelperPlan {
+const TS_JSON_STRINGIFY: p::HelperPlan = p::HelperPlan {
     name: "ts.json.stringify",
     function: p::function("dde607cc319f44371e965bffca235a50e1d72e71e9ec96d86e300a66c49d4679"),
     callees: &[
@@ -32857,7 +32857,7 @@ fn ts_json_stringify(ctx: &mut dyn p::PlanContext, entry: u32) -> Result<Value, 
     Ok(Value::Null)
 }
 
-static TS_ARRAY_MATCH_LENGTH: p::HelperPlan = p::HelperPlan {
+const TS_ARRAY_MATCH_LENGTH: p::HelperPlan = p::HelperPlan {
     name: "ts.array.match_length",
     function: p::function("8e3ba0962ea57984b590494bab9176f2e5931eb899cf90facca8a322925723f1"),
     callees: &[
@@ -32888,7 +32888,7 @@ fn ts_array_match_length(ctx: &mut dyn p::PlanContext, _entry: u32) -> Result<Va
     Ok(ctx.take(0))
 }
 
-static TS_ARRAY_SET: p::HelperPlan = p::HelperPlan {
+const TS_ARRAY_SET: p::HelperPlan = p::HelperPlan {
     name: "ts.array.set",
     function: p::function("ea9eb6ead0489a4e92b0bb099bbec26e60b758db86b4ee8a3612102ed9b450a7"),
     callees: &[
@@ -33002,7 +33002,7 @@ fn ts_array_set(ctx: &mut dyn p::PlanContext, entry: u32) -> Result<Value, p::Pl
     Ok(Value::Null)
 }
 
-static TS_ARRAY_REMOVE: p::HelperPlan = p::HelperPlan {
+const TS_ARRAY_REMOVE: p::HelperPlan = p::HelperPlan {
     name: "ts.array.remove",
     function: p::function("598fc0e7bc56cfa30608f0effee0b0ce5e808617f23ad6048ddcfb316a379ae4"),
     callees: &[
@@ -33114,7 +33114,7 @@ fn ts_array_remove(ctx: &mut dyn p::PlanContext, entry: u32) -> Result<Value, p:
     Ok(Value::Null)
 }
 
-static TS_ARRAY_ARGUMENT: p::HelperPlan = p::HelperPlan {
+const TS_ARRAY_ARGUMENT: p::HelperPlan = p::HelperPlan {
     name: "ts.array.argument",
     function: p::function("8a8dd65564d5024cfd646758ccb1a69fe473b4f862454917992734b4597741c7"),
     callees: &[
@@ -33158,7 +33158,7 @@ fn ts_array_argument(ctx: &mut dyn p::PlanContext, _entry: u32) -> Result<Value,
     Ok(ctx.take(0))
 }
 
-static TS_ARRAY_INTEGER: p::HelperPlan = p::HelperPlan {
+const TS_ARRAY_INTEGER: p::HelperPlan = p::HelperPlan {
     name: "ts.array.integer",
     function: p::function("250bfe1ee9e9cc5437b8ed9d05db60ab6bec1f39fb366d7508e76e36342a8cde"),
     callees: &[
@@ -33237,7 +33237,7 @@ fn ts_array_integer(ctx: &mut dyn p::PlanContext, entry: u32) -> Result<Value, p
     Ok(Value::Null)
 }
 
-static TS_ARRAY_LENGTH: p::HelperPlan = p::HelperPlan {
+const TS_ARRAY_LENGTH: p::HelperPlan = p::HelperPlan {
     name: "ts.array.length",
     function: p::function("0622f2afb7cf61706f94745ef932ce803873442d31b032df3f39a23086066ed6"),
     callees: &[
@@ -33350,7 +33350,7 @@ fn ts_array_length(ctx: &mut dyn p::PlanContext, entry: u32) -> Result<Value, p:
     Ok(Value::Null)
 }
 
-static TS_ARRAY_LENGTH_PROPERTY: p::HelperPlan = p::HelperPlan {
+const TS_ARRAY_LENGTH_PROPERTY: p::HelperPlan = p::HelperPlan {
     name: "ts.array.length_property",
     function: p::function("7984142b639c5c1a9de246985789179434b9906173e5c623982c399c0bf521d9"),
     callees: &[
@@ -33380,7 +33380,7 @@ fn ts_array_length_property(ctx: &mut dyn p::PlanContext, _entry: u32) -> Result
     Ok(ctx.take(0))
 }
 
-static TS_ARRAY_IS: p::HelperPlan = p::HelperPlan {
+const TS_ARRAY_IS: p::HelperPlan = p::HelperPlan {
     name: "ts.array.is",
     function: p::function("8f0ac10cd41f7f321f99efd18a09659b5555c40aed70767e3c1c094506efb497"),
     callees: &[
@@ -33442,7 +33442,7 @@ fn ts_array_is(ctx: &mut dyn p::PlanContext, _entry: u32) -> Result<Value, p::Pl
     Ok(ctx.take(0))
 }
 
-static TS_ARRAY_IS_ARRAY: p::HelperPlan = p::HelperPlan {
+const TS_ARRAY_IS_ARRAY: p::HelperPlan = p::HelperPlan {
     name: "ts.array.is_array",
     function: p::function("b32624cffe9846aeee07ac72abdfd7d52ef83aa22484bafbee3f20969ed9aa35"),
     callees: &[
@@ -33502,7 +33502,7 @@ fn ts_array_is_array(ctx: &mut dyn p::PlanContext, _entry: u32) -> Result<Value,
     Ok(ctx.take(0))
 }
 
-static TS_ARRAY_CALLBACK: p::HelperPlan = p::HelperPlan {
+const TS_ARRAY_CALLBACK: p::HelperPlan = p::HelperPlan {
     name: "ts.array.callback",
     function: p::function("0d0b0633eb6be2f98e3f3e245f9cdfe3d2d508f73eef2ddc64f665e3f45df84b"),
     callees: &[
@@ -33591,7 +33591,7 @@ fn ts_array_callback(ctx: &mut dyn p::PlanContext, _entry: u32) -> Result<Value,
     Err(p::PlanExit::Raise(ctx.take(0)))
 }
 
-static TS_ARRAY_REUSABLE_CALLBACK: p::HelperPlan = p::HelperPlan {
+const TS_ARRAY_REUSABLE_CALLBACK: p::HelperPlan = p::HelperPlan {
     name: "ts.array.reusable_callback",
     function: p::function("89d78c4ba567ffe435f6f33142c22639dd04afbd21b95ff4a6613aabc39f2b88"),
     callees: &[
@@ -33672,7 +33672,7 @@ fn ts_array_reusable_callback(ctx: &mut dyn p::PlanContext, _entry: u32) -> Resu
     Ok(ctx.take(0))
 }
 
-static TS_ARRAY_BOUND: p::HelperPlan = p::HelperPlan {
+const TS_ARRAY_BOUND: p::HelperPlan = p::HelperPlan {
     name: "ts.array.bound",
     function: p::function("e4fb8a041efbde038618e1e2ad6f9a2a8229c42a37fd7c751a1a6c3379b3bc2e"),
     callees: &[
@@ -33763,7 +33763,7 @@ fn ts_array_bound(ctx: &mut dyn p::PlanContext, entry: u32) -> Result<Value, p::
     Ok(Value::Null)
 }
 
-static TS_ARRAY_DENSE: p::HelperPlan = p::HelperPlan {
+const TS_ARRAY_DENSE: p::HelperPlan = p::HelperPlan {
     name: "ts.array.dense",
     function: p::function("784cffcc878182d95c7486316f2f1ccfd5e15991aab6a343ea0d29669de5065a"),
     callees: &[
@@ -33900,7 +33900,7 @@ fn ts_array_dense(ctx: &mut dyn p::PlanContext, entry: u32) -> Result<Value, p::
     Ok(Value::Null)
 }
 
-static TS_ARRAY_SPREAD: p::HelperPlan = p::HelperPlan {
+const TS_ARRAY_SPREAD: p::HelperPlan = p::HelperPlan {
     name: "ts.array.spread",
     function: p::function("60f6bad3fb6ce2a2b754fb3fa5e6035f3644834ec95203abc7d983f12d328707"),
     callees: &[
@@ -33967,7 +33967,7 @@ fn ts_array_spread(ctx: &mut dyn p::PlanContext, entry: u32) -> Result<Value, p:
     Ok(Value::Null)
 }
 
-static TS_ARRAY_CONSTRUCT: p::HelperPlan = p::HelperPlan {
+const TS_ARRAY_CONSTRUCT: p::HelperPlan = p::HelperPlan {
     name: "ts.array.construct",
     function: p::function("487a328b84d75cbfc3f02560d92d3c74d32ab6358a08605b6f4167a1b81448d5"),
     callees: &[
@@ -34107,7 +34107,7 @@ fn ts_array_construct(ctx: &mut dyn p::PlanContext, entry: u32) -> Result<Value,
     Ok(Value::Null)
 }
 
-static TS_ARRAY_OF: p::HelperPlan = p::HelperPlan {
+const TS_ARRAY_OF: p::HelperPlan = p::HelperPlan {
     name: "ts.array.of",
     function: p::function("91dec4a820a061517d7aa6cf79d277d4376ec2a0406b218f6402e99d31fb5381"),
     callees: &[
@@ -34137,7 +34137,7 @@ fn ts_array_of(ctx: &mut dyn p::PlanContext, _entry: u32) -> Result<Value, p::Pl
     Ok(ctx.take(0))
 }
 
-static TS_ARRAY_VALUEOF: p::HelperPlan = p::HelperPlan {
+const TS_ARRAY_VALUEOF: p::HelperPlan = p::HelperPlan {
     name: "ts.array.valueOf",
     function: p::function("07f23727c150d078300af43b82bc242dc002f6e841ebcd28f48540f0ce1ba3e5"),
     callees: &[
@@ -34169,7 +34169,7 @@ fn ts_array_valueof(ctx: &mut dyn p::PlanContext, _entry: u32) -> Result<Value, 
     Ok(ctx.take(0))
 }
 
-static TS_ARRAY_AT: p::HelperPlan = p::HelperPlan {
+const TS_ARRAY_AT: p::HelperPlan = p::HelperPlan {
     name: "ts.array.at",
     function: p::function("ec24c4a2162760c31a36d2716b43fbe37d67cc8f1e9544efcc90686249639038"),
     callees: &[
@@ -34305,7 +34305,7 @@ fn ts_array_at(ctx: &mut dyn p::PlanContext, entry: u32) -> Result<Value, p::Pla
     Ok(Value::Null)
 }
 
-static TS_ARRAY_PUSH: p::HelperPlan = p::HelperPlan {
+const TS_ARRAY_PUSH: p::HelperPlan = p::HelperPlan {
     name: "ts.array.push",
     function: p::function("4b4795ad417b670c2a680967f6bb2fb203db78f4eb30ae69a9afb8eb904822a3"),
     callees: &[
@@ -34453,7 +34453,7 @@ fn ts_array_push(ctx: &mut dyn p::PlanContext, entry: u32) -> Result<Value, p::P
     Ok(Value::Null)
 }
 
-static TS_ARRAY_POP: p::HelperPlan = p::HelperPlan {
+const TS_ARRAY_POP: p::HelperPlan = p::HelperPlan {
     name: "ts.array.pop",
     function: p::function("a9c69265422f7930b57af4ad0ac8996ba21be9c31c78bc2285e60a7545aa5e93"),
     callees: &[
@@ -34616,7 +34616,7 @@ fn ts_array_pop(ctx: &mut dyn p::PlanContext, entry: u32) -> Result<Value, p::Pl
     Ok(Value::Null)
 }
 
-static TS_ARRAY_SLICE_GENERIC: p::HelperPlan = p::HelperPlan {
+const TS_ARRAY_SLICE_GENERIC: p::HelperPlan = p::HelperPlan {
     name: "ts.array.slice_generic",
     function: p::function("693b4e309e849c1e8ca308694c0b74a7c14245e3b7121b98fcd95fd127c20220"),
     callees: &[
@@ -34888,7 +34888,7 @@ fn ts_array_slice_generic(ctx: &mut dyn p::PlanContext, entry: u32) -> Result<Va
     Ok(Value::Null)
 }
 
-static TS_ARRAY_SLICE: p::HelperPlan = p::HelperPlan {
+const TS_ARRAY_SLICE: p::HelperPlan = p::HelperPlan {
     name: "ts.array.slice",
     function: p::function("f2b23e2f32bc77f9284c7a8f62a111c36046fa915477a282a36ec57031398752"),
     callees: &[
@@ -35169,7 +35169,7 @@ fn ts_array_slice(ctx: &mut dyn p::PlanContext, entry: u32) -> Result<Value, p::
     Ok(Value::Null)
 }
 
-static TS_ARRAY_CONCAT: p::HelperPlan = p::HelperPlan {
+const TS_ARRAY_CONCAT: p::HelperPlan = p::HelperPlan {
     name: "ts.array.concat",
     function: p::function("a8557c9859d01d341c3e0375acf3f4b79c2c418fcf7c69c99b5263d2b286e565"),
     callees: &[
@@ -35402,7 +35402,7 @@ fn ts_array_concat(ctx: &mut dyn p::PlanContext, entry: u32) -> Result<Value, p:
     Ok(Value::Null)
 }
 
-static TS_ARRAY_FILL: p::HelperPlan = p::HelperPlan {
+const TS_ARRAY_FILL: p::HelperPlan = p::HelperPlan {
     name: "ts.array.fill",
     function: p::function("48ad4eba811b385e41143759908bfdae407a2564f3bb05ae293181846cd53554"),
     callees: &[
@@ -35566,7 +35566,7 @@ fn ts_array_fill(ctx: &mut dyn p::PlanContext, entry: u32) -> Result<Value, p::P
     Ok(Value::Null)
 }
 
-static TS_ARRAY_COPYWITHIN: p::HelperPlan = p::HelperPlan {
+const TS_ARRAY_COPYWITHIN: p::HelperPlan = p::HelperPlan {
     name: "ts.array.copyWithin",
     function: p::function("eed5e4adc09e631aedb760c1c4a572df92df419177480a2d6b1b15fc739ecc9e"),
     callees: &[
@@ -35881,7 +35881,7 @@ fn ts_array_copywithin(ctx: &mut dyn p::PlanContext, entry: u32) -> Result<Value
     Ok(Value::Null)
 }
 
-static TS_ARRAY_PRIMITIVE: p::HelperPlan = p::HelperPlan {
+const TS_ARRAY_PRIMITIVE: p::HelperPlan = p::HelperPlan {
     name: "ts.array.primitive",
     function: p::function("9481312c99d41dcee06a443f0bc78564f32c9f0d731efcc4fc46be73f66b9bd0"),
     callees: &[
@@ -35959,7 +35959,7 @@ fn ts_array_primitive(ctx: &mut dyn p::PlanContext, _entry: u32) -> Result<Value
     Ok(ctx.take(0))
 }
 
-static TS_ARRAY_SEARCHABLE: p::HelperPlan = p::HelperPlan {
+const TS_ARRAY_SEARCHABLE: p::HelperPlan = p::HelperPlan {
     name: "ts.array.searchable",
     function: p::function("71f1b4f39cedc33e67c2abf24b8973d1439249ed844d5494ea15417aefd1d755"),
     callees: &[
@@ -36104,7 +36104,7 @@ fn ts_array_searchable(ctx: &mut dyn p::PlanContext, _entry: u32) -> Result<Valu
     Ok(ctx.take(0))
 }
 
-static TS_ARRAY_SEARCH: p::HelperPlan = p::HelperPlan {
+const TS_ARRAY_SEARCH: p::HelperPlan = p::HelperPlan {
     name: "ts.array.search",
     function: p::function("88431342dadaf4239977c34f83e30725ffad0a5a644fc59f21fb88513677bda7"),
     callees: &[
@@ -36317,7 +36317,7 @@ fn ts_array_search(ctx: &mut dyn p::PlanContext, entry: u32) -> Result<Value, p:
     Ok(Value::Null)
 }
 
-static TS_ARRAY_GENERIC_INDEXOF: p::HelperPlan = p::HelperPlan {
+const TS_ARRAY_GENERIC_INDEXOF: p::HelperPlan = p::HelperPlan {
     name: "ts.array.generic_indexOf",
     function: p::function("d562d7927fb996094e0e08dbf40933c90552fe57c987b6f5c47985208369223f"),
     callees: &[
@@ -36602,7 +36602,7 @@ fn ts_array_generic_indexof(ctx: &mut dyn p::PlanContext, entry: u32) -> Result<
     Ok(Value::Null)
 }
 
-static TS_ARRAY_INDEXOF: p::HelperPlan = p::HelperPlan {
+const TS_ARRAY_INDEXOF: p::HelperPlan = p::HelperPlan {
     name: "ts.array.indexOf",
     function: p::function("a96925d5ee476b5da2034be50e8bfa7cbe7790a1e6f2223efcd32dd0cbba2602"),
     callees: &[
@@ -36700,7 +36700,7 @@ fn ts_array_indexof(ctx: &mut dyn p::PlanContext, entry: u32) -> Result<Value, p
     Ok(Value::Null)
 }
 
-static TS_ARRAY_GENERIC_LASTINDEXOF: p::HelperPlan = p::HelperPlan {
+const TS_ARRAY_GENERIC_LASTINDEXOF: p::HelperPlan = p::HelperPlan {
     name: "ts.array.generic_lastIndexOf",
     function: p::function("c046009d82d94c2c5e54291a147169d1843d3a2027b32d41749b5bfc5c7e24b8"),
     callees: &[
@@ -36948,7 +36948,7 @@ fn ts_array_generic_lastindexof(ctx: &mut dyn p::PlanContext, entry: u32) -> Res
     Ok(Value::Null)
 }
 
-static TS_ARRAY_LASTINDEXOF: p::HelperPlan = p::HelperPlan {
+const TS_ARRAY_LASTINDEXOF: p::HelperPlan = p::HelperPlan {
     name: "ts.array.lastIndexOf",
     function: p::function("535e5a59d340106ff76aaa59c4075c5a81cad21069288a0e84db75cdee38f46b"),
     callees: &[
@@ -37047,7 +37047,7 @@ fn ts_array_lastindexof(ctx: &mut dyn p::PlanContext, entry: u32) -> Result<Valu
     Ok(Value::Null)
 }
 
-static TS_ARRAY_GENERIC_INCLUDES: p::HelperPlan = p::HelperPlan {
+const TS_ARRAY_GENERIC_INCLUDES: p::HelperPlan = p::HelperPlan {
     name: "ts.array.generic_includes",
     function: p::function("2b4d5e37c236a4d64a99aca114995e43e2ced800a4a9e4ba8739683704e1a796"),
     callees: &[
@@ -37312,7 +37312,7 @@ fn ts_array_generic_includes(ctx: &mut dyn p::PlanContext, entry: u32) -> Result
     Ok(Value::Null)
 }
 
-static TS_ARRAY_INCLUDES: p::HelperPlan = p::HelperPlan {
+const TS_ARRAY_INCLUDES: p::HelperPlan = p::HelperPlan {
     name: "ts.array.includes",
     function: p::function("4cbfdf2692b88577dd263cd2621d11f71c89dd9288cca25e9ad0d8a7c56e4cb2"),
     callees: &[
@@ -37411,7 +37411,7 @@ fn ts_array_includes(ctx: &mut dyn p::PlanContext, entry: u32) -> Result<Value, 
     Ok(Value::Null)
 }
 
-static TS_ARRAY_MAP: p::HelperPlan = p::HelperPlan {
+const TS_ARRAY_MAP: p::HelperPlan = p::HelperPlan {
     name: "ts.array.map",
     function: p::function("482235667893c0c97b83cb31052f19efc6237220bb98cf18bc844888eb475df6"),
     callees: &[
@@ -37791,7 +37791,7 @@ fn ts_array_map(ctx: &mut dyn p::PlanContext, entry: u32) -> Result<Value, p::Pl
     Ok(Value::Null)
 }
 
-static TS_ARRAY_FILTER: p::HelperPlan = p::HelperPlan {
+const TS_ARRAY_FILTER: p::HelperPlan = p::HelperPlan {
     name: "ts.array.filter",
     function: p::function("3bfd678dbfd644437c599a05b476a7a7e6db52990fe16513f1ea87ccc82edb05"),
     callees: &[
@@ -38158,7 +38158,7 @@ fn ts_array_filter(ctx: &mut dyn p::PlanContext, entry: u32) -> Result<Value, p:
     Ok(Value::Null)
 }
 
-static TS_ARRAY_FOREACH: p::HelperPlan = p::HelperPlan {
+const TS_ARRAY_FOREACH: p::HelperPlan = p::HelperPlan {
     name: "ts.array.forEach",
     function: p::function("d76729361280015d934852c2fc838e1fd37541d3ebc6f9f802173fcd1808b119"),
     callees: &[
@@ -38456,7 +38456,7 @@ fn ts_array_foreach(ctx: &mut dyn p::PlanContext, entry: u32) -> Result<Value, p
     Ok(Value::Null)
 }
 
-static TS_ARRAY_EVERY: p::HelperPlan = p::HelperPlan {
+const TS_ARRAY_EVERY: p::HelperPlan = p::HelperPlan {
     name: "ts.array.every",
     function: p::function("dbcb4226bb2e7b38deb520668fd409c7fdd4da04499cbeacf726f9c01df1aa8e"),
     callees: &[
@@ -38805,7 +38805,7 @@ fn ts_array_every(ctx: &mut dyn p::PlanContext, entry: u32) -> Result<Value, p::
     Ok(Value::Null)
 }
 
-static TS_ARRAY_SOME: p::HelperPlan = p::HelperPlan {
+const TS_ARRAY_SOME: p::HelperPlan = p::HelperPlan {
     name: "ts.array.some",
     function: p::function("bb24d4eb8e088ca9b0212dc29b133ccbe3c751ce3eccf8c8ed5927515a50dad2"),
     callees: &[
@@ -39154,7 +39154,7 @@ fn ts_array_some(ctx: &mut dyn p::PlanContext, entry: u32) -> Result<Value, p::P
     Ok(Value::Null)
 }
 
-static TS_ARRAY_FIND: p::HelperPlan = p::HelperPlan {
+const TS_ARRAY_FIND: p::HelperPlan = p::HelperPlan {
     name: "ts.array.find",
     function: p::function("03ca16e0b78c0fa6ccf82fc38053be2c35fe2478a84311e2213e167a76c2bf11"),
     callees: &[
@@ -39494,7 +39494,7 @@ fn ts_array_find(ctx: &mut dyn p::PlanContext, entry: u32) -> Result<Value, p::P
     Ok(Value::Null)
 }
 
-static TS_ARRAY_FINDINDEX: p::HelperPlan = p::HelperPlan {
+const TS_ARRAY_FINDINDEX: p::HelperPlan = p::HelperPlan {
     name: "ts.array.findIndex",
     function: p::function("631f9039e87597d9196b1497c43b0841c8cf55584aa3a9378be40161652c58cb"),
     callees: &[
@@ -39835,7 +39835,7 @@ fn ts_array_findindex(ctx: &mut dyn p::PlanContext, entry: u32) -> Result<Value,
     Ok(Value::Null)
 }
 
-static TS_ARRAY_FINDLAST: p::HelperPlan = p::HelperPlan {
+const TS_ARRAY_FINDLAST: p::HelperPlan = p::HelperPlan {
     name: "ts.array.findLast",
     function: p::function("a80e652fae90e885234540575e7a7c32d7c8b2da98d745e646845b82f4c15622"),
     callees: &[
@@ -40119,7 +40119,7 @@ fn ts_array_findlast(ctx: &mut dyn p::PlanContext, entry: u32) -> Result<Value, 
     Ok(Value::Null)
 }
 
-static TS_ARRAY_FINDLASTINDEX: p::HelperPlan = p::HelperPlan {
+const TS_ARRAY_FINDLASTINDEX: p::HelperPlan = p::HelperPlan {
     name: "ts.array.findLastIndex",
     function: p::function("06e5398ebe77b3ac29e67cf914e04e87a235375933fd46ef8033bd9d12f36fab"),
     callees: &[
@@ -40404,7 +40404,7 @@ fn ts_array_findlastindex(ctx: &mut dyn p::PlanContext, entry: u32) -> Result<Va
     Ok(Value::Null)
 }
 
-static TS_ARRAY_REDUCE: p::HelperPlan = p::HelperPlan {
+const TS_ARRAY_REDUCE: p::HelperPlan = p::HelperPlan {
     name: "ts.array.reduce",
     function: p::function("225d7ca22929e7294ba68e8cddd10b44f3e8cbbcff88c75d82a1980bcb9afc5a"),
     callees: &[
@@ -40781,7 +40781,7 @@ fn ts_array_reduce(ctx: &mut dyn p::PlanContext, entry: u32) -> Result<Value, p:
     Ok(Value::Null)
 }
 
-static TS_ARRAY_REDUCERIGHT: p::HelperPlan = p::HelperPlan {
+const TS_ARRAY_REDUCERIGHT: p::HelperPlan = p::HelperPlan {
     name: "ts.array.reduceRight",
     function: p::function("a7f68fedc43d453b7093a530a5ab26213dec976a03d97ede21c5bc1e73dc431b"),
     callees: &[
@@ -41104,7 +41104,7 @@ fn ts_array_reduceright(ctx: &mut dyn p::PlanContext, entry: u32) -> Result<Valu
     Ok(Value::Null)
 }
 
-static TS_ARRAY_GENERIC_JOIN: p::HelperPlan = p::HelperPlan {
+const TS_ARRAY_GENERIC_JOIN: p::HelperPlan = p::HelperPlan {
     name: "ts.array.generic_join",
     function: p::function("cdb0ad6a38c27740ca9cba82aa16b100d0beb08fc04eb8adae2fdbbf619b3f79"),
     callees: &[
@@ -41314,7 +41314,7 @@ fn ts_array_generic_join(ctx: &mut dyn p::PlanContext, entry: u32) -> Result<Val
     Ok(Value::Null)
 }
 
-static TS_ARRAY_JOIN: p::HelperPlan = p::HelperPlan {
+const TS_ARRAY_JOIN: p::HelperPlan = p::HelperPlan {
     name: "ts.array.join",
     function: p::function("813b42a8147709c817b5cc6846aa5e977ab11253d0fd4ca1865481035193ac8d"),
     callees: &[
@@ -41448,7 +41448,7 @@ fn ts_array_join(ctx: &mut dyn p::PlanContext, entry: u32) -> Result<Value, p::P
     Ok(Value::Null)
 }
 
-static TS_ARRAY_TOSTRING: p::HelperPlan = p::HelperPlan {
+const TS_ARRAY_TOSTRING: p::HelperPlan = p::HelperPlan {
     name: "ts.array.toString",
     function: p::function("10cb6dd704a14a8fbf0d94eddfaf1c4a03fe2f44529b03887ec2d9934144171b"),
     callees: &[
@@ -41738,7 +41738,7 @@ fn ts_array_tostring(ctx: &mut dyn p::PlanContext, entry: u32) -> Result<Value, 
     Ok(Value::Null)
 }
 
-static TS_ARRAY_TOLOCALESTRING: p::HelperPlan = p::HelperPlan {
+const TS_ARRAY_TOLOCALESTRING: p::HelperPlan = p::HelperPlan {
     name: "ts.array.toLocaleString",
     function: p::function("33228184011d122aa5224466480bd93863f036547804f76627d1b4b8256e6584"),
     callees: &[
@@ -41774,7 +41774,7 @@ fn ts_array_tolocalestring(ctx: &mut dyn p::PlanContext, _entry: u32) -> Result<
     Err(p::PlanExit::Raise(ctx.take(0)))
 }
 
-static TS_ARRAY_REVERSE: p::HelperPlan = p::HelperPlan {
+const TS_ARRAY_REVERSE: p::HelperPlan = p::HelperPlan {
     name: "ts.array.reverse",
     function: p::function("38b304604943edd51aa2cbcb88d392d269021a42e05b82059932859257746e4f"),
     callees: &[
@@ -42048,7 +42048,7 @@ fn ts_array_reverse(ctx: &mut dyn p::PlanContext, entry: u32) -> Result<Value, p
     Ok(Value::Null)
 }
 
-static TS_ARRAY_TOREVERSED: p::HelperPlan = p::HelperPlan {
+const TS_ARRAY_TOREVERSED: p::HelperPlan = p::HelperPlan {
     name: "ts.array.toReversed",
     function: p::function("fd8dc7b4362ac54f6e051514986f37423153752f25f72b1aea606ba8e3e8bd6e"),
     callees: &[
@@ -42124,7 +42124,7 @@ fn ts_array_toreversed(ctx: &mut dyn p::PlanContext, entry: u32) -> Result<Value
     Ok(Value::Null)
 }
 
-static TS_ARRAY_SPLICE: p::HelperPlan = p::HelperPlan {
+const TS_ARRAY_SPLICE: p::HelperPlan = p::HelperPlan {
     name: "ts.array.splice",
     function: p::function("b15838d39ee2ef126d4f660be9cb65f55d6e4076209336a5f874af99c866fe3c"),
     callees: &[
@@ -42783,7 +42783,7 @@ fn ts_array_splice(ctx: &mut dyn p::PlanContext, entry: u32) -> Result<Value, p:
     Ok(Value::Null)
 }
 
-static TS_ARRAY_SHIFT: p::HelperPlan = p::HelperPlan {
+const TS_ARRAY_SHIFT: p::HelperPlan = p::HelperPlan {
     name: "ts.array.shift",
     function: p::function("726cf2fece72dd03afdd5a4795cd7b62cc130abc82baed0c1e40a62979ff54ec"),
     callees: &[
@@ -42925,7 +42925,7 @@ fn ts_array_shift(ctx: &mut dyn p::PlanContext, entry: u32) -> Result<Value, p::
     Ok(Value::Null)
 }
 
-static TS_ARRAY_UNSHIFT: p::HelperPlan = p::HelperPlan {
+const TS_ARRAY_UNSHIFT: p::HelperPlan = p::HelperPlan {
     name: "ts.array.unshift",
     function: p::function("267fe2c1a66ebe80bbe4a989afbf75052682ff296bb10df9838ea320f54b529b"),
     callees: &[
@@ -43032,7 +43032,7 @@ fn ts_array_unshift(ctx: &mut dyn p::PlanContext, entry: u32) -> Result<Value, p
     Ok(Value::Null)
 }
 
-static TS_ARRAY_TOSPLICED: p::HelperPlan = p::HelperPlan {
+const TS_ARRAY_TOSPLICED: p::HelperPlan = p::HelperPlan {
     name: "ts.array.toSpliced",
     function: p::function("89a22c730ad8a4af44835e8b818abf47342e9956ed8cff819fe6dbbd712dd95e"),
     callees: &[
@@ -43410,7 +43410,7 @@ fn ts_array_tospliced(ctx: &mut dyn p::PlanContext, entry: u32) -> Result<Value,
     Ok(Value::Null)
 }
 
-static TS_ARRAY_WITH: p::HelperPlan = p::HelperPlan {
+const TS_ARRAY_WITH: p::HelperPlan = p::HelperPlan {
     name: "ts.array.with",
     function: p::function("0b513d54e3a5c9a5e49b1308bccd92a51c73728466fc0cd547abd1cce591e6d0"),
     callees: &[
@@ -43644,7 +43644,7 @@ fn ts_array_with(ctx: &mut dyn p::PlanContext, entry: u32) -> Result<Value, p::P
     Ok(Value::Null)
 }
 
-static TS_ARRAY_SORT: p::HelperPlan = p::HelperPlan {
+const TS_ARRAY_SORT: p::HelperPlan = p::HelperPlan {
     name: "ts.array.sort",
     function: p::function("ae0f84392404935ee4c5f8cbf2a29ae9d71710a1cdf127cb72ce1300c6f9f1ac"),
     callees: &[
@@ -44002,7 +44002,7 @@ fn ts_array_sort(ctx: &mut dyn p::PlanContext, entry: u32) -> Result<Value, p::P
     Ok(Value::Null)
 }
 
-static TS_ARRAY_TOSORTED: p::HelperPlan = p::HelperPlan {
+const TS_ARRAY_TOSORTED: p::HelperPlan = p::HelperPlan {
     name: "ts.array.toSorted",
     function: p::function("7e4badfdb9aac957f2fa5dc36ef84b5ecf3a733e0883bf826b755e350144280b"),
     callees: &[
@@ -44074,7 +44074,7 @@ fn ts_array_tosorted(ctx: &mut dyn p::PlanContext, entry: u32) -> Result<Value, 
     Ok(Value::Null)
 }
 
-static TS_ARRAY_FLATTEN: p::HelperPlan = p::HelperPlan {
+const TS_ARRAY_FLATTEN: p::HelperPlan = p::HelperPlan {
     name: "ts.array.flatten",
     function: p::function("be416b10fdcb9c6c215d82c5076aa37656a2f6f5c6103c71685c112217f4adc0"),
     callees: &[],
@@ -44145,7 +44145,7 @@ fn ts_array_flatten(ctx: &mut dyn p::PlanContext, entry: u32) -> Result<Value, p
     Ok(Value::Null)
 }
 
-static TS_ARRAY_FLAT: p::HelperPlan = p::HelperPlan {
+const TS_ARRAY_FLAT: p::HelperPlan = p::HelperPlan {
     name: "ts.array.flat",
     function: p::function("63d8e56d4937451d2d24c3232a53d4f92b7237a435812199dfb543536fe99efe"),
     callees: &[
@@ -44259,7 +44259,7 @@ fn ts_array_flat(ctx: &mut dyn p::PlanContext, entry: u32) -> Result<Value, p::P
     Ok(Value::Null)
 }
 
-static TS_ARRAY_FLATMAP: p::HelperPlan = p::HelperPlan {
+const TS_ARRAY_FLATMAP: p::HelperPlan = p::HelperPlan {
     name: "ts.array.flatMap",
     function: p::function("10976c3f84f625547c78c2af80f8d8e561e69cf4a3da784132794338f4724bde"),
     callees: &[
@@ -44503,7 +44503,7 @@ fn ts_array_flatmap(ctx: &mut dyn p::PlanContext, entry: u32) -> Result<Value, p
     Ok(Value::Null)
 }
 
-static TS_ARRAY_KEYS: p::HelperPlan = p::HelperPlan {
+const TS_ARRAY_KEYS: p::HelperPlan = p::HelperPlan {
     name: "ts.array.keys",
     function: p::function("5cc9a61b49c15f09f6550e23d721a18dda1cc2c54bc553a3b98bfb707934d48e"),
     callees: &[
@@ -44564,7 +44564,7 @@ fn ts_array_keys(ctx: &mut dyn p::PlanContext, _entry: u32) -> Result<Value, p::
     Ok(ctx.take(0))
 }
 
-static TS_ARRAY_VALUES: p::HelperPlan = p::HelperPlan {
+const TS_ARRAY_VALUES: p::HelperPlan = p::HelperPlan {
     name: "ts.array.values",
     function: p::function("d8417bcd2960fc3c002a3b8b8f7021f05aa92b24848e807b01af0389336e8b21"),
     callees: &[
@@ -44625,7 +44625,7 @@ fn ts_array_values(ctx: &mut dyn p::PlanContext, _entry: u32) -> Result<Value, p
     Ok(ctx.take(0))
 }
 
-static TS_ARRAY_ENTRIES: p::HelperPlan = p::HelperPlan {
+const TS_ARRAY_ENTRIES: p::HelperPlan = p::HelperPlan {
     name: "ts.array.entries",
     function: p::function("b603a305fe28fdb3f4a79c7fdcdfae2d80cbe57d8d83f748802b57bcb378a0f5"),
     callees: &[
@@ -44686,7 +44686,7 @@ fn ts_array_entries(ctx: &mut dyn p::PlanContext, _entry: u32) -> Result<Value, 
     Ok(ctx.take(0))
 }
 
-static TS_ARRAY_ITERATOR: p::HelperPlan = p::HelperPlan {
+const TS_ARRAY_ITERATOR: p::HelperPlan = p::HelperPlan {
     name: "ts.array.iterator",
     function: p::function("0124886db4c9ce434dc0cfb0c93948d1ec688b3a666901adb4772a68b20889bf"),
     callees: &[
@@ -44829,7 +44829,7 @@ fn ts_array_iterator(ctx: &mut dyn p::PlanContext, entry: u32) -> Result<Value, 
     Ok(Value::Null)
 }
 
-static TS_FOR_OF_OPEN: p::HelperPlan = p::HelperPlan {
+const TS_FOR_OF_OPEN: p::HelperPlan = p::HelperPlan {
     name: "ts.for_of.open",
     function: p::function("d38a8617a4ceeaa3a3a6f1cc27d7561b40a823b1cd8f34e80d0471532da2458a"),
     callees: &[
@@ -44953,7 +44953,7 @@ fn ts_for_of_open(ctx: &mut dyn p::PlanContext, entry: u32) -> Result<Value, p::
     Ok(Value::Null)
 }
 
-static TS_FOR_OF_NEXT: p::HelperPlan = p::HelperPlan {
+const TS_FOR_OF_NEXT: p::HelperPlan = p::HelperPlan {
     name: "ts.for_of.next",
     function: p::function("c9fa3bd1ac1947f5ec4311fad844b503192ec5df72d556496b481cdbb34e538b"),
     callees: &[
@@ -45079,7 +45079,7 @@ fn ts_for_of_next(ctx: &mut dyn p::PlanContext, entry: u32) -> Result<Value, p::
     Ok(Value::Null)
 }
 
-static TS_FOR_OF_ITEM: p::HelperPlan = p::HelperPlan {
+const TS_FOR_OF_ITEM: p::HelperPlan = p::HelperPlan {
     name: "ts.for_of.item",
     function: p::function("ab76adc47904f735262818289c18d512ce4c2ddcf096ec2531f87c4691ec9db8"),
     callees: &[
@@ -45170,7 +45170,7 @@ fn ts_for_of_item(ctx: &mut dyn p::PlanContext, _entry: u32) -> Result<Value, p:
     Ok(ctx.take(0))
 }
 
-static TS_ARRAY_FROM: p::HelperPlan = p::HelperPlan {
+const TS_ARRAY_FROM: p::HelperPlan = p::HelperPlan {
     name: "ts.array.from",
     function: p::function("6d84b9300bde4084e876c26424338b832e4acd755bd9b355c4cb4d9ffec08042"),
     callees: &[
@@ -45708,7 +45708,7 @@ fn ts_array_from(ctx: &mut dyn p::PlanContext, entry: u32) -> Result<Value, p::P
     Ok(Value::Null)
 }
 
-static TS_PROMISE_IS: p::HelperPlan = p::HelperPlan {
+const TS_PROMISE_IS: p::HelperPlan = p::HelperPlan {
     name: "ts.promise.is",
     function: p::function("9bbac75194bfa51163e6d545771d89e1abb9cdbae40ff1611ce11e0f1015559f"),
     callees: &[
@@ -45758,7 +45758,7 @@ fn ts_promise_is(ctx: &mut dyn p::PlanContext, _entry: u32) -> Result<Value, p::
     Ok(ctx.take(0))
 }
 
-static TS_PROMISE_PENDING: p::HelperPlan = p::HelperPlan {
+const TS_PROMISE_PENDING: p::HelperPlan = p::HelperPlan {
     name: "ts.promise.pending",
     function: p::function("656aeb7c2f80aaa8c1a1f930bf330144f4d2b86e156f57a111e2b66c4bd7f9be"),
     callees: &[],
@@ -45789,7 +45789,7 @@ fn ts_promise_pending(ctx: &mut dyn p::PlanContext, _entry: u32) -> Result<Value
     Ok(ctx.take(0))
 }
 
-static TS_PROMISE_RUN: p::HelperPlan = p::HelperPlan {
+const TS_PROMISE_RUN: p::HelperPlan = p::HelperPlan {
     name: "ts.promise.run",
     function: p::function("1f532a178ec4dc76b622a2ce6f487cbb91ea1fe40f9a11911124c4316a761178"),
     callees: &[],
@@ -45924,7 +45924,7 @@ fn ts_promise_run(ctx: &mut dyn p::PlanContext, entry: u32) -> Result<Value, p::
     Ok(Value::Null)
 }
 
-static TS_PROMISE_RESOLVE: p::HelperPlan = p::HelperPlan {
+const TS_PROMISE_RESOLVE: p::HelperPlan = p::HelperPlan {
     name: "ts.promise.resolve",
     function: p::function("b9f5238b43efa96d2933acbde0827f786d26aa4a054a146f91425a6c4663ba1c"),
     callees: &[
@@ -46016,7 +46016,7 @@ fn ts_promise_resolve(ctx: &mut dyn p::PlanContext, entry: u32) -> Result<Value,
     Ok(Value::Null)
 }
 
-static TS_PROMISE_REJECT: p::HelperPlan = p::HelperPlan {
+const TS_PROMISE_REJECT: p::HelperPlan = p::HelperPlan {
     name: "ts.promise.reject",
     function: p::function("2c244c388801944a75c05b401c34a167a18a7e9b5e78a454491f1e3f0cb9478b"),
     callees: &[
@@ -46091,7 +46091,7 @@ fn ts_promise_reject(ctx: &mut dyn p::PlanContext, entry: u32) -> Result<Value, 
     Ok(Value::Null)
 }
 
-static TS_PROMISE_CALLABLE: p::HelperPlan = p::HelperPlan {
+const TS_PROMISE_CALLABLE: p::HelperPlan = p::HelperPlan {
     name: "ts.promise.callable",
     function: p::function("6b55b55b840c899cf2fbe7b106806545c91825f9fe9385db0eca13a84519bc75"),
     callees: &[
@@ -46128,7 +46128,7 @@ fn ts_promise_callable(ctx: &mut dyn p::PlanContext, _entry: u32) -> Result<Valu
     Ok(ctx.take(0))
 }
 
-static TS_PROMISE_THEN: p::HelperPlan = p::HelperPlan {
+const TS_PROMISE_THEN: p::HelperPlan = p::HelperPlan {
     name: "ts.promise.then",
     function: p::function("9c5194b4cc28a3f72c7bd67f5605b8c49576856595c25a975a9143f14e4be1b2"),
     callees: &[
@@ -46226,7 +46226,7 @@ fn ts_promise_then(ctx: &mut dyn p::PlanContext, entry: u32) -> Result<Value, p:
     Ok(Value::Null)
 }
 
-static TS_PROMISE_CATCH: p::HelperPlan = p::HelperPlan {
+const TS_PROMISE_CATCH: p::HelperPlan = p::HelperPlan {
     name: "ts.promise.catch",
     function: p::function("f9165ef99437fbec0c039e4ba078d0ac67516fed0561ebe0b5ceb9c6cfda04d4"),
     callees: &[
@@ -46303,7 +46303,7 @@ fn ts_promise_catch(ctx: &mut dyn p::PlanContext, entry: u32) -> Result<Value, p
     Ok(Value::Null)
 }
 
-static TS_PROMISE_FINALLY: p::HelperPlan = p::HelperPlan {
+const TS_PROMISE_FINALLY: p::HelperPlan = p::HelperPlan {
     name: "ts.promise.finally",
     function: p::function("6a19ccf3c6e7bcc64bf2235bc8e2411c006c5fdfc3c639ad46c0a58a50f1415b"),
     callees: &[
@@ -46392,7 +46392,7 @@ fn ts_promise_finally(ctx: &mut dyn p::PlanContext, entry: u32) -> Result<Value,
     Ok(Value::Null)
 }
 
-static TS_PROMISE_MEMBERS: p::HelperPlan = p::HelperPlan {
+const TS_PROMISE_MEMBERS: p::HelperPlan = p::HelperPlan {
     name: "ts.promise.members",
     function: p::function("e7399c46ab38086a0ad0c3c25e7f9469c8e608acae0434d2b3e9bcd3c33d9e36"),
     callees: &[
@@ -46537,7 +46537,7 @@ fn ts_promise_members(ctx: &mut dyn p::PlanContext, entry: u32) -> Result<Value,
     Ok(Value::Null)
 }
 
-static TS_PROMISE_DECIDED: p::HelperPlan = p::HelperPlan {
+const TS_PROMISE_DECIDED: p::HelperPlan = p::HelperPlan {
     name: "ts.promise.decided",
     function: p::function("9c4fd8aace9ba1ea39414f98a73e2b3ad4c03edca4e0eac72be196bcd23b75d4"),
     callees: &[
@@ -46683,7 +46683,7 @@ fn ts_promise_decided(ctx: &mut dyn p::PlanContext, _entry: u32) -> Result<Value
     Ok(ctx.take(0))
 }
 
-static TS_PROMISE_ALL: p::HelperPlan = p::HelperPlan {
+const TS_PROMISE_ALL: p::HelperPlan = p::HelperPlan {
     name: "ts.promise.all",
     function: p::function("322dedfb2f8bf4399ef97bfb76eb49024cc25cd39df31b1df4c32b3ab450dbc9"),
     callees: &[
@@ -46806,7 +46806,7 @@ fn ts_promise_all(ctx: &mut dyn p::PlanContext, entry: u32) -> Result<Value, p::
     Ok(Value::Null)
 }
 
-static TS_PROMISE_ALL_SETTLED: p::HelperPlan = p::HelperPlan {
+const TS_PROMISE_ALL_SETTLED: p::HelperPlan = p::HelperPlan {
     name: "ts.promise.all_settled",
     function: p::function("61ea8a2b77b56eb115c4a2cd801c0e3d73e7884eeb968d6f7ab08dcd865d2a03"),
     callees: &[
@@ -46929,7 +46929,7 @@ fn ts_promise_all_settled(ctx: &mut dyn p::PlanContext, entry: u32) -> Result<Va
     Ok(Value::Null)
 }
 
-static TS_PROMISE_RACE: p::HelperPlan = p::HelperPlan {
+const TS_PROMISE_RACE: p::HelperPlan = p::HelperPlan {
     name: "ts.promise.race",
     function: p::function("86b156848c14ae4f3f2c83f3b9b16a2b2214ee9fd82e1441828ea442e797e30b"),
     callees: &[
@@ -47042,7 +47042,7 @@ fn ts_promise_race(ctx: &mut dyn p::PlanContext, entry: u32) -> Result<Value, p:
     Ok(Value::Null)
 }
 
-static TS_PROMISE_ANY: p::HelperPlan = p::HelperPlan {
+const TS_PROMISE_ANY: p::HelperPlan = p::HelperPlan {
     name: "ts.promise.any",
     function: p::function("3e493f40ba9a8fbf8d0dfdf497fa0a280ec4b66d8b83ec00fe1792b56d2e9fe2"),
     callees: &[
@@ -47155,7 +47155,7 @@ fn ts_promise_any(ctx: &mut dyn p::PlanContext, entry: u32) -> Result<Value, p::
     Ok(Value::Null)
 }
 
-static TS_STRING_INTEGER: p::HelperPlan = p::HelperPlan {
+const TS_STRING_INTEGER: p::HelperPlan = p::HelperPlan {
     name: "ts.string.integer",
     function: p::function("9306434eba4298ac2afea28b01d16b82f37627f0cb173854ec2930d166ebce7d"),
     callees: &[
@@ -47261,7 +47261,7 @@ fn ts_string_integer(ctx: &mut dyn p::PlanContext, entry: u32) -> Result<Value, 
     Ok(Value::Null)
 }
 
-static TS_STRING_CLAMP: p::HelperPlan = p::HelperPlan {
+const TS_STRING_CLAMP: p::HelperPlan = p::HelperPlan {
     name: "ts.string.clamp",
     function: p::function("8f606dfbb78fa48db0fd89f7682280b83118dbc87864014773296edcdef21b07"),
     callees: &[
@@ -47314,7 +47314,7 @@ fn ts_string_clamp(ctx: &mut dyn p::PlanContext, _entry: u32) -> Result<Value, p
     Ok(ctx.take(0))
 }
 
-static TS_STRING_RELATIVE: p::HelperPlan = p::HelperPlan {
+const TS_STRING_RELATIVE: p::HelperPlan = p::HelperPlan {
     name: "ts.string.relative",
     function: p::function("f75271a38eee705ec99874a7cbbe93a94641c93c1237829bf54fcd07ca3f321e"),
     callees: &[
@@ -47393,7 +47393,7 @@ fn ts_string_relative(ctx: &mut dyn p::PlanContext, entry: u32) -> Result<Value,
     Ok(Value::Null)
 }
 
-static TS_STRING_LENGTH_VALUE: p::HelperPlan = p::HelperPlan {
+const TS_STRING_LENGTH_VALUE: p::HelperPlan = p::HelperPlan {
     name: "ts.string.length_value",
     function: p::function("2aca88f450e8c47c6c441db3feda67019519d550da730a52f1b4cc1c0a743f9c"),
     callees: &[
@@ -47455,7 +47455,7 @@ fn ts_string_length_value(ctx: &mut dyn p::PlanContext, entry: u32) -> Result<Va
     Ok(Value::Null)
 }
 
-static TS_STRING_UINT32: p::HelperPlan = p::HelperPlan {
+const TS_STRING_UINT32: p::HelperPlan = p::HelperPlan {
     name: "ts.string.uint32",
     function: p::function("dadae70967cb0abe59ce147ae72fe50b1c458eac1dc7f25a03a41313aeb3ee22"),
     callees: &[
@@ -47528,7 +47528,7 @@ fn ts_string_uint32(ctx: &mut dyn p::PlanContext, entry: u32) -> Result<Value, p
     Ok(Value::Null)
 }
 
-static TS_STRING_RECEIVER: p::HelperPlan = p::HelperPlan {
+const TS_STRING_RECEIVER: p::HelperPlan = p::HelperPlan {
     name: "ts.string.receiver",
     function: p::function("38029e14e58e15d6e46546f3cf3af7c661d42a1c8874eb3b2942bed0104739f1"),
     callees: &[
@@ -47585,7 +47585,7 @@ fn ts_string_receiver(ctx: &mut dyn p::PlanContext, entry: u32) -> Result<Value,
     Ok(Value::Null)
 }
 
-static TS_STRING_SLICE_UNITS: p::HelperPlan = p::HelperPlan {
+const TS_STRING_SLICE_UNITS: p::HelperPlan = p::HelperPlan {
     name: "ts.string.slice_units",
     function: p::function("2299e18d46ca45681be7a8ecb4e977c60dc392ff518cec0460a03a605aac94b3"),
     callees: &[
@@ -47688,7 +47688,7 @@ fn ts_string_slice_units(ctx: &mut dyn p::PlanContext, _entry: u32) -> Result<Va
     Ok(Value::Null)
 }
 
-static TS_STRING_CREATE: p::HelperPlan = p::HelperPlan {
+const TS_STRING_CREATE: p::HelperPlan = p::HelperPlan {
     name: "ts.string.create",
     function: p::function("5989d2da7856b60143f4387d7852288c15d560207d93e7129db39b9c9dfbc8b5"),
     callees: &[
@@ -47766,7 +47766,7 @@ fn ts_string_create(ctx: &mut dyn p::PlanContext, entry: u32) -> Result<Value, p
     Ok(Value::Null)
 }
 
-static TS_STRING_LENGTH: p::HelperPlan = p::HelperPlan {
+const TS_STRING_LENGTH: p::HelperPlan = p::HelperPlan {
     name: "ts.string.length",
     function: p::function("966e00f7cd419eda5761df2e8373263b5aacc7ad02bbd2cf586a490ea20c0246"),
     callees: &[
@@ -47821,7 +47821,7 @@ fn ts_string_length(ctx: &mut dyn p::PlanContext, entry: u32) -> Result<Value, p
     Ok(Value::Null)
 }
 
-static TS_STRING_TOSTRING: p::HelperPlan = p::HelperPlan {
+const TS_STRING_TOSTRING: p::HelperPlan = p::HelperPlan {
     name: "ts.string.toString",
     function: p::function("996e8b1b1fa5dfc4caeb3a49886697ca2fbbed363dba347f38c4e1cb86b38d0e"),
     callees: &[
@@ -47870,7 +47870,7 @@ fn ts_string_tostring(ctx: &mut dyn p::PlanContext, _entry: u32) -> Result<Value
     Err(p::PlanExit::Raise(ctx.take(0)))
 }
 
-static TS_STRING_VALUEOF: p::HelperPlan = p::HelperPlan {
+const TS_STRING_VALUEOF: p::HelperPlan = p::HelperPlan {
     name: "ts.string.valueOf",
     function: p::function("8e1ba3f4b35c035832b011935088f18286e8e65b7af3131b1300d76185b1bc7a"),
     callees: &[
@@ -47919,7 +47919,7 @@ fn ts_string_valueof(ctx: &mut dyn p::PlanContext, _entry: u32) -> Result<Value,
     Err(p::PlanExit::Raise(ctx.take(0)))
 }
 
-static TS_STRING_AT_GENERIC: p::HelperPlan = p::HelperPlan {
+const TS_STRING_AT_GENERIC: p::HelperPlan = p::HelperPlan {
     name: "ts.string.at_generic",
     function: p::function("f4c358b0f034608b0b2974fd10b07496aacbabe421c9287a1bb575fcfb790cdd"),
     callees: &[
@@ -48083,7 +48083,7 @@ fn ts_string_at_generic(ctx: &mut dyn p::PlanContext, entry: u32) -> Result<Valu
     Ok(Value::Null)
 }
 
-static TS_STRING_AT: p::HelperPlan = p::HelperPlan {
+const TS_STRING_AT: p::HelperPlan = p::HelperPlan {
     name: "ts.string.at",
     function: p::function("d78d7f23f4598c57ff7aa2de30cd6490f8f16999c036ab7b4428f831d659a994"),
     callees: &[
@@ -48286,7 +48286,7 @@ fn ts_string_at(ctx: &mut dyn p::PlanContext, entry: u32) -> Result<Value, p::Pl
     Ok(Value::Null)
 }
 
-static TS_STRING_CHARAT: p::HelperPlan = p::HelperPlan {
+const TS_STRING_CHARAT: p::HelperPlan = p::HelperPlan {
     name: "ts.string.charAt",
     function: p::function("6bd693f798e9cfcdc0b816544c0f58e202925612f262f7270bf67eb94d8c5b13"),
     callees: &[
@@ -48437,7 +48437,7 @@ fn ts_string_charat(ctx: &mut dyn p::PlanContext, entry: u32) -> Result<Value, p
     Ok(Value::Null)
 }
 
-static TS_STRING_CHARCODEAT: p::HelperPlan = p::HelperPlan {
+const TS_STRING_CHARCODEAT: p::HelperPlan = p::HelperPlan {
     name: "ts.string.charCodeAt",
     function: p::function("2c56e4a12fc24a1e8cc3bd460a32a4e361ff95a2fa3ee72eacc8e9a4970ae986"),
     callees: &[
@@ -48579,7 +48579,7 @@ fn ts_string_charcodeat(ctx: &mut dyn p::PlanContext, entry: u32) -> Result<Valu
     Ok(Value::Null)
 }
 
-static TS_STRING_CODEPOINTAT: p::HelperPlan = p::HelperPlan {
+const TS_STRING_CODEPOINTAT: p::HelperPlan = p::HelperPlan {
     name: "ts.string.codePointAt",
     function: p::function("1b5752e86a32584031c9e108efa1976d19857c48c2dc151ba2cf82c4f9c1ceb0"),
     callees: &[
@@ -48791,7 +48791,7 @@ fn ts_string_codepointat(ctx: &mut dyn p::PlanContext, entry: u32) -> Result<Val
     Ok(Value::Null)
 }
 
-static TS_STRING_SLICE_GENERIC: p::HelperPlan = p::HelperPlan {
+const TS_STRING_SLICE_GENERIC: p::HelperPlan = p::HelperPlan {
     name: "ts.string.slice_generic",
     function: p::function("667ab943484718ae28204f0100788c4a1e6eed6ea239a2a87cee5cce204246ec"),
     callees: &[
@@ -48946,7 +48946,7 @@ fn ts_string_slice_generic(ctx: &mut dyn p::PlanContext, entry: u32) -> Result<V
     Ok(Value::Null)
 }
 
-static TS_STRING_SLICE: p::HelperPlan = p::HelperPlan {
+const TS_STRING_SLICE: p::HelperPlan = p::HelperPlan {
     name: "ts.string.slice",
     function: p::function("1e5e6bf69326eda6d6d4a327932e78424d110f6f0b8009af7570d50336fd2d28"),
     callees: &[
@@ -49226,7 +49226,7 @@ fn ts_string_slice(ctx: &mut dyn p::PlanContext, entry: u32) -> Result<Value, p:
     Ok(Value::Null)
 }
 
-static TS_STRING_SUBSTRING_GENERIC: p::HelperPlan = p::HelperPlan {
+const TS_STRING_SUBSTRING_GENERIC: p::HelperPlan = p::HelperPlan {
     name: "ts.string.substring_generic",
     function: p::function("6033bee4776713d6b6820c54b41c061f3b44dcd75752133699f9e87055b57ee3"),
     callees: &[
@@ -49417,7 +49417,7 @@ fn ts_string_substring_generic(ctx: &mut dyn p::PlanContext, entry: u32) -> Resu
     Ok(Value::Null)
 }
 
-static TS_STRING_SUBSTRING: p::HelperPlan = p::HelperPlan {
+const TS_STRING_SUBSTRING: p::HelperPlan = p::HelperPlan {
     name: "ts.string.substring",
     function: p::function("7245fe57b743d68aaf62dcfbcdbf8e822ed368b053a1b7cbc5754dee88e65e3d"),
     callees: &[
@@ -49691,7 +49691,7 @@ fn ts_string_substring(ctx: &mut dyn p::PlanContext, entry: u32) -> Result<Value
     Ok(Value::Null)
 }
 
-static TS_STRING_INDEXOF_GENERIC: p::HelperPlan = p::HelperPlan {
+const TS_STRING_INDEXOF_GENERIC: p::HelperPlan = p::HelperPlan {
     name: "ts.string.indexOf_generic",
     function: p::function("92bc5914daa19cb22a6043afe0e9957e39baac0df48e85b45417ad00688d6d54"),
     callees: &[
@@ -49839,7 +49839,7 @@ fn ts_string_indexof_generic(ctx: &mut dyn p::PlanContext, entry: u32) -> Result
     Ok(Value::Null)
 }
 
-static TS_STRING_INDEXOF: p::HelperPlan = p::HelperPlan {
+const TS_STRING_INDEXOF: p::HelperPlan = p::HelperPlan {
     name: "ts.string.indexOf",
     function: p::function("0bcf8bc22b254656a0da4fec2a6377c3d2190433249c5cfd450062ea82818f89"),
     callees: &[
@@ -50024,7 +50024,7 @@ fn ts_string_indexof(ctx: &mut dyn p::PlanContext, entry: u32) -> Result<Value, 
     Ok(Value::Null)
 }
 
-static TS_STRING_LASTINDEXOF: p::HelperPlan = p::HelperPlan {
+const TS_STRING_LASTINDEXOF: p::HelperPlan = p::HelperPlan {
     name: "ts.string.lastIndexOf",
     function: p::function("feb978a414e9b245f47e46f99280f034ae2fef1318417dca29a0bd96850c110b"),
     callees: &[
@@ -50258,7 +50258,7 @@ fn ts_string_lastindexof(ctx: &mut dyn p::PlanContext, entry: u32) -> Result<Val
     Ok(Value::Null)
 }
 
-static TS_STRING_INCLUDES_GENERIC: p::HelperPlan = p::HelperPlan {
+const TS_STRING_INCLUDES_GENERIC: p::HelperPlan = p::HelperPlan {
     name: "ts.string.includes_generic",
     function: p::function("c05bc83b29d28c40ae751fde7747e0cf5facc97e944b5e51b01b1fd1a9103796"),
     callees: &[
@@ -50443,7 +50443,7 @@ fn ts_string_includes_generic(ctx: &mut dyn p::PlanContext, entry: u32) -> Resul
     Ok(Value::Null)
 }
 
-static TS_STRING_STARTSWITH_GENERIC: p::HelperPlan = p::HelperPlan {
+const TS_STRING_STARTSWITH_GENERIC: p::HelperPlan = p::HelperPlan {
     name: "ts.string.startsWith_generic",
     function: p::function("5eddb9ebbfe9d7ba5ba9ce08d5aa0fe98555946744ad01f9cedd707a6b781de5"),
     callees: &[
@@ -50628,7 +50628,7 @@ fn ts_string_startswith_generic(ctx: &mut dyn p::PlanContext, entry: u32) -> Res
     Ok(Value::Null)
 }
 
-static TS_STRING_ENDSWITH_GENERIC: p::HelperPlan = p::HelperPlan {
+const TS_STRING_ENDSWITH_GENERIC: p::HelperPlan = p::HelperPlan {
     name: "ts.string.endsWith_generic",
     function: p::function("520d8c43d6c9d7e5ae8b2a15efc03e071b2147ce406fa33621e68dd39431fe16"),
     callees: &[
@@ -50852,7 +50852,7 @@ fn ts_string_endswith_generic(ctx: &mut dyn p::PlanContext, entry: u32) -> Resul
     Ok(Value::Null)
 }
 
-static TS_STRING_INCLUDES: p::HelperPlan = p::HelperPlan {
+const TS_STRING_INCLUDES: p::HelperPlan = p::HelperPlan {
     name: "ts.string.includes",
     function: p::function("2658878232144ade927dbadfdb777971ad1aafe3c9741a25c80a473a29c3d833"),
     callees: &[
@@ -51039,7 +51039,7 @@ fn ts_string_includes(ctx: &mut dyn p::PlanContext, entry: u32) -> Result<Value,
     Ok(Value::Null)
 }
 
-static TS_STRING_STARTSWITH: p::HelperPlan = p::HelperPlan {
+const TS_STRING_STARTSWITH: p::HelperPlan = p::HelperPlan {
     name: "ts.string.startsWith",
     function: p::function("ebce660686ce46917d0be45b13df259a6c24f204b0c6a30d19e0a024dff3387b"),
     callees: &[
@@ -51226,7 +51226,7 @@ fn ts_string_startswith(ctx: &mut dyn p::PlanContext, entry: u32) -> Result<Valu
     Ok(Value::Null)
 }
 
-static TS_STRING_ENDSWITH: p::HelperPlan = p::HelperPlan {
+const TS_STRING_ENDSWITH: p::HelperPlan = p::HelperPlan {
     name: "ts.string.endsWith",
     function: p::function("5210a541e145274a5b01655920bcd13c42367d144060bd3600846e6ba2a99ede"),
     callees: &[
@@ -51439,7 +51439,7 @@ fn ts_string_endswith(ctx: &mut dyn p::PlanContext, entry: u32) -> Result<Value,
     Ok(Value::Null)
 }
 
-static TS_STRING_CONCAT: p::HelperPlan = p::HelperPlan {
+const TS_STRING_CONCAT: p::HelperPlan = p::HelperPlan {
     name: "ts.string.concat",
     function: p::function("312c0660c4bfc40daa7e3f8c111c64b57cea73dcd245a5ba5464e20e5b08960a"),
     callees: &[
@@ -51546,7 +51546,7 @@ fn ts_string_concat(ctx: &mut dyn p::PlanContext, entry: u32) -> Result<Value, p
     Ok(Value::Null)
 }
 
-static TS_STRING_NORMALIZE: p::HelperPlan = p::HelperPlan {
+const TS_STRING_NORMALIZE: p::HelperPlan = p::HelperPlan {
     name: "ts.string.normalize",
     function: p::function("148316bd9863f9841ab920ab3e30407c395c6332d72d0854e26fa4f36589d7ca"),
     callees: &[
@@ -51725,7 +51725,7 @@ fn ts_string_normalize(ctx: &mut dyn p::PlanContext, entry: u32) -> Result<Value
     Ok(Value::Null)
 }
 
-static TS_STRING_TOLOWERCASE: p::HelperPlan = p::HelperPlan {
+const TS_STRING_TOLOWERCASE: p::HelperPlan = p::HelperPlan {
     name: "ts.string.toLowerCase",
     function: p::function("ada0154f3f1f74919d63ccff830bf5cbbbbe0708debec879f297405cd9e1ebc5"),
     callees: &[
@@ -51780,7 +51780,7 @@ fn ts_string_tolowercase(ctx: &mut dyn p::PlanContext, entry: u32) -> Result<Val
     Ok(Value::Null)
 }
 
-static TS_STRING_TOUPPERCASE: p::HelperPlan = p::HelperPlan {
+const TS_STRING_TOUPPERCASE: p::HelperPlan = p::HelperPlan {
     name: "ts.string.toUpperCase",
     function: p::function("32ea20cf78cb253aa747043f55c3b359c7ac0b545759f8c0cc42dbe914f76633"),
     callees: &[
@@ -51835,7 +51835,7 @@ fn ts_string_touppercase(ctx: &mut dyn p::PlanContext, entry: u32) -> Result<Val
     Ok(Value::Null)
 }
 
-static TS_STRING_TRIM: p::HelperPlan = p::HelperPlan {
+const TS_STRING_TRIM: p::HelperPlan = p::HelperPlan {
     name: "ts.string.trim",
     function: p::function("31ce53f427eb9beb8140a463b93db81c31c02c9e44440b97d17a5d6edc8f6510"),
     callees: &[
@@ -51922,7 +51922,7 @@ fn ts_string_trim(ctx: &mut dyn p::PlanContext, entry: u32) -> Result<Value, p::
     Ok(Value::Null)
 }
 
-static TS_STRING_TRIMSTART: p::HelperPlan = p::HelperPlan {
+const TS_STRING_TRIMSTART: p::HelperPlan = p::HelperPlan {
     name: "ts.string.trimStart",
     function: p::function("afc9758f7efe20eb0f471421a2be823e9aab7a679b87818d4ce3c84d1893600d"),
     callees: &[
@@ -52010,7 +52010,7 @@ fn ts_string_trimstart(ctx: &mut dyn p::PlanContext, entry: u32) -> Result<Value
     Ok(Value::Null)
 }
 
-static TS_STRING_TRIMEND: p::HelperPlan = p::HelperPlan {
+const TS_STRING_TRIMEND: p::HelperPlan = p::HelperPlan {
     name: "ts.string.trimEnd",
     function: p::function("48ac89db5545a1b225e237fa699073bb54bbeb37beeaf4537c2803c00bb5a90e"),
     callees: &[
@@ -52098,7 +52098,7 @@ fn ts_string_trimend(ctx: &mut dyn p::PlanContext, entry: u32) -> Result<Value, 
     Ok(Value::Null)
 }
 
-static TS_STRING_REPEAT: p::HelperPlan = p::HelperPlan {
+const TS_STRING_REPEAT: p::HelperPlan = p::HelperPlan {
     name: "ts.string.repeat",
     function: p::function("0300a6b69b5cc1405145a6c5a279f3e387b1c73f3303929c334cae8064bdb5e0"),
     callees: &[
@@ -52228,7 +52228,7 @@ fn ts_string_repeat(ctx: &mut dyn p::PlanContext, entry: u32) -> Result<Value, p
     Ok(Value::Null)
 }
 
-static TS_STRING_PADSTART: p::HelperPlan = p::HelperPlan {
+const TS_STRING_PADSTART: p::HelperPlan = p::HelperPlan {
     name: "ts.string.padStart",
     function: p::function("6655af385a302aac80da1f222d528342e9ec145de4ea02e8abacfe30ba2cfc8f"),
     callees: &[
@@ -52449,7 +52449,7 @@ fn ts_string_padstart(ctx: &mut dyn p::PlanContext, entry: u32) -> Result<Value,
     Ok(Value::Null)
 }
 
-static TS_STRING_PADEND: p::HelperPlan = p::HelperPlan {
+const TS_STRING_PADEND: p::HelperPlan = p::HelperPlan {
     name: "ts.string.padEnd",
     function: p::function("103b48a13eec2033484b75cf6ab4f45e59de5b2d2454a00a1ad8b8526a36feb0"),
     callees: &[
@@ -52670,7 +52670,7 @@ fn ts_string_padend(ctx: &mut dyn p::PlanContext, entry: u32) -> Result<Value, p
     Ok(Value::Null)
 }
 
-static TS_STRING_FROMCHARCODE: p::HelperPlan = p::HelperPlan {
+const TS_STRING_FROMCHARCODE: p::HelperPlan = p::HelperPlan {
     name: "ts.string.fromCharCode",
     function: p::function("fc04f38f1beca12ce299c661f062a656594076bfc53877326ba46e19c42c5672"),
     callees: &[
@@ -52817,7 +52817,7 @@ fn ts_string_fromcharcode(ctx: &mut dyn p::PlanContext, entry: u32) -> Result<Va
     Ok(Value::Null)
 }
 
-static TS_STRING_FROMCODEPOINT: p::HelperPlan = p::HelperPlan {
+const TS_STRING_FROMCODEPOINT: p::HelperPlan = p::HelperPlan {
     name: "ts.string.fromCodePoint",
     function: p::function("d230faddf7b8588d249d3a2de5d1511c00f7e3e8879c24cf3cda59145a899520"),
     callees: &[
@@ -53028,7 +53028,7 @@ fn ts_string_fromcodepoint(ctx: &mut dyn p::PlanContext, entry: u32) -> Result<V
     Ok(Value::Null)
 }
 
-static TS_STRING_RAW: p::HelperPlan = p::HelperPlan {
+const TS_STRING_RAW: p::HelperPlan = p::HelperPlan {
     name: "ts.string.raw",
     function: p::function("ce7e1b6b3ed79e2142821d71a899e595ddb427a9a24bf9eb2175f589839a7972"),
     callees: &[
@@ -53283,7 +53283,7 @@ fn ts_string_raw(ctx: &mut dyn p::PlanContext, entry: u32) -> Result<Value, p::P
     Ok(Value::Null)
 }
 
-static TS_STRING_APPLY_ARGUMENTS: p::HelperPlan = p::HelperPlan {
+const TS_STRING_APPLY_ARGUMENTS: p::HelperPlan = p::HelperPlan {
     name: "ts.string.apply_arguments",
     function: p::function("a9c5d0a5430992a293e1aa58ff1f1fde20dbddf1c757b0b9c6834042c373fb91"),
     callees: &[
@@ -53471,7 +53471,7 @@ fn ts_string_apply_arguments(ctx: &mut dyn p::PlanContext, entry: u32) -> Result
     Ok(Value::Null)
 }
 
-static TS_STRING_LOCALE_UNSUPPORTED: p::HelperPlan = p::HelperPlan {
+const TS_STRING_LOCALE_UNSUPPORTED: p::HelperPlan = p::HelperPlan {
     name: "ts.string.locale_unsupported",
     function: p::function("e588a23dd285727f6e5e29d267abd9f4f83b987385484814a8e62447f0c8e4bc"),
     callees: &[
@@ -53511,7 +53511,7 @@ fn ts_string_locale_unsupported(ctx: &mut dyn p::PlanContext, _entry: u32) -> Re
     Err(p::PlanExit::Raise(ctx.take(0)))
 }
 
-static TS_REGEXP_IS: p::HelperPlan = p::HelperPlan {
+const TS_REGEXP_IS: p::HelperPlan = p::HelperPlan {
     name: "ts.regexp.is",
     function: p::function("ab587816845dd1f7faa4666923d08daa645e56cd2065dcd744424fd59ac637d3"),
     callees: &[
@@ -53561,7 +53561,7 @@ fn ts_regexp_is(ctx: &mut dyn p::PlanContext, _entry: u32) -> Result<Value, p::P
     Ok(ctx.take(0))
 }
 
-static TS_REGEXP_REQUIRE: p::HelperPlan = p::HelperPlan {
+const TS_REGEXP_REQUIRE: p::HelperPlan = p::HelperPlan {
     name: "ts.regexp.require",
     function: p::function("63af276cec8b4733a561ab2c52d0d3ab74596a266e5f859b5b4e52eb6320608c"),
     callees: &[
@@ -53608,7 +53608,7 @@ fn ts_regexp_require(ctx: &mut dyn p::PlanContext, _entry: u32) -> Result<Value,
     Err(p::PlanExit::Raise(ctx.take(0)))
 }
 
-static TS_REGEXP_CREATE: p::HelperPlan = p::HelperPlan {
+const TS_REGEXP_CREATE: p::HelperPlan = p::HelperPlan {
     name: "ts.regexp.create",
     function: p::function("4f8d4b2c3eef7cddfb1baaee6f12bfaff15ef6de07741cc6d89f076ecb8aca79"),
     callees: &[
@@ -53885,7 +53885,7 @@ fn ts_regexp_create(ctx: &mut dyn p::PlanContext, entry: u32) -> Result<Value, p
     Ok(Value::Null)
 }
 
-static TS_REGEXP_CALL: p::HelperPlan = p::HelperPlan {
+const TS_REGEXP_CALL: p::HelperPlan = p::HelperPlan {
     name: "ts.regexp.call",
     function: p::function("6a8083edcdfbad814f8996fda38206761b2fc7a7c816d2d2d813fad1abf34a63"),
     callees: &[
@@ -53989,7 +53989,7 @@ fn ts_regexp_call(ctx: &mut dyn p::PlanContext, entry: u32) -> Result<Value, p::
     Ok(Value::Null)
 }
 
-static TS_REGEXP_SNAPSHOT: p::HelperPlan = p::HelperPlan {
+const TS_REGEXP_SNAPSHOT: p::HelperPlan = p::HelperPlan {
     name: "ts.regexp.snapshot",
     function: p::function("097f25fd756b45b93e04332872a7ba8a62cbeab59e59f647b2067086496826c2"),
     callees: &[
@@ -54061,7 +54061,7 @@ fn ts_regexp_snapshot(ctx: &mut dyn p::PlanContext, entry: u32) -> Result<Value,
     Ok(Value::Null)
 }
 
-static TS_REGEXP_MATCH_RECORD: p::HelperPlan = p::HelperPlan {
+const TS_REGEXP_MATCH_RECORD: p::HelperPlan = p::HelperPlan {
     name: "ts.regexp.match_record",
     function: p::function("7a07b64ec597d4d67f0fc416dcfaa62c3c9018b60eeb7c994b362050ff06f4b9"),
     callees: &[
@@ -54198,7 +54198,7 @@ fn ts_regexp_match_record(ctx: &mut dyn p::PlanContext, _entry: u32) -> Result<V
     Ok(ctx.take(0))
 }
 
-static TS_REGEXP_NATIVE_EXEC: p::HelperPlan = p::HelperPlan {
+const TS_REGEXP_NATIVE_EXEC: p::HelperPlan = p::HelperPlan {
     name: "ts.regexp.native_exec",
     function: p::function("1003446f1fce48d98db977e5af970cfd5f58c75113e29b2f77d5c0aa7423e97d"),
     callees: &[
@@ -54297,7 +54297,7 @@ fn ts_regexp_native_exec(ctx: &mut dyn p::PlanContext, _entry: u32) -> Result<Va
     Ok(Value::Null)
 }
 
-static TS_REGEXP_NATIVE_MATCH_ALL: p::HelperPlan = p::HelperPlan {
+const TS_REGEXP_NATIVE_MATCH_ALL: p::HelperPlan = p::HelperPlan {
     name: "ts.regexp.native_match_all",
     function: p::function("9a2f8a72b5af206d72de3645c4407ea260db29a3d0dc27fb12280a110e0cba19"),
     callees: &[
@@ -54396,7 +54396,7 @@ fn ts_regexp_native_match_all(ctx: &mut dyn p::PlanContext, _entry: u32) -> Resu
     Ok(Value::Null)
 }
 
-static TS_REGEXP_NATIVE_REPLACE: p::HelperPlan = p::HelperPlan {
+const TS_REGEXP_NATIVE_REPLACE: p::HelperPlan = p::HelperPlan {
     name: "ts.regexp.native_replace",
     function: p::function("0a6c30e645b786e55255e285a1167670a6c467719658e0f3efd439e08df91d73"),
     callees: &[
@@ -54498,7 +54498,7 @@ fn ts_regexp_native_replace(ctx: &mut dyn p::PlanContext, _entry: u32) -> Result
     Ok(Value::Null)
 }
 
-static TS_REGEXP_NATIVE_SPLIT: p::HelperPlan = p::HelperPlan {
+const TS_REGEXP_NATIVE_SPLIT: p::HelperPlan = p::HelperPlan {
     name: "ts.regexp.native_split",
     function: p::function("5f5633e30f1aae0bc6d967df38c0e07b5c794144973748417d7a65ea9b008d75"),
     callees: &[
@@ -54600,7 +54600,7 @@ fn ts_regexp_native_split(ctx: &mut dyn p::PlanContext, _entry: u32) -> Result<V
     Ok(Value::Null)
 }
 
-static TS_REGEXP_EXEC: p::HelperPlan = p::HelperPlan {
+const TS_REGEXP_EXEC: p::HelperPlan = p::HelperPlan {
     name: "ts.regexp.exec",
     function: p::function("211a0e5d71e2d3bd153ae5ae97f036711b04e08325e7809afd1651d193058386"),
     callees: &[
@@ -54772,7 +54772,7 @@ fn ts_regexp_exec(ctx: &mut dyn p::PlanContext, entry: u32) -> Result<Value, p::
     Ok(Value::Null)
 }
 
-static TS_REGEXP_TEST: p::HelperPlan = p::HelperPlan {
+const TS_REGEXP_TEST: p::HelperPlan = p::HelperPlan {
     name: "ts.regexp.test",
     function: p::function("3d3e39b65a86d5f54974267235a3269ce5e3cd6ab0a99fc2bf4da1fdfbf10d19"),
     callees: &[
@@ -54996,7 +54996,7 @@ fn ts_regexp_test(ctx: &mut dyn p::PlanContext, entry: u32) -> Result<Value, p::
     Ok(Value::Null)
 }
 
-static TS_REGEXP_GLOBAL: p::HelperPlan = p::HelperPlan {
+const TS_REGEXP_GLOBAL: p::HelperPlan = p::HelperPlan {
     name: "ts.regexp.global",
     function: p::function("bd9214ca73cfc55b4b37e2a324bebc67f9b79a582060ef2409128110303ae957"),
     callees: &[
@@ -55037,7 +55037,7 @@ fn ts_regexp_global(ctx: &mut dyn p::PlanContext, _entry: u32) -> Result<Value, 
     Ok(ctx.take(0))
 }
 
-static TS_REGEXP_IGNORECASE: p::HelperPlan = p::HelperPlan {
+const TS_REGEXP_IGNORECASE: p::HelperPlan = p::HelperPlan {
     name: "ts.regexp.ignoreCase",
     function: p::function("109fde85299fa2811334b378a287ed949a6b555855cc3c5f95fd590674d21a43"),
     callees: &[
@@ -55078,7 +55078,7 @@ fn ts_regexp_ignorecase(ctx: &mut dyn p::PlanContext, _entry: u32) -> Result<Val
     Ok(ctx.take(0))
 }
 
-static TS_REGEXP_MULTILINE: p::HelperPlan = p::HelperPlan {
+const TS_REGEXP_MULTILINE: p::HelperPlan = p::HelperPlan {
     name: "ts.regexp.multiline",
     function: p::function("73d5c20a0424cd6ff55b284156a10748576e8891c8d52e5eadec8f1b3e138975"),
     callees: &[
@@ -55119,7 +55119,7 @@ fn ts_regexp_multiline(ctx: &mut dyn p::PlanContext, _entry: u32) -> Result<Valu
     Ok(ctx.take(0))
 }
 
-static TS_REGEXP_DOTALL: p::HelperPlan = p::HelperPlan {
+const TS_REGEXP_DOTALL: p::HelperPlan = p::HelperPlan {
     name: "ts.regexp.dotAll",
     function: p::function("76bda2968fe16632796aad3cbf942c0fcef8322e7d1059cd17d0da5ba2ea4f6e"),
     callees: &[
@@ -55160,7 +55160,7 @@ fn ts_regexp_dotall(ctx: &mut dyn p::PlanContext, _entry: u32) -> Result<Value, 
     Ok(ctx.take(0))
 }
 
-static TS_REGEXP_UNICODE: p::HelperPlan = p::HelperPlan {
+const TS_REGEXP_UNICODE: p::HelperPlan = p::HelperPlan {
     name: "ts.regexp.unicode",
     function: p::function("ee4baa7195bba2dbbb9807b6d5de853daaae892a690e72b7dc191285ceb01848"),
     callees: &[
@@ -55201,7 +55201,7 @@ fn ts_regexp_unicode(ctx: &mut dyn p::PlanContext, _entry: u32) -> Result<Value,
     Ok(ctx.take(0))
 }
 
-static TS_REGEXP_STICKY: p::HelperPlan = p::HelperPlan {
+const TS_REGEXP_STICKY: p::HelperPlan = p::HelperPlan {
     name: "ts.regexp.sticky",
     function: p::function("d954cf7e3a64174432564afca517021224f27e00322ee8d9161302c69dd55e21"),
     callees: &[
@@ -55242,7 +55242,7 @@ fn ts_regexp_sticky(ctx: &mut dyn p::PlanContext, _entry: u32) -> Result<Value, 
     Ok(ctx.take(0))
 }
 
-static TS_REGEXP_FLAGS: p::HelperPlan = p::HelperPlan {
+const TS_REGEXP_FLAGS: p::HelperPlan = p::HelperPlan {
     name: "ts.regexp.flags",
     function: p::function("e385477742fc6c18a4f7cdb01c3546563fc716543e576d7a63fbe8fb3fcd679e"),
     callees: &[
@@ -55273,7 +55273,7 @@ fn ts_regexp_flags(ctx: &mut dyn p::PlanContext, _entry: u32) -> Result<Value, p
     Ok(ctx.take(0))
 }
 
-static TS_REGEXP_SOURCE: p::HelperPlan = p::HelperPlan {
+const TS_REGEXP_SOURCE: p::HelperPlan = p::HelperPlan {
     name: "ts.regexp.source",
     function: p::function("0d49202fca0a62bceee07943923b9fea64575ba0a813f0b4c7d5d6c7a84403c8"),
     callees: &[
@@ -55314,7 +55314,7 @@ fn ts_regexp_source(ctx: &mut dyn p::PlanContext, _entry: u32) -> Result<Value, 
     Ok(ctx.take(0))
 }
 
-static TS_REGEXP_TOSTRING: p::HelperPlan = p::HelperPlan {
+const TS_REGEXP_TOSTRING: p::HelperPlan = p::HelperPlan {
     name: "ts.regexp.toString",
     function: p::function("002ff6cabab5f46a21d794a71877dbbce71aebf8780d29e9b630a007ea39fb88"),
     callees: &[
@@ -55450,7 +55450,7 @@ fn ts_regexp_tostring(ctx: &mut dyn p::PlanContext, entry: u32) -> Result<Value,
     Ok(Value::Null)
 }
 
-static TS_REGEXP_ARGUMENT: p::HelperPlan = p::HelperPlan {
+const TS_REGEXP_ARGUMENT: p::HelperPlan = p::HelperPlan {
     name: "ts.regexp.argument",
     function: p::function("24cc6a8d92a759131e4c23717448276af6f5957dfaa37ba565320bc4c439337f"),
     callees: &[
@@ -55528,7 +55528,7 @@ fn ts_regexp_argument(ctx: &mut dyn p::PlanContext, entry: u32) -> Result<Value,
     Ok(Value::Null)
 }
 
-static TS_STRING_MATCH: p::HelperPlan = p::HelperPlan {
+const TS_STRING_MATCH: p::HelperPlan = p::HelperPlan {
     name: "ts.string.match",
     function: p::function("f1ef2ca28ce3fd66d6cd5099df8ad88b096900c24cb2daad4c8cc84f4caa1b70"),
     callees: &[
@@ -55750,7 +55750,7 @@ fn ts_string_match(ctx: &mut dyn p::PlanContext, entry: u32) -> Result<Value, p:
     Ok(Value::Null)
 }
 
-static TS_STRING_SEARCH: p::HelperPlan = p::HelperPlan {
+const TS_STRING_SEARCH: p::HelperPlan = p::HelperPlan {
     name: "ts.string.search",
     function: p::function("c28c73dbcc7aeb0523e603c7d814a7dda6fd092ee9e8b64cfe7ce3cfc35bfcec"),
     callees: &[
@@ -55880,7 +55880,7 @@ fn ts_string_search(ctx: &mut dyn p::PlanContext, entry: u32) -> Result<Value, p
     Ok(Value::Null)
 }
 
-static TS_STRING_MATCHALL: p::HelperPlan = p::HelperPlan {
+const TS_STRING_MATCHALL: p::HelperPlan = p::HelperPlan {
     name: "ts.string.matchAll",
     function: p::function("8a23fcff011a52aee40601ee72fb290be3724c9c9d6be1ce8ca907f7b8fa5446"),
     callees: &[
@@ -56095,7 +56095,7 @@ fn ts_string_matchall(ctx: &mut dyn p::PlanContext, entry: u32) -> Result<Value,
     Ok(Value::Null)
 }
 
-static TS_STRING_SPLIT_GENERIC: p::HelperPlan = p::HelperPlan {
+const TS_STRING_SPLIT_GENERIC: p::HelperPlan = p::HelperPlan {
     name: "ts.string.split_generic",
     function: p::function("1d82b8f358eb337c151b4c58f71cb3f99286aa03cf1b056f8d2f5941e2ad372f"),
     callees: &[
@@ -56437,7 +56437,7 @@ fn ts_string_split_generic(ctx: &mut dyn p::PlanContext, entry: u32) -> Result<V
     Ok(Value::Null)
 }
 
-static TS_STRING_SPLIT: p::HelperPlan = p::HelperPlan {
+const TS_STRING_SPLIT: p::HelperPlan = p::HelperPlan {
     name: "ts.string.split",
     function: p::function("7ec00fbcbafa96bed6872cbe2f3a29ea3a14bcb3a54ff6ee35f028dbbe05fe34"),
     callees: &[
@@ -56618,7 +56618,7 @@ fn ts_string_split(ctx: &mut dyn p::PlanContext, entry: u32) -> Result<Value, p:
     Ok(Value::Null)
 }
 
-static TS_STRING_SUBSTITUTE: p::HelperPlan = p::HelperPlan {
+const TS_STRING_SUBSTITUTE: p::HelperPlan = p::HelperPlan {
     name: "ts.string.substitute",
     function: p::function("ecb61970f9cda0eca312eb247358de9c5a76cb470cfd0bbd81dedae432bfb890"),
     callees: &[
@@ -56852,7 +56852,7 @@ fn ts_string_substitute(ctx: &mut dyn p::PlanContext, _entry: u32) -> Result<Val
     Ok(ctx.take(0))
 }
 
-static TS_STRING_REPLACE_VALUE: p::HelperPlan = p::HelperPlan {
+const TS_STRING_REPLACE_VALUE: p::HelperPlan = p::HelperPlan {
     name: "ts.string.replace_value",
     function: p::function("05d079c35b12aa533687c22945956e9f48ebd7b85bf1a7780050c44fcd0a7746"),
     callees: &[
@@ -57705,7 +57705,7 @@ fn ts_string_replace_value(ctx: &mut dyn p::PlanContext, entry: u32) -> Result<V
     Ok(Value::Null)
 }
 
-static TS_STRING_REPLACE: p::HelperPlan = p::HelperPlan {
+const TS_STRING_REPLACE: p::HelperPlan = p::HelperPlan {
     name: "ts.string.replace",
     function: p::function("65d76d0bafeed75a9e872c6e86c01a13c1def92eba9172c282c1ead3ba8cf5f5"),
     callees: &[
@@ -57762,7 +57762,7 @@ fn ts_string_replace(ctx: &mut dyn p::PlanContext, entry: u32) -> Result<Value, 
     Ok(Value::Null)
 }
 
-static TS_STRING_REPLACEALL: p::HelperPlan = p::HelperPlan {
+const TS_STRING_REPLACEALL: p::HelperPlan = p::HelperPlan {
     name: "ts.string.replaceAll",
     function: p::function("09b7cb6117ae7a8c409cff2aa2f6ec084fa5578128dceb9956dc980415431e65"),
     callees: &[
@@ -57819,7 +57819,7 @@ fn ts_string_replaceall(ctx: &mut dyn p::PlanContext, entry: u32) -> Result<Valu
     Ok(Value::Null)
 }
 
-static TS_URI_HEX: p::HelperPlan = p::HelperPlan {
+const TS_URI_HEX: p::HelperPlan = p::HelperPlan {
     name: "ts.uri.hex",
     function: p::function("a3ebfbc8573b7f6bab77492a5db9a890aac30578d4a2564feb1db220b91ea2b2"),
     callees: &[
@@ -57914,7 +57914,7 @@ fn ts_uri_hex(ctx: &mut dyn p::PlanContext, _entry: u32) -> Result<Value, p::Pla
     Err(p::PlanExit::Raise(ctx.take(0)))
 }
 
-static TS_URI_ESCAPE: p::HelperPlan = p::HelperPlan {
+const TS_URI_ESCAPE: p::HelperPlan = p::HelperPlan {
     name: "ts.uri.escape",
     function: p::function("e50d135fde251e7111ea4d278dc21bcaa7617dfbc40fe5acbc259dbe9ef18709"),
     callees: &[
@@ -57984,7 +57984,7 @@ fn ts_uri_escape(ctx: &mut dyn p::PlanContext, _entry: u32) -> Result<Value, p::
     Ok(ctx.take(0))
 }
 
-static TS_URI_ENCODE: p::HelperPlan = p::HelperPlan {
+const TS_URI_ENCODE: p::HelperPlan = p::HelperPlan {
     name: "ts.uri.encode",
     function: p::function("ab0c16f98bae4c51a0471ec0d5ef34d2519bca7da99c25d1f74ef34ce5dbf198"),
     callees: &[
@@ -58301,7 +58301,7 @@ fn ts_uri_encode(ctx: &mut dyn p::PlanContext, _entry: u32) -> Result<Value, p::
     Ok(ctx.take(0))
 }
 
-static TS_URI_FLUSH: p::HelperPlan = p::HelperPlan {
+const TS_URI_FLUSH: p::HelperPlan = p::HelperPlan {
     name: "ts.uri.flush",
     function: p::function("ddcd7d034d26de52f6715f990244346abb3d61888e5d84a24522125d3a870754"),
     callees: &[
@@ -58388,7 +58388,7 @@ fn ts_uri_flush(ctx: &mut dyn p::PlanContext, _entry: u32) -> Result<Value, p::P
     Ok(Value::Null)
 }
 
-static TS_URI_DECODE: p::HelperPlan = p::HelperPlan {
+const TS_URI_DECODE: p::HelperPlan = p::HelperPlan {
     name: "ts.uri.decode",
     function: p::function("1df9f06e9655aa79c033eede3fb75b45b39d782e7cdd73969101a7330d32b05e"),
     callees: &[
@@ -58684,7 +58684,7 @@ fn ts_uri_decode(ctx: &mut dyn p::PlanContext, _entry: u32) -> Result<Value, p::
     Ok(ctx.take(0))
 }
 
-static TS_URI_ENCODEURI: p::HelperPlan = p::HelperPlan {
+const TS_URI_ENCODEURI: p::HelperPlan = p::HelperPlan {
     name: "ts.uri.encodeURI",
     function: p::function("485ff9438ba3313d1e7a762b8d1ae15b69d1d227be8b62c0489ed3e2a17f0a5b"),
     callees: &[
@@ -58767,7 +58767,7 @@ fn ts_uri_encodeuri(ctx: &mut dyn p::PlanContext, entry: u32) -> Result<Value, p
     Ok(Value::Null)
 }
 
-static TS_URI_DECODEURI: p::HelperPlan = p::HelperPlan {
+const TS_URI_DECODEURI: p::HelperPlan = p::HelperPlan {
     name: "ts.uri.decodeURI",
     function: p::function("5e76fa71f299285266d26468039dc0c0812ee52b2a0ea52c4b44fcceeb66ff1a"),
     callees: &[
@@ -58850,7 +58850,7 @@ fn ts_uri_decodeuri(ctx: &mut dyn p::PlanContext, entry: u32) -> Result<Value, p
     Ok(Value::Null)
 }
 
-static TS_URI_ENCODEURICOMPONENT: p::HelperPlan = p::HelperPlan {
+const TS_URI_ENCODEURICOMPONENT: p::HelperPlan = p::HelperPlan {
     name: "ts.uri.encodeURIComponent",
     function: p::function("8aab35be1a5190fe4d89bb8aff5f1834a26af3e78610e88b101970a7fb2becca"),
     callees: &[
@@ -58933,7 +58933,7 @@ fn ts_uri_encodeuricomponent(ctx: &mut dyn p::PlanContext, entry: u32) -> Result
     Ok(Value::Null)
 }
 
-static TS_URI_DECODEURICOMPONENT: p::HelperPlan = p::HelperPlan {
+const TS_URI_DECODEURICOMPONENT: p::HelperPlan = p::HelperPlan {
     name: "ts.uri.decodeURIComponent",
     function: p::function("eb28230dfe6a579fa5907fdad680b2cf8428aaa94031db5143dab97a0f97f592"),
     callees: &[
@@ -59016,7 +59016,7 @@ fn ts_uri_decodeuricomponent(ctx: &mut dyn p::PlanContext, entry: u32) -> Result
     Ok(Value::Null)
 }
 
-static TS_READ: p::HelperPlan = p::HelperPlan {
+const TS_READ: p::HelperPlan = p::HelperPlan {
     name: "ts.read",
     function: p::function("df101c6d09a8d3d15be9c18cf50d78c3a33b12a082fa34ebd328da00bb79355c"),
     callees: &[
@@ -59372,7 +59372,7 @@ fn ts_read(ctx: &mut dyn p::PlanContext, entry: u32) -> Result<Value, p::PlanExi
     Ok(Value::Null)
 }
 
-static TS_IN: p::HelperPlan = p::HelperPlan {
+const TS_IN: p::HelperPlan = p::HelperPlan {
     name: "ts.in",
     function: p::function("d915f31b3bea9a6b8cb254ffbef249036e0a94e860c5f8f4d61733411c05c0dc"),
     callees: &[
@@ -60488,7 +60488,7 @@ fn ts_in(ctx: &mut dyn p::PlanContext, entry: u32) -> Result<Value, p::PlanExit>
     Ok(Value::Null)
 }
 
-static TS_MEMBER_E: p::HelperPlan = p::HelperPlan {
+const TS_MEMBER_E: p::HelperPlan = p::HelperPlan {
     name: "ts.member.E",
     function: p::function("f2d3bf7d81317b6fc0d507f7c28d2ef73dfd56d7917ac0b72c3af3333bd4ee52"),
     callees: &[
@@ -60700,7 +60700,7 @@ fn ts_member_e(ctx: &mut dyn p::PlanContext, entry: u32) -> Result<Value, p::Pla
     Ok(Value::Null)
 }
 
-static TS_MEMBER_EPSILON: p::HelperPlan = p::HelperPlan {
+const TS_MEMBER_EPSILON: p::HelperPlan = p::HelperPlan {
     name: "ts.member.EPSILON",
     function: p::function("c8cf4ee182bad40f9fe85a53716dde9de4a7678660f55138181af6f7f87bbff1"),
     callees: &[
@@ -60912,7 +60912,7 @@ fn ts_member_epsilon(ctx: &mut dyn p::PlanContext, entry: u32) -> Result<Value, 
     Ok(Value::Null)
 }
 
-static TS_MEMBER_LN10: p::HelperPlan = p::HelperPlan {
+const TS_MEMBER_LN10: p::HelperPlan = p::HelperPlan {
     name: "ts.member.LN10",
     function: p::function("330626426ff2d65f86d61a72714257d295d2e0a31e3b6a262eae8026e0dfc1b6"),
     callees: &[
@@ -61124,7 +61124,7 @@ fn ts_member_ln10(ctx: &mut dyn p::PlanContext, entry: u32) -> Result<Value, p::
     Ok(Value::Null)
 }
 
-static TS_MEMBER_LN2: p::HelperPlan = p::HelperPlan {
+const TS_MEMBER_LN2: p::HelperPlan = p::HelperPlan {
     name: "ts.member.LN2",
     function: p::function("ecb298c8a3a44d0addeba96ad42167995a95e95bc14df444c5ecdc10ee1ce922"),
     callees: &[
@@ -61336,7 +61336,7 @@ fn ts_member_ln2(ctx: &mut dyn p::PlanContext, entry: u32) -> Result<Value, p::P
     Ok(Value::Null)
 }
 
-static TS_MEMBER_LOG10E: p::HelperPlan = p::HelperPlan {
+const TS_MEMBER_LOG10E: p::HelperPlan = p::HelperPlan {
     name: "ts.member.LOG10E",
     function: p::function("36571f7a94cbe16d44e44b4e9fd9fb3ed93b59a075c586778817e4bdcb20059c"),
     callees: &[
@@ -61548,7 +61548,7 @@ fn ts_member_log10e(ctx: &mut dyn p::PlanContext, entry: u32) -> Result<Value, p
     Ok(Value::Null)
 }
 
-static TS_MEMBER_LOG2E: p::HelperPlan = p::HelperPlan {
+const TS_MEMBER_LOG2E: p::HelperPlan = p::HelperPlan {
     name: "ts.member.LOG2E",
     function: p::function("3a8c2fc9f85ebd518ee9bf6ec4f64b60ea879d0115120b4b0ef88d97cc4add3c"),
     callees: &[
@@ -61760,7 +61760,7 @@ fn ts_member_log2e(ctx: &mut dyn p::PlanContext, entry: u32) -> Result<Value, p:
     Ok(Value::Null)
 }
 
-static TS_MEMBER_MAX_SAFE_INTEGER: p::HelperPlan = p::HelperPlan {
+const TS_MEMBER_MAX_SAFE_INTEGER: p::HelperPlan = p::HelperPlan {
     name: "ts.member.MAX_SAFE_INTEGER",
     function: p::function("19f9438bec2136960f67aa0b0348b5b03c8d1a5130c24a9c67f17a69c611867f"),
     callees: &[
@@ -61972,7 +61972,7 @@ fn ts_member_max_safe_integer(ctx: &mut dyn p::PlanContext, entry: u32) -> Resul
     Ok(Value::Null)
 }
 
-static TS_MEMBER_MAX_VALUE: p::HelperPlan = p::HelperPlan {
+const TS_MEMBER_MAX_VALUE: p::HelperPlan = p::HelperPlan {
     name: "ts.member.MAX_VALUE",
     function: p::function("82230712d5a80e6fcb41620559143b1126b4bd6596bc9491ab7180f65b9633dc"),
     callees: &[
@@ -62184,7 +62184,7 @@ fn ts_member_max_value(ctx: &mut dyn p::PlanContext, entry: u32) -> Result<Value
     Ok(Value::Null)
 }
 
-static TS_MEMBER_MIN_SAFE_INTEGER: p::HelperPlan = p::HelperPlan {
+const TS_MEMBER_MIN_SAFE_INTEGER: p::HelperPlan = p::HelperPlan {
     name: "ts.member.MIN_SAFE_INTEGER",
     function: p::function("84d421a638bfa4dcfc0463caf8861a93457f209c852d73fe0576481d02d01644"),
     callees: &[
@@ -62396,7 +62396,7 @@ fn ts_member_min_safe_integer(ctx: &mut dyn p::PlanContext, entry: u32) -> Resul
     Ok(Value::Null)
 }
 
-static TS_MEMBER_MIN_VALUE: p::HelperPlan = p::HelperPlan {
+const TS_MEMBER_MIN_VALUE: p::HelperPlan = p::HelperPlan {
     name: "ts.member.MIN_VALUE",
     function: p::function("423f22fc4af2a0e3e01143058137ca3681f0eaa881ae3e0ea34c46571f64435f"),
     callees: &[
@@ -62608,7 +62608,7 @@ fn ts_member_min_value(ctx: &mut dyn p::PlanContext, entry: u32) -> Result<Value
     Ok(Value::Null)
 }
 
-static TS_MEMBER_NEGATIVE_INFINITY: p::HelperPlan = p::HelperPlan {
+const TS_MEMBER_NEGATIVE_INFINITY: p::HelperPlan = p::HelperPlan {
     name: "ts.member.NEGATIVE_INFINITY",
     function: p::function("3607f8ae617e4c9b267450b9bb06c8f785d6025c526620e27e39c130d2955dc3"),
     callees: &[
@@ -62820,7 +62820,7 @@ fn ts_member_negative_infinity(ctx: &mut dyn p::PlanContext, entry: u32) -> Resu
     Ok(Value::Null)
 }
 
-static TS_MEMBER_NAN: p::HelperPlan = p::HelperPlan {
+const TS_MEMBER_NAN: p::HelperPlan = p::HelperPlan {
     name: "ts.member.NaN",
     function: p::function("b37558c295c0fbcc5dea125afee29da77c3de8fcd830c6913770f97582196d34"),
     callees: &[
@@ -63032,7 +63032,7 @@ fn ts_member_nan(ctx: &mut dyn p::PlanContext, entry: u32) -> Result<Value, p::P
     Ok(Value::Null)
 }
 
-static TS_MEMBER_PI: p::HelperPlan = p::HelperPlan {
+const TS_MEMBER_PI: p::HelperPlan = p::HelperPlan {
     name: "ts.member.PI",
     function: p::function("9961445a225c7e44de6d8965065bdaabfb47f29da9758288c551203fdc0066e4"),
     callees: &[
@@ -63244,7 +63244,7 @@ fn ts_member_pi(ctx: &mut dyn p::PlanContext, entry: u32) -> Result<Value, p::Pl
     Ok(Value::Null)
 }
 
-static TS_MEMBER_POSITIVE_INFINITY: p::HelperPlan = p::HelperPlan {
+const TS_MEMBER_POSITIVE_INFINITY: p::HelperPlan = p::HelperPlan {
     name: "ts.member.POSITIVE_INFINITY",
     function: p::function("a3d2571cbadd3cd03c74bc8ccc719e74c766037d6b94a5d1225bf96dc6f8104a"),
     callees: &[
@@ -63456,7 +63456,7 @@ fn ts_member_positive_infinity(ctx: &mut dyn p::PlanContext, entry: u32) -> Resu
     Ok(Value::Null)
 }
 
-static TS_MEMBER_SQRT1_2: p::HelperPlan = p::HelperPlan {
+const TS_MEMBER_SQRT1_2: p::HelperPlan = p::HelperPlan {
     name: "ts.member.SQRT1_2",
     function: p::function("93fdff848ab07d834c493bae7e7ee79ea80cab7bbef7d3a0e684577e40a9265e"),
     callees: &[
@@ -63668,7 +63668,7 @@ fn ts_member_sqrt1_2(ctx: &mut dyn p::PlanContext, entry: u32) -> Result<Value, 
     Ok(Value::Null)
 }
 
-static TS_MEMBER_SQRT2: p::HelperPlan = p::HelperPlan {
+const TS_MEMBER_SQRT2: p::HelperPlan = p::HelperPlan {
     name: "ts.member.SQRT2",
     function: p::function("0b578476995e1812bded28f898df633172c4e4589e86122b69bfe3b36b34335b"),
     callees: &[
@@ -63880,7 +63880,7 @@ fn ts_member_sqrt2(ctx: &mut dyn p::PlanContext, entry: u32) -> Result<Value, p:
     Ok(Value::Null)
 }
 
-static TS_MEMBER_UTC: p::HelperPlan = p::HelperPlan {
+const TS_MEMBER_UTC: p::HelperPlan = p::HelperPlan {
     name: "ts.member.UTC",
     function: p::function("440c26c6a3f6ba865cf6c2e8014f0891cbcae90794ea4b7a9ce224e5e73c8f84"),
     callees: &[
@@ -64096,7 +64096,7 @@ fn ts_member_utc(ctx: &mut dyn p::PlanContext, entry: u32) -> Result<Value, p::P
     Ok(Value::Null)
 }
 
-static TS_MEMBER_ABS: p::HelperPlan = p::HelperPlan {
+const TS_MEMBER_ABS: p::HelperPlan = p::HelperPlan {
     name: "ts.member.abs",
     function: p::function("a20c11f9d57781dd9451dcc865f5cb52c7bf1751e4a73ea1664460346352bf85"),
     callees: &[
@@ -64312,7 +64312,7 @@ fn ts_member_abs(ctx: &mut dyn p::PlanContext, entry: u32) -> Result<Value, p::P
     Ok(Value::Null)
 }
 
-static TS_MEMBER_ACOS: p::HelperPlan = p::HelperPlan {
+const TS_MEMBER_ACOS: p::HelperPlan = p::HelperPlan {
     name: "ts.member.acos",
     function: p::function("8ccb47d2430c92c4a24f418e364def0061ec3c2ba2ee1ae05d8fb3bd9c911c10"),
     callees: &[
@@ -64528,7 +64528,7 @@ fn ts_member_acos(ctx: &mut dyn p::PlanContext, entry: u32) -> Result<Value, p::
     Ok(Value::Null)
 }
 
-static TS_MEMBER_ACOSH: p::HelperPlan = p::HelperPlan {
+const TS_MEMBER_ACOSH: p::HelperPlan = p::HelperPlan {
     name: "ts.member.acosh",
     function: p::function("cb3dff261060ca1b0490f4370b9f10d653b4d6003458d3f5d51b395b4c8d007a"),
     callees: &[
@@ -64744,7 +64744,7 @@ fn ts_member_acosh(ctx: &mut dyn p::PlanContext, entry: u32) -> Result<Value, p:
     Ok(Value::Null)
 }
 
-static TS_MEMBER_ADD: p::HelperPlan = p::HelperPlan {
+const TS_MEMBER_ADD: p::HelperPlan = p::HelperPlan {
     name: "ts.member.add",
     function: p::function("a05cba4e052c6df20718bc14221b4cb02843c999b4c567bbc68fd711ff9f90d4"),
     callees: &[
@@ -64978,7 +64978,7 @@ fn ts_member_add(ctx: &mut dyn p::PlanContext, entry: u32) -> Result<Value, p::P
     Ok(Value::Null)
 }
 
-static TS_MEMBER_ALL: p::HelperPlan = p::HelperPlan {
+const TS_MEMBER_ALL: p::HelperPlan = p::HelperPlan {
     name: "ts.member.all",
     function: p::function("ccf43cb30455acc5986c9541028aaa9afe9d69f2086a44328c9f90bfaef1b38d"),
     callees: &[
@@ -65194,7 +65194,7 @@ fn ts_member_all(ctx: &mut dyn p::PlanContext, entry: u32) -> Result<Value, p::P
     Ok(Value::Null)
 }
 
-static TS_MEMBER_ALLSETTLED: p::HelperPlan = p::HelperPlan {
+const TS_MEMBER_ALLSETTLED: p::HelperPlan = p::HelperPlan {
     name: "ts.member.allSettled",
     function: p::function("05bbc872204c193cca0bb3b3dbed1cb8620884cfb9ec388e79b832e7d61b74bf"),
     callees: &[
@@ -65410,7 +65410,7 @@ fn ts_member_allsettled(ctx: &mut dyn p::PlanContext, entry: u32) -> Result<Valu
     Ok(Value::Null)
 }
 
-static TS_MEMBER_ANY: p::HelperPlan = p::HelperPlan {
+const TS_MEMBER_ANY: p::HelperPlan = p::HelperPlan {
     name: "ts.member.any",
     function: p::function("b021d200017446fe1adc86de653e4f147f9ce19d00f19b86ba679bebd35fb9ca"),
     callees: &[
@@ -65626,7 +65626,7 @@ fn ts_member_any(ctx: &mut dyn p::PlanContext, entry: u32) -> Result<Value, p::P
     Ok(Value::Null)
 }
 
-static TS_MEMBER_APPEND: p::HelperPlan = p::HelperPlan {
+const TS_MEMBER_APPEND: p::HelperPlan = p::HelperPlan {
     name: "ts.member.append",
     function: p::function("ebc1c3a0742859c51d3b75b5631f4f39520f9ee4c81d130ba701cb1705737b1b"),
     callees: &[
@@ -65860,7 +65860,7 @@ fn ts_member_append(ctx: &mut dyn p::PlanContext, entry: u32) -> Result<Value, p
     Ok(Value::Null)
 }
 
-static TS_MEMBER_APPLY: p::HelperPlan = p::HelperPlan {
+const TS_MEMBER_APPLY: p::HelperPlan = p::HelperPlan {
     name: "ts.member.apply",
     function: p::function("fbc86d10466824539d36febfeac35efd0de04ef65af0f0a31552241be43f0cda"),
     callees: &[
@@ -66121,7 +66121,7 @@ fn ts_member_apply(ctx: &mut dyn p::PlanContext, entry: u32) -> Result<Value, p:
     Ok(Value::Null)
 }
 
-static TS_MEMBER_ASIN: p::HelperPlan = p::HelperPlan {
+const TS_MEMBER_ASIN: p::HelperPlan = p::HelperPlan {
     name: "ts.member.asin",
     function: p::function("5ff6ee64b573b8bdaeb7d99c8d267f0b33605b1d6edcb80ba2e1eb5d61c9e0d5"),
     callees: &[
@@ -66337,7 +66337,7 @@ fn ts_member_asin(ctx: &mut dyn p::PlanContext, entry: u32) -> Result<Value, p::
     Ok(Value::Null)
 }
 
-static TS_MEMBER_ASINH: p::HelperPlan = p::HelperPlan {
+const TS_MEMBER_ASINH: p::HelperPlan = p::HelperPlan {
     name: "ts.member.asinh",
     function: p::function("bb1dce01a6061598c1ceaf45fe9a36095d816f49e36ddc220076a1f93262f2b8"),
     callees: &[
@@ -66553,7 +66553,7 @@ fn ts_member_asinh(ctx: &mut dyn p::PlanContext, entry: u32) -> Result<Value, p:
     Ok(Value::Null)
 }
 
-static TS_MEMBER_ASSIGN: p::HelperPlan = p::HelperPlan {
+const TS_MEMBER_ASSIGN: p::HelperPlan = p::HelperPlan {
     name: "ts.member.assign",
     function: p::function("9ed055428be2addf9aa9e3e828a58e780a65e3f504e999b50d3631ca6c5353c6"),
     callees: &[
@@ -66769,7 +66769,7 @@ fn ts_member_assign(ctx: &mut dyn p::PlanContext, entry: u32) -> Result<Value, p
     Ok(Value::Null)
 }
 
-static TS_MEMBER_AT: p::HelperPlan = p::HelperPlan {
+const TS_MEMBER_AT: p::HelperPlan = p::HelperPlan {
     name: "ts.member.at",
     function: p::function("e87bcd033aa8cd5d4da8a0820e387c66c43c8062027bc94cc3d0c2ecead46998"),
     callees: &[
@@ -67075,7 +67075,7 @@ fn ts_member_at(ctx: &mut dyn p::PlanContext, entry: u32) -> Result<Value, p::Pl
     Ok(Value::Null)
 }
 
-static TS_MEMBER_ATAN: p::HelperPlan = p::HelperPlan {
+const TS_MEMBER_ATAN: p::HelperPlan = p::HelperPlan {
     name: "ts.member.atan",
     function: p::function("52eb5580a0e3830c1eb1b89863d82e14a3ab8ffdea8fba20981cbba7c9444de7"),
     callees: &[
@@ -67291,7 +67291,7 @@ fn ts_member_atan(ctx: &mut dyn p::PlanContext, entry: u32) -> Result<Value, p::
     Ok(Value::Null)
 }
 
-static TS_MEMBER_ATAN2: p::HelperPlan = p::HelperPlan {
+const TS_MEMBER_ATAN2: p::HelperPlan = p::HelperPlan {
     name: "ts.member.atan2",
     function: p::function("4976a4b62569a3898dab655272c020996fc5d9c692d5399e75db12b9653f8982"),
     callees: &[
@@ -67507,7 +67507,7 @@ fn ts_member_atan2(ctx: &mut dyn p::PlanContext, entry: u32) -> Result<Value, p:
     Ok(Value::Null)
 }
 
-static TS_MEMBER_ATANH: p::HelperPlan = p::HelperPlan {
+const TS_MEMBER_ATANH: p::HelperPlan = p::HelperPlan {
     name: "ts.member.atanh",
     function: p::function("edd310355b5e043e51d4be18e8bb513de140ba392c63c3e70a694fe7fb248b68"),
     callees: &[
@@ -67723,7 +67723,7 @@ fn ts_member_atanh(ctx: &mut dyn p::PlanContext, entry: u32) -> Result<Value, p:
     Ok(Value::Null)
 }
 
-static TS_MEMBER_BIND: p::HelperPlan = p::HelperPlan {
+const TS_MEMBER_BIND: p::HelperPlan = p::HelperPlan {
     name: "ts.member.bind",
     function: p::function("f46207d0175b5f65dfcd30cf633b8d494cb975a46a711f97073b6d0eeef617b2"),
     callees: &[
@@ -67984,7 +67984,7 @@ fn ts_member_bind(ctx: &mut dyn p::PlanContext, entry: u32) -> Result<Value, p::
     Ok(Value::Null)
 }
 
-static TS_MEMBER_CALL: p::HelperPlan = p::HelperPlan {
+const TS_MEMBER_CALL: p::HelperPlan = p::HelperPlan {
     name: "ts.member.call",
     function: p::function("10ec652460b1b4367ffe308dbdc804afd9a01ade0558bbfa52335afbfc8b8d3e"),
     callees: &[
@@ -68245,7 +68245,7 @@ fn ts_member_call(ctx: &mut dyn p::PlanContext, entry: u32) -> Result<Value, p::
     Ok(Value::Null)
 }
 
-static TS_MEMBER_CANPARSE: p::HelperPlan = p::HelperPlan {
+const TS_MEMBER_CANPARSE: p::HelperPlan = p::HelperPlan {
     name: "ts.member.canParse",
     function: p::function("290b155a8f03a6d416032db7e5f8b83f499260e6b3324a355b39888add4f0781"),
     callees: &[
@@ -68461,7 +68461,7 @@ fn ts_member_canparse(ctx: &mut dyn p::PlanContext, entry: u32) -> Result<Value,
     Ok(Value::Null)
 }
 
-static TS_MEMBER_CATCH: p::HelperPlan = p::HelperPlan {
+const TS_MEMBER_CATCH: p::HelperPlan = p::HelperPlan {
     name: "ts.member.catch",
     function: p::function("e4f00f04094fdde02827881656c721742571c4ee62ddf9a7ae9d1e191a0076eb"),
     callees: &[
@@ -68695,7 +68695,7 @@ fn ts_member_catch(ctx: &mut dyn p::PlanContext, entry: u32) -> Result<Value, p:
     Ok(Value::Null)
 }
 
-static TS_MEMBER_CBRT: p::HelperPlan = p::HelperPlan {
+const TS_MEMBER_CBRT: p::HelperPlan = p::HelperPlan {
     name: "ts.member.cbrt",
     function: p::function("bafe515d76aec9b9d71b3df77e09ac53788c4836a38a46135b34c2acb7e2f1ba"),
     callees: &[
@@ -68911,7 +68911,7 @@ fn ts_member_cbrt(ctx: &mut dyn p::PlanContext, entry: u32) -> Result<Value, p::
     Ok(Value::Null)
 }
 
-static TS_MEMBER_CEIL: p::HelperPlan = p::HelperPlan {
+const TS_MEMBER_CEIL: p::HelperPlan = p::HelperPlan {
     name: "ts.member.ceil",
     function: p::function("e974ba202915f7bcca2e527eabcc310cbbca8aafbe6de7361875790fba052d03"),
     callees: &[
@@ -69127,7 +69127,7 @@ fn ts_member_ceil(ctx: &mut dyn p::PlanContext, entry: u32) -> Result<Value, p::
     Ok(Value::Null)
 }
 
-static TS_MEMBER_CHARAT: p::HelperPlan = p::HelperPlan {
+const TS_MEMBER_CHARAT: p::HelperPlan = p::HelperPlan {
     name: "ts.member.charAt",
     function: p::function("4714be8f3d2d4dd0d992bcbf6a9592f655a49e8b05754a505886728eeffdda69"),
     callees: &[
@@ -69361,7 +69361,7 @@ fn ts_member_charat(ctx: &mut dyn p::PlanContext, entry: u32) -> Result<Value, p
     Ok(Value::Null)
 }
 
-static TS_MEMBER_CHARCODEAT: p::HelperPlan = p::HelperPlan {
+const TS_MEMBER_CHARCODEAT: p::HelperPlan = p::HelperPlan {
     name: "ts.member.charCodeAt",
     function: p::function("651554590485dc9b09ee38a990aae379145c529120296862a4d32f341447e79f"),
     callees: &[
@@ -69595,7 +69595,7 @@ fn ts_member_charcodeat(ctx: &mut dyn p::PlanContext, entry: u32) -> Result<Valu
     Ok(Value::Null)
 }
 
-static TS_MEMBER_CLEAR: p::HelperPlan = p::HelperPlan {
+const TS_MEMBER_CLEAR: p::HelperPlan = p::HelperPlan {
     name: "ts.member.clear",
     function: p::function("602a407489ade4d483be997e1662a7978c3cdb827809dc35253e7a4a4f0953a7"),
     callees: &[
@@ -69866,7 +69866,7 @@ fn ts_member_clear(ctx: &mut dyn p::PlanContext, entry: u32) -> Result<Value, p:
     Ok(Value::Null)
 }
 
-static TS_MEMBER_CLZ32: p::HelperPlan = p::HelperPlan {
+const TS_MEMBER_CLZ32: p::HelperPlan = p::HelperPlan {
     name: "ts.member.clz32",
     function: p::function("5b35b58b8e60a3d6cb38794b68b9979cf738fa8182de63dee5c55ce614f6c2b7"),
     callees: &[
@@ -70082,7 +70082,7 @@ fn ts_member_clz32(ctx: &mut dyn p::PlanContext, entry: u32) -> Result<Value, p:
     Ok(Value::Null)
 }
 
-static TS_MEMBER_CODEPOINTAT: p::HelperPlan = p::HelperPlan {
+const TS_MEMBER_CODEPOINTAT: p::HelperPlan = p::HelperPlan {
     name: "ts.member.codePointAt",
     function: p::function("21661dc7abef881080421bc6d9d77b7ac7292f6facb8f80295f9c863bbc5e0c6"),
     callees: &[
@@ -70316,7 +70316,7 @@ fn ts_member_codepointat(ctx: &mut dyn p::PlanContext, entry: u32) -> Result<Val
     Ok(Value::Null)
 }
 
-static TS_MEMBER_CONCAT: p::HelperPlan = p::HelperPlan {
+const TS_MEMBER_CONCAT: p::HelperPlan = p::HelperPlan {
     name: "ts.member.concat",
     function: p::function("50d25ce59405dc8be3add7480230e1b706d4b2377de15c616a2bae47910ae9f4"),
     callees: &[
@@ -70622,7 +70622,7 @@ fn ts_member_concat(ctx: &mut dyn p::PlanContext, entry: u32) -> Result<Value, p
     Ok(Value::Null)
 }
 
-static TS_MEMBER_CONSTRUCTOR: p::HelperPlan = p::HelperPlan {
+const TS_MEMBER_CONSTRUCTOR: p::HelperPlan = p::HelperPlan {
     name: "ts.member.constructor",
     function: p::function("57bae041930cfc67068becd326e813f503e470c177a542b128f74d2d0213baa7"),
     callees: &[
@@ -71571,7 +71571,7 @@ fn ts_member_constructor(ctx: &mut dyn p::PlanContext, entry: u32) -> Result<Val
     Ok(Value::Null)
 }
 
-static TS_MEMBER_COPYWITHIN: p::HelperPlan = p::HelperPlan {
+const TS_MEMBER_COPYWITHIN: p::HelperPlan = p::HelperPlan {
     name: "ts.member.copyWithin",
     function: p::function("63171794fb63c73ad6ee5967faa264622da6dbf8ce09ed05f6114e7b5d263f91"),
     callees: &[
@@ -71840,7 +71840,7 @@ fn ts_member_copywithin(ctx: &mut dyn p::PlanContext, entry: u32) -> Result<Valu
     Ok(Value::Null)
 }
 
-static TS_MEMBER_COS: p::HelperPlan = p::HelperPlan {
+const TS_MEMBER_COS: p::HelperPlan = p::HelperPlan {
     name: "ts.member.cos",
     function: p::function("dd5750fcfcad22fd80597d289866b047adfff2039cf8553fc1fb9086d816ea2a"),
     callees: &[
@@ -72056,7 +72056,7 @@ fn ts_member_cos(ctx: &mut dyn p::PlanContext, entry: u32) -> Result<Value, p::P
     Ok(Value::Null)
 }
 
-static TS_MEMBER_COSH: p::HelperPlan = p::HelperPlan {
+const TS_MEMBER_COSH: p::HelperPlan = p::HelperPlan {
     name: "ts.member.cosh",
     function: p::function("813a16734f0aa27d8615c273f0db7366cda992e39f7061aeb2c9afacd2cc2bc1"),
     callees: &[
@@ -72272,7 +72272,7 @@ fn ts_member_cosh(ctx: &mut dyn p::PlanContext, entry: u32) -> Result<Value, p::
     Ok(Value::Null)
 }
 
-static TS_MEMBER_CREATE: p::HelperPlan = p::HelperPlan {
+const TS_MEMBER_CREATE: p::HelperPlan = p::HelperPlan {
     name: "ts.member.create",
     function: p::function("e23ede5622f8682d7ba33409559ed6bcc787b72fc200f6a922f08c0f204960a0"),
     callees: &[
@@ -72488,7 +72488,7 @@ fn ts_member_create(ctx: &mut dyn p::PlanContext, entry: u32) -> Result<Value, p
     Ok(Value::Null)
 }
 
-static TS_MEMBER_DEBUG: p::HelperPlan = p::HelperPlan {
+const TS_MEMBER_DEBUG: p::HelperPlan = p::HelperPlan {
     name: "ts.member.debug",
     function: p::function("c20ac354351c5e23a43c019a2371ed10c211e0a69385d34741017511e2410855"),
     callees: &[
@@ -72704,7 +72704,7 @@ fn ts_member_debug(ctx: &mut dyn p::PlanContext, entry: u32) -> Result<Value, p:
     Ok(Value::Null)
 }
 
-static TS_MEMBER_DEFINEPROPERTIES: p::HelperPlan = p::HelperPlan {
+const TS_MEMBER_DEFINEPROPERTIES: p::HelperPlan = p::HelperPlan {
     name: "ts.member.defineProperties",
     function: p::function("fa6020b282d07d00d5a9d1195542c35157f820739f36ebdf5d85c35d1e50008d"),
     callees: &[
@@ -72920,7 +72920,7 @@ fn ts_member_defineproperties(ctx: &mut dyn p::PlanContext, entry: u32) -> Resul
     Ok(Value::Null)
 }
 
-static TS_MEMBER_DEFINEPROPERTY: p::HelperPlan = p::HelperPlan {
+const TS_MEMBER_DEFINEPROPERTY: p::HelperPlan = p::HelperPlan {
     name: "ts.member.defineProperty",
     function: p::function("541fcfc5a8a2d00ae74bc51345b38f23a14dae10ccf02df0a3de8b1523225370"),
     callees: &[
@@ -73136,7 +73136,7 @@ fn ts_member_defineproperty(ctx: &mut dyn p::PlanContext, entry: u32) -> Result<
     Ok(Value::Null)
 }
 
-static TS_MEMBER_DELETE: p::HelperPlan = p::HelperPlan {
+const TS_MEMBER_DELETE: p::HelperPlan = p::HelperPlan {
     name: "ts.member.delete",
     function: p::function("363bfcdfa8f9c0950ecd47ab274ffdfd0c580f6d82e5d2879dbab517405a8c81"),
     callees: &[
@@ -73444,7 +73444,7 @@ fn ts_member_delete(ctx: &mut dyn p::PlanContext, entry: u32) -> Result<Value, p
     Ok(Value::Null)
 }
 
-static TS_MEMBER_DIFFERENCE: p::HelperPlan = p::HelperPlan {
+const TS_MEMBER_DIFFERENCE: p::HelperPlan = p::HelperPlan {
     name: "ts.member.difference",
     function: p::function("2125b2d9ba9bb35a172827a805e954d703e2eb646986b421d1577b460dc5958e"),
     callees: &[
@@ -73678,7 +73678,7 @@ fn ts_member_difference(ctx: &mut dyn p::PlanContext, entry: u32) -> Result<Valu
     Ok(Value::Null)
 }
 
-static TS_MEMBER_ENDSWITH: p::HelperPlan = p::HelperPlan {
+const TS_MEMBER_ENDSWITH: p::HelperPlan = p::HelperPlan {
     name: "ts.member.endsWith",
     function: p::function("5b89d05ef49185c5e5a2b584ac95fd8905b832e69d35858ffdd84b78c8c3b24b"),
     callees: &[
@@ -73912,7 +73912,7 @@ fn ts_member_endswith(ctx: &mut dyn p::PlanContext, entry: u32) -> Result<Value,
     Ok(Value::Null)
 }
 
-static TS_MEMBER_ENTRIES: p::HelperPlan = p::HelperPlan {
+const TS_MEMBER_ENTRIES: p::HelperPlan = p::HelperPlan {
     name: "ts.member.entries",
     function: p::function("ac43dd617f39b37e758bb0c4ddf4a1056c03017da93a58816a66e0a3b3ea8593"),
     callees: &[
@@ -74312,7 +74312,7 @@ fn ts_member_entries(ctx: &mut dyn p::PlanContext, entry: u32) -> Result<Value, 
     Ok(Value::Null)
 }
 
-static TS_MEMBER_ERROR: p::HelperPlan = p::HelperPlan {
+const TS_MEMBER_ERROR: p::HelperPlan = p::HelperPlan {
     name: "ts.member.error",
     function: p::function("59b4b686a16e08dd49d5ed5beff8492e5b100b5c62891f14a580ca8907ea5fbb"),
     callees: &[
@@ -74528,7 +74528,7 @@ fn ts_member_error(ctx: &mut dyn p::PlanContext, entry: u32) -> Result<Value, p:
     Ok(Value::Null)
 }
 
-static TS_MEMBER_EVERY: p::HelperPlan = p::HelperPlan {
+const TS_MEMBER_EVERY: p::HelperPlan = p::HelperPlan {
     name: "ts.member.every",
     function: p::function("b1bca5080da12814f0a2da3447132d8582b26ab844947f6e6c85544f02b049f9"),
     callees: &[
@@ -74797,7 +74797,7 @@ fn ts_member_every(ctx: &mut dyn p::PlanContext, entry: u32) -> Result<Value, p:
     Ok(Value::Null)
 }
 
-static TS_MEMBER_EXEC: p::HelperPlan = p::HelperPlan {
+const TS_MEMBER_EXEC: p::HelperPlan = p::HelperPlan {
     name: "ts.member.exec",
     function: p::function("13aff9f234f6689a9838fe437101c8a562a3b0ce57392d0f307542614f910fcc"),
     callees: &[
@@ -75031,7 +75031,7 @@ fn ts_member_exec(ctx: &mut dyn p::PlanContext, entry: u32) -> Result<Value, p::
     Ok(Value::Null)
 }
 
-static TS_MEMBER_EXP: p::HelperPlan = p::HelperPlan {
+const TS_MEMBER_EXP: p::HelperPlan = p::HelperPlan {
     name: "ts.member.exp",
     function: p::function("c1d9681a1f94dba343362a22c8f60192847717911334ba45f3b0468fd9dd3e3f"),
     callees: &[
@@ -75247,7 +75247,7 @@ fn ts_member_exp(ctx: &mut dyn p::PlanContext, entry: u32) -> Result<Value, p::P
     Ok(Value::Null)
 }
 
-static TS_MEMBER_EXPM1: p::HelperPlan = p::HelperPlan {
+const TS_MEMBER_EXPM1: p::HelperPlan = p::HelperPlan {
     name: "ts.member.expm1",
     function: p::function("54e91b9285ad2492cae9efb72cac5d34daef3212c239d9b7fa39243211cc3650"),
     callees: &[
@@ -75463,7 +75463,7 @@ fn ts_member_expm1(ctx: &mut dyn p::PlanContext, entry: u32) -> Result<Value, p:
     Ok(Value::Null)
 }
 
-static TS_MEMBER_FILL: p::HelperPlan = p::HelperPlan {
+const TS_MEMBER_FILL: p::HelperPlan = p::HelperPlan {
     name: "ts.member.fill",
     function: p::function("06f876b289a61c8d2a4c0a852557d4baa5901c80524e4e5b99f04184b5d81808"),
     callees: &[
@@ -75732,7 +75732,7 @@ fn ts_member_fill(ctx: &mut dyn p::PlanContext, entry: u32) -> Result<Value, p::
     Ok(Value::Null)
 }
 
-static TS_MEMBER_FILTER: p::HelperPlan = p::HelperPlan {
+const TS_MEMBER_FILTER: p::HelperPlan = p::HelperPlan {
     name: "ts.member.filter",
     function: p::function("b3906ee39512a53e6517266d720623938908061c7d4548b9639849b836fb1013"),
     callees: &[
@@ -76001,7 +76001,7 @@ fn ts_member_filter(ctx: &mut dyn p::PlanContext, entry: u32) -> Result<Value, p
     Ok(Value::Null)
 }
 
-static TS_MEMBER_FINALLY: p::HelperPlan = p::HelperPlan {
+const TS_MEMBER_FINALLY: p::HelperPlan = p::HelperPlan {
     name: "ts.member.finally",
     function: p::function("7b3159eec9b1675a0248e3759ca2eb3e618871060add28032aacbe14f3357f19"),
     callees: &[
@@ -76235,7 +76235,7 @@ fn ts_member_finally(ctx: &mut dyn p::PlanContext, entry: u32) -> Result<Value, 
     Ok(Value::Null)
 }
 
-static TS_MEMBER_FIND: p::HelperPlan = p::HelperPlan {
+const TS_MEMBER_FIND: p::HelperPlan = p::HelperPlan {
     name: "ts.member.find",
     function: p::function("4a3d11bf9f0a9ada61e3ffcc5317f74eb7a6e13b8cf3ea0aab2e5aa7700b9b81"),
     callees: &[
@@ -76504,7 +76504,7 @@ fn ts_member_find(ctx: &mut dyn p::PlanContext, entry: u32) -> Result<Value, p::
     Ok(Value::Null)
 }
 
-static TS_MEMBER_FINDINDEX: p::HelperPlan = p::HelperPlan {
+const TS_MEMBER_FINDINDEX: p::HelperPlan = p::HelperPlan {
     name: "ts.member.findIndex",
     function: p::function("9dd25355deb55e40df567ef199e3c84dbfd7b3319222cb5a029f03d819e32352"),
     callees: &[
@@ -76773,7 +76773,7 @@ fn ts_member_findindex(ctx: &mut dyn p::PlanContext, entry: u32) -> Result<Value
     Ok(Value::Null)
 }
 
-static TS_MEMBER_FINDLAST: p::HelperPlan = p::HelperPlan {
+const TS_MEMBER_FINDLAST: p::HelperPlan = p::HelperPlan {
     name: "ts.member.findLast",
     function: p::function("2f251d718a4ac4f978ccc48c01ed5bb5f8c07d8be1fd249744a84af3a644fb5d"),
     callees: &[
@@ -77042,7 +77042,7 @@ fn ts_member_findlast(ctx: &mut dyn p::PlanContext, entry: u32) -> Result<Value,
     Ok(Value::Null)
 }
 
-static TS_MEMBER_FINDLASTINDEX: p::HelperPlan = p::HelperPlan {
+const TS_MEMBER_FINDLASTINDEX: p::HelperPlan = p::HelperPlan {
     name: "ts.member.findLastIndex",
     function: p::function("928d4c101f1ec600b047fbe931d6354b8e74b2caa5e2724507946b205516aee8"),
     callees: &[
@@ -77311,7 +77311,7 @@ fn ts_member_findlastindex(ctx: &mut dyn p::PlanContext, entry: u32) -> Result<V
     Ok(Value::Null)
 }
 
-static TS_MEMBER_FLAT: p::HelperPlan = p::HelperPlan {
+const TS_MEMBER_FLAT: p::HelperPlan = p::HelperPlan {
     name: "ts.member.flat",
     function: p::function("5fb78ae8e5e2b107cf1ff4a1982e199ccbc2679e3c442e1d5b3c8c739ae5f303"),
     callees: &[
@@ -77580,7 +77580,7 @@ fn ts_member_flat(ctx: &mut dyn p::PlanContext, entry: u32) -> Result<Value, p::
     Ok(Value::Null)
 }
 
-static TS_MEMBER_FLATMAP: p::HelperPlan = p::HelperPlan {
+const TS_MEMBER_FLATMAP: p::HelperPlan = p::HelperPlan {
     name: "ts.member.flatMap",
     function: p::function("3c92e9c434d01a67fbc14b62bc93964597b4002aa372baabb69395089456cfea"),
     callees: &[
@@ -77849,7 +77849,7 @@ fn ts_member_flatmap(ctx: &mut dyn p::PlanContext, entry: u32) -> Result<Value, 
     Ok(Value::Null)
 }
 
-static TS_MEMBER_FLOOR: p::HelperPlan = p::HelperPlan {
+const TS_MEMBER_FLOOR: p::HelperPlan = p::HelperPlan {
     name: "ts.member.floor",
     function: p::function("11937518002553ddc55b746d39560fea64200f87d4ad7b7998ec7dfac9b40d74"),
     callees: &[
@@ -78065,7 +78065,7 @@ fn ts_member_floor(ctx: &mut dyn p::PlanContext, entry: u32) -> Result<Value, p:
     Ok(Value::Null)
 }
 
-static TS_MEMBER_FOREACH: p::HelperPlan = p::HelperPlan {
+const TS_MEMBER_FOREACH: p::HelperPlan = p::HelperPlan {
     name: "ts.member.forEach",
     function: p::function("2dcb6e9106b2bb00dc9b142922385d7cd1ee1f06c1b43ed9d5a344ea806c2c9f"),
     callees: &[
@@ -78445,7 +78445,7 @@ fn ts_member_foreach(ctx: &mut dyn p::PlanContext, entry: u32) -> Result<Value, 
     Ok(Value::Null)
 }
 
-static TS_MEMBER_FREEZE: p::HelperPlan = p::HelperPlan {
+const TS_MEMBER_FREEZE: p::HelperPlan = p::HelperPlan {
     name: "ts.member.freeze",
     function: p::function("c2ef53064fe7b2f0f1859316053b2ab6e1b0978cb5a3d121cf48cc31d9c263be"),
     callees: &[
@@ -78661,7 +78661,7 @@ fn ts_member_freeze(ctx: &mut dyn p::PlanContext, entry: u32) -> Result<Value, p
     Ok(Value::Null)
 }
 
-static TS_MEMBER_FROM: p::HelperPlan = p::HelperPlan {
+const TS_MEMBER_FROM: p::HelperPlan = p::HelperPlan {
     name: "ts.member.from",
     function: p::function("05d982b51396ec83d09ba7af3c8d4acefc07a8cdb9f4d6616777eb222ba9d7a5"),
     callees: &[
@@ -78877,7 +78877,7 @@ fn ts_member_from(ctx: &mut dyn p::PlanContext, entry: u32) -> Result<Value, p::
     Ok(Value::Null)
 }
 
-static TS_MEMBER_FROMCHARCODE: p::HelperPlan = p::HelperPlan {
+const TS_MEMBER_FROMCHARCODE: p::HelperPlan = p::HelperPlan {
     name: "ts.member.fromCharCode",
     function: p::function("4de861997d745415c431b55bbec1d9a58283bdda759c0c487c2e16444521fa1e"),
     callees: &[
@@ -79093,7 +79093,7 @@ fn ts_member_fromcharcode(ctx: &mut dyn p::PlanContext, entry: u32) -> Result<Va
     Ok(Value::Null)
 }
 
-static TS_MEMBER_FROMCODEPOINT: p::HelperPlan = p::HelperPlan {
+const TS_MEMBER_FROMCODEPOINT: p::HelperPlan = p::HelperPlan {
     name: "ts.member.fromCodePoint",
     function: p::function("467eebc4355f27128de0778c369993e8ae621c74229041ebccbebb6639f5297f"),
     callees: &[
@@ -79309,7 +79309,7 @@ fn ts_member_fromcodepoint(ctx: &mut dyn p::PlanContext, entry: u32) -> Result<V
     Ok(Value::Null)
 }
 
-static TS_MEMBER_FROMENTRIES: p::HelperPlan = p::HelperPlan {
+const TS_MEMBER_FROMENTRIES: p::HelperPlan = p::HelperPlan {
     name: "ts.member.fromEntries",
     function: p::function("5210862aee3f04f6757a244bb4dee650eb424533bc320b0c27d6a9ea33593154"),
     callees: &[
@@ -79525,7 +79525,7 @@ fn ts_member_fromentries(ctx: &mut dyn p::PlanContext, entry: u32) -> Result<Val
     Ok(Value::Null)
 }
 
-static TS_MEMBER_FROUND: p::HelperPlan = p::HelperPlan {
+const TS_MEMBER_FROUND: p::HelperPlan = p::HelperPlan {
     name: "ts.member.fround",
     function: p::function("a70f405c3eac3b7c606b43635414fdf85eb4d4542b12c5304de14dfa51ac31d1"),
     callees: &[
@@ -79741,7 +79741,7 @@ fn ts_member_fround(ctx: &mut dyn p::PlanContext, entry: u32) -> Result<Value, p
     Ok(Value::Null)
 }
 
-static TS_MEMBER_GET: p::HelperPlan = p::HelperPlan {
+const TS_MEMBER_GET: p::HelperPlan = p::HelperPlan {
     name: "ts.member.get",
     function: p::function("3c3dc9ca119f59e46bd0d70f43cc56897295a5f9d60c1f26984457cecfd9d763"),
     callees: &[
@@ -80012,7 +80012,7 @@ fn ts_member_get(ctx: &mut dyn p::PlanContext, entry: u32) -> Result<Value, p::P
     Ok(Value::Null)
 }
 
-static TS_MEMBER_GETALL: p::HelperPlan = p::HelperPlan {
+const TS_MEMBER_GETALL: p::HelperPlan = p::HelperPlan {
     name: "ts.member.getAll",
     function: p::function("688a523a29e567b115559835e163e7c7261ccb20e13b9c22bca890f8cf4bde71"),
     callees: &[
@@ -80246,7 +80246,7 @@ fn ts_member_getall(ctx: &mut dyn p::PlanContext, entry: u32) -> Result<Value, p
     Ok(Value::Null)
 }
 
-static TS_MEMBER_GETDATE: p::HelperPlan = p::HelperPlan {
+const TS_MEMBER_GETDATE: p::HelperPlan = p::HelperPlan {
     name: "ts.member.getDate",
     function: p::function("98a02da0f2ed24f20948d6f9af01c2386a7e6cd47fdba73abab9598cbb426553"),
     callees: &[
@@ -80498,7 +80498,7 @@ fn ts_member_getdate(ctx: &mut dyn p::PlanContext, entry: u32) -> Result<Value, 
     Ok(Value::Null)
 }
 
-static TS_MEMBER_GETDAY: p::HelperPlan = p::HelperPlan {
+const TS_MEMBER_GETDAY: p::HelperPlan = p::HelperPlan {
     name: "ts.member.getDay",
     function: p::function("f08039d7f034e9cef99f8ec797204ff8303ea138c271be74e4c8b353dfa20861"),
     callees: &[
@@ -80750,7 +80750,7 @@ fn ts_member_getday(ctx: &mut dyn p::PlanContext, entry: u32) -> Result<Value, p
     Ok(Value::Null)
 }
 
-static TS_MEMBER_GETFULLYEAR: p::HelperPlan = p::HelperPlan {
+const TS_MEMBER_GETFULLYEAR: p::HelperPlan = p::HelperPlan {
     name: "ts.member.getFullYear",
     function: p::function("4e9da562a352415770015278248f1039a40041d5a52adfa2bb9f8bf7d2507d3e"),
     callees: &[
@@ -81002,7 +81002,7 @@ fn ts_member_getfullyear(ctx: &mut dyn p::PlanContext, entry: u32) -> Result<Val
     Ok(Value::Null)
 }
 
-static TS_MEMBER_GETHOURS: p::HelperPlan = p::HelperPlan {
+const TS_MEMBER_GETHOURS: p::HelperPlan = p::HelperPlan {
     name: "ts.member.getHours",
     function: p::function("b95f544445ea2c2b0828383a17937c9e7ea664f5a48443ef8274117b1b7bf975"),
     callees: &[
@@ -81254,7 +81254,7 @@ fn ts_member_gethours(ctx: &mut dyn p::PlanContext, entry: u32) -> Result<Value,
     Ok(Value::Null)
 }
 
-static TS_MEMBER_GETMILLISECONDS: p::HelperPlan = p::HelperPlan {
+const TS_MEMBER_GETMILLISECONDS: p::HelperPlan = p::HelperPlan {
     name: "ts.member.getMilliseconds",
     function: p::function("4b0981988785d2f8457b9cd93e7fab4c1a0bbbc349791104728ea71065ea4b9e"),
     callees: &[
@@ -81506,7 +81506,7 @@ fn ts_member_getmilliseconds(ctx: &mut dyn p::PlanContext, entry: u32) -> Result
     Ok(Value::Null)
 }
 
-static TS_MEMBER_GETMINUTES: p::HelperPlan = p::HelperPlan {
+const TS_MEMBER_GETMINUTES: p::HelperPlan = p::HelperPlan {
     name: "ts.member.getMinutes",
     function: p::function("8107ba6dae0cd9255df18e9fd5e6aec4adf489325fbe51b1e0671b3d6c55f07a"),
     callees: &[
@@ -81758,7 +81758,7 @@ fn ts_member_getminutes(ctx: &mut dyn p::PlanContext, entry: u32) -> Result<Valu
     Ok(Value::Null)
 }
 
-static TS_MEMBER_GETMONTH: p::HelperPlan = p::HelperPlan {
+const TS_MEMBER_GETMONTH: p::HelperPlan = p::HelperPlan {
     name: "ts.member.getMonth",
     function: p::function("4b78e6246277e6cfb7a908cbc87967fd32b81dfc54b2772ca88e789392f37503"),
     callees: &[
@@ -82010,7 +82010,7 @@ fn ts_member_getmonth(ctx: &mut dyn p::PlanContext, entry: u32) -> Result<Value,
     Ok(Value::Null)
 }
 
-static TS_MEMBER_GETOWNPROPERTYDESCRIPTOR: p::HelperPlan = p::HelperPlan {
+const TS_MEMBER_GETOWNPROPERTYDESCRIPTOR: p::HelperPlan = p::HelperPlan {
     name: "ts.member.getOwnPropertyDescriptor",
     function: p::function("91fbcb754803ecdf58cfba3c1f603d42cdb718c6a161f5c233aef0a0003cf0bf"),
     callees: &[
@@ -82226,7 +82226,7 @@ fn ts_member_getownpropertydescriptor(ctx: &mut dyn p::PlanContext, entry: u32) 
     Ok(Value::Null)
 }
 
-static TS_MEMBER_GETOWNPROPERTYDESCRIPTORS: p::HelperPlan = p::HelperPlan {
+const TS_MEMBER_GETOWNPROPERTYDESCRIPTORS: p::HelperPlan = p::HelperPlan {
     name: "ts.member.getOwnPropertyDescriptors",
     function: p::function("8bf4813efcc711b72b9bc4dc64a9e9fb70096ffd9f5568d89327dfa369a63a31"),
     callees: &[
@@ -82442,7 +82442,7 @@ fn ts_member_getownpropertydescriptors(ctx: &mut dyn p::PlanContext, entry: u32)
     Ok(Value::Null)
 }
 
-static TS_MEMBER_GETOWNPROPERTYNAMES: p::HelperPlan = p::HelperPlan {
+const TS_MEMBER_GETOWNPROPERTYNAMES: p::HelperPlan = p::HelperPlan {
     name: "ts.member.getOwnPropertyNames",
     function: p::function("af3f24a493df2bcecc885572140f2743c4a067eb18eaf040d198a3f16501c5c6"),
     callees: &[
@@ -82658,7 +82658,7 @@ fn ts_member_getownpropertynames(ctx: &mut dyn p::PlanContext, entry: u32) -> Re
     Ok(Value::Null)
 }
 
-static TS_MEMBER_GETOWNPROPERTYSYMBOLS: p::HelperPlan = p::HelperPlan {
+const TS_MEMBER_GETOWNPROPERTYSYMBOLS: p::HelperPlan = p::HelperPlan {
     name: "ts.member.getOwnPropertySymbols",
     function: p::function("79f048c5faf2aea83e6b6cc7fa56c425fe313ed110f00cd30623692ccf63a3ad"),
     callees: &[
@@ -82874,7 +82874,7 @@ fn ts_member_getownpropertysymbols(ctx: &mut dyn p::PlanContext, entry: u32) -> 
     Ok(Value::Null)
 }
 
-static TS_MEMBER_GETPROTOTYPEOF: p::HelperPlan = p::HelperPlan {
+const TS_MEMBER_GETPROTOTYPEOF: p::HelperPlan = p::HelperPlan {
     name: "ts.member.getPrototypeOf",
     function: p::function("5c504f4afdae7636b4dcb3f43e847695b62f96049143d35148de63fe51c3e77d"),
     callees: &[
@@ -83090,7 +83090,7 @@ fn ts_member_getprototypeof(ctx: &mut dyn p::PlanContext, entry: u32) -> Result<
     Ok(Value::Null)
 }
 
-static TS_MEMBER_GETSECONDS: p::HelperPlan = p::HelperPlan {
+const TS_MEMBER_GETSECONDS: p::HelperPlan = p::HelperPlan {
     name: "ts.member.getSeconds",
     function: p::function("48c670482c6bdd204e2c4e8cdcad7c891261e3d506691e48983895f88ec8d0b9"),
     callees: &[
@@ -83342,7 +83342,7 @@ fn ts_member_getseconds(ctx: &mut dyn p::PlanContext, entry: u32) -> Result<Valu
     Ok(Value::Null)
 }
 
-static TS_MEMBER_GETTIME: p::HelperPlan = p::HelperPlan {
+const TS_MEMBER_GETTIME: p::HelperPlan = p::HelperPlan {
     name: "ts.member.getTime",
     function: p::function("6249f0955f2e47d650e7a799cb0dfa179d89eb78e1a68a0ab0a334b67aaec1ed"),
     callees: &[
@@ -83594,7 +83594,7 @@ fn ts_member_gettime(ctx: &mut dyn p::PlanContext, entry: u32) -> Result<Value, 
     Ok(Value::Null)
 }
 
-static TS_MEMBER_GETTIMEZONEOFFSET: p::HelperPlan = p::HelperPlan {
+const TS_MEMBER_GETTIMEZONEOFFSET: p::HelperPlan = p::HelperPlan {
     name: "ts.member.getTimezoneOffset",
     function: p::function("f87fd27f0755011dee3eaa0eb2e0a38aa291478cfef6ac36fbc7b2cb39f8c528"),
     callees: &[
@@ -83848,7 +83848,7 @@ fn ts_member_gettimezoneoffset(ctx: &mut dyn p::PlanContext, entry: u32) -> Resu
     Ok(Value::Null)
 }
 
-static TS_MEMBER_GETUTCDATE: p::HelperPlan = p::HelperPlan {
+const TS_MEMBER_GETUTCDATE: p::HelperPlan = p::HelperPlan {
     name: "ts.member.getUTCDate",
     function: p::function("db59fca1d3b81fcca86ca3b3c4f42bfc60d2da7c0686804e721bbdee02cd7d19"),
     callees: &[
@@ -84100,7 +84100,7 @@ fn ts_member_getutcdate(ctx: &mut dyn p::PlanContext, entry: u32) -> Result<Valu
     Ok(Value::Null)
 }
 
-static TS_MEMBER_GETUTCDAY: p::HelperPlan = p::HelperPlan {
+const TS_MEMBER_GETUTCDAY: p::HelperPlan = p::HelperPlan {
     name: "ts.member.getUTCDay",
     function: p::function("290183587347406868d87dd53318328b852c636dc29bced2086254f908a3d6ab"),
     callees: &[
@@ -84352,7 +84352,7 @@ fn ts_member_getutcday(ctx: &mut dyn p::PlanContext, entry: u32) -> Result<Value
     Ok(Value::Null)
 }
 
-static TS_MEMBER_GETUTCFULLYEAR: p::HelperPlan = p::HelperPlan {
+const TS_MEMBER_GETUTCFULLYEAR: p::HelperPlan = p::HelperPlan {
     name: "ts.member.getUTCFullYear",
     function: p::function("09dc49d8e6ef78734e81fca4b6561a470b92ba615a207872bbb516123f57c88d"),
     callees: &[
@@ -84604,7 +84604,7 @@ fn ts_member_getutcfullyear(ctx: &mut dyn p::PlanContext, entry: u32) -> Result<
     Ok(Value::Null)
 }
 
-static TS_MEMBER_GETUTCHOURS: p::HelperPlan = p::HelperPlan {
+const TS_MEMBER_GETUTCHOURS: p::HelperPlan = p::HelperPlan {
     name: "ts.member.getUTCHours",
     function: p::function("b7243bf024b34eacd774f90e516c9e739c4cf9e8e6efdd941b1d018150fa5c3e"),
     callees: &[
@@ -84856,7 +84856,7 @@ fn ts_member_getutchours(ctx: &mut dyn p::PlanContext, entry: u32) -> Result<Val
     Ok(Value::Null)
 }
 
-static TS_MEMBER_GETUTCMILLISECONDS: p::HelperPlan = p::HelperPlan {
+const TS_MEMBER_GETUTCMILLISECONDS: p::HelperPlan = p::HelperPlan {
     name: "ts.member.getUTCMilliseconds",
     function: p::function("279bbdd63503e35d8f1bd8784a97cb520720c406de9541a0169182e175e36752"),
     callees: &[
@@ -85108,7 +85108,7 @@ fn ts_member_getutcmilliseconds(ctx: &mut dyn p::PlanContext, entry: u32) -> Res
     Ok(Value::Null)
 }
 
-static TS_MEMBER_GETUTCMINUTES: p::HelperPlan = p::HelperPlan {
+const TS_MEMBER_GETUTCMINUTES: p::HelperPlan = p::HelperPlan {
     name: "ts.member.getUTCMinutes",
     function: p::function("27745d0736e797bdd935619c551ac961c54ef15bab0f6e5007b6768db6387d52"),
     callees: &[
@@ -85360,7 +85360,7 @@ fn ts_member_getutcminutes(ctx: &mut dyn p::PlanContext, entry: u32) -> Result<V
     Ok(Value::Null)
 }
 
-static TS_MEMBER_GETUTCMONTH: p::HelperPlan = p::HelperPlan {
+const TS_MEMBER_GETUTCMONTH: p::HelperPlan = p::HelperPlan {
     name: "ts.member.getUTCMonth",
     function: p::function("f9a1301f8647af30c9e6a48aa4b32cd527fba520e3728efabfd7c77d7260664d"),
     callees: &[
@@ -85612,7 +85612,7 @@ fn ts_member_getutcmonth(ctx: &mut dyn p::PlanContext, entry: u32) -> Result<Val
     Ok(Value::Null)
 }
 
-static TS_MEMBER_GETUTCSECONDS: p::HelperPlan = p::HelperPlan {
+const TS_MEMBER_GETUTCSECONDS: p::HelperPlan = p::HelperPlan {
     name: "ts.member.getUTCSeconds",
     function: p::function("2908ed188cc0c364d471cfd72b6e61ac2eaaa0b60b653507499c2d16a1ab2193"),
     callees: &[
@@ -85864,7 +85864,7 @@ fn ts_member_getutcseconds(ctx: &mut dyn p::PlanContext, entry: u32) -> Result<V
     Ok(Value::Null)
 }
 
-static TS_MEMBER_GROUPBY: p::HelperPlan = p::HelperPlan {
+const TS_MEMBER_GROUPBY: p::HelperPlan = p::HelperPlan {
     name: "ts.member.groupBy",
     function: p::function("2f6d9fa788340934de92e27e5e4a63e2bdbea7f9dd77af85864c0c5fde8ae12f"),
     callees: &[
@@ -86099,7 +86099,7 @@ fn ts_member_groupby(ctx: &mut dyn p::PlanContext, entry: u32) -> Result<Value, 
     Ok(Value::Null)
 }
 
-static TS_MEMBER_HAS: p::HelperPlan = p::HelperPlan {
+const TS_MEMBER_HAS: p::HelperPlan = p::HelperPlan {
     name: "ts.member.has",
     function: p::function("54eebc8edcbd015907362806af368d63929212a3bde743d091ac0d85372307a2"),
     callees: &[
@@ -86407,7 +86407,7 @@ fn ts_member_has(ctx: &mut dyn p::PlanContext, entry: u32) -> Result<Value, p::P
     Ok(Value::Null)
 }
 
-static TS_MEMBER_HASOWN: p::HelperPlan = p::HelperPlan {
+const TS_MEMBER_HASOWN: p::HelperPlan = p::HelperPlan {
     name: "ts.member.hasOwn",
     function: p::function("620f736cb9b723efa063155ed42998236c360f1b801042b2c61a8c5effc1ce69"),
     callees: &[
@@ -86623,7 +86623,7 @@ fn ts_member_hasown(ctx: &mut dyn p::PlanContext, entry: u32) -> Result<Value, p
     Ok(Value::Null)
 }
 
-static TS_MEMBER_HASOWNPROPERTY: p::HelperPlan = p::HelperPlan {
+const TS_MEMBER_HASOWNPROPERTY: p::HelperPlan = p::HelperPlan {
     name: "ts.member.hasOwnProperty",
     function: p::function("2394a24f887c38b57f1731057f5dc49158ec6bd543cef290f667108b4c8f8e33"),
     callees: &[
@@ -87088,7 +87088,7 @@ fn ts_member_hasownproperty(ctx: &mut dyn p::PlanContext, entry: u32) -> Result<
     Ok(Value::Null)
 }
 
-static TS_MEMBER_HYPOT: p::HelperPlan = p::HelperPlan {
+const TS_MEMBER_HYPOT: p::HelperPlan = p::HelperPlan {
     name: "ts.member.hypot",
     function: p::function("8a63097034f0cec103db37573bad3fa13c1b054dd68609de52b34d3da634f094"),
     callees: &[
@@ -87304,7 +87304,7 @@ fn ts_member_hypot(ctx: &mut dyn p::PlanContext, entry: u32) -> Result<Value, p:
     Ok(Value::Null)
 }
 
-static TS_MEMBER_IMUL: p::HelperPlan = p::HelperPlan {
+const TS_MEMBER_IMUL: p::HelperPlan = p::HelperPlan {
     name: "ts.member.imul",
     function: p::function("8f040f209975848eb83bf0a8a04079d35976f43b5dc8f53c777fbd79628ed211"),
     callees: &[
@@ -87520,7 +87520,7 @@ fn ts_member_imul(ctx: &mut dyn p::PlanContext, entry: u32) -> Result<Value, p::
     Ok(Value::Null)
 }
 
-static TS_MEMBER_INCLUDES: p::HelperPlan = p::HelperPlan {
+const TS_MEMBER_INCLUDES: p::HelperPlan = p::HelperPlan {
     name: "ts.member.includes",
     function: p::function("94df89c9a306ad2aac5c6044f9a8bfccb527f105d61524e305f40a345dc85899"),
     callees: &[
@@ -87826,7 +87826,7 @@ fn ts_member_includes(ctx: &mut dyn p::PlanContext, entry: u32) -> Result<Value,
     Ok(Value::Null)
 }
 
-static TS_MEMBER_INDEXOF: p::HelperPlan = p::HelperPlan {
+const TS_MEMBER_INDEXOF: p::HelperPlan = p::HelperPlan {
     name: "ts.member.indexOf",
     function: p::function("dc7001587fb9d534d939ff1d3b4f83ed3d6244a7a6b7a866ccaef96b2945fcc8"),
     callees: &[
@@ -88132,7 +88132,7 @@ fn ts_member_indexof(ctx: &mut dyn p::PlanContext, entry: u32) -> Result<Value, 
     Ok(Value::Null)
 }
 
-static TS_MEMBER_INFO: p::HelperPlan = p::HelperPlan {
+const TS_MEMBER_INFO: p::HelperPlan = p::HelperPlan {
     name: "ts.member.info",
     function: p::function("c19760c168454c5e6a70e3b50d77169afb23180aa1f1b3fcc5917bfcd6d20ea3"),
     callees: &[
@@ -88348,7 +88348,7 @@ fn ts_member_info(ctx: &mut dyn p::PlanContext, entry: u32) -> Result<Value, p::
     Ok(Value::Null)
 }
 
-static TS_MEMBER_INTERSECTION: p::HelperPlan = p::HelperPlan {
+const TS_MEMBER_INTERSECTION: p::HelperPlan = p::HelperPlan {
     name: "ts.member.intersection",
     function: p::function("a13ecc3a2b55d97e07504148672f62e1d4310dfa9d976557a7c8777b14feff00"),
     callees: &[
@@ -88582,7 +88582,7 @@ fn ts_member_intersection(ctx: &mut dyn p::PlanContext, entry: u32) -> Result<Va
     Ok(Value::Null)
 }
 
-static TS_MEMBER_IS: p::HelperPlan = p::HelperPlan {
+const TS_MEMBER_IS: p::HelperPlan = p::HelperPlan {
     name: "ts.member.is",
     function: p::function("85392aa96ed1b81fe79922219b8acd311ae7dbc9b811777a80cfd9ae932ccc2e"),
     callees: &[
@@ -88798,7 +88798,7 @@ fn ts_member_is(ctx: &mut dyn p::PlanContext, entry: u32) -> Result<Value, p::Pl
     Ok(Value::Null)
 }
 
-static TS_MEMBER_ISARRAY: p::HelperPlan = p::HelperPlan {
+const TS_MEMBER_ISARRAY: p::HelperPlan = p::HelperPlan {
     name: "ts.member.isArray",
     function: p::function("b6307d53a6f8ed29511b3df79d8a7b1f30341aa90b13f95e2cbc059434395bed"),
     callees: &[
@@ -89014,7 +89014,7 @@ fn ts_member_isarray(ctx: &mut dyn p::PlanContext, entry: u32) -> Result<Value, 
     Ok(Value::Null)
 }
 
-static TS_MEMBER_ISDISJOINTFROM: p::HelperPlan = p::HelperPlan {
+const TS_MEMBER_ISDISJOINTFROM: p::HelperPlan = p::HelperPlan {
     name: "ts.member.isDisjointFrom",
     function: p::function("0734ca9c84efde2b0ff68e04de9e29726d3743b6b7fd9389257209b065e7578d"),
     callees: &[
@@ -89248,7 +89248,7 @@ fn ts_member_isdisjointfrom(ctx: &mut dyn p::PlanContext, entry: u32) -> Result<
     Ok(Value::Null)
 }
 
-static TS_MEMBER_ISEXTENSIBLE: p::HelperPlan = p::HelperPlan {
+const TS_MEMBER_ISEXTENSIBLE: p::HelperPlan = p::HelperPlan {
     name: "ts.member.isExtensible",
     function: p::function("3b8962d155c070f205f92e87e98b58e04fd6a0f57d10f801871b797f7356277f"),
     callees: &[
@@ -89464,7 +89464,7 @@ fn ts_member_isextensible(ctx: &mut dyn p::PlanContext, entry: u32) -> Result<Va
     Ok(Value::Null)
 }
 
-static TS_MEMBER_ISFINITE: p::HelperPlan = p::HelperPlan {
+const TS_MEMBER_ISFINITE: p::HelperPlan = p::HelperPlan {
     name: "ts.member.isFinite",
     function: p::function("40e6e9a8a9175381829104610298d77acde964e66c69ee22fc0b5aa4930f42f8"),
     callees: &[
@@ -89680,7 +89680,7 @@ fn ts_member_isfinite(ctx: &mut dyn p::PlanContext, entry: u32) -> Result<Value,
     Ok(Value::Null)
 }
 
-static TS_MEMBER_ISFROZEN: p::HelperPlan = p::HelperPlan {
+const TS_MEMBER_ISFROZEN: p::HelperPlan = p::HelperPlan {
     name: "ts.member.isFrozen",
     function: p::function("f297abb89ae9b0f92d1837a1a25f1a76d718007d665ae983a0d0d15b72dfc44a"),
     callees: &[
@@ -89896,7 +89896,7 @@ fn ts_member_isfrozen(ctx: &mut dyn p::PlanContext, entry: u32) -> Result<Value,
     Ok(Value::Null)
 }
 
-static TS_MEMBER_ISINTEGER: p::HelperPlan = p::HelperPlan {
+const TS_MEMBER_ISINTEGER: p::HelperPlan = p::HelperPlan {
     name: "ts.member.isInteger",
     function: p::function("2543ba1d2a7ebc3ea3c2a3995ee5af0c8334dd44458414fa996edd2a7620875c"),
     callees: &[
@@ -90112,7 +90112,7 @@ fn ts_member_isinteger(ctx: &mut dyn p::PlanContext, entry: u32) -> Result<Value
     Ok(Value::Null)
 }
 
-static TS_MEMBER_ISNAN: p::HelperPlan = p::HelperPlan {
+const TS_MEMBER_ISNAN: p::HelperPlan = p::HelperPlan {
     name: "ts.member.isNaN",
     function: p::function("22ffcee9923577bf0e1c56f72543adf40344b45ed503dd871be2c8e4039cd046"),
     callees: &[
@@ -90328,7 +90328,7 @@ fn ts_member_isnan(ctx: &mut dyn p::PlanContext, entry: u32) -> Result<Value, p:
     Ok(Value::Null)
 }
 
-static TS_MEMBER_ISPROTOTYPEOF: p::HelperPlan = p::HelperPlan {
+const TS_MEMBER_ISPROTOTYPEOF: p::HelperPlan = p::HelperPlan {
     name: "ts.member.isPrototypeOf",
     function: p::function("138d22ec35f3d95d5bdb4d7cc9ece811771633e583fc9a112e5a68777e85244a"),
     callees: &[
@@ -90793,7 +90793,7 @@ fn ts_member_isprototypeof(ctx: &mut dyn p::PlanContext, entry: u32) -> Result<V
     Ok(Value::Null)
 }
 
-static TS_MEMBER_ISSAFEINTEGER: p::HelperPlan = p::HelperPlan {
+const TS_MEMBER_ISSAFEINTEGER: p::HelperPlan = p::HelperPlan {
     name: "ts.member.isSafeInteger",
     function: p::function("df7d0b1b0cf4a2173283136872799c95e5935bfbdcf85cb59a040bb33c467396"),
     callees: &[
@@ -91009,7 +91009,7 @@ fn ts_member_issafeinteger(ctx: &mut dyn p::PlanContext, entry: u32) -> Result<V
     Ok(Value::Null)
 }
 
-static TS_MEMBER_ISSEALED: p::HelperPlan = p::HelperPlan {
+const TS_MEMBER_ISSEALED: p::HelperPlan = p::HelperPlan {
     name: "ts.member.isSealed",
     function: p::function("80bf93f01cf6d94a28d7ee4a904c0314ab9f20393fd81461604d10fcd992ad0b"),
     callees: &[
@@ -91225,7 +91225,7 @@ fn ts_member_issealed(ctx: &mut dyn p::PlanContext, entry: u32) -> Result<Value,
     Ok(Value::Null)
 }
 
-static TS_MEMBER_ISSUBSETOF: p::HelperPlan = p::HelperPlan {
+const TS_MEMBER_ISSUBSETOF: p::HelperPlan = p::HelperPlan {
     name: "ts.member.isSubsetOf",
     function: p::function("56dad7baad5e4c54b5ce827c3032b6183b3427c237ee4712ae451e8669c3511c"),
     callees: &[
@@ -91459,7 +91459,7 @@ fn ts_member_issubsetof(ctx: &mut dyn p::PlanContext, entry: u32) -> Result<Valu
     Ok(Value::Null)
 }
 
-static TS_MEMBER_ISSUPERSETOF: p::HelperPlan = p::HelperPlan {
+const TS_MEMBER_ISSUPERSETOF: p::HelperPlan = p::HelperPlan {
     name: "ts.member.isSupersetOf",
     function: p::function("9ba07708d1af57694e82583e42ffbe78bc24d46458c1a24ae1acc425f3a17b33"),
     callees: &[
@@ -91693,7 +91693,7 @@ fn ts_member_issupersetof(ctx: &mut dyn p::PlanContext, entry: u32) -> Result<Va
     Ok(Value::Null)
 }
 
-static TS_MEMBER_JOIN: p::HelperPlan = p::HelperPlan {
+const TS_MEMBER_JOIN: p::HelperPlan = p::HelperPlan {
     name: "ts.member.join",
     function: p::function("1bd1bd420d9dfc4308bf8e49c24f2d33a7baef4b51ce4c66f1c758b601698833"),
     callees: &[
@@ -91962,7 +91962,7 @@ fn ts_member_join(ctx: &mut dyn p::PlanContext, entry: u32) -> Result<Value, p::
     Ok(Value::Null)
 }
 
-static TS_MEMBER_KEYS: p::HelperPlan = p::HelperPlan {
+const TS_MEMBER_KEYS: p::HelperPlan = p::HelperPlan {
     name: "ts.member.keys",
     function: p::function("9b247c178ece74034105ffcef5323eeb926a9bdcea74ba8d40053d213e80d23d"),
     callees: &[
@@ -92363,7 +92363,7 @@ fn ts_member_keys(ctx: &mut dyn p::PlanContext, entry: u32) -> Result<Value, p::
     Ok(Value::Null)
 }
 
-static TS_MEMBER_LASTINDEXOF: p::HelperPlan = p::HelperPlan {
+const TS_MEMBER_LASTINDEXOF: p::HelperPlan = p::HelperPlan {
     name: "ts.member.lastIndexOf",
     function: p::function("469f8a3a4264fda029045953bd8e0d24a091dbf2a263faa8be94f3b39f3636b8"),
     callees: &[
@@ -92669,7 +92669,7 @@ fn ts_member_lastindexof(ctx: &mut dyn p::PlanContext, entry: u32) -> Result<Val
     Ok(Value::Null)
 }
 
-static TS_MEMBER_LENGTH: p::HelperPlan = p::HelperPlan {
+const TS_MEMBER_LENGTH: p::HelperPlan = p::HelperPlan {
     name: "ts.member.length",
     function: p::function("21bf666ad6627b6e6c20f996d295982784ec7dd3e7a40f7e24b59f1cb7bfdb2c"),
     callees: &[
@@ -92889,7 +92889,7 @@ fn ts_member_length(ctx: &mut dyn p::PlanContext, entry: u32) -> Result<Value, p
     Ok(Value::Null)
 }
 
-static TS_MEMBER_LOCALECOMPARE: p::HelperPlan = p::HelperPlan {
+const TS_MEMBER_LOCALECOMPARE: p::HelperPlan = p::HelperPlan {
     name: "ts.member.localeCompare",
     function: p::function("bb9d16273c3ab9c2e38505e09b77b21d208dc0796fd309f85017e45a9b052266"),
     callees: &[
@@ -93126,7 +93126,7 @@ fn ts_member_localecompare(ctx: &mut dyn p::PlanContext, entry: u32) -> Result<V
     Ok(Value::Null)
 }
 
-static TS_MEMBER_LOG: p::HelperPlan = p::HelperPlan {
+const TS_MEMBER_LOG: p::HelperPlan = p::HelperPlan {
     name: "ts.member.log",
     function: p::function("4a2ac639d3e17926dfe3c458131a97a922ea1063212979bf71f4eb2502d6fe0d"),
     callees: &[
@@ -93362,7 +93362,7 @@ fn ts_member_log(ctx: &mut dyn p::PlanContext, entry: u32) -> Result<Value, p::P
     Ok(Value::Null)
 }
 
-static TS_MEMBER_LOG10: p::HelperPlan = p::HelperPlan {
+const TS_MEMBER_LOG10: p::HelperPlan = p::HelperPlan {
     name: "ts.member.log10",
     function: p::function("8533450feb43ec8ce0f764b5d31f13782fa7bcd7c8d7d77c3c8e41f2f5b11467"),
     callees: &[
@@ -93578,7 +93578,7 @@ fn ts_member_log10(ctx: &mut dyn p::PlanContext, entry: u32) -> Result<Value, p:
     Ok(Value::Null)
 }
 
-static TS_MEMBER_LOG1P: p::HelperPlan = p::HelperPlan {
+const TS_MEMBER_LOG1P: p::HelperPlan = p::HelperPlan {
     name: "ts.member.log1p",
     function: p::function("154323ebee2d6263b2cd3b53529aec6ac97fedc2a91a4058784f69c3c52a40a7"),
     callees: &[
@@ -93794,7 +93794,7 @@ fn ts_member_log1p(ctx: &mut dyn p::PlanContext, entry: u32) -> Result<Value, p:
     Ok(Value::Null)
 }
 
-static TS_MEMBER_LOG2: p::HelperPlan = p::HelperPlan {
+const TS_MEMBER_LOG2: p::HelperPlan = p::HelperPlan {
     name: "ts.member.log2",
     function: p::function("b6a292cb1f361b96b18172eeacfe4f791f9ec9dfa1f24b30775dc7cdbb56075d"),
     callees: &[
@@ -94010,7 +94010,7 @@ fn ts_member_log2(ctx: &mut dyn p::PlanContext, entry: u32) -> Result<Value, p::
     Ok(Value::Null)
 }
 
-static TS_MEMBER_MAP: p::HelperPlan = p::HelperPlan {
+const TS_MEMBER_MAP: p::HelperPlan = p::HelperPlan {
     name: "ts.member.map",
     function: p::function("85b49a0be13381e05a7081b4d07ef05271b5fdcbd3856a69631b62378be3af3d"),
     callees: &[
@@ -94279,7 +94279,7 @@ fn ts_member_map(ctx: &mut dyn p::PlanContext, entry: u32) -> Result<Value, p::P
     Ok(Value::Null)
 }
 
-static TS_MEMBER_MATCH: p::HelperPlan = p::HelperPlan {
+const TS_MEMBER_MATCH: p::HelperPlan = p::HelperPlan {
     name: "ts.member.match",
     function: p::function("4b4b0c86b3eaae6c3e7e959300c52d67c3a4b70d7e221644db607e0e9944c580"),
     callees: &[
@@ -94513,7 +94513,7 @@ fn ts_member_match(ctx: &mut dyn p::PlanContext, entry: u32) -> Result<Value, p:
     Ok(Value::Null)
 }
 
-static TS_MEMBER_MATCHALL: p::HelperPlan = p::HelperPlan {
+const TS_MEMBER_MATCHALL: p::HelperPlan = p::HelperPlan {
     name: "ts.member.matchAll",
     function: p::function("9f7a79bdee1b5a1847ba24abf37ad7d220d3f2221f0d22d4a45cc40adb54336f"),
     callees: &[
@@ -94747,7 +94747,7 @@ fn ts_member_matchall(ctx: &mut dyn p::PlanContext, entry: u32) -> Result<Value,
     Ok(Value::Null)
 }
 
-static TS_MEMBER_MAX: p::HelperPlan = p::HelperPlan {
+const TS_MEMBER_MAX: p::HelperPlan = p::HelperPlan {
     name: "ts.member.max",
     function: p::function("e6590495eb4e49a143326f802add97ebe1065b3f5e2d70dc9780b4d76d266aaa"),
     callees: &[
@@ -94963,7 +94963,7 @@ fn ts_member_max(ctx: &mut dyn p::PlanContext, entry: u32) -> Result<Value, p::P
     Ok(Value::Null)
 }
 
-static TS_MEMBER_MESSAGE: p::HelperPlan = p::HelperPlan {
+const TS_MEMBER_MESSAGE: p::HelperPlan = p::HelperPlan {
     name: "ts.member.message",
     function: p::function("8b3555418f4a54549008c0ee1b020f31cd2957181d4d410e1c3403e1fc555b34"),
     callees: &[
@@ -95254,7 +95254,7 @@ fn ts_member_message(ctx: &mut dyn p::PlanContext, entry: u32) -> Result<Value, 
     Ok(Value::Null)
 }
 
-static TS_MEMBER_MIN: p::HelperPlan = p::HelperPlan {
+const TS_MEMBER_MIN: p::HelperPlan = p::HelperPlan {
     name: "ts.member.min",
     function: p::function("ec09997e39895d72b0077a73140f22bcd2ba36d2974d54cddcdbb9eef4acc836"),
     callees: &[
@@ -95470,7 +95470,7 @@ fn ts_member_min(ctx: &mut dyn p::PlanContext, entry: u32) -> Result<Value, p::P
     Ok(Value::Null)
 }
 
-static TS_MEMBER_NAME: p::HelperPlan = p::HelperPlan {
+const TS_MEMBER_NAME: p::HelperPlan = p::HelperPlan {
     name: "ts.member.name",
     function: p::function("b899f3d50e190176d6b5cc5f81cae2c7debc1866c3cee23c4f8769bcb9e58218"),
     callees: &[
@@ -95769,7 +95769,7 @@ fn ts_member_name(ctx: &mut dyn p::PlanContext, entry: u32) -> Result<Value, p::
     Ok(Value::Null)
 }
 
-static TS_MEMBER_NORMALIZE: p::HelperPlan = p::HelperPlan {
+const TS_MEMBER_NORMALIZE: p::HelperPlan = p::HelperPlan {
     name: "ts.member.normalize",
     function: p::function("8b0265bd8b404f785eb0845a89fb8f90c99a338b460dbef93f021b37c82269e4"),
     callees: &[
@@ -96003,7 +96003,7 @@ fn ts_member_normalize(ctx: &mut dyn p::PlanContext, entry: u32) -> Result<Value
     Ok(Value::Null)
 }
 
-static TS_MEMBER_NOW: p::HelperPlan = p::HelperPlan {
+const TS_MEMBER_NOW: p::HelperPlan = p::HelperPlan {
     name: "ts.member.now",
     function: p::function("a92f263e52ee96e4845fc0dcafdb69ab8ee0b83dc1d46ef2deae41759270573f"),
     callees: &[
@@ -96219,7 +96219,7 @@ fn ts_member_now(ctx: &mut dyn p::PlanContext, entry: u32) -> Result<Value, p::P
     Ok(Value::Null)
 }
 
-static TS_MEMBER_OF: p::HelperPlan = p::HelperPlan {
+const TS_MEMBER_OF: p::HelperPlan = p::HelperPlan {
     name: "ts.member.of",
     function: p::function("87e752e7fdb5517e35d30753678b9c95a105faeb6e0b703a6a0c9cda0a298efb"),
     callees: &[
@@ -96435,7 +96435,7 @@ fn ts_member_of(ctx: &mut dyn p::PlanContext, entry: u32) -> Result<Value, p::Pl
     Ok(Value::Null)
 }
 
-static TS_MEMBER_PADEND: p::HelperPlan = p::HelperPlan {
+const TS_MEMBER_PADEND: p::HelperPlan = p::HelperPlan {
     name: "ts.member.padEnd",
     function: p::function("66d5e393ba133d10284be50612ec967f7a92deaa88b23511f336faf266c275b7"),
     callees: &[
@@ -96669,7 +96669,7 @@ fn ts_member_padend(ctx: &mut dyn p::PlanContext, entry: u32) -> Result<Value, p
     Ok(Value::Null)
 }
 
-static TS_MEMBER_PADSTART: p::HelperPlan = p::HelperPlan {
+const TS_MEMBER_PADSTART: p::HelperPlan = p::HelperPlan {
     name: "ts.member.padStart",
     function: p::function("619361fd64865eb61c3bd7516993f0ea12879d9586fe1e969a2813a0fc149d67"),
     callees: &[
@@ -96903,7 +96903,7 @@ fn ts_member_padstart(ctx: &mut dyn p::PlanContext, entry: u32) -> Result<Value,
     Ok(Value::Null)
 }
 
-static TS_MEMBER_PARSE: p::HelperPlan = p::HelperPlan {
+const TS_MEMBER_PARSE: p::HelperPlan = p::HelperPlan {
     name: "ts.member.parse",
     function: p::function("46db4519025b5dfccd683f6d46b098891b4f450f10c2a761cb11230ec09b86f5"),
     callees: &[
@@ -97139,7 +97139,7 @@ fn ts_member_parse(ctx: &mut dyn p::PlanContext, entry: u32) -> Result<Value, p:
     Ok(Value::Null)
 }
 
-static TS_MEMBER_PARSEFLOAT: p::HelperPlan = p::HelperPlan {
+const TS_MEMBER_PARSEFLOAT: p::HelperPlan = p::HelperPlan {
     name: "ts.member.parseFloat",
     function: p::function("473b626e19b92022b9c7195332e9451ce215fabb7d2f55476d899e5f836a7bbe"),
     callees: &[
@@ -97354,7 +97354,7 @@ fn ts_member_parsefloat(ctx: &mut dyn p::PlanContext, entry: u32) -> Result<Valu
     Ok(Value::Null)
 }
 
-static TS_MEMBER_PARSEINT: p::HelperPlan = p::HelperPlan {
+const TS_MEMBER_PARSEINT: p::HelperPlan = p::HelperPlan {
     name: "ts.member.parseInt",
     function: p::function("489ad9ff96c07e0fb50e75eaee31c6510e025ade168ba3e6b5cbd74c6fd25a7a"),
     callees: &[
@@ -97569,7 +97569,7 @@ fn ts_member_parseint(ctx: &mut dyn p::PlanContext, entry: u32) -> Result<Value,
     Ok(Value::Null)
 }
 
-static TS_MEMBER_POP: p::HelperPlan = p::HelperPlan {
+const TS_MEMBER_POP: p::HelperPlan = p::HelperPlan {
     name: "ts.member.pop",
     function: p::function("b0542a8335f93b31f0c100755bf4acae302c46a76471c915cd66a297571588e5"),
     callees: &[
@@ -97838,7 +97838,7 @@ fn ts_member_pop(ctx: &mut dyn p::PlanContext, entry: u32) -> Result<Value, p::P
     Ok(Value::Null)
 }
 
-static TS_MEMBER_POW: p::HelperPlan = p::HelperPlan {
+const TS_MEMBER_POW: p::HelperPlan = p::HelperPlan {
     name: "ts.member.pow",
     function: p::function("126a7f94f9ab1d6a002b91e59c20a934b674239c04084ba00c7bc97d7bc107d8"),
     callees: &[
@@ -98054,7 +98054,7 @@ fn ts_member_pow(ctx: &mut dyn p::PlanContext, entry: u32) -> Result<Value, p::P
     Ok(Value::Null)
 }
 
-static TS_MEMBER_PREVENTEXTENSIONS: p::HelperPlan = p::HelperPlan {
+const TS_MEMBER_PREVENTEXTENSIONS: p::HelperPlan = p::HelperPlan {
     name: "ts.member.preventExtensions",
     function: p::function("9d471c9536d474d592c16ac3ce5bda8ee815c899bb58acde2f7cc9dd809c479b"),
     callees: &[
@@ -98270,7 +98270,7 @@ fn ts_member_preventextensions(ctx: &mut dyn p::PlanContext, entry: u32) -> Resu
     Ok(Value::Null)
 }
 
-static TS_MEMBER_PROPERTYISENUMERABLE: p::HelperPlan = p::HelperPlan {
+const TS_MEMBER_PROPERTYISENUMERABLE: p::HelperPlan = p::HelperPlan {
     name: "ts.member.propertyIsEnumerable",
     function: p::function("a50cb167aa501a11e403008f2aa9a7a3147244b0e249eddfb9f4e09e08bef545"),
     callees: &[
@@ -98735,7 +98735,7 @@ fn ts_member_propertyisenumerable(ctx: &mut dyn p::PlanContext, entry: u32) -> R
     Ok(Value::Null)
 }
 
-static TS_MEMBER_PROTOTYPE: p::HelperPlan = p::HelperPlan {
+const TS_MEMBER_PROTOTYPE: p::HelperPlan = p::HelperPlan {
     name: "ts.member.prototype",
     function: p::function("f6d647e6eddbce57ca00ca695db31456bb17b3e0ce3fa97ea25db42be4b86f10"),
     callees: &[
@@ -99272,7 +99272,7 @@ fn ts_member_prototype(ctx: &mut dyn p::PlanContext, entry: u32) -> Result<Value
     Ok(Value::Null)
 }
 
-static TS_MEMBER_PUSH: p::HelperPlan = p::HelperPlan {
+const TS_MEMBER_PUSH: p::HelperPlan = p::HelperPlan {
     name: "ts.member.push",
     function: p::function("d747698a331b74ac23353ffea6087206f43e813736f5085ff93bd557fb0d2998"),
     callees: &[
@@ -99541,7 +99541,7 @@ fn ts_member_push(ctx: &mut dyn p::PlanContext, entry: u32) -> Result<Value, p::
     Ok(Value::Null)
 }
 
-static TS_MEMBER_RACE: p::HelperPlan = p::HelperPlan {
+const TS_MEMBER_RACE: p::HelperPlan = p::HelperPlan {
     name: "ts.member.race",
     function: p::function("5f9cd9b05b9fec7a1f2a110bae18849f43b99124d695160f58be27d090e83009"),
     callees: &[
@@ -99757,7 +99757,7 @@ fn ts_member_race(ctx: &mut dyn p::PlanContext, entry: u32) -> Result<Value, p::
     Ok(Value::Null)
 }
 
-static TS_MEMBER_RANDOM: p::HelperPlan = p::HelperPlan {
+const TS_MEMBER_RANDOM: p::HelperPlan = p::HelperPlan {
     name: "ts.member.random",
     function: p::function("ce688292c2c342038c74044e13c6d01ead740becf3e094947cd7f491422456dd"),
     callees: &[
@@ -99973,7 +99973,7 @@ fn ts_member_random(ctx: &mut dyn p::PlanContext, entry: u32) -> Result<Value, p
     Ok(Value::Null)
 }
 
-static TS_MEMBER_RAW: p::HelperPlan = p::HelperPlan {
+const TS_MEMBER_RAW: p::HelperPlan = p::HelperPlan {
     name: "ts.member.raw",
     function: p::function("b517bcd44490694394e34d5c410532da8beafe9d6ee360892e3c884c6bdd80f0"),
     callees: &[
@@ -100189,7 +100189,7 @@ fn ts_member_raw(ctx: &mut dyn p::PlanContext, entry: u32) -> Result<Value, p::P
     Ok(Value::Null)
 }
 
-static TS_MEMBER_REDUCE: p::HelperPlan = p::HelperPlan {
+const TS_MEMBER_REDUCE: p::HelperPlan = p::HelperPlan {
     name: "ts.member.reduce",
     function: p::function("379799ee0873fca25c2b695fa154cb1efd29e258d047dffe975d26e7a9a60cca"),
     callees: &[
@@ -100458,7 +100458,7 @@ fn ts_member_reduce(ctx: &mut dyn p::PlanContext, entry: u32) -> Result<Value, p
     Ok(Value::Null)
 }
 
-static TS_MEMBER_REDUCERIGHT: p::HelperPlan = p::HelperPlan {
+const TS_MEMBER_REDUCERIGHT: p::HelperPlan = p::HelperPlan {
     name: "ts.member.reduceRight",
     function: p::function("a50dba29b8f957b2a1b17889430a008cc7e6ab567101198fa254ef049b76cc89"),
     callees: &[
@@ -100727,7 +100727,7 @@ fn ts_member_reduceright(ctx: &mut dyn p::PlanContext, entry: u32) -> Result<Val
     Ok(Value::Null)
 }
 
-static TS_MEMBER_REJECT: p::HelperPlan = p::HelperPlan {
+const TS_MEMBER_REJECT: p::HelperPlan = p::HelperPlan {
     name: "ts.member.reject",
     function: p::function("2509766bf55fb59b5ccc2e1c3a734066eb65b2d8e6c3987f2eebd47eaf3ec87a"),
     callees: &[
@@ -100943,7 +100943,7 @@ fn ts_member_reject(ctx: &mut dyn p::PlanContext, entry: u32) -> Result<Value, p
     Ok(Value::Null)
 }
 
-static TS_MEMBER_REPEAT: p::HelperPlan = p::HelperPlan {
+const TS_MEMBER_REPEAT: p::HelperPlan = p::HelperPlan {
     name: "ts.member.repeat",
     function: p::function("f1879d9708ad8f21ad6c0501be185211f593e096faef19b6432d687ecbd6886a"),
     callees: &[
@@ -101177,7 +101177,7 @@ fn ts_member_repeat(ctx: &mut dyn p::PlanContext, entry: u32) -> Result<Value, p
     Ok(Value::Null)
 }
 
-static TS_MEMBER_REPLACE: p::HelperPlan = p::HelperPlan {
+const TS_MEMBER_REPLACE: p::HelperPlan = p::HelperPlan {
     name: "ts.member.replace",
     function: p::function("224b34e134d88be870fa80c0b7478075537656cc8c6ddf99ae55060ebbf09824"),
     callees: &[
@@ -101411,7 +101411,7 @@ fn ts_member_replace(ctx: &mut dyn p::PlanContext, entry: u32) -> Result<Value, 
     Ok(Value::Null)
 }
 
-static TS_MEMBER_REPLACEALL: p::HelperPlan = p::HelperPlan {
+const TS_MEMBER_REPLACEALL: p::HelperPlan = p::HelperPlan {
     name: "ts.member.replaceAll",
     function: p::function("2047174c4100f1698f6582d51b5be086a1eb480d32f79ef026bb6e240edcfbde"),
     callees: &[
@@ -101645,7 +101645,7 @@ fn ts_member_replaceall(ctx: &mut dyn p::PlanContext, entry: u32) -> Result<Valu
     Ok(Value::Null)
 }
 
-static TS_MEMBER_RESOLVE: p::HelperPlan = p::HelperPlan {
+const TS_MEMBER_RESOLVE: p::HelperPlan = p::HelperPlan {
     name: "ts.member.resolve",
     function: p::function("0320c7fdbeebfa3a9449854cf76a2a7695b8bf538c6f170f9fd1ecb90b1e6ff9"),
     callees: &[
@@ -101861,7 +101861,7 @@ fn ts_member_resolve(ctx: &mut dyn p::PlanContext, entry: u32) -> Result<Value, 
     Ok(Value::Null)
 }
 
-static TS_MEMBER_REVERSE: p::HelperPlan = p::HelperPlan {
+const TS_MEMBER_REVERSE: p::HelperPlan = p::HelperPlan {
     name: "ts.member.reverse",
     function: p::function("92f076c1359f448302df7836b3c5f64494c26cdc32d0d3ac82156488bf1c384b"),
     callees: &[
@@ -102130,7 +102130,7 @@ fn ts_member_reverse(ctx: &mut dyn p::PlanContext, entry: u32) -> Result<Value, 
     Ok(Value::Null)
 }
 
-static TS_MEMBER_ROUND: p::HelperPlan = p::HelperPlan {
+const TS_MEMBER_ROUND: p::HelperPlan = p::HelperPlan {
     name: "ts.member.round",
     function: p::function("c588eb4e2963482cefab99ed8fc3ec651cb810191cd690be31c5e41b5edfdb24"),
     callees: &[
@@ -102346,7 +102346,7 @@ fn ts_member_round(ctx: &mut dyn p::PlanContext, entry: u32) -> Result<Value, p:
     Ok(Value::Null)
 }
 
-static TS_MEMBER_SEAL: p::HelperPlan = p::HelperPlan {
+const TS_MEMBER_SEAL: p::HelperPlan = p::HelperPlan {
     name: "ts.member.seal",
     function: p::function("7ab2df65451f97d5f2dd39691ea0b0fdbdbf261406dc8df103c1e7fc8c0e7dbc"),
     callees: &[
@@ -102562,7 +102562,7 @@ fn ts_member_seal(ctx: &mut dyn p::PlanContext, entry: u32) -> Result<Value, p::
     Ok(Value::Null)
 }
 
-static TS_MEMBER_SEARCH: p::HelperPlan = p::HelperPlan {
+const TS_MEMBER_SEARCH: p::HelperPlan = p::HelperPlan {
     name: "ts.member.search",
     function: p::function("4e7bfd883e3a56b89a22cc8326b67f2317c72672e23f52defed1f8b725c133c0"),
     callees: &[
@@ -102796,7 +102796,7 @@ fn ts_member_search(ctx: &mut dyn p::PlanContext, entry: u32) -> Result<Value, p
     Ok(Value::Null)
 }
 
-static TS_MEMBER_SET: p::HelperPlan = p::HelperPlan {
+const TS_MEMBER_SET: p::HelperPlan = p::HelperPlan {
     name: "ts.member.set",
     function: p::function("ee681b6d5904039936c42186d1c5ea918d558c9692c26dbf83b5a6beb58bb49b"),
     callees: &[
@@ -103067,7 +103067,7 @@ fn ts_member_set(ctx: &mut dyn p::PlanContext, entry: u32) -> Result<Value, p::P
     Ok(Value::Null)
 }
 
-static TS_MEMBER_SETDATE: p::HelperPlan = p::HelperPlan {
+const TS_MEMBER_SETDATE: p::HelperPlan = p::HelperPlan {
     name: "ts.member.setDate",
     function: p::function("1ebc791d95ba4b14346794b31cf4757a180a085b462177cfe972e2f66fa0ac80"),
     callees: &[
@@ -103319,7 +103319,7 @@ fn ts_member_setdate(ctx: &mut dyn p::PlanContext, entry: u32) -> Result<Value, 
     Ok(Value::Null)
 }
 
-static TS_MEMBER_SETFULLYEAR: p::HelperPlan = p::HelperPlan {
+const TS_MEMBER_SETFULLYEAR: p::HelperPlan = p::HelperPlan {
     name: "ts.member.setFullYear",
     function: p::function("58c75b4f88c48683d08d79ce8e66a8834878348f0f010d0d0b13d7f35b922fc3"),
     callees: &[
@@ -103571,7 +103571,7 @@ fn ts_member_setfullyear(ctx: &mut dyn p::PlanContext, entry: u32) -> Result<Val
     Ok(Value::Null)
 }
 
-static TS_MEMBER_SETHOURS: p::HelperPlan = p::HelperPlan {
+const TS_MEMBER_SETHOURS: p::HelperPlan = p::HelperPlan {
     name: "ts.member.setHours",
     function: p::function("af3dbef7e304bdef554ae52a34dec4c769503c2b10d7a7819d94523f6aa7b493"),
     callees: &[
@@ -103823,7 +103823,7 @@ fn ts_member_sethours(ctx: &mut dyn p::PlanContext, entry: u32) -> Result<Value,
     Ok(Value::Null)
 }
 
-static TS_MEMBER_SETMILLISECONDS: p::HelperPlan = p::HelperPlan {
+const TS_MEMBER_SETMILLISECONDS: p::HelperPlan = p::HelperPlan {
     name: "ts.member.setMilliseconds",
     function: p::function("dff0626b8678d5e5c25de993bab832a035a03342e3033eddcc16be0e70b84f9a"),
     callees: &[
@@ -104075,7 +104075,7 @@ fn ts_member_setmilliseconds(ctx: &mut dyn p::PlanContext, entry: u32) -> Result
     Ok(Value::Null)
 }
 
-static TS_MEMBER_SETMINUTES: p::HelperPlan = p::HelperPlan {
+const TS_MEMBER_SETMINUTES: p::HelperPlan = p::HelperPlan {
     name: "ts.member.setMinutes",
     function: p::function("9cdb21a467d03ce2e8ece7f468e1fe0ae64b63caee847e7c0646e6e847c4e511"),
     callees: &[
@@ -104327,7 +104327,7 @@ fn ts_member_setminutes(ctx: &mut dyn p::PlanContext, entry: u32) -> Result<Valu
     Ok(Value::Null)
 }
 
-static TS_MEMBER_SETMONTH: p::HelperPlan = p::HelperPlan {
+const TS_MEMBER_SETMONTH: p::HelperPlan = p::HelperPlan {
     name: "ts.member.setMonth",
     function: p::function("c9fe8bfc648bf2fa8f83cb2847c0a3bb04c0a87886f57ce3d0b0eb6f5be5ad70"),
     callees: &[
@@ -104579,7 +104579,7 @@ fn ts_member_setmonth(ctx: &mut dyn p::PlanContext, entry: u32) -> Result<Value,
     Ok(Value::Null)
 }
 
-static TS_MEMBER_SETPROTOTYPEOF: p::HelperPlan = p::HelperPlan {
+const TS_MEMBER_SETPROTOTYPEOF: p::HelperPlan = p::HelperPlan {
     name: "ts.member.setPrototypeOf",
     function: p::function("47306ec7dd137b3df20384cbb55006add8f7e23a83469ccd094faa4b252629ec"),
     callees: &[
@@ -104795,7 +104795,7 @@ fn ts_member_setprototypeof(ctx: &mut dyn p::PlanContext, entry: u32) -> Result<
     Ok(Value::Null)
 }
 
-static TS_MEMBER_SETSECONDS: p::HelperPlan = p::HelperPlan {
+const TS_MEMBER_SETSECONDS: p::HelperPlan = p::HelperPlan {
     name: "ts.member.setSeconds",
     function: p::function("e51e08dc10e0a10a78b66d4df8919cd3179b0d4a4512e00a9b3d624a8b6d37ab"),
     callees: &[
@@ -105047,7 +105047,7 @@ fn ts_member_setseconds(ctx: &mut dyn p::PlanContext, entry: u32) -> Result<Valu
     Ok(Value::Null)
 }
 
-static TS_MEMBER_SETTIME: p::HelperPlan = p::HelperPlan {
+const TS_MEMBER_SETTIME: p::HelperPlan = p::HelperPlan {
     name: "ts.member.setTime",
     function: p::function("548d201881c4ac04816a5ffa6e24f7d293808cb5f3a0193c44f3bea5337b05d2"),
     callees: &[
@@ -105299,7 +105299,7 @@ fn ts_member_settime(ctx: &mut dyn p::PlanContext, entry: u32) -> Result<Value, 
     Ok(Value::Null)
 }
 
-static TS_MEMBER_SETUTCDATE: p::HelperPlan = p::HelperPlan {
+const TS_MEMBER_SETUTCDATE: p::HelperPlan = p::HelperPlan {
     name: "ts.member.setUTCDate",
     function: p::function("40b658a313602e686ee5d9d94ad1610d5957928b2e0c41330826d066974a89aa"),
     callees: &[
@@ -105551,7 +105551,7 @@ fn ts_member_setutcdate(ctx: &mut dyn p::PlanContext, entry: u32) -> Result<Valu
     Ok(Value::Null)
 }
 
-static TS_MEMBER_SETUTCFULLYEAR: p::HelperPlan = p::HelperPlan {
+const TS_MEMBER_SETUTCFULLYEAR: p::HelperPlan = p::HelperPlan {
     name: "ts.member.setUTCFullYear",
     function: p::function("a736303f672a742a35a4c0e45b8f7e51136bf2ede33116ec88490ed78d06e3bb"),
     callees: &[
@@ -105803,7 +105803,7 @@ fn ts_member_setutcfullyear(ctx: &mut dyn p::PlanContext, entry: u32) -> Result<
     Ok(Value::Null)
 }
 
-static TS_MEMBER_SETUTCHOURS: p::HelperPlan = p::HelperPlan {
+const TS_MEMBER_SETUTCHOURS: p::HelperPlan = p::HelperPlan {
     name: "ts.member.setUTCHours",
     function: p::function("adc22d7250a81eae8e8c1b0141ca6435abf5af14e23175dc03db3b72daa1d58e"),
     callees: &[
@@ -106055,7 +106055,7 @@ fn ts_member_setutchours(ctx: &mut dyn p::PlanContext, entry: u32) -> Result<Val
     Ok(Value::Null)
 }
 
-static TS_MEMBER_SETUTCMILLISECONDS: p::HelperPlan = p::HelperPlan {
+const TS_MEMBER_SETUTCMILLISECONDS: p::HelperPlan = p::HelperPlan {
     name: "ts.member.setUTCMilliseconds",
     function: p::function("ef9ac042bdea8c57ccf41ac090014c4892fae4cc41da003e54193678f027bc29"),
     callees: &[
@@ -106307,7 +106307,7 @@ fn ts_member_setutcmilliseconds(ctx: &mut dyn p::PlanContext, entry: u32) -> Res
     Ok(Value::Null)
 }
 
-static TS_MEMBER_SETUTCMINUTES: p::HelperPlan = p::HelperPlan {
+const TS_MEMBER_SETUTCMINUTES: p::HelperPlan = p::HelperPlan {
     name: "ts.member.setUTCMinutes",
     function: p::function("f834289cafc642008fcd2fa1baa8f78f4b4c2b67af55127622a6893e18c64d54"),
     callees: &[
@@ -106559,7 +106559,7 @@ fn ts_member_setutcminutes(ctx: &mut dyn p::PlanContext, entry: u32) -> Result<V
     Ok(Value::Null)
 }
 
-static TS_MEMBER_SETUTCMONTH: p::HelperPlan = p::HelperPlan {
+const TS_MEMBER_SETUTCMONTH: p::HelperPlan = p::HelperPlan {
     name: "ts.member.setUTCMonth",
     function: p::function("85f241c538195105291af3cd9ab8b5b922cc7f125a8cb2eacb810ac814887d8d"),
     callees: &[
@@ -106811,7 +106811,7 @@ fn ts_member_setutcmonth(ctx: &mut dyn p::PlanContext, entry: u32) -> Result<Val
     Ok(Value::Null)
 }
 
-static TS_MEMBER_SETUTCSECONDS: p::HelperPlan = p::HelperPlan {
+const TS_MEMBER_SETUTCSECONDS: p::HelperPlan = p::HelperPlan {
     name: "ts.member.setUTCSeconds",
     function: p::function("fdb5363328aa219fd6471a770f688da91f92b9b8d7e00c5edeb478346fd6cc16"),
     callees: &[
@@ -107063,7 +107063,7 @@ fn ts_member_setutcseconds(ctx: &mut dyn p::PlanContext, entry: u32) -> Result<V
     Ok(Value::Null)
 }
 
-static TS_MEMBER_SHIFT: p::HelperPlan = p::HelperPlan {
+const TS_MEMBER_SHIFT: p::HelperPlan = p::HelperPlan {
     name: "ts.member.shift",
     function: p::function("50daa1a17c2e3cfb59f18483aff550f8077f19b57ba3da5ef74c958cd200cf0b"),
     callees: &[
@@ -107332,7 +107332,7 @@ fn ts_member_shift(ctx: &mut dyn p::PlanContext, entry: u32) -> Result<Value, p:
     Ok(Value::Null)
 }
 
-static TS_MEMBER_SIGN: p::HelperPlan = p::HelperPlan {
+const TS_MEMBER_SIGN: p::HelperPlan = p::HelperPlan {
     name: "ts.member.sign",
     function: p::function("cc524cc07fbfc9bbe8d7aebaf43bb181e99e7c086a88c3ab59dae0efd2abc3d1"),
     callees: &[
@@ -107548,7 +107548,7 @@ fn ts_member_sign(ctx: &mut dyn p::PlanContext, entry: u32) -> Result<Value, p::
     Ok(Value::Null)
 }
 
-static TS_MEMBER_SIN: p::HelperPlan = p::HelperPlan {
+const TS_MEMBER_SIN: p::HelperPlan = p::HelperPlan {
     name: "ts.member.sin",
     function: p::function("124cafe61ee1ce2b9c70056aacf97ff4b32c8f68f3b0a73a128d7f9765c9b127"),
     callees: &[
@@ -107764,7 +107764,7 @@ fn ts_member_sin(ctx: &mut dyn p::PlanContext, entry: u32) -> Result<Value, p::P
     Ok(Value::Null)
 }
 
-static TS_MEMBER_SINH: p::HelperPlan = p::HelperPlan {
+const TS_MEMBER_SINH: p::HelperPlan = p::HelperPlan {
     name: "ts.member.sinh",
     function: p::function("f61e7d4aba7f5480514a246823b23ba0da9931ac08b04aa37670728fc52d12ae"),
     callees: &[
@@ -107980,7 +107980,7 @@ fn ts_member_sinh(ctx: &mut dyn p::PlanContext, entry: u32) -> Result<Value, p::
     Ok(Value::Null)
 }
 
-static TS_MEMBER_SIZE: p::HelperPlan = p::HelperPlan {
+const TS_MEMBER_SIZE: p::HelperPlan = p::HelperPlan {
     name: "ts.member.size",
     function: p::function("585b87ad42821ced5e5c81b76ea4bf85e77d7010378a3ca0044d42d3ff323b09"),
     callees: &[
@@ -108210,7 +108210,7 @@ fn ts_member_size(ctx: &mut dyn p::PlanContext, entry: u32) -> Result<Value, p::
     Ok(Value::Null)
 }
 
-static TS_MEMBER_SLICE: p::HelperPlan = p::HelperPlan {
+const TS_MEMBER_SLICE: p::HelperPlan = p::HelperPlan {
     name: "ts.member.slice",
     function: p::function("7222b6c0c5cb14d03fdc7ca1dce0081fa200f6a193727c76c347b82d33004993"),
     callees: &[
@@ -108516,7 +108516,7 @@ fn ts_member_slice(ctx: &mut dyn p::PlanContext, entry: u32) -> Result<Value, p:
     Ok(Value::Null)
 }
 
-static TS_MEMBER_SOME: p::HelperPlan = p::HelperPlan {
+const TS_MEMBER_SOME: p::HelperPlan = p::HelperPlan {
     name: "ts.member.some",
     function: p::function("d83c693172a938a58515b6ed19a50ab9ed3ca1f8b7274d88ff5018e559ee1925"),
     callees: &[
@@ -108785,7 +108785,7 @@ fn ts_member_some(ctx: &mut dyn p::PlanContext, entry: u32) -> Result<Value, p::
     Ok(Value::Null)
 }
 
-static TS_MEMBER_SORT: p::HelperPlan = p::HelperPlan {
+const TS_MEMBER_SORT: p::HelperPlan = p::HelperPlan {
     name: "ts.member.sort",
     function: p::function("95aa1a8e6c030f978b3a1d0b9c9e1355d7762b437b17974ad1859423c9d772a6"),
     callees: &[
@@ -109092,7 +109092,7 @@ fn ts_member_sort(ctx: &mut dyn p::PlanContext, entry: u32) -> Result<Value, p::
     Ok(Value::Null)
 }
 
-static TS_MEMBER_SPLICE: p::HelperPlan = p::HelperPlan {
+const TS_MEMBER_SPLICE: p::HelperPlan = p::HelperPlan {
     name: "ts.member.splice",
     function: p::function("a1a84c23cceb80a77884eececaaf435c5ef0b1e590b170f2a67bace306c6ebc3"),
     callees: &[
@@ -109361,7 +109361,7 @@ fn ts_member_splice(ctx: &mut dyn p::PlanContext, entry: u32) -> Result<Value, p
     Ok(Value::Null)
 }
 
-static TS_MEMBER_SPLIT: p::HelperPlan = p::HelperPlan {
+const TS_MEMBER_SPLIT: p::HelperPlan = p::HelperPlan {
     name: "ts.member.split",
     function: p::function("484b59edc94cc9285886955ee54cd5004da3df7b7a7b690e59464cb3103ccdf6"),
     callees: &[
@@ -109595,7 +109595,7 @@ fn ts_member_split(ctx: &mut dyn p::PlanContext, entry: u32) -> Result<Value, p:
     Ok(Value::Null)
 }
 
-static TS_MEMBER_SQRT: p::HelperPlan = p::HelperPlan {
+const TS_MEMBER_SQRT: p::HelperPlan = p::HelperPlan {
     name: "ts.member.sqrt",
     function: p::function("be6b31b0ff0f582ea37fd1ac43f71eb0611ff3b06b13d9f46429ff92272b0c86"),
     callees: &[
@@ -109811,7 +109811,7 @@ fn ts_member_sqrt(ctx: &mut dyn p::PlanContext, entry: u32) -> Result<Value, p::
     Ok(Value::Null)
 }
 
-static TS_MEMBER_STARTSWITH: p::HelperPlan = p::HelperPlan {
+const TS_MEMBER_STARTSWITH: p::HelperPlan = p::HelperPlan {
     name: "ts.member.startsWith",
     function: p::function("5162850f21fce25968cf854f70c4a376859bc8f9c633473a1738b716421edbf6"),
     callees: &[
@@ -110045,7 +110045,7 @@ fn ts_member_startswith(ctx: &mut dyn p::PlanContext, entry: u32) -> Result<Valu
     Ok(Value::Null)
 }
 
-static TS_MEMBER_STRINGIFY: p::HelperPlan = p::HelperPlan {
+const TS_MEMBER_STRINGIFY: p::HelperPlan = p::HelperPlan {
     name: "ts.member.stringify",
     function: p::function("d11a13f30257687adfb53140684768043302ad3addad482c4b2e7bbc5e2282cf"),
     callees: &[
@@ -110261,7 +110261,7 @@ fn ts_member_stringify(ctx: &mut dyn p::PlanContext, entry: u32) -> Result<Value
     Ok(Value::Null)
 }
 
-static TS_MEMBER_SUBSTRING: p::HelperPlan = p::HelperPlan {
+const TS_MEMBER_SUBSTRING: p::HelperPlan = p::HelperPlan {
     name: "ts.member.substring",
     function: p::function("6be55a426f867433d9ce5b04e769ad541830a9d3f9682e6eb5972a00dbc4504b"),
     callees: &[
@@ -110495,7 +110495,7 @@ fn ts_member_substring(ctx: &mut dyn p::PlanContext, entry: u32) -> Result<Value
     Ok(Value::Null)
 }
 
-static TS_MEMBER_SYMMETRICDIFFERENCE: p::HelperPlan = p::HelperPlan {
+const TS_MEMBER_SYMMETRICDIFFERENCE: p::HelperPlan = p::HelperPlan {
     name: "ts.member.symmetricDifference",
     function: p::function("1b2a187dc2ee4fd77bbf221302b64b551986a8e460413d8c6d489f2ea1521875"),
     callees: &[
@@ -110729,7 +110729,7 @@ fn ts_member_symmetricdifference(ctx: &mut dyn p::PlanContext, entry: u32) -> Re
     Ok(Value::Null)
 }
 
-static TS_MEMBER_TAN: p::HelperPlan = p::HelperPlan {
+const TS_MEMBER_TAN: p::HelperPlan = p::HelperPlan {
     name: "ts.member.tan",
     function: p::function("b3f7a3e8de0039ca67d6c2078679819d4bb3cc7324cc1222d3956ebb9ba63fc6"),
     callees: &[
@@ -110945,7 +110945,7 @@ fn ts_member_tan(ctx: &mut dyn p::PlanContext, entry: u32) -> Result<Value, p::P
     Ok(Value::Null)
 }
 
-static TS_MEMBER_TANH: p::HelperPlan = p::HelperPlan {
+const TS_MEMBER_TANH: p::HelperPlan = p::HelperPlan {
     name: "ts.member.tanh",
     function: p::function("79784bd452df80de7b723781afecae49c3dc4890d1eefb214d01d799c15543d1"),
     callees: &[
@@ -111161,7 +111161,7 @@ fn ts_member_tanh(ctx: &mut dyn p::PlanContext, entry: u32) -> Result<Value, p::
     Ok(Value::Null)
 }
 
-static TS_MEMBER_TEST: p::HelperPlan = p::HelperPlan {
+const TS_MEMBER_TEST: p::HelperPlan = p::HelperPlan {
     name: "ts.member.test",
     function: p::function("8dd8260ed02a7bb6f02d2de4179eea401b1e2496fd2ac58d377ec4f3b8bd80a2"),
     callees: &[
@@ -111395,7 +111395,7 @@ fn ts_member_test(ctx: &mut dyn p::PlanContext, entry: u32) -> Result<Value, p::
     Ok(Value::Null)
 }
 
-static TS_MEMBER_THEN: p::HelperPlan = p::HelperPlan {
+const TS_MEMBER_THEN: p::HelperPlan = p::HelperPlan {
     name: "ts.member.then",
     function: p::function("e39e407ee0e4cf3f8fb8d2a2b6cb462ead469e507dbb2f8764c4ceeeac1b07dd"),
     callees: &[
@@ -111629,7 +111629,7 @@ fn ts_member_then(ctx: &mut dyn p::PlanContext, entry: u32) -> Result<Value, p::
     Ok(Value::Null)
 }
 
-static TS_MEMBER_TODATESTRING: p::HelperPlan = p::HelperPlan {
+const TS_MEMBER_TODATESTRING: p::HelperPlan = p::HelperPlan {
     name: "ts.member.toDateString",
     function: p::function("e2608616de748cf400ee83a0fec73c88cd486fe46856087be7d11f70dec905b7"),
     callees: &[
@@ -111883,7 +111883,7 @@ fn ts_member_todatestring(ctx: &mut dyn p::PlanContext, entry: u32) -> Result<Va
     Ok(Value::Null)
 }
 
-static TS_MEMBER_TOEXPONENTIAL: p::HelperPlan = p::HelperPlan {
+const TS_MEMBER_TOEXPONENTIAL: p::HelperPlan = p::HelperPlan {
     name: "ts.member.toExponential",
     function: p::function("55632f101f1f77a0f418c7c86b4d9c57ee6d667c9fff0e80234c7dbf5f4db9cd"),
     callees: &[
@@ -112117,7 +112117,7 @@ fn ts_member_toexponential(ctx: &mut dyn p::PlanContext, entry: u32) -> Result<V
     Ok(Value::Null)
 }
 
-static TS_MEMBER_TOFIXED: p::HelperPlan = p::HelperPlan {
+const TS_MEMBER_TOFIXED: p::HelperPlan = p::HelperPlan {
     name: "ts.member.toFixed",
     function: p::function("7ad8ef8d8ca6f012a1cd2b310b804dba709d2b5f7a06ba1b608293acd2ad2af1"),
     callees: &[
@@ -112351,7 +112351,7 @@ fn ts_member_tofixed(ctx: &mut dyn p::PlanContext, entry: u32) -> Result<Value, 
     Ok(Value::Null)
 }
 
-static TS_MEMBER_TOISOSTRING: p::HelperPlan = p::HelperPlan {
+const TS_MEMBER_TOISOSTRING: p::HelperPlan = p::HelperPlan {
     name: "ts.member.toISOString",
     function: p::function("07eedff73359367e8e743630e9ff52d7bc4fc7b35314bb663dbea2d2114bb67c"),
     callees: &[
@@ -112603,7 +112603,7 @@ fn ts_member_toisostring(ctx: &mut dyn p::PlanContext, entry: u32) -> Result<Val
     Ok(Value::Null)
 }
 
-static TS_MEMBER_TOJSON: p::HelperPlan = p::HelperPlan {
+const TS_MEMBER_TOJSON: p::HelperPlan = p::HelperPlan {
     name: "ts.member.toJSON",
     function: p::function("21c17085e00efc81c7499f58ae3ef1395a998dd68e3c5deb82d24a9017bec9a3"),
     callees: &[
@@ -112893,7 +112893,7 @@ fn ts_member_tojson(ctx: &mut dyn p::PlanContext, entry: u32) -> Result<Value, p
     Ok(Value::Null)
 }
 
-static TS_MEMBER_TOLOCALEDATESTRING: p::HelperPlan = p::HelperPlan {
+const TS_MEMBER_TOLOCALEDATESTRING: p::HelperPlan = p::HelperPlan {
     name: "ts.member.toLocaleDateString",
     function: p::function("0692ac47ad1b4e5a5e19ac17852cd62ec8ee4903ad09c0060506bf830deba864"),
     callees: &[
@@ -113147,7 +113147,7 @@ fn ts_member_tolocaledatestring(ctx: &mut dyn p::PlanContext, entry: u32) -> Res
     Ok(Value::Null)
 }
 
-static TS_MEMBER_TOLOCALELOWERCASE: p::HelperPlan = p::HelperPlan {
+const TS_MEMBER_TOLOCALELOWERCASE: p::HelperPlan = p::HelperPlan {
     name: "ts.member.toLocaleLowerCase",
     function: p::function("952d89c61ecc307faa439bb05215141b38eec762b3b1e500c3499bcc8956489e"),
     callees: &[
@@ -113383,7 +113383,7 @@ fn ts_member_tolocalelowercase(ctx: &mut dyn p::PlanContext, entry: u32) -> Resu
     Ok(Value::Null)
 }
 
-static TS_MEMBER_TOLOCALESTRING: p::HelperPlan = p::HelperPlan {
+const TS_MEMBER_TOLOCALESTRING: p::HelperPlan = p::HelperPlan {
     name: "ts.member.toLocaleString",
     function: p::function("659fe86c0bbb47e7bc38f8bb9878eb1013e35dbbfa2cf3e0bb50c63bcc4a5331"),
     callees: &[
@@ -113723,7 +113723,7 @@ fn ts_member_tolocalestring(ctx: &mut dyn p::PlanContext, entry: u32) -> Result<
     Ok(Value::Null)
 }
 
-static TS_MEMBER_TOLOCALETIMESTRING: p::HelperPlan = p::HelperPlan {
+const TS_MEMBER_TOLOCALETIMESTRING: p::HelperPlan = p::HelperPlan {
     name: "ts.member.toLocaleTimeString",
     function: p::function("ede927824e06dbbae8b06946541816dcb9389796e818e5890631c5edca6ec463"),
     callees: &[
@@ -113977,7 +113977,7 @@ fn ts_member_tolocaletimestring(ctx: &mut dyn p::PlanContext, entry: u32) -> Res
     Ok(Value::Null)
 }
 
-static TS_MEMBER_TOLOCALEUPPERCASE: p::HelperPlan = p::HelperPlan {
+const TS_MEMBER_TOLOCALEUPPERCASE: p::HelperPlan = p::HelperPlan {
     name: "ts.member.toLocaleUpperCase",
     function: p::function("706037db77e6f6198299919ee1abaad821de48215d050448c9c0953d81d85f54"),
     callees: &[
@@ -114211,7 +114211,7 @@ fn ts_member_tolocaleuppercase(ctx: &mut dyn p::PlanContext, entry: u32) -> Resu
     Ok(Value::Null)
 }
 
-static TS_MEMBER_TOLOWERCASE: p::HelperPlan = p::HelperPlan {
+const TS_MEMBER_TOLOWERCASE: p::HelperPlan = p::HelperPlan {
     name: "ts.member.toLowerCase",
     function: p::function("56dd42d1cda5980d698591095213a766ca634ff4d1d4c11b0fd2224b6b0a035e"),
     callees: &[
@@ -114445,7 +114445,7 @@ fn ts_member_tolowercase(ctx: &mut dyn p::PlanContext, entry: u32) -> Result<Val
     Ok(Value::Null)
 }
 
-static TS_MEMBER_TOPRECISION: p::HelperPlan = p::HelperPlan {
+const TS_MEMBER_TOPRECISION: p::HelperPlan = p::HelperPlan {
     name: "ts.member.toPrecision",
     function: p::function("ae42f0af6c17bd4b34b650286937c416916e57089368c459e9261b7815d7142c"),
     callees: &[
@@ -114679,7 +114679,7 @@ fn ts_member_toprecision(ctx: &mut dyn p::PlanContext, entry: u32) -> Result<Val
     Ok(Value::Null)
 }
 
-static TS_MEMBER_TOREVERSED: p::HelperPlan = p::HelperPlan {
+const TS_MEMBER_TOREVERSED: p::HelperPlan = p::HelperPlan {
     name: "ts.member.toReversed",
     function: p::function("a9fb838c85e40f493c1d84035610ce498fcea67806ad5ed543343cc56198503b"),
     callees: &[
@@ -114948,7 +114948,7 @@ fn ts_member_toreversed(ctx: &mut dyn p::PlanContext, entry: u32) -> Result<Valu
     Ok(Value::Null)
 }
 
-static TS_MEMBER_TOSORTED: p::HelperPlan = p::HelperPlan {
+const TS_MEMBER_TOSORTED: p::HelperPlan = p::HelperPlan {
     name: "ts.member.toSorted",
     function: p::function("5b1e8e25faf8d5f40eb0e44ea3424bf6448f7e54ad89080653bb5af2deff0152"),
     callees: &[
@@ -115217,7 +115217,7 @@ fn ts_member_tosorted(ctx: &mut dyn p::PlanContext, entry: u32) -> Result<Value,
     Ok(Value::Null)
 }
 
-static TS_MEMBER_TOSPLICED: p::HelperPlan = p::HelperPlan {
+const TS_MEMBER_TOSPLICED: p::HelperPlan = p::HelperPlan {
     name: "ts.member.toSpliced",
     function: p::function("e1f49dbd8be4a7b292e82bc66cfc5a09c3dbff6cf76d9a310b251cf0bc389c9e"),
     callees: &[
@@ -115486,7 +115486,7 @@ fn ts_member_tospliced(ctx: &mut dyn p::PlanContext, entry: u32) -> Result<Value
     Ok(Value::Null)
 }
 
-static TS_MEMBER_TOSTRING: p::HelperPlan = p::HelperPlan {
+const TS_MEMBER_TOSTRING: p::HelperPlan = p::HelperPlan {
     name: "ts.member.toString",
     function: p::function("72b99aefdaea56ca3544beb561358a04660ecaf25a24e2fc0e758a492dcad9f1"),
     callees: &[
@@ -116244,7 +116244,7 @@ fn ts_member_tostring(ctx: &mut dyn p::PlanContext, entry: u32) -> Result<Value,
     Ok(Value::Null)
 }
 
-static TS_MEMBER_TOTIMESTRING: p::HelperPlan = p::HelperPlan {
+const TS_MEMBER_TOTIMESTRING: p::HelperPlan = p::HelperPlan {
     name: "ts.member.toTimeString",
     function: p::function("e070180271c175ae2d3902fef03f0df112b275c158efd25617967687d26686a6"),
     callees: &[
@@ -116496,7 +116496,7 @@ fn ts_member_totimestring(ctx: &mut dyn p::PlanContext, entry: u32) -> Result<Va
     Ok(Value::Null)
 }
 
-static TS_MEMBER_TOUTCSTRING: p::HelperPlan = p::HelperPlan {
+const TS_MEMBER_TOUTCSTRING: p::HelperPlan = p::HelperPlan {
     name: "ts.member.toUTCString",
     function: p::function("1624f43bbe27b76d85b4d5e962c6062cc2beb90754ba6efa450fa7ea821be004"),
     callees: &[
@@ -116748,7 +116748,7 @@ fn ts_member_toutcstring(ctx: &mut dyn p::PlanContext, entry: u32) -> Result<Val
     Ok(Value::Null)
 }
 
-static TS_MEMBER_TOUPPERCASE: p::HelperPlan = p::HelperPlan {
+const TS_MEMBER_TOUPPERCASE: p::HelperPlan = p::HelperPlan {
     name: "ts.member.toUpperCase",
     function: p::function("87c6e9039c10decfa50325ff123f3e9ee4c70d02925cbe128d0b1efe1ba5f23b"),
     callees: &[
@@ -116982,7 +116982,7 @@ fn ts_member_touppercase(ctx: &mut dyn p::PlanContext, entry: u32) -> Result<Val
     Ok(Value::Null)
 }
 
-static TS_MEMBER_TRIM: p::HelperPlan = p::HelperPlan {
+const TS_MEMBER_TRIM: p::HelperPlan = p::HelperPlan {
     name: "ts.member.trim",
     function: p::function("d205b8e2a27062cead36fa17c3e7458e7d7cd8f4ec4b08a6b81c74398de58861"),
     callees: &[
@@ -117216,7 +117216,7 @@ fn ts_member_trim(ctx: &mut dyn p::PlanContext, entry: u32) -> Result<Value, p::
     Ok(Value::Null)
 }
 
-static TS_MEMBER_TRIMEND: p::HelperPlan = p::HelperPlan {
+const TS_MEMBER_TRIMEND: p::HelperPlan = p::HelperPlan {
     name: "ts.member.trimEnd",
     function: p::function("cdeb7c2c3172d8891446eefa493d312e4a0d696f27199d939c2a4859ea423a52"),
     callees: &[
@@ -117450,7 +117450,7 @@ fn ts_member_trimend(ctx: &mut dyn p::PlanContext, entry: u32) -> Result<Value, 
     Ok(Value::Null)
 }
 
-static TS_MEMBER_TRIMSTART: p::HelperPlan = p::HelperPlan {
+const TS_MEMBER_TRIMSTART: p::HelperPlan = p::HelperPlan {
     name: "ts.member.trimStart",
     function: p::function("ec525203b57c1df48e0bcfc26631bfba33ba5762a99098809ea6df3bac6d1ea9"),
     callees: &[
@@ -117684,7 +117684,7 @@ fn ts_member_trimstart(ctx: &mut dyn p::PlanContext, entry: u32) -> Result<Value
     Ok(Value::Null)
 }
 
-static TS_MEMBER_TRUNC: p::HelperPlan = p::HelperPlan {
+const TS_MEMBER_TRUNC: p::HelperPlan = p::HelperPlan {
     name: "ts.member.trunc",
     function: p::function("a19d5ae9fd550f47fd921679eaf9e152b816991dd46b20fb4a3a33651e8200c6"),
     callees: &[
@@ -117900,7 +117900,7 @@ fn ts_member_trunc(ctx: &mut dyn p::PlanContext, entry: u32) -> Result<Value, p:
     Ok(Value::Null)
 }
 
-static TS_MEMBER_UNION: p::HelperPlan = p::HelperPlan {
+const TS_MEMBER_UNION: p::HelperPlan = p::HelperPlan {
     name: "ts.member.union",
     function: p::function("c401c5ea82386c0027d2af670201845a3db26967abf85cad68558e2301bfbd85"),
     callees: &[
@@ -118134,7 +118134,7 @@ fn ts_member_union(ctx: &mut dyn p::PlanContext, entry: u32) -> Result<Value, p:
     Ok(Value::Null)
 }
 
-static TS_MEMBER_UNSHIFT: p::HelperPlan = p::HelperPlan {
+const TS_MEMBER_UNSHIFT: p::HelperPlan = p::HelperPlan {
     name: "ts.member.unshift",
     function: p::function("3912f91a54a33cf0861df9d6e0a62e04dd9f7075b1bd36e8aacdf66a8d308d6d"),
     callees: &[
@@ -118403,7 +118403,7 @@ fn ts_member_unshift(ctx: &mut dyn p::PlanContext, entry: u32) -> Result<Value, 
     Ok(Value::Null)
 }
 
-static TS_MEMBER_VALUEOF: p::HelperPlan = p::HelperPlan {
+const TS_MEMBER_VALUEOF: p::HelperPlan = p::HelperPlan {
     name: "ts.member.valueOf",
     function: p::function("a4169932cd53b6c8853c337969bae85d0be347cda37ee6288c9a18d58e6908b1"),
     callees: &[
@@ -119001,7 +119001,7 @@ fn ts_member_valueof(ctx: &mut dyn p::PlanContext, entry: u32) -> Result<Value, 
     Ok(Value::Null)
 }
 
-static TS_MEMBER_VALUES: p::HelperPlan = p::HelperPlan {
+const TS_MEMBER_VALUES: p::HelperPlan = p::HelperPlan {
     name: "ts.member.values",
     function: p::function("4b10a3cec2074f33839de3205380117f97e292813ebc6f0dd52d06e863c87319"),
     callees: &[
@@ -119401,7 +119401,7 @@ fn ts_member_values(ctx: &mut dyn p::PlanContext, entry: u32) -> Result<Value, p
     Ok(Value::Null)
 }
 
-static TS_MEMBER_WARN: p::HelperPlan = p::HelperPlan {
+const TS_MEMBER_WARN: p::HelperPlan = p::HelperPlan {
     name: "ts.member.warn",
     function: p::function("6783e8858b7479597f204a46cc146d2e9d49e95f1f06dcb41b59dfe8c9f4a312"),
     callees: &[
@@ -119617,7 +119617,7 @@ fn ts_member_warn(ctx: &mut dyn p::PlanContext, entry: u32) -> Result<Value, p::
     Ok(Value::Null)
 }
 
-static TS_MEMBER_WITH: p::HelperPlan = p::HelperPlan {
+const TS_MEMBER_WITH: p::HelperPlan = p::HelperPlan {
     name: "ts.member.with",
     function: p::function("e6c24caa3360a1dd2a716f9175d788b9a5381b4a381fc47cde21a9e793f8e28a"),
     callees: &[
@@ -119886,7 +119886,7 @@ fn ts_member_with(ctx: &mut dyn p::PlanContext, entry: u32) -> Result<Value, p::
     Ok(Value::Null)
 }
 
-static TS_PROPERTY_DOTALL: p::HelperPlan = p::HelperPlan {
+const TS_PROPERTY_DOTALL: p::HelperPlan = p::HelperPlan {
     name: "ts.property.dotAll",
     function: p::function("eba4b7019bdd72317fbd3eebc45e6a77d05a46f9d52021f116133c09152f22c7"),
     callees: &[
@@ -120009,7 +120009,7 @@ fn ts_property_dotall(ctx: &mut dyn p::PlanContext, entry: u32) -> Result<Value,
     Ok(Value::Null)
 }
 
-static TS_PROPERTY_FLAGS: p::HelperPlan = p::HelperPlan {
+const TS_PROPERTY_FLAGS: p::HelperPlan = p::HelperPlan {
     name: "ts.property.flags",
     function: p::function("616cd07a12bb7a797b5ab1cb0be95452c82d81ad9f40145bda701bd6a3deb943"),
     callees: &[
@@ -120132,7 +120132,7 @@ fn ts_property_flags(ctx: &mut dyn p::PlanContext, entry: u32) -> Result<Value, 
     Ok(Value::Null)
 }
 
-static TS_PROPERTY_GLOBAL: p::HelperPlan = p::HelperPlan {
+const TS_PROPERTY_GLOBAL: p::HelperPlan = p::HelperPlan {
     name: "ts.property.global",
     function: p::function("bf9aa80695ae21cf2fe894f03e121c334566e724e53fba0bc63a746d539f0ab7"),
     callees: &[
@@ -120255,7 +120255,7 @@ fn ts_property_global(ctx: &mut dyn p::PlanContext, entry: u32) -> Result<Value,
     Ok(Value::Null)
 }
 
-static TS_PROPERTY_IGNORECASE: p::HelperPlan = p::HelperPlan {
+const TS_PROPERTY_IGNORECASE: p::HelperPlan = p::HelperPlan {
     name: "ts.property.ignoreCase",
     function: p::function("c6b053835eba04726ea47db2a0edf870a0665c7e6bb95efefed3161d59cb52e7"),
     callees: &[
@@ -120378,7 +120378,7 @@ fn ts_property_ignorecase(ctx: &mut dyn p::PlanContext, entry: u32) -> Result<Va
     Ok(Value::Null)
 }
 
-static TS_PROPERTY_LENGTH: p::HelperPlan = p::HelperPlan {
+const TS_PROPERTY_LENGTH: p::HelperPlan = p::HelperPlan {
     name: "ts.property.length",
     function: p::function("f36cf7a28067f85d653a6e86344e3313621c10d58c85361b6c80b921ae5be71f"),
     callees: &[
@@ -120569,7 +120569,7 @@ fn ts_property_length(ctx: &mut dyn p::PlanContext, entry: u32) -> Result<Value,
     Ok(Value::Null)
 }
 
-static TS_PROPERTY_MULTILINE: p::HelperPlan = p::HelperPlan {
+const TS_PROPERTY_MULTILINE: p::HelperPlan = p::HelperPlan {
     name: "ts.property.multiline",
     function: p::function("57cd5e6ca6d070744d21f1c09f7c2ae526f8891014284a55376076c4638479c0"),
     callees: &[
@@ -120692,7 +120692,7 @@ fn ts_property_multiline(ctx: &mut dyn p::PlanContext, entry: u32) -> Result<Val
     Ok(Value::Null)
 }
 
-static TS_PROPERTY_SIZE: p::HelperPlan = p::HelperPlan {
+const TS_PROPERTY_SIZE: p::HelperPlan = p::HelperPlan {
     name: "ts.property.size",
     function: p::function("8678d6950bdad9d03e23e4e287b43df5a2a03ae49d2742587adc42f7339071f9"),
     callees: &[
@@ -120849,7 +120849,7 @@ fn ts_property_size(ctx: &mut dyn p::PlanContext, entry: u32) -> Result<Value, p
     Ok(Value::Null)
 }
 
-static TS_PROPERTY_SOURCE: p::HelperPlan = p::HelperPlan {
+const TS_PROPERTY_SOURCE: p::HelperPlan = p::HelperPlan {
     name: "ts.property.source",
     function: p::function("cf414a30f06970df0b9239aa72df2cc8f58a215d845320c1239d508b150753ce"),
     callees: &[
@@ -120972,7 +120972,7 @@ fn ts_property_source(ctx: &mut dyn p::PlanContext, entry: u32) -> Result<Value,
     Ok(Value::Null)
 }
 
-static TS_PROPERTY_STICKY: p::HelperPlan = p::HelperPlan {
+const TS_PROPERTY_STICKY: p::HelperPlan = p::HelperPlan {
     name: "ts.property.sticky",
     function: p::function("d543bfb67133720ca92fb03abc312ccbf63482c2cda0e25f870e99877154bdcb"),
     callees: &[
@@ -121095,7 +121095,7 @@ fn ts_property_sticky(ctx: &mut dyn p::PlanContext, entry: u32) -> Result<Value,
     Ok(Value::Null)
 }
 
-static TS_PROPERTY_UNICODE: p::HelperPlan = p::HelperPlan {
+const TS_PROPERTY_UNICODE: p::HelperPlan = p::HelperPlan {
     name: "ts.property.unicode",
     function: p::function("11ebf83a63be8bd5a0c77631532f32457533a823352a55817c8eddf17f745c1c"),
     callees: &[
@@ -121218,7 +121218,7 @@ fn ts_property_unicode(ctx: &mut dyn p::PlanContext, entry: u32) -> Result<Value
     Ok(Value::Null)
 }
 
-static TS_GET_COMPUTED: p::HelperPlan = p::HelperPlan {
+const TS_GET_COMPUTED: p::HelperPlan = p::HelperPlan {
     name: "ts.get_computed",
     function: p::function("6aaf656ea026cf90a92944360755c9c10112688ef2ae6373fb2cc0ceaa506358"),
     callees: &[

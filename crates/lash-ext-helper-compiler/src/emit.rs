@@ -31,7 +31,7 @@ use crate::library::Library;
 #[derive(Clone, Debug, PartialEq, Eq)]
 pub struct Unsupported(pub String);
 
-/// A compiled body: its plan's static and its code.
+/// A compiled body: its plan's constant and its code.
 pub struct Plan {
     pub item: String,
     pub code: String,
@@ -1524,7 +1524,7 @@ pub fn emit(
     let registers = emitter.used.max(1);
     let upper = ident.to_uppercase();
     let mut item = String::new();
-    let _ = writeln!(item, "static {upper}: p::HelperPlan = p::HelperPlan {{");
+    let _ = writeln!(item, "const {upper}: p::HelperPlan = p::HelperPlan {{");
     let _ = writeln!(item, "    name: {:?},", definition.name.as_str());
     let _ = writeln!(
         item,

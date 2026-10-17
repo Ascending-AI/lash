@@ -20,7 +20,7 @@ use lash_kernel_doc::plan as p;
 enum Departure { Next, Return(Value), Break, Continue }
 
 /// Every plan, in the order the helpers are registered.
-pub static PLANS: &[&p::HelperPlan] = &[
+pub const PLANS: &[&p::HelperPlan] = &[
     &LAW_HANDLERS,
     &LAW_HALT,
     &LAW_FACTORY,
@@ -28,7 +28,7 @@ pub static PLANS: &[&p::HelperPlan] = &[
     &LAW_DECLINE_CALLER,
 ];
 
-static LAW_HANDLERS: p::HelperPlan = p::HelperPlan {
+const LAW_HANDLERS: p::HelperPlan = p::HelperPlan {
     name: "law.handlers",
     function: p::function("de0b4a6dc27de3577f05552be5c6892a8ac5faf1ec346518fd317795e617b4b3"),
     callees: &[
@@ -338,7 +338,7 @@ fn law_handlers(ctx: &mut dyn p::PlanContext, _entry: u32) -> Result<Value, p::P
     Ok(Value::Null)
 }
 
-static LAW_HALT: p::HelperPlan = p::HelperPlan {
+const LAW_HALT: p::HelperPlan = p::HelperPlan {
     name: "law.halt",
     function: p::function("3c75de6a80c773042cd87609b8d07dacc8c68bb704bc0e0796209d926319ff17"),
     callees: &[
@@ -447,7 +447,7 @@ fn law_halt(ctx: &mut dyn p::PlanContext, _entry: u32) -> Result<Value, p::PlanE
     Ok(Value::Null)
 }
 
-static LAW_FACTORY: p::HelperPlan = p::HelperPlan {
+const LAW_FACTORY: p::HelperPlan = p::HelperPlan {
     name: "law.factory",
     function: p::function("e75deca1bab8311e97fcf1f3234583874333138e4a8931aaad3e5678ef1fb191"),
     callees: &[
@@ -497,7 +497,7 @@ fn law_factory(ctx: &mut dyn p::PlanContext, _entry: u32) -> Result<Value, p::Pl
     Ok(ctx.take(0))
 }
 
-static LAW_DECLINING: p::HelperPlan = p::HelperPlan {
+const LAW_DECLINING: p::HelperPlan = p::HelperPlan {
     name: "law.declining",
     function: p::function("5c43e7eb78376a4caa78c1b906fef3a8214c7a7f0c23a8e73ee4a1129b94dbcc"),
     callees: &[
@@ -533,7 +533,7 @@ fn law_declining(ctx: &mut dyn p::PlanContext, _entry: u32) -> Result<Value, p::
     Ok(ctx.take(0))
 }
 
-static LAW_DECLINE_CALLER: p::HelperPlan = p::HelperPlan {
+const LAW_DECLINE_CALLER: p::HelperPlan = p::HelperPlan {
     name: "law.decline_caller",
     function: p::function("4a5f1ff8e519d85caec4ea66c003df34932cc886946efbdeafc5722b5ddecf0d"),
     callees: &[

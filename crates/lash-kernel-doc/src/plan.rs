@@ -33,9 +33,11 @@ use crate::heap::Value;
 use crate::name::FunctionId;
 
 /// A body compiled to Rust: the definition it was generated from, by
-/// identity, and the code. Generated code builds these as statics; an
-/// embedder installs them beside the definitions they were generated from
-/// ([`crate::FunctionRegistry::install_plans`]).
+/// identity, and the code. Generated code builds these as constants with
+/// promoted immutable references; an embedder installs them beside the
+/// definitions they were generated from
+/// ([`crate::FunctionRegistry::install_plans`]). The definition's function
+/// identity identifies a plan; its address has no identity contract.
 #[derive(Debug)]
 pub struct HelperPlan {
     /// The name the definition carries, for diagnostics.

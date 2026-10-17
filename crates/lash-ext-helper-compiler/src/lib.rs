@@ -167,7 +167,7 @@ pub fn generate_library(library: &Library, dialect: Dialect) -> Result<Generated
         "#[allow(dead_code)]\nenum Departure { Next, Return(Value), Break, Continue }\n\n",
     );
     rust.push_str("/// Every plan, in the order the helpers are registered.\n");
-    rust.push_str("pub static PLANS: &[&p::HelperPlan] = &[\n");
+    rust.push_str("pub const PLANS: &[&p::HelperPlan] = &[\n");
     for (ident, _) in &plans {
         let _ = writeln!(rust, "    &{},", ident.to_uppercase());
     }
